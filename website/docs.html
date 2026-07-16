@@ -138,22 +138,6 @@ app.listen(4600);</code></pre>
     <p class="small">A real deployment adds auth and path validation; this is the whole protocol though. The same contract powers hyperclay.com, Hyperclay Local, and htmlclay.</p>
   </section>
 
-  <!-- ====== MIGRATION ====== -->
-  <section id="migration">
-    <span class="eyebrow">Coming from hyperclayjs?</span>
-    <h2 class="section-title">Migration notes</h2>
-    <p>clayjs is the successor to hyperclayjs: the same save lifecycle, radically fewer concepts. Existing hyperclayjs apps keep working; hyperclayjs is in maintenance mode. The renames:</p>
-    <table>
-      <tr><th>hyperclayjs</th><th>clayjs</th></tr>
-      <tr><td><code>window.hyperclay</code> · <code>hyperclay.savePage()</code></td><td><code>window.clay</code> · <code>clay.save()</code></td></tr>
-      <tr><td><code>hyperclay:save-*</code> events</td><td><code>clay:save-*</code> events</td></tr>
-      <tr><td><code>save-remove</code>, <code>save-ignore</code>, <code>save-freeze</code>, <code>mutations-ignore</code>, and the bare <code>no-*</code> attributes</td><td>one <code>clay="…"</code> attribute; legacy aliases dropped</td></tr>
-      <tr><td><code>?preset=minimal|standard|everything</code></td><td>no presets: the default build plus <code>?plugins=</code> / <code>?exclude=</code></td></tr>
-      <tr><td><code>window.__hyperclayEditMode</code></td><td><code>window.clayEditMode</code></td></tr>
-    </table>
-    <p class="small">The wire contract is unchanged, so clayjs saves to every existing server today.</p>
-  </section>
-
 </main>
 
 <footer>
