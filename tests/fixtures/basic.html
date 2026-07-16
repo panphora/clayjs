@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>clayjs basic fixture</title>
+  <script>window.clayEditMode = true;</script>
+  <script src="/clay.js"></script>
+  <style>
+    body { font: 16px/1.6 system-ui, sans-serif; margin: 2rem; max-width: 40rem; }
+    nav { background: #eee; padding: .5rem; }
+  </style>
+</head>
+<body>
+  <h1 editable>Edit me</h1>
+
+  <label>Name: <input persist name="who" value=""></label>
+
+  <nav clay="no-save no-watch">
+    <span>local chrome that must not be saved</span>
+  </nav>
+
+  <span clay="freeze">frozen authored content</span>
+
+  <p><span onaftersave="this.textContent = 'saved at ' + event.detail.timestamp">not yet saved</span></p>
+
+  <button trigger-save>Save</button>
+</body>
+</html>

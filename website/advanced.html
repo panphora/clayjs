@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Advanced · clayjs</title>
+<meta name="description" content="Advanced save attributes and the separate utility libraries around clayjs.">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<nav class="nav">
+  <a class="wordmark" href="index.html">clay</a>
+  <div class="links">
+    <a href="advanced.html" aria-current="page">Advanced</a>
+    <a href="plugins.html">Plugins</a>
+    <a href="docs.html">Docs</a>
+    <a href="https://github.com/clayjs" rel="noopener">GitHub</a>
+  </div>
+</nav>
+
+<main class="page">
+
+  <section style="border-top: none; padding-top: 56px;">
+    <span class="eyebrow">Advanced</span>
+    <h1 class="display" style="font-size: clamp(30px, 4.5vw, 42px);">When you need more</h1>
+    <p class="lede" style="margin-top: 12px;">Everything here is optional. The first half is advanced control over the save lifecycle itself; the second half is separate libraries you add with their own script tags.</p>
+  </section>
+
+  <!-- ====== REGION REFERENCE ====== -->
+  <section id="regions">
+    <span class="eyebrow">The clay attribute</span>
+    <h2 class="section-title">Region reference</h2>
+    <p>One attribute controls how any element takes part in saving. Keywords combine with spaces: <code>clay="freeze no-undo"</code>.</p>
+    <table>
+      <tr><th>Keyword</th><th>Plain meaning</th><th>Typical use</th></tr>
+      <tr><td><code>no-save</code></td><td>Lives on the page, never written to disk. Still visible to live sync.</td><td>Search boxes, connection badges, edit toolbars</td></tr>
+      <tr><td><code>no-snapshot</code></td><td>Invisible to save and to sync. Every device keeps its own copy.</td><td>Per-device panel state</td></tr>
+      <tr><td><code>freeze</code></td><td>Saved exactly as authored; runtime changes to its contents are ignored.</td><td>Clocks, tickers, computed summaries</td></tr>
+      <tr><td><code>no-trigger-autosave</code></td><td>Saved normally, but edits here don't trigger an autosave.</td><td>High-churn text you'd rather batch</td></tr>
+      <tr><td><code>no-watch</code></td><td>The mutation system ignores it entirely (implies no autosave trigger, no undo).</td><td>Third-party widgets that churn the DOM</td></tr>
+      <tr><td><code>no-undo</code></td><td>Changes here aren't recorded in undo history.</td><td>Live regions where undo would feel wrong</td></tr>
+    </table>
+    <div class="recipes">
+      <span class="r-title">Recipes</span>
+      UI chrome (toolbars, badges) <span class="arrow">→</span> clay="no-save no-watch"<br>
+      Live or computed text (clocks) <span class="arrow">→</span> clay="freeze"<br>
+      Third-party embeds <span class="arrow">→</span> clay="no-watch"<br>
+      Heavy editors, batch the saves <span class="arrow">→</span> clay="no-trigger-autosave"
+    </div>
+  </section>
+
+  <!-- ====== ADVANCED SAVE ATTRIBUTES ====== -->
+  <section id="save-attrs">
+    <span class="eyebrow">Hooks into the save</span>
+    <h2 class="section-title">Advanced save attributes</h2>
+
+    <div class="libcard">
+      <div class="lib-name">onbeforesave / onbeforesnapshot</div>
+      <p class="lib-prob">“I want to clean an element up right before it's written to disk.”</p>
+      <p>Inline handlers that run on a <em>copy</em> of the element during the snapshot, so the live page never flickers. <code>onbeforesave</code> runs only for saves; <code>onbeforesnapshot</code> runs for every snapshot, including live-sync broadcasts.</p>
+      <pre><code>&lt;<span class="t">div</span> <span class="a">onbeforesave</span>="this.removeAttribute('data-temp')"&gt;…&lt;/<span class="t">div</span>&gt;</code></pre>
+    </div>
+
+    <div class="libcard">
+      <div class="lib-name">onaftersave</div>
+      <p class="lib-prob">“Run something every time a save succeeds.”</p>
+      <pre><code>&lt;<span class="t">div</span> <span class="a">onaftersave</span>="console.log('saved at', event.detail.timestamp)"&gt;…&lt;/<span class="t">div</span>&gt;</code></pre>
+    </div>
+
+    <div class="libcard">
+      <div class="lib-name">refetch-on-save</div>
+      <p class="lib-prob">“My stylesheet is generated on save; reload it without a flash.”</p>
+      <pre><code>&lt;<span class="t">link</span> <span class="a">rel</span>="stylesheet" <span class="a">href</span>="style.css" <span class="a">refetch-on-save</span>&gt;</code></pre>
+    </div>
+
+    <div class="libcard">
+      <div class="lib-name">clay.cacheBust(el)</div>
+      <p class="lib-prob">“Force one resource to re-download.”</p>
+      <p>Swaps a <code>?v=</code> timestamp onto the element's <code>href</code> or <code>src</code>. Pairs well with <code>onaftersave</code>.</p>
+    </div>
+
+    <div class="libcard">
+      <div class="lib-name">clay.beforeSave(fn)</div>
+      <p class="lib-prob">“I need JavaScript-level control over the outgoing HTML.”</p>
+      <p>Registers a callback that receives the cloned document right before serialization. Strip, rewrite, or annotate anything; the live page is untouched.</p>
+      <pre><code>clay.beforeSave(doc =&gt; doc.querySelectorAll(".draft-marker").forEach(el =&gt; el.remove()));</code></pre>
+    </div>
+  </section>
+
+  <!-- ====== SEPARATE LIBRARIES ====== -->
+  <section id="libraries">
+    <span class="eyebrow">Separate libraries</span>
+    <h2 class="section-title">Bring them in when the problem shows up</h2>
+    <p>These aren't checkboxes; each is its own library with its own script tag and docs. They share clayjs's taste: HTML-first, no build step.</p>
+
+    <div class="libcard">
+      <div class="lib-name">clay-ui <span class="tag">toasts · modals · dialogs</span></div>
+      <p class="lib-prob">“I need a toast or a confirm dialog and don't want to build one.”</p>
+      <p>Ready-made toasts, modals, and ask/confirm/tell dialogs. It listens to <code>clay:save-*</code> events automatically, so adding it upgrades your save feedback for free. If you already have a toast library, keep yours: the events are public.</p>
+      <pre><code>&lt;<span class="t">script</span> <span class="a">src</span>="https://clayjs.com/clay-ui.js"&gt;&lt;/<span class="t">script</span>&gt;</code></pre>
+    </div>
+
+    <div class="libcard">
+      <div class="lib-name">event attributes</div>
+      <p class="lib-prob">“I want small behaviors without writing addEventListener boilerplate.”</p>
+      <p><code>onclickaway</code>, <code>onclickchildren</code>, <code>onrender</code>, <code>onmutation</code>, <code>onclone</code>: HTML attributes for the events HTML forgot.</p>
+      <pre><code>&lt;<span class="t">script</span> <span class="a">src</span>="https://clayjs.com/clay-events.js"&gt;&lt;/<span class="t">script</span>&gt;</code></pre>
+    </div>
+
+    <div class="libcard">
+      <div class="lib-name">option visibility</div>
+      <p class="lib-prob">“Show or hide parts of the page based on a state attribute.”</p>
+      <p>Declarative show/hide: an ancestor sets <code>option:view="kanban"</code>, descendants opt in or out with <code>option:</code> / <code>option-not:</code> attributes.</p>
+      <pre><code>&lt;<span class="t">script</span> <span class="a">src</span>="https://clayjs.com/clay-options.js"&gt;&lt;/<span class="t">script</span>&gt;</code></pre>
+    </div>
+
+    <div class="libcard">
+      <div class="lib-name">DOM helpers</div>
+      <p class="lib-prob">“closest() only searches up. I need the element near me.”</p>
+      <p><code>el.nearest(sel)</code>, <code>el.val()</code>, <code>el.exec()</code>, <code>el.cycle()</code>: small prototype helpers for DOM-first apps.</p>
+      <pre><code>&lt;<span class="t">script</span> <span class="a">src</span>="https://clayjs.com/clay-dom.js"&gt;&lt;/<span class="t">script</span>&gt;</code></pre>
+    </div>
+
+    <div class="libcard">
+      <div class="lib-name">All.js</div>
+      <p class="lib-prob">“I miss jQuery's ergonomics, not its size.”</p>
+      <p>A chainable wrapper over querySelectorAll: <code>All(".card").addClass("open").on("click", …)</code>. Zero dependencies, one file.</p>
+      <pre><code>&lt;<span class="t">script</span> <span class="a">src</span>="https://clayjs.com/all.js"&gt;&lt;/<span class="t">script</span>&gt;</code></pre>
+    </div>
+
+    <div class="libcard">
+      <div class="lib-name">utilities</div>
+      <p class="lib-prob">“The small stuff: throttle, debounce, cookies, slugify.”</p>
+      <pre><code>&lt;<span class="t">script</span> <span class="a">src</span>="https://clayjs.com/clay-utils.js"&gt;&lt;/<span class="t">script</span>&gt;</code></pre>
+    </div>
+
+    <div class="libcard">
+      <div class="lib-name">hyper-morph <span class="tag">exported</span></div>
+      <p class="lib-prob">“I want the morphing engine itself.”</p>
+      <p>The content-based DOM morphing that powers live sync ships inside the sync plugin and is exported as <code>clay.morph</code>. Use it to update a page in place while preserving focus, inputs, and animations.</p>
+    </div>
+
+    <div class="libcard">
+      <div class="lib-name">clay.Mutation <span class="tag">exported</span></div>
+      <p class="lib-prob">“One MutationObserver for the whole page, with region rules applied.”</p>
+      <p>The shared mutation hub that autosave and live sync sit on. <code>clay.Mutation.onAnyChange(opts, cb)</code> respects <code>clay="no-watch"</code> regions so your observers and clayjs's agree about what counts as a change.</p>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="inner">
+    <span>clayjs</span>
+    <a href="index.html">Home</a>
+    <a href="plugins.html">Plugins</a>
+    <a href="docs.html">Docs</a>
+    <a href="https://github.com/clayjs" rel="noopener">GitHub</a>
+    <span>MIT</span>
+  </div>
+</footer>
+
+</body>
+</html>

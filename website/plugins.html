@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Plugins · clayjs</title>
+<meta name="description" content="The heavyweight plugins for malleable HTML files: CMS, sap, richclay, undo, data.">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<nav class="nav">
+  <a class="wordmark" href="index.html">clay</a>
+  <div class="links">
+    <a href="advanced.html">Advanced</a>
+    <a href="plugins.html" aria-current="page">Plugins</a>
+    <a href="docs.html">Docs</a>
+    <a href="https://github.com/clayjs" rel="noopener">GitHub</a>
+  </div>
+</nav>
+
+<main class="page">
+
+  <section style="border-top: none; padding-top: 56px;">
+    <span class="eyebrow">Plugins</span>
+    <h1 class="display" style="font-size: clamp(30px, 4.5vw, 42px);">The heavyweights</h1>
+    <p class="lede" style="margin-top: 12px;">Bigger capabilities for malleable files. Some are configurator checkboxes, some are their own libraries; each earns its place by solving a whole class of problem.</p>
+  </section>
+
+  <section>
+    <!-- CMS spotlight -->
+    <div class="libcard" style="border-color: var(--glaze); border-width: 2px;">
+      <div class="lib-name">cms <span class="tag">checkbox plugin</span></div>
+      <p class="lib-prob">“Other people need to edit this page's content without touching its code.”</p>
+      <p>A content sidebar that builds itself from your page. You name the parts of the file that count as content, and the CMS turns them into friendly fields: text, rich text, images, lists. Whoever you share edit access with sees the panel, not the markup.</p>
+      <p><strong>Setup is two tags.</strong> Check <em>“A content sidebar”</em> in the <a href="index.html#configure">configurator</a> (or add <code>?plugins=cms</code> yourself), then tell it what's content with a rules tag:</p>
+      <pre><code>&lt;<span class="t">script</span> <span class="a">src</span>="https://clayjs.com/clay.js?plugins=cms"&gt;&lt;/<span class="t">script</span>&gt;
+&lt;<span class="t">script</span> <span class="a">data-rules-name</span>="cms" <span class="a">type</span>="application/json"&gt;
+{
+  "title":    ".page-title",
+  "intro":    "p.intro",
+  "avatar":   "img.avatar@src",
+  "tags":     "ul.tags li[]",
+  "products": [".product", { "name": ".name", "price": ".price" }]
+}
+&lt;/<span class="t">script</span>&gt;</code></pre>
+      <p class="small">Each entry is a field: a name, then the selector it edits. <code>@src</code> becomes an image-upload control, <code>li[]</code> a reorderable list, and the <code>products</code> shape a list of cards. Open the sidebar with <code>?cms=true</code> on the URL or <code>cms.open()</code> from a button. The same rules tag can carry more tokens (<code>data-rules-name="api cms"</code>) to also power the <strong>data</strong> plugin's JSON API, so you configure content once.</p>
+    </div>
+
+    <div class="libcard">
+      <div class="lib-name">richclay <span class="tag">checkbox plugin · on by default</span></div>
+      <p class="lib-prob">“Editable text should mean bold, lists, and links, not just characters.”</p>
+      <p>The <code>editable</code> attribute from the tutorial. A floating toolbar appears while editing; output stays clean HTML. It's part of the default clay.js because editing text is the heart of a malleable file; uncheck it in the configurator if you're building something else.</p>
+      <pre><code>&lt;<span class="t">article</span> <span class="a">editable</span>&gt;Multi-line rich text…&lt;/<span class="t">article</span>&gt;
+&lt;<span class="t">h1</span> <span class="a">editable</span>="single-line"&gt;Page title&lt;/<span class="t">h1</span>&gt;
+&lt;<span class="t">p</span> <span class="a">editable</span>="single-line no-toolbar"&gt;Caption&lt;/<span class="t">p</span>&gt;</code></pre>
+      <p class="small">Tokens combine like classes: <code>single-line</code>, <code>no-toolbar</code>, <code>toolbar-on-select</code>. In the saved file the attribute is an inert marker; no editor chrome is ever written to disk.</p>
+    </div>
+
+    <div class="libcard">
+      <div class="lib-name">undo <span class="tag">checkbox plugin</span></div>
+      <p class="lib-prob">“⌘Z should undo what I did to the page, not just the last keystroke.”</p>
+      <p>Document-wide undo/redo built on DOM mutations: moves, deletions, and attribute changes all reverse cleanly. Respects <code>clay="no-undo"</code> regions.</p>
+      <pre><code>&lt;<span class="t">script</span> <span class="a">src</span>="https://clayjs.com/clay.js?plugins=undo"&gt;&lt;/<span class="t">script</span>&gt;</code></pre>
+    </div>
+
+    <div class="libcard">
+      <div class="lib-name">sap <span class="tag">separate library</span></div>
+      <p class="lib-prob">“I want reactive templates, with the DOM itself as the state.”</p>
+      <p>Reactivity without a virtual DOM or a store: attributes and elements are the source of truth, and templates re-render when the DOM they depend on changes. Made for malleable files, where the page already is the database.</p>
+      <pre><code>&lt;<span class="t">script</span> <span class="a">src</span>="https://clayjs.com/sap.js"&gt;&lt;/<span class="t">script</span>&gt;</code></pre>
+    </div>
+
+    <div class="libcard">
+      <div class="lib-name">data <span class="tag">separate library</span></div>
+      <p class="lib-prob">“I want the page's content in and out as JSON.”</p>
+      <p><code>extractData()</code> reads your page into structured JSON; <code>applyData()</code> writes JSON back into the page. The same mapping powers a read-only <code>/_/api</code> endpoint on platforms that support it, so a malleable file can double as an API.</p>
+      <pre><code>&lt;<span class="t">script</span> <span class="a">src</span>="https://clayjs.com/clay-data.js"&gt;&lt;/<span class="t">script</span>&gt;</code></pre>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="inner">
+    <span>clayjs</span>
+    <a href="index.html">Home</a>
+    <a href="advanced.html">Advanced</a>
+    <a href="docs.html">Docs</a>
+    <a href="https://github.com/clayjs" rel="noopener">GitHub</a>
+    <span>MIT</span>
+  </div>
+</footer>
+
+</body>
+</html>

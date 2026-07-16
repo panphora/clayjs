@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>clayjs: malleable html files</title>
+<meta name="description" content="The tools you need to make a static HTML file behave like a Google Document: editable, auto-save, live sync, etc.">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<nav class="nav">
+  <a class="wordmark" href="index.html">clay</a>
+  <div class="links">
+    <a href="advanced.html">Advanced</a>
+    <a href="plugins.html">Plugins</a>
+    <a href="docs.html">Docs</a>
+    <a href="https://github.com/clayjs" rel="noopener">GitHub</a>
+  </div>
+</nav>
+
+<div class="with-rail">
+  <aside class="rail" aria-label="Page outline">
+    <div class="rail-title">Outline</div>
+    <a href="#concept">The idea</a>
+    <a href="#save">1 · Make it save</a>
+    <a href="#feedback">2 · Know it saved</a>
+    <a href="#document">3 · Make it a document</a>
+    <a href="#next-problems">What you'll hit next</a>
+    <a href="#regions">What gets saved</a>
+    <a href="#configure">Get your script tag</a>
+    <a href="#runs-on">Where it runs</a>
+  </aside>
+
+  <main>
+
+  <!-- ================= HERO ================= -->
+  <section style="border-top: none; padding-top: 64px;">
+    <span class="eyebrow">clayjs</span>
+    <h1 class="display"><em>Malleable</em> HTML files</h1>
+    <p class="lede" style="margin-top: 14px;">The tools you need to make a static HTML file behave like a Google&nbsp;Document: editable, auto-save, live sync, etc.</p>
+
+    <div class="sheet" id="hero-sheet" style="margin-top: 30px;">
+      <span class="filename">notes.html</span>
+      <span class="simbadge">simulated save</span>
+      <h3 editable="single-line" spellcheck="false" style="font-size: 22px; margin-bottom: 10px;">My notes</h3>
+      <p class="small" style="margin-bottom: 14px;">Click the heading and type. Select text to format it. Then save.</p>
+      <button class="btn primary" id="hero-save">Save</button>
+      <span class="chip"></span>
+    </div>
+
+    <pre><code>&lt;!DOCTYPE html&gt;
+&lt;<span class="t">html</span>&gt;
+  &lt;<span class="t">body</span>&gt;
+    &lt;<span class="t">h1</span> <span class="a">editable</span>&gt;My notes&lt;/<span class="t">h1</span>&gt;
+    &lt;<span class="t">button</span> <span class="a">onclick</span>="clay.save()"&gt;Save&lt;/<span class="t">button</span>&gt;
+    &lt;<span class="t">script</span> <span class="a">src</span>="https://clayjs.com/clay.js"&gt;&lt;/<span class="t">script</span>&gt;
+  &lt;/<span class="t">body</span>&gt;
+&lt;/<span class="t">html</span>&gt;</code></pre>
+    <p>That's a complete app. Type into the heading, hit Save, refresh: your words are still there. The file saved itself.</p>
+    <p style="margin-top: 18px;">
+      <a class="btn primary" href="#save" style="text-decoration: none; display: inline-block;">Start the tutorial</a>
+      <a class="btn ghost" href="#configure" style="text-decoration: none; display: inline-block; margin-left: 6px;">Get your script tag</a>
+    </p>
+  </section>
+
+  <!-- ================= CONCEPT ================= -->
+  <section id="concept">
+    <p style="font-size: 19px;">A malleable HTML file is an HTML file that can save itself. There is no database and no build step: the page you're looking at <em>is</em> the data. When you save, clayjs snapshots the page's HTML, cleans it up, and POSTs it back to the server it came from, which writes it to disk. Next load, the file opens exactly the way you left it.</p>
+  </section>
+
+  <!-- ================= QUOTE: KAMI ================= -->
+  <section id="quote-kami" style="text-align: center;">
+    <p style="font-size: 21px; font-style: italic; line-height: 1.5; margin-bottom: 8px; text-wrap: pretty;">“I love simple solutions to problems that modern webdev has made unnecessarily complicated.”</p>
+    <p class="small">kami · developer <span style="font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--glaze); border: 1px solid var(--glaze); padding: 1px 6px; border-radius: 3px; vertical-align: 1px;">pending permission</span></p>
+  </section>
+
+  <!-- ================= STEP 1: SAVE ================= -->
+  <section id="save">
+    <span class="eyebrow">Step 1 · Make it save</span>
+    <p class="problem">You changed the page, and a refresh throws it away.</p>
+    <p>Add the script tag, then call <code>clay.save()</code> whenever you want to persist the page. Wire it to a button, a keystroke, or your own logic:</p>
+    <pre><code>&lt;<span class="t">script</span> <span class="a">src</span>="https://clayjs.com/clay.js"&gt;&lt;/<span class="t">script</span>&gt;
+&lt;<span class="t">button</span> <span class="a">onclick</span>="clay.save()"&gt;Save&lt;/<span class="t">button</span>&gt;
+
+&lt;<span class="t">script</span>&gt;
+  <span class="c">// or from your own code, with the server's answer:</span>
+  const { msg, msgType } = await clay.save();
+&lt;/<span class="t">script</span>&gt;</code></pre>
+    <h3>What actually happens</h3>
+    <p>clayjs POSTs the file's own HTML to <code>/_/save</code> on the server it was loaded from, and gets back a small JSON answer: <code>{ "msg": "Saved" }</code>. That's the whole protocol. Anything that implements that one endpoint can host malleable files:</p>
+    <table>
+      <tr><th>Server</th><th>What it is</th></tr>
+      <tr><td><strong>hyperclay.com</strong></td><td>Hosted platform: accounts, versions, sharing</td></tr>
+      <tr><td><strong>Hyperclay Local</strong></td><td>Desktop app that serves a folder on your machine</td></tr>
+      <tr><td><strong>htmlclay</strong></td><td>Desktop app: double-click a .htmlclay file and it just saves</td></tr>
+      <tr><td><strong>Your own</strong></td><td>About 12 lines of Express. <a href="docs.html#endpoint">Endpoint spec</a>.</td></tr>
+    </table>
+  </section>
+
+  <!-- ================= STEP 2: FEEDBACK ================= -->
+  <section id="feedback">
+    <span class="eyebrow">Step 2 · Know it saved</span>
+    <p class="problem">You hit save. Did it work?</p>
+    <p>clayjs never draws its own interface. Instead it keeps a <code>savestatus</code> attribute on <code>&lt;html&gt;</code> up to date (<code>saving</code>, <code>saved</code>, <code>error</code>, <code>offline</code>), and you decide what that looks like. Paste this CSS and you have a status chip, no JavaScript needed:</p>
+    <pre><code><span class="t">html[savestatus] body::after</span> {
+  position: fixed; right: 16px; bottom: 16px;
+  padding: 4px 12px; border-radius: 99px; font: 13px system-ui;
+}
+<span class="t">html[savestatus="saving"] body::after</span> { content: "Saving…"; background: #eee; }
+<span class="t">html[savestatus="saved"]  body::after</span> { content: "Saved"; background: #dcefe0; color: #2f5d3a; }
+<span class="t">html[savestatus="error"]  body::after</span> { content: "Couldn't save"; background: #f6e3de; color: #a04f38; }</code></pre>
+    <div class="sheet" id="chip-sheet">
+      <span class="filename">notes.html</span>
+      <span class="simbadge">simulated</span>
+      <p class="small" style="margin-bottom: 12px;">Try both outcomes:</p>
+      <button class="btn primary" id="chip-save">Save</button>
+      <button class="btn" id="chip-fail">Save (server down)</button>
+      <span class="chip"></span>
+    </div>
+    <p class="small">The chip is yours: restyle it, move it, delete it.</p>
+    <p><strong>Don't want to touch CSS?</strong> Check <em>“a built-in save indicator”</em> in the <a href="#configure">configurator</a> and clayjs ships a small ready-made one.</p>
+    <details class="fold">
+      <summary><span class="prob">Roll your own</span><span class="sol">events + promise</span></summary>
+      <div class="fold-body">
+        <p>Every save fires events on <code>document</code> and returns a promise, so any UI you already have can listen in:</p>
+        <pre><code>document.addEventListener(<span class="a">"clay:save-saved"</span>, () =&gt; myToast(<span class="a">"Saved"</span>));
+document.addEventListener(<span class="a">"clay:save-error"</span>, e =&gt; myToast(e.detail.msg));
+
+<span class="c">// or handle it inline:</span>
+const { msg, msgType } = await clay.save();</code></pre>
+        <p class="small">Events: <code>clay:save-saving</code>, <code>clay:save-saved</code>, <code>clay:save-error</code>, <code>clay:save-offline</code>. Each carries <code>detail.msg</code>.</p>
+      </div>
+    </details>
+    <details class="fold">
+      <summary><span class="prob">When it fails</span><span class="sol">error + offline</span></summary>
+      <div class="fold-body">
+        <p><code>savestatus="error"</code> means the server answered with a problem; the message is in the event's <code>detail.msg</code>. <code>savestatus="offline"</code> means the request couldn't get out at all. And if someone closes the tab with unsaved changes, clayjs warns them first. That safety net is built in.</p>
+      </div>
+    </details>
+  </section>
+
+  <!-- ================= STEP 3: DOCUMENT ================= -->
+  <section id="document">
+    <span class="eyebrow">Step 3 · Make it a document</span>
+    <p class="problem">A page you can't type into isn't a document.</p>
+    <p>Put <code>editable</code> on anything: it becomes rich text you can type into, with bold, italics, lists, and links. Form controls need one attribute, <code>persist</code>, which writes their current value into the HTML itself so it survives the save:</p>
+    <pre><code>&lt;<span class="t">p</span> <span class="a">editable</span>&gt;Meeting notes for Tuesday…&lt;/<span class="t">p</span>&gt;
+&lt;<span class="t">input</span> <span class="a">name</span>="title" <span class="a">persist</span>&gt;
+&lt;<span class="t">textarea</span> <span class="a">name</span>="draft" <span class="a">persist</span>&gt;&lt;/<span class="t">textarea</span>&gt;</code></pre>
+    <div class="sheet" id="doc-sheet">
+      <span class="filename">meeting.html</span>
+      <span class="simbadge">simulated save</span>
+      <p editable spellcheck="false" style="margin-bottom: 10px;">Meeting notes for Tuesday…</p>
+      <input id="doc-input" placeholder="title" style="font: 15px var(--serif); padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; margin-bottom: 14px; width: 60%; background: #fff;">
+      <div>
+        <button class="btn primary" id="doc-save">Save</button>
+        <button class="btn" id="doc-reload" title="Re-renders the sheet from its last saved HTML">Reload file</button>
+      </div>
+      <span class="chip"></span>
+    </div>
+    <p class="small">Edit both, save, then reload: everything survives. Reload <em>without</em> saving and your changes are gone, which is the point.</p>
+  </section>
+
+  <!-- ================= NEXT PROBLEMS ================= -->
+  <section id="next-problems">
+    <span class="eyebrow">The problems you'll hit next</span>
+    <h2 class="section-title">Saved files have a lifecycle</h2>
+    <p>Three things come up in almost every malleable file, usually in this order. Open the one you're facing.</p>
+
+    <details class="fold">
+      <summary><span class="prob">I shouldn't have to press Save.</span><span class="sol">autosave</span></summary>
+      <div class="fold-body">
+        <p>Put <code>autosave</code> on the <code>&lt;html&gt;</code> element and clayjs saves for you: edits settle for a moment, then a save fires. It's debounced and throttled, so rapid typing never spams the server.</p>
+        <pre><code>&lt;<span class="t">html</span> <span class="a">autosave</span>&gt;</code></pre>
+        <div class="sheet" id="auto-sheet">
+          <span class="filename">journal.html</span>
+          <span class="simbadge">simulated</span>
+          <p contenteditable spellcheck="false">Type here and just stop. It saves on its own.</p>
+          <span class="chip"></span>
+        </div>
+      </div>
+    </details>
+
+    <details class="fold">
+      <summary><span class="prob">It's open in two places and the copies fight.</span><span class="sol">live sync</span></summary>
+      <div class="fold-body">
+        <p>Check <em>“sync edits across open copies”</em> in the <a href="#configure">configurator</a>. Edits then flow into every open copy of the file, morphing the page in place: no reloads, and nobody loses their cursor. It's off by default on purpose: it holds a connection open, and you don't need that until you have this problem.</p>
+        <div class="sync-pair">
+          <div class="sheet" style="margin: 6px 0;">
+            <span class="filename">plan.html · your laptop</span>
+            <p contenteditable spellcheck="false" data-sync="a">Type in either copy…</p>
+          </div>
+          <div class="sheet" style="margin: 6px 0;">
+            <span class="filename">plan.html · your phone</span>
+            <span class="simbadge">simulated</span>
+            <p contenteditable spellcheck="false" data-sync="b">Type in either copy…</p>
+          </div>
+        </div>
+      </div>
+    </details>
+
+    <details class="fold">
+      <summary><span class="prob">Visitors can see my edit controls.</span><span class="sol">edit mode</span></summary>
+      <div class="fold-body">
+        <p>Your first malleable file can keep its controls exposed; that's fine. When you share it, mark the owner-only parts and clayjs strips or disables them for everyone else. The server decides who the owner is.</p>
+        <pre><code>&lt;<span class="t">h1</span> <span class="a">editmode:contenteditable</span>&gt;Only the owner can edit this&lt;/<span class="t">h1</span>&gt;
+&lt;<span class="t">button</span> <span class="a">clay</span>="no-save" <span class="a">onclick</span>="clay.save()"&gt;Save&lt;/<span class="t">button</span>&gt;</code></pre>
+        <div class="mode-toggle" role="group" aria-label="Simulate who is looking at the file">
+          <button id="mode-edit" aria-pressed="true">You (owner)</button>
+          <button id="mode-view" aria-pressed="false">A visitor</button>
+        </div>
+        <div class="sheet" id="mode-sheet" style="margin-top: 4px;">
+          <span class="filename">recipe.html</span>
+          <span class="simbadge">simulated</span>
+          <h3 contenteditable spellcheck="false" style="font-size: 19px; margin-bottom: 8px;">Sourdough, third attempt</h3>
+          <p style="margin-bottom: 12px;">More water, less patience.</p>
+          <div class="edit-only">
+            <button class="btn primary">Save</button>
+            <button class="btn">Add photo</button>
+          </div>
+          <p class="small edit-only" style="margin: 10px 0 0;">Visitors won't see these buttons or the dashed underline.</p>
+        </div>
+      </div>
+    </details>
+  </section>
+
+  <!-- ================= REGIONS ================= -->
+  <section id="regions">
+    <span class="eyebrow">One more concept</span>
+    <h2 class="section-title">Control what gets saved</h2>
+    <p class="problem">Some parts of the page shouldn't be part of the document.</p>
+    <p>A search box, a connection badge, a ticking clock: they live on the page but they aren't content. One attribute, <code>clay</code>, tells clayjs how any element takes part in saving:</p>
+    <pre><code>&lt;<span class="t">nav</span> <span class="a">clay</span>="no-save no-watch"&gt; …toolbar, never written to disk… &lt;/<span class="t">nav</span>&gt;
+&lt;<span class="t">span</span> <span class="a">clay</span>="freeze"&gt;12:04:33&lt;/<span class="t">span</span>&gt;  <span class="c">&lt;!-- saved as authored, ticking ignored --&gt;</span>
+&lt;<span class="t">div</span> <span class="a">clay</span>="no-watch"&gt; …a third-party widget that churns the DOM… &lt;/<span class="t">div</span>&gt;</code></pre>
+    <div class="recipes">
+      <span class="r-title">Recipes</span>
+      UI chrome (toolbars, badges) <span class="arrow">→</span> clay="no-save no-watch"<br>
+      Live or computed text (clocks) <span class="arrow">→</span> clay="freeze"<br>
+      Third-party embeds <span class="arrow">→</span> clay="no-watch"<br>
+      Heavy editors, batch the saves <span class="arrow">→</span> clay="no-trigger-autosave"
+    </div>
+    <p class="small">Six keywords total: <code>no-save</code>, <code>no-snapshot</code>, <code>no-trigger-autosave</code>, <code>no-watch</code>, <code>no-undo</code>, <code>freeze</code>. Full reference on the <a href="advanced.html#regions">advanced page</a>.</p>
+  </section>
+
+  <!-- ================= CONFIGURATOR ================= -->
+  <section id="configure">
+    <span class="eyebrow">Get your script tag</span>
+    <h2 class="section-title">What does your file need?</h2>
+    <p>Check what applies. The script tag updates as you go; plugins load only in the browser, only when checked.</p>
+
+    <div class="config">
+      <div class="choices">
+        <label class="row locked">
+          <input type="checkbox" checked disabled>
+          <span><span class="what">Saving</span><span class="why">The core. Always on.</span></span>
+        </label>
+        <label class="row">
+          <input type="checkbox" checked data-plugin="richclay" data-default="on">
+          <span><span class="what">Rich text editing</span><span class="why">The <code>editable</code> attribute: bold, lists, links. On by default.</span></span>
+        </label>
+        <label class="row">
+          <input type="checkbox" data-plugin="indicator">
+          <span><span class="what">A built-in save indicator</span><span class="why">A small ready-made status chip, if you'd rather not style your own.</span></span>
+        </label>
+        <label class="row">
+          <input type="checkbox" data-plugin="sync">
+          <span><span class="what">Sync edits across open copies</span><span class="why">Live sync between tabs, devices, and collaborators.</span></span>
+        </label>
+        <label class="row">
+          <input type="checkbox" data-plugin="sortable">
+          <span><span class="what">Drag items to reorder</span><span class="why">The <code>sortable</code> attribute for lists and boards.</span></span>
+        </label>
+        <label class="row">
+          <input type="checkbox" data-plugin="undo">
+          <span><span class="what">Undo / redo</span><span class="why">⌘Z that understands the whole document, not just text fields.</span></span>
+        </label>
+        <label class="row">
+          <input type="checkbox" data-plugin="cms">
+          <span><span class="what">A content sidebar (CMS)</span><span class="why">Edit-in-place panel for the file's content. Needs a two-line setup, shown below.</span></span>
+        </label>
+      </div>
+      <div class="out">
+        <div class="copyline">
+          <span class="lbl">Your script tag</span>
+          <button class="btn" id="copy-config">Copy</button>
+        </div>
+        <pre><code id="config-output"></code></pre>
+        <div class="cms-extra" id="cms-extra">
+          <p class="small" style="margin-bottom: 6px;"><strong>CMS setup:</strong> add one more tag naming the parts of your page that count as content. The sidebar builds itself from it:</p>
+          <pre style="margin-top: 0;"><code>&lt;<span class="t">script</span> <span class="a">data-rules-name</span>="cms" <span class="a">type</span>="application/json"&gt;
+{
+  "title":  ".page-title",
+  "intro":  "p.intro",
+  "avatar": "img.avatar@src",
+  "tags":   "ul.tags li[]"
+}
+&lt;/<span class="t">script</span>&gt;</code></pre>
+          <p class="small">Each entry is a field: a name, then the selector it edits. Open the sidebar with <code>?cms=true</code> on the URL. The same tag can power the <a href="plugins.html">JSON data API</a> too.</p>
+        </div>
+        <p class="small">Need more? Reactive templates, JSON data in and out, toasts and dialogs, DOM helpers: those are separate libraries with their own script tags, on <a href="plugins.html">Plugins</a> and <a href="advanced.html">Advanced</a>.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= RUNS ON ================= -->
+  <section id="runs-on">
+    <span class="eyebrow">Where this runs</span>
+    <h2 class="section-title">Your file is yours</h2>
+    <p>It runs on <a href="https://hyperclay.com">hyperclay.com</a>, on your own machine with Hyperclay Local or htmlclay, or against <a href="docs.html#endpoint">about 12 lines of your own server code</a>. Download it anytime; it's just HTML.</p>
+    <p class="small">The fastest way to try a malleable file with zero setup is a free account on <a href="https://hyperclay.com">hyperclay.com</a>.</p>
+  </section>
+
+  <!-- ================= QUOTE: MORGAN ================= -->
+  <section id="quote-morgan" style="text-align: center;">
+    <p style="font-size: 19px; font-style: italic; line-height: 1.55; margin-bottom: 8px; text-wrap: pretty;">“It's very exciting to see this emerging field of on-the-fly software — a re-emergence if you cast your mind back to hypercard for the macintosh.”</p>
+    <p class="small">Morgan · ampersand.pm <span style="font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--glaze); border: 1px solid var(--glaze); padding: 1px 6px; border-radius: 3px; vertical-align: 1px;">pending permission</span></p>
+  </section>
+
+  </main>
+</div>
+
+<footer>
+  <div class="inner">
+    <span>clayjs</span>
+    <a href="advanced.html">Advanced</a>
+    <a href="plugins.html">Plugins</a>
+    <a href="docs.html">Docs</a>
+    <a href="docs.html#endpoint">Host it yourself</a>
+    <a href="https://github.com/clayjs" rel="noopener">GitHub</a>
+    <a href="https://www.npmjs.com/org/clayjs" rel="noopener">npm</a>
+    <span>MIT</span>
+  </div>
+</footer>
+
+<script>window.__hyperclayEditMode = true;</script>
+<script src="vendor/richclay.min.js"></script>
+<script>
+(function () {
+  var RC = window.RichClay || window.richclay;
+  if (RC && typeof RC.init === "function") {
+    try { RC.init("[editable]"); } catch (e) {}
+  }
+
+  function chip(sheet, state, holdMs) {
+    clearTimeout(sheet._chipTimer);
+    if (state === "idle") { sheet.removeAttribute("savestatus"); return; }
+    sheet.setAttribute("savestatus", state);
+    if (state === "saved" || state === "error") {
+      sheet._chipTimer = setTimeout(function () { sheet.removeAttribute("savestatus"); }, holdMs || 2200);
+    }
+  }
+  function simulateSave(sheet, fail, after) {
+    chip(sheet, "saving");
+    clearTimeout(sheet._saveTimer);
+    sheet._saveTimer = setTimeout(function () {
+      chip(sheet, fail ? "error" : "saved");
+      if (after && !fail) after();
+    }, 650);
+  }
+
+  var heroSheet = document.getElementById("hero-sheet");
+  document.getElementById("hero-save").addEventListener("click", function () { simulateSave(heroSheet, false); });
+  heroSheet.addEventListener("keydown", function (e) {
+    if ((e.metaKey || e.ctrlKey) && e.key === "s") { e.preventDefault(); simulateSave(heroSheet, false); }
+  });
+
+  var chipSheet = document.getElementById("chip-sheet");
+  document.getElementById("chip-save").addEventListener("click", function () { simulateSave(chipSheet, false); });
+  document.getElementById("chip-fail").addEventListener("click", function () { simulateSave(chipSheet, true); });
+
+  var docSheet = document.getElementById("doc-sheet");
+  var docInput = document.getElementById("doc-input");
+  var docP = docSheet.querySelector("[editable]");
+  var docSaved = { html: docP.innerHTML, value: docInput.value };
+  document.getElementById("doc-save").addEventListener("click", function () {
+    simulateSave(docSheet, false, function () {
+      docSaved = { html: docP.innerHTML, value: docInput.value };
+    });
+  });
+  document.getElementById("doc-reload").addEventListener("click", function () {
+    docSheet.style.opacity = "0.25";
+    setTimeout(function () {
+      docP.innerHTML = docSaved.html;
+      docInput.value = docSaved.value;
+      docSheet.style.opacity = "1";
+    }, 220);
+  });
+
+  var autoSheet = document.getElementById("auto-sheet");
+  autoSheet.querySelector("[contenteditable]").addEventListener("input", function () {
+    clearTimeout(autoSheet._autoTimer);
+    chip(autoSheet, "idle");
+    autoSheet._autoTimer = setTimeout(function () { simulateSave(autoSheet, false); }, 1200);
+  });
+
+  var syncA = document.querySelector('[data-sync="a"]');
+  var syncB = document.querySelector('[data-sync="b"]');
+  function mirror(from, to) {
+    from.addEventListener("input", function () {
+      clearTimeout(from._syncTimer);
+      from._syncTimer = setTimeout(function () { to.textContent = from.textContent; }, 250);
+    });
+  }
+  mirror(syncA, syncB);
+  mirror(syncB, syncA);
+
+  var modeSheet = document.getElementById("mode-sheet");
+  var btnEdit = document.getElementById("mode-edit");
+  var btnView = document.getElementById("mode-view");
+  function setMode(viewing) {
+    modeSheet.classList.toggle("viewing", viewing);
+    btnEdit.setAttribute("aria-pressed", String(!viewing));
+    btnView.setAttribute("aria-pressed", String(viewing));
+  }
+  btnEdit.addEventListener("click", function () { setMode(false); });
+  btnView.addEventListener("click", function () { setMode(true); });
+
+  var output = document.getElementById("config-output");
+  var cmsExtra = document.getElementById("cms-extra");
+  var boxes = Array.prototype.slice.call(document.querySelectorAll("[data-plugin]"));
+  function renderConfig() {
+    var plugins = [];
+    var excludes = [];
+    boxes.forEach(function (box) {
+      var name = box.getAttribute("data-plugin");
+      var onByDefault = box.getAttribute("data-default") === "on";
+      if (box.checked && !onByDefault) plugins.push(name);
+      if (!box.checked && onByDefault) excludes.push(name);
+    });
+    var params = [];
+    if (plugins.length) params.push("plugins=" + plugins.join(","));
+    if (excludes.length) params.push("exclude=" + excludes.join(","));
+    var url = "https://clayjs.com/clay.js" + (params.length ? "?" + params.join("&") : "");
+    output.textContent = '<script src="' + url + '"><\/script>';
+    cmsExtra.classList.toggle("show", plugins.indexOf("cms") !== -1);
+  }
+  boxes.forEach(function (box) { box.addEventListener("change", renderConfig); });
+  renderConfig();
+
+  document.getElementById("copy-config").addEventListener("click", function () {
+    var btn = this;
+    var text = output.textContent;
+    function done() {
+      btn.textContent = "Copied!";
+      setTimeout(function () { btn.textContent = "Copy"; }, 1500);
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done);
+    } else {
+      var ta = document.createElement("textarea");
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+      done();
+    }
+  });
+})();
+</script>
+
+</body>
+</html>

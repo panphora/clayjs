@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Docs · clayjs</title>
+<meta name="description" content="clayjs reference: the core API, attributes, events, and the save endpoint spec.">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<nav class="nav">
+  <a class="wordmark" href="index.html">clay</a>
+  <div class="links">
+    <a href="advanced.html">Advanced</a>
+    <a href="plugins.html">Plugins</a>
+    <a href="docs.html" aria-current="page">Docs</a>
+    <a href="https://github.com/clayjs" rel="noopener">GitHub</a>
+  </div>
+</nav>
+
+<main class="page">
+
+  <section style="border-top: none; padding-top: 56px;">
+    <span class="eyebrow">Docs</span>
+    <h1 class="display" style="font-size: clamp(30px, 4.5vw, 42px);">Reference</h1>
+    <p class="lede" style="margin-top: 12px;">The core API, the attributes, the events, and the one endpoint that makes it all work. For the guided version, start with the <a href="index.html">tutorial</a>.</p>
+  </section>
+
+  <!-- ====== LOADING ====== -->
+  <section id="loading">
+    <span class="eyebrow">Loading</span>
+    <h2 class="section-title">The script tag</h2>
+    <pre><code>&lt;<span class="t">script</span> <span class="a">src</span>="https://clayjs.com/clay.js"&gt;&lt;/<span class="t">script</span>&gt;</code></pre>
+    <p>The default build includes the save lifecycle and rich text (<code>editable</code>). Plugins load conditionally through the URL, in the browser only:</p>
+    <table>
+      <tr><th>Param</th><th>Meaning</th><th>Example</th></tr>
+      <tr><td><code>plugins</code></td><td>Comma-separated plugins to load</td><td><code>clay.js?plugins=sync,undo</code></td></tr>
+      <tr><td><code>exclude</code></td><td>Remove a default-on plugin</td><td><code>clay.js?exclude=richclay</code></td></tr>
+    </table>
+    <p class="small">Checkbox plugins: <code>richclay</code> (default on), <code>indicator</code>, <code>sync</code>, <code>sortable</code>, <code>undo</code>, <code>cms</code>. The <a href="index.html#configure">configurator</a> composes this URL for you. Everything else is a separate library with its own script tag: see <a href="advanced.html">Advanced</a> and <a href="plugins.html">Plugins</a>. npm builds for bundlers live at <a href="https://www.npmjs.com/org/clayjs" rel="noopener">@clayjs</a>.</p>
+  </section>
+
+  <!-- ====== CORE API ====== -->
+  <section id="api">
+    <span class="eyebrow">Core API</span>
+    <h2 class="section-title">window.clay</h2>
+    <table>
+      <tr><th>Member</th><th>What it does</th></tr>
+      <tr><td><code>clay.save()</code></td><td>Snapshot the page and save it. Skips when nothing changed. Returns <code>Promise&lt;{msg, msgType}&gt;</code>; <code>msgType</code> is <code>success</code>, <code>error</code>, or <code>skipped</code>. Never rejects.</td></tr>
+      <tr><td><code>clay.save.force()</code></td><td>Save even when nothing appears to have changed.</td></tr>
+      <tr><td><code>clay.getHTML()</code></td><td>The exact HTML string a save would send, after all cleanup.</td></tr>
+      <tr><td><code>clay.beforeSave(fn)</code></td><td>Register a callback that receives the cloned document before serialization. The live page is never touched.</td></tr>
+      <tr><td><code>clay.isEditMode</code></td><td>Whether this session may edit (see <a href="#editmode">edit mode</a>).</td></tr>
+      <tr><td><code>clay.toggleEditMode()</code></td><td>Flip between edit and view mode (reloads the page).</td></tr>
+      <tr><td><code>clay.Mutation</code></td><td>The shared mutation hub. See <a href="advanced.html#libraries">Advanced</a>.</td></tr>
+      <tr><td><code>clay.morph(from, to)</code></td><td>The DOM morphing engine (available when the sync plugin is loaded).</td></tr>
+    </table>
+  </section>
+
+  <!-- ====== ATTRIBUTES ====== -->
+  <section id="attributes">
+    <span class="eyebrow">Attributes</span>
+    <h2 class="section-title">The HTML surface</h2>
+    <table>
+      <tr><th>Attribute</th><th>Where</th><th>What it does</th></tr>
+      <tr><td><code>editable</code></td><td>any element</td><td>Rich text editing with a floating toolbar (richclay, default on). Tokens: <code>editable="single-line no-toolbar toolbar-on-select"</code>. Native <code>contenteditable</code> also works for plain text.</td></tr>
+      <tr><td><code>persist</code></td><td>form controls</td><td>Writes the control's current value into the HTML so it survives the save.</td></tr>
+      <tr><td><code>trigger-save</code></td><td>buttons, links</td><td>Clicking it calls <code>clay.save()</code>. Same as wiring onclick yourself.</td></tr>
+      <tr><td><code>autosave</code></td><td><code>&lt;html&gt;</code></td><td>Save automatically after edits settle. Debounced and throttled.</td></tr>
+      <tr><td><code>clay="…"</code></td><td>any element</td><td>Region control: <code>no-save</code>, <code>no-snapshot</code>, <code>no-trigger-autosave</code>, <code>no-watch</code>, <code>no-undo</code>, <code>freeze</code>. <a href="advanced.html#regions">Full reference</a>.</td></tr>
+      <tr><td><code>editmode:contenteditable</code></td><td>any element</td><td>Editable for the owner, inert for visitors.</td></tr>
+      <tr><td><code>viewmode:disabled</code> / <code>viewmode:readonly</code></td><td>form controls</td><td>Disabled or read-only for visitors, live for the owner.</td></tr>
+      <tr><td><code>onbeforesave</code> / <code>onbeforesnapshot</code> / <code>onaftersave</code></td><td>any element</td><td>Inline hooks into the save. <a href="advanced.html#save-attrs">Details</a>.</td></tr>
+      <tr><td><code>savestatus</code></td><td><code>&lt;html&gt;</code>, set by clayjs</td><td>Read-only state for your CSS: <code>saving</code>, <code>saved</code>, <code>error</code>, <code>offline</code>.</td></tr>
+    </table>
+  </section>
+
+  <!-- ====== EVENTS ====== -->
+  <section id="events">
+    <span class="eyebrow">Events</span>
+    <h2 class="section-title">Listening in</h2>
+    <table>
+      <tr><th>Event (on document)</th><th>Fires when</th><th>detail</th></tr>
+      <tr><td><code>clay:save-saving</code></td><td>a save starts</td><td><code>{msg, timestamp}</code></td></tr>
+      <tr><td><code>clay:save-saved</code></td><td>the server confirmed the write</td><td><code>{msg, timestamp}</code></td></tr>
+      <tr><td><code>clay:save-error</code></td><td>the server answered with a problem</td><td><code>{msg, timestamp}</code></td></tr>
+      <tr><td><code>clay:save-offline</code></td><td>the request couldn't get out</td><td><code>{msg, timestamp}</code></td></tr>
+      <tr><td><code>clay:sync-applied</code></td><td>a live-sync update landed (sync plugin)</td><td><code>{seq}</code></td></tr>
+    </table>
+  </section>
+
+  <!-- ====== EDIT MODE ====== -->
+  <section id="editmode">
+    <span class="eyebrow">Edit mode</span>
+    <h2 class="section-title">Who may edit</h2>
+    <p>Saving requires edit mode. On the platforms, you never think about this: hyperclay.com arms it with a cookie when you're the owner, and Hyperclay Local and htmlclay arm it for local files automatically. Resolution order:</p>
+    <table>
+      <tr><th>Priority</th><th>Source</th></tr>
+      <tr><td>1</td><td><code>?editmode=true</code> / <code>?editmode=false</code> in the URL</td></tr>
+      <tr><td>2</td><td><code>window.clayEditMode</code> set before clay.js loads</td></tr>
+      <tr><td>3</td><td>The platform's owner cookie</td></tr>
+    </table>
+    <p>Serving files from your own server? Arm it yourself:</p>
+    <pre><code>&lt;<span class="t">script</span>&gt;window.clayEditMode = true&lt;/<span class="t">script</span>&gt;
+&lt;<span class="t">script</span> <span class="a">src</span>="https://clayjs.com/clay.js"&gt;&lt;/<span class="t">script</span>&gt;</code></pre>
+    <p class="small">Edit mode is client-side behavior. Whether a save is <em>accepted</em> is always the server's decision.</p>
+  </section>
+
+  <!-- ====== ENDPOINT SPEC ====== -->
+  <section id="endpoint">
+    <span class="eyebrow">Host it yourself</span>
+    <h2 class="section-title">The endpoint spec</h2>
+    <p>A clayjs server implements one route:</p>
+    <table>
+      <tr><th>Part</th><th>Value</th></tr>
+      <tr><td>Route</td><td><code>POST /_/save</code></td></tr>
+      <tr><td>Body</td><td>The file's full HTML, as plain text</td></tr>
+      <tr><td>Header</td><td><code>Page-URL</code>: the URL of the page being saved</td></tr>
+      <tr><td>Success</td><td><code>200</code> with JSON <code>{ "msg": "Saved" }</code></td></tr>
+      <tr><td>Failure</td><td>Any non-2xx with JSON <code>{ "msg": "why" }</code></td></tr>
+    </table>
+    <p>A complete server in about 12 lines of Express:</p>
+    <pre><code>import express from <span class="a">"express"</span>;
+import fs from <span class="a">"node:fs/promises"</span>;
+
+const app = express();
+app.use(express.static(<span class="a">"."</span>));
+app.use(express.text({ type: <span class="a">"*/*"</span>, limit: <span class="a">"10mb"</span> }));
+
+app.post(<span class="a">"/_/save"</span>, async (req, res) =&gt; {
+  const path = new URL(req.get(<span class="a">"Page-URL"</span>)).pathname;
+  await fs.writeFile(<span class="a">"."</span> + path, req.body);
+  res.json({ msg: <span class="a">"Saved"</span> });
+});
+
+app.listen(4600);</code></pre>
+    <p class="small">A real deployment adds auth and path validation; this is the whole protocol though. The same contract powers hyperclay.com, Hyperclay Local, and htmlclay.</p>
+  </section>
+
+  <!-- ====== MIGRATION ====== -->
+  <section id="migration">
+    <span class="eyebrow">Coming from hyperclayjs?</span>
+    <h2 class="section-title">Migration notes</h2>
+    <p>clayjs is the successor to hyperclayjs: the same save lifecycle, radically fewer concepts. Existing hyperclayjs apps keep working; hyperclayjs is in maintenance mode. The renames:</p>
+    <table>
+      <tr><th>hyperclayjs</th><th>clayjs</th></tr>
+      <tr><td><code>window.hyperclay</code> · <code>hyperclay.savePage()</code></td><td><code>window.clay</code> · <code>clay.save()</code></td></tr>
+      <tr><td><code>hyperclay:save-*</code> events</td><td><code>clay:save-*</code> events</td></tr>
+      <tr><td><code>save-remove</code>, <code>save-ignore</code>, <code>save-freeze</code>, <code>mutations-ignore</code>, and the bare <code>no-*</code> attributes</td><td>one <code>clay="…"</code> attribute; legacy aliases dropped</td></tr>
+      <tr><td><code>?preset=minimal|standard|everything</code></td><td>no presets: the default build plus <code>?plugins=</code> / <code>?exclude=</code></td></tr>
+      <tr><td><code>window.__hyperclayEditMode</code></td><td><code>window.clayEditMode</code></td></tr>
+    </table>
+    <p class="small">The wire contract is unchanged, so clayjs saves to every existing server today.</p>
+  </section>
+
+</main>
+
+<footer>
+  <div class="inner">
+    <span>clayjs</span>
+    <a href="index.html">Home</a>
+    <a href="advanced.html">Advanced</a>
+    <a href="plugins.html">Plugins</a>
+    <a href="https://github.com/clayjs" rel="noopener">GitHub</a>
+    <span>MIT</span>
+  </div>
+</footer>
+
+</body>
+</html>

@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>clayjs plugins fixture</title>
+  <script>window.clayEditMode = true;</script>
+  <script src="/clay.js?plugins=indicator,sortable,undo&exclude=richclay"></script>
+  <style>
+    body { font: 16px/1.6 system-ui, sans-serif; margin: 2rem; max-width: 40rem; }
+    [sortable] li { padding: .25rem .5rem; background: #eee; margin: .25rem 0; }
+  </style>
+</head>
+<body>
+  <h1>Plugins</h1>
+
+  <p contenteditable>Type here, then press Cmd+Z to undo.</p>
+
+  <ul sortable>
+    <li>Alpha</li>
+    <li>Beta</li>
+    <li>Gamma</li>
+  </ul>
+
+  <button trigger-save>Save</button>
+</body>
+</html>

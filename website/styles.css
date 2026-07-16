@@ -1,0 +1,294 @@
+:root {
+  --paper: #F1EFEA;
+  --sheet: #FBFAF7;
+  --ink: #2B2723;
+  --ink-soft: #6E675E;
+  --ink-faint: #9B948A;
+  --line: #DDD8CE;
+  --line-soft: #E7E3DA;
+  --glaze: #3E6B52;
+  --glaze-deep: #2F5440;
+  --glaze-tint: #E4EBE2;
+  --rust: #A3502E;
+  --rust-tint: #F2E2D9;
+  --char: #2E2B27;
+  --char-ink: #EDE7DB;
+  --char-tag: #DFBF7F;
+  --char-attr: #A5C6AD;
+  --char-mut: #8F887C;
+  --serif: Charter, "Bitstream Charter", Georgia, Cambria, "Times New Roman", serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+/* richclay injects its theme on :root after this sheet loads; html:root outranks it */
+html:root {
+  --richclay-accent: #3E6B52;
+  --richclay-focus: #3E6B52;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after { transition: none !important; animation: none !important; }
+}
+
+body {
+  font-family: var(--serif);
+  background: var(--paper);
+  color: var(--ink);
+  line-height: 1.6;
+  font-size: 17px;
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: var(--glaze); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+a:hover { color: var(--glaze-deep); }
+:focus-visible { outline: 2px solid var(--glaze); outline-offset: 2px; border-radius: 2px; }
+
+/* ---------- nav ---------- */
+.nav {
+  max-width: 1060px; margin: 0 auto; padding: 22px 24px 0;
+  display: flex; align-items: baseline; gap: 26px;
+}
+.nav .wordmark {
+  font-family: var(--mono); font-size: 16px; font-weight: 700;
+  color: var(--ink); text-decoration: none; letter-spacing: -0.02em;
+}
+.nav .wordmark::after { content: ".js"; color: var(--glaze); }
+.nav .links { margin-left: auto; display: flex; gap: 20px; }
+.nav .links a {
+  font-family: var(--mono); font-size: 13px; color: var(--ink-soft);
+  text-decoration: none;
+}
+.nav .links a:hover, .nav .links a[aria-current="page"] { color: var(--glaze-deep); }
+.nav .links a[aria-current="page"] { border-bottom: 2px solid var(--glaze); padding-bottom: 2px; }
+
+/* ---------- shells ---------- */
+.page { max-width: 720px; margin: 0 auto; padding: 0 24px 90px; }
+.page-wide { max-width: 1060px; margin: 0 auto; padding: 0 24px 90px; }
+
+.eyebrow {
+  font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.14em;
+  text-transform: uppercase; color: var(--glaze); font-weight: 600;
+  display: block; margin-bottom: 10px;
+}
+
+h1.display {
+  font-size: clamp(38px, 6vw, 58px); line-height: 1.05;
+  letter-spacing: -0.015em; font-weight: 700; text-wrap: balance;
+}
+h1.display em { font-style: italic; font-weight: 400; }
+
+.lede { font-size: 20px; color: var(--ink-soft); line-height: 1.5; text-wrap: pretty; }
+
+h2.section-title { font-size: 28px; line-height: 1.2; letter-spacing: -0.01em; margin-bottom: 10px; }
+h3 { font-size: 19px; margin-bottom: 8px; }
+
+p { margin-bottom: 14px; text-wrap: pretty; }
+.small { font-size: 14px; color: var(--ink-soft); }
+
+section { padding: 46px 0 10px; }
+section + section { border-top: 1px solid var(--line-soft); margin-top: 36px; }
+
+/* ---------- problem framing ---------- */
+.problem {
+  font-size: 21px; font-weight: 700; font-style: italic;
+  margin-bottom: 12px; text-wrap: balance;
+}
+.problem::before { content: "”"; color: var(--glaze); margin-right: 2px; }
+.problem::after { content: "“"; color: var(--glaze); margin-left: 2px; }
+
+/* ---------- code ---------- */
+pre {
+  background: var(--char); color: var(--char-ink);
+  border-radius: 10px; padding: 16px 18px; overflow-x: auto;
+  font-family: var(--mono); font-size: 13.5px; line-height: 1.65;
+  margin: 14px 0;
+}
+pre .t { color: var(--char-tag); }
+pre .a { color: var(--char-attr); }
+pre .c { color: var(--char-mut); font-style: italic; }
+code {
+  font-family: var(--mono); font-size: 0.88em;
+  background: #E7E4DC; border-radius: 4px; padding: 1px 5px;
+}
+pre code { background: none; padding: 0; font-size: inherit; }
+
+/* ---------- the file sheet (demo stage) ---------- */
+.sheet {
+  position: relative;
+  background: var(--sheet);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 1px 0 rgba(43,39,35,0.04), 0 10px 26px -18px rgba(43,39,35,0.35);
+  padding: 22px 24px 20px;
+  margin: 18px 0;
+}
+.sheet .filename {
+  position: absolute; top: -11px; left: 16px;
+  font-family: var(--mono); font-size: 11.5px; color: var(--ink-soft);
+  background: var(--paper); border: 1px solid var(--line);
+  border-radius: 5px; padding: 1px 8px;
+}
+.sheet .simbadge {
+  position: absolute; top: -11px; right: 16px;
+  font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--ink-faint);
+  background: var(--paper); border: 1px solid var(--line);
+  border-radius: 5px; padding: 1px 8px;
+}
+.sheet [contenteditable], .sheet [editable] {
+  outline: none;
+  border-bottom: 1px dashed rgba(62,107,82,0.55);
+  padding: 0 2px;
+}
+.sheet [contenteditable]:focus, .sheet [editable]:focus-within,
+.sheet [editable]:focus { background: var(--glaze-tint); border-bottom-style: solid; }
+
+.sheet .chip {
+  position: absolute; right: 14px; bottom: 12px;
+  font-family: var(--mono); font-size: 12px;
+  padding: 3px 11px; border-radius: 99px;
+  opacity: 0; transition: opacity 0.25s;
+  pointer-events: none;
+}
+.sheet[savestatus="saving"] .chip { opacity: 1; background: #E9E6DE; color: var(--ink-soft); }
+.sheet[savestatus="saving"] .chip::after { content: "Saving…"; }
+.sheet[savestatus="saved"] .chip { opacity: 1; background: var(--glaze-tint); color: var(--glaze-deep); }
+.sheet[savestatus="saved"] .chip::after { content: "Saved"; }
+.sheet[savestatus="error"] .chip { opacity: 1; background: var(--rust-tint); color: var(--rust); }
+.sheet[savestatus="error"] .chip::after { content: "Couldn’t save"; }
+
+/* ---------- buttons ---------- */
+.btn {
+  font-family: var(--mono); font-size: 13.5px;
+  border: 1px solid var(--line); background: #EFECE4; color: var(--ink);
+  border-radius: 7px; padding: 7px 15px; cursor: pointer;
+  transition: background 0.15s;
+}
+.btn:hover { background: #E7E3D8; }
+.btn.primary { background: var(--glaze); border-color: var(--glaze); color: #F4F6F1; }
+.btn.primary:hover { background: var(--glaze-deep); }
+.btn.ghost { background: transparent; }
+
+/* ---------- tables ---------- */
+table { border-collapse: collapse; width: 100%; margin: 14px 0; font-size: 15px; }
+th, td { border: 1px solid var(--line); padding: 8px 12px; text-align: left; vertical-align: top; }
+th {
+  font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--ink-soft); background: #EAE7DF;
+  font-weight: 600;
+}
+td code { white-space: nowrap; }
+
+/* ---------- expandables ---------- */
+details.fold {
+  border: 1px solid var(--line); border-radius: 10px;
+  background: var(--sheet); margin: 12px 0; overflow: hidden;
+}
+details.fold summary {
+  cursor: pointer; padding: 15px 18px; list-style: none;
+  display: flex; align-items: baseline; gap: 12px;
+}
+details.fold summary::-webkit-details-marker { display: none; }
+details.fold summary::before {
+  content: "+"; font-family: var(--mono); color: var(--glaze);
+  font-weight: 700; font-size: 16px; flex-shrink: 0;
+}
+details.fold[open] summary::before { content: "–"; }
+details.fold summary .prob { font-weight: 700; font-style: italic; }
+details.fold summary .sol { font-family: var(--mono); font-size: 12.5px; color: var(--glaze-deep); margin-left: auto; flex-shrink: 0; }
+details.fold .fold-body { padding: 2px 18px 18px; border-top: 1px solid var(--line-soft); }
+details.fold .fold-body > :first-child { margin-top: 14px; }
+
+/* ---------- recipes ---------- */
+.recipes {
+  background: var(--glaze-tint); border-radius: 10px;
+  padding: 14px 18px; margin: 14px 0;
+  font-family: var(--mono); font-size: 13px; line-height: 2;
+}
+.recipes .r-title {
+  font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--glaze-deep); font-weight: 700; display: block; margin-bottom: 4px;
+}
+.recipes .arrow { color: var(--glaze-deep); }
+
+/* ---------- configurator ---------- */
+.config { display: grid; grid-template-columns: 1fr 1fr; gap: 26px; margin: 18px 0; }
+@media (max-width: 760px) { .config { grid-template-columns: 1fr; } }
+.config .choices label.row {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 11px 4px; border-bottom: 1px solid var(--line-soft);
+  cursor: pointer; font-size: 15.5px;
+}
+.config .choices label.row:last-child { border-bottom: none; }
+.config .choices input[type="checkbox"] {
+  width: 17px; height: 17px; margin-top: 4px; accent-color: var(--glaze);
+  flex-shrink: 0;
+}
+.config .choices .what { font-weight: 700; }
+.config .choices .why { display: block; font-size: 13.5px; color: var(--ink-soft); }
+.config .choices label.row.locked { opacity: 0.75; cursor: default; }
+.config .out { position: sticky; top: 20px; align-self: start; }
+.config .out pre { margin-top: 0; white-space: pre-wrap; word-break: break-all; }
+.config .out .copyline { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.config .out .copyline .lbl { font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-soft); }
+.config .cms-extra { display: none; }
+.config .cms-extra.show { display: block; }
+
+/* ---------- cards (advanced / plugins pages) ---------- */
+.libcard {
+  background: var(--sheet); border: 1px solid var(--line); border-radius: 10px;
+  padding: 20px 22px; margin: 14px 0;
+}
+.libcard .lib-name { font-family: var(--mono); font-size: 15px; font-weight: 700; }
+.libcard .lib-name .tag {
+  font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--glaze-deep); background: var(--glaze-tint);
+  border-radius: 4px; padding: 2px 7px; margin-left: 8px; vertical-align: 2px;
+}
+.libcard .lib-prob { font-style: italic; color: var(--ink-soft); margin: 4px 0 10px; }
+
+/* ---------- footer ---------- */
+footer {
+  border-top: 1px solid var(--line); margin-top: 70px;
+  padding: 26px 24px 50px;
+}
+footer .inner {
+  max-width: 720px; margin: 0 auto;
+  font-family: var(--mono); font-size: 13px; color: var(--ink-soft);
+  display: flex; flex-wrap: wrap; gap: 8px 22px;
+}
+footer a { color: var(--ink-soft); }
+footer a:hover { color: var(--glaze-deep); }
+
+/* ---------- outline rail (front page) ---------- */
+.with-rail { display: grid; grid-template-columns: 170px minmax(0, 720px); gap: 44px; max-width: 1010px; margin: 0 auto; padding: 0 24px 90px; }
+.rail { position: sticky; top: 28px; align-self: start; padding-top: 56px; }
+.rail .rail-title { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-faint); margin-bottom: 10px; }
+.rail a {
+  display: block; font-family: var(--mono); font-size: 12.5px;
+  color: var(--ink-soft); text-decoration: none; padding: 4px 0 4px 12px;
+  border-left: 2px solid var(--line);
+}
+.rail a:hover { color: var(--glaze-deep); border-left-color: var(--glaze); }
+@media (max-width: 960px) {
+  .with-rail { display: block; max-width: 768px; }
+  .rail { display: none; }
+}
+
+/* ---------- live sync demo panes ---------- */
+.sync-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+@media (max-width: 620px) { .sync-pair { grid-template-columns: 1fr; } }
+
+/* ---------- edit/view toggle demo ---------- */
+.mode-toggle { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; margin-bottom: 12px; }
+.mode-toggle button {
+  font-family: var(--mono); font-size: 12.5px; padding: 6px 14px;
+  border: none; background: transparent; cursor: pointer; color: var(--ink-soft);
+}
+.mode-toggle button[aria-pressed="true"] { background: var(--glaze); color: #F4F6F1; }
+.sheet.viewing .edit-only { display: none; }
+.sheet.viewing [contenteditable] { border-bottom-color: transparent; pointer-events: none; }

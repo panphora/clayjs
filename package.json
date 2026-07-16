@@ -1,0 +1,27 @@
+{
+  "name": "@clayjs/clay",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "clayjs: malleable HTML files. Save lifecycle for self-saving HTML.",
+  "license": "MIT",
+  "homepage": "https://clayjs.com",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/panphora/clayjs.git"
+  },
+  "files": [
+    "clay.js",
+    "src/"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "test": "NODE_OPTIONS=--experimental-vm-modules jest",
+    "dev": "node tests/stub-server.mjs"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "jest-environment-jsdom": "^29.7.0"
+  }
+}
