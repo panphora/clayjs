@@ -1,5 +1,5 @@
 {
-  "name": "@clayjs/clay",
+  "name": "@panphora/clayjs",
   "version": "0.1.0",
   "type": "module",
   "description": "clayjs: malleable HTML files. Save lifecycle for self-saving HTML.",
