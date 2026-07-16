@@ -14,8 +14,10 @@ export async function boot(base, params, readyResolve) {
   const { isEditMode, isOwner } = editMode;
 
   // richclay's vendor build detects edit mode via this legacy global; set it
-  // before any plugin import so its autoInit sees the right value.
-  if (window.__hyperclayEditMode === undefined) window.__hyperclayEditMode = isEditMode;
+  // before any plugin import so its autoInit sees the right value. Overwrite
+  // even a pre-set value: resolution already consumed it (lowest precedence),
+  // and a conflicting leftover would make richclay disable itself.
+  window.__hyperclayEditMode = isEditMode;
 
   const regionPolicy = await import(base + "/src/lib/region-policy.js");
 
@@ -30,10 +32,18 @@ export async function boot(base, params, readyResolve) {
                                                                // before any plugin import
 
   for (const path of plan.plugins) {
-    loaded[path] = await import(base + "/src/" + path);
+    const mod = await import(base + "/src/" + path);
+    loaded[path] = mod;
+    attachPluginMember(path, mod);   // immediately, not after the loop: hypercms's ?cms=true
+                                     // auto-open runs as a microtask queued during ITS evaluation
+                                     // (before boot resumes) and reads window.hyperclay.RichClay
+                                     // and .undo, which earlier plugins must have mirrored by then
   }
 
-  attachPluginMembers(loaded);                          // clay.undo / clay.morph / clay.cms + shim mirrors
+  // Plugins with async setup (sortable's vendor fetch) export `ready`; hold
+  // clay.ready until they finish. allSettled: a failed plugin degrades, never blocks boot.
+  await Promise.allSettled(plan.plugins.map((path) => loaded[path]?.ready).filter(Boolean));
+
   installViewModeNotice(isEditMode);
   readyResolve(window.clay);
   document.dispatchEvent(new CustomEvent("clay:ready", { detail: { clay: window.clay } }));
@@ -87,27 +97,19 @@ function assembleCore(loaded, { isEditMode, isOwner }, regionPolicy) {
   }
 }
 
-function attachPluginMembers(loaded) {
+function attachPluginMember(path, mod) {
   const clay = window.clay;
 
-  const undoMod = loaded["plugins/undo.js"];
-  const syncMod = loaded["sync/live-sync.js"];
-  const cmsMod = loaded["vendor/hypercms.vendor.js"];
-  const richclayMod = loaded["vendor/richclay.vendor.js"];
-
-  if (undoMod) {
-    clay.undo = undoMod.undo || undoMod.default;
+  if (path === "plugins/undo.js") {
+    clay.undo = mod.undo || mod.default;
     window.hyperclay.undo = clay.undo;
-  }
-  if (syncMod) {
-    clay.morph = syncMod.morph;
-  }
-  if (cmsMod) {
-    clay.cms = cmsMod.cms || cmsMod.default;
+  } else if (path === "sync/live-sync.js") {
+    clay.morph = mod.morph;
+  } else if (path === "vendor/hypercms.vendor.js") {
+    clay.cms = mod.cms || mod.default;
     window.hyperclay.hypercms = clay.cms;
-  }
-  if (richclayMod) {
-    window.hyperclay.RichClay = richclayMod.RichClay || richclayMod.default;
+  } else if (path === "vendor/richclay.vendor.js") {
+    window.hyperclay.RichClay = mod.RichClay || mod.default;
   }
 }
 

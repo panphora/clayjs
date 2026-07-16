@@ -64,9 +64,23 @@ function makeSortable(sortableElem, Sortable) {
         console.error('Error in onsorted execution:', error);
       }
     }
-    // SortableJS fires no native input/change on drop. Tell reactive libs that
-    // listen for input (e.g. Sap re-derives its list order / $index; any other
-    // input-driven library too) that the DOM order changed.
+    // Announce the reorder as a real, self-documenting event carrying what moved.
+    // Reactive libs (e.g. Sap) and author code key off this without us knowing
+    // about them. Fires only in edit mode, since sortable only inits there.
+    const detail = {
+      item: evt.item,
+      from: evt.from,
+      to: evt.to,
+      oldIndex: evt.oldIndex,
+      newIndex: evt.newIndex,
+    };
+    sortableElem.dispatchEvent(new CustomEvent('clay:sorted', { bubbles: true, detail }));
+    // vendor-compat: sapjs's action wiring listens for the legacy name
+    // (sapjs/src/actions.js install()); remove when sap learns clay:sorted.
+    sortableElem.dispatchEvent(new CustomEvent('hyperclay:sorted', { bubbles: true, detail }));
+    // DEPRECATED: early versions dispatched a synthetic `input` here so reactive
+    // libs would re-derive. It is semantically off (a container has no value) and
+    // now redundant with clay:sorted and the mutation observers. Kept as a compat shim.
     sortableElem.dispatchEvent(new Event('input', { bubbles: true }));
   };
 
@@ -99,8 +113,8 @@ async function init() {
   });
 }
 
-// Auto-init when module is imported
-init();
+// Auto-init when module is imported; the loader awaits `ready` before resolving clay.ready
+const ready = init();
 
-export { init };
+export { init, ready };
 export default init;

@@ -12,7 +12,10 @@ function swapElement(el) {
     newEl.setAttribute(name, value);
   }
   newEl.setAttribute(attr, isSameOrigin ? url.pathname + url.search : url.href);
-  newEl.setAttribute("clay", "no-trigger-autosave no-undo");
+  const tokens = new Set((newEl.getAttribute("clay") || "").trim().split(/\s+/).filter(Boolean));
+  tokens.add("no-trigger-autosave");
+  tokens.add("no-undo");
+  newEl.setAttribute("clay", Array.from(tokens).join(" "));
 
   el.insertAdjacentElement('afterend', newEl);
 
