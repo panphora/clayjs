@@ -97,8 +97,8 @@ section + section { border-top: 1px solid var(--line-soft); margin-top: 36px; }
   font-size: 21px; font-weight: 700; font-style: italic;
   margin-bottom: 12px; text-wrap: balance;
 }
-.problem::before { content: "”"; color: var(--glaze); margin-right: 2px; }
-.problem::after { content: "“"; color: var(--glaze); margin-left: 2px; }
+.problem::before { content: "“"; color: var(--glaze); margin-right: 2px; }
+.problem::after { content: "”"; color: var(--glaze); margin-left: 2px; }
 
 /* ---------- code ---------- */
 pre {
