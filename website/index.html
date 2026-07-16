@@ -15,7 +15,7 @@
     <a href="advanced.html">Advanced</a>
     <a href="plugins.html">Plugins</a>
     <a href="docs.html">Docs</a>
-    <a href="https://github.com/clayjs" rel="noopener">GitHub</a>
+    <a href="https://github.com/panphora/clayjs" rel="noopener">GitHub</a>
   </div>
 </nav>
 
@@ -69,11 +69,8 @@
     <p style="font-size: 19px;">A malleable HTML file is an HTML file that can save itself. There is no database and no build step: the page you're looking at <em>is</em> the data. When you save, clayjs snapshots the page's HTML, cleans it up, and POSTs it back to the server it came from, which writes it to disk. Next load, the file opens exactly the way you left it.</p>
   </section>
 
-  <!-- ================= QUOTE: KAMI ================= -->
-  <section id="quote-kami" style="text-align: center;">
-    <p style="font-size: 21px; font-style: italic; line-height: 1.5; margin-bottom: 8px; text-wrap: pretty;">“I love simple solutions to problems that modern webdev has made unnecessarily complicated.”</p>
-    <p class="small">kami · developer <span style="font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--glaze); border: 1px solid var(--glaze); padding: 1px 6px; border-radius: 3px; vertical-align: 1px;">pending permission</span></p>
-  </section>
+  <!-- QUOTE SLOT 1 — removed 2026-07-16, hidden pending permission. Restore markup from git history once the ask lands. -->
+
 
   <!-- ================= STEP 1: SAVE ================= -->
   <section id="save">
@@ -92,7 +89,7 @@
     <p>clayjs POSTs the file's own HTML to <code>/_/save</code> on the server it was loaded from, and gets back a small JSON answer: <code>{ "msg": "Saved" }</code>. That's the whole protocol. Anything that implements that one endpoint can host malleable files:</p>
     <table>
       <tr><th>Server</th><th>What it is</th></tr>
-      <tr><td><strong>hyperclay.com</strong></td><td>Hosted platform: accounts, versions, sharing</td></tr>
+      <tr><td><strong><a href="https://hyperclay.com">hyperclay.com</a></strong></td><td>Hosted platform: accounts, versions, sharing</td></tr>
       <tr><td><strong>Hyperclay Local</strong></td><td>Desktop app that serves a folder on your machine</td></tr>
       <tr><td><strong>htmlclay</strong></td><td>Desktop app: double-click a .htmlclay file and it just saves</td></tr>
       <tr><td><strong>Your own</strong></td><td>About 12 lines of Express. <a href="docs.html#endpoint">Endpoint spec</a>.</td></tr>
@@ -313,11 +310,8 @@ const { msg, msgType } = await clay.save();</code></pre>
     <p class="small">The fastest way to try a malleable file with zero setup is a free account on <a href="https://hyperclay.com">hyperclay.com</a>.</p>
   </section>
 
-  <!-- ================= QUOTE: MORGAN ================= -->
-  <section id="quote-morgan" style="text-align: center;">
-    <p style="font-size: 19px; font-style: italic; line-height: 1.55; margin-bottom: 8px; text-wrap: pretty;">“It's very exciting to see this emerging field of on-the-fly software. A re-emergence of the early days of malleable software, like HyperCard.”</p>
-    <p class="small">Morgan · ampersand.pm <span style="font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--glaze); border: 1px solid var(--glaze); padding: 1px 6px; border-radius: 3px; vertical-align: 1px;">pending permission</span></p>
-  </section>
+  <!-- QUOTE SLOT 2 — removed 2026-07-16, hidden pending permission. Restore markup from git history once the ask lands. -->
+
 
   </main>
 </div>
@@ -329,7 +323,7 @@ const { msg, msgType } = await clay.save();</code></pre>
     <a href="plugins.html">Plugins</a>
     <a href="docs.html">Docs</a>
     <a href="docs.html#endpoint">Host it yourself</a>
-    <a href="https://github.com/clayjs" rel="noopener">GitHub</a>
+    <a href="https://github.com/panphora/clayjs" rel="noopener">GitHub</a>
     <a href="https://www.npmjs.com/package/@panphora/clayjs" rel="noopener">npm</a>
     <span>MIT</span>
   </div>
