@@ -34,7 +34,7 @@
     <p>One attribute controls how any element takes part in saving. Keywords combine with spaces: <code>clay="freeze no-undo"</code>.</p>
     <table>
       <tr><th>Keyword</th><th>Plain meaning</th><th>Typical use</th></tr>
-      <tr><td><code>no-save</code></td><td>Lives on the page, never written to disk. Still visible to live sync.</td><td>Search boxes, connection badges, edit toolbars</td></tr>
+      <tr><td><code>no-save</code></td><td>Lives on the page, never written to disk. Live sync leaves your copy alone.</td><td>Search boxes, connection badges, edit toolbars</td></tr>
       <tr><td><code>no-snapshot</code></td><td>Invisible to save and to sync. Every device keeps its own copy.</td><td>Per-device panel state</td></tr>
       <tr><td><code>freeze</code></td><td>Saved exactly as authored; runtime changes to its contents are ignored.</td><td>Clocks, tickers, computed summaries</td></tr>
       <tr><td><code>no-trigger-autosave</code></td><td>Saved normally, but edits here don't trigger an autosave.</td><td>High-churn text you'd rather batch</td></tr>

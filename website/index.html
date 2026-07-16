@@ -83,8 +83,9 @@
     <pre><code>&lt;<span class="t">script</span> <span class="a">src</span>="https://clayjs.com/clay.js"&gt;&lt;/<span class="t">script</span>&gt;
 &lt;<span class="t">button</span> <span class="a">onclick</span>="clay.save()"&gt;Save&lt;/<span class="t">button</span>&gt;
 
-&lt;<span class="t">script</span>&gt;
+&lt;<span class="t">script</span> <span class="a">type</span>="module"&gt;
   <span class="c">// or from your own code, with the server's answer:</span>
+  await clay.ready;
   const { msg, msgType } = await clay.save();
 &lt;/<span class="t">script</span>&gt;</code></pre>
     <h3>What actually happens</h3>
@@ -314,7 +315,7 @@ const { msg, msgType } = await clay.save();</code></pre>
 
   <!-- ================= QUOTE: MORGAN ================= -->
   <section id="quote-morgan" style="text-align: center;">
-    <p style="font-size: 19px; font-style: italic; line-height: 1.55; margin-bottom: 8px; text-wrap: pretty;">“It's very exciting to see this emerging field of on-the-fly software — a re-emergence if you cast your mind back to hypercard for the macintosh.”</p>
+    <p style="font-size: 19px; font-style: italic; line-height: 1.55; margin-bottom: 8px; text-wrap: pretty;">“It's very exciting to see this emerging field of on-the-fly software. A re-emergence of the early days of malleable software, like HyperCard.”</p>
     <p class="small">Morgan · ampersand.pm <span style="font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--glaze); border: 1px solid var(--glaze); padding: 1px 6px; border-radius: 3px; vertical-align: 1px;">pending permission</span></p>
   </section>
 

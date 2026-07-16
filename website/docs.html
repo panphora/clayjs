@@ -47,15 +47,22 @@
     <h2 class="section-title">window.clay</h2>
     <table>
       <tr><th>Member</th><th>What it does</th></tr>
+      <tr><td><code>clay.ready</code></td><td>A Promise that resolves once clayjs has booted (core loaded, plugins attached). In inline scripts, <code>await clay.ready</code> before touching anything else. <code>clay:ready</code> fires on <code>document</code> at the same moment.</td></tr>
       <tr><td><code>clay.save()</code></td><td>Snapshot the page and save it. Skips when nothing changed. Returns <code>Promise&lt;{msg, msgType}&gt;</code>; <code>msgType</code> is <code>success</code>, <code>error</code>, or <code>skipped</code>. Never rejects.</td></tr>
       <tr><td><code>clay.save.force()</code></td><td>Save even when nothing appears to have changed.</td></tr>
       <tr><td><code>clay.getHTML()</code></td><td>The exact HTML string a save would send, after all cleanup.</td></tr>
       <tr><td><code>clay.beforeSave(fn)</code></td><td>Register a callback that receives the cloned document before serialization. The live page is never touched.</td></tr>
+      <tr><td><code>clay.onSnapshot(fn)</code></td><td>Like <code>beforeSave</code>, but runs for every snapshot, including live-sync broadcasts.</td></tr>
       <tr><td><code>clay.isEditMode</code></td><td>Whether this session may edit (see <a href="#editmode">edit mode</a>).</td></tr>
+      <tr><td><code>clay.isOwner</code></td><td>Whether the platform's owner cookie is set. Unlike <code>isEditMode</code>, the URL and global overrides don't affect it.</td></tr>
       <tr><td><code>clay.toggleEditMode()</code></td><td>Flip between edit and view mode (reloads the page).</td></tr>
+      <tr><td><code>clay.cacheBust(el)</code></td><td>Re-download one resource by stamping <code>?v=</code> onto its <code>href</code> or <code>src</code>. <a href="advanced.html#save-attrs">Details</a>.</td></tr>
       <tr><td><code>clay.Mutation</code></td><td>The shared mutation hub. See <a href="advanced.html#libraries">Advanced</a>.</td></tr>
-      <tr><td><code>clay.morph(from, to)</code></td><td>The DOM morphing engine (available when the sync plugin is loaded).</td></tr>
+      <tr><td><code>clay.morph(oldEl, newEl)</code></td><td>The DOM morphing engine: morphs <code>oldEl</code> in place to match <code>newEl</code> (sync plugin).</td></tr>
+      <tr><td><code>clay.undo</code></td><td>The undo singleton: <code>clay.undo.undo()</code> / <code>clay.undo.redo()</code> (undo plugin).</td></tr>
+      <tr><td><code>clay.cms</code></td><td>The content panel: <code>clay.cms.open()</code> (cms plugin).</td></tr>
     </table>
+    <p class="small">In view mode the edit-only members are absent: <code>window.clay</code> holds just <code>ready</code>, <code>toggleEditMode</code>, <code>isEditMode</code>, <code>isOwner</code>, and <code>Mutation</code> (plus <code>morph</code>/<code>cms</code> when those plugins load). Feature-detect with <code>'save' in clay</code>.</p>
   </section>
 
   <!-- ====== ATTRIBUTES ====== -->
@@ -70,6 +77,8 @@
       <tr><td><code>autosave</code></td><td><code>&lt;html&gt;</code></td><td>Save automatically after edits settle. Debounced and throttled.</td></tr>
       <tr><td><code>clay="…"</code></td><td>any element</td><td>Region control: <code>no-save</code>, <code>no-snapshot</code>, <code>no-trigger-autosave</code>, <code>no-watch</code>, <code>no-undo</code>, <code>freeze</code>. <a href="advanced.html#regions">Full reference</a>.</td></tr>
       <tr><td><code>editmode:contenteditable</code></td><td>any element</td><td>Editable for the owner, inert for visitors.</td></tr>
+      <tr><td><code>editmode:onclick</code></td><td>any element</td><td>The <code>onclick</code> runs only for the owner; it's saved inert so it never runs for visitors.</td></tr>
+      <tr><td><code>editmode:resource</code></td><td>style, link, script</td><td>Active for the owner, saved with an inert <code>type</code> so visitors never load it.</td></tr>
       <tr><td><code>viewmode:disabled</code> / <code>viewmode:readonly</code></td><td>form controls</td><td>Disabled or read-only for visitors, live for the owner.</td></tr>
       <tr><td><code>onbeforesave</code> / <code>onbeforesnapshot</code> / <code>onaftersave</code></td><td>any element</td><td>Inline hooks into the save. <a href="advanced.html#save-attrs">Details</a>.</td></tr>
       <tr><td><code>savestatus</code></td><td><code>&lt;html&gt;</code>, set by clayjs</td><td>Read-only state for your CSS: <code>saving</code>, <code>saved</code>, <code>error</code>, <code>offline</code>.</td></tr>
@@ -82,11 +91,14 @@
     <h2 class="section-title">Listening in</h2>
     <table>
       <tr><th>Event (on document)</th><th>Fires when</th><th>detail</th></tr>
-      <tr><td><code>clay:save-saving</code></td><td>a save starts</td><td><code>{msg, timestamp}</code></td></tr>
+      <tr><td><code>clay:ready</code></td><td>clayjs finished booting (same moment <code>clay.ready</code> resolves)</td><td><code>{clay}</code></td></tr>
+      <tr><td><code>clay:save-saving</code></td><td>a save has been in flight for 500ms (fast saves skip straight to the result)</td><td><code>{msg, timestamp}</code></td></tr>
       <tr><td><code>clay:save-saved</code></td><td>the server confirmed the write</td><td><code>{msg, timestamp}</code></td></tr>
       <tr><td><code>clay:save-error</code></td><td>the server answered with a problem</td><td><code>{msg, timestamp}</code></td></tr>
-      <tr><td><code>clay:save-offline</code></td><td>the request couldn't get out</td><td><code>{msg, timestamp}</code></td></tr>
+      <tr><td><code>clay:save-offline</code></td><td>the browser is offline (clayjs re-saves when the connection returns)</td><td><code>{msg, timestamp}</code></td></tr>
       <tr><td><code>clay:sync-applied</code></td><td>a live-sync update landed (sync plugin)</td><td><code>{seq}</code></td></tr>
+      <tr><td><code>clay:sorted</code></td><td>a drag-drop reorder landed (sortable plugin); fires on the container and bubbles</td><td><code>{item, from, to, oldIndex, newIndex}</code></td></tr>
+      <tr><td><code>clay:view-save-attempt</code></td><td>a visitor clicked a <code>[trigger-save]</code> element in view mode; show your own notice</td><td>—</td></tr>
     </table>
   </section>
 
@@ -115,7 +127,7 @@
     <table>
       <tr><th>Part</th><th>Value</th></tr>
       <tr><td>Route</td><td><code>POST /_/save</code></td></tr>
-      <tr><td>Body</td><td>The file's full HTML, as plain text</td></tr>
+      <tr><td>Body</td><td>The file's full HTML, as plain text. Exception: on localhost, a JSON envelope <code>{content, snapshotHtml, userDriven}</code> with <code>Content-Type: application/json</code> — the dialect Hyperclay Local speaks. Your HTML is <code>content</code>.</td></tr>
       <tr><td>Header</td><td><code>Page-URL</code>: the URL of the page being saved</td></tr>
       <tr><td>Success</td><td><code>200</code> with JSON <code>{ "msg": "Saved" }</code></td></tr>
       <tr><td>Failure</td><td>Any non-2xx with JSON <code>{ "msg": "why" }</code></td></tr>
@@ -130,12 +142,14 @@ app.use(express.text({ type: <span class="a">"*/*"</span>, limit: <span class="a
 
 app.post(<span class="a">"/_/save"</span>, async (req, res) =&gt; {
   const path = new URL(req.get(<span class="a">"Page-URL"</span>)).pathname;
-  await fs.writeFile(<span class="a">"."</span> + path, req.body);
+  let html = req.body;
+  if (req.is(<span class="a">"application/json"</span>)) html = JSON.parse(html).content; <span class="c">// localhost envelope</span>
+  await fs.writeFile(<span class="a">"."</span> + path, html);
   res.json({ msg: <span class="a">"Saved"</span> });
 });
 
 app.listen(4600);</code></pre>
-    <p class="small">A real deployment adds auth and path validation; this is the whole protocol though. The same contract powers hyperclay.com, Hyperclay Local, and htmlclay.</p>
+    <p class="small">A real deployment adds auth and path validation; this is the whole protocol though. The same contract powers hyperclay.com, Hyperclay Local, and htmlclay. Two details you may ignore: every save also carries an <code>X-Hyperclay-User-Driven: 1|0</code> header (whether a person triggered it), and htmlclay uses a token variant, <code>POST /_/save/{token}</code>, read from <code>&lt;html htmlclaytoken&gt;</code>.</p>
   </section>
 
 </main>
