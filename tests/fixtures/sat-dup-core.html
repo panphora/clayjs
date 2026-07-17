@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>clayjs — duplicate core tags (second is a no-op)</title>
+<script>
+  window.clayEditMode = true;
+  window.__readyCount = 0;
+  document.addEventListener("clay:ready", () => { window.__readyCount++; });
+</script>
+<script src="/clay.js?exclude=richclay"></script>
+<script src="/clay.js?exclude=richclay"></script>
+</head>
+<body>
+  <h1 editable>Title</h1>
+</body>
+</html>

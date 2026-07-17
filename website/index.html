@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" demo-key="clayjs-home-v1">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -176,9 +176,9 @@ const { msg, msgType } = await clay.save();</code></pre>
       <div class="fold-body">
         <p>Put <code>autosave</code> on the <code>&lt;html&gt;</code> element and clayjs saves for you: edits settle for a moment, then a save fires. It's debounced and throttled, so rapid typing never spams the server.</p>
         <pre><code>&lt;<span class="t">html</span> <span class="a">autosave</span>&gt;</code></pre>
-        <div class="sheet" id="auto-sheet">
+        <div class="sheet live" id="auto-sheet">
           <span class="filename">journal.html</span>
-          <span class="simbadge">simulated</span>
+          <span class="realbadge">saved in your browser</span>
           <p contenteditable spellcheck="false">Type here and just stop. It saves on its own.</p>
           <span class="chip"></span>
         </div>
@@ -335,31 +335,25 @@ const { msg, msgType } = await clay.save();</code></pre>
 </footer>
 
 <script>window.clayEditMode = true;</script>
-<script src="/clay.js"></script>
-<script type="module" src="demo-harness.js"></script>
+<script src="/clay.js?plugins=demo"></script>
 <script>
 (function () {
-  function chip(sheet, state, holdMs) {
-    clearTimeout(sheet._chipTimer);
-    if (state === "idle") { sheet.removeAttribute("savestatus"); return; }
-    sheet.setAttribute("savestatus", state);
-    if (state === "saved" || state === "error") {
-      sheet._chipTimer = setTimeout(function () { sheet.removeAttribute("savestatus"); }, holdMs || 2200);
-    }
-  }
-  function simulateSave(sheet, fail) {
-    chip(sheet, "saving");
-    clearTimeout(sheet._saveTimer);
-    sheet._saveTimer = setTimeout(function () {
-      chip(sheet, fail ? "error" : "saved");
-    }, 650);
-  }
+  var booted = false;
+  window.clay.ready.then(function () { booted = true; });
+
+  document.getElementById("chip-save").addEventListener("click", function () { if (booted) window.clay.save.force(); });
+  document.getElementById("chip-fail").addEventListener("click", function () {
+    if (!booted) return;
+    window.clay.demo.failNext();
+    window.clay.save.force();
+  });
+  document.getElementById("doc-reload").addEventListener("click", function () { window.location.reload(); });
+  document.getElementById("demo-reset").addEventListener("click", function () { if (booted) window.clay.demo.reset(); });
 
   var autoSheet = document.getElementById("auto-sheet");
   autoSheet.querySelector("[contenteditable]").addEventListener("input", function () {
     clearTimeout(autoSheet._autoTimer);
-    chip(autoSheet, "idle");
-    autoSheet._autoTimer = setTimeout(function () { simulateSave(autoSheet, false); }, 1200);
+    autoSheet._autoTimer = setTimeout(function () { if (booted) window.clay.save(); }, 1500);
   });
 
   var syncA = document.querySelector('[data-sync="a"]');

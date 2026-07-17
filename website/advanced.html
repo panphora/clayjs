@@ -93,6 +93,7 @@
     <span class="eyebrow">Separate libraries</span>
     <h2 class="section-title">Bring them in when the problem shows up</h2>
     <p>These aren't checkboxes; each is its own library with its own script tag and docs. They share clayjs's taste: HTML-first, no build step.</p>
+    <p class="small">Each loads as a plain <code>&lt;script&gt;</code>. To call one from an inline script right after its tag, wait for it first: <code>await clay.loaded.ui</code> (or <code>.dom</code>, <code>.all</code>, <code>.utils</code>, <code>.events</code>, <code>.options</code>, <code>.data</code>, <code>.sap</code>).</p>
 
     <div class="libcard">
       <div class="lib-name">clay-ui <span class="tag">toasts · modals · dialogs</span></div>
@@ -111,21 +112,21 @@
     <div class="libcard">
       <div class="lib-name">option visibility</div>
       <p class="lib-prob">“Show or hide parts of the page based on a state attribute.”</p>
-      <p>Declarative show/hide: an ancestor sets <code>option:view="kanban"</code>, descendants opt in or out with <code>option:</code> / <code>option-not:</code> attributes.</p>
+      <p>Declarative show/hide: an ancestor carries the plain state attribute <code>view="kanban"</code>, descendants opt in or out with <code>option:view</code> / <code>option-not:view</code> attributes.</p>
       <pre><code>&lt;<span class="t">script</span> <span class="a">src</span>="https://clayjs.com/clay-options.js"&gt;&lt;/<span class="t">script</span>&gt;</code></pre>
     </div>
 
     <div class="libcard">
       <div class="lib-name">DOM helpers</div>
       <p class="lib-prob">“closest() only searches up. I need the element near me.”</p>
-      <p><code>el.nearest(sel)</code>, <code>el.val()</code>, <code>el.exec()</code>, <code>el.cycle()</code>: small prototype helpers for DOM-first apps.</p>
+      <p><code>el.nearest.menu</code>, <code>el.val.title</code>, <code>el.exec.action()</code>, <code>el.cycle(1, "state")</code>: small prototype helpers for DOM-first apps. The first three are getter proxies (read the nearest element with that attribute or class); <code>cycle</code> takes its attribute name.</p>
       <pre><code>&lt;<span class="t">script</span> <span class="a">src</span>="https://clayjs.com/clay-dom.js"&gt;&lt;/<span class="t">script</span>&gt;</code></pre>
     </div>
 
     <div class="libcard">
       <div class="lib-name">All.js</div>
       <p class="lib-prob">“I miss jQuery's ergonomics, not its size.”</p>
-      <p>A chainable wrapper over querySelectorAll: <code>All(".card").addClass("open").on("click", …)</code>. Zero dependencies, one file.</p>
+      <p>A chainable wrapper over querySelectorAll: <code>All(".card").css({ opacity: 1 }).onclick(e =&gt; e.target.classList.toggle("done"))</code>. Events are property-form (<code>.onclick</code>, <code>.oninput</code>); classes go through <code>.classList</code>. Zero dependencies, one script tag.</p>
       <pre><code>&lt;<span class="t">script</span> <span class="a">src</span>="https://clayjs.com/all.js"&gt;&lt;/<span class="t">script</span>&gt;</code></pre>
     </div>
 

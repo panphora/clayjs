@@ -1,0 +1,19 @@
+clayjs
+Copyright (c) 2026 David Miranda
+Licensed under the MIT License (see LICENSE).
+
+This product bundles and adapts third-party software:
+
+- hyperclayjs — MIT License, Copyright (c) 2025 Hyperclay.
+  Portions of clayjs (the save lifecycle, mutation hub, region model, UI,
+  event attributes, option visibility, DOM helpers, and utilities under src/)
+  are hand-ported from hyperclayjs.
+
+- MicroModal — MIT License, Copyright (c) 2017 Indrashish Ghosh.
+  Embedded in src/ui/modal.js.
+
+- sapjs — MIT License, Copyright (c) 2026 panphora.
+  Distributed unmodified as the generated sap.js (see its header).
+
+- hyper-html-api — Zero-Clause BSD (0BSD).
+  Distributed as the generated clay-data.js (see its header).

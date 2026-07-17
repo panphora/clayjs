@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>clayjs — cross-origin load (page :4602, clayjs :4601)</title>
+<!-- Served from the :4602 static server; clay.js and clay-events.js are loaded
+     from the :4601 stub with ABSOLUTE URLs. Their classic bootstraps dynamic-
+     import /src/* cross-origin, which only succeeds because /src/* carries
+     Access-Control-Allow-Origin: *. In production that header comes from the
+     _headers file; the stub server simulates it. -->
+<script>window.clayEditMode = true;</script>
+<script src="http://localhost:4601/clay.js?exclude=richclay"></script>
+<script src="http://localhost:4601/clay-events.js"></script>
+</head>
+<body>
+  <div id="watched" onmutation="window.__onmut = (window.__onmut || 0) + 1;">
+    <p id="watch-target">watch me</p>
+  </div>
+</body>
+</html>

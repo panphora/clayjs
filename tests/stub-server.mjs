@@ -41,7 +41,11 @@ http.createServer(async (req, res) => {
   try {
     const path = url.pathname === "/" ? "/tests/fixtures/basic.html" : url.pathname;
     const data = await readFile(join(root, path));
-    res.writeHead(200, { "Content-Type": TYPES[extname(path)] || "application/octet-stream" });
+    const headers = { "Content-Type": TYPES[extname(path)] || "application/octet-stream" };
+    // Simulate the production _headers rule (/src/* -> Access-Control-Allow-Origin: *)
+    // so a classic bootstrap's cross-origin import() of /src/* succeeds in tests too.
+    if (path.startsWith("/src/")) headers["Access-Control-Allow-Origin"] = "*";
+    res.writeHead(200, headers);
     res.end(data);
   } catch {
     res.writeHead(404); res.end("not found");

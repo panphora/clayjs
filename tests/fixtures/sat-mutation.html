@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>clayjs — core + clay-events + clay-options (shared hub)</title>
+<script>
+  window.__moCount = 0;
+  const __RealMO = window.MutationObserver;
+  window.MutationObserver = class extends __RealMO {
+    constructor(cb) { super(cb); window.__moCount++; }
+  };
+  window.clayEditMode = true;
+</script>
+<!-- core first, richclay excluded so the observer count reflects only the hub -->
+<script src="/clay.js?exclude=richclay"></script>
+<script src="/clay-events.js"></script>
+<script src="/clay-options.js"></script>
+</head>
+<body>
+  <div id="watched" onmutation="window.__onmut = (window.__onmut || 0) + 1;">
+    <p id="watch-target">watch me</p>
+  </div>
+
+  <div view="a">
+    <span class="opt-a" option:view="a">shown when a</span>
+    <span class="opt-b" option:view="b">hidden when a</span>
+  </div>
+</body>
+</html>

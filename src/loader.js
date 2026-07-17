@@ -108,6 +108,8 @@ function attachPluginMember(path, mod) {
   } else if (path === "vendor/hypercms.vendor.js") {
     clay.cms = mod.cms || mod.default;
     window.hyperclay.hypercms = clay.cms;
+  } else if (path === "plugins/demo.js") {
+    clay.demo = mod.demo;
   } else if (path === "vendor/richclay.vendor.js") {
     window.hyperclay.RichClay = mod.RichClay || mod.default;
   }

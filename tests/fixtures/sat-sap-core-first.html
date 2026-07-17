@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>clayjs — sap + core (core first): sap rides the shared hub</title>
+<script>
+  // Net active-observer tracker: observe() increments, disconnect() decrements,
+  // so a sap native observer that CEDES to the hub nets zero. Two concurrent
+  // observers (bug) would net 2; one shared hub nets 1.
+  window.__activeMO = 0;
+  const __RealMO = window.MutationObserver;
+  window.MutationObserver = class extends __RealMO {
+    observe(...a) { if (!this.__on) { window.__activeMO++; this.__on = true; } return super.observe(...a); }
+    disconnect() { if (this.__on) { window.__activeMO--; this.__on = false; } return super.disconnect(); }
+  };
+  window.clayEditMode = true;
+</script>
+<!-- core first; clay-options is an independent hub subscriber so the hub observes
+     whether or not sap does — that makes the observer count discriminate -->
+<script src="/clay.js?exclude=richclay"></script>
+<script src="/clay-options.js"></script>
+<script src="/sap.js"></script>
+</head>
+<body>
+  <main sap state="count" count="7">
+    <output id="sap-out" text="state.count"></output>
+  </main>
+</body>
+</html>

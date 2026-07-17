@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>clayjs satellites — standalone (no core)</title>
+<script>
+  // Count every MutationObserver construction so the fixtures can assert the
+  // shared-hub behavior (patched before any tag loads).
+  window.__moCount = 0;
+  const __RealMO = window.MutationObserver;
+  window.MutationObserver = class extends __RealMO {
+    constructor(cb) { super(cb); window.__moCount++; }
+  };
+</script>
+<script src="/clay-ui.js"></script>
+<script src="/clay-dom.js"></script>
+<script src="/all.js"></script>
+<script src="/clay-utils.js"></script>
+<!-- immediate-call race (§5.7): inline script right after the tag, gated on clay.loaded -->
+<script>
+  window.__race = clay.loaded.utils.then(() => clay.utils.slugify("Race Check"));
+</script>
+<script src="/clay-events.js"></script>
+<script src="/clay-options.js"></script>
+<script src="/sap.js"></script>
+<script src="/clay-data.js"></script>
+<script type="application/json" data-rules-name="cms" data-rules-version="1">
+{ "title": ".page-title" }
+</script>
+</head>
+<body>
+  <h1 class="page-title">Standalone title</h1>
+
+  <div id="dom-start"></div>
+  <aside class="panel" data-panel>panel</aside>
+
+  <ul>
+    <li class="card">one</li>
+    <li class="card">two</li>
+    <li class="card">three</li>
+  </ul>
+
+  <div view="a">
+    <span class="opt-a" option:view="a">shown when a</span>
+    <span class="opt-b" option:view="b">hidden when a</span>
+  </div>
+
+  <div id="watched" onmutation="window.__onmut = (window.__onmut || 0) + 1;">
+    <p id="watch-target">watch me</p>
+  </div>
+
+  <div sap scope>
+    <span text="count">0</span>
+  </div>
+</body>
+</html>

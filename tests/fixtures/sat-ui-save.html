@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html lang="en" demo-key="sat-ui-save">
+<head>
+<meta charset="utf-8">
+<title>clayjs — clay-ui toast on a real clay:save-saved (demo-backed save)</title>
+<script>window.clayEditMode = true;</script>
+<!-- demo plugin shims the save endpoint into localStorage, so a real save runs
+     the whole pipeline and fires clay:save-saved, which clay-ui turns into a toast -->
+<script src="/clay.js?plugins=demo"></script>
+<script src="/clay-ui.js"></script>
+</head>
+<body>
+  <h1 editable>Edit me, then save</h1>
+  <button trigger-save>Save</button>
+</body>
+</html>

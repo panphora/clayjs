@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>clayjs — satellite before core (merge order)</title>
+<script>window.clayEditMode = true;</script>
+<!-- clay-ui creates window.clay first; core must MERGE into it, not replace it -->
+<script src="/clay-ui.js"></script>
+<script src="/clay.js?exclude=richclay"></script>
+</head>
+<body>
+  <h1 editable>Title</h1>
+  <button trigger-save>Save</button>
+</body>
+</html>

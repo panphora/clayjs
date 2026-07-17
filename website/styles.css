@@ -154,12 +154,22 @@ pre code { background: none; padding: 0; font-size: inherit; }
   opacity: 0; transition: opacity 0.25s;
   pointer-events: none;
 }
-.sheet[savestatus="saving"] .chip { opacity: 1; background: #E9E6DE; color: var(--ink-soft); }
-.sheet[savestatus="saving"] .chip::after { content: "Saving…"; }
-.sheet[savestatus="saved"] .chip { opacity: 1; background: var(--glaze-tint); color: var(--glaze-deep); }
-.sheet[savestatus="saved"] .chip::after { content: "Saved"; }
-.sheet[savestatus="error"] .chip { opacity: 1; background: var(--rust-tint); color: var(--rust); }
-.sheet[savestatus="error"] .chip::after { content: "Couldn’t save"; }
+/* Live sheets: the real save state, straight off <html savestatus> */
+.sheet .realbadge {
+  position: absolute; top: -11px; right: 16px;
+  font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--glaze-deep);
+  background: var(--paper); border: 1px solid var(--line);
+  border-radius: 5px; padding: 1px 8px;
+}
+html[savestatus="saving"] .sheet.live .chip { opacity: 1; background: #E9E6DE; color: var(--ink-soft); }
+html[savestatus="saving"] .sheet.live .chip::after { content: "Saving…"; }
+html[savestatus="saved"] .sheet.live .chip { opacity: 1; background: var(--glaze-tint); color: var(--glaze-deep); }
+html[savestatus="saved"] .sheet.live .chip::after { content: "Saved"; }
+html[savestatus="error"] .sheet.live .chip { opacity: 1; background: var(--rust-tint); color: var(--rust); }
+html[savestatus="error"] .sheet.live .chip::after { content: "Couldn’t save"; }
+html[savestatus="offline"] .sheet.live .chip { opacity: 1; background: #E9E6DE; color: var(--ink-soft); }
+html[savestatus="offline"] .sheet.live .chip::after { content: "Offline"; }
 
 /* ---------- buttons ---------- */
 .btn {

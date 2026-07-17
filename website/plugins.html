@@ -74,8 +74,9 @@
     <div class="libcard">
       <div class="lib-name">data <span class="tag">separate library</span></div>
       <p class="lib-prob">“I want the page's content in and out as JSON.”</p>
-      <p><code>extractData()</code> reads your page into structured JSON; <code>applyData()</code> writes JSON back into the page. The same mapping powers a read-only <code>/_/api</code> endpoint on platforms that support it, so a malleable file can double as an API.</p>
+      <p><code>clay.extractData()</code> reads your page into structured JSON; <code>clay.applyData(data)</code> writes JSON back into the page. The same mapping powers a read-only <code>/_/api</code> endpoint on platforms that support it, so a malleable file can double as an API.</p>
       <pre><code>&lt;<span class="t">script</span> <span class="a">src</span>="https://clayjs.com/clay-data.js"&gt;&lt;/<span class="t">script</span>&gt;</code></pre>
+      <p class="small">Both attach to <code>window.clay</code>. From an inline script, wait for the tag first: <code>await clay.loaded.data</code>, then <code>const data = clay.extractData()</code>.</p>
     </div>
   </section>
 

@@ -21,9 +21,10 @@ export const PLUGIN_PATHS = {
   sortable:  { path: "plugins/sortable.js",        editOnly: true,  default: false },
   undo:      { path: "plugins/undo.js",            editOnly: true,  default: false },
   cms:       { path: "vendor/hypercms.vendor.js",  editOnly: false, default: false },
+  demo:      { path: "plugins/demo.js",            editOnly: false, default: false },
 };
 
-const PLUGIN_ORDER = ["richclay", "indicator", "sortable", "undo", "cms", "sync"];
+const PLUGIN_ORDER = ["richclay", "indicator", "sortable", "undo", "cms", "sync", "demo"];
 
 function parseCsv(params, key, enabled, apply) {
   const raw = params.get(key);

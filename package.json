@@ -11,6 +11,16 @@
   },
   "files": [
     "clay.js",
+    "clay-ui.js",
+    "clay-events.js",
+    "clay-options.js",
+    "clay-dom.js",
+    "all.js",
+    "clay-utils.js",
+    "sap.js",
+    "clay-data.js",
+    "_headers",
+    "NOTICE",
     "src/"
   ],
   "publishConfig": {

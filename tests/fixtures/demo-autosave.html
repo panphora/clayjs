@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en" autosave demo-key="fixture-demo-autosave">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>clayjs demo-mode fixture (browser-backed autosave)</title>
+  <script>window.clayEditMode = true;</script>
+  <script src="/clay.js?plugins=demo"></script>
+  <style>
+    body { font: 16px/1.6 system-ui, sans-serif; margin: 2rem; max-width: 40rem; }
+    body::after { position: fixed; right: 16px; bottom: 16px; padding: 4px 12px; border-radius: 99px; font: 13px system-ui; }
+    html[savestatus="saving"] body::after { content: "Saving…"; background: #eee; }
+    html[savestatus="saved"] body::after { content: "Saved"; background: #dcefe0; color: #2f5d3a; }
+    html[savestatus="error"] body::after { content: "Couldn't save"; background: #f6e3de; color: #a04f38; }
+  </style>
+</head>
+<body>
+  <h1 editable>Autosave me, no server anywhere</h1>
+  <label>Name: <input persist name="who" value=""></label>
+</body>
+</html>

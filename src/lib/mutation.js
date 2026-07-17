@@ -72,7 +72,7 @@ import { isUserDrivenNow, markUserDriven } from './user-gesture.js';
 
 const dummyElem = document.createElement("div");
 
-const Mutation = {
+const localMutation = {
   _callbacks: {
     anyChange: [],
     addOrRemove: [],
@@ -707,13 +707,30 @@ const Mutation = {
   }
 };
 
-// Signal consumers (e.g. hypercms ?cms=true auto-open) that Mutation is ready,
-// so they can react instead of polling. Wrapped so a dispatch failure can never
-// break the install.
-try {
-  document.dispatchEvent(new CustomEvent('clay:mutation-ready', { detail: { Mutation } }));
-  // vendor-compat: hypercms's readiness fast path listens for the legacy name
-  document.dispatchEvent(new CustomEvent('hyperclay:mutation-ready', { detail: { Mutation } }));
-} catch {}
+// Realm-global singleton, keyed by identity not module URL. A satellite bootstrap
+// that imports this module from a different origin (apex vs www, clayjs.com vs
+// jsdelivr, version-pinned URLs) evaluates a second module instance; without this,
+// each would create its own MutationObserver and silently double-observe. The
+// first instance to evaluate publishes its hub on window.__clayMutation; every
+// later instance adopts it and never creates a second observer.
+const existingHub = typeof window !== 'undefined' && window.__clayMutation;
+const Mutation = existingHub || localMutation;
+
+if (typeof window !== 'undefined' && !existingHub) {
+  window.__clayMutation = Mutation;
+  // Publish the vendor-compat mirror BEFORE the readiness dispatch: sap's mutation
+  // bridge reads window.hyperclay.Mutation when hyperclay:mutation-ready fires, so
+  // the hub must already be in place or sap keeps its own native observer.
+  window.hyperclay = window.hyperclay || {};
+  window.hyperclay.Mutation = Mutation;
+  // Signal consumers (e.g. hypercms ?cms=true auto-open, sap's late-hub listener)
+  // that Mutation is ready, so they can react instead of polling. Wrapped so a
+  // dispatch failure can never break the install.
+  try {
+    document.dispatchEvent(new CustomEvent('clay:mutation-ready', { detail: { Mutation } }));
+    // vendor-compat: hypercms's readiness fast path listens for the legacy name
+    document.dispatchEvent(new CustomEvent('hyperclay:mutation-ready', { detail: { Mutation } }));
+  } catch {}
+}
 
 export default Mutation;
