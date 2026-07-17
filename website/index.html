@@ -40,12 +40,13 @@
     <h1 class="display"><em>Malleable</em> HTML files</h1>
     <p class="lede" style="margin-top: 14px;">The tools you need to make a static HTML file behave like a Google&nbsp;Document: editable, auto-save, live sync, etc.</p>
 
-    <div class="sheet" id="hero-sheet" style="margin-top: 30px;">
+    <div class="sheet live" id="hero-sheet" style="margin-top: 30px;">
       <span class="filename">notes.html</span>
-      <span class="simbadge">simulated save</span>
+      <span class="realbadge">saved in your browser</span>
       <h3 editable="single-line" spellcheck="false" style="font-size: 22px; margin-bottom: 10px;">My notes</h3>
-      <p class="small" style="margin-bottom: 14px;">Click the heading and type. Select text to format it. Then save.</p>
-      <button class="btn primary" id="hero-save">Save</button>
+      <p class="small" style="margin-bottom: 14px;">Click the heading and type. Select text to format it. Then save, refresh the page, and it's still there.</p>
+      <button class="btn primary" id="hero-save" trigger-save>Save</button>
+      <button class="btn" id="demo-reset" title="Forget the browser copy and reload the original page">Reset</button>
       <span class="chip"></span>
     </div>
 
@@ -69,7 +70,11 @@
     <p style="font-size: 19px;">A malleable HTML file is an HTML file that can save itself. There is no database and no build step: the page you're looking at <em>is</em> the data. When you save, clayjs snapshots the page's HTML, cleans it up, and POSTs it back to the server it came from, which writes it to disk. Next load, the file opens exactly the way you left it.</p>
   </section>
 
-  <!-- QUOTE SLOT 1 — removed 2026-07-16, hidden pending permission. Restore markup from git history once the ask lands. -->
+  <!-- ================= QUOTE: KAMI ================= -->
+  <section id="quote-kami" style="text-align: center;">
+    <p style="font-size: 21px; font-style: italic; line-height: 1.5; margin-bottom: 8px; text-wrap: pretty;">“I love simple solutions to problems that modern webdev has made unnecessarily complicated.”</p>
+    <p class="small">kami · developer</p>
+  </section>
 
 
   <!-- ================= STEP 1: SAVE ================= -->
@@ -108,9 +113,9 @@
 <span class="t">html[savestatus="saving"] body::after</span> { content: "Saving…"; background: #eee; }
 <span class="t">html[savestatus="saved"]  body::after</span> { content: "Saved"; background: #dcefe0; color: #2f5d3a; }
 <span class="t">html[savestatus="error"]  body::after</span> { content: "Couldn't save"; background: #f6e3de; color: #a04f38; }</code></pre>
-    <div class="sheet" id="chip-sheet">
+    <div class="sheet live" id="chip-sheet">
       <span class="filename">notes.html</span>
-      <span class="simbadge">simulated</span>
+      <span class="realbadge">saved in your browser</span>
       <p class="small" style="margin-bottom: 12px;">Try both outcomes:</p>
       <button class="btn primary" id="chip-save">Save</button>
       <button class="btn" id="chip-fail">Save (server down)</button>
@@ -146,14 +151,14 @@ const { msg, msgType } = await clay.save();</code></pre>
     <pre><code>&lt;<span class="t">p</span> <span class="a">editable</span>&gt;Meeting notes for Tuesday…&lt;/<span class="t">p</span>&gt;
 &lt;<span class="t">input</span> <span class="a">name</span>="title" <span class="a">persist</span>&gt;
 &lt;<span class="t">textarea</span> <span class="a">name</span>="draft" <span class="a">persist</span>&gt;&lt;/<span class="t">textarea</span>&gt;</code></pre>
-    <div class="sheet" id="doc-sheet">
+    <div class="sheet live" id="doc-sheet">
       <span class="filename">meeting.html</span>
-      <span class="simbadge">simulated save</span>
+      <span class="realbadge">saved in your browser</span>
       <p editable spellcheck="false" style="margin-bottom: 10px;">Meeting notes for Tuesday…</p>
-      <input id="doc-input" placeholder="title" style="font: 15px var(--serif); padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; margin-bottom: 14px; width: 60%; background: #fff;">
+      <input id="doc-input" name="title" persist placeholder="title" style="font: 15px var(--serif); padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; margin-bottom: 14px; width: 60%; background: #fff;">
       <div>
-        <button class="btn primary" id="doc-save">Save</button>
-        <button class="btn" id="doc-reload" title="Re-renders the sheet from its last saved HTML">Reload file</button>
+        <button class="btn primary" id="doc-save" trigger-save>Save</button>
+        <button class="btn" id="doc-reload" title="Reloads the page; the file comes back from its last save">Reload file</button>
       </div>
       <span class="chip"></span>
     </div>
@@ -329,15 +334,11 @@ const { msg, msgType } = await clay.save();</code></pre>
   </div>
 </footer>
 
-<script>window.__hyperclayEditMode = true;</script>
-<script src="vendor/richclay.min.js"></script>
+<script>window.clayEditMode = true;</script>
+<script src="/clay.js"></script>
+<script type="module" src="demo-harness.js"></script>
 <script>
 (function () {
-  var RC = window.RichClay || window.richclay;
-  if (RC && typeof RC.init === "function") {
-    try { RC.init("[editable]"); } catch (e) {}
-  }
-
   function chip(sheet, state, holdMs) {
     clearTimeout(sheet._chipTimer);
     if (state === "idle") { sheet.removeAttribute("savestatus"); return; }
@@ -346,42 +347,13 @@ const { msg, msgType } = await clay.save();</code></pre>
       sheet._chipTimer = setTimeout(function () { sheet.removeAttribute("savestatus"); }, holdMs || 2200);
     }
   }
-  function simulateSave(sheet, fail, after) {
+  function simulateSave(sheet, fail) {
     chip(sheet, "saving");
     clearTimeout(sheet._saveTimer);
     sheet._saveTimer = setTimeout(function () {
       chip(sheet, fail ? "error" : "saved");
-      if (after && !fail) after();
     }, 650);
   }
-
-  var heroSheet = document.getElementById("hero-sheet");
-  document.getElementById("hero-save").addEventListener("click", function () { simulateSave(heroSheet, false); });
-  heroSheet.addEventListener("keydown", function (e) {
-    if ((e.metaKey || e.ctrlKey) && e.key === "s") { e.preventDefault(); simulateSave(heroSheet, false); }
-  });
-
-  var chipSheet = document.getElementById("chip-sheet");
-  document.getElementById("chip-save").addEventListener("click", function () { simulateSave(chipSheet, false); });
-  document.getElementById("chip-fail").addEventListener("click", function () { simulateSave(chipSheet, true); });
-
-  var docSheet = document.getElementById("doc-sheet");
-  var docInput = document.getElementById("doc-input");
-  var docP = docSheet.querySelector("[editable]");
-  var docSaved = { html: docP.innerHTML, value: docInput.value };
-  document.getElementById("doc-save").addEventListener("click", function () {
-    simulateSave(docSheet, false, function () {
-      docSaved = { html: docP.innerHTML, value: docInput.value };
-    });
-  });
-  document.getElementById("doc-reload").addEventListener("click", function () {
-    docSheet.style.opacity = "0.25";
-    setTimeout(function () {
-      docP.innerHTML = docSaved.html;
-      docInput.value = docSaved.value;
-      docSheet.style.opacity = "1";
-    }, 220);
-  });
 
   var autoSheet = document.getElementById("auto-sheet");
   autoSheet.querySelector("[contenteditable]").addEventListener("input", function () {
