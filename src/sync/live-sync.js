@@ -39,6 +39,7 @@ import { HyperMorph, morph } from "../vendor/hyper-morph.vendor.js";
 import Mutation from "../lib/mutation.js";
 import { isSnapshotRemoved } from "../lib/region-policy.js";
 import { isEditMode } from "../core/is-edit-mode.js";
+import { mergeTagRecognizers } from "./merge-tags.js";
 
 class LiveSync {
   constructor() {
@@ -639,7 +640,17 @@ class LiveSync {
         morphStyle: 'outerHTML',
         ignoreActiveValue: true,
         head: { style: 'merge' },
-        scripts: { handle: true, matchMode: 'smart' },
+        // mergeBase: mergeable script tags ([merge] + rules tags) three-way
+        // merge against the last synced state instead of being clobbered by
+        // the incoming save; lastHtml is exactly that base (set after every
+        // own save and every applied morph). Null on the first update →
+        // two-way merge, which still keeps local-only keys.
+        scripts: {
+          handle: true,
+          matchMode: 'smart',
+          mergeBase: this.lastHtml,
+          mergeTags: mergeTagRecognizers
+        },
         key,
         callbacks: { afterNodeMorphed }
       });
