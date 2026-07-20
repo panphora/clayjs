@@ -30,7 +30,8 @@ else document.addEventListener("clay:mutation-ready", mirrorConsent, { once: tru
 
 // Automatic save feedback. clay:save-saving stays deliberately silent (a toast for
 // a sub-second transient is noise). Keep your own toast lib? The events are public.
-document.addEventListener("clay:save-saved", () => toast("Saved", "success"));
+document.addEventListener("clay:save-saved", (e) =>
+  toast(e.detail?.msg || "Saved", e.detail?.msgType === "warning" ? "warning" : "success"));
 document.addEventListener("clay:save-error", () => toastPersistent("Couldn't save", "error"));
 document.addEventListener("clay:save-offline", () => toastPersistent("Offline, not saved", "warning"));
 

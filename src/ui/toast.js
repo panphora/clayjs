@@ -280,11 +280,14 @@ export function toastCore(message, messageType = "success", config = {}) {
   const template = templates.toast[messageType] || templates.toast.success;
   const toastHtml = template
     .replace('{icon}', icon)
-    .replace('{message}', message);
+    .replace('{message}', '');
 
   const tempDiv = document.createElement('div');
   tempDiv.innerHTML = toastHtml.trim();
   const toastElement = tempDiv.firstElementChild;
+  // A message can carry a filename, and a filename is whatever whoever wrote the
+  // file chose. Assign it as text so markup in a name can never become markup here.
+  toastElement.querySelector('.toast-message, .message').textContent = message;
 
   // Add click handler
   toastElement.addEventListener('click', () => {
@@ -393,11 +396,14 @@ function toastPersistent(message, messageType = "warning") {
   const template = templates.toast[messageType] || templates.toast.warning;
   const toastHtml = template
     .replace('{icon}', icon)
-    .replace('{message}', message);
+    .replace('{message}', '');
 
   const tempDiv = document.createElement('div');
   tempDiv.innerHTML = toastHtml.trim();
   const toastElement = tempDiv.firstElementChild;
+  // A message can carry a filename, and a filename is whatever whoever wrote the
+  // file chose. Assign it as text so markup in a name can never become markup here.
+  toastElement.querySelector('.toast-message, .message').textContent = message;
   toastElement.classList.add('toast-persistent');
 
   // Add close button as sibling (not inside message)

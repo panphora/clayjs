@@ -38,8 +38,9 @@ let savingTimeout = null;
  *
  * @param {string} state - One of: 'saving', 'saved', 'offline', 'error'
  * @param {string} msg - Optional message (e.g., error details)
+ * @param {string} msgType - Optional severity from the server (e.g., 'warning')
  */
-function setSaveState(state, msg = '') {
+function setSaveState(state, msg = '', msgType = '') {
   if (savingTimeout) {
     clearTimeout(savingTimeout);
     savingTimeout = null;
@@ -48,7 +49,7 @@ function setSaveState(state, msg = '') {
   document.documentElement.setAttribute('savestatus', state);
 
   const event = new CustomEvent(`clay:save-${state}`, {
-    detail: { msg, timestamp: Date.now() }
+    detail: { msg, msgType, timestamp: Date.now() }
   });
   document.dispatchEvent(event);
 }
@@ -187,7 +188,7 @@ export function savePage(callback = () => {}) {
         // SUCCESS - store stripped version for future comparisons
         lastSavedContents = forComparison;
         unsavedChanges = false;
-        setSaveState('saved', data?.msg || 'Saved');
+        setSaveState('saved', data?.msg || 'Saved', data?.msgType);
         logBaseline('updated after save', `${lastSavedContents.length} chars`);
       } else {
         // FAILED - determine if it's offline or server error
@@ -255,7 +256,7 @@ export function savePageForce(callback = () => {}) {
       if (!err) {
         lastSavedContents = forComparison;
         unsavedChanges = false;
-        setSaveState('saved', data?.msg || 'Saved');
+        setSaveState('saved', data?.msg || 'Saved', data?.msgType);
         logBaseline('updated after force save', `${lastSavedContents.length} chars`);
       } else {
         if (!navigator.onLine) {
