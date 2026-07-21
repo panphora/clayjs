@@ -47,6 +47,15 @@ class LiveSync {
     this.currentFile = null;
     this.lastHtml = null;
     this.clientId = this.generateClientId();
+
+    // Per-stream resume id for the htmlclay replay server's wire contract.
+    // Regenerated on every start() (see below) so an explicit stop/start is a
+    // brand-new stream that never inherits the old baseline. Native
+    // EventSource reuses the same URL — and thus this id — on its own
+    // automatic reconnect. Deliberately NOT the sender clientId, which is the
+    // durable per-tab identity used for echo suppression.
+    this.resumeId = null;
+
     this.debounceMs = 150;
     this.debounceTimer = null;
     this.isPaused = false;
@@ -134,6 +143,21 @@ class LiveSync {
   }
 
   /**
+   * Generate a fresh per-stream resume id (URL-safe, well under the 128-byte
+   * wire limit). Minted on every start(), never persisted: an explicit
+   * stop/start must not reuse the previous stream's baseline.
+   */
+  generateResumeId() {
+    try {
+      const bytes = new Uint8Array(16);
+      (globalThis.crypto || window.crypto).getRandomValues(bytes);
+      return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+    } catch (e) {
+      return Math.random().toString(36).slice(2) + Date.now().toString(36);
+    }
+  }
+
+  /**
    * Start the LiveSync system
    * Can be called after stop() to restart with a new file
    */
@@ -153,9 +177,11 @@ class LiveSync {
       return;
     }
 
-    // Reset state for new connection
+    // Reset state for new connection. Resetting lastSeenSeq is a new baseline,
+    // so mint a fresh resume id — this stream must not resume the previous one.
     this.lastHtml = null;
     this.lastSeenSeq = 0;
+    this.resumeId = this.generateResumeId();
 
     console.log(`[LiveSync] Starting for: ${this.currentFile} (lane=${this.lane})`);
     this.connect();
@@ -361,7 +387,7 @@ class LiveSync {
     if (this.isDestroyed) return;
 
     const pageUrl = encodeURIComponent(window.location.href);
-    const url = `/_/live-sync/stream?page-url=${pageUrl}&lane=${this.lane}`;
+    const url = `/_/live-sync/stream?page-url=${pageUrl}&lane=${this.lane}&resume-id=${this.resumeId}`;
     this.sse = new EventSource(url);
 
     this.sse.onopen = () => {
@@ -371,6 +397,26 @@ class LiveSync {
 
     this.sse.onmessage = (event) => {
       const data = JSON.parse(event.data);
+
+      // Staleness check + watermark advance run FIRST — before the notification
+      // and error branches — against the high-water mark of seqs we've seen
+      // (own echoes count too, see below). Notification frames now carry a seq,
+      // so a conservative-cursor replay after reconnect must not duplicate a
+      // toast or let a later stale data frame apply an older snapshot. `seq` is
+      // optional for back-compat with older servers that don't stamp it.
+      const { seq } = data;
+      if (typeof seq === 'number' && seq <= this.lastSeenSeq) {
+        this._log(`Dropping stale message: seq=${seq}, lastSeen=${this.lastSeenSeq}`);
+        return;
+      }
+
+      // Advance the watermark before the notification/sender branches so that
+      // our own save echoes count toward "seen". Without this, a later
+      // buffered/replayed message with a smaller seq could rewind us past our
+      // local edit.
+      if (typeof seq === 'number') {
+        this.lastSeenSeq = seq;
+      }
 
       // Handle notifications (show toast, don't morph)
       if (data.type === "notification") {
@@ -385,22 +431,7 @@ class LiveSync {
         return;
       }
 
-      const { html, sender, seq, identityMap } = data;
-
-      // Staleness check runs FIRST — compared against the high-water mark of
-      // seqs we've seen (own echoes count too, see below). `seq` is optional
-      // for back-compat with older server builds that don't stamp it.
-      if (typeof seq === 'number' && seq <= this.lastSeenSeq) {
-        this._log(`Dropping stale message: seq=${seq}, lastSeen=${this.lastSeenSeq}`);
-        return;
-      }
-
-      // Advance the watermark before the sender filter so that our own save
-      // echoes count toward "seen". Without this, a later buffered/replayed
-      // peer message with a smaller seq could rewind us past our local edit.
-      if (typeof seq === 'number') {
-        this.lastSeenSeq = seq;
-      }
+      const { html, sender, identityMap } = data;
 
       // Ignore own changes — already reflected in the DOM, nothing to morph
       if (sender === this.clientId) {
