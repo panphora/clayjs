@@ -133,14 +133,16 @@ function prepareCloneForSave(clone) {
     new Function(el.getAttribute('onbeforesave')).call(el);
   }
 
-  // Remove elements that shouldn't be saved ([no-save] / legacy [save-remove])
-  for (const el of clone.querySelectorAll(STRIP_FROM_SAVE)) {
-    el.remove();
-  }
-
   // Run registered prepare hooks ([freeze]/[save-freeze] innerHTML restore lives here)
   for (const hook of prepareForSaveHooks) {
     hook(clone);
+  }
+
+  // Strip [no-save] / legacy [save-remove] LAST (snapshot-algorithm step 7): a
+  // prepare hook (freeze restore) can re-inject [no-save] content into the clone,
+  // so the strip must run after the hooks or that content leaks to disk.
+  for (const el of clone.querySelectorAll(STRIP_FROM_SAVE)) {
+    el.remove();
   }
 
   return "<!DOCTYPE html>" + clone.outerHTML;
@@ -212,12 +214,13 @@ export function captureForSaveAndComparison({ emitForSync = true } = {}) {
   // Clone for comparison before stripping (cheaper than cloning live DOM)
   const compareClone = clonePreventingOnclone(clone);
 
-  // Save clone: strip [no-save]/[save-remove], then run hooks (freeze restore in hooks)
-  for (const el of clone.querySelectorAll(STRIP_FROM_SAVE)) {
-    el.remove();
-  }
+  // Save clone: run hooks (freeze restore lives here), THEN strip [no-save]/[save-remove]
+  // LAST (snapshot-algorithm step 7) so freeze-restored [no-save] content can't leak to disk.
   for (const hook of prepareForSaveHooks) {
     hook(clone);
+  }
+  for (const el of clone.querySelectorAll(STRIP_FROM_SAVE)) {
+    el.remove();
   }
   const forSave = "<!DOCTYPE html>" + clone.outerHTML;
 
