@@ -1,0 +1,85 @@
+{
+  "version": 1,
+  "fixtures": [
+    {
+      "name": "baseline",
+      "description": "doctype + root serialization, the simplest round trip",
+      "skipDocument": false,
+      "requires": []
+    },
+    {
+      "name": "no-snapshot",
+      "description": "[no-snapshot] is stripped from both the snapshot and the document",
+      "skipDocument": false,
+      "requires": []
+    },
+    {
+      "name": "no-save",
+      "description": "[no-save] present in the snapshot, absent from the document",
+      "skipDocument": false,
+      "requires": []
+    },
+    {
+      "name": "no-save-in-hook",
+      "description": "a save hook sees existing [no-save] nodes and its own injected [no-save] is still stripped",
+      "skipDocument": false,
+      "requires": []
+    },
+    {
+      "name": "extension-debris",
+      "description": "extension-injected elements removed, extension marker attributes stripped from real elements",
+      "skipDocument": false,
+      "requires": []
+    },
+    {
+      "name": "hooks",
+      "description": "inline onbeforesnapshot/onbeforesave and registered callbacks, and their snapshot-vs-save order",
+      "skipDocument": false,
+      "requires": []
+    },
+    {
+      "name": "doctype-coercion",
+      "description": "a non-HTML5 source doctype is coerced to <!DOCTYPE html>",
+      "skipDocument": false,
+      "requires": []
+    },
+    {
+      "name": "outside-root",
+      "description": "comments outside the root <html> element do not survive",
+      "skipDocument": false,
+      "requires": []
+    },
+    {
+      "name": "host-attributes",
+      "description": "ephemeral savetoken and durable documentid on the root pass through untouched",
+      "skipDocument": false,
+      "requires": []
+    },
+    {
+      "name": "properties-not-attributes",
+      "description": "state in a JS property is absent from both artifacts; the same value in an attribute is present",
+      "skipDocument": false,
+      "requires": [],
+      "secrets": ["PROP_SENTINEL_never_serialized"]
+    },
+    {
+      "name": "preformatted",
+      "description": "<pre>, <textarea>, <script>, <style> content survives verbatim",
+      "skipDocument": false,
+      "requires": []
+    },
+    {
+      "name": "form-state",
+      "description": "live values for every control in the step-3 table, reflected into markup",
+      "skipDocument": false,
+      "requires": ["form-persist"]
+    },
+    {
+      "name": "form-secrets",
+      "description": "password and file inputs are never written into markup (absolute rule)",
+      "skipDocument": false,
+      "requires": ["form-persist"],
+      "secrets": ["S3CRET-sentinel-should-never-serialize"]
+    }
+  ]
+}

@@ -1,0 +1,3 @@
+# Conformance fixtures are byte-exact goldens. Force LF so a CRLF checkout (e.g. on
+# Windows) can never fail the byte comparison for a non-bug.
+conformance/fixtures/** text eol=lf
