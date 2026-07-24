@@ -44,10 +44,17 @@ fixture's `input.html`/setup or the snapshot algorithm changes on purpose.
 1. Edit `input.html` / `manifest.json` here; `npm run sync-fixtures` to push down.
    (Imperative setup lives in each client's `conformance/setups.js`, kept identical by hand.)
 2. In **each** client: `npm run conformance:update` to regenerate its goldens.
-3. Cross-verify the two clients are byte-identical — this is the real conformance check:
-   `diff -rq hyperclayjs/conformance/fixtures clayjs/conformance/fixtures` must be empty.
-4. Promote up: `cp -R hyperclayjs/conformance/fixtures/. malleablehtmlfile/fixtures/`
-   then `npm run check-fixtures` to confirm both clients now match canonical.
+3. Cross-verify the two clients are byte-identical — this is the real conformance check.
+   From the workspace root: `diff -rq hyperclayjs/conformance/fixtures clayjs/conformance/fixtures`
+   must be empty.
+4. Promote up, then re-check. Both commands are written from the workspace root:
+   ```
+   cp -R hyperclayjs/conformance/fixtures/. malleablehtmlfile/fixtures/
+   cd malleablehtmlfile && npm run check-fixtures
+   ```
+   `check-fixtures` confirms both clients now match canonical.
 
 The browser is pinned (Playwright Chromium, version-locked in each client's `package.json`)
-so regeneration is reproducible across machines and CI.
+so regeneration is reproducible across machines and CI. `conformance:update` and
+`test:conformance` need the pinned browser installed (`npx playwright install chromium`); the
+same applies to `npm publish`, whose `prepublishOnly` runs the byte gate.
