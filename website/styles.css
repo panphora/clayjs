@@ -273,6 +273,7 @@ footer .inner {
 }
 footer a { color: var(--ink-soft); }
 footer a:hover { color: var(--glaze-deep); }
+footer .inner + .inner { margin-top: 18px; }
 
 /* ---------- outline rail (front page) ---------- */
 .with-rail { display: grid; grid-template-columns: 170px minmax(0, 720px); gap: 44px; max-width: 1010px; margin: 0 auto; padding: 0 24px 90px; }
