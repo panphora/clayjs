@@ -21,7 +21,24 @@ query params on the script URL:
 
 - `?plugins=` — add optional plugins: `sync`, `cms` (richclay, indicator, sortable, undo load by default in edit mode).
 - `?exclude=` — drop a default plugin.
-- `?editmode=false` — force view mode (URL param wins over cookies/globals).
+- `?editmode=false` — force view mode (URL param wins over everything below).
+
+## Host attributes
+
+A host can put these on `<html>` in the response it serves. They are ephemeral:
+the host injects them and strips them back out of whatever gets saved, so they
+never reach the file on disk.
+
+- `savetoken="…"` — the per-document save credential. clayjs posts to
+  `/_/save/{token}` and sends no cookies, because the token is the credential.
+  A token also implies edit mode, which is the only such signal a sandboxed
+  document can see. `htmlclaytoken` is the older spelling of the same thing.
+- `clay-save-transport="desktop-json-v1"` — send the save as
+  `{content, snapshotHtml, userDriven}` JSON instead of plain text. Only declare
+  it on a host whose save lane reads that envelope.
+
+Edit mode is decided in this order: the `?editmode` param, then
+`window.clayEditMode`, then a save token, then the platform's owner cookie.
 
 ## Readiness
 

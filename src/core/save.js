@@ -202,7 +202,9 @@ export function savePage(callback = () => {}) {
       // Call user callback if provided (preserve server's msgType)
       const result = {
         msg: err?.message || data?.msg,
-        msgType: err ? 'error' : (data?.msgType || 'success')
+        msgType: err ? 'error' : (data?.msgType || 'success'),
+        code: err?.code ?? data?.code ?? null,
+        etag: data?.etag ?? null
       };
       if (typeof callback === 'function') {
         callback(result);
@@ -268,7 +270,9 @@ export function savePageForce(callback = () => {}) {
 
       const result = {
         msg: err?.message || data?.msg,
-        msgType: err ? 'error' : (data?.msgType || 'success')
+        msgType: err ? 'error' : (data?.msgType || 'success'),
+        code: err?.code ?? data?.code ?? null,
+        etag: data?.etag ?? null
       };
       if (typeof callback === 'function') {
         callback(result);

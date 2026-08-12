@@ -13,6 +13,7 @@ beforeEach(() => {
     <grammarly-extension>EXTNOISE</grammarly-extension>
   `;
   window.__hyperclaySnapshotHtml = null;
+  document.documentElement.removeAttribute("clay-save-transport");
 });
 
 test("strips no-save (clay + legacy), no-snapshot, and extension noise; keeps content; runs onbeforesave", () => {
@@ -27,12 +28,21 @@ test("strips no-save (clay + legacy), no-snapshot, and extension noise; keeps co
   expect(forSave).not.toContain("beforetext");
 });
 
-test("localhost save-and-comparison sets window.__hyperclaySnapshotHtml", () => {
-  expect(window.location.hostname).toBe("localhost");
+// The unstripped snapshot exists for one consumer: a host that declared the
+// desktop JSON envelope. It used to be captured on any localhost page, which is
+// most of them in development and none of the hosts that wanted it.
+test("a declared desktop transport sets window.__hyperclaySnapshotHtml", () => {
+  document.documentElement.setAttribute("clay-save-transport", "desktop-json-v1");
   const { forSave, forComparison } = captureForSaveAndComparison();
   expect(typeof window.__hyperclaySnapshotHtml).toBe("string");
   expect(window.__hyperclaySnapshotHtml.startsWith("<!DOCTYPE html>")).toBe(true);
   expect(forSave).toContain("KEEPME");
   // comparison additionally strips the no-snapshot region (via snapshot-remove) and no-save
   expect(forComparison).not.toContain("NOSAVEREGION");
+});
+
+test("no declared transport leaves the snapshot uncaptured, even on localhost", () => {
+  expect(window.location.hostname).toBe("localhost");
+  captureForSaveAndComparison();
+  expect(window.__hyperclaySnapshotHtml).toBeNull();
 });

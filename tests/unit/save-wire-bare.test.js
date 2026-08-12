@@ -4,11 +4,11 @@
  */
 import { jest } from "@jest/globals";
 
-// Scenario: no htmlclaytoken and a production (non-localhost) origin — the save
-// must POST to the bare /_/save endpoint with the raw HTML body (no JSON
-// envelope, no Content-Type override) and exact header values (§1.4).
+// Scenario: no save token and no declared transport — the save must POST to the
+// bare /_/save endpoint with the raw HTML body (no JSON envelope, no Content-Type
+// override), exact header values, and the cookie that authenticates it (§1.4).
 
-test("save wire contract: bare endpoint and raw body on production origins", async () => {
+test("save wire contract: bare endpoint and raw body on a cookie host", async () => {
   window.clayEditMode = true;
   document.body.innerHTML = '<div id="content">start</div>';
 
@@ -23,6 +23,8 @@ test("save wire contract: bare endpoint and raw body on production origins", asy
   const [url, opts] = global.fetch.mock.calls[0];
   expect(url).toBe("/_/save");
   expect(opts.method).toBe("POST");
+  expect(opts.credentials).toBe("same-origin");
+  expect(opts.headers["Document-URL"]).toBe("https://example.com/page.html");
   expect(opts.headers["Page-URL"]).toBe("https://example.com/page.html");
   expect(opts.headers["X-Hyperclay-User-Driven"]).toBe("0");
   expect(opts.headers["Content-Type"]).toBeUndefined();

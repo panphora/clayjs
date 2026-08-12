@@ -38,6 +38,7 @@
 
 import { stripExtensionNoise } from '../lib/extension-noise.js';
 import { STRIP_FROM_SAVE, STRIP_FROM_COMPARISON, SNAPSHOT_REMOVE_SELECTOR } from '../lib/region-policy.js';
+import { saveTransport, DESKTOP_JSON } from './host-attrs.js';
 
 // =============================================================================
 // HOOK REGISTRIES
@@ -197,11 +198,12 @@ export function captureForSaveAndComparison({ emitForSync = true } = {}) {
       detail: { documentElement: clone }
     }));
 
-    // Store snapshot HTML for Hyperclay Local platform sync
-    // This allows the save system to send both stripped and full versions
-    const isHyperclayLocal = window.location.hostname === 'localhost' ||
-                             window.location.hostname === '127.0.0.1';
-    if (isHyperclayLocal) {
+    // Store the unstripped snapshot for a host that asked for the desktop JSON
+    // envelope, which is the only thing that reads it: the save system then sends
+    // both the stripped document and this. Captured only when someone will
+    // actually send it — this used to key off `location.hostname`, which set it
+    // on every localhost page whether or not its host wanted it.
+    if (saveTransport() === DESKTOP_JSON) {
       window.__hyperclaySnapshotHtml = '<!DOCTYPE html>' + clone.outerHTML;
     }
   }
