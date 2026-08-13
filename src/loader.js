@@ -28,7 +28,7 @@ export async function boot(base, params, readyResolve) {
     loaded[path] = await import(base + "/src/" + path); // sequential: order is load-bearing
   }
 
-  assembleCore(loaded, { isEditMode, isOwner }, regionPolicy); // window.clay + shim MUST exist
+  assembleCore(loaded, { isEditMode, isOwner }, regionPolicy); // window.clay MUST be assembled
                                                                // before any plugin import
 
   for (const path of plan.plugins) {
@@ -47,8 +47,8 @@ export async function boot(base, params, readyResolve) {
     loaded[path] = mod;
     attachPluginMember(path, mod);   // immediately, not after the loop: hypercms's ?cms=true
                                      // auto-open runs as a microtask queued during ITS evaluation
-                                     // (before boot resumes) and reads window.hyperclay.RichClay
-                                     // and .undo, which earlier plugins must have mirrored by then
+                                     // (before boot resumes) and reads clay.RichClay and clay.undo,
+                                     // which earlier plugins must have attached by then
   }
 
   // Plugins with async setup (sortable's vendor fetch) export `ready`; hold
@@ -71,6 +71,7 @@ function assembleCore(loaded, { isEditMode, isOwner }, regionPolicy) {
     isEditMode,
     isOwner,
     Mutation: mutation.default,
+    region: regionPolicy.windowRegionShape,
   });
 
   const snapshot = loaded["core/snapshot.js"];
@@ -84,27 +85,11 @@ function assembleCore(loaded, { isEditMode, isOwner }, regionPolicy) {
   }
   if (snapshot) {
     clay.getHTML = snapshot.getPageContents;
-    clay.beforeSave = snapshot.beforeSave;
+    clay.addDocumentTransform = snapshot.addDocumentTransform;
     clay.onSnapshot = snapshot.onSnapshot;
   }
   if (cacheBustMod) {
     clay.cacheBust = cacheBustMod.default;
-  }
-
-  // vendor-compat shim: richclay, hypercms, and hyper-undo read window.hyperclay;
-  // remove when the vendors migrate to window.clay.
-  window.hyperclay = window.hyperclay || {};
-  Object.assign(window.hyperclay, {
-    Mutation: clay.Mutation,
-    isEditMode: clay.isEditMode,
-    region: regionPolicy.windowRegionShape,
-  });
-  if (clay.beforeSave) {
-    window.hyperclay.beforeSave = clay.beforeSave;        // richclay's save-cleanup hook
-    window.hyperclay.onPrepareForSave = clay.beforeSave;  // hypercms uses this name
-  }
-  if (clay.save) {
-    window.hyperclay.savePage = clay.save;
   }
 }
 
@@ -113,16 +98,14 @@ function attachPluginMember(path, mod) {
 
   if (path === "plugins/undo.js") {
     clay.undo = mod.undo || mod.default;
-    window.hyperclay.undo = clay.undo;
   } else if (path === "sync/live-sync.js") {
     clay.morph = mod.morph;
   } else if (path === "vendor/hypercms.vendor.js") {
     clay.cms = mod.cms || mod.default;
-    window.hyperclay.hypercms = clay.cms;
   } else if (path === "plugins/demo.js") {
     clay.demo = mod.demo;
   } else if (path === "vendor/richclay.vendor.js") {
-    window.hyperclay.RichClay = mod.RichClay || mod.default;
+    clay.RichClay = mod.RichClay || mod.default;
   }
 }
 

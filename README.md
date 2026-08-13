@@ -50,11 +50,11 @@ await clay.ready;      // or: document.addEventListener("clay:ready", ...)
 clay.save();
 ```
 
-Edit mode exposes `clay.save()` (+ `clay.save.force()`), `clay.getHTML()`, `clay.beforeSave(fn)`,
+Edit mode exposes `clay.save()` (+ `clay.save.force()`), `clay.getHTML()`, `clay.addDocumentTransform(fn)`,
 `clay.onSnapshot(fn)`, `clay.toggleEditMode()`, `clay.isEditMode`, `clay.isOwner`, `clay.Mutation`,
-`clay.cacheBust(el)`, plus `clay.undo` / `clay.cms` / `clay.morph` when those plugins load. View
-mode keeps only the always-available members (`toggleEditMode`, `isEditMode`, `isOwner`,
-`Mutation`, `ready`); edit-only members are simply absent.
+`clay.region`, `clay.cacheBust(el)`, plus `clay.undo` / `clay.cms` / `clay.morph` / `clay.RichClay`
+when those plugins load. View mode keeps only the always-available members (`toggleEditMode`, `isEditMode`, `isOwner`,
+`Mutation`, `region`, `ready`); edit-only members are simply absent.
 
 ## API
 
@@ -68,9 +68,16 @@ Three tiers. The first two are a promise; the third is not.
 
 The contract starts at **0.3.0**: no name below changes without a major version.
 
-**`clay.js`** — `ready`, `save()`, `save.force()`, `getHTML()`, `beforeSave(fn)`, `onSnapshot(fn)`,
-`toggleEditMode()`, `isEditMode`, `isOwner`, `Mutation`, `cacheBust(el)`, plus `undo` / `cms` / `morph`
-when those plugins load. View mode keeps only the always-available members, as above.
+**`clay.js`** — `ready`, `save()`, `save.force()`, `getHTML()`, `addDocumentTransform(fn)`, `onSnapshot(fn)`,
+`toggleEditMode()`, `isEditMode`, `isOwner`, `Mutation`, `region`, `cacheBust(el)`, plus `undo` / `cms` / `morph` /
+`RichClay` when those plugins load. View mode keeps only the always-available members, as above.
+
+`addDocumentTransform(fn)` runs your callback over a detached clone whenever the page
+prepares to save AND whenever it checks whether anything changed. Keep it pure and
+repeatable: it is a transform, not a "a save is happening" event.
+
+`region` is the region-policy model (`resolveRegionPolicy`, `skipForPolicy`, and the token
+constants), the same shape `clay.internals.region` exposes.
 
 **Satellites** — one script tag each, and each resolves its own `clay.loaded.*` promise. `clay-ui` adds
 `toast`, `toastPersistent`, `ask`, `confirm`, `tell`, `snippet`, `modal`; `clay-utils` adds `clay.utils`
@@ -86,9 +93,10 @@ lifecycle.
 <script src="https://clayjs.com/clay-internals.js"></script>
 ```
 
-- `captureSnapshot()`, `captureForSave()`, `onPrepareForSave(fn)` — the snapshot pipeline, read side.
-  `captureSnapshot` gives you the clone before any stripping; `captureForSave` gives you the bytes a
-  save would send.
+- `captureSnapshot()`, `captureForSave()` — the snapshot pipeline, read side.
+  `captureSnapshot` gives you the clone before any stripping; `captureForSave` gives you the
+  bytes a save would send. Register your own transform with `clay.addDocumentTransform(fn)`
+  from core.
 - `region.addRegionToken(el, token)`, `region.resolveRegionPolicy(node)`, `region.isInert(node)`,
   `region.isSnapshotRemoved(el)`, `region.PERSIST`, `region.REGION_ATTRS`, and
   `region.selectors.stripFromSave` / `.stripFromComparison` / `.snapshotRemove` / `.freeze` — write your

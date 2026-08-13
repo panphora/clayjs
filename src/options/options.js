@@ -240,9 +240,7 @@ const optionVisibility = {
   }
 };
 
-// vendor-compat mirror: sap reads window.hyperclay.optionVisibility at runtime.
-window.hyperclay = window.hyperclay || {};
-window.hyperclay.optionVisibility = optionVisibility;
+window.clay.optionVisibility = optionVisibility;
 
 export default optionVisibility;
 

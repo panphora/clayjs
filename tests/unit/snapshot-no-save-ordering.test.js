@@ -1,7 +1,7 @@
 import {
   captureForSave,
   captureForSaveAndComparison,
-  onPrepareForSave,
+  addDocumentTransform,
 } from "../../src/core/snapshot.js";
 
 // Regression for snapshot-algorithm step 7: save-time hooks run BEFORE the
@@ -10,7 +10,7 @@ import {
 // contained a [no-save] element and the strip ran first, the content would leak
 // to disk. Here a stand-in hook re-injects a [no-save] element after capture and
 // the saved document must not contain it.
-onPrepareForSave((clone) => {
+addDocumentTransform((clone) => {
   const body = clone.querySelector("body");
   if (!body) return;
   const leak = document.createElement("div");

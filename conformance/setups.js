@@ -25,7 +25,7 @@ export const setups = {
   // after hooks), and a [no-save] node the hook itself injects must still be
   // stripped from the document.
   'no-save-in-hook'(doc, client) {
-    client.onPrepareForSave((clone) => {
+    client.addDocumentTransform((clone) => {
       const marker = clone.querySelector('#saw-existing');
       if (marker) {
         marker.setAttribute('data-saw', String(clone.querySelectorAll('[no-save]').length));
@@ -66,7 +66,7 @@ export const setups = {
       const el = clone.querySelector('#marks');
       if (el) el.setAttribute('data-reg-snapshot', '1');
     });
-    client.onPrepareForSave((clone) => {
+    client.addDocumentTransform((clone) => {
       const el = clone.querySelector('#marks');
       if (el) el.setAttribute('data-reg-save', '1');
     });

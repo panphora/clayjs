@@ -11,10 +11,9 @@ import { isEditMode } from "./is-edit-mode.js";
 import { consumeUserDriven, markUserDriven } from "../lib/user-gesture.js";
 import { saveToken, saveTransport, DESKTOP_JSON } from "./host-attrs.js";
 import {
-  beforeSave,
   getPageContents,
   onSnapshot,
-  onPrepareForSave
+  addDocumentTransform
 } from "./snapshot.js";
 
 // =============================================================================
@@ -37,7 +36,7 @@ export function isSaveInProgress() {
 // RE-EXPORTS FROM SNAPSHOT (for backwards compat)
 // =============================================================================
 
-export { beforeSave, getPageContents, onSnapshot, onPrepareForSave };
+export { getPageContents, onSnapshot, addDocumentTransform };
 
 // =============================================================================
 // THE RESULT

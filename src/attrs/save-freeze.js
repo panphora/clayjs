@@ -16,7 +16,7 @@
  * Changes inside freeze elements do not trigger autosave dirty checks.
  */
 
-import { onSnapshot, onPrepareForSave } from "../core/snapshot.js";
+import { onSnapshot, addDocumentTransform } from "../core/snapshot.js";
 import { isEditMode } from "../core/is-edit-mode.js";
 import { FREEZE_SELECTOR } from "../lib/region-policy.js";
 import Mutation from "../lib/mutation.js";
@@ -122,7 +122,7 @@ function init() {
   // Phase 3a: Freeze again in prepare, for anything changed between the phases
   // (e.g. onbeforesave handlers). Pairs by the WeakMap phase 2 filled, because by
   // now the clone has lost its [no-snapshot] subtrees and position means nothing.
-  onPrepareForSave(freezePrepare);
+  addDocumentTransform(freezePrepare);
 }
 
 init();

@@ -1,5 +1,5 @@
 import clayInternals from "../../src/internals/index.js";
-import { captureForSave } from "../../src/core/snapshot.js";
+import { captureForSave, addDocumentTransform } from "../../src/core/snapshot.js";
 import { PERSIST, REGION_ATTRS, STRIP_FROM_SAVE } from "../../src/lib/region-policy.js";
 
 beforeEach(() => {
@@ -11,8 +11,8 @@ describe("the clay.internals surface", () => {
     expect(window.clay.internals).toBe(clayInternals);
   });
 
-  test("the snapshot group holds its three documented functions", () => {
-    for (const name of ["captureSnapshot", "captureForSave", "onPrepareForSave"]) {
+  test("the snapshot group holds its two documented functions", () => {
+    for (const name of ["captureSnapshot", "captureForSave"]) {
       expect(typeof clayInternals[name]).toBe("function");
     }
   });
@@ -36,8 +36,8 @@ describe("the clay.internals surface", () => {
   });
 });
 
-test("a hook registered through clay.internals runs in a capture driven by snapshot.js imported separately", () => {
-  clayInternals.onPrepareForSave((clone) => {
+test("a transform registered through core runs in a capture driven by clay.internals", () => {
+  addDocumentTransform((clone) => {
     clone.querySelector("#keep").textContent = "HOOKRAN";
   });
 

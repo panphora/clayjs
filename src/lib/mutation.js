@@ -132,8 +132,8 @@ const localMutation = {
     // Bridge: pause undo recorder too. Live-sync calls Mutation.pause()
     // before morphing remote HTML in, and we want those mutations excluded
     // from the local undo stack as well. undo.pause() is itself reference-counted.
-    if (typeof window !== 'undefined' && window.hyperclay && window.hyperclay.undo && window.hyperclay.undo.pause) {
-      window.hyperclay.undo.pause();
+    if (typeof window !== 'undefined' && window.clay?.undo?.pause) {
+      window.clay.undo.pause();
     }
     this._log('Paused', this._pauseDepth);
   },
@@ -154,8 +154,8 @@ const localMutation = {
     if (this._pauseDepth === 0 && this._observer) {
       this._drainBrowserQueue(this);
     }
-    if (typeof window !== 'undefined' && window.hyperclay && window.hyperclay.undo && window.hyperclay.undo.resume) {
-      window.hyperclay.undo.resume();
+    if (typeof window !== 'undefined' && window.clay?.undo?.resume) {
+      window.clay.undo.resume();
     }
     this._log('Resumed', this._pauseDepth);
   },
@@ -765,18 +765,18 @@ const Mutation = existingHub || localMutation;
 
 if (typeof window !== 'undefined' && !existingHub) {
   window.__clayMutation = Mutation;
-  // Publish the vendor-compat mirror BEFORE the readiness dispatch: sap's mutation
-  // bridge reads window.hyperclay.Mutation when hyperclay:mutation-ready fires, so
-  // the hub must already be in place or sap keeps its own native observer.
-  window.hyperclay = window.hyperclay || {};
-  window.hyperclay.Mutation = Mutation;
+  // Publish the hub BEFORE the readiness dispatch. Consumers (sap's mutation
+  // bridge, hypercms's fast path) read clay.Mutation from inside their
+  // mutation-ready listener, and the loader's assembleCore does not run until
+  // after this module finishes evaluating, so without this the hub is invisible
+  // at the exact moment it announces itself.
+  window.clay = window.clay || {};
+  window.clay.Mutation = Mutation;
   // Signal consumers (e.g. hypercms ?cms=true auto-open, sap's late-hub listener)
   // that Mutation is ready, so they can react instead of polling. Wrapped so a
   // dispatch failure can never break the install.
   try {
     document.dispatchEvent(new CustomEvent('clay:mutation-ready', { detail: { Mutation } }));
-    // vendor-compat: hypercms's readiness fast path listens for the legacy name
-    document.dispatchEvent(new CustomEvent('hyperclay:mutation-ready', { detail: { Mutation } }));
   } catch {}
 }
 

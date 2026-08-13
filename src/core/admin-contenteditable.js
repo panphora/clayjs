@@ -1,11 +1,11 @@
 import { isEditMode, isOwner } from "./is-edit-mode.js";
 import onDomReady from "../lib/dom-ready.js";
-import { beforeSave } from "./snapshot.js";
+import { addDocumentTransform } from "./snapshot.js";
 
 export const SELECTOR = '[editmode\\:contenteditable]';
 
 export function disableContentEditableBeforeSave () {
-  beforeSave(docElem => {
+  addDocumentTransform(docElem => {
     docElem.querySelectorAll(SELECTOR).forEach(resource => {
       const originalValue = resource.getAttribute("contenteditable");
       resource.setAttribute("inert-contenteditable", originalValue);

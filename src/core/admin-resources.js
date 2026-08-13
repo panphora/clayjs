@@ -1,6 +1,6 @@
 import { isEditMode, isOwner } from "./is-edit-mode.js";
 import onDomReady from "../lib/dom-ready.js";
-import { beforeSave } from "./snapshot.js";
+import { addDocumentTransform } from "./snapshot.js";
 
 export const SELECTOR = '[editmode\\:resource]:is(style, link, script)';
 export const SELECTOR_INERT = '[editmode\\:resource]:is(style, link, script)[type^="inert/"]';
@@ -24,7 +24,7 @@ function makeActive(resource) {
 }
 
 export function disableAdminResourcesBeforeSave () {
-  beforeSave(docElem => {
+  addDocumentTransform(docElem => {
     docElem.querySelectorAll(SELECTOR).forEach(makeInert);
   });
 }

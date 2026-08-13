@@ -3,7 +3,7 @@
 // (it's the way IN), and setPageTypeOnPageLoad marks <html> in either mode.
 import { isEditMode, isOwner } from "./is-edit-mode.js";
 import onDomReady from "../lib/dom-ready.js";
-import { beforeSave } from "./snapshot.js";
+import { addDocumentTransform } from "./snapshot.js";
 
 export function toggleEditMode() {
   const url = new URL(window.location.href);
@@ -13,7 +13,7 @@ export function toggleEditMode() {
 }
 
 export function setViewerPageTypeBeforeSave () {
-  beforeSave(docElem => {
+  addDocumentTransform(docElem => {
     docElem.setAttribute("editmode", "false");
     docElem.setAttribute("pageowner", "false");
   });

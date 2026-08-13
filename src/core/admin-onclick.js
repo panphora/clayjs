@@ -1,11 +1,11 @@
 import { isEditMode, isOwner } from "./is-edit-mode.js";
 import onDomReady from "../lib/dom-ready.js";
-import { beforeSave } from "./snapshot.js";
+import { addDocumentTransform } from "./snapshot.js";
 
 export const SELECTOR = '[editmode\\:onclick]';
 
 export function disableOnClickBeforeSave () {
-  beforeSave(docElem => {
+  addDocumentTransform(docElem => {
     docElem.querySelectorAll(SELECTOR).forEach(resource => {
       const originalValue = resource.getAttribute("onclick");
       resource.setAttribute("inert-onclick", originalValue);

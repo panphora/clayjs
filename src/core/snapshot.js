@@ -19,7 +19,7 @@
  *              ▼                               ▼
  *   ┌─────────────────────────┐     ┌─────────────────────────┐
  *   │  3a. PREPARE HOOKS      │     │  3b. DONE               │
- *   │  onPrepareForSave       │     │  (live-sync stops here) │
+ *   │  addDocumentTransform   │     │  (live-sync stops here) │
  *   │  [onbeforesave]         │     │                         │
  *   │  [save-remove]          │     │  → emits snapshot-ready │
  *   │                         │     └─────────────────────────┘
@@ -46,7 +46,7 @@ import { TAB_LOCAL_ROOT_ATTRS } from '../lib/root-attrs.js';
 // =============================================================================
 
 const snapshotHooks = [];       // Phase 2: Always run (form sync)
-const prepareForSaveHooks = []; // Phase 3a: Save only (strip admin)
+const documentTransforms = [];  // Phase 3a: Save only (strip admin)
 
 /**
  * Run every authored handler of one kind over a clone, and never let one of them
@@ -82,17 +82,20 @@ export function onSnapshot(callback) {
 }
 
 /**
- * Register a hook that runs ONLY when preparing for save.
+ * Register a transform that runs over a detached clone when preparing to save.
  * Use for: stripping admin elements, cleanup.
+ *
+ * It is a TRANSFORM, not a save lifecycle event: it runs over the clone that
+ * gets saved AND over the clone used to answer "has anything changed", and that
+ * second one runs on dirty checks that never become a save. So it must be pure
+ * and repeatable — no counters, no logging, no network. The two clones have
+ * different visibility rules, which is why neither run can be skipped.
  *
  * @param {Function} callback - Receives the cloned document element
  */
-export function onPrepareForSave(callback) {
-  prepareForSaveHooks.push(callback);
+export function addDocumentTransform(callback) {
+  documentTransforms.push(callback);
 }
-
-// Backwards compat alias
-export const beforeSave = onPrepareForSave;
 
 // =============================================================================
 // CAPTURE FUNCTIONS
@@ -119,8 +122,8 @@ export function captureSnapshot() {
   // mid-typing would leave the idle batch open across the save boundary, and
   // Cmd+Z after save would restore to a state earlier than the last save.
   // No-op when undo isn't loaded or no batch is pending.
-  if (typeof window !== 'undefined' && window.hyperclay && window.hyperclay.undo && window.hyperclay.undo.flush) {
-    window.hyperclay.undo.flush();
+  if (typeof window !== 'undefined' && window.clay?.undo?.flush) {
+    window.clay.undo.flush();
   }
 
   const clone = clonePreventingOnclone(document.documentElement);
@@ -155,7 +158,7 @@ function prepareCloneForSave(clone) {
   runAuthoredHandlers(clone, 'onbeforesave');
 
   // Run registered prepare hooks ([freeze]/[save-freeze] innerHTML restore lives here)
-  for (const hook of prepareForSaveHooks) {
+  for (const hook of documentTransforms) {
     hook(clone);
   }
 
@@ -190,7 +193,7 @@ export function captureForComparison() {
   }
 
   // Run registered prepare hooks
-  for (const hook of prepareForSaveHooks) {
+  for (const hook of documentTransforms) {
     hook(clone);
   }
 
@@ -237,7 +240,7 @@ export function captureForSaveAndComparison({ emitForSync = true } = {}) {
 
   // Save clone: run hooks (freeze restore lives here), THEN strip [no-save]/[save-remove]
   // LAST (snapshot-algorithm step 7) so freeze-restored [no-save] content can't leak to disk.
-  for (const hook of prepareForSaveHooks) {
+  for (const hook of documentTransforms) {
     hook(clone);
   }
   for (const el of clone.querySelectorAll(STRIP_FROM_SAVE)) {
@@ -249,7 +252,7 @@ export function captureForSaveAndComparison({ emitForSync = true } = {}) {
   for (const el of compareClone.querySelectorAll(STRIP_FROM_COMPARISON)) {
     el.remove();
   }
-  for (const hook of prepareForSaveHooks) {
+  for (const hook of documentTransforms) {
     hook(compareClone);
   }
   const forComparison = "<!DOCTYPE html>" + compareClone.outerHTML;

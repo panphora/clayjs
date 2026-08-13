@@ -18,16 +18,6 @@ clay.modal = themodal;
 if (typeof window.toast === "undefined") window.toast = toast;
 if (typeof window.toastPersistent === "undefined") window.toastPersistent = toastPersistent;
 
-// vendor-compat mirror: sap reads window.hyperclay.consent (the legacy name for
-// clay.confirm). Never CREATE window.hyperclay here: sap's mutation bridge treats
-// any truthy window.hyperclay as "a hub is coming" and waits forever for it. Core
-// creates the object (with Mutation) and fires clay:mutation-ready; attach then.
-function mirrorConsent() {
-  if (window.hyperclay && !window.hyperclay.consent) window.hyperclay.consent = consent;
-}
-if (window.hyperclay) mirrorConsent();
-else document.addEventListener("clay:mutation-ready", mirrorConsent, { once: true });
-
 // Automatic save feedback. clay:save-saving stays deliberately silent (a toast for
 // a sub-second transient is noise). Keep your own toast lib? The events are public.
 document.addEventListener("clay:save-saved", (e) =>

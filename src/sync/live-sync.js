@@ -721,10 +721,6 @@ class LiveSync {
       document.dispatchEvent(new CustomEvent('clay:sync-applied', {
         detail: { seq }
       }));
-      // vendor-compat: hypercms's form panel listens for the legacy name.
-      document.dispatchEvent(new CustomEvent('hyperclay:livesync-applied', {
-        detail: { seq }
-      }));
     } finally {
       this._log('applyUpdate - morph complete, resuming mutations');
       Mutation.resume();

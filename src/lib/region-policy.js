@@ -220,8 +220,8 @@ export function skipForPolicy(policy, require, skip) {
 }
 
 // The canonical region API the vendored hyper-undo (a separate bundle that can't
-// import this module) delegates "is this undoable?" to via window.hyperclay.region,
-// so the two can no longer drift. The loader assembles this onto the compat shim.
+// import this module) delegates "is this undoable?" to via clay.region, so the two
+// can no longer drift. The loader assembles this onto clay in assembleCore.
 export const windowRegionShape = {
   resolveRegionPolicy,
   isInert,

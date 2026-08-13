@@ -10,7 +10,7 @@
  * your problem; the stability is ours.
  */
 
-import { captureSnapshot, captureForSave, onPrepareForSave } from "../core/snapshot.js";
+import { captureSnapshot, captureForSave } from "../core/snapshot.js";
 import { saveHtml, replacePageWith, isSaveInProgress } from "../core/save-core.js";
 import {
   addRegionToken,
@@ -32,7 +32,6 @@ clay.internals = {
   // any stripping; captureForSave gives you the bytes a save would send.
   captureSnapshot,
   captureForSave,
-  onPrepareForSave,
 
   // Write your own attribute without hardcoding our selectors. Doing it by hand is
   // how a custom attribute quietly stops respecting [no-save] two releases later.

@@ -16,14 +16,14 @@ import {
   saveHtml,
   getPageContents,
   replacePageWith as replacePageWithCore,
-  beforeSave,
+  addDocumentTransform,
   isSaveInProgress
 } from "./save-core.js";
 import { captureForComparison, captureForSaveAndComparison } from "./snapshot.js";
 import { logSaveCheck, logBaseline } from "../lib/autosave-debug.js";
 
 // Reset savestatus to 'saved' in snapshots (each module cleans up its own attrs)
-beforeSave(clone => {
+addDocumentTransform(clone => {
   clone.setAttribute('savestatus', 'saved');
 });
 
@@ -109,7 +109,7 @@ window.addEventListener('online', () => {
 // exactly what savePage sent, which is the only value that is true by construction.
 
 // Re-export from core for backward compatibility
-export { beforeSave, getPageContents };
+export { addDocumentTransform, getPageContents };
 
 let unsavedChanges = false;
 let lastSavedContents = '';

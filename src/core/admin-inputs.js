@@ -1,12 +1,12 @@
 import { isEditMode, isOwner } from "./is-edit-mode.js";
 import onDomReady from "../lib/dom-ready.js";
-import { beforeSave } from "./snapshot.js";
+import { addDocumentTransform } from "./snapshot.js";
 
 export const SELECTOR_DISABLED = '[viewmode\\:disabled]';
 export const SELECTOR_READONLY = '[viewmode\\:readonly]';
 
 export function disableAdminInputsBeforeSave() {
-  beforeSave(docElem => {
+  addDocumentTransform(docElem => {
     docElem.querySelectorAll(SELECTOR_DISABLED).forEach(input => {
       input.setAttribute('disabled', '');
     });
