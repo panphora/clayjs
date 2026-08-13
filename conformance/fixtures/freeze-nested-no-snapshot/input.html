@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Freeze nested in no-snapshot</title>
+<script>window.__hyperclayEditMode = true;</script>
+</head>
+<body>
+<p>A [freeze] region is saved as authored, whatever the runtime does to it.</p>
+<div freeze id="before">AUTHORED-BEFORE</div>
+<div no-snapshot>
+<div freeze id="hidden">AUTHORED-HIDDEN</div>
+</div>
+<div freeze id="after">AUTHORED-AFTER</div>
+</body>
+</html>

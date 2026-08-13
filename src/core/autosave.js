@@ -19,9 +19,19 @@ import { initUserGesture, markUserDriven } from "../lib/user-gesture.js";
  * Initialize auto-save on DOM changes
  * Uses debounced mutation observer
  */
+// A bare debounce resets on every change, so a page with anything that mutates
+// faster than the delay — a clock, a countdown, a polling counter — pushes autosave
+// into the future forever and it never fires, with nothing in the UI saying so.
+// maxWait bounds that: however long the churn lasts, a save happens within
+// AUTOSAVE_MAX_WAIT_MS of the first change it was waiting on. (The settled baseline
+// capture in save.js already solved this for itself with MAX_SETTLE_MS.)
+const AUTOSAVE_DEBOUNCE_MS = 1500;
+const AUTOSAVE_MAX_WAIT_MS = 10000;
+
 function initSavePageOnChange() {
   Mutation.onAnyChange({
-    debounce: 1500,
+    debounce: AUTOSAVE_DEBOUNCE_MS,
+    maxWait: AUTOSAVE_MAX_WAIT_MS,
     omitChangeDetails: true,
     require: 'autosave'
   }, () => {

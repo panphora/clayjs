@@ -68,9 +68,33 @@
 
 import { EXTENSION_ATTR_PATTERN } from './extension-noise.js';
 import { resolveRegionPolicy, isInert, strictestPolicy, skipForPolicy } from './region-policy.js';
+import { ROOT_LIBRARY_ATTRS } from './root-attrs.js';
+
 import { isUserDrivenNow, markUserDriven } from './user-gesture.js';
 
 const dummyElem = document.createElement("div");
+
+// Attributes clayjs itself writes on <html>: savestatus flips on every save,
+// editmode/pageowner on every mode change. They are library state, not page
+// content, and snapshots already normalize them so they never reach a file.
+//
+// This became load-bearing the moment the hub started observing documentElement
+// instead of body. The raw lane is deliberately unfiltered ("raw means raw"), so
+// without this every save would push a savestatus flip into undo's record stream
+// and Cmd+Z after a save would undo that instead of the user's edit.
+const ROOT_LIBRARY_ATTR_SET = new Set(ROOT_LIBRARY_ATTRS);
+
+function isLibraryRootAttr(record) {
+  return record.type === 'attributes'
+    && record.target === document.documentElement
+    && ROOT_LIBRARY_ATTR_SET.has(record.attributeName);
+}
+
+function withoutLibraryNoise(records) {
+  return records.some(isLibraryRootAttr)
+    ? records.filter(r => !isLibraryRootAttr(r))
+    : records;
+}
 
 const localMutation = {
   _callbacks: {
@@ -156,7 +180,7 @@ const localMutation = {
       // While paused, only non-pausable callbacks (pure enhancers) run.
       if (onlyNonPausable && callback.pausable !== false) continue;
 
-      const { fn, debounce = 0, selectorFilter, omitChangeDetails, require, skip } = callback;
+      const { fn, debounce = 0, maxWait = 0, selectorFilter, omitChangeDetails, require, skip } = callback;
 
       // Per-consumer region policy: drop changes whose region this consumer
       // doesn't participate in (no-save / no-trigger-autosave / no-undo / freeze
@@ -214,10 +238,21 @@ const localMutation = {
           callback.timeout = null;
         }
 
+        // A plain debounce resets on every mutation, so anything on the page that
+        // changes faster than the delay (a clock, a countdown, a polling counter)
+        // keeps pushing the callback into the future and it never fires at all.
+        // maxWait puts a ceiling on that: however long the churn lasts, the
+        // callback runs within maxWait of the FIRST change it was waiting on.
+        if (!callback.firstPendingAt) callback.firstPendingAt = Date.now();
+        const delay = maxWait > 0
+          ? Math.max(0, Math.min(debounce, maxWait - (Date.now() - callback.firstPendingAt)))
+          : debounce;
+
         if (omitChangeDetails) {
           // For omitChangeDetails, just reset the timer
           callback.timeout = setTimeout(() => {
             callback.timeout = null;
+            callback.firstPendingAt = null;
             try {
               this._log('Executing debounced callback (no details)');
               fn();
@@ -225,7 +260,7 @@ const localMutation = {
               this._log('Error in callback execution:', e, 'error');
               console.error('Error in Mutation callback:', e);
             }
-          }, debounce);
+          }, delay);
         } else {
           // For callbacks with change details, accumulate changes
           if (!callback.pendingChanges) {
@@ -238,6 +273,7 @@ const localMutation = {
             const changes = callback.pendingChanges;
             callback.pendingChanges = null; // Reset to null, not empty array
             callback.timeout = null; // Clear the timeout reference
+            callback.firstPendingAt = null;
             try {
               this._log('Executing debounced callback with changes:', { changes });
               if (changes && changes.length > 0) {
@@ -247,7 +283,7 @@ const localMutation = {
               this._log('Error in callback execution:', e, 'error');
               console.error('Error in Mutation callback:', e);
             }
-          }, debounce);
+          }, delay);
         }
       }
     }
@@ -272,7 +308,9 @@ const localMutation = {
   //      path) so the raw lane's push timing matches a real MutationObserver and
   //      undo's own paused-drop keeps working.
   //   2. the change lane (pause-gated, as before).
-  _onRecords(records) {
+  _onRecords(rawRecords) {
+    const records = withoutLibraryNoise(rawRecords);
+    if (!records.length) return;
     this._fanOutRaw(records);
     this._handleMutations(records);
   },
@@ -304,7 +342,9 @@ const localMutation = {
   //   (c) the requester: returns the pulled records merged with its own buffer,
   //       then clears the buffer.
   _drainBrowserQueue(requester) {
-    const pulled = this._observer ? this._observer.takeRecords() : [];
+    // Same filter as _onRecords: takeRecords() bypasses the observer callback, so
+    // library-owned root attributes would otherwise reach subscribers this way.
+    const pulled = withoutLibraryNoise(this._observer ? this._observer.takeRecords() : []);
     const requesterIsRaw = !!requester && this._rawSubscribers.indexOf(requester) !== -1;
 
     if (pulled.length) {
@@ -614,6 +654,8 @@ const localMutation = {
     const cb = {
       fn: callback,
       debounce: options.debounce || 0,
+      // Ceiling on the debounce: without it, continuous churn defers forever.
+      maxWait: options.maxWait || 0,
       selectorFilter: options.selectorFilter,
       omitChangeDetails: options.omitChangeDetails,
       // Region policy: axis this consumer needs ('observed' | 'autosave' | 'undo')
@@ -624,7 +666,8 @@ const localMutation = {
       // enhancers that never save/record/rebroadcast). Default true.
       pausable: options.pausable !== false,
       timeout: null,
-      pendingChanges: null
+      pendingChanges: null,
+      firstPendingAt: null
     };
 
     this._callbacks[type].push(cb);
@@ -664,7 +707,11 @@ const localMutation = {
 
     this._log('Starting observation');
     this._initializeObserver();
-    this._observer.observe(document.body, {
+    // The root, not body: every capture serializes documentElement, so watching
+    // only body meant a <head> edit (document.title, a new <style>) could never
+    // trigger an autosave while still counting as a change in the dirty check —
+    // the page stayed permanently unsaved and only a manual save cleared it.
+    this._observer.observe(document.documentElement, {
       childList: true,
       attributes: true,
       subtree: true,

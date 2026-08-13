@@ -12,6 +12,7 @@
   "files": [
     "clay.js",
     "clay-ui.js",
+    "clay-internals.js",
     "clay-events.js",
     "clay-options.js",
     "clay-dom.js",
@@ -31,7 +32,9 @@
     "test:conformance": "UPDATE_GOLDENS=0 web-test-runner",
     "conformance:update": "UPDATE_GOLDENS=1 web-test-runner",
     "prepublishOnly": "npm test && npm run test:conformance",
-    "dev": "node tests/stub-server.mjs"
+    "dev": "node tests/stub-server.mjs",
+    "build": "node build.js",
+    "deploy": "node build.js && wrangler deploy"
   },
   "devDependencies": {
     "@esm-bundle/chai": "^4.3.4-fix.0",

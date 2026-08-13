@@ -13,14 +13,17 @@ test("save wire contract: token endpoint, headers, and declared JSON envelope", 
 
   const saveMod = await import("../../src/core/save.js");
 
-  global.fetch = jest.fn(async () => ({ ok: true, json: async () => ({ msg: "Saved" }) }));
+  global.fetch = jest.fn(async () => ({ ok: true, text: async () => JSON.stringify({ msg: "Saved" }) }));
   document.getElementById("content").textContent = "wire-change";
 
   await saveMod.savePage();
 
   expect(global.fetch).toHaveBeenCalled();
   const [url, opts] = global.fetch.mock.calls[0];
-  expect(url).toBe("/_/save/abc");
+  // Absolute against the document's real origin, so a <base href> in the page
+  // cannot redirect the save — and the token in its path — somewhere else.
+  expect(url).toBe(new URL("/_/save/abc", window.location.origin).href);
+  expect(new URL(url).pathname).toBe("/_/save/abc");
   expect(opts.method).toBe("POST");
   expect(opts.headers["Document-URL"]).toBeDefined();
   expect(opts.headers["Page-URL"]).toBeDefined();

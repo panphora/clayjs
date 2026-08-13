@@ -5,8 +5,19 @@
  * Only fires on 'clay:save-saved' events (not on error/offline).
  *
  * Usage:
- *   <span onaftersave="this.innerText = event.detail.msg"></span>
+ *   <span clay="no-trigger-autosave" onaftersave="this.innerText = event.detail.msg"></span>
  *   <link href="styles.css" onaftersave="cacheBust(this)">
+ *
+ * MARK WHAT YOU MUTATE `no-trigger-autosave`.
+ * These handlers run after the save baseline has been taken, so anything they write
+ * to the live DOM reads as a change the user made and leaves the page permanently
+ * dirty: autosave loops, and the close-tab warning never clears. The token strips
+ * the element from every comparison capture, which is what stops that.
+ * `cacheBust()` marks its own target, so the second example needs nothing. A handler
+ * that mutates some OTHER element has to mark that element itself.
+ *
+ * (The alternative — re-reading the whole live DOM after handlers run — is what
+ * clayjs used to do, and it silently discarded anything typed during a save.)
  *
  * The event.detail object contains:
  *   - status: 'saved'

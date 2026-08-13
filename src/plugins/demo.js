@@ -20,12 +20,18 @@
 // returning visitors' old saved bodies morph over the new page.
 
 import { morph } from "../vendor/hyper-morph.vendor.js";
+import { STRIP_FROM_SAVE } from "../lib/region-policy.js";
 
 const KEY = "clay:demo:" +
   (document.documentElement.getAttribute("demo-key") || window.location.pathname);
 const LATENCY_MS = 800;
+// What the demo's fake server must not persist. The region half comes from
+// region-policy's STRIP_FROM_SAVE rather than being re-listed here: this used to
+// name "[save-remove]" alone and so missed the canonical clay="no-save" spelling,
+// which meant the demo saved the very regions no-save promises it never will. The
+// rest is editor chrome the real save lane strips by other means.
 const CHROME_SELECTOR = [
-  "[save-remove]",
+  STRIP_FROM_SAVE,
   "[data-richclay-toolbar]",
   "[data-richclay-menu]",
   "[data-richclay-dialog]",

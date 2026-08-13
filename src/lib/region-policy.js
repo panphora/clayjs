@@ -52,6 +52,21 @@ function hasRegionToken(el, token) {
   return !!el.hasAttribute?.(token);                            // legacy bare attribute
 }
 
+/**
+ * Add a canonical region token to an element's `clay` attribute, preserving any
+ * tokens already there. The one place that knows how the attribute is spelled, so
+ * a caller that needs to mark a region cannot invent a second merge.
+ *
+ * @param {Element} el
+ * @param {string} token - a canonical token, e.g. 'no-trigger-autosave'
+ */
+export function addRegionToken(el, token) {
+  const tokens = new Set((el.getAttribute("clay") || "").trim().split(/\s+/).filter(Boolean));
+  if (tokens.has(token)) return;
+  tokens.add(token);
+  el.setAttribute("clay", Array.from(tokens).join(" "));
+}
+
 // Serializer selectors (recognize the clay-token spelling FIRST, then new + legacy bare).
 export const STRIP_FROM_SAVE = '[clay~="no-save"], [no-save], [save-remove]';
 export const FREEZE_SELECTOR = '[clay~="freeze"], [freeze], [save-freeze]';

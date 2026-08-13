@@ -13,7 +13,7 @@
  * Requires the 'save-system' module (automatically included as dependency).
  */
 
-import { isOwner, isEditMode } from "./is-edit-mode.js";
+import { isEditMode } from "./is-edit-mode.js";
 import { captureForComparison } from "./snapshot.js";
 import { getLastSavedContents } from "./save.js";
 import { logUnloadDiffSync, preloadIfEnabled } from "../lib/autosave-debug.js";
@@ -21,8 +21,14 @@ import { logUnloadDiffSync, preloadIfEnabled } from "../lib/autosave-debug.js";
 // Pre-load diff library if debug mode is on (so it's ready for unload)
 preloadIfEnabled();
 
+// Gated on isEditMode, not isOwner. isOwner means the platform's admin cookie
+// specifically, so gating on it switched the warning off for every host that
+// authenticates another way: htmlclay, anything using a root save token, and any
+// sandboxed document, which cannot read cookies at all. Those are exactly the
+// documents where an unsaved edit is easiest to lose. If the page is editable,
+// the person editing it deserves the warning.
 window.addEventListener('beforeunload', (event) => {
-  if (!isOwner || !isEditMode) return;
+  if (!isEditMode) return;
 
   // Compare directly - both are already stripped
   const currentForCompare = captureForComparison();

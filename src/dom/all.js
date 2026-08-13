@@ -156,36 +156,9 @@ const createMethodHandler = (elements, plugins, methods) => ({
     // - When a method returns an Element (like cloneNode), it wraps it in a proxy
     // - When a method returns undefined (like removeAttribute), it chains on the original elements
     // - For other return values, like strings, it returns the results in an array
-    // We also handle passing in an all-wrapped proxy object as an argument and loop over all elements in it
-    // In the method handler's get function, replace the function call handling with:
     if (typeof value === 'function') {
       return (...args) => {
-        // Unwrap any proxy arguments
-        const unwrappedArgs = args.map(arg => {
-          if (arg && arg.constructor === Proxy) {
-            return Array.from(arg);
-          }
-          return arg;
-        });
-
-        const results = elements.map(el => {
-          // Check if any of the unwrapped arguments are arrays (from proxies)
-          const hasProxyArgs = unwrappedArgs.some(Array.isArray);
-
-          if (hasProxyArgs) {
-            // Handle proxy arguments case
-            const elementResults = unwrappedArgs.map(arg => {
-              if (Array.isArray(arg)) {
-                return arg.map(proxyEl => el[prop](proxyEl));
-              }
-              return [el[prop](...args)];
-            }).flat();
-            return elementResults[elementResults.length - 1];
-          } else {
-            // Simple case - just call the method once with original arguments
-            return el[prop](...args);
-          }
-        });
+        const results = elements.map(el => el[prop](...args));
 
         if (results[0] instanceof Element) {
           return createElementProxy(results.filter(Boolean), plugins, methods);
@@ -390,7 +363,9 @@ const All = new Proxy(function (selectorOrElements, contextSelector) {
     if (typeof selectorOrElements === 'string') {
       const elements = contextElements.flatMap(context => {
         // Include context itself if it matches the selector
-        const matches = context.matches(selectorOrElements) ? [context] : [];
+        // Document has no matches(): it can never be its own match, only a root
+        // to search under.
+        const matches = context.matches?.(selectorOrElements) ? [context] : [];
         // Plus all descendants that match
         const descendants = Array.from(context.querySelectorAll(selectorOrElements));
         return [...matches, ...descendants];

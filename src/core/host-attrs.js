@@ -7,9 +7,7 @@
  * cannot drift between the edit-mode ladder and the save lane.
  */
 
-// The spec spells it `savetoken`. htmlclay ships `htmlclaytoken` today and is a
-// first-class host, so both are read and the canonical one wins.
-const TOKEN_ATTRS = ["savetoken", "htmlclaytoken"];
+import { HOST_TOKEN_ATTRS, SAVE_TRANSPORT_ATTR } from "../lib/root-attrs.js";
 
 // A host that wants the desktop JSON envelope on its save lane declares it on
 // the root. This replaced a `location.hostname === 'localhost'` sniff, which sent
@@ -23,7 +21,7 @@ export const DESKTOP_JSON = "desktop-json-v1";
  */
 export function saveToken() {
   if (typeof document === "undefined") return null;
-  for (const attr of TOKEN_ATTRS) {
+  for (const attr of HOST_TOKEN_ATTRS) {
     const value = document.documentElement.getAttribute(attr);
     if (value) return value;
   }
@@ -44,5 +42,5 @@ export function hasSaveToken() {
  */
 export function saveTransport() {
   if (typeof document === "undefined") return null;
-  return document.documentElement.getAttribute("clay-save-transport");
+  return document.documentElement.getAttribute(SAVE_TRANSPORT_ATTR);
 }

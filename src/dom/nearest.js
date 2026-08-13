@@ -31,7 +31,9 @@
 export default function nearest (startElem, selector, elementFoundReturnValue = x => x) {
   const visited = new Set();
 
-  // Check node and its descendants using BFS
+  // Returns the matched ELEMENT, not the transformed value: a transform yielding
+  // "" or false used to read as not-found here, so the search walked past a real
+  // match (an empty input, an unchecked box) and could report a farther element.
   function checkDeep(root) {
     if (!root || visited.has(root)) return null;
 
@@ -46,7 +48,7 @@ export default function nearest (startElem, selector, elementFoundReturnValue = 
       localVisited.add(node);
 
       if (node.matches(selector)) {
-        return elementFoundReturnValue(node);
+        return node;
       }
 
       queue.push(...node.children);
@@ -58,8 +60,8 @@ export default function nearest (startElem, selector, elementFoundReturnValue = 
   function checkSiblings(start, direction) {
     let sibling = start[direction];
     while (sibling) {
-      const result = checkDeep(sibling);
-      if (result) return result;
+      const found = checkDeep(sibling);
+      if (found) return found;
       sibling = sibling[direction];
     }
     return null;
@@ -80,14 +82,14 @@ export default function nearest (startElem, selector, elementFoundReturnValue = 
 
     // Check children deeply
     for (const child of current.children) {
-      const result = checkDeep(child);
-      if (result) return result;
+      const found = checkDeep(child);
+      if (found) return elementFoundReturnValue(found);
     }
 
     // Check siblings deeply
-    let result = checkSiblings(current, 'previousElementSibling') ||
-                 checkSiblings(current, 'nextElementSibling');
-    if (result) return result;
+    const found = checkSiblings(current, 'previousElementSibling') ||
+                  checkSiblings(current, 'nextElementSibling');
+    if (found) return elementFoundReturnValue(found);
 
     // Move up to parent
     current = current.parentElement;

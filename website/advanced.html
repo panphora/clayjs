@@ -50,6 +50,29 @@
     </div>
   </section>
 
+  <!-- ====== CUSTOM ATTRIBUTES THAT RESPECT REGIONS ====== -->
+  <section id="custom-attrs">
+    <span class="eyebrow">Your own attributes</span>
+    <h2 class="section-title">Respecting regions from your own code</h2>
+    <p>Writing a custom attribute that touches the save? Ask clayjs what a region means instead of matching <code>[no-save]</code> yourself. That's what <code>clay.internals.region</code> is for: it's the same policy the library uses, so your attribute can't quietly stop agreeing with it two releases from now. It needs one extra script tag — the <a href="docs.html#internals">internals satellite</a>.</p>
+    <pre><code>&lt;<span class="t">script</span> <span class="a">src</span>="https://clayjs.com/clay-internals.js"&gt;&lt;/<span class="t">script</span>&gt;</code></pre>
+    <p>A <code>stamp</code> attribute that writes the time into an element on every save, and leaves alone the regions that aren't being persisted as they stand:</p>
+    <pre><code>await clay.loaded.internals;
+const { resolveRegionPolicy, addRegionToken, PERSIST } = clay.internals.region;
+
+clay.internals.onPrepareForSave(clone =&gt; {
+  for (const el of clone.querySelectorAll(<span class="a">"[stamp]"</span>)) {
+    <span class="c">// Inside no-save or freeze? This element isn't going to disk as it stands,</span>
+    <span class="c">// so stamping it is either wasted or wrong.</span>
+    if (resolveRegionPolicy(el).persist !== PERSIST.FULL) continue;
+    el.textContent = new Date().toISOString();
+  }
+});</code></pre>
+    <p>When your attribute generates chrome of its own, mark it rather than hoping nobody saves it. <code>addRegionToken</code> merges into whatever <code>clay</code> attribute is already on the element:</p>
+    <pre><code>addRegionToken(toolbar, <span class="a">"no-save"</span>);   <span class="c">// clay="existing-token no-save"</span></code></pre>
+    <p class="small">The rest of the surface — <code>isInert</code>, <code>isSnapshotRemoved</code>, <code>REGION_ATTRS</code>, and the raw <code>selectors</code> clayjs strips with — is in the <a href="docs.html#internals">reference</a>.</p>
+  </section>
+
   <!-- ====== ADVANCED SAVE ATTRIBUTES ====== -->
   <section id="save-attrs">
     <span class="eyebrow">Hooks into the save</span>

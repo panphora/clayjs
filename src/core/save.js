@@ -92,27 +92,68 @@ window.addEventListener('online', () => {
 });
 
 // ============================================
-// POST-SAVE BASELINE RECAPTURE
+// THE BASELINE IS THE BYTES WE SENT
 // ============================================
-// After a successful save, onaftersave handlers may modify the live DOM
-// (e.g., cacheBust updates ?v= query params). We recapture the baseline
-// after these sync handlers complete to prevent false "unsaved changes" warnings.
-
-document.addEventListener('clay:save-saved', () => {
-  // Use setTimeout(0) to run after all sync onaftersave handlers complete
-  setTimeout(() => {
-    // Store stripped version so comparisons are direct (no parsing needed)
-    const contents = captureForComparison();
-    lastSavedContents = contents;
-    logBaseline('recaptured after onaftersave', `${contents.length} chars`);
-  }, 0);
-});
+// There is deliberately no post-save re-read of the live DOM here.
+//
+// One used to exist, because [onaftersave] handlers mutate the page after a save
+// lands (cacheBust rewrites ?v= query params) and without it the page read dirty
+// forever. But a re-read cannot tell that churn apart from something the user typed
+// while the request was in flight, so it recorded those keystrokes as saved without
+// ever sending them: the edit was gone, with no error, no dirty flag, and no
+// close-tab warning.
+//
+// Post-save mutators are made invisible to the comparison instead — they mark what
+// they touch `no-trigger-autosave`, which strips it from every comparison capture
+// (see cache-bust.js and refetch-on-save.js). That leaves the baseline free to stay
+// exactly what savePage sent, which is the only value that is true by construction.
 
 // Re-export from core for backward compatibility
 export { beforeSave, getPageContents };
 
 let unsavedChanges = false;
 let lastSavedContents = '';
+// A save was requested while one was on the wire; run one more when it settles.
+let pendingSave = false;
+
+function skipped_(msg) {
+  return { ok: false, msg, msgType: 'skipped', code: null, etag: null };
+}
+
+/**
+ * Apply one save result to the page's state.
+ *
+ * A 'skipped' result means the bytes never reached the wire, so the baseline must
+ * NOT advance: recording content as saved when it was never sent is the same defect
+ * as re-reading the live DOM after a save, one layer down. 'unknown' is a timeout,
+ * where the write may or may not have landed, so it is not treated as success
+ * either.
+ */
+function applySaveResult(result, forComparison, label) {
+  if (result.ok) {
+    lastSavedContents = forComparison;
+    unsavedChanges = false;
+    // The server's severity rides through untouched: a save can land AND carry a
+    // warning, and the UI module is what decides how to render that.
+    setSaveState('saved', result.msg || 'Saved', result.msgType);
+    logBaseline(label, `${lastSavedContents.length} chars`);
+  } else if (result.msgType !== 'skipped') {
+    if (!navigator.onLine) {
+      setSaveState('offline', result.msg);
+    } else {
+      setSaveState('error', result.msg);
+    }
+  }
+}
+
+// Run the save that arrived while this one was in flight. savePage does its own
+// dirty check, so if nothing actually changed it resolves 'skipped' and stops:
+// this cannot spin.
+function drainPendingSave() {
+  if (!pendingSave) return;
+  pendingSave = false;
+  savePage();
+}
 
 // State accessors for autosave module
 export function getUnsavedChanges() { return unsavedChanges; }
@@ -133,14 +174,18 @@ export function setLastSavedContents(val) { lastSavedContents = val; }
 export function savePage(callback = () => {}) {
   return new Promise((resolve) => {
     if (!isEditMode && !window.clay?.testMode) {
-      const skipped = { msg: 'Not in edit mode', msgType: 'skipped' };
+      const skipped = skipped_('Not in edit mode');
       callback(skipped);
       return resolve(skipped);
     }
 
-    // Don't start a new save if one is already in progress
+    // A save is already on the wire. Remember that a newer state is waiting rather
+    // than dropping it: the in-flight request carries the older bytes, and if no
+    // further mutation happens to retrigger autosave, the newer ones would never
+    // reach disk at all.
     if (isSaveInProgress()) {
-      const skipped = { msg: 'Save already in progress', msgType: 'skipped' };
+      pendingSave = true;
+      const skipped = skipped_('Save already in progress');
       callback(skipped);
       return resolve(skipped);
     }
@@ -155,13 +200,13 @@ export function savePage(callback = () => {}) {
     // Single capture: clone once, get both versions
     // forSave strips non-persisted regions ([no-save]/[save-remove])
     // forComparison additionally strips every autosave-off region
-    let forSave, forComparison;
+    let forSave, forComparison, snapshotHtml;
     try {
-      ({ forSave, forComparison } = captureForSaveAndComparison());
+      ({ forSave, forComparison, snapshotHtml } = captureForSaveAndComparison());
     } catch (err) {
       console.error('savePage: captureForSaveAndComparison failed', err);
       setSaveState('error', err.message);
-      const result = { msg: err.message, msgType: 'error' };
+      const result = { msg: err.message, msgType: 'error', code: null, etag: null };
       if (typeof callback === 'function') {
         callback(result);
       }
@@ -174,7 +219,7 @@ export function savePage(callback = () => {}) {
 
     // Skip if content hasn't changed
     if (!unsavedChanges) {
-      const skipped = { msg: 'No changes to save', msgType: 'skipped' };
+      const skipped = skipped_('No changes to save');
       callback(skipped);
       return resolve(skipped);
     }
@@ -183,34 +228,14 @@ export function savePage(callback = () => {}) {
     setSavingState();
 
     // Use saveHtml directly with our pre-captured content (avoids double capture)
-    saveHtml(forSave, (err, data) => {
-      if (!err) {
-        // SUCCESS - store stripped version for future comparisons
-        lastSavedContents = forComparison;
-        unsavedChanges = false;
-        setSaveState('saved', data?.msg || 'Saved', data?.msgType);
-        logBaseline('updated after save', `${lastSavedContents.length} chars`);
-      } else {
-        // FAILED - determine if it's offline or server error
-        if (!navigator.onLine) {
-          setSaveState('offline', err.message);
-        } else {
-          setSaveState('error', err.message);
-        }
-      }
-
-      // Call user callback if provided (preserve server's msgType)
-      const result = {
-        msg: err?.message || data?.msg,
-        msgType: err ? 'error' : (data?.msgType || 'success'),
-        code: err?.code ?? data?.code ?? null,
-        etag: data?.etag ?? null
-      };
+    saveHtml(forSave, (result) => {
+      applySaveResult(result, forComparison, 'updated after save');
       if (typeof callback === 'function') {
         callback(result);
       }
       resolve(result);
-    });
+      drainPendingSave();
+    }, { snapshotHtml });
   });
 }
 
@@ -223,13 +248,14 @@ export function savePage(callback = () => {}) {
 export function savePageForce(callback = () => {}) {
   return new Promise((resolve) => {
     if (!isEditMode && !window.clay?.testMode) {
-      const skipped = { msg: 'Not in edit mode', msgType: 'skipped' };
+      const skipped = skipped_('Not in edit mode');
       callback(skipped);
       return resolve(skipped);
     }
 
     if (isSaveInProgress()) {
-      const skipped = { msg: 'Save already in progress', msgType: 'skipped' };
+      pendingSave = true;
+      const skipped = skipped_('Save already in progress');
       callback(skipped);
       return resolve(skipped);
     }
@@ -239,13 +265,13 @@ export function savePageForce(callback = () => {}) {
       setOfflineStateQuiet();
     }
 
-    let forSave, forComparison;
+    let forSave, forComparison, snapshotHtml;
     try {
-      ({ forSave, forComparison } = captureForSaveAndComparison());
+      ({ forSave, forComparison, snapshotHtml } = captureForSaveAndComparison());
     } catch (err) {
       console.error('savePageForce: captureForSaveAndComparison failed', err);
       setSaveState('error', err.message);
-      const result = { msg: err.message, msgType: 'error' };
+      const result = { msg: err.message, msgType: 'error', code: null, etag: null };
       if (typeof callback === 'function') {
         callback(result);
       }
@@ -254,31 +280,14 @@ export function savePageForce(callback = () => {}) {
 
     setSavingState();
 
-    saveHtml(forSave, (err, data) => {
-      if (!err) {
-        lastSavedContents = forComparison;
-        unsavedChanges = false;
-        setSaveState('saved', data?.msg || 'Saved', data?.msgType);
-        logBaseline('updated after force save', `${lastSavedContents.length} chars`);
-      } else {
-        if (!navigator.onLine) {
-          setSaveState('offline', err.message);
-        } else {
-          setSaveState('error', err.message);
-        }
-      }
-
-      const result = {
-        msg: err?.message || data?.msg,
-        msgType: err ? 'error' : (data?.msgType || 'success'),
-        code: err?.code ?? data?.code ?? null,
-        etag: data?.etag ?? null
-      };
+    saveHtml(forSave, (result) => {
+      applySaveResult(result, forComparison, 'updated after force save');
       if (typeof callback === 'function') {
         callback(result);
       }
       resolve(result);
-    });
+      drainPendingSave();
+    }, { snapshotHtml });
   });
 }
 
@@ -293,13 +302,16 @@ export function replacePageWith(url) {
     return;
   }
 
-  replacePageWithCore(url, (err, data) => {
-    if (err) {
-      // Emit error event (save-toast will show toast if loaded)
-      setSaveState('error', err.message || "Failed to save template");
-    } else {
-      // Only reload if save was successful
+  replacePageWithCore(url, (result) => {
+    // Reload ONLY on a save that actually landed. A skipped result means the
+    // replacement never happened (busy lane, or not in edit mode), and reloading
+    // then presented a no-op as a completed swap.
+    if (result.ok) {
       window.location.reload();
+    } else if (result.msgType === 'skipped') {
+      setSaveState('error', result.msg || 'Template not saved');
+    } else {
+      setSaveState('error', result.msg || 'Failed to save template');
     }
   });
 }
@@ -309,6 +321,9 @@ const throttledSave = throttle(savePage, 1200);
 
 // Baseline for autosave comparison
 let baselineContents = '';
+// The baseline veto only guards the load-time settle window; captureBaseline
+// disarms it. See the comment there.
+let baselineActive = true;
 
 // ============================================
 // BASELINE CAPTURE (Settled Signal)
@@ -376,6 +391,14 @@ function initBaselineCapture() {
       logBaseline('settled skipped', userEdited ? 'user edited' : 'save occurred during settle');
     }
 
+    // The load-time veto has done its job. It exists so setup churn from modules
+    // booting cannot trigger a save, and that window is over once mutations have
+    // settled. Leaving it armed for the life of the tab is what made an undo back
+    // to the page's original state unsaveable: it differed from lastSavedContents
+    // but matched baselineContents, so autosave vetoed it forever and only a manual
+    // save could persist the revert.
+    baselineActive = false;
+
     document.documentElement.setAttribute('savestatus', 'saved');
   };
 
@@ -412,29 +435,41 @@ if (document.readyState === 'loading') {
  */
 export function savePageThrottled(callback = () => {}) {
   if (!isEditMode) {
-    const skipped = { msg: 'Not in edit mode', msgType: 'skipped' };
+    const skipped = skipped_('Not in edit mode');
     callback(skipped);
     return Promise.resolve(skipped);
   }
 
-  // For autosave: check both that content changed from baseline AND from last save
-  // This prevents saves from initial setup mutations
+  // For autosave: while the page is still settling, content must differ from BOTH
+  // the load-time baseline and the last save, so module setup churn cannot trigger
+  // a save. Once settled, the baseline veto is disarmed and only the last save
+  // matters — otherwise undoing back to the page's original state can never be
+  // persisted, because it matches the baseline forever.
   // Compare directly - stored versions are already stripped
   const currentForCompare = captureForComparison();
-  const differsFromBaseline = currentForCompare !== baselineContents;
+  const differsFromBaseline = !baselineActive || currentForCompare !== baselineContents;
   const differsFromLastSave = currentForCompare !== lastSavedContents;
 
   logSaveCheck('throttled vs baseline', !differsFromBaseline);
   logSaveCheck('throttled vs lastSave', !differsFromLastSave);
 
   if (!(differsFromBaseline && differsFromLastSave)) {
-    const skipped = { msg: 'No changes to save', msgType: 'skipped' };
+    const skipped = skipped_('No changes to save');
     callback(skipped);
     return Promise.resolve(skipped);
   }
 
   unsavedChanges = true;
-  return throttledSave(callback);
+  // The throttled promise can reject now that a throwing save no longer strands
+  // its callers (see throttle.js), and both autosave call sites are fire-and-forget,
+  // with no reach into this module's error path. Catch it here, the one place that
+  // owns that path, so every caller keeps the never-rejects contract savePage
+  // documents and a throw surfaces as a failed save instead of an unhandled rejection.
+  return throttledSave(callback).catch(err => {
+    const result = { ok: false, msg: err?.message || 'Save failed', msgType: 'error', code: null, etag: null };
+    setSaveState('error', result.msg);
+    return result;
+  });
 }
 
 /**

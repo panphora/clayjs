@@ -14,7 +14,7 @@ beforeAll(async () => {
 });
 
 function respondWith(body) {
-  global.fetch = jest.fn(async () => ({ ok: true, json: async () => body }));
+  global.fetch = jest.fn(async () => ({ ok: true, text: async () => JSON.stringify(body) }));
 }
 
 async function saveAndCaptureDetail(text) {
@@ -45,13 +45,16 @@ test("success msgType reaches the clay:save-saved detail", async () => {
   expect(seen[0]).toMatchObject({ msg: "Saved", msgType: "success" });
 });
 
-test("msgType is empty when the server sends none", async () => {
+// A server that sends no severity means "fine", so the event says so rather than
+// carrying an empty string. The distinction was never read: ui/index.js branches on
+// 'warning' and treats everything else as success.
+test("msgType defaults to success when the server sends none", async () => {
   respondWith({ msg: "Saved" });
 
   const seen = await saveAndCaptureDetail("changed-no-msgtype");
 
   expect(seen[0].msg).toBe("Saved");
-  expect(seen[0].msgType).toBe("");
+  expect(seen[0].msgType).toBe("success");
 });
 
 test("core alone renders no toast — a warning save leaves the DOM untouched", async () => {

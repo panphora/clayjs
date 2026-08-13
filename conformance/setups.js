@@ -9,6 +9,17 @@
 // property values — the client's real persistence hook does the reflection.
 
 export const setups = {
+
+  // A [freeze] inside a [no-snapshot] region: the region is gone from the clone by
+  // the time the prepare-phase freeze pass runs, so pairing live and cloned freeze
+  // elements by list POSITION there wrote #hidden's authored content into #after —
+  // permanently, in the saved file. Runtime edits below prove the other half: a
+  // freeze region is saved as authored, never as it currently looks.
+  'freeze-nested-no-snapshot'(doc) {
+    doc.querySelector('#before').innerHTML = 'RUNTIME-BEFORE';
+    doc.querySelector('#hidden').innerHTML = 'RUNTIME-HIDDEN';
+    doc.querySelector('#after').innerHTML = 'RUNTIME-AFTER';
+  },
   // Step-7 ordering (the bug fixed in Step 1b), as a byte fixture. A registered
   // save-time hook must be able to SEE existing [no-save] nodes (the strip runs
   // after hooks), and a [no-save] node the hook itself injects must still be
@@ -59,6 +70,12 @@ export const setups = {
       const el = clone.querySelector('#marks');
       if (el) el.setAttribute('data-reg-save', '1');
     });
+  },
+
+  'sync-root-attrs': (doc) => {
+    doc.documentElement.setAttribute('savestatus', 'unsaved');
+    doc.documentElement.setAttribute('editmode', 'true');
+    doc.documentElement.setAttribute('pageowner', 'true');
   },
 
   // Spec §2: state held in a JS property is absent from both artifacts; the same

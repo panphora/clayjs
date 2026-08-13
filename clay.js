@@ -11,9 +11,17 @@
   // resolves the ORIGINAL `ready` promise via the stashed resolver.
   if (clay.__booted) return;
 
-  if (!clay.ready) {
-    clay.ready = new Promise(function (r) { clay.__readyResolve = r; });
+  function mintReady() {
+    clay.ready = new Promise(function (res, rej) {
+      clay.__readyResolve = res;
+      clay.__readyReject = rej;
+    });
+    // Nobody may be awaiting a failed boot's promise, and an unhandled rejection
+    // in the console is noise on top of the error we already logged.
+    clay.ready.catch(function () {});
   }
+
+  if (!clay.ready) mintReady();
 
   var script = document.currentScript;
   if (!script || !script.src) {
@@ -29,5 +37,13 @@
     .catch(function (err) {
       clay.__booted = false;
       console.error("clayjs failed to load:", err);
+      // Settle the promise so `await clay.ready` fails loudly instead of hanging
+      // forever with nothing to catch. Then mint a fresh one: a promise settles
+      // once, so without this the corrected retry tag would call __readyResolve on
+      // an already-rejected promise and every later await would keep throwing even
+      // though the retry succeeded.
+      var reject = clay.__readyReject;
+      mintReady();
+      if (reject) reject(err);
     });
 })();

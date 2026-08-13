@@ -56,6 +56,13 @@
       "requires": []
     },
     {
+      "name": "sync-root-attrs",
+      "description": "the sync payload drops the six root attributes that belong to one tab; the snapshot and the document keep them, because stripping the host's own injections is the host's job",
+      "skipDocument": false,
+      "syncGolden": true,
+      "requires": []
+    },
+    {
       "name": "properties-not-attributes",
       "description": "state in a JS property is absent from both artifacts; the same value in an attribute is present",
       "skipDocument": false,
@@ -80,6 +87,12 @@
       "skipDocument": false,
       "requires": ["form-persist"],
       "secrets": ["S3CRET-sentinel-should-never-serialize"]
+    },
+    {
+      "name": "freeze-nested-no-snapshot",
+      "description": "a [freeze] inside [no-snapshot] must not shift the authored content of the freeze regions around it",
+      "skipDocument": false,
+      "requires": ["freeze"]
     }
   ]
 }

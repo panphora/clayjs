@@ -43,5 +43,11 @@ for (const fx of manifest.fixtures) {
         await goldenAssert(`${FIXTURES_DIR}/${fx.name}/document.html`, out.document);
       });
     }
+
+    if (fx.syncGolden) {
+      it('sync payload bytes match golden', async () => {
+        await goldenAssert(`${FIXTURES_DIR}/${fx.name}/sync.html`, out.sync);
+      });
+    }
   });
 }

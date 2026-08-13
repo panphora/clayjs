@@ -40,6 +40,8 @@ import Mutation from "../lib/mutation.js";
 import { isSnapshotRemoved } from "../lib/region-policy.js";
 import { isEditMode } from "../core/is-edit-mode.js";
 import { mergeTagRecognizers } from "./merge-tags.js";
+import { serializeForSync } from '../core/snapshot.js';
+import { isTabLocalRootAttr } from '../lib/root-attrs.js';
 
 class LiveSync {
   constructor() {
@@ -58,6 +60,8 @@ class LiveSync {
 
     this.debounceMs = 150;
     this.debounceTimer = null;
+    this._sendInFlight = false;
+    this._queuedSend = null;
     this.isPaused = false;
     this.isDestroyed = false;
     this.debug = false;
@@ -96,7 +100,7 @@ class LiveSync {
     // against the live elements so that the next save can produce the same
     // identityMap, and afterNodeMorphed transfers IDs from incoming parsed
     // elements onto the live elements they morphed into.
-    this.idCounter = this._loadIdCounter();
+    this.idCounter = 0;
     this.liveWeakMap = new WeakMap();
 
     // Callbacks
@@ -118,28 +122,15 @@ class LiveSync {
   }
 
   /**
-   * Generate or retrieve a tab-specific client ID
-   * Uses sessionStorage (unique per tab) not localStorage (shared across tabs)
+   * Mint the per-tab sender identity used for echo suppression. Lives on the
+   * instance, never in storage: sessionStorage is COPIED into a duplicated tab,
+   * so a persisted id made the duplicate treat the original's edits as its own
+   * echoes and the two tabs silently stopped syncing. Instance lifetime is the
+   * durability that matters, since EventSource auto-reconnect reuses this same
+   * instance.
    */
   generateClientId() {
-    let id = null;
-
-    try {
-      id = sessionStorage.getItem('livesync-client-id');
-    } catch (e) {
-      // sessionStorage might not be available
-    }
-
-    if (!id) {
-      id = Math.random().toString(36).slice(2, 11) + Date.now().toString(36);
-      try {
-        sessionStorage.setItem('livesync-client-id', id);
-      } catch (e) {
-        // That's okay
-      }
-    }
-
-    return id;
+    return Math.random().toString(36).slice(2, 11) + Date.now().toString(36);
   }
 
   /**
@@ -208,6 +199,7 @@ class LiveSync {
     }
 
     clearTimeout(this.debounceTimer);
+    this._queuedSend = null;
 
     // Cancel any pending frame and clear the queue. A morph already in
     // flight cannot be aborted; the isDestroyed check in _runPending guards
@@ -221,27 +213,8 @@ class LiveSync {
     this._pendingIdentityMap = null;
   }
 
-  _loadIdCounter() {
-    try {
-      const raw = sessionStorage.getItem('livesync-id-counter');
-      const n = parseInt(raw || '0', 10);
-      return Number.isFinite(n) && n > 0 ? n : 0;
-    } catch (e) {
-      return 0;
-    }
-  }
-
-  _persistIdCounter() {
-    try {
-      sessionStorage.setItem('livesync-id-counter', String(this.idCounter));
-    } catch (e) {
-      // Storage full / sandboxed — fall back to in-memory only.
-    }
-  }
-
   _mintId() {
     this.idCounter++;
-    this._persistIdCounter();
     return `${this.clientId}:${this.idCounter}`;
   }
 
@@ -387,8 +360,10 @@ class LiveSync {
     if (this.isDestroyed) return;
 
     const pageUrl = encodeURIComponent(window.location.href);
-    const url = `/_/live-sync/stream?page-url=${pageUrl}&lane=${this.lane}&resume-id=${this.resumeId}`;
-    this.sse = new EventSource(url);
+    const path = `/_/live-sync/stream?page-url=${pageUrl}&lane=${this.lane}&resume-id=${this.resumeId}`;
+    // Resolved against the real origin: a <base href> in the authored document
+    // would otherwise point the sync stream at an origin the document chose.
+    this.sse = new EventSource(new URL(path, window.location.origin).href);
 
     this.sse.onopen = () => {
       console.log('[LiveSync] Connected');
@@ -482,7 +457,7 @@ class LiveSync {
       // after dispatchEvent returns, so reading outerHTML and walking children
       // must happen now.
       this._log('snapshot-ready received, preparing to send');
-      const html = clone.outerHTML;
+      const html = serializeForSync(clone);
       const identityMap = this._buildIdentityMap(document.documentElement, clone);
       this.sendUpdate(html, identityMap);
     };
@@ -491,40 +466,65 @@ class LiveSync {
   }
 
   /**
-   * Send full HTML to the server (debounced)
-   * Only updates lastHtml after successful save
+   * Send full HTML to the server (debounced, single-flight).
+   *
+   * One POST on the wire at a time, with at most one newer payload queued; a
+   * fresher snapshot replaces the queued one, because peers only ever need the
+   * latest state. Two concurrent fetches could reach the server in either order,
+   * and last-write-wins then stored the OLDER snapshot for every peer.
    */
   sendUpdate(html, identityMap) {
     clearTimeout(this.debounceTimer);
 
     this.debounceTimer = setTimeout(() => {
-      // Skip if unchanged
-      if (html === this.lastHtml) {
-        this._log('Skipping send - HTML unchanged');
-        return;
-      }
-
-      this._log(`Sending update (HTML length: ${html.length}, lastHtml length: ${this.lastHtml?.length || 0})`);
-
-      fetch('/_/live-sync/save', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Page-URL': window.location.href },
-        body: JSON.stringify({
-          html: html,
-          sender: this.clientId,
-          identityMap: identityMap
-        })
-      }).then(response => {
-        if (response.ok) {
-          this.lastHtml = html;
-        } else {
-          console.warn('[LiveSync] Save returned status:', response.status);
-        }
-      }).catch(err => {
-        console.error('[LiveSync] Save failed:', err);
-        if (this.onError) this.onError(err);
-      });
+      this._enqueueSend(html, identityMap);
     }, this.debounceMs);
+  }
+
+  _enqueueSend(html, identityMap) {
+    if (this._sendInFlight) {
+      this._queuedSend = { html, identityMap };
+      return;
+    }
+    this._postUpdate(html, identityMap);
+  }
+
+  _postUpdate(html, identityMap) {
+    // Skip if unchanged
+    if (html === this.lastHtml) {
+      this._log('Skipping send - HTML unchanged');
+      return;
+    }
+
+    this._log(`Sending update (HTML length: ${html.length}, lastHtml length: ${this.lastHtml?.length || 0})`);
+
+    this._sendInFlight = true;
+
+    // Absolute against the real origin, so a <base href> in the page cannot
+    // redirect the whole document to an origin the author picked.
+    fetch(new URL('/_/live-sync/save', window.location.origin).href, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Page-URL': window.location.href },
+      body: JSON.stringify({
+        html: html,
+        sender: this.clientId,
+        identityMap: identityMap
+      })
+    }).then(response => {
+      if (response.ok) {
+        this.lastHtml = html;
+      } else {
+        console.warn('[LiveSync] Save returned status:', response.status);
+      }
+    }).catch(err => {
+      console.error('[LiveSync] Save failed:', err);
+      if (this.onError) this.onError(err);
+    }).finally(() => {
+      this._sendInFlight = false;
+      const queued = this._queuedSend;
+      this._queuedSend = null;
+      if (queued) this._postUpdate(queued.html, queued.identityMap);
+    });
   }
 
   /**
@@ -660,6 +660,11 @@ class LiveSync {
       const id = parsedWeakMap.get(newEl);
       if (id) liveWeakMap.set(oldEl, id);
     };
+    // A peer may neither write these onto our root nor, by not carrying them,
+    // take ours away. Returning false is hyper-morph's veto for both directions
+    // (it calls this for updateType 'update' and 'remove' alike).
+    const beforeAttributeUpdated = (name, element) =>
+      isTabLocalRootAttr(name, element) ? false : undefined;
 
     try {
       // Morph entire document. We MUST await — HyperMorph.morph returns a
@@ -683,7 +688,7 @@ class LiveSync {
           mergeTags: mergeTagRecognizers
         },
         key,
-        callbacks: { afterNodeMorphed }
+        callbacks: { afterNodeMorphed, beforeAttributeUpdated }
       });
 
       // Restore viewport. Done after morph so layout has settled.

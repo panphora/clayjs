@@ -39,6 +39,7 @@
 import { stripExtensionNoise } from '../lib/extension-noise.js';
 import { STRIP_FROM_SAVE, STRIP_FROM_COMPARISON, SNAPSHOT_REMOVE_SELECTOR } from '../lib/region-policy.js';
 import { saveTransport, DESKTOP_JSON } from './host-attrs.js';
+import { TAB_LOCAL_ROOT_ATTRS } from '../lib/root-attrs.js';
 
 // =============================================================================
 // HOOK REGISTRIES
@@ -46,6 +47,29 @@ import { saveTransport, DESKTOP_JSON } from './host-attrs.js';
 
 const snapshotHooks = [];       // Phase 2: Always run (form sync)
 const prepareForSaveHooks = []; // Phase 3a: Save only (strip admin)
+
+/**
+ * Run every authored handler of one kind over a clone, and never let one of them
+ * take the page down with it.
+ *
+ * These attributes hold page-author JavaScript, and the capture pipeline runs on
+ * the boot path: save.js captures a baseline during module evaluation, inside the
+ * dynamic import the loader awaits. An unguarded throw in one page attribute
+ * therefore cost the document its entire client rather than costing that one
+ * handler its effect.
+ *
+ * @param {HTMLElement} clone
+ * @param {string} attr - e.g. 'onbeforesave'
+ */
+function runAuthoredHandlers(clone, attr) {
+  for (const el of clone.querySelectorAll(`[${attr}]`)) {
+    try {
+      new Function(el.getAttribute(attr)).call(el);
+    } catch (err) {
+      console.error(`[${attr}] handler failed:`, err);
+    }
+  }
+}
 
 /**
  * Register a hook that runs on EVERY snapshot (save AND sync).
@@ -105,9 +129,7 @@ export function captureSnapshot() {
     hook(clone);
   }
 
-  for (const el of clone.querySelectorAll('[onbeforesnapshot]')) {
-    new Function(el.getAttribute('onbeforesnapshot')).call(el);
-  }
+  runAuthoredHandlers(clone, 'onbeforesnapshot');
 
   for (const el of clone.querySelectorAll(SNAPSHOT_REMOVE_SELECTOR)) {
     el.remove();
@@ -130,9 +152,7 @@ export function captureSnapshot() {
  */
 function prepareCloneForSave(clone) {
   // Run inline [onbeforesave] handlers
-  for (const el of clone.querySelectorAll('[onbeforesave]')) {
-    new Function(el.getAttribute('onbeforesave')).call(el);
-  }
+  runAuthoredHandlers(clone, 'onbeforesave');
 
   // Run registered prepare hooks ([freeze]/[save-freeze] innerHTML restore lives here)
   for (const hook of prepareForSaveHooks) {
@@ -162,9 +182,7 @@ export function captureForComparison() {
   const clone = captureSnapshot();
 
   // Run inline [onbeforesave] handlers
-  for (const el of clone.querySelectorAll('[onbeforesave]')) {
-    new Function(el.getAttribute('onbeforesave')).call(el);
-  }
+  runAuthoredHandlers(clone, 'onbeforesave');
 
   // Strip before hooks (hooks see the "final" state)
   for (const el of clone.querySelectorAll(STRIP_FROM_COMPARISON)) {
@@ -187,31 +205,32 @@ export function captureForComparison() {
  *
  * @param {Object} options
  * @param {boolean} options.emitForSync - Whether to emit snapshot-ready event (default: true)
- * @returns {{ forSave: string, forComparison: string }}
+ * @returns {{ forSave: string, forComparison: string, snapshotHtml: ?string }}
  */
 export function captureForSaveAndComparison({ emitForSync = true } = {}) {
   const clone = captureSnapshot();
+
+  // The unstripped snapshot, for a host that asked for the desktop JSON envelope:
+  // the save then sends both the stripped document and this. Returned to the caller
+  // rather than parked on a window global, so it can only ever be paired with the
+  // content captured alongside it. As a global it was cleared on success only, so
+  // two captures without an intervening successful save shipped a stale snapshot
+  // next to fresh content. Captured only when the document DECLARES the transport;
+  // this used to key off `location.hostname`, which set it on every localhost page
+  // whether or not its host wanted it.
+  const snapshotHtml = saveTransport() === DESKTOP_JSON
+    ? '<!DOCTYPE html>' + clone.outerHTML
+    : null;
 
   // Emit for live-sync before any stripping
   if (emitForSync) {
     document.dispatchEvent(new CustomEvent('clay:snapshot-ready', {
       detail: { documentElement: clone }
     }));
-
-    // Store the unstripped snapshot for a host that asked for the desktop JSON
-    // envelope, which is the only thing that reads it: the save system then sends
-    // both the stripped document and this. Captured only when someone will
-    // actually send it — this used to key off `location.hostname`, which set it
-    // on every localhost page whether or not its host wanted it.
-    if (saveTransport() === DESKTOP_JSON) {
-      window.__hyperclaySnapshotHtml = '<!DOCTYPE html>' + clone.outerHTML;
-    }
   }
 
   // Run inline [onbeforesave] handlers
-  for (const el of clone.querySelectorAll('[onbeforesave]')) {
-    new Function(el.getAttribute('onbeforesave')).call(el);
-  }
+  runAuthoredHandlers(clone, 'onbeforesave');
 
   // Clone for comparison before stripping (cheaper than cloning live DOM)
   const compareClone = clonePreventingOnclone(clone);
@@ -235,7 +254,7 @@ export function captureForSaveAndComparison({ emitForSync = true } = {}) {
   }
   const forComparison = "<!DOCTYPE html>" + compareClone.outerHTML;
 
-  return { forSave, forComparison };
+  return { forSave, forComparison, snapshotHtml };
 }
 
 /**
@@ -260,6 +279,35 @@ export function captureForSave({ emitForSync = true } = {}) {
   }
 
   return prepareCloneForSave(clone);
+}
+
+/**
+ * The bytes a live-sync broadcast carries: the snapshot, minus the root
+ * attributes that belong to this tab alone. A third serialization of the same
+ * clone alongside the snapshot and the document, and the only one that crosses
+ * into another person's browser.
+ *
+ * Takes the clone rather than capturing one, because the caller already has the
+ * snapshot-ready clone and capturing again would run every hook a second time.
+ * (Not to be confused with captureBodyForSync below, which is the older
+ * body-innerHTML helper and unrelated to the live-sync lane.)
+ *
+ * The clone is detached and unobserved, so removing the attributes in place and
+ * putting them back is exact, and far cheaper than cloning the tree again. The
+ * finally is load-bearing: the save path reads this same clone afterwards.
+ */
+export function serializeForSync(clone) {
+  const removed = [];
+  for (const name of TAB_LOCAL_ROOT_ATTRS) {
+    if (!clone.hasAttribute(name)) continue;
+    removed.push([name, clone.getAttribute(name)]);
+    clone.removeAttribute(name);
+  }
+  try {
+    return clone.outerHTML;
+  } finally {
+    for (const [name, value] of removed) clone.setAttribute(name, value);
+  }
 }
 
 /**

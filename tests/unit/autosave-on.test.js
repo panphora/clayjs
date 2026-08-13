@@ -7,7 +7,7 @@ test("with <html autosave>, an edit triggers a debounced save", async () => {
   window.clayEditMode = true;
   document.documentElement.setAttribute("autosave", "");
   document.body.innerHTML = '<div id="c">a</div><input persist value="">';
-  global.fetch = jest.fn(async () => ({ ok: true, json: async () => ({ msg: "Saved" }) }));
+  global.fetch = jest.fn(async () => ({ ok: true, text: async () => JSON.stringify({ msg: "Saved" }) }));
 
   jest.useFakeTimers();
   await import("../../src/core/autosave.js"); // pulls in save.js; baseline captured at import

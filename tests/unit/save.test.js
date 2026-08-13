@@ -9,7 +9,7 @@ beforeAll(async () => {
 });
 
 function okFetch() {
-  return jest.fn(async () => ({ ok: true, json: async () => ({ msg: "Saved" }) }));
+  return jest.fn(async () => ({ ok: true, text: async () => JSON.stringify({ msg: "Saved" }) }));
 }
 
 test("success => saved state + clay:save-saved + msgType success", async () => {

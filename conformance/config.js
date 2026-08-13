@@ -18,6 +18,7 @@ export const FIXTURES_DIR = 'fixtures';
 // here is skipped, not failed (fixtures.md: a client may skip a feature it lacks
 // and still claim conformance on the rest).
 export const CAPABILITY_MODULES = {
+  'freeze': '/src/attrs/save-freeze.js',
   'form-persist': '/src/core/persist.js',
 };
 

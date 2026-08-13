@@ -11,7 +11,6 @@ import { isEditMode } from "./is-edit-mode.js";
 import { consumeUserDriven, markUserDriven } from "../lib/user-gesture.js";
 import { saveToken, saveTransport, DESKTOP_JSON } from "./host-attrs.js";
 import {
-  captureForSave,
   beforeSave,
   getPageContents,
   onSnapshot,
@@ -23,7 +22,7 @@ import {
 // =============================================================================
 
 let saveInProgress = false;
-const SAVE_ENDPOINT = '/_/save';
+const SAVE_PATH = '/_/save';
 const SAVE_TIMEOUT_MS = 12000;
 
 /**
@@ -41,27 +40,50 @@ export function isSaveInProgress() {
 export { beforeSave, getPageContents, onSnapshot, onPrepareForSave };
 
 // =============================================================================
-// INTERNAL: GET PAGE CONTENTS
+// THE RESULT
 // =============================================================================
+// One shape from every entry point: {ok, msg, msgType, code, etag}. There used to
+// be three shapes — two callback conventions and a hand-built third — which is how
+// a skipped save came to be read as a successful one.
+//
+// `ok` is the OUTCOME: did these bytes reach the server and get accepted. `msgType`
+// is the SEVERITY, and it belongs to the server, which can answer a perfectly good
+// save with 'warning' (htmlclay does, when an outside process touched the file).
+// Reading the severity as the outcome means treating that warning as a failure.
 
-/**
- * Get the current page contents as HTML string for saving.
- * Emits snapshot-ready event for live-sync.
- *
- * @returns {string} HTML string of current page
- */
-function getContentsForSave() {
-  // Emit for live-sync when actually saving
-  return captureForSave({ emitForSync: true });
+function successResult(data) {
+  return {
+    ok: true,
+    msg: data.msg ?? 'Saved',
+    msgType: data.msgType || 'success',
+    code: data.code ?? null,
+    etag: data.etag ?? null
+  };
+}
+
+function errorResult(err) {
+  const timedOut = err.name === 'AbortError';
+  return {
+    ok: false,
+    msg: timedOut ? 'Server not responding' : (err.message || 'Save failed'),
+    // A timeout is not evidence the write failed. The request may well have landed,
+    // so this reports "we do not know" rather than asserting something false.
+    msgType: timedOut ? 'unknown' : 'error',
+    code: timedOut ? 'timeout' : (err.code ?? null),
+    etag: null
+  };
+}
+
+function skippedResult(msg) {
+  return { ok: false, msg, msgType: 'skipped', code: null, etag: null };
 }
 
 // =============================================================================
 // THE WIRE
 // =============================================================================
-// One request builder and one response decoder, shared by both entry points
-// below. They differ only in where the HTML comes from and in the callback shape
-// each was born with. Keeping two copies of the request is what let four
-// separate wire bugs hide at once, each of which had to be found twice.
+// One request builder and one response decoder. Keeping two copies of the request
+// is what let four separate wire bugs hide at once, each of which had to be found
+// twice.
 
 /**
  * Build the save request for this host.
@@ -77,13 +99,20 @@ function getContentsForSave() {
  * `Origin: null` is forgeable and must not buy ambient authority. Asking anyway
  * gets every sandboxed save blocked before it leaves the browser.
  *
+ * The endpoint is resolved against the real origin rather than left relative,
+ * because a <base href> anywhere in the authored document would otherwise redirect
+ * the save — and the per-document token in its path — to an origin the document
+ * itself chose.
+ *
  * @param {string} content - HTML to save
+ * @param {?string} snapshotHtml - unstripped snapshot, for the desktop envelope
  * @param {boolean} userDriven - Whether a human gesture is behind this save
  * @param {AbortSignal} signal
  * @returns {{url: string, options: Object}}
  */
-function buildSaveRequest(content, userDriven, signal) {
+function buildSaveRequest(content, snapshotHtml, userDriven, signal) {
   const token = saveToken();
+  const path = token ? `${SAVE_PATH}/${token}` : SAVE_PATH;
   const options = {
     method: 'POST',
     credentials: token ? 'omit' : 'same-origin',
@@ -98,36 +127,37 @@ function buildSaveRequest(content, userDriven, signal) {
 
   // The desktop JSON envelope carries the unstripped snapshot alongside the
   // document, so a sync engine can replay what the browser actually had. It goes
-  // out only when the served document DECLARES that transport: this used to key
-  // off `location.hostname === 'localhost'`, which sent the envelope to every
-  // host that happened to be local, including ones whose save lane takes text
-  // and answers 415.
-  if (saveTransport() === DESKTOP_JSON && window.__hyperclaySnapshotHtml) {
+  // out only when the served document DECLARES that transport, and it is passed in
+  // from the capture that produced `content` — it used to be left on a window
+  // global that was cleared only on success, so two captures without an intervening
+  // successful save would pair a stale snapshot with fresh content.
+  if (saveTransport() === DESKTOP_JSON && snapshotHtml) {
     options.headers['Content-Type'] = 'application/json';
-    options.body = JSON.stringify({
-      content,
-      snapshotHtml: window.__hyperclaySnapshotHtml,
-      userDriven
-    });
+    options.body = JSON.stringify({ content, snapshotHtml, userDriven });
   } else {
     options.body = content;
   }
 
-  return { url: token ? `${SAVE_ENDPOINT}/${token}` : SAVE_ENDPOINT, options };
+  return { url: new URL(path, window.location.origin).href, options };
 }
 
 /**
  * Send one save and decode one response.
  *
  * Resolves with the server's JSON body: `msg` and `msgType` everywhere, plus
- * `code` and `etag` from a host that follows the spec. Rejects with the raw
- * error, so each entry point below can keep the error shape its API promised —
- * a server that answered gets its message and its `code` onto the Error.
+ * `code` and `etag` from a host that follows the spec. Rejects with the raw error,
+ * carrying the server's message and `code` when it answered at all.
+ *
+ * The body is read as text and parsed defensively BEFORE the status is consulted.
+ * Calling res.json() first meant a 200 with an empty body reported failure over a
+ * save that had landed, and a 502 HTML error page surfaced as "Unexpected token '<'"
+ * instead of the status.
  *
  * @param {string} content - HTML to save
+ * @param {?string} snapshotHtml
  * @returns {Promise<Object>} The server's response body
  */
-function sendSave(content) {
+function sendSave(content, snapshotHtml) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), SAVE_TIMEOUT_MS);
 
@@ -135,18 +165,24 @@ function sendSave(content) {
   // early returns in the callers), so it's never consumed on a save that never
   // ships.
   const userDriven = consumeUserDriven();
-  const { url, options } = buildSaveRequest(content, userDriven, controller.signal);
+  const { url, options } = buildSaveRequest(content, snapshotHtml, userDriven, controller.signal);
 
   return fetch(url, options)
-    .then(res => res.json().then(data => {
+    .then(res => res.text().then(text => {
+      let data = {};
+      if (text) {
+        try {
+          data = JSON.parse(text);
+        } catch (err) {
+          if (res.ok) throw new Error('Server sent a response that was not JSON');
+        }
+      }
       if (!res.ok) {
         const error = new Error(data.msg || data.error || `HTTP ${res.status}: ${res.statusText}`);
         error.code = data.code ?? null;
+        error.status = res.status;
         throw error;
       }
-      // Clear the snapshot only once the save actually landed (a failed save
-      // keeps it so a retry still carries the provenance snapshot).
-      window.__hyperclaySnapshotHtml = null;
       return data;
     }))
     .catch(err => {
@@ -166,126 +202,33 @@ function sendSave(content) {
 // =============================================================================
 
 /**
- * Save the current page contents to the server.
+ * Save specific HTML content to the server.
  *
- * Returns a Promise that resolves with {msg, msgType, code, etag} — the same
- * object passed to the callback. Promise never rejects; errors resolve with
- * msgType: 'error', skipped early-returns resolve with msgType: 'skipped'.
- * `code` and `etag` are null on a host that does not send them.
+ * Returns a Promise resolving with {msg, msgType, code, etag} — the same object
+ * passed to the callback. Never rejects.
  *
- * @param {Function} callback - Called with {msg, msgType, code, etag} on completion
- *   msgType will be 'success', 'error', or 'skipped'
+ * @param {string} html - HTML string to save
+ * @param {Function} callback - Called with the result on completion
+ * @param {Object} [options]
+ * @param {?string} [options.snapshotHtml] - unstripped snapshot from the same capture
  * @returns {Promise<{msg: string, msgType: string, code: ?string, etag: ?string}>}
  *
  * @example
- * // Callback form (unchanged)
- * savePage(({msg, msgType}) => {
- *   if (msgType === 'error') console.error('Save failed:', msg);
- * });
- *
- * @example
- * // Promise form
- * const {msg, msgType} = await savePage();
+ * const {msg, msgType} = await saveHtml(myHtml);
  * if (msgType === 'error') console.error('Save failed:', msg);
  */
-export function savePage(callback = () => {}) {
+export function saveHtml(html, callback = () => {}, { snapshotHtml = null } = {}) {
   return new Promise((resolve) => {
-    if (saveInProgress) {
-      const skipped = { msg: 'Save already in progress', msgType: 'skipped' };
-      callback(skipped);
-      return resolve(skipped);
-    }
+    const done = (result) => {
+      if (typeof callback === 'function') callback(result);
+      resolve(result);
+    };
+
     if (!isEditMode && !window.clay?.testMode) {
-      const skipped = { msg: 'Not in edit mode', msgType: 'skipped' };
-      callback(skipped);
-      return resolve(skipped);
+      return done(skippedResult('Not in edit mode'));
     }
-
-    let currentContents;
-    try {
-      currentContents = getContentsForSave();
-    } catch (err) {
-      console.error('savePage: getContentsForSave failed', err);
-      const result = { msg: err.message, msgType: "error" };
-      callback(result);
-      return resolve(result);
-    }
-    saveInProgress = true;
-
-    // Test mode: skip network request, return mock success
-    if (window.clay?.testMode) {
-      setTimeout(() => {
-        saveInProgress = false;
-        const result = { msg: "Test mode: save skipped", msgType: "success" };
-        if (typeof callback === 'function') {
-          callback(result);
-        }
-        resolve(result);
-      }, 0);
-      return;
-    }
-
-    sendSave(currentContents)
-      .then(data => {
-        const result = {
-          msg: data.msg,
-          msgType: data.msgType || 'success',
-          code: data.code ?? null,
-          etag: data.etag ?? null
-        };
-        if (typeof callback === 'function') {
-          callback(result);
-        }
-        resolve(result);
-      })
-      .catch(err => {
-        const msg = err.name === 'AbortError'
-          ? 'Server not responding'
-          : 'Save failed';
-
-        const result = { msg, msgType: "error", code: err.code ?? null, etag: null };
-        if (typeof callback === 'function') {
-          callback(result);
-        }
-        resolve(result);
-      })
-      .finally(() => {
-        saveInProgress = false;
-      });
-  });
-}
-
-/**
- * Save specific HTML content to the server.
- *
- * Returns a Promise that resolves with {err, data} — same arguments
- * passed to the callback. Promise never rejects; errors resolve with
- * truthy err. Skipped early-returns resolve with data.msgType: 'skipped'.
- *
- * @param {string} html - HTML string to save
- * @param {Function} callback - Called with (err, data) on completion
- * @returns {Promise<{err: ?Error, data: ?{msg: string, msgType: string}}>}
- *
- * @example
- * // Callback form (unchanged)
- * saveHtml(myHtml, (err, data) => {
- *   if (err) console.error('Save failed:', err);
- * });
- *
- * @example
- * // Promise form
- * const {err, data} = await saveHtml(myHtml);
- * if (err) console.error('Save failed:', err);
- */
-export function saveHtml(html, callback = () => {}) {
-  return new Promise((resolve) => {
-    if (!isEditMode || saveInProgress) {
-      const data = {
-        msg: saveInProgress ? 'Save already in progress' : 'Not in edit mode',
-        msgType: 'skipped'
-      };
-      callback(null, data);
-      return resolve({ err: null, data });
+    if (saveInProgress) {
+      return done(skippedResult('Save already in progress'));
     }
 
     saveInProgress = true;
@@ -294,35 +237,19 @@ export function saveHtml(html, callback = () => {}) {
     if (window.clay?.testMode) {
       setTimeout(() => {
         saveInProgress = false;
-        const data = { msg: "Test mode: save skipped", msgType: "success" };
-        if (typeof callback === 'function') {
-          callback(null, data);
-        }
-        resolve({ err: null, data });
+        done(successResult({ msg: 'Test mode: save skipped' }));
       }, 0);
       return;
     }
 
-    sendSave(html)
-      .then(data => {
-        if (typeof callback === 'function') {
-          callback(null, data);
-        }
-        resolve({ err: null, data });
-      })
-      .catch(err => {
-        // Normalize timeout errors
-        const error = err.name === 'AbortError'
-          ? new Error('Server not responding')
-          : err;
-
-        if (typeof callback === 'function') {
-          callback(error);
-        }
-        resolve({ err: error, data: null });
-      })
-      .finally(() => {
+    sendSave(html, snapshotHtml)
+      .then(successResult, errorResult)
+      // Clear the flag BEFORE handing the result back, so a caller that queues a
+      // follow-up save can start it immediately rather than being told the lane
+      // is busy by the save that just finished.
+      .then(result => {
         saveInProgress = false;
+        done(result);
       });
   });
 }
@@ -330,52 +257,39 @@ export function saveHtml(html, callback = () => {}) {
 /**
  * Fetch HTML from a URL and save it to replace the current page.
  *
- * Returns a Promise that resolves with {err, data} — same arguments
- * passed to the callback. Promise never rejects.
+ * Returns a Promise resolving with {msg, msgType, code, etag}. Never rejects.
+ *
+ * The fetch status is checked before the body is used: without that, pointing this
+ * at a path that 404s saved the server's error page over the user's document.
  *
  * @param {string} url - URL to fetch HTML from
- * @param {Function} callback - Called with (err, data) on completion
- * @returns {Promise<{err: ?Error, data: ?{msg: string, msgType: string}}>}
- *
- * @example
- * // Callback form (unchanged)
- * replacePageWith('/templates/blog.html', (err, data) => {
- *   if (err) console.error('Failed:', err);
- *   else window.location.reload();
- * });
- *
- * @example
- * // Promise form
- * const {err, data} = await replacePageWith('/templates/blog.html');
- * if (!err) window.location.reload();
+ * @param {Function} callback - Called with the result on completion
+ * @returns {Promise<{msg: string, msgType: string, code: ?string, etag: ?string}>}
  */
 export function replacePageWith(url, callback = () => {}) {
   return new Promise((resolve) => {
-    if (!isEditMode || saveInProgress) {
-      const data = {
-        msg: saveInProgress ? 'Save already in progress' : 'Not in edit mode',
-        msgType: 'skipped'
-      };
-      callback(null, data);
-      return resolve({ err: null, data });
-    }
+    const done = (result) => {
+      if (typeof callback === 'function') callback(result);
+      resolve(result);
+    };
 
-    fetch(url)
-      .then(res => res.text())
-      .then(html => {
-        saveHtml(html, (err, data) => {
-          if (typeof callback === 'function') {
-            callback(err, data);
-          }
-          resolve({ err: err || null, data: data || null });
-        });
+    if (!isEditMode) return done(skippedResult('Not in edit mode'));
+    if (saveInProgress) return done(skippedResult('Save already in progress'));
+
+    // Resolved against the document's real location, not a <base href> the page
+    // may have set.
+    fetch(new URL(url, window.location.href).href)
+      .then(res => {
+        if (!res.ok) {
+          throw new Error(`Template fetch failed: HTTP ${res.status} ${res.statusText}`);
+        }
+        return res.text();
       })
+      .then(html => saveHtml(html))
+      .then(done)
       .catch(err => {
         console.error('Failed to fetch template:', err);
-        if (typeof callback === 'function') {
-          callback(err);
-        }
-        resolve({ err, data: null });
+        done(errorResult(err));
       });
   });
 }

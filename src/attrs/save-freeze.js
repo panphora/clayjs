@@ -44,22 +44,51 @@ function captureAll() {
   }
 }
 
-function freezeClone(clone) {
+// Which cloned element holds which authored innerHTML, for the current snapshot.
+// Keyed by the cloned element itself: the prepare phase runs on the same clone
+// object the snapshot phase saw, so identity is the pairing. An attribute marker
+// would work too, right up until clay:snapshot-ready — which fires BETWEEN the two
+// phases — hands the still-marked clone to live-sync and demo mode, both of which
+// serialize it on the spot.
+let pending = new WeakMap();
+
+// Phase 2. The clone is a verbatim cloneNode of the live root and nothing has been
+// stripped from it yet, so pairing by position is sound HERE and nowhere else.
+function freezeSnapshot(clone) {
+  pending = new WeakMap();
+
   const liveElements = document.querySelectorAll(FREEZE_SELECTOR);
   const cloneElements = clone.querySelectorAll(FREEZE_SELECTOR);
 
   log('freezing clone — live:', liveElements.length, 'clone:', cloneElements.length);
 
+  // Counts can only differ if an earlier onSnapshot hook added or removed
+  // elements, which means alignment is already gone. Restoring nothing beats
+  // restoring one element's authored content into a different element.
+  if (liveElements.length !== cloneElements.length) {
+    console.warn('[save-freeze] live/clone freeze counts differ, skipping freeze restore');
+    return;
+  }
+
   for (let i = 0; i < cloneElements.length; i++) {
-    const liveEl = liveElements[i];
-    const hasOriginal = liveEl && originals.has(liveEl);
-    if (hasOriginal) {
-      const original = originals.get(liveEl);
-      const current = cloneElements[i].innerHTML;
-      if (original !== current) {
-        log('element', i, '— restoring original');
-        cloneElements[i].innerHTML = original;
-      }
+    if (!originals.has(liveElements[i])) continue;
+    const original = originals.get(liveElements[i]);
+    pending.set(cloneElements[i], original);
+    if (cloneElements[i].innerHTML !== original) {
+      log('element', i, '— restoring original');
+      cloneElements[i].innerHTML = original;
+    }
+  }
+}
+
+// Phase 3a. Re-freeze anything an [onbeforesave] handler changed between the two
+// phases. Nothing to clean up: the pairing never entered the document.
+function freezePrepare(clone) {
+  for (const el of clone.querySelectorAll(FREEZE_SELECTOR)) {
+    const original = pending.get(el);
+    if (original !== undefined && el.innerHTML !== original) {
+      log('re-restoring original after prepare-phase change');
+      el.innerHTML = original;
     }
   }
 }
@@ -75,10 +104,8 @@ function init() {
   // debounce:0 so we snapshot the authored content before any runtime edit
   // mutates it; the callback is a pure read into a WeakMap (no DOM writes).
   // require:'observed' (skip only no-watch); pausable:false so a morphed-in
-  // freeze region is still captured. NOTE: the old observer watched
-  // document.documentElement; Mutation watches document.body, so a [freeze] added
-  // directly to <head> at runtime is no longer captured (authored <head> freeze
-  // regions are still handled by captureAll() on load) — an accepted edge.
+  // freeze region is still captured. Mutation observes document.documentElement,
+  // so a [freeze] added directly to <head> at runtime is captured like any other.
   Mutation.onAddElement({
     selectorFilter: FREEZE_SELECTOR,
     require: 'observed',
@@ -90,11 +117,12 @@ function init() {
 
   // Phase 2: Freeze in snapshot — before snapshot-ready fires.
   // This prevents live-sync from writing unfrozen content to disk.
-  onSnapshot(freezeClone);
+  onSnapshot(freezeSnapshot);
 
-  // Phase 3a: Freeze again in prepare — belt-and-suspenders.
-  // Catches any modifications made between phase 2 and 3a (e.g., onbeforesave handlers).
-  onPrepareForSave(freezeClone);
+  // Phase 3a: Freeze again in prepare, for anything changed between the phases
+  // (e.g. onbeforesave handlers). Pairs by the WeakMap phase 2 filled, because by
+  // now the clone has lost its [no-snapshot] subtrees and position means nothing.
+  onPrepareForSave(freezePrepare);
 }
 
 init();

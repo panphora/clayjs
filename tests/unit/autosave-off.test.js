@@ -6,7 +6,7 @@ import { jest } from "@jest/globals";
 test("without <html autosave>, an edit does not trigger a save", async () => {
   window.clayEditMode = true; // edit mode, but the autosave attribute is absent
   document.body.innerHTML = '<div id="c">a</div><input persist value="">';
-  global.fetch = jest.fn(async () => ({ ok: true, json: async () => ({ msg: "Saved" }) }));
+  global.fetch = jest.fn(async () => ({ ok: true, text: async () => JSON.stringify({ msg: "Saved" }) }));
 
   jest.useFakeTimers();
   await import("../../src/core/autosave.js");

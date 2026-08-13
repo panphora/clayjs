@@ -5,7 +5,7 @@ function getDataFromForm(container) {
   // Helper function to process a single element
   const processElement = (elem) => {
     const name = elem.getAttribute('name');
-    const value = elem.value || elem.getAttribute('value');
+    const value = elem.value ?? elem.getAttribute('value');
 
     // Skip elements without a name or with a disabled attribute
     if (!name || elem.disabled) return;

@@ -32,7 +32,18 @@ export async function boot(base, params, readyResolve) {
                                                                // before any plugin import
 
   for (const path of plan.plugins) {
-    const mod = await import(base + "/src/" + path);
+    // A plugin that throws on evaluation degrades to absent. Unguarded, its
+    // rejection propagated out of boot() and left clay.ready pending forever, so
+    // every `await clay.ready` on the page hung: one broken optional module took
+    // the whole client with it. (The allSettled below covers the plugins' async
+    // `ready` exports, never their evaluation.)
+    let mod;
+    try {
+      mod = await import(base + "/src/" + path);
+    } catch (err) {
+      console.error(`clayjs: plugin "${path}" failed to load, continuing without it:`, err);
+      continue;
+    }
     loaded[path] = mod;
     attachPluginMember(path, mod);   // immediately, not after the loop: hypercms's ?cms=true
                                      // auto-open runs as a microtask queued during ITS evaluation

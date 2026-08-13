@@ -74,16 +74,22 @@ export async function withFixture(name, fn) {
   );
 }
 
-export function capture(client) {
+export function capture(client, entry = {}) {
   const snapshotEl = client.captureSnapshot();
-  return {
+  const out = {
     snapshot: '<!DOCTYPE html>' + snapshotEl.outerHTML,
     document: client.captureForSave({ emitForSync: false }),
   };
+  // Computed from the clone the snapshot golden was taken from, and only for
+  // fixtures that ask: serializeForSync restores what it removes, so the order
+  // of these three is free.
+  if (entry.syncGolden) out.sync = client.serializeForSync(snapshotEl);
+  return out;
 }
 
 export async function runFixture(name) {
-  return withFixture(name, ({ client }) => capture(client));
+  const entry = await getEntry(name);
+  return withFixture(name, ({ client }) => capture(client, entry));
 }
 
 export async function reserialize(documentBytes) {

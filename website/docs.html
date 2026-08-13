@@ -63,6 +63,38 @@
       <tr><td><code>clay.cms</code></td><td>The content panel: <code>clay.cms.open()</code> (cms plugin).</td></tr>
     </table>
     <p class="small">In view mode the edit-only members are absent: <code>window.clay</code> holds just <code>ready</code>, <code>toggleEditMode</code>, <code>isEditMode</code>, <code>isOwner</code>, and <code>Mutation</code> (plus <code>morph</code>/<code>cms</code> when those plugins load). Feature-detect with <code>'save' in clay</code>.</p>
+    <p>Three tiers, and only the first two are a promise:</p>
+    <table>
+      <tr><th>Tier</th><th>What it is</th><th>Promise</th></tr>
+      <tr><td><code>clay.*</code> from <code>clay.js</code></td><td>The everyday surface, above</td><td>Stable</td></tr>
+      <tr><td><code>clay.*</code> from a satellite</td><td>Opt-in, one script tag each: <code>clay-ui</code>, <code>clay-utils</code>, <code>clay-dom</code>, <code>clay-events</code>, <code>clay-options</code>, <code>clay-internals</code></td><td>Stable</td></tr>
+      <tr><td>Anything else under <code>src/</code></td><td>Reachable by direct import, because <code>src/</code> ships to npm and the CDN</td><td><strong>May change in any release</strong></td></tr>
+    </table>
+    <p class="small">The contract starts at 0.3.0: no name in the first two tiers changes without a major version. Everything in the third tier works today and is welcome to be used, but it is not a promise.</p>
+  </section>
+
+  <!-- ====== INTERNALS ====== -->
+  <section id="internals">
+    <span class="eyebrow">Low level</span>
+    <h2 class="section-title">clay.internals</h2>
+    <p>The pieces clayjs builds itself out of, for code that needs to sit <em>inside</em> the save lifecycle rather than call it. Lower level than <code>clay.*</code> deliberately: it assumes you know the lifecycle. One extra script tag, and <code>clay.loaded.internals</code> resolves when it's ready.</p>
+    <pre><code>&lt;<span class="t">script</span> <span class="a">src</span>="https://clayjs.com/clay-internals.js"&gt;&lt;/<span class="t">script</span>&gt;</code></pre>
+    <table>
+      <tr><th>Member</th><th>What it does</th></tr>
+      <tr><td><code>captureSnapshot()</code></td><td>The cloned document element, before anything is stripped.</td></tr>
+      <tr><td><code>captureForSave()</code></td><td>The exact bytes a save would send, stripping and all.</td></tr>
+      <tr><td><code>onPrepareForSave(fn)</code></td><td>Register a hook that runs on the clone during save preparation only. Same registry as <code>clay.beforeSave</code>.</td></tr>
+      <tr><td><code>region.resolveRegionPolicy(node)</code></td><td>The resolved region axes for a node: <code>{watched, autosaveTriggered, undoable, persist, extension}</code>.</td></tr>
+      <tr><td><code>region.isInert(node)</code></td><td>Whether a node is invisible to the whole mutation system (<code>no-watch</code> and extension noise).</td></tr>
+      <tr><td><code>region.isSnapshotRemoved(el)</code></td><td>Whether an element is dropped from every snapshot (<code>no-snapshot</code>).</td></tr>
+      <tr><td><code>region.addRegionToken(el, token)</code></td><td>Add one token to an element's <code>clay</code> attribute, keeping the tokens already there.</td></tr>
+      <tr><td><code>region.PERSIST</code> / <code>region.REGION_ATTRS</code></td><td>The persist values (<code>full</code>, <code>frozen</code>, <code>none</code>) and the canonical token list.</td></tr>
+      <tr><td><code>region.selectors</code></td><td><code>stripFromSave</code>, <code>stripFromComparison</code>, <code>snapshotRemove</code>, <code>freeze</code>: the selectors clayjs itself strips with, legacy spellings included.</td></tr>
+      <tr><td><code>save.saveHtml(html, cb, opts)</code></td><td>Send an HTML string to the save endpoint. Resolves <code>{ok, msg, msgType, code, etag}</code>; never rejects.</td></tr>
+      <tr><td><code>save.replacePageWith(url, cb)</code></td><td>Fetch another URL's HTML and save it over the current file. Same result shape.</td></tr>
+      <tr><td><code>save.isSaveInProgress()</code></td><td>Whether a save is in flight right now.</td></tr>
+    </table>
+    <p class="small"><strong><code>save.saveHtml</code> writes the bytes you hand it straight to the file</strong>: it bypasses the snapshot pipeline entirely, so nothing is stripped and no hook runs. Check <code>save.isSaveInProgress()</code> first, because firing into an in-flight save is how you lose an edit. For a worked example of the region helpers, see <a href="advanced.html#custom-attrs">Advanced</a>.</p>
   </section>
 
   <!-- ====== ATTRIBUTES ====== -->

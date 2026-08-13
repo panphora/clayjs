@@ -52,7 +52,11 @@ export function stripExtensionNoise(root) {
   if (!root || !root.querySelectorAll) return
   try {
     for (const el of root.querySelectorAll(EXTENSION_NODE_SELECTOR)) el.remove()
-    for (const el of root.querySelectorAll('*')) {
+    // querySelectorAll('*') never returns the root itself, so an extension stamp on
+    // <html> used to ride into every saved file. The root is the one element an
+    // extension can mark on a page with no other match.
+    for (const el of [root, ...root.querySelectorAll('*')]) {
+      if (!el.attributes) continue
       for (const attr of [...el.attributes]) {
         if (EXTENSION_ATTR_PATTERN.test(attr.name.toLowerCase())) el.removeAttribute(attr.name)
       }

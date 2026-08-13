@@ -1,3 +1,5 @@
+import { addRegionToken } from '../lib/region-policy.js';
+
 function swapElement(el) {
   const attr = el.hasAttribute('href') ? 'href' : el.hasAttribute('src') ? 'src' : null;
   if (!attr) return;
@@ -12,10 +14,8 @@ function swapElement(el) {
     newEl.setAttribute(name, value);
   }
   newEl.setAttribute(attr, isSameOrigin ? url.pathname + url.search : url.href);
-  const tokens = new Set((newEl.getAttribute("clay") || "").trim().split(/\s+/).filter(Boolean));
-  tokens.add("no-trigger-autosave");
-  tokens.add("no-undo");
-  newEl.setAttribute("clay", Array.from(tokens).join(" "));
+  addRegionToken(newEl, "no-trigger-autosave");
+  addRegionToken(newEl, "no-undo");
 
   el.insertAdjacentElement('afterend', newEl);
 

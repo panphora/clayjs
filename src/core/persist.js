@@ -86,7 +86,14 @@ export default function enablePersistentFormInputValues(filterBySelector = "[per
     const finalize = (selector) => {
       const live = document.querySelectorAll(selector);
       const cloned = doc.querySelectorAll(selector);
-      cloned.forEach((c, i) => { if (live[i]) finalizeControlForSave(c, live[i]); });
+      // Index pairing only holds while the two lists describe the same tree. If a
+      // hook ever diverges them, writing one control's value into another's is
+      // worse than writing none, so fail loudly instead of silently.
+      if (live.length !== cloned.length) {
+        console.warn('[persist] live/clone counts differ for', selector, '— skipping');
+        return;
+      }
+      cloned.forEach((c, i) => finalizeControlForSave(c, live[i]));
     };
     finalize(inputSelector);
     finalize(textareaSelector);

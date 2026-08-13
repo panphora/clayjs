@@ -56,6 +56,47 @@ Edit mode exposes `clay.save()` (+ `clay.save.force()`), `clay.getHTML()`, `clay
 mode keeps only the always-available members (`toggleEditMode`, `isEditMode`, `isOwner`,
 `Mutation`, `ready`); edit-only members are simply absent.
 
+## API
+
+Three tiers. The first two are a promise; the third is not.
+
+| Tier | What it is | Promise |
+|---|---|---|
+| `clay.*` from `clay.js` | the everyday surface | stable |
+| `clay.*` from a satellite (`clay-ui`, `clay-utils`, `clay-dom`, `clay-events`, `clay-options`, `clay-internals`) | opt-in, one script tag each | stable |
+| anything else under `src/` | reachable by direct import, because `src/` ships | **may change in any release** |
+
+The contract starts at **0.3.0**: no name below changes without a major version.
+
+**`clay.js`** — `ready`, `save()`, `save.force()`, `getHTML()`, `beforeSave(fn)`, `onSnapshot(fn)`,
+`toggleEditMode()`, `isEditMode`, `isOwner`, `Mutation`, `cacheBust(el)`, plus `undo` / `cms` / `morph`
+when those plugins load. View mode keeps only the always-available members, as above.
+
+**Satellites** — one script tag each, and each resolves its own `clay.loaded.*` promise. `clay-ui` adds
+`toast`, `toastPersistent`, `ask`, `confirm`, `tell`, `snippet`, `modal`; `clay-utils` adds `clay.utils`
+(`throttle`, `debounce`, `cookie`, `slugify`, `copyToClipboard`); `clay-internals` adds `clay.internals`,
+below. `clay-events`, `clay-dom`, `clay-options` and `all.js` add HTML attributes and DOM helpers rather
+than members on `clay`.
+
+**`clay.internals`** — the pieces the library builds itself out of, for code that needs to sit inside the
+save lifecycle rather than call it. Lower level than `clay.*` deliberately: it assumes you know the
+lifecycle.
+
+```html
+<script src="https://clayjs.com/clay-internals.js"></script>
+```
+
+- `captureSnapshot()`, `captureForSave()`, `onPrepareForSave(fn)` — the snapshot pipeline, read side.
+  `captureSnapshot` gives you the clone before any stripping; `captureForSave` gives you the bytes a
+  save would send.
+- `region.addRegionToken(el, token)`, `region.resolveRegionPolicy(node)`, `region.isInert(node)`,
+  `region.isSnapshotRemoved(el)`, `region.PERSIST`, `region.REGION_ATTRS`, and
+  `region.selectors.stripFromSave` / `.stripFromComparison` / `.snapshotRemove` / `.freeze` — write your
+  own attribute without hardcoding our selectors.
+- `save.saveHtml(html, cb, opts)`, `save.replacePageWith(url, cb)`, `save.isSaveInProgress()` — the save
+  lane under `clay.save`. **`saveHtml` writes the bytes you hand it straight to the file**, bypassing the
+  snapshot pipeline entirely; check `isSaveInProgress()` first.
+
 ## Regions
 
 Mark parts of the DOM the save/sync engine should treat specially with one space-separated
@@ -71,6 +112,32 @@ Add `autosave` to `<html>` to save automatically on change.
 ## Develop
 
 ```bash
-npm test        # jest unit suite
-npm run dev     # stub save server on :4601 for the tests/fixtures pages
+npm test                   # jest unit suite
+npm run test:conformance   # byte-for-byte fixture gate, in a real browser
+npm run dev                # stub save server on :4601 for the tests/fixtures pages
 ```
+
+## Deploy
+
+`public/` is what wrangler serves to clayjs.com. It is a build output: gitignored,
+disposable, and rebuilt from scratch every time.
+
+```bash
+npm run build    # rebuild public/ from source
+npm run deploy   # rebuild, then wrangler deploy
+```
+
+Never edit `public/` by hand, and never copy a file into it. Its contents are
+**derived**:
+
+```
+public/  =  package.json "files"  (minus NOTICE, which nothing requests)
+         +  website/*             (flattened to the root, so /docs.html works)
+```
+
+That derivation is the point. `files` is the list npm publishes, so it is already
+the line you edit to ship a new satellite, and deriving from it means a file cannot
+reach npm and miss the site. Before this script existed the mirror was hand-copied,
+and it drifted exactly that way: `src/core/host-attrs.js` never made it across, and
+since `loader.js` imports `is-edit-mode.js`, which imports it, the deployed
+`clay.js` could not boot at all.

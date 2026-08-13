@@ -14,14 +14,16 @@ test("save wire contract: bare endpoint and raw body on a cookie host", async ()
 
   const saveMod = await import("../../src/core/save.js");
 
-  global.fetch = jest.fn(async () => ({ ok: true, json: async () => ({ msg: "Saved" }) }));
+  global.fetch = jest.fn(async () => ({ ok: true, text: async () => JSON.stringify({ msg: "Saved" }) }));
   document.getElementById("content").textContent = "prod-wire-change";
 
   await saveMod.savePage();
 
   expect(global.fetch).toHaveBeenCalled();
   const [url, opts] = global.fetch.mock.calls[0];
-  expect(url).toBe("/_/save");
+  // Absolute against the document's real origin, so a <base href> in the page
+  // cannot redirect the save somewhere else.
+  expect(url).toBe("https://example.com/_/save");
   expect(opts.method).toBe("POST");
   expect(opts.credentials).toBe("same-origin");
   expect(opts.headers["Document-URL"]).toBe("https://example.com/page.html");
