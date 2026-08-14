@@ -10,7 +10,7 @@
  * your problem; the stability is ours.
  */
 
-import { captureSnapshot, captureForSave } from "../core/snapshot.js";
+import { captureSnapshot, captureForSave, addDocumentTransform } from "../core/snapshot.js";
 import { saveHtml, replacePageWith, isSaveInProgress } from "../core/save-core.js";
 import {
   addRegionToken,
@@ -32,6 +32,11 @@ clay.internals = {
   // any stripping; captureForSave gives you the bytes a save would send.
   captureSnapshot,
   captureForSave,
+
+  // The same registry clay.addDocumentTransform writes to. Core only publishes that
+  // name in edit mode, since core/snapshot.js is editOnly; this one is reachable from
+  // the satellite alone, so a view-mode page can still register a transform.
+  addDocumentTransform,
 
   // Write your own attribute without hardcoding our selectors. Doing it by hand is
   // how a custom attribute quietly stops respecting [no-save] two releases later.

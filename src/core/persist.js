@@ -10,7 +10,10 @@ import { serializeControlToAttributes, finalizeControlForSave } from '../vendor/
 //
 // The per-control rules (which attribute represents which control's state) live
 // in control-serialize.vendor.js — the single source of truth shared verbatim
-// with sapjs (carrier mirror) so the two implementations never drift. This
+// with sapjs (carrier mirror) so the two implementations never drift. sapjs
+// `npm run propagate` writes this copy and hyperclayjs's from one destination
+// table, and `--check` fails on either being stale, so the invariant is
+// enforced rather than remembered. This
 // module owns only the triggers (which elements, on which events) and the
 // snapshot safety net; serializeControlToAttributes / finalizeControlForSave do
 // the actual attribute writes.

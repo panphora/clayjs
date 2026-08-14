@@ -1,7 +1,7 @@
 /* clayjs bootstrap. https://clayjs.com */
 (function () {
   // Suppress every vendored bundle's window auto-export; the loader assembles
-  // window.clay (and a scoped compat shim) explicitly.
+  // window.clay explicitly.
   window.__hyperclayNoAutoExport = true;
 
   // Merge into any window.clay a satellite already created; never replace it.

@@ -34,7 +34,7 @@
     "prepublishOnly": "npm test && npm run test:conformance",
     "dev": "node tests/stub-server.mjs",
     "build": "node build.js",
-    "deploy": "node build.js && wrangler deploy"
+    "deploy": "node build.js && wrangler deploy && git rev-parse HEAD > .deploy"
   },
   "devDependencies": {
     "@esm-bundle/chai": "^4.3.4-fix.0",

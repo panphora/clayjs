@@ -60,7 +60,7 @@
     <pre><code>await clay.loaded.internals;
 const { resolveRegionPolicy, addRegionToken, PERSIST } = clay.internals.region;
 
-clay.internals.onPrepareForSave(clone =&gt; {
+clay.internals.addDocumentTransform(clone =&gt; {
   for (const el of clone.querySelectorAll(<span class="a">"[stamp]"</span>)) {
     <span class="c">// Inside no-save or freeze? This element isn't going to disk as it stands,</span>
     <span class="c">// so stamping it is either wasted or wrong.</span>
@@ -104,10 +104,10 @@ clay.internals.onPrepareForSave(clone =&gt; {
     </div>
 
     <div class="libcard">
-      <div class="lib-name">clay.beforeSave(fn)</div>
+      <div class="lib-name">clay.addDocumentTransform(fn)</div>
       <p class="lib-prob">“I need JavaScript-level control over the outgoing HTML.”</p>
       <p>Registers a callback that receives the cloned document right before serialization. Strip, rewrite, or annotate anything; the live page is untouched.</p>
-      <pre><code>clay.beforeSave(doc =&gt; doc.querySelectorAll(".draft-marker").forEach(el =&gt; el.remove()));</code></pre>
+      <pre><code>clay.addDocumentTransform(doc =&gt; doc.querySelectorAll(".draft-marker").forEach(el =&gt; el.remove()));</code></pre>
     </div>
   </section>
 

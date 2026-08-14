@@ -76,8 +76,10 @@ The contract starts at **0.3.0**: no name below changes without a major version.
 prepares to save AND whenever it checks whether anything changed. Keep it pure and
 repeatable: it is a transform, not a "a save is happening" event.
 
-`region` is the region-policy model (`resolveRegionPolicy`, `skipForPolicy`, and the token
-constants), the same shape `clay.internals.region` exposes.
+`region` is the region-policy model: `resolveRegionPolicy`, `isInert`, `skipForPolicy`,
+`strictestPolicy`, the `PERSIST` and `REGION_ATTRS` token constants, and the
+`STRIP_FROM_SAVE`, `FREEZE_SELECTOR` and `STRIP_FROM_COMPARISON` selectors.
+`clay.internals.region` is a different shape, narrower in aim, built for snapshot work.
 
 **Satellites** — one script tag each, and each resolves its own `clay.loaded.*` promise. `clay-ui` adds
 `toast`, `toastPersistent`, `ask`, `confirm`, `tell`, `snippet`, `modal`; `clay-utils` adds `clay.utils`
@@ -95,8 +97,10 @@ lifecycle.
 
 - `captureSnapshot()`, `captureForSave()` — the snapshot pipeline, read side.
   `captureSnapshot` gives you the clone before any stripping; `captureForSave` gives you the
-  bytes a save would send. Register your own transform with `clay.addDocumentTransform(fn)`
-  from core.
+  bytes a save would send.
+- `addDocumentTransform(fn)` — the same registry as `clay.addDocumentTransform`. Core only
+  publishes that name in edit mode, so reach for this one from a view-mode page or from the
+  satellite with no core loaded.
 - `region.addRegionToken(el, token)`, `region.resolveRegionPolicy(node)`, `region.isInert(node)`,
   `region.isSnapshotRemoved(el)`, `region.PERSIST`, `region.REGION_ATTRS`, and
   `region.selectors.stripFromSave` / `.stripFromComparison` / `.snapshotRemove` / `.freeze` — write your

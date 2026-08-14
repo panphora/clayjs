@@ -17,6 +17,10 @@ describe("the clay.internals surface", () => {
     }
   });
 
+  test("addDocumentTransform is exposed and is core's own export", () => {
+    expect(clayInternals.addDocumentTransform).toBe(addDocumentTransform);
+  });
+
   test("the region group holds its four functions, two constants, and four selectors", () => {
     const region = clayInternals.region;
     for (const name of ["addRegionToken", "resolveRegionPolicy", "isInert", "isSnapshotRemoved"]) {

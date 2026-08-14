@@ -1,7 +1,7 @@
 // Re-exports the vendored hyper-undo singleton and auto-starts it in edit mode
-// so apps "just work". The loader wires it onto clay.undo (and mirrors it onto
-// the vendor-compat shim); the vendor's own window auto-export is suppressed by
-// the bootstrap's __hyperclayNoAutoExport flag.
+// so apps "just work". The loader wires it onto clay.undo; the vendor's own
+// window auto-export is suppressed by the bootstrap's __hyperclayNoAutoExport
+// flag.
 
 import { undo } from '../vendor/hyper-undo.vendor.js'
 import { isEditMode } from '../core/is-edit-mode.js'

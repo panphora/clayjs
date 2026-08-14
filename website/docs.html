@@ -51,8 +51,8 @@
       <tr><td><code>clay.save()</code></td><td>Snapshot the page and save it. Skips when nothing changed. Returns <code>Promise&lt;{msg, msgType}&gt;</code>; <code>msgType</code> is <code>success</code>, <code>error</code>, or <code>skipped</code>. Never rejects.</td></tr>
       <tr><td><code>clay.save.force()</code></td><td>Save even when nothing appears to have changed.</td></tr>
       <tr><td><code>clay.getHTML()</code></td><td>The exact HTML string a save would send, after all cleanup.</td></tr>
-      <tr><td><code>clay.beforeSave(fn)</code></td><td>Register a callback that receives the cloned document before serialization. The live page is never touched.</td></tr>
-      <tr><td><code>clay.onSnapshot(fn)</code></td><td>Like <code>beforeSave</code>, but runs for every snapshot, including live-sync broadcasts.</td></tr>
+      <tr><td><code>clay.addDocumentTransform(fn)</code></td><td>Register a callback that receives the cloned document before serialization. The live page is never touched.</td></tr>
+      <tr><td><code>clay.onSnapshot(fn)</code></td><td>Like <code>addDocumentTransform</code>, but runs for every snapshot, including live-sync broadcasts.</td></tr>
       <tr><td><code>clay.isEditMode</code></td><td>Whether this session may edit (see <a href="#editmode">edit mode</a>).</td></tr>
       <tr><td><code>clay.isOwner</code></td><td>Whether the platform's owner cookie is set. Unlike <code>isEditMode</code>, the URL and global overrides don't affect it.</td></tr>
       <tr><td><code>clay.toggleEditMode()</code></td><td>Flip between edit and view mode (reloads the page).</td></tr>
@@ -83,7 +83,7 @@
       <tr><th>Member</th><th>What it does</th></tr>
       <tr><td><code>captureSnapshot()</code></td><td>The cloned document element, before anything is stripped.</td></tr>
       <tr><td><code>captureForSave()</code></td><td>The exact bytes a save would send, stripping and all.</td></tr>
-      <tr><td><code>onPrepareForSave(fn)</code></td><td>Register a hook that runs on the clone during save preparation only. Same registry as <code>clay.beforeSave</code>.</td></tr>
+      <tr><td><code>addDocumentTransform(fn)</code></td><td>Register a hook that runs on the clone during save preparation only. Same registry as <code>clay.addDocumentTransform</code>.</td></tr>
       <tr><td><code>region.resolveRegionPolicy(node)</code></td><td>The resolved region axes for a node: <code>{watched, autosaveTriggered, undoable, persist, extension}</code>.</td></tr>
       <tr><td><code>region.isInert(node)</code></td><td>Whether a node is invisible to the whole mutation system (<code>no-watch</code> and extension noise).</td></tr>
       <tr><td><code>region.isSnapshotRemoved(el)</code></td><td>Whether an element is dropped from every snapshot (<code>no-snapshot</code>).</td></tr>

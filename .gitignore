@@ -3,3 +3,4 @@ tests/tmp/
 .DS_Store
 public/
 .wrangler/
+.deploy

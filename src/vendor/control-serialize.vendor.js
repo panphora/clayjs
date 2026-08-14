@@ -1,5 +1,6 @@
 // GENERATED — do not edit. Vendored from sapjs/src/control-serialize.js
-// via sapjs `npm run copy-to-hyperclayjs`. Edit the sapjs source and re-run.
+// via sapjs `npm run propagate`, which writes every client's copy from one
+// table. Edit the sapjs source and re-run.
 
 // The one place that knows how a form control's live state maps to the DOM
 // attributes that survive serialization (cloneNode / outerHTML).
