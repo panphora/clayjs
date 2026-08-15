@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.3] - 2026-08-15
+
+### Added
+- CI test runs on Node 26
+
+
+
 ## [0.4.2] - 2026-08-15
 
 ### Changed
