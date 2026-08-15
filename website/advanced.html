@@ -56,18 +56,19 @@
     <h2 class="section-title">Respecting regions from your own code</h2>
     <p>Writing a custom attribute that touches the save? Ask clayjs what a region means instead of matching <code>[no-save]</code> yourself. That's what <code>clay.internals.region</code> is for: it's the same policy the library uses, so your attribute can't quietly stop agreeing with it two releases from now. It needs one extra script tag — the <a href="docs.html#internals">internals satellite</a>.</p>
     <pre><code>&lt;<span class="t">script</span> <span class="a">src</span>="https://clayjs.com/clay-internals.js"&gt;&lt;/<span class="t">script</span>&gt;</code></pre>
-    <p>A <code>stamp</code> attribute that writes the time into an element on every save, and leaves alone the regions that aren't being persisted as they stand:</p>
+    <p>A <code>count-of</code> attribute that writes how many elements match a selector into a badge, and leaves alone the regions that aren't being persisted as they stand:</p>
     <pre><code>await clay.loaded.internals;
 const { resolveRegionPolicy, addRegionToken, PERSIST } = clay.internals.region;
 
 clay.internals.addDocumentTransform(clone =&gt; {
-  for (const el of clone.querySelectorAll(<span class="a">"[stamp]"</span>)) {
+  for (const el of clone.querySelectorAll(<span class="a">"[count-of]"</span>)) {
     <span class="c">// Inside no-save or freeze? This element isn't going to disk as it stands,</span>
-    <span class="c">// so stamping it is either wasted or wrong.</span>
+    <span class="c">// so counting into it is either wasted or wrong.</span>
     if (resolveRegionPolicy(el).persist !== PERSIST.FULL) continue;
-    el.textContent = new Date().toISOString();
+    el.textContent = clone.querySelectorAll(el.getAttribute(<span class="a">"count-of"</span>)).length;
   }
 });</code></pre>
+    <p><strong>Keep the callback pure and repeatable.</strong> It runs on the save clone, and it runs again every time clayjs checks whether the page has changed. Write something new on each run, a timestamp being the tempting one, and every check differs from the last, so the page never reads clean and autosave never stops. Derive from the document, don't stamp the clock.</p>
     <p>When your attribute generates chrome of its own, mark it rather than hoping nobody saves it. <code>addRegionToken</code> merges into whatever <code>clay</code> attribute is already on the element:</p>
     <pre><code>addRegionToken(toolbar, <span class="a">"no-save"</span>);   <span class="c">// clay="existing-token no-save"</span></code></pre>
     <p class="small">The rest of the surface — <code>isInert</code>, <code>isSnapshotRemoved</code>, <code>REGION_ATTRS</code>, and the raw <code>selectors</code> clayjs strips with — is in the <a href="docs.html#internals">reference</a>.</p>
@@ -106,7 +107,7 @@ clay.internals.addDocumentTransform(clone =&gt; {
     <div class="libcard">
       <div class="lib-name">clay.addDocumentTransform(fn)</div>
       <p class="lib-prob">“I need JavaScript-level control over the outgoing HTML.”</p>
-      <p>Registers a callback that receives the cloned document right before serialization. Strip, rewrite, or annotate anything; the live page is untouched.</p>
+      <p>Registers a callback that receives the cloned document before serialization, and again on every change check. Strip, rewrite, or annotate anything; the live page is untouched. Keep it pure and repeatable: a callback that writes something new each run leaves the page permanently dirty.</p>
       <pre><code>clay.addDocumentTransform(doc =&gt; doc.querySelectorAll(".draft-marker").forEach(el =&gt; el.remove()));</code></pre>
     </div>
   </section>

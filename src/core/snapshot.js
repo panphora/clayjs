@@ -46,7 +46,7 @@ import { TAB_LOCAL_ROOT_ATTRS } from '../lib/root-attrs.js';
 // =============================================================================
 
 const snapshotHooks = [];       // Phase 2: Always run (form sync)
-const documentTransforms = [];  // Phase 3a: Save only (strip admin)
+const documentTransforms = [];  // Phase 3a: Save and change check (strip admin)
 
 /**
  * Run every authored handler of one kind over a clone, and never let one of them

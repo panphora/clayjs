@@ -83,7 +83,7 @@
       <tr><th>Member</th><th>What it does</th></tr>
       <tr><td><code>captureSnapshot()</code></td><td>The cloned document element, before anything is stripped.</td></tr>
       <tr><td><code>captureForSave()</code></td><td>The exact bytes a save would send, stripping and all.</td></tr>
-      <tr><td><code>addDocumentTransform(fn)</code></td><td>Register a hook that runs on the clone during save preparation only. Same registry as <code>clay.addDocumentTransform</code>.</td></tr>
+      <tr><td><code>addDocumentTransform(fn)</code></td><td>Register a hook that runs on the clone during save preparation and on every change check, so keep it pure and repeatable. Same registry as <code>clay.addDocumentTransform</code>.</td></tr>
       <tr><td><code>region.resolveRegionPolicy(node)</code></td><td>The resolved region axes for a node: <code>{watched, autosaveTriggered, undoable, persist, extension}</code>.</td></tr>
       <tr><td><code>region.isInert(node)</code></td><td>Whether a node is invisible to the whole mutation system (<code>no-watch</code> and extension noise).</td></tr>
       <tr><td><code>region.isSnapshotRemoved(el)</code></td><td>Whether an element is dropped from every snapshot (<code>no-snapshot</code>).</td></tr>
