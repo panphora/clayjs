@@ -22,9 +22,10 @@ export function enableContentEditableForAdminOnPageLoad () {
   });
 }
 
-// Runtime toggle functions
-export function enableContentEditable() {
-  document.querySelectorAll(SELECTOR).forEach(el => {
+// Runtime toggle functions. `root` lets scoped live sync activate a parsed
+// incoming document the same way boot activates the live one.
+export function enableContentEditable(root = document) {
+  root.querySelectorAll(SELECTOR).forEach(el => {
     let val = el.getAttribute("inert-contenteditable");
     if (!["false", "plaintext-only"].includes(val)) val = "true";
     el.setAttribute("contenteditable", val);

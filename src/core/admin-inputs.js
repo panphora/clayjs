@@ -24,11 +24,13 @@ export function enableAdminInputsOnPageLoad() {
   });
 }
 
-export function enableAdminInputs() {
-  document.querySelectorAll(SELECTOR_DISABLED).forEach(input => {
+// `root` lets scoped live sync activate a parsed incoming document the same
+// way boot activates the live one.
+export function enableAdminInputs(root = document) {
+  root.querySelectorAll(SELECTOR_DISABLED).forEach(input => {
     input.removeAttribute('disabled');
   });
-  document.querySelectorAll(SELECTOR_READONLY).forEach(input => {
+  root.querySelectorAll(SELECTOR_READONLY).forEach(input => {
     input.removeAttribute('readonly');
   });
 }

@@ -116,13 +116,16 @@ function clonePreventingOnclone(node) {
   finally { window.__preventOnclone = prev; }
 }
 
-export function captureSnapshot() {
+export function captureSnapshot({ flushUndo = true } = {}) {
   // Force-close any pending undo idle batch BEFORE cloning the DOM, so the
   // snapshot reflects a clean undo boundary. Without this, a save that fires
   // mid-typing would leave the idle batch open across the save boundary, and
   // Cmd+Z after save would restore to a state earlier than the last save.
   // No-op when undo isn't loaded or no batch is pending.
-  if (typeof window !== 'undefined' && window.clay?.undo?.flush) {
+  // flushUndo: false is for captures that are not save boundaries (the scoped
+  // live-sync dirty oracle runs per incoming frame, and flushing there would
+  // shatter the user's undo batches mid-typing).
+  if (flushUndo && typeof window !== 'undefined' && window.clay?.undo?.flush) {
     window.clay.undo.flush();
   }
 
@@ -181,8 +184,8 @@ function prepareCloneForSave(clone) {
  *
  * @returns {string} HTML string with all autosave-off regions stripped
  */
-export function captureForComparison() {
-  const clone = captureSnapshot();
+export function captureForComparison({ flushUndo = true } = {}) {
+  const clone = captureSnapshot({ flushUndo });
 
   // Run inline [onbeforesave] handlers
   runAuthoredHandlers(clone, 'onbeforesave');
@@ -258,6 +261,58 @@ export function captureForSaveAndComparison({ emitForSync = true } = {}) {
   const forComparison = "<!DOCTYPE html>" + compareClone.outerHTML;
 
   return { forSave, forComparison, snapshotHtml };
+}
+
+/**
+ * Capture for a protected live-sync merge: the save-domain and comparison-
+ * domain clones of ONE snapshot, plus a WeakMap pairing every comparison
+ * element to its save-clone twin.
+ *
+ * The pairing is recorded immediately after the comparison clone is created,
+ * while the two trees are still isomorphic; each side's strips then remove
+ * nodes independently without disturbing it. The scoped-sync dirty diff runs
+ * on the comparison clone (the same domain as lastSavedContents), and dirty
+ * roots map through pairMap to save-domain subtrees (the same domain as the
+ * file on disk), which still carry the no-trigger-autosave / freeze / no-watch
+ * children the comparison strips.
+ *
+ * Never emits snapshot-ready (this capture must not feed the send pipeline)
+ * and never flushes the undo batch (it runs per incoming frame, not per save).
+ *
+ * @returns {{ saveClone: HTMLElement, compareClone: HTMLElement, pairMap: WeakMap }}
+ */
+export function captureForMerge() {
+  const clone = captureSnapshot({ flushUndo: false });
+
+  runAuthoredHandlers(clone, 'onbeforesave');
+
+  const compareClone = clonePreventingOnclone(clone);
+
+  const pairMap = new WeakMap();
+  (function pair(compareEl, saveEl) {
+    pairMap.set(compareEl, saveEl);
+    const compareKids = compareEl.children;
+    const saveKids = saveEl.children;
+    for (let i = 0; i < compareKids.length; i++) {
+      pair(compareKids[i], saveKids[i]);
+    }
+  })(compareClone, clone);
+
+  for (const hook of documentTransforms) {
+    hook(clone);
+  }
+  for (const el of clone.querySelectorAll(STRIP_FROM_SAVE)) {
+    el.remove();
+  }
+
+  for (const el of compareClone.querySelectorAll(STRIP_FROM_COMPARISON)) {
+    el.remove();
+  }
+  for (const hook of documentTransforms) {
+    hook(compareClone);
+  }
+
+  return { saveClone: clone, compareClone, pairMap };
 }
 
 /**

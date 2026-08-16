@@ -22,9 +22,10 @@ export function enableOnClickForAdminOnPageLoad () {
   });
 }
 
-// Runtime toggle functions
-export function enableOnClick() {
-  document.querySelectorAll(SELECTOR).forEach(el => {
+// Runtime toggle functions. `root` lets scoped live sync activate a parsed
+// incoming document the same way boot activates the live one.
+export function enableOnClick(root = document) {
+  root.querySelectorAll(SELECTOR).forEach(el => {
     const val = el.getAttribute("inert-onclick");
     if (val) {
       el.setAttribute("onclick", val);

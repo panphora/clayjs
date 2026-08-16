@@ -40,8 +40,11 @@ import Mutation from "../lib/mutation.js";
 import { isSnapshotRemoved } from "../lib/region-policy.js";
 import { isEditMode } from "../core/is-edit-mode.js";
 import { mergeTagRecognizers } from "./merge-tags.js";
-import { serializeForSync } from '../core/snapshot.js';
+import { serializeForSync, captureForComparison } from '../core/snapshot.js';
 import { isTabLocalRootAttr } from '../lib/root-attrs.js';
+import { protectPeerDoc, protectDiskDoc, activateIncomingDoc } from './splice-merge.js';
+import { pageMaybeDirty, pauseGate, resumeGate } from '../lib/dirty-gate.js';
+import { savePageThrottled, setLastSavedContents, setUnsavedChanges } from '../core/save.js';
 
 class LiveSync {
   constructor() {
@@ -93,6 +96,25 @@ class LiveSync {
     this._pendingIdentityMap = null;
     this._morphInFlight = false;
     this._rafHandle = null;
+
+    // Disk-sourced external changes (htmlclay watcher content) get their own
+    // one-deep slot so a peer frame arriving in the same window can't
+    // displace them. Drained in seq order alongside the peer slot.
+    this._pendingExternal = null;   // { html, seq, saveEpoch }
+
+    // Newest external-change seq accepted for apply. Replayed or reordered
+    // disk frames (and their fetch fallbacks) are dropped against this.
+    this._lastExternalSeq = 0;
+
+    // Bumped on every own save success. A queued disk frame older than our
+    // own landed save is stale by construction: the save just made disk
+    // equal our state.
+    this._saveEpoch = 0;
+    this._saveSavedHandler = null;
+
+    // The identityMap that came with lastHtml, so the peer-lane dirty diff
+    // can resolve synthetic identities on its base tree.
+    this._lastIdentityMap = null;
 
     // Identity tracking for content-based morphing across live-sync updates.
     // Synthetic IDs (`<clientId>:<counter>`) live here only — never written to
@@ -171,7 +193,10 @@ class LiveSync {
     // Reset state for new connection. Resetting lastSeenSeq is a new baseline,
     // so mint a fresh resume id — this stream must not resume the previous one.
     this.lastHtml = null;
+    this._lastIdentityMap = null;
     this.lastSeenSeq = 0;
+    this._lastExternalSeq = 0;
+    this._pendingExternal = null;
     this.resumeId = this.generateResumeId();
 
     console.log(`[LiveSync] Starting for: ${this.currentFile} (lane=${this.lane})`);
@@ -180,6 +205,8 @@ class LiveSync {
     // snapshot listener would never fire — skip registering it.
     if (this.lane === 'live') {
       this.listenForSnapshots();
+      this._saveSavedHandler = () => { this._saveEpoch++; };
+      document.addEventListener('clay:save-saved', this._saveSavedHandler);
     }
   }
 
@@ -198,6 +225,11 @@ class LiveSync {
       this._snapshotHandler = null;
     }
 
+    if (this._saveSavedHandler) {
+      document.removeEventListener('clay:save-saved', this._saveSavedHandler);
+      this._saveSavedHandler = null;
+    }
+
     clearTimeout(this.debounceTimer);
     this._queuedSend = null;
 
@@ -211,6 +243,7 @@ class LiveSync {
     this._pendingHtml = null;
     this._pendingSeq = null;
     this._pendingIdentityMap = null;
+    this._pendingExternal = null;
   }
 
   _mintId() {
@@ -295,21 +328,23 @@ class LiveSync {
    * the same logical elements, breaking convergence for newly-added
    * ambiguous siblings — exactly the case identity-map exists to fix.
    *
-   * Walks live and parsed in lockstep using the same path scheme as
-   * _buildIdentityMap. Filters [snapshot-remove] from the live side to
-   * stay aligned with the sender's clone view. Aborts a subtree on
-   * child-count divergence (e.g. local save-ignore additions) — those
-   * elements fall through to content scoring on the next round, which
-   * is the same fallback as a sender-side lockstep skip.
+   * Walks live and parsed in lockstep, reading ids off the parsed NODES
+   * (parsedWeakMap) rather than re-deriving dot-paths: a protected splice
+   * shifts paths, but the WeakMap entries ride the nodes and stay correct.
+   * Filters [snapshot-remove] from the live side to stay aligned with the
+   * sender's clone view. Aborts a subtree on child-count divergence (e.g.
+   * local save-ignore additions) — those elements fall through to content
+   * scoring on the next round, which is the same fallback as a sender-side
+   * lockstep skip.
    *
    * @param {Element} liveRoot - post-morph live tree root
-   * @param {Element} parsedRoot - parsed-tree root (still has identityMap WeakMap entries)
-   * @param {Object} identityMap - path → id map from the SSE payload
+   * @param {Element} parsedRoot - parsed-tree root
+   * @param {WeakMap} parsedWeakMap - parsed node → synthetic id
    */
-  _fillInIdsAfterMorph(liveRoot, parsedRoot, identityMap) {
-    if (!liveRoot || !parsedRoot || !identityMap) return;
-    const visit = (live, parsed, path) => {
-      const id = identityMap[path];
+  _fillInIdsAfterMorph(liveRoot, parsedRoot, parsedWeakMap) {
+    if (!liveRoot || !parsedRoot || !parsedWeakMap) return;
+    const visit = (live, parsed) => {
+      const id = parsedWeakMap.get(parsed);
       if (id && !this.liveWeakMap.has(live)) {
         this.liveWeakMap.set(live, id);
       }
@@ -320,10 +355,10 @@ class LiveSync {
       const parsedKids = parsed.children;
       if (liveKids.length !== parsedKids.length) return;
       for (let i = 0; i < liveKids.length; i++) {
-        visit(liveKids[i], parsedKids[i], path === '' ? String(i) : `${path}.${i}`);
+        visit(liveKids[i], parsedKids[i]);
       }
     };
-    visit(liveRoot, parsedRoot, '');
+    visit(liveRoot, parsedRoot);
   }
 
   /**
@@ -393,8 +428,11 @@ class LiveSync {
         this.lastSeenSeq = seq;
       }
 
-      // Handle notifications (show toast, don't morph)
+      // External disk changes ride the notification channel as first-class
+      // content (data.kind === 'external-change'). They apply silently —
+      // Google-Docs-style — so a handled one never reaches the toast branch.
       if (data.type === "notification") {
+        if (this._maybeAcceptExternalChange(data)) return;
         this.handleNotification(data);
         return;
       }
@@ -513,6 +551,7 @@ class LiveSync {
     }).then(response => {
       if (response.ok) {
         this.lastHtml = html;
+        this._lastIdentityMap = identityMap || null;
       } else {
         console.warn('[LiveSync] Save returned status:', response.status);
       }
@@ -525,6 +564,73 @@ class LiveSync {
       this._queuedSend = null;
       if (queued) this._postUpdate(queued.html, queued.identityMap);
     });
+  }
+
+  /**
+   * Route an external disk change (htmlclay watcher) out of the notification
+   * path. Returns true when the notification was consumed — the caller must
+   * then skip the toast branch entirely (silent UX).
+   *
+   * New servers mark these with data.kind === 'external-change' and embed the
+   * disk HTML (omitted only when it exceeds the server's size cap). Old
+   * servers send a bare warning with the watcher's fixed message shape; both
+   * content-less forms fall back to a token-free fetch of the served page.
+   */
+  _maybeAcceptExternalChange(data) {
+    if (this.lane !== 'live') return false;
+    const info = data.data;
+    if (info && info.kind === 'external-change') {
+      if (typeof info.html === 'string') {
+        this._enqueueExternal(info.html, data.seq);
+      } else {
+        this._fetchExternalChange(data.seq);
+      }
+      return true;
+    }
+    if (typeof data.msg === 'string' && data.msg.endsWith('changed on disk outside this tab')) {
+      this._fetchExternalChange(data.seq);
+      return true;
+    }
+    return false;
+  }
+
+  _enqueueExternal(html, seq) {
+    if (typeof seq === 'number') {
+      if (seq <= this._lastExternalSeq) {
+        this._log(`Dropping replayed external change: seq=${seq}`);
+        return;
+      }
+      this._lastExternalSeq = seq;
+    }
+    this._pendingExternal = { html, seq, saveEpoch: this._saveEpoch };
+    this._scheduleNextFrame();
+  }
+
+  /**
+   * Content-less fallback: fetch the served document. The request carries no
+   * Sec-Fetch-Dest: document, so htmlclay serves it token-free; the morph's
+   * root-attribute veto keeps this tab's own token either way. The result is
+   * stamped with the triggering notification's seq and dropped if a newer
+   * external change (or our own save) landed while it was in flight.
+   */
+  _fetchExternalChange(seq) {
+    if (typeof seq === 'number') {
+      if (seq <= this._lastExternalSeq) return;
+      this._lastExternalSeq = seq;
+    }
+    const epoch = this._saveEpoch;
+    fetch(new URL(window.location.href), { cache: 'no-store' })
+      .then((response) => (response.ok ? response.text() : null))
+      .then((html) => {
+        if (this.isDestroyed || html == null) return;
+        if (typeof seq === 'number' && seq < this._lastExternalSeq) return;
+        if (this._saveEpoch > epoch) return;
+        this._pendingExternal = { html, seq, saveEpoch: epoch };
+        this._scheduleNextFrame();
+      })
+      .catch((err) => {
+        this._log('External-change fetch failed', err);
+      });
   }
 
   /**
@@ -562,34 +668,74 @@ class LiveSync {
   }
 
   /**
-   * Drain the pending slot once. Errors are caught and logged so a single
-   * failed morph does not stop the queue.
+   * Drain one pending payload per frame. Errors are caught and logged so a
+   * single failed morph does not stop the queue.
+   *
+   * Two slots feed this: peer frames and disk-sourced external changes. When
+   * both are pending, the lower seq applies first so the two lanes land in
+   * server order; the other stays queued for the next frame.
    */
   async _runPending() {
     this._rafHandle = null;
     if (this.isDestroyed) return;
 
-    const html = this._pendingHtml;
-    const seq = this._pendingSeq;
-    const identityMap = this._pendingIdentityMap;
-    this._pendingHtml = null;
-    this._pendingSeq = null;
-    this._pendingIdentityMap = null;
-    if (html == null) return;
-
-    this._morphInFlight = true;
-    try {
-      await this._doApplyUpdate(html, seq, identityMap);
-    } catch (err) {
-      console.error('[LiveSync] applyUpdate failed:', err);
-    } finally {
-      this._morphInFlight = false;
+    const ext = this._pendingExternal;
+    let runExternal = false;
+    if (ext != null) {
+      if (this._pendingHtml == null) {
+        runExternal = true;
+      } else {
+        runExternal = !(
+          typeof ext.seq === 'number' &&
+          typeof this._pendingSeq === 'number' &&
+          this._pendingSeq < ext.seq
+        );
+      }
     }
 
-    // A newer payload may have arrived during the morph. Schedule another
-    // frame to drain it. Without this, late-arriving updates would sit
-    // forever until the next applyUpdate call.
-    if (!this.isDestroyed && this._pendingHtml != null) {
+    if (runExternal) {
+      this._pendingExternal = null;
+      // Stale-at-drain checks: our own save landed after this frame was
+      // queued (disk now equals our state), or a newer external change
+      // already superseded it.
+      if (ext.saveEpoch === this._saveEpoch &&
+          !(typeof ext.seq === 'number' && ext.seq < this._lastExternalSeq)) {
+        this._morphInFlight = true;
+        try {
+          await this._doApplyExternal(ext.html, ext.seq);
+        } catch (err) {
+          console.error('[LiveSync] applyExternal failed:', err);
+        } finally {
+          this._morphInFlight = false;
+        }
+      } else {
+        this._log('Dropping stale external change at drain');
+      }
+    } else {
+      const html = this._pendingHtml;
+      const seq = this._pendingSeq;
+      const identityMap = this._pendingIdentityMap;
+      this._pendingHtml = null;
+      this._pendingSeq = null;
+      this._pendingIdentityMap = null;
+      if (html == null) return;
+
+      this._morphInFlight = true;
+      try {
+        await this._doApplyUpdate(html, seq, identityMap);
+      } catch (err) {
+        console.error('[LiveSync] applyUpdate failed:', err);
+      } finally {
+        this._morphInFlight = false;
+      }
+    }
+
+    // A newer payload may have arrived during the morph, or the other slot
+    // is still holding one. Schedule another frame to drain it. Without
+    // this, late-arriving updates would sit forever until the next
+    // applyUpdate call.
+    if (!this.isDestroyed &&
+        (this._pendingHtml != null || this._pendingExternal != null)) {
       this._scheduleNextFrame();
     }
   }
@@ -630,6 +776,7 @@ class LiveSync {
 
     // Pause mutation observer so morph doesn't trigger autosave
     Mutation.pause();
+    pauseGate();
 
     // Parse as full document
     const parser = new DOMParser();
@@ -666,7 +813,30 @@ class LiveSync {
     const beforeAttributeUpdated = (name, element) =>
       isTabLocalRootAttr(name, element) ? false : undefined;
 
+    let retainedRoots = 0;
     try {
+      // Scoped sync: when this tab might hold unsaved edits, splice them into
+      // the incoming document BEFORE the morph so it cannot clobber them.
+      // The clean path skips every capture and stays byte-identical to a
+      // plain full morph.
+      if (this.lane === 'live' && pageMaybeDirty()) {
+        const protection = protectPeerDoc({
+          newDoc,
+          parsedWeakMap,
+          baseHtml: this.lastHtml,
+          baseIdentityMap: this._lastIdentityMap,
+          liveWeakMap: this.liveWeakMap,
+        });
+        if (!protection.ok) {
+          // Hold the whole frame: a dirty section couldn't be safely merged
+          // (or no baseline exists yet). Nothing is lost — the next frame or
+          // our own convergence save re-delivers current state.
+          console.log('[LiveSync] Holding incoming update: unsaved local section cannot be safely merged', protection.held?.el || '');
+          return;
+        }
+        retainedRoots = protection.entries.length;
+      }
+
       // Morph entire document. We MUST await — HyperMorph.morph returns a
       // Promise when `scripts: { handle: true }` needs to wait for external
       // scripts to load. If we don't await, Mutation.resume() fires before
@@ -701,7 +871,7 @@ class LiveSync {
       // would mint fresh IDs on its next save for those elements,
       // breaking convergence exactly for newly-added ambiguous siblings.
       if (identityMap && typeof identityMap === 'object' && !Array.isArray(identityMap)) {
-        this._fillInIdsAfterMorph(document.documentElement, newDoc.documentElement, identityMap);
+        this._fillInIdsAfterMorph(document.documentElement, newDoc.documentElement, parsedWeakMap);
       }
 
       // Only mark lastHtml after a successful morph so that a failed apply
@@ -709,7 +879,17 @@ class LiveSync {
       // mistakenly skipped as "unchanged". Note: lastSeenSeq is advanced at
       // receive time (in onmessage) so the staleness check covers own-save
       // echoes even when they don't reach this point.
+      //
+      // lastHtml is the RAW incoming frame even after a protected apply. A
+      // patched serialization would poison the next frame's diff base (frame
+      // two of a burst would read the protected section as clean and clobber
+      // it) and could dedupe away the convergence send. Convergence is driven
+      // by the explicit save below instead.
       this.lastHtml = html;
+      this._lastIdentityMap =
+        identityMap && typeof identityMap === 'object' && !Array.isArray(identityMap)
+          ? identityMap
+          : null;
 
       // Announce that a remote morph just landed, so document-level listeners
       // that are deaf to Mutation.pause (e.g. the hypercms form panel) can
@@ -724,10 +904,110 @@ class LiveSync {
     } finally {
       this._log('applyUpdate - morph complete, resuming mutations');
       Mutation.resume();
+      resumeGate();
       // Defer past microtask boundary — MutationObserver callbacks fire before
       // this, so isPaused catches any stray snapshots from the morph itself.
       await new Promise((resolve) => setTimeout(resolve, 0));
       this.isPaused = false;
+    }
+
+    // Convergence: a protected apply produced a merged state (our sections +
+    // their frame) that exists only in this DOM. Push it out explicitly — the
+    // morph ran under Mutation.pause, so no autosave was triggered, and a
+    // pending autosave debounce may already have fired mid-flight. Runs after
+    // isPaused is lifted so the save's snapshot-ready relay reaches peers.
+    if (retainedRoots > 0) {
+      savePageThrottled();
+    }
+  }
+
+  /**
+   * Apply an external disk change to this edit-mode tab. Same shape as
+   * _doApplyUpdate with three differences: the incoming document is save
+   * domain, so it is edit-mode ACTIVATED before the morph (inert attribute
+   * forms flipped live, as boot does on page load); dirty protection diffs
+   * against the save baseline instead of lastHtml; and on a clean apply the
+   * save baseline advances to a post-morph local comparison capture — true by
+   * construction, where any wire-derived baseline permanently mismatches
+   * (token, doctype, transform and parse divergences). A dirty apply leaves
+   * the baseline alone so the convergence save below sees its own changes.
+   * lastHtml is never touched: it belongs to the peer lane.
+   */
+  async _doApplyExternal(html, seq) {
+    this._log(`applyExternal - external disk change (seq=${seq})`);
+    this.isPaused = true;
+
+    const scrollX = window.scrollX;
+    const scrollY = window.scrollY;
+
+    Mutation.pause();
+    pauseGate();
+
+    let retainedRoots = 0;
+    try {
+      const parser = new DOMParser();
+      const newDoc = parser.parseFromString(html, 'text/html');
+
+      if (pageMaybeDirty()) {
+        const protection = protectDiskDoc({ newDoc });
+        if (!protection.ok) {
+          console.log('[LiveSync] Holding external change: unsaved local section cannot be safely merged', protection.held?.el || '');
+          return;
+        }
+        retainedRoots = protection.entries.length;
+      }
+
+      activateIncomingDoc(newDoc.documentElement);
+
+      const liveWeakMap = this.liveWeakMap;
+      const key = (el) =>
+        liveWeakMap.get(el) ||
+        (el.getAttribute && el.getAttribute('data-id')) ||
+        (el.getAttribute && el.getAttribute('id')) ||
+        null;
+      const beforeAttributeUpdated = (name, element) =>
+        isTabLocalRootAttr(name, element) ? false : undefined;
+
+      await HyperMorph.morph(document.documentElement, newDoc.documentElement, {
+        morphStyle: 'outerHTML',
+        ignoreActiveValue: true,
+        head: { style: 'merge' },
+        scripts: {
+          handle: true,
+          matchMode: 'smart',
+          mergeBase: this.lastHtml,
+          mergeTags: mergeTagRecognizers
+        },
+        key,
+        callbacks: { beforeAttributeUpdated }
+      });
+
+      window.scrollTo(scrollX, scrollY);
+
+      if (retainedRoots === 0) {
+        // Clean apply: the DOM now IS the disk state, so a local comparison
+        // capture of it is the truthful baseline. The next no-op save skips,
+        // beforeunload stays quiet.
+        setLastSavedContents(captureForComparison({ flushUndo: false }));
+        setUnsavedChanges(false);
+      }
+
+      document.dispatchEvent(new CustomEvent('clay:sync-applied', {
+        detail: { seq }
+      }));
+    } finally {
+      this._log('applyExternal - morph complete, resuming mutations');
+      Mutation.resume();
+      resumeGate();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      this.isPaused = false;
+    }
+
+    // Convergence: disk holds the writer's version, this DOM holds the merge.
+    // The baseline was left pre-external, so the save sees both our retained
+    // sections and the external content as changes and writes the merge back.
+    if (retainedRoots > 0) {
+      savePageThrottled();
     }
   }
 

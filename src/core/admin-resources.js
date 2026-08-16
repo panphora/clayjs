@@ -37,11 +37,15 @@ export function enableAdminResourcesOnPageLoad () {
   });
 }
 
-// Runtime toggle functions
-export function enableAdminResources() {
-  document.querySelectorAll(SELECTOR_INERT).forEach(resource => {
+// Runtime toggle functions. `root` lets scoped live sync activate a parsed
+// incoming document; the clone-swap re-execution trick only applies to the
+// live document — in a detached parse nothing executes, and the morph's own
+// script handling decides execution when the content lands.
+export function enableAdminResources(root = document) {
+  const live = (root.ownerDocument || root) === document;
+  root.querySelectorAll(SELECTOR_INERT).forEach(resource => {
     makeActive(resource);
-    resource.replaceWith(resource.cloneNode(true));
+    if (live) resource.replaceWith(resource.cloneNode(true));
   });
 }
 

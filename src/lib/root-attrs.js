@@ -12,7 +12,11 @@
 // per-tab and makes the host strip it before writing, so it never reaches disk.
 // But §9 bounds only the save path, and §10 fans a snapshot out to other editors'
 // browsers, which is the hole this module closes.
-export const HOST_TOKEN_ATTRS = ["savetoken", "htmlclaytoken"];
+//
+// htmlclayid is host-injected too (htmlclay's durable file identity, stamped on
+// every serve, absent from disk bytes). It rides here so a morph of raw disk
+// content cannot strip this tab's copy, and a peer's copy is never applied.
+export const HOST_TOKEN_ATTRS = ["savetoken", "htmlclaytoken", "htmlclayid"];
 
 // Which save envelope this host's lane takes: a fact about the response, not
 // about the document.

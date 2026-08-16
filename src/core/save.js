@@ -20,6 +20,7 @@ import {
   isSaveInProgress
 } from "./save-core.js";
 import { captureForComparison, captureForSaveAndComparison } from "./snapshot.js";
+import { gateCaptureToken, gateClearIfUnchanged } from "../lib/dirty-gate.js";
 import { logSaveCheck, logBaseline } from "../lib/autosave-debug.js";
 
 // Reset savestatus to 'saved' in snapshots (each module cleans up its own attrs)
@@ -129,10 +130,13 @@ function skipped_(msg) {
  * where the write may or may not have landed, so it is not treated as success
  * either.
  */
-function applySaveResult(result, forComparison, label) {
+function applySaveResult(result, forComparison, label, gateToken) {
   if (result.ok) {
     lastSavedContents = forComparison;
     unsavedChanges = false;
+    // Generation-checked: clears the scoped-sync dirty gate only if nothing
+    // changed while this save was on the wire.
+    gateClearIfUnchanged(gateToken);
     // The server's severity rides through untouched: a save can land AND carry a
     // warning, and the UI module is what decides how to render that.
     setSaveState('saved', result.msg || 'Saved', result.msgType);
@@ -201,6 +205,7 @@ export function savePage(callback = () => {}) {
     // forSave strips non-persisted regions ([no-save]/[save-remove])
     // forComparison additionally strips every autosave-off region
     let forSave, forComparison, snapshotHtml;
+    const gateToken = gateCaptureToken();
     try {
       ({ forSave, forComparison, snapshotHtml } = captureForSaveAndComparison());
     } catch (err) {
@@ -219,6 +224,7 @@ export function savePage(callback = () => {}) {
 
     // Skip if content hasn't changed
     if (!unsavedChanges) {
+      gateClearIfUnchanged(gateToken);
       const skipped = skipped_('No changes to save');
       callback(skipped);
       return resolve(skipped);
@@ -229,7 +235,7 @@ export function savePage(callback = () => {}) {
 
     // Use saveHtml directly with our pre-captured content (avoids double capture)
     saveHtml(forSave, (result) => {
-      applySaveResult(result, forComparison, 'updated after save');
+      applySaveResult(result, forComparison, 'updated after save', gateToken);
       if (typeof callback === 'function') {
         callback(result);
       }
@@ -266,6 +272,7 @@ export function savePageForce(callback = () => {}) {
     }
 
     let forSave, forComparison, snapshotHtml;
+    const gateToken = gateCaptureToken();
     try {
       ({ forSave, forComparison, snapshotHtml } = captureForSaveAndComparison());
     } catch (err) {
@@ -281,7 +288,7 @@ export function savePageForce(callback = () => {}) {
     setSavingState();
 
     saveHtml(forSave, (result) => {
-      applySaveResult(result, forComparison, 'updated after force save');
+      applySaveResult(result, forComparison, 'updated after force save', gateToken);
       if (typeof callback === 'function') {
         callback(result);
       }
@@ -383,9 +390,13 @@ function initBaselineCapture() {
     // (if a save happened, lastSavedContents would differ from immediateContents)
     if (!userEdited && lastSavedContents === immediateContents) {
       // Store stripped version so comparisons are direct (no parsing needed)
+      const gateToken = gateCaptureToken();
       const contents = captureForComparison();
       lastSavedContents = contents;
       baselineContents = contents;
+      // Boot churn (modules rewriting attributes at DOM-ready) counted toward
+      // the scoped-sync gate; the settled baseline is the proof it wasn't edits.
+      gateClearIfUnchanged(gateToken);
       logBaseline('settled capture', `${contents.length} chars`);
     } else {
       logBaseline('settled skipped', userEdited ? 'user edited' : 'save occurred during settle');
@@ -446,6 +457,7 @@ export function savePageThrottled(callback = () => {}) {
   // matters — otherwise undoing back to the page's original state can never be
   // persisted, because it matches the baseline forever.
   // Compare directly - stored versions are already stripped
+  const gateToken = gateCaptureToken();
   const currentForCompare = captureForComparison();
   const differsFromBaseline = !baselineActive || currentForCompare !== baselineContents;
   const differsFromLastSave = currentForCompare !== lastSavedContents;
@@ -454,6 +466,7 @@ export function savePageThrottled(callback = () => {}) {
   logSaveCheck('throttled vs lastSave', !differsFromLastSave);
 
   if (!(differsFromBaseline && differsFromLastSave)) {
+    if (!differsFromLastSave) gateClearIfUnchanged(gateToken);
     const skipped = skipped_('No changes to save');
     callback(skipped);
     return Promise.resolve(skipped);
