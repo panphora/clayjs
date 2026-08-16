@@ -49,10 +49,25 @@ test("an edit between capture and clear keeps the gate dirty", () => {
   expect(gate.pageMaybeDirty()).toBe(true);
 });
 
-test("events during the morph-apply window do not count", () => {
+test("user input during the morph-apply window STILL counts", () => {
+  // A morph never dispatches input/change events, so anything on those
+  // listeners is the user — including typing during a morph's async
+  // resource wait, which must keep the page dirty or the next clean frame
+  // full-morphs over it.
   document.body.innerHTML = '<input type="text">';
   gate.pauseGate();
   type(document.querySelector("input"));
+  gate.resumeGate();
+  expect(gate.pageMaybeDirty()).toBe(true);
+});
+
+test("DOM mutations during the morph-apply window do not count", async () => {
+  document.body.innerHTML = "<div><p>x</p></div>";
+  await Promise.resolve();
+  gate.gateClearIfUnchanged(gate.gateCaptureToken());
+  gate.pauseGate();
+  document.querySelector("p").textContent = "morphed";
+  await Promise.resolve(); // let the MutationObserver microtask deliver
   gate.resumeGate();
   expect(gate.pageMaybeDirty()).toBe(false);
 });

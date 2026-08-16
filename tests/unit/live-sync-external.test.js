@@ -174,18 +174,53 @@ test("clay:save-saved bumps the save epoch on the live lane", () => {
   sync.stop();
 });
 
-test("a queued disk frame older than an own landed save is discarded at drain", async () => {
+test("a queued disk frame older than an own landed save is refetched at drain, never applied as-is", async () => {
+  // Save-response order does not prove disk-write order: the queued frame
+  // may still be newer than the save, so the drain fetches what disk holds
+  // NOW instead of applying the possibly-stale body or dropping the change.
   const sync = makeSync();
   const applyExternal = jest
     .spyOn(sync, "_doApplyExternal")
     .mockImplementation(async () => {});
+  let resolveFetch;
+  global.fetch = jest.fn(
+    () => new Promise((resolve) => { resolveFetch = resolve; })
+  );
 
   sync._enqueueExternal("<html>stale</html>", 5); // saveEpoch captured: 0
-  sync._saveEpoch++; // our own save landed: disk now equals our state
+  sync._saveEpoch++; // our own save landed while it was queued
   await sync._runPending();
 
   expect(applyExternal).not.toHaveBeenCalled();
-  expect(sync._pendingExternal).toBeNull();
+  expect(global.fetch).toHaveBeenCalledTimes(1);
+  expect(global.fetch.mock.calls[0][1]).toEqual({ cache: "no-store" });
+
+  resolveFetch({ ok: true, text: async () => "<html>disk-now</html>" });
+  await new Promise((r) => setTimeout(r, 0));
+  expect(sync._pendingExternal).toEqual({
+    html: "<html>disk-now</html>",
+    seq: 5,
+    saveEpoch: 1,
+  });
+  sync.stop();
+});
+
+test("a failed fallback fetch rolls the seq watermark back so a replay can redeliver", async () => {
+  const sync = makeSync();
+  global.fetch = jest.fn(() => Promise.reject(new Error("server gone")));
+
+  sync._fetchExternalChange(5);
+  expect(sync._lastExternalSeq).toBe(5);
+  await new Promise((r) => setTimeout(r, 0));
+  // Without the rollback, seq 5 would be dropped forever on redelivery.
+  expect(sync._lastExternalSeq).toBe(4);
+
+  global.fetch = jest.fn(() =>
+    Promise.resolve({ ok: true, text: async () => "<html>recovered</html>" })
+  );
+  sync._fetchExternalChange(5);
+  await new Promise((r) => setTimeout(r, 0));
+  expect(sync._pendingExternal.html).toBe("<html>recovered</html>");
   sync.stop();
 });
 
@@ -278,6 +313,9 @@ test("clean tab: disk frame morphs in activated, token survives, baseline advanc
     snapshot.captureForComparison({ flushUndo: false })
   );
   expect(save.getUnsavedChanges()).toBe(false);
+  // Cross-lane: the peer diff base now tracks the applied disk state, so a
+  // later dirty peer apply cannot misread it as unsaved local edits.
+  expect(sync.lastHtml).toContain("v2-from-disk");
   expect(applied).toEqual([20]);
   sync.stop();
   document.documentElement.removeAttribute("htmlclaytoken");
@@ -329,10 +367,11 @@ test("dirty tab with an unmergeable (keyless) edit holds the whole disk frame", 
 
   await sync._doApplyExternal(diskDoc("<main><p>disk-edit</p></main>"), 40);
 
-  // Nothing applied, nothing lost: the local edit stands, the frame waits for
-  // the convergence save or the next frame.
+  // Nothing applied, nothing lost: the local edit stands, and a retry is
+  // scheduled so the frame still applies if the blocking edit is undone.
   expect(document.querySelector("main p").textContent).toBe("local-edit");
   expect(document.body.innerHTML).not.toContain("disk-edit");
   expect(save.getLastSavedContents()).toBe(baselineBefore);
+  expect(sync._holdRetryExt).not.toBeNull();
   sync.stop();
 });

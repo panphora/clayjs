@@ -26,6 +26,7 @@ class FakeEventSource {
 let LiveSync;
 let snapshot;
 let gate;
+let save;
 
 beforeAll(async () => {
   window.clayEditMode = true;
@@ -39,6 +40,7 @@ beforeAll(async () => {
 
   snapshot = await import("../../src/core/snapshot.js");
   gate = await import("../../src/lib/dirty-gate.js");
+  save = await import("../../src/core/save.js");
 });
 
 beforeEach(async () => {
@@ -69,6 +71,8 @@ test("clean tab: a peer frame full-morphs, including sections this tab last touc
   document.body.innerHTML =
     '<section data-id="b"><p>b0</p></section><section data-id="h"><p>h0</p></section>';
   sync.lastHtml = captureFrame();
+  await Promise.resolve();
+  gate.gateClearIfUnchanged(gate.gateCaptureToken());
 
   const frame = sync.lastHtml.replace("b0", "b1-peer").replace("h0", "h1-peer");
   await sync._doApplyUpdate(frame, 5, null);
@@ -76,6 +80,12 @@ test("clean tab: a peer frame full-morphs, including sections this tab last touc
   expect(document.querySelector('[data-id="b"] p').textContent).toBe("b1-peer");
   expect(document.querySelector('[data-id="h"] p').textContent).toBe("h1-peer");
   expect(sync.lastHtml).toBe(frame);
+  // Cross-lane: a verified-clean peer apply also advances the DISK baseline,
+  // so a later dirty disk apply cannot misread this frame's content as
+  // unsaved local edits and splice stale bytes over newer disk state.
+  expect(save.getLastSavedContents()).toBe(
+    snapshot.captureForComparison({ flushUndo: false })
+  );
   sync.stop();
 });
 
@@ -151,5 +161,7 @@ test("dirty tab with an unmergeable (keyless) edit holds the whole frame", async
   expect(document.body.innerHTML).not.toContain("peer-edit");
   // A held frame must not advance the diff base either.
   expect(sync.lastHtml).toBe(lastBefore);
+  // A retry is scheduled so the frame still applies if the edit is undone.
+  expect(sync._holdRetryPeer).not.toBeNull();
   sync.stop();
 });

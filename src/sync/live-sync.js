@@ -40,7 +40,7 @@ import Mutation from "../lib/mutation.js";
 import { isSnapshotRemoved } from "../lib/region-policy.js";
 import { isEditMode } from "../core/is-edit-mode.js";
 import { mergeTagRecognizers } from "./merge-tags.js";
-import { serializeForSync, captureForComparison } from '../core/snapshot.js';
+import { serializeForSync, captureForComparison, captureSnapshot } from '../core/snapshot.js';
 import { isTabLocalRootAttr } from '../lib/root-attrs.js';
 import { protectPeerDoc, protectDiskDoc, activateIncomingDoc } from './splice-merge.js';
 import { pageMaybeDirty, pauseGate, resumeGate } from '../lib/dirty-gate.js';
@@ -115,6 +115,19 @@ class LiveSync {
     // The identityMap that came with lastHtml, so the peer-lane dirty diff
     // can resolve synthetic identities on its base tree.
     this._lastIdentityMap = null;
+
+    // Bumped whenever an APPLY (or a reset) rewrites lastHtml. A POST's
+    // success callback carries no ordering guarantee against the SSE stream,
+    // so a delayed response must not rewind lastHtml past a frame that
+    // applied while it was on the wire.
+    this._applyGen = 0;
+
+    // Hold-retry timers, one per pending slot. A held frame's slot and seq
+    // watermark have already advanced, so nothing redelivers it; the retry
+    // re-queues the same payload so it applies if the blocking local edit is
+    // undone, and is dropped by the seq/epoch checks if it went stale.
+    this._holdRetryPeer = null;
+    this._holdRetryExt = null;
 
     // Identity tracking for content-based morphing across live-sync updates.
     // Synthetic IDs (`<clientId>:<counter>`) live here only — never written to
@@ -194,6 +207,7 @@ class LiveSync {
     // so mint a fresh resume id — this stream must not resume the previous one.
     this.lastHtml = null;
     this._lastIdentityMap = null;
+    this._applyGen++;
     this.lastSeenSeq = 0;
     this._lastExternalSeq = 0;
     this._pendingExternal = null;
@@ -244,6 +258,10 @@ class LiveSync {
     this._pendingSeq = null;
     this._pendingIdentityMap = null;
     this._pendingExternal = null;
+    clearTimeout(this._holdRetryPeer);
+    clearTimeout(this._holdRetryExt);
+    this._holdRetryPeer = null;
+    this._holdRetryExt = null;
   }
 
   _mintId() {
@@ -537,6 +555,7 @@ class LiveSync {
     this._log(`Sending update (HTML length: ${html.length}, lastHtml length: ${this.lastHtml?.length || 0})`);
 
     this._sendInFlight = true;
+    const gen = this._applyGen;
 
     // Absolute against the real origin, so a <base href> in the page cannot
     // redirect the whole document to an origin the author picked.
@@ -550,8 +569,16 @@ class LiveSync {
       })
     }).then(response => {
       if (response.ok) {
-        this.lastHtml = html;
-        this._lastIdentityMap = identityMap || null;
+        // A frame that applied while this POST was on the wire has already
+        // advanced lastHtml past this snapshot; assigning would rewind the
+        // diff base to pre-frame state and misclassify the frame's content
+        // as local edits on the next dirty apply.
+        if (this._applyGen === gen) {
+          this.lastHtml = html;
+          this._lastIdentityMap = identityMap || null;
+        } else {
+          this._log('Skipping lastHtml advance: a frame applied during the POST');
+        }
       } else {
         console.warn('[LiveSync] Save returned status:', response.status);
       }
@@ -618,18 +645,43 @@ class LiveSync {
       if (seq <= this._lastExternalSeq) return;
       this._lastExternalSeq = seq;
     }
+    this._fetchServedDocument(seq);
+  }
+
+  /**
+   * GET the served document and queue it as an external change. No watermark
+   * check of its own — callers own that — so it can also re-materialize a
+   * frame the epoch check refused (the fetched body is whatever disk holds
+   * NOW, which is always safe to apply).
+   */
+  _fetchServedDocument(seq, attempt = 0) {
     const epoch = this._saveEpoch;
     fetch(new URL(window.location.href), { cache: 'no-store' })
       .then((response) => (response.ok ? response.text() : null))
       .then((html) => {
         if (this.isDestroyed || html == null) return;
         if (typeof seq === 'number' && seq < this._lastExternalSeq) return;
-        if (this._saveEpoch > epoch) return;
+        if (this._saveEpoch > epoch) {
+          // An own save landed while the GET was in flight, so this body may
+          // predate it. Save-response order proves nothing about disk-write
+          // order — refetch for the newest bytes instead of dropping.
+          if (attempt < 3) {
+            console.log('[LiveSync] Refetching external change: own save landed mid-fetch');
+            this._fetchServedDocument(seq, attempt + 1);
+          }
+          return;
+        }
         this._pendingExternal = { html, seq, saveEpoch: epoch };
         this._scheduleNextFrame();
       })
       .catch((err) => {
         this._log('External-change fetch failed', err);
+        // The watermark already advanced for this seq; leaving it there
+        // would drop the change forever. Roll back so a replay or a later
+        // duplicate can redeliver it.
+        if (typeof seq === 'number' && this._lastExternalSeq === seq) {
+          this._lastExternalSeq = seq - 1;
+        }
       });
   }
 
@@ -695,11 +747,18 @@ class LiveSync {
 
     if (runExternal) {
       this._pendingExternal = null;
-      // Stale-at-drain checks: our own save landed after this frame was
-      // queued (disk now equals our state), or a newer external change
-      // already superseded it.
-      if (ext.saveEpoch === this._saveEpoch &&
-          !(typeof ext.seq === 'number' && ext.seq < this._lastExternalSeq)) {
+      // Stale-at-drain checks: a newer external change already superseded
+      // this frame, or our own save landed after it was queued.
+      if (typeof ext.seq === 'number' && ext.seq < this._lastExternalSeq) {
+        this._log('Dropping superseded external change at drain');
+      } else if (ext.saveEpoch !== this._saveEpoch) {
+        // The epoch moved, but save-response order does not prove disk-write
+        // order: the frame's content may still be newer than our save.
+        // Refetch the served document — applying what disk holds NOW is
+        // always safe — instead of dropping the frame.
+        console.log('[LiveSync] Refetching external change: own save landed after queue');
+        this._fetchServedDocument(ext.seq);
+      } else {
         this._morphInFlight = true;
         try {
           await this._doApplyExternal(ext.html, ext.seq);
@@ -708,8 +767,6 @@ class LiveSync {
         } finally {
           this._morphInFlight = false;
         }
-      } else {
-        this._log('Dropping stale external change at drain');
       }
     } else {
       const html = this._pendingHtml;
@@ -829,9 +886,29 @@ class LiveSync {
         });
         if (!protection.ok) {
           // Hold the whole frame: a dirty section couldn't be safely merged
-          // (or no baseline exists yet). Nothing is lost — the next frame or
-          // our own convergence save re-delivers current state.
+          // (or no baseline exists yet). Nothing morphs and no baseline
+          // moves; the tab keeps its local state and converges through its
+          // own next save. Deliberately NO proactive save here — a hold can
+          // fire on a manual-save page, which must never auto-write. The
+          // retry re-queues the same frame so it still applies if the
+          // blocking edit is undone; the slot-empty check and the drain's
+          // staleness checks drop it once superseded.
           console.log('[LiveSync] Holding incoming update: unsaved local section cannot be safely merged', protection.held?.el || '');
+          const epochAtHold = this._saveEpoch;
+          const seenAtHold = this.lastSeenSeq;
+          clearTimeout(this._holdRetryPeer);
+          this._holdRetryPeer = setTimeout(() => {
+            this._holdRetryPeer = null;
+            if (this.isDestroyed || this._pendingHtml != null) return;
+            // Only while the world hasn't moved: an own save or any newer
+            // frame since the hold makes this payload stale.
+            if (this._saveEpoch !== epochAtHold) return;
+            if (this.lastSeenSeq !== seenAtHold) return;
+            this._pendingHtml = html;
+            this._pendingSeq = seq;
+            this._pendingIdentityMap = identityMap;
+            this._scheduleNextFrame();
+          }, 3000);
           return;
         }
         retainedRoots = protection.entries.length;
@@ -890,6 +967,20 @@ class LiveSync {
         identityMap && typeof identityMap === 'object' && !Array.isArray(identityMap)
           ? identityMap
           : null;
+      this._applyGen++;
+
+      // Cross-lane baseline: the DOM now holds this frame's content, but the
+      // DISK baseline (lastSavedContents) still describes pre-frame state. A
+      // later dirty disk apply diffing against that stale baseline would
+      // classify everything this frame brought as unsaved local edits and
+      // splice it over newer disk bytes. A verified-clean apply is the one
+      // moment the DOM is truthfully "as if saved", so the comparison
+      // baseline advances here too. Skipped whenever the gate reports dirty
+      // (including typing that arrived during the morph's async wait, which
+      // must never be recorded as saved).
+      if (this.lane === 'live' && retainedRoots === 0 && !pageMaybeDirty()) {
+        setLastSavedContents(captureForComparison({ flushUndo: false }));
+      }
 
       // Announce that a remote morph just landed, so document-level listeners
       // that are deaf to Mutation.pause (e.g. the hypercms form panel) can
@@ -930,8 +1021,11 @@ class LiveSync {
    * save baseline advances to a post-morph local comparison capture — true by
    * construction, where any wire-derived baseline permanently mismatches
    * (token, doctype, transform and parse divergences). A dirty apply leaves
-   * the baseline alone so the convergence save below sees its own changes.
-   * lastHtml is never touched: it belongs to the peer lane.
+   * both baselines alone so the convergence save below sees its own changes
+   * (and, via the save pipeline, refreshes both). A clean apply also rebuilds
+   * lastHtml, because the peer lane's diff base must track what the DOM now
+   * holds or a later dirty peer apply misclassifies this frame's content as
+   * local edits.
    */
   async _doApplyExternal(html, seq) {
     this._log(`applyExternal - external disk change (seq=${seq})`);
@@ -951,7 +1045,23 @@ class LiveSync {
       if (pageMaybeDirty()) {
         const protection = protectDiskDoc({ newDoc });
         if (!protection.ok) {
+          // Hold: nothing morphs, no baseline moves, and deliberately NO
+          // proactive save (a hold can fire on a manual-save page, which
+          // must never auto-write). The frame's seq watermark has already
+          // advanced, so nothing redelivers it on its own; the retry
+          // re-queues it with the epoch captured NOW, so the drain's epoch
+          // check turns an intervening own save into a refetch of current
+          // disk instead of a stale re-apply, and the seq check drops it
+          // once a newer external change supersedes it.
           console.log('[LiveSync] Holding external change: unsaved local section cannot be safely merged', protection.held?.el || '');
+          const epochAtHold = this._saveEpoch;
+          clearTimeout(this._holdRetryExt);
+          this._holdRetryExt = setTimeout(() => {
+            this._holdRetryExt = null;
+            if (this.isDestroyed || this._pendingExternal != null) return;
+            this._pendingExternal = { html, seq, saveEpoch: epochAtHold };
+            this._scheduleNextFrame();
+          }, 3000);
           return;
         }
         retainedRoots = protection.entries.length;
@@ -984,12 +1094,24 @@ class LiveSync {
 
       window.scrollTo(scrollX, scrollY);
 
-      if (retainedRoots === 0) {
+      if (retainedRoots === 0 && !pageMaybeDirty()) {
         // Clean apply: the DOM now IS the disk state, so a local comparison
         // capture of it is the truthful baseline. The next no-op save skips,
-        // beforeunload stays quiet.
+        // beforeunload stays quiet. The dirty re-check matters: typing that
+        // arrived during the morph's async wait would otherwise be captured
+        // into the baseline and recorded as saved without reaching disk.
         setLastSavedContents(captureForComparison({ flushUndo: false }));
         setUnsavedChanges(false);
+
+        // Cross-lane baseline: the PEER diff base (lastHtml) would otherwise
+        // still describe pre-frame state, and a later dirty peer apply would
+        // classify this frame's content as local edits and splice it over a
+        // newer peer frame. Rebuild it exactly the way the send pipeline
+        // does, so it stays in the snapshot domain.
+        const clone = captureSnapshot({ flushUndo: false });
+        this.lastHtml = serializeForSync(clone);
+        this._lastIdentityMap = this._buildIdentityMap(document.documentElement, clone);
+        this._applyGen++;
       }
 
       document.dispatchEvent(new CustomEvent('clay:sync-applied', {
