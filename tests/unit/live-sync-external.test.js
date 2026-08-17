@@ -69,6 +69,11 @@ const DISK_MSG = "index.html changed on disk outside this tab";
 function makeSync() {
   const sync = new LiveSync();
   sync.lane = "live";
+  // Suppress the automatic ~16ms rAF drain. These tests inspect the pending
+  // slots between steps and call _runPending() themselves when they want one
+  // drained; left live, the frame races their setTimeout(0) ticks and empties
+  // a slot mid-assertion whenever the machine is loaded.
+  sync._requestFrame = () => null;
   return sync;
 }
 
