@@ -1,6 +1,6 @@
 {
   "name": "@panphora/clayjs",
-  "version": "0.4.3",
+  "version": "0.5.0",
   "type": "module",
   "description": "clayjs: malleable HTML files. Save lifecycle for self-saving HTML.",
   "license": "MIT",
