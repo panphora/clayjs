@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.6.0] - 2026-08-18
+
+### Changed
+- Update clayjs
+
+### Fixed
+- Skip strip-from-comparison regions in the dirty gate
+
+
+
 ## [0.5.0] - 2026-08-17
 
 ### Added
