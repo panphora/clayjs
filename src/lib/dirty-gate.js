@@ -27,6 +27,7 @@
 
 import Mutation from './mutation.js';
 import { isEditMode } from '../core/is-edit-mode.js';
+import { STRIP_FROM_COMPARISON, SNAPSHOT_REMOVE_SELECTOR } from './region-policy.js';
 
 let changes = 0;
 let clearedAt = 0;
@@ -34,6 +35,22 @@ let paused = false;
 let started = false;
 
 const PERSIST_CONTROLS = 'input[persist], textarea[persist], select[persist]';
+
+// Regions the comparison never sees. The hub feed already skips them, through
+// `require: 'autosave'`, and the input feed has to skip them for the same
+// reason: their content is stripped from the comparison clone, so an edit inside
+// one can never produce a dirty root, and counting it marks the page dirty with
+// nothing for the oracle to find — permanently, since only a save clears the
+// counter and churn in these regions triggers none.
+//
+// This is not a relaxation of "never under-report". A control here is absent
+// from the clone by definition, so there is nothing about it to under-report.
+// It matters because a mounted tool (redpen's answer field, any panel that
+// marks itself no-save) is a real <textarea> in the document: one keystroke in
+// it used to freeze the live-sync save baseline for the rest of the session,
+// after which every incoming disk change was diffed against a stale base, and
+// the previous change was spliced back over the newer one and written to disk.
+const GATE_IGNORE = `${STRIP_FROM_COMPARISON}, ${SNAPSHOT_REMOVE_SELECTOR}`;
 const probeCache = new WeakMap();
 
 function onUserInput(event) {
@@ -42,9 +59,9 @@ function onUserInput(event) {
   // during a morph's async resource wait, which must keep the page dirty.
   const el = event.target;
   if (!el || el.nodeType !== 1) return;
-  if (el.matches('input, textarea, select') || el.isContentEditable) {
-    changes++;
-  }
+  if (!(el.matches('input, textarea, select') || el.isContentEditable)) return;
+  if (el.closest(GATE_IGNORE)) return;
+  changes++;
 }
 
 export function startDirtyGate() {

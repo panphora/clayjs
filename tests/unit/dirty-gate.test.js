@@ -104,3 +104,29 @@ test("a token clear does not cache a value written after the capture", () => {
   gate.gateClearIfUnchanged(token);
   expect(gate.persistProbeDirty()).toBe(true);
 });
+
+// A mounted tool's own field is a real form control in the document, so the
+// capture-phase listener saw it and the page stayed dirty for the rest of the
+// session: only a save clears the counter, and nothing in a no-watch/no-save
+// region ever triggers one. Live-sync then stopped advancing its save baseline,
+// diffed every later disk change against a stale base, and spliced the previous
+// change back over the newer one.
+test("typing inside a region the comparison strips does not mark the page dirty", () => {
+  document.body.innerHTML = '<div clay="no-save no-snapshot no-watch"><textarea></textarea></div>';
+  type(document.querySelector("textarea"));
+  expect(gate.pageMaybeDirty()).toBe(false);
+});
+
+test("the bare-attribute spelling is skipped too", () => {
+  document.body.innerHTML = '<div no-save no-snapshot no-watch><input type="text"></div>';
+  type(document.querySelector("input"));
+  expect(gate.pageMaybeDirty()).toBe(false);
+});
+
+// The skip is region-scoped, not a hole: a control the page authored beside the
+// tool still counts.
+test("a control outside the region still marks the page dirty", () => {
+  document.body.innerHTML = '<div clay="no-save"><textarea></textarea></div><input type="text">';
+  type(document.querySelector("input"));
+  expect(gate.pageMaybeDirty()).toBe(true);
+});
