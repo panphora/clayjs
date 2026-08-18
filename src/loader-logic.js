@@ -21,11 +21,20 @@ export const PLUGIN_PATHS = {
   sortable:  { path: "plugins/sortable.js",        editOnly: true,  default: false },
   undo:      { path: "plugins/undo.js",            editOnly: true,  default: false },
   cms:       { path: "vendor/hypercms.vendor.js",  editOnly: false, default: false },
+  quickcrop: { path: "vendor/quickcrop.vendor.js", editOnly: false, default: false },
   wire:      { path: "plugins/wire.js",            editOnly: false, default: false },
   demo:      { path: "plugins/demo.js",            editOnly: false, default: false },
 };
 
-const PLUGIN_ORDER = ["richclay", "indicator", "sortable", "undo", "cms", "sync", "wire", "demo"];
+const PLUGIN_ORDER = ["richclay", "indicator", "sortable", "undo", "quickcrop", "cms", "sync", "wire", "demo"];
+
+// A plugin that cannot do its whole job alone. hypercms reads the cropper through
+// a capability lookup (`clay.quickcrop`) and silently uploads the raw file when it
+// finds nothing, so `plugins=cms` has to bring quickcrop with it or image crop is
+// dead with no error and no log. quickcrop loads BEFORE cms in the order above,
+// because the loader attaches each plugin's member as it lands and cms reads what
+// earlier plugins attached during its own evaluation.
+const IMPLIES = { cms: ["quickcrop"] };
 
 function parseCsv(params, key, enabled, apply) {
   const raw = params.get(key);
@@ -50,6 +59,11 @@ export function resolveModules(params, isEditMode) {
     if (spec.default) enabled.add(name);
   }
   parseCsv(params, "plugins", enabled, (set, name) => set.add(name));
+  // Between the two: exclude still wins, so `plugins=cms&exclude=quickcrop` opts
+  // back out of the cropper.
+  for (const name of [...enabled]) {
+    for (const implied of IMPLIES[name] || []) enabled.add(implied);
+  }
   parseCsv(params, "exclude", enabled, (set, name) => set.delete(name));
 
   const plugins = [];

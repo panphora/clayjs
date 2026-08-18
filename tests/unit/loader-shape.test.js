@@ -64,6 +64,17 @@ test("attachPluginMember publishes the richclay vendor on clay.RichClay", () => 
   expect(branch[0]).toMatch(/^ {4}clay\.RichClay = mod\.RichClay \|\| mod\.default;$/m);
 });
 
+// Same silent failure as the richclay pin above: the vendored hypercms bundle
+// resolves the cropper as `clay?.quickcrop ?? hyperclay?.quickcrop`, so a loader
+// that loads the vendor file without publishing the member leaves every
+// data-hcms-crop field uploading the raw image with no error and no log.
+test("attachPluginMember publishes the quickcrop vendor on clay.quickcrop", () => {
+  const source = readFileSync(join(repoRoot, "src", "loader.js"), "utf8");
+  const branch = source.match(/\} else if \(path === "vendor\/quickcrop\.vendor\.js"\) \{[\s\S]*?\n {2}\}/);
+  expect(branch).not.toBeNull();
+  expect(branch[0]).toMatch(/^ {4}clay\.quickcrop = mod\.quickcrop \|\| mod\.default;$/m);
+});
+
 // options.js assigns this unguarded. It used to write window.hyperclay, which the
 // loader had created; on window.clay the satellite bootstrap creates the object, so
 // the assignment must land on whatever clay-options.js made.

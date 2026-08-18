@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Plugins · clayjs</title>
-<meta name="description" content="The heavyweight plugins for malleable HTML files: CMS, sap, richclay, undo, data.">
+<meta name="description" content="The heavyweight plugins for malleable HTML files: CMS, sap, richclay, undo, quickcrop, data.">
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -45,6 +45,16 @@
 }
 &lt;/<span class="t">script</span>&gt;</code></pre>
       <p class="small">Each entry is a field: a name, then the selector it edits. <code>@src</code> becomes an image-upload control, <code>li[]</code> a reorderable list, and the <code>products</code> shape a list of cards. Open the sidebar with <code>?cms=true</code> on the URL or <code>cms.open()</code> from a button. The same rules tag can carry more tokens (<code>data-rules-name="api cms"</code>) to also power the <strong>data</strong> plugin's JSON API, so you configure content once.</p>
+    </div>
+
+    <div class="libcard">
+      <div class="lib-name">quickcrop <span class="tag">checkbox plugin · comes with cms</span></div>
+      <p class="lib-prob">“People upload a 4000px photo and it lands in the page sideways and uncropped.”</p>
+      <p>A crop modal for image uploads: pick a file, drag a box, confirm. It resolves a cropped, re-encoded blob and a data URL. The CMS uses it for any image field marked <code>data-hcms-crop</code>, so <code>?plugins=cms</code> loads it for you; ask for it by name to call it from your own code.</p>
+      <pre><code>&lt;<span class="t">img</span> <span class="a">class</span>="avatar" <span class="a">data-hcms-crop</span>="1:1" <span class="a">src</span>="avatar.jpg"&gt;</code></pre>
+      <pre><code><span class="t">const</span> shot = <span class="t">await</span> clay.quickcrop(file, { aspect: <span class="a">16/9</span> });
+<span class="c">// { blob, dataURL, width, height }, or null if they cancelled</span></code></pre>
+      <p class="small">Aspects are <code>1:1</code>, <code>16:9</code> or <code>free</code> on the attribute, a plain number in code. The modal and its stylesheet are marked <code>save-remove</code>, so cropping chrome never reaches the saved file.</p>
     </div>
 
     <div class="libcard">

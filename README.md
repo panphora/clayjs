@@ -19,8 +19,10 @@ query params on the script URL:
 <script src="/clay.js?plugins=sync,cms&exclude=indicator"></script>
 ```
 
-- `?plugins=` — add optional plugins: `sync`, `cms` (richclay, indicator, sortable, undo load by default in edit mode).
-- `?exclude=` — drop a default plugin.
+- `?plugins=` — add optional plugins: `sync`, `cms`, `undo`, `sortable`, `indicator`, `quickcrop`, `wire`.
+  Only `richclay` loads by default, and only in edit mode. `cms` brings `quickcrop` with it, because
+  the CMS uses it for `data-hcms-crop` image fields.
+- `?exclude=` — drop a plugin that would otherwise load (a default, or one another plugin pulled in).
 - `?editmode=false` — force view mode (URL param wins over everything below).
 
 ## Host attributes
@@ -52,8 +54,8 @@ clay.save();
 
 Edit mode exposes `clay.save()` (+ `clay.save.force()`), `clay.getHTML()`, `clay.addDocumentTransform(fn)`,
 `clay.onSnapshot(fn)`, `clay.toggleEditMode()`, `clay.isEditMode`, `clay.isOwner`, `clay.Mutation`,
-`clay.region`, `clay.cacheBust(el)`, plus `clay.undo` / `clay.cms` / `clay.morph` / `clay.RichClay`
-when those plugins load. View mode keeps only the always-available members (`toggleEditMode`, `isEditMode`, `isOwner`,
+`clay.region`, `clay.cacheBust(el)`, plus `clay.undo` / `clay.cms` / `clay.morph` / `clay.RichClay` /
+`clay.quickcrop` when those plugins load. View mode keeps only the always-available members (`toggleEditMode`, `isEditMode`, `isOwner`,
 `Mutation`, `region`, `ready`); edit-only members are simply absent.
 
 ## API
@@ -70,11 +72,17 @@ The contract starts at **0.3.0**: no name below changes without a major version.
 
 **`clay.js`** — `ready`, `save()`, `save.force()`, `getHTML()`, `addDocumentTransform(fn)`, `onSnapshot(fn)`,
 `toggleEditMode()`, `isEditMode`, `isOwner`, `Mutation`, `region`, `cacheBust(el)`, plus `undo` / `cms` / `morph` /
-`RichClay` when those plugins load. View mode keeps only the always-available members, as above.
+`RichClay` / `quickcrop` when those plugins load. View mode keeps only the always-available members, as above.
 
 `addDocumentTransform(fn)` runs your callback over a detached clone whenever the page
 prepares to save AND whenever it checks whether anything changed. Keep it pure and
 repeatable: it is a transform, not a "a save is happening" event.
+
+`quickcrop(file, options)` opens a crop modal over a File or Blob and resolves
+`{ blob, dataURL, width, height }`, or `null` if the person cancels. `aspect` (a number,
+or null for freeform), `type`, `quality`, `maxWidth`/`maxHeight` and `labels.confirm` are
+the options worth knowing. Its modal and injected stylesheet carry `save-remove`, so they
+never reach the saved file.
 
 `region` is the region-policy model: `resolveRegionPolicy`, `isInert`, `skipForPolicy`,
 `strictestPolicy`, the `PERSIST` and `REGION_ATTRS` token constants, and the

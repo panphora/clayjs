@@ -24,7 +24,32 @@ describe("resolveModules", () => {
 
   test("view mode keeps sync + cms (not editOnly) while dropping richclay", () => {
     const { plugins } = resolveModules(params({ plugins: "sync,cms" }), false);
-    expect(plugins).toEqual(["vendor/hypercms.vendor.js", "sync/live-sync.js"]);
+    expect(plugins).toEqual([
+      "vendor/quickcrop.vendor.js",
+      "vendor/hypercms.vendor.js",
+      "sync/live-sync.js",
+    ]);
+  });
+
+  // hypercms looks the cropper up as clay.quickcrop and silently uploads the raw
+  // file when it is absent, so cms must pull quickcrop in rather than degrade.
+  test("cms implies quickcrop, ahead of cms in load order", () => {
+    const { plugins } = resolveModules(params({ plugins: "cms" }), true);
+    expect(plugins).toEqual([
+      "vendor/richclay.vendor.js",
+      "vendor/quickcrop.vendor.js",
+      "vendor/hypercms.vendor.js",
+    ]);
+  });
+
+  test("excluding quickcrop overrides the implication", () => {
+    const { plugins } = resolveModules(params({ plugins: "cms", exclude: "quickcrop" }), true);
+    expect(plugins).toEqual(["vendor/richclay.vendor.js", "vendor/hypercms.vendor.js"]);
+  });
+
+  test("quickcrop loads on its own request, in view mode too", () => {
+    expect(resolveModules(params({ plugins: "quickcrop" }), false).plugins)
+      .toEqual(["vendor/quickcrop.vendor.js"]);
   });
 
   test("plugins CSV adds listed plugins in canonical order", () => {
