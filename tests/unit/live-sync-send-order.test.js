@@ -8,8 +8,9 @@ import { jest } from "@jest/globals";
  *     snapshot for every peer.
  */
 
-class FakeEventSource {
+class FakeEventSource extends EventTarget {
   constructor(url) {
+    super();
     this.url = url;
     this.readyState = 0;
   }

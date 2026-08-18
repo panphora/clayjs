@@ -15,8 +15,9 @@ import { jest } from "@jest/globals";
  * live-sync.js (its singleton auto-starts, and this file runs in edit mode).
  */
 
-class FakeEventSource {
+class FakeEventSource extends EventTarget {
   constructor(url) {
+    super();
     this.url = url;
     this.readyState = 0;
   }

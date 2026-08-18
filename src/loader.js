@@ -102,6 +102,8 @@ function attachPluginMember(path, mod) {
     clay.morph = mod.morph;
   } else if (path === "vendor/hypercms.vendor.js") {
     clay.cms = mod.cms || mod.default;
+  } else if (path === "plugins/wire.js") {
+    clay.wire = mod.wire || mod.default;
   } else if (path === "plugins/demo.js") {
     clay.demo = mod.demo;
   } else if (path === "vendor/richclay.vendor.js") {

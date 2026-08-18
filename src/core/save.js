@@ -117,6 +117,37 @@ let lastSavedContents = '';
 // A save was requested while one was on the wire; run one more when it settles.
 let pendingSave = false;
 
+// ============================================
+// AUTOSAVE SUSPENSION
+// ============================================
+//
+// clay.wire holds this for the length of an agent request. The save is
+// last-writer-wins with a backup, so an autosave landing while a local process is
+// writing the same file posts the pre-agent document: the server backs the agent's
+// bytes up and writes the browser's, the watcher's revalidation then fails, and
+// the agent's work exists only in Backups while the page reports success.
+//
+// It suspends AUTOsave only. An explicit savePage — Cmd+S, a [trigger-save]
+// button, or the wire's own pre-send flush — is a deliberate act and still runs.
+//
+// Reference counted, because two overlapping requests each hold it. A save
+// skipped while suspended is replayed on release, or the user's edits would sit
+// unsaved until something else happened to mutate the page.
+let autosaveSuspended = 0;
+let autosaveMissed = false;
+
+export function suspendAutosave() {
+  autosaveSuspended++;
+}
+
+export function resumeAutosave() {
+  if (autosaveSuspended === 0) return;
+  autosaveSuspended--;
+  if (autosaveSuspended > 0 || !autosaveMissed) return;
+  autosaveMissed = false;
+  savePageThrottled();
+}
+
 function skipped_(msg) {
   return { ok: false, msg, msgType: 'skipped', code: null, etag: null };
 }
@@ -447,6 +478,16 @@ if (document.readyState === 'loading') {
 export function savePageThrottled(callback = () => {}) {
   if (!isEditMode) {
     const skipped = skipped_('Not in edit mode');
+    callback(skipped);
+    return Promise.resolve(skipped);
+  }
+
+  // Every autosave path lands here — the mutation-driven one, the [persist] input
+  // timer, and live-sync's convergence save after a protected apply — which is
+  // why the suspension lives at this one entry rather than at each caller.
+  if (autosaveSuspended > 0) {
+    autosaveMissed = true;
+    const skipped = skipped_('Autosave suspended');
     callback(skipped);
     return Promise.resolve(skipped);
   }

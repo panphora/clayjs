@@ -423,6 +423,34 @@ class LiveSync {
       if (this.onConnect) this.onConnect();
     };
 
+    // The cursor frame is a NAMED SSE event, so it never reaches onmessage and
+    // never looks like data. Its `resync` flag says the server could not retain
+    // everything between where this client resumed and the baseline it is
+    // sending: what this page holds is stale in a way no replay will fix.
+    //
+    // The repair is the token-free fetch of the served document this class
+    // already runs for a change too large to send, so noticing the flag is the
+    // whole of the work.
+    this.sse.addEventListener('cursor', (event) => {
+      let data;
+      try {
+        data = JSON.parse(event.data);
+      } catch {
+        return;
+      }
+      if (!data || data.resync !== true) return;
+      console.log('[LiveSync] Server could not replay everything; refetching the document');
+      // _fetchServedDocument, deliberately, and not _fetchExternalChange: that
+      // one drops a fetch whose seq is at or below the external watermark, and
+      // the cursor baseline routinely is, since it is the server's high-water
+      // mark and our own last applied change may already have reached it. A
+      // resync that skipped itself for being "already seen" would leave the page
+      // permanently stale, which is the exact failure the flag exists to report.
+      this._fetchServedDocument(typeof data.seq === 'number' ? data.seq : undefined, {
+        repair: true,
+      });
+    });
+
     this.sse.onmessage = (event) => {
       const data = JSON.parse(event.data);
 
@@ -654,20 +682,29 @@ class LiveSync {
    * frame the epoch check refused (the fetched body is whatever disk holds
    * NOW, which is always safe to apply).
    */
-  _fetchServedDocument(seq, attempt = 0) {
+  _fetchServedDocument(seq, { attempt = 0, repair = false } = {}) {
     const epoch = this._saveEpoch;
     fetch(new URL(window.location.href), { cache: 'no-store' })
       .then((response) => (response.ok ? response.text() : null))
       .then((html) => {
         if (this.isDestroyed || html == null) return;
-        if (typeof seq === 'number' && seq < this._lastExternalSeq) return;
+        if (typeof seq === 'number' && seq < this._lastExternalSeq) {
+          // A newer external change superseded this one, and its own fetch will
+          // queue a body. Except for a repair: that one exists because the server
+          // said replay cannot fix this page, so if the newer fetch fails there is
+          // nothing else coming. Refetch rather than drop the only repair.
+          if (repair && attempt < 3) {
+            this._fetchServedDocument(seq, { attempt: attempt + 1, repair });
+          }
+          return;
+        }
         if (this._saveEpoch > epoch) {
           // An own save landed while the GET was in flight, so this body may
           // predate it. Save-response order proves nothing about disk-write
           // order — refetch for the newest bytes instead of dropping.
           if (attempt < 3) {
             console.log('[LiveSync] Refetching external change: own save landed mid-fetch');
-            this._fetchServedDocument(seq, attempt + 1);
+            this._fetchServedDocument(seq, { attempt: attempt + 1, repair });
           }
           return;
         }
@@ -989,8 +1026,12 @@ class LiveSync {
       // onmessage before applyUpdate is ever called. Covers every SSE morph
       // source (peer edit, version restore, body-swap) since they all funnel
       // through this single choke point.
+      //
+      // `source` is what lets a listener tell the two apply paths apart. clay.wire
+      // waits for a DISK frame to call an agent's write landed, and another tab's
+      // edit arriving first would otherwise report the wrong bytes as delivered.
       document.dispatchEvent(new CustomEvent('clay:sync-applied', {
-        detail: { seq }
+        detail: { seq, source: 'peer' }
       }));
     } finally {
       this._log('applyUpdate - morph complete, resuming mutations');
@@ -1042,7 +1083,14 @@ class LiveSync {
       const parser = new DOMParser();
       const newDoc = parser.parseFromString(html, 'text/html');
 
-      if (pageMaybeDirty()) {
+      // Lane-guarded exactly like the peer path. A view-mode tab has no save
+      // baseline — every writer of lastSavedContents is edit-gated — so
+      // protectDiskDoc can only ever refuse, and the frame would hold, retry
+      // every 3s, and hold again forever. The gate still reads dirty there,
+      // because persistProbeDirty inspects the live DOM and a visitor can type
+      // into a [persist] field. Before the resync repair this path was
+      // unreachable outside the live lane; now it is the repair's own route.
+      if (this.lane === 'live' && pageMaybeDirty()) {
         const protection = protectDiskDoc({ newDoc });
         if (!protection.ok) {
           // Hold: nothing morphs, no baseline moves, and deliberately NO
@@ -1094,7 +1142,7 @@ class LiveSync {
 
       window.scrollTo(scrollX, scrollY);
 
-      if (retainedRoots === 0 && !pageMaybeDirty()) {
+      if (this.lane === 'live' && retainedRoots === 0 && !pageMaybeDirty()) {
         // Clean apply: the DOM now IS the disk state, so a local comparison
         // capture of it is the truthful baseline. The next no-op save skips,
         // beforeunload stays quiet. The dirty re-check matters: typing that
@@ -1115,7 +1163,7 @@ class LiveSync {
       }
 
       document.dispatchEvent(new CustomEvent('clay:sync-applied', {
-        detail: { seq }
+        detail: { seq, source: 'disk' }
       }));
     } finally {
       this._log('applyExternal - morph complete, resuming mutations');
