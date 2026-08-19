@@ -21,11 +21,23 @@ import {
 } from "./save-core.js";
 import { captureForComparison, captureForSaveAndComparison } from "./snapshot.js";
 import { gateCaptureToken, gateClearIfUnchanged } from "../lib/dirty-gate.js";
+import { ROOT_LIBRARY_ATTRS } from "../lib/root-attrs.js";
 import { logSaveCheck, logBaseline } from "../lib/autosave-debug.js";
 
-// Reset savestatus to 'saved' in snapshots (each module cleans up its own attrs)
+// Keep this library's own root state out of the saved bytes.
+//
+// This used to write `savestatus="saved"` onto the clone instead of removing it,
+// which stopped a mid-save "saving" from being baked in but still put a library
+// attribute on disk. It is there today in four LOCAL_APPS documents. These three
+// are this tab's UI truth, re-stamped on every load by edit-mode and by the save
+// lane itself, so a stored copy is at best noise and at worst a lie: a file whose
+// disk bytes say `savestatus="saved"` reads as saved before clayjs has booted.
+//
+// Scoped to the ROOT on purpose. `savestatus` on any other element is an authored
+// attribute that `option:savestatus` reads, and stripping those would delete page
+// content. Both clones get this, so the dirty comparison sees no difference.
 addDocumentTransform(clone => {
-  clone.setAttribute('savestatus', 'saved');
+  for (const name of ROOT_LIBRARY_ATTRS) clone.removeAttribute(name);
 });
 
 // ============================================

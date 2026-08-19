@@ -22,11 +22,15 @@ export const PLUGIN_PATHS = {
   undo:      { path: "plugins/undo.js",            editOnly: true,  default: false },
   cms:       { path: "vendor/hypercms.vendor.js",  editOnly: false, default: false },
   quickcrop: { path: "vendor/quickcrop.vendor.js", editOnly: false, default: false },
+  // editOnly, because a file picker only ever appears in edit mode: the cms
+  // injects its own editing toggle there and clayjs's edit-mode signal is a
+  // superset of the cms's, so the plugin is present exactly when it can be used.
+  upload:    { path: "plugins/upload.js",          editOnly: true,  default: false },
   wire:      { path: "plugins/wire.js",            editOnly: false, default: false },
   demo:      { path: "plugins/demo.js",            editOnly: false, default: false },
 };
 
-const PLUGIN_ORDER = ["richclay", "indicator", "sortable", "undo", "quickcrop", "cms", "sync", "wire", "demo"];
+const PLUGIN_ORDER = ["richclay", "indicator", "sortable", "undo", "quickcrop", "upload", "cms", "sync", "wire", "demo"];
 
 // A plugin that cannot do its whole job alone. hypercms reads the cropper through
 // a capability lookup (`clay.quickcrop`) and silently uploads the raw file when it
@@ -34,6 +38,9 @@ const PLUGIN_ORDER = ["richclay", "indicator", "sortable", "undo", "quickcrop", 
 // dead with no error and no log. quickcrop loads BEFORE cms in the order above,
 // because the loader attaches each plugin's member as it lands and cms reads what
 // earlier plugins attached during its own evaluation.
+// `upload` is deliberately NOT implied by cms yet. Adding it flips how an
+// existing page behaves, from embedding an image to storing it, and that is
+// isolated into its own one-line release so it can be reverted alone.
 const IMPLIES = { cms: ["quickcrop"] };
 
 function parseCsv(params, key, enabled, apply) {

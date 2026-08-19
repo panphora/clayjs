@@ -25,6 +25,37 @@ test.each(BOOTSTRAPS)("%s imports a src target that exists on disk", (file) => {
   expect(existsSync(join(repoRoot, target))).toBe(true);
 });
 
+// clay-events' [onrender] sweeps the document the instant its import resolves, and
+// those handlers routinely reach for clay-dom's element helpers (this.val, this.exec,
+// this.nearest). The two satellites are independent dynamic imports, so without this
+// gate events can win on a cold load and every handler throws "Cannot read properties
+// of undefined" — intermittently, and looking like stale data rather than a failure.
+// Observed on the official devlog template; see the templates-to-clayjs change record.
+describe("clay-events waits for clay-dom", () => {
+  const source = readFileSync(join(repoRoot, "clay-events.js"), "utf8");
+
+  test("it gates on clay.loaded.dom before importing its src target", () => {
+    expect(source).toMatch(/clay\.loaded\.dom/);
+    // Ordering is the whole point: the gate is worthless after the import.
+    expect(source.indexOf("clay.loaded.dom")).toBeLessThan(
+      source.indexOf('import(base + "/src/events/index.js")')
+    );
+  });
+
+  test("a clay-dom that failed to load does not take events down with it", () => {
+    const gate = source.match(/return clay\.loaded\.dom[^;]*;/);
+    expect(gate).not.toBeNull();
+    // Swallowed, not chained: a rejected clay.loaded.dom must not reject clay.loaded.events.
+    expect(gate[0]).toMatch(/\.catch\(/);
+  });
+
+  test("the gate is optional, so clay-events alone still boots", () => {
+    // `clay.loaded.dom &&` is what makes a page without clay-dom.js proceed instead
+    // of awaiting undefined forever.
+    expect(source).toMatch(/clay\.loaded\.dom &&/);
+  });
+});
+
 // The two generated satellites are self-contained classic scripts: they must NOT
 // dynamic-import (nothing to CORS-fetch) and must NOT carry ESM export syntax.
 test.each(["sap.js", "clay-data.js"])("%s is a self-contained classic script", (file) => {

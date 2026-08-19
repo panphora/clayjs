@@ -31,6 +31,28 @@ describe("resolveModules", () => {
     ]);
   });
 
+  test("upload is opt-in, edit-mode only, and loads before cms", () => {
+    const { plugins } = resolveModules(params({ plugins: "upload,cms" }), true);
+    expect(plugins.indexOf("plugins/upload.js")).toBeGreaterThan(-1);
+    // The loader attaches each plugin's member as it lands, and cms reads what
+    // earlier plugins attached during its own evaluation.
+    expect(plugins.indexOf("plugins/upload.js"))
+      .toBeLessThan(plugins.indexOf("vendor/hypercms.vendor.js"));
+  });
+
+  test("upload is dropped in view mode, where no file picker can appear", () => {
+    const { plugins } = resolveModules(params({ plugins: "upload" }), false);
+    expect(plugins).not.toContain("plugins/upload.js");
+  });
+
+  // Step 6 of the plan flips this deliberately, on its own, so it can be reverted
+  // alone: it is the one change that alters how an EXISTING page behaves, from
+  // embedding an image to storing it on the host.
+  test("cms does NOT imply upload yet", () => {
+    const { plugins } = resolveModules(params({ plugins: "cms" }), true);
+    expect(plugins).not.toContain("plugins/upload.js");
+  });
+
   // hypercms looks the cropper up as clay.quickcrop and silently uploads the raw
   // file when it is absent, so cms must pull quickcrop in rather than degrade.
   test("cms implies quickcrop, ahead of cms in load order", () => {
