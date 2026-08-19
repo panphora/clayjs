@@ -1,6 +1,14 @@
+# Cache-Control is declared once, on /*. Two matching blocks do not override,
+# they join: repeating this line under /src/* served every module a doubled
+# max-age, which a cache is free to treat as stale. /src/* inherits it and adds
+# only CORS.
+#
+# No stale-while-revalidate: clay.js imports ~49 unversioned module URLs, each
+# with its own freshness clock, and a view-mode load fetches a different subset
+# than an edit-mode load. A stale window lets one browser hold half the graph
+# from before a deploy and half from after, which fails silently.
 /*
-  Cache-Control: public, max-age=600, stale-while-revalidate=86400
+  Cache-Control: public, max-age=600
 
 /src/*
   Access-Control-Allow-Origin: *
-  Cache-Control: public, max-age=600, stale-while-revalidate=86400
