@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.6.1] - 2026-08-19
+
+### Changed
+- Update hypercms vendor bundle
+- Update clayjs
+
+
+
 ## [0.6.0] - 2026-08-18
 
 ### Changed
