@@ -9,7 +9,7 @@
 
 import { isEditMode } from "./is-edit-mode.js";
 import { consumeUserDriven, markUserDriven } from "../lib/user-gesture.js";
-import { saveToken, saveTransport, DESKTOP_JSON } from "./host-attrs.js";
+import { saveToken } from "./host-attrs.js";
 import {
   getPageContents,
   onSnapshot,
@@ -103,13 +103,19 @@ function skippedResult(msg) {
  * the save — and the per-document token in its path — to an origin the document
  * itself chose.
  *
+ * The body is the document, as text, always. Spec §3: this route has exactly one
+ * body shape. Everything else about the save travels in a header, which is how
+ * §6's `conditional` capability added `If-Match` without touching the body, and
+ * how anything later will be added too. There used to be a JSON envelope here
+ * carrying the document alongside an unstripped snapshot; the snapshot's home is
+ * the §10 relay, which the live-sync plugin already posts it to.
+ *
  * @param {string} content - HTML to save
- * @param {?string} snapshotHtml - unstripped snapshot, for the desktop envelope
  * @param {boolean} userDriven - Whether a human gesture is behind this save
  * @param {AbortSignal} signal
  * @returns {{url: string, options: Object}}
  */
-function buildSaveRequest(content, snapshotHtml, userDriven, signal) {
+function buildSaveRequest(content, userDriven, signal) {
   const token = saveToken();
   const path = token ? `${SAVE_PATH}/${token}` : SAVE_PATH;
   const options = {
@@ -120,22 +126,13 @@ function buildSaveRequest(content, snapshotHtml, userDriven, signal) {
       'Document-URL': window.location.href,
       // The older spelling of the same header, which htmlclay reads today.
       'Page-URL': window.location.href,
-      'X-Hyperclay-User-Driven': userDriven ? '1' : '0'
-    }
+      // Spec §9's name for the provenance bit. `X-Hyperclay-User-Driven` was the
+      // pre-spec spelling; every host reads Save-Trigger first and falls back to
+      // it, so stored documents running an older client keep working.
+      'Save-Trigger': userDriven ? 'user' : 'auto'
+    },
+    body: content
   };
-
-  // The desktop JSON envelope carries the unstripped snapshot alongside the
-  // document, so a sync engine can replay what the browser actually had. It goes
-  // out only when the served document DECLARES that transport, and it is passed in
-  // from the capture that produced `content` — it used to be left on a window
-  // global that was cleared only on success, so two captures without an intervening
-  // successful save would pair a stale snapshot with fresh content.
-  if (saveTransport() === DESKTOP_JSON && snapshotHtml) {
-    options.headers['Content-Type'] = 'application/json';
-    options.body = JSON.stringify({ content, snapshotHtml, userDriven });
-  } else {
-    options.body = content;
-  }
 
   return { url: new URL(path, window.location.origin).href, options };
 }
@@ -153,10 +150,9 @@ function buildSaveRequest(content, snapshotHtml, userDriven, signal) {
  * instead of the status.
  *
  * @param {string} content - HTML to save
- * @param {?string} snapshotHtml
  * @returns {Promise<Object>} The server's response body
  */
-function sendSave(content, snapshotHtml) {
+function sendSave(content) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), SAVE_TIMEOUT_MS);
 
@@ -164,7 +160,7 @@ function sendSave(content, snapshotHtml) {
   // early returns in the callers), so it's never consumed on a save that never
   // ships.
   const userDriven = consumeUserDriven();
-  const { url, options } = buildSaveRequest(content, snapshotHtml, userDriven, controller.signal);
+  const { url, options } = buildSaveRequest(content, userDriven, controller.signal);
 
   return fetch(url, options)
     .then(res => res.text().then(text => {
@@ -208,15 +204,13 @@ function sendSave(content, snapshotHtml) {
  *
  * @param {string} html - HTML string to save
  * @param {Function} callback - Called with the result on completion
- * @param {Object} [options]
- * @param {?string} [options.snapshotHtml] - unstripped snapshot from the same capture
  * @returns {Promise<{msg: string, msgType: string, code: ?string, etag: ?string}>}
  *
  * @example
  * const {msg, msgType} = await saveHtml(myHtml);
  * if (msgType === 'error') console.error('Save failed:', msg);
  */
-export function saveHtml(html, callback = () => {}, { snapshotHtml = null } = {}) {
+export function saveHtml(html, callback = () => {}) {
   return new Promise((resolve) => {
     const done = (result) => {
       if (typeof callback === 'function') callback(result);
@@ -241,7 +235,7 @@ export function saveHtml(html, callback = () => {}, { snapshotHtml = null } = {}
       return;
     }
 
-    sendSave(html, snapshotHtml)
+    sendSave(html)
       .then(successResult, errorResult)
       // Clear the flag BEFORE handing the result back, so a caller that queues a
       // follow-up save can start it immediately rather than being told the lane

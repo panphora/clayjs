@@ -4,9 +4,9 @@
  */
 import { jest } from "@jest/globals";
 
-// Scenario: no save token and no declared transport — the save must POST to the
-// bare /_/save endpoint with the raw HTML body (no JSON envelope, no Content-Type
-// override), exact header values, and the cookie that authenticates it (§1.4).
+// Scenario: no save token — the save must POST to the bare /_/save endpoint with
+// the document as the raw body (no Content-Type override), exact header values,
+// and the cookie that authenticates it (§1.4).
 
 test("save wire contract: bare endpoint and raw body on a cookie host", async () => {
   window.clayEditMode = true;
@@ -28,7 +28,8 @@ test("save wire contract: bare endpoint and raw body on a cookie host", async ()
   expect(opts.credentials).toBe("same-origin");
   expect(opts.headers["Document-URL"]).toBe("https://example.com/page.html");
   expect(opts.headers["Page-URL"]).toBe("https://example.com/page.html");
-  expect(opts.headers["X-Hyperclay-User-Driven"]).toBe("0");
+  expect(opts.headers["Save-Trigger"]).toBe("auto");
+  expect(opts.headers["X-Hyperclay-User-Driven"]).toBeUndefined();
   expect(opts.headers["Content-Type"]).toBeUndefined();
   expect(typeof opts.body).toBe("string");
   expect(opts.body).toContain("prod-wire-change");

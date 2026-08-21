@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" demo-key="clayjs-home-v1">
+<html lang="en" demo-key="clayjs-home-v2">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -10,7 +10,7 @@
 <body>
 
 <nav class="nav">
-  <a class="wordmark" href="index.html">clay</a>
+  <a class="wordmark" href="index.html">clay<span class="js">.js</span><span class="tm" aria-hidden="true">™</span></a>
   <div class="links">
     <a href="advanced.html">Advanced</a>
     <a href="plugins.html">Plugins</a>
@@ -44,7 +44,11 @@
       <span class="filename">notes.html</span>
       <span class="realbadge">saved in your browser</span>
       <h3 editable="single-line" spellcheck="false" style="font-size: 22px; margin-bottom: 10px;">My notes</h3>
-      <p class="small" style="margin-bottom: 14px;">Click the heading and type. Select text to format it. Then save, refresh the page, and it's still there.</p>
+      <div editable spellcheck="false" style="margin-bottom: 14px;">
+        <p>This note is the whole app. No database, no build step.</p>
+        <p>Everything you type here is saved into the file itself.</p>
+      </div>
+      <p class="small" style="margin-bottom: 14px;">Click the heading or the note and type. Select text to format it. Then save, refresh the page, and it's still there.</p>
       <button class="btn primary" id="hero-save" trigger-save>Save</button>
       <button class="btn" id="demo-reset" title="Forget the browser copy and reload the original page">Reset</button>
       <span class="chip"></span>
@@ -95,9 +99,9 @@
     <table>
       <tr><th>Server</th><th>What it is</th></tr>
       <tr><td><strong><a href="https://hyperclay.com">hyperclay.com</a></strong></td><td>Hosted platform: accounts, versions, sharing</td></tr>
-      <tr><td><strong>Hyperclay Local</strong></td><td>Desktop app that serves a folder on your machine</td></tr>
-      <tr><td><strong>htmlclay</strong></td><td>Desktop app: double-click a .htmlclay file and it just saves</td></tr>
-      <tr><td><strong>Your own</strong></td><td>About 12 lines of Express. <a href="docs.html#endpoint">Endpoint spec</a>.</td></tr>
+      <tr><td><strong><a href="https://hyperclaylocal.com/">Hyperclay Local</a></strong></td><td>Desktop app that serves a folder on your machine</td></tr>
+      <tr><td><strong><a href="https://htmlclay.com/">HTML Clay</a></strong></td><td>Desktop app: double-click a .htmlclay file and it just saves</td></tr>
+      <tr><td><strong>Your own</strong></td><td>About 15 lines of Express. <a href="docs.html#endpoint">Endpoint spec</a>.</td></tr>
     </table>
   </section>
 
@@ -311,7 +315,7 @@ const { msg, msgType } = await clay.save();</code></pre>
   <section id="runs-on">
     <span class="eyebrow">Where this runs</span>
     <h2 class="section-title">Your file is yours</h2>
-    <p>It runs on <a href="https://hyperclay.com">hyperclay.com</a>, on your own machine with Hyperclay Local or htmlclay, or against <a href="docs.html#endpoint">about 12 lines of your own server code</a>. Download it anytime; it's just HTML.</p>
+    <p>It runs on <a href="https://hyperclay.com">hyperclay.com</a>, on your own machine with <a href="https://hyperclaylocal.com/">Hyperclay Local</a> or <a href="https://htmlclay.com/">HTML Clay</a>, or against <a href="docs.html#endpoint">about 15 lines of your own server code</a>. Download it anytime; it's just HTML.</p>
     <p class="small">The fastest way to try a malleable file with zero setup is a free account on <a href="https://hyperclay.com">hyperclay.com</a>.</p>
   </section>
 

@@ -38,10 +38,17 @@ const PLUGIN_ORDER = ["richclay", "indicator", "sortable", "undo", "quickcrop", 
 // dead with no error and no log. quickcrop loads BEFORE cms in the order above,
 // because the loader attaches each plugin's member as it lands and cms reads what
 // earlier plugins attached during its own evaluation.
-// `upload` is deliberately NOT implied by cms yet. Adding it flips how an
-// existing page behaves, from embedding an image to storing it, and that is
-// isolated into its own one-line release so it can be reverted alone.
-const IMPLIES = { cms: ["quickcrop"] };
+// `upload` rides the same reasoning one step further. Without it the cms has no
+// uploader to look up, so it embeds every picked image in the document as a data:
+// URL: a two megabyte photo costs 2.7 MB of base64 on that save, on every future
+// save, and in every stored version. With it the cms asks the host first and
+// embeds only when the host does not store files, which is still the right answer
+// on a plain file server.
+//
+// This is the only line in the capability that changes how an already-published
+// page behaves, which is why it shipped alone, one release after the plugin it
+// enables. Reverting it is reverting this line.
+const IMPLIES = { cms: ["quickcrop", "upload"] };
 
 function parseCsv(params, key, enabled, apply) {
   const raw = params.get(key);

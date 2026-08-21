@@ -18,10 +18,6 @@
 // content cannot strip this tab's copy, and a peer's copy is never applied.
 export const HOST_TOKEN_ATTRS = ["savetoken", "htmlclaytoken", "htmlclayid"];
 
-// Which save envelope this host's lane takes: a fact about the response, not
-// about the document.
-export const SAVE_TRANSPORT_ATTR = "clay-save-transport";
-
 // This library's own root state, and this tab's UI truth.
 export const ROOT_LIBRARY_ATTRS = ["savestatus", "editmode", "pageowner"];
 
@@ -36,7 +32,6 @@ export const ROOT_LIBRARY_ATTRS = ["savestatus", "editmode", "pageowner"];
 // can no longer save at all.
 export const TAB_LOCAL_ROOT_ATTRS = new Set([
   ...HOST_TOKEN_ATTRS,
-  SAVE_TRANSPORT_ATTR,
   ...ROOT_LIBRARY_ATTRS,
 ]);
 

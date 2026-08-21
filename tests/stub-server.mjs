@@ -22,17 +22,12 @@ http.createServer(async (req, res) => {
     const name = basename(page.pathname) || "index.html";
     const token = url.pathname.replace(/^\/_\/save\/?/, "");   // "" for the plain endpoint
 
-    let html = body;
-    if ((req.headers["content-type"] || "").includes("application/json")) {
-      const envelope = JSON.parse(body);                        // {content, snapshotHtml, userDriven}
-      html = envelope.content;
-      await writeFile(join(tmp, name + ".envelope.json"), JSON.stringify(envelope, null, 2));
-    }
-    await writeFile(join(tmp, name), html);
+    // Spec §3: the body is the document, as text, always.
+    await writeFile(join(tmp, name), body);
     await writeFile(join(tmp, name + ".meta.json"), JSON.stringify({
       token,
       pageUrl: req.headers["page-url"] || null,
-      userDriven: req.headers["x-hyperclay-user-driven"] || null,
+      saveTrigger: req.headers["save-trigger"] || null,
       contentType: req.headers["content-type"] || null,
     }, null, 2));
     res.writeHead(200, { "Content-Type": "application/json" });

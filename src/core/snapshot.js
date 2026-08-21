@@ -38,7 +38,6 @@
 
 import { stripExtensionNoise } from '../lib/extension-noise.js';
 import { STRIP_FROM_SAVE, STRIP_FROM_COMPARISON, SNAPSHOT_REMOVE_SELECTOR } from '../lib/region-policy.js';
-import { saveTransport, DESKTOP_JSON } from './host-attrs.js';
 import { TAB_LOCAL_ROOT_ATTRS } from '../lib/root-attrs.js';
 
 // =============================================================================
@@ -211,22 +210,10 @@ export function captureForComparison({ flushUndo = true } = {}) {
  *
  * @param {Object} options
  * @param {boolean} options.emitForSync - Whether to emit snapshot-ready event (default: true)
- * @returns {{ forSave: string, forComparison: string, snapshotHtml: ?string }}
+ * @returns {{ forSave: string, forComparison: string }}
  */
 export function captureForSaveAndComparison({ emitForSync = true } = {}) {
   const clone = captureSnapshot();
-
-  // The unstripped snapshot, for a host that asked for the desktop JSON envelope:
-  // the save then sends both the stripped document and this. Returned to the caller
-  // rather than parked on a window global, so it can only ever be paired with the
-  // content captured alongside it. As a global it was cleared on success only, so
-  // two captures without an intervening successful save shipped a stale snapshot
-  // next to fresh content. Captured only when the document DECLARES the transport;
-  // this used to key off `location.hostname`, which set it on every localhost page
-  // whether or not its host wanted it.
-  const snapshotHtml = saveTransport() === DESKTOP_JSON
-    ? '<!DOCTYPE html>' + clone.outerHTML
-    : null;
 
   // Emit for live-sync before any stripping
   if (emitForSync) {
@@ -260,7 +247,7 @@ export function captureForSaveAndComparison({ emitForSync = true } = {}) {
   }
   const forComparison = "<!DOCTYPE html>" + compareClone.outerHTML;
 
-  return { forSave, forComparison, snapshotHtml };
+  return { forSave, forComparison };
 }
 
 /**

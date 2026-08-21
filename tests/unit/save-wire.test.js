@@ -1,11 +1,14 @@
 import { jest } from "@jest/globals";
 
 // Scenario: with a save token on the root, the save must POST to /_/save/{token},
-// carry the Document-URL + Page-URL + X-Hyperclay-User-Driven headers, ask for no
-// cookies, and send the JSON envelope {content, snapshotHtml, userDriven} when the
-// document declares the desktop transport (§1.4).
+// carry the Document-URL + Page-URL + Save-Trigger headers, ask for no cookies,
+// and send the document as the raw body (§1.4).
+//
+// The root also carries the attribute a host once used to ask for a JSON envelope
+// on this lane. Spec §3 gives /_/save exactly one body shape, so it buys nothing
+// now: the assertion below is what keeps it that way.
 
-test("save wire contract: token endpoint, headers, and declared JSON envelope", async () => {
+test("save wire contract: token endpoint, headers, and a text body", async () => {
   window.clayEditMode = true;
   document.documentElement.setAttribute("htmlclaytoken", "abc");
   document.documentElement.setAttribute("clay-save-transport", "desktop-json-v1");
@@ -27,16 +30,17 @@ test("save wire contract: token endpoint, headers, and declared JSON envelope", 
   expect(opts.method).toBe("POST");
   expect(opts.headers["Document-URL"]).toBeDefined();
   expect(opts.headers["Page-URL"]).toBeDefined();
-  expect(opts.headers["X-Hyperclay-User-Driven"]).toBeDefined();
-  expect(opts.headers["Content-Type"]).toBe("application/json");
+  expect(opts.headers["Save-Trigger"]).toBe("auto");
+  expect(opts.headers["X-Hyperclay-User-Driven"]).toBeUndefined();
   // The token IS the credential. Asking for cookies as well needs
   // Access-Control-Allow-Credentials back, which a token-minting host must never
   // send, so the browser would block the save before it left.
   expect(opts.credentials).toBe("omit");
 
-  const envelope = JSON.parse(opts.body);
-  expect(envelope).toHaveProperty("content");
-  expect(envelope).toHaveProperty("snapshotHtml");
-  expect(envelope).toHaveProperty("userDriven");
-  expect(envelope.content).toContain("wire-change");
+  // One body shape: the document, as text. Not JSON, and no Content-Type that
+  // would make it a preflighted request.
+  expect(opts.headers["Content-Type"]).toBeUndefined();
+  expect(typeof opts.body).toBe("string");
+  expect(opts.body).toContain("wire-change");
+  expect(() => JSON.parse(opts.body)).toThrow();
 });

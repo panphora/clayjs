@@ -7,13 +7,7 @@
  * cannot drift between the edit-mode ladder and the save lane.
  */
 
-import { HOST_TOKEN_ATTRS, SAVE_TRANSPORT_ATTR } from "../lib/root-attrs.js";
-
-// A host that wants the desktop JSON envelope on its save lane declares it on
-// the root. This replaced a `location.hostname === 'localhost'` sniff, which sent
-// the envelope to every host that happened to be local, including ones whose
-// save lane takes text and answers 415.
-export const DESKTOP_JSON = "desktop-json-v1";
+import { HOST_TOKEN_ATTRS } from "../lib/root-attrs.js";
 
 /**
  * The per-document save token this response carries, or null.
@@ -34,13 +28,4 @@ export function saveToken() {
  */
 export function hasSaveToken() {
   return saveToken() !== null;
-}
-
-/**
- * The save transport the served document declares, or null.
- * @returns {?string}
- */
-export function saveTransport() {
-  if (typeof document === "undefined") return null;
-  return document.documentElement.getAttribute(SAVE_TRANSPORT_ATTR);
 }

@@ -50,14 +50,7 @@ document.addEventListener("clay:snapshot-ready", (event) => {
 });
 
 function postedHtml(raw) {
-  const text = typeof raw === "string" ? raw : "";
-  try {
-    const envelope = JSON.parse(text);
-    if (envelope && typeof envelope === "object") {
-      return envelope.snapshotHtml || envelope.content || text;
-    }
-  } catch {}
-  return text;
+  return typeof raw === "string" ? raw : "";
 }
 
 const realFetch = window.fetch.bind(window);

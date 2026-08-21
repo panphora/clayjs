@@ -3,7 +3,7 @@
   "version": "0.6.1",
   "type": "module",
   "description": "clayjs: malleable HTML files. Save lifecycle for self-saving HTML.",
-  "license": "MIT",
+  "license": "MIT-0",
   "homepage": "https://clayjs.com",
   "repository": {
     "type": "git",
@@ -21,7 +21,7 @@
     "sap.js",
     "clay-data.js",
     "_headers",
-    "NOTICE",
+    "THIRD-PARTY-NOTICES.md",
     "src/"
   ],
   "publishConfig": {

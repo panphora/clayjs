@@ -45,12 +45,30 @@ describe("resolveModules", () => {
     expect(plugins).not.toContain("plugins/upload.js");
   });
 
-  // Step 6 of the plan flips this deliberately, on its own, so it can be reverted
-  // alone: it is the one change that alters how an EXISTING page behaves, from
-  // embedding an image to storing it on the host.
-  test("cms does NOT imply upload yet", () => {
+  // The cms has no uploader to look up without this, so it embeds every picked
+  // image in the document as a data: URL. Edit mode only, and ahead of cms in the
+  // order, because cms reads what earlier plugins attached during its own
+  // evaluation.
+  test("cms implies upload, in edit mode, ahead of cms", () => {
     const { plugins } = resolveModules(params({ plugins: "cms" }), true);
+    expect(plugins).toContain("plugins/upload.js");
+    expect(plugins.indexOf("plugins/upload.js"))
+      .toBeLessThan(plugins.indexOf("vendor/hypercms.vendor.js"));
+  });
+
+  // A cms page in VIEW mode still has no picker, so the uploader stays out. The
+  // implication does not override editOnly.
+  test("cms in view mode does not pull in upload", () => {
+    const { plugins } = resolveModules(params({ plugins: "cms" }), false);
     expect(plugins).not.toContain("plugins/upload.js");
+  });
+
+  // The escape hatch, unchanged: exclude runs after the implications, so a page
+  // that wants the cms without the uploader can still say so.
+  test("exclude=upload opts a cms page back out", () => {
+    const { plugins } = resolveModules(params({ plugins: "cms", exclude: "upload" }), true);
+    expect(plugins).not.toContain("plugins/upload.js");
+    expect(plugins).toContain("vendor/hypercms.vendor.js");
   });
 
   // hypercms looks the cropper up as clay.quickcrop and silently uploads the raw
@@ -60,13 +78,14 @@ describe("resolveModules", () => {
     expect(plugins).toEqual([
       "vendor/richclay.vendor.js",
       "vendor/quickcrop.vendor.js",
+      "plugins/upload.js",
       "vendor/hypercms.vendor.js",
     ]);
   });
 
   test("excluding quickcrop overrides the implication", () => {
     const { plugins } = resolveModules(params({ plugins: "cms", exclude: "quickcrop" }), true);
-    expect(plugins).toEqual(["vendor/richclay.vendor.js", "vendor/hypercms.vendor.js"]);
+    expect(plugins).toEqual(["vendor/richclay.vendor.js", "plugins/upload.js", "vendor/hypercms.vendor.js"]);
   });
 
   test("quickcrop loads on its own request, in view mode too", () => {

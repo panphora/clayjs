@@ -1,4 +1,4 @@
-# clayjs
+# clayjs™
 
 **Site, tutorial, and docs: [clayjs.com](https://clayjs.com)** · hosted platform: [hyperclay.com](https://hyperclay.com)
 
@@ -35,10 +35,6 @@ never reach the file on disk.
   `/_/save/{token}` and sends no cookies, because the token is the credential.
   A token also implies edit mode, which is the only such signal a sandboxed
   document can see. `htmlclaytoken` is the older spelling of the same thing.
-- `clay-save-transport="desktop-json-v1"` — send the save as
-  `{content, snapshotHtml, userDriven}` JSON instead of plain text. Only declare
-  it on a host whose save lane reads that envelope.
-
 Edit mode is decided in this order: the `?editmode` param, then
 `window.clayEditMode`, then a save token, then the platform's owner cookie.
 
@@ -151,7 +147,7 @@ Never edit `public/` by hand, and never copy a file into it. Its contents are
 **derived**:
 
 ```
-public/  =  package.json "files"  (minus NOTICE, which nothing requests)
+public/  =  package.json "files"  (minus THIRD-PARTY-NOTICES.md, which nothing requests)
          +  website/*             (flattened to the root, so /docs.html works)
 ```
 
@@ -161,3 +157,9 @@ reach npm and miss the site. Before this script existed the mirror was hand-copi
 and it drifted exactly that way: `src/core/host-attrs.js` never made it across, and
 since `loader.js` imports `is-edit-mode.js`, which imports it, the deployed
 `clay.js` could not boot at all.
+
+## License
+
+Our code is MIT-0 (MIT No Attribution): use it, remix it, ship it, no attribution
+needed. Vendored third-party files keep their original permissive licenses; see
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).

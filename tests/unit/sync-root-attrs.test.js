@@ -2,11 +2,10 @@ import { serializeForSync } from "../../src/core/snapshot.js";
 import { isTabLocalRootAttr, TAB_LOCAL_ROOT_ATTRS } from "../../src/lib/root-attrs.js";
 import { HyperMorph } from "../../src/vendor/hyper-morph.vendor.js";
 
-const SEVEN = [
+const TAB_LOCAL = [
   "savetoken",
   "htmlclaytoken",
   "htmlclayid",
-  "clay-save-transport",
   "savestatus",
   "editmode",
   "pageowner",
@@ -20,21 +19,20 @@ function makeClone() {
   clone.setAttribute("savetoken", "ephemeral-abc123");
   clone.setAttribute("htmlclaytoken", "ephemeral-def456");
   clone.setAttribute("htmlclayid", "durable-file-uuid");
-  clone.setAttribute("clay-save-transport", "desktop-json-v1");
   clone.setAttribute("savestatus", "unsaved");
   clone.setAttribute("editmode", "true");
   clone.setAttribute("pageowner", "true");
   return clone;
 }
 
-test("the seven tab-local names are exactly the set the module publishes", () => {
-  expect([...TAB_LOCAL_ROOT_ATTRS].sort()).toEqual([...SEVEN].sort());
+test("the tab-local names are exactly the set the module publishes", () => {
+  expect([...TAB_LOCAL_ROOT_ATTRS].sort()).toEqual([...TAB_LOCAL].sort());
 });
 
-test("the sync payload drops all seven tab-local attributes from the root", () => {
+test("the sync payload drops every tab-local attribute from the root", () => {
   const html = serializeForSync(makeClone());
   const rootTag = html.slice(0, html.indexOf(">"));
-  for (const name of SEVEN) {
+  for (const name of TAB_LOCAL) {
     expect(rootTag).not.toContain(`${name}=`);
   }
 });
@@ -49,7 +47,7 @@ test("the sync payload keeps lang, class and documentid on the root", () => {
 
 test("every removed attribute is restored on the clone afterwards", () => {
   const clone = makeClone();
-  const before = SEVEN.map((name) => [name, clone.getAttribute(name)]);
+  const before = TAB_LOCAL.map((name) => [name, clone.getAttribute(name)]);
   serializeForSync(clone);
   for (const [name, value] of before) {
     expect(clone.getAttribute(name)).toBe(value);
@@ -57,28 +55,28 @@ test("every removed attribute is restored on the clone afterwards", () => {
   expect(clone.getAttribute("documentid")).toBe("durable-xyz789");
 });
 
-test("the same seven names on a non-root element are left alone", () => {
+test("the same names on a non-root element are left alone", () => {
   const clone = makeClone();
   const el = clone.ownerDocument.createElement("div");
   el.id = "author-owned";
-  for (const name of SEVEN) el.setAttribute(name, `author-${name}`);
+  for (const name of TAB_LOCAL) el.setAttribute(name, `author-${name}`);
   clone.querySelector("body").appendChild(el);
 
   const html = serializeForSync(clone);
-  for (const name of SEVEN) {
+  for (const name of TAB_LOCAL) {
     expect(html).toContain(`${name}="author-${name}"`);
   }
 });
 
-test("isTabLocalRootAttr is true for each of the seven on the root", () => {
-  for (const name of SEVEN) {
+test("isTabLocalRootAttr is true for each tab-local name on the root", () => {
+  for (const name of TAB_LOCAL) {
     expect(isTabLocalRootAttr(name, document.documentElement)).toBe(true);
   }
 });
 
-test("isTabLocalRootAttr is false for each of the seven on any other element", () => {
+test("isTabLocalRootAttr is false for each of them on any other element", () => {
   const el = document.createElement("div");
-  for (const name of SEVEN) {
+  for (const name of TAB_LOCAL) {
     expect(isTabLocalRootAttr(name, el)).toBe(false);
   }
   expect(isTabLocalRootAttr("savetoken", document.body)).toBe(false);

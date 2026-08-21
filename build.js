@@ -25,7 +25,7 @@ const PUBLIC = resolve(ROOT, 'public');
 const WEBSITE = resolve(ROOT, 'website');
 
 // In "files" because npm ships it, but nothing on the site requests it.
-const NOT_SERVED = new Set(['NOTICE']);
+const NOT_SERVED = new Set(['THIRD-PARTY-NOTICES.md']);
 
 // Never follow a symlink out of the tree, and never copy something that is not a
 // regular file. Same rule as malleablehtmlfile's sync-fixtures.mjs, for the same

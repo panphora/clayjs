@@ -247,10 +247,10 @@ export function savePage(callback = () => {}) {
     // Single capture: clone once, get both versions
     // forSave strips non-persisted regions ([no-save]/[save-remove])
     // forComparison additionally strips every autosave-off region
-    let forSave, forComparison, snapshotHtml;
+    let forSave, forComparison;
     const gateToken = gateCaptureToken();
     try {
-      ({ forSave, forComparison, snapshotHtml } = captureForSaveAndComparison());
+      ({ forSave, forComparison } = captureForSaveAndComparison());
     } catch (err) {
       console.error('savePage: captureForSaveAndComparison failed', err);
       setSaveState('error', err.message);
@@ -284,7 +284,7 @@ export function savePage(callback = () => {}) {
       }
       resolve(result);
       drainPendingSave();
-    }, { snapshotHtml });
+    });
   });
 }
 
@@ -314,10 +314,10 @@ export function savePageForce(callback = () => {}) {
       setOfflineStateQuiet();
     }
 
-    let forSave, forComparison, snapshotHtml;
+    let forSave, forComparison;
     const gateToken = gateCaptureToken();
     try {
-      ({ forSave, forComparison, snapshotHtml } = captureForSaveAndComparison());
+      ({ forSave, forComparison } = captureForSaveAndComparison());
     } catch (err) {
       console.error('savePageForce: captureForSaveAndComparison failed', err);
       setSaveState('error', err.message);
@@ -337,7 +337,7 @@ export function savePageForce(callback = () => {}) {
       }
       resolve(result);
       drainPendingSave();
-    }, { snapshotHtml });
+    });
   });
 }
 

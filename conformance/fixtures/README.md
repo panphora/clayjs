@@ -58,3 +58,9 @@ The browser is pinned (Playwright Chromium, version-locked in each client's `pac
 so regeneration is reproducible across machines and CI. `conformance:update` and
 `test:conformance` need the pinned browser installed (`npx playwright install chromium`); the
 same applies to `npm publish`, whose `prepublishOnly` runs the byte gate.
+
+## License
+
+These fixtures are MIT-0 (MIT No Attribution); see the LICENSE file in this
+directory. Copies distributed to consumer repos by the sync script carry the
+same license.

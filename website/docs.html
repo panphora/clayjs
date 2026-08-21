@@ -10,7 +10,7 @@
 <body>
 
 <nav class="nav">
-  <a class="wordmark" href="index.html">clay</a>
+  <a class="wordmark" href="index.html">clay<span class="js">.js</span><span class="tm" aria-hidden="true">™</span></a>
   <div class="links">
     <a href="advanced.html">Advanced</a>
     <a href="plugins.html">Plugins</a>
@@ -139,7 +139,7 @@
   <section id="editmode">
     <span class="eyebrow">Edit mode</span>
     <h2 class="section-title">Who may edit</h2>
-    <p>Saving requires edit mode. On the platforms, you never think about this: <a href="https://hyperclay.com">hyperclay.com</a> arms it with a cookie when you're the owner, and Hyperclay Local and htmlclay arm it for local files automatically. Resolution order:</p>
+    <p>Saving requires edit mode. On the platforms, you never think about this: <a href="https://hyperclay.com">hyperclay.com</a> arms it with a cookie when you're the owner, and Hyperclay Local and HTML Clay arm it for local files automatically. Resolution order:</p>
     <table>
       <tr><th>Priority</th><th>Source</th></tr>
       <tr><td>1</td><td><code>?editmode=true</code> / <code>?editmode=false</code> in the URL</td></tr>
@@ -160,12 +160,12 @@
     <table>
       <tr><th>Part</th><th>Value</th></tr>
       <tr><td>Route</td><td><code>POST /_/save</code></td></tr>
-      <tr><td>Body</td><td>The file's full HTML, as plain text. Exception: on localhost, a JSON envelope <code>{content, snapshotHtml, userDriven}</code> with <code>Content-Type: application/json</code> — the dialect Hyperclay Local speaks. Your HTML is <code>content</code>.</td></tr>
-      <tr><td>Header</td><td><code>Page-URL</code>: the URL of the page being saved</td></tr>
+      <tr><td>Body</td><td>The file's full HTML, as plain text. Always: this route has exactly one body shape, on every host.</td></tr>
+      <tr><td>Header</td><td><code>Document-URL</code>: the URL of the page being saved. Also sent as <code>Page-URL</code>, the older spelling; read either.</td></tr>
       <tr><td>Success</td><td><code>200</code> with JSON <code>{ "msg": "Saved" }</code></td></tr>
       <tr><td>Failure</td><td>Any non-2xx with JSON <code>{ "msg": "why" }</code></td></tr>
     </table>
-    <p>A complete server in about 12 lines of Express:</p>
+    <p>A complete server in about 15 lines of Express:</p>
     <pre><code>import express from <span class="a">"express"</span>;
 import fs from <span class="a">"node:fs/promises"</span>;
 
@@ -174,15 +174,17 @@ app.use(express.static(<span class="a">"."</span>));
 app.use(express.text({ type: <span class="a">"*/*"</span>, limit: <span class="a">"10mb"</span> }));
 
 app.post(<span class="a">"/_/save"</span>, async (req, res) =&gt; {
-  const path = new URL(req.get(<span class="a">"Page-URL"</span>)).pathname;
-  let html = req.body;
-  if (req.is(<span class="a">"application/json"</span>)) html = JSON.parse(html).content; <span class="c">// localhost envelope</span>
-  await fs.writeFile(<span class="a">"."</span> + path, html);
-  res.json({ msg: <span class="a">"Saved"</span> });
+  try {
+    const page = decodeURIComponent(new URL(req.get(<span class="a">"Document-URL"</span>)).pathname);
+    await fs.writeFile(<span class="a">"."</span> + (page.endsWith(<span class="a">"/"</span>) ? page + <span class="a">"index.html"</span> : page), req.body);
+    res.json({ msg: <span class="a">"Saved"</span> });
+  } catch {
+    res.status(500).json({ msg: <span class="a">"Couldn't save"</span> });
+  }
 });
 
 app.listen(4600);</code></pre>
-    <p class="small">A real deployment adds auth and path validation; this is the whole protocol though. The same contract powers hyperclay.com, Hyperclay Local, and htmlclay. Two details you may ignore: every save also carries an <code>X-Hyperclay-User-Driven: 1|0</code> header (whether a person triggered it), and htmlclay uses a token variant, <code>POST /_/save/{token}</code>, read from <code>&lt;html htmlclaytoken&gt;</code>.</p>
+    <p class="small">A real deployment adds auth and path validation; this is the whole protocol though. The same contract powers hyperclay.com, Hyperclay Local, and HTML Clay. Two details you may ignore: every save also carries a <code>Save-Trigger: user|auto</code> header (whether a person triggered it), and HTML Clay uses a token variant, <code>POST /_/save/{token}</code>, read from <code>&lt;html htmlclaytoken&gt;</code>.</p>
   </section>
 
 </main>
