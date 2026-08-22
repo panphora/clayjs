@@ -1,4 +1,4 @@
-/*! quickcrop v1.0.0 | MIT-0 | https://github.com/panphora/quickcrop
+/*! quickcrop v1.1.0 | MIT-0 | https://github.com/panphora/quickcrop
  *
  *  const result = await quickcrop(file, { aspect: 1 });
  *  // result: { blob, dataURL, width, height } on confirm, null on cancel
