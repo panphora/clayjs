@@ -61,7 +61,7 @@ a:hover { color: var(--glaze-deep); }
   font-size: 9px; font-weight: 600; color: var(--ink-soft);
   vertical-align: super; margin-left: 1px; user-select: none;
 }
-.nav .links { margin-left: auto; display: flex; gap: 20px; }
+.nav .links { margin-left: auto; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px 20px; }
 .nav .links a {
   font-family: var(--mono); font-size: 13px; color: var(--ink-soft);
   text-decoration: none;
@@ -83,7 +83,6 @@ h1.display {
   font-size: clamp(38px, 6vw, 58px); line-height: 1.05;
   letter-spacing: -0.015em; font-weight: 700; text-wrap: balance;
 }
-h1.display em { font-style: italic; font-weight: 400; }
 
 .lede { font-size: 20px; color: var(--ink-soft); line-height: 1.5; text-wrap: pretty; }
 

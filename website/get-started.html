@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="en" autosave demo-key="clayjs-get-started-v1">
+<!--
+  get-started.html · served at /get-started (website/ copies to the root of public/)
+
+  Decisions a maintainer should know about:
+
+  · No version number appears anywhere on this page, on purpose. Only the macOS download
+    filename carries a version, htmlclay's stamp-website.js only rewrites htmlclay.com
+    pages, and download.htmlclay.com/htmlclay-release-info.json sends no CORS header, so
+    any mac link or version hard-coded here would silently rot at the next release. The
+    Windows and Linux filenames are stable, so those download directly; the macOS button
+    goes to htmlclay.com/#downloads, which is stamped on every release.
+  · The agent prompt at the bottom references https://clayjs.com/llms.txt AND carries the
+    wiring steps inline, so an agent that can't fetch URLs still has enough to work with.
+    llms.txt lives at website/llms.txt; keep the two in agreement.
+  · There is deliberately no downloadable starter file and no copy button on the hero's
+    complete-file listing (removed 2026-08-22): the Copy button in step 2 is the one path
+    to the file, so the page teaches the real motion instead of skipping it.
+  · demo-key is clayjs-get-started-v1. Bump it whenever the authored demo content changes.
+  · Candidate for the shared styles.css: the .copyrow rules in the style block below (a
+    label + Copy header for code blocks). Everything else in that block is page-local.
+-->
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Get started · clayjs</title>
+<meta name="description" content="From nothing to an HTML file on your own machine that saves itself. Download HTML Clay, rename .html to .htmlclay, add one script tag: about two minutes.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%233E6B52'/%3E%3Cpath d='M21.5 11.2a7 7 0 1 0 0 9.6' fill='none' stroke='%23F1EFEA' stroke-width='3.2' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="canonical" href="https://clayjs.com/get-started">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="clayjs">
+<meta property="og:title" content="Get started · clayjs">
+<meta property="og:description" content="From nothing to an HTML file on your own machine that saves itself. About two minutes, no account, no build step.">
+<meta property="og:url" content="https://clayjs.com/get-started">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Get started · clayjs">
+<meta name="twitter:description" content="From nothing to an HTML file on your own machine that saves itself. About two minutes, no account, no build step.">
+<link rel="stylesheet" href="styles.css">
+<style>
+  .copyrow { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: 16px 0 0; }
+  .copyrow .lbl { font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-soft); }
+  .copyrow + pre, .copyrow + .sheet { margin-top: 8px; }
+  #try-sheet h3 { font-size: 22px; margin-bottom: 10px; }
+  .boundary-fig { margin: 18px 0 6px; }
+  .boundary-fig svg { display: block; width: 100%; max-width: 430px; height: auto; }
+  .bx { fill: var(--sheet); stroke: var(--line); }
+  .bt { font: 700 12.5px var(--mono); fill: var(--ink); }
+  .bs { font: 11.5px var(--serif); fill: var(--ink-soft); }
+  .bl { font: 10.5px var(--mono); fill: var(--glaze-deep); }
+  .barrow { stroke: var(--glaze); stroke-width: 1.5; }
+  .ask label { display: block; font-weight: 700; margin-bottom: 8px; }
+  .ask input {
+    width: 100%; box-sizing: border-box; font: 16px var(--serif); color: var(--ink);
+    background: var(--sheet); border: 1px solid var(--line); border-radius: 8px;
+    padding: 10px 12px; margin-bottom: 6px;
+  }
+  .ask input:focus { outline: none; border-color: var(--glaze); }
+  .ask input::placeholder { color: var(--ink-faint); }
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <a class="wordmark" href="/">clay<span class="js">.js</span><span class="tm" aria-hidden="true">™</span></a>
+  <div class="links">
+    <a href="/get-started" aria-current="page">Get started</a>
+    <a href="/advanced">Advanced</a>
+    <a href="/plugins">Plugins</a>
+    <a href="/docs">Docs</a>
+    <a href="https://github.com/panphora/clayjs" rel="noopener">GitHub</a>
+  </div>
+</nav>
+
+<div class="with-rail">
+  <aside class="rail" aria-label="Page outline">
+    <div class="rail-title">Outline</div>
+    <a href="#try">Try it now</a>
+    <a href="#get-the-app">1 · Get the app</a>
+    <a href="#make-the-file">2 · Make the file</a>
+    <a href="#script-tag">3 · Add the script tag</a>
+    <a href="#editable">4 · Turn on editing</a>
+    <a href="#boundary">How it fits together</a>
+    <a href="#next">Where next</a>
+    <a href="#questions">Honest questions</a>
+    <a href="#your-own">Bring your own file</a>
+  </aside>
+
+  <main>
+
+  <!-- ================= HERO / TRY IT ================= -->
+  <section id="try" style="border-top: none; padding-top: 64px;">
+    <span class="eyebrow">Get started</span>
+    <h1 class="display">A file that saves itself.</h1>
+    <p class="lede" style="margin-top: 14px;">From nothing to an HTML file on your own machine that keeps every edit. No account, no build step, nothing to configure. Four steps, about two minutes.</p>
+
+    <div class="sheet live" id="try-sheet" style="margin-top: 30px;">
+      <span class="filename">notes.htmlclay</span>
+      <span class="realbadge">saved in your browser</span>
+      <h3 editable="single-line" spellcheck="false">My notes</h3>
+      <div editable spellcheck="false" style="margin-bottom: 14px;">
+        <p>Type anything here.</p>
+      </div>
+      <p class="small" style="margin-bottom: 14px;">Click and type, then just stop. Autosave is on, the same way it will be in your file. Refresh the page and your words are still here.</p>
+      <button type="button" class="btn primary" trigger-save>Save now</button>
+      <button type="button" class="btn" id="demo-reset" title="Forget the browser copy and reload the original page">Reset</button>
+      <span class="chip" role="status" clay="no-save no-watch no-snapshot"></span>
+    </div>
+    <p class="small">This copy saves into your browser's storage through the real save pipeline; a save normally writes to disk. The steps below give you the real thing: a file on disk that does it.</p>
+
+    <details class="fold" id="payload-fold" onbeforesnapshot="this.removeAttribute('open')">
+      <summary><span class="prob">See the HTML a save writes</span><span class="sol">clay.getHTML()</span></summary>
+      <div class="fold-body">
+        <p class="small">This demo sheet's slice of the exact string <code>clay.getHTML()</code> returns: the payload a save sends, after cleanup. Your edits are just markup now.</p>
+        <pre id="payload-view" clay="no-save no-watch no-snapshot" style="max-height: 320px; overflow: auto;"></pre>
+      </div>
+    </details>
+
+    <p style="margin-top: 22px;">The complete file behind a page like that:</p>
+    <div class="copyrow">
+      <span class="lbl">notes.html · the whole file</span>
+    </div>
+    <pre><code id="recipe-code">&lt;!DOCTYPE html&gt;
+&lt;<span class="t">html</span> <span class="a">lang</span>="en" <span class="a">autosave</span>&gt;
+&lt;<span class="t">head</span>&gt;&lt;<span class="t">meta</span> <span class="a">charset</span>="utf-8"&gt;&lt;<span class="t">title</span>&gt;Notes&lt;/<span class="t">title</span>&gt;&lt;/<span class="t">head</span>&gt;
+&lt;<span class="t">body</span>&gt;
+  &lt;<span class="t">h1</span> <span class="a">editable</span>&gt;My notes&lt;/<span class="t">h1</span>&gt;
+  &lt;<span class="t">div</span> <span class="a">editable</span>&gt;&lt;<span class="t">p</span>&gt;Type anything here.&lt;/<span class="t">p</span>&gt;&lt;/<span class="t">div</span>&gt;
+  &lt;<span class="t">script</span> <span class="a">src</span>="https://clayjs.com/clay.js"&gt;&lt;/<span class="t">script</span>&gt;
+&lt;/<span class="t">body</span>&gt;
+&lt;/<span class="t">html</span>&gt;</code></pre>
+
+    <div class="recipes">
+      <span class="r-title">The whole path</span>
+      1 · Get HTML Clay <span class="arrow">→</span> a small desktop app that writes the saves<br>
+      2 · Save the file, rename it .htmlclay <span class="arrow">→</span> double-click opens it, served<br>
+      3 · Add one script tag <span class="arrow">→</span> the page can save itself<br>
+      4 · <code>editable</code> + <code>autosave</code> <span class="arrow">→</span> what you type lands in the file
+    </div>
+
+    <p style="margin-top: 18px;">
+      <a class="btn primary" href="#get-the-app" style="text-decoration: none; display: inline-block;">Start: get the app</a>
+    </p>
+  </section>
+
+  <!-- ================= STEP 1 ================= -->
+  <section id="get-the-app">
+    <h2 class="eyebrow">Step 1 · Get the app</h2>
+    <p class="problem">A browser can't write to a file on your disk.</p>
+    <p>Something outside the browser sandbox has to hold the pen. HTML Clay is that something: a small desktop app whose whole job is to serve your file locally and write saves back into it. No account, and it only ever writes inside your home folder: the file you opened, or a folder you explicitly trust.</p>
+    <div clay="no-save no-watch">
+      <p style="margin: 18px 0 8px;">
+        <a class="btn primary" id="dl-btn" href="https://htmlclay.com/#downloads" style="text-decoration: none; display: inline-block;">Download HTML Clay</a>
+      </p>
+    </div>
+    <p class="small">Free. macOS universal dmg, signed and notarized, about 8.6 MB · Windows 64-bit zip, signed, about 3.7 MB · Linux tar.gz, about 4.3 MB, x86_64 and ARM64. <a href="https://htmlclay.com/#downloads">All downloads</a>.</p>
+    <p class="small">The mac installer's file name carries its version number, so on a Mac the button goes through htmlclay.com's always-current download list. No security-warning workarounds are needed on any platform; the builds are signed.</p>
+  </section>
+
+  <!-- ================= STEP 2 ================= -->
+  <section id="make-the-file">
+    <h2 class="eyebrow">Step 2 · Make the file</h2>
+    <p class="problem">Double-clicking an HTML file just views it.</p>
+    <p>Copy this and save it as <code>notes.html</code>, anywhere inside your home folder. (The app refuses to serve anything outside it, so keep it there.) Any HTML file you already have works exactly the same way.</p>
+    <div class="copyrow">
+      <span class="lbl">notes.html · plain, for now</span>
+      <button type="button" class="btn" data-copy="#plain-code" clay="no-save no-watch">Copy</button>
+    </div>
+    <pre><code id="plain-code">&lt;!DOCTYPE html&gt;
+&lt;<span class="t">html</span> <span class="a">lang</span>="en"&gt;
+&lt;<span class="t">head</span>&gt;&lt;<span class="t">meta</span> <span class="a">charset</span>="utf-8"&gt;&lt;<span class="t">title</span>&gt;Notes&lt;/<span class="t">title</span>&gt;&lt;/<span class="t">head</span>&gt;
+&lt;<span class="t">body</span>&gt;
+  &lt;<span class="t">h1</span>&gt;My notes&lt;/<span class="t">h1</span>&gt;
+  &lt;<span class="t">div</span>&gt;&lt;<span class="t">p</span>&gt;Type anything here.&lt;/<span class="t">p</span>&gt;&lt;/<span class="t">div</span>&gt;
+&lt;/<span class="t">body</span>&gt;
+&lt;/<span class="t">html</span>&gt;</code></pre>
+    <p>Now rename <code>notes.html</code> to <code>notes.htmlclay</code> and double-click it. HTML Clay serves it at <code>http://127.0.0.1</code> and opens it in your default browser, as an ordinary tab. Right now it is just a page; the next two steps make it a document.</p>
+    <p class="small">On a machine without the app, nothing is lost: it is still an ordinary HTML file. Rename it back to <code>.html</code> and any browser opens it. Nothing about the file depends on the app.</p>
+  </section>
+
+  <!-- ================= STEP 3 ================= -->
+  <section id="script-tag">
+    <h2 class="eyebrow">Step 3 · Add the script tag</h2>
+    <p class="problem">The page doesn't know how to save itself yet.</p>
+    <div class="copyrow">
+      <span class="lbl">last line inside &lt;body&gt;</span>
+      <button type="button" class="btn" data-copy="#tag-code" clay="no-save no-watch">Copy</button>
+    </div>
+    <pre><code id="tag-code">&lt;<span class="t">script</span> <span class="a">src</span>="https://clayjs.com/clay.js"&gt;&lt;/<span class="t">script</span>&gt;</code></pre>
+    <p>Open <code>notes.htmlclay</code> in your text editor, add that line just before <code>&lt;/body&gt;</code>, save, and refresh the tab. Nothing visible changes, but the wiring is now live: when HTML Clay serves the file it stamps a save token onto <code>&lt;html&gt;</code>, and clayjs reads that token, switches into edit mode on its own, and knows to POST the whole document back to the app. No config, no save code to write.</p>
+  </section>
+
+  <!-- ================= STEP 4 ================= -->
+  <section id="editable">
+    <h2 class="eyebrow">Step 4 · Turn on editing</h2>
+    <p class="problem">Nothing on the page is editable yet.</p>
+    <p>Two attributes. <code>editable</code> on any element makes it rich text you can type into, with bold, lists, and links. <code>autosave</code> on <code>&lt;html&gt;</code> saves after your edits settle, debounced and throttled; ⌘S or Ctrl+S always works too.</p>
+    <div class="copyrow">
+      <span class="lbl">the two attributes</span>
+      <button type="button" class="btn" data-copy="#attrs-code" clay="no-save no-watch">Copy</button>
+    </div>
+    <pre><code id="attrs-code">&lt;<span class="t">html</span> <span class="a">lang</span>="en" <span class="a">autosave</span>&gt;
+  &lt;<span class="t">div</span> <span class="a">editable</span>&gt;&lt;<span class="t">p</span>&gt;Type anything here.&lt;/<span class="t">p</span>&gt;&lt;/<span class="t">div</span>&gt;</code></pre>
+    <p>Add them, refresh the tab, and your file now matches the complete file at the <a href="#try">top of this page</a>.</p>
+    <p><strong>Now prove it to yourself.</strong> Type into the page, stop for a moment, then open <code>notes.htmlclay</code> in your text editor. Your words are in the file. That file is the whole app.</p>
+    <p class="small">While it works, clayjs keeps a <code>savestatus</code> attribute on <code>&lt;html&gt;</code> up to date (<code>saving</code>, <code>saved</code>, <code>error</code>, <code>offline</code>) and draws no interface of its own. Style it with a few lines of CSS, listen to the <code>clay:save-*</code> events (that is what this page's status chip does), or load a ready-made chip with <code>clay.js?plugins=indicator</code>. Details in the <a href="/docs#attributes">reference</a>.</p>
+  </section>
+
+  <!-- ================= BOUNDARY ================= -->
+  <section id="boundary">
+    <span class="eyebrow">How it fits together</span>
+    <h2 class="section-title">Three parts, one document</h2>
+    <p>The file owns everything: the interface and the state are one HTML document. clayjs, inside the page, turns your edits into a clean serialized copy of that document. HTML Clay, outside the browser, is the only part that touches disk: it serves the file up and writes the saves back.</p>
+    <div class="boundary-fig">
+      <svg viewBox="0 0 400 380" role="img" aria-labelledby="bd-t bd-d">
+        <title id="bd-t">How a save travels</title>
+        <desc id="bd-d">Your file on disk is served by the HTML Clay app to your browser, where clayjs makes it editable and POSTs the edited document back; the app writes the bytes to disk.</desc>
+        <defs>
+          <marker id="arr" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0 0 L8 4 L0 8 z" fill="var(--glaze)"/>
+          </marker>
+        </defs>
+        <rect class="bx" x="28" y="14" width="344" height="64" rx="8"/>
+        <text class="bt" x="200" y="40" text-anchor="middle">notes.htmlclay · the file on disk</text>
+        <text class="bs" x="200" y="60" text-anchor="middle">The interface and the state, one HTML document</text>
+        <line class="barrow" x1="120" y1="84" x2="120" y2="140" marker-end="url(#arr)"/>
+        <line class="barrow" x1="280" y1="140" x2="280" y2="84" marker-end="url(#arr)"/>
+        <text class="bl" x="108" y="116" text-anchor="end">reads the file</text>
+        <text class="bl" x="292" y="109">writes the</text>
+        <text class="bl" x="292" y="123">bytes back</text>
+        <rect class="bx" x="28" y="146" width="344" height="76" rx="8"/>
+        <text class="bt" x="200" y="172" text-anchor="middle">HTML Clay · the desktop app</text>
+        <text class="bs" x="200" y="192" text-anchor="middle">Serves your file at http://127.0.0.1 and opens it in</text>
+        <text class="bs" x="200" y="208" text-anchor="middle">your default browser. The only part that touches disk.</text>
+        <line class="barrow" x1="120" y1="228" x2="120" y2="284" marker-end="url(#arr)"/>
+        <line class="barrow" x1="280" y1="284" x2="280" y2="228" marker-end="url(#arr)"/>
+        <text class="bl" x="108" y="253" text-anchor="end">serves the page</text>
+        <text class="bl" x="292" y="246">POSTs the whole</text>
+        <text class="bl" x="292" y="260">document back</text>
+        <rect class="bx" x="28" y="290" width="344" height="76" rx="8"/>
+        <text class="bt" x="200" y="316" text-anchor="middle">your browser · clayjs in the page</text>
+        <text class="bs" x="200" y="336" text-anchor="middle">Turns elements editable, watches your edits, snapshots</text>
+        <text class="bs" x="200" y="352" text-anchor="middle">the DOM into clean HTML and sends it back</text>
+      </svg>
+    </div>
+    <p class="small">The save is one POST of the whole document, as plain text, to <code>/_/save/&lt;token&gt;</code> on the local app. What lands on disk is HTML you can read. The same one-route protocol runs <a href="https://hyperclay.com">hyperclay.com</a> and <a href="/docs#endpoint">about 20 lines of your own server</a>.</p>
+    <p class="small">clayjs is free to use in anything; the precise terms are its <a href="https://github.com/panphora/clayjs/blob/main/LICENSE" rel="noopener">LICENSE</a>. HTML Clay is source-available (not open source) under the <a href="https://github.com/panphora/htmlclay/blob/main/LICENSE" rel="noopener">First Million Stays Yours License</a>: free unless the software brings you more than $1M a year.</p>
+  </section>
+
+  <!-- ================= WHERE NEXT ================= -->
+  <section id="next">
+    <span class="eyebrow">Where next</span>
+    <h2 class="section-title">You have a file. Now make it an app.</h2>
+    <div class="recipes">
+      <span class="r-title">Where next</span>
+      The full tutorial: feedback, regions, live sync <span class="arrow">→</span> <a href="/">clayjs.com</a><br>
+      The reference: API, attributes, events <span class="arrow">→</span> <a href="/docs">/docs</a><br>
+      Host it anywhere: the one-route endpoint spec <span class="arrow">→</span> <a href="/docs#endpoint">/docs#endpoint</a><br>
+      Everything the app does: versions, live sync, the wire <span class="arrow">→</span> <a href="https://htmlclay.com/features" rel="noopener">htmlclay.com/features</a><br>
+      Is it safe? The exact boundary <span class="arrow">→</span> <a href="https://htmlclay.com/#safe" rel="noopener">htmlclay.com/#safe</a>
+    </div>
+  </section>
+
+  <!-- ================= HONEST QUESTIONS ================= -->
+  <section id="questions">
+    <span class="eyebrow">Fair questions</span>
+    <h2 class="section-title">Honest questions, honest answers</h2>
+
+    <details class="fold" onbeforesnapshot="this.removeAttribute('open')">
+      <summary><span class="prob">Isn't this just contenteditable plus a POST?</span><span class="sol">mostly, yes</span></summary>
+      <div class="fold-body">
+        <p>Mostly, yes. contenteditable has been in browsers for twenty years, and the save is one POST of the whole document. The news is what is missing: no format of its own, no export step, no cloud in the loop. Double-click a file, edit it like a document, and the exact HTML you were looking at is written back to the same file, clean enough to read. clayjs earns its keep on the unglamorous parts, a clean serialize with the runtime junk stripped, autosave that settles instead of spamming, a warning before you close unsaved work, but the core is as simple as you suspect. That simplicity is the point.</p>
+      </div>
+    </details>
+
+    <details class="fold" onbeforesnapshot="this.removeAttribute('open')">
+      <summary><span class="prob">A desktop app is a bigger ask than a script tag.</span><span class="sol">it is</span></summary>
+      <div class="fold-body">
+        <p>It is. But a web page cannot write to your disk; the sandbox is the one rule this idea cannot cross, so a native process has to do the writing. HTML Clay is deliberately small about it: 4 to 9 MB, signed, no account, and it only ever writes inside your home folder, into the file you opened or a folder you explicitly trust. It also brings more than the pen: every file it opens gets automatic version history, an edit from a text editor or an agent merges into the open page without a reload, and a local program can work on the file through the wire. The full list is at <a href="https://htmlclay.com/features" rel="noopener">htmlclay.com/features</a>. If you'd rather install nothing, <a href="https://hyperclay.com">hyperclay.com</a> hosts the same files, saved to their disk instead of yours.</p>
+      </div>
+    </details>
+
+    <details class="fold" onbeforesnapshot="this.removeAttribute('open')">
+      <summary><span class="prob">What actually gets sent when it saves?</span><span class="sol">the whole file</span></summary>
+      <div class="fold-body">
+        <p>The entire document, serialized as HTML and POSTed as plain text to the local app. There is no hidden project format and no sidecar files: what lands on disk is the same kind of HTML you would write by hand. <code>clay.getHTML()</code> returns the exact string, and the fold at the <a href="#try">top of this page</a> shows it live.</p>
+      </div>
+    </details>
+
+    <details class="fold" onbeforesnapshot="this.removeAttribute('open')">
+      <summary><span class="prob">View source shows attributes I didn't write.</span><span class="sol">two, one stays</span></summary>
+      <div class="fold-body">
+        <p>When HTML Clay serves your file it puts two attributes on <code>&lt;html&gt;</code>: <code>htmlclaytoken</code>, a per-serve save credential, and <code>htmlclayid</code>, a durable identity for the file. clayjs adds <code>savestatus</code> while it works. Before anything is written to disk, <code>htmlclaytoken</code> and <code>savestatus</code> are stripped. <code>htmlclayid</code> is kept: it is how the app still recognizes the file after you rename or move it. So the browser shows three attributes you didn't write, and the file on disk gains exactly one.</p>
+      </div>
+    </details>
+  </section>
+
+  <!-- ================= BRING YOUR OWN ================= -->
+  <section id="your-own">
+    <span class="eyebrow">Send in an agent</span>
+    <h2 class="section-title">Already have a static file?</h2>
+    <p>The notes file above is only an example. The same four steps work on any HTML you own: a page you already have, or the personal software you have been meaning to build. Paste the prompt below at a coding agent (Claude, Cursor, Codex…), with your file if you have one, and it does steps 3 and 4 for you.</p>
+    <div class="sheet ask" clay="no-save no-watch" style="margin-bottom: 10px;">
+      <label for="build-input">What personal software do you want to build today?</label>
+      <input id="build-input" type="text" autocomplete="off" spellcheck="false" placeholder="a reading log, a trip planner, a home inventory…">
+      <p class="small" style="margin-bottom: 4px;">Type it and the prompt below asks the agent to build it first. Leave it empty if you're bringing a file you already have.</p>
+      <div class="copyrow">
+        <span class="lbl">for Claude, Cursor, Codex…</span>
+        <button type="button" class="btn" data-copy="#agent-text" data-copy-flat>Copy</button>
+      </div>
+      <p id="agent-text" style="font-family: var(--mono); font-size: 13px; line-height: 1.75; margin: 8px 0 0;">Make this static HTML file malleable with clayjs. Read https://clayjs.com/llms.txt before you start: it is the full clayjs reference, including every plugin and advanced module. Add &lt;script src="https://clayjs.com/clay.js"&gt;&lt;/script&gt; as the last element inside &lt;body&gt;. Add an autosave attribute to the &lt;html&gt; element. Add an editable attribute to each element a person should be able to edit as rich text (headings, paragraphs, note containers), and add a persist attribute to any form control whose value should survive saving. Do not write any save logic or add a save button: clayjs saves the whole document automatically, and the host (the HTML Clay desktop app for .htmlclay files, or hyperclay.com) writes it to disk. If part of the page is UI that should never be written to disk, mark it clay="no-save no-watch". Change nothing else.</p>
+    </div>
+    <!-- slot: a second paragraph ("add a CMS") ships with a later email; add it here, below this one -->
+  </section>
+
+  </main>
+</div>
+
+<footer>
+  <div class="inner">
+    <span>clayjs</span>
+    <a href="/">Home</a>
+    <a href="/get-started">Get started</a>
+    <a href="/advanced">Advanced</a>
+    <a href="/plugins">Plugins</a>
+    <a href="/docs">Docs</a>
+    <a href="/docs#endpoint">Host it yourself</a>
+    <a href="https://github.com/panphora/clayjs" rel="noopener">GitHub</a>
+    <a href="https://github.com/panphora/clayjs/blob/main/LICENSE" rel="noopener">MIT-0</a>
+    <a href="THIRD-PARTY-NOTICES.md">Third-party notices</a>
+  </div>
+  <div class="inner" data-hyper-footer="clayjs" clay="no-save no-snapshot"></div>
+</footer>
+
+<script>window.clayEditMode = true;</script>
+<script src="https://clayjs.com/clay.js?plugins=demo"></script>
+<script>
+(function () {
+  function copyToClipboard(btn, text) {
+    function done() {
+      btn.textContent = "Copied!";
+      setTimeout(function () { btn.textContent = "Copy"; }, 1500);
+    }
+    function fallback() {
+      var ta = document.createElement("textarea");
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+      done();
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done).catch(fallback);
+    } else {
+      fallback();
+    }
+  }
+
+  Array.prototype.forEach.call(document.querySelectorAll("[data-copy]"), function (btn) {
+    btn.addEventListener("click", function () {
+      var src = document.querySelector(btn.getAttribute("data-copy"));
+      if (!src) return;
+      var text = src.textContent;
+      if (btn.hasAttribute("data-copy-flat")) {
+        text = text.replace(/\s+/g, " ").trim();
+      } else {
+        text = text.replace(/^\n+/, "").replace(/\s+$/, "") + "\n";
+      }
+      copyToClipboard(btn, text);
+    });
+  });
+
+  // OS-detected download. Only the Windows and Linux filenames are stable; the
+  // macOS dmg name carries a version, so the mac button goes through
+  // htmlclay.com's stamped, always-current download list.
+  var DL = "https://download.htmlclay.com/";
+  var ua = navigator.userAgent;
+  var dlBtn = document.getElementById("dl-btn");
+  if (/iPhone|iPad|iPod|Android/.test(ua)) {
+    // a phone: leave the generic button pointing at the download list
+  } else if (/Mac/.test(ua)) {
+    dlBtn.textContent = "Get HTML Clay for macOS";
+  } else if (/Win/.test(ua)) {
+    dlBtn.href = DL + "htmlclay-windows-amd64.zip";
+    dlBtn.setAttribute("download", "");
+    dlBtn.textContent = "Download for Windows (.zip)";
+  } else if (/Linux|CrOS/.test(ua)) {
+    dlBtn.href = DL + "htmlclay-linux-amd64.tar.gz";
+    dlBtn.setAttribute("download", "");
+    dlBtn.textContent = "Download for Linux (.tar.gz)";
+  }
+
+  // The agent prompt: rewritten from the wish input. The static text in the HTML
+  // is the empty-input variant, so the two must say the same thing.
+  var WIRE_STEPS =
+    'Add <script src="https://clayjs.com/clay.js"><\/script> as the last element inside <body>. ' +
+    "Add an autosave attribute to the <html> element. " +
+    "Add an editable attribute to each element a person should be able to edit as rich text " +
+    "(headings, paragraphs, note containers), and add a persist attribute to any form control " +
+    "whose value should survive saving. Do not write any save logic or add a save button: " +
+    "clayjs saves the whole document automatically, and the host (the HTML Clay desktop app " +
+    "for .htmlclay files, or hyperclay.com) writes it to disk. If part of the page is UI that " +
+    'should never be written to disk, mark it clay="no-save no-watch".';
+  var READ_FIRST =
+    "Read https://clayjs.com/llms.txt before you start: it is the full clayjs reference, " +
+    "including every plugin and advanced module. ";
+  var buildInput = document.getElementById("build-input");
+  var agentText = document.getElementById("agent-text");
+  function renderPrompt() {
+    var wish = buildInput.value.replace(/\s+/g, " ").trim();
+    agentText.textContent = wish
+      ? "Build this personal software as one self-contained HTML file: " + wish + ". " +
+        "Build it with clayjs. " + READ_FIRST + "Then make the file malleable: " + WIRE_STEPS
+      : "Make this static HTML file malleable with clayjs. " + READ_FIRST + WIRE_STEPS +
+        " Change nothing else.";
+  }
+  buildInput.addEventListener("input", renderPrompt);
+
+  // Everything below needs the live library.
+  if (!(window.clay && window.clay.ready)) return;
+
+  var booted = false;
+  window.clay.ready.then(function () { booted = true; });
+  function canSave() { return booted && "save" in window.clay; }
+  function canDemo() { return booted && "demo" in window.clay; }
+
+  document.getElementById("demo-reset").addEventListener("click", function () {
+    if (canDemo()) window.clay.demo.reset();
+  });
+
+  // The status chip: real text written from the save events, so a screen reader
+  // announces it. Armed only after the sheet is touched, because autosave can
+  // legitimately fire on load (a returning visitor's restore) and lighting the
+  // chip before any interaction reads as noise.
+  var sheet = document.getElementById("try-sheet");
+  var chip = sheet.querySelector(".chip");
+  var armed = false;
+  ["focusin", "click", "input"].forEach(function (type) {
+    sheet.addEventListener(type, function () { armed = true; }, true);
+  });
+  var CHIP_TEXT = { saving: "Saving…", saved: "Saved in your browser", error: "Couldn't save", offline: "Offline" };
+  function showChip(state) {
+    if (!armed) return;
+    chip.textContent = CHIP_TEXT[state] || "";
+    chip.setAttribute("data-state", state);
+    clearTimeout(chip._chipTimer);
+    if (state === "saved") {
+      chip._chipTimer = setTimeout(function () {
+        chip.removeAttribute("data-state");
+        chip.textContent = "";
+      }, 2200);
+    }
+  }
+  Object.keys(CHIP_TEXT).forEach(function (state) {
+    document.addEventListener("clay:save-" + state, function () { showChip(state); });
+  });
+
+  // The payload viewer: the demo sheet's slice of the exact save payload,
+  // re-rendered with the same .t/.a highlighting as the static code blocks so
+  // it stays highlighted every time a save refreshes it.
+  var fold = document.getElementById("payload-fold");
+  var view = document.getElementById("payload-view");
+  function escapeHTML(s) {
+    return s.replace(/[&<>]/g, function (c) {
+      return c === "&" ? "&amp;" : c === "<" ? "&lt;" : "&gt;";
+    });
+  }
+  function highlightHTML(src) {
+    return escapeHTML(src).replace(/&lt;(\/?)([a-zA-Z][\w-]*)([\s\S]*?)(\/?&gt;)/g, function (m, slash, tag, attrs, end) {
+      attrs = attrs.replace(/("[^"]*")|([a-zA-Z][\w-]*)/g, function (mm, quoted, name) {
+        return quoted ? quoted : '<span class="a">' + name + "</span>";
+      });
+      return "&lt;" + slash + '<span class="t">' + tag + "</span>" + attrs + end;
+    });
+  }
+  function renderPayload() {
+    if (!fold.open) return;
+    if (!canSave() || !("getHTML" in window.clay)) {
+      view.textContent = "The live library didn't load, so there is no payload to show. (This demo needs a connection to clayjs.com.)";
+      return;
+    }
+    var doc = new DOMParser().parseFromString(window.clay.getHTML(), "text/html");
+    var el = doc.getElementById("try-sheet");
+    view.innerHTML = el ? highlightHTML(el.outerHTML) : "";
+  }
+  fold.addEventListener("toggle", renderPayload);
+  document.addEventListener("clay:save-saved", renderPayload);
+})();
+</script>
+<script src="https://hyperclay.com/public/js/hyper-footer.js" defer></script>
+
+</body>
+</html>
