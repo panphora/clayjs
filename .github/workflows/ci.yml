@@ -8,6 +8,10 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # A hung step must fail fast and visibly. Without this, the browser install hanging on
+    # Node 26 burned GitHub's 6h job ceiling on every push since 2026-08-15 and reported as
+    # "cancelled", which reads like someone stopped it rather than a broken build.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
