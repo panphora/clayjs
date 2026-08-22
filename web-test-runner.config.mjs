@@ -25,6 +25,11 @@ export default {
   </head>
   <body></body>
 </html>`,
+  // Mocha defaults to a 2000ms per-hook timeout. Every fixture does its async setup in a
+  // `before` hook, so on a contended machine the hook times out before any byte comparison
+  // happens and a green suite reports as a product failure. That failed a release on
+  // 2026-08-22 while the suite's own runtime was 0.6s. 20s is still a real hang detector.
+  testFramework: { config: { timeout: '20000' } },
   plugins: [filePlugin()],
   reporters: [summaryReporter(), defaultReporter()],
 };
