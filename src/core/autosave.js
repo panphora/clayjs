@@ -13,7 +13,8 @@
 import Mutation from "../lib/mutation.js";
 import { isEditMode } from "./is-edit-mode.js";
 import { savePageThrottled } from "./save.js";
-import { initUserGesture, markUserDriven } from "../lib/user-gesture.js";
+import { markUserDriven } from "../lib/user-gesture.js";
+import { resolveRegionPolicy, skipForPolicy } from "../lib/region-policy.js";
 
 /**
  * Initialize auto-save on DOM changes
@@ -48,8 +49,13 @@ function initSaveOnPersistInput() {
   document.addEventListener('input', (e) => {
     if (!e.target.closest('[persist]')) return;
     // A trusted input on a [persist] field is itself a user-driven change the
-    // Mutation hub can't see (form values aren't DOM mutations). Attribute it.
-    if (e.isTrusted) markUserDriven();
+    // Mutation hub can't see (form values aren't DOM mutations). Attribute it,
+    // but only when the field is inside the dirty domain: a [persist] control in
+    // a no-save or freeze region contributes nothing to the saved bytes, so
+    // typing in one must not arm provenance for a later background write.
+    if (e.isTrusted && !skipForPolicy(resolveRegionPolicy(e.target), 'dirty')) {
+      markUserDriven();
+    }
     clearTimeout(inputSaveTimer);
     inputSaveTimer = setTimeout(savePageThrottled, 1500);
   }, true);
@@ -58,7 +64,8 @@ function initSaveOnPersistInput() {
 function init() {
   if (!document.documentElement.hasAttribute("autosave")) return;
   if (!isEditMode) return;
-  initUserGesture();
+  // initUserGesture moved to save.js's init: gesture provenance belongs to every
+  // editable page, not only the ones with <html autosave>.
   initSavePageOnChange();
   initSaveOnPersistInput();
 }

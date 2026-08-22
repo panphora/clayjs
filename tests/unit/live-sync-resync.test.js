@@ -52,11 +52,12 @@ beforeEach(async () => {
   gate.gateClearIfUnchanged(gate.gateCaptureToken());
 });
 
-function started(lane = "live") {
+async function started(lane = "live") {
   const sync = new LiveSync();
   sync.lane = lane;
   sync._requestFrame = () => null;
   sync.start("index.html");
+  await sync._ready;
   return { sync, sse: eventSourceInstances.at(-1) };
 }
 
@@ -64,16 +65,16 @@ function cursor(sse, data) {
   sse.dispatchEvent(new MessageEvent("cursor", { data }));
 }
 
-test("a resync cursor refetches the served document at the server's baseline", () => {
-  const { sync, sse } = started();
+test("a resync cursor refetches the served document at the server's baseline", async () => {
+  const { sync, sse } = await started();
   const refetch = jest.spyOn(sync, "_fetchServedDocument").mockImplementation(() => {});
   cursor(sse, JSON.stringify({ seq: 42, resync: true }));
   expect(refetch).toHaveBeenCalledWith(42, { repair: true });
   sync.stop();
 });
 
-test("an ordinary cursor refetches nothing", () => {
-  const { sync, sse } = started();
+test("an ordinary cursor refetches nothing", async () => {
+  const { sync, sse } = await started();
   const refetch = jest.spyOn(sync, "_fetchServedDocument").mockImplementation(() => {});
   cursor(sse, JSON.stringify({ seq: 42 }));
   cursor(sse, JSON.stringify({ seq: 43, resync: false }));
@@ -81,16 +82,16 @@ test("an ordinary cursor refetches nothing", () => {
   sync.stop();
 });
 
-test("a resync without a seq still repairs the page", () => {
-  const { sync, sse } = started();
+test("a resync without a seq still repairs the page", async () => {
+  const { sync, sse } = await started();
   const refetch = jest.spyOn(sync, "_fetchServedDocument").mockImplementation(() => {});
   cursor(sse, JSON.stringify({ resync: true }));
   expect(refetch).toHaveBeenCalledWith(undefined, { repair: true });
   sync.stop();
 });
 
-test("a malformed cursor frame is ignored, not thrown", () => {
-  const { sync, sse } = started();
+test("a malformed cursor frame is ignored, not thrown", async () => {
+  const { sync, sse } = await started();
   const refetch = jest.spyOn(sync, "_fetchServedDocument").mockImplementation(() => {});
   expect(() => cursor(sse, "{not json")).not.toThrow();
   expect(refetch).not.toHaveBeenCalled();
@@ -105,7 +106,7 @@ test("a malformed cursor frame is ignored, not thrown", () => {
 // The watermark is set AFTER start(), which resets it to 0 — set before, this
 // test would run against a watermark of 0 and pass on either fetch path.
 test("a baseline the page has already seen still repairs it", async () => {
-  const { sync, sse } = started();
+  const { sync, sse } = await started();
   sync._lastExternalSeq = 12;
 
   global.fetch = jest.fn(() =>
@@ -129,7 +130,7 @@ test("a baseline the page has already seen still repairs it", async () => {
 // change's own fetch will queue a body. A repair has nothing to defer to — it
 // exists because replay cannot fix this page — so it fetches again.
 test("a repair overtaken by a newer change refetches instead of dropping", async () => {
-  const { sync } = started();
+  const { sync } = await started();
   let resolveFetch;
   global.fetch = jest.fn(() => new Promise((resolve) => { resolveFetch = resolve; }));
 
@@ -144,7 +145,7 @@ test("a repair overtaken by a newer change refetches instead of dropping", async
 });
 
 test("an ordinary fetch overtaken by a newer change drops and does not refetch", async () => {
-  const { sync } = started();
+  const { sync } = await started();
   let resolveFetch;
   global.fetch = jest.fn(() => new Promise((resolve) => { resolveFetch = resolve; }));
 
@@ -164,7 +165,7 @@ test("an ordinary fetch overtaken by a newer change drops and does not refetch",
 // forever: the page would stay permanently stale, which is the exact failure the
 // resync flag exists to report.
 test("a view-mode tab applies the repair instead of holding it forever", async () => {
-  const { sync } = started("saved");
+  const { sync } = await started("saved");
   document.body.innerHTML =
     '<input persist type="text" value="saved"><p data-id="t">v1</p>';
   await Promise.resolve();

@@ -604,12 +604,14 @@ const localMutation = {
       });
 
       // Data-guard provenance: if a trusted gesture drove this turn (or one
-      // happened within the recency window) and any change is autosave-relevant
-      // (matches the save's region scope), mark the pending save user-driven.
+      // happened within the recency window) and any change is dirty-relevant
+      // (i.e. it reaches the saved bytes), mark the pending save user-driven.
+      // The DIRTY domain, not the autosave one: an edit inside a batching region
+      // is still the person's work, and the save that carries it is still human.
       // Runs synchronously in the MO callback; skipped during paused-morph drains.
       if (!onlyNonPausable && isUserDrivenNow()) {
         for (const change of changes) {
-          if (!skipForPolicy(this._policyForChange(change), 'autosave')) {
+          if (!skipForPolicy(this._policyForChange(change), 'dirty')) {
             markUserDriven();
             break;
           }

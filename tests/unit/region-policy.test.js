@@ -84,6 +84,7 @@ describe("region-policy clay tokens", () => {
     expect(p).toEqual({
       watched: true,
       autosaveTriggered: true,
+      dirtyTracked: true,
       undoable: true,
       persist: "full",
       extension: false,
@@ -117,4 +118,51 @@ describe("region-policy clay tokens", () => {
     expect(el({ clay: "no-save" }).matches(STRIP_FROM_COMPARISON)).toBe(true);
     expect(el({}).matches(STRIP_FROM_COMPARISON)).toBe(false);
   });
+});
+
+describe("one region shape, served to both surfaces", () => {
+  test("clay.region and clay.internals.region are the same object", async () => {
+    const { regionShape, windowRegionShape } = await import("../../src/lib/region-policy.js");
+    expect(windowRegionShape).toBe(regionShape);
+  });
+
+  // Both spellings are documented (README and website/docs.html), so the cleanup
+  // is an additive union. Dropping either would be a compatibility break dressed
+  // up as tidying.
+  test("it carries both the flat and the nested selector spellings", async () => {
+    const { regionShape } = await import("../../src/lib/region-policy.js");
+
+    expect(typeof regionShape.STRIP_FROM_SAVE).toBe("string");
+    expect(typeof regionShape.STRIP_FROM_COMPARISON).toBe("string");
+    expect(typeof regionShape.SNAPSHOT_REMOVE_SELECTOR).toBe("string");
+    expect(typeof regionShape.FREEZE_SELECTOR).toBe("string");
+
+    expect(regionShape.selectors.stripFromSave).toBe(regionShape.STRIP_FROM_SAVE);
+    expect(regionShape.selectors.stripFromComparison).toBe(regionShape.STRIP_FROM_COMPARISON);
+    expect(regionShape.selectors.snapshotRemove).toBe(regionShape.SNAPSHOT_REMOVE_SELECTOR);
+    expect(regionShape.selectors.freeze).toBe(regionShape.FREEZE_SELECTOR);
+  });
+
+  test("it exposes every helper both surfaces published, plus the token list", async () => {
+    const { regionShape, TOKENS } = await import("../../src/lib/region-policy.js");
+
+    for (const name of ["resolveRegionPolicy", "isInert", "isSnapshotRemoved",
+                        "skipForPolicy", "strictestPolicy", "addRegionToken"]) {
+      expect(typeof regionShape[name]).toBe("function");
+    }
+    expect(regionShape.TOKENS).toBe(TOKENS);
+    expect(TOKENS).toEqual(expect.arrayContaining([
+      "no-save", "no-snapshot", "no-trigger-autosave", "no-watch", "no-undo", "freeze",
+    ]));
+  });
+});
+
+// The strip removes a marked element WITH its subtree, so a descendant is just
+// as absent from every snapshot as the region itself.
+test("isSnapshotRemoved is ancestor-aware", async () => {
+  const { isSnapshotRemoved } = await import("../../src/lib/region-policy.js");
+  document.body.innerHTML = '<div clay="no-snapshot"><p id="kid">x</p></div><span id="free">y</span>';
+
+  expect(isSnapshotRemoved(document.getElementById("kid"))).toBe(true);
+  expect(isSnapshotRemoved(document.getElementById("free"))).toBe(false);
 });

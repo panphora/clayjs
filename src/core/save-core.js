@@ -8,7 +8,7 @@
  */
 
 import { isEditMode } from "./is-edit-mode.js";
-import { consumeUserDriven, markUserDriven } from "../lib/user-gesture.js";
+import { consumeUserDriven, consumeExplicitSave, markUserDriven } from "../lib/user-gesture.js";
 import { saveToken } from "./host-attrs.js";
 import {
   getPageContents,
@@ -159,7 +159,12 @@ function sendSave(content) {
   // Read-and-reset the data-guard provenance bit at the ACTUAL send (past the
   // early returns in the callers), so it's never consumed on a save that never
   // ships.
-  const userDriven = consumeUserDriven();
+  // Two independent ways a save is human: an edit made in a trusted turn, or a
+  // person pressing Save. Both are consumed here, at the one point past every
+  // early return, so neither can survive into an unrelated later save.
+  const gestureDriven = consumeUserDriven();
+  const explicitlyAsked = consumeExplicitSave();
+  const userDriven = gestureDriven || explicitlyAsked;
   const { url, options } = buildSaveRequest(content, userDriven, controller.signal);
 
   return fetch(url, options)

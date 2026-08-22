@@ -7,15 +7,17 @@
  * Works independently of autosave - no mutation observer needed during editing,
  * just a single comparison when the user tries to leave.
  *
- * Both current and stored content have [save-remove] and [save-ignore] stripped,
- * so comparison is direct with no parsing needed.
+ * Both current and stored content have [save-remove] stripped, so comparison is
+ * direct with no parsing needed. [save-ignore] / no-trigger-autosave regions are
+ * KEPT here: they don't trigger an autosave, so an edit in one is precisely the
+ * kind that would be lost without a warning.
  *
  * Requires the 'save-system' module (automatically included as dependency).
  */
 
 import { isEditMode } from "./is-edit-mode.js";
-import { captureForComparison } from "./snapshot.js";
-import { getLastSavedContents } from "./save.js";
+import { captureForDirtyCheck } from "./snapshot.js";
+import { getLastSavedDirty } from "./save.js";
 import { logUnloadDiffSync, preloadIfEnabled } from "../lib/autosave-debug.js";
 
 // Pre-load diff library if debug mode is on (so it's ready for unload)
@@ -30,9 +32,11 @@ preloadIfEnabled();
 window.addEventListener('beforeunload', (event) => {
   if (!isEditMode) return;
 
-  // Compare directly - both are already stripped
-  const currentForCompare = captureForComparison();
-  const lastSaved = getLastSavedContents();
+  // The DIRTY domain, not the autosave domain. An edit inside a
+  // no-trigger-autosave region never starts a save by itself, which is exactly
+  // why closing the tab on one has to warn: nothing else is going to write it.
+  const currentForCompare = captureForDirtyCheck();
+  const lastSaved = getLastSavedDirty();
 
   if (currentForCompare !== lastSaved) {
     // Debug: log what's different before showing the warning

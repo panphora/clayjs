@@ -5,16 +5,26 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Docs · clayjs</title>
 <meta name="description" content="clayjs reference: the core API, attributes, events, and the save endpoint spec.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%233E6B52'/%3E%3Cpath d='M21.5 11.2a7 7 0 1 0 0 9.6' fill='none' stroke='%23F1EFEA' stroke-width='3.2' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="canonical" href="https://clayjs.com/docs">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="clayjs">
+<meta property="og:title" content="Docs · clayjs">
+<meta property="og:description" content="clayjs reference: the core API, attributes, events, and the save endpoint spec.">
+<meta property="og:url" content="https://clayjs.com/docs">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Docs · clayjs">
+<meta name="twitter:description" content="clayjs reference: the core API, attributes, events, and the save endpoint spec.">
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
 
 <nav class="nav">
-  <a class="wordmark" href="index.html">clay<span class="js">.js</span><span class="tm" aria-hidden="true">™</span></a>
+  <a class="wordmark" href="/">clay<span class="js">.js</span><span class="tm" aria-hidden="true">™</span></a>
   <div class="links">
-    <a href="advanced.html">Advanced</a>
-    <a href="plugins.html">Plugins</a>
-    <a href="docs.html" aria-current="page">Docs</a>
+    <a href="/advanced">Advanced</a>
+    <a href="/plugins">Plugins</a>
+    <a href="/docs" aria-current="page">Docs</a>
     <a href="https://github.com/panphora/clayjs" rel="noopener">GitHub</a>
   </div>
 </nav>
@@ -24,7 +34,7 @@
   <section style="border-top: none; padding-top: 56px;">
     <span class="eyebrow">Docs</span>
     <h1 class="display" style="font-size: clamp(30px, 4.5vw, 42px);">Reference</h1>
-    <p class="lede" style="margin-top: 12px;">The core API, the attributes, the events, and the one endpoint that makes it all work. For the guided version, start with the <a href="index.html">tutorial</a>.</p>
+    <p class="lede" style="margin-top: 12px;">The core API, the attributes, the events, and the one endpoint that makes it all work. For the guided version, start with the <a href="/">tutorial</a>.</p>
   </section>
 
   <!-- ====== LOADING ====== -->
@@ -38,7 +48,7 @@
       <tr><td><code>plugins</code></td><td>Comma-separated plugins to load</td><td><code>clay.js?plugins=sync,undo</code></td></tr>
       <tr><td><code>exclude</code></td><td>Remove a default-on plugin</td><td><code>clay.js?exclude=richclay</code></td></tr>
     </table>
-    <p class="small">Checkbox plugins: <code>richclay</code> (default on), <code>indicator</code>, <code>sync</code>, <code>sortable</code>, <code>undo</code>, <code>cms</code>. The <a href="index.html#configure">configurator</a> composes this URL for you. Everything else is a separate library with its own script tag: see <a href="advanced.html">Advanced</a> and <a href="plugins.html">Plugins</a>. npm builds for bundlers live at <a href="https://www.npmjs.com/package/@panphora/clayjs" rel="noopener">@panphora/clayjs</a>.</p>
+    <p class="small">Loadable plugins: <code>richclay</code> (default on), <code>indicator</code>, <code>sync</code>, <code>sortable</code>, <code>undo</code>, <code>cms</code>, <code>quickcrop</code>, <code>upload</code>, <code>wire</code>, <code>demo</code>. The first six have a checkbox in the configurator; ask for the rest by name. The <a href="/#configure">configurator</a> composes this URL for you. Everything else is a separate library with its own script tag: see <a href="/advanced">Advanced</a> and <a href="/plugins">Plugins</a>. npm builds for bundlers live at <a href="https://www.npmjs.com/package/@panphora/clayjs" rel="noopener">@panphora/clayjs</a>.</p>
   </section>
 
   <!-- ====== CORE API ====== -->
@@ -48,7 +58,7 @@
     <table>
       <tr><th>Member</th><th>What it does</th></tr>
       <tr><td><code>clay.ready</code></td><td>A Promise that resolves once clayjs has booted (core loaded, plugins attached). In inline scripts, <code>await clay.ready</code> before touching anything else. <code>clay:ready</code> fires on <code>document</code> at the same moment.</td></tr>
-      <tr><td><code>clay.save()</code></td><td>Snapshot the page and save it. Skips when nothing changed. Returns <code>Promise&lt;{msg, msgType}&gt;</code>; <code>msgType</code> is <code>success</code>, <code>error</code>, or <code>skipped</code>. Never rejects.</td></tr>
+      <tr><td><code>clay.save()</code></td><td>Snapshot the page and save it. Skips when nothing changed. Returns <code>Promise&lt;{ok, msg, msgType, code, etag}&gt;</code>; check <code>ok</code>. <code>msgType</code> is <code>success</code>, <code>error</code>, <code>skipped</code> (nothing was sent), or <code>unknown</code> (the request timed out, so the write may or may not have landed). A host may answer with its own severity, such as <code>warning</code>, and that rides through untouched. Never rejects.</td></tr>
       <tr><td><code>clay.save.force()</code></td><td>Save even when nothing appears to have changed.</td></tr>
       <tr><td><code>clay.getHTML()</code></td><td>The exact HTML string a save would send, after all cleanup.</td></tr>
       <tr><td><code>clay.addDocumentTransform(fn)</code></td><td>Register a callback that receives the cloned document before serialization. The live page is never touched.</td></tr>
@@ -56,13 +66,17 @@
       <tr><td><code>clay.isEditMode</code></td><td>Whether this session may edit (see <a href="#editmode">edit mode</a>).</td></tr>
       <tr><td><code>clay.isOwner</code></td><td>Whether the platform's owner cookie is set. Unlike <code>isEditMode</code>, the URL and global overrides don't affect it.</td></tr>
       <tr><td><code>clay.toggleEditMode()</code></td><td>Flip between edit and view mode (reloads the page).</td></tr>
-      <tr><td><code>clay.cacheBust(el)</code></td><td>Re-download one resource by stamping <code>?v=</code> onto its <code>href</code> or <code>src</code>. <a href="advanced.html#save-attrs">Details</a>.</td></tr>
-      <tr><td><code>clay.Mutation</code></td><td>The shared mutation hub. See <a href="advanced.html#libraries">Advanced</a>.</td></tr>
+      <tr><td><code>clay.cacheBust(el)</code></td><td>Re-download one resource by stamping <code>?v=</code> onto its <code>href</code> or <code>src</code>. <a href="/advanced#save-attrs">Details</a>.</td></tr>
+      <tr><td><code>clay.Mutation</code></td><td>The shared mutation hub. See <a href="/advanced#libraries">Advanced</a>.</td></tr>
       <tr><td><code>clay.morph(oldEl, newEl)</code></td><td>The DOM morphing engine: morphs <code>oldEl</code> in place to match <code>newEl</code> (sync plugin).</td></tr>
       <tr><td><code>clay.undo</code></td><td>The undo singleton: <code>clay.undo.undo()</code> / <code>clay.undo.redo()</code> (undo plugin).</td></tr>
       <tr><td><code>clay.cms</code></td><td>The content panel: <code>clay.cms.open()</code> (cms plugin).</td></tr>
+      <tr><td><code>clay.RichClay</code></td><td>The rich-text editor class behind <code>editable</code> (richclay plugin, default on).</td></tr>
+      <tr><td><code>clay.quickcrop(file, opts)</code></td><td>The crop modal: resolves <code>{blob, dataURL, width, height}</code>, or <code>null</code> if cancelled (quickcrop plugin). See <a href="/plugins#quickcrop">Plugins</a>.</td></tr>
+      <tr><td><code>clay.upload</code></td><td>Pick a file and get it into the page (upload plugin).</td></tr>
+      <tr><td><code>clay.wire</code></td><td>A per-file control channel to a process on your own machine: <code>send</code>, <code>cancel</code>, <code>get</code>, <code>list</code>, <code>isBusy</code>, <code>on</code> (wire plugin). See <a href="/plugins#wire">Plugins</a>.</td></tr>
     </table>
-    <p class="small">In view mode the edit-only members are absent: <code>window.clay</code> holds just <code>ready</code>, <code>toggleEditMode</code>, <code>isEditMode</code>, <code>isOwner</code>, and <code>Mutation</code> (plus <code>morph</code>/<code>cms</code> when those plugins load). Feature-detect with <code>'save' in clay</code>.</p>
+    <p class="small">In view mode the edit-only members are absent: <code>window.clay</code> holds just <code>ready</code>, <code>toggleEditMode</code>, <code>isEditMode</code>, <code>isOwner</code>, <code>Mutation</code>, and <code>region</code> (plus <code>morph</code>/<code>cms</code> when those plugins load). Feature-detect with <code>'save' in clay</code>.</p>
     <p>Three tiers, and only the first two are a promise:</p>
     <table>
       <tr><th>Tier</th><th>What it is</th><th>Promise</th></tr>
@@ -81,20 +95,20 @@
     <pre><code>&lt;<span class="t">script</span> <span class="a">src</span>="https://clayjs.com/clay-internals.js"&gt;&lt;/<span class="t">script</span>&gt;</code></pre>
     <table>
       <tr><th>Member</th><th>What it does</th></tr>
-      <tr><td><code>captureSnapshot()</code></td><td>The cloned document element, before anything is stripped.</td></tr>
+      <tr><td><code>captureSnapshot()</code></td><td>The cloned document element, with form values synced, <code>onbeforesnapshot</code> handlers run, and <code>no-snapshot</code> regions plus browser-extension noise already removed. It is the shared base every lane starts from, not an untouched copy of the DOM.</td></tr>
       <tr><td><code>captureForSave()</code></td><td>The exact bytes a save would send, stripping and all.</td></tr>
       <tr><td><code>addDocumentTransform(fn)</code></td><td>Register a hook that runs on the clone during save preparation and on every change check, so keep it pure and repeatable. Same registry as <code>clay.addDocumentTransform</code>.</td></tr>
-      <tr><td><code>region.resolveRegionPolicy(node)</code></td><td>The resolved region axes for a node: <code>{watched, autosaveTriggered, undoable, persist, extension}</code>.</td></tr>
+      <tr><td><code>region.resolveRegionPolicy(node)</code></td><td>The resolved region axes for a node: <code>{watched, autosaveTriggered, dirtyTracked, undoable, persist, extension}</code>. <code>autosaveTriggered</code> is whether an edit here starts a save by itself; <code>dirtyTracked</code> is whether it counts as unsaved work at all. They differ only inside <code>no-trigger-autosave</code>, which is saved work waiting for a manual save; <code>no-dirty</code> clears both, for content that is saved but is not work.</td></tr>
       <tr><td><code>region.isInert(node)</code></td><td>Whether a node is invisible to the whole mutation system (<code>no-watch</code> and extension noise).</td></tr>
-      <tr><td><code>region.isSnapshotRemoved(el)</code></td><td>Whether an element is dropped from every snapshot (<code>no-snapshot</code>).</td></tr>
+      <tr><td><code>region.isSnapshotRemoved(node)</code></td><td>Whether a node is dropped from every snapshot (<code>no-snapshot</code>). Ancestor-aware: a child of a marked region is just as absent as the region itself.</td></tr>
       <tr><td><code>region.addRegionToken(el, token)</code></td><td>Add one token to an element's <code>clay</code> attribute, keeping the tokens already there.</td></tr>
       <tr><td><code>region.PERSIST</code> / <code>region.REGION_ATTRS</code></td><td>The persist values (<code>full</code>, <code>frozen</code>, <code>none</code>) and the canonical token list.</td></tr>
-      <tr><td><code>region.selectors</code></td><td><code>stripFromSave</code>, <code>stripFromComparison</code>, <code>snapshotRemove</code>, <code>freeze</code>: the selectors clayjs itself strips with, legacy spellings included.</td></tr>
-      <tr><td><code>save.saveHtml(html, cb, opts)</code></td><td>Send an HTML string to the save endpoint. Resolves <code>{ok, msg, msgType, code, etag}</code>; never rejects.</td></tr>
+      <tr><td><code>region.selectors</code></td><td><code>stripFromSave</code>, <code>stripFromComparison</code>, <code>stripFromDirtyCheck</code>, <code>noTriggerAutosave</code>, <code>snapshotRemove</code>, <code>freeze</code>: the selectors clayjs itself strips with, legacy spellings included. The same object is on <code>clay.region</code>, which also publishes them as <code>STRIP_FROM_SAVE</code>-style constants.</td></tr>
+      <tr><td><code>save.saveHtml(html, cb)</code></td><td>Send an HTML string to the save endpoint. Resolves <code>{ok, msg, msgType, code, etag}</code>; never rejects.</td></tr>
       <tr><td><code>save.replacePageWith(url, cb)</code></td><td>Fetch another URL's HTML and save it over the current file. Same result shape.</td></tr>
       <tr><td><code>save.isSaveInProgress()</code></td><td>Whether a save is in flight right now.</td></tr>
     </table>
-    <p class="small"><strong><code>save.saveHtml</code> writes the bytes you hand it straight to the file</strong>: it bypasses the snapshot pipeline entirely, so nothing is stripped and no hook runs. Check <code>save.isSaveInProgress()</code> first, because firing into an in-flight save is how you lose an edit. For a worked example of the region helpers, see <a href="advanced.html#custom-attrs">Advanced</a>.</p>
+    <p class="small"><strong><code>save.saveHtml</code> writes the bytes you hand it straight to the file</strong>: it bypasses the snapshot pipeline entirely, so nothing is stripped and no hook runs. Check <code>save.isSaveInProgress()</code> first, because firing into an in-flight save is how you lose an edit. For a worked example of the region helpers, see <a href="/advanced#custom-attrs">Advanced</a>.</p>
   </section>
 
   <!-- ====== ATTRIBUTES ====== -->
@@ -104,16 +118,17 @@
     <table>
       <tr><th>Attribute</th><th>Where</th><th>What it does</th></tr>
       <tr><td><code>editable</code></td><td>any element</td><td>Rich text editing with a floating toolbar (richclay, default on). Tokens: <code>editable="single-line no-toolbar toolbar-on-select"</code>. Native <code>contenteditable</code> also works for plain text.</td></tr>
-      <tr><td><code>persist</code></td><td>form controls</td><td>Writes the control's current value into the HTML so it survives the save.</td></tr>
-      <tr><td><code>trigger-save</code></td><td>buttons, links</td><td>Clicking it calls <code>clay.save()</code>. Same as wiring onclick yourself.</td></tr>
+      <tr><td><code>persist</code></td><td>form controls</td><td>Writes the control's current value into the HTML so it survives the save. <code>password</code>, <code>hidden</code> and <code>file</code> inputs are always skipped, so a secret cannot be written into the file by adding one attribute.</td></tr>
+      <tr><td><code>trigger-save</code></td><td>buttons</td><td>Clicking it calls <code>clay.save()</code>. Same as wiring onclick yourself. Put it on a <code>&lt;button type="button"&gt;</code>: on a link the browser follows the href as well, and the navigation can outrun the save. If you want a link, give it an onclick instead: <code>&lt;a href="#" onclick="event.preventDefault(); clay.save()"&gt;</code>.</td></tr>
       <tr><td><code>autosave</code></td><td><code>&lt;html&gt;</code></td><td>Save automatically after edits settle. Debounced and throttled.</td></tr>
-      <tr><td><code>clay="…"</code></td><td>any element</td><td>Region control: <code>no-save</code>, <code>no-snapshot</code>, <code>no-trigger-autosave</code>, <code>no-watch</code>, <code>no-undo</code>, <code>freeze</code>. <a href="advanced.html#regions">Full reference</a>.</td></tr>
+      <tr><td><code>clay="…"</code></td><td>any element</td><td>Region control: <code>no-save</code>, <code>no-snapshot</code>, <code>no-trigger-autosave</code>, <code>no-dirty</code>, <code>no-watch</code>, <code>no-undo</code>, <code>freeze</code>. <a href="/advanced#regions">Full reference</a>.</td></tr>
       <tr><td><code>merge="name"</code></td><td>JSON script tags</td><td>Multi-writer safety for JSON stored in a script tag (sync plugin). Incoming saves three-way merge the JSON per key against the last synced version instead of replacing the blob, so unsaved local keys survive. Arrays merge by identity (<code>id</code>-style fields; name your own with <code>merge-key="taskId"</code>). Bodies may use relaxed JSON: unquoted keys, single quotes, trailing commas, comments. Requires a JSON <code>type</code>.</td></tr>
       <tr><td><code>editmode:contenteditable</code></td><td>any element</td><td>Editable for the owner, inert for visitors.</td></tr>
       <tr><td><code>editmode:onclick</code></td><td>any element</td><td>The <code>onclick</code> runs only for the owner; it's saved inert so it never runs for visitors.</td></tr>
+      <tr><td colspan="3" class="small">The three <code>editmode:</code> rows and the <code>viewmode:</code> row are enforced by a <em>save</em> transform, which view mode never loads. So they hold for any file an owner has saved, which is every file in normal use, but not for freshly authored markup a visitor reaches before the first owner save. Save once after adding them.</td></tr>
       <tr><td><code>editmode:resource</code></td><td>style, link, script</td><td>Active for the owner, saved with an inert <code>type</code> so visitors never load it.</td></tr>
       <tr><td><code>viewmode:disabled</code> / <code>viewmode:readonly</code></td><td>form controls</td><td>Disabled or read-only for visitors, live for the owner.</td></tr>
-      <tr><td><code>onbeforesave</code> / <code>onbeforesnapshot</code> / <code>onaftersave</code></td><td>any element</td><td>Inline hooks into the save. <a href="advanced.html#save-attrs">Details</a>.</td></tr>
+      <tr><td><code>onbeforesave</code> / <code>onbeforesnapshot</code> / <code>onaftersave</code></td><td>any element</td><td>Inline hooks into the save. <code>onbeforesave</code> and <code>onbeforesnapshot</code> run on the clone for <em>every</em> change check, not only for saves that ship, so keep them pure and repeatable: no counters, no logging, no network. <a href="/advanced#save-attrs">Details</a>.</td></tr>
       <tr><td><code>savestatus</code></td><td><code>&lt;html&gt;</code>, set by clayjs</td><td>Read-only state for your CSS: <code>saving</code>, <code>saved</code>, <code>error</code>, <code>offline</code>.</td></tr>
     </table>
   </section>
@@ -129,7 +144,8 @@
       <tr><td><code>clay:save-saved</code></td><td>the server confirmed the write</td><td><code>{msg, timestamp}</code></td></tr>
       <tr><td><code>clay:save-error</code></td><td>the server answered with a problem</td><td><code>{msg, timestamp}</code></td></tr>
       <tr><td><code>clay:save-offline</code></td><td>the browser is offline (clayjs re-saves when the connection returns)</td><td><code>{msg, timestamp}</code></td></tr>
-      <tr><td><code>clay:sync-applied</code></td><td>a live-sync update landed (sync plugin)</td><td><code>{seq}</code></td></tr>
+      <tr><td><code>clay:snapshot-ready</code></td><td>a snapshot has been cloned, before any stripping. Mutating <code>detail.documentElement</code> changes what is saved and broadcast.</td><td><code>{documentElement}</code></td></tr>
+      <tr><td><code>clay:sync-applied</code></td><td>a live-sync update landed (sync plugin)</td><td><code>{seq, source}</code>; <code>source</code> is <code>peer</code> (another open copy) or <code>disk</code> (the file changed underneath you)</td></tr>
       <tr><td><code>clay:sorted</code></td><td>a drag-drop reorder landed (sortable plugin); fires on the container and bubbles</td><td><code>{item, from, to, oldIndex, newIndex}</code></td></tr>
       <tr><td><code>clay:view-save-attempt</code></td><td>a visitor clicked a <code>[trigger-save]</code> element in view mode; show your own notice</td><td>—</td></tr>
     </table>
@@ -144,8 +160,10 @@
       <tr><th>Priority</th><th>Source</th></tr>
       <tr><td>1</td><td><code>?editmode=true</code> / <code>?editmode=false</code> in the URL</td></tr>
       <tr><td>2</td><td><code>window.clayEditMode</code> set before clay.js loads</td></tr>
-      <tr><td>3</td><td>The platform's owner cookie</td></tr>
+      <tr><td>3</td><td>A save token the host put on the root element</td></tr>
+      <tr><td>4</td><td>The platform's owner cookie</td></tr>
     </table>
+    <p class="small">The token sits above the cookie because it is the stronger claim: the host issued it for this document, while a cookie is ambient. A sandboxed document cannot read a cookie at all.</p>
     <p>Serving files from your own server? Arm it yourself:</p>
     <pre><code>&lt;<span class="t">script</span>&gt;window.clayEditMode = true&lt;/<span class="t">script</span>&gt;
 &lt;<span class="t">script</span> <span class="a">src</span>="https://clayjs.com/clay.js"&gt;&lt;/<span class="t">script</span>&gt;</code></pre>
@@ -165,18 +183,23 @@
       <tr><td>Success</td><td><code>200</code> with JSON <code>{ "msg": "Saved" }</code></td></tr>
       <tr><td>Failure</td><td>Any non-2xx with JSON <code>{ "msg": "why" }</code></td></tr>
     </table>
-    <p>A complete server in about 15 lines of Express:</p>
+    <p>A complete server in about 20 lines of Express:</p>
     <pre><code>import express from <span class="a">"express"</span>;
 import fs from <span class="a">"node:fs/promises"</span>;
+import path from <span class="a">"node:path"</span>;
 
+const root = process.cwd();
 const app = express();
-app.use(express.static(<span class="a">"."</span>));
+app.use(express.static(root));
 app.use(express.text({ type: <span class="a">"*/*"</span>, limit: <span class="a">"10mb"</span> }));
 
 app.post(<span class="a">"/_/save"</span>, async (req, res) =&gt; {
   try {
     const page = decodeURIComponent(new URL(req.get(<span class="a">"Document-URL"</span>)).pathname);
-    await fs.writeFile(<span class="a">"."</span> + (page.endsWith(<span class="a">"/"</span>) ? page + <span class="a">"index.html"</span> : page), req.body);
+    const file = path.join(root, page.endsWith(<span class="a">"/"</span>) ? page + <span class="a">"index.html"</span> : page);
+    <span class="c">// a save may only ever write inside the folder you are serving</span>
+    if (!file.startsWith(root + path.sep)) return res.status(403).json({ msg: <span class="a">"Outside the folder"</span> });
+    await fs.writeFile(file, req.body);
     res.json({ msg: <span class="a">"Saved"</span> });
   } catch {
     res.status(500).json({ msg: <span class="a">"Couldn't save"</span> });
@@ -184,7 +207,7 @@ app.post(<span class="a">"/_/save"</span>, async (req, res) =&gt; {
 });
 
 app.listen(4600);</code></pre>
-    <p class="small">A real deployment adds auth and path validation; this is the whole protocol though. The same contract powers hyperclay.com, Hyperclay Local, and HTML Clay. Two details you may ignore: every save also carries a <code>Save-Trigger: user|auto</code> header (whether a person triggered it), and HTML Clay uses a token variant, <code>POST /_/save/{token}</code>, read from <code>&lt;html htmlclaytoken&gt;</code>.</p>
+    <p class="small">The server half is only half of it: on your own host nothing arms <a href="#editmode">edit mode</a> for you, so a page served this way is read-only until you set <code>window.clayEditMode</code> before the script tag. A real deployment adds authorization and atomic writes; this is the whole protocol though. The same contract powers hyperclay.com, Hyperclay Local, and HTML Clay. Two details you may ignore: every save also carries a <code>Save-Trigger: user|auto</code> header (whether a person triggered it), and HTML Clay uses a token variant, <code>POST /_/save/{token}</code>, read from <code>&lt;html htmlclaytoken&gt;</code>.</p>
   </section>
 
 </main>
@@ -192,11 +215,12 @@ app.listen(4600);</code></pre>
 <footer>
   <div class="inner">
     <span>clayjs</span>
-    <a href="index.html">Home</a>
-    <a href="advanced.html">Advanced</a>
-    <a href="plugins.html">Plugins</a>
+    <a href="/">Home</a>
+    <a href="/advanced">Advanced</a>
+    <a href="/plugins">Plugins</a>
     <a href="https://github.com/panphora/clayjs" rel="noopener">GitHub</a>
-    <span>MIT</span>
+    <a href="https://github.com/panphora/clayjs/blob/main/LICENSE" rel="noopener">MIT-0</a>
+    <a href="THIRD-PARTY-NOTICES.md">Third-party notices</a>
   </div>
   <div class="inner" data-hyper-footer="clayjs" clay="no-save no-snapshot"></div>
 </footer>

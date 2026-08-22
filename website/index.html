@@ -1,20 +1,30 @@
 <!DOCTYPE html>
-<html lang="en" demo-key="clayjs-home-v2">
+<html lang="en" demo-key="clayjs-home-v3">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>clayjs: malleable html files</title>
 <meta name="description" content="The tools you need to make a static HTML file behave like a Google Document: editable, auto-save, live sync, etc.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%233E6B52'/%3E%3Cpath d='M21.5 11.2a7 7 0 1 0 0 9.6' fill='none' stroke='%23F1EFEA' stroke-width='3.2' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="canonical" href="https://clayjs.com/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="clayjs">
+<meta property="og:title" content="clayjs: malleable html files">
+<meta property="og:description" content="The tools you need to make a static HTML file behave like a Google Document: editable, auto-save, live sync, etc.">
+<meta property="og:url" content="https://clayjs.com/">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="clayjs: malleable html files">
+<meta name="twitter:description" content="The tools you need to make a static HTML file behave like a Google Document: editable, auto-save, live sync, etc.">
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
 
 <nav class="nav">
-  <a class="wordmark" href="index.html">clay<span class="js">.js</span><span class="tm" aria-hidden="true">™</span></a>
+  <a class="wordmark" href="/">clay<span class="js">.js</span><span class="tm" aria-hidden="true">™</span></a>
   <div class="links">
-    <a href="advanced.html">Advanced</a>
-    <a href="plugins.html">Plugins</a>
-    <a href="docs.html">Docs</a>
+    <a href="/advanced">Advanced</a>
+    <a href="/plugins">Plugins</a>
+    <a href="/docs">Docs</a>
     <a href="https://github.com/panphora/clayjs" rel="noopener">GitHub</a>
   </div>
 </nav>
@@ -49,9 +59,9 @@
         <p>Everything you type here is saved into the file itself.</p>
       </div>
       <p class="small" style="margin-bottom: 14px;">Click the heading or the note and type. Select text to format it. Then save, refresh the page, and it's still there.</p>
-      <button class="btn primary" id="hero-save" trigger-save>Save</button>
-      <button class="btn" id="demo-reset" title="Forget the browser copy and reload the original page">Reset</button>
-      <span class="chip"></span>
+      <button type="button" class="btn primary" id="hero-save" trigger-save>Save</button>
+      <button type="button" class="btn" id="demo-reset" title="Forget the browser copy and reload the original page">Reset</button>
+      <span class="chip" role="status" clay="no-save no-watch no-snapshot"></span>
     </div>
 
     <pre><code>&lt;!DOCTYPE html&gt;
@@ -83,7 +93,7 @@
 
   <!-- ================= STEP 1: SAVE ================= -->
   <section id="save">
-    <span class="eyebrow">Step 1 · Make it save</span>
+    <h2 class="eyebrow">Step 1 · Make it save</h2>
     <p class="problem">You changed the page, and a refresh throws it away.</p>
     <p>Add the script tag, then call <code>clay.save()</code> whenever you want to persist the page. Wire it to a button, a keystroke, or your own logic:</p>
     <pre><code>&lt;<span class="t">script</span> <span class="a">src</span>="https://clayjs.com/clay.js"&gt;&lt;/<span class="t">script</span>&gt;
@@ -101,13 +111,13 @@
       <tr><td><strong><a href="https://hyperclay.com">hyperclay.com</a></strong></td><td>Hosted platform: accounts, versions, sharing</td></tr>
       <tr><td><strong><a href="https://hyperclaylocal.com/">Hyperclay Local</a></strong></td><td>Desktop app that serves a folder on your machine</td></tr>
       <tr><td><strong><a href="https://htmlclay.com/">HTML Clay</a></strong></td><td>Desktop app: double-click a .htmlclay file and it just saves</td></tr>
-      <tr><td><strong>Your own</strong></td><td>About 15 lines of Express. <a href="docs.html#endpoint">Endpoint spec</a>.</td></tr>
+      <tr><td><strong>Your own</strong></td><td>About 20 lines of Express. <a href="/docs#endpoint">Endpoint spec</a>. On your own server you also arm <a href="/docs#editmode">edit mode</a> yourself, with one line before the script tag.</td></tr>
     </table>
   </section>
 
   <!-- ================= STEP 2: FEEDBACK ================= -->
   <section id="feedback">
-    <span class="eyebrow">Step 2 · Know it saved</span>
+    <h2 class="eyebrow">Step 2 · Know it saved</h2>
     <p class="problem">You hit save. Did it work?</p>
     <p>clayjs never draws its own interface. Instead it keeps a <code>savestatus</code> attribute on <code>&lt;html&gt;</code> up to date (<code>saving</code>, <code>saved</code>, <code>error</code>, <code>offline</code>), and you decide what that looks like. Paste this CSS and you have a status chip, no JavaScript needed:</p>
     <pre><code><span class="t">html[savestatus] body::after</span> {
@@ -121,13 +131,20 @@
       <span class="filename">notes.html</span>
       <span class="realbadge">saved in your browser</span>
       <p class="small" style="margin-bottom: 12px;">Try both outcomes:</p>
-      <button class="btn primary" id="chip-save">Save</button>
-      <button class="btn" id="chip-fail">Save (server down)</button>
-      <span class="chip"></span>
+      <button type="button" class="btn primary" id="chip-save">Save</button>
+      <button type="button" class="btn" id="chip-fail">Save (server down)</button>
+      <span class="chip" role="status" clay="no-save no-watch no-snapshot"></span>
     </div>
-    <p class="small">The chip is yours: restyle it, move it, delete it.</p>
+    <p class="small">The chip is yours: restyle it, move it, delete it. One caveat: generated content is decoration, so a screen reader never announces it. If the save state matters to everyone, put a real element on the page and write it from the events instead, which is what the demo chips above do:</p>
+    <pre><code>&lt;<span class="t">span</span> <span class="a">id</span>="status" <span class="a">role</span>="status" <span class="a">clay</span>="no-save no-watch no-snapshot"&gt;&lt;/<span class="t">span</span>&gt;
+&lt;<span class="t">script</span>&gt;
+  status.textContent = <span class="a">""</span>;
+  document.addEventListener(<span class="a">"clay:save-saved"</span>, () =&gt; status.textContent = <span class="a">"Saved"</span>);
+  document.addEventListener(<span class="a">"clay:save-error"</span>, () =&gt; status.textContent = <span class="a">"Couldn't save"</span>);
+&lt;/<span class="t">script</span>&gt;</code></pre>
+    <p class="small">The <code>clay="no-save no-watch no-snapshot"</code> is the important part: this element is written <em>after</em> the save baseline is taken, so without it every successful save would leave the page looking unsaved again.</p>
     <p><strong>Don't want to touch CSS?</strong> Check <em>“a built-in save indicator”</em> in the <a href="#configure">configurator</a> and clayjs ships a small ready-made one.</p>
-    <details class="fold">
+    <details class="fold" onbeforesnapshot="this.removeAttribute('open')">
       <summary><span class="prob">Roll your own</span><span class="sol">events + promise</span></summary>
       <div class="fold-body">
         <p>Every save fires events on <code>document</code> and returns a promise, so any UI you already have can listen in:</p>
@@ -139,7 +156,7 @@ const { msg, msgType } = await clay.save();</code></pre>
         <p class="small">Events: <code>clay:save-saving</code>, <code>clay:save-saved</code>, <code>clay:save-error</code>, <code>clay:save-offline</code>. Each carries <code>detail.msg</code>.</p>
       </div>
     </details>
-    <details class="fold">
+    <details class="fold" onbeforesnapshot="this.removeAttribute('open')">
       <summary><span class="prob">When it fails</span><span class="sol">error + offline</span></summary>
       <div class="fold-body">
         <p><code>savestatus="error"</code> means the server answered with a problem; the message is in the event's <code>detail.msg</code>. <code>savestatus="offline"</code> means the request couldn't get out at all. And if someone closes the tab with unsaved changes, clayjs warns them first. That safety net is built in.</p>
@@ -149,7 +166,7 @@ const { msg, msgType } = await clay.save();</code></pre>
 
   <!-- ================= STEP 3: DOCUMENT ================= -->
   <section id="document">
-    <span class="eyebrow">Step 3 · Make it a document</span>
+    <h2 class="eyebrow">Step 3 · Make it a document</h2>
     <p class="problem">A page you can't type into isn't a document.</p>
     <p>Put <code>editable</code> on anything: it becomes rich text you can type into, with bold, italics, lists, and links. Form controls need one attribute, <code>persist</code>, which writes their current value into the HTML itself so it survives the save:</p>
     <pre><code>&lt;<span class="t">p</span> <span class="a">editable</span>&gt;Meeting notes for Tuesday…&lt;/<span class="t">p</span>&gt;
@@ -161,10 +178,10 @@ const { msg, msgType } = await clay.save();</code></pre>
       <p editable spellcheck="false" style="margin-bottom: 10px;">Meeting notes for Tuesday…</p>
       <input id="doc-input" name="title" persist placeholder="title" style="font: 15px var(--serif); padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; margin-bottom: 14px; width: 60%; background: #fff;">
       <div>
-        <button class="btn primary" id="doc-save" trigger-save>Save</button>
-        <button class="btn" id="doc-reload" title="Reloads the page; the file comes back from its last save">Reload file</button>
+        <button type="button" class="btn primary" id="doc-save" trigger-save>Save</button>
+        <button type="button" class="btn" id="doc-reload" title="Reloads the page; the file comes back from its last save">Reload file</button>
       </div>
-      <span class="chip"></span>
+      <span class="chip" role="status" clay="no-save no-watch no-snapshot"></span>
     </div>
     <p class="small">Edit both, save, then reload: everything survives. Reload <em>without</em> saving and your changes are gone, which is the point.</p>
   </section>
@@ -175,27 +192,28 @@ const { msg, msgType } = await clay.save();</code></pre>
     <h2 class="section-title">Saved files have a lifecycle</h2>
     <p>Three things come up in almost every malleable file, usually in this order. Open the one you're facing.</p>
 
-    <details class="fold">
+    <details class="fold" onbeforesnapshot="this.removeAttribute('open')">
       <summary><span class="prob">I shouldn't have to press Save.</span><span class="sol">autosave</span></summary>
       <div class="fold-body">
         <p>Put <code>autosave</code> on the <code>&lt;html&gt;</code> element and clayjs saves for you: edits settle for a moment, then a save fires. It's debounced and throttled, so rapid typing never spams the server.</p>
         <pre><code>&lt;<span class="t">html</span> <span class="a">autosave</span>&gt;</code></pre>
         <div class="sheet live" id="auto-sheet">
           <span class="filename">journal.html</span>
-          <span class="realbadge">saved in your browser</span>
-          <p contenteditable spellcheck="false">Type here and just stop. It saves on its own.</p>
-          <span class="chip"></span>
+          <span class="simbadge">simulated</span>
+          <p editable spellcheck="false">Type here and just stop. It saves on its own.</p>
+          <span class="chip" role="status" clay="no-save no-watch no-snapshot"></span>
         </div>
       </div>
     </details>
 
-    <details class="fold">
+    <details class="fold" onbeforesnapshot="this.removeAttribute('open')">
       <summary><span class="prob">It's open in two places and the copies fight.</span><span class="sol">live sync</span></summary>
       <div class="fold-body">
         <p>Check <em>“sync edits across open copies”</em> in the <a href="#configure">configurator</a>. Edits then flow into every open copy of the file, morphing the page in place: no reloads, and nobody loses their cursor. It's off by default on purpose: it holds a connection open, and you don't need that until you have this problem.</p>
-        <div class="sync-pair">
+        <div class="sync-pair" clay="no-save no-watch">
           <div class="sheet" style="margin: 6px 0;">
             <span class="filename">plan.html · your laptop</span>
+            <span class="simbadge">simulated</span>
             <p contenteditable spellcheck="false" data-sync="a">Type in either copy…</p>
           </div>
           <div class="sheet" style="margin: 6px 0;">
@@ -207,24 +225,24 @@ const { msg, msgType } = await clay.save();</code></pre>
       </div>
     </details>
 
-    <details class="fold">
+    <details class="fold" onbeforesnapshot="this.removeAttribute('open')">
       <summary><span class="prob">Visitors can see my edit controls.</span><span class="sol">edit mode</span></summary>
       <div class="fold-body">
         <p>Your first malleable file can keep its controls exposed; that's fine. When you share it, mark the owner-only parts and clayjs strips or disables them for everyone else. The server decides who the owner is.</p>
         <pre><code>&lt;<span class="t">h1</span> <span class="a">editmode:contenteditable</span>&gt;Only the owner can edit this&lt;/<span class="t">h1</span>&gt;
 &lt;<span class="t">button</span> <span class="a">clay</span>="no-save" <span class="a">onclick</span>="clay.save()"&gt;Save&lt;/<span class="t">button</span>&gt;</code></pre>
-        <div class="mode-toggle" role="group" aria-label="Simulate who is looking at the file">
-          <button id="mode-edit" aria-pressed="true">You (owner)</button>
-          <button id="mode-view" aria-pressed="false">A visitor</button>
+        <div class="mode-toggle" role="radiogroup" aria-label="Simulate who is looking at the file" clay="no-save no-watch">
+          <button type="button" id="mode-edit" role="radio" aria-checked="true">You (owner)</button>
+          <button type="button" id="mode-view" role="radio" aria-checked="false">A visitor</button>
         </div>
-        <div class="sheet" id="mode-sheet" style="margin-top: 4px;">
+        <div class="sheet" id="mode-sheet" style="margin-top: 4px;" clay="no-save no-watch">
           <span class="filename">recipe.html</span>
           <span class="simbadge">simulated</span>
           <h3 contenteditable spellcheck="false" style="font-size: 19px; margin-bottom: 8px;">Sourdough, third attempt</h3>
           <p style="margin-bottom: 12px;">More water, less patience.</p>
           <div class="edit-only">
-            <button class="btn primary">Save</button>
-            <button class="btn">Add photo</button>
+            <button type="button" class="btn primary">Save</button>
+            <button type="button" class="btn">Add photo</button>
           </div>
           <p class="small edit-only" style="margin: 10px 0 0;">Visitors won't see these buttons or the dashed underline.</p>
         </div>
@@ -246,9 +264,10 @@ const { msg, msgType } = await clay.save();</code></pre>
       UI chrome (toolbars, badges) <span class="arrow">→</span> clay="no-save no-watch"<br>
       Live or computed text (clocks) <span class="arrow">→</span> clay="freeze"<br>
       Third-party embeds <span class="arrow">→</span> clay="no-watch"<br>
-      Heavy editors, batch the saves <span class="arrow">→</span> clay="no-trigger-autosave"
+      Heavy editors, batch the saves <span class="arrow">→</span> clay="no-trigger-autosave"<br>
+      Self-rendering UI (filter bars) <span class="arrow">→</span> clay="no-dirty"
     </div>
-    <p class="small">Six keywords total: <code>no-save</code>, <code>no-snapshot</code>, <code>no-trigger-autosave</code>, <code>no-watch</code>, <code>no-undo</code>, <code>freeze</code>. Full reference on the <a href="advanced.html#regions">advanced page</a>.</p>
+    <p class="small">Seven keywords total: <code>no-save</code>, <code>no-snapshot</code>, <code>no-trigger-autosave</code>, <code>no-dirty</code>, <code>no-watch</code>, <code>no-undo</code>, <code>freeze</code>. Full reference on the <a href="/advanced#regions">advanced page</a>.</p>
   </section>
 
   <!-- ================= CONFIGURATOR ================= -->
@@ -257,7 +276,7 @@ const { msg, msgType } = await clay.save();</code></pre>
     <h2 class="section-title">What does your file need?</h2>
     <p>Check what applies. The script tag updates as you go; plugins load only in the browser, only when checked.</p>
 
-    <div class="config">
+    <div class="config" clay="no-save no-watch">
       <div class="choices">
         <label class="row locked">
           <input type="checkbox" checked disabled>
@@ -291,12 +310,12 @@ const { msg, msgType } = await clay.save();</code></pre>
       <div class="out">
         <div class="copyline">
           <span class="lbl">Your script tag</span>
-          <button class="btn" id="copy-config">Copy</button>
+          <button type="button" class="btn" id="copy-config">Copy</button>
         </div>
         <pre><code id="config-output"></code></pre>
         <div class="cms-extra" id="cms-extra">
           <p class="small" style="margin-bottom: 6px;"><strong>CMS setup:</strong> add one more tag naming the parts of your page that count as content. The sidebar builds itself from it:</p>
-          <pre style="margin-top: 0;"><code>&lt;<span class="t">script</span> <span class="a">data-rules-name</span>="cms" <span class="a">type</span>="application/json"&gt;
+          <pre style="margin-top: 0;"><code>&lt;<span class="t">script</span> <span class="a">data-rules-name</span>="cms" <span class="a">data-rules-version</span>="1" <span class="a">type</span>="application/json"&gt;
 {
   "title":  ".page-title",
   "intro":  "p.intro",
@@ -304,9 +323,9 @@ const { msg, msgType } = await clay.save();</code></pre>
   "tags":   "ul.tags li[]"
 }
 &lt;/<span class="t">script</span>&gt;</code></pre>
-          <p class="small">Each entry is a field: a name, then the selector it edits. Open the sidebar with <code>?cms=true</code> on the URL. The same tag can power the <a href="plugins.html">JSON data API</a> too.</p>
+          <p class="small">Each entry is a field: a name, then the selector it edits. Open the sidebar with <code>?cms=true</code> on the URL. The same tag can power the <a href="/plugins">JSON data API</a> too.</p>
         </div>
-        <p class="small">Need more? Reactive templates, JSON data in and out, toasts and dialogs, DOM helpers: those are separate libraries with their own script tags, on <a href="plugins.html">Plugins</a> and <a href="advanced.html">Advanced</a>.</p>
+        <p class="small">Need more? Reactive templates, JSON data in and out, toasts and dialogs, DOM helpers: those are separate libraries with their own script tags, on <a href="/plugins">Plugins</a> and <a href="/advanced">Advanced</a>.</p>
       </div>
     </div>
   </section>
@@ -315,7 +334,7 @@ const { msg, msgType } = await clay.save();</code></pre>
   <section id="runs-on">
     <span class="eyebrow">Where this runs</span>
     <h2 class="section-title">Your file is yours</h2>
-    <p>It runs on <a href="https://hyperclay.com">hyperclay.com</a>, on your own machine with <a href="https://hyperclaylocal.com/">Hyperclay Local</a> or <a href="https://htmlclay.com/">HTML Clay</a>, or against <a href="docs.html#endpoint">about 15 lines of your own server code</a>. Download it anytime; it's just HTML.</p>
+    <p>It runs on <a href="https://hyperclay.com">hyperclay.com</a>, on your own machine with <a href="https://hyperclaylocal.com/">Hyperclay Local</a> or <a href="https://htmlclay.com/">HTML Clay</a>, or against <a href="/docs#endpoint">about 20 lines of your own server code</a>. Download it anytime; it's just HTML.</p>
     <p class="small">The fastest way to try a malleable file with zero setup is a free account on <a href="https://hyperclay.com">hyperclay.com</a>.</p>
   </section>
 
@@ -328,13 +347,14 @@ const { msg, msgType } = await clay.save();</code></pre>
 <footer>
   <div class="inner">
     <span>clayjs</span>
-    <a href="advanced.html">Advanced</a>
-    <a href="plugins.html">Plugins</a>
-    <a href="docs.html">Docs</a>
-    <a href="docs.html#endpoint">Host it yourself</a>
+    <a href="/advanced">Advanced</a>
+    <a href="/plugins">Plugins</a>
+    <a href="/docs">Docs</a>
+    <a href="/docs#endpoint">Host it yourself</a>
     <a href="https://github.com/panphora/clayjs" rel="noopener">GitHub</a>
     <a href="https://www.npmjs.com/package/@panphora/clayjs" rel="noopener">npm</a>
-    <span>MIT</span>
+    <a href="https://github.com/panphora/clayjs/blob/main/LICENSE" rel="noopener">MIT-0</a>
+    <a href="THIRD-PARTY-NOTICES.md">Third-party notices</a>
   </div>
   <div class="inner" data-hyper-footer="clayjs" clay="no-save no-snapshot"></div>
 </footer>
@@ -346,19 +366,67 @@ const { msg, msgType } = await clay.save();</code></pre>
   var booted = false;
   window.clay.ready.then(function () { booted = true; });
 
-  document.getElementById("chip-save").addEventListener("click", function () { if (booted) window.clay.save.force(); });
+  // 'save' in clay is what the docs tell every reader to check, because the
+  // edit-only members are absent in view mode and when the save plugin is
+  // excluded. The demo may as well practise it.
+  function canSave() { return booted && window.clay && "save" in window.clay; }
+  function canDemo() { return booted && window.clay && "demo" in window.clay; }
+
+  document.getElementById("chip-save").addEventListener("click", function () { if (canSave()) window.clay.save.force(); });
   document.getElementById("chip-fail").addEventListener("click", function () {
-    if (!booted) return;
+    if (!canSave() || !canDemo()) return;
     window.clay.demo.failNext();
     window.clay.save.force();
   });
   document.getElementById("doc-reload").addEventListener("click", function () { window.location.reload(); });
-  document.getElementById("demo-reset").addEventListener("click", function () { if (booted) window.clay.demo.reset(); });
+  document.getElementById("demo-reset").addEventListener("click", function () { if (canDemo()) window.clay.demo.reset(); });
+
+  // The chips carry real text written from the save events, so a screen reader
+  // announces them; the CSS version could only ever draw a ::after. They are
+  // marked no-save/no-watch/no-snapshot in the markup for the same reason the
+  // library's own indicator plugin is: this write lands after the save baseline
+  // was taken, and unmarked it would leave the page dirty the instant a save
+  // succeeded.
+  var CHIP_TEXT = { saving: "Saving…", saved: "Saved", error: "Couldn't save", offline: "Offline" };
+  var activeSheet = null;
+
+  function rememberSheet(event) {
+    var sheet = event.target && event.target.closest ? event.target.closest(".sheet.live") : null;
+    if (sheet) activeSheet = sheet;
+  }
+  ["focusin", "click", "input"].forEach(function (type) {
+    document.addEventListener(type, rememberSheet, true);
+  });
+
+  function showChip(state) {
+    // Only the sheet being worked in. The old rule keyed off html[savestatus],
+    // which lit every live sheet on the page at once, including ones the person
+    // had never touched, from the very first save.
+    if (!activeSheet) return;
+    var chip = activeSheet.querySelector(".chip");
+    if (!chip) return;
+    chip.textContent = CHIP_TEXT[state] || "";
+    chip.setAttribute("data-state", state);
+    clearTimeout(chip._chipTimer);
+    if (state === "saved") {
+      chip._chipTimer = setTimeout(function () {
+        chip.removeAttribute("data-state");
+        chip.textContent = "";
+      }, 2200);
+    }
+  }
+  Object.keys(CHIP_TEXT).forEach(function (state) {
+    document.addEventListener("clay:save-" + state, function () { showChip(state); });
+  });
 
   var autoSheet = document.getElementById("auto-sheet");
-  autoSheet.querySelector("[contenteditable]").addEventListener("input", function () {
+  // The authored attribute, not the one richclay adds. The loader's imports are
+  // async, so this script runs before [editable] has become contenteditable and
+  // querySelector("[contenteditable]") would return null and throw, taking every
+  // listener below it in this IIFE down with it.
+  autoSheet.querySelector("[editable]").addEventListener("input", function () {
     clearTimeout(autoSheet._autoTimer);
-    autoSheet._autoTimer = setTimeout(function () { if (booted) window.clay.save(); }, 1500);
+    autoSheet._autoTimer = setTimeout(function () { if (canSave()) window.clay.save(); }, 1500);
   });
 
   var syncA = document.querySelector('[data-sync="a"]');
@@ -377,8 +445,8 @@ const { msg, msgType } = await clay.save();</code></pre>
   var btnView = document.getElementById("mode-view");
   function setMode(viewing) {
     modeSheet.classList.toggle("viewing", viewing);
-    btnEdit.setAttribute("aria-pressed", String(!viewing));
-    btnView.setAttribute("aria-pressed", String(viewing));
+    btnEdit.setAttribute("aria-checked", String(!viewing));
+    btnView.setAttribute("aria-checked", String(viewing));
   }
   btnEdit.addEventListener("click", function () { setMode(false); });
   btnView.addEventListener("click", function () { setMode(true); });
@@ -412,9 +480,7 @@ const { msg, msgType } = await clay.save();</code></pre>
       btn.textContent = "Copied!";
       setTimeout(function () { btn.textContent = "Copy"; }, 1500);
     }
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(text).then(done);
-    } else {
+    function fallback() {
       var ta = document.createElement("textarea");
       ta.value = text;
       document.body.appendChild(ta);
@@ -422,6 +488,14 @@ const { msg, msgType } = await clay.save();</code></pre>
       document.execCommand("copy");
       document.body.removeChild(ta);
       done();
+    }
+    // writeText REJECTS without a permission or on a non-secure origin, and an
+    // unhandled rejection left the button saying "Copy" with nothing copied and
+    // no explanation. One fallback serves both that and the API being absent.
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done).catch(fallback);
+    } else {
+      fallback();
     }
   });
 })();

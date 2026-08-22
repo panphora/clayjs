@@ -21,6 +21,7 @@
 
 import { morph } from "../vendor/hyper-morph.vendor.js";
 import { STRIP_FROM_SAVE } from "../lib/region-policy.js";
+import { isEditMode } from "../core/is-edit-mode.js";
 
 const KEY = "clay:demo:" +
   (document.documentElement.getAttribute("demo-key") || window.location.pathname);
@@ -104,6 +105,18 @@ async function restore() {
   const saved = localStorage.getItem(KEY);
   if (!saved) return;
   const doc = new DOMParser().parseFromString(saved, "text/html");
+
+  // The body was stored from an edit-mode page, so every [editable] in it carries
+  // the contenteditable richclay adds at runtime. Morphing that into a view-mode
+  // load would hand a visitor a fully editable document. Drop the runtime
+  // attribute, never the element: [contenteditable] cannot join CHROME_SELECTOR,
+  // whose matches are removed outright, and doing that deletes real content.
+  if (!isEditMode) {
+    for (const el of doc.querySelectorAll("[editable][contenteditable]")) {
+      el.removeAttribute("contenteditable");
+    }
+  }
+
   await morph(document.body, doc.body, {
     morphStyle: "outerHTML",
     ignoreActiveValue: true,

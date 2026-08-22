@@ -49,6 +49,12 @@ test("one POST in flight at a time, and the newest queued payload wins", async (
   );
 
   const sync = new LiveSync();
+  // Discovery is a precondition of sending, not the thing under test: the client
+  // must know which wire it is on before it can address a relay. This mock host
+  // answers /_/meta with something unparseable, which is the legacy verdict.
+  await sync._resolveProfile();
+  expect(sync._profile.name).toBe("legacy");
+  global.fetch.mockClear();
 
   sync._enqueueSend("<html>A</html>", null);
   expect(global.fetch).toHaveBeenCalledTimes(1);
@@ -62,5 +68,6 @@ test("one POST in flight at a time, and the newest queued payload wins", async (
   await new Promise((resolve) => setTimeout(resolve, 0));
 
   expect(global.fetch).toHaveBeenCalledTimes(2);
+  // `html` is the legacy artifact key; a host announcing `sync` gets `snapshot`.
   expect(JSON.parse(global.fetch.mock.calls[1][1].body).html).toBe("<html>C</html>");
 });

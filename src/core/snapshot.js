@@ -37,7 +37,8 @@
  */
 
 import { stripExtensionNoise } from '../lib/extension-noise.js';
-import { STRIP_FROM_SAVE, STRIP_FROM_COMPARISON, SNAPSHOT_REMOVE_SELECTOR } from '../lib/region-policy.js';
+import { restoreAuthoredUrls } from '../lib/authored-url.js';
+import { STRIP_FROM_SAVE, STRIP_FROM_COMPARISON, STRIP_FROM_DIRTY_CHECK, NO_TRIGGER_AUTOSAVE_SELECTOR, SNAPSHOT_REMOVE_SELECTOR } from '../lib/region-policy.js';
 import { TAB_LOCAL_ROOT_ATTRS } from '../lib/root-attrs.js';
 
 // =============================================================================
@@ -134,6 +135,11 @@ export function captureSnapshot({ flushUndo = true } = {}) {
     hook(clone);
   }
 
+  // Put back any URL clay rewrote at runtime (cache-bust, refetch-on-save) so
+  // the file keeps what the page author wrote. Before onbeforesnapshot, so an
+  // authored handler sees the same URLs the file will.
+  restoreAuthoredUrls(clone);
+
   runAuthoredHandlers(clone, 'onbeforesnapshot');
 
   for (const el of clone.querySelectorAll(SNAPSHOT_REMOVE_SELECTOR)) {
@@ -203,6 +209,78 @@ export function captureForComparison({ flushUndo = true } = {}) {
 }
 
 /**
+ * Capture in the DIRTY domain: like captureForComparison, but it KEEPS
+ * no-trigger-autosave regions.
+ *
+ * The two domains answer different questions. "Should this edit start an
+ * autosave?" is the autosave domain (captureForComparison). "Is there anything
+ * here the person would lose?" is this one — an edit inside a batching region is
+ * a real edit that an explicit save must write and a close must warn about.
+ *
+ * On a document with no such region this returns bytes identical to
+ * captureForComparison, which is what keeps the two baselines comparable.
+ *
+ * @returns {string}
+ */
+export function captureForDirtyCheck({ flushUndo = true } = {}) {
+  const clone = captureSnapshot({ flushUndo });
+
+  runAuthoredHandlers(clone, 'onbeforesave');
+
+  for (const el of clone.querySelectorAll(STRIP_FROM_DIRTY_CHECK)) {
+    el.remove();
+  }
+
+  for (const hook of documentTransforms) {
+    hook(clone);
+  }
+
+  return "<!DOCTYPE html>" + clone.outerHTML;
+}
+
+/**
+ * Both comparison domains from ONE snapshot, with no save clone and no
+ * snapshot-ready event.
+ *
+ * For the callers that need to install or check both baselines without sending
+ * anything: the load-time baseline capture and live-sync's post-morph baseline
+ * setter. Taking two separate snapshots there would cost two full DOM clones per
+ * boot and per applied frame, for bytes that are usually identical.
+ *
+ * @returns {{ forComparison: string, forDirty: string }}
+ */
+export function captureForComparisonAndDirty({ flushUndo = true } = {}) {
+  const clone = captureSnapshot({ flushUndo });
+
+  runAuthoredHandlers(clone, 'onbeforesave');
+
+  const dirtyClone = clone.querySelector(NO_TRIGGER_AUTOSAVE_SELECTOR)
+    ? clonePreventingOnclone(clone)
+    : null;
+
+  for (const el of clone.querySelectorAll(STRIP_FROM_COMPARISON)) {
+    el.remove();
+  }
+  for (const hook of documentTransforms) {
+    hook(clone);
+  }
+  const forComparison = "<!DOCTYPE html>" + clone.outerHTML;
+
+  let forDirty = forComparison;
+  if (dirtyClone) {
+    for (const el of dirtyClone.querySelectorAll(STRIP_FROM_DIRTY_CHECK)) {
+      el.remove();
+    }
+    for (const hook of documentTransforms) {
+      hook(dirtyClone);
+    }
+    forDirty = "<!DOCTYPE html>" + dirtyClone.outerHTML;
+  }
+
+  return { forComparison, forDirty };
+}
+
+/**
  * Single-capture function for both saving and comparison.
  *
  * Clones the DOM once, then clones that clone for comparison.
@@ -210,7 +288,7 @@ export function captureForComparison({ flushUndo = true } = {}) {
  *
  * @param {Object} options
  * @param {boolean} options.emitForSync - Whether to emit snapshot-ready event (default: true)
- * @returns {{ forSave: string, forComparison: string }}
+ * @returns {{ forSave: string, forComparison: string, forDirty: string }}
  */
 export function captureForSaveAndComparison({ emitForSync = true } = {}) {
   const clone = captureSnapshot();
@@ -227,6 +305,15 @@ export function captureForSaveAndComparison({ emitForSync = true } = {}) {
 
   // Clone for comparison before stripping (cheaper than cloning live DOM)
   const compareClone = clonePreventingOnclone(clone);
+
+  // The dirty domain differs from the autosave domain only inside
+  // no-trigger-autosave regions, so a document without one pays nothing: the two
+  // strip sets remove exactly the same nodes and one string serves both. The
+  // predicate reads the captured clone after authored handlers have run, and
+  // covers all three spellings via the policy's own selector.
+  const dirtyClone = clone.querySelector(NO_TRIGGER_AUTOSAVE_SELECTOR)
+    ? clonePreventingOnclone(clone)
+    : null;
 
   // Save clone: run hooks (freeze restore lives here), THEN strip [no-save]/[save-remove]
   // LAST (snapshot-algorithm step 7) so freeze-restored [no-save] content can't leak to disk.
@@ -247,21 +334,42 @@ export function captureForSaveAndComparison({ emitForSync = true } = {}) {
   }
   const forComparison = "<!DOCTYPE html>" + compareClone.outerHTML;
 
-  return { forSave, forComparison };
+  // Dirty clone: same shape as the compare clone, one selector weaker.
+  let forDirty = forComparison;
+  if (dirtyClone) {
+    for (const el of dirtyClone.querySelectorAll(STRIP_FROM_DIRTY_CHECK)) {
+      el.remove();
+    }
+    for (const hook of documentTransforms) {
+      hook(dirtyClone);
+    }
+    forDirty = "<!DOCTYPE html>" + dirtyClone.outerHTML;
+  }
+
+  return { forSave, forComparison, forDirty };
 }
 
 /**
- * Capture for a protected live-sync merge: the save-domain and comparison-
- * domain clones of ONE snapshot, plus a WeakMap pairing every comparison
- * element to its save-clone twin.
+ * Capture for a protected live-sync merge: the save-domain and loss-domain
+ * clones of ONE snapshot, plus a WeakMap pairing every loss-domain element to
+ * its save-clone twin.
  *
- * The pairing is recorded immediately after the comparison clone is created,
+ * The pairing is recorded immediately after the compare clone is created,
  * while the two trees are still isomorphic; each side's strips then remove
- * nodes independently without disturbing it. The scoped-sync dirty diff runs
- * on the comparison clone (the same domain as lastSavedContents), and dirty
- * roots map through pairMap to save-domain subtrees (the same domain as the
- * file on disk), which still carry the no-trigger-autosave / freeze / no-watch
- * children the comparison strips.
+ * nodes independently without disturbing it.
+ *
+ * The compare clone strips STRIP_FROM_DIRTY_CHECK, not STRIP_FROM_COMPARISON:
+ * the merge asks "would applying this frame destroy work?", which is the same
+ * question the close warning asks, so it must use the same domain. The autosave
+ * domain is the wrong one here because it strips no-trigger-autosave, and an
+ * unsaved edit in a batching region is exactly the work the merge exists to
+ * protect. Disposable churn stays out of both domains via no-dirty, which is
+ * what keeps a self-churning region from promoting a dirty root to <body> and
+ * holding every frame forever.
+ *
+ * Dirty roots map through pairMap to save-domain subtrees (the same domain as
+ * the file on disk), which still carry the freeze / no-watch children the
+ * compare clone strips.
  *
  * Never emits snapshot-ready (this capture must not feed the send pipeline)
  * and never flushes the undo batch (it runs per incoming frame, not per save).
@@ -292,7 +400,7 @@ export function captureForMerge() {
     el.remove();
   }
 
-  for (const el of compareClone.querySelectorAll(STRIP_FROM_COMPARISON)) {
+  for (const el of compareClone.querySelectorAll(STRIP_FROM_DIRTY_CHECK)) {
     el.remove();
   }
   for (const hook of documentTransforms) {

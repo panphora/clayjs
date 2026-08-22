@@ -19,7 +19,7 @@ query params on the script URL:
 <script src="/clay.js?plugins=sync,cms&exclude=indicator"></script>
 ```
 
-- `?plugins=` — add optional plugins: `sync`, `cms`, `undo`, `sortable`, `indicator`, `quickcrop`, `wire`.
+- `?plugins=` — add optional plugins: `sync`, `cms`, `undo`, `sortable`, `indicator`, `quickcrop`, `upload`, `wire`, `demo`.
   Only `richclay` loads by default, and only in edit mode. `cms` brings `quickcrop` with it, because
   the CMS uses it for `data-hcms-crop` image fields.
 - `?exclude=` — drop a plugin that would otherwise load (a default, or one another plugin pulled in).
@@ -107,8 +107,9 @@ lifecycle.
   satellite with no core loaded.
 - `region.addRegionToken(el, token)`, `region.resolveRegionPolicy(node)`, `region.isInert(node)`,
   `region.isSnapshotRemoved(el)`, `region.PERSIST`, `region.REGION_ATTRS`, and
-  `region.selectors.stripFromSave` / `.stripFromComparison` / `.snapshotRemove` / `.freeze` — write your
-  own attribute without hardcoding our selectors.
+  `region.selectors.stripFromSave` / `.stripFromComparison` / `.stripFromDirtyCheck` /
+  `.noTriggerAutosave` / `.noDirty` / `.snapshotRemove` / `.freeze` — write your own attribute
+  without hardcoding our selectors.
 - `save.saveHtml(html, cb, opts)`, `save.replacePageWith(url, cb)`, `save.isSaveInProgress()` — the save
   lane under `clay.save`. **`saveHtml` writes the bytes you hand it straight to the file**, bypassing the
   snapshot pipeline entirely; check `isSaveInProgress()` first.
@@ -122,8 +123,15 @@ attribute:
 <div clay="no-save no-snapshot freeze">…</div>
 ```
 
-Tokens: `no-save`, `no-snapshot`, `no-trigger-autosave`, `no-watch`, `no-undo`, `freeze`.
-Add `autosave` to `<html>` to save automatically on change.
+Tokens: `no-save`, `no-snapshot`, `no-trigger-autosave`, `no-dirty`, `no-watch`, `no-undo`,
+`freeze`. Add `autosave` to `<html>` to save automatically on change.
+
+`no-trigger-autosave` and `no-dirty` are the pair worth getting right. Both are saved in full and
+neither starts an autosave. The difference is whether their content is *work*: a
+`no-trigger-autosave` region holds real edits waiting for a manual save, so it warns you on close
+and live sync will not overwrite it, while a `no-dirty` region renders itself from something else,
+so it never warns and an incoming sync frame may replace it. Use `no-dirty` for filter bars,
+projections and drag previews; use `no-trigger-autosave` for a heavy editor you save by hand.
 
 ## Develop
 

@@ -19,10 +19,11 @@ import {
   addDocumentTransform,
   isSaveInProgress
 } from "./save-core.js";
-import { captureForComparison, captureForSaveAndComparison } from "./snapshot.js";
+import { captureForComparison, captureForComparisonAndDirty, captureForSaveAndComparison } from "./snapshot.js";
 import { gateCaptureToken, gateClearIfUnchanged } from "../lib/dirty-gate.js";
 import { ROOT_LIBRARY_ATTRS } from "../lib/root-attrs.js";
 import { logSaveCheck, logBaseline } from "../lib/autosave-debug.js";
+import { initUserGesture, markExplicitSave, clearExplicitSave } from "../lib/user-gesture.js";
 
 // Keep this library's own root state out of the saved bytes.
 //
@@ -99,9 +100,18 @@ window.addEventListener('offline', () => {
 });
 
 window.addEventListener('online', () => {
-  if (document.documentElement.getAttribute('savestatus') === 'offline') {
-    savePage();
-  }
+  if (document.documentElement.getAttribute('savestatus') !== 'offline') return;
+  savePage().then((result) => {
+    // The page went offline with everything already saved, so there is nothing
+    // to send and the offline chip is simply stale. Clear it directly rather
+    // than through setSaveState: no save happened, and dispatching
+    // clay:save-saved would run every [onaftersave] handler and light every
+    // status chip as though one had.
+    if (result.msgType === 'skipped' &&
+        document.documentElement.getAttribute('savestatus') === 'offline') {
+      document.documentElement.setAttribute('savestatus', 'saved');
+    }
+  });
 });
 
 // ============================================
@@ -116,16 +126,36 @@ window.addEventListener('online', () => {
 // ever sending them: the edit was gone, with no error, no dirty flag, and no
 // close-tab warning.
 //
-// Post-save mutators are made invisible to the comparison instead — they mark what
-// they touch `no-trigger-autosave`, which strips it from every comparison capture
-// (see cache-bust.js and refetch-on-save.js). That leaves the baseline free to stay
-// exactly what savePage sent, which is the only value that is true by construction.
+// Post-save mutators are made invisible to the comparison instead. They remember
+// what the URL was authored as and restore it on every snapshot clone, so the live
+// DOM carries the busted URL and the file carries the authored one (authored-url.js,
+// used by cache-bust.js and refetch-on-save.js). That leaves the baseline free to
+// stay exactly what savePage sent, which is the only value true by construction.
+//
+// They used to mark what they touched `no-trigger-autosave` instead. That hid the
+// rewrite from the comparison only once the marker had reached the baseline, so the
+// FIRST save on any page using either helper was followed by a spurious dirty state
+// and a false close warning. It self-healed on the next save, which is why it went
+// unnoticed.
 
 // Re-export from core for backward compatibility
 export { addDocumentTransform, getPageContents };
 
 let unsavedChanges = false;
+// TWO SAVED BASELINES, one per comparison domain.
+//
+//   lastSavedContents — the AUTOSAVE domain (no-trigger-autosave stripped).
+//     Answers "should this edit start a save on its own?" Autosave, the load
+//     settle guard, the live-sync baseline and the scoped-sync merge oracle all
+//     read this one, and none of them changes.
+//   lastSavedDirty — the DIRTY domain (no-trigger-autosave kept). Answers "is
+//     there anything here the person would lose?" Only an explicit savePage()
+//     and the close warning read it.
+//
+// On a page with no batching region the two are byte-identical, so nothing about
+// the split is observable there.
 let lastSavedContents = '';
+let lastSavedDirty = '';
 // A save was requested while one was on the wire; run one more when it settles.
 let pendingSave = false;
 
@@ -173,9 +203,12 @@ function skipped_(msg) {
  * where the write may or may not have landed, so it is not treated as success
  * either.
  */
-function applySaveResult(result, forComparison, label, gateToken) {
+function applySaveResult(result, forComparison, forDirty, label, gateToken) {
   if (result.ok) {
+    // Both baselines advance from the SAME pre-request capture, never from the
+    // live DOM, so an edit made while the request was on the wire stays unsaved.
     lastSavedContents = forComparison;
+    lastSavedDirty = forDirty;
     unsavedChanges = false;
     // Generation-checked: clears the scoped-sync dirty gate only if nothing
     // changed while this save was on the wire.
@@ -206,7 +239,28 @@ function drainPendingSave() {
 export function getUnsavedChanges() { return unsavedChanges; }
 export function setUnsavedChanges(val) { unsavedChanges = val; }
 export function getLastSavedContents() { return lastSavedContents; }
-export function setLastSavedContents(val) { lastSavedContents = val; }
+export function getLastSavedDirty() { return lastSavedDirty; }
+
+/**
+ * Install both saved baselines from one post-morph capture.
+ *
+ * live-sync calls this after applying a frame it verified clean, where the page
+ * now IS the file on disk. Setting only the autosave baseline would leave the
+ * dirty baseline describing the pre-frame page, and the close warning would then
+ * warn about the frame's own content.
+ */
+export function setLastSavedBaselines(forComparison, forDirty) {
+  lastSavedContents = forComparison;
+  lastSavedDirty = forDirty;
+}
+
+// Kept for back-compat: a caller with one string means the page has no batching
+// region, or it does not know about the split. Setting both from it is the safe
+// reading, since the domains coincide exactly when there is no such region.
+export function setLastSavedContents(val) {
+  lastSavedContents = val;
+  lastSavedDirty = val;
+}
 
 /**
  * Save the current page with change detection and state management.
@@ -221,6 +275,7 @@ export function setLastSavedContents(val) { lastSavedContents = val; }
 export function savePage(callback = () => {}) {
   return new Promise((resolve) => {
     if (!isEditMode && !window.clay?.testMode) {
+      clearExplicitSave();
       const skipped = skipped_('Not in edit mode');
       callback(skipped);
       return resolve(skipped);
@@ -230,6 +285,8 @@ export function savePage(callback = () => {}) {
     // than dropping it: the in-flight request carries the older bytes, and if no
     // further mutation happens to retrigger autosave, the newer ones would never
     // reach disk at all.
+    // Not cleared here: pendingSave means this request is deferred, not
+    // abandoned, and drainPendingSave is what eventually sends it.
     if (isSaveInProgress()) {
       pendingSave = true;
       const skipped = skipped_('Save already in progress');
@@ -247,12 +304,13 @@ export function savePage(callback = () => {}) {
     // Single capture: clone once, get both versions
     // forSave strips non-persisted regions ([no-save]/[save-remove])
     // forComparison additionally strips every autosave-off region
-    let forSave, forComparison;
+    let forSave, forComparison, forDirty;
     const gateToken = gateCaptureToken();
     try {
-      ({ forSave, forComparison } = captureForSaveAndComparison());
+      ({ forSave, forComparison, forDirty } = captureForSaveAndComparison());
     } catch (err) {
       console.error('savePage: captureForSaveAndComparison failed', err);
+      clearExplicitSave();
       setSaveState('error', err.message);
       const result = { msg: err.message, msgType: 'error', code: null, etag: null };
       if (typeof callback === 'function') {
@@ -261,12 +319,18 @@ export function savePage(callback = () => {}) {
       return resolve(result);
     }
 
-    // Compare directly - lastSavedContents is already stripped
-    unsavedChanges = (forComparison !== lastSavedContents);
+    // An explicit save asks the DIRTY question: write anything the person would
+    // otherwise lose, including an edit inside a batching region that was never
+    // going to autosave itself.
+    unsavedChanges = (forDirty !== lastSavedDirty);
     logSaveCheck('savePage dirty check', !unsavedChanges);
 
-    // Skip if content hasn't changed
+    // Skip if content hasn't changed. Clearing the explicit intent here is the
+    // whole point of scoping it: pressing Save on a clean page sends nothing, and
+    // leaving "a human asked for this" armed would hand it to the next
+    // background write and hide exactly the clobber the guard watches for.
     if (!unsavedChanges) {
+      clearExplicitSave();
       gateClearIfUnchanged(gateToken);
       const skipped = skipped_('No changes to save');
       callback(skipped);
@@ -278,7 +342,7 @@ export function savePage(callback = () => {}) {
 
     // Use saveHtml directly with our pre-captured content (avoids double capture)
     saveHtml(forSave, (result) => {
-      applySaveResult(result, forComparison, 'updated after save', gateToken);
+      applySaveResult(result, forComparison, forDirty, 'updated after save', gateToken);
       if (typeof callback === 'function') {
         callback(result);
       }
@@ -314,10 +378,10 @@ export function savePageForce(callback = () => {}) {
       setOfflineStateQuiet();
     }
 
-    let forSave, forComparison;
+    let forSave, forComparison, forDirty;
     const gateToken = gateCaptureToken();
     try {
-      ({ forSave, forComparison } = captureForSaveAndComparison());
+      ({ forSave, forComparison, forDirty } = captureForSaveAndComparison());
     } catch (err) {
       console.error('savePageForce: captureForSaveAndComparison failed', err);
       setSaveState('error', err.message);
@@ -331,7 +395,7 @@ export function savePageForce(callback = () => {}) {
     setSavingState();
 
     saveHtml(forSave, (result) => {
-      applySaveResult(result, forComparison, 'updated after force save', gateToken);
+      applySaveResult(result, forComparison, forDirty, 'updated after force save', gateToken);
       if (typeof callback === 'function') {
         callback(result);
       }
@@ -403,8 +467,9 @@ function initBaselineCapture() {
   // Take immediate snapshot and set as baseline right away
   // This ensures saves during settle window work correctly
   // Store stripped version so comparisons are direct (no parsing needed)
-  const immediateContents = captureForComparison();
+  const { forComparison: immediateContents, forDirty: immediateDirty } = captureForComparisonAndDirty();
   lastSavedContents = immediateContents;
+  lastSavedDirty = immediateDirty;
   baselineContents = immediateContents;
   logBaseline('immediate capture', `${immediateContents.length} chars`);
 
@@ -429,13 +494,18 @@ function initBaselineCapture() {
     if (unsubscribeMutation) unsubscribeMutation();
     userEditEvents.forEach(evt => document.removeEventListener(evt, markUserEdited, true));
 
-    // Only update if no user edits AND no saves occurred during settle
-    // (if a save happened, lastSavedContents would differ from immediateContents)
-    if (!userEdited && lastSavedContents === immediateContents) {
+    // Only update if no user edits AND no saves occurred during settle.
+    // BOTH baselines have to be untouched, not just the autosave one: a save
+    // whose only change was inside a batching region advances lastSavedDirty
+    // while leaving lastSavedContents byte-identical to the immediate capture.
+    // Checking one would let a second, unsent edit in that region be captured
+    // here as though it had been saved.
+    if (!userEdited && lastSavedContents === immediateContents && lastSavedDirty === immediateDirty) {
       // Store stripped version so comparisons are direct (no parsing needed)
       const gateToken = gateCaptureToken();
-      const contents = captureForComparison();
+      const { forComparison: contents, forDirty: contentsDirty } = captureForComparisonAndDirty();
       lastSavedContents = contents;
+      lastSavedDirty = contentsDirty;
       baselineContents = contents;
       // Boot churn (modules rewriting attributes at DOM-ready) counted toward
       // the scoped-sync gate; the settled baseline is the proof it wasn't edits.
@@ -547,6 +617,9 @@ export function initSaveKeyboardShortcut() {
     let metaKeyPressed = isMac ? event.metaKey : event.ctrlKey;
     if (metaKeyPressed && event.keyCode == 83) {
       event.preventDefault();
+      // isTrusted, so a script calling dispatchEvent cannot manufacture human
+      // provenance for a write the person never asked for.
+      if (event.isTrusted) markExplicitSave();
       savePage();
     }
   });
@@ -559,6 +632,8 @@ export function initSaveKeyboardShortcut() {
 export function initHyperclaySaveButton() {
   document.addEventListener("click", event => {
     if (event.target.closest("[trigger-save]")) {
+      // el.click() is isTrusted:false, so this cannot be faked from script.
+      if (event.isTrusted) markExplicitSave();
       savePage();
     }
   });
@@ -571,6 +646,10 @@ export function initHyperclaySaveButton() {
 export function init() {
   if (!isEditMode) return;
 
+  // Every editable page, not just autosave pages. A manual-save page makes
+  // exactly the saves a person asked for, and used to report all of them as
+  // background writes because this was installed behind the autosave gate.
+  initUserGesture();
   initSaveKeyboardShortcut();
   initHyperclaySaveButton();
 }

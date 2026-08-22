@@ -76,7 +76,7 @@ a:hover { color: var(--glaze-deep); }
 .eyebrow {
   font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.14em;
   text-transform: uppercase; color: var(--glaze); font-weight: 600;
-  display: block; margin-bottom: 10px;
+  display: block; margin: 0 0 10px;
 }
 
 h1.display {
@@ -172,14 +172,15 @@ pre code { background: none; padding: 0; font-size: inherit; }
   background: var(--paper); border: 1px solid var(--line);
   border-radius: 5px; padding: 1px 8px;
 }
-html[savestatus="saving"] .sheet.live .chip { opacity: 1; background: #E9E6DE; color: var(--ink-soft); }
-html[savestatus="saving"] .sheet.live .chip::after { content: "Saving…"; }
-html[savestatus="saved"] .sheet.live .chip { opacity: 1; background: var(--glaze-tint); color: var(--glaze-deep); }
-html[savestatus="saved"] .sheet.live .chip::after { content: "Saved"; }
-html[savestatus="error"] .sheet.live .chip { opacity: 1; background: var(--rust-tint); color: var(--rust); }
-html[savestatus="error"] .sheet.live .chip::after { content: "Couldn’t save"; }
-html[savestatus="offline"] .sheet.live .chip { opacity: 1; background: #E9E6DE; color: var(--ink-soft); }
-html[savestatus="offline"] .sheet.live .chip::after { content: "Offline"; }
+/* The chip's text is written by the page's own script from the clay:save-*
+   events, not generated here. A ::after has no text for a screen reader to
+   announce, and keying the rules off html[savestatus] lit every live sheet on
+   the page at once, including ones nobody had touched. */
+.sheet .chip[data-state] { opacity: 1; }
+.sheet .chip[data-state="saving"] { background: #E9E6DE; color: var(--ink-soft); }
+.sheet .chip[data-state="saved"] { background: var(--glaze-tint); color: var(--glaze-deep); }
+.sheet .chip[data-state="error"] { background: var(--rust-tint); color: var(--rust); }
+.sheet .chip[data-state="offline"] { background: #E9E6DE; color: var(--ink-soft); }
 
 /* ---------- buttons ---------- */
 .btn {

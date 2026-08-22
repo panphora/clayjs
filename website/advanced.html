@@ -5,16 +5,26 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Advanced · clayjs</title>
 <meta name="description" content="Advanced save attributes and the separate utility libraries around clayjs.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%233E6B52'/%3E%3Cpath d='M21.5 11.2a7 7 0 1 0 0 9.6' fill='none' stroke='%23F1EFEA' stroke-width='3.2' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="canonical" href="https://clayjs.com/advanced">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="clayjs">
+<meta property="og:title" content="Advanced · clayjs">
+<meta property="og:description" content="Advanced save attributes and the separate utility libraries around clayjs.">
+<meta property="og:url" content="https://clayjs.com/advanced">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Advanced · clayjs">
+<meta name="twitter:description" content="Advanced save attributes and the separate utility libraries around clayjs.">
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
 
 <nav class="nav">
-  <a class="wordmark" href="index.html">clay<span class="js">.js</span><span class="tm" aria-hidden="true">™</span></a>
+  <a class="wordmark" href="/">clay<span class="js">.js</span><span class="tm" aria-hidden="true">™</span></a>
   <div class="links">
-    <a href="advanced.html" aria-current="page">Advanced</a>
-    <a href="plugins.html">Plugins</a>
-    <a href="docs.html">Docs</a>
+    <a href="/advanced" aria-current="page">Advanced</a>
+    <a href="/plugins">Plugins</a>
+    <a href="/docs">Docs</a>
     <a href="https://github.com/panphora/clayjs" rel="noopener">GitHub</a>
   </div>
 </nav>
@@ -37,7 +47,8 @@
       <tr><td><code>no-save</code></td><td>Lives on the page, never written to disk. Live sync leaves your copy alone.</td><td>Search boxes, connection badges, edit toolbars</td></tr>
       <tr><td><code>no-snapshot</code></td><td>Invisible to save and to sync. Every device keeps its own copy.</td><td>Per-device panel state</td></tr>
       <tr><td><code>freeze</code></td><td>Saved exactly as authored; runtime changes to its contents are ignored.</td><td>Clocks, tickers, computed summaries</td></tr>
-      <tr><td><code>no-trigger-autosave</code></td><td>Saved normally, but edits here don't trigger an autosave.</td><td>High-churn text you'd rather batch</td></tr>
+      <tr><td><code>no-trigger-autosave</code></td><td>Saved normally and still counted as unsaved work, but edits here don't start an autosave. Live sync protects it until you save.</td><td>Heavy editors you save by hand</td></tr>
+      <tr><td><code>no-dirty</code></td><td>Saved normally, but its content is disposable: no autosave, no unsaved-changes warning, and live sync may replace it.</td><td>Regions that render themselves: filter bars, projections, drag previews</td></tr>
       <tr><td><code>no-watch</code></td><td>The mutation system ignores it entirely (implies no autosave trigger, no undo).</td><td>Third-party widgets that churn the DOM</td></tr>
       <tr><td><code>no-undo</code></td><td>Changes here aren't recorded in undo history.</td><td>Live regions where undo would feel wrong</td></tr>
     </table>
@@ -46,15 +57,17 @@
       UI chrome (toolbars, badges) <span class="arrow">→</span> clay="no-save no-watch"<br>
       Live or computed text (clocks) <span class="arrow">→</span> clay="freeze"<br>
       Third-party embeds <span class="arrow">→</span> clay="no-watch"<br>
-      Heavy editors, batch the saves <span class="arrow">→</span> clay="no-trigger-autosave"
+      Heavy editors, batch the saves <span class="arrow">→</span> clay="no-trigger-autosave"<br>
+      Self-rendering UI (filter bars) <span class="arrow">→</span> clay="no-dirty"
     </div>
+    <p class="small"><strong><code>no-trigger-autosave</code> or <code>no-dirty</code>?</strong> Ask whether a change in that region is work you would be upset to lose. If it is, use <code>no-trigger-autosave</code>: it waits for your save, warns you on close, and an incoming sync frame will not overwrite it. If the region renders itself from other content and its changes mean nothing on their own, use <code>no-dirty</code>. Marking real work <code>no-dirty</code> means a sync frame may replace it and nothing will warn you, so reach for it only when the content is genuinely derived. A region that mixes both wants two elements, one of each.</p>
   </section>
 
   <!-- ====== CUSTOM ATTRIBUTES THAT RESPECT REGIONS ====== -->
   <section id="custom-attrs">
     <span class="eyebrow">Your own attributes</span>
     <h2 class="section-title">Respecting regions from your own code</h2>
-    <p>Writing a custom attribute that touches the save? Ask clayjs what a region means instead of matching <code>[no-save]</code> yourself. That's what <code>clay.internals.region</code> is for: it's the same policy the library uses, so your attribute can't quietly stop agreeing with it two releases from now. It needs one extra script tag — the <a href="docs.html#internals">internals satellite</a>.</p>
+    <p>Writing a custom attribute that touches the save? Ask clayjs what a region means instead of matching <code>[no-save]</code> yourself. That's what <code>clay.internals.region</code> is for: it's the same policy the library uses, so your attribute can't quietly stop agreeing with it two releases from now. It needs one extra script tag — the <a href="/docs#internals">internals satellite</a>.</p>
     <pre><code>&lt;<span class="t">script</span> <span class="a">src</span>="https://clayjs.com/clay-internals.js"&gt;&lt;/<span class="t">script</span>&gt;</code></pre>
     <p>A <code>count-of</code> attribute that writes how many elements match a selector into a badge, and leaves alone the regions that aren't being persisted as they stand:</p>
     <pre><code>await clay.loaded.internals;
@@ -71,7 +84,7 @@ clay.internals.addDocumentTransform(clone =&gt; {
     <p><strong>Keep the callback pure and repeatable.</strong> It runs on the save clone, and it runs again every time clayjs checks whether the page has changed. Write something new on each run, a timestamp being the tempting one, and every check differs from the last, so the page never reads clean and autosave never stops. Derive from the document, don't stamp the clock.</p>
     <p>When your attribute generates chrome of its own, mark it rather than hoping nobody saves it. <code>addRegionToken</code> merges into whatever <code>clay</code> attribute is already on the element:</p>
     <pre><code>addRegionToken(toolbar, <span class="a">"no-save"</span>);   <span class="c">// clay="existing-token no-save"</span></code></pre>
-    <p class="small">The rest of the surface — <code>isInert</code>, <code>isSnapshotRemoved</code>, <code>REGION_ATTRS</code>, and the raw <code>selectors</code> clayjs strips with — is in the <a href="docs.html#internals">reference</a>.</p>
+    <p class="small">The rest of the surface — <code>isInert</code>, <code>isSnapshotRemoved</code>, <code>REGION_ATTRS</code>, and the raw <code>selectors</code> clayjs strips with — is in the <a href="/docs#internals">reference</a>.</p>
   </section>
 
   <!-- ====== ADVANCED SAVE ATTRIBUTES ====== -->
@@ -178,11 +191,12 @@ clay.internals.addDocumentTransform(clone =&gt; {
 <footer>
   <div class="inner">
     <span>clayjs</span>
-    <a href="index.html">Home</a>
-    <a href="plugins.html">Plugins</a>
-    <a href="docs.html">Docs</a>
+    <a href="/">Home</a>
+    <a href="/plugins">Plugins</a>
+    <a href="/docs">Docs</a>
     <a href="https://github.com/panphora/clayjs" rel="noopener">GitHub</a>
-    <span>MIT</span>
+    <a href="https://github.com/panphora/clayjs/blob/main/LICENSE" rel="noopener">MIT-0</a>
+    <a href="THIRD-PARTY-NOTICES.md">Third-party notices</a>
   </div>
   <div class="inner" data-hyper-footer="clayjs" clay="no-save no-snapshot"></div>
 </footer>

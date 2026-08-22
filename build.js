@@ -24,8 +24,9 @@ const ROOT = dirname(fileURLToPath(import.meta.url));
 const PUBLIC = resolve(ROOT, 'public');
 const WEBSITE = resolve(ROOT, 'website');
 
-// In "files" because npm ships it, but nothing on the site requests it.
-const NOT_SERVED = new Set(['THIRD-PARTY-NOTICES.md']);
+// Everything in "files" is served. THIRD-PARTY-NOTICES.md used to sit out here
+// because nothing linked it; the footers link it now, so it ships with the site.
+const NOT_SERVED = new Set();
 
 // Never follow a symlink out of the tree, and never copy something that is not a
 // regular file. Same rule as malleablehtmlfile's sync-fixtures.mjs, for the same

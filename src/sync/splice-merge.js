@@ -7,11 +7,16 @@
  * diff always compares trees from ONE serialization domain.
  *
  *   Disk frames (htmlclay external changes; save domain on the wire):
- *     diff    comparison clone  vs  parse(lastSavedContents)   [same domain]
+ *     diff    loss-domain clone  vs  parse(lastSavedDirty)     [same domain]
  *     splice  save-clone subtrees into the incoming disk doc   [same domain]
  *     The two clones come from ONE snapshot via captureForMerge(), whose
- *     pairMap bridges them. Save-domain subtrees still carry the
- *     no-trigger-autosave / freeze / no-watch children the comparison strips.
+ *     pairMap bridges them. Save-domain subtrees still carry the freeze /
+ *     no-watch children the loss-domain clone strips.
+ *
+ *     The loss domain, not the autosave domain: the question here is "would
+ *     this frame destroy work?", which is the close warning's question, so it
+ *     keeps no-trigger-autosave content. Disposable churn is declared out of
+ *     it with no-dirty rather than inferred from bytes or gesture timing.
  *
  *   Peer frames (live-lane relays; snapshot domain on the wire):
  *     diff    snapshot clone  vs  parse(lastHtml)               [same domain]
@@ -31,15 +36,16 @@ import { captureSnapshot, captureForMerge } from '../core/snapshot.js';
 // save.js is edit-only in the loader waves but safe to reach from here: its
 // module body guards every init on isEditMode, and the disk lane that needs
 // this state only ever runs in edit-mode tabs.
-import { getLastSavedContents } from '../core/save.js';
+import { getLastSavedDirty } from '../core/save.js';
 import { TAB_LOCAL_ROOT_ATTRS } from '../lib/root-attrs.js';
 import {
   isSnapshotRemoved,
   STRIP_FROM_SAVE,
   FREEZE_SELECTOR,
   SNAPSHOT_REMOVE_SELECTOR,
+  NO_DIRTY_SELECTOR,
 } from '../lib/region-policy.js';
-import { probeMarkClean } from '../lib/dirty-gate.js';
+import { probeMarkClean, gateCaptureToken, gateClearIfUnchanged } from '../lib/dirty-gate.js';
 import { isEditMode } from '../core/is-edit-mode.js';
 import { enableContentEditable } from '../core/admin-contenteditable.js';
 import { enableOnClick } from '../core/admin-onclick.js';
@@ -53,7 +59,7 @@ const PEER_SKIP_SELECTOR = [
   STRIP_FROM_SAVE,
   FREEZE_SELECTOR,
   SNAPSHOT_REMOVE_SELECTOR,
-  '[save-ignore]',
+  NO_DIRTY_SELECTOR,
 ].join(', ');
 
 function peerSkip(el) {
@@ -148,6 +154,7 @@ export function protectPeerDoc({ newDoc, parsedWeakMap, baseHtml, baseIdentityMa
     return { ok: false, entries: [], held: null };
   }
 
+  const gateToken = gateCaptureToken();
   const localClone = captureSnapshot({ flushUndo: false });
   const baseDoc = parsePeerBase(baseHtml);
   if (!baseDoc.documentElement) return { ok: false, entries: [], held: null };
@@ -172,7 +179,12 @@ export function protectPeerDoc({ newDoc, parsedWeakMap, baseHtml, baseIdentityMa
   });
 
   if (!entries.length) {
+    // The oracle just proved the page clean against its baseline. probeMarkClean
+    // only caches form signatures; without the generation-checked counter clear
+    // an edit that was typed and then undone leaves the gate armed forever, and
+    // every later frame pays the full capture-and-diff for nothing.
     probeMarkClean();
+    gateClearIfUnchanged(gateToken);
     return { ok: true, entries };
   }
 
@@ -203,9 +215,10 @@ export function protectPeerDoc({ newDoc, parsedWeakMap, baseHtml, baseIdentityMa
  * @returns {{ ok: boolean, entries: Array, held?: object }}
  */
 export function protectDiskDoc({ newDoc }) {
-  const base = getLastSavedContents();
+  const base = getLastSavedDirty();
   if (!base) return { ok: false, entries: [], held: null };
 
+  const gateToken = gateCaptureToken();
   const { saveClone, compareClone, pairMap } = captureForMerge();
   const baseDoc = parseDiskBase(base);
   if (!baseDoc.documentElement) return { ok: false, entries: [], held: null };
@@ -216,6 +229,7 @@ export function protectDiskDoc({ newDoc }) {
 
   if (!entries.length) {
     probeMarkClean();
+    gateClearIfUnchanged(gateToken);
     return { ok: true, entries };
   }
 

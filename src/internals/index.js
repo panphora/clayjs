@@ -12,18 +12,7 @@
 
 import { captureSnapshot, captureForSave, addDocumentTransform } from "../core/snapshot.js";
 import { saveHtml, replacePageWith, isSaveInProgress } from "../core/save-core.js";
-import {
-  addRegionToken,
-  resolveRegionPolicy,
-  isInert,
-  isSnapshotRemoved,
-  PERSIST,
-  REGION_ATTRS,
-  STRIP_FROM_SAVE,
-  STRIP_FROM_COMPARISON,
-  SNAPSHOT_REMOVE_SELECTOR,
-  FREEZE_SELECTOR,
-} from "../lib/region-policy.js";
+import { regionShape } from "../lib/region-policy.js";
 
 const clay = (window.clay = window.clay || {});
 
@@ -40,20 +29,8 @@ clay.internals = {
 
   // Write your own attribute without hardcoding our selectors. Doing it by hand is
   // how a custom attribute quietly stops respecting [no-save] two releases later.
-  region: {
-    addRegionToken,
-    resolveRegionPolicy,
-    isInert,
-    isSnapshotRemoved,
-    PERSIST,
-    REGION_ATTRS,
-    selectors: {
-      stripFromSave: STRIP_FROM_SAVE,
-      stripFromComparison: STRIP_FROM_COMPARISON,
-      snapshotRemove: SNAPSHOT_REMOVE_SELECTOR,
-      freeze: FREEZE_SELECTOR,
-    },
-  },
+  // The same object clay.region holds, so the two can no longer drift.
+  region: regionShape,
 
   // The save lane under clay.save. saveHtml sends bytes you supply, so it bypasses
   // the snapshot pipeline entirely: whatever you hand it is what lands in the

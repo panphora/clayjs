@@ -78,9 +78,10 @@ function makeSync() {
   return sync;
 }
 
-test("an external-change notification with embedded html enqueues silently", () => {
+test("an external-change notification with embedded html enqueues silently", async () => {
   const sync = makeSync();
   sync.start("index.html");
+  await sync._ready;
   window.toast = jest.fn();
 
   const sse = eventSourceInstances.at(-1);
@@ -171,9 +172,10 @@ test("replayed or reordered external seqs are dropped", () => {
   sync.stop();
 });
 
-test("clay:save-saved bumps the save epoch on the live lane", () => {
+test("clay:save-saved bumps the save epoch on the live lane", async () => {
   const sync = makeSync();
   sync.start("index.html");
+  await sync._ready;
   expect(sync._saveEpoch).toBe(0);
   document.dispatchEvent(new CustomEvent("clay:save-saved"));
   expect(sync._saveEpoch).toBe(1);

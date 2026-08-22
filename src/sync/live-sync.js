@@ -10,7 +10,7 @@
  *                              │
  *                              ▼
  *   ┌─────────────────────────────────────────────────────────┐
- *   │  2. SEND               POST html to /_/live-sync/save   │
+ *   │  2. SEND          POST snapshot to the relay address    │
  *   │                        (debounced, skip if unchanged)   │
  *   └─────────────────────────────────────────────────────────┘
  *                              │
@@ -40,11 +40,61 @@ import Mutation from "../lib/mutation.js";
 import { isSnapshotRemoved } from "../lib/region-policy.js";
 import { isEditMode } from "../core/is-edit-mode.js";
 import { mergeTagRecognizers } from "./merge-tags.js";
-import { serializeForSync, captureForComparison, captureSnapshot } from '../core/snapshot.js';
+import { serializeForSync, captureForComparisonAndDirty, captureSnapshot } from '../core/snapshot.js';
 import { isTabLocalRootAttr } from '../lib/root-attrs.js';
 import { protectPeerDoc, protectDiskDoc, activateIncomingDoc } from './splice-merge.js';
+import { hostMeta } from '../core/host-meta.js';
 import { pageMaybeDirty, pauseGate, resumeGate } from '../lib/dirty-gate.js';
-import { savePageThrottled, setLastSavedContents, setUnsavedChanges } from '../core/save.js';
+
+// The page just took a frame verified clean against its baseline, so it now IS
+// the file on disk. Both saved baselines move together from one capture: leaving
+// the dirty baseline behind would make the close warning fire on the frame's own
+// content. Never flushes undo (this runs per incoming frame, not per save) and
+// never emits snapshot-ready (it must not feed the send pipeline).
+function pairedBaseline() {
+  const { forComparison, forDirty } = captureForComparisonAndDirty({ flushUndo: false });
+  return [forComparison, forDirty];
+}
+import { savePageThrottled, setLastSavedBaselines, setUnsavedChanges } from '../core/save.js';
+
+/**
+ * The two live-sync wires, and the rule for choosing between them.
+ *
+ * Spec §10 puts both halves on `/_/sync`. Not every host serves that yet, and the
+ * ones that do not cannot be upgraded on our schedule: hyperclay-local ships behind
+ * Apple notarization, while this library reaches every document within one 10-minute
+ * cache TTL. So the client is the half that has to know both.
+ *
+ * The choice is DISCOVERED, never guessed. Spec §5 makes `/_/meta` the only way to
+ * learn what a host can do, and §10 says a client that has not discovered `sync`
+ * never opens either half of the route. Probing is also a bad instrument here: an
+ * EventSource reports a 404, an auth refusal and an offline browser through one
+ * error path, so a failed connection cannot tell you which address was wrong.
+ *
+ * One profile is chosen once and used for BOTH directions for the life of the page.
+ * Letting send and receive decide independently is exactly the bug this replaces: a
+ * client that posted to the spec address while streaming from the legacy one.
+ */
+const WIRE_PROFILES = {
+  spec: {
+    name: 'spec',
+    relayPath: '/_/sync',
+    documentHeader: 'Document-URL',
+    snapshotKey: 'snapshot',
+    streamPath: (href, lane, resumeId) =>
+      `/_/sync?document-url=${encodeURIComponent(href)}&lane=${lane}&resume-id=${resumeId}`,
+  },
+  // What every published clayjs speaks, and what hyperclayjs and the inline script in
+  // every Collection dashboard hardcode. Hosts keep these addresses permanently.
+  legacy: {
+    name: 'legacy',
+    relayPath: '/_/live-sync/save',
+    documentHeader: 'Page-URL',
+    snapshotKey: 'html',
+    streamPath: (href, lane, resumeId) =>
+      `/_/live-sync/stream?page-url=${encodeURIComponent(href)}&lane=${lane}&resume-id=${resumeId}`,
+  },
+};
 
 class LiveSync {
   constructor() {
@@ -65,6 +115,16 @@ class LiveSync {
     this.debounceTimer = null;
     this._sendInFlight = false;
     this._queuedSend = null;
+
+    // The chosen wire, and the in-flight discovery that chooses it. Memoized for the
+    // life of the page: a host does not change its capabilities under a loaded
+    // document, and hostMeta() memoizes the request itself.
+    this._profile = null;
+    this._profilePromise = null;
+    this._ready = null;
+    // Bumped by every start(), so a discovery that resolves after a stop/restart
+    // cannot open a stream for the run that has already been torn down.
+    this._startGen = 0;
     this.isPaused = false;
     this.isDestroyed = false;
     this.debug = false;
@@ -128,6 +188,12 @@ class LiveSync {
     // undone, and is dropped by the seq/epoch checks if it went stale.
     this._holdRetryPeer = null;
     this._holdRetryExt = null;
+
+    // Whether each lane is currently holding. A hold is a safe outcome but a
+    // silent one: without an event the page simply stops updating and nothing
+    // can say why. These make the transitions observable in both directions.
+    this._heldLive = false;
+    this._heldExt = false;
 
     // Identity tracking for content-based morphing across live-sync updates.
     // Synthetic IDs (`<clientId>:<counter>`) live here only — never written to
@@ -214,7 +280,16 @@ class LiveSync {
     this.resumeId = this.generateResumeId();
 
     console.log(`[LiveSync] Starting for: ${this.currentFile} (lane=${this.lane})`);
-    this.connect();
+    // One discovery request stands between here and the stream. It is memoized and
+    // bounded, and it does not gate ordinary saves — /_/save is a separate lane that
+    // never moved. Snapshots produced during the window are queued, not dropped.
+    const gen = ++this._startGen;
+    // Exposed so a caller (and the tests) can await the point where the stream is
+    // actually open, rather than counting microtasks behind the discovery request.
+    this._ready = this._resolveProfile().then(() => {
+      if (this.isDestroyed || this._startGen !== gen) return;
+      this.connect();
+    });
     // View-mode tabs are receive-only: saves are edit-gated upstream, so a
     // snapshot listener would never fire — skip registering it.
     if (this.lane === 'live') {
@@ -406,14 +481,58 @@ class LiveSync {
   }
 
   /**
+   * Choose the wire profile from what the host advertises.
+   *
+   * Absence of `sync` selects the legacy wire rather than disabling live sync. That is
+   * deliberate transition debt: §10 says an undiscovered capability is not opened at
+   * all, but both deployed first-party hosts ran live sync for a long time without
+   * advertising anything, and refusing to sync with them would be a regression against
+   * every published version. Once the unannounced hosts are gone, absence should mean
+   * off. A malformed answer, a 404 or a timeout all land here too, and all mean legacy.
+   */
+  _resolveProfile() {
+    if (!this._profilePromise) {
+      this._profilePromise = hostMeta()
+        .then((meta) => (meta?.extensions?.includes('sync') ? WIRE_PROFILES.spec : WIRE_PROFILES.legacy))
+        .catch(() => WIRE_PROFILES.legacy)
+        .then((profile) => {
+          this._profile = profile;
+          this._log(`Wire profile: ${profile.name}`);
+          return profile;
+        });
+    }
+    return this._profilePromise;
+  }
+
+  /**
+   * Report a hold transition on one lane, once per episode in each direction,
+   * so a listener can raise a "sync paused until you save" notice and take it
+   * back down again. Never fires twice for the same state.
+   *
+   * @param {string} lane   'live' or 'external'
+   * @param {boolean} isHeld
+   * @param {Element} [el]  the local element that could not be merged
+   */
+  _setHeld(lane, isHeld, el) {
+    const key = lane === 'live' ? '_heldLive' : '_heldExt';
+    if (this[key] === isHeld) return;
+    this[key] = isHeld;
+    document.dispatchEvent(new CustomEvent(isHeld ? 'clay:sync-held' : 'clay:sync-resumed', {
+      detail: { lane, el: el || null },
+    }));
+  }
+
+  /**
    * Connect to the SSE endpoint
    * Uses native EventSource reconnection behavior
    */
   connect() {
     if (this.isDestroyed) return;
 
-    const pageUrl = encodeURIComponent(window.location.href);
-    const path = `/_/live-sync/stream?page-url=${pageUrl}&lane=${this.lane}&resume-id=${this.resumeId}`;
+    // Whichever wire discovery selected. start() does not call connect() until the
+    // profile is known, so this is never null on the normal path.
+    const profile = this._profile || WIRE_PROFILES.legacy;
+    const path = profile.streamPath(window.location.href, this.lane, this.resumeId);
     // Resolved against the real origin: a <base href> in the authored document
     // would otherwise point the sync stream at an origin the document chose.
     this.sse = new EventSource(new URL(path, window.location.origin).href);
@@ -566,11 +685,27 @@ class LiveSync {
   }
 
   _enqueueSend(html, identityMap) {
+    // Same one-deep queue the in-flight case uses, for the same reason: peers only
+    // ever need the newest state, so a fresher snapshot replaces the waiting one.
+    // Sending before the profile is known would have to guess an address.
+    if (!this._profile) {
+      this._queuedSend = { html, identityMap };
+      this._resolveProfile().then(() => this._flushQueuedSend());
+      return;
+    }
     if (this._sendInFlight) {
       this._queuedSend = { html, identityMap };
       return;
     }
     this._postUpdate(html, identityMap);
+  }
+
+  _flushQueuedSend() {
+    if (this.isDestroyed || this._sendInFlight) return;
+    const queued = this._queuedSend;
+    if (!queued) return;
+    this._queuedSend = null;
+    this._postUpdate(queued.html, queued.identityMap);
   }
 
   _postUpdate(html, identityMap) {
@@ -587,11 +722,15 @@ class LiveSync {
 
     // Absolute against the real origin, so a <base href> in the page cannot
     // redirect the whole document to an origin the author picked.
-    fetch(new URL('/_/live-sync/save', window.location.origin).href, {
+    const profile = this._profile || WIRE_PROFILES.legacy;
+    fetch(new URL(profile.relayPath, window.location.origin).href, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Page-URL': window.location.href },
+      headers: {
+        'Content-Type': 'application/json',
+        [profile.documentHeader]: window.location.href,
+      },
       body: JSON.stringify({
-        html: html,
+        [profile.snapshotKey]: html,
         sender: this.clientId,
         identityMap: identityMap
       })
@@ -931,6 +1070,7 @@ class LiveSync {
           // blocking edit is undone; the slot-empty check and the drain's
           // staleness checks drop it once superseded.
           console.log('[LiveSync] Holding incoming update: unsaved local section cannot be safely merged', protection.held?.el || '');
+          this._setHeld('live', true, protection.held?.el);
           const epochAtHold = this._saveEpoch;
           const seenAtHold = this.lastSeenSeq;
           clearTimeout(this._holdRetryPeer);
@@ -950,6 +1090,8 @@ class LiveSync {
         }
         retainedRoots = protection.entries.length;
       }
+
+      this._setHeld('live', false);
 
       // Morph entire document. We MUST await — HyperMorph.morph returns a
       // Promise when `scripts: { handle: true }` needs to wait for external
@@ -1016,7 +1158,7 @@ class LiveSync {
       // (including typing that arrived during the morph's async wait, which
       // must never be recorded as saved).
       if (this.lane === 'live' && retainedRoots === 0 && !pageMaybeDirty()) {
-        setLastSavedContents(captureForComparison({ flushUndo: false }));
+        setLastSavedBaselines(...pairedBaseline());
       }
 
       // Announce that a remote morph just landed, so document-level listeners
@@ -1102,6 +1244,7 @@ class LiveSync {
           // disk instead of a stale re-apply, and the seq check drops it
           // once a newer external change supersedes it.
           console.log('[LiveSync] Holding external change: unsaved local section cannot be safely merged', protection.held?.el || '');
+          this._setHeld('external', true, protection.held?.el);
           const epochAtHold = this._saveEpoch;
           clearTimeout(this._holdRetryExt);
           this._holdRetryExt = setTimeout(() => {
@@ -1114,6 +1257,8 @@ class LiveSync {
         }
         retainedRoots = protection.entries.length;
       }
+
+      this._setHeld('external', false);
 
       activateIncomingDoc(newDoc.documentElement);
 
@@ -1148,7 +1293,7 @@ class LiveSync {
         // beforeunload stays quiet. The dirty re-check matters: typing that
         // arrived during the morph's async wait would otherwise be captured
         // into the baseline and recorded as saved without reaching disk.
-        setLastSavedContents(captureForComparison({ flushUndo: false }));
+        setLastSavedBaselines(...pairedBaseline());
         setUnsavedChanges(false);
 
         // Cross-lane baseline: the PEER diff base (lastHtml) would otherwise
@@ -1241,5 +1386,5 @@ if (typeof window !== 'undefined') {
 // Export for the clayjs module system. The class itself is exported so
 // tests can create fresh instances without driving the singleton's
 // EventSource/snapshot wiring.
-export { liveSync, LiveSync, morph };
+export { liveSync, LiveSync, morph, WIRE_PROFILES };
 export default liveSync;

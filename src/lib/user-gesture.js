@@ -45,6 +45,7 @@ const RECENT_GESTURE_MS = 500;
 let gestureTaskActive = false;
 let lastTrustedGestureTs = -Infinity;
 let userDrivenSinceLastSave = false;
+let explicitSaveIntent = false;
 let installed = false;
 
 // Monotonic clock for the recency window — never moves backward, so a system
@@ -69,7 +70,9 @@ function onGesture(e) {
 
 /**
  * Install the capture-phase gesture listeners (idempotent). Call once in edit
- * mode (autosave.js and data-loss-panel both do this).
+ * mode. save.js does this for every editable page: gesture provenance is not an
+ * autosave feature, and gating it on <html autosave> left every manual-save page
+ * reporting its human edits as background writes.
  */
 export function initUserGesture() {
   if (installed || typeof document === 'undefined') return;
@@ -108,11 +111,40 @@ export function consumeUserDriven() {
   return v;
 }
 
+/**
+ * Record that a person asked for THIS save (Cmd+S, a [trigger-save] button).
+ *
+ * Deliberately NOT markUserDriven(). That bit accumulates until a save actually
+ * ships, which is right for "an edit happened in a human turn" but wrong here: a
+ * person pressing Save on a clean page produces no save at all, so the bit stays
+ * armed and rides whatever BACKGROUND write happens next, reporting it as human.
+ * That is precisely the write the recovery guard exists to catch.
+ *
+ * This one is scoped to a single save attempt. The send consumes it; an attempt
+ * that ends without sending clears it.
+ */
+export function markExplicitSave() {
+  explicitSaveIntent = true;
+}
+
+/** Read-and-reset, at the actual send. */
+export function consumeExplicitSave() {
+  const v = explicitSaveIntent;
+  explicitSaveIntent = false;
+  return v;
+}
+
+/** The save attempt ended without sending anything. */
+export function clearExplicitSave() {
+  explicitSaveIntent = false;
+}
+
 /** Test seam: force-reset state. */
 export function _resetUserGesture() {
   gestureTaskActive = false;
   lastTrustedGestureTs = -Infinity;
   userDrivenSinceLastSave = false;
+  explicitSaveIntent = false;
 }
 
 /**

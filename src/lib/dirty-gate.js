@@ -8,7 +8,7 @@
  * a false "clean" full-morphs over a real unsaved edit.
  *
  * Two feeds, because neither alone sees everything:
- *   - the mutation hub (require: 'autosave'), which sees DOM changes but not
+ *   - the mutation hub (require: 'dirty'), which sees DOM changes but not
  *     value-property writes on form controls (typing fires no MutationRecord
  *     for .value), and
  *   - capture-phase input/change listeners on ALL form controls, not just
@@ -27,7 +27,7 @@
 
 import Mutation from './mutation.js';
 import { isEditMode } from '../core/is-edit-mode.js';
-import { STRIP_FROM_COMPARISON, SNAPSHOT_REMOVE_SELECTOR } from './region-policy.js';
+import { STRIP_FROM_DIRTY_CHECK, SNAPSHOT_REMOVE_SELECTOR } from './region-policy.js';
 
 let changes = 0;
 let clearedAt = 0;
@@ -36,12 +36,17 @@ let started = false;
 
 const PERSIST_CONTROLS = 'input[persist], textarea[persist], select[persist]';
 
-// Regions the comparison never sees. The hub feed already skips them, through
-// `require: 'autosave'`, and the input feed has to skip them for the same
-// reason: their content is stripped from the comparison clone, so an edit inside
+// Regions the loss oracle never sees. The hub feed already skips them, through
+// `require: 'dirty'`, and the input feed has to skip them for the same reason:
+// their content is stripped from the merge's compare clone, so an edit inside
 // one can never produce a dirty root, and counting it marks the page dirty with
 // nothing for the oracle to find — permanently, since only a save clears the
 // counter and churn in these regions triggers none.
+//
+// The gate and the oracle must key off the SAME domain. This is the dirty
+// domain, so no-trigger-autosave is deliberately absent: the oracle can now
+// report an unsaved batching edit, so the gate has to arm for one. Disposable
+// churn leaves via no-dirty, which is in both.
 //
 // This is not a relaxation of "never under-report". A control here is absent
 // from the clone by definition, so there is nothing about it to under-report.
@@ -50,8 +55,21 @@ const PERSIST_CONTROLS = 'input[persist], textarea[persist], select[persist]';
 // it used to freeze the live-sync save baseline for the rest of the session,
 // after which every incoming disk change was diffed against a stale base, and
 // the previous change was spliced back over the newer one and written to disk.
-const GATE_IGNORE = `${STRIP_FROM_COMPARISON}, ${SNAPSHOT_REMOVE_SELECTOR}`;
+const GATE_IGNORE = `${STRIP_FROM_DIRTY_CHECK}, ${SNAPSHOT_REMOVE_SELECTOR}`;
 const probeCache = new WeakMap();
+
+// The [persist] probe has to honour GATE_IGNORE too. It scans by attribute, not
+// through the mutation hub, so without this a programmatic .value write inside a
+// no-dirty region pins the gate dirty forever even though every DOM mutation
+// there is ignored — the one hole that would survive the domain switch.
+function gatedPersistControls() {
+  const out = [];
+  for (const el of document.querySelectorAll(PERSIST_CONTROLS)) {
+    if (el.closest(GATE_IGNORE)) continue;
+    out.push(el);
+  }
+  return out;
+}
 
 function onUserInput(event) {
   // Deliberately NOT gated on `paused`: a morph never dispatches input or
@@ -68,7 +86,7 @@ export function startDirtyGate() {
   if (started) return;
   started = true;
   Mutation.onAnyChange(
-    { omitChangeDetails: true, require: 'autosave' },
+    { omitChangeDetails: true, require: 'dirty' },
     () => {
       if (!paused) changes++;
     }
@@ -115,7 +133,7 @@ function serializedStateMatches(el) {
 }
 
 export function persistProbeDirty() {
-  for (const el of document.querySelectorAll(PERSIST_CONTROLS)) {
+  for (const el of gatedPersistControls()) {
     const sig = controlSignature(el);
     if (probeCache.get(el) === sig) continue;
     if (serializedStateMatches(el)) {
@@ -129,7 +147,7 @@ export function persistProbeDirty() {
 
 /** Call after the oracle verified the whole page clean against its baseline. */
 export function probeMarkClean() {
-  for (const el of document.querySelectorAll(PERSIST_CONTROLS)) {
+  for (const el of gatedPersistControls()) {
     probeCache.set(el, controlSignature(el));
   }
 }
@@ -145,7 +163,7 @@ export function pageMaybeDirty() {
  */
 export function gateCaptureToken() {
   const probe = [];
-  for (const el of document.querySelectorAll(PERSIST_CONTROLS)) {
+  for (const el of gatedPersistControls()) {
     probe.push([el, controlSignature(el)]);
   }
   return { gen: changes, probe };
