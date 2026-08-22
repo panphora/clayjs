@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.7.0] - 2026-08-22
+
+### Changed
+- Update quickcrop vendor to v1.1.0
+- Update clayjs
+
+### Fixed
+- Split autosave and dirty-check comparison baselines
+
+
+
 ## [Unreleased]
 
 ### Changed
