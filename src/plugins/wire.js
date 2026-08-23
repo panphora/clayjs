@@ -105,11 +105,17 @@ function view(rec) {
   };
 }
 
-function emit(rec) {
+// The second argument is the inbound frame that caused this emit, when one did,
+// and null otherwise. Today only `wire/status` passes it, which is the one case
+// a snapshot cannot describe on its own: `rec.text` is sticky across later
+// states, so a listener accumulating status lines has no other way to tell a new
+// line from the same line arriving again under a new state. Terminal outcomes
+// need no frame, since `handle.done` settles for every one of them.
+function emit(rec, frame) {
   const snapshot = view(rec);
   for (const fn of listeners) {
     try {
-      fn(snapshot);
+      fn(snapshot, frame || null);
     } catch (err) {
       console.error("clay.wire: a listener threw", err);
     }
@@ -223,7 +229,7 @@ function handleFrame(frame) {
       arm(rec, SILENCE_TIMEOUT_MS, "the agent stopped responding");
       rec.text = typeof frame.text === "string" ? frame.text : "";
       rec.state = "acked";
-      emit(rec);
+      emit(rec, frame);
       break;
     case "wire/done":
       land(rec);

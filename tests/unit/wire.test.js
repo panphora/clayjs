@@ -137,6 +137,61 @@ test("ack, status and done walk a request to done once the change lands", async 
   off();
 });
 
+test("a status emit carries its frame, and nothing else does", async () => {
+  const seen = [];
+  const off = wire.on((snap, frame) => seen.push([snap.state, frame]));
+
+  const handle = wire.send({}, { id: "r2b" });
+  await settle();
+
+  frame(sockets[0], { type: "wire/ack", id: "r2b" });
+  frame(sockets[0], { type: "wire/status", id: "r2b", text: "rewriting the intro" });
+  frame(sockets[0], { type: "wire/done", id: "r2b" });
+  applied("disk", 4);
+  await handle.done;
+
+  // `sent`, `acked` from the ack, `acked` from the status, `landing`, `done`.
+  // Only the status one was caused by a frame a snapshot cannot describe.
+  expect(seen.map(([state]) => state)).toEqual(["sent", "acked", "acked", "landing", "done"]);
+  expect(seen.map(([, f]) => f && f.type)).toEqual([null, null, "wire/status", null, null]);
+  expect(seen[2][1].text).toBe("rewriting the intro");
+
+  off();
+});
+
+test("the same status line twice emits twice, each with its own frame", async () => {
+  // `rec.text` is unchanged between these two, so a listener comparing text
+  // would see one line where the handler printed two. The frame argument is the
+  // only thing that separates them, which is the whole reason it exists.
+  const lines = [];
+  const off = wire.on((snap, frame) => {
+    if (frame && frame.type === "wire/status") lines.push(frame.text);
+  });
+
+  wire.send({}, { id: "r2c" });
+  await settle();
+
+  frame(sockets[0], { type: "wire/status", id: "r2c", text: "thinking" });
+  frame(sockets[0], { type: "wire/status", id: "r2c", text: "thinking" });
+
+  expect(lines).toEqual(["thinking", "thinking"]);
+  off();
+});
+
+test("a listener written for one argument is unaffected", async () => {
+  // The whole change is additive or it is a breaking change, and every existing
+  // consumer takes one argument.
+  const seen = [];
+  const off = wire.on((snap) => seen.push(snap.state));
+
+  wire.send({}, { id: "r2d" });
+  await settle();
+  frame(sockets[0], { type: "wire/status", id: "r2d", text: "working" });
+
+  expect(seen).toEqual(["sent", "acked"]);
+  off();
+});
+
 test("a landing that no sync frame ever reports still ends as done", async () => {
   const handle = wire.send({}, { id: "r3" });
   await settle();

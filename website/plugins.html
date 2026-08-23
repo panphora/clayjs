@@ -97,9 +97,10 @@
       <p class="lib-prob">“I want a program on my own machine to work on this file while I have it open.”</p>
       <p>A per-file control channel between the page and a process running in your terminal. The page sends a request, the process answers with progress, and the process edits <em>the file</em>. HTML never travels over the wire: the change reaches your open page as an ordinary external file change, through live sync. That split is the whole design, and it is why the wire has no opinion about what a payload contains.</p>
       <pre><code>&lt;<span class="t">script</span> <span class="a">src</span>="https://clayjs.com/clay.js?plugins=wire,sync"&gt;&lt;/<span class="t">script</span>&gt;</code></pre>
-      <pre><code><span class="t">const</span> run = <span class="t">await</span> clay.wire.send({ ask: <span class="a">"tighten the intro"</span> });
-clay.wire.on(<span class="a">"frame"</span>, (f) =&gt; console.log(f.state));</code></pre>
-      <p class="small">Also <code>cancel</code>, <code>get</code>, <code>list</code> and <code>isBusy</code>. It runs in view mode too, so a read-only review page can drive one; nothing in it assumes the save lane exists. The stream is lazy and idle between requests, because a browser allows only six connections per origin and live sync already holds one.</p>
+      <pre><code><span class="t">const</span> run = clay.wire.send({ ask: <span class="a">"tighten the intro"</span> });
+clay.wire.on((state, frame) =&gt; console.log(state.state, frame &amp;&amp; frame.text));
+<span class="t">const</span> outcome = <span class="t">await</span> run.done;</code></pre>
+      <p class="small"><code>send</code> returns its handle immediately, and <code>handle.done</code> resolves with the final snapshot and never rejects. <code>on</code> takes a function, not an event name. Its second argument is the inbound frame when one caused the update, which today means a status line and nothing else: <code>state.text</code> is sticky across later states, so the frame is the only way to tell a new line from the same line arriving again. Also <code>cancel</code>, <code>get</code>, <code>list</code> and <code>isBusy</code>. It runs in view mode too, so a read-only review page can drive one; nothing in it assumes the save lane exists. The stream is lazy and idle between requests, because a browser allows only six connections per origin and live sync already holds one.</p>
     </div>
 
     <div class="libcard">

@@ -302,9 +302,17 @@ token variant, `POST /_/save/{token}`, read from `<html htmlclaytoken>`.
   ordinary external file change, through live sync.
 
   ```js
-  const run = await clay.wire.send({ ask: "tighten the intro" });
-  clay.wire.on("frame", (f) => console.log(f.state));
+  const run = clay.wire.send({ ask: "tighten the intro" });
+  clay.wire.on((state, frame) => console.log(state.state, frame && frame.text));
+  const outcome = await run.done;
   ```
+
+  `send` returns its handle immediately; `handle.done` resolves with the final
+  snapshot and never rejects. `on` takes a function, not an event name, and returns
+  its own unsubscribe. A listener's second argument is the inbound frame when one
+  caused the update, which today means `wire/status` and nothing else: `state.text`
+  is sticky across later states, so the frame is the only way to tell a new status
+  line from the same line arriving again.
 
   Also `cancel`, `get`, `list`, `isBusy`. Works in view mode too.
 - `demo` — saves into browser storage instead of a host; used by clayjs.com's live
