@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.7.1] - 2026-08-23
+
+### Changed
+- Update the vendored clayjs build
+
+### Fixed
+- Give the conformance hooks a realistic timeout so they no longer fail on slow runs
+- Bound the CI job runtime and unblock the browser install on Node 26
+
+
+
 ## [0.7.0] - 2026-08-22
 
 ### Changed
