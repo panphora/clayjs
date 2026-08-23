@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.2] - 2026-08-23
+
+### Changed
+- Listeners now receive the causing frame
+
+
+
 ## [0.7.1] - 2026-08-23
 
 ### Changed
