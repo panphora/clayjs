@@ -16,6 +16,7 @@
 <meta name="twitter:title" content="Advanced · clayjs">
 <meta name="twitter:description" content="Advanced save attributes and the separate utility libraries around clayjs.">
 <link rel="stylesheet" href="styles.css">
+<script src="prism.min.js"></script>
 </head>
 <body>
 
@@ -69,22 +70,22 @@
     <span class="eyebrow">Your own attributes</span>
     <h2 class="section-title">Respecting regions from your own code</h2>
     <p>Writing a custom attribute that touches the save? Ask clayjs what a region means instead of matching <code>[no-save]</code> yourself. That's what <code>clay.internals.region</code> is for: it's the same policy the library uses, so your attribute can't quietly stop agreeing with it two releases from now. It needs one extra script tag — the <a href="/docs#internals">internals satellite</a>.</p>
-    <pre><code>&lt;<span class="t">script</span> <span class="a">src</span>="https://clayjs.com/clay-internals.js"&gt;&lt;/<span class="t">script</span>&gt;</code></pre>
+    <pre><code class="language-markup">&lt;script src="https://clayjs.com/clay-internals.js"&gt;&lt;/script&gt;</code></pre>
     <p>A <code>count-of</code> attribute that writes how many elements match a selector into a badge, and leaves alone the regions that aren't being persisted as they stand:</p>
-    <pre><code>await clay.loaded.internals;
+    <pre><code class="language-javascript">await clay.loaded.internals;
 const { resolveRegionPolicy, addRegionToken, PERSIST } = clay.internals.region;
 
 clay.internals.addDocumentTransform(clone =&gt; {
-  for (const el of clone.querySelectorAll(<span class="a">"[count-of]"</span>)) {
-    <span class="c">// Inside no-save or freeze? This element isn't going to disk as it stands,</span>
-    <span class="c">// so counting into it is either wasted or wrong.</span>
+  for (const el of clone.querySelectorAll("[count-of]")) {
+    // Inside no-save or freeze? This element isn't going to disk as it stands,
+    // so counting into it is either wasted or wrong.
     if (resolveRegionPolicy(el).persist !== PERSIST.FULL) continue;
-    el.textContent = clone.querySelectorAll(el.getAttribute(<span class="a">"count-of"</span>)).length;
+    el.textContent = clone.querySelectorAll(el.getAttribute("count-of")).length;
   }
 });</code></pre>
     <p><strong>Keep the callback pure and repeatable.</strong> It runs on the save clone, and it runs again every time clayjs checks whether the page has changed. Write something new on each run, a timestamp being the tempting one, and every check differs from the last, so the page never reads clean and autosave never stops. Derive from the document, don't stamp the clock.</p>
     <p>When your attribute generates chrome of its own, mark it rather than hoping nobody saves it. <code>addRegionToken</code> merges into whatever <code>clay</code> attribute is already on the element:</p>
-    <pre><code>addRegionToken(toolbar, <span class="a">"no-save"</span>);   <span class="c">// clay="existing-token no-save"</span></code></pre>
+    <pre><code class="language-javascript">addRegionToken(toolbar, "no-save");   // clay="existing-token no-save"</code></pre>
     <p class="small">The rest of the surface — <code>isInert</code>, <code>isSnapshotRemoved</code>, <code>REGION_ATTRS</code>, and the raw <code>selectors</code> clayjs strips with — is in the <a href="/docs#internals">reference</a>.</p>
   </section>
 
@@ -97,19 +98,19 @@ clay.internals.addDocumentTransform(clone =&gt; {
       <div class="lib-name">onbeforesave / onbeforesnapshot</div>
       <p class="lib-prob">“I want to clean an element up right before it's written to disk.”</p>
       <p>Inline handlers that run on a <em>copy</em> of the element during the snapshot, so the live page never flickers. <code>onbeforesave</code> runs only for saves; <code>onbeforesnapshot</code> runs for every snapshot, including live-sync broadcasts.</p>
-      <pre><code>&lt;<span class="t">div</span> <span class="a">onbeforesave</span>="this.removeAttribute('data-temp')"&gt;…&lt;/<span class="t">div</span>&gt;</code></pre>
+      <pre><code class="language-markup">&lt;div onbeforesave="this.removeAttribute('data-temp')"&gt;…&lt;/div&gt;</code></pre>
     </div>
 
     <div class="libcard">
       <div class="lib-name">onaftersave</div>
       <p class="lib-prob">“Run something every time a save succeeds.”</p>
-      <pre><code>&lt;<span class="t">div</span> <span class="a">onaftersave</span>="console.log('saved at', event.detail.timestamp)"&gt;…&lt;/<span class="t">div</span>&gt;</code></pre>
+      <pre><code class="language-markup">&lt;div onaftersave="console.log('saved at', event.detail.timestamp)"&gt;…&lt;/div&gt;</code></pre>
     </div>
 
     <div class="libcard">
       <div class="lib-name">refetch-on-save</div>
       <p class="lib-prob">“My stylesheet is generated on save; reload it without a flash.”</p>
-      <pre><code>&lt;<span class="t">link</span> <span class="a">rel</span>="stylesheet" <span class="a">href</span>="style.css" <span class="a">refetch-on-save</span>&gt;</code></pre>
+      <pre><code class="language-markup">&lt;link rel="stylesheet" href="style.css" refetch-on-save&gt;</code></pre>
     </div>
 
     <div class="libcard">
@@ -122,7 +123,7 @@ clay.internals.addDocumentTransform(clone =&gt; {
       <div class="lib-name">clay.addDocumentTransform(fn)</div>
       <p class="lib-prob">“I need JavaScript-level control over the outgoing HTML.”</p>
       <p>Registers a callback that receives the cloned document before serialization, and again on every change check. Strip, rewrite, or annotate anything; the live page is untouched. Keep it pure and repeatable: a callback that writes something new each run leaves the page permanently dirty.</p>
-      <pre><code>clay.addDocumentTransform(doc =&gt; doc.querySelectorAll(".draft-marker").forEach(el =&gt; el.remove()));</code></pre>
+      <pre><code class="language-javascript">clay.addDocumentTransform(doc =&gt; doc.querySelectorAll(".draft-marker").forEach(el =&gt; el.remove()));</code></pre>
     </div>
   </section>
 
@@ -137,41 +138,41 @@ clay.internals.addDocumentTransform(clone =&gt; {
       <div class="lib-name">clay-ui <span class="tag">toasts · modals · dialogs</span></div>
       <p class="lib-prob">“I need a toast or a confirm dialog and don't want to build one.”</p>
       <p>Ready-made toasts, modals, and ask/confirm/tell dialogs. It listens to <code>clay:save-*</code> events automatically, so adding it upgrades your save feedback for free. If you already have a toast library, keep yours: the events are public.</p>
-      <pre><code>&lt;<span class="t">script</span> <span class="a">src</span>="https://clayjs.com/clay-ui.js"&gt;&lt;/<span class="t">script</span>&gt;</code></pre>
+      <pre><code class="language-markup">&lt;script src="https://clayjs.com/clay-ui.js"&gt;&lt;/script&gt;</code></pre>
     </div>
 
     <div class="libcard">
       <div class="lib-name">event attributes</div>
       <p class="lib-prob">“I want small behaviors without writing addEventListener boilerplate.”</p>
       <p><code>onclickaway</code>, <code>onclickchildren</code>, <code>onrender</code>, <code>onmutation</code>, <code>onclone</code>: HTML attributes for the events HTML forgot.</p>
-      <pre><code>&lt;<span class="t">script</span> <span class="a">src</span>="https://clayjs.com/clay-events.js"&gt;&lt;/<span class="t">script</span>&gt;</code></pre>
+      <pre><code class="language-markup">&lt;script src="https://clayjs.com/clay-events.js"&gt;&lt;/script&gt;</code></pre>
     </div>
 
     <div class="libcard">
       <div class="lib-name">option visibility</div>
       <p class="lib-prob">“Show or hide parts of the page based on a state attribute.”</p>
       <p>Declarative show/hide: an ancestor carries the plain state attribute <code>view="kanban"</code>, descendants opt in or out with <code>option:view</code> / <code>option-not:view</code> attributes.</p>
-      <pre><code>&lt;<span class="t">script</span> <span class="a">src</span>="https://clayjs.com/clay-options.js"&gt;&lt;/<span class="t">script</span>&gt;</code></pre>
+      <pre><code class="language-markup">&lt;script src="https://clayjs.com/clay-options.js"&gt;&lt;/script&gt;</code></pre>
     </div>
 
     <div class="libcard">
       <div class="lib-name">DOM helpers</div>
       <p class="lib-prob">“closest() only searches up. I need the element near me.”</p>
       <p><code>el.nearest.menu</code>, <code>el.val.title</code>, <code>el.exec.action()</code>, <code>el.cycle(1, "state")</code>: small prototype helpers for DOM-first apps. The first three are getter proxies (read the nearest element with that attribute or class); <code>cycle</code> takes its attribute name.</p>
-      <pre><code>&lt;<span class="t">script</span> <span class="a">src</span>="https://clayjs.com/clay-dom.js"&gt;&lt;/<span class="t">script</span>&gt;</code></pre>
+      <pre><code class="language-markup">&lt;script src="https://clayjs.com/clay-dom.js"&gt;&lt;/script&gt;</code></pre>
     </div>
 
     <div class="libcard">
       <div class="lib-name">All.js</div>
       <p class="lib-prob">“I miss jQuery's ergonomics, not its size.”</p>
       <p>A chainable wrapper over querySelectorAll: <code>All(".card").css({ opacity: 1 }).onclick(e =&gt; e.target.classList.toggle("done"))</code>. Events are property-form (<code>.onclick</code>, <code>.oninput</code>); classes go through <code>.classList</code>. Zero dependencies, one script tag.</p>
-      <pre><code>&lt;<span class="t">script</span> <span class="a">src</span>="https://clayjs.com/all.js"&gt;&lt;/<span class="t">script</span>&gt;</code></pre>
+      <pre><code class="language-markup">&lt;script src="https://clayjs.com/all.js"&gt;&lt;/script&gt;</code></pre>
     </div>
 
     <div class="libcard">
       <div class="lib-name">utilities</div>
       <p class="lib-prob">“The small stuff: throttle, debounce, cookies, slugify.”</p>
-      <pre><code>&lt;<span class="t">script</span> <span class="a">src</span>="https://clayjs.com/clay-utils.js"&gt;&lt;/<span class="t">script</span>&gt;</code></pre>
+      <pre><code class="language-markup">&lt;script src="https://clayjs.com/clay-utils.js"&gt;&lt;/script&gt;</code></pre>
     </div>
 
     <div class="libcard">

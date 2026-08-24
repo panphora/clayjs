@@ -16,6 +16,7 @@
 <meta name="twitter:title" content="Docs · clayjs">
 <meta name="twitter:description" content="clayjs reference: the core API, attributes, events, and the save endpoint spec.">
 <link rel="stylesheet" href="styles.css">
+<script src="prism.min.js"></script>
 </head>
 <body>
 
@@ -42,7 +43,7 @@
   <section id="loading">
     <span class="eyebrow">Loading</span>
     <h2 class="section-title">The script tag</h2>
-    <pre><code>&lt;<span class="t">script</span> <span class="a">src</span>="https://clayjs.com/clay.js"&gt;&lt;/<span class="t">script</span>&gt;</code></pre>
+    <pre><code class="language-markup">&lt;script src="https://clayjs.com/clay.js"&gt;&lt;/script&gt;</code></pre>
     <p>The default build includes the save lifecycle and rich text (<code>editable</code>). Plugins load conditionally through the URL, in the browser only:</p>
     <table>
       <tr><th>Param</th><th>Meaning</th><th>Example</th></tr>
@@ -93,7 +94,7 @@
     <span class="eyebrow">Low level</span>
     <h2 class="section-title">clay.internals</h2>
     <p>The pieces clayjs builds itself out of, for code that needs to sit <em>inside</em> the save lifecycle rather than call it. Lower level than <code>clay.*</code> deliberately: it assumes you know the lifecycle. One extra script tag, and <code>clay.loaded.internals</code> resolves when it's ready.</p>
-    <pre><code>&lt;<span class="t">script</span> <span class="a">src</span>="https://clayjs.com/clay-internals.js"&gt;&lt;/<span class="t">script</span>&gt;</code></pre>
+    <pre><code class="language-markup">&lt;script src="https://clayjs.com/clay-internals.js"&gt;&lt;/script&gt;</code></pre>
     <table>
       <tr><th>Member</th><th>What it does</th></tr>
       <tr><td><code>captureSnapshot()</code></td><td>The cloned document element, with form values synced, <code>onbeforesnapshot</code> handlers run, and <code>no-snapshot</code> regions plus browser-extension noise already removed. It is the shared base every lane starts from, not an untouched copy of the DOM.</td></tr>
@@ -166,8 +167,8 @@
     </table>
     <p class="small">The token sits above the cookie because it is the stronger claim: the host issued it for this document, while a cookie is ambient. A sandboxed document cannot read a cookie at all.</p>
     <p>Serving files from your own server? Arm it yourself:</p>
-    <pre><code>&lt;<span class="t">script</span>&gt;window.clayEditMode = true&lt;/<span class="t">script</span>&gt;
-&lt;<span class="t">script</span> <span class="a">src</span>="https://clayjs.com/clay.js"&gt;&lt;/<span class="t">script</span>&gt;</code></pre>
+    <pre><code class="language-markup">&lt;script&gt;window.clayEditMode = true&lt;/script&gt;
+&lt;script src="https://clayjs.com/clay.js"&gt;&lt;/script&gt;</code></pre>
     <p class="small">Edit mode is client-side behavior. Whether a save is <em>accepted</em> is always the server's decision.</p>
   </section>
 
@@ -185,25 +186,25 @@
       <tr><td>Failure</td><td>Any non-2xx with JSON <code>{ "msg": "why" }</code></td></tr>
     </table>
     <p>A complete server in about 20 lines of Express:</p>
-    <pre><code>import express from <span class="a">"express"</span>;
-import fs from <span class="a">"node:fs/promises"</span>;
-import path from <span class="a">"node:path"</span>;
+    <pre><code class="language-javascript">import express from "express";
+import fs from "node:fs/promises";
+import path from "node:path";
 
 const root = process.cwd();
 const app = express();
 app.use(express.static(root));
-app.use(express.text({ type: <span class="a">"*/*"</span>, limit: <span class="a">"10mb"</span> }));
+app.use(express.text({ type: "*/*", limit: "10mb" }));
 
-app.post(<span class="a">"/_/save"</span>, async (req, res) =&gt; {
+app.post("/_/save", async (req, res) =&gt; {
   try {
-    const page = decodeURIComponent(new URL(req.get(<span class="a">"Document-URL"</span>)).pathname);
-    const file = path.join(root, page.endsWith(<span class="a">"/"</span>) ? page + <span class="a">"index.html"</span> : page);
-    <span class="c">// a save may only ever write inside the folder you are serving</span>
-    if (!file.startsWith(root + path.sep)) return res.status(403).json({ msg: <span class="a">"Outside the folder"</span> });
+    const page = decodeURIComponent(new URL(req.get("Document-URL")).pathname);
+    const file = path.join(root, page.endsWith("/") ? page + "index.html" : page);
+    // a save may only ever write inside the folder you are serving
+    if (!file.startsWith(root + path.sep)) return res.status(403).json({ msg: "Outside the folder" });
     await fs.writeFile(file, req.body);
-    res.json({ msg: <span class="a">"Saved"</span> });
+    res.json({ msg: "Saved" });
   } catch {
-    res.status(500).json({ msg: <span class="a">"Couldn't save"</span> });
+    res.status(500).json({ msg: "Couldn't save" });
   }
 });
 

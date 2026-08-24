@@ -24,6 +24,13 @@ or carry third-party code, and keep their original licenses.
 - (c) Cure53 and other contributors
 - https://github.com/cure53/DOMPurify
 
+## Prism 1.29.0 (MIT)
+
+- File: website/prism.min.js (core + markup, css, clike, javascript, bash), used
+  only to highlight the code samples on clayjs.com. Not part of the library.
+- Copyright (c) 2012 Lea Verou
+- https://github.com/PrismJS/prism
+
 ## MicroModal (MIT)
 
 - The modal component in src/ui/modal.js derives its structure and class naming

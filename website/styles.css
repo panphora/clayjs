@@ -15,6 +15,8 @@
   --char-ink: #EDE7DB;
   --char-tag: #DFBF7F;
   --char-attr: #A5C6AD;
+  --char-val: #D9A183;
+  --char-punc: #A8A093;
   --char-mut: #8F887C;
   --serif: Charter, "Bitstream Charter", Georgia, Cambria, "Times New Roman", serif;
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
@@ -110,9 +112,53 @@ pre {
   font-family: var(--mono); font-size: 13.5px; line-height: 1.65;
   margin: 14px 0;
 }
-pre .t { color: var(--char-tag); }
-pre .a { color: var(--char-attr); }
-pre .c { color: var(--char-mut); font-style: italic; }
+/* Prism token theme. Three hues on the dark ground, and they mean the same
+   thing in every language: gold is structure (tag names, keywords), sage is
+   names (attributes, properties, functions), clay is values (strings, numbers).
+   Hand-written .t/.a spans did this job until they drifted — `const` was gold
+   on one page and plain on three others. */
+code[class*="language-"] .token.comment { color: var(--char-mut); font-style: italic; }
+
+/* Brackets, slashes and operators carry the shape of the markup, so they get
+   their own step above the comment grey rather than sharing it: at --char-mut
+   the angle brackets sit at 3.9:1 on --char, and HTML is most of what these
+   blocks show. --char-punc is 5.5:1. A doctype is structure, not a comment. */
+code[class*="language-"] .token.punctuation,
+code[class*="language-"] .token.operator,
+code[class*="language-"] .token.doctype,
+code[class*="language-"] .token.prolog,
+code[class*="language-"] .token.cdata { color: var(--char-punc); }
+
+code[class*="language-"] .token.tag,
+code[class*="language-"] .token.keyword,
+code[class*="language-"] .token.selector,
+code[class*="language-"] .token.atrule,
+code[class*="language-"] .token.important { color: var(--char-tag); }
+
+code[class*="language-"] .token.attr-name,
+code[class*="language-"] .token.function,
+code[class*="language-"] .token.class-name,
+code[class*="language-"] .token.property,
+code[class*="language-"] .token.builtin,
+code[class*="language-"] .token.variable,
+code[class*="language-"] .token.constant { color: var(--char-attr); }
+
+code[class*="language-"] .token.attr-value,
+code[class*="language-"] .token.string,
+code[class*="language-"] .token.char,
+code[class*="language-"] .token.regex,
+code[class*="language-"] .token.number,
+code[class*="language-"] .token.boolean,
+code[class*="language-"] .token.entity,
+code[class*="language-"] .token.symbol,
+code[class*="language-"] .token.url { color: var(--char-val); }
+
+/* Prism nests the = and the quotes inside attr-value; without these the quotes
+   come out muted and the value looks unclosed. */
+code[class*="language-"] .token.attr-value > .token.punctuation { color: var(--char-val); }
+code[class*="language-"] .token.attr-value > .token.attr-equals { color: var(--char-punc); }
+
+code[class*="language-"] .token.namespace { opacity: 0.7; }
 code {
   font-family: var(--mono); font-size: 0.88em;
   background: #E7E4DC; border-radius: 4px; padding: 1px 5px;

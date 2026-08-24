@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" autosave demo-key="clayjs-get-started-v1">
+<html lang="en" autosave demo-key="clayjs-get-started-v2">
 <!--
   get-started.html · served at /get-started (website/ copies to the root of public/)
 
@@ -37,6 +37,7 @@
 <meta name="twitter:title" content="Get started · clayjs">
 <meta name="twitter:description" content="From nothing to an HTML file on your own machine that saves itself. About two minutes, no account, no build step.">
 <link rel="stylesheet" href="styles.css">
+<script src="prism.min.js"></script>
 <style>
   .copyrow { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: 16px 0 0; }
   .copyrow .lbl { font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-soft); }
@@ -112,7 +113,7 @@
       <summary><span class="prob">See the HTML a save writes</span><span class="sol">clay.getHTML()</span></summary>
       <div class="fold-body">
         <p class="small">This demo sheet's slice of the exact string <code>clay.getHTML()</code> returns: the payload a save sends, after cleanup. Your edits are just markup now.</p>
-        <pre id="payload-view" clay="no-save no-watch no-snapshot" style="max-height: 320px; overflow: auto;"></pre>
+        <pre class="language-markup" id="payload-view" clay="no-save no-watch no-snapshot" style="max-height: 320px; overflow: auto;"></pre>
       </div>
     </details>
 
@@ -120,15 +121,15 @@
     <div class="copyrow">
       <span class="lbl">notes.html · the whole file</span>
     </div>
-    <pre><code id="recipe-code">&lt;!DOCTYPE html&gt;
-&lt;<span class="t">html</span> <span class="a">lang</span>="en" <span class="a">autosave</span>&gt;
-&lt;<span class="t">head</span>&gt;&lt;<span class="t">meta</span> <span class="a">charset</span>="utf-8"&gt;&lt;<span class="t">title</span>&gt;Notes&lt;/<span class="t">title</span>&gt;&lt;/<span class="t">head</span>&gt;
-&lt;<span class="t">body</span>&gt;
-  &lt;<span class="t">h1</span> <span class="a">editable</span>&gt;My notes&lt;/<span class="t">h1</span>&gt;
-  &lt;<span class="t">div</span> <span class="a">editable</span>&gt;&lt;<span class="t">p</span>&gt;Type anything here.&lt;/<span class="t">p</span>&gt;&lt;/<span class="t">div</span>&gt;
-  &lt;<span class="t">script</span> <span class="a">src</span>="https://clayjs.com/clay.js"&gt;&lt;/<span class="t">script</span>&gt;
-&lt;/<span class="t">body</span>&gt;
-&lt;/<span class="t">html</span>&gt;</code></pre>
+    <pre><code class="language-markup" id="recipe-code">&lt;!DOCTYPE html&gt;
+&lt;html lang="en" autosave&gt;
+&lt;head&gt;&lt;meta charset="utf-8"&gt;&lt;title&gt;Notes&lt;/title&gt;&lt;/head&gt;
+&lt;body&gt;
+  &lt;h1 editable&gt;My notes&lt;/h1&gt;
+  &lt;div editable&gt;&lt;p&gt;Type anything here.&lt;/p&gt;&lt;/div&gt;
+  &lt;script src="https://clayjs.com/clay.js"&gt;&lt;/script&gt;
+&lt;/body&gt;
+&lt;/html&gt;</code></pre>
 
     <div class="recipes">
       <span class="r-title">The whole path</span>
@@ -166,14 +167,14 @@
       <span class="lbl">notes.html · plain, for now</span>
       <button type="button" class="btn" data-copy="#plain-code" clay="no-save no-watch">Copy</button>
     </div>
-    <pre><code id="plain-code">&lt;!DOCTYPE html&gt;
-&lt;<span class="t">html</span> <span class="a">lang</span>="en"&gt;
-&lt;<span class="t">head</span>&gt;&lt;<span class="t">meta</span> <span class="a">charset</span>="utf-8"&gt;&lt;<span class="t">title</span>&gt;Notes&lt;/<span class="t">title</span>&gt;&lt;/<span class="t">head</span>&gt;
-&lt;<span class="t">body</span>&gt;
-  &lt;<span class="t">h1</span>&gt;My notes&lt;/<span class="t">h1</span>&gt;
-  &lt;<span class="t">div</span>&gt;&lt;<span class="t">p</span>&gt;Type anything here.&lt;/<span class="t">p</span>&gt;&lt;/<span class="t">div</span>&gt;
-&lt;/<span class="t">body</span>&gt;
-&lt;/<span class="t">html</span>&gt;</code></pre>
+    <pre><code class="language-markup" id="plain-code">&lt;!DOCTYPE html&gt;
+&lt;html lang="en"&gt;
+&lt;head&gt;&lt;meta charset="utf-8"&gt;&lt;title&gt;Notes&lt;/title&gt;&lt;/head&gt;
+&lt;body&gt;
+  &lt;h1&gt;My notes&lt;/h1&gt;
+  &lt;div&gt;&lt;p&gt;Type anything here.&lt;/p&gt;&lt;/div&gt;
+&lt;/body&gt;
+&lt;/html&gt;</code></pre>
     <p>Now rename <code>notes.html</code> to <code>notes.htmlclay</code> and double-click it. HTML Clay serves it at <code>http://127.0.0.1</code> and opens it in your default browser, as an ordinary tab. Right now it is just a page; the next two steps make it a document.</p>
     <p class="small">On a machine without the app, nothing is lost: it is still an ordinary HTML file. Rename it back to <code>.html</code> and any browser opens it. Nothing about the file depends on the app.</p>
   </section>
@@ -186,7 +187,7 @@
       <span class="lbl">last line inside &lt;body&gt;</span>
       <button type="button" class="btn" data-copy="#tag-code" clay="no-save no-watch">Copy</button>
     </div>
-    <pre><code id="tag-code">&lt;<span class="t">script</span> <span class="a">src</span>="https://clayjs.com/clay.js"&gt;&lt;/<span class="t">script</span>&gt;</code></pre>
+    <pre><code class="language-markup" id="tag-code">&lt;script src="https://clayjs.com/clay.js"&gt;&lt;/script&gt;</code></pre>
     <p>Open <code>notes.htmlclay</code> in your text editor, add that line just before <code>&lt;/body&gt;</code>, save, and refresh the tab. Nothing visible changes, but the wiring is now live: when HTML Clay serves the file it stamps a save token onto <code>&lt;html&gt;</code>, and clayjs reads that token, switches into edit mode on its own, and knows to POST the whole document back to the app. No config, no save code to write.</p>
   </section>
 
@@ -199,8 +200,8 @@
       <span class="lbl">the two attributes</span>
       <button type="button" class="btn" data-copy="#attrs-code" clay="no-save no-watch">Copy</button>
     </div>
-    <pre><code id="attrs-code">&lt;<span class="t">html</span> <span class="a">lang</span>="en" <span class="a">autosave</span>&gt;
-  &lt;<span class="t">div</span> <span class="a">editable</span>&gt;&lt;<span class="t">p</span>&gt;Type anything here.&lt;/<span class="t">p</span>&gt;&lt;/<span class="t">div</span>&gt;</code></pre>
+    <pre><code class="language-markup" id="attrs-code">&lt;html lang="en" autosave&gt;
+  &lt;div editable&gt;&lt;p&gt;Type anything here.&lt;/p&gt;&lt;/div&gt;</code></pre>
     <p>Add them, refresh the tab, and your file now matches the complete file at the <a href="#try">top of this page</a>.</p>
     <p><strong>Now prove it to yourself.</strong> Type into the page, stop for a moment, then open <code>notes.htmlclay</code> in your text editor. Your words are in the file. That file is the whole app.</p>
     <p class="small">While it works, clayjs keeps a <code>savestatus</code> attribute on <code>&lt;html&gt;</code> up to date (<code>saving</code>, <code>saved</code>, <code>error</code>, <code>offline</code>) and draws no interface of its own. Style it with a few lines of CSS, listen to the <code>clay:save-*</code> events (that is what this page's status chip does), or load a ready-made chip with <code>clay.js?plugins=indicator</code>. Details in the <a href="/docs#attributes">reference</a>.</p>
@@ -456,24 +457,12 @@
     document.addEventListener("clay:save-" + state, function () { showChip(state); });
   });
 
-  // The payload viewer: the demo sheet's slice of the exact save payload,
-  // re-rendered with the same .t/.a highlighting as the static code blocks so
-  // it stays highlighted every time a save refreshes it.
+  // The payload viewer: the demo sheet's slice of the exact save payload, run
+  // through the same Prism pass as the static code blocks so it stays
+  // highlighted every time a save refreshes it. Setting textContent first is
+  // what escapes the markup; Prism re-reads that text and writes the tokens.
   var fold = document.getElementById("payload-fold");
   var view = document.getElementById("payload-view");
-  function escapeHTML(s) {
-    return s.replace(/[&<>]/g, function (c) {
-      return c === "&" ? "&amp;" : c === "<" ? "&lt;" : "&gt;";
-    });
-  }
-  function highlightHTML(src) {
-    return escapeHTML(src).replace(/&lt;(\/?)([a-zA-Z][\w-]*)([\s\S]*?)(\/?&gt;)/g, function (m, slash, tag, attrs, end) {
-      attrs = attrs.replace(/("[^"]*")|([a-zA-Z][\w-]*)/g, function (mm, quoted, name) {
-        return quoted ? quoted : '<span class="a">' + name + "</span>";
-      });
-      return "&lt;" + slash + '<span class="t">' + tag + "</span>" + attrs + end;
-    });
-  }
   function renderPayload() {
     if (!fold.open) return;
     if (!canSave() || !("getHTML" in window.clay)) {
@@ -482,7 +471,8 @@
     }
     var doc = new DOMParser().parseFromString(window.clay.getHTML(), "text/html");
     var el = doc.getElementById("try-sheet");
-    view.innerHTML = el ? highlightHTML(el.outerHTML) : "";
+    view.textContent = el ? el.outerHTML : "";
+    if (el && window.Prism) Prism.highlightElement(view);
   }
   fold.addEventListener("toggle", renderPayload);
   document.addEventListener("clay:save-saved", renderPayload);
