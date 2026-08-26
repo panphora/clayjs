@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.4] - 2026-08-26
+
+### Changed
+- Clarified First Million Stays Yours License terms
+
+
+
 ## [0.7.3] - 2026-08-25
 
 ### Changed
