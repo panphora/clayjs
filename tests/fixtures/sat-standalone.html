@@ -12,18 +12,18 @@
     constructor(cb) { super(cb); window.__moCount++; }
   };
 </script>
-<script src="/clay-ui.js"></script>
-<script src="/clay-dom.js"></script>
+<script src="/v1/clay-ui.js"></script>
+<script src="/v1/clay-dom.js"></script>
 <script src="/all.js"></script>
-<script src="/clay-utils.js"></script>
+<script src="/v1/clay-utils.js"></script>
 <!-- immediate-call race (§5.7): inline script right after the tag, gated on clay.loaded -->
 <script>
   window.__race = clay.loaded.utils.then(() => clay.utils.slugify("Race Check"));
 </script>
-<script src="/clay-events.js"></script>
-<script src="/clay-options.js"></script>
-<script src="/sap.js"></script>
-<script src="/clay-data.js"></script>
+<script src="/v1/clay-events.js"></script>
+<script src="/v1/clay-options.js"></script>
+<script src="/v1/sap.js"></script>
+<script src="/v1/clay-data.js"></script>
 <script type="application/json" data-rules-name="cms" data-rules-version="1">
 { "title": ".page-title" }
 </script>

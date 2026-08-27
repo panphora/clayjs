@@ -1,0 +1,20 @@
+# Cache-Control and the module CORS rule are NOT in this file. They are per version
+# prefix now (/v1/*, /1.0.0/*, ...) and build.js appends them, because two matching
+# blocks do not override, they JOIN: declaring Cache-Control on /* and again on a
+# pinned prefix sends both values. So never add a Cache-Control line here.
+
+# The get-started starter. Cloudflare answers /my-list.html with a 307 to
+# /my-list, so both paths carry the rules: the redirect target is where the
+# headers actually land, and the source path is what a reader or an agent types.
+# Content-Disposition keeps the served copy a real download with the right
+# filename even when the guide's Blob path is unavailable (no JS, or a fetch
+# rather than a click). X-Robots-Tag keeps a bare checklist with no nav and no
+# canonical out of search results without shipping a noindex meta tag inside the
+# file the reader downloads, which becomes their file.
+/my-list
+  Content-Disposition: attachment; filename="my-list.html"
+  X-Robots-Tag: noindex
+
+/my-list.html
+  Content-Disposition: attachment; filename="my-list.html"
+  X-Robots-Tag: noindex

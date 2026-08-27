@@ -12,7 +12,7 @@ at those URLs. clayjs is MIT-0 licensed. npm builds for bundlers: @panphora/clay
 ## The one-paragraph integration
 
 To make a static HTML file malleable: add
-`<script src="https://clayjs.com/clay.js"></script>` as the last element inside `<body>`.
+`<script src="https://clayjs.com/v1/clay.js"></script>` as the last element inside `<body>`.
 Add an `autosave` attribute to the `<html>` element. Add an `editable` attribute to each
 element a person should edit as rich text (headings, paragraphs, note containers). Add a
 `persist` attribute to any form control whose value should survive saving. Mark page UI
@@ -32,7 +32,7 @@ clayjs is client-side; a host accepts the save and writes bytes:
 ## Loading
 
 ```html
-<script src="https://clayjs.com/clay.js"></script>
+<script src="https://clayjs.com/v1/clay.js"></script>
 ```
 
 The default build includes the save lifecycle and rich text (`editable`). Plugins load
@@ -94,15 +94,18 @@ In view mode the edit-only members are absent: `window.clay` holds just `ready`,
 `toggleEditMode`, `isEditMode`, `isOwner`, `Mutation`, and `region` (plus `morph`/`cms`
 when those plugins load). Feature-detect with `'save' in clay`.
 
-Stability contract (since 0.3.0): `clay.*` from clay.js and `clay.*` from a satellite
+Stability contract (since 1.0.0): `clay.*` from clay.js and `clay.*` from a satellite
 are stable; no name changes without a major version. Anything else under `src/` is
 reachable by direct import but may change in any release.
 
 ## The HTML surface (attributes)
 
-- `editable` (any element) — rich text editing with a floating toolbar (richclay,
-  default on). Tokens combine: `editable="single-line no-toolbar toolbar-on-select"`.
-  Native `contenteditable` also works for plain text.
+- `editable` (any element except a custom element) — rich text editing with a floating
+  toolbar (richclay, default on). Tokens combine:
+  `editable="single-line no-toolbar toolbar-on-select"`. A hyphenated tag is skipped,
+  because `editable` is a common boolean property on a component and means something
+  else there; such an element opts in with `clay-editable` instead. Native
+  `contenteditable` also works for plain text.
 - `persist` (form controls) — writes the control's current value into the HTML so it
   survives the save. `password`, `hidden`, and `file` inputs are always skipped, so a
   secret cannot be written into the file by adding one attribute.
@@ -204,7 +207,7 @@ Serving files from your own server? Arm it yourself:
 
 ```html
 <script>window.clayEditMode = true</script>
-<script src="https://clayjs.com/clay.js"></script>
+<script src="https://clayjs.com/v1/clay.js"></script>
 ```
 
 Edit mode is client-side behavior. Whether a save is accepted is always the server's
@@ -272,7 +275,7 @@ token variant, `POST /_/save/{token}`, read from `<html htmlclaytoken>`.
   text, images, lists), not markup:
 
   ```html
-  <script src="https://clayjs.com/clay.js?plugins=cms"></script>
+  <script src="https://clayjs.com/v1/clay.js?plugins=cms"></script>
   <script data-rules-name="cms" data-rules-version="1" type="application/json">
   {
     "title":    ".page-title",
@@ -347,7 +350,7 @@ token variant, `POST /_/save/{token}`, read from `<html htmlclaytoken>`.
 
 ## clay.internals (low level)
 
-One extra script tag, `<script src="https://clayjs.com/clay-internals.js"></script>`;
+One extra script tag, `<script src="https://clayjs.com/v1/clay-internals.js"></script>`;
 `clay.loaded.internals` resolves when ready. Lower level than `clay.*` deliberately.
 
 - `captureSnapshot()` — the cloned document element, with form values synced,

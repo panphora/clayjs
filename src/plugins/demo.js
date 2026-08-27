@@ -3,7 +3,7 @@
 //
 //   <html autosave demo-key="my-page-v1">          <!-- both attributes optional -->
 //   <script>window.clayEditMode = true;</script>   <!-- before the clay.js tag -->
-//   <script src="https://clayjs.com/clay.js?plugins=demo"></script>
+//   <script src="https://clayjs.com/v1/clay.js?plugins=demo"></script>
 //
 // The fetch shim answers POST /_/save the way a clayjs server would, so the
 // whole real pipeline (savestatus, events, autosave, ⌘S) runs unchanged. The
@@ -112,7 +112,7 @@ async function restore() {
   // attribute, never the element: [contenteditable] cannot join CHROME_SELECTOR,
   // whose matches are removed outright, and doing that deletes real content.
   if (!isEditMode) {
-    for (const el of doc.querySelectorAll("[editable][contenteditable]")) {
+    for (const el of doc.querySelectorAll(":is([editable], [clay-editable])[contenteditable]")) {
       el.removeAttribute("contenteditable");
     }
   }

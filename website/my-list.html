@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>My list</title>
+<style>
+  body {
+    font: 17px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
+    color: #2B2723; background: #F1EFEA;
+    max-width: 30em; margin: 0 auto; padding: 7vh 22px 12vh;
+  }
+  h1 { font-size: 30px; line-height: 1.2; margin: 0 0 4px; }
+  p.sub { color: #57514A; margin: 0 0 26px; }
+  ul { list-style: none; margin: 0; padding: 0; }
+  li { display: flex; align-items: center; gap: 12px; padding: 13px 2px; border-bottom: 1px solid #DDD8CE; }
+  input[type=checkbox] { width: 19px; height: 19px; flex: none; accent-color: #3E6B52; cursor: pointer; }
+  input[type=checkbox]:checked + span { color: #57514A; text-decoration: line-through; }
+  :focus-visible { outline: 2px solid #3E6B52; outline-offset: 3px; }
+</style>
+</head>
+<body>
+
+<h1>My list</h1>
+<p class="sub">What I need to get done.</p>
+
+<ul>
+  <li><input type="checkbox" aria-labelledby="t1"> <span id="t1">Buy oat milk</span></li>
+  <li><input type="checkbox" aria-labelledby="t2"> <span id="t2">Book the dentist</span></li>
+  <li><input type="checkbox" aria-labelledby="t3"> <span id="t3">Water the fig tree</span></li>
+</ul>
+
+</body>
+</html>

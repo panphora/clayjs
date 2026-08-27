@@ -12,9 +12,14 @@
 <meta property="og:title" content="Plugins · clayjs">
 <meta property="og:description" content="The heavyweight plugins for malleable HTML files: CMS, sap, richclay, undo, quickcrop, data.">
 <meta property="og:url" content="https://clayjs.com/plugins">
-<meta name="twitter:card" content="summary">
+<meta property="og:image" content="https://clayjs.com/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="clayjs: the document is the app, the document is the database">
+<meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Plugins · clayjs">
 <meta name="twitter:description" content="The heavyweight plugins for malleable HTML files: CMS, sap, richclay, undo, quickcrop, data.">
+<meta name="twitter:image" content="https://clayjs.com/og-image.png">
 <link rel="stylesheet" href="styles.css">
 <script src="prism.min.js"></script>
 </head>
@@ -46,7 +51,7 @@
       <p class="lib-prob">“Other people need to edit this page's content without touching its code.”</p>
       <p>A content sidebar that builds itself from your page. You name the parts of the file that count as content, and the CMS turns them into friendly fields: text, rich text, images, lists. Whoever you share edit access with sees the panel, not the markup.</p>
       <p><strong>Setup is two tags.</strong> Check <em>“A content sidebar”</em> in the <a href="/#configure">configurator</a> (or add <code>?plugins=cms</code> yourself), then tell it what's content with a rules tag:</p>
-      <pre><code class="language-markup">&lt;script src="https://clayjs.com/clay.js?plugins=cms"&gt;&lt;/script&gt;
+      <pre><code class="language-markup">&lt;script src="https://clayjs.com/v1/clay.js?plugins=cms"&gt;&lt;/script&gt;
 &lt;script data-rules-name="cms" data-rules-version="1" type="application/json"&gt;
 {
   "title":    ".page-title",
@@ -83,21 +88,21 @@
       <div class="lib-name" id="undo">undo <span class="tag">checkbox plugin</span></div>
       <p class="lib-prob">“⌘Z should undo what I did to the page, not just the last keystroke.”</p>
       <p>Document-wide undo/redo built on DOM mutations: moves, deletions, and attribute changes all reverse cleanly. Respects <code>clay="no-undo"</code> regions.</p>
-      <pre><code class="language-markup">&lt;script src="https://clayjs.com/clay.js?plugins=undo"&gt;&lt;/script&gt;</code></pre>
+      <pre><code class="language-markup">&lt;script src="https://clayjs.com/v1/clay.js?plugins=undo"&gt;&lt;/script&gt;</code></pre>
     </div>
 
     <div class="libcard">
       <div class="lib-name" id="upload">upload <span class="tag">plugin · ask by name</span></div>
       <p class="lib-prob">“Someone needs to put a file into this page without knowing what a data URL is.”</p>
       <p>A file picker that gets the chosen file into the page. Pair it with the CMS for image fields, or call it yourself from a button.</p>
-      <pre><code class="language-markup">&lt;script src="https://clayjs.com/clay.js?plugins=upload"&gt;&lt;/script&gt;</code></pre>
+      <pre><code class="language-markup">&lt;script src="https://clayjs.com/v1/clay.js?plugins=upload"&gt;&lt;/script&gt;</code></pre>
     </div>
 
     <div class="libcard">
       <div class="lib-name" id="wire">wire <span class="tag">plugin · ask by name</span></div>
       <p class="lib-prob">“I want a program on my own machine to work on this file while I have it open.”</p>
       <p>A per-file control channel between the page and a process running in your terminal. The page sends a request, the process answers with progress, and the process edits <em>the file</em>. HTML never travels over the wire: the change reaches your open page as an ordinary external file change, through live sync. That split is the whole design, and it is why the wire has no opinion about what a payload contains.</p>
-      <pre><code class="language-markup">&lt;script src="https://clayjs.com/clay.js?plugins=wire,sync"&gt;&lt;/script&gt;</code></pre>
+      <pre><code class="language-markup">&lt;script src="https://clayjs.com/v1/clay.js?plugins=wire,sync"&gt;&lt;/script&gt;</code></pre>
       <pre><code class="language-javascript">const run = clay.wire.send({ ask: "tighten the intro" });
 clay.wire.on((state, frame) =&gt; console.log(state.state, frame &amp;&amp; frame.text));
 const outcome = await run.done;</code></pre>
@@ -108,14 +113,14 @@ const outcome = await run.done;</code></pre>
       <div class="lib-name" id="sap">sap <span class="tag">separate library</span></div>
       <p class="lib-prob">“I want reactive templates, with the DOM itself as the state.”</p>
       <p>Reactivity without a virtual DOM or a store: attributes and elements are the source of truth, and templates re-render when the DOM they depend on changes. Made for malleable files, where the page already is the database.</p>
-      <pre><code class="language-markup">&lt;script src="https://clayjs.com/sap.js"&gt;&lt;/script&gt;</code></pre>
+      <pre><code class="language-markup">&lt;script src="https://clayjs.com/v1/sap.js"&gt;&lt;/script&gt;</code></pre>
     </div>
 
     <div class="libcard">
       <div class="lib-name" id="data">data <span class="tag">separate library</span></div>
       <p class="lib-prob">“I want the page's content in and out as JSON.”</p>
       <p><code>clay.extractData()</code> reads your page into structured JSON; <code>clay.applyData(data)</code> writes JSON back into the page. The same mapping powers a read-only <code>/_/api</code> endpoint on platforms that support it, so a malleable file can double as an API.</p>
-      <pre><code class="language-markup">&lt;script src="https://clayjs.com/clay-data.js"&gt;&lt;/script&gt;</code></pre>
+      <pre><code class="language-markup">&lt;script src="https://clayjs.com/v1/clay-data.js"&gt;&lt;/script&gt;</code></pre>
       <p class="small">Both attach to <code>window.clay</code>. From an inline script, wait for the tag first: <code>await clay.loaded.data</code>, then <code>const data = clay.extractData()</code>.</p>
     </div>
   </section>

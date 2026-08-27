@@ -1,6 +1,6 @@
 {
   "name": "@panphora/clayjs",
-  "version": "0.7.4",
+  "version": "1.0.0",
   "type": "module",
   "description": "clayjs: malleable HTML files. Save lifecycle for self-saving HTML.",
   "license": "MIT-0",
@@ -9,18 +9,32 @@
     "type": "git",
     "url": "git+https://github.com/panphora/clayjs.git"
   },
+  "bugs": {
+    "url": "https://github.com/panphora/clayjs/issues"
+  },
+  "keywords": [
+    "html",
+    "self-saving",
+    "malleable",
+    "local-first",
+    "no-build",
+    "contenteditable",
+    "dom",
+    "autosave",
+    "single-file",
+    "static-site",
+    "vanilla-javascript",
+    "html-editor"
+  ],
+  "exports": {
+    "./package.json": "./package.json",
+    "./THIRD-PARTY-NOTICES.md": "./THIRD-PARTY-NOTICES.md",
+    "./src/*": "./src/*",
+    "./entries/*": "./entries/*",
+    "./*": "./entries/*"
+  },
   "files": [
-    "clay.js",
-    "clay-ui.js",
-    "clay-internals.js",
-    "clay-events.js",
-    "clay-options.js",
-    "clay-dom.js",
-    "all.js",
-    "clay-utils.js",
-    "sap.js",
-    "clay-data.js",
-    "_headers",
+    "entries/",
     "THIRD-PARTY-NOTICES.md",
     "src/"
   ],
@@ -29,8 +43,8 @@
   },
   "scripts": {
     "test": "NODE_OPTIONS=--experimental-vm-modules jest",
-    "test:conformance": "UPDATE_GOLDENS=0 web-test-runner",
-    "conformance:update": "UPDATE_GOLDENS=1 web-test-runner",
+    "test:conformance": "UPDATE_GOLDENS=0 web-test-runner --config conformance/wtr.config.mjs",
+    "conformance:update": "UPDATE_GOLDENS=1 web-test-runner --config conformance/wtr.config.mjs",
     "prepublishOnly": "npm test && npm run test:conformance",
     "dev": "node tests/stub-server.mjs",
     "build": "node build.js",
@@ -49,5 +63,15 @@
     "kind": "lib",
     "status": "active",
     "url": "https://clayjs.com"
+  },
+  "jest": {
+    "testEnvironment": "jsdom",
+    "testMatch": [
+      "**/tests/unit/**/*.test.js"
+    ],
+    "transform": {},
+    "setupFiles": [
+      "<rootDir>/tests/jest.setup.js"
+    ]
   }
 }

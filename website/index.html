@@ -12,9 +12,14 @@
 <meta property="og:title" content="clayjs: malleable html files">
 <meta property="og:description" content="The tools you need to make a static HTML file behave like a Google Document: editable, auto-save, live sync, etc.">
 <meta property="og:url" content="https://clayjs.com/">
-<meta name="twitter:card" content="summary">
+<meta property="og:image" content="https://clayjs.com/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="clayjs: the document is the app, the document is the database">
+<meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="clayjs: malleable html files">
 <meta name="twitter:description" content="The tools you need to make a static HTML file behave like a Google Document: editable, auto-save, live sync, etc.">
+<meta name="twitter:image" content="https://clayjs.com/og-image.png">
 <link rel="stylesheet" href="styles.css">
 <script src="prism.min.js"></script>
 </head>
@@ -71,7 +76,7 @@
   &lt;body&gt;
     &lt;h1 editable&gt;My notes&lt;/h1&gt;
     &lt;button onclick="clay.save()"&gt;Save&lt;/button&gt;
-    &lt;script src="https://clayjs.com/clay.js"&gt;&lt;/script&gt;
+    &lt;script src="https://clayjs.com/v1/clay.js"&gt;&lt;/script&gt;
   &lt;/body&gt;
 &lt;/html&gt;</code></pre>
     <p>That's a complete app. Type into the heading, hit Save, refresh: your words are still there. The file saved itself.</p>
@@ -98,7 +103,7 @@
     <h2 class="eyebrow">Step 1 · Make it save</h2>
     <p class="problem">You changed the page, and a refresh throws it away.</p>
     <p>Add the script tag, then call <code>clay.save()</code> whenever you want to persist the page. Wire it to a button, a keystroke, or your own logic:</p>
-    <pre><code class="language-markup">&lt;script src="https://clayjs.com/clay.js"&gt;&lt;/script&gt;
+    <pre><code class="language-markup">&lt;script src="https://clayjs.com/v1/clay.js"&gt;&lt;/script&gt;
 &lt;button onclick="clay.save()"&gt;Save&lt;/button&gt;
 
 &lt;script type="module"&gt;
@@ -363,7 +368,7 @@ const { msg, msgType } = await clay.save();</code></pre>
 </footer>
 
 <script>window.clayEditMode = true;</script>
-<script src="/clay.js?plugins=demo"></script>
+<script src="/v1/clay.js?plugins=demo"></script>
 <script>
 (function () {
   var booted = false;
@@ -469,7 +474,7 @@ const { msg, msgType } = await clay.save();</code></pre>
     var params = [];
     if (plugins.length) params.push("plugins=" + plugins.join(","));
     if (excludes.length) params.push("exclude=" + excludes.join(","));
-    var url = "https://clayjs.com/clay.js" + (params.length ? "?" + params.join("&") : "");
+    var url = "https://clayjs.com/v1/clay.js" + (params.length ? "?" + params.join("&") : "");
     output.textContent = '<script src="' + url + '"><\/script>';
     if (window.Prism) Prism.highlightElement(output);
     cmsExtra.classList.toggle("show", plugins.indexOf("cms") !== -1);

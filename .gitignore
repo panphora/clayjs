@@ -4,3 +4,4 @@ tests/tmp/
 public/
 .wrangler/
 .deploy
+.version-cache/

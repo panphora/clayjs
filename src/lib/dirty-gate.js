@@ -28,13 +28,14 @@
 import Mutation from './mutation.js';
 import { isEditMode } from '../core/is-edit-mode.js';
 import { STRIP_FROM_DIRTY_CHECK, SNAPSHOT_REMOVE_SELECTOR } from './region-policy.js';
+import { PERSIST } from './attr-aliases.js';
 
 let changes = 0;
 let clearedAt = 0;
 let paused = false;
 let started = false;
 
-const PERSIST_CONTROLS = 'input[persist], textarea[persist], select[persist]';
+const PERSIST_CONTROLS = `input${PERSIST}, textarea${PERSIST}, select${PERSIST}`;
 
 // Regions the loss oracle never sees. The hub feed already skips them, through
 // `require: 'dirty'`, and the input feed has to skip them for the same reason:

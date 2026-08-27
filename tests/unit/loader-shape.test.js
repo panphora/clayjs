@@ -3,6 +3,10 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
+// The public scripts live in entries/ and are flattened to the root of the served
+// site by build.js, so read them from entries/ and resolve their /src targets from
+// the repo root, which is where the flatten puts src/ relative to them.
+const entriesDir = join(repoRoot, "entries");
 
 // Every top-level classic bootstrap dynamically imports one ES module from /src.
 // If a bootstrap's import target is missing, the tag is dead on arrival. This
@@ -10,6 +14,7 @@ const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const BOOTSTRAPS = [
   "clay.js",
   "clay-ui.js",
+  "clay-internals.js",
   "clay-events.js",
   "clay-options.js",
   "clay-dom.js",
@@ -18,7 +23,7 @@ const BOOTSTRAPS = [
 ];
 
 test.each(BOOTSTRAPS)("%s imports a src target that exists on disk", (file) => {
-  const source = readFileSync(join(repoRoot, file), "utf8");
+  const source = readFileSync(join(entriesDir, file), "utf8");
   const match = source.match(/import\(base \+ "(\/src\/[^"]+)"\)/);
   expect(match).not.toBeNull();
   const target = match[1].replace(/^\//, "");
@@ -32,7 +37,7 @@ test.each(BOOTSTRAPS)("%s imports a src target that exists on disk", (file) => {
 // of undefined" — intermittently, and looking like stale data rather than a failure.
 // Observed on the official devlog template; see the templates-to-clayjs change record.
 describe("clay-events waits for clay-dom", () => {
-  const source = readFileSync(join(repoRoot, "clay-events.js"), "utf8");
+  const source = readFileSync(join(entriesDir, "clay-events.js"), "utf8");
 
   test("it gates on clay.loaded.dom before importing its src target", () => {
     expect(source).toMatch(/clay\.loaded\.dom/);
@@ -59,7 +64,7 @@ describe("clay-events waits for clay-dom", () => {
 // The two generated satellites are self-contained classic scripts: they must NOT
 // dynamic-import (nothing to CORS-fetch) and must NOT carry ESM export syntax.
 test.each(["sap.js", "clay-data.js"])("%s is a self-contained classic script", (file) => {
-  const source = readFileSync(join(repoRoot, file), "utf8");
+  const source = readFileSync(join(entriesDir, file), "utf8");
   expect(source).not.toMatch(/import\(/);
   expect(source).not.toMatch(/^export[\s{]/m);
 });

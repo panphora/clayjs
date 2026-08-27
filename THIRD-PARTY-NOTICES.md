@@ -12,15 +12,13 @@ or carry third-party code, and keep their original licenses.
 
 ## Squire 2.4.8 (MIT)
 
-- Carried inside src/vendor/richclay.vendor.js and website/vendor/richclay.min.js
-  (richclay bundles Squire)
+- Carried inside src/vendor/richclay.vendor.js (richclay bundles Squire)
 - Copyright (c) 2011-2023 by Neil Jenkins
 - https://github.com/fastmail/Squire
 
 ## DOMPurify 3.4.11 (Apache-2.0 OR MPL-2.0)
 
-- Carried inside src/vendor/richclay.vendor.js and website/vendor/richclay.min.js
-  (richclay bundles DOMPurify)
+- Carried inside src/vendor/richclay.vendor.js (richclay bundles DOMPurify)
 - (c) Cure53 and other contributors
 - https://github.com/cure53/DOMPurify
 

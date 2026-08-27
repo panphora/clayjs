@@ -9,7 +9,13 @@
     return;
   }
   var url = new URL(script.src, location.href);
-  var base = url.href.slice(0, url.href.lastIndexOf("/"));
+  // Query and fragment off first, then step out of the tarball's entries/ directory
+  // so package-path CDNs resolve src/. See clay.js for the full reason on both.
+  var path = url.href.split("#")[0].split("?")[0];
+  var base = path.slice(0, path.lastIndexOf("/"));
+  if (url.pathname.slice(0, url.pathname.lastIndexOf("/")).slice(-8) === "/entries") {
+    base = base.slice(0, -8);
+  }
 
   // Toasts and dialogs append to document.body, so `loaded.ui` must not resolve
   // before the DOM is ready (same gate as clay-events).

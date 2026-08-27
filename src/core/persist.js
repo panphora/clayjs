@@ -1,5 +1,6 @@
 import { onSnapshot } from './snapshot.js';
 import { serializeControlToAttributes, finalizeControlForSave } from '../vendor/control-serialize.vendor.js';
+import { PERSIST } from '../lib/attr-aliases.js';
 
 // Persistent Form Input Values
 //
@@ -51,7 +52,7 @@ import { serializeControlToAttributes, finalizeControlForSave } from '../vendor/
 // When event-attrs is loaded, its cloneNode() intercept (onclone.js) patches
 // data-value into textContent on cloned textareas automatically.
 
-export default function enablePersistentFormInputValues(filterBySelector = "[persist]") {
+export default function enablePersistentFormInputValues(filterBySelector = PERSIST) {
   const inputSelector = `input${filterBySelector}:not([type="password"]):not([type="hidden"]):not([type="file"])`;
   const textareaSelector = `textarea${filterBySelector}`;
   const selectSelector = `select${filterBySelector}`;
@@ -106,7 +107,7 @@ export default function enablePersistentFormInputValues(filterBySelector = "[per
 
 // Auto-initialize with default selector
 export function init() {
-  enablePersistentFormInputValues("[persist]");
+  enablePersistentFormInputValues(PERSIST);
 }
 
 // Auto-init when module is imported

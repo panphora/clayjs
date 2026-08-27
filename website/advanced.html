@@ -12,9 +12,14 @@
 <meta property="og:title" content="Advanced · clayjs">
 <meta property="og:description" content="Advanced save attributes and the separate utility libraries around clayjs.">
 <meta property="og:url" content="https://clayjs.com/advanced">
-<meta name="twitter:card" content="summary">
+<meta property="og:image" content="https://clayjs.com/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="clayjs: the document is the app, the document is the database">
+<meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Advanced · clayjs">
 <meta name="twitter:description" content="Advanced save attributes and the separate utility libraries around clayjs.">
+<meta name="twitter:image" content="https://clayjs.com/og-image.png">
 <link rel="stylesheet" href="styles.css">
 <script src="prism.min.js"></script>
 </head>
@@ -70,7 +75,7 @@
     <span class="eyebrow">Your own attributes</span>
     <h2 class="section-title">Respecting regions from your own code</h2>
     <p>Writing a custom attribute that touches the save? Ask clayjs what a region means instead of matching <code>[no-save]</code> yourself. That's what <code>clay.internals.region</code> is for: it's the same policy the library uses, so your attribute can't quietly stop agreeing with it two releases from now. It needs one extra script tag — the <a href="/docs#internals">internals satellite</a>.</p>
-    <pre><code class="language-markup">&lt;script src="https://clayjs.com/clay-internals.js"&gt;&lt;/script&gt;</code></pre>
+    <pre><code class="language-markup">&lt;script src="https://clayjs.com/v1/clay-internals.js"&gt;&lt;/script&gt;</code></pre>
     <p>A <code>count-of</code> attribute that writes how many elements match a selector into a badge, and leaves alone the regions that aren't being persisted as they stand:</p>
     <pre><code class="language-javascript">await clay.loaded.internals;
 const { resolveRegionPolicy, addRegionToken, PERSIST } = clay.internals.region;
@@ -138,41 +143,41 @@ clay.internals.addDocumentTransform(clone =&gt; {
       <div class="lib-name">clay-ui <span class="tag">toasts · modals · dialogs</span></div>
       <p class="lib-prob">“I need a toast or a confirm dialog and don't want to build one.”</p>
       <p>Ready-made toasts, modals, and ask/confirm/tell dialogs. It listens to <code>clay:save-*</code> events automatically, so adding it upgrades your save feedback for free. If you already have a toast library, keep yours: the events are public.</p>
-      <pre><code class="language-markup">&lt;script src="https://clayjs.com/clay-ui.js"&gt;&lt;/script&gt;</code></pre>
+      <pre><code class="language-markup">&lt;script src="https://clayjs.com/v1/clay-ui.js"&gt;&lt;/script&gt;</code></pre>
     </div>
 
     <div class="libcard">
       <div class="lib-name">event attributes</div>
       <p class="lib-prob">“I want small behaviors without writing addEventListener boilerplate.”</p>
       <p><code>onclickaway</code>, <code>onclickchildren</code>, <code>onrender</code>, <code>onmutation</code>, <code>onclone</code>: HTML attributes for the events HTML forgot.</p>
-      <pre><code class="language-markup">&lt;script src="https://clayjs.com/clay-events.js"&gt;&lt;/script&gt;</code></pre>
+      <pre><code class="language-markup">&lt;script src="https://clayjs.com/v1/clay-events.js"&gt;&lt;/script&gt;</code></pre>
     </div>
 
     <div class="libcard">
       <div class="lib-name">option visibility</div>
       <p class="lib-prob">“Show or hide parts of the page based on a state attribute.”</p>
       <p>Declarative show/hide: an ancestor carries the plain state attribute <code>view="kanban"</code>, descendants opt in or out with <code>option:view</code> / <code>option-not:view</code> attributes.</p>
-      <pre><code class="language-markup">&lt;script src="https://clayjs.com/clay-options.js"&gt;&lt;/script&gt;</code></pre>
+      <pre><code class="language-markup">&lt;script src="https://clayjs.com/v1/clay-options.js"&gt;&lt;/script&gt;</code></pre>
     </div>
 
     <div class="libcard">
       <div class="lib-name">DOM helpers</div>
       <p class="lib-prob">“closest() only searches up. I need the element near me.”</p>
       <p><code>el.nearest.menu</code>, <code>el.val.title</code>, <code>el.exec.action()</code>, <code>el.cycle(1, "state")</code>: small prototype helpers for DOM-first apps. The first three are getter proxies (read the nearest element with that attribute or class); <code>cycle</code> takes its attribute name.</p>
-      <pre><code class="language-markup">&lt;script src="https://clayjs.com/clay-dom.js"&gt;&lt;/script&gt;</code></pre>
+      <pre><code class="language-markup">&lt;script src="https://clayjs.com/v1/clay-dom.js"&gt;&lt;/script&gt;</code></pre>
     </div>
 
     <div class="libcard">
       <div class="lib-name">All.js</div>
       <p class="lib-prob">“I miss jQuery's ergonomics, not its size.”</p>
       <p>A chainable wrapper over querySelectorAll: <code>All(".card").css({ opacity: 1 }).onclick(e =&gt; e.target.classList.toggle("done"))</code>. Events are property-form (<code>.onclick</code>, <code>.oninput</code>); classes go through <code>.classList</code>. Zero dependencies, one script tag.</p>
-      <pre><code class="language-markup">&lt;script src="https://clayjs.com/all.js"&gt;&lt;/script&gt;</code></pre>
+      <pre><code class="language-markup">&lt;script src="https://clayjs.com/v1/all.js"&gt;&lt;/script&gt;</code></pre>
     </div>
 
     <div class="libcard">
       <div class="lib-name">utilities</div>
       <p class="lib-prob">“The small stuff: throttle, debounce, cookies, slugify.”</p>
-      <pre><code class="language-markup">&lt;script src="https://clayjs.com/clay-utils.js"&gt;&lt;/script&gt;</code></pre>
+      <pre><code class="language-markup">&lt;script src="https://clayjs.com/v1/clay-utils.js"&gt;&lt;/script&gt;</code></pre>
     </div>
 
     <div class="libcard">

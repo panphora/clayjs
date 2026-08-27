@@ -4,39 +4,63 @@
 
 Self-saving, malleable HTML in one classic `<script>`. Load `clay.js` on a page and it
 becomes editable in place, snapshots its own DOM, and saves that DOM back to the file it
-came from. No build step, no framework.
+came from. No build step, no framework, no account.
+
+The document is the app *and* the database. State lives in the DOM, and a save is one POST
+of the entire serialized document. There is no data layer, no JSON on a server, no schema.
+Open the saved file in a text editor and your edit is right there in the HTML.
+
+## See it save itself
+
+[`examples/notes.html`](https://github.com/panphora/clayjs/blob/main/examples/notes.html) is a complete self-saving document. Two
+attributes do the work: `autosave` on `<html>`, and `editable` on the parts you type into.
+
+```html
+<!DOCTYPE html>
+<html lang="en" autosave>
+<head><meta charset="utf-8"><title>Notes</title></head>
+<body>
+  <h1 editable>My notes</h1>
+  <div editable><p>Type anything here.</p></div>
+  <script src="https://clayjs.com/v1/clay.js"></script>
+</body>
+</html>
+```
+
+Type into it, then open the file in a text editor: your words are in the HTML.
+
+**Something has to write the bytes.** clayjs runs in the browser; it makes the document
+and posts it, and a host puts it on disk. The shortest path is
+[HTML Clay](https://htmlclay.com), a desktop app: rename the file to `.htmlclay` and
+double-click it, and it serves the file at `http://127.0.0.1` and writes every save back.
+[hyperclay.com](https://hyperclay.com) hosts the same file online. Your own server needs
+one route, about twenty lines: see [the endpoint spec](https://clayjs.com/docs#endpoint).
+Full walkthrough: [the tutorial](https://clayjs.com/get-started) and
+[`examples/`](https://github.com/panphora/clayjs/tree/main/examples).
 
 ## Use
 
 ```html
-<script src="https://clayjs.com/clay.js"></script>
+<script src="https://clayjs.com/v1/clay.js"></script>
 ```
 
 The loader detects edit vs view mode and pulls only the modules it needs. Tune it with
 query params on the script URL:
 
 ```html
-<script src="/clay.js?plugins=sync,cms&exclude=indicator"></script>
+<script src="https://clayjs.com/v1/clay.js?plugins=sync,cms&exclude=indicator"></script>
 ```
 
 - `?plugins=` — add optional plugins: `sync`, `cms`, `undo`, `sortable`, `indicator`, `quickcrop`, `upload`, `wire`, `demo`.
   Only `richclay` loads by default, and only in edit mode. `cms` brings `quickcrop` with it, because
   the CMS uses it for `data-hcms-crop` image fields.
 - `?exclude=` — drop a plugin that would otherwise load (a default, or one another plugin pulled in).
-- `?editmode=false` — force view mode (URL param wins over everything below).
+- `?editmode=false` — force view mode (URL param wins over everything else).
 
-## Host attributes
-
-A host can put these on `<html>` in the response it serves. They are ephemeral:
-the host injects them and strips them back out of whatever gets saved, so they
-never reach the file on disk.
-
-- `savetoken="…"` — the per-document save credential. clayjs posts to
-  `/_/save/{token}` and sends no cookies, because the token is the credential.
-  A token also implies edit mode, which is the only such signal a sandboxed
-  document can see. `htmlclaytoken` is the older spelling of the same thing.
-Edit mode is decided in this order: the `?editmode` param, then
-`window.clayEditMode`, then a save token, then the platform's owner cookie.
+Edit mode is decided in this order: the `?editmode` param, then `window.clayEditMode`,
+then a save token stamped on `<html>` by the host, then the platform's owner cookie. Hosts
+and save tokens are covered in [the reference](https://github.com/panphora/clayjs/blob/main/docs/reference.md) and on
+[clayjs.com/docs](https://clayjs.com/docs#editmode).
 
 ## Readiness
 
@@ -48,12 +72,6 @@ await clay.ready;      // or: document.addEventListener("clay:ready", ...)
 clay.save();
 ```
 
-Edit mode exposes `clay.save()` (+ `clay.save.force()`), `clay.getHTML()`, `clay.addDocumentTransform(fn)`,
-`clay.onSnapshot(fn)`, `clay.toggleEditMode()`, `clay.isEditMode`, `clay.isOwner`, `clay.Mutation`,
-`clay.region`, `clay.cacheBust(el)`, plus `clay.undo` / `clay.cms` / `clay.morph` / `clay.RichClay` /
-`clay.quickcrop` when those plugins load. View mode keeps only the always-available members (`toggleEditMode`, `isEditMode`, `isOwner`,
-`Mutation`, `region`, `ready`); edit-only members are simply absent.
-
 ## API
 
 Three tiers. The first two are a promise; the third is not.
@@ -64,55 +82,23 @@ Three tiers. The first two are a promise; the third is not.
 | `clay.*` from a satellite (`clay-ui`, `clay-utils`, `clay-dom`, `clay-events`, `clay-options`, `clay-internals`) | opt-in, one script tag each | stable |
 | anything else under `src/` | reachable by direct import, because `src/` ships | **may change in any release** |
 
-The contract starts at **0.3.0**: no name below changes without a major version.
+The contract starts at **1.0.0**: no name below changes without a major version.
 
 **`clay.js`** — `ready`, `save()`, `save.force()`, `getHTML()`, `addDocumentTransform(fn)`, `onSnapshot(fn)`,
 `toggleEditMode()`, `isEditMode`, `isOwner`, `Mutation`, `region`, `cacheBust(el)`, plus `undo` / `cms` / `morph` /
-`RichClay` / `quickcrop` when those plugins load. View mode keeps only the always-available members, as above.
-
-`addDocumentTransform(fn)` runs your callback over a detached clone whenever the page
-prepares to save AND whenever it checks whether anything changed. Keep it pure and
-repeatable: it is a transform, not a "a save is happening" event.
-
-`quickcrop(file, options)` opens a crop modal over a File or Blob and resolves
-`{ blob, dataURL, width, height }`, or `null` if the person cancels. `aspect` (a number,
-or null for freeform), `type`, `quality`, `maxWidth`/`maxHeight` and `labels.confirm` are
-the options worth knowing. Its modal and injected stylesheet carry `save-remove`, so they
-never reach the saved file.
-
-`region` is the region-policy model: `resolveRegionPolicy`, `isInert`, `skipForPolicy`,
-`strictestPolicy`, the `PERSIST` and `REGION_ATTRS` token constants, and the
-`STRIP_FROM_SAVE`, `FREEZE_SELECTOR` and `STRIP_FROM_COMPARISON` selectors.
-`clay.internals.region` is a different shape, narrower in aim, built for snapshot work.
+`RichClay` / `quickcrop` when those plugins load. View mode keeps only the always-available members
+(`toggleEditMode`, `isEditMode`, `isOwner`, `Mutation`, `region`, `ready`); edit-only members are simply absent.
 
 **Satellites** — one script tag each, and each resolves its own `clay.loaded.*` promise. `clay-ui` adds
 `toast`, `toastPersistent`, `ask`, `confirm`, `tell`, `snippet`, `modal`; `clay-utils` adds `clay.utils`
 (`throttle`, `debounce`, `cookie`, `slugify`, `copyToClipboard`); `clay-internals` adds `clay.internals`,
-below. `clay-events`, `clay-dom`, `clay-options` and `all.js` add HTML attributes and DOM helpers rather
+the low-level surface for code that needs to sit *inside* the save lifecycle rather than call it.
+`clay-events`, `clay-dom`, `clay-options` and `all.js` add HTML attributes and DOM helpers rather
 than members on `clay`.
 
-**`clay.internals`** — the pieces the library builds itself out of, for code that needs to sit inside the
-save lifecycle rather than call it. Lower level than `clay.*` deliberately: it assumes you know the
-lifecycle.
-
-```html
-<script src="https://clayjs.com/clay-internals.js"></script>
-```
-
-- `captureSnapshot()`, `captureForSave()` — the snapshot pipeline, read side.
-  `captureSnapshot` gives you the clone before any stripping; `captureForSave` gives you the
-  bytes a save would send.
-- `addDocumentTransform(fn)` — the same registry as `clay.addDocumentTransform`. Core only
-  publishes that name in edit mode, so reach for this one from a view-mode page or from the
-  satellite with no core loaded.
-- `region.addRegionToken(el, token)`, `region.resolveRegionPolicy(node)`, `region.isInert(node)`,
-  `region.isSnapshotRemoved(el)`, `region.PERSIST`, `region.REGION_ATTRS`, and
-  `region.selectors.stripFromSave` / `.stripFromComparison` / `.stripFromDirtyCheck` /
-  `.noTriggerAutosave` / `.noDirty` / `.snapshotRemove` / `.freeze` — write your own attribute
-  without hardcoding our selectors.
-- `save.saveHtml(html, cb, opts)`, `save.replacePageWith(url, cb)`, `save.isSaveInProgress()` — the save
-  lane under `clay.save`. **`saveHtml` writes the bytes you hand it straight to the file**, bypassing the
-  snapshot pipeline entirely; check `isSaveInProgress()` first.
+Every member, every attribute, and the endpoint spec: **[docs/reference.md](https://github.com/panphora/clayjs/blob/main/docs/reference.md)**,
+also served at [clayjs.com/llms.txt](https://clayjs.com/llms.txt) and rendered as
+[clayjs.com/docs](https://clayjs.com/docs).
 
 ## Regions
 
@@ -133,41 +119,46 @@ and live sync will not overwrite it, while a `no-dirty` region renders itself fr
 so it never warns and an incoming sync frame may replace it. Use `no-dirty` for filter bars,
 projections and drag previews; use `no-trigger-autosave` for a heavy editor you save by hand.
 
+## Repo map
+
+**Everything in `entries/` is served under a version prefix on clayjs.com.**
+`entries/clay.js` is `https://clayjs.com/v1/clay.js`, which rolls forward within major
+version 1, and `https://clayjs.com/1.0.0/clay.js`, which never changes. Same for each
+satellite. A saved document hardcodes its script URL and has no update channel, which is
+why the version is in the URL and why a served path, once published, is permanent. Repo
+paths are not: `build.js` flattens `entries/` into each prefix on the way out. `clay.js`
+derives its own base URL from its script tag and imports `<base>/src/loader.js`, so `src/`
+is public surface too and ships inside every prefix as its sibling.
+
+| | |
+|---|---|
+| `entries/clay.js` | the bootstrap: everything starts here |
+| `entries/clay-ui.js`, `-dom`, `-events`, `-options`, `-utils`, `-internals` | satellites, one script tag each |
+| `entries/all.js` | `All(selector)`, a chainable `querySelectorAll` wrapper |
+| `entries/sap.js` | reactive templating, **generated** from the `sapjs` repo |
+| `entries/clay-data.js` | the HTML data API, **generated** from the `hyper-html-api` repo |
+| `src/` | the implementation, and public surface by direct import |
+| `conformance/` | the byte-exact gate: real browser, pinned Chromium, goldens from the spec |
+| `tests/` | jest unit suite, fixtures, and a stub save server |
+| `website/` | the source of clayjs.com |
+| `docs/reference.md` | the full reference, served as `/llms.txt` |
+| `build.js`, `wrangler.jsonc` | assemble and deploy `public/`, which is a gitignored build output |
+
 ## Develop
 
 ```bash
 npm test                   # jest unit suite
 npm run test:conformance   # byte-for-byte fixture gate, in a real browser
 npm run dev                # stub save server on :4601 for the tests/fixtures pages
+npm run build              # rebuild public/, the deploy output
 ```
 
-## Deploy
-
-`public/` is what wrangler serves to clayjs.com. It is a build output: gitignored,
-disposable, and rebuilt from scratch every time.
-
-```bash
-npm run build    # rebuild public/ from source
-npm run deploy   # rebuild, then wrangler deploy
-```
-
-Never edit `public/` by hand, and never copy a file into it. Its contents are
-**derived**:
-
-```
-public/  =  package.json "files"  (minus THIRD-PARTY-NOTICES.md, which nothing requests)
-         +  website/*             (flattened to the root, so /docs.html works)
-```
-
-That derivation is the point. `files` is the list npm publishes, so it is already
-the line you edit to ship a new satellite, and deriving from it means a file cannot
-reach npm and miss the site. Before this script existed the mirror was hand-copied,
-and it drifted exactly that way: `src/core/host-attrs.js` never made it across, and
-since `loader.js` imports `is-edit-mode.js`, which imports it, the deployed
-`clay.js` could not boot at all.
+Setup, the pinned-browser requirement, and the things about this repo that will surprise
+you are in [CONTRIBUTING.md](https://github.com/panphora/clayjs/blob/main/CONTRIBUTING.md).
 
 ## License
 
 Our code is MIT-0 (MIT No Attribution): use it, remix it, ship it, no attribution
 needed. Vendored third-party files keep their original permissive licenses; see
-[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md). Security reports go through
+[the security policy](https://github.com/panphora/clayjs/blob/main/.github/SECURITY.md).

@@ -12,9 +12,14 @@
 <meta property="og:title" content="Docs · clayjs">
 <meta property="og:description" content="clayjs reference: the core API, attributes, events, and the save endpoint spec.">
 <meta property="og:url" content="https://clayjs.com/docs">
-<meta name="twitter:card" content="summary">
+<meta property="og:image" content="https://clayjs.com/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="clayjs: the document is the app, the document is the database">
+<meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Docs · clayjs">
 <meta name="twitter:description" content="clayjs reference: the core API, attributes, events, and the save endpoint spec.">
+<meta name="twitter:image" content="https://clayjs.com/og-image.png">
 <link rel="stylesheet" href="styles.css">
 <script src="prism.min.js"></script>
 </head>
@@ -43,7 +48,14 @@
   <section id="loading">
     <span class="eyebrow">Loading</span>
     <h2 class="section-title">The script tag</h2>
-    <pre><code class="language-markup">&lt;script src="https://clayjs.com/clay.js"&gt;&lt;/script&gt;</code></pre>
+    <pre><code class="language-markup">&lt;script src="https://clayjs.com/v1/clay.js"&gt;&lt;/script&gt;</code></pre>
+    <p>Every clayjs URL carries a version, because a saved document hardcodes its script tag and there is no way to reach it afterwards to change it. Two forms:</p>
+    <table>
+      <tr><th>URL</th><th>What it serves</th></tr>
+      <tr><td><code>/v1/clay.js</code></td><td>The newest 1.x release. Rolls forward with fixes and features, never across a major version.</td></tr>
+      <tr><td><code>/1.0.0/clay.js</code></td><td>That exact release, byte for byte, forever. Cached for a year as immutable.</td></tr>
+    </table>
+    <p class="small">Use <code>/v1/</code> unless you have a reason not to. Both forms exist for every satellite, so <code>/v1/clay-ui.js</code> and <code>/1.0.0/sap.js</code> work the same way. Published versions are listed at <a href="/versions.json">versions.json</a>. There is no unversioned URL: <code>clayjs.com/clay.js</code> was retired at 1.0 and returns 404.</p>
     <p>The default build includes the save lifecycle and rich text (<code>editable</code>). Plugins load conditionally through the URL, in the browser only:</p>
     <table>
       <tr><th>Param</th><th>Meaning</th><th>Example</th></tr>
@@ -86,7 +98,7 @@
       <tr><td><code>clay.*</code> from a satellite</td><td>Opt-in, one script tag each: <code>clay-ui</code>, <code>clay-utils</code>, <code>clay-dom</code>, <code>clay-events</code>, <code>clay-options</code>, <code>clay-internals</code></td><td>Stable</td></tr>
       <tr><td>Anything else under <code>src/</code></td><td>Reachable by direct import, because <code>src/</code> ships to npm and the CDN</td><td><strong>May change in any release</strong></td></tr>
     </table>
-    <p class="small">The contract starts at 0.3.0: no name in the first two tiers changes without a major version. Everything in the third tier works today and is welcome to be used, but it is not a promise.</p>
+    <p class="small">The contract starts at 1.0.0: no name in the first two tiers changes without a major version. Everything in the third tier works today and is welcome to be used, but it is not a promise.</p>
   </section>
 
   <!-- ====== INTERNALS ====== -->
@@ -94,7 +106,7 @@
     <span class="eyebrow">Low level</span>
     <h2 class="section-title">clay.internals</h2>
     <p>The pieces clayjs builds itself out of, for code that needs to sit <em>inside</em> the save lifecycle rather than call it. Lower level than <code>clay.*</code> deliberately: it assumes you know the lifecycle. One extra script tag, and <code>clay.loaded.internals</code> resolves when it's ready.</p>
-    <pre><code class="language-markup">&lt;script src="https://clayjs.com/clay-internals.js"&gt;&lt;/script&gt;</code></pre>
+    <pre><code class="language-markup">&lt;script src="https://clayjs.com/v1/clay-internals.js"&gt;&lt;/script&gt;</code></pre>
     <table>
       <tr><th>Member</th><th>What it does</th></tr>
       <tr><td><code>captureSnapshot()</code></td><td>The cloned document element, with form values synced, <code>onbeforesnapshot</code> handlers run, and <code>no-snapshot</code> regions plus browser-extension noise already removed. It is the shared base every lane starts from, not an untouched copy of the DOM.</td></tr>
@@ -168,7 +180,7 @@
     <p class="small">The token sits above the cookie because it is the stronger claim: the host issued it for this document, while a cookie is ambient. A sandboxed document cannot read a cookie at all.</p>
     <p>Serving files from your own server? Arm it yourself:</p>
     <pre><code class="language-markup">&lt;script&gt;window.clayEditMode = true&lt;/script&gt;
-&lt;script src="https://clayjs.com/clay.js"&gt;&lt;/script&gt;</code></pre>
+&lt;script src="https://clayjs.com/v1/clay.js"&gt;&lt;/script&gt;</code></pre>
     <p class="small">Edit mode is client-side behavior. Whether a save is <em>accepted</em> is always the server's decision.</p>
   </section>
 

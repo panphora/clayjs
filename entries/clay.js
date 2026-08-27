@@ -31,7 +31,21 @@
   clay.__booted = true;
 
   var url = new URL(script.src, location.href);
-  var base = url.href.slice(0, url.href.lastIndexOf("/"));
+  // The query and the fragment come off before the last slash is found. Leaving them
+  // on split the base inside them, so clay.js?next=/a/b imported ".../clay.js?next=/a/src/loader.js"
+  // and the library never booted.
+  var path = url.href.split("#")[0].split("?")[0];
+  var base = path.slice(0, path.lastIndexOf("/"));
+  // In the npm tarball the entry scripts sit in entries/ while src/ stays beside it
+  // at the package root, so a CDN that serves package paths literally (jsDelivr,
+  // unpkg) would look for src/ one directory too deep and load nothing. Stepping out
+  // of an "entries" segment makes those URLs resolve. clayjs.com never has the
+  // segment: build.js flattens entries/ into each version prefix, so this is a no-op
+  // there. The question is asked of the pathname, because asking it of the whole URL
+  // matched a host merely named "entries" and sent the import to another origin.
+  if (url.pathname.slice(0, url.pathname.lastIndexOf("/")).slice(-8) === "/entries") {
+    base = base.slice(0, -8);
+  }
   import(base + "/src/loader.js")
     .then(function (m) { return m.boot(base, url.searchParams, clay.__readyResolve); })
     .catch(function (err) {

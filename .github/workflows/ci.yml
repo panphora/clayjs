@@ -27,3 +27,8 @@ jobs:
         run: npm test
       - name: Conformance byte gate (web-test-runner)
         run: npm run test:conformance
+      # Both suites can be green while the deploy output is broken: nothing else here
+      # runs the build. build.js asserts that public/ came out with _headers, clay.js,
+      # src/loader.js, llms.txt and index.html, so this step is the gate on the site.
+      - name: Build the deploy output
+        run: npm run build

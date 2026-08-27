@@ -34,8 +34,18 @@ http.createServer(async (req, res) => {
     return res.end(JSON.stringify({ msg: "Saved" }));
   }
   try {
-    const path = url.pathname === "/" ? "/tests/fixtures/basic.html" : url.pathname;
-    const data = await readFile(join(root, path));
+    const raw = url.pathname === "/" ? "/tests/fixtures/basic.html" : url.pathname;
+    // Mirror the deploy so fixtures load the URL shape production actually serves.
+    // Every library URL carries a version prefix (/v1/clay.js, /1.0.0/src/loader.js);
+    // build.js flattens entries/ into each prefix, so /v1/clay.js is entries/clay.js on
+    // disk. The unversioned /clay.js is retired and must 404 here exactly as it does in
+    // production: a fixture suite that answers the old URL cannot notice a page still
+    // asking for it, which is how the homepage shipped loading a 404.
+    const path = raw.replace(/^\/(?:v\d+|\d+\.\d+\.\d+)\//, "/");
+    const versioned = path !== raw;
+    const data = versioned
+      ? await readFile(join(root, "entries", path)).catch(() => readFile(join(root, path)))
+      : await readFile(join(root, path));
     const headers = { "Content-Type": TYPES[extname(path)] || "application/octet-stream" };
     // Simulate the production _headers rule (/src/* -> Access-Control-Allow-Origin: *)
     // so a classic bootstrap's cross-origin import() of /src/* succeeds in tests too.

@@ -1,3 +1,10 @@
 # Conformance fixtures are byte-exact goldens. Force LF so a CRLF checkout (e.g. on
 # Windows) can never fail the byte comparison for a non-bug.
 conformance/fixtures/** text eol=lf
+
+# sap.js and clay-data.js are generated bundles copied in from sibling repos, and
+# src/vendor/* is vendored. Without these, GitHub counts 65 KB of minified vendor as
+# authored JavaScript, skews the language bar, and expands them in every diff.
+entries/sap.js linguist-generated=true
+entries/clay-data.js linguist-generated=true
+src/vendor/*.vendor.js linguist-vendored=true

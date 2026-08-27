@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en" autosave>
+<head>
+  <meta charset="utf-8">
+  <title>Notes</title>
+  <style>
+    body { font: 17px/1.6 Charter, Georgia, serif; max-width: 34rem; margin: 3rem auto; padding: 0 1.5rem; color: #2B2723; background: #F1EFEA; }
+    h1 { font-size: 2rem; margin: 0 0 1rem; }
+    [editable]:focus { outline: 2px solid #3E6B52; outline-offset: 6px; border-radius: 2px; }
+    .status { position: fixed; right: 16px; bottom: 16px; padding: 4px 12px; border-radius: 99px; font: 13px ui-monospace, Menlo, monospace; }
+    html[savestatus="saving"] .status::after { content: "Saving"; }
+    html[savestatus="saved"]   .status::after { content: "Saved"; }
+    html[savestatus="error"]   .status::after { content: "Couldn't save"; color: #A3502E; }
+    html[savestatus="offline"] .status::after { content: "Offline"; }
+  </style>
+</head>
+<body>
+  <h1 editable>My notes</h1>
+  <div editable>
+    <p>Type anything here. Stop for a moment, then open this file in a text editor: your words are in the HTML. That file is the whole app.</p>
+  </div>
+
+  <div class="status" clay="no-save no-watch"></div>
+
+  <script src="https://clayjs.com/v1/clay.js"></script>
+</body>
+</html>
