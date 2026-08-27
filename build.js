@@ -339,10 +339,15 @@ for (const rel of required) {
   if (!stat?.isFile()) throw new Error(`build produced no public/${rel}`);
 }
 
-// The retired unversioned URL must stay retired. A stray clay.js at the root would
-// quietly become the address everyone uses again, and then it can never be removed.
-if (await lstat(join(PUBLIC, 'clay.js')).catch(() => null)) {
-  throw new Error('public/clay.js exists; the unversioned URL was retired at 1.0');
+// The retired unversioned URLs must stay retired. A stray entry script at the root
+// would quietly become the address everyone uses again, and then it can never be
+// removed. Derived from entries/ rather than naming clay.js, because a guard that
+// names one file cannot see a satellite: /all.js is exactly the spelling that slipped
+// past a hand-written list once already.
+for (const name of await readdir(join(ROOT, 'entries'))) {
+  if (await lstat(join(PUBLIC, name)).catch(() => null)) {
+    throw new Error(`public/${name} exists; the unversioned URLs were retired at 1.0`);
+  }
 }
 
 // A manifest so the deployed site can be checked against what was intended.
