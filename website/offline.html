@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Offline · clayjs</title>
+<meta name="description" content="The whole clayjs library in one file, for pages that must load with no network.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%233E6B52'/%3E%3Cpath d='M21.5 11.2a7 7 0 1 0 0 9.6' fill='none' stroke='%23F1EFEA' stroke-width='3.2' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="canonical" href="https://clayjs.com/offline">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="clayjs">
+<meta property="og:title" content="Offline · clayjs">
+<meta property="og:description" content="The whole clayjs library in one file, for pages that must load with no network.">
+<meta property="og:url" content="https://clayjs.com/offline">
+<meta property="og:image" content="https://clayjs.com/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="clayjs: the document is the app, the document is the database">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Offline · clayjs">
+<meta name="twitter:description" content="The whole clayjs library in one file, for pages that must load with no network.">
+<meta name="twitter:image" content="https://clayjs.com/og-image.png">
+<link rel="stylesheet" href="styles.css">
+<script src="prism.min.js"></script>
+</head>
+<body>
+
+<nav class="nav">
+  <a class="wordmark" href="/">clay<span class="js">.js</span><span class="tm" aria-hidden="true">™</span></a>
+  <div class="links">
+    <a class="github-clay" href="https://github.com/panphora/clayjs" target="_blank" rel="noopener" aria-label="View ClayJS source on GitHub"><span class="github-bracket" aria-hidden="true">&lt;</span><span class="github-mascot" aria-hidden="true"><svg viewBox="0 0 16 16" focusable="false"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg></span><span class="github-word" aria-hidden="true">source</span><span class="github-bracket github-close" aria-hidden="true">/&gt;</span></a>
+    <a href="/get-started">Get started</a>
+    <a href="/advanced">Advanced</a>
+    <a href="/plugins">Plugins</a>
+    <a href="/docs">Docs</a>
+    <a href="/offline" aria-current="page">Offline</a>
+  </div>
+</nav>
+
+<main class="page">
+
+  <section style="border-top: none; padding-top: 56px;">
+    <span class="eyebrow">Offline</span>
+    <h1 class="display" style="font-size: clamp(30px, 4.5vw, 42px);">One file, no network</h1>
+    <p class="lede" style="margin-top: 12px;"><code>clay.js</code> is a 3 KB bootstrap that fetches the modules a page asked for. The standalone build is every one of those modules in a single readable file. Download it once, keep it beside your HTML, and the page loads with no connection at all.</p>
+  </section>
+
+  <!-- ====== DOWNLOAD ====== -->
+  <section id="download">
+    <span class="eyebrow">Download</span>
+    <h2 class="section-title">clay.standalone.js</h2>
+    <p><a class="btn" href="/v1/clay.standalone.js" download>Download clay.standalone.js</a></p>
+    <p class="small">About 1 MB of readable source, MIT-0. <code>/v1/clay.standalone.js</code> is the newest 1.x; <code>/1.1.0/clay.standalone.js</code> is that exact release, forever. The first line of the file names its version. It is also in the npm package, at <code>dist/clay.standalone.js</code>.</p>
+  </section>
+
+  <!-- ====== USE ====== -->
+  <section id="use">
+    <span class="eyebrow">Use</span>
+    <h2 class="section-title">The same tag, pointed at the file</h2>
+    <pre><code class="language-markup">&lt;script src="clay.standalone.js?plugins=sync"&gt;&lt;/script&gt;</code></pre>
+    <p>Same query params as <code>clay.js</code>: <code>plugins</code> and <code>exclude</code>. Everything is inside the file, so <code>plugins=</code> decides what runs, not what downloads. The <a href="/advanced">satellites</a> are inside too: <code>await clay.loaded.ui</code>, <code>clay.loaded.sap</code> and the rest work without a tag of their own.</p>
+    <p class="small">The file never changes under you. A page depends on the bytes it has, not on a server.</p>
+  </section>
+
+  <!-- ====== SAVING ====== -->
+  <section id="saving">
+    <span class="eyebrow">Saving</span>
+    <h2 class="section-title">Offline still needs a writer</h2>
+    <p>The library is now on your disk. Saving is a separate job: something has to take the edited document and write the bytes. <a href="https://htmlclay.com">HTML Clay</a> does that on the machine itself, with no network. It serves the file at <code>127.0.0.1</code>, stamps the save token that switches clayjs into edit mode, and writes every save back to disk. Wi-Fi off, everything works.</p>
+    <p class="small">A file opened straight from disk (<code>file://</code>) loads and renders, but has nowhere to post a save to. It stays in view mode unless you force edit mode, and then a save reports an error and your edits stay in the tab.</p>
+  </section>
+
+  <!-- ====== EXCEPTIONS ====== -->
+  <section id="network">
+    <span class="eyebrow">Two exceptions</span>
+    <h2 class="section-title">What still reaches out</h2>
+    <p>Both are opt-in, and both fail soft.</p>
+    <table>
+      <tr><th>What</th><th>When</th><th>Offline</th></tr>
+      <tr><td>The CMS sidebar's font, from jsDelivr</td><td><code>plugins=cms</code></td><td>Falls back to your system monospace. The sidebar works the same.</td></tr>
+      <tr><td>A diff library, from esm.sh</td><td>Autosave debugging, switched on with <code>localStorage.setItem("clay:debug:autosave", "true")</code></td><td>The debug log loses its diffs. Autosave itself is unaffected.</td></tr>
+    </table>
+  </section>
+
+  <!-- ====== UPDATING ====== -->
+  <section id="updating">
+    <span class="eyebrow">Updating</span>
+    <h2 class="section-title">When you want a newer clayjs</h2>
+    <p>Download again and replace the file. Nothing else changes: the tag, the params and your document stay as they are. To see what you have, read the first line of the file.</p>
+    <p class="small">The rolling <code>/v1/</code> URL updates on its own for pages that load from the network. A file you downloaded does not, on purpose.</p>
+  </section>
+
+</main>
+
+<footer>
+  <div class="inner">
+    <span>clayjs</span>
+    <a href="/">Home</a>
+    <a href="/get-started">Get started</a>
+    <a href="/plugins">Plugins</a>
+    <a href="/docs">Docs</a>
+    <a href="/offline">Offline</a>
+    <a href="https://github.com/panphora/clayjs" rel="noopener">GitHub</a>
+    <a href="https://github.com/panphora/clayjs/blob/main/LICENSE" rel="noopener">MIT-0</a>
+    <a href="THIRD-PARTY-NOTICES.md">Third-party notices</a>
+        <a href="/llms.txt">llms.txt</a>
+  </div>
+  <div class="inner" data-hyper-footer="clayjs" clay="no-save no-snapshot"></div>
+</footer>
+<script src="https://hyperclay.com/public/js/hyper-footer.js" defer></script>
+
+</body>
+</html>

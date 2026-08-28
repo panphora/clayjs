@@ -33,6 +33,7 @@
     <a href="/advanced">Advanced</a>
     <a href="/plugins">Plugins</a>
     <a href="/docs">Docs</a>
+    <a href="/offline">Offline</a>
   </div>
 </nav>
 
@@ -88,7 +89,7 @@
 
   <!-- ================= CONCEPT ================= -->
   <section id="concept">
-    <p style="font-size: 19px;">A malleable HTML file is an HTML file that can save itself. There is no database and no build step: the page you're looking at <em>is</em> the data. When you save, clayjs snapshots the page's HTML, cleans it up, and POSTs it back to the server it came from, which writes it to disk. Next load, the file opens exactly the way you left it.</p>
+    <p style="font-size: 19px;">A malleable HTML file is an HTML file that can save itself. There is no database and no build step. The page you're looking at <em>is</em> the data. When you save, clayjs snapshots the page's HTML, cleans it up, and POSTs it back to the server it came from, which writes it to disk. Next load, the file opens exactly the way you left it.</p>
   </section>
 
   <!-- ================= QUOTE: KAMI ================= -->
@@ -166,7 +167,7 @@ const { msg, msgType } = await clay.save();</code></pre>
     <details class="fold" onbeforesnapshot="this.removeAttribute('open')">
       <summary><span class="prob">When it fails</span><span class="sol">error + offline</span></summary>
       <div class="fold-body">
-        <p><code>savestatus="error"</code> means the server answered with a problem; the message is in the event's <code>detail.msg</code>. <code>savestatus="offline"</code> means the request couldn't get out at all. And if someone closes the tab with unsaved changes, clayjs warns them first. That safety net is built in.</p>
+        <p><code>savestatus="error"</code> means the server answered with a problem; the message is in the event's <code>detail.msg</code>. <code>savestatus="offline"</code> means the request couldn't get out at all. And if someone closes the tab with unsaved changes, clayjs warns them first.</p>
       </div>
     </details>
   </section>
@@ -190,7 +191,7 @@ const { msg, msgType } = await clay.save();</code></pre>
       </div>
       <span class="chip" role="status" clay="no-save no-watch no-snapshot"></span>
     </div>
-    <p class="small">Edit both, save, then reload: everything survives. Reload <em>without</em> saving and your changes are gone, which is the point.</p>
+    <p class="small">Edit both, save, then reload: everything survives. Reload <em>without</em> saving and your changes are gone.</p>
   </section>
 
   <!-- ================= NEXT PROBLEMS ================= -->
@@ -216,7 +217,7 @@ const { msg, msgType } = await clay.save();</code></pre>
     <details class="fold" onbeforesnapshot="this.removeAttribute('open')">
       <summary><span class="prob">It's open in two places and the copies fight.</span><span class="sol">live sync</span></summary>
       <div class="fold-body">
-        <p>Check <em>“sync edits across open copies”</em> in the <a href="#configure">configurator</a>. Edits then flow into every open copy of the file, morphing the page in place: no reloads, and nobody loses their cursor. It's off by default on purpose: it holds a connection open, and you don't need that until you have this problem.</p>
+        <p>Check <em>“sync edits across open copies”</em> in the <a href="#configure">configurator</a>. Edits then flow into every open copy of the file, morphing the page in place: no reloads, and nobody loses their cursor. It's off by default: it holds a connection open, and you don't need that until you have this problem.</p>
         <div class="sync-pair" clay="no-save no-watch">
           <div class="sheet" style="margin: 6px 0;">
             <span class="filename">plan.html · your laptop</span>
@@ -358,11 +359,13 @@ const { msg, msgType } = await clay.save();</code></pre>
     <a href="/advanced">Advanced</a>
     <a href="/plugins">Plugins</a>
     <a href="/docs">Docs</a>
+    <a href="/offline">Offline</a>
     <a href="/docs#endpoint">Host it yourself</a>
     <a href="https://github.com/panphora/clayjs" rel="noopener">GitHub</a>
     <a href="https://www.npmjs.com/package/@panphora/clayjs" rel="noopener">npm</a>
     <a href="https://github.com/panphora/clayjs/blob/main/LICENSE" rel="noopener">MIT-0</a>
     <a href="THIRD-PARTY-NOTICES.md">Third-party notices</a>
+        <a href="/llms.txt">llms.txt</a>
   </div>
   <div class="inner" data-hyper-footer="clayjs" clay="no-save no-snapshot"></div>
 </footer>

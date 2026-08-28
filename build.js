@@ -15,8 +15,8 @@
 //     llms.txt                         docs/reference.md, renamed
 //     THIRD-PARTY-NOTICES.md           linked from the site footer
 //     _headers                         from website/
-//     v1/     clay.js …  src/**        latest 1.x, what everyone is told to use
-//     1.0.0/  clay.js …  src/**        that exact release, immutable, forever
+//     v1/     clay.js clay.standalone.js …  src/**   latest 1.x, what everyone is told to use
+//     1.1.0/  clay.js clay.standalone.js …  src/**   that exact release, immutable, forever
 //
 // There is no unversioned /clay.js. It was retired before 1.0 on purpose: an
 // unversioned URL means the library can never make a breaking change, because
@@ -30,7 +30,7 @@
 //
 // The library file list is DERIVED, not written down here:
 //
-//   library payload = package.json "files" (entries/ flattened, plus src/)
+//   library payload = package.json "files" (entries/ and dist/ flattened, plus src/)
 //
 // package.json "files" is the list npm publishes, so it is already the thing you
 // must edit to ship a new satellite. Deriving from it means a satellite cannot
@@ -41,6 +41,7 @@ import { dirname, join, resolve, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { build as esbuild } from 'esbuild';
 
 const run = promisify(execFile);
 
@@ -55,9 +56,40 @@ const pkg = JSON.parse(await readFile(join(ROOT, 'package.json'), 'utf8'));
 
 // Entries of "files" that make up the versioned library payload, and where each
 // lands inside a version prefix. entries/ flattens: entries/clay.js is served as
-// <prefix>/clay.js, which is the URL saved documents point at. src/ keeps its name
+// <prefix>/clay.js, which is the URL saved documents point at. dist/ flattens the
+// same way, so the single-file build sits beside clay.js. src/ keeps its name
 // because clay.js imports it by that literal path.
-const LIBRARY = new Map([['entries/', ''], ['src/', 'src/']]);
+const LIBRARY = new Map([['entries/', ''], ['dist/', ''], ['src/', 'src/']]);
+
+// The single-file build, for pages that must load with no network: src/standalone.js
+// and every module reachable from it, in one classic script. Same source as clay.js
+// plus src/, with the loader's imports resolved ahead of time; `plugins=` still
+// decides what runs, it just no longer decides what downloads. esbuild, because it
+// keeps a dynamic import lazy (rollup hoists them) and the loader's evaluation
+// order is load-bearing. `https://*` stays external: the one such import
+// (autosave-debug's diff library) is opt-in debugging, not the library.
+const DIST = resolve(ROOT, 'dist');
+const STANDALONE = 'clay.standalone.js';
+// The first release that shipped dist/. Older tarballs have none, and their pins
+// still have to rebuild.
+const STANDALONE_SINCE = '1.1.0';
+
+async function emitStandalone() {
+  await rm(DIST, { recursive: true, force: true });
+  await esbuild({
+    entryPoints: [join(ROOT, 'src/standalone.js')],
+    outfile: join(DIST, STANDALONE),
+    bundle: true,
+    format: 'iife',
+    legalComments: 'inline',
+    external: ['https://*'],
+    // Sortable's UMD header reads `module`, which esbuild flags on every build;
+    // sortable.js handles both branches, so the warning carries no information.
+    logOverride: { 'commonjs-variable-in-esm': 'silent' },
+    banner: { js: `/* clayjs ${pkg.version} standalone build: every clayjs module in one file. https://clayjs.com/offline */` },
+    logLevel: 'warning',
+  });
+}
 
 // Everything else in "files" is served once, at the site root.
 const RENAMED = new Map([['docs/reference.md', 'llms.txt']]);
@@ -103,11 +135,14 @@ async function copyInto(fromAbs, relPath) {
 
 // Copy a library payload under one prefix. `from` is the working tree for the
 // version being built, or an unpacked tarball for anything already released.
-async function emitLibrary(from, prefix) {
+async function emitLibrary(from, version, prefix = version) {
   let n = 0;
   for (const [name, sub] of LIBRARY) {
     const abs = join(from, name);
-    if (!(await lstat(abs).catch(() => null))) throw new Error(`${from} has no ${name}`);
+    if (!(await lstat(abs).catch(() => null))) {
+      if (name === 'dist/' && cmpVersion(version, STANDALONE_SINCE) < 0) continue;
+      throw new Error(`${from} has no ${name}`);
+    }
     for (const rel of await walk(abs)) n += await copyInto(join(abs, rel), join(prefix, sub, rel));
   }
   return n;
@@ -202,6 +237,15 @@ async function sourceFor(version, published) {
   return published.has(version) ? unpackRelease(version) : ROOT;
 }
 
+// dist/ first: the working tree's own version is served from the tree, so its
+// single-file build has to exist before the copy below. `--standalone` stops here,
+// for a rebuild of that one file with no site and no registry lookup.
+await emitStandalone();
+if (process.argv.includes('--standalone')) {
+  console.log(`built dist/${STANDALONE}`);
+  process.exit(0);
+}
+
 // Clean rebuild, so a file deleted from source disappears from the site instead of
 // lingering forever. Scoped to PUBLIC, which is computed from this file's own
 // location and never from input.
@@ -234,7 +278,7 @@ const heads = rollingHeads(pins);
 
 for (const version of pins) count += await emitLibrary(await sourceFor(version, published), version);
 for (const [major, version] of heads) {
-  count += await emitLibrary(await sourceFor(version, published), `v${major}`);
+  count += await emitLibrary(await sourceFor(version, published), version, `v${major}`);
 }
 
 // Root-level entries from "files": everything the library payload did not claim.
@@ -331,8 +375,10 @@ if (ruleCount > 90) {
 // Cache-Control and, worse, no Access-Control-Allow-Origin on the module tree,
 // which silently breaks every page loading clay.js from another origin.
 const required = ['_headers', 'index.html', 'llms.txt', 'THIRD-PARTY-NOTICES.md'];
-for (const prefix of [...[...heads.keys()].map((m) => `v${m}`), ...pins]) {
+const served = [...[...heads].map(([major, v]) => [`v${major}`, v]), ...pins.map((v) => [v, v])];
+for (const [prefix, version] of served) {
   required.push(`${prefix}/clay.js`, `${prefix}/src/loader.js`, `${prefix}/sap.js`);
+  if (cmpVersion(version, STANDALONE_SINCE) >= 0) required.push(`${prefix}/${STANDALONE}`);
 }
 for (const rel of required) {
   const stat = await lstat(join(PUBLIC, rel)).catch(() => null);
@@ -344,9 +390,11 @@ for (const rel of required) {
 // removed. Derived from entries/ rather than naming clay.js, because a guard that
 // names one file cannot see a satellite: /all.js is exactly the spelling that slipped
 // past a hand-written list once already.
-for (const name of await readdir(join(ROOT, 'entries'))) {
-  if (await lstat(join(PUBLIC, name)).catch(() => null)) {
-    throw new Error(`public/${name} exists; the unversioned URLs were retired at 1.0`);
+for (const dir of ['entries', 'dist']) {
+  for (const name of await readdir(join(ROOT, dir))) {
+    if (await lstat(join(PUBLIC, name)).catch(() => null)) {
+      throw new Error(`public/${name} exists; the unversioned URLs were retired at 1.0`);
+    }
   }
 }
 

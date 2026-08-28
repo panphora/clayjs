@@ -2,6 +2,7 @@ node_modules/
 tests/tmp/
 .DS_Store
 public/
+dist/
 .wrangler/
 .deploy
 .version-cache/

@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.1.0] - 2026-08-28
+
+### Added
+- `clay.standalone.js`: the whole library in one readable file, for pages that must load with no network. Core, every plugin, every satellite and every vendored library, built from the same source by esbuild (`npm run build:standalone` writes `dist/clay.standalone.js`). Served at `https://clayjs.com/v1/clay.standalone.js` and under every pinned prefix from this release on, shipped in the npm tarball at `dist/`, documented at [clayjs.com/offline](https://clayjs.com/offline). It takes the same `?plugins=` and `?exclude=` params; they decide what runs, not what downloads. Every `clay.loaded.*` satellite promise exists without its own tag.
+
+### Changed
+- The loader imports each module through a table of literal imports (`MODULES` in `src/loader-logic.js`) instead of computing `import(base + "/src/" + path)` at runtime, which is what lets a bundler see the graph. The URLs a page fetches from clayjs.com are unchanged, and `boot()` no longer takes a base URL.
+- `sortable` imports its vendored Sortable by literal path too, and falls back to the module's default export for a bundler that takes the UMD's CommonJS branch. `src/lib/load-vendor-script.js` lost its last caller and is gone.
+
 ## [1.0.0] - 2026-08-27
 
 ### Breaking Changes

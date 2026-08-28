@@ -33,6 +33,7 @@
     <a href="/advanced" aria-current="page">Advanced</a>
     <a href="/plugins">Plugins</a>
     <a href="/docs">Docs</a>
+    <a href="/offline">Offline</a>
   </div>
 </nav>
 
@@ -74,7 +75,7 @@
   <section id="custom-attrs">
     <span class="eyebrow">Your own attributes</span>
     <h2 class="section-title">Respecting regions from your own code</h2>
-    <p>Writing a custom attribute that touches the save? Ask clayjs what a region means instead of matching <code>[no-save]</code> yourself. That's what <code>clay.internals.region</code> is for: it's the same policy the library uses, so your attribute can't quietly stop agreeing with it two releases from now. It needs one extra script tag — the <a href="/docs#internals">internals satellite</a>.</p>
+    <p>Writing a custom attribute that touches the save? Ask clayjs what a region means instead of matching <code>[no-save]</code> yourself. That's what <code>clay.internals.region</code> is for: it's the same policy the library uses, so your attribute can't stop agreeing with it two releases from now. It needs one extra script tag, the <a href="/docs#internals">internals satellite</a>.</p>
     <pre><code class="language-markup">&lt;script src="https://clayjs.com/v1/clay-internals.js"&gt;&lt;/script&gt;</code></pre>
     <p>A <code>count-of</code> attribute that writes how many elements match a selector into a badge, and leaves alone the regions that aren't being persisted as they stand:</p>
     <pre><code class="language-javascript">await clay.loaded.internals;
@@ -88,10 +89,10 @@ clay.internals.addDocumentTransform(clone =&gt; {
     el.textContent = clone.querySelectorAll(el.getAttribute("count-of")).length;
   }
 });</code></pre>
-    <p><strong>Keep the callback pure and repeatable.</strong> It runs on the save clone, and it runs again every time clayjs checks whether the page has changed. Write something new on each run, a timestamp being the tempting one, and every check differs from the last, so the page never reads clean and autosave never stops. Derive from the document, don't stamp the clock.</p>
+    <p><strong>Keep the callback pure and repeatable.</strong> It runs on the save clone, and it runs again every time clayjs checks whether the page has changed. Write something new on each run, a timestamp being the tempting one, and every check differs from the last, so the page never reads clean and autosave never stops.</p>
     <p>When your attribute generates chrome of its own, mark it rather than hoping nobody saves it. <code>addRegionToken</code> merges into whatever <code>clay</code> attribute is already on the element:</p>
     <pre><code class="language-javascript">addRegionToken(toolbar, "no-save");   // clay="existing-token no-save"</code></pre>
-    <p class="small">The rest of the surface — <code>isInert</code>, <code>isSnapshotRemoved</code>, <code>REGION_ATTRS</code>, and the raw <code>selectors</code> clayjs strips with — is in the <a href="/docs#internals">reference</a>.</p>
+    <p class="small">The rest of the surface (<code>isInert</code>, <code>isSnapshotRemoved</code>, <code>REGION_ATTRS</code>, and the raw <code>selectors</code> clayjs strips with) is in the <a href="/docs#internals">reference</a>.</p>
   </section>
 
   <!-- ====== ADVANCED SAVE ATTRIBUTES ====== -->
@@ -136,7 +137,7 @@ clay.internals.addDocumentTransform(clone =&gt; {
   <section id="libraries">
     <span class="eyebrow">Separate libraries</span>
     <h2 class="section-title">Bring them in when the problem shows up</h2>
-    <p>These aren't checkboxes; each is its own library with its own script tag and docs. They share clayjs's taste: HTML-first, no build step.</p>
+    <p>These aren't checkboxes; each is its own library with its own script tag and docs. Like clayjs, they are HTML-first with no build step.</p>
     <p class="small">Each loads as a plain <code>&lt;script&gt;</code>. To call one from an inline script right after its tag, wait for it first: <code>await clay.loaded.ui</code> (or <code>.dom</code>, <code>.all</code>, <code>.utils</code>, <code>.events</code>, <code>.options</code>, <code>.data</code>, <code>.sap</code>).</p>
 
     <div class="libcard">
@@ -202,9 +203,11 @@ clay.internals.addDocumentTransform(clone =&gt; {
     <a href="/get-started">Get started</a>
     <a href="/plugins">Plugins</a>
     <a href="/docs">Docs</a>
+    <a href="/offline">Offline</a>
     <a href="https://github.com/panphora/clayjs" rel="noopener">GitHub</a>
     <a href="https://github.com/panphora/clayjs/blob/main/LICENSE" rel="noopener">MIT-0</a>
     <a href="THIRD-PARTY-NOTICES.md">Third-party notices</a>
+        <a href="/llms.txt">llms.txt</a>
   </div>
   <div class="inner" data-hyper-footer="clayjs" clay="no-save no-snapshot"></div>
 </footer>

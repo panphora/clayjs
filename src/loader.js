@@ -1,16 +1,16 @@
-import { resolveModules } from "./loader-logic.js";
+import { resolveModules, MODULES } from "./loader-logic.js";
 import onDomReady from "./lib/dom-ready.js";
 
 function domReady() {
   return new Promise((resolve) => onDomReady(resolve));
 }
 
-export async function boot(base, params, readyResolve) {
+export async function boot(params, readyResolve) {
   await domReady();                                    // Mutation observes document.body
                                                        // unconditionally, and a <head> placement
                                                        // would otherwise observe null
 
-  const editMode = await import(base + "/src/core/is-edit-mode.js");
+  const editMode = await MODULES["core/is-edit-mode.js"]();
   const { isEditMode, isOwner } = editMode;
 
   // richclay's vendor build detects edit mode via this legacy global; set it
@@ -19,13 +19,13 @@ export async function boot(base, params, readyResolve) {
   // and a conflicting leftover would make richclay disable itself.
   window.__hyperclayEditMode = isEditMode;
 
-  const regionPolicy = await import(base + "/src/lib/region-policy.js");
+  const regionPolicy = await MODULES["lib/region-policy.js"]();
 
   const plan = resolveModules(params, isEditMode);
   const loaded = {};
 
   for (const path of plan.core) {
-    loaded[path] = await import(base + "/src/" + path); // sequential: order is load-bearing
+    loaded[path] = await MODULES[path](); // sequential: order is load-bearing
   }
 
   assembleCore(loaded, { isEditMode, isOwner }, regionPolicy); // window.clay MUST be assembled
@@ -39,7 +39,7 @@ export async function boot(base, params, readyResolve) {
     // `ready` exports, never their evaluation.)
     let mod;
     try {
-      mod = await import(base + "/src/" + path);
+      mod = await MODULES[path]();
     } catch (err) {
       console.error(`clayjs: plugin "${path}" failed to load, continuing without it:`, err);
       continue;

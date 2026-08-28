@@ -162,6 +162,7 @@
     <a href="/advanced">Advanced</a>
     <a href="/plugins">Plugins</a>
     <a href="/docs">Docs</a>
+    <a href="/offline">Offline</a>
   </div>
 </nav>
 
@@ -318,7 +319,7 @@
     <pre><code class="language-markup" id="tag-code">&lt;script src="https://clayjs.com/v1/clay.js"&gt;&lt;/script&gt;</code></pre>
     <p>Open <code>my-list.htmlclay</code> in your text editor and add that line just before <code>&lt;/body&gt;</code>. <strong>Keep the editor open and go straight to Step 4.</strong> It adds three attributes to the same file, and then you reload the tab once and see everything arrive at the same time.</p>
     <p>Here is what that one line buys. When HTML Clay serves the file, it stamps a save token onto <code>&lt;html&gt;</code>. clayjs reads that token, switches into edit mode on its own, and knows to POST the whole document back to the app. No config, no save code to write.</p>
-    <p class="small">This tag loads clayjs from <code>clayjs.com</code>, so the tutorial path needs an internet connection. Your file and your saves never leave your machine; the library is the only thing that crosses the network.</p>
+    <p class="small">This tag loads clayjs from <code>clayjs.com</code>, so the tutorial path needs an internet connection. Your file and your saves never leave your machine; the library is the only thing that crosses the network. If you want nothing to cross it, <a href="/offline">the standalone build</a> is the whole library in one file you keep beside yours.</p>
   </section>
 
   <!-- ================= STEP 4 ================= -->
@@ -543,10 +544,12 @@
     <a href="/advanced">Advanced</a>
     <a href="/plugins">Plugins</a>
     <a href="/docs">Docs</a>
+    <a href="/offline">Offline</a>
     <a href="/docs#endpoint">Host it yourself</a>
     <a href="https://github.com/panphora/clayjs" rel="noopener">GitHub</a>
     <a href="https://github.com/panphora/clayjs/blob/main/LICENSE" rel="noopener">MIT-0</a>
     <a href="THIRD-PARTY-NOTICES.md">Third-party notices</a>
+        <a href="/llms.txt">llms.txt</a>
   </div>
   <div class="inner" data-hyper-footer="clayjs" clay="no-save no-snapshot"></div>
 </footer>

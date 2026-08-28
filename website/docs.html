@@ -33,6 +33,7 @@
     <a href="/advanced">Advanced</a>
     <a href="/plugins">Plugins</a>
     <a href="/docs" aria-current="page">Docs</a>
+    <a href="/offline">Offline</a>
   </div>
 </nav>
 
@@ -53,7 +54,8 @@
     <table>
       <tr><th>URL</th><th>What it serves</th></tr>
       <tr><td><code>/v1/clay.js</code></td><td>The newest 1.x release. Rolls forward with fixes and features, never across a major version.</td></tr>
-      <tr><td><code>/1.0.0/clay.js</code></td><td>That exact release, byte for byte, forever. Cached for a year as immutable.</td></tr>
+      <tr><td><code>/1.0.0/clay.js</code></td><td>That exact release, forever. Cached for a year as immutable.</td></tr>
+      <tr><td><code>/v1/clay.standalone.js</code></td><td>The whole library in one file, for a page that must load with no network. Same query params. Details on <a href="/offline">Offline</a>.</td></tr>
     </table>
     <p class="small">Use <code>/v1/</code> unless you have a reason not to. Both forms exist for every satellite, so <code>/v1/clay-ui.js</code> and <code>/1.0.0/sap.js</code> work the same way. Published versions are listed at <a href="/versions.json">versions.json</a>. There is no unversioned URL: <code>clayjs.com/clay.js</code> was retired at 1.0 and returns 404.</p>
     <p>The default build includes the save lifecycle and rich text (<code>editable</code>). Plugins load conditionally through the URL, in the browser only:</p>
@@ -62,7 +64,7 @@
       <tr><td><code>plugins</code></td><td>Comma-separated plugins to load</td><td><code>clay.js?plugins=sync,undo</code></td></tr>
       <tr><td><code>exclude</code></td><td>Remove a default-on plugin</td><td><code>clay.js?exclude=richclay</code></td></tr>
     </table>
-    <p class="small">Loadable plugins: <code>richclay</code> (default on), <code>indicator</code>, <code>sync</code>, <code>sortable</code>, <code>undo</code>, <code>cms</code>, <code>quickcrop</code>, <code>upload</code>, <code>wire</code>, <code>demo</code>. The first six have a checkbox in the configurator; ask for the rest by name. The <a href="/#configure">configurator</a> composes this URL for you. Everything else is a separate library with its own script tag: see <a href="/advanced">Advanced</a> and <a href="/plugins">Plugins</a>. npm builds for bundlers live at <a href="https://www.npmjs.com/package/@panphora/clayjs" rel="noopener">@panphora/clayjs</a>.</p>
+    <p class="small">Loadable plugins: <code>richclay</code> (default on), <code>indicator</code>, <code>sync</code>, <code>sortable</code>, <code>undo</code>, <code>cms</code>, <code>quickcrop</code>, <code>upload</code>, <code>wire</code>, <code>demo</code>. The first six have a checkbox in the configurator; ask for the rest by name. The <a href="/#configure">configurator</a> composes this URL for you. Everything else is a separate library with its own script tag: see <a href="/advanced">Advanced</a> and <a href="/plugins">Plugins</a>. npm builds for bundlers live at <a href="https://www.npmjs.com/package/@panphora/clayjs" rel="noopener">@panphora/clayjs</a>. For a page with no network at all, <a href="/offline">the standalone build</a> is every module in one downloadable file.</p>
   </section>
 
   <!-- ====== CORE API ====== -->
@@ -105,7 +107,7 @@
   <section id="internals">
     <span class="eyebrow">Low level</span>
     <h2 class="section-title">clay.internals</h2>
-    <p>The pieces clayjs builds itself out of, for code that needs to sit <em>inside</em> the save lifecycle rather than call it. Lower level than <code>clay.*</code> deliberately: it assumes you know the lifecycle. One extra script tag, and <code>clay.loaded.internals</code> resolves when it's ready.</p>
+    <p>The pieces clayjs builds itself out of, for code that needs to sit <em>inside</em> the save lifecycle rather than call it. Lower level than <code>clay.*</code>: it assumes you know the lifecycle. One extra script tag, and <code>clay.loaded.internals</code> resolves when it's ready.</p>
     <pre><code class="language-markup">&lt;script src="https://clayjs.com/v1/clay-internals.js"&gt;&lt;/script&gt;</code></pre>
     <table>
       <tr><th>Member</th><th>What it does</th></tr>
@@ -221,7 +223,7 @@ app.post("/_/save", async (req, res) =&gt; {
 });
 
 app.listen(4600);</code></pre>
-    <p class="small">The server half is only half of it: on your own host nothing arms <a href="#editmode">edit mode</a> for you, so a page served this way is read-only until you set <code>window.clayEditMode</code> before the script tag. A real deployment adds authorization and atomic writes; this is the whole protocol though. The same contract powers hyperclay.com, Hyperclay Local, and HTML Clay. Two details you may ignore: every save also carries a <code>Save-Trigger: user|auto</code> header (whether a person triggered it), and HTML Clay uses a token variant, <code>POST /_/save/{token}</code>, read from <code>&lt;html htmlclaytoken&gt;</code>.</p>
+    <p class="small">The server half is only half of it: on your own host nothing arms <a href="#editmode">edit mode</a> for you, so a page served this way is read-only until you set <code>window.clayEditMode</code> before the script tag. A real deployment adds authorization and atomic writes. The same contract powers hyperclay.com, Hyperclay Local, and HTML Clay. Two details you may ignore: every save also carries a <code>Save-Trigger: user|auto</code> header (whether a person triggered it), and HTML Clay uses a token variant, <code>POST /_/save/{token}</code>, read from <code>&lt;html htmlclaytoken&gt;</code>.</p>
   </section>
 
 </main>
@@ -233,9 +235,11 @@ app.listen(4600);</code></pre>
     <a href="/get-started">Get started</a>
     <a href="/advanced">Advanced</a>
     <a href="/plugins">Plugins</a>
+    <a href="/offline">Offline</a>
     <a href="https://github.com/panphora/clayjs" rel="noopener">GitHub</a>
     <a href="https://github.com/panphora/clayjs/blob/main/LICENSE" rel="noopener">MIT-0</a>
     <a href="THIRD-PARTY-NOTICES.md">Third-party notices</a>
+        <a href="/llms.txt">llms.txt</a>
   </div>
   <div class="inner" data-hyper-footer="clayjs" clay="no-save no-snapshot"></div>
 </footer>

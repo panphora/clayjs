@@ -62,6 +62,26 @@ then a save token stamped on `<html>` by the host, then the platform's owner coo
 and save tokens are covered in [the reference](https://github.com/panphora/clayjs/blob/main/docs/reference.md) and on
 [clayjs.com/docs](https://clayjs.com/docs#editmode).
 
+### One file, no network
+
+`clay.js` is a small bootstrap that fetches the modules a page asked for. For a page
+that has to load with no connection, download the standalone build instead: every
+module, plugin and satellite in one readable file.
+
+```html
+<script src="clay.standalone.js?plugins=sync"></script>
+```
+
+Get it from [clayjs.com/v1/clay.standalone.js](https://clayjs.com/v1/clay.standalone.js)
+(about 1 MB; `/1.1.0/clay.standalone.js` is that exact release, and the file's first
+line says which version it is) or from the npm tarball at `dist/clay.standalone.js`.
+Keep it beside the HTML file and use the same query params: `plugins=` decides what
+runs, not what downloads, and `await clay.loaded.ui` and the other satellites work
+without tags of their own. Saving still needs a host that writes the file;
+[HTML Clay](https://htmlclay.com) does that on the machine itself, with no network.
+The two things that still reach out, and why they fail soft, are on
+[clayjs.com/offline](https://clayjs.com/offline).
+
 ## Readiness
 
 The bootstrap creates `window.clay` synchronously with just a `ready` promise, then augments

@@ -1,6 +1,6 @@
 {
   "name": "@panphora/clayjs",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "type": "module",
   "description": "clayjs: malleable HTML files. Save lifecycle for self-saving HTML.",
   "license": "MIT-0",
@@ -31,10 +31,12 @@
     "./THIRD-PARTY-NOTICES.md": "./THIRD-PARTY-NOTICES.md",
     "./src/*": "./src/*",
     "./entries/*": "./entries/*",
+    "./dist/*": "./dist/*",
     "./*": "./entries/*"
   },
   "files": [
     "entries/",
+    "dist/",
     "THIRD-PARTY-NOTICES.md",
     "src/"
   ],
@@ -45,7 +47,9 @@
     "test": "NODE_OPTIONS=--experimental-vm-modules jest",
     "test:conformance": "UPDATE_GOLDENS=0 web-test-runner --config conformance/wtr.config.mjs",
     "conformance:update": "UPDATE_GOLDENS=1 web-test-runner --config conformance/wtr.config.mjs",
-    "prepublishOnly": "npm test && npm run test:conformance",
+    "build:standalone": "node build.js --standalone",
+    "test:standalone": "node build.js --standalone && web-test-runner --config tests/browser/wtr.config.mjs",
+    "prepublishOnly": "npm test && npm run test:conformance && npm run test:standalone",
     "dev": "node tests/stub-server.mjs",
     "build": "node build.js",
     "deploy": "node build.js && wrangler deploy && git rev-parse HEAD > .deploy"
@@ -55,6 +59,7 @@
     "@web/test-runner": "^0.20.2",
     "@web/test-runner-commands": "^0.9.0",
     "@web/test-runner-playwright": "^0.11.1",
+    "esbuild": "^0.28.2",
     "jest": "^29.7.0",
     "jest-environment-jsdom": "^29.7.0",
     "playwright": "1.62.1"

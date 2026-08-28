@@ -21,6 +21,7 @@ They test different things and both have to pass.
 ```bash
 npm test                   # jest, jsdom, tests/unit/ — behavior
 npm run test:conformance   # web-test-runner, real browser, conformance/ — exact bytes
+npm run test:standalone    # web-test-runner, real browser, the single-file build
 npm run build              # assembles public/, asserts the deploy output is complete
 ```
 
@@ -59,6 +60,12 @@ satellite means dropping the file into `entries/` and nothing else. The npm surf
 derived the same way: `exports` maps `./*` into `entries/`, so a new satellite is reachable
 as `@panphora/clayjs/<name>.js` with no second edit. That derivation is deliberate: a
 hand-copied mirror drifted once and the deployed `clay.js` could not boot.
+
+**`dist/` is a build output too.** `npm run build:standalone` writes `dist/clay.standalone.js`,
+the single-file build, with esbuild from `src/standalone.js`. It is gitignored, rebuilt
+by `npm run build` and before publishing, and shipped in the tarball. `src/standalone.js`
+is the twin of `entries/clay.js`: the same bootstrap, with the loader bundled in instead
+of imported at runtime. A change to one bootstrap is a change to both.
 
 **The docs are checked by tests.** `tests/unit/docs-contract.test.js` asserts that every
 loadable plugin, every `clay.*` member the loader attaches, and every region token is

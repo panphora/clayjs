@@ -27,6 +27,10 @@ jobs:
         run: npm test
       - name: Conformance byte gate (web-test-runner)
         run: npm run test:conformance
+      # The single-file build, bundled here and loaded in the same pinned Chromium:
+      # proves it boots, fetches nothing else, and snapshots the same bytes as clay.js.
+      - name: Single-file build (web-test-runner)
+        run: npm run test:standalone
       # Both suites can be green while the deploy output is broken: nothing else here
       # runs the build. build.js asserts that public/ came out with _headers, clay.js,
       # src/loader.js, llms.txt and index.html, so this step is the gate on the site.

@@ -50,6 +50,19 @@ sap.js. To call a satellite from an inline script right after its tag, wait for 
 `await clay.loaded.ui` (or `.dom`, `.all`, `.utils`, `.events`, `.options`, `.data`,
 `.sap`, `.internals`).
 
+Offline: `https://clayjs.com/v1/clay.standalone.js` is the whole library in one
+readable file (core, every plugin, every satellite), built from the same source.
+Download it, keep it beside the HTML file, and load it with the same query params:
+`<script src="clay.standalone.js?plugins=sync"></script>`. `plugins=` then decides
+what runs, not what downloads, and every `clay.loaded.*` promise exists without a
+satellite tag. `/<version>/clay.standalone.js` is a pinned copy; the npm tarball
+carries it at `dist/clay.standalone.js`; the file's first line names its version.
+Two things still reach the network, both opt-in: the CMS sidebar's font comes from
+jsDelivr and falls back to the system monospace, and autosave debugging
+(`localStorage` key `clay:debug:autosave`) imports its diff library from esm.sh.
+Saving still needs a host that writes the file; HTML Clay does that on the machine
+itself, with no network.
+
 ## Core API: window.clay
 
 - `clay.ready` — Promise that resolves once clayjs has booted (core loaded, plugins

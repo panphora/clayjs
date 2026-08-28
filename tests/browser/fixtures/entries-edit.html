@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>clayjs standalone fixture</title>
+  <script>window.clayEditMode = true;</script>
+  <script src="/entries/clay.js?plugins=sync,sortable,undo,wire"></script>
+  <script src="/entries/clay-dom.js"></script>
+  <script src="/entries/clay-utils.js"></script>
+  <script src="/entries/clay-internals.js"></script>
+  <script src="/entries/all.js"></script>
+  <script src="/entries/clay-ui.js"></script>
+  <script src="/entries/clay-options.js"></script>
+  <script src="/entries/clay-events.js"></script>
+  <script src="/entries/clay-data.js"></script>
+  <script src="/entries/sap.js"></script>
+</head>
+<body>
+  <h1 editable>Edit me</h1>
+
+  <p contenteditable>Type here, then press Cmd+Z to undo.</p>
+
+  <ul sortable>
+    <li>Alpha</li>
+    <li>Beta</li>
+    <li>Gamma</li>
+  </ul>
+
+  <label>Name: <input persist name="who" value=""></label>
+
+  <nav clay="no-save no-watch">
+    <span>local chrome that must not be saved</span>
+  </nav>
+
+  <button trigger-save>Save</button>
+</body>
+</html>

@@ -16,7 +16,6 @@
 */
 import { isEditMode } from "../core/is-edit-mode.js";
 import Mutation from "../lib/mutation.js";
-import { getVendorUrl } from "../lib/load-vendor-script.js";
 
 function makeSortable(sortableElem, Sortable) {
   let options = {};
@@ -89,10 +88,11 @@ function makeSortable(sortableElem, Sortable) {
 async function init() {
   if (!isEditMode) return;
 
-  // Load the vendor script
-  const vendorUrl = getVendorUrl(import.meta.url, '../vendor/Sortable.vendor.js');
-  await import(vendorUrl);
-  const Sortable = window.Sortable;
+  // Sortable's UMD header picks its target at run time: window.Sortable when no
+  // module system is present (a module load, and the single-file build), a
+  // default export when a bundler hands it one. Cover both.
+  const mod = await import('../vendor/Sortable.vendor.js');
+  const Sortable = window.Sortable || mod.default;
 
   // Set up sortable on page load
   document.querySelectorAll('[sortable]').forEach(el => makeSortable(el, Sortable));
