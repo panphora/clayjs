@@ -366,8 +366,10 @@
       <li>Reload the browser tab one more time. The new words and the checkmark are both still there, because they were never anywhere but the file.</li>
     </ol>
 
-    <p>The line you are hunting for in move 7:</p>
-    <pre><code class="language-markup">&lt;li&gt;&lt;input type="checkbox" persist checked aria-labelledby="t2"&gt; &lt;span id="t2" editable="single-line"&gt;Book the dentist&lt;/span&gt;&lt;/li&gt;</code></pre>
+    <p>The line you are hunting for in move 7. A browser writes bare attributes back with
+      empty values and appends <code>checked</code> at the end, so it reads like this rather
+      than the way you typed it:</p>
+    <pre><code class="language-markup">&lt;li&gt;&lt;input type="checkbox" persist="" aria-labelledby="t2" checked=""&gt; &lt;span id="t2" editable="single-line"&gt;Book the dentist&lt;/span&gt;&lt;/li&gt;</code></pre>
     <p>Uncheck that task, wait, and look again: the attribute is gone. Your list's state is not in a database and not in browser storage. It is in the file, spelled out in HTML you can read.</p>
 
     <p class="small">If your editor still shows the old text, reload the file: an editor that opened it back in Step 3 may be showing you the buffer it read then. VS Code refreshes on its own; some editors want a nudge. Also new in the file: <code>&lt;html&gt;</code> has gained an <code>htmlclayid</code> attribute. That is the app's durable name for the file, and it is the only thing the app adds.</p>
@@ -677,8 +679,22 @@
   }
   buildInput.addEventListener("input", renderPrompt);
 
-  // Everything below needs the live library.
-  if (!(window.clay && window.clay.ready)) return;
+  var NO_LIBRARY = "The live library didn't load, so there is no payload to show. (This demo needs a connection to clayjs.com.)";
+
+  // Everything below needs the live library. When clay.js itself never loaded there is
+  // no ready promise to wait on, and this return happens before the fold's toggle
+  // listener is bound further down, so renderPayload's own version of this message
+  // could never run in the one case it describes. Bind the explanation here instead.
+  if (!(window.clay && window.clay.ready)) {
+    var deadFold = document.getElementById("payload-fold");
+    var deadView = document.getElementById("payload-view");
+    if (deadFold && deadView) {
+      deadFold.addEventListener("toggle", function () {
+        if (deadFold.open) deadView.textContent = NO_LIBRARY;
+      });
+    }
+    return;
+  }
 
   var booted = false;
   window.clay.ready.then(function () { booted = true; });
@@ -725,7 +741,7 @@
   function renderPayload() {
     if (!fold.open) return;
     if (!canSave() || !("getHTML" in window.clay)) {
-      view.textContent = "The live library didn't load, so there is no payload to show. (This demo needs a connection to clayjs.com.)";
+      view.textContent = NO_LIBRARY;
       return;
     }
     var doc = new DOMParser().parseFromString(window.clay.getHTML(), "text/html");
