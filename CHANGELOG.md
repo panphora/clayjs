@@ -3,29 +3,18 @@
 ## [1.1.0] - 2026-08-28
 
 ### Added
-- `clay.standalone.js`, a single-file build for offline pages
-- Conditional save support using etags, with a hold on conflict
-- Notice shown when a save conflict is detected
-
-### Changed
-- Hold-resume logic refactored
-- Updated the hypercms vendor bundle
-- Updated clayjs
-
-### Fixed
-- Sync serializer no longer reorders the root element's attributes
-
-
-
-## [1.1.0] - 2026-08-28
-
-### Added
 - `clay.standalone.js`: the whole library in one readable file, for pages that must load with no network. Core, every plugin, every satellite and every vendored library, built from the same source by esbuild (`npm run build:standalone` writes `dist/clay.standalone.js`). Served at `https://clayjs.com/v1/clay.standalone.js` and under every pinned prefix from this release on, shipped in the npm tarball at `dist/`, documented at [clayjs.com/offline](https://clayjs.com/offline). It takes the same `?plugins=` and `?exclude=` params; they decide what runs, not what downloads. Every `clay.loaded.*` satellite promise exists without its own tag.
 - `npm run build:standalone` regenerates the file alone; `prepack` builds it so every tarball carries it; pasted inline into a page it boots with the defaults.
+- Conditional saves. On a host whose discovery meta lists `conditional`, every save carries `If-Match` with the etag this tab last saw, and a 412 is a refused save, not a failed one: the host wrote nothing. Autosave holds until a save lands; `clay.save.overwrite()` sends this tab's version unconditionally. Live-sync stamp frames carry the etag, so a tab in step with the document takes each new stamp while a held tab keeps its old one, and a cleared hold asks the host for the current stamp.
+- A save-conflict notice: one line at the bottom of the page when a save is refused, with the two answers (keep this version, take the other). It is core, not a plugin, since the status chip that would otherwise say so is off by default.
 
 ### Changed
 - The loader imports each module through a table of literal imports (`MODULES` in `src/loader-logic.js`) instead of computing `import(base + "/src/" + path)` at runtime, which is what lets a bundler see the graph. The URLs a page fetches from clayjs.com are unchanged. `boot()` keeps its `base` parameter, now unused: the entry and the loader are cached independently under `/v1/`, so the call shape between them cannot change.
 - `sortable` imports its vendored Sortable by literal path too, so a bundler can see it; it reads `window.Sortable` with the module's default export as the fallback, whichever branch the UMD header takes. `src/lib/load-vendor-script.js` lost its last caller and is gone.
+- The hypercms vendor bundle is updated.
+
+### Fixed
+- The sync serializer no longer reorders the root element's attributes. It stripped the tab-local ones and set them again afterwards, which appended them, so every save installed a baseline whose `<html>` tag never matched the live one again. On htmlclay, which splices its token in right after `<html`, that meant a close warning on every already-saved document and a full capture plus live-sync broadcast on every no-op autosave. The open tag is now serialized from a childless copy.
 
 ## [1.0.0] - 2026-08-27
 
