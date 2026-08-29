@@ -72,7 +72,7 @@
       <pre><code class="language-markup">&lt;img class="avatar" data-hcms-crop="1:1" src="avatar.jpg"&gt;</code></pre>
       <pre><code class="language-javascript">const shot = await clay.quickcrop(file, { aspect: 16/9 });
 // { blob, dataURL, width, height }, or null if they cancelled</code></pre>
-      <p class="small">Aspects are <code>1:1</code>, <code>16:9</code> or <code>free</code> on the attribute, a plain number in code. The modal and its stylesheet are marked <code>save-remove</code>, so cropping chrome never reaches the saved file.</p>
+      <p class="small">Aspects are <code>1:1</code>, <code>16:9</code> or <code>free</code> on the attribute, a plain number in code. The modal and its stylesheet are marked <code>save-remove</code>, the legacy alias for <code>no-save</code>, so cropping chrome never reaches the saved file.</p>
     </div>
 
     <div class="libcard">

@@ -240,12 +240,12 @@ A clayjs server implements one route:
 - Route: `POST /_/save`
 - Body: the file's full HTML, as plain text. Always; this route has exactly one body
   shape on every host.
-- Header: `Document-URL`, the URL of the page being saved (also sent as `Page-URL`, the
-  older spelling; read either).
+- Header: `Document-URL`, the full URL of the page being saved.
 - Success: `200` with JSON `{ "msg": "Saved" }`
-- Failure: any non-2xx with JSON `{ "msg": "why" }`
+- Failure: any non-2xx. The status is authoritative; host-generated failures use JSON
+  `{ "msg": "why" }`, but clients tolerate non-JSON intermediary errors.
 
-A complete server in about 20 lines of Express:
+A complete server in a couple dozen lines of Express:
 
 ```js
 import express from "express";
@@ -259,11 +259,16 @@ app.use(express.text({ type: "*/*", limit: "10mb" }));
 
 app.post("/_/save", async (req, res) => {
   try {
+    const origin = req.get("Origin");
+    if (origin && new URL(origin).host !== req.get("Host"))
+      return res.status(403).json({ msg: "Cross-origin save refused", code: "forbidden" });
     const page = decodeURIComponent(new URL(req.get("Document-URL")).pathname);
-    const file = path.join(root, page.endsWith("/") ? page + "index.html" : page);
-    // a save may only ever write inside the folder you are serving
-    if (!file.startsWith(root + path.sep)) return res.status(403).json({ msg: "Outside the folder" });
-    await fs.writeFile(file, req.body);
+    const target = path.join(root, path.normalize(page.endsWith("/") ? page + "index.html" : page));
+    if (!target.startsWith(root + path.sep))
+      return res.status(403).json({ msg: "Outside the folder", code: "forbidden" });
+    if (!/^\s*<!doctype html>/i.test(req.body))
+      return res.status(422).json({ msg: "Not a complete HTML document", code: "invalid-document" });
+    await fs.writeFile(target, req.body);
     res.json({ msg: "Saved" });
   } catch {
     res.status(500).json({ msg: "Couldn't save" });
@@ -276,7 +281,7 @@ app.listen(4600);
 On your own host nothing arms edit mode for you, so set `window.clayEditMode` before the
 script tag. Two details you may ignore: every save also carries a
 `Save-Trigger: user|auto` header (whether a person triggered it), and HTML Clay uses a
-token variant, `POST /_/save/{token}`, read from `<html htmlclaytoken>`.
+token variant, `POST /_/save/{token}`, read from `<html savetoken>`.
 
 ## Plugins
 

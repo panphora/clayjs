@@ -7,7 +7,33 @@
  * cannot drift between the edit-mode ladder and the save lane.
  */
 
-import { SAVE_TOKEN_ATTRS } from "../lib/root-attrs.js";
+import { SAVE_TOKEN_ATTRS, LEGACY_SAVE_TOKEN_ATTRS } from "../lib/root-attrs.js";
+
+let warnedAboutLegacyToken = false;
+
+/**
+ * Say so, once, when this response carries only the pre-rename save token.
+ *
+ * Dropping the old spelling is a deliberate break (see root-attrs.js), and its failure
+ * mode is the kind worth spending five lines on: the host that serves the old name also
+ * sets the edit-mode cookie, so the page stays editable and every save 404s. Without
+ * this the reader sees a working page that quietly keeps nothing. With it the console
+ * names the cause and the fix, which is the whole difference between a break and a bug.
+ */
+function warnAboutLegacyToken() {
+  if (warnedAboutLegacyToken) return;
+  const carries = LEGACY_SAVE_TOKEN_ATTRS.some(
+    (attr) => document.documentElement.getAttribute(attr)
+  );
+  if (!carries) return;
+  warnedAboutLegacyToken = true;
+  console.warn(
+    "[clay] This page was served with the pre-1.9.0 save token (" +
+      LEGACY_SAVE_TOKEN_ATTRS.join(", ") +
+      "), which this version no longer accepts. Saving will fail until the host is " +
+      "updated. If this is HTML Clay, upgrade it to 1.9.0 or newer."
+  );
+}
 
 /**
  * The per-document save token this response carries, or null.
@@ -24,6 +50,7 @@ export function saveToken() {
     const value = document.documentElement.getAttribute(attr);
     if (value) return value;
   }
+  warnAboutLegacyToken();
   return null;
 }
 

@@ -10,7 +10,7 @@ import { jest } from "@jest/globals";
 
 test("save wire contract: token endpoint, headers, and a text body", async () => {
   window.clayEditMode = true;
-  document.documentElement.setAttribute("htmlclaytoken", "abc");
+  document.documentElement.setAttribute("savetoken", "abc");
   document.documentElement.setAttribute("clay-save-transport", "desktop-json-v1");
   document.body.innerHTML = '<div id="content">start</div>';
 

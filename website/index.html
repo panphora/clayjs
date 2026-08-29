@@ -113,7 +113,7 @@
   const { msg, msgType } = await clay.save();
 &lt;/script&gt;</code></pre>
     <h3>What actually happens</h3>
-    <p>clayjs POSTs the file's own HTML to <code>/_/save</code> on the server it was loaded from, and gets back a small JSON answer: <code>{ "msg": "Saved" }</code>. That's the whole protocol. Anything that implements that one endpoint can host malleable files:</p>
+    <p>clayjs POSTs the file's own HTML as plain text to <code>/_/save</code> on the server it was loaded from, identifies the document with the <code>Document-URL</code> header, includes same-origin cookies, and treats the HTTP status as authoritative. A 2xx response accepts the save and normally includes JSON such as <code>{ "msg": "Saved" }</code>; any non-2xx refuses or fails it, even when a proxy returns HTML instead of JSON. That's the whole core protocol. Anything that implements that one endpoint can host malleable files:</p>
     <table>
       <tr><th>Server</th><th>What it is</th></tr>
       <tr><td><strong><a href="https://hyperclay.com">hyperclay.com</a></strong></td><td>Hosted platform: accounts, versions, sharing</td></tr>

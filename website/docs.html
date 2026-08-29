@@ -195,11 +195,11 @@
       <tr><th>Part</th><th>Value</th></tr>
       <tr><td>Route</td><td><code>POST /_/save</code></td></tr>
       <tr><td>Body</td><td>The file's full HTML, as plain text. Always: this route has exactly one body shape, on every host.</td></tr>
-      <tr><td>Header</td><td><code>Document-URL</code>: the URL of the page being saved. Also sent as <code>Page-URL</code>, the older spelling; read either.</td></tr>
+      <tr><td>Header</td><td><code>Document-URL</code>: the full URL of the page being saved.</td></tr>
       <tr><td>Success</td><td><code>200</code> with JSON <code>{ "msg": "Saved" }</code></td></tr>
-      <tr><td>Failure</td><td>Any non-2xx with JSON <code>{ "msg": "why" }</code></td></tr>
+      <tr><td>Failure</td><td>Any non-2xx. The status is authoritative; host-generated failures use JSON <code>{ "msg": "why" }</code>, but clients tolerate non-JSON intermediary errors.</td></tr>
     </table>
-    <p>A complete server in about 20 lines of Express:</p>
+    <p>A complete server in a couple dozen lines of Express:</p>
     <pre><code class="language-javascript">import express from "express";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -211,11 +211,16 @@ app.use(express.text({ type: "*/*", limit: "10mb" }));
 
 app.post("/_/save", async (req, res) =&gt; {
   try {
+    const origin = req.get("Origin");
+    if (origin &amp;&amp; new URL(origin).host !== req.get("Host"))
+      return res.status(403).json({ msg: "Cross-origin save refused", code: "forbidden" });
     const page = decodeURIComponent(new URL(req.get("Document-URL")).pathname);
-    const file = path.join(root, page.endsWith("/") ? page + "index.html" : page);
-    // a save may only ever write inside the folder you are serving
-    if (!file.startsWith(root + path.sep)) return res.status(403).json({ msg: "Outside the folder" });
-    await fs.writeFile(file, req.body);
+    const target = path.join(root, path.normalize(page.endsWith("/") ? page + "index.html" : page));
+    if (!target.startsWith(root + path.sep))
+      return res.status(403).json({ msg: "Outside the folder", code: "forbidden" });
+    if (!/^\s*&lt;!doctype html&gt;/i.test(req.body))
+      return res.status(422).json({ msg: "Not a complete HTML document", code: "invalid-document" });
+    await fs.writeFile(target, req.body);
     res.json({ msg: "Saved" });
   } catch {
     res.status(500).json({ msg: "Couldn't save" });
@@ -223,7 +228,7 @@ app.post("/_/save", async (req, res) =&gt; {
 });
 
 app.listen(4600);</code></pre>
-    <p class="small">The server half is only half of it: on your own host nothing arms <a href="#editmode">edit mode</a> for you, so a page served this way is read-only until you set <code>window.clayEditMode</code> before the script tag. A real deployment adds authorization and atomic writes. The same contract powers hyperclay.com, Hyperclay Local, and HTML Clay. Two details you may ignore: every save also carries a <code>Save-Trigger: user|auto</code> header (whether a person triggered it), and HTML Clay uses a token variant, <code>POST /_/save/{token}</code>, read from <code>&lt;html htmlclaytoken&gt;</code>.</p>
+    <p class="small">The server half is only half of it: on your own host nothing arms <a href="#editmode">edit mode</a> for you, so a page served this way is read-only until you set <code>window.clayEditMode</code> before the script tag. A real deployment adds authorization and atomic writes. The same contract powers hyperclay.com, Hyperclay Local, and HTML Clay. Two details you may ignore: every save also carries a <code>Save-Trigger: user|auto</code> header (whether a person triggered it), and HTML Clay uses a token variant, <code>POST /_/save/{token}</code>, read from <code>&lt;html savetoken&gt;</code>.</p>
   </section>
 
 </main>

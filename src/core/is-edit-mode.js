@@ -5,7 +5,7 @@ import { hasSaveToken } from "./host-attrs.js";
 // Edit-mode precedence: an explicit ?editmode=true|false URL param wins, then an
 // opt-in window.clayEditMode global (with the legacy window.__hyperclayEditMode
 // still honored as a fallback for older standalone embedders — htmlclay itself
-// uses the injected htmlclaytoken plus the admin cookie, not this global), then
+// uses its injected save token plus the admin cookie, not this global), then
 // a save token the host put on the root, then the isAdminOfCurrentResource cookie. The
 // global is for standalone uses (demos, htmlclay, any self-saving file) that are
 // always editable and have no owner cookie; setting it before clayjs loads turns

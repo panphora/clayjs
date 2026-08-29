@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.2.0] - 2026-08-29
+
+### Breaking Changes
+- **The save token is read under one name, `savetoken`.** `htmlclaytoken`, the pre-rename spelling, is no longer accepted as a credential and no longer turns edit mode on. Spec §9 names one save-token attribute, and carrying a second name in the save path indefinitely was the alternative, since "wait until every old host is gone" is a condition nobody measures.
+
+  **This breaks documents served by HTML Clay 1.8.0 or earlier**, which inject only the old name. On those, the page stays editable, because that host also sets the edit-mode cookie, and every save fails: it posts to the bare `/_/save`, which that host does not route. **Upgrade HTML Clay to 1.9.0 or newer**, which serves both names and is the fix for every document at once. The library now says exactly this in the console when it finds the old name, rather than letting the page look like it is saving.
+
+  The old name is still stripped from every save and still kept out of an incoming live-sync morph. What a host injects has to be removed whether or not this library reads it, or a live credential ends up written into a document or handed to another tab.
+
+### Changed
+- `savetoken` is the documented name of the save token, in the reference and across the site.
+
+### Fixed
+- A document's durable file identity is no longer read as a save token. `documentid` and `htmlclayid` are injected by the host exactly as a token is, and need the same protection from an incoming morph, but they are not credentials and they do reach disk. They shared one list with the token spellings, so `saveToken()` returned an identity whenever the host had minted no token of its own, and the library posted to `/_/save/{id}` with credentials omitted and showed edit mode to every visitor. Identities have their own list now: still stripped before a save, still kept out of a peer's morph, never read as a credential.
+
 ## [1.1.0] - 2026-08-28
 
 ### Added
