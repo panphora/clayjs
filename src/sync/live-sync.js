@@ -44,6 +44,7 @@ import { serializeForSync, captureForComparisonAndDirty, captureSnapshot } from 
 import { isTabLocalRootAttr } from '../lib/root-attrs.js';
 import { protectPeerDoc, protectDiskDoc, activateIncomingDoc } from './splice-merge.js';
 import { hostMeta } from '../core/host-meta.js';
+import { recordEtag, seedEtag } from '../core/etag.js';
 import { pageMaybeDirty, pauseGate, resumeGate } from '../lib/dirty-gate.js';
 
 // The page just took a frame verified clean against its baseline, so it now IS
@@ -517,9 +518,48 @@ class LiveSync {
     const key = lane === 'live' ? '_heldLive' : '_heldExt';
     if (this[key] === isHeld) return;
     this[key] = isHeld;
+    // A hold that clears leaves this tab back in step, but every stamp frame that
+    // arrived while it was held was refused and nothing re-sends them: stamps are
+    // broadcast on a save, not on a merge. So the tab would go on holding a stamp
+    // from before the hold and have its next save refused over a conflict that has
+    // already resolved itself, which is this notice crying wolf. Ask the host for
+    // the current one instead. Only once BOTH lanes are clear, because one lane
+    // resuming while the other still holds means the tab is still behind.
+    if (!isHeld && !this._heldLive && !this._heldExt) {
+      seedEtag({ fresh: true, clearIfMissing: false });
+    }
     document.dispatchEvent(new CustomEvent(isHeld ? 'clay:sync-held' : 'clay:sync-resumed', {
       detail: { lane, el: el || null },
     }));
+  }
+
+  /**
+   * Take a stamp that arrived with no document (spec §6).
+   *
+   * The host sends one whenever the file on disk changes, because an editing tab
+   * never receives the saved document itself: that lane is for viewers, and
+   * pushing a saved document onto an editor would replace work in progress.
+   *
+   * Taking it is what makes live sync and the conflict check agree. An editor
+   * whose peer frames are merging is already looking at the other tab's content,
+   * so refusing its next save would be a conflict about nothing.
+   *
+   * But only while this tab is in step. A held lane means live sync saw an
+   * incoming change, could not merge it into an unsaved local edit, and kept this
+   * tab's version instead, so the DOM here is knowingly missing what disk holds.
+   * Taking the new stamp there would let this tab's next save replace that change
+   * with nobody seeing it. That is the one loss live sync cannot prevent on its
+   * own: a held tab "converges through its own next save", and that convergence
+   * IS the overwrite. Refusing the stamp turns it into a conflict somebody is
+   * told about.
+   *
+   * @param {Object} data - The decoded frame
+   * @returns {boolean} True when this was a stamp frame and nothing should morph
+   */
+  _applyEtagFrame(data) {
+    if (typeof data.etag !== 'string' || typeof data.html === 'string') return false;
+    if (!this._heldLive && !this._heldExt) recordEtag(data.etag);
+    return true;
   }
 
   /**
@@ -609,27 +649,7 @@ class LiveSync {
         return;
       }
 
-      // Spec §6: a stamp with no document. The host sends one whenever the file on
-      // disk changes, because an editing tab never receives the saved document
-      // itself: that lane is for viewers, and pushing it here would replace
-      // another editor's work in progress.
-      //
-      // Taking it is what makes live sync and the conflict check agree. An editor
-      // whose peer frames are merging is already looking at the other tab's
-      // content, so refusing its next save would be a conflict about nothing.
-      //
-      // But only while this tab is in step. A held lane means live sync saw an
-      // incoming change, could not merge it into an unsaved local edit, and kept
-      // this tab's version instead, so the DOM here is knowingly missing what disk
-      // holds. Taking the new stamp there would let this tab's next save replace
-      // that change with nobody seeing it, which is the one loss live sync cannot
-      // prevent on its own: its own comment says a held tab "converges through its
-      // own next save", and that convergence is an overwrite. Refusing the stamp
-      // is what turns it into a conflict somebody is told about.
-      if (typeof data.etag === 'string' && typeof data.html !== 'string') {
-        if (!this._heldLive && !this._heldExt) recordEtag(data.etag);
-        return;
-      }
+      if (this._applyEtagFrame(data)) return;
 
       const { html, sender, identityMap } = data;
 

@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Conflict notice, real module</title>
+<style>
+  :root { --bg:#fbfaf8; --fg:#26231f; --soft:#6d6862; --rule:#e4e0d9; }
+  html[data-page="dark"] { --bg:#14161a; --fg:#e6e8ec; --soft:#939aa6; --rule:#2a2e35; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg);
+         font:16px/1.65 Georgia,serif; }
+  .sheet { max-width:640px; margin:0 auto; padding:70px 28px 160px; }
+  h1 { font-size:30px; margin:0 0 20px; }
+  p { margin:0 0 16px; }
+  .tools { position:fixed; top:0; left:0; right:0; z-index:50; display:flex; gap:8px;
+           flex-wrap:wrap; padding:10px 14px; background:#101215; border-bottom:1px solid #2a2e35; }
+  .tools button { font:12px system-ui,sans-serif; padding:5px 10px; border-radius:5px;
+                  border:1px solid #333941; background:#1a1e24; color:#d6dae1; cursor:pointer; }
+  /* The page fights the notice: every button restyled, with !important. */
+  html[data-hostile] .sheet ~ * button, html[data-hostile] body button {
+    font-family: "Comic Sans MS", cursive !important;
+    background: #c00 !important; color: #0f0 !important;
+    border: 3px dashed #0f0 !important; border-radius: 0 !important;
+    padding: 2px !important; text-transform: uppercase !important;
+  }
+</style>
+</head>
+<body>
+<div class="tools">
+  <button onclick="fire('conflict')">Save refused</button>
+  <button onclick="fire('conflict',{changedBy:'another-tab'})">Refused (another tab)</button>
+  <button onclick="fire('saved')">A save lands</button>
+  <button onclick="window.__fail=!window.__fail;this.textContent=window.__fail?'Keep mine: fails':'Keep mine: works'">Keep mine: works</button>
+  <button onclick="t('data-page','dark')">Light / dark page</button>
+  <button onclick="t('data-hostile','')">Hostile page CSS</button>
+</div>
+
+<div class="sheet">
+  <h1>Reading notes, week of the 24th</h1>
+  <p>Kept coming back to the same idea this week, that most of what we call a
+  platform is a filing cabinet somebody put a login on. The interesting question is
+  not how to build a better cabinet. It is what happens when the document itself is
+  the program, and the cabinet is just a folder.</p>
+  <p>The counterargument is real: a folder full of clever HTML files is a maintenance
+  burden that lands entirely on one person. But that person is me, and I would rather
+  owe maintenance to myself than rent to a company that will sunset the product in
+  four years.</p>
+  <p>Undo is the most underrated feature in software and the first one cut. Files that
+  outlive the tool that made them are the whole point, and everything I wrote in a
+  hosted editor in 2009 is gone while everything I wrote in a text file is not.</p>
+</div>
+
+<script>
+  window.clayEditMode = true;
+  window.__fail = false;
+  window.clay = { save: { overwrite: () => new Promise(r => setTimeout(() => {
+    if (window.__fail) return r({ ok:false, msg:'Network error' });
+    fire('saved'); r({ ok:true });
+  }, 800)) } };
+  function fire(state, detail = {}) {
+    document.documentElement.setAttribute('savestatus', state);
+    document.dispatchEvent(new CustomEvent('clay:save-' + state, { detail }));
+  }
+  function t(attr, val) {
+    const el = document.documentElement;
+    el.hasAttribute(attr) ? el.removeAttribute(attr) : el.setAttribute(attr, val);
+  }
+</script>
+<script type="module">
+  import "../../src/core/save-conflict-notice.js";
+  setTimeout(() => fire('conflict'), 60);
+</script>
+</body>
+</html>

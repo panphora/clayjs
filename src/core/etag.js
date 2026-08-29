@@ -69,9 +69,16 @@ export function forgetEtag() {
  *   memoized answer, and take whatever it says as the whole truth: an answer with
  *   no stamp in it clears the one held here rather than leaving a stale value the
  *   host would refuse forever.
+ * @param {boolean} [options.clearIfMissing] - Whether an answer carrying no stamp
+ *   drops the one held here. Defaults to `fresh`, which is what a person asking to
+ *   overwrite wants: no stamp means the next save goes out unconditional, which is
+ *   last write wins, which is what they asked for by name. Pass false for a refresh
+ *   nobody requested. Clearing fails OPEN, and a background reseed that quietly
+ *   turns the guard off is worse than one that leaves a stale stamp behind, because
+ *   a stale stamp only costs a refusal.
  * @returns {Promise<?string>}
  */
-export async function seedEtag({ fresh = false } = {}) {
+export async function seedEtag({ fresh = false, clearIfMissing = fresh } = {}) {
   const at = generation;
   const meta = await hostMeta({ fresh });
   conditional = meta.extensions.includes("conditional");
@@ -82,7 +89,7 @@ export async function seedEtag({ fresh = false } = {}) {
   if (typeof seed === "string" && seed !== "") {
     lastSeen = seed;
     generation++;
-  } else if (fresh) {
+  } else if (clearIfMissing) {
     lastSeen = null;
     generation++;
   }

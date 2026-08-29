@@ -1,21 +1,23 @@
 import { isEditMode } from "../core/is-edit-mode.js";
 import onDomReady from "../lib/dom-ready.js";
 
+// No 'conflict' here on purpose. core/save-conflict-notice.js owns that state now,
+// and it ships in every document rather than only the ones that turned this chip on.
+// Both listen to clay:save-conflict, so keeping a label here put a chip in the corner
+// saying the same thing as the bar at the same moment. Dropping it from this side
+// leaves core unaware that this plugin exists, which is the direction that
+// dependency has to point.
 const LABELS = {
   saving: "Saving…",
   saved: "Saved",
   error: "Couldn't save",
   offline: "Offline, not saved",
-  conflict: "Changed elsewhere, not saved",
 };
 
-// States that stay on screen instead of fading. 'saving' is still in flight, and a
-// conflict has stopped autosave until the person chooses, so a chip that faded
-// after two seconds would leave a page that is no longer saving looking like one
-// that is.
-const STICKY = new Set(["saving", "conflict"]);
+// States that stay on screen instead of fading, because 'saving' is still in flight.
+const STICKY = new Set(["saving"]);
 
-const ALARMING = new Set(["error", "offline", "conflict"]);
+const ALARMING = new Set(["error", "offline"]);
 
 let el = null;
 let hideTimer = null;

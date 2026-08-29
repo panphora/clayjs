@@ -7,6 +7,7 @@ export const CORE_WAVES = {
   ],
   editOnly: [
     "core/snapshot.js", "core/save-core.js", "core/save.js",
+    "core/save-conflict-notice.js",
     "core/unsaved-warning.js", "core/persist.js",
     "core/admin-attrs.js", "core/autosave.js",
     "attrs/save-freeze.js", "attrs/onaftersave.js", "attrs/refetch-on-save.js",
@@ -47,6 +48,7 @@ export const MODULES = {
   "core/snapshot.js":           () => import("./core/snapshot.js"),
   "core/save-core.js":          () => import("./core/save-core.js"),
   "core/save.js":               () => import("./core/save.js"),
+  "core/save-conflict-notice.js": () => import("./core/save-conflict-notice.js"),
   "core/unsaved-warning.js":    () => import("./core/unsaved-warning.js"),
   "core/persist.js":            () => import("./core/persist.js"),
   "core/admin-attrs.js":        () => import("./core/admin-attrs.js"),
