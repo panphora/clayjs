@@ -54,8 +54,9 @@ let savingTimeout = null;
  * @param {string} state - One of: 'saving', 'saved', 'offline', 'error', 'conflict'
  * @param {string} msg - Optional message (e.g., error details)
  * @param {string} msgType - Optional severity from the server (e.g., 'warning')
+ * @param {Object} [extra] - Extra detail fields for the event (e.g. `changedBy`)
  */
-function setSaveState(state, msg = '', msgType = '') {
+function setSaveState(state, msg = '', msgType = '', extra = null) {
   if (savingTimeout) {
     clearTimeout(savingTimeout);
     savingTimeout = null;
@@ -64,7 +65,7 @@ function setSaveState(state, msg = '', msgType = '') {
   document.documentElement.setAttribute('savestatus', state);
 
   const event = new CustomEvent(`clay:save-${state}`, {
-    detail: { msg, msgType, timestamp: Date.now() }
+    detail: { msg, msgType, timestamp: Date.now(), ...(extra || {}) }
   });
   document.dispatchEvent(event);
 }
@@ -261,7 +262,7 @@ function applySaveResult(result, forComparison, forDirty, label, gateToken) {
     releaseConflictHold();
   } else if (result.msgType === 'conflict') {
     holdForConflict();
-    setSaveState('conflict', result.msg, result.msgType);
+    setSaveState('conflict', result.msg, result.msgType, { changedBy: result.changedBy ?? null });
   } else if (result.msgType !== 'skipped') {
     if (!navigator.onLine) {
       setSaveState('offline', result.msg);

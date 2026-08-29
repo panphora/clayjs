@@ -57,9 +57,23 @@ test("the spec spelling still wins over the original", async () => {
 // must not quietly drop it out of the morph guard, or a peer's frame could strip
 // this tab's copy of an attribute that is absent from disk bytes.
 test("the file identity keeps its morph protection", () => {
+  expect(HOST_IDENTITY_ATTRS).toContain("documentid");
+  expect(HOST_TOKEN_ATTRS).toContain("documentid");
+  expect(isTabLocalRootAttr("documentid", document.documentElement)).toBe(true);
+});
+
+// The legacy spelling is not a migration step. Every .htmlclay file saved before
+// the rename carries htmlclayid on disk forever, and a morph that does not know
+// the name strips this tab's copy of it.
+test("the pre-spec identity spelling keeps its protection too", () => {
   expect(HOST_IDENTITY_ATTRS).toContain("htmlclayid");
-  expect(HOST_TOKEN_ATTRS).toContain("htmlclayid");
   expect(isTabLocalRootAttr("htmlclayid", document.documentElement)).toBe(true);
+});
+
+// The order is the contract with host-attrs.js, which takes the first name it
+// finds. A document carrying both must resolve to the current one.
+test("the current identity spelling is read first", () => {
+  expect(HOST_IDENTITY_ATTRS[0]).toBe("documentid");
 });
 
 test("every token spelling keeps its morph protection too", () => {

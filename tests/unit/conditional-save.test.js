@@ -225,6 +225,41 @@ describe("a 412", () => {
     expect(seen[0].msg).toBe("This document changed since you last loaded it.");
   });
 
+  // Spec §6: the host may name what moved the document, and only the host can know.
+  // Being told it was your own other tab is a very different thing to being told a
+  // colleague overwrote you, so the field has to survive the whole way from the
+  // refusal body to the event the notice listens to.
+  test("carries the host's word on what changed the file through to the event", async () => {
+    responses.save = () => ({
+      status: 412,
+      body: { msg: "This document changed since you last loaded it.", code: "conflict", changedBy: "another-tab" }
+    });
+    const seen = [];
+    const onConflict = (e) => seen.push(e.detail);
+    document.addEventListener("clay:save-conflict", onConflict);
+
+    await edit("an hour of typing");
+    const result = await saveMod.savePage();
+    document.removeEventListener("clay:save-conflict", onConflict);
+
+    expect(result.changedBy).toBe("another-tab");
+    expect(seen[0].changedBy).toBe("another-tab");
+  });
+
+  // A host that cannot tell must say nothing rather than guess, and the page then
+  // uses the phrase that is true in every case.
+  test("says nothing about the source when the host does not", async () => {
+    const seen = [];
+    const onConflict = (e) => seen.push(e.detail);
+    document.addEventListener("clay:save-conflict", onConflict);
+
+    await edit("an hour of typing");
+    await saveMod.savePage();
+    document.removeEventListener("clay:save-conflict", onConflict);
+
+    expect(seen[0].changedBy).toBeNull();
+  });
+
   // A regression guard rather than a test of new behaviour: a refused save has
   // always left the baselines where they were. It is here because the conflict
   // branch is a new path through applySaveResult, and the one thing that path must

@@ -18,11 +18,16 @@
 // in a path. Durable identities go in the list below, never in this one.
 export const SAVE_TOKEN_ATTRS = ["savetoken", "htmlclaytoken"];
 
-// Host-injected, but NOT credentials. htmlclayid is htmlclay's durable file
-// identity, stamped on every serve and absent from disk bytes, so it rides in the
-// morph protection below for the same reason a token does: a morph of raw disk
-// content would otherwise strip this tab's copy, and a peer's copy must never be
-// applied.
+// Host-injected, but NOT credentials. This is htmlclay's durable file identity,
+// stamped on every serve and absent from disk bytes, so it rides in the morph
+// protection below for the same reason a token does: a morph of raw disk content
+// would otherwise strip this tab's copy, and a peer's copy must never be applied.
+//
+// Two spellings, permanently, mirroring the token list above. htmlclay serves
+// `documentid` and reads either, but a document saved before that rename holds
+// `htmlclayid` on disk forever, and this list is what a morph consults. Knowing
+// only the current name would leave every pre-rename file's identity unprotected,
+// which is the failure this list exists to prevent.
 //
 // It was previously in the token list, where saveToken() returned it whenever a
 // host minted no token of its own. That is reachable: htmlclay stamps the id on
@@ -30,7 +35,7 @@ export const SAVE_TOKEN_ATTRS = ["savetoken", "htmlclaytoken"];
 // route strips only the token, so the id reaches disk. Any such file hosted
 // somewhere tokenless made this library POST to /_/save/{id} with no cookie and
 // hand edit mode to every visitor.
-export const HOST_IDENTITY_ATTRS = ["htmlclayid"];
+export const HOST_IDENTITY_ATTRS = ["documentid", "htmlclayid"];
 
 export const HOST_TOKEN_ATTRS = [...SAVE_TOKEN_ATTRS, ...HOST_IDENTITY_ATTRS];
 

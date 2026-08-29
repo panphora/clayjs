@@ -78,6 +78,7 @@ function errorResult(err) {
     // so this reports "we do not know" rather than asserting something false.
     msgType: timedOut ? 'unknown' : (conflicted ? 'conflict' : 'error'),
     code: timedOut ? 'timeout' : (conflicted ? 'conflict' : (err.code ?? null)),
+    changedBy: conflicted ? (err.changedBy ?? null) : null,
     etag: null
   };
 }
@@ -226,6 +227,10 @@ function sendSave(content) {
         const error = new Error(data.msg || data.error || `HTTP ${res.status}: ${res.statusText}`);
         error.code = data.code ?? null;
         error.status = res.status;
+        // Spec §6: a conflict may name what moved the document. Only the host can
+        // know, and it often cannot, so this rides through as-is and the notice
+        // falls back to a phrase that is true either way.
+        error.changedBy = data.changedBy ?? null;
         throw error;
       }
       // The one place a stamp is ever learned from a save (§6). A response with no

@@ -1,6 +1,6 @@
 # Conformance fixtures — canonical home
 
-These are the canonical Malleable HTML File conformance fixtures (spec §11). They are
+These are the canonical Malleable HTML File conformance fixtures (spec §12). They are
 the published arbiter of exact bytes: a conforming client must reproduce each fixture's
 `snapshot.html` and `document.html` byte-for-byte from its `input.html`.
 

@@ -2,9 +2,15 @@ import { serializeForSync } from "../../src/core/snapshot.js";
 import { isTabLocalRootAttr, TAB_LOCAL_ROOT_ATTRS } from "../../src/lib/root-attrs.js";
 import { HyperMorph } from "../../src/vendor/hyper-morph.vendor.js";
 
+// documentid joined this list when htmlclay adopted the spec's spelling for its
+// durable file identity. It was previously the example of an attribute that
+// SHOULD ride along, chosen when the name was still hypothetical; it is now the
+// host-injected id itself, so it belongs here beside htmlclayid, its pre-spec
+// spelling, and gets the same treatment for the same reason.
 const TAB_LOCAL = [
   "savetoken",
   "htmlclaytoken",
+  "documentid",
   "htmlclayid",
   "savestatus",
   "editmode",
@@ -15,10 +21,11 @@ function makeClone() {
   const clone = document.documentElement.cloneNode(true);
   clone.setAttribute("lang", "en");
   clone.setAttribute("class", "theme-dark");
-  clone.setAttribute("documentid", "durable-xyz789");
+  clone.setAttribute("data-doc-version", "durable-xyz789");
   clone.setAttribute("savetoken", "ephemeral-abc123");
   clone.setAttribute("htmlclaytoken", "ephemeral-def456");
-  clone.setAttribute("htmlclayid", "durable-file-uuid");
+  clone.setAttribute("documentid", "durable-file-uuid");
+  clone.setAttribute("htmlclayid", "pre-spec-file-uuid");
   clone.setAttribute("savestatus", "unsaved");
   clone.setAttribute("editmode", "true");
   clone.setAttribute("pageowner", "true");
@@ -37,12 +44,12 @@ test("the sync payload drops every tab-local attribute from the root", () => {
   }
 });
 
-test("the sync payload keeps lang, class and documentid on the root", () => {
+test("the sync payload keeps the author's own root attributes", () => {
   const html = serializeForSync(makeClone());
   const rootTag = html.slice(0, html.indexOf(">"));
   expect(rootTag).toContain('lang="en"');
   expect(rootTag).toContain('class="theme-dark"');
-  expect(rootTag).toContain('documentid="durable-xyz789"');
+  expect(rootTag).toContain('data-doc-version="durable-xyz789"');
 });
 
 test("every removed attribute is restored on the clone afterwards", () => {
@@ -52,7 +59,7 @@ test("every removed attribute is restored on the clone afterwards", () => {
   for (const [name, value] of before) {
     expect(clone.getAttribute(name)).toBe(value);
   }
-  expect(clone.getAttribute("documentid")).toBe("durable-xyz789");
+  expect(clone.getAttribute("data-doc-version")).toBe("durable-xyz789");
 });
 
 test("the same names on a non-root element are left alone", () => {
@@ -82,9 +89,9 @@ test("isTabLocalRootAttr is false for each of them on any other element", () => 
   expect(isTabLocalRootAttr("savetoken", document.body)).toBe(false);
 });
 
-test("isTabLocalRootAttr is false for lang and documentid on the root", () => {
+test("isTabLocalRootAttr is false for the author's own root attributes", () => {
   expect(isTabLocalRootAttr("lang", document.documentElement)).toBe(false);
-  expect(isTabLocalRootAttr("documentid", document.documentElement)).toBe(false);
+  expect(isTabLocalRootAttr("data-doc-version", document.documentElement)).toBe(false);
 });
 
 const beforeAttributeUpdated = (name, element) =>
