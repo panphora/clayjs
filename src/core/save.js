@@ -20,6 +20,7 @@ import {
   isSaveInProgress
 } from "./save-core.js";
 import { captureForComparison, captureForComparisonAndDirty, captureForSaveAndComparison } from "./snapshot.js";
+import { seedEtag } from "./etag.js";
 import { gateCaptureToken, gateClearIfUnchanged } from "../lib/dirty-gate.js";
 import { ROOT_LIBRARY_ATTRS } from "../lib/root-attrs.js";
 import { logSaveCheck, logBaseline } from "../lib/autosave-debug.js";
@@ -50,7 +51,7 @@ let savingTimeout = null;
 /**
  * Sets the save status on <html> and dispatches an event.
  *
- * @param {string} state - One of: 'saving', 'saved', 'offline', 'error'
+ * @param {string} state - One of: 'saving', 'saved', 'offline', 'error', 'conflict'
  * @param {string} msg - Optional message (e.g., error details)
  * @param {string} msgType - Optional severity from the server (e.g., 'warning')
  */
@@ -190,6 +191,46 @@ export function resumeAutosave() {
   savePageThrottled();
 }
 
+// ============================================
+// THE CONFLICT HOLD
+// ============================================
+//
+// A 412 refuses this tab's bytes because the document changed since this tab last
+// saw it (spec §6). Two things have to follow, and the second is the one that is
+// easy to leave out.
+//
+// Nothing may be thrown away. The baselines do not advance on a refused save, so
+// the edits stay dirty, the close warning still fires, and the person keeps what
+// they typed. That falls out of applySaveResult and needs no special case.
+//
+// And autosave has to stop. Every autosave from here sends the same stamp and is
+// refused for the same reason, so leaving it running means a save attempt every
+// throttle window, forever, each one toasting a failure the person can do nothing
+// about. The suspension clay.wire already owns is exactly the right lever: it
+// stops AUTOsave only, so an explicit Cmd+S still goes out, and it replays one
+// missed save on release so nothing typed during the hold is stranded.
+//
+// The hold is released when a save lands, whatever produced it: clay.save.overwrite,
+// a live-sync frame that brought the page back in step, or the other tab going away.
+let conflictHold = false;
+
+function holdForConflict() {
+  if (conflictHold) return;
+  conflictHold = true;
+  suspendAutosave();
+}
+
+function releaseConflictHold() {
+  if (!conflictHold) return;
+  conflictHold = false;
+  resumeAutosave();
+}
+
+/** True while this tab is refusing to autosave over a version it has not seen. */
+export function isSaveConflicted() {
+  return conflictHold;
+}
+
 function skipped_(msg) {
   return { ok: false, msg, msgType: 'skipped', code: null, etag: null };
 }
@@ -217,6 +258,10 @@ function applySaveResult(result, forComparison, forDirty, label, gateToken) {
     // warning, and the UI module is what decides how to render that.
     setSaveState('saved', result.msg || 'Saved', result.msgType);
     logBaseline(label, `${lastSavedContents.length} chars`);
+    releaseConflictHold();
+  } else if (result.msgType === 'conflict') {
+    holdForConflict();
+    setSaveState('conflict', result.msg, result.msgType);
   } else if (result.msgType !== 'skipped') {
     if (!navigator.onLine) {
       setSaveState('offline', result.msg);
@@ -403,6 +448,30 @@ export function savePageForce(callback = () => {}) {
       drainPendingSave();
     });
   });
+}
+
+/**
+ * Keep this tab's version, over the one the host is holding.
+ *
+ * The only exit from a conflict that keeps what is on screen. It asks the host for
+ * the document's current stamp and force-saves with it, so the save that follows
+ * carries a value the host will accept. If the host answers with no stamp at all,
+ * the save goes out unconditional, which is last write wins, which is what the
+ * person just asked for by name.
+ *
+ * Deliberately not automatic, and deliberately not what a second Cmd+S does. A
+ * person pressing Save again has not been shown the other version, and reading
+ * that as consent to replace it destroys exactly the copy this capability exists
+ * to protect. The other two answers to a conflict need nothing from this library:
+ * `location.reload()` takes the host's version, and a page that wants to merge
+ * merges into its own DOM and then calls this.
+ *
+ * @param {Function} callback - Optional callback for custom handling
+ * @returns {Promise<{ok: boolean, msg: string, msgType: string}>}
+ */
+export async function saveOverwritingConflict(callback = () => {}) {
+  await seedEtag({ fresh: true });
+  return savePageForce(callback);
 }
 
 /**
@@ -645,6 +714,16 @@ export function initHyperclaySaveButton() {
  */
 export function init() {
   if (!isEditMode) return;
+
+  // §6's stamp for a page that has never saved. Fired here and never awaited: the
+  // request a person feels is the save, and a host with no /_/meta would make every
+  // first save wait out a discovery timeout for an answer that was never coming.
+  // Until the seed lands the first save goes out unconditional, which is last write
+  // wins, which is what every save did before this existed. This is also the only
+  // moment the seed can be useful at all: ask for it lazily at the first save and
+  // it can never arrive in time for that save, and from the second save onward the
+  // first save's own response has already supplied one.
+  seedEtag();
 
   // Every editable page, not just autosave pages. A manual-save page makes
   // exactly the saves a person asked for, and used to report all of them as

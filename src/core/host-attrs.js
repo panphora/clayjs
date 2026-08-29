@@ -7,15 +7,20 @@
  * cannot drift between the edit-mode ladder and the save lane.
  */
 
-import { HOST_TOKEN_ATTRS } from "../lib/root-attrs.js";
+import { SAVE_TOKEN_ATTRS } from "../lib/root-attrs.js";
 
 /**
  * The per-document save token this response carries, or null.
+ *
+ * Walks SAVE_TOKEN_ATTRS and not the wider HOST_TOKEN_ATTRS: whatever comes back
+ * is put straight into the save URL and gates edit mode, so a durable file
+ * identity in that list would be treated as a capability it is not.
+ *
  * @returns {?string}
  */
 export function saveToken() {
   if (typeof document === "undefined") return null;
-  for (const attr of HOST_TOKEN_ATTRS) {
+  for (const attr of SAVE_TOKEN_ATTRS) {
     const value = document.documentElement.getAttribute(attr);
     if (value) return value;
   }

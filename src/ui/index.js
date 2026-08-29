@@ -23,6 +23,13 @@ if (typeof window.toastPersistent === "undefined") window.toastPersistent = toas
 document.addEventListener("clay:save-saved", (e) =>
   toast(e.detail?.msg || "Saved", e.detail?.msgType === "warning" ? "warning" : "success"));
 document.addEventListener("clay:save-error", () => toastPersistent("Couldn't save", "error"));
+// Spec §6. Persistent, and carrying the host's own words, because this is the one
+// save outcome the person has to act on: their edits are safe and unsaved, and
+// autosave has stopped until they choose. Deliberately a toast and not a dialog:
+// most conflicts surface on an autosave nobody asked for, and a modal thrown over
+// the page a person is typing into is worse than the problem it reports.
+document.addEventListener("clay:save-conflict", (e) =>
+  toastPersistent(e.detail?.msg || "This document changed since you opened it", "warning"));
 document.addEventListener("clay:save-offline", () => toastPersistent("Offline, not saved", "warning"));
 
 export { toast, toastPersistent, ask, consent, tell, snippet, themodal };

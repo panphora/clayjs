@@ -16,6 +16,9 @@ test("without <html autosave>, an edit does not trigger a save", async () => {
 
   jest.advanceTimersByTime(3000);
 
-  expect(global.fetch).not.toHaveBeenCalled();
+  // The save lane specifically, not the network. Edit mode also asks /_/meta once
+  // for the host's capabilities, and that request is not a save.
+  const saves = global.fetch.mock.calls.filter(([url]) => String(url).includes("/_/save"));
+  expect(saves).toEqual([]);
   jest.useRealTimers();
 });

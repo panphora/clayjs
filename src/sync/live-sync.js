@@ -609,6 +609,28 @@ class LiveSync {
         return;
       }
 
+      // Spec §6: a stamp with no document. The host sends one whenever the file on
+      // disk changes, because an editing tab never receives the saved document
+      // itself: that lane is for viewers, and pushing it here would replace
+      // another editor's work in progress.
+      //
+      // Taking it is what makes live sync and the conflict check agree. An editor
+      // whose peer frames are merging is already looking at the other tab's
+      // content, so refusing its next save would be a conflict about nothing.
+      //
+      // But only while this tab is in step. A held lane means live sync saw an
+      // incoming change, could not merge it into an unsaved local edit, and kept
+      // this tab's version instead, so the DOM here is knowingly missing what disk
+      // holds. Taking the new stamp there would let this tab's next save replace
+      // that change with nobody seeing it, which is the one loss live sync cannot
+      // prevent on its own: its own comment says a held tab "converges through its
+      // own next save", and that convergence is an overwrite. Refusing the stamp
+      // is what turns it into a conflict somebody is told about.
+      if (typeof data.etag === 'string' && typeof data.html !== 'string') {
+        if (!this._heldLive && !this._heldExt) recordEtag(data.etag);
+        return;
+      }
+
       const { html, sender, identityMap } = data;
 
       // Ignore own changes — already reflected in the DOM, nothing to morph

@@ -86,6 +86,7 @@ function assembleCore(loaded, { isEditMode, isOwner }, regionPolicy) {
   if (save) {
     const saveFn = save.savePage || save.default;
     saveFn.force = save.savePageForce;
+    saveFn.overwrite = save.saveOverwritingConflict;
     clay.save = saveFn;
   }
   if (snapshot) {

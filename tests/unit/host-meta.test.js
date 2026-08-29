@@ -84,6 +84,33 @@ describe("anything that is not a capability document reads as a bare host", () =
   }
 });
 
+// The document block is the one part of the answer that changes under a loaded
+// page: its etag ticks on every save, by anyone. A caller that needs a current one
+// asks for a fresh answer, and that answer becomes the memoized one.
+test("fresh asks again, and what comes back replaces the memoized answer", async () => {
+  const { hostMeta } = await freshMeta();
+  let etag = "a1";
+  global.fetch = jest.fn(async () => ok({ spec: 1, extensions: ["conditional"], document: { etag } }));
+
+  expect((await hostMeta()).document.etag).toBe("a1");
+  expect((await hostMeta()).document.etag).toBe("a1");
+  expect(global.fetch).toHaveBeenCalledTimes(1);
+
+  etag = "b2";
+  expect((await hostMeta({ fresh: true })).document.etag).toBe("b2");
+  expect(global.fetch).toHaveBeenCalledTimes(2);
+  expect((await hostMeta()).document.etag).toBe("b2");
+  expect(global.fetch).toHaveBeenCalledTimes(2);
+});
+
+test("two fresh callers at once make one request", async () => {
+  const { hostMeta } = await freshMeta();
+  global.fetch = jest.fn(async () => ok({ spec: 1, extensions: [], document: { etag: "c3" } }));
+
+  await Promise.all([hostMeta({ fresh: true }), hostMeta({ fresh: true })]);
+  expect(global.fetch).toHaveBeenCalledTimes(1);
+});
+
 test("hostSupports answers only from the announced list", async () => {
   const { hostSupports } = await freshMeta();
   global.fetch = jest.fn(async () => ok({ spec: 1, extensions: ["format"] }));

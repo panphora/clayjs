@@ -6,7 +6,16 @@ const LABELS = {
   saved: "Saved",
   error: "Couldn't save",
   offline: "Offline, not saved",
+  conflict: "Changed elsewhere, not saved",
 };
+
+// States that stay on screen instead of fading. 'saving' is still in flight, and a
+// conflict has stopped autosave until the person chooses, so a chip that faded
+// after two seconds would leave a page that is no longer saving looking like one
+// that is.
+const STICKY = new Set(["saving", "conflict"]);
+
+const ALARMING = new Set(["error", "offline", "conflict"]);
 
 let el = null;
 let hideTimer = null;
@@ -34,11 +43,11 @@ function show(state) {
   const node = ensure();
   node.textContent = LABELS[state];
   node.dataset.state = state;
-  node.style.background = state === "error" || state === "offline"
+  node.style.background = ALARMING.has(state)
     ? "var(--clay-indicator-error-bg,#7a3b28)" : "var(--clay-indicator-bg,#2e2b27)";
   node.style.opacity = "1";
   clearTimeout(hideTimer);
-  if (state !== "saving") hideTimer = setTimeout(() => { node.style.opacity = "0"; }, 2200);
+  if (!STICKY.has(state)) hideTimer = setTimeout(() => { node.style.opacity = "0"; }, 2200);
 }
 
 function init() {

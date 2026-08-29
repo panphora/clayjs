@@ -10,6 +10,7 @@
 import { isEditMode } from "./is-edit-mode.js";
 import { consumeUserDriven, consumeExplicitSave, markUserDriven } from "../lib/user-gesture.js";
 import { saveToken } from "./host-attrs.js";
+import { lastSeenEtag, conditionalSaves, recordEtag, seedEtag } from "./etag.js";
 import {
   getPageContents,
   onSnapshot,
@@ -62,13 +63,21 @@ function successResult(data) {
 
 function errorResult(err) {
   const timedOut = err.name === 'AbortError';
+  // Spec §6: a 412 is a REFUSED save, not a failed one. The host wrote nothing and
+  // its document is byte-identical to what it was, and the bytes we tried to write
+  // are still on this page. Reporting that as 'error' would give the one outcome
+  // where nothing went wrong the one severity that means something did, and would
+  // put it through the same retry-and-toast path as a dead server.
+  // The status is authoritative (§3), and `code` is honoured too because a proxy
+  // can answer 412 on the host's behalf with no body at all.
+  const conflicted = !timedOut && (err.status === 412 || err.code === 'conflict');
   return {
     ok: false,
     msg: timedOut ? 'Server not responding' : (err.message || 'Save failed'),
     // A timeout is not evidence the write failed. The request may well have landed,
     // so this reports "we do not know" rather than asserting something false.
-    msgType: timedOut ? 'unknown' : 'error',
-    code: timedOut ? 'timeout' : (err.code ?? null),
+    msgType: timedOut ? 'unknown' : (conflicted ? 'conflict' : 'error'),
+    code: timedOut ? 'timeout' : (conflicted ? 'conflict' : (err.code ?? null)),
     etag: null
   };
 }
@@ -134,7 +143,43 @@ function buildSaveRequest(content, userDriven, signal) {
     body: content
   };
 
-  return { url: new URL(path, window.location.origin).href, options };
+  // Spec §6: the stamp this tab last saw, so a host that advertises `conditional`
+  // can refuse rather than overwrite a version nobody here has read.
+  //
+  // Two gates, and both are the point. The capability must have been announced by
+  // name, because §5 forbids inferring one any other way, and a host that never
+  // promised to honour If-Match may do anything at all with it. And a stamp must
+  // actually be held: a host reads this header's PRESENCE, so an empty value is
+  // not a softer version of the request, it is a save asking to be refused.
+  const etag = lastSeenEtag();
+  if (conditionalSaves() && etag) options.headers['If-Match'] = etag;
+
+  return { url: resolveSaveUrl(path), options };
+}
+
+/**
+ * The absolute URL a save goes to.
+ *
+ * A relative path is resolved by fetch against the DOCUMENT's base URL, which
+ * `<base href>` sets and the author of a malleable document controls. Left
+ * relative, a `<base href="https://elsewhere.example/">` sends the document and
+ * the per-document token in the path to an origin the document picked. Pinning to
+ * the real origin is the whole fix.
+ *
+ * The guard is not defensive noise. `window.location.origin` is the STRING "null"
+ * on a file:// document, and `new URL(path, "null")` throws a TypeError, which
+ * would escape synchronously here rather than becoming a failed save. Documents
+ * opened from disk are a first-class case (an exported app is just a file), and
+ * there is no origin to pin to and no host to save to there anyway, so the
+ * relative path is both the honest answer and the one that cannot throw.
+ *
+ * @param {string} path - Root-relative save path
+ * @returns {string}
+ */
+function resolveSaveUrl(path) {
+  const origin = window.location.origin;
+  if (!origin || origin === "null") return path;
+  return new URL(path, origin).href;
 }
 
 /**
@@ -183,10 +228,22 @@ function sendSave(content) {
         error.status = res.status;
         throw error;
       }
+      // The one place a stamp is ever learned from a save (§6). A response with no
+      // etag clears it rather than keeping the old one, because the write we just
+      // made means any stamp held here describes bytes the host no longer stores.
+      recordEtag(data.etag ?? null);
       return data;
     }))
     .catch(err => {
       console.error('Failed to save page:', err);
+      // Spec §7: a timeout is INDETERMINATE, so this write may well have landed,
+      // and the stamp held here may already describe bytes the host has replaced.
+      // Reconcile against the host before anything retries, or a save that times
+      // out and lands is followed by a 412 the person cannot explain and did not
+      // cause. The only save that can have moved the document inside that window
+      // is almost always this one, so taking the host's current stamp is taking
+      // back our own.
+      if (err.name === 'AbortError') seedEtag({ fresh: true });
       // The save never landed: re-arm the user-driven bit so the next (retry)
       // save still reports the human gesture instead of reading as background.
       if (userDriven) markUserDriven();

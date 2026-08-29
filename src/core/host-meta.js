@@ -23,6 +23,7 @@ function bareHost() {
 }
 
 let inFlight = null;
+let refreshing = null;
 
 /**
  * Ask the host what it supports, once per page.
@@ -30,11 +31,26 @@ let inFlight = null;
  * Memoizes the PROMISE rather than the value, so two pickers opened together
  * make one request instead of two and the second waits on the first.
  *
+ * `spec` and `extensions` describe the host and never change under a loaded
+ * document, which is why one answer serves the whole page. The `document` block
+ * does change: its `etag` ticks on every save, by anyone. A caller that needs a
+ * current one passes `fresh`, which asks again and replaces the memoized answer,
+ * and concurrent fresh callers still share one request.
+ *
+ * @param {Object} [options]
+ * @param {boolean} [options.fresh]
  * @returns {Promise<{spec: ?number, extensions: string[], document: ?Object}>}
  */
-export function hostMeta() {
-  if (!inFlight) inFlight = fetchMeta().catch(bareHost);
-  return inFlight;
+export function hostMeta({ fresh = false } = {}) {
+  if (!fresh) {
+    if (!inFlight) inFlight = fetchMeta().catch(bareHost);
+    return inFlight;
+  }
+  if (!refreshing) {
+    refreshing = fetchMeta().catch(bareHost).finally(() => { refreshing = null; });
+    inFlight = refreshing;
+  }
+  return refreshing;
 }
 
 /**
@@ -54,6 +70,7 @@ export async function hostSupports(name) {
 /** Drop the memoized answer. Tests only. */
 export function resetHostMeta() {
   inFlight = null;
+  refreshing = null;
 }
 
 async function fetchMeta() {
