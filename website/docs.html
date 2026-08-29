@@ -160,7 +160,7 @@
       <tr><td><code>clay:save-saved</code></td><td>the server confirmed the write</td><td><code>{msg, timestamp}</code></td></tr>
       <tr><td><code>clay:save-error</code></td><td>the server answered with a problem</td><td><code>{msg, timestamp}</code></td></tr>
       <tr><td><code>clay:save-offline</code></td><td>the browser is offline (clayjs re-saves when the connection returns)</td><td><code>{msg, timestamp}</code></td></tr>
-      <tr><td><code>clay:snapshot-ready</code></td><td>a snapshot has been cloned, before any stripping. Mutating <code>detail.documentElement</code> changes what is saved and broadcast.</td><td><code>{documentElement}</code></td></tr>
+      <tr><td><code>clay:snapshot-ready</code></td><td>a snapshot has been cloned, before any stripping. Read <code>detail.documentElement</code>; do not change it. It is also where both change-detection baselines come from, and the change checks do not fire this event, so an edit made here is saved but never compared and the page reads dirty forever. Use <code>clay.addDocumentTransform(fn)</code> to change what gets saved.</td><td><code>{documentElement}</code></td></tr>
       <tr><td><code>clay:sync-applied</code></td><td>a live-sync update landed (sync plugin)</td><td><code>{seq, source}</code>; <code>source</code> is <code>peer</code> (another open copy) or <code>disk</code> (the file changed underneath you)</td></tr>
       <tr><td><code>clay:sorted</code></td><td>a drag-drop reorder landed (sortable plugin); fires on the container and bubbles</td><td><code>{item, from, to, oldIndex, newIndex}</code></td></tr>
       <tr><td><code>clay:view-save-attempt</code></td><td>a visitor clicked a <code>[trigger-save]</code> element in view mode; show your own notice</td><td>—</td></tr>

@@ -109,10 +109,10 @@ export function addDocumentTransform(callback) {
  *
  * @returns {HTMLElement} Cloned document element with snapshot hooks applied
  */
-function clonePreventingOnclone(node) {
+function clonePreventingOnclone(node, deep = true) {
   const prev = window.__preventOnclone;
   window.__preventOnclone = true;
-  try { return node.cloneNode(true); }
+  try { return node.cloneNode(deep); }
   finally { window.__preventOnclone = prev; }
 }
 
@@ -293,7 +293,13 @@ export function captureForComparisonAndDirty({ flushUndo = true } = {}) {
 export function captureForSaveAndComparison({ emitForSync = true } = {}) {
   const clone = captureSnapshot();
 
-  // Emit for live-sync before any stripping
+  // Emit for live-sync before any stripping.
+  //
+  // A listener gets the very clone this function goes on to serialize into
+  // forSave, forComparison and forDirty — that sharing is the point, it saves a
+  // second full DOM clone per save. So a listener may READ it and must not write
+  // to it: anything it changes lands in the saved bytes and in both baselines,
+  // and a baseline the dirty check cannot reproduce warns on close forever.
   if (emitForSync) {
     document.dispatchEvent(new CustomEvent('clay:snapshot-ready', {
       detail: { documentElement: clone }
@@ -445,22 +451,33 @@ export function captureForSave({ emitForSync = true } = {}) {
  * (Not to be confused with captureBodyForSync below, which is the older
  * body-innerHTML helper and unrelated to the live-sync lane.)
  *
- * The clone is detached and unobserved, so removing the attributes in place and
- * putting them back is exact, and far cheaper than cloning the tree again. The
- * finally is load-bearing: the save path reads this same clone afterwards.
+ * It must not write to the clone. The caller derives forSave and both comparison
+ * baselines from this same object once every listener has returned, so anything
+ * left behind lands in the saved bytes and in both baselines.
+ *
+ * This used to strip the tab-local attributes in place and set them again in a
+ * finally, which looked exact and was not: an attribute list is ordered by
+ * insertion, so putting a name back appended it. On htmlclay, whose injectAttr
+ * splices the token and file id in right after `<html`, every save then installed
+ * a baseline whose root tag was ordered differently from the one any later dirty
+ * check builds off the live DOM — same names, same values, same length, never
+ * equal again. Closing an already-saved document warned every time, and
+ * savePageThrottled's "no changes to save" short-circuit never fired.
+ *
+ * The open tag is serialized from a childless copy instead, so the shared clone is
+ * never touched and there is no restore to get wrong. The copy is one element, not
+ * the tree.
  */
 export function serializeForSync(clone) {
-  const removed = [];
-  for (const name of TAB_LOCAL_ROOT_ATTRS) {
-    if (!clone.hasAttribute(name)) continue;
-    removed.push([name, clone.getAttribute(name)]);
-    clone.removeAttribute(name);
-  }
-  try {
-    return clone.outerHTML;
-  } finally {
-    for (const [name, value] of removed) clone.setAttribute(name, value);
-  }
+  const bareRoot = clonePreventingOnclone(clone, false);
+  for (const name of TAB_LOCAL_ROOT_ATTRS) bareRoot.removeAttribute(name);
+
+  // Split the end tag off by LENGTH rather than searching for one: an authored
+  // attribute value holding "</html>" would fool any indexOf-based split and
+  // truncate the broadcast.
+  const shell = bareRoot.outerHTML;
+  const endTag = `</${bareRoot.localName}>`;
+  return shell.slice(0, shell.length - endTag.length) + clone.innerHTML + endTag;
 }
 
 /**

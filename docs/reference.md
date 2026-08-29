@@ -199,8 +199,11 @@ two elements, one of each.
 - `clay:save-error` — the server answered with a problem; detail `{msg, timestamp}`.
 - `clay:save-offline` — the browser is offline (clayjs re-saves when the connection
   returns); detail `{msg, timestamp}`.
-- `clay:snapshot-ready` — a snapshot has been cloned, before any stripping. Mutating
-  `detail.documentElement` changes what is saved and broadcast.
+- `clay:snapshot-ready` — a snapshot has been cloned, before any stripping. Read
+  `detail.documentElement`; do not change it. It is also where both "has anything
+  changed" baselines come from, and the change checks do not fire this event, so an
+  edit made here is saved but never compared — the page reads dirty forever. Use
+  `clay.addDocumentTransform(fn)` to change what gets saved.
 - `clay:sync-applied` — a live-sync update landed (sync plugin); detail `{seq, source}`,
   where `source` is `peer` (another open copy) or `disk` (the file changed underneath
   you).
