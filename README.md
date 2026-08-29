@@ -77,8 +77,11 @@ Get it from [clayjs.com/v1/clay.standalone.js](https://clayjs.com/v1/clay.standa
 line says which version it is) or from the npm tarball at `dist/clay.standalone.js`.
 Keep it beside the HTML file and use the same query params: `plugins=` decides what
 runs, not what downloads, and `await clay.loaded.ui` and the other satellites work
-without tags of their own. Saving still needs a host that writes the file;
-[HTML Clay](https://htmlclay.com) does that on the machine itself, with no network.
+without tags of their own (they are always on, so clay-ui's automatic save toasts run
+on your page unless you handle the `clay:save-*` events yourself). If the page already
+had satellite tags, delete them: a second `sap.js` mounts a second runtime. Saving
+still needs a host that writes the file; [HTML Clay](https://htmlclay.com) does that
+on the machine itself, with no network.
 The two things that still reach out, and why they fail soft, are on
 [clayjs.com/offline](https://clayjs.com/offline).
 

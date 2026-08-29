@@ -28,8 +28,9 @@ yourself, which is one line before the script tag.
 
 **No network** works with any of the three. Download
 [clay.standalone.js](https://clayjs.com/v1/clay.standalone.js), put it beside
-`notes.html`, and change the script tag to `<script src="clay.standalone.js"></script>`.
-The page then loads with no connection, and HTML Clay saves it with none either. See
+`notes.html`, and change the script tag to `<script src="clay.standalone.js"></script>`
+(and drop any satellite tags; the file carries them). The page then loads with no
+connection, and HTML Clay saves it with none either. See
 [clayjs.com/offline](https://clayjs.com/offline).
 
 ## What to try once it is running

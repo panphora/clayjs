@@ -10,14 +10,20 @@ import { join, extname } from "node:path";
 // loading a 404 while a green suite said the migration was complete.
 
 const ROOT = new URL("../..", import.meta.url).pathname;
-const ENTRIES = readdirSync(join(ROOT, "entries"))
+// dist/clay.standalone.js is a public URL too, and dist/ is a build output that
+// is usually absent, so its name is pinned here rather than read from disk: a
+// missing directory would otherwise narrow the list without a word.
+// tests/unit/standalone-build.test.js asserts the build writes exactly this name.
+const ENTRIES = [...readdirSync(join(ROOT, "entries")), "clay.standalone.js"]
   .filter((f) => f.endsWith(".js"))
   .map((f) => f.slice(0, -3));
 
 const SEARCHED = ["website", "examples", "docs", "tests/fixtures", "conformance/fixtures"];
 const READABLE = new Set([".html", ".htm", ".md", ".js", ".json", ".txt"]);
 // The one path segment immediately before the filename must be a version prefix.
-const VERSIONED = /^(v\d+|\d+\.\d+\.\d+|entries)$/;
+// `entries` and `dist` are the npm tarball's own directories: on a package CDN the
+// version sits before the package name instead, so those spellings are versioned too.
+const VERSIONED = /^(v\d+|\d+\.\d+\.\d+|entries|dist)$/;
 
 function walk(dir, out = []) {
   let names;

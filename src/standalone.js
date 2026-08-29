@@ -5,13 +5,10 @@
    loader and every module it can ask for (see MODULES in loader-logic.js), so
    `plugins=` decides what runs, never what downloads. The bootstrap logic below
    (window.clay, `ready`, `__booted`, the retry path) is the same code as clay.js
-   and must stay in step with it. */
+   and must stay in step with it; tests/unit/bootstrap-twins.test.js compares the
+   shared pieces. */
 import { boot } from "./loader.js";
 import onDomReady from "./lib/dom-ready.js";
-// The two generated satellites are classic scripts that assemble themselves onto
-// window.clay when they run. Bundled, they run here, ahead of the bootstrap.
-import "../entries/clay-data.js";
-import "../entries/sap.js";
 
 (function () {
   // Suppress every vendored bundle's window auto-export; the loader assembles
@@ -37,14 +34,11 @@ import "../entries/sap.js";
 
   if (!clay.ready) mintReady();
 
+  // clay.js needs its own URL to find the loader; this file needs it only for the
+  // query string, so pasted inline into the page it boots with the defaults.
   var script = document.currentScript;
-  if (!script || !script.src) {
-    console.error("clayjs: could not determine my own URL (load me with a classic <script src=...>, not type=\"module\")");
-    return;
-  }
+  var params = script && script.src ? new URL(script.src, location.href).searchParams : new URLSearchParams();
   clay.__booted = true;
-
-  var params = new URL(script.src, location.href).searchParams;
 
   function domReady() {
     return new Promise(function (r) { onDomReady(r); });
@@ -66,6 +60,14 @@ import "../entries/sap.js";
   }
 
   clay.loaded = clay.loaded || {};
+  // The two generated satellites are classic scripts that assemble themselves
+  // onto window.clay when they run, and they carry no guard of their own, so
+  // they run here, behind the sentinel, and not as hoisted static imports: a
+  // duplicate tag would otherwise mount a second Sap runtime on the page. For
+  // the same reason a tag that already registered one (a leftover
+  // <script src="sap.js"> above this one) wins, and the copy in here stays idle.
+  if (!clay.loaded.data) satellite("data", import("../entries/clay-data.js"));
+  if (!clay.loaded.sap) satellite("sap", import("../entries/sap.js"));
   satellite("dom", import("./dom/dom-helpers.js"));
   satellite("utils", import("./utils/index.js"));
   satellite("internals", import("./internals/index.js"));
@@ -77,14 +79,18 @@ import "../entries/sap.js";
   satellite("ui", domReady().then(function () { return import("./ui/index.js"); }));
   satellite("options", domReady().then(function () { return import("./options/options.js"); }));
   satellite("events", domReady()
-    .then(function () { return clay.loaded.dom.catch(function () {}); })
+    .then(function () { return clay.loaded.dom && clay.loaded.dom.catch(function () {}); })
     .then(function () { return import("./events/index.js"); }));
 
-  boot(params, clay.__readyResolve).catch(function (err) {
+  // The first argument is the loader's unused `base`; see boot() in loader.js.
+  boot(null, params, clay.__readyResolve).catch(function (err) {
     clay.__booted = false;
     console.error("clayjs failed to load:", err);
     // Settle the promise so `await clay.ready` fails loudly instead of hanging,
-    // then mint a fresh one for a corrected retry tag. See entries/clay.js.
+    // then mint a fresh one for a corrected retry tag. See entries/clay.js. A
+    // retry re-evaluates this whole file, satellites included; the path is
+    // reachable only when a bundled module throws on evaluation, which is a
+    // clayjs bug, not a page condition.
     var reject = clay.__readyReject;
     mintReady();
     if (reject) reject(err);

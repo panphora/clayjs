@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 /**
@@ -29,6 +29,7 @@ test("is one classic script with nothing left to fetch", () => {
   const imports = [...bundle.matchAll(/\bimport\s*\(([^)]*)\)/g)].map((m) => m[1].trim());
   expect(new Set(imports)).toEqual(new Set(['"https://esm.sh/diff@5.2.0"', "url"]));
   expect(bundle).not.toMatch(/import\.meta/);
+  expect(bundle).not.toMatch(/__require\(\s*["']/);   // a static external import, see build.js
   expect(bundle).not.toMatch(/^\s*(import|export)\s/m);
 });
 
@@ -54,4 +55,8 @@ test("carries the core, every plugin and every satellite", () => {
   }
   expect(bundle.length).toBeGreaterThan(500_000);
   expect(bundle.length).toBeLessThan(3_000_000);
+});
+
+test("writes exactly the file the unversioned-URL guard pins", () => {
+  expect(readdirSync(join(ROOT, "dist"))).toEqual(["clay.standalone.js"]);
 });

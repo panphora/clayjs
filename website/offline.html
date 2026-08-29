@@ -50,7 +50,7 @@
     <span class="eyebrow">Download</span>
     <h2 class="section-title">clay.standalone.js</h2>
     <p><a class="btn" href="/v1/clay.standalone.js" download>Download clay.standalone.js</a></p>
-    <p class="small">About 1 MB of readable source, MIT-0. <code>/v1/clay.standalone.js</code> is the newest 1.x; <code>/1.1.0/clay.standalone.js</code> is that exact release, forever. The first line of the file names its version. It is also in the npm package, at <code>dist/clay.standalone.js</code>.</p>
+    <p class="small">About 1 MB of readable source. MIT-0 for the clayjs code; the third-party notices for the libraries inside are on the first lines of the file. <code>/v1/clay.standalone.js</code> is the newest 1.x; <code>/1.1.0/clay.standalone.js</code> is that exact release, forever. The first line of the file names its version. It is also in the npm package, at <code>dist/clay.standalone.js</code>.</p>
   </section>
 
   <!-- ====== USE ====== -->
@@ -59,7 +59,8 @@
     <h2 class="section-title">The same tag, pointed at the file</h2>
     <pre><code class="language-markup">&lt;script src="clay.standalone.js?plugins=sync"&gt;&lt;/script&gt;</code></pre>
     <p>Same query params as <code>clay.js</code>: <code>plugins</code> and <code>exclude</code>. Everything is inside the file, so <code>plugins=</code> decides what runs, not what downloads. The <a href="/advanced">satellites</a> are inside too: <code>await clay.loaded.ui</code>, <code>clay.loaded.sap</code> and the rest work without a tag of their own.</p>
-    <p class="small">The file never changes under you. A page depends on the bytes it has, not on a server.</p>
+    <p class="small">Always on means always on: the ui satellite's automatic <code>Saved</code> and <code>Couldn't save</code> toasts run on your page, and the element helpers (<code>el.nearest</code>, <code>el.val</code> and friends) are installed, whether or not you asked. Listen for the <code>clay:save-*</code> events yourself if you want your own feedback. If your page already had satellite tags, delete them: a second <code>sap.js</code> mounts a second runtime and every action runs twice.</p>
+    <p class="small">The file never changes under you. A page depends on the bytes it has, not on a server. You can even paste the whole file into a <code>&lt;script&gt;</code> block; the query params then have nowhere to go, so the defaults apply.</p>
   </section>
 
   <!-- ====== SAVING ====== -->

@@ -1,6 +1,6 @@
 {
   "name": "@panphora/clayjs",
-  "version": "1.1.0",
+  "version": "1.0.0",
   "type": "module",
   "description": "clayjs: malleable HTML files. Save lifecycle for self-saving HTML.",
   "license": "MIT-0",
@@ -31,6 +31,7 @@
     "./THIRD-PARTY-NOTICES.md": "./THIRD-PARTY-NOTICES.md",
     "./src/*": "./src/*",
     "./entries/*": "./entries/*",
+    "./clay.standalone.js": "./dist/clay.standalone.js",
     "./dist/*": "./dist/*",
     "./*": "./entries/*"
   },
@@ -48,6 +49,7 @@
     "test:conformance": "UPDATE_GOLDENS=0 web-test-runner --config conformance/wtr.config.mjs",
     "conformance:update": "UPDATE_GOLDENS=1 web-test-runner --config conformance/wtr.config.mjs",
     "build:standalone": "node build.js --standalone",
+    "prepack": "node build.js --standalone",
     "test:standalone": "node build.js --standalone && web-test-runner --config tests/browser/wtr.config.mjs",
     "prepublishOnly": "npm test && npm run test:conformance && npm run test:standalone",
     "dev": "node tests/stub-server.mjs",

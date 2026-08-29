@@ -55,8 +55,12 @@ readable file (core, every plugin, every satellite), built from the same source.
 Download it, keep it beside the HTML file, and load it with the same query params:
 `<script src="clay.standalone.js?plugins=sync"></script>`. `plugins=` then decides
 what runs, not what downloads, and every `clay.loaded.*` promise exists without a
-satellite tag. `/<version>/clay.standalone.js` is a pinned copy; the npm tarball
-carries it at `dist/clay.standalone.js`; the file's first line names its version.
+satellite tag. Delete any satellite tags the page had: the file carries them all,
+and a second `sap.js` mounts a second runtime. `clay.Sap` and `clay.extractData`,
+which a tag defines synchronously, arrive one microtask later here; `await
+clay.loaded.sap` (or `.data`) covers both. `/1.1.0/clay.standalone.js` is that exact
+release, pinned, and every later release has the same form; the npm tarball carries it
+at `dist/clay.standalone.js`; the file's first line names its version.
 Two things still reach the network, both opt-in: the CMS sidebar's font comes from
 jsDelivr and falls back to the system monospace, and autosave debugging
 (`localStorage` key `clay:debug:autosave`) imports its diff library from esm.sh.

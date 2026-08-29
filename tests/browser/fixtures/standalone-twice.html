@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>clayjs standalone twice fixture</title>
+  <script>window.clayEditMode = true;</script>
+  <script src="/dist/clay.standalone.js"></script>
+  <script src="/dist/clay.standalone.js"></script>
+</head>
+<body>
+  <h1 editable>Edit me</h1>
+  <main sap state="count:num" count="7">
+    <output id="out" text="state.count"></output>
+    <button id="inc" set:count="window.bump()">Increment</button>
+  </main>
+</body>
+</html>

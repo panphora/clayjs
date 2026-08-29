@@ -76,7 +76,7 @@ const STANDALONE_SINCE = '1.1.0';
 
 async function emitStandalone() {
   await rm(DIST, { recursive: true, force: true });
-  await esbuild({
+  const result = await esbuild({
     entryPoints: [join(ROOT, 'src/standalone.js')],
     outfile: join(DIST, STANDALONE),
     bundle: true,
@@ -86,9 +86,22 @@ async function emitStandalone() {
     // Sortable's UMD header reads `module`, which esbuild flags on every build;
     // sortable.js handles both branches, so the warning carries no information.
     logOverride: { 'commonjs-variable-in-esm': 'silent' },
-    banner: { js: `/* clayjs ${pkg.version} standalone build: every clayjs module in one file. https://clayjs.com/offline */` },
-    logLevel: 'warning',
+    metafile: true,
+    banner: {
+      js: `/* clayjs ${pkg.version} standalone build: every clayjs module in one file. https://clayjs.com/offline\n` +
+        `   Third-party code inside keeps its own license (Sortable MIT, Squire MIT, DOMPurify Apache-2.0 OR MPL-2.0, MicroModal MIT): https://clayjs.com/THIRD-PARTY-NOTICES.md */`,
+    },
   });
+  // An external import survives only as a dynamic import(). A STATIC import of an
+  // https:// URL becomes a __require() that throws the moment its module
+  // evaluates in the browser, and esbuild prints nothing about it.
+  for (const [file, input] of Object.entries(result.metafile.inputs)) {
+    for (const imp of input.imports) {
+      if (imp.external && imp.kind !== 'dynamic-import') {
+        throw new Error(`${file} imports ${imp.path} statically; in the single-file build that becomes a require() that throws in the browser`);
+      }
+    }
+  }
 }
 
 // Everything else in "files" is served once, at the site root.
@@ -237,6 +250,18 @@ async function sourceFor(version, published) {
   return published.has(version) ? unpackRelease(version) : ROOT;
 }
 
+// A prerelease is not a version this site can serve. cmpVersion parses "0-beta.1"
+// as NaN, so ordering it is undefined, and rollingHeads compares only the minor: a
+// 1.1.0-beta.1 in the working tree would take /v1/ away from the released 1.0.0 and
+// hand every rolling document prerelease code. It would also mint /1.1.0-beta.1/
+// under a year of immutable, and the exact-version filter drops it from the registry
+// list next build, so that supposedly permanent address disappears.
+if (!/^\d+\.\d+\.\d+$/.test(pkg.version)) {
+  throw new Error(
+    `package.json version "${pkg.version}" is not X.Y.Z; clayjs.com serves released versions only`
+  );
+}
+
 // dist/ first: the working tree's own version is served from the tree, so its
 // single-file build has to exist before the copy below. `--standalone` stops here,
 // for a rebuild of that one file with no site and no registry lookup.
@@ -258,18 +283,6 @@ for (const name of LIBRARY.keys()) {
   if (!(pkg.files || []).includes(name)) {
     throw new Error(`package.json "files" no longer lists ${name}; the library payload is derived from it`);
   }
-}
-
-// A prerelease is not a version this site can serve. cmpVersion parses "0-beta.1"
-// as NaN, so ordering it is undefined, and rollingHeads compares only the minor: a
-// 1.1.0-beta.1 in the working tree would take /v1/ away from the released 1.0.0 and
-// hand every rolling document prerelease code. It would also mint /1.1.0-beta.1/
-// under a year of immutable, and the exact-version filter drops it from the registry
-// list next build, so that supposedly permanent address disappears.
-if (!/^\d+\.\d+\.\d+$/.test(pkg.version)) {
-  throw new Error(
-    `package.json version "${pkg.version}" is not X.Y.Z; clayjs.com serves released versions only`
-  );
 }
 
 const published = new Set(await publishedPins());

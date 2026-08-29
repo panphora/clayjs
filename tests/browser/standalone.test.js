@@ -62,7 +62,12 @@ describe('clay.standalone.js in edit mode', () => {
 
   it('carries every satellite', async () => {
     const clay = win.clay;
-    for (const name of SATELLITES) await clay.loaded[name];
+    for (const name of SATELLITES) {
+      // A satellite tree-shaken out of the bundle leaves this undefined, and
+      // `await undefined` resolves: the type check is what catches it.
+      expect(clay.loaded[name], `clay.loaded.${name}`).to.be.a('promise');
+      await clay.loaded[name];
+    }
     expect(clay.utils).to.be.an('object');
     expect(clay.internals).to.be.an('object');
     expect(win.All).to.be.a('function');
@@ -73,6 +78,37 @@ describe('clay.standalone.js in edit mode', () => {
     expect(win.Sap).to.exist;
     expect(scripts(win)).to.deep.equal([BUNDLE]);
     expect(foreign(win)).to.deep.equal([]);
+  });
+});
+
+// One Sap runtime handles a click once. The probe lives in the fixtures: a
+// `set:` action that calls window.bump().
+async function clicksOnce(win) {
+  await win.clay.loaded.sap;
+  win.calls = 0;
+  win.bump = () => ++win.calls;
+  win.document.querySelector('#inc').click();
+  await new Promise((r) => setTimeout(r, 20));
+  expect(win.calls).to.equal(1);
+  expect(win.document.querySelector('#out').textContent).to.equal('1');
+}
+
+describe('a second clay.standalone.js tag', () => {
+  it('is a no-op, generated satellites included', async () => {
+    // entries/sap.js carries no guard of its own: run twice, it mounts two Sap
+    // runtimes and one click runs the action once per runtime. The sentinel
+    // has to stop the generated scripts as well as the loader.
+    const win = await open('standalone-twice.html');
+    await clicksOnce(win);
+    expect(win.clay.save).to.be.a('function');
+  });
+});
+
+describe('a leftover sap.js tag above the standalone', () => {
+  it('keeps the one runtime the tag mounted', async () => {
+    const win = await open('standalone-leftover-sap.html');
+    await clicksOnce(win);
+    expect(win.clay.save).to.be.a('function');
   });
 });
 

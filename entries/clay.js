@@ -47,7 +47,7 @@
     base = base.slice(0, -8);
   }
   import(base + "/src/loader.js")
-    .then(function (m) { return m.boot(url.searchParams, clay.__readyResolve); })
+    .then(function (m) { return m.boot(base, url.searchParams, clay.__readyResolve); })
     .catch(function (err) {
       clay.__booted = false;
       console.error("clayjs failed to load:", err);

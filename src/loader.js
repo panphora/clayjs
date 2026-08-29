@@ -5,7 +5,12 @@ function domReady() {
   return new Promise((resolve) => onDomReady(resolve));
 }
 
-export async function boot(params, readyResolve) {
+// `base` has been unused since 1.1.0 (the loader imports through MODULES) and
+// stays anyway: /v1/clay.js and /v1/src/loader.js are cached independently, so
+// for a while after a deploy a browser can pair either file with the other's
+// previous release. A call shape that differs between them leaves the page with
+// no clayjs at all.
+export async function boot(base, params, readyResolve) {
   await domReady();                                    // Mutation observes document.body
                                                        // unconditionally, and a <head> placement
                                                        // would otherwise observe null
