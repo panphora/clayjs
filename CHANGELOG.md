@@ -3,6 +3,23 @@
 ## [1.1.0] - 2026-08-28
 
 ### Added
+- `clay.standalone.js`, a single-file build for offline pages
+- Conditional save support using etags, with a hold on conflict
+- Notice shown when a save conflict is detected
+
+### Changed
+- Hold-resume logic refactored
+- Updated the hypercms vendor bundle
+- Updated clayjs
+
+### Fixed
+- Sync serializer no longer reorders the root element's attributes
+
+
+
+## [1.1.0] - 2026-08-28
+
+### Added
 - `clay.standalone.js`: the whole library in one readable file, for pages that must load with no network. Core, every plugin, every satellite and every vendored library, built from the same source by esbuild (`npm run build:standalone` writes `dist/clay.standalone.js`). Served at `https://clayjs.com/v1/clay.standalone.js` and under every pinned prefix from this release on, shipped in the npm tarball at `dist/`, documented at [clayjs.com/offline](https://clayjs.com/offline). It takes the same `?plugins=` and `?exclude=` params; they decide what runs, not what downloads. Every `clay.loaded.*` satellite promise exists without its own tag.
 - `npm run build:standalone` regenerates the file alone; `prepack` builds it so every tarball carries it; pasted inline into a page it boots with the defaults.
 
