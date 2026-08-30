@@ -61,3 +61,22 @@ export function saveToken() {
 export function hasSaveToken() {
   return saveToken() !== null;
 }
+
+/**
+ * True when this response carries ONLY the pre-rename save token.
+ *
+ * That combination means one thing: the host is older than the rename and cannot be
+ * saved to by this version. It is worth its own name because two separate things act
+ * on it. Edit mode goes off, so the page does not offer editing it cannot keep, and
+ * stale-host-notice.js says why on the page, since the console line reaches a
+ * developer and nobody else.
+ *
+ * @returns {boolean}
+ */
+export function servedStaleToken() {
+  if (typeof document === "undefined") return false;
+  if (saveToken() !== null) return false;
+  return LEGACY_SAVE_TOKEN_ATTRS.some(
+    (attr) => document.documentElement.getAttribute(attr)
+  );
+}

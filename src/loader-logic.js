@@ -4,6 +4,10 @@ export const CORE_WAVES = {
     "core/edit-mode.js",   // both modes — matches today: 'edit-mode' is NOT in EDIT_MODE_ONLY
                            // (hyperclay.js:251-273 lists 'edit-mode-helpers', not 'edit-mode');
                            // toggleEditMode must exist in view mode, it's the way IN
+    // always, deliberately: it speaks only when the host is too old to save to, which
+    // is exactly the case where edit mode is off, so the editOnly wave would never
+    // reach it. It draws nothing on any other page.
+    "core/stale-host-notice.js",
   ],
   editOnly: [
     "core/snapshot.js", "core/save-core.js", "core/save.js",
@@ -45,6 +49,7 @@ export const MODULES = {
   "lib/region-policy.js":       () => import("./lib/region-policy.js"),
   "lib/mutation.js":            () => import("./lib/mutation.js"),
   "core/edit-mode.js":          () => import("./core/edit-mode.js"),
+  "core/stale-host-notice.js":  () => import("./core/stale-host-notice.js"),
   "core/snapshot.js":           () => import("./core/snapshot.js"),
   "core/save-core.js":          () => import("./core/save-core.js"),
   "core/save.js":               () => import("./core/save.js"),

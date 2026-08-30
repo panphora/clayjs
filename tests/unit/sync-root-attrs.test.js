@@ -1,4 +1,8 @@
 import { serializeForSync } from "../../src/core/snapshot.js";
+
+// serializeForSync emits a complete document, so the open tag starts after the doctype.
+const DOCTYPE = "<!DOCTYPE html>";
+const openTag = (html) => html.slice(DOCTYPE.length, html.indexOf(">", DOCTYPE.length));
 import { isTabLocalRootAttr, TAB_LOCAL_ROOT_ATTRS } from "../../src/lib/root-attrs.js";
 import { HyperMorph } from "../../src/vendor/hyper-morph.vendor.js";
 
@@ -38,7 +42,7 @@ test("the tab-local names are exactly the set the module publishes", () => {
 
 test("the sync payload drops every tab-local attribute from the root", () => {
   const html = serializeForSync(makeClone());
-  const rootTag = html.slice(0, html.indexOf(">"));
+  const rootTag = openTag(html);
   for (const name of TAB_LOCAL) {
     expect(rootTag).not.toContain(`${name}=`);
   }
@@ -46,7 +50,7 @@ test("the sync payload drops every tab-local attribute from the root", () => {
 
 test("the sync payload keeps the author's own root attributes", () => {
   const html = serializeForSync(makeClone());
-  const rootTag = html.slice(0, html.indexOf(">"));
+  const rootTag = openTag(html);
   expect(rootTag).toContain('lang="en"');
   expect(rootTag).toContain('class="theme-dark"');
   expect(rootTag).toContain('data-doc-version="durable-xyz789"');

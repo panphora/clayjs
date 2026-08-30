@@ -477,7 +477,11 @@ export function serializeForSync(clone) {
   // truncate the broadcast.
   const shell = bareRoot.outerHTML;
   const endTag = `</${bareRoot.localName}>`;
-  return shell.slice(0, shell.length - endTag.length) + clone.innerHTML + endTag;
+  // The doctype, so this artifact is a complete document like every other one this
+  // module produces. Spec section 2 asks for that, and it costs nothing on the wire:
+  // a receiver parses the string and morphs documentElement against documentElement,
+  // so the prologue is consumed by the parser and never reaches the morph.
+  return "<!DOCTYPE html>" + shell.slice(0, shell.length - endTag.length) + clone.innerHTML + endTag;
 }
 
 /**

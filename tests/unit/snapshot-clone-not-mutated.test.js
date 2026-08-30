@@ -150,7 +150,10 @@ describe("serializeForSync", () => {
 
   test("drops the tab-local attributes and keeps the rest in place", () => {
     const html = snapshotMod.serializeForSync(makeClone());
-    expect(html.slice(0, html.indexOf(">") + 1)).toBe('<html lang="en" autosave="">');
+    // The prologue first: this artifact is a complete document, same as every other
+    // one the module emits, which is what spec section 2 asks of a snapshot.
+    expect(html.startsWith("<!DOCTYPE html>")).toBe(true);
+    expect(html.slice("<!DOCTYPE html>".length, html.indexOf(">", "<!DOCTYPE html>".length) + 1)).toBe('<html lang="en" autosave="">');
   });
 
   test("an authored attribute containing an end tag does not truncate the payload", () => {

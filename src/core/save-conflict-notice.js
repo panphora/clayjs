@@ -1,5 +1,6 @@
 import { isEditMode } from "./is-edit-mode.js";
 import onDomReady from "../lib/dom-ready.js";
+import { style, set, make } from "../lib/hostile-css.js";
 
 // The page's only word on a refused save. Without it a document whose host said no
 // looks exactly like one that is saving fine, while autosave sits suspended: the
@@ -32,31 +33,6 @@ let root = null, line = null, keep = null, drop = null;
 let armTimer = null, armed = false, busy = false;
 
 const still = () => !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-
-// Every declaration goes on as !important, and this is the whole reason the notice
-// survives a stranger's page. A plain inline style loses to an author rule that
-// carries !important, and `button { ... !important }` is a thing real pages do: the
-// first browser run of this module had both controls repainted in the host's colours
-// and font. Only an inline !important outranks an author !important.
-function style(el, rules) {
-  for (const rule of rules) {
-    const at = rule.indexOf(":");
-    el.style.setProperty(rule.slice(0, at).trim(), rule.slice(at + 1).trim(), "important");
-  }
-}
-
-// Same reason: a later assignment must be able to beat the !important one already
-// sitting on the element, and a plain style.foo = x silently cannot.
-function set(el, prop, value) {
-  el.style.setProperty(prop, value, "important");
-}
-
-function make(tag, rules, text) {
-  const el = document.createElement(tag);
-  style(el, rules);
-  if (text) el.textContent = text;
-  return el;
-}
 
 // all:initial first, because a page restyling every button is the normal case, not
 // the adversarial one. Everything the control needs is restated after it.

@@ -18,7 +18,7 @@ describe("resolveModules", () => {
 
   test("view mode: drops editOnly core wave and editOnly plugins, keeps always core", () => {
     const { core, plugins } = resolveModules(params(), false);
-    expect(core).toEqual(["lib/mutation.js", "core/edit-mode.js"]);
+    expect(core).toEqual(["lib/mutation.js", "core/edit-mode.js", "core/stale-host-notice.js"]);
     expect(plugins).toEqual([]); // richclay is editOnly, dropped in view mode
   });
 

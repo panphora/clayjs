@@ -1,6 +1,6 @@
 import cookie from "../lib/cookie.js";
 import query from "../lib/query.js";
-import { hasSaveToken } from "./host-attrs.js";
+import { hasSaveToken, servedStaleToken } from "./host-attrs.js";
 
 // Edit-mode precedence: an explicit ?editmode=true|false URL param wins, then an
 // opt-in window.clayEditMode global (with the legacy window.__hyperclayEditMode
@@ -25,11 +25,20 @@ if (typeof window !== "undefined") {
   }
 }
 
+// A host older than the save-token rename takes edit mode off the table, above every
+// rung below it. Such a host still sets the owner cookie, so without this the page
+// would look fully editable while every save 404s against a route that no longer
+// matches: an editable page that keeps nothing is worse than a read-only one. Only an
+// explicit ?editmode=true outranks it, because that is a person at the keyboard asking
+// for it this load, not a decision baked into the document by an author who could not
+// have known. stale-host-notice.js puts the reason on the page.
 const isEditMode = query.editmode
   ? query.editmode === "true" // takes precedence over the global, token and cookie
-  : forcedEditMode != null
-    ? forcedEditMode
-    : hasSaveToken() || Boolean(cookie.get("isAdminOfCurrentResource"));
+  : servedStaleToken()
+    ? false
+    : forcedEditMode != null
+      ? forcedEditMode
+      : hasSaveToken() || Boolean(cookie.get("isAdminOfCurrentResource"));
 
 const isOwner = Boolean(cookie.get("isAdminOfCurrentResource"));
 
