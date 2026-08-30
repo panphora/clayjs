@@ -55,7 +55,11 @@ export function saveToken() {
 }
 
 /**
- * True when the host handed this response a save token of either spelling.
+ * True when the host handed this response a save token this version accepts.
+ *
+ * Only `savetoken` counts. A response carrying nothing but the pre-rename spelling is
+ * FALSE here and true from `servedStaleToken()`, which is the whole point of the pair.
+ *
  * @returns {boolean}
  */
 export function hasSaveToken() {

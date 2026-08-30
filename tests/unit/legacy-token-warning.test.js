@@ -9,7 +9,9 @@
 //
 // Its own file because the warning fires once per module instance and jest caches modules
 // per file: a spy installed after any earlier import of host-attrs.js would be watching a
-// warning that had already happened.
+// warning that had already happened. The quiet half lives in current-token-quiet.test.js
+// for the same reason: it used to sit below this test, sharing the spent latch and this
+// test's `htmlclaytoken` root, and it could not fail.
 
 import { jest } from "@jest/globals";
 
@@ -24,16 +26,5 @@ test("finding only the pre-rename spelling says so, once", async () => {
   expect(warn).toHaveBeenCalledTimes(1);
   expect(warn.mock.calls[0][0]).toContain("htmlclaytoken");
   expect(warn.mock.calls[0][0]).toContain("1.9.0");
-  warn.mockRestore();
-});
-
-test("a host serving the current name says nothing", async () => {
-  document.documentElement.setAttribute("savetoken", "tok-spec");
-  const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
-
-  const { saveToken } = await import("../../src/core/host-attrs.js");
-  saveToken();
-
-  expect(warn).not.toHaveBeenCalled();
   warn.mockRestore();
 });

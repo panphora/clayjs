@@ -68,9 +68,13 @@ function errorResult(err) {
   // are still on this page. Reporting that as 'error' would give the one outcome
   // where nothing went wrong the one severity that means something did, and would
   // put it through the same retry-and-toast path as a dead server.
-  // The status is authoritative (§3), and `code` is honoured too because a proxy
-  // can answer 412 on the host's behalf with no body at all.
-  const conflicted = !timedOut && (err.status === 412 || err.code === 'conflict');
+  // The status is authoritative (§3), so the 412 alone decides this. Reading `code`
+  // as well let any other status claim a conflict, and it bought nothing: a proxy
+  // answering 412 with no body carries no code to read, so the fallback never
+  // covered the case it was written for. What it did cover was htmlclay's
+  // truncation refusal, a 409 that lifts itself within a second, which suspended
+  // autosave over a condition that had already cleared.
+  const conflicted = !timedOut && err.status === 412;
   return {
     ok: false,
     msg: timedOut ? 'Server not responding' : (err.message || 'Save failed'),

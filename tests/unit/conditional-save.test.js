@@ -38,7 +38,9 @@ function installRouter() {
       ok: status < 400,
       status,
       statusText: "",
-      text: async () => JSON.stringify(answer.body ?? {})
+      // `text` lets a case answer with a genuinely empty body, which is what a
+      // proxy does when it refuses on the host's behalf.
+      text: async () => (answer.text !== undefined ? answer.text : JSON.stringify(answer.body ?? {}))
     };
   });
 }
@@ -286,6 +288,23 @@ describe("a 412", () => {
     expect(calls.save).toHaveLength(before);
   });
 
+  // A proxy can refuse on the host's behalf and send nothing at all. There is no
+  // `code` in an empty body to read, so the status has to carry this on its own.
+  test("still conflicts when the refusal has no body", async () => {
+    responses.save = () => ({ status: 412, text: "" });
+    const seen = [];
+    const onConflict = (e) => seen.push(e.detail);
+    document.addEventListener("clay:save-conflict", onConflict);
+
+    await edit("nothing came back but the number");
+    const result = await saveMod.savePage();
+    document.removeEventListener("clay:save-conflict", onConflict);
+
+    expect(result.msgType).toBe("conflict");
+    expect(saveMod.isSaveConflicted()).toBe(true);
+    expect(seen).toHaveLength(1);
+  });
+
   test("clay.save.overwrite takes a fresh stamp from the host, lands, and clears the hold", async () => {
     await edit("keep mine");
     await saveMod.savePage();
@@ -300,6 +319,46 @@ describe("a 412", () => {
     expect(ifMatchOf(calls.save.length - 1)).toBe("theirs-9");
     expect(saveMod.isSaveConflicted()).toBe(false);
     expect(document.documentElement.getAttribute("savestatus")).toBe("saved");
+  });
+});
+
+// htmlclay refuses a save that arrives while an outside process is truncating the
+// file, and that refusal lifts itself within a second. Reading its 409 as §6's
+// conflict suspended autosave until a person intervened, over a condition that had
+// already cleared. The status decides (§3), so this is an ordinary failure and the
+// next autosave goes out and lands.
+describe("a 409 that calls itself a conflict", () => {
+  beforeEach(async () => {
+    responses.meta = { spec: 1, extensions: ["conditional"], document: { etag: "seed-409" } };
+    await rediscover();
+    responses.save = () => ({
+      status: 409,
+      body: { msg: "Refusing to save over a truncation in progress", code: "conflict" }
+    });
+  });
+
+  test("is an error, holds nothing, and the next autosave still goes out", async () => {
+    const seen = [];
+    const onConflict = (e) => seen.push(e.detail);
+    document.addEventListener("clay:save-conflict", onConflict);
+
+    await edit("typed while the file was being truncated");
+    const result = await saveMod.savePage();
+    document.removeEventListener("clay:save-conflict", onConflict);
+
+    expect(result.ok).toBe(false);
+    expect(result.msgType).toBe("error");
+    expect(saveMod.isSaveConflicted()).toBe(false);
+    expect(seen).toHaveLength(0);
+    expect(document.documentElement.getAttribute("savestatus")).toBe("error");
+
+    const before = calls.save.length;
+    responses.save = accepted("stored-409");
+    await edit("and the guard has lifted");
+    const auto = await saveMod.savePageThrottled();
+
+    expect(auto.ok).toBe(true);
+    expect(calls.save).toHaveLength(before + 1);
   });
 });
 
