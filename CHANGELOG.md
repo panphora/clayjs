@@ -9,11 +9,19 @@
 
   The old name is still stripped from every save and still kept out of an incoming live-sync morph. What a host injects has to be removed whether or not this library reads it, or a live credential ends up written into a document or handed to another tab.
 
+### Added
+- **A notice when a save is refused.** A document whose host said no used to look exactly like one saving fine, while autosave sat suspended: the status chip that would have said so is a plugin, off by default, so most documents showed nothing at all. Core now shows one bordered line at the bottom of the page, "This page was updated elsewhere. Saving is paused.", offering `Load theirs` or `Keep mine`. Discarding arms for five seconds before it fires, since it is the only control here that destroys work with no undo, and Escape backs it out. Every declaration is set with `!important`, because a plain inline style loses to an author rule that carries one and `button { ... !important }` is something real pages do.
+- **A notice when the host is too old to save.** A document served by HTML Clay 1.8.0 or earlier posts to a route that host does not have, so this library now says so on the page instead of letting the save fail silently. It stays off an explicitly editable page, since `?editmode=true` is a person at the keyboard asking and outranks the check.
+- **A save that returns an `etag` sends the stamp on to the other editors,** carrying the bytes it just saved. A tab adopts a stamp only as part of applying the content that stamp describes, so no tab can come to believe it is in step with disk on the strength of a message that arrived before the content did. A receiver whose baseline already matches records the stamp and skips the morph, which is the common case.
+
 ### Changed
 - `savetoken` is the documented name of the save token, in the reference and across the site.
 
 ### Fixed
 - A document's durable file identity is no longer read as a save token. `documentid` and `htmlclayid` are injected by the host exactly as a token is, and need the same protection from an incoming morph, but they are not credentials and they do reach disk. They shared one list with the token spellings, so `saveToken()` returned an identity whenever the host had minted no token of its own, and the library posted to `/_/save/{id}` with credentials omitted and showed edit mode to every visitor. Identities have their own list now: still stripped before a save, still kept out of a peer's morph, never read as a credential.
+- A bare stamp arriving with no content is dropped rather than adopted. It asserts "you are in step with disk" on no evidence: a stamp can outrun the content it describes, and a tab that recorded it would then overwrite the other save with its own older bytes on the next autosave, matching `If-Match` all the way.
+- A stamp is no longer left stale after a live-sync hold clears. The guard re-seeds from the host, and only when both lanes are clear, since a background re-seed that could clear the stamp must never quietly drop the protection.
+- The status chip drops its own `conflict` state rather than core learning that a plugin exists.
 
 ## [1.1.0] - 2026-08-28
 
