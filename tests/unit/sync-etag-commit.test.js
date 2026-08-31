@@ -87,6 +87,12 @@ describe("the stamp rides in the slot beside the bytes", () => {
 });
 
 describe("a saving tab tells the other editors, and only when it has something to tell", () => {
+  // lastHtml is deliberately something ELSE, and every test here depends on that.
+  // It is the last relay that COMPLETED, which lags the save whenever the response
+  // beats the 150ms snapshot debounce, and reading it was the defect: the commit
+  // went out pairing pre-save bytes with the new save's stamp. What the commit must
+  // carry is _savedSnapshot, captured at snapshot-ready from the very clone the save
+  // stored.
   function commitTab(over = {}) {
     const posted = [];
     return {
@@ -94,11 +100,12 @@ describe("a saving tab tells the other editors, and only when it has something t
       tab: {
         isDestroyed: false,
         isPaused: false,
-        lastHtml: "<html>what I saved</html>",
+        lastHtml: "<html>a stale relay</html>",
+        _savedSnapshot: { html: "<html>what I saved</html>", identityMap: { a: 1 } },
         clientId: "tab-a",
         _profile: { relayPath: "/_/sync", documentHeader: "Document-URL", snapshotKey: "snapshot" },
         _log() {},
-        _postCommit(html, etag) { posted.push({ html, etag }); },
+        _postCommit(html, etag, identityMap) { posted.push({ html, etag, identityMap }); },
         ...over,
       },
     };
@@ -110,10 +117,44 @@ describe("a saving tab tells the other editors, and only when it has something t
     return posted;
   };
 
-  test("relays the bytes it last sent, carrying the stamp its save returned", () => {
+  test("relays the bytes THIS SAVE stored, carrying the stamp that save returned", () => {
     recordEtag("stored-7");
 
-    expect(relay()).toEqual([{ html: "<html>what I saved</html>", etag: "stored-7" }]);
+    expect(relay()).toEqual([
+      { html: "<html>what I saved</html>", etag: "stored-7", identityMap: { a: 1 } },
+    ]);
+  });
+
+  // The regression this whole shape exists for. A tab that took its content from
+  // lastHtml would send "<html>a stale relay</html>" with stamp stored-7, and a peer
+  // adopting that pair holds bytes without the save in them while claiming the save's
+  // version, so its next autosave passes If-Match and overwrites what it never saw.
+  test("never sends the last completed relay in place of the saved bytes", () => {
+    recordEtag("stored-7");
+
+    const [frame] = relay();
+    expect(frame.html).not.toBe("<html>a stale relay</html>");
+  });
+
+  // A save-saved with no capture behind it cannot know which bytes the stamp
+  // describes, and §10 says a stamp must never travel on its own.
+  test("says nothing when no snapshot was captured for this save", () => {
+    recordEtag("stored-7");
+
+    expect(relay({ _savedSnapshot: null })).toEqual([]);
+  });
+
+  // Consumed, not left behind: a later save-saved must not reuse an older save's
+  // bytes under a newer stamp.
+  test("consumes the captured snapshot, so it is never relayed twice", () => {
+    recordEtag("stored-7");
+    const { posted, tab } = commitTab();
+
+    LiveSync.prototype._relayCommit.call(tab);
+    LiveSync.prototype._relayCommit.call(tab);
+
+    expect(posted).toHaveLength(1);
+    expect(tab._savedSnapshot).toBeNull();
   });
 
   test("says nothing when the save returned no stamp", () => {
@@ -131,10 +172,10 @@ describe("a saving tab tells the other editors, and only when it has something t
     expect(relay()).toEqual([]);
   });
 
-  test("says nothing before this tab has ever relayed a snapshot", () => {
+  test("says nothing before this tab has captured anything", () => {
     recordEtag("stored-7");
 
-    expect(relay({ lastHtml: null })).toEqual([]);
+    expect(relay({ _savedSnapshot: undefined })).toEqual([]);
   });
 
   test("says nothing while paused or destroyed", () => {

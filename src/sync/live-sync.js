@@ -114,6 +114,15 @@ class LiveSync {
 
     this.debounceMs = 150;
     this.debounceTimer = null;
+
+    // The sync serialization of the clone the CURRENT save was captured from,
+    // held so the commit relay can pair the host's stamp with the content that
+    // stamp actually describes. Set at snapshot-ready, which fires before the
+    // save POST goes out, and consumed by _relayCommit when the response lands.
+    // Never reconstructed from lastHtml: that is the last relay that COMPLETED,
+    // which lags the save whenever the response beats the 150ms debounce, and
+    // pairing a fresh stamp with older bytes is the one thing spec §10 forbids.
+    this._savedSnapshot = null;
     this._sendInFlight = false;
     this._queuedSend = null;
 
@@ -165,7 +174,7 @@ class LiveSync {
     // Disk-sourced external changes (htmlclay watcher content) get their own
     // one-deep slot so a peer frame arriving in the same window can't
     // displace them. Drained in seq order alongside the peer slot.
-    this._pendingExternal = null;   // { html, seq, saveEpoch }
+    this._pendingExternal = null;   // { html, seq, saveEpoch, etag }
 
     // Newest external-change seq accepted for apply. Replayed or reordered
     // disk frames (and their fetch fallbacks) are dropped against this.
@@ -278,6 +287,7 @@ class LiveSync {
     // so mint a fresh resume id — this stream must not resume the previous one.
     this.lastHtml = null;
     this._lastIdentityMap = null;
+    this._savedSnapshot = null;
     this._applyGen++;
     this.lastSeenSeq = 0;
     this._lastExternalSeq = 0;
@@ -724,6 +734,12 @@ class LiveSync {
       this._log('snapshot-ready received, preparing to send');
       const html = serializeForSync(clone);
       const identityMap = this._buildIdentityMap(document.documentElement, clone);
+
+      // The save that follows this capture stores these bytes, so this is the
+      // content its stamp will describe. Held for _relayCommit, and overwritten
+      // by the next capture, so it always names the save currently in flight.
+      this._savedSnapshot = { html, identityMap };
+
       this.sendUpdate(html, identityMap);
     };
 
@@ -791,20 +807,35 @@ class LiveSync {
     // a second flag that would have to be reached through discovery to exercise.
     const etag = lastSeenEtag();
     if (!etag) return;
-    if (typeof this.lastHtml !== 'string') return;
     if (this.isDestroyed || this.isPaused) return;
-    this._postCommit(this.lastHtml, etag);
+
+    // The content this save stored, captured with it. Consumed rather than left
+    // behind, so a save-saved with no capture of its own can never reuse an
+    // older save's bytes under a newer stamp.
+    const pending = this._savedSnapshot;
+    this._savedSnapshot = null;
+
+    // No captured snapshot means nothing here knows which bytes this stamp
+    // describes, and §10 is explicit that a stamp must never travel on its own.
+    // Staying silent costs the other editors one refusal they recover from;
+    // guessing costs somebody their work.
+    if (!pending || typeof pending.html !== 'string') return;
+
+    this._postCommit(pending.html, etag, pending.identityMap);
   }
 
   /**
    * Post a snapshot whose point is the stamp attached to it.
    *
    * Deliberately not `_postUpdate`: that one returns early when the html matches
-   * `lastHtml`, which is the case here almost every time. It also does not touch
-   * `lastHtml` or the single-flight queue, because it introduces no new content
-   * and must not displace a real snapshot waiting to go out.
+   * `lastHtml`, and the whole point here is that the stamp is the new information
+   * even when the bytes are not. It also does not touch `lastHtml` or the
+   * single-flight queue, because it must not displace a real snapshot waiting to
+   * go out. It carries the identityMap captured with these bytes, so a receiver
+   * that morphs on this frame pairs elements the same way it would on the
+   * ordinary relay of the same content.
    */
-  _postCommit(html, etag) {
+  _postCommit(html, etag, identityMap) {
     const profile = this._profile;
     if (!profile) return;
     fetch(new URL(profile.relayPath, window.location.origin).href, {
@@ -816,6 +847,7 @@ class LiveSync {
       body: JSON.stringify({
         [profile.snapshotKey]: html,
         sender: this.clientId,
+        identityMap,
         etag
       })
     }).catch(err => {
@@ -892,7 +924,7 @@ class LiveSync {
     const info = data.data;
     if (info && info.kind === 'external-change') {
       if (typeof info.html === 'string') {
-        this._enqueueExternal(info.html, data.seq);
+        this._enqueueExternal(info.html, data.seq, info.etag);
       } else {
         this._fetchExternalChange(data.seq);
       }
@@ -905,7 +937,7 @@ class LiveSync {
     return false;
   }
 
-  _enqueueExternal(html, seq) {
+  _enqueueExternal(html, seq, etag) {
     if (typeof seq === 'number') {
       if (seq <= this._lastExternalSeq) {
         this._log(`Dropping replayed external change: seq=${seq}`);
@@ -913,7 +945,12 @@ class LiveSync {
       }
       this._lastExternalSeq = seq;
     }
-    this._pendingExternal = { html, seq, saveEpoch: this._saveEpoch };
+    this._pendingExternal = {
+      html,
+      seq,
+      saveEpoch: this._saveEpoch,
+      etag: typeof etag === 'string' && etag ? etag : null,
+    };
     this._scheduleNextFrame();
   }
 
@@ -964,7 +1001,10 @@ class LiveSync {
           }
           return;
         }
-        this._pendingExternal = { html, seq, saveEpoch: epoch };
+        // No stamp: this body came from a GET of the served page, which nobody
+        // stamped, so the apply leaves the held stamp alone and etag.js asks the
+        // host for a replacement.
+        this._pendingExternal = { html, seq, saveEpoch: epoch, etag: null };
         this._scheduleNextFrame();
       })
       .catch((err) => {
@@ -1058,7 +1098,7 @@ class LiveSync {
       } else {
         this._morphInFlight = true;
         try {
-          await this._doApplyExternal(ext.html, ext.seq);
+          await this._doApplyExternal(ext.html, ext.seq, ext.etag);
         } catch (err) {
           console.error('[LiveSync] applyExternal failed:', err);
         } finally {
@@ -1216,16 +1256,17 @@ class LiveSync {
 
       this._setHeld('live', false);
 
-      // The frame merged, so this tab now holds the peer's content (with its own
-      // unsaved sections spliced back in, which is what scoped sync is for). That
-      // is the condition, and the ONLY condition, under which its stamp may be
-      // taken: adopting it here and applying the bytes are the same event, so no
-      // ordering between two messages has to be trusted.
+      // The frame merged, so this tab may take its stamp — but not yet. Adopting
+      // the stamp and applying the bytes have to be the same event, and they only
+      // are once the apply has actually happened. The morph below is awaited and
+      // can reject, and a stamp recorded before it would sit on the old DOM with
+      // nothing to undo it, so the next save would pass If-Match and replace a
+      // version this tab never received. It is recorded after the await, beside
+      // `lastHtml`, on the one path where the bytes definitely landed.
       //
-      // The hold path above returns before this line, deliberately. A held tab is
+      // The hold path above returns before that point, deliberately. A held tab is
       // knowingly missing what disk holds, and a stamp there would let its next
       // save replace that change with nobody told.
-      if (typeof etag === 'string' && etag) recordEtag(etag);
 
       // Morph entire document. We MUST await — HyperMorph.morph returns a
       // Promise when `scripts: { handle: true }` needs to wait for external
@@ -1281,6 +1322,13 @@ class LiveSync {
           ? identityMap
           : null;
       this._applyGen++;
+
+      // The stamp of section 6, taken now that the bytes it describes are the
+      // bytes this tab is holding. Same line of reasoning as lastHtml directly
+      // above, and deliberately the same moment: the two claims a page makes
+      // when it adopts a stamp are "the host stores this version" and "I hold
+      // it", and only the second one is this tab's to make.
+      if (typeof etag === 'string' && etag) recordEtag(etag);
 
       // Cross-lane baseline: the DOM now holds this frame's content, but the
       // DISK baseline (lastSavedContents) still describes pre-frame state. A
@@ -1344,7 +1392,7 @@ class LiveSync {
    * holds or a later dirty peer apply misclassifies this frame's content as
    * local edits.
    */
-  async _doApplyExternal(html, seq) {
+  async _doApplyExternal(html, seq, etag = null) {
     this._log(`applyExternal - external disk change (seq=${seq})`);
     this.isPaused = true;
 
@@ -1384,7 +1432,7 @@ class LiveSync {
           this._holdRetryExt = setTimeout(() => {
             this._holdRetryExt = null;
             if (this.isDestroyed || this._pendingExternal != null) return;
-            this._pendingExternal = { html, seq, saveEpoch: epochAtHold };
+            this._pendingExternal = { html, seq, saveEpoch: epochAtHold, etag };
             this._scheduleNextFrame();
           }, 3000);
           return;
@@ -1421,6 +1469,17 @@ class LiveSync {
 
       window.scrollTo(scrollX, scrollY);
 
+      // The stamp of section 6, adopted here and nowhere else: this is the moment
+      // the bytes it describes reached this tab. It is taken on the retained-roots
+      // path too, because a merge still incorporates the disk bytes, and the
+      // convergence save at the bottom needs a stamp the host will accept or the
+      // merge is refused and lost.
+      //
+      // A frame with no stamp (an older host, or the content-less fetch fallback,
+      // which serves bytes nobody stamped) leaves this alone, and the listener in
+      // etag.js falls back to asking the host.
+      if (typeof etag === 'string' && etag) recordEtag(etag);
+
       if (this.lane === 'live' && retainedRoots === 0 && !pageMaybeDirty()) {
         // Clean apply: the DOM now IS the disk state, so a local comparison
         // capture of it is the truthful baseline. The next no-op save skips,
@@ -1442,7 +1501,7 @@ class LiveSync {
       }
 
       document.dispatchEvent(new CustomEvent('clay:sync-applied', {
-        detail: { seq, source: 'disk' }
+        detail: { seq, source: 'disk', etag: typeof etag === 'string' && etag ? etag : null }
       }));
     } finally {
       this._log('applyExternal - morph complete, resuming mutations');

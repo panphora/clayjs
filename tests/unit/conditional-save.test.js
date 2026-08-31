@@ -178,28 +178,75 @@ test("an accepted save that answers with no stamp clears the old one instead of 
   expect(ifMatchOf(1)).toBeUndefined();
 });
 
-test("a save that times out reconciles the stamp before anything retries", async () => {
-  // §7: the write may have landed. If it did, the stamp held here describes bytes
-  // the host replaced, and the retry would be refused for a change this tab made.
-  responses.meta = { spec: 1, extensions: ["conditional"], document: { etag: "before-timeout" } };
-  await rediscover();
+describe("a save that times out", () => {
+  // §7: the write may have landed and it may not, and this client cannot tell.
+  // The stamp is left exactly as it was. Taking the host's current one instead
+  // would be a guess that our own write is what moved the document, and the times
+  // that guess is wrong are precisely the times a peer wrote: the tab would adopt
+  // a stamp for bytes it has never seen and overwrite them on the next save with
+  // no refusal and no notice. A kept stamp costs a refusal, which is recoverable.
+  beforeEach(async () => {
+    responses.meta = { spec: 1, extensions: ["conditional"], document: { etag: "before-timeout" } };
+    await rediscover();
 
-  // The write lands on the host and the answer never reaches the browser, so the
-  // host's stamp moves during the request the client is about to give up on.
-  responses.save = () => {
-    responses.meta = { spec: 1, extensions: ["conditional"], document: { etag: "it-landed" } };
-    throw Object.assign(new Error("aborted"), { name: "AbortError" });
-  };
-  await edit("slow network");
-  const timedOut = await saveMod.savePage();
-  expect(timedOut.msgType).toBe("unknown");
-  await flush();
+    // The write lands on the host and the answer never reaches the browser, so
+    // the host's stamp moves during the request the client gives up on.
+    responses.save = () => {
+      responses.meta = { spec: 1, extensions: ["conditional"], document: { etag: "it-landed" } };
+      throw Object.assign(new Error("aborted"), { name: "AbortError" });
+    };
+  });
 
-  responses.save = accepted("stored-t");
-  await edit("the retry");
-  await saveMod.savePage();
+  test("keeps its stamp rather than adopting whatever the host now holds", async () => {
+    await edit("slow network, save one");
+    const timedOut = await saveMod.savePage();
+    expect(timedOut.msgType).toBe("unknown");
+    await flush();
 
-  expect(ifMatchOf(calls.save.length - 1)).toBe("it-landed");
+    responses.save = accepted("stored-t");
+    await edit("the retry");
+    await saveMod.savePage();
+
+    expect(ifMatchOf(calls.save.length - 1)).toBe("before-timeout");
+  });
+
+  test("marks the refusal that follows, so the notice can explain it", async () => {
+    await edit("slow network, save two");
+    await saveMod.savePage();
+    await flush();
+
+    const seen = [];
+    const onConflict = (e) => seen.push(e.detail);
+    document.addEventListener("clay:save-conflict", onConflict);
+    responses.save = refused;
+    await edit("the retry after a timeout");
+    await saveMod.savePage();
+    document.removeEventListener("clay:save-conflict", onConflict);
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0].afterTimeout).toBe(true);
+  });
+
+  test("stops marking refusals once a save the host answered has landed", async () => {
+    await edit("slow network, save three");
+    await saveMod.savePage();
+    await flush();
+
+    responses.save = accepted("stored-t");
+    await edit("a save that got through");
+    await saveMod.savePage();
+
+    const seen = [];
+    const onConflict = (e) => seen.push(e.detail);
+    document.addEventListener("clay:save-conflict", onConflict);
+    responses.save = refused;
+    await edit("a later, unrelated conflict");
+    await saveMod.savePage();
+    document.removeEventListener("clay:save-conflict", onConflict);
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0].afterTimeout).toBe(false);
+  });
 });
 
 describe("a 412", () => {

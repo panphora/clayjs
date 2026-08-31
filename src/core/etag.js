@@ -15,8 +15,9 @@
  *   - an accepted save replaces it with the one that response carried, and clears
  *     it when a response carries none: after our own write, any stamp still held
  *     here is known to describe bytes the host has stopped storing,
- *   - a disk-sourced live-sync frame clears it and asks for a fresh one, because
- *     the file changed under a tab that never saved.
+ *   - a disk-sourced live-sync frame replaces it with the stamp that frame
+ *     carried, because the file changed under a tab that never saved. A frame
+ *     with no stamp on it falls back to clearing and asking the host.
  *
  * A peer's SNAPSHOT does not move it. §10 relays never write to disk, so the
  * stamp is still true after one lands, and treating one as a disk change would
@@ -99,8 +100,19 @@ export async function seedEtag({ fresh = false, clearIfMissing = fresh } = {}) {
 // A disk-sourced frame is the one live-sync outcome that changes the file under a
 // tab which did not save it. Holding the old stamp would refuse this tab's next
 // save against bytes it has already morphed to and is looking at, so the stamp
-// goes immediately and the replacement is asked for in the background: the save
-// lane never waits on it.
+// has to move.
+//
+// The frame's own stamp is the right one, and live-sync has already taken it as
+// part of applying the frame's content. Nothing is left to do here: this listener
+// exists for the frames that carry no stamp.
+//
+// Asking the host is the fallback and not the rule, because discovery answers
+// about whatever is on disk when the ANSWER is built, which is a later moment
+// than the frame. If a second write lands in between, the reply describes bytes
+// this tab has never seen, and adopting it makes the next save overwrite that
+// write silently. The frames without a stamp are an old host, and the fetch
+// fallback for a change too large to send, whose body is the served page rather
+// than anything the host stamped.
 //
 // A frame that live-sync HELD is deliberately not covered, because it never
 // dispatches this event. That tab has unsaved local edits and has not seen the
@@ -108,6 +120,7 @@ export async function seedEtag({ fresh = false, clearIfMissing = fresh } = {}) {
 if (isEditMode) {
   document.addEventListener("clay:sync-applied", (event) => {
     if (event.detail?.source !== "disk") return;
+    if (typeof event.detail.etag === "string" && event.detail.etag) return;
     forgetEtag();
     seedEtag({ fresh: true });
   });

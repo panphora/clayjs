@@ -262,7 +262,10 @@ function applySaveResult(result, forComparison, forDirty, label, gateToken) {
     releaseConflictHold();
   } else if (result.msgType === 'conflict') {
     holdForConflict();
-    setSaveState('conflict', result.msg, result.msgType, { changedBy: result.changedBy ?? null });
+    setSaveState('conflict', result.msg, result.msgType, {
+      changedBy: result.changedBy ?? null,
+      afterTimeout: result.afterTimeout === true,
+    });
   } else if (result.msgType !== 'skipped') {
     if (!navigator.onLine) {
       setSaveState('offline', result.msg);

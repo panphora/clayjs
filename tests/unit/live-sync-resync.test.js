@@ -121,6 +121,7 @@ test("a baseline the page has already seen still repairs it", async () => {
     html: "<html>disk-now</html>",
     seq: 12,
     saveEpoch: 0,
+    etag: null,
   });
   sync.stop();
 });

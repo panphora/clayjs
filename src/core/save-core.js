@@ -10,7 +10,7 @@
 import { isEditMode } from "./is-edit-mode.js";
 import { consumeUserDriven, consumeExplicitSave, markUserDriven } from "../lib/user-gesture.js";
 import { saveToken } from "./host-attrs.js";
-import { lastSeenEtag, conditionalSaves, recordEtag, seedEtag } from "./etag.js";
+import { lastSeenEtag, conditionalSaves, recordEtag } from "./etag.js";
 import {
   getPageContents,
   onSnapshot,
@@ -61,6 +61,22 @@ function successResult(data) {
   };
 }
 
+// Set by a save whose fate this client cannot know, and cleared by the next save
+// the host actually answers with a write. It exists so a later 412 can say WHY it
+// might be refusing a change the person believes is their own, which is the thing
+// the old reconcile-on-timeout was for. That reconcile took the host's current
+// stamp on the guess that our own write was what moved the document. When the
+// guess was wrong the stamp described a peer's bytes this tab had never seen, and
+// the next save overwrote them with no refusal and no notice, which is the exact
+// loss `conditional` exists to prevent. A stale stamp only ever costs a refusal,
+// so the refusal is what this keeps, and the notice explains it instead.
+let fateUnknown = false;
+
+/** True while an earlier save may or may not have landed (spec §7). */
+export function saveFateIsUnknown() {
+  return fateUnknown;
+}
+
 function errorResult(err) {
   const timedOut = err.name === 'AbortError';
   // Spec §6: a 412 is a REFUSED save, not a failed one. The host wrote nothing and
@@ -83,6 +99,9 @@ function errorResult(err) {
     msgType: timedOut ? 'unknown' : (conflicted ? 'conflict' : 'error'),
     code: timedOut ? 'timeout' : (conflicted ? 'conflict' : (err.code ?? null)),
     changedBy: conflicted ? (err.changedBy ?? null) : null,
+    // A refusal that may be answering this tab's own timed-out write. Only the
+    // notice uses it, and only to word itself; nothing decides anything on it.
+    afterTimeout: conflicted && fateUnknown,
     etag: null
   };
 }
@@ -241,18 +260,19 @@ function sendSave(content) {
       // etag clears it rather than keeping the old one, because the write we just
       // made means any stamp held here describes bytes the host no longer stores.
       recordEtag(data.etag ?? null);
+      // A write the host answered: whatever an earlier timeout left uncertain,
+      // this document's version is known again.
+      fateUnknown = false;
       return data;
     }))
     .catch(err => {
       console.error('Failed to save page:', err);
       // Spec §7: a timeout is INDETERMINATE, so this write may well have landed,
       // and the stamp held here may already describe bytes the host has replaced.
-      // Reconcile against the host before anything retries, or a save that times
-      // out and lands is followed by a 412 the person cannot explain and did not
-      // cause. The only save that can have moved the document inside that window
-      // is almost always this one, so taking the host's current stamp is taking
-      // back our own.
-      if (err.name === 'AbortError') seedEtag({ fresh: true });
+      // The stamp is deliberately NOT reconciled against the host: see fateUnknown
+      // above. The old stamp is kept, the next save is refused rather than
+      // accepted, and the notice says the refusal may be answering this save.
+      if (err.name === 'AbortError') fateUnknown = true;
       // The save never landed: re-arm the user-driven bit so the next (retry)
       // save still reports the human gesture instead of reading as background.
       if (userDriven) markUserDriven();

@@ -53,6 +53,24 @@ test("names the source when the host knows one, and stays vague when it does not
   expect(bar().textContent).toContain("updated elsewhere.");
 });
 
+test("says a timed-out save may be the cause, and never over a host that named one", () => {
+  // The tab keeps its stamp across a timeout rather than reconciling, so a
+  // refusal here may be answering the person's own write. Without this line that
+  // refusal is unexplainable, which is what the old reconcile was avoiding by
+  // guessing instead.
+  fire("conflict", { changedBy: null, afterTimeout: true });
+  expect(bar().textContent).toContain("possibly by your own save that timed out");
+
+  // The host actually knows. Its answer beats the guess.
+  fire("conflict", { changedBy: "another-person", afterTimeout: true });
+  expect(bar().textContent).toContain("by someone else");
+  expect(bar().textContent).not.toContain("timed out");
+
+  // An ordinary conflict is worded as it always was.
+  fire("conflict", { changedBy: null, afterTimeout: false });
+  expect(bar().textContent).toContain("This page was updated elsewhere.");
+});
+
 test("goes away when a save lands", () => {
   fire("conflict");
   expect(bar().style.display).toBe("flex");

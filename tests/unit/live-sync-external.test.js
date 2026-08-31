@@ -31,6 +31,7 @@ let LiveSync;
 let save;
 let snapshot;
 let gate;
+let etag;
 
 beforeAll(async () => {
   window.clayEditMode = true;
@@ -48,6 +49,7 @@ beforeAll(async () => {
   save = await import("../../src/core/save.js");
   snapshot = await import("../../src/core/snapshot.js");
   gate = await import("../../src/lib/dirty-gate.js");
+  etag = await import("../../src/core/etag.js");
 });
 
 beforeEach(async () => {
@@ -100,6 +102,7 @@ test("an external-change notification with embedded html enqueues silently", asy
     html: "<html><body>disk</body></html>",
     seq: 10,
     saveEpoch: 0,
+    etag: null,
   });
   expect(sync._lastExternalSeq).toBe(10);
   sync.stop();
@@ -128,6 +131,7 @@ test("an external-change notification without html falls back to a no-store fetc
     html: "<html><body>fetched</body></html>",
     seq: 4,
     saveEpoch: 0,
+    etag: null,
   });
   sync.stop();
 });
@@ -209,6 +213,7 @@ test("a queued disk frame older than an own landed save is refetched at drain, n
     html: "<html>disk-now</html>",
     seq: 5,
     saveEpoch: 1,
+    etag: null,
   });
   sync.stop();
 });
@@ -281,6 +286,55 @@ test("when both slots are pending, the lower seq applies first", async () => {
   await sync._runPending();
   expect(order).toEqual(["peer", "external"]);
   sync.stop();
+});
+
+// Spec §10: a stamp is adopted only as part of applying the content it
+// describes. The disk lane's stamp rides on the frame for that reason, and the
+// alternative it replaced (apply the frame, then ask the host for a stamp) is
+// the exact shape the rule forbids: the host answers about whatever is on disk
+// by the time it builds the answer, which may be a later write this tab has
+// never seen, and adopting that makes the next save overwrite it silently.
+describe("the disk frame's stamp", () => {
+  test("is adopted as part of applying the frame, without asking the host", async () => {
+    const sync = makeSync();
+    etag.recordEtag("before-the-frame");
+    const metaCallsBefore = global.fetch.mock.calls.filter((c) =>
+      String(c[0]).includes("/_/meta")
+    ).length;
+
+    await sync._doApplyExternal(diskDoc("<p>from disk</p>"), 31, "disk-42");
+
+    expect(etag.lastSeenEtag()).toBe("disk-42");
+    const metaCallsAfter = global.fetch.mock.calls.filter((c) =>
+      String(c[0]).includes("/_/meta")
+    ).length;
+    expect(metaCallsAfter).toBe(metaCallsBefore);
+    sync.stop();
+  });
+
+  test("falls back to asking the host only when the frame carried none", async () => {
+    const sync = makeSync();
+    etag.recordEtag("before-the-frame");
+
+    await sync._doApplyExternal(diskDoc("<p>from an old host</p>"), 32);
+
+    // forgetEtag ran: an unstamped disk change must not leave this tab holding
+    // a stamp for bytes it no longer has.
+    expect(etag.lastSeenEtag()).toBe(null);
+    sync.stop();
+  });
+
+  test("rides from the notification onto the queued frame", () => {
+    const sync = makeSync();
+    const consumed = sync._maybeAcceptExternalChange({
+      seq: 40,
+      data: { kind: "external-change", html: diskDoc("<p>x</p>"), etag: "disk-7" },
+    });
+
+    expect(consumed).toBe(true);
+    expect(sync._pendingExternal.etag).toBe("disk-7");
+    sync.stop();
+  });
 });
 
 function diskDoc(bodyInner) {

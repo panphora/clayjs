@@ -147,8 +147,18 @@ function onKeydown(e) {
 function show(e) {
   if (!root) build();
   set(root, "display", "flex");
-  const where = SOURCES[e?.detail?.changedBy] || "elsewhere";
-  line.textContent = `This page was updated ${where}. Saving is paused.`;
+  const named = SOURCES[e?.detail?.changedBy];
+  // An earlier save of this tab's timed out, so this refusal may be answering
+  // that write rather than anybody else's. Saying so is the whole reason the
+  // stamp is kept across a timeout instead of quietly reconciled: the refusal is
+  // honest, and this is what makes it explainable. A host that NAMED the writer
+  // knows better than this guess, so the name wins.
+  if (!named && e?.detail?.afterTimeout) {
+    line.textContent =
+      "This page was updated elsewhere, possibly by your own save that timed out. Saving is paused.";
+  } else {
+    line.textContent = `This page was updated ${named || "elsewhere"}. Saving is paused.`;
+  }
   keep.textContent = "Keep mine";
   set(keep, "opacity", "1");
   busy = false;
