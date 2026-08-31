@@ -1,4 +1,5 @@
 import { servedStaleToken } from "./host-attrs.js";
+import { isEditMode } from "./is-edit-mode.js";
 import onDomReady from "../lib/dom-ready.js";
 import { set, make } from "../lib/hostile-css.js";
 
@@ -82,6 +83,12 @@ function build() {
 
 function init() {
   if (!servedStaleToken()) return;
+  // ?editmode=true outranks the stale-host check by design: that is a person at the
+  // keyboard asking for editing on this load, and is-edit-mode.js gives it to them.
+  // This notice never consulted that, so it appeared on a page that IS editable and
+  // told its reader the opposite. The message is only true while editing is actually
+  // off, so it is shown only then.
+  if (isEditMode) return;
   build();
 }
 

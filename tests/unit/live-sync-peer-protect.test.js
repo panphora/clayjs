@@ -28,6 +28,7 @@ let LiveSync;
 let snapshot;
 let gate;
 let save;
+let etag;
 
 beforeAll(async () => {
   window.clayEditMode = true;
@@ -42,6 +43,7 @@ beforeAll(async () => {
   snapshot = await import("../../src/core/snapshot.js");
   gate = await import("../../src/lib/dirty-gate.js");
   save = await import("../../src/core/save.js");
+  etag = await import("../../src/core/etag.js");
 });
 
 beforeEach(async () => {
@@ -165,4 +167,63 @@ test("dirty tab with an unmergeable (keyless) edit holds the whole frame", async
   // A retry is scheduled so the frame still applies if the edit is undone.
   expect(sync._holdRetryPeer).not.toBeNull();
   sync.stop();
+});
+
+// Spec §6: a version stamp rides ON a peer frame and is adopted only if that frame
+// merges. The pair below is the whole rule, and it is here rather than beside the
+// queue tests because only this harness runs the real merge.
+//
+// A stamp says "disk is at this version". Taking it says, additionally, "and I hold
+// those bytes". The first is the host's news; the second is what makes the next save
+// safe, and only a clean apply establishes it.
+describe("the stamp a peer frame carries", () => {
+  test("is taken once the frame has merged: this tab now holds what disk holds", async () => {
+    const sync = makeSync();
+    document.body.innerHTML = '<section data-id="b"><p>b0</p></section>';
+    sync.lastHtml = captureFrame();
+    await Promise.resolve();
+    gate.gateClearIfUnchanged(gate.gateCaptureToken());
+    etag.recordEtag("stamp-before");
+
+    await sync._doApplyUpdate(sync.lastHtml.replace("b0", "b1-peer"), 5, null, "stamp-after");
+
+    expect(document.querySelector('[data-id="b"] p').textContent).toBe("b1-peer");
+    expect(etag.lastSeenEtag()).toBe("stamp-after");
+    sync.stop();
+  });
+
+  // The case the whole guard exists for. A held tab kept its own version of a
+  // section it could not merge, so it is knowingly missing what disk holds. Taking
+  // the stamp there would let its next save pass If-Match and replace that change
+  // with nobody told. Refusing it turns the same event into a conflict somebody sees.
+  test("is refused when the frame holds, so the overwrite becomes a conflict instead", async () => {
+    const sync = makeSync();
+    document.body.innerHTML = "<main><p>orig</p></main>";
+    sync.lastHtml = captureFrame();
+    const frame = sync.lastHtml.replace("orig", "peer-edit");
+
+    document.querySelector("main p").textContent = "local-edit";
+    await Promise.resolve();
+    etag.recordEtag("stamp-before");
+
+    await sync._doApplyUpdate(frame, 9, null, "stamp-after");
+
+    expect(document.body.innerHTML).not.toContain("peer-edit");
+    expect(etag.lastSeenEtag()).toBe("stamp-before");
+    sync.stop();
+  });
+
+  test("a frame with no stamp leaves the one this tab holds alone", async () => {
+    const sync = makeSync();
+    document.body.innerHTML = '<section data-id="b"><p>b0</p></section>';
+    sync.lastHtml = captureFrame();
+    await Promise.resolve();
+    gate.gateClearIfUnchanged(gate.gateCaptureToken());
+    etag.recordEtag("stamp-before");
+
+    await sync._doApplyUpdate(sync.lastHtml.replace("b0", "b1-peer"), 5, null, undefined);
+
+    expect(etag.lastSeenEtag()).toBe("stamp-before");
+    sync.stop();
+  });
 });

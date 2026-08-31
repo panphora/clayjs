@@ -44,7 +44,7 @@ import { serializeForSync, captureForComparisonAndDirty, captureSnapshot } from 
 import { isTabLocalRootAttr } from '../lib/root-attrs.js';
 import { protectPeerDoc, protectDiskDoc, activateIncomingDoc } from './splice-merge.js';
 import { hostMeta } from '../core/host-meta.js';
-import { recordEtag, seedEtag } from '../core/etag.js';
+import { recordEtag, seedEtag, lastSeenEtag } from '../core/etag.js';
 import { pageMaybeDirty, pauseGate, resumeGate } from '../lib/dirty-gate.js';
 
 // The page just took a frame verified clean against its baseline, so it now IS
@@ -155,6 +155,10 @@ class LiveSync {
     this._pendingHtml = null;
     this._pendingSeq = null;
     this._pendingIdentityMap = null;
+    // The stamp a pending frame carries, adopted only if that frame applies
+    // cleanly. It rides in the slot beside the bytes it describes so the two can
+    // never be separated, which is the whole rule (§6, and §22 of the plan).
+    this._pendingEtag = null;
     this._morphInFlight = false;
     this._rafHandle = null;
 
@@ -295,7 +299,10 @@ class LiveSync {
     // snapshot listener would never fire — skip registering it.
     if (this.lane === 'live') {
       this.listenForSnapshots();
-      this._saveSavedHandler = () => { this._saveEpoch++; };
+      this._saveSavedHandler = () => {
+        this._saveEpoch++;
+        this._relayCommit();
+      };
       document.addEventListener('clay:save-saved', this._saveSavedHandler);
     }
   }
@@ -534,31 +541,32 @@ class LiveSync {
   }
 
   /**
-   * Take a stamp that arrived with no document (spec §6).
+   * Drop a stamp that arrived with no document (spec §6).
    *
-   * The host sends one whenever the file on disk changes, because an editing tab
-   * never receives the saved document itself: that lane is for viewers, and
-   * pushing a saved document onto an editor would replace work in progress.
+   * ⚠️ This used to TAKE it, and taking it was wrong. A stamp says "disk is at this
+   * version"; adopting it says "and I hold those bytes". Only the second claim
+   * makes the next save safe, and a frame with no content is no evidence for it.
    *
-   * Taking it is what makes live sync and the conflict check agree. An editor
-   * whose peer frames are merging is already looking at the other tab's content,
-   * so refusing its next save would be a conflict about nothing.
+   * The race is real and it loses work. A peer's save and that peer's snapshot
+   * relay are two concurrent requests, so a stamp travelling on its own can arrive
+   * first. This tab would record it while its DOM still held the older content,
+   * and its next save would then pass If-Match and overwrite the save it had never
+   * received. The hold flags cannot cover that: a lane holds when an incoming
+   * change could NOT be merged, not when one has yet to arrive.
    *
-   * But only while this tab is in step. A held lane means live sync saw an
-   * incoming change, could not merge it into an unsaved local edit, and kept this
-   * tab's version instead, so the DOM here is knowingly missing what disk holds.
-   * Taking the new stamp there would let this tab's next save replace that change
-   * with nobody seeing it. That is the one loss live sync cannot prevent on its
-   * own: a held tab "converges through its own next save", and that convergence
-   * IS the overwrite. Refusing the stamp turns it into a conflict somebody is
-   * told about.
+   * So a stamp now rides on the snapshot the saving tab relays after its save
+   * returns, and `_doApplyUpdate` records it only once that content has merged.
+   * Nothing sends a bare stamp any more — hyperclay's was deleted, and it had
+   * never reached anyone, because the relay library refuses a payload with no
+   * document in it. This stays as the rule rather than as compatibility: if some
+   * host does send one, dropping it is correct.
    *
    * @param {Object} data - The decoded frame
-   * @returns {boolean} True when this was a stamp frame and nothing should morph
+   * @returns {boolean} True when this was a stamp-only frame and nothing should morph
    */
   _applyEtagFrame(data) {
     if (typeof data.etag !== 'string' || typeof data.html === 'string') return false;
-    if (!this._heldLive && !this._heldExt) recordEtag(data.etag);
+    this._log('Dropping a stamp that arrived with no document: nothing proves this tab holds those bytes');
     return true;
   }
 
@@ -665,9 +673,21 @@ class LiveSync {
         return;
       }
 
+      const etag = typeof data.etag === 'string' && data.etag ? data.etag : null;
+
+      // The common case, and it costs nothing: a peer saved bytes this tab has
+      // already applied, so the frame's only news is the stamp. Taking it without
+      // a morph is exactly as safe as taking it after one, because the baseline
+      // being equal IS the proof that this tab holds those bytes.
+      if (etag && html === this.lastHtml) {
+        this._log(`Taking the stamp from a peer save of content already applied (seq=${seq})`);
+        recordEtag(etag);
+        return;
+      }
+
       this._log(`Received update from: ${sender} (my clientId: ${this.clientId}, seq=${seq})`);
-      this.applyUpdate(html, seq, identityMap);
-      if (this.onUpdate) this.onUpdate({ html, sender, seq, identityMap });
+      this.applyUpdate(html, seq, identityMap, etag);
+      if (this.onUpdate) this.onUpdate({ html, sender, seq, identityMap, etag });
     };
 
     // Native EventSource auto-reconnects on transient errors
@@ -748,6 +768,61 @@ class LiveSync {
     if (!queued) return;
     this._queuedSend = null;
     this._postUpdate(queued.html, queued.identityMap);
+  }
+
+  /**
+   * Tell the other editors what this tab's save stored, and under which stamp.
+   *
+   * Runs on clay:save-saved, by which point the save response has already been
+   * recorded, so `lastSeenEtag()` is the stamp for the bytes that just landed.
+   *
+   * The content is `lastHtml`, the snapshot this tab most recently relayed, which
+   * is the state the save was taken from: the save pipeline dispatches
+   * clay:snapshot-ready on its way to capturing what to send, so that relay has
+   * already gone out. Re-sending those same bytes is not redundant, because the
+   * stamp is the new information and a stamp may never travel without the content
+   * it describes. A receiver whose baseline already matches takes the stamp and
+   * skips the morph.
+   */
+  _relayCommit() {
+    // Holding a stamp is the whole condition. It is set only from a save response
+    // that carried one, and a host that does not do conditional saves returns
+    // none, so this is the same test as "the host stamps what it stores" without
+    // a second flag that would have to be reached through discovery to exercise.
+    const etag = lastSeenEtag();
+    if (!etag) return;
+    if (typeof this.lastHtml !== 'string') return;
+    if (this.isDestroyed || this.isPaused) return;
+    this._postCommit(this.lastHtml, etag);
+  }
+
+  /**
+   * Post a snapshot whose point is the stamp attached to it.
+   *
+   * Deliberately not `_postUpdate`: that one returns early when the html matches
+   * `lastHtml`, which is the case here almost every time. It also does not touch
+   * `lastHtml` or the single-flight queue, because it introduces no new content
+   * and must not displace a real snapshot waiting to go out.
+   */
+  _postCommit(html, etag) {
+    const profile = this._profile;
+    if (!profile) return;
+    fetch(new URL(profile.relayPath, window.location.origin).href, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        [profile.documentHeader]: window.location.href,
+      },
+      body: JSON.stringify({
+        [profile.snapshotKey]: html,
+        sender: this.clientId,
+        etag
+      })
+    }).catch(err => {
+      // Losing this costs the other editors one spurious refusal on their next
+      // save, which they recover from. It is not worth surfacing as an error.
+      this._log('Commit relay failed: ' + (err && err.message));
+    });
   }
 
   _postUpdate(html, identityMap) {
@@ -917,11 +992,15 @@ class LiveSync {
    * @param {number} [seq] - Optional monotonic seq from the server
    * @param {Object} [identityMap] - Optional element-identity map from sender
    */
-  applyUpdate(html, seq, identityMap) {
+  applyUpdate(html, seq, identityMap, etag) {
     if (this.isDestroyed) return;
     this._pendingHtml = html;
     this._pendingSeq = seq;
     this._pendingIdentityMap = identityMap;
+    // A newer frame replacing this one takes its stamp with it, and that is
+    // correct: the stamp belongs to bytes that are no longer what will apply.
+    // Losing it costs one honest 412 later, which is the safe direction.
+    this._pendingEtag = etag ?? null;
     this._scheduleNextFrame();
   }
 
@@ -990,14 +1069,16 @@ class LiveSync {
       const html = this._pendingHtml;
       const seq = this._pendingSeq;
       const identityMap = this._pendingIdentityMap;
+      const etag = this._pendingEtag;
       this._pendingHtml = null;
       this._pendingSeq = null;
       this._pendingIdentityMap = null;
+      this._pendingEtag = null;
       if (html == null) return;
 
       this._morphInFlight = true;
       try {
-        await this._doApplyUpdate(html, seq, identityMap);
+        await this._doApplyUpdate(html, seq, identityMap, etag);
       } catch (err) {
         console.error('[LiveSync] applyUpdate failed:', err);
       } finally {
@@ -1038,7 +1119,7 @@ class LiveSync {
    * @param {Object} [identityMap]
    * @returns {Promise<void>}
    */
-  async _doApplyUpdate(html, seq, identityMap) {
+  async _doApplyUpdate(html, seq, identityMap, etag) {
     this._log('applyUpdate - pausing mutations and morphing');
     this.isPaused = true;
 
@@ -1134,6 +1215,17 @@ class LiveSync {
       }
 
       this._setHeld('live', false);
+
+      // The frame merged, so this tab now holds the peer's content (with its own
+      // unsaved sections spliced back in, which is what scoped sync is for). That
+      // is the condition, and the ONLY condition, under which its stamp may be
+      // taken: adopting it here and applying the bytes are the same event, so no
+      // ordering between two messages has to be trusted.
+      //
+      // The hold path above returns before this line, deliberately. A held tab is
+      // knowingly missing what disk holds, and a stamp there would let its next
+      // save replace that change with nobody told.
+      if (typeof etag === 'string' && etag) recordEtag(etag);
 
       // Morph entire document. We MUST await — HyperMorph.morph returns a
       // Promise when `scripts: { handle: true }` needs to wait for external
