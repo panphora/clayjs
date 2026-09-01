@@ -17,7 +17,8 @@ import {
   getPageContents,
   replacePageWith as replacePageWithCore,
   addDocumentTransform,
-  isSaveInProgress
+  isSaveInProgress,
+  saveFateIsUnknown
 } from "./save-core.js";
 import { captureForComparison, captureForComparisonAndDirty, captureForSaveAndComparison } from "./snapshot.js";
 import { seedEtag } from "./etag.js";
@@ -278,8 +279,18 @@ function applySaveResult(result, forComparison, forDirty, label, gateToken) {
 // Run the save that arrived while this one was in flight. savePage does its own
 // dirty check, so if nothing actually changed it resolves 'skipped' and stops:
 // this cannot spin.
+//
+// Not while the last save's fate is still unknown, which happens only when the
+// save timed out AND the host could not be asked what became of it. Sending then
+// is sending into a question: the host is unreachable, so the save is most likely
+// to time out too, and if it does reach a host that took the first write it is
+// refused, which puts a conflict bar on screen seconds after a person typed,
+// unprompted, over what is really a network problem. The queued state is KEPT, not
+// dropped, so the newer bytes still go out on the next save; the page is still
+// dirty, so an edit or a close warning will produce one.
 function drainPendingSave() {
   if (!pendingSave) return;
+  if (saveFateIsUnknown()) return;
   pendingSave = false;
   savePage();
 }

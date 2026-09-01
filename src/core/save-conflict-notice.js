@@ -148,16 +148,25 @@ function show(e) {
   if (!root) build();
   set(root, "display", "flex");
   const named = SOURCES[e?.detail?.changedBy];
-  // An earlier save of this tab's timed out, so this refusal may be answering
-  // that write rather than anybody else's. Saying so is the whole reason the
-  // stamp is kept across a timeout instead of quietly reconciled: the refusal is
-  // honest, and this is what makes it explainable. A host that NAMED the writer
-  // knows better than this guess, so the name wins.
+  // Reassurance first, then the fact. What a person needs to know at this moment
+  // is that nothing of theirs is gone and nothing is about to be overwritten; the
+  // detail of what happened is the second half of the sentence, not the first.
+  // "Saving is paused" led here once and read as a failure, which it is not: the
+  // page is holding a version, and the two buttons below are the whole decision.
+  //
+  // An earlier save of this tab's timed out and the host could not say what became
+  // of it, so this refusal may be answering that write rather than anybody else's.
+  // Saying so is the whole reason the stamp is kept across a timeout instead of
+  // quietly reconciled. A host that NAMED the writer, or that answered the question
+  // with a receipt, knows better than this guess, so the name wins.
   if (!named && e?.detail?.afterTimeout) {
     line.textContent =
-      "This page was updated elsewhere, possibly by your own save that timed out. Saving is paused.";
+      "This page changed elsewhere, possibly by your own save that timed out. " +
+      "Your edits here are safe, and nothing will be overwritten until you choose.";
   } else {
-    line.textContent = `This page was updated ${named || "elsewhere"}. Saving is paused.`;
+    line.textContent =
+      `This page changed ${named || "elsewhere"}. ` +
+      "Your edits here are safe, and nothing will be overwritten until you choose.";
   }
   keep.textContent = "Keep mine";
   set(keep, "opacity", "1");

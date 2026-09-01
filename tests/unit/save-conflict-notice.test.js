@@ -23,14 +23,19 @@ const bar = () => document.querySelector("[data-clay-conflict]");
 const buttonSaying = (re) =>
   [...bar().querySelectorAll("button")].find((b) => re.test(b.textContent));
 
-test("says what happened, and that saving has stopped", () => {
+test("leads with reassurance, then says what happened", () => {
   fire("conflict");
 
   expect(bar()).not.toBeNull();
-  expect(bar().textContent).toContain("This page was updated elsewhere.");
-  // The half that matters: everything else on screen already tells them their
-  // text is fine, and this is the only thing telling them it is not being saved.
-  expect(bar().textContent).toContain("Saving is paused.");
+  // Reassurance first. A person meeting this bar has just been told, implicitly,
+  // that something went wrong with their work; the first thing they read has to be
+  // that it did not. "Saving is paused" led here once and read as a failure.
+  const text = bar().textContent;
+  expect(text).toContain("Your edits here are safe");
+  expect(text).toContain("nothing will be overwritten until you choose");
+  expect(text).toContain("This page changed elsewhere.");
+  expect(text.indexOf("changed elsewhere")).toBeLessThan(text.indexOf("Your edits here are safe"));
+  expect(text).not.toContain("Saving is paused");
 });
 
 test("never lands in the saved file", () => {
@@ -50,7 +55,7 @@ test("names the source when the host knows one, and stays vague when it does not
 
   // A filesystem write has no author, and an unknown value must not reach the page.
   fire("conflict", { changedBy: "wat" });
-  expect(bar().textContent).toContain("updated elsewhere.");
+  expect(bar().textContent).toContain("changed elsewhere.");
 });
 
 test("says a timed-out save may be the cause, and never over a host that named one", () => {
@@ -60,15 +65,19 @@ test("says a timed-out save may be the cause, and never over a host that named o
   // guessing instead.
   fire("conflict", { changedBy: null, afterTimeout: true });
   expect(bar().textContent).toContain("possibly by your own save that timed out");
+  // The hedge does not cost the reassurance. This wording reaches a person who is
+  // least sure what just happened, so it is the one that needs it most.
+  expect(bar().textContent).toContain("Your edits here are safe");
 
   // The host actually knows. Its answer beats the guess.
   fire("conflict", { changedBy: "another-person", afterTimeout: true });
   expect(bar().textContent).toContain("by someone else");
   expect(bar().textContent).not.toContain("timed out");
 
-  // An ordinary conflict is worded as it always was.
+  // An ordinary conflict says the same thing without the hedge.
   fire("conflict", { changedBy: null, afterTimeout: false });
-  expect(bar().textContent).toContain("This page was updated elsewhere.");
+  expect(bar().textContent).toContain("This page changed elsewhere.");
+  expect(bar().textContent).toContain("Your edits here are safe");
 });
 
 test("goes away when a save lands", () => {

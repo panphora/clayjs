@@ -11,6 +11,7 @@ import { isEditMode } from "./is-edit-mode.js";
 import { consumeUserDriven, consumeExplicitSave, markUserDriven } from "../lib/user-gesture.js";
 import { saveToken } from "./host-attrs.js";
 import { lastSeenEtag, conditionalSaves, recordEtag } from "./etag.js";
+import { hostMeta } from "./host-meta.js";
 import {
   getPageContents,
   onSnapshot,
@@ -61,20 +62,91 @@ function successResult(data) {
   };
 }
 
-// Set by a save whose fate this client cannot know, and cleared by the next save
-// the host actually answers with a write. It exists so a later 412 can say WHY it
-// might be refusing a change the person believes is their own, which is the thing
-// the old reconcile-on-timeout was for. That reconcile took the host's current
-// stamp on the guess that our own write was what moved the document. When the
-// guess was wrong the stamp described a peer's bytes this tab had never seen, and
-// the next save overwrote them with no refusal and no notice, which is the exact
-// loss `conditional` exists to prevent. A stale stamp only ever costs a refusal,
-// so the refusal is what this keeps, and the notice explains it instead.
-let fateUnknown = false;
+// =============================================================================
+// THE ATTEMPT ID (spec §6, `receipts`)
+// =============================================================================
+// A save that times out leaves two questions open at once: did our write land,
+// and did somebody else write. The client cannot answer either from the outside.
+// Guessing "it was me" is what the old reconcile-on-timeout did, and when the
+// guess was wrong it adopted a stamp describing a peer's bytes this tab had never
+// seen, so the next save overwrote them with no refusal and no notice. Refusing to
+// guess is safe but shows a person a conflict bar for a few seconds of bad wifi.
+//
+// So this tab stamps every attempt with an opaque id and asks the host the one
+// question only the host can answer: are the bytes you are storing the ones this
+// save sent? A host that answers turns an indeterminate save into a determinate
+// one, and the person sees nothing at all.
+//
+// The ids this tab has sent, newest last. A 412 carrying one of them is the host
+// saying "your OWN earlier save is what moved this document", which is a late
+// duplicate and not a conflict with anybody. Bounded because it is only ever
+// searched for a recent send.
+const sentIds = [];
+const SENT_ID_MEMORY = 8;
+
+// The attempt whose answer never arrived, or null. It holds only what is needed to
+// ask about it later: which id it carried, and which stamp it was sent against.
+//
+// It survives ONLY while the question is genuinely open. A host that answers, in
+// either direction, closes it, which is what keeps the conflict bar from claiming
+// a refusal might be the person's own save when the host has already said it is
+// not. An unreachable host leaves it set, and that is the honest old behaviour:
+// the stamp is kept, the next save is refused rather than accepted, and the notice
+// says so.
+let unknownAttempt = null;
 
 /** True while an earlier save may or may not have landed (spec §7). */
 export function saveFateIsUnknown() {
-  return fateUnknown;
+  return unknownAttempt !== null;
+}
+
+/**
+ * A fresh id for one save attempt.
+ *
+ * Uniqueness per attempt is the whole property: two tabs sharing an id would each
+ * read the other's receipt as proof of their own write. `getRandomValues` into a
+ * zeroed array is the failure that would do exactly that, silently, so a missing
+ * crypto implementation falls back to something random rather than to zeros.
+ */
+function mintSaveId() {
+  const uuid = window.crypto?.randomUUID?.();
+  if (uuid) return uuid;
+  if (window.crypto?.getRandomValues) {
+    const bytes = new Uint8Array(16);
+    window.crypto.getRandomValues(bytes);
+    return Array.from(bytes, b => b.toString(16).padStart(2, "0")).join("");
+  }
+  // Three segments, not one: §6 asks for at least 128 bits, and one `Math.random()`
+  // truncated to ten base-36 characters carries about 52. A timestamp is not entropy,
+  // so it cannot make up the difference between two tabs minting in the same
+  // millisecond, which is the collision that matters.
+  const segment = () => Math.random().toString(36).slice(2, 12).padEnd(10, "0");
+  return `${Date.now().toString(36)}-${segment()}${segment()}${segment()}`;
+}
+
+function rememberSentId(saveId) {
+  sentIds.push(saveId);
+  if (sentIds.length > SENT_ID_MEMORY) sentIds.shift();
+}
+
+/**
+ * Did this tab send this id at all?
+ *
+ * The weaker of the two questions asked of a receipt, and it belongs only to the
+ * late-duplicate rule: a 412 naming ANY id this tab sent means this tab's own
+ * earlier save is what moved the document, which is enough to adopt that stamp and
+ * send again, because sending again is all that follows. It is never enough to
+ * conclude that a particular save landed. That needs identity with that save's own
+ * id, which is what recoverUnknownSave asks.
+ */
+function sentByThisTab(saveId) {
+  return typeof saveId === "string" && saveId !== "" && sentIds.includes(saveId);
+}
+
+/** Test-only: forget every id and any open question. */
+export function resetSaveAttempts() {
+  sentIds.length = 0;
+  unknownAttempt = null;
 }
 
 function errorResult(err) {
@@ -101,7 +173,7 @@ function errorResult(err) {
     changedBy: conflicted ? (err.changedBy ?? null) : null,
     // A refusal that may be answering this tab's own timed-out write. Only the
     // notice uses it, and only to word itself; nothing decides anything on it.
-    afterTimeout: conflicted && fateUnknown,
+    afterTimeout: conflicted && unknownAttempt !== null,
     etag: null
   };
 }
@@ -146,9 +218,11 @@ function skippedResult(msg) {
  * @param {string} content - HTML to save
  * @param {boolean} userDriven - Whether a human gesture is behind this save
  * @param {AbortSignal} signal
+ * @param {string} saveId - this attempt's §6 receipt id
+ * @param {?string} etag - the stamp to send as If-Match, or null
  * @returns {{url: string, options: Object}}
  */
-function buildSaveRequest(content, userDriven, signal) {
+function buildSaveRequest(content, userDriven, signal, saveId, etag) {
   const token = saveToken();
   const path = token ? `${SAVE_PATH}/${token}` : SAVE_PATH;
   const options = {
@@ -162,23 +236,34 @@ function buildSaveRequest(content, userDriven, signal) {
       // Spec §9's name for the provenance bit. `X-Hyperclay-User-Driven` was the
       // pre-spec spelling; every host reads Save-Trigger first and falls back to
       // it, so stored documents running an older client keep working.
-      'Save-Trigger': userDriven ? 'user' : 'auto'
+      'Save-Trigger': userDriven ? 'user' : 'auto',
+      // Spec §6 (`receipts`): which attempt this is. Sent to every host, because a
+      // host that does not implement receipts ignores an unknown header, and
+      // gating it on discovery would mean holding the save until an async lookup
+      // resolved. Nothing is inferred from the header being accepted: only a host
+      // that ANSWERS with the id has said anything.
+      'Save-ID': saveId
     },
     body: content
   };
 
-  // Spec §6: the stamp this tab last saw, so a host that advertises `conditional`
-  // can refuse rather than overwrite a version nobody here has read.
-  //
-  // Two gates, and both are the point. The capability must have been announced by
-  // name, because §5 forbids inferring one any other way, and a host that never
-  // promised to honour If-Match may do anything at all with it. And a stamp must
-  // actually be held: a host reads this header's PRESENCE, so an empty value is
-  // not a softer version of the request, it is a save asking to be refused.
-  const etag = lastSeenEtag();
-  if (conditionalSaves() && etag) options.headers['If-Match'] = etag;
+  if (etag) options.headers['If-Match'] = etag;
 
   return { url: resolveSaveUrl(path), options };
+}
+
+/**
+ * The stamp to send as If-Match, or null for a save that goes out unconditional.
+ *
+ * Two gates, and both are the point. The capability must have been announced by
+ * name, because §5 forbids inferring one any other way, and a host that never
+ * promised to honour If-Match may do anything at all with it. And a stamp must
+ * actually be held: a host reads the header's PRESENCE, so an empty value is not a
+ * softer version of the request, it is a save asking to be refused.
+ */
+function stampToSend() {
+  const etag = lastSeenEtag();
+  return conditionalSaves() && etag ? etag : null;
 }
 
 /**
@@ -221,7 +306,7 @@ function resolveSaveUrl(path) {
  * @param {string} content - HTML to save
  * @returns {Promise<Object>} The server's response body
  */
-function sendSave(content) {
+function sendOnce(content, saveId, etag) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), SAVE_TIMEOUT_MS);
 
@@ -234,7 +319,8 @@ function sendSave(content) {
   const gestureDriven = consumeUserDriven();
   const explicitlyAsked = consumeExplicitSave();
   const userDriven = gestureDriven || explicitlyAsked;
-  const { url, options } = buildSaveRequest(content, userDriven, controller.signal);
+  const { url, options } = buildSaveRequest(content, userDriven, controller.signal, saveId, etag);
+  rememberSentId(saveId);
 
   return fetch(url, options)
     .then(res => res.text().then(text => {
@@ -254,6 +340,12 @@ function sendSave(content) {
         // know, and it often cannot, so this rides through as-is and the notice
         // falls back to a phrase that is true either way.
         error.changedBy = data.changedBy ?? null;
+        // §6: the stamp of the bytes that caused the refusal, and the receipt for
+        // them. Both are what let a refusal be recovered from instead of merely
+        // reported: the stamp is what the retry has to carry, and the receipt says
+        // whether the document was moved by this tab's own earlier save.
+        error.etag = data.etag ?? null;
+        error.saveId = data.saveId ?? null;
         throw error;
       }
       // The one place a stamp is ever learned from a save (§6). A response with no
@@ -262,17 +354,17 @@ function sendSave(content) {
       recordEtag(data.etag ?? null);
       // A write the host answered: whatever an earlier timeout left uncertain,
       // this document's version is known again.
-      fateUnknown = false;
+      unknownAttempt = null;
       return data;
     }))
     .catch(err => {
       console.error('Failed to save page:', err);
-      // Spec §7: a timeout is INDETERMINATE, so this write may well have landed,
-      // and the stamp held here may already describe bytes the host has replaced.
-      // The stamp is deliberately NOT reconciled against the host: see fateUnknown
-      // above. The old stamp is kept, the next save is refused rather than
-      // accepted, and the notice says the refusal may be answering this save.
-      if (err.name === 'AbortError') fateUnknown = true;
+      // Spec §7: a timeout is INDETERMINATE. The stamp is deliberately NOT
+      // reconciled against the host here; what this records is the question, so
+      // recovery below can ask it. The old code adopted the host's current stamp
+      // on the guess that our own write was what moved the document, which was
+      // wrong exactly when somebody else wrote.
+      if (err.name === 'AbortError') unknownAttempt = { saveId, etag };
       // The save never landed: re-arm the user-driven bit so the next (retry)
       // save still reports the human gesture instead of reading as background.
       if (userDriven) markUserDriven();
@@ -281,6 +373,150 @@ function sendSave(content) {
     .finally(() => {
       clearTimeout(timeoutId);
     });
+}
+
+/**
+ * Ask the host what became of the attempt whose answer never arrived (spec §7).
+ *
+ * One question, one round trip, and only two things to do with the answer:
+ *
+ *   - the host's receipt is ours, so the bytes it stores are the ones this save
+ *     sent. The save landed. Adopt the stamp for those bytes and report success:
+ *     the person sees a save that worked, because one did.
+ *   - anything else, including a host that keeps no receipts at all: send the save
+ *     again, under the ORIGINAL If-Match.
+ *
+ * The second case looks like it needs to know more than it does, and it does not,
+ * because the stamp is what makes it safe. If our write did land, the stamp is now
+ * stale and the re-send is REFUSED, carrying the host's receipt for the bytes that
+ * refused it; that receipt is ours, and the late-duplicate rule in sendSave turns
+ * it back into a finished save without a word to anybody. If somebody else wrote,
+ * the same refusal carries their bytes and becomes an honest conflict. And if
+ * nothing landed, the stamp still matches and the save simply goes through.
+ *
+ * So there is no branch here that guesses. Every outcome is decided by a host
+ * answering a conditional request, which is the one thing in this protocol that
+ * cannot be wrong.
+ *
+ * A host that cannot be reached leaves the question open, which is the older
+ * behaviour and the honest one: the stamp is kept, the next save is refused rather
+ * than accepted, and the notice says the refusal may be answering this tab's own
+ * timed-out save.
+ *
+ * @returns {Promise<{landed: ?Object, resend: boolean}>}
+ */
+async function recoverUnknownSave() {
+  const attempt = unknownAttempt;
+  if (!attempt) return { landed: null, resend: false };
+
+  const meta = await hostMeta({ fresh: true });
+  const doc = meta.document;
+  const stored = typeof doc?.etag === 'string' && doc.etag ? doc.etag : null;
+  if (!stored) return { landed: null, resend: false };
+
+  // THIS attempt's id, and no other. A receipt is proof about the save that carried
+  // that exact id, so an earlier save of this same tab naming itself proves only
+  // that the earlier save landed, which is a thing already known and says nothing
+  // about this one. Matching any id this tab has sent turns the most ordinary
+  // failure there is, a request that never left the browser, into a reported
+  // success: the tab shows Saved, advances its baselines, drops the close warning,
+  // and the bytes are on no disk anywhere. Membership is the right test one line
+  // down in sendSave, where a 412 only ever leads to another conditional send.
+  if (doc.saveId && doc.saveId === attempt.saveId) {
+    // Proof, not inference: the host is saying the bytes it stores are the stored
+    // form of the body THIS save sent. §6 lets a client adopt a stamp on exactly that.
+    recordEtag(stored);
+    unknownAttempt = null;
+    return { landed: { msg: 'Saved', msgType: 'success', etag: stored }, resend: false };
+  }
+
+  // Positive proof, and nothing weaker, closes the question. A non-empty id that is
+  // not ours names another save as the author of these bytes. An ABSENT id proves
+  // nothing at all: §6 lets a host lose its pair to a restart or an eviction and stay
+  // conforming, so a host that keeps receipts can report none for bytes this tab
+  // really did write. Reading absence as "somebody else wrote" makes the notice tell
+  // a person their own save was somebody else's change.
+  if (doc.saveId) unknownAttempt = null;
+
+  // The re-send carries the stamp the ORIGINAL save carried, which is the normative
+  // rule and not a detail: the stamp this tab holds is mutable and moves for reasons
+  // that have nothing to do with this save, because a disk-sourced live-sync frame
+  // records the stamp of the bytes it applied. Re-sending under that one is a write
+  // conditional on a version this save was never judged against, and the host accepts
+  // it, replacing bytes the person has just been shown with bytes captured before
+  // they arrived.
+  //
+  // No stamp at all means there is nothing to re-send under, so nothing is re-sent.
+  // An unconditional recovery write has no comparison to refuse it and would replace
+  // whatever landed while this tab was waiting, which is the loss this whole
+  // capability exists to prevent.
+  return { landed: null, resend: !!attempt.etag, etag: attempt.etag };
+}
+
+/**
+ * Send one save, and see it through.
+ *
+ * Two things can happen that are not the save's own outcome, and both are handled
+ * here rather than reported:
+ *
+ *   - the request timed out, so the host is asked what became of it,
+ *   - the host refused with a receipt this tab recognises, which means its own
+ *     earlier save is what moved the document. That is a late duplicate, not a
+ *     conflict with anybody: take the stamp the refusal handed back and finish
+ *     the save that was refused.
+ *
+ * Each recovery sends at most one further request, so a save can never loop.
+ *
+ * @param {string} content - HTML to save
+ * @returns {Promise<Object>} The server's response body
+ */
+async function sendSave(content) {
+  // The re-send below is a RETRY of this attempt, so it carries this same id:
+  // whichever of the two requests the host ends up storing, its receipt then
+  // answers for this save. A fresh id on the re-send would leave the first
+  // request's landing unprovable.
+  let saveId = mintSaveId();
+  let etag = stampToSend();
+  // Each recovery runs at most once, and they are counted apart because they are
+  // different things. Re-sending after a timeout is worth doing once: a second
+  // timeout says the host is not answering this document in time, and sending a
+  // whole document a third time will not change that. Resolving a late duplicate
+  // is fast and conclusive, so it gets its own turn regardless.
+  let reSent = false;
+  let duplicateResolved = false;
+  for (;;) {
+    try {
+      return await sendOnce(content, saveId, etag);
+    } catch (err) {
+      if (err.name === 'AbortError') {
+        if (reSent) throw err;
+        const { landed, resend, etag: original } = await recoverUnknownSave();
+        if (landed) return landed;
+        if (!resend) throw err;
+        // Explicitly the original, never `stampToSend()` again.
+        etag = original;
+        reSent = true;
+        continue;
+      }
+
+      if (err.status === 412 && !duplicateResolved && sentByThisTab(err.saveId)) {
+        // Our own earlier save is what the host is refusing us against: a late
+        // duplicate, not a conflict with anybody. Adopt the stamp for those bytes
+        // and send the current ones on top of it. The retry is still conditional,
+        // so anything that arrives in between still refuses it.
+        recordEtag(err.etag ?? null);
+        unknownAttempt = null;
+        saveId = mintSaveId();
+        // A new attempt, deliberately on the base the host just proved is this tab's
+        // own work, rather than on the stamp the refused attempt carried.
+        etag = stampToSend();
+        duplicateResolved = true;
+        continue;
+      }
+
+      throw err;
+    }
+  }
 }
 
 // =============================================================================
