@@ -126,6 +126,25 @@ test("a snapshot produced while discovery is in flight is sent, not dropped", as
   expect(JSON.parse(relayCalls[0][1].body).snapshot).toBe("<html>early</html>");
 });
 
+// The host reads `?client-id=` at admission to tell one tab from another — two
+// tabs of a guest whose cookie was refused are otherwise one participant. It is
+// the same value every outbound frame carries as `sender`, so the connection the
+// host names and the frames it sees are joined by one string.
+test("both wires carry the tab's client id, and it is the sender its frames use", async () => {
+  for (const [extensions, wire] of [[["sync"], "spec"], [["upload"], "legacy"]]) {
+    resetHostMeta();
+    const sync = await startedAgainst(host({ meta: { spec: 1, extensions } }));
+    expect(sync._profile.name).toBe(wire);
+
+    const sent = new URL(sync.sse.url).searchParams.get("client-id");
+    expect(sent).toBe(sync.clientId);
+    expect(sent).toBeTruthy();
+
+    sync._postUpdate("<html>x</html>", null);
+    expect(JSON.parse(global.fetch.mock.calls.at(-1)[1].body).sender).toBe(sent);
+  }
+});
+
 // The defect this design replaces: the client posted to the spec address while
 // streaming from the legacy one, so it worked on no host at all.
 test("send and receive never end up on different wires", async () => {

@@ -122,6 +122,7 @@ test("a baseline the page has already seen still repairs it", async () => {
     seq: 12,
     saveEpoch: 0,
     etag: null,
+    by: null,
   });
   sync.stop();
 });

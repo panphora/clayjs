@@ -103,6 +103,7 @@ test("an external-change notification with embedded html enqueues silently", asy
     seq: 10,
     saveEpoch: 0,
     etag: null,
+    by: null,
   });
   expect(sync._lastExternalSeq).toBe(10);
   sync.stop();
@@ -132,6 +133,7 @@ test("an external-change notification without html falls back to a no-store fetc
     seq: 4,
     saveEpoch: 0,
     etag: null,
+    by: null,
   });
   sync.stop();
 });
@@ -214,6 +216,7 @@ test("a queued disk frame older than an own landed save is refetched at drain, n
     seq: 5,
     saveEpoch: 1,
     etag: null,
+    by: null,
   });
   sync.stop();
 });

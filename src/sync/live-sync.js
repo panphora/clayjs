@@ -44,6 +44,9 @@ import { serializeForSync, captureForComparisonAndDirty, captureSnapshot } from 
 import { isTabLocalRootAttr } from '../lib/root-attrs.js';
 import { protectPeerDoc, protectDiskDoc, activateIncomingDoc } from './splice-merge.js';
 import { presence } from './presence.js';
+// Side-effect import: the section-changed notice wires itself to
+// `clay:sync-applied`, which this file is the only dispatcher of.
+import './section-notice.js';
 import { hostMeta } from '../core/host-meta.js';
 import { recordEtag, seedEtag, lastSeenEtag } from '../core/etag.js';
 import { pageMaybeDirty, pauseGate, resumeGate } from '../lib/dirty-gate.js';
@@ -76,6 +79,12 @@ import { savePageThrottled, setLastSavedBaselines, setUnsavedChanges } from '../
  * One profile is chosen once and used for BOTH directions for the life of the page.
  * Letting send and receive decide independently is exactly the bug this replaces: a
  * client that posted to the spec address while streaming from the legacy one.
+ *
+ * Both stream addresses carry `client-id`, in the same kebab spelling as the rest of
+ * the query. It is the tab's own sender id — the one every outbound frame already
+ * carries — so a host that reads it at admission knows this connection by the value
+ * its frames arrive under, and can tell two tabs of one cookie-less guest apart. A
+ * host that does not read it ignores an unknown parameter.
  */
 const WIRE_PROFILES = {
   spec: {
@@ -83,8 +92,8 @@ const WIRE_PROFILES = {
     relayPath: '/_/sync',
     documentHeader: 'Document-URL',
     snapshotKey: 'snapshot',
-    streamPath: (href, lane, resumeId) =>
-      `/_/sync?document-url=${encodeURIComponent(href)}&lane=${lane}&resume-id=${resumeId}`,
+    streamPath: (href, lane, resumeId, clientId) =>
+      `/_/sync?document-url=${encodeURIComponent(href)}&lane=${lane}&resume-id=${resumeId}&client-id=${encodeURIComponent(clientId)}`,
   },
   // What every published clayjs speaks, and what hyperclayjs and the inline script in
   // every Collection dashboard hardcode. Hosts keep these addresses permanently.
@@ -93,8 +102,8 @@ const WIRE_PROFILES = {
     relayPath: '/_/live-sync/save',
     documentHeader: 'Page-URL',
     snapshotKey: 'html',
-    streamPath: (href, lane, resumeId) =>
-      `/_/live-sync/stream?page-url=${encodeURIComponent(href)}&lane=${lane}&resume-id=${resumeId}`,
+    streamPath: (href, lane, resumeId, clientId) =>
+      `/_/live-sync/stream?page-url=${encodeURIComponent(href)}&lane=${lane}&resume-id=${resumeId}&client-id=${encodeURIComponent(clientId)}`,
   },
 };
 
@@ -169,6 +178,11 @@ class LiveSync {
     // cleanly. It rides in the slot beside the bytes it describes so the two can
     // never be separated, which is the whole rule (§6, and §22 of the plan).
     this._pendingEtag = null;
+    // Who the server says sent the pending frame, `{ id, name }`. Rides in the
+    // slot for the same reason the stamp does: it describes these bytes and
+    // nothing else, so a newer frame replacing them takes its author with it.
+    // Reported on `clay:sync-applied` once the frame has actually applied.
+    this._pendingBy = null;
     this._morphInFlight = false;
     this._rafHandle = null;
 
@@ -355,6 +369,7 @@ class LiveSync {
     this._pendingHtml = null;
     this._pendingSeq = null;
     this._pendingIdentityMap = null;
+    this._pendingBy = null;
     this._pendingExternal = null;
     clearTimeout(this._holdRetryPeer);
     clearTimeout(this._holdRetryExt);
@@ -595,7 +610,7 @@ class LiveSync {
     // Whichever wire discovery selected. start() does not call connect() until the
     // profile is known, so this is never null on the normal path.
     const profile = this._profile || WIRE_PROFILES.legacy;
-    const path = profile.streamPath(window.location.href, this.lane, this.resumeId);
+    const path = profile.streamPath(window.location.href, this.lane, this.resumeId, this.clientId);
     // Resolved against the real origin: a <base href> in the authored document
     // would otherwise point the sync stream at an origin the document chose.
     this.sse = new EventSource(new URL(path, window.location.origin).href);
@@ -716,7 +731,7 @@ class LiveSync {
       }
 
       this._log(`Received update from: ${sender} (my clientId: ${this.clientId}, seq=${seq})`);
-      this.applyUpdate(html, seq, identityMap, etag);
+      this.applyUpdate(html, seq, identityMap, etag, data.by);
       if (this.onUpdate) this.onUpdate({ html, sender, seq, identityMap, etag });
     };
 
@@ -944,7 +959,7 @@ class LiveSync {
     const info = data.data;
     if (info && info.kind === 'external-change') {
       if (typeof info.html === 'string') {
-        this._enqueueExternal(info.html, data.seq, info.etag);
+        this._enqueueExternal(info.html, data.seq, info.etag, info.by);
       } else {
         this._fetchExternalChange(data.seq);
       }
@@ -957,7 +972,7 @@ class LiveSync {
     return false;
   }
 
-  _enqueueExternal(html, seq, etag) {
+  _enqueueExternal(html, seq, etag, by) {
     if (typeof seq === 'number') {
       if (seq <= this._lastExternalSeq) {
         this._log(`Dropping replayed external change: seq=${seq}`);
@@ -970,6 +985,11 @@ class LiveSync {
       seq,
       saveEpoch: this._saveEpoch,
       etag: typeof etag === 'string' && etag ? etag : null,
+      // Carried for the same reason the stamp is, and null on every disk frame
+      // today: hyperclay stamps an author on the two live relays and nowhere
+      // else, so a change that arrived from the filesystem has no author to
+      // name. The slot carries it so a host that does stamp one is believed.
+      by: by ?? null,
     };
     this._scheduleNextFrame();
   }
@@ -1023,8 +1043,9 @@ class LiveSync {
         }
         // No stamp: this body came from a GET of the served page, which nobody
         // stamped, so the apply leaves the held stamp alone and etag.js asks the
-        // host for a replacement.
-        this._pendingExternal = { html, seq, saveEpoch: epoch, etag: null };
+        // host for a replacement. No author either, for the same reason — a GET
+        // answers what disk holds, not who put it there.
+        this._pendingExternal = { html, seq, saveEpoch: epoch, etag: null, by: null };
         this._scheduleNextFrame();
       })
       .catch((err) => {
@@ -1051,8 +1072,10 @@ class LiveSync {
    * @param {string} html - Full document HTML
    * @param {number} [seq] - Optional monotonic seq from the server
    * @param {Object} [identityMap] - Optional element-identity map from sender
+   * @param {string} [etag] - Optional version stamp for these bytes
+   * @param {Object} [by] - Optional `{ id, name }` author stamp for these bytes
    */
-  applyUpdate(html, seq, identityMap, etag) {
+  applyUpdate(html, seq, identityMap, etag, by) {
     if (this.isDestroyed) return;
     this._pendingHtml = html;
     this._pendingSeq = seq;
@@ -1061,6 +1084,7 @@ class LiveSync {
     // correct: the stamp belongs to bytes that are no longer what will apply.
     // Losing it costs one honest 412 later, which is the safe direction.
     this._pendingEtag = etag ?? null;
+    this._pendingBy = by ?? null;
     this._scheduleNextFrame();
   }
 
@@ -1118,7 +1142,7 @@ class LiveSync {
       } else {
         this._morphInFlight = true;
         try {
-          await this._doApplyExternal(ext.html, ext.seq, ext.etag);
+          await this._doApplyExternal(ext.html, ext.seq, ext.etag, ext.by);
         } catch (err) {
           console.error('[LiveSync] applyExternal failed:', err);
         } finally {
@@ -1130,15 +1154,17 @@ class LiveSync {
       const seq = this._pendingSeq;
       const identityMap = this._pendingIdentityMap;
       const etag = this._pendingEtag;
+      const by = this._pendingBy;
       this._pendingHtml = null;
       this._pendingSeq = null;
       this._pendingIdentityMap = null;
       this._pendingEtag = null;
+      this._pendingBy = null;
       if (html == null) return;
 
       this._morphInFlight = true;
       try {
-        await this._doApplyUpdate(html, seq, identityMap, etag);
+        await this._doApplyUpdate(html, seq, identityMap, etag, by);
       } catch (err) {
         console.error('[LiveSync] applyUpdate failed:', err);
       } finally {
@@ -1177,9 +1203,11 @@ class LiveSync {
    * @param {string} html
    * @param {number} [seq]
    * @param {Object} [identityMap]
+   * @param {string} [etag]
+   * @param {Object} [by]
    * @returns {Promise<void>}
    */
-  async _doApplyUpdate(html, seq, identityMap, etag) {
+  async _doApplyUpdate(html, seq, identityMap, etag, by = null) {
     this._log('applyUpdate - pausing mutations and morphing');
     this.isPaused = true;
 
@@ -1267,6 +1295,7 @@ class LiveSync {
             this._pendingHtml = html;
             this._pendingSeq = seq;
             this._pendingIdentityMap = identityMap;
+            this._pendingBy = by;
             this._scheduleNextFrame();
           }, 3000);
           return;
@@ -1374,8 +1403,13 @@ class LiveSync {
       // `source` is what lets a listener tell the two apply paths apart. clay.wire
       // waits for a DISK frame to call an agent's write landed, and another tab's
       // edit arriving first would otherwise report the wrong bytes as delivered.
+      //
+      // `by` is the server's answer about who sent these bytes, and it is on the
+      // event rather than on the frame's arrival for one reason: a frame that held
+      // returns above without reaching here, so nothing can name an author for a
+      // change this tab never took. Null on every frame the host did not stamp.
       document.dispatchEvent(new CustomEvent('clay:sync-applied', {
-        detail: { seq, source: 'peer' }
+        detail: { seq, source: 'peer', by: by || null }
       }));
     } finally {
       this._log('applyUpdate - morph complete, resuming mutations');
@@ -1412,7 +1446,7 @@ class LiveSync {
    * holds or a later dirty peer apply misclassifies this frame's content as
    * local edits.
    */
-  async _doApplyExternal(html, seq, etag = null) {
+  async _doApplyExternal(html, seq, etag = null, by = null) {
     this._log(`applyExternal - external disk change (seq=${seq})`);
     this.isPaused = true;
 
@@ -1452,7 +1486,7 @@ class LiveSync {
           this._holdRetryExt = setTimeout(() => {
             this._holdRetryExt = null;
             if (this.isDestroyed || this._pendingExternal != null) return;
-            this._pendingExternal = { html, seq, saveEpoch: epochAtHold, etag };
+            this._pendingExternal = { html, seq, saveEpoch: epochAtHold, etag, by };
             this._scheduleNextFrame();
           }, 3000);
           return;
@@ -1521,7 +1555,12 @@ class LiveSync {
       }
 
       document.dispatchEvent(new CustomEvent('clay:sync-applied', {
-        detail: { seq, source: 'disk', etag: typeof etag === 'string' && etag ? etag : null }
+        detail: {
+          seq,
+          source: 'disk',
+          etag: typeof etag === 'string' && etag ? etag : null,
+          by: by || null,
+        }
       }));
     } finally {
       this._log('applyExternal - morph complete, resuming mutations');
