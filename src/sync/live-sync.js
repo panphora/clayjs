@@ -43,6 +43,7 @@ import { mergeTagRecognizers } from "./merge-tags.js";
 import { serializeForSync, captureForComparisonAndDirty, captureSnapshot } from '../core/snapshot.js';
 import { isTabLocalRootAttr } from '../lib/root-attrs.js';
 import { protectPeerDoc, protectDiskDoc, activateIncomingDoc } from './splice-merge.js';
+import { presence } from './presence.js';
 import { hostMeta } from '../core/host-meta.js';
 import { recordEtag, seedEtag, lastSeenEtag } from '../core/etag.js';
 import { pageMaybeDirty, pauseGate, resumeGate } from '../lib/dirty-gate.js';
@@ -326,6 +327,10 @@ class LiveSync {
       this.sse.close();
       this.sse = null;
     }
+
+    // Nothing feeds the roster once the stream is gone, so leaving the stack up
+    // would show a list of people who may all have left.
+    presence.clear();
 
     if (this._snapshotHandler) {
       document.removeEventListener('clay:snapshot-ready', this._snapshotHandler);
@@ -626,6 +631,21 @@ class LiveSync {
       this._fetchServedDocument(typeof data.seq === 'number' ? data.seq : undefined, {
         repair: true,
       });
+    });
+
+    // The roster is a NAMED event for the same reason the cursor frame is: a tab
+    // with no listener for it never sees a bare data line, so every published
+    // client is counted in the roster without being sent one. The frame is
+    // handed on untouched — who is named is the host's decision, taken per
+    // recipient from that recipient's own access, and nothing here can widen it.
+    this.sse.addEventListener('presence', (event) => {
+      let data;
+      try {
+        data = JSON.parse(event.data);
+      } catch {
+        return;
+      }
+      presence.update(data);
     });
 
     this.sse.onmessage = (event) => {
