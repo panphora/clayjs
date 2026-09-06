@@ -204,9 +204,11 @@ two elements, one of each.
   changed" baselines come from, and the change checks do not fire this event, so an
   edit made here is saved but never compared — the page reads dirty forever. Use
   `clay.addDocumentTransform(fn)` to change what gets saved.
-- `clay:sync-applied` — a live-sync update landed (sync plugin); detail `{seq, source}`,
-  where `source` is `peer` (another open copy) or `disk` (the file changed underneath
-  you).
+- `clay:sync-applied` — a live-sync update landed (sync plugin); detail
+  `{seq, source, by}`, plus `etag` on a disk frame. `source` is `peer` (another open
+  copy) or `disk` (the file changed underneath you). `by` is the `{id, name}` the host
+  stamped on the frame, or `null` on a frame nobody stamped; hosts stamp live-lane
+  frames only, so a disk frame's `by` is normally `null`.
 - `clay:sorted` — a drag-drop reorder landed (sortable plugin); fires on the container
   and bubbles; detail `{item, from, to, oldIndex, newIndex}`.
 - `clay:view-save-attempt` — a visitor clicked a `[trigger-save]` element in view mode;

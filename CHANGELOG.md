@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.3.0] - 2026-09-06
+
+### Added
+- **A stack of avatars showing who else is on the document.** One circle per participant the host named, initials inside, solid for somebody who can change the document and hollow for somebody reading it, plus a chip counting everyone the host did not name. It sits in the top right corner, and it appears only once there is more than one person on the page: somebody alone is told nothing at all. Who gets a name is the host's decision, taken per recipient from that recipient's own access. Nothing in the library asks for a name and nothing in it can widen what arrived. A full name reaches the DOM in one place, the hover label, and it is held in a closure until a pointer is actually on the circle.
+
+  **Nothing this draws is ever saved, and nothing it draws reaches another tab.** Every element it creates carries `no-save no-watch no-snapshot`, the hover label included. `no-save` alone would have leaked: `captureForSaveAndComparison()` clones the document, hands that clone to peers on `clay:snapshot-ready`, and strips the save-only regions only after that, so a name kept out of the file still reached every peer on the document, including the visitor the host had deliberately answered with a count and no names. `no-snapshot` is the token that runs before the clone is emitted, which is why all three are on every root, and why the release-blocking test asserts that with two named people on screen neither name nor either roster id appears in `forSave` or in the clone peers receive.
+
+  **It is gated on the host, not on the first frame.** A host that does not list `presence` among its discovery extensions draws nothing at all rather than an empty stack, which is what hyperclay-local, HTML Clay and makerclay do today. Read the absence as this release working correctly on those hosts, not as a fault, and it stays that way until they adopt the capability.
+- **A notice when somebody else changes the part you are reading.** One dismissible line, `<name> changed this section`, shown when an applied live-sync frame carrying an author actually changed the editable region this reader was working in. Both of the obvious tests are wrong: every frame morphs `document.documentElement`, so "an ancestor was morphed" makes `body` an ancestor of everything and reports every unrelated edit anybody makes anywhere, and "an ancestor was replaced" misses the common case, because hyper-morph matches and mutates in place when a peer retypes a sentence. So the region's own content is compared across the morph instead. The baseline is recorded when the reader focuses the region and refreshed while they type, so their own keystrokes are never read as somebody else's edit, and it is re-recorded on every applied frame, named or not, so a change nobody is named for cannot be charged to whoever comes next.
+
+  It is silent for this tab's own edits, for a frame carrying no author, for a frame the peer path held, and for a frame equal to what the page already has. It is silent on the saved lane by construction rather than by a rule of its own: the server stamps an author on live lane frames alone, so a visitor reading a public page is never told who wrote it. It offers `Dismiss` and nothing else, since an undo here would mean recovering displaced local work, which nothing in this library builds; unsaved local edits are already protected before the morph. It carries the same three runtime tokens as the avatar stack, for the same reason.
+- `clay:sync-applied` carries `by`, the `{ id, name }` the host stamped on the frame that just applied, or `null` on a frame nobody stamped. It rides on the event rather than on the frame's arrival because a frame that held returns before the event fires, so nothing can name an author for a change this tab never took.
+
+### Changed
+- Both live-sync stream addresses now carry `client-id`, in the same kebab spelling as the rest of the query. It is the tab's own sender id, the value every outbound frame already carried and the one the host has been reading, so a host that reads it at admission knows the connection by the value its frames arrive under, and can tell two tabs of one signed out guest apart. A host that does not read it ignores an unknown parameter.
+
 ## [1.2.0] - 2026-08-29
 
 ### Breaking Changes
