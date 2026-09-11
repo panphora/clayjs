@@ -40,7 +40,7 @@ import Mutation from "../lib/mutation.js";
 import { isSnapshotRemoved } from "../lib/region-policy.js";
 import { isEditMode } from "../core/is-edit-mode.js";
 import { mergeTagRecognizers } from "./merge-tags.js";
-import { serializeForSync, captureForComparisonAndDirty, captureSnapshot } from '../core/snapshot.js';
+import { serializeForSync, captureForComparisonAndDirty, captureSnapshot, originalSnapshotNode } from '../core/snapshot.js';
 import { isTabLocalRootAttr } from '../lib/root-attrs.js';
 import { protectPeerDoc, protectDiskDoc, activateIncomingDoc } from './splice-merge.js';
 import { presence } from './presence.js';
@@ -402,33 +402,25 @@ class LiveSync {
     const map = {};
     if (!liveRoot || !cloneRoot) return map;
 
-    const visit = (live, clone, path) => {
-      let id = this.liveWeakMap.get(live);
-      if (!id) {
-        id = this._mintId();
-        this.liveWeakMap.set(live, id);
+    const visit = (clone, path) => {
+      const live = originalSnapshotNode(clone);
+      if (live) {
+        let id = this.liveWeakMap.get(live);
+        if (!id) {
+          id = this._mintId();
+          this.liveWeakMap.set(live, id);
+        }
+        map[path] = id;
       }
-      map[path] = id;
 
-      const liveKids = [];
-      for (const c of live.children) {
-        if (!isSnapshotRemoved(c)) liveKids.push(c);
-      }
       const cloneKids = clone.children;
 
-      if (liveKids.length !== cloneKids.length) {
-        this._log(
-          `identity map: subtree skipped at "${path}" (live=${liveKids.length}, clone=${cloneKids.length})`
-        );
-        return;
-      }
-
-      for (let i = 0; i < liveKids.length; i++) {
-        visit(liveKids[i], cloneKids[i], path === '' ? String(i) : `${path}.${i}`);
+      for (let i = 0; i < cloneKids.length; i++) {
+        visit(cloneKids[i], path === '' ? String(i) : `${path}.${i}`);
       }
     };
 
-    visit(liveRoot, cloneRoot, '');
+    visit(cloneRoot, '');
     return map;
   }
 

@@ -40,6 +40,7 @@ import { stripExtensionNoise } from '../lib/extension-noise.js';
 import { restoreAuthoredUrls } from '../lib/authored-url.js';
 import { STRIP_FROM_SAVE, STRIP_FROM_COMPARISON, STRIP_FROM_DIRTY_CHECK, NO_TRIGGER_AUTOSAVE_SELECTOR, SNAPSHOT_REMOVE_SELECTOR } from '../lib/region-policy.js';
 import { TAB_LOCAL_ROOT_ATTRS } from '../lib/root-attrs.js';
+import { createContentView } from '../lib/content-dom.js';
 
 // =============================================================================
 // HOOK REGISTRIES
@@ -47,6 +48,15 @@ import { TAB_LOCAL_ROOT_ATTRS } from '../lib/root-attrs.js';
 
 const snapshotHooks = [];       // Phase 2: Always run (form sync)
 const documentTransforms = [];  // Phase 3a: Save and change check (strip admin)
+const snapshotProvenance = new WeakMap();
+
+export function originalSnapshotNode(cloneNode) {
+  return snapshotProvenance.get(cloneNode) || null;
+}
+
+function stripSnapshotRegions(clone) {
+  for (const el of clone.querySelectorAll(SNAPSHOT_REMOVE_SELECTOR)) el.remove();
+}
 
 /**
  * Run every authored handler of one kind over a clone, and never let one of them
@@ -63,6 +73,8 @@ const documentTransforms = [];  // Phase 3a: Save and change check (strip admin)
  */
 function runAuthoredHandlers(clone, attr) {
   for (const el of clone.querySelectorAll(`[${attr}]`)) {
+    stripSnapshotRegions(clone);
+    if (el !== clone && !clone.contains(el)) continue;
     try {
       new Function(el.getAttribute(attr)).call(el);
     } catch (err) {
@@ -129,10 +141,18 @@ export function captureSnapshot({ flushUndo = true } = {}) {
     window.clay.undo.flush();
   }
 
-  const clone = clonePreventingOnclone(document.documentElement);
+  const view = createContentView(document.documentElement, { capability: 'snapshot' });
+  const clone = view.root;
+  const remember = (node) => {
+    const live = view.original(node);
+    if (live) snapshotProvenance.set(node, live);
+    for (const child of node.childNodes || []) remember(child);
+  };
+  remember(clone);
 
   for (const hook of snapshotHooks) {
-    hook(clone);
+    stripSnapshotRegions(clone);
+    hook(clone, { original: originalSnapshotNode });
   }
 
   // Put back any URL clay rewrote at runtime (cache-bust, refetch-on-save) so
@@ -140,11 +160,10 @@ export function captureSnapshot({ flushUndo = true } = {}) {
   // authored handler sees the same URLs the file will.
   restoreAuthoredUrls(clone);
 
+  stripSnapshotRegions(clone);
   runAuthoredHandlers(clone, 'onbeforesnapshot');
 
-  for (const el of clone.querySelectorAll(SNAPSHOT_REMOVE_SELECTOR)) {
-    el.remove();
-  }
+  stripSnapshotRegions(clone);
 
   // Browser-extension noise (password-manager menus, Grammarly overlays, and
   // marker attributes on real inputs) is not page content. Drop it from every
@@ -162,13 +181,17 @@ export function captureSnapshot({ flushUndo = true } = {}) {
  * @returns {string} Full HTML string ready for server
  */
 function prepareCloneForSave(clone) {
+  stripSnapshotRegions(clone);
   // Run inline [onbeforesave] handlers
   runAuthoredHandlers(clone, 'onbeforesave');
 
   // Run registered prepare hooks ([freeze]/[save-freeze] innerHTML restore lives here)
   for (const hook of documentTransforms) {
+    stripSnapshotRegions(clone);
     hook(clone);
   }
+
+  stripSnapshotRegions(clone);
 
   // Strip [no-save] / legacy [save-remove] LAST (snapshot-algorithm step 7): a
   // prepare hook (freeze restore) can re-inject [no-save] content into the clone,
@@ -202,8 +225,11 @@ export function captureForComparison({ flushUndo = true } = {}) {
 
   // Run registered prepare hooks
   for (const hook of documentTransforms) {
+    stripSnapshotRegions(clone);
     hook(clone);
   }
+
+  stripSnapshotRegions(clone);
 
   return "<!DOCTYPE html>" + clone.outerHTML;
 }
@@ -232,8 +258,11 @@ export function captureForDirtyCheck({ flushUndo = true } = {}) {
   }
 
   for (const hook of documentTransforms) {
+    stripSnapshotRegions(clone);
     hook(clone);
   }
+
+  stripSnapshotRegions(clone);
 
   return "<!DOCTYPE html>" + clone.outerHTML;
 }
@@ -262,8 +291,10 @@ export function captureForComparisonAndDirty({ flushUndo = true } = {}) {
     el.remove();
   }
   for (const hook of documentTransforms) {
+    stripSnapshotRegions(clone);
     hook(clone);
   }
+  stripSnapshotRegions(clone);
   const forComparison = "<!DOCTYPE html>" + clone.outerHTML;
 
   let forDirty = forComparison;
@@ -272,8 +303,10 @@ export function captureForComparisonAndDirty({ flushUndo = true } = {}) {
       el.remove();
     }
     for (const hook of documentTransforms) {
+      stripSnapshotRegions(dirtyClone);
       hook(dirtyClone);
     }
+    stripSnapshotRegions(dirtyClone);
     forDirty = "<!DOCTYPE html>" + dirtyClone.outerHTML;
   }
 
@@ -324,8 +357,10 @@ export function captureForSaveAndComparison({ emitForSync = true } = {}) {
   // Save clone: run hooks (freeze restore lives here), THEN strip [no-save]/[save-remove]
   // LAST (snapshot-algorithm step 7) so freeze-restored [no-save] content can't leak to disk.
   for (const hook of documentTransforms) {
+    stripSnapshotRegions(clone);
     hook(clone);
   }
+  stripSnapshotRegions(clone);
   for (const el of clone.querySelectorAll(STRIP_FROM_SAVE)) {
     el.remove();
   }
@@ -336,8 +371,10 @@ export function captureForSaveAndComparison({ emitForSync = true } = {}) {
     el.remove();
   }
   for (const hook of documentTransforms) {
+    stripSnapshotRegions(compareClone);
     hook(compareClone);
   }
+  stripSnapshotRegions(compareClone);
   const forComparison = "<!DOCTYPE html>" + compareClone.outerHTML;
 
   // Dirty clone: same shape as the compare clone, one selector weaker.
@@ -347,8 +384,10 @@ export function captureForSaveAndComparison({ emitForSync = true } = {}) {
       el.remove();
     }
     for (const hook of documentTransforms) {
+      stripSnapshotRegions(dirtyClone);
       hook(dirtyClone);
     }
+    stripSnapshotRegions(dirtyClone);
     forDirty = "<!DOCTYPE html>" + dirtyClone.outerHTML;
   }
 
@@ -400,8 +439,10 @@ export function captureForMerge() {
   })(compareClone, clone);
 
   for (const hook of documentTransforms) {
+    stripSnapshotRegions(clone);
     hook(clone);
   }
+  stripSnapshotRegions(clone);
   for (const el of clone.querySelectorAll(STRIP_FROM_SAVE)) {
     el.remove();
   }
@@ -410,8 +451,10 @@ export function captureForMerge() {
     el.remove();
   }
   for (const hook of documentTransforms) {
+    stripSnapshotRegions(compareClone);
     hook(compareClone);
   }
+  stripSnapshotRegions(compareClone);
 
   return { saveClone: clone, compareClone, pairMap };
 }

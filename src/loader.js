@@ -82,6 +82,7 @@ function assembleCore(loaded, { isEditMode, isOwner }, regionPolicy) {
   const snapshot = loaded["core/snapshot.js"];
   const save = loaded["core/save.js"];
   const cacheBustMod = loaded["lib/cache-bust.js"];
+  const hyperMorph = loaded["vendor/hyper-morph.vendor.js"];
 
   if (save) {
     const saveFn = save.savePage || save.default;
@@ -97,6 +98,7 @@ function assembleCore(loaded, { isEditMode, isOwner }, regionPolicy) {
   if (cacheBustMod) {
     clay.cacheBust = cacheBustMod.default;
   }
+  if (hyperMorph) clay.morph = hyperMorph.morph;
 }
 
 function attachPluginMember(path, mod) {

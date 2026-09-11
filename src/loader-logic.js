@@ -10,6 +10,7 @@ export const CORE_WAVES = {
     "core/stale-host-notice.js",
   ],
   editOnly: [
+    "vendor/hyper-morph.vendor.js",
     "core/snapshot.js", "core/save-core.js", "core/save.js",
     "core/save-conflict-notice.js",
     "core/unsaved-warning.js", "core/persist.js",
@@ -62,6 +63,7 @@ export const MODULES = {
   "attrs/onaftersave.js":       () => import("./attrs/onaftersave.js"),
   "attrs/refetch-on-save.js":   () => import("./attrs/refetch-on-save.js"),
   "lib/cache-bust.js":          () => import("./lib/cache-bust.js"),
+  "vendor/hyper-morph.vendor.js": () => import("./vendor/hyper-morph.vendor.js"),
   "vendor/richclay.vendor.js":  () => import("./vendor/richclay.vendor.js"),
   "plugins/indicator.js":       () => import("./plugins/indicator.js"),
   "sync/live-sync.js":          () => import("./sync/live-sync.js"),

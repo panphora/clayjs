@@ -54,29 +54,21 @@ let pending = new WeakMap();
 
 // Phase 2. The clone is a verbatim cloneNode of the live root and nothing has been
 // stripped from it yet, so pairing by position is sound HERE and nowhere else.
-function freezeSnapshot(clone) {
+function freezeSnapshot(clone, provenance) {
   pending = new WeakMap();
 
-  const liveElements = document.querySelectorAll(FREEZE_SELECTOR);
   const cloneElements = clone.querySelectorAll(FREEZE_SELECTOR);
 
-  log('freezing clone — live:', liveElements.length, 'clone:', cloneElements.length);
+  log('freezing clone:', cloneElements.length);
 
-  // Counts can only differ if an earlier onSnapshot hook added or removed
-  // elements, which means alignment is already gone. Restoring nothing beats
-  // restoring one element's authored content into a different element.
-  if (liveElements.length !== cloneElements.length) {
-    console.warn('[save-freeze] live/clone freeze counts differ, skipping freeze restore');
-    return;
-  }
-
-  for (let i = 0; i < cloneElements.length; i++) {
-    if (!originals.has(liveElements[i])) continue;
-    const original = originals.get(liveElements[i]);
-    pending.set(cloneElements[i], original);
-    if (cloneElements[i].innerHTML !== original) {
-      log('element', i, '— restoring original');
-      cloneElements[i].innerHTML = original;
+  for (const cloneElement of cloneElements) {
+    const liveElement = provenance.original(cloneElement);
+    if (!liveElement || !originals.has(liveElement)) continue;
+    const original = originals.get(liveElement);
+    pending.set(cloneElement, original);
+    if (cloneElement.innerHTML !== original) {
+      log('restoring original');
+      cloneElement.innerHTML = original;
     }
   }
 }

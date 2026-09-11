@@ -1,7 +1,11 @@
 import nearest from "./nearest.js";
 import pipe from "./pipe.js";
+import { createContentView, cleanContentClone } from '../lib/content-dom.js';
 
 function init () {
+
+  window.clay = window.clay || {};
+  window.clay.dom = Object.assign(window.clay.dom || {}, { createContentView, cleanContentClone });
 
   // Bail if already initialized
   if (HTMLElement.prototype.hasOwnProperty('nearest')) {
@@ -214,5 +218,5 @@ function init () {
 // Auto-init when module is imported
 init();
 
-export { init };
+export { init, createContentView, cleanContentClone };
 export default init;

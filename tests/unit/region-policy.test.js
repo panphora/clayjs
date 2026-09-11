@@ -58,6 +58,29 @@ describe("region-policy clay tokens", () => {
     expect(p.undoable).toBe(false);
   });
 
+  test.each([
+    { "editor-ui": "" },
+    { clay: "editor-ui" },
+  ])("editor-ui expands to every document exclusion %#", (attrs) => {
+    const node = el(attrs);
+    const policy = resolveRegionPolicy(node);
+    expect(policy).toMatchObject({ watched: false, undoable: false, persist: "none" });
+    expect(isSnapshotRemoved(node)).toBe(true);
+    expect(node.matches(STRIP_FROM_SAVE)).toBe(true);
+  });
+
+  test.each([
+    { "no-data": "" },
+    { clay: "no-data" },
+  ])("no-data remains saved, watched, and undoable %#", async (attrs) => {
+    const { isDataExcluded } = await import("../../src/lib/region-policy.js");
+    const node = el(attrs);
+    expect(resolveRegionPolicy(node)).toMatchObject({ watched: true, undoable: true, persist: "full" });
+    expect(isSnapshotRemoved(node)).toBe(false);
+    expect(node.matches(STRIP_FROM_SAVE)).toBe(false);
+    expect(isDataExcluded(node)).toBe(true);
+  });
+
   test("whitespace variants (tab/newline) resolve", () => {
     expect(resolveRegionPolicy(el({ clay: "freeze\tno-undo" })).undoable).toBe(false);
     expect(resolveRegionPolicy(el({ clay: "no-save\nfreeze" })).persist).toBe("none");

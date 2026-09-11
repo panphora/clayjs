@@ -41,7 +41,7 @@ test("carries the core, every plugin and every satellite", () => {
     /clayjs: plugin "/,                    // src/loader.js
     /Sortable 1\.15\.6/,                   // the vendored Sortable's legal comment
     /\brichclay\s*=\s*\(/,
-    /\bhypercms\s*=\s*\(/,
+    /(?:\bhypercms\s*=\s*\(|hypercms_vendor_exports)/,
     /quickcrop v1/,                        // quickcrop's legal comment
     /\bHyperMorph\s*=\s*\(/,               // sync's morph engine
     /\bhyperundo\s*=\s*\(/,

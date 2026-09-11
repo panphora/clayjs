@@ -32,7 +32,7 @@
  */
 
 import { findChangedRoots, spliceProtected } from '../vendor/hyper-morph.vendor.js';
-import { captureSnapshot, captureForMerge } from '../core/snapshot.js';
+import { captureSnapshot, captureForMerge, originalSnapshotNode } from '../core/snapshot.js';
 // save.js is edit-only in the loader waves but safe to reach from here: its
 // module body guards every init on isEditMode, and the disk lane that needs
 // this state only ever runs in edit-mode tabs.
@@ -109,17 +109,14 @@ function walkPairs(a, b, cb) {
  * whose child counts diverge (extension noise beside the clone's strip) is
  * skipped — those elements fall back to data-id / id matching.
  */
-function fillCloneIds(liveEl, cloneEl, liveWeakMap, idOf) {
-  const id = liveWeakMap.get(liveEl);
+function fillCloneIds(liveEl, cloneEl, liveWeakMap, idOf, root = true) {
+  const live = originalSnapshotNode(cloneEl) || (root ? liveEl : null);
+  const id = liveWeakMap.get(live);
   if (id) idOf.set(cloneEl, id);
-  const liveKids = [];
-  for (const c of liveEl.children) {
-    if (!isSnapshotRemoved(c)) liveKids.push(c);
-  }
   const cloneKids = cloneEl.children;
-  if (liveKids.length !== cloneKids.length) return;
-  for (let i = 0; i < liveKids.length; i++) {
-    fillCloneIds(liveKids[i], cloneKids[i], liveWeakMap, idOf);
+  for (let i = 0; i < cloneKids.length; i++) {
+    const childLive = originalSnapshotNode(cloneKids[i]);
+    fillCloneIds(childLive, cloneKids[i], liveWeakMap, idOf, false);
   }
 }
 

@@ -16,9 +16,14 @@
 */
 import { isEditMode } from "../core/is-edit-mode.js";
 import Mutation from "../lib/mutation.js";
+import { capabilitySelector } from "../lib/region-capabilities.js";
+
+const EDITOR_UI_SELECTOR = capabilitySelector('history');
 
 function makeSortable(sortableElem, Sortable) {
   let options = {};
+  const childSelector = /^(UL|OL)$/.test(sortableElem.tagName) ? 'li' : '*';
+  options.draggable = `> ${childSelector}:not(${EDITOR_UI_SELECTOR})`;
 
   // Check if Sortable instance already exists
   if (Sortable.get(sortableElem)) return;
@@ -115,5 +120,5 @@ async function init() {
 // Auto-init when module is imported; the loader awaits `ready` before resolving clay.ready
 const ready = init();
 
-export { init, ready };
+export { init, ready, makeSortable };
 export default init;

@@ -68,6 +68,7 @@
 
 import { EXTENSION_ATTR_PATTERN } from './extension-noise.js';
 import { resolveRegionPolicy, isInert, strictestPolicy, skipForPolicy } from './region-policy.js';
+import { isPolicyAttribute } from './region-capabilities.js';
 import { ROOT_LIBRARY_ATTRS } from './root-attrs.js';
 
 import { isUserDrivenNow, markUserDriven } from './user-gesture.js';
@@ -186,7 +187,12 @@ const localMutation = {
       // doesn't participate in (no-save / no-trigger-autosave / no-undo / freeze
       // and their legacy equivalents), resolved against the callback's `require`.
       let filteredChanges = changes.filter(
-        change => !skipForPolicy(this._policyForChange(change), require, skip)
+        change => {
+          const currentSkipped = skipForPolicy(this._policyForChange(change), require, skip);
+          if (!change.policyTransition) return !currentSkipped;
+          const previousSkipped = skipForPolicy(change.previousPolicy, require, skip);
+          return !(currentSkipped && previousSkipped);
+        }
       );
       if (!filteredChanges.length) {
         this._log('No changes passed the region policy, skipping callback');
@@ -478,7 +484,8 @@ const localMutation = {
       // Intake drop: a no-watch / mutations-ignore subtree (or extension noise)
       // is invisible to every consumer, so skip it without walking. All other
       // region attributes are resolved per-consumer in _notify.
-      if (isInert(mutation.target)) {
+      const policyTransition = mutation.type === 'attributes' && isPolicyAttribute(mutation.attributeName);
+      if (!policyTransition && isInert(mutation.target)) {
         continue;
       }
 
@@ -586,7 +593,9 @@ const localMutation = {
           element: mutation.target,
           attribute: mutation.attributeName,
           oldValue: mutation.oldValue,
-          newValue: mutation.target.getAttribute(mutation.attributeName)
+          newValue: mutation.target.getAttribute(mutation.attributeName),
+          policyTransition,
+          previousPolicy: policyTransition ? policyBeforeMutation(mutation) : null,
         };
         changes.push(change);
         changesByType.attribute.push(change);
@@ -783,3 +792,17 @@ if (typeof window !== 'undefined' && !existingHub) {
 }
 
 export default Mutation;
+function policyBeforeMutation(record) {
+  let source = record.target;
+  let clone = source.cloneNode(false);
+  const leaf = clone;
+  while (source.parentElement) {
+    source = source.parentElement;
+    const parent = source.cloneNode(false);
+    parent.appendChild(clone);
+    clone = parent;
+  }
+  if (record.oldValue == null) leaf.removeAttribute(record.attributeName);
+  else leaf.setAttribute(record.attributeName, record.oldValue);
+  return resolveRegionPolicy(leaf);
+}

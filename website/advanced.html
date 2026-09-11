@@ -59,10 +59,12 @@
       <tr><td><code>no-dirty</code></td><td>Saved normally, but its content is disposable: no autosave, no unsaved-changes warning, and live sync may replace it.</td><td>Regions that render themselves: filter bars, projections, drag previews</td></tr>
       <tr><td><code>no-watch</code></td><td>The mutation system ignores it entirely (implies no autosave trigger, no undo).</td><td>Third-party widgets that churn the DOM</td></tr>
       <tr><td><code>no-undo</code></td><td>Changes here aren't recorded in undo history.</td><td>Live regions where undo would feel wrong</td></tr>
+      <tr><td><code>no-data</code></td><td>Excluded from content-aware queries and serialization, but otherwise saved, watched, snapshotted, and undoable normally.</td><td>Saved metadata or controls that are not part of an API's content view</td></tr>
+      <tr><td><code>editor-ui</code></td><td>A live editing-control bundle: no-data, no-save, no-snapshot, no-watch, and no-undo.</td><td>Add rows, handles, menus, and editor panels</td></tr>
     </table>
     <div class="recipes">
       <span class="r-title">Recipes</span>
-      UI chrome (toolbars, badges) <span class="arrow">→</span> clay="no-save no-watch"<br>
+      UI chrome (toolbars, badges) <span class="arrow">→</span> clay="editor-ui"<br>
       Live or computed text (clocks) <span class="arrow">→</span> clay="freeze"<br>
       Third-party embeds <span class="arrow">→</span> clay="no-watch"<br>
       Heavy editors, batch the saves <span class="arrow">→</span> clay="no-trigger-autosave"<br>

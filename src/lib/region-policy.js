@@ -44,24 +44,21 @@
  */
 
 import { EXTENSION_NODE_SELECTOR } from './extension-noise.js';
+import { capabilitySelector, expandsTo, hasCapability, hasPolicyToken, POLICY_TOKENS } from './region-capabilities.js';
 
 export const PERSIST = { FULL: 'full', FROZEN: 'frozen', NONE: 'none' };
 
 // The canonical region tokens (spelled in the `clay` attribute or as bare attrs).
-export const REGION_ATTRS = ['no-save', 'no-trigger-autosave', 'no-dirty', 'no-undo', 'no-watch', 'freeze'];
+export const REGION_ATTRS = ['no-save', 'no-trigger-autosave', 'no-dirty', 'no-undo', 'no-watch', 'no-data', 'freeze', 'editor-ui'];
 
 // Every canonical token spellable inside the space-separated `clay` attribute.
 // Exported: this list used to exist as a private CLAY_TOKENS that nothing read,
 // while callers hardcoded their own copies.
-export const TOKENS = ["no-save", "no-snapshot", "no-trigger-autosave", "no-dirty", "no-watch", "no-undo", "freeze"];
+export const TOKENS = [...POLICY_TOKENS];
 
 // True when a region marker is present, whether spelled as a `clay` token
 // (whitespace-token semantics, matching [clay~=token]) or a legacy bare attribute.
-function hasRegionToken(el, token) {
-  const clay = el.getAttribute?.("clay");
-  if (clay && clay.split(/\s+/).includes(token)) return true;   // whitespace-token semantics, matches [clay~=…]
-  return !!el.hasAttribute?.(token);                            // legacy bare attribute
-}
+const hasRegionToken = hasPolicyToken;
 
 /**
  * Add a canonical region token to an element's `clay` attribute, preserving any
@@ -79,7 +76,7 @@ export function addRegionToken(el, token) {
 }
 
 // Serializer selectors (recognize the clay-token spelling FIRST, then new + legacy bare).
-export const STRIP_FROM_SAVE = '[clay~="no-save"], [no-save], [save-remove]';
+export const STRIP_FROM_SAVE = `${capabilitySelector('save')}, [save-remove]`;
 export const FREEZE_SELECTOR = '[clay~="freeze"], [freeze], [save-freeze]';
 // forComparison additionally strips every region whose autosave-trigger is off,
 // so their churn never marks the page dirty — including the no-watch /
@@ -117,7 +114,8 @@ export const STRIP_FROM_DIRTY_CHECK =
 // dirty-comparison) in snapshot.js. `no-snapshot` is the consistent alias for the
 // original `snapshot-remove`; hyper-morph treats both as sync-ignored so a
 // live-sync receiver keeps its own local copy instead of deleting it.
-export const SNAPSHOT_REMOVE_SELECTOR = '[clay~="no-snapshot"], [snapshot-remove], [no-snapshot]';
+export const SNAPSHOT_REMOVE_SELECTOR = `${capabilitySelector('snapshot')}, [snapshot-remove]`;
+export const NO_DATA_SELECTOR = capabilitySelector('data');
 
 // Ancestor-aware, because the strip removes a marked element together with its
 // whole subtree: a child of a no-snapshot region is just as absent from every
@@ -126,6 +124,10 @@ export const SNAPSHOT_REMOVE_SELECTOR = '[clay~="no-snapshot"], [snapshot-remove
 export function isSnapshotRemoved(node) {
   const element = startElement(node);
   return !!(element && element.closest && element.closest(SNAPSHOT_REMOVE_SELECTOR));
+}
+
+export function isDataExcluded(node) {
+  return hasCapability(node, 'data');
 }
 
 const PERSIST_RANK = { full: 0, frozen: 1, none: 2 };
@@ -158,11 +160,11 @@ export function resolveRegionPolicy(node) {
   while (element && element.nodeType === 1) {
     if (element.hasAttribute) {
       // new naked attributes
-      if (hasRegionToken(element, 'no-watch')) watched = false;
+      if (expandsTo(element, 'no-watch')) watched = false;
       if (hasRegionToken(element, 'no-trigger-autosave')) autosaveOff = true;
       if (hasRegionToken(element, 'no-dirty')) { autosaveOff = true; dirtyOff = true; }
-      if (hasRegionToken(element, 'no-undo')) undoable = false;
-      if (hasRegionToken(element, 'no-save')) persistRank = Math.max(persistRank, PERSIST_RANK.none);
+      if (expandsTo(element, 'no-undo')) undoable = false;
+      if (expandsTo(element, 'no-save')) persistRank = Math.max(persistRank, PERSIST_RANK.none);
       if (hasRegionToken(element, 'freeze')) persistRank = Math.max(persistRank, PERSIST_RANK.frozen);
       // legacy markers -> bundles
       if (hasRegionToken(element, 'mutations-ignore')) watched = false;
@@ -209,7 +211,7 @@ export function isInert(node) {
   if (element && element.closest && element.closest(EXTENSION_NODE_SELECTOR)) return true;
   while (element && element.nodeType === 1) {
     if (element.hasAttribute &&
-        (hasRegionToken(element, 'no-watch') || hasRegionToken(element, 'mutations-ignore'))) {
+        (expandsTo(element, 'no-watch') || hasRegionToken(element, 'mutations-ignore'))) {
       return true;
     }
     element = element.parentElement;
@@ -283,6 +285,7 @@ export const regionShape = {
   resolveRegionPolicy,
   isInert,
   isSnapshotRemoved,
+  isDataExcluded,
   skipForPolicy,
   strictestPolicy,
   addRegionToken,
@@ -297,6 +300,7 @@ export const regionShape = {
   NO_TRIGGER_AUTOSAVE_SELECTOR,
   NO_DIRTY_SELECTOR,
   SNAPSHOT_REMOVE_SELECTOR,
+  NO_DATA_SELECTOR,
   FREEZE_SELECTOR,
 
   // Nested camelCase: what clay.internals.region has always published.
@@ -307,6 +311,7 @@ export const regionShape = {
     noTriggerAutosave: NO_TRIGGER_AUTOSAVE_SELECTOR,
     noDirty: NO_DIRTY_SELECTOR,
     snapshotRemove: SNAPSHOT_REMOVE_SELECTOR,
+    noData: NO_DATA_SELECTOR,
     freeze: FREEZE_SELECTOR,
   },
 };

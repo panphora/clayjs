@@ -54,6 +54,8 @@
     "prepublishOnly": "npm test && npm run test:conformance && npm run test:standalone",
     "dev": "node tests/stub-server.mjs",
     "build": "node build.js",
+    "propagate:foundation": "node scripts/propagate-foundation.mjs",
+    "check:foundation": "node scripts/propagate-foundation.mjs --check",
     "deploy": "node build.js && wrangler deploy && git rev-parse HEAD > .deploy"
   },
   "devDependencies": {

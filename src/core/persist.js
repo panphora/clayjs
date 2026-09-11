@@ -86,18 +86,13 @@ export default function enablePersistentFormInputValues(filterBySelector = PERSI
   // programmatically without firing an input event, and resolves textarea
   // data-value into real textContent). Matched by index per selector; another
   // hook mutating the clone could diverge the lists, hence the per-type loops.
-  onSnapshot((doc) => {
+  onSnapshot((doc, provenance) => {
     const finalize = (selector) => {
-      const live = document.querySelectorAll(selector);
       const cloned = doc.querySelectorAll(selector);
-      // Index pairing only holds while the two lists describe the same tree. If a
-      // hook ever diverges them, writing one control's value into another's is
-      // worse than writing none, so fail loudly instead of silently.
-      if (live.length !== cloned.length) {
-        console.warn('[persist] live/clone counts differ for', selector, '— skipping');
-        return;
-      }
-      cloned.forEach((c, i) => finalizeControlForSave(c, live[i]));
+      cloned.forEach((control) => {
+        const live = provenance.original(control);
+        if (live) finalizeControlForSave(control, live);
+      });
     };
     finalize(inputSelector);
     finalize(textareaSelector);

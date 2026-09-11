@@ -58,6 +58,37 @@ describe("the mutation hub watches the whole document", () => {
     expect(seen.length).toBeGreaterThan(0);
     sub();
   });
+
+  test.each(['editor-ui', 'no-watch'])("a %s policy transition is delivered despite its final exclusion", async (attribute) => {
+    const target = document.createElement('section');
+    document.body.appendChild(target);
+    await new Promise((r) => setTimeout(r, 0));
+    const seen = [];
+    const sub = Mutation.onAnyChange({ debounce: 0, require: 'observed' }, changes => seen.push(...changes));
+    target.setAttribute(attribute, '');
+    await new Promise((r) => setTimeout(r, 10));
+    expect(seen.some(change => change.type === 'attribute' && change.attribute === attribute)).toBe(true);
+    sub();
+    target.remove();
+  });
+
+  test('a policy transition wholly inside editor UI reaches neither dirty nor autosave consumers', async () => {
+    const parent = document.createElement('section');
+    parent.setAttribute('editor-ui', '');
+    const target = document.createElement('span');
+    parent.appendChild(target);
+    document.body.appendChild(parent);
+    await new Promise((r) => setTimeout(r, 0));
+    const seen = [];
+    const dirty = Mutation.onAnyChange({ debounce: 0, require: 'dirty' }, changes => seen.push(...changes));
+    const autosave = Mutation.onAnyChange({ debounce: 0, require: 'autosave' }, changes => seen.push(...changes));
+    target.setAttribute('no-data', '');
+    await new Promise((r) => setTimeout(r, 10));
+    expect(seen).toHaveLength(0);
+    dirty();
+    autosave();
+    parent.remove();
+  });
 });
 
 describe("maxWait stops continuous churn from starving a debounced callback", () => {

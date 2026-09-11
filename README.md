@@ -133,7 +133,10 @@ attribute:
 ```
 
 Tokens: `no-save`, `no-snapshot`, `no-trigger-autosave`, `no-dirty`, `no-watch`, `no-undo`,
-`freeze`. Add `autosave` to `<html>` to save automatically on change.
+`no-data`, `editor-ui`, `freeze`. `no-data` excludes a subtree from content-aware reads without
+changing save, watch, snapshot, or undo behavior. `editor-ui` combines `no-data`, `no-save`,
+`no-snapshot`, `no-watch`, and `no-undo` for live editing controls. Native DOM queries still see
+both markers. Add `autosave` to `<html>` to save automatically on change.
 
 `no-trigger-autosave` and `no-dirty` are the pair worth getting right. Both are saved in full and
 neither starts an autosave. The difference is whether their content is *work*: a

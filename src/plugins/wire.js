@@ -1,14 +1,15 @@
 import { isEditMode } from "../core/is-edit-mode.js";
+import { saveToken } from "../core/host-attrs.js";
+import { hostMeta, hostSupports } from "../core/host-meta.js";
 
 /**
  * clay.wire — a per-file control channel between this page and a local process.
  *
  * The page sends a request ("rewrite the section I circled"), a process running
- * in the user's own terminal answers with progress and a terminal frame, and
- * that process edits the FILE. HTML never rides the wire: the agent's change
- * reaches this page as an ordinary external file change, through live-sync. That
- * split is why this module has no morphing, no content lane, and no opinion
- * about what a payload contains.
+ * in the user's own terminal answers with progress and a terminal frame. An
+ * editing process changes the file and the result reaches this page through
+ * live-sync. A structured helper can instead return a bounded result on the
+ * terminal frame without touching the document.
  *
  * Three constraints shape everything below.
  *
@@ -44,12 +45,13 @@ import { isEditMode } from "../core/is-edit-mode.js";
 // only has to say so.
 const ACK_TIMEOUT_MS = 15000;
 
-// After that, it is an inactivity deadline: every frame rearms it, and `wire
+// Raw handlers keep an inactivity deadline: every frame rearms it, and `wire
 // serve` streams the child's stdout as status frames, so an agent that reports
-// what it is doing keeps its request alive indefinitely. A silent one gets this
-// long. Its work still reaches the page if it lands later, through live-sync,
-// since the wire never carried the content anyway.
+// what it is doing keeps its request alive indefinitely. A structured handler
+// instead announces its fixed execution budget in the acknowledgement.
 const SILENCE_TIMEOUT_MS = 120000;
+
+const STRUCTURED_TIMEOUT_GRACE_MS = 15000;
 
 // `wire/done` means the handler finished writing the file. It does not mean this
 // page has rendered the change: that arrives on the live-sync lane after the
@@ -71,6 +73,8 @@ const OPEN_STATES = new Set(["sent", "acked"]);
 // when the user cancelled, an ack timer that fires after a fast error, a done
 // for a request the handler also errored.
 const TERMINAL_STATES = new Set(["done", "error", "cancelled"]);
+
+const HELPER_EXTENSION = "wire";
 
 const records = new Map();
 const listeners = new Set();
@@ -94,13 +98,34 @@ function wireURL(path) {
   return new URL(path, window.location.origin).href;
 }
 
+// The document's save token rides on both legs of the wire.
+//
+// A helper-bound channel is the one place "one wire per file" has to be
+// isolation rather than addressing. A page names only its own URL, but the host
+// resolves that through the same funnel the save route uses, and that funnel
+// admits any registered path on this origin. Without the token, another
+// document's page on the same loopback origin could subscribe to this file's
+// channel and push requests that run this file's helpers.
+//
+// A host that has no helper bound to the file ignores the token on both legs, so
+// this is unconditional here and costs a document nothing.
+function wireToken() {
+  const token = saveToken();
+  return typeof token === "string" && token !== "" ? token : null;
+}
+
 function view(rec) {
   return {
     id: rec.id,
     type: rec.type,
     state: rec.state,
+    helper: rec.helper,
     text: rec.text,
+    result: rec.result,
     error: rec.error,
+    errorCode: rec.errorCode,
+    errorDetails: rec.errorDetails,
+    errorSource: rec.errorSource,
     startedAt: rec.startedAt,
   };
 }
@@ -129,13 +154,14 @@ function setState(rec, state) {
   emit(rec);
 }
 
-// The request deadline. Armed before the POST and rearmed by every frame, so a
-// request is bounded from end to end rather than only up to its ack.
-function arm(rec, ms, message) {
+// The request deadline. Armed before the POST, then replaced by the handler's
+// raw inactivity window or structured execution budget when it acknowledges.
+function arm(rec, ms, message, { cancelFirst = false, errorCode = null } = {}) {
   clearTimeout(rec.timer);
   rec.timer = setTimeout(() => {
     rec.timer = null;
-    finish(rec, "error", message);
+    if (cancelFirst) postCancel(rec);
+    finish(rec, "error", message, { errorCode, errorSource: "client" });
   }, ms);
 }
 
@@ -162,7 +188,11 @@ function prune() {
 function openStream() {
   if (streamReady) return streamReady;
 
-  const path = `/_/wire/subscribe?page-url=${encodeURIComponent(window.location.href)}`;
+  // In the query, not a header: native EventSource takes no custom headers, and
+  // the access log records URL.Path without the query.
+  const token = wireToken();
+  const path = `/_/wire/subscribe?page-url=${encodeURIComponent(window.location.href)}`
+    + (token ? `&token=${encodeURIComponent(token)}` : "");
   stream = new EventSource(wireURL(path));
 
   stream.onmessage = (event) => {
@@ -222,24 +252,86 @@ function handleFrame(frame) {
       // Rearmed, not cleared. The handler acknowledges within milliseconds of
       // picking a request up, so clearing here would leave every working request
       // with no deadline at all.
-      arm(rec, SILENCE_TIMEOUT_MS, "the agent stopped responding");
+      if (
+        frame.payload?.mode === "jsonl" &&
+        Number.isFinite(frame.payload.budgetMs) &&
+        frame.payload.budgetMs > 0
+      ) {
+        rec.structured = true;
+        arm(
+          rec,
+          frame.payload.budgetMs + STRUCTURED_TIMEOUT_GRACE_MS,
+          "the helper did not finish within its execution budget",
+          { cancelFirst: true, errorCode: "helper_timeout" }
+        );
+      } else {
+        arm(rec, SILENCE_TIMEOUT_MS, "the agent stopped responding");
+      }
       setState(rec, "acked");
       break;
     case "wire/status":
-      arm(rec, SILENCE_TIMEOUT_MS, "the agent stopped responding");
+      if (!rec.structured) arm(rec, SILENCE_TIMEOUT_MS, "the agent stopped responding");
       rec.text = typeof frame.text === "string" ? frame.text : "";
       rec.state = "acked";
+      notifyStatus(rec, frame);
       emit(rec, frame);
       break;
     case "wire/done":
-      land(rec);
+      rec.result = Object.prototype.hasOwnProperty.call(frame, "payload") ? frame.payload : null;
+      if (rec.document === "edit") land(rec);
+      else finish(rec, "done", null);
       break;
     case "wire/error":
-      finish(rec, "error", frame.text || "the handler reported an error");
+      finishError(rec, frame);
       break;
     default:
       break;
   }
+}
+
+function notifyStatus(rec, frame) {
+  if (!rec.onStatus || typeof frame.text !== "string") return;
+  const status = { text: frame.text };
+  if (
+    frame.payload &&
+    typeof frame.payload === "object" &&
+    Object.prototype.hasOwnProperty.call(frame.payload, "progress")
+  ) {
+    status.progress = frame.payload.progress;
+  }
+  try {
+    rec.onStatus(status);
+  } catch (err) {
+    console.error("clay.wire: an onStatus listener threw", err);
+  }
+}
+
+function finishError(rec, frame) {
+  const payload = frame.payload;
+  const structured =
+    payload &&
+    typeof payload === "object" &&
+    !Array.isArray(payload) &&
+    (payload.source === "application" || payload.source === "host") &&
+    typeof payload.code === "string" &&
+    payload.code;
+  const error = typeof frame.text === "string" && frame.text
+    ? frame.text
+    : "the handler reported an error";
+
+  if (!structured) {
+    finish(rec, "error", error);
+    return;
+  }
+
+  const state = payload.source === "host" && payload.code === "helper_cancelled"
+    ? "cancelled"
+    : "error";
+  finish(rec, state, error, {
+    errorCode: payload.code,
+    errorDetails: Object.prototype.hasOwnProperty.call(payload, "details") ? payload.details : null,
+    errorSource: payload.source,
+  });
 }
 
 // --- the landing state -----------------------------------------------------
@@ -292,7 +384,7 @@ function land(rec) {
   closeStreamIfIdle();
 }
 
-function finish(rec, state, error) {
+function finish(rec, state, error, fields = {}) {
   if (TERMINAL_STATES.has(rec.state)) return;
   const wasLanding = rec.state === "landing";
   disarm(rec);
@@ -306,7 +398,14 @@ function finish(rec, state, error) {
     unwatchLandingsIfIdle();
   }
   rec.error = error;
+  if (Object.prototype.hasOwnProperty.call(fields, "errorCode")) rec.errorCode = fields.errorCode;
+  if (Object.prototype.hasOwnProperty.call(fields, "errorDetails")) rec.errorDetails = fields.errorDetails;
+  if (Object.prototype.hasOwnProperty.call(fields, "errorSource")) rec.errorSource = fields.errorSource;
   rec.state = state;
+  if (rec.signal && rec.signalHandler) {
+    rec.signal.removeEventListener("abort", rec.signalHandler);
+    rec.signalHandler = null;
+  }
   releaseSaving(rec);
   emit(rec);
   closeStreamIfIdle();
@@ -432,12 +531,15 @@ async function flushSave() {
 // --- sending ---------------------------------------------------------------
 
 async function postFrame(body, signal) {
+  const headers = {
+    "Content-Type": "application/json",
+    "Page-URL": window.location.href,
+  };
+  const token = wireToken();
+  if (token) headers["Save-Token"] = token;
   const response = await fetch(wireURL("/_/wire/send"), {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Page-URL": window.location.href,
-    },
+    headers,
     body: JSON.stringify(body),
     signal,
   });
@@ -460,42 +562,59 @@ async function postFrame(body, signal) {
 function send(payload, opts = {}) {
   const id = typeof opts.id === "string" && opts.id ? opts.id : newId();
   const type = typeof opts.type === "string" && opts.type ? opts.type : "wire/request";
+  const hasHelper = Object.prototype.hasOwnProperty.call(opts, "helper");
+  const helper = hasHelper && typeof opts.helper === "string" && opts.helper ? opts.helper : null;
+  const documentMode = opts.document === undefined ? (helper ? "none" : "edit") : opts.document;
+
+  if (hasHelper && !helper) {
+    return rejected(id, type, null, "helper must be a nonempty string", "invalid_helper");
+  }
+  if (documentMode !== "edit" && documentMode !== "none") {
+    return rejected(
+      id,
+      type,
+      helper,
+      'document must be "edit" or "none"',
+      "invalid_document"
+    );
+  }
 
   // The id is request identity on the wire, on both sides: a reused one would
   // route the first request's frames to the second record, leaving the first
   // unresolvable and its save hold never released. Refused as an outcome rather
   // than thrown, so a UI renders it the way it renders any other failure.
   if (records.has(id)) {
-    const clash = {
+    return rejected(
       id,
       type,
-      state: "error",
-      text: "",
-      error: "a request with this id is already on the wire",
-      startedAt: Date.now(),
-    };
-    return {
-      id,
-      get state() {
-        return clash.state;
-      },
-      done: Promise.resolve(view(clash)),
-      cancel: () => false,
-    };
+      helper,
+      "a request with this id is already on the wire",
+      "duplicate_request"
+    );
   }
 
   const rec = {
     id,
     type,
     state: "sent",
+    helper,
+    document: documentMode,
+    structured: false,
+    onStatus: typeof opts.onStatus === "function" ? opts.onStatus : null,
     text: "",
+    result: null,
     error: null,
+    errorCode: null,
+    errorDetails: null,
+    errorSource: null,
     startedAt: Date.now(),
     timer: null,
     landingTimer: null,
     abort: typeof AbortController === "function" ? new AbortController() : null,
     holdsSave: false,
     settle: null,
+    signal: opts.signal && typeof opts.signal.addEventListener === "function" ? opts.signal : null,
+    signalHandler: null,
   };
   rec.done = new Promise((resolve) => {
     rec.settle = resolve;
@@ -503,15 +622,36 @@ function send(payload, opts = {}) {
   records.set(id, rec);
   emit(rec);
 
+  if (rec.signal) {
+    rec.signalHandler = () => cancel(id);
+    rec.signal.addEventListener("abort", rec.signalHandler, { once: true });
+    if (rec.signal.aborted) rec.signalHandler();
+  }
+
   const dispatch = async () => {
     // The record is re-checked after every await. A cancel can land in any of
     // these gaps, and a step that ran on regardless would open a stream nobody
     // closes or post a request the user already took back.
-    await holdSaving(rec);
     if (rec.state !== "sent") return;
+    if (rec.helper) {
+      const supported = await hostSupports(HELPER_EXTENSION);
+      if (rec.state !== "sent") return;
+      if (!supported) {
+        finish(rec, "error", "this host does not support named wire helpers", {
+          errorCode: "helper_protocol_unsupported",
+          errorSource: "client",
+        });
+        return;
+      }
+    }
 
-    await flushSave();
-    if (rec.state !== "sent") return;
+    if (rec.document === "edit") {
+      await holdSaving(rec);
+      if (rec.state !== "sent") return;
+
+      await flushSave();
+      if (rec.state !== "sent") return;
+    }
 
     // Subscribe before posting. A handler can acknowledge in single-digit
     // milliseconds, a fresh subscription deliberately replays nothing, and only
@@ -527,12 +667,17 @@ function send(payload, opts = {}) {
     // the request unbounded, and an ack that arrives while the POST is still in
     // flight — the ordinary case, since the page subscribed first — would be
     // followed by a fresh ack timer that fails a healthy request 15s later.
-    arm(rec, ACK_TIMEOUT_MS, "the agent never answered");
-
-    const { ok, status, reply } = await postFrame(
-      { type: rec.type, id: rec.id, text: opts.text, payload },
-      rec.abort?.signal
+    arm(
+      rec,
+      ACK_TIMEOUT_MS,
+      "the agent never answered",
+      rec.helper ? { cancelFirst: true, errorCode: "ack_timeout" } : undefined
     );
+
+    const body = { type: rec.type, id: rec.id, text: opts.text, payload };
+    if (rec.helper) body.helper = rec.helper;
+    if (rec.helper || opts.document !== undefined) body.document = rec.document;
+    const { ok, status, reply } = await postFrame(body, rec.abort?.signal);
 
     // A frame may have moved this request on while its own POST was in flight.
     // Only a request still waiting on that POST may be failed by it.
@@ -540,6 +685,20 @@ function send(payload, opts = {}) {
 
     if (!ok) {
       finish(rec, "error", `the wire refused this request (${status})`);
+      return;
+    }
+    // A typed refusal on the reply beats the generic reading of delivered: 0.
+    // The host sends the same refusal down the stream, but the reply and the
+    // stream are two connections with no ordering between them, so settling on
+    // delivered: 0 first would discard it and report "no agent is attached" for a
+    // handler that was attached and refused for a specific, reportable reason.
+    const refused = reply && reply.refused;
+    if (refused && typeof refused.code === "string" && refused.code) {
+      finish(rec, "error", refused.message || "the handler refused this request", {
+        errorCode: refused.code,
+        errorSource: refused.source === "application" ? "application" : "host",
+        errorDetails: null,
+      });
       return;
     }
     if (!reply || reply.delivered === 0) {
@@ -564,6 +723,30 @@ function send(payload, opts = {}) {
   };
 }
 
+function rejected(id, type, helper, error, errorCode) {
+  const rec = {
+    id,
+    type,
+    state: "error",
+    helper,
+    text: "",
+    result: null,
+    error,
+    errorCode,
+    errorDetails: null,
+    errorSource: "client",
+    startedAt: Date.now(),
+  };
+  return {
+    id,
+    get state() {
+      return rec.state;
+    },
+    done: Promise.resolve(view(rec)),
+    cancel: () => false,
+  };
+}
+
 /**
  * Stop completely: the request ends here, its late frames are ignored, and the
  * handler is asked to stop. A cancel that only hid the spinner would leave the
@@ -572,9 +755,13 @@ function send(payload, opts = {}) {
 function cancel(id) {
   const rec = records.get(id);
   if (!rec || !OPEN_STATES.has(rec.state)) return false;
-  postFrame({ type: "wire/cancel", id }).catch(() => {});
+  postCancel(rec);
   finish(rec, "cancelled", null);
   return true;
+}
+
+function postCancel(rec) {
+  postFrame({ type: "wire/cancel", id: rec.id }).catch(() => {});
 }
 
 function get(id) {
@@ -599,6 +786,20 @@ function on(fn) {
   return () => listeners.delete(fn);
 }
 
-export const wire = { send, cancel, get, list, isBusy, on };
+async function helpers() {
+  const meta = await hostMeta({ fresh: true });
+  if (!meta.extensions.includes(HELPER_EXTENSION)) return [];
+  const declared = meta.document?.helpers;
+  if (!Array.isArray(declared)) return [];
+  return declared
+    .filter((helper) =>
+      helper &&
+      typeof helper.name === "string" &&
+      ["ready", "denied", "unavailable"].includes(helper.state)
+    )
+    .map(({ name, state }) => ({ name, state }));
+}
+
+export const wire = { send, cancel, get, list, isBusy, on, helpers };
 
 export default wire;
