@@ -36,6 +36,7 @@
     "./*": "./entries/*"
   },
   "files": [
+    "packed-contract.json",
     "entries/",
     "dist/",
     "THIRD-PARTY-NOTICES.md",
