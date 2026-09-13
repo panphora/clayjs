@@ -1,0 +1,17 @@
+{
+  "load": [
+    "@panphora/clayjs/entries/all.js",
+    "@panphora/clayjs/entries/clay.js",
+    "@panphora/clayjs/entries/clay-data.js",
+    "@panphora/clayjs/entries/clay-dom.js",
+    "@panphora/clayjs/entries/clay-events.js",
+    "@panphora/clayjs/entries/clay-internals.js",
+    "@panphora/clayjs/entries/clay-options.js",
+    "@panphora/clayjs/entries/clay-ui.js",
+    "@panphora/clayjs/entries/clay-utils.js",
+    "@panphora/clayjs/entries/sap.js",
+    "@panphora/clayjs/clay.standalone.js"
+  ],
+  "members": ["THIRD-PARTY-NOTICES.md"],
+  "families": ["./entries/*", "./dist/*", "./src/*"]
+}
