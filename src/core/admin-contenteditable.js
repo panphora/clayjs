@@ -8,7 +8,7 @@ export function disableContentEditableBeforeSave () {
   addDocumentTransform(docElem => {
     docElem.querySelectorAll(SELECTOR).forEach(resource => {
       const originalValue = resource.getAttribute("contenteditable");
-      resource.setAttribute("inert-contenteditable", originalValue);
+      resource.setAttribute("inert-contenteditable", originalValue === null ? "true" : originalValue);
       resource.removeAttribute("contenteditable");
     });
   });
@@ -26,17 +26,16 @@ export function enableContentEditableForAdminOnPageLoad () {
 // incoming document the same way boot activates the live one.
 export function enableContentEditable(root = document) {
   root.querySelectorAll(SELECTOR).forEach(el => {
-    let val = el.getAttribute("inert-contenteditable");
-    if (!["false", "plaintext-only"].includes(val)) val = "true";
-    el.setAttribute("contenteditable", val);
+    const val = el.getAttribute("inert-contenteditable");
+    el.setAttribute("contenteditable", ["", "false", "plaintext-only"].includes(val) ? val : "true");
     el.removeAttribute("inert-contenteditable");
   });
 }
 
 export function disableContentEditable() {
   document.querySelectorAll(SELECTOR).forEach(el => {
-    const val = el.getAttribute("contenteditable") || "true";
-    el.setAttribute("inert-contenteditable", val);
+    const val = el.getAttribute("contenteditable");
+    el.setAttribute("inert-contenteditable", val === null ? "true" : val);
     el.removeAttribute("contenteditable");
   });
 }
