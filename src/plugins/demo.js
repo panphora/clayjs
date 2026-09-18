@@ -15,6 +15,9 @@
 // localStorage is instant, and the saving state only shows past save.js's
 // 500ms debounce, so an instant answer would keep it invisible.
 //
+// Demo mode never shows the leave-page warning: nothing it saves is worth a
+// prompt, so an unsaved demo edit never blocks a click away.
+//
 // The storage key includes <html demo-key> (fallback: the page's pathname).
 // Bump the attribute whenever the page's authored content changes, or
 // returning visitors' old saved bodies morph over the new page.

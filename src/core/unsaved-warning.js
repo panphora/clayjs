@@ -31,6 +31,9 @@ preloadIfEnabled();
 // the person editing it deserves the warning.
 window.addEventListener('beforeunload', (event) => {
   if (!isEditMode) return;
+  // The demo plugin saves into this browser's own storage, so leaving the page
+  // loses nothing a prompt could protect.
+  if (window.clay?.demo) return;
 
   // The DIRTY domain, not the autosave domain. An edit inside a
   // no-trigger-autosave region never starts a save by itself, which is exactly
