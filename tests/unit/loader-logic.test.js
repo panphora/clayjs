@@ -6,14 +6,14 @@ function params(obj = {}) {
 }
 
 describe("resolveModules", () => {
-  test("edit mode: default plugins (richclay) + full core waves", () => {
+  test("edit mode: default plugins (richclay, source) + full core waves", () => {
     const { core, plugins } = resolveModules(params(), true);
     expect(core[0]).toBe("lib/mutation.js");
     expect(core).toContain("core/edit-mode.js");
     expect(core).toContain("core/snapshot.js");
     expect(core).toContain("core/save.js");
     expect(core).toContain("lib/cache-bust.js");
-    expect(plugins).toEqual(["vendor/richclay.vendor.js"]);
+    expect(plugins).toEqual(["vendor/richclay.vendor.js", "plugins/source.js"]);
   });
 
   test("view mode: drops editOnly core wave and editOnly plugins, keeps always core", () => {
@@ -80,12 +80,13 @@ describe("resolveModules", () => {
       "vendor/quickcrop.vendor.js",
       "plugins/upload.js",
       "vendor/hypercms.vendor.js",
+      "plugins/source.js",
     ]);
   });
 
   test("excluding quickcrop overrides the implication", () => {
     const { plugins } = resolveModules(params({ plugins: "cms", exclude: "quickcrop" }), true);
-    expect(plugins).toEqual(["vendor/richclay.vendor.js", "plugins/upload.js", "vendor/hypercms.vendor.js"]);
+    expect(plugins).toEqual(["vendor/richclay.vendor.js", "plugins/upload.js", "vendor/hypercms.vendor.js", "plugins/source.js"]);
   });
 
   test("quickcrop loads on its own request, in view mode too", () => {
@@ -100,19 +101,27 @@ describe("resolveModules", () => {
       "plugins/indicator.js",
       "plugins/sortable.js",
       "plugins/undo.js",
+      "plugins/source.js",
     ]);
   });
 
   test("exclude CSV removes a default-on plugin", () => {
     const { plugins } = resolveModules(params({ exclude: "richclay" }), true);
-    expect(plugins).toEqual([]);
+    expect(plugins).toEqual(["plugins/source.js"]);
+  });
+
+  test("exclude=source opts a page out of the source-preserving save", () => {
+    // The whole escape hatch for a default-on plugin, and the one a page uses when it
+    // does not want the parser downloaded or the extra boot request made.
+    expect(resolveModules(params({ exclude: "source" }), true).plugins)
+      .toEqual(["vendor/richclay.vendor.js"]);
   });
 
   test("unknown plugin name warns and is skipped (plugins param)", () => {
     const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
     const { plugins } = resolveModules(params({ plugins: "bogus,indicator" }), true);
     expect(warn).toHaveBeenCalledWith('clayjs: unknown plugin "bogus"');
-    expect(plugins).toEqual(["vendor/richclay.vendor.js", "plugins/indicator.js"]);
+    expect(plugins).toEqual(["vendor/richclay.vendor.js", "plugins/indicator.js", "plugins/source.js"]);
     warn.mockRestore();
   });
 

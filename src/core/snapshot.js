@@ -30,7 +30,9 @@
  *   ┌─────────────────────────┐
  *   │  4. SERIALIZE           │
  *   │  "<!DOCTYPE html>"      │
- *   │  + outerHTML            │
+ *   │  + outerHTML, unless a  │
+ *   │  save renderer is set   │
+ *   │  (setSaveRenderer)      │
  *   │                         │
  *   │  → sent to server       │
  *   └─────────────────────────┘
@@ -49,6 +51,11 @@ import { createContentView } from '../lib/content-dom.js';
 const snapshotHooks = [];       // Phase 2: Always run (form sync)
 const documentTransforms = [];  // Phase 3a: Save and change check (strip admin)
 const snapshotProvenance = new WeakMap();
+
+// Phase 4, and there is only ever one. Everything else in this file is a list
+// because many things want a turn; serializing the document is one decision, so a
+// second renderer would be two answers to "what bytes does this save send".
+let saveRenderer = null;
 
 export function originalSnapshotNode(cloneNode) {
   return snapshotProvenance.get(cloneNode) || null;
@@ -94,6 +101,51 @@ export function onSnapshot(callback) {
 }
 
 /**
+ * Replace the save-domain serializer.
+ *
+ * Given the prepared save clone and the bytes `clone.outerHTML` would have sent, it
+ * returns the bytes to send instead. The source map (plugins/source.js) is the only
+ * caller: it renders the file's own bytes back out with only the changed regions
+ * reprinted, so a save stops rewriting 88% of an authored document's lines.
+ *
+ * It runs on the save path with a person's document in its hands, so the contract is
+ * narrow. It must return a complete document. It must not touch the clone, which is
+ * also the source of both comparison baselines. And it must be able to answer with
+ * `today` unchanged, because that is what it has to do whenever it is not certain:
+ * the caller here treats a throw the same way, so the floor of any renderer is the
+ * serialization it replaced.
+ *
+ * Comparison and dirty-check captures deliberately do NOT go through it. Those
+ * strings are only ever compared against each other, so they gain nothing from
+ * source fidelity and would pay a full render on every keystroke's dirty check.
+ *
+ * @param {?Function} renderer - (clone, today) => string, or null to restore outerHTML
+ */
+export function setSaveRenderer(renderer) {
+  saveRenderer = renderer;
+}
+
+/**
+ * The bytes a save sends: the prepared clone, through the save renderer if one is
+ * installed.
+ *
+ * The try/catch is not defensive noise around a renderer that already catches its
+ * own errors. That one catches in order to COUNT, and to fire the event that says a
+ * document reprinted; this one is the guarantee that no bug in an optional plugin can
+ * cost somebody a save.
+ */
+function serializeSaveClone(clone) {
+  const today = "<!DOCTYPE html>" + clone.outerHTML;
+  if (!saveRenderer) return today;
+  try {
+    return saveRenderer(clone, today);
+  } catch (err) {
+    console.error('clayjs: save renderer failed, sending the full serialization', err);
+    return today;
+  }
+}
+
+/**
  * Register a transform that runs over a detached clone when preparing to save.
  * Use for: stripping admin elements, cleanup.
  *
@@ -128,7 +180,7 @@ function clonePreventingOnclone(node, deep = true) {
   finally { window.__preventOnclone = prev; }
 }
 
-export function captureSnapshot({ flushUndo = true } = {}) {
+export function captureSnapshot({ flushUndo = true, authored = true } = {}) {
   // Force-close any pending undo idle batch BEFORE cloning the DOM, so the
   // snapshot reflects a clean undo boundary. Without this, a save that fires
   // mid-typing would leave the idle batch open across the save boundary, and
@@ -143,10 +195,19 @@ export function captureSnapshot({ flushUndo = true } = {}) {
 
   const view = createContentView(document.documentElement, { capability: 'snapshot' });
   const clone = view.root;
+  // A <template>'s children are not its childNodes, they are its content fragment's,
+  // so walking childNodes alone leaves everything inside a template with no provenance.
+  // Nothing noticed until the source map asked which live node a clone node came from
+  // and got null for every node in a template, which reprinted the whole template on
+  // every save. createContentView already maps the fragment itself, so descending into
+  // it is all that was missing.
   const remember = (node) => {
     const live = view.original(node);
     if (live) snapshotProvenance.set(node, live);
-    for (const child of node.childNodes || []) remember(child);
+    const children = node.nodeType === 1 && node.tagName === 'TEMPLATE' && node.content
+      ? node.content.childNodes
+      : node.childNodes;
+    for (const child of children || []) remember(child);
   };
   remember(clone);
 
@@ -161,7 +222,10 @@ export function captureSnapshot({ flushUndo = true } = {}) {
   restoreAuthoredUrls(clone);
 
   stripSnapshotRegions(clone);
-  runAuthoredHandlers(clone, 'onbeforesnapshot');
+  // authored: false is for a capture that is not a save and not a frame the page will
+  // see. The attributes hold page-author JavaScript, so running them is a side effect
+  // the author asked for once per save, not once per capture.
+  if (authored) runAuthoredHandlers(clone, 'onbeforesnapshot');
 
   stripSnapshotRegions(clone);
 
@@ -178,12 +242,12 @@ export function captureSnapshot({ flushUndo = true } = {}) {
  * Mutates the clone — only call once per snapshot.
  *
  * @param {HTMLElement} clone - A snapshot from captureSnapshot()
- * @returns {string} Full HTML string ready for server
+ * @returns {HTMLElement} The same clone, in the save domain
  */
-function prepareCloneForSave(clone) {
+function prepareCloneForSave(clone, { authored = true } = {}) {
   stripSnapshotRegions(clone);
   // Run inline [onbeforesave] handlers
-  runAuthoredHandlers(clone, 'onbeforesave');
+  if (authored) runAuthoredHandlers(clone, 'onbeforesave');
 
   // Run registered prepare hooks ([freeze]/[save-freeze] innerHTML restore lives here)
   for (const hook of documentTransforms) {
@@ -200,7 +264,29 @@ function prepareCloneForSave(clone) {
     el.remove();
   }
 
-  return "<!DOCTYPE html>" + clone.outerHTML;
+  return clone;
+}
+
+/**
+ * The save-domain clone, for a caller that needs the tree rather than the bytes.
+ *
+ * The source map pairs against this rather than against the live DOM, because this is
+ * the tree in the file's own domain: edit mode deactivated back to the inert
+ * attribute forms, [no-save] gone, every transform run. Every node in it that came
+ * from the page can be traced back with originalSnapshotNode.
+ *
+ * Emits no snapshot-ready event: this capture must never feed the send pipeline.
+ *
+ * A caller that is only INSPECTING the tree passes `{ flushUndo: false, authored:
+ * false }`. Both defaults are right for a save and wrong for anything else: flushing
+ * closes the undo batch, so a capture taken mid-typing splits the user's undo history
+ * at a point they did not make, and the authored handlers are page JavaScript that is
+ * meant to run once per save, not once per capture.
+ *
+ * @returns {HTMLElement}
+ */
+export function captureSaveClone({ flushUndo = true, authored = true } = {}) {
+  return prepareCloneForSave(captureSnapshot({ flushUndo, authored }), { authored });
 }
 
 /**
@@ -364,7 +450,7 @@ export function captureForSaveAndComparison({ emitForSync = true } = {}) {
   for (const el of clone.querySelectorAll(STRIP_FROM_SAVE)) {
     el.remove();
   }
-  const forSave = "<!DOCTYPE html>" + clone.outerHTML;
+  const forSave = serializeSaveClone(clone);
 
   // Compare clone: strip every autosave-off region, then run hooks
   for (const el of compareClone.querySelectorAll(STRIP_FROM_COMPARISON)) {
@@ -480,7 +566,7 @@ export function captureForSave({ emitForSync = true } = {}) {
     }));
   }
 
-  return prepareCloneForSave(clone);
+  return serializeSaveClone(prepareCloneForSave(clone));
 }
 
 /**

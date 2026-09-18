@@ -139,6 +139,13 @@ describe('the standalone build and clay.js', () => {
     ]);
     for (const win of [standalone, entries]) {
       for (const name of SATELLITES) await win.clay.loaded[name];
+      // The source plugin is on by default and installs WITHOUT blocking boot, so a
+      // save issued before it lands is a full serialization, which is the documented
+      // behaviour and not a failure. Without this wait the two pages race: the
+      // standalone is one request and wins, entries fetches ten satellite tags and
+      // loses, and the comparison is between a source-preserving save and a printed
+      // one. Waiting also makes this the stronger claim: both builds preserve source.
+      await win.clay.source.ready;
     }
     const strip = (html) => html.replace(/[ \t]*<script src="[^"]*"><\/script>\n?/g, '');
     expect(strip(standalone.clay.getHTML())).to.equal(strip(entries.clay.getHTML()));

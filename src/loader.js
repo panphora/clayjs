@@ -120,6 +120,8 @@ function attachPluginMember(path, mod) {
     clay.RichClay = mod.RichClay || mod.default;
   } else if (path === "vendor/quickcrop.vendor.js") {
     clay.quickcrop = mod.quickcrop || mod.default;
+  } else if (path === "plugins/source.js") {
+    clay.source = mod.source || mod.default;
   }
 }
 

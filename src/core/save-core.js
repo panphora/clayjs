@@ -26,12 +26,46 @@ let saveInProgress = false;
 const SAVE_PATH = '/_/save';
 const SAVE_TIMEOUT_MS = 12000;
 
+// Listeners for "the host took these exact bytes". This is the only place in the
+// library that knows both the body that went out and that the host accepted it, and
+// the two together are what make the bytes a fact about the file rather than a guess:
+// a capture says what we would send, a success says a write happened, and only their
+// conjunction says what is on disk. The source map uses it to re-model, so the next
+// save is measured from the file as it now is.
+//
+// Not a DOM event, deliberately. The whole document rides in the argument, and a
+// CustomEvent would put it on a bus any script on the page can listen to.
+const saveAcceptedHooks = [];
+
 /**
  * Check if a save is currently in progress.
  * @returns {boolean}
  */
 export function isSaveInProgress() {
   return saveInProgress;
+}
+
+/**
+ * Run a callback with the bytes the host just accepted.
+ *
+ * Called once per accepted save, after the response, with the exact body that was
+ * sent. Never called for a refused, failed or skipped save, and never in test mode,
+ * where nothing reached a host.
+ *
+ * @param {Function} callback - Receives the accepted HTML string
+ */
+export function onSaveAccepted(callback) {
+  saveAcceptedHooks.push(callback);
+}
+
+function notifySaveAccepted(html) {
+  for (const hook of saveAcceptedHooks) {
+    try {
+      hook(html);
+    } catch (err) {
+      console.error('clayjs: onSaveAccepted hook failed:', err);
+    }
+  }
 }
 
 // =============================================================================
@@ -569,6 +603,7 @@ export function saveHtml(html, callback = () => {}) {
       // is busy by the save that just finished.
       .then(result => {
         saveInProgress = false;
+        if (result.ok) notifySaveAccepted(html);
         done(result);
       });
   });

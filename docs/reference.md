@@ -41,8 +41,8 @@ conditionally through the URL, in the browser only:
 - `?plugins=` comma-separated plugins to add, e.g. `clay.js?plugins=sync,undo`
 - `?exclude=` remove a default-on plugin, e.g. `clay.js?exclude=richclay`
 
-Loadable plugins: `richclay` (default on), `indicator`, `sync`, `sortable`, `undo`,
-`cms`, `quickcrop`, `upload`, `wire`, `demo`.
+Loadable plugins: `richclay` (default on), `source` (default on), `indicator`, `sync`,
+`sortable`, `undo`, `cms`, `quickcrop`, `upload`, `wire`, `demo`.
 
 Everything else is a separate library ("satellite") with its own script tag: clay-ui,
 clay-events, clay-options, clay-dom, all.js, clay-utils, clay-internals, clay-data,
@@ -345,6 +345,52 @@ token variant, `POST /_/save/{token}`, read from `<html savetoken>`.
   line from the same line arriving again.
 
   Also `cancel`, `get`, `list`, `isBusy`. Works in view mode too.
+- `source` (default on; `?exclude=source` to turn it off) — saves the file rather than
+  a fresh printout of the page. Without it, every save rebuilds the document from the DOM, which reorders
+  attributes, renormalises quoting and reprints every tag: a save that changes nothing
+  rewrites about 88% of a hand-written file's lines. With it, clay keeps the bytes the
+  file was loaded from, pairs each node to its place in them, and reprints only what
+  changed. Edit mode only.
+
+  ```js
+  clay.source.stats();   // { installed, paired, saves, reprints, lastReprint, ... }
+  document.addEventListener("clay:save-reprinted", (e) => console.warn(e.detail.reason));
+
+  clay.source.text();      // the bytes clay believes are on disk right now
+  clay.source.locate(el);  // { from, to, line, column } for a live element, or null
+  ```
+
+  `text()` and `locate()` are the pair an editing tool needs: read the file as it will be
+  written, point at an element in the live page, and express an edit as a range in those
+  bytes rather than as a DOM mutation. No ids written into the file, and no map that has to
+  survive a reload.
+
+  **The offsets and `column` are UTF-16 code units into `text()`, not bytes.** Slice the
+  string `text()` returns and the answer is exact. Hand the same numbers to something that
+  counts bytes, such as a file seek or most Python file APIs, and it writes to the wrong
+  place, silently, and only on documents with non-ASCII content: one line of
+  `café 🎉 naïve` puts the same position at 51 code units and 55 bytes.
+
+  `locate()` answers `null` rather than guessing, and the reasons differ enough to matter:
+  the element was created after load, so it is not in the file yet; or it is an implied
+  `<html>`, `<head>` or `<body>` the author never wrote and that holds nothing; or the
+  plugin never installed, which is the whole document rather than that one element.
+  `stats().installed` and `stats().refused` tell the last case from the first two. An
+  implied tag that does hold content locates to the bytes it occupies, which are its
+  children's, because there are no tag bytes to include.
+
+  Every save is reparsed and compared against the page before it is sent. Anything
+  that does not match exactly is sent as the ordinary full serialization instead, so
+  the worst case is the behaviour without the plugin; `clay:save-reprinted` fires when
+  that happens and `clay.source.stats()` counts it. It costs an HTML parser (about
+  48 KB compressed) and one request for the file's own bytes at load, both in edit mode
+  only; `exclude=source` is how a page declines to pay that. It does nothing, silently
+  and safely, when that request fails, redirects, is not `text/html`, or returns
+  something whose doctype and document-level comments are not this document's. It also
+  declines two document shapes it cannot describe: one where the parser moves content
+  out of a `<table>` it was written inside, so the source order and the tree order
+  disagree, and one with no content inside `<html>` at all. `clay.source.stats().refused`
+  says which, and saves on such a page are the ordinary full serialization.
 - `demo` — saves into browser storage instead of a host; used by clayjs.com's live
   demos. `clay.demo.reset()` forgets the browser copy.
 

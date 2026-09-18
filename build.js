@@ -89,7 +89,7 @@ async function emitStandalone() {
     metafile: true,
     banner: {
       js: `/* clayjs ${pkg.version} standalone build: every clayjs module in one file. https://clayjs.com/offline\n` +
-        `   Third-party code inside keeps its own license (Sortable MIT, Squire MIT, DOMPurify Apache-2.0 OR MPL-2.0, MicroModal MIT): https://clayjs.com/THIRD-PARTY-NOTICES.md */`,
+        `   Third-party code inside keeps its own license (Sortable MIT, Squire MIT, DOMPurify Apache-2.0 OR MPL-2.0, MicroModal MIT, parse5 MIT): https://clayjs.com/THIRD-PARTY-NOTICES.md */`,
     },
   });
   // An external import survives only as a dynamic import(). A STATIC import of an

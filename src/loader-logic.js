@@ -34,6 +34,14 @@ export const PLUGIN_PATHS = {
   upload:    { path: "plugins/upload.js",          editOnly: true,  default: false },
   wire:      { path: "plugins/wire.js",            editOnly: false, default: false },
   demo:      { path: "plugins/demo.js",            editOnly: false, default: false },
+  // Saves the file's own bytes back instead of a fresh serialization of the DOM.
+  // editOnly because a page that cannot save has nothing to preserve. On by default
+  // because the fallback rate it is judged on can only be collected from real pages,
+  // and a plugin nobody enables produces no number to judge. It costs a 48 KB parser
+  // and one extra request at boot, both in edit mode only, and every save it cannot
+  // verify is sent as the ordinary full serialization, so the floor is the behaviour
+  // it replaces. `exclude=source` turns it off.
+  source:    { path: "plugins/source.js",          editOnly: true,  default: true },
 };
 
 // One literal import per module the loader can ask for, so a bundler can see the
@@ -74,9 +82,12 @@ export const MODULES = {
   "plugins/upload.js":          () => import("./plugins/upload.js"),
   "plugins/wire.js":            () => import("./plugins/wire.js"),
   "plugins/demo.js":            () => import("./plugins/demo.js"),
+  "plugins/source.js":          () => import("./plugins/source.js"),
 };
 
-const PLUGIN_ORDER = ["richclay", "indicator", "sortable", "undo", "quickcrop", "upload", "cms", "sync", "wire", "demo"];
+// `source` is last on purpose: its install captures a save clone, so it wants every
+// plugin that registers a document transform to have registered it first.
+const PLUGIN_ORDER = ["richclay", "indicator", "sortable", "undo", "quickcrop", "upload", "cms", "sync", "wire", "demo", "source"];
 
 // A plugin that cannot do its whole job alone. hypercms reads the cropper through
 // a capability lookup (`clay.quickcrop`) and silently uploads the raw file when it

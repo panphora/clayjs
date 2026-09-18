@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>clayjs source-map fixture</title>
+  <script>window.clayEditMode = true;</script>
+  <script src="/entries/clay.js?plugins=source"></script>
+  <style>
+    .row { color: red }
+  </style>
+</head>
+<body class='page'>
+  <h1 editmode:contenteditable inert-contenteditable="true">A hand written file</h1>
+
+  <p>Tom &amp; Jerry, and a bare &amp; too: R&amp;D</p>
+
+  <p class=byline>by <a href='/ana'>Ana</a> <a href='/bo'>Bo</a></p>
+
+  <p class=wrapped>by <a href='/cy'>Cy</a>
+    <a href='/di'>Di</a></p>
+
+  <ul id=list>
+    <li data-id='a' class="row">alpha</li>
+    <li data-id='b' class="row">beta</li>
+  </ul>
+
+  <pre>
+first line, after a newline the serializer eats
+  indented
+</pre>
+
+  <template id=tpl><li data-id='x' class="row">from a template</li></template>
+
+  <svg viewBox="0 0 8 8" width=8 height=8><linearGradient id="g"/></svg>
+
+  <noscript><p class='n'>needs javascript</p></noscript>
+
+  <script>
+    if (1 < 2 && 3 > 2) window.__fixtureRan = true;
+  </script>
+</body>
+</html>

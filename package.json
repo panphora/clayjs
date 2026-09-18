@@ -57,7 +57,8 @@
     "build": "node build.js",
     "propagate:foundation": "node scripts/propagate-foundation.mjs",
     "check:foundation": "node scripts/propagate-foundation.mjs --check",
-    "deploy": "node build.js && wrangler deploy && git rev-parse HEAD > .deploy"
+    "deploy": "node build.js && wrangler deploy && git rev-parse HEAD > .deploy",
+    "build:parse5": "node scripts/build-parse5-vendor.mjs"
   },
   "devDependencies": {
     "@esm-bundle/chai": "^4.3.4-fix.0",
@@ -67,6 +68,7 @@
     "esbuild": "^0.28.2",
     "jest": "^29.7.0",
     "jest-environment-jsdom": "^29.7.0",
+    "parse5": "^7.3.0",
     "playwright": "1.62.1"
   },
   "hyper": {

@@ -22,6 +22,16 @@ or carry third-party code, and keep their original licenses.
 - (c) Cure53 and other contributors
 - https://github.com/cure53/DOMPurify
 
+## parse5 7.3.0 (MIT)
+
+- File: src/vendor/parse5.vendor.js (the `parse` export only, bundled by
+  scripts/build-parse5-vendor.mjs)
+- Used by the `source` plugin, which needs a spec-conformant parse that reports byte
+  offsets. No browser exposes one: DOMParser builds the same tree and reports no
+  offsets at all.
+- Copyright (c) 2013-2019 Ivan Nikulin and contributors
+- https://github.com/inikulin/parse5
+
 ## Prism 1.29.0 (MIT)
 
 - File: website/prism.min.js (core + markup, css, clike, javascript, bash), used
