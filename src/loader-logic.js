@@ -11,10 +11,13 @@ export const CORE_WAVES = {
   ],
   editOnly: [
     "vendor/hyper-morph.vendor.js",
-    "core/snapshot.js", "core/save-core.js", "core/save.js",
+    "core/snapshot.js",
+    // Before save.js: it takes the boot baseline as it evaluates, and a snapshot
+    // transform registered after that made an untouched page read as unsaved.
+    "core/persist.js", "core/admin-attrs.js",
+    "core/save-core.js", "core/save.js",
     "core/save-conflict-notice.js",
-    "core/unsaved-warning.js", "core/persist.js",
-    "core/admin-attrs.js", "core/autosave.js",
+    "core/unsaved-warning.js", "core/autosave.js",
     "attrs/save-freeze.js", "attrs/onaftersave.js", "attrs/refetch-on-save.js",
     "lib/cache-bust.js",
   ],
