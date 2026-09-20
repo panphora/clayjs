@@ -38,6 +38,38 @@ beforeEach(() => {
 
 afterEach(() => {
   delete global.fetch;
+  delete global.SharedWorker;
+});
+
+test.each([
+  [['sync', 'sync-worker'], true],
+  [['sync'], false],
+  [['sync', 'sync-worker', 'presence'], false],
+  [['sync-worker'], false],
+])('shared-worker discovery %j selects the compatible transport', async (extensions, shared) => {
+  const workers = [];
+  global.SharedWorker = class {
+    constructor(url, name) {
+      this.url = url; this.name = name;
+      this.port = { start() {}, close() {}, postMessage: jest.fn() };
+      workers.push(this);
+    }
+  };
+  const sync = await startedAgainst(host({ meta: { spec: 1, extensions } }));
+  try {
+    expect(workers).toHaveLength(shared ? 1 : 0);
+    if (shared) {
+      expect(workers[0].name).toBe('clay-sync');
+      expect(workers[0].port.postMessage).toHaveBeenCalledWith(expect.objectContaining({ type: 'subscribe', since: 0 }));
+      const apply = jest.spyOn(sync, 'applyUpdate').mockImplementation(() => {});
+      workers[0].port.onmessage({ data: { v: 1, type: 'cursor', seq: 42, resync: false } });
+      workers[0].port.onmessage({ data: { v: 1, type: 'frame', data: JSON.stringify({ seq: 42, html: 'peer', sender: 'peer' }) } });
+      expect(apply).toHaveBeenCalledTimes(1);
+      workers[0].port.onmessage({ data: { v: 1, type: 'frame', data: JSON.stringify({ seq: 43, html: 'own', sender: sync.clientId }) } });
+      expect(apply).toHaveBeenCalledTimes(1);
+      expect(sync.lastSeenSeq).toBe(43);
+    }
+  } finally { sync.stop(); }
 });
 
 // `/_/meta` answers first; everything after it is the relay.

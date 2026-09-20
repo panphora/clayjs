@@ -50,6 +50,7 @@ import './section-notice.js';
 import { hostMeta } from '../core/host-meta.js';
 import { recordEtag, seedEtag, lastSeenEtag } from '../core/etag.js';
 import { pageMaybeDirty, pauseGate, resumeGate } from '../lib/dirty-gate.js';
+import { SyncStream } from './stream.js';
 
 // The page just took a frame verified clean against its baseline, so it now IS
 // the file on disk. Both saved baselines move together from one capture: leaving
@@ -523,7 +524,11 @@ class LiveSync {
   _resolveProfile() {
     if (!this._profilePromise) {
       this._profilePromise = hostMeta()
-        .then((meta) => (meta?.extensions?.includes('sync') ? WIRE_PROFILES.spec : WIRE_PROFILES.legacy))
+        .then((meta) => {
+          const extensions = meta?.extensions || [];
+          this._sharedSync = extensions.includes('sync') && extensions.includes('sync-worker') && !extensions.includes('presence');
+          return extensions.includes('sync') ? WIRE_PROFILES.spec : WIRE_PROFILES.legacy;
+        })
         .catch(() => WIRE_PROFILES.legacy)
         .then((profile) => {
           this._profile = profile;
@@ -605,7 +610,11 @@ class LiveSync {
     const path = profile.streamPath(window.location.href, this.lane, this.resumeId, this.clientId);
     // Resolved against the real origin: a <base href> in the authored document
     // would otherwise point the sync stream at an origin the document chose.
-    this.sse = new EventSource(new URL(path, window.location.origin).href);
+    this.sse = new SyncStream(new URL(path, window.location.origin).href, {
+      shared: this._sharedSync,
+      documentURL: window.location.href,
+      lane: this.lane,
+    });
 
     this.sse.onopen = () => {
       console.log('[LiveSync] Connected');
@@ -1009,6 +1018,7 @@ class LiveSync {
    */
   _fetchServedDocument(seq, { attempt = 0, repair = false } = {}) {
     const epoch = this._saveEpoch;
+    if (repair && typeof seq !== 'number') seq = this._lastExternalSeq;
     fetch(new URL(window.location.href), { cache: 'no-store' })
       .then((response) => (response.ok ? response.text() : null))
       .then((html) => {
@@ -1019,7 +1029,7 @@ class LiveSync {
           // said replay cannot fix this page, so if the newer fetch fails there is
           // nothing else coming. Refetch rather than drop the only repair.
           if (repair && attempt < 3) {
-            this._fetchServedDocument(seq, { attempt: attempt + 1, repair });
+            this._fetchServedDocument(this._lastExternalSeq, { attempt: attempt + 1, repair });
           }
           return;
         }

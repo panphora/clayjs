@@ -143,6 +143,25 @@ test("a repair overtaken by a newer change refetches instead of dropping", async
 
   expect(sync._pendingExternal).toBeNull();
   expect(global.fetch).toHaveBeenCalledTimes(2); // the repair went round again
+  resolveFetch({ ok: true, text: async () => "<html>fresh</html>" });
+  await new Promise((r) => setTimeout(r, 0));
+  expect(sync._pendingExternal).toMatchObject({ html: "<html>fresh</html>", seq: 9 });
+  sync.stop();
+});
+
+test("a repair without a cursor cannot overwrite a newer disk update", async () => {
+  const { sync } = await started();
+  let resolveFetch;
+  global.fetch = jest.fn(() => new Promise(resolve => { resolveFetch = resolve; }));
+  sync._fetchServedDocument(undefined, { repair: true });
+  sync._enqueueExternal("<html>new disk</html>", 42, "disk42");
+  resolveFetch({ ok: true, text: async () => "<html>stale</html>" });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(sync._pendingExternal).toMatchObject({ html: "<html>new disk</html>", seq: 42 });
+  expect(global.fetch).toHaveBeenCalledTimes(2);
+  resolveFetch({ ok: true, text: async () => "<html>fresh</html>" });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(sync._pendingExternal).toMatchObject({ html: "<html>fresh</html>", seq: 42 });
   sync.stop();
 });
 

@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Added
+- Live-sync tabs share one connection on hosts advertising `sync-worker`. Hidden tabs release their subscriptions and resume with a document refresh. Older hosts and hosts with presence retain the direct transport, which now releases idle hidden-tab connections too.
 - **`?plugins=source`: a save writes the file, not a fresh printout of it.** Every program that edits a malleable HTML file rewrites the whole file, because each one parses to a tree and serializes the tree back out, and a serializer does not reproduce its input. A save that changed nothing still rewrote about 88% of a hand-written document's lines: attributes reordered, quoting renormalised, `&` became `&amp;`, every tag reprinted canonically. Nothing was lost and the file was no longer the file anybody wrote, which made diffs unreadable, made an agent's formatting disposable, and manufactured most of the same-line collisions a concurrent editor has to merge.
 
   With the plugin, clay keeps the bytes the document was loaded from, pairs every live node to a byte range in them at boot, and on save copies source bytes for everything unchanged and prints only what changed. A no-edit save is byte identical. An edit to one list row changes that row's line and no other. Single quotes stay single, unquoted values stay unquoted, attribute order is the author's, a bare `&` is left alone, indentation is untouched, and a `<pre>` keeps the leading newline that the HTML serializer cannot preserve.
