@@ -148,6 +148,30 @@ test('an unresponsive worker port is replaced with a repair, not a direct stream
   expect(sources).toHaveLength(0);
 });
 
+test('a responsive worker stays shared while the host reconnects without a cursor', () => {
+  make();
+  workers[0].send({ type: 'status', state: 'connecting' });
+  for (let i = 0; i < 4; i++) {
+    jest.advanceTimersByTime(15000);
+    workers[0].send({ type: 'pong' });
+  }
+  expect(workers).toHaveLength(1);
+  expect(sources).toHaveLength(0);
+});
+
+test('a brief hide and show resumes the same shared subscription', () => {
+  make();
+  workers[0].send({ type: 'cursor', seq: 40, resync: false });
+  hidden(true);
+  jest.advanceTimersByTime(300);
+  hidden(false);
+  expect(workers).toHaveLength(1);
+  expect(workers[0].sent.at(-1)).toEqual({ v: 1, type: 'visible' });
+  expect(workers[0].port.close).not.toHaveBeenCalled();
+  jest.advanceTimersByTime(5000);
+  expect(workers[0].port.close).not.toHaveBeenCalled();
+});
+
 test.each([false, true])('restoring a page cancels its earlier hidden timer (shared=%s)', shared => {
   make(shared);
   if (shared) workers[0].send({ type: 'cursor', seq: 40, resync: false });

@@ -27,8 +27,7 @@ export class SyncStream extends EventTarget {
       } else {
         if (this._suspended) this._resume();
         else if (this._worker) {
-          this._repair = true;
-          this._reopen();
+          this._worker.port.postMessage({ v: 1, type: 'visible' });
         }
       }
     };
@@ -66,6 +65,7 @@ export class SyncStream extends EventTarget {
       worker.port.onmessage = ({ data }) => {
         if (this._worker !== worker || data?.v !== 1) return;
         lastReply = Date.now();
+        if (['status', 'pong', 'cursor', 'frame', 'gone'].includes(data.type)) clearTimeout(this._startTimer);
         if (data.type === 'status') {
           if (data.state === 'open') {
             this.readyState = 1;
