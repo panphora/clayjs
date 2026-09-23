@@ -125,6 +125,49 @@ export function setSaveRenderer(renderer) {
   saveRenderer = renderer;
 }
 
+const XHTML_NS = 'http://www.w3.org/1999/xhtml';
+
+/**
+ * `clone.outerHTML`, except that a <noscript> holding only text is written raw.
+ *
+ * The page parsed with scripting on, so a <noscript> holds the author's markup as one
+ * text node, and the page's own serializer writes it back raw. The clone lives in a
+ * document with no window (createContentView), where scripting is off, and Chrome's
+ * serializer escapes that text there: `<p>` went to disk as `&lt;p&gt;`, which a reload
+ * reads as literal text, and every later save escaped it again. The text is swapped for
+ * a marker only while serializing, so the clone holds the same nodes when this returns.
+ */
+function serializeClone(clone) {
+  const blocks = [];
+  const collect = (node) => {
+    for (const child of node.childNodes) {
+      if (child.nodeType !== 1) continue;
+      if (child.localName === 'noscript' && child.namespaceURI === XHTML_NS) {
+        const kids = Array.from(child.childNodes);
+        if (kids.length && kids.every((n) => n.nodeType === 3)) blocks.push([child, kids]);
+        continue;
+      }
+      collect(child.localName === 'template' && child.content ? child.content : child);
+    }
+  };
+  collect(clone);
+  if (!blocks.length) return "<!DOCTYPE html>" + clone.outerHTML;
+  const nonce = Math.random().toString(36).slice(2);
+  const raw = blocks.map(([el, kids], i) => {
+    const marker = `\uE000clay-noscript-${nonce}-${i}\uE000`;
+    el.replaceChildren(el.ownerDocument.createTextNode(marker));
+    return [marker, kids.map((n) => n.data).join('')];
+  });
+  let html;
+  try {
+    html = "<!DOCTYPE html>" + clone.outerHTML;
+  } finally {
+    for (const [el, kids] of blocks) el.replaceChildren(...kids);
+  }
+  for (const [marker, text] of raw) html = html.split(marker).join(text);
+  return html;
+}
+
 /**
  * The bytes a save sends: the prepared clone, through the save renderer if one is
  * installed.
@@ -135,7 +178,7 @@ export function setSaveRenderer(renderer) {
  * cost somebody a save.
  */
 function serializeSaveClone(clone) {
-  const today = "<!DOCTYPE html>" + clone.outerHTML;
+  const today = serializeClone(clone);
   if (!saveRenderer) return today;
   try {
     return saveRenderer(clone, today);
