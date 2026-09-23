@@ -1562,6 +1562,9 @@ class LiveSync {
           source: 'disk',
           etag: typeof etag === 'string' && etag ? etag : null,
           by: by || null,
+          // The bytes now on disk, exactly as they arrived. The source map models them
+          // so this tab's next save copies from the file somebody else just wrote.
+          html,
         }
       }));
     } finally {

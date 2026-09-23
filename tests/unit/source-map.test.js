@@ -13,6 +13,10 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { model, checkSource, locate, pair, render, verify } from "../../src/core/source-map.js";
+import { TextEncoder, TextDecoder } from "node:util";
+globalThis.TextEncoder ??= TextEncoder;
+globalThis.TextDecoder ??= TextDecoder;
+const { JSDOM } = await import("jsdom");
 
 const ROOT = new URL("../../", import.meta.url).pathname;
 
@@ -172,6 +176,10 @@ describe("saving the same document again and again changes nothing", () => {
     "a form inside a table": `<!DOCTYPE html><html><head></head><body><table><form action="/x"></form><tr><td>c</td></tr></table></body></html>`,
     "an unquoted value ending in a slash": `<!DOCTYPE html><html><head></head><body><a href=x/>link</a></body></html>`,
     "a CRLF document": `<!DOCTYPE html>\r\n<html>\r\n<head></head>\r\n<body>\r\n<p>hi</p>\r\n</body>\r\n</html>\r\n`,
+    "an element left open at </body>": `<!DOCTYPE html><html><head><title>Notes</title></head><body><div class="wrap"><p>para</p></body></html>`,
+    "an omitted </p> before </body>": `<!DOCTYPE html><html><head></head><body><p>para</body></html>`,
+    "a </body> with no </html>": `<!DOCTYPE html><html><head></head><body><p>para</body>`,
+    "an </html> with no </body>": `<!DOCTYPE html><html><head></head><body><p>para</html>`,
   };
 
   test.each(Object.entries(cases))("%s", (_name, src) => {
@@ -192,6 +200,100 @@ describe("saving the same document again and again changes nothing", () => {
     const printed = roundTrip(crlf, { breakText: true });
     expect(printed.verify.ok).toBe(true);
     expect(printed.text).not.toContain("\n\n\n");
+  });
+});
+
+describe("no generated document grows when it is saved again", () => {
+  // The same defect shape as the cases above, found by a sweep rather than by hand:
+  // an element still open at the end of <body> copied its ancestors' end tags into its
+  // own close, the extra tags reparsed to nothing, and the file grew on every save with
+  // verification green. Every hand-written fixture closed its elements, so none saw it.
+  test("500 seeded documents render the same bytes on the second and third save", () => {
+    let seed = 1;
+    const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+    const pick = (a) => a[Math.floor(rnd() * a.length)];
+    const TOKENS = ["<div>", "</div>", "<p>", "</p>", "<b>", "</b>", "<i>", "</i>", "<a href=x>", "</a>", "<span>", "</span>", "<ul>", "<li>", "</li>", "</ul>",
+      "<table>", "<tr>", "<td>", "</td>", "</tr>", "</table>", "text", " ", "\n", "  ", "<br>", "<img src=a>", "<!-- c -->", "&amp;", "<em>", "</em>", "<section>", "</section>",
+      "<h1>", "</h1>", "<select>", "<option>", "</select>", "<pre>", "</pre>", "<textarea>", "</textarea>", "<form>", "</form>", "<button>", "</button>", "<svg>", "<circle/>", "</svg>"];
+    const ENDS = ["</body></html>", "</body></html>\n", "</body>\n</html>\n", "", "\n", "</html>", "</body>", "</body>\n</html>", "</html>\n"];
+    let checked = 0;
+    const grew = [];
+    for (let i = 0; i < 500; i++) {
+      let body = "";
+      const n = 1 + Math.floor(rnd() * 10);
+      for (let k = 0; k < n; k++) body += pick(TOKENS);
+      const src = "<!DOCTYPE html><html><head><title>t</title></head><body>" + body + pick(ENDS);
+      if (checkSource(model(src), new DOMParser().parseFromString(src, "text/html"))) continue;
+      const first = roundTrip(src);
+      if (!first.verify.ok) continue;
+      const second = roundTrip(first.text);
+      const third = roundTrip(second.text);
+      checked++;
+      if (second.text !== first.text || third.text !== first.text) grew.push(src);
+    }
+    expect(checked).toBeGreaterThan(200);
+    expect(grew).toEqual([]);
+  });
+});
+
+describe("the end of <body>, and elements left open", () => {
+  // Whitespace after </body> or </html> belongs, in the tree, to the last text node in
+  // <body>, and an element with no end tag is closed by whatever followed it in the
+  // file. Both break when an edit changes what comes last, and both used to make the
+  // save fall back to a full reprint.
+  function edited(src, edit) {
+    const doc = new DOMParser().parseFromString(src, "text/html");
+    const m = model(src);
+    const { map } = pair(doc.documentElement, m);
+    edit(doc);
+    const text = render(doc.documentElement, map, m, (n) => n).text;
+    const today = "<!DOCTYPE html>" + doc.documentElement.outerHTML;
+    return { text, verify: verify(text, today, doc, doc.documentElement, m.parseErrors) };
+  }
+  const appendSection = (d) => { const s = d.createElement("section"); s.textContent = "new"; d.body.appendChild(s); };
+  const TYPICAL = "<!DOCTYPE html>\n<html>\n<head>\n  <title>t</title>\n</head>\n<body class='page'>\n  <main>\n    <p id=one>one</p>\n  </main>\n</body>\n</html>\n";
+
+  test("appending to <body> verifies and keeps the author's bytes", () => {
+    const { text, verify: v } = edited(TYPICAL, appendSection);
+    expect(v.ok).toBe(true);
+    expect(text).toBe("<!DOCTYPE html>\n<html>\n<head>\n  <title>t</title>\n</head>\n<body class='page'>\n  <main>\n    <p id=one>one</p>\n  </main>\n\n\n<section>new</section></body></html>");
+  });
+
+  test("removing the last text node in <body> verifies", () => {
+    const { text, verify: v } = edited(TYPICAL, (d) => d.body.lastChild.remove());
+    expect(v.ok).toBe(true);
+    expect(text).toBe("<!DOCTYPE html>\n<html>\n<head>\n  <title>t</title>\n</head>\n<body class='page'>\n  <main>\n    <p id=one>one</p>\n  </main></body></html>");
+  });
+
+  test("editing the last text in <body> when it holds a character reference changes only that text", () => {
+    const SRC = "<!DOCTYPE html>\n<html>\n<body>\ntext &amp; more\n</body>\n</html>\n";
+    const { text, verify: v } = edited(SRC, (d) => { d.body.lastChild.data = d.body.lastChild.data.replace("more", "less"); });
+    expect(v.ok).toBe(true);
+    expect(text).toBe(SRC.replace("more", "less"));
+  });
+
+  test("content written after </html> is refused at install", () => {
+    const SRC = "<!DOCTYPE html>\n<html>\n<body>\n<p>hi</p>\n</body>\n</html>\n<script>x=1</script>\n";
+    expect(checkSource(model(SRC), new DOMParser().parseFromString(SRC, "text/html"))).toMatch(/after the end of <body>/);
+  });
+
+  test("appending after elements left open closes each of them first", () => {
+    const SRC = "<!DOCTYPE html><html><head></head><body><div class=x><b><b>bold</body></html>";
+    const { text, verify: v } = edited(SRC, appendSection);
+    expect(v.ok).toBe(true);
+    expect(text).toBe("<!DOCTYPE html><html><head></head><body><div class=x><b><b>bold</b></b></div><section>new</section></body></html>");
+  });
+
+  test("an element left open gets no end tag while its original follower still follows it", () => {
+    const SRC = "<!DOCTYPE html><html><head></head><body><ul>\n<li>a\n<li>b\n</ul>\n</body></html>";
+    expect(roundTrip(SRC).text).toBe(SRC);
+    const { text, verify: v } = edited(SRC, (d) => {
+      const li = d.createElement("li");
+      li.textContent = "c";
+      d.querySelector("ul").insertBefore(li, d.querySelectorAll("li")[1]);
+    });
+    expect(v.ok).toBe(true);
+    expect(text).toBe("<!DOCTYPE html><html><head></head><body><ul>\n<li>a\n</li><li>c</li><li>b\n</ul>\n</body></html>");
   });
 });
 
@@ -302,24 +404,32 @@ describe("an edit reprints the edit and nothing else", () => {
     expect(out.text).toBe(SRC);
   });
 
-  test("a region rebuilt AFTER pairing reprints once, and re-pairing takes it back", () => {
-    // Honest about the limit: the map is keyed by node identity, so nodes replaced
-    // after it was built are unknown and get printed. That is one save's worth of
-    // reprint, not a permanent state, because an accepted save re-models and re-pairs.
+  test("a region rebuilt AFTER pairing still copies, because unchanged content is matched at save time", () => {
+    // The map is keyed by node identity, so nodes replaced after it was built are
+    // unknown to it. A [freeze] restore, a [persist] textarea and an innerHTML rebuild
+    // all hand the save fresh nodes for content the file already holds. The renderer
+    // matches them to their parent's unclaimed source children by exact subtree, so the
+    // author's bytes come back.
     const doc = new DOMParser().parseFromString(SRC, "text/html");
     const m = model(SRC);
-    const first = pair(doc.documentElement, m);
+    const { map } = pair(doc.documentElement, m);
     const list = doc.querySelector("#list");
     list.innerHTML = list.innerHTML;               // runtime churn, after pairing
-    const reprinted = render(doc.documentElement, first.map, m, (n) => n).text;
-    expect(reprinted).not.toBe(SRC);
-    expect(reprinted).toContain('data-id="a"');    // printed, so the quoting is the DOM's
+    const out = render(doc.documentElement, map, m, (n) => n).text;
+    expect(verify(out, "<!DOCTYPE html>" + doc.documentElement.outerHTML, doc, doc.documentElement, m.parseErrors).ok).toBe(true);
+    expect(out).toBe(SRC);
+  });
 
-    // What adopt does after an accepted save: model the bytes that landed, pair again.
-    const adopted = model(reprinted);
-    const again = pair(doc.documentElement, adopted);
-    const settled = render(doc.documentElement, again.map, adopted, (n) => n).text;
-    expect(settled).toBe(reprinted);               // converged: the next save changes nothing
+  test("and an edit inside a rebuilt region reprints only the edited node", () => {
+    const doc = new DOMParser().parseFromString(SRC, "text/html");
+    const m = model(SRC);
+    const { map } = pair(doc.documentElement, m);
+    const list = doc.querySelector("#list");
+    list.innerHTML = list.innerHTML;
+    list.querySelectorAll("li")[1].textContent = "BETA";
+    const out = render(doc.documentElement, map, m, (n) => n).text;
+    expect(verify(out, "<!DOCTYPE html>" + doc.documentElement.outerHTML, doc, doc.documentElement, m.parseErrors).ok).toBe(true);
+    expect(out).toBe(SRC.replace("<li data-id='b'>beta</li>", '<li data-id="b">BETA</li>'));
   });
 });
 
@@ -430,7 +540,7 @@ describe("a map and a model that were not paired together are not trusted", () =
   const A = `<!DOCTYPE html><html><body><ul id=list><li data-id='a'>alpha</li></ul></body></html>`;
   const B = `<!DOCTYPE html><html><body><ul id="list"><li data-id="a">AAAAAAAAAAAAAAAA</li></ul></body></html>`;
 
-  test("the crossed render copies no source bytes, so it is a full reprint", () => {
+  test("the crossed render slices nothing by the other model's offsets", () => {
     const doc = new DOMParser().parseFromString(A, "text/html");
     const root = doc.documentElement;
     const mA = model(A);
@@ -438,9 +548,13 @@ describe("a map and a model that were not paired together are not trusted", () =
     pair(root, mA);
     const { map: mapB } = pair(root, mB);
 
+    // Every loc from mapB is refused. What comes back is A's own bytes, because the
+    // save-time match finds each unchanged node among A's source children by exact
+    // subtree and copies from A, the model being sliced. The one printed piece is the
+    // implied <head>, which has no bytes in A to copy.
     const crossed = render(root, mapB, mA, (n) => n).text;
     const today = "<!DOCTYPE html>" + root.outerHTML;
-    expect(crossed).toBe(today);                       // printed, not copied
+    expect(crossed).toBe(A.replace("<html>", "<html><head></head>"));
     expect(crossed).not.toContain("alalpha");          // the corruption it used to emit
     expect(verify(crossed, today, doc, root).ok).toBe(true);
   });
@@ -664,4 +778,38 @@ describe("locate: where a live element is in the file", () => {
     expect(Buffer.byteLength(prefix, "utf8")).toBeGreaterThan(prefix.length);
     expect([...prefix]).not.toHaveLength(prefix.length);
   });
+});
+
+describe("text moved into a <noscript>", () => {
+  // A scripting browser reads <noscript> content as raw text, so the same text node is
+  // written escaped in a <div> and raw in a <noscript>. Copying its old bytes into its
+  // new parent wrote escaped text where the page has an image, and the <noscript>
+  // comparison read that escaped text back as markup and passed it.
+  const SRC = '<!DOCTYPE html><html><head></head><body><div id=from>&lt;img src="fallback.png"&gt;</div><noscript id=to></noscript></body></html>';
+  function moved() {
+    const live = new JSDOM(SRC, { runScripts: "outside-only" }).window.document;
+    const m = model(SRC);
+    const { map } = pair(live.documentElement, m);
+    live.querySelector("#to").append(live.querySelector("#from").firstChild);
+    return { live, m, out: render(live.documentElement, map, m, (n) => n).text };
+  }
+
+  test("is printed for its new parent, not copied from its old one", () => {
+    expect(moved().out).toContain('<noscript id=to><img src="fallback.png"></noscript>');
+  });
+
+  test("and the comparison rejects the escaped copy", () => {
+    // `today` is passed the way Chrome serializes a scripting page, raw inside
+    // <noscript>. jsdom's serializer escapes it, which would make the escaped copy
+    // agree with today's bytes and hide exactly this.
+    const { live, m, out } = moved();
+    const escaped = out.replace('<noscript id=to><img src="fallback.png"></noscript>', '<noscript id=to>&lt;img src="fallback.png"&gt;</noscript>');
+    expect(escaped).not.toBe(out);
+    expect(verify(escaped, out, live, live.documentElement, m.parseErrors).ok).toBe(false);
+  });
+});
+
+test("attributes merged in from a second <body> tag are not written twice", () => {
+  const SRC = '<!DOCTYPE html><html><head></head><body class="a"><p>hi</p><body id="y"></body></html>';
+  expect(roundTrip(SRC).text).toBe(SRC);
 });

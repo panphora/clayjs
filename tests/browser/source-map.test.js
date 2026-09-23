@@ -75,8 +75,29 @@ describe('the source map, against a real browser parse', () => {
     expect(win.clay.getHTML()).to.equal(served);
   });
 
-  it('and it did not have to fall back to do it', () => {
-    expect(win.clay.source.stats().reprints, win.clay.source.stats().lastReprint || '').to.equal(0);
+  it('and it did not have to fall back to do it', async () => {
+    // Reprints are counted when the host accepts a save, not when a render runs, so
+    // this has to be a save the host takes. A getHTML() alone counts nothing.
+    const before = win.clay.source.stats();
+    const realFetch = win.fetch;
+    const sent = [];
+    win.fetch = async (url, init) => {
+      if (init && init.method === 'POST') {
+        sent.push(String(init.body));
+        return new win.Response(JSON.stringify({ msg: 'Saved' }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      return realFetch(url, init);
+    };
+    try {
+      await win.clay.save.force();
+    } finally {
+      win.fetch = realFetch;
+    }
+    const after = win.clay.source.stats();
+    expect(sent).to.deep.equal([served]);
+    expect(after.saves).to.equal(before.saves + 1);
+    expect(after.reprints, after.lastReprint || '').to.equal(before.reprints);
+    expect(after.partialReprints, after.lastPartialReprint || '').to.equal(before.partialReprints);
   });
 
   it('an edit reprints the edit and copies every other line', () => {

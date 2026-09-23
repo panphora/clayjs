@@ -40,6 +40,8 @@
 import { parse } from '../vendor/parse5.vendor.js';
 
 const RAW_TEXT = new Set(['script', 'style', 'xmp', 'iframe', 'noembed', 'noframes', 'plaintext', 'noscript']);
+const RCDATA = new Set(['textarea', 'title']);
+const textContext = (tag) => (RAW_TEXT.has(tag) ? 'raw' : RCDATA.has(tag) ? 'rcdata' : 'normal');
 const VOID = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr']);
 const XHTML = 'http://www.w3.org/1999/xhtml';
 
@@ -66,7 +68,13 @@ export function model(src) {
     ? { kind: 'doctype', name: n.name || '', publicId: n.publicId || '', systemId: n.systemId || '' }
     : { kind: n.nodeName === '#comment' ? 'comment' : n.nodeName, value: n.data });
   const root = html ? locOf(html, null, src) : null;
-  return { src, doc, outside, root, parseErrors, relocated: root ? firstOutOfOrder(root) : null };
+  if (root) settle(root, src);
+  return {
+    src, doc, outside, root, parseErrors,
+    relocated: root ? firstOutOfOrder(root) : null,
+    movedIn: root ? firstOutOfOrder(root, 'movedIn') : null,
+    tailOwner: root ? tailOwner(root) : null,
+  };
 }
 
 function locOf(n, parent, src) {
@@ -81,6 +89,7 @@ function locOf(n, parent, src) {
   loc.openTo = loc.located ? l.startTag.endOffset : -1;
   loc.closeFrom = l && l.endTag ? l.endTag.startOffset : (loc.located ? loc.to : -1);
   loc.closeTo = l && l.endTag ? l.endTag.endOffset : (loc.located ? loc.to : -1);
+  loc.endTagged = !!(l && l.endTag);
   // Nothing can end before its own start tag does, but parse5 reports exactly that for
   // an element the parser inserts and immediately pops. A <form> written directly
   // inside a <table> is the case that ships: the form is inserted, the form pointer is
@@ -124,7 +133,28 @@ function locOf(n, parent, src) {
     loc.closeFrom = loc.closeTo = last;
     loc.from = first; loc.to = last;
   }
+  return loc;
+}
+
+/**
+ * Clamp every child's ranges into its parent's, top-down.
+ *
+ * Top-down because a parent's close range can itself be corrected here, and its
+ * children have to be clamped against the corrected one. An element the parser closed
+ * implicitly (a missing </div>, an omitted </p> at </body>) has no end tag, and parse5
+ * gives it the end of the file as its end offset. Its close gap then spanned its
+ * ancestors' end tags, which it copied, and they copied them again: the file grew by
+ * `</body></html>` on every save, and the extra tags reparse to nothing, so verify
+ * passed each time.
+ */
+function settle(loc, src, limit = Infinity) {
+  if (loc.kind !== 'element') return;
   for (const cl of loc.children) {
+    // Content written after an end tag that the parser carried back inside the element:
+    // anything after </body> or </html> other than whitespace lands in <body>. Its
+    // bytes sit past the close that every copy of the file emits verbatim, so a render
+    // writes them twice. Refused at install, like foster parenting, for the same reason.
+    if (cl.from >= limit && !(cl.kind === 'text' && !/\S/.test(cl.value))) loc.movedIn = true;
     // Clamp every child into its parent's content range, at BOTH ends.
     //
     // The spec (and parse5, and every browser) appends whitespace that follows an end
@@ -155,24 +185,28 @@ function locOf(n, parent, src) {
         // different places into one text node.
         //
         // Whitespace only, which is all a parser relocates.
-        if (cl.kind === 'text') {
-          // Normalized, because the node's value is. The parser rewrites every CRLF and
-          // every lone CR in the input stream to LF before a text node ever sees them,
-          // so on a CRLF file the raw bytes and the value can never match and this
-          // comparison silently found no overhang at all. The tail then printed on top
-          // of the bytes it had been relocated from and the file grew a blank line per
-          // save. Only the LENGTH taken from here is normalized; the copy path still
-          // uses the raw bytes, which is why an unedited CRLF file round trips exactly.
-          const inside = src.slice(from, to).replace(/\r\n?/g, '\n');
-          if (cl.value.startsWith(inside)) {
-            const outside = cl.value.slice(inside.length);
-            if (outside && !/\S/.test(outside)) cl.outsideTail = outside;
-          }
+        if (cl.kind === 'text' && !RAW_TEXT.has(loc.tag) && !RCDATA.has(loc.tag)) {
+          // Read from the bytes PAST the clamped end, with the end tags and comments the
+          // span crosses taken out, never by matching the bytes inside against the
+          // node's value: those can hold a character reference, `&amp;` in the file and
+          // `&` in the value, so a prefix match found no overhang at all and an edit to
+          // the text printed the relocated newlines on top of the ones still copied
+          // after the end tags. Normalized, because the node's value is: the parser
+          // rewrites every CRLF and lone CR to LF before a text node sees them. Only the
+          // tail's text is normalized; the copy path still uses the raw bytes, which is
+          // why an unedited CRLF file round trips exactly. Never inside a raw-text or
+          // RCDATA element, whose "tags" are text: an unclosed <textarea> at the end of a
+          // file holds `</html>\n` as characters, not as an end tag and a relocation.
+          const outside = src.slice(to, cl.to).replace(/<!--[\s\S]*?-->|<[^>]*>/g, '').replace(/\r\n?/g, '\n');
+          if (outside && !/\S/.test(outside) && cl.value.endsWith(outside)) cl.outsideTail = outside;
         }
         cl.clamped = true;
         cl.from = from;
         cl.to = to;
       }
+    }
+    if (cl.kind === 'element' && cl.located && !cl.endTagged && cl.closeFrom > cl.to) {
+      cl.closeFrom = cl.closeTo = cl.to;
     }
   }
   // Every copy below walks the source forward, so the children have to be in source
@@ -189,14 +223,25 @@ function locOf(n, parent, src) {
     if (cl.from < floor) { loc.outOfOrder = true; break; }
     floor = cl.to;
   }
-  return loc;
+  const inner = loc.located && loc.endTagged ? Math.min(limit, loc.closeTo) : limit;
+  for (const cl of loc.children) settle(cl, src, inner);
 }
 
-function firstOutOfOrder(loc) {
-  if (loc.outOfOrder) return loc.tag;
+function firstOutOfOrder(loc, flag = 'outOfOrder') {
+  if (loc[flag]) return loc.tag;
   for (const c of loc.children) {
     if (c.kind !== 'element') continue;
-    const found = firstOutOfOrder(c);
+    const found = firstOutOfOrder(c, flag);
+    if (found) return found;
+  }
+  return null;
+}
+
+/** The one text node holding whitespace the parser carried in from past </body>, if any. */
+function tailOwner(loc) {
+  if (loc.outsideTail) return loc;
+  for (const c of loc.children || []) {
+    const found = tailOwner(c);
     if (found) return found;
   }
   return null;
@@ -222,6 +267,7 @@ export function checkSource(m, liveDocument) {
   // bracket with.
   if (m.root.openFrom < 0) return 'source has no content inside <html>';
   if (m.relocated) return 'the parser moved content out of <' + m.relocated + '>, so source order and tree order disagree';
+  if (m.movedIn) return 'the parser moved content written after the end of <' + m.movedIn + '> back inside it, so source order and tree order disagree';
   const want = outsideOf(liveDocument);
   const got = m.outside.map(outsideKey);
   if (want.length !== got.length) return 'outside <html>: ' + JSON.stringify(got) + ' vs live ' + JSON.stringify(want);
@@ -543,19 +589,56 @@ export function render(clone, map, m, provenance, opts = {}) {
   // wrong byte and looks like a successful render.
   const keep = (from, to) => { if (from >= 0 && to > from) pieces.push({ from, to }); };
   const text = (t) => { if (t) pieces.push({ text: t }); };
-  const locOfClone = (n) => { const live = provenance(n); const l = live ? map.get(live) : null; return l && l.gen === m.gen ? l : null; };
+  // Elements in `opts.print`, and everything inside them, are printed rather than
+  // copied: the answer to a region whose copy did not verify.
+  let printing = 0;
+  const locOfClone = (n) => { if (printing) return null; const live = provenance(n); const l = live ? map.get(live) : null; return l && l.gen === m.gen ? l : null; };
+  // Whitespace written after </body> or </html> is not where its bytes are. The parser
+  // appends it to the last text node in <body> (the model's `tailOwner`), and every
+  // copy of the file writes it back after the end tags, which reparses to the same
+  // node. That only holds while the owner is still the last thing in <body>. Once
+  // something follows it (an appended element, a removed or printed owner), the same
+  // bytes reparse as a new text node at the end of <body>, so the render has to put the
+  // tail back on the owner and write nothing but tags and comments after </body>.
+  let tailMark = null;     // where the owner's copied text ends, and the tail it left out
+  let afterBody = -1;      // the first piece after body's end
+  let tailClean = false;
   const rootLoc = m.root;
   keep(0, rootLoc.openFrom);            // the authored doctype and anything before <html>, verbatim
   emitElement(clone, rootLoc);
   keep(rootLoc.closeTo, src.length);    // the trailing bytes, verbatim
+  if (m.tailOwner && afterBody >= 0 && !tailClean) {
+    for (let i = afterBody; i < pieces.length; i++) pieces[i] = { text: withoutWhitespace(piece(pieces[i])) };
+    if (tailMark && tailMark.tail) pieces.splice(tailMark.at, 0, { text: tailMark.tail });
+  }
 
-  const out = pieces.map((p) => p.text !== undefined ? p.text : src.slice(p.from, p.to)).join('');
+  const out = pieces.map(piece).join('');
   return { text: out, ms: now() - t0 };
+
+  function piece(p) { return p.text !== undefined ? p.text : src.slice(p.from, p.to); }
+  function withoutWhitespace(s) {
+    return s.split(/(<!--[\s\S]*?-->|<[^>]*>)/).map((seg, i) => (i % 2 ? seg : seg.replace(/[\t\n\f\r ]+/g, ''))).join('');
+  }
+  // Called once <body>'s end tag, if any, has been emitted. The owner is still last when
+  // nothing but end tags was emitted after its text.
+  function endOfBody() {
+    afterBody = pieces.length;
+    tailClean = !!tailMark && tailMark.whole
+      && /^(?:<\/[^>]*>)*$/.test(pieces.slice(tailMark.at).map(piece).join(''));
+  }
 
   function emitNode(n, parentTag) {
     if (n.nodeType === 3) return emitText(n, parentTag);
     if (n.nodeType === 8) return emitComment(n);
-    if (n.nodeType === 1) return emitElement(n, locOfClone(n));
+    if (n.nodeType === 1) {
+      if (opts.print && opts.print.has(n)) {
+        printing++;
+        try { emitElement(n, null); } finally { printing--; }
+      } else {
+        emitElement(n, locOfClone(n));
+      }
+      if (n.localName === 'body' && n.parentNode === clone) endOfBody();
+    }
   }
   function emitComment(n) {
     const loc = locOfClone(n);
@@ -566,11 +649,28 @@ export function render(clone, map, m, provenance, opts = {}) {
     const loc = locOfClone(n);
     let data = n.data;
     if (opts.corrupt === 'drop-first-text' && !opts.corrupted && data.trim()) { opts.corrupted = true; data = data.slice(1); }
-    if (loc && loc.kind === 'text' && loc.value === data && loc.from >= 0 && !opts.breakText) { keep(loc.from, loc.to); return; }
-    if (loc && loc.kind === 'text' && loc.outsideTail && data.endsWith(loc.outsideTail)) {
-      data = data.slice(0, data.length - loc.outsideTail.length);
+    // The same bytes mean different things in different parents. A text node whose data
+    // is `<img>` is written `&lt;img&gt;` in a <div>, and raw in a <noscript>, whose
+    // content a scripting browser reads as raw text; copied into one from the other it
+    // says something else. A text node moved across that boundary is printed for its
+    // new parent, never copied from its old one.
+    const sameContext = loc && loc.parent && textContext(loc.parent.tag) === textContext(parentTag);
+    if (loc && loc.kind === 'text' && loc.value === data && loc.from >= 0 && !opts.breakText && sameContext) {
+      keep(loc.from, loc.to);
+      // Test switch: copy one named text node's bytes twice, a corruption only the
+      // copy path makes, so printing the element around it is the fix.
+      if (opts.doubleCopied !== undefined && data === opts.doubleCopied) keep(loc.from, loc.to);
+      if (loc.outsideTail) tailMark = { at: pieces.length, tail: loc.outsideTail, whole: true };
+      return;
+    }
+    let owner = null;
+    if (loc && loc.kind === 'text' && loc.outsideTail) {
+      const whole = data.endsWith(loc.outsideTail);
+      if (whole) data = data.slice(0, data.length - loc.outsideTail.length);
+      owner = { tail: whole ? loc.outsideTail : '', whole };
     }
     text(RAW_TEXT.has(parentTag) ? data : escText(data));
+    if (owner) tailMark = { at: pieces.length, ...owner };
   }
   function emitElement(n, loc) {
     const tag = n.localName;
@@ -625,7 +725,13 @@ export function render(clone, map, m, provenance, opts = {}) {
     const seen = new Set();
     let cursor = loc.openFrom;
     for (const a of loc.attrs) {
-      if (a.from < 0) continue;
+      if (a.from < 0) {
+        // No bytes in this tag: parse5 merged it in from a second <body> or <html> tag,
+        // where its bytes still are. Appending it here as well wrote it twice.
+        const cur = live.get(a.key);
+        if (cur && cur.value === a.value) seen.add(a.key);
+        continue;
+      }
       const cur = live.get(a.key);
       seen.add(a.key);
       if (!cur) { keep(cursor, gapStart(cursor, a.from)); cursor = a.to; continue; }
@@ -668,27 +774,94 @@ export function render(clone, map, m, provenance, opts = {}) {
   // this parent and form the longest in-order run stay in place and copy their bytes;
   // every other clone child is emitted where the clone has it (printed, or copied out of
   // place as a move); every source child the clone no longer has is dropped.
+  // An element the author left open (`<li>a`, a `<div>` missing its `</div>`) is closed
+  // by whatever the parser met next in the file. Copied without an end tag, it stays
+  // closed only while that same node still follows it. Anything else emitted after it
+  // (an appended element, a text node, a moved sibling) would parse INSIDE it, so it
+  // gets the end tag the file never had, written just before that next node.
+  function copiedOpen(c) {
+    if (c.nodeType !== 1 || printing || (opts.print && opts.print.has(c))) return null;
+    const l = locOfClone(c);
+    return l && l.kind === 'element' && l.located && !l.endTagged && !VOID.has(l.tag) && !opts.breakTags ? l : null;
+  }
+  // The end tags a copied-open element needs, innermost first: its own, and those of the
+  // open elements it ends with, since one end tag does not close them all. `</b>` inside
+  // `<b><b>` closes only the inner one.
+  function openChain(c) {
+    const l = copiedOpen(c);
+    if (!l) return null;
+    const kids = liveKids(c);
+    const inner = kids.length ? openChain(kids[kids.length - 1]) : null;
+    return (inner || []).concat(l.tag);
+  }
   function emitChildren(el, loc, parentTag) {
     const C = liveKids(el);
-    if (!loc) { for (const c of C) emitNode(c, parentTag); return; }
+    let open = null;         // { tags, j }: the last child's end tags if it was copied open, and its source index
+    const closeOpen = (i, j) => {
+      if (open && !(j >= 0 && open.j >= 0 && j === open.j + 1)) text(open.tags.map((t) => '</' + t + '>').join(''));
+      open = null;
+    };
+    if (!loc) {
+      for (const c of C) { closeOpen(-1, -1); emitNode(c, parentTag); const tags = openChain(c); if (tags) open = { tags, j: -1 }; }
+      return;
+    }
     const S = loc.children;
     const sIndex = new Map(S.map((s, j) => [s, j]));
     const owned = C.map((c) => { const l = locOfClone(c); return l && l.parent === loc && l.from >= 0 ? sIndex.get(l) : -1; });
+    // A child with no identity at all is usually not new. A [freeze] restore, a
+    // [persist] textarea, an innerHTML rebuild after pairing: each hands the save clone
+    // fresh nodes for content the file already holds. Matched here, by exact subtree
+    // signature against this parent's source children nothing else claimed, in order,
+    // and copied whole. Exact means the bytes say what the node says; verify still checks.
+    const whole = new Set();
+    if (!opts.breakText && !opts.breakTags) {
+      const taken = new Set(owned);
+      const free = new Map();
+      S.forEach((s, j) => {
+        if (taken.has(j) || s.from < 0 || !s.keys) return;
+        if (!free.has(s.keys.deep)) free.set(s.keys.deep, []);
+        free.get(s.keys.deep).push(j);
+      });
+      if (free.size) C.forEach((c, i) => {
+        if (owned[i] >= 0 || locOfClone(c)) return;
+        const q = free.get(keysOfLive(c, new Map()).deep);
+        if (q && q.length) { owned[i] = q.shift(); whole.add(i); }
+      });
+    }
+    const emitChild = (c, i) => {
+      if (!whole.has(i)) return emitNode(c, parentTag);
+      const s = S[owned[i]];
+      keep(s.from, s.to);
+      if (s.outsideTail) tailMark = { at: pieces.length, tail: s.outsideTail, whole: true };
+    };
+    const openOf = (c, i) => {
+      if (!whole.has(i)) return openChain(c);
+      const s = S[owned[i]];
+      return s.kind === 'element' && s.located && !s.endTagged && !VOID.has(s.tag) ? [s.tag] : null;
+    };
     const inPlace = new Set(lis(owned));
     let cursor = loc.openTo;
     let lastS = -1;
     const dropTo = (j) => { for (let k = lastS + 1; k < j; k++) { const sk = S[k]; if (sk.from < 0) continue; keep(cursor, sk.from); cursor = Math.max(cursor, sk.to); } };
     for (let i = 0; i < C.length; i++) {
       const c = C[i];
+      const tags = openOf(c, i);
       if (inPlace.has(i)) {
         const j = owned[i], s = S[j];
+        closeOpen(i, j);
         dropTo(j);
         keep(cursor, s.from);
-        emitNode(c, parentTag);
+        emitChild(c, i);
         cursor = Math.max(cursor, s.to); lastS = j;
+        open = tags ? { tags, j } : null;
         continue;
       }
-      emitNode(c, parentTag);
+      // An original follower the parser implied rather than read (a <p> made by a stray
+      // </p>) has no bytes of its own, so it is not "in place", but it still follows.
+      const lc = locOfClone(c);
+      closeOpen(i, lc && lc.parent === loc ? sIndex.get(lc) : -1);
+      emitChild(c, i);
+      open = tags ? { tags, j: -1 } : null;
     }
     dropTo(S.length);
     keep(cursor, loc.closeFrom);
@@ -736,11 +909,30 @@ export function verify(rendered, today, liveDocument, clone = null, sourceErrors
   const diff = vDiff(A.documentElement, B.documentElement, 'html');
   const worse = diff ? null : vParseErrors(rendered, sourceErrors);
   if (!diff) return worse ? { ok: false, diff: worse } : { ok: true, diff: null, oracle: 'today' };
-  if (clone && !vDiff(A.documentElement, clone, 'html')) {
-    const w = vParseErrors(rendered, sourceErrors);
-    return w ? { ok: false, diff: w } : { ok: true, diff: null, oracle: 'clone', todayDiff: diff };
+  if (clone) {
+    // `at` is the index path, in the clone, of the node where the render first differs,
+    // so a caller can print that element and try again instead of discarding the whole
+    // render. It is valid in the clone because every earlier sibling at every level on
+    // the way down compared equal.
+    const at = [];
+    if (!vDiff(A.documentElement, clone, 'html', at)) {
+      const w = vParseErrors(rendered, sourceErrors);
+      return w ? { ok: false, diff: w } : { ok: true, diff: null, oracle: 'clone', todayDiff: diff };
+    }
+    return { ok: false, diff, at };
   }
   return { ok: false, diff };
+}
+
+/** The node at an index path from verify's `at`, walking the same children verify walked. */
+export function nodeAt(root, at) {
+  let n = root;
+  for (const i of at) {
+    const kids = vKids(n);
+    if (i >= kids.length) return null;
+    n = kids[i];
+  }
+  return n;
 }
 
 /**
@@ -754,9 +946,13 @@ export function verify(rendered, today, liveDocument, clone = null, sourceErrors
  * full serialization cannot produce one, because the DOM it comes from cannot hold a
  * duplicate attribute in the first place.
  *
- * This is narrower than it sounds and worth saying plainly: it catches the discarded
- * class only. Bytes the parser DOES represent, such as a duplicated element, change
- * the tree, and the comparison above is what catches those.
+ * This is narrower than it sounds and worth saying plainly. It sees what parse5
+ * reports, which is tokenizer errors such as `duplicate-attribute`. Input the tree
+ * builder discards is not reported at all: a stray end tag, a second `<body>` tag's
+ * attributes, a stray doctype. A render that wrote one of those would reparse to the
+ * same tree with no new error, and nothing here would see it. Bytes the parser DOES
+ * represent, such as a duplicated element, change the tree, and the comparison above
+ * is what catches those.
  */
 function vParseErrors(rendered, sourceErrors) {
   if (!sourceErrors) return null;
@@ -793,18 +989,25 @@ function vOutside(doc) {
  */
 function vNoscript(a, b, path) {
   const P = new DOMParser();
-  const inner = (el) => {
+  // Read each side the way it was parsed, which verify fixes, not the node. `a` is always
+  // the render reparsed by DOMParser, with scripting off, so its <noscript> text is TEXT,
+  // and reading its `.data` as markup would turn `&lt;img&gt;` into an <img> and pass a
+  // render that wrote escaped text where the page has an image. `b` always comes from the
+  // page, parsed with scripting on, so a <noscript> holding only text holds its markup
+  // raw. Asking the node's own document gets `b` wrong: Chrome builds the save clone in a
+  // document with no window.
+  const raw = (el) => {
     const kids = Array.from(el.childNodes);
     return kids.length && kids.every((n) => n.nodeType === 3) ? kids.map((n) => n.data).join('') : el.innerHTML;
   };
-  return vDiff(P.parseFromString(inner(a), 'text/html').body, P.parseFromString(inner(b), 'text/html').body, path + '>#noscript');
+  return vDiff(P.parseFromString(a.innerHTML, 'text/html').body, P.parseFromString(raw(b), 'text/html').body, path + '>#noscript');
 }
 function vKids(el) {
   const list = el.localName === 'template' && el.content ? el.content.childNodes : el.childNodes;
   return Array.from(list).filter((n) => n.nodeType === 1 || n.nodeType === 3 || n.nodeType === 8);
 }
 const vAttrs = (el) => Array.from(el.attributes, (a) => (a.namespaceURI || '') + ' ' + a.name + '=' + JSON.stringify(a.value)).sort().join('; ');
-function vDiff(a, b, path) {
+function vDiff(a, b, path, at = []) {
   if (a.nodeType !== b.nodeType) return path + ': node type ' + a.nodeType + ' vs ' + b.nodeType;
   if (a.nodeType === 3 || a.nodeType === 8) return a.data === b.data ? null : path + ': text ' + JSON.stringify(a.data.slice(0, 60)) + ' vs ' + JSON.stringify(b.data.slice(0, 60));
   if (a.localName !== b.localName || a.namespaceURI !== b.namespaceURI) return path + ': tag ' + a.localName + ' vs ' + b.localName;
@@ -812,6 +1015,11 @@ function vDiff(a, b, path) {
   if (a.localName === 'noscript' && a.namespaceURI === XHTML) return vNoscript(a, b, path);
   const ka = vKids(a), kb = vKids(b);
   if (ka.length !== kb.length) return path + ': ' + ka.length + ' vs ' + kb.length + ' children';
-  for (let i = 0; i < ka.length; i++) { const d = vDiff(ka[i], kb[i], path + '>' + (ka[i].localName || '#') + '[' + i + ']'); if (d) return d; }
+  for (let i = 0; i < ka.length; i++) {
+    at.push(i);
+    const d = vDiff(ka[i], kb[i], path + '>' + (ka[i].localName || '#') + '[' + i + ']', at);
+    if (d) return d;
+    at.pop();
+  }
   return null;
 }

@@ -42,6 +42,7 @@ import {
   model,
   checkSource,
   locate,
+  nodeAt,
   pair,
   render,
   verify
@@ -62,6 +63,11 @@ const state = {
   saves: 0,
   reprints: 0,
   lastReprint: null,
+  partialReprints: 0,
+  lastPartialReprint: null,
+  // What the last render produced, so the save the host accepts can be counted and
+  // announced as what it was. Cleared once reported.
+  lastOutcome: null,
   lastRenderMs: null,
   lastBytes: null,
   timing: { fetch: null, model: null, pair: null, refresh: null },
@@ -154,38 +160,95 @@ function install(sourceUrl) {
  * pass as "the verifier is blind" is a mistake this project has already made once.
  * `{ corrupt: 'drop-first-text' }` is the one that must be REJECTED: it changes the
  * tree, which is exactly what the verifier is for.
+ *
+ * A render that does not verify is not thrown away whole. verify says where it first
+ * differs; that element is printed in full and the render tried again, widening to the
+ * parent while it still fails. Everything outside the printed elements is still the
+ * author's bytes. Only when the widening reaches <html>, or the failure has no node to
+ * point at (the prologue, a parse-error count), is today's full serialization sent.
+ *
+ * Nothing is counted or announced here. A render is not a save: an autosave that
+ * found nothing changed, a refused save and a failed request all rendered. The
+ * outcome is recorded, and `adopt` reports it when the host accepts these exact bytes.
  */
 export function renderSave(clone, today, opts = {}) {
   if (!state.installed) return today;
-  state.saves++;
-  let out;
-  try {
-    out = render(clone, state.map, state.model, originalSnapshotNode, opts);
-  } catch (err) {
-    return reprint('render threw: ' + (err && err.message ? err.message : err), today);
+  state.lastOutcome = null;
+  const print = new Set();
+  let firstDiff = null;
+  for (let round = 0; round <= MAX_PRINT_ROUNDS; round++) {
+    let out;
+    try {
+      out = render(clone, state.map, state.model, originalSnapshotNode, { ...opts, print });
+    } catch (err) {
+      return fallback('render threw: ' + (err && err.message ? err.message : err), today);
+    }
+    const v = verify(out.text, today, document, clone, state.model.parseErrors);
+    if (v.ok) {
+      state.lastRenderMs = out.ms;
+      state.lastBytes = out.text.length;
+      state.lastOutcome = print.size
+        ? { text: out.text, scope: 'partial', reason: firstDiff, printed: print.size }
+        : { text: out.text, scope: null };
+      return out.text;
+    }
+    if (firstDiff === null) firstDiff = v.diff;
+    if (!v.at || !widen(clone, nodeAt(clone, v.at), print)) return fallback(firstDiff, today);
   }
-  const v = verify(out.text, today, document, clone, state.model.parseErrors);
-  if (!v.ok) return reprint(v.diff, today);
-  state.lastRenderMs = out.ms;
-  state.lastBytes = out.text.length;
-  return out.text;
+  return fallback(firstDiff, today);
+}
+
+const MAX_PRINT_ROUNDS = 8;
+
+/**
+ * Add the next element to print: the one holding `node`, or, when that is already
+ * inside a printed element, that element's parent. false when the only element left is
+ * the root, which is the full serialization by another name.
+ */
+function widen(clone, node, print) {
+  let el = node && node.nodeType === 1 ? node : node && node.parentNode;
+  for (let a = el; a && a !== clone; a = a.parentNode) {
+    if (print.has(a)) { print.delete(a); el = a.parentNode; break; }
+  }
+  if (!el || el.nodeType !== 1 || el === clone) return false;
+  print.add(el);
+  return true;
+}
+
+/** Send today's full serialization, and remember that this render was a fallback. */
+function fallback(reason, today) {
+  state.lastOutcome = { text: today, scope: 'full', reason };
+  return today;
 }
 
 /**
  * The fallback, and the alarm.
  *
- * Both halves matter. The bytes are today's, so the floor of this whole mechanism is
- * the behaviour it replaces. The event and the counter are how a reprint gets fixed
+ * Reported for a save the host accepted. The bytes that went out were today's, so the
+ * floor of this whole mechanism is the behaviour it replaces. The event and the
+ * counter are how a reprint gets fixed
  * in the renderer or in the page, which is the only place it should ever be fixed: a
  * verifier loosened to make this counter look better would pass exactly the writes it
  * exists to stop.
  */
-function reprint(reason, today) {
+function reprint(reason) {
   state.reprints++;
   state.lastReprint = reason;
   console.warn('clayjs: source map did not verify, saving the full serialization instead:', reason);
-  document.dispatchEvent(new CustomEvent('clay:save-reprinted', { detail: { reason } }));
-  return today;
+  document.dispatchEvent(new CustomEvent('clay:save-reprinted', { detail: { reason, scope: 'full' } }));
+}
+
+/**
+ * Part of the document was printed rather than copied. Counted apart from a full
+ * reprint because they are different news: this one kept the author's bytes everywhere
+ * else, and its rate says how often the renderer and the page disagree about one
+ * element, which is where the next renderer fix is.
+ */
+function partialReprint(reason, printed) {
+  state.partialReprints++;
+  state.lastPartialReprint = reason;
+  console.info(`clayjs: source map printed ${printed} element(s) in full to match the page:`, reason);
+  document.dispatchEvent(new CustomEvent('clay:save-reprinted', { detail: { reason, scope: 'partial', printed } }));
 }
 
 /**
@@ -196,28 +259,41 @@ function reprint(reason, today) {
  * and the page being told about it. Only the most recent accepted bytes matter, so a
  * burst of saves costs one refresh.
  *
- * One caveat, worth knowing rather than working around: a host that rewrites on the
- * way in leaves this model describing something slightly different from disk.
- * htmlclay strips the save token from the root tag, which was never meant to reach
- * disk, so the model carries one attribute the file does not. It is self-correcting
- * rather than cumulative — the next render copies the token's bytes back out of the
- * model and the host strips them again — so the file stays put and only the model's
- * idea of the root tag is one attribute long.
+ * It is also where a save is counted, because it is the one place that knows a save
+ * reached the file.
  */
 function adopt(bytes) {
   if (!state.installed) return;
+  report(bytes);
   state.pendingBytes = bytes;
   scheduleRefresh();
 }
 
 /**
- * A morph replaced live nodes, so the map is keyed by objects that are no longer in
- * the page. Re-pair against the same model: for a peer frame the bytes on disk did
- * not change, and for a disk frame they changed to something this tab cannot see, so
- * the model is the best available answer either way.
+ * Count and announce an accepted save, if these are the bytes the last render
+ * produced. Bytes this module did not render (a caller of `saveHtml` with its own
+ * string, or an older render) are not its save to report.
  */
-function queueRepair() {
+function report(bytes) {
+  const outcome = state.lastOutcome;
+  if (!outcome || outcome.text !== bytes) return;
+  state.lastOutcome = null;
+  state.saves++;
+  if (outcome.scope === 'full') reprint(outcome.reason);
+  else if (outcome.scope === 'partial') partialReprint(outcome.reason, outcome.printed);
+}
+
+/**
+ * A morph replaced live nodes, so the map is keyed by objects that are no longer in
+ * the page, and it has to be re-paired either way. A DISK frame also carries the bytes
+ * now on disk, written by somebody else: those become the model, the same as bytes this
+ * tab saved, or the next save would copy the old formatting back over theirs. A peer
+ * frame changed nothing on disk, so the model stays.
+ */
+function queueRepair(event) {
   if (!state.installed) return;
+  const detail = event && event.detail;
+  if (detail && detail.source === 'disk' && typeof detail.html === 'string') state.pendingBytes = detail.html;
   scheduleRefresh();
 }
 
@@ -232,45 +308,51 @@ function queueRepair() {
 function scheduleRefresh() {
   if (state.refreshQueued) return;
   state.refreshQueued = true;
-  const run = () => {
-    state.refreshQueued = false;
-    if (!state.installed) return;
-    const bytes = state.pendingBytes;
-    state.pendingBytes = null;
-    const t = now();
-    // The two halves fail independently, so they are tried independently. A refused
-    // re-model used to skip the re-pair with it, and the re-pair is the half that
-    // cannot be skipped: a morph replaced live nodes, so the old map is keyed by
-    // objects no longer in the page, and every save after that reprints the whole
-    // document until something else queues a refresh. The previous model still
-    // describes real bytes, so re-pairing against it is the right answer.
-    let m = state.model;
-    if (bytes !== null) {
-      try {
-        const next = model(bytes);
-        const refused = checkSource(next, document);
-        if (refused) throw new Error(refused);
-        m = next;
-      } catch (err) {
-        console.warn('clayjs: source map kept the previous model, the accepted bytes did not model:', err);
-      }
-    }
+  if (typeof requestIdleCallback === 'function') requestIdleCallback(refreshNow, { timeout: 2000 });
+  else setTimeout(refreshNow, 0);
+}
+
+/**
+ * Run a queued refresh now. A no-op when none is queued, which is also what makes the
+ * idle callback of a refresh that `text()` or `locate()` already ran harmless.
+ */
+function refreshNow() {
+  if (!state.refreshQueued) return;
+  state.refreshQueued = false;
+  if (!state.installed) return;
+  const bytes = state.pendingBytes;
+  state.pendingBytes = null;
+  const t = now();
+  // The two halves fail independently, so they are tried independently. A refused
+  // re-model used to skip the re-pair with it, and the re-pair is the half that
+  // cannot be skipped: a morph replaced live nodes, so the old map is keyed by
+  // objects no longer in the page, and every save after that reprints the whole
+  // document until something else queues a refresh. The previous model still
+  // describes real bytes, so re-pairing against it is the right answer.
+  let m = state.model;
+  if (bytes !== null) {
     try {
-      const { map, stats } = pairAgainstPage(m);
-      state.model = m;
-      state.map = map;
-      state.stats = stats;
-      state.refreshes++;
-      state.timing.refresh = now() - t;
+      const next = model(bytes);
+      const refused = checkSource(next, document);
+      if (refused) throw new Error(refused);
+      m = next;
     } catch (err) {
-      // The map is now stale rather than wrong: it still describes the pairing as of
-      // the last successful refresh. Renders off a stale map verify or fall back like
-      // any other, so this costs formatting fidelity and nothing else.
-      console.warn('clayjs: source map could not re-pair, continuing on the previous map:', err);
+      console.warn('clayjs: source map kept the previous model, the accepted bytes did not model:', err);
     }
-  };
-  if (typeof requestIdleCallback === 'function') requestIdleCallback(run, { timeout: 2000 });
-  else setTimeout(run, 0);
+  }
+  try {
+    const { map, stats } = pairAgainstPage(m);
+    state.model = m;
+    state.map = map;
+    state.stats = stats;
+    state.refreshes++;
+    state.timing.refresh = now() - t;
+  } catch (err) {
+    // The map is now stale rather than wrong: it still describes the pairing as of
+    // the last successful refresh. Renders off a stale map verify or fall back like
+    // any other, so this costs formatting fidelity and nothing else.
+    console.warn('clayjs: source map could not re-pair, continuing on the previous map:', err);
+  }
 }
 
 function summary() {
@@ -287,6 +369,8 @@ function summary() {
     saves: state.saves,
     reprints: state.reprints,
     lastReprint: state.lastReprint,
+    partialReprints: state.partialReprints,
+    lastPartialReprint: state.lastPartialReprint,
     lastRenderMs: state.lastRenderMs,
     lastBytes: state.lastBytes,
     refreshes: state.refreshes,
@@ -297,8 +381,8 @@ function summary() {
 export const source = {
   ready: null,
   stats: summary,
-  /** The bytes this module believes are on disk right now. */
-  text: () => (state.model ? state.model.src : null),
+  /** The bytes this module believes are on disk right now. A refresh still queued from a save or a disk frame runs first, so this is never the file before that. */
+  text: () => { refreshNow(); return state.model ? state.model.src : null; },
   /**
    * Where a live element is in those bytes: `{ from, to, line, column }`, or null.
    *
@@ -312,7 +396,7 @@ export const source = {
    * agent that cannot tell "this element is new" from "this document has no map" will eventually
    * write into a file it was never modelling.
    */
-  locate: (node) => (state.installed && node ? locate(node, state.map, state.model) : null),
+  locate: (node) => { refreshNow(); return state.installed && node ? locate(node, state.map, state.model) : null; },
   /** What did not pair, for working out why a document reprints more than it should. */
   unpaired: () => (state.stats
     ? { live: state.stats.unmatchedLive.slice(0, 50), source: state.stats.unmatchedSource.slice(0, 50) }

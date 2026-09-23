@@ -169,6 +169,16 @@ describe("the plugin, end to end", () => {
     await mod.source.ready;
   });
 
+  // A save the host took. Counting and the event wait for this: a render is not a save,
+  // and a refused or skipped one never reached the file.
+  async function accept(html) {
+    global.fetch = jest.fn(async () => ({
+      ok: true, status: 200, statusText: "OK", text: async () => JSON.stringify({ msg: "Saved" })
+    }));
+    saveCore.resetSaveAttempts();
+    await saveCore.saveHtml(html);
+  }
+
   test("it installed, and paired the whole document", () => {
     const stats = source.source.stats();
     expect(stats.installed).toBe(true);
@@ -198,21 +208,62 @@ describe("the plugin, end to end", () => {
     expect(out.split("\n").length).toBe(SRC.split("\n").length);
   });
 
-  test("a render that changes the tree falls back, counts, and says so", () => {
+  test("a render that changes the tree falls back, and counts and says so once the host takes it", async () => {
     const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
     const events = [];
-    document.addEventListener("clay:save-reprinted", (e) => events.push(e.detail));
+    const onEvent = (e) => events.push(e.detail);
+    document.addEventListener("clay:save-reprinted", onEvent);
 
-    const before = source.source.stats().reprints;
+    const before = source.source.stats();
     const clone = snapshot.captureSaveClone();
     const today = "<!DOCTYPE html>" + clone.outerHTML;
     const out = source.renderSave(clone, today, { corrupt: "drop-first-text" });
 
     expect(out).toBe(today);                                // the floor: today's bytes
-    expect(source.source.stats().reprints).toBe(before + 1);
-    expect(events).toHaveLength(1);
-    expect(typeof events[0].reason).toBe("string");
+    expect(source.source.stats().reprints).toBe(before.reprints);   // rendered, not saved
+    expect(events).toHaveLength(0);
+
+    await accept(out);
+    expect(source.source.stats().reprints).toBe(before.reprints + 1);
+    expect(source.source.stats().saves).toBe(before.saves + 1);
+    expect(events).toEqual([expect.objectContaining({ scope: "full", reason: expect.any(String) })]);
     expect(warn).toHaveBeenCalled();
+
+    await accept(out);                                      // the same bytes again: not this render's save
+    expect(source.source.stats().reprints).toBe(before.reprints + 1);
+
+    await accept(SRC);                                      // the file as the tests after this one expect it
+    expect(source.source.text()).toBe(SRC);
+    document.removeEventListener("clay:save-reprinted", onEvent);
+    warn.mockRestore();
+  });
+
+  test("a render that fails in one element prints that element and copies the rest", async () => {
+    const info = jest.spyOn(console, "info").mockImplementation(() => {});
+    const events = [];
+    const onEvent = (e) => events.push(e.detail);
+    document.addEventListener("clay:save-reprinted", onEvent);
+
+    const before = source.source.stats();
+    const clone = snapshot.captureSaveClone();
+    const today = "<!DOCTYPE html>" + clone.outerHTML;
+    const out = source.renderSave(clone, today, { doubleCopied: "alpha" });
+
+    expect(out).not.toBe(today);                            // not the full serialization
+    expect(out).toContain('<li data-id="a">alpha</li>');   // the failing element, printed
+    expect(out).toContain("<ul id=list>");                  // its parent, still the author's bytes
+    expect(source.source.stats().partialReprints).toBe(before.partialReprints);
+    expect(events).toHaveLength(0);
+
+    await accept(out);
+    expect(source.source.stats().reprints).toBe(before.reprints);
+    expect(source.source.stats().partialReprints).toBe(before.partialReprints + 1);
+    expect(events).toEqual([expect.objectContaining({ scope: "partial", printed: 1 })]);
+
+    await accept(SRC);
+    expect(source.source.text()).toBe(SRC);
+    document.removeEventListener("clay:save-reprinted", onEvent);
+    info.mockRestore();
   });
 
   test("a render that changes only bytes is sent, because the document is the same", () => {
@@ -335,5 +386,31 @@ describe("the refresh runs on a sync frame, and costs the page nothing else", ()
     await saveCore.saveHtml(adopted);
     await flush();
     expect(source.source.text()).toBe(adopted);
+  });
+
+  test("text() right after a save resolves is the bytes that save sent", async () => {
+    const sent = source.source.text().replace("<li data-id='b'>beta</li>", "<li data-id='b'>BETA</li>");
+    global.fetch = jest.fn(async () => ({
+      ok: true, status: 200, statusText: "OK", text: async () => JSON.stringify({ msg: "Saved" })
+    }));
+    saveCore.resetSaveAttempts();
+    await saveCore.saveHtml(sent);
+    expect(source.source.text()).toBe(sent);           // no flush: nothing waits for the idle callback
+  });
+
+  test("a disk frame's bytes are what the plugin models next", () => {
+    // Somebody else wrote the file. Re-pairing against the old model would copy the old
+    // formatting back over theirs on this tab's next save.
+    const disk = source.source.text().replace("<li data-id='a'>alpha</li>", '<li data-id="a">alpha</li>');
+    document.dispatchEvent(new CustomEvent("clay:sync-applied", {
+      detail: { seq: 1, source: "disk", etag: null, by: null, html: disk }
+    }));
+    expect(source.source.text()).toBe(disk);
+  });
+
+  test("a peer frame re-pairs but models nothing new", () => {
+    const before = source.source.text();
+    document.dispatchEvent(new CustomEvent("clay:sync-applied", { detail: { seq: 2, source: "peer", by: null } }));
+    expect(source.source.text()).toBe(before);
   });
 });
