@@ -3,6 +3,8 @@ import query from "../lib/query.js";
 import { hasSaveToken, servedStaleToken } from "./host-attrs.js";
 
 // Edit-mode precedence: an explicit ?editmode=true|false URL param wins, then an
+// authored `viewonly` attribute on <html> (a tool page that must never save its
+// runtime state, even on a host that hands it a save token), then an
 // opt-in window.clayEditMode global (with the legacy window.__hyperclayEditMode
 // still honored as a fallback for older standalone embedders — htmlclay itself
 // uses its injected save token plus the admin cookie, not this global), then
@@ -32,9 +34,12 @@ if (typeof window !== "undefined") {
 // explicit ?editmode=true outranks it, because that is a person at the keyboard asking
 // for it this load, not a decision baked into the document by an author who could not
 // have known. stale-host-notice.js puts the reason on the page.
+const isViewOnlyDocument =
+  typeof document !== "undefined" && document.documentElement.hasAttribute("viewonly");
+
 const isEditMode = query.editmode
-  ? query.editmode === "true" // takes precedence over the global, token and cookie
-  : servedStaleToken()
+  ? query.editmode === "true" // takes precedence over viewonly, the global, token and cookie
+  : isViewOnlyDocument || servedStaleToken()
     ? false
     : forcedEditMode != null
       ? forcedEditMode

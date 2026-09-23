@@ -57,7 +57,8 @@ query params on the script URL:
 - `?exclude=` — drop a plugin that would otherwise load (a default, or one another plugin pulled in).
 - `?editmode=false` — force view mode (URL param wins over everything else).
 
-Edit mode is decided in this order: the `?editmode` param, then `window.clayEditMode`,
+Edit mode is decided in this order: the `?editmode` param, then a `viewonly` attribute
+on `<html>` (a page that never saves itself), then `window.clayEditMode`,
 then a save token stamped on `<html>` by the host, then the platform's owner cookie. Hosts
 and save tokens are covered in [the reference](https://github.com/panphora/clayjs/blob/main/docs/reference.md) and on
 [clayjs.com/docs](https://clayjs.com/docs#editmode).
