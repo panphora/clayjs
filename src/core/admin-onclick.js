@@ -8,6 +8,11 @@ export function disableOnClickBeforeSave () {
   addDocumentTransform(docElem => {
     docElem.querySelectorAll(SELECTOR).forEach(resource => {
       const originalValue = resource.getAttribute("onclick");
+      // Only an element edit mode activated has an onclick to put back. One whose
+      // inert-onclick was empty or missing was never activated, so its authored
+      // attributes are already right, and `setAttribute(name, null)` would store the
+      // string "null" in the file.
+      if (originalValue === null) return;
       resource.setAttribute("inert-onclick", originalValue);
       resource.removeAttribute("onclick");
     });

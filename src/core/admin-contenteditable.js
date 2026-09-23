@@ -27,7 +27,10 @@ export function enableContentEditableForAdminOnPageLoad () {
 export function enableContentEditable(root = document) {
   root.querySelectorAll(SELECTOR).forEach(el => {
     const val = el.getAttribute("inert-contenteditable");
-    el.setAttribute("contenteditable", ["", "false", "plaintext-only"].includes(val) ? val : "true");
+    // Keywords match ASCII case-insensitively, so `FALSE` means false. The author's own
+    // spelling is what gets written, so the save transform puts it back unchanged.
+    const keyword = val === null ? null : val.toLowerCase();
+    el.setAttribute("contenteditable", ["", "true", "false", "plaintext-only"].includes(keyword) ? val : "true");
     el.removeAttribute("inert-contenteditable");
   });
 }
