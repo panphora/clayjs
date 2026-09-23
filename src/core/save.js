@@ -23,7 +23,7 @@ import {
 import { captureForComparison, captureForComparisonAndDirty, captureForSaveAndComparison } from "./snapshot.js";
 import { seedEtag } from "./etag.js";
 import { gateCaptureToken, gateClearIfUnchanged } from "../lib/dirty-gate.js";
-import { ROOT_LIBRARY_ATTRS } from "../lib/root-attrs.js";
+import { ROOT_LIBRARY_ATTRS, SAVE_TOKEN_ATTRS, LEGACY_SAVE_TOKEN_ATTRS } from "../lib/root-attrs.js";
 import { logSaveCheck, logBaseline } from "../lib/autosave-debug.js";
 import { initUserGesture, markExplicitSave, clearExplicitSave } from "../lib/user-gesture.js";
 
@@ -41,6 +41,18 @@ import { initUserGesture, markExplicitSave, clearExplicitSave } from "../lib/use
 // content. Both clones get this, so the dirty comparison sees no difference.
 addDocumentTransform(clone => {
   for (const name of ROOT_LIBRARY_ATTRS) clone.removeAttribute(name);
+});
+
+// Keep the host's save token out of the saved bytes, both spellings.
+//
+// It is a credential for this response, never file content: htmlclay strips it from
+// every save body on arrival, so it never reached disk anyway. Sending it made the
+// source map, which models the bytes a save sent, describe a root tag one attribute
+// longer than the file, and every offset after it was off by that much. The save
+// itself is authorized by the URL, which reads the token from the live page. The
+// document id is NOT stripped: htmlclay keeps it on disk on purpose.
+addDocumentTransform(clone => {
+  for (const name of [...SAVE_TOKEN_ATTRS, ...LEGACY_SAVE_TOKEN_ATTRS]) clone.removeAttribute(name);
 });
 
 // ============================================

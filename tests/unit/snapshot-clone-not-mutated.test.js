@@ -124,9 +124,10 @@ describe.each([
   });
 
   test("the saved bytes keep the root attribute order the host wrote", () => {
+    // Minus the save token, which a save never carries: the host strips it on arrival.
     const rootTag = /<html\b[^>]*>/i.exec(savedBody)[0];
     const names = [...rootTag.matchAll(/\s([a-z-]+)=/gi)].map((m) => m[1]);
-    expect(names).toEqual(order);
+    expect(names).toEqual(order.filter((name) => name !== "htmlclaytoken"));
   });
 });
 
