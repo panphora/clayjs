@@ -27,6 +27,9 @@ beforeAll(async () => {
     <input id="title" persist placeholder="title">
     <input id="admin" viewmode:disabled>
     <p>content</p>`;
+  // A value typed (or autofilled) before boot, so the persist transform has something
+  // to write: an empty input now correctly saves with no value attribute at all.
+  document.getElementById("title").value = "typed";
   const { core } = resolveModules(new URLSearchParams(), true);
   const loaded = {};
   for (const path of core) loaded[path] = await MODULES[path]();
@@ -40,7 +43,7 @@ test("the checks below ran before the settled capture", () => {
 });
 
 test("the boot baseline is taken with every core snapshot transform registered", () => {
-  expect(baselineAtBoot).toMatch(/<input id="title"[^>]*\svalue=""/);
+  expect(baselineAtBoot).toMatch(/<input id="title"[^>]*\svalue="typed"/);
   expect(baselineAtBoot).toMatch(/<input id="admin"[^>]*\sdisabled=""/);
 });
 

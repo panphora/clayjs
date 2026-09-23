@@ -48,20 +48,24 @@ export function serializeControlToAttributes(el) {
   }
 }
 
+// Writes only what changes what a reload would show. A control whose attributes
+// already reload as its live state is left exactly as the author wrote it, because a
+// source-preserving save copies the author's bytes for every node the save did not
+// change, and a rewrite here is a change.
 export function finalizeControlForSave(target, source = target) {
   const tag = target.tagName;
   if (tag === "INPUT") {
     const type = inputType(target);
     if (type === "checkbox" || type === "radio") {
-      if (source.checked) target.setAttribute("checked", "");
-      else target.removeAttribute("checked");
-    } else {
+      if (!source.checked) target.removeAttribute("checked");
+      else if (!target.hasAttribute("checked")) target.setAttribute("checked", "");
+    } else if (source.value !== (target.getAttribute("value") ?? "")) {
       target.setAttribute("value", source.value);
     }
     return;
   }
   if (tag === "TEXTAREA") {
-    target.textContent = source.value;
+    if (target.textContent !== source.value) target.textContent = source.value;
     target.removeAttribute("data-value");
     return;
   }
@@ -69,8 +73,8 @@ export function finalizeControlForSave(target, source = target) {
     const tOpts = target.options;
     const sOpts = source.options;
     for (let i = 0; i < tOpts.length; i++) {
-      if (sOpts[i] && sOpts[i].selected) tOpts[i].setAttribute("selected", "");
-      else tOpts[i].removeAttribute("selected");
+      if (!(sOpts[i] && sOpts[i].selected)) tOpts[i].removeAttribute("selected");
+      else if (!tOpts[i].hasAttribute("selected")) tOpts[i].setAttribute("selected", "");
     }
   }
 }
