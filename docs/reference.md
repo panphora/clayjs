@@ -221,9 +221,10 @@ arms it with a cookie for the owner, and Hyperclay Local and HTML Clay arm it fo
 files automatically. Resolution order:
 
 1. `?editmode=true` / `?editmode=false` in the URL
-2. `window.clayEditMode` set before clay.js loads
-3. A save token the host put on the root element
-4. The platform's owner cookie
+2. `<html viewonly>`: the page never saves itself (a tool that renders runtime state)
+3. `window.clayEditMode` set before clay.js loads
+4. A save token the host put on the root element
+5. The platform's owner cookie
 
 Serving files from your own server? Arm it yourself:
 
@@ -353,8 +354,8 @@ token variant, `POST /_/save/{token}`, read from `<html savetoken>`.
   changed. Edit mode only.
 
   ```js
-  clay.source.stats();   // { installed, paired, saves, reprints, lastReprint, ... }
-  document.addEventListener("clay:save-reprinted", (e) => console.warn(e.detail.reason));
+  clay.source.stats();   // { installed, paired, saves, reprints, partialReprints, lastReprint, ... }
+  document.addEventListener("clay:save-reprinted", (e) => console.warn(e.detail.scope, e.detail.reason));
 
   clay.source.text();      // the bytes clay believes are on disk right now
   clay.source.locate(el);  // { from, to, line, column } for a live element, or null
@@ -363,7 +364,8 @@ token variant, `POST /_/save/{token}`, read from `<html savetoken>`.
   `text()` and `locate()` are the pair an editing tool needs: read the file as it will be
   written, point at an element in the live page, and express an edit as a range in those
   bytes rather than as a DOM mutation. No ids written into the file, and no map that has to
-  survive a reload.
+  survive a reload. Both answer for the file as of the last accepted save or the last
+  live-sync frame from disk, whichever came later: a refresh still waiting runs first.
 
   **The offsets and `column` are UTF-16 code units into `text()`, not bytes.** Slice the
   string `text()` returns and the answer is exact. Hand the same numbers to something that
@@ -379,10 +381,15 @@ token variant, `POST /_/save/{token}`, read from `<html savetoken>`.
   implied tag that does hold content locates to the bytes it occupies, which are its
   children's, because there are no tag bytes to include.
 
-  Every save is reparsed and compared against the page before it is sent. Anything
-  that does not match exactly is sent as the ordinary full serialization instead, so
-  the worst case is the behaviour without the plugin; `clay:save-reprinted` fires when
-  that happens and `clay.source.stats()` counts it. It costs an HTML parser (about
+  Every save is reparsed and compared against the page before it is sent. Where it
+  differs, the element it differs in is printed the way the browser would print it and
+  the rest is still copied, widening to the parent while the check still fails. Only a
+  failure that reaches `<html>`, or has no element to point at, sends the ordinary full
+  serialization, so the worst case is the behaviour without the plugin.
+  `clay:save-reprinted` fires for an accepted save that needed either, with
+  `detail.scope` `'partial'` or `'full'` (and `detail.printed`, the element count, on a
+  partial one), and `stats()` counts them as `partialReprints` and `reprints`. A render
+  the host never accepted counts nothing. It costs an HTML parser (about
   48 KB compressed) and one request for the file's own bytes at load, both in edit mode
   only; `exclude=source` is how a page declines to pay that. It does nothing, silently
   and safely, when that request fails, redirects, is not `text/html`, or returns
