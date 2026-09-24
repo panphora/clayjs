@@ -36,6 +36,9 @@ export const PLUGIN_PATHS = {
   // superset of the cms's, so the plugin is present exactly when it can be used.
   upload:    { path: "plugins/upload.js",          editOnly: true,  default: false },
   wire:      { path: "plugins/wire.js",            editOnly: false, default: false },
+  // Edit mode only: the AI comment box is an editing gesture, and the plugin is
+  // dormant anyway on any host that does not list a ready `ai-edit` helper.
+  "ai-edit": { path: "plugins/ai-edit.js",         editOnly: true,  default: false },
   demo:      { path: "plugins/demo.js",            editOnly: false, default: false },
   // Saves the file's own bytes back instead of a fresh serialization of the DOM.
   // editOnly because a page that cannot save has nothing to preserve. On by default
@@ -84,13 +87,14 @@ export const MODULES = {
   "vendor/quickcrop.vendor.js": () => import("./vendor/quickcrop.vendor.js"),
   "plugins/upload.js":          () => import("./plugins/upload.js"),
   "plugins/wire.js":            () => import("./plugins/wire.js"),
+  "plugins/ai-edit.js":         () => import("./plugins/ai-edit.js"),
   "plugins/demo.js":            () => import("./plugins/demo.js"),
   "plugins/source.js":          () => import("./plugins/source.js"),
 };
 
 // `source` is last on purpose: its install captures a save clone, so it wants every
 // plugin that registers a document transform to have registered it first.
-const PLUGIN_ORDER = ["richclay", "indicator", "sortable", "undo", "quickcrop", "upload", "cms", "sync", "wire", "demo", "source"];
+const PLUGIN_ORDER = ["richclay", "indicator", "sortable", "undo", "quickcrop", "upload", "cms", "sync", "wire", "ai-edit", "demo", "source"];
 
 // A plugin that cannot do its whole job alone. hypercms reads the cropper through
 // a capability lookup (`clay.quickcrop`) and silently uploads the raw file when it
@@ -108,7 +112,9 @@ const PLUGIN_ORDER = ["richclay", "indicator", "sortable", "undo", "quickcrop", 
 // This is the only line in the capability that changes how an already-published
 // page behaves, which is why it shipped alone, one release after the plugin it
 // enables. Reverting it is reverting this line.
-const IMPLIES = { cms: ["quickcrop", "upload"] };
+// ai-edit reads `clay.wire.helpers()` and sends through `clay.wire.send`, so a page
+// that asks for it has to have the wire. The wire loads first in the order above.
+const IMPLIES = { cms: ["quickcrop", "upload"], "ai-edit": ["wire"] };
 
 function parseCsv(params, key, enabled, apply) {
   const raw = params.get(key);

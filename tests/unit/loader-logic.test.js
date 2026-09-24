@@ -117,6 +117,33 @@ describe("resolveModules", () => {
       .toEqual(["vendor/richclay.vendor.js"]);
   });
 
+  // ai-edit is a consumer of clay.wire: it asks `clay.wire.helpers()` whether the
+  // host runs it and sends through `clay.wire.send`. Asking for it has to bring the
+  // wire, and the wire has to load first, or the plugin evaluates against nothing.
+  test("plugins=ai-edit implies wire, which loads before it", () => {
+    const { plugins } = resolveModules(params({ plugins: "ai-edit" }), true);
+    expect(plugins).toContain("plugins/wire.js");
+    expect(plugins.indexOf("plugins/wire.js"))
+      .toBeLessThan(plugins.indexOf("plugins/ai-edit.js"));
+  });
+
+  // editOnly, like upload: the comment box is an editing gesture, and no host lists
+  // a ready helper to a page that cannot edit. The wire it implies stays, because
+  // the wire itself works in view mode.
+  test("ai-edit is dropped in view mode, leaving the wire it implied", () => {
+    expect(resolveModules(params({ plugins: "ai-edit" }), false).plugins)
+      .toEqual(["plugins/wire.js"]);
+  });
+
+  // Both paths are droppable by name: `exclude=wire` takes the implied wire back
+  // out, and excluding the plugin itself takes the pair out.
+  test("exclude drops the ai-edit path and the wire path it implied", () => {
+    expect(resolveModules(params({ plugins: "ai-edit", exclude: "wire" }), true).plugins)
+      .toEqual(["vendor/richclay.vendor.js", "plugins/ai-edit.js", "plugins/source.js"]);
+    expect(resolveModules(params({ plugins: "ai-edit", exclude: "wire,ai-edit" }), true).plugins)
+      .toEqual(["vendor/richclay.vendor.js", "plugins/source.js"]);
+  });
+
   test("unknown plugin name warns and is skipped (plugins param)", () => {
     const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
     const { plugins } = resolveModules(params({ plugins: "bogus,indicator" }), true);

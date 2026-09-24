@@ -114,6 +114,8 @@ function attachPluginMember(path, mod) {
     clay.upload = mod.upload || mod.default;
   } else if (path === "plugins/wire.js") {
     clay.wire = mod.wire || mod.default;
+  } else if (path === "plugins/ai-edit.js") {
+    clay.aiEdit = mod.aiEdit || mod.default;
   } else if (path === "plugins/demo.js") {
     clay.demo = mod.demo;
   } else if (path === "vendor/richclay.vendor.js") {
