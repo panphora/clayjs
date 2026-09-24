@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.4.0] - 2026-09-24
+
+### Added
+- ai-edit plugin that turns comments into AI edits
+- Documentation for the ai-edit plugin
+- Documentation for partial reprints and viewonly pages
+
+### Changed
+- Control state attributes are written only when a reload differs
+- Managed attributes are saved in the author's original spelling
+- Save verification failures print only the failing element
+- Updated vendored hyper-morph to 0.5.4, which limits sync-ignore markers to the morph root
+
+### Fixed
+- A viewonly page no longer enters edit mode
+- The host save token is stripped from saved bytes
+- Text-only noscript content is written raw on save
+
+
+
 ## [Unreleased]
 
 ### Added
