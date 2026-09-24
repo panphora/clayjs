@@ -51,7 +51,7 @@ query params on the script URL:
 <script src="https://clayjs.com/v1/clay.js?plugins=sync,cms&exclude=indicator"></script>
 ```
 
-- `?plugins=` — add optional plugins: `sync`, `cms`, `undo`, `sortable`, `indicator`, `quickcrop`, `upload`, `wire`, `demo`.
+- `?plugins=` — add optional plugins: `sync`, `cms`, `undo`, `sortable`, `indicator`, `quickcrop`, `upload`, `wire`, `ai-edit`, `demo`.
   Only `richclay` loads by default, and only in edit mode. `cms` brings `quickcrop` with it, because
   the CMS uses it for `data-hcms-crop` image fields.
 - `?exclude=` — drop a plugin that would otherwise load (a default, or one another plugin pulled in).

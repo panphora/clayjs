@@ -42,7 +42,7 @@ conditionally through the URL, in the browser only:
 - `?exclude=` remove a default-on plugin, e.g. `clay.js?exclude=richclay`
 
 Loadable plugins: `richclay` (default on), `source` (default on), `indicator`, `sync`,
-`sortable`, `undo`, `cms`, `quickcrop`, `upload`, `wire`, `demo`.
+`sortable`, `undo`, `cms`, `quickcrop`, `upload`, `wire`, `ai-edit`, `demo`.
 
 Everything else is a separate library ("satellite") with its own script tag: clay-ui,
 clay-events, clay-options, clay-dom, all.js, clay-utils, clay-internals, clay-data,
@@ -104,6 +104,8 @@ itself, with no network.
 - `clay.upload` — pick a file and get it into the page (upload plugin).
 - `clay.wire` — per-file control channel to a process on the user's machine: `send`,
   `cancel`, `get`, `list`, `isBusy`, `on` (wire plugin).
+- `clay.aiEdit` — the AI comment box: `clay.aiEdit.init()` (ai-edit plugin; booted by the
+  plugin itself, and a no-op unless the host lists a ready `ai-edit` wire helper).
 - `clay.region` — region policy helpers and strip selectors (see clay.internals.region;
   the same object, also published as `STRIP_FROM_SAVE`-style constants).
 
@@ -346,6 +348,15 @@ token variant, `POST /_/save/{token}`, read from `<html savetoken>`.
   line from the same line arriving again.
 
   Also `cancel`, `get`, `list`, `isBusy`. Works in view mode too.
+- `ai-edit` (`?plugins=ai-edit`, which brings `wire` with it) — comment-to-edit AI editing:
+  the same box Hyperclay Local has always shown on `/_/bus`, now a named helper request on the
+  wire. Hover a heading or paragraph for the 💬 chip, press ⌘K with the caret in one (a
+  selection rides along as a quote), click bare section padding for the nearest unit, or use the
+  bottom-right bubble for the whole page. Keep saves the result through `clay.save()`; Revert puts
+  the snapshot back. A leading `@token` picks the engine, `@file.ext` adds context, and `@page`
+  saves the page first so the helper reads it from disk. Edit mode only, and dormant unless
+  `clay.wire.helpers()` lists a ready `ai-edit` — so a page on HTML Clay loads it and does
+  nothing with it.
 - `source` (default on; `?exclude=source` to turn it off) — saves the file rather than
   a fresh printout of the page. Without it, every save rebuilds the document from the DOM, which reorders
   attributes, renormalises quoting and reprints every tag: a save that changes nothing

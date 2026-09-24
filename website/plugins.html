@@ -111,6 +111,14 @@ const outcome = await run.done;</code></pre>
     </div>
 
     <div class="libcard">
+      <div class="lib-name" id="ai-edit">ai-edit <span class="tag">plugin · ask by name</span></div>
+      <p class="lib-prob">“I want to describe a change to this section in words and have it made.”</p>
+      <p>Comment-to-edit AI editing, built on the wire. Hover a heading or paragraph for the chip, press ⌘K with the caret in one (a selection rides along as a quote), click bare section padding for the nearest unit, or use the bottom-right bubble for the whole page. The comment goes to the host’s <code>ai-edit</code> helper as a named wire request and comes back as that element’s HTML, morphed in place: <strong>Keep</strong> saves it, <strong>Revert</strong> puts the snapshot back. <code>@file.ext</code> in the comment adds context, and <code>@page</code> saves the page first so the helper reads it from disk.</p>
+      <pre><code class="language-markup">&lt;script src="https://clayjs.com/v1/clay.js?plugins=ai-edit"&gt;&lt;/script&gt;</code></pre>
+      <p class="small">Asking for <code>ai-edit</code> loads <code>wire</code> with it. It is dormant unless the host lists a ready <code>ai-edit</code> helper, so a page on HTML Clay loads it and does nothing with it. Edit mode only. The host side is Hyperclay Local with AI editing turned on.</p>
+    </div>
+
+    <div class="libcard">
       <div class="lib-name" id="source">source <span class="tag">plugin &middot; on by default</span></div>
       <p class="lib-prob">&ldquo;Saving reformats my whole file, and now I cannot read my own diffs.&rdquo;</p>
       <p>Saves the file rather than a fresh printout of the page. Without it, every save rebuilds the document from the browser's DOM, which reorders attributes, renormalises quoting and reprints every tag: a save that changes nothing rewrites about 88% of a hand-written file's lines. With it, clay keeps the bytes the file was loaded from, pairs each element to its place in them, and reprints only what actually changed. A save that changes nothing changes nothing.</p>
