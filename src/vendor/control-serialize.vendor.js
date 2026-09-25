@@ -65,7 +65,10 @@ export function finalizeControlForSave(target, source = target) {
     return;
   }
   if (tag === "TEXTAREA") {
-    if (target.textContent !== source.value) target.textContent = source.value;
+    // The HTML parser drops one newline right after <textarea>, so a value that
+    // starts with one needs a sacrificial newline to survive a reload.
+    const text = source.value.startsWith("\n") ? "\n" + source.value : source.value;
+    if (target.textContent !== text) target.textContent = text;
     target.removeAttribute("data-value");
     return;
   }
