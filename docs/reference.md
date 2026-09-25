@@ -95,6 +95,7 @@ itself, with no network.
   `clay="no-watch"` regions.
 - `clay.morph(oldEl, newEl)` — content-based DOM morphing engine: morphs `oldEl` in
   place to match `newEl`, preserving focus, inputs, and animations (sync plugin).
+  Its signature is unchanged on hyper-morph 1.0.
 - `clay.undo` — document-wide undo singleton: `clay.undo.undo()` / `clay.undo.redo()`
   (undo plugin).
 - `clay.cms` — the content panel: `clay.cms.open()` (cms plugin).
@@ -207,10 +208,12 @@ two elements, one of each.
   edit made here is saved but never compared — the page reads dirty forever. Use
   `clay.addDocumentTransform(fn)` to change what gets saved.
 - `clay:sync-applied` — a live-sync update landed (sync plugin); detail
-  `{seq, source, by}`, plus `etag` on a disk frame. `source` is `peer` (another open
+  `{seq, source, by, report}`, plus `etag` on a disk frame. `source` is `peer` (another open
   copy) or `disk` (the file changed underneath you). `by` is the `{id, name}` the host
   stamped on the frame, or `null` on a frame nobody stamped; hosts stamp live-lane
   frames only, so a disk frame's `by` is normally `null`.
+  `report` is hyper-morph's merge report: `conflicts` lists every place both sides
+  changed the same content, with the text this tab lost when the incoming side won.
 - `clay:sorted` — a drag-drop reorder landed (sortable plugin); fires on the container
   and bubbles; detail `{item, from, to, oldIndex, newIndex}`.
 - `clay:view-save-attempt` — a visitor clicked a `[trigger-save]` element in view mode;
@@ -295,7 +298,9 @@ token variant, `POST /_/save/{token}`, read from `<html savetoken>`.
   the attribute is an inert marker; no editor chrome is written to disk.
 - `indicator` — a ready-made save-status chip driven by the `clay:save-*` events.
 - `sync` — live sync: outside file changes and other open tabs merge into the page in
-  place, preserving focus, caret, and unsaved dirty regions. Powers `clay.morph` and
+  place, preserving focus, caret, and unsaved edits (a three-way merge: both sides'
+  edits survive, and the incoming change wins where both changed the same words).
+  Powers `clay.morph` and
   the `merge="name"` JSON script-tag merging.
 - `sortable` — drag-drop reordering; fires `clay:sorted`.
 - `undo` — document-wide undo/redo built on DOM mutations: moves, deletions, and

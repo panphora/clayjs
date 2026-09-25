@@ -4,12 +4,11 @@ import { jest } from "@jest/globals";
  * The peer lane of scoped live sync inside _doApplyUpdate:
  *
  *   - clean tab: a peer frame full-morphs, nothing is protected;
- *   - dirty tab: the locally-edited section is spliced into the frame before
- *     the morph, so the peer's frame cannot clobber it;
+ *   - dirty tab: a three-way merge keeps this tab's edits and takes the peer's;
  *   - lastHtml stays the RAW incoming frame after a protected apply — the
  *     two-frame burst here is the regression: a patched lastHtml would make
  *     frame two's diff read the protected section as clean and clobber it;
- *   - no baseline / unmergeable dirty root: the whole frame holds.
+ *   - no baseline: the whole frame holds.
  *
  * jsdom ships no EventSource; the fake must be installed before importing
  * live-sync.js (its singleton auto-starts, and this file runs in edit mode).
@@ -148,24 +147,45 @@ test("dirty tab with no baseline yet: the frame holds, nothing morphs", async ()
   sync.stop();
 });
 
-test("dirty tab with an unmergeable (keyless) edit holds the whole frame", async () => {
+test("dirty tab: keyless edits to different paragraphs both survive", async () => {
+  const sync = makeSync();
+  document.body.innerHTML = "<main><p>one</p><p>two</p></main>";
+  sync.lastHtml = captureFrame();
+  const lastBefore = sync.lastHtml;
+
+  document.querySelector("main p").textContent = "one-local";
+  await Promise.resolve();
+
+  const frame = lastBefore.replace("two", "two-peer");
+  await sync._doApplyUpdate(frame, 9, null);
+
+  const ps = [...document.querySelectorAll("main p")].map((p) => p.textContent);
+  expect(ps).toEqual(["one-local", "two-peer"]);
+  expect(sync.lastHtml).toBe(frame);
+  expect(sync._holdRetryPeer).toBeNull();
+  sync.stop();
+});
+
+test("dirty tab: both rewrote the same word, the peer's version wins and it is reported", async () => {
   const sync = makeSync();
   document.body.innerHTML = "<main><p>orig</p></main>";
   sync.lastHtml = captureFrame();
-  const lastBefore = sync.lastHtml;
+  const frame = sync.lastHtml.replace("orig", "peer-edit");
 
   document.querySelector("main p").textContent = "local-edit";
   await Promise.resolve();
 
-  const frame = lastBefore.replace("orig", "peer-edit");
-  await sync._doApplyUpdate(frame, 9, null);
+  let detail = null;
+  const onApplied = (e) => { detail = e.detail; };
+  document.addEventListener("clay:sync-applied", onApplied);
+  try {
+    await sync._doApplyUpdate(frame, 9, null);
+  } finally {
+    document.removeEventListener("clay:sync-applied", onApplied);
+  }
 
-  expect(document.querySelector("main p").textContent).toBe("local-edit");
-  expect(document.body.innerHTML).not.toContain("peer-edit");
-  // A held frame must not advance the diff base either.
-  expect(sync.lastHtml).toBe(lastBefore);
-  // A retry is scheduled so the frame still applies if the edit is undone.
-  expect(sync._holdRetryPeer).not.toBeNull();
+  expect(document.querySelector("main p").textContent).toBe("peer-edit");
+  expect(detail.report.conflicts.length).toBeGreaterThan(0);
   sync.stop();
 });
 
@@ -199,8 +219,8 @@ describe("the stamp a peer frame carries", () => {
   test("is refused when the frame holds, so the overwrite becomes a conflict instead", async () => {
     const sync = makeSync();
     document.body.innerHTML = "<main><p>orig</p></main>";
-    sync.lastHtml = captureFrame();
-    const frame = sync.lastHtml.replace("orig", "peer-edit");
+    sync.lastHtml = null; // no baseline yet: the one case that still holds
+    const frame = '<html><head></head><body><main><p>peer-edit</p></main></body></html>';
 
     document.querySelector("main p").textContent = "local-edit";
     await Promise.resolve();

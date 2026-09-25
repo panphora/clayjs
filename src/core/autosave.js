@@ -16,6 +16,7 @@ import { savePageThrottled } from "./save.js";
 import { markUserDriven } from "../lib/user-gesture.js";
 import { resolveRegionPolicy, skipForPolicy } from "../lib/region-policy.js";
 import { PERSIST, AUTOSAVE } from "../lib/attr-aliases.js";
+import { setAutosaveActive } from "../lib/autosave-state.js";
 
 /**
  * Initialize auto-save on DOM changes
@@ -65,6 +66,7 @@ function initSaveOnPersistInput() {
 function init() {
   if (!document.documentElement.matches(AUTOSAVE)) return;
   if (!isEditMode) return;
+  setAutosaveActive(true);
   // initUserGesture moved to save.js's init: gesture provenance belongs to every
   // editable page, not only the ones with <html autosave>.
   initSavePageOnChange();

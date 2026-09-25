@@ -258,12 +258,13 @@ function skipped_(msg) {
  * where the write may or may not have landed, so it is not treated as success
  * either.
  */
-function applySaveResult(result, forComparison, forDirty, label, gateToken) {
+function applySaveResult(result, forComparison, forDirty, label, gateToken, forSave = null) {
   if (result.ok) {
     // Both baselines advance from the SAME pre-request capture, never from the
     // live DOM, so an edit made while the request was on the wire stays unsaved.
     lastSavedContents = forComparison;
     lastSavedDirty = forDirty;
+    lastSavedBytes = forSave;
     unsavedChanges = false;
     // Generation-checked: clears the scoped-sync dirty gate only if nothing
     // changed while this save was on the wire.
@@ -312,6 +313,11 @@ export function getUnsavedChanges() { return unsavedChanges; }
 export function setUnsavedChanges(val) { unsavedChanges = val; }
 export function getLastSavedContents() { return lastSavedContents; }
 export function getLastSavedDirty() { return lastSavedDirty; }
+
+// The bytes the last successful save wrote. Live sync merges disk frames
+// against them: they are what the file held when this tab last agreed with it.
+let lastSavedBytes = null;
+export function getLastSavedBytes() { return lastSavedBytes; }
 
 /**
  * Install both saved baselines from one post-morph capture.
@@ -414,7 +420,7 @@ export function savePage(callback = () => {}) {
 
     // Use saveHtml directly with our pre-captured content (avoids double capture)
     saveHtml(forSave, (result) => {
-      applySaveResult(result, forComparison, forDirty, 'updated after save', gateToken);
+      applySaveResult(result, forComparison, forDirty, 'updated after save', gateToken, forSave);
       if (typeof callback === 'function') {
         callback(result);
       }
@@ -467,7 +473,7 @@ export function savePageForce(callback = () => {}) {
     setSavingState();
 
     saveHtml(forSave, (result) => {
-      applySaveResult(result, forComparison, forDirty, 'updated after force save', gateToken);
+      applySaveResult(result, forComparison, forDirty, 'updated after force save', gateToken, forSave);
       if (typeof callback === 'function') {
         callback(result);
       }

@@ -36,32 +36,84 @@
  */
 
 import { HyperMorph, morph } from "../vendor/hyper-morph.vendor.js";
+
+const { createIdentityStore } = HyperMorph;
 import Mutation from "../lib/mutation.js";
-import { isSnapshotRemoved } from "../lib/region-policy.js";
+import { NO_DIRTY_SELECTOR } from "../lib/region-policy.js";
+import { EXTENSION_NODE_SELECTOR } from '../lib/extension-noise.js';
 import { isEditMode } from "../core/is-edit-mode.js";
 import { mergeTagRecognizers } from "./merge-tags.js";
-import { serializeForSync, captureForComparisonAndDirty, captureSnapshot, originalSnapshotNode } from '../core/snapshot.js';
-import { isTabLocalRootAttr } from '../lib/root-attrs.js';
-import { protectPeerDoc, protectDiskDoc, activateIncomingDoc } from './splice-merge.js';
+import { serializeForSync, captureForComparisonAndDirty, captureSnapshot, originalSnapshotNode, captureForMerge, captureForSaveAndComparison } from '../core/snapshot.js';
+import { isTabLocalRootAttr, TAB_LOCAL_ROOT_ATTRS } from '../lib/root-attrs.js';
+import { autosaveActive } from '../lib/autosave-state.js';
+import { enableContentEditable } from '../core/admin-contenteditable.js';
+import { enableOnClick } from '../core/admin-onclick.js';
+import { enableAdminInputs } from '../core/admin-inputs.js';
+import { enableAdminResources } from '../core/admin-resources.js';
 import { presence } from './presence.js';
 // Side-effect import: the section-changed notice wires itself to
 // `clay:sync-applied`, which this file is the only dispatcher of.
 import './section-notice.js';
 import { hostMeta } from '../core/host-meta.js';
 import { recordEtag, seedEtag, lastSeenEtag } from '../core/etag.js';
-import { pageMaybeDirty, pauseGate, resumeGate } from '../lib/dirty-gate.js';
+import { pageMaybeDirty, pauseGate, resumeGate, gateCaptureToken, gateClearIfUnchanged } from '../lib/dirty-gate.js';
 import { SyncStream } from './stream.js';
+
+// What a live-sync merge never reads or touches on any side: editor chrome,
+// content kept out of the save or the snapshot, frozen regions, and nodes
+// browser extensions inject. The same set the 0.5 morph's sync policy ignored.
+const SYNC_IGNORE_SELECTOR = [
+  '[editor-ui]', '[clay~="editor-ui"]', '[save-ignore]', '[snapshot-remove]',
+  '[no-snapshot]', '[no-save]', '[save-remove]', '[freeze]', '[save-freeze]',
+  '[clay~="no-save"]', '[clay~="no-snapshot"]', '[clay~="freeze"]',
+  EXTENSION_NODE_SELECTOR,
+].join(',');
+
+// Regions whose local state is never work to keep: disposable content
+// (no-dirty) and regions the mutation system does not watch, whose churn the
+// dirty gate already excludes. The incoming frame's version wins there.
+const REMOTE_WINS_SELECTOR = [
+  NO_DIRTY_SELECTOR,
+  '[clay~="no-watch"]', '[no-watch]', '[mutations-ignore]',
+].join(',');
+
+// Host tokens and library state on a document's root element, on every side
+// of a merge: the live root, a snapshot clone's root, a parsed frame's root.
+const isRootLocalAttr = (el, name) =>
+  !el.parentElement && el.localName === 'html' && TAB_LOCAL_ROOT_ATTRS.has(name);
+
+// Identity an author wrote into the page, the fallback behind synthetic ids.
+const authoredIdentity = (el) =>
+  el.getAttribute('data-id') || el.getAttribute('id') || null;
+
+const isIdMap = (m) => !!m && typeof m === 'object' && !Array.isArray(m);
 
 // The page just took a frame verified clean against its baseline, so it now IS
 // the file on disk. Both saved baselines move together from one capture: leaving
 // the dirty baseline behind would make the close warning fire on the frame's own
 // content. Never flushes undo (this runs per incoming frame, not per save) and
 // never emits snapshot-ready (it must not feed the send pipeline).
+/**
+ * Convert an incoming disk document from its saved (inert) form to the live
+ * edit-mode form, exactly as boot does on page load, so the merge compares
+ * like with like: without this, every disk frame would swap the live page's
+ * contenteditable/onclick/admin state back to inert, killing the caret
+ * mid-edit. Root attributes (editmode, savestatus, tokens) need no reversal
+ * here; the merge's attribute veto keeps the live root's own.
+ */
+function activateIncomingDoc(rootEl) {
+  if (!isEditMode || !rootEl) return;
+  enableContentEditable(rootEl);
+  enableOnClick(rootEl);
+  enableAdminInputs(rootEl);
+  enableAdminResources(rootEl);
+}
+
 function pairedBaseline() {
   const { forComparison, forDirty } = captureForComparisonAndDirty({ flushUndo: false });
   return [forComparison, forDirty];
 }
-import { savePageThrottled, setLastSavedBaselines, setUnsavedChanges } from '../core/save.js';
+import { savePageThrottled, setLastSavedBaselines, setUnsavedChanges, getLastSavedBytes } from '../core/save.js';
 
 /**
  * The two live-sync wires, and the rule for choosing between them.
@@ -113,6 +165,7 @@ class LiveSync {
     this.sse = null;
     this.currentFile = null;
     this.lastHtml = null;
+    this._diskBase = null;
     this.clientId = this.generateClientId();
 
     // Per-stream resume id for the htmlclay replay server's wire contract.
@@ -227,12 +280,11 @@ class LiveSync {
 
     // Identity tracking for content-based morphing across live-sync updates.
     // Synthetic IDs (`<clientId>:<counter>`) live here only — never written to
-    // the DOM, never serialized into saved HTML. The WeakMap holds them
+    // the DOM, never serialized into saved HTML. hyper-morph’s identity store holds them
     // against the live elements so that the next save can produce the same
     // identityMap, and afterNodeMorphed transfers IDs from incoming parsed
     // elements onto the live elements they morphed into.
-    this.idCounter = 0;
-    this.liveWeakMap = new WeakMap();
+    this.identity = createIdentityStore(this.clientId);
 
     // Callbacks
     this.onConnect = null;
@@ -303,12 +355,24 @@ class LiveSync {
     // so mint a fresh resume id — this stream must not resume the previous one.
     this.lastHtml = null;
     this._lastIdentityMap = null;
+    this._diskBase = null;
     this._savedSnapshot = null;
     this._applyGen++;
     this.lastSeenSeq = 0;
     this._lastExternalSeq = 0;
     this._pendingExternal = null;
     this.resumeId = this.generateResumeId();
+
+    // Seed both merge bases (the peer lane's and the disk lane's) with the page
+    // as served, so a first frame that arrives after local edits merges instead
+    // of holding. A page already dirty at start has no trustworthy base; it
+    // keeps null and holds.
+    if (this.lane === 'live' && !pageMaybeDirty()) {
+      const clone = captureSnapshot({ flushUndo: false });
+      this.lastHtml = serializeForSync(clone);
+      this._lastIdentityMap = this.identity.exportMap(clone, originalSnapshotNode);
+      this._diskBase = captureForSaveAndComparison({ emitForSync: false }).forSave;
+    }
 
     console.log(`[LiveSync] Starting for: ${this.currentFile} (lane=${this.lane})`);
     // One discovery request stands between here and the stream. It is memoized and
@@ -327,6 +391,9 @@ class LiveSync {
       this.listenForSnapshots();
       this._saveSavedHandler = () => {
         this._saveEpoch++;
+        // The file now holds what this save wrote: the disk lane's new base.
+        const bytes = getLastSavedBytes();
+        if (bytes != null) this._diskBase = bytes;
         this._relayCommit();
       };
       document.addEventListener('clay:save-saved', this._saveSavedHandler);
@@ -376,113 +443,6 @@ class LiveSync {
     clearTimeout(this._holdRetryExt);
     this._holdRetryPeer = null;
     this._holdRetryExt = null;
-  }
-
-  _mintId() {
-    this.idCounter++;
-    return `${this.clientId}:${this.idCounter}`;
-  }
-
-  /**
-   * Walk the live DOM and the snapshot clone in lockstep. Path keys come
-   * from the clone (= what the receiver will see, after [snapshot-remove]
-   * and snapshotHooks). WeakMap lookup happens against the live element so
-   * synthetic IDs persist across saves.
-   *
-   * The live walk filters [snapshot-remove] to mirror the clone's earlier
-   * strip in captureSnapshot. If child counts diverge anywhere (an
-   * onbeforesnapshot handler added/removed siblings on the clone), the
-   * subtree is skipped — better to fall back to content scoring there than
-   * emit misaligned IDs.
-   *
-   * @param {Element} liveRoot
-   * @param {Element} cloneRoot
-   * @returns {Object} identityMap keyed by dot-path
-   */
-  _buildIdentityMap(liveRoot, cloneRoot) {
-    const map = {};
-    if (!liveRoot || !cloneRoot) return map;
-
-    const visit = (clone, path) => {
-      const live = originalSnapshotNode(clone);
-      if (live) {
-        let id = this.liveWeakMap.get(live);
-        if (!id) {
-          id = this._mintId();
-          this.liveWeakMap.set(live, id);
-        }
-        map[path] = id;
-      }
-
-      const cloneKids = clone.children;
-
-      for (let i = 0; i < cloneKids.length; i++) {
-        visit(cloneKids[i], path === '' ? String(i) : `${path}.${i}`);
-      }
-    };
-
-    visit(cloneRoot, '');
-    return map;
-  }
-
-  /**
-   * Walk a single parsed tree, invoking cb(element, path) at each Element.
-   * Paths use the same dot-segment scheme as _buildIdentityMap so the
-   * receiver can look up IDs by the path the sender emitted.
-   */
-  _walkParsedTree(root, cb) {
-    if (!root) return;
-    const visit = (el, path) => {
-      cb(el, path);
-      const kids = el.children;
-      for (let i = 0; i < kids.length; i++) {
-        visit(kids[i], path === '' ? String(i) : `${path}.${i}`);
-      }
-    };
-    visit(root, '');
-  }
-
-  /**
-   * Fill liveWeakMap entries for live elements that the matcher's
-   * afterNodeMorphed didn't reach. createNode's no-id-children
-   * optimization (hyper-morph importNode path) inserts a clone of the
-   * parsed element without invoking morphNode, so afterNodeMorphed never
-   * fires for those subtrees and their synthetic IDs would be lost. On
-   * the receiver's next save, _buildIdentityMap would mint fresh IDs for
-   * the same logical elements, breaking convergence for newly-added
-   * ambiguous siblings — exactly the case identity-map exists to fix.
-   *
-   * Walks live and parsed in lockstep, reading ids off the parsed NODES
-   * (parsedWeakMap) rather than re-deriving dot-paths: a protected splice
-   * shifts paths, but the WeakMap entries ride the nodes and stay correct.
-   * Filters [snapshot-remove] from the live side to stay aligned with the
-   * sender's clone view. Aborts a subtree on child-count divergence (e.g.
-   * local save-ignore additions) — those elements fall through to content
-   * scoring on the next round, which is the same fallback as a sender-side
-   * lockstep skip.
-   *
-   * @param {Element} liveRoot - post-morph live tree root
-   * @param {Element} parsedRoot - parsed-tree root
-   * @param {WeakMap} parsedWeakMap - parsed node → synthetic id
-   */
-  _fillInIdsAfterMorph(liveRoot, parsedRoot, parsedWeakMap) {
-    if (!liveRoot || !parsedRoot || !parsedWeakMap) return;
-    const visit = (live, parsed) => {
-      const id = parsedWeakMap.get(parsed);
-      if (id && !this.liveWeakMap.has(live)) {
-        this.liveWeakMap.set(live, id);
-      }
-      const liveKids = [];
-      for (const c of live.children) {
-        if (!isSnapshotRemoved(c)) liveKids.push(c);
-      }
-      const parsedKids = parsed.children;
-      if (liveKids.length !== parsedKids.length) return;
-      for (let i = 0; i < liveKids.length; i++) {
-        visit(liveKids[i], parsedKids[i]);
-      }
-    };
-    visit(liveRoot, parsedRoot);
   }
 
   /**
@@ -769,7 +729,7 @@ class LiveSync {
       // must happen now.
       this._log('snapshot-ready received, preparing to send');
       const html = serializeForSync(clone);
-      const identityMap = this._buildIdentityMap(document.documentElement, clone);
+      const identityMap = this.identity.exportMap(clone, originalSnapshotNode);
 
       // The save that follows this capture stores these bytes, so this is the
       // content its stamp will describe. Held for _relayCommit, and overwritten
@@ -1200,6 +1160,97 @@ class LiveSync {
   }
 
   /**
+   * Merge an incoming frame (a peer's broadcast or the file's bytes) into the
+   * live document with hyper-morph, and return its report.
+   *
+   * With a base, the merge is three-way: the base the lane last agreed on, this
+   * tab's state captured in the base's serialization domain, and the frame.
+   * Both sides' edits survive; where both changed the same words the frame
+   * wins and the report records a conflict. With no base (a clean tab before
+   * its first seed), the frame is taken two-way. Callers hold before this when
+   * the tab is dirty and has no base.
+   *
+   * Authored ids (data-id, id) outrank synthetic ones on every side, so a map
+   * can never pair an element against a different element that carries the
+   * same authored id.
+   *
+   * @param {string} html - the incoming frame
+   * @param {object|null} identityMap - the sender's synthetic ids, if any
+   * @param {object} lane
+   * @param {string|null} lane.base - the lane's merge base
+   * @param {object|null} [lane.baseIdentityMap] - synthetic ids for the base
+   * @param {() => Element} lane.captureLocal - this tab's state in the base's domain
+   * @param {boolean} lane.synthetic - whether this tab's synthetic ids apply
+   * @param {object} [lane.extra] - extra mergeDocument options (the disk lane's beforeApply)
+   */
+  async _mergeIncoming(html, identityMap, { base, baseIdentityMap = null, captureLocal, synthetic, extra = {} }) {
+    const store = this.identity;
+    // A frame may neither write these onto our root nor, by not carrying them,
+    // take ours away. Returning false is hyper-morph's veto for both directions.
+    const beforeAttributeUpdated = (name, element) =>
+      isTabLocalRootAttr(name, element) ? false : undefined;
+    const sideIdentity = (map) =>
+      isIdMap(map)
+        ? { first: authoredIdentity, map, then: authoredIdentity }
+        : authoredIdentity;
+    const localIdentity = synthetic
+      ? (el) =>
+          authoredIdentity(el) || store.idOf(originalSnapshotNode(el) || el) || null
+      : authoredIdentity;
+    const common = {
+      live: document,
+      remote: html,
+      ignore: (el) => el.matches(SYNC_IGNORE_SELECTOR),
+      remoteWins: (el) => el.matches(REMOTE_WINS_SELECTOR),
+      ignoreAttribute: isRootLocalAttr,
+      protectFocusedValue: true,
+      scripts: { mergeTags: mergeTagRecognizers },
+      hooks: { beforeAttributeUpdated },
+      ...extra,
+    };
+    // The gate token is taken before the capture so a clear can never swallow
+    // typing that lands during the merge.
+    const dirty = this.lane === 'live' && pageMaybeDirty();
+    const token = dirty ? gateCaptureToken() : null;
+    // We MUST await: the Promise resolves once new external scripts have
+    // loaded and run. Resuming mutations earlier would let late scripts' DOM
+    // changes look like user edits and echo back out.
+    let report;
+    if (base == null) {
+      report = await HyperMorph.mergeDocument({
+        ...common,
+        base: null,
+        identity: { local: localIdentity, remote: sideIdentity(identityMap) },
+      });
+    } else {
+      report = await HyperMorph.mergeDocument({
+        ...common,
+        base,
+        local: { root: captureLocal(), toLive: originalSnapshotNode },
+        identity: {
+          base: sideIdentity(baseIdentityMap),
+          local: localIdentity,
+          remote: sideIdentity(identityMap),
+        },
+      });
+    }
+    // Clean only when nothing of this tab's survived and nothing of it was
+    // lost: a conflict the frame won leaves the tab's text in report.conflicts
+    // and nowhere else, so the page stays dirty and the close warning stays.
+    if (dirty && !report.localDiverged && report.conflicts.length === 0) {
+      gateClearIfUnchanged(token);
+    }
+    // Synthetic ids converge: every live element the frame named takes the
+    // sender's id. Only ids from the frame's map are adopted, never an
+    // authored data-id or id.
+    const mapIds = new Set(isIdMap(identityMap) ? Object.values(identityMap) : []);
+    for (const [el, id] of report.identities) {
+      if (mapIds.has(id)) store.adopt(el, id);
+    }
+    return report;
+  }
+
+  /**
    * Actual morph work. Do not call directly. Use applyUpdate() so calls
    * pass through the rAF queue and don't overlap.
    * @param {string} html
@@ -1224,85 +1275,33 @@ class LiveSync {
     Mutation.pause();
     pauseGate();
 
-    // Parse as full document
-    const parser = new DOMParser();
-    const newDoc = parser.parseFromString(html, 'text/html');
-
-    // Build the parsed-tree WeakMap from the incoming identityMap. The
-    // sender emitted paths off its clone, which is exactly what we just
-    // parsed, so the same path scheme indexes into both trees.
-    const parsedWeakMap = new WeakMap();
-    if (identityMap && typeof identityMap === 'object' && !Array.isArray(identityMap)) {
-      this._walkParsedTree(newDoc.documentElement, (el, path) => {
-        const id = identityMap[path];
-        if (id) parsedWeakMap.set(el, id);
-      });
-    }
-
-    const liveWeakMap = this.liveWeakMap;
-    // Priority: synthetic IDs win when present (they're updated after every
-    // morph via afterNodeMorphed). data-id / id is the durable fallback that
-    // covers the bootstrap window and any element that hasn't been paired yet.
-    const key = (el) =>
-      liveWeakMap.get(el) ||
-      parsedWeakMap.get(el) ||
-      (el.getAttribute && el.getAttribute('data-id')) ||
-      (el.getAttribute && el.getAttribute('id')) ||
-      null;
-    const afterNodeMorphed = (oldEl, newEl) => {
-      const id = parsedWeakMap.get(newEl);
-      if (id) liveWeakMap.set(oldEl, id);
-    };
-    // A peer may neither write these onto our root nor, by not carrying them,
-    // take ours away. Returning false is hyper-morph's veto for both directions
-    // (it calls this for updateType 'update' and 'remove' alike).
-    const beforeAttributeUpdated = (name, element) =>
-      isTabLocalRootAttr(name, element) ? false : undefined;
-
-    let retainedRoots = 0;
+    let diverged = false;
     try {
-      // Scoped sync: when this tab might hold unsaved edits, splice them into
-      // the incoming document BEFORE the morph so it cannot clobber them.
-      // The clean path skips every capture and stays byte-identical to a
-      // plain full morph.
-      if (this.lane === 'live' && pageMaybeDirty()) {
-        const protection = protectPeerDoc({
-          newDoc,
-          parsedWeakMap,
-          baseHtml: this.lastHtml,
-          baseIdentityMap: this._lastIdentityMap,
-          liveWeakMap: this.liveWeakMap,
-        });
-        if (!protection.ok) {
-          // Hold the whole frame: a dirty section couldn't be safely merged
-          // (or no baseline exists yet). Nothing morphs and no baseline
-          // moves; the tab keeps its local state and converges through its
-          // own next save. Deliberately NO proactive save here — a hold can
-          // fire on a manual-save page, which must never auto-write. The
-          // retry re-queues the same frame so it still applies if the
-          // blocking edit is undone; the slot-empty check and the drain's
-          // staleness checks drop it once superseded.
-          console.log('[LiveSync] Holding incoming update: unsaved local section cannot be safely merged', protection.held?.el || '');
-          this._setHeld('live', true, protection.held?.el);
-          const epochAtHold = this._saveEpoch;
-          const seenAtHold = this.lastSeenSeq;
-          clearTimeout(this._holdRetryPeer);
-          this._holdRetryPeer = setTimeout(() => {
-            this._holdRetryPeer = null;
-            if (this.isDestroyed || this._pendingHtml != null) return;
-            // Only while the world hasn't moved: an own save or any newer
-            // frame since the hold makes this payload stale.
-            if (this._saveEpoch !== epochAtHold) return;
-            if (this.lastSeenSeq !== seenAtHold) return;
-            this._pendingHtml = html;
-            this._pendingSeq = seq;
-            this._pendingIdentityMap = identityMap;
-            this._pendingBy = by;
-            this._scheduleNextFrame();
-          }, 3000);
-          return;
-        }
-        retainedRoots = protection.entries.length;
+      // Hold the whole frame only when this tab has unsaved edits and no
+      // baseline to merge them against (the first frame of a fresh
+      // connection). Nothing morphs and no baseline moves; the tab keeps its
+      // local state. Deliberately NO proactive save here: a hold can fire on a
+      // manual-save page, which must never auto-write. The retry re-queues the
+      // same frame; the slot-empty check and the drain's staleness checks drop
+      // it once superseded.
+      if (this.lane === 'live' && pageMaybeDirty() && this.lastHtml === null) {
+        console.log('[LiveSync] Holding incoming update: unsaved local edits and no baseline to merge against');
+        this._setHeld('live', true, null);
+        const epochAtHold = this._saveEpoch;
+        const seenAtHold = this.lastSeenSeq;
+        clearTimeout(this._holdRetryPeer);
+        this._holdRetryPeer = setTimeout(() => {
+          this._holdRetryPeer = null;
+          if (this.isDestroyed || this._pendingHtml != null) return;
+          if (this._saveEpoch !== epochAtHold) return;
+          if (this.lastSeenSeq !== seenAtHold) return;
+          this._pendingHtml = html;
+          this._pendingSeq = seq;
+          this._pendingIdentityMap = identityMap;
+          this._pendingBy = by;
+          this._scheduleNextFrame();
+        }, 3000);
+        return;
       }
 
       this._setHeld('live', false);
@@ -1319,42 +1318,16 @@ class LiveSync {
       // knowingly missing what disk holds, and a stamp there would let its next
       // save replace that change with nobody told.
 
-      // Morph entire document. We MUST await — HyperMorph.morph returns a
-      // Promise when `scripts: { handle: true }` needs to wait for external
-      // scripts to load. If we don't await, Mutation.resume() fires before
-      // late-loading scripts execute, and any DOM mutations they trigger look
-      // like user edits → the receiving tab rebroadcasts them (feedback loop).
-      await HyperMorph.morph(document.documentElement, newDoc.documentElement, {
-        morphStyle: 'outerHTML',
-        ignoreActiveValue: true,
-        head: { style: 'merge' },
-        // mergeBase: mergeable script tags ([merge] + rules tags) three-way
-        // merge against the last synced state instead of being clobbered by
-        // the incoming save; lastHtml is exactly that base (set after every
-        // own save and every applied morph). Null on the first update →
-        // two-way merge, which still keeps local-only keys.
-        scripts: {
-          handle: true,
-          matchMode: 'smart',
-          mergeBase: this.lastHtml,
-          mergeTags: mergeTagRecognizers
-        },
-        key,
-        callbacks: { afterNodeMorphed, beforeAttributeUpdated }
+      const report = await this._mergeIncoming(html, identityMap, {
+        base: this.lastHtml,
+        baseIdentityMap: this._lastIdentityMap,
+        captureLocal: () => captureSnapshot({ flushUndo: false }),
+        synthetic: true,
       });
+      diverged = report.localDiverged;
 
       // Restore viewport. Done after morph so layout has settled.
       window.scrollTo(scrollX, scrollY);
-
-      // Fill in any IDs the matcher's afterNodeMorphed missed. Brand-new
-      // elements come in via hyper-morph's importNode optimization, which
-      // skips morphNode and thus afterNodeMorphed; their parsedWeakMap IDs
-      // never make it onto liveWeakMap. Without this pass, the receiver
-      // would mint fresh IDs on its next save for those elements,
-      // breaking convergence exactly for newly-added ambiguous siblings.
-      if (identityMap && typeof identityMap === 'object' && !Array.isArray(identityMap)) {
-        this._fillInIdsAfterMorph(document.documentElement, newDoc.documentElement, parsedWeakMap);
-      }
 
       // Only mark lastHtml after a successful morph so that a failed apply
       // doesn't desync our state and cause the next outbound save to be
@@ -1362,7 +1335,7 @@ class LiveSync {
       // receive time (in onmessage) so the staleness check covers own-save
       // echoes even when they don't reach this point.
       //
-      // lastHtml is the RAW incoming frame even after a protected apply. A
+      // lastHtml is the RAW incoming frame even after a merge that kept local edits. A
       // patched serialization would poison the next frame's diff base (frame
       // two of a burst would read the protected section as clean and clobber
       // it) and could dedupe away the convergence send. Convergence is driven
@@ -1390,7 +1363,7 @@ class LiveSync {
       // baseline advances here too. Skipped whenever the gate reports dirty
       // (including typing that arrived during the morph's async wait, which
       // must never be recorded as saved).
-      if (this.lane === 'live' && retainedRoots === 0 && !pageMaybeDirty()) {
+      if (this.lane === 'live' && !diverged && !pageMaybeDirty()) {
         setLastSavedBaselines(...pairedBaseline());
       }
 
@@ -1411,7 +1384,7 @@ class LiveSync {
       // returns above without reaching here, so nothing can name an author for a
       // change this tab never took. Null on every frame the host did not stamp.
       document.dispatchEvent(new CustomEvent('clay:sync-applied', {
-        detail: { seq, source: 'peer', by: by || null }
+        detail: { seq, source: 'peer', by: by || null, report }
       }));
     } finally {
       this._log('applyUpdate - morph complete, resuming mutations');
@@ -1423,22 +1396,24 @@ class LiveSync {
       this.isPaused = false;
     }
 
-    // Convergence: a protected apply produced a merged state (our sections +
-    // their frame) that exists only in this DOM. Push it out explicitly — the
-    // morph ran under Mutation.pause, so no autosave was triggered, and a
+    // Convergence: a merge that kept this tab's edits produced a state (our
+    // edits + their frame) that exists only in this DOM. Push it out explicitly
+    // — the morph ran under Mutation.pause, so no autosave was triggered, and a
     // pending autosave debounce may already have fired mid-flight. Runs after
     // isPaused is lifted so the save's snapshot-ready relay reaches peers.
-    if (retainedRoots > 0) {
+    // Only where autosave is on: a manual-save page must never auto-write, so
+    // there the merge stays local, still dirty, until the person saves.
+    if (diverged && autosaveActive()) {
       savePageThrottled();
     }
   }
 
   /**
    * Apply an external disk change to this edit-mode tab. Same shape as
-   * _doApplyUpdate with three differences: the incoming document is save
-   * domain, so it is edit-mode ACTIVATED before the morph (inert attribute
-   * forms flipped live, as boot does on page load); dirty protection diffs
-   * against the save baseline instead of lastHtml; and on a clean apply the
+   * _doApplyUpdate with two differences: the incoming document is save
+   * domain, so the merged document is edit-mode ACTIVATED before it applies
+   * (inert attribute forms flipped live, as boot does on page load); and on a
+   * clean apply the
    * save baseline advances to a post-morph local comparison capture — true by
    * construction, where any wire-derived baseline permanently mismatches
    * (token, doctype, transform and parse divergences). A dirty apply leaves
@@ -1458,85 +1433,63 @@ class LiveSync {
     Mutation.pause();
     pauseGate();
 
-    let retainedRoots = 0;
+    let diverged = false;
     try {
-      const parser = new DOMParser();
-      const newDoc = parser.parseFromString(html, 'text/html');
-
-      // Lane-guarded exactly like the peer path. A view-mode tab has no save
-      // baseline — every writer of lastSavedContents is edit-gated — so
-      // protectDiskDoc can only ever refuse, and the frame would hold, retry
-      // every 3s, and hold again forever. The gate still reads dirty there,
-      // because persistProbeDirty inspects the live DOM and a visitor can type
-      // into a [persist] field. Before the resync repair this path was
-      // unreachable outside the live lane; now it is the repair's own route.
-      if (this.lane === 'live' && pageMaybeDirty()) {
-        const protection = protectDiskDoc({ newDoc });
-        if (!protection.ok) {
-          // Hold: nothing morphs, no baseline moves, and deliberately NO
-          // proactive save (a hold can fire on a manual-save page, which
-          // must never auto-write). The frame's seq watermark has already
-          // advanced, so nothing redelivers it on its own; the retry
-          // re-queues it with the epoch captured NOW, so the drain's epoch
-          // check turns an intervening own save into a refetch of current
-          // disk instead of a stale re-apply, and the seq check drops it
-          // once a newer external change supersedes it.
-          console.log('[LiveSync] Holding external change: unsaved local section cannot be safely merged', protection.held?.el || '');
-          this._setHeld('external', true, protection.held?.el);
-          const epochAtHold = this._saveEpoch;
-          clearTimeout(this._holdRetryExt);
-          this._holdRetryExt = setTimeout(() => {
-            this._holdRetryExt = null;
-            if (this.isDestroyed || this._pendingExternal != null) return;
-            this._pendingExternal = { html, seq, saveEpoch: epochAtHold, etag, by };
-            this._scheduleNextFrame();
-          }, 3000);
-          return;
-        }
-        retainedRoots = protection.entries.length;
+      // Hold the whole frame only when this tab has unsaved edits and no
+      // baseline to merge them against. Lane-guarded like the peer path: a
+      // view-mode tab's gate can still read dirty (a visitor typing into a
+      // [persist] field), and it must take disk frames, never hold them.
+      // Nothing morphs, no baseline moves, and deliberately NO proactive save
+      // (a hold can fire on a manual-save page, which must never auto-write).
+      // The frame's seq watermark has already advanced, so nothing redelivers
+      // it on its own; the retry re-queues it with the epoch captured NOW, so
+      // the drain's epoch check turns an intervening own save into a refetch
+      // of current disk instead of a stale re-apply, and the seq check drops
+      // it once a newer external change supersedes it.
+      if (this.lane === 'live' && pageMaybeDirty() && this._diskBase === null) {
+        console.log('[LiveSync] Holding external change: unsaved local edits and no baseline to merge against');
+        this._setHeld('external', true, null);
+        const epochAtHold = this._saveEpoch;
+        clearTimeout(this._holdRetryExt);
+        this._holdRetryExt = setTimeout(() => {
+          this._holdRetryExt = null;
+          if (this.isDestroyed || this._pendingExternal != null) return;
+          this._pendingExternal = { html, seq, saveEpoch: epochAtHold, etag, by };
+          this._scheduleNextFrame();
+        }, 3000);
+        return;
       }
 
       this._setHeld('external', false);
 
-      activateIncomingDoc(newDoc.documentElement);
-
-      const liveWeakMap = this.liveWeakMap;
-      const key = (el) =>
-        liveWeakMap.get(el) ||
-        (el.getAttribute && el.getAttribute('data-id')) ||
-        (el.getAttribute && el.getAttribute('id')) ||
-        null;
-      const beforeAttributeUpdated = (name, element) =>
-        isTabLocalRootAttr(name, element) ? false : undefined;
-
-      await HyperMorph.morph(document.documentElement, newDoc.documentElement, {
-        morphStyle: 'outerHTML',
-        ignoreActiveValue: true,
-        head: { style: 'merge' },
-        scripts: {
-          handle: true,
-          matchMode: 'smart',
-          mergeBase: this.lastHtml,
-          mergeTags: mergeTagRecognizers
-        },
-        key,
-        callbacks: { beforeAttributeUpdated }
+      // All three sides are in the save domain, the file's own inert form: the
+      // bytes this tab last saved or applied, this tab's save capture, and the
+      // file. The merged document is activated for edit mode before it is
+      // applied, exactly as boot would have, so every node, local or incoming,
+      // goes live from its own saved form.
+      const report = await this._mergeIncoming(html, null, {
+        base: this._diskBase,
+        captureLocal: () => captureForMerge().saveClone,
+        synthetic: false,
+        extra: { beforeApply: (doc) => activateIncomingDoc(doc.documentElement) },
       });
+      diverged = report.localDiverged;
+      this._diskBase = html;
 
       window.scrollTo(scrollX, scrollY);
 
       // The stamp of section 6, adopted here and nowhere else: this is the moment
-      // the bytes it describes reached this tab. It is taken on the retained-roots
-      // path too, because a merge still incorporates the disk bytes, and the
-      // convergence save at the bottom needs a stamp the host will accept or the
-      // merge is refused and lost.
+      // the bytes it describes reached this tab. It is taken after a merge that
+      // kept local edits too, because the merge still incorporates the disk
+      // bytes, and the convergence save at the bottom needs a stamp the host
+      // will accept or the merge is refused and lost.
       //
       // A frame with no stamp (an older host, or the content-less fetch fallback,
       // which serves bytes nobody stamped) leaves this alone, and the listener in
       // etag.js falls back to asking the host.
       if (typeof etag === 'string' && etag) recordEtag(etag);
 
-      if (this.lane === 'live' && retainedRoots === 0 && !pageMaybeDirty()) {
+      if (this.lane === 'live' && !diverged && !pageMaybeDirty()) {
         // Clean apply: the DOM now IS the disk state, so a local comparison
         // capture of it is the truthful baseline. The next no-op save skips,
         // beforeunload stays quiet. The dirty re-check matters: typing that
@@ -1552,7 +1505,7 @@ class LiveSync {
         // does, so it stays in the snapshot domain.
         const clone = captureSnapshot({ flushUndo: false });
         this.lastHtml = serializeForSync(clone);
-        this._lastIdentityMap = this._buildIdentityMap(document.documentElement, clone);
+        this._lastIdentityMap = this.identity.exportMap(clone, originalSnapshotNode);
         this._applyGen++;
       }
 
@@ -1565,6 +1518,7 @@ class LiveSync {
           // The bytes now on disk, exactly as they arrived. The source map models them
           // so this tab's next save copies from the file somebody else just wrote.
           html,
+          report,
         }
       }));
     } finally {
@@ -1575,10 +1529,11 @@ class LiveSync {
       this.isPaused = false;
     }
 
-    // Convergence: disk holds the writer's version, this DOM holds the merge.
-    // The baseline was left pre-external, so the save sees both our retained
-    // sections and the external content as changes and writes the merge back.
-    if (retainedRoots > 0) {
+    // Convergence: disk holds the writer's version, this DOM holds the merge
+    // (our edits + their bytes). The baseline was left pre-external, so the
+    // save sees both as changes and writes the merge back. Only where
+    // autosave is on, as in the peer lane.
+    if (diverged && autosaveActive()) {
       savePageThrottled();
     }
   }

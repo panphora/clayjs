@@ -28,15 +28,14 @@
  * next. Typing, pasting and every other user edit of a control or a
  * contenteditable subtree do fire one, which is the case this is for.
  *
- * The region is kept AFTER focus leaves, deliberately. hyper-morph's
- * `ignoreActiveValue` skips both the value sync and the child morph for
- * `document.activeElement`, so nothing can change under the caret while it is
- * still there; the frame worth reporting is the one that lands on the paragraph
- * the reader just left.
+ * The region is kept AFTER focus leaves, deliberately. The three-way merge
+ * keeps the reader's own typing in the focused region and restores the caret,
+ * so the frame worth reporting is the one that lands on the paragraph the
+ * reader just left.
  *
  * DISMISS ONLY. An undo here would mean recovering displaced local work, which
- * nothing in this library builds. Unsaved local work is protected before the
- * morph by protectPeerDoc, and a refused save is still the conflict bar's job.
+ * nothing in this library builds. Unsaved local work survives the three-way
+ * merge, and a refused save is still the conflict bar's job.
  *
  * Silent with no `by` on the frame, which is the whole gate: the server stamps
  * an author on live-lane frames alone, so a saved-lane reader — who must never

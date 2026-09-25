@@ -9,8 +9,9 @@ import { jest } from "@jest/globals";
  *   - ordering: replayed seqs drop, an own landed save discards queued disk
  *     frames (save epoch), the two pending slots drain in seq order;
  *   - apply: a clean tab morphs the disk doc (edit-mode ACTIVATED first) and
- *     advances the save baseline; a dirty tab keeps its edited section, takes
- *     the rest of the disk frame, and converges via an explicit save.
+ *     advances the save baseline; a dirty tab merges three-way against lastHtml,
+ *     keeping its edits and taking the file's, and converges via an explicit
+ *     save; with no lastHtml it holds.
  *
  * jsdom ships no EventSource; the fake must be installed before importing
  * live-sync.js (its singleton auto-starts, and this file runs in edit mode).
@@ -344,6 +345,17 @@ function diskDoc(bodyInner) {
   return `<!DOCTYPE html><html><head></head><body>${bodyInner}</body></html>`;
 }
 
+// The frame this tab last agreed on: what it would have sent (and stored as
+// lastHtml) a moment ago.
+function captureFrame() {
+  return snapshot.serializeForSync(snapshot.captureSnapshot({ flushUndo: false }));
+}
+
+// The disk lane's base: the bytes a save of the current page would write.
+function captureDisk() {
+  return snapshot.captureForSaveAndComparison({ emitForSync: false }).forSave;
+}
+
 test("clean tab: disk frame morphs in activated, token survives, baseline advances", async () => {
   const sync = makeSync();
   document.documentElement.setAttribute("htmlclaytoken", "mine");
@@ -387,12 +399,16 @@ test("clean tab: disk frame morphs in activated, token survives, baseline advanc
 });
 
 test("dirty tab: the edited section survives, the rest applies, and the merge converges via save", async () => {
+  const autosaveState = await import("../../src/lib/autosave-state.js");
   window.clay = { testMode: true }; // saveHtml short-circuits the network
+  // Convergence saves only where autosave is on.
+  autosaveState.setAutosaveActive(true);
   const sync = makeSync();
   document.body.innerHTML =
     '<section data-id="b"><p>b0</p></section><section data-id="h"><p>h0</p></section>';
   save.setLastSavedContents(snapshot.captureForComparison());
   save.setUnsavedChanges(false);
+  sync._diskBase = captureDisk();
   await Promise.resolve();
   gate.gateClearIfUnchanged(gate.gateCaptureToken());
 
@@ -403,7 +419,7 @@ test("dirty tab: the edited section survives, the rest applies, and the merge co
   await sync._doApplyExternal(
     diskDoc(
       '<section data-id="b"><p>b0</p></section><section data-id="h"><p>h1-from-disk</p></section>'
-    ),
+    ).replace("<html>", "<html autosave>"),
     30
   );
 
@@ -416,10 +432,57 @@ test("dirty tab: the edited section survives, the rest applies, and the merge co
   expect(save.getLastSavedContents()).toContain("b-local-edit");
   expect(save.getLastSavedContents()).toContain("h1-from-disk");
   expect(gate.pageMaybeDirty()).toBe(false);
+  autosaveState.setAutosaveActive(false);
   sync.stop();
 });
 
-test("dirty tab with an unmergeable (keyless) edit holds the whole disk frame", async () => {
+test("dirty tab: keyless edits to different paragraphs both survive", async () => {
+  window.clay = { testMode: true };
+  const sync = makeSync();
+  document.body.innerHTML = "<main><p>one</p><p>two</p></main>";
+  save.setLastSavedContents(snapshot.captureForComparison());
+  sync._diskBase = captureDisk();
+  await Promise.resolve();
+  gate.gateClearIfUnchanged(gate.gateCaptureToken());
+
+  document.querySelector("main p").textContent = "one-local";
+  await Promise.resolve();
+
+  await sync._doApplyExternal(diskDoc("<main><p>one</p><p>two-disk</p></main>"), 40);
+
+  const ps = [...document.querySelectorAll("main p")].map((p) => p.textContent);
+  expect(ps).toEqual(["one-local", "two-disk"]);
+  expect(sync._holdRetryExt).toBeNull();
+  sync.stop();
+});
+
+test("dirty tab: both rewrote the same word, the disk version wins and it is reported", async () => {
+  window.clay = { testMode: true };
+  const sync = makeSync();
+  document.body.innerHTML = "<main><p>orig</p></main>";
+  save.setLastSavedContents(snapshot.captureForComparison());
+  sync._diskBase = captureDisk();
+  await Promise.resolve();
+  gate.gateClearIfUnchanged(gate.gateCaptureToken());
+
+  document.querySelector("main p").textContent = "local-edit";
+  await Promise.resolve();
+
+  let detail = null;
+  const onApplied = (e) => { detail = e.detail; };
+  document.addEventListener("clay:sync-applied", onApplied);
+  try {
+    await sync._doApplyExternal(diskDoc("<main><p>disk-edit</p></main>"), 41);
+  } finally {
+    document.removeEventListener("clay:sync-applied", onApplied);
+  }
+
+  expect(document.querySelector("main p").textContent).toBe("disk-edit");
+  expect(detail.report.conflicts.length).toBeGreaterThan(0);
+  sync.stop();
+});
+
+test("dirty tab with no baseline holds the whole disk frame", async () => {
   const sync = makeSync();
   document.body.innerHTML = "<main><p>orig</p></main>";
   save.setLastSavedContents(snapshot.captureForComparison());
@@ -429,11 +492,10 @@ test("dirty tab with an unmergeable (keyless) edit holds the whole disk frame", 
   document.querySelector("main p").textContent = "local-edit";
   await Promise.resolve();
   const baselineBefore = save.getLastSavedContents();
+  expect(sync._diskBase).toBeNull();
 
-  await sync._doApplyExternal(diskDoc("<main><p>disk-edit</p></main>"), 40);
+  await sync._doApplyExternal(diskDoc("<main><p>disk-edit</p></main>"), 42);
 
-  // Nothing applied, nothing lost: the local edit stands, and a retry is
-  // scheduled so the frame still applies if the blocking edit is undone.
   expect(document.querySelector("main p").textContent).toBe("local-edit");
   expect(document.body.innerHTML).not.toContain("disk-edit");
   expect(save.getLastSavedContents()).toBe(baselineBefore);
