@@ -452,8 +452,8 @@ export function captureForComparisonAndDirty({ flushUndo = true } = {}) {
  * @param {boolean} options.emitForSync - Whether to emit snapshot-ready event (default: true)
  * @returns {{ forSave: string, forComparison: string, forDirty: string }}
  */
-export function captureForSaveAndComparison({ emitForSync = true } = {}) {
-  const clone = captureSnapshot();
+export function captureForSaveAndComparison({ emitForSync = true, flushUndo = true } = {}) {
+  const clone = captureSnapshot({ flushUndo });
 
   // Emit for live-sync before any stripping.
   //

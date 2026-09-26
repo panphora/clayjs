@@ -194,8 +194,12 @@ describe("the convergence save after a diverged merge", () => {
     const frame = sync.lastHtml.replace("b0", "b-peer");
     document.querySelector('[data-id="a"] p').textContent = "a-local";
     await Promise.resolve();
+    // savePageThrottled's 1200 ms window is module state shared by every test
+    // in the run. Outwait it first, so a save the merge schedules runs at once
+    // instead of hiding behind a trailing timer past the assertion.
+    await new Promise((r) => setTimeout(r, 1300));
     await sync._doApplyUpdate(frame, 9, null);
-    await new Promise((r) => setTimeout(r, 20));
+    await new Promise((r) => setTimeout(r, 50));
     sync.stop();
   }
 

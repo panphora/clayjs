@@ -364,6 +364,12 @@ test("clean tab: disk frame morphs in activated, token survives, baseline advanc
   save.setUnsavedChanges(false);
   await Promise.resolve();
   gate.gateClearIfUnchanged(gate.gateCaptureToken());
+  // Seed the lanes the way a booted tab is seeded, so the frame takes the
+  // three-way path every real clean tab takes, not the base-less one.
+  sync._resolveProfile = () => new Promise(() => {});
+  sync.start("index.html");
+  sync._requestFrame = () => null;
+  expect(sync._diskBase).toContain("v1");
 
   const applied = [];
   const onApplied = (e) => applied.push(e.detail.seq);

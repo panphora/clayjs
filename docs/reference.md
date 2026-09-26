@@ -214,6 +214,11 @@ two elements, one of each.
   frames only, so a disk frame's `by` is normally `null`.
   `report` is hyper-morph's merge report: `conflicts` lists every place both sides
   changed the same content, with the text this tab lost when the incoming side won.
+  A lost conflict keeps the page dirty (the unsaved-changes warning stays up, no
+  automatic save runs from the merge, later clean frames do not clear it) until this
+  tab's next successful save. Until then every such conflict is also in
+  `liveSync.unresolvedConflicts` (the `liveSync` export of the sync plugin's
+  `live-sync.js`; not on `window.clay`), each with `local`, the text this tab lost.
 - `clay:sorted` — a drag-drop reorder landed (sortable plugin); fires on the container
   and bubbles; detail `{item, from, to, oldIndex, newIndex}`.
 - `clay:view-save-attempt` — a visitor clicked a `[trigger-save]` element in view mode;

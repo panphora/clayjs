@@ -340,9 +340,11 @@ test("R11 autosave follows the boot decision, not an attribute a frame carries",
   const frame = sync.lastHtml.replace("b0", "b-peer").replace("<html", "<html autosave");
   document.querySelector('[data-id="a"] p').textContent = "a-local";
   await Promise.resolve();
+  // Outwait savePageThrottled's shared 1200 ms window (see the three-way file).
+  await new Promise((r) => setTimeout(r, 1300));
 
   await sync._doApplyUpdate(frame, 170, null);
-  await new Promise((r) => setTimeout(r, 30));
+  await new Promise((r) => setTimeout(r, 50));
 
   expect(save.getLastSavedContents()).not.toContain("a-local");
   sync.stop();
