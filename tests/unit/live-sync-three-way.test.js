@@ -8,6 +8,8 @@ import { jest } from "@jest/globals";
  *   - a moved element keeps its live node;
  *   - two edits in one paragraph both land once, with no duplicated text, also
  *     when one side added formatting;
+ *   - a paragraph split or joined here while a peer edits it lands every word
+ *     once and keeps the live paragraph, and the relayed split converges;
  *   - a merge that kept nothing local clears the dirty gate;
  *   - the convergence save runs on autosave pages only;
  *   - start() seeds the merge base on a clean page, and not on a dirty one;
@@ -162,6 +164,63 @@ test("bolding a word while a peer edits the same paragraph keeps both, with no d
   const p = document.querySelector('[data-id="p"]');
   expect(p.textContent).toBe("The quick brown dog jumps.");
   expect(p.querySelector("b").textContent).toBe("brown");
+  sync.stop();
+});
+
+const texts = (selector) => [...document.querySelectorAll(selector)].map((el) => el.textContent);
+
+test("pressing Enter mid-paragraph while a peer edits the tail: every word once, the live paragraph kept, and the echo converges", async () => {
+  const sync = makeSync();
+  await settle('<div contenteditable="true"><p>hello there big world</p></div>');
+  sync.lastHtml = captureFrame();
+  const frame = sync.lastHtml.replace("big world", "big world again");
+
+  const first = document.querySelector("p");
+  first.firstChild.nodeValue = "hello there";
+  const tail = document.createElement("p");
+  tail.textContent = "big world";
+  first.after(tail);
+  await Promise.resolve();
+
+  const seen = onApplied();
+  await sync._doApplyUpdate(frame, 12, null);
+  expect(texts("p")).toEqual(["hello there", "big world again"]);
+  expect(document.querySelector("p")).toBe(first);
+  expect(seen[0].report.conflicts).toEqual([]);
+  expect(seen[0].report.localDiverged).toBe(true);
+
+  // The same frame again changes nothing.
+  await sync._doApplyUpdate(frame, 13, null);
+  expect(texts("p")).toEqual(["hello there", "big world again"]);
+
+  // The peer relays the split back: nothing local is left.
+  const echo = frame.replace("<p>hello there big world again</p>", "<p>hello there</p><p>big world again</p>");
+  await sync._doApplyUpdate(echo, 14, null);
+  seen.stop();
+  expect(texts("p")).toEqual(["hello there", "big world again"]);
+  expect(document.querySelector("p")).toBe(first);
+  expect(seen[2].report.localDiverged).toBe(false);
+  expect(seen[2].report.conflicts).toEqual([]);
+  sync.stop();
+});
+
+test("joining two paragraphs while a peer edits the second: the join keeps the edit, once", async () => {
+  const sync = makeSync();
+  await settle('<div contenteditable="true"><p>a1 b1</p><p>c1 d1</p></div>');
+  sync.lastHtml = captureFrame();
+  const frame = sync.lastHtml.replace("c1 d1", "c1 D1");
+
+  const [first, second] = document.querySelectorAll("p");
+  first.firstChild.nodeValue = "a1 b1 c1 d1";
+  second.remove();
+  await Promise.resolve();
+
+  const seen = onApplied();
+  await sync._doApplyUpdate(frame, 15, null);
+  seen.stop();
+  expect(texts("p")).toEqual(["a1 b1 c1 D1"]);
+  expect(document.querySelector("p")).toBe(first);
+  expect(seen[0].report.conflicts).toEqual([]);
   sync.stop();
 });
 
