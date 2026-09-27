@@ -56,7 +56,7 @@ import { presence } from './presence.js';
 import './section-notice.js';
 import { hostMeta } from '../core/host-meta.js';
 import { recordEtag, seedEtag, lastSeenEtag } from '../core/etag.js';
-import { pageMaybeDirty, pauseGate, resumeGate, gateCaptureToken, gateClearIfUnchanged } from '../lib/dirty-gate.js';
+import { pageMaybeDirty, pauseGate, resumeGate, gateCaptureToken, gateClearIfUnchanged, gateMarkDirty } from '../lib/dirty-gate.js';
 import { SyncStream } from './stream.js';
 
 // What a live-sync merge never reads or touches on any side: editor chrome,
@@ -215,6 +215,8 @@ class LiveSync {
     // and the lost text stays reachable. Each entry is a hyper-morph conflict
     // (`local` is the text this tab lost).
     this.unresolvedConflicts = [];
+    // Each conflict's ticket: the moment its frame applied.
+    this._conflictTickets = new WeakMap();
     this.clientId = this.generateClientId();
 
     // Per-stream resume id for the htmlclay replay server's wire contract.
@@ -455,8 +457,13 @@ class LiveSync {
         const bytes = getLastSavedBytes();
         if (bytes != null) this._setDiskBase(bytes, ticket);
         // A save this tab made is the one act that acknowledges a lost
-        // conflict: the person wrote the page as it stands.
-        this.unresolvedConflicts = [];
+        // conflict: the person wrote the page as it stands. Only the page as
+        // it stood at the capture: a conflict from a frame that applied after
+        // it is not in these bytes, and it keeps the page dirty.
+        this.unresolvedConflicts = this.unresolvedConflicts.filter(
+          (c) => this._conflictTickets.get(c) > ticket
+        );
+        if (this.unresolvedConflicts.length) gateMarkDirty();
         this._relayCommit();
       };
       document.addEventListener('clay:save-saved', this._saveSavedHandler);
@@ -1372,7 +1379,10 @@ class LiveSync {
     // nowhere else. It is kept until this tab's next successful save, so the
     // page stays dirty (the close warning holds) however many clean frames
     // follow, and nothing writes the page out from under it automatically.
-    if (dirty && report.conflicts.length) this.unresolvedConflicts.push(...report.conflicts);
+    if (dirty && report.conflicts.length) {
+      for (const c of report.conflicts) this._conflictTickets.set(c, ticket);
+      this.unresolvedConflicts.push(...report.conflicts);
+    }
     // Clean only when nothing of this tab's survived, nothing of it was lost,
     // and nothing lost earlier is still waiting on a save.
     if (

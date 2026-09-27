@@ -493,6 +493,42 @@ describe("R2-4 an unresolved conflict stays dirty across later frames", () => {
     sync.stop();
   });
 
+  test("Astra R3-6: a save captured before the conflicting frame leaves that conflict open", async () => {
+    await settle('<p id="p">budget is fine</p><p id="q">q0</p>');
+    const sync = startSync();
+    const remote = sync.lastHtml.replace("budget is fine", "budget is approved");
+    document.querySelector("#p").textContent = "budget is over";
+    await Promise.resolve();
+    let release;
+    const response = new Promise((r) => { release = r; });
+    global.fetch = jest.fn(() =>
+      response.then(() => ({ ok: true, text: async () => JSON.stringify({ msg: "Saved" }) }))
+    );
+    const saving = save.savePageForce();
+    await sync._doApplyUpdate(remote, 1, null);
+    const lost = sync.unresolvedConflicts.length;
+    expect(lost).toBeGreaterThan(0);
+
+    release();
+    expect((await saving).ok).toBe(true);
+    expect(sync.unresolvedConflicts).toHaveLength(lost);
+    expect(gate.pageMaybeDirty()).toBe(true);
+
+    await sync._doApplyUpdate(remote.replace("q0", "q1"), 2, null);
+    expect(texts("p")).toEqual(["budget is approved", "q1"]);
+    expect(sync.unresolvedConflicts).toHaveLength(lost);
+    expect(gate.pageMaybeDirty()).toBe(true);
+    expect(closeWarns()).toBe(true);
+
+    window.clay = { testMode: true };
+    global.fetch = jest.fn(() =>
+      Promise.resolve({ ok: true, text: async () => JSON.stringify({ msg: "Saved" }) })
+    );
+    expect((await save.savePageForce()).ok).toBe(true);
+    expect(sync.unresolvedConflicts).toEqual([]);
+    sync.stop();
+  });
+
   test("this tab's own save is what resolves it: the list empties and the next clean frame clears the gate", async () => {
     window.clay = { testMode: true };
     await settle('<p data-id="a">budget is fine</p><p data-id="b">b0</p>');

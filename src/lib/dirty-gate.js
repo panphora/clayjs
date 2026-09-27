@@ -170,6 +170,11 @@ export function gateCaptureToken() {
   return { gen: changes, probe };
 }
 
+/** A change nothing in the DOM recorded: the page holds text a save has not written. */
+export function gateMarkDirty() {
+  changes++;
+}
+
 export function gateClearIfUnchanged(token) {
   if (!token) return;
   if (changes === token.gen) {
