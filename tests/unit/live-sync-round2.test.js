@@ -21,8 +21,8 @@ import { HyperMorph } from "../../src/vendor/hyper-morph.vendor.js";
  *   A13   typing during an awaited apply was never scheduled for autosave;
  *   F2    a dirty tab re-creates the children of no-watch (and the other
  *         remote-wins) regions on every frame: hyper-morph's asBase view hands
- *         the base node to provenance, so apply finds no live twin. Pinned as
- *         `test.failing` until the vendor carries the fix (see the handoff).
+ *         the base node to provenance, so apply finds no live twin. Fixed in
+ *         hyper-morph (HM-G, Group N).
  *
  * jsdom ships no EventSource; the fake must be installed before importing
  * live-sync.js (its singleton auto-starts, and this file runs in edit mode).
@@ -777,7 +777,7 @@ describe("F2 a no-watch region's children survive a frame that did not touch the
   // hyper-morph's `view()` hands provenance the BASE node for a remote-wins
   // region, so apply finds no live twin and re-creates the children. Flips to
   // passing once the vendor carries the fix described in the handoff.
-  test.failing.each(["peer", "disk"])("%s lane, dirty tab: the button is the same node and still listens", async (lane) => {
+  test.each(["peer", "disk"])("%s lane, dirty tab: the button is the same node and still listens", async (lane) => {
     const r = await frameOverWidget(lane, true);
     expect(r.a).toBe("a1");
     expect(r.sameButton).toBe(true);
