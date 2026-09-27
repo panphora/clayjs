@@ -1,5 +1,29 @@
 # Changelog
 
+## [1.5.0] - 2026-09-27
+
+### Changed
+- Live sync now does a three-way merge on hyper-morph 1.0
+- Live sync keeps an ordered disk base, keeps unresolved conflicts until they are resolved, and gives authored ids unique values
+- Vendored hyper-morph now produces a merge report
+- Rebuilt vendor and entry point bundles
+
+### Fixed
+- A save during live sync clears only the conflicts from before its capture, and a later conflict keeps the page dirty
+- Paragraph splits and joins merge correctly during live sync
+- Two paragraphs rewritten to the same text both land after a merge
+- Words stay inside their block when a join meets a line break edit
+- A new block typed beside a similar neighbour stays new text
+- A new block that repeats a kept word stays new text
+- A join beside a split of the same block keeps the split half's element
+- Repeated-word splits and echoed joins merge correctly, and a join keeps the next block's element
+- An edited copy of a block removed by a join counts only where the neighbouring block gained that text
+- Vendored hyper-morph text merge, segment pairing and slot alignment
+- Compatibility issues between vendored hyper-morph and hypercms
+- A textarea keeps its leading newline through save and reload
+
+
+
 ## [1.4.0] - 2026-09-24
 
 ### Added
