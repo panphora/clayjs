@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.1] - 2026-09-27
+
+### Fixed
+- A phrase repeated across a non-breaking space now appears only once after a live sync merge
+
+
+
 ## [1.5.0] - 2026-09-27
 
 ### Changed
