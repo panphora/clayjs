@@ -43,6 +43,10 @@
 ### Changed
 - Live sync merges three-way: the last synced state, this tab's edits, and the incoming change. A tab with unsaved edits now takes another tab's or the file's change without losing either side. Where both changed the same words, the incoming change wins. A change is held only when the tab has unsaved edits and no synced state yet.
 - The convergence save after such a merge runs only on autosave pages. On a manual-save page the merged result stays local until the person saves.
+- A paragraph split or joined in one tab while another tab edits it merges as edits: every word lands once, and the live paragraph, its synthetic id and the caret are kept.
+- Where the incoming change wins over this tab's unsaved words, the page stays dirty until this tab saves again: the close warning holds, later frames do not clear it, and no automatic save runs over it. `liveSync.unresolvedConflicts` lists each conflict with the text this tab lost. Only a save captured after the conflict clears it.
+- The file lane's merge base is the newest moment this tab agreed with the file, so a slow save response or a slow frame can no longer rewind it.
+- Cloned elements that share one authored id pair by their synthetic ids, so each clone keeps its own content.
 - `clay.morph` runs on hyper-morph 1.0 through its compatibility layer. Its signature is unchanged.
 
 ### Removed
