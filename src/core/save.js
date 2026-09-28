@@ -22,7 +22,7 @@ import {
 } from "./save-core.js";
 import { captureForComparison, captureForComparisonAndDirty, captureForSaveAndComparison } from "./snapshot.js";
 import { seedEtag } from "./etag.js";
-import { gateCaptureToken, gateClearIfUnchanged, gateIgnores, pageMaybeDirty } from "../lib/dirty-gate.js";
+import { gateCaptureToken, gateClearIfUnchanged, pageMaybeDirty } from "../lib/dirty-gate.js";
 import { autosaveActive } from "../lib/autosave-state.js";
 import { ROOT_LIBRARY_ATTRS, SAVE_TOKEN_ATTRS, LEGACY_SAVE_TOKEN_ATTRS } from "../lib/root-attrs.js";
 import { logSaveCheck, logBaseline } from "../lib/autosave-debug.js";
@@ -572,9 +572,9 @@ let baselineContents = '';
 // The baseline veto only guards the load-time settle window; captureBaseline
 // disarms it. See the comment there.
 let baselineActive = true;
-// True once the load-time settle has run. Live sync seeds its merge bases from
-// this moment, not from its own start: modules that build DOM at boot (an
-// editor mounting from an editmode:resource script) are in the page by now.
+// True once the load-time settle has run. Live sync refreshes an untouched tab's
+// merge bases at this moment: modules that build DOM at boot (an editor mounting
+// from an editmode:resource script) are in the page by now.
 let baselineSettledAt = false;
 export function baselineSettled() { return baselineSettledAt; }
 
@@ -620,7 +620,7 @@ function initBaselineCapture() {
                        target.tagName === 'INPUT' ||
                        target.tagName === 'TEXTAREA' ||
                        target.tagName === 'SELECT';
-    if (isEditable && !gateIgnores(target)) userEdited = true;
+    if (isEditable) userEdited = true;
   };
   userEditEvents.forEach(evt => document.addEventListener(evt, markUserEdited, true));
 

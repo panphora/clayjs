@@ -57,10 +57,6 @@ const PERSIST_CONTROLS = `input${PERSIST}, textarea${PERSIST}, select${PERSIST}`
 // after which every incoming disk change was diffed against a stale base, and
 // the previous change was spliced back over the newer one and written to disk.
 const GATE_IGNORE = `${STRIP_FROM_DIRTY_CHECK}, ${SNAPSHOT_REMOVE_SELECTOR}`;
-/** True for an element inside a region the dirty check ignores (no-save and the like). */
-export function gateIgnores(el) {
-  return !!el.closest(GATE_IGNORE);
-}
 const probeCache = new WeakMap();
 
 // The [persist] probe has to honour GATE_IGNORE too. It scans by attribute, not

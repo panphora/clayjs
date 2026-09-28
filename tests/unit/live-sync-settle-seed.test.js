@@ -32,9 +32,7 @@ import { jest } from "@jest/globals";
  * setup has a hole: the provenance bit is consumed at the send, so an edit whose
  * save is already in flight looks like boot churn, and a same-turn signal misses a
  * button whose handler edits a macrotask later. An untouched tab cannot hold a
- * person's edit, so refreshing only that one cannot absorb anything, and an
- * input inside a no-save / stripped region does not count either (the dirty gate
- * already ignores those).
+ * person's edit, so refreshing only that one cannot absorb anything.
  *
  * Every test loads fresh modules: the settle is a one-time event per save.js
  * instance, so a scenario that needs an unsettled page cannot share the registry
@@ -346,29 +344,6 @@ test("an edit a button makes a turn after the gesture is not absorbed", async ()
   // read the move as a peer's edit arriving on top of it.
   expect(sync._diskBase).not.toContain('id="done"><li');
   expect(sync._diskBase).toContain('id="todo"><li');
-  sync.stop();
-});
-
-test("an input inside a no-save region does not block the refresh", async () => {
-  await load();
-  expect(save.baselineSettled()).toBe(false);
-
-  document.body.innerHTML = '<div class="content-editor"></div><div no-save><input id="q"></div>';
-  const sync = makeSync();
-  sync.start("index.html");
-
-  document.querySelector(".content-editor").insertAdjacentHTML(
-    "beforeend",
-    '<div class="ql-container">editor</div>'
-  );
-  const q = document.querySelector("#q");
-  q.value = "typed";
-  q.dispatchEvent(new Event("input", { bubbles: true }));
-  await waitForSettle();
-  expect(save.baselineSettled()).toBe(true);
-
-  expect(gate.pageMaybeDirty()).toBe(false);
-  expect(sync.lastHtml).toContain("ql-container");
   sync.stop();
 });
 

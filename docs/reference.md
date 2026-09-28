@@ -237,6 +237,12 @@ two elements, one of each.
   bytes identical to an earlier version (an undo, then a save) while its previous update
   is still in transit. A page that loads in the instant between another tab's save and
   that save's update can also start from a stamp newer than the bytes it was served.
+  Live sync takes its merge base when it starts, then retakes it once the page settles
+  (500 ms without changes, at most 3 s after load), so DOM that modules build at boot is
+  part of it. It retakes it only on a tab nobody has clicked or typed in yet. A script that
+  changes the document's content in that window with no user action (restoring a draft,
+  applying a `postMessage`) is therefore treated as page setup: if a later incoming update
+  still has the served version of that content, it wins.
 - `clay:sorted` — a drag-drop reorder landed (sortable plugin); fires on the container
   and bubbles; detail `{item, from, to, oldIndex, newIndex}`.
 - `clay:view-save-attempt` — a visitor clicked a `[trigger-save]` element in view mode;
