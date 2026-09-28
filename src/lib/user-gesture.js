@@ -45,6 +45,10 @@ const RECENT_GESTURE_MS = 500;
 let gestureTaskActive = false;
 let lastTrustedGestureTs = -Infinity;
 let userDrivenSinceLastSave = false;
+// Set when a dirty-relevant change lands in the same turn as a trusted gesture.
+// Never consumed by a save: the load-time settle reads it, and a save sent before
+// the settle must not make the gesture's edit look like boot setup.
+let gestureTurnEditSeen = false;
 let explicitSaveIntent = false;
 let installed = false;
 
@@ -98,16 +102,19 @@ export function isUserDrivenNow() {
  */
 export function markUserDriven() {
   userDrivenSinceLastSave = true;
+  if (gestureTaskActive) gestureTurnEditSeen = true;
 }
 
 /**
- * Peek at the accumulated bit without resetting it. The load-time settle reads
- * this: a gesture-driven edit before it (a drag, a toolbar click) fires no input
- * event, and must not be folded into the baseline as though it were boot setup.
+ * True once a dirty-relevant change has landed in the same turn as a trusted
+ * gesture: a drop, a toolbar click, a keyboard shortcut. The load-time settle
+ * reads this to tell a person's edit from boot setup. The recency window used for
+ * save provenance is too loose here, since a module mounting shortly after a click
+ * is still setup. A save never resets it.
  * @returns {boolean}
  */
-export function userDrivenPending() {
-  return userDrivenSinceLastSave;
+export function gestureEditSeen() {
+  return gestureTurnEditSeen;
 }
 
 /**
@@ -154,6 +161,7 @@ export function _resetUserGesture() {
   gestureTaskActive = false;
   lastTrustedGestureTs = -Infinity;
   userDrivenSinceLastSave = false;
+  gestureTurnEditSeen = false;
   explicitSaveIntent = false;
 }
 

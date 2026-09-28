@@ -22,9 +22,17 @@ import { jest } from "@jest/globals";
  *   - start after the settle seeds immediately, exactly as before.
  *
  * The settle is stricter so a user edit it cannot see today does not end up in
- * the refreshed base: a gesture-driven mutation before it (a drag, a toolbar
- * click) counts as a user edit, while an input inside a no-save / stripped region
- * does not count (the dirty gate already ignores those).
+ * the refreshed base. Its signal is not the save-provenance bit: that one is
+ * consumed at the send, so an edit whose save is already in flight would be
+ * absorbed into the refresh, and a save refused afterwards would merge against a
+ * base that already holds the edit. This signal is a dirty-relevant change in the
+ * SAME TURN as a trusted gesture (a drop, a toolbar click, a Cmd+B keydown), which
+ * a save never clears. The recency window around a gesture is deliberately not
+ * used here: a module mounting a few hundred ms after a click mutates inside it
+ * and would leave the page dirty with no edit, a false conflict in waiting. An
+ * input inside a no-save / stripped region does not count either (the dirty gate
+ * already ignores those). The refresh is also skipped while this tab has a save
+ * outstanding, since what an unconfirmed save carries is not yet common history.
  *
  * Every test loads fresh modules: the settle is a one-time event per save.js
  * instance, so a scenario that needs an unsettled page cannot share the registry
@@ -160,14 +168,40 @@ test("a frame applied before the settle keeps its peer base", async () => {
   const frame = captureFrame().replace(">one<", ">peer<");
   await sync._doApplyUpdate(frame, 5, null, null);
   const afterFrame = sync.lastHtml;
+  const afterMap = sync._lastIdentityMap;
   expect(afterFrame).toBe(frame);
 
-  document.body.insertAdjacentHTML("beforeend", '<div class="late">x</div>');
   await waitForSettle();
   expect(save.baselineSettled()).toBe(true);
 
+  // Only a clean page takes the refresh; a dirty one returns early and the
+  // assertions below would hold whatever the lane guard did.
+  expect(gate.pageMaybeDirty()).toBe(false);
   expect(sync.lastHtml).toBe(afterFrame);
-  expect(sync.lastHtml).not.toContain("late");
+  expect(sync._lastIdentityMap).toBe(afterMap);
+  sync.stop();
+});
+
+test("a disk frame applied before the settle keeps its disk base", async () => {
+  await load();
+  expect(save.baselineSettled()).toBe(false);
+
+  document.body.innerHTML = '<section data-id="b"><p>v1</p></section>';
+  const sync = makeSync();
+  sync.start("index.html");
+
+  await sync._doApplyExternal(
+    '<!DOCTYPE html><html><head></head><body><section data-id="b"><p>v2-from-disk</p></section></body></html>',
+    31
+  );
+  expect(document.querySelector('[data-id="b"] p').textContent).toBe("v2-from-disk");
+  const afterFrame = sync._diskBaseTicket;
+
+  await waitForSettle();
+  expect(save.baselineSettled()).toBe(true);
+
+  expect(gate.pageMaybeDirty()).toBe(false);
+  expect(sync._diskBaseTicket).toBe(afterFrame);
   sync.stop();
 });
 
@@ -232,6 +266,56 @@ test("a gesture-driven edit before the settle is not absorbed", async () => {
   sync.stop();
 });
 
+test("a gesture edit whose save was sent before the settle keeps the start seed", async () => {
+  await load();
+  expect(save.baselineSettled()).toBe(false);
+
+  document.body.innerHTML = '<ul><li id="x">one</li></ul>';
+  const sync = makeSync();
+  sync.start("index.html");
+  const seed = sync.lastHtml;
+  expect(seed).not.toBeNull();
+
+  userGesture._simulateGestureTurn();
+  document.querySelector("ul").insertAdjacentHTML("beforeend", '<li id="y">two</li>');
+  // The send happens a turn later, so the gesture's own bit is already gone by
+  // the time the settle runs: only the settle's signal proves the edit was human.
+  await tick();
+  userGesture.consumeUserDriven();
+
+  await waitForSettle();
+  expect(save.baselineSettled()).toBe(true);
+
+  expect(gate.pageMaybeDirty()).toBe(true);
+  expect(sync.lastHtml).toBe(seed);
+  sync.stop();
+});
+
+test("a click followed later by module DOM does not block the refresh", async () => {
+  await load();
+  expect(save.baselineSettled()).toBe(false);
+
+  await cleanBody('<div class="content-editor"></div>');
+  const sync = makeSync();
+  sync.start("index.html");
+
+  // The click, then a module that mounts its DOM long after the gesture's turn:
+  // still inside the recency window, but not the person editing.
+  userGesture._simulateGestureTurn();
+  await wait(50);
+  document.querySelector(".content-editor").insertAdjacentHTML(
+    "beforeend",
+    '<div class="ql-container">editor</div>'
+  );
+
+  await waitForSettle();
+  expect(save.baselineSettled()).toBe(true);
+
+  expect(gate.pageMaybeDirty()).toBe(false);
+  expect(sync.lastHtml).toContain("ql-container");
+  sync.stop();
+});
+
 test("an input inside a no-save region does not block the refresh", async () => {
   await load();
   expect(save.baselineSettled()).toBe(false);
@@ -252,6 +336,30 @@ test("an input inside a no-save region does not block the refresh", async () => 
 
   expect(gate.pageMaybeDirty()).toBe(false);
   expect(sync.lastHtml).toContain("ql-container");
+  sync.stop();
+});
+
+test("an outstanding save at the settle keeps both start bases", async () => {
+  await load();
+  expect(save.baselineSettled()).toBe(false);
+
+  document.body.innerHTML = '<div class="content-editor">boot churn</div>';
+  const sync = makeSync();
+  sync.start("index.html");
+  const seed = sync.lastHtml;
+  const startTicket = sync._diskBaseTicket;
+  expect(seed).not.toBeNull();
+
+  // A save captured its snapshot and no answer has come back yet. What it carried
+  // is not common history, and a refusal has to merge against the older base.
+  sync._saveTicket = sync._ticket();
+
+  await waitForSettle();
+  expect(save.baselineSettled()).toBe(true);
+
+  expect(gate.pageMaybeDirty()).toBe(false);
+  expect(sync.lastHtml).toBe(seed);
+  expect(sync._diskBaseTicket).toBe(startTicket);
   sync.stop();
 });
 

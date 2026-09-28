@@ -452,6 +452,9 @@ class LiveSync {
         // The settle clears the gate only when it saw no user edit, so a dirty page
         // here holds work the base must not absorb: keep the start seed.
         if (pageMaybeDirty()) return;
+        // A save this tab sent is still unconfirmed: what it carries is not yet
+        // common history, and a refused save must merge against the older base.
+        if (this._saveTicket !== 0) return;
         // Refresh each lane only while it still holds what start left. A frame, a
         // landed relay, an own save or a disk frame since then gave it a newer base.
         if (this._applyGen === applyGen && this.lastHtml === startHtml) {

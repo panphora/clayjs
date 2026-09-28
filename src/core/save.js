@@ -26,7 +26,7 @@ import { gateCaptureToken, gateClearIfUnchanged, gateIgnores, pageMaybeDirty } f
 import { autosaveActive } from "../lib/autosave-state.js";
 import { ROOT_LIBRARY_ATTRS, SAVE_TOKEN_ATTRS, LEGACY_SAVE_TOKEN_ATTRS } from "../lib/root-attrs.js";
 import { logSaveCheck, logBaseline } from "../lib/autosave-debug.js";
-import { initUserGesture, markExplicitSave, clearExplicitSave, userDrivenPending } from "../lib/user-gesture.js";
+import { initUserGesture, markExplicitSave, clearExplicitSave, gestureEditSeen } from "../lib/user-gesture.js";
 
 // Keep this library's own root state out of the saved bytes.
 //
@@ -639,7 +639,7 @@ function initBaselineCapture() {
     // while leaving lastSavedContents byte-identical to the immediate capture.
     // Checking one would let a second, unsent edit in that region be captured
     // here as though it had been saved.
-    const gestured = userDrivenPending();
+    const gestured = gestureEditSeen();
     if (!userEdited && !gestured && lastSavedContents === immediateContents && lastSavedDirty === immediateDirty) {
       // Store stripped version so comparisons are direct (no parsing needed)
       const gateToken = gateCaptureToken();
