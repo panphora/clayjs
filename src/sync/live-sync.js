@@ -816,15 +816,15 @@ class LiveSync {
    */
   listenForSnapshots() {
     this._snapshotHandler = (event) => {
-      // Every save captures through this event, before its request goes out,
-      // so this is the moment the save's bytes were true of the document. Taken
-      // ahead of the pause check: a save made during a frame's await is still a
-      // save, and it is newer than that frame.
-      this._saveTicket = this._ticket();
-      // Only a save's own capture names what the next landed save stored. A
-      // capture made for any other reason (the public captureForSave) must not
-      // replace the payload that save will relay.
+      // Only a save's own capture names what the next landed save stored, and
+      // when. A capture made for any other reason (the public captureForSave)
+      // must not replace the payload that save will relay, nor move its ticket.
       if (!event.detail || event.detail.forSave !== true) return;
+      // Every save captures through this event, before its request goes out,
+      // so this is the moment the save's bytes were true of the document. A
+      // save made during a frame's await is still a save, and it is newer than
+      // that frame.
+      this._saveTicket = this._ticket();
 
       const { documentElement: clone } = event.detail;
       if (!clone) return;
