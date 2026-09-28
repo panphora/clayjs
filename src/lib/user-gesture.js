@@ -101,6 +101,16 @@ export function markUserDriven() {
 }
 
 /**
+ * Peek at the accumulated bit without resetting it. The load-time settle reads
+ * this: a gesture-driven edit before it (a drag, a toolbar click) fires no input
+ * event, and must not be folded into the baseline as though it were boot setup.
+ * @returns {boolean}
+ */
+export function userDrivenPending() {
+  return userDrivenSinceLastSave;
+}
+
+/**
  * Read-and-reset the accumulated bit. Called at the ACTUAL save send (not on a
  * save that never ships), so it survives the autosave debounce and coalescing.
  * @returns {boolean}

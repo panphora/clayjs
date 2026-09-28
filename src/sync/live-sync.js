@@ -431,11 +431,11 @@ class LiveSync {
     this._pendingExternal = null;
     this.resumeId = this.generateResumeId();
 
-    // Seed the merge bases from the settled page, never from a page still booting:
-    // a base taken before a module built its DOM makes the first merge see both
-    // sides add that DOM, and keep it twice. Before the settle a clean tab merges
-    // against its own capture and a dirty one holds, until the seed below lands.
-    if (this.lane === 'live' && baselineSettled()) this._seedBases();
+    // Seed both merge bases now, so a first frame that arrives after local edits
+    // merges instead of holding. A page still booting is refreshed at the settle
+    // below: a base taken before a module built its DOM makes the first dirty merge
+    // see both sides add that DOM, and keep it twice.
+    if (this.lane === 'live') this._seedBases();
 
     console.log(`[LiveSync] Starting for: ${this.currentFile} (lane=${this.lane})`);
     // One discovery request stands between here and the stream. It is memoized and
@@ -444,15 +444,24 @@ class LiveSync {
     const gen = ++this._startGen;
     if (this.lane === 'live' && !baselineSettled()) {
       const applyGen = this._applyGen;
-      const saveEpoch = this._saveEpoch;
+      const startHtml = this.lastHtml;
+      const startDiskTicket = this._diskBaseTicket;
       this._settledHandler = () => {
         this._settledHandler = null;
         if (this.isDestroyed || this._startGen !== gen) return;
-        // A frame or an own save since start already gave this tab a base that
-        // is newer than the settled page.
-        if (this._applyGen !== applyGen || this._saveEpoch !== saveEpoch) return;
-        if (this.lastHtml !== null) return;
-        this._seedBases();
+        // The settle clears the gate only when it saw no user edit, so a dirty page
+        // here holds work the base must not absorb: keep the start seed.
+        if (pageMaybeDirty()) return;
+        // Refresh each lane only while it still holds what start left. A frame, a
+        // landed relay, an own save or a disk frame since then gave it a newer base.
+        if (this._applyGen === applyGen && this.lastHtml === startHtml) {
+          const clone = captureSnapshot({ flushUndo: false });
+          this.lastHtml = serializeForSync(clone);
+          this._lastIdentityMap = this.identity.exportMap(clone, originalSnapshotNode);
+        }
+        if (this._diskBaseTicket === startDiskTicket) {
+          this._setDiskBase(captureForSaveAndComparison({ emitForSync: false }).forSave, this._ticket());
+        }
       };
       document.addEventListener('clay:baseline-settled', this._settledHandler, { once: true });
     }

@@ -1,21 +1,30 @@
 import { jest } from "@jest/globals";
 
 /**
- * The merge bases live sync seeds, and the one moment they may be taken from.
+ * The merge bases live sync seeds at start, and the one moment they are refreshed.
  *
- * LiveSync.start() used to seed the peer lane's and the disk lane's bases from the
- * page as it stood at start. On a page whose editmode:resource scripts build DOM
- * during boot (the Writer template mounting a Quill editor), start runs before that
- * DOM exists, so the base lacked the editor: the first dirty merge saw both sides
- * "add" one and kept two, and the peer's text was lost. The base is now seeded at
- * the same settle save.js takes its settled baseline, and not before:
+ * LiveSync.start() seeds the peer lane's and the disk lane's bases from the page
+ * as it stands, exactly as 1.5.2 did: a clean tab gets both, a dirty tab gets
+ * none. Leaving them null until the boot settle was worse than the bug it fixed:
+ * a clean tab's first frame lost JSON key deletions, and an edit before the
+ * settle left the tab with no base at all, which stranded saves in conflict or
+ * dropped a peer's edit.
  *
- *   - start before the settle seeds nothing (lastHtml stays null, the existing clean
- *     path and the existing hold cover the gap), and the settle then seeds the page
- *     as it stands, including DOM a module built in between;
- *   - a frame that applied, or an own save that landed, before the settle keeps the
- *     base it gave this tab: the settle does not overwrite it;
+ * The settle then REFRESHES each lane from the settled page, so DOM an
+ * editmode:resource script built during boot (the Writer template mounting a
+ * Quill editor) lands in the base instead of being read twice by the first dirty
+ * merge. The refresh is narrow:
+ *
+ *   - only on a page clean at that moment: a page holding an edit keeps the start
+ *     seed, since the base must not absorb work the settle could not see;
+ *   - only for a lane still holding exactly what start left: a frame applied, a
+ *     landed relay, an own save or a disk frame since then gave it a newer base;
  *   - start after the settle seeds immediately, exactly as before.
+ *
+ * The settle is stricter so a user edit it cannot see today does not end up in
+ * the refreshed base: a gesture-driven mutation before it (a drag, a toolbar
+ * click) counts as a user edit, while an input inside a no-save / stripped region
+ * does not count (the dirty gate already ignores those).
  *
  * Every test loads fresh modules: the settle is a one-time event per save.js
  * instance, so a scenario that needs an unsettled page cannot share the registry
@@ -48,9 +57,16 @@ let LiveSync;
 let snapshot;
 let gate;
 let save;
+let userGesture;
 
 async function load() {
   jest.resetModules();
+  // mutation.js publishes a realm-global hub on window.__clayMutation and every
+  // later module instance adopts it, so without this the fresh registry (and the
+  // user-gesture instance this file imports) would register on the FIRST test's
+  // hub, whose own user-gesture module is the one a simulated gesture would mark.
+  delete window.__clayMutation;
+  if (window.clay) delete window.clay.Mutation;
   window.clayEditMode = true;
   global.EventSource = FakeEventSource;
   window.EventSource = FakeEventSource;
@@ -71,6 +87,7 @@ async function load() {
   snapshot = await import("../../src/core/snapshot.js");
   gate = await import("../../src/lib/dirty-gate.js");
   save = await import("../../src/core/save.js");
+  userGesture = await import("../../src/lib/user-gesture.js");
 }
 
 beforeEach(() => {
@@ -109,14 +126,16 @@ function captureFrame() {
   return snapshot.serializeForSync(snapshot.captureSnapshot({ flushUndo: false }));
 }
 
-test("start before the settle seeds nothing; the settle seeds the page as it then stands, including DOM a module built in between", async () => {
+test("start before the settle seeds the page at start; the settle refreshes both bases with DOM a module built in between", async () => {
   await load();
   expect(save.baselineSettled()).toBe(false);
 
   document.body.innerHTML = '<div class="content-editor"></div>';
   const sync = makeSync();
   sync.start("index.html");
-  expect(sync.lastHtml).toBeNull();
+
+  expect(sync.lastHtml).not.toBeNull();
+  expect(sync.lastHtml).not.toContain("ql-container");
 
   document.querySelector(".content-editor").insertAdjacentHTML(
     "beforeend",
@@ -125,28 +144,114 @@ test("start before the settle seeds nothing; the settle seeds the page as it the
   await waitForSettle();
   expect(save.baselineSettled()).toBe(true);
 
-  expect(sync.lastHtml).not.toBeNull();
   expect(sync.lastHtml).toContain("ql-container");
+  expect(sync._diskBase).toContain("ql-container");
   sync.stop();
 });
 
-test("a frame applied before the settle is not overwritten by the settle seed", async () => {
+test("a frame applied before the settle keeps its peer base", async () => {
   await load();
   expect(save.baselineSettled()).toBe(false);
 
-  await cleanBody('<div class="content-editor">as served</div>');
+  document.body.innerHTML = '<p id="a">one</p>';
   const sync = makeSync();
   sync.start("index.html");
-  expect(sync.lastHtml).toBeNull();
 
-  const frame = captureFrame().replace("as served", "as served, from the peer");
+  const frame = captureFrame().replace(">one<", ">peer<");
   await sync._doApplyUpdate(frame, 5, null, null);
-  expect(sync.lastHtml).toBe(frame);
+  const afterFrame = sync.lastHtml;
+  expect(afterFrame).toBe(frame);
 
+  document.body.insertAdjacentHTML("beforeend", '<div class="late">x</div>');
   await waitForSettle();
   expect(save.baselineSettled()).toBe(true);
 
-  expect(sync.lastHtml).toBe(frame);
+  expect(sync.lastHtml).toBe(afterFrame);
+  expect(sync.lastHtml).not.toContain("late");
+  sync.stop();
+});
+
+test("an input before the settle keeps the start seed and does not null it", async () => {
+  await load();
+  expect(save.baselineSettled()).toBe(false);
+
+  document.body.innerHTML = '<p id="a" contenteditable>one</p>';
+  const sync = makeSync();
+  sync.start("index.html");
+  const seed = sync.lastHtml;
+  expect(seed).not.toBeNull();
+
+  const p = document.querySelector("#a");
+  // jsdom has no isContentEditable; the input feed keys off it, as other suites
+  // in this repo stand in for it.
+  Object.defineProperty(p, "isContentEditable", { value: true, configurable: true });
+  p.textContent = "typed";
+  p.dispatchEvent(new Event("input", { bubbles: true }));
+  await waitForSettle();
+  expect(save.baselineSettled()).toBe(true);
+
+  expect(gate.pageMaybeDirty()).toBe(true);
+  expect(sync.lastHtml).toBe(seed);
+  sync.stop();
+});
+
+test("a clean frame before the settle keeps a JSON key deletion", async () => {
+  await load();
+  expect(save.baselineSettled()).toBe(false);
+
+  document.body.innerHTML = '<script type="application/json" merge="data">{"a":1,"b":2}</script>';
+  const sync = makeSync();
+  sync.start("index.html");
+
+  const frame = captureFrame().replace('{"a":1,"b":2}', '{"a":1}');
+  expect(frame).not.toContain('"b":2');
+  await sync._doApplyUpdate(frame, 5, null, null);
+
+  const script = document.querySelector('script[type="application/json"]');
+  expect(JSON.parse(script.textContent)).toEqual({ a: 1 });
+  sync.stop();
+});
+
+test("a gesture-driven edit before the settle is not absorbed", async () => {
+  await load();
+  expect(save.baselineSettled()).toBe(false);
+
+  document.body.innerHTML = '<ul><li id="x">one</li></ul>';
+  const sync = makeSync();
+  sync.start("index.html");
+  const seed = sync.lastHtml;
+  expect(seed).not.toBeNull();
+
+  userGesture._simulateGestureTurn();
+  document.querySelector("ul").insertAdjacentHTML("beforeend", '<li id="y">two</li>');
+  await waitForSettle();
+  expect(save.baselineSettled()).toBe(true);
+
+  expect(gate.pageMaybeDirty()).toBe(true);
+  expect(sync.lastHtml).toBe(seed);
+  sync.stop();
+});
+
+test("an input inside a no-save region does not block the refresh", async () => {
+  await load();
+  expect(save.baselineSettled()).toBe(false);
+
+  document.body.innerHTML = '<div class="content-editor"></div><div no-save><input id="q"></div>';
+  const sync = makeSync();
+  sync.start("index.html");
+
+  document.querySelector(".content-editor").insertAdjacentHTML(
+    "beforeend",
+    '<div class="ql-container">editor</div>'
+  );
+  const q = document.querySelector("#q");
+  q.value = "typed";
+  q.dispatchEvent(new Event("input", { bubbles: true }));
+  await waitForSettle();
+  expect(save.baselineSettled()).toBe(true);
+
+  expect(gate.pageMaybeDirty()).toBe(false);
+  expect(sync.lastHtml).toContain("ql-container");
   sync.stop();
 });
 

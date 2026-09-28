@@ -22,11 +22,11 @@ import {
 } from "./save-core.js";
 import { captureForComparison, captureForComparisonAndDirty, captureForSaveAndComparison } from "./snapshot.js";
 import { seedEtag } from "./etag.js";
-import { gateCaptureToken, gateClearIfUnchanged, pageMaybeDirty } from "../lib/dirty-gate.js";
+import { gateCaptureToken, gateClearIfUnchanged, gateIgnores, pageMaybeDirty } from "../lib/dirty-gate.js";
 import { autosaveActive } from "../lib/autosave-state.js";
 import { ROOT_LIBRARY_ATTRS, SAVE_TOKEN_ATTRS, LEGACY_SAVE_TOKEN_ATTRS } from "../lib/root-attrs.js";
 import { logSaveCheck, logBaseline } from "../lib/autosave-debug.js";
-import { initUserGesture, markExplicitSave, clearExplicitSave } from "../lib/user-gesture.js";
+import { initUserGesture, markExplicitSave, clearExplicitSave, userDrivenPending } from "../lib/user-gesture.js";
 
 // Keep this library's own root state out of the saved bytes.
 //
@@ -620,7 +620,7 @@ function initBaselineCapture() {
                        target.tagName === 'INPUT' ||
                        target.tagName === 'TEXTAREA' ||
                        target.tagName === 'SELECT';
-    if (isEditable) userEdited = true;
+    if (isEditable && !gateIgnores(target)) userEdited = true;
   };
   userEditEvents.forEach(evt => document.addEventListener(evt, markUserEdited, true));
 
@@ -639,7 +639,8 @@ function initBaselineCapture() {
     // while leaving lastSavedContents byte-identical to the immediate capture.
     // Checking one would let a second, unsent edit in that region be captured
     // here as though it had been saved.
-    if (!userEdited && lastSavedContents === immediateContents && lastSavedDirty === immediateDirty) {
+    const gestured = userDrivenPending();
+    if (!userEdited && !gestured && lastSavedContents === immediateContents && lastSavedDirty === immediateDirty) {
       // Store stripped version so comparisons are direct (no parsing needed)
       const gateToken = gateCaptureToken();
       const { forComparison: contents, forDirty: contentsDirty } = captureForComparisonAndDirty();
@@ -651,7 +652,7 @@ function initBaselineCapture() {
       gateClearIfUnchanged(gateToken);
       logBaseline('settled capture', `${contents.length} chars`);
     } else {
-      logBaseline('settled skipped', userEdited ? 'user edited' : 'save occurred during settle');
+      logBaseline('settled skipped', userEdited ? 'user edited' : gestured ? 'gesture-driven edit' : 'save occurred during settle');
     }
 
     // The load-time veto has done its job. It exists so setup churn from modules
