@@ -347,6 +347,52 @@ test("an edit a button makes a turn after the gesture is not absorbed", async ()
   sync.stop();
 });
 
+test("a tab dirty at start gets no base from the settle, as 1.5.2 held it", async () => {
+  await load();
+  expect(save.baselineSettled()).toBe(false);
+
+  document.body.innerHTML = '<div class="content-editor">boot churn</div>';
+  await tick();
+  expect(gate.pageMaybeDirty()).toBe(true);
+  const sync = makeSync();
+  sync.start("index.html");
+  expect(sync.lastHtml).toBeNull();
+  expect(sync._diskBase).toBeNull();
+
+  await waitForSettle();
+  expect(save.baselineSettled()).toBe(true);
+
+  // The settle cleared the gate, so only the empty-seed rule keeps the bases empty.
+  expect(gate.pageMaybeDirty()).toBe(false);
+  expect(sync.lastHtml).toBeNull();
+  expect(sync._diskBase).toBeNull();
+  sync.stop();
+});
+
+test("an own save that landed before the settle keeps the peer start seed even when its relay failed", async () => {
+  await load();
+  expect(save.baselineSettled()).toBe(false);
+
+  document.body.innerHTML = '<div class="content-editor"></div>';
+  const sync = makeSync();
+  sync.start("index.html");
+  const seed = sync.lastHtml;
+  expect(seed).not.toBeNull();
+
+  // What clay:save-saved does; a failed relay leaves lastHtml at the seed.
+  sync._saveEpoch++;
+  document.querySelector(".content-editor").insertAdjacentHTML(
+    "beforeend",
+    '<div class="ql-container">editor</div>'
+  );
+  await waitForSettle();
+  expect(save.baselineSettled()).toBe(true);
+
+  expect(gate.pageMaybeDirty()).toBe(false);
+  expect(sync.lastHtml).toBe(seed);
+  sync.stop();
+});
+
 test("an outstanding save at the settle keeps both start bases", async () => {
   await load();
   expect(save.baselineSettled()).toBe(false);

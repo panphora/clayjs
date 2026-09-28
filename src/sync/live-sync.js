@@ -448,6 +448,7 @@ class LiveSync {
       const saveEpoch = this._saveEpoch;
       const startHtml = this.lastHtml;
       const startDiskTicket = this._diskBaseTicket;
+      const startDiskSeeded = this._diskBase !== null;
       this._settledHandler = () => {
         this._settledHandler = null;
         if (this.isDestroyed || this._startGen !== gen) return;
@@ -464,12 +465,15 @@ class LiveSync {
         // Refresh each lane only while it still holds what start left. A frame, a
         // landed relay, an own save or a disk frame since then gave it a newer base
         // (an own save counts even when its relay failed and lastHtml never moved).
-        if (this._applyGen === applyGen && this._saveEpoch === saveEpoch && this.lastHtml === startHtml) {
+        // Only replace a seed start took, never fill a base start left empty: a page
+        // dirty at start held its frames in 1.5.2, and its own scripts may still be
+        // rewriting content the merge cannot reach.
+        if (startHtml !== null && this._applyGen === applyGen && this._saveEpoch === saveEpoch && this.lastHtml === startHtml) {
           const clone = captureSnapshot({ flushUndo: false });
           this.lastHtml = serializeForSync(clone);
           this._lastIdentityMap = this.identity.exportMap(clone, originalSnapshotNode);
         }
-        if (this._diskBaseTicket === startDiskTicket) {
+        if (startDiskSeeded && this._diskBaseTicket === startDiskTicket) {
           this._setDiskBase(captureForSaveAndComparison({ emitForSync: false }).forSave, this._ticket());
         }
       };
