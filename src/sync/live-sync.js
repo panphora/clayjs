@@ -144,7 +144,7 @@ function pairedBaseline() {
   const { forComparison, forDirty } = captureForComparisonAndDirty({ flushUndo: false });
   return [forComparison, forDirty];
 }
-import { savePageThrottled, setLastSavedBaselines, setUnsavedChanges, getLastSavedBytes, conflictResolvedBySync, isSaveConflicted } from '../core/save.js';
+import { savePageThrottled, setLastSavedBaselines, setUnsavedChanges, getLastSavedBytes, conflictResolvedBySync, isSaveConflicted, baselineSettled } from '../core/save.js';
 
 /**
  * The two live-sync wires, and the rule for choosing between them.
@@ -303,6 +303,7 @@ class LiveSync {
     this._saveEpoch = 0;
     this._saveSavedHandler = null;
     this._saveConflictHandler = null;
+    this._settledHandler = null;
 
     // The identityMap that came with lastHtml, so the peer-lane dirty diff
     // can resolve synthetic identities on its base tree.
@@ -381,6 +382,19 @@ class LiveSync {
   }
 
   /**
+   * Seed both merge bases (the peer lane's and the disk lane's) with the page as
+   * it stands, so a first frame that arrives after local edits merges instead of
+   * holding. A page already dirty has no trustworthy base; it keeps null and holds.
+   */
+  _seedBases() {
+    if (pageMaybeDirty()) return;
+    const clone = captureSnapshot({ flushUndo: false });
+    this.lastHtml = serializeForSync(clone);
+    this._lastIdentityMap = this.identity.exportMap(clone, originalSnapshotNode);
+    this._setDiskBase(captureForSaveAndComparison({ emitForSync: false }).forSave, this._ticket());
+  }
+
+  /**
    * Start the LiveSync system
    * Can be called after stop() to restart with a new file
    */
@@ -417,22 +431,31 @@ class LiveSync {
     this._pendingExternal = null;
     this.resumeId = this.generateResumeId();
 
-    // Seed both merge bases (the peer lane's and the disk lane's) with the page
-    // as served, so a first frame that arrives after local edits merges instead
-    // of holding. A page already dirty at start has no trustworthy base; it
-    // keeps null and holds.
-    if (this.lane === 'live' && !pageMaybeDirty()) {
-      const clone = captureSnapshot({ flushUndo: false });
-      this.lastHtml = serializeForSync(clone);
-      this._lastIdentityMap = this.identity.exportMap(clone, originalSnapshotNode);
-      this._setDiskBase(captureForSaveAndComparison({ emitForSync: false }).forSave, this._ticket());
-    }
+    // Seed the merge bases from the settled page, never from a page still booting:
+    // a base taken before a module built its DOM makes the first merge see both
+    // sides add that DOM, and keep it twice. Before the settle a clean tab merges
+    // against its own capture and a dirty one holds, until the seed below lands.
+    if (this.lane === 'live' && baselineSettled()) this._seedBases();
 
     console.log(`[LiveSync] Starting for: ${this.currentFile} (lane=${this.lane})`);
     // One discovery request stands between here and the stream. It is memoized and
     // bounded, and it does not gate ordinary saves — /_/save is a separate lane that
     // never moved. Snapshots produced during the window are queued, not dropped.
     const gen = ++this._startGen;
+    if (this.lane === 'live' && !baselineSettled()) {
+      const applyGen = this._applyGen;
+      const saveEpoch = this._saveEpoch;
+      this._settledHandler = () => {
+        this._settledHandler = null;
+        if (this.isDestroyed || this._startGen !== gen) return;
+        // A frame or an own save since start already gave this tab a base that
+        // is newer than the settled page.
+        if (this._applyGen !== applyGen || this._saveEpoch !== saveEpoch) return;
+        if (this.lastHtml !== null) return;
+        this._seedBases();
+      };
+      document.addEventListener('clay:baseline-settled', this._settledHandler, { once: true });
+    }
     // Exposed so a caller (and the tests) can await the point where the stream is
     // actually open, rather than counting microtasks behind the discovery request.
     this._ready = this._resolveProfile().then(() => {
@@ -512,6 +535,11 @@ class LiveSync {
     if (this._saveConflictHandler) {
       document.removeEventListener('clay:save-conflict', this._saveConflictHandler);
       this._saveConflictHandler = null;
+    }
+
+    if (this._settledHandler) {
+      document.removeEventListener('clay:baseline-settled', this._settledHandler);
+      this._settledHandler = null;
     }
 
     this._queuedSend = null;

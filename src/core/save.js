@@ -572,6 +572,11 @@ let baselineContents = '';
 // The baseline veto only guards the load-time settle window; captureBaseline
 // disarms it. See the comment there.
 let baselineActive = true;
+// True once the load-time settle has run. Live sync seeds its merge bases from
+// this moment, not from its own start: modules that build DOM at boot (an
+// editor mounting from an editmode:resource script) are in the page by now.
+let baselineSettledAt = false;
+export function baselineSettled() { return baselineSettledAt; }
 
 // ============================================
 // BASELINE CAPTURE (Settled Signal)
@@ -658,6 +663,8 @@ function initBaselineCapture() {
     baselineActive = false;
 
     document.documentElement.setAttribute('savestatus', 'saved');
+    baselineSettledAt = true;
+    document.dispatchEvent(new CustomEvent('clay:baseline-settled'));
   };
 
   // Start settle observer - fires when no mutations for SETTLE_MS.

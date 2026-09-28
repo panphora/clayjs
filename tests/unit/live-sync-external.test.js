@@ -61,6 +61,7 @@ beforeEach(async () => {
   document.body.innerHTML = "";
   await Promise.resolve(); // let the innerHTML MutationRecord land
   gate.gateClearIfUnchanged(gate.gateCaptureToken());
+  while (!save.baselineSettled()) await new Promise((r) => setTimeout(r, 25));
 });
 
 afterEach(() => {
