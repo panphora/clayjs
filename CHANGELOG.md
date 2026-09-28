@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.5.2] - 2026-09-28
+
+### Changed
+- Documented a live sync known limitation where a late relay can arrive across an undo back to identical bytes
+
+### Fixed
+- Live sync now relays only the saves the host accepted, so a peer's refused save can no longer revert a saved edit
+- Live sync conflict holds now release only for the version that refused the save
+- Live sync retries relays of landed saves and never dedupes them away
+- A capture that is not a save no longer moves the save's ticket
+
+
+
 ## [1.5.1] - 2026-09-27
 
 ### Fixed
