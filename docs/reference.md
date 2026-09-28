@@ -229,6 +229,14 @@ two elements, one of each.
   tab's next successful save. Until then every such conflict is also in
   `liveSync.unresolvedConflicts` (the `liveSync` export of the sync plugin's
   `live-sync.js`; not on `window.clay`), each with `local`, the text this tab lost.
+  A tab tells the other open copies about a save only once the host has accepted it, so
+  every update it sends descends from the version they already hold. Known limitation:
+  the host's stamp is a hash of the file's content, and relayed updates do not say which
+  version they were built on. So an older update that arrives late can still revert
+  another tab's newer save without a conflict. It takes a tab saving the file back to
+  bytes identical to an earlier version (an undo, then a save) while its previous update
+  is still in transit. A page that loads in the instant between another tab's save and
+  that save's update can also start from a stamp newer than the bytes it was served.
 - `clay:sorted` — a drag-drop reorder landed (sortable plugin); fires on the container
   and bubbles; detail `{item, from, to, oldIndex, newIndex}`.
 - `clay:view-save-attempt` — a visitor clicked a `[trigger-save]` element in view mode;
