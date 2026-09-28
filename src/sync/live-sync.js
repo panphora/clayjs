@@ -1631,7 +1631,7 @@ class LiveSync {
       // returns above without reaching here, so nothing can name an author for a
       // change this tab never took. Null on every frame the host did not stamp.
       document.dispatchEvent(new CustomEvent('clay:sync-applied', {
-        detail: { seq, source: 'peer', by: by || null, report }
+        detail: { seq, source: 'peer', by: by || null, report, unresolved: this.unresolvedConflicts.slice() }
       }));
     } finally {
       this._log('applyUpdate - morph complete, resuming mutations');
@@ -1780,6 +1780,7 @@ class LiveSync {
           // so this tab's next save copies from the file somebody else just wrote.
           html,
           report,
+          unresolved: this.unresolvedConflicts.slice(),
         }
       }));
     } finally {

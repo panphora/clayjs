@@ -218,7 +218,7 @@ two elements, one of each.
   edit made here is saved but never compared — the page reads dirty forever. Use
   `clay.addDocumentTransform(fn)` to change what gets saved.
 - `clay:sync-applied` — a live-sync update landed (sync plugin); detail
-  `{seq, source, by, report}`, plus `etag` on a disk frame. `source` is `peer` (another open
+  `{seq, source, by, report, unresolved}`, plus `etag` on a disk frame. `source` is `peer` (another open
   copy) or `disk` (the file changed underneath you). `by` is the `{id, name}` the host
   stamped on the frame, or `null` on a frame nobody stamped; hosts stamp live-lane
   frames only, so a disk frame's `by` is normally `null`.
@@ -229,6 +229,8 @@ two elements, one of each.
   tab's next successful save. Until then every such conflict is also in
   `liveSync.unresolvedConflicts` (the `liveSync` export of the sync plugin's
   `live-sync.js`; not on `window.clay`), each with `local`, the text this tab lost.
+  The event's `unresolved` is a copy of that list as it stands after this frame, including
+  conflicts earlier frames left.
   A tab tells the other open copies about a save only once the host has accepted it, so
   every update it sends descends from the version they already hold. Known limitation:
   the host's stamp is a hash of the file's content, and relayed updates do not say which

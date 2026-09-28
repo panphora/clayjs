@@ -189,6 +189,34 @@ test("dirty tab: both rewrote the same word, the peer's version wins and it is r
   sync.stop();
 });
 
+test("the event lists every unresolved conflict, including an earlier frame's", async () => {
+  const sync = makeSync();
+  document.body.innerHTML = "<main><p>orig</p><p>second</p></main>";
+  sync.lastHtml = captureFrame();
+  const first = sync.lastHtml.replace("orig", "peer-edit");
+
+  document.querySelector("main p").textContent = "local-edit";
+  await Promise.resolve();
+
+  const details = [];
+  const onApplied = (e) => { details.push(e.detail); };
+  document.addEventListener("clay:sync-applied", onApplied);
+  try {
+    await sync._doApplyUpdate(first, 9, null);
+    const second = sync.lastHtml.replace("second", "second-peer");
+    await sync._doApplyUpdate(second, 10, null);
+  } finally {
+    document.removeEventListener("clay:sync-applied", onApplied);
+  }
+
+  expect(details).toHaveLength(2);
+  expect(details[0].unresolved.length).toBeGreaterThan(0);
+  expect(details[1].report.conflicts).toHaveLength(0);
+  expect(details[1].unresolved).toEqual(details[0].unresolved);
+  expect(details[1].unresolved).not.toBe(sync.unresolvedConflicts);
+  sync.stop();
+});
+
 // Spec §6: a version stamp rides ON a peer frame and is adopted only if that frame
 // merges. The pair below is the whole rule, and it is here rather than beside the
 // queue tests because only this harness runs the real merge.
