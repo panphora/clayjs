@@ -174,6 +174,9 @@ let lastSavedContents = '';
 let lastSavedDirty = '';
 // A save was requested while one was on the wire; run one more when it settles.
 let pendingSave = false;
+// Whether that queued save came from autosave. It acknowledges a lost conflict
+// only if something else asked for it.
+let pendingSaveAuto = false;
 
 // ============================================
 // AUTOSAVE SUSPENSION
@@ -289,7 +292,7 @@ function skipped_(msg) {
  * where the write may or may not have landed, so it is not treated as success
  * either.
  */
-function applySaveResult(result, forComparison, forDirty, label, gateToken, forSave = null) {
+function applySaveResult(result, forComparison, forDirty, label, gateToken, forSave = null, auto = false) {
   if (result.ok) {
     // Both baselines advance from the SAME pre-request capture, never from the
     // live DOM, so an edit made while the request was on the wire stays unsaved.
@@ -302,7 +305,9 @@ function applySaveResult(result, forComparison, forDirty, label, gateToken, forS
     gateClearIfUnchanged(gateToken);
     // The server's severity rides through untouched: a save can land AND carry a
     // warning, and the UI module is what decides how to render that.
-    setSaveState('saved', result.msg || 'Saved', result.msgType);
+    // auto: this save came from autosave, which writes the page but is not the
+    // person saying "the page as it stands is what I want" (live sync reads it).
+    setSaveState('saved', result.msg || 'Saved', result.msgType, auto ? { auto: true } : null);
     logBaseline(label, `${lastSavedContents.length} chars`);
     releaseConflictHold();
   } else if (result.msgType === 'conflict') {
@@ -337,7 +342,7 @@ function drainPendingSave() {
   if (!pendingSave) return;
   if (saveFateIsUnknown()) return;
   pendingSave = false;
-  savePage();
+  runSave(() => {}, pendingSaveAuto);
 }
 
 // State accessors for autosave module
@@ -383,6 +388,15 @@ export function setLastSavedContents(val) {
  * @returns {Promise<{msg: string, msgType: string}>}
  */
 export function savePage(callback = () => {}) {
+  return runSave(callback, false);
+}
+
+// The autosave entry point's save: savePageThrottled's throttle calls this one.
+function autoSavePage(callback = () => {}) {
+  return runSave(callback, true);
+}
+
+function runSave(callback, auto) {
   return new Promise((resolve) => {
     if (!isEditMode && !window.clay?.testMode) {
       clearExplicitSave();
@@ -398,6 +412,9 @@ export function savePage(callback = () => {}) {
     // Not cleared here: pendingSave means this request is deferred, not
     // abandoned, and drainPendingSave is what eventually sends it.
     if (isSaveInProgress()) {
+      // The queued save acknowledges a lost conflict only if something other than
+      // autosave asked for it.
+      pendingSaveAuto = pendingSave ? pendingSaveAuto && auto : auto;
       pendingSave = true;
       const skipped = skipped_('Save already in progress');
       callback(skipped);
@@ -452,7 +469,7 @@ export function savePage(callback = () => {}) {
 
     // Use saveHtml directly with our pre-captured content (avoids double capture)
     saveHtml(forSave, (result) => {
-      applySaveResult(result, forComparison, forDirty, 'updated after save', gateToken, forSave);
+      applySaveResult(result, forComparison, forDirty, 'updated after save', gateToken, forSave, auto);
       if (typeof callback === 'function') {
         callback(result);
       }
@@ -477,6 +494,7 @@ export function savePageForce(callback = () => {}) {
     }
 
     if (isSaveInProgress()) {
+      pendingSaveAuto = false;
       pendingSave = true;
       const skipped = skipped_('Save already in progress');
       callback(skipped);
@@ -565,7 +583,7 @@ export function replacePageWith(url) {
 }
 
 // Throttled version of savePage for auto-save
-const throttledSave = throttle(savePage, 1200);
+const throttledSave = throttle(autoSavePage, 1200);
 
 // Baseline for autosave comparison
 let baselineContents = '';
