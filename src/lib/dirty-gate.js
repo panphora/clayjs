@@ -191,3 +191,12 @@ export function gateClearIfUnchanged(token) {
 if (typeof document !== 'undefined' && isEditMode) {
   startDirtyGate();
 }
+
+// Public for editors whose own surface is editor-ui (so neither gate feed sees it):
+// a person's edit made while a live-sync frame waits on a resource would otherwise be
+// recorded as saved. Set here, not in the loader, because the sync plugin is what
+// loads this module.
+if (typeof window !== 'undefined') {
+  window.clay = window.clay || {};
+  window.clay.markDirty = gateMarkDirty;
+}

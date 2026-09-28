@@ -84,6 +84,10 @@ itself, with no network.
   check too, so keep it pure and repeatable (no timestamps, counters, or network).
 - `clay.onSnapshot(fn)` — like `addDocumentTransform`, but runs for every snapshot,
   including live-sync broadcasts.
+- `clay.markDirty()` — tell live sync the person just edited something it cannot see: an
+  editor whose own UI is `editor-ui` and which writes its data itself. Call it on each
+  user edit. Without it, an edit made while an incoming update waits on a script or
+  stylesheet load can be recorded as already saved. Present when the sync plugin is loaded.
 - `clay.isEditMode` — whether this session may edit.
 - `clay.isOwner` — whether the platform's owner cookie is set (URL and global overrides
   don't affect it, unlike `isEditMode`).

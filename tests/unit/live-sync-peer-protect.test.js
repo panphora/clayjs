@@ -28,6 +28,7 @@ let snapshot;
 let gate;
 let save;
 let etag;
+let Mutation;
 
 beforeAll(async () => {
   window.clayEditMode = true;
@@ -43,6 +44,7 @@ beforeAll(async () => {
   gate = await import("../../src/lib/dirty-gate.js");
   save = await import("../../src/core/save.js");
   etag = await import("../../src/core/etag.js");
+  Mutation = (await import("../../src/lib/mutation.js")).default;
 });
 
 beforeEach(async () => {
@@ -214,6 +216,35 @@ test("the event lists every unresolved conflict, including an earlier frame's", 
   expect(details[1].report.conflicts).toHaveLength(0);
   expect(details[1].unresolved).toEqual(details[0].unresolved);
   expect(details[1].unresolved).not.toBe(sync.unresolvedConflicts);
+  sync.stop();
+});
+
+test("clay.markDirty during an apply keeps an invisible edit unsaved", async () => {
+  const sync = makeSync();
+  document.body.innerHTML = '<main><p>one</p><script type="application/json" class="data">{"a":1}</script></main>';
+  sync.lastHtml = captureFrame();
+  const frame = sync.lastHtml.replace("one", "one-peer");
+
+  let applied = null;
+  const onApplied = (e) => { applied = e.detail; };
+  document.addEventListener("clay:sync-applied", onApplied);
+  const origPause = Mutation.pause;
+  Mutation.pause = function (...args) {
+    const r = origPause.apply(this, args);
+    document.querySelector(".data").textContent = '{"a":2}';
+    window.clay.markDirty();
+    return r;
+  };
+  try {
+    await sync._doApplyUpdate(frame, 9, null);
+  } finally {
+    Mutation.pause = origPause;
+    document.removeEventListener("clay:sync-applied", onApplied);
+  }
+
+  expect(applied).not.toBeNull();
+  expect(gate.pageMaybeDirty()).toBe(true);
+  expect(save.getLastSavedDirty()).not.toContain('{"a":2}');
   sync.stop();
 });
 
