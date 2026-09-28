@@ -23,7 +23,7 @@ import {
 import { captureForComparison, captureForComparisonAndDirty, captureForSaveAndComparison } from "./snapshot.js";
 import { seedEtag } from "./etag.js";
 import { gateCaptureToken, gateClearIfUnchanged, pageMaybeDirty } from "../lib/dirty-gate.js";
-import { autosaveActive } from "../lib/autosave-state.js";
+import { autosaveActive, saveAckPending } from "../lib/autosave-state.js";
 import { ROOT_LIBRARY_ATTRS, SAVE_TOKEN_ATTRS, LEGACY_SAVE_TOKEN_ATTRS } from "../lib/root-attrs.js";
 import { logSaveCheck, logBaseline } from "../lib/autosave-debug.js";
 import { initUserGesture, markExplicitSave, clearExplicitSave } from "../lib/user-gesture.js";
@@ -449,7 +449,9 @@ function runSave(callback, auto) {
     // An explicit save asks the DIRTY question: write anything the person would
     // otherwise lose, including an edit inside a batching region that was never
     // going to autosave itself.
-    unsavedChanges = (forDirty !== lastSavedDirty);
+    // A lost live-sync conflict waits on a save that is not an autosave: that save is
+    // the acknowledgement, so it goes out even when the bytes already match the file.
+    unsavedChanges = (forDirty !== lastSavedDirty) || (!auto && saveAckPending());
     logSaveCheck('savePage dirty check', !unsavedChanges);
 
     // Skip if content hasn't changed. Clearing the explicit intent here is the

@@ -45,7 +45,7 @@ import { isEditMode } from "../core/is-edit-mode.js";
 import { mergeTagRecognizers } from "./merge-tags.js";
 import { serializeForSync, captureForComparisonAndDirty, captureSnapshot, originalSnapshotNode, captureForMerge, captureForSaveAndComparison } from '../core/snapshot.js';
 import { isTabLocalRootAttr, TAB_LOCAL_ROOT_ATTRS } from '../lib/root-attrs.js';
-import { autosaveActive } from '../lib/autosave-state.js';
+import { autosaveActive, setAckPending } from '../lib/autosave-state.js';
 import { enableContentEditable } from '../core/admin-contenteditable.js';
 import { enableOnClick } from '../core/admin-onclick.js';
 import { enableAdminInputs } from '../core/admin-inputs.js';
@@ -489,6 +489,7 @@ class LiveSync {
     // snapshot listener would never fire — skip registering it.
     if (this.lane === 'live') {
       this.listenForSnapshots();
+      setAckPending(() => this.unresolvedConflicts.length > 0);
       this._saveSavedHandler = (event) => {
         this._saveEpoch++;
         // The file now holds what this save wrote: the disk lane's new base,
@@ -557,6 +558,7 @@ class LiveSync {
 
     if (this._saveSavedHandler) {
       document.removeEventListener('clay:save-saved', this._saveSavedHandler);
+      setAckPending(() => false);
       this._saveSavedHandler = null;
     }
 

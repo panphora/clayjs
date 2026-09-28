@@ -72,6 +72,41 @@ function captureFrame() {
   return snapshot.serializeForSync(snapshot.captureSnapshot({ flushUndo: false }));
 }
 
+// The save lane specifically, not the network: live sync also reaches the wire for
+// relays and profile discovery, and those are not saves. URLs only, so a failure
+// prints the request, not jsdom's request init.
+function saveRequests() {
+  return global.fetch.mock.calls
+    .map(([url]) => String(url))
+    .filter((url) => url.includes("/_/save"));
+}
+
+// Start an instance whose stream never opens (no profile, no connect), so the only
+// fetch that can land is one a test drives itself.
+function makeStartedSync() {
+  const sync = makeSync();
+  sync._resolveProfile = () => new Promise(() => {});
+  return sync;
+}
+
+// An open conflict whose page has since been written by autosave: the page as it
+// stands IS what the file holds, which is the state a person's Cmd+S arrives in.
+async function startWithAcknowledgedPage() {
+  const sync = makeStartedSync();
+  document.body.innerHTML = "<main><p>orig</p></main>";
+  await Promise.resolve();
+  gate.gateClearIfUnchanged(gate.gateCaptureToken());
+  sync.start("index.html");
+
+  document.querySelector("main p").textContent = "local-edit";
+  await Promise.resolve();
+  await sync._doApplyUpdate(sync.lastHtml.replace("orig", "peer-edit"), 9, null);
+
+  const { forComparison, forDirty } = snapshot.captureForComparisonAndDirty();
+  save.setLastSavedBaselines(forComparison, forDirty);
+  return sync;
+}
+
 test("clean tab: a peer frame full-morphs, including sections this tab last touched", async () => {
   const sync = makeSync();
   document.body.innerHTML =
@@ -299,6 +334,85 @@ test("autosave saves the page anyway, and the conflict outlives its own save", a
     // tests after this one never had <html autosave>.
     autosaveState.setAutosaveActive(false);
     document.documentElement.removeAttribute("autosave");
+    sync.stop();
+  }
+});
+
+// Autosave keeps saving, so by the time the person presses Cmd+S the page equals
+// the last saved bytes. The save that acknowledges a lost conflict would then
+// resolve "No changes to save" without sending anything, and the close warning
+// would never come down. While a conflict is open, a non-autosave save counts as
+// having changes: one extra request carrying the same bytes, and its
+// clay:save-saved is the acknowledgement.
+test("a person\'s save goes out while a conflict is open, even with the page already saved", async () => {
+  global.fetch = jest.fn(async () => ({
+    ok: true,
+    status: 200,
+    statusText: "OK",
+    text: async () => JSON.stringify({ msg: "Saved" })
+  }));
+  const sync = await startWithAcknowledgedPage();
+
+  try {
+    expect(sync.unresolvedConflicts.length).toBeGreaterThan(0);
+
+    const result = await save.savePage();
+
+    expect(result.msgType).not.toBe("skipped");
+    expect(saveRequests()).toHaveLength(1);
+    expect(sync.unresolvedConflicts).toHaveLength(0);
+  } finally {
+    sync.stop();
+  }
+});
+
+// The same call with nothing waiting on it: the extra request is scoped to the
+// conflict, and a clean page still sends nothing at all.
+test("with no conflict open, a save with the page already saved sends nothing", async () => {
+  global.fetch = jest.fn(async () => ({
+    ok: true,
+    status: 200,
+    statusText: "OK",
+    text: async () => JSON.stringify({ msg: "Saved" })
+  }));
+  const sync = makeStartedSync();
+  document.body.innerHTML = "<main><p>orig</p></main>";
+  await Promise.resolve();
+  gate.gateClearIfUnchanged(gate.gateCaptureToken());
+  sync.start("index.html");
+
+  try {
+    expect(sync.unresolvedConflicts).toHaveLength(0);
+    const { forComparison, forDirty } = snapshot.captureForComparisonAndDirty();
+    save.setLastSavedBaselines(forComparison, forDirty);
+
+    const result = await save.savePage();
+
+    expect(result.msgType).toBe("skipped");
+    expect(saveRequests()).toHaveLength(0);
+  } finally {
+    sync.stop();
+  }
+});
+
+// Autosave carries no acknowledgement, so it gets no such exemption: in the exact
+// state above it sends nothing and the conflict outlives the call.
+test("an autosave with the page already saved sends nothing and leaves the conflict open", async () => {
+  global.fetch = jest.fn(async () => ({
+    ok: true,
+    status: 200,
+    statusText: "OK",
+    text: async () => JSON.stringify({ msg: "Saved" })
+  }));
+  const sync = await startWithAcknowledgedPage();
+
+  try {
+    const result = await save.savePageThrottled();
+
+    expect(result.msgType).toBe("skipped");
+    expect(saveRequests()).toHaveLength(0);
+    expect(sync.unresolvedConflicts.length).toBeGreaterThan(0);
+  } finally {
     sync.stop();
   }
 });
