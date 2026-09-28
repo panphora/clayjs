@@ -19,6 +19,7 @@ import { isEditMode } from "./is-edit-mode.js";
 import { captureForDirtyCheck } from "./snapshot.js";
 import { getLastSavedDirty } from "./save.js";
 import { logUnloadDiffSync, preloadIfEnabled } from "../lib/autosave-debug.js";
+import { hasUnsavedState } from "../lib/unsaved-state.js";
 
 // Pre-load diff library if debug mode is on (so it's ready for unload)
 preloadIfEnabled();
@@ -31,20 +32,26 @@ preloadIfEnabled();
 // the person editing it deserves the warning.
 window.addEventListener('beforeunload', (event) => {
   if (!isEditMode) return;
-  // The demo plugin saves into this browser's own storage, so leaving the page
-  // loses nothing a prompt could protect.
-  if (window.clay?.demo) return;
 
-  // The DIRTY domain, not the autosave domain. An edit inside a
-  // no-trigger-autosave region never starts a save by itself, which is exactly
-  // why closing the tab on one has to warn: nothing else is going to write it.
-  const currentForCompare = captureForDirtyCheck();
-  const lastSaved = getLastSavedDirty();
+  // Work outside the DOM first: it needs no capture, and a capture that throws
+  // must not hide it. The demo plugin does not save it either, so it warns there too.
+  const held = hasUnsavedState();
 
-  if (currentForCompare !== lastSaved) {
+  // The demo plugin saves the page's bytes into this browser's own storage, so
+  // leaving loses none of them.
+  let bytesDiffer = false;
+  if (!held && !window.clay?.demo) {
+    // The DIRTY domain, not the autosave domain. An edit inside a
+    // no-trigger-autosave region never starts a save by itself, which is exactly
+    // why closing the tab on one has to warn: nothing else is going to write it.
+    const currentForCompare = captureForDirtyCheck();
+    const lastSaved = getLastSavedDirty();
+    bytesDiffer = currentForCompare !== lastSaved;
     // Debug: log what's different before showing the warning
-    logUnloadDiffSync(currentForCompare, lastSaved);
+    if (bytesDiffer) logUnloadDiffSync(currentForCompare, lastSaved);
+  }
 
+  if (held || bytesDiffer) {
     event.preventDefault();
     event.returnValue = '';
   }
