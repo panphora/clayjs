@@ -208,6 +208,10 @@ function errorResult(err) {
     // A refusal that may be answering this tab's own timed-out write. Only the
     // notice uses it, and only to word itself; nothing decides anything on it.
     afterTimeout: conflicted && unknownAttempt !== null,
+    // The stamp the host refused this save against: the version that beat it.
+    // Live sync compares it with the frames it merges to know when the refusal
+    // is answered.
+    conflictEtag: conflicted ? (err.etag ?? null) : null,
     etag: null
   };
 }

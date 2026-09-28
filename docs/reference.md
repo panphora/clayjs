@@ -204,9 +204,12 @@ two elements, one of each.
   returns); detail `{msg, timestamp}`.
 - `clay:save-conflict` — the host refused a save because the file changed since this tab
   loaded or last saved it (HTTP 412). Autosave pauses and a notice appears; detail
-  `{msg, msgType, timestamp, changedBy, afterTimeout}`.
+  `{msg, msgType, timestamp, changedBy, afterTimeout, etag}`, where `etag` is the stamp
+  the host refused the save against.
 - `clay:save-conflict-resolved` — live sync merged the version that beat this tab's save
-  with nothing lost, so the refusal is answered: autosave resumes and the notice hides.
+  (its stamp matches the refusal's `etag`) with nothing lost, so the refusal is answered:
+  autosave resumes and the notice hides. On a manual-save page with unsaved work the
+  notice stays until the person saves.
   No save happened; `clay:save-saved` follows once the merged page is saved. Detail
   `{timestamp}`.
 - `clay:snapshot-ready` — a snapshot has been cloned, before any stripping. Read

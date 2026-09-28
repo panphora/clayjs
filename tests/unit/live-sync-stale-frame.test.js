@@ -140,7 +140,7 @@ test("a save's capture relays nothing; the landed save relays once, with its sta
   document.querySelector('[data-id="two"]').textContent = "Two EDITED";
   const clone = snapshot.captureSnapshot({ flushUndo: false });
   const saved = snapshot.serializeForSync(clone);
-  document.dispatchEvent(new CustomEvent("clay:snapshot-ready", { detail: { documentElement: clone } }));
+  document.dispatchEvent(new CustomEvent("clay:snapshot-ready", { detail: { documentElement: clone, forSave: true } }));
   await wait(250);
   expect(relayPosts).toHaveLength(0);
   expect(sync.lastHtml).toBe(seed);
@@ -165,7 +165,7 @@ test("a landed save on a host that returns no stamp still relays, without one", 
 
   document.querySelector('[data-id="two"]').textContent = "Two EDITED";
   const clone = snapshot.captureSnapshot({ flushUndo: false });
-  document.dispatchEvent(new CustomEvent("clay:snapshot-ready", { detail: { documentElement: clone } }));
+  document.dispatchEvent(new CustomEvent("clay:snapshot-ready", { detail: { documentElement: clone, forSave: true } }));
   etag.recordEtag(null);
   document.dispatchEvent(new CustomEvent("clay:save-saved", { detail: { msg: "Saved" } }));
   await Promise.resolve();
@@ -210,8 +210,10 @@ test("the refused tab merges the peer's stamped frame against the seed, keeps bo
   expect(gate.pageMaybeDirty()).toBe(true);
   expect(etag.lastSeenEtag()).toBe("E1");
   expect(save.isSaveConflicted()).toBe(false);
-  expect(document.documentElement.getAttribute("savestatus")).toBe("saved");
-  expect(bar.style.display).toBe("none");
+  // A manual-save page: nothing has been written yet, so the notice stays up
+  // until the person saves.
+  expect(document.documentElement.getAttribute("savestatus")).toBe("conflict");
+  expect(bar.style.display).toBe("flex");
 
   // The convergence save answers the version the host refused this tab over.
   saveResponse = () => ({ status: 200, body: { msg: "Saved", etag: "E2" } });
@@ -219,6 +221,8 @@ test("the refused tab merges the peer's stamped frame against the seed, keeps bo
   expect(landed.ok).toBe(true);
   expect(savePosts[1].headers["If-Match"]).toBe("E1");
   expect(etag.lastSeenEtag()).toBe("E2");
+  expect(document.documentElement.getAttribute("savestatus")).toBe("saved");
+  expect(bar.style.display).toBe("none");
   sync.stop();
 });
 

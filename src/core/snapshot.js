@@ -464,7 +464,7 @@ export function captureForSaveAndComparison({ emitForSync = true, flushUndo = tr
   // and a baseline the dirty check cannot reproduce warns on close forever.
   if (emitForSync) {
     document.dispatchEvent(new CustomEvent('clay:snapshot-ready', {
-      detail: { documentElement: clone }
+      detail: { documentElement: clone, forSave: true }
     }));
   }
 

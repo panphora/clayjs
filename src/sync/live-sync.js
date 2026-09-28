@@ -144,7 +144,7 @@ function pairedBaseline() {
   const { forComparison, forDirty } = captureForComparisonAndDirty({ flushUndo: false });
   return [forComparison, forDirty];
 }
-import { savePageThrottled, setLastSavedBaselines, setUnsavedChanges, getLastSavedBytes, conflictResolvedBySync } from '../core/save.js';
+import { savePageThrottled, setLastSavedBaselines, setUnsavedChanges, getLastSavedBytes, conflictResolvedBySync, isSaveConflicted } from '../core/save.js';
 
 /**
  * The two live-sync wires, and the rule for choosing between them.
@@ -302,6 +302,7 @@ class LiveSync {
     // equal our state.
     this._saveEpoch = 0;
     this._saveSavedHandler = null;
+    this._saveConflictHandler = null;
 
     // The identityMap that came with lastHtml, so the peer-lane dirty diff
     // can resolve synthetic identities on its base tree.
@@ -464,6 +465,23 @@ class LiveSync {
         this._relayCommit();
       };
       document.addEventListener('clay:save-saved', this._saveSavedHandler);
+      // A 412 can arrive after this tab already merged the version that beat it:
+      // the winner's relay overtook the refusal. The refusal then names a stamp
+      // this tab already holds, and nothing else would ever release the hold.
+      // Deferred a microtask so the conflict notice's own listener has shown the
+      // bar before this hides it.
+      this._saveConflictHandler = (event) => {
+        const refusedBy = event.detail && event.detail.etag;
+        if (!refusedBy) return;
+        queueMicrotask(() => {
+          if (this.isDestroyed) return;
+          if (refusedBy !== lastSeenEtag()) return;
+          if (this.unresolvedConflicts.length) return;
+          conflictResolvedBySync(refusedBy);
+          this._saveAfterMerge(pageMaybeDirty(), false);
+        });
+      };
+      document.addEventListener('clay:save-conflict', this._saveConflictHandler);
     }
   }
 
@@ -489,6 +507,11 @@ class LiveSync {
     if (this._saveSavedHandler) {
       document.removeEventListener('clay:save-saved', this._saveSavedHandler);
       this._saveSavedHandler = null;
+    }
+
+    if (this._saveConflictHandler) {
+      document.removeEventListener('clay:save-conflict', this._saveConflictHandler);
+      this._saveConflictHandler = null;
     }
 
     this._queuedSend = null;
@@ -762,6 +785,10 @@ class LiveSync {
       if (etag && html === this.lastHtml) {
         this._log(`Taking the stamp from a peer save of content already applied (seq=${seq})`);
         recordEtag(etag);
+        if (isSaveConflicted() && this.unresolvedConflicts.length === 0) {
+          conflictResolvedBySync(etag);
+          this._saveAfterMerge(pageMaybeDirty(), false);
+        }
         return;
       }
 
@@ -794,6 +821,10 @@ class LiveSync {
       // ahead of the pause check: a save made during a frame's await is still a
       // save, and it is newer than that frame.
       this._saveTicket = this._ticket();
+      // Only a save's own capture names what the next landed save stored. A
+      // capture made for any other reason (the public captureForSave) must not
+      // replace the payload that save will relay.
+      if (!event.detail || event.detail.forSave !== true) return;
 
       const { documentElement: clone } = event.detail;
       if (!clone) return;
@@ -852,14 +883,10 @@ class LiveSync {
    *
    * Runs on clay:save-saved, by which point the save response has already been
    * recorded, so `lastSeenEtag()` is the stamp for the bytes that just landed.
-   *
-   * The content is `lastHtml`, the snapshot this tab most recently relayed, which
-   * is the state the save was taken from: the save pipeline dispatches
-   * clay:snapshot-ready on its way to capturing what to send, so that relay has
-   * already gone out. Re-sending those same bytes is not redundant, because the
-   * stamp is the new information and a stamp may never travel without the content
-   * it describes. A receiver whose baseline already matches takes the stamp and
-   * skips the morph.
+   * The content is `_savedSnapshot`, captured by that save's own snapshot-ready
+   * event, never `lastHtml`: a capture is not relayed until its save lands, so
+   * peers only ever see versions the host accepted, each descending from the one
+   * before. A host that returns no stamp still gets the relay, without one.
    */
   _relayCommit() {
     if (this.isDestroyed) return;
@@ -878,9 +905,11 @@ class LiveSync {
     this._enqueueSend(pending.html, pending.identityMap, etag || null);
   }
 
-  _postUpdate(html, identityMap, etag = null) {
-    // Skip if unchanged
-    if (html === this.lastHtml) {
+  _postUpdate(html, identityMap, etag = null, attempt = 0) {
+    // Skip only an unstamped repeat. A landed save is news even when its bytes
+    // equal the last relay: "Keep mine" can restore exactly those bytes after
+    // the peers moved on, and they must hear it.
+    if (!etag && html === this.lastHtml) {
       this._log('Skipping send - HTML unchanged');
       return;
     }
@@ -889,6 +918,7 @@ class LiveSync {
 
     this._sendInFlight = true;
     const gen = this._applyGen;
+    let retry = false;
 
     // Absolute against the real origin, so a <base href> in the page cannot
     // redirect the whole document to an origin the author picked.
@@ -919,15 +949,33 @@ class LiveSync {
         }
       } else {
         console.warn('[LiveSync] Save returned status:', response.status);
+        retry = response.status >= 500 || response.status === 408 || response.status === 429;
       }
     }).catch(err => {
       console.error('[LiveSync] Save failed:', err);
       if (this.onError) this.onError(err);
+      retry = true;
     }).finally(() => {
       this._sendInFlight = false;
       const queued = this._queuedSend;
       this._queuedSend = null;
-      if (queued) this._postUpdate(queued.html, queued.identityMap, queued.etag);
+      if (queued) {
+        this._postUpdate(queued.html, queued.identityMap, queued.etag);
+        return;
+      }
+      // The relay of a landed save is the only one peers get, so a transient
+      // failure is retried a few times. A newer save queued meanwhile replaces
+      // it: peers only need the latest.
+      if (!retry || !etag || attempt >= 3 || this.isDestroyed) return;
+      this._sendInFlight = true;
+      setTimeout(() => {
+        this._sendInFlight = false;
+        if (this.isDestroyed) return;
+        const newer = this._queuedSend;
+        this._queuedSend = null;
+        if (newer) this._postUpdate(newer.html, newer.identityMap, newer.etag);
+        else this._postUpdate(html, identityMap, etag, attempt + 1);
+      }, 500 * 2 ** attempt);
     });
   }
 
@@ -1553,7 +1601,7 @@ class LiveSync {
     // there the merge stays local, still dirty, until the person saves.
     // Not over a lost conflict: the hold and its bar stay up as the signal that
     // this tab lost text, until the person saves.
-    if (stamped && this.unresolvedConflicts.length === 0) conflictResolvedBySync();
+    if (stamped && this.unresolvedConflicts.length === 0) conflictResolvedBySync(etag);
     this._saveAfterMerge(diverged, typedDuringWait);
   }
 
@@ -1697,7 +1745,7 @@ class LiveSync {
     // autosave is on, as in the peer lane.
     // Not over a lost conflict: the hold and its bar stay up as the signal that
     // this tab lost text, until the person saves.
-    if (stamped && this.unresolvedConflicts.length === 0) conflictResolvedBySync();
+    if (stamped && this.unresolvedConflicts.length === 0) conflictResolvedBySync(etag);
     this._saveAfterMerge(diverged, typedDuringWait);
   }
 

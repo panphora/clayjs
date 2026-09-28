@@ -22,7 +22,8 @@ import {
 } from "./save-core.js";
 import { captureForComparison, captureForComparisonAndDirty, captureForSaveAndComparison } from "./snapshot.js";
 import { seedEtag } from "./etag.js";
-import { gateCaptureToken, gateClearIfUnchanged } from "../lib/dirty-gate.js";
+import { gateCaptureToken, gateClearIfUnchanged, pageMaybeDirty } from "../lib/dirty-gate.js";
+import { autosaveActive } from "../lib/autosave-state.js";
 import { ROOT_LIBRARY_ATTRS, SAVE_TOKEN_ATTRS, LEGACY_SAVE_TOKEN_ATTRS } from "../lib/root-attrs.js";
 import { logSaveCheck, logBaseline } from "../lib/autosave-debug.js";
 import { initUserGesture, markExplicitSave, clearExplicitSave } from "../lib/user-gesture.js";
@@ -227,8 +228,10 @@ export function resumeAutosave() {
 // The hold is released when a save lands, whatever produced it: clay.save.overwrite,
 // a live-sync frame that brought the page back in step, or the other tab going away.
 let conflictHold = false;
+let conflictEtag = null;
 
-function holdForConflict() {
+function holdForConflict(etag) {
+  conflictEtag = etag ?? null;
   if (conflictHold) return;
   conflictHold = true;
   suspendAutosave();
@@ -237,6 +240,7 @@ function holdForConflict() {
 function releaseConflictHold() {
   if (!conflictHold) return;
   conflictHold = false;
+  conflictEtag = null;
   resumeAutosave();
 }
 
@@ -247,20 +251,28 @@ export function isSaveConflicted() {
 
 /**
  * Live sync merged the version the host refused this tab over, and the tab now
- * holds that version's stamp. The refusal is answered: the next save carries a
- * stamp the host accepts, so autosave resumes (replaying one missed save), the
- * root leaves 'conflict', and the notice comes down. Not clay:save-saved: no
- * save happened, and that event runs every [onaftersave] handler.
+ * holds that version's stamp, so the next save carries a stamp the host accepts.
+ * Only that version answers the refusal: a frame with any other stamp (an older
+ * save arriving late) leaves the hold alone. Autosave resumes, replaying one
+ * missed save. On a manual-save page with unsaved work the root stays in
+ * 'conflict' and the notice stays up until the person saves, since nothing has
+ * been written yet. Not clay:save-saved: no save happened, and that event runs
+ * every [onaftersave] handler.
  */
-export function conflictResolvedBySync() {
+export function conflictResolvedBySync(etag) {
   if (!conflictHold) return;
+  if (conflictEtag && etag !== conflictEtag) return;
   conflictHold = false;
-  if (document.documentElement.getAttribute('savestatus') === 'conflict') {
-    document.documentElement.setAttribute('savestatus', 'saved');
+  conflictEtag = null;
+  const awaitingManualSave = !autosaveActive() && pageMaybeDirty();
+  if (!awaitingManualSave) {
+    if (document.documentElement.getAttribute('savestatus') === 'conflict') {
+      document.documentElement.setAttribute('savestatus', 'saved');
+    }
+    document.dispatchEvent(new CustomEvent('clay:save-conflict-resolved', {
+      detail: { timestamp: Date.now() }
+    }));
   }
-  document.dispatchEvent(new CustomEvent('clay:save-conflict-resolved', {
-    detail: { timestamp: Date.now() }
-  }));
   resumeAutosave();
 }
 
@@ -294,10 +306,11 @@ function applySaveResult(result, forComparison, forDirty, label, gateToken, forS
     logBaseline(label, `${lastSavedContents.length} chars`);
     releaseConflictHold();
   } else if (result.msgType === 'conflict') {
-    holdForConflict();
+    holdForConflict(result.conflictEtag);
     setSaveState('conflict', result.msg, result.msgType, {
       changedBy: result.changedBy ?? null,
       afterTimeout: result.afterTimeout === true,
+      etag: result.conflictEtag ?? null,
     });
   } else if (result.msgType !== 'skipped') {
     if (!navigator.onLine) {

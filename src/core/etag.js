@@ -82,7 +82,10 @@ export function forgetEtag() {
 export async function seedEtag({ fresh = false, clearIfMissing = fresh } = {}) {
   const at = generation;
   const meta = await hostMeta({ fresh });
-  conditional = meta.extensions.includes("conditional");
+  // Only a real answer (spec is a number) says what the host supports: a refresh
+  // that failed comes back as a bare host with no extensions, and must not switch
+  // conditional saves off for the rest of the page's life.
+  if (typeof meta.spec === "number") conditional = meta.extensions.includes("conditional");
 
   if (generation !== at) return lastSeen;
 
