@@ -300,7 +300,7 @@ test("R8 a typed edit whose save was refused survives the disk frame that caused
   sync._diskBase = captureDisk();
   document.querySelector('[data-id="a"] p').textContent = "a-typed";
   await Promise.resolve();
-  // The relay went out (lastHtml carries the edit); the save itself was refused.
+  // Simulates a tab whose base already carries the edit; the save itself was refused.
   sync.lastHtml = captureFrame();
 
   await sync._doApplyExternal(

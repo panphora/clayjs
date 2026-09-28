@@ -11,7 +11,7 @@
  *                              ▼
  *   ┌─────────────────────────────────────────────────────────┐
  *   │  2. SEND          POST snapshot to the relay address    │
- *   │                        (debounced, skip if unchanged)   │
+ *   │                 (after the save lands, with its stamp)  │
  *   └─────────────────────────────────────────────────────────┘
  *                              │
  *                              ▼
@@ -55,7 +55,7 @@ import { presence } from './presence.js';
 // `clay:sync-applied`, which this file is the only dispatcher of.
 import './section-notice.js';
 import { hostMeta } from '../core/host-meta.js';
-import { recordEtag, seedEtag, lastSeenEtag } from '../core/etag.js';
+import { recordEtag, seedEtag, lastSeenEtag, conditionalSaves } from '../core/etag.js';
 import { pageMaybeDirty, pauseGate, resumeGate, gateCaptureToken, gateClearIfUnchanged, gateMarkDirty } from '../lib/dirty-gate.js';
 import { SyncStream } from './stream.js';
 
@@ -144,7 +144,7 @@ function pairedBaseline() {
   const { forComparison, forDirty } = captureForComparisonAndDirty({ flushUndo: false });
   return [forComparison, forDirty];
 }
-import { savePageThrottled, setLastSavedBaselines, setUnsavedChanges, getLastSavedBytes } from '../core/save.js';
+import { savePageThrottled, setLastSavedBaselines, setUnsavedChanges, getLastSavedBytes, conflictResolvedBySync } from '../core/save.js';
 
 /**
  * The two live-sync wires, and the rule for choosing between them.
@@ -227,15 +227,12 @@ class LiveSync {
     // durable per-tab identity used for echo suppression.
     this.resumeId = null;
 
-    this.debounceMs = 150;
-    this.debounceTimer = null;
-
     // The sync serialization of the clone the CURRENT save was captured from,
     // held so the commit relay can pair the host's stamp with the content that
     // stamp actually describes. Set at snapshot-ready, which fires before the
     // save POST goes out, and consumed by _relayCommit when the response lands.
     // Never reconstructed from lastHtml: that is the last relay that COMPLETED,
-    // which lags the save whenever the response beats the 150ms debounce, and
+    // which lags the save whenever an earlier relay is still in flight, and
     // pairing a fresh stamp with older bytes is the one thing spec §10 forbids.
     this._savedSnapshot = null;
     this._sendInFlight = false;
@@ -494,7 +491,6 @@ class LiveSync {
       this._saveSavedHandler = null;
     }
 
-    clearTimeout(this.debounceTimer);
     this._queuedSend = null;
 
     // Cancel any pending frame and clear the queue. A morph already in
@@ -751,6 +747,14 @@ class LiveSync {
 
       const etag = typeof data.etag === 'string' && data.etag ? data.etag : null;
 
+      // On a host that stamps saves, every landed save is relayed with its stamp.
+      // A live-lane frame without one is an older client's preview of a save that
+      // may yet be refused; the stamped frame follows if it lands.
+      if (this.lane === 'live' && !etag && conditionalSaves()) {
+        this._log(`Dropping an unstamped live frame on a stamping host (seq=${seq})`);
+        return;
+      }
+
       // The common case, and it costs nothing: a peer saved bytes this tab has
       // already applied, so the frame's only news is the stamp. Taking it without
       // a morph is exactly as safe as taking it after one, because the baseline
@@ -790,10 +794,6 @@ class LiveSync {
       // ahead of the pause check: a save made during a frame's await is still a
       // save, and it is newer than that frame.
       this._saveTicket = this._ticket();
-      if (this.isPaused) {
-        this._log('snapshot-ready received but isPaused, skipping');
-        return;
-      }
 
       const { documentElement: clone } = event.detail;
       if (!clone) return;
@@ -810,43 +810,33 @@ class LiveSync {
       // content its stamp will describe. Held for _relayCommit, and overwritten
       // by the next capture, so it always names the save currently in flight.
       this._savedSnapshot = { html, identityMap };
-
-      this.sendUpdate(html, identityMap);
     };
 
     document.addEventListener('clay:snapshot-ready', this._snapshotHandler);
   }
 
   /**
-   * Send full HTML to the server (debounced, single-flight).
+   * Send a landed save's HTML to the relay (single-flight).
    *
    * One POST on the wire at a time, with at most one newer payload queued; a
    * fresher snapshot replaces the queued one, because peers only ever need the
    * latest state. Two concurrent fetches could reach the server in either order,
    * and last-write-wins then stored the OLDER snapshot for every peer.
    */
-  sendUpdate(html, identityMap) {
-    clearTimeout(this.debounceTimer);
-
-    this.debounceTimer = setTimeout(() => {
-      this._enqueueSend(html, identityMap);
-    }, this.debounceMs);
-  }
-
-  _enqueueSend(html, identityMap) {
+  _enqueueSend(html, identityMap, etag = null) {
     // Same one-deep queue the in-flight case uses, for the same reason: peers only
     // ever need the newest state, so a fresher snapshot replaces the waiting one.
     // Sending before the profile is known would have to guess an address.
     if (!this._profile) {
-      this._queuedSend = { html, identityMap };
+      this._queuedSend = { html, identityMap, etag };
       this._resolveProfile().then(() => this._flushQueuedSend());
       return;
     }
     if (this._sendInFlight) {
-      this._queuedSend = { html, identityMap };
+      this._queuedSend = { html, identityMap, etag };
       return;
     }
-    this._postUpdate(html, identityMap);
+    this._postUpdate(html, identityMap, etag);
   }
 
   _flushQueuedSend() {
@@ -854,7 +844,7 @@ class LiveSync {
     const queued = this._queuedSend;
     if (!queued) return;
     this._queuedSend = null;
-    this._postUpdate(queued.html, queued.identityMap);
+    this._postUpdate(queued.html, queued.identityMap, queued.etag);
   }
 
   /**
@@ -872,13 +862,8 @@ class LiveSync {
    * skips the morph.
    */
   _relayCommit() {
-    // Holding a stamp is the whole condition. It is set only from a save response
-    // that carried one, and a host that does not do conditional saves returns
-    // none, so this is the same test as "the host stamps what it stores" without
-    // a second flag that would have to be reached through discovery to exercise.
+    if (this.isDestroyed) return;
     const etag = lastSeenEtag();
-    if (!etag) return;
-    if (this.isDestroyed || this.isPaused) return;
 
     // The content this save stored, captured with it. Consumed rather than left
     // behind, so a save-saved with no capture of its own can never reuse an
@@ -886,49 +871,14 @@ class LiveSync {
     const pending = this._savedSnapshot;
     this._savedSnapshot = null;
 
-    // No captured snapshot means nothing here knows which bytes this stamp
-    // describes, and §10 is explicit that a stamp must never travel on its own.
-    // Staying silent costs the other editors one refusal they recover from;
-    // guessing costs somebody their work.
+    // No captured snapshot means nothing here knows which bytes this save
+    // stored, and §10 is explicit that a stamp must never travel on its own.
     if (!pending || typeof pending.html !== 'string') return;
 
-    this._postCommit(pending.html, etag, pending.identityMap);
+    this._enqueueSend(pending.html, pending.identityMap, etag || null);
   }
 
-  /**
-   * Post a snapshot whose point is the stamp attached to it.
-   *
-   * Deliberately not `_postUpdate`: that one returns early when the html matches
-   * `lastHtml`, and the whole point here is that the stamp is the new information
-   * even when the bytes are not. It also does not touch `lastHtml` or the
-   * single-flight queue, because it must not displace a real snapshot waiting to
-   * go out. It carries the identityMap captured with these bytes, so a receiver
-   * that morphs on this frame pairs elements the same way it would on the
-   * ordinary relay of the same content.
-   */
-  _postCommit(html, etag, identityMap) {
-    const profile = this._profile;
-    if (!profile) return;
-    fetch(new URL(profile.relayPath, window.location.origin).href, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        [profile.documentHeader]: window.location.href,
-      },
-      body: JSON.stringify({
-        [profile.snapshotKey]: html,
-        sender: this.clientId,
-        identityMap,
-        etag
-      })
-    }).catch(err => {
-      // Losing this costs the other editors one spurious refusal on their next
-      // save, which they recover from. It is not worth surfacing as an error.
-      this._log('Commit relay failed: ' + (err && err.message));
-    });
-  }
-
-  _postUpdate(html, identityMap) {
+  _postUpdate(html, identityMap, etag = null) {
     // Skip if unchanged
     if (html === this.lastHtml) {
       this._log('Skipping send - HTML unchanged');
@@ -952,7 +902,8 @@ class LiveSync {
       body: JSON.stringify({
         [profile.snapshotKey]: html,
         sender: this.clientId,
-        identityMap: identityMap
+        identityMap: identityMap,
+        ...(etag ? { etag } : {})
       })
     }).then(response => {
       if (response.ok) {
@@ -976,7 +927,7 @@ class LiveSync {
       this._sendInFlight = false;
       const queued = this._queuedSend;
       this._queuedSend = null;
-      if (queued) this._postUpdate(queued.html, queued.identityMap);
+      if (queued) this._postUpdate(queued.html, queued.identityMap, queued.etag);
     });
   }
 
@@ -1445,6 +1396,7 @@ class LiveSync {
 
     let diverged = false;
     let typedDuringWait = false;
+    let stamped = false;
     try {
       // Hold the whole frame only when this tab has unsaved edits and no
       // baseline to merge them against (the first frame of a fresh
@@ -1522,7 +1474,10 @@ class LiveSync {
       // above, and deliberately the same moment: the two claims a page makes
       // when it adopts a stamp are "the host stores this version" and "I hold
       // it", and only the second one is this tab's to make.
-      if (typeof etag === 'string' && etag) recordEtag(etag);
+      if (typeof etag === 'string' && etag) {
+        recordEtag(etag);
+        stamped = true;
+      }
 
       // Cross-lane baseline: the DOM now holds this frame's content, but the
       // DISK baseline (lastSavedContents) still describes pre-frame state. A
@@ -1593,9 +1548,12 @@ class LiveSync {
     // edits + their frame) that exists only in this DOM. Push it out explicitly
     // — the morph ran under Mutation.pause, so no autosave was triggered, and a
     // pending autosave debounce may already have fired mid-flight. Runs after
-    // isPaused is lifted so the save's snapshot-ready relay reaches peers.
+    // isPaused is lifted so the convergence save's relay reaches peers.
     // Only where autosave is on: a manual-save page must never auto-write, so
     // there the merge stays local, still dirty, until the person saves.
+    // Not over a lost conflict: the hold and its bar stay up as the signal that
+    // this tab lost text, until the person saves.
+    if (stamped && this.unresolvedConflicts.length === 0) conflictResolvedBySync();
     this._saveAfterMerge(diverged, typedDuringWait);
   }
 
@@ -1626,6 +1584,7 @@ class LiveSync {
 
     let diverged = false;
     let typedDuringWait = false;
+    let stamped = false;
     try {
       // Hold the whole frame only when this tab has unsaved edits and no
       // baseline to merge them against. Lane-guarded like the peer path: a
@@ -1682,7 +1641,10 @@ class LiveSync {
       // A frame with no stamp (an older host, or the content-less fetch fallback,
       // which serves bytes nobody stamped) leaves this alone, and the listener in
       // etag.js falls back to asking the host.
-      if (typeof etag === 'string' && etag) recordEtag(etag);
+      if (typeof etag === 'string' && etag) {
+        recordEtag(etag);
+        stamped = true;
+      }
 
       if (
         this.lane === 'live' &&
@@ -1733,6 +1695,9 @@ class LiveSync {
     // (our edits + their bytes). The baseline was left pre-external, so the
     // save sees both as changes and writes the merge back. Only where
     // autosave is on, as in the peer lane.
+    // Not over a lost conflict: the hold and its bar stay up as the signal that
+    // this tab lost text, until the person saves.
+    if (stamped && this.unresolvedConflicts.length === 0) conflictResolvedBySync();
     this._saveAfterMerge(diverged, typedDuringWait);
   }
 

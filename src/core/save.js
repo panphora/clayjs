@@ -245,6 +245,25 @@ export function isSaveConflicted() {
   return conflictHold;
 }
 
+/**
+ * Live sync merged the version the host refused this tab over, and the tab now
+ * holds that version's stamp. The refusal is answered: the next save carries a
+ * stamp the host accepts, so autosave resumes (replaying one missed save), the
+ * root leaves 'conflict', and the notice comes down. Not clay:save-saved: no
+ * save happened, and that event runs every [onaftersave] handler.
+ */
+export function conflictResolvedBySync() {
+  if (!conflictHold) return;
+  conflictHold = false;
+  if (document.documentElement.getAttribute('savestatus') === 'conflict') {
+    document.documentElement.setAttribute('savestatus', 'saved');
+  }
+  document.dispatchEvent(new CustomEvent('clay:save-conflict-resolved', {
+    detail: { timestamp: Date.now() }
+  }));
+  resumeAutosave();
+}
+
 function skipped_(msg) {
   return { ok: false, msg, msgType: 'skipped', code: null, etag: null };
 }

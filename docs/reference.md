@@ -202,6 +202,13 @@ two elements, one of each.
 - `clay:save-error` — the server answered with a problem; detail `{msg, timestamp}`.
 - `clay:save-offline` — the browser is offline (clayjs re-saves when the connection
   returns); detail `{msg, timestamp}`.
+- `clay:save-conflict` — the host refused a save because the file changed since this tab
+  loaded or last saved it (HTTP 412). Autosave pauses and a notice appears; detail
+  `{msg, msgType, timestamp, changedBy, afterTimeout}`.
+- `clay:save-conflict-resolved` — live sync merged the version that beat this tab's save
+  with nothing lost, so the refusal is answered: autosave resumes and the notice hides.
+  No save happened; `clay:save-saved` follows once the merged page is saved. Detail
+  `{timestamp}`.
 - `clay:snapshot-ready` — a snapshot has been cloned, before any stripping. Read
   `detail.documentElement`; do not change it. It is also where both "has anything
   changed" baselines come from, and the change checks do not fire this event, so an

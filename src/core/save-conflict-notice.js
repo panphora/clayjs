@@ -185,6 +185,7 @@ function init() {
   if (!isEditMode) return;
   document.addEventListener("clay:save-conflict", show);
   document.addEventListener("clay:save-saved", hide);
+  document.addEventListener("clay:save-conflict-resolved", hide);
   document.addEventListener("keydown", onKeydown);
 }
 

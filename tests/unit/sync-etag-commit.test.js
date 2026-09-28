@@ -105,7 +105,7 @@ describe("a saving tab tells the other editors, and only when it has something t
         clientId: "tab-a",
         _profile: { relayPath: "/_/sync", documentHeader: "Document-URL", snapshotKey: "snapshot" },
         _log() {},
-        _postCommit(html, etag, identityMap) { posted.push({ html, etag, identityMap }); },
+        _enqueueSend(html, identityMap, etag) { posted.push({ html, etag, identityMap }); },
         ...over,
       },
     };
@@ -157,19 +157,23 @@ describe("a saving tab tells the other editors, and only when it has something t
     expect(tab._savedSnapshot).toBeNull();
   });
 
-  test("says nothing when the save returned no stamp", () => {
+  // A landed save is relayed whether or not the host stamped it: peers need the
+  // content either way, and holding it back is what let a pre-save preview be
+  // the only thing they ever saw.
+  test("relays without a stamp when the save returned none", () => {
     forgetEtag();
 
-    expect(relay()).toEqual([]);
+    expect(relay()).toEqual([
+      { html: "<html>what I saved</html>", etag: null, identityMap: { a: 1 } },
+    ]);
   });
 
-  // Holding a stamp IS the condition. A host that does not do conditional saves
-  // returns none, so there is one test rather than two, and no branch that can
-  // only be reached by driving discovery.
-  test("says nothing on a host whose saves return no stamp", () => {
+  test("relays without a stamp on a host whose saves return none", () => {
     recordEtag(null);
 
-    expect(relay()).toEqual([]);
+    expect(relay()).toEqual([
+      { html: "<html>what I saved</html>", etag: null, identityMap: { a: 1 } },
+    ]);
   });
 
   test("says nothing before this tab has captured anything", () => {
@@ -178,27 +182,34 @@ describe("a saving tab tells the other editors, and only when it has something t
     expect(relay({ _savedSnapshot: undefined })).toEqual([]);
   });
 
-  test("says nothing while paused or destroyed", () => {
+  // A save that landed during a frame's apply window is still a save; only a
+  // destroyed tab stays silent.
+  test("says nothing once destroyed, and a pause does not hold a landed save back", () => {
     recordEtag("stored-7");
 
-    expect(relay({ isPaused: true })).toEqual([]);
     expect(relay({ isDestroyed: true })).toEqual([]);
+    expect(relay({ isPaused: true })).toHaveLength(1);
   });
 });
 
 describe("the body a commit frame puts on the wire", () => {
-  test("names the snapshot lane and carries the stamp beside it", async () => {
+  const postingTab = () => ({
+    clientId: "tab-a",
+    lastHtml: null,
+    _applyGen: 0,
+    _queuedSend: null,
+    _profile: { relayPath: "/_/sync", documentHeader: "Document-URL", snapshotKey: "snapshot" },
+    _log() {},
+  });
+
+  test("names the snapshot lane and carries the stamp beside it", () => {
     const sent = [];
     global.fetch = (url, options) => {
       sent.push({ url: String(url), body: JSON.parse(options.body) });
       return Promise.resolve({ ok: true });
     };
 
-    LiveSync.prototype._postCommit.call({
-      clientId: "tab-a",
-      _profile: { relayPath: "/_/sync", documentHeader: "Document-URL", snapshotKey: "snapshot" },
-      _log() {},
-    }, "<html>saved</html>", "stored-7");
+    LiveSync.prototype._postUpdate.call(postingTab(), "<html>saved</html>", { a: 1 }, "stored-7");
 
     expect(sent).toHaveLength(1);
     expect(sent[0].body.snapshot).toBe("<html>saved</html>");
@@ -215,13 +226,21 @@ describe("the body a commit frame puts on the wire", () => {
       return Promise.resolve({ ok: true });
     };
 
-    LiveSync.prototype._postCommit.call({
-      clientId: "tab-a",
-      _profile: { relayPath: "/_/sync", documentHeader: "Document-URL", snapshotKey: "snapshot" },
-      _log() {},
-    }, "<html>saved</html>", "stored-7");
+    LiveSync.prototype._postUpdate.call(postingTab(), "<html>saved</html>", { a: 1 }, "stored-7");
 
     expect(typeof sent[0].snapshot).toBe("string");
     expect(sent[0].snapshot.length).toBeGreaterThan(0);
+  });
+
+  test("leaves the stamp off a body that has none", () => {
+    const sent = [];
+    global.fetch = (url, options) => {
+      sent.push(JSON.parse(options.body));
+      return Promise.resolve({ ok: true });
+    };
+
+    LiveSync.prototype._postUpdate.call(postingTab(), "<html>saved</html>", { a: 1 });
+
+    expect("etag" in sent[0]).toBe(false);
   });
 });
