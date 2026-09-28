@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.5.3] - 2026-09-28
+
+### Added
+- Documented the boot refresh, which covers any content change made without a user action
+
+### Changed
+- Live sync seeds its merge bases at start again, and refreshes them at the boot settle
+- Restored the 1.5.2 settle condition
+
+### Fixed
+- The settle refresh only runs on a tab nobody has touched, and skips unconfirmed saves and boot DOM changes near a click
+- The settle refresh only replaces a start seed and never fills an empty merge base
+
+
+
 ## [1.5.2] - 2026-09-28
 
 ### Changed
