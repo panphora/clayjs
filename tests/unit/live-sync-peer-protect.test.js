@@ -29,7 +29,6 @@ let gate;
 let save;
 let etag;
 let Mutation;
-let autosaveState;
 
 beforeAll(async () => {
   window.clayEditMode = true;
@@ -46,7 +45,6 @@ beforeAll(async () => {
   save = await import("../../src/core/save.js");
   etag = await import("../../src/core/etag.js");
   Mutation = (await import("../../src/lib/mutation.js")).default;
-  autosaveState = await import("../../src/lib/autosave-state.js");
 });
 
 beforeEach(async () => {
@@ -219,94 +217,6 @@ test("the event lists every unresolved conflict, including an earlier frame's", 
   expect(details[1].unresolved).toEqual(details[0].unresolved);
   expect(details[1].unresolved).not.toBe(sync.unresolvedConflicts);
   sync.stop();
-});
-
-// The frame keeps its text and this tab's lost text waits on the person. An
-// autosave queued BEFORE the frame still fires AFTER it (the 1.5 s debounce runs
-// on the timer the local edit set), so the hold is read at fire time, not at
-// queue time. Without it, that save writes the page with the lost text gone and
-// its clay:save-saved clears the conflict: the close warning goes quiet and
-// nobody acknowledged anything.
-test("an autosave queued before the frame is held until a save acknowledges the conflict", async () => {
-  const sync = makeSync();
-  sync._resolveProfile = () => new Promise(() => {});
-  document.body.innerHTML = "<main><p>orig</p></main>";
-  await Promise.resolve();
-  gate.gateClearIfUnchanged(gate.gateCaptureToken());
-  sync.start("index.html");
-
-  const frame = sync.lastHtml.replace("orig", "peer-edit");
-  document.querySelector("main p").textContent = "local-edit";
-  await Promise.resolve();
-  expect(gate.pageMaybeDirty()).toBe(true);
-
-  await sync._doApplyUpdate(frame, 9, null);
-
-  expect(sync.unresolvedConflicts.length).toBeGreaterThan(0);
-  expect(autosaveState.autosaveHeld()).toBe(true);
-
-  document.dispatchEvent(new CustomEvent("clay:save-saved"));
-
-  expect(sync.unresolvedConflicts).toHaveLength(0);
-  expect(autosaveState.autosaveHeld()).toBe(false);
-  sync.stop();
-});
-
-test("stopping live sync takes back a hold a lost conflict still owed a save", async () => {
-  const sync = makeSync();
-  sync._resolveProfile = () => new Promise(() => {});
-  document.body.innerHTML = "<main><p>orig</p></main>";
-  await Promise.resolve();
-  gate.gateClearIfUnchanged(gate.gateCaptureToken());
-  sync.start("index.html");
-
-  document.querySelector("main p").textContent = "local-edit";
-  await Promise.resolve();
-  await sync._doApplyUpdate(sync.lastHtml.replace("orig", "peer-edit"), 9, null);
-  expect(autosaveState.autosaveHeld()).toBe(true);
-
-  sync.stop();
-
-  expect(autosaveState.autosaveHeld()).toBe(false);
-});
-
-// The same queue-and-fire race, driven through the real autosave callback: the
-// local edit arms the hub's 1.5 s debounce, the frame lands inside that window,
-// and the timer then fires with the hold already up. Real timers, because the
-// apply defers its tail past a 0 ms timer a fake clock would strand.
-test("autosave's own callback sends nothing when the frame beat its timer", async () => {
-  const sync = makeSync();
-  sync._resolveProfile = () => new Promise(() => {});
-  document.documentElement.setAttribute("autosave", "");
-  document.body.innerHTML = "<main><p>orig</p></main>";
-  await Promise.resolve();
-  gate.gateClearIfUnchanged(gate.gateCaptureToken());
-  sync.start("index.html");
-
-  try {
-    await import("../../src/core/autosave.js");
-
-    document.querySelector("main p").textContent = "local-edit";
-    await Promise.resolve();
-    await sync._doApplyUpdate(sync.lastHtml.replace("orig", "peer-edit"), 9, null);
-    expect(autosaveState.autosaveHeld()).toBe(true);
-
-    await new Promise((r) => setTimeout(r, 2000));
-
-    // The save lane specifically, not the network: live sync also reaches the
-    // wire for relays and profile discovery, and those are not saves. URLs only,
-    // so a failure prints the request, not jsdom's request init.
-    const saves = global.fetch.mock.calls
-      .map(([url]) => String(url))
-      .filter((url) => url.includes("/_/save"));
-    expect(saves).toEqual([]);
-  } finally {
-    // autosave.js's import registered the flag for the rest of the file; the
-    // tests after this one never had <html autosave>.
-    autosaveState.setAutosaveActive(false);
-    document.documentElement.removeAttribute("autosave");
-    sync.stop();
-  }
 });
 
 test("clay.markDirty during an apply keeps an invisible edit unsaved", async () => {

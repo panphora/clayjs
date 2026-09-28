@@ -15,15 +15,3 @@ export function setAutosaveActive(value) {
 export function autosaveActive() {
   return active;
 }
-
-// Live sync registers whether a lost conflict is still waiting on the person's save.
-// Autosave asks when it fires, not when it was queued: a frame can land in between.
-let hold = () => false;
-
-export function setAutosaveHold(fn) {
-  hold = fn;
-}
-
-export function autosaveHeld() {
-  return hold();
-}
