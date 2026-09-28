@@ -45,7 +45,7 @@ import { isEditMode } from "../core/is-edit-mode.js";
 import { mergeTagRecognizers } from "./merge-tags.js";
 import { serializeForSync, captureForComparisonAndDirty, captureSnapshot, originalSnapshotNode, captureForMerge, captureForSaveAndComparison } from '../core/snapshot.js';
 import { isTabLocalRootAttr, TAB_LOCAL_ROOT_ATTRS } from '../lib/root-attrs.js';
-import { autosaveActive } from '../lib/autosave-state.js';
+import { autosaveActive, setAutosaveHold } from '../lib/autosave-state.js';
 import { enableContentEditable } from '../core/admin-contenteditable.js';
 import { enableOnClick } from '../core/admin-onclick.js';
 import { enableAdminInputs } from '../core/admin-inputs.js';
@@ -489,7 +489,9 @@ class LiveSync {
     // snapshot listener would never fire — skip registering it.
     if (this.lane === 'live') {
       this.listenForSnapshots();
-      this._saveSavedHandler = (event) => {
+      // A queued autosave must not be the save that acknowledges a lost conflict.
+      setAutosaveHold(() => this.unresolvedConflicts.length > 0);
+      this._saveSavedHandler = () => {
         this._saveEpoch++;
         // The file now holds what this save wrote: the disk lane's new base,
         // dated at the save's capture, which is when the document held these
@@ -500,18 +502,13 @@ class LiveSync {
         this._saveTicket = 0;
         const bytes = getLastSavedBytes();
         if (bytes != null) this._setDiskBase(bytes, ticket);
-        // A save this tab made, other than an autosave, is the one act that
-        // acknowledges a lost conflict: the person wrote the page as it
-        // stands. Only the page as it stood at the capture: a conflict from a
-        // frame that applied after it is not in these bytes, and it keeps the
-        // page dirty.
-        // An autosave wrote the page but acknowledged nothing: the conflicts
-        // stay, and so does the close warning.
-        if (!event?.detail?.auto) {
-          this.unresolvedConflicts = this.unresolvedConflicts.filter(
-            (c) => this._conflictTickets.get(c) > ticket
-          );
-        }
+        // A save this tab made is the one act that acknowledges a lost
+        // conflict: the person wrote the page as it stands. Only the page as
+        // it stood at the capture: a conflict from a frame that applied after
+        // it is not in these bytes, and it keeps the page dirty.
+        this.unresolvedConflicts = this.unresolvedConflicts.filter(
+          (c) => this._conflictTickets.get(c) > ticket
+        );
         if (this.unresolvedConflicts.length) gateMarkDirty();
         this._relayCommit();
       };
@@ -558,6 +555,7 @@ class LiveSync {
     if (this._saveSavedHandler) {
       document.removeEventListener('clay:save-saved', this._saveSavedHandler);
       this._saveSavedHandler = null;
+      setAutosaveHold(() => false);
     }
 
     if (this._saveConflictHandler) {

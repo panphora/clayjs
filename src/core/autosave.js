@@ -16,7 +16,7 @@ import { savePageThrottled } from "./save.js";
 import { markUserDriven } from "../lib/user-gesture.js";
 import { resolveRegionPolicy, skipForPolicy } from "../lib/region-policy.js";
 import { PERSIST, AUTOSAVE } from "../lib/attr-aliases.js";
-import { setAutosaveActive } from "../lib/autosave-state.js";
+import { setAutosaveActive, autosaveHeld } from "../lib/autosave-state.js";
 
 /**
  * Initialize auto-save on DOM changes
@@ -38,7 +38,7 @@ function initSavePageOnChange() {
     omitChangeDetails: true,
     require: 'autosave'
   }, () => {
-    savePageThrottled();
+    if (!autosaveHeld()) savePageThrottled();
   });
 }
 
@@ -59,7 +59,7 @@ function initSaveOnPersistInput() {
       markUserDriven();
     }
     clearTimeout(inputSaveTimer);
-    inputSaveTimer = setTimeout(savePageThrottled, 1500);
+    inputSaveTimer = setTimeout(() => { if (!autosaveHeld()) savePageThrottled(); }, 1500);
   }, true);
 }
 
