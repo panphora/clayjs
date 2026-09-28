@@ -57,6 +57,7 @@ import './section-notice.js';
 import { hostMeta } from '../core/host-meta.js';
 import { recordEtag, seedEtag, lastSeenEtag, conditionalSaves } from '../core/etag.js';
 import { pageMaybeDirty, pauseGate, resumeGate, gateCaptureToken, gateClearIfUnchanged, gateMarkDirty } from '../lib/dirty-gate.js';
+import { gestureSeen } from '../lib/user-gesture.js';
 import { SyncStream } from './stream.js';
 
 // What a live-sync merge never reads or touches on any side: editor chrome,
@@ -444,11 +445,16 @@ class LiveSync {
     const gen = ++this._startGen;
     if (this.lane === 'live' && !baselineSettled()) {
       const applyGen = this._applyGen;
+      const saveEpoch = this._saveEpoch;
       const startHtml = this.lastHtml;
       const startDiskTicket = this._diskBaseTicket;
       this._settledHandler = () => {
         this._settledHandler = null;
         if (this.isDestroyed || this._startGen !== gen) return;
+        // A person has touched the page: whatever they did (a drag, a button whose
+        // handler edits a turn later) may be in it and not yet saved. Keep the start
+        // seed, as 1.5.2 did; only an untouched tab gets the settled page as its base.
+        if (gestureSeen()) return;
         // The settle clears the gate only when it saw no user edit, so a dirty page
         // here holds work the base must not absorb: keep the start seed.
         if (pageMaybeDirty()) return;
@@ -456,8 +462,9 @@ class LiveSync {
         // common history, and a refused save must merge against the older base.
         if (this._saveTicket !== 0) return;
         // Refresh each lane only while it still holds what start left. A frame, a
-        // landed relay, an own save or a disk frame since then gave it a newer base.
-        if (this._applyGen === applyGen && this.lastHtml === startHtml) {
+        // landed relay, an own save or a disk frame since then gave it a newer base
+        // (an own save counts even when its relay failed and lastHtml never moved).
+        if (this._applyGen === applyGen && this._saveEpoch === saveEpoch && this.lastHtml === startHtml) {
           const clone = captureSnapshot({ flushUndo: false });
           this.lastHtml = serializeForSync(clone);
           this._lastIdentityMap = this.identity.exportMap(clone, originalSnapshotNode);

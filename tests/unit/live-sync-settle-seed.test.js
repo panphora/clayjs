@@ -15,24 +15,26 @@ import { jest } from "@jest/globals";
  * Quill editor) lands in the base instead of being read twice by the first dirty
  * merge. The refresh is narrow:
  *
+ *   - only on a tab nobody has touched: no trusted gesture has reached the page
+ *     at all by the time of the settle, so there is no one's edit in it to
+ *     absorb. Once a person has touched the page the tab keeps its start seed,
+ *     exactly as 1.5.2 did;
  *   - only on a page clean at that moment: a page holding an edit keeps the start
  *     seed, since the base must not absorb work the settle could not see;
+ *   - only with no save outstanding: what an unconfirmed save carries is not yet
+ *     common history;
  *   - only for a lane still holding exactly what start left: a frame applied, a
  *     landed relay, an own save or a disk frame since then gave it a newer base;
  *   - start after the settle seeds immediately, exactly as before.
  *
- * The settle is stricter so a user edit it cannot see today does not end up in
- * the refreshed base. Its signal is not the save-provenance bit: that one is
- * consumed at the send, so an edit whose save is already in flight would be
- * absorbed into the refresh, and a save refused afterwards would merge against a
- * base that already holds the edit. This signal is a dirty-relevant change in the
- * SAME TURN as a trusted gesture (a drop, a toolbar click, a Cmd+B keydown), which
- * a save never clears. The recency window around a gesture is deliberately not
- * used here: a module mounting a few hundred ms after a click mutates inside it
- * and would leave the page dirty with no edit, a false conflict in waiting. An
+ * The gesture rule, not the save-provenance or dirty signals, is what makes the
+ * refresh safe. Every after-the-fact rule for telling a person's edit from boot
+ * setup has a hole: the provenance bit is consumed at the send, so an edit whose
+ * save is already in flight looks like boot churn, and a same-turn signal misses a
+ * button whose handler edits a macrotask later. An untouched tab cannot hold a
+ * person's edit, so refreshing only that one cannot absorb anything, and an
  * input inside a no-save / stripped region does not count either (the dirty gate
- * already ignores those). The refresh is also skipped while this tab has a save
- * outstanding, since what an unconfirmed save carries is not yet common history.
+ * already ignores those).
  *
  * Every test loads fresh modules: the settle is a one-time event per save.js
  * instance, so a scenario that needs an unsettled page cannot share the registry
@@ -261,7 +263,6 @@ test("a gesture-driven edit before the settle is not absorbed", async () => {
   await waitForSettle();
   expect(save.baselineSettled()).toBe(true);
 
-  expect(gate.pageMaybeDirty()).toBe(true);
   expect(sync.lastHtml).toBe(seed);
   sync.stop();
 });
@@ -279,28 +280,30 @@ test("a gesture edit whose save was sent before the settle keeps the start seed"
   userGesture._simulateGestureTurn();
   document.querySelector("ul").insertAdjacentHTML("beforeend", '<li id="y">two</li>');
   // The send happens a turn later, so the gesture's own bit is already gone by
-  // the time the settle runs: only the settle's signal proves the edit was human.
+  // the time the settle runs: only the page's gesture history proves it was human.
   await tick();
   userGesture.consumeUserDriven();
 
   await waitForSettle();
   expect(save.baselineSettled()).toBe(true);
 
-  expect(gate.pageMaybeDirty()).toBe(true);
   expect(sync.lastHtml).toBe(seed);
   sync.stop();
 });
 
-test("a click followed later by module DOM does not block the refresh", async () => {
+test("a click before the settle keeps the start seed, as 1.5.2 did", async () => {
   await load();
   expect(save.baselineSettled()).toBe(false);
 
   await cleanBody('<div class="content-editor"></div>');
   const sync = makeSync();
   sync.start("index.html");
+  const seed = sync.lastHtml;
+  expect(seed).not.toBeNull();
+  expect(seed).not.toContain("ql-container");
 
-  // The click, then a module that mounts its DOM long after the gesture's turn:
-  // still inside the recency window, but not the person editing.
+  // The click, then a module that mounts its DOM long after the gesture's turn.
+  // A touched page keeps its start seed whether or not the later DOM was setup.
   userGesture._simulateGestureTurn();
   await wait(50);
   document.querySelector(".content-editor").insertAdjacentHTML(
@@ -311,8 +314,38 @@ test("a click followed later by module DOM does not block the refresh", async ()
   await waitForSettle();
   expect(save.baselineSettled()).toBe(true);
 
+  expect(sync.lastHtml).toBe(seed);
+  expect(sync.lastHtml).not.toContain("ql-container");
+  // The settle still captures its own baseline, so a click near boot DOM leaves
+  // the page clean: no false dirty, no conflict in waiting.
   expect(gate.pageMaybeDirty()).toBe(false);
-  expect(sync.lastHtml).toContain("ql-container");
+  sync.stop();
+});
+
+test("an edit a button makes a turn after the gesture is not absorbed", async () => {
+  await load();
+  expect(save.baselineSettled()).toBe(false);
+
+  document.body.innerHTML = '<ul id="todo"><li id="x">one</li></ul><ul id="done"></ul>';
+  const sync = makeSync();
+  sync.start("index.html");
+  const seed = sync.lastHtml;
+  expect(seed).not.toBeNull();
+  expect(sync._diskBase).toContain("todo");
+
+  // The gesture's own turn is over by the time the handler runs, so the mutation
+  // reads as background boot churn to everything but the gesture history.
+  userGesture._simulateGestureTurn();
+  setTimeout(() => document.getElementById("done").appendChild(document.getElementById("x")), 0);
+
+  await waitForSettle();
+  expect(save.baselineSettled()).toBe(true);
+
+  expect(sync.lastHtml).toBe(seed);
+  // The start base still holds the item in the first list: a later merge must not
+  // read the move as a peer's edit arriving on top of it.
+  expect(sync._diskBase).not.toContain('id="done"><li');
+  expect(sync._diskBase).toContain('id="todo"><li');
   sync.stop();
 });
 

@@ -44,11 +44,10 @@ const RECENT_GESTURE_MS = 500;
 
 let gestureTaskActive = false;
 let lastTrustedGestureTs = -Infinity;
+// Set by the first trusted gesture and never cleared. Live sync reads it at the
+// load-time settle: a page nobody has touched yet holds no one's edit.
+let anyGesture = false;
 let userDrivenSinceLastSave = false;
-// Set when a dirty-relevant change lands in the same turn as a trusted gesture.
-// Never consumed by a save: the load-time settle reads it, and a save sent before
-// the settle must not make the gesture's edit look like boot setup.
-let gestureTurnEditSeen = false;
 let explicitSaveIntent = false;
 let installed = false;
 
@@ -59,6 +58,7 @@ function now() {
 }
 
 function markGestureTurn() {
+  anyGesture = true;
   gestureTaskActive = true;
   lastTrustedGestureTs = now();
   // Clear the same-turn flag on the next macrotask. The MutationObserver
@@ -102,19 +102,11 @@ export function isUserDrivenNow() {
  */
 export function markUserDriven() {
   userDrivenSinceLastSave = true;
-  if (gestureTaskActive) gestureTurnEditSeen = true;
 }
 
-/**
- * True once a dirty-relevant change has landed in the same turn as a trusted
- * gesture: a drop, a toolbar click, a keyboard shortcut. The load-time settle
- * reads this to tell a person's edit from boot setup. The recency window used for
- * save provenance is too loose here, since a module mounting shortly after a click
- * is still setup. A save never resets it.
- * @returns {boolean}
- */
-export function gestureEditSeen() {
-  return gestureTurnEditSeen;
+/** True once any trusted gesture has reached the page. */
+export function gestureSeen() {
+  return anyGesture;
 }
 
 /**
@@ -161,7 +153,7 @@ export function _resetUserGesture() {
   gestureTaskActive = false;
   lastTrustedGestureTs = -Infinity;
   userDrivenSinceLastSave = false;
-  gestureTurnEditSeen = false;
+  anyGesture = false;
   explicitSaveIntent = false;
 }
 
