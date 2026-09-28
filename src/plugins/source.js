@@ -20,11 +20,9 @@
  *                 by node identity.
  *
  * The accepted-save re-model is deferred and coalesced, so it never sits between a save
- * landing and the page hearing about it. A sync frame's re-pair is LAZY instead: it is
- * owed from the moment a morph replaces live nodes, and the next save pays for it against
- * the clone that save already built, with `text()` and `locate()` refreshing on demand
- * until then. A burst of frames still costs one walk, and nothing walks the document
- * unless a save or a reader needs it to.
+ * landing and the page hearing about it. A sync frame's re-pair shares that idle refresh,
+ * so a burst of frames costs one walk, and a save, `text()` or `locate()` that comes
+ * before it runs it first, so none of them work from a map the morph made stale.
  *
  * NOTHING HERE BLOCKS BOOT. The install is async and the loader does not wait for
  * it, because a save before it finishes is a save exactly as it is today. Waiting
@@ -177,9 +175,10 @@ function install(sourceUrl) {
  */
 export function renderSave(clone, today, opts = {}) {
   if (!state.installed) return today;
-  // A frame queued a re-pair without running it (queueRepair): do it here, against the
-  // clone this save already built, instead of a capture of its own in idle time.
-  if (state.refreshQueued) refreshWith(clone);
+  // A refresh still waiting for idle time runs now, so this save never renders from a
+  // map a morph made stale. It pairs against the page, not this clone: onbeforesave may
+  // have changed the clone, and the map must describe the live page.
+  refreshNow();
   state.lastOutcome = null;
   const print = new Set();
   let firstDiff = null;
@@ -295,17 +294,14 @@ function report(bytes) {
  * the page, and it has to be re-paired either way. A DISK frame also carries the bytes
  * now on disk, written by somebody else: those become the model, the same as bytes this
  * tab saved, or the next save would copy the old formatting back over theirs. A peer
- * frame changed nothing on disk, so the model stays. The re-pair itself waits: the next
- * save does it against the clone that save already built, and `text()` or `locate()`
- * refresh on demand, whichever comes first.
+ * frame changed nothing on disk, so the model stays. The re-pair runs in idle time, or
+ * earlier if a save, `text()` or `locate()` needs it first.
  */
 function queueRepair(event) {
   if (!state.installed) return;
   const detail = event && event.detail;
   if (detail && detail.source === 'disk' && typeof detail.html === 'string') state.pendingBytes = detail.html;
-  // Lazy: the next save pairs against its own clone, and text()/locate() refresh on
-  // demand. An idle re-pair here cost a full capture after every frame.
-  state.refreshQueued = true;
+  scheduleRefresh();
 }
 
 /**
@@ -326,12 +322,8 @@ function scheduleRefresh() {
 /**
  * Run a queued refresh now. A no-op when none is queued, which is also what makes the
  * idle callback of a refresh that `text()` or `locate()` already ran harmless.
- * (The idle callback passes a deadline, so this never forwards its argument.)
  */
-function refreshNow() { refreshWith(null); }
-
-/** refreshNow, pairing against a save clone the caller already built when there is one. */
-function refreshWith(clone) {
+function refreshNow() {
   if (!state.refreshQueued) return;
   state.refreshQueued = false;
   if (!state.installed) return;
@@ -356,7 +348,7 @@ function refreshWith(clone) {
     }
   }
   try {
-    const { map, stats } = clone ? pair(clone, m, originalSnapshotNode) : pairAgainstPage(m);
+    const { map, stats } = pairAgainstPage(m);
     state.model = m;
     state.map = map;
     state.stats = stats;

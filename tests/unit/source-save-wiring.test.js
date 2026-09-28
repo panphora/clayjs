@@ -434,22 +434,21 @@ const RENDERED_AFTER_FRAME = [
 ].join("\n");
 
 /**
- * What a frame costs, and which reader pays for it.
+ * When a frame's re-pair runs, and which reader pays for it.
  *
- * A morph replaces live nodes, so the map has to be rebuilt after every frame. Rebuilding
- * it in an idle callback of its own was a full capture that only a save, `text()` or
- * `locate()` ever read, so the re-pair is queued now and paid by whichever of those comes
- * first. Three claims, each with its own consequence if it is wrong: the frame itself
- * walks nothing; the bytes a disk frame carries still reach `text()` at once, rather than
- * being dropped on the floor; and the save that pays the re-pair renders exactly the
- * bytes it rendered when the re-pair ran on its own.
+ * A morph replaces live nodes, so the map has to be rebuilt after every frame. The
+ * rebuild runs in idle time, as the accepted-save re-model does, so it never sits inside
+ * an apply. A save, `text()` or `locate()` that comes before idle time runs it first, so
+ * none of them reads a map the morph made stale. Three claims: the refresh runs once
+ * whichever comes first; the bytes a disk frame carries reach `text()` at once; and a save
+ * before idle time renders exactly the bytes it renders after it.
  *
  * Fake timers throughout. A deferred refresh is a timer, and an accepted save earlier in
  * this file left one pending; with the clock under the test's control, `runAllTimers` is
- * exactly "the idle callback the frame used to schedule, had it scheduled one", and no
- * stray timer can run a refresh in the middle of an assertion.
+ * exactly "idle time came", and no stray timer can run a refresh in the middle of an
+ * assertion.
  */
-describe("a frame's re-pair waits for a reader", () => {
+describe("a frame's re-pair runs in idle time, or first for a reader", () => {
   let captures;
 
   beforeAll(() => {
@@ -476,41 +475,47 @@ describe("a frame's re-pair waits for a reader", () => {
     jest.runAllTimers();
   });
 
-  test("a peer frame walks nothing, and the re-pair it owes is paid on demand", () => {
+  test("a peer frame's re-pair runs in idle time, once", () => {
     const before = captures;
     document.dispatchEvent(new CustomEvent("clay:sync-applied", { detail: { seq: 21, source: "peer", by: null } }));
-    jest.runAllTimers();
+    expect(captures).toBe(before);            // nothing inside the frame itself
 
-    expect(captures).toBe(before);            // the frame cost no capture at all
-    expect(source.source.text()).toBe(SRC);   // and the one it owes is paid here, not lost
-    expect(captures).toBe(before + 1);
+    jest.runAllTimers();
+    expect(captures).toBe(before + 1);        // idle time paid it
+    expect(source.source.text()).toBe(SRC);
+    expect(captures).toBe(before + 1);        // and a later reader does not pay again
+  });
+
+  test("a reader before idle time runs the re-pair itself, once", () => {
+    const before = captures;
+    document.dispatchEvent(new CustomEvent("clay:sync-applied", { detail: { seq: 21, source: "peer", by: null } }));
+
+    expect(source.source.text()).toBe(SRC);
+    expect(captures).toBe(before + 1);        // the reader paid it
+    jest.runAllTimers();
+    expect(captures).toBe(before + 1);        // and the idle callback finds nothing queued
   });
 
   test("a disk frame's bytes reach text() at once", () => {
     const disk = SRC.replace("<li data-id='a'>alpha</li>", '<li data-id="a">alpha</li>');
-    const before = captures;
 
     document.dispatchEvent(new CustomEvent("clay:sync-applied", {
       detail: { seq: 22, source: "disk", etag: null, by: null, html: disk }
     }));
-    jest.runAllTimers();                       // an idle re-model would have run by now
-
-    expect(captures).toBe(before);             // the frame paid nothing
-    expect(source.source.text()).toBe(disk);   // and its bytes are still text()'s, at once
+    expect(source.source.text()).toBe(disk);   // before idle time
 
     document.dispatchEvent(new CustomEvent("clay:sync-applied", {
       detail: { seq: 23, source: "disk", etag: null, by: null, html: SRC }
     }));
-    expect(source.source.text()).toBe(SRC);    // the file the rest of this suite expects
+    jest.runAllTimers();
+    expect(source.source.text()).toBe(SRC);    // and after it
   });
 
-  test("after a frame and a morph, the next save renders the bytes it rendered before", () => {
+  test("a save right after a frame and a morph renders the bytes it renders after idle time", () => {
     // The map is keyed by live node identity, so a frame's morph leaves it describing
-    // nodes that are no longer in the page. The save that follows pays the re-pair out of
-    // the clone it already built, and its bytes have to be what they were when the re-pair
-    // ran in idle time: the same saved bytes, whichever tree the re-pair was paired
-    // against. A re-pair that did not happen, or one paired against the wrong tree, prints
-    // elements the file already had bytes for and does not equal this.
+    // nodes that are no longer in the page. A save before idle time has to re-pair first:
+    // one that rendered from the stale map would print elements the file already had
+    // bytes for, and would not equal this.
     const list = document.querySelector("#list");
     const original = Array.from(list.childNodes);
     const morph = Array.from(list.cloneNode(true).childNodes);
@@ -518,7 +523,6 @@ describe("a frame's re-pair waits for a reader", () => {
     morph.find((n) => n.nodeType === 1 && n.getAttribute("data-id") === "a").firstChild.data = "ALPHA";
 
     document.dispatchEvent(new CustomEvent("clay:sync-applied", { detail: { seq: 24, source: "peer", by: null } }));
-    jest.runAllTimers();
 
     const out = snapshot.captureForSave({ emitForSync: false });
     list.replaceChildren(...original);
@@ -528,16 +532,17 @@ describe("a frame's re-pair waits for a reader", () => {
 });
 
 /**
- * The merge base, which is parsed and never saved.
+ * The merge base, which is parsed and never saved — and is still RENDERED.
  *
- * A live-sync merge base is a string the morph parses as one side of a three-way merge. It
- * is never written anywhere, so it does not need to be the bytes a save would send, and
- * the renderer is the wrong thing to run for it: a full source-map render per boot seed
- * and per applied frame, for bytes whose only reader parses them. The clone's own
- * serialization parses to the same tree, which is what renderSave verifies on the save
- * path, and the save path still renders.
+ * A live-sync merge base is a string the morph parses as one side of a three-way merge, so
+ * it has to parse to the tree the page is in. The clone's own serialization does not always
+ * do that: a <pre> with a leading blank line loses one on the way back in through the
+ * parser, and quirks-mode reparents a <p> around a <table>. The rendered bytes do, because
+ * they are the author's own bytes and the save path verifies they parse to this tree. A
+ * base that parsed differently would read a remote change as no change, or as a different
+ * one, so these tests pin the base to the renderer's output.
  */
-describe("a merge base skips the save renderer", () => {
+describe("a merge base is rendered like a save", () => {
   let LiveSync;
   let sync;
   let renderer;
@@ -552,10 +557,6 @@ describe("a merge base skips the save renderer", () => {
     }
     close() {}
   }
-
-  // The bytes a merge base should carry: the save clone's own serialization, with none of
-  // the renderer's copied author bytes in it.
-  const asSerialized = () => "<!DOCTYPE html>" + snapshot.captureSaveClone({ flushUndo: false }).outerHTML;
 
   beforeAll(async () => {
     jest.useRealTimers();
@@ -588,29 +589,118 @@ describe("a merge base skips the save renderer", () => {
     sync._requestFrame = () => null;
   });
 
-  test("the boot seed's disk base is the clone's own bytes, and the renderer is not reached", () => {
+  test("the boot seed's disk base is the bytes a save would send, and the renderer is reached", () => {
     sync.start("index.html");
 
-    expect(renderer).not.toHaveBeenCalled();
-    expect(sync._diskBase).toBe(asSerialized());
+    expect(renderer).toHaveBeenCalled();
+    expect(sync._diskBase).toBe(SRC);
     sync.stop();
   });
 
-  test("an applied peer frame hands _setDiskBase the clone's own bytes too", async () => {
+  test("an applied peer frame hands _setDiskBase the rendered bytes too", async () => {
     sync.lastHtml = snapshot.serializeForSync(snapshot.captureSnapshot({ flushUndo: false }));
     const frame = sync.lastHtml;
 
     await sync._doApplyUpdate(frame, 5, null, null);
 
-    expect(renderer).not.toHaveBeenCalled();
-    expect(sync._diskBase).toBe(asSerialized());
+    expect(renderer).toHaveBeenCalled();
+    expect(sync._diskBase).toBe(SRC);
     sync.stop();
   });
 
-  test("a save still renders, so the skip above is the merge base and not the renderer", () => {
+  test("a save renders the same bytes the base carries", () => {
     const { forSave } = snapshot.captureForSaveAndComparison({ emitForSync: false });
 
-    expect(renderer).toHaveBeenCalledTimes(1);
     expect(forSave).toBe(SRC);
+  });
+});
+
+/**
+ * A frame queues a re-pair, and the save that pays it pairs against the PAGE.
+ *
+ * The re-pair is owed from the moment a morph replaces live nodes, and renderSave runs it
+ * before rendering. Pairing it against the save clone instead would let the page's own
+ * [onbeforesave] handlers rewrite the tree the map is built from: a handler that removes an
+ * element shifts every sibling after it onto the wrong source range, so locate() answers
+ * null for a live node and the save reprints a surviving element in the WRONG quoting.
+ * Each test loads the plugin fresh: these fixtures replace the document this file installed
+ * against.
+ */
+describe("a queued re-pair pairs against the page, not the clone a save is about to change", () => {
+  const AUTHORED = "<!DOCTYPE html><html><head></head><body><main onbeforesave=\"this.firstElementChild.remove()\"><p class='x'>same</p><p class=x>same</p></main></body></html>";
+
+  let pageSnapshot, pageSource, pageSaveCore;
+
+  async function load() {
+    jest.resetModules();
+    const parsed = new DOMParser().parseFromString(AUTHORED, "text/html");
+    document.replaceChild(document.importNode(parsed.documentElement, true), document.documentElement);
+    window.clayEditMode = true;
+    global.fetch = jest.fn(async () => ({
+      ok: true,
+      status: 200,
+      redirected: false,
+      type: "basic",
+      headers: { get: (name) => (name.toLowerCase() === "content-type" ? "text/html; charset=utf-8" : null) },
+      text: async () => AUTHORED,
+    }));
+    pageSnapshot = await import("../../src/core/snapshot.js");
+    pageSaveCore = await import("../../src/core/save-core.js");
+    ({ source: pageSource } = await import("../../src/plugins/source.js"));
+    await pageSource.ready;
+  }
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  test("an [onbeforesave] that removes an element does not reprint its surviving sibling", async () => {
+    await load();
+    expect(pageSource.stats().installed).toBe(true);
+    const [first, second] = document.querySelectorAll("p");
+
+    jest.useFakeTimers();
+    document.dispatchEvent(new CustomEvent("clay:sync-applied", { detail: { source: "peer", seq: 1 } }));
+    jest.runAllTimers();
+    const output = pageSnapshot.captureForSave({ emitForSync: false });
+    const firstLocation = pageSource.locate(first);
+    const secondLocation = pageSource.locate(second);
+
+    expect(firstLocation).not.toBeNull();
+    expect(pageSource.text().slice(firstLocation.from, firstLocation.to)).toBe("<p class='x'>same</p>");
+    expect(secondLocation).not.toBeNull();
+    expect(pageSource.text().slice(secondLocation.from, secondLocation.to)).toBe("<p class=x>same</p>");
+    expect(output).toContain("<p class=x>same</p>");
+  });
+
+  test("a refused save and an intervening disk frame keep the surviving element's bytes", async () => {
+    await load();
+    const [first] = document.querySelectorAll("p");
+
+    jest.useFakeTimers();
+    document.dispatchEvent(new CustomEvent("clay:sync-applied", { detail: { source: "peer", seq: 1 } }));
+    jest.runAllTimers();
+    const attempted = pageSnapshot.captureForSave({ emitForSync: false });
+    jest.useRealTimers();
+
+    global.fetch = jest.fn(async () => ({
+      ok: false,
+      status: 412,
+      statusText: "Conflict",
+      text: async () => JSON.stringify({ msg: "Conflict" }),
+    }));
+    pageSaveCore.resetSaveAttempts();
+    const result = await pageSaveCore.saveHtml(attempted);
+    expect(result.ok).toBe(false);
+    expect(pageSource.locate(first)).not.toBeNull();
+
+    const disk = AUTHORED.replace("<p class=x>", '<p class="x">');
+    jest.useFakeTimers();
+    document.dispatchEvent(new CustomEvent("clay:sync-applied", { detail: { source: "disk", seq: 2, html: disk } }));
+    jest.runAllTimers();
+    const next = pageSnapshot.captureForSave({ emitForSync: false });
+
+    expect(pageSource.text()).toBe(disk);
+    expect(next).toContain('<p class="x">same</p>');
   });
 });

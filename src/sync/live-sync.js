@@ -392,7 +392,7 @@ class LiveSync {
     const clone = captureSnapshot({ flushUndo: false });
     this.lastHtml = serializeForSync(clone);
     this._lastIdentityMap = this.identity.exportMap(clone, originalSnapshotNode);
-    this._setDiskBase(captureForSaveAndComparison({ emitForSync: false, render: false }).forSave, this._ticket());
+    this._setDiskBase(captureForSaveAndComparison({ emitForSync: false }).forSave, this._ticket());
   }
 
   /**
@@ -474,7 +474,7 @@ class LiveSync {
           this._lastIdentityMap = this.identity.exportMap(clone, originalSnapshotNode);
         }
         if (startDiskSeeded && this._diskBaseTicket === startDiskTicket) {
-          this._setDiskBase(captureForSaveAndComparison({ emitForSync: false, render: false }).forSave, this._ticket());
+          this._setDiskBase(captureForSaveAndComparison({ emitForSync: false }).forSave, this._ticket());
         }
       };
       document.addEventListener('clay:baseline-settled', this._settledHandler, { once: true });
@@ -1612,7 +1612,6 @@ class LiveSync {
         const { forSave, forComparison, forDirty } = captureForSaveAndComparison({
           emitForSync: false,
           flushUndo: false,
-          render: false,
         });
         setLastSavedBaselines(forComparison, forDirty);
         this._setDiskBase(forSave, this._ticket());

@@ -1,4 +1,5 @@
 import { createContentView } from '../../src/lib/content-dom.js'
+import { hasCapability } from '../../src/lib/region-capabilities.js'
 
 test('content views exclude inherited editor UI and preserve live provenance', () => {
   document.body.innerHTML = `
@@ -50,6 +51,21 @@ test('a region capability is read from the element below the root', () => {
 
   expect(view.html()).toBe('<section no-save=""><p id="keep">keep</p></section>')
   expect(view.query('p')).toEqual([document.getElementById('keep')])
+})
+
+test('a descendant reads its own region marker the way hasCapability reads it', () => {
+  // A `clay` token list is split on JS whitespace, which is not the same set a CSS `~=`
+  // splits on. The own-element check for a descendant below the root has to agree with
+  // hasCapability about the element it is standing on, not with the selector it spells.
+  document.body.innerHTML = '<main id="root"><p id="keep">keep</p><p id="drop" clay="other editor-ui">drop</p></main>'
+  const root = document.getElementById('root')
+  const drop = document.getElementById('drop')
+  const view = createContentView(root, { capability: 'snapshot' })
+
+  expect(hasCapability(drop, 'snapshot')).toBe(true)
+  expect(view.cloneOf(drop)).toBeNull()          // the own-element check excluded it
+  expect(view.query('p')).toEqual([document.getElementById('keep')])
+  expect(view.html()).toBe('<p id="keep">keep</p>')
 })
 
 test('an ancestor above the root still excludes the whole view', () => {
