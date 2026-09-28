@@ -414,3 +414,203 @@ describe("the refresh runs on a sync frame, and costs the page nothing else", ()
     expect(source.source.text()).toBe(before);
   });
 });
+
+// The bytes the same save produced before this change, from a scratch copy with fix 5
+// reverted: one line reprinted, every other line the author's own, byte for byte. A save
+// that lost the re-pair, or paired against the wrong tree, prints elements the file
+// already had bytes for and does not equal this.
+const RENDERED_AFTER_FRAME = [
+  "<!DOCTYPE html>",
+  "<html>",
+  "  <head><title>Notes</title></head>",
+  "  <body class='page'>",
+  "    <ul id=list>",
+  "      <li data-id='a'>ALPHA</li>",
+  "      <li data-id='b'>beta</li>",
+  "    </ul>",
+  "    <template id=tpl><li data-id='x'>from a template</li></template>",
+  "  </body>",
+  "</html>",
+].join("\n");
+
+/**
+ * What a frame costs, and which reader pays for it.
+ *
+ * A morph replaces live nodes, so the map has to be rebuilt after every frame. Rebuilding
+ * it in an idle callback of its own was a full capture that only a save, `text()` or
+ * `locate()` ever read, so the re-pair is queued now and paid by whichever of those comes
+ * first. Three claims, each with its own consequence if it is wrong: the frame itself
+ * walks nothing; the bytes a disk frame carries still reach `text()` at once, rather than
+ * being dropped on the floor; and the save that pays the re-pair renders exactly the
+ * bytes it rendered when the re-pair ran on its own.
+ *
+ * Fake timers throughout. A deferred refresh is a timer, and an accepted save earlier in
+ * this file left one pending; with the clock under the test's control, `runAllTimers` is
+ * exactly "the idle callback the frame used to schedule, had it scheduled one", and no
+ * stray timer can run a refresh in the middle of an assertion.
+ */
+describe("a frame's re-pair waits for a reader", () => {
+  let captures;
+
+  beforeAll(() => {
+    // Every capture runs the registered snapshot hooks on its way past, so counting them
+    // is how a test sees a capture it did not ask for. A counter is pure, which is what a
+    // snapshot hook has to be.
+    captures = 0;
+    snapshot.onSnapshot(() => { captures++; });
+    jest.useFakeTimers();
+  });
+
+  afterAll(() => {
+    jest.useRealTimers();
+  });
+
+  beforeEach(() => {
+    jest.restoreAllMocks();
+    // Every test here starts from the file this document was served as, whatever the tests
+    // above left the model holding, and with nothing queued and nothing scheduled.
+    document.dispatchEvent(new CustomEvent("clay:sync-applied", {
+      detail: { seq: 20, source: "disk", etag: null, by: null, html: SRC }
+    }));
+    source.source.text();
+    jest.runAllTimers();
+  });
+
+  test("a peer frame walks nothing, and the re-pair it owes is paid on demand", () => {
+    const before = captures;
+    document.dispatchEvent(new CustomEvent("clay:sync-applied", { detail: { seq: 21, source: "peer", by: null } }));
+    jest.runAllTimers();
+
+    expect(captures).toBe(before);            // the frame cost no capture at all
+    expect(source.source.text()).toBe(SRC);   // and the one it owes is paid here, not lost
+    expect(captures).toBe(before + 1);
+  });
+
+  test("a disk frame's bytes reach text() at once", () => {
+    const disk = SRC.replace("<li data-id='a'>alpha</li>", '<li data-id="a">alpha</li>');
+    const before = captures;
+
+    document.dispatchEvent(new CustomEvent("clay:sync-applied", {
+      detail: { seq: 22, source: "disk", etag: null, by: null, html: disk }
+    }));
+    jest.runAllTimers();                       // an idle re-model would have run by now
+
+    expect(captures).toBe(before);             // the frame paid nothing
+    expect(source.source.text()).toBe(disk);   // and its bytes are still text()'s, at once
+
+    document.dispatchEvent(new CustomEvent("clay:sync-applied", {
+      detail: { seq: 23, source: "disk", etag: null, by: null, html: SRC }
+    }));
+    expect(source.source.text()).toBe(SRC);    // the file the rest of this suite expects
+  });
+
+  test("after a frame and a morph, the next save renders the bytes it rendered before", () => {
+    // The map is keyed by live node identity, so a frame's morph leaves it describing
+    // nodes that are no longer in the page. The save that follows pays the re-pair out of
+    // the clone it already built, and its bytes have to be what they were when the re-pair
+    // ran in idle time: the same saved bytes, whichever tree the re-pair was paired
+    // against. A re-pair that did not happen, or one paired against the wrong tree, prints
+    // elements the file already had bytes for and does not equal this.
+    const list = document.querySelector("#list");
+    const original = Array.from(list.childNodes);
+    const morph = Array.from(list.cloneNode(true).childNodes);
+    list.replaceChildren(...morph);
+    morph.find((n) => n.nodeType === 1 && n.getAttribute("data-id") === "a").firstChild.data = "ALPHA";
+
+    document.dispatchEvent(new CustomEvent("clay:sync-applied", { detail: { seq: 24, source: "peer", by: null } }));
+    jest.runAllTimers();
+
+    const out = snapshot.captureForSave({ emitForSync: false });
+    list.replaceChildren(...original);
+
+    expect(out).toBe(RENDERED_AFTER_FRAME);
+  });
+});
+
+/**
+ * The merge base, which is parsed and never saved.
+ *
+ * A live-sync merge base is a string the morph parses as one side of a three-way merge. It
+ * is never written anywhere, so it does not need to be the bytes a save would send, and
+ * the renderer is the wrong thing to run for it: a full source-map render per boot seed
+ * and per applied frame, for bytes whose only reader parses them. The clone's own
+ * serialization parses to the same tree, which is what renderSave verifies on the save
+ * path, and the save path still renders.
+ */
+describe("a merge base skips the save renderer", () => {
+  let LiveSync;
+  let sync;
+  let renderer;
+  let dirtyGate;
+  let save;
+
+  class FakeEventSource extends EventTarget {
+    constructor(url) {
+      super();
+      this.url = url;
+      this.readyState = 0;
+    }
+    close() {}
+  }
+
+  // The bytes a merge base should carry: the save clone's own serialization, with none of
+  // the renderer's copied author bytes in it.
+  const asSerialized = () => "<!DOCTYPE html>" + snapshot.captureSaveClone({ flushUndo: false }).outerHTML;
+
+  beforeAll(async () => {
+    jest.useRealTimers();
+    global.EventSource = FakeEventSource;
+    window.EventSource = FakeEventSource;
+    window.scrollTo = () => {};
+    dirtyGate = await import("../../src/lib/dirty-gate.js");
+    save = await import("../../src/core/save.js");
+    const liveSyncModule = await import("../../src/sync/live-sync.js");
+    ({ LiveSync } = liveSyncModule);
+    // The singleton auto-starts on import. Every test here builds its own instance, and
+    // the singleton's stream would only be noise behind them.
+    liveSyncModule.liveSync.stop();
+  });
+
+  beforeEach(() => {
+    jest.restoreAllMocks();
+    // No server: the discovery request fails and the profile falls back, which is all
+    // these tests need. The stream itself is the fake EventSource above.
+    global.fetch = jest.fn(() => Promise.resolve({ ok: false, status: 500, statusText: "mock", text: async () => "" }));
+    // A boot seed is taken over a clean page only. Nothing in this file is unsaved work,
+    // so the gate is cleared the way a completed save clears it.
+    save.setLastSavedContents(snapshot.captureForComparison());
+    save.setUnsavedChanges(false);
+    dirtyGate.gateClearIfUnchanged(dirtyGate.gateCaptureToken());
+    renderer = jest.fn((clone, today) => source.renderSave(clone, today));
+    snapshot.setSaveRenderer(renderer);
+    sync = new LiveSync();
+    sync.lane = "live";
+    sync._requestFrame = () => null;
+  });
+
+  test("the boot seed's disk base is the clone's own bytes, and the renderer is not reached", () => {
+    sync.start("index.html");
+
+    expect(renderer).not.toHaveBeenCalled();
+    expect(sync._diskBase).toBe(asSerialized());
+    sync.stop();
+  });
+
+  test("an applied peer frame hands _setDiskBase the clone's own bytes too", async () => {
+    sync.lastHtml = snapshot.serializeForSync(snapshot.captureSnapshot({ flushUndo: false }));
+    const frame = sync.lastHtml;
+
+    await sync._doApplyUpdate(frame, 5, null, null);
+
+    expect(renderer).not.toHaveBeenCalled();
+    expect(sync._diskBase).toBe(asSerialized());
+    sync.stop();
+  });
+
+  test("a save still renders, so the skip above is the merge base and not the renderer", () => {
+    const { forSave } = snapshot.captureForSaveAndComparison({ emitForSync: false });
+
+    expect(renderer).toHaveBeenCalledTimes(1);
+    expect(forSave).toBe(SRC);
+  });
+});

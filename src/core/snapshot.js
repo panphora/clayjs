@@ -452,7 +452,7 @@ export function captureForComparisonAndDirty({ flushUndo = true } = {}) {
  * @param {boolean} options.emitForSync - Whether to emit snapshot-ready event (default: true)
  * @returns {{ forSave: string, forComparison: string, forDirty: string }}
  */
-export function captureForSaveAndComparison({ emitForSync = true, flushUndo = true } = {}) {
+export function captureForSaveAndComparison({ emitForSync = true, flushUndo = true, render = true } = {}) {
   const clone = captureSnapshot({ flushUndo });
 
   // Emit for live-sync before any stripping.
@@ -493,7 +493,9 @@ export function captureForSaveAndComparison({ emitForSync = true, flushUndo = tr
   for (const el of clone.querySelectorAll(STRIP_FROM_SAVE)) {
     el.remove();
   }
-  const forSave = serializeSaveClone(clone);
+  // render: false is for a merge base, which is parsed, never saved. The renderer's
+  // bytes and serializeClone's parse to the same tree (renderSave verifies that).
+  const forSave = render ? serializeSaveClone(clone) : serializeClone(clone);
 
   // Compare clone: strip every autosave-off region, then run hooks
   for (const el of compareClone.querySelectorAll(STRIP_FROM_COMPARISON)) {

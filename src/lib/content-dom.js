@@ -27,8 +27,10 @@ function matchesWithin(node, selector, boundary, inherit) {
 
 function importTree(source, targetDocument, capability, capabilityMatch, exclude, boundary, inherit, maps) {
   if (source.nodeType === 1 && (
-    (inherit ? hasCapability(source, capability) : matchesWithin(source, capabilityMatch, boundary, false)) ||
-    (exclude && matchesWithin(source, exclude, boundary, inherit))
+    (inherit
+      ? (source === boundary ? hasCapability(source, capability) : source.matches(capabilityMatch))
+      : matchesWithin(source, capabilityMatch, boundary, false)) ||
+    (exclude && (inherit && source !== boundary ? source.matches(exclude) : matchesWithin(source, exclude, boundary, inherit)))
   )) return null
   const copy = targetDocument.importNode(source, false)
   maps.cloneToLive.set(copy, source)

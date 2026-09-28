@@ -40,3 +40,26 @@ test('filtered views reject stateful selectors', () => {
   const view = createContentView(document.querySelector('main'))
   expect(() => view.query('button:focus')).toThrow(/do not support stateful selector/)
 })
+
+test('a region capability is read from the element below the root', () => {
+  // The ancestor walk is not free, and importing is top-down: every ancestor between the
+  // root and a node has already been asked. A node inside a region that excludes
+  // something else entirely still has to answer for itself.
+  document.body.innerHTML = '<main id="root"><section no-save><p id="keep">keep</p><p no-snapshot>drop</p></section></main>'
+  const view = createContentView(document.getElementById('root'), { capability: 'snapshot' })
+
+  expect(view.html()).toBe('<section no-save=""><p id="keep">keep</p></section>')
+  expect(view.query('p')).toEqual([document.getElementById('keep')])
+})
+
+test('an ancestor above the root still excludes the whole view', () => {
+  // The one walk that cannot be skipped: nothing between the root and itself has been
+  // checked, so the root asks about its ancestors. An editor-ui panel wrapping the
+  // context excludes it, exactly as it did when every node walked.
+  document.body.innerHTML = '<div editor-ui><main id="root"><p>text</p></main></div>'
+  const view = createContentView(document.getElementById('root'), { capability: 'data' })
+
+  expect(view.root).toBeNull()
+  expect(view.html()).toBe('')
+  expect(view.text()).toBe('')
+})
