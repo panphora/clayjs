@@ -15,15 +15,3 @@ export function setAutosaveActive(value) {
 export function autosaveActive() {
   return active;
 }
-
-// Live sync registers whether a lost conflict is waiting for the person's save.
-// That save is the acknowledgement, so it goes out even when the bytes match.
-let ackPending = () => false;
-
-export function setAckPending(fn) {
-  ackPending = fn;
-}
-
-export function saveAckPending() {
-  return ackPending();
-}
