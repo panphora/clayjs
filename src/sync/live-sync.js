@@ -209,6 +209,16 @@ class LiveSync {
     this._agreeSeq = 0;
     // The ticket of the save currently in flight, taken when it captured.
     this._saveTicket = 0;
+    // The peer lane's base carries a ticket from the same counter as the disk
+    // lane, so an accepted save and a frame install in the order the document
+    // held their bytes, not the order their promises settled.
+    this._peerBaseTicket = 0;
+    // The newest accepted save's capture ticket. A frame older than it does not
+    // adopt its own stamp: the save's response already recorded a newer one.
+    this._acceptedSaveTicket = 0;
+    // The ticket of the latest frame of either lane whose morph has run. The
+    // boot settle must not replace a base a morph already moved past.
+    this._morphTicket = 0;
     // Conflicts an incoming frame won over this tab's unsaved text, kept until
     // this tab's next successful save. While any are here the page stays
     // dirty: no clean frame clears the gate or advances a saved baseline, and
@@ -232,9 +242,9 @@ class LiveSync {
     // held so the commit relay can pair the host's stamp with the content that
     // stamp actually describes. Set at snapshot-ready, which fires before the
     // save POST goes out, and consumed by _relayCommit when the response lands.
-    // Never reconstructed from lastHtml: that is the last relay that COMPLETED,
-    // which lags the save whenever an earlier relay is still in flight, and
-    // pairing a fresh stamp with older bytes is the one thing spec §10 forbids.
+    // Never reconstructed from lastHtml: that is the newest accepted save or
+    // applied frame, which can still lag the save in flight, and pairing a fresh
+    // stamp with older bytes is the one thing spec §10 forbids.
     this._savedSnapshot = null;
     this._sendInFlight = false;
     this._queuedSend = null;
@@ -310,10 +320,9 @@ class LiveSync {
     // can resolve synthetic identities on its base tree.
     this._lastIdentityMap = null;
 
-    // Bumped whenever an APPLY (or a reset) rewrites lastHtml. A POST's
-    // success callback carries no ordering guarantee against the SSE stream,
-    // so a delayed response must not rewind lastHtml past a frame that
-    // applied while it was on the wire.
+    // Bumped whenever an APPLY (or a reset) rewrites lastHtml. The boot settle
+    // reads it: a lane a frame already replaced since start is not refreshed
+    // from whatever DOM that frame left behind.
     this._applyGen = 0;
 
     // Hold-retry timers, one per pending slot. A held frame's slot and seq
@@ -390,8 +399,7 @@ class LiveSync {
   _seedBases() {
     if (pageMaybeDirty()) return;
     const clone = captureSnapshot({ flushUndo: false });
-    this.lastHtml = serializeForSync(clone);
-    this._lastIdentityMap = this.identity.exportMap(clone, originalSnapshotNode);
+    this._setPeerBase(serializeForSync(clone), this.identity.exportMap(clone, originalSnapshotNode), this._ticket());
     this._setDiskBase(captureForSaveAndComparison({ emitForSync: false }).forSave, this._ticket());
   }
 
@@ -419,6 +427,9 @@ class LiveSync {
     // so mint a fresh resume id — this stream must not resume the previous one.
     this.lastHtml = null;
     this._lastIdentityMap = null;
+    // A ticket of its own, as the disk lane's reset takes: a save accepted or
+    // a frame settling from before this start cannot land in the new run.
+    this._peerBaseTicket = this._ticket();
     // The reset takes a ticket of its own, so a writer from before this start
     // (a save response still on the wire) cannot land in the new run.
     this._diskBase = null;
@@ -445,6 +456,7 @@ class LiveSync {
     const gen = ++this._startGen;
     if (this.lane === 'live' && !baselineSettled()) {
       const applyGen = this._applyGen;
+      const morphTicket = this._morphTicket;
       const saveEpoch = this._saveEpoch;
       const startHtml = this.lastHtml;
       const startDiskTicket = this._diskBaseTicket;
@@ -462,6 +474,9 @@ class LiveSync {
         // A save this tab sent is still unconfirmed: what it carries is not yet
         // common history, and a refused save must merge against the older base.
         if (this._saveTicket !== 0) return;
+        // A frame morphed the page since start: its base is newer than
+        // anything the settle would capture.
+        if (this._morphTicket !== morphTicket) return;
         // Refresh each lane only while it still holds what start left. A frame, a
         // landed relay, an own save or a disk frame since then gave it a newer base
         // (an own save counts even when its relay failed and lastHtml never moved).
@@ -470,8 +485,7 @@ class LiveSync {
         // rewriting content the merge cannot reach.
         if (startHtml !== null && this._applyGen === applyGen && this._saveEpoch === saveEpoch && this.lastHtml === startHtml) {
           const clone = captureSnapshot({ flushUndo: false });
-          this.lastHtml = serializeForSync(clone);
-          this._lastIdentityMap = this.identity.exportMap(clone, originalSnapshotNode);
+          this._setPeerBase(serializeForSync(clone), this.identity.exportMap(clone, originalSnapshotNode), this._ticket());
         }
         if (startDiskSeeded && this._diskBaseTicket === startDiskTicket) {
           this._setDiskBase(captureForSaveAndComparison({ emitForSync: false }).forSave, this._ticket());
@@ -498,6 +512,7 @@ class LiveSync {
         // today) counts as now.
         const ticket = this._saveTicket || this._ticket();
         this._saveTicket = 0;
+        if (ticket > this._acceptedSaveTicket) this._acceptedSaveTicket = ticket;
         const bytes = getLastSavedBytes();
         if (bytes != null) this._setDiskBase(bytes, ticket);
         // A save this tab made is the one act that acknowledges a lost
@@ -891,7 +906,7 @@ class LiveSync {
       // The save that follows this capture stores these bytes, so this is the
       // content its stamp will describe. Held for _relayCommit, and overwritten
       // by the next capture, so it always names the save currently in flight.
-      this._savedSnapshot = { html, identityMap };
+      this._savedSnapshot = { html, identityMap, ticket: this._saveTicket };
     };
 
     document.addEventListener('clay:snapshot-ready', this._snapshotHandler);
@@ -953,22 +968,29 @@ class LiveSync {
     // stored, and §10 is explicit that a stamp must never travel on its own.
     if (!pending || typeof pending.html !== 'string') return;
 
+    // Skip only an unstamped repeat, judged against the base as it stood. A
+    // landed save is news even when its bytes equal the last relay: "Keep mine"
+    // can restore exactly those bytes after the peers moved on, and they must
+    // hear it.
+    const repeat = !etag && pending.html === this.lastHtml;
+
+    // The host accepted these bytes, so every later accepted save descends from
+    // them: they are the peer lane's base from this moment, not once the relay
+    // returns. A frame whose morph ran after this capture installs its own,
+    // newer base when its resources settle, and the ticket keeps it there.
+    this._setPeerBase(pending.html, pending.identityMap, pending.ticket);
+
+    if (repeat) {
+      this._log('Skipping send - HTML unchanged');
+      return;
+    }
     this._enqueueSend(pending.html, pending.identityMap, etag || null);
   }
 
   _postUpdate(html, identityMap, etag = null, attempt = 0) {
-    // Skip only an unstamped repeat. A landed save is news even when its bytes
-    // equal the last relay: "Keep mine" can restore exactly those bytes after
-    // the peers moved on, and they must hear it.
-    if (!etag && html === this.lastHtml) {
-      this._log('Skipping send - HTML unchanged');
-      return;
-    }
-
-    this._log(`Sending update (HTML length: ${html.length}, lastHtml length: ${this.lastHtml?.length || 0})`);
+    this._log(`Sending update (HTML length: ${html.length})`);
 
     this._sendInFlight = true;
-    const gen = this._applyGen;
     let retry = false;
 
     // Absolute against the real origin, so a <base href> in the page cannot
@@ -987,18 +1009,7 @@ class LiveSync {
         ...(etag ? { etag } : {})
       })
     }).then(response => {
-      if (response.ok) {
-        // A frame that applied while this POST was on the wire has already
-        // advanced lastHtml past this snapshot; assigning would rewind the
-        // diff base to pre-frame state and misclassify the frame's content
-        // as local edits on the next dirty apply.
-        if (this._applyGen === gen) {
-          this.lastHtml = html;
-          this._lastIdentityMap = identityMap || null;
-        } else {
-          this._log('Skipping lastHtml advance: a frame applied during the POST');
-        }
-      } else {
+      if (!response.ok) {
         console.warn('[LiveSync] Save returned status:', response.status);
         retry = response.status >= 500 || response.status === 408 || response.status === 429;
       }
@@ -1284,6 +1295,22 @@ class LiveSync {
     this._diskBaseTicket = ticket;
   }
 
+  /**
+   * The one writer of the peer lane's base. Keeps the newest moment: a save
+   * accepted after a later frame's morph, or a frame whose resource wait
+   * outlasts a later save, can no longer rewind it.
+   */
+  _setPeerBase(html, identityMap, ticket) {
+    if (ticket < this._peerBaseTicket) return false;
+    this._peerBaseTicket = ticket;
+    this.lastHtml = html;
+    this._lastIdentityMap =
+      identityMap && typeof identityMap === 'object' && !Array.isArray(identityMap)
+        ? identityMap
+        : null;
+    return true;
+  }
+
   _requestFrame(cb) {
     if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
       return window.requestAnimationFrame(cb);
@@ -1422,6 +1449,7 @@ class LiveSync {
     // of the document, so the lane dates its base here, not after the await:
     // a save that captures during the wait is newer than this frame.
     const ticket = this._ticket();
+    this._morphTicket = ticket;
     const report = await pending;
     const typedDuringWait = gateCaptureToken().gen !== token.gen;
 
@@ -1538,7 +1566,7 @@ class LiveSync {
       // knowingly missing what disk holds, and a stamp there would let its next
       // save replace that change with nobody told.
 
-      const { report, typedDuringWait: typed } = await this._mergeIncoming(html, identityMap, {
+      const { report, ticket, typedDuringWait: typed } = await this._mergeIncoming(html, identityMap, {
         base: this.lastHtml,
         baseIdentityMap: this._lastIdentityMap,
         captureLocal: () => captureSnapshot({ flushUndo: false }),
@@ -1561,11 +1589,9 @@ class LiveSync {
       // two of a burst would read the protected section as clean and clobber
       // it) and could dedupe away the convergence send. Convergence is driven
       // by the explicit save below instead.
-      this.lastHtml = html;
-      this._lastIdentityMap =
-        identityMap && typeof identityMap === 'object' && !Array.isArray(identityMap)
-          ? identityMap
-          : null;
+      // A save captured during this frame's resource wait and already accepted
+      // is newer than the frame: it keeps the base, and its stamp too.
+      this._setPeerBase(html, identityMap, ticket);
       this._applyGen++;
 
       // The stamp of section 6, taken now that the bytes it describes are the
@@ -1573,7 +1599,7 @@ class LiveSync {
       // above, and deliberately the same moment: the two claims a page makes
       // when it adopts a stamp are "the host stores this version" and "I hold
       // it", and only the second one is this tab's to make.
-      if (typeof etag === 'string' && etag) {
+      if (!(this._acceptedSaveTicket > ticket) && typeof etag === 'string' && etag) {
         recordEtag(etag);
         stamped = true;
       }
@@ -1765,8 +1791,7 @@ class LiveSync {
         // newer peer frame. Rebuild it exactly the way the send pipeline
         // does, so it stays in the snapshot domain.
         const clone = captureSnapshot({ flushUndo: false });
-        this.lastHtml = serializeForSync(clone);
-        this._lastIdentityMap = this.identity.exportMap(clone, originalSnapshotNode);
+        this._setPeerBase(serializeForSync(clone), this.identity.exportMap(clone, originalSnapshotNode), ticket);
         this._applyGen++;
       }
 
