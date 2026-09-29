@@ -1878,5 +1878,5 @@ if (typeof window !== 'undefined') {
 // Export for the clayjs module system. The class itself is exported so
 // tests can create fresh instances without driving the singleton's
 // EventSource/snapshot wiring.
-export { liveSync, LiveSync, morph, WIRE_PROFILES, conflicts };
+export { liveSync, LiveSync, morph, WIRE_PROFILES, conflicts, SYNC_IGNORE_SELECTOR, REMOTE_WINS_SELECTOR };
 export default liveSync;
