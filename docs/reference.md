@@ -236,7 +236,9 @@ two elements, one of each.
   The event's `unresolved` is a copy of that list as it stands after this frame, including
   conflicts earlier frames left.
   A tab tells the other open copies about a save only once the host has accepted it, so
-  every update it sends descends from the version they already hold. Known limitation:
+  every update it sends descends from the version they already hold. Its own merge base
+  moves to that version at the same moment, not when its update reaches the others.
+  Known limitation:
   the host's stamp is a hash of the file's content, and relayed updates do not say which
   version they were built on. So an older update that arrives late can still revert
   another tab's newer save without a conflict. It takes a tab saving the file back to
