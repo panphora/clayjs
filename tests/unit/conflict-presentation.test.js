@@ -1,4 +1,5 @@
 import { rowOf, plain, headingAbove, structuralSentence } from "../../src/core/conflict-presentation.js";
+import { conflicts, beginApply, completeApply } from "../../src/sync/conflicts.js";
 
 /**
  * How a replaced edit is named and quoted in the notice. Names come from what the
@@ -84,39 +85,124 @@ test("a duplicate id cannot point the ring at the wrong element", () => {
   expect(row.target).not.toBe(document.getElementById("dup"));
 });
 
-test("a clash quotes the words around it, and says only where it cut", () => {
-  const tp = document.querySelector("#tp").firstChild;
-  const row = rowOf({ id: "1", kind: "text", node: tp, range: [0, 22], local: "$9 per seat", remote: "$12 per seat per month" });
+test("a clash quotes the engine's own text around it, and says only where it cut", () => {
+  document.body.innerHTML =
+    '<h2>Team plan</h2><p id="p">Our team plan includes five seats, shared folders, priority support and a great price for everyone.</p>';
+  const p = document.querySelector("#p");
+  const full = p.textContent;
+  const merged = full.replace("great", "low");
+  const start = full.indexOf("great");
+  const mergedStart = merged.indexOf("low");
+  const sideOf = (text, at, fragment) => ({ text, start: at, end: at + fragment.length, fragment, span: null, scope: null });
+  const mergedSide = sideOf(merged, mergedStart, "low");
 
-  expect(row.now.hit).toBe("$12 per seat per month");
-  expect(row.now.after.startsWith(", billed")).toBe(true);
-  expect(row.now.cutBefore).toBe(false);
+  const row = rowOf({
+    id: "1", kind: "text", local: "great", remote: "low",
+    recovery: {
+      version: 1, key: "t", localLost: true, applied: true, unavailable: null,
+      subject: { key: "b:[1,0]", nodeType: 1, base: [[1, 0]], local: [[1, 0]], remote: [[1, 0]], merged: [[1, 0]], live: [p] },
+      text: {
+        encoding: "plain", base: null,
+        local: sideOf(full, start, "great"),
+        merged: mergedSide, remote: mergedSide,
+        liveSpan: null, liveScope: null,
+      },
+    },
+  });
+
+  expect(row.yours.hit).toBe("great");
+  expect(row.now.hit).toBe("low");
+  expect(row.yours.before.endsWith("priority support and a ")).toBe(true);
+  expect(row.now.before.endsWith("priority support and a ")).toBe(true);
+  expect(row.yours.after).toBe(" price for everyone.");
+  expect(row.now.after).toBe(" price for everyone.");
+  expect(row.yours.cutBefore).toBe(true);
+  expect(row.now.cutBefore).toBe(true);
+  expect(row.yours.cutAfter).toBe(false);
   expect(row.now.cutAfter).toBe(false);
-
-  const words = [];
-  for (let i = 0; i < 40; i++) words.push(`word${i}`);
-  document.body.innerHTML = `<p id="long">${words.join(" ")}</p>`;
-
-  const long = document.querySelector("#long").firstChild;
-  const full = long.textContent;
-  const start = full.indexOf("word20");
-  const end = start + "word20".length;
-  const middle = rowOf({ id: "2", kind: "text", node: long, range: [start, end], local: "mine", remote: full.slice(start, end) });
-
-  expect(middle.now.cutBefore).toBe(true);
-  expect(middle.now.cutAfter).toBe(true);
-  const raw = full.slice(start - 40, start);
-  const firstSpace = raw.indexOf(" ");
-  expect(firstSpace).toBeGreaterThan(-1);
-  expect(middle.now.before).toBe(raw.slice(firstSpace + 1));
-  expect(full[full.indexOf(middle.now.before) - 1]).toBe(" ");
+  expect(row.target).toBe(p);
 });
 
-test("a range that is not the text the engine says it is quotes nothing around it", () => {
-  const tp = document.querySelector("#tp").firstChild;
-  const row = rowOf({ id: "1", kind: "text", node: tp, range: [0, 10], local: "$9 per seat", remote: "$9 per seat" });
+test("the words around a clash come from the engine's own text, not the live page", () => {
+  document.body.innerHTML = '<p id="p">something else entirely</p>';
+  const p = document.querySelector("#p");
+  const full = "A \uFFFC and\u001E a great day";
+  const merged = "A \uFFFC and a low\u001Eday";
+  const start = full.indexOf("great");
+  const mergedStart = merged.indexOf("low");
+  const sideOf = (text, at, fragment) => ({ text, start: at, end: at + fragment.length, fragment, span: null, scope: null });
+  const mergedSide = sideOf(merged, mergedStart, "low");
 
-  expect(row.now).toEqual({ before: "", hit: "$9 per seat", after: "", cutBefore: false, cutAfter: false });
+  const row = rowOf({
+    id: "2", kind: "text", local: "great", remote: "low",
+    recovery: {
+      version: 1, key: "t2", localLost: true, applied: true, unavailable: null,
+      subject: { key: "b:[1,1]", nodeType: 1, base: [[1, 1]], local: [[1, 1]], remote: [[1, 1]], merged: [[1, 1]], live: [p] },
+      text: {
+        encoding: "plain", base: null,
+        local: sideOf(full, start, "great"),
+        merged: mergedSide, remote: mergedSide,
+        liveSpan: null, liveScope: null,
+      },
+    },
+  });
+
+  expect(row.yours.before).toBe("A [item] and\n a ");
+  expect(row.yours.after).toBe(" day");
+  expect(row.now.after).toBe("\nday");
+  for (const text of [row.yours.before, row.yours.hit, row.yours.after, row.now.before, row.now.hit, row.now.after]) {
+    expect(text).not.toContain("\uFFFC");
+    expect(text).not.toContain("\u001E");
+  }
+});
+
+test("a subject that is gone from the page is named from this tab's own copy", () => {
+  const root = document.implementation.createHTMLDocument("").documentElement;
+  root.querySelector("body").innerHTML = '<section id="faq"><h2>FAQ</h2></section>';
+  window.clay = { conflicts };
+  const applyId = beginApply({ source: "peer", seq: null, etag: null, domain: "sync", root });
+  const report = {
+    kind: "structure",
+    recovery: {
+      version: 1, key: "s1", localLost: true, applied: true, unavailable: null,
+      subject: { key: "b:[1,0]", nodeType: 1, base: [[1, 0]], local: [[1, 0]], remote: [[1, 0]], merged: [[1, 0]], live: [] },
+      structure: {
+        localAction: "moved", remoteAction: "moved", localPlacement: null, remotePlacement: null,
+        mergedPlacement: null, localOrder: null, mergedOrder: null, localFragment: null, fragmentKind: "element",
+      },
+    },
+  };
+
+  const ids = completeApply(applyId, [report], { ticket: 1 });
+  expect(ids).toHaveLength(1);
+
+  const row = rowOf(report);
+
+  expect(row.name).toBe("Section");
+  expect(row.target).toBeNull();
+  expect(row.sentence).toBe("You moved this section. The other edit moved it somewhere else. Their position is showing.");
+
+  conflicts.acknowledge(ids, { reason: "accepted" });
+  delete window.clay;
+});
+
+test("an attribute is named by its qualified name, and the ring lands on the live element", () => {
+  document.body.innerHTML = '<svg><a id="x" xlink:href="/a">Go</a></svg>';
+  const link = document.querySelector("#x");
+
+  const row = rowOf({
+    id: "3", kind: "attr", local: "/mine", remote: "/theirs",
+    recovery: {
+      version: 1, key: "a1", localLost: true, applied: true, unavailable: null,
+      subject: { key: "b:[1,0]", nodeType: 1, base: [[1, 0]], local: [[1, 0]], remote: [[1, 0]], merged: [[1, 0]], live: [link] },
+      attribute: { namespaceURI: "http://www.w3.org/1999/xlink", localName: "href", qualifiedName: "xlink:href" },
+    },
+  });
+
+  expect(row.name).toBe('"xlink:href" attribute');
+  expect(row.target).toBe(link);
+  expect(row.yours.hit).toBe("/mine");
+  expect(row.now.hit).toBe("/theirs");
 });
 
 test("an engine slice is parsed inert: text, never HTML", async () => {

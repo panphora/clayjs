@@ -654,6 +654,31 @@ test("a row names the edit, quotes both versions, and offers the eye", async () 
   expect(eyeOf(drawn[1]).getAttribute("aria-label")).toBe("Show Link address under Pricing on page");
 });
 
+test("a record the page never showed draws Yours and no Now", async () => {
+  apply([{
+    kind: "text", local: "slow", remote: "fast",
+    recovery: {
+      version: 1, key: "missing-output", localLost: true, applied: false, unavailable: "missing-output",
+      subject: { key: "b:[1,1]", nodeType: 3, base: [[1, 1]], local: [[1]], remote: [[1, 1]], merged: [[1, 1]], live: [] },
+      text: {
+        encoding: "plain", base: null,
+        local: { text: "One slow fox.", start: 4, end: 8, fragment: "slow", span: null, scope: null },
+        merged: null, remote: null,
+      },
+    },
+  }]);
+  await frame();
+  review();
+  buttonSaying(/See the edits/).click();
+
+  const drawn = rows();
+  expect(drawn).toHaveLength(1);
+  expect(values(drawn[0])).toEqual(["Yours", "One slow fox."]);
+  expect(drawn[0].textContent).toContain("The other edit replaced this, and the page changed again before it could be shown here. Download my copy keeps your version.");
+  expect(drawn[0].textContent).not.toContain("Now");
+  expect(eyeOf(drawn[0])).toBeNull();
+});
+
 test("another tab's markup is text in the notice, never an element", async () => {
   apply([{ kind: "text", node: document.querySelector("#h"), local: '<img src=x onerror="window.__pwned2=1">x', remote: "Pricing" }]);
   await frame();

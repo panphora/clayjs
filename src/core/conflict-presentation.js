@@ -19,6 +19,7 @@ const ATTR = {
 const CONTAINERS = new Set(["section", "article", "div", "li", "aside", "main", "header", "footer", "nav"]);
 const HIDDEN = new Set(["script", "style", "template", "noscript"]);
 const HEADINGS = "h1,h2,h3,h4,h5,h6";
+const OWN_HEADING = ":scope > :is(h1,h2,h3,h4,h5,h6)";
 const CONTEXT = 40;
 
 export function cut(text, max = CONTEXT) {
@@ -90,7 +91,7 @@ function nameOfElement(el, attrName) {
     return under ? `Heading under ${under}` : "Page heading";
   }
   if (CONTAINERS.has(el.localName)) {
-    const own = el.querySelector(HEADINGS);
+    const own = el.querySelector(OWN_HEADING);
     if (own && own.textContent.trim()) return `${cut(own.textContent)} section`;
   }
   const kind = kindName(el);
@@ -134,8 +135,136 @@ export function structuralSentence(record, kind) {
   return make ? make(kind.toLowerCase()) : "Your change here was replaced by the other edit.";
 }
 
+function visibleContainer(el) {
+  let n = el.parentElement;
+  while (n && HIDDEN.has(n.localName)) n = n.parentElement;
+  return n && n !== document.documentElement ? n : null;
+}
+
+const ATOM = "\uFFFC";
+const BREAK = "\u001E";
+
+// The engine's flattened text marks an inline element (an image, a field) with
+// U+FFFC and a block break with U+001E. Neither is shown as a control character.
+function shown(text) {
+  return text.replaceAll(ATOM, "[item]").replaceAll(BREAK, "\n");
+}
+
+function textSide(t) {
+  if (!t || typeof t.text !== "string") return null;
+  const ctx = textContext(t.text, t.start, t.end);
+  return {
+    before: shown(ctx.before), hit: shown(t.text.slice(t.start, t.end)), after: shown(ctx.after),
+    cutBefore: ctx.cutBefore, cutAfter: ctx.cutAfter,
+  };
+}
+
+// A live node the engine named, still on the page or in a live template.
+function liveOf(ref) {
+  for (const n of ref?.live || []) if (hostOf(n)) return n;
+  return null;
+}
+
+// Recovery paths index childNodes from the root the merge read as "mine" (the
+// clone the ledger keeps); "content" enters a template's fragment.
+function nodeAtPath(root, path) {
+  let n = root;
+  for (const step of path) {
+    if (!n) return null;
+    n = step === "content" ? n.content : n.childNodes[step];
+  }
+  return n || null;
+}
+
+function localNode(record, ref) {
+  const root = window.clay?.conflicts?.recoveryOf?.(record.id)?.root;
+  const path = ref?.local?.[0];
+  return root && path ? nodeAtPath(root, path) : null;
+}
+
+function visibleHost(node) {
+  const h = hostOf(node);
+  return h && HIDDEN.has(h.localName) ? visibleContainer(h) : h;
+}
+
+// Where a moved block went, in words: "into the FAQ section", "under Pricing".
+function placeName(node) {
+  const el = elementOf(node);
+  if (!el) return null;
+  if (CONTAINERS.has(el.localName)) {
+    const own = el.querySelector(OWN_HEADING);
+    if (own && own.textContent.trim()) return `into the ${cut(own.textContent)} section`;
+  }
+  const under = el.isConnected ? headingAbove(el) : null;
+  return under ? `under ${under}` : null;
+}
+
+function recoverySentence(record, rv, kind) {
+  const s = rv.structure;
+  const k = kind.toLowerCase();
+  switch (`${s.localAction}/${s.remoteAction}`) {
+    case "deleted/edited":
+      return `You deleted this ${k}. The other edit changed it at the same time, so it is still here.`;
+    case "deleted/moved":
+      return `You deleted this ${k}. The other edit moved it, so it is still here.`;
+    case "reordered/reordered":
+      return `You changed the order of the items in this ${k}. The other edit changed their order too. Their order is showing.`;
+    case "inserted/inserted":
+      return "You and the other edit added different content in the same place. Their content is showing.";
+    case "moved/moved": {
+      const mine = placeName(liveOf(s.localPlacement?.parent) || localNode(record, s.localPlacement?.parent));
+      const theirs = placeName(liveOf(s.mergedPlacement?.parent));
+      if (mine && theirs && mine !== theirs) {
+        return `You moved this ${k} ${mine}. The other edit moved it ${theirs}. Their position is showing.`;
+      }
+      return `You moved this ${k}. The other edit moved it somewhere else. Their position is showing.`;
+    }
+    default:
+      return "Your change here was replaced by the other edit.";
+  }
+}
+
+const CHANGED_AGAIN = "The other edit replaced this, and the page changed again before it could be shown here. Download my copy keeps your version.";
+
+const NON_ELEMENT = { 3: "Text", 8: "Comment" };
+
+function recoveryRow(record, rv) {
+  const id = record.id;
+  // Output the engine could not map to the page: nothing here to point at, and
+  // what the page shows is not the other edit's text either.
+  const shown = rv.applied !== false;
+  const live = shown ? liveOf(rv.subject) : null;
+  const target = live ? visibleHost(live) : null;
+  const shape = elementOf(live) || elementOf(localNode(record, rv.subject));
+  const plainKind = NON_ELEMENT[rv.subject?.nodeType];
+  if (rv.attribute) {
+    return {
+      id, kind: "attr", name: nameOfElement(shape, rv.attribute.qualifiedName), target,
+      yours: side(String(record.local ?? "")), now: shown ? side(String(record.remote ?? "")) : null,
+      sentence: shown ? null : CHANGED_AGAIN,
+    };
+  }
+  if (rv.structure) {
+    const kind = plainKind || (shape ? kindName(shape) : "Block");
+    const name = plainKind || (live ? nameOfElement(elementOf(live)) : kind);
+    return {
+      id, kind: "struct", name, target, yours: null, now: null,
+      sentence: shown ? recoverySentence(record, rv, kind) : CHANGED_AGAIN,
+    };
+  }
+  const name = plainKind === "Comment" ? "Comment"
+    : shape && HIDDEN.has(shape.localName) ? kindName(shape)
+    : nameOfElement(shape);
+  return {
+    id, kind: "text", name, target,
+    yours: textSide(rv.text?.local), now: shown ? textSide(rv.text?.merged) : null,
+    sentence: shown ? null : CHANGED_AGAIN,
+  };
+}
+
 export function rowOf(record) {
   const id = record.id;
+  if (record.recovery?.version === 1) return recoveryRow(record, record.recovery);
   if (record.kind === "attr") {
     const el = record.el || null;
     return {
@@ -165,20 +294,8 @@ export function rowOf(record) {
   const text = (v) => (v == null ? "" : Array.isArray(v) ? v.join("") : String(v));
   const yours = html ? plain(record.local) : text(record.local);
   const now = html ? plain(record.remote) : text(record.remote);
-  let ctx = null;
-  if (Array.isArray(record.range) && record.node) {
-    const full = record.node.textContent;
-    const [start, end] = record.range;
-    if (full.slice(start, end) === now) ctx = textContext(full, start, end);
-  }
   return {
     id, kind: "text", name, target: host && !HIDDEN.has(host.localName) ? host : (host ? visibleContainer(host) : null),
-    yours: side(yours, ctx), now: side(now, ctx), sentence: null,
+    yours: side(yours), now: side(now), sentence: null,
   };
-}
-
-function visibleContainer(el) {
-  let n = el.parentElement;
-  while (n && HIDDEN.has(n.localName)) n = n.parentElement;
-  return n && n !== document.documentElement ? n : null;
 }

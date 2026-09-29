@@ -33,9 +33,15 @@ function changed(detail) {
   }));
 }
 
+// A report is a loss unless the engine says this tab's operation survived, or a
+// hook kept the incoming change off the page. One the engine could not map to the
+// live page ("missing-output") still replaced this tab's work: it shows, without
+// a place to point at.
 function isLoss(c) {
   const r = c.recovery;
-  return !r || (r.localLost !== false && r.applied !== false);
+  if (!r) return true;
+  if (r.applied === false && r.unavailable === 'hook-veto') return false;
+  return r.localLost !== false;
 }
 
 function install(apply, raw) {

@@ -366,9 +366,10 @@ function buildRow(record, index) {
   if (row.target && row.target.isConnected) where.append(key(eyeButton(row), `eye:${record.id}`));
   box.append(where);
   if (row.sentence) box.append(bevelText("div", ["display:block", "font-size:13px", `color:${TOKENS["ink-2"]}`], row.sentence));
-  if (row.yours && row.now) {
+  if (row.yours) {
     const grid = bevelText("div", ["display:grid", "grid-template-columns:44px 1fr", "gap:3px 10px", "align-items:start", `font:12.5px/1.5 ${FONT_MONO}`, ...(row.sentence ? ["margin-top:4px"] : [])]);
-    grid.append(...valueLine("Yours", row.yours, { mine: true }), ...valueLine("Now", row.now, { mine: false }));
+    grid.append(...valueLine("Yours", row.yours, { mine: true }));
+    if (row.now) grid.append(...valueLine("Now", row.now, { mine: false }));
     box.append(grid);
   }
   return box;
