@@ -679,3 +679,24 @@ export function captureBodyForSync() {
 export function getPageContents() {
   return captureForSave({ emitForSync: false });
 }
+
+/**
+ * The page as this tab had it before a merge replaced some of it, as the bytes a
+ * save would have written. The ledger's clone is shared and must come back
+ * untouched, so this works on a copy. A snapshot-domain clone still needs the save
+ * preparation (transforms, the [no-save] strip) but not the authored onbeforesave
+ * handlers: this is a download, not a save. A save-domain clone is already prepared.
+ */
+export function serializeRecoveryClone(clone, { prepared = false } = {}) {
+  const copy = clonePreventingOnclone(clone);
+  return serializeClone(prepared ? copy : prepareCloneForSave(copy, { authored: false }));
+}
+
+/**
+ * The live page as a save would write it, for a download: the save transforms and
+ * the [no-save] strip, but no authored handler runs and the undo batch stays open.
+ * Nothing is sent and no event fires.
+ */
+export function captureRecoveryPage() {
+  return serializeSaveClone(captureSaveClone({ flushUndo: false, authored: false }));
+}

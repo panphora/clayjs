@@ -76,7 +76,7 @@ beforeAll(async () => {
   gate = await import("../../src/lib/dirty-gate.js");
   save = await import("../../src/core/save.js");
   etag = await import("../../src/core/etag.js");
-  await import("../../src/core/save-conflict-notice.js");
+  await import("../../src/core/conflict-notice.js");
   // Let discovery land: from here the host stamps saves.
   await etag.seedEtag();
 });
@@ -195,6 +195,7 @@ test("the refused tab merges the peer's stamped frame against the seed, keeps bo
   expect(savePosts[0].headers["If-Match"]).toBe("E0");
   expect(save.isSaveConflicted()).toBe(true);
   expect(document.documentElement.getAttribute("savestatus")).toBe("conflict");
+  await wait(30);
   const bar = document.querySelector("[data-clay-conflict]");
   expect(bar.style.display).toBe("flex");
 
@@ -210,10 +211,12 @@ test("the refused tab merges the peer's stamped frame against the seed, keeps bo
   expect(gate.pageMaybeDirty()).toBe(true);
   expect(etag.lastSeenEtag()).toBe("E1");
   expect(save.isSaveConflicted()).toBe(false);
-  // A manual-save page: nothing has been written yet, so the notice stays up
-  // until the person saves.
+  // A manual-save page: nothing has been written yet, so the root stays in
+  // 'conflict' until the person saves, but the refusal is answered and the
+  // notice lets it go.
   expect(document.documentElement.getAttribute("savestatus")).toBe("conflict");
-  expect(bar.style.display).toBe("flex");
+  await wait(30);
+  expect(bar.style.display).toBe("none");
 
   // The convergence save answers the version the host refused this tab over.
   saveResponse = () => ({ status: 200, body: { msg: "Saved", etag: "E2" } });
@@ -222,6 +225,7 @@ test("the refused tab merges the peer's stamped frame against the seed, keeps bo
   expect(savePosts[1].headers["If-Match"]).toBe("E1");
   expect(etag.lastSeenEtag()).toBe("E2");
   expect(document.documentElement.getAttribute("savestatus")).toBe("saved");
+  await wait(30);
   expect(bar.style.display).toBe("none");
   sync.stop();
 });

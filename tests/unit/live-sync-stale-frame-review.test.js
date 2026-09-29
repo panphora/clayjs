@@ -86,7 +86,7 @@ beforeAll(async () => {
   save = await import("../../src/core/save.js");
   etag = await import("../../src/core/etag.js");
   autosaveState = await import("../../src/lib/autosave-state.js");
-  await import("../../src/core/save-conflict-notice.js");
+  await import("../../src/core/conflict-notice.js");
   // The close warning, for the tests that assert the ledger holds it up.
   await import("../../src/core/unsaved-warning.js");
   await etag.seedEtag();
@@ -207,14 +207,17 @@ test("T1a a 412 that arrives after this tab already merged the winner releases t
   // The refusal names the stamp this tab already holds.
   response.resolve({ status: 412, body: { code: "conflict", changedBy: "another-tab", etag: "E1" } });
   expect((await inFlight).msgType).toBe("conflict");
-  await tick();
+  await wait(30);
   events.stop();
 
   expect(events["clay:save-conflict"]).toBe(1);
   expect(events["clay:save-conflict-resolved"]).toBe(1);
   expect(save.isSaveConflicted()).toBe(false);
   expect(document.documentElement.getAttribute("savestatus")).toBe("saved");
-  expect(bar().style.display).toBe("none");
+  // The refusal was answered before the notice drew its first frame, so there may
+  // be no bar at all, and one it drew is hidden.
+  const notice = bar();
+  expect(notice === null || notice.style.display === "none").toBe(true);
 
   // Autosave is running again, under the winner's stamp.
   document.querySelector('[data-id="one"]').textContent = "One later";
@@ -246,6 +249,7 @@ test("T1b a frame whose stamp differs from the 412's (an older save arriving lat
   await sync._doApplyUpdate(frameE1, 5, null, "E1");
   expect(save.isSaveConflicted()).toBe(true);
   expect(document.documentElement.getAttribute("savestatus")).toBe("conflict");
+  await wait(30);
   expect(bar().style.display).toBe("flex");
   expect(events["clay:save-conflict-resolved"]).toBe(0);
   await wait(300);

@@ -1,7 +1,7 @@
 import { isEditMode } from "../core/is-edit-mode.js";
 import onDomReady from "../lib/dom-ready.js";
 
-// No 'conflict' here on purpose. core/save-conflict-notice.js owns that state now,
+// No 'conflict' here on purpose. core/conflict-notice.js owns that state now,
 // and it ships in every document rather than only the ones that turned this chip on.
 // Both listen to clay:save-conflict, so keeping a label here put a chip in the corner
 // saying the same thing as the bar at the same moment. Dropping it from this side

@@ -168,6 +168,9 @@ class SectionNotice {
 
   show(name) {
     if (!this.build()) return;
+    // The conflict notice sits in the same corner and matters more.
+    const conflict = document.querySelector('[data-clay-conflict]');
+    if (conflict && conflict.style.display !== 'none') return;
     this.line.textContent = `${name} changed this section`;
     set(this.root, 'display', 'flex');
   }

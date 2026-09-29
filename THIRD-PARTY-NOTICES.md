@@ -46,6 +46,12 @@ or carry third-party code, and keep their original licenses.
 - Copyright (c) 2017 Indrashish Ghosh
 - https://github.com/ghosh/Micromodal
 
+## Phosphor Icons (MIT)
+
+- File: the eye icon in src/core/conflict-notice.js
+- Copyright (c) 2020 Phosphor Icons
+- https://github.com/phosphor-icons/core
+
 ## First-party vendored modules
 
 The remaining files in src/vendor/ (hypercms, hyper-morph, hyper-undo, quickcrop,

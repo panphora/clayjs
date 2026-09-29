@@ -21,6 +21,19 @@ import { getLastSavedDirty } from "./save.js";
 import { logUnloadDiffSync, preloadIfEnabled } from "../lib/autosave-debug.js";
 import { hasUnsavedState } from "../lib/unsaved-state.js";
 
+// One beforeunload let through, for the reload a person confirmed with two presses
+// in the conflict notice. Nothing else is switched off: the next close still warns.
+let discardPermit = false;
+export function reloadAfterDiscard({ isCurrent, reload }) {
+  if (!isCurrent()) return false;
+  discardPermit = true;
+  // Browsers fire beforeunload for a reload on their own schedule; a permit still
+  // unused a second later means the navigation did not happen.
+  setTimeout(() => { discardPermit = false; }, 1000);
+  reload();
+  return true;
+}
+
 // Pre-load diff library if debug mode is on (so it's ready for unload)
 preloadIfEnabled();
 
@@ -32,6 +45,11 @@ preloadIfEnabled();
 // the person editing it deserves the warning.
 window.addEventListener('beforeunload', (event) => {
   if (!isEditMode) return;
+
+  if (discardPermit) {
+    discardPermit = false;
+    return;
+  }
 
   // Work outside the DOM first: it needs no capture, and a capture that throws
   // must not hide it. The demo plugin does not save it either, so it warns there too.

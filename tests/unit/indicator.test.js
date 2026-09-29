@@ -34,7 +34,7 @@ test("shows the right label + clay markers on save events, hides after saved", (
   jest.useRealTimers();
 });
 
-// core/save-conflict-notice.js owns the conflict state now, and it ships in every
+// core/conflict-notice.js owns the conflict state now, and it ships in every
 // document rather than only the ones that turned this chip on. Both listen to
 // clay:save-conflict, so a label here put a chip in the corner saying the same
 // thing as the bar, at the same moment.

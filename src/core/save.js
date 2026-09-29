@@ -257,7 +257,8 @@ export function isSaveConflicted() {
  * missed save. On a manual-save page with unsaved work the root stays in
  * 'conflict' and the notice stays up until the person saves, since nothing has
  * been written yet. Not clay:save-saved: no save happened, and that event runs
- * every [onaftersave] handler.
+ * every [onaftersave] handler. Either way clay:save-conflict-released fires, so a
+ * notice can drop the refusal it was showing.
  */
 export function conflictResolvedBySync(etag) {
   if (!conflictHold) return;
@@ -273,6 +274,7 @@ export function conflictResolvedBySync(etag) {
       detail: { timestamp: Date.now() }
     }));
   }
+  document.dispatchEvent(new CustomEvent('clay:save-conflict-released', { detail: { etag: etag ?? null } }));
   resumeAutosave();
 }
 
