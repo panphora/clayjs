@@ -56,9 +56,10 @@ import { presence } from './presence.js';
 import './section-notice.js';
 import { hostMeta } from '../core/host-meta.js';
 import { recordEtag, seedEtag, lastSeenEtag, conditionalSaves } from '../core/etag.js';
-import { pageMaybeDirty, pauseGate, resumeGate, gateCaptureToken, gateClearIfUnchanged, gateMarkDirty } from '../lib/dirty-gate.js';
+import { pageMaybeDirty, pauseGate, resumeGate, gateCaptureToken, gateClearIfUnchanged } from '../lib/dirty-gate.js';
 import { gestureSeen } from '../lib/user-gesture.js';
 import { SyncStream } from './stream.js';
+import { conflicts, beginApply, completeApply, failApply } from './conflicts.js';
 
 // What a live-sync merge never reads or touches on any side: editor chrome,
 // content kept out of the save or the snapshot, frozen regions, and nodes
@@ -219,15 +220,6 @@ class LiveSync {
     // The ticket of the latest frame of either lane whose morph has run. The
     // boot settle must not replace a base a morph already moved past.
     this._morphTicket = 0;
-    // Conflicts an incoming frame won over this tab's unsaved text, kept until
-    // this tab's next successful save. While any are here the page stays
-    // dirty: no clean frame clears the gate or advances a saved baseline, and
-    // no automatic save runs from the merge path, so the close warning holds
-    // and the lost text stays reachable. Each entry is a hyper-morph conflict
-    // (`local` is the text this tab lost).
-    this.unresolvedConflicts = [];
-    // Each conflict's ticket: the moment its frame applied.
-    this._conflictTickets = new WeakMap();
     this.clientId = this.generateClientId();
 
     // Per-stream resume id for the htmlclay replay server's wire contract.
@@ -354,6 +346,12 @@ class LiveSync {
     this.onNotification = null;
   }
 
+  // Compatibility: the raw engine reports of every open loss. The ledger
+  // (clay.conflicts) is the real owner; nothing here removes a record.
+  get unresolvedConflicts() {
+    return conflicts.list().filter((c) => c.kind !== 'apply-incomplete');
+  }
+
   _log(message, data = null) {
     if (!this.debug) return;
     const prefix = `[LiveSync ${new Date().toISOString()}]`;
@@ -435,7 +433,6 @@ class LiveSync {
     this._diskBase = null;
     this._diskBaseTicket = this._ticket();
     this._saveTicket = 0;
-    this.unresolvedConflicts = [];
     this._savedSnapshot = null;
     this._applyGen++;
     this.lastSeenSeq = 0;
@@ -515,14 +512,6 @@ class LiveSync {
         if (ticket > this._acceptedSaveTicket) this._acceptedSaveTicket = ticket;
         const bytes = getLastSavedBytes();
         if (bytes != null) this._setDiskBase(bytes, ticket);
-        // A save this tab made is the one act that acknowledges a lost
-        // conflict: the person wrote the page as it stands. Only the page as
-        // it stood at the capture: a conflict from a frame that applied after
-        // it is not in these bytes, and it keeps the page dirty.
-        this.unresolvedConflicts = this.unresolvedConflicts.filter(
-          (c) => this._conflictTickets.get(c) > ticket
-        );
-        if (this.unresolvedConflicts.length) gateMarkDirty();
         this._relayCommit();
       };
       document.addEventListener('clay:save-saved', this._saveSavedHandler);
@@ -537,7 +526,6 @@ class LiveSync {
         queueMicrotask(() => {
           if (this.isDestroyed) return;
           if (refusedBy !== lastSeenEtag()) return;
-          if (this.unresolvedConflicts.length) return;
           conflictResolvedBySync(refusedBy);
           this._saveAfterMerge(pageMaybeDirty(), false);
         });
@@ -851,7 +839,7 @@ class LiveSync {
       if (etag && html === this.lastHtml) {
         this._log(`Taking the stamp from a peer save of content already applied (seq=${seq})`);
         recordEtag(etag);
-        if (isSaveConflicted() && this.unresolvedConflicts.length === 0) {
+        if (isSaveConflicted()) {
           conflictResolvedBySync(etag);
           this._saveAfterMerge(pageMaybeDirty(), false);
         }
@@ -1350,7 +1338,7 @@ class LiveSync {
    * @param {boolean} lane.synthetic - whether this tab's synthetic ids apply
    * @param {object} [lane.extra] - extra mergeDocument options (the disk lane's beforeApply)
    */
-  async _mergeIncoming(html, identityMap, { base, baseIdentityMap = null, captureLocal, synthetic, extra = {} }) {
+  async _mergeIncoming(html, identityMap, { base, baseIdentityMap = null, captureLocal, synthetic, source = 'peer', seq = null, etag = null, extra = {} }) {
     const store = this.identity;
     // A frame may neither write these onto our root nor, by not carrying them,
     // take ours away. Returning false is hyper-morph's veto for both directions.
@@ -1404,6 +1392,8 @@ class LiveSync {
     // loaded and run. Resuming mutations earlier would let late scripts' DOM
     // changes look like user edits and echo back out.
     let pending;
+    let localRoot = null;
+    let applyId = null;
     if (base == null) {
       pending = HyperMorph.mergeDocument({
         ...common,
@@ -1433,16 +1423,26 @@ class LiveSync {
         },
       });
     } else {
-      pending = HyperMorph.mergeDocument({
-        ...common,
-        base,
-        local: { root: captureLocal(), toLive: originalSnapshotNode },
-        identity: {
-          base: sideIdentity(baseIdentityMap),
-          local: localIdentity,
-          remote: sideIdentity(identityMap),
-        },
+      localRoot = captureLocal();
+      applyId = beginApply({
+        source, seq, etag, root: localRoot,
+        domain: source === 'disk' ? 'save' : 'sync',
       });
+      try {
+        pending = HyperMorph.mergeDocument({
+          ...common,
+          base,
+          local: { root: localRoot, toLive: originalSnapshotNode },
+          identity: {
+            base: sideIdentity(baseIdentityMap),
+            local: localIdentity,
+            remote: sideIdentity(identityMap),
+          },
+        });
+      } catch (err) {
+        failApply(applyId, err);
+        throw err;
+      }
     }
     // The apply itself ran synchronously inside mergeDocument; only resource
     // loads are still pending. This is the moment the frame's bytes were true
@@ -1450,25 +1450,20 @@ class LiveSync {
     // a save that captures during the wait is newer than this frame.
     const ticket = this._ticket();
     this._morphTicket = ticket;
-    const report = await pending;
+    let report;
+    try {
+      report = await pending;
+    } catch (err) {
+      if (applyId) failApply(applyId, err, { ticket });
+      throw err;
+    }
     const typedDuringWait = gateCaptureToken().gen !== token.gen;
 
-    // A conflict the frame won leaves this tab's text in report.conflicts and
-    // nowhere else. It is kept until this tab's next successful save, so the
-    // page stays dirty (the close warning holds) however many clean frames
-    // follow, and nothing writes the page out from under it automatically.
-    if (dirty && report.conflicts.length) {
-      for (const c of report.conflicts) this._conflictTickets.set(c, ticket);
-      this.unresolvedConflicts.push(...report.conflicts);
-    }
-    // Clean only when nothing of this tab's survived, nothing of it was lost,
-    // and nothing lost earlier is still waiting on a save.
-    if (
-      dirty &&
-      !report.localDiverged &&
-      report.conflicts.length === 0 &&
-      this.unresolvedConflicts.length === 0
-    ) {
+    // What the frame won over this tab's unsaved edits goes to the ledger with
+    // the clone the merge read as "mine". Earlier losses live in the ledger,
+    // not in the page's dirty state.
+    const conflictIds = applyId ? completeApply(applyId, report.conflicts, { ticket }) : [];
+    if (dirty && !report.localDiverged) {
       gateClearIfUnchanged(token);
     }
     // Synthetic ids converge: every live element the frame named takes the
@@ -1479,20 +1474,18 @@ class LiveSync {
       const synthetic = mapIds.has(id) ? id : syntheticByAuthored.get(id);
       if (synthetic) store.adopt(el, synthetic);
     }
-    return { report, ticket, typedDuringWait };
+    return { report, ticket, typedDuringWait, conflictIds };
   }
 
   /**
    * The automatic save a merge may owe: the merge kept this tab's edits
    * (convergence), or the person typed during the awaited apply (the mutation
    * feed was paused, so nothing else will schedule it). Only where autosave is
-   * on, and never over an unresolved conflict: that save would write the page
-   * with the lost text gone and clear the one signal that says so.
+   * on.
    */
   _saveAfterMerge(diverged, typedDuringWait) {
     if (!(diverged || typedDuringWait)) return;
     if (!autosaveActive()) return;
-    if (this.unresolvedConflicts.length) return;
     savePageThrottled();
   }
 
@@ -1566,11 +1559,14 @@ class LiveSync {
       // knowingly missing what disk holds, and a stamp there would let its next
       // save replace that change with nobody told.
 
-      const { report, ticket, typedDuringWait: typed } = await this._mergeIncoming(html, identityMap, {
+      const { report, ticket, typedDuringWait: typed, conflictIds } = await this._mergeIncoming(html, identityMap, {
         base: this.lastHtml,
         baseIdentityMap: this._lastIdentityMap,
         captureLocal: () => captureSnapshot({ flushUndo: false }),
         synthetic: true,
+        source: 'peer',
+        seq,
+        etag,
       });
       diverged = report.localDiverged;
       typedDuringWait = typed;
@@ -1624,13 +1620,10 @@ class LiveSync {
       // gate or a diverged merge leaves the base where it was, and the
       // convergence save moves it once the merge is on disk.
       //
-      // Unresolved conflicts keep every saved baseline where it is too: the
-      // page is dirty by definition until this tab saves.
       if (
         this.lane === 'live' &&
         !diverged &&
-        !pageMaybeDirty() &&
-        this.unresolvedConflicts.length === 0
+        !pageMaybeDirty()
       ) {
         const { forSave, forComparison, forDirty } = captureForSaveAndComparison({
           emitForSync: false,
@@ -1657,7 +1650,7 @@ class LiveSync {
       // returns above without reaching here, so nothing can name an author for a
       // change this tab never took. Null on every frame the host did not stamp.
       document.dispatchEvent(new CustomEvent('clay:sync-applied', {
-        detail: { seq, source: 'peer', by: by || null, report, unresolved: this.unresolvedConflicts.slice() }
+        detail: { seq, source: 'peer', by: by || null, report, unresolved: this.unresolvedConflicts, conflictIds }
       }));
     } finally {
       this._log('applyUpdate - morph complete, resuming mutations');
@@ -1676,9 +1669,7 @@ class LiveSync {
     // isPaused is lifted so the convergence save's relay reaches peers.
     // Only where autosave is on: a manual-save page must never auto-write, so
     // there the merge stays local, still dirty, until the person saves.
-    // Not over a lost conflict: the hold and its bar stay up as the signal that
-    // this tab lost text, until the person saves.
-    if (stamped && this.unresolvedConflicts.length === 0) conflictResolvedBySync(etag);
+    if (stamped) conflictResolvedBySync(etag);
     this._saveAfterMerge(diverged, typedDuringWait);
   }
 
@@ -1743,10 +1734,13 @@ class LiveSync {
       // file. The merged document is activated for edit mode before it is
       // applied, exactly as boot would have, so every node, local or incoming,
       // goes live from its own saved form.
-      const { report, ticket, typedDuringWait: typed } = await this._mergeIncoming(html, null, {
+      const { report, ticket, typedDuringWait: typed, conflictIds } = await this._mergeIncoming(html, null, {
         base: this._diskBase,
         captureLocal: () => captureForMerge().saveClone,
         synthetic: false,
+        source: 'disk',
+        seq,
+        etag,
         extra: { beforeApply: (doc) => activateIncomingDoc(doc.documentElement) },
       });
       diverged = report.localDiverged;
@@ -1774,8 +1768,7 @@ class LiveSync {
       if (
         this.lane === 'live' &&
         !diverged &&
-        !pageMaybeDirty() &&
-        this.unresolvedConflicts.length === 0
+        !pageMaybeDirty()
       ) {
         // Clean apply: the DOM now IS the disk state, so a local comparison
         // capture of it is the truthful baseline. The next no-op save skips,
@@ -1805,7 +1798,8 @@ class LiveSync {
           // so this tab's next save copies from the file somebody else just wrote.
           html,
           report,
-          unresolved: this.unresolvedConflicts.slice(),
+          conflictIds,
+          unresolved: this.unresolvedConflicts,
         }
       }));
     } finally {
@@ -1820,9 +1814,7 @@ class LiveSync {
     // (our edits + their bytes). The baseline was left pre-external, so the
     // save sees both as changes and writes the merge back. Only where
     // autosave is on, as in the peer lane.
-    // Not over a lost conflict: the hold and its bar stay up as the signal that
-    // this tab lost text, until the person saves.
-    if (stamped && this.unresolvedConflicts.length === 0) conflictResolvedBySync(etag);
+    if (stamped) conflictResolvedBySync(etag);
     this._saveAfterMerge(diverged, typedDuringWait);
   }
 
@@ -1886,5 +1878,5 @@ if (typeof window !== 'undefined') {
 // Export for the clayjs module system. The class itself is exported so
 // tests can create fresh instances without driving the singleton's
 // EventSource/snapshot wiring.
-export { liveSync, LiveSync, morph, WIRE_PROFILES };
+export { liveSync, LiveSync, morph, WIRE_PROFILES, conflicts };
 export default liveSync;

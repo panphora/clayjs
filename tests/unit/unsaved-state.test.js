@@ -134,3 +134,16 @@ test("a save does not clear a registered check", async () => {
   // The save wrote the page's bytes; the registered work is still unreviewed.
   expect(closeWouldWarn()).toBe(true);
 });
+
+test("window.clay.registerUnsavedState is the registry's own function", () => {
+  expect(window.clay.registerUnsavedState).toBe(unsaved.registerUnsavedState);
+
+  bytesMatchLastSave();
+  const handle = window.clay.registerUnsavedState({ id: "x", isPending: () => true });
+  registrations.push(handle);
+
+  expect(closeWouldWarn()).toBe(true);
+
+  handle.dispose();
+  expect(closeWouldWarn()).toBe(false);
+});

@@ -108,6 +108,7 @@ function attachPluginMember(path, mod) {
     clay.undo = mod.undo || mod.default;
   } else if (path === "sync/live-sync.js") {
     clay.morph = mod.morph;
+    clay.conflicts = mod.conflicts;
   } else if (path === "vendor/hypercms.vendor.js") {
     clay.cms = mod.cms || mod.default;
   } else if (path === "plugins/upload.js") {

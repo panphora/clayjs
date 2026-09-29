@@ -222,19 +222,27 @@ two elements, one of each.
   edit made here is saved but never compared — the page reads dirty forever. Use
   `clay.addDocumentTransform(fn)` to change what gets saved.
 - `clay:sync-applied` — a live-sync update landed (sync plugin); detail
-  `{seq, source, by, report, unresolved}`, plus `etag` on a disk frame. `source` is `peer` (another open
+  `{seq, source, by, report, unresolved, conflictIds}`, plus `etag` on a disk frame. `source` is `peer` (another open
   copy) or `disk` (the file changed underneath you). `by` is the `{id, name}` the host
   stamped on the frame, or `null` on a frame nobody stamped; hosts stamp live-lane
   frames only, so a disk frame's `by` is normally `null`.
   `report` is hyper-morph's merge report: `conflicts` lists every place both sides
   changed the same content, with the text this tab lost when the incoming side won.
-  A lost conflict keeps the page dirty (the unsaved-changes warning stays up, no
-  automatic save runs from the merge, later clean frames do not clear it) until this
-  tab's next successful save. Until then every such conflict is also in
-  `liveSync.unresolvedConflicts` (the `liveSync` export of the sync plugin's
-  `live-sync.js`; not on `window.clay`), each with `local`, the text this tab lost.
-  The event's `unresolved` is a copy of that list as it stands after this frame, including
-  conflicts earlier frames left.
+  A lost conflict goes into `clay.conflicts`, a ledger of every place another edit
+  replaced yours that you have not decided on yet. Each record has a stable `id` and
+  the text this tab lost in `local`; `clay.conflicts.recoveryOf(id)` returns that
+  frame's apply, `{id, source, seq, etag, ticket, domain, root, ids}`, where `root` is
+  a clone of the page as this tab had it just before the frame (`domain` `sync` for a
+  peer frame, `save` for a disk frame, already prepared for saving), or `null` once
+  every record from it is acknowledged. The ledger keeps the close warning up and is
+  cleared only by `clay.conflicts.acknowledge(ids, {reason})`, which the notice calls
+  when you choose Accept theirs or Revert to mine. No save, autosave, reconnect or
+  later frame clears it. `unresolved` is every open ledger record after
+  this frame — the engine conflict objects with the ledger's own fields added, less
+  the applies that ended as `apply-incomplete` — and `conflictIds` the ids this frame
+  added. An editor that merges both sides itself (Writer) can `claim` its records so
+  the notice does not list them, then acknowledge them with `reason: 'reconciled'` once
+  its merged content is in the page.
   A tab tells the other open copies about a save only once the host has accepted it, so
   every update it sends descends from the version they already hold. Its own merge base
   moves to that version at the same moment, not when its update reaches the others.
@@ -252,6 +260,8 @@ two elements, one of each.
   restoring a draft, a `postMessage`, the browser restoring a `[persist]` field) is
   therefore treated as page setup: if a later incoming update still has the served version
   of that content, it wins.
+
+- `clay:sync-conflicts-changed`: the ledger changed. Detail `{open, added, removedIds, updatedIds, reason}`. Read `clay.conflicts.list()` for the records.
 - `clay:sorted` — a drag-drop reorder landed (sortable plugin); fires on the container
   and bubbles; detail `{item, from, to, oldIndex, newIndex}`.
 - `clay:view-save-attempt` — a visitor clicked a `[trigger-save]` element in view mode;

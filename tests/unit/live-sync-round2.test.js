@@ -12,8 +12,9 @@ import { HyperMorph } from "../../src/vendor/hyper-morph.vendor.js";
  *         await outlasted a save) rewound the disk lane's base;
  *   R2-3  an authored id shared by several elements pre-empted the sender's
  *         map, so cloned cards paired by nothing and one was emptied silently;
- *   R2-4  a conflict the frame won marked the page dirty for exactly one frame;
- *         the next clean frame, or the convergence save, cleared it;
+ *   R2-4  a conflict the frame won lived in the page's dirty state, which the
+ *         next clean frame or the convergence save took away; it lives in the
+ *         conflict ledger now (clay.conflicts), and only acknowledge() ends it;
  *   R2-5  an element paired by authored id never adopted the sender's synthetic
  *         id, so a 1.4.0 receiver replaced the card on the next frame;
  *   R2-6  a clean tab merged the lane's base against a fresh capture and read
@@ -38,6 +39,7 @@ class FakeEventSource extends EventTarget {
 }
 
 let LiveSync;
+let conflicts;
 let Legacy;
 let snapshot;
 let gate;
@@ -58,7 +60,7 @@ beforeAll(async () => {
   await import("../../src/core/unsaved-warning.js");
 
   const liveSyncModule = await import("../../src/sync/live-sync.js");
-  ({ LiveSync } = liveSyncModule);
+  ({ LiveSync, conflicts } = liveSyncModule);
   liveSyncModule.liveSync.stop();
 
   const legacy = await import("./legacy-1.4.0/legacy-live.js");
@@ -83,6 +85,9 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+  // The ledger is a module singleton: a record left open keeps the close
+  // warning on for every test after this one.
+  conflicts.acknowledge(conflicts.list().map((r) => r.id), { reason: "accepted" });
   delete window.clay;
   for (const a of ROOT_ATTRS) document.documentElement.removeAttribute(a);
   autosaveState.setAutosaveActive(false);
@@ -404,11 +409,11 @@ describe("R2-3 cloned cards sharing one data-id pair by synthetic id", () => {
 });
 
 // ---------------------------------------------------------------------------
-// R2-4 a lost conflict keeps the page dirty until this tab saves
+// R2-4 a lost conflict lives in the ledger, not in the page
 // ---------------------------------------------------------------------------
 
-describe("R2-4 an unresolved conflict stays dirty across later frames", () => {
-  test("Codex R2E: a later unrelated peer frame leaves the gate dirty and the baseline untouched", async () => {
+describe("R2-4 a lost conflict lives in the ledger, not in the page", () => {
+  test("Codex R2E: a later unrelated peer frame leaves the loss to the ledger", async () => {
     const sync = makeSync();
     await settle('<p data-id="a">budget is fine</p><p data-id="b">b0</p>');
     sync.lastHtml = captureFrame();
@@ -419,17 +424,19 @@ describe("R2-4 an unresolved conflict stays dirty across later frames", () => {
     const seen = onApplied();
     await sync._doApplyUpdate(first, 220, null);
     expect(seen[0].report.conflicts.length).toBeGreaterThan(0);
-    expect(gate.pageMaybeDirty()).toBe(true);
-    expect(sync.unresolvedConflicts).toHaveLength(seen[0].report.conflicts.length);
-    expect(sync.unresolvedConflicts[0].local).toContain("over by 20 percent");
+    expect(seen[0].conflictIds).toHaveLength(1);
+    const id = seen[0].conflictIds[0];
+    expect(conflicts.get(id).local).toContain("over by 20 percent");
 
     await sync._doApplyUpdate(first.replace("b0", "b1"), 221, null);
     seen.stop();
 
+    // The frame nothing of this tab's survived settles the page and moves the
+    // baselines; the record is what says this tab lost text.
     expect(texts("p")).toEqual(["budget is approved", "b1"]);
-    expect(gate.pageMaybeDirty()).toBe(true);
-    expect(save.getLastSavedContents()).not.toContain("budget is approved");
-    expect(sync.unresolvedConflicts).toHaveLength(seen[0].report.conflicts.length);
+    expect(gate.pageMaybeDirty()).toBe(false);
+    expect(conflicts.size).toBe(1);
+    expect(closeWarns()).toBe(true);
     sync.stop();
   });
 
@@ -448,26 +455,25 @@ describe("R2-4 an unresolved conflict stays dirty across later frames", () => {
     sync.stop();
   });
 
-  test("Astra R2-B: a later unrelated disk frame leaves the gate dirty and the close warning up", async () => {
+  test("Astra R2-B: a later unrelated disk frame leaves the record and the close warning up", async () => {
     await settle('<p id="p">budget is fine</p><p id="q">q0</p>');
     const sync = startSync();
     document.querySelector("#p").textContent = "budget is over";
     await Promise.resolve();
     const first = diskDoc('<p id="p">budget is approved</p><p id="q">q0</p>');
     await sync._doApplyExternal(first, 1, "e1");
-    expect(gate.pageMaybeDirty()).toBe(true);
+    expect(conflicts.size).toBe(1);
     expect(closeWarns()).toBe(true);
 
     await sync._doApplyExternal(first.replace("q0", "q1"), 2, "e2");
 
     expect(texts("p")).toEqual(["budget is approved", "q1"]);
-    expect(gate.pageMaybeDirty()).toBe(true);
+    expect(conflicts.size).toBe(1);
     expect(closeWarns()).toBe(true);
-    expect(save.getLastSavedDirty()).not.toContain("approved");
     sync.stop();
   });
 
-  test("Astra R2-G: the convergence save does not run over a lost conflict on an autosave page", async () => {
+  test("Astra R2-G: the convergence save runs and the record stays", async () => {
     await settle('<p id="p">budget is fine</p><p id="q">q0</p>');
     const sync = startSync();
     window.clay = { testMode: true };
@@ -486,9 +492,10 @@ describe("R2-4 an unresolved conflict stays dirty across later frames", () => {
 
     expect(seen[0].report.conflicts.length).toBeGreaterThan(0);
     expect(seen[0].report.localDiverged).toBe(true);
-    expect(save.getLastSavedContents()).not.toContain("approved");
-    expect(save.getLastSavedContents()).not.toContain("q local");
-    expect(gate.pageMaybeDirty()).toBe(true);
+    // The convergence save writes the merge out; the record keeps the loss.
+    expect(save.getLastSavedContents()).toContain("approved");
+    expect(save.getLastSavedContents()).toContain("q local");
+    expect(conflicts.size).toBe(1);
     expect(closeWarns()).toBe(true);
     sync.stop();
   });
@@ -506,18 +513,16 @@ describe("R2-4 an unresolved conflict stays dirty across later frames", () => {
     );
     const saving = save.savePageForce();
     await sync._doApplyUpdate(remote, 1, null);
-    const lost = sync.unresolvedConflicts.length;
+    const lost = conflicts.size;
     expect(lost).toBeGreaterThan(0);
 
     release();
     expect((await saving).ok).toBe(true);
-    expect(sync.unresolvedConflicts).toHaveLength(lost);
-    expect(gate.pageMaybeDirty()).toBe(true);
+    expect(conflicts.size).toBe(lost);
 
     await sync._doApplyUpdate(remote.replace("q0", "q1"), 2, null);
     expect(texts("p")).toEqual(["budget is approved", "q1"]);
-    expect(sync.unresolvedConflicts).toHaveLength(lost);
-    expect(gate.pageMaybeDirty()).toBe(true);
+    expect(conflicts.size).toBe(lost);
     expect(closeWarns()).toBe(true);
 
     window.clay = { testMode: true };
@@ -525,11 +530,11 @@ describe("R2-4 an unresolved conflict stays dirty across later frames", () => {
       Promise.resolve({ ok: true, text: async () => JSON.stringify({ msg: "Saved" }) })
     );
     expect((await save.savePageForce()).ok).toBe(true);
-    expect(sync.unresolvedConflicts).toEqual([]);
+    expect(conflicts.size).toBe(lost);
     sync.stop();
   });
 
-  test("this tab's own save is what resolves it: the list empties and the next clean frame clears the gate", async () => {
+  test("a save leaves it; acknowledge resolves it: the next clean frame advances the baseline", async () => {
     window.clay = { testMode: true };
     await settle('<p data-id="a">budget is fine</p><p data-id="b">b0</p>');
     const sync = startSync();
@@ -537,11 +542,16 @@ describe("R2-4 an unresolved conflict stays dirty across later frames", () => {
     document.querySelector('[data-id="a"]').textContent = "budget is over";
     await Promise.resolve();
     await sync._doApplyUpdate(first, 1, null);
-    expect(sync.unresolvedConflicts.length).toBeGreaterThan(0);
+    expect(conflicts.size).toBe(1);
+    const id = conflicts.list()[0].id;
 
     expect((await save.savePageForce()).ok).toBe(true);
-    expect(sync.unresolvedConflicts).toEqual([]);
-    expect(gate.pageMaybeDirty()).toBe(false);
+    expect(conflicts.size).toBe(1);
+    expect(closeWarns()).toBe(true);
+
+    conflicts.acknowledge([id], { reason: "accepted" });
+    expect(conflicts.size).toBe(0);
+    expect(closeWarns()).toBe(false);
 
     await sync._doApplyUpdate(first.replace("b0", "b1"), 2, null);
     expect(gate.pageMaybeDirty()).toBe(false);

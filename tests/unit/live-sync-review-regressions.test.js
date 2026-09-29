@@ -14,7 +14,8 @@ import { jest } from "@jest/globals";
  *   R7  a runtime contenteditable lock lost to the file's inert form;
  *   R8  the disk lane merged against the relayed (not saved) state and reverted
  *       a typed edit;
- *   R9  a conflict the remote won marked the page clean;
+ *   R9  a conflict the remote won left no trace of the text it replaced; the
+ *       loss lives in the ledger (clay.conflicts) now;
  *   R11 a frame carrying <html autosave> turned a manual-save tab into an
  *       auto-writer;
  *   R12 a clean tab merged [merge] JSON two-way and resurrected a deleted key.
@@ -33,6 +34,7 @@ class FakeEventSource extends EventTarget {
 }
 
 let LiveSync;
+let conflicts;
 let snapshot;
 let gate;
 let save;
@@ -53,8 +55,10 @@ beforeAll(async () => {
   await import("../../src/core/admin-attrs.js");
 
   const liveSyncModule = await import("../../src/sync/live-sync.js");
-  ({ LiveSync } = liveSyncModule);
+  ({ LiveSync, conflicts } = liveSyncModule);
   liveSyncModule.liveSync.stop();
+  // The close warning, for the record that holds it up.
+  await import("../../src/core/unsaved-warning.js");
 
   snapshot = await import("../../src/core/snapshot.js");
   gate = await import("../../src/lib/dirty-gate.js");
@@ -74,6 +78,9 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+  // The ledger is a module singleton: a record left open keeps the close
+  // warning on for every test after this one.
+  conflicts.acknowledge(conflicts.list().map((r) => r.id), { reason: "accepted" });
   delete window.clay;
   for (const a of ROOT_ATTRS) document.documentElement.removeAttribute(a);
   autosaveState.setAutosaveActive(false);
@@ -106,6 +113,12 @@ function onApplied() {
   document.addEventListener("clay:sync-applied", handler);
   seen.stop = () => document.removeEventListener("clay:sync-applied", handler);
   return seen;
+}
+
+function closeWarns() {
+  const event = new Event("beforeunload", { cancelable: true });
+  window.dispatchEvent(event);
+  return event.defaultPrevented;
 }
 
 async function settle(body) {
@@ -314,7 +327,7 @@ test("R8 a typed edit whose save was refused survives the disk frame that caused
   sync.stop();
 });
 
-test("R9 a conflict the file won leaves the page dirty and reports the lost text", async () => {
+test("R9 a conflict the file won leaves the page clean, its loss in the ledger, and reports the lost text", async () => {
   const sync = makeSync();
   await settle('<p data-id="p">Meeting notes: budget is fine.</p>');
   sync._diskBase = captureDisk();
@@ -327,8 +340,12 @@ test("R9 a conflict the file won leaves the page dirty and reports the lost text
 
   expect(document.querySelector("p").textContent).toBe("Meeting notes: budget is approved.");
   expect(seen[0].report.conflicts.length).toBeGreaterThan(0);
-  expect(gate.pageMaybeDirty()).toBe(true);
-  expect(save.getLastSavedContents()).not.toContain("approved");
+  // The frame replaced the whole edit, so the page now holds the file's bytes:
+  // the loss lives in the ledger, and a record is what keeps the close warning up.
+  expect(seen[0].conflictIds).toHaveLength(1);
+  expect(gate.pageMaybeDirty()).toBe(false);
+  expect(save.getLastSavedContents()).toContain("approved");
+  expect(closeWarns()).toBe(true);
   sync.stop();
 });
 

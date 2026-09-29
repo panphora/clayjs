@@ -85,6 +85,8 @@
       <tr><td><code>clay.cacheBust(el)</code></td><td>Re-download one resource by stamping <code>?v=</code> onto its <code>href</code> or <code>src</code>. <a href="/advanced#save-attrs">Details</a>.</td></tr>
       <tr><td><code>clay.Mutation</code></td><td>The shared mutation hub. See <a href="/advanced#libraries">Advanced</a>.</td></tr>
       <tr><td><code>clay.morph(oldEl, newEl)</code></td><td>The DOM morphing engine: morphs <code>oldEl</code> in place to match <code>newEl</code> (sync plugin).</td></tr>
+      <tr><td><code>clay.conflicts</code></td><td>Edits of yours that live sync replaced and you have not decided on: <code>list()</code>, <code>acknowledge(ids, {reason})</code>, <code>claim(ids, {owner})</code>, <code>recoveryOf(id)</code> (sync plugin). The lost edit notice draws from it.</td></tr>
+      <tr><td><code>clay.registerUnsavedState({id, isPending})</code></td><td>For an editor whose work can be ahead of the page (its model not yet written into the DOM): <code>isPending()</code> is called fresh whenever the close warning checks, and the warning fires while it returns true. Returns <code>{changed(), dispose()}</code>; call <code>changed()</code> when the answer may have changed.</td></tr>
       <tr><td><code>clay.undo</code></td><td>The undo singleton: <code>clay.undo.undo()</code> / <code>clay.undo.redo()</code> (undo plugin).</td></tr>
       <tr><td><code>clay.cms</code></td><td>The content panel: <code>clay.cms.open()</code> (cms plugin).</td></tr>
       <tr><td><code>clay.RichClay</code></td><td>The rich-text editor class behind <code>editable</code> (richclay plugin, default on).</td></tr>

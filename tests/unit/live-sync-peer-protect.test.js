@@ -24,6 +24,7 @@ class FakeEventSource extends EventTarget {
 }
 
 let LiveSync;
+let conflicts;
 let snapshot;
 let gate;
 let save;
@@ -37,7 +38,7 @@ beforeAll(async () => {
   window.scrollTo = () => {};
 
   const liveSyncModule = await import("../../src/sync/live-sync.js");
-  ({ LiveSync } = liveSyncModule);
+  ({ LiveSync, conflicts } = liveSyncModule);
   liveSyncModule.liveSync.stop();
 
   snapshot = await import("../../src/core/snapshot.js");
@@ -215,7 +216,8 @@ test("the event lists every unresolved conflict, including an earlier frame's", 
   expect(details[0].unresolved.length).toBeGreaterThan(0);
   expect(details[1].report.conflicts).toHaveLength(0);
   expect(details[1].unresolved).toEqual(details[0].unresolved);
-  expect(details[1].unresolved).not.toBe(sync.unresolvedConflicts);
+  expect(details[1].unresolved[0]).toBe(details[0].unresolved[0]);
+  expect(conflicts.get(details[1].unresolved[0].id)).toBe(details[1].unresolved[0]);
   sync.stop();
 });
 

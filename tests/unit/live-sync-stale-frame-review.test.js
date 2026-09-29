@@ -40,7 +40,7 @@ function relayAnswer(r) {
   return respond(r, { success: r < 400 });
 }
 
-let LiveSync, snapshot, gate, save, etag, autosaveState;
+let LiveSync, snapshot, gate, save, etag, autosaveState, conflicts;
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -80,12 +80,15 @@ beforeAll(async () => {
   const m = await import("../../src/sync/live-sync.js");
   ({ LiveSync } = m);
   m.liveSync.stop();
+  conflicts = (await import("../../src/sync/conflicts.js")).conflicts;
   snapshot = await import("../../src/core/snapshot.js");
   gate = await import("../../src/lib/dirty-gate.js");
   save = await import("../../src/core/save.js");
   etag = await import("../../src/core/etag.js");
   autosaveState = await import("../../src/lib/autosave-state.js");
   await import("../../src/core/save-conflict-notice.js");
+  // The close warning, for the tests that assert the ledger holds it up.
+  await import("../../src/core/unsaved-warning.js");
   await etag.seedEtag();
   // Past save.js's load-time settle, which writes savestatus on its own.
   await wait(3200);
@@ -125,6 +128,9 @@ beforeEach(async () => {
 
 afterEach(() => {
   while (started.length) started.pop().stop();
+  // The ledger is a module singleton: a record left open keeps the close
+  // warning on for every test after this one.
+  conflicts.acknowledge(conflicts.list().map((r) => r.id), { reason: "accepted" });
 });
 
 function makeSync(lane = "live") {
@@ -373,7 +379,10 @@ test("T7 a public captureForSave() between a save's capture and its response doe
 // T8 gates
 // ---------------------------------------------------------------------------
 
-test("G1 a merge that loses this tab's text keeps the hold, the bar, and autosave off", async () => {
+// A stamped frame answers the refusal even when the merge cost this tab text.
+// The loss is the ledger's to carry now, and the hold is the save lane's: it
+// releases on the version it was refused over, whatever the merge kept.
+test("G1 a stamped merge that loses this tab's text releases the hold; the ledger keeps the loss and the warning", async () => {
   autosaveState.setAutosaveActive(true);
   await settle('<p data-id="a">budget is fine</p><p data-id="b">b0</p>');
   const sync = makeSync();
@@ -384,14 +393,29 @@ test("G1 a merge that loses this tab's text keeps the hold, the bar, and autosav
   await Promise.resolve();
   saveResponse = () => ({ status: 412, body: { code: "conflict", changedBy: "another-tab", etag: "E1" } });
   expect((await save.savePage()).msgType).toBe("conflict");
+  // Nothing autosaves while the hold is up.
+  expect((await save.savePageThrottled()).msg).toBe("Autosave suspended");
 
+  saveResponse = () => ({ status: 200, body: { msg: "Saved", etag: "E2" } });
   await sync._doApplyUpdate(remote, 5, null, "E1");
   expect(sync.unresolvedConflicts.length).toBeGreaterThan(0);
-  expect(save.isSaveConflicted()).toBe(true);
-  expect(document.documentElement.getAttribute("savestatus")).toBe("conflict");
-  expect(bar().style.display).toBe("flex");
+  expect(conflicts.size).toBeGreaterThan(0);
+  expect(save.isSaveConflicted()).toBe(false);
+
+  // The frame brought the version that refused this tab and replaced all of
+  // the text this tab held over it, so the page now holds those bytes: the
+  // released hold owes no further write, and the loss is the ledger's alone.
   await wait(1500);
   expect(ifMatches()).toEqual(["E0"]);
+  expect(gate.pageMaybeDirty()).toBe(false);
+  expect(conflicts.size).toBeGreaterThan(0);
+  expect(save.getLastSavedContents()).toContain("budget is approved");
+
+  const unload = new Event("beforeunload", { cancelable: true });
+  window.dispatchEvent(unload);
+  expect(unload.defaultPrevented).toBe(true);
+
+  conflicts.acknowledge(conflicts.list().map((r) => r.id), { reason: "accepted" });
 });
 
 test("G2 an unstamped merge does not release a hold, even one whose 412 named no stamp; a stamped merge does", async () => {
@@ -562,7 +586,7 @@ test("T5 a failed fresh /_/meta (network error or 404, a bare host) keeps condit
   expect(etag.conditionalSaves()).toBe(true);
 });
 
-test("T7b a public captureForSave() during a save does not move its ticket, so a conflict from a later frame survives the save", async () => {
+test("T7b a save landing over a frame that landed mid-save leaves that frame's record open", async () => {
   await settle('<p data-id="a">budget is fine</p><p data-id="b">b0</p>');
   const sync = await startSync();
   const remote = sync.lastHtml.replace("budget is fine", "budget is approved");
