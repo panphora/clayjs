@@ -58,7 +58,9 @@
     "propagate:foundation": "node scripts/propagate-foundation.mjs",
     "check:foundation": "node scripts/propagate-foundation.mjs --check",
     "deploy": "node build.js && wrangler deploy && git rev-parse HEAD > .deploy",
-    "build:parse5": "node scripts/build-parse5-vendor.mjs"
+    "build:parse5": "node scripts/build-parse5-vendor.mjs",
+    "build:bevel": "node scripts/build-bevel-subset.mjs",
+    "check:bevel": "node scripts/build-bevel-subset.mjs --check"
   },
   "devDependencies": {
     "@esm-bundle/chai": "^4.3.4-fix.0",
@@ -69,7 +71,8 @@
     "jest": "^29.7.0",
     "jest-environment-jsdom": "^29.7.0",
     "parse5": "^7.3.0",
-    "playwright": "1.62.1"
+    "playwright": "1.62.1",
+    "postcss": "^8.5.28"
   },
   "hyper": {
     "kind": "lib",

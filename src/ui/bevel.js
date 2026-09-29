@@ -1,0 +1,176 @@
+// GENERATED from bevel/bevel.css by scripts/build-bevel-subset.mjs. Run `npm run build:bevel`.
+export const SOURCE_SHA256 = "2bcaf48eee61427cedd3068744579455c52b0c3382909ec7ec17c5c7117bc3ba";
+export const FONT_SANS = "system-ui,-apple-system,\"Segoe UI\",sans-serif";
+export const FONT_MONO = "ui-monospace,SFMono-Regular,Menlo,Consolas,monospace";
+export const SHADOW = "0 1px 2px rgba(0,0,0,.12),0 10px 28px -12px rgba(0,0,0,.35)";
+export const TOKENS = {
+  "ground": "light-dark(#FDF8F0, #0B0C13)",
+  "surface": "light-dark(#FFFCF6, #11131E)",
+  "sunk": "light-dark(#F4ECDF, #1A1D2C)",
+  "ink": "light-dark(#2B241B, #ECEAF2)",
+  "ink-2": "light-dark(#4A4033, #C9CDE0)",
+  "muted": "light-dark(#6B5942, #8A90AB)",
+  "faint": "light-dark(#9A8A70, #6A7090)",
+  "line": "light-dark(#E8DCC6, #262B42)",
+  "line-2": "light-dark(#D8C8AF, #353B52)",
+  "brass": "light-dark(#8F6310, #D9A445)",
+  "brass-soft": "light-dark(#F0E4CC, #3A2F17)",
+  "ox": "light-dark(#A83A2C, #FF5566)",
+  "ox-soft": "light-dark(#F6DED6, #3A2226)",
+  "teal": "light-dark(#256056, #63AE9E)",
+  "teal-soft": "light-dark(#DCEBE7, #17332E)",
+  "face": "light-dark(#F1E7D4, #22273E)",
+  "edge-hi": "light-dark(#FFF9ED, #3C4260)",
+  "edge-lo": "light-dark(#D6C3A5, #1B2033)",
+  "face-in": "light-dark(#E3D0B3, #28304D)",
+  "edge-in": "light-dark(#B89F7B, #1F2339)",
+  "edge-in-hi": "light-dark(#F0E1C9, #4D587A)",
+  "knob": "light-dark(#FCF8F1, #4A5275)",
+  "knob-hi": "light-dark(#FFF9ED, #6C759A)",
+  "ox-face": "light-dark(#7A2A1F, #842E22)",
+  "ox-edge-hi": "light-dark(#AE4F3E, #B85A47)",
+  "ox-edge-lo": "light-dark(#451510, #3E1410)",
+  "ox-ink": "light-dark(#FBEEE8, #FBEEE8)",
+};
+export const RULES = {
+  "button": [
+    "display:inline-flex",
+    "align-items:center",
+    "justify-content:center",
+    "gap:.5rem",
+    "font-family:system-ui,-apple-system,\"Segoe UI\",sans-serif",
+    "font-size:17px",
+    "font-weight:500",
+    "line-height:1.5",
+    "cursor:pointer",
+    "user-select:none",
+    "text-align:center",
+    "text-decoration:none",
+    "color:light-dark(#2B241B, #ECEAF2)",
+    "background:light-dark(#F1E7D4, #22273E)",
+    "border:2px solid",
+    "border-color:light-dark(#FFF9ED, #3C4260) light-dark(#D6C3A5, #1B2033) light-dark(#D6C3A5, #1B2033) light-dark(#FFF9ED, #3C4260)",
+    "border-radius:0",
+    "padding:6px 15px",
+    "outline:none",
+  ],
+  "buttonLabel": [
+    "white-space:nowrap",
+    "user-select:none",
+    "display:inline-block",
+  ],
+  "buttonHover": [
+    "background:color-mix(in srgb, light-dark(#F1E7D4, #22273E), light-dark(#FFF9ED, #3C4260) 45%)",
+  ],
+  "buttonActive": [
+    "border-color:light-dark(#D6C3A5, #1B2033) light-dark(#FFF9ED, #3C4260) light-dark(#FFF9ED, #3C4260) light-dark(#D6C3A5, #1B2033)",
+  ],
+  "buttonActiveLabel": [
+    "translate:1px 1px",
+  ],
+  "buttonDisabled": [
+    "opacity:.5",
+    "cursor:not-allowed",
+  ],
+  "buttonDisabledLabel": [
+    "translate:none",
+  ],
+  "buttonSmall": [
+    "font-size:14px",
+    "padding:3px 11px",
+  ],
+  "buttonPrimary": [
+    "display:inline-flex",
+    "align-items:center",
+    "justify-content:center",
+    "gap:.5rem",
+    "font-family:system-ui,-apple-system,\"Segoe UI\",sans-serif",
+    "font-size:17px",
+    "font-weight:500",
+    "line-height:1.5",
+    "cursor:pointer",
+    "user-select:none",
+    "text-align:center",
+    "text-decoration:none",
+    "color:light-dark(#2B241B, #ECEAF2)",
+    "background:light-dark(#2B241B, #ECEAF2)",
+    "border:2px solid",
+    "border-color:color-mix(in srgb, light-dark(#2B241B, #ECEAF2), white 24%) color-mix(in srgb, light-dark(#2B241B, #ECEAF2), black 32%) color-mix(in srgb, light-dark(#2B241B, #ECEAF2), black 32%) color-mix(in srgb, light-dark(#2B241B, #ECEAF2), white 24%)",
+    "border-radius:0",
+    "padding:6px 15px",
+    "outline:none",
+    "color:light-dark(#FDF8F0, #0B0C13)",
+  ],
+  "buttonPrimaryHover": [
+    "background:color-mix(in srgb, light-dark(#2B241B, #ECEAF2), light-dark(#FDF8F0, #0B0C13) 12%)",
+  ],
+  "buttonPrimaryHoverBase": [
+    "background:color-mix(in srgb, light-dark(#2B241B, #ECEAF2), color-mix(in srgb, light-dark(#2B241B, #ECEAF2), white 24%) 45%)",
+  ],
+  "buttonPrimaryActive": [
+    "border-color:color-mix(in srgb, light-dark(#2B241B, #ECEAF2), black 32%) color-mix(in srgb, light-dark(#2B241B, #ECEAF2), white 24%) color-mix(in srgb, light-dark(#2B241B, #ECEAF2), white 24%) color-mix(in srgb, light-dark(#2B241B, #ECEAF2), black 32%)",
+  ],
+  "buttonDanger": [
+    "display:inline-flex",
+    "align-items:center",
+    "justify-content:center",
+    "gap:.5rem",
+    "font-family:system-ui,-apple-system,\"Segoe UI\",sans-serif",
+    "font-size:17px",
+    "font-weight:500",
+    "line-height:1.5",
+    "cursor:pointer",
+    "user-select:none",
+    "text-align:center",
+    "text-decoration:none",
+    "color:light-dark(#2B241B, #ECEAF2)",
+    "background:light-dark(#7A2A1F, #842E22)",
+    "border:2px solid",
+    "border-color:light-dark(#AE4F3E, #B85A47) light-dark(#451510, #3E1410) light-dark(#451510, #3E1410) light-dark(#AE4F3E, #B85A47)",
+    "border-radius:0",
+    "padding:6px 15px",
+    "outline:none",
+    "color:light-dark(#FBEEE8, #FBEEE8)",
+  ],
+  "buttonDangerHover": [
+    "background:color-mix(in srgb, light-dark(#7A2A1F, #842E22), light-dark(#AE4F3E, #B85A47) 45%)",
+  ],
+  "buttonDangerActive": [
+    "border-color:light-dark(#451510, #3E1410) light-dark(#AE4F3E, #B85A47) light-dark(#AE4F3E, #B85A47) light-dark(#451510, #3E1410)",
+  ],
+  "buttonQuiet": [
+    "background:none",
+    "border-color:transparent",
+    "color:light-dark(#8F6310, #D9A445)",
+  ],
+  "buttonQuietHover": [
+    "background:light-dark(#F4ECDF, #1A1D2C)",
+    "color:color-mix(in srgb, light-dark(#8F6310, #D9A445) 80%, light-dark(#2B241B, #ECEAF2))",
+  ],
+  "buttonQuietActive": [
+    "border-color:transparent",
+  ],
+  "focus": [
+    "outline:2px solid light-dark(#8F6310, #D9A445)",
+    "outline-offset:2px",
+  ],
+  "recess": [
+    "border:2px solid",
+    "border-color:light-dark(#B89F7B, #1F2339) light-dark(#F0E1C9, #4D587A) light-dark(#F0E1C9, #4D587A) light-dark(#B89F7B, #1F2339)",
+    "background:light-dark(#E3D0B3, #28304D)",
+  ],
+  "surface": [
+    "background:light-dark(#FFFCF6, #11131E)",
+    "color:light-dark(#2B241B, #ECEAF2)",
+    "border:1px solid light-dark(#D8C8AF, #353B52)",
+    "box-shadow:0 1px 2px rgba(0,0,0,.12),0 10px 28px -12px rgba(0,0,0,.35)",
+  ],
+};
+export const MEDIA = {
+  "reducedMotion": [
+    "translate:none",
+  ],
+  "forcedColors": [
+    "border:1px solid ButtonText",
+  ],
+};

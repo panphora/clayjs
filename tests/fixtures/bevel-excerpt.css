@@ -1,0 +1,185 @@
+/* Verbatim excerpts of bevel/bevel.css, for the subset generator tests.
+   @layer base:       lines 28-134
+   @layer components: lines 357-359, 1028-1080, 2350
+   top level:         lines 2994-3004 (the two media blocks, brace to brace)
+   Line numbers are 1-based and count the commented ranges below as written. */
+@layer base, components;
+@layer base {
+  :root {
+    color-scheme: light dark;
+
+    --bevel-split-size: 50%;
+    --bevel-kanban-lane: 274px;
+    --bevel-kanban-gap: 14px;
+    --bevel-ground:     light-dark(#FDF8F0, #0B0C13);
+    --bevel-surface:    light-dark(#FFFCF6, #11131E);
+    --bevel-sunk:       light-dark(#F4ECDF, #1A1D2C);
+    --bevel-ink:        light-dark(#2B241B, #ECEAF2);
+    --bevel-ink-2:      light-dark(#4A4033, #C9CDE0);
+    --bevel-muted:      light-dark(#6B5942, #8A90AB);
+    --bevel-faint:      light-dark(#9A8A70, #6A7090);
+    --bevel-line:       light-dark(#E8DCC6, #262B42);
+    --bevel-line-2:     light-dark(#D8C8AF, #353B52);
+    --bevel-brass:      light-dark(#8F6310, #D9A445);
+    --bevel-brass-soft: light-dark(#F0E4CC, #3A2F17);
+    --bevel-ox:         light-dark(#A83A2C, #FF5566);
+    --bevel-ox-soft:    light-dark(#F6DED6, #3A2226);
+    --bevel-teal:       light-dark(#256056, #63AE9E);
+    --bevel-teal-soft:  light-dark(#DCEBE7, #17332E);
+
+    /* Source colour. Five roles borrow a page hue so a code surface still reads
+       as a Bevel surface; attribute names and numbers need two hues the page
+       does not have, or they collapse into the tag and string colours. */
+    --bevel-syn-tag:     var(--bevel-brass);
+    --bevel-syn-string:  var(--bevel-teal);
+    --bevel-syn-comment: var(--bevel-faint);
+    --bevel-syn-punct:   var(--bevel-muted);
+    --bevel-syn-invalid: var(--bevel-ox);
+    --bevel-syn-plum:    light-dark(#6E4076, #C39BD8);
+    --bevel-syn-rust:    light-dark(#8A4A28, #E0906A);
+
+    /* The software keyboard inset. iOS does not shrink the layout viewport when
+       the keyboard opens, so a bar pinned to the bottom lands underneath it. The
+       code editor measures the visual viewport and writes this on its own root. */
+    --bevel-keyboard-inset: 0px;
+    --bevel-available-height: calc(100dvh - 32px);
+
+    /* The raised face is a material of its own, a step off the page in both
+       modes (bone on cream, slate on navy), so a resting control reads as a
+       closed shape on the ground and on a card. The shadow wall clears the
+       navy ground at night while staying darker than the raised face. */
+    --bevel-face:       light-dark(#F1E7D4, #22273E);
+    --bevel-edge-hi:    light-dark(#FFF9ED, #3C4260);
+    --bevel-edge-lo:    light-dark(#D6C3A5, #1B2033);
+
+    /* A pressed-in control is a body, not a lip: a floor, the wall the light
+       misses (top, left) and the wall it reaches (bottom, right). In light all
+       three sit below the cream; in dark all three sit above the navy, so no
+       side of the perimeter can vanish into the ground. Literal stops, never a
+       mix: a mix between a navy face and a near-black edge lands on gray. */
+    --bevel-face-in:    light-dark(#E3D0B3, #28304D);
+    --bevel-edge-in:    light-dark(#B89F7B, #1F2339);
+    --bevel-edge-in-hi: light-dark(#F0E1C9, #4D587A);
+
+    /* The switch knob is lighter than its on channel in both modes, so an on
+       switch never reads as a hole. In light it sits a step above the face,
+       so it also clears its own channel. */
+    --bevel-knob:       light-dark(#FCF8F1, #4A5275);
+    --bevel-knob-hi:    light-dark(#FFF9ED, #6C759A);
+
+    /* The danger button is a solid block like the primary, so it carries its
+       own face, its own two edges and the cream that sits on it. A dark red
+       nearing brown, brighter by a step at night so it still reads as red on
+       navy. Literal stops: no neutral token is dark in both modes. */
+    --bevel-ox-face:    light-dark(#7A2A1F, #842E22);
+    --bevel-ox-edge-hi: light-dark(#AE4F3E, #B85A47);
+    --bevel-ox-edge-lo: light-dark(#451510, #3E1410);
+    --bevel-ox-ink:     light-dark(#FBEEE8, #FBEEE8);
+
+    --bevel-font-sans:  "IBM Plex Sans", system-ui, -apple-system, sans-serif;
+    --bevel-font-serif: Newsreader, Georgia, "Times New Roman", serif;
+    --bevel-font-mono:  "IBM Plex Mono", ui-monospace, Menlo, monospace;
+
+    --bevel-shadow: 0 1px 2px rgba(23, 28, 36, .05), 0 8px 24px -12px rgba(23, 28, 36, .14);
+
+    background: var(--bevel-ground);
+    color: var(--bevel-ink);
+  }
+
+  /* The one non-colour token, so it cannot ride light-dark(): a media default
+     for the OS, then explicit forced-mode overrides. */
+  @media (prefers-color-scheme: dark) {
+    :root { --bevel-shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 10px 28px -14px rgba(0, 0, 0, .6); }
+  }
+  [data-theme="light"], .light {
+    color-scheme: light;
+    --bevel-shadow: 0 1px 2px rgba(23, 28, 36, .05), 0 8px 24px -12px rgba(23, 28, 36, .14);
+    background: var(--bevel-ground); color: var(--bevel-ink);
+  }
+  [data-theme="dark"], .dark {
+    color-scheme: dark;
+    --bevel-shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 10px 28px -14px rgba(0, 0, 0, .6);
+    background: var(--bevel-ground); color: var(--bevel-ink);
+  }
+
+  body {
+    margin: 0;
+    font-family: var(--bevel-font-sans);
+    font-size: 17px; line-height: 1.6;
+    -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
+    font-variant-numeric: tabular-nums;
+    accent-color: var(--bevel-brass);
+  }
+  ::selection { background: var(--bevel-brass-soft); color: var(--bevel-ink); }
+  :focus-visible { outline: 2px solid var(--bevel-brass); outline-offset: 2px; }
+}
+@layer components {
+  .bevel-toolbar__icon { display:inline-grid; flex:0 0 auto; place-items:center; inline-size:34px; block-size:34px; padding:0; border:2px solid; border-color:var(--bevel-edge-hi) var(--bevel-edge-lo) var(--bevel-edge-lo) var(--bevel-edge-hi); background:var(--bevel-face); color:var(--bevel-ink); cursor:pointer; }
+  .bevel-toolbar__icon:hover:not(:disabled) { background:color-mix(in srgb,var(--bevel-face),var(--bevel-edge-hi) 45%); }
+  .bevel-toolbar__icon[aria-pressed="true"], .bevel-toolbar__icon[aria-expanded="true"] { position:relative; z-index:1; border-color:var(--bevel-edge-in) var(--bevel-edge-in-hi) var(--bevel-edge-in-hi) var(--bevel-edge-in); background:var(--bevel-face-in); }
+  /* The raised bevel: light top+left, dark right+bottom, real borders so the
+     corners mitre. Press it and the edges swap and the label sinks 1px. */
+  .bevel-button {
+    display: inline-flex; align-items: center; justify-content: center; gap: .5rem;
+    font-family: var(--bevel-font-sans); font-size: 17px; font-weight: 500; line-height: 1.5;
+    cursor: pointer; user-select: none; text-align: center; text-decoration: none;
+    color: var(--bevel-ink);
+    background: var(--bevel-face);
+    border: 2px solid;
+    border-color: var(--bevel-edge-hi) var(--bevel-edge-lo) var(--bevel-edge-lo) var(--bevel-edge-hi);
+    border-radius: 0;
+    padding: 6px 15px;
+    outline: none;
+  }
+  .bevel-button__label { white-space: nowrap; user-select: none; display: inline-block; }
+  .bevel-button:hover { background: color-mix(in srgb, var(--bevel-face), var(--bevel-edge-hi) 45%); }
+  .bevel-button:active:where(:not(:disabled, [aria-disabled="true"])) {
+    border-color: var(--bevel-edge-lo) var(--bevel-edge-hi) var(--bevel-edge-hi) var(--bevel-edge-lo);
+  }
+  .bevel-button:active:where(:not(:disabled, [aria-disabled="true"])) .bevel-button__label { translate: 1px 1px; }
+  .bevel-button:focus-visible,
+  .bevel-button:has(:focus-visible) { outline: 2px solid var(--bevel-brass); outline-offset: 2px; }
+  .bevel-button:disabled, .bevel-button[aria-disabled="true"] { opacity: .5; cursor: not-allowed; }
+  .bevel-button:disabled .bevel-button__label { translate: none; }
+
+  .bevel-button--small { font-size: 14px; padding: 3px 11px; }
+
+  /* Primary: ink acts. The bevel is derived from the ink so it embosses in
+     both modes. Exactly one per view. */
+  .bevel-button--primary {
+    --bevel-face: var(--bevel-ink);
+    --bevel-edge-hi: color-mix(in srgb, var(--bevel-ink), white 24%);
+    --bevel-edge-lo: color-mix(in srgb, var(--bevel-ink), black 32%);
+    color: var(--bevel-ground);
+  }
+  .bevel-button--primary:hover { background: color-mix(in srgb, var(--bevel-ink), var(--bevel-ground) 12%); }
+
+  /* Danger: ox destroys. A solid dark-red block with its own three stops, so
+     the base rules for hover and press work unchanged on it. */
+  .bevel-button--danger {
+    --bevel-face: var(--bevel-ox-face);
+    --bevel-edge-hi: var(--bevel-ox-edge-hi);
+    --bevel-edge-lo: var(--bevel-ox-edge-lo);
+    color: var(--bevel-ox-ink);
+  }
+
+  /* Quiet: a link wearing padding. Transparent border keeps the hit area and
+     the baseline aligned with neighbouring bevel buttons. */
+  .bevel-button--quiet {
+    background: none; border-color: transparent; color: var(--bevel-brass);
+  }
+  .bevel-button--quiet:hover { background: var(--bevel-sunk); color: color-mix(in srgb, var(--bevel-brass) 80%, var(--bevel-ink)); }
+  .bevel-button--quiet:active { border-color: transparent; }
+  .bevel-card { background: var(--bevel-surface); border: 1px solid var(--bevel-line); border-radius: 0; padding: 20px 22px; box-shadow: var(--bevel-shadow); }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, ::before, ::after { transition-duration: .01ms; animation-duration: .01ms; animation-iteration-count: 1; }
+  .bevel-button:active .bevel-button__label { translate: none; }
+}
+@media (forced-colors: active) {
+  .bevel-button, .bevel-checkbox__box, .bevel-radio__ring, .bevel-toggle__track, .bevel-slider__nub, .bevel-tags__chip, .bevel-details > summary::before, .bevel-grid__expand, .bevel-grid__more { border: 1px solid ButtonText; }
+  .bevel-radio__ring::after { background: ButtonText; }
+  .bevel-progress { forced-color-adjust: none; background: Canvas; border: 1px solid ButtonText; }
+  .bevel-progress::-webkit-progress-bar { background: Canvas; }
+  .bevel-progress::-webkit-progress-value, .bevel-progress::-moz-progress-bar { background: ButtonText; }
+}
