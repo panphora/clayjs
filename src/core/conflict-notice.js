@@ -38,6 +38,8 @@ const EYE_SVG = '<svg viewBox="0 0 256 256" width="16" height="16" fill="current
 
 const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
+const BLOCKED_ROW = "This spot changed again. Review the latest edit or download your copy.";
+
 let view = "hidden";
 let listOpen = false;
 let renderedIds = [];
@@ -51,6 +53,7 @@ let busy = null;
 let keepFailed = false;
 let downloaded = false;
 let downloadFailed = false;
+const blockedRows = new Map();
 let ledgerRevision = 0;
 let frameQueued = false;
 let checkRefusal = false;
@@ -179,8 +182,9 @@ function render() {
   if (wellEl) wellEl.scrollTop = scroll;
 
   const want = pendingFocus || focusKey;
-  pendingFocus = null;
   if (want && keyed.has(want)) keyed.get(want).focus({ preventScroll: true });
+  // A request for a control the toast is standing in for waits until the toast goes.
+  if (!toastText) pendingFocus = null;
   place();
 }
 
@@ -302,6 +306,12 @@ function drawPanel(m) {
     keep.setDisabled(busy === "overwrite");
     actions.append(keep, action(armed ? "Yes, drop my edits" : "Accept theirs", "accept", { variant: "primary", onClick: onRefusedAccept, push: true }));
   } else {
+    if (m === "replaced") {
+      const pending = ledger().hasPendingApply();
+      const put = action(pending ? "Finishing the incoming edit…" : busy === "revert" ? "Putting back…" : "Revert to mine", "revert", { onClick: onRevert });
+      put.setDisabled(pending || busy === "revert");
+      actions.append(put);
+    }
     actions.append(action("Accept theirs", "accept", { variant: "primary", onClick: onAccept, push: true }));
   }
   panel.append(actions);
@@ -366,6 +376,7 @@ function buildRow(record, index) {
   if (row.target && row.target.isConnected) where.append(key(eyeButton(row), `eye:${record.id}`));
   box.append(where);
   if (row.sentence) box.append(bevelText("div", ["display:block", "font-size:13px", `color:${TOKENS["ink-2"]}`], row.sentence));
+  if (blockedRows.has(record.id)) box.append(bevelText("div", ["display:block", "font-size:13px", "margin-top:4px", `color:${WARN}`], blockedRows.get(record.id)));
   if (row.yours) {
     const grid = bevelText("div", ["display:grid", "grid-template-columns:44px 1fr", "gap:3px 10px", "align-items:start", `font:12.5px/1.5 ${FONT_MONO}`, ...(row.sentence ? ["margin-top:4px"] : [])]);
     grid.append(...valueLine("Yours", row.yours, { mine: true }));
@@ -461,6 +472,34 @@ function onAccept() {
   schedule();
 }
 
+// Revert to mine. The ids are the rendered ones, copied before anything runs, as
+// Accept reads them. The module that does the work loads on first use, and only
+// here, where the sync plugin has published the ledger. What it could not put back
+// keeps its row, with the reason under it, until the ledger moves on.
+async function onRevert() {
+  const l = ledger();
+  if (busy || !l || l.hasPendingApply()) return;
+  const ids = renderedIds.filter((id) => { const r = l.get(id); return r && !r.claimedBy; });
+  if (!ids.length) return;
+  busy = "revert";
+  render();
+  let result;
+  try {
+    const { revertConflicts } = await import("../sync/conflict-revert.js");
+    result = await revertConflicts(ids);
+  } catch (err) {
+    console.error("[clay] Revert to mine did not finish", err);
+    result = { revertedIds: [], blockedIds: ids, saveResult: null };
+  }
+  busy = null;
+  for (const id of result.blockedIds) blockedRows.set(id, BLOCKED_ROW);
+  view = mode() ? "bar" : "hidden";
+  pendingFocus = "review";
+  const saving = result.saveResult && (result.saveResult.ok || result.saveResult.msg === "Save already in progress");
+  if (result.revertedIds.length && saving) toast(`Put back ${plural(result.revertedIds.length, "change")}. Saving.`);
+  else render();
+}
+
 let downloadedTimer = null;
 
 // Download my copy. Nothing here acknowledges or releases a record.
@@ -545,12 +584,17 @@ export function toast(text) {
 function onLedgerChanged() {
   ledgerRevision++;
   if (armed) disarm();
+  for (const id of [...blockedRows.keys()]) if (!ledger()?.get(id)) blockedRows.delete(id);
   schedule();
 }
 
 function onSaveConflict(e) {
   const d = e?.detail || {};
   refused = { generation: ++refusalGeneration, changedBy: d.changedBy, afterTimeout: !!d.afterTimeout, etag: d.etag ?? null };
+  // The refusal answers the save a toast may still be announcing; it replaces the
+  // toast at once.
+  toastText = null;
+  clearTimeout(toastTimer);
   disarm();
   busy = null;
   keepFailed = false;
@@ -622,9 +666,17 @@ function onInput(e) {
   schedule();
 }
 
+// Focus that leaves the notice while a toast stands in for it is the person moving
+// on: the control the toast replaced does not take focus back afterwards.
+function onFocus(e) {
+  if (toastText && pendingFocus && !root?.contains(e.target)) pendingFocus = null;
+}
+
 function init() {
   if (!isEditMode) return;
   document.addEventListener("clay:sync-conflicts-changed", onLedgerChanged);
+  // An apply beginning or ending changes only whether Revert may run.
+  document.addEventListener("clay:unsaved-state-changed", schedule);
   document.addEventListener("clay:save-conflict", onSaveConflict);
   document.addEventListener("clay:save-saved", onSaveSettled);
   document.addEventListener("clay:save-conflict-resolved", onSaveSettled);
@@ -632,6 +684,7 @@ function init() {
   document.addEventListener("clay:save-conflict-released", onConflictReleased);
   document.addEventListener("keydown", onKeydown);
   document.addEventListener("input", onInput, true);
+  document.addEventListener("focus", onFocus, true);
   if (ledger()?.size) schedule();
 }
 

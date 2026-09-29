@@ -179,7 +179,7 @@ test("the panel lists what the bar counted, and draws nothing that decides for a
   expect(shown()).toContain("The page is showing the other edit.");
   expect(buttonSaying(/Download my copy/)).toBeDefined();
   expect(buttonSaying(/Accept theirs/)).toBeDefined();
-  expect(buttons().map((b) => b.textContent).filter((label) => /revert/i.test(label))).toEqual([]);
+  expect(buttons().map((b) => b.textContent).filter((label) => /revert/i.test(label))).toEqual(["Revert to mine"]);
 
   // Focus lands on the heading, so a screen reader reads the reason first and a
   // keyboard lands inside the thing that just opened.
