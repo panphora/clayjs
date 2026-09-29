@@ -435,7 +435,7 @@ test("a write that silently does nothing fails its postcondition: nothing acknow
   const [id] = await lose(sync, `<p id="p">One quick fox sleeps.</p>`, `<p id="p">One slow fox sleeps.</p>`, `<p id="p">One fast fox sleeps.</p>`);
   const html = document.documentElement.outerHTML;
   const run = document.getElementById("p").firstChild;
-  const spy = jest.spyOn(Range.prototype, "insertNode").mockImplementationOnce(() => {});
+  const spy = jest.spyOn(CharacterData.prototype, "replaceData").mockImplementationOnce(() => {});
   const result = await revert.revertConflicts([id]);
   spy.mockRestore();
   expect(result).toEqual({ revertedIds: [], blockedIds: [id], saveResult: null });
@@ -777,14 +777,25 @@ test.each([
   ["N1 the other side split the paragraph", `<p id="p">alpha quick beta gamma</p>`, `<p id="p">alpha slow beta gamma</p>`, `<p id="p">alpha fast beta</p><p>gamma</p>`],
   ["N1b the same between a heading and a paragraph", `<h2 id="h">Title</h2><p id="p">alpha quick beta gamma</p><p id="z">tail</p>`, `<h2 id="h">Title</h2><p id="p">alpha slow beta gamma</p><p id="z">tail</p>`, `<h2 id="h">Title</h2><p id="p">alpha fast beta</p><p>gamma</p><p id="z">tail</p>`],
   ["N2b the same after a paragraph that repeats the clash text", `<p id="h">alpha fast beta gamma</p><p id="p">alpha quick beta gamma</p>`, `<p id="h">alpha fast beta gamma</p><p id="p">alpha slow beta gamma</p>`, `<p id="h">alpha fast beta gamma</p><p id="p">alpha fast beta</p><p>gamma</p>`],
-])("C3 a local fragment that carries a block (%s) is blocked: no paragraph inside a paragraph, one #p", async (label, base, local, remote) => {
+])("C3 O8 a local fragment wrapped in the live paragraph (%s): only the word goes back inside it, no paragraph inside a paragraph, one #p", async (label, base, local, remote) => {
   const sync = makeSync();
   const ids = await lose(sync, base, local, remote);
   expect(ids.map(textOf).some((t) => t && /<p/.test(t.local.fragment))).toBe(true);
-  expect(await revert.revertConflicts(ids)).toEqual({ revertedIds: [], blockedIds: ids, saveResult: null });
-  expect(body()).toBe(remote);
+  expect((await revert.revertConflicts(ids)).revertedIds).toEqual(ids);
+  expect(body()).toBe(remote.replace("alpha fast beta</p>", "alpha slow beta</p>"));
   expect(document.querySelector("p p")).toBeNull();
   expect(document.querySelectorAll("#p")).toHaveLength(1);
+  sync.stop();
+});
+
+test("C3 a block inside the paragraph wrapper still blocks: the wrapper goes, the block it holds does not", async () => {
+  const sync = makeSync();
+  const base = `<div id="d">One quick fox.</div><div id="e">Two quick cats.</div>`;
+  const remote = `<div id="d">One fast fox.</div><div id="e">Two quick cats.</div>`;
+  const ids = await lose(sync, base, `<div id="d">One <div id="in">slow</div> fox.</div><div id="e">Two quick cats.</div>`, remote);
+  expect(textOf(ids[0]).local.fragment).toBe(`<div id="d"><div id="in">slow</div></div>`);
+  expect(await revert.revertConflicts(ids)).toEqual({ revertedIds: [], blockedIds: ids, saveResult: null });
+  expect(body()).toBe(remote);
   sync.stop();
 });
 
@@ -829,11 +840,12 @@ test.each([
   sync.stop();
 });
 
-test("N1c an id-less pair of paragraphs sharing the clash word: the record spans both, and it blocks rather than guess", async () => {
+test("N1c O8 an id-less pair of paragraphs sharing the clash word: the record sits above both, and the word goes back inside the paragraph holding the range", async () => {
   const sync = makeSync();
   const ids = await lose(sync, `<p>One quick fox.</p><p>Two quick dogs.</p>`, `<p>One slow fox.</p><p>Two quick dogs.</p>`, `<p>One fast fox.</p><p>Two quick dogs.</p>`);
-  expect(await revert.revertConflicts(ids)).toEqual({ revertedIds: [], blockedIds: ids, saveResult: null });
-  expect(body()).toBe(`<p>One fast fox.</p><p>Two quick dogs.</p>`);
+  expect(textOf(ids[0]).local.fragment).toBe(`<p>slow</p>`);
+  expect((await revert.revertConflicts(ids)).revertedIds).toEqual(ids);
+  expect(body()).toBe(`<p>One slow fox.</p><p>Two quick dogs.</p>`);
   sync.stop();
 });
 
@@ -1004,15 +1016,353 @@ test("B3 a write that reaches outside its spot is undone: the scope must read as
   const sync = makeSync();
   const [id] = await lose(sync, `<p id="p">One quick fox sleeps.</p>`, `<p id="p">One slow fox sleeps.</p>`, `<p id="p">One fast fox sleeps.</p>`);
   const html = document.documentElement.outerHTML;
-  const original = Range.prototype.deleteContents;
-  const spy = jest.spyOn(Range.prototype, "deleteContents").mockImplementationOnce(function () {
-    this.setStart(this.startContainer, 0);
-    return original.call(this);
+  const original = CharacterData.prototype.replaceData;
+  const spy = jest.spyOn(CharacterData.prototype, "replaceData").mockImplementationOnce(function (offset, count, data) {
+    original.call(this, offset, count, data);
+    original.call(this, 0, 1, "X");
   });
   const result = await revert.revertConflicts([id]);
   spy.mockRestore();
   expect(result).toEqual({ revertedIds: [], blockedIds: [id], saveResult: null });
   expect(document.documentElement.outerHTML).toBe(html);
   expect(saveCalls()).toHaveLength(0);
+  sync.stop();
+});
+
+// ---------------------------------------------------------------------------
+// round 3: form state, textareas, identities, marks, prose, exact rollback
+// ---------------------------------------------------------------------------
+
+// The natural rollback trigger: this tab's fragment carries <i id="x"> while #x still
+// lives in #q, so B1 undoes the transaction after the writes.
+const b1 = (word) => `<p id="p">One ${word} fox</p><p id="q"><i id="x">x</i></p>`;
+const B1_LOCAL = b1(`<i id="x">slow</i>`);
+const blockedAll = (ids) => ({ revertedIds: [], blockedIds: ids, saveResult: null });
+
+test("O1 a [persist] input typed into after the loss: the value attribute and the live value both go back, and the save carries it", async () => {
+  const sync = makeSync();
+  const [id] = await lose(sync, `<input id="i" persist="" value="old">`, `<input id="i" persist="" value="mine">`, `<input id="i" persist="" value="theirs">`);
+  const i = document.getElementById("i");
+  i.value = "typed";
+  i.dispatchEvent(new Event("input", { bubbles: true }));
+  await Promise.resolve();
+  expect(i.getAttribute("value")).toBe("typed");
+
+  const result = await revert.revertConflicts([id]);
+
+  expect(result.revertedIds).toEqual([id]);
+  expect(i.getAttribute("value")).toBe("mine");
+  expect(i.value).toBe("mine");
+  expect(saveBodies().at(-1)).toContain(`<input id="i" persist="" value="mine">`);
+  sync.stop();
+});
+
+test("O1 a checkbox the person unticked again: the checked attribute and the checked state both go back (explicit record: the merge keeps a control's own checked state, so no real merge loses it)", async () => {
+  await settle(`<input id="c" type="checkbox" persist="">`);
+  const c = document.getElementById("c");
+  c.click();
+  c.click();
+  expect(c.checked).toBe(false);
+  expect(c.hasAttribute("checked")).toBe(false);
+  const applyId = beginApply({ source: "peer", domain: "sync", root: document.documentElement.cloneNode(true) });
+  const [id] = completeApply(applyId, [{
+    kind: "attr", detail: "value-clash", node: c, local: "",
+    recovery: {
+      version: 1, key: "c-checked", localLost: true, applied: true,
+      subject: { key: "c", nodeType: 1, live: [c], base: [], local: [], remote: [], merged: [] },
+      attribute: { namespaceURI: null, qualifiedName: "checked", localName: "checked" },
+    },
+  }], { ticket: 99 });
+
+  const result = await revert.revertConflicts([id]);
+
+  expect(result.revertedIds).toEqual([id]);
+  expect(c.getAttribute("checked")).toBe("");
+  expect(c.checked).toBe(true);
+  expect(saveBodies().at(-1)).toContain(`<input id="c" type="checkbox" persist="" checked="">`);
+});
+
+test("O1 a control that does not show the restored value fails its check: the attribute undone, nothing acknowledged, nothing saved", async () => {
+  const sync = makeSync();
+  const [id] = await lose(sync, `<input id="i" persist="" value="old">`, `<input id="i" persist="" value="mine">`, `<input id="i" persist="" value="theirs">`);
+  const i = document.getElementById("i");
+  Object.defineProperty(i, "value", { configurable: true, get: () => "stuck", set: () => {} });
+  const html = document.documentElement.outerHTML;
+
+  expect(await revert.revertConflicts([id])).toEqual(blockedAll([id]));
+  expect(document.documentElement.outerHTML).toBe(html);
+  expect(i.getAttribute("value")).toBe("theirs");
+  expect(saveCalls()).toHaveLength(0);
+  delete i.value;
+  sync.stop();
+});
+
+test.each([
+  ["color", `<input id="c" type="color" value="#000000">`, "#FF0000", "#00ff00", "#ff0000"],
+  ["url", `<input id="c" type="url" value="http://old.example/">`, " http://a.example/ ", "http://b.example/", "http://a.example/"],
+])("O1 a %s input's value goes back although the control shows it sanitized", async (type, base, mine, theirs, shown) => {
+  const sync = makeSync();
+  const [id] = await lose(sync, base, base.replace(/value="[^"]*"/, `value="${mine}"`), base.replace(/value="[^"]*"/, `value="${theirs}"`));
+  const c = document.getElementById("c");
+
+  const result = await revert.revertConflicts([id]);
+
+  expect(result.revertedIds).toEqual([id]);
+  expect(c.getAttribute("value")).toBe(mine);
+  expect(c.value).toBe(shown);
+  sync.stop();
+});
+
+test("O1 O5 with the undo plugin loaded, a revert that writes a control's live value leaves no undo entry, so Ctrl+Z cannot split the attribute from what the control shows", async () => {
+  window.clay.Mutation = window.__clayMutation;
+  const { undo } = await import("../../src/plugins/undo.js");
+  undo.stop();
+  undo.start({ bindKeys: true });
+  window.clay.undo = undo;
+  try {
+    const sync = makeSync();
+    const [id] = await lose(sync, `<input id="i" persist="" value="old">`, `<input id="i" persist="" value="mine">`, `<input id="i" persist="" value="theirs">`);
+    const i = document.getElementById("i");
+    i.value = "typed";
+    i.dispatchEvent(new Event("input", { bubbles: true }));
+    await tick();
+    undo.flush();
+    undo.clear();
+
+    expect((await revert.revertConflicts([id])).revertedIds).toEqual([id]);
+    await tick();
+    undo.flush();
+    expect(undo.history).toEqual([]);
+    expect(i.getAttribute("value")).toBe("mine");
+    expect(i.value).toBe("mine");
+    sync.stop();
+  } finally {
+    undo.stop();
+    delete window.clay.undo;
+  }
+});
+
+test.each([["plain", ""], ["persist", ` persist=""`]])("O2 a textarea typed into after the loss (%s): the clash goes back inside the typed value; the value, the text and the save carry both", async (label, attr) => {
+  const sync = makeSync();
+  const [id] = await lose(sync, `<textarea id="t"${attr}>One quick fox</textarea>`, `<textarea id="t"${attr}>One slow fox</textarea>`, `<textarea id="t"${attr}>One fast fox</textarea>`);
+  const t = document.getElementById("t");
+  t.value = "One fast fox. Typed after the loss.";
+  t.dispatchEvent(new Event("input", { bubbles: true }));
+  await Promise.resolve();
+
+  const result = await revert.revertConflicts([id]);
+
+  expect(result.revertedIds).toEqual([id]);
+  expect(t.value).toBe("One slow fox. Typed after the loss.");
+  expect(t.textContent).toBe("One slow fox. Typed after the loss.");
+  expect(saveBodies().at(-1)).toContain(`>One slow fox. Typed after the loss.</textarea>`);
+  sync.stop();
+});
+
+test.each([
+  ["reset to its text", (t) => t.form.reset(), "theirs", "later"],
+  ["typed into", (t) => { t.value = "theirs, typed"; t.dispatchEvent(new Event("input", { bubbles: true })); }, "theirs, typed", "theirs, typed"],
+])("O3 C3 a textarea whose loss rolls back with the transaction keeps what it showed and whether it follows its text (%s)", async (label, touch, shows, afterText) => {
+  const sync = makeSync();
+  const page = (word, text) => `${b1(word)}<form id="form"><textarea id="t">${text}</textarea></form>`;
+  const ids = await lose(sync, page("quick", "base"), page(`<i id="x">slow</i>`, "mine"), page("fast", "theirs"));
+  expect(ids).toHaveLength(2);
+  const t = document.getElementById("t");
+  touch(t);
+  await Promise.resolve();
+  const html = document.documentElement.outerHTML;
+  expect(revert.prepareRevert(ids).blocked.size).toBe(0);
+
+  expect(await revert.revertConflicts(ids)).toEqual(blockedAll(ids));
+  expect(document.documentElement.outerHTML).toBe(html);
+  expect(t.value).toBe(shows);
+  t.textContent = "later";
+  expect(t.value).toBe(afterText);
+  sync.stop();
+});
+
+test("C5 the census counts id and data-id apart: a fragment whose id the page holds under another data-id is undone", async () => {
+  const sync = makeSync();
+  const tail = `<p id="q"><i id="x" data-id="other">x</i></p>`;
+  const ids = await lose(sync, `<p id="p">One quick fox</p>${tail}`, `<p id="p">One <i id="x" data-id="fresh">slow</i> fox</p>${tail}`, `<p id="p">One fast fox</p>${tail}`);
+  const html = document.documentElement.outerHTML;
+
+  expect(await revert.revertConflicts(ids)).toEqual(blockedAll(ids));
+  expect(document.documentElement.outerHTML).toBe(html);
+  expect(document.querySelectorAll("#x")).toHaveLength(1);
+  expect(saveCalls()).toHaveLength(0);
+  sync.stop();
+});
+
+test("C5 the document element's id counts: a fragment carrying it is undone", async () => {
+  const sync = makeSync();
+  document.documentElement.id = "x";
+  try {
+    const ids = await lose(sync, `<p id="p">One quick fox</p>`, `<p id="p">One <i id="x">slow</i> fox</p>`, `<p id="p">One fast fox</p>`);
+    const html = document.documentElement.outerHTML;
+
+    expect(await revert.revertConflicts(ids)).toEqual(blockedAll(ids));
+    expect(document.documentElement.outerHTML).toBe(html);
+    expect(document.querySelectorAll("#x")).toHaveLength(1);
+    expect(saveCalls()).toHaveLength(0);
+  } finally {
+    document.documentElement.removeAttribute("id");
+    sync.stop();
+  }
+});
+
+test("O7 a collapsed restore at the edge of nested marks lands outside both", async () => {
+  const sync = makeSync();
+  const local = `<p id="p">One <b><i>fast</i></b> cat</p>`;
+  const ids = await lose(sync, `<p id="p">One <b><i>fast</i></b> dog</p>`, local, `<p id="p">One <b><i>fast</i></b></p>`);
+
+  expect((await revert.revertConflicts(ids)).revertedIds).toEqual(ids);
+  expect(body()).toBe(local);
+  sync.stop();
+});
+
+test.each([
+  ["a neighbour has the base word", `<p id="p">One quick fox.</p><p id="q">Two quick cats.</p>`, "quick", "slow", "fast", "p"],
+  ["a neighbour has the local word", `<p id="p">One quick fox.</p><p id="q">Two slow cats.</p>`, "quick", "slow", "fast", "p"],
+  ["a neighbour has the remote word", `<p id="p">One quick fox.</p><p id="q">Two fast cats.</p>`, "quick", "slow", "fast", "p"],
+  ["shared 'The' only", `<p id="p">The quick fox.</p><p id="q">The lazy dog.</p>`, "quick", "slow", "fast", "p"],
+  ["common word 'the' edited", `<p id="p">We fixed the bug today.</p><p id="q">Then the tests passed.</p>`, "the bug", "a bug", "this bug", "p"],
+  ["word two paragraphs away", `<p id="p">One quick fox.</p><p id="r">Middle text here.</p><p id="q">Two quick cats.</p>`, "quick", "slow", "fast", "p"],
+  ["headings and paragraphs, word repeated", `<h2 id="h">Pricing plans</h2><p id="p">Our plans start at ten dollars.</p><p id="q">All plans include support.</p>`, "ten", "twelve", "nine", "p"],
+  ["list items sharing a word", `<ul><li id="a">Buy milk today</li><li id="b">Buy bread today</li></ul>`, "milk", "eggs", "juice", "a"],
+  ["list items, clash word shared", `<ul><li id="a">Buy milk today</li><li id="b">Buy bread today</li></ul>`, "today", "now", "later", "a"],
+])("O8 plain prose: a word clash goes back whether the engine records it on the block or above it (%s)", async (label, base, word, mine, theirs, where) => {
+  const sync = makeSync();
+  const sub = (html, w) => html.replace(new RegExp(`(<[^>]*id="${where}"[^>]*>[^<]*?)${word}`), `$1${w}`);
+  const local = sub(base, mine);
+  const ids = await lose(sync, base, local, sub(base, theirs));
+
+  expect((await revert.revertConflicts(ids)).revertedIds).toEqual(ids);
+  expect(body()).toBe(local);
+  expect(document.querySelector("p p, li li, p li, li p")).toBeNull();
+  expect(document.querySelectorAll(`#${where}`)).toHaveLength(1);
+  sync.stop();
+});
+
+test.each([
+  ["a namespace declaration this tab removed", (v) => b1(v.word) + `<svg id="s"${v.at === null ? "" : ` xmlns:xlink="${v.at}"`}></svg>`],
+  ["an xlink:href this tab removed", (v) => b1(v.word) + `<svg><use id="u" class="keep"${v.at === null ? "" : ` xlink:href="${v.at}"`}></use></svg>`],
+])("C1 O6 %s comes back with its prefix, namespace and place when the transaction rolls back", async (label, page) => {
+  const sync = makeSync();
+  const ids = await lose(sync, page({ word: "quick", at: "urn:base" }), page({ word: `<i id="x">slow</i>`, at: null }), page({ word: "fast", at: "urn:theirs" }));
+  expect(ids.length).toBeGreaterThanOrEqual(2);
+  const html = document.documentElement.outerHTML;
+  const attrs = () => [...document.querySelectorAll("svg, use, #z")].map((el) => [...el.attributes].map((a) => [a.name, a.namespaceURI, a.prefix, a.value]));
+  const before = attrs();
+  expect(revert.prepareRevert(ids).blocked.size).toBe(0);
+
+  expect(await revert.revertConflicts(ids)).toEqual(blockedAll(ids));
+  expect(document.documentElement.outerHTML).toBe(html);
+  expect(attrs()).toEqual(before);
+  expect(saveCalls()).toHaveLength(0);
+  sync.stop();
+});
+
+test("C1 O6 two attributes this tab removed from one element come back in their places when the transaction rolls back", async () => {
+  const sync = makeSync();
+  const base = `<p id="z" title="a" lang="en" class="c">z</p>${b1("quick")}`;
+  await settle(base);
+  sync.lastHtml = captureFrame();
+  const z = document.getElementById("z");
+  z.removeAttribute("title");
+  z.removeAttribute("lang");
+  document.getElementById("p").innerHTML = `One <i id="x">slow</i> fox`;
+  await Promise.resolve();
+  await sync._doApplyUpdate(sync.lastHtml.replace(`<body>${base}</body>`, `<body><p id="z" title="z" lang="fr" class="c">z</p>${b1("fast")}</body>`), 5, null);
+  const ids = conflicts.list().map((r) => r.id);
+  expect(ids).toHaveLength(3);
+  const html = document.documentElement.outerHTML;
+  expect(z.outerHTML).toBe(`<p id="z" class="c" title="z" lang="fr">z</p>`);
+  expect(revert.prepareRevert(ids).blocked.size).toBe(0);
+
+  expect(await revert.revertConflicts(ids)).toEqual(blockedAll(ids));
+  expect(document.documentElement.outerHTML).toBe(html);
+  expect(saveCalls()).toHaveLength(0);
+  sync.stop();
+});
+
+test("O4 C2 text directly inside a template's content rolls back with the transaction", async () => {
+  const sync = makeSync();
+  const tpl = (w) => `<template id="tp">Two ${w} cats</template>`;
+  const ids = await lose(sync, tpl("quick") + b1("quick"), tpl("slow") + B1_LOCAL, tpl("fast") + b1("fast"));
+  expect(ids).toHaveLength(2);
+  const html = document.documentElement.outerHTML;
+  const run = document.getElementById("tp").content.firstChild;
+  expect(revert.prepareRevert(ids).blocked.size).toBe(0);
+
+  expect(await revert.revertConflicts(ids)).toEqual(blockedAll(ids));
+  expect(document.documentElement.outerHTML).toBe(html);
+  expect(document.getElementById("tp").content.firstChild).toBe(run);
+  expect(run.data).toBe("Two fast cats");
+  expect(saveCalls()).toHaveLength(0);
+  sync.stop();
+});
+
+test("C7 O10 a write that throws midway is undone: the page as it was, the ids open, nothing saved", async () => {
+  const sync = makeSync();
+  const page = (word, title) => `<p id="p">One ${word} fox</p><p id="q" title="${title}">Q</p>`;
+  const ids = await lose(sync, page("quick", "base"), page("slow", "mine"), page("fast", "theirs"));
+  expect(ids).toHaveLength(2);
+  const html = document.documentElement.outerHTML;
+  const run = document.getElementById("p").firstChild;
+  const original = Element.prototype.setAttribute;
+  const spy = jest.spyOn(Element.prototype, "setAttribute").mockImplementation(function (name, value) {
+    if (this.id === "q" && name === "title") throw new DOMException("injected", "InvalidCharacterError");
+    return original.call(this, name, value);
+  });
+  const quiet = jest.spyOn(console, "error").mockImplementation(() => {});
+  let result;
+  let reported;
+  try {
+    result = await revert.revertConflicts(ids);
+  } finally {
+    reported = quiet.mock.calls.length;
+    spy.mockRestore();
+    quiet.mockRestore();
+  }
+
+  expect(result).toEqual(blockedAll(ids));
+  expect(reported).toBe(1);
+  expect(document.documentElement.outerHTML).toBe(html);
+  expect(document.getElementById("p").firstChild).toBe(run);
+  expect(conflicts.size).toBe(2);
+  expect(saveCalls()).toHaveLength(0);
+  sync.stop();
+});
+
+test("O9 an undone transaction reaches neither the dirty gate nor the page's change feed", async () => {
+  const sync = makeSync();
+  const ids = await lose(sync, b1("quick"), B1_LOCAL, b1("fast"));
+  await tick();
+  gate.gateClearIfUnchanged(gate.gateCaptureToken());
+  expect(gate.pageMaybeDirty()).toBe(false);
+  let changes = 0;
+  const off = window.__clayMutation.onAnyChange({ omitChangeDetails: true, require: "observed" }, () => changes++);
+
+  expect(await revert.revertConflicts(ids)).toEqual(blockedAll(ids));
+  await tick();
+  off();
+  expect(changes).toBe(0);
+  expect(gate.pageMaybeDirty()).toBe(false);
+  sync.stop();
+});
+
+test("C8 the document selection comes back after a rollback", async () => {
+  const sync = makeSync();
+  const ids = await lose(sync, b1("quick"), B1_LOCAL, b1("fast"));
+  const node = document.getElementById("p").firstChild;
+  const sel = window.getSelection();
+  sel.setBaseAndExtent(node, 10, node, 12);
+  expect(sel.toString()).toBe("ox");
+
+  expect(await revert.revertConflicts(ids)).toEqual(blockedAll(ids));
+  expect([sel.anchorNode, sel.anchorOffset, sel.focusNode, sel.focusOffset]).toEqual([node, 10, node, 12]);
+  expect(sel.toString()).toBe("ox");
+  sel.removeAllRanges();
   sync.stop();
 });

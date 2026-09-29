@@ -3,6 +3,7 @@ import { conflicts } from "./conflicts.js";
 import { SYNC_IGNORE_SELECTOR, REMOTE_WINS_SELECTOR } from "./live-sync.js";
 import { savePage } from "../core/save.js";
 import { gateMarkDirty } from "../lib/dirty-gate.js";
+import Mutation from "../lib/mutation.js";
 import { markExplicitSave } from "../lib/user-gesture.js";
 import { enableContentEditable } from "../core/admin-contenteditable.js";
 import { enableOnClick } from "../core/admin-onclick.js";
@@ -16,9 +17,12 @@ import { enableAdminResources } from "../core/admin-resources.js";
 // wins and the older is blocked. The writes run as one transaction under a
 // MutationObserver: when any op's own check or any whole-page invariant fails, every
 // record is undone in reverse and the page is the page it was before the click, with
-// nothing acknowledged and nothing saved. Everything here reads the engine's recovery
-// data on each record and the clone the merge read as "mine"; nothing here touches a
-// sync base, a ticket or a saved baseline: a revert is typing.
+// nothing acknowledged and nothing saved. Attributes, form control state, focus and
+// the selection come back from a snapshot taken before the first write, and neither
+// the page's change feed nor its undo history sees the undone writes. Everything here
+// reads the engine's recovery data on each record and the clone the merge read as
+// "mine"; nothing here touches a sync base, a ticket or a saved baseline: a revert is
+// typing.
 
 export const BLOCKED = "This spot changed again. Review the latest edit or download your copy.";
 
@@ -44,7 +48,6 @@ const remoteWins = (el) => el.matches(REMOTE_WINS_SELECTOR);
 const kidsOf = (el) => (el.localName === "template" && el.content ? el.content : el);
 const indexOf = (node) => Array.prototype.indexOf.call(node.parentNode.childNodes, node);
 const authored = (el) => el.getAttribute("data-id") || el.getAttribute("id") || null;
-const lengthOf = (node) => (node.nodeType === 3 || node.nodeType === 8 ? node.data.length : node.childNodes.length);
 
 function isEmptyMark(el) {
   return !el.firstChild || (el.textContent === "" && !el.querySelector("br,img,wbr"));
@@ -334,19 +337,20 @@ function marksAbove(node, root) {
 }
 
 // A collapsed point at the edge of marks the fragment does not carry moves outside
-// them: the local side wrote its text next to the mark, not inside it.
+// them, nested marks included: the local side wrote its text next to the mark, not
+// inside it.
 function hoist(point, root, carried) {
   let [node, off] = point;
-  while (node !== root) {
-    const edge = off === 0 ? "start" : off === lengthOf(node) ? "end" : null;
-    const parent = node.parentNode;
-    if (!edge || !parent || parent === root || !isMark(parent)) break;
-    if (carried.some((w) => sameMark(w, parent))) break;
-    if ((edge === "start" ? parent.firstChild : parent.lastChild) !== node) break;
-    off = indexOf(parent) + (edge === "end" ? 1 : 0);
-    node = parent.parentNode;
+  if (node.nodeType === 3) {
+    if (off !== 0 && off !== node.data.length) return point;
+    [node, off] = [node.parentNode, indexOf(node) + (off === 0 ? 0 : 1)];
   }
-  return [node, off];
+  let lifted = false;
+  while (node !== root && isMark(node) && (off === 0 || off === node.childNodes.length) && !carried.some((w) => sameMark(w, node))) {
+    [node, off] = [node.parentNode, indexOf(node) + (off === 0 ? 0 : 1)];
+    lifted = true;
+  }
+  return lifted ? [node, off] : point;
 }
 
 // Decide, before any write, how the fragment's wrappers meet the marks around the
@@ -364,6 +368,30 @@ function reconcile(op, range, root) {
   return !op.wrappers.slice(op.peel).some((w) => chain.some((c) => c.tagName === w.tagName));
 }
 
+// The engine records a clash whose neighbour shares the word one level up and
+// serializes the paragraph around the local text. That one wrapper goes when it is
+// the live text block holding both ends of the range, by tag and authored identity;
+// an id-less wrapper matches by being that block.
+function peelBlock(fragment, start, end, live) {
+  const outer = fragment.childNodes.length === 1 && isEl(fragment.firstChild) ? fragment.firstChild : null;
+  if (!outer || !BLOCK_TAGS.has(outer.tagName)) return;
+  const range = document.createRange();
+  range.setStart(...start);
+  range.setEnd(...end);
+  const block = scopeOf(range, live);
+  if (block === live || block.tagName !== outer.tagName || block.namespaceURI !== outer.namespaceURI || authored(block) !== authored(outer)) return;
+  outer.replaceWith(...outer.childNodes);
+}
+
+// A fragment that is one run of text, or nothing, is written into a single text node
+// with one replaceData, which undo can reverse.
+function plainOf(op) {
+  if (!op.parsed) return op.fragment;
+  const kids = op.parsed.childNodes;
+  if (!kids.length) return "";
+  return kids.length === 1 && kids[0].nodeType === 3 ? kids[0].data : null;
+}
+
 function planText(rec, apply) {
   const t = rec.recovery.text;
   const subject = rec.recovery.subject;
@@ -379,6 +407,15 @@ function planText(rec, apply) {
     op.range.setEnd(live, span.e);
     return { ...op, root: live, owner: live, scope: live, s: span.s, e: span.e, before: live.data, bs: span.s, be: span.e };
   }
+  // A textarea shows its value, which typing moves away from its child text: the
+  // spot is found in the value and both are written.
+  if (live.localName === "textarea") {
+    if (op.encoding !== "plain") return null;
+    const span = rebase(t.merged.text, live.value, t.merged.start, t.merged.end);
+    if (!span) return null;
+    op.range.selectNodeContents(live);
+    return { ...op, root: live, field: live, scope: live, f: { text: live.value }, s: span.s, e: span.e, before: live.value, bs: span.s, be: span.e };
+  }
   const f = project(live);
   const from = scopeStart(t, live, f);
   if (from === null) return null;
@@ -386,12 +423,14 @@ function planText(rec, apply) {
   if (!span) return null;
   const s = from + span.s;
   const e = from + span.e;
+  let start = pointAt(f, s, "start");
+  let end = s === e ? start : pointAt(f, e, "end");
   op.parsed = op.encoding === "html" ? parse(op.fragment) : null;
+  if (op.parsed) peelBlock(op.parsed, start, end, live);
   if (op.parsed && hasBlock(op.parsed)) return null;
   op.wrappers = op.parsed ? wrappers(op.parsed) : [];
   if (op.parsed) idsIn(op.parsed, op.ids);
-  let start = pointAt(f, s, "start");
-  let end = s === e ? start : pointAt(f, e, "end");
+  op.plain = plainOf(op);
   if (s === e) start = end = hoist(start, live, op.wrappers);
   op.range.setStart(...start);
   op.range.setEnd(...end);
@@ -404,14 +443,33 @@ function planText(rec, apply) {
   return { ...op, root: live, f, s, e, scope, before: g.text, bs, be };
 }
 
-function applyText(op, tx) {
+function applyText(op) {
   if (op.owner) {
     const d = op.owner.data;
     op.owner.data = d.slice(0, op.s) + op.fragment + d.slice(op.e);
     op.check = () => op.owner.data.slice(op.s, op.s + op.fragment.length) === op.fragment && onPage(op.owner);
     return;
   }
+  if (op.field) {
+    const field = op.field;
+    const next = field.value.slice(0, op.s) + op.fragment + field.value.slice(op.e);
+    field.textContent = next;
+    if (field.value !== next) {
+      field.value = next;
+      op.wroteProperty = true;
+    }
+    if (field.hasAttribute("data-value")) field.setAttribute("data-value", next);
+    op.check = () => onPage(field) && field.value === next && field.textContent === next;
+    return;
+  }
   const range = op.range;
+  const node = range.startContainer;
+  if (op.plain !== null && node.nodeType === 3 && range.endContainer === node) {
+    const at = range.startOffset;
+    node.replaceData(at, range.endOffset - at, op.plain);
+    op.check = () => onPage(node) && node.data.slice(at, at + op.plain.length) === op.plain;
+    return;
+  }
   range.deleteContents();
   let nodes = [];
   if (op.fragment) {
@@ -425,12 +483,6 @@ function applyText(op, tx) {
       nodes = [document.createTextNode(op.fragment)];
       range.insertNode(nodes[0]);
     }
-  }
-  if (op.root.localName === "textarea") {
-    const field = op.root;
-    const was = field.value;
-    tx.undo.push(() => { field.value = was; });
-    field.value = field.textContent;
   }
   op.check = () => nodes.every(onPage) && (op.parsed || !nodes.length || nodes[0].data === op.fragment);
 }
@@ -453,14 +505,45 @@ function planAttr(rec, apply) {
   return op;
 }
 
+// Input types whose value attribute is not what the control shows.
+const DEFAULT_VALUE_TYPES = new Set(["hidden", "submit", "image", "reset", "button", "checkbox", "radio", "file"]);
+
+// What a control shows for a value: the browser sanitizes some input types (a colour
+// is lowercased, a URL trimmed), so the check compares against that.
+function shownValue(el, value) {
+  const probe = document.createElement("input");
+  probe.type = el.type;
+  probe.value = value;
+  return probe.value;
+}
+
+// The live property a form-state attribute stands for, and the state it should show:
+// once a person has typed or clicked, the control shows the property, and a [persist]
+// save serializes it, whatever the attribute says.
+function formState(op) {
+  const el = op.el;
+  if (op.ns !== null || el.namespaceURI !== "http://www.w3.org/1999/xhtml") return null;
+  if (el.localName === "input" && op.name === "checked" && (el.type === "checkbox" || el.type === "radio")) return ["checked", op.value !== null];
+  if (el.localName === "input" && op.name === "value" && !DEFAULT_VALUE_TYPES.has(el.type)) return ["value", shownValue(el, op.value ?? "")];
+  if (el.localName === "option" && op.name === "selected") return ["selected", op.value !== null];
+  return null;
+}
+
 function applyAttr(op) {
   if (op.ns === null) {
     if (op.value === null) op.el.removeAttribute(op.name);
     else op.el.setAttribute(op.name, op.value);
   } else if (op.value === null) op.el.removeAttributeNS(op.ns, op.local);
   else op.el.setAttributeNS(op.ns, op.name, op.value);
+  // A control that still follows its attribute has taken the state already; the
+  // property is written only when it did not, so no pristine control turns dirty.
+  const state = formState(op);
+  if (state && op.el[state[0]] !== state[1]) {
+    op.el[state[0]] = state[1];
+    op.wroteProperty = true;
+  }
   const now = () => (op.ns === null ? op.el.getAttribute(op.name) : op.el.getAttributeNS(op.ns, op.local));
-  op.check = () => onPage(op.el) && now() === op.value;
+  op.check = () => onPage(op.el) && now() === op.value && (!state || op.el[state[0]] === state[1]);
 }
 
 function planStructure(rec, apply) {
@@ -704,7 +787,7 @@ function touchesNode(op, c) {
 // The newer op (k) achieves the older's local state: the same live node, and the
 // older's whole range inside the newer's. Nothing else covers.
 function covers(k, op) {
-  return k.kind === "text" && op.kind === "text" && k.root === op.root && contains(k.range, op.range);
+  return k.kind === "text" && op.kind === "text" && !k.field && k.root === op.root && contains(k.range, op.range);
 }
 
 // What a loss that cannot be planned still protects, as narrow as the page allows:
@@ -758,18 +841,25 @@ const revisionNow = () => `${conflicts.hasPendingApply() ? 1 : 0}|${conflicts.li
 // The whole page: what must hold after the writes
 // ---------------------------------------------------------------------------
 
-// How often each authored identity occurs, and which block elements sit inside a
-// phrasing-only block or a mark. Template content counts with the page.
+// How often each id and each data-id occurs, counted apart and the document element
+// included, and which block elements sit inside a phrasing-only block or a mark.
+// Template content counts with the page.
 function census() {
   const out = { ids: new Map(), nested: new Set() };
+  const tally = (el) => {
+    for (const name of ["id", "data-id"]) {
+      const value = el.getAttribute(name);
+      if (value) out.ids.set(`${name} ${value}`, (out.ids.get(`${name} ${value}`) || 0) + 1);
+    }
+  };
   const walk = (node, under) => {
     for (const el of kidsOf(node).children) {
-      const id = authored(el);
-      if (id) out.ids.set(id, (out.ids.get(id) || 0) + 1);
+      tally(el);
       if (under && BLOCK_TAGS.has(el.tagName)) out.nested.add(el);
       walk(el, under || isMark(el) || INLINE_ONLY_TAGS.has(el.tagName));
     }
   };
+  tally(document.documentElement);
   walk(document.documentElement, false);
   return out;
 }
@@ -786,42 +876,105 @@ function holds(plan) {
   for (const [scope, ops] of byScope) {
     let expected = ops[0].before;
     for (const op of [...ops].sort((a, b) => b.bs - a.bs)) expected = expected.slice(0, op.bs) + op.local + expected.slice(op.be);
-    const now = ops[0].owner ? scope.data : project(scope).text;
+    const now = ops[0].owner ? scope.data : ops[0].field ? scope.value : project(scope).text;
     if (now !== expected) return false;
   }
   return true;
 }
 
-// Every mutation record undone, last first, then the non-DOM effects.
-function rollback(records, undo) {
+// What mutation records cannot carry back, taken before the first write: each
+// element's attribute nodes with their values in order (qualified name, namespace and
+// prefix travel with the node), each form control's live state, the focused element
+// and its selection, and the document selection.
+function remember() {
+  const attrs = new Map();
+  const walk = (root) => {
+    for (const el of root.querySelectorAll("*")) {
+      attrs.set(el, [...el.attributes].map((a) => [a, a.value]));
+      if (el.localName === "template" && el.content) walk(el.content);
+    }
+  };
+  walk(document);
+  const controls = [];
+  for (const el of document.querySelectorAll("input, textarea")) controls.push([el, "value", el.value]);
+  for (const el of document.querySelectorAll("input")) controls.push([el, "checked", el.checked]);
+  for (const el of document.querySelectorAll("option")) controls.push([el, "selected", el.selected]);
+  const active = document.activeElement;
+  let caret = null;
+  try {
+    if (active && typeof active.selectionStart === "number") caret = [active.selectionStart, active.selectionEnd, active.selectionDirection];
+  } catch {}
+  const sel = document.getSelection();
+  const selection = sel && sel.rangeCount ? [sel.anchorNode, sel.anchorOffset, sel.focusNode, sel.focusOffset] : null;
+  return { attrs, controls, active, caret, selection };
+}
+
+function sameAttrs(el, list) {
+  const now = el.attributes;
+  return now.length === list.length && list.every(([a, value], i) => now[i] === a && a.value === value);
+}
+
+// Every mutation record undone, last first; attributes, control state, focus and the
+// selection then come back from the snapshot.
+function rollback(records, page) {
+  const touched = new Set();
   for (let i = records.length - 1; i >= 0; i--) {
     const r = records[i];
     if (r.type === "characterData") r.target.data = r.oldValue;
-    else if (r.type === "attributes") {
-      if (r.oldValue === null) {
-        if (r.attributeNamespace === null) r.target.removeAttribute(r.attributeName);
-        else r.target.removeAttributeNS(r.attributeNamespace, r.attributeName);
-      } else if (r.attributeNamespace === null) r.target.setAttribute(r.attributeName, r.oldValue);
-      else r.target.setAttributeNS(r.attributeNamespace, r.attributeName, r.oldValue);
-    } else {
+    else if (r.type === "attributes") touched.add(r.target);
+    else {
       for (const n of r.addedNodes) if (n.parentNode === r.target) r.target.removeChild(n);
       for (const n of r.removedNodes) r.target.insertBefore(n, r.nextSibling);
     }
   }
-  for (let i = undo.length - 1; i >= 0; i--) undo[i]();
-}
-
-// The trees the plan writes in: the document, and the content of every template a
-// target sits in.
-function treesOf(ops) {
-  const roots = new Set();
-  for (const op of ops) {
-    for (let n of heldBy(op)) {
-      while (n.parentNode) n = n.parentNode;
-      roots.add(n);
+  for (const el of touched) {
+    const list = page.attrs.get(el);
+    if (!list || sameAttrs(el, list)) continue;
+    for (const a of [...el.attributes]) el.removeAttributeNode(a);
+    for (const [a, value] of list) {
+      a.value = value;
+      el.setAttributeNode(a);
     }
   }
-  return roots;
+  for (const [el, prop, value] of page.controls) {
+    if (el[prop] === value) continue;
+    try {
+      el[prop] = value;
+    } catch {}
+  }
+  const sel = document.getSelection();
+  if (sel && page.selection) {
+    if (onPage(page.selection[0]) && onPage(page.selection[2])) sel.setBaseAndExtent(...page.selection);
+  } else if (sel && sel.rangeCount) sel.removeAllRanges();
+  const active = page.active;
+  if (active && active !== document.activeElement && active !== document.body && onPage(active) && active.focus) active.focus({ preventScroll: true });
+  if (page.caret && document.activeElement === active) {
+    try {
+      active.setSelectionRange(...page.caret);
+    } catch {}
+  }
+}
+
+// Every tree a write can reach: the document and the content of every template on
+// the page, nested templates included.
+function observeAll(observer) {
+  const visit = (root) => {
+    observer.observe(root, OBSERVE);
+    for (const t of root.querySelectorAll("template")) if (t.content) visit(t.content);
+  };
+  visit(document);
+}
+
+// hyper-undo reads a text node's final data for every record on it, so a node
+// written twice in one transaction cannot be undone through its records.
+function undoable(records) {
+  const seen = new Set();
+  for (const r of records) {
+    if (r.type !== "characterData") continue;
+    if (seen.has(r.target)) return false;
+    seen.add(r.target);
+  }
+  return true;
 }
 
 /**
@@ -912,18 +1065,48 @@ export function applyRevert(plan) {
     for (const op of plan.ops) plan.blocked.set(op.id, BLOCKED);
     return [];
   }
-  const tx = { undo: [], observer: new MutationObserver(() => {}) };
+  const page = remember();
+  // The undo recorder is held while the writes run: a revert that goes through is
+  // one entry when its records can be undone, one that is undone is none.
+  const undo = window.clay?.undo;
+  undo?.pause?.();
+  const observer = new MutationObserver(() => {});
   const parked = document.createDocumentFragment();
-  for (const root of treesOf(plan.ops)) tx.observer.observe(root, OBSERVE);
-  tx.observer.observe(parked, OBSERVE);
-  const texts = plan.ops.filter((op) => op.kind === "text").sort((a, b) => (a.root === b.root ? b.s - a.s || b.e - a.e : 0));
-  for (const op of texts) applyText(op, tx);
-  for (const op of plan.ops) if (op.kind === "attr") applyAttr(op);
-  applyStructure(plan.ops.filter((op) => op.kind !== "text" && op.kind !== "attr"), parked);
-  const records = tx.observer.takeRecords();
-  tx.observer.disconnect();
-  if (plan.ops.every((op) => op.check()) && holds(plan)) return [...plan.ops.map((op) => op.id), ...plan.covered.keys()];
-  rollback(records, tx.undo);
+  let records = [];
+  let ok = false;
+  try {
+    observeAll(observer);
+    observer.observe(parked, OBSERVE);
+    const texts = plan.ops.filter((op) => op.kind === "text").sort((a, b) => (a.root === b.root ? b.s - a.s || b.e - a.e : 0));
+    for (const op of texts) applyText(op);
+    for (const op of plan.ops) if (op.kind === "attr") applyAttr(op);
+    applyStructure(plan.ops.filter((op) => op.kind !== "text" && op.kind !== "attr"), parked);
+    records = observer.takeRecords();
+    ok = plan.ops.every((op) => op.check()) && holds(plan);
+  } catch (err) {
+    console.error("[clay] Revert to mine failed while writing and was undone", err);
+  } finally {
+    records = records.concat(observer.takeRecords());
+    observer.disconnect();
+  }
+  if (ok) {
+    // A live property write is not in the records, so its entry could not undo it.
+    if (undoable(records) && !plan.ops.some((op) => op.wroteProperty)) undo?.commitCaptured?.("Revert to mine");
+    else undo?.discardCaptured?.();
+    undo?.resume?.();
+    return [...plan.ops.map((op) => op.id), ...plan.covered.keys()];
+  }
+  try {
+    rollback(records, page);
+  } finally {
+    // The page's change feed drops the writes and their undoing together: nothing
+    // changed, so the dirty gate, autosave and the hub's other pausable subscribers
+    // have nothing to see.
+    Mutation.pause();
+    Mutation.resume();
+    undo?.discardCaptured?.();
+    undo?.resume?.();
+  }
   for (const op of plan.ops) plan.blocked.set(op.id, BLOCKED);
   for (const id of plan.covered.keys()) plan.blocked.set(id, BLOCKED);
   return [];
@@ -936,6 +1119,9 @@ export function applyRevert(plan) {
  * content now, and ordinary dirty bytes protect it.
  */
 export async function revertConflicts(ids) {
+  // Changes made before the call reach the page's change feed first: an undone
+  // transaction drops what the feed holds when it ends.
+  await Promise.resolve();
   const plan = prepareRevert(ids);
   const revertedIds = applyRevert(plan);
   let saveResult = null;

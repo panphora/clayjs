@@ -483,6 +483,11 @@ async function onRevert() {
   if (!ids.length) return;
   busy = "revert";
   render();
+  // Focus that lands outside the notice while the revert and its save run is the
+  // person moving on; Review takes focus afterwards only if it stayed here.
+  let stayed = true;
+  const track = (e) => { stayed = !!root?.contains(e.target); };
+  document.addEventListener("focus", track, true);
   let result;
   try {
     const { revertConflicts } = await import("../sync/conflict-revert.js");
@@ -490,11 +495,13 @@ async function onRevert() {
   } catch (err) {
     console.error("[clay] Revert to mine did not finish", err);
     result = { revertedIds: [], blockedIds: ids, saveResult: null };
+  } finally {
+    document.removeEventListener("focus", track, true);
   }
   busy = null;
   for (const id of result.blockedIds) blockedRows.set(id, BLOCKED_ROW);
   view = mode() ? "bar" : "hidden";
-  pendingFocus = "review";
+  pendingFocus = stayed ? "review" : null;
   const saving = result.saveResult && (result.saveResult.ok || result.saveResult.msg === "Save already in progress");
   if (result.revertedIds.length && saving) toast(`Put back ${plural(result.revertedIds.length, "change")}. Saving.`);
   else render();

@@ -790,7 +790,7 @@ test("A a failed check after moves, a removal and a restored subtree undoes all 
   const html = document.documentElement.outerHTML;
   const nodes = ["t", "mp", "s", "n", "ip"].map(byId);
   const pings = listen(byId("mp"));
-  const spy = jest.spyOn(Range.prototype, "insertNode").mockImplementationOnce(() => {});
+  const spy = jest.spyOn(CharacterData.prototype, "replaceData").mockImplementationOnce(() => {});
 
   const result = await revert.revertConflicts(ids);
   spy.mockRestore();
@@ -831,5 +831,101 @@ test("A a move that silently does not land is caught by its own check and undone
   expect(pings()).toBe(1);
   expect(conflicts.size).toBe(1);
   expect(saveCalls()).toHaveLength(0);
+  sync.stop();
+});
+
+// ---------------------------------------------------------------------------
+// round 3: rollback reaches template content, focus and form state
+// ---------------------------------------------------------------------------
+
+// The natural rollback trigger: this tab moved div#k into a <b>, so B2 undoes the
+// transaction after the writes.
+const TRIG_BASE = `<p id="m"><b id="b">x</b></p><div id="k">K</div><div id="t"></div>`;
+const TRIG_REMOTE = `<p id="m"><b id="b">x</b></p><div id="t"><div id="k">K</div></div>`;
+const trig = () => byId("b").append(byId("k"));
+
+async function loseBy(sync, base, edit, remote, seq = 5) {
+  await settle(base);
+  sync.lastHtml = captureFrame();
+  edit();
+  await Promise.resolve();
+  const before = new Set(conflicts.list().map((r) => r.id));
+  await sync._doApplyUpdate(sync.lastHtml.replace(/<body>[\s\S]*<\/body>/, `<body>${remote}</body>`), seq, null);
+  return conflicts.list().map((r) => r.id).filter((id) => !before.has(id));
+}
+
+async function expectUndone(ids) {
+  const html = document.documentElement.outerHTML;
+  expect(revert.prepareRevert(ids).blocked.size).toBe(0);
+  expect(await revert.revertConflicts(ids)).toEqual({ revertedIds: [], blockedIds: ids, saveResult: null });
+  expect(document.documentElement.outerHTML).toBe(html);
+  expect(saveCalls()).toHaveLength(0);
+}
+
+test("O4 C2 a reorder inside a template's content rolls back with the transaction", async () => {
+  const sync = makeSync();
+  const ids = await loseBy(sync, `<template id="tp"><p id="a">A</p><p id="b2">B</p><p id="c">C</p></template>${TRIG_BASE}`,
+    () => { const c = byId("tp").content; c.insertBefore(c.getElementById("b2"), c.getElementById("a")); trig(); },
+    `<template id="tp"><p id="a">A</p><p id="c">C</p><p id="b2">B</p></template>${TRIG_REMOTE}`);
+  expect(ids.map(detailOf).sort()).toEqual(["both-moved", "both-reordered"]);
+  const kids = [...byId("tp").content.childNodes];
+  await expectUndone(ids);
+  expect([...byId("tp").content.childNodes]).toEqual(kids);
+  sync.stop();
+});
+
+test("O4 C2 a paragraph realized into a template's content rolls back with the transaction", async () => {
+  const sync = makeSync();
+  await loseBy(sync, `<template id="tp"><p id="a">A</p></template>${TRIG_BASE}`,
+    () => { const n = document.createElement("p"); n.id = "n"; n.textContent = "LOCAL"; byId("tp").content.append(n); trig(); },
+    `<template id="tp"><p id="a">A</p><p id="n">REMOTE</p></template>${TRIG_REMOTE}`);
+  sync.lastHtml = captureFrame();
+  await sync._doApplyUpdate(sync.lastHtml.replace(/<body>[\s\S]*<\/body>/, `<body><template id="tp"><p id="a">A</p></template>${TRIG_REMOTE}</body>`), 6, null);
+  const ids = conflicts.list().map((r) => r.id);
+  expect(revert.prepareRevert(ids).ops.map((op) => op.kind + (op.mode ? ":" + op.mode : "")).sort()).toEqual(["move", "realize:place"]);
+  await expectUndone(ids);
+  expect(byId("tp").innerHTML).toBe(`<p id="a">A</p>`);
+  sync.stop();
+});
+
+test("O4 C2 a morph that reaches a template inside the restored block rolls back with the transaction", async () => {
+  const sync = makeSync();
+  const ids = await loseBy(sync, `<div id="s"></div>${TRIG_BASE}`,
+    () => { byId("s").innerHTML = `<div id="f"><template id="ti"><p id="x">mine</p></template><p id="y">mine</p></div>`; trig(); },
+    `<div id="s"><div id="f"><template id="ti"><p id="x">theirs</p></template><p id="y">theirs</p></div></div>${TRIG_REMOTE}`);
+  expect(revert.prepareRevert(ids).ops.map((op) => op.kind + (op.mode ? ":" + op.mode : "")).sort()).toEqual(["move", "realize:morph"]);
+  const inner = byId("ti").content.firstChild;
+  await expectUndone(ids);
+  expect(byId("ti").content.firstChild).toBe(inner);
+  expect(inner.textContent).toBe("theirs");
+  sync.stop();
+});
+
+test("C8 a focused input inside a block that moves and rolls back keeps focus and its selection", async () => {
+  const sync = makeSync();
+  const base = `<p id="p"><b id="m">x</b></p><div id="k"><input id="input" value="draft"></div><div id="t"></div>`;
+  const ids = await loseBy(sync, base, () => byId("m").append(byId("k")), `<p id="p"><b id="m">x</b></p><div id="t"><div id="k"><input id="input" value="draft"></div></div>`);
+  expect(ids).toHaveLength(1);
+  const input = byId("input");
+  input.focus();
+  input.setSelectionRange(1, 4);
+  await expectUndone(ids);
+  expect(document.activeElement).toBe(input);
+  expect([input.selectionStart, input.selectionEnd]).toEqual([1, 4]);
+  sync.stop();
+});
+
+test("O3 C3 form controls inside a morphed block that rolls back keep their live state", async () => {
+  const sync = makeSync();
+  const ctl = (v) => `<div id="f"><input id="i" value="${v}"><input id="c" type="checkbox"><textarea id="ta">${v}</textarea></div>`;
+  const ids = await loseBy(sync, `<div id="s"></div>${TRIG_BASE}`, () => { byId("s").innerHTML = ctl("mine"); trig(); }, `<div id="s">${ctl("theirs")}</div>${TRIG_REMOTE}`);
+  expect(revert.prepareRevert(ids).ops.map((op) => op.kind + (op.mode ? ":" + op.mode : "")).sort()).toEqual(["move", "realize:morph"]);
+  byId("i").value = "typed";
+  byId("c").checked = true;
+  byId("ta").form?.reset();
+  const state = () => [byId("i").value, byId("c").checked, byId("ta").value];
+  const before = state();
+  await expectUndone(ids);
+  expect(state()).toEqual(before);
   sync.stop();
 });

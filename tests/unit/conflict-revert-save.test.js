@@ -644,3 +644,119 @@ test("C12 a revert queued behind a save on the wire whose drained save is refuse
   document.dispatchEvent(new CustomEvent("clay:save-conflict-resolved"));
   await frame();
 }, 10000);
+
+// ---------------------------------------------------------------------------
+// round 3: focus through the save wait, and undo
+// ---------------------------------------------------------------------------
+
+test("C9 the person moves focus into the page while the revert's save is on the wire: focus stays there once the toast has gone", async () => {
+  const sync = makeSync();
+  const [A, C] = await lose(sync, `<p id="p">One quick fox sleeps.</p><p id="q">quick</p>`, `<p id="p">One slow fox sleeps.</p><p id="q">slow</p>`, `<p id="p">One fast fox sleeps.</p><p id="q">fast</p>`);
+  await frame();
+  buttonSaying(/Review/).click();
+  document.getElementById("p").firstChild.data = "OnXst fox sleeps.";
+  let release;
+  saveResponse = () => new Promise((r) => { release = () => r({ status: 200, body: { msg: "Saved", etag: "E1" } }); });
+  const put = buttonSaying(/Revert to mine/);
+  put.focus();
+  put.click();
+  await waitFor(() => !!release);
+
+  const input = document.createElement("input");
+  input.id = "continued-editing";
+  document.body.append(input);
+  input.focus();
+  expect(document.activeElement).toBe(input);
+  release();
+  await frame();
+  await frame();
+  expect(shown()).toBe("Put back 1 change. Saving.");
+  expect(conflicts.list().map((r) => r.id)).toEqual([A]);
+  expect(conflicts.get(C)).toBeNull();
+  await wait(4100);
+  expect(shown()).toContain("Another edit replaced 1 change.");
+  expect(document.activeElement).toBe(input);
+  input.remove();
+}, 10000);
+
+// The undo plugin as the loader wires it: the hub is published on clay.Mutation
+// before the plugin starts, the plugin starts the recorder with its keys bound, and
+// the loader attaches it as clay.undo.
+async function withUndo() {
+  window.clay.Mutation = window.__clayMutation;
+  const { undo } = await import("../../src/plugins/undo.js");
+  undo.stop();
+  undo.start({ bindKeys: true });
+  window.clay.undo = undo;
+  return undo;
+}
+
+const ctrlZ = () => document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "z", ctrlKey: true, bubbles: true, cancelable: true }));
+
+test("O5 C4 with the undo plugin loaded, a revert is one undo entry: Ctrl+Z puts the other side's text back", async () => {
+  const undo = await withUndo();
+  try {
+    const sync = makeSync();
+    const [id] = await lose(sync, `<p id="p">One quick fox sleeps.</p>`, `<p id="p">One slow fox sleeps.</p>`, `<p id="p">One fast fox sleeps.</p>`);
+    await tick();
+    undo.flush();
+    undo.clear();
+
+    expect((await revert.revertConflicts([id])).revertedIds).toEqual([id]);
+    await tick();
+    undo.flush();
+    expect(body()).toBe(`<p id="p">One slow fox sleeps.</p>`);
+    expect(undo.history.map((h) => h.label)).toEqual(["Revert to mine"]);
+
+    ctrlZ();
+    expect(body()).toBe(`<p id="p">One fast fox sleeps.</p>`);
+    expect(undo.canUndo).toBe(false);
+  } finally {
+    undo.stop();
+  }
+});
+
+test("O5 C4 with the undo plugin loaded, a revert that rolls back leaves no undo entry: Ctrl+Z changes nothing", async () => {
+  const undo = await withUndo();
+  try {
+    const sync = makeSync();
+    const page = (word) => `<p id="p">One ${word} fox</p><p id="q"><i id="x">x</i></p>`;
+    const ids = await lose(sync, page("quick"), page(`<i id="x">slow</i>`), page("fast"));
+    await tick();
+    undo.flush();
+    undo.clear();
+    const html = document.documentElement.outerHTML;
+
+    expect(await revert.revertConflicts(ids)).toEqual({ revertedIds: [], blockedIds: ids, saveResult: null });
+    await tick();
+    undo.flush();
+    expect(undo.history).toEqual([]);
+
+    ctrlZ();
+    expect(document.documentElement.outerHTML).toBe(html);
+  } finally {
+    undo.stop();
+  }
+});
+
+test("O5 a revert that writes one text node twice (a mark this tab added) leaves no undo entry rather than one that deletes the word", async () => {
+  const undo = await withUndo();
+  try {
+    const sync = makeSync();
+    const [id] = await lose(sync, `<p id="p">One quick fox</p>`, `<p id="p">One <b>slow</b> fox</p>`, `<p id="p">One fast fox</p>`);
+    await tick();
+    undo.flush();
+    undo.clear();
+
+    expect((await revert.revertConflicts([id])).revertedIds).toEqual([id]);
+    await tick();
+    undo.flush();
+    expect(body()).toBe(`<p id="p">One <b>slow</b> fox</p>`);
+    expect(undo.history).toEqual([]);
+
+    ctrlZ();
+    expect(body()).toBe(`<p id="p">One <b>slow</b> fox</p>`);
+  } finally {
+    undo.stop();
+  }
+});
