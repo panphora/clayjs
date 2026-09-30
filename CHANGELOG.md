@@ -1,5 +1,28 @@
 # Changelog
 
+## [1.6.0]
+
+### Added
+- `clay.conflicts` keeps every edit live sync replaces until the person chooses what to do with it
+- One notice lists each edit another save replaced, and a save the host refused, and stays until the person chooses
+- "Revert to mine" puts selected replaced edits back in one step: it checks the page afterwards, undoes everything if any check fails, and saves once
+- The notice can download the replaced edits as a file
+- `clay.markDirty()` for editors that write their own data where live sync cannot see it
+- `clay:sync-applied` lists every unresolved conflict, not only the current frame's
+
+### Changed
+- Live sync on a tab with no unsaved edits merges only the part of the page that changed (hyper-morph 1.1.0's fast path), so large pages apply remote edits faster
+- A merge keeps an edit with the element its id names, even when a copy of that element has identical content
+- The peer merge base moves forward when the host accepts a save, so a frame built on that save no longer types a letter twice or shows a phantom conflict
+- Injected ClayJS UI is built from a generated Bevel subset with system fonts, and page CSS can no longer restyle it
+- The close warning also counts unsaved work that has not reached the page yet
+
+### Fixed
+- A copied block keeps its content on the receiving tab
+- A reorder of blocks without ids, merged under a disk change, keeps the page unsaved instead of being recorded as saved
+
+
+
 ## [1.5.3] - 2026-09-28
 
 ### Added
