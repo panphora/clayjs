@@ -16,7 +16,7 @@
 
 ### Changed
 - A lost conflict no longer keeps the page dirty or holds the automatic save, and a save no longer clears it: the edit waits in `clay.conflicts` until the person acknowledges it. `liveSync.unresolvedConflicts` is now a read-only view of that ledger, so assigning to it throws
-- Live sync on a tab with no unsaved edits merges only the part of the page that changed (hyper-morph 1.1.0's fast path), so large pages apply remote edits faster
+- Live sync on a tab with no unsaved edits merges only the part of the page that changed, when the change touches no script or template (hyper-morph 1.1.0's fast path)
 - A merge keeps an edit with the element its id names, even when a copy of that element has identical content
 - The peer merge base moves forward when the host accepts a save, so a frame built on that save no longer types a letter twice or shows a phantom conflict
 - Injected ClayJS UI is built from a generated Bevel subset with system fonts, and page CSS can no longer restyle it
@@ -36,6 +36,7 @@
 - The toast theme exports
 
 ### Fixed
+- An update from another tab no longer strips editors' runtime state (RichClay's editable regions stayed on the page but could not be typed into until reload), and a tab that started without a merge base no longer strips every editor on the first update
 - A copied block keeps its content on the receiving tab
 - A reorder of blocks without ids, merged under a disk change, keeps the page unsaved instead of being recorded as saved
 

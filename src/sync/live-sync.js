@@ -1378,6 +1378,7 @@ class LiveSync {
       remoteWins: (el) => el.matches(REMOTE_WINS_SELECTOR),
       ignoreAttribute: isRootLocalAttr,
       protectFocusedValue: true,
+      keepLiveOnly: source === 'peer',
       scripts: { mergeTags: mergeTagRecognizers },
       hooks: { beforeAttributeUpdated },
       ...extra,
@@ -1398,6 +1399,7 @@ class LiveSync {
       pending = HyperMorph.mergeDocument({
         ...common,
         base: null,
+        local: { root: captureLocal(), toLive: originalSnapshotNode },
         identity: { local: localIdentity, remote: sideIdentity(identityMap) },
       });
     } else if (!dirty) {
