@@ -3,6 +3,7 @@ import onDomReady from "../lib/dom-ready.js";
 import { set, style } from "../lib/hostile-css.js";
 import { bevelSurface, pageScheme } from "../ui/bevel-controls.js";
 import { TOKENS, FONT_SANS } from "../ui/bevel.js";
+import { saveFeedback } from "../core/save-feedback.js";
 
 // No 'conflict' here on purpose. core/conflict-notice.js owns that state now,
 // and it ships in every document rather than only the ones that turned this chip on.
@@ -48,6 +49,17 @@ function ensure() {
 }
 
 function show(state) {
+  // A failed or offline save is the persistent toast's to report when clay-ui is loaded,
+  // and so is saved when the page turned on clay.saveToast.
+  if (saveFeedback.toasts && (ALARMING.has(state) || (state === "saved" && saveFeedback.savedToast))) {
+    clearTimeout(hideTimer);
+    if (el) {
+      set(el, "opacity", "0");
+      el.textContent = "";
+      delete el.dataset.state;
+    }
+    return;
+  }
   const node = ensure();
   node.textContent = LABELS[state];
   node.dataset.state = state;
@@ -60,6 +72,7 @@ function show(state) {
 
 function init() {
   if (!isEditMode) return;
+  saveFeedback.chip = true;
   for (const state of Object.keys(LABELS)) {
     document.addEventListener("clay:save-" + state, () => show(state));
   }

@@ -398,17 +398,18 @@ function buildChrome() {
 
   panel.append(quoteEl, textarea, row, warningsEl);
 
-  chip = marked(bevelButton('\ud83d\udcac', {
+  chip = marked(bevelButton('AI', {
     small: true,
-    extra: ['position:fixed', 'width:26px', 'height:26px', 'font-size:13px', ...FLOATING, scheme],
+    extra: ['position:fixed', 'width:26px', 'height:26px', `font:600 11px/1 ${FONT_SANS}`, ...FLOATING, scheme],
   }), 'data-clay-ai-edit', 'chip');
   chip.title = 'Comment on this (\u2318K)';
   setShown(chip, false, 'inline-grid');
 
-  docBubble = marked(bevelButton('\ud83d\udcac', {
-    extra: ['position:fixed', 'right:16px', 'bottom:16px', 'width:44px', 'height:44px', 'font-size:18px', ...FLOATING, scheme],
+  docBubble = marked(bevelButton('AI', {
+    extra: ['position:fixed', 'width:40px', 'height:40px', `font:600 14px/1 ${FONT_SANS}`, ...FLOATING, scheme],
   }), 'data-clay-ai-edit', 'bubble');
   docBubble.title = 'Comment on the whole page';
+  placeBubble();
 
   document.body.append(ring, panel, chip, docBubble);
 
@@ -430,11 +431,38 @@ function buildChrome() {
   });
   docBubble.addEventListener('click', () => {
     if (session) return;
+    // Like a click outside, a second click keeps a typed comment: it closes an empty panel only.
+    if (!panel.hidden && anchorEl === document.body) {
+      if (textarea.value.trim()) textarea.focus();
+      else closePanel();
+      return;
+    }
     openPanel(document.body, quoteFromSelection(document.body));
   });
 
   window.addEventListener('scroll', () => { positionChrome(); hideChip(); }, { passive: true });
-  window.addEventListener('resize', positionChrome, { passive: true });
+  window.addEventListener('resize', () => { placeBubble(); positionChrome(); }, { passive: true });
+  // The CMS toggle can arrive after this chrome, and a docked sidebar slides it left.
+  const replace = () => { placeBubble(); positionChrome(); };
+  document.addEventListener('hcms:open', () => { replace(); setTimeout(replace, 350); });
+  document.addEventListener('hcms:close', () => { replace(); setTimeout(replace, 350); });
+  new MutationObserver((records) => {
+    const touched = (nodes) => [...nodes].some((n) => n.nodeType === 1 && n.hasAttribute('data-hcms-toggle-host'));
+    if (records.some((r) => touched(r.addedNodes) || touched(r.removedNodes))) replace();
+  }).observe(document.body, { childList: true });
+}
+
+// The bubble sits in the bottom-right corner, or just left of the CMS's "Edit content"
+// toggle when the page has one, bottoms aligned, so the two never overlap.
+function placeBubble() {
+  if (!docBubble) return;
+  const host = document.querySelector('[data-hcms-toggle-host]');
+  const rect = host && host.getBoundingClientRect();
+  const beside = !!rect && rect.width > 0 && rect.height > 0;
+  docBubble.pin({
+    right: beside ? `${Math.round((document.documentElement.clientWidth || window.innerWidth) - rect.left + 8)}px` : '16px',
+    bottom: beside ? `${Math.round((document.documentElement.clientHeight || window.innerHeight) - rect.bottom)}px` : '16px',
+  });
 }
 
 // ---------------------------------------------------------------- hover chip
@@ -486,10 +514,12 @@ function positionChrome() {
   if (!anchorEl || panel.hidden) return;
   if (!anchorEl.isConnected) { closePanel(); return; }
   if (anchorEl === document.body) {
-    // document mode: no ring, panel pinned above the bottom-right bubble
+    // document mode: no ring, panel pinned above the bubble
     setShown(ring, false);
-    set(panel, 'left', Math.max(16, window.innerWidth - (panel.offsetWidth || 480) - 16) + 'px');
-    set(panel, 'top', Math.max(16, window.innerHeight - (panel.offsetHeight || 120) - 76) + 'px');
+    const bubble = docBubble.getBoundingClientRect();
+    const width = panel.offsetWidth || 480;
+    set(panel, 'left', Math.max(16, Math.min((bubble.right || window.innerWidth - 16) - width, window.innerWidth - width - 16)) + 'px');
+    set(panel, 'top', Math.max(16, (bubble.top || window.innerHeight - 56) - (panel.offsetHeight || 120) - 12) + 'px');
     return;
   }
   const rect = anchorEl.getBoundingClientRect();

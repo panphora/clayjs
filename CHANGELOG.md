@@ -11,6 +11,8 @@
 - `clay:sync-applied` lists every unresolved conflict, not only the current frame's
 - RichClay, Quickcrop and the CMS get generated skins that page CSS cannot restyle: RichClay and Quickcrop follow the page's colour scheme, and a CMS shell with `data-theme` keeps its own theme
 - `clay.modal`'s `html`, `yes` and `no` accept a node
+- `clay.modal` takes a `title`, drawn as a header with the close button, and a `width`
+- `clay.saveToast = true` shows Saved as a toast, with the host's message, instead of on the indicator chip
 
 ### Changed
 - A lost conflict no longer keeps the page dirty or holds the automatic save, and a save no longer clears it: the edit waits in `clay.conflicts` until the person acknowledges it. `liveSync.unresolvedConflicts` is now a read-only view of that ledger, so assigning to it throws
@@ -23,6 +25,11 @@
 - Quickcrop writes its crop geometry and RichClay its floating toolbar placement inline with `!important`, so page CSS cannot move them
 - RichClay checks a descendant's own region marker on the element itself
 - The close warning also counts unsaved work that has not reached the page yet
+- Each save state shows in one place: the indicator chip shows Saving… and Saved, and with clay-ui loaded a failed or offline save is a toast that stays up until the next save succeeds
+- Toasts, the modal, and ask, confirm, tell and snippet take the Hyperclay dashboard's styles. Ask, confirm and tell use the prompt as the dialog's title, with Cancel and OK or Confirm buttons, and Enter confirms
+- The AI edit chip and bubble read "AI". The bubble sits left of the CMS's Edit content toggle, and a second click closes an empty panel
+- The section changed bar sits beside the section it names and follows it as the page scrolls
+- The CMS's Edit content toggle and RichClay's toolbar buttons use Bevel's raised button face and hover, and RichClay's Block style button is the normal toolbar width
 
 ### Removed
 - Classes and ids on injected UI (`.micromodal*`, `.toast*`, `#hyper-edit-*`, `.hep-*`, `.snippet-warning`) and the `--clay-notice-*`, `--clay-presence-*`, `--clay-section-*`, `--clay-indicator-*` and `--hyperclay-modal-*` custom properties: page CSS aimed at them no longer applies

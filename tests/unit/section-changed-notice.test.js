@@ -1,5 +1,7 @@
 import { jest } from "@jest/globals";
 
+import { capture, last } from "./helpers/injected-ui.js";
+
 /**
  * "<name> changed this section", and the five ways it stays quiet.
  *
@@ -422,4 +424,119 @@ test("a notice is not an edit", async () => {
   await settle();
   expect(observed.length).toBeGreaterThan(0);
   sync.stop();
+});
+
+// =============================================================================
+// Where the line is drawn
+// =============================================================================
+
+// jsdom lays nothing out, so a region's rect is all zeros without help: the four
+// cases below are the geometry `place()` has to get right.
+function regionWith(rect) {
+  const region = document.createElement("div");
+  region.setAttribute("contenteditable", "");
+  document.body.appendChild(region);
+  Object.defineProperty(region, "getBoundingClientRect", { configurable: true, value: () => rect });
+  return region;
+}
+
+function sized(width, height) {
+  const beforeWidth = Object.getOwnPropertyDescriptor(window, "innerWidth");
+  const beforeHeight = Object.getOwnPropertyDescriptor(window, "innerHeight");
+  Object.defineProperty(window, "innerWidth", { configurable: true, writable: true, value: width });
+  Object.defineProperty(window, "innerHeight", { configurable: true, writable: true, value: height });
+  return () => {
+    Object.defineProperty(window, "innerWidth", beforeWidth);
+    Object.defineProperty(window, "innerHeight", beforeHeight);
+  };
+}
+
+// jsdom drops `auto` and calc() with env() from el.style, so the declarations that
+// matter here are read from the style-call log, where the written value survives.
+const shown = (rect) => capture(() => {
+  sectionNotice.remember(regionWith(rect));
+  sectionNotice.show("Grace Hopper");
+});
+
+test("the line sits just above the section it names", () => {
+  const restore = sized(1024, 768);
+  try {
+    const calls = shown({ top: 300, bottom: 360, left: 40, right: 600, width: 560, height: 60 });
+
+    expect(last(calls, notice(), "top")).toBe("254px");
+    expect(last(calls, notice(), "left")).toBe("40px");
+    expect(last(calls, notice(), "bottom")).toBe("auto");
+  } finally {
+    restore();
+  }
+});
+
+test("with no room above, the line sits just below the section", () => {
+  const restore = sized(1024, 768);
+  try {
+    const calls = shown({ top: 20, bottom: 80, left: 40, right: 600, width: 560, height: 60 });
+
+    expect(last(calls, notice(), "top")).toBe("86px");
+    expect(last(calls, notice(), "bottom")).toBe("auto");
+  } finally {
+    restore();
+  }
+});
+
+test("a section out of view leaves the line in its corner", () => {
+  const restore = sized(1024, 768);
+  try {
+    const calls = shown({ top: -500, bottom: -440, left: 40, right: 600, width: 560, height: 60 });
+
+    expect(last(calls, notice(), "top")).toBe("auto");
+    expect(last(calls, notice(), "bottom")).toBe("calc(72px + env(safe-area-inset-bottom,0px))");
+    expect(last(calls, notice(), "left")).toBe("calc(12px + env(safe-area-inset-left,0px))");
+  } finally {
+    restore();
+  }
+});
+
+test("a line hidden by the conflict notice stops following", () => {
+  const restore = sized(1024, 768);
+  try {
+    const rect = { top: 300, bottom: 360, left: 40, right: 600, width: 560, height: 60 };
+    sectionNotice.remember(regionWith(rect));
+    sectionNotice.show("Grace Hopper");
+    expect(notice().style.top).toBe("254px");
+
+    // The conflict notice hides the line directly, without calling hide().
+    notice().style.setProperty("display", "none", "important");
+    window.dispatchEvent(new Event("scroll"));
+
+    rect.top = 700;
+    rect.bottom = 760;
+    window.dispatchEvent(new Event("scroll"));
+    expect(notice().style.top).toBe("254px");
+  } finally {
+    restore();
+  }
+});
+
+test("the line follows its section while the page scrolls", () => {
+  const restore = sized(1024, 768);
+  try {
+    const rect = { top: 300, bottom: 360, left: 40, right: 600, width: 560, height: 60 };
+    sectionNotice.remember(regionWith(rect));
+    sectionNotice.show("Grace Hopper");
+    expect(notice().style.top).toBe("254px");
+
+    rect.top = 500;
+    rect.bottom = 560;
+    window.dispatchEvent(new Event("scroll"));
+    expect(notice().style.top).toBe("454px");
+
+    // Dismissing stops the following, so the line stays where it was put.
+    sectionNotice.hide();
+    rect.top = 100;
+    rect.bottom = 160;
+    window.dispatchEvent(new Event("scroll"));
+    expect(notice().style.top).toBe("454px");
+  } finally {
+    restore();
+  }
 });

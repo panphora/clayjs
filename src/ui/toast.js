@@ -1,21 +1,26 @@
 // a nice, simple alert
 // ❗️ don't use too much text!
+//
+// The Hyperclay dashboard's toast (Bevel's React toast with the dashboard's overrides),
+// drawn inline: a 3px tone edge, a 16px stroked glyph, 13.5px semibold text, a quiet close.
 import { set } from "../lib/hostile-css.js";
-import { bevelBox, bevelSurface, bevelText, bevelIconButton, pageScheme, protectIcon } from "./bevel-controls.js";
+import { bevelBox, bevelSurface, bevelText, pageScheme, protectIcon } from "./bevel-controls.js";
 import { TOKENS, FONT_SANS } from "./bevel.js";
 
 const icon = (d) =>
-  `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="${d}" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="square"/></svg>`;
+  `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="${d}" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>`;
+
+const ALERT = "m12 3 10 18H2ZM12 9v5m0 3v1";
 
 const TONES = {
-  success: { edge: TOKENS.teal, icon: icon("M5 12.5l4.5 4.5L19 7.5") },
-  error: { edge: TOKENS.ox, icon: icon("M6 6l12 12M18 6L6 18") },
-  warning: { edge: TOKENS.brass, icon: icon("M12 4L2.5 20h19L12 4zM12 10v4.5M12 17v1") },
-  info: { edge: TOKENS["ink-2"], icon: icon("M12 3a9 9 0 1 0 0 18a9 9 0 0 0 0-18zM12 11v6M12 7v1.5") },
+  success: { edge: TOKENS.teal, icon: icon("m5 12 4 4L19 6") },
+  error: { edge: TOKENS.ox, icon: icon(ALERT) },
+  warning: { edge: TOKENS.brass, icon: icon(ALERT) },
+  info: { edge: TOKENS.brass, icon: icon("M3 3h18v5H3ZM5 8v13h14V8M9 12h6") },
 };
 
 const CLOSE_ICON =
-  '<svg viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M2 2l8 8M10 2L2 10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="square"/></svg>';
+  '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>';
 
 const HIDDEN = ["opacity:0", "transform:translateX(24px)"];
 
@@ -30,11 +35,12 @@ function stack() {
   const existing = document.querySelector("[data-clay-toasts]");
   if (existing) return existing;
   const box = bevelBox("div", [
-    "position:fixed", "top:20px", "right:20px", "z-index:9999",
+    "position:fixed", "top:18px", "right:18px", "z-index:9999",
     "display:flex", "flex-direction:column", "align-items:flex-end", "gap:10px",
-    "width:min(400px, calc(100vw - 40px))", "pointer-events:none",
+    "width:min(330px, calc(100vw - 36px))", "pointer-events:none",
   ]);
   box.setAttribute("data-clay-toasts", "");
+  box.setAttribute("aria-live", "polite");
   document.body.append(box);
   return box;
 }
@@ -42,8 +48,8 @@ function stack() {
 function build(message, type) {
   const tone = TONES[type];
   const el = bevelSurface("div", [
-    "display:flex", "align-items:flex-start", "gap:12px", "max-width:100%",
-    "padding:12px 12px 12px 14px", `border-inline-start:3px solid ${tone.edge}`,
+    "display:flex", "align-items:flex-start", "gap:12px", "width:100%",
+    "padding:13px 12px 13px 15px", `border-inline-start:3px solid ${tone.edge}`,
     "cursor:pointer", "pointer-events:auto", `color-scheme:${pageScheme()}`,
     ...HIDDEN, `transition:${motion()}`,
   ]);
@@ -53,9 +59,33 @@ function build(message, type) {
   protectIcon(glyph.firstElementChild, 16);
   // A message can carry a filename, and a filename is whatever whoever wrote the
   // file chose. It goes in as text so markup in a name can never become markup here.
-  const text = bevelText("span", ["flex:1 1 auto", "min-width:0", `font:600 14px/1.35 ${FONT_SANS}`, "overflow-wrap:anywhere"], message);
+  const text = bevelText("span", ["flex:1 1 auto", "min-width:120px", `font:600 13.5px/1.3 ${FONT_SANS}`, "overflow-wrap:anywhere"], message);
   el.append(glyph, text);
   return el;
+}
+
+// The dashboard's toast close: a bare 24px square in the muted ink, the sunk ground on hover.
+function closeButton(onClick) {
+  const b = bevelBox("button", [
+    "flex:none", "display:inline-grid", "place-items:center", "width:24px", "height:24px",
+    "margin:-2px -2px 0 0", "padding:0", "border:0", "cursor:pointer",
+    "background:transparent", `color:${TOKENS.muted}`,
+  ]);
+  b.type = "button";
+  b.setAttribute("aria-label", "Dismiss");
+  b.title = "Dismiss";
+  b.innerHTML = CLOSE_ICON;
+  protectIcon(b.firstElementChild, 14);
+  const paint = (lit) => {
+    set(b, "color", lit ? TOKENS.ink : TOKENS.muted);
+    set(b, "background", lit ? TOKENS.sunk : "transparent");
+  };
+  b.addEventListener("pointerenter", () => paint(true));
+  b.addEventListener("pointerleave", () => paint(false));
+  b.addEventListener("focus", () => { paint(true); set(b, "outline", `2px solid ${TOKENS.brass}`); set(b, "outline-offset", "1px"); });
+  b.addEventListener("blur", () => { paint(false); set(b, "outline", "none"); });
+  b.addEventListener("click", onClick);
+  return b;
 }
 
 function reveal(el) {
@@ -95,13 +125,10 @@ function toastPersistent(message, messageType = "warning") {
 
   const el = build(message, TONES[messageType] ? messageType : "warning");
   set(el, "cursor", "default");
-  const close = bevelIconButton(CLOSE_ICON, {
-    label: "Close",
-    onClick: (e) => {
-      e.stopPropagation();
-      // A newer toast with the same message may have taken this entry since.
-      dismiss(el, () => { if (activePersistentToasts.get(message) === el) activePersistentToasts.delete(message); });
-    },
+  const close = closeButton((e) => {
+    e.stopPropagation();
+    // A newer toast with the same message may have taken this entry since.
+    dismiss(el, () => { if (activePersistentToasts.get(message) === el) activePersistentToasts.delete(message); });
   });
   el.append(close);
 
@@ -109,5 +136,13 @@ function toastPersistent(message, messageType = "warning") {
   reveal(el);
 }
 
-export { toastPersistent };
+// Takes down the persistent toast showing this message, if one is up.
+function dismissPersistent(message) {
+  const el = activePersistentToasts.get(message);
+  if (!el) return;
+  activePersistentToasts.delete(message);
+  dismiss(el);
+}
+
+export { toastPersistent, dismissPersistent };
 export default toast;

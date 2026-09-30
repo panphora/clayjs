@@ -154,6 +154,16 @@ describe("what a skin leaves alone", () => {
     expect(checked).toBeGreaterThan(40);
   });
 
+  test("the Block style button keeps the normal button width, and hover is Bevel's", () => {
+    expect(richclay.CSS).not.toContain("118px");
+    const hover = ":is(.richclay-toolbar, .richclay-float, .richclay-dialog) .richclay-button:hover:not([aria-pressed=\"true\"], [aria-expanded=\"true\"], :disabled)";
+    expect(richclay.CSS).toContain(`${hover}{border-color:light-dark(#FFF9ED, #3C4260)`);
+    expect(richclay.CSS).toContain(
+      `${hover}{border-color:light-dark(#FFF9ED, #3C4260) light-dark(#D6C3A5, #1B2033) light-dark(#D6C3A5, #1B2033) light-dark(#FFF9ED, #3C4260) !important;background:color-mix(in srgb, light-dark(#F1E7D4, #22273E), light-dark(#FFF9ED, #3C4260) 45%) !important}`
+    );
+    expect(richclay.CSS).toContain(`${hover} .richclay-cut{stroke:color-mix(`);
+  });
+
   test("the CMS skin is pins and a system face: it never pins a slider's runtime value and re-raises the chip's local tokens", () => {
     expect(cms.CSS).not.toMatch(/--mirk-value/);
     expect(cms.CSS).not.toMatch(/Departure Mono/);

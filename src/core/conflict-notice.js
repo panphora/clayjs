@@ -334,7 +334,8 @@ function drawPanel(m) {
 }
 
 function drawWell(rows) {
-  const well = bevelWell(["flex:1 1 auto", "margin:0 12px 12px", "min-height:0", "overflow:auto"]);
+  // The sunk ground, not the recess: the recess's lighter blue glares against the panel in dark mode.
+  const well = bevelWell(["flex:1 1 auto", "margin:0 16px 12px", "min-height:0", "overflow:auto", `background:${TOKENS.sunk}`, `border:1px solid ${TOKENS["line-2"]}`]);
   const head = el("div", ["all:initial", "position:sticky", "top:0", "z-index:1", "display:flex", "align-items:center", "gap:8px", "padding:8px 12px", `background:${TOKENS.sunk}`, `border-bottom:1px solid ${TOKENS["line-2"]}`, `color:${TOKENS.muted}`, `font:600 10.5px/1 ${FONT_MONO}`, "letter-spacing:.12em", "text-transform:uppercase"]);
   const hideWrap = el("span", ["all:initial", "display:inline-flex", "margin-left:auto"]);
   hideWrap.append(key(bevelButton("Hide", { small: true, variant: "quiet", onClick: toggleList }), "list"));
@@ -387,7 +388,7 @@ function buildRow(record, index) {
 }
 
 function eyeButton(row) {
-  const base = ["all:initial", "color-scheme:inherit", "box-sizing:border-box", "cursor:pointer", "display:inline-grid", "place-items:center", "width:22px", "height:20px", `color:${WARN}`];
+  const base = ["all:initial", "color-scheme:inherit", "box-sizing:border-box", "cursor:pointer", "display:inline-grid", "place-items:center", "width:22px", "height:20px", `color:${TOKENS.ink}`];
   const b = el("button", base);
   b.type = "button";
   b.innerHTML = EYE_SVG;
@@ -432,7 +433,23 @@ function ring(target) {
   dropRing();
   if (!target || !target.isConnected) return;
   const still = !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-  target.scrollIntoView?.({ block: "center", behavior: still ? "instant" : "smooth" });
+  const behavior = still ? "instant" : "smooth";
+  // The notice sits at the bottom of the viewport: centre the target in what is left
+  // above it, or the outline lands on the panel instead of the text.
+  const top = root?.getBoundingClientRect().top ?? 0;
+  const cover = root && top > 0 ? Math.max(0, window.innerHeight - top) : 0;
+  if (!cover) {
+    target.scrollIntoView?.({ block: "center", behavior });
+  } else {
+    // Centre first, so a page whose own scroller holds the target still brings it
+    // up; then move the window the rest of the way. A target taller than the free
+    // space shows its top instead.
+    target.scrollIntoView?.({ block: "center", behavior: "instant" });
+    const r = target.getBoundingClientRect();
+    const free = window.innerHeight - cover;
+    const shift = r.height > free - 24 ? r.top - 12 : r.top + r.height / 2 - free / 2;
+    window.scrollBy?.({ top: shift, behavior });
+  }
   ringTarget = target;
   ringEl = el("div", ["all:initial", "color-scheme:inherit", "position:fixed", "pointer-events:none", "z-index:2147483001", `outline:2px solid ${WARN}`, "outline-offset:3px", `background:color-mix(in srgb, ${WARN} 14%, transparent)`]);
   document.body.appendChild(ringEl);

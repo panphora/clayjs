@@ -1,5 +1,7 @@
 import { jest } from "@jest/globals";
 import { RUNTIME_ONLY } from "../../src/ui/bevel-controls.js";
+import { TOKENS } from "../../src/ui/bevel.js";
+import { captureAsync, last } from "./helpers/injected-ui.js";
 
 /**
  * One notice for the two things this tab holds that the page no longer shows:
@@ -720,6 +722,62 @@ test("the eye scrolls to the element and rings it without touching the page", as
   expect(document.body.contains(ring)).toBe(false);
 }, 10000);
 
+test("with the panel covering the bottom of the screen, the eye centres the element in the space above it", async () => {
+  const h = document.querySelector("#h");
+  h.scrollIntoView = jest.fn();
+  h.getBoundingClientRect = () => ({ top: 409, bottom: 435, left: 0, right: 300, width: 300, height: 26 });
+  const untouched = h.outerHTML;
+  const innerHeight = window.innerHeight;
+  const scrollBy = window.scrollBy;
+  window.scrollBy = jest.fn();
+  Object.defineProperty(window, "innerHeight", { configurable: true, value: 844 });
+  try {
+    three();
+    await frame();
+    review();
+    buttonSaying(/See the edits/).click();
+    root().getBoundingClientRect = () => ({ top: 403, bottom: 828, left: 12, right: 378, width: 366, height: 425 });
+    eyeOf(rows()[0]).click();
+
+    expect(h.scrollIntoView.mock.calls.map((c) => c[0].block)).toEqual(["center"]);
+    expect(window.scrollBy).toHaveBeenCalledTimes(1);
+    // Space above the panel is 403px; the element's centre (422) goes to 201.5.
+    expect(window.scrollBy.mock.calls[0][0].top).toBeCloseTo(422 - 201.5);
+    expect(h.outerHTML).toBe(untouched);
+  } finally {
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: innerHeight });
+    window.scrollBy = scrollBy;
+  }
+});
+
+test("a target taller than the space above the panel shows its top", async () => {
+  const h = document.querySelector("#h");
+  h.scrollIntoView = jest.fn();
+  h.getBoundingClientRect = () => ({ top: 409, bottom: 1009, left: 0, right: 300, width: 300, height: 600 });
+  const untouched = h.outerHTML;
+  const innerHeight = window.innerHeight;
+  const scrollBy = window.scrollBy;
+  window.scrollBy = jest.fn();
+  Object.defineProperty(window, "innerHeight", { configurable: true, value: 844 });
+  try {
+    three();
+    await frame();
+    review();
+    buttonSaying(/See the edits/).click();
+    root().getBoundingClientRect = () => ({ top: 403, bottom: 828, left: 12, right: 378, width: 366, height: 425 });
+    eyeOf(rows()[0]).click();
+
+    expect(h.scrollIntoView.mock.calls.map((c) => c[0].block)).toEqual(["center"]);
+    expect(window.scrollBy).toHaveBeenCalledTimes(1);
+    // 600px does not fit in the 403px above the panel: its top goes 12px below the viewport's.
+    expect(window.scrollBy.mock.calls[0][0].top).toBe(409 - 12);
+    expect(h.outerHTML).toBe(untouched);
+  } finally {
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: innerHeight });
+    window.scrollBy = scrollBy;
+  }
+});
+
 test("Minimize takes the ring with it", async () => {
   const h = document.querySelector("#h");
   h.scrollIntoView = jest.fn();
@@ -1105,4 +1163,23 @@ test("the eye icon cannot be hidden by the page's own CSS", async () => {
   } finally {
     style.remove();
   }
+});
+
+test("the replaced edits well uses the sunk ground", async () => {
+  three();
+  await frame();
+  review();
+
+  const calls = await captureAsync(async () => {
+    buttonSaying(/See the edits/).click();
+    await frame();
+  });
+
+  // jsdom drops light-dark() from el.style, so the written declarations are read
+  // from the call log: the well is the scroller holding the list's sticky head.
+  const list = well();
+  expect(list).not.toBeNull();
+  expect(last(calls, list, "background")).toContain("#F4ECDF");
+  expect(last(calls, list, "background")).toBe(TOKENS.sunk);
+  expect(last(calls, list, "border")).toBe(`1px solid ${TOKENS["line-2"]}`);
 });

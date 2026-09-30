@@ -56,11 +56,12 @@ const SHAPES = new Set(['path', 'circle', 'rect', 'line', 'polyline', 'polygon',
 // Presentation attributes lose to any author rule, so the icon's own attributes are
 // restated as inline !important declarations: the page cannot hide, resize or
 // repaint it. A path's geometry is pinned through the `d` property as well.
+// It inherits colour, so a currentColor shape takes the ink of the control it sits in.
 function protectIcon(svg, size) {
   if (!svg || svg.namespaceURI !== SVG_NS) return;
   runtime(svg);
   style(svg, [
-    ...RESET, 'display:block', `width:${size}px`, `height:${size}px`, 'overflow:visible',
+    ...RESET, 'color:inherit', 'display:block', `width:${size}px`, `height:${size}px`, 'overflow:visible',
     'visibility:visible', 'opacity:1', 'transform:none', 'pointer-events:none',
   ]);
   for (const el of svg.querySelectorAll('*')) {

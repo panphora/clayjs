@@ -1,5 +1,6 @@
 import { bevelButton, setShown } from "./bevel-controls.js";
-import { bevelDialog, dismissOf } from "./bevel-dialog.js";
+import { set } from "../lib/hostile-css.js";
+import { bevelDialog, dismissOf, DIALOG_BUTTON } from "./bevel-dialog.js";
 
 /*
 
@@ -17,6 +18,8 @@ import { bevelDialog, dismissOf } from "./bevel-dialog.js";
   themodal.no = content;
 
   themodal.closeHtml = "x";  // any non-empty value shows the corner close
+  themodal.title = content;  // markup or a node: a header with the title (optional)
+  themodal.width = "440px";  // the panel's width (default 600px)
 
   themodal.disableFocus = true;
   themodal.disableScroll = true;
@@ -294,6 +297,8 @@ const themodal = (() => {
   let no = "";
   let zIndex = "100";
   let closeHtml = "";
+  let title = "";
+  let width = "";
 
   let enableClickOutsideCloses = true;
   let disableScroll = true;
@@ -342,15 +347,15 @@ const themodal = (() => {
       // Expose this modal's dismiss so a later open()/close can settle it.
       this._dismiss = dismiss;
 
-      const shell = bevelDialog({ zIndex, closable: !!closeHtml });
+      const shell = bevelDialog({ zIndex, closable: !!closeHtml, titled: !!title, ...(width ? { width } : {}) });
       const modalRootElem = shell.root;
       const modalOverlayElem = shell.overlay;
       const modalContainerElem = shell.panel;
       const modalContentElem = shell.body;
       const modalButtonsElem = shell.footer;
       const modalCloseElem = shell.close;
-      const modalNoElem = bevelButton('');
-      const modalYesElem = bevelButton('', { variant: 'primary' });
+      const modalNoElem = bevelButton('', { extra: DIALOG_BUTTON });
+      const modalYesElem = bevelButton('', { variant: 'primary', extra: DIALOG_BUTTON });
       modalYesElem.type = 'submit';
       modalButtonsElem.append(modalNoElem, modalYesElem);
 
@@ -362,6 +367,11 @@ const themodal = (() => {
       place(modalContentElem, html);
       place(modalYesElem.firstChild, yes);
       place(modalNoElem.firstChild, no);
+      if (title) place(shell.heading, title);
+      if (title) modalContainerElem.setAttribute("aria-label", shell.heading.textContent.trim());
+      // No body content (a confirm that is all title) means no empty band between header and footer.
+      setShown(modalContentElem, !(html === "" || html == null), "block");
+      if ((html === "" || html == null) && title) set(modalButtonsElem, "border-top", "0");
 
       document.body.prepend(modalRootElem);
 
@@ -456,6 +466,8 @@ const themodal = (() => {
           no = "";
           zIndex = "100";
           closeHtml = "";
+          title = "";
+          width = "";
 
           // reset to defaults
           enableClickOutsideCloses = true;
@@ -483,7 +495,7 @@ const themodal = (() => {
 
       if (!disableFocus) {
         let firstInput = modalContentElem.querySelector(":is(input,textarea,button):not([hidden])") ||
-          [modalNoElem, modalYesElem].find(button => !button.hidden);
+          [modalYesElem, modalNoElem].find(button => !button.hidden);
         firstInput?.focus();
         firstInput?.setSelectionRange?.(-1, -1);
       }
@@ -503,6 +515,18 @@ const themodal = (() => {
     },
     set closeHtml(newVal) {
       closeHtml = newVal;
+    },
+    get title() {
+      return title;
+    },
+    set title(newVal) {
+      title = newVal;
+    },
+    get width() {
+      return width;
+    },
+    set width(newVal) {
+      width = newVal;
     },
     get yes() {
       return yes;

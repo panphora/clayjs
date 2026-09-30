@@ -5,12 +5,15 @@ import { capture, last, expectHostileProof, expectCallsResolved } from "./helper
 const root = () => document.querySelector("[data-clay-modal]");
 const dialog = () => root().querySelector('[role="dialog"]');
 const yes = () => dialog().querySelector('button[type="submit"]');
+const close = () => dialog().querySelector('button[aria-label="Close"]');
 
-function open({ html = '<p data-caller="1">Hi <b>there</b></p>', yesLabel = "Yes", noLabel = "No", closeHtml = "x" } = {}) {
+function open({ html = '<p data-caller="1">Hi <b>there</b></p>', yesLabel = "Yes", noLabel = "No", closeHtml = "x", title = "", width = "" } = {}) {
   themodal.html = html;
   themodal.yes = yesLabel;
   themodal.no = noLabel;
   themodal.closeHtml = closeHtml;
+  themodal.title = title;
+  themodal.width = width;
   return capture(() => themodal.open());
 }
 
@@ -49,20 +52,37 @@ test("html: a node is placed as it is, not serialised", () => {
   expect(clicked).toBe(1);
 });
 
-test("material: a Bevel panel, a primary yes, a default no", () => {
+test("material: a Bevel panel, a 32px primary yes, a 32px default no", () => {
   const calls = open();
   expect(last(calls, dialog(), "background")).toBe(TOKENS.surface);
   expect(last(calls, yes(), "background")).toBe(TOKENS.ink);
+  expect(last(calls, yes(), "height")).toBe("32px");
   const no = [...dialog().querySelectorAll('button[type="button"]')].find((b) => !b.hasAttribute("aria-label"));
   expect(last(calls, no, "background")).toBe(TOKENS.face);
+  expect(last(calls, no, "height")).toBe("32px");
 });
 
-test("close corner: shown when closeHtml is set, absent when it is empty", () => {
+test("title: the prompt is the panel's heading, and the close moves into the header", () => {
+  const calls = open({ title: "Heads up", width: "440px" });
+  const heading = dialog().querySelector('[role="heading"]');
+  const header = heading.parentElement;
+  expect([heading.textContent, heading.getAttribute("aria-level")]).toEqual(["Heads up", "2"]);
+  expect(header.parentElement).toBe(dialog());
+  expect(close().parentElement).toBe(header);
+  expect(last(calls, dialog(), "width")).toBe("min(440px, 100%)");
+
+  themodal.close();
+  open();
+  expect(dialog().querySelector('[role="heading"]')).toBeNull();
+  expect(close().parentElement).toBe(dialog());
+});
+
+test("close: shown when closeHtml is set, absent when it is empty", () => {
   open({ closeHtml: "x" });
-  expect(dialog().querySelector('button[aria-label="Close modal"] svg')).not.toBeNull();
+  expect(dialog().querySelector('button[aria-label="Close"] svg')).not.toBeNull();
   themodal.close();
   open({ closeHtml: "" });
-  expect(dialog().querySelector('button[aria-label="Close modal"]')).toBeNull();
+  expect(dialog().querySelector('button[aria-label="Close"]')).toBeNull();
 });
 
 test("hidden button: a hover or focus rebuild cannot bring back a button with no label", () => {

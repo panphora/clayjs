@@ -344,7 +344,9 @@ token variant, `POST /_/save/{token}`, read from `<html savetoken>`.
 - `richclay` (default on) — the `editable` attribute: floating toolbar, clean HTML
   output. Tokens: `single-line`, `no-toolbar`, `toolbar-on-select`. In the saved file
   the attribute is an inert marker; no editor chrome is written to disk.
-- `indicator` — a ready-made save-status chip driven by the `clay:save-*` events.
+- `indicator` — a ready-made save-status chip driven by the `clay:save-*` events. It
+  shows Saving… and Saved. With `clay-ui.js` loaded, a failed or offline save is
+  reported by a persistent toast instead of the chip, so no save is reported twice.
 - `sync` — live sync: outside file changes and other open tabs merge into the page in
   place, preserving focus, caret, and unsaved edits (a three-way merge: both sides'
   edits survive, and the incoming change wins where both changed the same words).
@@ -403,9 +405,10 @@ token variant, `POST /_/save/{token}`, read from `<html savetoken>`.
   Also `cancel`, `get`, `list`, `isBusy`. Works in view mode too.
 - `ai-edit` (`?plugins=ai-edit`, which brings `wire` with it) — comment-to-edit AI editing:
   the same box Hyperclay Local has always shown on `/_/bus`, now a named helper request on the
-  wire. Hover a heading or paragraph for the 💬 chip, press ⌘K with the caret in one (a
+  wire. Hover a heading or paragraph for the **AI** chip, press ⌘K with the caret in one (a
   selection rides along as a quote), click bare section padding for the nearest unit, or use the
-  bottom-right bubble for the whole page. Keep saves the result through `clay.save()`; Revert puts
+  **AI** bubble at the bottom right for the whole page (it sits just left of the CMS's
+  Edit content toggle when the page has one, and a second click closes an empty panel). Keep saves the result through `clay.save()`; Revert puts
   the snapshot back. A leading `@token` picks the engine, `@file.ext` adds context, and `@page`
   saves the page first so the helper reads it from disk. Edit mode only, and dormant unless
   `clay.wire.helpers()` lists a ready `ai-edit` — so a page on HTML Clay loads it and does
@@ -468,7 +471,24 @@ token variant, `POST /_/save/{token}`, read from `<html savetoken>`.
 ## Satellites (separate libraries, one script tag each)
 
 - `clay-ui.js` — ready-made toasts, modals, and ask/confirm/tell dialogs. Listens to
-  `clay:save-*` events automatically, so adding it upgrades save feedback for free.
+  `clay:save-*` events automatically, so adding it upgrades save feedback for free:
+  a failed or offline save shows a toast that stays up until the next save succeeds,
+  and Saved shows as a toast only when the `indicator` chip is not loaded. Set
+  `clay.saveToast = true` (or `window.clay = { saveToast: true }` before clayjs loads)
+  to show Saved as a toast, with the host's message, instead of on the chip.
+  - `clay.toast(message, type)` — `success` (default), `info`, `warning` or `error`;
+    gone on click or after about 6.6 s. `clay.toastPersistent(message, type)` stays
+    until closed.
+  - `clay.ask(prompt, onYes, defaultValue, extraHtml)`, `clay.confirm(prompt, onYes,
+    extraHtml)`, `clay.tell(title, ...paragraphs)` and `clay.snippet(title, code,
+    extraHtml)` — the prompt is the dialog's title, and Enter confirms. Ask, confirm and
+    tell return a promise that resolves on OK or Confirm (ask with the typed text) and
+    rejects on Cancel, close or Escape; an `onYes` that throws keeps the dialog open and
+    toasts the error. Snippet's promise resolves when it closes.
+  - `clay.modal` — the dialog they are built on. Set `title`, `html`, `yes`, `no`
+    (markup or a node each), `closeHtml` (any non-empty value shows the close button)
+    and `width` (default `600px`), register `onYes(fn)` / `onNo(fn)`, then `open()`.
+    Every setting resets after the modal closes.
 - `clay-events.js` — HTML attributes for the events HTML forgot: `onclickaway`,
   `onclickchildren`, `onrender`, `onmutation`, `onclone`.
 - `clay-options.js` — declarative show/hide: an ancestor carries a state attribute

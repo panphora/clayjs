@@ -48,11 +48,11 @@ test("box: reset first, runtime-only, only the given rules after", () => {
   expect(expectHostileProof(box)).toBe(1);
 });
 
-test("dialog: root, backdrop, form panel; hostile-proof and resolved; the page's scheme", () => {
+test("dialog: root, backdrop, form panel, header and its heading; hostile-proof and resolved", () => {
   document.documentElement.style.colorScheme = "dark";
   let parts;
-  const calls = capture(() => { parts = bevelDialog({ zIndex: "250", width: "600px", closable: true }); });
-  const { root, overlay, panel, body, footer, close } = parts;
+  const calls = capture(() => { parts = bevelDialog({ zIndex: "250", width: "600px", closable: true, titled: true }); });
+  const { root, overlay, panel, header, heading, body, footer, close } = parts;
   document.body.append(root);
 
   expect(root.getAttribute("data-clay-modal")).toBe("");
@@ -60,22 +60,51 @@ test("dialog: root, backdrop, form panel; hostile-proof and resolved; the page's
   expect(overlay.parentElement).toBe(root);
   expect(panel.parentElement).toBe(overlay);
   expect([panel.tagName, panel.getAttribute("role"), panel.getAttribute("aria-modal")]).toEqual(["FORM", "dialog", "true"]);
-  expect(body.parentElement.parentElement).toBe(panel);
+  expect(header.parentElement).toBe(panel);
+  expect(heading.parentElement).toBe(header);
+  expect([heading.getAttribute("role"), heading.getAttribute("aria-level")]).toEqual(["heading", "2"]);
+  expect(body.parentElement).toBe(panel);
   expect(footer.previousElementSibling).toBe(body);
-  expect(close.parentElement).toBe(panel);
-  expect(expectHostileProof(root)).toBeGreaterThanOrEqual(7);
+  expect(close.parentElement).toBe(header);
+  expect(expectHostileProof(root)).toBeGreaterThanOrEqual(8);
   expectCallsResolved(calls, root);
   expect(overlay.style.zIndex).toBe("250");
   expect(overlay.tabIndex).toBe(-1);
   expect(last(calls, panel, "width")).toBe("min(600px, 100%)");
   expect(last(calls, panel, "background")).toBe(TOKENS.surface);
+  expect(last(calls, panel, "border")).toBe(`1px solid ${TOKENS["line-2"]}`);
+  expect(last(calls, panel, "box-shadow")).toBe(`6px 6px 0 color-mix(in srgb, ${TOKENS.ink} 10%, transparent)`);
   expect(root.style.getPropertyValue("color-scheme")).toBe("dark");
   document.documentElement.style.colorScheme = "";
   root.remove();
 });
 
+test("close: a 62px column at the header's right edge, the X painted inline, class-free", () => {
+  let parts;
+  const calls = capture(() => { parts = bevelDialog({ closable: true, titled: true }); });
+  const { header, close } = parts;
+  document.body.append(header);
+  const svg = close.querySelector("svg");
+  const path = svg.querySelector("path");
+
+  expect(header.contains(close)).toBe(true);
+  expect(close.getAttribute("aria-label")).toBe("Close");
+  expect(close.title).toBe("Close");
+  expect(last(calls, close, "width")).toBe("62px");
+  expect(last(calls, close, "height")).toBe("calc(100% + 1px)");
+  expect(last(calls, close, "border-left")).toBe(`1px solid ${TOKENS["line-2"]}`);
+  expect(expectHostileProof(header)).toBe(3);
+  expect(svg.getAttribute("class")).toBeNull();
+  expect(last(calls, svg, "color")).toBe("inherit");
+  expect(path.style.getPropertyValue("stroke")).toBe("currentColor");
+  expect(path.style.getPropertyPriority("stroke")).toBe("important");
+  header.remove();
+});
+
 test("dialog: no corner close unless asked for", () => {
-  const { panel, close } = bevelDialog();
+  const { panel, header, heading, close } = bevelDialog();
+  expect(header).toBeNull();
+  expect(heading).toBeNull();
   expect(close).toBeNull();
-  expect(panel.querySelector('button[aria-label="Close modal"]')).toBeNull();
+  expect(panel.querySelector('button[aria-label="Close"]')).toBeNull();
 });

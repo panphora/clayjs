@@ -11,7 +11,7 @@ const root = () => document.querySelector("[data-clay-modal], .micromodal-parent
 const dialog = () => document.querySelector('[role="dialog"]');
 const overlay = () => dialog().parentElement;
 const yes = () => dialog().querySelector('button[type="submit"]');
-const close = () => dialog().querySelector('button[aria-label="Close modal"]');
+const close = () => dialog().querySelector('button[aria-label="Close"]');
 const no = () => [...dialog().querySelectorAll('button[type="button"]')].find((b) => b !== close());
 const shown = (el) => !el.hidden && !el.classList.contains("micromodal__hide");
 
@@ -108,10 +108,12 @@ test("singleton: a second open dismisses the first and leaves one modal", () => 
 
 test("reset: every setter returns to its default after a close", () => {
   themodal.zIndex = "250";
+  themodal.title = "Title";
+  themodal.width = "440px";
   open();
   expect(overlay().style.zIndex).toBe("250");
   themodal.close();
-  expect([themodal.html, themodal.yes, themodal.no, themodal.closeHtml, themodal.zIndex]).toEqual(["", "", "", "", "100"]);
+  expect([themodal.html, themodal.yes, themodal.no, themodal.closeHtml, themodal.zIndex, themodal.title, themodal.width]).toEqual(["", "", "", "", "100", "", ""]);
   expect([themodal.disableScroll, themodal.disableFocus]).toEqual([true, false]);
 });
 

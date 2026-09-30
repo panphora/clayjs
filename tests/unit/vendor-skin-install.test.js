@@ -3,6 +3,7 @@ import { installSkin } from "../../src/ui/vendor-skin.js";
 import { RUNTIME_ONLY } from "../../src/ui/bevel-controls.js";
 import { CSS as RICHCLAY, ROOTS as RICHCLAY_ROOTS } from "../../src/ui/skins/richclay.js";
 import { CSS as CMS } from "../../src/ui/skins/cms.js";
+import { CSS as TOGGLE_CSS, ROOTS as TOGGLE_ROOTS } from "../../src/ui/skins/cms-toggle.js";
 import { CSS as QUICKCROP, ROOTS as QUICKCROP_ROOTS } from "../../src/ui/skins/quickcrop.js";
 
 /**
@@ -60,16 +61,20 @@ test("moves back to the front when something was put ahead of it", () => {
 });
 
 test.each([
-  ["richclay", "../../src/plugins/richclay.js", RICHCLAY, RICHCLAY_ROOTS],
-  ["cms", "../../src/plugins/cms.js", CMS, null],
-  ["quickcrop", "../../src/plugins/quickcrop.js", QUICKCROP, QUICKCROP_ROOTS],
-])("the %s plugin puts its skin first in <head> when it loads, with its roots' scheme where it has roots", async (name, path, css, roots) => {
+  ["richclay", "../../src/plugins/richclay.js", [["richclay", RICHCLAY, RICHCLAY_ROOTS]]],
+  ["cms", "../../src/plugins/cms.js", [["cms", CMS, null], ["cms-toggle", TOGGLE_CSS, TOGGLE_ROOTS]]],
+  ["quickcrop", "../../src/plugins/quickcrop.js", [["quickcrop", QUICKCROP, QUICKCROP_ROOTS]]],
+])("the %s plugin puts its skin first in <head> when it loads, with its roots' scheme where it has roots", async (name, path, skins) => {
   await import(path);
-  const el = document.head.querySelector(`style[data-clay-skin="${name}"]`);
-  expect(el).not.toBeNull();
-  expect(el.textContent).toBe(roots ? `${css}\n@layer clay-skin{:is(${roots.join(", ")}){color-scheme:light dark !important}}` : css);
-  expect(el.getAttribute("clay")).toBe(RUNTIME_ONLY);
-  expect(el.previousElementSibling === null || el.previousElementSibling.hasAttribute("data-clay-skin")).toBe(true);
+  // Every plugin installs at least the skin named after it; the CMS installs two.
+  expect(skins.some(([skin]) => skin === name)).toBe(true);
+  for (const [skin, css, roots] of skins) {
+    const el = document.head.querySelector(`style[data-clay-skin="${skin}"]`);
+    expect(el).not.toBeNull();
+    expect(el.textContent).toBe(roots ? `${css}\n@layer clay-skin{:is(${roots.join(", ")}){color-scheme:light dark !important}}` : css);
+    expect(el.getAttribute("clay")).toBe(RUNTIME_ONLY);
+    expect(el.previousElementSibling === null || el.previousElementSibling.hasAttribute("data-clay-skin")).toBe(true);
+  }
 });
 
 test("a skin given its roots gives them the page's scheme, the reader's when the page declares none, and re-reads it after a frame", () => {
@@ -88,6 +93,15 @@ test("a skin given its roots gives them the page's scheme, the reader's when the
 
 test("without roots the skin text is exactly the module's", () => {
   expect(installSkin("cms", CMS).textContent).toBe(CMS);
+});
+
+test("the CMS toggle skin sets the documented hooks, raised edges and a pressed state", () => {
+  for (const part of [
+    "--hcms-toggle-bg:", "--hcms-toggle-color:", ".hcms-toggle__main", ".hcms-toggle__arrow",
+    ":hover:not(:active)", ":active{border-color:",
+  ]) {
+    expect(TOGGLE_CSS).toContain(part);
+  }
 });
 
 test("after a live-sync frame every skin is back ahead of the page's stylesheets", () => {

@@ -84,10 +84,11 @@ an entry to `scripts/bevel-manifest.mjs`, run `npm run build:bevel`, and add a t
   `!important` declarations, so the page cannot hide, resize or repaint it, and pins a
   path's geometry through the `d` property as well.
 
-`src/ui/bevel-dialog.js` builds the dialog frame on these: `bevelDialog({ zIndex, width,
-closable })` returns the root (`data-clay-modal`), the backdrop, the `<form>` panel, the
-body, the footer and the corner close. It holds no behaviour; the modal and the crop
-adapter keep their own focus, Escape and settling rules.
+`src/ui/bevel-dialog.js` builds the dialog frame in the dashboard's style:
+`bevelDialog({ zIndex, width, closable, titled })` returns the root (`data-clay-modal`),
+the backdrop, the `<form>` panel, the header and its heading (when titled), the body, the
+footer and the close. It holds no behaviour; the modal and the crop adapter keep their
+own focus, Escape and settling rules.
 
 Inline styles have no `:hover`, `:active` or `:focus-visible`, so a button keeps hover,
 press, focus-visible and disabled in flags and rebuilds its whole inline style from them
@@ -123,6 +124,9 @@ cascade layer beat a page's unlayered `!important` rules.
 - RichClay and Quickcrop also get Bevel's integration rules and their own chrome
   rules, re-emitted at `!important`. The CMS gets pins and the Bevel mono face only:
   its theme sits in cascade layers on purpose, so a page's utilities can restyle it.
+- The CMS's "Edit content" toggle also gets Bevel's button face, ink and hover through
+  HyperCMS's documented --hcms-toggle-bg and --hcms-toggle-color hooks, from the
+  hand-written src/ui/skins/cms-toggle.js.
 - Every selector in a source is listed in `scripts/skin-manifest.mjs` or the build
   fails, and edited prose is never in a skin.
 - `npm run build:skins` regenerates; `npm run check:skins` fails when a skin is stale
@@ -136,9 +140,9 @@ cascade layer beat a page's unlayered `!important` rules.
 | Stale host warning | `src/core/stale-host-notice.js` | Bevel controls | Keeps view-mode and stale-host gating, and its dismiss. |
 | Presence avatars, count, tooltip | `src/sync/presence.js` | Bevel controls | Participant colours keep their meaning; faces are square, in the mono face. |
 | Section-changed bar | `src/sync/section-notice.js` | Bevel controls | Keeps attribution and dismiss timing, and stays hidden under the conflict notice. |
-| Save indicator chip | `src/plugins/indicator.js` | Bevel controls | Error and offline wear the ox tone. |
-| Toasts | `src/ui/toast.js` | Bevel controls | Keeps caller options, timing and actions; markers are `data-clay-toasts` and `data-clay-toast`. |
-| Modal shell | `src/ui/modal.js`, `src/ui/bevel-dialog.js` | Bevel controls | Keeps focus, Escape and settling; `html`, `yes` and `no` take markup or a node, and caller content is never styled. |
+| Save indicator chip | `src/plugins/indicator.js` | Bevel controls | Error and offline wear the ox tone, unless clay-ui's toasts are loaded to carry them. With clay-ui's clay.saveToast = true, saved is a toast instead. |
+| Toasts | `src/ui/toast.js` | Bevel controls | Keeps caller options and timing; the dashboard's toast style; markers are `data-clay-toasts` and `data-clay-toast`. |
+| Modal shell | `src/ui/modal.js`, `src/ui/bevel-dialog.js` | Bevel controls | Keeps focus, Escape and settling; `title`, `html`, `yes` and `no` take markup or a node, and caller content is never styled. |
 | Ask, confirm, tell and snippet dialogs | `src/ui/dialogs.js` | Bevel controls | Keeps promise and callback behaviour. |
 | AI edit chrome | `src/plugins/ai-edit.js` | Bevel controls | Ring, panel, chip and bubble only; the contenteditable focus rule is unchanged. |
 | RichClay toolbar, menus, floating toolbar, link dialog | `src/plugins/richclay.js`, `src/ui/skins/richclay.js` | vendor skin | Edited prose is never restyled. RichClay has no image toolbar; Squire's resize handles sit inside the prose. |

@@ -44,7 +44,7 @@ test("tone: the inline-start edge and the icon follow the type, unknown types fa
     success: `3px solid ${TOKENS.teal}`,
     error: `3px solid ${TOKENS.ox}`,
     warning: `3px solid ${TOKENS.brass}`,
-    info: `3px solid ${TOKENS["ink-2"]}`,
+    info: `3px solid ${TOKENS.brass}`,
   });
   toast("odd", "nonsense");
   expect(toasts().at(-1).getAttribute("data-clay-toast")).toBe("success");
@@ -100,7 +100,7 @@ test("control: a toast dismisses on click, a persistent one only through its clo
   expect(sticky.isConnected).toBe(true);
 
   const close = sticky.querySelector("button");
-  expect(close.getAttribute("aria-label")).toBe("Close");
+  expect(close.getAttribute("aria-label")).toBe("Dismiss");
   close.click();
   jest.advanceTimersByTime(500);
   expect(sticky.isConnected).toBe(false);

@@ -31,7 +31,8 @@
  * The region is kept AFTER focus leaves, deliberately. The three-way merge
  * keeps the reader's own typing in the focused region and restores the caret,
  * so the frame worth reporting is the one that lands on the paragraph the
- * reader just left.
+ * reader just left. The line is drawn beside that region, so the reader sees
+ * which section it means.
  *
  * DISMISS ONLY. An undo here would mean recovering displaced local work, which
  * nothing in this library builds. Unsaved local work survives the three-way
@@ -107,6 +108,7 @@ class SectionNotice {
     this._onFocusIn = (event) => this.remember(event.target);
     this._onEdit = (event) => this.refresh(event.target);
     this._onApplied = (event) => this.applied(event && event.detail);
+    this._onMove = () => this.place();
   }
 
   /** Idempotent, so importing this module twice cannot double-report a frame. */
@@ -123,6 +125,7 @@ class SectionNotice {
   destroy() {
     if (!this._wired) return;
     this._wired = false;
+    this.follow(false);
     document.removeEventListener('focusin', this._onFocusIn);
     document.removeEventListener('input', this._onEdit);
     document.removeEventListener('clay:sync-applied', this._onApplied);
@@ -167,12 +170,49 @@ class SectionNotice {
     this.line.textContent = `${name} changed this section`;
     set(this.root, 'color-scheme', pageScheme());
     set(this.root, 'display', 'flex');
+    this.place();
+    this.follow(true);
   }
 
   hide() {
     if (!this.root) return;
     this.line.textContent = '';
     set(this.root, 'display', 'none');
+    this.follow(false);
+  }
+
+  // Beside the section it names: just above its top edge, or just below it when there
+  // is no room above. A section scrolled out of view, removed by the frame, or never
+  // focused leaves the line in its corner, clear of the conflict bar.
+  place() {
+    if (!this.root) return;
+    // The conflict notice hides the line directly; stop following until the next show().
+    if (this.root.style.display === 'none') { this.follow(false); return; }
+    const r = this.region && this.region.isConnected ? this.region.getBoundingClientRect() : null;
+    const vw = document.documentElement.clientWidth || window.innerWidth;
+    const vh = document.documentElement.clientHeight || window.innerHeight;
+    if (!r || !(r.width || r.height) || r.bottom <= 0 || r.top >= vh) {
+      set(this.root, 'top', 'auto');
+      set(this.root, 'left', 'calc(12px + env(safe-area-inset-left,0px))');
+      set(this.root, 'bottom', 'calc(72px + env(safe-area-inset-bottom,0px))');
+      return;
+    }
+    const h = this.root.offsetHeight || 40;
+    const w = this.root.offsetWidth || 280;
+    const gap = 6;
+    const top = r.top - h - gap >= 8 ? r.top - h - gap : Math.min(r.bottom + gap, vh - h - 8);
+    const left = Math.max(12, Math.min(r.left, vw - w - 12));
+    set(this.root, 'bottom', 'auto');
+    set(this.root, 'top', `${Math.round(top)}px`);
+    set(this.root, 'left', `${Math.round(left)}px`);
+  }
+
+  follow(on) {
+    if (typeof window === 'undefined' || !!on === !!this._following) return;
+    this._following = !!on;
+    const method = on ? 'addEventListener' : 'removeEventListener';
+    window[method]('scroll', this._onMove, { capture: true, passive: true });
+    window[method]('resize', this._onMove, { passive: true });
   }
 
   build() {

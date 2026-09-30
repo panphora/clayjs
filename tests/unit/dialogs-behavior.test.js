@@ -11,7 +11,7 @@ const { default: themodal } = await import("../../src/ui/modal.js");
 // after the dialogs move onto Bevel.
 const dialog = () => document.querySelector('[role="dialog"]');
 const submit = () => dialog().querySelector('button[type="submit"]');
-const closeButton = () => dialog().querySelector('button[aria-label="Close modal"]');
+const closeButton = () => dialog().querySelector('button[aria-label="Close"]');
 const anyToast = () => document.querySelector("[data-clay-toast], .toast");
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -69,7 +69,7 @@ test("data-copy buttons in caller content copy, and so does snippet's copy butto
 
   snippet("Embed", "the code");
   await settle();
-  const copyButton = [...dialog().querySelectorAll("button")].find((b) => b.textContent.trim() === "copy");
+  const copyButton = [...dialog().querySelectorAll("button")].find((b) => b.textContent.trim() === "Copy");
   copyButton.click();
   expect(copied).toEqual(["https://x.test", "the code"]);
 });

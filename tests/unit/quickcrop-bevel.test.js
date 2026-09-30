@@ -76,7 +76,7 @@ test("frame: confirm, close, Escape and the backdrop each report once", () => {
   expect(document.querySelector("[data-clay-modal]")).toBeNull();
 
   ({ calls, root, host } = openAdapter());
-  root.querySelector('button[aria-label="Close modal"]').click();
+  root.querySelector('button[aria-label="Close"]').click();
   expect(calls).toEqual({ confirm: 0, cancel: 1 });
   host.close();
 
@@ -109,6 +109,6 @@ test("fit: the stage fits the panel at phone and desktop widths", () => {
     Object.defineProperty(document.documentElement, "clientWidth", { value: w, configurable: true });
     return bevelCropAdapter.fit();
   };
-  expect(at(1440, 900)).toEqual({ width: 844 - 4 - 80, height: 680 });
-  expect(at(375, 700)).toEqual({ width: 375 - 32 - 4 - 2 * 22.5, height: 480 });
+  expect(at(1440, 900)).toEqual({ width: 844 - 2 - 44, height: 900 - 90 - 200 });
+  expect(at(375, 700)).toEqual({ width: 375 - 32 - 2 - 44, height: 700 - 70 - 200 });
 });

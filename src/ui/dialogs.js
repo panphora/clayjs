@@ -2,46 +2,29 @@ import themodal from "./modal.js";
 import onDomReady from "../lib/dom-ready.js";
 import toast from "./toast.js";
 import copyToClipboard from "../utils/copy-to-clipboard.js";
-import { bevelBox, bevelButton, bevelInput, bevelText, protectIcon } from "./bevel-controls.js";
+import { bevelBox, bevelButton, bevelInput, bevelText } from "./bevel-controls.js";
 import { TOKENS, FONT_SANS, FONT_MONO } from "./bevel.js";
-
-// The confirm arrow, drawn in the button's own ink so it follows the primary button.
-function confirmArrow() {
-  const holder = document.createElement("span");
-  holder.innerHTML = '<svg viewBox="0 0 60 33" fill="none" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" clip-rule="evenodd" d="M34.5 0.75H43.5V5.25H49V9.75H54.5V14.25H60V18.75H54.5V23.25H49V27.75H43.5V32.25H34.5V27.75H40V23.25H45.5V18.75H0V14.25H45.5V9.75H40V5.25H34.5V0.75Z" fill="currentColor"/></svg>';
-  const svg = holder.firstElementChild;
-  protectIcon(svg, 28);
-  return svg;
-}
-
-// Leaves room on the right for the corner close.
-function heading(markup) {
-  const el = bevelText("div", [
-    "display:flex", "flex-direction:column", "gap:2px", "margin:0 0 14px", "padding-inline-end:36px",
-    `font:600 22px/1.25 ${FONT_SANS}`, "letter-spacing:-.01em", "overflow-wrap:anywhere",
-  ]);
-  el.innerHTML = markup;
-  return el;
-}
 
 // Caller markup (promptText, extraContent, tell's paragraphs) goes in as it is: those
 // are markup by design, and callers pass elements through them. Only the frame around
-// it is ClayJS's to style.
-function createModal(promptText, yesCallback, extraContent = "", includeInput = false, defaultValue = "") {
-  const content = bevelBox("div", ["display:block"]);
-  content.append(heading(promptText));
+// it is ClayJS's to style. The prompt is the dialog's title, as in the dashboard.
+function createModal(promptText, yesCallback, extraContent = "", includeInput = false, defaultValue = "", yesLabel = "OK") {
+  const content = bevelBox("div", ["display:flex", "flex-direction:column", "gap:14px"]);
   let input = null;
   if (includeInput) {
-    input = bevelInput("input", { rules: ["margin:0 0 14px"] });
+    input = bevelInput("input", { rules: ["display:block", "width:100%", "margin:0"] });
     input.setAttribute("value", String(defaultValue));
     input.required = true;
     content.append(input);
   }
   content.insertAdjacentHTML("beforeend", extraContent);
 
-  themodal.html = content;
+  themodal.title = promptText;
+  themodal.html = includeInput || extraContent ? content : "";
+  themodal.width = "440px";
   themodal.closeHtml = "x";
-  themodal.yes = confirmArrow();
+  themodal.no = "Cancel";
+  themodal.yes = yesLabel;
 
   const promise = new Promise((resolve, reject) => {
     themodal.onYes(() => {
@@ -98,11 +81,11 @@ function createModal(promptText, yesCallback, extraContent = "", includeInput = 
 
 // Public API functions
 export function ask(promptText, yesCallback, defaultValue = "", extraContent = "") {
-  return createModal(promptText, yesCallback, extraContent, true, defaultValue);
+  return createModal(promptText, yesCallback, extraContent, true, defaultValue, "OK");
 }
 
 export function consent(promptText, yesCallback, extraContent = "") {
-  return createModal(promptText, yesCallback, extraContent, false);
+  return createModal(promptText, yesCallback, extraContent, false, "", "Confirm");
 }
 
 /**
@@ -112,18 +95,18 @@ export function consent(promptText, yesCallback, extraContent = "") {
  * @returns {Promise} Resolves when user confirms, rejects on close
  */
 export function tell(promptText, ...content) {
-  const box = bevelBox("div", ["display:flex", "flex-direction:column", "gap:20px", "max-width:440px", "margin:0 0 6px"]);
-  box.append(bevelText("div", [`font:600 22px/1.25 ${FONT_SANS}`, "padding-inline-end:36px", "overflow-wrap:anywhere"]));
-  box.firstChild.innerHTML = promptText;
+  const box = bevelBox("div", ["display:flex", "flex-direction:column", "gap:12px"]);
   for (const c of content) {
-    const paragraph = bevelText("div", [`font:16px/1.55 ${FONT_SANS}`, `color:${TOKENS["ink-2"]}`, "overflow-wrap:anywhere"]);
+    const paragraph = bevelText("div", [`font:14.5px/1.55 ${FONT_SANS}`, `color:${TOKENS["ink-2"]}`, "overflow-wrap:anywhere"]);
     paragraph.innerHTML = c;
     box.append(paragraph);
   }
 
-  themodal.html = box;
+  themodal.title = promptText;
+  themodal.html = content.length ? box : "";
+  themodal.width = "470px";
   themodal.closeHtml = "x";
-  themodal.yes = confirmArrow();
+  themodal.yes = "OK";
 
   const promise = new Promise((resolve, reject) => {
     themodal.onYes(() => {
@@ -156,12 +139,12 @@ export function snippet(title, content, extraContent = '') {
   const box = bevelBox("div", ["display:block"]);
   const well = bevelBox("div", [
     "display:block", "max-width:100%", "overflow-x:auto", "margin:0 0 14px", "padding:14px 16px",
-    `background:${TOKENS.sunk}`, `border:1px solid ${TOKENS.line}`,
+    `background:${TOKENS.sunk}`, `border:1px solid ${TOKENS["line-2"]}`,
   ]);
   const pre = bevelText("pre", ["display:block", "margin:0", "white-space:nowrap", `font:13px/1.6 ${FONT_MONO}`]);
   pre.innerHTML = content;
   well.append(pre);
-  const copy = bevelButton("copy", {
+  const copy = bevelButton("Copy", {
     small: true,
     extra: ["margin:0 0 14px"],
     onClick: () => {
@@ -169,10 +152,12 @@ export function snippet(title, content, extraContent = '') {
       toast('Copied to clipboard!', 'success');
     },
   });
-  box.append(heading(title), well, copy);
+  box.append(well, copy);
   box.insertAdjacentHTML("beforeend", extraContent || "");
 
+  themodal.title = title;
   themodal.html = box;
+  themodal.width = "540px";
   themodal.closeHtml = "x";
   themodal.yes = '';
 

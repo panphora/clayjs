@@ -93,14 +93,14 @@ test("ring, chip and bubble keep their shapes, sizes and placement in Bevel mate
   const bubble = root("bubble");
   expect(chip.style.getPropertyValue("width")).toBe("26px");
   expect(chip.style.getPropertyValue("height")).toBe("26px");
-  expect(bubble.style.getPropertyValue("width")).toBe("44px");
-  expect(bubble.style.getPropertyValue("height")).toBe("44px");
+  expect(bubble.style.getPropertyValue("width")).toBe("40px");
+  expect(bubble.style.getPropertyValue("height")).toBe("40px");
   expect(bubble.style.getPropertyValue("position")).toBe("fixed");
   expect(bubble.style.getPropertyValue("right")).toBe("16px");
   expect(bubble.style.getPropertyValue("bottom")).toBe("16px");
   for (const el of [chip, bubble]) {
     expect(el.style.getPropertyValue("border-radius")).toBe("0");
-    expect(el.textContent).toBe("💬");
+    expect(el.textContent).toBe("AI");
   }
   expect(chip.title).toBe("Comment on this (⌘K)");
   expect(bubble.title).toBe("Comment on the whole page");
@@ -200,4 +200,51 @@ test("the panel and ring take the page's scheme when the panel opens", () => {
   document.documentElement.style.setProperty("color-scheme", "light");
   openOnSection();
   expect(root("panel").style.getPropertyValue("color-scheme")).toBe("light");
+});
+
+test("the bubble sits just left of the CMS toggle", async () => {
+  const toggle = document.createElement("hypercms-toggle");
+  toggle.setAttribute("data-hcms-toggle-host", "");
+  toggle.getBoundingClientRect = () => ({ left: 800, right: 960, top: 744, bottom: 784, width: 160, height: 40 });
+  const innerWidth = Object.getOwnPropertyDescriptor(window, "innerWidth");
+  const innerHeight = Object.getOwnPropertyDescriptor(window, "innerHeight");
+  Object.defineProperty(window, "innerWidth", { configurable: true, writable: true, value: 1000 });
+  Object.defineProperty(window, "innerHeight", { configurable: true, writable: true, value: 800 });
+  document.body.append(toggle);
+  try {
+    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const bubble = root("bubble");
+    expect(bubble.style.getPropertyValue("right")).toBe("208px");
+    expect(bubble.style.getPropertyValue("bottom")).toBe("16px");
+    expect(bubble.style.getPropertyPriority("right")).toBe("important");
+    expect(bubble.style.getPropertyPriority("bottom")).toBe("important");
+  } finally {
+    toggle.remove();
+    Object.defineProperty(window, "innerWidth", innerWidth);
+    Object.defineProperty(window, "innerHeight", innerHeight);
+  }
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(root("bubble").style.getPropertyValue("right")).toBe("16px");
+  expect(root("bubble").style.getPropertyValue("bottom")).toBe("16px");
+});
+
+test("a second click keeps a typed comment", () => {
+  const bubble = root("bubble");
+  bubble.click();
+  expect(root("panel").hidden).toBe(false);
+
+  part("input").value = "x";
+  bubble.click();
+
+  expect(root("panel").hidden).toBe(false);
+  expect(part("input").value).toBe("x");
+});
+
+test("a second click on the bubble closes the whole-page panel", () => {
+  const bubble = root("bubble");
+  bubble.click();
+  expect(root("panel").hidden).toBe(false);
+  bubble.click();
+  expect(root("panel").hidden).toBe(true);
 });

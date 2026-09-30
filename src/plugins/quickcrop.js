@@ -9,7 +9,7 @@
 // through untouched. The stage itself is quickcrop's, and so is its geometry; its
 // skin keeps a page stylesheet off it.
 import vendorQuickcrop from "../vendor/quickcrop.vendor.js";
-import { bevelDialog, dismissOf, keepFocusIn } from "../ui/bevel-dialog.js";
+import { bevelDialog, dismissOf, keepFocusIn, DIALOG_BUTTON } from "../ui/bevel-dialog.js";
 import { bevelButton } from "../ui/bevel-controls.js";
 import { installSkin } from "../ui/vendor-skin.js";
 import { CSS as SKIN, ROOTS as SKIN_ROOTS } from "../ui/skins/quickcrop.js";
@@ -25,22 +25,25 @@ function isThemodal(m) {
 }
 
 export const bevelCropAdapter = {
-  // The stage has to fit inside the panel: the overlay's 16px inset, the panel's 2px
-  // border and the inner padding (clamp(20px, 6vw, 40px) a side), with room below for
-  // the button row. Widths come from clientWidth, which leaves out a classic scrollbar as the overlay does.
+  // The stage has to fit inside the panel: the overlay's 16px side inset, the panel's
+  // 1px border and the body's 22px padding a side; below it the header, the footer and
+  // the overlay's top inset. Widths come from clientWidth, which leaves out a classic
+  // scrollbar as the overlay does.
   fit() {
-    const side = Math.min(40, Math.max(20, document.documentElement.clientWidth * 0.06));
+    const width = document.documentElement.clientWidth;
     return {
-      width: Math.max(120, Math.min(WIDTH, document.documentElement.clientWidth - 32) - 4 - 2 * side),
-      height: Math.max(120, window.innerHeight - 220),
+      width: Math.max(120, Math.min(WIDTH, width - 32) - 2 - 44),
+      height: Math.max(120, window.innerHeight - Math.min(96, window.innerHeight * 0.1) - 200),
     };
   },
   open({ content, confirmLabel, onConfirm, onCancel }) {
-    const { root, overlay, panel, body, footer, close } = bevelDialog({
-      zIndex: "2147483001", width: `${WIDTH}px`, closable: true,
+    const { root, overlay, panel, heading, body, footer, close } = bevelDialog({
+      zIndex: "2147483001", width: `${WIDTH}px`, closable: true, titled: true,
     });
+    heading.textContent = "Crop image";
+    panel.setAttribute("aria-label", "Crop image");
     body.append(content);
-    const confirm = bevelButton(confirmLabel, { variant: "primary", onClick: () => onConfirm() });
+    const confirm = bevelButton(confirmLabel, { variant: "primary", extra: DIALOG_BUTTON, onClick: () => onConfirm() });
     footer.append(confirm);
 
     close.addEventListener("click", () => onCancel());
