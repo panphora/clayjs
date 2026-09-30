@@ -1,3 +1,6 @@
+import { bevelButton, setShown } from "./bevel-controls.js";
+import { bevelDialog, dismissOf } from "./bevel-dialog.js";
+
 /*
 
   theModal
@@ -9,9 +12,11 @@
   - user confirms
   - everything about the modal resets
 
-  themodal.html = content;
+  themodal.html = content;   // html, yes and no each take markup, or a node placed as it is
   themodal.yes = content;
   themodal.no = content;
+
+  themodal.closeHtml = "x";  // any non-empty value shows the corner close
 
   themodal.disableFocus = true;
   themodal.disableScroll = true;
@@ -24,35 +29,11 @@
 
 */
 
-/* 
-
-things you probably want to style
-
-.micromodal {}
-.micromodal .micromodal__container {}
-.micromodal .micromodal__content {}
-.micromodal .micromodal__heading {}
-.micromodal .micromodal__input {}
-.micromodal .micromodal__input:focus, .micromodal .micromodal__input:active {}
-.micromodal .micromodal__buttons {}
-.micromodal .micromodal__yes, .micromodal__no {}
-.micromodal .micromodal__yes {}
-.micromodal .micromodal__yes:focus, .micromodal__yes:hover {}
-.micromodal .micromodal__no {}
-.micromodal .micromodal__no:focus, .micromodal__no:hover {}
-.micromodal .micromodal__close {}
-.micromodal .micromodal__close:focus, .micromodal__close:hover {}
-
-*/
-
-
-
-
-
-
 // MicroModal
 // MIT License (c) 2017 Indrashish Ghosh
 // MODIFIED: removed `this.activeElement.focus()` after modal is closed
+// MODIFIED: takes the modal element itself, not an id, and adds no open class; the
+// shell is created on open and removed on close, so nothing has to be looked up
 
 const MicroModal = (() => {
   'use strict'
@@ -86,7 +67,7 @@ const MicroModal = (() => {
       awaitOpenAnimation = false,
       debugMode = false
     }) {
-      this.modal = document.getElementById(targetModal)
+      this.modal = typeof targetModal === 'string' ? document.getElementById(targetModal) : targetModal
 
       this.config = { debugMode, disableScroll, openTrigger, closeTrigger, openClass, onShow, onClose, awaitCloseAnimation, awaitOpenAnimation, disableFocus }
 
@@ -105,7 +86,6 @@ const MicroModal = (() => {
     showModal (event = null) {
       this.activeElement = document.activeElement
       this.modal.setAttribute('aria-hidden', 'false')
-      this.modal.classList.add(this.config.openClass)
       this.scrollBehaviour('disable')
       this.addEventListeners()
 
@@ -122,33 +102,13 @@ const MicroModal = (() => {
       this.config.onShow(this.modal, this.activeElement, event)
     }
 
+    // Runs on the stored element even after a live-sync morph removed it from the
+    // DOM, so onClose, the keydown listener and the scroll restore are never stranded.
     closeModal (event = null) {
-      const modal = this.modal
       this.modal.setAttribute('aria-hidden', 'true')
       this.removeEventListeners()
       this.scrollBehaviour('enable')
       this.config.onClose(this.modal, this.activeElement, event)
-
-      if (this.config.awaitCloseAnimation) {
-        const openClass = this.config.openClass // <- old school ftw
-        this.modal.addEventListener('animationend', function handler () {
-          modal.classList.remove(openClass)
-          modal.removeEventListener('animationend', handler, false)
-        }, false)
-      } else {
-        modal.classList.remove(this.config.openClass)
-      }
-    }
-
-    closeModalById (targetModal) {
-      // Fall back to the stored modal reference when the node was removed from
-      // the DOM externally (e.g. a live-sync morph). Without this, getElementById
-      // returns null, closeModal() is skipped, and its cleanup never runs — the
-      // onClose callback, this.removeEventListeners() (which drops MicroModal's
-      // document keydown listener), and scroll restore are all stranded.
-      const modal = document.getElementById(targetModal)
-      if (modal) this.modal = modal
-      if (this.modal) this.closeModal()
     }
 
     scrollBehaviour (toggle) {
@@ -310,9 +270,9 @@ const MicroModal = (() => {
     activeModal.showModal()
   }
 
-  const close = targetModal => {
+  const close = () => {
     if (!activeModal) return
-    targetModal ? activeModal.closeModalById(targetModal) : activeModal.closeModal()
+    activeModal.closeModal()
     activeModal = null
   }
 
@@ -323,310 +283,10 @@ const MicroModal = (() => {
 
 // themodal.js 
 // MIT License (c) 2023 David Miranda
-
-const modalCss = `<style class="micromodal-css">
-.micromodal {
-  display: none;
-  color: #fff;
-  font-family: var(--hyperclay-modal-font-family, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace);
-  font-size: var(--hyperclay-modal-font-size, 18px);
-}
-
-.micromodal button:not(.custom-button) {
-  background: none;
-  color: inherit;
-  border: none;
-  padding: 0;
-  margin: 0;
-  width: auto;
-  overflow: visible;
-  font: inherit;
-  line-height: inherit;
-  text-transform: none;
-  text-align: center;
-  text-decoration: none;
-  cursor: pointer;
-  -webkit-appearance: none;
-  -moz-appearance: none;
-  appearance: none;
-  outline: 0;
-}
-
-.micromodal .micromodal__hide {
-  display: none;
-}
-
-.micromodal.is-open {
-  display: block;
-}
-
-.micromodal__overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  background: rgba(0,0,0,.65);
-}
-
-.micromodal__container {
-  position: relative;
-  width: 100%;
-  min-width: 0;
-  max-width: min(550px, calc(100vw - 2rem));
-  max-height: calc(100vh - 4rem);
-  max-height: calc(100dvh - 2rem);
-  box-sizing: border-box;
-  overflow: hidden;
-  border: 2px solid #FFFFFF;
-  background-color: #11131E;
-}
-
-.micromodal__inner {
-  overflow-x: hidden;
-  overflow-y: auto;
-  /* Must subtract container's 4px border (2px top + 2px bottom) from max-height,
-     otherwise inner overflows past container since box-sizing: border-box
-     makes the container's content area smaller than its max-height */
-  max-height: calc(100dvh - 2rem - 4px);
-  padding: 26px 40px 40px 40px;
-}
-
-@media (min-width: 640px) {
-  .micromodal .micromodal__inner {
-    padding: 52px 64px 60px 64px;
-  }
-}
-
-.micromodal[aria-hidden="false"] .micromodal__overlay {
-  animation: microModalFadeIn .2s cubic-bezier(0.0, 0.0, 0.2, 1);
-}
-
-.micromodal[aria-hidden="false"] .micromodal__container {
-  animation: microModalSlideIn .2s cubic-bezier(0, 0, .2, 1);
-}
-
-.micromodal .micromodal__container,
-.micromodal .micromodal__overlay {
-  will-change: transform;
-}
-
-@keyframes microModalFadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-@keyframes microModalSlideIn {
-  from { transform: translateY(15%); }
-  to { transform: translateY(0); }
-}
-
-.micromodal .micromodal__content {
-  margin-bottom: 14px;
-  overflow-wrap: anywhere;
-}
-
-.micromodal .micromodal__heading {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin-bottom: 8px;
-  overflow-wrap: anywhere;
-}
-
-.micromodal .micromodal__input {
-  width: min(calc(100vw - 100px), 420px);
-  padding: 6px 6px 7px;
-  font-size: var(--hyperclay-modal-input-font-size, 16px);
-  color: #000;
-  background: #fff;
-}
-
-.micromodal .micromodal__input:focus, .micromodal .micromodal__input:active {
-  outline: 3px solid #6A73B6;
-}
-
-.micromodal button.micromodal__yes {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  width: 100%;
-  height: 39px;
-  line-height: 0;
-  border: 3px solid;
-  border-top-color: #94BA6F;
-  border-left-color: #94BA6F;
-  border-bottom-color: #1A3004;
-  border-right-color: #1A3004;
-  background-color: #49870B;
-}
-
-.micromodal button.micromodal__yes:focus,
-.micromodal button.micromodal__yes:hover {
-  background-color: #549B0D;
-}
-
-.micromodal button.micromodal__yes:active {
-  border-top-color: #1A3004;
-  border-left-color: #1A3004;
-  border-bottom-color: #94BA6F;
-  border-right-color: #94BA6F;
-}
-
-.micromodal button.micromodal__secondary-btn {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  width: 100%;
-  height: 39px;
-  line-height: 0;
-  border: 3px solid;
-  border-top-color: #474C65;
-  border-left-color: #474C65;
-  border-bottom-color: #131725;
-  border-right-color: #131725;
-  background-color: #1D1F2F;
-  color: #E5E7EB;
-  font-family: inherit;
-  font-size: inherit;
-  font-weight: bold;
-}
-
-.micromodal button.micromodal__secondary-btn:focus,
-.micromodal button.micromodal__secondary-btn:hover {
-  background-color: #232639;
-}
-
-.micromodal button.micromodal__secondary-btn:active {
-  border-top-color: #131725;
-  border-left-color: #131725;
-  border-bottom-color: #474C65;
-  border-right-color: #474C65;
-}
-
-.micromodal:has(.snippet-code-block) .micromodal__content {
-  margin-bottom: 0;
-}
-
-.micromodal .snippet-code-block {
-  background-color: #292E54;
-  padding: 1rem;
-  margin-bottom: 14px;
-  max-width: 420px;
-  overflow-x: auto;
-}
-
-.micromodal .snippet-code-block pre {
-  color: white;
-  font-family: var(--hyperclay-modal-code-font-family, var(--hyperclay-modal-font-family, monospace));
-  font-size: 0.875rem;
-  white-space: nowrap;
-  margin: 0;
-}
-
-.micromodal .snippet-warning {
-  padding: 0.75rem;
-  border: 2px solid #989742;
-  background-color: #1E1E11;
-  font-size: 0.875rem;
-  color: #FBF7B7;
-  max-width: 420px;
-}
-
-.micromodal .snippet-link-box {
-  font-size: 16px;
-  margin-top: 0.75rem;
-  text-align: right;
-}
-
-.micromodal .snippet-link-box a {
-  color: #F6F7F9;
-  text-decoration: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  padding: 0.35rem 0.45rem;
-  border: 1px solid #474C64;
-  line-height: 1;
-}
-
-.micromodal .snippet-link-box a:hover {
-  color: #E5E7EB;
-  border-color: #75798B;
-}
-
-.micromodal .snippet-link-box a svg {
-  width: 0.85rem;
-  height: 0.85rem;
-  flex-shrink: 0;
-}
-
-.micromodal button.micromodal__close {
-  clip-path: polygon(0% 4%, 0% 0%, 100% 0%, 100% 100%, 94% 100%);
-  position: absolute;
-  top: -1px;
-  right: -1px;
-  width: 68px;
-}
-
-.micromodal .micromodal__close-bg {
-  fill: #1D2032;
-}
-
-.micromodal .micromodal__close:hover .micromodal__close-bg {
-  fill: #212543;
-}
-
-.micromodal .micromodal__close-x {
-  fill: #fff;
-}
-
-.micromodal .micromodal__tell {
-  max-width: 440px;
-  margin-bottom: 28px;
-}
-
-.micromodal .micromodal__tell > * + * {
-  margin-top: 20px;
-}
-
-.micromodal .micromodal__tell-title {
-  font-size: var(--hyperclay-modal-title-font-size, 20px);
-  font-weight: bold;
-}
-
-.micromodal .micromodal__tell-content {
-  font-size: var(--hyperclay-modal-font-size, 16px);
-  font-weight: normal;
-}
-
-@media (min-width: 640px) {
-  .micromodal .micromodal__tell-title {
-    font-size: var(--hyperclay-modal-title-font-size, 22px);
-  }
-  .micromodal .micromodal__tell-content {
-    font-size: var(--hyperclay-modal-font-size, 18px);
-  }
-}
-</style>`;
-
-const modalHtml = `<div class="micromodal" id="micromodal" aria-hidden="true">
-  <div class="micromodal__overlay" tabindex="-1">
-    <form class="micromodal__container" role="dialog" aria-modal="true">
-      <div class="micromodal__inner">
-        <div class="micromodal__content"></div>
-        <div class="micromodal__buttons">
-          <button class="micromodal__no" type="button"></button>
-          <button class="micromodal__yes" type="submit"></button>
-        </div>
-      </div>
-      <button class="micromodal__close" type="button" aria-label="Close modal"></button>
-    </form>
-  </div>
-</div>`;
+//
+// Drawn in Bevel (bevel-dialog.js): inline !important, no classes, no ids, so a
+// page stylesheet cannot repaint it. What callers put in html, yes and no is theirs
+// and goes in untouched.
 
 const themodal = (() => {
   let html = "";
@@ -671,10 +331,10 @@ const themodal = (() => {
       // Singleton: only one modal on screen at a time. If one is still up (or
       // left stale state behind, e.g. a live-sync morph removed its DOM), reject
       // its promise and tear it down before opening the new one.
-      if (this.isShowing || document.querySelector('.micromodal-parent')) {
+      if (this.isShowing || document.querySelector('[data-clay-modal]')) {
         this._dismiss?.();
         this._cleanupListeners?.();
-        document.querySelectorAll('.micromodal-parent').forEach(n => n.remove());
+        document.querySelectorAll('[data-clay-modal]').forEach(n => { dismissOf.get(n)?.(); n.remove(); });
         this.isShowing = false;
         document.body.style.overflow = '';
       }
@@ -682,20 +342,28 @@ const themodal = (() => {
       // Expose this modal's dismiss so a later open()/close can settle it.
       this._dismiss = dismiss;
 
-      document.body.insertAdjacentHTML("afterbegin", "<div clay='no-save no-snapshot' class='micromodal-parent'>" + modalCss + modalHtml + "</div>");
+      const shell = bevelDialog({ zIndex, closable: !!closeHtml });
+      const modalRootElem = shell.root;
+      const modalOverlayElem = shell.overlay;
+      const modalContainerElem = shell.panel;
+      const modalContentElem = shell.body;
+      const modalButtonsElem = shell.footer;
+      const modalCloseElem = shell.close;
+      const modalNoElem = bevelButton('');
+      const modalYesElem = bevelButton('', { variant: 'primary' });
+      modalYesElem.type = 'submit';
+      modalButtonsElem.append(modalNoElem, modalYesElem);
 
-      const modalOverlayElem = document.querySelector(".micromodal__overlay");
-      const modalContentElem = document.querySelector(".micromodal__content");
-      const modalButtonsElem = document.querySelector(".micromodal__buttons");
-      const modalYesElem = document.querySelector(".micromodal__yes");
-      const modalNoElem = document.querySelector(".micromodal__no");
-      const modalCloseElem = document.querySelector(".micromodal__close");
+      // Markup is parsed in; a node is placed as it is, listeners and all.
+      const place = (target, value) => {
+        if (value instanceof Node) target.append(value);
+        else target.innerHTML = value;
+      };
+      place(modalContentElem, html);
+      place(modalYesElem.firstChild, yes);
+      place(modalNoElem.firstChild, no);
 
-      modalContentElem.innerHTML = html;
-      modalYesElem.innerHTML = yes;
-      modalNoElem.innerHTML = no;
-      modalOverlayElem.style.zIndex = zIndex;
-      modalCloseElem.innerHTML = closeHtml;
+      document.body.prepend(modalRootElem);
 
       // MODIFIED so modal doesn't close if mousedown happened inside the modal
       let mousedownOnBackdrop = false;
@@ -703,17 +371,17 @@ const themodal = (() => {
       // MODIFIED so modal doesn't close if mousedown happened inside the modal
       function handleMousedown(event) {
         // Check if mousedown started on backdrop (overlay but not container)
-        mousedownOnBackdrop = event.target.closest(".micromodal__overlay") && 
-                              !event.target.closest(".micromodal__container");
+        mousedownOnBackdrop = modalOverlayElem.contains(event.target) &&
+                              !modalContainerElem.contains(event.target);
       }
 
       function handleClick(event) {
         // Just close on no / close-button / backdrop; onClose runs dismiss().
-        if (event.target.closest(".micromodal__no") || event.target.closest(".micromodal__close")) {
-          MicroModal.close("micromodal");
+        if (modalNoElem.contains(event.target) || modalCloseElem?.contains(event.target)) {
+          MicroModal.close();
         // MODIFIED so modal doesn't close if mousedown happened inside the modal
-        } else if (enableClickOutsideCloses && mousedownOnBackdrop && !event.target.closest(".micromodal__container") && event.target.closest(".micromodal__overlay")) {
-          MicroModal.close("micromodal");
+        } else if (enableClickOutsideCloses && mousedownOnBackdrop && !modalContainerElem.contains(event.target) && modalOverlayElem.contains(event.target)) {
+          MicroModal.close();
         }
 
         // Reset after handling
@@ -721,7 +389,7 @@ const themodal = (() => {
       }
 
       function handleSubmit(event) {
-        if (event.target.closest("#micromodal")) {
+        if (modalRootElem.contains(event.target)) {
           event.preventDefault();
           
           // Execute callbacks and check if any return false or throw errors
@@ -747,7 +415,7 @@ const themodal = (() => {
           // scheduled their resolve, so mark settled to stop onClose rejecting.
           if (shouldClose) {
             settled = true;
-            MicroModal.close("micromodal");
+            MicroModal.close();
           }
         }
       }
@@ -765,14 +433,14 @@ const themodal = (() => {
       };
 
       function setButtonsVisibility () {
-        modalButtonsElem.classList.toggle("micromodal__hide", !yes && !no);
-        modalYesElem.classList.toggle("micromodal__hide", !yes);
-        modalNoElem.classList.toggle("micromodal__hide", !no);
+        setShown(modalButtonsElem, !!(yes || no), "flex");
+        setShown(modalYesElem, !!yes, "inline-flex");
+        setShown(modalNoElem, !!no, "inline-flex");
       }
 
       setButtonsVisibility();
 
-      MicroModal.show("micromodal", {
+      MicroModal.show(modalRootElem, {
         disableScroll,
         disableFocus: true, // we use our own
         // reset everything on close
@@ -781,7 +449,7 @@ const themodal = (() => {
           // (no / close / backdrop / Esc). No-op once already resolved.
           dismiss();
 
-          document.querySelector(".micromodal-parent")?.remove();
+          modalRootElem.remove();
 
           html = "";
           yes = "";
@@ -814,14 +482,15 @@ const themodal = (() => {
       myOnOpen.forEach(cb => cb());
 
       if (!disableFocus) {
-        let firstInput = modalOverlayElem.querySelector(".micromodal__content :is(input,textarea,button):not(.micromodal__hide), .micromodal__buttons :is(input,textarea,button):not(.micromodal__hide)");
+        let firstInput = modalContentElem.querySelector(":is(input,textarea,button):not([hidden])") ||
+          [modalNoElem, modalYesElem].find(button => !button.hidden);
         firstInput?.focus();
         firstInput?.setSelectionRange?.(-1, -1);
       }
     },
     close() {
       // onClose runs the dismiss/reject path; just trigger the close.
-      MicroModal.close("micromodal");
+      MicroModal.close();
     },
     get html() {
       return html;

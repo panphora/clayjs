@@ -5,6 +5,7 @@ import {
   bevelSurface,
   bevelText,
   bevelWell,
+  setShown,
   RUNTIME_ONLY,
 } from "../../src/ui/bevel-controls.js";
 import * as bevelControls from "../../src/ui/bevel-controls.js";
@@ -319,4 +320,43 @@ test("icon: the glyph is pinned against a page that resets and repaints", () => 
 test("exports: set and style are not re-exported", () => {
   expect(bevelControls.set).toBeUndefined();
   expect(bevelControls.style).toBeUndefined();
+});
+
+test("pin: a pinned declaration outlives hover, press, focus and blur rebuilds", () => {
+  const b = bevelButton("Go", { extra: ["position:fixed"] });
+  document.body.append(b);
+  b.pin({ left: "40px", top: "12px" });
+  setShown(b, false, "inline-flex");
+  for (const type of ["pointerenter", "pointerdown", "pointerup", "pointerleave"]) b.dispatchEvent(new MouseEvent(type));
+  b.focus();
+  b.blur();
+  expect(b.hidden).toBe(true);
+  for (const [prop, want] of [["left", "40px"], ["top", "12px"], ["display", "none"], ["position", "fixed"]]) {
+    expect([prop, b.style.getPropertyValue(prop), b.style.getPropertyPriority(prop)]).toEqual([prop, want, "important"]);
+  }
+  setShown(b, true, "inline-flex");
+  b.dispatchEvent(new MouseEvent("pointerenter"));
+  expect(b.hidden).toBe(false);
+  expect(b.style.getPropertyValue("display")).toBe("inline-flex");
+  expect(b.style.getPropertyValue("left")).toBe("40px");
+  b.remove();
+});
+
+test("setShown: a plain element gets the attribute and an !important display", () => {
+  const el = document.createElement("div");
+  setShown(el, false);
+  expect([el.hidden, el.style.getPropertyValue("display"), el.style.getPropertyPriority("display")]).toEqual([true, "none", "important"]);
+  setShown(el, true, "flex");
+  expect([el.hidden, el.style.getPropertyValue("display"), el.style.getPropertyPriority("display")]).toEqual([false, "flex", "important"]);
+});
+
+test("pageScheme: the page's declared scheme wins, otherwise the reader's preference", () => {
+  document.documentElement.style.colorScheme = "dark";
+  expect(bevelControls.pageScheme()).toBe("dark");
+  document.documentElement.style.colorScheme = "light";
+  expect(bevelControls.pageScheme()).toBe("light");
+  document.documentElement.style.colorScheme = "light dark";
+  expect(bevelControls.pageScheme()).toBe("light dark");
+  document.documentElement.style.colorScheme = "";
+  expect(bevelControls.pageScheme()).toBe("light dark");
 });

@@ -56,15 +56,8 @@
  * nowhere else — no attribute, no data store, nothing a serializer walks.
  */
 
-import { make, set } from '../lib/hostile-css.js';
-
-// Runtime-only chrome, in one string so no root can carry two of the three.
-const RUNTIME_ONLY = 'no-save no-watch no-snapshot';
-
-const BG = 'var(--clay-section-bg,#222)';
-const INK = 'var(--clay-section-ink,#fff)';
-const EDGE = 'var(--clay-section-edge,rgba(255,255,255,.28))';
-const FONT = "14px/1.45 system-ui,-apple-system,'Segoe UI',sans-serif";
+import { set } from '../lib/hostile-css.js';
+import { bevelButton, bevelSurface, bevelText, pageScheme, RUNTIME_ONLY } from '../ui/bevel-controls.js';
 
 // A control's work is its live value, which its markup does not carry. An
 // editable subtree's is its markup, and `outerHTML` covers the region's own
@@ -172,6 +165,7 @@ class SectionNotice {
     const conflict = document.querySelector('[data-clay-conflict]');
     if (conflict && conflict.style.display !== 'none') return;
     this.line.textContent = `${name} changed this section`;
+    set(this.root, 'color-scheme', pageScheme());
     set(this.root, 'display', 'flex');
   }
 
@@ -185,7 +179,7 @@ class SectionNotice {
     if (this.root && this.root.isConnected) return true;
     if (typeof document === 'undefined' || !document.body) return false;
 
-    this.root = runtimeRoot(make('div', [
+    this.root = runtimeRoot(bevelSurface('div', [
       'position:fixed',
       'left:calc(12px + env(safe-area-inset-left,0px))',
       // Clear of the conflict bar, which is bottom-anchored and can span almost
@@ -193,30 +187,18 @@ class SectionNotice {
       // this one moves rather than covering it.
       'bottom:calc(72px + env(safe-area-inset-bottom,0px))',
       'z-index:2147483000',
-      'display:none', 'align-items:center', 'gap:10px',
-      'box-sizing:border-box', 'max-width:calc(100vw - 24px)',
-      'padding:9px 12px', 'border-radius:10px',
-      `background-color:${BG}`, 'background-image:none', `color:${INK}`,
-      'border-width:1px', 'border-style:solid', `border-color:${EDGE}`,
-      'box-shadow:0 6px 24px rgba(0,0,0,.32),0 1px 2px rgba(0,0,0,.24)',
-      `font:${FONT}`, 'text-align:left',
+      'display:none', 'align-items:center', 'gap:10px 12px',
+      'max-width:calc(100vw - 24px)', 'padding:8px 8px 8px 14px', 'text-align:left',
+      `color-scheme:${pageScheme()}`,
     ]));
     this.root.setAttribute('data-clay-section-notice', '');
     this.root.setAttribute('role', 'status');
 
-    this.line = runtimeRoot(make('span', ['flex:1 1 auto']));
+    this.line = runtimeRoot(bevelText('span', ['flex:1 1 auto']));
     this.line.setAttribute('data-clay-section-notice-line', '');
 
-    // all:initial first, because a page restyling every button is the normal
-    // case rather than the adversarial one; everything it needs is restated.
-    const dismiss = runtimeRoot(make('button', [
-      'all:initial', 'box-sizing:border-box', 'cursor:pointer', `font:${FONT}`,
-      'font-weight:500', 'border-radius:6px', 'padding:4px 8px',
-      'white-space:nowrap', 'flex:none', `color:${INK}`, 'opacity:.72',
-    ], 'Dismiss'));
-    dismiss.type = 'button';
+    const dismiss = bevelButton('Dismiss', { small: true, variant: 'quiet', onClick: () => this.hide() });
     dismiss.setAttribute('data-clay-section-notice-dismiss', '');
-    dismiss.addEventListener('click', () => this.hide());
 
     this.root.append(this.line, dismiss);
     document.body.appendChild(this.root);

@@ -183,3 +183,21 @@
   .bevel-progress::-webkit-progress-bar { background: Canvas; }
   .bevel-progress::-webkit-progress-value, .bevel-progress::-moz-progress-bar { background: ButtonText; }
 }
+
+@layer components {
+  /* ============================ TEXT INPUT ============================ */
+  /* Flat and recessed: a hairline on the surface. Typed text is sans because
+     most of it is language; --mono for a figure, a hex, an id. */
+  .bevel-input {
+    width: 100%; display: block;
+    font-family: var(--bevel-font-sans); font-size: 17px; line-height: 1.5;
+    color: var(--bevel-ink); background: var(--bevel-surface);
+    border: 1px solid var(--bevel-line-2); border-radius: 0;
+    padding: 7px 12px; outline: none;
+    transition: border-color .14s, background-color .14s;
+  }
+  .bevel-input::placeholder { color: var(--bevel-faint); }
+  .bevel-input:hover:not(:disabled) { border-color: var(--bevel-faint); }
+  .bevel-input:focus-visible { outline: 2px solid var(--bevel-brass); outline-offset: 1px; border-color: var(--bevel-brass); }
+  .bevel-input:disabled { background: var(--bevel-sunk); color: var(--bevel-faint); border-color: var(--bevel-line); cursor: not-allowed; }
+}

@@ -139,7 +139,8 @@ async function startSync() {
 
 const captureFrame = () => snapshot.serializeForSync(snapshot.captureSnapshot({ flushUndo: false }));
 const tick = () => new Promise((r) => setTimeout(r, 0));
-const frame = () => new Promise((r) => setTimeout(r, 5));
+// The old 5 ms, then let pending promise work schedule its render and wait out that frame.
+const frame = () => new Promise((r) => setTimeout(() => requestAnimationFrame(() => setTimeout(r, 0)), 5));
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // The page without the notice's own root, which lives in the body and saves nothing.
@@ -474,6 +475,7 @@ test("the panel offers Revert to mine between Download and Accept; pressing it p
 
   // Let the toast expire before the next test builds a notice in this root.
   await wait(4100);
+  await frame();
 }, 10000);
 
 test("a blocked id keeps its row, with the reason under it, and the toast counts only what went back", async () => {
@@ -494,6 +496,7 @@ test("a blocked id keeps its row, with the reason under it, and the toast counts
   expect(shown()).toBe("Put back 1 change. Saving.");
   expect(conflicts.list().map((r) => r.id)).toEqual([A]);
   await wait(4100);
+  await frame();
   expect(shown()).toContain("Another edit replaced 1 change.");
   buttonSaying(/Review/).click();
   buttonSaying(/See the edits/).click();
@@ -541,6 +544,7 @@ test("Revert acknowledges only what it put back; Accept and Download stay what t
 
   expect(acknowledged).toEqual([["reverted", id]]);
   await wait(4100);
+  await frame();
 }, 10000);
 
 test("O5 a refused save shows the refusal at once, no toast, and the restored id is acknowledged", async () => {
@@ -580,6 +584,7 @@ test("C12 a partial revert hands focus to Review once the toast has gone", async
   expect(shown()).toBe("Put back 1 change. Saving.");
   expect(conflicts.list().map((r) => r.id)).toEqual([A]);
   await wait(4100);
+  await frame();
   expect(document.activeElement).toBe(buttonSaying(/Review/));
 }, 10000);
 
@@ -607,6 +612,7 @@ test("N7 C11 the person clicks into the page during the toast: focus stays there
   input.focus();
   expect(document.activeElement).toBe(input);
   await wait(4100);
+  await frame();
   expect(shown()).toContain("Another edit replaced 1 change.");
   expect(document.activeElement).toBe(input);
   input.remove();
@@ -674,6 +680,7 @@ test("C9 the person moves focus into the page while the revert's save is on the 
   expect(conflicts.list().map((r) => r.id)).toEqual([A]);
   expect(conflicts.get(C)).toBeNull();
   await wait(4100);
+  await frame();
   expect(shown()).toContain("Another edit replaced 1 change.");
   expect(document.activeElement).toBe(input);
   input.remove();

@@ -50,12 +50,12 @@ function makeHandle() {
 
 const PAGE = '<section data-edit-id="hero"><h1>Old heading</h1><p>Old paragraph</p></section>';
 
-const panel = () => document.getElementById("hyper-edit-panel");
+const panel = () => document.querySelector('[data-clay-ai-edit="panel"]');
 const textarea = () => panel().querySelector("textarea");
-const statusEl = () => panel().querySelector(".hep-status");
-const button = (name) => panel().querySelector(".hep-" + name);
-const chip = () => document.getElementById("hyper-edit-chip");
-const docBubble = () => document.getElementById("hyper-edit-doc-bubble");
+const statusEl = () => panel().querySelector('[data-clay-ai-edit-part="status"]');
+const button = (name) => panel().querySelector(`[data-clay-ai-edit-part="${name}"]`);
+const chip = () => document.querySelector('[data-clay-ai-edit="chip"]');
+const docBubble = () => document.querySelector('[data-clay-ai-edit="bubble"]');
 const heading = () => document.querySelector("h1");
 
 // Every step of a send is a microtask, and the wire's handle settles on its own.
@@ -140,7 +140,7 @@ describe("with a ready ai-edit helper", () => {
     expect(chip().hidden).toBe(true);
     expect(panel().hidden).toBe(true);
     expect(docBubble()).not.toBeNull();
-    for (const el of [panel(), chip(), docBubble(), document.getElementById("hyper-edit-ring")]) {
+    for (const el of [panel(), chip(), docBubble(), document.querySelector('[data-clay-ai-edit="ring"]')]) {
       expect(el.getAttribute("clay")).toBe("no-save no-watch no-snapshot");
     }
   });
@@ -288,7 +288,7 @@ describe("with a ready ai-edit helper", () => {
 
     expect(heading().textContent).toBe("Old heading");
     expect(statusEl().textContent).toBe("the helper reported an error");
-    expect(statusEl().classList.contains("warn")).toBe(true);
+    expect(statusEl().getAttribute("data-tone")).toBe("warn");
     expect(button("send").hidden).toBe(false);
     expect(button("keep").hidden).toBe(true);
   });
@@ -318,7 +318,7 @@ describe("with a ready ai-edit helper", () => {
     expect(payload.tag).toBe("body");
     expect(payload.editId).toBe("document");
     expect(payload.elementHTML).toContain("<h1>Old heading</h1>");
-    expect(payload.elementHTML).not.toContain("hyper-edit");
+    expect(payload.elementHTML).not.toContain("data-clay-ai-edit");
     expect("page" in payload).toBe(false);
     expect(save).not.toHaveBeenCalled();
   });
@@ -330,7 +330,7 @@ describe("with a ready ai-edit helper", () => {
     expect(fakeWire.send).not.toHaveBeenCalled();
     expect(save).not.toHaveBeenCalled();
     expect(statusEl().textContent).toBe("This section is too large for AI editing; select a smaller part.");
-    expect(statusEl().classList.contains("warn")).toBe(true);
+    expect(statusEl().getAttribute("data-tone")).toBe("warn");
     expect(button("send").hidden).toBe(false);
 
     // The refusal does not wedge the panel: a request that fits still goes out.

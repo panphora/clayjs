@@ -357,8 +357,8 @@ test("every element it creates is marked out of the save, the watch and the snap
   const sync = await showing();
 
   const created = [notice(), ...notice().querySelectorAll("*")];
-  // Root, line, dismiss button.
-  expect(created.length).toBe(3);
+  // Root, line, dismiss button and its label.
+  expect(created.length).toBe(4);
   for (const el of created) {
     expect(el.getAttribute("clay")).toBe("no-save no-watch no-snapshot");
   }

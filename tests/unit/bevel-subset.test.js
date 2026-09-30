@@ -288,3 +288,20 @@ test("check mode: a leaked var() or a token that is not a light-dark() pair is n
   const short = { ...checked, RULES: { ...checked.RULES, buttonSmall: ["font-size"] } };
   expect(validateModule(short).join(" ")).toMatch(/RULES\.buttonSmall\[0\] is not a prop:value/);
 });
+
+test("input: a field is a surface with a line, focus draws brass on the edge", () => {
+  const t = subset.TOKENS;
+  expect(subset.RULES.input).toEqual(expect.arrayContaining([
+    `font-family:${FONT_SANS}`,
+    `color:${t.ink}`,
+    `background:${t.surface}`,
+    `border:1px solid ${t["line-2"]}`,
+    "border-radius:0",
+  ]));
+  expect(subset.RULES.inputHover).toEqual([`border-color:${t.faint}`]);
+  expect(subset.RULES.inputFocus).toEqual([
+    `outline:2px solid ${t.brass}`,
+    "outline-offset:1px",
+    `border-color:${t.brass}`,
+  ]);
+});

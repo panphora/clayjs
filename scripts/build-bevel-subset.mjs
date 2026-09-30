@@ -34,7 +34,7 @@ const USAGE = 'usage: node scripts/build-bevel-subset.mjs [--check] [--source <p
 // of these must fail the check rather than render half a control at runtime.
 const EXPORTS = ['RULES', 'MEDIA', 'FONT_SANS', 'FONT_MONO', 'TOKENS', 'SHADOW', 'SOURCE_SHA256']
 
-function collapse(value) {
+export function collapse(value) {
   return value.replace(/\s+/g, ' ').trim()
 }
 
@@ -148,7 +148,7 @@ function substitute(value, recipe, lookup) {
   }
 }
 
-function lookupIn(tokens, overrides) {
+export function lookupIn(tokens, overrides) {
   return name => {
     if (!name.startsWith('--bevel-')) return undefined
     const token = name.slice('--bevel-'.length)
@@ -209,7 +209,7 @@ function declarations(entries, tokens, overrides, recipe, options = {}) {
 
 // The :root colour tokens, checked against the manifest so a rename in Bevel cannot
 // quietly ship a subset with a stale token list.
-function readTokens(root) {
+export function readTokens(root) {
   const tokens = new Map()
   for (const rule of rulesFor(root, ':root', 'base', null, 'tokens')) {
     for (const decl of directDecls(rule, 'tokens')) {

@@ -12,7 +12,7 @@ test("a stale host gets a notice naming the fix", async () => {
   document.documentElement.setAttribute("htmlclaytoken", "tok-old");
   jest.spyOn(console, "warn").mockImplementation(() => {});
 
-  await import("../../src/core/stale-host-notice.js");
+  await (await import("../../src/core/stale-host-notice.js")).whenShown();
 
   expect(bar()).not.toBeNull();
   expect(bar().textContent).toContain("out of date");
@@ -26,7 +26,7 @@ test("the notice is marked so it can never reach disk or a peer", async () => {
   document.documentElement.setAttribute("htmlclaytoken", "tok-old");
   jest.spyOn(console, "warn").mockImplementation(() => {});
 
-  await import("../../src/core/stale-host-notice.js");
+  await (await import("../../src/core/stale-host-notice.js")).whenShown();
 
   const marker = bar().getAttribute("clay");
   expect(marker).toContain("no-save");

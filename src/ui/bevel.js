@@ -159,6 +159,28 @@ export const RULES = {
     "border-color:light-dark(#B89F7B, #1F2339) light-dark(#F0E1C9, #4D587A) light-dark(#F0E1C9, #4D587A) light-dark(#B89F7B, #1F2339)",
     "background:light-dark(#E3D0B3, #28304D)",
   ],
+  "input": [
+    "width:100%",
+    "display:block",
+    "font-family:system-ui,-apple-system,\"Segoe UI\",sans-serif",
+    "font-size:17px",
+    "line-height:1.5",
+    "color:light-dark(#2B241B, #ECEAF2)",
+    "background:light-dark(#FFFCF6, #11131E)",
+    "border:1px solid light-dark(#D8C8AF, #353B52)",
+    "border-radius:0",
+    "padding:7px 12px",
+    "outline:none",
+    "transition:border-color .14s, background-color .14s",
+  ],
+  "inputHover": [
+    "border-color:light-dark(#9A8A70, #6A7090)",
+  ],
+  "inputFocus": [
+    "outline:2px solid light-dark(#8F6310, #D9A445)",
+    "outline-offset:1px",
+    "border-color:light-dark(#8F6310, #D9A445)",
+  ],
   "surface": [
     "background:light-dark(#FFFCF6, #11131E)",
     "color:light-dark(#2B241B, #ECEAF2)",

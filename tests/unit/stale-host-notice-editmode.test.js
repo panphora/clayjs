@@ -25,7 +25,7 @@ test("no notice on a stale host when the reader asked for edit mode anyway", asy
   jest.spyOn(console, "warn").mockImplementation(() => {});
 
   const { isEditMode } = await import("../../src/core/is-edit-mode.js");
-  await import("../../src/core/stale-host-notice.js");
+  await (await import("../../src/core/stale-host-notice.js")).whenShown();
 
   // The premise: this really is the stale-host case, and editing really is on.
   const { servedStaleToken } = await import("../../src/core/host-attrs.js");

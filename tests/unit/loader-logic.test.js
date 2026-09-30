@@ -13,7 +13,7 @@ describe("resolveModules", () => {
     expect(core).toContain("core/snapshot.js");
     expect(core).toContain("core/save.js");
     expect(core).toContain("lib/cache-bust.js");
-    expect(plugins).toEqual(["vendor/richclay.vendor.js", "plugins/source.js"]);
+    expect(plugins).toEqual(["plugins/richclay.js", "plugins/source.js"]);
   });
 
   test("view mode: drops editOnly core wave and editOnly plugins, keeps always core", () => {
@@ -25,8 +25,8 @@ describe("resolveModules", () => {
   test("view mode keeps sync + cms (not editOnly) while dropping richclay", () => {
     const { plugins } = resolveModules(params({ plugins: "sync,cms" }), false);
     expect(plugins).toEqual([
-      "vendor/quickcrop.vendor.js",
-      "vendor/hypercms.vendor.js",
+      "plugins/quickcrop.js",
+      "plugins/cms.js",
       "sync/live-sync.js",
     ]);
   });
@@ -37,7 +37,7 @@ describe("resolveModules", () => {
     // The loader attaches each plugin's member as it lands, and cms reads what
     // earlier plugins attached during its own evaluation.
     expect(plugins.indexOf("plugins/upload.js"))
-      .toBeLessThan(plugins.indexOf("vendor/hypercms.vendor.js"));
+      .toBeLessThan(plugins.indexOf("plugins/cms.js"));
   });
 
   test("upload is dropped in view mode, where no file picker can appear", () => {
@@ -53,7 +53,7 @@ describe("resolveModules", () => {
     const { plugins } = resolveModules(params({ plugins: "cms" }), true);
     expect(plugins).toContain("plugins/upload.js");
     expect(plugins.indexOf("plugins/upload.js"))
-      .toBeLessThan(plugins.indexOf("vendor/hypercms.vendor.js"));
+      .toBeLessThan(plugins.indexOf("plugins/cms.js"));
   });
 
   // A cms page in VIEW mode still has no picker, so the uploader stays out. The
@@ -68,7 +68,7 @@ describe("resolveModules", () => {
   test("exclude=upload opts a cms page back out", () => {
     const { plugins } = resolveModules(params({ plugins: "cms", exclude: "upload" }), true);
     expect(plugins).not.toContain("plugins/upload.js");
-    expect(plugins).toContain("vendor/hypercms.vendor.js");
+    expect(plugins).toContain("plugins/cms.js");
   });
 
   // hypercms looks the cropper up as clay.quickcrop and silently uploads the raw
@@ -76,28 +76,28 @@ describe("resolveModules", () => {
   test("cms implies quickcrop, ahead of cms in load order", () => {
     const { plugins } = resolveModules(params({ plugins: "cms" }), true);
     expect(plugins).toEqual([
-      "vendor/richclay.vendor.js",
-      "vendor/quickcrop.vendor.js",
+      "plugins/richclay.js",
+      "plugins/quickcrop.js",
       "plugins/upload.js",
-      "vendor/hypercms.vendor.js",
+      "plugins/cms.js",
       "plugins/source.js",
     ]);
   });
 
   test("excluding quickcrop overrides the implication", () => {
     const { plugins } = resolveModules(params({ plugins: "cms", exclude: "quickcrop" }), true);
-    expect(plugins).toEqual(["vendor/richclay.vendor.js", "plugins/upload.js", "vendor/hypercms.vendor.js", "plugins/source.js"]);
+    expect(plugins).toEqual(["plugins/richclay.js", "plugins/upload.js", "plugins/cms.js", "plugins/source.js"]);
   });
 
   test("quickcrop loads on its own request, in view mode too", () => {
     expect(resolveModules(params({ plugins: "quickcrop" }), false).plugins)
-      .toEqual(["vendor/quickcrop.vendor.js"]);
+      .toEqual(["plugins/quickcrop.js"]);
   });
 
   test("plugins CSV adds listed plugins in canonical order", () => {
     const { plugins } = resolveModules(params({ plugins: "indicator,sortable,undo" }), true);
     expect(plugins).toEqual([
-      "vendor/richclay.vendor.js",
+      "plugins/richclay.js",
       "plugins/indicator.js",
       "plugins/sortable.js",
       "plugins/undo.js",
@@ -114,7 +114,7 @@ describe("resolveModules", () => {
     // The whole escape hatch for a default-on plugin, and the one a page uses when it
     // does not want the parser downloaded or the extra boot request made.
     expect(resolveModules(params({ exclude: "source" }), true).plugins)
-      .toEqual(["vendor/richclay.vendor.js"]);
+      .toEqual(["plugins/richclay.js"]);
   });
 
   // ai-edit is a consumer of clay.wire: it asks `clay.wire.helpers()` whether the
@@ -139,16 +139,16 @@ describe("resolveModules", () => {
   // out, and excluding the plugin itself takes the pair out.
   test("exclude drops the ai-edit path and the wire path it implied", () => {
     expect(resolveModules(params({ plugins: "ai-edit", exclude: "wire" }), true).plugins)
-      .toEqual(["vendor/richclay.vendor.js", "plugins/ai-edit.js", "plugins/source.js"]);
+      .toEqual(["plugins/richclay.js", "plugins/ai-edit.js", "plugins/source.js"]);
     expect(resolveModules(params({ plugins: "ai-edit", exclude: "wire,ai-edit" }), true).plugins)
-      .toEqual(["vendor/richclay.vendor.js", "plugins/source.js"]);
+      .toEqual(["plugins/richclay.js", "plugins/source.js"]);
   });
 
   test("unknown plugin name warns and is skipped (plugins param)", () => {
     const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
     const { plugins } = resolveModules(params({ plugins: "bogus,indicator" }), true);
     expect(warn).toHaveBeenCalledWith('clayjs: unknown plugin "bogus"');
-    expect(plugins).toEqual(["vendor/richclay.vendor.js", "plugins/indicator.js", "plugins/source.js"]);
+    expect(plugins).toEqual(["plugins/richclay.js", "plugins/indicator.js", "plugins/source.js"]);
     warn.mockRestore();
   });
 

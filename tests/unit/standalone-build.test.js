@@ -41,8 +41,9 @@ test("carries the core, every plugin and every satellite", () => {
     /clayjs: plugin "/,                    // src/loader.js
     /Sortable 1\.15\.6/,                   // the vendored Sortable's legal comment
     /\brichclay\s*=\s*\(/,
-    /(?:\bhypercms\s*=\s*\(|hypercms_vendor_exports)/,
+    /(?:\bhypercms\s*=\s*\(|hypercms_vendor_exports|init_hypercms_vendor)/,
     /quickcrop v1/,                        // quickcrop's legal comment
+    /@layer clay-skin\{/,                  // src/ui/skins, through the plugin wrappers
     /\bHyperMorph\s*=\s*\(/,               // sync's morph engine
     /\bhyperundo\s*=\s*\(/,
     /\bhyperHtmlApiData\s*=\s*\(/,         // clay-data
@@ -53,6 +54,10 @@ test("carries the core, every plugin and every satellite", () => {
   ]) {
     expect(bundle).toMatch(marker);
   }
+  // One skin per wrapper, each installed by name: a wrapper that dropped out of the
+  // bundle takes its skin with it.
+  expect((bundle.match(/@layer clay-skin\{/g) || []).length).toBeGreaterThanOrEqual(3);
+  for (const name of ["richclay", "cms", "quickcrop"]) expect(bundle).toMatch(new RegExp(`installSkin\\d*\\(\\s*"${name}"`));
   expect(bundle.length).toBeGreaterThan(500_000);
   expect(bundle.length).toBeLessThan(3_000_000);
 });

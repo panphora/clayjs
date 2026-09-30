@@ -126,11 +126,11 @@ test("debounce and throttle still resolve every queued caller, with timing uncha
 test("ask(): a default value cannot close the value attribute", async () => {
   ask("Name?", null, '" onfocus=x');
 
-  const input = document.querySelector(".micromodal__input");
+  const input = document.querySelector("[data-clay-modal] input");
   expect(input).not.toBeNull();
   expect(input.hasAttribute("onfocus")).toBe(false);
   expect(input.getAttribute("value")).toBe('" onfocus=x');
-  expect(document.querySelector(".micromodal-parent").innerHTML).toContain("&quot; onfocus=x");
+  expect(document.querySelector("[data-clay-modal]").innerHTML).toContain("&quot; onfocus=x");
 });
 
 // 6

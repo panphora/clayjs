@@ -2,37 +2,52 @@ import themodal from "./modal.js";
 import onDomReady from "../lib/dom-ready.js";
 import toast from "./toast.js";
 import copyToClipboard from "../utils/copy-to-clipboard.js";
+import { bevelBox, bevelButton, bevelInput, bevelText, protectIcon } from "./bevel-controls.js";
+import { TOKENS, FONT_SANS, FONT_MONO } from "./bevel.js";
 
-const CLOSE_BUTTON_SVG = `<svg viewBox="0 0 134 134" fill="none" xmlns="http://www.w3.org/2000/svg"><path class="micromodal__close-bg" d="M132 132.5 1 1.5h131v131Z" /><path class="micromodal__close-x" fill-rule="evenodd" clip-rule="evenodd" d="M0 0h3v1.5h1.5V3H6v1.5h1.5V6H9v1.5h1.5V9H12v1.5h1.5V12H15v1.5h1.5V15H18v1.5h1.5V18H21v1.5h1.5V21H24v1.5h1.5V24H27v1.5h1.5V27H30v1.5h1.5V30H33v1.5h1.5V33H36v1.5h1.5V36H39v1.5h1.5V39H42v1.5h1.5V42H45v1.5h1.5V45H48v1.5h1.5V48H51v1.5h1.5V51H54v1.5h1.5V54H57v1.5h1.5V57H60v1.5h1.5V60H63v1.5h1.5V63H66v1.5h1.5V66H69v1.5h1.5V69H72v1.5h1.5V72H75v1.5h1.5V75H78v1.5h1.5V78H81v1.5h1.5V81H84v1.5h1.5V84H87v1.5h1.5V87H90v1.5h1.5V90H93v1.5h1.5V93H96v1.5h1.5V96H99v1.5h1.5V99h1.5v1.5h1.5v1.5h1.5v1.5h1.5v1.5h1.5v1.5h1.5v1.5h1.5v1.5h1.5v1.5h1.5v1.5h1.5v1.5h1.5v1.5h1.5v1.5h1.5v1.5h1.5v1.5h1.5v1.5h1.5v1.5h1.5v1.5h1.5v1.5h1.5v1.5h1.5v1.5h1.5v1.5h1.5v3h-3V132H129v-1.5h-1.5V129H126v-1.5h-1.5V126H123v-1.5h-1.5V123H120v-1.5h-1.5V120H117v-1.5h-1.5V117H114v-1.5h-1.5V114H111v-1.5h-1.5V111H108v-1.5h-1.5V108H105v-1.5h-1.5V105H102v-1.5h-1.5V102H99v-1.5h-1.5V99H96v-1.5h-1.5V96H93v-1.5h-1.5V93H90v-1.5h-1.5V90H87v-1.5h-1.5V87H84v-1.5h-1.5V84H81v-1.5h-1.5V81H78v-1.5h-1.5V78H75v-1.5h-1.5V75H72v-1.5h-1.5V72H69v-1.5h-1.5V69H66v-1.5h-1.5V66H63v-1.5h-1.5V63H60v-1.5h-1.5V60H57v-1.5h-1.5V57H54v-1.5h-1.5V54H51v-1.5h-1.5V51H48v-1.5h-1.5V48H45v-1.5h-1.5V45H42v-1.5h-1.5V42H39v-1.5h-1.5V39H36v-1.5h-1.5V36H33v-1.5h-1.5V33H30v-1.5h-1.5V30H27v-1.5h-1.5V27H24v-1.5h-1.5V24H21v-1.5h-1.5V21H18v-1.5h-1.5V18H15v-1.5h-1.5V15H12v-1.5h-1.5V12H9v-1.5H7.5V9H6V7.5H4.5V6H3V4.5H1.5V3H0V0ZM108.8 22h5.2v5.1h-2.6v2.6H109v2.6h-2.6v2.6h-2.6v2.5h-2.6v5.2h2.6V45h2.6v2.6h2.6v2.6h2.5v2.6h2.6V58h-5.1v-2.6h-2.6V53h-2.6v-2.6h-2.6v-2.6h-2.5v-2.6h-5.2v2.6H91v2.6h-2.6v2.6h-2.6v2.5h-2.6V58H78v-5.1h2.6v-2.6H83v-2.6h2.6v-2.6h2.6v-2.5h2.6v-5.2h-2.6V35h-2.6v-2.6h-2.6v-2.6h-2.5v-2.6H78V22h5.2v2.6h2.5V27h2.6v2.6h2.6v2.6h2.5v2.6h5.2v-2.6h2.5v-2.6h2.6v-2.6h2.6v-2.5h2.5V22Z" /></svg>`;
-const CONFIRM_BUTTON_SVG = `<div style="width: 28px;"><svg viewBox="0 0 60 33" fill="none" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" clip-rule="evenodd" d="M34.5 0.75H43.5V5.25H49V9.75H54.5V14.25H60V18.75H54.5V23.25H49V27.75H43.5V32.25H34.5V27.75H40V23.25H45.5V18.75H0V14.25H45.5V9.75H40V5.25H34.5V0.75Z" fill="white"/></svg></div>`;
-
-// Only for the prompt's default value. promptText and extraContent are markup by
-// design, and callers pass elements through them.
-function escapeAttribute(value) {
-  return String(value)
-    .replaceAll("&", "&amp;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("<", "&lt;");
+// The confirm arrow, drawn in the button's own ink so it follows the primary button.
+function confirmArrow() {
+  const holder = document.createElement("span");
+  holder.innerHTML = '<svg viewBox="0 0 60 33" fill="none" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" clip-rule="evenodd" d="M34.5 0.75H43.5V5.25H49V9.75H54.5V14.25H60V18.75H54.5V23.25H49V27.75H43.5V32.25H34.5V27.75H40V23.25H45.5V18.75H0V14.25H45.5V9.75H40V5.25H34.5V0.75Z" fill="currentColor"/></svg>';
+  const svg = holder.firstElementChild;
+  protectIcon(svg, 28);
+  return svg;
 }
 
-function createModal(promptText, yesCallback, extraContent = "", includeInput = false, defaultValue = "") {
-  const inputHtml = includeInput
-    ? `<div><input class="micromodal__input" type="text" value="${escapeAttribute(defaultValue)}" required></div>`
-    : "";
+// Leaves room on the right for the corner close.
+function heading(markup) {
+  const el = bevelText("div", [
+    "display:flex", "flex-direction:column", "gap:2px", "margin:0 0 14px", "padding-inline-end:36px",
+    `font:600 22px/1.25 ${FONT_SANS}`, "letter-spacing:-.01em", "overflow-wrap:anywhere",
+  ]);
+  el.innerHTML = markup;
+  return el;
+}
 
-  themodal.html = `<div>
-    <div class="micromodal__heading">${promptText}</div>
-    ${inputHtml}
-    ${extraContent}
-  </div>`;
-  themodal.closeHtml = CLOSE_BUTTON_SVG;
-  themodal.yes = CONFIRM_BUTTON_SVG;
+// Caller markup (promptText, extraContent, tell's paragraphs) goes in as it is: those
+// are markup by design, and callers pass elements through them. Only the frame around
+// it is ClayJS's to style.
+function createModal(promptText, yesCallback, extraContent = "", includeInput = false, defaultValue = "") {
+  const content = bevelBox("div", ["display:block"]);
+  content.append(heading(promptText));
+  let input = null;
+  if (includeInput) {
+    input = bevelInput("input", { rules: ["margin:0 0 14px"] });
+    input.setAttribute("value", String(defaultValue));
+    input.required = true;
+    content.append(input);
+  }
+  content.insertAdjacentHTML("beforeend", extraContent);
+
+  themodal.html = content;
+  themodal.closeHtml = "x";
+  themodal.yes = confirmArrow();
 
   const promise = new Promise((resolve, reject) => {
     themodal.onYes(() => {
       let promptResult;
       if (includeInput) {
-        promptResult = document.querySelector(".micromodal__input").value;
+        promptResult = input.value;
         if (!promptResult) return false; // keep modal open on empty input
       }
       // Run the validation callback synchronously so a throw can keep the
@@ -61,7 +76,7 @@ function createModal(promptText, yesCallback, extraContent = "", includeInput = 
   themodal.open();
 
   setTimeout(() => {
-    const modalContainer = document.querySelector('.micromodal-parent');
+    const modalContainer = document.querySelector('[data-clay-modal]');
     if (modalContainer) {
       modalContainer.addEventListener('click', (event) => {
         const btn = event.target.closest('[data-copy]');
@@ -97,16 +112,18 @@ export function consent(promptText, yesCallback, extraContent = "") {
  * @returns {Promise} Resolves when user confirms, rejects on close
  */
 export function tell(promptText, ...content) {
-  const contentHtml = content.length > 0
-    ? content.map(c => `<div class="micromodal__tell-content">${c}</div>`).join("")
-    : "";
+  const box = bevelBox("div", ["display:flex", "flex-direction:column", "gap:20px", "max-width:440px", "margin:0 0 6px"]);
+  box.append(bevelText("div", [`font:600 22px/1.25 ${FONT_SANS}`, "padding-inline-end:36px", "overflow-wrap:anywhere"]));
+  box.firstChild.innerHTML = promptText;
+  for (const c of content) {
+    const paragraph = bevelText("div", [`font:16px/1.55 ${FONT_SANS}`, `color:${TOKENS["ink-2"]}`, "overflow-wrap:anywhere"]);
+    paragraph.innerHTML = c;
+    box.append(paragraph);
+  }
 
-  themodal.html = `<div class="micromodal__tell">
-    <div class="micromodal__tell-title">${promptText}</div>
-    ${contentHtml}
-  </div>`;
-  themodal.closeHtml = CLOSE_BUTTON_SVG;
-  themodal.yes = CONFIRM_BUTTON_SVG;
+  themodal.html = box;
+  themodal.closeHtml = "x";
+  themodal.yes = confirmArrow();
 
   const promise = new Promise((resolve, reject) => {
     themodal.onYes(() => {
@@ -133,64 +150,39 @@ export function tell(promptText, ...content) {
  * @param {string} title - The modal heading
  * @param {string} content - The code to display
  * @param {string} extraContent - Optional raw HTML rendered below the copy button.
- *   Callers style their own container; use `<div class="snippet-warning">…</div>`
- *   for the standard yellow-bordered warning box.
+ *   Callers style their own container.
  */
 export function snippet(title, content, extraContent = '') {
+  const box = bevelBox("div", ["display:block"]);
+  const well = bevelBox("div", [
+    "display:block", "max-width:100%", "overflow-x:auto", "margin:0 0 14px", "padding:14px 16px",
+    `background:${TOKENS.sunk}`, `border:1px solid ${TOKENS.line}`,
+  ]);
+  const pre = bevelText("pre", ["display:block", "margin:0", "white-space:nowrap", `font:13px/1.6 ${FONT_MONO}`]);
+  pre.innerHTML = content;
+  well.append(pre);
+  const copy = bevelButton("copy", {
+    small: true,
+    extra: ["margin:0 0 14px"],
+    onClick: () => {
+      copyToClipboard(content);
+      toast('Copied to clipboard!', 'success');
+    },
+  });
+  box.append(heading(title), well, copy);
+  box.insertAdjacentHTML("beforeend", extraContent || "");
 
-  // Create the modal content with copy button
-  const modalContent = `
-    <div class="snippet-code-block">
-      <pre>${content}</pre>
-    </div>
-
-    <button type="button" class="micromodal__secondary-btn copy-snippet-btn" style="margin-bottom: 14px;">copy</button>
-
-    ${extraContent || ''}
-  `;
-
-  // Use the existing modal system
-  themodal.html = `<div>
-    <div class="micromodal__heading">${title}</div>
-    ${modalContent}
-  </div>`;
-
-  themodal.closeHtml = CLOSE_BUTTON_SVG;
+  themodal.html = box;
+  themodal.closeHtml = "x";
   themodal.yes = '';
 
   const promise = new Promise((resolve) => {
-    // Local copy function
-    const handleCopy = function(event) {
-      if (event.target.closest('.copy-snippet-btn')) {
-        copyToClipboard(content);
-        toast('Copied to clipboard!', 'success');
-      }
-    };
-
-    // Add event listener to the modal container after it opens
-    setTimeout(() => {
-      const modalContainer = document.querySelector('.micromodal-parent');
-      if (modalContainer) {
-        modalContainer.addEventListener('click', handleCopy);
-      }
-    }, 0);
-
     themodal.onYes(() => {
-      // Clean up the event listener synchronously — the DOM may be torn down
-      // before our deferred resolve fires otherwise.
-      const modalContainer = document.querySelector('.micromodal-parent');
-      if (modalContainer) {
-        modalContainer.removeEventListener('click', handleCopy);
-      }
       setTimeout(resolve, 0);
       return true;
     });
 
     themodal.onNo = () => {
-      const modalContainer = document.querySelector('.micromodal-parent');
-      if (modalContainer) {
-        modalContainer.removeEventListener('click', handleCopy);
-      }
       setTimeout(resolve, 0);
     };
   });
@@ -203,7 +195,7 @@ export function snippet(title, content, extraContent = '') {
 // Auto-initialize - cleanup any leftover modal elements
 export function init() {
   onDomReady(() => {
-    const micromodalParentElem = document.querySelector(".micromodal-parent");
+    const micromodalParentElem = document.querySelector("[data-clay-modal]");
     if (micromodalParentElem) {
       micromodalParentElem.remove();
       document.body.style.overflow = "";

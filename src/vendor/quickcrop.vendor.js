@@ -24,6 +24,12 @@ function el(tag, cls = '', text = '') {
   return n;
 }
 
+// Geometry goes on inline and !important: a host page's `img { width: auto !important }`
+// beats a plain inline style, and the crop math assumes the sizes written here.
+function pin(node, prop, value) {
+  node.style.setProperty(prop, value, 'important');
+}
+
 function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, c => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -229,8 +235,8 @@ function quickcrop(file, options = {}) {
       ensureStyles();
 
       const stage = el('div', 'qc-stage');
-      img.style.width = dispW + 'px';
-      img.style.height = dispH + 'px';
+      pin(img, 'width', dispW + 'px');
+      pin(img, 'height', dispH + 'px');
       const dim = el('div', 'qc-dim');
       const box = el('div', 'qc-box');
       for (const c of ['nw', 'ne', 'sw', 'se']) box.appendChild(el('div', 'qc-handle qc-' + c));
@@ -251,15 +257,15 @@ function quickcrop(file, options = {}) {
       render();
 
       function render() {
-        box.style.left = x + 'px';
-        box.style.top = y + 'px';
-        box.style.width = w + 'px';
-        box.style.height = h + 'px';
+        pin(box, 'left', x + 'px');
+        pin(box, 'top', y + 'px');
+        pin(box, 'width', w + 'px');
+        pin(box, 'height', h + 'px');
         // dim the image outside the box: one donut polygon. The outer ring winds
         // clockwise and the inner counter-clockwise, so the default nonzero fill
         // rule punches the hole without the (less supported) evenodd keyword.
-        dim.style.clipPath = `polygon(0 0, 100% 0, 100% 100%, 0 100%, 0 0, ` +
-          `${x}px ${y}px, ${x}px ${y + h}px, ${x + w}px ${y + h}px, ${x + w}px ${y}px, ${x}px ${y}px)`;
+        pin(dim, 'clip-path', `polygon(0 0, 100% 0, 100% 100%, 0 100%, 0 0, ` +
+          `${x}px ${y}px, ${x}px ${y + h}px, ${x + w}px ${y + h}px, ${x + w}px ${y}px, ${x}px ${y}px)`);
       }
       const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
