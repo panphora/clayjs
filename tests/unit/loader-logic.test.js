@@ -25,7 +25,7 @@ describe("resolveModules", () => {
   test("view mode keeps sync + cms (not editOnly) while dropping richclay", () => {
     const { plugins } = resolveModules(params({ plugins: "sync,cms" }), false);
     expect(plugins).toEqual([
-      "vendor/quickcrop.vendor.js",
+      "plugins/quickcrop.js",
       "vendor/hypercms.vendor.js",
       "sync/live-sync.js",
     ]);
@@ -77,7 +77,7 @@ describe("resolveModules", () => {
     const { plugins } = resolveModules(params({ plugins: "cms" }), true);
     expect(plugins).toEqual([
       "vendor/richclay.vendor.js",
-      "vendor/quickcrop.vendor.js",
+      "plugins/quickcrop.js",
       "plugins/upload.js",
       "vendor/hypercms.vendor.js",
       "plugins/source.js",
@@ -91,7 +91,7 @@ describe("resolveModules", () => {
 
   test("quickcrop loads on its own request, in view mode too", () => {
     expect(resolveModules(params({ plugins: "quickcrop" }), false).plugins)
-      .toEqual(["vendor/quickcrop.vendor.js"]);
+      .toEqual(["plugins/quickcrop.js"]);
   });
 
   test("plugins CSV adds listed plugins in canonical order", () => {

@@ -52,11 +52,14 @@ an entry to `scripts/bevel-manifest.mjs`, run `npm run build:bevel`, and add a t
 
 - `RUNTIME_ONLY` is the `clay` attribute value every control carries
   (`no-save no-watch no-snapshot`).
-- `bevelButton(label, { variant, small, onClick, extra, labelExtra })` returns a
+- `bevelButton(label, { variant, small, onClick, extra, labelExtra, onState })` returns a
   `<button>` wrapping a label `<span>`. `variant` is `default`, `primary`, `quiet` or
   `danger`; `small` shrinks type and padding; `onClick` runs on click while the button is
-  not disabled. The element also carries `setLabel(text)`, `setDisabled(bool)` and
-  `isDisabled()`.
+  not disabled; `onState(flags)` runs after every rebuild with a copy of the hover,
+  press, focus-visible and disabled flags, for a button whose children follow its state.
+  The element also carries `setLabel(text)`, `setDisabled(bool)`, `isDisabled()` and
+  `pin(props)`: declarations that must outlive every rebuild, such as where a floating
+  button sits or whether it shows.
 - `bevelIconButton(svg, { label, onClick })` is a small square button whose label span
   holds the given SVG markup. `label` becomes the `aria-label` and the `title`.
 - `bevelSurface(tag, rules)` is a Bevel surface: background, ink, border and shadow, on
@@ -66,9 +69,25 @@ an entry to `scripts/bevel-manifest.mjs`, run `npm run build:bevel`, and add a t
   ink; `text` is set when it is not `null`.
 - `pageScheme()` is the scheme a UI root gives its subtree: the page's own when it
   declares one, else `light dark`.
+- `bevelInput(tag, { rules })` is a text field (`input` or `textarea`) in Bevel's input
+  material, with hover and focus kept in flags like a button's. `paintInput(el, { rules })`
+  does the same to a field that already exists. A textarea keeps the height a person
+  dragged it to.
+- `bevelBox(tag, rules)` is a plain box: the reset, then only the given rules, for rows,
+  stacks and backdrops that carry no material of their own.
+- `bevelCornerClose({ label, onClick })` is Bevel's overlay close: a 68px corner cut on
+  the diagonal with the pixel X, lifting on hover and filling brass on keyboard focus.
+- `setShown(el, shown, display)` shows or hides through both the `hidden` attribute and
+  an `!important` display, because `hidden` alone loses to an inline display. On a
+  Bevel button it goes through `pin`, so the next rebuild keeps it.
 - `protectIcon(svg, size)` restates an icon's own presentation attributes as inline
   `!important` declarations, so the page cannot hide, resize or repaint it, and pins a
   path's geometry through the `d` property as well.
+
+`src/ui/bevel-dialog.js` builds the dialog frame on these: `bevelDialog({ zIndex, width,
+closable })` returns the root (`data-clay-modal`), the backdrop, the `<form>` panel, the
+body, the footer and the corner close. It holds no behaviour; the modal and the crop
+adapter keep their own focus, Escape and settling rules.
 
 Inline styles have no `:hover`, `:active` or `:focus-visible`, so a button keeps hover,
 press, focus-visible and disabled in flags and rebuilds its whole inline style from them
@@ -97,12 +116,13 @@ question, whether these declarations beat a hostile stylesheet, needs a browser.
 | Stale host warning | `src/core/stale-host-notice.js` | Bevel controls | Keeps view-mode and stale-host gating, and its dismiss. |
 | Presence avatars, count, tooltip | `src/sync/presence.js` | Bevel controls | Participant colours keep their meaning; faces are square, in the mono face. |
 | Section-changed bar | `src/sync/section-notice.js` | Bevel controls | Keeps attribution and dismiss timing, and stays hidden under the conflict notice. |
-| Save indicator chip | `src/plugins/indicator.js` | not yet | Moves off plain `cssText`. |
-| Toasts | `src/ui/toast.js` | not yet | Keeps caller options, timing and actions. |
-| Modal shell | `src/ui/modal.js` | not yet | Keeps focus, Escape and return-focus; caller content untouched. |
-| Ask, confirm, tell and snippet dialogs | `src/ui/dialogs.js` | not yet | Keeps promise and callback behaviour. |
-| AI edit chrome | `src/plugins/ai-edit.js` | not yet | Ring, panel, chip and bubble only. |
+| Save indicator chip | `src/plugins/indicator.js` | Bevel controls | Error and offline wear the ox tone. |
+| Toasts | `src/ui/toast.js` | Bevel controls | Keeps caller options, timing and actions; markers are `data-clay-toasts` and `data-clay-toast`. |
+| Modal shell | `src/ui/modal.js`, `src/ui/bevel-dialog.js` | Bevel controls | Keeps focus, Escape and settling; `html`, `yes` and `no` take markup or a node, and caller content is never styled. |
+| Ask, confirm, tell and snippet dialogs | `src/ui/dialogs.js` | Bevel controls | Keeps promise and callback behaviour. |
+| AI edit chrome | `src/plugins/ai-edit.js` | Bevel controls | Ring, panel, chip and bubble only; the contenteditable focus rule is unchanged. |
 | RichClay toolbar, menus, link dialog, image toolbar | `src/vendor/richclay.vendor.js` | not yet | Edited prose is never restyled. |
-| Quickcrop | `src/vendor/quickcrop.vendor.js` | not yet | Crop geometry untouched. |
+| Quickcrop frame | `src/plugins/quickcrop.js` | Bevel controls | Frames the vendored cropper; crop geometry untouched. |
+| Quickcrop stage | `src/vendor/quickcrop.vendor.js` | not yet | Crop geometry untouched. |
 | CMS shell and controls | `src/vendor/hypercms.vendor.js` | not yet | Existing tokens map to the generated values. |
-| Sortable drag decoration | `src/plugins/sortable.js` | not yet | Transient decoration only, never authored items. |
+| Sortable drag decoration | `src/plugins/sortable.js` | nothing to draw | ClayJS adds no decoration: the ghost is a clone of the authored item and Sortable's classes are the page's to style. |

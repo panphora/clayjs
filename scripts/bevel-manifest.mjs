@@ -33,6 +33,9 @@ export const RECIPES = {
   buttonQuietActive: { selector: '.bevel-button--quiet:active' },
   focus: { selector: ':focus-visible', layer: 'base' },
   recess: { selector: '.bevel-toolbar__icon[aria-pressed="true"]', keep: ['border-color', 'background'], prepend: ['border:2px solid'] },
+  input: { selector: '.bevel-input' },
+  inputHover: { selector: '.bevel-input:hover:not(:disabled)' },
+  inputFocus: { selector: '.bevel-input:focus-visible' },
 };
 
 // Composed from tokens, not copied from a selector.

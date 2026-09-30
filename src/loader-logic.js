@@ -30,7 +30,7 @@ export const PLUGIN_PATHS = {
   sortable:  { path: "plugins/sortable.js",        editOnly: true,  default: false },
   undo:      { path: "plugins/undo.js",            editOnly: true,  default: false },
   cms:       { path: "vendor/hypercms.vendor.js",  editOnly: false, default: false },
-  quickcrop: { path: "vendor/quickcrop.vendor.js", editOnly: false, default: false },
+  quickcrop: { path: "plugins/quickcrop.js",       editOnly: false, default: false },
   // editOnly, because a file picker only ever appears in edit mode: the cms
   // injects its own editing toggle there and clayjs's edit-mode signal is a
   // superset of the cms's, so the plugin is present exactly when it can be used.
@@ -84,7 +84,7 @@ export const MODULES = {
   "plugins/sortable.js":        () => import("./plugins/sortable.js"),
   "plugins/undo.js":            () => import("./plugins/undo.js"),
   "vendor/hypercms.vendor.js":  () => import("./vendor/hypercms.vendor.js"),
-  "vendor/quickcrop.vendor.js": () => import("./vendor/quickcrop.vendor.js"),
+  "plugins/quickcrop.js":       () => import("./plugins/quickcrop.js"),
   "plugins/upload.js":          () => import("./plugins/upload.js"),
   "plugins/wire.js":            () => import("./plugins/wire.js"),
   "plugins/ai-edit.js":         () => import("./plugins/ai-edit.js"),

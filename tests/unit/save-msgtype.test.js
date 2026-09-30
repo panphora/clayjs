@@ -62,7 +62,7 @@ test("core alone renders no toast — a warning save leaves the DOM untouched", 
 
   await saveAndCaptureDetail("changed-no-ui-module");
 
-  expect(document.querySelector(".toast-container")).toBeNull();
-  expect(document.querySelector(".toast")).toBeNull();
+  expect(document.querySelector("[data-clay-toasts]")).toBeNull();
+  expect(document.querySelector("[data-clay-toast]")).toBeNull();
   expect(document.body.textContent).not.toContain("changed on disk");
 });

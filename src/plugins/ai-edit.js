@@ -43,10 +43,12 @@ import { STRIP_FROM_SAVE } from "../lib/region-policy.js";
 import { enableContentEditable } from "../core/admin-contenteditable.js";
 import onDomReady from "../lib/dom-ready.js";
 import wire from "./wire.js";
+import { set } from "../lib/hostile-css.js";
+import { bevelBox, bevelButton, bevelSurface, bevelText, bevelInput, pageScheme, setShown, RUNTIME_ONLY } from "../ui/bevel-controls.js";
+import { TOKENS, FONT_SANS, FONT_MONO, SHADOW } from "../ui/bevel.js";
 
 const HELPER = "ai-edit";
 const UNIT_SELECTOR = "h1,h2,h3,h4,h5,h6,p,figure";
-const RUNTIME_ONLY = "no-save no-watch no-snapshot";
 // The request ceiling, kept below the host's 1 MiB envelope so the refusal happens
 // here, where the message can say what to do about it.
 const MAX_PAYLOAD_BYTES = 900 * 1024;
@@ -324,8 +326,15 @@ function cancelStream() {
 
 // ---------------------------------------------------------------- chrome
 
-function markRuntimeOnly(el) {
-  el.setAttribute('clay', RUNTIME_ONLY);
+// Everything below is drawn on somebody else's page, so it follows the hostile-CSS
+// contract: runtime-only, no ids or classes, every declaration inline and !important
+// from all:initial, in Bevel material from the generated subset. Show and hide go
+// through setShown and positions through set(), both !important, so no page rule can
+// reveal a hidden part or move a placed one.
+const FLOATING = ['z-index:99999', 'padding:0', 'display:inline-grid', 'place-items:center', 'line-height:1', `box-shadow:${SHADOW}`];
+
+function marked(el, name, value) {
+  el.setAttribute(name, value);
   return el;
 }
 
@@ -333,108 +342,75 @@ function buildChrome() {
   const style = document.createElement('style');
   style.setAttribute('clay', RUNTIME_ONLY);
   style.textContent = `
-    #hyper-edit-panel {
-      position: fixed; z-index: 99999; width: min(30rem, calc(100vw - 2rem));
-      background: #16161d; color: #e8e8f0; border: 1px solid #34343f;
-      border-radius: 10px; box-shadow: 0 12px 40px rgba(0,0,0,.45);
-      font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
-      padding: 10px;
-    }
-    #hyper-edit-panel[hidden] { display: none; }
-    #hyper-edit-panel .hep-quote {
-      color: #9a9ab0; border-left: 2px solid #4a4a5a; padding-left: 8px;
-      margin-bottom: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-    }
-    #hyper-edit-panel textarea {
-      width: 100%; box-sizing: border-box; min-height: 3.2em; resize: vertical;
-      background: #0e0e13; color: inherit; border: 1px solid #34343f;
-      border-radius: 6px; padding: 8px; font: inherit; outline: none;
-    }
-    #hyper-edit-panel textarea:focus { border-color: #6a6a8a; }
-    #hyper-edit-panel .hep-row {
-      display: flex; align-items: center; gap: 8px; margin-top: 8px;
-    }
-    #hyper-edit-panel .hep-status { flex: 1; color: #9a9ab0; min-width: 0; }
-    #hyper-edit-panel .hep-status.warn { color: #e8b04a; }
-    #hyper-edit-panel button {
-      background: #26262f; color: inherit; border: 1px solid #44444f;
-      border-radius: 6px; padding: 4px 12px; font: inherit; cursor: pointer;
-    }
-    #hyper-edit-panel button:hover { background: #32323d; }
-    #hyper-edit-panel .hep-keep { background: #1e3a2a; border-color: #2e5a40; }
-    #hyper-edit-panel .hep-warnings {
-      margin-top: 8px; color: #e8b04a; white-space: pre-line;
-    }
-    #hyper-edit-ring {
-      position: fixed; z-index: 99998; pointer-events: none;
-      border: 1px solid #7a7aff; border-radius: 4px; opacity: .8;
-    }
-    #hyper-edit-ring[hidden] { display: none; }
-    #hyper-edit-chip {
-      position: fixed; z-index: 99999; width: 26px; height: 26px; padding: 0;
-      display: flex; align-items: center; justify-content: center;
-      background: #16161d; color: #e8e8f0; border: 1px solid #44444f;
-      border-radius: 50%; cursor: pointer; font-size: 13px; line-height: 1;
-      box-shadow: 0 4px 14px rgba(0,0,0,.4);
-    }
-    #hyper-edit-chip[hidden] { display: none; }
-    #hyper-edit-chip:hover { background: #32323d; border-color: #6a6a8a; }
-    #hyper-edit-doc-bubble {
-      position: fixed; right: 16px; bottom: 16px; z-index: 99999;
-      width: 44px; height: 44px; padding: 0; border-radius: 50%;
-      display: flex; align-items: center; justify-content: center;
-      background: #16161d; color: #e8e8f0; border: 1px solid #44444f;
-      font-size: 18px; cursor: pointer; box-shadow: 0 6px 20px rgba(0,0,0,.45);
-    }
-    #hyper-edit-doc-bubble:hover { background: #32323d; border-color: #6a6a8a; }
     [editmode\\:contenteditable][contenteditable]:focus {
       outline: 1px solid #4a4a6a; outline-offset: 4px; border-radius: 2px;
     }
   `;
   document.head.appendChild(style);
 
-  ring = markRuntimeOnly(document.createElement('div'));
-  ring.id = 'hyper-edit-ring';
-  ring.hidden = true;
+  const scheme = `color-scheme:${pageScheme()}`;
 
-  panel = markRuntimeOnly(document.createElement('div'));
-  panel.id = 'hyper-edit-panel';
-  panel.hidden = true;
-  panel.innerHTML = `
-    <div class="hep-quote" hidden></div>
-    <textarea rows="2" placeholder="Describe the change\u2026 (@file.ext adds context, @fable / @claude picks the agent)"></textarea>
-    <div class="hep-row">
-      <span class="hep-status"></span>
-      <button class="hep-send" type="button">Send</button>
-      <button class="hep-stop" type="button" hidden>Stop</button>
-      <button class="hep-revert" type="button" hidden>Revert</button>
-      <button class="hep-keep" type="button" hidden>Keep</button>
-    </div>
-    <div class="hep-warnings" hidden></div>
-  `;
+  ring = marked(bevelBox('div', [
+    'box-sizing:content-box', 'position:fixed', 'z-index:99998', 'pointer-events:none',
+    `border:2px solid ${TOKENS.brass}`, 'border-radius:0', scheme,
+  ]), 'data-clay-ai-edit', 'ring');
+  setShown(ring, false);
 
-  chip = markRuntimeOnly(document.createElement('button'));
-  chip.id = 'hyper-edit-chip';
-  chip.type = 'button';
+  panel = marked(bevelSurface('div', [
+    'position:fixed', 'z-index:99999', 'width:min(30rem, calc(100vw - 2rem))',
+    'padding:10px', `font:13px/1.5 ${FONT_SANS}`, scheme,
+  ]), 'data-clay-ai-edit', 'panel');
+  setShown(panel, false);
+
+  const part = (el, name) => marked(el, 'data-clay-ai-edit-part', name);
+
+  quoteEl = part(bevelText('div', [
+    'display:block', `color:${TOKENS.muted}`, `border-left:2px solid ${TOKENS['line-2']}`,
+    'padding-left:8px', 'margin-bottom:8px', 'white-space:nowrap', 'overflow:hidden',
+    'text-overflow:ellipsis', `font:12.5px/1.5 ${FONT_MONO}`,
+  ]), 'quote');
+  setShown(quoteEl, false);
+
+  textarea = part(bevelInput('textarea', {
+    rules: ['min-height:3.2em', 'resize:vertical', 'padding:8px', `font:13px/1.5 ${FONT_SANS}`],
+  }), 'input');
+  textarea.rows = 2;
+  textarea.placeholder = 'Describe the change\u2026 (@file.ext adds context, @fable / @claude picks the agent)';
+
+  statusEl = part(bevelText('span', [
+    'flex:1', 'min-width:0', `color:${TOKENS.muted}`, `font:12.5px/1.5 ${FONT_MONO}`,
+  ]), 'status');
+
+  const variants = { send: 'primary', stop: 'default', revert: 'quiet', keep: 'primary' };
+  const labels = { send: 'Send', stop: 'Stop', revert: 'Revert', keep: 'Keep' };
+  for (const name of ['send', 'stop', 'revert', 'keep']) {
+    buttons[name] = part(bevelButton(labels[name], { small: true, variant: variants[name] }), name);
+    setShown(buttons[name], name === 'send', 'inline-flex');
+  }
+
+  const row = bevelBox('div', ['display:flex', 'align-items:center', 'gap:8px', 'margin-top:8px']);
+  row.append(statusEl, buttons.send, buttons.stop, buttons.revert, buttons.keep);
+
+  warningsEl = part(bevelText('div', [
+    'display:block', 'margin-top:8px', `color:${TOKENS.ox}`, 'white-space:pre-line',
+  ]), 'warnings');
+  setShown(warningsEl, false);
+
+  panel.append(quoteEl, textarea, row, warningsEl);
+
+  chip = marked(bevelButton('\ud83d\udcac', {
+    small: true,
+    extra: ['position:fixed', 'width:26px', 'height:26px', 'font-size:13px', ...FLOATING, scheme],
+  }), 'data-clay-ai-edit', 'chip');
   chip.title = 'Comment on this (\u2318K)';
-  chip.textContent = '\ud83d\udcac';
-  chip.hidden = true;
+  setShown(chip, false, 'inline-grid');
 
-  docBubble = markRuntimeOnly(document.createElement('button'));
-  docBubble.id = 'hyper-edit-doc-bubble';
-  docBubble.type = 'button';
+  docBubble = marked(bevelButton('\ud83d\udcac', {
+    extra: ['position:fixed', 'right:16px', 'bottom:16px', 'width:44px', 'height:44px', 'font-size:18px', ...FLOATING, scheme],
+  }), 'data-clay-ai-edit', 'bubble');
   docBubble.title = 'Comment on the whole page';
-  docBubble.textContent = '\ud83d\udcac';
 
   document.body.append(ring, panel, chip, docBubble);
-
-  quoteEl = panel.querySelector('.hep-quote');
-  textarea = panel.querySelector('textarea');
-  statusEl = panel.querySelector('.hep-status');
-  warningsEl = panel.querySelector('.hep-warnings');
-  for (const name of ['send', 'stop', 'keep', 'revert']) {
-    buttons[name] = panel.querySelector('.hep-' + name);
-  }
 
   buttons.send.addEventListener('click', submit);
   buttons.stop.addEventListener('click', cancelStream);
@@ -468,15 +444,18 @@ function showChipFor(unit) {
   chipHideTimer = null;
   chipTarget = unit;
   const rect = unit.getBoundingClientRect();
-  chip.hidden = false;
-  chip.style.left = Math.min(rect.right + 8, window.innerWidth - 34) + 'px';
-  chip.style.top = Math.max(8, rect.top) + 'px';
+  chip.pin({
+    left: Math.min(rect.right + 8, window.innerWidth - 34) + 'px',
+    top: Math.max(8, rect.top) + 'px',
+    'color-scheme': pageScheme(),
+  });
+  setShown(chip, true, 'inline-grid');
 }
 
 function hideChip() {
   clearTimeout(chipHideTimer);
   chipHideTimer = null;
-  chip.hidden = true;
+  setShown(chip, false, 'inline-grid');
   chipTarget = null;
 }
 
@@ -487,17 +466,19 @@ function scheduleChipHide() {
 
 function setStatus(text, tone) {
   statusEl.textContent = text || '';
-  statusEl.classList.toggle('warn', tone === 'warn');
+  if (tone === 'warn') statusEl.setAttribute('data-tone', 'warn');
+  else statusEl.removeAttribute('data-tone');
+  set(statusEl, 'color', tone === 'warn' ? TOKENS.ox : TOKENS.muted);
 }
 
 function showButtons(...names) {
   for (const [name, button] of Object.entries(buttons)) {
-    button.hidden = !names.includes(name);
+    setShown(button, names.includes(name), 'inline-flex');
   }
 }
 
 function showWarnings(warnings) {
-  warningsEl.hidden = !warnings.length;
+  setShown(warningsEl, warnings.length > 0);
   warningsEl.textContent = warnings.map(w => '\u26a0 ' + w).join('\n');
 }
 
@@ -506,17 +487,17 @@ function positionChrome() {
   if (!anchorEl.isConnected) { closePanel(); return; }
   if (anchorEl === document.body) {
     // document mode: no ring, panel pinned above the bottom-right bubble
-    ring.hidden = true;
-    panel.style.left = Math.max(16, window.innerWidth - (panel.offsetWidth || 480) - 16) + 'px';
-    panel.style.top = Math.max(16, window.innerHeight - (panel.offsetHeight || 120) - 76) + 'px';
+    setShown(ring, false);
+    set(panel, 'left', Math.max(16, window.innerWidth - (panel.offsetWidth || 480) - 16) + 'px');
+    set(panel, 'top', Math.max(16, window.innerHeight - (panel.offsetHeight || 120) - 76) + 'px');
     return;
   }
   const rect = anchorEl.getBoundingClientRect();
-  ring.hidden = false;
-  ring.style.left = rect.left - 4 + 'px';
-  ring.style.top = rect.top - 4 + 'px';
-  ring.style.width = rect.width + 6 + 'px';
-  ring.style.height = rect.height + 6 + 'px';
+  setShown(ring, true);
+  set(ring, 'left', rect.left - 5 + 'px');
+  set(ring, 'top', rect.top - 5 + 'px');
+  set(ring, 'width', rect.width + 6 + 'px');
+  set(ring, 'height', rect.height + 6 + 'px');
   const panelWidth = panel.offsetWidth || 480;
   const left = Math.max(16, Math.min(rect.left, window.innerWidth - panelWidth - 16));
   let top = rect.bottom + 10;
@@ -524,15 +505,17 @@ function positionChrome() {
   if (top + panelHeight > window.innerHeight - 16) {
     top = Math.max(16, rect.top - panelHeight - 10);
   }
-  panel.style.left = left + 'px';
-  panel.style.top = top + 'px';
+  set(panel, 'left', left + 'px');
+  set(panel, 'top', top + 'px');
 }
 
 function openPanel(el, quote) {
   anchorEl = el;
   hideChip();
-  panel.hidden = false;
-  quoteEl.hidden = !quote;
+  set(panel, 'color-scheme', pageScheme());
+  set(ring, 'color-scheme', pageScheme());
+  setShown(panel, true);
+  setShown(quoteEl, !!quote);
   quoteEl.textContent = quote ? `\u201c${quote}\u201d` : '';
   panel.dataset.quote = quote || '';
   setStatus('');
@@ -545,8 +528,8 @@ function openPanel(el, quote) {
 function closePanel() {
   if (session) revertSession();
   anchorEl = null;
-  panel.hidden = true;
-  ring.hidden = true;
+  setShown(panel, false);
+  setShown(ring, false);
   textarea.value = '';
 }
 

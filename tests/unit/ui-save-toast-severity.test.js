@@ -16,7 +16,7 @@ function fireSaved(detail) {
 }
 
 function renderedToast() {
-  return document.querySelector(".toast");
+  return document.querySelector("[data-clay-toast]");
 }
 
 test("warning msgType renders a warning toast carrying the server's text", () => {
@@ -24,8 +24,7 @@ test("warning msgType renders a warning toast carrying the server's text", () =>
 
   const el = renderedToast();
   expect(el).not.toBeNull();
-  expect(el.classList.contains("warning")).toBe(true);
-  expect(el.classList.contains("success")).toBe(false);
+  expect(el.getAttribute("data-clay-toast")).toBe("warning");
   expect(el.textContent).toContain("Saved, but the file changed on disk");
 });
 
@@ -33,19 +32,18 @@ test("success msgType renders a success toast", () => {
   fireSaved({ msg: "Saved", msgType: "success" });
 
   const el = renderedToast();
-  expect(el.classList.contains("success")).toBe(true);
-  expect(el.classList.contains("warning")).toBe(false);
+  expect(el.getAttribute("data-clay-toast")).toBe("success");
   expect(el.textContent).toContain("Saved");
 });
 
 test("absent msgType renders a success toast", () => {
   fireSaved({ msg: "Saved" });
 
-  expect(renderedToast().classList.contains("success")).toBe(true);
+  expect(renderedToast().getAttribute("data-clay-toast")).toBe("success");
 });
 
 // A stale-write warning names the file, and a filename is attacker-chosen on any
-// OS that allows < and > in names. The toast builds its shell with innerHTML, so
+// OS that allows < and > in names. The toast writes its icon with innerHTML, so
 // the message must never travel that path.
 test("markup in the server's message is rendered as text, never as HTML", () => {
   fireSaved({
@@ -63,6 +61,6 @@ test("absent detail falls back to a Saved success toast", () => {
   fireSaved(undefined);
 
   const el = renderedToast();
-  expect(el.classList.contains("success")).toBe(true);
+  expect(el.getAttribute("data-clay-toast")).toBe("success");
   expect(el.textContent).toContain("Saved");
 });

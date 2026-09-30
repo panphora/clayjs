@@ -8,7 +8,7 @@
 // all:initial resets color-scheme and direction too. Both are put back after every
 // reset, so light-dark() follows the scheme the UI root sets and a page cannot
 // flip the text direction.
-import { style, make } from '../lib/hostile-css.js';
+import { style, make, set } from '../lib/hostile-css.js';
 import { RULES, MEDIA, FONT_SANS, TOKENS } from './bevel.js';
 
 export const RUNTIME_ONLY = 'no-save no-watch no-snapshot';
@@ -78,12 +78,13 @@ function protectIcon(svg, size) {
   }
 }
 
-export function bevelButton(label, { variant = 'default', small = false, onClick = null, extra = [], labelExtra = [] } = {}) {
+export function bevelButton(label, { variant = 'default', small = false, onClick = null, extra = [], labelExtra = [], onState = null } = {}) {
   const v = VARIANT[variant] || VARIANT.default;
   const size = small ? SIZE.small : SIZE.normal;
   const reducedMotion = media('(prefers-reduced-motion: reduce)');
   const forced = media('(forced-colors: active)');
   const flags = { hovered: false, pressed: false, focusVisible: false, disabled: false };
+  const pinned = new Map();
 
   const b = runtime(make('button', []));
   b.type = 'button';
@@ -102,12 +103,14 @@ export function bevelButton(label, { variant = 'default', small = false, onClick
     if (flags.focusVisible) rules.push(...RULES.focus);
     if (forced) rules.push(...MEDIA.forcedColors);
     rules.push(...extra);
+    for (const [prop, value] of pinned) rules.push(`${prop}:${value}`);
     restyle(b, rules);
     const labelRules = [...RESET, 'font:inherit', 'color:inherit', ...RULES.buttonLabel];
     if (flags.disabled) labelRules.push(...RULES.buttonDisabledLabel);
     else if (flags.pressed) labelRules.push(...(reducedMotion ? MEDIA.reducedMotion : RULES.buttonActiveLabel));
     labelRules.push(...labelExtra);
     restyle(span, labelRules);
+    onState?.({ ...flags });
   }
 
   function refreshFocus() {
@@ -146,6 +149,12 @@ export function bevelButton(label, { variant = 'default', small = false, onClick
     applyState();
   };
   b.isDisabled = () => flags.disabled;
+  // Declarations that must outlive every state rebuild: where a floating button sits,
+  // whether it shows. Written anywhere else, they would be rebuilt away on the next hover.
+  b.pin = (props) => {
+    for (const [prop, value] of Object.entries(props)) pinned.set(prop, value);
+    applyState();
+  };
 
   applyState();
   return b;
@@ -165,6 +174,45 @@ export function bevelIconButton(svg, { label, onClick = null }) {
   return b;
 }
 
+// Bevel's overlay close: a 68px corner cut on the diagonal, the pixel X drawn on it.
+// Hover lifts the corner to the face, keyboard focus fills it with brass.
+const CORNER = [
+  'position:absolute', 'top:-1px', 'right:-1px', 'z-index:2', 'display:block',
+  'width:68px', 'height:68px', 'padding:0', 'margin:0', 'border:0', 'outline:none',
+  'background:transparent', 'clip-path:polygon(0 4%, 0 0, 100% 0, 100% 100%, 94% 100%)',
+];
+const CORNER_BG = 'M132 132.5 1 1.5h131v131Z';
+const CORNER_X = 'M0 0h3v1.5h1.5V3H6v1.5h1.5V6H9v1.5h1.5V9H12v1.5h1.5V12H15v1.5h1.5V15H18v1.5h1.5V18H21v1.5h1.5V21H24v1.5h1.5V24H27v1.5h1.5V27H30v1.5h1.5V30H33v1.5h1.5V33H36v1.5h1.5V36H39v1.5h1.5V39H42v1.5h1.5V42H45v1.5h1.5V45H48v1.5h1.5V48H51v1.5h1.5V51H54v1.5h1.5V54H57v1.5h1.5V57H60v1.5h1.5V60H63v1.5h1.5V63H66v1.5h1.5V66H69v1.5h1.5V69H72v1.5h1.5V72H75v1.5h1.5V75H78v1.5h1.5V78H81v1.5h1.5V81H84v1.5h1.5V84H87v1.5h1.5V87H90v1.5h1.5V90H93v1.5h1.5V93H96v1.5h1.5V96H99v1.5h1.5V99h1.5v1.5h1.5v1.5h1.5v1.5h1.5v1.5h1.5v1.5h1.5v1.5h1.5v1.5h1.5v1.5h1.5v1.5h1.5v1.5h1.5v1.5h1.5v1.5h1.5v1.5h1.5v1.5h1.5v1.5h1.5v1.5h1.5v1.5h1.5v1.5h1.5v1.5h1.5v1.5h1.5v1.5h1.5v3h-3V132H129v-1.5h-1.5V129H126v-1.5h-1.5V126H123v-1.5h-1.5V123H120v-1.5h-1.5V120H117v-1.5h-1.5V117H114v-1.5h-1.5V114H111v-1.5h-1.5V111H108v-1.5h-1.5V108H105v-1.5h-1.5V105H102v-1.5h-1.5V102H99v-1.5h-1.5V99H96v-1.5h-1.5V96H93v-1.5h-1.5V93H90v-1.5h-1.5V90H87v-1.5h-1.5V87H84v-1.5h-1.5V84H81v-1.5h-1.5V81H78v-1.5h-1.5V78H75v-1.5h-1.5V75H72v-1.5h-1.5V72H69v-1.5h-1.5V69H66v-1.5h-1.5V66H63v-1.5h-1.5V63H60v-1.5h-1.5V60H57v-1.5h-1.5V57H54v-1.5h-1.5V54H51v-1.5h-1.5V51H48v-1.5h-1.5V48H45v-1.5h-1.5V45H42v-1.5h-1.5V42H39v-1.5h-1.5V39H36v-1.5h-1.5V36H33v-1.5h-1.5V33H30v-1.5h-1.5V30H27v-1.5h-1.5V27H24v-1.5h-1.5V24H21v-1.5h-1.5V21H18v-1.5h-1.5V18H15v-1.5h-1.5V15H12v-1.5h-1.5V12H9v-1.5H7.5V9H6V7.5H4.5V6H3V4.5H1.5V3H0V0ZM108.8 22h5.2v5.1h-2.6v2.6H109v2.6h-2.6v2.6h-2.6v2.5h-2.6v5.2h2.6V45h2.6v2.6h2.6v2.6h2.5v2.6h2.6V58h-5.1v-2.6h-2.6V53h-2.6v-2.6h-2.6v-2.6h-2.5v-2.6h-5.2v2.6H91v2.6h-2.6v2.6h-2.6v2.5h-2.6V58H78v-5.1h2.6v-2.6H83v-2.6h2.6v-2.6h2.6v-2.5h2.6v-5.2h-2.6V35h-2.6v-2.6h-2.6v-2.6h-2.5v-2.6H78V22h5.2v2.6h2.5V27h2.6v2.6h2.6v2.6h2.5v2.6h5.2v-2.6h2.5v-2.6h2.6v-2.6h2.6v-2.5h2.5V22Z';
+
+export function bevelCornerClose({ label = 'Close', onClick = null } = {}) {
+  let bg = null;
+  let x = null;
+  const paint = ({ hovered, focusVisible }) => {
+    if (!bg) return;
+    set(bg, 'fill', focusVisible ? TOKENS.brass : hovered ? TOKENS.face : TOKENS.sunk);
+    set(x, 'fill', focusVisible ? TOKENS.face : TOKENS.ink);
+  };
+  const b = bevelButton('', {
+    variant: 'quiet', onClick, extra: CORNER,
+    labelExtra: ['display:block', 'width:100%', 'height:100%'], onState: paint,
+  });
+  b.setAttribute('aria-label', label);
+  b.firstChild.innerHTML = `<svg viewBox="0 0 134 134" xmlns="http://www.w3.org/2000/svg"><path d="${CORNER_BG}"/><path fill-rule="evenodd" clip-rule="evenodd" d="${CORNER_X}"/></svg>`;
+  const svg = b.firstChild.firstElementChild;
+  protectIcon(svg, 68);
+  [bg, x] = svg.children;
+  set(x, 'fill-rule', 'evenodd');
+  set(x, 'clip-rule', 'evenodd');
+  paint({ hovered: false, focusVisible: false });
+  return b;
+}
+
+// A plain runtime-only box: reset, then only the given rules. For structure inside a
+// surface (rows, stacks, backdrops) that carries no material of its own.
+export function bevelBox(tag, rules = []) {
+  return runtime(make(tag, [...RESET, 'box-sizing:border-box', ...rules]));
+}
+
 export function bevelSurface(tag, rules = []) {
   return runtime(make(tag, [...RESET, 'box-sizing:border-box', ...RULES.surface, `font:14px/1.5 ${FONT_SANS}`, ...rules]));
 }
@@ -179,11 +227,50 @@ export function bevelText(tag, rules = [], text) {
   return el;
 }
 
+// A text field in Bevel's input material, on an element that already exists (markup a
+// dialog wrote) or a new one. Focus and hover live in flags, as on a button. A
+// textarea keeps the height a person dragged it to across every repaint.
+export function paintInput(el, { rules = [] } = {}) {
+  const flags = { hovered: false, focused: false };
+  const forced = media('(forced-colors: active)');
+  runtime(el);
+  function applyState() {
+    const height = el.localName === 'textarea' ? el.style.getPropertyValue('height') : '';
+    const list = [...RESET, 'box-sizing:border-box', ...RULES.input];
+    if (flags.hovered) list.push(...RULES.inputHover);
+    if (flags.focused) list.push(...RULES.inputFocus);
+    if (forced) list.push(...MEDIA.forcedColors);
+    list.push(...rules);
+    if (height) list.push(`height:${height}`);
+    restyle(el, list);
+  }
+  el.addEventListener('pointerenter', () => { flags.hovered = true; applyState(); });
+  el.addEventListener('pointerleave', () => { flags.hovered = false; applyState(); });
+  el.addEventListener('focus', () => { flags.focused = true; applyState(); });
+  el.addEventListener('blur', () => { flags.focused = false; applyState(); });
+  applyState();
+  return el;
+}
+
+export function bevelInput(tag = 'input', opts = {}) {
+  const el = document.createElement(tag);
+  if (tag === 'input') el.type = 'text';
+  return paintInput(el, opts);
+}
+
 // The scheme a UI root gives its subtree: the page's own when it declares one, so
 // light-dark() matches what the person is looking at, else the reader's preference.
 export function pageScheme() {
   const s = getComputedStyle(document.documentElement).colorScheme;
   return s === 'light' || s === 'dark' ? s : 'light dark';
+}
+
+// `hidden` loses to an inline !important display, so showing and hiding a control
+// sets both: the attribute for assistive tech and callers, the declaration for looks.
+export function setShown(el, shown, display = 'block') {
+  el.hidden = !shown;
+  if (el.pin) el.pin({ display: shown ? display : 'none' });
+  else set(el, 'display', shown ? display : 'none');
 }
 
 export { protectIcon };
