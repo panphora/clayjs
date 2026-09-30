@@ -178,18 +178,20 @@ describe("what a skin leaves alone", () => {
     expect(vendorText("cms")).toMatch(/createElement\("hypercms-toggle"\);\w+\.className="hcms-shell /);
   });
 
-  // Properties a vendor writes as inline styles. A skin that declared one !important
-  // on the same element would outrank the plain inline value and freeze it.
-  const INLINE_WRITE = [/\.style\.([a-zA-Z]+)\s*=(?!=)/g, /style\.setProperty\(\s*["']([a-z-]+)["']/g];
+  // A plain inline style loses to a page's !important rule, and a skin declaring the
+  // property would freeze it, so inside a skin a vendor writes inline styles
+  // !important (tests/unit/vendor-inline-important.test.js). The plain writes left
+  // are each on an element no skin selector reaches, and the manifest names exactly
+  // those.
+  const PLAIN_WRITE = [/\.style\.([a-zA-Z]+)\s*=(?!=)/g, /style\.setProperty\(\s*["']([a-z-]+)["'][^)]*\)/g];
   const kebab = (name) => name.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
 
-  test.each(["quickcrop", "richclay"])("%s: every property the vendor writes inline is classified", (name) => {
-    const spec = SKINS[name];
+  test.each(["quickcrop", "richclay"])("%s: every plain inline style the vendor writes lands outside the skin", (name) => {
     const written = new Set();
-    for (const re of INLINE_WRITE) for (const m of vendorText(name).matchAll(re)) written.add(kebab(m[1]));
-    expect(written.size).toBeGreaterThan(2);
-    const classified = new Set([...spec.inline.flatMap((entry) => entry.props), ...Object.keys(spec.inlineOutOfScope)]);
-    for (const prop of written) expect([prop, classified.has(prop)]).toEqual([prop, true]);
+    for (const re of PLAIN_WRITE) {
+      for (const m of vendorText(name).matchAll(re)) if (!/important/.test(m[0])) written.add(kebab(m[1]));
+    }
+    expect([...written].sort()).toEqual(Object.keys(SKINS[name].inlineOutOfScope).sort());
   });
 
   test.each(["quickcrop", "richclay"])("%s: no skin rule declares an inline-written property on that element", (name) => {

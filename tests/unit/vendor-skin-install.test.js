@@ -1,9 +1,9 @@
 import postcss from "postcss";
 import { installSkin } from "../../src/ui/vendor-skin.js";
 import { RUNTIME_ONLY } from "../../src/ui/bevel-controls.js";
-import { CSS as RICHCLAY } from "../../src/ui/skins/richclay.js";
+import { CSS as RICHCLAY, ROOTS as RICHCLAY_ROOTS } from "../../src/ui/skins/richclay.js";
 import { CSS as CMS } from "../../src/ui/skins/cms.js";
-import { CSS as QUICKCROP } from "../../src/ui/skins/quickcrop.js";
+import { CSS as QUICKCROP, ROOTS as QUICKCROP_ROOTS } from "../../src/ui/skins/quickcrop.js";
 
 /**
  * A skin's layer is placed where its name first appears, and important declarations
@@ -60,14 +60,14 @@ test("moves back to the front when something was put ahead of it", () => {
 });
 
 test.each([
-  ["richclay", "../../src/plugins/richclay.js", RICHCLAY],
-  ["cms", "../../src/plugins/cms.js", CMS],
-  ["quickcrop", "../../src/plugins/quickcrop.js", QUICKCROP],
-])("the %s plugin puts its skin first in <head> when it loads", async (name, path, css) => {
+  ["richclay", "../../src/plugins/richclay.js", RICHCLAY, RICHCLAY_ROOTS],
+  ["cms", "../../src/plugins/cms.js", CMS, null],
+  ["quickcrop", "../../src/plugins/quickcrop.js", QUICKCROP, QUICKCROP_ROOTS],
+])("the %s plugin puts its skin first in <head> when it loads, with its roots' scheme where it has roots", async (name, path, css, roots) => {
   await import(path);
   const el = document.head.querySelector(`style[data-clay-skin="${name}"]`);
   expect(el).not.toBeNull();
-  expect(el.textContent.startsWith(css)).toBe(true);
+  expect(el.textContent).toBe(roots ? `${css}\n@layer clay-skin{:is(${roots.join(", ")}){color-scheme:light dark !important}}` : css);
   expect(el.getAttribute("clay")).toBe(RUNTIME_ONLY);
   expect(el.previousElementSibling === null || el.previousElementSibling.hasAttribute("data-clay-skin")).toBe(true);
 });

@@ -60,15 +60,17 @@ export const SKINS = {
     skipMedia: { '(max-width:520px)': 'sizes the Bevel modal, which ClayJS draws inline itself' },
     keyframes: ['qc-fade'],
     prose: [],
-    // Properties quickcrop writes as inline styles. A skin declaring one of them
-    // !important on the same element would freeze it, so the generator drops them.
+    // The crop geometry quickcrop writes inline, !important, so a page rule cannot
+    // move it. The skin leaves these properties to quickcrop.
     inline: [
       { subject: '.qc-box', props: ['left', 'top', 'width', 'height'] },
       { subject: 'img', within: '.qc-stage', props: ['width', 'height'] },
       { subject: '.qc-dim', props: ['clip-path'] },
-      { subject: '.qc-css-probe', props: ['display'] },
     ],
-    inlineOutOfScope: {},
+    // Plain inline writes, each on an element no skin selector reaches.
+    inlineOutOfScope: {
+      display: 'the stylesheet-detection probe, on <body> and gone before the stage mounts',
+    },
   },
 
   richclay: {
@@ -158,11 +160,13 @@ export const SKINS = {
     skipMedia: { '(prefers-color-scheme: dark)': 'dark defaults for the vendor tokens, which the pins replace' },
     keyframes: [],
     prose: ['.richclay-editor', '.richclay-inline'],
+    // The floating toolbar's placement, written inline and !important.
     inline: [
       { subject: '.richclay-float', props: ['display', 'visibility', 'transform'] },
     ],
-    // Inline writes that land outside every skin selector.
+    // Plain inline writes, each on an element no skin selector reaches.
     inlineOutOfScope: {
+      display: 'the edited element itself, which is prose',
       'font-family': 'Squire font spans inside edited prose',
       'font-size': 'Squire size spans inside edited prose',
       color: 'Squire colour spans inside edited prose',
