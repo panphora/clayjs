@@ -9,6 +9,8 @@
 - The notice can download the replaced edits as a file
 - `clay.markDirty()` for editors that write their own data where live sync cannot see it
 - `clay:sync-applied` lists every unresolved conflict, not only the current frame's
+- RichClay, Quickcrop and the CMS get generated skins that page CSS cannot restyle: RichClay and Quickcrop follow the page's colour scheme, and a CMS shell with `data-theme` keeps its own theme
+- `clay.modal`'s `html`, `yes` and `no` accept a node
 
 ### Changed
 - A lost conflict no longer keeps the page dirty or holds the automatic save, and a save no longer clears it: the edit waits in `clay.conflicts` until the person acknowledges it. `liveSync.unresolvedConflicts` is now a read-only view of that ledger, so assigning to it throws
@@ -16,7 +18,15 @@
 - A merge keeps an edit with the element its id names, even when a copy of that element has identical content
 - The peer merge base moves forward when the host accepts a save, so a frame built on that save no longer types a letter twice or shows a phantom conflict
 - Injected ClayJS UI is built from a generated Bevel subset with system fonts, and page CSS can no longer restyle it
+- Every injected surface uses it: the save indicator, toasts, modal, ask, confirm, tell, snippet warning, AI edit panel, stale host notice, presence, section bar and crop frame
+- `closeHtml` always draws the corner close
+- Quickcrop writes its crop geometry and RichClay its floating toolbar placement inline with `!important`, so page CSS cannot move them
+- RichClay checks a descendant's own region marker on the element itself
 - The close warning also counts unsaved work that has not reached the page yet
+
+### Removed
+- Classes and ids on injected UI (`.micromodal*`, `.toast*`, `#hyper-edit-*`, `.hep-*`, `.snippet-warning`) and the `--clay-notice-*`, `--clay-presence-*`, `--clay-section-*`, `--clay-indicator-*` and `--hyperclay-modal-*` custom properties: page CSS aimed at them no longer applies
+- The toast theme exports
 
 ### Fixed
 - A copied block keeps its content on the receiving tab
