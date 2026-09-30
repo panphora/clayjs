@@ -44,6 +44,11 @@ let LiveSync, snapshot, gate, save, etag, autosaveState, conflicts;
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+// Resolves once `predicate` holds, or after `timeout`; the assertion after it decides.
+async function waitFor(predicate, timeout = 4000) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeout && !predicate()) await wait(10);
+}
 function deferred() {
   let resolve;
   const promise = new Promise((r) => (resolve = r));
@@ -276,6 +281,7 @@ test("T2 Keep mine whose bytes equal this tab's last relay is still relayed, wit
   document.querySelector('[data-id="two"]').textContent = "Two X";
   await Promise.resolve();
   expect((await save.savePage()).ok).toBe(true);
+  await waitFor(() => relayPosts.length >= 1);
   await wait(50);
   expect(relayPosts).toHaveLength(1);
   const x = relayPosts[0].body.snapshot;
@@ -294,6 +300,7 @@ test("T2 Keep mine whose bytes equal this tab's last relay is still relayed, wit
   saveResponse = () => ({ status: 200, body: { msg: "Saved", etag: "E1" } });
   expect((await save.saveOverwritingConflict()).ok).toBe(true);
   expect(savePosts[2].headers["If-Match"]).toBe("E2");
+  await waitFor(() => relayPosts.length >= 2);
   await wait(50);
 
   expect(relayPosts).toHaveLength(2);
@@ -371,6 +378,7 @@ test("T7 a public captureForSave() between a save's capture and its response doe
 
   response.resolve({ status: 200, body: { msg: "Saved", etag: "E1" } });
   expect((await inFlight).ok).toBe(true);
+  await waitFor(() => relayPosts.length >= 1);
   await wait(50);
 
   expect(relayPosts).toHaveLength(1);
@@ -515,6 +523,7 @@ test("G5 a relay queued behind one in flight keeps its own stamp", async () => {
   expect(relayPosts).toHaveLength(1);
 
   first.resolve(200);
+  await waitFor(() => relayPosts.length >= 2);
   await wait(50);
   expect(relayPosts).toHaveLength(2);
   expect(relayPosts[0].body.etag).toBe("E1");
@@ -535,6 +544,7 @@ test("G6 a save captured during a frame's apply window is still relayed once it 
   const saving = save.savePage();
   await applying;
   expect((await saving).ok).toBe(true);
+  await waitFor(() => relayPosts.length >= 1);
   await wait(50);
 
   expect(relayPosts).toHaveLength(1);
