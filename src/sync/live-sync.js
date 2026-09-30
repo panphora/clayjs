@@ -1416,6 +1416,7 @@ class LiveSync {
         ...common,
         base: baseDoc,
         local: { root: localRoot, toLive: originalSnapshotNode },
+        fastPath: true,
         identity: {
           base: localIdentity,
           local: localIdentity,
