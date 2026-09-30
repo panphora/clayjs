@@ -109,7 +109,7 @@ function attachPluginMember(path, mod) {
   } else if (path === "sync/live-sync.js") {
     clay.morph = mod.morph;
     clay.conflicts = mod.conflicts;
-  } else if (path === "vendor/hypercms.vendor.js") {
+  } else if (path === "plugins/cms.js") {
     clay.cms = mod.cms || mod.default;
   } else if (path === "plugins/upload.js") {
     clay.upload = mod.upload || mod.default;
@@ -119,7 +119,7 @@ function attachPluginMember(path, mod) {
     clay.aiEdit = mod.aiEdit || mod.default;
   } else if (path === "plugins/demo.js") {
     clay.demo = mod.demo;
-  } else if (path === "vendor/richclay.vendor.js") {
+  } else if (path === "plugins/richclay.js") {
     clay.RichClay = mod.RichClay || mod.default;
   } else if (path === "plugins/quickcrop.js") {
     clay.quickcrop = mod.quickcrop || mod.default;

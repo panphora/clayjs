@@ -24,12 +24,12 @@ export const CORE_WAVES = {
 };
 
 export const PLUGIN_PATHS = {
-  richclay:  { path: "vendor/richclay.vendor.js",  editOnly: true,  default: true },
+  richclay:  { path: "plugins/richclay.js",        editOnly: true,  default: true },
   indicator: { path: "plugins/indicator.js",       editOnly: true,  default: false },
   sync:      { path: "sync/live-sync.js",          editOnly: false, default: false },
   sortable:  { path: "plugins/sortable.js",        editOnly: true,  default: false },
   undo:      { path: "plugins/undo.js",            editOnly: true,  default: false },
-  cms:       { path: "vendor/hypercms.vendor.js",  editOnly: false, default: false },
+  cms:       { path: "plugins/cms.js",             editOnly: false, default: false },
   quickcrop: { path: "plugins/quickcrop.js",       editOnly: false, default: false },
   // editOnly, because a file picker only ever appears in edit mode: the cms
   // injects its own editing toggle there and clayjs's edit-mode signal is a
@@ -78,12 +78,12 @@ export const MODULES = {
   "attrs/refetch-on-save.js":   () => import("./attrs/refetch-on-save.js"),
   "lib/cache-bust.js":          () => import("./lib/cache-bust.js"),
   "vendor/hyper-morph.vendor.js": () => import("./vendor/hyper-morph.vendor.js"),
-  "vendor/richclay.vendor.js":  () => import("./vendor/richclay.vendor.js"),
+  "plugins/richclay.js":        () => import("./plugins/richclay.js"),
   "plugins/indicator.js":       () => import("./plugins/indicator.js"),
   "sync/live-sync.js":          () => import("./sync/live-sync.js"),
   "plugins/sortable.js":        () => import("./plugins/sortable.js"),
   "plugins/undo.js":            () => import("./plugins/undo.js"),
-  "vendor/hypercms.vendor.js":  () => import("./vendor/hypercms.vendor.js"),
+  "plugins/cms.js":             () => import("./plugins/cms.js"),
   "plugins/quickcrop.js":       () => import("./plugins/quickcrop.js"),
   "plugins/upload.js":          () => import("./plugins/upload.js"),
   "plugins/wire.js":            () => import("./plugins/wire.js"),

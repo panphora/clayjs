@@ -93,11 +93,18 @@ describe("clay.region", () => {
 // without this leaves hypercms unable to find richclay at all — silently.
 test("attachPluginMember publishes the richclay vendor on clay.RichClay", () => {
   const source = readFileSync(join(repoRoot, "src", "loader.js"), "utf8");
-  const branch = source.match(/\} else if \(path === "vendor\/richclay\.vendor\.js"\) \{[\s\S]*?\n {2}\}/);
+  const branch = source.match(/\} else if \(path === "plugins\/richclay\.js"\) \{[\s\S]*?\n {2}\}/);
   expect(branch).not.toBeNull();
   // Anchored: `window.hyperclay.RichClay = ...` contains `clay.RichClay = ...` as a
   // substring, so an unanchored match passes on the very code this pins against.
   expect(branch[0]).toMatch(/^ {4}clay\.RichClay = mod\.RichClay \|\| mod\.default;$/m);
+});
+
+test("attachPluginMember publishes the CMS on clay.cms through its skin wrapper", () => {
+  const source = readFileSync(join(repoRoot, "src", "loader.js"), "utf8");
+  const branch = source.match(/\} else if \(path === "plugins\/cms\.js"\) \{[\s\S]*?\n {2}\}/);
+  expect(branch).not.toBeNull();
+  expect(branch[0]).toMatch(/^ {4}clay\.cms = mod\.cms \|\| mod\.default;$/m);
 });
 
 // Same silent failure as the richclay pin above: the vendored hypercms bundle

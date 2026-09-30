@@ -6,12 +6,17 @@
 // that a page stylesheet can repaint. So every request that would have landed on
 // either ('auto', or a themodal-shaped object such as clay.modal, which is what the
 // CMS passes) is framed here instead. 'builtin' and a caller's own adapter pass
-// through untouched. The stage itself is quickcrop's, and so is its geometry.
+// through untouched. The stage itself is quickcrop's, and so is its geometry; its
+// skin keeps a page stylesheet off it.
 import vendorQuickcrop from "../vendor/quickcrop.vendor.js";
 import { bevelDialog, dismissOf, keepFocusIn } from "../ui/bevel-dialog.js";
 import { bevelButton } from "../ui/bevel-controls.js";
+import { installSkin } from "../ui/vendor-skin.js";
+import { CSS as SKIN, ROOTS as SKIN_ROOTS } from "../ui/skins/quickcrop.js";
 
 const WIDTH = 844;
+
+installSkin("quickcrop", SKIN, { roots: SKIN_ROOTS });
 
 function isThemodal(m) {
   return !!m && typeof m === "object" &&

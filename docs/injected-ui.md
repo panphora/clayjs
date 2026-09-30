@@ -108,6 +108,26 @@ jsdom drops `light-dark()` and `color-mix()` values, and the `translate` propert
 spy (see `tests/unit/bevel-controls.test.js`). jsdom has no cascade, so the real
 question, whether these declarations beat a hostile stylesheet, needs a browser.
 
+## Vendor skins
+
+RichClay, Quickcrop and the CMS draw their own UI with their own classes, and ClayJS
+never edits a vendor. Each gets a skin instead: `scripts/build-vendor-skins.mjs`
+reads the CSS the vendored bundle ships, plus Bevel's integration file where there is
+one, and writes `src/ui/skins/<name>.js`, one `@layer clay-skin { ... }` block in
+which every declaration is `!important`. `src/ui/vendor-skin.js` puts it first in
+`<head>`, runtime-only, when the plugin loads. Important declarations in the earliest
+cascade layer beat a page's unlayered `!important` rules.
+
+- The vendor's custom properties are pinned to Bevel's literal values on its roots
+  and every descendant.
+- RichClay and Quickcrop also get Bevel's integration rules and their own chrome
+  rules, re-emitted at `!important`. The CMS gets pins and the Bevel mono face only:
+  its theme sits in cascade layers on purpose, so a page's utilities can restyle it.
+- Every selector in a source is listed in `scripts/skin-manifest.mjs` or the build
+  fails, and edited prose is never in a skin.
+- `npm run build:skins` regenerates; `npm run check:skins` fails when a skin is stale
+  (it validates the checked-in modules when `../bevel` is not beside the repo).
+
 ## Surfaces
 
 | Surface | File | Status | Notes |
@@ -121,8 +141,8 @@ question, whether these declarations beat a hostile stylesheet, needs a browser.
 | Modal shell | `src/ui/modal.js`, `src/ui/bevel-dialog.js` | Bevel controls | Keeps focus, Escape and settling; `html`, `yes` and `no` take markup or a node, and caller content is never styled. |
 | Ask, confirm, tell and snippet dialogs | `src/ui/dialogs.js` | Bevel controls | Keeps promise and callback behaviour. |
 | AI edit chrome | `src/plugins/ai-edit.js` | Bevel controls | Ring, panel, chip and bubble only; the contenteditable focus rule is unchanged. |
-| RichClay toolbar, menus, link dialog, image toolbar | `src/vendor/richclay.vendor.js` | not yet | Edited prose is never restyled. |
+| RichClay toolbar, menus, floating toolbar, link dialog | `src/plugins/richclay.js`, `src/ui/skins/richclay.js` | vendor skin | Edited prose is never restyled. RichClay has no image toolbar; Squire's resize handles sit inside the prose. |
 | Quickcrop frame | `src/plugins/quickcrop.js` | Bevel controls | Frames the vendored cropper; crop geometry untouched. |
-| Quickcrop stage | `src/vendor/quickcrop.vendor.js` | not yet | Crop geometry untouched. |
-| CMS shell and controls | `src/vendor/hypercms.vendor.js` | not yet | Existing tokens map to the generated values. |
+| Quickcrop stage | `src/plugins/quickcrop.js`, `src/ui/skins/quickcrop.js` | vendor skin | Crop geometry untouched. |
+| CMS shell and controls | `src/plugins/cms.js`, `src/ui/skins/cms.js` | vendor skin, pins | Existing tokens map to the generated values, in the Bevel mono face. |
 | Sortable drag decoration | `src/plugins/sortable.js` | nothing to draw | ClayJS adds no decoration: the ghost is a clone of the authored item and Sortable's classes are the page's to style. |

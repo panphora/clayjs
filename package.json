@@ -60,7 +60,9 @@
     "deploy": "node build.js && wrangler deploy && git rev-parse HEAD > .deploy",
     "build:parse5": "node scripts/build-parse5-vendor.mjs",
     "build:bevel": "node scripts/build-bevel-subset.mjs",
-    "check:bevel": "node scripts/build-bevel-subset.mjs --check"
+    "check:bevel": "node scripts/build-bevel-subset.mjs --check",
+    "build:skins": "node scripts/build-vendor-skins.mjs",
+    "check:skins": "node scripts/build-vendor-skins.mjs --check"
   },
   "devDependencies": {
     "@esm-bundle/chai": "^4.3.4-fix.0",

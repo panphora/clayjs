@@ -1,0 +1,95 @@
+@layer components {
+  .bevel-richtext,
+  .bevel-inline-edit[data-bevel-edit-kind="rich"],
+  [data-bevel-richclay-chrome] {
+    --richclay-surface: var(--bevel-surface);
+    --richclay-surface-alt: var(--bevel-sunk);
+    --richclay-text: var(--bevel-ink);
+    --richclay-muted: var(--bevel-muted);
+    --richclay-border: var(--bevel-line-2);
+    --richclay-accent: var(--bevel-brass);
+    --richclay-accent-ink: var(--bevel-ground);
+    --richclay-focus: var(--bevel-brass);
+    --richclay-danger: var(--bevel-ox);
+    --richclay-radius: 0px;
+    --richclay-control-size: 32px;
+    --richclay-shadow: var(--bevel-shadow);
+    font-family: var(--bevel-font-sans);
+  }
+  .bevel-inline-edit--title .bevel-inline-edit__input {
+    --richclay-muted: var(--bevel-faint);
+    --richclay-focus: transparent;
+    --richclay-border: transparent;
+  }
+  .bevel-richtext :where(.richclay-toolbar),
+  :where(.richclay-float, .richclay-dialog)[data-bevel-richclay-chrome] { color: var(--bevel-ink); background: var(--bevel-surface); border: 1px solid var(--bevel-line-2); }
+  .bevel-richtext :where([contenteditable="true"]):focus { outline: 2px solid var(--bevel-brass); outline-offset: 2px; }
+}
+
+.bevel-richtext { border: 0; }
+:is(.bevel-richtext, [data-bevel-richclay-chrome]) .richclay-toolbar,
+.richclay-toolbar[data-bevel-richclay-chrome] {
+  gap: 3px;
+  margin: 0;
+  padding: 8px;
+  border: 1px solid var(--bevel-line-2);
+  border-radius: 0;
+  background: var(--bevel-sunk);
+  color: var(--bevel-ink);
+}
+:is(.bevel-richtext, [data-bevel-richclay-chrome]) .richclay-button {
+  min-width: 32px;
+  height: 32px;
+  padding: 0 7px;
+  gap: 6px;
+  border: 2px solid;
+  border-color: var(--bevel-edge-hi) var(--bevel-edge-lo) var(--bevel-edge-lo) var(--bevel-edge-hi);
+  border-radius: 0;
+  background: var(--bevel-face);
+  font: 14px var(--bevel-font-sans);
+  cursor: pointer;
+}
+:is(.bevel-richtext, [data-bevel-richclay-chrome]) .richclay-button:is([aria-pressed="true"], [aria-expanded="true"]) {
+  background: var(--bevel-face-in);
+  border-color: var(--bevel-edge-in) var(--bevel-edge-in-hi) var(--bevel-edge-in-hi) var(--bevel-edge-in);
+  box-shadow: none;
+  color: var(--bevel-ink);
+}
+:is(.bevel-richtext, [data-bevel-richclay-chrome]) .richclay-button[aria-pressed="true"] > svg { translate: 1px 1px; }
+:is(.bevel-richtext, [data-bevel-richclay-chrome]) .richclay-button:disabled { opacity: .45; cursor: not-allowed; }
+:is(.bevel-richtext, [data-bevel-richclay-chrome]) .richclay-separator { align-self: center; height: 22px; margin: 0 5px; background: var(--bevel-line-2); }
+:is(.bevel-richtext, [data-bevel-richclay-chrome]) .richclay-menu { inset-block-start: 38px; min-width: 210px; padding: 5px; border-radius: 0; box-shadow: var(--bevel-shadow); }
+:is(.bevel-richtext, [data-bevel-richclay-chrome]) .richclay-menu-item { padding: 8px 10px; border: 0; border-radius: 0; font: 14px var(--bevel-font-sans); }
+:is(.bevel-richtext, [data-bevel-richclay-chrome]) .richclay-menu-item[aria-checked="true"] { background: var(--bevel-sunk); box-shadow: inset 2px 0 var(--bevel-brass); }
+:is(.bevel-richtext, [data-bevel-richclay-chrome]) [data-richclay-menu-item="blockMenu"][data-richclay-option-index="1"] { font: 500 18px var(--bevel-font-serif); }
+:is(.bevel-richtext, [data-bevel-richclay-chrome]) [data-richclay-menu-item="blockMenu"][data-richclay-option-index="2"] { font: 500 15.5px var(--bevel-font-serif); }
+.bevel-richtext > [data-bevel-richtext] { position: relative; margin: 0; min-height: 240px; padding: 28px 30px; border: 1px solid var(--bevel-line-2); border-radius: 0; background: var(--bevel-surface); color: var(--bevel-ink); overflow-wrap: anywhere; }
+.bevel-richtext > .richclay-toolbar + [data-bevel-richtext] { border-top: 0; }
+.bevel-richtext > [data-bevel-richtext] h2 { margin: 0; font: 400 29px/1.15 var(--bevel-font-serif); }
+.bevel-richtext > [data-bevel-richtext] p { margin: 14px 0; font-size: 14.5px; line-height: 1.7; color: var(--bevel-ink-2); }
+.bevel-richtext > [data-bevel-richtext] :is(strong, b) { color: var(--bevel-ink); }
+.bevel-richtext > [data-bevel-richtext] blockquote { margin: 20px 0; padding-left: 18px; border-left: 2px solid var(--bevel-brass); font: 21px var(--bevel-font-serif); color: var(--bevel-ink); }
+.bevel-richtext > [data-bevel-richtext] a { color: var(--bevel-brass); }
+.richclay-dialog[data-bevel-richclay-chrome] { position: relative; width: min(100%, 360px); margin: 16px 0; padding: 14px 16px 12px; border: 1px solid var(--bevel-line-2); border-radius: 0; background: var(--bevel-surface); color: var(--bevel-ink); box-shadow: var(--bevel-shadow); }
+.richclay-dialog[data-bevel-richclay-chrome]::before { content: ""; position: absolute; left: 22px; top: -7px; width: 12px; height: 12px; background: var(--bevel-surface); border-top: 1px solid var(--bevel-line-2); border-left: 1px solid var(--bevel-line-2); transform: rotate(45deg); }
+[data-bevel-richclay-chrome] .richclay-dialog-title { margin-bottom: 2px; font: 500 10px var(--bevel-font-mono); text-transform: uppercase; letter-spacing: .12em; }
+[data-bevel-richclay-chrome] .richclay-field { gap: 5px; }
+[data-bevel-richclay-chrome] .richclay-field > span { color: var(--bevel-ink-2); font-size: 12px; }
+[data-bevel-richclay-chrome] .richclay-input { min-height: 30px; padding: 4px 8px; border: 2px solid; border-color: var(--bevel-edge-in) var(--bevel-edge-in-hi) var(--bevel-edge-in-hi) var(--bevel-edge-in); border-radius: 0; background: var(--bevel-sunk); color: var(--bevel-ink); font: 13px var(--bevel-font-sans); }
+[data-bevel-richclay-chrome] .richclay-dialog-actions { margin-top: 4px; padding-top: 12px; border-top: 1px solid var(--bevel-line); flex-wrap: wrap; }
+[data-bevel-richclay-chrome] :is(.richclay-primary, .richclay-secondary) { min-height: 30px; padding: 4px 10px; border: 2px solid; border-color: var(--bevel-edge-hi) var(--bevel-edge-lo) var(--bevel-edge-lo) var(--bevel-edge-hi); border-radius: 0; background: var(--bevel-face); color: var(--bevel-ink); font: 13px var(--bevel-font-sans); }
+[data-bevel-richclay-chrome] .richclay-primary { background: var(--bevel-ink); color: var(--bevel-ground); border-color: color-mix(in srgb, var(--bevel-ink), white 24%) color-mix(in srgb, var(--bevel-ink), black 32%) color-mix(in srgb, var(--bevel-ink), black 32%) color-mix(in srgb, var(--bevel-ink), white 24%); }
+.richclay-float[data-bevel-richclay-chrome] { border-radius: 0; box-shadow: var(--bevel-shadow); }
+.richclay-float[data-bevel-richclay-chrome] > .richclay-toolbar { padding: 5px; }
+@media (max-width: 540px) {
+  .bevel-richtext > [data-bevel-richtext] { padding: 20px 18px; }
+  .bevel-richtext > [data-bevel-richtext] blockquote { font-size: 18px; }
+}
+
+[data-bevel-richclay-icon] { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+[data-bevel-richclay-chrome] [data-richclay-control="blockMenu"] { min-width: 118px; padding: 0 8px 0 11px; font-size: 13.5px; }
+[data-bevel-richclay-chrome] [data-richclay-control="blockMenu"] [data-bevel-richclay-icon] { width: 100%; justify-content: space-between; }
+[data-bevel-richclay-chrome] [aria-pressed="true"] > [data-bevel-richclay-icon] { translate: 1px 1px; }
+@media (max-width: 540px) {
+  [data-bevel-richclay-chrome] [data-richclay-control="blockMenu"] { min-width: 0; }
+}
