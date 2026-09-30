@@ -320,3 +320,14 @@ test("exports: set and style are not re-exported", () => {
   expect(bevelControls.set).toBeUndefined();
   expect(bevelControls.style).toBeUndefined();
 });
+
+test("pageScheme: the page's declared scheme wins, otherwise the reader's preference", () => {
+  document.documentElement.style.colorScheme = "dark";
+  expect(bevelControls.pageScheme()).toBe("dark");
+  document.documentElement.style.colorScheme = "light";
+  expect(bevelControls.pageScheme()).toBe("light");
+  document.documentElement.style.colorScheme = "light dark";
+  expect(bevelControls.pageScheme()).toBe("light dark");
+  document.documentElement.style.colorScheme = "";
+  expect(bevelControls.pageScheme()).toBe("light dark");
+});

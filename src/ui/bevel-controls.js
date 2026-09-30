@@ -179,4 +179,11 @@ export function bevelText(tag, rules = [], text) {
   return el;
 }
 
+// The scheme a UI root gives its subtree: the page's own when it declares one, so
+// light-dark() matches what the person is looking at, else the reader's preference.
+export function pageScheme() {
+  const s = getComputedStyle(document.documentElement).colorScheme;
+  return s === 'light' || s === 'dark' ? s : 'light dark';
+}
+
 export { protectIcon };

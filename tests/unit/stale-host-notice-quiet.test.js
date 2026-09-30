@@ -4,7 +4,7 @@
 test("a host serving the current token gets no notice", async () => {
   document.documentElement.setAttribute("savetoken", "tok-spec");
 
-  await import("../../src/core/stale-host-notice.js");
+  await (await import("../../src/core/stale-host-notice.js")).whenShown();
 
   expect(document.querySelector("[data-clay-stale-host]")).toBeNull();
 });

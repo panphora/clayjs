@@ -1,7 +1,7 @@
 /**
  * presence.js — who else is on this document.
  *
- * A fixed-corner stack of circles, one per participant the host chose to name,
+ * A fixed-corner stack of squares, one per participant the host chose to name,
  * plus a count of everyone it did not. The host decides who is named, per
  * recipient, from that recipient's own access; nothing here asks for a name and
  * nothing here can widen what arrived.
@@ -37,26 +37,24 @@
 
 import { hostSupports } from '../core/host-meta.js';
 import { make, set } from '../lib/hostile-css.js';
+import { pageScheme, RUNTIME_ONLY } from '../ui/bevel-controls.js';
+import { TOKENS, FONT_MONO, SHADOW } from '../ui/bevel.js';
 
-// Runtime-only chrome, in one string so no root can carry two of the three.
-const RUNTIME_ONLY = 'no-save no-watch no-snapshot';
-
-// Two initials at 12px need about 15px of the circle, so the overlap has to
-// leave that much clear or the neighbouring circle eats the second letter.
+// Two initials at 11px need about 15px of the square, so the overlap has to
+// leave that much clear or the neighbouring square eats the second letter.
 const SIZE = 30;
 const OVERLAP = 6;
-const FONT = "12px/1 system-ui,-apple-system,'Segoe UI',sans-serif";
-const LABEL_FONT = "12px/1.4 system-ui,-apple-system,'Segoe UI',sans-serif";
+const FONT = `600 11px/1 ${FONT_MONO}`;
+const LABEL_FONT = `500 11px/1.4 ${FONT_MONO}`;
 
-// The chrome around the circles is themeable like every other clayjs surface.
-// The circles themselves are not: their colour is computed per participant, so
-// there is no one value a page could override.
-const INK = 'var(--clay-presence-ink,#1f2023)';
-const CHIP_BG = 'var(--clay-presence-bg,#fff)';
-const CHIP_EDGE = 'var(--clay-presence-edge,rgba(0,0,0,.14))';
-const TIP_BG = 'var(--clay-presence-tip-bg,#222)';
-const TIP_INK = 'var(--clay-presence-tip-ink,#fff)';
-const FACE = '#ffffff';
+// all:initial first on every element, so a page rule has nothing left to reach; it
+// resets color-scheme and direction too, which are put back straight after.
+const RESET = ['all:initial', 'color-scheme:inherit', 'direction:ltr', 'unicode-bidi:isolate'];
+
+// The paper a participant's colour sits on: the initials of a solid square, the fill
+// of a hollow one. One literal in both schemes, because every colour below was chosen
+// against it.
+const FACE = '#FFFCF6';
 
 // A fixed set rather than a computed hue: every one of these was looked at
 // against white initials, and a hue wheel puts neighbouring pseudonyms on two
@@ -97,7 +95,7 @@ function initialsOf(name) {
 /**
  * Read the roster frame defensively. Everything here arrived over a wire, and a
  * frame this function cannot understand must draw nothing rather than draw a
- * guess: `[object Object]` in a circle is worse than an empty corner.
+ * guess: `[object Object]` in a square is worse than an empty corner.
  */
 function normalize(data) {
   const list = data && Array.isArray(data.people) ? data.people : [];
@@ -176,11 +174,12 @@ class Presence {
     if (!this.build()) return;
 
     this.hideTip();
+    set(this.root, 'color-scheme', pageScheme());
     this.stack.textContent = '';
     for (const person of people) {
       this.stack.appendChild(this.avatar(person));
     }
-    // The overlap belongs between circles, so the leftmost one does not pull
+    // The overlap belongs between squares, so the leftmost one does not pull
     // itself into the count beside it.
     if (this.stack.firstElementChild) set(this.stack.firstElementChild, 'margin-left', '0');
 
@@ -207,44 +206,50 @@ class Presence {
     if (typeof document === 'undefined' || !document.body) return false;
 
     this.root = runtimeRoot(make('div', [
+      ...RESET,
+      `color-scheme:${pageScheme()}`,
       'position:fixed',
       'top:calc(12px + env(safe-area-inset-top,0px))',
       'right:calc(12px + env(safe-area-inset-right,0px))',
       'z-index:2147483000',
       'display:flex', 'align-items:center', 'gap:8px',
       'max-width:calc(100vw - 24px)',
-      `font:${LABEL_FONT}`, `color:${INK}`,
-      // Only the circles take a pointer. A fixed corner that swallowed clicks
+      `font:${LABEL_FONT}`, `color:${TOKENS.ink}`,
+      // Only the squares take a pointer. A fixed corner that swallowed clicks
       // would take a bite out of whatever the page put underneath it.
       'pointer-events:none',
     ]));
     this.root.setAttribute('data-clay-presence', '');
 
     this.count = runtimeRoot(make('span', [
+      ...RESET,
       'box-sizing:border-box', 'flex:none', 'white-space:nowrap',
-      'padding:4px 8px', 'border-radius:999px',
-      `background-color:${CHIP_BG}`, 'background-image:none', `color:${INK}`,
-      'border-width:1px', 'border-style:solid', `border-color:${CHIP_EDGE}`,
-      `font:${LABEL_FONT}`,
-      'box-shadow:0 1px 3px rgba(0,0,0,.2)',
+      'padding:3px 8px', 'border-radius:0',
+      `background:${TOKENS.surface}`, `color:${TOKENS.muted}`,
+      `border:1px solid ${TOKENS['line-2']}`,
+      `font:${LABEL_FONT}`, 'letter-spacing:.02em',
+      `box-shadow:${SHADOW}`,
       'display:none',
+      'pointer-events:none',
     ]));
     this.count.setAttribute('data-clay-presence-count', '');
 
     this.stack = runtimeRoot(make('div', [
-      'display:flex', 'align-items:center', 'flex:none',
+      ...RESET,
+      'display:flex', 'align-items:center', 'flex:none', 'pointer-events:none',
     ]));
 
     // Inside the root rather than appended to <body>, so the one element that
     // holds a name at rest cannot outlive the subtree that keeps it out of a
     // snapshot. It carries the marking of its own too.
     this.tip = runtimeRoot(make('span', [
+      ...RESET,
       'position:absolute', 'top:100%', 'right:0', 'margin-top:6px',
       'box-sizing:border-box', 'white-space:nowrap', 'pointer-events:none',
-      'padding:4px 8px', 'border-radius:6px',
-      `background-color:${TIP_BG}`, 'background-image:none',
-      `color:${TIP_INK}`, `font:${LABEL_FONT}`,
-      'box-shadow:0 4px 14px rgba(0,0,0,.28)',
+      'padding:5px 9px', 'border-radius:0',
+      `background:${TOKENS.ink}`, `color:${TOKENS.ground}`,
+      `font:${LABEL_FONT}`, 'letter-spacing:.02em',
+      `box-shadow:${SHADOW}`,
       'display:none',
     ]));
     this.tip.setAttribute('data-clay-presence-tip', '');
@@ -264,20 +269,21 @@ class Presence {
       : [`background-color:${FACE}`, `color:${color}`, `border-color:${color}`];
 
     const el = runtimeRoot(make('div', [
+      ...RESET,
       'box-sizing:border-box', 'flex:none',
-      `width:${SIZE}px`, `height:${SIZE}px`, 'border-radius:50%',
+      `width:${SIZE}px`, `height:${SIZE}px`, 'border-radius:0',
       'display:flex', 'align-items:center', 'justify-content:center',
-      `font:${FONT}`, 'font-weight:600',
+      `font:${FONT}`, 'letter-spacing:.02em',
       `margin-left:-${OVERLAP}px`,
       'border-width:2px', 'border-style:solid', 'background-image:none',
-      'box-shadow:0 1px 3px rgba(0,0,0,.28)',
+      `box-shadow:${SHADOW}`,
       'user-select:none', 'cursor:default', 'pointer-events:auto',
       ...skin,
     ], initialsOf(person.name)));
     el.setAttribute('data-clay-presence-avatar', '');
 
     // The name lives in this closure, never in an attribute on the element, and
-    // it reaches the DOM only while a pointer is actually on the circle.
+    // it reaches the DOM only while a pointer is actually on the square.
     const label = person.you ? `${person.name} (you)` : person.name;
     el.addEventListener('mouseenter', () => this.showTip(label));
     el.addEventListener('mouseleave', () => this.hideTip());

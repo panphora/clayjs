@@ -64,6 +64,8 @@ an entry to `scripts/bevel-manifest.mjs`, run `npm run build:bevel`, and add a t
 - `bevelWell(rules)` is a recessed `<div>`, for the lighter container inside a surface.
 - `bevelText(tag, rules, text)` is a text element that inherits the surface's font and
   ink; `text` is set when it is not `null`.
+- `pageScheme()` is the scheme a UI root gives its subtree: the page's own when it
+  declares one, else `light dark`.
 - `protectIcon(svg, size)` restates an icon's own presentation attributes as inline
   `!important` declarations, so the page cannot hide, resize or repaint it, and pins a
   path's geometry through the `d` property as well.
@@ -92,9 +94,9 @@ question, whether these declarations beat a hostile stylesheet, needs a browser.
 | Surface | File | Status | Notes |
 |---|---|---|---|
 | Lost edit and refused-save notice | `src/core/conflict-notice.js` | Bevel controls | Keeps its precedence over the section-changed bar. |
-| Stale host warning | `src/core/stale-host-notice.js` | not yet | Keeps view-mode and stale-host gating, and its dismiss. |
-| Presence avatars, count, tooltip | `src/sync/presence.js` | not yet | Participant colours keep their meaning. |
-| Section-changed bar | `src/sync/section-notice.js` | not yet | Keeps attribution and dismiss timing. |
+| Stale host warning | `src/core/stale-host-notice.js` | Bevel controls | Keeps view-mode and stale-host gating, and its dismiss. |
+| Presence avatars, count, tooltip | `src/sync/presence.js` | Bevel controls | Participant colours keep their meaning; faces are square, in the mono face. |
+| Section-changed bar | `src/sync/section-notice.js` | Bevel controls | Keeps attribution and dismiss timing, and stays hidden under the conflict notice. |
 | Save indicator chip | `src/plugins/indicator.js` | not yet | Moves off plain `cssText`. |
 | Toasts | `src/ui/toast.js` | not yet | Keeps caller options, timing and actions. |
 | Modal shell | `src/ui/modal.js` | not yet | Keeps focus, Escape and return-focus; caller content untouched. |

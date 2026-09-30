@@ -19,16 +19,15 @@ import { set, make } from "../lib/hostile-css.js";
 // One line, no choice to make: nothing on this page can fix it, so offering a button
 // would be a lie. Dismissable, because after you have read it, it is only in the way.
 
-const BG = "var(--clay-notice-bg,#222)";
-const INK = "var(--clay-notice-ink,#fff)";
-const EDGE = "var(--clay-notice-edge,rgba(255,255,255,.28))";
-const FONT = "14px/1.45 system-ui,-apple-system,'Segoe UI',sans-serif";
-
 const MESSAGE =
   "This page can't be edited: the app serving it is out of date. " +
   "Update HTML Clay to 1.9.0 or newer.";
 
 let root = null;
+
+// Bevel is fetched only when the warning is actually shown. This module loads on every
+// page, view mode included, and almost none of them ever show it.
+let ui = null;
 
 // A phone keyboard shrinks the visual viewport but leaves fixed elements pinned to the
 // layout viewport, so a bottom-anchored bar parks itself behind the keyboard. Same fix
@@ -48,32 +47,24 @@ function dismiss() {
 }
 
 function build() {
-  root = make("div", [
+  root = ui.bevelSurface("div", [
     "position:fixed", "left:50%", "transform:translateX(-50%)",
-    "z-index:2147483001", "display:flex", "align-items:center", "gap:10px",
-    "max-width:calc(100vw - 24px)", "flex-wrap:wrap", "justify-content:center",
-    "padding:9px 12px", "border-radius:10px",
-    `background:${BG}`, `color:${INK}`, `border:1px solid ${EDGE}`,
-    "box-shadow:0 6px 24px rgba(0,0,0,.32),0 1px 2px rgba(0,0,0,.24)",
-    `font:${FONT}`, "text-align:left",
+    "z-index:2147483001", "display:flex", "align-items:center", "gap:10px 12px",
+    "width:max-content", "max-width:calc(100vw - 24px)", "flex-wrap:wrap",
+    "padding:8px 8px 8px 14px", "text-align:left", `color-scheme:${ui.pageScheme()}`,
   ]);
   // Three markers, and each is load-bearing on a page that CAN save: this element is
   // injected, so it is in no document on disk and must never reach one, never wake the
   // watcher, and never ride out in a snapshot to somebody else's browser.
-  root.setAttribute("clay", "no-save no-watch no-snapshot");
+  root.setAttribute("clay", ui.RUNTIME_ONLY);
   root.setAttribute("data-clay-stale-host", "");
   root.setAttribute("role", "alert");
 
-  root.append(make("span", ["margin-right:2px"], MESSAGE));
-
-  const close = make("button", [
-    "all:initial", "box-sizing:border-box", "cursor:pointer", `font:${FONT}`,
-    "color:" + INK, "opacity:.72", "padding:2px 6px", "border-radius:6px", "flex:none",
-  ], "Dismiss");
-  close.type = "button";
+  const dot = make("span", ["all:initial", "color-scheme:inherit", "display:inline-block", "flex:none", "width:8px", "height:8px", "border-radius:50%", `background:${ui.TOKENS.ox}`]);
+  dot.setAttribute("clay", ui.RUNTIME_ONLY);
+  const close = ui.bevelButton("Dismiss", { small: true, variant: "quiet", onClick: dismiss });
   close.setAttribute("aria-label", "Dismiss this message");
-  close.addEventListener("click", dismiss);
-  root.append(close);
+  root.append(dot, ui.bevelText("span", [], MESSAGE), close);
 
   document.body.appendChild(root);
   place();
@@ -81,7 +72,7 @@ function build() {
   window.visualViewport?.addEventListener("scroll", place);
 }
 
-function init() {
+async function init() {
   if (!servedStaleToken()) return;
   // ?editmode=true outranks the stale-host check by design: that is a person at the
   // keyboard asking for editing on this load, and is-edit-mode.js gives it to them.
@@ -89,7 +80,13 @@ function init() {
   // told its reader the opposite. The message is only true while editing is actually
   // off, so it is shown only then.
   if (isEditMode) return;
+  const [controls, bevel] = await Promise.all([import("../ui/bevel-controls.js"), import("../ui/bevel.js")]);
+  ui = { ...controls, TOKENS: bevel.TOKENS };
   build();
 }
 
-onDomReady(init);
+let shown = Promise.resolve();
+onDomReady(() => { shown = init(); });
+
+// Settles once the warning is on the page, or straight away when there is none to show.
+export const whenShown = () => shown;
