@@ -37,7 +37,8 @@ function respond(status, body) {
 
 let saveResponse = () => ({ status: 200, body: { msg: "Saved", etag: "E1" } });
 
-const frame = () => new Promise((r) => setTimeout(r, 5));
+// Let pending promise work schedule its render, then wait out that animation frame.
+const frame = () => new Promise((r) => setTimeout(() => requestAnimationFrame(() => setTimeout(r, 0)), 0));
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
 let conflicts;
