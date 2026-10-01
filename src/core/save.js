@@ -207,6 +207,41 @@ export function resumeAutosave() {
 }
 
 // ============================================
+// THE PREVIEW HOLD
+// ============================================
+//
+// While an AI edit's rewrite is on screen and not yet kept, the DOM holds words the
+// person has not accepted. Every save would write them, the explicit ones included,
+// so for that window no save goes out at all. A save asked for meanwhile is
+// remembered and runs on release; Keep releases without the replay because it saves
+// right after.
+let previewHold = 0;
+let previewMissed = false;
+
+export function holdAllSaves() {
+  previewHold++;
+}
+
+export function releaseAllSaves({ replay = true } = {}) {
+  if (previewHold === 0) return;
+  previewHold--;
+  if (previewHold > 0) return;
+  const missed = previewMissed;
+  previewMissed = false;
+  if (missed && replay) savePage();
+}
+
+function heldForPreview(callback, resolve) {
+  if (previewHold === 0) return false;
+  previewMissed = true;
+  clearExplicitSave();
+  const skipped = skipped_('Waiting for the AI edit to be kept or reverted');
+  callback(skipped);
+  resolve(skipped);
+  return true;
+}
+
+// ============================================
 // THE CONFLICT HOLD
 // ============================================
 //
@@ -393,6 +428,8 @@ export function savePage(callback = () => {}) {
       return resolve(skipped);
     }
 
+    if (heldForPreview(callback, resolve)) return;
+
     // A save is already on the wire. Remember that a newer state is waiting rather
     // than dropping it: the in-flight request carries the older bytes, and if no
     // further mutation happens to retrigger autosave, the newer ones would never
@@ -477,6 +514,8 @@ export function savePageForce(callback = () => {}) {
       callback(skipped);
       return resolve(skipped);
     }
+
+    if (heldForPreview(callback, resolve)) return;
 
     if (isSaveInProgress()) {
       pendingSave = true;
@@ -703,6 +742,13 @@ if (document.readyState === 'loading') {
 export function savePageThrottled(callback = () => {}) {
   if (!isEditMode) {
     const skipped = skipped_('Not in edit mode');
+    callback(skipped);
+    return Promise.resolve(skipped);
+  }
+
+  if (previewHold > 0) {
+    previewMissed = true;
+    const skipped = skipped_('Waiting for the AI edit to be kept or reverted');
     callback(skipped);
     return Promise.resolve(skipped);
   }

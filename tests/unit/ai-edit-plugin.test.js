@@ -339,6 +339,41 @@ describe("with a ready ai-edit helper", () => {
     expect(handle.payload.comment).toBe("tighten this");
   });
 
+  test("a reply that adds a script is refused before it is shown", async () => {
+    clickSection(mountPage());
+    await submit("make it fancy");
+    const before = document.querySelector("[data-edit-id]").outerHTML;
+    handle.settle({ state: "done", result: { html: '<section data-edit-id="hero"><h1>New</h1><script>alert(1)</script></section>', model: "m" } });
+    await flush();
+    expect(document.querySelector("[data-edit-id]").outerHTML).toBe(before);
+    expect(statusEl().textContent).toMatch(/adds a script or event handler/);
+    expect(button("keep").hidden).toBe(true);
+  });
+
+  test("a reply that adds an inline handler is refused", async () => {
+    clickSection(mountPage());
+    await submit("make it clickable");
+    handle.settle({ state: "done", result: { html: '<section data-edit-id="hero"><h1 onclick="x()">New</h1><p>Old paragraph</p></section>', model: "m" } });
+    await flush();
+    expect(heading().textContent).toBe("Old heading");
+    expect(statusEl().textContent).toMatch(/adds a script or event handler/);
+  });
+
+  test("a save asked for during the preview waits, and Revert lets it run", async () => {
+    clickSection(mountPage());
+    await submit("tighten");
+    handle.settle({ state: "done", result: { html: '<section data-edit-id="hero"><h1>New heading</h1><p>Old paragraph</p></section>', model: "m" } });
+    await flush();
+    expect(button("keep").hidden).toBe(false);
+    const saveModule = await import("../../src/core/save.js");
+    const held = await saveModule.savePage();
+    expect(held.msgType).toBe("skipped");
+    expect(held.msg).toMatch(/AI edit/);
+    button("revert").click();
+    await flush();
+    expect(heading().textContent).toBe("Old heading");
+  });
+
   describe("plain pages, no data-edit-id", () => {
     const PLAIN = '<main id="plain"><h2>Hours</h2><p id="intro">Visitors arriving late will not be admitted. Late arrivals wait.</p><ul><li>Tea</li><li>Cake</li></ul></main>';
 

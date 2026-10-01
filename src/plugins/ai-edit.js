@@ -39,6 +39,7 @@ import { HyperMorph } from "../vendor/hyper-morph.vendor.js";
 import { mergeTagRecognizers } from "../sync/merge-tags.js";
 import Mutation from "../lib/mutation.js";
 import { isEditMode } from "../core/is-edit-mode.js";
+import { holdAllSaves, releaseAllSaves } from "../core/save.js";
 import { STRIP_FROM_SAVE } from "../lib/region-policy.js";
 import { enableContentEditable } from "../core/admin-contenteditable.js";
 import onDomReady from "../lib/dom-ready.js";
@@ -284,6 +285,37 @@ async function sendRequest(el, comment, quote) {
   else onError(outcome.error || 'the helper reported an error');
 }
 
+// What a reply may not add: anything that runs code. Compared against the element
+// the model was given, so a page's own scripts and handlers are not a reason to
+// refuse an edit near them.
+function activeParts(root) {
+  const parts = new Set();
+  for (const el of [root, ...root.querySelectorAll('*')]) {
+    const tag = el.tagName.toLowerCase();
+    if (tag === 'script') parts.add('script:' + el.textContent.trim() + '|' + (el.getAttribute('src') || ''));
+    if (['iframe', 'frame', 'object', 'embed'].includes(tag)) parts.add(tag + ':' + (el.getAttribute('src') || el.getAttribute('data') || ''));
+    for (const attr of el.attributes) {
+      const name = attr.name.toLowerCase();
+      const value = attr.value.trim();
+      if (name.startsWith('on')) parts.add('on:' + name + '=' + value);
+      else if (name === 'srcdoc') parts.add('srcdoc:' + value);
+      else if (/^\s*javascript:/i.test(value)) parts.add('js:' + name + '=' + value);
+    }
+  }
+  return parts;
+}
+
+function addsActiveContent(candidate, snapshot, docMode) {
+  const original = docMode
+    ? new DOMParser().parseFromString(snapshot, 'text/html').body
+    : (() => { const t = document.createElement('template'); t.innerHTML = snapshot; return t.content.firstElementChild; })();
+  const before = original ? activeParts(original) : new Set();
+  for (const part of activeParts(candidate)) if (!before.has(part)) return true;
+  return false;
+}
+
+const ACTIVE_REFUSED = 'The reply adds a script or event handler, so it was not applied. AI editing changes content, not code.';
+
 function onDone(payload) {
   if (!session || session.state !== 'requesting') return;
   session.state = 'deciding';
@@ -302,17 +334,13 @@ function onDone(payload) {
     }
   }
   if (session.reassertId) candidate.setAttribute('data-edit-id', session.reassertId);
-  if (!session.docMode) { // the real body legitimately contains scripts; skip in doc mode
-    if (candidate.querySelector('script')) {
-      warnings.push('reply contains <script> \u2014 review before keeping');
-    }
-    for (const el of [candidate, ...candidate.querySelectorAll('*')]) {
-      if ([...el.attributes].some(a => a.name.toLowerCase().startsWith('on'))) {
-        warnings.push('reply contains inline event handlers \u2014 review before keeping');
-        break;
-      }
-    }
+  if (addsActiveContent(candidate, session.snapshot, session.docMode)) {
+    onError(ACTIVE_REFUSED);
+    return;
   }
+
+  holdAllSaves();
+  session.held = true;
 
   session.finalCandidate = candidate;
   sessionMorph(session, candidate); // authoritative morph from the full final HTML
@@ -340,6 +368,7 @@ function revertSession() {
     sessionMorph(s, s.snapshot, { rewind: true });
   }
   if (s.paused) resumeObservers();
+  if (s.held) releaseAllSaves();
   positionChrome();
 }
 
@@ -348,6 +377,7 @@ async function keepSession() {
   session = null;
   sessionMorph(s, s.snapshot, { rewind: true }); // rewind while observers are still paused
   if (s.paused) resumeObservers();    // boundary drain discards the rewind
+  if (s.held) releaseAllSaves({ replay: false });
   sessionMorph(s, s.finalCandidate);  // recorded: the whole edit = one undo step
   positionChrome();
   showButtons('send');
