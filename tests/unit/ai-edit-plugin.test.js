@@ -230,6 +230,13 @@ describe("with a ready ai-edit helper", () => {
     expect(handle.payload.contextRefs).toEqual(["notes.md"]);
   });
 
+  test("a full stop after an attachment or @page is not part of the name", async () => {
+    clickSection(mountPage());
+    await submit("Match @notes.md. Use @page.");
+    expect(handle.payload.contextRefs).toEqual(["notes.md"]);
+    expect(handle.payload.page).toBe(true);
+  });
+
   // Stop is live while an @page save is still in flight, before the wire has handed
   // back a handle: a cancel there has to land, and the request must never go out.
   test("Stop during the @page save cancels before anything is sent", async () => {

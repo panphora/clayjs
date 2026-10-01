@@ -237,8 +237,9 @@ function newSession(el, comment, quote) {
   // helper-side), and mid-text ones are prose.
   // The @ has to start a word, so an email address is prose too.
   const contextRefs = [...comment.matchAll(/(?<![\w.@-])@([\w.-]*[/.][\w./-]*)/g)]
-    .map(m => m[1])
-    .filter(ref => ref !== 'page');
+    .map(m => m[1].replace(/\.+$/, '')) // a sentence's full stop is not part of the name
+    .filter(ref => ref !== 'page')
+    .filter(ref => /[/.]/.test(ref));
   const elementHTML = docMode ? strippedBodyHTML() : el.outerHTML;
   const payload = {
     id: 'req-' + Date.now().toString(36) + '-' + (++requestCounter),
