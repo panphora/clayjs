@@ -1,5 +1,5 @@
 import { jest } from "@jest/globals";
-import { TOKENS, FONT_SANS, FONT_MONO } from "../../src/ui/bevel.js";
+import { TOKENS, FONT_SANS } from "../../src/ui/bevel.js";
 import { capture, captureAsync, last, expectHostileProof, expectCallsResolved } from "./helpers/injected-ui.js";
 
 /**
@@ -70,9 +70,10 @@ test("the panel is a Bevel surface holding a Bevel input and Bevel buttons", () 
   expect(input.localName).toBe("textarea");
   expect(last(buildCalls, input, "background")).toBe(TOKENS.surface);
   expect(last(buildCalls, input, "border")).toBe(`1px solid ${TOKENS["line-2"]}`);
-  expect(input.style.getPropertyValue("resize")).toBe("vertical");
+  expect(input.style.getPropertyValue("resize")).toBe("none");
 
-  expect(last(buildCalls, part("quote"), "font")).toContain(FONT_MONO);
+  expect(panel.style.getPropertyValue("border-radius")).toBe("12px");
+  expect(part("pointer")).not.toBeNull();
   expect(last(buildCalls, part("send"), "background")).toBe(TOKENS.ink);
   expect(last(buildCalls, part("keep"), "background")).toBe(TOKENS.ink);
   expect(last(buildCalls, part("revert"), "color")).toBe(TOKENS.brass);
@@ -120,7 +121,7 @@ test("hidden chrome carries display:none !important and shown chrome does not", 
   expect(display(root("ring"))).toEqual(["block", "important"]);
   expect(part("send").hidden).toBe(false);
   expect(display(part("send"))).toEqual(["inline-flex", "important"]);
-  for (const name of ["stop", "revert", "keep", "warnings", "quote"]) {
+  for (const name of ["stop", "revert", "keep", "warnings"]) {
     expect([name, part(name).hidden]).toEqual([name, true]);
     expect([name, ...display(part(name))]).toEqual([name, "none", "important"]);
   }

@@ -63,7 +63,7 @@ const TOO_LARGE = "This section is too large for AI editing; select a smaller pa
 
 let requestCounter = 0;
 let session = null; // one edit at a time
-let panel, ring, textarea, quoteEl, statusEl, warningsEl, hintEl, closeButton, chip, docBubble;
+let panel, ring, textarea, statusEl, warningsEl, pointer, chip, docBubble;
 let buttons = {};
 let anchorEl = null;    // element the panel is currently anchored to
 let chipTarget = null;  // unit the hover chip currently points at
@@ -397,6 +397,7 @@ function onDone(payload) {
   showWarnings(warnings);
   showButtons('keep', 'revert');
   textarea.value = '';
+  fitTextarea();
 }
 
 function onError(message) {
@@ -483,8 +484,8 @@ function buildChrome() {
   setShown(ring, false);
 
   panel = marked(bevelSurface('div', [
-    'position:fixed', 'z-index:99999', 'width:min(30rem, calc(100vw - 32px))',
-    'padding:10px', `font:13px/1.5 ${FONT_SANS}`, scheme,
+    'position:fixed', 'z-index:99999', 'width:min(28rem, calc(100vw - 32px))',
+    'padding:12px', 'border-radius:12px', `box-shadow:${SHADOW}`, `font:13px/1.5 ${FONT_SANS}`, scheme,
   ]), 'data-clay-ai-edit', 'panel');
   setShown(panel, false);
   panel.setAttribute('role', 'dialog');
@@ -492,54 +493,45 @@ function buildChrome() {
 
   const part = (el, name) => marked(el, 'data-clay-ai-edit-part', name);
 
-  const eyebrow = bevelBox('div', ['display:flex', 'align-items:center', 'justify-content:space-between', 'margin-bottom:6px']);
-  const eyebrowLabel = bevelText('span', [
-    `color:${TOKENS.muted}`, `font:600 10.5px/1 ${FONT_SANS}`, 'letter-spacing:0.08em', 'text-transform:uppercase',
-  ], 'AI edit');
-  closeButton = part(bevelButton('×', { small: true, variant: 'quiet' }), 'close');
-  closeButton.setAttribute('aria-label', 'Close');
-  eyebrow.append(eyebrowLabel, closeButton);
-
-  quoteEl = part(bevelText('div', [
-    'display:block', `color:${TOKENS.muted}`, `border-left:2px solid ${TOKENS.brass}`,
-    'padding-left:8px', 'margin-bottom:8px', 'white-space:normal', 'overflow:hidden',
-    'max-height:3em', `font:12.5px/1.5 ${FONT_MONO}`,
-  ]), 'quote');
-  setShown(quoteEl, false);
+  // The notch on the panel's edge that points at the selected words.
+  pointer = part(bevelBox('div', [
+    'position:absolute', 'width:12px', 'height:12px', 'pointer-events:none',
+    `background:${TOKENS.surface}`, `border-left:1px solid ${TOKENS['line-2']}`, `border-top:1px solid ${TOKENS['line-2']}`,
+  ]), 'pointer');
+  setShown(pointer, false);
 
   textarea = part(bevelInput('textarea', {
-    rules: ['min-height:3.2em', 'resize:vertical', 'padding:8px', `font:13px/1.5 ${FONT_SANS}`],
+    rules: ['flex:1', 'min-width:0', 'min-height:40px', 'max-height:9.5em', 'resize:none', 'overflow-y:auto',
+      'padding:8px 12px', `font:15px/1.45 ${FONT_SANS}`],
   }), 'input');
-  textarea.rows = 2;
+  textarea.rows = 1;
   textarea.placeholder = 'Describe the change';
   textarea.setAttribute('aria-label', 'Describe the change');
+  textarea.title = 'Enter sends · Shift+Enter adds a line · @fable or @codex picks another agent · @file.ext adds context';
 
-  statusEl = part(bevelText('span', [
-    'flex:1', 'min-width:0', `color:${TOKENS.muted}`, `font:12.5px/1.5 ${FONT_MONO}`,
+  statusEl = part(bevelText('div', [
+    'display:block', 'margin-top:8px', `color:${TOKENS.muted}`, `font:12.5px/1.5 ${FONT_MONO}`,
   ]), 'status');
   statusEl.setAttribute('role', 'status');
   statusEl.setAttribute('aria-live', 'polite');
-
-  hintEl = part(bevelText('div', [
-    'display:block', 'margin-top:6px', `color:${TOKENS.muted}`, `font:11.5px/1.4 ${FONT_SANS}`,
-  ], 'Enter sends · @fable or @codex picks another agent · @file.ext adds context'), 'hint');
+  setShown(statusEl, false);
 
   const variants = { send: 'primary', stop: 'default', revert: 'quiet', keep: 'primary' };
   const labels = { send: 'Send', stop: 'Stop', revert: 'Revert', keep: 'Keep' };
   for (const name of ['send', 'stop', 'revert', 'keep']) {
-    buttons[name] = part(bevelButton(labels[name], { small: true, variant: variants[name] }), name);
+    buttons[name] = part(bevelButton(labels[name], { variant: variants[name], extra: ['min-height:40px', 'flex:none'] }), name);
     setShown(buttons[name], name === 'send', 'inline-flex');
   }
 
-  const row = bevelBox('div', ['display:flex', 'align-items:center', 'gap:8px', 'margin-top:8px']);
-  row.append(statusEl, buttons.send, buttons.stop, buttons.revert, buttons.keep);
+  const row = bevelBox('div', ['display:flex', 'align-items:flex-start', 'gap:8px']);
+  row.append(textarea, buttons.send, buttons.stop, buttons.revert, buttons.keep);
 
   warningsEl = part(bevelText('div', [
     'display:block', 'margin-top:8px', `color:${TOKENS.ox}`, 'white-space:pre-line',
   ]), 'warnings');
   setShown(warningsEl, false);
 
-  panel.append(eyebrow, quoteEl, textarea, hintEl, row, warningsEl);
+  panel.append(pointer, row, statusEl, warningsEl);
 
   chip = marked(bevelButton('AI', {
     small: true,
@@ -561,16 +553,15 @@ function buildChrome() {
   buttons.stop.addEventListener('click', cancelStream);
   buttons.keep.addEventListener('click', keepSession);
   buttons.revert.addEventListener('click', () => { revertSession(); setStatus('reverted'); showButtons('send'); });
-  closeButton.addEventListener('click', () => {
-    if (session?.state === 'requesting') cancelStream();
-    closePanel();
-  });
   textarea.addEventListener('keydown', (event) => {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
       if (!buttons.send.hidden) submit();
     }
   });
+
+  // One line to start, growing with the request up to the max-height.
+  textarea.addEventListener('input', fitTextarea);
 
   chip.addEventListener('mousedown', (event) => event.preventDefault()); // keeps the page's selection alive
   chip.addEventListener('click', () => {
@@ -609,6 +600,11 @@ function buildChrome() {
   }).observe(document.body, { childList: true, subtree: true });
 }
 
+function fitTextarea() {
+  set(textarea, 'height', 'auto');
+  if (textarea.value) set(textarea, 'height', textarea.scrollHeight + 2 + 'px');
+}
+
 // The whole-page bubble belongs to pages built from [data-edit-id] sections. A plain
 // page gets the selection chip and the shortcut instead.
 function syncBubble() {
@@ -631,7 +627,6 @@ function clearHighlight() {
 function applyHelperState() {
   const on = helperState === 'ready';
   textarea.disabled = !on;
-  setShown(hintEl, on);
   if (on) {
     if (statusEl.textContent === OFF_MESSAGE) setStatus('');
     if (!session) showButtons('send');
@@ -719,6 +714,7 @@ function showChipForSelection() {
 }
 
 function setStatus(text, tone) {
+  setShown(statusEl, !!text);
   statusEl.textContent = text || '';
   if (tone === 'warn') statusEl.setAttribute('data-tone', 'warn');
   else statusEl.removeAttribute('data-tone');
@@ -742,6 +738,7 @@ function positionChrome() {
   if (anchorEl === document.body) {
     // document mode: no ring, panel pinned above the bubble
     setShown(ring, false);
+    setShown(pointer, false);
     const bubble = docBubble.getBoundingClientRect();
     const width = panel.offsetWidth || 480;
     set(panel, 'left', Math.max(16, Math.min((bubble.right || window.innerWidth - 16) - width, window.innerWidth - width - 16)) + 'px');
@@ -749,7 +746,8 @@ function positionChrome() {
     return;
   }
   const rect = anchorEl.getBoundingClientRect();
-  setShown(ring, true);
+  // With selected words the highlight marks them; the ring is for a whole element.
+  setShown(ring, !pendingSelection);
   set(ring, 'left', rect.left - 5 + 'px');
   set(ring, 'top', rect.top - 5 + 'px');
   set(ring, 'width', rect.width + 6 + 'px');
@@ -767,6 +765,15 @@ function positionChrome() {
   }
   set(panel, 'left', left + 'px');
   set(panel, 'top', top + 'px');
+
+  // The pointer sits above the start of the selection, on the top edge, or on the
+  // bottom edge when the panel had to open above it.
+  const below = top >= place.bottom;
+  const tip = Math.max(14, Math.min(place.left + 10 - left, panelWidth - 28));
+  setShown(pointer, true);
+  set(pointer, 'left', tip + 'px');
+  set(pointer, 'top', below ? '-7px' : (panelHeight - 6) + 'px');
+  set(pointer, 'transform', below ? 'rotate(45deg)' : 'rotate(225deg)');
 }
 
 function openPanel(el, quote) {
@@ -781,8 +788,6 @@ function openPanel(el, quote) {
   setShown(panel, true);
   pendingSelection = quote;
   const shown = quote ? (quote.text.trim().length > 400 ? quote.text.trim().slice(0, 400) + '\u2026' : quote.text.trim()) : '';
-  setShown(quoteEl, !!quote);
-  quoteEl.textContent = quote ? `\u201c${shown}\u201d` : '';
   panel.dataset.quote = shown;
   setStatus('');
   showWarnings([]);
@@ -806,6 +811,7 @@ function closePanel() {
   setShown(panel, false);
   setShown(ring, false);
   textarea.value = '';
+  fitTextarea();
   if (hadFocus && back && back.isConnected) back.focus({ preventScroll: true });
 }
 

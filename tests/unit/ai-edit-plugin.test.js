@@ -430,10 +430,10 @@ describe("with a ready ai-edit helper", () => {
     expect(panel().hidden).toBe(true);
   });
 
-  test("closing the panel during a request cancels it on the wire", async () => {
+  test("removing the section during a request cancels it on the wire", async () => {
     clickSection(mountPage());
     await submit("tighten");
-    button("close").click();
+    document.querySelector("[data-edit-id]").remove();
     await flush();
     expect(handle.cancel).toHaveBeenCalled();
     expect(panel().hidden).toBe(true);
@@ -461,8 +461,8 @@ describe("with a ready ai-edit helper", () => {
     expect(statusEl().getAttribute("role")).toBe("status");
     expect(statusEl().getAttribute("aria-live")).toBe("polite");
     expect(textarea().getAttribute("aria-label")).toBe("Describe the change");
-    expect(button("close").getAttribute("aria-label")).toBe("Close");
-    button("close").click();
+    expect(button("close")).toBeNull();
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
     expect(panel().hidden).toBe(true);
   });
 
@@ -529,6 +529,21 @@ describe("with a ready ai-edit helper", () => {
       expect(handle.payload.selection).toEqual({ start: 9, end: 22 });
       expect(handle.payload.elementHTML).toBe(document.querySelector("#intro").outerHTML);
       expect(handle.payload.elementHTML).not.toContain("data-edit-id");
+    });
+
+    test("the panel is one row with a pointer, and no ring when words are selected", () => {
+      mountPlain();
+      const text = document.querySelector("#intro").firstChild;
+      select(text, 9, text, 22);
+      ctrlJ();
+      const row = textarea().parentElement;
+      expect(row.contains(button("send"))).toBe(true);
+      expect(panel().querySelector('[data-clay-ai-edit-part="quote"]')).toBeNull();
+      expect(panel().querySelector('[data-clay-ai-edit-part="hint"]')).toBeNull();
+      expect(panel().querySelector('[data-clay-ai-edit-part="pointer"]').hidden).toBe(false);
+      expect(document.querySelector('[data-clay-ai-edit="ring"]').hidden).toBe(true);
+      expect(textarea().rows).toBe(1);
+      expect(textarea().title).toMatch(/@fable/);
     });
 
     test("a repeated phrase is told apart by its offsets", async () => {
