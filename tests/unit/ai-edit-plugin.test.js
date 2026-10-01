@@ -503,8 +503,8 @@ describe("with a ready ai-edit helper", () => {
       selection.addRange(range);
     }
 
-    function ctrlK(target = document.body) {
-      const event = new KeyboardEvent("keydown", { key: "k", code: "KeyK", ctrlKey: true, bubbles: true, cancelable: true });
+    function ctrlJ(target = document.body) {
+      const event = new KeyboardEvent("keydown", { key: "j", code: "KeyJ", ctrlKey: true, bubbles: true, cancelable: true });
       target.dispatchEvent(event);
       return event;
     }
@@ -514,11 +514,11 @@ describe("with a ready ai-edit helper", () => {
       document.querySelector("#plain")?.remove();
     });
 
-    test("Ctrl+K on a selection inside a plain paragraph opens the panel for that paragraph", async () => {
+    test("Ctrl+J on a selection inside a plain paragraph opens the panel for that paragraph", async () => {
       mountPlain();
       const text = document.querySelector("#intro").firstChild;
       select(text, 9, text, 22); // "arriving late"
-      const event = ctrlK();
+      const event = ctrlJ();
       expect(event.defaultPrevented).toBe(true);
       expect(panel().hidden).toBe(false);
 
@@ -536,7 +536,7 @@ describe("with a ready ai-edit helper", () => {
       const text = document.querySelector("#intro").firstChild;
       const second = text.data.lastIndexOf("Late");
       select(text, second, text, second + 4);
-      ctrlK();
+      ctrlJ();
       await submit("lowercase this");
       expect(handle.payload.quote).toBe("Late");
       expect(handle.payload.selection.start).toBe(second);
@@ -546,39 +546,65 @@ describe("with a ready ai-edit helper", () => {
       mountPlain();
       const items = document.querySelectorAll("li");
       select(items[0].firstChild, 0, items[1].firstChild, 4);
-      ctrlK();
+      ctrlJ();
       await submit("add milk");
       expect(handle.payload.tag).toBe("ul");
     });
 
-    test("Ctrl+K with nothing selected leaves the key to the browser", () => {
+    test("Ctrl+J with nothing selected leaves the key to the browser", () => {
       mountPlain();
       window.getSelection().removeAllRanges();
-      const event = ctrlK();
+      const event = ctrlJ();
       expect(event.defaultPrevented).toBe(false);
       expect(panel().hidden).toBe(true);
     });
 
-    test("Ctrl+K while a page input has focus does nothing", () => {
+    test("Ctrl+J while a page input has focus does nothing", () => {
       mountPlain();
       const input = document.createElement("input");
       document.querySelector("#plain").append(input);
       input.focus();
       const text = document.querySelector("#intro").firstChild;
       select(text, 0, text, 8);
-      const event = ctrlK(input);
+      const event = ctrlJ(input);
       expect(event.defaultPrevented).toBe(false);
       expect(panel().hidden).toBe(true);
     });
 
-    test("Ctrl+Shift+K is not the shortcut", () => {
+    test("Ctrl+Shift+J is not the shortcut", () => {
       mountPlain();
       const text = document.querySelector("#intro").firstChild;
       select(text, 0, text, 8);
-      const event = new KeyboardEvent("keydown", { key: "K", code: "KeyK", ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true });
+      const event = new KeyboardEvent("keydown", { key: "J", code: "KeyJ", ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true });
       document.body.dispatchEvent(event);
       expect(event.defaultPrevented).toBe(false);
       expect(panel().hidden).toBe(true);
+    });
+
+    test("Ctrl+K is no longer the shortcut", () => {
+      mountPlain();
+      const text = document.querySelector("#intro").firstChild;
+      select(text, 0, text, 8);
+      const event = new KeyboardEvent("keydown", { key: "k", code: "KeyK", ctrlKey: true, bubbles: true, cancelable: true });
+      document.body.dispatchEvent(event);
+      expect(event.defaultPrevented).toBe(false);
+      expect(panel().hidden).toBe(true);
+    });
+
+    test("a selection across top-level paragraphs edits the whole page, with the selection quoted", async () => {
+      document.body.insertAdjacentHTML("afterbegin", '<p id="top1">First block</p><p id="top2">Second block</p>');
+      try {
+        select(document.querySelector("#top1").firstChild, 6, document.querySelector("#top2").firstChild, 6);
+        const event = ctrlJ();
+        expect(event.defaultPrevented).toBe(true);
+        expect(panel().hidden).toBe(false);
+        await submit("merge these");
+        expect(handle.payload.tag).toBe("body");
+        expect(handle.payload.quote).toBe("blockSecond");
+      } finally {
+        document.querySelector("#top1")?.remove();
+        document.querySelector("#top2")?.remove();
+      }
     });
 
     test("a plain page has no whole-page bubble", async () => {
@@ -610,7 +636,7 @@ describe("with a ready ai-edit helper", () => {
         mountPlain();
         const text = document.querySelector("#intro").firstChild;
         select(text, 9, text, 22);
-        ctrlK();
+        ctrlJ();
         expect(highlights.get("clay-ai-edit").ranges[0].toString()).toBe("arriving late");
         document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
         expect(highlights.has("clay-ai-edit")).toBe(false);

@@ -13,8 +13,9 @@
 - `clay.modal`'s `html`, `yes` and `no` accept a node
 - `clay.modal` takes a `title`, drawn as a header with the close button, and a `width`
 - `clay.saveToast = true` shows Saved as a toast, with the host's message, instead of on the indicator chip
-- AI editing works on any page in edit mode: select text in any block and press ⌘K (Ctrl+K elsewhere), or click the AI chip at the end of the selection. A page no longer needs `[data-edit-id]` sections
+- AI editing works on any page in edit mode: select text in any block and press ⌘J (Ctrl+J elsewhere), or click the AI chip at the end of the selection. A page no longer needs `[data-edit-id]` sections
 - An AI edit request carries the selected text with its character offsets inside the block, so a repeated phrase is unambiguous
+- A selection across top-level blocks opens AI edit for the whole page, with the selection quoted
 - The selected words stay highlighted while the AI edit panel is open
 - A host with AI editing switched off gets the panel with a note and no Send
 
@@ -38,7 +39,8 @@
 - While an AI edit's rewrite is on screen, every save waits, explicit ones included; a save asked for meanwhile runs after Revert
 - A reply that adds a script, an inline event handler, a `javascript:` URL, `srcdoc` or an embedding element is refused before it is shown. It used to be applied with a warning
 - The whole-page AI bubble only shows on pages built from `[data-edit-id]` sections
-- ⌘K with nothing to open, or in a page's own field, is left to the browser
+- ⌘J with nothing to open, or in a page's own field, is left to the browser
+- The AI edit shortcut is ⌘J (Ctrl+J elsewhere). ⌘K is left to the page, so RichClay's link shortcut works in editable text
 
 ### Removed
 - Classes and ids on injected UI (`.micromodal*`, `.toast*`, `#hyper-edit-*`, `.hep-*`, `.snippet-warning`) and the `--clay-notice-*`, `--clay-presence-*`, `--clay-section-*`, `--clay-indicator-*` and `--hyperclay-modal-*` custom properties: page CSS aimed at them no longer applies

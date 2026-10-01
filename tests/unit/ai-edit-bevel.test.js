@@ -102,7 +102,7 @@ test("ring, chip and bubble keep their shapes, sizes and placement in Bevel mate
     expect(el.style.getPropertyValue("border-radius")).toBe("0");
     expect(el.textContent).toBe("AI");
   }
-  expect(chip.title).toBe("Comment on this (⌘K)");
+  expect(chip.title).toBe("Comment on this (⌘J)");
   expect(bubble.title).toBe("Comment on the whole page");
 });
 

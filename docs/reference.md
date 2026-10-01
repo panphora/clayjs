@@ -407,13 +407,14 @@ token variant, `POST /_/save/{token}`, read from `<html savetoken>`.
   Also `cancel`, `get`, `list`, `isBusy`. Works in view mode too.
 - `ai-edit` (default on in edit mode, brings `wire` with it; `?exclude=ai-edit` turns it off) —
   select text and ask an agent to rewrite it. Select words in any block (a paragraph, heading, list
-  item, table cell...) and press ⌘K (Ctrl+K elsewhere), or click the small **AI** chip at the end
+  item, table cell...) and press ⌘J (Ctrl+J elsewhere), or click the small **AI** chip at the end
   of the selection. The panel opens under the selection with the words highlighted. The request
   carries the block's HTML, the selected text, and the text's character offsets inside the block;
-  a selection across blocks sends the nearest container. ⌘K with nothing to open is left to the
-  browser, and so is ⌘K in a page's own input, textarea or select. Pages built from
-  `[data-edit-id]` sections also get the hover chip, a click on bare section padding, and the
-  **AI** bubble for the whole page (just left of the CMS's Edit content toggle when there is one).
+  a selection across blocks sends the nearest container, and one across top-level blocks sends
+  the whole page. ⌘J with nothing to open is left to the browser, and so is ⌘J in a page's own
+  input, textarea or select. Pages built from `[data-edit-id]` sections also get the hover chip,
+  a click on bare section padding, and the **AI** bubble for the whole page (just left of the
+  CMS's Edit content toggle when there is one).
 
   The reply previews in place with Revert and Keep. While it is on screen every save waits,
   explicit ones included (`clay.save()`, ⌘S, `[persist]`, the wire's pre-send flush): Revert
@@ -424,7 +425,7 @@ token variant, `POST /_/save/{token}`, read from `<html savetoken>`.
   so the helper reads it from disk.
 
   Edit mode only, and dormant unless `clay.wire.helpers()` lists an `ai-edit` helper. Listed as
-  `unavailable` (the host's switch is off), ⌘K opens the panel with a note and no Send. HTML Clay
+  `unavailable` (the host's switch is off), ⌘J opens the panel with a note and no Send. HTML Clay
   and Hyperclay Local both answer it.
 - `source` (default on; `?exclude=source` to turn it off) — saves the file rather than
   a fresh printout of the page. Without it, every save rebuilds the document from the DOM, which reorders

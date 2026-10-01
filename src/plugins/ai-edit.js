@@ -3,7 +3,7 @@
  *
  * Direct editing stays primary: text units carry editmode:contenteditable, so a
  * click places the caret and a figure keeps its own interactivity. This adds the
- * comment box on demand: Cmd+K (Ctrl+K elsewhere) or the small chip at the end of a
+ * comment box on demand: Cmd+J (Ctrl+J elsewhere) or the small chip at the end of a
  * selection, for the block around it; on pages built from [data-edit-id] sections,
  * also a hover chip near the unit, a click on bare section padding, and the fixed
  * bottom-right bubble for the whole document.
@@ -51,7 +51,8 @@ import { TOKENS, FONT_SANS, FONT_MONO, SHADOW } from "../ui/bevel.js";
 const HELPER = "ai-edit";
 const UNIT_SELECTOR = "h1,h2,h3,h4,h5,h6,p,figure";
 // Outside [data-edit-id] sections: the nearest text block that holds the whole
-// selection, else the nearest container that does. Never the body from the keyboard.
+// selection, else the nearest container that does. A selection across top-level blocks
+// edits the whole page.
 const BLOCK_SELECTOR = "p,h1,h2,h3,h4,h5,h6,li,dt,dd,blockquote,pre,figcaption,td,th";
 const CONTAINER_SELECTOR = "section,article,aside,header,footer,nav,main,div,ul,ol,dl,table,figure,form";
 const NOT_TEXT = "script,style,template,textarea,input,select,button,iframe,svg,math";
@@ -131,7 +132,9 @@ function liveRange() {
 function targetFromRange(range) {
   let node = range.commonAncestorContainer;
   if (node.nodeType !== 1) node = node.parentElement;
-  if (!node || node === document.body || !document.body.contains(node)) return null;
+  if (!node || !document.body.contains(node)) return null;
+  // A selection across top-level blocks has only the page around it.
+  if (node === document.body) return document.body;
   if (node.closest('[data-clay-ai-edit]') || node.closest(STRIP_FROM_SAVE) || node.closest(NOT_TEXT)) return null;
   if (node.closest('[data-edit-id]')) return unitFrom(node);
   const target = node.closest(BLOCK_SELECTOR) || node.closest(CONTAINER_SELECTOR);
@@ -542,7 +545,7 @@ function buildChrome() {
     small: true,
     extra: ['position:fixed', 'width:26px', 'height:26px', `font:600 11px/1 ${FONT_SANS}`, ...FLOATING, scheme],
   }), 'data-clay-ai-edit', 'chip');
-  chip.title = 'Comment on this (\u2318K)';
+  chip.title = 'Comment on this (\u2318J)';
   setShown(chip, false, 'inline-grid');
 
   docBubble = marked(bevelButton('AI', {
@@ -691,7 +694,7 @@ function scheduleChipHide() {
 }
 
 // The chip at the end of a selection: for people who do not know the shortcut, and
-// for browsers that keep Ctrl+K for themselves.
+// for browsers that keep Ctrl+J for themselves.
 function showChipForSelection() {
   if (session || !panel.hidden || helperState !== 'ready' || pageOwnsFocus()) return;
   const range = liveRange();
@@ -817,15 +820,15 @@ function submit() {
 
 const IS_MAC = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || '');
 
-// Cmd+K on a Mac, Ctrl+K elsewhere. event.code covers keyboard layouts where the
-// K key types another letter.
-function isCommandK(event) {
+// Cmd+J on a Mac, Ctrl+J elsewhere. event.code covers keyboard layouts where the
+// J key types another letter.
+function isShortcut(event) {
   const modifier = IS_MAC ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
   if (!modifier || event.shiftKey || event.altKey || event.repeat || event.isComposing) return false;
-  return event.code === 'KeyK' || (event.key || '').toLowerCase() === 'k';
+  return event.code === 'KeyJ' || (event.key || '').toLowerCase() === 'j';
 }
 
-// A field the page owns keeps its own Ctrl+K, and so does the panel's own box.
+// A field the page owns keeps its own Ctrl+J, and so does the panel's own box.
 function pageOwnsFocus() {
   const el = document.activeElement;
   if (!el || el === document.body) return false;
@@ -864,7 +867,7 @@ function wireInteractions() {
   });
 
   document.addEventListener('keydown', (event) => {
-    if (isCommandK(event)) {
+    if (isShortcut(event)) {
       if (!session && anchorEl && !anchorEl.isConnected) closePanel();
       if (session || pageOwnsFocus()) return;
       const range = liveRange();
