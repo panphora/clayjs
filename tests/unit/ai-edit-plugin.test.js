@@ -224,6 +224,12 @@ describe("with a ready ai-edit helper", () => {
     expect(statusEl().textContent).toBe("cancelled");
   });
 
+  test("an email address is not an attachment, and a real @file ref still is", async () => {
+    clickSection(mountPage());
+    await submit("email bob@example.com about this, see @notes.md");
+    expect(handle.payload.contextRefs).toEqual(["notes.md"]);
+  });
+
   // Stop is live while an @page save is still in flight, before the wire has handed
   // back a handle: a cancel there has to land, and the request must never go out.
   test("Stop during the @page save cancels before anything is sent", async () => {

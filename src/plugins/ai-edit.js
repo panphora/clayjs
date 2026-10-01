@@ -235,7 +235,8 @@ function newSession(el, comment, quote) {
   // Context refs are @tokens containing a dot or slash (@notes.md, @src/x.js). Bare
   // @words are not refs: a leading one is an engine token (@fable, @codex — routed
   // helper-side), and mid-text ones are prose.
-  const contextRefs = [...comment.matchAll(/@([\w.-]*[/.][\w./-]*)/g)]
+  // The @ has to start a word, so an email address is prose too.
+  const contextRefs = [...comment.matchAll(/(?<![\w.@-])@([\w.-]*[/.][\w./-]*)/g)]
     .map(m => m[1])
     .filter(ref => ref !== 'page');
   const elementHTML = docMode ? strippedBodyHTML() : el.outerHTML;
