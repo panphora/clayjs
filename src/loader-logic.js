@@ -36,9 +36,10 @@ export const PLUGIN_PATHS = {
   // superset of the cms's, so the plugin is present exactly when it can be used.
   upload:    { path: "plugins/upload.js",          editOnly: true,  default: false },
   wire:      { path: "plugins/wire.js",            editOnly: false, default: false },
-  // Edit mode only: the AI comment box is an editing gesture, and the plugin is
-  // dormant anyway on any host that does not list a ready `ai-edit` helper.
-  "ai-edit": { path: "plugins/ai-edit.js",         editOnly: true,  default: false },
+  // Edit mode only: the AI comment box is an editing gesture. On by default because
+  // it costs nothing where it cannot run: it stays dormant on any host that does not
+  // list a ready `ai-edit` helper. `exclude=ai-edit` turns it off.
+  "ai-edit": { path: "plugins/ai-edit.js",         editOnly: true,  default: true },
   demo:      { path: "plugins/demo.js",            editOnly: false, default: false },
   // Saves the file's own bytes back instead of a fresh serialization of the DOM.
   // editOnly because a page that cannot save has nothing to preserve. On by default
@@ -114,6 +115,8 @@ const PLUGIN_ORDER = ["richclay", "indicator", "sortable", "undo", "quickcrop", 
 // enables. Reverting it is reverting this line.
 // ai-edit reads `clay.wire.helpers()` and sends through `clay.wire.send`, so a page
 // that asks for it has to have the wire. The wire loads first in the order above.
+// It does not bring undo: hyper-undo takes Cmd+Z for the whole window, text fields
+// included, which a page that never asked for it should not get by default.
 const IMPLIES = { cms: ["quickcrop", "upload"], "ai-edit": ["wire"] };
 
 function parseCsv(params, key, enabled, apply) {
@@ -134,17 +137,26 @@ export function resolveModules(params, isEditMode) {
   const core = [...CORE_WAVES.always];
   if (isEditMode) core.push(...CORE_WAVES.editOnly);
 
-  const enabled = new Set();
+  const explicit = new Set();
+  parseCsv(params, "plugins", explicit, (set, name) => set.add(name));
+  const excluded = new Set();
+  parseCsv(params, "exclude", excluded, (set, name) => set.add(name));
+
+  const enabled = new Set(explicit);
   for (const [name, spec] of Object.entries(PLUGIN_PATHS)) {
     if (spec.default) enabled.add(name);
   }
-  parseCsv(params, "plugins", enabled, (set, name) => set.add(name));
-  // Between the two: exclude still wins, so `plugins=cms&exclude=quickcrop` opts
-  // back out of the cropper.
+  // ai-edit cannot run without the wire, so excluding the wire excludes it too.
+  if (excluded.has("wire")) enabled.delete("ai-edit");
+  // A default-on plugin that this mode drops brings nothing with it, or every view
+  // page would download the wire for an AI box it never shows. An explicitly asked
+  // for plugin still brings what it implies, as before.
   for (const name of [...enabled]) {
+    if (excluded.has(name)) continue;
+    if (!explicit.has(name) && PLUGIN_PATHS[name].editOnly && !isEditMode) continue;
     for (const implied of IMPLIES[name] || []) enabled.add(implied);
   }
-  parseCsv(params, "exclude", enabled, (set, name) => set.delete(name));
+  for (const name of excluded) enabled.delete(name);
 
   const plugins = [];
   for (const name of PLUGIN_ORDER) {

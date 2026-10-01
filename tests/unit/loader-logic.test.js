@@ -6,14 +6,19 @@ function params(obj = {}) {
 }
 
 describe("resolveModules", () => {
-  test("edit mode: default plugins (richclay, source) + full core waves", () => {
+  test("edit mode: default plugins (richclay, wire, ai-edit, source) + full core waves", () => {
     const { core, plugins } = resolveModules(params(), true);
     expect(core[0]).toBe("lib/mutation.js");
     expect(core).toContain("core/edit-mode.js");
     expect(core).toContain("core/snapshot.js");
     expect(core).toContain("core/save.js");
     expect(core).toContain("lib/cache-bust.js");
-    expect(plugins).toEqual(["plugins/richclay.js", "plugins/source.js"]);
+    expect(plugins).toEqual([
+      "plugins/richclay.js",
+      "plugins/wire.js",
+      "plugins/ai-edit.js",
+      "plugins/source.js",
+    ]);
   });
 
   test("view mode: drops editOnly core wave and editOnly plugins, keeps always core", () => {
@@ -80,13 +85,22 @@ describe("resolveModules", () => {
       "plugins/quickcrop.js",
       "plugins/upload.js",
       "plugins/cms.js",
+      "plugins/wire.js",
+      "plugins/ai-edit.js",
       "plugins/source.js",
     ]);
   });
 
   test("excluding quickcrop overrides the implication", () => {
     const { plugins } = resolveModules(params({ plugins: "cms", exclude: "quickcrop" }), true);
-    expect(plugins).toEqual(["plugins/richclay.js", "plugins/upload.js", "plugins/cms.js", "plugins/source.js"]);
+    expect(plugins).toEqual([
+      "plugins/richclay.js",
+      "plugins/upload.js",
+      "plugins/cms.js",
+      "plugins/wire.js",
+      "plugins/ai-edit.js",
+      "plugins/source.js",
+    ]);
   });
 
   test("quickcrop loads on its own request, in view mode too", () => {
@@ -101,20 +115,22 @@ describe("resolveModules", () => {
       "plugins/indicator.js",
       "plugins/sortable.js",
       "plugins/undo.js",
+      "plugins/wire.js",
+      "plugins/ai-edit.js",
       "plugins/source.js",
     ]);
   });
 
   test("exclude CSV removes a default-on plugin", () => {
     const { plugins } = resolveModules(params({ exclude: "richclay" }), true);
-    expect(plugins).toEqual(["plugins/source.js"]);
+    expect(plugins).toEqual(["plugins/wire.js", "plugins/ai-edit.js", "plugins/source.js"]);
   });
 
   test("exclude=source opts a page out of the source-preserving save", () => {
     // The whole escape hatch for a default-on plugin, and the one a page uses when it
     // does not want the parser downloaded or the extra boot request made.
     expect(resolveModules(params({ exclude: "source" }), true).plugins)
-      .toEqual(["plugins/richclay.js"]);
+      .toEqual(["plugins/richclay.js", "plugins/wire.js", "plugins/ai-edit.js"]);
   });
 
   // ai-edit is a consumer of clay.wire: it asks `clay.wire.helpers()` whether the
@@ -135,12 +151,14 @@ describe("resolveModules", () => {
       .toEqual(["plugins/wire.js"]);
   });
 
-  // Both paths are droppable by name: `exclude=wire` takes the implied wire back
-  // out, and excluding the plugin itself takes the pair out.
-  test("exclude drops the ai-edit path and the wire path it implied", () => {
+  // Excluding the wire takes ai-edit out with it, since the plugin cannot run
+  // without it, and nothing ai-edit would have implied comes in.
+  test("exclude=wire drops ai-edit and what it implied", () => {
     expect(resolveModules(params({ plugins: "ai-edit", exclude: "wire" }), true).plugins)
-      .toEqual(["plugins/richclay.js", "plugins/ai-edit.js", "plugins/source.js"]);
-    expect(resolveModules(params({ plugins: "ai-edit", exclude: "wire,ai-edit" }), true).plugins)
+      .toEqual(["plugins/richclay.js", "plugins/source.js"]);
+    expect(resolveModules(params({ exclude: "wire" }), true).plugins)
+      .toEqual(["plugins/richclay.js", "plugins/source.js"]);
+    expect(resolveModules(params({ exclude: "ai-edit" }), true).plugins)
       .toEqual(["plugins/richclay.js", "plugins/source.js"]);
   });
 
@@ -148,7 +166,13 @@ describe("resolveModules", () => {
     const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
     const { plugins } = resolveModules(params({ plugins: "bogus,indicator" }), true);
     expect(warn).toHaveBeenCalledWith('clayjs: unknown plugin "bogus"');
-    expect(plugins).toEqual(["plugins/richclay.js", "plugins/indicator.js", "plugins/source.js"]);
+    expect(plugins).toEqual([
+      "plugins/richclay.js",
+      "plugins/indicator.js",
+      "plugins/wire.js",
+      "plugins/ai-edit.js",
+      "plugins/source.js",
+    ]);
     warn.mockRestore();
   });
 
@@ -157,5 +181,26 @@ describe("resolveModules", () => {
     resolveModules(params({ exclude: "nope" }), true);
     expect(warn).toHaveBeenCalledWith('clayjs: unknown plugin "nope"');
     warn.mockRestore();
+  });
+
+  test("ai-edit is on by default in edit mode, with the wire ahead of it", () => {
+    const { plugins } = resolveModules(params(), true);
+    expect(plugins).toEqual([
+      "plugins/richclay.js",
+      "plugins/wire.js",
+      "plugins/ai-edit.js",
+      "plugins/source.js",
+    ]);
+  });
+
+  test("the default ai-edit brings nothing in view mode", () => {
+    expect(resolveModules(params(), false).plugins).toEqual([]);
+    expect(resolveModules(params({ plugins: "sync" }), false).plugins)
+      .toEqual(["sync/live-sync.js"]);
+  });
+
+  test("ai-edit does not bring undo, which would take Cmd+Z in every text field", () => {
+    expect(resolveModules(params(), true).plugins).not.toContain("plugins/undo.js");
+    expect(resolveModules(params({ plugins: "ai-edit" }), true).plugins).not.toContain("plugins/undo.js");
   });
 });
