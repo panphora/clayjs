@@ -13,6 +13,10 @@
 - `clay.modal`'s `html`, `yes` and `no` accept a node
 - `clay.modal` takes a `title`, drawn as a header with the close button, and a `width`
 - `clay.saveToast = true` shows Saved as a toast, with the host's message, instead of on the indicator chip
+- AI editing works on any page in edit mode: select text in any block and press ⌘K (Ctrl+K elsewhere), or click the AI chip at the end of the selection. A page no longer needs `[data-edit-id]` sections
+- An AI edit request carries the selected text with its character offsets inside the block, so a repeated phrase is unambiguous
+- The selected words stay highlighted while the AI edit panel is open
+- A host with AI editing switched off gets the panel with a note and no Send
 
 ### Changed
 - A lost conflict no longer keeps the page dirty or holds the automatic save, and a save no longer clears it: the edit waits in `clay.conflicts` until the person acknowledges it. `liveSync.unresolvedConflicts` is now a read-only view of that ledger, so assigning to it throws
@@ -30,6 +34,11 @@
 - The AI edit chip and bubble read "AI". The bubble sits left of the CMS's Edit content toggle, and a second click closes an empty panel
 - The section changed bar sits beside the section it names and follows it as the page scrolls
 - The CMS's Edit content toggle and RichClay's toolbar buttons use Bevel's raised button face and hover, and RichClay's Block style button is the normal toolbar width
+- `ai-edit` loads by default in edit mode and brings `wire` with it. `?exclude=ai-edit` or `?exclude=wire` turns it off
+- While an AI edit's rewrite is on screen, every save waits, explicit ones included; a save asked for meanwhile runs after Revert
+- A reply that adds a script, an inline event handler, a `javascript:` URL, `srcdoc` or an embedding element is refused before it is shown. It used to be applied with a warning
+- The whole-page AI bubble only shows on pages built from `[data-edit-id]` sections
+- ⌘K with nothing to open, or in a page's own field, is left to the browser
 
 ### Removed
 - Classes and ids on injected UI (`.micromodal*`, `.toast*`, `#hyper-edit-*`, `.hep-*`, `.snippet-warning`) and the `--clay-notice-*`, `--clay-presence-*`, `--clay-section-*`, `--clay-indicator-*` and `--hyperclay-modal-*` custom properties: page CSS aimed at them no longer applies

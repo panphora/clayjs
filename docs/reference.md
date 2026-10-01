@@ -39,10 +39,12 @@ The default build includes the save lifecycle and rich text (`editable`). Plugin
 conditionally through the URL, in the browser only:
 
 - `?plugins=` comma-separated plugins to add, e.g. `clay.js?plugins=sync,undo`
-- `?exclude=` remove a default-on plugin, e.g. `clay.js?exclude=richclay`
+- `?exclude=` remove a default-on plugin, e.g. `clay.js?exclude=richclay`. One `exclude=` takes a
+  comma list (`?exclude=source,ai-edit`); a second `exclude=` parameter is ignored.
 
-Loadable plugins: `richclay` (default on), `source` (default on), `indicator`, `sync`,
-`sortable`, `undo`, `cms`, `quickcrop`, `upload`, `wire`, `ai-edit`, `demo`.
+Loadable plugins: `richclay` (default on), `source` (default on), `ai-edit` (default on, brings
+`wire`), `indicator`, `sync`, `sortable`, `undo`, `cms`, `quickcrop`, `upload`, `wire`, `demo`.
+The default-on plugins load in edit mode only.
 
 Everything else is a separate library ("satellite") with its own script tag: clay-ui,
 clay-events, clay-options, clay-dom, all.js, clay-utils, clay-internals, clay-data,
@@ -110,7 +112,7 @@ itself, with no network.
 - `clay.wire` — per-file control channel to a process on the user's machine: `send`,
   `cancel`, `get`, `list`, `isBusy`, `on` (wire plugin).
 - `clay.aiEdit` — the AI comment box: `clay.aiEdit.init()` (ai-edit plugin; booted by the
-  plugin itself, and a no-op unless the host lists a ready `ai-edit` wire helper).
+  plugin itself, and a no-op unless the host lists an `ai-edit` wire helper).
 - `clay.region` — region policy helpers and strip selectors (see clay.internals.region;
   the same object, also published as `STRIP_FROM_SAVE`-style constants).
 
@@ -403,16 +405,27 @@ token variant, `POST /_/save/{token}`, read from `<html savetoken>`.
   line from the same line arriving again.
 
   Also `cancel`, `get`, `list`, `isBusy`. Works in view mode too.
-- `ai-edit` (`?plugins=ai-edit`, which brings `wire` with it) — comment-to-edit AI editing:
-  the same box Hyperclay Local has always shown on `/_/bus`, now a named helper request on the
-  wire. Hover a heading or paragraph for the **AI** chip, press ⌘K with the caret in one (a
-  selection rides along as a quote), click bare section padding for the nearest unit, or use the
-  **AI** bubble at the bottom right for the whole page (it sits just left of the CMS's
-  Edit content toggle when the page has one, and a second click closes an empty panel). Keep saves the result through `clay.save()`; Revert puts
-  the snapshot back. A leading `@token` picks the engine, `@file.ext` adds context, and `@page`
-  saves the page first so the helper reads it from disk. Edit mode only, and dormant unless
-  `clay.wire.helpers()` lists a ready `ai-edit` — so a page on HTML Clay loads it and does
-  nothing with it.
+- `ai-edit` (default on in edit mode, brings `wire` with it; `?exclude=ai-edit` turns it off) —
+  select text and ask an agent to rewrite it. Select words in any block (a paragraph, heading, list
+  item, table cell...) and press ⌘K (Ctrl+K elsewhere), or click the small **AI** chip at the end
+  of the selection. The panel opens under the selection with the words highlighted. The request
+  carries the block's HTML, the selected text, and the text's character offsets inside the block;
+  a selection across blocks sends the nearest container. ⌘K with nothing to open is left to the
+  browser, and so is ⌘K in a page's own input, textarea or select. Pages built from
+  `[data-edit-id]` sections also get the hover chip, a click on bare section padding, and the
+  **AI** bubble for the whole page (just left of the CMS's Edit content toggle when there is one).
+
+  The reply previews in place with Revert and Keep. While it is on screen every save waits,
+  explicit ones included (`clay.save()`, ⌘S, `[persist]`, the wire's pre-send flush): Revert
+  lets a save asked for meanwhile run, and Keep saves the rewrite through `clay.save()`. A reply
+  that adds a script, an inline event handler, a `javascript:` URL, `srcdoc`, or an `iframe`,
+  `frame`, `object` or `embed` the original did not have is refused before it is shown. A
+  leading `@token` picks the engine, `@file.ext` adds context, and `@page` saves the page first
+  so the helper reads it from disk.
+
+  Edit mode only, and dormant unless `clay.wire.helpers()` lists an `ai-edit` helper. Listed as
+  `unavailable` (the host's switch is off), ⌘K opens the panel with a note and no Send. HTML Clay
+  and Hyperclay Local both answer it.
 - `source` (default on; `?exclude=source` to turn it off) — saves the file rather than
   a fresh printout of the page. Without it, every save rebuilds the document from the DOM, which reorders
   attributes, renormalises quoting and reprints every tag: a save that changes nothing
