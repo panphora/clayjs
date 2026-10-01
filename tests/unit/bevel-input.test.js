@@ -14,7 +14,7 @@ test("structure: a text input in the field material, runtime-only, every declara
   expect(input.getAttribute("clay")).toBe(RUNTIME_ONLY);
   expect(expectHostileProof(input)).toBe(1);
   expect(input.style.item(0)).toBe("all");
-  expect(last(calls, input, "background")).toBe(TOKENS.surface);
+  expect(last(calls, input, "background")).toBe(TOKENS.ground);
   expect(last(calls, input, "border")).toBe(value(RULES.input, "border"));
   input.remove();
 });

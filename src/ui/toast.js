@@ -2,25 +2,27 @@
 // ❗️ don't use too much text!
 //
 // The Hyperclay dashboard's toast (Bevel's React toast with the dashboard's overrides),
-// drawn inline: a 3px tone edge, a 16px stroked glyph, 13.5px semibold text, a quiet close.
+// drawn inline: a 3px tone edge, a 16px Phosphor glyph, 13.5px semibold text, a quiet close.
 import { set } from "../lib/hostile-css.js";
 import { bevelBox, bevelSurface, bevelText, pageScheme, protectIcon } from "./bevel-controls.js";
-import { TOKENS, FONT_SANS } from "./bevel.js";
+import { TOKENS, RULES } from "./bevel.js";
 
 const icon = (d) =>
-  `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="${d}" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>`;
+  `<svg viewBox="0 0 256 256" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="${d}"/></svg>`;
 
-const ALERT = "m12 3 10 18H2ZM12 9v5m0 3v1";
+const CHECK = "M229.66,77.66l-128,128a8,8,0,0,1-11.32,0l-56-56a8,8,0,0,1,11.32-11.32L96,188.69,218.34,66.34a8,8,0,0,1,11.32,11.32Z";
+const WARNING = "M236.8,188.09,149.35,36.22h0a24.76,24.76,0,0,0-42.7,0L19.2,188.09a23.51,23.51,0,0,0,0,23.72A24.35,24.35,0,0,0,40.55,224h174.9a24.35,24.35,0,0,0,21.33-12.19A23.51,23.51,0,0,0,236.8,188.09ZM222.93,203.8a8.5,8.5,0,0,1-7.48,4.2H40.55a8.5,8.5,0,0,1-7.48-4.2,7.59,7.59,0,0,1,0-7.72L120.52,44.21a8.75,8.75,0,0,1,15,0l87.45,151.87A7.59,7.59,0,0,1,222.93,203.8ZM120,144V104a8,8,0,0,1,16,0v40a8,8,0,0,1-16,0Zm20,36a12,12,0,1,1-12-12A12,12,0,0,1,140,180Z";
+const INFO = "M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm0,192a88,88,0,1,1,88-88A88.1,88.1,0,0,1,128,216Zm16-40a8,8,0,0,1-8,8,16,16,0,0,1-16-16V128a8,8,0,0,1,0-16,16,16,0,0,1,16,16v40A8,8,0,0,1,144,176ZM112,84a12,12,0,1,1,12,12A12,12,0,0,1,112,84Z";
+const X = "M205.66,194.34a8,8,0,0,1-11.32,11.32L128,139.31,61.66,205.66a8,8,0,0,1-11.32-11.32L116.69,128,50.34,61.66A8,8,0,0,1,61.66,50.34L128,116.69l66.34-66.35a8,8,0,0,1,11.32,11.32L139.31,128Z";
 
 const TONES = {
-  success: { edge: TOKENS.teal, icon: icon("m5 12 4 4L19 6") },
-  error: { edge: TOKENS.ox, icon: icon(ALERT) },
-  warning: { edge: TOKENS.brass, icon: icon(ALERT) },
-  info: { edge: TOKENS.brass, icon: icon("M3 3h18v5H3ZM5 8v13h14V8M9 12h6") },
+  success: { edge: TOKENS.teal, icon: icon(CHECK) },
+  error: { edge: TOKENS.ox, icon: icon(WARNING) },
+  warning: { edge: TOKENS.brass, icon: icon(WARNING) },
+  info: { edge: TOKENS.brass, icon: icon(INFO) },
 };
 
-const CLOSE_ICON =
-  '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>';
+const CLOSE_ICON = icon(X);
 
 const HIDDEN = ["opacity:0", "transform:translateX(24px)"];
 
@@ -48,8 +50,8 @@ function stack() {
 function build(message, type) {
   const tone = TONES[type];
   const el = bevelSurface("div", [
-    "display:flex", "align-items:flex-start", "gap:12px", "width:100%",
-    "padding:13px 12px 13px 15px", `border-inline-start:3px solid ${tone.edge}`,
+    "display:flex", "align-items:flex-start", ...RULES.toast, "width:100%",
+    `border-inline-start:3px solid ${tone.edge}`,
     "cursor:pointer", "pointer-events:auto", `color-scheme:${pageScheme()}`,
     ...HIDDEN, `transition:${motion()}`,
   ]);
@@ -59,7 +61,7 @@ function build(message, type) {
   protectIcon(glyph.firstElementChild, 16);
   // A message can carry a filename, and a filename is whatever whoever wrote the
   // file chose. It goes in as text so markup in a name can never become markup here.
-  const text = bevelText("span", ["flex:1 1 auto", "min-width:120px", `font:600 13.5px/1.3 ${FONT_SANS}`, "overflow-wrap:anywhere"], message);
+  const text = bevelText("span", ["flex:1 1 auto", "min-width:120px", ...RULES.toastTitle, "overflow-wrap:anywhere"], message);
   el.append(glyph, text);
   return el;
 }
@@ -67,9 +69,8 @@ function build(message, type) {
 // The dashboard's toast close: a bare 24px square in the muted ink, the sunk ground on hover.
 function closeButton(onClick) {
   const b = bevelBox("button", [
-    "flex:none", "display:inline-grid", "place-items:center", "width:24px", "height:24px",
-    "margin:-2px -2px 0 0", "padding:0", "border:0", "cursor:pointer",
-    "background:transparent", `color:${TOKENS.muted}`,
+    "flex:none", "display:inline-grid", "place-items:center", ...RULES.toastClose,
+    "cursor:pointer",
   ]);
   b.type = "button";
   b.setAttribute("aria-label", "Dismiss");

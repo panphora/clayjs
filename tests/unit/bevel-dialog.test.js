@@ -90,14 +90,14 @@ test("close: a 62px column at the header's right edge, the X painted inline, cla
   expect(header.contains(close)).toBe(true);
   expect(close.getAttribute("aria-label")).toBe("Close");
   expect(close.title).toBe("Close");
-  expect(last(calls, close, "width")).toBe("62px");
+  expect(last(calls, close, "inline-size")).toBe("62px");
   expect(last(calls, close, "height")).toBe("calc(100% + 1px)");
   expect(last(calls, close, "border-left")).toBe(`1px solid ${TOKENS["line-2"]}`);
   expect(expectHostileProof(header)).toBe(3);
   expect(svg.getAttribute("class")).toBeNull();
   expect(last(calls, svg, "color")).toBe("inherit");
-  expect(path.style.getPropertyValue("stroke")).toBe("currentColor");
-  expect(path.style.getPropertyPriority("stroke")).toBe("important");
+  expect(path.style.getPropertyValue("fill")).toBe("currentColor");
+  expect(path.style.getPropertyPriority("fill")).toBe("important");
   header.remove();
 });
 

@@ -1,5 +1,6 @@
 export const FONT_SANS = 'system-ui,-apple-system,"Segoe UI",sans-serif';
 export const FONT_MONO = 'ui-monospace,SFMono-Regular,Menlo,Consolas,monospace';
+export const FONT_SERIF = 'Georgia,"Times New Roman",serif';
 export const SHADOW = '0 1px 2px rgba(0,0,0,.12),0 10px 28px -12px rgba(0,0,0,.35)';
 
 // Every light-dark() colour token in the base :root rule except --bevel-syn-*.
@@ -36,6 +37,15 @@ export const RECIPES = {
   input: { selector: '.bevel-input' },
   inputHover: { selector: '.bevel-input:hover:not(:disabled)' },
   inputFocus: { selector: '.bevel-input:focus-visible' },
+  toast: { selector: '.bevel-toast', keep: ['gap', 'padding'] },
+  toastTitle: { selector: '.bevel-toast__title', keep: ['font'] },
+  toastClose: { selector: '.bevel-toast__close', keep: ['margin', 'inline-size', 'block-size', 'padding', 'border', 'background', 'color'] },
+  dialogPanel: { selector: '.bevel-modal', keep: ['border-radius', 'box-shadow'], cascade: true },
+  dialogHeader: { selector: '.bevel-modal__header', keep: ['border-bottom'] },
+  dialogHeading: { selector: '.bevel-modal__heading', keep: ['margin', 'font'] },
+  dialogFooter: { selector: '.bevel-modal__footer', keep: ['gap', 'padding', 'border-top'], cascade: true },
+  dialogClose: { selector: '.bevel-overlay__close', keep: ['inline-size', 'border-left', 'background', 'color'] },
+  dialogCloseHover: { selector: '.bevel-overlay__close:hover', keep: ['background'] },
 };
 
 // Composed from tokens, not copied from a selector.

@@ -9,7 +9,7 @@
 // through untouched. The stage itself is quickcrop's, and so is its geometry; its
 // skin keeps a page stylesheet off it.
 import vendorQuickcrop from "../vendor/quickcrop.vendor.js";
-import { bevelDialog, dismissOf, keepFocusIn, DIALOG_BUTTON } from "../ui/bevel-dialog.js";
+import { bevelDialog, dismissOf, keepFocusIn } from "../ui/bevel-dialog.js";
 import { bevelButton } from "../ui/bevel-controls.js";
 import { installSkin } from "../ui/vendor-skin.js";
 import { CSS as SKIN, ROOTS as SKIN_ROOTS } from "../ui/skins/quickcrop.js";
@@ -43,7 +43,7 @@ export const bevelCropAdapter = {
     heading.textContent = "Crop image";
     panel.setAttribute("aria-label", "Crop image");
     body.append(content);
-    const confirm = bevelButton(confirmLabel, { variant: "primary", extra: DIALOG_BUTTON, onClick: () => onConfirm() });
+    const confirm = bevelButton(confirmLabel, { variant: "primary", onClick: () => onConfirm() });
     footer.append(confirm);
 
     close.addEventListener("click", () => onCancel());

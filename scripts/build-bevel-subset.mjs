@@ -20,14 +20,14 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import postcss from 'postcss'
-import { FONT_SANS, FONT_MONO, SHADOW, TOKEN_NAMES, RECIPES, SURFACE, MEDIA } from './bevel-manifest.mjs'
+import { FONT_SANS, FONT_MONO, FONT_SERIF, SHADOW, TOKEN_NAMES, RECIPES, SURFACE, MEDIA } from './bevel-manifest.mjs'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const OUT = path.join(ROOT, 'src/ui/bevel.js')
 const OUT_LABEL = 'src/ui/bevel.js'
 const DEFAULT_SOURCE = path.resolve(ROOT, '../bevel/bevel.css')
 const HEADER = '// GENERATED from bevel/bevel.css by scripts/build-bevel-subset.mjs. Run `npm run build:bevel`.\n'
-const SPECIAL = { 'font-sans': FONT_SANS, 'font-mono': FONT_MONO, shadow: SHADOW }
+const SPECIAL = { 'font-sans': FONT_SANS, 'font-mono': FONT_MONO, 'font-serif': FONT_SERIF, shadow: SHADOW }
 const USAGE = 'usage: node scripts/build-bevel-subset.mjs [--check] [--source <path>] [--module <path>]'
 // Everything src/ui/bevel-controls.js reads out of src/ui/bevel.js. Inline styles
 // are the only styling ClayJS can trust on a hostile page, so a module missing any
@@ -91,7 +91,7 @@ function directDecls(rule, recipe) {
 // Every matched rule for one recipe, merged in source order: two rules for the
 // same selector are a cascade, and a generator that emits one flat declaration
 // list cannot express which of the two wins, so a disagreement is an error.
-function collect(rules, selector, recipe, custom) {
+function collect(rules, selector, recipe, custom, cascade = false) {
   const entries = []
   const seen = new Map()
   for (const rule of rules) {
@@ -100,7 +100,8 @@ function collect(rules, selector, recipe, custom) {
       const value = collapse(decl.value)
       const previous = seen.get(decl.prop)
       if (previous !== undefined && previous !== value) {
-        throw new Error(`bevel: conflicting declarations for ${decl.prop} in ${selector} (${recipe})`)
+        if (!cascade) throw new Error(`bevel: conflicting declarations for ${decl.prop} in ${selector} (${recipe})`)
+        entries.find(entry => entry.prop === decl.prop).value = value
       }
       seen.set(decl.prop, value)
       if (previous === undefined) entries.push({ prop: decl.prop, value })
@@ -197,6 +198,11 @@ function variantOverrides(rules, tokens, recipe, selector) {
 
 function declarations(entries, tokens, overrides, recipe, options = {}) {
   const lookup = lookupIn(tokens, overrides)
+  if (options.keep) {
+    for (const prop of options.keep) {
+      if (!entries.some(entry => entry.prop === prop)) throw new Error(`bevel: ${recipe} keeps ${prop}, which no rule declares`)
+    }
+  }
   const kept = []
   for (const entry of entries) {
     if (options.keep && !options.keep.includes(entry.prop)) continue
@@ -239,7 +245,7 @@ function renderRecipe(name, spec, root, tokens) {
   const overrides = spec.withOverridesOf
     ? variantOverrides(rulesFor(root, spec.withOverridesOf, layer, null, name), tokens, name, spec.withOverridesOf)
     : null
-  const entries = collect(rulesFor(root, spec.selector, layer, null, name), spec.selector, name, false)
+  const entries = collect(rulesFor(root, spec.selector, layer, null, name), spec.selector, name, false, spec.cascade === true)
   return declarations(entries, tokens, overrides, name, spec)
 }
 

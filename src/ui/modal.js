@@ -1,6 +1,6 @@
 import { bevelButton, setShown } from "./bevel-controls.js";
 import { set } from "../lib/hostile-css.js";
-import { bevelDialog, dismissOf, DIALOG_BUTTON } from "./bevel-dialog.js";
+import { bevelDialog, dismissOf } from "./bevel-dialog.js";
 
 /*
 
@@ -354,8 +354,8 @@ const themodal = (() => {
       const modalContentElem = shell.body;
       const modalButtonsElem = shell.footer;
       const modalCloseElem = shell.close;
-      const modalNoElem = bevelButton('', { extra: DIALOG_BUTTON });
-      const modalYesElem = bevelButton('', { variant: 'primary', extra: DIALOG_BUTTON });
+      const modalNoElem = bevelButton('');
+      const modalYesElem = bevelButton('', { variant: 'primary' });
       modalYesElem.type = 'submit';
       modalButtonsElem.append(modalNoElem, modalYesElem);
 

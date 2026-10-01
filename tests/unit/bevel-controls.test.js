@@ -155,7 +155,7 @@ test("disabled: aria-disabled, the dimmed face, and a click that does not land",
   expect(b.isDisabled()).toBe(true);
   expect(last(off, b, "opacity")).toBe(value(RULES.buttonDisabled, "opacity"));
   expect(last(off, b, "cursor")).toBe(value(RULES.buttonDisabled, "cursor"));
-  expect(b.style.getPropertyValue("cursor")).toBe("not-allowed");
+  expect(b.style.getPropertyValue("cursor")).toBe("default");
 
   const blocked = new MouseEvent("click", { bubbles: true, cancelable: true });
   b.dispatchEvent(blocked);

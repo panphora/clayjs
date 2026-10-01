@@ -3,7 +3,7 @@
 // backdrop clicks and settling, so each keeps the rules it already had.
 import { set } from "../lib/hostile-css.js";
 import { bevelBox, bevelSurface, bevelText, pageScheme, protectIcon } from "./bevel-controls.js";
-import { TOKENS, FONT_SANS } from "./bevel.js";
+import { TOKENS, FONT_SANS, RULES } from "./bevel.js";
 
 // A frame's own way to settle itself. The modal is a singleton and clears every frame
 // when it opens; a frame it does not own (the crop dialog) registers here, so it is
@@ -31,23 +31,19 @@ export function keepFocusIn(container, event) {
 
 // The dashboard's dialog (Bevel's React dialog with the dashboard's overrides), drawn
 // inline. ClayJS loads no webfonts, so the title's Newsreader falls back to Georgia.
-const FONT_SERIF = 'Newsreader,Georgia,"Times New Roman",serif';
 const LINE = `1px solid ${TOKENS["line-2"]}`;
 const CLOSE_X =
-  '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>';
-
-// Footer buttons are 32px, as in the dashboard's dialogs.
-export const DIALOG_BUTTON = ["height:32px", "padding:0 12px", "font-size:13.5px"];
+  '<svg viewBox="0 0 256 256" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M205.66,194.34a8,8,0,0,1-11.32,11.32L128,139.31,61.66,205.66a8,8,0,0,1-11.32-11.32L116.69,128,50.34,61.66A8,8,0,0,1,61.66,50.34L128,116.69l66.34-66.35a8,8,0,0,1,11.32,11.32L139.31,128Z"/></svg>';
 
 // The close: a column at the header's right edge in the button face, or a 62px square
 // at the panel's corner when there is no header.
 function dialogClose(label, inHeader) {
-  const hover = `color-mix(in srgb, ${TOKENS.face}, ${TOKENS["edge-hi"]} 45%)`;
+  const hover = RULES.dialogCloseHover[0].slice("background:".length);
   const b = bevelBox("button", [
     "position:absolute", "top:-1px", "right:-1px", "z-index:2",
-    "display:grid", "place-items:center", "width:62px", inHeader ? "height:calc(100% + 1px)" : "height:62px",
-    "margin:0", "padding:0", "border:0", `border-left:${LINE}`, ...(inHeader ? [] : [`border-bottom:${LINE}`]),
-    "cursor:pointer", `background:${TOKENS.face}`, `color:${TOKENS.ink}`, "outline:none",
+    "display:grid", "place-items:center", inHeader ? "height:calc(100% + 1px)" : "height:62px",
+    "margin:0", "padding:0", "border:0", ...RULES.dialogClose, ...(inHeader ? [] : [`border-bottom:${LINE}`]),
+    "cursor:pointer", "outline:none",
   ]);
   b.type = "button";
   b.setAttribute("aria-label", label);
@@ -78,7 +74,7 @@ export function bevelDialog({ zIndex = "100", width = "600px", closable = false,
   const panel = bevelSurface("form", [
     "position:relative", "display:flex", "flex-direction:column", "margin:0",
     `width:min(${width}, 100%)`, "max-height:calc(100dvh - min(96px, 10vh) - 16px)",
-    "border-radius:0", `box-shadow:6px 6px 0 color-mix(in srgb, ${TOKENS.ink} 10%, transparent)`,
+    ...RULES.dialogPanel,
   ]);
   panel.setAttribute("role", "dialog");
   panel.setAttribute("aria-modal", "true");
@@ -88,9 +84,9 @@ export function bevelDialog({ zIndex = "100", width = "600px", closable = false,
   if (titled) {
     header = bevelBox("div", [
       "position:relative", "display:block", "flex:none",
-      `padding:20px ${closable ? "68px" : "22px"} 16px 22px`, `border-bottom:${LINE}`,
+      `padding:20px ${closable ? "68px" : "22px"} 16px 22px`, ...RULES.dialogHeader,
     ]);
-    heading = bevelText("div", ["display:block", "margin:0", `font:400 24px/1.15 ${FONT_SERIF}`, "overflow-wrap:anywhere"]);
+    heading = bevelText("div", ["display:block", ...RULES.dialogHeading, "overflow-wrap:anywhere"]);
     heading.setAttribute("role", "heading");
     heading.setAttribute("aria-level", "2");
     header.append(heading);
@@ -103,8 +99,7 @@ export function bevelDialog({ zIndex = "100", width = "600px", closable = false,
     "overflow-wrap:anywhere", `font:14.5px/1.55 ${FONT_SANS}`,
   ]);
   const footer = bevelBox("div", [
-    "display:flex", "flex:none", "flex-wrap:wrap", "justify-content:flex-end", "align-items:center", "gap:10px",
-    "padding:14px 22px", `border-top:${LINE}`,
+    "display:flex", "flex:none", "flex-wrap:wrap", "justify-content:flex-end", "align-items:center", ...RULES.dialogFooter,
   ]);
   panel.append(body, footer);
 

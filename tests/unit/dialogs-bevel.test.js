@@ -26,14 +26,14 @@ test("ask: title, Bevel input and the close are hostile-proof; the prompt markup
   expectCallsResolved(calls, root);
   expect(caller.hasAttribute("style")).toBe(false);
   const input = dialog().querySelector("input");
-  expect(last(calls, input, "background")).toBe(TOKENS.surface);
+  expect(last(calls, input, "background")).toBe(TOKENS.ground);
   expect([input.required, input.getAttribute("value"), document.activeElement]).toEqual([true, "old", input]);
   const x = close().querySelector("svg");
   const ink = calls.filter((call) => call.style === x.style && call.name === "color");
   expect(ink.map((call) => [call.value, call.priority])).toEqual([["inherit", "important"]]);
-  expect(x.querySelector("path").style.getPropertyValue("stroke")).toBe("currentColor");
+  expect(x.querySelector("path").style.getPropertyValue("fill")).toBe("currentColor");
   expect(x.getAttribute("class")).toBeNull();
-  expect(x.querySelector("path").style.getPropertyPriority("stroke")).toBe("important");
+  expect(x.querySelector("path").style.getPropertyPriority("fill")).toBe("important");
   expect(document.querySelector('[class*="micromodal"]')).toBeNull();
 });
 
