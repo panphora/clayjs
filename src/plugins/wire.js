@@ -506,6 +506,10 @@ async function flushSave() {
   // surface is an opt-in satellite script, absent on every page the loader
   // builds, so reading it here made "is a save on the wire" permanently false.
   const { isSaveInProgress } = await import("../core/save-core.js");
+  // A held save is an AI edit preview waiting for Keep or Revert, not a page with
+  // nothing to save: posting now would hand the agent a file that is about to change.
+  const { savesHeld } = await import("../core/save.js");
+  if (savesHeld()) throw new Error("keep or revert the AI edit first");
   const deadline = Date.now() + SAVE_FLUSH_TIMEOUT_MS;
 
   for (let attempt = 0; attempt < 3; attempt++) {

@@ -70,6 +70,12 @@ function mountPage() {
   return document.querySelector("[data-edit-id]");
 }
 
+function mountHTML(html) {
+  document.querySelectorAll("[data-edit-id]").forEach(el => el.remove());
+  document.body.insertAdjacentHTML("afterbegin", html);
+  return document.querySelector("[data-edit-id]");
+}
+
 function clickSection(el) {
   el.dispatchEvent(new MouseEvent("click", { bubbles: true }));
 }
@@ -271,7 +277,7 @@ describe("with a ready ai-edit helper", () => {
     // three-way merged against the HTML the model saw, so mid-flight edits survive.
     expect(morphCalls).toHaveLength(3);
     const calls = morphCalls;
-    expect(calls[1][2].scripts).toEqual({ merge: false });
+    expect(calls[1][2].scripts).toEqual({ merge: false, handle: false });
     expect(calls[2][2].scripts.mergeBase).toBe(PAGE);
     expect(typeof calls[2][2].scripts.mergeTags).toBe("object");
     expect(save).toHaveBeenCalledTimes(1);
@@ -357,6 +363,80 @@ describe("with a ready ai-edit helper", () => {
     await flush();
     expect(heading().textContent).toBe("Old heading");
     expect(statusEl().textContent).toMatch(/adds a script or event handler/);
+  });
+
+  test("a javascript: URL split by an encoded tab is refused", async () => {
+    clickSection(mountPage());
+    await submit("add a link");
+    handle.settle({ state: "done", result: { html: '<section data-edit-id="hero"><h1>Old heading</h1><p><a href="java&#9;script:void(0)">x</a></p></section>', model: "m" } });
+    await flush();
+    expect(document.querySelector("[data-edit-id] a")).toBeNull();
+    expect(statusEl().textContent).toMatch(/adds a script or event handler/);
+  });
+
+  test("a reply that makes an existing data script executable is refused and nothing runs", async () => {
+    window.__aiEditRuns = 0;
+    clickSection(mountHTML('<section data-edit-id="hero"><h1>Old heading</h1><script type="text/plain">window.__aiEditRuns += 1</script></section>'));
+    await submit("tidy");
+    handle.settle({ state: "done", result: { html: '<section data-edit-id="hero"><h1>New heading</h1><script>window.__aiEditRuns += 1</script></section>', model: "m" } });
+    await flush();
+    expect(window.__aiEditRuns).toBe(0);
+    expect(heading().textContent).toBe("Old heading");
+    expect(statusEl().textContent).toMatch(/adds a script or event handler/);
+  });
+
+  test("a reply that copies an existing handler onto a second element is refused", async () => {
+    clickSection(mountHTML('<section data-edit-id="hero"><h1>Old heading</h1><button onclick="void 0">a</button></section>'));
+    await submit("add another button");
+    handle.settle({ state: "done", result: { html: '<section data-edit-id="hero"><h1>Old heading</h1><button onclick="void 0">a</button><button onclick="void 0">b</button></section>', model: "m" } });
+    await flush();
+    expect(document.querySelectorAll("[data-edit-id] button").length).toBe(1);
+    expect(statusEl().textContent).toMatch(/adds a script or event handler/);
+  });
+
+  test("a reply that adds a JSON data script is shown for Keep", async () => {
+    clickSection(mountPage());
+    await submit("add data");
+    handle.settle({ state: "done", result: { html: '<section data-edit-id="hero"><h1>Old heading</h1><p>Old paragraph</p><script type="application/json">{"a":1}</script></section>', model: "m" } });
+    await flush();
+    expect(button("keep").hidden).toBe(false);
+  });
+
+  test("a morph that throws releases the save hold and reports the failure", async () => {
+    clickSection(mountPage());
+    await submit("tighten");
+    vendorMock.HyperMorph.morph = (el, content, ...rest) => {
+      if (typeof content !== "string") throw new Error("boom");
+      return realVendor.HyperMorph.morph(el, content, ...rest);
+    };
+    handle.settle({ state: "done", result: { html: '<section data-edit-id="hero"><h1>New heading</h1><p>Old paragraph</p></section>', model: "m" } });
+    await flush();
+    const saveModule = await import("../../src/core/save.js");
+    expect(saveModule.savesHeld()).toBe(false);
+    expect(statusEl().textContent).toMatch(/could not be applied/);
+    expect(heading().textContent).toBe("Old heading");
+  });
+
+  test("removing the previewed section releases the save hold and closes the panel", async () => {
+    clickSection(mountPage());
+    await submit("tighten");
+    handle.settle({ state: "done", result: { html: '<section data-edit-id="hero"><h1>New heading</h1><p>Old paragraph</p></section>', model: "m" } });
+    await flush();
+    const saveModule = await import("../../src/core/save.js");
+    expect(saveModule.savesHeld()).toBe(true);
+    document.querySelector("[data-edit-id]").remove();
+    await flush();
+    expect(saveModule.savesHeld()).toBe(false);
+    expect(panel().hidden).toBe(true);
+  });
+
+  test("closing the panel during a request cancels it on the wire", async () => {
+    clickSection(mountPage());
+    await submit("tighten");
+    button("close").click();
+    await flush();
+    expect(handle.cancel).toHaveBeenCalled();
+    expect(panel().hidden).toBe(true);
   });
 
   test("a save asked for during the preview waits, and Revert lets it run", async () => {

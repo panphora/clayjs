@@ -231,6 +231,10 @@ export function releaseAllSaves({ replay = true } = {}) {
   if (missed && replay) savePage();
 }
 
+export function savesHeld() {
+  return previewHold > 0;
+}
+
 function heldForPreview(callback, resolve) {
   if (previewHold === 0) return false;
   previewMissed = true;

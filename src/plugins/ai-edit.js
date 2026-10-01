@@ -181,9 +181,11 @@ function morphTo(el, content, scripts) {
 // against the snapshot the model saw, so data the user changed mid-flight survives
 // the reply. Rewinds must restore the snapshot exactly, so they disable merging.
 function sessionMorph(s, content, { rewind = false } = {}) {
+  // handle:false: a reply's scripts never run, so the preview cannot execute code
+  // before Keep, and neither can a rewind.
   const scripts = rewind
-    ? { merge: false }
-    : { mergeBase: s.snapshot, mergeTags: mergeTagRecognizers };
+    ? { merge: false, handle: false }
+    : { mergeBase: s.snapshot, mergeTags: mergeTagRecognizers, handle: false };
   if (s.docMode) {
     if (typeof content === 'string') {
       // Parse to an element ourselves: hyper-morph parses a body string into a
@@ -297,21 +299,47 @@ async function sendRequest(el, comment, quote) {
   else onError(outcome.error || 'the helper reported an error');
 }
 
-// What a reply may not add: anything that runs code. Compared against the element
-// the model was given, so a page's own scripts and handlers are not a reason to
-// refuse an edit near them.
+// What a reply may not add: anything that runs code. Each part is counted, and the
+// reply is refused when it holds more of any part than the element the model was
+// given, so a page's own scripts and handlers are not a reason to refuse an edit
+// near them, while a copied handler or a changed script is.
+const ACTIVE_ATTR = /^(on|hx-on|x-|@|:|v-on:|v-bind:|data-on[-:])/;
+const ACTIVE_TAGS = new Set(['iframe', 'frame', 'object', 'embed', 'base', 'link']);
+
+// URL parsing removes tab, CR and LF anywhere and controls and spaces at the start,
+// so "java&#9;script:" is still a javascript: URL.
+function isScriptURL(value) {
+  const url = value.replace(/[\t\n\r]/g, '').replace(/^[\u0000- ]+/, '').toLowerCase();
+  return url.startsWith('javascript:') || url.startsWith('vbscript:');
+}
+
+// A script whose type the browser does not run (JSON, a template) is data.
+function runsAsCode(script) {
+  const type = (script.getAttribute('type') || '').trim().toLowerCase();
+  return !type || /javascript|ecmascript/.test(type) || ['module', 'importmap', 'speculationrules'].includes(type);
+}
+
+function attrsOf(el) {
+  return [...el.attributes].map(a => a.name.toLowerCase() + '=' + a.value).sort().join(' ');
+}
+
 function activeParts(root) {
-  const parts = new Set();
+  const parts = new Map();
+  const add = (part) => parts.set(part, (parts.get(part) || 0) + 1);
   for (const el of [root, ...root.querySelectorAll('*')]) {
     const tag = el.tagName.toLowerCase();
-    if (tag === 'script') parts.add('script:' + el.textContent.trim() + '|' + (el.getAttribute('src') || ''));
-    if (['iframe', 'frame', 'object', 'embed'].includes(tag)) parts.add(tag + ':' + (el.getAttribute('src') || el.getAttribute('data') || ''));
+    if (tag === 'script') {
+      if (runsAsCode(el)) add('script ' + attrsOf(el) + '|' + el.textContent.trim());
+    } else if (ACTIVE_TAGS.has(tag) || (tag === 'meta' && el.hasAttribute('http-equiv'))) {
+      add(tag + ' ' + attrsOf(el));
+    } else if ((tag === 'animate' || tag === 'set') && /href/i.test(el.getAttribute('attributeName') || '')) {
+      add(tag + ' ' + attrsOf(el));
+    }
     for (const attr of el.attributes) {
       const name = attr.name.toLowerCase();
-      const value = attr.value.trim();
-      if (name.startsWith('on')) parts.add('on:' + name + '=' + value);
-      else if (name === 'srcdoc') parts.add('srcdoc:' + value);
-      else if (/^\s*javascript:/i.test(value)) parts.add('js:' + name + '=' + value);
+      if (ACTIVE_ATTR.test(name)) add(tag + ' ' + name + '=' + attr.value.trim());
+      else if (name === 'srcdoc') add(tag + ' srcdoc=' + attr.value);
+      else if (isScriptURL(attr.value)) add(tag + ' ' + name + '=' + attr.value);
     }
   }
   return parts;
@@ -321,8 +349,8 @@ function addsActiveContent(candidate, snapshot, docMode) {
   const original = docMode
     ? new DOMParser().parseFromString(snapshot, 'text/html').body
     : (() => { const t = document.createElement('template'); t.innerHTML = snapshot; return t.content.firstElementChild; })();
-  const before = original ? activeParts(original) : new Set();
-  for (const part of activeParts(candidate)) if (!before.has(part)) return true;
+  const before = original ? activeParts(original) : new Map();
+  for (const [part, count] of activeParts(candidate)) if (count > (before.get(part) || 0)) return true;
   return false;
 }
 
@@ -355,7 +383,12 @@ function onDone(payload) {
   session.held = true;
 
   session.finalCandidate = candidate;
-  sessionMorph(session, candidate); // authoritative morph from the full final HTML
+  try {
+    sessionMorph(session, candidate); // authoritative morph from the full final HTML
+  } catch (error) {
+    onError('the reply could not be applied: ' + (error?.message || error));
+    return;
+  }
   positionChrome();
   setStatus(payload.model ? `done (${payload.model})` : 'done');
   showWarnings(warnings);
@@ -376,20 +409,26 @@ function revertSession() {
   const s = session;
   session = null;
   if (!s) return;
-  if (s.state === 'requesting' || s.state === 'deciding') {
-    sessionMorph(s, s.snapshot, { rewind: true });
+  try {
+    if (s.state === 'requesting' || s.state === 'deciding') {
+      sessionMorph(s, s.snapshot, { rewind: true });
+    }
+  } finally {
+    if (s.paused) resumeObservers();
+    if (s.held) releaseAllSaves();
+    positionChrome();
   }
-  if (s.paused) resumeObservers();
-  if (s.held) releaseAllSaves();
-  positionChrome();
 }
 
 async function keepSession() {
   const s = session;
   session = null;
-  sessionMorph(s, s.snapshot, { rewind: true }); // rewind while observers are still paused
-  if (s.paused) resumeObservers();    // boundary drain discards the rewind
-  if (s.held) releaseAllSaves({ replay: false });
+  try {
+    sessionMorph(s, s.snapshot, { rewind: true }); // rewind while observers are still paused
+  } finally {
+    if (s.paused) resumeObservers();    // boundary drain discards the rewind
+    if (s.held) releaseAllSaves({ replay: false });
+  }
   sessionMorph(s, s.finalCandidate);  // recorded: the whole edit = one undo step
   positionChrome();
   showButtons('send');
@@ -559,6 +598,12 @@ function buildChrome() {
     const touched = (nodes) => [...nodes].some((n) => n.nodeType === 1 && n.hasAttribute('data-hcms-toggle-host'));
     if (records.some((r) => touched(r.addedNodes) || touched(r.removedNodes))) replace();
   }).observe(document.body, { childList: true });
+
+  // A target removed from the page ends its edit, so the save hold and the paused
+  // observers never outlive it.
+  new MutationObserver(() => {
+    if (anchorEl && !anchorEl.isConnected && !panel.hidden) closePanel();
+  }).observe(document.body, { childList: true, subtree: true });
 }
 
 // The whole-page bubble belongs to pages built from [data-edit-id] sections. A plain
@@ -747,7 +792,7 @@ function openPanel(el, quote) {
 }
 
 function closePanel() {
-  if (session) revertSession();
+  if (session) { session.handle?.cancel(); revertSession(); }
   const back = returnFocus;
   const hadFocus = panel.contains(document.activeElement);
   anchorEl = null;
