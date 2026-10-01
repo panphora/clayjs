@@ -49,6 +49,11 @@ import { TOKENS, FONT_SANS, FONT_MONO, SHADOW } from "../ui/bevel.js";
 
 const HELPER = "ai-edit";
 const UNIT_SELECTOR = "h1,h2,h3,h4,h5,h6,p,figure";
+// Outside [data-edit-id] sections: the nearest text block that holds the whole
+// selection, else the nearest container that does. Never the body from the keyboard.
+const BLOCK_SELECTOR = "p,h1,h2,h3,h4,h5,h6,li,dt,dd,blockquote,pre,figcaption,td,th";
+const CONTAINER_SELECTOR = "section,article,aside,header,footer,nav,main,div,ul,ol,dl,table,figure,form";
+const NOT_TEXT = "script,style,template,textarea,input,select,button,iframe,svg,math";
 // The request ceiling, kept below the host's 1 MiB envelope so the refusal happens
 // here, where the message can say what to do about it.
 const MAX_PAYLOAD_BYTES = 900 * 1024;
@@ -61,6 +66,7 @@ let buttons = {};
 let anchorEl = null;    // element the panel is currently anchored to
 let chipTarget = null;  // unit the hover chip currently points at
 let chipHideTimer = null;
+let pendingSelection; // { text, start, end } for the open panel, or undefined
 
 // ---------------------------------------------------------------- transport
 
@@ -96,18 +102,50 @@ function editLabel(el) {
   const own = el.getAttribute('data-edit-id');
   if (own) return own;
   const section = el.closest('[data-edit-id]');
-  return (section ? section.getAttribute('data-edit-id') + ' \u203a ' : '') + el.tagName.toLowerCase();
+  if (!section) return el.id ? '#' + el.id : el.tagName.toLowerCase();
+  return section.getAttribute('data-edit-id') + ' \u203a ' + el.tagName.toLowerCase();
+}
+
+function liveRange() {
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return null;
+  return selection.getRangeAt(0);
+}
+
+// The element a selection edits. Section pages keep their unit rules; everywhere
+// else it is the block around the whole selection, so a backward selection and a
+// forward one land on the same element.
+function targetFromRange(range) {
+  let node = range.commonAncestorContainer;
+  if (node.nodeType !== 1) node = node.parentElement;
+  if (!node || node === document.body || !document.body.contains(node)) return null;
+  if (node.closest('[data-clay-ai-edit]') || node.closest(STRIP_FROM_SAVE) || node.closest(NOT_TEXT)) return null;
+  if (node.closest('[data-edit-id]')) return unitFrom(node);
+  const target = node.closest(BLOCK_SELECTOR) || node.closest(CONTAINER_SELECTOR);
+  return target && target !== document.body ? target : null;
+}
+
+// The selected text, whole, with its character offsets inside the target's text,
+// so a phrase that appears twice is unambiguous.
+function selectionIn(range, target) {
+  if (!range || !target || !target.contains(range.commonAncestorContainer)) return undefined;
+  const text = range.toString();
+  if (!text.trim()) return undefined;
+  const before = document.createRange();
+  before.selectNodeContents(target);
+  before.setEnd(range.startContainer, range.startOffset);
+  const start = before.toString().length;
+  return { text, start, end: start + text.length };
 }
 
 function quoteFromSelection(scope) {
-  const selection = window.getSelection();
-  if (!selection || selection.isCollapsed) return undefined;
-  const text = selection.toString().trim();
-  if (!text) return undefined;
-  let node = selection.getRangeAt(0).commonAncestorContainer;
-  if (node.nodeType !== 1) node = node.parentElement;
-  if (scope && scope !== document.body && !scope.contains(node)) return undefined;
-  return text.length > 400 ? text.slice(0, 400) + '\u2026' : text;
+  const range = liveRange();
+  if (!range) return undefined;
+  if (scope === document.body) {
+    const text = range.toString();
+    return text.trim() ? { text, start: undefined, end: undefined } : undefined;
+  }
+  return selectionIn(range, scope);
 }
 
 function strippedBodyHTML() {
@@ -191,7 +229,10 @@ function newSession(el, comment, quote) {
     comment,
     contextRefs
   };
-  if (quote) payload.quote = quote;
+  if (quote) {
+    payload.quote = quote.text;
+    if (Number.isInteger(quote.start)) payload.selection = { start: quote.start, end: quote.end };
+  }
   // Document mode reads the live page itself, and every other @page request reads
   // the file from disk: the plugin saves first, then asks for it by flag.
   if (!docMode && /@page\b/.test(comment)) payload.page = true;
@@ -545,9 +586,11 @@ function openPanel(el, quote) {
   set(panel, 'color-scheme', pageScheme());
   set(ring, 'color-scheme', pageScheme());
   setShown(panel, true);
+  pendingSelection = quote;
+  const shown = quote ? (quote.text.trim().length > 400 ? quote.text.trim().slice(0, 400) + '\u2026' : quote.text.trim()) : '';
   setShown(quoteEl, !!quote);
-  quoteEl.textContent = quote ? `\u201c${quote}\u201d` : '';
-  panel.dataset.quote = quote || '';
+  quoteEl.textContent = quote ? `\u201c${shown}\u201d` : '';
+  panel.dataset.quote = shown;
   setStatus('');
   showWarnings([]);
   showButtons('send');
@@ -558,6 +601,7 @@ function openPanel(el, quote) {
 function closePanel() {
   if (session) revertSession();
   anchorEl = null;
+  pendingSelection = undefined;
   setShown(panel, false);
   setShown(ring, false);
   textarea.value = '';
@@ -566,10 +610,28 @@ function closePanel() {
 function submit() {
   const comment = textarea.value.trim();
   if (!comment || !anchorEl || session) return;
-  sendRequest(anchorEl, comment, panel.dataset.quote || undefined);
+  sendRequest(anchorEl, comment, pendingSelection);
 }
 
 // ---------------------------------------------------------------- interactions
+
+const IS_MAC = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || '');
+
+// Cmd+K on a Mac, Ctrl+K elsewhere. event.code covers keyboard layouts where the
+// K key types another letter.
+function isCommandK(event) {
+  const modifier = IS_MAC ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
+  if (!modifier || event.shiftKey || event.altKey || event.repeat || event.isComposing) return false;
+  return event.code === 'KeyK' || (event.key || '').toLowerCase() === 'k';
+}
+
+// A field the page owns keeps its own Ctrl+K, and so does the panel's own box.
+function pageOwnsFocus() {
+  const el = document.activeElement;
+  if (!el || el === document.body) return false;
+  if (panel && panel.contains(el)) return !panel.hidden;
+  return el.matches('input,textarea,select');
+}
 
 function wireInteractions() {
   // Clicks: text units are contenteditable (caret) and figures keep their own
@@ -601,14 +663,22 @@ function wireInteractions() {
   });
 
   document.addEventListener('keydown', (event) => {
-    if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'k') {
-      if (session) return;
+    if (isCommandK(event)) {
+      if (!session && anchorEl && !anchorEl.isConnected) closePanel();
+      if (session || pageOwnsFocus()) return;
+      const range = liveRange();
+      let target = range ? targetFromRange(range) : null;
+      if (!target) {
+        // Section pages: a caret inside a unit, or the unit under the hover chip.
+        const selection = window.getSelection();
+        let node = selection && selection.anchorNode;
+        if (node && node.nodeType !== 1) node = node.parentElement;
+        target = (node && unitFrom(node)) || chipTarget;
+      }
+      // Nothing to open: leave the key to the browser.
+      if (!target) return;
       event.preventDefault();
-      const selection = window.getSelection();
-      let node = selection && selection.anchorNode;
-      if (node && node.nodeType !== 1) node = node.parentElement;
-      const target = (node && unitFrom(node)) || chipTarget;
-      if (target) openPanel(target, quoteFromSelection(target));
+      openPanel(target, quoteFromSelection(target));
       return;
     }
     if (event.key !== 'Escape' || panel.hidden) return;

@@ -338,4 +338,100 @@ describe("with a ready ai-edit helper", () => {
     expect(fakeWire.send).toHaveBeenCalledTimes(1);
     expect(handle.payload.comment).toBe("tighten this");
   });
+
+  describe("plain pages, no data-edit-id", () => {
+    const PLAIN = '<main id="plain"><h2>Hours</h2><p id="intro">Visitors arriving late will not be admitted. Late arrivals wait.</p><ul><li>Tea</li><li>Cake</li></ul></main>';
+
+    function mountPlain() {
+      document.querySelectorAll("[data-edit-id], #plain").forEach(el => el.remove());
+      document.body.insertAdjacentHTML("afterbegin", PLAIN);
+    }
+
+    function select(startNode, startOffset, endNode, endOffset) {
+      const range = document.createRange();
+      range.setStart(startNode, startOffset);
+      range.setEnd(endNode, endOffset);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+
+    function ctrlK(target = document.body) {
+      const event = new KeyboardEvent("keydown", { key: "k", code: "KeyK", ctrlKey: true, bubbles: true, cancelable: true });
+      target.dispatchEvent(event);
+      return event;
+    }
+
+    afterEach(() => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+      document.querySelector("#plain")?.remove();
+    });
+
+    test("Ctrl+K on a selection inside a plain paragraph opens the panel for that paragraph", async () => {
+      mountPlain();
+      const text = document.querySelector("#intro").firstChild;
+      select(text, 9, text, 22); // "arriving late"
+      const event = ctrlK();
+      expect(event.defaultPrevented).toBe(true);
+      expect(panel().hidden).toBe(false);
+
+      await submit("make this friendlier");
+      expect(handle.payload.tag).toBe("p");
+      expect(handle.payload.editId).toBe("#intro");
+      expect(handle.payload.quote).toBe("arriving late");
+      expect(handle.payload.selection).toEqual({ start: 9, end: 22 });
+      expect(handle.payload.elementHTML).toBe(document.querySelector("#intro").outerHTML);
+      expect(handle.payload.elementHTML).not.toContain("data-edit-id");
+    });
+
+    test("a repeated phrase is told apart by its offsets", async () => {
+      mountPlain();
+      const text = document.querySelector("#intro").firstChild;
+      const second = text.data.lastIndexOf("Late");
+      select(text, second, text, second + 4);
+      ctrlK();
+      await submit("lowercase this");
+      expect(handle.payload.quote).toBe("Late");
+      expect(handle.payload.selection.start).toBe(second);
+    });
+
+    test("a selection across two list items targets the list", async () => {
+      mountPlain();
+      const items = document.querySelectorAll("li");
+      select(items[0].firstChild, 0, items[1].firstChild, 4);
+      ctrlK();
+      await submit("add milk");
+      expect(handle.payload.tag).toBe("ul");
+    });
+
+    test("Ctrl+K with nothing selected leaves the key to the browser", () => {
+      mountPlain();
+      window.getSelection().removeAllRanges();
+      const event = ctrlK();
+      expect(event.defaultPrevented).toBe(false);
+      expect(panel().hidden).toBe(true);
+    });
+
+    test("Ctrl+K while a page input has focus does nothing", () => {
+      mountPlain();
+      const input = document.createElement("input");
+      document.querySelector("#plain").append(input);
+      input.focus();
+      const text = document.querySelector("#intro").firstChild;
+      select(text, 0, text, 8);
+      const event = ctrlK(input);
+      expect(event.defaultPrevented).toBe(false);
+      expect(panel().hidden).toBe(true);
+    });
+
+    test("Ctrl+Shift+K is not the shortcut", () => {
+      mountPlain();
+      const text = document.querySelector("#intro").firstChild;
+      select(text, 0, text, 8);
+      const event = new KeyboardEvent("keydown", { key: "K", code: "KeyK", ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true });
+      document.body.dispatchEvent(event);
+      expect(event.defaultPrevented).toBe(false);
+      expect(panel().hidden).toBe(true);
+    });
+  });
 });
