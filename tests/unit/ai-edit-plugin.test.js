@@ -374,6 +374,38 @@ describe("with a ready ai-edit helper", () => {
     expect(heading().textContent).toBe("Old heading");
   });
 
+  test("the panel is a labelled dialog with a polite status and a labelled box", () => {
+    clickSection(mountPage());
+    expect(panel().getAttribute("role")).toBe("dialog");
+    expect(panel().getAttribute("aria-label")).toBe("AI edit");
+    expect(statusEl().getAttribute("role")).toBe("status");
+    expect(statusEl().getAttribute("aria-live")).toBe("polite");
+    expect(textarea().getAttribute("aria-label")).toBe("Describe the change");
+    expect(button("close").getAttribute("aria-label")).toBe("Close");
+    button("close").click();
+    expect(panel().hidden).toBe(true);
+  });
+
+  test("with AI editing turned off the panel opens with a note and no Send, and turning it on works without a reload", async () => {
+    fakeWire.helpers.mockResolvedValue([{ name: "ai-edit", state: "unavailable" }]);
+    clickSection(mountPage());
+    await flush();
+    expect(panel().hidden).toBe(false);
+    expect(statusEl().textContent).toMatch(/turned off/);
+    expect(button("send").hidden).toBe(true);
+    expect(textarea().disabled).toBe(true);
+    await submit("tighten");
+    expect(fakeWire.send).not.toHaveBeenCalled();
+
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    fakeWire.helpers.mockResolvedValue([{ name: "ai-edit", state: "ready" }]);
+    clickSection(mountPage());
+    await flush();
+    expect(button("send").hidden).toBe(false);
+    expect(textarea().disabled).toBe(false);
+    expect(statusEl().textContent).not.toMatch(/turned off/);
+  });
+
   describe("plain pages, no data-edit-id", () => {
     const PLAIN = '<main id="plain"><h2>Hours</h2><p id="intro">Visitors arriving late will not be admitted. Late arrivals wait.</p><ul><li>Tea</li><li>Cake</li></ul></main>';
 
@@ -467,6 +499,45 @@ describe("with a ready ai-edit helper", () => {
       document.body.dispatchEvent(event);
       expect(event.defaultPrevented).toBe(false);
       expect(panel().hidden).toBe(true);
+    });
+
+    test("a plain page has no whole-page bubble", async () => {
+      mountPlain();
+      await flush();
+      expect(docBubble().hidden).toBe(true);
+    });
+
+    test("selecting text shows the chip, and clicking it opens the panel with that selection", async () => {
+      mountPlain();
+      const text = document.querySelector("#intro").firstChild;
+      select(text, 9, text, 22);
+      document.dispatchEvent(new Event("selectionchange"));
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      expect(chip().hidden).toBe(false);
+      chip().click();
+      expect(panel().hidden).toBe(false);
+      await submit("make this friendlier");
+      expect(handle.payload.quote).toBe("arriving late");
+      expect(handle.payload.selection).toEqual({ start: 9, end: 22 });
+    });
+
+    test("the selection stays highlighted while the panel is open and clears on close", () => {
+      const highlights = new Map();
+      window.CSS = window.CSS || {};
+      window.CSS.highlights = highlights;
+      window.Highlight = class { constructor(...ranges) { this.ranges = ranges; } };
+      try {
+        mountPlain();
+        const text = document.querySelector("#intro").firstChild;
+        select(text, 9, text, 22);
+        ctrlK();
+        expect(highlights.get("clay-ai-edit").ranges[0].toString()).toBe("arriving late");
+        document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+        expect(highlights.has("clay-ai-edit")).toBe(false);
+      } finally {
+        delete window.Highlight;
+        delete window.CSS.highlights;
+      }
     });
   });
 });

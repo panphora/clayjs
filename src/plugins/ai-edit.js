@@ -3,11 +3,10 @@
  *
  * Direct editing stays primary: text units carry editmode:contenteditable, so a
  * click places the caret and a figure keeps its own interactivity. This adds the
- * comment box on demand: a floating chip near the hovered unit, Cmd+K for the unit
- * holding the caret (the selection rides along as a quote), a click on bare section
- * padding, or the fixed bottom-right bubble for the whole document. Units resolve to
- * the nearest h1-h6/p/figure inside a [data-edit-id] section, falling back to the
- * section itself.
+ * comment box on demand: Cmd+K (Ctrl+K elsewhere) or the small chip at the end of a
+ * selection, for the block around it; on pages built from [data-edit-id] sections,
+ * also a hover chip near the unit, a click on bare section padding, and the fixed
+ * bottom-right bubble for the whole document.
  *
  * The request leaves as a named helper request on the wire
  * (`clay.wire.send(payload, { helper: "ai-edit" })`) and comes back as the edited
@@ -15,9 +14,10 @@
  * writes nothing: this page morphs the result in and Keep saves it through
  * `clay.save()`, exactly as before.
  *
- * Dormant unless the host lists a ready `ai-edit` helper. On HTML Clay, or with the
- * desktop toggle off, `clay.wire.helpers()` never lists one and nothing is built at
- * all: the page is then just a page.
+ * Dormant unless the host lists an `ai-edit` helper: then nothing is built and the
+ * page is just a page. Listed as unavailable (the host's toggle is off), the
+ * shortcut opens the panel with a note and no Send, and the state is checked again
+ * each time the panel opens.
  *
  * The bus version previewed the reply as it streamed. The wire carries status lines
  * only — replaceable progress, capped and droppable — so the page shows throttled
@@ -62,18 +62,30 @@ const TOO_LARGE = "This section is too large for AI editing; select a smaller pa
 
 let requestCounter = 0;
 let session = null; // one edit at a time
-let panel, ring, textarea, quoteEl, statusEl, warningsEl, chip, docBubble;
+let panel, ring, textarea, quoteEl, statusEl, warningsEl, hintEl, closeButton, chip, docBubble;
 let buttons = {};
 let anchorEl = null;    // element the panel is currently anchored to
 let chipTarget = null;  // unit the hover chip currently points at
 let chipHideTimer = null;
 let pendingSelection; // { text, start, end } for the open panel, or undefined
 
+let chipSelection;       // the selection the chip was raised for; undefined for the hover chip
+let selectionTimer = null;
+let anchorRange = null;  // the selection the open panel was raised for
+let returnFocus = null;  // where focus goes back to when the panel closes
+let helperState = null;  // "ready" or "unavailable"
+
+const HIGHLIGHT = 'clay-ai-edit';
+const OFF_MESSAGE = 'AI editing is turned off. Turn it on from the app’s menu.';
+
 // ---------------------------------------------------------------- transport
 
-async function available() {
+// The helper's state as this host lists it: "ready", "unavailable" (listed, but the
+// host's toggle is off), or null when there is no ai-edit helper to talk to.
+async function helperStateNow() {
   const list = await wire.helpers();
-  return list.some(h => h.name === HELPER && h.state === "ready");
+  const helper = list.find(h => h.name === HELPER);
+  return helper && (helper.state === 'ready' || helper.state === 'unavailable') ? helper.state : null;
 }
 
 // ---------------------------------------------------------------- observers (undo/autosave)
@@ -416,6 +428,7 @@ function buildChrome() {
     [editmode\\:contenteditable][contenteditable]:focus {
       outline: 1px solid #4a4a6a; outline-offset: 4px; border-radius: 2px;
     }
+    ::highlight(clay-ai-edit) { background-color: ${TOKENS['brass-soft']} !important; }
   `;
   document.head.appendChild(style);
 
@@ -428,17 +441,27 @@ function buildChrome() {
   setShown(ring, false);
 
   panel = marked(bevelSurface('div', [
-    'position:fixed', 'z-index:99999', 'width:min(30rem, calc(100vw - 2rem))',
+    'position:fixed', 'z-index:99999', 'width:min(30rem, calc(100vw - 32px))',
     'padding:10px', `font:13px/1.5 ${FONT_SANS}`, scheme,
   ]), 'data-clay-ai-edit', 'panel');
   setShown(panel, false);
+  panel.setAttribute('role', 'dialog');
+  panel.setAttribute('aria-label', 'AI edit');
 
   const part = (el, name) => marked(el, 'data-clay-ai-edit-part', name);
 
+  const eyebrow = bevelBox('div', ['display:flex', 'align-items:center', 'justify-content:space-between', 'margin-bottom:6px']);
+  const eyebrowLabel = bevelText('span', [
+    `color:${TOKENS.muted}`, `font:600 10.5px/1 ${FONT_SANS}`, 'letter-spacing:0.08em', 'text-transform:uppercase',
+  ], 'AI edit');
+  closeButton = part(bevelButton('×', { small: true, variant: 'quiet' }), 'close');
+  closeButton.setAttribute('aria-label', 'Close');
+  eyebrow.append(eyebrowLabel, closeButton);
+
   quoteEl = part(bevelText('div', [
-    'display:block', `color:${TOKENS.muted}`, `border-left:2px solid ${TOKENS['line-2']}`,
-    'padding-left:8px', 'margin-bottom:8px', 'white-space:nowrap', 'overflow:hidden',
-    'text-overflow:ellipsis', `font:12.5px/1.5 ${FONT_MONO}`,
+    'display:block', `color:${TOKENS.muted}`, `border-left:2px solid ${TOKENS.brass}`,
+    'padding-left:8px', 'margin-bottom:8px', 'white-space:normal', 'overflow:hidden',
+    'max-height:3em', `font:12.5px/1.5 ${FONT_MONO}`,
   ]), 'quote');
   setShown(quoteEl, false);
 
@@ -446,11 +469,18 @@ function buildChrome() {
     rules: ['min-height:3.2em', 'resize:vertical', 'padding:8px', `font:13px/1.5 ${FONT_SANS}`],
   }), 'input');
   textarea.rows = 2;
-  textarea.placeholder = 'Describe the change\u2026 (@file.ext adds context, @fable / @claude picks the agent)';
+  textarea.placeholder = 'Describe the change';
+  textarea.setAttribute('aria-label', 'Describe the change');
 
   statusEl = part(bevelText('span', [
     'flex:1', 'min-width:0', `color:${TOKENS.muted}`, `font:12.5px/1.5 ${FONT_MONO}`,
   ]), 'status');
+  statusEl.setAttribute('role', 'status');
+  statusEl.setAttribute('aria-live', 'polite');
+
+  hintEl = part(bevelText('div', [
+    'display:block', 'margin-top:6px', `color:${TOKENS.muted}`, `font:11.5px/1.4 ${FONT_SANS}`,
+  ], 'Enter sends · @fable or @codex picks another agent · @file.ext adds context'), 'hint');
 
   const variants = { send: 'primary', stop: 'default', revert: 'quiet', keep: 'primary' };
   const labels = { send: 'Send', stop: 'Stop', revert: 'Revert', keep: 'Keep' };
@@ -467,7 +497,7 @@ function buildChrome() {
   ]), 'warnings');
   setShown(warningsEl, false);
 
-  panel.append(quoteEl, textarea, row, warningsEl);
+  panel.append(eyebrow, quoteEl, textarea, hintEl, row, warningsEl);
 
   chip = marked(bevelButton('AI', {
     small: true,
@@ -483,11 +513,16 @@ function buildChrome() {
   placeBubble();
 
   document.body.append(ring, panel, chip, docBubble);
+  syncBubble();
 
   buttons.send.addEventListener('click', submit);
   buttons.stop.addEventListener('click', cancelStream);
   buttons.keep.addEventListener('click', keepSession);
   buttons.revert.addEventListener('click', () => { revertSession(); setStatus('reverted'); showButtons('send'); });
+  closeButton.addEventListener('click', () => {
+    if (session?.state === 'requesting') cancelStream();
+    closePanel();
+  });
   textarea.addEventListener('keydown', (event) => {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
@@ -495,10 +530,12 @@ function buildChrome() {
     }
   });
 
+  chip.addEventListener('mousedown', (event) => event.preventDefault()); // keeps the page's selection alive
   chip.addEventListener('click', () => {
     const target = chipTarget;
+    const selection = chipSelection;
     hideChip();
-    if (target && !session) openPanel(target, quoteFromSelection(target));
+    if (target && !session) openPanel(target, selection || quoteFromSelection(target));
   });
   docBubble.addEventListener('click', () => {
     if (session) return;
@@ -518,9 +555,52 @@ function buildChrome() {
   document.addEventListener('hcms:open', () => { replace(); setTimeout(replace, 350); });
   document.addEventListener('hcms:close', () => { replace(); setTimeout(replace, 350); });
   new MutationObserver((records) => {
+    syncBubble();
     const touched = (nodes) => [...nodes].some((n) => n.nodeType === 1 && n.hasAttribute('data-hcms-toggle-host'));
     if (records.some((r) => touched(r.addedNodes) || touched(r.removedNodes))) replace();
   }).observe(document.body, { childList: true });
+}
+
+// The whole-page bubble belongs to pages built from [data-edit-id] sections. A plain
+// page gets the selection chip and the shortcut instead.
+function syncBubble() {
+  const doc = docBubble?.ownerDocument;
+  if (!doc) return;
+  setShown(docBubble, helperState === 'ready' && !!doc.querySelector('[data-edit-id]'), 'inline-grid');
+}
+
+// The selected words stay marked while the person types, through the CSS Custom
+// Highlight API, so the page's DOM never changes.
+function highlight(range) {
+  if (!range || typeof window.Highlight !== 'function' || !window.CSS?.highlights) return;
+  window.CSS.highlights.set(HIGHLIGHT, new window.Highlight(range));
+}
+
+function clearHighlight() {
+  window.CSS?.highlights?.delete(HIGHLIGHT);
+}
+
+function applyHelperState() {
+  const on = helperState === 'ready';
+  textarea.disabled = !on;
+  setShown(hintEl, on);
+  if (on) {
+    if (statusEl.textContent === OFF_MESSAGE) setStatus('');
+    if (!session) showButtons('send');
+  } else {
+    setStatus(OFF_MESSAGE, 'warn');
+    showButtons();
+  }
+  syncBubble();
+}
+
+// The host's toggle can change while the page is open, so each opening asks again.
+function refreshHelperState() {
+  helperStateNow().then((state) => {
+    helperState = state || 'unavailable';
+    if (!panel.hidden && !session) applyHelperState();
+    else syncBubble();
+  }).catch(() => {});
 }
 
 // The bubble sits in the bottom-right corner, or just left of the CMS's "Edit content"
@@ -542,6 +622,7 @@ function showChipFor(unit) {
   clearTimeout(chipHideTimer);
   chipHideTimer = null;
   chipTarget = unit;
+  chipSelection = undefined;
   const rect = unit.getBoundingClientRect();
   chip.pin({
     left: Math.min(rect.right + 8, window.innerWidth - 34) + 'px',
@@ -556,11 +637,37 @@ function hideChip() {
   chipHideTimer = null;
   setShown(chip, false, 'inline-grid');
   chipTarget = null;
+  chipSelection = undefined;
 }
 
 function scheduleChipHide() {
   if (chip.hidden || chipHideTimer) return;
   chipHideTimer = setTimeout(hideChip, 400);
+}
+
+// The chip at the end of a selection: for people who do not know the shortcut, and
+// for browsers that keep Ctrl+K for themselves.
+function showChipForSelection() {
+  if (session || !panel.hidden || helperState !== 'ready' || pageOwnsFocus()) return;
+  const range = liveRange();
+  const target = range && targetFromRange(range);
+  const selection = target && selectionIn(range, target);
+  if (!selection) {
+    if (chipSelection) hideChip();
+    return;
+  }
+  const rects = typeof range.getClientRects === 'function' ? range.getClientRects() : [];
+  const end = rects.length ? rects[rects.length - 1] : target.getBoundingClientRect();
+  clearTimeout(chipHideTimer);
+  chipHideTimer = null;
+  chipTarget = target;
+  chipSelection = selection;
+  chip.pin({
+    left: Math.min(end.right + 6, window.innerWidth - 34) + 'px',
+    top: Math.max(8, end.top + end.height / 2 - 13) + 'px',
+    'color-scheme': pageScheme(),
+  });
+  setShown(chip, true, 'inline-grid');
 }
 
 function setStatus(text, tone) {
@@ -599,19 +706,27 @@ function positionChrome() {
   set(ring, 'top', rect.top - 5 + 'px');
   set(ring, 'width', rect.width + 6 + 'px');
   set(ring, 'height', rect.height + 6 + 'px');
+  // Under the selection while it is still in the page, else under the element.
+  const at = anchorRange && anchorRange.startContainer.isConnected && typeof anchorRange.getBoundingClientRect === 'function'
+    ? anchorRange.getBoundingClientRect() : null;
+  const place = at && (at.width || at.height) ? at : rect;
   const panelWidth = panel.offsetWidth || 480;
-  const left = Math.max(16, Math.min(rect.left, window.innerWidth - panelWidth - 16));
-  let top = rect.bottom + 10;
+  const left = Math.max(16, Math.min(place.left, window.innerWidth - panelWidth - 16));
+  let top = place.bottom + 10;
   const panelHeight = panel.offsetHeight || 120;
   if (top + panelHeight > window.innerHeight - 16) {
-    top = Math.max(16, rect.top - panelHeight - 10);
+    top = Math.max(16, place.top - panelHeight - 10);
   }
   set(panel, 'left', left + 'px');
   set(panel, 'top', top + 'px');
 }
 
 function openPanel(el, quote) {
+  const range = quote ? liveRange() : null; // read before focus moves into the panel
+  const active = document.activeElement;
+  returnFocus = active && active !== document.body && !panel.contains(active) ? active : null;
   anchorEl = el;
+  anchorRange = range ? range.cloneRange() : null;
   hideChip();
   set(panel, 'color-scheme', pageScheme());
   set(ring, 'color-scheme', pageScheme());
@@ -624,22 +739,32 @@ function openPanel(el, quote) {
   setStatus('');
   showWarnings([]);
   showButtons('send');
+  highlight(anchorRange);
+  applyHelperState();
   positionChrome();
   textarea.focus();
+  refreshHelperState();
 }
 
 function closePanel() {
   if (session) revertSession();
+  const back = returnFocus;
+  const hadFocus = panel.contains(document.activeElement);
   anchorEl = null;
+  anchorRange = null;
+  returnFocus = null;
   pendingSelection = undefined;
+  clearHighlight();
   setShown(panel, false);
   setShown(ring, false);
   textarea.value = '';
+  if (hadFocus && back && back.isConnected) back.focus({ preventScroll: true });
 }
 
 function submit() {
   const comment = textarea.value.trim();
-  if (!comment || !anchorEl || session) return;
+  if (!comment || !anchorEl || session || helperState !== 'ready') return;
+  clearHighlight();
   sendRequest(anchorEl, comment, pendingSelection);
 }
 
@@ -686,6 +811,7 @@ function wireInteractions() {
     if (now - lastMove < 80) return;
     lastMove = now;
     if (session || !panel.hidden) { scheduleChipHide(); return; }
+    if (helperState !== 'ready' || chipSelection) return;
     if (chip.contains(event.target)) { clearTimeout(chipHideTimer); chipHideTimer = null; return; }
     const unit = unitFrom(event.target);
     if (unit) showChipFor(unit);
@@ -722,13 +848,19 @@ function wireInteractions() {
       closePanel();
     }
   });
+
+  document.addEventListener('selectionchange', () => {
+    clearTimeout(selectionTimer);
+    selectionTimer = setTimeout(showChipForSelection, 150);
+  });
 }
 
 // ---------------------------------------------------------------- boot
 
 async function init() {
-  if (!isEditMode) return;           // an owner/editor feature, nothing else
-  if (!(await available())) return;  // no ai-edit helper (e.g. HTML Clay, or the toggle off): stay dormant
+  if (!isEditMode || panel) return;  // an owner/editor feature, built once
+  helperState = await helperStateNow();
+  if (!helperState) return;          // no ai-edit helper on this host: stay dormant
   buildChrome();
   wireInteractions();
 }
