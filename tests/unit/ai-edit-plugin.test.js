@@ -237,6 +237,14 @@ describe("with a ready ai-edit helper", () => {
     expect(handle.payload.page).toBe(true);
   });
 
+  test("an @ inside a URL or after an accented letter is not an attachment, and info@page.io is not @page", async () => {
+    clickSection(mountPage());
+    await submit("email josé@example.com, see https://cdn.jsdelivr.net/npm/@panphora/clayjs@1.5.3/x.js and medium.com/@david/post, or info@page.io");
+    expect(handle.payload.contextRefs).toEqual([]);
+    expect(handle.payload.page).toBeFalsy();
+    expect(save).not.toHaveBeenCalled();
+  });
+
   // Stop is live while an @page save is still in flight, before the wire has handed
   // back a handle: a cancel there has to land, and the request must never go out.
   test("Stop during the @page save cancels before anything is sent", async () => {
@@ -557,6 +565,25 @@ describe("with a ready ai-edit helper", () => {
       expect(document.querySelector('[data-clay-ai-edit="ring"]').hidden).toBe(true);
       expect(textarea().rows).toBe(1);
       expect(textarea().title).toMatch(/@fable/);
+    });
+
+    test("the panel is placed again when its height changes, and the ring marks a running edit", async () => {
+      mountPlain();
+      const intro = document.querySelector("#intro");
+      const text = intro.firstChild;
+      select(text, 9, text, 22);
+      ctrlJ();
+      intro.getBoundingClientRect = () => ({ left: 40, top: 700, right: 400, bottom: 720, width: 360, height: 20 });
+      let height = 60;
+      Object.defineProperty(panel(), "offsetHeight", { get: () => height, configurable: true });
+      window.dispatchEvent(new Event("resize"));
+      expect(panel().style.getPropertyValue("top")).toBe("630px");
+      height = 93;
+      await submit("make this shorter");
+      expect(panel().style.getPropertyValue("top")).toBe("597px");
+      const pointer = panel().querySelector('[data-clay-ai-edit-part="pointer"]');
+      expect(pointer.style.getPropertyValue("top")).toBe("87px");
+      expect(document.querySelector('[data-clay-ai-edit="ring"]').hidden).toBe(false);
     });
 
     test("a repeated phrase is told apart by its offsets", async () => {

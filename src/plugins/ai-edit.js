@@ -235,8 +235,8 @@ function newSession(el, comment, quote) {
   // Context refs are @tokens containing a dot or slash (@notes.md, @src/x.js). Bare
   // @words are not refs: a leading one is an engine token (@fable, @codex — routed
   // helper-side), and mid-text ones are prose.
-  // The @ has to start a word, so an email address is prose too.
-  const contextRefs = [...comment.matchAll(/(?<![\w.@-])@([\w.-]*[/.][\w./-]*)/g)]
+  // The @ has to start a word, so an email address or a URL is prose too.
+  const contextRefs = [...comment.matchAll(/(?<![\w\u00C0-\u024F.@\/:-])@([\w.-]*[/.][\w./-]*)/g)]
     .map(m => m[1].replace(/\.+$/, '')) // a sentence's full stop is not part of the name
     .filter(ref => ref !== 'page')
     .filter(ref => /[/.]/.test(ref));
@@ -255,7 +255,7 @@ function newSession(el, comment, quote) {
   }
   // Document mode reads the live page itself, and every other @page request reads
   // the file from disk: the plugin saves first, then asks for it by flag.
-  if (!docMode && /@page\b/.test(comment)) payload.page = true;
+  if (!docMode && /(?<![\w\u00C0-\u024F.@\/:-])@page(?![\w\/-]|\.\w)/.test(comment)) payload.page = true;
   return {
     id: payload.id,
     el,
@@ -286,7 +286,7 @@ async function sendRequest(el, comment, quote) {
   setStatus('sending\u2026');
   showButtons('stop');
   // @page reads the file the host has on disk, so the page has to be on disk first.
-  if (/@page\b/.test(comment) && !session.docMode) await window.clay.save();
+  if (session.payload.page) await window.clay.save();
   if (!session) return; // cancelled while saving
   // The host owns the deadline; this side only renders. A named request defaults to
   // `document: "none"`, so nothing here asks anyone to write the file.
@@ -512,11 +512,10 @@ function buildChrome() {
   textarea.title = 'Enter sends · Shift+Enter adds a line · @fable or @codex picks another agent · @file.ext adds context';
 
   statusEl = part(bevelText('div', [
-    'display:block', 'margin-top:8px', `color:${TOKENS.muted}`, `font:12.5px/1.5 ${FONT_MONO}`,
+    'display:block', 'margin-top:0', `color:${TOKENS.muted}`, `font:12.5px/1.5 ${FONT_MONO}`,
   ]), 'status');
   statusEl.setAttribute('role', 'status');
   statusEl.setAttribute('aria-live', 'polite');
-  setShown(statusEl, false);
 
   const variants = { send: 'primary', stop: 'default', revert: 'quiet', keep: 'primary' };
   const labels = { send: 'Send', stop: 'Stop', revert: 'Revert', keep: 'Keep' };
@@ -584,7 +583,7 @@ function buildChrome() {
   });
 
   window.addEventListener('scroll', () => { positionChrome(); hideChip(); }, { passive: true });
-  window.addEventListener('resize', () => { placeBubble(); positionChrome(); }, { passive: true });
+  window.addEventListener('resize', () => { placeBubble(); if (panel && !panel.hidden) fitTextarea(); positionChrome(); }, { passive: true });
   // The CMS toggle can arrive after this chrome, and a docked sidebar slides it left.
   const replace = () => { placeBubble(); positionChrome(); };
   document.addEventListener('hcms:open', () => { replace(); setTimeout(replace, 350); });
@@ -602,9 +601,16 @@ function buildChrome() {
   }).observe(document.body, { childList: true, subtree: true });
 }
 
+// The panel's height changes as the box grows and the status line fills, so it is
+// placed again after each change.
+function placePanelAgain() {
+  if (anchorEl?.isConnected) positionChrome();
+}
+
 function fitTextarea() {
   set(textarea, 'height', 'auto');
   if (textarea.value) set(textarea, 'height', textarea.scrollHeight + 2 + 'px');
+  placePanelAgain();
 }
 
 // The whole-page bubble belongs to pages built from [data-edit-id] sections. A plain
@@ -716,22 +722,25 @@ function showChipForSelection() {
 }
 
 function setStatus(text, tone) {
-  setShown(statusEl, !!text);
+  set(statusEl, 'margin-top', text ? '8px' : '0');
   statusEl.textContent = text || '';
   if (tone === 'warn') statusEl.setAttribute('data-tone', 'warn');
   else statusEl.removeAttribute('data-tone');
   set(statusEl, 'color', tone === 'warn' ? TOKENS.ox : TOKENS.muted);
+  placePanelAgain();
 }
 
 function showButtons(...names) {
   for (const [name, button] of Object.entries(buttons)) {
     setShown(button, names.includes(name), 'inline-flex');
   }
+  fitTextarea();
 }
 
 function showWarnings(warnings) {
   setShown(warningsEl, warnings.length > 0);
   warningsEl.textContent = warnings.map(w => '\u26a0 ' + w).join('\n');
+  placePanelAgain();
 }
 
 function positionChrome() {
@@ -748,8 +757,8 @@ function positionChrome() {
     return;
   }
   const rect = anchorEl.getBoundingClientRect();
-  // With selected words the highlight marks them; the ring is for a whole element.
-  setShown(ring, !pendingSelection);
+  // With selected words the highlight marks them until Send; the ring is for a whole element and for a running edit.
+  setShown(ring, !pendingSelection || !!session);
   set(ring, 'left', rect.left - 5 + 'px');
   set(ring, 'top', rect.top - 5 + 'px');
   set(ring, 'width', rect.width + 6 + 'px');
