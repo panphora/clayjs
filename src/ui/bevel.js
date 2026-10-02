@@ -1,5 +1,5 @@
 // GENERATED from bevel/bevel.css by scripts/build-bevel-subset.mjs. Run `npm run build:bevel`.
-export const SOURCE_SHA256 = "f3c1a4011f18710da836bbddf3024063895a30fda8f866b90482ba8501ccc98d";
+export const SOURCE_SHA256 = "419290c2d7cec6914d69d74408f310a72b826545542a9162554fb2ece48a8342";
 export const FONT_SANS = "system-ui,-apple-system,\"Segoe UI\",sans-serif";
 export const FONT_MONO = "ui-monospace,SFMono-Regular,Menlo,Consolas,monospace";
 export const SHADOW = "0 1px 2px rgba(0,0,0,.12),0 10px 28px -12px rgba(0,0,0,.35)";
@@ -13,6 +13,7 @@ export const TOKENS = {
   "faint": "light-dark(#9A8A70, #6A7090)",
   "line": "light-dark(#E8DCC6, #262B42)",
   "line-2": "light-dark(#D8C8AF, #353B52)",
+  "line-3": "light-dark(#C4B192, #46506E)",
   "brass": "light-dark(#8F6310, #D9A445)",
   "brass-soft": "light-dark(#F0E4CC, #3A2F17)",
   "ox": "light-dark(#A83A2C, #FF5566)",
@@ -205,8 +206,8 @@ export const RULES = {
     "color:light-dark(#6B5942, #8A90AB)",
   ],
   "dialogPanel": [
-    "box-shadow:6px 6px 0 color-mix(in srgb, light-dark(#2B241B, #ECEAF2) 10%, transparent)",
     "border-radius:0",
+    "box-shadow:6px 6px 0 color-mix(in srgb, light-dark(#2B241B, #ECEAF2) 10%, transparent)",
   ],
   "dialogHeader": [
     "border-bottom:1px solid light-dark(#D8C8AF, #353B52)",

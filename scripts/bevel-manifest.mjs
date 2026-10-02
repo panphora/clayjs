@@ -5,7 +5,7 @@ export const SHADOW = '0 1px 2px rgba(0,0,0,.12),0 10px 28px -12px rgba(0,0,0,.3
 
 // Every light-dark() colour token in the base :root rule except --bevel-syn-*.
 export const TOKEN_NAMES = [
-  'ground', 'surface', 'sunk', 'ink', 'ink-2', 'muted', 'faint', 'line', 'line-2',
+  'ground', 'surface', 'sunk', 'ink', 'ink-2', 'muted', 'faint', 'line', 'line-2', 'line-3',
   'brass', 'brass-soft', 'ox', 'ox-soft', 'teal', 'teal-soft',
   'face', 'edge-hi', 'edge-lo', 'face-in', 'edge-in', 'edge-in-hi', 'knob', 'knob-hi',
   'ox-face', 'ox-edge-hi', 'ox-edge-lo', 'ox-ink',

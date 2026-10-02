@@ -45,7 +45,7 @@ beforeAll(async () => {
 
 test("tokens: the manifest list, every one a light-dark() pair", () => {
   expect(Object.keys(subset.TOKENS).sort()).toEqual([...TOKEN_NAMES].sort());
-  expect(Object.keys(subset.TOKENS)).toHaveLength(27);
+  expect(Object.keys(subset.TOKENS)).toHaveLength(28);
   for (const value of Object.values(subset.TOKENS)) {
     expect(value).toMatch(/^light-dark\(#[0-9A-Fa-f]{6}, #[0-9A-Fa-f]{6}\)$/);
   }
