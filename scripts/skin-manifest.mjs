@@ -99,7 +99,8 @@ export const SKINS = {
       '.richclay-float-rail .richclay-toolbar', '.richclay-float-rail .richclay-toolbar svg',
       '.richclay-float-rail .richclay-separator', '.richclay-float-rail .richclay-menu',
       '.richclay-dialog', '.richclay-dialog-title', '.richclay-field', '.richclay-field span',
-      '.richclay-input', '.richclay-dialog-actions', '.richclay-primary', '.richclay-secondary',
+      '.richclay-input', '.richclay-dialog-actions', '.richclay-dialog-actions [data-richclay-remove-link]',
+      '.richclay-primary', '.richclay-secondary',
       '.richclay-sr-only',
     ],
     integrationKeep: [
