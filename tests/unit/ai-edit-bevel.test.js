@@ -68,7 +68,7 @@ test("the panel is a Bevel surface holding a Bevel input and Bevel buttons", () 
 
   const input = part("input");
   expect(input.localName).toBe("textarea");
-  expect(last(buildCalls, input, "background")).toBe(TOKENS.surface);
+  expect(last(buildCalls, input, "background")).toBe(TOKENS.ground);
   expect(last(buildCalls, input, "border")).toBe(`1px solid ${TOKENS["line-2"]}`);
   expect(input.style.getPropertyValue("resize")).toBe("none");
 
