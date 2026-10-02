@@ -79,6 +79,8 @@ export const SKINS = {
     prefix: '--richclay-',
     roots: RICHCLAY_ROOTS,
     pins: {},
+    // Set per dialog at runtime (where its arrow points); pinning it would freeze every arrow.
+    runtime: ['--richclay-dialog-arrow'],
     tokenBlock: { selector: '[data-bevel-richclay-chrome]', keep: ['font-family'] },
     rescope: [
       [':is(.bevel-richtext, [data-bevel-richclay-chrome])', RICHCLAY_SCOPE],
@@ -94,7 +96,7 @@ export const SKINS = {
       '.richclay-button:disabled', '.richclay-cut', '.richclay-button:hover .richclay-cut',
       '.richclay-button[aria-expanded="true"] .richclay-cut', '.richclay-separator', '.richclay-menu-wrap',
       '.richclay-menu', '.richclay-menu[hidden]', '.richclay-menu-item', '.richclay-float',
-      '.richclay-float .richclay-toolbar', '.richclay-float .richclay-dialog',
+      '.richclay-float .richclay-toolbar',
       '.richclay-float-rail .richclay-toolbar', '.richclay-float-rail .richclay-toolbar svg',
       '.richclay-float-rail .richclay-separator', '.richclay-float-rail .richclay-menu',
       '.richclay-dialog', '.richclay-dialog-title', '.richclay-field', '.richclay-field span',
@@ -117,6 +119,7 @@ export const SKINS = {
       ':is(.bevel-richtext, [data-bevel-richclay-chrome]) .richclay-menu-item[aria-checked="true"]',
       '.richclay-dialog[data-bevel-richclay-chrome]',
       '.richclay-dialog[data-bevel-richclay-chrome]::before',
+      '.richclay-dialog[data-bevel-richclay-chrome][data-richclay-side="above"]::before',
       '[data-bevel-richclay-chrome] .richclay-dialog-title',
       '[data-bevel-richclay-chrome] .richclay-field',
       '[data-bevel-richclay-chrome] .richclay-field > span',
@@ -162,9 +165,10 @@ export const SKINS = {
     skipMedia: { '(prefers-color-scheme: dark)': 'dark defaults for the vendor tokens, which the pins replace' },
     keyframes: [],
     prose: ['.richclay-editor', '.richclay-inline'],
-    // The floating toolbar's placement, written inline and !important.
+    // The floating toolbar's and the link dialog's placement, written inline and !important.
     inline: [
       { subject: '.richclay-float', props: ['display', 'visibility', 'transform'] },
+      { subject: '.richclay-dialog', props: ['position', 'inset', 'margin', 'overflow', 'transform'] },
     ],
     // Plain inline writes, each on an element no skin selector reaches.
     inlineOutOfScope: {
@@ -178,6 +182,7 @@ export const SKINS = {
       width: 'Squire image resize container, no richclay class',
       height: 'Squire image resize container, no richclay class',
       cursor: 'document.body during an image resize',
+      '--richclay-dialog-arrow': 'the link dialog\'s arrow position, a runtime token the pins leave alone',
     },
   },
 

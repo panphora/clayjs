@@ -78,7 +78,8 @@
 .bevel-richtext > [data-bevel-richtext] blockquote { margin: 20px 0; padding-left: 18px; border-left: 2px solid var(--bevel-brass); font: 21px var(--bevel-font-serif); color: var(--bevel-ink); }
 .bevel-richtext > [data-bevel-richtext] a { color: var(--bevel-brass); }
 .richclay-dialog[data-bevel-richclay-chrome] { position: relative; width: min(100%, 360px); margin: 16px 0; padding: 14px 16px 12px; border: 1px solid var(--bevel-line-2); border-radius: 0; background: var(--bevel-surface); color: var(--bevel-ink); box-shadow: var(--bevel-shadow); }
-.richclay-dialog[data-bevel-richclay-chrome]::before { content: ""; position: absolute; left: 22px; top: -7px; width: 12px; height: 12px; background: var(--bevel-surface); border-top: 1px solid var(--bevel-line-2); border-left: 1px solid var(--bevel-line-2); transform: rotate(45deg); }
+.richclay-dialog[data-bevel-richclay-chrome]::before { content: ""; position: absolute; left: calc(var(--richclay-dialog-arrow, 28px) - 6px); top: -7px; width: 12px; height: 12px; background: var(--bevel-surface); border-top: 1px solid var(--bevel-line-2); border-left: 1px solid var(--bevel-line-2); transform: rotate(45deg); }
+.richclay-dialog[data-bevel-richclay-chrome][data-richclay-side="above"]::before { top: auto; bottom: -7px; border: 0; border-right: 1px solid var(--bevel-line-2); border-bottom: 1px solid var(--bevel-line-2); }
 [data-bevel-richclay-chrome] .richclay-dialog-title { margin-bottom: 2px; font: 500 10px var(--bevel-font-mono); text-transform: uppercase; letter-spacing: .12em; }
 [data-bevel-richclay-chrome] .richclay-field { gap: 5px; }
 [data-bevel-richclay-chrome] .richclay-field > span { color: var(--bevel-ink-2); font-size: 12px; }

@@ -116,6 +116,7 @@ describe.each(NAMES)("the %s skin", (name) => {
     for (const rule of rules(module.CSS)) for (const decl of rule.decls) if (decl.prop.startsWith("--")) declared.add(decl.prop);
     const read = [...module.CSS.matchAll(/var\(\s*(--[a-z0-9-]+)/gi)].map((m) => m[1]);
     for (const token of read) {
+      if ((SKINS[name].runtime ?? []).includes(token)) continue;
       expect(token.startsWith(prefix)).toBe(true);
       expect([token, declared.has(token)]).toEqual([token, true]);
     }
