@@ -37,6 +37,13 @@ test("ask: title, Bevel input and the close are hostile-proof; the prompt markup
   expect(document.querySelector('[class*="micromodal"]')).toBeNull();
 });
 
+test("consent: extra content inherits Bevel body type, not the reset font", () => {
+  const calls = capture(() => { consent("Delete?", null, '<p data-extra="1">This cannot be undone.</p>').catch(() => {}); });
+  const extra = dialog().querySelector('[data-extra="1"]');
+  expect(last(calls, extra.parentElement, "color")).toBe(TOKENS["ink-2"]);
+  expect(last(calls, extra.parentElement, "font")).toMatch(/^14\.5px\/1\.55 /);
+});
+
 test("tell: the title and each paragraph in Bevel type, paragraphs as caller markup", () => {
   const calls = capture(() => { tell("Heads up", 'first <i data-caller="p">one</i>', "second").catch(() => {}); });
   const root = document.querySelector("[data-clay-modal]");

@@ -9,7 +9,7 @@ import { TOKENS, FONT_SANS, FONT_MONO } from "./bevel.js";
 // are markup by design, and callers pass elements through them. Only the frame around
 // it is ClayJS's to style. The prompt is the dialog's title, as in the dashboard.
 function createModal(promptText, yesCallback, extraContent = "", includeInput = false, defaultValue = "", yesLabel = "OK") {
-  const content = bevelBox("div", ["display:flex", "flex-direction:column", "gap:14px"]);
+  const content = bevelBox("div", ["display:flex", "flex-direction:column", "gap:14px", `font:14.5px/1.55 ${FONT_SANS}`, `color:${TOKENS["ink-2"]}`]);
   let input = null;
   if (includeInput) {
     input = bevelInput("input", { rules: ["display:block", "width:100%", "margin:0"] });
