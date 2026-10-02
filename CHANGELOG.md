@@ -35,7 +35,7 @@
 - The AI edit chip and bubble read "AI". The bubble sits left of the CMS's Edit content toggle, and a second click closes an empty panel
 - The section changed bar sits beside the section it names and follows it as the page scrolls
 - The CMS's Edit content toggle and RichClay's toolbar buttons use Bevel's raised button face and hover, and RichClay's Block style button is the normal toolbar width
-- `ai-edit` loads by default in edit mode and brings `wire` with it. `?exclude=ai-edit` or `?exclude=wire` turns it off
+- `ai-edit` brings `wire` with it. `?exclude=wire` turns it off
 - While an AI edit's rewrite is on screen, every save waits, explicit ones included; a save asked for meanwhile runs after Revert
 - A reply that adds a script, an inline event handler, a `javascript:` URL, `srcdoc` or an embedding element is refused before it is shown. It used to be applied with a warning
 - The whole-page AI bubble only shows on pages built from `[data-edit-id]` sections

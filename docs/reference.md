@@ -40,10 +40,10 @@ conditionally through the URL, in the browser only:
 
 - `?plugins=` comma-separated plugins to add, e.g. `clay.js?plugins=sync,undo`
 - `?exclude=` remove a default-on plugin, e.g. `clay.js?exclude=richclay`. One `exclude=` takes a
-  comma list (`?exclude=source,ai-edit`); a second `exclude=` parameter is ignored.
+  comma list (`?exclude=source,richclay`); a second `exclude=` parameter is ignored.
 
-Loadable plugins: `richclay` (default on), `source` (default on), `ai-edit` (default on, brings
-`wire`), `indicator`, `sync`, `sortable`, `undo`, `cms`, `quickcrop`, `upload`, `wire`, `demo`.
+Loadable plugins: `richclay` (default on), `source` (default on), `ai-edit` (brings `wire`),
+`indicator`, `sync`, `sortable`, `undo`, `cms`, `quickcrop`, `upload`, `wire`, `demo`.
 The default-on plugins load in edit mode only.
 
 Everything else is a separate library ("satellite") with its own script tag: clay-ui,
@@ -405,7 +405,7 @@ token variant, `POST /_/save/{token}`, read from `<html savetoken>`.
   line from the same line arriving again.
 
   Also `cancel`, `get`, `list`, `isBusy`. Works in view mode too.
-- `ai-edit` (default on in edit mode, brings `wire` with it; `?exclude=ai-edit` turns it off) —
+- `ai-edit` (opt in with `?plugins=ai-edit`, brings `wire` with it) —
   select text and ask an agent to rewrite it. Select words in any block (a paragraph, heading, list
   item, table cell...) and press ⌘J (Ctrl+J elsewhere), or click the small **AI** chip at the end
   of the selection. The panel opens under the selection with the words highlighted. The request

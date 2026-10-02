@@ -51,11 +51,11 @@ query params on the script URL:
 <script src="https://clayjs.com/v1/clay.js?plugins=sync,cms&exclude=indicator"></script>
 ```
 
-- `?plugins=` — add optional plugins: `sync`, `cms`, `undo`, `sortable`, `indicator`, `quickcrop`, `upload`, `wire`, `demo`.
-  In edit mode `richclay`, `source` and `ai-edit` load by default, and `ai-edit` brings `wire` with it.
+- `?plugins=` — add optional plugins: `sync`, `cms`, `undo`, `sortable`, `indicator`, `ai-edit`, `quickcrop`, `upload`, `wire`, `demo`.
+  In edit mode `richclay` and `source` load by default. `ai-edit` brings `wire` with it.
   `cms` brings `quickcrop` with it, because the CMS uses it for `data-hcms-crop` image fields.
 - `?exclude=` — drop a plugin that would otherwise load (a default, or one another plugin pulled in).
-  One `exclude=` takes a comma list, e.g. `?exclude=source,ai-edit`; a second `exclude=` is ignored.
+  One `exclude=` takes a comma list, e.g. `?exclude=source,richclay`; a second `exclude=` is ignored.
   Excluding `wire` turns `ai-edit` off too.
 - `?editmode=false` — force view mode (URL param wins over everything else).
 

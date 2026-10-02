@@ -36,10 +36,10 @@ export const PLUGIN_PATHS = {
   // superset of the cms's, so the plugin is present exactly when it can be used.
   upload:    { path: "plugins/upload.js",          editOnly: true,  default: false },
   wire:      { path: "plugins/wire.js",            editOnly: false, default: false },
-  // Edit mode only: the AI comment box is an editing gesture. On by default because
-  // it costs nothing where it cannot run: it stays dormant on any host that does not
-  // list a ready `ai-edit` helper. `exclude=ai-edit` turns it off.
-  "ai-edit": { path: "plugins/ai-edit.js",         editOnly: true,  default: true },
+  // Edit mode only: the AI comment box is an editing gesture. Opt in with
+  // `plugins=ai-edit`; it stays dormant on any host that does not list a ready
+  // `ai-edit` helper.
+  "ai-edit": { path: "plugins/ai-edit.js",         editOnly: true,  default: false },
   demo:      { path: "plugins/demo.js",            editOnly: false, default: false },
   // Saves the file's own bytes back instead of a fresh serialization of the DOM.
   // editOnly because a page that cannot save has nothing to preserve. On by default
@@ -148,9 +148,8 @@ export function resolveModules(params, isEditMode) {
   }
   // ai-edit cannot run without the wire, so excluding the wire excludes it too.
   if (excluded.has("wire")) enabled.delete("ai-edit");
-  // A default-on plugin that this mode drops brings nothing with it, or every view
-  // page would download the wire for an AI box it never shows. An explicitly asked
-  // for plugin still brings what it implies, as before.
+  // A default-on plugin that this mode drops brings nothing with it. An explicitly
+  // asked for plugin still brings what it implies.
   for (const name of [...enabled]) {
     if (excluded.has(name)) continue;
     if (!explicit.has(name) && PLUGIN_PATHS[name].editOnly && !isEditMode) continue;

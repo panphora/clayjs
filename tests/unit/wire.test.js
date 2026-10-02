@@ -288,10 +288,10 @@ test("the loader can load the wire plugin in view mode", () => {
   expect(plan.plugins).toContain("plugins/wire.js");
 });
 
-test("the wire loads by default in edit mode only, because ai-edit brings it", () => {
-  expect(resolveModules(new URLSearchParams(""), true).plugins).toContain("plugins/wire.js");
+test("the wire does not load by default", () => {
+  expect(resolveModules(new URLSearchParams(""), true).plugins).not.toContain("plugins/wire.js");
   expect(resolveModules(new URLSearchParams(""), false).plugins).not.toContain("plugins/wire.js");
-  expect(resolveModules(new URLSearchParams("exclude=ai-edit"), true).plugins).not.toContain("plugins/wire.js");
+  expect(resolveModules(new URLSearchParams("plugins=ai-edit"), true).plugins).toContain("plugins/wire.js");
 });
 
 // The loader attaches each plugin's public member by hand. Without this branch
