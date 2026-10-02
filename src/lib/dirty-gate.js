@@ -35,6 +35,26 @@ let clearedAt = 0;
 let paused = false;
 let started = false;
 
+// The state change, announced on the document: `clay:dirty` when work nothing has
+// written appears, `clay:clean` when a save (or the oracle) has accounted for it. A
+// burst of edits is ONE announcement, since what a listener wants is the state, not
+// the edit. Only a transition is dispatched.
+let announcedDirty = false;
+let queued = false;
+
+function scheduleAnnounce() {
+  if (!isEditMode || queued) return;
+  queued = true;
+  queueMicrotask(() => {
+    queued = false;
+    if (typeof document === 'undefined') return;
+    const dirty = pageMaybeDirty();
+    if (dirty === announcedDirty) return;
+    announcedDirty = dirty;
+    document.dispatchEvent(new CustomEvent(dirty ? 'clay:dirty' : 'clay:clean'));
+  });
+}
+
 const PERSIST_CONTROLS = `input${PERSIST}, textarea${PERSIST}, select${PERSIST}`;
 
 // Regions the loss oracle never sees. The hub feed already skips them, through
@@ -81,6 +101,7 @@ function onUserInput(event) {
   if (!(el.matches('input, textarea, select') || el.isContentEditable)) return;
   if (el.closest(GATE_IGNORE)) return;
   changes++;
+  scheduleAnnounce();
 }
 
 export function startDirtyGate() {
@@ -89,7 +110,10 @@ export function startDirtyGate() {
   Mutation.onAnyChange(
     { omitChangeDetails: true, require: 'dirty' },
     () => {
-      if (!paused) changes++;
+      if (!paused) {
+        changes++;
+        scheduleAnnounce();
+      }
     }
   );
   document.addEventListener('input', onUserInput, true);
@@ -151,6 +175,7 @@ export function probeMarkClean() {
   for (const el of gatedPersistControls()) {
     probeCache.set(el, controlSignature(el));
   }
+  scheduleAnnounce();
 }
 
 export function pageMaybeDirty() {
@@ -173,6 +198,7 @@ export function gateCaptureToken() {
 /** A change nothing in the DOM recorded: the page holds text a save has not written. */
 export function gateMarkDirty() {
   changes++;
+  scheduleAnnounce();
 }
 
 export function gateClearIfUnchanged(token) {
@@ -186,6 +212,7 @@ export function gateClearIfUnchanged(token) {
   for (const [el, sig] of token.probe) {
     if (controlSignature(el) === sig) probeCache.set(el, sig);
   }
+  scheduleAnnounce();
 }
 
 if (typeof document !== 'undefined' && isEditMode) {

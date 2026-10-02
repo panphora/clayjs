@@ -25,6 +25,12 @@ import {
 let saveInProgress = false;
 const SAVE_PATH = '/_/save';
 const SAVE_TIMEOUT_MS = 12000;
+// The browser caps a keepalive body (Chromium refuses one over 64 KB), and it counts
+// BYTES: the hint is only attached to a save whose UTF-8 encoding fits well inside that.
+const KEEPALIVE_MAX_BODY = 60000;
+// Set by `withKeepalive`, read once by the next `sendOnce`: the hint belongs to one
+// request, not to the save pipeline.
+let nextSaveKeepalive = false;
 
 // Listeners for "the host took these exact bytes". This is the only place in the
 // library that knows both the body that went out and that the host accepted it, and
@@ -36,6 +42,26 @@ const SAVE_TIMEOUT_MS = 12000;
 // Not a DOM event, deliberately. The whole document rides in the argument, and a
 // CustomEvent would put it on a bus any script on the page can listen to.
 const saveAcceptedHooks = [];
+
+/**
+ * Send the next save with `keepalive`, so a request whose page is going away (a tab
+ * closing, a navigation) is still finished by the transport.
+ *
+ * A transport hint and nothing more: the save is the same save, and the body has to
+ * fit the browser's keepalive cap for the hint to go on the wire at all.
+ *
+ * @param {boolean} keepalive
+ * @param {Function} run - the save to run with the hint set
+ * @returns {Promise<Object>} whatever `run` resolves with
+ */
+export async function withKeepalive(keepalive, run) {
+  nextSaveKeepalive = Boolean(keepalive);
+  try {
+    return await run();
+  } finally {
+    nextSaveKeepalive = false;
+  }
+}
 
 /**
  * Check if a save is currently in progress.
@@ -258,9 +284,10 @@ function skippedResult(msg) {
  * @param {AbortSignal} signal
  * @param {string} saveId - this attempt's §6 receipt id
  * @param {?string} etag - the stamp to send as If-Match, or null
+ * @param {boolean} keepalive - whether to ask the transport to see the request through
  * @returns {{url: string, options: Object}}
  */
-function buildSaveRequest(content, userDriven, signal, saveId, etag) {
+function buildSaveRequest(content, userDriven, signal, saveId, etag, keepalive = false) {
   const token = saveToken();
   const path = token ? `${SAVE_PATH}/${token}` : SAVE_PATH;
   const options = {
@@ -286,6 +313,8 @@ function buildSaveRequest(content, userDriven, signal, saveId, etag) {
   };
 
   if (etag) options.headers['If-Match'] = etag;
+
+  if (keepalive && new Blob([content]).size < KEEPALIVE_MAX_BODY) options.keepalive = true;
 
   return { url: resolveSaveUrl(path), options };
 }
@@ -357,7 +386,11 @@ function sendOnce(content, saveId, etag) {
   const gestureDriven = consumeUserDriven();
   const explicitlyAsked = consumeExplicitSave();
   const userDriven = gestureDriven || explicitlyAsked;
-  const { url, options } = buildSaveRequest(content, userDriven, controller.signal, saveId, etag);
+  // Read-and-reset here too, at the one send that can still honour it: a save that
+  // returns early never reaches this point, so the hint cannot leak onto a later one.
+  const keepalive = nextSaveKeepalive;
+  nextSaveKeepalive = false;
+  const { url, options } = buildSaveRequest(content, userDriven, controller.signal, saveId, etag, keepalive);
   rememberSentId(saveId);
 
   return fetch(url, options)

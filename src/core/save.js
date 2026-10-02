@@ -18,15 +18,22 @@ import {
   replacePageWith as replacePageWithCore,
   addDocumentTransform,
   isSaveInProgress,
-  saveFateIsUnknown
+  saveFateIsUnknown,
+  withKeepalive
 } from "./save-core.js";
 import { captureForComparison, captureForComparisonAndDirty, captureForSaveAndComparison } from "./snapshot.js";
-import { seedEtag } from "./etag.js";
+import { seedEtag, lastSeenEtag } from "./etag.js";
 import { gateCaptureToken, gateClearIfUnchanged, pageMaybeDirty } from "../lib/dirty-gate.js";
+import { hasUnsavedState } from "../lib/unsaved-state.js";
 import { autosaveActive } from "../lib/autosave-state.js";
 import { ROOT_LIBRARY_ATTRS, SAVE_TOKEN_ATTRS, LEGACY_SAVE_TOKEN_ATTRS } from "../lib/root-attrs.js";
 import { logSaveCheck, logBaseline } from "../lib/autosave-debug.js";
 import { initUserGesture, markExplicitSave, clearExplicitSave } from "../lib/user-gesture.js";
+// A deliberate import cycle: unsaved-warning reads this module's saved baseline, and
+// flush asks the SAME bytes question the close warning asks, through `bytesUnsaved`.
+// Both read across it at call time, never while a module is evaluating, so neither
+// side sees a half-built module.
+import { bytesUnsaved } from "./unsaved-warning.js";
 
 // Keep this library's own root state out of the saved bytes.
 //
@@ -558,6 +565,101 @@ export function savePageForce(callback = () => {}) {
       drainPendingSave();
     });
   });
+}
+
+// Resolve on the next save that settles, or reject once the deadline has passed.
+// Every settled state is one, not just success: a save that failed is an answer about
+// the page's bytes too, and the caller decides what to do with it.
+function settled(deadline) {
+  const events = ['clay:save-saved', 'clay:save-error', 'clay:save-offline', 'clay:save-conflict'];
+  return new Promise((resolve, reject) => {
+    let timer = null;
+    const cleanup = () => {
+      clearTimeout(timer);
+      for (const name of events) document.removeEventListener(name, onSettle);
+    };
+    const onSettle = () => {
+      cleanup();
+      resolve();
+    };
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) {
+      reject(Object.assign(new Error('Save timed out.'), { state: 'failed' }));
+      return;
+    }
+    timer = setTimeout(() => {
+      cleanup();
+      reject(Object.assign(new Error('Save timed out.'), { state: 'failed' }));
+    }, remaining);
+    for (const name of events) document.addEventListener(name, onSettle);
+  });
+}
+
+function flushError(message, state) {
+  return Object.assign(new Error(message), { state });
+}
+
+// Resolve when `name` fires on document, or reject at the deadline.
+function nextEvent(name, deadline) {
+  return new Promise((resolve, reject) => {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) return reject(flushError('Save timed out.', 'failed'));
+    const timer = setTimeout(() => {
+      document.removeEventListener(name, onEvent);
+      reject(flushError('Save timed out.', 'failed'));
+    }, remaining);
+    const onEvent = () => { clearTimeout(timer); resolve(); };
+    document.addEventListener(name, onEvent, { once: true });
+  });
+}
+
+// Save now; answer only when the host has accepted the bytes the page holds now.
+// Resolves { state: 'view' | 'clean' | 'saved', etag }. Rejects with an Error carrying
+// state 'failed' (including a timeout), 'conflict', or 'blocked' (the bytes are on the
+// host but the page holds work a save cannot write, registered through
+// clay.registerUnsavedState; only a person can resolve that). Never overwrites.
+// `keepalive` is a transport hint honoured under 60 KB of UTF-8.
+export async function flushSave({ keepalive = false, timeoutMs = 15000 } = {}) {
+  if (!isEditMode) return { state: 'view', etag: null };
+  const deadline = Date.now() + timeoutMs;
+  let timer = null;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(flushError('Save timed out.', 'failed')), Math.max(0, timeoutMs));
+  });
+  try {
+    return await Promise.race([flushBytes(keepalive, deadline), timeout]);
+  } catch (err) {
+    if (err && typeof err.state === 'string') throw err;
+    throw flushError(err?.message || 'Save failed', 'failed');
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function flushBytes(keepalive, deadline) {
+  // Load-time module churn is not the person's work: autosave never saves it, and
+  // neither does a flush. Wait for the baseline to settle (at most MAX_SETTLE_MS).
+  if (!baselineSettled()) await nextEvent('clay:baseline-settled', deadline);
+
+  let saved = false;
+  let etag = null;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    if (isSaveInProgress()) await settled(deadline);
+    if (isSaveConflicted()) throw flushError('This document has a conflict to resolve.', 'conflict');
+    const token = gateCaptureToken();
+    if (!bytesUnsaved()) {
+      gateClearIfUnchanged(token);
+      if (hasUnsavedState()) throw flushError('This document has unsaved work a save cannot write.', 'blocked');
+      return { state: saved ? 'saved' : 'clean', etag: etag ?? lastSeenEtag() };
+    }
+    const result = await withKeepalive(keepalive, () => savePage());
+    // The lane was busy (a drained pending save is on the wire): wait it out next turn.
+    if (result.msgType === 'skipped') continue;
+    if (!result.ok) throw flushError(result.msg || 'Save failed', result.msgType === 'conflict' || isSaveConflicted() ? 'conflict' : 'failed');
+    saved = true;
+    etag = result.etag ?? null;
+  }
+  throw flushError('The document kept changing while saving.', 'failed');
 }
 
 /**

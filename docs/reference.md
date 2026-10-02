@@ -80,6 +80,22 @@ itself, with no network.
   write may or may not have landed). A host may answer with its own severity, such as
   `warning`. Never rejects.
 - `clay.save.force()` — save even when nothing appears to have changed.
+- `clay.save.flush({keepalive, timeoutMs})` — save now, and answer only when the host has
+  accepted the bytes the page holds at that moment. Resolves `{state, etag}`, where `state`
+  is `view` (this page cannot save), `clean` (the file already holds these bytes, so nothing
+  was sent) or `saved` (this call wrote them, and `etag` is the stamp the host accepted).
+  Rejects with an `Error` whose `state` is `failed`, `conflict` or `blocked`: `blocked` means
+  the bytes are on the host but the page holds work a save cannot write, reported by a check
+  registered through `clay.registerUnsavedState`, so only a person can resolve it. A save
+  already on the wire is waited out; an edit made while a request is in flight forces another
+  save. A refusal is reported, never resolved by overwriting: keeping this tab's version
+  stays a person's decision (`clay.save.overwrite`). In the first seconds after load it
+  waits for the page to settle, so load-time rendering is not written as an edit. `keepalive`
+  asks the transport to see the request through a page unload and is honoured under a 60 KB
+  UTF-8 body only; `timeoutMs` (default 15000) bounds the whole call.
+- `clay.hasUnsavedChanges()` — synchronous answer to "is there work here that no save has
+  written?", the same question the close warning asks: an edit in the DOM, or work a check
+  registered through `clay.registerUnsavedState` reports as pending. `false` in view mode.
 - `clay.getHTML()` — the exact HTML string a save would send, after all cleanup.
 - `clay.addDocumentTransform(fn)` — register a callback that receives the cloned
   document before serialization. The live page is never touched. Runs on every change
@@ -208,6 +224,14 @@ two elements, one of each.
 - `clay:save-error` — the server answered with a problem; detail `{msg, timestamp}`.
 - `clay:save-offline` — the browser is offline (clayjs re-saves when the connection
   returns); detail `{msg, timestamp}`.
+- `clay:dirty` — the page holds work no save has written: an edit in the DOM, or a
+  `[persist]` control whose live value differs from what the file carries. It follows DOM
+  mutations and user input; a script setting a `[persist]` control's value programmatically
+  is not observed. One event per state change, so a burst of keystrokes is one `clay:dirty`.
+  It fires before autosave does, which is what lets a status row show unsaved state at the
+  moment it appears.
+- `clay:clean` — a save (or a merge the loss oracle verified) has accounted for everything
+  the gate saw, so nothing on the page is unwritten.
 - `clay:save-conflict` — the host refused a save because the file changed since this tab
   loaded or last saved it (HTTP 412). Autosave pauses and a notice appears; detail
   `{msg, msgType, timestamp, changedBy, afterTimeout, etag}`, where `etag` is the stamp

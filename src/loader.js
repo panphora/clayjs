@@ -88,8 +88,14 @@ function assembleCore(loaded, { isEditMode, isOwner }, regionPolicy) {
     const saveFn = save.savePage || save.default;
     saveFn.force = save.savePageForce;
     saveFn.overwrite = save.saveOverwritingConflict;
+    saveFn.flush = save.flushSave;
     clay.save = saveFn;
   }
+  // The close warning's own predicate, reachable without a capture. It falls back to
+  // false rather than to absent: the module is edit-only, and a document that cannot
+  // save has nothing unsaved. Older clayjs has no such member, and that is the answer
+  // a host feature-detects.
+  clay.hasUnsavedChanges = loaded["core/unsaved-warning.js"]?.hasUnsavedChanges ?? (() => false);
   if (snapshot) {
     clay.getHTML = snapshot.getPageContents;
     clay.addDocumentTransform = snapshot.addDocumentTransform;

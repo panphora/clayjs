@@ -130,3 +130,51 @@ test("a control outside the region still marks the page dirty", () => {
   type(document.querySelector("input"));
   expect(gate.pageMaybeDirty()).toBe(true);
 });
+
+// The gate's state, on the document, for a row that has to show it before autosave
+// fires. One announcement per transition: a burst of keystrokes is one dirty state.
+test("three synchronous edits announce one clay:dirty", async () => {
+  const seen = [];
+  const onDirty = () => seen.push("dirty");
+  document.addEventListener("clay:dirty", onDirty);
+  try {
+    document.body.innerHTML = '<input type="text">';
+    const input = document.querySelector("input");
+    type(input);
+    type(input);
+    type(input);
+
+    // Announced on the next turn, not once per edit.
+    expect(seen).toEqual([]);
+    await Promise.resolve();
+    expect(seen).toEqual(["dirty"]);
+
+    // And once per transition: another edit while the page is already dirty is the
+    // same state, so it is not announced again.
+    type(input);
+    await Promise.resolve();
+    expect(seen).toEqual(["dirty"]);
+  } finally {
+    document.removeEventListener("clay:dirty", onDirty);
+  }
+});
+
+test("a token clear after a save announces one clay:clean", async () => {
+  const seen = [];
+  const onClean = () => seen.push("clean");
+  document.addEventListener("clay:clean", onClean);
+  try {
+    document.body.innerHTML = "<textarea></textarea>";
+    type(document.querySelector("textarea"));
+    // Let the mutation record land before the token is taken, so the clear is the
+    // only thing left that can change the gate.
+    await Promise.resolve();
+
+    gate.gateClearIfUnchanged(gate.gateCaptureToken());
+    await Promise.resolve();
+
+    expect(seen).toEqual(["clean"]);
+  } finally {
+    document.removeEventListener("clay:clean", onClean);
+  }
+});

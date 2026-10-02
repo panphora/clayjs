@@ -43,6 +43,39 @@ preloadIfEnabled();
 // sandboxed document, which cannot read cookies at all. Those are exactly the
 // documents where an unsaved edit is easiest to lose. If the page is editable,
 // the person editing it deserves the warning.
+//
+// The same predicate is exposed as `clay.hasUnsavedChanges`, which a host asks
+// synchronously before deciding whether a save is worth asking for.
+export function hasUnsavedChanges() {
+  if (!isEditMode) return false;
+
+  // Work outside the DOM first: it needs no capture, and a capture that throws
+  // must not hide it. The demo plugin does not save it either, so it warns there too.
+  if (hasUnsavedState()) return true;
+
+  // The demo plugin saves the page's bytes into this browser's own storage, so
+  // leaving loses none of them.
+  if (window.clay?.demo) return false;
+
+  return bytesUnsaved();
+}
+
+// The page's own bytes against the last bytes the host accepted. A capture that throws
+// counts as unsaved: something on the page is broken, and "nothing to lose" is the one
+// answer that can lose work.
+//
+// The DIRTY domain, not the autosave domain. An edit inside a no-trigger-autosave
+// region never starts a save by itself, which is exactly why closing the tab on one has
+// to warn: nothing else is going to write it.
+export function bytesUnsaved() {
+  if (!isEditMode) return false;
+  try {
+    return captureForDirtyCheck() !== getLastSavedDirty();
+  } catch {
+    return true;
+  }
+}
+
 window.addEventListener('beforeunload', (event) => {
   if (!isEditMode) return;
 
@@ -51,26 +84,16 @@ window.addEventListener('beforeunload', (event) => {
     return;
   }
 
-  // Work outside the DOM first: it needs no capture, and a capture that throws
-  // must not hide it. The demo plugin does not save it either, so it warns there too.
-  const held = hasUnsavedState();
+  if (!hasUnsavedChanges()) return;
 
-  // The demo plugin saves the page's bytes into this browser's own storage, so
-  // leaving loses none of them.
-  let bytesDiffer = false;
-  if (!held && !window.clay?.demo) {
-    // The DIRTY domain, not the autosave domain. An edit inside a
-    // no-trigger-autosave region never starts a save by itself, which is exactly
-    // why closing the tab on one has to warn: nothing else is going to write it.
-    const currentForCompare = captureForDirtyCheck();
-    const lastSaved = getLastSavedDirty();
-    bytesDiffer = currentForCompare !== lastSaved;
-    // Debug: log what's different before showing the warning
-    if (bytesDiffer) logUnloadDiffSync(currentForCompare, lastSaved);
-  }
-
-  if (held || bytesDiffer) {
-    event.preventDefault();
-    event.returnValue = '';
+  event.preventDefault();
+  event.returnValue = '';
+  // Debug only, after the decision: a capture that throws here must not cancel the warning.
+  if (!window.clay?.demo && !hasUnsavedState()) {
+    try {
+      const currentForCompare = captureForDirtyCheck();
+      const lastSaved = getLastSavedDirty();
+      if (currentForCompare !== lastSaved) logUnloadDiffSync(currentForCompare, lastSaved);
+    } catch {}
   }
 });
