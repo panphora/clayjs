@@ -61,9 +61,6 @@
   border-color: var(--bevel-edge-hi) var(--bevel-edge-lo) var(--bevel-edge-lo) var(--bevel-edge-hi);
   background: color-mix(in srgb, var(--bevel-face), var(--bevel-edge-hi) 45%);
 }
-:is(.bevel-richtext, [data-bevel-richclay-chrome]) .richclay-button:hover:not([aria-pressed="true"], [aria-expanded="true"], :disabled) .richclay-cut {
-  stroke: color-mix(in srgb, var(--bevel-face), var(--bevel-edge-hi) 45%);
-}
 :is(.bevel-richtext, [data-bevel-richclay-chrome]) .richclay-separator { align-self: center; height: 22px; margin: 0 5px; background: var(--bevel-line-2); }
 :is(.bevel-richtext, [data-bevel-richclay-chrome]) .richclay-menu { inset-block-start: 38px; min-width: 210px; padding: 5px; border-radius: 0; box-shadow: var(--bevel-shadow); }
 :is(.bevel-richtext, [data-bevel-richclay-chrome]) .richclay-menu-item { padding: 8px 10px; border: 0; border-radius: 0; font: 14px var(--bevel-font-sans); }
