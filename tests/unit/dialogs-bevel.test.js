@@ -44,6 +44,21 @@ test("consent: extra content inherits Bevel body type, not the reset font", () =
   expect(last(calls, extra.parentElement, "font")).toMatch(/^14\.5px\/1\.55 /);
 });
 
+test("coarse pointer dialogs use touch sized inputs and footer buttons", () => {
+  const original = window.matchMedia;
+  window.matchMedia = query => ({ matches: query === "(pointer: coarse)", media: query, addEventListener() {}, removeEventListener() {} });
+  try {
+    ask("Rename?", null, "old").catch(() => {});
+    const input = dialog().querySelector("input");
+    const buttons = [...dialog().lastElementChild.querySelectorAll("button")];
+    expect([input.style.fontSize, input.style.blockSize, input.style.minBlockSize]).toEqual(["16px", "40px", "40px"]);
+    expect(buttons.map(button => [button.style.blockSize, button.style.minBlockSize])).toEqual([["40px", "40px"], ["40px", "40px"]]);
+  } finally {
+    themodal.close();
+    window.matchMedia = original;
+  }
+});
+
 test("tell: the title and each paragraph in Bevel type, paragraphs as caller markup", () => {
   const calls = capture(() => { tell("Heads up", 'first <i data-caller="p">one</i>', "second").catch(() => {}); });
   const root = document.querySelector("[data-clay-modal]");

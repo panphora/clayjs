@@ -84,6 +84,7 @@ export function bevelButton(label, { variant = 'default', small = false, onClick
   const size = small ? SIZE.small : SIZE.normal;
   const reducedMotion = media('(prefers-reduced-motion: reduce)');
   const forced = media('(forced-colors: active)');
+  const coarse = media('(pointer: coarse)');
   const flags = { hovered: false, pressed: false, focusVisible: false, disabled: false };
   const pinned = new Map();
 
@@ -103,6 +104,7 @@ export function bevelButton(label, { variant = 'default', small = false, onClick
     }
     if (flags.focusVisible) rules.push(...RULES.focus);
     if (forced) rules.push(...MEDIA.forcedColors);
+    if (coarse) rules.push(...MEDIA.coarseButton);
     rules.push(...extra);
     for (const [prop, value] of pinned) rules.push(`${prop}:${value}`);
     restyle(b, rules);
@@ -234,6 +236,7 @@ export function bevelText(tag, rules = [], text) {
 export function paintInput(el, { rules = [] } = {}) {
   const flags = { hovered: false, focused: false };
   const forced = media('(forced-colors: active)');
+  const coarse = media('(pointer: coarse)');
   runtime(el);
   function applyState() {
     const height = el.localName === 'textarea' ? el.style.getPropertyValue('height') : '';
@@ -242,6 +245,7 @@ export function paintInput(el, { rules = [] } = {}) {
     if (flags.focused) list.push(...RULES.inputFocus);
     if (forced) list.push(...MEDIA.forcedColors);
     list.push(...rules);
+    if (coarse) list.push(...MEDIA.coarseInput);
     if (height) list.push(`height:${height}`);
     restyle(el, list);
   }

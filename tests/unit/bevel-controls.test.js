@@ -211,6 +211,17 @@ test("icon button: 26px square through hover and press", () => {
   expect(b.firstChild.style.getPropertyValue("width")).toBe("12px");
 });
 
+test("icon button: coarse pointer rules do not change its 26px square", () => {
+  const original = window.matchMedia;
+  window.matchMedia = query => ({ matches: query === "(pointer: coarse)", media: query, addEventListener() {}, removeEventListener() {} });
+  try {
+    const b = bevelIconButton("<svg></svg>", { label: "Minimize" });
+    expect([b.style.getPropertyValue("width"), b.style.getPropertyValue("height")]).toEqual(["26px", "26px"]);
+  } finally {
+    window.matchMedia = original;
+  }
+});
+
 test("reset: color-scheme and direction are put back right after all:initial", () => {
   let b, surface, well, text;
   const calls = capture(() => {

@@ -264,8 +264,8 @@ export function generate(cssText) {
   rules.push(['surface', SURFACE(ordered)])
   const media = Object.entries(MEDIA).map(([name, spec]) => [
     name,
-    rulesFor(root, spec.selector, null, collapse(spec.media), name)
-      .flatMap(rule => declarations(collect([rule], spec.selector, name, false), tokens, null, name)),
+    (spec.selectors || [spec.selector]).flatMap(selector => rulesFor(root, selector, null, collapse(spec.media), name)
+      .flatMap(rule => declarations(collect([rule], selector, name, false), tokens, null, name))),
   ])
 
   const sha = crypto.createHash('sha256').update(cssText).digest('hex')

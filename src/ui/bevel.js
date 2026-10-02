@@ -1,5 +1,5 @@
 // GENERATED from bevel/bevel.css by scripts/build-bevel-subset.mjs. Run `npm run build:bevel`.
-export const SOURCE_SHA256 = "4532d98386c76070626c0cccea91f512dafd0314c0c846dbf1eea9372ddde541";
+export const SOURCE_SHA256 = "c61b4e412b3a6e2173d98f74ff9e8f869215531ffe0f2018ef23fad48ad7cc46";
 export const FONT_SANS = "system-ui,-apple-system,\"Segoe UI\",sans-serif";
 export const FONT_MONO = "ui-monospace,SFMono-Regular,Menlo,Consolas,monospace";
 export const SHADOW = "0 1px 2px rgba(0,0,0,.12),0 10px 28px -12px rgba(0,0,0,.35)";
@@ -243,5 +243,17 @@ export const MEDIA = {
   ],
   "forcedColors": [
     "border:1px solid ButtonText",
+  ],
+  "coarseInput": [
+    "font-size:16px",
+    "block-size:40px",
+    "min-block-size:40px",
+    "padding-inline:12px",
+  ],
+  "coarseButton": [
+    "block-size:40px",
+    "min-block-size:40px",
+    "padding-inline:14px",
+    "font-size:15px",
   ],
 };

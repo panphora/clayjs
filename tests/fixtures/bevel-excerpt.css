@@ -185,6 +185,22 @@
   .bevel-progress::-webkit-progress-bar { background: Canvas; }
   .bevel-progress::-webkit-progress-value, .bevel-progress::-moz-progress-bar { background: ButtonText; }
 }
+@media (pointer: coarse) {
+  :root:root :is(.bevel-input, .bevel-select__field, .bevel-date__field, .bevel-textarea) {
+    font-size: 16px;
+  }
+  :root:root :is(.bevel-input, .bevel-select__field, .bevel-date__field) {
+    block-size: 40px;
+    min-block-size: 40px;
+    padding-inline: 12px;
+  }
+  :root:root .bevel-button:not(.bevel-icon-button, :is(.bevel-seg, .bevel-diff__controls, .bevel-pagination, .bevel-grid__pages) *) {
+    block-size: 40px;
+    min-block-size: 40px;
+    padding-inline: 14px;
+    font-size: 15px;
+  }
+}
 
 @layer components {
   /* ============================ TEXT INPUT ============================ */

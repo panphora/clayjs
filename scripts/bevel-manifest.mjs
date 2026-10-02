@@ -55,4 +55,12 @@ export const SURFACE = (t) => [`background:${t.surface}`, `color:${t.ink}`, `bor
 export const MEDIA = {
   reducedMotion: { media: '(prefers-reduced-motion: reduce)', selector: '.bevel-button:active .bevel-button__label' },
   forcedColors: { media: '(forced-colors: active)', selector: '.bevel-button' },
+  coarseInput: {
+    media: '(pointer: coarse)',
+    selectors: [
+      ':root:root :is(.bevel-input, .bevel-select__field, .bevel-date__field, .bevel-textarea)',
+      ':root:root :is(.bevel-input, .bevel-select__field, .bevel-date__field)',
+    ],
+  },
+  coarseButton: { media: '(pointer: coarse)', selector: ':root:root .bevel-button:not(.bevel-icon-button, :is(.bevel-seg, .bevel-diff__controls, .bevel-pagination, .bevel-grid__pages) *)' },
 };

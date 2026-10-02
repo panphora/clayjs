@@ -118,7 +118,8 @@ test("deterministic, and the checked-in module is the shape the injector expects
   expect(typeof checked.SHADOW).toBe("string");
   expect(Object.keys(checked.TOKENS)).toEqual([...Object.keys(subset.TOKENS)]);
   expect(Object.keys(checked.RULES)).toEqual([...Object.keys(RECIPES), "surface"]);
-  expect(Object.keys(checked.MEDIA)).toEqual(["reducedMotion", "forcedColors"]);
+  expect(Object.keys(checked.MEDIA)).toEqual(["reducedMotion", "forcedColors", "coarseInput", "coarseButton"]);
+  expect(checked.MEDIA.coarseInput).toEqual(["font-size:16px", "block-size:40px", "min-block-size:40px", "padding-inline:12px"]);
 });
 
 /**
