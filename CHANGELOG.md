@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.1] - 2026-10-02
+
+### Added
+- ClayJS dirty state tracking and a flush API
+
+
+
 ## [1.6.0]
 
 ### Added
