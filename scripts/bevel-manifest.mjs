@@ -3,6 +3,18 @@ export const FONT_MONO = 'ui-monospace,SFMono-Regular,Menlo,Consolas,monospace';
 export const FONT_SERIF = 'Georgia,"Times New Roman",serif';
 export const SHADOW = '0 1px 2px rgba(0,0,0,.12),0 10px 28px -12px rgba(0,0,0,.35)';
 
+// Library names and rendered box sizes for the icons ClayJS embeds in its generated
+// Bevel subset. build-bevel-subset.mjs resolves these through bevel/icons so no icon
+// drawing is copied into ClayJS source.
+export const GLYPHS = {
+  toastSuccess: { name: 'check', size: 16 },
+  toastWarning: { name: 'warning', size: 16 },
+  toastInfo: { name: 'info', size: 16 },
+  toastClose: { name: 'close', size: 14 },
+  dialogClose: { name: 'close', size: 16 },
+  conflictEye: { name: 'eye', size: 16 },
+};
+
 // Every light-dark() colour token in the base :root rule except --bevel-syn-*.
 export const TOKEN_NAMES = [
   'ground', 'surface', 'sunk', 'ink', 'ink-2', 'muted', 'faint', 'line', 'line-2', 'line-3',

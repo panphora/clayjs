@@ -7,7 +7,7 @@ import { isSaveConflicted } from "./save.js";
 import { gateCaptureToken } from "../lib/dirty-gate.js";
 import { reloadAfterDiscard } from "./unsaved-warning.js";
 import { bevelButton, bevelIconButton, bevelSurface, bevelWell, bevelText, protectIcon, RUNTIME_ONLY } from "../ui/bevel-controls.js";
-import { TOKENS, FONT_SANS, FONT_MONO } from "../ui/bevel.js";
+import { TOKENS, FONT_SANS, FONT_MONO, GLYPHS } from "../ui/bevel.js";
 
 // One notice for everything this tab holds that the page no longer shows: edits
 // another save replaced (the ledger, clay.conflicts) and a save the host refused.
@@ -33,8 +33,6 @@ const SOURCES = {
 };
 
 const MINIMIZE_SVG = '<svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M2.5 9.5h7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="square"/></svg>';
-
-const EYE_SVG = '<svg viewBox="0 0 256 256" width="16" height="16" fill="currentColor" aria-hidden="true">' + '<path d="M247.31,124.76c-.35-.79-8.82-19.58-27.65-38.41C194.57,61.26,162.88,48,128,48S61.43,61.26,36.34,86.35C17.51,105.18,9,124,8.69,124.76a8,8,0,0,0,0,6.5c.35.79,8.82,19.57,27.65,38.4C61.43,194.74,93.12,208,128,208s66.57-13.26,91.66-38.34c18.83-18.83,27.3-37.61,27.65-38.4A8,8,0,0,0,247.31,124.76ZM128,192c-30.78,0-57.67-11.19-79.93-33.25A133.47,133.47,0,0,1,25,128,133.33,133.33,0,0,1,48.07,97.25C70.33,75.19,97.22,64,128,64s57.67,11.19,79.93,33.25A133.46,133.46,0,0,1,231.05,128C223.84,141.46,192.43,192,128,192Zm0-112a48,48,0,1,0,48,48A48.05,48.05,0,0,0,128,80Zm0,80a32,32,0,1,1,32-32A32,32,0,0,1,128,160Z"/>' + '</svg>';
 
 const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
@@ -391,7 +389,7 @@ function eyeButton(row) {
   const base = ["all:initial", "color-scheme:inherit", "box-sizing:border-box", "cursor:pointer", "display:inline-grid", "place-items:center", "width:22px", "height:20px", `color:${TOKENS.ink}`];
   const b = el("button", base);
   b.type = "button";
-  b.innerHTML = EYE_SVG;
+  b.innerHTML = GLYPHS.conflictEye;
   protectIcon(b.firstElementChild, 16);
   b.setAttribute("aria-label", `Show ${row.name} on page`);
   b.title = "Show on page";

@@ -310,7 +310,7 @@ test("focus ring: keyboard use after pointer focus still draws it", () => {
 test("icon: the glyph is pinned against a page that resets and repaints", () => {
   let b;
   const calls = capture(() => {
-    b = bevelIconButton('<svg viewBox="0 0 12 12" width="12" height="12"><path d="M2.5 9.5h7" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>', { label: "Minimize" });
+    b = bevelIconButton('<svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="square" stroke-linejoin="miter"><path d="M2.5 9.5h7"/></svg>', { label: "Minimize" });
   });
   const svg = b.firstChild.firstElementChild;
   const path = svg.firstElementChild;
@@ -323,6 +323,8 @@ test("icon: the glyph is pinned against a page that resets and repaints", () => 
   expect(last(calls, path, "stroke")).toBe("currentColor");
   expect(last(calls, path, "fill")).toBe("none");
   expect(last(calls, path, "stroke-width")).toBe("1.8");
+  expect(last(calls, path, "stroke-linecap")).toBe("square");
+  expect(last(calls, path, "stroke-linejoin")).toBe("miter");
   for (const call of calls.filter((call) => call.style === path.style)) {
     expect(call.priority).toBe("important");
   }

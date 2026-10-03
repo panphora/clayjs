@@ -1,6 +1,6 @@
 import { jest } from "@jest/globals";
 import { RUNTIME_ONLY } from "../../src/ui/bevel-controls.js";
-import { TOKENS } from "../../src/ui/bevel.js";
+import { TOKENS, GLYPHS } from "../../src/ui/bevel.js";
 import { captureAsync, last } from "./helpers/injected-ui.js";
 
 /**
@@ -796,14 +796,20 @@ test("Minimize takes the ring with it", async () => {
   expect(document.body.contains(ring)).toBe(false);
 });
 
-test("the eye wears the licensed icon", async () => {
+test("the eye uses the generated Bevel glyph", async () => {
   three();
   await frame();
   review();
   buttonSaying(/See the edits/).click();
 
-  const path = eyeOf(rows()[0]).querySelector("path");
-  expect(path.getAttribute("d").startsWith("M247.31,124.76c-.35-.79")).toBe(true);
+  const svg = eyeOf(rows()[0]).querySelector("svg");
+  const template = document.createElement("template");
+  template.innerHTML = GLYPHS.conflictEye;
+  const source = template.content.firstElementChild;
+  expect(svg.getAttribute("viewBox")).toBe(source.getAttribute("viewBox"));
+  expect(svg.querySelector("path").getAttribute("d")).toBe(source.querySelector("path").getAttribute("d"));
+  expect([svg.getAttribute("width"), svg.getAttribute("height"), svg.getAttribute("aria-hidden")])
+    .toEqual(["16", "16", "true"]);
 });
 
 test("every element the notice resets gets its colour scheme back", async () => {

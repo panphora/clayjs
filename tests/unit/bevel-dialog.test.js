@@ -1,6 +1,6 @@
 import { bevelCornerClose, bevelBox, RUNTIME_ONLY } from "../../src/ui/bevel-controls.js";
 import { bevelDialog } from "../../src/ui/bevel-dialog.js";
-import { TOKENS } from "../../src/ui/bevel.js";
+import { TOKENS, GLYPHS } from "../../src/ui/bevel.js";
 import { capture, last, expectHostileProof, expectCallsResolved } from "./helpers/injected-ui.js";
 
 test("corner close: a 68px diagonal corner, the X painted inline, class-free", () => {
@@ -86,6 +86,9 @@ test("close: a 62px column at the header's right edge, the X painted inline, cla
   document.body.append(header);
   const svg = close.querySelector("svg");
   const path = svg.querySelector("path");
+  const template = document.createElement("template");
+  template.innerHTML = GLYPHS.dialogClose;
+  const source = template.content.firstElementChild;
 
   expect(header.contains(close)).toBe(true);
   expect(close.getAttribute("aria-label")).toBe("Close");
@@ -96,6 +99,10 @@ test("close: a 62px column at the header's right edge, the X painted inline, cla
   expect(expectHostileProof(header)).toBe(3);
   expect(svg.getAttribute("class")).toBeNull();
   expect(last(calls, svg, "color")).toBe("inherit");
+  expect(svg.getAttribute("viewBox")).toBe(source.getAttribute("viewBox"));
+  expect(path.getAttribute("d")).toBe(source.querySelector("path").getAttribute("d"));
+  expect([svg.getAttribute("width"), svg.getAttribute("height"), svg.getAttribute("aria-hidden")])
+    .toEqual(["16", "16", "true"]);
   expect(path.style.getPropertyValue("fill")).toBe("currentColor");
   expect(path.style.getPropertyPriority("fill")).toBe("important");
   header.remove();

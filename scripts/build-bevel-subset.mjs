@@ -20,19 +20,25 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import postcss from 'postcss'
-import { FONT_SANS, FONT_MONO, FONT_SERIF, SHADOW, TOKEN_NAMES, RECIPES, SURFACE, MEDIA } from './bevel-manifest.mjs'
+import { FONT_SANS, FONT_MONO, FONT_SERIF, SHADOW, GLYPHS, TOKEN_NAMES, RECIPES, SURFACE, MEDIA } from './bevel-manifest.mjs'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const OUT = path.join(ROOT, 'src/ui/bevel.js')
 const OUT_LABEL = 'src/ui/bevel.js'
 const DEFAULT_SOURCE = path.resolve(ROOT, '../bevel/bevel.css')
-const HEADER = '// GENERATED from bevel/bevel.css by scripts/build-bevel-subset.mjs. Run `npm run build:bevel`.\n'
+const DEFAULT_ICONS = path.resolve(ROOT, '../bevel/icons/icons.js')
+const HEADER = '// GENERATED from bevel/bevel.css and bevel/icons by scripts/build-bevel-subset.mjs. Run `npm run build:bevel`.\n'
 const SPECIAL = { 'font-sans': FONT_SANS, 'font-mono': FONT_MONO, 'font-serif': FONT_SERIF, shadow: SHADOW }
 const USAGE = 'usage: node scripts/build-bevel-subset.mjs [--check] [--source <path>] [--module <path>]'
 // Everything src/ui/bevel-controls.js reads out of src/ui/bevel.js. Inline styles
 // are the only styling ClayJS can trust on a hostile page, so a module missing any
 // of these must fail the check rather than render half a control at runtime.
-const EXPORTS = ['RULES', 'MEDIA', 'FONT_SANS', 'FONT_MONO', 'TOKENS', 'SHADOW', 'SOURCE_SHA256']
+const EXPORTS = ['RULES', 'MEDIA', 'GLYPHS', 'FONT_SANS', 'FONT_MONO', 'TOKENS', 'SHADOW', 'SOURCE_SHA256']
+
+let defaultBevelIcon = null
+if (fs.existsSync(DEFAULT_ICONS)) {
+  ({ bevelIcon: defaultBevelIcon } = await import(pathToFileURL(DEFAULT_ICONS).href))
+}
 
 export function collapse(value) {
   return value.replace(/\s+/g, ' ').trim()
@@ -255,10 +261,12 @@ function literalArray(lines, name, values) {
   lines.push('  ],')
 }
 
-export function generate(cssText) {
+export function generate(cssText, bevelIcon = defaultBevelIcon) {
+  if (typeof bevelIcon !== 'function') throw new Error(`bevel: icon library not found at ${DEFAULT_ICONS}`)
   const root = postcss.parse(cssText)
   const tokens = readTokens(root)
   const ordered = Object.fromEntries(TOKEN_NAMES.map(name => [name, tokens.get(name)]))
+  const glyphs = Object.fromEntries(Object.entries(GLYPHS).map(([usage, spec]) => [usage, bevelIcon(spec.name, { size: spec.size })]))
 
   const rules = Object.entries(RECIPES).map(([name, spec]) => [name, renderRecipe(name, spec, root, tokens)])
   rules.push(['surface', SURFACE(ordered)])
@@ -268,7 +276,7 @@ export function generate(cssText) {
       .flatMap(rule => declarations(collect([rule], selector, name, false), tokens, null, name))),
   ])
 
-  const sha = crypto.createHash('sha256').update(cssText).digest('hex')
+  const sha = crypto.createHash('sha256').update(cssText).update('\0').update(JSON.stringify(glyphs)).digest('hex')
   const lines = [HEADER.trimEnd()]
   lines.push(`export const SOURCE_SHA256 = ${JSON.stringify(sha)};`)
   lines.push(`export const FONT_SANS = ${JSON.stringify(FONT_SANS)};`)
@@ -276,6 +284,9 @@ export function generate(cssText) {
   lines.push(`export const SHADOW = ${JSON.stringify(SHADOW)};`)
   lines.push('export const TOKENS = {')
   for (const name of TOKEN_NAMES) lines.push(`  ${JSON.stringify(name)}: ${JSON.stringify(ordered[name])},`)
+  lines.push('};')
+  lines.push('export const GLYPHS = {')
+  for (const [name, markup] of Object.entries(glyphs)) lines.push(`  ${JSON.stringify(name)}: ${JSON.stringify(markup)},`)
   lines.push('};')
   lines.push('export const RULES = {')
   for (const [name, values] of rules) literalArray(lines, name, values)
@@ -305,6 +316,22 @@ export function validateModule(module) {
     }
     const names = Object.keys(module.TOKENS)
     for (const name of TOKEN_NAMES) if (!names.includes(name)) problems.push(`TOKENS.${name} is missing`)
+  }
+  if (module.GLYPHS !== undefined && (module.GLYPHS === null || typeof module.GLYPHS !== 'object')) {
+    problems.push('GLYPHS is not an object')
+  } else if (module.GLYPHS !== undefined) {
+    for (const [name, spec] of Object.entries(GLYPHS)) {
+      const markup = module.GLYPHS[name]
+      if (typeof markup !== 'string') {
+        problems.push(`GLYPHS.${name} is missing`)
+        continue
+      }
+      if (!markup.startsWith('<svg ') || !markup.endsWith('</svg>')) problems.push(`GLYPHS.${name} is not SVG markup`)
+      if (!markup.includes(`width="${spec.size}"`) || !markup.includes(`height="${spec.size}"`)) {
+        problems.push(`GLYPHS.${name} is not ${spec.size}px`)
+      }
+      if (!markup.includes('aria-hidden="true"')) problems.push(`GLYPHS.${name} is not hidden from assistive technology`)
+    }
   }
   for (const key of ['RULES', 'MEDIA']) {
     for (const [name, values] of Object.entries(module[key] ?? {})) {

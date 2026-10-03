@@ -72,8 +72,10 @@ function protectIcon(svg, size) {
       `fill:${attr('fill', svg.getAttribute('fill') ?? 'currentColor')}`,
       `stroke:${attr('stroke', svg.getAttribute('stroke') ?? 'none')}`,
     ];
-    if (el.hasAttribute('stroke-width')) rules.push(`stroke-width:${el.getAttribute('stroke-width')}`);
-    if (el.hasAttribute('stroke-linecap')) rules.push(`stroke-linecap:${el.getAttribute('stroke-linecap')}`);
+    for (const prop of ['stroke-width', 'stroke-linecap', 'stroke-linejoin']) {
+      const value = el.getAttribute(prop) ?? svg.getAttribute(prop);
+      if (value !== null) rules.push(`${prop}:${value}`);
+    }
     if (el.localName === 'path' && el.hasAttribute('d')) rules.push(`d:path("${el.getAttribute('d')}")`);
     style(el, rules);
   }

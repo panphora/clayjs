@@ -1,5 +1,5 @@
-// GENERATED from bevel/bevel.css by scripts/build-bevel-subset.mjs. Run `npm run build:bevel`.
-export const SOURCE_SHA256 = "6f0c2df813ee69e58fae7fe83b0fe7b3da14af7a2217daaeec57b66505ae9e83";
+// GENERATED from bevel/bevel.css and bevel/icons by scripts/build-bevel-subset.mjs. Run `npm run build:bevel`.
+export const SOURCE_SHA256 = "0ceec5b5b3c6923655f6b97631f9d6eb3f442dbe9b935841183c6f287034b4f9";
 export const FONT_SANS = "system-ui,-apple-system,\"Segoe UI\",sans-serif";
 export const FONT_MONO = "ui-monospace,SFMono-Regular,Menlo,Consolas,monospace";
 export const SHADOW = "0 1px 2px rgba(0,0,0,.12),0 10px 28px -12px rgba(0,0,0,.35)";
@@ -32,6 +32,14 @@ export const TOKENS = {
   "ox-edge-hi": "light-dark(#AE4F3E, #B85A47)",
   "ox-edge-lo": "light-dark(#451510, #3E1410)",
   "ox-ink": "light-dark(#FBEEE8, #FBEEE8)",
+};
+export const GLYPHS = {
+  "toastSuccess": "<svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"square\" stroke-linejoin=\"miter\" aria-hidden=\"true\" focusable=\"false\"><path d=\"m5 12 4 4L19 6\"/></svg>",
+  "toastWarning": "<svg width=\"16\" height=\"16\" viewBox=\"0 0 256 256\" fill=\"currentColor\" aria-hidden=\"true\" focusable=\"false\"><path d=\"M236.8,188.09,149.35,36.22h0a24.76,24.76,0,0,0-42.7,0L19.2,188.09a23.51,23.51,0,0,0,0,23.72A24.35,24.35,0,0,0,40.55,224h174.9a24.35,24.35,0,0,0,21.33-12.19A23.51,23.51,0,0,0,236.8,188.09ZM222.93,203.8a8.5,8.5,0,0,1-7.48,4.2H40.55a8.5,8.5,0,0,1-7.48-4.2,7.59,7.59,0,0,1,0-7.72L120.52,44.21a8.75,8.75,0,0,1,15,0l87.45,151.87A7.59,7.59,0,0,1,222.93,203.8ZM120,144V104a8,8,0,0,1,16,0v40a8,8,0,0,1-16,0Zm20,36a12,12,0,1,1-12-12A12,12,0,0,1,140,180Z\"/></svg>",
+  "toastInfo": "<svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"square\" stroke-linejoin=\"miter\" aria-hidden=\"true\" focusable=\"false\"><path d=\"M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0M12 7.75v.85M10.3 11.15H12v5.1M10.3 16.25h3.4\"/></svg>",
+  "toastClose": "<svg width=\"14\" height=\"14\" viewBox=\"0 0 256 256\" fill=\"currentColor\" aria-hidden=\"true\" focusable=\"false\"><path d=\"M205.66,194.34a8,8,0,0,1-11.32,11.32L128,139.31,61.66,205.66a8,8,0,0,1-11.32-11.32L116.69,128,50.34,61.66A8,8,0,0,1,61.66,50.34L128,116.69l66.34-66.35a8,8,0,0,1,11.32,11.32L139.31,128Z\"/></svg>",
+  "dialogClose": "<svg width=\"16\" height=\"16\" viewBox=\"0 0 256 256\" fill=\"currentColor\" aria-hidden=\"true\" focusable=\"false\"><path d=\"M205.66,194.34a8,8,0,0,1-11.32,11.32L128,139.31,61.66,205.66a8,8,0,0,1-11.32-11.32L116.69,128,50.34,61.66A8,8,0,0,1,61.66,50.34L128,116.69l66.34-66.35a8,8,0,0,1,11.32,11.32L139.31,128Z\"/></svg>",
+  "conflictEye": "<svg width=\"16\" height=\"16\" viewBox=\"0 0 256 256\" fill=\"currentColor\" aria-hidden=\"true\" focusable=\"false\"><path d=\"M247.31,124.76c-.35-.79-8.82-19.58-27.65-38.41C194.57,61.26,162.88,48,128,48S61.43,61.26,36.34,86.35C17.51,105.18,9,124,8.69,124.76a8,8,0,0,0,0,6.5c.35.79,8.82,19.57,27.65,38.4C61.43,194.74,93.12,208,128,208s66.57-13.26,91.66-38.34c18.83-18.83,27.3-37.61,27.65-38.4A8,8,0,0,0,247.31,124.76ZM128,192c-30.78,0-57.67-11.19-79.93-33.25A133.47,133.47,0,0,1,25,128,133.33,133.33,0,0,1,48.07,97.25C70.33,75.19,97.22,64,128,64s57.67,11.19,79.93,33.25A133.46,133.46,0,0,1,231.05,128C223.84,141.46,192.43,192,128,192Zm0-112a48,48,0,1,0,48,48A48.05,48.05,0,0,0,128,80Zm0,80a32,32,0,1,1,32-32A32,32,0,0,1,128,160Z\"/></svg>",
 };
 export const RULES = {
   "button": [

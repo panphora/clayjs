@@ -1,6 +1,6 @@
 import { jest } from "@jest/globals";
 import toast, { toastPersistent } from "../../src/ui/toast.js";
-import { TOKENS, FONT_SANS } from "../../src/ui/bevel.js";
+import { TOKENS, FONT_SANS, GLYPHS } from "../../src/ui/bevel.js";
 import { capture, last, expectHostileProof, expectCallsResolved } from "./helpers/injected-ui.js";
 
 const stack = () => document.querySelector("[data-clay-toasts]");
@@ -8,6 +8,11 @@ const toasts = () => [...document.querySelectorAll("[data-clay-toast]")];
 // Behaviour controls find a toast by either marker, so they pass on the class-based
 // toasts this replaces and keep passing after: timing and dismissal must not move.
 const anyToasts = () => [...document.querySelectorAll("[data-clay-toast], .toast")];
+const parsedGlyph = (markup) => {
+  const template = document.createElement("template");
+  template.innerHTML = markup;
+  return template.content.firstElementChild;
+};
 
 beforeEach(() => {
   jest.useFakeTimers();
@@ -50,6 +55,32 @@ test("tone: the inline-start edge and the icon follow the type, unknown types fa
   expect(toasts().at(-1).getAttribute("data-clay-toast")).toBe("success");
   toastPersistent("odd too", "nonsense");
   expect(toasts().at(-1).getAttribute("data-clay-toast")).toBe("warning");
+});
+
+test("icons: each tone and the close use the generated Bevel glyph", () => {
+  const expected = {
+    success: GLYPHS.toastSuccess,
+    error: GLYPHS.toastWarning,
+    warning: GLYPHS.toastWarning,
+    info: GLYPHS.toastInfo,
+  };
+  for (const [type, markup] of Object.entries(expected)) {
+    toast(type, type);
+    const actual = toasts().at(-1).querySelector("svg");
+    const source = parsedGlyph(markup);
+    expect(actual.getAttribute("viewBox")).toBe(source.getAttribute("viewBox"));
+    expect(actual.querySelector("path").getAttribute("d")).toBe(source.querySelector("path").getAttribute("d"));
+    expect([actual.getAttribute("width"), actual.getAttribute("height"), actual.getAttribute("aria-hidden")])
+      .toEqual(["16", "16", "true"]);
+  }
+
+  toastPersistent("Offline", "warning");
+  const actual = toasts().at(-1).querySelector("button svg");
+  const source = parsedGlyph(GLYPHS.toastClose);
+  expect(actual.getAttribute("viewBox")).toBe(source.getAttribute("viewBox"));
+  expect(actual.querySelector("path").getAttribute("d")).toBe(source.querySelector("path").getAttribute("d"));
+  expect([actual.getAttribute("width"), actual.getAttribute("height"), actual.getAttribute("aria-hidden")])
+    .toEqual(["14", "14", "true"]);
 });
 
 test("material: a Bevel surface, the message in the system font as text", () => {

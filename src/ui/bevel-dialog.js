@@ -3,7 +3,7 @@
 // backdrop clicks and settling, so each keeps the rules it already had.
 import { set } from "../lib/hostile-css.js";
 import { bevelBox, bevelSurface, bevelText, pageScheme, protectIcon } from "./bevel-controls.js";
-import { TOKENS, FONT_SANS, RULES } from "./bevel.js";
+import { TOKENS, FONT_SANS, RULES, GLYPHS } from "./bevel.js";
 
 // A frame's own way to settle itself. The modal is a singleton and clears every frame
 // when it opens; a frame it does not own (the crop dialog) registers here, so it is
@@ -32,8 +32,6 @@ export function keepFocusIn(container, event) {
 // The dashboard's dialog (Bevel's React dialog with the dashboard's overrides), drawn
 // inline. ClayJS loads no webfonts, so the title's Newsreader falls back to Georgia.
 const LINE = `1px solid ${TOKENS["line-2"]}`;
-const CLOSE_X =
-  '<svg viewBox="0 0 256 256" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M205.66,194.34a8,8,0,0,1-11.32,11.32L128,139.31,61.66,205.66a8,8,0,0,1-11.32-11.32L116.69,128,50.34,61.66A8,8,0,0,1,61.66,50.34L128,116.69l66.34-66.35a8,8,0,0,1,11.32,11.32L139.31,128Z"/></svg>';
 
 // The close: a column at the header's right edge in the button face, or a 62px square
 // at the panel's corner when there is no header.
@@ -48,7 +46,7 @@ function dialogClose(label, inHeader) {
   b.type = "button";
   b.setAttribute("aria-label", label);
   b.title = label;
-  b.innerHTML = CLOSE_X;
+  b.innerHTML = GLYPHS.dialogClose;
   protectIcon(b.firstElementChild, 16);
   b.addEventListener("pointerenter", () => set(b, "background", hover));
   b.addEventListener("pointerleave", () => set(b, "background", TOKENS.face));

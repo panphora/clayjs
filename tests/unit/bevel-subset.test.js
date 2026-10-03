@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { spawnSync } from "node:child_process";
 import { generate, validateModule } from "../../scripts/build-bevel-subset.mjs";
-import { FONT_SANS, TOKEN_NAMES, RECIPES } from "../../scripts/bevel-manifest.mjs";
+import { FONT_SANS, GLYPHS as GLYPH_SPECS, TOKEN_NAMES, RECIPES } from "../../scripts/bevel-manifest.mjs";
 
 /**
  * src/ui/bevel.js is the slice of Bevel that ClayJS injects into somebody else's
@@ -48,6 +48,34 @@ test("tokens: the manifest list, every one a light-dark() pair", () => {
   expect(Object.keys(subset.TOKENS)).toHaveLength(28);
   for (const value of Object.values(subset.TOKENS)) {
     expect(value).toMatch(/^light-dark\(#[0-9A-Fa-f]{6}, #[0-9A-Fa-f]{6}\)$/);
+  }
+});
+
+test("glyphs: every manifest use comes from the library at its requested box size", () => {
+  expect(GLYPH_SPECS).toEqual({
+    toastSuccess: { name: "check", size: 16 },
+    toastWarning: { name: "warning", size: 16 },
+    toastInfo: { name: "info", size: 16 },
+    toastClose: { name: "close", size: 14 },
+    dialogClose: { name: "close", size: 16 },
+    conflictEye: { name: "eye", size: 16 },
+  });
+  expect(Object.keys(subset.GLYPHS)).toEqual(Object.keys(GLYPH_SPECS));
+  const viewBoxes = {
+    toastSuccess: "0 0 24 24",
+    toastWarning: "0 0 256 256",
+    toastInfo: "0 0 24 24",
+    toastClose: "0 0 256 256",
+    dialogClose: "0 0 256 256",
+    conflictEye: "0 0 256 256",
+  };
+  for (const [name, spec] of Object.entries(GLYPH_SPECS)) {
+    const template = document.createElement("template");
+    template.innerHTML = subset.GLYPHS[name];
+    const svg = template.content.firstElementChild;
+    expect(svg.getAttribute("viewBox")).toBe(viewBoxes[name]);
+    expect([svg.getAttribute("width"), svg.getAttribute("height")]).toEqual([String(spec.size), String(spec.size)]);
+    expect([svg.getAttribute("aria-hidden"), svg.getAttribute("focusable")]).toEqual(["true", "false"]);
   }
 });
 
