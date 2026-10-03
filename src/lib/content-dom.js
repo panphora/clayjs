@@ -5,9 +5,9 @@ const UNSUPPORTED_SELECTOR = /:(?:focus(?:-within|-visible)?|hover|active|visite
 function copyControlState(source, copy) {
   if (!/^(INPUT|TEXTAREA|SELECT|OPTION)$/.test(source.tagName || '')) return
   const type = (source.getAttribute?.('type') || '').toLowerCase()
-  if ('value' in source && 'value' in copy && source.tagName !== 'OPTION' && type !== 'checkbox' && type !== 'radio') copy.value = source.value
-  if ('checked' in source && 'checked' in copy) copy.checked = source.checked
-  if ('selected' in source && 'selected' in copy) copy.selected = source.selected
+  if ('value' in source && 'value' in copy && source.tagName !== 'OPTION' && type !== 'checkbox' && type !== 'radio' && type !== 'file') copy.value = source.value
+  if (source.tagName === 'INPUT' && (type === 'checkbox' || type === 'radio')) copy.checked = source.checked
+  if (source.tagName === 'OPTION') copy.selected = source.selected
   if (source.tagName === 'SELECT') {
     for (let i = 0; i < source.options.length; i++) copy.options[i].selected = source.options[i].selected
   }
