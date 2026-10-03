@@ -144,7 +144,7 @@ cascade layer beat a page's unlayered `!important` rules.
 | Toasts | `src/ui/toast.js` | Bevel controls | Keeps caller options and timing; the dashboard's toast style; markers are `data-clay-toasts` and `data-clay-toast`. |
 | Modal shell | `src/ui/modal.js`, `src/ui/bevel-dialog.js` | Bevel controls | Keeps focus, Escape and settling; `title`, `html`, `yes` and `no` take markup or a node, and caller content is never styled. |
 | Ask, confirm, tell and snippet dialogs | `src/ui/dialogs.js` | Bevel controls | Keeps promise and callback behaviour. |
-| AI edit chrome | `src/plugins/ai-edit.js` | Bevel controls | Ring, panel, chip and bubble only; the contenteditable focus rule is unchanged. |
+| AI edit chrome | `src/plugins/ai-edit.js` | Bevel controls | Ring, panel, chip, bubble and the bottom status bar only; the contenteditable focus rule is unchanged. |
 | RichClay toolbar, menus, floating toolbar, link dialog | `src/plugins/richclay.js`, `src/ui/skins/richclay.js` | vendor skin | Edited prose is never restyled. RichClay has no image toolbar; Squire's resize handles sit inside the prose. |
 | Quickcrop frame | `src/plugins/quickcrop.js` | Bevel controls | Frames the vendored cropper; crop geometry untouched. |
 | Quickcrop stage | `src/plugins/quickcrop.js`, `src/ui/skins/quickcrop.js` | vendor skin | Crop geometry untouched. |

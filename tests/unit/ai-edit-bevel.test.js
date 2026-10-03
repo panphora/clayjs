@@ -1,9 +1,9 @@
 import { jest } from "@jest/globals";
-import { TOKENS, FONT_SANS } from "../../src/ui/bevel.js";
+import { TOKENS, SHADOW, FONT_SANS, FONT_MONO } from "../../src/ui/bevel.js";
 import { capture, captureAsync, last, expectHostileProof, expectCallsResolved } from "./helpers/injected-ui.js";
 
 /**
- * The ai-edit chrome on Bevel: panel, ring, chip and bubble are drawn on somebody
+ * The ai-edit chrome on Bevel: panel, bar, ring, chip and bubble are drawn on somebody
  * else's page, so each one holds the hostile-CSS contract, takes its material from the
  * generated subset, and shows and hides through an inline !important display that a
  * page rule cannot override. Behaviour lives in ai-edit-plugin.test.js; this file is
@@ -42,7 +42,10 @@ beforeEach(() => {
 
 afterEach(() => {
   document.documentElement.style.removeProperty("color-scheme");
+  // Compose text is a draft now, so a leftover would be restored by the next test.
+  if (part("input")) part("input").value = "";
   document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+  if (!root("panel").hidden) document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
 });
 
 function openOnSection() {
@@ -51,7 +54,7 @@ function openOnSection() {
 
 test("every chrome root is hostile-proof, and every declaration it was built with is resolved", () => {
   let checked = 0;
-  for (const name of ["panel", "ring", "chip", "bubble"]) {
+  for (const name of ["panel", "status-bar", "ring", "chip", "bubble"]) {
     expect(root(name)).not.toBeNull();
     checked += expectHostileProof(root(name));
     expectCallsResolved(buildCalls, root(name));
@@ -74,14 +77,14 @@ test("the panel is a Bevel surface holding a Bevel input and Bevel buttons", () 
 
   expect(panel.style.getPropertyValue("border-radius")).toBe("12px");
   expect(part("pointer")).not.toBeNull();
-  expect(last(buildCalls, part("send"), "background")).toBe(TOKENS.ink);
-  expect(last(buildCalls, part("keep"), "background")).toBe(TOKENS.ink);
-  expect(last(buildCalls, part("revert"), "color")).toBe(TOKENS.brass);
-  expect(last(buildCalls, part("stop"), "background")).toBe(TOKENS.face);
-  for (const name of ["send", "stop", "revert", "keep"]) {
-    expect(part(name).localName).toBe("button");
-    expect(part(name).firstElementChild.localName).toBe("span");
+  // Compose only: Send, and the panel's own note. Stop, Keep, Revert and the reply's
+  // warnings belong to the bar now.
+  for (const name of ["stop", "keep", "revert", "warnings"]) {
+    expect([name, panel.querySelector(`[data-clay-ai-edit-part="${name}"]`)]).toEqual([name, null]);
   }
+  expect(last(buildCalls, part("send"), "background")).toBe(TOKENS.ink);
+  expect(part("send").localName).toBe("button");
+  expect(part("send").firstElementChild.localName).toBe("span");
 });
 
 test("ring, chip and bubble keep their shapes, sizes and placement in Bevel material", () => {
@@ -113,7 +116,12 @@ test("hidden chrome carries display:none !important and shown chrome does not", 
   expect(display(root("panel"))).toEqual(["none", "important"]);
   expect(display(root("chip"))).toEqual(["none", "important"]);
   expect(display(root("ring"))).toEqual(["none", "important"]);
+  expect(display(root("status-bar"))).toEqual(["none", "important"]);
   expect(display(root("bubble"))[0]).not.toBe("none");
+  for (const name of ["bar-stop", "bar-keep", "bar-revert", "bar-close"]) {
+    expect([name, part(name).hidden]).toEqual([name, true]);
+    expect([name, ...display(part(name))]).toEqual([name, "none", "important"]);
+  }
 
   openOnSection();
   expect(root("panel").hidden).toBe(false);
@@ -121,14 +129,12 @@ test("hidden chrome carries display:none !important and shown chrome does not", 
   expect(display(root("ring"))).toEqual(["block", "important"]);
   expect(part("send").hidden).toBe(false);
   expect(display(part("send"))).toEqual(["inline-flex", "important"]);
-  for (const name of ["stop", "revert", "keep", "warnings"]) {
-    expect([name, part(name).hidden]).toEqual([name, true]);
-    expect([name, ...display(part(name))]).toEqual([name, "none", "important"]);
-  }
+  // Nothing has been sent, so no part of a live edit is on screen.
+  expect(display(root("status-bar"))).toEqual(["none", "important"]);
 
   // A Bevel button repaints its whole inline style on hover, press and focus; the
   // hidden ones must come out of that still hidden.
-  for (const name of ["stop", "revert", "keep"]) {
+  for (const name of ["bar-stop", "bar-keep", "bar-revert", "bar-close"]) {
     const el = part(name);
     for (const type of ["pointerenter", "pointerdown", "pointerup", "pointerleave"]) el.dispatchEvent(new MouseEvent(type, { bubbles: true }));
     el.dispatchEvent(new FocusEvent("focus"));
@@ -137,23 +143,98 @@ test("hidden chrome carries display:none !important and shown chrome does not", 
   }
 });
 
-test("status tone is a data-tone attribute and an inline colour, flipping both ways", () => {
+test("the status bar is a compact fixed Bevel surface with a flexible speaking line", () => {
+  const bar = root("status-bar");
+  expect(last(buildCalls, bar, "background")).toBe(TOKENS.surface);
+  expect(last(buildCalls, bar, "color")).toBe(TOKENS.ink);
+  expect(last(buildCalls, bar, "font")).toContain(FONT_SANS);
+  expect(last(buildCalls, bar, "box-shadow")).toBe(SHADOW);
+  expect(bar.style.getPropertyValue("position")).toBe("fixed");
+  expect(bar.style.getPropertyValue("left")).toBe("50%");
+  expect(bar.style.getPropertyValue("bottom")).toBe("16px");
+  expect(bar.style.getPropertyValue("z-index")).toBe("99999");
+  expect(bar.style.getPropertyValue("padding")).toBe("8px 10px");
+  expect(last(buildCalls, bar, "width")).toBe("min(35rem, calc(100vw - 32px))");
+  expect(last(buildCalls, bar, "transform")).toBe("translateX(-50%)");
+
+  // One row, and the line is the part that gives way, so the controls cannot be pushed
+  // off a 375px screen; the full wording stays in the DOM and in the accessible name
+  // while the line ellipsises.
+  const status = part("bar-status");
+  expect(last(buildCalls, status, "flex")).toBe("1");
+  expect(status.style.getPropertyValue("min-width")).toBe("0");
+  expect(status.style.getPropertyValue("overflow")).toBe("hidden");
+  expect(status.style.getPropertyValue("text-overflow")).toBe("ellipsis");
+  expect(status.style.getPropertyValue("white-space")).toBe("nowrap");
+  expect(last(buildCalls, status, "color")).toBe(TOKENS.muted);
+  expect(last(buildCalls, status, "font")).toContain(FONT_MONO);
+  expect(status.getAttribute("role")).toBe("status");
+  expect(status.getAttribute("aria-live")).toBe("polite");
+
+  expect(last(buildCalls, part("bar-stop"), "background")).toBe(TOKENS.face);
+  expect(last(buildCalls, part("bar-keep"), "background")).toBe(TOKENS.ink);
+  expect(last(buildCalls, part("bar-revert"), "color")).toBe(TOKENS.brass);
+  for (const name of ["bar-stop", "bar-keep", "bar-revert", "bar-close"]) {
+    expect([name, part(name).localName]).toEqual([name, "button"]);
+    expect([name, last(buildCalls, part(name), "flex")]).toEqual([name, "none"]);
+  }
+  const close = part("bar-close");
+  expect(close.getAttribute("aria-label")).toBe("Keep and close");
+  expect(close.title).toBe("Keep and close");
+  expect(close.querySelector("svg")).not.toBeNull();
+});
+
+test("the bar takes the page's scheme when it appears, and Stop takes it away", async () => {
+  document.documentElement.style.setProperty("color-scheme", "dark");
+  openOnSection();
+  part("input").value = "tighten this";
+  await captureAsync(async () => {
+    part("send").click();
+    await flush();
+  });
+  expect(root("panel").hidden).toBe(true);
+  expect(root("status-bar").hidden).toBe(false);
+  expect(root("status-bar").style.getPropertyValue("color-scheme")).toBe("dark");
+  expect(part("bar-status").textContent).toBe("Sending…");
+  expect([part("bar-stop").hidden, part("bar-stop").style.getPropertyValue("display")]).toEqual([false, "inline-flex"]);
+  for (const name of ["bar-keep", "bar-revert", "bar-close"]) {
+    expect([name, part(name).hidden]).toEqual([name, true]);
+  }
+
+  part("bar-stop").click();
+  expect(root("status-bar").hidden).toBe(true);
+  expect(root("status-bar").style.getPropertyValue("display")).toBe("none");
+});
+
+test("a host failure is spoken by the bar in the warning colour, with X to close it", async () => {
+  fakeWire.send.mockImplementationOnce(() => ({
+    id: "h", done: Promise.resolve({ state: "error", error: "the helper reported an error" }), cancel: jest.fn(),
+  }));
+  openOnSection();
+  part("input").value = "tighten this";
+  const calls = await captureAsync(async () => {
+    part("send").click();
+    await flush();
+  });
+  const status = part("bar-status");
+  expect(root("status-bar").hidden).toBe(false);
+  expect(status.textContent).toBe("the helper reported an error");
+  expect(status.getAttribute("data-tone")).toBe("warn");
+  expect(last(calls, status, "color")).toBe(TOKENS.ox);
+  expect([part("bar-close").hidden, part("bar-keep").hidden]).toEqual([false, true]);
+});
+
+test("a request too large is the panel's own warning, in the panel's own tone", () => {
   openOnSection();
   const status = part("status");
   part("input").value = "x".repeat(1000 * 1024);
-  let calls = capture(() => part("send").click());
+  const calls = capture(() => part("send").click());
   expect(status.getAttribute("data-tone")).toBe("warn");
   expect(last(calls, status, "color")).toBe(TOKENS.ox);
-
-  part("input").value = "tighten this";
-  calls = capture(() => part("send").click());
-  expect(status.textContent).toBe("sending…");
-  expect(status.hasAttribute("data-tone")).toBe(false);
-  expect(last(calls, status, "color")).toBe(TOKENS.muted);
-  expect([part("stop").hidden, part("stop").style.getPropertyValue("display")]).toEqual([false, "inline-flex"]);
-  expect([part("send").hidden, part("send").style.getPropertyValue("display")]).toEqual([true, "none"]);
-  part("stop").click();
-  expect([part("stop").hidden, part("stop").style.getPropertyValue("display")]).toEqual([true, "none"]);
+  // Nothing was sent, so the box stays open with its text and no bar appears.
+  expect(root("panel").hidden).toBe(false);
+  expect(part("input").value.length).toBe(1000 * 1024);
+  expect(root("status-bar").hidden).toBe(true);
   expect([part("send").hidden, part("send").style.getPropertyValue("display")]).toEqual([false, "inline-flex"]);
 });
 

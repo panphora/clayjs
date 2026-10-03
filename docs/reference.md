@@ -451,13 +451,38 @@ token variant, `POST /_/save/{token}`, read from `<html savetoken>`.
   a click on bare section padding, and the **AI** bubble for the whole page (just left of the
   CMS's Edit content toggle when there is one).
 
-  The reply previews in place with Revert and Keep. While it is on screen every save waits,
-  explicit ones included (`clay.save()`, ⌘S, `[persist]`, the wire's pre-send flush): Revert
-  lets a save asked for meanwhile run, and Keep saves the rewrite through `clay.save()`. A reply
-  that adds a script, an inline event handler, a `javascript:` URL, `srcdoc`, or an `iframe`,
-  `frame`, `object` or `embed` the original did not have is refused before it is shown. A
-  leading `@token` picks the engine, `@file.ext` adds context, and `@page` saves the page first
-  so the helper reads it from disk.
+  The box composes and nothing else. Any click on the page away from it closes it, a click
+  inside the block being edited included, and the click still lands where it was aimed. Text
+  typed and not sent is kept as that target's draft and comes back when the box is opened on the
+  same target again, so a click away costs nothing. A sent comment is that target's draft too
+  until its reply is ready, so Error and Stop reopen the box with it. The box's own Stop, Keep
+  and Revert are gone: once a request is sent the whole live state moves to a bar fixed at the
+  bottom centre of the viewport, and the ring stays on the block being edited while the bar is up.
+
+  The bar shows one state at a time. **Working** shows the host's own progress line and **Stop**,
+  which cancels the request and leaves the page exactly as it was. **Ready** shows `Edit ready.`
+  with any warning the reply carried and the model that wrote it, and offers **Keep**, **Revert**
+  and an **X** that keeps and closes. **Error** shows the host's message and an X that closes the
+  bar, with the edit already rewound; a cancellation on the host's own side, the AI Editing switch
+  going off or HTML Clay quitting, reports `HTML Clay stopped this edit.` there. After Keep the
+  bar reports `Saving…` and then the host's answer, and closes itself about a second and a half
+  later. Keep saves what the live preview shows, a fix made by hand in it included, and a save
+  that fails or conflicts stays on the bar with its message and its X instead of closing. Revert
+  rewinds the edit and closes the bar. While the reply waits, every save is held, explicit ones
+  included (`clay.save()`, ⌘S, `[persist]`, the wire's pre-send flush): Revert lets a save asked
+  for meanwhile run, and Keep releases the hold and saves the rewrite through `clay.save()`. A
+  reply that adds a script, an inline event handler, a `javascript:` URL, `srcdoc`, or an `iframe`,
+  `frame`, `object` or `embed` the original did not have is refused before it is shown, and the
+  bar says so.
+
+  Escape reads the bar first: in Working it stops the request, in Ready it keeps the edit, in
+  Error it closes the bar, and in Saving it does nothing. With no bar and the box open it closes
+  the box and keeps the draft. It stands down when the page has a claim on it too: the event was
+  already handled, a `[data-clay-modal]`, `dialog[open]` or `[aria-modal="true"]` element is open,
+  or the caret is in a field the page owns. On a page with `[data-edit-id]` sections a second
+  click on the whole page bubble closes an empty box and keeps a typed one open. A leading
+  `@token` picks the engine, `@file.ext` adds context, and `@page` saves the page first so the
+  helper reads it from disk.
 
   Edit mode only, and dormant unless `clay.wire.helpers()` lists an `ai-edit` helper. Listed as
   `unavailable` (the host's switch is off), ⌘J opens the panel with a note and no Send. HTML Clay

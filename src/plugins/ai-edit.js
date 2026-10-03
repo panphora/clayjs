@@ -26,6 +26,12 @@
  * the plugin saves first and then sends `{ page: true }`, because a whole page never
  * fits the envelope.
  *
+ * The comment box is compose only: a click anywhere outside it closes it, keeping the
+ * text as a draft for that target, and Send moves the whole live state to one compact
+ * bar at the bottom of the viewport. The bar carries the host's progress and Stop, the
+ * reply's warnings and Keep/Revert/X, and then the save, so no part of a running edit
+ * depends on a popover the person may want out of the way.
+ *
  * Undo integration: observers pause at request start. On Keep the element is rewound
  * to the snapshot while still paused, observers resume, then one final morph lands
  * the whole AI edit as a single undoable step. On Revert the rewind happens under
@@ -45,8 +51,8 @@ import { enableContentEditable } from "../core/admin-contenteditable.js";
 import onDomReady from "../lib/dom-ready.js";
 import wire from "./wire.js";
 import { set } from "../lib/hostile-css.js";
-import { bevelBox, bevelButton, bevelSurface, bevelText, bevelInput, pageScheme, setShown, RUNTIME_ONLY } from "../ui/bevel-controls.js";
-import { TOKENS, FONT_SANS, FONT_MONO, SHADOW } from "../ui/bevel.js";
+import { bevelBox, bevelButton, bevelSurface, bevelText, bevelInput, bevelIconButton, pageScheme, setShown, RUNTIME_ONLY } from "../ui/bevel-controls.js";
+import { TOKENS, GLYPHS, FONT_SANS, FONT_MONO, SHADOW } from "../ui/bevel.js";
 
 const HELPER = "ai-edit";
 const UNIT_SELECTOR = "h1,h2,h3,h4,h5,h6,p,figure";
@@ -60,11 +66,22 @@ const NOT_TEXT = "script,style,template,textarea,input,select,button,iframe,svg,
 // here, where the message can say what to do about it.
 const MAX_PAYLOAD_BYTES = 900 * 1024;
 const TOO_LARGE = "This section is too large for AI editing; select a smaller part.";
+const SAVE_FAILED = "The save did not finish; the edit is still on the page.";
 
 let requestCounter = 0;
 let session = null; // one edit at a time
-let panel, ring, textarea, statusEl, warningsEl, pointer, chip, docBubble;
+let panel, ring, textarea, statusEl, pointer, chip, docBubble;
+let bar, barStatus, barStop, barKeep, barRevert, barClose;
 let buttons = {};
+// A visible bar is chrome in its own right, so its mode is tracked explicitly rather
+// than inferred from the session: Error and Saving outlive the session.
+let barMode = null;  // "working", "ready", "saving" or "error"
+// One request's whole life on the bar, Working through Ready or Error to Saving. A save
+// continuation or a close timer from an older lifecycle must never touch a newer bar.
+let barLifecycle = null;
+let barCloseTimer = null;
+let panelPointerDown = false; // the last pointerdown began in the panel: its click is not a page click
+const drafts = new WeakMap();  // compose text a target keeps while the panel is shut
 let anchorEl = null;    // element the panel is currently anchored to
 let chipTarget = null;  // unit the hover chip currently points at
 let chipHideTimer = null;
@@ -276,31 +293,36 @@ async function sendRequest(el, comment, quote) {
   // Refused here, before anything is sent or paused: the envelope would refuse it
   // anyway, and a refusal the page cannot explain is worse than one it can.
   if (new Blob([JSON.stringify(session.payload)]).size > MAX_PAYLOAD_BYTES) {
+    // Not a Send: the box stays open with its text, draft included.
     session = null;
     setStatus(TOO_LARGE, 'warn');
-    showButtons('send');
     return;
   }
+  // The sent comment is this target's draft until the reply is ready: Error, Stop, a
+  // refused reply, a morph failure and a host cancellation all leave it in place.
+  drafts.set(el, comment);
+  closePanelForSend();
   session.paused = true;
   pauseObservers();
-  setStatus('sending\u2026');
-  showButtons('stop');
+  barLifecycle = {};
+  showBar('working');
+  setBarStatus('Sending\u2026');
   // @page reads the file the host has on disk, so the page has to be on disk first.
   if (session.payload.page) await window.clay.save();
   if (!session) return; // cancelled while saving
   // The host owns the deadline; this side only renders. A named request defaults to
   // `document: "none"`, so nothing here asks anyone to write the file.
   // Only the live session's statuses land: a line from a request the user already
-  // cancelled or replaced must not repaint the panel.
+  // cancelled or replaced must not repaint the bar.
   const handle = wire.send(session.payload, {
     helper: HELPER,
-    onStatus: ({ text }) => { if (session?.handle === handle) setStatus(text); }
+    onStatus: ({ text }) => { if (session?.handle === handle) setBarStatus(text); }
   });
   session.handle = handle;
   const outcome = await handle.done;
   if (!session || session.handle !== handle) return;
   if (outcome.state === 'done') onDone(outcome.result || {});
-  else if (outcome.state === 'cancelled') { revertSession(); setStatus('cancelled'); showButtons('send'); }
+  else if (outcome.state === 'cancelled') onError('HTML Clay stopped this edit.');
   else onError(outcome.error || 'the helper reported an error');
 }
 
@@ -395,18 +417,24 @@ function onDone(payload) {
     return;
   }
   positionChrome();
-  setStatus(payload.model ? `done (${payload.model})` : 'done');
-  showWarnings(warnings);
-  showButtons('keep', 'revert');
-  textarea.value = '';
-  fitTextarea();
+  drafts.delete(session.el); // delivered: the comment is no longer this target's draft
+  showBar('ready');
+  setBarStatus(readyText(warnings, payload.model), warnings.length ? 'warn' : '');
+}
+
+// The reply's own caveats ride with the invitation to keep it, and the model that
+// wrote it is named when the host said which one it was.
+function readyText(warnings, model) {
+  const parts = ['Edit ready.', ...warnings.map(w => '\u26a0 ' + w)];
+  if (model) parts.push(`(${model})`);
+  return parts.join(' ');
 }
 
 function onError(message) {
   if (!session) return;
   revertSession();
-  setStatus(message, 'warn');
-  showButtons('send');
+  showBar('error');
+  setBarStatus(message, 'warn');
 }
 
 // Rewind to the pre-edit snapshot and release observers. The paused rewind means
@@ -428,28 +456,40 @@ function revertSession() {
 
 async function keepSession() {
   const s = session;
+  if (!s) return;
   session = null;
+  // What is on screen is what Keep keeps: the preview may have been edited by hand.
+  const liveResult = s.docMode ? strippedBodyHTML() : s.el.outerHTML;
   try {
     sessionMorph(s, s.snapshot, { rewind: true }); // rewind while observers are still paused
   } finally {
     if (s.paused) resumeObservers();    // boundary drain discards the rewind
     if (s.held) releaseAllSaves({ replay: false });
   }
-  sessionMorph(s, s.finalCandidate);  // recorded: the whole edit = one undo step
+  sessionMorph(s, liveResult);  // recorded: the whole edit = one undo step
   positionChrome();
-  showButtons('send');
-  setStatus('saving\u2026');
+  showBar('saving');
+  setBarStatus('Saving\u2026');
+  const lifecycle = barLifecycle;
   const result = await window.clay.save();
-  setStatus((result && result.msg) || 'saved', result && result.msgType === 'error' ? 'warn' : '');
+  // An older lifecycle's save answers an older bar, and has nothing to say to this one.
+  if (lifecycle !== barLifecycle) return;
+  if (result && result.ok === false) {
+    showBar('error'); // a failed or conflicting save stays on screen until it is dismissed
+    setBarStatus(result.msg || SAVE_FAILED, 'warn');
+    return;
+  }
+  setBarStatus((result && result.msg) || 'Saved', result && result.msgType === 'error' ? 'warn' : '');
+  scheduleBarClose();
 }
 
-function cancelStream() {
-  // Stop is live from the moment the request starts, which includes the window where
-  // an @page save is still in flight and there is no handle yet.
+// Stop is live from the moment the request starts, which includes the window where an
+// @page save is still in flight and there is no handle yet. Nothing is left on screen:
+// the edit is rewound and the bar goes with it.
+function stopSession() {
   session?.handle?.cancel();
   revertSession();
-  setStatus('cancelled');
-  showButtons('send');
+  closeBar();
 }
 
 // ---------------------------------------------------------------- chrome
@@ -517,22 +557,40 @@ function buildChrome() {
   statusEl.setAttribute('role', 'status');
   statusEl.setAttribute('aria-live', 'polite');
 
-  const variants = { send: 'primary', stop: 'default', revert: 'quiet', keep: 'primary' };
-  const labels = { send: 'Send', stop: 'Stop', revert: 'Revert', keep: 'Keep' };
-  for (const name of ['send', 'stop', 'revert', 'keep']) {
-    buttons[name] = part(bevelButton(labels[name], { variant: variants[name], extra: ['min-height:40px', 'flex:none'] }), name);
-    setShown(buttons[name], name === 'send', 'inline-flex');
-  }
+  buttons.send = part(bevelButton('Send', { variant: 'primary', extra: ['min-height:40px', 'flex:none'] }), 'send');
+  setShown(buttons.send, true, 'inline-flex');
 
   const row = bevelBox('div', ['display:flex', 'align-items:flex-start', 'gap:8px']);
-  row.append(textarea, buttons.send, buttons.stop, buttons.revert, buttons.keep);
+  row.append(textarea, buttons.send);
 
-  warningsEl = part(bevelText('div', [
-    'display:block', 'margin-top:8px', `color:${TOKENS.ox}`, 'white-space:pre-line',
-  ]), 'warnings');
-  setShown(warningsEl, false);
+  panel.append(pointer, row, statusEl);
 
-  panel.append(pointer, row, statusEl, warningsEl);
+  // One line, bottom centre, never wider than the viewport it is centred in: the live
+  // state of an edit that no longer has a popover. The text takes what the controls
+  // leave and ellipsises there, so a long host line cannot push a button off a 375px
+  // screen; its full wording stays in the DOM and in the accessible name.
+  bar = marked(bevelSurface('div', [
+    'position:fixed', 'left:50%', 'bottom:16px', 'transform:translateX(-50%)',
+    'z-index:99999', 'width:min(35rem, calc(100vw - 32px))',
+    'padding:8px 10px', 'border-radius:12px', 'gap:8px', 'align-items:center',
+    `box-shadow:${SHADOW}`, `font:13px/1.5 ${FONT_SANS}`, scheme,
+  ]), 'data-clay-ai-edit', 'status-bar');
+  setShown(bar, false, 'flex');
+
+  barStatus = part(bevelText('div', [
+    'display:block', 'flex:1', 'min-width:0', 'overflow:hidden', 'text-overflow:ellipsis',
+    'white-space:nowrap', `color:${TOKENS.muted}`, `font:12.5px/1.5 ${FONT_MONO}`,
+  ]), 'bar-status');
+  barStatus.setAttribute('role', 'status');
+  barStatus.setAttribute('aria-live', 'polite');
+
+  barStop = part(bevelButton('Stop', { extra: ['flex:none'] }), 'bar-stop');
+  barKeep = part(bevelButton('Keep', { variant: 'primary', extra: ['flex:none'] }), 'bar-keep');
+  barRevert = part(bevelButton('Revert', { variant: 'quiet', extra: ['flex:none'] }), 'bar-revert');
+  barClose = part(bevelIconButton(GLYPHS.toastClose, { label: 'Keep and close' }), 'bar-close');
+  barClose.pin({ flex: 'none' });
+  for (const control of [barStop, barKeep, barRevert, barClose]) setShown(control, false, 'inline-flex');
+  bar.append(barStatus, barStop, barKeep, barRevert, barClose);
 
   chip = marked(bevelButton('AI', {
     small: true,
@@ -547,13 +605,16 @@ function buildChrome() {
   docBubble.title = 'Comment on the whole page';
   placeBubble();
 
-  document.body.append(ring, panel, chip, docBubble);
+  document.body.append(ring, panel, bar, chip, docBubble);
   syncBubble();
 
   buttons.send.addEventListener('click', submit);
-  buttons.stop.addEventListener('click', cancelStream);
-  buttons.keep.addEventListener('click', keepSession);
-  buttons.revert.addEventListener('click', () => { revertSession(); setStatus('reverted'); showButtons('send'); });
+  barStop.addEventListener('click', stopSession);
+  barKeep.addEventListener('click', keepSession);
+  barRevert.addEventListener('click', () => { revertSession(); closeBar(); });
+  // X means Keep while the edit waits to be decided, and only closes the bar once the
+  // edit has been rewound out of the page.
+  barClose.addEventListener('click', () => { if (barMode === 'ready') keepSession(); else closeBar(); });
   textarea.addEventListener('keydown', (event) => {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
@@ -569,10 +630,10 @@ function buildChrome() {
     const target = chipTarget;
     const selection = chipSelection;
     hideChip();
-    if (target && !session) openPanel(target, selection || quoteFromSelection(target));
+    if (target && !session && !barMode) openPanel(target, selection || quoteFromSelection(target));
   });
   docBubble.addEventListener('click', () => {
-    if (session) return;
+    if (session || barMode) return;
     // Like a click outside, a second click keeps a typed comment: it closes an empty panel only.
     if (!panel.hidden && anchorEl === document.body) {
       if (textarea.value.trim()) textarea.focus();
@@ -595,9 +656,10 @@ function buildChrome() {
   }).observe(document.body, { childList: true });
 
   // A target removed from the page ends its edit, so the save hold and the paused
-  // observers never outlive it.
+  // observers never outlive it. A running bar is no exception: it is torn down with
+  // the target it was describing.
   new MutationObserver(() => {
-    if (anchorEl && !anchorEl.isConnected && !panel.hidden) closePanel();
+    if (anchorEl && !anchorEl.isConnected) abandonTarget();
   }).observe(document.body, { childList: true, subtree: true });
 }
 
@@ -613,12 +675,14 @@ function fitTextarea() {
   placePanelAgain();
 }
 
-// The whole-page bubble belongs to pages built from [data-edit-id] sections. A plain
-// page gets the selection chip and the shortcut instead.
+// The whole-page bubble belongs to pages built from [data-edit-id] sections, and it
+// stands down while the bar holds the screen. A plain page gets the selection chip and
+// the shortcut instead.
 function syncBubble() {
   const doc = docBubble?.ownerDocument;
   if (!doc) return;
-  setShown(docBubble, helperState === 'ready' && !!doc.querySelector('[data-edit-id]'), 'inline-grid');
+  const wanted = !barMode && helperState === 'ready' && !!doc.querySelector('[data-edit-id]');
+  setShown(docBubble, wanted, 'inline-grid');
 }
 
 // The selected words stay marked while the person types, through the CSS Custom
@@ -637,11 +701,10 @@ function applyHelperState() {
   textarea.disabled = !on;
   if (on) {
     if (statusEl.textContent === OFF_MESSAGE) setStatus('');
-    if (!session) showButtons('send');
   } else {
     setStatus(OFF_MESSAGE, 'warn');
-    showButtons();
   }
+  setShown(buttons.send, on, 'inline-flex');
   syncBubble();
 }
 
@@ -699,7 +762,7 @@ function scheduleChipHide() {
 // The chip at the end of a selection: for people who do not know the shortcut, and
 // for browsers that keep Ctrl+J for themselves.
 function showChipForSelection() {
-  if (session || !panel.hidden || helperState !== 'ready' || pageOwnsFocus()) return;
+  if (session || barMode || !panel.hidden || helperState !== 'ready' || pageOwnsFocus()) return;
   const range = liveRange();
   const target = range && targetFromRange(range);
   const selection = target && selectionIn(range, target);
@@ -721,6 +784,8 @@ function showChipForSelection() {
   setShown(chip, true, 'inline-grid');
 }
 
+// Compose-only messages: the host's switch being off and a request too large to send
+// both belong to the box the person is typing in, because the box stays open for them.
 function setStatus(text, tone) {
   set(statusEl, 'margin-top', text ? '8px' : '0');
   statusEl.textContent = text || '';
@@ -730,26 +795,84 @@ function setStatus(text, tone) {
   placePanelAgain();
 }
 
-function showButtons(...names) {
-  for (const [name, button] of Object.entries(buttons)) {
-    setShown(button, names.includes(name), 'inline-flex');
+function setBarStatus(text, tone) {
+  barStatus.textContent = text || '';
+  if (tone === 'warn') barStatus.setAttribute('data-tone', 'warn');
+  else barStatus.removeAttribute('data-tone');
+  set(barStatus, 'color', tone === 'warn' ? TOKENS.ox : TOKENS.muted);
+}
+
+// One place decides what a bar state looks like, so the bubble and the ring can never
+// disagree with it. A pending delayed close belongs to the state that scheduled it.
+function showBar(mode) {
+  clearTimeout(barCloseTimer);
+  barCloseTimer = null;
+  const wasOpen = !!barMode;
+  const focused = document.activeElement;
+  barMode = mode;
+  const controls = {
+    working: [barStop],
+    ready: [barKeep, barRevert, barClose],
+    error: [barClose],
+    saving: [],
+  }[mode] || [];
+  const all = [barStop, barKeep, barRevert, barClose];
+  for (const control of all) {
+    setShown(control, controls.includes(control), 'inline-flex');
   }
-  fitTextarea();
+  hideChip();
+  set(bar, 'color-scheme', pageScheme());
+  setShown(bar, true, 'flex');
+  syncBubble();
+  positionChrome();
+  // The bar opens on the control that belongs to its state, and a state change moves
+  // focus only when the button holding it has just gone away.
+  const first = controls[0];
+  if (first && (!wasOpen || (all.includes(focused) && !controls.includes(focused)))) {
+    first.focus({ preventScroll: true });
+  }
 }
 
-function showWarnings(warnings) {
-  setShown(warningsEl, warnings.length > 0);
-  warningsEl.textContent = warnings.map(w => '\u26a0 ' + w).join('\n');
-  placePanelAgain();
+function scheduleBarClose() {
+  clearTimeout(barCloseTimer);
+  const lifecycle = barLifecycle;
+  barCloseTimer = setTimeout(() => {
+    if (lifecycle && lifecycle === barLifecycle) closeBar();
+  }, 1500);
 }
 
+// The bar is over: the edit it described is finished, so the target goes with it.
+function closeBar(lifecycle) {
+  if (lifecycle !== undefined && lifecycle !== barLifecycle) return; // a stale teardown
+  clearTimeout(barCloseTimer);
+  barCloseTimer = null;
+  barLifecycle = null;
+  if (!panel.hidden) storeDraft(); // an open composer keeps its text through a teardown
+  barMode = null;
+  setShown(bar, false, 'flex');
+  setBarStatus('');
+  anchorEl = null;
+  anchorRange = null;
+  returnFocus = null;
+  pendingSelection = undefined;
+  clearHighlight();
+  setShown(panel, false);
+  textarea.value = '';
+  setShown(ring, false);
+  setShown(pointer, false);
+  syncBubble();
+}
+
+// The ring follows the target while anything is on screen for it, which includes every
+// bar mode; the panel is placed only while it is the thing on screen.
 function positionChrome() {
-  if (!anchorEl || panel.hidden) return;
-  if (!anchorEl.isConnected) { closePanel(); return; }
+  if (!anchorEl) return;
+  if (!anchorEl.isConnected) { abandonTarget(); return; }
   if (anchorEl === document.body) {
     // document mode: no ring, panel pinned above the bubble
     setShown(ring, false);
     setShown(pointer, false);
+    if (panel.hidden) return;
     const bubble = docBubble.getBoundingClientRect();
     const width = panel.offsetWidth || 480;
     set(panel, 'left', Math.max(16, Math.min((bubble.right || window.innerWidth - 16) - width, window.innerWidth - width - 16)) + 'px');
@@ -758,11 +881,12 @@ function positionChrome() {
   }
   const rect = anchorEl.getBoundingClientRect();
   // With selected words the highlight marks them until Send; the ring is for a whole element and for a running edit.
-  setShown(ring, !pendingSelection || !!session);
+  setShown(ring, !!barMode || !pendingSelection || !!session);
   set(ring, 'left', rect.left - 5 + 'px');
   set(ring, 'top', rect.top - 5 + 'px');
   set(ring, 'width', rect.width + 6 + 'px');
   set(ring, 'height', rect.height + 6 + 'px');
+  if (panel.hidden) return;
   // Under the selection while it is still in the page, else under the element.
   const at = anchorRange && anchorRange.startContainer.isConnected && typeof anchorRange.getBoundingClientRect === 'function'
     ? anchorRange.getBoundingClientRect() : null;
@@ -788,6 +912,9 @@ function positionChrome() {
 }
 
 function openPanel(el, quote) {
+  // A composer already open on another target hands its text over as that target's draft
+  // before anything here replaces the target or the box.
+  if (!panel.hidden && anchorEl && anchorEl !== el) storeDraft();
   const range = quote ? liveRange() : null; // read before focus moves into the panel
   const active = document.activeElement;
   returnFocus = active && active !== document.body && !panel.contains(active) ? active : null;
@@ -801,19 +928,28 @@ function openPanel(el, quote) {
   const shown = quote ? (quote.text.trim().length > 400 ? quote.text.trim().slice(0, 400) + '\u2026' : quote.text.trim()) : '';
   panel.dataset.quote = shown;
   setStatus('');
-  showWarnings([]);
-  showButtons('send');
+  textarea.value = drafts.get(el) || '';
   highlight(anchorRange);
   applyHelperState();
   positionChrome();
+  fitTextarea();
   textarea.focus();
   refreshHelperState();
+}
+
+// Typing that was not sent is not thrown away: it is the target's draft until the
+// panel is opened on that target again.
+function storeDraft() {
+  if (!anchorEl) return;
+  if (textarea.value) drafts.set(anchorEl, textarea.value);
+  else drafts.delete(anchorEl);
 }
 
 function closePanel() {
   if (session) { session.handle?.cancel(); revertSession(); }
   const back = returnFocus;
   const hadFocus = panel.contains(document.activeElement);
+  storeDraft();
   anchorEl = null;
   anchorRange = null;
   returnFocus = null;
@@ -826,10 +962,30 @@ function closePanel() {
   if (hadFocus && back && back.isConnected) back.focus({ preventScroll: true });
 }
 
+// The send path closes the box without cancelling anything and without letting the
+// target go: the request is now about that element, and the ring stays on it.
+function closePanelForSend() {
+  anchorRange = null;
+  returnFocus = null;
+  pendingSelection = undefined;
+  clearHighlight();
+  setShown(panel, false);
+  textarea.value = '';
+  fitTextarea();
+  positionChrome();
+}
+
+// The target is gone from the page: whatever was live for it ends, and no observer,
+// save hold or piece of chrome is left behind.
+function abandonTarget() {
+  const s = session;
+  if (s) { s.handle?.cancel(); revertSession(); }
+  closeBar();
+}
+
 function submit() {
   const comment = textarea.value.trim();
   if (!comment || !anchorEl || session || helperState !== 'ready') return;
-  clearHighlight();
   sendRequest(anchorEl, comment, pendingSelection);
 }
 
@@ -853,18 +1009,47 @@ function pageOwnsFocus() {
   return el.matches('input,textarea,select');
 }
 
+// An Escape the page owns stays the page's: it was already handled, a modal is up, or the
+// caret is in a field the page owns. Nothing this plugin drew counts as somebody else's.
+const MODAL_SELECTOR = '[data-clay-modal], dialog[open], [aria-modal="true"]';
+const PAGE_FIELD = 'input,textarea,select,[contenteditable=""],[contenteditable="true"]';
+
+function escapeIsMine(event) {
+  if (event.defaultPrevented) return false;
+  if (document.querySelector(MODAL_SELECTOR)) return false;
+  const el = document.activeElement;
+  if (!el || el === document.body) return true;
+  if (panel.contains(el) || bar.contains(el)) return true;
+  if (el.isContentEditable === true) return false;
+  return !el.matches(PAGE_FIELD);
+}
+
 function wireInteractions() {
   // Clicks: text units are contenteditable (caret) and figures keep their own
-  // interactivity, so neither is intercepted. Only a click on bare section padding
-  // opens the comment box; a click away from an open, empty panel closes it.
+  // interactivity, so neither is intercepted, and nothing here prevents the click from
+  // landing. Any click on the page away from ClayJS chrome closes the box, a click
+  // inside the anchored element included: the caret goes where the person clicked and
+  // what they had typed waits as that target's draft. Bare section padding still opens
+  // the box, and clicking another section moves it there.
+  // Where the pointer went down decides whose click this is: a drag that starts in the
+  // box and ends on the page is still the box's, not a click away from it.
+  document.addEventListener('pointerdown', (event) => {
+    panelPointerDown = panel.contains(event.target);
+  }, { capture: true });
+
   document.addEventListener('click', (event) => {
-    if (panel.contains(event.target) || chip.contains(event.target) || docBubble.contains(event.target)) return;
-    if (session) return; // one edit at a time
+    const startedInPanel = panelPointerDown;
+    panelPointerDown = false;
+    if (startedInPanel) return;
+    if (panel.contains(event.target) || bar.contains(event.target) || chip.contains(event.target) || docBubble.contains(event.target)) return;
+    if (session || barMode) return; // one edit at a time, and the bar owns the screen
     const section = event.target.closest?.('[data-edit-id]');
     const unit = section ? unitFrom(event.target) : null;
     if (section && unit === section) {
-      if (section !== anchorEl || panel.hidden) openPanel(section, quoteFromSelection(section));
-    } else if (!panel.hidden && !textarea.value.trim() && !(anchorEl && anchorEl.contains(event.target))) {
+      const same = !panel.hidden && section === anchorEl;
+      if (!panel.hidden) closePanel();
+      if (!same) openPanel(section, quoteFromSelection(section));
+    } else if (!panel.hidden) {
       closePanel();
     }
   });
@@ -875,7 +1060,7 @@ function wireInteractions() {
     const now = Date.now();
     if (now - lastMove < 80) return;
     lastMove = now;
-    if (session || !panel.hidden) { scheduleChipHide(); return; }
+    if (session || barMode || !panel.hidden) { scheduleChipHide(); return; }
     if (helperState !== 'ready' || chipSelection) return;
     if (chip.contains(event.target)) { clearTimeout(chipHideTimer); chipHideTimer = null; return; }
     const unit = unitFrom(event.target);
@@ -885,8 +1070,8 @@ function wireInteractions() {
 
   document.addEventListener('keydown', (event) => {
     if (isShortcut(event)) {
-      if (!session && anchorEl && !anchorEl.isConnected) closePanel();
-      if (session || pageOwnsFocus()) return;
+      if (barMode || session || pageOwnsFocus()) return;
+      if (anchorEl && !anchorEl.isConnected) closePanel();
       const range = liveRange();
       let target = range ? targetFromRange(range) : null;
       if (!target) {
@@ -902,16 +1087,15 @@ function wireInteractions() {
       openPanel(target, quoteFromSelection(target));
       return;
     }
-    if (event.key !== 'Escape' || panel.hidden) return;
-    if (session?.state === 'requesting') {
-      cancelStream();
-    } else if (session?.state === 'deciding') {
-      revertSession();
-      setStatus('reverted');
-      showButtons('send');
-    } else {
-      closePanel();
-    }
+    if (event.key !== 'Escape') return;
+    if (!escapeIsMine(event)) return;
+    // The bar answers before the box: Working stops, Ready keeps (the edit is one undo
+    // step, so keeping is the safe answer), Error and Saving have nothing to do.
+    if (barMode === 'working') { stopSession(); return; }
+    if (barMode === 'ready') { keepSession(); return; }
+    if (barMode === 'error') { closeBar(); return; }
+    if (barMode) return;
+    if (!panel.hidden) closePanel();
   });
 
   document.addEventListener('selectionchange', () => {
