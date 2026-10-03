@@ -143,7 +143,7 @@ clay.source.locate(el);  // { from, to, line, column } for a live element, or nu
     <div class="libcard">
       <div class="lib-name" id="data">data <span class="tag">separate library</span></div>
       <p class="lib-prob">“I want the page's content in and out as JSON.”</p>
-      <p><code>clay.extractData()</code> reads your page into structured JSON; <code>clay.applyData(data)</code> writes JSON back into the page. The same mapping powers a read-only <code>/_/api</code> endpoint on platforms that support it, so a malleable file can double as an API.</p>
+      <p><code>clay.extractData()</code> reads your live page into structured JSON; <code>clay.applyData(values, {rules})</code> applies content-only JSON changes atomically. Core adds <code>clay.readData()</code> and <code>clay.writeData()</code> for hosts that announce the matching saved-file capabilities.</p>
       <pre><code class="language-markup">&lt;script src="https://clayjs.com/v1/clay-data.js"&gt;&lt;/script&gt;</code></pre>
       <p class="small">Both attach to <code>window.clay</code>. From an inline script, wait for the tag first: <code>await clay.loaded.data</code>, then <code>const data = clay.extractData()</code>.</p>
     </div>

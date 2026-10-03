@@ -96,6 +96,16 @@ itself, with no network.
 - `clay.hasUnsavedChanges()` — synchronous answer to "is there work here that no save has
   written?", the same question the close warning asks: an edit in the DOM, or work a check
   registered through `clay.registerUnsavedState` reports as pending. `false` in view mode.
+- `clay.extractData(rules?)` — read structured JSON from the live page. Supplied by the
+  `clay-data.js` satellite. Omitted rules use the page's `api` rules tag.
+- `clay.applyData(values, {rules})` — apply structured JSON to the live page atomically.
+  Supplied by the `clay-data.js` satellite. It changes content only and refuses executable
+  content, unsafe attributes, unknown keys, and HTML replacement without changing the page.
+- `clay.readData(rules?)` — read the saved file as `{data, etag}`. Always present in core,
+  and rejects when the host does not announce `data-read`.
+- `clay.writeData(values, {rules, ifMatch})` — conditionally write JSON into the saved file
+  and return `{data, etag}`. Always present in core, and rejects when the host does not
+  announce `data-write`.
 - `clay.getHTML()` — the exact HTML string a save would send, after all cleanup.
 - `clay.addDocumentTransform(fn)` — register a callback that receives the cloned
   document before serialization. The live page is never touched. Runs on every change
@@ -132,9 +142,10 @@ itself, with no network.
 - `clay.region` — region policy helpers and strip selectors (see clay.internals.region;
   the same object, also published as `STRIP_FROM_SAVE`-style constants).
 
-In view mode the edit-only members are absent: `window.clay` holds just `ready`,
-`toggleEditMode`, `isEditMode`, `isOwner`, `Mutation`, and `region` (plus `morph`/`cms`
-when those plugins load). Feature-detect with `'save' in clay`.
+In view mode the edit-only members are absent. `window.clay` keeps `ready`, `toggleEditMode`,
+`isEditMode`, `isOwner`, `Mutation`, `region`, `readData`, and `writeData`, plus `morph` or
+`cms` when those plugins load. `writeData` still refuses without an editable page, a
+connected sync plugin, and host support. Feature-detect edit mode with `'save' in clay`.
 
 Stability contract (since 1.0.0): `clay.*` from clay.js and `clay.*` from a satellite
 are stable; no name changes without a major version. Anything else under `src/` is
@@ -538,12 +549,26 @@ token variant, `POST /_/save/{token}`, read from `<html savetoken>`.
   `All(".card").css({ opacity: 1 }).onclick(e => …)`. Events are property-form
   (`.onclick`, `.oninput`); classes go through `.classList`. Zero dependencies.
 - `clay-utils.js` — the small stuff: throttle, debounce, cookies, slugify.
-- `clay-data.js` — the page's content in and out as JSON: `clay.extractData()` reads
-  the page into structured JSON, `clay.applyData(data)` writes JSON back. The same
-  mapping powers a read-only `/_/api` endpoint on hosts that support it (HTML Clay,
-  hyperclay.com), so a malleable file can double as an API. Declare the mapping with a
-  rules tag (`data-rules-name="api"`), same dialect as the CMS rules above. From an
-  inline script: `await clay.loaded.data`, then `const data = clay.extractData()`.
+- `clay-data.js` — the live page as JSON. `clay.extractData(rules?)` reads the live DOM.
+  `clay.applyData(values, {rules})` validates the complete change, then changes the live
+  DOM atomically. It writes content only. Scripts, styles, event handlers, executable
+  URLs, `innerHTML`, `outerHTML`, and unknown keys are refused without a partial change.
+  Load it with `await clay.loaded.data`.
+
+Core adds the saved file operations beside that satellite. `await clay.readData(rules?)`
+returns `{data, etag}`. `await clay.writeData(values, {rules, ifMatch})` returns
+`{data, etag}` after the corresponding sync frame has reached the live page. All four
+methods use the page's `api` rules tag when rules are omitted. Explicit rules are sent as
+the URL encoded JSON `data` query on the document's own path.
+
+`writeData` always sends `If-Match`, using the supplied value or the page's current save
+version. It does not retry a `412`, adopt the JSON response's ETag as the page save version,
+or send while the page is dirty, saving, conflicted, held, or disconnected from live sync.
+It holds automatic and manual saves until the incoming file update is applied, then replays
+any save requested during the hold. A successful write whose sync frame does not arrive
+within 12 seconds resolves with `{data, etag, pageUpdatePending: true, message}`. The write
+has landed in that case, so callers must not retry it automatically. Server failures reject
+with an `Error` carrying `status`, `error`, `message`, and `details`.
 - `sap.js` — reactive templates with the DOM itself as the state: attributes and
   elements are the source of truth, templates re-render when the DOM they depend on
   changes. No virtual DOM, no store.

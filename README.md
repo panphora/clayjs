@@ -105,20 +105,21 @@ Three tiers. The first two are a promise; the third is not.
 | Tier | What it is | Promise |
 |---|---|---|
 | `clay.*` from `clay.js` | the everyday surface | stable |
-| `clay.*` from a satellite (`clay-ui`, `clay-utils`, `clay-dom`, `clay-events`, `clay-options`, `clay-internals`) | opt-in, one script tag each | stable |
+| `clay.*` from a satellite (`clay-ui`, `clay-utils`, `clay-dom`, `clay-events`, `clay-options`, `clay-internals`, `clay-data`) | opt-in, one script tag each | stable |
 | anything else under `src/` | reachable by direct import, because `src/` ships | **may change in any release** |
 
 The contract starts at **1.0.0**: no name below changes without a major version.
 
-**`clay.js`** — `ready`, `save()`, `save.force()`, `getHTML()`, `addDocumentTransform(fn)`, `onSnapshot(fn)`,
+**`clay.js`** — `ready`, `save()`, `save.force()`, `readData()`, `writeData()`, `getHTML()`, `addDocumentTransform(fn)`, `onSnapshot(fn)`,
 `toggleEditMode()`, `isEditMode`, `isOwner`, `Mutation`, `region`, `cacheBust(el)`, plus `undo` / `cms` / `morph` /
 `RichClay` / `quickcrop` when those plugins load. View mode keeps only the always-available members
-(`toggleEditMode`, `isEditMode`, `isOwner`, `Mutation`, `region`, `ready`); edit-only members are simply absent.
+(`toggleEditMode`, `isEditMode`, `isOwner`, `Mutation`, `region`, `readData`, `writeData`, `ready`); edit-only members are simply absent.
 
 **Satellites** — one script tag each, and each resolves its own `clay.loaded.*` promise. `clay-ui` adds
 `toast`, `toastPersistent`, `ask`, `confirm`, `tell`, `snippet`, `modal`; `clay-utils` adds `clay.utils`
 (`throttle`, `debounce`, `cookie`, `slugify`, `copyToClipboard`); `clay-internals` adds `clay.internals`,
-the low-level surface for code that needs to sit *inside* the save lifecycle rather than call it.
+the low-level surface for code that needs to sit *inside* the save lifecycle rather than call it; `clay-data`
+adds `extractData` and `applyData` for live page JSON.
 `clay-events`, `clay-dom`, `clay-options` and `all.js` add HTML attributes and DOM helpers rather
 than members on `clay`.
 
