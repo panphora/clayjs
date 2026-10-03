@@ -117,6 +117,21 @@ test("a save that failed ends the request instead of sending it", async () => {
   expect((await handle.done).error).toMatch(/could not save this page first/);
 });
 
+test("a held save reports the operation's actual reason before sending", async () => {
+  const reason = "Waiting for the page data write to finish";
+  save.holdAllSaves(reason);
+
+  try {
+    const handle = wire.send({}, { id: "s2-hold" });
+    await settle();
+
+    expect(calls).toEqual([]);
+    await expect(handle.done).resolves.toMatchObject({ state: "error", error: reason });
+  } finally {
+    save.releaseAllSaves({ replay: false, reason });
+  }
+});
+
 test("the flush waits for a save that is already on the wire", async () => {
   // isSaveInProgress is read from the module. It used to be read off
   // clay.internals, an opt-in satellite that no page the loader builds ever

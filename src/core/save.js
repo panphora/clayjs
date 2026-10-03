@@ -214,23 +214,26 @@ export function resumeAutosave() {
 }
 
 // ============================================
-// THE PREVIEW HOLD
+// THE ALL-SAVE HOLD
 // ============================================
 //
-// While an AI edit's rewrite is on screen and not yet kept, the DOM holds words the
-// person has not accepted. Every save would write them, the explicit ones included,
-// so for that window no save goes out at all. A save asked for meanwhile is
-// remembered and runs on release; Keep releases without the replay because it saves
-// right after.
+// While an operation owns the page's persisted state, no save goes out at all. A
+// save asked for meanwhile is remembered and runs on release.
 let previewHold = 0;
 let previewMissed = false;
+const PREVIEW_HOLD_REASON = 'Waiting for the AI edit to be kept or reverted';
+const holdReasons = new Map();
 
-export function holdAllSaves() {
+export function holdAllSaves(reason = PREVIEW_HOLD_REASON) {
   previewHold++;
+  holdReasons.set(reason, (holdReasons.get(reason) || 0) + 1);
 }
 
-export function releaseAllSaves({ replay = true } = {}) {
-  if (previewHold === 0) return;
+export function releaseAllSaves({ replay = true, reason = PREVIEW_HOLD_REASON } = {}) {
+  const count = holdReasons.get(reason) || 0;
+  if (count === 0) return;
+  if (count === 1) holdReasons.delete(reason);
+  else holdReasons.set(reason, count - 1);
   previewHold--;
   if (previewHold > 0) return;
   const missed = previewMissed;
@@ -242,11 +245,16 @@ export function savesHeld() {
   return previewHold > 0;
 }
 
+export function saveHoldReason() {
+  if (previewHold === 0) return null;
+  return holdReasons.keys().next().value || PREVIEW_HOLD_REASON;
+}
+
 function heldForPreview(callback, resolve) {
   if (previewHold === 0) return false;
   previewMissed = true;
   clearExplicitSave();
-  const skipped = skipped_('Waiting for the AI edit to be kept or reverted');
+  const skipped = skipped_(saveHoldReason());
   callback(skipped);
   resolve(skipped);
   return true;
@@ -854,7 +862,7 @@ export function savePageThrottled(callback = () => {}) {
 
   if (previewHold > 0) {
     previewMissed = true;
-    const skipped = skipped_('Waiting for the AI edit to be kept or reverted');
+    const skipped = skipped_(saveHoldReason());
     callback(skipped);
     return Promise.resolve(skipped);
   }
