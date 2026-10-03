@@ -705,6 +705,28 @@ test.each([
   sync.stop();
 });
 
+test.each([
+  ["save-remove", `<button save-remove="">x</button>`, false],
+  ["no-save", `<span no-save="">x</span>`, false],
+  ["editor-ui", `<span editor-ui="">x</span>`, false],
+  ["editor-ui after", `<span editor-ui="">x</span>`, true],
+])("nested inserted losses recover with retained %s chrome", async (label, chrome, after) => {
+  const sync = makeSync();
+  await settle(`<div id="s"></div>`);
+  sync.lastHtml = captureFrame();
+  const paragraph = `<p id="p">LOCAL <b>x</b></p>`;
+  document.body.innerHTML = `<div id="s"><section id="w">${after ? paragraph + chrome : chrome + paragraph}</section></div>`;
+  const retained = byId("w").querySelector("[save-remove], [no-save], [editor-ui]");
+  await Promise.resolve();
+  await sync._doApplyUpdate(sync.lastHtml.replace(`<body><div id="s"></div></body>`, `<body><div id="s"><section id="w"><p id="p">REMOTE</p></section></div></body>`), 5, null);
+  const ids = conflicts.list().map((r) => r.id);
+  expect(ids).toHaveLength(1);
+  expect((await revert.revertConflicts(ids)).revertedIds).toEqual(ids);
+  expect(byId("p").innerHTML).toBe("LOCAL <b>x</b>");
+  expect(byId("w").querySelector("[save-remove], [no-save], [editor-ui]")).toBe(retained);
+  sync.stop();
+});
+
 // The one synthetic record here: this vendor records no loss for an inserted
 // comment (three probes, zero records), so the comment shape is installed by hand.
 test("O9 an absent comment insertion is realized as a comment", async () => {

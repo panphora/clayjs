@@ -21,6 +21,7 @@ let ledger;
 let unsaved;
 let events = [];
 let onConflictsChanged;
+let insertionLive;
 
 beforeEach(async () => {
   jest.resetModules();
@@ -29,6 +30,8 @@ beforeEach(async () => {
   events = [];
   onConflictsChanged = (event) => events.push(event.detail);
   document.addEventListener("clay:sync-conflicts-changed", onConflictsChanged);
+  insertionLive = document.implementation.createHTMLDocument("").documentElement;
+  insertionLive.querySelector("body").innerHTML = "<section><div><p>mine</p><p>mine</p></div><p>mine</p></section><aside></aside>";
 });
 
 afterEach(() => {
@@ -184,6 +187,213 @@ test("the same recovery key in two applies stays two records", () => {
   expect(ledger.conflicts.get(secondId).rawReports).toHaveLength(1);
   expect(ledger.conflicts.get(firstId).source).toBe("peer");
   expect(ledger.conflicts.get(secondId).source).toBe("disk");
+});
+
+/**
+ * The live page a report's paths are resolved in, content steps included: an html
+ * element whose head is step 0 and body step 1, the body holding a section (with a
+ * div of two paragraphs inside it) and an aside beside it.
+ */
+function nodeAt(path, root = insertionLive) {
+  return path.reduce((node, step) => (step === "content" ? node.content : node.childNodes[step]), root);
+}
+
+/**
+ * A nested insert-collision, the shape one engine release emits once per element
+ * of one inserted subtree: subject.local is the single path that element lives at,
+ * subject.merged is where the merge put it, subject.live is that live element, and
+ * every report carries its own full recovery copy.
+ */
+function insertCollision(path, key, overrides = {}) {
+  const node = nodeAt(path);
+  return {
+    kind: "structure",
+    detail: "insert-collision",
+    node,
+    recovery: {
+      version: 1, key, localLost: true, applied: true, unavailable: null,
+      subject: { key: `${key}-subject`, nodeType: 1, live: [node], local: [path], base: [], remote: [], merged: [path] },
+      structure: {
+        localAction: "inserted", fragmentKind: "element", localFragment: node.outerHTML,
+        localPlacement: { parent: null, before: [], after: [] },
+      },
+      ...overrides,
+    },
+  };
+}
+
+/** Start an apply of several reports and return the ids the ledger installed. */
+function installAll(reports, options = {}) {
+  const applyId = ledger.beginApply({
+    source: "peer", seq: null, etag: null, domain: "sync", root: document.createElement("html"),
+    ...options,
+  });
+  return ledger.completeApply(applyId, reports, { ticket: 41 });
+}
+
+test("a child-first pair from one inserted subtree becomes one record holding both, the outer one wearing it", () => {
+  const parent = insertCollision([1, 0], "outer");
+  const child = insertCollision([1, 0, 0], "inner");
+
+  const ids = installAll([child, parent]);
+
+  expect(ids).toHaveLength(1);
+  const rec = ledger.conflicts.get(ids[0]);
+  expect(rec).toBe(parent);
+  expect(rec.rawReports).toEqual([parent, child]);
+  expect(rec.recovery.key).toBe("outer");
+  expect(ledger.conflicts.size).toBe(1);
+});
+
+test("three levels of one inserted subtree fold to the outermost, every report kept once", () => {
+  const outer = insertCollision([1, 0], "outer");
+  const middle = insertCollision([1, 0, 0], "middle");
+  const inner = insertCollision([1, 0, 0, 1], "inner");
+
+  const ids = installAll([inner, outer, middle]);
+
+  expect(ids).toHaveLength(1);
+  const rec = ledger.conflicts.get(ids[0]);
+  expect(rec).toBe(outer);
+  expect(rec.rawReports).toEqual([outer, inner, middle]);
+  expect(new Set(rec.rawReports).size).toBe(3);
+});
+
+test("two branches of one inserted subtree fold under it as one record", () => {
+  const outer = insertCollision([1, 0], "outer");
+  const left = insertCollision([1, 0, 0], "left");
+  const right = insertCollision([1, 0, 1], "right");
+
+  const ids = installAll([left, right, outer]);
+
+  expect(ids).toHaveLength(1);
+  const rec = ledger.conflicts.get(ids[0]);
+  expect(rec).toBe(outer);
+  expect(rec.rawReports).toEqual([outer, left, right]);
+});
+
+test("siblings of a shared parent, neither inside the other, stay two records", () => {
+  const left = insertCollision([1, 0], "left");
+  const right = insertCollision([1, 1], "right");
+
+  const ids = installAll([left, right]);
+
+  expect(ids).toHaveLength(2);
+  expect(ledger.conflicts.get(ids[0])).toBe(left);
+  expect(ledger.conflicts.get(ids[1])).toBe(right);
+  expect(ledger.conflicts.get(ids[0]).rawReports).toEqual([left]);
+  expect(ledger.conflicts.get(ids[1]).rawReports).toEqual([right]);
+});
+
+test("an element inside a template's content folds under the inserted block that carries it", () => {
+  insertionLive.querySelector("body").innerHTML = "<template><p>mine</p></template>";
+  const outer = insertCollision([1, 0], "outer");
+  const nested = insertCollision([1, 0, "content", 0], "nested");
+
+  const ids = installAll([nested, outer]);
+
+  expect(ids).toHaveLength(1);
+  const rec = ledger.conflicts.get(ids[0]);
+  expect(rec).toBe(outer);
+  expect(rec.rawReports).toEqual([outer, nested]);
+});
+
+test("a report with no live output stays its own record, whatever its ancestry", () => {
+  const outer = insertCollision([1, 0], "outer");
+  const missing = insertCollision([1, 0, 0], "missing", { unavailable: "missing-output" });
+  const unmapped = insertCollision([1, 0, 1], "unmapped", { applied: false });
+
+  const ids = installAll([missing, unmapped, outer]);
+
+  expect(ids).toHaveLength(3);
+  const byKey = new Map(ids.map((id) => [ledger.conflicts.get(id).recovery.key, ledger.conflicts.get(id)]));
+  expect(byKey.get("outer").rawReports).toEqual([outer]);
+  expect(byKey.get("missing").rawReports).toEqual([missing]);
+  expect(byKey.get("unmapped").rawReports).toEqual([unmapped]);
+});
+
+test("a report with no live output anchors no fold over the reports inside it", () => {
+  const outer = insertCollision([1, 0], "outer", { unavailable: "missing-output" });
+  const child = insertCollision([1, 0, 0], "inner");
+
+  const ids = installAll([outer, child]);
+
+  expect(ids).toHaveLength(2);
+  expect(ledger.conflicts.get(ids[0])).toBe(outer);
+  expect(ledger.conflicts.get(ids[1])).toBe(child);
+  expect(ledger.conflicts.get(ids[0]).rawReports).toEqual([outer]);
+  expect(ledger.conflicts.get(ids[1]).rawReports).toEqual([child]);
+});
+
+test("one subtree's insert-collisions in two applies never fold together", () => {
+  const firstId = installOne(insertCollision([1, 0], "outer"));
+  const secondId = installOne(insertCollision([1, 0, 0], "inner"), { source: "disk", domain: "save" });
+
+  expect(firstId).not.toBe(secondId);
+  expect(ledger.conflicts.size).toBe(2);
+  expect(ledger.conflicts.get(firstId).rawReports).toHaveLength(1);
+  expect(ledger.conflicts.get(secondId).rawReports).toHaveLength(1);
+  expect(ledger.conflicts.get(firstId).source).toBe("peer");
+  expect(ledger.conflicts.get(secondId).source).toBe("disk");
+});
+
+test("reports sharing one recovery key stay one record, each report present once", () => {
+  const parent = insertCollision([1, 0], "same");
+  const child = insertCollision([1, 0, 0], "same");
+
+  const ids = installAll([parent, child]);
+
+  expect(ids).toHaveLength(1);
+  const rec = ledger.conflicts.get(ids[0]);
+  expect(rec).toBe(parent);
+  expect(rec.rawReports).toEqual([parent, child]);
+  expect(new Set(rec.rawReports).size).toBe(2);
+});
+
+test("a child the merge moved out of its local parent keeps its own record", () => {
+  const parent = insertCollision([1, 0], "outer");
+  const child = insertCollision([1, 0, 0], "inner");
+  nodeAt([1, 1]).appendChild(child.recovery.subject.live[0]);
+  child.recovery.subject.merged = [[1, 1, 0]];
+
+  const ids = installAll([child, parent]);
+
+  expect(ids).toHaveLength(2);
+  expect(ledger.conflicts.get(ids[0])).toBe(child);
+  expect(ledger.conflicts.get(ids[1])).toBe(parent);
+  expect(ledger.conflicts.get(ids[0]).rawReports).toEqual([child]);
+  expect(ledger.conflicts.get(ids[1]).rawReports).toEqual([parent]);
+  expect(ledger.conflicts.size).toBe(2);
+});
+
+test("a stale merged path cannot fold a child whose live node left the parent", () => {
+  const parent = insertCollision([1, 0], "outer");
+  const child = insertCollision([1, 0, 0], "inner");
+  nodeAt([1, 1]).appendChild(child.recovery.subject.live[0]);
+
+  const ids = installAll([child, parent]);
+
+  expect(ids).toHaveLength(2);
+  expect(ledger.conflicts.get(ids[0])).toBe(child);
+  expect(ledger.conflicts.get(ids[1])).toBe(parent);
+  expect(ledger.conflicts.get(ids[0]).rawReports).toEqual([child]);
+  expect(ledger.conflicts.get(ids[1]).rawReports).toEqual([parent]);
+  expect(ledger.conflicts.size).toBe(2);
+});
+
+test("a child with no merged path stays separate however valid the outer report is", () => {
+  const parent = insertCollision([1, 0], "outer");
+  const child = insertCollision([1, 0, 0], "inner");
+  child.recovery.subject.merged = [];
+
+  const ids = installAll([parent, child]);
+
+  expect(ids).toHaveLength(2);
+  expect(ledger.conflicts.get(ids[0])).toBe(parent);
+  expect(ledger.conflicts.get(ids[1])).toBe(child);
+  expect(ledger.conflicts.get(ids[0]).rawReports).toEqual([parent]);
+  expect(ledger.conflicts.get(ids[1]).rawReports).toEqual([child]);
+  expect(ledger.conflicts.size).toBe(2);
 });
 
 test("acknowledge removes only the named ids and reports what is left", () => {

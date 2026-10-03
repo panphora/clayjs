@@ -1,5 +1,6 @@
 import { HyperMorph } from "../vendor/hyper-morph.vendor.js";
 import { conflicts } from "./conflicts.js";
+import { replacementFootprint } from "./conflict-footprints.js";
 import { SYNC_IGNORE_SELECTOR, REMOTE_WINS_SELECTOR } from "./live-sync.js";
 import { savePage } from "../core/save.js";
 import { gateMarkDirty } from "../lib/dirty-gate.js";
@@ -802,6 +803,8 @@ function footprintOf(rec, apply) {
   }
   const live = subject ? liveOf(subject, apply, subject.nodeType) : null;
   if (live) return live;
+  const replacement = replacementFootprint(rec);
+  if (replacement && onPage(replacement)) return replacement;
   const parent = r.structure && r.structure.localPlacement ? liveOf(r.structure.localPlacement.parent, apply, 1) : null;
   if (parent) return parent;
   const path = subject && subject.local.length ? subject.local[0] : [];

@@ -60,6 +60,7 @@ import { pageMaybeDirty, pauseGate, resumeGate, gateCaptureToken, gateClearIfUnc
 import { gestureSeen } from '../lib/user-gesture.js';
 import { SyncStream } from './stream.js';
 import { conflicts, beginApply, completeApply, failApply } from './conflicts.js';
+import { trackConflictFootprints } from './conflict-footprints.js';
 
 // What a live-sync merge never reads or touches on any side: editor chrome,
 // content kept out of the save or the snapshot, frozen regions, and nodes
@@ -1339,6 +1340,7 @@ class LiveSync {
    * @param {object} [lane.extra] - extra mergeDocument options (the disk lane's beforeApply)
    */
   async _mergeIncoming(html, identityMap, { base, baseIdentityMap = null, captureLocal, synthetic, source = 'peer', seq = null, etag = null, extra = {} }) {
+    const mergeDocument = (options) => trackConflictFootprints(() => HyperMorph.mergeDocument(options));
     const store = this.identity;
     // A frame may neither write these onto our root nor, by not carrying them,
     // take ours away. Returning false is hyper-morph's veto for both directions.
@@ -1396,7 +1398,7 @@ class LiveSync {
     let localRoot = null;
     let applyId = null;
     if (base == null) {
-      pending = HyperMorph.mergeDocument({
+      pending = mergeDocument({
         ...common,
         base: null,
         local: { root: captureLocal(), toLive: originalSnapshotNode },
@@ -1414,7 +1416,7 @@ class LiveSync {
       const localRoot = captureLocal();
       const baseDoc = localRoot.ownerDocument;
       if (baseDoc.documentElement !== localRoot) baseDoc.replaceChild(localRoot, baseDoc.documentElement);
-      pending = HyperMorph.mergeDocument({
+      pending = mergeDocument({
         ...common,
         base: baseDoc,
         local: { root: localRoot, toLive: originalSnapshotNode },
@@ -1432,7 +1434,7 @@ class LiveSync {
         domain: source === 'disk' ? 'save' : 'sync',
       });
       try {
-        pending = HyperMorph.mergeDocument({
+        pending = mergeDocument({
           ...common,
           base,
           local: { root: localRoot, toLive: originalSnapshotNode },

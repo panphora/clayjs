@@ -63,6 +63,33 @@ export function beginApply({ source, seq = null, etag = null, domain, root }) {
   return id;
 }
 
+function insertionProof(raw) {
+  if (!raw.every((c) => c.kind === 'structure' && c.detail === 'insert-collision' && c.recovery?.applied === true && !c.recovery.unavailable && c.recovery.structure?.localAction === 'inserted' && c.recovery.structure.fragmentKind === 'element')) return null;
+  const subject = raw[0].recovery.subject;
+  if (subject?.local?.length !== 1 || subject.merged?.length !== 1 || subject.live?.length !== 1) return null;
+  return { local: subject.local[0], merged: subject.merged[0], live: subject.live[0] };
+}
+
+function foldInsertions(groups) {
+  const proofs = new Map(groups.map((raw) => [raw, insertionProof(raw)]));
+  const below = (parent, child) => parent.length < child.length && parent.every((step, i) => step === child[i]);
+  const at = (root, path) => path.reduce((node, step) => step === 'content' ? node?.content : node?.childNodes[step], root);
+  const folded = new Map();
+  for (const raw of groups) {
+    const child = proofs.get(raw);
+    let owner = raw;
+    if (child) {
+      for (const candidate of groups) {
+        const parent = proofs.get(candidate);
+        if (parent && parent.local.length < proofs.get(owner).local.length && below(parent.local, child.local) && below(parent.merged, child.merged) && (parent.live.contains(child.live) || at(parent.live, child.merged.slice(parent.merged.length)) === child.live)) owner = candidate;
+      }
+    }
+    if (!folded.has(owner)) folded.set(owner, [...owner]);
+    if (raw !== owner) folded.get(owner).push(...raw);
+  }
+  return [...folded.values()];
+}
+
 export function completeApply(applyId, conflicts, { ticket }) {
   const apply = applies.get(applyId);
   if (!apply) return [];
@@ -74,7 +101,7 @@ export function completeApply(applyId, conflicts, { ticket }) {
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(c);
   }
-  const ids = [...groups.values()].map((raw) => install(apply, raw));
+  const ids = foldInsertions([...groups.values()]).map((raw) => install(apply, raw));
   pending.delete(applyId);
   if (!ids.length) applies.delete(applyId);
   if (ids.length) changed({ added: ids.map((id) => records.get(id)) });

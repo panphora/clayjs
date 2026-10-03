@@ -788,12 +788,12 @@ test.each([
   sync.stop();
 });
 
-test("C3 a block inside the paragraph wrapper still blocks: the wrapper goes, the block it holds does not", async () => {
+test("C3 a block inside the local fragment still blocks recovery into a text run", async () => {
   const sync = makeSync();
   const base = `<div id="d">One quick fox.</div><div id="e">Two quick cats.</div>`;
   const remote = `<div id="d">One fast fox.</div><div id="e">Two quick cats.</div>`;
   const ids = await lose(sync, base, `<div id="d">One <div id="in">slow</div> fox.</div><div id="e">Two quick cats.</div>`, remote);
-  expect(textOf(ids[0]).local.fragment).toBe(`<div id="d"><div id="in">slow</div></div>`);
+  expect(textOf(ids[0]).local.fragment).toBe(`<div id="in">slow</div>`);
   expect(await revert.revertConflicts(ids)).toEqual({ revertedIds: [], blockedIds: ids, saveResult: null });
   expect(body()).toBe(remote);
   sync.stop();
@@ -840,10 +840,10 @@ test.each([
   sync.stop();
 });
 
-test("N1c O8 an id-less pair of paragraphs sharing the clash word: the record sits above both, and the word goes back inside the paragraph holding the range", async () => {
+test("N1c O8 an id-less pair of paragraphs sharing the clash word restores the word in the paragraph holding the range", async () => {
   const sync = makeSync();
   const ids = await lose(sync, `<p>One quick fox.</p><p>Two quick dogs.</p>`, `<p>One slow fox.</p><p>Two quick dogs.</p>`, `<p>One fast fox.</p><p>Two quick dogs.</p>`);
-  expect(textOf(ids[0]).local.fragment).toBe(`<p>slow</p>`);
+  expect(textOf(ids[0]).local.fragment).toBe(`slow`);
   expect((await revert.revertConflicts(ids)).revertedIds).toEqual(ids);
   expect(body()).toBe(`<p>One slow fox.</p><p>Two quick dogs.</p>`);
   sync.stop();
