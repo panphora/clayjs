@@ -1,5 +1,29 @@
 # Changelog
 
+## [1.7.0] - 2026-10-03
+
+### Added
+- Page data API with readData and writeData in core
+- Dialog sizing for coarse pointer devices
+
+### Changed
+- Updated hypercms and quickcrop vendor dependencies
+- Refreshed HyperMorph vendor for shared CMS builds
+- ClayJS UI now uses Bevel icons
+- Finalized RichClay icons and menu skin
+- clay.applyData now accepts rules and copies form state
+- Save holds are tracked by named reason
+- Documented data read/write APIs and clay-data changes
+- Improved RichClay link editing and dialog skin
+- Extra dialog content now inherits Bevel body type
+
+### Fixed
+- Conflict recovery now works with current HyperMorph records
+- Refreshed RichClay link navigation guard
+- Emptying a RichClay link URL now removes the link
+
+
+
 ## [1.6.1] - 2026-10-02
 
 ### Added
