@@ -50,7 +50,7 @@ export async function boot(base, params, readyResolve) {
       continue;
     }
     loaded[path] = mod;
-    attachPluginMember(path, mod);   // immediately, not after the loop: hypercms's ?cms=true
+    attachPluginMember(path, mod, loaded); // immediately, not after the loop: hypercms's ?cms=true
                                      // auto-open runs as a microtask queued during ITS evaluation
                                      // (before boot resumes) and reads clay.RichClay and clay.undo,
                                      // which earlier plugins must have attached by then
@@ -83,6 +83,10 @@ function assembleCore(loaded, { isEditMode, isOwner }, regionPolicy) {
   const save = loaded["core/save.js"];
   const cacheBustMod = loaded["lib/cache-bust.js"];
   const hyperMorph = loaded["vendor/hyper-morph.vendor.js"];
+  const pageData = loaded["core/page-data.js"];
+
+  clay.readData = pageData.readData;
+  clay.writeData = pageData.writeData;
 
   if (save) {
     const saveFn = save.savePage || save.default;
@@ -107,7 +111,7 @@ function assembleCore(loaded, { isEditMode, isOwner }, regionPolicy) {
   if (hyperMorph) clay.morph = hyperMorph.morph;
 }
 
-function attachPluginMember(path, mod) {
+function attachPluginMember(path, mod, loaded) {
   const clay = window.clay;
 
   if (path === "plugins/undo.js") {
@@ -115,6 +119,7 @@ function attachPluginMember(path, mod) {
   } else if (path === "sync/live-sync.js") {
     clay.morph = mod.morph;
     clay.conflicts = mod.conflicts;
+    loaded["core/page-data.js"].setPageDataLiveSync(mod.liveSync);
   } else if (path === "plugins/cms.js") {
     clay.cms = mod.cms || mod.default;
   } else if (path === "plugins/upload.js") {

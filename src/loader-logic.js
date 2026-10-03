@@ -8,6 +8,7 @@ export const CORE_WAVES = {
     // is exactly the case where edit mode is off, so the editOnly wave would never
     // reach it. It draws nothing on any other page.
     "core/stale-host-notice.js",
+    "core/page-data.js",
   ],
   editOnly: [
     "vendor/hyper-morph.vendor.js",
@@ -66,6 +67,7 @@ export const MODULES = {
   "lib/mutation.js":            () => import("./lib/mutation.js"),
   "core/edit-mode.js":          () => import("./core/edit-mode.js"),
   "core/stale-host-notice.js":  () => import("./core/stale-host-notice.js"),
+  "core/page-data.js":          () => import("./core/page-data.js"),
   "core/snapshot.js":           () => import("./core/snapshot.js"),
   "core/save-core.js":          () => import("./core/save-core.js"),
   "core/save.js":               () => import("./core/save.js"),

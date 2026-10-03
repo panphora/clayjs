@@ -737,12 +737,14 @@ test("a merge that rejects at the await keeps a record of the page it landed on"
 // loader's other branches with.
 test("the loader attaches the ledger to clay.conflicts", async () => {
   const source = readFileSync(join(repoRoot, "src", "loader.js"), "utf8");
-  const found = source.match(/^function attachPluginMember\(path, mod\) \{[\s\S]*?\n\}$/m);
+  const found = source.match(/^function attachPluginMember\(path, mod, loaded\) \{[\s\S]*?\n\}$/m);
   expect(found).not.toBeNull();
   const attachPluginMember = new Function(`${found[0]}\nreturn attachPluginMember;`)();
 
   window.clay = window.clay || {};
-  attachPluginMember("sync/live-sync.js", liveSyncModule);
+  const setPageDataLiveSync = jest.fn();
+  attachPluginMember("sync/live-sync.js", liveSyncModule, { "core/page-data.js": { setPageDataLiveSync } });
 
   expect(window.clay.conflicts).toBe(liveSyncModule.conflicts);
+  expect(setPageDataLiveSync).toHaveBeenCalledWith(liveSyncModule.liveSync);
 });
