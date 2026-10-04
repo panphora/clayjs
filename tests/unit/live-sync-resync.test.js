@@ -29,6 +29,7 @@ class FakeEventSource extends EventTarget {
 
 let LiveSync;
 let gate;
+let resetHostMeta;
 
 beforeAll(async () => {
   window.clayEditMode = true;
@@ -42,6 +43,7 @@ beforeAll(async () => {
   liveSyncModule.liveSync.stop(); // the singleton auto-started on import
 
   gate = await import("../../src/lib/dirty-gate.js");
+  ({ resetHostMeta } = await import("../../src/core/host-meta.js"));
 });
 
 beforeEach(async () => {
@@ -69,7 +71,7 @@ test("a resync cursor refetches the served document at the server's baseline", a
   const { sync, sse } = await started();
   const refetch = jest.spyOn(sync, "_fetchServedDocument").mockImplementation(() => {});
   cursor(sse, JSON.stringify({ seq: 42, resync: true }));
-  expect(refetch).toHaveBeenCalledWith(42, { repair: true });
+  expect(refetch).toHaveBeenCalledWith(42, { repair: true, startup: false });
   sync.stop();
 });
 
@@ -86,7 +88,7 @@ test("a resync without a seq still repairs the page", async () => {
   const { sync, sse } = await started();
   const refetch = jest.spyOn(sync, "_fetchServedDocument").mockImplementation(() => {});
   cursor(sse, JSON.stringify({ resync: true }));
-  expect(refetch).toHaveBeenCalledWith(undefined, { repair: true });
+  expect(refetch).toHaveBeenCalledWith(undefined, { repair: true, startup: false });
   sync.stop();
 });
 
@@ -123,6 +125,11 @@ test("a baseline the page has already seen still repairs it", async () => {
     saveEpoch: 0,
     etag: null,
     by: null,
+    fetchOptions: { repair: true, startup: false, attempt: 0, versionCheck: false },
+    startGen: sync._startGen,
+    seenSeq: 0,
+    applyGen: sync._applyGen,
+    fetchId: sync._servedFetchId,
   });
   sync.stop();
 });
@@ -206,3 +213,61 @@ test("a view-mode tab applies the repair instead of holding it forever", async (
   expect(sync._holdRetryExt).toBeFalsy();
   sync.stop();
 });
+
+// The opening subscription is not a repair by itself. This host named no version
+// in the response that served the page, so the first subscription has nothing to
+// compare the file against: pulling the document would mean morphing a page
+// without knowing whether it changed at all, which is the unconditional startup
+// repair the version stamp exists to avoid. Discovery reporting an ETag does not
+// create provenance — its answer describes a later moment than this page. An
+// explicit resync still fetches, above.
+test.each(["live", "saved"])(
+  "the first subscription asks for nothing on a host that named no version (%s lane)",
+  async (lane) => {
+    document.body.innerHTML = '<p id="startup-value">Before subscription</p>';
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    gate.gateClearIfUnchanged(gate.gateCaptureToken());
+
+    // start() opens no stream until discovery answers, the answer is memoized
+    // against whichever fetch was installed when it was asked for, and this
+    // file's default fetch never settles: a test that applied a frame before
+    // this one leaves that memo holding a request nothing will answer. Ask again
+    // here, so the stream this test needs is the one it gets.
+    resetHostMeta();
+    global.fetch = jest.fn((url) =>
+      String(url).includes("/_/meta")
+        ? Promise.resolve({
+            ok: true,
+            text: async () =>
+              JSON.stringify({
+                spec: 1,
+                extensions: ["conditional"],
+                document: { etag: "disk-B" },
+              }),
+          })
+        : Promise.resolve({
+            ok: true,
+            text: async () =>
+              "<!DOCTYPE html><html><head></head><body>" +
+              '<p id="startup-value">Changed before subscription</p>' +
+              "</body></html>",
+          })
+    );
+
+    const { sync, sse } = await started(lane);
+    try {
+      sse.onopen();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await sync._runPending();
+      expect(
+        global.fetch.mock.calls.filter(([url]) => !String(url).includes("/_/meta"))
+      ).toHaveLength(0);
+      expect(sync._pendingExternal).toBeNull();
+      expect(document.querySelector("#startup-value").textContent).toBe(
+        "Before subscription"
+      );
+    } finally {
+      sync.stop();
+    }
+  }
+);

@@ -9,9 +9,15 @@ test("the library's root attributes are stripped from the saved bytes", async ()
   document.documentElement.setAttribute("savestatus", "saving");
   document.documentElement.setAttribute("editmode", "true");
   document.documentElement.setAttribute("pageowner", "true");
-  // The author's own attribute, on a child, which `option:savestatus` reads. The
-  // same name away from the root is page content and must survive.
-  document.body.innerHTML = '<div id="c" savestatus="error">start</div>';
+  // The version stamp for the response this tab loaded. Writing it would freeze one
+  // response's stamp into the file, where the next reader would read it as provenance
+  // for bytes nobody built a response from.
+  document.documentElement.setAttribute("documentetag", "response-stamp-abc123");
+  // The author's own attributes, on a child: `option:savestatus` reads the first, and
+  // the second is simply the author's. The same names away from the root are page
+  // content and must survive.
+  document.body.innerHTML =
+    '<div id="c" savestatus="error" documentetag="child-owned">start</div>';
 
   const saveMod = await import("../../src/core/save.js");
   global.fetch = jest.fn(async () => ({ ok: true, text: async () => JSON.stringify({ msg: "Saved" }) }));
@@ -28,8 +34,11 @@ test("the library's root attributes are stripped from the saved bytes", async ()
   expect(root).not.toContain("savestatus");
   expect(root).not.toContain("editmode");
   expect(root).not.toContain("pageowner");
+  expect(root).not.toContain("documentetag");
   expect(body).toContain('savestatus="error"');
+  expect(body).toContain('documentetag="child-owned"');
 
   // The live page keeps them; only the saved copy loses them.
   expect(document.documentElement.hasAttribute("savestatus")).toBe(true);
+  expect(document.documentElement.getAttribute("documentetag")).toBe("response-stamp-abc123");
 });

@@ -46,7 +46,7 @@ import { mergeTagRecognizers } from "../sync/merge-tags.js";
 import Mutation from "../lib/mutation.js";
 import { isEditMode } from "../core/is-edit-mode.js";
 import { holdAllSaves, releaseAllSaves } from "../core/save.js";
-import { STRIP_FROM_SAVE } from "../lib/region-policy.js";
+import { STRIP_FROM_SAVE, SNAPSHOT_REMOVE_SELECTOR } from "../lib/region-policy.js";
 import { enableContentEditable } from "../core/admin-contenteditable.js";
 import onDomReady from "../lib/dom-ready.js";
 import wire from "./wire.js";
@@ -1109,11 +1109,45 @@ function wireInteractions() {
 async function init() {
   if (!isEditMode || panel) return;  // an owner/editor feature, built once
   helperState = await helperStateNow();
-  if (!helperState) return;          // no ai-edit helper on this host: stay dormant
+  // No ai-edit helper on this host: stay dormant. A concurrent open() that got here
+  // first may also have built the chrome already.
+  if (!helperState || panel) return;
   buildChrome();
   wireInteractions();
 }
 
+// A target the composer can be opened on: a connected content element of this
+// document. ClayJS chrome, transient UI, everything the save strips and everything
+// that holds no text are not targets.
+function canOpenTarget(el) {
+  return el instanceof Element && el.ownerDocument === document &&
+    document.body.contains(el) && !el.closest('[data-clay-ai-edit]') &&
+    !el.closest(STRIP_FROM_SAVE) && !el.closest(SNAPSHOT_REMOVE_SELECTOR) && !el.closest(NOT_TEXT);
+}
+
+// `await clay.aiEdit.open(element, { prompt: 'Add a bar chart above the table. Keep the table.' })`
+// opens the existing composer and returns true when opened, false when unavailable,
+// busy or the target cannot be edited. It does not send automatically. The prompt
+// seeds an empty per-target draft; previously typed text is preserved. The target
+// must be a connected content element in this document. Controls and transient UI
+// are not valid targets. A listed but disabled helper opens the existing setup
+// explanation with Send unavailable, just like the keyboard shortcut.
+async function open(el, { prompt } = {}) {
+  if (!canOpenTarget(el)) return false;
+  await init();
+  // A click listener that calls this runs its microtasks before the same click reaches
+  // the click-away handler, so the opening has to wait for that event to finish.
+  await new Promise(resolve => setTimeout(resolve, 0));
+  if (!panel || session || barMode || !canOpenTarget(el)) return false;
+  if (!panel.hidden && anchorEl === el) {
+    textarea.focus();
+    return true;
+  }
+  if (typeof prompt === 'string' && !drafts.has(el)) drafts.set(el, prompt);
+  openPanel(el, null);
+  return true;
+}
+
 onDomReady(() => { init().catch(() => {}); });
 
-export const aiEdit = { init };
+export const aiEdit = { init, open };

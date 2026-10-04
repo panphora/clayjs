@@ -24,14 +24,17 @@ Each injected element additionally:
 
 ## Where the values come from
 
-`src/ui/bevel.js` is generated, not written. Its source is `../bevel/bevel.css`, the
-Bevel design system in a sibling checkout, reduced to the recipes in
+`src/ui/bevel.js` is generated, not written. Its source is Bevel's `bevel.css`, from
+the exact-pinned `@panphora/bevel` devDependency, reduced to the recipes in
 `scripts/bevel-manifest.mjs` by `scripts/build-bevel-subset.mjs`:
 
 - `npm run build:bevel` regenerates `src/ui/bevel.js`.
 - `npm run check:bevel` prints whether the checked-in module is in sync, and when the
-  sibling source is absent it validates the checked-in module instead and passes with
+  source is absent it validates the checked-in module instead and passes with
   `source not available, checked-in src/ui/bevel.js used`.
+- The generators resolve the package's CSS, icons and integrations, so a clean
+  checkout builds without a sibling Bevel checkout. `--source <path>` still overrides
+  the CSS for experiments.
 
 Every `var(--bevel-*)` is resolved to its literal `light-dark(...)` value before the
 module is written, so a host rule such as `* { --bevel-ink: red !important }` cannot
@@ -130,7 +133,7 @@ cascade layer beat a page's unlayered `!important` rules.
 - Every selector in a source is listed in `scripts/skin-manifest.mjs` or the build
   fails, and edited prose is never in a skin.
 - `npm run build:skins` regenerates; `npm run check:skins` fails when a skin is stale
-  (it validates the checked-in modules when `../bevel` is not beside the repo).
+  (it validates the checked-in modules when the Bevel source is unavailable).
 
 ## Surfaces
 

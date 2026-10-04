@@ -55,7 +55,8 @@ import { presence } from './presence.js';
 // `clay:sync-applied`, which this file is the only dispatcher of.
 import './section-notice.js';
 import { hostMeta } from '../core/host-meta.js';
-import { recordEtag, seedEtag, lastSeenEtag, conditionalSaves } from '../core/etag.js';
+import { servedDocumentEtag } from '../core/host-attrs.js';
+import { recordEtag, seedEtag, lastSeenEtag, conditionalSaves, representedEtag, forgetRepresentedEtag } from '../core/etag.js';
 import { pageMaybeDirty, pauseGate, resumeGate, gateCaptureToken, gateClearIfUnchanged } from '../lib/dirty-gate.js';
 import { gestureSeen } from '../lib/user-gesture.js';
 import { SyncStream } from './stream.js';
@@ -121,6 +122,23 @@ const uniqueAuthoredIdentity = (memo) => (el) => {
 };
 
 const isIdMap = (m) => !!m && typeof m === 'object' && !Array.isArray(m);
+
+/**
+ * The version a fetched served document names on its own root, or null.
+ *
+ * The host injects this attribute into the response it builds from one read of
+ * the file, so a served-document GET answers which version the body it just
+ * returned actually is. Parsed detached: this reads one attribute and never
+ * touches the live page, and a body that cannot be parsed simply offers no stamp.
+ *
+ * @param {string} html
+ * @returns {?string}
+ */
+function readServedStamp(html) {
+  if (typeof html !== 'string' || html === '') return null;
+  const parsed = new DOMParser().parseFromString(html, 'text/html');
+  return parsed.documentElement?.getAttribute('documentetag') || null;
+}
 
 // The page just took a frame verified clean against its baseline, so it now IS
 // the file on disk. Both saved baselines move together from one capture: leaving
@@ -324,6 +342,16 @@ class LiveSync {
     // undone, and is dropped by the seq/epoch checks if it went stale.
     this._holdRetryPeer = null;
     this._holdRetryExt = null;
+
+    // The startup check: the one fetch this class runs against the page it was
+    // itself served, started once by the transport's first cursor and never
+    // again. `_servedFetchId` numbers every served-document GET, so a response
+    // that arrives after a newer GET was issued can tell it is superseded — only
+    // the startup check acts on that, since a repair is re-issued rather than
+    // re-read. `_startupRetry` is the single pending re-ask, coalesced so two
+    // retries cannot pile up behind one another.
+    this._servedFetchId = 0;
+    this._startupRetry = null;
 
     // Whether each lane is currently holding. A hold is a safe outcome but a
     // silent one: without an event the page simply stops updating and nothing
@@ -587,6 +615,12 @@ class LiveSync {
     clearTimeout(this._holdRetryExt);
     this._holdRetryPeer = null;
     this._holdRetryExt = null;
+
+    // A stopped run's startup check must not act on what it finds: the next
+    // fetch, if any, owns the question.
+    clearTimeout(this._startupRetry);
+    this._startupRetry = null;
+    this._servedFetchId++;
   }
 
   /**
@@ -718,6 +752,10 @@ class LiveSync {
       shared: this._sharedSync,
       documentURL: window.location.href,
       lane: this.lane,
+      // Only a response that named its own version gives this tab anything to
+      // compare against. On a host that served none there is no provenance to
+      // check, and the page keeps its pre-1.9.0 startup behavior.
+      startupCheck: Boolean(servedDocumentEtag),
     });
 
     this.sse.onopen = () => {
@@ -740,8 +778,22 @@ class LiveSync {
       } catch {
         return;
       }
-      if (!data || data.resync !== true) return;
-      console.log('[LiveSync] Server could not replay everything; refetching the document');
+      // Two different reasons for one refetch. `resync` is the server saying it
+      // could not replay everything between where this client resumed and the
+      // baseline it is sending. `startup` is this tab's own check of the page
+      // it was served: the file may have changed between that response and this
+      // first subscription, and a stamped response is the only thing that can
+      // tell. One fetch covers both: a body that names its own version is
+      // compared whatever asked for it, and the flag only decides what an
+      // unstamped answer may do.
+      if (!data || (data.resync !== true && data.startup !== true)) return;
+      const repair = data.resync === true;
+      const startup = data.startup === true && !repair;
+      console.log(
+        repair
+          ? '[LiveSync] Server could not replay everything; refetching the document'
+          : '[LiveSync] Checking the served document against the version this tab was served'
+      );
       // _fetchServedDocument, deliberately, and not _fetchExternalChange: that
       // one drops a fetch whose seq is at or below the external watermark, and
       // the cursor baseline routinely is, since it is the server's high-water
@@ -749,7 +801,8 @@ class LiveSync {
       // resync that skipped itself for being "already seen" would leave the page
       // permanently stale, which is the exact failure the flag exists to report.
       this._fetchServedDocument(typeof data.seq === 'number' ? data.seq : undefined, {
-        repair: true,
+        repair,
+        startup,
       });
     });
 
@@ -1100,50 +1153,168 @@ class LiveSync {
    * check of its own — callers own that — so it can also re-materialize a
    * frame the epoch check refused (the fetched body is whatever disk holds
    * NOW, which is always safe to apply).
+   *
+   * `startup` marks the one fetch that asks whether the page this tab was served
+   * is still what disk holds. It differs from every other reason to fetch in that
+   * an unchanged answer must do NOTHING: no queue, no apply, no baseline move, no
+   * event, no stamp change. A no-op is not a missed frame here, it is the answer.
+   * A body that names its own version is judged the same way, and a repair that
+   * carries one is no exception.
+   *
+   * @param {number} [seq]
+   * @param {Object} [options]
+   * @param {number} [options.attempt] - Bounded retry count, carried through
+   *   every re-ask so a page under constant churn stops asking.
+   * @param {boolean} [options.repair] - The server could not replay everything.
+   * @param {boolean} [options.startup] - The served page's version check.
    */
-  _fetchServedDocument(seq, { attempt = 0, repair = false } = {}) {
+  _fetchServedDocument(seq, { attempt = 0, repair = false, startup = false } = {}) {
+    // Content already on its way in is about to change what this check would be
+    // comparing, and its version question is newer than this one. Let it land and
+    // ask again; a check that judged the pre-frame DOM would answer about a page
+    // that no longer exists.
+    if (
+      startup &&
+      (this._morphInFlight || this._pendingHtml != null || this._pendingExternal != null)
+    ) {
+      this._retryStartup(attempt);
+      return;
+    }
     const epoch = this._saveEpoch;
+    const startGen = this._startGen;
+    const seenSeq = this.lastSeenSeq;
+    const applyGen = this._applyGen;
+    const fetchId = ++this._servedFetchId;
     if (repair && typeof seq !== 'number') seq = this._lastExternalSeq;
     fetch(new URL(window.location.href), { cache: 'no-store' })
       .then((response) => (response.ok ? response.text() : null))
       .then((html) => {
         if (this.isDestroyed || html == null) return;
-        if (typeof seq === 'number' && seq < this._lastExternalSeq) {
+        if (this._startGen !== startGen) return;
+        const stamp = readServedStamp(html);
+        // A version question is asked by the startup check and by a repair whose
+        // body names its own version. Every other fetch — including an ordinary
+        // fallback whose body happens to carry a stamp — is content, and keeps
+        // the hold/retry behavior the external lane has always had.
+        const versionCheck = startup || (repair && Boolean(stamp));
+        if (versionCheck) {
+          // A newer GET owns this question: whatever it is reading describes a
+          // later moment than this response does.
+          if (fetchId !== this._servedFetchId) return;
+          // The page moved while the GET was in flight — an own save, a frame,
+          // or a morph. The comparison this check exists to make is against a
+          // stationary page, so ask again rather than judge a version the tab has
+          // already left. A failed startup GET is the one exception below: it
+          // changes nothing and has nothing to retry toward.
+          if (
+            epoch !== this._saveEpoch ||
+            seenSeq !== this.lastSeenSeq ||
+            applyGen !== this._applyGen ||
+            this._morphInFlight ||
+            this._pendingHtml != null ||
+            this._pendingExternal != null
+          ) {
+            this._retryStartup(attempt + 1, { repair, startup }, seq);
+            return;
+          }
+          if (!stamp) {
+            // No stamp on the body means the host did not answer the version
+            // question, and an answer nobody gave must not be invented: a
+            // startup check keeps exactly the stamp it holds and applies
+            // nothing, fetched or forgotten. A repair still has a page the
+            // server could not replay, so it keeps its unstamped fallback.
+            if (!repair) return;
+          } else if (stamp === representedEtag()) {
+            // The file this tab was served, and nothing to do about it.
+            return;
+          }
+        } else if (typeof seq === 'number' && seq < this._lastExternalSeq) {
           // A newer external change superseded this one, and its own fetch will
           // queue a body. Except for a repair: that one exists because the server
           // said replay cannot fix this page, so if the newer fetch fails there is
           // nothing else coming. Refetch rather than drop the only repair.
           if (repair && attempt < 3) {
-            this._fetchServedDocument(this._lastExternalSeq, { attempt: attempt + 1, repair });
+            this._fetchServedDocument(this._lastExternalSeq, { attempt: attempt + 1, repair, startup });
           }
           return;
-        }
-        if (this._saveEpoch > epoch) {
+        } else if (this._saveEpoch > epoch) {
           // An own save landed while the GET was in flight, so this body may
           // predate it. Save-response order proves nothing about disk-write
           // order — refetch for the newest bytes instead of dropping.
           if (attempt < 3) {
             console.log('[LiveSync] Refetching external change: own save landed mid-fetch');
-            this._fetchServedDocument(seq, { attempt: attempt + 1, repair });
+            this._fetchServedDocument(seq, { attempt: attempt + 1, repair, startup });
           }
           return;
         }
-        // No stamp: this body came from a GET of the served page, which nobody
-        // stamped, so the apply leaves the held stamp alone and etag.js asks the
-        // host for a replacement. No author either, for the same reason — a GET
-        // answers what disk holds, not who put it there.
-        this._pendingExternal = { html, seq, saveEpoch: epoch, etag: null, by: null };
+        // The stamp, when the body carries one, is the version of THESE bytes:
+        // the same claim the navigation made about its own response, read from
+        // the body rather than from discovery, which answers about a later
+        // moment than any response. A body without one keeps the old fallback
+        // — the apply leaves the stamp alone and etag.js asks the host. No
+        // author either way, for the same reason: a GET answers what disk holds,
+        // not who put it there.
+        this._pendingExternal = {
+          html,
+          seq,
+          saveEpoch: epoch,
+          etag: stamp,
+          by: null,
+          // Why this body was fetched, kept beside it so the drain and the apply
+          // can still tell a version check from an ordinary change. A body that
+          // named its own version was judged against this tab's version, and the
+          // drain must go on judging it that way. The epoch refetch below
+          // re-issues a fetch whose caller may have been a repair.
+          fetchOptions: { repair, startup, attempt, versionCheck },
+          // What the check was made against, so the drain can tell whether the
+          // answer it holds still describes the page that asked.
+          startGen,
+          seenSeq,
+          applyGen,
+          fetchId,
+        };
         this._scheduleNextFrame();
       })
       .catch((err) => {
         this._log('External-change fetch failed', err);
         // The watermark already advanced for this seq; leaving it there
         // would drop the change forever. Roll back so a replay or a later
-        // duplicate can redeliver it.
+        // duplicate can redeliver it. A startup check has no seq to roll back
+        // and no state to restore: it simply did not happen.
         if (typeof seq === 'number' && this._lastExternalSeq === seq) {
           this._lastExternalSeq = seq - 1;
         }
       });
+  }
+
+  /**
+   * Ask the served-document question again, coalesced and bounded.
+   *
+   * A version check that finds the page mid-morph, mid-queue or mid-change cannot
+   * answer, and the answer is the whole point of the fetch, so it re-asks. The
+   * single timer means three arrivals in one frame collapse to one re-ask, and
+   * `attempt` counts only the re-asks that got as far as a GET, so a page that
+   * never settles stops asking rather than looping forever.
+   *
+   * The re-ask carries the options and seq of the fetch that could not answer,
+   * so a re-asked repair is still a repair and still owns its cursor seq.
+   *
+   * @param {number} [attempt]
+   * @param {Object} [options] - The original fetch options.
+   * @param {number} [seq]
+   */
+  _retryStartup(attempt = 0, options = { startup: true }, seq) {
+    if (this.isDestroyed || attempt > 3) return;
+    clearTimeout(this._startupRetry);
+    this._startupRetry = setTimeout(() => {
+      this._startupRetry = null;
+      if (this.isDestroyed) return;
+      if (this._morphInFlight || this._pendingHtml != null || this._pendingExternal != null) {
+        this._retryStartup(attempt, options, seq);
+        return;
+      }
+      this._fetchServedDocument(seq, { ...options, attempt });
+    }, 16);
   }
 
   /**
@@ -1200,9 +1371,21 @@ class LiveSync {
     if (this.isDestroyed) return;
 
     const ext = this._pendingExternal;
+    const opts = ext?.fetchOptions || null;
+    // A startup check and a stamped repair are both version checks: each one
+    // judges its body against the version this tab represents, and each one
+    // answers "nothing to do" when the two agree. An ordinary fetch, and an
+    // unstamped repair, keep the pre-existing content behavior.
+    const versionChecked = Boolean(opts?.startup || opts?.versionCheck);
     let runExternal = false;
     if (ext != null) {
-      if (this._pendingHtml == null) {
+      if (versionChecked && this._pendingHtml != null) {
+        // A version check and a peer frame have no order to compare: the peer
+        // slot's seq is a subscription cursor, not the version of the bytes it
+        // carries, and the answer is only worth anything once the frame it
+        // would be judging has landed. Drain the peer first and ask again.
+        runExternal = false;
+      } else if (this._pendingHtml == null) {
         runExternal = true;
       } else {
         runExternal = !(
@@ -1216,20 +1399,52 @@ class LiveSync {
     if (runExternal) {
       this._pendingExternal = null;
       // Stale-at-drain checks: a newer external change already superseded
-      // this frame, or our own save landed after it was queued.
+      // this frame, our own save landed after it was queued, or the page moved
+      // past what a version check was made against.
       if (typeof ext.seq === 'number' && ext.seq < this._lastExternalSeq) {
-        this._log('Dropping superseded external change at drain');
-      } else if (ext.saveEpoch !== this._saveEpoch) {
+        if (versionChecked && opts?.repair) {
+          // The repair is the only answer a page the server could not replay
+          // has, and the newer change's own fetch may yet fail. Ask again once
+          // that content has drained instead of dropping it here — at the
+          // current watermark, since the seq this body carried is already
+          // superseded and a re-ask that kept it would only be dropped again.
+          this._retryStartup((opts.attempt || 0) + 1, opts, this._lastExternalSeq);
+        } else {
+          this._log('Dropping superseded external change at drain');
+        }
+      } else if (
+        versionChecked &&
+        (ext.startGen !== this._startGen || ext.fetchId !== this._servedFetchId)
+      ) {
+        // The run that asked is gone, or a newer GET is already re-reading the
+        // document: either way this body answers nobody.
+        this._log('Dropping superseded startup check at drain');
+      } else if (
+        versionChecked &&
+        (ext.saveEpoch !== this._saveEpoch ||
+          ext.seenSeq !== this.lastSeenSeq ||
+          ext.applyGen !== this._applyGen)
+      ) {
+        // The page changed after this check was made. Comparing the version it
+        // holds against a page that has since moved would answer about neither,
+        // so ask again rather than apply a body that may already be obsolete.
+        this._retryStartup((opts.attempt || 0) + 1, opts, ext.seq);
+      } else if (versionChecked && ext.etag != null && ext.etag === representedEtag()) {
+        // Checked once more at the moment of truth, because a frame that applied
+        // while this waited can have brought the very version disk holds.
+        this._log('Startup check found the same version: nothing to apply');
+      } else if (!versionChecked && ext.saveEpoch !== this._saveEpoch) {
         // The epoch moved, but save-response order does not prove disk-write
         // order: the frame's content may still be newer than our save.
         // Refetch the served document — applying what disk holds NOW is
-        // always safe — instead of dropping the frame.
+        // always safe — instead of dropping the frame. Mode rides along: a
+        // repair that comes back this way is still a repair.
         console.log('[LiveSync] Refetching external change: own save landed after queue');
-        this._fetchServedDocument(ext.seq);
+        this._fetchServedDocument(ext.seq, opts || {});
       } else {
         this._morphInFlight = true;
         try {
-          await this._doApplyExternal(ext.html, ext.seq, ext.etag, ext.by);
+          await this._doApplyExternal(ext.html, ext.seq, ext.etag, ext.by, opts);
         } catch (err) {
           console.error('[LiveSync] applyExternal failed:', err);
         } finally {
@@ -1600,9 +1815,16 @@ class LiveSync {
       // above, and deliberately the same moment: the two claims a page makes
       // when it adopts a stamp are "the host stores this version" and "I hold
       // it", and only the second one is this tab's to make.
-      if (!(this._acceptedSaveTicket > ticket) && typeof etag === 'string' && etag) {
-        recordEtag(etag);
-        stamped = true;
+      if (!(this._acceptedSaveTicket > ticket)) {
+        if (typeof etag === 'string' && etag) {
+          recordEtag(etag);
+          stamped = true;
+        } else {
+          // Content nobody stamped: the DOM no longer holds the version this
+          // tab was claiming, so the claim goes. A save accepted since this
+          // frame captured keeps its own newer stamp.
+          forgetRepresentedEtag();
+        }
       }
 
       // Cross-lane baseline: the DOM now holds this frame's content, but the
@@ -1693,7 +1915,7 @@ class LiveSync {
    * holds or a later dirty peer apply misclassifies this frame's content as
    * local edits.
    */
-  async _doApplyExternal(html, seq, etag = null, by = null) {
+  async _doApplyExternal(html, seq, etag = null, by = null, fetchOptions = null) {
     this._log(`applyExternal - external disk change (seq=${seq})`);
     this.isPaused = true;
 
@@ -1721,6 +1943,15 @@ class LiveSync {
       if (this.lane === 'live' && pageMaybeDirty() && this._diskBase === null) {
         console.log('[LiveSync] Holding external change: unsaved local edits and no baseline to merge against');
         this._setHeld('external', true, null);
+        // A version check holds nothing: it has no frame to re-queue, and the
+        // body it fetched describes disk as of its GET rather than a version
+        // anyone named. Re-queueing it would apply bytes while the local edit
+        // that caused the hold is still unsaved, so ask the question again
+        // instead — by then either the page is clean or the answer has changed.
+        if (fetchOptions?.startup || fetchOptions?.versionCheck) {
+          this._retryStartup((fetchOptions.attempt || 0) + 1, fetchOptions, seq);
+          return;
+        }
         const epochAtHold = this._saveEpoch;
         clearTimeout(this._holdRetryExt);
         this._holdRetryExt = setTimeout(() => {
@@ -1762,12 +1993,18 @@ class LiveSync {
       // bytes, and the convergence save at the bottom needs a stamp the host
       // will accept or the merge is refused and lost.
       //
-      // A frame with no stamp (an older host, or the content-less fetch fallback,
-      // which serves bytes nobody stamped) leaves this alone, and the listener in
-      // etag.js falls back to asking the host.
-      if (typeof etag === 'string' && etag) {
-        recordEtag(etag);
-        stamped = true;
+      // A frame with no stamp (an older host, or the content-less fetch fallback
+      // on a host that does not answer the version question) leaves this alone,
+      // and the listener in etag.js falls back to asking the host. A save
+      // accepted since this frame captured already recorded a newer stamp, and
+      // this body, older than that save, must not rewind it — nor clear it.
+      if (!(this._acceptedSaveTicket > ticket)) {
+        if (typeof etag === 'string' && etag) {
+          recordEtag(etag);
+          stamped = true;
+        } else {
+          forgetRepresentedEtag();
+        }
       }
 
       if (

@@ -18,6 +18,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
+import { createRequire } from 'node:module'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import postcss from 'postcss'
 import { FONT_SANS, FONT_MONO, FONT_SERIF, SHADOW, GLYPHS, TOKEN_NAMES, RECIPES, SURFACE, MEDIA } from './bevel-manifest.mjs'
@@ -25,8 +26,10 @@ import { FONT_SANS, FONT_MONO, FONT_SERIF, SHADOW, GLYPHS, TOKEN_NAMES, RECIPES,
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const OUT = path.join(ROOT, 'src/ui/bevel.js')
 const OUT_LABEL = 'src/ui/bevel.js'
-const DEFAULT_SOURCE = path.resolve(ROOT, '../bevel/bevel.css')
-const DEFAULT_ICONS = path.resolve(ROOT, '../bevel/icons/icons.js')
+// Resolved from the pinned package; createRequire because Jest's ESM loader has no import.meta.resolve.
+const BEVEL = path.dirname(createRequire(import.meta.url).resolve('@panphora/bevel/package.json'))
+const DEFAULT_SOURCE = path.join(BEVEL, 'bevel.css')
+const DEFAULT_ICONS = path.join(BEVEL, 'icons/icons.js')
 const HEADER = '// GENERATED from bevel/bevel.css and bevel/icons by scripts/build-bevel-subset.mjs. Run `npm run build:bevel`.\n'
 const SPECIAL = { 'font-sans': FONT_SANS, 'font-mono': FONT_MONO, 'font-serif': FONT_SERIF, shadow: SHADOW }
 const USAGE = 'usage: node scripts/build-bevel-subset.mjs [--check] [--source <path>] [--module <path>]'
@@ -399,7 +402,7 @@ async function main() {
       await checkWithoutSource()
       return
     }
-    console.log('bevel/bevel.css not found beside clayjs')
+    console.log('@panphora/bevel/bevel.css not found; run npm install')
     process.exit(1)
   }
 

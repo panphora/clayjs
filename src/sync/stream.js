@@ -3,7 +3,7 @@ const HIDDEN_DELAY = 5000;
 const PING_INTERVAL = 15000;
 
 export class SyncStream extends EventTarget {
-  constructor(url, { shared = false, documentURL, lane } = {}) {
+  constructor(url, { shared = false, documentURL, lane, startupCheck = false } = {}) {
     super();
     this.url = url;
     this.readyState = 0;
@@ -16,7 +16,14 @@ export class SyncStream extends EventTarget {
     this._since = 0;
     this._closed = false;
     this._suspended = false;
+    // Two different questions, asked once each at the first subscription and
+    // never again: `_repair` is a real reconnect whose replay the host could not
+    // retain, and `_startup` is the caller's own check of a page that was served
+    // before this stream existed. Only the caller can know whether the response
+    // it was served named a version, so the startup check is opt-in and off by
+    // default: a stream nobody told about provenance must not manufacture one.
     this._repair = false;
+    this._startup = startupCheck;
     this._worker = null;
     this._source = null;
     this._visibility = () => {
@@ -77,8 +84,11 @@ export class SyncStream extends EventTarget {
         } else if (data.type === 'cursor') {
           clearTimeout(this._startTimer);
           if (Number.isSafeInteger(data.seq)) this._since = Math.max(this._since, data.seq);
-          this._emit('cursor', JSON.stringify({ ...data, resync: data.resync === true || this._repair }));
+          const resync = data.resync === true || this._repair;
+          const startup = this._startup;
           this._repair = false;
+          this._startup = false;
+          this._emit('cursor', JSON.stringify({ ...data, resync, startup }));
         } else if (data.type === 'frame' && typeof data.data === 'string') {
           this._remember(data.data);
           this._emit('message', data.data);
@@ -111,9 +121,12 @@ export class SyncStream extends EventTarget {
       if (this._source !== source) return;
       this.readyState = 1;
       this._emit('open');
-      if (this._repair) {
+      if (this._repair || this._startup) {
+        const resync = this._repair;
+        const startup = this._startup;
         this._repair = false;
-        this._emit('cursor', JSON.stringify({ resync: true }));
+        this._startup = false;
+        this._emit('cursor', JSON.stringify({ resync, startup }));
       }
     };
     source.onerror = () => {

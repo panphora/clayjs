@@ -14,6 +14,8 @@ jest.unstable_mockModule("../../src/core/etag.js", () => ({
   lastSeenEtag: jest.fn(),
   conditionalSaves: jest.fn(() => true),
   forgetEtag: jest.fn(),
+  representedEtag: jest.fn(),
+  forgetRepresentedEtag: jest.fn(),
 }));
 
 class FakeEventSource extends EventTarget {

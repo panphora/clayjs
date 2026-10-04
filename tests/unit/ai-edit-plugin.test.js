@@ -109,6 +109,38 @@ test("stays dormant while helpers() lists no ready ai-edit", () => {
   expect(fakeWire.send).not.toHaveBeenCalled();
 });
 
+test("open() with no ai-edit helper on this host returns false and builds nothing", async () => {
+  fakeWire.helpers.mockResolvedValue([{ name: "search", state: "ready" }]);
+  const target = mountPage();
+  expect(await aiEdit.open(target, { prompt: "tighten this" })).toBe(false);
+  expect(panel()).toBeNull();
+  expect(chip()).toBeNull();
+  expect(document.querySelectorAll("[data-clay-ai-edit]").length).toBe(0);
+  expect(fakeWire.send).not.toHaveBeenCalled();
+});
+
+test("concurrent init() and open() calls build one composer", async () => {
+  fakeWire.helpers.mockResolvedValue([{ name: "ai-edit", state: "ready" }]);
+  const target = mountPage();
+  try {
+    const results = await Promise.all([
+      aiEdit.init(),
+      aiEdit.open(target, { prompt: "add a bar chart" }),
+      aiEdit.init(),
+    ]);
+    expect(results).toEqual([undefined, true, undefined]);
+    for (const name of ["panel", "ring", "chip", "bubble", "status-bar"]) {
+      expect([name, document.querySelectorAll(`[data-clay-ai-edit="${name}"]`).length]).toEqual([name, 1]);
+    }
+    expect(panel().hidden).toBe(false);
+    expect(textarea().value).toBe("add a bar chart");
+  } finally {
+    // Leave the composer shut, the way the rest of this file expects to find it.
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+  }
+  expect(panel().hidden).toBe(true);
+});
+
 describe("with a ready ai-edit helper", () => {
   beforeAll(async () => {
     fakeWire.helpers.mockResolvedValue([{ name: "ai-edit", state: "ready" }]);
@@ -1141,6 +1173,211 @@ describe("with a ready ai-edit helper", () => {
     expect(document.querySelector('[data-clay-ai-edit="status-bar"]')).not.toBeNull();
     expect(captured).not.toContain("data-clay-ai-edit");
     expect(captured).toContain("Old heading");
+  });
+
+  // ------------------------------------------------------------------- open
+
+  describe("opening the box on a target\u0027s behalf", () => {
+    const ARTICLE = '<article data-edit-id="post"><h1>Old heading</h1><p>Old paragraph</p></article>';
+
+    test("a ready helper opens a connected article target with the suggested prompt and sends nothing", async () => {
+      const article = mountHTML(ARTICLE);
+      expect(await aiEdit.open(article, { prompt: "Add a bar chart above the table. Keep the table." })).toBe(true);
+      expect(panel().hidden).toBe(false);
+      expect(textarea().value).toBe("Add a bar chart above the table. Keep the table.");
+      expect(textarea().disabled).toBe(false);
+      expect(barShown()).toBe(false);
+      expect(fakeWire.send).not.toHaveBeenCalled();
+    });
+
+    test("a page button that opens the box keeps it open through the click-away listener of the same click", async () => {
+      // The prominent AI button on the page opens the composer from its own click
+      // listener, and the plugin's click-away listener runs later in that same click.
+      // A real click through agent-browser shows the box closing on the spot, so the
+      // ordering is modeled here rather than reproduced: open() starts, the microtasks
+      // it yields on run out, and only then does the outside click reach document.
+      const article = mountHTML(ARTICLE);
+      const aiButton = document.createElement("button");
+      aiButton.textContent = "Write with AI";
+      document.body.append(aiButton);
+
+      try {
+        const opening = aiEdit.open(article, { prompt: "chart" });
+        await flush(); // microtasks only: the opening is still waiting out the click
+        aiButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        expect(await opening).toBe(true);
+        expect(panel().hidden).toBe(false);
+        expect(textarea().value).toBe("chart");
+
+        // A later click away is still a dismissal: the box closes as it always did.
+        aiButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        expect(panel().hidden).toBe(true);
+      } finally {
+        aiButton.remove();
+      }
+    });
+
+    test("Send carries that target\u0027s HTML and the suggested prompt", async () => {
+      const article = mountHTML(ARTICLE);
+      await aiEdit.open(article, { prompt: "Add a bar chart above the table. Keep the table." });
+      button("send").click();
+      await flush();
+
+      expect(fakeWire.send).toHaveBeenCalledTimes(1);
+      expect(handle.opts.helper).toBe("ai-edit");
+      expect(handle.payload.comment).toBe("Add a bar chart above the table. Keep the table.");
+      expect(handle.payload.elementHTML).toBe(ARTICLE);
+      expect(handle.payload.editId).toBe("post");
+      expect(handle.payload.tag).toBe("article");
+      expect(handle.payload.quote).toBeUndefined();
+      expect(save).not.toHaveBeenCalled();
+      expect(barShown()).toBe(true);
+    });
+
+    test("a typed draft survives a dismissal and a later suggestion", async () => {
+      const section = mountPage();
+      await aiEdit.open(section, { prompt: "first suggestion" });
+      expect(textarea().value).toBe("first suggestion");
+
+      textarea().value = "  my own words  ";
+      document.querySelector("h1").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      expect(panel().hidden).toBe(true);
+
+      expect(await aiEdit.open(section, { prompt: "another suggestion" })).toBe(true);
+      expect(textarea().value).toBe("  my own words  ");
+    });
+
+    test("opening the box again on the same target keeps its unsent text", async () => {
+      const section = mountPage();
+      await aiEdit.open(section, { prompt: "suggested" });
+      textarea().value = "half typed";
+
+      expect(await aiEdit.open(section, { prompt: "ignored suggestion" })).toBe(true);
+      expect(panel().hidden).toBe(false);
+      expect(textarea().value).toBe("half typed");
+      expect(document.activeElement).toBe(textarea());
+    });
+
+    test("detached, non-element, script and UI targets return false without changing the panel", async () => {
+      const section = mountPage();
+      expect(await aiEdit.open(section, { prompt: "keep this" })).toBe(true);
+
+      const extras = document.createElement("div");
+      const detached = document.createElement("p");
+      detached.textContent = "Detached";
+      const script = document.createElement("script");
+      const stripped = document.createElement("p");
+      stripped.setAttribute("clay", "no-save");
+      const saveRemoved = document.createElement("p");
+      saveRemoved.setAttribute("save-remove", "");
+      const control = document.createElement("button");
+      const field = document.createElement("textarea");
+      const snapshotRegion = document.createElement("div");
+      snapshotRegion.setAttribute("clay", "no-snapshot");
+      const snapshotRegionChild = document.createElement("p");
+      snapshotRegionChild.textContent = "Nested";
+      snapshotRegion.append(snapshotRegionChild);
+      const bareSnapshotRegion = document.createElement("div");
+      bareSnapshotRegion.setAttribute("no-snapshot", "");
+      const bareSnapshotRegionChild = document.createElement("p");
+      bareSnapshotRegionChild.textContent = "Nested";
+      bareSnapshotRegion.append(bareSnapshotRegionChild);
+      const snapshotRemovedRegion = document.createElement("div");
+      snapshotRemovedRegion.setAttribute("snapshot-remove", "");
+      const snapshotRemovedRegionChild = document.createElement("p");
+      snapshotRemovedRegionChild.textContent = "Nested";
+      snapshotRemovedRegion.append(snapshotRemovedRegionChild);
+      extras.append(script, stripped, saveRemoved, control, field,
+        snapshotRegion, bareSnapshotRegion, snapshotRemovedRegion);
+      document.body.append(extras);
+
+      try {
+        const targets = [
+          ["a detached element", detached],
+          ["no target", null],
+          ["an undefined target", undefined],
+          ["a string", "p"],
+          ["a text node", document.createTextNode("text")],
+          ["a script", script],
+          ["a stripped region", stripped],
+          ["a save-remove region", saveRemoved],
+          ["a no-snapshot region", snapshotRegion],
+          ["a bare no-snapshot region", bareSnapshotRegion],
+          ["a snapshot-remove region", snapshotRemovedRegion],
+          ["a child of a no-snapshot region", snapshotRegionChild],
+          ["a child of a bare no-snapshot region", bareSnapshotRegionChild],
+          ["a child of a snapshot-remove region", snapshotRemovedRegionChild],
+          ["a control", control],
+          ["a field", field],
+          ["the panel", panel()],
+          ["the chip", chip()],
+          ["the whole-page bubble", docBubble()],
+          ["the bar", bar()],
+        ];
+        for (const [label, target] of targets) {
+          expect([label, await aiEdit.open(target, { prompt: "nope" })]).toEqual([label, false]);
+        }
+      } finally {
+        extras.remove();
+      }
+
+      expect(panel().hidden).toBe(false);
+      expect(textarea().value).toBe("keep this");
+      expect(fakeWire.send).not.toHaveBeenCalled();
+
+      await submit("keep this");
+      expect(handle.payload.editId).toBe("hero");
+    });
+
+    test("an active request returns false and retains its target", async () => {
+      const section = mountPage();
+      clickSection(section);
+      await submit("tighten this");
+      expect(barShown()).toBe(true);
+
+      const other = document.createElement("section");
+      other.setAttribute("data-edit-id", "aside");
+      other.innerHTML = "<p>Aside</p>";
+      document.body.append(other);
+
+      try {
+        expect(await aiEdit.open(other, { prompt: "add a chart" })).toBe(false);
+        expect(panel().hidden).toBe(true);
+        expect(textarea().value).toBe("");
+        expect(fakeWire.send).toHaveBeenCalledTimes(1);
+
+        // The reply is still about the original target, and only that target moves.
+        handle.settle({ state: "done", result: { html: '<section data-edit-id="hero"><h1>New heading</h1><p>Old paragraph</p></section>', model: "m" } });
+        await flush();
+        expect(barButton("keep").hidden).toBe(false);
+        expect(document.querySelector('[data-edit-id="hero"] h1').textContent).toBe("New heading");
+        expect(other.querySelector("p").textContent).toBe("Aside");
+      } finally {
+        other.remove();
+      }
+    });
+
+    test("a listed but disabled helper opens the existing setup note with Send unavailable", async () => {
+      fakeWire.helpers.mockResolvedValue([{ name: "ai-edit", state: "unavailable" }]);
+      const section = mountPage();
+      expect(await aiEdit.open(section, { prompt: "add a bar chart" })).toBe(true);
+      await flush();
+
+      expect(panel().hidden).toBe(false);
+      expect(statusEl().textContent).toMatch(/turned off/);
+      expect(button("send").hidden).toBe(true);
+      expect(textarea().disabled).toBe(true);
+      expect(textarea().value).toBe("add a bar chart");
+      await submit("add a bar chart");
+      expect(fakeWire.send).not.toHaveBeenCalled();
+
+      // The host turns its switch back on: the next opening works without a reload.
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+      fakeWire.helpers.mockResolvedValue([{ name: "ai-edit", state: "ready" }]);
+      clickSection(mountPage());
+      await flush();
+      expect(button("send").hidden).toBe(false);
+    });
   });
 
   describe("plain pages, no data-edit-id", () => {

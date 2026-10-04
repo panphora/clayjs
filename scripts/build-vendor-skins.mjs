@@ -26,6 +26,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
+import { createRequire } from 'node:module'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import postcss from 'postcss'
 import { collapse, lookupIn, readTokens } from './build-bevel-subset.mjs'
@@ -33,7 +34,8 @@ import { LAYER, SKINS } from './skin-manifest.mjs'
 import { FONT_MONO, FONT_SANS } from '../src/ui/bevel.js'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const BEVEL = path.resolve(ROOT, '../bevel')
+// Resolved from the pinned package; createRequire because Jest's ESM loader has no import.meta.resolve.
+const BEVEL = path.dirname(createRequire(import.meta.url).resolve('@panphora/bevel/package.json'))
 const OUT_DIR = path.join(ROOT, 'src/ui/skins')
 const EXPORTS = ['CSS', 'ROOTS', 'SOURCE_SHA256']
 
@@ -497,7 +499,7 @@ async function main() {
   const names = Object.keys(SKINS)
   if (!fs.existsSync(path.join(BEVEL, 'bevel.css'))) {
     if (!check) {
-      console.log('bevel/bevel.css not found beside clayjs')
+      console.log('@panphora/bevel/bevel.css not found; run npm install')
       process.exit(1)
     }
     let failed = false

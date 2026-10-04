@@ -22,9 +22,9 @@ const hidden = value => {
   Object.defineProperty(document, 'hidden', { configurable: true, value });
   document.dispatchEvent(new Event('visibilitychange'));
 };
-const make = (shared = true) => {
+const make = (shared = true, options = {}) => {
   const stream = new SyncStream('http://localhost/_/sync?document-url=test&resume-id=existing', {
-    shared, documentURL: 'http://localhost/file.htmlclay', lane: 'live',
+    shared, documentURL: 'http://localhost/file.htmlclay', lane: 'live', ...options,
   });
   streams.push(stream);
   return stream;
@@ -128,7 +128,7 @@ test('direct fallback releases hidden connections and repairs after bfcache rest
   hidden(false);
   expect(sources).toHaveLength(2);
   sources[1].onopen();
-  expect(JSON.parse(repair.mock.calls[0][0].data)).toEqual({ resync: true });
+  expect(JSON.parse(repair.mock.calls[0][0].data)).toEqual({ resync: true, startup: false });
   window.dispatchEvent(new Event('pagehide'));
   expect(sources[1].close).toHaveBeenCalledTimes(1);
   window.dispatchEvent(new Event('pageshow'));
@@ -185,4 +185,39 @@ test.each([false, true])('restoring a page cancels its earlier hidden timer (sha
   jest.advanceTimersByTime(3000);
   const close = shared ? workers[1].port.close : sources[1].close;
   expect(close).not.toHaveBeenCalled();
+});
+
+// The startup check is the caller's question about a page that was served before
+// this stream existed, and only the caller can know whether that response named a
+// version. So it is opt-in: the same first open without it is a subscription and
+// nothing else, and a stream nobody asked about provenance never manufactures one.
+test('a stream with a startup check flags the first direct open, once', () => {
+  const stream = make(false, { startupCheck: true });
+  const cursors = [];
+  stream.addEventListener('cursor', event => cursors.push(JSON.parse(event.data)));
+  sources[0].onopen();
+  expect(cursors).toEqual([{ resync: false, startup: true }]);
+  sources[0].onopen();
+  expect(cursors).toHaveLength(1);
+});
+
+test('without a startup check a direct open is a subscription and nothing else', () => {
+  const stream = make(false);
+  const cursors = [];
+  stream.addEventListener('cursor', event => cursors.push(JSON.parse(event.data)));
+  sources[0].onopen();
+  expect(cursors).toEqual([]);
+});
+
+test('a status frame does not consume the startup check a shared cursor carries', () => {
+  const stream = make(true, { startupCheck: true });
+  const cursors = [];
+  stream.addEventListener('cursor', event => cursors.push(JSON.parse(event.data)));
+  workers[0].send({ type: 'status', state: 'open' });
+  expect(cursors).toEqual([]);
+  workers[0].send({ type: 'cursor', seq: 7, resync: false });
+  workers[0].send({ type: 'cursor', seq: 8, resync: false });
+  expect(cursors.map(({ seq, resync, startup }) => ({ seq, resync, startup }))).toEqual([
+    { seq: 7, resync: false, startup: true }, { seq: 8, resync: false, startup: false },
+  ]);
 });

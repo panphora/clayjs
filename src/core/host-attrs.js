@@ -9,6 +9,20 @@
 
 import { SAVE_TOKEN_ATTRS, LEGACY_SAVE_TOKEN_ATTRS } from "../lib/root-attrs.js";
 
+// The version of the bytes this response was built from, captured ONCE, here.
+//
+// §5's discovery answers about whatever is on disk when the ANSWER is built, which is
+// a later moment than the navigation that delivered this page: the file can change in
+// between, and its answer then names a revision this tab has never seen. The root
+// attribute is the only place that says which one this tab is actually looking at, so
+// it is read at module evaluation and never again. A later re-read would pick up
+// whatever a morph or a stream restart left on the root, which is exactly the claim
+// this value exists to avoid.
+export const servedDocumentEtag =
+  typeof document === "undefined"
+    ? null
+    : document.documentElement.getAttribute("documentetag") || null;
+
 let warnedAboutLegacyToken = false;
 
 /**

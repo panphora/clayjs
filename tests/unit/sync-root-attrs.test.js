@@ -11,11 +11,15 @@ import { HyperMorph } from "../../src/vendor/hyper-morph.vendor.js";
 // SHOULD ride along, chosen when the name was still hypothetical; it is now the
 // host-injected id itself, so it belongs here beside htmlclayid, its pre-spec
 // spelling, and gets the same treatment for the same reason.
+// documentetag is the host's version stamp for THIS response. Not a token, not a
+// durable identity: it names a revision, so a peer's copy is a claim about bytes this
+// tab never received and this tab's copy must never travel out.
 const TAB_LOCAL = [
   "savetoken",
   "htmlclaytoken",
   "documentid",
   "htmlclayid",
+  "documentetag",
   "savestatus",
   "editmode",
   "pageowner",
@@ -30,6 +34,7 @@ function makeClone() {
   clone.setAttribute("htmlclaytoken", "ephemeral-def456");
   clone.setAttribute("documentid", "durable-file-uuid");
   clone.setAttribute("htmlclayid", "pre-spec-file-uuid");
+  clone.setAttribute("documentetag", "response-stamp-abc123");
   clone.setAttribute("savestatus", "unsaved");
   clone.setAttribute("editmode", "true");
   clone.setAttribute("pageowner", "true");
@@ -46,6 +51,24 @@ test("the sync payload drops every tab-local attribute from the root", () => {
   for (const name of TAB_LOCAL) {
     expect(rootTag).not.toContain(`${name}=`);
   }
+});
+
+test("a peer's response stamp is not written onto this tab's root", async () => {
+  document.documentElement.setAttribute("documentetag", "mine");
+  await morphFrom(
+    '<html documentetag="theirs" lang="fr"><head></head><body><p>peer</p></body></html>',
+  );
+  expect(document.documentElement.getAttribute("documentetag")).toBe("mine");
+  expect(document.documentElement.getAttribute("lang")).toBe("fr");
+});
+
+test("a stamp-stripped frame does not remove this tab's own stamp", async () => {
+  document.documentElement.setAttribute("documentetag", "mine");
+  await morphFrom(
+    '<html lang="de"><head></head><body><p>peer</p></body></html>',
+  );
+  expect(document.documentElement.getAttribute("documentetag")).toBe("mine");
+  expect(document.documentElement.getAttribute("lang")).toBe("de");
 });
 
 test("the sync payload keeps the author's own root attributes", () => {

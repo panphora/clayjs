@@ -26,7 +26,7 @@ import { seedEtag, lastSeenEtag } from "./etag.js";
 import { gateCaptureToken, gateClearIfUnchanged, pageMaybeDirty } from "../lib/dirty-gate.js";
 import { hasUnsavedState } from "../lib/unsaved-state.js";
 import { autosaveActive } from "../lib/autosave-state.js";
-import { ROOT_LIBRARY_ATTRS, SAVE_TOKEN_ATTRS, LEGACY_SAVE_TOKEN_ATTRS } from "../lib/root-attrs.js";
+import { ROOT_LIBRARY_ATTRS, SAVE_TOKEN_ATTRS, LEGACY_SAVE_TOKEN_ATTRS, HOST_RESPONSE_ATTRS } from "../lib/root-attrs.js";
 import { logSaveCheck, logBaseline } from "../lib/autosave-debug.js";
 import { initUserGesture, markExplicitSave, clearExplicitSave } from "../lib/user-gesture.js";
 // A deliberate import cycle: unsaved-warning reads this module's saved baseline, and
@@ -51,16 +51,24 @@ addDocumentTransform(clone => {
   for (const name of ROOT_LIBRARY_ATTRS) clone.removeAttribute(name);
 });
 
-// Keep the host's save token out of the saved bytes, both spellings.
+// Keep the host's save token out of the saved bytes, both spellings, and the response
+// metadata with it.
 //
-// It is a credential for this response, never file content: htmlclay strips it from
-// every save body on arrival, so it never reached disk anyway. Sending it made the
+// A save token is a credential for this response, never file content: htmlclay strips it
+// from every save body on arrival, so it never reached disk anyway. Sending it made the
 // source map, which models the bytes a save sent, describe a root tag one attribute
 // longer than the file, and every offset after it was off by that much. The save
 // itself is authorized by the URL, which reads the token from the live page. The
 // document id is NOT stripped: htmlclay keeps it on disk on purpose.
+//
+// `documentetag` is the same kind of thing for a different reason. It names the version
+// of the response this tab loaded, and it is replaced on every serve, so writing it to
+// disk would freeze one response's stamp into the file and give the next reader a
+// provenance claim about bytes nobody built a response from. Root only, like the rest of
+// this transform: the same name on a child is the author's, and stripping those would
+// delete page content.
 addDocumentTransform(clone => {
-  for (const name of [...SAVE_TOKEN_ATTRS, ...LEGACY_SAVE_TOKEN_ATTRS]) clone.removeAttribute(name);
+  for (const name of [...SAVE_TOKEN_ATTRS, ...LEGACY_SAVE_TOKEN_ATTRS, ...HOST_RESPONSE_ATTRS]) clone.removeAttribute(name);
 });
 
 // ============================================

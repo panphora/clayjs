@@ -137,8 +137,9 @@ itself, with no network.
 - `clay.upload` — pick a file and get it into the page (upload plugin).
 - `clay.wire` — per-file control channel to a process on the user's machine: `send`,
   `cancel`, `get`, `list`, `isBusy`, `on` (wire plugin).
-- `clay.aiEdit` — the AI comment box: `clay.aiEdit.init()` (ai-edit plugin; booted by the
-  plugin itself, and a no-op unless the host lists an `ai-edit` wire helper).
+- `clay.aiEdit` — the AI comment box: `clay.aiEdit.init()` and
+  `clay.aiEdit.open(element, { prompt })` (ai-edit plugin; booted by the plugin itself, and a
+  no-op unless the host lists an `ai-edit` wire helper).
 - `clay.region` — region policy helpers and strip selectors (see clay.internals.region;
   the same object, also published as `STRIP_FROM_SAVE`-style constants).
 
@@ -483,6 +484,19 @@ token variant, `POST /_/save/{token}`, read from `<html savetoken>`.
   click on the whole page bubble closes an empty box and keeps a typed one open. A leading
   `@token` picks the engine, `@file.ext` adds context, and `@page` saves the page first so the
   helper reads it from disk.
+
+  A page can open the composer itself, prefilled with a suggested request:
+
+  ```js
+  await clay.aiEdit.open(element, { prompt: "Add a bar chart above the table. Keep the table." });
+  ```
+
+  `open` opens the existing composer and returns true when opened, false when unavailable, busy
+  or the target cannot be edited. It does not send automatically. The prompt seeds an empty
+  per-target draft; previously typed text is preserved. The target must be a connected content
+  element in this document. Controls and transient UI are not valid targets. A listed but
+  disabled helper opens the existing setup explanation with Send unavailable, just like the
+  keyboard shortcut.
 
   Edit mode only, and dormant unless `clay.wire.helpers()` lists an `ai-edit` helper. Listed as
   `unavailable` (the host's switch is off), ⌘J opens the panel with a note and no Send. HTML Clay

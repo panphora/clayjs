@@ -10,7 +10,7 @@
 //
 // Source text is read from what ClayJS actually ships: the CSS template literal inside
 // the vendored bundle (found by `marker`, the text the literal opens with), plus the
-// Bevel integration stylesheet from the sibling ../bevel checkout.
+// Bevel integration stylesheet from the pinned @panphora/bevel package.
 
 export const LAYER = 'clay-skin'
 

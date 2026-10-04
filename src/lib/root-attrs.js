@@ -63,6 +63,19 @@ export const LEGACY_SAVE_TOKEN_ATTRS = ["htmlclaytoken"];
 // what fixed that, and the split holds whatever token spellings are read above.
 export const HOST_IDENTITY_ATTRS = ["documentid", "htmlclayid"];
 
+// Response metadata, and neither of the other two. `documentetag` names the version
+// of the bytes the host built THIS response from, which is the one thing neither the
+// token nor the identity can say: a token grants a capability and an identity names a
+// file, while the stamp names a revision. It rides on the response only, so an
+// incoming morph must never apply a peer's copy and an outgoing sync must never carry
+// this tab's. Read once, at module evaluation, by host-attrs.js — never re-read from
+// the live root, which a morph may since have rewritten.
+//
+// Kept out of SAVE_TOKEN_ATTRS on purpose: host-attrs.js returns the first name it
+// finds in that list straight into the save URL, and a version stamp is not a
+// credential.
+export const HOST_RESPONSE_ATTRS = ["documentetag"];
+
 // What a host may have injected, and therefore what has to be stripped before a save
 // and kept out of an incoming morph. Wider than what is READ, on purpose: the old token
 // spelling is still injected by every htmlclay, so it still has to be stripped, whether
@@ -87,6 +100,7 @@ export const ROOT_LIBRARY_ATTRS = ["savestatus", "editmode", "pageowner"];
 // can no longer save at all.
 export const TAB_LOCAL_ROOT_ATTRS = new Set([
   ...HOST_TOKEN_ATTRS,
+  ...HOST_RESPONSE_ATTRS,
   ...ROOT_LIBRARY_ATTRS,
 ]);
 

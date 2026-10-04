@@ -66,6 +66,7 @@
   },
   "devDependencies": {
     "@esm-bundle/chai": "^4.3.4-fix.0",
+    "@panphora/bevel": "0.1.0",
     "@web/test-runner": "^0.20.2",
     "@web/test-runner-commands": "^0.9.0",
     "@web/test-runner-playwright": "^0.11.1",

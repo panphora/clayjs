@@ -10,14 +10,32 @@
  *
  * Three things move the stamp, and nothing else does:
  *
- *   - discovery seeds it, because a freshly loaded page has never saved and so
- *     holds no stamp of its own,
+ *   - the response that delivered this page seeds it, when the host stamped that
+ *     response: the stamp names the bytes the navigation was built from, which is
+ *     the only evidence this tab has about the version it is looking at,
  *   - an accepted save replaces it with the one that response carried, and clears
  *     it when a response carries none: after our own write, any stamp still held
  *     here is known to describe bytes the host has stopped storing,
  *   - a disk-sourced live-sync frame replaces it with the stamp that frame
  *     carried, because the file changed under a tab that never saved. A frame
  *     with no stamp on it falls back to clearing and asking the host.
+ *
+ * Discovery seeds it only for a page that arrived without a stamp of its own. That
+ * is not a detail: both hosts read the file AGAIN when they answer discovery, so
+ * their answer describes a later moment than the navigation. This tab may have been
+ * served A, the file may have become B, and discovery answers B — bytes this tab has
+ * never seen. Adopting that would claim the newer version while holding the older
+ * bytes, and this tab's next save would pass If-Match and overwrite the update it
+ * never received. It would also erase the only evidence that the update is missing.
+ * The exception is an explicit overwrite, `seedEtag({ fresh: true })`, which a person
+ * asks for by name; that may take whatever the host says now.
+ *
+ * `represented` rides beside the stamp and answers a different question: which
+ * version of the file is the DOM in front of the person? A save compares against
+ * `lastSeen`, but discovery moves that without this tab having received anything, so
+ * the two only agree when the last change came with content. Startup repair compares
+ * the file against `represented` to decide whether this page is still the page the
+ * navigation delivered.
  *
  * A peer's SNAPSHOT does not move it. §10 relays never write to disk, so the
  * stamp is still true after one lands, and treating one as a disk change would
@@ -30,8 +48,13 @@
 
 import { hostMeta } from "./host-meta.js";
 import { isEditMode } from "./is-edit-mode.js";
+import { servedDocumentEtag } from "./host-attrs.js";
 
-let lastSeen = null;
+// Both start at the version this response was built from, when the host said which one
+// that is, so a page whose file changes before its first discovery answer still knows
+// what its own DOM came from.
+let lastSeen = servedDocumentEtag;
+let represented = servedDocumentEtag;
 let conditional = false;
 // Bumped by every write. A discovery answer that resolves after a save has
 // already recorded a newer stamp must not overwrite it.
@@ -54,6 +77,25 @@ export function conditionalSaves() {
 export function recordEtag(value) {
   lastSeen = typeof value === "string" && value !== "" ? value : null;
   generation++;
+  // Whatever this value came from — a save response, a disk frame, a deliberate
+  // forget — it describes content this tab has taken, so it is also what the tab
+  // represents.
+  represented = lastSeen;
+}
+
+/** The version of the file this tab's content came from, or null. */
+export function representedEtag() {
+  return represented;
+}
+
+/**
+ * Drop the represented stamp without touching the save stamp.
+ *
+ * For content that arrived with no version on it: the DOM now holds bytes the host
+ * never named, so this tab can no longer say which version it is looking at.
+ */
+export function forgetRepresentedEtag() {
+  represented = null;
 }
 
 /** Forget the stamp: the next save goes out unconditional. */
@@ -89,6 +131,13 @@ export async function seedEtag({ fresh = false, clearIfMissing = fresh } = {}) {
 
   if (generation !== at) return lastSeen;
 
+  // A stamped navigation is provenance, and discovery is not evidence about it. This
+  // answer is about a later moment than the response that built this page, so it may
+  // neither advance nor clear the stamp while this tab still represents what it was
+  // served. Only an explicit overwrite — fresh AND clearing allowed — moves it, and
+  // that is also the only case where an empty answer is taken as the truth.
+  if (servedDocumentEtag && !(fresh && clearIfMissing)) return lastSeen;
+
   const seed = meta.document?.etag;
   if (typeof seed === "string" && seed !== "") {
     lastSeen = seed;
@@ -120,6 +169,21 @@ export async function seedEtag({ fresh = false, clearIfMissing = fresh } = {}) {
 // A frame that live-sync HELD is deliberately not covered, because it never
 // dispatches this event. That tab has unsaved local edits and has not seen the
 // new disk bytes, which is precisely the case a 412 exists for.
+
+// The represented stamp goes first, and in both lanes. An unstamped disk apply leaves
+// this tab holding a DOM whose version nobody stated, so neither lane may keep claiming
+// the old one — a view-mode tab included, since that is the lane startup repair runs
+// in. A stamped frame needs nothing here: live-sync has already recorded it as part of
+// applying the content.
+document.addEventListener("clay:sync-applied", (event) => {
+  if (event.detail?.source !== "disk") return;
+  if (typeof event.detail.etag === "string" && event.detail.etag) return;
+  forgetRepresentedEtag();
+});
+
+// Edit mode goes further: the stamp it SAVES with has to move too, and the host is the
+// only source for the value, so it forgets the one it holds and asks again with the
+// overwrite flags. A view-mode tab never saves, so its save stamp can stay where it is.
 if (isEditMode) {
   document.addEventListener("clay:sync-applied", (event) => {
     if (event.detail?.source !== "disk") return;

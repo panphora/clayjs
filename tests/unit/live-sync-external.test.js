@@ -135,6 +135,11 @@ test("an external-change notification without html falls back to a no-store fetc
     saveEpoch: 0,
     etag: null,
     by: null,
+    fetchOptions: { repair: false, startup: false, attempt: 0, versionCheck: false },
+    startGen: sync._startGen,
+    seenSeq: 0,
+    applyGen: sync._applyGen,
+    fetchId: sync._servedFetchId,
   });
   sync.stop();
 });
@@ -218,6 +223,11 @@ test("a queued disk frame older than an own landed save is refetched at drain, n
     saveEpoch: 1,
     etag: null,
     by: null,
+    fetchOptions: { repair: false, startup: false, attempt: 0, versionCheck: false },
+    startGen: sync._startGen,
+    seenSeq: 0,
+    applyGen: sync._applyGen,
+    fetchId: sync._servedFetchId,
   });
   sync.stop();
 });
