@@ -1199,8 +1199,21 @@ class LiveSync {
         const versionCheck = startup || (repair && Boolean(stamp));
         if (versionCheck) {
           // A newer GET owns this question: whatever it is reading describes a
-          // later moment than this response does.
-          if (fetchId !== this._servedFetchId) return;
+          // later moment than this response does. Except for a repair, which is
+          // the only answer a page the server could not replay has: the newer
+          // GET may yet fail, and dropping this body would leave nothing to ask
+          // again. Refetch it at the watermark the page has reached instead,
+          // under the same bounded count the retry always had.
+          if (fetchId !== this._servedFetchId) {
+            if (repair) {
+              this._retryStartup(
+                attempt + 1,
+                { repair, startup },
+                typeof seq === 'number' ? Math.max(seq, this._lastExternalSeq) : seq
+              );
+            }
+            return;
+          }
           // The page moved while the GET was in flight — an own save, a frame,
           // or a morph. The comparison this check exists to make is against a
           // stationary page, so ask again rather than judge a version the tab has
@@ -1412,13 +1425,20 @@ class LiveSync {
         } else {
           this._log('Dropping superseded external change at drain');
         }
-      } else if (
-        versionChecked &&
-        (ext.startGen !== this._startGen || ext.fetchId !== this._servedFetchId)
-      ) {
-        // The run that asked is gone, or a newer GET is already re-reading the
-        // document: either way this body answers nobody.
+      } else if (versionChecked && ext.startGen !== this._startGen) {
+        // The run that asked is gone: this body answers nobody.
         this._log('Dropping superseded startup check at drain');
+      } else if (versionChecked && ext.fetchId !== this._servedFetchId) {
+        // A newer GET is already re-reading the document, so this body is
+        // superseded — unless it is a repair, the one answer a page the server
+        // could not replay has. The newer GET may yet fail, so ask again at the
+        // watermark the page has reached rather than discard it; the bounded
+        // count stops a page under constant churn.
+        if (opts?.repair) {
+          this._retryStartup((opts.attempt || 0) + 1, opts, this._lastExternalSeq);
+        } else {
+          this._log('Dropping superseded startup check at drain');
+        }
       } else if (
         versionChecked &&
         (ext.saveEpoch !== this._saveEpoch ||
@@ -1945,11 +1965,22 @@ class LiveSync {
         this._setHeld('external', true, null);
         // A version check holds nothing: it has no frame to re-queue, and the
         // body it fetched describes disk as of its GET rather than a version
-        // anyone named. Re-queueing it would apply bytes while the local edit
-        // that caused the hold is still unsaved, so ask the question again
-        // instead — by then either the page is clean or the answer has changed.
+        // anyone named. Re-queueing those bytes would apply them over an edit
+        // the person has not saved yet, and could even put a version back over
+        // one a newer peer has already passed. So the hold takes the ordinary
+        // three-second wait and then fetches afresh: whatever disk holds by then
+        // is answered against the page as it stands by then. The hold is not a
+        // retry attempt, so a person who stays dirty never exhausts the bounded
+        // retries; the options ride along so a repair is still a repair.
         if (fetchOptions?.startup || fetchOptions?.versionCheck) {
-          this._retryStartup((fetchOptions.attempt || 0) + 1, fetchOptions, seq);
+          clearTimeout(this._holdRetryExt);
+          this._holdRetryExt = setTimeout(() => {
+            this._holdRetryExt = null;
+            if (this.isDestroyed) return;
+            const currentSeq =
+              typeof seq === 'number' ? Math.max(seq, this._lastExternalSeq) : seq;
+            this._retryStartup(0, fetchOptions, currentSeq);
+          }, 3000);
           return;
         }
         const epochAtHold = this._saveEpoch;

@@ -99,6 +99,14 @@ function deferredDoc() {
   return { promise, release: (stamp, body) => release(response(200, served(stamp, body))) };
 }
 
+function deferredFailure() {
+  let reject;
+  const promise = new Promise((resolve, rejectPromise) => {
+    reject = rejectPromise;
+  });
+  return { promise, fail: () => reject(new Error("served document fetch failed")) };
+}
+
 function installFetch() {
   resetHostMeta();
   metaCalls = 0;
@@ -521,17 +529,115 @@ test("a dirty page holds the startup check instead of applying what it fetched",
 
     expect(document.querySelector("#value").textContent).toBe("A edited here");
     expect(applied).not.toHaveBeenCalled();
-    // A startup check has no frame worth re-queueing: the body describes disk as
-    // of its GET, so the question is asked again instead of the bytes being held
-    // for three seconds and applied over whatever the person is doing.
-    expect(sync._holdRetryExt).toBeFalsy();
-    expect(sync._startupRetry).toBeTruthy();
+    // A version check has no frame worth re-queueing, so the hold takes the
+    // ordinary three-second wait and then asks disk afresh. Until it fires
+    // nothing is on the wire, so a person who stays dirty is not out-polled and
+    // the bounded retry count is not spent while they work.
+    expect(sync._holdRetryExt).toBeTruthy();
+    expect(sync._startupRetry).toBeFalsy();
     expect(sync._pendingExternal).toBeNull();
+
+    await wait(150);
+    expect(docFetches()).toBe(1);
+    expect(sync._holdRetryExt).toBeTruthy();
+
+    // The hold fires and its fresh answer waits in the slot: the page is still
+    // dirty, so it still may not apply.
+    await wait(3100);
+    expect(docFetches()).toBe(2);
+    expect(sync._pendingExternal).not.toBeNull();
+    expect(document.querySelector("#value").textContent).toBe("A edited here");
+    expect(applied).not.toHaveBeenCalled();
   } finally {
     document.removeEventListener("clay:sync-applied", applied);
     sync.stop();
   }
-});
+}, 15000);
+
+test(
+  "a held repair fetches afresh when the hold fires, so a newer version on disk applies",
+  async () => {
+    await boot('<p id="value">A</p>');
+    clearGate();
+    installFetch();
+    metaAnswer = diskMeta("disk-B", ["conditional", "sync"]);
+    // The startup check finds the version this page holds, so the resync below is
+    // the only repair in play. Its own answer names disk-B, but by the time the
+    // hold fires disk holds disk-C: the fresh fetch is the one that counts.
+    docResponder = (index) =>
+      index === 0
+        ? doc(BOOT, '<p id="value">A</p>')
+        : index === 1
+          ? doc("disk-B", '<p id="value">B from disk</p>')
+          : doc("disk-C", '<p id="value">C from disk</p>');
+    const applied = jest.fn();
+    document.addEventListener("clay:sync-applied", applied);
+
+    // Unsaved work before the stream exists: no disk baseline to merge against,
+    // so the external lane holds rather than morph.
+    document.getElementById("value").textContent = "A edited here";
+    await tick();
+    const { sync, sse } = await started("live");
+    try {
+      expect(sync._diskBase).toBe(null);
+
+      sse.onopen();
+      await tick();
+      await sync._runPending();
+      expect(docFetches()).toBe(1);
+
+      // The server could not replay this page, so the repair fetches disk-B.
+      sse.dispatchEvent(
+        new MessageEvent("cursor", { data: JSON.stringify({ seq: 20, resync: true }) })
+      );
+      await tick();
+      expect(sync._pendingExternal).toMatchObject({
+        seq: 20,
+        etag: "disk-B",
+        fetchOptions: { repair: true, startup: false, versionCheck: true },
+      });
+
+      await sync._runPending();
+
+      expect(sync._heldExt).toBe(true);
+      expect(document.querySelector("#value").textContent).toBe("A edited here");
+      expect(applied).not.toHaveBeenCalled();
+      expect(sync._pendingExternal).toBeNull();
+
+      // The hold takes the ordinary three-second wait: the repair is not asked
+      // again in the meantime, so a person who keeps editing is not out-polled
+      // and the bounded retry count is not spent while they work.
+      await wait(150);
+      expect(docFetches()).toBe(2);
+      expect(applied).not.toHaveBeenCalled();
+      expect(sync._holdRetryExt).toBeTruthy();
+      expect(sync._startupRetry).toBeFalsy();
+
+      // The person reverts their edit, so the page is clean and a fresh answer
+      // may land.
+      document.getElementById("value").textContent = "A";
+      await tick();
+      clearGate();
+
+      // The hold fires and fetches disk NOW instead of re-queueing the bytes its
+      // first answer carried: the page gets C, not the held B.
+      await wait(3200);
+      expect(docFetches()).toBe(3);
+      await sync._runPending();
+
+      expect(document.querySelector("#value").textContent).toBe("C from disk");
+      expect(applied).toHaveBeenCalledTimes(1);
+      expect(etag.representedEtag()).toBe("disk-C");
+      expect(etag.lastSeenEtag()).toBe("disk-C");
+      expect(sync._heldExt).toBe(false);
+      expect(sync._holdRetryExt).toBeFalsy();
+    } finally {
+      document.removeEventListener("clay:sync-applied", applied);
+      sync.stop();
+    }
+  },
+  15000
+);
 
 test("an ordinary stamped fallback holds on a dirty page instead of asking the version question", async () => {
   await boot('<p id="value">A</p>');
@@ -1011,6 +1117,135 @@ test("a superseded repair is re-asked at the current watermark and lands once", 
     expect(document.querySelector("#value").textContent).toBe("C from disk");
     expect(applied).toHaveBeenCalledTimes(1);
     expect(etag.representedEtag()).toBe("disk-C");
+  } finally {
+    document.removeEventListener("clay:sync-applied", applied);
+    sync.stop();
+  }
+});
+
+test("a repair whose answer a newer, failing GET superseded is asked again", async () => {
+  await boot('<p id="value">A</p>');
+  clearGate();
+  installFetch();
+  metaAnswer = diskMeta("disk-B", ["conditional", "sync"]);
+  const repair = deferredDoc();
+  const failing = deferredFailure();
+  // GET 1 is the startup check and finds the version this page holds. GET 2 is
+  // the repair, still on the wire. GET 3 is a content-less external change's own
+  // fallback, which fails. GET 4 is the repair asked again, and names disk-C.
+  docResponder = (index) =>
+    index === 0
+      ? doc(BOOT, '<p id="value">A</p>')
+      : index === 1
+        ? repair.promise
+        : index === 2
+          ? failing.promise
+          : doc("disk-C", '<p id="value">C from disk</p>');
+  const applied = jest.fn();
+  document.addEventListener("clay:sync-applied", applied);
+
+  const { sync, sse } = await started("live");
+  try {
+    sse.onopen();
+    await tick();
+    await sync._runPending();
+    expect(docFetches()).toBe(1);
+
+    // The repair's GET is in flight when a content-less external change arrives,
+    // so its own fallback GET owns the served-fetch id from here on.
+    sse.dispatchEvent(
+      new MessageEvent("cursor", { data: JSON.stringify({ seq: 30, resync: true }) })
+    );
+    await tick();
+    sse.onmessage({
+      data: JSON.stringify({ type: "notification", seq: 31, data: { kind: "external-change" } }),
+    });
+    await tick();
+    expect(docFetches()).toBe(3);
+
+    // That newer GET fails, and the repair's late answer is superseded by it. A
+    // repair is the only answer a page the server could not replay has, so it is
+    // asked again rather than dropped: the page would otherwise stay on A.
+    failing.fail();
+    await tick();
+    await tick();
+    repair.release("disk-C", '<p id="value">C from disk</p>');
+    await tick();
+
+    await wait(30);
+    await sync._runPending();
+
+    expect(sync._pendingExternal).toBeNull();
+    expect(document.querySelector("#value").textContent).toBe("C from disk");
+    expect(applied).toHaveBeenCalledTimes(1);
+    expect(etag.representedEtag()).toBe("disk-C");
+    expect(etag.lastSeenEtag()).toBe("disk-C");
+    // The fresh answer is a second GET, not the superseded body.
+    expect(docFetches()).toBe(4);
+  } finally {
+    document.removeEventListener("clay:sync-applied", applied);
+    sync.stop();
+  }
+});
+
+test("a queued repair a newer GET superseded is asked again instead of applying", async () => {
+  await boot('<p id="value">A</p>');
+  clearGate();
+  installFetch();
+  metaAnswer = diskMeta("disk-B", ["conditional", "sync"]);
+  const repeated = deferredDoc();
+  // GET 1 is the startup check and finds the version this page holds. GET 2 is
+  // the repair, whose disk-B answer queues but has not drained. GET 3 is the
+  // server repeating its resync cursor; it never answers, and is only here to own
+  // the served-fetch id while the body waits. GET 4 is the repair asked again.
+  docResponder = (index) =>
+    index === 0
+      ? doc(BOOT, '<p id="value">A</p>')
+      : index === 1
+        ? doc("disk-B", '<p id="value">B from disk</p>')
+        : index === 2
+          ? repeated.promise
+          : doc("disk-C", '<p id="value">C from disk</p>');
+  const applied = jest.fn();
+  document.addEventListener("clay:sync-applied", applied);
+
+  const { sync, sse } = await started("live");
+  try {
+    sse.onopen();
+    await tick();
+    await sync._runPending();
+
+    sse.dispatchEvent(
+      new MessageEvent("cursor", { data: JSON.stringify({ seq: 30, resync: true }) })
+    );
+    await tick();
+    expect(sync._pendingExternal).toMatchObject({ seq: 30, etag: "disk-B" });
+
+    sse.dispatchEvent(
+      new MessageEvent("cursor", { data: JSON.stringify({ seq: 30, resync: true }) })
+    );
+    await tick();
+    expect(docFetches()).toBe(3);
+    // The queued body was not clobbered by the newer question's own answer.
+    expect(sync._pendingExternal).toMatchObject({ seq: 30, etag: "disk-B" });
+
+    // The queued body is superseded at drain time, so its stale bytes may not
+    // apply to a page a newer question is already re-reading. Being a repair, it
+    // is asked again at the watermark the page has reached instead.
+    await sync._runPending();
+    expect(sync._pendingExternal).toBeNull();
+    expect(document.querySelector("#value").textContent).toBe("A");
+    expect(applied).not.toHaveBeenCalled();
+
+    await wait(30);
+    await sync._runPending();
+
+    expect(sync._pendingExternal).toBeNull();
+    expect(document.querySelector("#value").textContent).toBe("C from disk");
+    expect(applied).toHaveBeenCalledTimes(1);
+    expect(etag.representedEtag()).toBe("disk-C");
+    // The fresh answer is a second GET, not the superseded body.
+    expect(docFetches()).toBe(4);
   } finally {
     document.removeEventListener("clay:sync-applied", applied);
     sync.stop();
