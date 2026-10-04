@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.8.0] - 2026-10-04
+
+### Added
+- Guided AI editing support
+- AI edit status bar with Stop, Keep, Revert and X controls
+
+### Changed
+- Conflict protection now tracks elements through explicit lineage
+- AI edit closes on click-away and keeps drafts
+
+### Fixed
+- Sync repairs stay recoverable across dirty holds and failed fetches
+- Startup sync repairs itself from served versions
+
+
+
 ## [1.7.0] - 2026-10-03
 
 ### Added
