@@ -1,6 +1,6 @@
 import { HyperMorph } from "../vendor/hyper-morph.vendor.js";
 import { conflicts } from "./conflicts.js";
-import { replacementFootprint } from "./conflict-footprints.js";
+import { protectionOf, protectionGeneration, captureFootprintWitnesses, footprintWitnessesValid } from "./conflict-footprints.js";
 import { SYNC_IGNORE_SELECTOR, REMOTE_WINS_SELECTOR } from "./live-sync.js";
 import { savePage } from "../core/save.js";
 import { gateMarkDirty } from "../lib/dirty-gate.js";
@@ -795,6 +795,11 @@ function covers(k, op) {
 // the text block around its recorded clash, else around its recorded scope, else its
 // live subject, else its live placement parent, else the nearest ancestor of its
 // clone path still on the page by identity, else the whole page.
+function footprintsOf(rec, apply) {
+  const protection = protectionOf(rec);
+  return protection ? protection.nodes : [footprintOf(rec, apply)];
+}
+
 function footprintOf(rec, apply) {
   const r = rec.recovery;
   const subject = r.subject;
@@ -803,8 +808,6 @@ function footprintOf(rec, apply) {
   }
   const live = subject ? liveOf(subject, apply, subject.nodeType) : null;
   if (live) return live;
-  const replacement = replacementFootprint(rec);
-  if (replacement && onPage(replacement)) return replacement;
   const parent = r.structure && r.structure.localPlacement ? liveOf(r.structure.localPlacement.parent, apply, 1) : null;
   if (parent) return parent;
   const path = subject && subject.local.length ? subject.local[0] : [];
@@ -838,7 +841,7 @@ function planOne(rec, apply) {
   return null;
 }
 
-const revisionNow = () => `${conflicts.hasPendingApply() ? 1 : 0}|${conflicts.list().map((r) => r.id).join(",")}`;
+const revisionNow = () => `${protectionGeneration()}|${conflicts.hasPendingApply() ? 1 : 0}|${conflicts.list().map((r) => r.id).join(",")}`;
 
 // ---------------------------------------------------------------------------
 // The whole page: what must hold after the writes
@@ -1007,7 +1010,9 @@ export function prepareRevert(ids) {
   const plan = (rec) => {
     const apply = conflicts.recoveryOf(rec.id);
     const op = apply ? planOne(rec, apply) : null;
-    if (!op && apply) constraints.push({ ticket: apply.ticket, node: footprintOf(rec, apply) });
+    if (!op && apply) {
+      for (const node of footprintsOf(rec, apply)) constraints.push({ ticket: apply.ticket, node });
+    }
     return op;
   };
   const ops = [];
@@ -1053,7 +1058,10 @@ export function prepareRevert(ids) {
       block(newer);
     }
   }
-  return { ops: kept, covered, blocked, revision, before: census() };
+  const protectedWitnesses = captureFootprintWitnesses(constraints
+    .filter((c) => kept.some((op) => c.ticket > op.ticket))
+    .map((c) => c.node));
+  return { ops: kept, covered, blocked, revision: revisionNow(), protectedWitnesses, before: census() };
 }
 
 /**
@@ -1064,8 +1072,9 @@ export function prepareRevert(ids) {
  * saved.
  */
 export function applyRevert(plan) {
-  if (plan.revision !== revisionNow()) {
+  if (plan.revision !== revisionNow() || !footprintWitnessesValid(plan.protectedWitnesses || [])) {
     for (const op of plan.ops) plan.blocked.set(op.id, BLOCKED);
+    for (const id of plan.covered.keys()) plan.blocked.set(id, BLOCKED);
     return [];
   }
   const page = remember();
@@ -1085,7 +1094,8 @@ export function applyRevert(plan) {
     for (const op of plan.ops) if (op.kind === "attr") applyAttr(op);
     applyStructure(plan.ops.filter((op) => op.kind !== "text" && op.kind !== "attr"), parked);
     records = observer.takeRecords();
-    ok = plan.ops.every((op) => op.check()) && holds(plan);
+    ok = plan.ops.every((op) => op.check()) && holds(plan) &&
+      plan.revision === revisionNow() && footprintWitnessesValid(plan.protectedWitnesses || []);
   } catch (err) {
     console.error("[clay] Revert to mine failed while writing and was undone", err);
   } finally {

@@ -1,4 +1,5 @@
 import { registerUnsavedState } from '../lib/unsaved-state.js';
+import { releaseProtection } from './conflict-footprints.js';
 
 // What incoming frames won over this tab's unsaved edits, kept for the life of
 // the document until the person decides. Nothing here is read by a save, a
@@ -137,6 +138,7 @@ export const conflicts = {
     for (const id of ids) {
       const rec = records.get(id);
       if (!rec) continue;
+      releaseProtection(rec);
       records.delete(id);
       removedIds.push(id);
       const apply = applies.get(rec.applyId);

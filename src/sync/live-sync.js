@@ -61,7 +61,7 @@ import { pageMaybeDirty, pauseGate, resumeGate, gateCaptureToken, gateClearIfUnc
 import { gestureSeen } from '../lib/user-gesture.js';
 import { SyncStream } from './stream.js';
 import { conflicts, beginApply, completeApply, failApply } from './conflicts.js';
-import { trackConflictFootprints } from './conflict-footprints.js';
+import { beginLineageCapture } from './conflict-footprints.js';
 
 // What a live-sync merge never reads or touches on any side: editor chrome,
 // content kept out of the save or the snapshot, frozen regions, and nodes
@@ -1575,7 +1575,19 @@ class LiveSync {
    * @param {object} [lane.extra] - extra mergeDocument options (the disk lane's beforeApply)
    */
   async _mergeIncoming(html, identityMap, { base, baseIdentityMap = null, captureLocal, synthetic, source = 'peer', seq = null, etag = null, extra = {} }) {
-    const mergeDocument = (options) => trackConflictFootprints(() => HyperMorph.mergeDocument(options));
+    let lineageCapture;
+    const mergeDocument = (options) => {
+      lineageCapture = beginLineageCapture(conflicts.list());
+      try {
+        const pending = HyperMorph.mergeDocument({ ...options, lineage: lineageCapture.lineage });
+        lineageCapture.returned();
+        return pending;
+      } catch (error) {
+        lineageCapture.invalidate(conflicts.list());
+        lineageCapture.finish(conflicts.list());
+        throw error;
+      }
+    };
     const store = this.identity;
     // A frame may neither write these onto our root nor, by not carrying them,
     // take ours away. Returning false is hyper-morph's veto for both directions.
@@ -1694,7 +1706,12 @@ class LiveSync {
     try {
       report = await pending;
     } catch (err) {
-      if (applyId) failApply(applyId, err, { ticket });
+      lineageCapture.invalidate(conflicts.list());
+      try {
+        if (applyId) failApply(applyId, err, { ticket });
+      } finally {
+        lineageCapture.finish(conflicts.list());
+      }
       throw err;
     }
     const typedDuringWait = gateCaptureToken().gen !== token.gen;
@@ -1702,7 +1719,13 @@ class LiveSync {
     // What the frame won over this tab's unsaved edits goes to the ledger with
     // the clone the merge read as "mine". Earlier losses live in the ledger,
     // not in the page's dirty state.
-    const conflictIds = applyId ? completeApply(applyId, report.conflicts, { ticket }) : [];
+    let conflictIds;
+    try {
+      lineageCapture.prepareComplete(report, conflicts.list());
+      conflictIds = applyId ? completeApply(applyId, report.conflicts, { ticket }) : [];
+    } finally {
+      lineageCapture.finish(conflicts.list());
+    }
     if (dirty && !report.localDiverged) {
       gateClearIfUnchanged(token);
     }
