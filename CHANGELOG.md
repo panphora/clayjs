@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.8.1] - 2026-10-05
+
+### Changed
+- Removed the redundant close action from AI edit results
+
+
+
 ## [1.8.0] - 2026-10-04
 
 ### Added
