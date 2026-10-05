@@ -29,7 +29,7 @@
  * The comment box is compose only: a click anywhere outside it closes it, keeping the
  * text as a draft for that target, and Send moves the whole live state to one compact
  * bar at the bottom of the viewport. The bar carries the host's progress and Stop, the
- * reply's warnings and Keep/Revert/X, and then the save, so no part of a running edit
+ * reply's warnings and Keep/Revert, and then the save, so no part of a running edit
  * depends on a popover the person may want out of the way.
  *
  * Undo integration: observers pause at request start. On Keep the element is rewound
@@ -587,7 +587,7 @@ function buildChrome() {
   barStop = part(bevelButton('Stop', { extra: ['flex:none'] }), 'bar-stop');
   barKeep = part(bevelButton('Keep', { variant: 'primary', extra: ['flex:none'] }), 'bar-keep');
   barRevert = part(bevelButton('Revert', { variant: 'quiet', extra: ['flex:none'] }), 'bar-revert');
-  barClose = part(bevelIconButton(GLYPHS.toastClose, { label: 'Keep and close' }), 'bar-close');
+  barClose = part(bevelIconButton(GLYPHS.toastClose, { label: 'Dismiss error' }), 'bar-close');
   barClose.pin({ flex: 'none' });
   for (const control of [barStop, barKeep, barRevert, barClose]) setShown(control, false, 'inline-flex');
   bar.append(barStatus, barStop, barKeep, barRevert, barClose);
@@ -612,9 +612,7 @@ function buildChrome() {
   barStop.addEventListener('click', stopSession);
   barKeep.addEventListener('click', keepSession);
   barRevert.addEventListener('click', () => { revertSession(); closeBar(); });
-  // X means Keep while the edit waits to be decided, and only closes the bar once the
-  // edit has been rewound out of the page.
-  barClose.addEventListener('click', () => { if (barMode === 'ready') keepSession(); else closeBar(); });
+  barClose.addEventListener('click', () => { if (barMode === 'error') closeBar(); });
   textarea.addEventListener('keydown', (event) => {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
@@ -812,7 +810,7 @@ function showBar(mode) {
   barMode = mode;
   const controls = {
     working: [barStop],
-    ready: [barKeep, barRevert, barClose],
+    ready: [barKeep, barRevert],
     error: [barClose],
     saving: [],
   }[mode] || [];

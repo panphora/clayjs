@@ -462,8 +462,8 @@ token variant, `POST /_/save/{token}`, read from `<html savetoken>`.
 
   The bar shows one state at a time. **Working** shows the host's own progress line and **Stop**,
   which cancels the request and leaves the page exactly as it was. **Ready** shows `Edit ready.`
-  with any warning the reply carried and the model that wrote it, and offers **Keep**, **Revert**
-  and an **X** that keeps and closes. **Error** shows the host's message and an X that closes the
+  with any warning the reply carried and the model that wrote it, and offers **Keep** and **Revert**.
+  **Error** shows the host's message and an X that closes the
   bar, with the edit already rewound; a cancellation on the host's own side, the AI Editing switch
   going off or HTML Clay quitting, reports `HTML Clay stopped this edit.` there. After Keep the
   bar reports `Saving…` and then the host's answer, and closes itself about a second and a half

@@ -179,8 +179,8 @@ test("the status bar is a compact fixed Bevel surface with a flexible speaking l
     expect([name, last(buildCalls, part(name), "flex")]).toEqual([name, "none"]);
   }
   const close = part("bar-close");
-  expect(close.getAttribute("aria-label")).toBe("Keep and close");
-  expect(close.title).toBe("Keep and close");
+  expect(close.getAttribute("aria-label")).toBe("Dismiss error");
+  expect(close.title).toBe("Dismiss error");
   expect(close.querySelector("svg")).not.toBeNull();
 });
 

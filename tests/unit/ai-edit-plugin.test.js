@@ -226,7 +226,7 @@ describe("with a ready ai-edit helper", () => {
     opts.onStatus({ text: "Writing, 1.8 KB" });
     expect(barStatus().textContent).toBe("Writing, 1.8 KB");
 
-    // The result is the element's own HTML, morphs in once, and offers Keep/Revert/X.
+    // The result is the element's own HTML, morphs in once, and offers Keep/Revert.
     handle.settle({ state: "done", result: { html: '<section data-edit-id="hero"><h1>New heading</h1><p>Old paragraph</p></section>', model: "claude-opus-4-6" } });
     await flush();
 
@@ -234,7 +234,7 @@ describe("with a ready ai-edit helper", () => {
     expect(barStatus().textContent).toBe("Edit ready. (claude-opus-4-6)");
     expect(barButton("keep").hidden).toBe(false);
     expect(barButton("revert").hidden).toBe(false);
-    expect(barButton("close").hidden).toBe(false);
+    expect(barButton("close").hidden).toBe(true);
     expect(barButton("stop").hidden).toBe(true);
 
     // Revert is the way back out, with the edit already applied, and it takes the bar
@@ -720,8 +720,8 @@ describe("with a ready ai-edit helper", () => {
     }
     handle.settle({ state: "done", result: { html: '<section data-edit-id="hero"><h1>New heading</h1><p>Old paragraph</p></section>', model: "m" } });
     await flush();
-    expect(barButton("close").getAttribute("aria-label")).toBe("Keep and close");
-    expect(barButton("close").title).toBe("Keep and close");
+    expect(barButton("close").getAttribute("aria-label")).toBe("Dismiss error");
+    expect(barButton("close").title).toBe("Dismiss error");
     expect(barStatus().textContent).toBe("Edit ready. (m)");
   });
 
@@ -930,7 +930,7 @@ describe("with a ready ai-edit helper", () => {
     expect(document.activeElement).toBe(barButton("close"));
   });
 
-  test("a reply with warnings and a model shows both, with Keep, Revert and X", async () => {
+  test("a reply with warnings and a model offers only Keep and Revert", async () => {
     clickSection(mountPage());
     await submit("tighten this");
     handle.settle({
@@ -942,11 +942,12 @@ describe("with a ready ai-edit helper", () => {
     expect(barStatus().textContent).toContain("Edit ready.");
     expect(barStatus().textContent).toContain("\u26a0 reply had extra root elements");
     expect(barStatus().textContent).toContain("(gpt-5.6-sol)");
-    for (const name of ["keep", "revert", "close"]) expect([name, barButton(name).hidden]).toEqual([name, false]);
+    for (const name of ["keep", "revert"]) expect([name, barButton(name).hidden]).toEqual([name, false]);
+    expect(barButton("close").hidden).toBe(true);
     expect(barButton("stop").hidden).toBe(true);
   });
 
-  test("X in Ready keeps, with the same pause, morph, resume and save as Keep", async () => {
+  test("the hidden error dismissal cannot accept a ready edit; Keep saves it", async () => {
     const trace = [];
     jest.spyOn(Mutation, "pause").mockImplementation(() => { trace.push("pause"); });
     jest.spyOn(Mutation, "resume").mockImplementation(() => { trace.push("resume"); });
@@ -967,7 +968,12 @@ describe("with a ready ai-edit helper", () => {
     handle.settle({ state: "done", result: { html: '<section data-edit-id="hero"><h1>New heading</h1><p>Old paragraph</p></section>', model: "m" } });
     await flush();
 
+    expect(barButton("close").hidden).toBe(true);
     barButton("close").click();
+    await flush();
+    expect(save).not.toHaveBeenCalled();
+    expect(barButton("keep").hidden).toBe(false);
+    barButton("keep").click();
     await flush();
 
     expect(trace).toEqual(["pause", "morph", "morph", "resume", "morph", "save"]);
