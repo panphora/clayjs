@@ -403,3 +403,49 @@ test('beforeApply escape preserves protection against an older attribute revert'
   expect(saveBodies()).toHaveLength(0);
   sync.stop();
 });
+for (const explicit of [false, true]) {
+  test(`split group recovery preserves local content and refuses structural undo, lineage ${explicit}`, async () => {
+    const input = {
+      b: '<p data-id="b0">w0 w1 <b>w3</b> w2</p><p data-id="b1">w4 w5 w6 w7 w8 <b>w10 w11</b> w9</p>',
+      l: '<p data-id="b0">w13 w14</p><p data-id="b2">w15</p><p data-id="b1">w4 w5 w6 w7 w12 w8 <b>w10 w11</b> w9</p>',
+      r: '<p data-id="b0">w0</p><p data-id="b3">w1 <b>w3</b> w2</p><p data-id="b1">w16 w17 w18 w19</p>',
+    };
+    const documentOf = (html) => `<!doctype html><html><head></head><body>${html}</body></html>`;
+    document.body.innerHTML = input.l;
+    const inserted = document.querySelector('[data-id="b2"]');
+    const text = inserted.firstChild;
+    const applyId = beginApply({ source: 'peer', domain: 'sync', root: document.documentElement.cloneNode(true) });
+    const capture = explicit ? beginLineageCapture(conflicts.list()) : null;
+    const pending = HyperMorph.mergeDocument({
+      live: document,
+      base: documentOf(input.b),
+      remote: documentOf(input.r),
+      scripts: { execute: false },
+      ...(capture ? { lineage: capture.lineage } : {}),
+    });
+    capture?.returned();
+    const report = await pending;
+    capture?.prepareComplete(report, conflicts.list());
+    const ids = completeApply(applyId, report.conflicts, { ticket: 1 });
+    capture?.finish(conflicts.list());
+    expect(ids).toHaveLength(2);
+    expect([...document.body.children].map(node => node.dataset.id)).toEqual(['b0', 'b3', 'b2', 'b1']);
+    const recovery = conflicts.get(ids[0]).recovery;
+    expect(recovery.applied).toBe(true);
+    expect(recovery.unavailable).toBe(null);
+    expect(recovery.localLost).toBe(true);
+    const merged = recovery.text.merged;
+    expect(merged.text.slice(merged.start, merged.end)).toContain('\u001e');
+    const before = body();
+    const plan = revert.prepareRevert([ids[0]]);
+    expect(plan.ops).toHaveLength(0);
+    expect(plan.blocked.has(ids[0])).toBe(true);
+    expect(revert.applyRevert(plan)).toEqual([]);
+    expect(body()).toBe(before);
+    expect(document.querySelector('[data-id="b2"]')).toBe(inserted);
+    expect(inserted.firstChild).toBe(text);
+    expect(inserted.textContent).toBe('w15');
+    expect(conflicts.list().map(record => record.id)).toEqual(ids);
+    expect(saveBodies()).toHaveLength(0);
+  });
+}
