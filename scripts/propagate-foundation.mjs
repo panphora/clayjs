@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url'
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const workspace = path.dirname(repo)
 const sources = ['region-capabilities.js', 'content-dom.js']
-const consumers = ['hyper-html-api', 'hyper-morph', 'richclay', 'hyper-undo', 'hypercms']
+const consumers = ['hyper-html-api', 'richclay', 'hyper-undo', 'hypercms']
 const check = process.argv.includes('--check')
 const header = file => `// GENERATED from clayjs/src/lib/${file}. Edit ClayJS and run \`npm run propagate:foundation\`.\n\n`
 
