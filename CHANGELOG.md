@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.8.2] - 2026-10-07
+
+### Changed
+- Propagation consumers no longer depend on hyper-morph
+
+### Fixed
+- Recovery of split groups is now guarded, and structural changes can no longer be undone
+
+
+
 ## [1.8.1] - 2026-10-05
 
 ### Changed
