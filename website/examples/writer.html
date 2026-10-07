@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en" autosave>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Launch plan</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f6f3ec; --ink: #25231f; --muted: #757065; --line: #ddd7ca; --panel: #fdfbf6;
+    --accent: #3d6f72; --callout: #ece6d6; --danger: #a4473b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1c1e21; --ink: #e9e5dd; --muted: #a39e94; --line: #3b4046; --panel: #26292d;
+      --accent: #82b6b8; --callout: #2c3035; --danger: #e08a7c;
+    }
+  }
+  * { box-sizing: border-box }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 17px/1.6 Georgia, serif }
+  button { font: 14px/1.2 system-ui, sans-serif; color: inherit; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; cursor: pointer }
+  .page { max-width: 720px; margin: 0 auto; padding: 48px 56px 120px }
+  .page > h1 { font-size: 36px; line-height: 1.2; margin: 0 0 24px }
+  [contenteditable]:focus, [editable]:focus { outline: none }
+
+  .block { position: relative; margin: 0 0 12px }
+  .block .body > :first-child { margin-top: 0 }
+  .block .body > :last-child { margin-bottom: 0 }
+  .block[data-type="callout"] { background: var(--callout); border-radius: 8px; padding: 12px 16px }
+  .block[data-type="divider"] hr { border: 0; border-top: 1px solid var(--line); margin: 20px 0 }
+  .block[data-type="image"] figure { margin: 0 }
+  .block[data-type="image"] img { max-width: 100%; border-radius: 6px; display: block }
+  .block[data-type="image"] figcaption { font-size: 14px; color: var(--muted); margin-top: 6px }
+  .todos { list-style: none; padding: 0; margin: 0 }
+  .todos li { display: flex; gap: 10px; align-items: baseline }
+  .todos li span { flex: 1 1 auto; min-height: 1.6em }
+  .todos li:has(> input:checked) span { text-decoration: line-through; color: var(--muted) }
+  pre { background: var(--callout); padding: 12px; border-radius: 6px; overflow-x: auto; font-size: 14px }
+
+  .gutter { position: absolute; left: -48px; top: 0; display: flex; gap: 2px; opacity: 0; transition: opacity .1s }
+  .block:hover > .gutter, .block:focus-within > .gutter, .gutter:focus-within { opacity: 1 }
+  .gutter button { border: 0; background: none; color: var(--muted); padding: 2px 4px }
+  .gutter [sortable-handle] { cursor: grab }
+
+  #menu { position: absolute; z-index: 30; min-width: 180px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px; box-shadow: 0 6px 24px rgb(0 0 0 / .18) }
+  #menu[hidden] { display: none }
+  #menu button { display: block; width: 100%; text-align: left; border: 0; background: none; padding: 6px 8px }
+  #menu button:hover, #menu button:focus { background: var(--callout) }
+  #menu[data-mode="insert"] .for-block, #menu[data-mode="block"] .for-insert { display: none }
+  #menu .danger { color: var(--danger) }
+
+  #outline { position: fixed; top: 48px; left: 16px; width: 180px; font: 13px/1.4 system-ui, sans-serif; color: var(--muted) }
+  #outline a { display: block; color: inherit; text-decoration: none; padding: 2px 0 }
+  #outline a[data-level="3"] { padding-left: 12px }
+  #outline a:hover { color: var(--ink) }
+  #status { position: fixed; bottom: 12px; left: 16px; font: 12px system-ui, sans-serif; color: var(--muted) }
+  @media (max-width: 1100px) { #outline { display: none } }
+  @media (max-width: 720px) { .page { padding: 24px 20px 80px } .gutter { position: static; opacity: 1; margin-bottom: 4px } }
+</style>
+</head>
+<body>
+<article class="page">
+  <h1 editmode:contenteditable inert-contenteditable="plaintext-only">Launch plan</h1>
+  <div id="blocks" sortable="blocks">
+    <div class="block" data-id="b-intro" data-type="text">
+      <div class="body" editable="toolbar-on-select"><p>What we are shipping, for whom, and in what order. Type <b>/</b> on an empty line to add a block.</p></div>
+    </div>
+    <div class="block" data-id="b-goals" data-type="text">
+      <div class="body" editable="toolbar-on-select"><h2>Goals</h2><ul><li>Public launch on the 20th</li><li>Three starter templates</li></ul></div>
+    </div>
+    <div class="block" data-id="b-note" data-type="callout">
+      <div class="body" editable="toolbar-on-select"><p>Pricing stays at $15 a month through launch.</p></div>
+    </div>
+    <div class="block" data-id="b-tasks" data-type="todo">
+      <ul class="todos">
+        <li data-id="t-1"><input type="checkbox" persist viewmode:disabled disabled checked> <span editmode:contenteditable inert-contenteditable="plaintext-only">Draft the announcement</span></li>
+        <li data-id="t-2"><input type="checkbox" persist viewmode:disabled disabled> <span editmode:contenteditable inert-contenteditable="plaintext-only">Record the demo</span></li>
+      </ul>
+    </div>
+    <div class="block" data-id="b-rule" data-type="divider"><hr></div>
+    <div class="block" data-id="b-next" data-type="text">
+      <div class="body" editable="toolbar-on-select"><h2>After launch</h2><p>Collect the first fifty replies and sort them by theme.</p></div>
+    </div>
+  </div>
+</article>
+
+<template id="block-text"><div class="block" data-type="text"><div class="body" editable="toolbar-on-select"><p><br></p></div></div></template>
+<template id="block-heading"><div class="block" data-type="text"><div class="body" editable="toolbar-on-select"><h2><br></h2></div></div></template>
+<template id="block-callout"><div class="block" data-type="callout"><div class="body" editable="toolbar-on-select"><p><br></p></div></div></template>
+<template id="block-todo"><div class="block" data-type="todo"><ul class="todos"></ul></div></template>
+<template id="block-divider"><div class="block" data-type="divider"><hr></div></template>
+<template id="block-image"><div class="block" data-type="image"><figure><img alt=""><figcaption editmode:contenteditable contenteditable="plaintext-only"></figcaption></figure></div></template>
+<template id="todo-item"><li><input type="checkbox" persist viewmode:disabled> <span editmode:contenteditable contenteditable="plaintext-only"></span></li></template>
+<template id="gutter-tpl"><div class="gutter" contenteditable="false"><button type="button" sortable-handle aria-label="Drag block">⠿</button><button type="button" data-action="menu" data-mode="insert" aria-label="Insert block">+</button><button type="button" data-action="menu" data-mode="block" aria-label="Block options">⋯</button></div></template>
+<template id="chrome-tpl">
+  <nav id="outline" aria-label="Outline"></nav>
+  <div id="status"></div>
+  <div id="menu" role="menu" hidden>
+    <button type="button" class="for-insert" data-insert="text">Text</button>
+    <button type="button" class="for-insert" data-insert="heading">Heading</button>
+    <button type="button" class="for-insert" data-insert="callout">Callout</button>
+    <button type="button" class="for-insert" data-insert="todo">To-do list</button>
+    <button type="button" class="for-insert" data-insert="image">Image</button>
+    <button type="button" class="for-insert" data-insert="divider">Divider</button>
+    <button type="button" class="for-block" data-block="duplicate">Duplicate</button>
+    <button type="button" class="for-block danger" data-block="delete">Delete</button>
+  </div>
+  <input type="file" id="image-picker" accept="image/*" hidden>
+</template>
+
+<script src="https://clayjs.com/v1/clay.js?plugins=sync,sortable,undo,upload,indicator"></script>
+<script src="https://clayjs.com/v1/clay-ui.js"></script>
+<script>
+clay.ready.then(() => {
+  if (window.__writerStarted) return;
+  window.__writerStarted = true;
+
+  const blocks = document.getElementById("blocks");
+  const newId = (prefix) => prefix + "-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  const command = (label, fn) => (clay.undo ? clay.undo.commit(label, fn) : fn());
+
+  clay.onSnapshot?.((root) => {
+    for (const el of root.querySelectorAll(".sortable-chosen, .sortable-ghost, .sortable-drag")) {
+      el.classList.remove("sortable-chosen", "sortable-ghost", "sortable-drag");
+      if (!el.classList.length) el.removeAttribute("class");
+    }
+    for (const el of root.querySelectorAll('[draggable="false"]')) el.removeAttribute("draggable");
+    for (const el of root.querySelectorAll('[style=""]')) el.removeAttribute("style");
+  });
+  const fromTemplate = (id) => document.getElementById(id).content.firstElementChild.cloneNode(true);
+  const setText = (el, text) => { if (el.textContent !== text) el.textContent = text; };
+
+  const chrome = document.createElement("div");
+  chrome.id = "chrome";
+  chrome.setAttribute("clay", "editor-ui");
+  chrome.append(document.getElementById("chrome-tpl").content.cloneNode(true));
+  document.body.append(chrome);
+  const menu = chrome.querySelector("#menu");
+  const picker = chrome.querySelector("#image-picker");
+  let menuTarget = null;
+  let slashParagraph = null;
+
+  function focusEnd(el) {
+    el.focus();
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    range.collapse(false);
+    getSelection().removeAllRanges();
+    getSelection().addRange(range);
+  }
+
+  function newTodoItem() {
+    const item = fromTemplate("todo-item");
+    item.dataset.id = newId("t");
+    return item;
+  }
+
+  function makeBlock(type) {
+    const block = fromTemplate("block-" + type);
+    block.dataset.id = newId("b");
+    if (type === "todo") block.querySelector(".todos").append(newTodoItem());
+    return block;
+  }
+
+  function focusBlock(block) {
+    const target = block.querySelector(".body p, .body h2, .body") || block.querySelector("[contenteditable]");
+    if (target) focusEnd(target);
+  }
+
+  function spotAfter(block) {
+    return { prev: block?.dataset.id || null, next: block?.nextElementSibling?.dataset.id || null };
+  }
+
+  function place(spot, block) {
+    const byId = (id) => id && blocks.querySelector(`:scope > [data-id="${CSS.escape(id)}"]`);
+    const prev = byId(spot.prev);
+    const next = byId(spot.next);
+    if (prev) prev.after(block);
+    else if (next) next.before(block);
+    else blocks.append(block);
+  }
+
+  function insertAt(spot, type, src, clear) {
+    const block = makeBlock(type);
+    if (src) block.querySelector("img").src = src;
+    command("Insert block", () => { clear?.(); place(spot, block); });
+    focusBlock(block);
+    return block;
+  }
+
+  function duplicate(block) {
+    const copy = block.cloneNode(true);
+    copy.querySelectorAll('[clay~="editor-ui"]').forEach((el) => el.remove());
+    copy.querySelectorAll("[data-richclay-active]").forEach((el) => clay.RichClay.stripElement(el));
+    copy.dataset.id = newId("b");
+    copy.querySelectorAll("li[data-id]").forEach((li) => { li.dataset.id = newId("t"); });
+    command("Duplicate block", () => block.after(copy));
+    return copy;
+  }
+
+  async function imageSource(file) {
+    const result = await clay.upload(file);
+    if (result.ok) return result.uploads[0].url;
+    if (result.code === "unsupported") {
+      return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.readAsDataURL(file);
+      });
+    }
+    clay.toast?.(result.msg || "Upload failed", "error");
+    return null;
+  }
+
+  function openMenu(block, mode, anchor) {
+    menuTarget = block;
+    menu.dataset.mode = mode;
+    const rect = anchor.getBoundingClientRect();
+    menu.style.left = rect.left + scrollX + "px";
+    menu.style.top = rect.bottom + scrollY + 4 + "px";
+    menu.hidden = false;
+    menu.querySelector(mode === "insert" ? ".for-insert" : ".for-block").focus();
+  }
+
+  function closeMenu() {
+    menu.hidden = true;
+    menuTarget = null;
+    slashParagraph = null;
+  }
+
+  function slashSpot() {
+    const para = slashParagraph;
+    if (!para || !para.isConnected || para.textContent.trim() !== "/") return { spot: spotAfter(menuTarget), clear: null };
+    const block = para.closest(".block");
+    if (para.closest(".body").textContent.trim() === "/") {
+      const spot = { prev: block.previousElementSibling?.dataset.id || null, next: block.nextElementSibling?.dataset.id || null };
+      return { spot, clear: () => block.remove() };
+    }
+    return { spot: spotAfter(block), clear: () => para.remove() };
+  }
+
+  async function chooseInsert(type) {
+    const { spot, clear } = slashSpot();
+    closeMenu();
+    if (type !== "image") return insertAt(spot, type, null, clear);
+    if (clear) command("Remove slash", clear);
+    picker.onchange = async () => {
+      const file = picker.files[0];
+      picker.value = "";
+      if (!file) return;
+      const src = await imageSource(file);
+      if (src) insertAt(spot, "image", src);
+    };
+    picker.click();
+  }
+
+  function renderGutters() {
+    if (!clay.isEditMode) return;
+    for (const block of blocks.children) {
+      if (!block.querySelector(":scope > .gutter")) {
+        const gutter = fromTemplate("gutter-tpl");
+        gutter.setAttribute("clay", "editor-ui");
+        block.prepend(gutter);
+      }
+    }
+    const sortable = window.Sortable?.get(blocks);
+    if (sortable && sortable.option("handle") !== "[sortable-handle]") sortable.option("handle", "[sortable-handle]");
+  }
+
+  const watchedEditors = new WeakSet();
+  function watchPastedImages() {
+    if (!clay.isEditMode || !clay.RichClay) return;
+    for (const body of blocks.querySelectorAll('.block[data-type="text"] > .body, .block[data-type="callout"] > .body')) {
+      if (!body.hasAttribute("data-richclay-active") || watchedEditors.has(body)) continue;
+      watchedEditors.add(body);
+      new clay.RichClay(body).squire.addEventListener("pasteImage", async (event) => {
+        const item = [...(event.detail?.clipboardData?.items || [])].find((i) => i.type.startsWith("image/"));
+        const file = item?.getAsFile();
+        if (!file) return;
+        const spot = spotAfter(body.closest(".block"));
+        const src = await imageSource(file);
+        if (src) insertAt(spot, "image", src);
+      });
+    }
+  }
+
+  function renderOutline() {
+    const outline = chrome.querySelector("#outline");
+    const headings = [...blocks.querySelectorAll(".block .body h1, .block .body h2, .block .body h3")];
+    const signature = headings.map((h) => h.tagName + h.textContent).join("\n");
+    if (outline.dataset.signature === signature) return;
+    outline.dataset.signature = signature;
+    outline.replaceChildren(...headings.map((heading, index) => {
+      const link = document.createElement("a");
+      link.href = "#";
+      link.dataset.index = index;
+      link.dataset.level = heading.tagName.slice(1);
+      link.textContent = heading.textContent.trim() || "Untitled";
+      return link;
+    }));
+  }
+
+  function render() {
+    renderGutters();
+    watchPastedImages();
+    renderOutline();
+    let words = 0;
+    const walker = document.createTreeWalker(blocks, NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) {
+      if (!walker.currentNode.parentElement.closest('[clay~="editor-ui"]')) words += walker.currentNode.data.split(/\s+/).filter(Boolean).length;
+    }
+    setText(chrome.querySelector("#status"), `${words} words`);
+  }
+
+  function syncCheckboxes() {
+    for (const box of blocks.querySelectorAll(".todos input[type=checkbox]")) box.checked = box.hasAttribute("checked");
+  }
+
+  document.addEventListener("click", (event) => {
+    const link = event.target.closest("#outline a");
+    if (link) {
+      event.preventDefault();
+      blocks.querySelectorAll(".block .body h1, .block .body h2, .block .body h3")[link.dataset.index]?.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+    if (!clay.isEditMode) return;
+    const trigger = event.target.closest('[data-action="menu"]');
+    if (trigger) return openMenu(trigger.closest(".block"), trigger.dataset.mode, trigger);
+    const insert = event.target.closest("#menu [data-insert]");
+    if (insert) return chooseInsert(insert.dataset.insert);
+    const blockAction = event.target.closest("#menu [data-block]");
+    if (blockAction) {
+      const block = menuTarget;
+      closeMenu();
+      if (blockAction.dataset.block === "duplicate") duplicate(block);
+      if (blockAction.dataset.block === "delete") command("Delete block", () => block.remove());
+      return;
+    }
+    if (!menu.hidden && !event.target.closest("#menu")) closeMenu();
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !menu.hidden) return closeMenu();
+    const span = event.target.closest?.(".todos li > span");
+    if (!span || !clay.isEditMode) return;
+    const item = span.parentElement;
+    if (event.key === "Enter") {
+      event.preventDefault();
+      const next = newTodoItem();
+      command("Add to-do", () => item.after(next));
+      focusEnd(next.querySelector("span"));
+    } else if (event.key === "Backspace" && span.textContent === "" && item.parentElement.children.length > 1) {
+      event.preventDefault();
+      const previous = item.previousElementSibling || item.nextElementSibling;
+      command("Remove to-do", () => item.remove());
+      focusEnd(previous.querySelector("span"));
+    }
+  });
+
+  document.addEventListener("keyup", (event) => {
+    if (event.key !== "/" || !clay.isEditMode) return;
+    const node = getSelection().anchorNode;
+    const para = (node?.nodeType === 1 ? node : node?.parentElement)?.closest("p, h2, h3, li, div");
+    if (!para || !para.closest(".block > .body") || para.textContent.trim() !== "/") return;
+    openMenu(para.closest(".block"), "insert", para);
+    slashParagraph = para;
+  });
+
+  document.addEventListener("clay:sync-applied", () => {
+    syncCheckboxes();
+    render();
+  });
+  clay.undo?.on("undo", syncCheckboxes);
+  clay.undo?.on("redo", syncCheckboxes);
+
+  let queued = false;
+  new MutationObserver(() => {
+    if (queued) return;
+    queued = true;
+    queueMicrotask(() => { queued = false; render(); });
+  }).observe(blocks, { subtree: true, childList: true, attributes: true, characterData: true });
+
+  render();
+});
+</script>
+</body>
+</html>

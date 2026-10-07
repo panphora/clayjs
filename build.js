@@ -13,6 +13,7 @@
 //   public/
 //     index.html docs.html …           the site, from website/, flattened
 //     llms.txt                         docs/reference.md, renamed
+//     guide.html guide.md *.md         the guide and each page's Markdown twin (scripts/site-docs.mjs)
 //     THIRD-PARTY-NOTICES.md           linked from the site footer
 //     _headers                         from website/
 //     v1/     clay.js clay.standalone.js …  src/**   latest 1.x, what everyone is told to use
@@ -42,6 +43,7 @@ import { fileURLToPath } from 'node:url';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { build as esbuild } from 'esbuild';
+import { emitDocs } from './scripts/site-docs.mjs';
 
 const run = promisify(execFile);
 
@@ -321,6 +323,10 @@ for (const rel of await walk(WEBSITE)) {
   count += await copyInto(join(WEBSITE, rel), rel);
 }
 
+// The guide page and the Markdown twin of every doc page (scripts/site-docs.mjs).
+const docFiles = await emitDocs({ website: WEBSITE, publicDir: PUBLIC, guideSource: join(ROOT, 'docs/guide.md') });
+count += docFiles.length;
+
 // The caching and CORS rules are appended to website/_headers rather than written
 // there by hand, because they are per version prefix and Cloudflare JOINS duplicate
 // headers instead of overriding them. A Cache-Control on /* plus one on a pinned
@@ -361,9 +367,11 @@ function servedPaths(rel) {
 }
 
 // The site's own files, named one by one so no rule overlaps a version prefix.
-const siteRules = [...siteFiles.filter((f) => f !== '_headers'), 'llms.txt', 'THIRD-PARTY-NOTICES.md', 'versions.json']
+// The example apps share one rule: they only ever change together with the guide,
+// and one rule per file would spend eight of the 90.
+const siteRules = [...new Set([...siteFiles.filter((f) => f !== '_headers'), ...docFiles, 'llms.txt', 'THIRD-PARTY-NOTICES.md', 'versions.json']
   .sort()
-  .flatMap(servedPaths);
+  .flatMap((rel) => (rel.startsWith('examples/') ? ['/examples/*'] : servedPaths(rel))))];
 for (const path of siteRules) {
   blocks.push(`${path}\n  Cache-Control: public, max-age=600`);
 }
@@ -387,7 +395,7 @@ if (ruleCount > 90) {
 // broken. _headers earns its own check twice over: without it the site serves no
 // Cache-Control and, worse, no Access-Control-Allow-Origin on the module tree,
 // which silently breaks every page loading clay.js from another origin.
-const required = ['_headers', 'index.html', 'llms.txt', 'THIRD-PARTY-NOTICES.md'];
+const required = ['_headers', 'index.html', 'llms.txt', 'THIRD-PARTY-NOTICES.md', 'guide.html', 'guide.md', 'docs.md', 'visual-guide.html', 'copy-markdown.js', 'examples/skeleton.html'];
 const served = [...[...heads].map(([major, v]) => [`v${major}`, v]), ...pins.map((v) => [v, v])];
 for (const [prefix, version] of served) {
   required.push(`${prefix}/clay.js`, `${prefix}/src/loader.js`, `${prefix}/sap.js`);

@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en" autosave>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>October budget</title>
+<style>
+  html:not([editmode="true"]) [show-when\:editmode="true"] { display: none }
+  [item][template] { display: none }
+
+  :root {
+    color-scheme: light dark;
+    --bg: #f3f0e8; --panel: #fbfaf6; --ink: #26241f; --muted: #706b61; --line: #dbd5c8;
+    --accent: #3d6f72; --over: #a4473b; --good: #3f6b3a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #1c1e21; --panel: #24272b; --ink: #e9e5dd; --muted: #a39e94; --line: #3b4046; --accent: #82b6b8; --over: #e08a7c; --good: #9cc58f; }
+  }
+  * { box-sizing: border-box }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.45 system-ui, sans-serif }
+  main { max-width: 860px; margin: 0 auto; padding: 28px 20px 80px }
+  h1 { margin: 0 0 4px; font-size: 26px }
+  h2 { font-size: 16px; margin: 28px 0 8px }
+  button { font: inherit; color: inherit; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; cursor: pointer }
+  input { font: inherit; color: inherit; background: transparent; border: 1px solid transparent; border-radius: 4px; padding: 2px 4px; width: 100% }
+  input:not([readonly]):hover, input:focus { border-color: var(--line); background: var(--panel) }
+  input[type="number"] { text-align: right }
+  [contenteditable]:focus { outline: 2px solid var(--accent); border-radius: 3px }
+
+  .summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 16px }
+  .summary div { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px }
+  .summary small { display: block; color: var(--muted) }
+  .summary output { font-size: 22px; font-variant-numeric: tabular-nums }
+  table { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--line); border-radius: 8px }
+  th, td { padding: 4px 8px; border-bottom: 1px solid var(--line); text-align: left }
+  th { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted) }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; width: 120px }
+  td.actions { width: 36px; text-align: center }
+  td.actions button { border: 0; background: none; color: var(--muted) }
+  .over { color: var(--over) }
+  .bar { height: 4px; background: var(--line); border-radius: 2px; overflow: hidden; margin-top: 2px }
+  .bar span { display: block; height: 100%; width: var(--used, 0%); background: var(--good) }
+  tr.over .bar span { background: var(--over) }
+  .tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0 }
+  .tools input[type="search"] { width: 220px; border-color: var(--line); background: var(--panel) }
+</style>
+</head>
+<body>
+<main id="app" sap>
+  <h1 editmode:contenteditable inert-contenteditable="plaintext-only">October 2026</h1>
+
+  <section class="summary">
+    <div><small>Budgeted</small><output clay="no-dirty" calc:totalbudget="sum(state.categories, 'budget')" text:usd2="state.totalbudget">$1,250.00</output></div>
+    <div><small>Spent</small><output clay="no-dirty" calc:totalspent="sum(state.txns, 'amount')" text:usd2="state.totalspent">$1,384.40</output></div>
+    <div><small>Left</small><output clay="no-dirty" calc:totalleft="state.totalbudget - state.totalspent" text:usd2="state.totalleft" class:over="state.totalleft < 0" class="over">$-134.40</output></div>
+  </section>
+
+  <h2>Categories</h2>
+  <table>
+    <thead><tr><th>Category</th><th class="num">Budget</th><th class="num">Spent</th><th class="num">Left</th><th></th></tr></thead>
+    <tbody items="categories">
+      <tr item id="cat-rent" class:over="item.left < 0">
+        <td><span bind="name" editmode:contenteditable inert-contenteditable="plaintext-only">Rent</span>
+          <div class="bar" clay="no-dirty" css:used="Math.min(100, item.budget ? item.spent / item.budget * 100 : 0) + '%'" style="--used: 100%;"><span></span></div></td>
+        <td class="num"><input type="number" step="1" min="0" bind="budget" persist viewmode:readonly readonly value="900"></td>
+        <td class="num" clay="no-dirty" calc:spent="sum(root.txns.filter(t => t.cat === item.name), 'amount')" text:usd2="item.spent">$900.00</td>
+        <td class="num" clay="no-dirty" calc:left="item.budget - item.spent" text:usd2="item.left">$0.00</td>
+        <td class="actions"><button type="button" show-when:editmode="true" trigger-remove confirm="Delete this category?" aria-label="Delete category">×</button></td>
+      </tr>
+      <tr item id="cat-food" class:over="item.left < 0" class="over">
+        <td><span bind="name" editmode:contenteditable inert-contenteditable="plaintext-only">Food</span>
+          <div class="bar" clay="no-dirty" css:used="Math.min(100, item.budget ? item.spent / item.budget * 100 : 0) + '%'" style="--used: 100%;"><span></span></div></td>
+        <td class="num"><input type="number" step="1" min="0" bind="budget" persist viewmode:readonly readonly value="250"></td>
+        <td class="num" clay="no-dirty" calc:spent="sum(root.txns.filter(t => t.cat === item.name), 'amount')" text:usd2="item.spent">$412.40</td>
+        <td class="num" clay="no-dirty" calc:left="item.budget - item.spent" text:usd2="item.left">$-162.40</td>
+        <td class="actions"><button type="button" show-when:editmode="true" trigger-remove confirm="Delete this category?" aria-label="Delete category">×</button></td>
+      </tr>
+      <tr item id="cat-fun" class:over="item.left < 0">
+        <td><span bind="name" editmode:contenteditable inert-contenteditable="plaintext-only">Fun</span>
+          <div class="bar" clay="no-dirty" css:used="Math.min(100, item.budget ? item.spent / item.budget * 100 : 0) + '%'" style="--used: 72%;"><span></span></div></td>
+        <td class="num"><input type="number" step="1" min="0" bind="budget" persist viewmode:readonly readonly value="100"></td>
+        <td class="num" clay="no-dirty" calc:spent="sum(root.txns.filter(t => t.cat === item.name), 'amount')" text:usd2="item.spent">$72.00</td>
+        <td class="num" clay="no-dirty" calc:left="item.budget - item.spent" text:usd2="item.left">$28.00</td>
+        <td class="actions"><button type="button" show-when:editmode="true" trigger-remove confirm="Delete this category?" aria-label="Delete category">×</button></td>
+      </tr>
+      <tr item template class:over="item.left < 0">
+        <td><span bind="name" editmode:contenteditable contenteditable="plaintext-only">New category</span>
+          <div class="bar" clay="no-dirty" css:used="Math.min(100, item.budget ? item.spent / item.budget * 100 : 0) + '%'"><span></span></div></td>
+        <td class="num"><input type="number" step="1" min="0" bind="budget" persist viewmode:readonly value="0"></td>
+        <td class="num" clay="no-dirty" calc:spent="sum(root.txns.filter(t => t.cat === item.name), 'amount')" text:usd2="item.spent"></td>
+        <td class="num" clay="no-dirty" calc:left="item.budget - item.spent" text:usd2="item.left"></td>
+        <td class="actions"><button type="button" show-when:editmode="true" trigger-remove confirm="Delete this category?" aria-label="Delete category">×</button></td>
+      </tr>
+    </tbody>
+  </table>
+  <div class="tools"><button type="button" show-when:editmode="true" trigger-add="categories">+ Category</button></div>
+
+  <h2>Transactions</h2>
+  <div class="tools">
+    <input type="search" bind="q" transient placeholder="Search memo or category" aria-label="Search transactions">
+    <button type="button" show-when:editmode="true" trigger-add="txns">+ Transaction</button>
+    <button type="button" show-when:editmode="true" data-action="import">Import CSV</button>
+    <button type="button" data-action="export">Export CSV</button>
+  </div>
+  <table>
+    <thead><tr><th>Date</th><th>Memo</th><th>Category</th><th class="num">Amount</th><th></th></tr></thead>
+    <tbody items="txns" onbeforesnapshot="this.querySelectorAll(':scope > [item][hidden]').forEach((row) => row.removeAttribute('hidden'))">
+      <tr item id="t-k1" calc:match="!root.q || (item.memo + ' ' + item.cat).toLowerCase().includes(root.q.toLowerCase())" show="item.match">
+        <td><input type="date" bind="date" persist viewmode:readonly readonly value="2026-10-01"></td>
+        <td><span bind="memo" editmode:contenteditable inert-contenteditable="plaintext-only">October rent</span></td>
+        <td><input bind="cat" list="cat-list" persist viewmode:readonly readonly value="Rent"></td>
+        <td class="num"><input type="number" step="0.01" bind="amount" persist viewmode:readonly readonly value="900"></td>
+        <td class="actions"><button type="button" show-when:editmode="true" trigger-remove aria-label="Delete transaction">×</button></td>
+      </tr>
+      <tr item id="t-k2" calc:match="!root.q || (item.memo + ' ' + item.cat).toLowerCase().includes(root.q.toLowerCase())" show="item.match">
+        <td><input type="date" bind="date" persist viewmode:readonly readonly value="2026-10-03"></td>
+        <td><span bind="memo" editmode:contenteditable inert-contenteditable="plaintext-only">Groceries</span></td>
+        <td><input bind="cat" list="cat-list" persist viewmode:readonly readonly value="Food"></td>
+        <td class="num"><input type="number" step="0.01" bind="amount" persist viewmode:readonly readonly value="312.40"></td>
+        <td class="actions"><button type="button" show-when:editmode="true" trigger-remove aria-label="Delete transaction">×</button></td>
+      </tr>
+      <tr item id="t-k3" calc:match="!root.q || (item.memo + ' ' + item.cat).toLowerCase().includes(root.q.toLowerCase())" show="item.match">
+        <td><input type="date" bind="date" persist viewmode:readonly readonly value="2026-10-04"></td>
+        <td><span bind="memo" editmode:contenteditable inert-contenteditable="plaintext-only">Dinner out</span></td>
+        <td><input bind="cat" list="cat-list" persist viewmode:readonly readonly value="Food"></td>
+        <td class="num"><input type="number" step="0.01" bind="amount" persist viewmode:readonly readonly value="100"></td>
+        <td class="actions"><button type="button" show-when:editmode="true" trigger-remove aria-label="Delete transaction">×</button></td>
+      </tr>
+      <tr item id="t-k4" calc:match="!root.q || (item.memo + ' ' + item.cat).toLowerCase().includes(root.q.toLowerCase())" show="item.match">
+        <td><input type="date" bind="date" persist viewmode:readonly readonly value="2026-10-05"></td>
+        <td><span bind="memo" editmode:contenteditable inert-contenteditable="plaintext-only">Concert tickets</span></td>
+        <td><input bind="cat" list="cat-list" persist viewmode:readonly readonly value="Fun"></td>
+        <td class="num"><input type="number" step="0.01" bind="amount" persist viewmode:readonly readonly value="72"></td>
+        <td class="actions"><button type="button" show-when:editmode="true" trigger-remove aria-label="Delete transaction">×</button></td>
+      </tr>
+      <tr item template calc:match="!root.q || (item.memo + ' ' + item.cat).toLowerCase().includes(root.q.toLowerCase())" show="item.match">
+        <td><input type="date" bind="date" persist viewmode:readonly></td>
+        <td><span bind="memo" editmode:contenteditable contenteditable="plaintext-only"></span></td>
+        <td><input bind="cat" list="cat-list" persist viewmode:readonly></td>
+        <td class="num"><input type="number" step="0.01" bind="amount" persist viewmode:readonly value="0"></td>
+        <td class="actions"><button type="button" show-when:editmode="true" trigger-remove aria-label="Delete transaction">×</button></td>
+      </tr>
+    </tbody>
+  </table>
+</main>
+
+<script src="https://clayjs.com/v1/clay.js?plugins=sync,undo,indicator&exclude=richclay"></script>
+<script src="https://clayjs.com/v1/clay-options.js"></script>
+<script src="https://clayjs.com/v1/clay-ui.js"></script>
+<script src="https://clayjs.com/v1/sap.js"></script>
+<script>
+clay.ready.then(async () => {
+  if (window.__budgetStarted) return;
+  window.__budgetStarted = true;
+  await clay.loaded.sap;
+
+  const app = document.getElementById("app");
+  const newId = (prefix) => prefix + "-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+
+  function claimRowIds() {
+    for (const row of app.querySelectorAll("[items] > [item]:not([template])")) {
+      if (!row.id || /^row-/.test(row.id)) row.id = newId(row.parentElement.getAttribute("items") === "txns" ? "t" : "cat");
+    }
+  }
+  new MutationObserver(claimRowIds).observe(app, { subtree: true, childList: true });
+
+  document.addEventListener("clay:sync-applied", () => {
+    const derived = clay.conflicts.list().filter((c) =>
+      c.detail === "remote-wins" && [c.el, c.local].some((n) => n?.closest?.('[clay~="no-dirty"]')));
+    if (derived.length) clay.conflicts.acknowledge(derived.map((c) => c.id), { reason: "reconciled" });
+  });
+
+  function syncControls({ keepFocused = false } = {}) {
+    for (const input of app.querySelectorAll("input[persist]")) {
+      if (keepFocused && input === document.activeElement) continue;
+      const value = input.getAttribute("value") ?? "";
+      if (input.value !== value) input.value = value;
+    }
+    Sap.refresh();
+  }
+  clay.undo?.on("undo", () => syncControls());
+  clay.undo?.on("redo", () => syncControls());
+  document.addEventListener("clay:sync-applied", () => syncControls({ keepFocused: true }));
+
+  const chrome = document.createElement("div");
+  chrome.setAttribute("clay", "editor-ui");
+  chrome.innerHTML = '<datalist id="cat-list"></datalist><input type="file" id="csv-picker" accept=".csv,text/csv" hidden>';
+  document.body.append(chrome);
+
+  document.addEventListener("focusin", (event) => {
+    if (!event.target.matches?.('input[list="cat-list"]')) return;
+    const names = [...new Set(Sap(app).categories.map((c) => c.name.trim()).filter(Boolean))];
+    chrome.querySelector("#cat-list").replaceChildren(...names.map((name) => Object.assign(document.createElement("option"), { value: name })));
+  });
+
+  function parseCSV(text) {
+    const rows = [];
+    let row = [], field = "", quoted = false;
+    for (let i = 0; i < text.length; i++) {
+      const c = text[i];
+      if (quoted) {
+        if (c === '"' && text[i + 1] === '"') { field += '"'; i++; }
+        else if (c === '"') quoted = false;
+        else field += c;
+      } else if (c === '"') quoted = true;
+      else if (c === ",") { row.push(field); field = ""; }
+      else if (c === "\n" || c === "\r") {
+        if (c === "\r" && text[i + 1] === "\n") i++;
+        row.push(field); rows.push(row); row = []; field = "";
+      } else field += c;
+    }
+    if (field || row.length) { row.push(field); rows.push(row); }
+    return rows.filter((r) => r.some((cell) => cell.trim()));
+  }
+
+  function toCSV(rows) {
+    const cell = (v) => (/[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : String(v));
+    return rows.map((r) => r.map(cell).join(",")).join("\n");
+  }
+
+  function importRows(records) {
+    const [header, ...body] = records;
+    const col = Object.fromEntries(header.map((name, i) => [name.trim().toLowerCase(), i]));
+    const pick = (r, name) => (col[name] === undefined ? "" : (r[col[name]] || "").trim());
+    Sap.batch("Import CSV", () => {
+      for (const r of body) {
+        const row = Sap(app).$add("txns");
+        row.date = pick(r, "date");
+        row.memo = pick(r, "memo");
+        row.cat = pick(r, "category");
+        row.amount = Number(pick(r, "amount").replace(/[$,]/g, "")) || 0;
+      }
+    });
+    claimRowIds();
+  }
+
+  const picker = chrome.querySelector("#csv-picker");
+  picker.addEventListener("change", async () => {
+    const file = picker.files[0];
+    picker.value = "";
+    if (file) importRows(parseCSV(await file.text()));
+  });
+
+  document.addEventListener("click", (event) => {
+    const action = event.target.closest("[data-action]")?.dataset.action;
+    if (action === "import" && clay.isEditMode) picker.click();
+    if (action === "export") {
+      const rows = Sap(app).txns.map((t) => [t.date, t.memo, t.cat, t.amount]);
+      const blob = new Blob([toCSV([["date", "memo", "category", "amount"], ...rows])], { type: "text/csv" });
+      const link = Object.assign(document.createElement("a"), { href: URL.createObjectURL(blob), download: "transactions.csv" });
+      link.click();
+      URL.revokeObjectURL(link.href);
+    }
+  });
+});
+</script>
+</body>
+</html>

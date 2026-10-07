@@ -73,9 +73,13 @@
     "esbuild": "^0.28.2",
     "jest": "^29.7.0",
     "jest-environment-jsdom": "^29.7.0",
+    "jsdom": "^20.0.3",
+    "marked": "^18.0.14",
     "parse5": "^7.3.0",
     "playwright": "1.62.1",
-    "postcss": "^8.5.28"
+    "postcss": "^8.5.28",
+    "turndown": "^7.2.4",
+    "turndown-plugin-gfm": "^1.0.2"
   },
   "hyper": {
     "kind": "lib",

@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en" autosave>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Launch board</title>
+<style>
+  html:not([editmode="true"]) [show-when\:editmode="true"] { display: none }
+
+  :root {
+    color-scheme: light dark;
+    --bg: #f3f0e8; --panel: #fbfaf6; --card: #fffdf8; --ink: #26241f; --muted: #706b61;
+    --line: #dbd5c8; --accent: #3d6f72; --danger: #a4473b; --shade: rgb(38 36 31 / 0.35);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1c1e21; --panel: #24272b; --card: #2b2f34; --ink: #e9e5dd; --muted: #a39e94;
+      --line: #3b4046; --accent: #82b6b8; --danger: #e08a7c; --shade: rgb(0 0 0 / 0.55);
+    }
+  }
+  * { box-sizing: border-box }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.45 system-ui, sans-serif }
+  button { font: inherit; color: inherit; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; cursor: pointer }
+  button:hover { border-color: var(--accent) }
+  [contenteditable]:focus { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px }
+
+  .board-head { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 16px 20px 0 }
+  .board-head h1 { margin: 0; font-size: 22px; flex: 1 1 auto }
+  .toolbar { display: flex; gap: 8px }
+  .toolbar input { font: inherit; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: inherit }
+
+  .columns { display: flex; gap: 14px; align-items: flex-start; padding: 16px 20px 40px; overflow-x: auto }
+  .column { flex: 0 0 280px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px }
+  .column > header { display: flex; align-items: center; gap: 6px; margin-bottom: 8px }
+  .column h2 { margin: 0; font-size: 15px; flex: 1 1 auto }
+  .count { color: var(--muted); font-size: 13px }
+  .cards { list-style: none; margin: 0 0 8px; padding: 0; min-height: 12px; display: grid; gap: 8px }
+  .add-card { width: 100% }
+
+  .card { position: relative; background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px 8px 26px; cursor: pointer }
+  .card h3 { margin: 0; font-size: 15px; font-weight: 600 }
+  .card .progress { display: inline-block; margin-top: 4px; font-size: 12px; color: var(--muted) }
+  .grip { cursor: grab; color: var(--muted); user-select: none }
+  .card > .grip { position: absolute; left: 8px; top: 8px }
+  .detail { display: none; margin-top: 12px; cursor: auto }
+  .desc { min-height: 3em; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px }
+  .checklist { list-style: none; padding: 0; margin: 12px 0 }
+  .checklist li { display: flex; gap: 8px; align-items: baseline; padding: 2px 0 }
+  .checklist li span { flex: 1 1 auto }
+  .checklist li:has(> input:checked) span { text-decoration: line-through; color: var(--muted) }
+  .checklist .remove-item { border: 0; background: none; color: var(--muted); padding: 0 4px }
+  .activity { margin: 12px 0 0; padding: 0; list-style: none; font-size: 12px; color: var(--muted) }
+  .activity li::before { content: attr(data-at) " · " }
+  .card-actions { display: flex; gap: 8px; margin-top: 12px }
+  .card-actions [data-action="delete-card"] { color: var(--danger); margin-left: auto }
+
+  #chrome .backdrop { display: none; position: fixed; inset: 0; z-index: 10; background: var(--shade) }
+</style>
+</head>
+<body>
+<main id="board">
+  <header class="board-head">
+    <h1 editmode:contenteditable inert-contenteditable="plaintext-only">Product launch</h1>
+  </header>
+
+  <div class="columns" sortable="columns">
+    <section class="column" data-id="col-todo">
+      <header>
+        <span class="grip" sortable-handle show-when:editmode="true" aria-label="Drag column">⠿</span>
+        <h2 editmode:contenteditable inert-contenteditable="plaintext-only">To do</h2>
+      </header>
+      <ol class="cards" sortable="cards">
+        <li class="card" data-id="c-brief">
+          <span class="grip" sortable-handle show-when:editmode="true" aria-label="Drag card">⠿</span>
+          <h3 editmode:contenteditable inert-contenteditable="plaintext-only">Write the launch brief</h3>
+          <div class="detail">
+            <div class="desc" editable><p>Two paragraphs on <b>scope</b> and audience.</p></div>
+            <ul class="checklist">
+              <li data-id="i-brief-1"><input type="checkbox" persist viewmode:disabled disabled checked> <span editmode:contenteditable inert-contenteditable="plaintext-only">Outline</span><button type="button" class="remove-item" data-action="remove-item" show-when:editmode="true" aria-label="Remove item">×</button></li>
+              <li data-id="i-brief-2"><input type="checkbox" persist viewmode:disabled disabled> <span editmode:contenteditable inert-contenteditable="plaintext-only">First draft</span><button type="button" class="remove-item" data-action="remove-item" show-when:editmode="true" aria-label="Remove item">×</button></li>
+            </ul>
+            <ol class="activity"><li data-at="2026-10-07">Created</li></ol>
+            <footer class="card-actions" show-when:editmode="true">
+              <button type="button" data-action="add-item">Add checklist item</button>
+              <button type="button" data-action="delete-card">Delete card</button>
+            </footer>
+          </div>
+        </li>
+        <li class="card" data-id="c-pricing">
+          <span class="grip" sortable-handle show-when:editmode="true" aria-label="Drag card">⠿</span>
+          <h3 editmode:contenteditable inert-contenteditable="plaintext-only">Decide pricing</h3>
+          <div class="detail">
+            <div class="desc" editable><p>Monthly and yearly.</p></div>
+            <ul class="checklist"></ul>
+            <ol class="activity"><li data-at="2026-10-07">Created</li></ol>
+            <footer class="card-actions" show-when:editmode="true">
+              <button type="button" data-action="add-item">Add checklist item</button>
+              <button type="button" data-action="delete-card">Delete card</button>
+            </footer>
+          </div>
+        </li>
+      </ol>
+      <button type="button" class="add-card" data-action="add-card" show-when:editmode="true">+ Add card</button>
+    </section>
+
+    <section class="column" data-id="col-doing">
+      <header>
+        <span class="grip" sortable-handle show-when:editmode="true" aria-label="Drag column">⠿</span>
+        <h2 editmode:contenteditable inert-contenteditable="plaintext-only">Doing</h2>
+      </header>
+      <ol class="cards" sortable="cards">
+        <li class="card" data-id="c-site">
+          <span class="grip" sortable-handle show-when:editmode="true" aria-label="Drag card">⠿</span>
+          <h3 editmode:contenteditable inert-contenteditable="plaintext-only">Landing page</h3>
+          <div class="detail">
+            <div class="desc" editable><p>Hero, three features, pricing.</p></div>
+            <ul class="checklist">
+              <li data-id="i-site-1"><input type="checkbox" persist viewmode:disabled disabled checked> <span editmode:contenteditable inert-contenteditable="plaintext-only">Hero copy</span><button type="button" class="remove-item" data-action="remove-item" show-when:editmode="true" aria-label="Remove item">×</button></li>
+            </ul>
+            <ol class="activity"><li data-at="2026-10-06">Created</li><li data-at="2026-10-07">Moved to Doing</li></ol>
+            <footer class="card-actions" show-when:editmode="true">
+              <button type="button" data-action="add-item">Add checklist item</button>
+              <button type="button" data-action="delete-card">Delete card</button>
+            </footer>
+          </div>
+        </li>
+      </ol>
+      <button type="button" class="add-card" data-action="add-card" show-when:editmode="true">+ Add card</button>
+    </section>
+
+    <section class="column" data-id="col-done">
+      <header>
+        <span class="grip" sortable-handle show-when:editmode="true" aria-label="Drag column">⠿</span>
+        <h2 editmode:contenteditable inert-contenteditable="plaintext-only">Done</h2>
+      </header>
+      <ol class="cards" sortable="cards"></ol>
+      <button type="button" class="add-card" data-action="add-card" show-when:editmode="true">+ Add card</button>
+    </section>
+  </div>
+</main>
+
+<template id="card-tpl">
+  <li class="card">
+    <span class="grip" sortable-handle show-when:editmode="true" aria-label="Drag card">⠿</span>
+    <h3 editmode:contenteditable contenteditable="plaintext-only"></h3>
+    <div class="detail">
+      <div class="desc" editable><p><br></p></div>
+      <ul class="checklist"></ul>
+      <ol class="activity"></ol>
+      <footer class="card-actions" show-when:editmode="true">
+        <button type="button" data-action="add-item">Add checklist item</button>
+        <button type="button" data-action="delete-card">Delete card</button>
+      </footer>
+    </div>
+  </li>
+</template>
+
+<template id="item-tpl">
+  <li><input type="checkbox" persist viewmode:disabled> <span editmode:contenteditable contenteditable="plaintext-only"></span><button type="button" class="remove-item" data-action="remove-item" show-when:editmode="true" aria-label="Remove item">×</button></li>
+</template>
+
+<template id="column-tpl">
+  <section class="column">
+    <header>
+      <span class="grip" sortable-handle show-when:editmode="true" aria-label="Drag column">⠿</span>
+      <h2 editmode:contenteditable contenteditable="plaintext-only"></h2>
+    </header>
+    <ol class="cards" sortable="cards"></ol>
+    <button type="button" class="add-card" data-action="add-card" show-when:editmode="true">+ Add card</button>
+  </section>
+</template>
+
+<template id="chrome-tpl">
+  <div class="toolbar">
+    <input type="search" id="filter" placeholder="Filter cards" aria-label="Filter cards">
+    <button type="button" data-action="add-column" show-when:editmode="true">+ Column</button>
+  </div>
+  <div class="backdrop" data-action="close-card"></div>
+  <style id="view-state"></style>
+</template>
+
+<script src="https://clayjs.com/v1/clay.js?plugins=sync,sortable,undo,indicator"></script>
+<script src="https://clayjs.com/v1/clay-options.js"></script>
+<script src="https://clayjs.com/v1/clay-ui.js"></script>
+<script>
+clay.ready.then(() => {
+  if (window.__boardStarted) return;
+  window.__boardStarted = true;
+
+  const board = document.getElementById("board");
+  const newId = (prefix) => prefix + "-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  const today = () => new Date().toISOString().slice(0, 10);
+  const command = (label, fn) => (clay.undo ? clay.undo.commit(label, fn) : fn());
+  const recordText = (el) => {
+    const copy = el.cloneNode(true);
+    copy.querySelectorAll('[clay~="editor-ui"]').forEach((n) => n.remove());
+    return copy.textContent;
+  };
+
+  clay.onSnapshot?.((root) => {
+    for (const el of root.querySelectorAll(".sortable-chosen, .sortable-ghost, .sortable-drag")) {
+      el.classList.remove("sortable-chosen", "sortable-ghost", "sortable-drag");
+      if (!el.classList.length) el.removeAttribute("class");
+    }
+    for (const el of root.querySelectorAll('[draggable="false"]')) el.removeAttribute("draggable");
+    for (const el of root.querySelectorAll('[style=""]')) el.removeAttribute("style");
+  });
+  const fromTemplate = (id) => document.getElementById(id).content.firstElementChild.cloneNode(true);
+  const cardById = (id) => board.querySelector(`.card[data-id="${CSS.escape(id)}"]`);
+
+  function readHash() {
+    const params = new URLSearchParams(location.hash.slice(1));
+    return { card: params.get("card") || "", q: params.get("q") || "" };
+  }
+
+  function writeHash(next, { replace = false } = {}) {
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries({ ...readHash(), ...next })) if (value) params.set(key, value);
+    const hash = params.toString() ? "#" + params : location.pathname + location.search;
+    if (replace) history.replaceState(null, "", hash);
+    else location.hash = params.toString();
+    render();
+  }
+
+  function logActivity(card, text) {
+    const entry = document.createElement("li");
+    entry.dataset.at = today();
+    entry.textContent = text;
+    card.querySelector(".activity").append(entry);
+  }
+
+  function focusText(el) {
+    el.focus();
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    range.collapse(false);
+    getSelection().removeAllRanges();
+    getSelection().addRange(range);
+  }
+
+  function syncCheckboxes() {
+    for (const box of board.querySelectorAll(".checklist input[type=checkbox]")) {
+      box.checked = box.hasAttribute("checked");
+    }
+  }
+
+  function derived(host, className, after) {
+    let el = host.querySelector(`:scope > .${className}`);
+    if (!el) {
+      el = document.createElement("span");
+      el.className = className;
+      el.setAttribute("clay", "editor-ui");
+      after.after(el);
+    }
+    return el;
+  }
+
+  function setText(el, text) {
+    if (el.textContent !== text) el.textContent = text;
+  }
+
+  function render() {
+    for (const column of board.querySelectorAll(".column")) {
+      const header = column.querySelector(":scope > header");
+      setText(derived(header, "count", header.querySelector("h2")), String(column.querySelectorAll(".card").length));
+    }
+    for (const card of board.querySelectorAll(".card")) {
+      const boxes = card.querySelectorAll(".checklist input[type=checkbox]");
+      const done = [...boxes].filter((box) => box.hasAttribute("checked")).length;
+      setText(derived(card, "progress", card.querySelector("h3")), boxes.length ? `${done}/${boxes.length} done` : "");
+    }
+
+    const { card: openId, q } = readHash();
+    if (openId && !cardById(openId)) return writeHash({ card: "" }, { replace: true });
+
+    const rules = [];
+    if (openId) {
+      const sel = `.card[data-id="${CSS.escape(openId)}"]`;
+      rules.push(`${sel}{position:fixed;z-index:20;top:6vh;left:0;right:0;margin:auto;width:min(560px,92vw);max-height:88vh;overflow:auto;cursor:auto;padding:16px 20px}`);
+      rules.push(`${sel} > .grip{display:none}`, `${sel} .detail{display:block}`, `#chrome .backdrop{display:block}`);
+    }
+    if (q) {
+      const needle = q.toLowerCase();
+      const hits = [...board.querySelectorAll(".card")]
+        .filter((card) => recordText(card).toLowerCase().includes(needle))
+        .map((card) => `[data-id="${CSS.escape(card.dataset.id)}"]`);
+      rules.push(hits.length ? `.card:not(${hits.join(",")}){display:none}` : `.card{display:none}`);
+    }
+    setText(document.getElementById("view-state"), rules.join("\n"));
+  }
+
+  function mountChrome() {
+    const chrome = document.createElement("div");
+    chrome.id = "chrome";
+    chrome.setAttribute("clay", "editor-ui");
+    chrome.append(document.getElementById("chrome-tpl").content.cloneNode(true));
+    board.querySelector(".board-head").append(chrome);
+    const filter = chrome.querySelector("#filter");
+    filter.value = readHash().q;
+    filter.addEventListener("input", () => writeHash({ q: filter.value }, { replace: true }));
+  }
+
+  const actions = {
+    "add-card"(button) {
+      const card = fromTemplate("card-tpl");
+      card.dataset.id = newId("c");
+      logActivity(card, "Created");
+      command("Add card", () => button.closest(".column").querySelector(".cards").append(card));
+      focusText(card.querySelector("h3"));
+    },
+    "add-column"() {
+      const column = fromTemplate("column-tpl");
+      column.dataset.id = newId("col");
+      command("Add column", () => board.querySelector(".columns").append(column));
+      focusText(column.querySelector("h2"));
+    },
+    "add-item"(button) {
+      const item = fromTemplate("item-tpl");
+      item.dataset.id = newId("i");
+      command("Add checklist item", () => button.closest(".card").querySelector(".checklist").append(item));
+      focusText(item.querySelector("span"));
+    },
+    "remove-item"(button) {
+      command("Remove checklist item", () => button.closest("li").remove());
+    },
+    "delete-card"(button) {
+      const card = button.closest(".card");
+      clay.confirm("Delete this card?").then(() => {
+        command("Delete card", () => card.remove());
+        writeHash({ card: "" });
+      }, () => {});
+    },
+    "close-card"() {
+      writeHash({ card: "" });
+    },
+  };
+
+  const editOnly = new Set(["add-card", "add-column", "add-item", "remove-item", "delete-card"]);
+
+  document.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-action]");
+    if (button) {
+      const name = button.dataset.action;
+      if (editOnly.has(name) && !clay.isEditMode) return;
+      actions[name](button);
+      return;
+    }
+    const card = event.target.closest(".card");
+    if (!card || card.dataset.id === readHash().card) return;
+    if (event.target.closest("[contenteditable], [sortable-handle], input, a")) return;
+    writeHash({ card: card.dataset.id });
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && event.target.matches?.('[contenteditable="plaintext-only"]')) {
+      event.preventDefault();
+      event.target.blur();
+    }
+    if (event.key === "Escape" && readHash().card && !event.target.closest?.("[contenteditable]")) {
+      writeHash({ card: "" });
+    }
+  });
+
+  document.addEventListener("clay:sorted", (event) => {
+    const { item, from, to } = event.detail;
+    if (!item.matches(".card") || from === to) return;
+    logActivity(item, "Moved to " + to.closest(".column").querySelector("h2").textContent.trim());
+  });
+
+  document.addEventListener("clay:sync-applied", () => {
+    syncCheckboxes();
+    render();
+  });
+  clay.undo?.on("undo", syncCheckboxes);
+  clay.undo?.on("redo", syncCheckboxes);
+  window.addEventListener("hashchange", render);
+
+  let queued = false;
+  new MutationObserver(() => {
+    if (queued) return;
+    queued = true;
+    queueMicrotask(() => { queued = false; render(); });
+  }).observe(board, { subtree: true, childList: true, attributes: true, characterData: true });
+
+  mountChrome();
+  render();
+});
+</script>
+</body>
+</html>

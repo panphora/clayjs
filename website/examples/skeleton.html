@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en" autosave>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reading list</title>
+<style>
+  html:not([editmode="true"]) [show-when\:editmode="true"] { display: none }
+  :root { color-scheme: light dark; --bg: #f3f0e8; --ink: #26241f; --muted: #706b61; --line: #dbd5c8; --accent: #3d6f72 }
+  @media (prefers-color-scheme: dark) { :root { --bg: #1c1e21; --ink: #e9e5dd; --muted: #a39e94; --line: #3b4046; --accent: #82b6b8 } }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.5 system-ui, sans-serif }
+  main { max-width: 640px; margin: 0 auto; padding: 32px 20px }
+  button { font: inherit; color: inherit; background: none; border: 1px solid var(--line); border-radius: 6px; padding: 2px 10px; cursor: pointer }
+  #items { list-style: none; padding: 0 }
+  #items li { display: flex; gap: 8px; align-items: baseline; padding: 4px 0; border-bottom: 1px solid var(--line) }
+  #items li .title { flex: 1 1 auto }
+  #items li:has(> input:checked) .title { color: var(--muted); text-decoration: line-through }
+  .grip { cursor: grab; color: var(--muted) }
+  #summary { color: var(--muted) }
+  [contenteditable]:focus { outline: 2px solid var(--accent); border-radius: 3px }
+</style>
+</head>
+<body>
+<main id="app">
+  <h1 editmode:contenteditable inert-contenteditable="plaintext-only">Reading list</h1>
+  <ul id="items" sortable="items">
+    <li data-id="r-mmm"><span class="grip" sortable-handle show-when:editmode="true" aria-label="Drag">⠿</span><input type="checkbox" persist viewmode:disabled disabled checked> <span class="title" editmode:contenteditable inert-contenteditable="plaintext-only">The Mythical Man-Month</span><button type="button" data-action="remove" show-when:editmode="true" aria-label="Remove">×</button></li>
+    <li data-id="r-sicp"><span class="grip" sortable-handle show-when:editmode="true" aria-label="Drag">⠿</span><input type="checkbox" persist viewmode:disabled disabled> <span class="title" editmode:contenteditable inert-contenteditable="plaintext-only">Structure and Interpretation of Computer Programs</span><button type="button" data-action="remove" show-when:editmode="true" aria-label="Remove">×</button></li>
+  </ul>
+  <button type="button" data-action="add" show-when:editmode="true">+ Add book</button>
+</main>
+
+<template id="item-tpl">
+  <li><span class="grip" sortable-handle show-when:editmode="true" aria-label="Drag">⠿</span><input type="checkbox" persist viewmode:disabled> <span class="title" editmode:contenteditable contenteditable="plaintext-only"></span><button type="button" data-action="remove" show-when:editmode="true" aria-label="Remove">×</button></li>
+</template>
+
+<template id="chrome-tpl">
+  <p id="summary"></p>
+  <input type="search" id="filter" placeholder="Filter" aria-label="Filter">
+  <style id="view-state"></style>
+</template>
+
+<script src="https://clayjs.com/v1/clay.js?plugins=sync,sortable,undo,indicator&exclude=richclay"></script>
+<script src="https://clayjs.com/v1/clay-options.js"></script>
+<script src="https://clayjs.com/v1/clay-ui.js"></script>
+<script>
+clay.ready.then(() => {
+  if (window.__appStarted) return;
+  window.__appStarted = true;
+
+  const items = document.getElementById("items");
+  const newId = (prefix) => prefix + "-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  const command = (label, fn) => (clay.undo ? clay.undo.commit(label, fn) : fn());
+
+  clay.onSnapshot?.((root) => {
+    for (const el of root.querySelectorAll(".sortable-chosen, .sortable-ghost, .sortable-drag")) {
+      el.classList.remove("sortable-chosen", "sortable-ghost", "sortable-drag");
+      if (!el.classList.length) el.removeAttribute("class");
+    }
+    for (const el of root.querySelectorAll('[draggable="false"]')) el.removeAttribute("draggable");
+    for (const el of root.querySelectorAll('[style=""]')) el.removeAttribute("style");
+  });
+  const setText = (el, text) => { if (el.textContent !== text) el.textContent = text; };
+
+  const chrome = document.createElement("div");
+  chrome.setAttribute("clay", "editor-ui");
+  chrome.append(document.getElementById("chrome-tpl").content.cloneNode(true));
+  items.before(chrome);
+  const filter = chrome.querySelector("#filter");
+  filter.value = new URLSearchParams(location.hash.slice(1)).get("q") || "";
+  filter.addEventListener("input", () => {
+    history.replaceState(null, "", filter.value ? "#q=" + encodeURIComponent(filter.value) : location.pathname + location.search);
+    render();
+  });
+
+  function render() {
+    const rows = [...items.querySelectorAll(":scope > li")];
+    const done = rows.filter((li) => li.querySelector("input").hasAttribute("checked")).length;
+    setText(chrome.querySelector("#summary"), `${done} of ${rows.length} read`);
+    const q = filter.value.trim().toLowerCase();
+    const hidden = q ? rows.filter((li) => !li.textContent.toLowerCase().includes(q)) : [];
+    setText(chrome.querySelector("#view-state"), hidden.map((li) => `#items > [data-id="${CSS.escape(li.dataset.id)}"]{display:none}`).join("\n"));
+  }
+
+  function syncCheckboxes() {
+    for (const box of items.querySelectorAll("input[type=checkbox]")) box.checked = box.hasAttribute("checked");
+  }
+
+  document.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-action]");
+    if (!button || !clay.isEditMode) return;
+    if (button.dataset.action === "add") {
+      const li = document.getElementById("item-tpl").content.firstElementChild.cloneNode(true);
+      li.dataset.id = newId("r");
+      command("Add book", () => items.append(li));
+      li.querySelector(".title").focus();
+    }
+    if (button.dataset.action === "remove") {
+      const li = button.closest("li");
+      clay.confirm("Remove this book?").then(() => command("Remove book", () => li.remove()), () => {});
+    }
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && event.target.matches?.('[contenteditable="plaintext-only"]')) {
+      event.preventDefault();
+      event.target.blur();
+    }
+  });
+
+  document.addEventListener("clay:sync-applied", () => { syncCheckboxes(); render(); });
+  clay.undo?.on("undo", syncCheckboxes);
+  clay.undo?.on("redo", syncCheckboxes);
+  window.addEventListener("hashchange", () => { filter.value = new URLSearchParams(location.hash.slice(1)).get("q") || ""; render(); });
+  new MutationObserver(render).observe(items, { subtree: true, childList: true, attributes: true, characterData: true });
+  render();
+});
+</script>
+</body>
+</html>

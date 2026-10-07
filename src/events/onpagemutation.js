@@ -2,8 +2,10 @@
    [onpagemutation] / [onglobalmutation] - Trigger code when ANY element on the page changes
 
    Usage:
-   <span onglobalmutation="this.textContent = All('li').length">0</span>
-   <span onpagemutation="this.textContent = All('li').length">0</span>
+   <span onglobalmutation="const n = String(All('li').length); if (this.textContent !== n) this.textContent = n">0</span>
+   <span onpagemutation="const n = String(All('li').length); if (this.textContent !== n) this.textContent = n">0</span>
+
+   Guard every write: writing into the page, even the same text, is a mutation and re-runs the handler.
 
    Both attributes are equivalent - onglobalmutation is the preferred name for clarity.
 */

@@ -30,6 +30,7 @@
   <div class="links">
     <a class="github-clay" href="https://github.com/panphora/clayjs" target="_blank" rel="noopener" aria-label="View ClayJS source on GitHub"><span class="github-bracket" aria-hidden="true">&lt;</span><span class="github-mascot" aria-hidden="true"><svg viewBox="0 0 16 16" focusable="false"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg></span><span class="github-word" aria-hidden="true">source</span><span class="github-bracket github-close" aria-hidden="true">/&gt;</span></a>
     <a href="/get-started">Get started</a>
+    <a href="/guide">Guide</a>
     <a href="/advanced">Advanced</a>
     <a href="/plugins">Plugins</a>
     <a href="/docs" aria-current="page">Docs</a>
@@ -42,7 +43,27 @@
   <section style="border-top: none; padding-top: 56px;">
     <span class="eyebrow">Docs</span>
     <h1 class="display" style="font-size: clamp(30px, 4.5vw, 42px);">Reference</h1>
-    <p class="lede" style="margin-top: 12px;">The core API, the attributes, the events, and the one endpoint that makes it all work. For the guided version, start with the <a href="/">tutorial</a>.</p>
+    <p class="lede" style="margin-top: 12px;">The core API, the attributes, the events, and the one endpoint that makes it all work. For the guided version, start with the <a href="/">tutorial</a>. To build a whole app, read the <a href="/guide">guide</a>. <a href="#all-pages">All pages</a>.</p>
+  </section>
+
+  <!-- ====== ALL PAGES ====== -->
+  <section id="all-pages">
+    <span class="eyebrow">Every page</span>
+    <h2 class="section-title">All the docs</h2>
+    <p>Every page has a Markdown copy at the same address plus <code>.md</code>, for pasting into an agent or reading in a terminal. The <b>Copy as Markdown</b> button at the top of each page copies it.</p>
+    <table>
+      <tr><th>Page</th><th>What it covers</th><th>Markdown</th></tr>
+      <tr><td><a href="/">Home</a></td><td>The tutorial: one file that saves itself, then feedback, documents, regions and the configurator.</td><td><a href="/index.md">index.md</a></td></tr>
+      <tr><td><a href="/get-started">Get started</a></td><td>A checklist on your own disk in four steps, with HTML Clay.</td><td><a href="/get-started.md">get-started.md</a></td></tr>
+      <tr><td><a href="/guide">Guide</a></td><td>The complete guide to building apps: the model, a starter file, saving, sync, components, architecture, recipes, limits and a trap index.</td><td><a href="/guide.md">guide.md</a></td></tr>
+      <tr><td><a href="/visual-guide">Visual guide</a></td><td>The guide's core ideas drawn: the two forms of a file, why stripping complicates sync, common mistakes, where state belongs.</td><td><a href="/visual-guide.md">visual-guide.md</a></td></tr>
+      <tr><td><a href="/advanced">Advanced</a></td><td>The clay attribute and regions, custom attributes, save hooks, and the separate libraries (events, options, DOM helpers, sap.js and more).</td><td><a href="/advanced.md">advanced.md</a></td></tr>
+      <tr><td><a href="/plugins">Plugins</a></td><td>What each plugin adds and how to load it.</td><td><a href="/plugins.md">plugins.md</a></td></tr>
+      <tr><td><a href="/docs">Docs</a></td><td>This reference: the core API, attributes, events and the save endpoint.</td><td><a href="/docs.md">docs.md</a></td></tr>
+      <tr><td><a href="/offline">Offline</a></td><td>The standalone build for pages with no network.</td><td><a href="/offline.md">offline.md</a></td></tr>
+    </table>
+    <p>The example apps the guide quotes, each one complete file: <a href="/examples/skeleton.html">reading list</a> (the starter), <a href="/examples/kanban.html">kanban</a>, <a href="/examples/writer.html">block writer</a> and <a href="/examples/finance.html">budget</a>. They open read-only here; download one and open it in HTML Clay to edit it.</p>
+    <p class="small">For agents: <a href="/llms.txt">llms.txt</a> is the condensed reference in one file, and <a href="/guide.md">guide.md</a> is the full guide.</p>
   </section>
 
   <!-- ====== LOADING ====== -->
@@ -85,6 +106,7 @@
       <tr><td><code>clay.onSnapshot(fn)</code></td><td>Like <code>addDocumentTransform</code>, but runs for every snapshot, including live-sync broadcasts.</td></tr>
       <tr><td><code>clay.isEditMode</code></td><td>Whether this session may edit (see <a href="#editmode">edit mode</a>).</td></tr>
       <tr><td><code>clay.isOwner</code></td><td>Whether the platform's owner cookie is set. Unlike <code>isEditMode</code>, the URL and global overrides don't affect it.</td></tr>
+      <tr><td><code>clay.siteVisibility</code></td><td>How the host serves this site: <code>"private"</code>, <code>"public"</code>, or <code>null</code> when the host says nothing. Read once, at boot.</td></tr>
       <tr><td><code>clay.toggleEditMode()</code></td><td>Flip between edit and view mode (reloads the page).</td></tr>
       <tr><td><code>clay.cacheBust(el)</code></td><td>Re-download one resource by stamping <code>?v=</code> onto its <code>href</code> or <code>src</code>. <a href="/advanced#save-attrs">Details</a>.</td></tr>
       <tr><td><code>clay.Mutation</code></td><td>The shared mutation hub. See <a href="/advanced#libraries">Advanced</a>.</td></tr>
@@ -106,7 +128,6 @@
       <tr><td><code>clay.*</code> from <code>clay.js</code></td><td>The everyday surface, above</td><td>Stable</td></tr>
       <tr><td><code>clay.*</code> from a satellite</td><td>Opt-in, one script tag each: <code>clay-ui</code>, <code>clay-utils</code>, <code>clay-dom</code>, <code>clay-events</code>, <code>clay-options</code>, <code>clay-internals</code>, <code>clay-data</code></td><td>Stable</td></tr>
       <tr><td>Anything else under <code>src/</code></td><td>Reachable by direct import, because <code>src/</code> ships to npm and the CDN</td><td><strong>May change in any release</strong></td></tr>
-      <tr><td><code>clay.siteVisibility</code></td><td>How the host serves this site: <code>"private"</code>, <code>"public"</code>, or <code>null</code> when the host says nothing. Read once, at boot.</td></tr>
     </table>
     <p class="small">The contract starts at 1.0.0: no name in the first two tiers changes without a major version. Everything in the third tier works today and is welcome to be used, but it is not a promise.</p>
   </section>

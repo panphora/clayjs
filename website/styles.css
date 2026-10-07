@@ -142,6 +142,11 @@ a:hover { color: var(--glaze-deep); }
 }
 .nav .links a:hover, .nav .links a[aria-current="page"] { color: var(--glaze-deep); }
 .nav .links a[aria-current="page"] { border-bottom: 2px solid var(--glaze); padding-bottom: 2px; }
+@media (max-width: 620px) {
+  .nav { gap: 14px; }
+  .nav .links { gap: 6px 12px; }
+  .nav .links a { font-size: 12.5px; }
+}
 
 /* ---------- shells ---------- */
 .page { max-width: 720px; margin: 0 auto; padding: 0 24px 90px; }
@@ -320,6 +325,7 @@ th {
   font-weight: 600;
 }
 td code { white-space: nowrap; }
+@media (max-width: 760px) { table { display: block; overflow-x: auto; } }
 
 /* ---------- expandables ---------- */
 details.fold {
@@ -432,3 +438,31 @@ footer .inner + .inner { margin-top: 18px; }
 .mode-toggle button[aria-pressed="true"] { background: var(--glaze); color: #F4F6F1; }
 .sheet.viewing .edit-only { display: none; }
 .sheet.viewing [contenteditable] { border-bottom-color: transparent; pointer-events: none; }
+
+/* ---------- copy as markdown (added by copy-markdown.js) ---------- */
+.md-tools {
+  float: right; display: flex; align-items: baseline; gap: 10px;
+  margin: -5px 0 10px 16px;
+}
+.md-tools .btn { font-size: 12.5px; padding: 4px 11px; }
+.md-tools a { font-family: var(--mono); font-size: 12.5px; color: var(--ink-soft); }
+.md-tools a:hover { color: var(--glaze-deep); }
+
+/* ---------- guide (rendered from docs/guide.md) ---------- */
+.guide .toc { margin-top: 22px; }
+.guide .toc ol { list-style: none; columns: 2; column-gap: 28px; font-size: 15px; }
+.guide .toc li { break-inside: avoid; padding: 2px 0; }
+@media (max-width: 620px) { .guide .toc ol { columns: 1; } }
+.prose h2 { font-size: 28px; line-height: 1.2; letter-spacing: -0.01em; margin: 56px 0 12px; padding-top: 22px; border-top: 1px solid var(--line-soft); scroll-margin-top: 16px; }
+.prose h3 { margin: 30px 0 8px; scroll-margin-top: 16px; }
+.prose h4 { font-size: 17px; margin: 22px 0 6px; }
+.prose ul, .prose ol { margin: 0 0 14px 22px; }
+.prose ul { list-style: disc; }
+.prose ol { list-style: decimal; }
+.prose li { margin-bottom: 6px; }
+.prose li > p { margin-bottom: 6px; }
+.prose hr { border: none; border-top: 1px solid var(--line-soft); margin: 36px 0; }
+.prose table { display: block; overflow-x: auto; }
+.prose td code { white-space: normal; }
+.prose :not(pre) > code { overflow-wrap: anywhere; }
+.prose blockquote { border-left: 3px solid var(--glaze); padding-left: 14px; color: var(--ink-soft); margin: 0 0 14px; }

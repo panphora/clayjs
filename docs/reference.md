@@ -9,6 +9,12 @@ This file is the complete reference for agents, condensed from https://clayjs.co
 https://clayjs.com/advanced, and https://clayjs.com/plugins. Human-readable versions live
 at those URLs. clayjs is MIT-0 licensed. npm builds for bundlers: @panphora/clayjs.
 
+Building a whole app (inline editing, controls, sync, undo, derived values)? Read the
+guide, https://clayjs.com/guide.md: the model, a complete starter file, architecture,
+recipes, limits and a trap index, with four tested example apps. Every page on
+clayjs.com also has a Markdown copy at the same path plus `.md` (https://clayjs.com/docs.md);
+the list is at https://clayjs.com/docs#all-pages.
+
 ## The one-paragraph integration
 
 To make a static HTML file malleable: add
@@ -16,7 +22,7 @@ To make a static HTML file malleable: add
 Add an `autosave` attribute to the `<html>` element. Add an `editable` attribute to each
 element a person should edit as rich text (headings, paragraphs, note containers). Add a
 `persist` attribute to any form control whose value should survive saving. Mark page UI
-that should never be written to disk with `clay="no-save no-watch"`. Do not write any
+that should never be written to disk with `clay="editor-ui"`. Do not write any
 save logic or add a save button: clayjs saves the whole document automatically, and the
 host writes it to disk.
 
@@ -76,9 +82,12 @@ itself, with no network.
   `clay:ready` fires on `document` at the same moment.
 - `clay.save()` — snapshot the page and save it. Skips when nothing changed. Returns
   `Promise<{ok, msg, msgType, code, etag}>`; check `ok`. `msgType` is `success`,
-  `error`, `skipped` (nothing was sent), or `unknown` (the request timed out, so the
-  write may or may not have landed). A host may answer with its own severity, such as
-  `warning`. Never rejects.
+  `error`, `skipped` (nothing was sent), `conflict` (HTTP 412, see `clay:save-conflict`;
+  the result also carries `changedBy`, `afterTimeout` and `conflictEtag`), or `unknown`
+  (the request timed out, so the write may or may not have landed). A host may answer
+  with its own severity, such as `warning`. `skipped` covers both "No changes to save"
+  and "Save already in progress" (the bytes are queued and sent after the in-flight
+  save), so branch on `msgType`, not `ok`. Never rejects.
 - `clay.save.force()` — save even when nothing appears to have changed.
 - `clay.save.flush({keepalive, timeoutMs})` — save now, and answer only when the host has
   accepted the bytes the page holds at that moment. Resolves `{state, etag}`, where `state`
@@ -115,10 +124,12 @@ itself, with no network.
 - `clay.markDirty()` — tell live sync the person just edited something it cannot see: an
   editor whose own UI is `editor-ui` and which writes its data itself. Call it on each
   user edit. Without it, an edit made while an incoming update waits on a script or
-  stylesheet load can be recorded as already saved. Present when the sync plugin is loaded.
+  stylesheet load can be recorded as already saved. Present on every edit-mode page, and in view mode when `sync` is loaded.
 - `clay.isEditMode` — whether this session may edit.
 - `clay.isOwner` — whether the platform's owner cookie is set (URL and global overrides
   don't affect it, unlike `isEditMode`).
+- `clay.siteVisibility` — `"private"` or `"public"` when the host says how it serves this
+  site (hyperclay.com tells the owner's tab), otherwise `null`. Read once, at boot.
 - `clay.toggleEditMode()` — flip between edit and view mode (reloads the page).
 - `clay.cacheBust(el)` — re-download one resource by stamping `?v=` onto its `href` or
   `src`.
@@ -128,15 +139,20 @@ itself, with no network.
 - `clay.morph(oldEl, newEl)` — content-based DOM morphing engine: morphs `oldEl` in
   place to match `newEl`, preserving focus, inputs, and animations (sync plugin).
   Its signature is unchanged on hyper-morph 1.0.
-- `clay.siteVisibility` — `"private"` or `"public"` when the host says how it serves this
-  site (hyperclay.com tells the owner's tab), otherwise `null`. Read once, at boot.
 - `clay.undo` — document-wide undo singleton: `clay.undo.undo()` / `clay.undo.redo()`
   (undo plugin).
 - `clay.cms` — the content panel: `clay.cms.open()` (cms plugin).
 - `clay.RichClay` — the rich-text editor class behind `editable` (richclay plugin).
 - `clay.quickcrop(file, opts)` — crop modal: resolves `{blob, dataURL, width, height}`,
   or `null` if cancelled (quickcrop plugin).
-- `clay.upload` — pick a file and get it into the page (upload plugin).
+- `clay.upload(file, {onProgress, signal})` — post a `File` you supply (from an
+  `<input type="file">`, a drop or a paste) to the host. Resolves
+  `{ok, msg, msgType, code, uploads}` with `uploads[0].url` on success and never rejects.
+  It opens no picker and inserts nothing: write the URL into the page yourself.
+  `code` is `unsupported` when the host stores no files; other failures include
+  `too-large`, `unsupported-type`, `payment-required`, `unauthorized`, `forbidden`,
+  `timeout`, `aborted`, `network`. Events: `clay:upload-start`, `clay:upload-progress`, `clay:upload-done`,
+  `clay:upload-error` (upload plugin).
 - `clay.wire` — per-file control channel to a process on the user's machine: `send`,
   `cancel`, `get`, `list`, `isBusy`, `on` (wire plugin).
 - `clay.aiEdit` — the AI comment box: `clay.aiEdit.init()` and
@@ -146,7 +162,8 @@ itself, with no network.
   the same object, also published as `STRIP_FROM_SAVE`-style constants).
 
 In view mode the edit-only members are absent. `window.clay` keeps `ready`, `toggleEditMode`,
-`isEditMode`, `isOwner`, `Mutation`, `region`, `readData`, and `writeData`, plus `morph` or
+`isEditMode`, `isOwner`, `Mutation`, `region`, `readData`, `writeData`, and
+`hasUnsavedChanges` (always `false`), plus `morph` or
 `cms` when those plugins load. `writeData` still refuses without an editable page, a
 connected sync plugin, and host support. Feature-detect edit mode with `'save' in clay`.
 
@@ -196,22 +213,33 @@ reachable by direct import but may change in any release.
 - `refetch-on-save` (link/style) — reload a stylesheet that is generated on save,
   without a flash: `<link rel="stylesheet" href="style.css" refetch-on-save>`.
 - `savestatus` (`<html>`, set by clayjs) — read-only state for your CSS: `saving`,
-  `saved`, `error`, `offline`.
+  `saved`, `error`, `offline`, `conflict`. Removed from every save, like `editmode` and
+  `pageowner`, so before clayjs boots none of them is present: key CSS on
+  `html:not([editmode="true"])`, not `html[editmode="false"]`.
 
 ## Region reference (the clay attribute)
 
 One attribute controls how any element takes part in saving. Keywords combine with
 spaces: `clay="freeze no-undo"`.
 
+- `editor-ui` — runtime UI built by script: toolbars, menus, filter boxes, badges,
+  computed counts. Shorthand for `no-data no-save no-snapshot no-watch no-undo`: never
+  saved, never sent to peers, never in undo, never seen by autosave. Create it at
+  runtime (an authored `editor-ui` element is gone from the file after the first save).
+- `no-data` — kept in the file and synced, but skipped by `clay.extractData`, the data
+  API and `clay.dom.createContentView`.
 - `no-save` — lives on the page, never written to disk; live sync leaves your copy
-  alone. Use for search boxes, connection badges, edit toolbars.
+  alone. Its content is still inside the snapshot sent to peers (they never apply it), so
+  prefer `editor-ui` for UI.
 - `no-snapshot` — invisible to save AND to sync; every device keeps its own copy. Use
   for per-device panel state.
-- `freeze` — saved exactly as authored; runtime changes to its contents are ignored.
-  Use for clocks, tickers, computed summaries.
+- `freeze` — its inner HTML is saved as it was at load; runtime changes to its contents
+  are ignored (the element's own attributes stay live). Use for clocks and tickers. Not
+  for totals the saved file should show: they would be saved stale.
 - `no-trigger-autosave` — saved normally and still counted as unsaved work, but edits
-  here don't start an autosave; live sync protects it until you save. Use for heavy
-  editors you save by hand.
+  here don't start an autosave (any save still writes them). Live sync merges it like
+  ordinary content: an overlap with an incoming frame goes to the conflict ledger. Use for
+  heavy editors you save by hand.
 - `no-dirty` — saved normally, but its content is disposable: no autosave, no
   unsaved-changes warning, and live sync may replace it. Use for regions that render
   themselves (filter bars, projections, drag previews).
@@ -219,25 +247,30 @@ spaces: `clay="freeze no-undo"`.
   undo). Use for third-party widgets that churn the DOM.
 - `no-undo` — changes here aren't recorded in undo history.
 
-Recipes: UI chrome (toolbars, badges) → `clay="no-save no-watch"`. Live or computed
+Recipes: UI chrome (toolbars, badges) → `clay="editor-ui"`. Live or computed
 text (clocks) → `clay="freeze"`. Third-party embeds → `clay="no-watch"`. Heavy editors,
 batch the saves → `clay="no-trigger-autosave"`. Self-rendering UI → `clay="no-dirty"`.
 
 `no-trigger-autosave` vs `no-dirty`: ask whether a change in that region is work you
-would be upset to lose. If yes, `no-trigger-autosave` (waits for your save, warns on
-close, sync will not overwrite it). If the region renders itself from other content,
-`no-dirty` (a sync frame may replace it with no warning). A region that mixes both wants
-two elements, one of each.
+would be upset to lose. If yes, `no-trigger-autosave` (waits for a save, warns on
+close, merged like ordinary content). If the region renders itself from other content,
+`no-dirty` (a sync frame replaces it). A region that mixes both wants two elements, one
+of each. Known issue in 1.8.2: when a frame replaces a `no-dirty` region this tab had also
+changed, while the tab holds an unsaved edit elsewhere, the replacement is recorded in `clay.conflicts` (`detail: "remote-wins"`) and
+raises the conflict notice. Until it is fixed, acknowledge those records on
+`clay:sync-applied` with `{reason: "reconciled"}`.
 
 ## Events (on document)
 
 - `clay:ready` — clayjs finished booting; detail `{clay}`.
 - `clay:save-saving` — a save has been in flight for 500ms (fast saves skip straight to
-  the result); detail `{msg, timestamp}`.
-- `clay:save-saved` — the server confirmed the write; detail `{msg, timestamp}`.
-- `clay:save-error` — the server answered with a problem; detail `{msg, timestamp}`.
+  the result); detail `{msg, msgType, timestamp}`, with `msgType` empty.
+- `clay:save-saved` — the server confirmed the write; detail `{msg, msgType, timestamp}`.
+- `clay:save-error` — the server answered with a problem; detail
+  `{msg, msgType, timestamp}`, with `msgType` empty in 1.8.2. A failed save is not
+  retried until the next edit or the browser's `online` event.
 - `clay:save-offline` — the browser is offline (clayjs re-saves when the connection
-  returns); detail `{msg, timestamp}`.
+  returns); detail `{msg, msgType, timestamp}`, with `msgType` empty.
 - `clay:dirty` — the page holds work no save has written: an edit in the DOM, or a
   `[persist]` control whose live value differs from what the file carries. It follows DOM
   mutations and user input; a script setting a `[persist]` control's value programmatically
@@ -422,7 +455,8 @@ token variant, `POST /_/save/{token}`, read from `<html savetoken>`.
   `{blob, dataURL, width, height}` or `null` if cancelled. The CMS uses it for any
   image field marked `data-hcms-crop="1:1"` (aspects: `1:1`, `16:9`, `free` on the
   attribute; a plain number in code).
-- `upload` (ask by name) — a file picker that gets the chosen file into the page.
+- `upload` (ask by name) — `clay.upload(file)` posts a file you supply to the host and
+  resolves with its URL. It is not a picker; see `clay.upload` above.
 - `wire` (`?plugins=wire,sync`) — a per-file control channel between the page and a
   process running in the user's terminal (see `htmlclay wire serve <file> -- <cmd>`).
   The page sends a request, the process answers with progress, and the process edits
@@ -580,16 +614,27 @@ token variant, `POST /_/save/{token}`, read from `<html savetoken>`.
     and `width` (default `600px`), register `onYes(fn)` / `onNo(fn)`, then `open()`.
     Every setting resets after the modal closes.
 - `clay-events.js` — HTML attributes for the events HTML forgot: `onclickaway`,
-  `onclickchildren`, `onrender`, `onmutation`, `onclone`.
+  `onclickchildren`, `onrender`, `onmutation`, `onglobalmutation` (alias
+  `onpagemutation`), `onclone`. A mutation handler that writes into what it watches runs
+  forever, even when it writes the same text: guard it,
+  `if (this.textContent !== n) this.textContent = n`.
 - `clay-options.js` — declarative show/hide: an ancestor carries a state attribute
-  (`view="kanban"`), descendants opt in or out with `option:view` / `option-not:view`.
+  (`view="kanban"`), descendants opt in or out with `show-when:view` (alias `option:view`),
+  `hide-when:view` or `option-not:view`. Any ancestor matches, not only the nearest.
 - `clay-dom.js` — small prototype helpers for DOM-first apps: `el.nearest.menu`,
   `el.val.title`, `el.exec.action()` (getter proxies reading the nearest element with
-  that attribute or class), and `el.cycle(1, "state")`.
+  that attribute or class; "nearest" searches siblings and cousins too, so in a list it
+  can reach a neighbouring record), and `el.cycleAttr(1, "data-status")`, which sets the
+  attribute to the next value used anywhere in the document, in alphabetical order.
+  `el.cycle(order, attr)` is different: it replaces the element with a copy of another
+  element carrying `attr`. `clay.dom.createContentView(root, {capability})` returns an
+  inert view of a subtree with a region capability filtered out (`data` drops `no-data`
+  and `editor-ui`); `clay.dom.cleanContentClone(node, opts)` returns one cleaned clone.
 - `all.js` — a chainable wrapper over querySelectorAll:
   `All(".card").css({ opacity: 1 }).onclick(e => …)`. Events are property-form
   (`.onclick`, `.oninput`); classes go through `.classList`. Zero dependencies.
-- `clay-utils.js` — the small stuff: throttle, debounce, cookies, slugify.
+- `clay-utils.js` — the small stuff: throttle, debounce, `cookie.get` / `cookie.remove`,
+  slugify, copyToClipboard.
 - `clay-data.js` — the live page as JSON. `clay.extractData(rules?)` reads the live DOM.
   `clay.applyData(values, {rules})` validates the complete change, then changes the live
   DOM atomically. It writes content only. Scripts, styles, event handlers, executable
