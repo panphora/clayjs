@@ -16,7 +16,7 @@ export async function boot(base, params, readyResolve) {
                                                        // would otherwise observe null
 
   const editMode = await MODULES["core/is-edit-mode.js"]();
-  const { isEditMode, isOwner } = editMode;
+  const { isEditMode, isOwner, siteVisibility } = editMode;
 
   // richclay's vendor build detects edit mode via this legacy global; set it
   // before any plugin import so its autoInit sees the right value. Overwrite
@@ -33,7 +33,7 @@ export async function boot(base, params, readyResolve) {
     loaded[path] = await MODULES[path](); // sequential: order is load-bearing
   }
 
-  assembleCore(loaded, { isEditMode, isOwner }, regionPolicy); // window.clay MUST be assembled
+  assembleCore(loaded, { isEditMode, isOwner, siteVisibility }, regionPolicy); // window.clay MUST be assembled
                                                                // before any plugin import
 
   for (const path of plan.plugins) {
@@ -65,7 +65,7 @@ export async function boot(base, params, readyResolve) {
   document.dispatchEvent(new CustomEvent("clay:ready", { detail: { clay: window.clay } }));
 }
 
-function assembleCore(loaded, { isEditMode, isOwner }, regionPolicy) {
+function assembleCore(loaded, { isEditMode, isOwner, siteVisibility }, regionPolicy) {
   const clay = window.clay;
 
   const mutation = loaded["lib/mutation.js"];
@@ -75,6 +75,7 @@ function assembleCore(loaded, { isEditMode, isOwner }, regionPolicy) {
     toggleEditMode: editModeMod.toggleEditMode,
     isEditMode,
     isOwner,
+    siteVisibility,
     Mutation: mutation.default,
     region: regionPolicy.windowRegionShape,
   });

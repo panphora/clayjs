@@ -106,6 +106,7 @@
       <tr><td><code>clay.*</code> from <code>clay.js</code></td><td>The everyday surface, above</td><td>Stable</td></tr>
       <tr><td><code>clay.*</code> from a satellite</td><td>Opt-in, one script tag each: <code>clay-ui</code>, <code>clay-utils</code>, <code>clay-dom</code>, <code>clay-events</code>, <code>clay-options</code>, <code>clay-internals</code>, <code>clay-data</code></td><td>Stable</td></tr>
       <tr><td>Anything else under <code>src/</code></td><td>Reachable by direct import, because <code>src/</code> ships to npm and the CDN</td><td><strong>May change in any release</strong></td></tr>
+      <tr><td><code>clay.siteVisibility</code></td><td>How the host serves this site: <code>"private"</code>, <code>"public"</code>, or <code>null</code> when the host says nothing. Read once, at boot.</td></tr>
     </table>
     <p class="small">The contract starts at 1.0.0: no name in the first two tiers changes without a major version. Everything in the third tier works today and is welcome to be used, but it is not a promise.</p>
   </section>

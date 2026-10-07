@@ -128,6 +128,8 @@ itself, with no network.
 - `clay.morph(oldEl, newEl)` — content-based DOM morphing engine: morphs `oldEl` in
   place to match `newEl`, preserving focus, inputs, and animations (sync plugin).
   Its signature is unchanged on hyper-morph 1.0.
+- `clay.siteVisibility` — `"private"` or `"public"` when the host says how it serves this
+  site (hyperclay.com tells the owner's tab), otherwise `null`. Read once, at boot.
 - `clay.undo` — document-wide undo singleton: `clay.undo.undo()` / `clay.undo.redo()`
   (undo plugin).
 - `clay.cms` — the content panel: `clay.cms.open()` (cms plugin).

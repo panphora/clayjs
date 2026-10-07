@@ -1,6 +1,6 @@
 import cookie from "../lib/cookie.js";
 import query from "../lib/query.js";
-import { hasSaveToken, servedStaleToken } from "./host-attrs.js";
+import { hasSaveToken, servedStaleToken, servedSiteVisibility } from "./host-attrs.js";
 
 // Edit-mode precedence: an explicit ?editmode=true|false URL param wins, then an
 // authored `viewonly` attribute on <html> (a tool page that must never save its
@@ -47,7 +47,10 @@ const isEditMode = query.editmode
 
 const isOwner = Boolean(cookie.get("isAdminOfCurrentResource"));
 
+const siteVisibility = servedSiteVisibility;
+
 export {
   isEditMode,
-  isOwner
+  isOwner,
+  siteVisibility
 }

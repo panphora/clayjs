@@ -74,7 +74,12 @@ export const HOST_IDENTITY_ATTRS = ["documentid", "htmlclayid"];
 // Kept out of SAVE_TOKEN_ATTRS on purpose: host-attrs.js returns the first name it
 // finds in that list straight into the save URL, and a version stamp is not a
 // credential.
-export const HOST_RESPONSE_ATTRS = ["documentetag"];
+//
+// `sitevisibility` is the host telling the owner's tab whether this site is served
+// privately or publicly ("private" | "public"). It describes the response, not the
+// file: the same bytes are private today and public tomorrow, so it must never be
+// written to disk, and a peer tab's copy says nothing about what this tab was served.
+export const HOST_RESPONSE_ATTRS = ["documentetag", "sitevisibility"];
 
 // What a host may have injected, and therefore what has to be stripped before a save
 // and kept out of an incoming morph. Wider than what is READ, on purpose: the old token

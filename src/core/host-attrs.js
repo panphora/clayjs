@@ -23,6 +23,17 @@ export const servedDocumentEtag =
     ? null
     : document.documentElement.getAttribute("documentetag") || null;
 
+// Whether the host serves this site privately, captured ONCE, for the same reason as
+// the etag above: it describes this response, and a morph may later rewrite the root.
+// null when the host said nothing (HTML Clay, Hyperclay Local, a downloaded copy) or
+// said something this library does not recognize.
+const SITE_VISIBILITIES = new Set(["private", "public"]);
+export const servedSiteVisibility = (() => {
+  if (typeof document === "undefined") return null;
+  const value = document.documentElement.getAttribute("sitevisibility");
+  return SITE_VISIBILITIES.has(value) ? value : null;
+})();
+
 let warnedAboutLegacyToken = false;
 
 /**

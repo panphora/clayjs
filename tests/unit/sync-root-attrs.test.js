@@ -14,12 +14,14 @@ import { HyperMorph } from "../../src/vendor/hyper-morph.vendor.js";
 // documentetag is the host's version stamp for THIS response. Not a token, not a
 // durable identity: it names a revision, so a peer's copy is a claim about bytes this
 // tab never received and this tab's copy must never travel out.
+// sitevisibility is the host's private/public answer for THIS response.
 const TAB_LOCAL = [
   "savetoken",
   "htmlclaytoken",
   "documentid",
   "htmlclayid",
   "documentetag",
+  "sitevisibility",
   "savestatus",
   "editmode",
   "pageowner",
@@ -35,6 +37,7 @@ function makeClone() {
   clone.setAttribute("documentid", "durable-file-uuid");
   clone.setAttribute("htmlclayid", "pre-spec-file-uuid");
   clone.setAttribute("documentetag", "response-stamp-abc123");
+  clone.setAttribute("sitevisibility", "private");
   clone.setAttribute("savestatus", "unsaved");
   clone.setAttribute("editmode", "true");
   clone.setAttribute("pageowner", "true");
