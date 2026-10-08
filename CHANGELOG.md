@@ -1,5 +1,30 @@
 # Changelog
 
+## [1.9.0] - 2026-10-08
+
+### Added
+- Theme rules in ClayJS's shared controls
+- Theme configuration for ClayJS's own UI
+- People plugin can rename a name chosen in this browser
+- People plugin with clay.me, clay.people and clay.author
+- Browser test for conflict lineage protection
+- App-building guide, visual guide and example apps, with a Markdown copy of every doc page
+- clay.siteVisibility, a tab-local host attribute read once at boot
+
+### Changed
+- Dialogs and the name prompt now use the page's theme
+- Guide now documents that uploads come back as /_/uploads/ host paths
+- Dialog buttons are 44px tall on phones
+- People plugin refuses email addresses as names and forgets a name on request
+- ClayJS releases now run through the test box
+
+### Fixed
+- Sortable keeps authored attributes
+- Sortable strips drag residue from snapshots
+- Uploads no longer happen when the document has no upload block
+
+
+
 ## [1.8.2] - 2026-10-07
 
 ### Changed
