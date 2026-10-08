@@ -143,6 +143,44 @@ test("add() upserts by id and refuses a person it cannot name", async () => {
   expect(() => mod.people.add({ id: A.id, name: "" })).toThrow();
 });
 
+test("remove() forgets a person the document no longer names", async () => {
+  const mod = await load();
+  mod.people.add(A);
+  expect(mod.people.list().map((p) => p.id)).toEqual([A.id]);
+
+  mod.people.remove(A.id);
+
+  expect(mod.people.list()).toEqual([]);
+  expect(dataFor(A.id)).toBeNull();
+});
+
+test("an email address is never a name", async () => {
+  const mod = await load();
+  const li = document.createElement("li");
+  document.body.append(li);
+
+  const pending = mod.author(li);
+  await tick();
+  const input = dialog().querySelector("input");
+  input.value = "ada@example.test";
+  button("Continue").click();
+
+  expect(dialog()).not.toBeNull();
+  expect(dialog().querySelector("p").textContent).toBe("Use a name, not an email address. Everyone who can read this page will see it.");
+  expect(window.localStorage.getItem("clay:people:me")).toBeNull();
+  expect(li.hasAttribute("data-by")).toBe(false);
+  expect(document.querySelector("[clay-people]")).toBeNull();
+
+  input.value = "Ada Chen";
+  input.dispatchEvent(new Event("input"));
+  expect(dialog().querySelector("p").textContent).toBe("Saved in this browser. Everyone who can read this page will see it.");
+
+  button("Continue").click();
+
+  expect((await pending).name).toBe("Ada Chen");
+  expect(() => mod.people.add({ id: "abcdefgh", name: "a@b.co" })).toThrow(TypeError);
+});
+
 test("a name is text, never markup", async () => {
   const mod = await load();
   const markup = "<img src=x onerror=alert(1)>";
@@ -329,6 +367,34 @@ test("an author() in the same task opens no second prompt", async () => {
   expect(liA.dataset.by).toBe(liB.dataset.by);
   expect(liB.dataset.by).toBe(liC.dataset.by);
   expect(document.querySelectorAll("[data-clay-modal]").length).toBe(0);
+});
+
+test("a prompt whose element was removed from the page is asked again", async () => {
+  const mod = await load();
+  const liA = document.createElement("li");
+  const liB = document.createElement("li");
+  document.body.append(liA, liB);
+
+  const first = mod.author(liA);
+  await tick();
+  const dead = dialog();
+  expect(dead).not.toBeNull();
+  dead.remove();
+
+  const second = mod.author(liB);
+  await tick();
+
+  expect(dialog()).not.toBeNull();
+  expect(dialog()).not.toBe(dead);
+  expect(await first).toBeNull();
+
+  dialog().querySelector("input").value = "Grace Hopper";
+  button("Continue").click();
+
+  const mine = await second;
+  expect(mine.name).toBe("Grace Hopper");
+  expect(liB.dataset.by).toBe(mine.id);
+  expect(liA.hasAttribute("data-by")).toBe(false);
 });
 
 // Every test leaves a plugin instance watching document.body, so the file ends with an

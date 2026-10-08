@@ -26,6 +26,8 @@ const EDITOR_UI_SELECTOR = capabilitySelector('history');
 // mere click would change the file. Record them when an item is chosen and put them back after.
 const RUNTIME_ATTRS = ['draggable', 'style'];
 
+const pressed = new Set();
+
 function recordRuntimeAttrs(item) {
   return [item, ...item.querySelectorAll('*')].map(el => [el, RUNTIME_ATTRS.map(name => el.getAttribute(name))]);
 }
@@ -120,6 +122,7 @@ function makeSortable(sortableElem, Sortable) {
   const restoreSoon = () => {
     const pending = recorded;
     recorded = null;
+    pressed.delete(pending);
     ENDS.forEach(type => document.removeEventListener(type, restoreSoon, true));
     if (pending) setTimeout(() => restoreRuntimeAttrs(pending), 0);
   };
@@ -128,6 +131,7 @@ function makeSortable(sortableElem, Sortable) {
     while (item && item.parentElement !== sortableElem) item = item.parentElement;
     if (!item || recorded) return;
     recorded = recordRuntimeAttrs(item);
+    pressed.add(recorded);
     ENDS.forEach(type => document.addEventListener(type, restoreSoon, true));
   }, true);
   options.onUnchoose = restoreSoon;
@@ -146,13 +150,21 @@ async function init() {
 
   // A save taken mid-drag would otherwise write Sortable's classes and attributes into the
   // file. Strip them from the snapshot clone only, so the live drag carries on untouched.
-  onSnapshot((root) => {
+  onSnapshot((root, { original }) => {
     for (const el of root.querySelectorAll("[sortable] .sortable-chosen, [sortable] .sortable-ghost, [sortable] .sortable-drag")) {
       el.classList.remove("sortable-chosen", "sortable-ghost", "sortable-drag");
       if (!el.classList.length) el.removeAttribute("class");
     }
-    for (const el of root.querySelectorAll('[sortable] [draggable="false"], [sortable] [draggable="true"]')) el.removeAttribute("draggable");
-    for (const el of root.querySelectorAll('[sortable] [style=""]')) el.removeAttribute("style");
+    if (!pressed.size) return;
+    const before = new Map();
+    for (const recording of pressed) for (const [el, values] of recording) before.set(el, values);
+    for (const el of root.querySelectorAll("[sortable] *")) {
+      const values = before.get(original(el));
+      if (!values) continue;
+      RUNTIME_ATTRS.forEach((name, i) => {
+        if (values[i] === null) el.removeAttribute(name); else el.setAttribute(name, values[i]);
+      });
+    }
   });
 
   // Set up sortable on page load

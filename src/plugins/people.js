@@ -6,6 +6,7 @@
  *   clay.people.list()             the people this document names
  *   await clay.people.available()  the host's team for a picker, or null
  *   clay.people.add(person)        record a person in the document; returns the record
+ *   clay.people.remove(id)         forget a person the document no longer names
  *   await clay.author(el, attr?)   stamp el with my id (asks my name once if needed)
  *   event clay:people              the viewer, the team or the registry changed
  *
@@ -27,19 +28,22 @@ const STORE = "clay:people:me";
 const BOOT_WAIT_MS = 2000;
 const COLORS = 8;
 const MAX_NAME = 120;
+const EMAIL = /\S+@\S+\.\S+/;
 
 let host = { supports: false, me: null, members: null };
 let outcome = null;
 let local;
 let cache = null;
 let asking = null;
+let askingRoot = null;
+let cancelAsking = null;
 let lastRegistry = "";
 
 function clean(person) {
   if (!person || typeof person !== "object") return null;
   const id = typeof person.id === "string" ? person.id : "";
   const name = typeof person.name === "string" ? person.name.trim().replace(/\s+/g, " ") : "";
-  if (!ID.test(id) || !name || name.length > MAX_NAME) return null;
+  if (!ID.test(id) || !name || name.length > MAX_NAME || EMAIL.test(name)) return null;
   return { id, name };
 }
 
@@ -181,6 +185,13 @@ function add(person) {
   return record(p);
 }
 
+// Forget a person the document no longer names, so their name stops travelling with it.
+function remove(id) {
+  const key = String(id ?? "");
+  for (const el of entries()) if (el.getAttribute("value") === key) el.remove();
+  cache = null;
+}
+
 function unavailable() {
   return Object.assign(new Error("Can't reach the host to check who you are. Try again in a moment."), { code: "people-unavailable" });
 }
@@ -209,11 +220,14 @@ export async function author(el, attr = "data-by") {
 }
 
 function askName() {
-  if (asking) return asking;
+  if (asking && askingRoot?.isConnected) return asking;
+  if (asking) cancelAsking();
   asking = new Promise((resolve) => {
     const { root, overlay, panel, heading, body, footer, close } = bevelDialog({
       zIndex: "2147483001", width: "420px", closable: true, titled: true,
     });
+    askingRoot = root;
+    cancelAsking = () => finish(null);
     heading.textContent = "What name should appear on your changes?";
     panel.setAttribute("aria-label", "Your name");
 
@@ -223,6 +237,7 @@ function askName() {
     input.autocomplete = "name";
     const hint = bevelText("p", ["display:block", "margin:10px 0 0", "font-size:13px", "opacity:.8"],
       "Saved in this browser. Everyone who can read this page will see it.");
+    const hintText = hint.textContent;
     body.append(input, hint);
 
     const known = list().slice(0, 8);
@@ -245,8 +260,16 @@ function askName() {
         input.focus();
         return;
       }
+      if (EMAIL.test(name)) {
+        hint.textContent = "Use a name, not an email address. Everyone who can read this page will see it.";
+        input.focus();
+        return;
+      }
       finish({ id: mint(), name: name.slice(0, MAX_NAME) });
     };
+    input.addEventListener("input", () => {
+      if (hint.textContent !== hintText) hint.textContent = hintText;
+    });
 
     panel.addEventListener("submit", (event) => {
       event.preventDefault();
@@ -287,6 +310,8 @@ function askName() {
       // instead of opening a second prompt.
       if (person) writeLocal(person);
       asking = null;
+      askingRoot = null;
+      cancelAsking = null;
       resolve(person);
     }
     dismissOf.set(root, () => finish(null));
@@ -352,7 +377,7 @@ async function init() {
   await Promise.race([first, new Promise((resolve) => setTimeout(resolve, BOOT_WAIT_MS))]);
 }
 
-export const people = Object.freeze({ get, list, available, add });
+export const people = Object.freeze({ get, list, available, add, remove });
 
 export const ready = init();
 
