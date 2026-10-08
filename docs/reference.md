@@ -12,8 +12,8 @@ at those URLs. clayjs is MIT-0 licensed. npm builds for bundlers: @panphora/clay
 Building a whole app (inline editing, controls, sync, undo, derived values)? Read the
 guide, https://clayjs.com/guide.md: the model, a complete starter file, architecture,
 recipes, limits and a trap index, with four tested example apps. Every page on
-clayjs.com also has a Markdown copy at the same path plus `.md` (https://clayjs.com/docs.md);
-the list is at https://clayjs.com/docs#all-pages.
+clayjs.com also has a Markdown copy at the same path plus `.md`; https://clayjs.com/docs.md
+lists the reference pages.
 
 ## The one-paragraph integration
 
@@ -80,6 +80,12 @@ itself, with no network.
 - `clay.ready` — Promise that resolves once clayjs has booted (core loaded, plugins
   attached). In inline scripts, `await clay.ready` before touching anything else.
   `clay:ready` fires on `document` at the same moment.
+- `clay.theme(options)` — theme the UI ClayJS draws (dialogs and the people name prompt).
+  `options` is `{ auto, colorScheme, tokens, parts }`, the same shape as `window.clayTheme`
+  set before the loader. `clay.theme(false)` keeps the exact Bevel look, `clay.theme(null)`
+  restores the default (the page's font and solid colours over Bevel), `clay.theme()`
+  returns the current configuration. Invalid options throw a `TypeError` and keep the
+  previous theme. Applies to the next surface drawn. See `docs/injected-ui.md`, "Page themes".
 - `clay.save()` — snapshot the page and save it. Skips when nothing changed. Returns
   `Promise<{ok, msg, msgType, code, etag}>`; check `ok`. `msgType` is `success`,
   `error`, `skipped` (nothing was sent), `conflict` (HTTP 412, see `clay:save-conflict`;
@@ -154,17 +160,23 @@ itself, with no network.
   `timeout`, `aborted`, `network`. Events: `clay:upload-start`, `clay:upload-progress`, `clay:upload-done`,
   `clay:upload-error` (upload plugin).
 - `clay.me` — the person editing: `{id, name, initials, color}` or `null` (people plugin).
-  The host names you through `/_/meta`; with no host, it is the name this browser gave
-  the first time you authored something. `color` is an index from 0 to 7 for the app's
+  The host names you through `/_/meta`: hyperclay.com from your account, HTML Clay and
+  Hyperclay Local from their Profile setting when you turn it on (Local uses your
+  Hyperclay account while signed in). Otherwise it is the name this browser gave the
+  first time you authored something. `color` is an index from 0 to 7 for the app's
   own palette. Attribution, never a permission check.
 - `clay.people` — `get(id)` (always a record, "Unknown person" for an id nobody named),
   `list()` (the people this document names), `await available()` (the host's team for
   a picker, refreshed, or `null`), `add(person)` (record a person in the document's
-  `<div clay-people hidden>` registry and return the record) (people plugin).
+  `<div clay-people hidden>` registry and return the record), `canRename()` and
+  `rename(name)` (change the name this browser chose, keeping its id; only when the host
+  names nobody, since a host's name is changed in the host) (people plugin).
 - `clay.author(el, attr = "data-by")` — stamp `el` with your id and record you in the
   registry. With no host it asks your name once, remembered in this browser. Resolves
   your record, `null` if you cancel, and rejects with `code: "people-unavailable"` when
-  the host failed to answer (offer a retry). Edit mode only (people plugin).
+  the host failed to answer (offer a retry). On a host that names people it asks the
+  host again first, so a sign-out or rename in the app is never stamped with the old
+  name. Edit mode only (people plugin).
 - `clay.wire` — per-file control channel to a process on the user's machine: `send`,
   `cancel`, `get`, `list`, `isBusy`, `on` (wire plugin).
 - `clay.aiEdit` — the AI comment box: `clay.aiEdit.init()` and

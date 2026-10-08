@@ -1,18 +1,20 @@
-import themodal from "./modal.js";
+import themodal, { SURFACE_THEME } from "./modal.js";
 import onDomReady from "../lib/dom-ready.js";
 import toast from "./toast.js";
 import copyToClipboard from "../utils/copy-to-clipboard.js";
 import { bevelBox, bevelButton, bevelInput, bevelText } from "./bevel-controls.js";
 import { TOKENS, FONT_SANS, FONT_MONO } from "./bevel.js";
+import { resolveTheme } from "./theme.js";
 
 // Caller markup (promptText, extraContent, tell's paragraphs) goes in as it is: those
 // are markup by design, and callers pass elements through them. Only the frame around
 // it is ClayJS's to style. The prompt is the dialog's title, as in the dashboard.
 function createModal(promptText, yesCallback, extraContent = "", includeInput = false, defaultValue = "", yesLabel = "OK") {
-  const content = bevelBox("div", ["display:flex", "flex-direction:column", "gap:14px", `font:14.5px/1.55 ${FONT_SANS}`, `color:${TOKENS["ink-2"]}`]);
+  const theme = resolveTheme();
+  const content = bevelBox("div", ["display:flex", "flex-direction:column", "gap:14px", `font:14.5px/1.55 ${FONT_SANS}`, `color:${TOKENS["ink-2"]}`], { theme, parts: ["dialog.content"], role: "text" });
   let input = null;
   if (includeInput) {
-    input = bevelInput("input", { rules: ["display:block", "width:100%", "margin:0"] });
+    input = bevelInput("input", { rules: ["display:block", "width:100%", "margin:0"], theme, parts: ["dialog.input"] });
     input.setAttribute("value", String(defaultValue));
     input.required = true;
     content.append(input);
@@ -22,6 +24,7 @@ function createModal(promptText, yesCallback, extraContent = "", includeInput = 
   themodal.title = promptText;
   themodal.html = includeInput || extraContent ? content : "";
   themodal.width = "440px";
+  themodal[SURFACE_THEME] = theme;
   themodal.closeHtml = "x";
   themodal.no = "Cancel";
   themodal.yes = yesLabel;
@@ -95,9 +98,10 @@ export function consent(promptText, yesCallback, extraContent = "") {
  * @returns {Promise} Resolves when user confirms, rejects on close
  */
 export function tell(promptText, ...content) {
-  const box = bevelBox("div", ["display:flex", "flex-direction:column", "gap:12px"]);
+  const theme = resolveTheme();
+  const box = bevelBox("div", ["display:flex", "flex-direction:column", "gap:12px"], { theme, parts: ["dialog.content"] });
   for (const c of content) {
-    const paragraph = bevelText("div", [`font:14.5px/1.55 ${FONT_SANS}`, `color:${TOKENS["ink-2"]}`, "overflow-wrap:anywhere"]);
+    const paragraph = bevelText("div", [`font:14.5px/1.55 ${FONT_SANS}`, `color:${TOKENS["ink-2"]}`, "overflow-wrap:anywhere"], undefined, { theme });
     paragraph.innerHTML = c;
     box.append(paragraph);
   }
@@ -105,6 +109,7 @@ export function tell(promptText, ...content) {
   themodal.title = promptText;
   themodal.html = content.length ? box : "";
   themodal.width = "470px";
+  themodal[SURFACE_THEME] = theme;
   themodal.closeHtml = "x";
   themodal.yes = "OK";
 
@@ -136,17 +141,19 @@ export function tell(promptText, ...content) {
  *   Callers style their own container.
  */
 export function snippet(title, content, extraContent = '') {
-  const box = bevelBox("div", ["display:block"]);
+  const theme = resolveTheme();
+  const box = bevelBox("div", ["display:block"], { theme, parts: ["dialog.content"] });
   const well = bevelBox("div", [
     "display:block", "max-width:100%", "overflow-x:auto", "margin:0 0 14px", "padding:14px 16px",
     `background:${TOKENS.sunk}`, `border:1px solid ${TOKENS["line-2"]}`,
-  ]);
-  const pre = bevelText("pre", ["display:block", "margin:0", "white-space:nowrap", `font:13px/1.6 ${FONT_MONO}`]);
+  ], { theme, parts: ["dialog.well"], role: "well" });
+  const pre = bevelText("pre", ["display:block", "margin:0", "white-space:nowrap", `font:13px/1.6 ${FONT_MONO}`], undefined, { theme, parts: ["dialog.code"], role: "code" });
   pre.innerHTML = content;
   well.append(pre);
   const copy = bevelButton("Copy", {
     small: true,
     extra: ["margin:0 0 14px"],
+    theme, parts: ["dialog.button", "dialog.copyButton"], labelParts: ["dialog.buttonLabel"],
     onClick: () => {
       copyToClipboard(content);
       toast('Copied to clipboard!', 'success');
@@ -158,6 +165,7 @@ export function snippet(title, content, extraContent = '') {
   themodal.title = title;
   themodal.html = box;
   themodal.width = "540px";
+  themodal[SURFACE_THEME] = theme;
   themodal.closeHtml = "x";
   themodal.yes = '';
 

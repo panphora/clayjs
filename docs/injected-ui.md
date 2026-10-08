@@ -49,6 +49,45 @@ Never edit `src/ui/bevel.js` by hand: the next build overwrites it. To add a rec
 an entry to `scripts/bevel-manifest.mjs`, run `npm run build:bevel`, and add a test to
 `tests/unit/bevel-subset.test.js`.
 
+## Page themes
+
+A page can restyle the UI ClayJS draws without weakening the rule above. `src/ui/theme.js`
+holds the configuration (`window.clayTheme`, `clay.theme()`); `resolveTheme()` captures one
+surface's theme when that surface is built, and `src/ui/theme-parts.js` turns it into
+declarations that the controls append after their Bevel recipe, still inline and
+`!important`.
+
+Each value resolves in this order: explicit `tokens`, then `--clay-ui-*` custom properties
+read from `body`, then a sample of the page (`body`'s font family, and an opaque background
+with its text colour from `body` or the root; nothing from a translucent or image-backed
+background, a colour it cannot read, or a text colour with less than 3:1 contrast against
+it; a font list made only of the browser's default serif counts as no font), then the Bevel
+declaration. An absent token keeps Bevel's declaration for that part, so a theme can change
+one thing.
+
+When the text and surface colours are known and no `accent` is given, the primary
+button takes the text colour, with the surface colour on it.
+
+Order inside a control, every time it repaints: reset and Bevel recipe, the control's own
+layout, theme tokens for its role and state, then the page's parts (general to specific,
+each `base` then `hover`, `active`, `focus`, `disabled`), then what behaviour owns: forced
+colours, the 44px floor on narrow screens, and pinned values such as visibility.
+
+Part names (`data-clay-part` on each element):
+
+| Group | Names |
+|---|---|
+| Controls | `button`, `button.default`, `button.primary`, `button.quiet`, `button.danger`, `buttonLabel`, `input`, `text`, `mutedText`, `icon`, `well`, `close` |
+| Dialogs | `dialog.` + `root`, `overlay`, `panel`, `header`, `title`, `body`, `footer`, `close`, `closeIcon`, `content`, `input`, `hint`, `actions`, `button`, `buttonLabel`, `well`, `code`, `copyButton` |
+| Name prompt | `people.` + any dialog suffix, and `people.choices`, `people.choice`, `people.choiceLabel` |
+| Crop, toasts, notices | Reserved: `crop.*`, `toast.*`, `notice.*`, `conflict.*`, `section.*`, `staleHost.*` are accepted but not drawn with a theme yet |
+
+The colour scheme of a themed surface is the root's declared `color-scheme`, else the page's
+`<meta name="color-scheme">`, else light or dark from the surface colour, else `"light dark"`.
+
+`clay.theme(false)` (or `window.clayTheme = false`) bypasses all of this: every control
+writes exactly its Bevel declarations, as before theming existed.
+
 ## Controls
 
 `src/ui/bevel-controls.js` builds the elements.

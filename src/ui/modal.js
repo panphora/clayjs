@@ -1,6 +1,11 @@
 import { bevelButton, setShown } from "./bevel-controls.js";
 import { set } from "../lib/hostile-css.js";
 import { bevelDialog, dismissOf } from "./bevel-dialog.js";
+import { resolveTheme } from "./theme.js";
+
+// The theme one open() draws with. Internal: only dialogs.js sets it, so no page can
+// leave a value behind that makes the next open() throw.
+export const SURFACE_THEME = Symbol("clay.surfaceTheme");
 
 /*
 
@@ -299,6 +304,7 @@ const themodal = (() => {
   let closeHtml = "";
   let title = "";
   let width = "";
+  let theme;
 
   let enableClickOutsideCloses = true;
   let disableScroll = true;
@@ -347,15 +353,17 @@ const themodal = (() => {
       // Expose this modal's dismiss so a later open()/close can settle it.
       this._dismiss = dismiss;
 
-      const shell = bevelDialog({ zIndex, closable: !!closeHtml, titled: !!title, ...(width ? { width } : {}) });
+      const surfaceTheme = theme === undefined ? resolveTheme() : theme;
+      const shell = bevelDialog({ zIndex, closable: !!closeHtml, titled: !!title, ...(width ? { width } : {}), theme: surfaceTheme });
       const modalRootElem = shell.root;
       const modalOverlayElem = shell.overlay;
       const modalContainerElem = shell.panel;
       const modalContentElem = shell.body;
       const modalButtonsElem = shell.footer;
       const modalCloseElem = shell.close;
-      const modalNoElem = bevelButton('');
-      const modalYesElem = bevelButton('', { variant: 'primary' });
+      const buttonParts = { theme: surfaceTheme, parts: ['dialog.button'], labelParts: ['dialog.buttonLabel'] };
+      const modalNoElem = bevelButton('', buttonParts);
+      const modalYesElem = bevelButton('', { variant: 'primary', ...buttonParts });
       modalYesElem.type = 'submit';
       modalButtonsElem.append(modalNoElem, modalYesElem);
 
@@ -468,6 +476,7 @@ const themodal = (() => {
           closeHtml = "";
           title = "";
           width = "";
+          theme = undefined;
 
           // reset to defaults
           enableClickOutsideCloses = true;
@@ -527,6 +536,12 @@ const themodal = (() => {
     },
     set width(newVal) {
       width = newVal;
+    },
+    get [SURFACE_THEME]() {
+      return theme;
+    },
+    set [SURFACE_THEME](newVal) {
+      theme = newVal;
     },
     get yes() {
       return yes;

@@ -267,6 +267,29 @@ Satellites do not wait for `clay.ready` and work without `clay.js` at all, inclu
 
 You can set configuration before the tag, and the loader merges into it: `window.clay = { saveToast: true }`.
 
+### 3.5 Theming ClayJS's own UI
+
+ClayJS draws a few things on your page: dialogs (`clay.ask`, `clay.confirm`, `clay.tell`, `clay.snippet`, `clay.modal`) and the people plugin's name prompt. By default they take your page's font, and on a page with a plain solid background, its background and text colours. Everything else comes from ClayJS's own look, Bevel.
+
+To match them to your design, set `window.clayTheme` before the loader tag:
+
+```html
+<script>
+window.clayTheme = {
+  tokens: { font: "Inter, sans-serif", text: "#263d4e", surface: "#ffffff", border: "#e0e7ee", accent: "#0c2635", accentText: "#ffffff", radius: "8px" },
+  parts: { "dialog.title": { base: { "font-size": "18px", "font-weight": "600" } } }
+};
+</script>
+<script src="https://clayjs.com/v1/clay.js?plugins=people"></script>
+```
+
+- **Tokens** set the basics: `font`, `headingFont`, `text`, `mutedText`, `background`, `surface`, `border`, `accent`, `accentText`, `danger`, `dangerText`, `success`, `warning`, `radius`, `shadow`, `overlay`, `spacing`, `buttonHeight`. Each is a CSS value, and `var(--your-variable, fallback)` works. A page can also set a token in CSS as `--clay-ui-<name>` (`--clay-ui-accent-text` for `accentText`). `spacing` is one length, such as `20px`.
+- **Parts** set anything else. Every element ClayJS draws has a stable name, such as `dialog.panel`, `dialog.title`, `button.primary` or `people.choice`, and each takes `base`, `hover`, `active`, `focus` and `disabled` declarations. A part names its surface, so `people.title` overrides `dialog.title` in the name prompt only. The names are in `data-clay-part` on each element, and the full list is in `docs/injected-ui.md`.
+- A value wins in this order: `tokens`, then `--clay-ui-*` properties, then the page's sampled font and colours, then Bevel.
+- `window.clayTheme = false` keeps the exact Bevel look. After loading, `clay.theme(options)` replaces the theme, `clay.theme(false)` and `clay.theme(null)` restore Bevel or the default, and `clay.theme()` returns the current one. A change affects the next dialog, not one already open.
+
+Your stylesheet still cannot reach these elements: every declaration is inline and `!important`, so a stray `button { ... }` rule never breaks a prompt. On a phone, dialog buttons stay at least 44px tall whatever the theme asks for.
+
 ---
 
 ## 4. Edit mode and view mode

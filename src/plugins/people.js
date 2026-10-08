@@ -24,6 +24,7 @@ import { isEditMode } from "../core/is-edit-mode.js";
 const editing = () => (window.clay && "isEditMode" in window.clay ? !!window.clay.isEditMode : isEditMode);
 import { bevelDialog, dismissOf, keepFocusIn } from "../ui/bevel-dialog.js";
 import { bevelBox, bevelButton, bevelInput, bevelText } from "../ui/bevel-controls.js";
+import { resolveTheme } from "../ui/theme.js";
 
 const ID = /^[A-Za-z0-9_-]{8,64}$/;
 const STORE = "clay:people:me";
@@ -32,7 +33,7 @@ const COLORS = 8;
 const MAX_NAME = 120;
 const EMAIL = /\S+@\S+\.\S+/;
 
-let host = { supports: false, me: null, members: null };
+let host = { supports: false, me: null, members: null, unavailable: false };
 let outcome = null;
 let local;
 let cache = null;
@@ -118,6 +119,9 @@ function mint() {
 export function currentMe() {
   if (!editing()) return null;
   if (host.me) return record(host.me);
+  // The host knows who you are but cannot say right now: not a reason to become whoever
+  // this browser last was.
+  if (host.unavailable) return null;
   if (outcome !== "ok" && outcome !== "none") return null;
   const mine = readLocal();
   return mine ? record(mine) : null;
@@ -134,6 +138,7 @@ function applyMeta(meta) {
     supports,
     me: supports ? clean(people.me) : null,
     members: supports && Array.isArray(people.members) ? people.members.map(clean).filter(Boolean) : null,
+    unavailable: supports && people.unavailable === true,
   };
   const changed = nextOutcome !== outcome || JSON.stringify(next) !== JSON.stringify(host);
   host = next;
@@ -196,7 +201,7 @@ function remove(id) {
 
 // Only a name this browser chose can change here; a host's name is the host's to change.
 function canRename() {
-  return editing() && !host.me && (outcome === "ok" || outcome === "none") && !!readLocal();
+  return editing() && !host.me && (outcome === "ok" || outcome === "none") && !!readLocal() && !host.unavailable;
 }
 
 /**
@@ -226,7 +231,19 @@ function unavailable() {
 export async function author(el, attr = "data-by") {
   if (!window.clay?.isEditMode) throw new Error("clay.author: this page is not in edit mode");
   if (!(el instanceof Element)) throw new TypeError("clay.author: needs an element");
-  if (outcome !== "ok" && outcome !== "none") await refresh(outcome === "failed");
+  // A host that names people can change who you are while the page is open (a sign-out,
+  // a rename in the app), so a stamp asks it again first. If it cannot answer now, nothing
+  // is stamped: the last answer might name someone who is no longer here.
+  if (host.supports) {
+    const meta = await hostMeta({ fresh: true });
+    const fresh = hostMetaOutcome(meta);
+    if (fresh === "none") throw Object.assign(new Error("This page lost its connection to the host. Reload it to keep editing."), { code: "people-unavailable" });
+    if (fresh !== "ok") throw unavailable();
+    applyMeta(meta);
+    if (host.unavailable) throw Object.assign(new Error("The app hosting this file can't name you right now. Check its Profile settings, then try again."), { code: "people-unavailable" });
+  } else if (outcome !== "ok" && outcome !== "none") {
+    await refresh(outcome === "failed");
+  }
   if (outcome === "failed") throw unavailable();
   let me = currentMe();
   if (!me) {
@@ -245,35 +262,36 @@ function askName() {
   if (asking && askingRoot?.isConnected) return asking;
   if (asking) cancelAsking();
   asking = new Promise((resolve) => {
+    const theme = resolveTheme();
     const { root, overlay, panel, heading, body, footer, close } = bevelDialog({
-      zIndex: "2147483001", width: "420px", closable: true, titled: true,
+      zIndex: "2147483001", width: "420px", closable: true, titled: true, theme, surface: "people",
     });
     askingRoot = root;
     cancelAsking = () => finish(null);
     heading.textContent = "What name should appear on your changes?";
     panel.setAttribute("aria-label", "Your name");
 
-    const input = bevelInput("input", { rules: ["display:block", "width:100%", "margin:0"] });
+    const input = bevelInput("input", { rules: ["display:block", "width:100%", "margin:0"], theme, parts: ["dialog.input", "people.input"] });
     input.setAttribute("aria-label", "Your name");
     input.maxLength = MAX_NAME;
     input.autocomplete = "name";
     const hint = bevelText("p", ["display:block", "margin:10px 0 0", "font-size:13px", "opacity:.8"],
-      "Saved in this browser. Everyone who can read this page will see it.");
+      "Saved in this browser. Everyone who can read this page will see it.", { theme, parts: ["dialog.hint", "people.hint"], role: "mutedText" });
     const hintText = hint.textContent;
     body.append(input, hint);
 
     const known = list().slice(0, 8);
     if (known.length) {
-      const label = bevelText("p", ["display:block", "margin:18px 0 8px", "font-size:13px"], "Or continue as someone already in this page:");
-      const row = bevelBox("div", ["display:flex", "flex-wrap:wrap", "gap:8px"]);
+      const label = bevelText("p", ["display:block", "margin:18px 0 8px", "font-size:13px"], "Or continue as someone already in this page:", { theme, parts: ["people.choiceLabel"], role: "mutedText" });
+      const row = bevelBox("div", ["display:flex", "flex-wrap:wrap", "gap:8px"], { theme, parts: ["people.choices"] });
       for (const person of known) {
-        row.append(bevelButton(person.name, { small: true, onClick: () => finish({ id: person.id, name: person.name }) }));
+        row.append(bevelButton(person.name, { small: true, onClick: () => finish({ id: person.id, name: person.name }), theme, parts: ["dialog.button", "people.button", "people.choice"], labelParts: ["dialog.buttonLabel", "people.buttonLabel"] }));
       }
       body.append(label, row);
     }
 
-    const cancel = bevelButton("Cancel", { onClick: () => finish(null) });
-    const ok = bevelButton("Continue", { variant: "primary", onClick: () => submit() });
+    const cancel = bevelButton("Cancel", { onClick: () => finish(null), theme, parts: ["dialog.button", "people.button"], labelParts: ["dialog.buttonLabel", "people.buttonLabel"] });
+    const ok = bevelButton("Continue", { variant: "primary", onClick: () => submit(), theme, parts: ["dialog.button", "people.button"], labelParts: ["dialog.buttonLabel", "people.buttonLabel"] });
     footer.append(cancel, ok);
 
     const submit = () => {

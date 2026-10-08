@@ -388,13 +388,14 @@ test("a blip after a good answer keeps the known person", async () => {
   const mod = await load({
     meta: async () => {
       calls += 1;
-      if (calls > 1) return { ok: false, status: 502 };
+      if (calls === 2) return { ok: false, status: 502 };
       return { ok: true, status: 200, text: async () => JSON.stringify(withPeople({ me: A, members: [A] })) };
     },
   });
   expect(mod.currentMe().id).toBe(A.id);
 
   await mod.people.available();
+  expect(calls).toBe(2);
 
   expect(mod.currentMe().id).toBe(A.id);
 
@@ -460,6 +461,295 @@ test("a prompt whose element was removed from the page is asked again", async ()
   expect(mine.name).toBe("Grace Hopper");
   expect(liB.dataset.by).toBe(mine.id);
   expect(liA.hasAttribute("data-by")).toBe(false);
+});
+
+// A host that names people can change who you are while the page stays open, so a stamp
+// asks it again first and stamps nothing when it cannot answer.
+test("a stamp asks the host again, so a new host person is stamped", async () => {
+  let people = { me: A, members: [A] };
+  let calls = 0;
+  const mod = await load({
+    meta: async () => {
+      calls += 1;
+      return { ok: true, status: 200, text: async () => JSON.stringify(withPeople(people)) };
+    },
+  });
+  const asked = calls;
+  expect(mod.currentMe().id).toBe(A.id);
+
+  people = { me: B, members: [A, B] };
+
+  const li = document.createElement("li");
+  document.body.append(li);
+  const mine = await mod.author(li);
+
+  expect(calls).toBeGreaterThan(asked);
+  expect(mine.id).toBe(B.id);
+  expect(li.dataset.by).toBe(B.id);
+  expect(dataFor(B.id).textContent).toBe("Sam Ortiz");
+  expect(dataFor(A.id)).toBeNull();
+});
+
+test("a host that stops naming me is asked again, and asks me instead", async () => {
+  let people = { me: A, members: [A] };
+  const mod = await load({
+    meta: async () => ({ ok: true, status: 200, text: async () => JSON.stringify(withPeople(people)) }),
+  });
+  expect(mod.currentMe().id).toBe(A.id);
+
+  people = { me: null };
+
+  const li = document.createElement("li");
+  document.body.append(li);
+  const pending = mod.author(li);
+  await tick();
+  expect(dialog()).not.toBeNull();
+  dialog().querySelector("input").value = "Grace Hopper";
+  button("Continue").click();
+
+  const mine = await pending;
+  expect(mine.name).toBe("Grace Hopper");
+  expect(mine.id).not.toBe(A.id);
+  expect(li.dataset.by).toBe(mine.id);
+  expect(dataFor(A.id)).toBeNull();
+});
+
+test("a host that stops naming me falls back to a name this browser chose", async () => {
+  let people = { me: A, members: [A] };
+  const mod = await load({
+    meta: async () => ({ ok: true, status: 200, text: async () => JSON.stringify(withPeople(people)) }),
+    stored: B,
+  });
+  expect(mod.currentMe().id).toBe(A.id);
+
+  people = { me: null };
+
+  const li = document.createElement("li");
+  document.body.append(li);
+  const mine = await mod.author(li);
+
+  expect(dialog()).toBeNull();
+  expect(mine.id).toBe(B.id);
+  expect(li.dataset.by).toBe(B.id);
+  expect(dataFor(B.id).textContent).toBe("Sam Ortiz");
+});
+
+test("a rename in the app keeps the id and the stamp carries the new name", async () => {
+  let people = { me: A, members: [A] };
+  const mod = await load({
+    meta: async () => ({ ok: true, status: 200, text: async () => JSON.stringify(withPeople(people)) }),
+  });
+  expect(mod.currentMe().name).toBe("Ada Chen");
+
+  people = { me: { id: A.id, name: "Ada L." }, members: [A] };
+
+  const li = document.createElement("li");
+  document.body.append(li);
+  const mine = await mod.author(li);
+
+  expect(mine.id).toBe(A.id);
+  expect(mine.name).toBe("Ada L.");
+  expect(li.dataset.by).toBe(A.id);
+  expect(dataFor(A.id).textContent).toBe("Ada L.");
+});
+
+test("a fresh answer that fails after a good one stamps nothing", async () => {
+  let calls = 0;
+  const mod = await load({
+    meta: async () => {
+      calls += 1;
+      if (calls > 1) return { ok: false, status: 503 };
+      return { ok: true, status: 200, text: async () => JSON.stringify(withPeople({ me: A, members: [A] })) };
+    },
+  });
+  expect(mod.currentMe().id).toBe(A.id);
+  document.body.innerHTML = `<div clay-people hidden><data value="${B.id}">Sam Ortiz</data></div>`;
+
+  const li = document.createElement("li");
+  document.body.append(li);
+  await expect(mod.author(li)).rejects.toMatchObject({ code: "people-unavailable" });
+
+  expect(li.hasAttribute("data-by")).toBe(false);
+  expect(document.querySelectorAll("[clay-people] data[value]").length).toBe(1);
+  expect(dataFor(B.id).textContent).toBe("Sam Ortiz");
+  // The last good answer still names the viewer on screen.
+  expect(mod.currentMe().id).toBe(A.id);
+});
+
+test("a fresh answer that never arrives stamps nothing", async () => {
+  let calls = 0;
+  const mod = await load({
+    meta: async () => {
+      calls += 1;
+      if (calls > 1) throw new Error("offline");
+      return { ok: true, status: 200, text: async () => JSON.stringify(withPeople({ me: A, members: [A] })) };
+    },
+  });
+  expect(mod.currentMe().id).toBe(A.id);
+
+  const li = document.createElement("li");
+  document.body.append(li);
+  await expect(mod.author(li)).rejects.toMatchObject({ code: "people-unavailable" });
+
+  expect(li.hasAttribute("data-by")).toBe(false);
+  expect(document.querySelector("[clay-people]")).toBeNull();
+});
+
+test("two stamps at once share one fresh answer", async () => {
+  let calls = 0;
+  const mod = await load({
+    meta: async () => {
+      calls += 1;
+      return { ok: true, status: 200, text: async () => JSON.stringify(withPeople({ me: A, members: [A] })) };
+    },
+  });
+  const asked = calls;
+  const liA = document.createElement("li");
+  const liB = document.createElement("li");
+  document.body.append(liA, liB);
+
+  const [a, b] = await Promise.all([mod.author(liA), mod.author(liB)]);
+
+  expect(calls - asked).toBe(1);
+  expect(a.id).toBe(A.id);
+  expect(b.id).toBe(A.id);
+  expect(liA.dataset.by).toBe(A.id);
+  expect(liB.dataset.by).toBe(A.id);
+});
+
+test("a stamp on a host without people asks nothing more", async () => {
+  let calls = 0;
+  const mod = await load({
+    meta: async () => {
+      calls += 1;
+      return { ok: true, status: 200, text: async () => JSON.stringify({ spec: 1, extensions: ["files"], document: null }) };
+    },
+    stored: B,
+  });
+  const asked = calls;
+
+  const li = document.createElement("li");
+  document.body.append(li);
+  const mine = await mod.author(li);
+
+  expect(calls).toBe(asked);
+  expect(mine.id).toBe(B.id);
+  expect(li.dataset.by).toBe(B.id);
+});
+
+test("cancelling the prompt after the host stops naming me stamps nothing", async () => {
+  let people = { me: A, members: [A] };
+  const mod = await load({
+    meta: async () => ({ ok: true, status: 200, text: async () => JSON.stringify(withPeople(people)) }),
+  });
+  expect(mod.currentMe().id).toBe(A.id);
+
+  people = { me: null };
+
+  const li = document.createElement("li");
+  document.body.append(li);
+  const pending = mod.author(li);
+  await tick();
+  button("Cancel").click();
+
+  expect(await pending).toBeNull();
+  expect(li.hasAttribute("data-by")).toBe(false);
+  expect(document.querySelector("[clay-people]")).toBeNull();
+});
+
+test("returning focus, discovery and name lookup write nothing", async () => {
+  const mod = await load({ meta: withPeople({ me: A, members: [A, B] }) });
+  document.body.innerHTML = `<div clay-people hidden><data value="${A.id}">Ada Chen</data></div>`;
+  await tick();
+  const before = document.body.innerHTML;
+
+  Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+  window.dispatchEvent(new Event("focus"));
+  document.dispatchEvent(new Event("visibilitychange"));
+  await tick();
+  delete document.visibilityState;
+
+  expect(document.body.innerHTML).toBe(before);
+
+  expect(mod.people.get(A.id).name).toBe("Ada Chen");
+  expect(mod.people.get("nobody-at-all").name).toBe("Unknown person");
+  expect(document.body.innerHTML).toBe(before);
+});
+
+// Local with profile sharing on can know that a person is here and still be unable to
+// name them (a rejected key, a server too old to send the person). It says so in the
+// answer rather than failing discovery, so the page keeps its capabilities, and ClayJS
+// must not quietly become whoever this browser last was.
+test("a host that cannot name a person right now is never the browser's name", async () => {
+  const mod = await load({ meta: withPeople({ me: null, unavailable: true }), stored: A });
+  document.body.innerHTML = `<div clay-people hidden><data value="${B.id}">Sam Ortiz</data></div>`;
+  await tick();
+
+  expect(mod.currentMe()).toBeNull();
+
+  const li = document.createElement("li");
+  document.body.append(li);
+  await expect(mod.author(li)).rejects.toMatchObject({
+    code: "people-unavailable",
+    message: expect.stringContaining("can't name you right now"),
+  });
+
+  expect(li.hasAttribute("data-by")).toBe(false);
+  expect(dialog()).toBeNull();
+  expect(document.querySelectorAll("[clay-people] data[value]").length).toBe(1);
+  expect(dataFor(B.id).textContent).toBe("Sam Ortiz");
+  expect(dataFor(A.id)).toBeNull();
+  expect(mod.people.canRename()).toBe(false);
+});
+
+test("the marker lifts when the host names a person again", async () => {
+  let people = { me: null, unavailable: true };
+  const mod = await load({
+    meta: async () => ({ ok: true, status: 200, text: async () => JSON.stringify(withPeople(people)) }),
+    stored: B,
+  });
+  expect(mod.currentMe()).toBeNull();
+
+  people = { me: A, members: [A] };
+
+  const li = document.createElement("li");
+  document.body.append(li);
+  const mine = await mod.author(li);
+
+  expect(mine.id).toBe(A.id);
+  expect(li.dataset.by).toBe(A.id);
+  expect(mod.currentMe().id).toBe(A.id);
+});
+
+test("an answer that cannot name a person still carries the host's capabilities", async () => {
+  const mod = await load({
+    meta: { spec: 1, extensions: ["people", "upload"], document: { etag: "e", people: { me: null, unavailable: true } } },
+  });
+  const { hostSupports } = await import("../../src/core/host-meta.js");
+
+  expect(mod.currentMe()).toBeNull();
+  expect(await hostSupports("upload")).toBe(true);
+});
+
+test("a fresh answer that is not a capability document names the lost connection", async () => {
+  let calls = 0;
+  const mod = await load({
+    meta: async () => {
+      calls += 1;
+      if (calls > 1) return { ok: false, status: 401 };
+      return { ok: true, status: 200, text: async () => JSON.stringify(withPeople({ me: A, members: [A] })) };
+    },
+  });
+  expect(mod.currentMe().id).toBe(A.id);
+
+  const li = document.createElement("li");
+  document.body.append(li);
+  await expect(mod.author(li)).rejects.toMatchObject({
+    code: "people-unavailable",
+    message: expect.stringContaining("lost its connection to the host"),
+  });
+
+  expect(li.hasAttribute("data-by")).toBe(false);
 });
 
 // Every test leaves a plugin instance watching document.body, so the file ends with an

@@ -10,7 +10,7 @@
 // flip the text direction.
 import { style, make, set } from '../lib/hostile-css.js';
 import { RULES, MEDIA, FONT_SANS, TOKENS } from './bevel.js';
-import { themed, tokenRulesFor, partRules, markParts, heightFloor } from './theme-parts.js';
+import { themed, tokenRulesFor, partRules, markParts, floorRules } from './theme-parts.js';
 
 export const RUNTIME_ONLY = 'no-save no-watch no-snapshot';
 
@@ -121,8 +121,7 @@ export function bevelButton(label, { variant = 'default', small = false, onClick
       const act = { hover: flags.hovered, active: flags.pressed, focus: flags.focusVisible, disabled: flags.disabled };
       rules.push(...tokenRulesFor(theme, `button.${variantName}`, act), ...partRules(theme, names, act));
       if (forced) rules.push(...MEDIA.forcedColors);
-      if (coarse) rules.push('min-block-size:40px');
-      rules.push(...heightFloor(rules, narrow));
+      rules.push(...floorRules(rules, 'min-height', narrow ? 44 : coarse ? 40 : 0));
     }
     for (const [prop, value] of pinned) rules.push(`${prop}:${value}`);
     restyle(b, rules);
@@ -234,40 +233,53 @@ export function bevelCornerClose({ label = 'Close', onClick = null } = {}) {
 }
 
 // A plain runtime-only box: reset, then only the given rules. For structure inside a
-// surface (rows, stacks, backdrops) that carries no material of its own.
-export function bevelBox(tag, rules = [], { theme = null, parts = [] } = {}) {
+// surface (rows, stacks, backdrops) that carries no material of its own. `role` names the
+// token declarations it takes, or null for parts only.
+export function bevelBox(tag, rules = [], { theme = null, parts = [], role = null } = {}) {
   const el = runtime(make(tag, [...RESET, 'box-sizing:border-box', ...rules]));
   if (themed(theme)) {
+    if (role) style(el, tokenRulesFor(theme, role, {}));
+    const names = [...(['text', 'mutedText', 'well'].includes(role) ? [role] : []), ...parts];
+    style(el, partRules(theme, names, {}));
+    markParts(el, theme, names);
+  }
+  return el;
+}
+
+// Rebuild a box's whole inline style: what a stateful control does on every change.
+export function restyleBox(el, rules) {
+  restyle(el, [...RESET, 'box-sizing:border-box', ...rules]);
+}
+
+export function bevelSurface(tag, rules = [], { theme = null, parts = [], role = 'surface' } = {}) {
+  const el = runtime(make(tag, [...RESET, 'box-sizing:border-box', ...RULES.surface, `font:14px/1.5 ${FONT_SANS}`, ...rules]));
+  if (themed(theme)) {
+    if (role) style(el, tokenRulesFor(theme, role, {}));
     style(el, partRules(theme, parts, {}));
     markParts(el, theme, parts);
   }
   return el;
 }
 
-export function bevelSurface(tag, rules = [], { theme = null, parts = [] } = {}) {
-  const el = runtime(make(tag, [...RESET, 'box-sizing:border-box', ...RULES.surface, `font:14px/1.5 ${FONT_SANS}`, ...rules]));
-  if (themed(theme)) {
-    style(el, [...tokenRulesFor(theme, 'surface', {}), ...partRules(theme, parts, {})]);
-    markParts(el, theme, parts);
-  }
-  return el;
-}
-
-export function bevelWell(rules = [], { theme = null, parts = [] } = {}) {
+export function bevelWell(rules = [], { theme = null, parts = [], role = 'well' } = {}) {
   const el = runtime(make('div', [...RESET, 'display:block', 'box-sizing:border-box', `font:14px/1.5 ${FONT_SANS}`, `color:${TOKENS.ink}`, ...RULES.recess, ...rules]));
   if (themed(theme)) {
-    style(el, [...tokenRulesFor(theme, 'well', {}), ...partRules(theme, parts, {})]);
-    markParts(el, theme, parts);
+    if (role) style(el, tokenRulesFor(theme, role, {}));
+    const names = [...(['text', 'mutedText', 'well'].includes(role) ? [role] : []), ...parts];
+    style(el, partRules(theme, names, {}));
+    markParts(el, theme, names);
   }
   return el;
 }
 
-export function bevelText(tag, rules = [], text, { theme = null, parts = [] } = {}) {
+export function bevelText(tag, rules = [], text, { theme = null, parts = [], role = 'text' } = {}) {
   const el = runtime(make(tag, [...RESET, 'font:inherit', `color:${TOKENS.ink}`, ...rules]));
   if (text != null) el.textContent = text;
   if (themed(theme)) {
-    style(el, [...tokenRulesFor(theme, 'text', {}), ...partRules(theme, parts, {})]);
-    markParts(el, theme, parts);
+    if (role) style(el, tokenRulesFor(theme, role, {}));
+    const names = [...(['text', 'mutedText', 'well'].includes(role) ? [role] : []), ...parts];
+    style(el, partRules(theme, names, {}));
+    markParts(el, theme, names);
   }
   return el;
 }
@@ -291,9 +303,10 @@ export function paintInput(el, { rules = [], theme = null, parts = [] } = {}) {
     list.push(...rules);
     if (coarse) list.push(...MEDIA.coarseInput);
     if (themed(theme)) {
-      const act = { hover: flags.hovered, focus: flags.focused };
+      const act = { hover: flags.hovered && !el.disabled, focus: flags.focused, disabled: !!el.disabled };
       list.push(...tokenRulesFor(theme, 'input', act), ...partRules(theme, names, act));
       if (forced) list.push(...MEDIA.forcedColors);
+      if (coarse) list.push(...floorRules(list, 'font-size', 16));
     }
     if (height) list.push(`height:${height}`);
     restyle(el, list);

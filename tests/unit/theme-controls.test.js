@@ -232,6 +232,51 @@ test("disabled: hover and pressed blocks are suppressed, the disabled block appl
   expect(shown(b, "background")).toEqual(parseColor("#bbbbbb"));
 });
 
+test("floor: a keyword height still gets the plain floor, and the theme's size the max() one", () => {
+  withMedia(["(max-width: 760px)"], () => {
+    let b;
+    const calls = capture(() => { b = bevelButton("Go", { theme: light({}, { button: { base: { "min-height": "auto" } } }) }); });
+    const written = calls.filter((call) => call.style === b.style && call.name === "min-height").map((call) => call.value);
+    expect(written).toContain("auto");
+    expect(written.indexOf("auto")).toBeLessThan(written.lastIndexOf("44px"));
+    expect(written.slice(-2)).toEqual(["44px", "max(44px, auto)"]);
+  });
+
+  withMedia(["(pointer: coarse)"], () => {
+    const tall = bevelButton("Go", { theme: light({ buttonHeight: "48px" }) });
+    expect(tall.style.getPropertyValue("min-height")).toBe("max(40px, 48px)");
+
+    let input;
+    const calls = capture(() => { input = bevelInput("input", { theme: light({}, { input: { base: { "font-size": "14px" } } }) }); });
+    const sizes = calls.filter((call) => call.style === input.style && call.name === "font-size").map((call) => call.value);
+    expect(sizes.slice(-2)).toEqual(["16px", "max(16px, 14px)"]);
+  });
+});
+
+test("input: a disabled field takes its disabled part and drops hover", () => {
+  const theme = light({}, { input: { hover: { "outline-offset": "3px" }, disabled: { opacity: ".4" } } });
+  const el = bevelInput("input", { theme });
+  el.disabled = true;
+
+  const over = pointer(el, "pointerenter");
+  expect(over.some((call) => call.style === el.style && call.name === "outline-offset")).toBe(false);
+  expect(Number(el.style.getPropertyValue("opacity"))).toBe(0.4);
+
+  el.disabled = false;
+  const back = pointer(el, "pointerenter");
+  expect(last(back, el, "outline-offset")).toBe("3px");
+});
+
+test("neutral: hover takes a page background that differs from the surface", () => {
+  const b = bevelButton("Review", { theme: light({ surface: "#ffffff", text: "#000000", background: "#ffcc00" }) });
+  const over = pointer(b, "pointerenter");
+  expect(last(over, b, "background")).toBe("#ffcc00");
+
+  const plain = bevelButton("Review", { theme: light({ surface: "#ffffff" }) });
+  const hovered = pointer(plain, "pointerenter");
+  expect(last(hovered, plain, "background")).toBe("color-mix(in srgb, #ffffff, currentColor 7%)");
+});
+
 test("phone floor: the 44px touch target outlives a themed buttonHeight", () => {
   const original = window.matchMedia;
   const width = (px) => {
@@ -326,8 +371,10 @@ test("data-clay-part: a themed control carries its part names, an unthemed one c
   expect(bevelInput("input").getAttribute("data-clay-part")).toBeNull();
 
   expect(bevelSurface("div", [], { theme: light(PAINT), parts: ["dialog.panel"] }).getAttribute("data-clay-part")).toBe("dialog.panel");
-  expect(bevelWell([], { theme: light(PAINT), parts: ["dialog.well"] }).getAttribute("data-clay-part")).toBe("dialog.well");
-  expect(bevelText("span", [], "x", { theme: light(PAINT), parts: ["dialog.hint"] }).getAttribute("data-clay-part")).toBe("dialog.hint");
+  expect(bevelWell([], { theme: light(PAINT), parts: ["dialog.well"] }).getAttribute("data-clay-part")).toBe("well dialog.well");
+  expect(bevelText("span", [], "x", { theme: light(PAINT), parts: ["dialog.hint"] }).getAttribute("data-clay-part")).toBe("text dialog.hint");
+  expect(bevelText("span", [], "x", { theme: light(PAINT), parts: ["dialog.hint"], role: "mutedText" }).getAttribute("data-clay-part")).toBe("mutedText dialog.hint");
+  expect(bevelBox("div", [], { theme: light(PAINT), parts: ["dialog.body"], role: "well" }).getAttribute("data-clay-part")).toBe("well dialog.body");
   expect(bevelBox("div", [], { theme: light(PAINT), parts: ["dialog.body"] }).getAttribute("data-clay-part")).toBe("dialog.body");
   expect(bevelSurface("div").getAttribute("data-clay-part")).toBeNull();
 });

@@ -18,8 +18,13 @@ export function stateList({ hover = false, active = false, focus = false, disabl
   return list;
 }
 
+// Hover and press on neutral controls: a page's own background colour when it gave one
+// that differs from the surface, else the surface tinted toward the text (or the
+// control's own colour when the theme has no text).
 function neutral(t, pct) {
-  return t.text && t.surface ? mix(t.surface, t.text, pct) : t.background;
+  if (t.background && t.background !== t.surface) return pct > 8 ? mix(t.background, t.text || "currentColor", 6) : t.background;
+  if (t.surface) return mix(t.surface, t.text || "currentColor", pct);
+  return t.background;
 }
 
 function button(t, variant, state) {
@@ -60,6 +65,7 @@ const ROLES = {
   text: (t, s) => (s === "base" ? [...decl("color", t.text), ...decl("font-family", t.font)] : []),
   mutedText: (t, s) => (s === "base" ? [...decl("color", t.mutedText), ...decl("font-family", t.font)] : []),
   heading: (t, s) => (s === "base" ? [...decl("font-family", t.headingFont || t.font), ...decl("color", t.text)] : []),
+  code: (t, s) => (s === "base" ? decl("color", t.text) : []),
   well: (t, s) =>
     s === "base" ? [...decl("background", t.background), ...(t.border ? [`border:1px solid ${t.border}`] : []), ...decl("border-radius", t.radius)] : [],
   overlay: (t, s) => (s === "base" ? decl("background", t.overlay) : []),
@@ -99,11 +105,18 @@ export function markParts(el, theme, names) {
   if (themed(theme) && names?.length) el.setAttribute("data-clay-part", names.join(" "));
 }
 
-// The phone floor applies after theme and part declarations: a requested height
-// larger than 44px survives, a smaller one does not.
+// A floor goes on after the theme: first the plain floor, then the larger of the floor
+// and what the theme asked for. When the theme's value cannot go inside max() (a keyword
+// such as auto), the browser drops that second declaration and the plain floor stands.
+export function floorRules(rules, prop, px) {
+  if (!px) return [];
+  const last = [...rules].reverse().find((r) => r.startsWith(`${prop}:`));
+  const value = last ? last.slice(prop.length + 1).trim() : "";
+  const out = [`${prop}:${px}px`];
+  if (value && value !== `${px}px`) out.push(`${prop}:max(${px}px, ${value})`);
+  return out;
+}
+
 export function heightFloor(rules, narrow) {
-  if (!narrow) return [];
-  const last = [...rules].reverse().find((r) => /^min-height\s*:/.test(r));
-  const value = last ? last.slice(last.indexOf(":") + 1).trim() : "";
-  return [value && value !== "44px" ? `min-height:max(44px, ${value})` : "min-height:44px"];
+  return narrow ? floorRules(rules, "min-height", 44) : [];
 }

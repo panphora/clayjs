@@ -21,7 +21,7 @@ export const TOKEN_PROPS = {
   radius: "border-radius",
   shadow: "box-shadow",
   overlay: "background-color",
-  spacing: "padding",
+  spacing: "outline-offset",
   buttonHeight: "min-height",
 };
 
@@ -75,7 +75,7 @@ function normalize(options) {
   for (const [name, value] of Object.entries(tokens)) {
     if (!(name in TOKEN_PROPS)) throw new TypeError(`clay.theme: unknown token "${name}"`);
     if (!validValue(TOKEN_PROPS[name], value)) throw new TypeError(`clay.theme: token "${name}" is not a valid ${TOKEN_PROPS[name]} value`);
-    outTokens[name] = value.trim();
+    outTokens[name] = name === "spacing" && value.trim() === "0" ? "0px" : value.trim();
   }
   const outParts = {};
   for (const [name, states] of Object.entries(parts)) {
@@ -166,31 +166,44 @@ export function contrast(a, b) {
 
 // --- sampling --------------------------------------------------------------
 
+const TRANSPARENT = new Set(["", "transparent", "rgba(0, 0, 0, 0)"]);
+const DEFAULT_FONTS = new Set(["serif", "times", "times new roman", "-webkit-standard", "tinos", "liberation serif"]);
+
+// A family list made only of the browser's default serif means the page never chose a font.
+function chosenFont(value) {
+  const families = String(value || "").split(",").map((f) => f.trim().replace(/^["']|["']$/g, "").toLowerCase()).filter(Boolean);
+  return families.length && !families.every((f) => DEFAULT_FONTS.has(f));
+}
+
+// The element's own background: null when it has none (transparent, so look further
+// out), { blocked: true } when it is translucent, image-backed, or a colour this code
+// cannot read, so no palette is inferred at all.
 function opaqueBackground(el) {
   if (!el) return null;
   const cs = getComputedStyle(el);
   if (cs.backgroundImage && cs.backgroundImage !== "none") return { blocked: true };
-  const c = parseColor(cs.backgroundColor);
-  if (!c || c[3] === 0) return null;
+  const raw = (cs.backgroundColor || "").trim();
+  if (TRANSPARENT.has(raw)) return null;
+  const c = parseColor(raw);
+  if (!c) return { blocked: true };
+  if (c[3] === 0) return null;
   if (c[3] < 1) return { blocked: true };
-  return { value: cs.backgroundColor };
+  return { value: raw, rgb: c };
 }
 
 // The page's font, and its background and text as a pair, from body and root only.
-// A translucent or image-backed background gives no palette at all.
+// The pair is kept only when it reads: a dark body whose text colour is set on inner
+// elements would otherwise give black on near-black.
 export function samplePage() {
   const out = {};
   const body = document.body;
   if (!body) return out;
   const cs = getComputedStyle(body);
-  const font = cs.fontFamily && cs.fontFamily.trim();
-  if (font) {
-    out.font = font;
-    out.headingFont = font;
-  }
+  if (chosenFont(cs.fontFamily)) out.font = cs.fontFamily.trim();
   let bg = opaqueBackground(body);
   if (!bg) bg = opaqueBackground(document.documentElement);
-  if (bg && !bg.blocked && parseColor(cs.color)) {
+  const text = parseColor(cs.color);
+  if (bg && !bg.blocked && text && text[3] === 1 && contrast(bg.rgb, text) >= 3) {
     out.background = bg.value;
     out.surface = bg.value;
     out.text = cs.color;
@@ -204,15 +217,22 @@ function cssTokens() {
   const cs = getComputedStyle(document.body);
   for (const [name, prop] of Object.entries(TOKEN_PROPS)) {
     const v = cs.getPropertyValue(`--clay-ui-${kebab(name)}`).trim();
-    if (v && validValue(prop, v)) out[name] = v;
+    if (v && validValue(prop, v)) out[name] = name === "spacing" && v === "0" ? "0px" : v;
   }
   return out;
 }
 
-function scheme(choice) {
+// "page": the root's declared scheme, else <meta name="color-scheme">, else the scheme
+// of a sampled or given surface colour, else both, as unthemed ClayJS UI has always used.
+function scheme(choice, tokens) {
   if (choice !== "page") return choice;
   const s = getComputedStyle(document.documentElement).colorScheme;
-  return !s || s === "normal" ? "light" : s;
+  if (s && s !== "normal") return s;
+  const meta = document.querySelector('meta[name="color-scheme"]')?.getAttribute("content")?.trim();
+  if (meta && /\b(light|dark)\b/.test(meta)) return meta;
+  const surface = parseColor(tokens.surface || "");
+  if (surface) return luminance(surface) < 0.2 ? "dark" : "light";
+  return "light dark";
 }
 
 function onColor(fill, t) {
@@ -238,6 +258,8 @@ export function resolveTheme() {
     tokens.mutedText ??= `color-mix(in srgb, ${tokens.text} 70%, ${tokens.surface})`;
     tokens.border ??= `color-mix(in srgb, ${tokens.text} 18%, ${tokens.surface})`;
     tokens.overlay ??= `color-mix(in srgb, ${tokens.text} 20%, transparent)`;
+    // A page's own ink is its primary colour unless it names one.
+    tokens.accent ??= tokens.text;
   }
   for (const [fill, on] of [["accent", "accentText"], ["danger", "dangerText"]]) {
     if (!tokens[fill] || tokens[on]) continue;
@@ -245,7 +267,7 @@ export function resolveTheme() {
     if (pick) tokens[on] = pick;
     else console.warn(`clayjs: theme sets ${fill} without ${on}; pass ${on} so text on it stays readable`);
   }
-  return { bevel: false, scheme: scheme(config.colorScheme), tokens, parts: config.parts };
+  return { bevel: false, scheme: scheme(config.colorScheme, tokens), tokens, parts: config.parts };
 }
 
 // Test hook: forget configuration so the next call re-reads window.clayTheme.
