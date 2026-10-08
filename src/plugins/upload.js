@@ -58,6 +58,12 @@ export async function upload(file, { onProgress, signal } = {}) {
     // core host, and embedding is what it should do.
     return result(false, "This host does not store uploaded files", "skipped", "unsupported");
   }
+  // The host stores files, but not for this caller on this document: the spec withholds the
+  // document's upload block by omission, and a client that finds none does not upload. Not
+  // "unsupported", because embedding instead would route around the host's own decision.
+  if (!meta.document?.upload) {
+    return result(false, "You can't add files to this document", "error", "forbidden");
+  }
 
   // The one local pre-check the spec asks for, and the only reason `maxBytes` is
   // published: refusing a 40 MB photo here costs nothing, and sending it to be

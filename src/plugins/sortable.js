@@ -17,6 +17,7 @@
 import { isEditMode } from "../core/is-edit-mode.js";
 import Mutation from "../lib/mutation.js";
 import { capabilitySelector } from "../lib/region-capabilities.js";
+import { onSnapshot } from "../core/snapshot.js";
 
 const EDITOR_UI_SELECTOR = capabilitySelector('history');
 
@@ -142,6 +143,17 @@ async function init() {
   // default export when a bundler hands it one. Cover both.
   const mod = await import('../vendor/Sortable.vendor.js');
   const Sortable = window.Sortable || mod.default;
+
+  // A save taken mid-drag would otherwise write Sortable's classes and attributes into the
+  // file. Strip them from the snapshot clone only, so the live drag carries on untouched.
+  onSnapshot((root) => {
+    for (const el of root.querySelectorAll("[sortable] .sortable-chosen, [sortable] .sortable-ghost, [sortable] .sortable-drag")) {
+      el.classList.remove("sortable-chosen", "sortable-ghost", "sortable-drag");
+      if (!el.classList.length) el.removeAttribute("class");
+    }
+    for (const el of root.querySelectorAll('[sortable] [draggable="false"], [sortable] [draggable="true"]')) el.removeAttribute("draggable");
+    for (const el of root.querySelectorAll('[sortable] [style=""]')) el.removeAttribute("style");
+  });
 
   // Set up sortable on page load
   document.querySelectorAll('[sortable]').forEach(el => makeSortable(el, Sortable));

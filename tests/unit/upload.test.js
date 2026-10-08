@@ -32,7 +32,7 @@ function installXhr() {
   return sent;
 }
 
-async function load({ extensions = ["upload"], document: doc = null } = {}) {
+async function load({ extensions = ["upload"], document: doc = { upload: { allowed: true } } } = {}) {
   jest.resetModules();
   global.fetch = jest.fn(async () => ok({ spec: 1, extensions, document: doc }));
   const mod = await import("../../src/plugins/upload.js");
@@ -74,6 +74,18 @@ test("a host that never announced upload is not a failure, it is embed-instead",
   expect(res.msgType).toBe("skipped");
   // §5: a client must not go looking for the route to see whether it answers.
   expect(global.XMLHttpRequest).toBeDefined();
+});
+
+test("a host that stores files but names no upload block for this document refuses without sending", async () => {
+  const upload = await load({ document: { etag: "e1" } });
+  const sent = installXhr();
+
+  const res = await upload(file());
+  expect(res.ok).toBe(false);
+  expect(res.code).toBe("forbidden");
+  expect(res.msgType).toBe("error");
+  for (let i = 0; i < 20; i++) await Promise.resolve();
+  expect(sent).toHaveLength(0);
 });
 
 test("the wire: token in the path, absolute url, FormData, no credentials", async () => {

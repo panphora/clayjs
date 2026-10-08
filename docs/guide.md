@@ -856,7 +856,7 @@ Traps:
 - **One stray `[sortable-handle]` makes every other item undraggable** except by its handle.
 - **`onsorting` cannot veto a move**: its return value is lost. Use `Sortable.get(el).option("onMove", (evt) => …)`.
 - **Hidden template children count as items.** Keep blueprints in `<template>` outside the list.
-- **Sortable leaves residue** (`draggable="false"`, `style=""`, drag classes) that saves. Strip it with the snapshot hook in 6.6.
+- **Sortable leaves residue** (`draggable="false"`, `style=""`, drag classes) that saves. The `sortable` plugin strips it inside `[sortable]` lists itself, including from a save taken mid-drag; a Sortable you load and wire up yourself needs the snapshot hook in 6.6.
 - A peer frame arriving mid-drag merges under the drag. Rare at autosave cadence, but possible.
 - Write durable side effects of a move in a `clay:sorted` handler (the kanban logs "Moved to Doing" into the card's activity). If a record attribute must match its container (`data-status`), set it there too.
 
@@ -907,7 +907,7 @@ async function imageSource(file) {
 }
 ```
 
-- Embed a `data:` URL **only** on `code === "unsupported"` (the host does not store files). On `too-large`, `unsupported-type`, `payment-required` and other failures, write nothing: embedding a refused 20 MB photo would ride every future save.
+- Embed a `data:` URL **only** on `code === "unsupported"` (the host does not store files). On `forbidden` (the host stores files, but not for this person on this document), `too-large`, `unsupported-type`, `payment-required` and other failures, write nothing: embedding a refused 20 MB photo would ride every future save.
 - Other codes: `unauthorized`, `forbidden`, `timeout` (may have landed; retrying is safe), `aborted`, `network`, `bad-response`.
 - Events: `clay:upload-start`, `clay:upload-progress`, `clay:upload-done`, `clay:upload-error`.
 - Host limits: HTML Clay and Hyperclay Local 25 MB per file; hyperclay.com 10, 20 or 100 MB by plan.
