@@ -10,6 +10,7 @@
 // flip the text direction.
 import { style, make, set } from '../lib/hostile-css.js';
 import { RULES, MEDIA, FONT_SANS, TOKENS } from './bevel.js';
+import { themed, tokenRulesFor, partRules, markParts, heightFloor } from './theme-parts.js';
 
 export const RUNTIME_ONLY = 'no-save no-watch no-snapshot';
 
@@ -81,7 +82,7 @@ function protectIcon(svg, size) {
   }
 }
 
-export function bevelButton(label, { variant = 'default', small = false, onClick = null, extra = [], labelExtra = [], onState = null } = {}) {
+export function bevelButton(label, { variant = 'default', small = false, onClick = null, extra = [], labelExtra = [], onState = null, theme = null, parts = [], labelParts = [] } = {}) {
   const v = VARIANT[variant] || VARIANT.default;
   const size = small ? SIZE.small : SIZE.normal;
   const reducedMotion = media('(prefers-reduced-motion: reduce)');
@@ -97,6 +98,12 @@ export function bevelButton(label, { variant = 'default', small = false, onClick
   span.textContent = label;
   b.append(span);
 
+  const variantName = VARIANT[variant] ? variant : 'default';
+  const names = ['button', `button.${variantName}`, ...parts];
+  const labelNames = ['buttonLabel', ...labelParts];
+  markParts(b, theme, names);
+  markParts(span, theme, labelNames);
+
   function applyState() {
     const rules = [...RESET, 'box-sizing:border-box', ...v.rest, ...size];
     if (flags.disabled) {
@@ -110,12 +117,24 @@ export function bevelButton(label, { variant = 'default', small = false, onClick
     if (coarse) rules.push(...MEDIA.coarseButton);
     if (narrow) rules.push('min-height:44px');
     rules.push(...extra);
+    if (themed(theme)) {
+      const act = { hover: flags.hovered, active: flags.pressed, focus: flags.focusVisible, disabled: flags.disabled };
+      rules.push(...tokenRulesFor(theme, `button.${variantName}`, act), ...partRules(theme, names, act));
+      if (forced) rules.push(...MEDIA.forcedColors);
+      if (coarse) rules.push('min-block-size:40px');
+      rules.push(...heightFloor(rules, narrow));
+    }
     for (const [prop, value] of pinned) rules.push(`${prop}:${value}`);
     restyle(b, rules);
     const labelRules = [...RESET, 'font:inherit', 'color:inherit', ...RULES.buttonLabel];
     if (flags.disabled) labelRules.push(...RULES.buttonDisabledLabel);
     else if (flags.pressed) labelRules.push(...(reducedMotion ? MEDIA.reducedMotion : RULES.buttonActiveLabel));
     labelRules.push(...labelExtra);
+    if (themed(theme)) {
+      const act = { hover: flags.hovered, active: flags.pressed, focus: flags.focusVisible, disabled: flags.disabled };
+      labelRules.push(...partRules(theme, labelNames, act));
+      if (flags.pressed && !flags.disabled && reducedMotion) labelRules.push(...MEDIA.reducedMotion);
+    }
     restyle(span, labelRules);
     onState?.({ ...flags });
   }
@@ -216,32 +235,53 @@ export function bevelCornerClose({ label = 'Close', onClick = null } = {}) {
 
 // A plain runtime-only box: reset, then only the given rules. For structure inside a
 // surface (rows, stacks, backdrops) that carries no material of its own.
-export function bevelBox(tag, rules = []) {
-  return runtime(make(tag, [...RESET, 'box-sizing:border-box', ...rules]));
+export function bevelBox(tag, rules = [], { theme = null, parts = [] } = {}) {
+  const el = runtime(make(tag, [...RESET, 'box-sizing:border-box', ...rules]));
+  if (themed(theme)) {
+    style(el, partRules(theme, parts, {}));
+    markParts(el, theme, parts);
+  }
+  return el;
 }
 
-export function bevelSurface(tag, rules = []) {
-  return runtime(make(tag, [...RESET, 'box-sizing:border-box', ...RULES.surface, `font:14px/1.5 ${FONT_SANS}`, ...rules]));
+export function bevelSurface(tag, rules = [], { theme = null, parts = [] } = {}) {
+  const el = runtime(make(tag, [...RESET, 'box-sizing:border-box', ...RULES.surface, `font:14px/1.5 ${FONT_SANS}`, ...rules]));
+  if (themed(theme)) {
+    style(el, [...tokenRulesFor(theme, 'surface', {}), ...partRules(theme, parts, {})]);
+    markParts(el, theme, parts);
+  }
+  return el;
 }
 
-export function bevelWell(rules = []) {
-  return runtime(make('div', [...RESET, 'display:block', 'box-sizing:border-box', `font:14px/1.5 ${FONT_SANS}`, `color:${TOKENS.ink}`, ...RULES.recess, ...rules]));
+export function bevelWell(rules = [], { theme = null, parts = [] } = {}) {
+  const el = runtime(make('div', [...RESET, 'display:block', 'box-sizing:border-box', `font:14px/1.5 ${FONT_SANS}`, `color:${TOKENS.ink}`, ...RULES.recess, ...rules]));
+  if (themed(theme)) {
+    style(el, [...tokenRulesFor(theme, 'well', {}), ...partRules(theme, parts, {})]);
+    markParts(el, theme, parts);
+  }
+  return el;
 }
 
-export function bevelText(tag, rules = [], text) {
+export function bevelText(tag, rules = [], text, { theme = null, parts = [] } = {}) {
   const el = runtime(make(tag, [...RESET, 'font:inherit', `color:${TOKENS.ink}`, ...rules]));
   if (text != null) el.textContent = text;
+  if (themed(theme)) {
+    style(el, [...tokenRulesFor(theme, 'text', {}), ...partRules(theme, parts, {})]);
+    markParts(el, theme, parts);
+  }
   return el;
 }
 
 // A text field in Bevel's input material, on an element that already exists (markup a
 // dialog wrote) or a new one. Focus and hover live in flags, as on a button. A
 // textarea keeps the height a person dragged it to across every repaint.
-export function paintInput(el, { rules = [] } = {}) {
+export function paintInput(el, { rules = [], theme = null, parts = [] } = {}) {
   const flags = { hovered: false, focused: false };
   const forced = media('(forced-colors: active)');
   const coarse = media('(pointer: coarse)');
   runtime(el);
+  const names = ['input', ...parts];
+  markParts(el, theme, names);
   function applyState() {
     const height = el.localName === 'textarea' ? el.style.getPropertyValue('height') : '';
     const list = [...RESET, 'box-sizing:border-box', ...RULES.input];
@@ -250,6 +290,11 @@ export function paintInput(el, { rules = [] } = {}) {
     if (forced) list.push(...MEDIA.forcedColors);
     list.push(...rules);
     if (coarse) list.push(...MEDIA.coarseInput);
+    if (themed(theme)) {
+      const act = { hover: flags.hovered, focus: flags.focused };
+      list.push(...tokenRulesFor(theme, 'input', act), ...partRules(theme, names, act));
+      if (forced) list.push(...MEDIA.forcedColors);
+    }
     if (height) list.push(`height:${height}`);
     restyle(el, list);
   }
