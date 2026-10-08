@@ -7,6 +7,8 @@
  *   await clay.people.available()  the host's team for a picker, or null
  *   clay.people.add(person)        record a person in the document; returns the record
  *   clay.people.remove(id)         forget a person the document no longer names
+ *   clay.people.canRename()        true when my name was chosen in this browser
+ *   clay.people.rename(name)       change that name here and in this page
  *   await clay.author(el, attr?)   stamp el with my id (asks my name once if needed)
  *   event clay:people              the viewer, the team or the registry changed
  *
@@ -190,6 +192,26 @@ function remove(id) {
   const key = String(id ?? "");
   for (const el of entries()) if (el.getAttribute("value") === key) el.remove();
   cache = null;
+}
+
+// Only a name this browser chose can change here; a host's name is the host's to change.
+function canRename() {
+  return editing() && !host.me && (outcome === "ok" || outcome === "none") && !!readLocal();
+}
+
+/**
+ * Change the name this browser uses, and this page's record of it. Other pages keep the
+ * old name until this person next writes there. Returns the new record.
+ */
+function rename(name) {
+  if (!canRename()) throw Object.assign(new Error("clay.people.rename: only a name chosen in this browser can be changed here"), { code: "not-renamable" });
+  const mine = readLocal();
+  const next = clean({ id: mine.id, name });
+  if (!next) throw new TypeError("clay.people.rename: needs a name of 1 to 120 characters that is not an email address");
+  writeLocal(next);
+  if (entries().some((el) => el.getAttribute("value") === next.id)) add(next);
+  emit();
+  return record(next);
 }
 
 function unavailable() {
@@ -377,7 +399,7 @@ async function init() {
   await Promise.race([first, new Promise((resolve) => setTimeout(resolve, BOOT_WAIT_MS))]);
 }
 
-export const people = Object.freeze({ get, list, available, add, remove });
+export const people = Object.freeze({ get, list, available, add, remove, canRename, rename });
 
 export const ready = init();
 

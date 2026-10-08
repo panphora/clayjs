@@ -222,6 +222,25 @@ test("icon button: coarse pointer rules do not change its 26px square", () => {
   }
 });
 
+test("narrow viewport: a button keeps a 44px touch target, a wide one does not", () => {
+  const original = window.matchMedia;
+  const width = (px) => {
+    window.matchMedia = (query) => ({ matches: query === "(max-width: 760px)" && px <= 760, media: query, addEventListener() {}, removeEventListener() {} });
+  };
+  try {
+    width(390);
+    const phone = bevelButton("Continue");
+    expect(phone.style.getPropertyValue("min-height")).toBe("44px");
+    expect(phone.style.getPropertyPriority("min-height")).toBe("important");
+
+    width(1280);
+    const desktop = bevelButton("Continue");
+    expect(desktop.style.getPropertyValue("min-height")).toBe("");
+  } finally {
+    window.matchMedia = original;
+  }
+});
+
 test("reset: color-scheme and direction are put back right after all:initial", () => {
   let b, surface, well, text;
   const calls = capture(() => {

@@ -27,6 +27,7 @@ const tick = () => new Promise((r) => setTimeout(r, 0));
 const dialog = () => document.querySelector("[data-clay-modal]");
 const button = (label) => [...dialog().querySelectorAll("button")].find((b) => b.textContent === label);
 const dataFor = (id) => document.querySelector(`[clay-people] data[value="${id}"]`);
+const errorOf = (fn) => { try { fn(); return null; } catch (e) { return e; } };
 
 test("a host that names me is clay.me, and author records me", async () => {
   const mod = await load({ meta: withPeople({ me: A, members: [A, B] }) });
@@ -152,6 +153,70 @@ test("remove() forgets a person the document no longer names", async () => {
 
   expect(mod.people.list()).toEqual([]);
   expect(dataFor(A.id)).toBeNull();
+});
+
+test("a name this browser chose can be renamed here and in this page", async () => {
+  const mod = await load({ stored: A });
+  mod.people.add(A);
+  let fired = 0;
+  document.addEventListener("clay:people", () => { fired += 1; });
+
+  expect(mod.people.canRename()).toBe(true);
+
+  const next = mod.people.rename("Ada Lovelace");
+
+  expect(next.id).toBe(A.id);
+  expect(next.name).toBe("Ada Lovelace");
+  expect(next.initials).toBe("AL");
+  expect(mod.currentMe().id).toBe(A.id);
+  expect(mod.currentMe().name).toBe("Ada Lovelace");
+  expect(dataFor(A.id).textContent).toBe("Ada Lovelace");
+  expect(JSON.parse(window.localStorage.getItem("clay:people:me")).name).toBe("Ada Lovelace");
+  expect(fired).toBe(1);
+});
+
+test("a name the host gave is the host's to change", async () => {
+  const mod = await load({ meta: withPeople({ me: A, members: [A] }), stored: B });
+  mod.people.add(A);
+
+  expect(mod.people.canRename()).toBe(false);
+
+  const refused = errorOf(() => mod.people.rename("Sam Ortiz"));
+  expect(refused.code).toBe("not-renamable");
+
+  expect(mod.currentMe().id).toBe(A.id);
+  expect(mod.currentMe().name).toBe("Ada Chen");
+  expect(dataFor(A.id).textContent).toBe("Ada Chen");
+  expect(JSON.parse(window.localStorage.getItem("clay:people:me")).name).toBe("Sam Ortiz");
+});
+
+test("rename refuses an email address or no name at all", async () => {
+  const mod = await load({ stored: A });
+  mod.people.add(A);
+
+  for (const bad of ["a@b.co", ""]) {
+    const refused = errorOf(() => mod.people.rename(bad));
+    expect(refused).toBeInstanceOf(TypeError);
+    expect(refused.message).toContain("clay.people.rename: needs a name");
+  }
+
+  expect(mod.currentMe().name).toBe("Ada Chen");
+  expect(dataFor(A.id).textContent).toBe("Ada Chen");
+  expect(JSON.parse(window.localStorage.getItem("clay:people:me")).name).toBe("Ada Chen");
+});
+
+test("a page that does not name me yet keeps the new name off the page", async () => {
+  const mod = await load({ stored: A });
+
+  expect(document.querySelector("[clay-people]")).toBeNull();
+  expect(mod.people.canRename()).toBe(true);
+
+  const next = mod.people.rename("Ada Lovelace");
+
+  expect(next.name).toBe("Ada Lovelace");
+  expect(mod.currentMe().name).toBe("Ada Lovelace");
+  expect(document.querySelector("[clay-people]")).toBeNull();
+  expect(document.querySelectorAll("[clay-people] data[value]").length).toBe(0);
 });
 
 test("an email address is never a name", async () => {

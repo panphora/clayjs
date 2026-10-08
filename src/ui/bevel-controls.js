@@ -87,6 +87,7 @@ export function bevelButton(label, { variant = 'default', small = false, onClick
   const reducedMotion = media('(prefers-reduced-motion: reduce)');
   const forced = media('(forced-colors: active)');
   const coarse = media('(pointer: coarse)');
+  const narrow = media('(max-width: 760px)');
   const flags = { hovered: false, pressed: false, focusVisible: false, disabled: false };
   const pinned = new Map();
 
@@ -107,6 +108,7 @@ export function bevelButton(label, { variant = 'default', small = false, onClick
     if (flags.focusVisible) rules.push(...RULES.focus);
     if (forced) rules.push(...MEDIA.forcedColors);
     if (coarse) rules.push(...MEDIA.coarseButton);
+    if (narrow) rules.push('min-height:44px');
     rules.push(...extra);
     for (const [prop, value] of pinned) rules.push(`${prop}:${value}`);
     restyle(b, rules);
