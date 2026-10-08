@@ -20,6 +20,31 @@ import { capabilitySelector } from "../lib/region-capabilities.js";
 
 const EDITOR_UI_SELECTOR = capabilitySelector('history');
 
+// Sortable marks the picked-up item and its links and images draggable="false" on press, and
+// leaves style="" behind after a drag. Those attributes would be saved into the document, so a
+// mere click would change the file. Record them when an item is chosen and put them back after.
+const RUNTIME_ATTRS = ['draggable', 'style'];
+
+function recordRuntimeAttrs(item) {
+  return [item, ...item.querySelectorAll('*')].map(el => [el, RUNTIME_ATTRS.map(name => el.getAttribute(name))]);
+}
+
+function restoreRuntimeAttrs(recorded) {
+  for (const [el, values] of recorded) {
+    RUNTIME_ATTRS.forEach((name, i) => {
+      const before = values[i];
+      const now = el.getAttribute(name);
+      if (now === before) return;
+      if (before === null) {
+        if (name === 'style' && now) return;
+        el.removeAttribute(name);
+      } else {
+        el.setAttribute(name, before);
+      }
+    });
+  }
+}
+
 function makeSortable(sortableElem, Sortable) {
   let options = {};
   const childSelector = /^(UL|OL)$/.test(sortableElem.tagName) ? 'li' : '*';
@@ -86,6 +111,25 @@ function makeSortable(sortableElem, Sortable) {
     // now redundant with clay:sorted and the mutation observers. Kept as a compat shim.
     sortableElem.dispatchEvent(new Event('input', { bubbles: true }));
   };
+
+  // Record on the capture phase, before Sortable's own press handler changes anything, and
+  // restore once the press ends: a plain click never fires Sortable's unchoose.
+  const ENDS = ['pointerup', 'pointercancel', 'dragend', 'drop'];
+  let recorded = null;
+  const restoreSoon = () => {
+    const pending = recorded;
+    recorded = null;
+    ENDS.forEach(type => document.removeEventListener(type, restoreSoon, true));
+    if (pending) setTimeout(() => restoreRuntimeAttrs(pending), 0);
+  };
+  sortableElem.addEventListener('pointerdown', (event) => {
+    let item = event.target instanceof Element ? event.target : null;
+    while (item && item.parentElement !== sortableElem) item = item.parentElement;
+    if (!item || recorded) return;
+    recorded = recordRuntimeAttrs(item);
+    ENDS.forEach(type => document.addEventListener(type, restoreSoon, true));
+  }, true);
+  options.onUnchoose = restoreSoon;
 
   Sortable.create(sortableElem, options);
 }

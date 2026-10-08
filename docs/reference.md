@@ -49,7 +49,7 @@ conditionally through the URL, in the browser only:
   comma list (`?exclude=source,richclay`); a second `exclude=` parameter is ignored.
 
 Loadable plugins: `richclay` (default on), `source` (default on), `ai-edit` (brings `wire`),
-`indicator`, `sync`, `sortable`, `undo`, `cms`, `quickcrop`, `upload`, `wire`, `demo`.
+`indicator`, `sync`, `sortable`, `undo`, `cms`, `quickcrop`, `upload`, `people`, `wire`, `demo`.
 The default-on plugins load in edit mode only.
 
 Everything else is a separate library ("satellite") with its own script tag: clay-ui,
@@ -153,6 +153,18 @@ itself, with no network.
   `too-large`, `unsupported-type`, `payment-required`, `unauthorized`, `forbidden`,
   `timeout`, `aborted`, `network`. Events: `clay:upload-start`, `clay:upload-progress`, `clay:upload-done`,
   `clay:upload-error` (upload plugin).
+- `clay.me` — the person editing: `{id, name, initials, color}` or `null` (people plugin).
+  The host names you through `/_/meta`; with no host, it is the name this browser gave
+  the first time you authored something. `color` is an index from 0 to 7 for the app's
+  own palette. Attribution, never a permission check.
+- `clay.people` — `get(id)` (always a record, "Unknown person" for an id nobody named),
+  `list()` (the people this document names), `await available()` (the host's team for
+  a picker, refreshed, or `null`), `add(person)` (record a person in the document's
+  `<div clay-people hidden>` registry and return the record) (people plugin).
+- `clay.author(el, attr = "data-by")` — stamp `el` with your id and record you in the
+  registry. With no host it asks your name once, remembered in this browser. Resolves
+  your record, `null` if you cancel, and rejects with `code: "people-unavailable"` when
+  the host failed to answer (offer a retry). Edit mode only (people plugin).
 - `clay.wire` — per-file control channel to a process on the user's machine: `send`,
   `cancel`, `get`, `list`, `isBusy`, `on` (wire plugin).
 - `clay.aiEdit` — the AI comment box: `clay.aiEdit.init()` and
@@ -263,6 +275,8 @@ raises the conflict notice. Until it is fixed, acknowledge those records on
 ## Events (on document)
 
 - `clay:ready` — clayjs finished booting; detail `{clay}`.
+- `clay:people` — the viewer, the host's team or the document's people registry
+  changed; detail `{me}` (people plugin).
 - `clay:save-saving` — a save has been in flight for 500ms (fast saves skip straight to
   the result); detail `{msg, msgType, timestamp}`, with `msgType` empty.
 - `clay:save-saved` — the server confirmed the write; detail `{msg, msgType, timestamp}`.
@@ -457,6 +471,10 @@ token variant, `POST /_/save/{token}`, read from `<html savetoken>`.
   attribute; a plain number in code).
 - `upload` (ask by name) — `clay.upload(file)` posts a file you supply to the host and
   resolves with its URL. It is not a picker; see `clay.upload` above.
+- `people` (ask by name) — who is editing and who wrote what: `clay.me`,
+  `clay.people`, `clay.author`. Names live in the document as
+  `<div clay-people hidden><data value="id">Name</data></div>`, and authored elements
+  carry `data-by="id"`.
 - `wire` (`?plugins=wire,sync`) — a per-file control channel between the page and a
   process running in the user's terminal (see `htmlclay wire serve <file> -- <cmd>`).
   The page sends a request, the process answers with progress, and the process edits

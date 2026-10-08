@@ -118,3 +118,78 @@ test("hostSupports answers only from the announced list", async () => {
   expect(await hostSupports("format")).toBe(true);
   expect(await hostSupports("upload")).toBe(false);
 });
+
+// The outcome rides beside the answer, not on it, so the answer\'s shape is the same
+// whatever happened. Save and upload can treat "none" and "failed" alike; people
+// cannot, because a host that failed to say who you are has not said you are nobody.
+describe("hostMetaOutcome names how the discovery ended", () => {
+  test("a capability document is ok", async () => {
+    const { hostMeta, hostMetaOutcome } = await freshMeta();
+    global.fetch = jest.fn(async () => ok({ spec: 1, extensions: ["people"] }));
+
+    expect(hostMetaOutcome(await hostMeta())).toBe("ok");
+  });
+
+  test("a 404 is none: this host offers no discovery", async () => {
+    const { hostMeta, hostMetaOutcome } = await freshMeta();
+    global.fetch = jest.fn(async () => ({ ok: false, status: 404 }));
+
+    expect(hostMetaOutcome(await hostMeta())).toBe("none");
+  });
+
+  test("a 503 is failed: a host that should have answered did not", async () => {
+    const { hostMeta, hostMetaOutcome } = await freshMeta();
+    global.fetch = jest.fn(async () => ({ ok: false, status: 503 }));
+
+    expect(hostMetaOutcome(await hostMeta())).toBe("failed");
+  });
+
+  test("a network failure is failed", async () => {
+    const { hostMeta, hostMetaOutcome } = await freshMeta();
+    global.fetch = jest.fn(async () => { throw new TypeError("network"); });
+
+    expect(hostMetaOutcome(await hostMeta())).toBe("failed");
+  });
+
+  test("a 2xx that is not JSON is none", async () => {
+    const { hostMeta, hostMetaOutcome } = await freshMeta();
+    global.fetch = jest.fn(async () => ({ ok: true, text: async () => "<html>" }));
+
+    expect(hostMetaOutcome(await hostMeta())).toBe("none");
+  });
+
+  test("an object this module never produced is none", async () => {
+    const { hostMetaOutcome } = await freshMeta();
+
+    expect(hostMetaOutcome({})).toBe("none");
+  });
+});
+
+// A refresh that fails is a blip (a deploy, a proxy), not news that the host forgot
+// its capabilities: the page keeps the last good answer. But an answer that was
+// already bare stays bare, so a failure never invents a capability.
+test("a failed fresh answer keeps the page's last good answer", async () => {
+  const { hostMeta } = await freshMeta();
+  let calls = 0;
+  global.fetch = jest.fn(async () => {
+    calls += 1;
+    return calls > 1 ? { ok: false, status: 502 } : ok({ spec: 1, extensions: ["upload"] });
+  });
+
+  expect((await hostMeta()).extensions).toEqual(["upload"]);
+
+  const fresh = await hostMeta({ fresh: true });
+  expect(fresh.extensions).toEqual([]);
+  expect((await hostMeta()).extensions).toEqual(["upload"]);
+
+  const bare = await freshMeta();
+  let bareCalls = 0;
+  global.fetch = jest.fn(async () => {
+    bareCalls += 1;
+    return bareCalls > 1 ? { ok: false, status: 502 } : { ok: false, status: 404 };
+  });
+
+  expect((await bare.hostMeta()).extensions).toEqual([]);
+  expect((await bare.hostMeta({ fresh: true })).extensions).toEqual([]);
+  expect((await bare.hostMeta()).extensions).toEqual([]);
+});

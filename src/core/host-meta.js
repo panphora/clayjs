@@ -1,8 +1,9 @@
 /**
  * host-meta.js — what this host can do (spec §5).
  *
- * The first discovery client clayjs has had. Not fetched at boot: the first
- * caller is the first file pick, so a page that never uploads never asks.
+ * The first discovery client clayjs has had. Not fetched at boot by core: the first
+ * caller is the first file pick, or the people plugin when a page asks for it, so a
+ * page that uses neither never asks.
  *
  * The spec's own rule about what counts as an answer is deliberately strict on
  * the way in and forgiving on the way out. Only a 2xx carrying a JSON object with
@@ -16,6 +17,29 @@ import { saveToken } from "./host-attrs.js";
 
 const META_PATH = "/_/meta";
 const META_TIMEOUT_MS = 6000;
+
+// How each answer came about, kept beside the answer rather than on it so its
+// shape never changes. "ok": a capability document. "none": no discovery on offer
+// (a 404, a file nobody is serving, a server that has never heard of the spec).
+// "failed": a host that should have answered did not (a 5xx, a timeout, a dropped
+// connection). Save and upload treat the last two alike; people must not, because
+// a host that failed to say who you are has not said you are nobody.
+const outcomes = new WeakMap();
+
+function settle(outcome, meta = bareHost()) {
+  outcomes.set(meta, outcome);
+  return meta;
+}
+
+/**
+ * How the discovery that produced `meta` ended: "ok", "none" or "failed".
+ *
+ * @param {Object} meta - an answer from hostMeta()
+ * @returns {"ok"|"none"|"failed"}
+ */
+export function hostMetaOutcome(meta) {
+  return outcomes.get(meta) ?? "none";
+}
 
 // The bare-core-host answer, which is also every failure's answer.
 function bareHost() {
@@ -34,8 +58,9 @@ let refreshing = null;
  * `spec` and `extensions` describe the host and never change under a loaded
  * document, which is why one answer serves the whole page. The `document` block
  * does change: its `etag` ticks on every save, by anyone. A caller that needs a
- * current one passes `fresh`, which asks again and replaces the memoized answer,
- * and concurrent fresh callers still share one request.
+ * current one passes `fresh`, which asks again and replaces the memoized answer
+ * unless it failed where an earlier one succeeded, and concurrent fresh callers
+ * still share one request.
  *
  * @param {Object} [options]
  * @param {boolean} [options.fresh]
@@ -47,8 +72,15 @@ export function hostMeta({ fresh = false } = {}) {
     return inFlight;
   }
   if (!refreshing) {
+    const previous = inFlight;
     refreshing = fetchMeta().catch(bareHost).finally(() => { refreshing = null; });
-    inFlight = refreshing;
+    // The caller that asked for a fresh answer gets it, failure and all. The page keeps its
+    // last good answer: one 502 during a deploy must not turn uploads off for the session.
+    inFlight = refreshing.then(async (meta) => {
+      if (hostMetaOutcome(meta) === "ok" || !previous) return meta;
+      const last = await previous;
+      return hostMetaOutcome(last) === "ok" ? last : meta;
+    });
   }
   return refreshing;
 }
@@ -74,6 +106,9 @@ export function resetHostMeta() {
 }
 
 async function fetchMeta() {
+  // A file opened from disk has no host to ask, and fetch would only throw.
+  if (!/^https?:$/.test(window.location.protocol)) return settle("none");
+
   const token = saveToken();
   // A host that mints tokens answers discovery per token, because on a sandboxed
   // document the token is the only identity there is: the browser gives it an
@@ -99,25 +134,25 @@ async function fetchMeta() {
       redirect: "manual",
       signal: controller.signal
     });
-    if (!res.ok) return bareHost();
+    if (!res.ok) return settle(res.status >= 500 ? "failed" : "none");
     const text = await res.text();
-    if (!text) return bareHost();
+    if (!text) return settle("none");
 
     let body;
     try {
       body = JSON.parse(text);
     } catch (_) {
-      return bareHost();
+      return settle("none");
     }
-    if (!body || typeof body !== "object" || typeof body.spec !== "number") return bareHost();
+    if (!body || typeof body !== "object" || typeof body.spec !== "number") return settle("none");
 
-    return {
+    return settle("ok", {
       spec: body.spec,
       extensions: Array.isArray(body.extensions) ? body.extensions : [],
       document: body.document && typeof body.document === "object" ? body.document : null
-    };
+    });
   } catch (_) {
-    return bareHost();
+    return settle("failed");
   } finally {
     clearTimeout(timeoutId);
   }

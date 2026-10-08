@@ -101,6 +101,13 @@
     </div>
 
     <div class="libcard">
+      <div class="lib-name" id="people">people <span class="tag">plugin · ask by name</span></div>
+      <p class="lib-prob">“Comments and cards need to say who wrote them, and the page has no idea who anyone is.”</p>
+      <p><code>clay.me</code> is the person editing, <code>clay.people</code> the names this page records, and <code>clay.author(el)</code> stamps an element with your id. On a host that knows you, names come from your account; on a file with no host, it asks your name once.</p>
+      <pre><code class="language-markup">&lt;script src="https://clayjs.com/v1/clay.js?plugins=people"&gt;&lt;/script&gt;</code></pre>
+    </div>
+
+    <div class="libcard">
       <div class="lib-name" id="wire">wire <span class="tag">plugin · ask by name</span></div>
       <p class="lib-prob">“I want a program on my own machine to work on this file while I have it open.”</p>
       <p>A per-file control channel between the page and a process running in your terminal. The page sends a request, the process answers with progress, and the process edits <em>the file</em>. HTML never travels over the wire: the change reaches your open page as an ordinary external file change, through live sync. Nothing in the wire depends on what a payload contains.</p>

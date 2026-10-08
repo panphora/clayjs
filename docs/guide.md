@@ -415,7 +415,7 @@ Traps in this table:
 - **A runtime change inside `freeze` is never saved,** not even by `clay.save.force()`: every save restores the inner HTML captured at load.
 - **`freeze` freezes inner HTML only.** The freeze element's own attributes stay live and are saved.
 - **Rendering into a `freeze` mount before `clay.ready` freezes the rendered output**, because the capture happens at boot. Render after `clay.ready`.
-- An `editor-ui` root disappears from the saved file, so it cannot be authored in the file. Create it at runtime from a `<template>`, every load.
+- An `editor-ui` root disappears from the saved file, so it cannot be authored in the file. Create it at runtime from a `<template>`, every load. That includes elements inside the `<template>`: mark the blueprint `editor-ui` and the first save empties the template, so the next load has no chrome to clone. Leave the blueprint unmarked and set `clay="editor-ui"` on each clone as you insert it.
 - Mark a region by setting the attribute on creation, or with `clay.region.addRegionToken(el, "editor-ui")`.
 
 ### 5.3 `persist`: form controls

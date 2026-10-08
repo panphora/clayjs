@@ -125,6 +125,10 @@ function attachPluginMember(path, mod, loaded) {
     clay.cms = mod.cms || mod.default;
   } else if (path === "plugins/upload.js") {
     clay.upload = mod.upload || mod.default;
+  } else if (path === "plugins/people.js") {
+    clay.people = mod.people;
+    clay.author = mod.author;
+    Object.defineProperty(clay, "me", { get: mod.currentMe, configurable: true, enumerable: true });
   } else if (path === "plugins/wire.js") {
     clay.wire = mod.wire || mod.default;
   } else if (path === "plugins/ai-edit.js") {

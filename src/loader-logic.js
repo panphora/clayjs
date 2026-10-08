@@ -36,6 +36,8 @@ export const PLUGIN_PATHS = {
   // injects its own editing toggle there and clayjs's edit-mode signal is a
   // superset of the cms's, so the plugin is present exactly when it can be used.
   upload:    { path: "plugins/upload.js",          editOnly: true,  default: false },
+  // Who is editing and who wrote what. Not editOnly: a reader still sees names.
+  people:    { path: "plugins/people.js",          editOnly: false, default: false },
   wire:      { path: "plugins/wire.js",            editOnly: false, default: false },
   // Edit mode only: the AI comment box is an editing gesture. Opt in with
   // `plugins=ai-edit`; it stays dormant on any host that does not list a ready
@@ -89,6 +91,7 @@ export const MODULES = {
   "plugins/cms.js":             () => import("./plugins/cms.js"),
   "plugins/quickcrop.js":       () => import("./plugins/quickcrop.js"),
   "plugins/upload.js":          () => import("./plugins/upload.js"),
+  "plugins/people.js":          () => import("./plugins/people.js"),
   "plugins/wire.js":            () => import("./plugins/wire.js"),
   "plugins/ai-edit.js":         () => import("./plugins/ai-edit.js"),
   "plugins/demo.js":            () => import("./plugins/demo.js"),
@@ -97,7 +100,7 @@ export const MODULES = {
 
 // `source` is last on purpose: its install captures a save clone, so it wants every
 // plugin that registers a document transform to have registered it first.
-const PLUGIN_ORDER = ["richclay", "indicator", "sortable", "undo", "quickcrop", "upload", "cms", "sync", "wire", "ai-edit", "demo", "source"];
+const PLUGIN_ORDER = ["richclay", "indicator", "sortable", "undo", "quickcrop", "upload", "people", "cms", "sync", "wire", "ai-edit", "demo", "source"];
 
 // A plugin that cannot do its whole job alone. hypercms reads the cropper through
 // a capability lookup (`clay.quickcrop`) and silently uploads the raw file when it
