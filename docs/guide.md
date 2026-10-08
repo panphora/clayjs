@@ -506,7 +506,7 @@ Live sync and undo pair elements across versions by **`data-id`, then `id`**, us
 
 ### 5.6 Assets
 
-An image's durable form is its `src`. Upload the file and write the returned URL (8.5). Where the host cannot store files, embed a `data:` URL, which works anywhere but makes every save carry the bytes. Keep embedded images small. On HTML Clay and Hyperclay Local uploads land beside the file in `assets-<name>/`; moving the HTML alone breaks them.
+An image's durable form is its `src`. Upload the file and write the returned URL (8.5). Where the host cannot store files, embed a `data:` URL, which works anywhere but makes every save carry the bytes. Keep embedded images small. Every host returns a host path such as `/_/uploads/assets-<name>/photo-ab12.png`, which keeps working on that host when the document is renamed or moved. A document opened straight from disk shows those images broken; Export as zip takes a document with its files.
 
 ---
 
@@ -911,6 +911,7 @@ async function imageSource(file) {
 - Other codes: `unauthorized`, `forbidden`, `timeout` (may have landed; retrying is safe), `aborted`, `network`, `bad-response`.
 - Events: `clay:upload-start`, `clay:upload-progress`, `clay:upload-done`, `clay:upload-error`.
 - Host limits: HTML Clay and Hyperclay Local 25 MB per file; hyperclay.com 10, 20 or 100 MB by plan.
+- The URL is a host path, `/_/uploads/assets-<document>/<name>`. Write it exactly as returned: every address of the host serves it, so it survives renaming or moving the document. Never rebuild it from parts.
 - Uploaded assets on hyperclay.com are publicly reachable by URL even when the document is private.
 
 `clay.quickcrop(file, { aspect, maxWidth, maxHeight, type, quality })` opens a crop dialog and resolves `{ blob, dataURL, width, height }`, or `null` on cancel. It does not upload. Pass the blob to `clay.upload`, wrapped as a `File`. One cropper at a time; it sets `body.style.overflow = "hidden"` while open, which a save at that moment writes into the file.
@@ -1352,7 +1353,7 @@ Cross-cutting:
 | `by` on frames, section notice | no | no | yes |
 | Wire and ai-edit | yes | yes | no |
 | Data API write | yes | yes | read only |
-| Uploads | 25 MB, beside the file | 25 MB, in `assets-<name>/` | 10, 20 or 100 MB by plan |
+| Uploads | 25 MB, in `~/htmlclay/uploads/` | 25 MB, in the root's `uploads/` | 10, 20 or 100 MB by plan, in the account's `uploads/` |
 | Version history | yes | 60 days, newest 20 | a version per save; a restore does not reach open editors' tabs, so reload after restoring |
 | Max save | 50 MB | 20 MB | 5 MB |
 
