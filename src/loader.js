@@ -1,5 +1,6 @@
 import { resolveModules, MODULES } from "./loader-logic.js";
 import onDomReady from "./lib/dom-ready.js";
+import { initTheme } from "./ui/theme.js";
 
 function domReady() {
   return new Promise((resolve) => onDomReady(resolve));
@@ -11,6 +12,8 @@ function domReady() {
 // previous release. A call shape that differs between them leaves the page with
 // no clayjs at all.
 export async function boot(base, params, readyResolve) {
+  initTheme();
+
   await domReady();                                    // Mutation observes document.body
                                                        // unconditionally, and a <head> placement
                                                        // would otherwise observe null

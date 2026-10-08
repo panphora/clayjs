@@ -2,9 +2,12 @@ import toast, { toastPersistent, dismissPersistent } from "./toast.js";
 import themodal from "./modal.js";
 import { ask, consent, tell, snippet } from "./dialogs.js";
 import { saveFeedback } from "../core/save-feedback.js";
+import { initTheme } from "./theme.js";
 
 // Attach the public surface explicitly (§2.3). We do NOT rely on toast.js /
 // dialogs.js evaluation side effects — their window auto-exports are stripped.
+initTheme();
+
 const clay = (window.clay = window.clay || {});
 clay.toast = toast;
 clay.toastPersistent = toastPersistent;
