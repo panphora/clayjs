@@ -46,13 +46,13 @@
     "access": "public"
   },
   "scripts": {
-    "test": "NODE_OPTIONS=--experimental-vm-modules jest",
+    "test": "node scripts/test-guard.mjs",
     "test:conformance": "UPDATE_GOLDENS=0 web-test-runner --config conformance/wtr.config.mjs",
     "conformance:update": "UPDATE_GOLDENS=1 web-test-runner --config conformance/wtr.config.mjs",
     "build:standalone": "node build.js --standalone",
     "prepack": "node build.js --standalone",
     "test:standalone": "node build.js --standalone && web-test-runner --config tests/browser/wtr.config.mjs",
-    "prepublishOnly": "npm test && npm run test:conformance && npm run test:standalone",
+    "prepublishOnly": "testbox run",
     "dev": "node tests/stub-server.mjs",
     "build": "npm run build:bevel && npm run build:skins && node build.js",
     "propagate:foundation": "node scripts/propagate-foundation.mjs",

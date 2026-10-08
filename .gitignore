@@ -6,3 +6,4 @@ dist/
 .wrangler/
 .deploy
 .version-cache/
+test-box-out/
