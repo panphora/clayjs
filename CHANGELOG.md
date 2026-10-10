@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.1] - 2026-10-09
+
+### Changed
+- Split the ClayJS docs into sub pages, with redirects from the old URLs and Markdown copies of each page
+
+
+
 ## [1.9.0] - 2026-10-08
 
 ### Added
