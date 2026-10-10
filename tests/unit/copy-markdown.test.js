@@ -21,6 +21,8 @@ test('puts the button and the .md link at the top of the first section', () => {
   expect(tools.className).toBe('md-tools');
   expect(tools.querySelector('button').textContent).toBe('Copy as Markdown');
   expect(tools.querySelector('a').getAttribute('href')).toBe('/docs.md');
+  expect(tools.querySelector('a').textContent).toBe('.md file');
+  expect(tools.querySelector('a').className).toBe('btn ghost');
   expect(document.querySelectorAll('.md-tools')).toHaveLength(1);
 });
 
@@ -56,4 +58,20 @@ test('a failed fetch reports the failure and can retry', async () => {
   button.click();
   await new Promise((r) => setTimeout(r, 0));
   expect(global.fetch).toHaveBeenCalledTimes(2);
+});
+
+test('a page with its own data-copy-md buttons wires them and adds nothing', async () => {
+  page();
+  document.body.insertAdjacentHTML('beforeend', '<button data-copy-md="/guide.md">Copy as Markdown</button>');
+  global.fetch = jest.fn(async () => ({ ok: true, text: async () => '# Guide\n' }));
+  const writeText = jest.fn(async () => {});
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+  run();
+  expect(document.querySelector('.md-tools')).toBeNull();
+  const button = document.querySelector('[data-copy-md]');
+  button.click();
+  await new Promise((r) => setTimeout(r, 0));
+  expect(global.fetch).toHaveBeenCalledWith('/guide.md');
+  expect(writeText).toHaveBeenCalledWith('# Guide\n');
+  expect(button.textContent).toBe('Copied');
 });

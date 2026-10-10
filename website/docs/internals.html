@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Low level · Docs · clayjs</title>
+<meta name="description" content="clay.internals, for code that sits inside the save lifecycle instead of calling it.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%233E6B52'/%3E%3Cpath d='M21.5 11.2a7 7 0 1 0 0 9.6' fill='none' stroke='%23F1EFEA' stroke-width='3.2' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="canonical" href="https://clayjs.com/docs/internals">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="clayjs">
+<meta property="og:title" content="Low level · Docs · clayjs">
+<meta property="og:description" content="clay.internals, for code that sits inside the save lifecycle instead of calling it.">
+<meta property="og:url" content="https://clayjs.com/docs/internals">
+<meta property="og:image" content="https://clayjs.com/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="clayjs: the document is the app, the document is the database">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Low level · Docs · clayjs">
+<meta name="twitter:description" content="clay.internals, for code that sits inside the save lifecycle instead of calling it.">
+<meta name="twitter:image" content="https://clayjs.com/og-image.png">
+<link rel="stylesheet" href="/styles.css">
+<script src="/prism.min.js"></script>
+</head>
+<body>
+
+<nav class="nav">
+  <a class="wordmark" href="/">clay<span class="js">.js</span><span class="tm" aria-hidden="true">™</span></a>
+  <div class="links">
+    <a class="github-clay" href="https://github.com/panphora/clayjs" target="_blank" rel="noopener" aria-label="View ClayJS source on GitHub"><span class="github-bracket" aria-hidden="true">&lt;</span><span class="github-mascot" aria-hidden="true"><svg viewBox="0 0 16 16" focusable="false"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg></span><span class="github-word" aria-hidden="true">source</span><span class="github-bracket github-close" aria-hidden="true">/&gt;</span></a>
+    <a href="/get-started">Get started</a>
+    <a href="/guide">Guide</a>
+    <a href="/advanced">Advanced</a>
+    <a href="/plugins">Plugins</a>
+    <a href="/docs" aria-current="page">Docs</a>
+  </div>
+</nav>
+
+<main class="page">
+
+  <section style="border-top: none; padding-top: 56px;">
+    <span class="eyebrow"><a href="/docs">Docs</a> · Low level</span>
+    <h1 class="display" style="font-size: clamp(30px, 4.5vw, 42px);">clay.internals</h1>
+    <p class="lede" style="margin-top: 12px;">clay.internals, for code that sits inside the save lifecycle instead of calling it.</p>
+  </section>
+
+  <section id="internals" class="doc-body">
+    <p>The pieces clayjs builds itself out of, for code that needs to sit <em>inside</em> the save lifecycle rather than call it. Lower level than <code>clay.*</code>: it assumes you know the lifecycle. One extra script tag, and <code>clay.loaded.internals</code> resolves when it's ready.</p>
+    <pre><code class="language-markup">&lt;script src="https://clayjs.com/v1/clay-internals.js"&gt;&lt;/script&gt;</code></pre>
+    <table>
+      <tr><th>Member</th><th>What it does</th></tr>
+      <tr><td><code>captureSnapshot()</code></td><td>The cloned document element, with form values synced, <code>onbeforesnapshot</code> handlers run, and <code>no-snapshot</code> regions plus browser-extension noise already removed. It is the shared base every lane starts from, not an untouched copy of the DOM.</td></tr>
+      <tr><td><code>captureForSave()</code></td><td>The exact bytes a save would send, stripping and all.</td></tr>
+      <tr><td><code>addDocumentTransform(fn)</code></td><td>Register a hook that runs on the clone during save preparation and on every change check, so keep it pure and repeatable. Same registry as <code>clay.addDocumentTransform</code>.</td></tr>
+      <tr><td><code>region.resolveRegionPolicy(node)</code></td><td>The resolved region axes for a node: <code>{watched, autosaveTriggered, dirtyTracked, undoable, persist, extension}</code>. <code>autosaveTriggered</code> is whether an edit here starts a save by itself; <code>dirtyTracked</code> is whether it counts as unsaved work at all. They differ only inside <code>no-trigger-autosave</code>, which is saved work waiting for a manual save; <code>no-dirty</code> clears both, for content that is saved but is not work.</td></tr>
+      <tr><td><code>region.isInert(node)</code></td><td>Whether a node is invisible to the whole mutation system (<code>no-watch</code> and extension noise).</td></tr>
+      <tr><td><code>region.isSnapshotRemoved(node)</code></td><td>Whether a node is dropped from every snapshot (<code>no-snapshot</code>). Ancestor-aware: a child of a marked region is just as absent as the region itself.</td></tr>
+      <tr><td><code>region.addRegionToken(el, token)</code></td><td>Add one token to an element's <code>clay</code> attribute, keeping the tokens already there.</td></tr>
+      <tr><td><code>region.PERSIST</code> / <code>region.REGION_ATTRS</code></td><td>The persist values (<code>full</code>, <code>frozen</code>, <code>none</code>) and the canonical token list.</td></tr>
+      <tr><td><code>region.selectors</code></td><td><code>stripFromSave</code>, <code>stripFromComparison</code>, <code>stripFromDirtyCheck</code>, <code>noTriggerAutosave</code>, <code>snapshotRemove</code>, <code>freeze</code>: the selectors clayjs itself strips with, legacy spellings included. The same object is on <code>clay.region</code>, which also publishes them as <code>STRIP_FROM_SAVE</code>-style constants.</td></tr>
+      <tr><td><code>save.saveHtml(html, cb)</code></td><td>Send an HTML string to the save endpoint. Resolves <code>{ok, msg, msgType, code, etag}</code>; never rejects.</td></tr>
+      <tr><td><code>save.replacePageWith(url, cb)</code></td><td>Fetch another URL's HTML and save it over the current file. Same result shape.</td></tr>
+      <tr><td><code>save.isSaveInProgress()</code></td><td>Whether a save is in flight right now.</td></tr>
+    </table>
+    <p class="small"><strong><code>save.saveHtml</code> writes the bytes you hand it straight to the file</strong>: it bypasses the snapshot pipeline entirely, so nothing is stripped and no hook runs. Check <code>save.isSaveInProgress()</code> first, because firing into an in-flight save is how you lose an edit. For a worked example of the region helpers, see <a href="/advanced#custom-attrs">Advanced</a>.</p>
+  </section>
+
+  <nav class="pager" aria-label="Docs pages">
+    <a class="pager-prev" href="/docs/offline"><span class="pager-dir">&larr; Previous</span><span class="pager-name">Offline</span></a>
+    <a class="pager-next" href="/docs/examples"><span class="pager-dir">Next &rarr;</span><span class="pager-name">Example apps</span></a>
+  </nav>
+
+</main>
+
+<footer>
+  <div class="inner">
+    <span>clayjs</span>
+    <a href="/">Home</a>
+    <a href="/get-started">Get started</a>
+    <a href="/advanced">Advanced</a>
+    <a href="/plugins">Plugins</a>
+    <a href="/docs/offline">Offline</a>
+    <a href="https://github.com/panphora/clayjs" rel="noopener">GitHub</a>
+    <a href="https://github.com/panphora/clayjs/blob/main/LICENSE" rel="noopener">MIT-0</a>
+    <a href="/THIRD-PARTY-NOTICES.md">Third-party notices</a>
+        <a href="/llms.txt">llms.txt</a>
+  </div>
+  <div class="inner" data-hyper-footer="clayjs" clay="no-save no-snapshot"></div>
+</footer>
+<script src="https://hyperclay.com/public/js/hyper-footer.js" defer></script>
+
+</body>
+</html>

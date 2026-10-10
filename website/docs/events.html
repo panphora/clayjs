@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Events · Docs · clayjs</title>
+<meta name="description" content="What fires on document as a page boots, saves, goes dirty and receives live sync.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%233E6B52'/%3E%3Cpath d='M21.5 11.2a7 7 0 1 0 0 9.6' fill='none' stroke='%23F1EFEA' stroke-width='3.2' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="canonical" href="https://clayjs.com/docs/events">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="clayjs">
+<meta property="og:title" content="Events · Docs · clayjs">
+<meta property="og:description" content="What fires on document as a page boots, saves, goes dirty and receives live sync.">
+<meta property="og:url" content="https://clayjs.com/docs/events">
+<meta property="og:image" content="https://clayjs.com/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="clayjs: the document is the app, the document is the database">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Events · Docs · clayjs">
+<meta name="twitter:description" content="What fires on document as a page boots, saves, goes dirty and receives live sync.">
+<meta name="twitter:image" content="https://clayjs.com/og-image.png">
+<link rel="stylesheet" href="/styles.css">
+<script src="/prism.min.js"></script>
+</head>
+<body>
+
+<nav class="nav">
+  <a class="wordmark" href="/">clay<span class="js">.js</span><span class="tm" aria-hidden="true">™</span></a>
+  <div class="links">
+    <a class="github-clay" href="https://github.com/panphora/clayjs" target="_blank" rel="noopener" aria-label="View ClayJS source on GitHub"><span class="github-bracket" aria-hidden="true">&lt;</span><span class="github-mascot" aria-hidden="true"><svg viewBox="0 0 16 16" focusable="false"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg></span><span class="github-word" aria-hidden="true">source</span><span class="github-bracket github-close" aria-hidden="true">/&gt;</span></a>
+    <a href="/get-started">Get started</a>
+    <a href="/guide">Guide</a>
+    <a href="/advanced">Advanced</a>
+    <a href="/plugins">Plugins</a>
+    <a href="/docs" aria-current="page">Docs</a>
+  </div>
+</nav>
+
+<main class="page">
+
+  <section style="border-top: none; padding-top: 56px;">
+    <span class="eyebrow"><a href="/docs">Docs</a> · Events</span>
+    <h1 class="display" style="font-size: clamp(30px, 4.5vw, 42px);">Listening in</h1>
+    <p class="lede" style="margin-top: 12px;">What fires on document as a page boots, saves, goes dirty and receives live sync.</p>
+  </section>
+
+  <section id="events" class="doc-body">
+    <table>
+      <tr><th>Event (on document)</th><th>Fires when</th><th>detail</th></tr>
+      <tr><td><code>clay:ready</code></td><td>clayjs finished booting (same moment <code>clay.ready</code> resolves)</td><td><code>{clay}</code></td></tr>
+      <tr><td><code>clay:save-saving</code></td><td>a save has been in flight for 500ms (fast saves skip straight to the result)</td><td><code>{msg, timestamp}</code></td></tr>
+      <tr><td><code>clay:save-saved</code></td><td>the server confirmed the write</td><td><code>{msg, timestamp}</code></td></tr>
+      <tr><td><code>clay:save-error</code></td><td>the server answered with a problem</td><td><code>{msg, timestamp}</code></td></tr>
+      <tr><td><code>clay:save-offline</code></td><td>the browser is offline (clayjs re-saves when the connection returns)</td><td><code>{msg, timestamp}</code></td></tr>
+      <tr><td><code>clay:dirty</code></td><td>the page holds work no save has written. It follows DOM mutations and user input; a script setting a <code>[persist]</code> control's value programmatically is not observed. One event per state change, so a burst of keystrokes is one <code>clay:dirty</code>, and it fires before autosave does</td><td>—</td></tr>
+      <tr><td><code>clay:clean</code></td><td>a save (or a verified merge) has accounted for everything the gate saw</td><td>—</td></tr>
+      <tr><td><code>clay:snapshot-ready</code></td><td>a snapshot has been cloned, before any stripping. Read <code>detail.documentElement</code>; do not change it. It is also where both change-detection baselines come from, and the change checks do not fire this event, so an edit made here is saved but never compared and the page reads dirty forever. Use <code>clay.addDocumentTransform(fn)</code> to change what gets saved.</td><td><code>{documentElement}</code></td></tr>
+      <tr><td><code>clay:sync-applied</code></td><td>a live-sync update landed (sync plugin)</td><td><code>{seq, source, by, report, unresolved}</code>; <code>source</code> is <code>peer</code> (another open copy) or <code>disk</code> (the file changed underneath you)</td></tr>
+      <tr><td><code>clay:sorted</code></td><td>a drag-drop reorder landed (sortable plugin); fires on the container and bubbles</td><td><code>{item, from, to, oldIndex, newIndex}</code></td></tr>
+      <tr><td><code>clay:view-save-attempt</code></td><td>a visitor clicked a <code>[trigger-save]</code> element in view mode; show your own notice</td><td>—</td></tr>
+    </table>
+  </section>
+
+  <nav class="pager" aria-label="Docs pages">
+    <a class="pager-prev" href="/docs/attributes"><span class="pager-dir">&larr; Previous</span><span class="pager-name">Attributes</span></a>
+    <a class="pager-next" href="/docs/edit-mode"><span class="pager-dir">Next &rarr;</span><span class="pager-name">Edit mode</span></a>
+  </nav>
+
+</main>
+
+<footer>
+  <div class="inner">
+    <span>clayjs</span>
+    <a href="/">Home</a>
+    <a href="/get-started">Get started</a>
+    <a href="/advanced">Advanced</a>
+    <a href="/plugins">Plugins</a>
+    <a href="/docs/offline">Offline</a>
+    <a href="https://github.com/panphora/clayjs" rel="noopener">GitHub</a>
+    <a href="https://github.com/panphora/clayjs/blob/main/LICENSE" rel="noopener">MIT-0</a>
+    <a href="/THIRD-PARTY-NOTICES.md">Third-party notices</a>
+        <a href="/llms.txt">llms.txt</a>
+  </div>
+  <div class="inner" data-hyper-footer="clayjs" clay="no-save no-snapshot"></div>
+</footer>
+<script src="https://hyperclay.com/public/js/hyper-footer.js" defer></script>
+
+</body>
+</html>

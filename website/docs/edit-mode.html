@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Edit mode · Docs · clayjs</title>
+<meta name="description" content="Who may edit a page, and the four places clayjs looks to decide, in order.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%233E6B52'/%3E%3Cpath d='M21.5 11.2a7 7 0 1 0 0 9.6' fill='none' stroke='%23F1EFEA' stroke-width='3.2' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="canonical" href="https://clayjs.com/docs/edit-mode">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="clayjs">
+<meta property="og:title" content="Edit mode · Docs · clayjs">
+<meta property="og:description" content="Who may edit a page, and the four places clayjs looks to decide, in order.">
+<meta property="og:url" content="https://clayjs.com/docs/edit-mode">
+<meta property="og:image" content="https://clayjs.com/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="clayjs: the document is the app, the document is the database">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Edit mode · Docs · clayjs">
+<meta name="twitter:description" content="Who may edit a page, and the four places clayjs looks to decide, in order.">
+<meta name="twitter:image" content="https://clayjs.com/og-image.png">
+<link rel="stylesheet" href="/styles.css">
+<script src="/prism.min.js"></script>
+</head>
+<body>
+
+<nav class="nav">
+  <a class="wordmark" href="/">clay<span class="js">.js</span><span class="tm" aria-hidden="true">™</span></a>
+  <div class="links">
+    <a class="github-clay" href="https://github.com/panphora/clayjs" target="_blank" rel="noopener" aria-label="View ClayJS source on GitHub"><span class="github-bracket" aria-hidden="true">&lt;</span><span class="github-mascot" aria-hidden="true"><svg viewBox="0 0 16 16" focusable="false"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg></span><span class="github-word" aria-hidden="true">source</span><span class="github-bracket github-close" aria-hidden="true">/&gt;</span></a>
+    <a href="/get-started">Get started</a>
+    <a href="/guide">Guide</a>
+    <a href="/advanced">Advanced</a>
+    <a href="/plugins">Plugins</a>
+    <a href="/docs" aria-current="page">Docs</a>
+  </div>
+</nav>
+
+<main class="page">
+
+  <section style="border-top: none; padding-top: 56px;">
+    <span class="eyebrow"><a href="/docs">Docs</a> · Edit mode</span>
+    <h1 class="display" style="font-size: clamp(30px, 4.5vw, 42px);">Who may edit</h1>
+    <p class="lede" style="margin-top: 12px;">Who may edit a page, and the four places clayjs looks to decide, in order.</p>
+  </section>
+
+  <section id="editmode" class="doc-body">
+    <p>Saving requires edit mode. On the platforms, you never think about this: <a href="https://hyperclay.com">hyperclay.com</a> arms it with a cookie when you're the owner, and Hyperclay Local and HTML Clay arm it for local files automatically. Resolution order:</p>
+    <table>
+      <tr><th>Priority</th><th>Source</th></tr>
+      <tr><td>1</td><td><code>?editmode=true</code> / <code>?editmode=false</code> in the URL</td></tr>
+      <tr><td>2</td><td><code>window.clayEditMode</code> set before clay.js loads</td></tr>
+      <tr><td>3</td><td>A save token the host put on the root element</td></tr>
+      <tr><td>4</td><td>The platform's owner cookie</td></tr>
+    </table>
+    <p class="small">The token sits above the cookie because it is the stronger claim: the host issued it for this document, while a cookie is ambient. A sandboxed document cannot read a cookie at all.</p>
+    <p>Serving files from your own server? Arm it yourself:</p>
+    <pre><code class="language-markup">&lt;script&gt;window.clayEditMode = true&lt;/script&gt;
+&lt;script src="https://clayjs.com/v1/clay.js"&gt;&lt;/script&gt;</code></pre>
+    <p class="small">Edit mode is client-side behavior. Whether a save is <em>accepted</em> is always the server's decision.</p>
+  </section>
+
+  <nav class="pager" aria-label="Docs pages">
+    <a class="pager-prev" href="/docs/events"><span class="pager-dir">&larr; Previous</span><span class="pager-name">Events</span></a>
+    <a class="pager-next" href="/docs/endpoint"><span class="pager-dir">Next &rarr;</span><span class="pager-name">Host it yourself</span></a>
+  </nav>
+
+</main>
+
+<footer>
+  <div class="inner">
+    <span>clayjs</span>
+    <a href="/">Home</a>
+    <a href="/get-started">Get started</a>
+    <a href="/advanced">Advanced</a>
+    <a href="/plugins">Plugins</a>
+    <a href="/docs/offline">Offline</a>
+    <a href="https://github.com/panphora/clayjs" rel="noopener">GitHub</a>
+    <a href="https://github.com/panphora/clayjs/blob/main/LICENSE" rel="noopener">MIT-0</a>
+    <a href="/THIRD-PARTY-NOTICES.md">Third-party notices</a>
+        <a href="/llms.txt">llms.txt</a>
+  </div>
+  <div class="inner" data-hyper-footer="clayjs" clay="no-save no-snapshot"></div>
+</footer>
+<script src="https://hyperclay.com/public/js/hyper-footer.js" defer></script>
+
+</body>
+</html>

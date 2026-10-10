@@ -13,9 +13,9 @@
 //   public/
 //     index.html docs.html …           the site, from website/, flattened
 //     llms.txt                         docs/reference.md, renamed
-//     guide.html guide.md *.md         the guide and each page's Markdown twin (scripts/site-docs.mjs)
+//     complete-guide.html guide.md *.md  the guide and each page's Markdown twin (scripts/site-docs.mjs)
 //     THIRD-PARTY-NOTICES.md           linked from the site footer
-//     _headers                         from website/
+//     _headers _redirects              from website/
 //     v1/     clay.js clay.standalone.js …  src/**   latest 1.x, what everyone is told to use
 //     1.1.0/  clay.js clay.standalone.js …  src/**   that exact release, immutable, forever
 //
@@ -367,11 +367,11 @@ function servedPaths(rel) {
 }
 
 // The site's own files, named one by one so no rule overlaps a version prefix.
-// The example apps share one rule: they only ever change together with the guide,
-// and one rule per file would spend eight of the 90.
-const siteRules = [...new Set([...siteFiles.filter((f) => f !== '_headers'), ...docFiles, 'llms.txt', 'THIRD-PARTY-NOTICES.md', 'versions.json']
+// The example apps share one rule, and so do the docs sub pages and their Markdown
+// copies: one rule per file would spend most of the 90.
+const siteRules = [...new Set([...siteFiles.filter((f) => f !== '_headers' && f !== '_redirects'), ...docFiles, 'llms.txt', 'THIRD-PARTY-NOTICES.md', 'versions.json']
   .sort()
-  .flatMap((rel) => (rel.startsWith('examples/') ? ['/examples/*'] : servedPaths(rel))))];
+  .flatMap((rel) => (rel.startsWith('examples/') ? ['/examples/*'] : rel.startsWith('docs/') ? ['/docs/*'] : servedPaths(rel))))];
 for (const path of siteRules) {
   blocks.push(`${path}\n  Cache-Control: public, max-age=600`);
 }
@@ -395,7 +395,7 @@ if (ruleCount > 90) {
 // broken. _headers earns its own check twice over: without it the site serves no
 // Cache-Control and, worse, no Access-Control-Allow-Origin on the module tree,
 // which silently breaks every page loading clay.js from another origin.
-const required = ['_headers', 'index.html', 'llms.txt', 'THIRD-PARTY-NOTICES.md', 'guide.html', 'guide.md', 'docs.md', 'visual-guide.html', 'copy-markdown.js', 'examples/skeleton.html'];
+const required = ['_headers', 'index.html', 'llms.txt', 'THIRD-PARTY-NOTICES.md', 'guide.html', 'complete-guide.html', 'guide.md', 'docs.md', 'visual-guide.html', 'docs/offline.html', 'docs/endpoint.md', '_redirects', 'copy-markdown.js', 'examples/skeleton.html'];
 const served = [...[...heads].map(([major, v]) => [`v${major}`, v]), ...pins.map((v) => [v, v])];
 for (const [prefix, version] of served) {
   required.push(`${prefix}/clay.js`, `${prefix}/src/loader.js`, `${prefix}/sap.js`);

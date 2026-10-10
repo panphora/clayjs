@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Core API · Docs · clayjs</title>
+<meta name="description" content="Everything on window.clay: saving, reading and writing data, edit mode, and what each plugin adds.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%233E6B52'/%3E%3Cpath d='M21.5 11.2a7 7 0 1 0 0 9.6' fill='none' stroke='%23F1EFEA' stroke-width='3.2' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="canonical" href="https://clayjs.com/docs/api">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="clayjs">
+<meta property="og:title" content="Core API · Docs · clayjs">
+<meta property="og:description" content="Everything on window.clay: saving, reading and writing data, edit mode, and what each plugin adds.">
+<meta property="og:url" content="https://clayjs.com/docs/api">
+<meta property="og:image" content="https://clayjs.com/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="clayjs: the document is the app, the document is the database">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Core API · Docs · clayjs">
+<meta name="twitter:description" content="Everything on window.clay: saving, reading and writing data, edit mode, and what each plugin adds.">
+<meta name="twitter:image" content="https://clayjs.com/og-image.png">
+<link rel="stylesheet" href="/styles.css">
+<script src="/prism.min.js"></script>
+</head>
+<body>
+
+<nav class="nav">
+  <a class="wordmark" href="/">clay<span class="js">.js</span><span class="tm" aria-hidden="true">™</span></a>
+  <div class="links">
+    <a class="github-clay" href="https://github.com/panphora/clayjs" target="_blank" rel="noopener" aria-label="View ClayJS source on GitHub"><span class="github-bracket" aria-hidden="true">&lt;</span><span class="github-mascot" aria-hidden="true"><svg viewBox="0 0 16 16" focusable="false"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg></span><span class="github-word" aria-hidden="true">source</span><span class="github-bracket github-close" aria-hidden="true">/&gt;</span></a>
+    <a href="/get-started">Get started</a>
+    <a href="/guide">Guide</a>
+    <a href="/advanced">Advanced</a>
+    <a href="/plugins">Plugins</a>
+    <a href="/docs" aria-current="page">Docs</a>
+  </div>
+</nav>
+
+<main class="page">
+
+  <section style="border-top: none; padding-top: 56px;">
+    <span class="eyebrow"><a href="/docs">Docs</a> · Core API</span>
+    <h1 class="display" style="font-size: clamp(30px, 4.5vw, 42px);">window.clay</h1>
+    <p class="lede" style="margin-top: 12px;">Everything on window.clay: saving, reading and writing data, edit mode, and what each plugin adds.</p>
+  </section>
+
+  <section id="api" class="doc-body">
+    <table>
+      <tr><th>Member</th><th>What it does</th></tr>
+      <tr><td><code>clay.ready</code></td><td>A Promise that resolves once clayjs has booted (core loaded, plugins attached). In inline scripts, <code>await clay.ready</code> before touching anything else. <code>clay:ready</code> fires on <code>document</code> at the same moment.</td></tr>
+      <tr><td><code>clay.save()</code></td><td>Snapshot the page and save it. Skips when nothing changed. Returns <code>Promise&lt;{ok, msg, msgType, code, etag}&gt;</code>; check <code>ok</code>. <code>msgType</code> is <code>success</code>, <code>error</code>, <code>skipped</code> (nothing was sent), or <code>unknown</code> (the request timed out, so the write may or may not have landed). A host may answer with its own severity, such as <code>warning</code>, and that rides through untouched. Never rejects.</td></tr>
+      <tr><td><code>clay.save.force()</code></td><td>Save even when nothing appears to have changed.</td></tr>
+      <tr><td><code>clay.save.flush({keepalive, timeoutMs})</code></td><td>Save now and resolve only when the host has accepted the bytes the page holds at that moment: <code>Promise&lt;{state, etag}&gt;</code>, where <code>state</code> is <code>view</code>, <code>clean</code> (the file already holds these bytes, so nothing was sent) or <code>saved</code>. Rejects with an <code>Error</code> whose <code>state</code> is <code>failed</code>, <code>conflict</code> or <code>blocked</code>, the last meaning the bytes are on the host but the page holds work a save cannot write (see <code>clay.registerUnsavedState</code>), which only a person can resolve; a refusal is never resolved by overwriting, which stays a person's decision (<code>clay.save.overwrite()</code>). In the first seconds after load it waits for the page to settle, so load-time rendering is not written as an edit, and <code>timeoutMs</code> bounds the whole call.</td></tr>
+      <tr><td><code>clay.hasUnsavedChanges()</code></td><td>Is there work here that no save has written? Synchronous, and the same question the close warning asks. Answers <code>false</code> in view mode.</td></tr>
+      <tr><td><code>clay.readData(rules?)</code></td><td>Read the saved file as <code>{data, etag}</code>. Omitted rules use the page's <code>api</code> rules tag. Rejects when the host does not announce <code>data-read</code>.</td></tr>
+      <tr><td><code>clay.writeData(values, {rules, ifMatch})</code></td><td>Conditionally write JSON into the saved file and return <code>{data, etag}</code>. Requires an editable clean page, a connected sync plugin, a trustworthy ETag, and host support.</td></tr>
+      <tr><td><code>clay.getHTML()</code></td><td>The exact HTML string a save would send, after all cleanup.</td></tr>
+      <tr><td><code>clay.addDocumentTransform(fn)</code></td><td>Register a callback that receives the cloned document before serialization. The live page is never touched.</td></tr>
+      <tr><td><code>clay.onSnapshot(fn)</code></td><td>Like <code>addDocumentTransform</code>, but runs for every snapshot, including live-sync broadcasts.</td></tr>
+      <tr><td><code>clay.isEditMode</code></td><td>Whether this session may edit (see <a href="/docs/edit-mode">edit mode</a>).</td></tr>
+      <tr><td><code>clay.isOwner</code></td><td>Whether the platform's owner cookie is set. Unlike <code>isEditMode</code>, the URL and global overrides don't affect it.</td></tr>
+      <tr><td><code>clay.siteVisibility</code></td><td>How the host serves this site: <code>"private"</code>, <code>"public"</code>, or <code>null</code> when the host says nothing. Read once, at boot.</td></tr>
+      <tr><td><code>clay.toggleEditMode()</code></td><td>Flip between edit and view mode (reloads the page).</td></tr>
+      <tr><td><code>clay.cacheBust(el)</code></td><td>Re-download one resource by stamping <code>?v=</code> onto its <code>href</code> or <code>src</code>. <a href="/advanced#save-attrs">Details</a>.</td></tr>
+      <tr><td><code>clay.Mutation</code></td><td>The shared mutation hub. See <a href="/advanced#libraries">Advanced</a>.</td></tr>
+      <tr><td><code>clay.morph(oldEl, newEl)</code></td><td>The DOM morphing engine: morphs <code>oldEl</code> in place to match <code>newEl</code> (sync plugin).</td></tr>
+      <tr><td><code>clay.conflicts</code></td><td>Edits of yours that live sync replaced and you have not decided on: <code>list()</code>, <code>acknowledge(ids, {reason})</code>, <code>claim(ids, {owner})</code>, <code>recoveryOf(id)</code> (sync plugin). The lost edit notice draws from it.</td></tr>
+      <tr><td><code>clay.registerUnsavedState({id, isPending})</code></td><td>For an editor whose work can be ahead of the page (its model not yet written into the DOM): <code>isPending()</code> is called fresh whenever the close warning checks, and the warning fires while it returns true. Returns <code>{changed(), dispose()}</code>; call <code>changed()</code> when the answer may have changed.</td></tr>
+      <tr><td><code>clay.undo</code></td><td>The undo singleton: <code>clay.undo.undo()</code> / <code>clay.undo.redo()</code> (undo plugin).</td></tr>
+      <tr><td><code>clay.cms</code></td><td>The content panel: <code>clay.cms.open()</code> (cms plugin).</td></tr>
+      <tr><td><code>clay.RichClay</code></td><td>The rich-text editor class behind <code>editable</code> (richclay plugin, default on).</td></tr>
+      <tr><td><code>clay.quickcrop(file, opts)</code></td><td>The crop modal: resolves <code>{blob, dataURL, width, height}</code>, or <code>null</code> if cancelled (quickcrop plugin). See <a href="/plugins#quickcrop">Plugins</a>.</td></tr>
+      <tr><td><code>clay.upload</code></td><td>Pick a file and get it into the page (upload plugin).</td></tr>
+      <tr><td><code>clay.me</code></td><td>Who is editing: <code>{id, name, initials, color}</code> or null (people plugin).</td></tr>
+      <tr><td><code>clay.people</code></td><td>Names in this page: <code>get</code>, <code>list</code>, <code>available</code>, <code>add</code> (people plugin).</td></tr>
+      <tr><td><code>clay.author</code></td><td>Stamp an element with your id, asking your name once with no host (people plugin).</td></tr>
+      <tr><td><code>clay.wire</code></td><td>A per-file control channel to a process on your own machine: <code>send</code>, <code>cancel</code>, <code>get</code>, <code>list</code>, <code>isBusy</code>, <code>on</code> (wire plugin). See <a href="/plugins#wire">Plugins</a>.</td></tr>
+      <tr><td><code>clay.aiEdit</code></td><td>The AI comment box: <code>clay.aiEdit.init()</code> (ai-edit plugin). It boots itself, and does nothing unless the host lists a ready <code>ai-edit</code> wire helper. See <a href="/plugins#ai-edit">Plugins</a>.</td></tr>
+    </table>
+    <p class="small">In view mode the edit-only members are absent: <code>window.clay</code> keeps <code>ready</code>, <code>toggleEditMode</code>, <code>isEditMode</code>, <code>isOwner</code>, <code>Mutation</code>, <code>region</code>, <code>readData</code>, and <code>writeData</code> (plus <code>morph</code>/<code>cms</code> when those plugins load), and <code>clay.hasUnsavedChanges()</code>, which answers <code>false</code> there because a page that cannot save has nothing unsaved. <code>writeData</code> refuses without edit mode. Feature-detect with <code>'save' in clay</code>.</p>
+    <p>Three tiers, and only the first two are a promise:</p>
+    <table>
+      <tr><th>Tier</th><th>What it is</th><th>Promise</th></tr>
+      <tr><td><code>clay.*</code> from <code>clay.js</code></td><td>The everyday surface, above</td><td>Stable</td></tr>
+      <tr><td><code>clay.*</code> from a satellite</td><td>Opt-in, one script tag each: <code>clay-ui</code>, <code>clay-utils</code>, <code>clay-dom</code>, <code>clay-events</code>, <code>clay-options</code>, <code>clay-internals</code>, <code>clay-data</code></td><td>Stable</td></tr>
+      <tr><td>Anything else under <code>src/</code></td><td>Reachable by direct import, because <code>src/</code> ships to npm and the CDN</td><td><strong>May change in any release</strong></td></tr>
+    </table>
+    <p class="small">The contract starts at 1.0.0: no name in the first two tiers changes without a major version. Everything in the third tier works today and is welcome to be used, but it is not a promise.</p>
+  </section>
+
+  <nav class="pager" aria-label="Docs pages">
+    <a class="pager-prev" href="/docs/script-tag"><span class="pager-dir">&larr; Previous</span><span class="pager-name">The script tag</span></a>
+    <a class="pager-next" href="/docs/attributes"><span class="pager-dir">Next &rarr;</span><span class="pager-name">Attributes</span></a>
+  </nav>
+
+</main>
+
+<footer>
+  <div class="inner">
+    <span>clayjs</span>
+    <a href="/">Home</a>
+    <a href="/get-started">Get started</a>
+    <a href="/advanced">Advanced</a>
+    <a href="/plugins">Plugins</a>
+    <a href="/docs/offline">Offline</a>
+    <a href="https://github.com/panphora/clayjs" rel="noopener">GitHub</a>
+    <a href="https://github.com/panphora/clayjs/blob/main/LICENSE" rel="noopener">MIT-0</a>
+    <a href="/THIRD-PARTY-NOTICES.md">Third-party notices</a>
+        <a href="/llms.txt">llms.txt</a>
+  </div>
+  <div class="inner" data-hyper-footer="clayjs" clay="no-save no-snapshot"></div>
+</footer>
+<script src="https://hyperclay.com/public/js/hyper-footer.js" defer></script>
+
+</body>
+</html>

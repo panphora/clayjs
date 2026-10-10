@@ -34,7 +34,7 @@ and posts it, and a host puts it on disk. The shortest path is
 [HTML Clay](https://htmlclay.com), a desktop app: rename the file to `.htmlclay` and
 double-click it, and it serves the file at `http://127.0.0.1` and writes every save back.
 [hyperclay.com](https://hyperclay.com) hosts the same file online. Your own server needs
-one route, about twenty lines: see [the endpoint spec](https://clayjs.com/docs#endpoint).
+one route, about twenty lines: see [the endpoint spec](https://clayjs.com/docs/endpoint).
 Full walkthrough: [the tutorial](https://clayjs.com/get-started) and
 [`examples/`](https://github.com/panphora/clayjs/tree/main/examples).
 
@@ -63,7 +63,7 @@ Edit mode is decided in this order: the `?editmode` param, then a `viewonly` att
 on `<html>` (a page that never saves itself), then `window.clayEditMode`,
 then a save token stamped on `<html>` by the host, then the platform's owner cookie. Hosts
 and save tokens are covered in [the reference](https://github.com/panphora/clayjs/blob/main/docs/reference.md) and on
-[clayjs.com/docs](https://clayjs.com/docs#editmode).
+[clayjs.com/docs](https://clayjs.com/docs/edit-mode).
 
 ### One file, no network
 
@@ -86,7 +86,7 @@ had satellite tags, delete them: a second `sap.js` mounts a second runtime. Savi
 still needs a host that writes the file; [HTML Clay](https://htmlclay.com) does that
 on the machine itself, with no network.
 The two things that still reach out, and why they fail soft, are on
-[clayjs.com/offline](https://clayjs.com/offline).
+[clayjs.com/docs/offline](https://clayjs.com/docs/offline).
 
 ## Readiness
 

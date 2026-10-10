@@ -12,8 +12,8 @@ import { join } from "node:path";
  */
 
 const ROOT = new URL("../../", import.meta.url).pathname;
-const site = readdirSync(join(ROOT, "website"))
-  .filter((f) => f.endsWith(".html"))
+const site = readdirSync(join(ROOT, "website"), { recursive: true })
+  .filter((f) => f.endsWith(".html") && !f.startsWith("examples"))
   .map((f) => readFileSync(join(ROOT, "website", f), "utf8"))
   .join("\n");
 
@@ -53,7 +53,7 @@ test("the region axes the docs list are the axes the policy returns", async () =
   const { resolveRegionPolicy } = await import("../../src/lib/region-policy.js");
   const axes = Object.keys(resolveRegionPolicy(document.createElement("div"))).sort();
 
-  const docs = readFileSync(join(ROOT, "website/docs.html"), "utf8");
+  const docs = readFileSync(join(ROOT, "website/docs/internals.html"), "utf8");
   const row = docs.match(/The resolved region axes for a node: <code>\{([^}]*)\}<\/code>/);
   expect(row).not.toBeNull();
 
@@ -63,7 +63,7 @@ test("the region axes the docs list are the axes the policy returns", async () =
 
 test("the region tokens the docs list are the tokens the policy defines", async () => {
   const { TOKENS } = await import("../../src/lib/region-policy.js");
-  const docs = readFileSync(join(ROOT, "website/docs.html"), "utf8");
+  const docs = readFileSync(join(ROOT, "website/docs/attributes.html"), "utf8");
 
   const missing = TOKENS.filter((t) => !docs.includes(`<code>${t}</code>`));
   expect(missing).toEqual([]);

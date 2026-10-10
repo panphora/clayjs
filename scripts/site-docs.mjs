@@ -7,8 +7,9 @@
 // reads what a person sees on /docs.
 //
 // The guide runs the other way: docs/guide.md is the source, served verbatim at
-// /guide.md, and /guide is rendered from it inside the docs page's own shell (head,
-// nav, footer), so it cannot drift from the rest of the site.
+// /guide.md, and /complete-guide is rendered from it inside the docs page's own shell
+// (head, nav, footer), so it cannot drift from the rest of the site. /guide itself is
+// website/guide.html, which offers the complete guide and the visual guide.
 
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
@@ -21,7 +22,8 @@ const SITE = 'https://clayjs.com';
 
 // Pages with a Markdown twin and the copy button. my-list is a live app, not a doc,
 // and the examples are apps whose source is the point.
-export const DOC_PAGES = ['index', 'get-started', 'advanced', 'plugins', 'docs', 'offline', 'visual-guide'];
+export const DOC_PAGES = ['index', 'get-started', 'advanced', 'plugins', 'docs', 'visual-guide',
+  ...['script-tag', 'api', 'attributes', 'events', 'edit-mode', 'endpoint', 'offline', 'internals', 'examples'].map((part) => `docs/${part}`)];
 
 const slug = (text) => text.toLowerCase().replace(/<[^>]+>/g, '').replace(/&[a-z#0-9]+;/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 
@@ -50,18 +52,18 @@ export function renderGuide(markdown, shellHtml) {
   const dom = new JSDOM(shellHtml);
   const doc = dom.window.document;
   const description = 'The complete guide to building malleable HTML apps with clayjs: inline editing, saving, live sync, components, architecture, recipes and traps.';
-  doc.title = 'Guide · clayjs';
+  doc.title = 'Complete guide · clayjs';
   const set = (selector, attr, value) => {
     const el = doc.querySelector(selector);
     if (!el) throw new Error(`guide shell has no ${selector}`);
     el.setAttribute(attr, value);
   };
   set('meta[name="description"]', 'content', description);
-  set('link[rel="canonical"]', 'href', `${SITE}/guide`);
-  set('meta[property="og:title"]', 'content', 'Guide · clayjs');
+  set('link[rel="canonical"]', 'href', `${SITE}/complete-guide`);
+  set('meta[property="og:title"]', 'content', 'Complete guide · clayjs');
   set('meta[property="og:description"]', 'content', description);
-  set('meta[property="og:url"]', 'content', `${SITE}/guide`);
-  set('meta[name="twitter:title"]', 'content', 'Guide · clayjs');
+  set('meta[property="og:url"]', 'content', `${SITE}/complete-guide`);
+  set('meta[name="twitter:title"]', 'content', 'Complete guide · clayjs');
   set('meta[name="twitter:description"]', 'content', description);
 
   doc.querySelector('.nav a[aria-current]')?.removeAttribute('aria-current');
@@ -73,7 +75,7 @@ export function renderGuide(markdown, shellHtml) {
   main.className = 'page guide';
   main.innerHTML = `
   <section style="border-top: none; padding-top: 56px;">
-    <span class="eyebrow">Docs · Guide</span>
+    <span class="eyebrow"><a href="/guide">Guide</a> · Complete</span>
     <h1 class="display" style="font-size: clamp(30px, 4.5vw, 42px);">${title}</h1>
     <details class="fold toc"><summary><span class="prob">Contents</span></summary><div class="fold-body"><ol>${toc.join('')}</ol></div></details>
   </section>
@@ -107,6 +109,21 @@ export function pageToMarkdown(html, url) {
     note.firstChild?.append(`Diagram: ${label}`);
     svg.replaceWith(note);
   });
+  main.querySelectorAll('.pager').forEach((n) => n.remove());
+  main.querySelectorAll('.doc-rows').forEach((rows) => {
+    const list = doc.createElement('ul');
+    for (const row of rows.querySelectorAll('a.doc-row')) {
+      const item = doc.createElement('li');
+      const link = doc.createElement('a');
+      link.href = row.getAttribute('href');
+      link.textContent = row.querySelector('.doc-name').textContent;
+      const names = [...row.querySelectorAll('.doc-chips code')].map((c) => `<code>${c.innerHTML}</code>`).join(', ');
+      item.append(link, `: ${row.querySelector('.doc-line').textContent} `);
+      item.insertAdjacentHTML('beforeend', `Covers ${names}.`);
+      list.append(item);
+    }
+    rows.replaceWith(list);
+  });
   main.querySelectorAll('.legend').forEach((legend) => {
     legend.textContent = [...legend.children].map((c) => c.textContent.trim()).join(' · ');
   });
@@ -116,15 +133,15 @@ export function pageToMarkdown(html, url) {
   turndown.use(gfm);
   const title = doc.querySelector('title')?.textContent.trim();
   const markdown = turndown.turndown(main.innerHTML).replace(/^```markup$/gm, '```html').replace(/^(#+ \d+)\\\./gm, '$1.').replace(/\n{3,}/g, '\n\n').trim();
-  return `<!-- ${title} · ${url} · generated from the page, Markdown version of every page: ${SITE}/docs#all-pages -->\n\n${markdown}\n`;
+  return `<!-- ${title} · ${url} · generated from the page; every page has one at its path plus .md -->\n\n${markdown}\n`;
 }
 
-function addMarkdownHooks(html, name) {
+function addMarkdownHooks(html, markdownPath) {
   if (html.split('</head>').length !== 2 || html.split('</body>').length !== 2) {
-    throw new Error(`${name}.html needs exactly one </head> and one </body>`);
+    throw new Error(`the page for ${markdownPath} needs exactly one </head> and one </body>`);
   }
   return html
-    .replace('</head>', `<link rel="alternate" type="text/markdown" href="/${name}.md">\n</head>`)
+    .replace('</head>', `<link rel="alternate" type="text/markdown" href="${markdownPath}">\n</head>`)
     .replace('</body>', '<script src="/copy-markdown.js" defer></script>\n</body>');
 }
 
@@ -141,7 +158,9 @@ export async function emitDocs({ website, publicDir, guideSource }) {
   const guideMarkdown = await readFile(guideSource, 'utf8');
   const shell = await readFile(join(website, 'docs.html'), 'utf8');
   await write('guide.md', guideMarkdown);
-  await write('guide.html', addMarkdownHooks(renderGuide(guideMarkdown, shell), 'guide'));
+  await write('complete-guide.html', addMarkdownHooks(renderGuide(guideMarkdown, shell), '/guide.md'));
+  const chooser = join(publicDir, 'guide.html');
+  await writeFile(chooser, addMarkdownHooks(await readFile(chooser, 'utf8'), '/guide.md'));
 
   for (const name of DOC_PAGES) {
     const path = join(publicDir, `${name}.html`);
@@ -149,9 +168,9 @@ export async function emitDocs({ website, publicDir, guideSource }) {
     const markdown = pageToMarkdown(html, name === 'index' ? `${SITE}/` : `${SITE}/${name}`);
     // A converter that matched nothing would still write a file; a near-empty twin
     // is that failure, not a short page.
-    if (markdown.length < 1500) throw new Error(`${name}.md came out at ${markdown.length} characters; the page conversion found almost nothing`);
+    if (markdown.length < 600) throw new Error(`${name}.md came out at ${markdown.length} characters; the page conversion found almost nothing`);
     await write(`${name}.md`, markdown);
-    await writeFile(path, addMarkdownHooks(html, name));
+    await writeFile(path, addMarkdownHooks(html, `/${name}.md`));
   }
   return written;
 }

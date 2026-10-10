@@ -149,7 +149,7 @@ describe("one region shape, served to both surfaces", () => {
     expect(windowRegionShape).toBe(regionShape);
   });
 
-  // Both spellings are documented (README and website/docs.html), so the cleanup
+  // Both spellings are documented (README and website/docs/attributes.html), so the cleanup
   // is an additive union. Dropping either would be a compatibility break dressed
   // up as tidying.
   test("it carries both the flat and the nested selector spellings", async () => {

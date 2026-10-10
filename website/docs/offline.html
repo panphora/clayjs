@@ -3,25 +3,25 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Offline · clayjs</title>
-<meta name="description" content="The whole clayjs library in one file, for pages that must load with no network.">
+<title>Offline · Docs · clayjs</title>
+<meta name="description" content="The standalone build: every module in one file, for pages that load with no network.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%233E6B52'/%3E%3Cpath d='M21.5 11.2a7 7 0 1 0 0 9.6' fill='none' stroke='%23F1EFEA' stroke-width='3.2' stroke-linecap='round'/%3E%3C/svg%3E">
-<link rel="canonical" href="https://clayjs.com/offline">
+<link rel="canonical" href="https://clayjs.com/docs/offline">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="clayjs">
-<meta property="og:title" content="Offline · clayjs">
-<meta property="og:description" content="The whole clayjs library in one file, for pages that must load with no network.">
-<meta property="og:url" content="https://clayjs.com/offline">
+<meta property="og:title" content="Offline · Docs · clayjs">
+<meta property="og:description" content="The standalone build: every module in one file, for pages that load with no network.">
+<meta property="og:url" content="https://clayjs.com/docs/offline">
 <meta property="og:image" content="https://clayjs.com/og-image.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta property="og:image:alt" content="clayjs: the document is the app, the document is the database">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="Offline · clayjs">
-<meta name="twitter:description" content="The whole clayjs library in one file, for pages that must load with no network.">
+<meta name="twitter:title" content="Offline · Docs · clayjs">
+<meta name="twitter:description" content="The standalone build: every module in one file, for pages that load with no network.">
 <meta name="twitter:image" content="https://clayjs.com/og-image.png">
-<link rel="stylesheet" href="styles.css">
-<script src="prism.min.js"></script>
+<link rel="stylesheet" href="/styles.css">
+<script src="/prism.min.js"></script>
 </head>
 <body>
 
@@ -33,15 +33,14 @@
     <a href="/guide">Guide</a>
     <a href="/advanced">Advanced</a>
     <a href="/plugins">Plugins</a>
-    <a href="/docs">Docs</a>
-    <a href="/offline" aria-current="page">Offline</a>
+    <a href="/docs" aria-current="page">Docs</a>
   </div>
 </nav>
 
 <main class="page">
 
   <section style="border-top: none; padding-top: 56px;">
-    <span class="eyebrow">Offline</span>
+    <span class="eyebrow"><a href="/docs">Docs</a> · Offline</span>
     <h1 class="display" style="font-size: clamp(30px, 4.5vw, 42px);">One file, no network</h1>
     <p class="lede" style="margin-top: 12px;"><code>clay.js</code> is a 3 KB bootstrap that fetches the modules a page asked for. The standalone build is every one of those modules in a single readable file. Download it once, keep it beside your HTML, and the page loads with no connection at all.</p>
   </section>
@@ -92,6 +91,11 @@
     <p class="small">The rolling <code>/v1/</code> URL updates on its own for pages that load from the network. A file you downloaded does not, on purpose.</p>
   </section>
 
+  <nav class="pager" aria-label="Docs pages">
+    <a class="pager-prev" href="/docs/endpoint"><span class="pager-dir">&larr; Previous</span><span class="pager-name">Host it yourself</span></a>
+    <a class="pager-next" href="/docs/internals"><span class="pager-dir">Next &rarr;</span><span class="pager-name">Low level</span></a>
+  </nav>
+
 </main>
 
 <footer>
@@ -101,10 +105,10 @@
     <a href="/get-started">Get started</a>
     <a href="/plugins">Plugins</a>
     <a href="/docs">Docs</a>
-    <a href="/offline">Offline</a>
+    <a href="/docs/offline">Offline</a>
     <a href="https://github.com/panphora/clayjs" rel="noopener">GitHub</a>
     <a href="https://github.com/panphora/clayjs/blob/main/LICENSE" rel="noopener">MIT-0</a>
-    <a href="THIRD-PARTY-NOTICES.md">Third-party notices</a>
+    <a href="/THIRD-PARTY-NOTICES.md">Third-party notices</a>
         <a href="/llms.txt">llms.txt</a>
   </div>
   <div class="inner" data-hyper-footer="clayjs" clay="no-save no-snapshot"></div>

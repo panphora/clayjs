@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Host it yourself · Docs · clayjs</title>
+<meta name="description" content="The one route a host implements, and a complete server in a couple dozen lines of Express.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%233E6B52'/%3E%3Cpath d='M21.5 11.2a7 7 0 1 0 0 9.6' fill='none' stroke='%23F1EFEA' stroke-width='3.2' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="canonical" href="https://clayjs.com/docs/endpoint">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="clayjs">
+<meta property="og:title" content="Host it yourself · Docs · clayjs">
+<meta property="og:description" content="The one route a host implements, and a complete server in a couple dozen lines of Express.">
+<meta property="og:url" content="https://clayjs.com/docs/endpoint">
+<meta property="og:image" content="https://clayjs.com/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="clayjs: the document is the app, the document is the database">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Host it yourself · Docs · clayjs">
+<meta name="twitter:description" content="The one route a host implements, and a complete server in a couple dozen lines of Express.">
+<meta name="twitter:image" content="https://clayjs.com/og-image.png">
+<link rel="stylesheet" href="/styles.css">
+<script src="/prism.min.js"></script>
+</head>
+<body>
+
+<nav class="nav">
+  <a class="wordmark" href="/">clay<span class="js">.js</span><span class="tm" aria-hidden="true">™</span></a>
+  <div class="links">
+    <a class="github-clay" href="https://github.com/panphora/clayjs" target="_blank" rel="noopener" aria-label="View ClayJS source on GitHub"><span class="github-bracket" aria-hidden="true">&lt;</span><span class="github-mascot" aria-hidden="true"><svg viewBox="0 0 16 16" focusable="false"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg></span><span class="github-word" aria-hidden="true">source</span><span class="github-bracket github-close" aria-hidden="true">/&gt;</span></a>
+    <a href="/get-started">Get started</a>
+    <a href="/guide">Guide</a>
+    <a href="/advanced">Advanced</a>
+    <a href="/plugins">Plugins</a>
+    <a href="/docs" aria-current="page">Docs</a>
+  </div>
+</nav>
+
+<main class="page">
+
+  <section style="border-top: none; padding-top: 56px;">
+    <span class="eyebrow"><a href="/docs">Docs</a> · Host it yourself</span>
+    <h1 class="display" style="font-size: clamp(30px, 4.5vw, 42px);">The endpoint spec</h1>
+    <p class="lede" style="margin-top: 12px;">The one route a host implements, and a complete server in a couple dozen lines of Express.</p>
+  </section>
+
+  <section id="endpoint" class="doc-body">
+    <p>A clayjs server implements one route:</p>
+    <table>
+      <tr><th>Part</th><th>Value</th></tr>
+      <tr><td>Route</td><td><code>POST /_/save</code></td></tr>
+      <tr><td>Body</td><td>The file's full HTML, as plain text. Always: this route has exactly one body shape, on every host.</td></tr>
+      <tr><td>Header</td><td><code>Document-URL</code>: the full URL of the page being saved.</td></tr>
+      <tr><td>Success</td><td><code>200</code> with JSON <code>{ "msg": "Saved" }</code></td></tr>
+      <tr><td>Failure</td><td>Any non-2xx. The status is authoritative; host-generated failures use JSON <code>{ "msg": "why" }</code>, but clients tolerate non-JSON intermediary errors.</td></tr>
+    </table>
+    <p>A complete server in a couple dozen lines of Express:</p>
+    <pre><code class="language-javascript">import express from "express";
+import fs from "node:fs/promises";
+import path from "node:path";
+
+const root = process.cwd();
+const app = express();
+app.use(express.static(root));
+app.use(express.text({ type: "*/*", limit: "10mb" }));
+
+app.post("/_/save", async (req, res) =&gt; {
+  try {
+    const origin = req.get("Origin");
+    if (origin &amp;&amp; new URL(origin).host !== req.get("Host"))
+      return res.status(403).json({ msg: "Cross-origin save refused", code: "forbidden" });
+    const page = decodeURIComponent(new URL(req.get("Document-URL")).pathname);
+    const target = path.join(root, path.normalize(page.endsWith("/") ? page + "index.html" : page));
+    if (!target.startsWith(root + path.sep))
+      return res.status(403).json({ msg: "Outside the folder", code: "forbidden" });
+    if (!/^\s*&lt;!doctype html&gt;/i.test(req.body))
+      return res.status(422).json({ msg: "Not a complete HTML document", code: "invalid-document" });
+    await fs.writeFile(target, req.body);
+    res.json({ msg: "Saved" });
+  } catch {
+    res.status(500).json({ msg: "Couldn't save" });
+  }
+});
+
+app.listen(4600);</code></pre>
+    <p class="small">The server half is only half of it: on your own host nothing arms <a href="/docs/edit-mode">edit mode</a> for you, so a page served this way is read-only until you set <code>window.clayEditMode</code> before the script tag. A real deployment adds authorization and atomic writes. The same contract powers hyperclay.com, Hyperclay Local, and HTML Clay. Two details you may ignore: every save also carries a <code>Save-Trigger: user|auto</code> header (whether a person triggered it), and HTML Clay uses a token variant, <code>POST /_/save/{token}</code>, read from <code>&lt;html savetoken&gt;</code>.</p>
+  </section>
+
+  <nav class="pager" aria-label="Docs pages">
+    <a class="pager-prev" href="/docs/edit-mode"><span class="pager-dir">&larr; Previous</span><span class="pager-name">Edit mode</span></a>
+    <a class="pager-next" href="/docs/offline"><span class="pager-dir">Next &rarr;</span><span class="pager-name">Offline</span></a>
+  </nav>
+
+</main>
+
+<footer>
+  <div class="inner">
+    <span>clayjs</span>
+    <a href="/">Home</a>
+    <a href="/get-started">Get started</a>
+    <a href="/advanced">Advanced</a>
+    <a href="/plugins">Plugins</a>
+    <a href="/docs/offline">Offline</a>
+    <a href="https://github.com/panphora/clayjs" rel="noopener">GitHub</a>
+    <a href="https://github.com/panphora/clayjs/blob/main/LICENSE" rel="noopener">MIT-0</a>
+    <a href="/THIRD-PARTY-NOTICES.md">Third-party notices</a>
+        <a href="/llms.txt">llms.txt</a>
+  </div>
+  <div class="inner" data-hyper-footer="clayjs" clay="no-save no-snapshot"></div>
+</footer>
+<script src="https://hyperclay.com/public/js/hyper-footer.js" defer></script>
+
+</body>
+</html>
