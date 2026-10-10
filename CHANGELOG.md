@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.2] - 2026-10-10
+
+### Fixed
+- hyper-undo's keyboard shortcuts now apply inside OverType editor inputs (`.overtype-input`) in shadow DOM
+
+
+
 ## [1.9.1] - 2026-10-09
 
 ### Changed
