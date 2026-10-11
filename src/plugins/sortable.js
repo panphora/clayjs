@@ -29,7 +29,9 @@ const RUNTIME_ATTRS = ['draggable', 'style'];
 const pressed = new Set();
 
 function recordRuntimeAttrs(item) {
-  return [item, ...item.querySelectorAll('*')].map(el => [el, RUNTIME_ATTRS.map(name => el.getAttribute(name))]);
+  return [item, ...item.querySelectorAll('*')]
+    .filter(el => !el.closest(EDITOR_UI_SELECTOR))
+    .map(el => [el, RUNTIME_ATTRS.map(name => el.getAttribute(name))]);
 }
 
 function restoreRuntimeAttrs(recorded) {
