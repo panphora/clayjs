@@ -23,7 +23,7 @@ let queued = false;
 
 /** Parse a hash into params. A hash with no "=" (a plain #anchor) carries none. */
 export function parseHash(hash) {
-  const params = {};
+  const params = Object.create(null);
   const raw = String(hash || "").replace(/^#/, "");
   if (!raw.includes("=")) return params;
   for (const [name, value] of new URLSearchParams(raw)) {
@@ -116,7 +116,7 @@ export function set(patch, { replace = false } = {}) {
   if (hash === (location.hash.includes("=") ? location.hash : "")) return;
   const bare = location.pathname + location.search;
   if (replace) {
-    history.replaceState(history.state, "", hash || bare);
+    history.replaceState(history.state, "", bare + hash);
     apply();
   } else if (hash) {
     location.hash = hash;
@@ -135,12 +135,14 @@ function queueApply() {
   });
 }
 
-// A record added to or removed from a [route] container changes what matches.
+// A record added to or removed from a [route] container changes what matches,
+// and so does a [route] container arriving whole.
 function onChildList(records) {
   for (const r of records) {
-    if (r.type === "childList" && r.target.nodeType === 1 && r.target.hasAttribute("route")) {
-      queueApply();
-      return;
+    if (r.type !== "childList") continue;
+    if (r.target.nodeType === 1 && r.target.hasAttribute("route")) { queueApply(); return; }
+    for (const n of r.addedNodes) {
+      if (n.nodeType === 1 && (n.hasAttribute("route") || n.querySelector("[route]"))) { queueApply(); return; }
     }
   }
 }

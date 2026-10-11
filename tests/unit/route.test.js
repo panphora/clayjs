@@ -144,3 +144,34 @@ test("a plain anchor hash clears the route", async () => {
   expect(route.get()).toEqual({});
   expect(active()).toEqual([]);
 });
+
+test("replace keeps the document's path even with a <base> element", () => {
+  reset("/notes/app.html#entry=e-1");
+  const base = document.createElement("base");
+  base.href = "/assets/";
+  document.head.appendChild(base);
+  try {
+    route.set({ entry: "e-2" }, { replace: true });
+    expect(location.pathname).toBe("/notes/app.html");
+    expect(location.hash).toBe("#entry=e-2");
+  } finally {
+    base.remove();
+  }
+});
+
+test("a [route] container inserted whole gets its match stamped", async () => {
+  reset("/app.html#entry=e-9");
+  const wrap = document.createElement("div");
+  wrap.innerHTML = '<section route="entry"><article data-id="e-9">late</article></section>';
+  document.body.appendChild(wrap);
+  await nextTick();
+  expect(wrap.querySelector("article").getAttribute("route-active")).toBe("entry");
+});
+
+test("clearing a param named like an Object.prototype key clears its root attribute", () => {
+  reset("/app.html#constructor=week");
+  expect(document.documentElement.getAttribute("route-constructor")).toBe("week");
+  route.set({ constructor: null }, { replace: true });
+  expect(document.documentElement.hasAttribute("route-constructor")).toBe(false);
+  expect(route.get()).toEqual({});
+});
