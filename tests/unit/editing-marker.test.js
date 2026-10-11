@@ -131,6 +131,28 @@ test("a frame entry it cannot read draws nothing", async () => {
 // What it draws
 // =============================================================================
 
+test("a block the reader does not have yet is outlined as soon as a sync brings it in", async () => {
+  const { marker } = await load();
+  fixture();
+  const third = document.createElement("div");
+  third.textContent = "a third block";
+  third.getBoundingClientRect = () => RECT;
+  document.body.appendChild(third);
+
+  // The block the other person is in is one this reader's document does not have
+  // yet: their report arrives a save-and-relay before their structure does.
+  await marker.update(frame(ME, { ...ADA, editing: "3" }));
+  expect(box()).toBeNull();
+
+  const added = document.createElement("div");
+  added.textContent = "the block the peer just made";
+  added.getBoundingClientRect = () => RECT;
+  document.body.appendChild(added);
+  document.dispatchEvent(new CustomEvent("clay:sync-applied"));
+
+  expect(box()).not.toBeNull();
+});
+
 test("a block another person edits is outlined in their colour, with their name on it", async () => {
   const { marker } = await load();
   fixture();
@@ -274,6 +296,17 @@ test("every element it creates is marked out of the save, the watch and the snap
       expect(value).not.toContain("Ada Chen");
     }
   }
+});
+
+test("a name that looks like markup is still only text", async () => {
+  const { marker } = await load();
+  fixture();
+
+  const name = "<img src=x onerror=alert(1)>";
+  await marker.update(frame(ME, { ...ADA, name, editing: "0" }));
+
+  expect(chips()[0].textContent).toBe(name);
+  expect(chips()[0].querySelector("img")).toBeNull();
 });
 
 test("RELEASE-BLOCKING: no name, no marker and no colour reaches a snapshot or a save", async () => {

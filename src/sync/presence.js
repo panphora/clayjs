@@ -116,8 +116,14 @@ class Presence {
    * @returns {Promise<void>}
    */
   async update(data) {
-    this.roster = normalize(data);
+    const next = normalize(data);
+    const same = this.root && JSON.stringify(next) === JSON.stringify(this.roster);
+    this.roster = next;
     if (!(await this.supported())) return;
+    if (same) {
+      set(this.root, 'color-scheme', pageScheme());
+      return;
+    }
     this.render();
   }
 

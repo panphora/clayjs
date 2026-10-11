@@ -1,7 +1,8 @@
 import { blockOf, pathOf } from './editing-path.js';
 
 const INTERVAL_MS = 250;
-const EVENTS = ['focusin', 'focusout', 'selectionchange', 'clay:workspace-background', 'clay:workspace-foreground'];
+const RETRY_MS = 2000;
+const EVENTS = ['focusin', 'focusout', 'selectionchange', 'clay:sync-applied', 'clay:workspace-background', 'clay:workspace-foreground'];
 
 export class EditingSender {
   constructor({ send, now = () => Date.now() }) {
@@ -13,6 +14,9 @@ export class EditingSender {
     this.lastAt = -Infinity;
     this.timer = null;
     this.poked = null;
+    this.inflight = false;
+    this.retry = null;
+    this.stopped = false;
     this._onEvent = (event) => {
       if (event.type === 'clay:workspace-background') this.background = true;
       if (event.type === 'clay:workspace-foreground') this.background = false;
@@ -21,15 +25,19 @@ export class EditingSender {
   }
 
   start() {
+    this.stopped = false;
     for (const type of EVENTS) document.addEventListener(type, this._onEvent);
   }
 
   stop() {
+    this.stopped = true;
     for (const type of EVENTS) document.removeEventListener(type, this._onEvent);
     clearTimeout(this.timer);
     clearTimeout(this.poked);
+    clearTimeout(this.retry);
     this.timer = null;
     this.poked = null;
+    this.retry = null;
   }
 
   roster(frame) {
@@ -59,7 +67,7 @@ export class EditingSender {
   }
 
   schedule() {
-    if (this.timer !== null || this.wanted() === this.sent) return;
+    if (this.stopped || this.timer !== null || this.inflight || this.wanted() === this.sent) return;
     const wait = Math.max(0, this.lastAt + INTERVAL_MS - this.now());
     this.timer = setTimeout(() => {
       this.timer = null;
@@ -68,14 +76,25 @@ export class EditingSender {
   }
 
   flush() {
+    if (this.inflight) return;
     const value = this.wanted();
     if (value === this.sent) return;
     this.sent = value;
     this.lastAt = this.now();
-    Promise.resolve(this.send(value)).then((ok) => {
-      if (!ok && this.sent === value) this.sent = undefined;
-    }, () => {
-      if (this.sent === value) this.sent = undefined;
-    });
+    this.inflight = true;
+    const settle = (ok) => {
+      this.inflight = false;
+      if (this.stopped) return;
+      if (ok) {
+        clearTimeout(this.retry);
+        this.retry = null;
+      } else if (this.sent === value) {
+        this.sent = undefined;
+        if (this.retry === null) this.retry = setTimeout(() => { this.retry = null; this.schedule(); }, RETRY_MS);
+        return;
+      }
+      this.schedule();
+    };
+    Promise.resolve(this.send(value)).then((ok) => settle(Boolean(ok)), () => settle(false));
   }
 }

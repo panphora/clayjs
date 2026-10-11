@@ -97,7 +97,7 @@ class EditingMarker {
         this.root.textContent = '';
         set(this.root, 'display', 'none');
       }
-      this.follow(groups.size > 0);
+      this.follow(this.editors.length > 0);
       return;
     }
     if (!this.build()) return;

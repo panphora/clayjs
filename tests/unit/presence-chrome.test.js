@@ -99,6 +99,27 @@ test("one circle per named participant, plus the count of everyone else", async 
   expect(stack().style.display).toBe("flex");
 });
 
+test("a frame that only says who is editing leaves the squares where they are", async () => {
+  const { presence } = await load();
+
+  await presence.update(ROSTER);
+  const before = avatars();
+  hover(before[0]);
+  expect(tip().style.display).toBe("block");
+
+  // The same roster, re-sent because somebody moved to another block. Nothing
+  // here draws from `editing`, so the chrome it would rebuild is the same chrome.
+  await presence.update({
+    people: [{ ...ADA, editing: "0" }, { ...GRACE, editing: "1" }],
+    anonymous: 3,
+  });
+
+  const after = avatars();
+  expect(after.length).toBe(before.length);
+  for (const [i, el] of after.entries()) expect(el).toBe(before[i]);
+  expect(tip().style.display).toBe("block");
+});
+
 test("a recipient the host would not name gets the count and no circles", async () => {
   const { presence } = await load();
 

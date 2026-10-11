@@ -102,9 +102,9 @@ test("twenty blocks in one second send at most four times, ending on the last", 
   sender.roster(COMPANY);
   for (const el of els) {
     el.focus();
-    jest.advanceTimersByTime(50);
+    await jest.advanceTimersByTimeAsync(50);
   }
-  await jest.runAllTimersAsync();
+  await jest.advanceTimersByTimeAsync(300);
 
   expect(send.mock.calls.at(-1)).toEqual(["19"]);
   expect(sentAt.length).toBeGreaterThanOrEqual(4);
@@ -194,11 +194,11 @@ test("a refused send is free to be sent again", async () => {
 
   els[1].focus();
   sender.roster(COMPANY);
-  await jest.runAllTimersAsync();
+  await jest.advanceTimersByTimeAsync(300);
   expect(send).toHaveBeenCalledTimes(1);
 
   typed();
-  await jest.runAllTimersAsync();
+  await jest.advanceTimersByTimeAsync(300);
 
   expect(send).toHaveBeenCalledTimes(2);
   expect(send.mock.calls.at(-1)).toEqual(["1"]);
@@ -217,6 +217,7 @@ test("stop drops every listener and silences the sender", async () => {
     "focusin",
     "focusout",
     "selectionchange",
+    "clay:sync-applied",
     "clay:workspace-background",
     "clay:workspace-foreground",
   ]);
@@ -253,4 +254,92 @@ test("a roster with nobody else named in it counts as alone", async () => {
   await jest.runAllTimersAsync();
 
   expect(send).not.toHaveBeenCalled();
+});
+
+test("a request still in flight blocks the next one, and the value wanted during it follows", async () => {
+  const els = blocks(2);
+  const pending = [];
+  const send = jest.fn((value) => new Promise((resolve) => pending.push({ value, resolve })));
+  const { sender } = make(send);
+
+  els[0].focus();
+  sender.roster(COMPANY);
+  await jest.advanceTimersByTimeAsync(300);
+  expect(send.mock.calls).toEqual([["0"]]);
+
+  // The person leaves the block while the host is still answering the first
+  // request. Nothing may overlap it, and the clear may not be lost.
+  els[0].blur();
+  await jest.advanceTimersByTimeAsync(1000);
+  expect(send.mock.calls).toEqual([["0"]]);
+
+  pending[0].resolve(true);
+  await jest.advanceTimersByTimeAsync(1000);
+
+  expect(send.mock.calls).toEqual([["0"], [null]]);
+});
+
+test("a failed clear is retried on its own after two seconds", async () => {
+  const els = blocks(2);
+  const send = jest
+    .fn()
+    .mockResolvedValueOnce(true)
+    .mockResolvedValueOnce(false)
+    .mockResolvedValue(true);
+  const { sender } = make(send);
+
+  els[0].focus();
+  sender.roster(COMPANY);
+  await jest.advanceTimersByTimeAsync(300);
+  expect(send.mock.calls).toEqual([["0"]]);
+
+  els[0].blur();
+  await jest.advanceTimersByTimeAsync(300);
+  expect(send.mock.calls).toEqual([["0"], [null]]);
+
+  // No caret event, no roster change, no reconnect: the retry is the only thing
+  // that can put the clear through.
+  await jest.advanceTimersByTimeAsync(2000);
+  expect(send.mock.calls).toEqual([["0"], [null], [null]]);
+});
+
+test("stop() cancels a pending retry", async () => {
+  const els = blocks(2);
+  const send = jest.fn().mockResolvedValueOnce(true).mockResolvedValue(false);
+  const { sender } = make(send);
+
+  els[0].focus();
+  sender.roster(COMPANY);
+  await jest.advanceTimersByTimeAsync(300);
+
+  els[0].blur();
+  await jest.advanceTimersByTimeAsync(300);
+  expect(send.mock.calls).toEqual([["0"], [null]]);
+
+  sender.stop();
+  await jest.advanceTimersByTimeAsync(10_000);
+
+  expect(send.mock.calls).toEqual([["0"], [null]]);
+});
+
+test("a sync that shifts the block under the caret reports the new path", async () => {
+  const els = blocks(2);
+  const { sender, send } = make();
+
+  els[0].focus();
+  sender.roster(COMPANY);
+  await jest.advanceTimersByTimeAsync(300);
+  expect(send.mock.calls).toEqual([["0"]]);
+
+  // A peer's frame lands above the caret: the block keeps focus and the caret
+  // does not move, so no focus or selection event fires.
+  const focused = document.activeElement;
+  const added = document.createElement("p");
+  added.textContent = "peer inserted a block";
+  document.body.prepend(added);
+  document.dispatchEvent(new CustomEvent("clay:sync-applied"));
+  await jest.advanceTimersByTimeAsync(1000);
+
+  expect(document.activeElement).toBe(focused);
+  expect(send.mock.calls).toEqual([["0"], ["1"]]);
 });
