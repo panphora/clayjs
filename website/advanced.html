@@ -54,7 +54,7 @@
       <tr><th>Keyword</th><th>Plain meaning</th><th>Typical use</th></tr>
       <tr><td><code>no-save</code></td><td>Lives on the page, never written to disk. Live sync leaves your copy alone.</td><td>Search boxes, connection badges, edit toolbars</td></tr>
       <tr><td><code>no-snapshot</code></td><td>Invisible to save and to sync. Every device keeps its own copy.</td><td>Per-device panel state</td></tr>
-      <tr><td><code>freeze</code></td><td>Saved exactly as authored; runtime changes to its contents are ignored.</td><td>Clocks, tickers, computed summaries</td></tr>
+      <tr><td><code>freeze</code></td><td>A scratchpad: the element saves, syncs and merges like any element; its contents are per-tab, saved as they were when it first appeared and never sent to peers.</td><td>Clocks, status text, per-tab labels such as “overdue”</td></tr>
       <tr><td><code>no-trigger-autosave</code></td><td>Saved normally and still counted as unsaved work, but edits here don't start an autosave. Live sync protects it until you save.</td><td>Heavy editors you save by hand</td></tr>
       <tr><td><code>no-dirty</code></td><td>Saved normally, but its content is disposable: no autosave, no unsaved-changes warning, and live sync may replace it.</td><td>Regions that render themselves: filter bars, projections, drag previews</td></tr>
       <tr><td><code>no-watch</code></td><td>The mutation system ignores it entirely (implies no autosave trigger, no undo).</td><td>Third-party widgets that churn the DOM</td></tr>
@@ -65,7 +65,7 @@
     <div class="recipes">
       <span class="r-title">Recipes</span>
       UI chrome (toolbars, badges) <span class="arrow">→</span> clay="editor-ui"<br>
-      Live or computed text (clocks) <span class="arrow">→</span> clay="freeze"<br>
+      Per-tab generated text (clocks, status, “overdue”) <span class="arrow">→</span> clay="freeze"<br>
       Third-party embeds <span class="arrow">→</span> clay="no-watch"<br>
       Heavy editors, batch the saves <span class="arrow">→</span> clay="no-trigger-autosave"<br>
       Self-rendering UI (filter bars) <span class="arrow">→</span> clay="no-dirty"

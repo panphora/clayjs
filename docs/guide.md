@@ -1005,6 +1005,7 @@ The vocabulary:
 
 - `sap` marks an app root. `bind="field"` two-way binds a control (numbers for `type=number`, booleans for checkboxes) or a contenteditable leaf. `items="list"` on a container makes its `[item]` children rows; `[item][template]` is the row blueprint.
 - `calc:name="expr"`, `text:fmt="expr"` (`usd`, `usd2`, `pct`, `int`, `num2`, `compact`, `date`, others), `show="expr"` (toggles `hidden`), `class:name`, `css:name` (sets `--name`), `attr:name`.
+- `effect="stmt"` runs a statement on every pass (fill a scratchpad, set `document.title`). `state="name:transient"` declares a field that lives only in this tab. `state="data-date"` reads and writes the `data-date` attribute and appears in expressions as `item.date`. `each="expr"` with one `<template>` child renders a runtime row per array element, matched by `key="expr"` (default `item.$key`).
 - Expressions see `state`, `item`, `root`, and `sum`, `count`, `avg`, `min`, `max`, `num`, `plural`, `days`. Field names are lowercase identifiers without hyphens.
 - Actions: `trigger-add="list"`, `trigger-remove`, `move:up`, `move:down`, `sort:field`, `set:field="expr"`, `confirm="msg"` (uses `clay.confirm`).
 - JavaScript: `Sap(el)` returns a write-through proxy for the owning row or scope (`$add(list)`, `$remove()`); `Sap.batch(label, fn)` makes one undo step; `Sap.refresh()` runs a pass now.
@@ -1012,7 +1013,7 @@ The vocabulary:
 
 How it fits ClayJS: it rides the mutation hub so its paints never trigger autosave, re-derives on `clay:sync-applied` and on undo, and mirrors bound values into attributes on programmatic writes. `persist` on bound controls keeps typed values. Sap reads a control's live value, not its attribute, so after undo and redo re-sync the inputs first (the `syncControls` code in 5.3) or totals and the next save keep the undone number.
 
-Rules for sap in a malleable file, all from the finance tracker:
+Rules for sap in a malleable file, from the finance tracker and the starter templates:
 
 - **A paint computed only from the records is ordinary saved content.** A list count, a card's checklist badge, an entry count in a header: put the paint in the record markup with no region token. It saves and syncs like anything else, and every tab computes the same value, so at load and after a merge sap writes nothing new. This is the normal way to use sap.
 - **A paint that differs per tab goes in a `clay="freeze"` scratchpad**: anything that depends on today's date, the browser's locale or OS, the URL hash, the search box, or data loaded at runtime. Freeze keeps an element's contents, not its attributes, so the per-tab values must be inside the scratchpad: wrap them, or fill the scratchpad from an `effect`, which is re-run on every pass and so also fills a scratchpad that arrived empty from a peer:
@@ -1024,19 +1025,12 @@ Rules for sap in a malleable file, all from the finance tracker:
   `show` on the scratchpad itself is fine when it depends only on the record. Write through a guard (`if (el.innerHTML !== html) el.innerHTML = html`) so a pass that changes nothing writes nothing.
 - **Author the file with its computed values already painted.** A mismatch makes sap write at load, which is an edit. Check by comparing the live `#app` after load with the file's. `Sap.status().apps[0].mountWrites` is not a clean signal on its own: in a root that contains `show-when` controls, sap briefly sets `hidden` on them before clay-options starts (a `W30` warning, 10 writes in the finance tracker) and clears it again, which is harmless.
 - **Optionally, computed outputs can go in `clay="no-dirty"`.** Their bytes save with the next real edit, never count as edits themselves, and a peer's frame replaces them. Apply the acknowledge workaround from 7.3 while that known issue stands.
-- **Give rows your own stable ids.** Sap stamps `row-N` from a counter that restarts on every load, so a row added after reload can reuse an id another row already carries. Replace them as rows appear:
-
-  ```js
-  function claimRowIds() {
-    for (const row of app.querySelectorAll("[items] > [item]:not([template])")) {
-      if (!row.id || /^row-/.test(row.id)) row.id = newId("t");
-    }
-  }
-  new MutationObserver(claimRowIds).observe(app, { subtree: true, childList: true });
-  ```
+- **Give rows a `data-id`.** A row's `$key` is its `data-id`, else its `id`, else a key that lives only in this tab. Sap never writes an id at mount, and `$add` mints a fresh `data-id` when the template carries one.
 
 - **Hide the template row in your own CSS**: `[item][template] { display: none }`. Sap's rule is runtime-only and absent before it loads.
-- **Filter by hiding, never by removing**, so totals still see every row. A filter painted with `show=` writes `hidden` onto saved rows; normalize it out of snapshots with `onbeforesnapshot` (6.6) and use `transient` on the search input.
+- **Filter by hiding, never by removing**, so totals still see every row. Paint the hiding rule into a frozen stylesheet, so it never saves, syncs or touches a record, and keep the search text in a `transient` field: `<style clay="freeze" text="fmt.hideRules(state.cards)"></style>`. Painting `show=` on saved rows writes `hidden` into them, and that saves.
+- **Views of records are `each` projections.** A sorted, filtered or grouped list, a week grid, the quadrants of a matrix: render them with `each` over the records. Rows are `editor-ui`, so they never save or sync, and actions inside a row (`set:`, `trigger-remove`, `Sap(el)`) reach the record the row stands for.
+- **The open record is the URL hash.** Load `clay-router.js` after `clay.js`, put `route="name"` on the record container, and open a record with `clay.route.set({ name: id })` (`null` closes it). The router marks the record `route-active` (matched by `data-id`; `route="name by data-key"` picks another attribute) and sets `route-name` on `<html>`. ClayJS never saves, syncs or undoes either, so show the open record with CSS on `[route-active]`. Reload keeps it open, Back closes it, and `clay:route` fires on every change.
 - Sap adds `[hidden] { display: none !important }` page-wide.
 - Sap lints `viewmode:` attributes as unknown (`W03` warnings) in 1.8.2. Harmless.
 - `usd2` formats negative numbers as `$-162.40`.
