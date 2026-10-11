@@ -10,9 +10,10 @@ const SATELLITES = {
   "clay-ui.js": () => import("../../../src/ui/index.js"),
   "clay-events.js": () => import("../../../src/events/index.js"),
   "clay-dom.js": () => import("../../../src/dom/dom-helpers.js"),
+  "clay-router.js": () => import("../../../src/route/route.js"),
 };
 const BUNDLES = { "sap.js": "entries/sap.js", "clay-data.js": "entries/clay-data.js" };
-const SATELLITE_KEYS = { "clay-options.js": "options", "clay-ui.js": "ui", "clay-events.js": "events", "clay-dom.js": "dom" };
+const SATELLITE_KEYS = { "clay-options.js": "options", "clay-ui.js": "ui", "clay-events.js": "events", "clay-dom.js": "dom", "clay-router.js": "router" };
 
 class FakeEventSource extends EventTarget {
   constructor(url) { super(); this.url = url; this.readyState = 0; }

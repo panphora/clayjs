@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Journal fixture</title>
+<style>.entry { display: none } .entry[route-active] { display: block }</style>
+</head>
+<body>
+<header clay="freeze"><h1>Journal</h1><button id="theme" type="button">Theme</button></header>
+<main id="app" sap>
+  <section id="entries" items="entries" route="entry">
+    <article class="entry" item template data-id="" state="data-date" data-date=""><textarea bind="body" persist></textarea></article>
+    <article class="entry" item data-id="e-1" state="data-date" data-date="2026-10-01"><textarea bind="body" persist># First
+one</textarea></article>
+    <article class="entry" item data-id="e-2" state="data-date" data-date="2026-10-03"><textarea bind="body" persist># Second
+two</textarea></article>
+  </section>
+  <input id="q" bind="q" transient>
+  <nav id="index" route="entry by data-key" each="fmt.index(state.entries, state.q)">
+    <template><a class="row" attr:href="'#entry=' + item.$key" text="item.title"></a></template>
+  </nav>
+</main>
+<script src="https://clayjs.com/v1/clay.js?plugins=sync,undo"></script>
+<script src="https://clayjs.com/v1/sap.js"></script>
+<script src="https://clayjs.com/v1/clay-router.js"></script>
+<script>
+Sap.config({
+  formats: {
+    index: (entries, q) => entries
+      .filter((e) => !q || e.body.includes(q))
+      .map((e) => ({ $key: e.$key, title: e.body.split("\n")[0].replace(/^#\s*/, ""), date: e.date }))
+      .sort((a, b) => b.date.localeCompare(a.date)),
+  },
+});
+</script>
+</body>
+</html>
