@@ -69,7 +69,7 @@
 import { EXTENSION_ATTR_PATTERN } from './extension-noise.js';
 import { resolveRegionPolicy, isInert, strictestPolicy, skipForPolicy } from './region-policy.js';
 import { isPolicyAttribute } from './region-capabilities.js';
-import { ROOT_LIBRARY_ATTRS } from './root-attrs.js';
+import { ROOT_LIBRARY_ATTRS, ROUTE_ROOT_PREFIX, ROUTE_ACTIVE_ATTR } from './root-attrs.js';
 
 import { isUserDrivenNow, markUserDriven } from './user-gesture.js';
 
@@ -83,12 +83,15 @@ const dummyElem = document.createElement("div");
 // instead of body. The raw lane is deliberately unfiltered ("raw means raw"), so
 // without this every save would push a savestatus flip into undo's record stream
 // and Cmd+Z after a save would undo that instead of the user's edit.
+// Router state (route-* on the root, route-active anywhere) is dropped here for the same reason.
 const ROOT_LIBRARY_ATTR_SET = new Set(ROOT_LIBRARY_ATTRS);
 
 function isLibraryRootAttr(record) {
-  return record.type === 'attributes'
-    && record.target === document.documentElement
-    && ROOT_LIBRARY_ATTR_SET.has(record.attributeName);
+  if (record.type !== 'attributes') return false;
+  const name = record.attributeName;
+  if (name === ROUTE_ACTIVE_ATTR) return true;
+  return record.target === document.documentElement
+    && (ROOT_LIBRARY_ATTR_SET.has(name) || name.startsWith(ROUTE_ROOT_PREFIX));
 }
 
 function withoutLibraryNoise(records) {

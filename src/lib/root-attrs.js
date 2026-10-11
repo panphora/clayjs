@@ -116,3 +116,31 @@ export const TAB_LOCAL_ROOT_ATTRS = new Set([
 export function isTabLocalRootAttr(name, element) {
   return element === document.documentElement && TAB_LOCAL_ROOT_ATTRS.has(name);
 }
+
+// Router state. The router mirrors each URL-hash param onto the root as
+// route-<name>, and stamps route-active on the record a param selects. Both say
+// where this tab is in the document, not what the document holds, so they are
+// tab-local like the library's own root state: never saved, never dirty, never
+// undone, never sent to or taken from a peer. route-* is reserved on the root
+// only; route-active is reserved on every element.
+export const ROUTE_ROOT_PREFIX = "route-";
+export const ROUTE_ACTIVE_ATTR = "route-active";
+
+/**
+ * True when `name` on `el` belongs to this tab rather than to the document:
+ * every tab-local root attribute, route-* on a root, and route-active anywhere.
+ * Works on the live root and on a snapshot clone's or parsed frame's root.
+ */
+export function isTabLocalAttr(name, el) {
+  if (name === ROUTE_ACTIVE_ATTR) return true;
+  if (!el || el.localName !== "html" || el.parentElement) return false;
+  return TAB_LOCAL_ROOT_ATTRS.has(name) || name.startsWith(ROUTE_ROOT_PREFIX);
+}
+
+/** Remove router state from a snapshot clone: route-* on its root, route-active anywhere. */
+export function stripRouteAttrs(root) {
+  for (const attr of [...root.attributes]) {
+    if (attr.name.startsWith(ROUTE_ROOT_PREFIX)) root.removeAttribute(attr.name);
+  }
+  for (const el of root.querySelectorAll(`[${ROUTE_ACTIVE_ATTR}]`)) el.removeAttribute(ROUTE_ACTIVE_ATTR);
+}

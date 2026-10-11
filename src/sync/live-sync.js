@@ -44,7 +44,7 @@ import { EXTENSION_NODE_SELECTOR } from '../lib/extension-noise.js';
 import { isEditMode } from "../core/is-edit-mode.js";
 import { mergeTagRecognizers } from "./merge-tags.js";
 import { serializeForSync, captureForComparisonAndDirty, captureSnapshot, originalSnapshotNode, captureForMerge, captureForSaveAndComparison } from '../core/snapshot.js';
-import { isTabLocalRootAttr, TAB_LOCAL_ROOT_ATTRS } from '../lib/root-attrs.js';
+import { isTabLocalAttr } from '../lib/root-attrs.js';
 import { autosaveActive } from '../lib/autosave-state.js';
 import { enableContentEditable } from '../core/admin-contenteditable.js';
 import { enableOnClick } from '../core/admin-onclick.js';
@@ -81,10 +81,9 @@ const REMOTE_WINS_SELECTOR = [
   '[clay~="no-watch"]', '[no-watch]', '[mutations-ignore]',
 ].join(',');
 
-// Host tokens and library state on a document's root element, on every side
+// Host tokens, library state and router state, on every side
 // of a merge: the live root, a snapshot clone's root, a parsed frame's root.
-const isRootLocalAttr = (el, name) =>
-  !el.parentElement && el.localName === 'html' && TAB_LOCAL_ROOT_ATTRS.has(name);
+const isRootLocalAttr = (el, name) => isTabLocalAttr(name, el);
 
 // Identity an author wrote into the page, the fallback behind synthetic ids.
 //
@@ -1592,7 +1591,7 @@ class LiveSync {
     // A frame may neither write these onto our root nor, by not carrying them,
     // take ours away. Returning false is hyper-morph's veto for both directions.
     const beforeAttributeUpdated = (name, element) =>
-      isTabLocalRootAttr(name, element) ? false : undefined;
+      isTabLocalAttr(name, element) ? false : undefined;
     const authored = uniqueAuthoredIdentity(new WeakMap());
     const sideIdentity = (map) =>
       isIdMap(map) ? { first: authored, map, then: authored } : authored;
