@@ -51,10 +51,12 @@ import { enableOnClick } from '../core/admin-onclick.js';
 import { enableAdminInputs } from '../core/admin-inputs.js';
 import { enableAdminResources } from '../core/admin-resources.js';
 import { presence } from './presence.js';
+import { editingMarker } from './editing-marker.js';
 // Side-effect import: the section-changed notice wires itself to
 // `clay:sync-applied`, which this file is the only dispatcher of.
 import './section-notice.js';
-import { hostMeta } from '../core/host-meta.js';
+import { hostMeta, hostSupports } from '../core/host-meta.js';
+import { EditingSender } from './editing-sender.js';
 import { servedDocumentEtag } from '../core/host-attrs.js';
 import { recordEtag, seedEtag, lastSeenEtag, conditionalSaves, representedEtag, forgetRepresentedEtag } from '../core/etag.js';
 import { pageMaybeDirty, pauseGate, resumeGate, gateCaptureToken, gateClearIfUnchanged } from '../lib/dirty-gate.js';
@@ -283,6 +285,7 @@ class LiveSync {
     // document, and hostMeta() memoizes the request itself.
     this._profile = null;
     this._profilePromise = null;
+    this._editing = null;
     this._ready = null;
     // Bumped by every start(), so a discovery that resolves after a stop/restart
     // cannot open a stream for the run that has already been torn down.
@@ -547,6 +550,12 @@ class LiveSync {
     // snapshot listener would never fire — skip registering it.
     if (this.lane === 'live') {
       this.listenForSnapshots();
+      hostSupports('presence-editing').then((supported) => {
+        if (!supported || this.isDestroyed || this._startGen !== gen || this._editing) return;
+        this._editing = new EditingSender({ send: (path) => this._postEditing(path) });
+        this._editing.start();
+        this._editing.roster(this._lastRoster);
+      }, () => {});
       this._saveSavedHandler = () => {
         this._saveEpoch++;
         // The file now holds what this save wrote: the disk lane's new base,
@@ -594,6 +603,13 @@ class LiveSync {
     // Nothing feeds the roster once the stream is gone, so leaving the stack up
     // would show a list of people who may all have left.
     presence.clear();
+    editingMarker.clear();
+
+    if (this._editing) {
+      this._editing.stop();
+      this._editing = null;
+    }
+    this._lastRoster = null;
 
     if (this._snapshotHandler) {
       document.removeEventListener('clay:snapshot-ready', this._snapshotHandler);
@@ -778,6 +794,7 @@ class LiveSync {
 
     this.sse.onopen = () => {
       console.log('[LiveSync] Connected');
+      if (this._editing) this._editing.reconnected();
       if (this.onConnect) this.onConnect();
     };
 
@@ -837,6 +854,9 @@ class LiveSync {
         return;
       }
       presence.update(data);
+      editingMarker.update(data);
+      this._lastRoster = data;
+      if (this._editing) this._editing.roster(data);
     });
 
     this.sse.onmessage = (event) => {
@@ -1099,6 +1119,16 @@ class LiveSync {
         else this._postUpdate(html, identityMap, etag, attempt + 1);
       }, 500 * 2 ** attempt);
     });
+  }
+
+  _postEditing(path) {
+    const url = new URL('/_/presence', window.location.origin);
+    url.searchParams.set('client-id', this.clientId);
+    return fetch(url.href, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Document-URL': window.location.href },
+      body: JSON.stringify({ editing: path }),
+    }).then((response) => response.ok, () => false);
   }
 
   /**
