@@ -152,7 +152,7 @@ test("solid for canEdit, hollow for everyone else", async () => {
   expect(asColor(solid.style.getPropertyValue("border-color"))).toBe(face);
 });
 
-test("the colour comes from the pseudonym", async () => {
+test("the colour comes from the id", async () => {
   const { presence } = await load();
 
   // Both solid, so the fill is the derived colour in both circles and the

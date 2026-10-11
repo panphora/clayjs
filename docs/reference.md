@@ -163,8 +163,11 @@ itself, with no network.
   The host names you through `/_/meta`: hyperclay.com from your account, HTML Clay and
   Hyperclay Local from their Profile setting when you turn it on (Local uses your
   Hyperclay account while signed in). Otherwise it is the name this browser gave the
-  first time you authored something. `color` is an index from 0 to 7 for the app's
-  own palette. Attribution, never a permission check.
+  first time you authored something. `color` is an index from 0 to 7; the eight
+  colors in order are `#6b4fa8`, `#2f6a9e`, `#9a6a1c`, `#a8463d`, `#2f7a69`,
+  `#4f6178`, `#3f7d3a`, `#a2457a`, and the presence stack paints index *n* with the
+  *n*th, so an app that uses them shows a person in the same color as the stack.
+  Attribution, never a permission check.
 - `clay.people` — `get(id)` (always a record, "Unknown person" for an id nobody named),
   `list()` (the people this document names), `await available()` (the host's team for
   a picker, refreshed, or `null`), `add(person)` (record a person in the document's

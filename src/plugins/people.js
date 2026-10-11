@@ -25,11 +25,11 @@ const editing = () => (window.clay && "isEditMode" in window.clay ? !!window.cla
 import { bevelDialog, dismissOf, keepFocusIn } from "../ui/bevel-dialog.js";
 import { bevelBox, bevelButton, bevelInput, bevelText } from "../ui/bevel-controls.js";
 import { resolveTheme } from "../ui/theme.js";
+import { colorIndexOf, initialsOf } from "../lib/person-face.js";
 
 const ID = /^[A-Za-z0-9_-]{8,64}$/;
 const STORE = "clay:people:me";
 const BOOT_WAIT_MS = 2000;
-const COLORS = 8;
 const MAX_NAME = 120;
 const EMAIL = /\S+@\S+\.\S+/;
 
@@ -50,19 +50,8 @@ function clean(person) {
   return { id, name };
 }
 
-function initialsOf(name) {
-  const letters = name.split(" ").filter(Boolean).slice(0, 2).map((word) => Array.from(word)[0]);
-  return letters.join("").toUpperCase() || "?";
-}
-
-function colorOf(id) {
-  let hash = 0;
-  for (const ch of String(id)) hash = (hash * 31 + ch.codePointAt(0)) >>> 0;
-  return hash % COLORS;
-}
-
 function record({ id, name }) {
-  return Object.freeze({ id, name, initials: initialsOf(name), color: colorOf(id) });
+  return Object.freeze({ id, name, initials: initialsOf(name), color: colorIndexOf(id) });
 }
 
 function emit() {
@@ -156,7 +145,7 @@ function get(id) {
   if (live) return record(live);
   const mine = readLocal();
   if (mine?.id === key) return record(mine);
-  return saved().get(key) || Object.freeze({ id: key, name: "Unknown person", initials: "?", color: colorOf(key) });
+  return saved().get(key) || Object.freeze({ id: key, name: "Unknown person", initials: "?", color: colorIndexOf(key) });
 }
 
 function list() {

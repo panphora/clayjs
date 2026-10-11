@@ -31,12 +31,14 @@
  * hyperclay-local, HTML Clay and makerclay do today and it stays that way until
  * they adopt it.
  *
- * `people[].id` is an opaque keyed pseudonym. It picks the colour and nothing
- * else: it is not a database id, it names no account, and it is never logged.
+ * `people[].id` is the person's people id (the one `clay.me` and `clay.people`
+ * use) or a guest's per-document pseudonym. It picks the colour and nothing
+ * else: it is not a permission check, and it is never logged.
  */
 
 import { hostSupports } from '../core/host-meta.js';
 import { make, set } from '../lib/hostile-css.js';
+import { initialsOf, personColor } from '../lib/person-face.js';
 import { pageScheme, RUNTIME_ONLY } from '../ui/bevel-controls.js';
 import { TOKENS, FONT_MONO, SHADOW } from '../ui/bevel.js';
 
@@ -52,44 +54,14 @@ const LABEL_FONT = `500 11px/1.4 ${FONT_MONO}`;
 const RESET = ['all:initial', 'color-scheme:inherit', 'direction:ltr', 'unicode-bidi:isolate'];
 
 // The paper a participant's colour sits on: the initials of a solid square, the fill
-// of a hollow one. One literal in both schemes, because every colour below was chosen
-// against it.
+// of a hollow one. One literal in both schemes, because every colour the shared
+// person-face palette draws with was chosen against it.
 const FACE = '#FFFCF6';
-
-// A fixed set rather than a computed hue: every one of these was looked at
-// against white initials, and a hue wheel puts neighbouring pseudonyms on two
-// blues nobody can tell apart.
-const COLORS = [
-  '#b91c1c', '#c2410c', '#a16207', '#15803d', '#0f766e',
-  '#0369a1', '#1d4ed8', '#6d28d9', '#a21caf', '#9f1239',
-];
 
 /** Every element this module creates, marked the same way. */
 function runtimeRoot(el) {
   el.setAttribute('clay', RUNTIME_ONLY);
   return el;
-}
-
-function hashOf(id) {
-  let h = 5381;
-  for (let i = 0; i < id.length; i++) {
-    h = (((h << 5) + h) ^ id.charCodeAt(i)) >>> 0;
-  }
-  return h;
-}
-
-// The pseudonym picks the colour and nothing else.
-function colorFor(id) {
-  return COLORS[hashOf(id) % COLORS.length];
-}
-
-// Array.from, not [0]: a name starting outside the BMP would otherwise show half
-// a character.
-function initialsOf(name) {
-  const words = String(name).trim().split(/\s+/).filter(Boolean);
-  if (!words.length) return '?';
-  const first = (word) => Array.from(word)[0].toUpperCase();
-  return words.length === 1 ? first(words[0]) : first(words[0]) + first(words[1]);
 }
 
 /**
@@ -260,7 +232,7 @@ class Presence {
   }
 
   avatar(person) {
-    const color = colorFor(person.id);
+    const color = personColor(person.id);
     // Solid says this person can change the document; hollow says they are
     // reading it. The two are the same three colours inverted, so a stack of
     // both reads as one set rather than as two kinds of thing.
