@@ -64,14 +64,33 @@ import { conflicts, beginApply, completeApply, failApply } from './conflicts.js'
 import { beginLineageCapture } from './conflict-footprints.js';
 
 // What a live-sync merge never reads or touches on any side: editor chrome,
-// content kept out of the save or the snapshot, frozen regions, and nodes
-// browser extensions inject. The same set the 0.5 morph's sync policy ignored.
+// content kept out of the save or the snapshot, the contents of frozen regions,
+// and nodes browser extensions inject. The same set the 0.5 morph's sync policy
+// ignored.
 const SYNC_IGNORE_SELECTOR = [
   '[editor-ui]', '[clay~="editor-ui"]', '[save-ignore]', '[snapshot-remove]',
-  '[no-snapshot]', '[no-save]', '[save-remove]', '[freeze]', '[save-freeze]',
-  '[clay~="no-save"]', '[clay~="no-snapshot"]', '[clay~="freeze"]',
+  '[no-snapshot]', '[no-save]', '[save-remove]', '[freeze] *', '[save-freeze] *',
+  '[clay~="no-save"]', '[clay~="no-snapshot"]', '[clay~="freeze"] *',
   EXTENSION_NODE_SELECTOR,
 ].join(',');
+
+// A frozen element is a scratchpad: the element is part of the document and
+// merges like any other, but its contents belong to this tab. Every merge input
+// has its frozen elements emptied, and hyper-morph's opaque option leaves the
+// live contents alone.
+const FREEZE_SELECTOR = '[clay~="freeze"], [freeze], [save-freeze]';
+
+function emptyScratchpads(root) {
+  for (const el of root.querySelectorAll(FREEZE_SELECTOR)) el.replaceChildren();
+  return root;
+}
+
+function scratchpadsEmptied(input) {
+  if (input == null) return input;
+  const doc = typeof input === 'string' ? new DOMParser().parseFromString(input, 'text/html') : input;
+  emptyScratchpads(doc);
+  return doc;
+}
 
 // Regions whose local state is never work to keep: disposable content
 // (no-dirty) and regions the mutation system does not watch, whose churn the
@@ -1618,11 +1637,13 @@ class LiveSync {
         if (synthetic) syntheticByAuthored.set(id, synthetic);
       }
     }
+    remote = scratchpadsEmptied(remote);
 
     const common = {
       live: document,
       remote,
       ignore: (el) => el.matches(SYNC_IGNORE_SELECTOR),
+      opaque: (el) => el.matches(FREEZE_SELECTOR),
       remoteWins: (el) => el.matches(REMOTE_WINS_SELECTOR),
       ignoreAttribute: isRootLocalAttr,
       protectFocusedValue: true,
@@ -1647,7 +1668,7 @@ class LiveSync {
       pending = mergeDocument({
         ...common,
         base: null,
-        local: { root: captureLocal(), toLive: originalSnapshotNode },
+        local: { root: emptyScratchpads(captureLocal()), toLive: originalSnapshotNode },
         identity: { local: localIdentity, remote: sideIdentity(identityMap) },
       });
     } else if (!dirty) {
@@ -1659,7 +1680,7 @@ class LiveSync {
       // a local edit, and a clean autosave tab would write that "edit" back to
       // disk on every frame. Still three-way: merge tags keep their base for
       // the JSON merge, and hyper-morph's clean-side shortcuts apply.
-      const localRoot = captureLocal();
+      const localRoot = emptyScratchpads(captureLocal());
       const baseDoc = localRoot.ownerDocument;
       if (baseDoc.documentElement !== localRoot) baseDoc.replaceChild(localRoot, baseDoc.documentElement);
       pending = mergeDocument({
@@ -1674,7 +1695,7 @@ class LiveSync {
         },
       });
     } else {
-      localRoot = captureLocal();
+      localRoot = emptyScratchpads(captureLocal());
       applyId = beginApply({
         source, seq, etag, root: localRoot,
         domain: source === 'disk' ? 'save' : 'sync',
@@ -1682,7 +1703,7 @@ class LiveSync {
       try {
         pending = mergeDocument({
           ...common,
-          base,
+          base: scratchpadsEmptied(base),
           local: { root: localRoot, toLive: originalSnapshotNode },
           identity: {
             base: sideIdentity(baseIdentityMap),
