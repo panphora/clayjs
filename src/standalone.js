@@ -78,6 +78,7 @@ import onDomReady from "./lib/dom-ready.js";
   }));
   satellite("ui", domReady().then(function () { return import("./ui/index.js"); }));
   satellite("options", domReady().then(function () { return import("./options/options.js"); }));
+  satellite("router", import("./route/route.js").then(function (m) { return m.default; }));
   satellite("events", domReady()
     .then(function () { return clay.loaded.dom && clay.loaded.dom.catch(function () {}); })
     .then(function () { return import("./events/index.js"); }));

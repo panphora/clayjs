@@ -7,6 +7,7 @@
     "@panphora/clayjs/entries/clay-events.js",
     "@panphora/clayjs/entries/clay-internals.js",
     "@panphora/clayjs/entries/clay-options.js",
+    "@panphora/clayjs/entries/clay-router.js",
     "@panphora/clayjs/entries/clay-ui.js",
     "@panphora/clayjs/entries/clay-utils.js",
     "@panphora/clayjs/entries/sap.js",

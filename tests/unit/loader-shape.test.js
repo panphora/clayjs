@@ -17,6 +17,7 @@ const BOOTSTRAPS = [
   "clay-internals.js",
   "clay-events.js",
   "clay-options.js",
+  "clay-router.js",
   "clay-dom.js",
   "all.js",
   "clay-utils.js",
