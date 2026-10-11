@@ -2,6 +2,12 @@ const START_TIMEOUT = 5000;
 const HIDDEN_DELAY = 5000;
 const PING_INTERVAL = 15000;
 
+let workspaceBackground = false;
+document.addEventListener('clay:workspace-background', () => { workspaceBackground = true; });
+document.addEventListener('clay:workspace-foreground', () => { workspaceBackground = false; });
+
+const pageHidden = () => document.hidden || workspaceBackground;
+
 export class SyncStream extends EventTarget {
   constructor(url, { shared = false, documentURL, lane, startupCheck = false } = {}) {
     super();
@@ -28,7 +34,7 @@ export class SyncStream extends EventTarget {
     this._source = null;
     this._visibility = () => {
       clearTimeout(this._hiddenTimer);
-      if (document.hidden) {
+      if (pageHidden()) {
         this._worker?.port.postMessage({ v: 1, type: 'hidden' });
         this._hiddenTimer = setTimeout(() => this._suspend(), HIDDEN_DELAY);
       } else {
@@ -39,12 +45,14 @@ export class SyncStream extends EventTarget {
       }
     };
     this._pagehide = () => this._suspend();
-    this._pageshow = () => { if (!document.hidden) this._resume(); };
+    this._pageshow = () => { if (!pageHidden()) this._resume(); };
     document.addEventListener('visibilitychange', this._visibility);
+    document.addEventListener('clay:workspace-background', this._visibility);
+    document.addEventListener('clay:workspace-foreground', this._visibility);
     window.addEventListener('pagehide', this._pagehide);
     window.addEventListener('pageshow', this._pageshow);
     this._open();
-    if (document.hidden) this._visibility();
+    if (pageHidden()) this._visibility();
   }
 
   _emit(type, data) {
@@ -99,7 +107,7 @@ export class SyncStream extends EventTarget {
         }
       };
       worker.port.start();
-      worker.port.postMessage({ v: 1, type: document.hidden ? 'hidden' : 'visible' });
+      worker.port.postMessage({ v: 1, type: pageHidden() ? 'hidden' : 'visible' });
       worker.port.postMessage({ v: 1, type: 'subscribe', document: this._documentURL, lane: this._lane, since: this._since });
       this._pingTimer = setInterval(() => {
         if (this._worker !== worker) return;
@@ -197,6 +205,8 @@ export class SyncStream extends EventTarget {
     clearTimeout(this._hiddenTimer);
     this._disconnect();
     document.removeEventListener('visibilitychange', this._visibility);
+    document.removeEventListener('clay:workspace-background', this._visibility);
+    document.removeEventListener('clay:workspace-foreground', this._visibility);
     window.removeEventListener('pagehide', this._pagehide);
     window.removeEventListener('pageshow', this._pageshow);
   }
