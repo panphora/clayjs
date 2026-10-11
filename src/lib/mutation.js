@@ -130,6 +130,7 @@ const localMutation = {
    * Always pair with resume() in a try/finally block.
    */
   pause() {
+    if (this._pauseDepth === 0) this._deliverBeforePause();
     // Reference-counted so nested pauses (e.g. a programmatic pause wrapping a
     // live-sync morph that also pauses) only resume on the outermost release.
     this._pauseDepth++;
@@ -140,6 +141,26 @@ const localMutation = {
       window.clay.undo.pause();
     }
     this._log('Paused', this._pauseDepth);
+  },
+
+  // Records the browser queued before this pause describe changes made outside
+  // it. Left in the queue, resume() would drain them as paused-time records and
+  // only non-pausable callbacks would see them, so autosave missed a change made
+  // just before a pause. Deliver them on a microtask, as the observer would have.
+  _deliverBeforePause() {
+    if (!this._observer) return;
+    const records = this._observer.takeRecords();
+    if (records.length) queueMicrotask(() => this._onRecords(records));
+  },
+
+  /**
+   * Hand the records the browser has queued to raw subscribers' buffers and to
+   * non-pausable callbacks only, as if they had happened inside a pause. For a
+   * caller whose writes and their undoing cancel out, so the page's change feed
+   * has nothing to see.
+   */
+  dropQueued() {
+    if (this._observer) this._drainBrowserQueue(this);
   },
 
   /**

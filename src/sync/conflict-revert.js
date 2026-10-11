@@ -1115,8 +1115,7 @@ export function applyRevert(plan) {
     // The page's change feed drops the writes and their undoing together: nothing
     // changed, so the dirty gate, autosave and the hub's other pausable subscribers
     // have nothing to see.
-    Mutation.pause();
-    Mutation.resume();
+    Mutation.dropQueued();
     undo?.discardCaptured?.();
     undo?.resume?.();
   }
