@@ -28,7 +28,7 @@ npm run build              # assembles public/, asserts the deploy output is com
 The unit suite covers logic. The conformance suite is the byte gate: it runs each fixture
 in `conformance/fixtures/` through the snapshot algorithm and compares the output
 byte-for-byte against a committed golden, with no whitespace tolerance. It is how clayjs
-proves it agrees with the Malleable HTML File spec, and with the other client
+proves it agrees with the Malleable Document spec, and with the other client
 implementation.
 
 **Do not hand-edit anything under `conformance/fixtures/`.** That directory is a

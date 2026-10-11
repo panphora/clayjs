@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Visual guide · clayjs</title>
-<meta name="description" content="Malleable HTML files, drawn: how the file and the open page relate, why stripping content for viewers makes sync harder, the common mistakes, and where each piece of state belongs.">
+<meta name="description" content="Malleable documents, drawn: how the file and the open page relate, why stripping content for viewers makes sync harder, the common mistakes, and where each piece of state belongs.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%233E6B52'/%3E%3Cpath d='M21.5 11.2a7 7 0 1 0 0 9.6' fill='none' stroke='%23F1EFEA' stroke-width='3.2' stroke-linecap='round'/%3E%3C/svg%3E">
 <link rel="canonical" href="https://clayjs.com/visual-guide">
 <meta property="og:type" content="website">
@@ -81,13 +81,13 @@
 
   <section style="border-top: none; padding-top: 56px;">
     <span class="eyebrow"><a href="/guide">Guide</a> · Visual</span>
-    <h1 class="display" style="font-size: clamp(30px, 4.5vw, 42px);">Malleable HTML, drawn</h1>
+    <h1 class="display" style="font-size: clamp(30px, 4.5vw, 42px);">Malleable documents, drawn</h1>
     <p class="lede" style="margin-top: 12px;">You save and reopen, and an "Add item" button appears twice. Or the next save writes over an agent's edit. Both happen when the saved file and the open page drift apart. <a href="#minimal">Section 6</a> is the smallest complete file: a task list that keeps its edits and order when you reopen it. This page assumes you have loaded ClayJS and saved through a host. If you haven't, start with <a href="/get-started">Get started</a>. The attribute reference and the APIs are in the <a href="/complete-guide">complete guide</a>.</p>
   </section>
 
 
 <h2 id="loop">1. One file, two forms</h2>
-<p>A malleable HTML file exists in two forms. The saved file is the bytes on disk. The open page is the live DOM in an editor's browser. ClayJS turns the file into the page on open, and the page back into a file on save. With the <code>sync</code> plugin, it also merges outside changes into the open page.</p>
+<p>A malleable document exists in two forms. The saved file is the bytes on disk. The open page is the live DOM in an editor's browser. ClayJS turns the file into the page on open, and the page back into a file on save. With the <code>sync</code> plugin, it also merges outside changes into the open page.</p>
 
 <figure>
 <svg viewBox="0 0 760 335" role="img" aria-labelledby="f1t">

@@ -2,7 +2,7 @@
 
 **Site, tutorial, and docs: [clayjs.com](https://clayjs.com)** · hosted platform: [hyperclay.com](https://hyperclay.com)
 
-Self-saving, malleable HTML in one classic `<script>`. Load `clay.js` on a page and it
+Self-saving malleable documents from one classic `<script>`. Load `clay.js` on a page and it
 becomes editable in place, snapshots its own DOM, and saves that DOM back to the file it
 came from. No build step, no framework, no account.
 

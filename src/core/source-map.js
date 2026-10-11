@@ -1,7 +1,7 @@
 /**
  * source-map.js — save the file, not a serialization of it.
  *
- * Every program that edits a malleable HTML file rewrites the whole file, because
+ * Every program that edits a malleable document rewrites the whole file, because
  * each one parses to a tree and serializes the tree back out, and a serializer does
  * not reproduce its input. A no-edit save through `clone.outerHTML` rewrites about
  * 88% of an authored document's lines: attributes reorder, quoting normalises, `&`

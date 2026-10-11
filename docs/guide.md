@@ -1,6 +1,6 @@
-# Building malleable HTML files with ClayJS
+# Building malleable documents with ClayJS
 
-This is the complete reference for building malleable HTML files with ClayJS: one HTML file that is the whole app, edits itself in place, saves itself back to its host, and merges edits from other tabs, other people and agents. Read it top to bottom once. After that, sections 2 (the skeleton), 9 (architecture) and 13 (checklist and trap index) are the parts to return to.
+This is the complete reference for building malleable documents with ClayJS: one HTML file that is the whole app, edits itself in place, saves itself back to its host, and merges edits from other tabs, other people and agents. Read it top to bottom once. After that, sections 2 (the skeleton), 9 (architecture) and 13 (checklist and trap index) are the parts to return to.
 
 It is written for a developer or an LLM building full apps with inline editing and inline controls: kanban boards with card detail, block writers, finance trackers, CRMs, flashcards, trackers. It covers the CMS plugin only in passing (section 8.12), because an app whose product is editing should not route editing through a form sidebar.
 
@@ -21,7 +21,7 @@ Code in this guide assumes the loader URL `https://clayjs.com/v1/`. Section 3 co
 
 ### 1.1 Two forms of one file
 
-A malleable HTML file exists in two forms.
+A malleable document exists in two forms.
 
 - **The saved file** is the bytes on the host. A visitor downloads exactly these bytes. They must be correct and complete with no JavaScript running: the content, its order, the state of every checkbox, the totals if the reader needs them.
 - **The open page** is the live DOM in one browser tab. It holds the saved content plus everything the tab adds at runtime: editing toolbars, a filter box, an open dialog, selection, computed badges, drag ghosts.

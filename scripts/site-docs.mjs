@@ -51,7 +51,7 @@ export function renderGuide(markdown, shellHtml) {
 
   const dom = new JSDOM(shellHtml);
   const doc = dom.window.document;
-  const description = 'The complete guide to building malleable HTML apps with clayjs: inline editing, saving, live sync, components, architecture, recipes and traps.';
+  const description = 'The complete guide to building malleable documents with clayjs: inline editing, saving, live sync, components, architecture, recipes and traps.';
   doc.title = 'Complete guide · clayjs';
   const set = (selector, attr, value) => {
     const el = doc.querySelector(selector);
