@@ -397,7 +397,7 @@ In view mode `window.clay` keeps `ready`, `isEditMode`, `isOwner`, `toggleEditMo
 A save writes the current document with these changes:
 
 - Subtrees marked `no-save`, `no-snapshot` or `editor-ui` are removed.
-- `freeze` subtrees are written with the inner HTML they had at load.
+- `freeze` elements are written with the inner HTML they had when they first appeared (at load, or when inserted later). Their contents are a per-tab scratchpad.
 - Mode attributes go inert (4.4). Root attributes `editmode`, `pageowner`, `savestatus`, `savetoken`, `documentetag` are removed.
 - `persist` controls write their live values (5.3).
 - Runtime residue of ClayJS's own editors (richclay attributes, toolbars) and of browser extensions (password managers, Grammarly, Dark Reader) is stripped.
@@ -421,7 +421,7 @@ Never saved: JavaScript objects, `localStorage`, canvas pixels, scroll position,
 | `editor-ui` | removed | no | no | no | no | **all runtime chrome and tab-only derived values** |
 | `no-save` | removed | carried in the bytes, never applied | no | no | yes | rarely; prefer `editor-ui` |
 | `no-snapshot` | removed | no (each tab keeps its own) | no | no | yes | part of `editor-ui` |
-| `freeze` | inner HTML as at load | no | no | no | yes | an authored mount whose runtime content must never save |
+| `freeze` | element current, contents as when it appeared | element yes, contents never | no | no | yes | a scratchpad: per-tab generated content in a saved element (9.4) |
 | `no-dirty` | current | yes, **remote wins** | no | no | yes | derived values the saved file must show (9.4) |
 | `no-trigger-autosave` | current | yes | no | **yes** | yes | a heavy editor whose saves you batch yourself (6.3) |
 | `no-watch` | current | yes, remote wins | no | no | no | rarely: high-frequency content that is disposable |
@@ -435,9 +435,9 @@ Legacy spellings still work: `save-remove` is `no-save no-undo`, `save-ignore` i
 Traps in this table:
 
 - **An edit inside `no-watch` or `no-dirty` is invisible to `clay.save()` and the close warning.** `save()` answers "No changes to save" and closing the tab loses it silently. It is saved only when some other change triggers a save, or by `clay.save.force()`. Never put typed work there.
-- **A runtime change inside `freeze` is never saved,** not even by `clay.save.force()`: every save restores the inner HTML captured at load.
-- **`freeze` freezes inner HTML only.** The freeze element's own attributes stay live and are saved.
-- **Rendering into a `freeze` mount before `clay.ready` freezes the rendered output**, because the capture happens at boot. Render after `clay.ready`.
+- **`freeze` is a scratchpad.** The element belongs to the document: its attributes save, it syncs, moves and merges like any element. Its contents belong to this tab: a runtime change inside is never saved, not even by `clay.save.force()`, and never reaches a peer. Every save restores the contents the element had when it first appeared.
+- **A scratchpad from a peer arrives empty.** When a peer adds a record that contains a frozen element, it is inserted without contents. Fill scratchpads from code that runs on every change (a sap `effect`, or your render function), never once at boot.
+- **Fill a scratchpad after `clay.ready`, and insert new ones empty.** The contents are captured when the element first appears, so content written before boot, or present in a cloned element when it is inserted, becomes its saved contents. Empty the scratchpads in a copied record before inserting it.
 - An `editor-ui` root disappears from the saved file, so it cannot be authored in the file. Create it at runtime from a `<template>`, every load. That includes elements inside the `<template>`: mark the blueprint `editor-ui` and the first save empties the template, so the next load has no chrome to clone. Leave the blueprint unmarked and set `clay="editor-ui"` on each clone as you insert it.
 - Mark a region by setting the attribute on creation, or with `clay.region.addRegionToken(el, "editor-ui")`.
 
@@ -632,7 +632,7 @@ Rules:
 
 - **Hooks must be pure and repeatable.** They run on every autosave check, every `hasUnsavedChanges()`, every `getHTML()`. A hook that writes a timestamp or counter makes the page permanently dirty and autosaves forever.
 - A throwing **attribute** hook costs only that hook. A throwing `clay.onSnapshot` or `clay.addDocumentTransform` callback aborts the capture: `getHTML()` throws and every `save()` fails with `msgType: "error"` until it stops throwing. Registered callbacks must handle missing elements themselves; remember that change-check captures have already removed `editor-ui`, `no-save` and `no-snapshot` regions.
-- `onaftersave` writes to the live DOM, so anything it changes is a new edit and, with autosave, a save loop. Mark what it writes `no-save` or `freeze`.
+- `onaftersave` writes to the live DOM, so anything it changes is a new edit and, with autosave, a save loop. Mark what it writes `editor-ui`, or write it inside a `freeze` scratchpad.
 - `clay:snapshot-ready` listeners receive the shared clone and must not change it.
 
 Strip library residue once, at the snapshot level:
@@ -721,7 +721,8 @@ More engine rules:
 
 ### 7.3 Regions and JSON under sync
 
-- `editor-ui`, `no-save`, `no-snapshot`, `freeze`: **ignored on every side.** Your copy is never touched, and the incoming copy is never read.
+- `editor-ui`, `no-save`, `no-snapshot`: **ignored on every side.** Your copy is never touched, and the incoming copy is never read.
+- `freeze`: **the element merges, its contents never do.** A frozen element pairs, moves, is inserted and removed with its record, and its attributes merge. Your copy's contents are never touched, the incoming contents are never read, and a frozen element new to this tab arrives empty.
 - `no-dirty`, `no-watch`: **remote wins.** The incoming copy replaces yours with no merge. Correct for derived values that every tab recomputes.
 - `no-trigger-autosave`: merged like ordinary content.
 - Root attributes the library owns (`editmode`, `savestatus`, tokens) are never written by a frame.
@@ -1013,8 +1014,16 @@ How it fits ClayJS: it rides the mutation hub so its paints never trigger autosa
 
 Rules for sap in a malleable file, all from the finance tracker:
 
+- **A paint computed only from the records is ordinary saved content.** A list count, a card's checklist badge, an entry count in a header: put the paint in the record markup with no region token. It saves and syncs like anything else, and every tab computes the same value, so at load and after a merge sap writes nothing new. This is the normal way to use sap.
+- **A paint that differs per tab goes in a `clay="freeze"` scratchpad**: anything that depends on today's date, the browser's locale or OS, the URL hash, the search box, or data loaded at runtime. Freeze keeps an element's contents, not its attributes, so the per-tab values must be inside the scratchpad: wrap them, or fill the scratchpad from an `effect`, which is re-run on every pass and so also fills a scratchpad that arrived empty from a peer:
+
+  ```html
+  <span class="due-slot" clay="freeze" show="Face.due(item.$el)" effect="Face.paintDue(el, item.$el)"></span>
+  ```
+
+  `show` on the scratchpad itself is fine when it depends only on the record. Write through a guard (`if (el.innerHTML !== html) el.innerHTML = html`) so a pass that changes nothing writes nothing.
 - **Author the file with its computed values already painted.** A mismatch makes sap write at load, which is an edit. Check by comparing the live `#app` after load with the file's. `Sap.status().apps[0].mountWrites` is not a clean signal on its own: in a root that contains `show-when` controls, sap briefly sets `hidden` on them before clay-options starts (a `W30` warning, 10 writes in the finance tracker) and clears it again, which is harmless.
-- **Computed outputs that the saved file shows go in `clay="no-dirty"`.** Their bytes save with the next real edit, never count as edits themselves, and a peer's frame replaces them. Apply the acknowledge workaround from 7.3 while that known issue stands.
+- **Optionally, computed outputs can go in `clay="no-dirty"`.** Their bytes save with the next real edit, never count as edits themselves, and a peer's frame replaces them. Apply the acknowledge workaround from 7.3 while that known issue stands.
 - **Give rows your own stable ids.** Sap stamps `row-N` from a counter that restarts on every load, so a row added after reload can reuse an id another row already carries. Replace them as rows appear:
 
   ```js
@@ -1072,7 +1081,7 @@ chrome.append(document.getElementById("chrome-tpl").content.cloneNode(true));
 board.querySelector(".board-head").append(chrome);
 ```
 
-Chrome may sit inside the record container (the kanban puts its filter in the board header): `editor-ui` removes it wherever it is. Per-item chrome (the writer's block gutter, the kanban's count badges) is inserted into each item as its own `editor-ui` element and re-inserted by `render()` when missing, so items added by a peer get theirs too.
+Chrome may sit inside the record container (the kanban puts its filter in the board header): `editor-ui` removes it wherever it is. Per-item controls (the writer's block gutter, a list's menu button) are inserted into each item as their own `editor-ui` element and re-inserted by `render()` when missing, so items added by a peer get theirs too. A per-item value computed from the record, such as a count, is not chrome: it is saved content (9.4).
 
 Edit-only chrome lives in the same wrapper with `show-when:editmode="true"`, or is not built at all in view mode (`if (clay.isEditMode) …`).
 
@@ -1111,8 +1120,10 @@ Never put per-viewer state on `<html>` or any record element without that: it au
 
 Pick by whether the saved file must show the value:
 
-- **Tab only** (counts, progress badges, outlines, word counts, search results): write into `editor-ui` elements. The kanban inserts a `.count` span into each column header and a `.progress` span into each card, both `editor-ui`, so they are never saved, never synced and never undone. Each tab computes its own.
-- **Visible in the saved file** (budget totals a reader needs without JavaScript): write into the record inside `clay="no-dirty"`. It saves with the next real edit, never counts as an edit itself, and remote wins under sync. Apply the 7.3 workaround. Sap does this in the finance tracker.
+- **Computed only from the records** (counts, progress badges, totals, a card's face): ordinary saved content. Write it into the record markup, ship the file pre-painted, and recompute on every change; every tab computes the same value, so a merge never fights over it. With sap this is just a paint (8.11). The starter Kanban paints its list counts and card faces this way.
+- **Different per tab** (search results, which entry is open, "overdue" against today's date, OS shortcut labels, names loaded from the people plugin): write it inside a `clay="freeze"` scratchpad (5.2). The element saves and syncs; its contents never do.
+- **Pure UI** (buttons, menus, handles): `editor-ui`, created from a `<template>` (9.2).
+- **Optionally, `no-dirty`** for a computed value the saved file shows: it saves with the next real edit, never counts as an edit itself, and remote wins under sync. Apply the 7.3 workaround. The finance tracker does this.
 - **Only in the saved file**: compute it into the save clone with `clay.addDocumentTransform`, never the live page.
 
 Always write derived text through a guard, because writing the same text is still a mutation:
@@ -1441,8 +1452,9 @@ The saved file is the data. Everyone who can download it can read everything in 
 | `showModal()`, `hidden`, `.selected` and library inline styles save | 5.1 |
 | `no-save` chrome still reaches peers; use `editor-ui` | 5.2 |
 | Edits in `no-watch` or `no-dirty` are invisible to `save()` and the close warning | 5.2 |
-| Runtime changes inside `freeze` are never saved, even by `force()` | 5.2 |
-| Rendering into `freeze` before `clay.ready` freezes the render | 5.2 |
+| Runtime changes inside `freeze` are never saved or synced, even by `force()` | 5.2 |
+| A `freeze` scratchpad from a peer arrives empty; fill it on every change | 5.2 |
+| Content in a `freeze` element when it first appears becomes its saved contents | 5.2 |
 | A control without `persist` loses its typed value | 5.3 |
 | Undo and merges restore `checked`/`value` attributes but not what the control shows, and the next save writes what is shown | 5.3, 8.3 |
 | JSON with an unescaped `</script>` corrupts the file | 5.4 |

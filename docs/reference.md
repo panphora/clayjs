@@ -257,9 +257,11 @@ spaces: `clay="freeze no-undo"`.
   prefer `editor-ui` for UI.
 - `no-snapshot` — invisible to save AND to sync; every device keeps its own copy. Use
   for per-device panel state.
-- `freeze` — its inner HTML is saved as it was at load; runtime changes to its contents
-  are ignored (the element's own attributes stay live). Use for clocks and tickers. Not
-  for totals the saved file should show: they would be saved stale.
+- `freeze` — a scratchpad. The element saves, syncs and merges like any element; its
+  contents are per-tab: saved as they were when the element first appeared, never sent to
+  peers, and a frozen element new to this tab arrives empty. Use for status text, clocks,
+  and per-tab paints such as "overdue". Not for values computed from the records: those
+  are ordinary content.
 - `no-trigger-autosave` — saved normally and still counted as unsaved work, but edits
   here don't start an autosave (any save still writes them). Live sync merges it like
   ordinary content: an overlap with an incoming frame goes to the conflict ledger. Use for
@@ -271,8 +273,8 @@ spaces: `clay="freeze no-undo"`.
   undo). Use for third-party widgets that churn the DOM.
 - `no-undo` — changes here aren't recorded in undo history.
 
-Recipes: UI chrome (toolbars, badges) → `clay="editor-ui"`. Live or computed
-text (clocks) → `clay="freeze"`. Third-party embeds → `clay="no-watch"`. Heavy editors,
+Recipes: UI chrome (toolbars, badges) → `clay="editor-ui"`. Per-tab generated
+text (clocks, status, "overdue") → `clay="freeze"`. Third-party embeds → `clay="no-watch"`. Heavy editors,
 batch the saves → `clay="no-trigger-autosave"`. Self-rendering UI → `clay="no-dirty"`.
 
 `no-trigger-autosave` vs `no-dirty`: ask whether a change in that region is work you
