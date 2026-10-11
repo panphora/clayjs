@@ -2,7 +2,7 @@ const START_TIMEOUT = 5000;
 const HIDDEN_DELAY = 5000;
 const PING_INTERVAL = 15000;
 
-let workspaceBackground = false;
+let workspaceBackground = window.__clayWorkspaceBackground === true;
 document.addEventListener('clay:workspace-background', () => { workspaceBackground = true; });
 document.addEventListener('clay:workspace-foreground', () => { workspaceBackground = false; });
 

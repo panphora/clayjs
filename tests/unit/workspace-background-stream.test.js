@@ -42,6 +42,7 @@ beforeEach(async () => {
 afterEach(() => {
   streams.forEach(stream => stream.close());
   workspace("foreground");
+  delete window.__clayWorkspaceBackground;
   delete global.SharedWorker;
   delete global.EventSource;
   delete document.hidden;
@@ -105,6 +106,34 @@ test("a stream constructed while the workspace is backgrounded suspends on the h
   expect(sources).toHaveLength(1);
   jest.advanceTimersByTime(5000);
   expect(sources[0].close).toHaveBeenCalledTimes(1);
+});
+
+const lateStream = async () => {
+  jest.resetModules();
+  const { SyncStream: LateSyncStream } = await import("../../src/sync/stream.js");
+  const stream = new LateSyncStream("http://localhost/_/sync?document-url=test&resume-id=existing", {
+    shared: false, documentURL: "http://localhost/file.htmlclay", lane: "live",
+  });
+  streams.push(stream);
+  return stream;
+};
+
+test("a workspace backgrounded before the module loads still suspends the direct stream", async () => {
+  window.__clayWorkspaceBackground = true;
+  workspace("background");
+  await lateStream();
+  expect(sources).toHaveLength(1);
+  jest.advanceTimersByTime(5000);
+  expect(sources[0].close).toHaveBeenCalledTimes(1);
+});
+
+test("the same ordering without the recorded window flag leaves the stream open", async () => {
+  delete window.__clayWorkspaceBackground;
+  workspace("background");
+  await lateStream();
+  expect(sources).toHaveLength(1);
+  jest.advanceTimersByTime(5000);
+  expect(sources[0].close).not.toHaveBeenCalled();
 });
 
 test("pageshow does not resume a backgrounded workspace", () => {
