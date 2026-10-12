@@ -1,5 +1,34 @@
 # Changelog
 
+## [1.10.0] - 2026-10-12
+
+### Added
+- Editing marker outlines blocks other people are editing, with editing presence wired into live sync
+- Index paths for blocks shared between peers
+- Sync stream is suspended in a backgrounded workspace
+- Test covering a journal-shaped page through boot, save and live sync
+- Vendored sap with each=, data-id keys, data-* fields and the clay.ready mount
+- clay-router.js for URL-hash routing as tab-local attributes
+
+### Changed
+- One shared person-face palette and initials across all surfaces
+- Guide 8.11 covers each views, the hash router, frozen filter styles and data-id keys, with updated site freeze wording
+- Docs describe freeze as a scratchpad and record-derived paints as saved content
+- Live sync merges a frozen element, and only its contents stay per-tab
+- Router state is treated as tab-local
+- Prose now calls the format "malleable document"
+
+### Fixed
+- Changes queued before a pause are now delivered to every consumer
+- Editing marker keeps one report in flight with retry, recomputes after sync, follows newly added blocks, and keeps avatars in place on marker-only frames
+- Workspace background state survives a stream module that loads after the frame was backgrounded
+- Sortable press guard leaves editor UI elements alone, so paints made during a click persist
+- Vendored hyper-morph gives focused fields the merged text
+- Vendored sap includes the each-row move and data-* field fixes
+- Router keeps the path under `<base>`, stamps containers that arrive whole, and freeze never keeps a stamp
+
+
+
 ## [1.9.2] - 2026-10-10
 
 ### Fixed
