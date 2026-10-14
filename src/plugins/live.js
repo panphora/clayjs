@@ -18,6 +18,7 @@ import { hostSupports } from "../core/host-meta.js";
 import { setSaveHeader } from "../core/save-core.js";
 import { createFastLane } from "../live/fast-lane.js";
 import { serverTransport } from "../live/server-lane.js";
+import { localTransport, localLaneSupported } from "../live/local-lane.js";
 
 const NAME = /^[A-Za-z0-9_.:-]{1,64}$/;
 const CAPTURES_KEPT = 16;
@@ -50,20 +51,47 @@ const checkpoints = createCheckpoints({
 // clay.live() call in an edit-mode tab.
 let fast = null;
 let laneRequested = false;
+let local = null;
+
+// What this tab holds for every live tag, for the room it starts when it becomes
+// the local sequencer: an open store's authoritative value (never its own
+// unconfirmed ops, which its lane resends), or the tag's text.
+function seedLocalRoom() {
+  const values = new Map();
+  for (const [name, tag] of liveTags(document, { warn: false })) {
+    const text = tag.element.textContent;
+    const entry = entries.get(name);
+    if (entry) {
+      values.set(name, { value: entry.store.authoritative, ephemeral: entry.store.ephemeral, text });
+      continue;
+    }
+    try {
+      const value = HyperMorph.parseJsonRelaxed(text);
+      if (value !== null && typeof value === "object") values.set(name, { value, ephemeral: tag.ephemeral, text });
+    } catch {}
+  }
+  return values;
+}
 
 function ensureLane() {
   if (laneRequested || !isEditMode) return;
   laneRequested = true;
   hostSupports("live-data").then(
     (supported) => {
-      if (!supported) return;
-      fast = createFastLane({
-        transport: serverTransport(),
-        entries,
-        onEpoch: (epoch) => setSaveHeader("Live-Epoch", epoch),
-        onWriter: () => checkpoints.changed(),
-        onStop: () => setSaveHeader("Live-Epoch", null),
-      });
+      if (supported) {
+        fast = createFastLane({
+          transport: serverTransport(),
+          entries,
+          onEpoch: (epoch) => setSaveHeader("Live-Epoch", epoch),
+          onWriter: () => checkpoints.changed(),
+          onStop: () => setSaveHeader("Live-Epoch", null),
+        });
+      } else if (localLaneSupported()) {
+        local = localTransport({ seed: seedLocalRoom });
+        fast = createFastLane({ transport: local, entries, onWriter: () => checkpoints.changed() });
+      } else {
+        return;
+      }
       fast.start();
     },
     () => {},
@@ -171,6 +199,7 @@ onSnapshot((clone) => {
     const text = textOf(entry);
     tag.element.textContent = text;
     remember(entry, text);
+    local?.captured(entry.store.name, text);
   }
 });
 
@@ -202,7 +231,12 @@ export function receiveFrame(html) {
   if (typeof html !== "string" || !html) return;
   const incoming = liveTags(parseHtml(html), { warn: false });
   if (!incoming.size) return;
-  const local = liveTags(document, { warn: false });
+  if (local) {
+    const texts = new Map();
+    for (const [name, tag] of incoming) texts.set(name, tag.element.textContent);
+    local.fileFrame(texts);
+  }
+  const page = liveTags(document, { warn: false });
   for (const [name, tag] of incoming) {
     const text = tag.element.textContent;
     const entry = entries.get(name);
@@ -210,7 +244,7 @@ export function receiveFrame(html) {
       if (entry.store.handle.status.mode === "file") receive(entry, text, "remote");
       continue;
     }
-    const element = local.get(name)?.element;
+    const element = page.get(name)?.element;
     if (element && element.textContent !== text) element.textContent = text;
   }
 }
