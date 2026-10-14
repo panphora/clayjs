@@ -1,5 +1,36 @@
 # Changelog
 
+## [1.11.0] - 2026-10-14
+
+### Added
+- `add-from`/`add-to` attributes that clone templates into lists
+- clay.live, which exposes a live JSON tag as an in-memory object
+- Op model for live JSON stores
+- Live region token, and live tags are kept out of the merge
+- clay.live fast lane client, with stream events, a bridge and data routes
+- clay.live local tab lane
+- clay.live checkpoints that save live changes every 8 seconds and when the tab is hidden
+- clay.live write-back, confirmation and frames at file speed
+- clay.live lineage stamp helpers (`textHash`, `stampOf`, `parseStamp`)
+- clay.live frames now carry their epoch
+- clay.live logged merges, a connection-checked fast lane, local hand-off and crash rules
+
+### Changed
+- clay.live fast lane does ordered state repair, packs frames by size, backs off on failure, and opens every tag
+- JSON merge conflicts now show as readable rows in the conflict notice
+- Presence squares are hollow for everyone, and the section notice hides itself after six seconds
+- Guide updated to 7.9 with live data docs, and to sapjs 8.11 for 0.5.0 with notes on using sapjs
+
+### Fixed
+- clay.live applies ops exactly once across room changes
+- clay.live file mode confirms ops only on this tab's own accepted save
+- clay.live no longer creates sparse lists, and a deep set followed by a delete keeps its meaning
+
+### Breaking Changes
+- Removed the section-changed notice, since the editing marker already shows who is editing each block
+
+
+
 ## [Unreleased]
 
 ### Added
