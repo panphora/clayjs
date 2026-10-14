@@ -102,7 +102,17 @@ export function checkOp(root, op) {
   for (let i = 0; i < op.path.length; i++) {
     const seg = op.path[i];
     const last = i === op.path.length - 1;
-    if (!isContainer(node)) return;
+    if (!isContainer(node)) {
+      // The rest of the path will be created, and a new list starts empty: an
+      // index other than 0 would leave holes, which are not JSON.
+      if (op.op === "del") return;
+      for (let j = i; j < op.path.length; j++) {
+        if (typeof op.path[j] === "number" && op.path[j] !== 0) {
+          throw new RangeError(`clay.live: index ${op.path[j]} would leave holes in a new list at ${op.path.slice(0, j).join(".") || "the root"}`);
+        }
+      }
+      return;
+    }
     if (Array.isArray(node)) {
       const idx = indexOf(node, seg);
       if (idx < 0) throw new TypeError(`clay.live: "${seg}" is not an index of the list at ${op.path.slice(0, i).join(".") || "the root"}`);
@@ -164,8 +174,9 @@ const samePath = (a, b) => a.length === b.length && a.every((s, i) => String(s) 
 
 // Merges neighbouring ops on the same path, without changing the result:
 // set,set -> the later set; add,add -> one add of the sum; set,add -> one set of
-// the sum; set,del and add,del -> the del. A del is never merged with what
-// follows it (on a list it shifts the indexes after it).
+// the sum; set,del and add,del -> the del, but only on a one-segment path (a
+// deeper set may have created the parents the del leaves behind). A del is never
+// merged with what follows it (on a list it shifts the indexes after it).
 export function coalesce(ops) {
   const out = [];
   for (const op of ops) {
@@ -174,7 +185,9 @@ export function coalesce(ops) {
       out.push(op);
       continue;
     }
-    if (op.op === "set" || op.op === "del") {
+    if (op.op === "del" && op.path.length > 1) {
+      out.push(op);
+    } else if (op.op === "set" || op.op === "del") {
       out[out.length - 1] = op;
     } else if (prev.op === "add") {
       out[out.length - 1] = { op: "add", path: prev.path, n: prev.n + op.n };

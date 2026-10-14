@@ -24,5 +24,10 @@
   { "name": "set then add", "before": { "s": 9 }, "ops": [{ "op": "set", "path": ["s"], "value": 1 }, { "op": "add", "path": ["s"], "n": 1 }], "after": { "s": 2 } },
   { "name": "add then set", "before": { "s": 9 }, "ops": [{ "op": "add", "path": ["s"], "n": 1 }, { "op": "set", "path": ["s"], "value": 1 }], "after": { "s": 1 } },
   { "name": "a later op sees an earlier one", "before": {}, "ops": [{ "op": "set", "path": ["p"], "value": { "a": { "x": 0 } } }, { "op": "set", "path": ["p", "a", "x"], "value": 4 }], "after": { "p": { "a": { "x": 4 } } } },
-  { "name": "a key named __proto__ is an ordinary key", "before": {}, "ops": [{ "op": "set", "path": ["__proto__"], "value": { "polluted": true } }], "after": { "__proto__": { "polluted": true } } }
+  { "name": "a key named __proto__ is an ordinary key", "before": {}, "ops": [{ "op": "set", "path": ["__proto__"], "value": { "polluted": true } }], "after": { "__proto__": { "polluted": true } } },
+{ "name": "set through a missing parent may only start a new list at 0", "before": {}, "ops": [{ "op": "set", "path": ["rows", 3], "value": "x" }], "throws": "RangeError" },
+{ "name": "a missing nested index other than 0 is refused", "before": {}, "ops": [{ "op": "set", "path": ["players", 2, "x"], "value": 7 }], "throws": "RangeError" },
+{ "name": "a new list at index 0 through two missing levels", "before": {}, "ops": [{ "op": "set", "path": ["g", 0, 0], "value": 1 }], "after": { "g": [[1]] } },
+{ "name": "add through a missing parent at a non-zero index is refused", "before": {}, "ops": [{ "op": "add", "path": ["c", 1], "n": 1 }], "throws": "RangeError" },
+{ "name": "del through a missing parent changes nothing", "before": {}, "ops": [{ "op": "del", "path": ["a", 5, "x"] }], "after": {} }
 ]

@@ -158,6 +158,14 @@ describe("coalesce", () => {
     coalesce(ops);
     expect(ops[0].n).toBe(1);
   });
+
+  test("a deep set followed by a del keeps both, so a replay creates the same parents", () => {
+    const ops = [{ op: "set", path: ["a", "x"], value: 1 }, { op: "del", path: ["a", "x"] }];
+    const merged = coalesce(ops);
+    expect(merged).toHaveLength(2);
+    expect(JSON.stringify(applyOps({}, merged))).toBe(JSON.stringify(applyOps({}, ops)));
+    expect(JSON.stringify(applyOps({}, merged))).toBe('{"a":{}}');
+  });
 });
 
 describe("assignDeep", () => {
