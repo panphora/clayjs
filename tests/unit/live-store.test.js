@@ -155,7 +155,7 @@ test("rebase replays pending ops over the new value: increments count once, sets
   expect(game.toJSON().score).toBe(11);
   expect(game.data.players.ana.x).toBe(5);
   expect(store.pending).toEqual([{ op: "set", path: ["players", "ana", "x"], value: 5 }]);
-  expect(events[1].source).toBe("state");
+  expect(events).toHaveLength(1);
 });
 
 test("rebase drops a pending op that no longer applies", () => {
@@ -202,4 +202,33 @@ test("ready resolves to the handle; status starts in file mode", async () => {
 
 test("a store must start from an object or a list", () => {
   expect(() => createStore({ name: "n", value: 5 })).toThrow(/object or list/);
+});
+
+test("rebase through a mark drops exactly the ops up to it", () => {
+  const { store, game } = make({ s: 0 });
+  game.add("s", 1);
+  const mark = store.mark;
+  game.add("s", 1);
+  store.rebase({ s: 1 }, { through: mark, source: "state" });
+  expect(game.data.s).toBe(2);
+  expect(store.pending).toEqual([{ op: "add", path: ["s"], n: 1 }]);
+});
+
+test("rebase announces a change only when the value changed", () => {
+  const { store, events } = make({ s: 0 });
+  store.rebase({ s: 0 });
+  expect(events).toEqual([]);
+  store.rebase({ s: 3 }, { source: "state" });
+  expect(events).toEqual([{ source: "state", ops: null }]);
+});
+
+test("mark is the id of the newest committed op", () => {
+  const { store, game } = make();
+  expect(store.mark).toBe(0);
+  game.add("score");
+  game.update((d) => {
+    d.score = 5;
+    d.score = 6;
+  });
+  expect(store.mark).toBe(2);
 });
