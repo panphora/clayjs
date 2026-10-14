@@ -232,3 +232,20 @@ test("mark is the id of the newest committed op", () => {
   });
   expect(store.mark).toBe(2);
 });
+
+test("confirm folds this tab's ops up to a mark into the base without changing what page code sees", () => {
+  const store = createStore({ name: "g", value: { s: 0 } });
+  const events = [];
+  store.handle.on("change", (e) => events.push(e));
+  store.handle.add("s", 1);
+  const mark = store.mark;
+  store.handle.add("s", 1);
+  events.length = 0;
+  store.confirm(mark);
+  expect(store.authoritative).toEqual({ s: 1 });
+  expect(store.pending).toEqual([{ op: "add", path: ["s"], n: 1 }]);
+  expect(store.handle.toJSON()).toEqual({ s: 2 });
+  expect(events).toEqual([]);
+  store.confirm(0);
+  expect(store.pending).toHaveLength(1);
+});

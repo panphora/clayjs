@@ -258,6 +258,19 @@ export function createStore({ name, value, ephemeral = false }) {
       sinks.add(fn);
       return () => sinks.delete(fn);
     },
+    // This tab's ops up to and including `through` are in the file (the save
+    // that carried them was accepted) and no newer value arrived since: they
+    // become part of authoritative. The value page code sees does not change.
+    confirm(through) {
+      const taken = pending.filter((entry) => entry.id <= through);
+      if (!taken.length) return;
+      try {
+        authoritative = applyOps(cloneJson(authoritative), taken.map((entry) => entry.op));
+      } catch {
+        authoritative = cloneJson(state);
+      }
+      pending = pending.filter((entry) => entry.id > through);
+    },
     // A new value from outside. Ops already in it are dropped: the first
     // `confirmed` pending ops, or every op up to the mark `through`. The rest
     // replay over it; a pending op that no longer applies is dropped too.

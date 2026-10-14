@@ -98,6 +98,12 @@ function read(container, seg) {
 // key on a list, or a list index past the end. A missing or non-container
 // step along the way is not an error: applyOp replaces it with a container.
 export function checkOp(root, op) {
+  if (op.path.length === 0) {
+    if (op.op === "set" && (!isContainer(op.value) || Array.isArray(op.value) !== Array.isArray(root))) {
+      throw new TypeError(`clay.live: the whole value must stay ${Array.isArray(root) ? "a list" : "an object"}`);
+    }
+    return;
+  }
   let node = root;
   for (let i = 0; i < op.path.length; i++) {
     const seg = op.path[i];

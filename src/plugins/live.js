@@ -2,8 +2,8 @@
 // clay="live"> tag as a live object. The store (src/live/store.js) holds the
 // value in memory and never writes the tag. This module carries the value in and
 // out at file speed: it writes the value into every capture, confirms this tab's
-// ops when a save carrying them is accepted, and takes the values other tabs
-// saved or relayed from each live-sync frame.
+// ops when the save that carried them is accepted (never from an incoming frame),
+// and takes the values other tabs saved or relayed from each live-sync frame.
 
 import { createStore } from "../live/store.js";
 import { serializeLive } from "../live/ops.js";
@@ -21,18 +21,22 @@ import { serverTransport } from "../live/server-lane.js";
 import { localTransport, localLaneSupported } from "../live/local-lane.js";
 
 const NAME = /^[A-Za-z0-9_.:-]{1,64}$/;
-const CAPTURES_KEPT = 16;
 const entries = new Map();
 
+// What the save on the wire captured, per saved store: { text, mark, lastSeq }.
+// Set by the save's own capture, taken by its acceptance. Only one save is on the
+// wire at a time.
+let pinned = null;
+
 // Saved stores with changes no accepted save holds yet. Only an edit-mode tab
-// saves. In file mode that is this tab's unconfirmed ops; in fast mode it is any
-// change since the last accepted save, and only the room's writer saves it.
+// saves. In file mode that is this tab's unconfirmed ops; in fast mode it is a
+// room seq past the one the last accepted save held, and only the writer saves it.
 function unsavedLiveChanges() {
   if (!isEditMode) return false;
   for (const entry of entries.values()) {
     if (entry.store.ephemeral) continue;
     if (entry.store.handle.status.mode === "fast") {
-      if (fast?.isWriter() && entry.version > entry.savedVersion) return true;
+      if (fast?.isWriter() && entry.lastSeq > entry.savedSeq) return true;
     } else if (entry.store.pending.length > 0) {
       return true;
     }
@@ -84,11 +88,12 @@ function ensureLane() {
           entries,
           onEpoch: (epoch) => setSaveHeader("Live-Epoch", epoch),
           onWriter: () => checkpoints.changed(),
+          onApplied: () => checkpoints.changed(),
           onStop: () => setSaveHeader("Live-Epoch", null),
         });
       } else if (localLaneSupported()) {
         local = localTransport({ seed: seedLocalRoom });
-        fast = createFastLane({ transport: local, entries, onWriter: () => checkpoints.changed() });
+        fast = createFastLane({ transport: local, entries, onWriter: () => checkpoints.changed(), onApplied: () => checkpoints.changed() });
       } else {
         return;
       }
@@ -137,20 +142,15 @@ function parseHtml(html) {
   return new DOMParser().parseFromString(html, "text/html");
 }
 
+// In fast mode a capture writes the room's value, never this tab's unconfirmed
+// ops (the room may still refuse them).
 function textOf(entry) {
-  const value = entry.store.value;
+  const value = entry.store.handle.status.mode === "fast" ? entry.store.authoritative : entry.store.value;
   return entry.pretty ? JSON.stringify(value, null, 2).replace(/</g, "\\u003c") : serializeLive(value);
 }
 
-// The text a capture wrote, with the newest op it held and the store's version.
-// When that text comes back (an accepted save, or a frame carrying this tab's own
-// save), every op up to that mark is in it.
-function remember(entry, text) {
-  entry.captures.delete(text);
-  entry.captures.set(text, { mark: entry.store.mark, version: entry.version });
-  if (entry.captures.size > CAPTURES_KEPT) entry.captures.delete(entry.captures.keys().next().value);
-}
-
+// A value another tab saved or relayed. It never confirms this tab's ops: equal
+// text from a peer is not this tab's save.
 function receive(entry, text, source) {
   let value;
   try {
@@ -158,15 +158,7 @@ function receive(entry, text, source) {
   } catch {
     return;
   }
-  const captured = entry.captures.get(text);
-  if (captured === undefined) {
-    entry.store.rebase(value, { source });
-    return;
-  }
-  // An older save of this tab's, arriving after a newer one was confirmed.
-  if (captured.mark < entry.confirmed) return;
-  entry.confirmed = captured.mark;
-  entry.store.rebase(value, { source, through: captured.mark });
+  if (entry.store.rebase(value, { source })) entry.framesSince = true;
 }
 
 export function live(name) {
@@ -182,12 +174,11 @@ export function live(name) {
     throw new SyntaxError(`clay.live("${name}"): the tag's JSON does not parse: ${err.message}`);
   }
   const store = createStore({ name, value, ephemeral: tag.ephemeral });
-  const entry = { store, pretty: text.includes("\n"), captures: new Map(), confirmed: 0, version: 0, savedVersion: 0 };
+  const entry = { store, pretty: text.includes("\n"), framesSince: false, lastSeq: 0, savedSeq: 0 };
   entries.set(name, entry);
   if (!tag.ephemeral) store.onLocal(() => checkpoints.changed());
   store.onLocal((ops) => fast?.local(name, ops, store.mark));
   store.handle.on("change", () => {
-    entry.version++;
     if (!store.ephemeral && store.handle.status.mode === "fast") checkpoints.changed();
   });
   fast?.storeOpened(name);
@@ -206,25 +197,45 @@ onSnapshot((clone) => {
     if (!tag) continue;
     const text = textOf(entry);
     tag.element.textContent = text;
-    remember(entry, text);
     local?.captured(entry.store.name, text);
   }
 });
 
-// The bytes a host just accepted: each saved store whose text in them is one of
-// its own captures confirms the ops that capture held.
-export function confirmSaved(html) {
-  if (!entries.size || typeof html !== "string") return;
-  const tags = liveTags(parseHtml(html), { warn: false });
+// The save's own capture (the one that is sent): pin what each saved store wrote
+// and the newest op it held. onSnapshot has already written the clone.
+document.addEventListener("clay:snapshot-ready", (event) => {
+  if (event.detail?.forSave !== true || !entries.size) return;
+  const tags = liveTags(event.detail.documentElement, { warn: false });
+  const stores = new Map();
   for (const entry of entries.values()) {
     if (entry.store.ephemeral) continue;
     const tag = tags.get(entry.store.name);
     if (!tag) continue;
-    const text = tag.element.textContent;
-    const captured = entry.captures.get(text);
-    if (!captured) continue;
-    entry.savedVersion = Math.max(entry.savedVersion, captured.version);
-    if (entry.store.handle.status.mode === "file") receive(entry, text, "state");
+    stores.set(entry.store.name, { text: tag.element.textContent, mark: entry.store.mark, lastSeq: entry.lastSeq });
+    entry.framesSince = false;
+  }
+  pinned = stores;
+});
+
+// The bytes a host just accepted. When a store's tag in them is the text the
+// save's own capture wrote, the ops that capture held are in the file: folded
+// into the store's base when nothing arrived since the capture, only dropped
+// when a frame did (that frame descends from this save and holds them already).
+export function confirmSaved(html) {
+  const pin = pinned;
+  pinned = null;
+  if (!pin || typeof html !== "string") return;
+  const tags = liveTags(parseHtml(html), { warn: false });
+  for (const [name, saved] of pin) {
+    const entry = entries.get(name);
+    const tag = tags.get(name);
+    if (!entry || !tag || tag.element.textContent !== saved.text) continue;
+    if (entry.store.handle.status.mode === "file") {
+      if (entry.framesSince) entry.store.rebase(entry.store.authoritative, { source: "state", through: saved.mark });
+      else entry.store.confirm(saved.mark);
+    } else {
+      entry.savedSeq = Math.max(entry.savedSeq, saved.lastSeq);
+    }
   }
 }
 

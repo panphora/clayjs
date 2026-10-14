@@ -29,5 +29,7 @@
   { "name": "a missing nested index other than 0 is refused", "before": {}, "ops": [{ "op": "set", "path": ["players", 2, "x"], "value": 7 }], "throws": "RangeError" },
   { "name": "a new list at index 0 through two missing levels", "before": {}, "ops": [{ "op": "set", "path": ["g", 0, 0], "value": 1 }], "after": { "g": [[1]] } },
   { "name": "add through a missing parent at a non-zero index is refused", "before": {}, "ops": [{ "op": "add", "path": ["c", 1], "n": 1 }], "throws": "RangeError" },
-  { "name": "del through a missing parent changes nothing", "before": {}, "ops": [{ "op": "del", "path": ["a", 5, "x"] }], "after": {} }
+  { "name": "del through a missing parent changes nothing", "before": {}, "ops": [{ "op": "del", "path": ["a", 5, "x"] }], "after": {} },
+  { "name": "a root set may not change an object into a list", "before": { "a": 1 }, "ops": [{ "op": "set", "path": [], "value": [1, 2] }], "throws": "TypeError" },
+  { "name": "a root set of the same kind replaces the value", "before": { "a": 1 }, "ops": [{ "op": "set", "path": [], "value": { "b": 2 } }], "after": { "b": 2 } }
 ]

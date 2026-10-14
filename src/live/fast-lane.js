@@ -6,7 +6,7 @@
 //   send(clientId, { name, n, ops, epoch }) -> Promise<{ status, body, retryAfter }>
 //   fetchState(clientId) -> Promise<{ epoch, seq, writer, stores } | { status } | null>
 
-import { applyOps, cloneJson } from "./ops.js";
+import { applyOps, cloneJson, serializeLive } from "./ops.js";
 
 export const MIN_GAP_MS = 40;
 export const MAX_OPS = 128;
@@ -27,6 +27,7 @@ const transient = (status) => status === 0 || status === 408 || status === 429 |
  * @param {Map<string, {store: object}>} options.entries - the live plugin's open stores, by name
  * @param {(epoch: string) => void} [options.onEpoch] - joined a room (first join or restart)
  * @param {() => void} [options.onWriter] - the room's writer may have changed
+ * @param {() => void} [options.onApplied] - a store's room value moved (its entry's lastSeq advanced)
  * @param {() => void} [options.onStop] - the lane stopped for good
  */
 export function createFastLane({
@@ -34,6 +35,7 @@ export function createFastLane({
   entries,
   onEpoch = () => {},
   onWriter = () => {},
+  onApplied = () => {},
   onStop = () => {},
   now = () => Date.now(),
   setTimer = setTimeout,
@@ -210,6 +212,9 @@ export function createFastLane({
       }
     }
     store.rebase(next, { source: own ? "state" : "remote", through });
+    const entry = entries.get(frame.name);
+    entry.lastSeq = frame.seq;
+    onApplied();
     settleAwaiting();
   }
 
@@ -258,6 +263,11 @@ export function createFastLane({
         continue;
       }
       entry.store.setMode("fast");
+      // The room moved since this store's base: the writer has something to save.
+      if (serializeLive(room.value) !== serializeLive(entry.store.authoritative)) {
+        entry.lastSeq = seq;
+        onApplied();
+      }
       if (fresh) {
         lane.awaiting = [];
         lane.unsent = entry.store.pendingEntries();

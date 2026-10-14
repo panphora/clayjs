@@ -1,8 +1,8 @@
 /**
  * clay.live at file speed: captures carry each saved store's value (never the
  * DOM tag), a never-saved store writes nothing, frames rebase a store and replay
- * its unconfirmed ops, this tab's own save coming back confirms its ops so an
- * increment counts once, and tags no saved store owns follow the file.
+ * its unconfirmed ops, only this tab's own accepted save confirms its ops, and
+ * tags no saved store owns follow the file.
  */
 
 let live;
@@ -55,54 +55,69 @@ test("a frame's value becomes the base and this tab's ops replay over it", () =>
   expect(storeOf("a4").pending).toHaveLength(2);
 });
 
-test("this tab's own save coming back confirms its ops, so an increment counts once", () => {
+// The save's own capture: pins what it wrote, and returns the bytes it would send.
+const saveCapture = () => snapshot.captureForSaveAndComparison({ flushUndo: false }).forSave;
+
+test("a peer's frame never confirms this tab's ops, even when its text is what this tab captured", () => {
   document.body.innerHTML = tag("a5", '{"score":0}');
   const game = live("a5");
   game.add("score", 1);
-  const text = captured("a5");
-  receiveFrame(page(tag("a5", text)));
-  expect(game.data.score).toBe(1);
-  expect(storeOf("a5").pending).toEqual([]);
-  receiveFrame(page(tag("a5", '{"score":5}')));
-  expect(game.data.score).toBe(5);
+  captured("a5");
+  receiveFrame(page(tag("a5", '{"score":1}')));
+  expect(game.data.score).toBe(2);
+  expect(storeOf("a5").pending).toHaveLength(1);
 });
 
-test("an accepted save confirms the ops it carried, without announcing a change", () => {
+test("an accepted save confirms the ops its own capture held, once, without announcing a change", () => {
   document.body.innerHTML = tag("a6", '{"score":0}');
   const game = live("a6");
   game.add("score", 1);
-  captured("a6");
+  const body = saveCapture();
   const events = [];
   game.on("change", (e) => events.push(e));
-  confirmSaved(page(tag("a6", '{"score":1}')));
+  confirmSaved(body);
   expect(storeOf("a6").pending).toEqual([]);
+  expect(storeOf("a6").authoritative).toEqual({ score: 1 });
   expect(events).toEqual([]);
   game.add("score", 1);
-  confirmSaved(page(tag("a6", '{"score":1}')));
+  confirmSaved(body);
   expect(game.data.score).toBe(2);
   expect(storeOf("a6").pending).toHaveLength(1);
 });
 
-test("accepted bytes this tab never captured confirm nothing", () => {
+test("accepted bytes that are not the save's own capture confirm nothing", () => {
   document.body.innerHTML = tag("a7", '{"score":0}');
   const game = live("a7");
   game.add("score", 1);
+  saveCapture();
   confirmSaved(page(tag("a7", '{"score":99}')));
   expect(game.data.score).toBe(1);
   expect(storeOf("a7").pending).toHaveLength(1);
 });
 
-test("an older save of this tab's arriving after a newer one is ignored", () => {
+test("an acceptance arriving after a newer file version drops the ops and keeps the newer value", () => {
   document.body.innerHTML = tag("a8", '{"s":0}');
   const game = live("a8");
   game.add("s", 1);
-  const older = captured("a8");
-  game.add("s", 1);
-  const newer = captured("a8");
-  receiveFrame(page(tag("a8", newer)));
+  const body = saveCapture();
+  receiveFrame(page(tag("a8", '{"s":5}')));
+  confirmSaved(body);
+  expect(game.data.s).toBe(5);
   expect(storeOf("a8").pending).toEqual([]);
-  receiveFrame(page(tag("a8", older)));
-  expect(game.data.s).toBe(2);
+});
+
+test("ordinary captures between a save and its acceptance do not disturb what it confirms", () => {
+  document.body.innerHTML = tag("a9", '{"s":0}');
+  const game = live("a9");
+  game.add("s", 1);
+  const body = saveCapture();
+  for (let i = 0; i < 20; i++) {
+    game.add("s", 1);
+    captured("a9");
+  }
+  confirmSaved(body);
+  expect(storeOf("a9").pending).toHaveLength(20);
+  expect(game.data.s).toBe(21);
 });
 
 test("tags no saved store owns follow the file", () => {
