@@ -236,23 +236,11 @@ export function captureSnapshot({ flushUndo = true, authored = true } = {}) {
     window.clay.undo.flush();
   }
 
-  const view = createContentView(document.documentElement, { capability: 'snapshot' });
+  // The view records each clone node's live original straight into the provenance
+  // map as it clones, including the nodes inside a <template>'s content fragment,
+  // so the source map can ask which live node any clone node came from.
+  const view = createContentView(document.documentElement, { capability: 'snapshot', provenance: snapshotProvenance });
   const clone = view.root;
-  // A <template>'s children are not its childNodes, they are its content fragment's,
-  // so walking childNodes alone leaves everything inside a template with no provenance.
-  // Nothing noticed until the source map asked which live node a clone node came from
-  // and got null for every node in a template, which reprinted the whole template on
-  // every save. createContentView already maps the fragment itself, so descending into
-  // it is all that was missing.
-  const remember = (node) => {
-    const live = view.original(node);
-    if (live) snapshotProvenance.set(node, live);
-    const children = node.nodeType === 1 && node.tagName === 'TEMPLATE' && node.content
-      ? node.content.childNodes
-      : node.childNodes;
-    for (const child of children || []) remember(child);
-  };
-  remember(clone);
 
   for (const hook of snapshotHooks) {
     stripSnapshotRegions(clone);

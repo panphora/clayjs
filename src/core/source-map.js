@@ -587,7 +587,16 @@ export function render(clone, map, m, provenance, opts = {}) {
   // `from >= 0` is not defensive padding: `src.slice(-1, n)` is the LAST BYTE of the
   // source, so an unset offset reaching here does not produce nothing, it produces one
   // wrong byte and looks like a successful render.
-  const keep = (from, to) => { if (from >= 0 && to > from) pieces.push({ from, to }); };
+  // Adjacent copied ranges merge into one piece, except across a mark that records
+  // a piece index (tailMark, afterBody): a piece sealed under a mark is never extended,
+  // so the next range starts a new piece at the index the mark points to.
+  let sealedAt = 0;
+  const keep = (from, to) => {
+    if (!(from >= 0 && to > from)) return;
+    const last = pieces.length > sealedAt ? pieces[pieces.length - 1] : null;
+    if (last && last.text === undefined && last.to === from) last.to = to;
+    else pieces.push({ from, to });
+  };
   const text = (t) => { if (t) pieces.push({ text: t }); };
   // Elements in `opts.print`, and everything inside them, are printed rather than
   // copied: the answer to a region whose copy did not verify.
@@ -622,7 +631,7 @@ export function render(clone, map, m, provenance, opts = {}) {
   // Called once <body>'s end tag, if any, has been emitted. The owner is still last when
   // nothing but end tags was emitted after its text.
   function endOfBody() {
-    afterBody = pieces.length;
+    afterBody = pieces.length; sealedAt = pieces.length;
     tailClean = !!tailMark && tailMark.whole
       && /^(?:<\/[^>]*>)*$/.test(pieces.slice(tailMark.at).map(piece).join(''));
   }
@@ -660,7 +669,7 @@ export function render(clone, map, m, provenance, opts = {}) {
       // Test switch: copy one named text node's bytes twice, a corruption only the
       // copy path makes, so printing the element around it is the fix.
       if (opts.doubleCopied !== undefined && data === opts.doubleCopied) keep(loc.from, loc.to);
-      if (loc.outsideTail) tailMark = { at: pieces.length, tail: loc.outsideTail, whole: true };
+      if (loc.outsideTail) { tailMark = { at: pieces.length, tail: loc.outsideTail, whole: true }; sealedAt = pieces.length; }
       return;
     }
     let owner = null;
@@ -670,7 +679,7 @@ export function render(clone, map, m, provenance, opts = {}) {
       owner = { tail: whole ? loc.outsideTail : '', whole };
     }
     text(RAW_TEXT.has(parentTag) ? data : escText(data));
-    if (owner) tailMark = { at: pieces.length, ...owner };
+    if (owner) { tailMark = { at: pieces.length, ...owner }; sealedAt = pieces.length; }
   }
   function emitElement(n, loc) {
     const tag = n.localName;
@@ -719,7 +728,20 @@ export function render(clone, map, m, provenance, opts = {}) {
   // clone still has with the same value copies its bytes; a changed one keeps the
   // author's quoting; a removed one takes its leading whitespace with it; a new one is
   // appended just before the `>`.
+  // The open tag copies as one range when the clone's attributes are the source's, in
+  // the source's order, with the same values: the attribute walk below would copy the
+  // same bytes piece by piece.
+  function sameAttrs(n, loc) {
+    const attrs = n.attributes;
+    if (attrs.length !== loc.attrs.length) return false;
+    for (let i = 0; i < attrs.length; i++) {
+      const a = loc.attrs[i];
+      if (a.from < 0 || attrs[i].value !== a.value || attrs[i].name.toLowerCase() !== a.key) return false;
+    }
+    return true;
+  }
   function emitOpenTag(n, loc) {
+    if (sameAttrs(n, loc)) { keep(loc.openFrom, loc.openTo); return; }
     const live = new Map();
     for (const a of n.attributes) live.set(a.name.toLowerCase(), a);
     const seen = new Set();
@@ -832,7 +854,7 @@ export function render(clone, map, m, provenance, opts = {}) {
       if (!whole.has(i)) return emitNode(c, parentTag);
       const s = S[owned[i]];
       keep(s.from, s.to);
-      if (s.outsideTail) tailMark = { at: pieces.length, tail: s.outsideTail, whole: true };
+      if (s.outsideTail) { tailMark = { at: pieces.length, tail: s.outsideTail, whole: true }; sealedAt = pieces.length; }
     };
     const openOf = (c, i) => {
       if (!whole.has(i)) return openChain(c);
@@ -903,24 +925,31 @@ function lis(vals) {
 export function verify(rendered, today, liveDocument, clone = null, sourceErrors = null) {
   const P = new DOMParser();
   const A = P.parseFromString(rendered, 'text/html');
-  const B = P.parseFromString(today, 'text/html');
   const outsideA = vOutside(A), outsideLive = vOutside(liveDocument);
   if (outsideA.join('\n') !== outsideLive.join('\n')) return { ok: false, diff: 'document: outside <html> ' + JSON.stringify(outsideA) + ' vs live ' + JSON.stringify(outsideLive) };
+  // The clone oracle first: it is the stronger claim and needs no second parse. The
+  // accept set is unchanged (equal to the clone, or equal to today's bytes reparsed);
+  // only the order the two are tried in differs, and the oracle named is still the
+  // one that passed.
+  let at = null;
+  let cloneDiff = null;
+  if (clone) {
+    at = [];
+    cloneDiff = vDiff(A.documentElement, clone, 'html', at);
+    if (!cloneDiff) {
+      const w = vParseErrors(rendered, sourceErrors);
+      return w ? { ok: false, diff: w } : { ok: true, diff: null, oracle: 'clone' };
+    }
+  }
+  const B = P.parseFromString(today, 'text/html');
   const diff = vDiff(A.documentElement, B.documentElement, 'html');
   const worse = diff ? null : vParseErrors(rendered, sourceErrors);
   if (!diff) return worse ? { ok: false, diff: worse } : { ok: true, diff: null, oracle: 'today' };
-  if (clone) {
-    // `at` is the index path, in the clone, of the node where the render first differs,
-    // so a caller can print that element and try again instead of discarding the whole
-    // render. It is valid in the clone because every earlier sibling at every level on
-    // the way down compared equal.
-    const at = [];
-    if (!vDiff(A.documentElement, clone, 'html', at)) {
-      const w = vParseErrors(rendered, sourceErrors);
-      return w ? { ok: false, diff: w } : { ok: true, diff: null, oracle: 'clone', todayDiff: diff };
-    }
-    return { ok: false, diff, at };
-  }
+  // `at` is the index path, in the clone, of the node where the render first differs,
+  // so a caller can print that element and try again instead of discarding the whole
+  // render. It is valid in the clone because every earlier sibling at every level on
+  // the way down compared equal.
+  if (clone) return { ok: false, diff, at };
   return { ok: false, diff };
 }
 
@@ -1004,14 +1033,27 @@ function vNoscript(a, b, path) {
 }
 function vKids(el) {
   const list = el.localName === 'template' && el.content ? el.content.childNodes : el.childNodes;
-  return Array.from(list).filter((n) => n.nodeType === 1 || n.nodeType === 3 || n.nodeType === 8);
+  const out = [];
+  for (let i = 0; i < list.length; i++) { const n = list[i]; if (n.nodeType === 1 || n.nodeType === 3 || n.nodeType === 8) out.push(n); }
+  return out;
 }
 const vAttrs = (el) => Array.from(el.attributes, (a) => (a.namespaceURI || '') + ' ' + a.name + '=' + JSON.stringify(a.value)).sort().join('; ');
+// Equal attribute lists in the same order need no sorted strings; any other case is
+// decided by the strings, as before.
+function sameAttrsInOrder(a, b) {
+  const A = a.attributes, B = b.attributes;
+  if (A.length !== B.length) return false;
+  for (let i = 0; i < A.length; i++) {
+    const x = A[i], y = B[i];
+    if (x.name !== y.name || x.value !== y.value || x.namespaceURI !== y.namespaceURI) return false;
+  }
+  return true;
+}
 function vDiff(a, b, path, at = []) {
   if (a.nodeType !== b.nodeType) return path + ': node type ' + a.nodeType + ' vs ' + b.nodeType;
   if (a.nodeType === 3 || a.nodeType === 8) return a.data === b.data ? null : path + ': text ' + JSON.stringify(a.data.slice(0, 60)) + ' vs ' + JSON.stringify(b.data.slice(0, 60));
   if (a.localName !== b.localName || a.namespaceURI !== b.namespaceURI) return path + ': tag ' + a.localName + ' vs ' + b.localName;
-  if (vAttrs(a) !== vAttrs(b)) return path + ': attrs ' + vAttrs(a) + ' vs ' + vAttrs(b);
+  if (!sameAttrsInOrder(a, b) && vAttrs(a) !== vAttrs(b)) return path + ': attrs ' + vAttrs(a) + ' vs ' + vAttrs(b);
   if (a.localName === 'noscript' && a.namespaceURI === XHTML) return vNoscript(a, b, path);
   const ka = vKids(a), kb = vKids(b);
   if (ka.length !== kb.length) return path + ': ' + ka.length + ' vs ' + kb.length + ' children';

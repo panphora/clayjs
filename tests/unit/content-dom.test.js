@@ -1,5 +1,6 @@
 import { createContentView } from '../../src/lib/content-dom.js'
 import { hasCapability } from '../../src/lib/region-capabilities.js'
+import { stripExtensionNoise } from '../../src/lib/extension-noise.js'
 
 test('content views exclude inherited editor UI and preserve live provenance', () => {
   document.body.innerHTML = `
@@ -78,4 +79,38 @@ test('an ancestor above the root still excludes the whole view', () => {
   expect(view.root).toBeNull()
   expect(view.html()).toBe('')
   expect(view.text()).toBe('')
+})
+
+test('a fragment root is filtered, mapped and given control state like an element root', () => {
+  document.body.innerHTML = '<template><p class="keep">keep</p><p no-data>drop</p><input value="a"></template>'
+  const fragment = document.querySelector('template').content
+  fragment.querySelector('input').value = 'typed'
+  const view = createContentView(fragment)
+
+  expect(view.text()).toBe('keep')
+  expect(view.query('p.keep')).toEqual([fragment.querySelector('p.keep')])
+  expect(view.cloneOf(fragment.querySelector('input')).value).toBe('typed')
+})
+
+test('a template keeps only its content, not child nodes appended to the element itself', () => {
+  document.body.innerHTML = '<div><template><i>content</i></template></div>'
+  const template = document.querySelector('template')
+  const stray = document.createElement('b')
+  stray.textContent = 'stray'
+  template.appendChild(stray)
+  const view = createContentView(document.querySelector('div'), { capability: 'snapshot' })
+  const copy = view.cloneOf(template)
+
+  expect(copy.childNodes.length).toBe(0)
+  expect(copy.content.textContent).toBe('content')
+})
+
+test('extension markers are stripped whatever their case', () => {
+  document.body.innerHTML = '<div><svg><g></g></svg></div>'
+  const g = document.querySelector('g')
+  g.setAttribute('DATA-GRAMMARLY', 'true')
+  g.setAttribute('data-app', 'kept')
+  stripExtensionNoise(document.querySelector('div'))
+
+  expect(g.getAttributeNames()).toEqual(['data-app'])
 })
