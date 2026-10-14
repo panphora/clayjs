@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.11.1] - 2026-10-14
+
+### Changed
+- Updated vendored sapjs to 0.5.0
+
+
+
 ## [1.11.0] - 2026-10-14
 
 ### Added
