@@ -504,7 +504,7 @@ In order of preference:
    }
    ```
 
-   Always escape `<`: a value containing `</script>` ends the element early and corrupts the file on reload. Re-parse on every `clay:sync-applied`, because a merge changes the text, not your parsed object. Same-key edits from two writers resolve silently to the incoming one (7.3).
+   Always escape `<`: a value containing `</script>` ends the element early and corrupts the file on reload. Re-parse on every `clay:sync-applied`, because a merge changes the text, not your parsed object. When two writers change the same key, the incoming value wins and the lost value shows in the conflict notice (7.3).
 4. **`<template>` content: never for mutable data.** It is saved, but edits there never trigger autosave.
 
 ### 5.5 Identity
@@ -737,7 +737,7 @@ document.addEventListener("clay:sync-applied", () => {
 });
 ```
 
-**JSON.** A JSON script without `merge` is one value: two writers changing it means one whole blob goes to the ledger. With `merge="name"` it merges per key: objects per key, arrays of objects by an `id` field (`merge-key="taskId"` names another), arrays of primitives by value. **A key both sides changed takes the incoming value silently**: no ledger record, no notice. Keep fields where a silent loss matters (an amount, a status) in the DOM, where an overlap shows. Use per-entry keys (`notes: { "n-1": ..., "n-2": ... }`) so two people adding entries never touch the same key. The merged text is re-serialized, so blob formatting is not kept.
+**JSON.** A JSON script without `merge` is one value: two writers changing it means one whole blob goes to the ledger. With `merge="name"` it merges per key: objects per key, arrays of objects by an `id` field, arrays of primitives by value, and lists without an id (grids, boards, repeated values) position by position when both sides kept the same length. `merge-key="taskId"` names another id field for every list, and `merge-key="players:uid, items:sku"` names one per list path (no spaces inside an entry). **A key both sides changed takes the incoming value**, and the lost value goes to the ledger like any other replaced edit: the notice shows a row such as `game → players → alice → x`, with yours and now. Revert cannot put a JSON value back; Download keeps your copy. Use per-entry keys (`notes: { "n-1": ..., "n-2": ... }`) so two people adding entries never touch the same key. When a merge mixes both sides, the text is rewritten in the incoming text's style (one line stays one line, indented stays indented) with `<` written as `\u003c`.
 
 ### 7.4 Focus, typing and long-running editors
 
@@ -1466,7 +1466,7 @@ The saved file is the data. Everyone who can download it can read everything in 
 | Listeners attached to records are lost when a merge recreates them | 7.2 |
 | A peer's frame re-runs inline scripts | 7.2, 9.10 |
 | A `no-dirty` region replaced by a peer raises a false conflict notice (1.8.2) | 7.3 |
-| Same-key JSON edits under `merge` are lost silently | 7.3 |
+| Same-key JSON edits under `merge`: incoming wins, yours goes to the notice | 7.3 |
 | Rewriting the record at boot makes incoming frames hold | 7.4 |
 | Parsed JSON goes stale after a merge | 7.5 |
 | There is no presence API | 7.7 |

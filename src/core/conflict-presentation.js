@@ -262,6 +262,41 @@ function recoveryRow(record, rv) {
   };
 }
 
+// A JSON conflict path ('players[id="alice"].x', 'grid[0][1]', '["a b"]') as the words
+// a person reads: players → alice → x. A keyed segment shows its key's value.
+export function jsonPathWords(path) {
+  const words = [];
+  let i = 0;
+  while (i < path.length) {
+    if (path[i] === ".") { i++; continue; }
+    if (path[i] === "[") {
+      let j = i + 1;
+      let inString = false;
+      for (; j < path.length; j++) {
+        const ch = path[j];
+        if (inString) {
+          if (ch === "\\") j++;
+          else if (ch === '"') inString = false;
+        } else if (ch === '"') inString = true;
+        else if (ch === "]") break;
+      }
+      let inner = path.slice(i + 1, j);
+      const keyed = /^[A-Za-z_$][\w$]*=/.exec(inner);
+      if (keyed) inner = inner.slice(keyed[0].length);
+      try { words.push(String(JSON.parse(inner))); } catch { words.push(inner); }
+      i = j + 1;
+      continue;
+    }
+    let j = i;
+    while (j < path.length && path[j] !== "." && path[j] !== "[") j++;
+    words.push(path.slice(i, j));
+    i = j;
+  }
+  return words.join(" → ");
+}
+
+const jsonValue = (v) => (v === undefined ? "(deleted)" : JSON.stringify(v));
+
 export function rowOf(record) {
   const id = record.id;
   if (record.recovery?.version === 1) return recoveryRow(record, record.recovery);
@@ -281,6 +316,13 @@ export function rowOf(record) {
     return {
       id, kind: "struct", name: live ? nameOfElement(live) : kind, target: live ? hostOf(live) : null,
       yours: both ? side(plain(record.local)) : null, now: both ? side(plain(record.remote)) : null, sentence,
+    };
+  }
+  if (record.kind === "json") {
+    const where = jsonPathWords(record.path || "");
+    return {
+      id, kind: "json", name: where ? `${record.name} → ${where}` : record.name, target: null,
+      yours: side(jsonValue(record.local)), now: side(jsonValue(record.resolved)), sentence: null,
     };
   }
   const host = hostOf(record.node);

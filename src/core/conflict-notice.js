@@ -37,6 +37,7 @@ const MINIMIZE_SVG = '<svg viewBox="0 0 12 12" width="12" height="12" aria-hidde
 const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 const BLOCKED_ROW = "This spot changed again. Review the latest edit or download your copy.";
+const DATA_BLOCKED_ROW = "A data value can't be put back from here. Download your copy to keep yours.";
 
 let view = "hidden";
 let listOpen = false;
@@ -510,7 +511,7 @@ async function onRevert() {
     document.removeEventListener("focus", track, true);
   }
   busy = null;
-  for (const id of result.blockedIds) blockedRows.set(id, BLOCKED_ROW);
+  for (const id of result.blockedIds) blockedRows.set(id, ledger()?.get(id)?.kind === "json" ? DATA_BLOCKED_ROW : BLOCKED_ROW);
   view = mode() ? "bar" : "hidden";
   pendingFocus = stayed ? "review" : null;
   const saving = result.saveResult && (result.saveResult.ok || result.saveResult.msg === "Save already in progress");

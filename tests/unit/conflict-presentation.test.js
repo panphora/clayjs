@@ -1,4 +1,4 @@
-import { rowOf, plain, headingAbove, structuralSentence } from "../../src/core/conflict-presentation.js";
+import { rowOf, plain, headingAbove, structuralSentence, jsonPathWords } from "../../src/core/conflict-presentation.js";
 import { conflicts, beginApply, completeApply } from "../../src/sync/conflicts.js";
 
 /**
@@ -248,4 +248,33 @@ test("a structural loss is described in words the person can check", () => {
     .toBe("Your change here was replaced by the other edit.");
   expect(structuralSentence({}, "Section"))
     .toBe("Your change here was replaced by the other edit.");
+});
+
+test("a JSON conflict names the data path and shows both values as JSON", () => {
+  document.body.innerHTML = '<script type="application/json" merge="game">{}</script>';
+  const node = document.querySelector("script");
+  const row = rowOf({ id: "j1", kind: "json", node, name: "game", path: 'players[id="alice"].x', base: 1, local: 5, remote: 9, resolved: 9 });
+  expect(row.kind).toBe("json");
+  expect(row.name).toBe("game → players → alice → x");
+  expect(row.target).toBeNull();
+  expect(row.yours.hit).toBe("5");
+  expect(row.now.hit).toBe("9");
+});
+
+test("a JSON conflict shows deletions and objects readably", () => {
+  const deleted = rowOf({ id: "j2", kind: "json", node: null, name: "store", path: "a", base: 1, local: undefined, remote: { v: 2 }, resolved: { v: 2 } });
+  expect(deleted.name).toBe("store → a");
+  expect(deleted.yours.hit).toBe("(deleted)");
+  expect(deleted.now.hit).toBe('{"v":2}');
+
+  const whole = rowOf({ id: "j3", kind: "json", node: null, name: "store", path: "", base: [1], local: [1, 2], remote: [3], resolved: [3] });
+  expect(whole.name).toBe("store");
+});
+
+test("JSON paths read as words", () => {
+  expect(jsonPathWords('players[id="alice"].x')).toBe("players → alice → x");
+  expect(jsonPathWords("grid[0][1]")).toBe("grid → 0 → 1");
+  expect(jsonPathWords('["a b"].c')).toBe("a b → c");
+  expect(jsonPathWords('items[sku="x]y"].n')).toBe("items → x]y → n");
+  expect(jsonPathWords("tags[\"red\"]")).toBe("tags → red");
 });

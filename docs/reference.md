@@ -218,7 +218,10 @@ reachable by direct import but may change in any release.
 - `merge="name"` (JSON script tags, sync plugin) — multi-writer safety for JSON stored
   in a script tag. Incoming saves three-way merge the JSON per key against the last
   synced version instead of replacing the blob, so unsaved local keys survive. Arrays
-  merge by identity (`id`-style fields; name your own with `merge-key="taskId"`).
+  merge by identity (`id`-style fields; name your own with `merge-key="taskId"`, or per
+  list path with `merge-key="players:uid, items:sku"`); lists without an id merge by
+  position when both sides kept the same length. A key both sides changed takes the
+  incoming value and records a `json` conflict in the ledger.
   Bodies may use relaxed JSON (unquoted keys, single quotes, trailing commas,
   comments). Requires a JSON `type` attribute.
 - `editmode:contenteditable` (any element) — editable for the owner, inert for

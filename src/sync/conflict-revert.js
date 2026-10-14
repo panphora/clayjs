@@ -999,7 +999,7 @@ export function prepareRevert(ids) {
     seen.add(id);
     const rec = conflicts.get(id);
     if (!rec) continue;
-    if (rec.claimedBy || rec.kind === "apply-incomplete" || !rec.recovery) blocked.set(id, BLOCKED);
+    if (rec.claimedBy || rec.kind === "apply-incomplete" || rec.kind === "json" || !rec.recovery) blocked.set(id, BLOCKED);
     else selected.push(rec);
   }
   if (conflicts.hasPendingApply()) {
