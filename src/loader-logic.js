@@ -19,7 +19,7 @@ export const CORE_WAVES = {
     "core/save-core.js", "core/save.js",
     "core/conflict-notice.js",
     "core/unsaved-warning.js", "core/autosave.js",
-    "attrs/save-freeze.js", "attrs/onaftersave.js", "attrs/refetch-on-save.js",
+    "attrs/save-freeze.js", "attrs/onaftersave.js", "attrs/refetch-on-save.js", "attrs/add-from.js",
     "lib/cache-bust.js",
   ],
 };
@@ -84,6 +84,7 @@ export const MODULES = {
   "attrs/save-freeze.js":       () => import("./attrs/save-freeze.js"),
   "attrs/onaftersave.js":       () => import("./attrs/onaftersave.js"),
   "attrs/refetch-on-save.js":   () => import("./attrs/refetch-on-save.js"),
+  "attrs/add-from.js":          () => import("./attrs/add-from.js"),
   "lib/cache-bust.js":          () => import("./lib/cache-bust.js"),
   "vendor/hyper-morph.vendor.js": () => import("./vendor/hyper-morph.vendor.js"),
   "plugins/richclay.js":        () => import("./plugins/richclay.js"),

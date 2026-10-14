@@ -230,6 +230,10 @@ reachable by direct import but may change in any release.
   visitors.
 - `editmode:onclick` (any element) — the `onclick` runs only for the owner; saved inert
   so it never runs for visitors.
+- `add-from` / `add-to` (any element, usually a button) — in edit mode, a click clones
+  the `<template>` named by `add-from`, gives the clone a fresh `data-id`, appends it to
+  the element named by `add-to`, and focuses its first editable field:
+  `<button add-from="#task-tpl" add-to="#tasks">Add task</button>`.
 - `editmode:resource` (style, link, script) — active for the owner, saved with an inert
   `type` so visitors never load it.
 - `viewmode:disabled` / `viewmode:readonly` (form controls) — disabled or read-only for

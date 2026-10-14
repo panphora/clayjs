@@ -9,6 +9,7 @@
 - Live tags carry a `live-at` stamp written by checkpoints. An outside save of a live tag merges with live play instead of restarting the room, a sequencer hand-off keeps every accepted move, and a change is never counted twice.
 - `live` region token, and `setSaveHeader()` in the save core
 - JSON merges keep list positions for same-length lists, take per-path `merge-key`, keep the authored formatting, and report conflicting keys in the conflict notice
+- `add-from` / `add-to` attributes: a button that adds a list item from a `<template>` in edit mode, with a fresh `data-id` and its first field focused, no script needed
 
 ## [1.10.0] - 2026-10-12
 

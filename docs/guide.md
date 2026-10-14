@@ -525,7 +525,7 @@ Live sync and undo pair elements across versions by **`data-id`, then `id`**, us
   copy.querySelectorAll("li[data-id]").forEach((li) => { li.dataset.id = newId("t"); });
   ```
 
-- **Templates carry no `data-id`.** The command that clones a template assigns one.
+- **Templates carry no `data-id`.** The command that clones a template assigns one. For a plain "add an item" button, `<button add-from="#item-tpl" add-to="#list">` does the clone, the id and the focus with no script.
 - **Never stamp ids on open.** Opening an old file must not rewrite it. Add an id when an item is created or first changed.
 - **Make ids without `crypto.randomUUID`** unless the file is only ever served over https or localhost: it is missing in insecure contexts. The examples use `prefix + "-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6)`.
 - Ids are also how commands find records: `board.querySelector(\`.card[data-id="${CSS.escape(id)}"]\`)`. Never find a record by position.
