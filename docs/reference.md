@@ -49,7 +49,7 @@ conditionally through the URL, in the browser only:
   comma list (`?exclude=source,richclay`); a second `exclude=` parameter is ignored.
 
 Loadable plugins: `richclay` (default on), `source` (default on), `ai-edit` (brings `wire`),
-`indicator`, `sync`, `sortable`, `undo`, `cms`, `quickcrop`, `upload`, `people`, `wire`, `demo`.
+`indicator`, `sync`, `live`, `sortable`, `undo`, `cms`, `quickcrop`, `upload`, `people`, `wire`, `demo`.
 The default-on plugins load in edit mode only.
 
 Everything else is a separate library ("satellite") with its own script tag: clay-ui,
@@ -182,6 +182,8 @@ itself, with no network.
   name. Edit mode only (people plugin).
 - `clay.wire` — per-file control channel to a process on the user's machine: `send`,
   `cancel`, `get`, `list`, `isBusy`, `on` (wire plugin).
+- `clay.live(name)` — the page's `<script type="application/json" merge="name" clay="live">` tag
+  as a live object: `data`, `set`, `delete`, `add`, `update`, `on("change")`, `toJSON` (live plugin).
 - `clay.aiEdit` — the AI comment box: `clay.aiEdit.init()` and
   `clay.aiEdit.open(element, { prompt })` (ai-edit plugin; booted by the plugin itself, and a
   no-op unless the host lists an `ai-edit` wire helper).
@@ -278,6 +280,9 @@ spaces: `clay="freeze no-undo"`.
 - `no-watch` — the mutation system ignores it entirely (implies no autosave trigger, no
   undo). Use for third-party widgets that churn the DOM.
 - `no-undo` — changes here aren't recorded in undo history.
+- `live` — on a `merge=` JSON script, the live plugin holds the value in memory and writes
+  it into each save: saved, never marks the page unsaved, not undoable, and live sync leaves
+  the tag to the plugin. Read it with `clay.live(name)`.
 
 Recipes: UI chrome (toolbars, badges) → `clay="editor-ui"`. Per-tab generated
 text (clocks, status, "overdue") → `clay="freeze"`. Third-party embeds → `clay="no-watch"`. Heavy editors,

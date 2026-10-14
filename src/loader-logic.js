@@ -28,6 +28,9 @@ export const PLUGIN_PATHS = {
   richclay:  { path: "plugins/richclay.js",        editOnly: true,  default: true },
   indicator: { path: "plugins/indicator.js",       editOnly: true,  default: false },
   sync:      { path: "sync/live-sync.js",          editOnly: false, default: false },
+  // A live JSON tag as an in-memory object (clay.live). Not editOnly: a reader's
+  // tab still shows the game, and its writes stay in that tab.
+  live:      { path: "plugins/live.js",           editOnly: false, default: false },
   sortable:  { path: "plugins/sortable.js",        editOnly: true,  default: false },
   undo:      { path: "plugins/undo.js",            editOnly: true,  default: false },
   cms:       { path: "plugins/cms.js",             editOnly: false, default: false },
@@ -86,6 +89,7 @@ export const MODULES = {
   "plugins/richclay.js":        () => import("./plugins/richclay.js"),
   "plugins/indicator.js":       () => import("./plugins/indicator.js"),
   "sync/live-sync.js":          () => import("./sync/live-sync.js"),
+  "plugins/live.js":            () => import("./plugins/live.js"),
   "plugins/sortable.js":        () => import("./plugins/sortable.js"),
   "plugins/undo.js":            () => import("./plugins/undo.js"),
   "plugins/cms.js":             () => import("./plugins/cms.js"),
@@ -100,7 +104,7 @@ export const MODULES = {
 
 // `source` is last on purpose: its install captures a save clone, so it wants every
 // plugin that registers a document transform to have registered it first.
-const PLUGIN_ORDER = ["richclay", "indicator", "sortable", "undo", "quickcrop", "upload", "people", "cms", "sync", "wire", "ai-edit", "demo", "source"];
+const PLUGIN_ORDER = ["richclay", "indicator", "sortable", "undo", "quickcrop", "upload", "people", "cms", "sync", "live", "wire", "ai-edit", "demo", "source"];
 
 // A plugin that cannot do its whole job alone. hypercms reads the cropper through
 // a capability lookup (`clay.quickcrop`) and silently uploads the raw file when it

@@ -186,3 +186,10 @@ describe("resolveModules", () => {
     expect(resolveModules(params({ plugins: "ai-edit" }), true).plugins).not.toContain("plugins/undo.js");
   });
 });
+
+test("live is opt-in, loads in view mode, and brings nothing with it", () => {
+  const off = resolveModules(new URLSearchParams(""), true);
+  expect(off.plugins).not.toContain("plugins/live.js");
+  const view = resolveModules(new URLSearchParams("plugins=live"), false);
+  expect(view.plugins).toEqual(["plugins/live.js"]);
+});

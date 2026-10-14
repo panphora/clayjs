@@ -51,7 +51,7 @@ query params on the script URL:
 <script src="https://clayjs.com/v1/clay.js?plugins=sync,cms&exclude=indicator"></script>
 ```
 
-- `?plugins=` — add optional plugins: `sync`, `cms`, `undo`, `sortable`, `indicator`, `ai-edit`, `quickcrop`, `upload`, `wire`, `demo`.
+- `?plugins=` — add optional plugins: `sync`, `live`, `cms`, `undo`, `sortable`, `indicator`, `ai-edit`, `quickcrop`, `upload`, `wire`, `demo`.
   In edit mode `richclay` and `source` load by default. `ai-edit` brings `wire` with it.
   `cms` brings `quickcrop` with it, because the CMS uses it for `data-hcms-crop` image fields.
 - `?exclude=` — drop a plugin that would otherwise load (a default, or one another plugin pulled in).
@@ -137,7 +137,7 @@ attribute:
 ```
 
 Tokens: `no-save`, `no-snapshot`, `no-trigger-autosave`, `no-dirty`, `no-watch`, `no-undo`,
-`no-data`, `editor-ui`, `freeze`. `no-data` excludes a subtree from content-aware reads without
+`no-data`, `editor-ui`, `freeze`, `live`. `no-data` excludes a subtree from content-aware reads without
 changing save, watch, snapshot, or undo behavior. `editor-ui` combines `no-data`, `no-save`,
 `no-snapshot`, `no-watch`, and `no-undo` for live editing controls. Native DOM queries still see
 both markers. Add `autosave` to `<html>` to save automatically on change.

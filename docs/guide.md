@@ -223,6 +223,7 @@ The test suite checks this file opens without becoming dirty, saves the record a
 | `richclay` | on | no | the `editable` attribute, `clay.RichClay` |
 | `source` | on | no | byte-preserving saves, `clay.source` |
 | `sync` | off | yes | live sync, `clay.conflicts`, `clay.morph`, presence and the editing marker |
+| `live` | off | yes | `clay.live(name)`: a `clay="live"` JSON tag as a live object |
 | `sortable` | off | no | the `sortable` attribute, `window.Sortable`, `clay:sorted` |
 | `undo` | off | no | `clay.undo` (whole-page undo, takes Cmd+Z for the window) |
 | `indicator` | off | no | the save status chip |

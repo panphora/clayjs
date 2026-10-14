@@ -61,6 +61,7 @@
       <tr><td><code>no-undo</code></td><td>Changes here aren't recorded in undo history.</td><td>Live regions where undo would feel wrong</td></tr>
       <tr><td><code>no-data</code></td><td>Excluded from content-aware queries and serialization, but otherwise saved, watched, snapshotted, and undoable normally.</td><td>Saved metadata or controls that are not part of an API's content view</td></tr>
       <tr><td><code>editor-ui</code></td><td>A live editing-control bundle: no-data, no-save, no-snapshot, no-watch, and no-undo.</td><td>Add rows, handles, menus, and editor panels</td></tr>
+      <tr><td><code>live</code></td><td>On a <code>merge=</code> JSON script: the live plugin holds its value in memory and writes it into each save. Saved, but never marks the page unsaved, never undone, and live sync leaves the tag to the plugin.</td><td>Game state and other fast-changing data read with <code>clay.live(name)</code></td></tr>
     </table>
     <div class="recipes">
       <span class="r-title">Recipes</span>
