@@ -252,6 +252,11 @@ function errorResult(err) {
     // Live sync compares it with the frames it merges to know when the refusal
     // is answered.
     conflictEtag: conflicted ? (err.etag ?? null) : null,
+    // The host's answer, null when none came (a lost connection or a timeout).
+    status: Number.isInteger(err.status) ? err.status : null,
+    // An attempt of this save timed out, so it may have landed whatever the
+    // final answer says.
+    hadTimeout: timedOut || err.hadTimeout === true,
     etag: null
   };
 }
@@ -575,6 +580,7 @@ async function sendSave(content) {
     try {
       return await sendOnce(content, saveId, etag);
     } catch (err) {
+      if (reSent) err.hadTimeout = true;
       if (err.name === 'AbortError') {
         if (reSent) throw err;
         const { landed, resend, etag: original } = await recoverUnknownSave();

@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import {
-  parsePath, cloneJson, validateOp, checkOp, applyOp, applyOps, coalesce, overlaps, assignDeep, serializeLive,
+  parsePath, cloneJson, validateOp, checkOp, applyOp, applyOps, coalesce, overlaps, assignDeep, serializeLive, diffOps,
   textHash, stampOf, parseStamp,
 } from "../../src/live/ops.js";
 
@@ -202,6 +202,20 @@ describe("assignDeep", () => {
     expect(target.l).toBe(list);
     expect(list).toEqual([9]);
   });
+});
+
+describe("the shared diff fixture table", () => {
+  const diffs = JSON.parse(readFileSync(new URL("../fixtures/live-diff.json", import.meta.url), "utf8"));
+  for (const c of diffs) {
+    test(c.name, () => {
+      const ops = diffOps(c.before, c.after);
+      expect(ops).toEqual(c.ops);
+      const applied = applyOps(cloneJson(c.before), ops.map(validateOp));
+      const text = serializeLive(applied);
+      expect(text).toBe(serializeLive(c.after));
+      expect(serializeLive(applyOps(applied, ops.map(validateOp)))).toBe(text);
+    });
+  }
 });
 
 describe("lineage stamps", () => {

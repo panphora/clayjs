@@ -6,9 +6,14 @@
 //   send(clientId, { name, n, ops, epoch }) -> Promise<{ status, body, retryAfter }>
 //   fetchState(clientId) -> Promise<{ epoch, seq, writer, stores } | { status } | null>
 // A new room (a new epoch) holds some of this tab's frames still in flight; see
-// firstNotHeld for how each is sorted.
+// sortAwaiting for how each is sorted.
+//
+// Per open store the room says how far its file reaches: entry.last (the seq of
+// the store's latest change) and entry.landed (the seq from which the file plus
+// the room's log rebuilds the value; -1: rewrite now). Both are numbers in the
+// current epoch, taken from the room and never carried across epochs.
 
-import { applyOps, cloneJson, serializeLive } from "./ops.js";
+import { applyOps, cloneJson } from "./ops.js";
 
 export const MIN_GAP_MS = 40;
 export const MAX_OPS = 128;
@@ -22,6 +27,8 @@ const encoder = new TextEncoder();
 const byteSize = (value) => encoder.encode(JSON.stringify(value)).length;
 
 const transient = (status) => status === 0 || status === 408 || status === 429 || status >= 500;
+// A refusal sent before the request was handled: the frame was not applied.
+const unhandled = (status) => status === 429 || status === 503;
 
 /**
  * @param {object} options
@@ -29,15 +36,24 @@ const transient = (status) => status === 0 || status === 408 || status === 429 |
  * @param {Map<string, {store: object}>} options.entries - the live plugin's open stores, by name
  * @param {(epoch: string) => void} [options.onEpoch] - joined a room (first join or restart)
  * @param {() => void} [options.onWriter] - the room's writer may have changed
- * @param {() => void} [options.onApplied] - a store's room value moved (its entry's lastSeq advanced)
+ * @param {() => void} [options.onApplied] - a store's room value moved (its entry's last advanced)
+ * @param {() => void} [options.onLanded] - how far the file reaches moved (an entry's landed)
+ * @param {() => void} [options.onCheckpoint] - the room asks the writer to save now (its log is half full)
+ * @param {(name: string) => boolean} [options.held] - a save still on the wire carries some of
+ *   this store's pending ops in file mode: nothing of the store is framed until release(name),
+ *   so those ops are framed in order if the save does not land, and never if it does
  * @param {() => void} [options.onStop] - the lane stopped for good
  */
 export function createFastLane({
   transport,
   entries,
   onEpoch = () => {},
+  onLeave = () => {},
   onWriter = () => {},
   onApplied = () => {},
+  onLanded = () => {},
+  onCheckpoint = () => {},
+  held = () => false,
   onStop = () => {},
   now = () => Date.now(),
   setTimer = setTimeout,
@@ -54,6 +70,8 @@ export function createFastLane({
   let fetching = false;
   let stopped = false;
   let inFlight = false;
+  // The frame on the wire now.
+  let flying = null;
   let lastSentAt = -Infinity;
   let holdUntil = 0;
   let timer = null;
@@ -62,17 +80,48 @@ export function createFastLane({
   // Bumped when the stream opens or closes, and when a state is taken: a state
   // request answered after either is obsolete.
   let connection = 0;
+  // The stream connection the host knows this tab by (server lane): a frame
+  // applies only under it. undefined on a transport without one.
+  let conn;
   let stateCount = 0;
   let fetchAgain = false;
   let unsubscribe = null;
-  // Per store: the next n, ops not yet in a frame, and frames sent but not yet
-  // seen back (each { n, ops, through, seq, sent }).
+  // Per store: the next n, ops not yet in a frame, frames sent but not yet seen
+  // back (each { n, ops, through, seq, sent, refused, uncertain }), and the
+  // newest op id ever put in a frame.
   const lanes = new Map();
 
   function laneOf(name) {
     let lane = lanes.get(name);
-    if (!lane) lanes.set(name, (lane = { n: 0, unsent: [], awaiting: [] }));
+    if (!lane) lanes.set(name, (lane = { n: 0, unsent: [], awaiting: [], framed: 0 }));
     return lane;
+  }
+
+  // The store's ops still to frame: pending, past what was framed.
+  function unframed(name, lane) {
+    const store = entries.get(name)?.store;
+    if (!store) return [];
+    return store.pendingEntries().filter((pending) => pending.id > lane.framed);
+  }
+
+  // Never applied: every attempt was refused before the room handled it.
+  const unapplied = (frame) => frame.refused === true && !frame.uncertain;
+
+  // Stop sending this store: it leaves the room. A frame the room may have
+  // applied is dropped from pending (never replayed over a file that may hold
+  // it); a frame refused unapplied, and ops never framed, stay pending for file
+  // mode. Refused frames come last: a refusal stops sending until the next state.
+  function leaveRoom(name, lane) {
+    const store = entries.get(name)?.store;
+    let through = 0;
+    for (const frame of lane.awaiting) if (!unapplied(frame)) through = frame.through;
+    if (store && through) store.rebase(store.authoritative, { source: "state", through });
+    onLeave(name, { epoch, seq });
+    lane.unsent = [];
+    lane.awaiting = [];
+    // What is left pending is framed afresh if the store comes back.
+    lane.framed = through;
+    store?.setMode("file");
   }
 
   function schedule() {
@@ -93,7 +142,7 @@ export function createFastLane({
       if (retry) return { name, lane, frame: retry };
     }
     for (const [name, lane] of lanes) {
-      if (!lane.unsent.length || !roomNames.has(name)) continue;
+      if (!lane.unsent.length || !roomNames.has(name) || held(name)) continue;
       // Packed by bytes as well as count: the host refuses a body over 16 KB.
       let size = byteSize({ name, n: lane.n + 1, ops: [], epoch });
       let count = 0;
@@ -112,6 +161,7 @@ export function createFastLane({
       }
       const take = lane.unsent.splice(0, count);
       const frame = { n: ++lane.n, ops: take.map((entry) => entry.op), through: take[take.length - 1].id, seq: null, sent: false };
+      lane.framed = Math.max(lane.framed, frame.through);
       lane.awaiting.push(frame);
       return { name, lane, frame };
     }
@@ -119,26 +169,50 @@ export function createFastLane({
   }
 
   async function flush() {
-    if (inFlight || stopped || !connected || !synced) return;
+    if (inFlight || stopped || !connected || !synced || conn === null) return;
     const next = nextFrame();
     if (!next) return;
     const { name, lane, frame } = next;
     lanes.delete(name);
     lanes.set(name, lane);
     const sentEpoch = epoch;
+    frame.sentOn = connection;
     frame.sent = true;
+    // Refusal is evidence about earlier attempts only: this one may apply.
+    frame.refused = false;
     inFlight = true;
+    flying = frame;
     lastSentAt = now();
     let result;
     try {
-      result = await transport.send(clientId, { name, n: frame.n, ops: frame.ops, epoch: sentEpoch });
+      result = await transport.send(clientId, { name, n: frame.n, ops: frame.ops, epoch: sentEpoch, ...(conn !== undefined && { conn }) });
     } catch {
       result = null;
     }
     inFlight = false;
+    flying = null;
     if (stopped) return;
-    if (sentEpoch === epoch && lane.awaiting.includes(frame)) answered(name, lane, frame, result || { status: 0 });
+    if (frame.undecided) decide(name, lane, frame, result || { status: 0 });
+    else if (sentEpoch === epoch && lane.awaiting.includes(frame)) answered(name, lane, frame, result || { status: 0 });
     schedule();
+  }
+
+  // The answer to a frame sent to the room before this one. Refused unapplied
+  // (stale, a 4xx, 429/503): it goes again here. Otherwise the old room applied
+  // it or may have: it is dropped, never sent again.
+  function decide(name, lane, frame, { status, body }) {
+    delete frame.undecided;
+    if (!lane.awaiting.includes(frame)) return;
+    const refused = body?.stale === true || unhandled(status) || (status >= 400 && status < 500 && !transient(status));
+    if (refused && !frame.uncertain) {
+      frame.refused = true;
+      frame.sent = false;
+      frame.seq = null;
+      return;
+    }
+    lane.awaiting.splice(lane.awaiting.indexOf(frame), 1);
+    const store = entries.get(name)?.store;
+    store?.rebase(store.authoritative, { source: "state", through: frame.through });
   }
 
   // Every frame the room ordered at or before the applied seq is in the
@@ -158,13 +232,16 @@ export function createFastLane({
   function answered(name, lane, frame, { status, body, retryAfter }) {
     if (status >= 200 && status < 300) {
       retryDelay = RETRY_MS;
+      // Made for an earlier room and refused unapplied: it goes again once this
+      // tab has the new room's state (which may already be here).
+      if (body?.stale) {
+        frame.sent = false;
+        frame.refused = true;
+        if (body.epoch !== epoch) resync();
+        else schedule();
+        return;
+      }
       if (body?.epoch && body.epoch !== epoch) {
-        // Made for an earlier room and refused unapplied: it goes again once
-        // this tab has the new room's state.
-        if (body.stale) {
-          frame.sent = false;
-          frame.refused = true;
-        }
         resync();
         return;
       }
@@ -175,26 +252,53 @@ export function createFastLane({
     }
     if (transient(status)) {
       frame.sent = false;
-      frame.uncertain = true;
+      if (unhandled(status)) frame.refused = true;
+      else {
+        frame.uncertain = true;
+        // The earliest connection an attempt that may have applied was sent on.
+        frame.uncertainSince ??= frame.sentOn;
+      }
+      // Sent under a connection the host no longer has: read the state for the
+      // current one, which also settles or resends this frame by its receipt.
+      if (status === 503 && body?.code === "not-connected") {
+        conn = null;
+        resync();
+        return;
+      }
+      // The room holds a receipt for every connected sender and has no room for
+      // this one: this store goes at save speed until the room takes it back.
+      if (status === 503 && body?.code === "busy") {
+        console.warn(`clay.live("${name}"): the room is full, so it stays at save speed for now`);
+        roomNames.delete(name);
+        leaveRoom(name, lane);
+        setTimer(resync, (retryAfter > 0 ? retryAfter : 60) * 1000);
+        return;
+      }
+      // Its fate is unknown and the stream reconnected while it was on the wire:
+      // a state read on the new connection decides it, by its receipt or none.
+      if (frame.uncertain && frame.sentOn !== connection) {
+        resync();
+        return;
+      }
       holdUntil = now() + (retryAfter > 0 ? retryAfter * 1000 : retryDelay);
       retryDelay = Math.min(retryDelay * 2, RETRY_MAX_MS);
       return;
     }
     if (REVOKED.has(status)) {
+      if (!frame.uncertain) frame.refused = true;
       stop();
+      return;
+    }
+    const reason = body?.error || body?.code || `status ${status}`;
+    if (status === 404) {
+      console.warn(`clay.live("${name}"): the room has no such store, so it stays at save speed (${reason})`);
+      frame.refused = true;
+      roomNames.delete(name);
+      leaveRoom(name, lane);
       return;
     }
     lane.awaiting.splice(lane.awaiting.indexOf(frame), 1);
     const store = entries.get(name)?.store;
-    const reason = body?.error || body?.code || `status ${status}`;
-    if (status === 404) {
-      console.warn(`clay.live("${name}"): the room has no such store, so it stays at save speed (${reason})`);
-      roomNames.delete(name);
-      lane.unsent = [];
-      lane.awaiting = [];
-      store?.setMode("file");
-      return;
-    }
     console.warn(`clay.live("${name}"): the host refused an update, so it was undone (${reason})`);
     store?.rebase(store.authoritative, { source: "state", through: frame.through });
   }
@@ -221,9 +325,9 @@ export function createFastLane({
       }
     }
     store.rebase(next, { source: own ? "state" : "remote", through });
-    const entry = entries.get(frame.name);
-    entry.lastSeq = frame.seq;
+    entries.get(frame.name).last = frame.seq;
     onApplied();
+    if (frame.checkpoint === true) onCheckpoint();
     settleAwaiting();
   }
 
@@ -248,87 +352,103 @@ export function createFastLane({
     apply(frame);
   }
 
-  // A new room: which of this tab's frames still awaiting an answer it holds.
-  // Frames go one at a time, so n and seq grow along awaiting and only the last
-  // can have an unknown seq; the answer is a prefix of held (or unknowable)
-  // frames, dropped from pending, then frames that go again with their own n.
-  //   seen (a local sequencer's receipts): n <= seen is held, anything else is not.
-  //   from naming the epoch this tab was in: a known seq is held iff it is at or
-  //   below from.seq; an unknown one is not held when from.seq <= the seq this
-  //   tab applied, else unknowable.
-  //   anything else: unknowable. Unknowable frames are lost with the room, never
-  //   resent on a guess, so the room never holds an op twice.
-  //   a frame the new room refused as stale, never sent with an uncertain outcome: not held.
-  function firstNotHeld(awaiting, room, oldEpoch, oldSeq) {
+  // A new room: what becomes of this tab's frames still awaiting an answer.
+  // A frame a local successor's receipts (seen) say it holds settles. A frame
+  // every attempt of which was refused unapplied goes again. Any other frame the
+  // old room may have applied is dropped, never sent again: a late checkpoint of
+  // the old room may bring that move back, so sending it again could count it
+  // twice. Frames go one at a time and a refusal stops
+  // sending until the next state, so the settled or dropped frames come first.
+  // Returns the frames to send again and the op id the rest reach (0: none).
+  function sortAwaiting(awaiting, room) {
     const seen = room.seen ? (room.seen[clientId] ?? 0) : null;
-    const from = room.from ?? null;
-    for (let i = 0; i < awaiting.length; i++) {
-      const frame = awaiting[i];
-      let held;
-      if (frame.refused && !frame.uncertain) held = false;
-      else if (seen !== null) held = frame.n <= seen;
-      else if (from && from.epoch === oldEpoch) {
-        if (frame.seq !== null) held = frame.seq <= from.seq;
-        else held = from.seq <= oldSeq ? false : undefined;
-      }
-      if (held === false) return i;
+    const resend = [];
+    let through = 0;
+    for (const frame of awaiting) {
+      if (seen !== null && frame.n <= seen) through = frame.through;
+      else if (frame.sent && frame === flying) {
+        // Still on the wire: its answer decides.
+        frame.undecided = true;
+        resend.push(frame);
+      } else if (unapplied(frame)) resend.push(frame);
+      else through = frame.through;
     }
-    return awaiting.length;
+    return { resend, through };
   }
 
   function applyState(state) {
     if (stopped || !state || typeof state.epoch !== "string") return;
     stateCount++;
-    const oldEpoch = epoch;
-    const oldSeq = seq;
     // Older than what this tab already applied: keep what it has.
     if (state.epoch === epoch && Number.isInteger(state.seq) && state.seq < seq) {
       drain();
       return;
     }
     const fresh = state.epoch !== epoch;
+    let joined = false;
     epoch = state.epoch;
     seq = Number.isInteger(state.seq) ? state.seq : 0;
     writer = state.writer ?? null;
+    if ("conn" in state) conn = state.conn;
     const stores = state.stores || {};
     roomNames = new Set(Object.keys(stores));
     for (const [name, entry] of entries) {
       const room = stores[name];
       const lane = laneOf(name);
       if (!room) {
-        lane.unsent = [];
-        lane.awaiting = [];
-        entry.store.setMode("file");
+        leaveRoom(name, lane);
         continue;
       }
+      const rejoined = entry.store.handle.status.mode === "file";
       entry.store.setMode("fast");
-      // The room moved since this store's base: the writer has something to save.
-      if (serializeLive(room.value) !== serializeLive(entry.store.authoritative)) {
-        entry.lastSeq = seq;
-        onApplied();
-      }
+      entry.last = Number.isInteger(room.last) ? room.last : 0;
+      entry.landed = Number.isInteger(room.landed) ? room.landed : 0;
       if (fresh) {
-        const first = firstNotHeld(lane.awaiting, room, oldEpoch, oldSeq);
-        const resend = lane.awaiting.slice(first);
-        const dropped = lane.awaiting.slice(0, first);
+        const { resend, through } = sortAwaiting(lane.awaiting, room);
         for (const frame of resend) {
+          if (frame.undecided) continue;
           frame.sent = false;
           frame.seq = null;
-          frame.refused = false;
         }
         lane.awaiting = resend;
-        entry.store.rebase(room.value, { source: "state", through: dropped.length ? dropped[dropped.length - 1].through : undefined });
-        const framed = resend.length ? resend[resend.length - 1].through : 0;
-        lane.unsent = entry.store.pendingEntries().filter((pending) => pending.id > framed);
+        entry.store.rebase(room.value, { source: "state", through: through || undefined });
+        lane.unsent = unframed(name, lane);
       } else {
+        const seen = room.seen ? room.seen[clientId] : undefined;
+        const next = [];
         let through;
-        while (lane.awaiting.length && lane.awaiting[0].seq !== null && lane.awaiting[0].seq <= seq) {
-          through = lane.awaiting.shift().through;
+        for (const frame of lane.awaiting) {
+          if (frame === flying) {
+            next.push(frame);
+          } else if ((frame.seq !== null && frame.seq <= seq) || (seen !== undefined && frame.n <= seen)) {
+            // In this state, by its answer or by the room's receipt.
+            through = frame.through;
+          } else if (frame.seq !== null) {
+            // Answered as applied after this state was read: its event is on its way.
+            next.push(frame);
+          } else if (!frame.uncertain || seen !== undefined || frame.uncertainSince === connection) {
+            // Provably not applied: every attempt refused before handling, above
+            // the room's receipt for this tab, or every attempt that may have
+            // applied went on this connection, which never dropped (its receipt
+            // cannot have gone). It goes again with the same n.
+            frame.sent = false;
+            next.push(frame);
+          } else {
+            // Unanswered, and the stream reconnected since: its receipt may be gone.
+            through = frame.through;
+          }
         }
+        lane.awaiting = next;
         entry.store.rebase(room.value, { source: "state", through });
+        // Back in the room after a spell at save speed: frame what was made meanwhile.
+        if (rejoined) {
+          lane.unsent = unframed(name, lane);
+          joined = true;
+        }
       }
     }
-    if (fresh) onEpoch(epoch);
+    if (fresh || joined) onEpoch(epoch);
+    onApplied();
     onWriter();
     drain();
   }
@@ -389,7 +509,14 @@ export function createFastLane({
     if (timer !== null) clearTimer(timer);
     timer = null;
     unsubscribe?.();
-    for (const entry of entries.values()) entry.store.setMode("file");
+    for (const [name, entry] of entries) {
+      const lane = lanes.get(name);
+      if (lane) leaveRoom(name, lane);
+      else {
+        onLeave(name, { epoch, seq });
+        entry.store.setMode("file");
+      }
+    }
     onStop();
   }
 
@@ -408,9 +535,19 @@ export function createFastLane({
     },
     frame: onFrame,
     state: applyState,
+    // The room's writer, and how far the file reaches when a save landed.
     writer(data) {
       if (!data || data.epoch !== epoch) return;
       writer = data.writer ?? null;
+      if (data.landed && typeof data.landed === "object") {
+        // A state read in flight was taken before this: its landed is older.
+        stateCount++;
+        for (const [name, landed] of Object.entries(data.landed)) {
+          const entry = entries.get(name);
+          if (entry && Number.isInteger(landed)) entry.landed = landed;
+        }
+        onLanded();
+      }
       onWriter();
     },
   };
@@ -427,7 +564,18 @@ export function createFastLane({
       ops.forEach((op, i) => lane.unsent.push({ id: first + i, op }));
       schedule();
     },
-    // A store opened after this tab joined: fetch the room again for its value.
+    // The save that held this store ended: frame whatever is still pending past
+    // what was framed (an accepted save's ops have left pending).
+    release(name) {
+      if (stopped || epoch === null || !roomNames.has(name)) return;
+      laneOf(name).unsent = unframed(name, laneOf(name));
+      schedule();
+    },
+    // Read the room again: a store opened after this tab joined, or a save the
+    // room merged whose state may not have arrived yet.
+    refresh() {
+      if (epoch !== null && connected) resync();
+    },
     storeOpened() {
       if (epoch !== null && connected) resync();
     },

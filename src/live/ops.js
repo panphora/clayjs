@@ -264,3 +264,28 @@ export function parseStamp(value) {
   const m = typeof value === "string" ? STAMP.exec(value) : null;
   return m ? { epoch: m[1], seq: Number(m[2]), hash: m[3] } : null;
 }
+
+// The leaf-level ops that turn before into after: set for a changed or added
+// leaf, del for a removed key, a whole-value set where the container kind or a
+// list's length changes. Every op is idempotent, so replaying the result over a
+// value that already holds `after` at those paths changes nothing.
+export function diffOps(before, after, path = []) {
+  if (!isContainer(before) || !isContainer(after) || Array.isArray(before) !== Array.isArray(after)) {
+    return [{ op: "set", path, value: cloneJson(after) }];
+  }
+  if (Array.isArray(before)) {
+    if (before.length !== after.length) return [{ op: "set", path, value: cloneJson(after) }];
+    const out = [];
+    for (let i = 0; i < after.length; i++) {
+      if (serializeLive(before[i]) !== serializeLive(after[i])) out.push(...diffOps(before[i], after[i], [...path, i]));
+    }
+    return out;
+  }
+  const out = [];
+  for (const key of Object.keys(before)) if (!has(after, key)) out.push({ op: "del", path: [...path, key] });
+  for (const key of Object.keys(after)) {
+    if (!has(before, key)) out.push({ op: "set", path: [...path, key], value: cloneJson(after[key]) });
+    else if (serializeLive(before[key]) !== serializeLive(after[key])) out.push(...diffOps(before[key], after[key], [...path, key]));
+  }
+  return out;
+}

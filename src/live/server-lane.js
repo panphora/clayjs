@@ -49,7 +49,11 @@ export async function fetchLiveState(clientId) {
       headers: { "Document-URL": window.location.href },
     });
     if (!response.ok) return { status: response.status };
-    return await response.json();
+    const state = await response.json();
+    // The stream is open but the host has not seen its subscription yet: not
+    // ready, and the lane reads again.
+    if (state && typeof state.epoch === "string" && state.conn === null) return null;
+    return state;
   } catch {
     return null;
   }

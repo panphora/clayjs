@@ -58,6 +58,7 @@ function fakeLocks() {
 }
 
 let localTransport;
+let tabs;
 
 beforeAll(async () => {
   global.BroadcastChannel = FakeChannel;
@@ -69,10 +70,13 @@ beforeEach(() => {
   channels = [];
   locks = fakeLocks();
   drop = () => false;
+  tabs = [];
   Object.defineProperty(navigator, "locks", { configurable: true, value: locks });
 });
 
 afterEach(() => {
+  for (const t of tabs) t.lane.stop();
+  tabs = [];
   jest.useRealTimers();
 });
 
@@ -93,10 +97,20 @@ function tab(tags) {
   for (const [name, entry] of entries) entry.store.onLocal((ops) => lane.local(name, ops, entry.store.mark));
   lane.start();
   const handle = (name) => entries.get(name).store.handle;
-  return { transport, lane, entries, handle, game: handle("game"), channel: channels.at(-1) };
+  const t = { transport, lane, entries, handle, game: handle("game"), channel: channels.at(-1) };
+  tabs.push(t);
+  return t;
 }
 
 const settle = (ms = 3000) => jest.advanceTimersByTimeAsync(ms);
+
+// A tab that vanishes without pagehide: its channel stops delivering and its
+// lock is released, but it never posts closed.
+function crash(t) {
+  t.channel.closed = true;
+  t.channel.postMessage = () => {};
+  t.lane.stop();
+}
 
 test("the first tab is the sequencer and the writer; three tabs converge", async () => {
   const a = tab({ game: { value: { score: 0, players: {} } } });
@@ -132,7 +146,7 @@ test("never-saved stores travel too", async () => {
   expect(a.handle("lobby").toJSON()).toEqual({ chat: ["hi"] });
 });
 
-test("when the sequencer stops, the next tab takes over with the same values and nothing counts twice", async () => {
+test("when the sequencer stops, the next tab takes over the same epoch with the same values and nothing counts twice", async () => {
   const a = tab({ game: { value: { score: 0 } } });
   await settle();
   const b = tab({ game: { value: { score: 0 } } });
@@ -147,7 +161,7 @@ test("when the sequencer stops, the next tab takes over with the same values and
   c.game.add("score", 1);
   await settle();
   expect(b.transport.isSequencer || c.transport.isSequencer).toBe(true);
-  expect(b.lane.status.epoch).not.toBe(firstEpoch);
+  expect(b.lane.status.epoch).toBe(firstEpoch);
   expect(b.game.toJSON()).toEqual({ score: 6 });
   expect(c.game.toJSON()).toEqual({ score: 6 });
   b.game.add("score", 1);
@@ -195,6 +209,27 @@ test("an outside save with no stamp keeps every move the room accepted", async (
   expect(b.lane.status.epoch).toBe(epoch);
   expect(a.game.toJSON()).toEqual({ score: 2, name: "z" });
   expect(b.game.toJSON()).toEqual({ score: 2, name: "z" });
+});
+
+test("a stamped file edited again is an edit, so the first edit's logged merge is not replayed over it", async () => {
+  const a = tab({ game: { value: { name: "x", s: 0 } } });
+  await settle();
+  const b = tab({ game: { value: { name: "x", s: 0 } } });
+  await settle();
+  b.game.add("s", 1);
+  await settle();
+  const epoch = a.lane.status.epoch;
+  const stamp = at(epoch, 1, '{"name":"x","s":1}');
+  a.transport.landed("game", stamp);
+  await settle();
+  a.transport.fileFrame(new Map([["game", { text: '{"name":"y","s":1}', at: stamp, seq: 10 }]]));
+  await settle();
+  expect(a.game.toJSON()).toEqual({ name: "y", s: 1 });
+
+  a.transport.fileFrame(new Map([["game", { text: '{"name":"z","s":1}', at: stamp, seq: 11 }]]));
+  await settle();
+  expect(a.game.toJSON()).toEqual({ name: "z", s: 1 });
+  expect(b.game.toJSON()).toEqual({ name: "z", s: 1 });
 });
 
 test("a file frame whose text has not changed since the last one changes nothing", async () => {
@@ -272,6 +307,554 @@ test("a move whose answer was lost is not counted twice by the successor", async
   expect(b.game.toJSON()).toEqual({ s: 1 });
   expect(c.game.toJSON()).toEqual({ s: 1 });
   expect(c.entries.get("game").store.pending).toEqual([]);
+});
+
+test("a successor holds every move it has a receipt for, even one its lane was still buffering", async () => {
+  const a = tab({ game: { value: { s: 0 } } });
+  await settle();
+  const b = tab({ game: { value: { s: 0 } } });
+  await settle();
+  const c = tab({ game: { value: { s: 0 } } });
+  await settle();
+  // b asks for the room again and its answer is held back, so b's lane is
+  // unsynced and the move that arrives meanwhile waits in its buffer.
+  drop = (to, m) => to === b.channel && m.type === "answer";
+  b.lane.storeOpened();
+  await settle(0);
+  c.game.add("s", 1);
+  await settle(100);
+  expect(a.game.toJSON()).toEqual({ s: 1 });
+  expect(c.game.toJSON()).toEqual({ s: 1 });
+
+  drop = () => false;
+  a.lane.stop();
+  await settle(5000);
+  expect(b.transport.isSequencer).toBe(true);
+  expect(b.game.toJSON()).toEqual({ s: 1 });
+  expect(c.game.toJSON()).toEqual({ s: 1 });
+  expect(c.entries.get("game").store.pending).toEqual([]);
+});
+
+test("a move the old sequencer accepted just before it went is applied once by the successor", async () => {
+  const a = tab({ game: { value: { s: 0 } } });
+  await settle();
+  const b = tab({ game: { value: { s: 0 } } });
+  await settle();
+  const c = tab({ game: { value: { s: 0 } } });
+  await settle();
+  const held = [];
+  drop = (to, m) => {
+    if (to !== b.channel || m.type !== "data") return false;
+    held.push(JSON.parse(JSON.stringify(m)));
+    return true;
+  };
+  c.game.add("s", 1);
+  await settle(100);
+  expect(a.game.toJSON()).toEqual({ s: 1 });
+  expect(c.game.toJSON()).toEqual({ s: 1 });
+
+  drop = () => false;
+  a.lane.stop();
+  await settle(5000);
+  expect(b.transport.isSequencer).toBe(true);
+  for (const message of held) b.channel.onmessage({ data: message });
+  await settle();
+  expect(b.game.toJSON()).toEqual({ s: 1 });
+  expect(c.game.toJSON()).toEqual({ s: 1 });
+  expect(c.entries.get("game").store.pending).toEqual([]);
+
+  for (const message of held) b.channel.onmessage({ data: message });
+  await settle();
+  expect(b.game.toJSON()).toEqual({ s: 1 });
+});
+
+test("a state answer asked for before the mirror changed is dropped", async () => {
+  const a = tab({ game: { value: { s: 0 } } });
+  await settle();
+  const b = tab({ game: { value: { s: 0 } } });
+  await settle();
+  let held = null;
+  drop = (to, m) => {
+    if (to !== b.channel || m.type !== "answer" || held) return false;
+    held = m;
+    return true;
+  };
+  const asked = b.transport.fetchState();
+  await settle(0);
+  a.game.add("s", 1);
+  await settle(100);
+  a.game.add("s", 1);
+  await settle(100);
+  expect(b.game.toJSON()).toEqual({ s: 2 });
+
+  drop = () => false;
+  b.channel.onmessage({ data: held });
+  expect(await asked).toBeNull();
+  await settle(100);
+  expect(b.game.toJSON()).toEqual({ s: 2 });
+
+  a.lane.stop();
+  await settle(5000);
+  expect(b.transport.isSequencer).toBe(true);
+  expect(b.game.toJSON()).toEqual({ s: 2 });
+});
+
+test("a revert of the file to its first text is merged, not skipped", async () => {
+  const a = tab({ game: { value: { s: 0 } } });
+  await settle();
+  const b = tab({ game: { value: { s: 0 } } });
+  await settle();
+  a.game.add("s", 1);
+  await settle();
+  const epoch = a.lane.status.epoch;
+  a.transport.landed("game", at(epoch, 1, '{"s":1}'));
+  await settle();
+  const frame = new Map([["game", { text: '{"s":0}', at: null }]]);
+  a.transport.fileFrame(frame);
+  b.transport.fileFrame(frame);
+  await settle();
+  expect(a.game.toJSON()).toEqual({ s: 0 });
+  expect(b.game.toJSON()).toEqual({ s: 0 });
+});
+
+test("the closing sequencer's last checkpoint reaches the successor", async () => {
+  const a = tab({ game: { value: { s: 0 } } });
+  await settle();
+  const b = tab({ game: { value: { s: 0 } } });
+  await settle();
+  a.game.add("s", 1);
+  await settle();
+  a.game.add("s", 1);
+  await settle();
+  a.game.add("s", 1);
+  await settle();
+  const epoch = a.lane.status.epoch;
+  a.transport.landed("game", at(epoch, 3, '{"s":3}'));
+  await settle();
+  a.lane.stop();
+  await settle(5000);
+  expect(b.transport.isSequencer).toBe(true);
+  expect(b.game.toJSON()).toEqual({ s: 3 });
+
+  b.transport.fileFrame(new Map([["game", { text: '{"s":3,"t":1}', at: null }]]));
+  await settle();
+  expect(b.game.toJSON()).toEqual({ s: 3, t: 1 });
+});
+
+test("a restore of an older own checkpoint keeps the room's value and asks for a save", async () => {
+  const a = tab({ game: { value: { s: 0 } } });
+  await settle();
+  const b = tab({ game: { value: { s: 0 } } });
+  await settle();
+  for (let i = 0; i < 5; i++) {
+    a.game.add("s", 1);
+    await settle();
+  }
+  const epoch = a.lane.status.epoch;
+  a.transport.landed("game", at(epoch, 5, '{"s":5}'));
+  await settle();
+  const frame = new Map([["game", { text: '{"s":3}', at: at(epoch, 3, '{"s":3}') }]]);
+  a.transport.fileFrame(frame);
+  b.transport.fileFrame(frame);
+  await settle();
+  expect(a.game.toJSON()).toEqual({ s: 5 });
+  expect(b.game.toJSON()).toEqual({ s: 5 });
+  expect(a.entries.get("game").landed).toBe(3);
+  expect(a.entries.get("game").last).toBe(5);
+});
+
+test("a successor whose mirror reached the saved move has nothing to rewrite", async () => {
+  const a = tab({ game: { value: { s: 0 } } });
+  await settle();
+  const b = tab({ game: { value: { s: 0 } } });
+  await settle();
+  a.game.add("s", 1);
+  a.game.add("s", 1);
+  await settle(10);
+  const { epoch, seq } = a.lane.status;
+  a.transport.landed("game", at(epoch, seq, '{"s":2}'));
+  a.lane.stop();
+  await settle(5000);
+  expect(b.transport.isSequencer).toBe(true);
+  const state = await b.transport.fetchState();
+  expect(state.stores.game.landed).toBe(seq);
+  expect(state.stores.game.value).toEqual({ s: 2 });
+});
+
+test("a never-saved store ignores file frames", async () => {
+  const tags = { game: { value: { s: 0 } }, lobby: { value: { chat: [] }, ephemeral: true } };
+  const a = tab(tags);
+  await settle();
+  const b = tab(tags);
+  await settle();
+  a.handle("lobby").data.chat.push("hi");
+  a.game.add("s", 1);
+  await settle();
+  const frame = new Map([
+    ["game", { text: '{"s":0}', at: null }],
+    ["lobby", { text: '{"chat":["file"]}', at: null }],
+  ]);
+  a.transport.fileFrame(frame);
+  b.transport.fileFrame(frame);
+  await settle();
+  expect(a.handle("lobby").toJSON()).toEqual({ chat: ["hi"] });
+  expect(b.handle("lobby").toJSON()).toEqual({ chat: ["hi"] });
+  expect(a.game.toJSON()).toEqual({ s: 1 });
+  expect(b.game.toJSON()).toEqual({ s: 1 });
+});
+
+test("closed ends a tab's unanswered post, which then counts once", async () => {
+  const a = tab({ game: { value: { s: 0 } } });
+  await settle();
+  const b = tab({ game: { value: { s: 0 } } });
+  const c = tab({ game: { value: { s: 0 } } });
+  await settle();
+  const epoch = b.lane.status.epoch;
+  drop = (to, m) => to === c.channel && m.type === "answer";
+  c.game.add("s", 1);
+  await settle(100);
+  expect(a.game.toJSON()).toEqual({ s: 1 });
+  expect(b.game.toJSON()).toEqual({ s: 1 });
+  expect(c.game.toJSON()).toEqual({ s: 1 });
+
+  drop = () => false;
+  a.lane.stop();
+  await settle(3000);
+  expect(a.game.toJSON()).toEqual({ s: 1 });
+  expect(b.game.toJSON()).toEqual({ s: 1 });
+  expect(c.game.toJSON()).toEqual({ s: 1 });
+  expect(c.entries.get("game").store.pending).toEqual([]);
+  expect(b.lane.status.epoch).toBe(epoch);
+});
+
+test("a move whose data reached only the sequencer before it stopped is in the successor's room", async () => {
+  const a = tab({ game: { value: { s: 0 } } });
+  await settle();
+  const b = tab({ game: { value: { s: 0 } } });
+  const c = tab({ game: { value: { s: 0 } } });
+  await settle();
+  const held = [];
+  drop = (to, m) => {
+    if (to !== b.channel || m.type !== "data") return false;
+    held.push(JSON.parse(JSON.stringify(m)));
+    return true;
+  };
+  c.game.add("s", 1);
+  await settle(100);
+  expect(a.game.toJSON()).toEqual({ s: 1 });
+  expect(c.game.toJSON()).toEqual({ s: 1 });
+
+  drop = () => false;
+  a.lane.stop();
+  await settle(3000);
+  expect(b.transport.isSequencer).toBe(true);
+  expect(b.game.toJSON()).toEqual({ s: 1 });
+
+  for (const message of held) b.channel.onmessage({ data: message });
+  await settle();
+  expect(b.game.toJSON()).toEqual({ s: 1 });
+  expect(c.game.toJSON()).toEqual({ s: 1 });
+});
+
+test("the successor waits for a closed that arrives after the lock", async () => {
+  const a = tab({ game: { value: { s: 0 } } });
+  await settle();
+  const b = tab({ game: { value: { s: 0 } } });
+  await settle();
+  const epoch = b.lane.status.epoch;
+  let held = null;
+  drop = (to, m) => {
+    if (to !== b.channel) return false;
+    if (m.type === "data" || m.type === "data-state") return true;
+    if (m.type === "closed" && !held) {
+      held = JSON.parse(JSON.stringify(m));
+      return true;
+    }
+    return false;
+  };
+  a.game.add("s", 1);
+  await settle(100);
+  a.lane.stop();
+  await settle(200);
+  expect(b.transport.isSequencer).toBe(false);
+
+  drop = () => false;
+  b.channel.onmessage({ data: held });
+  await settle(100);
+  expect(b.transport.isSequencer).toBe(true);
+  expect(b.game.toJSON()).toEqual({ s: 1 });
+  expect(b.lane.status.epoch).toBe(epoch);
+});
+
+test("a crash starts a new epoch from the mirror, and every tab follows it", async () => {
+  const a = tab({ game: { value: { s: 0 } } });
+  await settle();
+  const b = tab({ game: { value: { s: 0 } } });
+  const c = tab({ game: { value: { s: 0 } } });
+  await settle();
+  const epoch = a.lane.status.epoch;
+  a.game.add("s", 2);
+  await settle();
+
+  crash(a);
+  await settle(1000);
+  expect(b.transport.isSequencer || c.transport.isSequencer).toBe(true);
+  expect(b.lane.status.epoch).not.toBe(epoch);
+  expect(c.lane.status.epoch).toBe(b.lane.status.epoch);
+  expect(b.game.toJSON()).toEqual({ s: 2 });
+  expect(c.game.toJSON()).toEqual({ s: 2 });
+
+  b.game.add("s", 1);
+  await settle();
+  expect(c.game.toJSON()).toEqual({ s: 3 });
+});
+
+test("a crash whose last move reached only some tabs does not split them", async () => {
+  const a = tab({ game: { value: { s: 0 } } });
+  await settle();
+  const b = tab({ game: { value: { s: 0 } } });
+  await settle();
+  const c = tab({ game: { value: { s: 0 } } });
+  await settle();
+  drop = (to, m) => to === b.channel && m.type === "data";
+  a.game.add("s", 5);
+  await settle(100);
+  expect(c.game.toJSON()).toEqual({ s: 5 });
+  drop = () => false;
+
+  crash(a);
+  await settle(1000);
+  expect(b.transport.isSequencer).toBe(true);
+  expect(c.lane.status.epoch).toBe(b.lane.status.epoch);
+  expect(c.game.toJSON()).toEqual(b.game.toJSON());
+  c.game.add("s", 1);
+  await settle();
+  expect(b.game.toJSON()).toEqual(c.game.toJSON());
+});
+
+test("a crash with a stale mirror starts a new epoch and rewrites the file", async () => {
+  const a = tab({ game: { value: { s: 0 } } });
+  await settle();
+  const b = tab({ game: { value: { s: 0 } } });
+  await settle();
+  const epoch = b.lane.status.epoch;
+  drop = (to, m) => to === b.channel && m.type === "data";
+  a.game.add("s", 1);
+  await settle(100);
+  expect(a.game.toJSON()).toEqual({ s: 1 });
+
+  drop = () => false;
+  crash(a);
+  await settle(1000);
+  expect(b.transport.isSequencer).toBe(true);
+  expect(b.lane.status.epoch).not.toBe(epoch);
+  const state = await b.transport.fetchState();
+  expect(state.stores.game.landed).toBe(-1);
+});
+
+test("two hand-offs with a late data message from the first sequencer count it once", async () => {
+  const a = tab({ game: { value: { s: 0 } } });
+  await settle();
+  const b = tab({ game: { value: { s: 0 } } });
+  const c = tab({ game: { value: { s: 0 } } });
+  const d = tab({ game: { value: { s: 0 } } });
+  await settle();
+  const held = [];
+  drop = (to, m) => {
+    if ((to !== b.channel && to !== d.channel) || m.type !== "data") return false;
+    held.push({ to, message: JSON.parse(JSON.stringify(m)) });
+    return true;
+  };
+  c.game.add("s", 1);
+  await settle(100);
+  expect(c.game.toJSON()).toEqual({ s: 1 });
+
+  drop = () => false;
+  a.lane.stop();
+  await settle(1000);
+  for (const { to, message } of held) to.onmessage({ data: message });
+  await settle();
+  expect(b.game.toJSON()).toEqual({ s: 1 });
+  expect(d.game.toJSON()).toEqual({ s: 1 });
+
+  c.game.add("s", 1);
+  await settle();
+  expect(c.game.toJSON()).toEqual({ s: 2 });
+
+  const sequencer = b.transport.isSequencer ? b : d;
+  const live = b.transport.isSequencer ? d : b;
+  sequencer.lane.stop();
+  await settle(1000);
+  expect(c.game.toJSON()).toEqual({ s: 2 });
+  expect(live.game.toJSON()).toEqual({ s: 2 });
+});
+
+test("a file frame seen only by a non-sequencer is merged when it takes the room", async () => {
+  const a = tab({ game: { value: { score: 0 } } });
+  await settle();
+  const b = tab({ game: { value: { score: 0 } } });
+  await settle();
+  b.transport.fileFrame(new Map([["game", { text: '{"score":0,"note":"agent"}', at: null, seq: 10 }]]));
+  await settle();
+  expect(a.game.toJSON()).toEqual({ score: 0 });
+
+  a.lane.stop();
+  await settle(1000);
+  expect(b.transport.isSequencer).toBe(true);
+  expect(b.game.toJSON()).toEqual({ score: 0, note: "agent" });
+});
+
+test("a kept file frame the room already merged is not merged again", async () => {
+  const a = tab({ game: { value: { score: 0 } } });
+  await settle();
+  const b = tab({ game: { value: { score: 0 } } });
+  await settle();
+  const frame = new Map([["game", { text: '{"score":0,"note":"agent"}', at: null, seq: 10 }]]);
+  a.transport.fileFrame(frame);
+  b.transport.fileFrame(frame);
+  await settle();
+  expect(b.game.toJSON()).toEqual({ score: 0, note: "agent" });
+
+  a.game.add("score", 1);
+  await settle();
+  a.lane.stop();
+  await settle(1000);
+  expect(b.transport.isSequencer).toBe(true);
+  expect(b.game.toJSON()).toEqual({ score: 1, note: "agent" });
+  const state = await b.transport.fetchState();
+  expect(state.mirror.stores.game.file.seq).toBe(10);
+});
+
+test("a second unstamped file is not overwritten by the merge of the first", async () => {
+  const a = tab({ game: { value: { score: 0 } } });
+  await settle();
+  a.game.add("score", 1);
+  await settle();
+  a.transport.fileFrame(new Map([["game", { text: '{"score":0,"t":"b"}', at: null }]]));
+  await settle();
+  expect(a.game.toJSON()).toEqual({ score: 1, t: "b" });
+
+  a.transport.fileFrame(new Map([["game", { text: '{"score":0,"t":"c"}', at: null }]]));
+  await settle();
+  expect(a.game.toJSON()).toEqual({ score: 1, t: "c" });
+});
+
+test("pagehide on the sequencer hands off, and pageshow brings the tab back", async () => {
+  const a = tab({ game: { value: { s: 0 } } });
+  await settle();
+  const b = tab({ game: { value: { s: 0 } } });
+  await settle();
+  const epoch = a.lane.status.epoch;
+
+  window.dispatchEvent(new Event("pagehide"));
+  await settle(1000);
+  expect(a.game.toJSON()).toEqual(b.game.toJSON());
+  expect(b.lane.status.epoch).toBe(epoch);
+
+  const ev = new Event("pageshow");
+  Object.defineProperty(ev, "persisted", { value: true });
+  window.dispatchEvent(ev);
+  await settle(1000);
+  expect(a.transport.isSequencer !== b.transport.isSequencer).toBe(true);
+
+  a.game.add("s", 1);
+  await settle();
+  expect(b.game.toJSON()).toEqual({ s: 1 });
+});
+
+
+test("a successor that never heard the intermediate sequencer is forked by a tab ahead of it", async () => {
+  const a = tab({ game: { value: { s: 0 } } });
+  await settle();
+  const b = tab({ game: { value: { s: 0 } } });
+  const c = tab({ game: { value: { s: 0 } } });
+  const d = tab({ game: { value: { s: 0 } } });
+  await settle();
+  a.game.add("s", 1);
+  await settle();
+  const epoch = d.lane.status.epoch;
+
+  a.lane.stop();
+  drop = (to, m) => to === c.channel && (m.type === "data" || m.type === "data-state" || m.type === "closed");
+  await settle(1000);
+  expect(b.transport.isSequencer).toBe(true);
+  expect(c.transport.isSequencer).toBe(false);
+
+  d.game.add("s", 10);
+  await settle(1000);
+  expect(b.game.toJSON()).toEqual({ s: 11 });
+  expect(d.game.toJSON()).toEqual({ s: 11 });
+
+  b.lane.stop();
+  drop = () => false;
+  await settle(1000);
+  expect(c.transport.isSequencer).toBe(true);
+
+  c.game.add("s", 1);
+  await settle(3000);
+  d.game.add("s", 1);
+  await settle(5000);
+  expect(d.game.toJSON()).toEqual(c.game.toJSON());
+  expect(c.lane.status.epoch).not.toBe(epoch);
+  expect(d.lane.status.epoch).toBe(c.lane.status.epoch);
+});
+
+test("a sequencer that took the lock before the old sequencer's messages arrive forks on their arrival", async () => {
+  const a = tab({ game: { value: { s: 0 } } });
+  await settle();
+  const b = tab({ game: { value: { s: 0 } } });
+  const c = tab({ game: { value: { s: 0 } } });
+  const d = tab({ game: { value: { s: 0 } } });
+  await settle();
+  a.game.add("s", 1);
+  await settle();
+  const epoch = d.lane.status.epoch;
+
+  a.lane.stop();
+  const held = [];
+  drop = (to, m) => {
+    if (to !== c.channel) return false;
+    held.push(JSON.parse(JSON.stringify(m)));
+    return true;
+  };
+  await settle(1000);
+  expect(b.transport.isSequencer).toBe(true);
+
+  b.lane.stop();
+  await settle(1000);
+  expect(c.transport.isSequencer).toBe(true);
+  expect(c.lane.status.epoch).toBe(epoch);
+
+  drop = () => false;
+  for (const message of held) c.channel.onmessage({ data: message });
+  await settle(1000);
+  expect(c.lane.status.epoch).not.toBe(epoch);
+
+  c.game.add("s", 1);
+  await settle(3000);
+  d.game.add("s", 1);
+  await settle(5000);
+  expect(d.game.toJSON()).toEqual(c.game.toJSON());
+  expect(d.lane.status.epoch).toBe(c.lane.status.epoch);
+});
+
+test("a kept file frame merges before the new epoch of a crashed sequencer's successor", async () => {
+  const a = tab({ game: { value: { score: 0 } } });
+  await settle();
+  const b = tab({ game: { value: { score: 0 } } });
+  await settle();
+  const epoch = a.lane.status.epoch;
+  b.transport.fileFrame(new Map([["game", { text: '{"score":0,"note":"agent"}', at: null, seq: 10 }]]));
+  await settle();
+  expect(a.game.toJSON()).toEqual({ score: 0 });
+
+  crash(a);
+  await settle(3000);
+  expect(b.transport.isSequencer).toBe(true);
+  expect(b.lane.status.epoch).not.toBe(epoch);
+  expect(b.game.toJSON()).toEqual({ score: 0, note: "agent" });
+  const state = await b.transport.fetchState();
+  expect(state.stores.game.landed).toBe(-1);
 });
 
 test("without BroadcastChannel or Web Locks there is no local lane", async () => {

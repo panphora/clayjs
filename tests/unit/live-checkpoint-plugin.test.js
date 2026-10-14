@@ -15,7 +15,7 @@ await jest.unstable_mockModule("../../src/live/checkpoint.js", () => ({
   RETRY_MS: 1000,
   createCheckpoints: (d) => {
     deps = d;
-    return { changed, flush, deadline: null };
+    return { changed, soon: jest.fn(), flush, flushing: false, deadline: null };
   },
 }));
 

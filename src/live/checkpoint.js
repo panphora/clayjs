@@ -18,6 +18,15 @@ export function createCheckpoints({ needsSave, blocked, save, saveNow, now = () 
   let deadline = null;
   let timer = null;
   let running = false;
+  let flushing = false;
+  // After a save that did not land, no save before this time (soon included).
+  let retryAt = 0;
+
+  function after(result) {
+    const skipped = result && !result.ok && result.msgType === "skipped";
+    retryAt = result?.ok || skipped ? 0 : now() + CHECKPOINT_MS;
+    return skipped ? RETRY_MS : CHECKPOINT_MS;
+  }
 
   function arm(at) {
     deadline = at;
@@ -48,10 +57,11 @@ export function createCheckpoints({ needsSave, blocked, save, saveNow, now = () 
     } finally {
       running = false;
     }
+    const wait = after(result);
     if (!needsSave()) return;
     // A save skipped because another was on the wire is retried soon; anything
     // else waits a full interval, so a failing host is not asked every second.
-    arm(now() + (result && !result.ok && result.msgType === "skipped" ? RETRY_MS : CHECKPOINT_MS));
+    arm(now() + wait);
   }
 
   return {
@@ -66,14 +76,28 @@ export function createCheckpoints({ needsSave, blocked, save, saveNow, now = () 
       if (running || !needsSave() || blocked()) return;
       disarm();
       running = true;
+      flushing = true;
       Promise.resolve()
         .then(saveNow)
         .catch(() => null)
         .then((result) => {
           running = false;
+          flushing = false;
+          const wait = after(result);
           if (!needsSave()) return;
-          arm(now() + (result && !result.ok && result.msgType === "skipped" ? RETRY_MS : CHECKPOINT_MS));
+          arm(now() + wait);
         });
+    },
+    // Save as soon as possible: the room asks for it (its log is half full, or
+    // the file holds a version the room cannot rebuild from).
+    soon() {
+      if (running) return;
+      const at = Math.max(now(), retryAt);
+      if (deadline === null || at < deadline) arm(at);
+    },
+    // True while the hide/close save is being made.
+    get flushing() {
+      return flushing;
     },
     get deadline() {
       return deadline;

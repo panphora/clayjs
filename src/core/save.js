@@ -379,15 +379,17 @@ function applySaveResult(result, forComparison, forDirty, label, gateToken, forS
   } else if (result.msgType === 'conflict') {
     holdForConflict(result.conflictEtag);
     setSaveState('conflict', result.msg, result.msgType, {
+      hadTimeout: result.hadTimeout === true,
       changedBy: result.changedBy ?? null,
       afterTimeout: result.afterTimeout === true,
       etag: result.conflictEtag ?? null,
     });
   } else if (result.msgType !== 'skipped') {
+    const extra = { status: result.status ?? null, hadTimeout: result.hadTimeout === true };
     if (!navigator.onLine) {
-      setSaveState('offline', result.msg);
+      setSaveState('offline', result.msg, '', extra);
     } else {
-      setSaveState('error', result.msg);
+      setSaveState('error', result.msg, '', extra);
     }
   }
 }

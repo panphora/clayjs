@@ -95,6 +95,19 @@ test("accepted bytes that are not the save's own capture confirm nothing", () =>
   expect(storeOf("a7").pending).toHaveLength(1);
 });
 
+test("a save hook that reformats a live tag still confirms the save's ops", () => {
+  document.body.innerHTML = tag("a10", '{"score":0}');
+  const game = live("a10");
+  game.add("score", 1);
+  const body = saveCapture();
+  const reformatted = body.replace('{"score":1}', '{\n  "score": 1\n}');
+  expect(reformatted).not.toBe(body);
+  confirmSaved(reformatted);
+  expect(storeOf("a10").pending).toEqual([]);
+  receiveFrame(page(tag("a10", '{"score":2}')));
+  expect(game.data.score).toBe(2);
+});
+
 test("an acceptance arriving after a newer file version drops the ops and keeps the newer value", () => {
   document.body.innerHTML = tag("a8", '{"s":0}');
   const game = live("a8");

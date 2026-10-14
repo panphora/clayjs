@@ -1,0 +1,14 @@
+[
+  { "name": "identical values give no ops", "before": { "a": 1, "l": [1, 2] }, "after": { "a": 1, "l": [1, 2] }, "ops": [] },
+  { "name": "an added key is set", "before": { "a": 1 }, "after": { "a": 1, "b": 2 }, "ops": [{ "op": "set", "path": ["b"], "value": 2 }] },
+  { "name": "a changed leaf is set", "before": { "a": 1 }, "after": { "a": 2 }, "ops": [{ "op": "set", "path": ["a"], "value": 2 }] },
+  { "name": "a removed key is deleted", "before": { "a": 1, "b": 2 }, "after": { "a": 1 }, "ops": [{ "op": "del", "path": ["b"] }] },
+  { "name": "removals come first, then the after keys in order", "before": { "a": 1, "b": 2 }, "after": { "b": 3, "c": 4 }, "ops": [{ "op": "del", "path": ["a"] }, { "op": "set", "path": ["b"], "value": 3 }, { "op": "set", "path": ["c"], "value": 4 }] },
+  { "name": "a nested change is set at its leaf", "before": { "p": { "x": 1, "y": 2 } }, "after": { "p": { "x": 1, "y": 3 } }, "ops": [{ "op": "set", "path": ["p", "y"], "value": 3 }] },
+  { "name": "a list of the same length is set by position", "before": { "l": [1, 2, 3] }, "after": { "l": [1, 5, 3] }, "ops": [{ "op": "set", "path": ["l", 1], "value": 5 }] },
+  { "name": "an object inside a list is diffed through the index", "before": { "l": [{ "a": 1 }, { "a": 2 }] }, "after": { "l": [{ "a": 1 }, { "a": 3 }] }, "ops": [{ "op": "set", "path": ["l", 1, "a"], "value": 3 }] },
+  { "name": "a list whose length changes is set whole", "before": { "l": [1, 2] }, "after": { "l": [1, 2, 3] }, "ops": [{ "op": "set", "path": ["l"], "value": [1, 2, 3] }] },
+  { "name": "a change of container kind is set whole", "before": { "v": { "a": 1 } }, "after": { "v": [1] }, "ops": [{ "op": "set", "path": ["v"], "value": [1] }] },
+  { "name": "a leaf that becomes a container is set whole", "before": { "a": null }, "after": { "a": { "b": 1 } }, "ops": [{ "op": "set", "path": ["a"], "value": { "b": 1 } }] },
+  { "name": "a root list of the same length is set by position", "before": [1, 2], "after": [1, 3], "ops": [{ "op": "set", "path": [1], "value": 3 }] }
+]

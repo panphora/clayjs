@@ -125,6 +125,43 @@ test("a flush whose save is skipped arms the clock again", async () => {
   expect(save).toHaveBeenCalledTimes(1);
 });
 
+test("soon arms at now", async () => {
+  const { save, cp } = setup();
+  cp.changed();
+  cp.soon();
+  await tick(0);
+  expect(save).toHaveBeenCalledTimes(1);
+  await tick(CHECKPOINT_MS - 1);
+  expect(save).toHaveBeenCalledTimes(1);
+});
+
+test("soon is a no-op while a save runs", async () => {
+  const { save, cp } = setup();
+  let resolve;
+  save.mockImplementation(() => new Promise((r) => (resolve = r)));
+  cp.changed();
+  await tick(CHECKPOINT_MS);
+  expect(save).toHaveBeenCalledTimes(1);
+  cp.soon();
+  expect(cp.deadline).toBeNull();
+  resolve({ ok: true });
+  await tick(RETRY_MS);
+  expect(save).toHaveBeenCalledTimes(1);
+});
+
+test("flushing is true while the hide save runs and false after", async () => {
+  const { saveNow, cp } = setup();
+  let resolve;
+  saveNow.mockImplementation(() => new Promise((r) => (resolve = r)));
+  cp.changed();
+  cp.flush();
+  await tick(0);
+  expect(cp.flushing).toBe(true);
+  resolve({ ok: true });
+  await tick(0);
+  expect(cp.flushing).toBe(false);
+});
+
 test("a flush whose save throws waits a full interval, then saves", async () => {
   const { save, saveNow, cp } = setup();
   saveNow.mockImplementation(async () => {
@@ -134,4 +171,18 @@ test("a flush whose save throws waits a full interval, then saves", async () => 
   cp.flush();
   await tick(CHECKPOINT_MS);
   expect(save).toHaveBeenCalledTimes(1);
+});
+
+test("after a failed save, soon does not save again before the retry time", async () => {
+  const { save, cp } = setup({ result: { ok: false, msgType: "error" } });
+  cp.changed();
+  await tick(CHECKPOINT_MS);
+  expect(save).toHaveBeenCalledTimes(1);
+  const failed = save.mock.calls.length;
+
+  for (let ms = 0; ms < 60000; ms += 100) {
+    await tick(100);
+    cp.soon();
+  }
+  expect(save.mock.calls.length - failed).toBeLessThanOrEqual(8);
 });
