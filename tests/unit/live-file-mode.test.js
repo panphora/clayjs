@@ -135,3 +135,12 @@ test("clay:sync-applied frames are taken", () => {
   document.dispatchEvent(new CustomEvent("clay:sync-applied", { detail: { source: "disk", html: page(tag("b3", '{"n":7}')) } }));
   expect(game.data.n).toBe(7);
 });
+
+test("a file-mode tab keeps the lineage of the version it last took from a frame", () => {
+  document.body.innerHTML = tag("c1", '{"s":0}');
+  live("c1");
+  receiveFrame(page('<script type="application/json" merge="c1" clay="live" live-at="e7:3:00000000">{"s":4}</script>'));
+  expect(document.querySelector('script[merge="c1"]').getAttribute("live-at")).toBe("e7:3:00000000");
+  receiveFrame(page(tag("c1", '{"s":5}')));
+  expect(document.querySelector('script[merge="c1"]').hasAttribute("live-at")).toBe(false);
+});

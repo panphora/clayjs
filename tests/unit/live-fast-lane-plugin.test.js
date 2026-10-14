@@ -33,6 +33,7 @@ global.fetch = jest.fn(async (url, init = {}) => {
 const { live, fastLane, storeOf, confirmSaved } = await import("../../src/plugins/live.js");
 const bridge = await import("../../src/live/stream-bridge.js");
 const snapshot = await import("../../src/core/snapshot.js");
+const { stampOf } = await import("../../src/live/ops.js");
 
 const flushAsync = async () => {
   for (let i = 0; i < 10; i++) await Promise.resolve();
@@ -77,6 +78,8 @@ test("joins the room, posts ops, and checkpoints only as the writer after a chan
 
   const body = snapshot.captureForSaveAndComparison({ flushUndo: false }).forSave;
   expect(body).toContain('{"s":1}');
+  const saved = new DOMParser().parseFromString(body, "text/html").querySelector('script[merge="g"]');
+  expect(saved.getAttribute("live-at")).toBe(stampOf("e1", 1, saved.textContent));
   confirmSaved(body);
   expect(deps.needsSave()).toBe(false);
 });

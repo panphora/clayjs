@@ -302,8 +302,12 @@ test("a store the room does not have stays in file mode", async () => {
 
 test("a frame in flight when the room restarts is not applied twice", async () => {
   const room = createRoom({ game: { score: 0 } });
+  let restarted = false;
   const wrap = (post) => (frame) => {
-    if (frame.n === 1) room.restartQuiet({ game: { score: 10 } });
+    if (frame.n === 1 && !restarted) {
+      restarted = true;
+      room.restartQuiet({ game: { score: 10 } });
+    }
     return post(frame);
   };
   const a = client(room, "a", { score: 0 }, { wrap });
@@ -436,4 +440,145 @@ test("a failing state read backs off instead of asking every half second", async
   await jest.advanceTimersByTimeAsync(10000);
   expect(reads.mock.calls.length).toBeLessThanOrEqual(6);
   expect(reads.mock.calls.length).toBeGreaterThanOrEqual(4);
+});
+
+// "a" posts once; the post lands, but its answer and its event are lost.
+function lostOnce(room) {
+  let lose = true;
+  const wrap = (post) => (frame) => {
+    const result = post(frame);
+    if (!lose) return result;
+    lose = false;
+    return { status: 0, body: null, retryAfter: 0 };
+  };
+  room.drop = (id) => id === "a" && lose;
+  return wrap;
+}
+
+// The room is replaced (a hand-off or a cold restart) with this value and evidence.
+function replaceRoom(room, value, evidence = {}, lastN = new Map()) {
+  room.epoch = `e${Number(room.epoch.slice(1)) + 1}`;
+  room.seq = 0;
+  room.writer = null;
+  room.stores = { game: cloneJson(value) };
+  room.lastN = lastN;
+  room.broadcast("state", { epoch: room.epoch, seq: 0, writer: null, stores: { game: { value: cloneJson(value), ephemeral: false, ...evidence } } });
+}
+
+async function sendLost(room, a) {
+  a.game.add("s", 1);
+  await jest.advanceTimersByTimeAsync(MIN_GAP_MS + 1);
+  expect(room.posts).toHaveLength(1);
+}
+
+describe("a new room sorts the frames still in flight", () => {
+  test("receipts that hold my frame confirm it, and it is not sent again", async () => {
+    const room = createRoom({ game: { s: 0 } });
+    const a = client(room, "a", { s: 0 }, { wrap: lostOnce(room) });
+    room.open("a");
+    await settle();
+    await sendLost(room, a);
+    replaceRoom(room, { s: 1 }, { seen: { a: 1 } }, new Map([["game\na", { n: 1, seq: 0 }]]));
+    await settle();
+    expect(room.posts).toHaveLength(1);
+    expect(a.game.toJSON()).toEqual({ s: 1 });
+    expect(a.store.pending).toEqual([]);
+  });
+
+  test("receipts without my frame send it again with its own n", async () => {
+    const room = createRoom({ game: { s: 0 } });
+    const a = client(room, "a", { s: 0 }, { wrap: lostOnce(room) });
+    room.open("a");
+    await settle();
+    await sendLost(room, a);
+    replaceRoom(room, { s: 0 }, { seen: {} });
+    await settle();
+    expect(room.posts.map((p) => p.n)).toEqual([1, 1]);
+    expect(room.stores.game).toEqual({ s: 1 });
+    expect(a.game.toJSON()).toEqual({ s: 1 });
+    expect(a.store.pending).toEqual([]);
+  });
+
+  test("a seed from a checkpoint past my unanswered frame cannot prove it either way: it is dropped, never counted twice", async () => {
+    const room = createRoom({ game: { s: 0 } });
+    const a = client(room, "a", { s: 0 }, { wrap: lostOnce(room) });
+    room.open("a");
+    await settle();
+    await sendLost(room, a);
+    replaceRoom(room, { s: 1 }, { from: { epoch: "e1", seq: 1 } });
+    await settle();
+    expect(room.posts).toHaveLength(1);
+    expect(room.stores.game).toEqual({ s: 1 });
+    expect(a.game.toJSON()).toEqual({ s: 1 });
+    expect(a.store.pending).toEqual([]);
+  });
+
+  test("a seed from a checkpoint no later than what I applied lacks my unanswered frame: it goes again", async () => {
+    const room = createRoom({ game: { s: 0 } });
+    const a = client(room, "a", { s: 0 }, { wrap: lostOnce(room) });
+    room.open("a");
+    await settle();
+    await sendLost(room, a);
+    replaceRoom(room, { s: 0 }, { from: { epoch: "e1", seq: 0 } });
+    await settle();
+    expect(room.posts).toHaveLength(2);
+    expect(room.stores.game).toEqual({ s: 1 });
+    expect(a.game.toJSON()).toEqual({ s: 1 });
+  });
+
+  test("a frame answered with a seq the seed's checkpoint reaches is confirmed", async () => {
+    const room = createRoom({ game: { s: 0 } });
+    room.drop = (id) => id === "a";
+    const a = client(room, "a", { s: 0 });
+    room.open("a");
+    await settle();
+    a.game.add("s", 1);
+    await jest.advanceTimersByTimeAsync(MIN_GAP_MS + 1);
+    room.drop = () => false;
+    replaceRoom(room, { s: 1 }, { from: { epoch: "e1", seq: 1 } });
+    await settle();
+    expect(room.posts).toHaveLength(1);
+    expect(a.game.toJSON()).toEqual({ s: 1 });
+    expect(a.store.pending).toEqual([]);
+  });
+
+  test("a seed of unknown lineage drops an unanswered frame", async () => {
+    const room = createRoom({ game: { s: 0 } });
+    const a = client(room, "a", { s: 0 }, { wrap: lostOnce(room) });
+    room.open("a");
+    await settle();
+    await sendLost(room, a);
+    replaceRoom(room, { s: 0 });
+    await settle();
+    expect(room.posts).toHaveLength(1);
+    expect(a.game.toJSON()).toEqual({ s: 0 });
+    expect(a.store.pending).toEqual([]);
+  });
+
+  test("a frame whose first try may have landed is not resent when the new room refuses it as stale", async () => {
+    const room = createRoom({ game: { s: 0 } });
+    const a = client(room, "a", { s: 0 }, { wrap: lostOnce(room) });
+    room.open("a");
+    await settle();
+    await sendLost(room, a);
+    room.restartQuiet({ game: { s: 1 } });
+    await settle();
+    expect(room.posts).toHaveLength(2);
+    expect(room.posts[1].epoch).toBe("e1");
+    expect(room.stores.game).toEqual({ s: 1 });
+    expect(a.game.toJSON()).toEqual({ s: 1 });
+    expect(a.store.pending).toEqual([]);
+  });
+
+  test("ops not yet sent always go to the new room", async () => {
+    const room = createRoom({ game: { s: 0 } });
+    const a = client(room, "a", { s: 0 });
+    room.open("a");
+    await settle();
+    a.game.add("s", 1);
+    replaceRoom(room, { s: 5 });
+    await settle();
+    expect(room.stores.game).toEqual({ s: 6 });
+    expect(a.game.toJSON()).toEqual({ s: 6 });
+  });
 });

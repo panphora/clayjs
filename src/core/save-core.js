@@ -43,8 +43,7 @@ let nextSaveKeepalive = false;
 // CustomEvent would put it on a bus any script on the page can listen to.
 const saveAcceptedHooks = [];
 
-// Headers another module asks every save to carry, by name. clay.live's fast lane
-// marks its saves with Live-Epoch so the host keeps the room those values came from.
+// Headers another module asks every save to carry, by name.
 const extraSaveHeaders = new Map();
 
 /**

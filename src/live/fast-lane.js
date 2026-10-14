@@ -5,6 +5,8 @@
 //   start({ open, close, frame, state, writer }) -> stop function
 //   send(clientId, { name, n, ops, epoch }) -> Promise<{ status, body, retryAfter }>
 //   fetchState(clientId) -> Promise<{ epoch, seq, writer, stores } | { status } | null>
+// A new room (a new epoch) holds some of this tab's frames still in flight; see
+// firstNotHeld for how each is sorted.
 
 import { applyOps, cloneJson, serializeLive } from "./ops.js";
 
@@ -157,6 +159,12 @@ export function createFastLane({
     if (status >= 200 && status < 300) {
       retryDelay = RETRY_MS;
       if (body?.epoch && body.epoch !== epoch) {
+        // Made for an earlier room and refused unapplied: it goes again once
+        // this tab has the new room's state.
+        if (body.stale) {
+          frame.sent = false;
+          frame.refused = true;
+        }
         resync();
         return;
       }
@@ -167,6 +175,7 @@ export function createFastLane({
     }
     if (transient(status)) {
       frame.sent = false;
+      frame.uncertain = true;
       holdUntil = now() + (retryAfter > 0 ? retryAfter * 1000 : retryDelay);
       retryDelay = Math.min(retryDelay * 2, RETRY_MAX_MS);
       return;
@@ -239,9 +248,39 @@ export function createFastLane({
     apply(frame);
   }
 
+  // A new room: which of this tab's frames still awaiting an answer it holds.
+  // Frames go one at a time, so n and seq grow along awaiting and only the last
+  // can have an unknown seq; the answer is a prefix of held (or unknowable)
+  // frames, dropped from pending, then frames that go again with their own n.
+  //   seen (a local sequencer's receipts): n <= seen is held, anything else is not.
+  //   from naming the epoch this tab was in: a known seq is held iff it is at or
+  //   below from.seq; an unknown one is not held when from.seq <= the seq this
+  //   tab applied, else unknowable.
+  //   anything else: unknowable. Unknowable frames are lost with the room, never
+  //   resent on a guess, so the room never holds an op twice.
+  //   a frame the new room refused as stale, never sent with an uncertain outcome: not held.
+  function firstNotHeld(awaiting, room, oldEpoch, oldSeq) {
+    const seen = room.seen ? (room.seen[clientId] ?? 0) : null;
+    const from = room.from ?? null;
+    for (let i = 0; i < awaiting.length; i++) {
+      const frame = awaiting[i];
+      let held;
+      if (frame.refused && !frame.uncertain) held = false;
+      else if (seen !== null) held = frame.n <= seen;
+      else if (from && from.epoch === oldEpoch) {
+        if (frame.seq !== null) held = frame.seq <= from.seq;
+        else held = from.seq <= oldSeq ? false : undefined;
+      }
+      if (held === false) return i;
+    }
+    return awaiting.length;
+  }
+
   function applyState(state) {
     if (stopped || !state || typeof state.epoch !== "string") return;
     stateCount++;
+    const oldEpoch = epoch;
+    const oldSeq = seq;
     // Older than what this tab already applied: keep what it has.
     if (state.epoch === epoch && Number.isInteger(state.seq) && state.seq < seq) {
       drain();
@@ -269,9 +308,18 @@ export function createFastLane({
         onApplied();
       }
       if (fresh) {
-        lane.awaiting = [];
-        lane.unsent = entry.store.pendingEntries();
-        entry.store.rebase(room.value, { source: "state" });
+        const first = firstNotHeld(lane.awaiting, room, oldEpoch, oldSeq);
+        const resend = lane.awaiting.slice(first);
+        const dropped = lane.awaiting.slice(0, first);
+        for (const frame of resend) {
+          frame.sent = false;
+          frame.seq = null;
+          frame.refused = false;
+        }
+        lane.awaiting = resend;
+        entry.store.rebase(room.value, { source: "state", through: dropped.length ? dropped[dropped.length - 1].through : undefined });
+        const framed = resend.length ? resend[resend.length - 1].through : 0;
+        lane.unsent = entry.store.pendingEntries().filter((pending) => pending.id > framed);
       } else {
         let through;
         while (lane.awaiting.length && lane.awaiting[0].seq !== null && lane.awaiting[0].seq <= seq) {

@@ -822,7 +822,7 @@ function render() {
 }
 ```
 
-**The tag.** A `<script type="application/json">` with `merge="name"` and `clay="live"`, holding a JSON object or list. The name is 1 to 64 letters, digits, `_`, `.`, `:` or `-`, and two live tags with the same name are both ignored. Write the tag into the file before people share it: a tag added later is not in the rooms of tabs that loaded before.
+**The tag.** A `<script type="application/json">` with `merge="name"` and `clay="live"`, holding a JSON object or list. The name is 1 to 64 letters, digits, `_`, `.`, `:` or `-`, and two live tags with the same name are both ignored. Write the tag into the file before people share it: a tag added later is not in the rooms of tabs that loaded before. Checkpoints add a `live-at` attribute to the tag (the room position the value was saved at, and a hash of the text). Leave it in place when you or an agent edit the tag's JSON by hand: the room then merges your edit with the play since that checkpoint. Removing it still works; the edit is merged over everything the room has not saved.
 
 **The API.** `clay.live(name)` returns the same handle every time.
 
@@ -843,11 +843,13 @@ Two rules for the proxy:
 
 **How it travels.** Which lane a store uses depends on the host:
 
-- **hyperclay.com** (the `live-data` capability): every change goes to the document's room on the server, which numbers it and passes it to every editor within a network round trip. Tabs that join late, or that miss a change, fetch the room's whole state. Only one tab, the room's writer, saves the checkpoints. Viewers do not get the fast lane: they see the game at each checkpoint, through ordinary live sync. When an outside save changes a live tag (the code editor, a version restore, a device sync), the room starts over from the file.
-- **Tabs of one browser on HTML Clay or Hyperclay Local**: the tabs share the store at the same speed through the browser itself. One tab runs the room and saves the checkpoints. When it closes, another tab takes over. Use this to playtest a game in several tabs.
-- **Everywhere else** (another device on a local host, a browser without Web Locks): the store moves at save speed. Each incoming save replaces the value, and this tab's own changes that are not yet saved are replayed on top, so an `add` counts exactly once.
+- **hyperclay.com** (the `live-data` capability): every change goes to the document's room on the server, which numbers it and passes it to every editor within a network round trip. Tabs that join late, or that miss a change, fetch the room's whole state. Only one tab, the room's writer, saves the checkpoints. Viewers do not get the fast lane: they see the game at each checkpoint, through ordinary live sync. When an outside save changes a live tag (the code editor, a version restore, a device sync, an agent), the room takes the file's value and puts its own changes since the version the file came from back on top, so the edit lands and no move is lost or counted twice.
+- **Tabs of one browser on HTML Clay or Hyperclay Local**: the tabs share the store at the same speed through the browser itself. One tab runs the room and saves the checkpoints. When it closes, another tab takes over with every move the room had accepted. Use this to playtest a game in several tabs.
+- **Everywhere else** (another device on a local host, a browser without Web Locks): the store moves at save speed. Each incoming save replaces the value, and this tab's own changes that are not yet saved are replayed on top. A change counts as saved only when this tab's own save holding it is accepted, so an `add` counts exactly once.
 
 `game.status.mode` is `fast` on the first two lanes and `file` on the third. In view mode a store reads normally, but writes stay in the tab and are never sent or saved.
+
+**When a room is lost.** A room lives in memory: a server restart, or two minutes with nobody connected, ends it, and so does closing every tab of a local room. The next room starts from the last checkpoint, so up to 8 seconds of play is gone. A change of yours that was on its way at that moment, and that the room cannot prove it holds or lacks, is dropped rather than sent again: a change is never counted twice.
 
 **Load the plugin wherever a live tag exists.** A page without `?plugins=live` still leaves live tags out of the merge, so an incoming save does not update them and the next save writes the old text back.
 

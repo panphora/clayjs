@@ -6,7 +6,7 @@
 // and takes the values other tabs saved or relayed from each live-sync frame.
 
 import { createStore } from "../live/store.js";
-import { serializeLive } from "../live/ops.js";
+import { serializeLive, stampOf, parseStamp } from "../live/ops.js";
 import { onSnapshot } from "../core/snapshot.js";
 import { onSaveAccepted } from "../core/save-core.js";
 import { savePageForce, baselineSettled, isSaveConflicted, autosaveIsSuspended } from "../core/save.js";
@@ -15,7 +15,6 @@ import { isEditMode } from "../core/is-edit-mode.js";
 import { createCheckpoints } from "../live/checkpoint.js";
 import { HyperMorph } from "../vendor/hyper-morph.vendor.js";
 import { hostSupports } from "../core/host-meta.js";
-import { setSaveHeader } from "../core/save-core.js";
 import { createFastLane } from "../live/fast-lane.js";
 import { serverTransport } from "../live/server-lane.js";
 import { localTransport, localLaneSupported } from "../live/local-lane.js";
@@ -59,7 +58,8 @@ let local = null;
 
 // What this tab holds for every live tag, for the room it starts when it becomes
 // the local sequencer: an open store's authoritative value (never its own
-// unconfirmed ops, which its lane resends), or the tag's text.
+// unconfirmed ops, which its lane resends), or the tag's value; with the tag's
+// text, the file's last text for that store.
 function seedLocalRoom() {
   const values = new Map();
   for (const [name, tag] of liveTags(document, { warn: false })) {
@@ -86,10 +86,8 @@ function ensureLane() {
         fast = createFastLane({
           transport: serverTransport(),
           entries,
-          onEpoch: (epoch) => setSaveHeader("Live-Epoch", epoch),
           onWriter: () => checkpoints.changed(),
           onApplied: () => checkpoints.changed(),
-          onStop: () => setSaveHeader("Live-Epoch", null),
         });
       } else if (localLaneSupported()) {
         local = localTransport({ seed: seedLocalRoom });
@@ -197,7 +195,9 @@ onSnapshot((clone) => {
     if (!tag) continue;
     const text = textOf(entry);
     tag.element.textContent = text;
-    local?.captured(entry.store.name, text);
+    // The room position this value was written at, and its hash: how the host
+    // tells the room's own checkpoint from an outside edit, and merges the edit.
+    if (entry.store.handle.status.mode === "fast" && fast) tag.element.setAttribute("live-at", stampOf(fast.status.epoch, fast.status.seq, text));
   }
 });
 
@@ -235,6 +235,9 @@ export function confirmSaved(html) {
       else entry.store.confirm(saved.mark);
     } else {
       entry.savedSeq = Math.max(entry.savedSeq, saved.lastSeq);
+      // The sequencer's own save never comes back as a frame: tell every tab
+      // how far the file now reaches.
+      local?.landed(name, parseStamp(tag.element.getAttribute("live-at")));
     }
   }
 }
@@ -251,20 +254,30 @@ export function receiveFrame(html) {
   const incoming = liveTags(parseHtml(html), { warn: false });
   if (!incoming.size) return;
   if (local) {
-    const texts = new Map();
-    for (const [name, tag] of incoming) texts.set(name, tag.element.textContent);
-    local.fileFrame(texts);
+    const frames = new Map();
+    for (const [name, tag] of incoming) {
+      if (tag.ephemeral) continue;
+      frames.set(name, { text: tag.element.textContent, at: parseStamp(tag.element.getAttribute("live-at")) });
+    }
+    local.fileFrame(frames);
   }
   const page = liveTags(document, { warn: false });
   for (const [name, tag] of incoming) {
     const text = tag.element.textContent;
     const entry = entries.get(name);
+    const at = tag.element.getAttribute("live-at");
+    const pageTag = page.get(name)?.element;
+    // The page's tag keeps the lineage of the version this tab last took, so a
+    // file-mode save claims what it descends from.
+    if (pageTag && (!entry || entry.store.handle.status.mode === "file")) {
+      if (at === null) pageTag.removeAttribute("live-at");
+      else if (pageTag.getAttribute("live-at") !== at) pageTag.setAttribute("live-at", at);
+    }
     if (entry && !entry.store.ephemeral) {
       if (entry.store.handle.status.mode === "file") receive(entry, text, "remote");
       continue;
     }
-    const element = page.get(name)?.element;
-    if (element && element.textContent !== text) element.textContent = text;
+    if (pageTag && pageTag.textContent !== text) pageTag.textContent = text;
   }
 }
 
