@@ -39,7 +39,7 @@ import { HyperMorph, morph } from "../vendor/hyper-morph.vendor.js";
 
 const { createIdentityStore } = HyperMorph;
 import Mutation from "../lib/mutation.js";
-import { NO_DIRTY_SELECTOR } from "../lib/region-policy.js";
+import { NO_DIRTY_SELECTOR, LIVE_SELECTOR } from "../lib/region-policy.js";
 import { EXTENSION_NODE_SELECTOR } from '../lib/extension-noise.js';
 import { isEditMode } from "../core/is-edit-mode.js";
 import { mergeTagRecognizers } from "./merge-tags.js";
@@ -70,6 +70,7 @@ const SYNC_IGNORE_SELECTOR = [
   '[editor-ui]', '[clay~="editor-ui"]', '[save-ignore]', '[snapshot-remove]',
   '[no-snapshot]', '[no-save]', '[save-remove]', '[freeze] *', '[save-freeze] *',
   '[clay~="no-save"]', '[clay~="no-snapshot"]', '[clay~="freeze"] *',
+  LIVE_SELECTOR,
   EXTENSION_NODE_SELECTOR,
 ].join(',');
 
@@ -1967,7 +1968,7 @@ class LiveSync {
       // returns above without reaching here, so nothing can name an author for a
       // change this tab never took. Null on every frame the host did not stamp.
       document.dispatchEvent(new CustomEvent('clay:sync-applied', {
-        detail: { seq, source: 'peer', by: by || null, report, unresolved: this.unresolvedConflicts, conflictIds }
+        detail: { seq, source: 'peer', by: by || null, html, report, unresolved: this.unresolvedConflicts, conflictIds }
       }));
     } finally {
       this._log('applyUpdate - morph complete, resuming mutations');

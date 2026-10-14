@@ -49,7 +49,7 @@ import { capabilitySelector, expandsTo, hasCapability, hasPolicyToken, POLICY_TO
 export const PERSIST = { FULL: 'full', FROZEN: 'frozen', NONE: 'none' };
 
 // The canonical region tokens (spelled in the `clay` attribute or as bare attrs).
-export const REGION_ATTRS = ['no-save', 'no-trigger-autosave', 'no-dirty', 'no-undo', 'no-watch', 'no-data', 'freeze', 'editor-ui'];
+export const REGION_ATTRS = ['no-save', 'no-trigger-autosave', 'no-dirty', 'no-undo', 'no-watch', 'no-data', 'freeze', 'editor-ui', 'live'];
 
 // Every canonical token spellable inside the space-separated `clay` attribute.
 // Exported: this list used to exist as a private CLAY_TOKENS that nothing read,
@@ -83,7 +83,7 @@ export const FREEZE_SELECTOR = '[clay~="freeze"], [freeze], [save-freeze]';
 // mutations-ignore footgun (their content stays in the saved file, but is no
 // longer counted as a change).
 export const STRIP_FROM_COMPARISON =
-  '[clay~="no-save"], [clay~="no-trigger-autosave"], [clay~="no-dirty"], [clay~="freeze"], [clay~="no-watch"], [no-save], [save-remove], [no-trigger-autosave], [no-dirty], [save-ignore], [freeze], [save-freeze], [no-watch], [mutations-ignore]';
+  '[clay~="no-save"], [clay~="no-trigger-autosave"], [clay~="no-dirty"], [clay~="freeze"], [clay~="no-watch"], [no-save], [save-remove], [no-trigger-autosave], [no-dirty], [save-ignore], [freeze], [save-freeze], [no-watch], [mutations-ignore], [clay~="live"]';
 
 // Every spelling of no-trigger-autosave: the ONE difference between the autosave
 // domain and the dirty domain. A document containing none of these has identical
@@ -93,6 +93,10 @@ export const STRIP_FROM_COMPARISON =
 // with — the split-brain where savePage() skips while the close warning fires.
 export const NO_TRIGGER_AUTOSAVE_SELECTOR =
   '[clay~="no-trigger-autosave"], [no-trigger-autosave]';
+
+// Live JSON stores (clay="live" on a merge= JSON script). Saved, stripped from both
+// comparison domains, and ignored by the live-sync merge: the live plugin owns the value.
+export const LIVE_SELECTOR = '[clay~="live"]';
 
 // Disposable regions: saved, but their content is explicitly not work. Stripped
 // from BOTH comparison domains, skipped by the merge on both sides, and never
@@ -108,7 +112,7 @@ export const NO_DIRTY_SELECTOR =
 // dirty-tracked either, and counting it would re-freeze the live-sync baseline
 // the way the mounted-tool bug did (see dirty-gate.js).
 export const STRIP_FROM_DIRTY_CHECK =
-  '[clay~="no-save"], [clay~="no-dirty"], [clay~="freeze"], [clay~="no-watch"], [no-save], [save-remove], [no-dirty], [save-ignore], [freeze], [save-freeze], [no-watch], [mutations-ignore]';
+  '[clay~="no-save"], [clay~="no-dirty"], [clay~="freeze"], [clay~="no-watch"], [no-save], [save-remove], [no-dirty], [save-ignore], [freeze], [save-freeze], [no-watch], [mutations-ignore], [clay~="live"]';
 
 // Snapshot-layer marker: removed from EVERY snapshot (save, live-sync broadcast,
 // dirty-comparison) in snapshot.js. `no-snapshot` is the consistent alias for the
@@ -163,6 +167,9 @@ export function resolveRegionPolicy(node) {
       if (expandsTo(element, 'no-watch')) watched = false;
       if (hasRegionToken(element, 'no-trigger-autosave')) autosaveOff = true;
       if (hasRegionToken(element, 'no-dirty')) { autosaveOff = true; dirtyOff = true; }
+      // A live JSON store: saved, but its value lives in memory and the live plugin
+      // writes it into each save clone, so the tag itself is never work to track.
+      if (hasRegionToken(element, 'live')) { autosaveOff = true; dirtyOff = true; undoable = false; }
       if (expandsTo(element, 'no-undo')) undoable = false;
       if (expandsTo(element, 'no-save')) persistRank = Math.max(persistRank, PERSIST_RANK.none);
       if (hasRegionToken(element, 'freeze')) persistRank = Math.max(persistRank, PERSIST_RANK.frozen);

@@ -21,6 +21,7 @@ export const POLICY_TOKENS = Object.freeze([
   'no-data',
   'freeze',
   'editor-ui',
+  'live',
 ])
 
 export function hasPolicyToken(element, token) {

@@ -3,7 +3,9 @@ import {
   isInert,
   isSnapshotRemoved,
   STRIP_FROM_COMPARISON,
+  STRIP_FROM_DIRTY_CHECK,
   STRIP_FROM_SAVE,
+  LIVE_SELECTOR,
   FREEZE_SELECTOR,
   SNAPSHOT_REMOVE_SELECTOR,
 } from "../../src/lib/region-policy.js";
@@ -188,4 +190,29 @@ test("isSnapshotRemoved is ancestor-aware", async () => {
 
   expect(isSnapshotRemoved(document.getElementById("kid"))).toBe(true);
   expect(isSnapshotRemoved(document.getElementById("free"))).toBe(false);
+});
+
+describe("the live token", () => {
+  test("a live tag is saved, not dirty-tracked, not autosave-triggered, not undoable", () => {
+    const policy = resolveRegionPolicy(el({ clay: "live" }));
+    expect(policy.persist).toBe("full");
+    expect(policy.dirtyTracked).toBe(false);
+    expect(policy.autosaveTriggered).toBe(false);
+    expect(policy.undoable).toBe(false);
+    expect(policy.watched).toBe(true);
+  });
+
+  test("live combines with other tokens", () => {
+    const policy = resolveRegionPolicy(el({ clay: "live ephemeral" }));
+    expect(policy.dirtyTracked).toBe(false);
+  });
+
+  test("a live tag is stripped from both comparison domains and kept in the save", () => {
+    const tag = document.createElement("script");
+    tag.setAttribute("clay", "live");
+    expect(tag.matches(STRIP_FROM_COMPARISON)).toBe(true);
+    expect(tag.matches(STRIP_FROM_DIRTY_CHECK)).toBe(true);
+    expect(tag.matches(STRIP_FROM_SAVE)).toBe(false);
+    expect(tag.matches(LIVE_SELECTOR)).toBe(true);
+  });
 });
