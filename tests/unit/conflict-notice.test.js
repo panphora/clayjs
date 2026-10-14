@@ -913,30 +913,6 @@ test("a value that looks like markup is quoted as text and never becomes an elem
   expect(shownValues.some((text) => text.includes(rawText))).toBe(true);
 });
 
-test("the section notice yields to the conflict bar, and comes back when it is gone", async () => {
-  const { sectionNotice } = await import("../../src/sync/section-notice.js");
-
-  three();
-  await frame();
-  expect(visible()).toBe(true);
-
-  sectionNotice.show("Ana");
-  const section = document.querySelector("[data-clay-section-notice]");
-  expect(section).not.toBeNull();
-  expect(section.style.display).toBe("none");
-  expect(section.textContent).not.toContain("Ana");
-
-  for (const rec of conflicts.list()) conflicts.acknowledge([rec.id], { reason: "accepted" });
-  await frame();
-  expect(visible()).toBe(false);
-
-  sectionNotice.show("Ana");
-  expect(section.style.display).toBe("flex");
-  expect(section.textContent).toContain("Ana changed this section");
-
-  sectionNotice.destroy();
-});
-
 test("a save event does not widen what Accept covers", async () => {
   three();
   await frame();

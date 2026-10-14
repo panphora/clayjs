@@ -44,9 +44,6 @@ import { serializeForSync, captureForComparisonAndDirty, captureSnapshot, origin
 import { isTabLocalRootAttr } from '../../../src/lib/root-attrs.js';
 import { protectPeerDoc, protectDiskDoc, activateIncomingDoc } from './legacy-splice.js';
 import { presence } from '../../../src/sync/presence.js';
-// Side-effect import: the section-changed notice wires itself to
-// `clay:sync-applied`, which this file is the only dispatcher of.
-import '../../../src/sync/section-notice.js';
 import { hostMeta } from '../../../src/core/host-meta.js';
 import { recordEtag, seedEtag, lastSeenEtag } from '../../../src/core/etag.js';
 import { pageMaybeDirty, pauseGate, resumeGate } from '../../../src/lib/dirty-gate.js';

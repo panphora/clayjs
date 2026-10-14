@@ -9,8 +9,8 @@
  * peers receive, so counting either would put this tab's outline on the wrong
  * block for everyone else.
  *
- * `blockOf` is deliberately finer than the editable region `section-notice.js`
- * remembers: a Writer-style page makes one `contenteditable` element the whole
+ * `blockOf` is deliberately finer than the editable region: a Writer-style page
+ * makes one `contenteditable` element the whole
  * article, so an outline around the region would say nothing. The block is the
  * child of that host which holds the caret.
  */

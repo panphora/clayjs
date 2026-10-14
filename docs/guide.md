@@ -222,7 +222,7 @@ The test suite checks this file opens without becoming dirty, saves the record a
 |---|---|---|---|
 | `richclay` | on | no | the `editable` attribute, `clay.RichClay` |
 | `source` | on | no | byte-preserving saves, `clay.source` |
-| `sync` | off | yes | live sync, `clay.conflicts`, `clay.morph`, the section notice and presence |
+| `sync` | off | yes | live sync, `clay.conflicts`, `clay.morph`, presence and the editing marker |
 | `sortable` | off | no | the `sortable` attribute, `window.Sortable`, `clay:sorted` |
 | `undo` | off | no | `clay.undo` (whole-page undo, takes Cmd+Z for the window) |
 | `indicator` | off | no | the save status chip |
@@ -773,11 +773,9 @@ Losses (where this tab's work was replaced) enter `clay.conflicts`:
 
 The built-in notice reads "Another edit replaced N changes" and offers **Revert to mine**, **Accept theirs**, **Download my copy** and a list of the edits. Revert puts the selected losses back as an ordinary local edit, then saves.
 
-On hyperclay.com, a frame stamped with `by` also shows a one-line "*Name* changed this section" beside the field the reader last focused.
-
 ### 7.7 Presence
 
-hyperclay.com shows a fixed avatar stack (initials, editors solid, viewers hollow, a "+N viewing" count) when two or more people have the file open. **There is no API**: no event, no roster, no cursor or section data. An app cannot build its own "who is here" or "X is editing this card". HTML Clay and Hyperclay Local have no presence.
+hyperclay.com shows a fixed avatar stack (initials in hollow squares, a "+N viewing" count) when two or more people have the file open. **There is no API**: no event, no roster, no cursor or section data. An app cannot build its own "who is here" or "X is editing this card". HTML Clay and Hyperclay Local have no presence.
 
 ### 7.8 Agents
 
@@ -1378,7 +1376,7 @@ Cross-cutting:
 | Live sync | tabs on this machine | tabs, plus other devices through the sync engine | every editor and viewer |
 | Outside disk edits reach open tabs | yes (agents, text editors) | yes | no disk except through device sync |
 | Presence | none | none | avatar stack, no API |
-| `by` on frames, section notice | no | no | yes |
+| `by` on frames, editing marker | no | no | yes |
 | Wire and ai-edit | yes | yes | no |
 | Data API write | yes | yes | read only |
 | Uploads | 25 MB, in `~/htmlclay/uploads/` | 25 MB, in the root's `uploads/` | 10, 20 or 100 MB by plan, in the account's `uploads/` |

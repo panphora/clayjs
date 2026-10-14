@@ -173,10 +173,6 @@ function render() {
     root.append(drawPanel(m));
   }
   set(root, "display", toastText || view !== "hidden" ? "flex" : "none");
-  if (view !== "hidden") {
-    const section = document.querySelector("[data-clay-section-notice]");
-    if (section) set(section, "display", "none");
-  }
   if (wellEl) wellEl.scrollTop = scroll;
 
   const want = pendingFocus || focusKey;

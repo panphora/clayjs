@@ -178,10 +178,9 @@ cascade layer beat a page's unlayered `!important` rules.
 
 | Surface | File | Status | Notes |
 |---|---|---|---|
-| Lost edit and refused-save notice | `src/core/conflict-notice.js` | Bevel controls | Keeps its precedence over the section-changed bar. |
+| Lost edit and refused-save notice | `src/core/conflict-notice.js` | Bevel controls | Bottom-anchored bar, panel and toast. |
 | Stale host warning | `src/core/stale-host-notice.js` | Bevel controls | Keeps view-mode and stale-host gating, and its dismiss. |
 | Presence avatars, count, tooltip | `src/sync/presence.js` | Bevel controls | Participant colours keep their meaning; faces are square, in the mono face. |
-| Section-changed bar | `src/sync/section-notice.js` | Bevel controls | Keeps attribution and dismiss timing, and stays hidden under the conflict notice. |
 | Save indicator chip | `src/plugins/indicator.js` | Bevel controls | Error and offline wear the ox tone, unless clay-ui's toasts are loaded to carry them. With clay-ui's clay.saveToast = true, saved is a toast instead. |
 | Toasts | `src/ui/toast.js` | Bevel controls | Keeps caller options and timing; the dashboard's toast style; markers are `data-clay-toasts` and `data-clay-toast`. |
 | Modal shell | `src/ui/modal.js`, `src/ui/bevel-dialog.js` | Bevel controls | Keeps focus, Escape and settling; `title`, `html`, `yes` and `no` take markup or a node, and caller content is never styled. |

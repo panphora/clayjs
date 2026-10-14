@@ -52,9 +52,6 @@ import { enableAdminInputs } from '../core/admin-inputs.js';
 import { enableAdminResources } from '../core/admin-resources.js';
 import { presence } from './presence.js';
 import { editingMarker } from './editing-marker.js';
-// Side-effect import: the section-changed notice wires itself to
-// `clay:sync-applied`, which this file is the only dispatcher of.
-import './section-notice.js';
 import { hostMeta, hostSupports } from '../core/host-meta.js';
 import { EditingSender } from './editing-sender.js';
 import { servedDocumentEtag } from '../core/host-attrs.js';
