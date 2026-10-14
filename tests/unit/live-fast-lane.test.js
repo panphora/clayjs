@@ -43,6 +43,7 @@ function createRoom(initial) {
   };
   room.post = (clientId, frame) => {
     room.posts.push({ clientId, ...cloneJson(frame) });
+    if (frame.epoch !== undefined && frame.epoch !== room.epoch) return { status: 200, body: { stale: true, epoch: room.epoch }, retryAfter: 0 };
     if (!(frame.name in room.stores)) return { status: 404, body: { error: "unknown-store" }, retryAfter: 0 };
     const key = frame.name + "\n" + clientId;
     if (frame.n <= (room.lastN.get(key) || 0)) return { status: 200, body: { duplicate: true, seq: room.seq, epoch: room.epoch }, retryAfter: 0 };
@@ -69,6 +70,14 @@ function createRoom(initial) {
     room.stores = cloneJson(stores);
     room.lastN = new Map();
     room.broadcast("state", room.state());
+  };
+  // A restart whose data-state has not reached anyone yet.
+  room.restartQuiet = (stores) => {
+    room.epoch = `e${Number(room.epoch.slice(1)) + 1}`;
+    room.seq = 0;
+    room.writer = null;
+    room.stores = cloneJson(stores);
+    room.lastN = new Map();
   };
   room.transport = (clientId, wrap = (post) => post) => ({
     start(handlers) {
@@ -288,4 +297,21 @@ test("a store the room does not have stays in file mode", async () => {
   await settle();
   expect(room.posts).toEqual([]);
   expect(a.store.pending).toHaveLength(1);
+});
+
+test("a frame in flight when the room restarts is not applied twice", async () => {
+  const room = createRoom({ game: { score: 0 } });
+  const wrap = (post) => (frame) => {
+    if (frame.n === 1) room.restartQuiet({ game: { score: 10 } });
+    return post(frame);
+  };
+  const a = client(room, "a", { score: 0 }, { wrap });
+  room.open("a");
+  await settle();
+  a.game.add("score", 1);
+  await settle();
+  expect(room.posts[0].epoch).toBe("e1");
+  expect(room.stores.game).toEqual({ score: 11 });
+  expect(a.game.toJSON()).toEqual({ score: 11 });
+  expect(a.store.pending).toEqual([]);
 });

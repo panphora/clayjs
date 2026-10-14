@@ -3,7 +3,7 @@
 // room is on the host (server-lane.js) or in one tab of this browser; both speak
 // the same frames through a transport:
 //   start({ open, close, frame, state, writer }) -> stop function
-//   send(clientId, { name, n, ops }) -> Promise<{ status, body, retryAfter }>
+//   send(clientId, { name, n, ops, epoch }) -> Promise<{ status, body, retryAfter }>
 //   fetchState() -> Promise<{ epoch, seq, writer, stores } | null>
 
 import { applyOps, cloneJson } from "./ops.js";
@@ -100,7 +100,7 @@ export function createFastLane({
     lastSentAt = now();
     let result;
     try {
-      result = await transport.send(clientId, { name, n: frame.n, ops: frame.ops });
+      result = await transport.send(clientId, { name, n: frame.n, ops: frame.ops, epoch: sentEpoch });
     } catch {
       result = null;
     }

@@ -54,7 +54,7 @@ test("joins the room, posts ops, and checkpoints only as the writer after a chan
   await flushAsync();
   const post = requests.find((r) => r.init.method === "POST");
   expect(new URL(post.url).searchParams.get("client-id")).toBe("tab-1");
-  expect(JSON.parse(post.init.body)).toEqual({ name: "g", n: 1, ops: [{ op: "add", path: ["s"], n: 1 }] });
+  expect(JSON.parse(post.init.body)).toEqual({ name: "g", n: 1, ops: [{ op: "add", path: ["s"], n: 1 }], epoch: "e1" });
 
   bridge.streamEvent("data", { epoch: "e1", seq: 1, name: "g", ops: [{ op: "add", path: ["s"], n: 1 }], from: "tab-1", n: 1 });
   expect(g.toJSON()).toEqual({ s: 1 });
