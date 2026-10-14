@@ -59,6 +59,7 @@ import { recordEtag, seedEtag, lastSeenEtag, conditionalSaves, representedEtag, 
 import { pageMaybeDirty, pauseGate, resumeGate, gateCaptureToken, gateClearIfUnchanged } from '../lib/dirty-gate.js';
 import { gestureSeen } from '../lib/user-gesture.js';
 import { SyncStream } from './stream.js';
+import { streamOpened, streamClosed, streamEvent, LIVE_EVENTS } from '../live/stream-bridge.js';
 import { conflicts, beginApply, completeApply, failApply } from './conflicts.js';
 import { beginLineageCapture } from './conflict-footprints.js';
 
@@ -597,6 +598,7 @@ class LiveSync {
       this.sse.close();
       this.sse = null;
     }
+    streamClosed();
 
     // Nothing feeds the roster once the stream is gone, so leaving the stack up
     // would show a list of people who may all have left.
@@ -795,6 +797,22 @@ class LiveSync {
       if (this._editing) this._editing.reconnected();
       if (this.onConnect) this.onConnect();
     };
+
+    // clay.live's fast lane rides this stream: report it open and closed, and pass
+    // on its named events (stream-bridge.js).
+    this.sse.addEventListener('open', () => streamOpened({ clientId: this.clientId, lane: this.lane }));
+    this.sse.addEventListener('error', () => streamClosed());
+    for (const type of LIVE_EVENTS) {
+      this.sse.addEventListener(type, (event) => {
+        let data;
+        try {
+          data = JSON.parse(event.data);
+        } catch {
+          return;
+        }
+        streamEvent(type, data);
+      });
+    }
 
     // The cursor frame is a NAMED SSE event, so it never reaches onmessage and
     // never looks like data. Its `resync` flag says the server could not retain

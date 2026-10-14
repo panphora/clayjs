@@ -147,7 +147,8 @@ export class SyncStream extends EventTarget {
       this._remember(event.data);
       this._emit('message', event.data);
     };
-    for (const type of ['cursor', 'presence']) {
+    // `data`, `data-state` and `data-writer` are clay.live's fast lane (stream-bridge.js).
+    for (const type of ['cursor', 'presence', 'data', 'data-state', 'data-writer']) {
       source.addEventListener(type, event => {
         if (this._source === source) this._emit(type, event.data);
       });

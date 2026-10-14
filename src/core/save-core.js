@@ -43,6 +43,21 @@ let nextSaveKeepalive = false;
 // CustomEvent would put it on a bus any script on the page can listen to.
 const saveAcceptedHooks = [];
 
+// Headers another module asks every save to carry, by name. clay.live's fast lane
+// marks its saves with Live-Epoch so the host keeps the room those values came from.
+const extraSaveHeaders = new Map();
+
+/**
+ * Add a header to every save from now on, or remove it with a null value.
+ *
+ * @param {string} name
+ * @param {string|null} value
+ */
+export function setSaveHeader(name, value) {
+  if (value == null) extraSaveHeaders.delete(name);
+  else extraSaveHeaders.set(name, String(value));
+}
+
 /**
  * Send the next save with `keepalive`, so a request whose page is going away (a tab
  * closing, a navigation) is still finished by the transport.
@@ -311,6 +326,8 @@ function buildSaveRequest(content, userDriven, signal, saveId, etag, keepalive =
     },
     body: content
   };
+
+  for (const [name, value] of extraSaveHeaders) options.headers[name] = value;
 
   if (etag) options.headers['If-Match'] = etag;
 
