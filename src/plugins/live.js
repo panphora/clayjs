@@ -14,16 +14,27 @@ import { withKeepalive } from "../core/save-core.js";
 import { isEditMode } from "../core/is-edit-mode.js";
 import { createCheckpoints } from "../live/checkpoint.js";
 import { HyperMorph } from "../vendor/hyper-morph.vendor.js";
+import { hostSupports } from "../core/host-meta.js";
+import { setSaveHeader } from "../core/save-core.js";
+import { createFastLane } from "../live/fast-lane.js";
+import { serverTransport } from "../live/server-lane.js";
 
 const NAME = /^[A-Za-z0-9_.:-]{1,64}$/;
 const CAPTURES_KEPT = 16;
 const entries = new Map();
 
-// Saved stores with ops no accepted save holds yet. Only an edit-mode tab saves.
+// Saved stores with changes no accepted save holds yet. Only an edit-mode tab
+// saves. In file mode that is this tab's unconfirmed ops; in fast mode it is any
+// change since the last accepted save, and only the room's writer saves it.
 function unsavedLiveChanges() {
   if (!isEditMode) return false;
   for (const entry of entries.values()) {
-    if (!entry.store.ephemeral && entry.store.pending.length > 0) return true;
+    if (entry.store.ephemeral) continue;
+    if (entry.store.handle.status.mode === "fast") {
+      if (fast?.isWriter() && entry.version > entry.savedVersion) return true;
+    } else if (entry.store.pending.length > 0) {
+      return true;
+    }
   }
   return false;
 }
@@ -34,6 +45,30 @@ const checkpoints = createCheckpoints({
   save: () => savePageForce(),
   saveNow: () => withKeepalive(true, () => savePageForce()),
 });
+
+// The fast lane, on a host that advertises live-data. Started by the first
+// clay.live() call in an edit-mode tab.
+let fast = null;
+let laneRequested = false;
+
+function ensureLane() {
+  if (laneRequested || !isEditMode) return;
+  laneRequested = true;
+  hostSupports("live-data").then(
+    (supported) => {
+      if (!supported) return;
+      fast = createFastLane({
+        transport: serverTransport(),
+        entries,
+        onEpoch: (epoch) => setSaveHeader("Live-Epoch", epoch),
+        onWriter: () => checkpoints.changed(),
+        onStop: () => setSaveHeader("Live-Epoch", null),
+      });
+      fast.start();
+    },
+    () => {},
+  );
+}
 
 function isJsonType(type) {
   const t = (type || "").split(";")[0].trim().toLowerCase();
@@ -71,12 +106,12 @@ function textOf(entry) {
   return entry.pretty ? JSON.stringify(value, null, 2).replace(/</g, "\\u003c") : serializeLive(value);
 }
 
-// The text a capture wrote, with the newest op it held. When that text comes
-// back (an accepted save, or a frame carrying this tab's own save), every op up
-// to that mark is in it.
+// The text a capture wrote, with the newest op it held and the store's version.
+// When that text comes back (an accepted save, or a frame carrying this tab's own
+// save), every op up to that mark is in it.
 function remember(entry, text) {
   entry.captures.delete(text);
-  entry.captures.set(text, entry.store.mark);
+  entry.captures.set(text, { mark: entry.store.mark, version: entry.version });
   if (entry.captures.size > CAPTURES_KEPT) entry.captures.delete(entry.captures.keys().next().value);
 }
 
@@ -87,15 +122,15 @@ function receive(entry, text, source) {
   } catch {
     return;
   }
-  const through = entry.captures.get(text);
-  if (through === undefined) {
+  const captured = entry.captures.get(text);
+  if (captured === undefined) {
     entry.store.rebase(value, { source });
     return;
   }
   // An older save of this tab's, arriving after a newer one was confirmed.
-  if (through < entry.confirmed) return;
-  entry.confirmed = through;
-  entry.store.rebase(value, { source, through });
+  if (captured.mark < entry.confirmed) return;
+  entry.confirmed = captured.mark;
+  entry.store.rebase(value, { source, through: captured.mark });
 }
 
 export function live(name) {
@@ -111,8 +146,16 @@ export function live(name) {
     throw new SyntaxError(`clay.live("${name}"): the tag's JSON does not parse: ${err.message}`);
   }
   const store = createStore({ name, value, ephemeral: tag.ephemeral });
-  entries.set(name, { store, pretty: text.includes("\n"), captures: new Map(), confirmed: 0 });
+  const entry = { store, pretty: text.includes("\n"), captures: new Map(), confirmed: 0, version: 0, savedVersion: 0 };
+  entries.set(name, entry);
   if (!tag.ephemeral) store.onLocal(() => checkpoints.changed());
+  store.onLocal((ops) => fast?.local(name, ops, store.mark));
+  store.handle.on("change", () => {
+    entry.version++;
+    if (!store.ephemeral && store.handle.status.mode === "fast") checkpoints.changed();
+  });
+  fast?.storeOpened(name);
+  ensureLane();
   return store.handle;
 }
 
@@ -141,7 +184,10 @@ export function confirmSaved(html) {
     const tag = tags.get(entry.store.name);
     if (!tag) continue;
     const text = tag.element.textContent;
-    if (entry.captures.has(text)) receive(entry, text, "state");
+    const captured = entry.captures.get(text);
+    if (!captured) continue;
+    entry.savedVersion = Math.max(entry.savedVersion, captured.version);
+    if (entry.store.handle.status.mode === "file") receive(entry, text, "state");
   }
 }
 
@@ -185,6 +231,11 @@ export function storeOf(name) {
 
 export function openStores() {
   return [...entries.values()].map((entry) => entry.store);
+}
+
+// The fast lane, for tests and the local tab lane.
+export function fastLane() {
+  return fast;
 }
 
 export default live;

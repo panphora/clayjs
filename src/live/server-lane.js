@@ -1,3 +1,5 @@
+import { onStream } from "./stream-bridge.js";
+
 // The host side of clay.live's fast lane on a host that advertises `live-data`:
 // one POST per frame of ops, one GET for the room's whole state. Both name the
 // document with Document-URL, as the sync relay and presence do.
@@ -46,4 +48,28 @@ export async function fetchLiveState() {
   } catch {
     return null;
   }
+}
+
+/**
+ * The fast-lane transport (fast-lane.js) for a host that advertises live-data:
+ * frames go up by POST, and come down as named events on the live-lane stream.
+ */
+export function serverTransport() {
+  return {
+    start(handlers) {
+      return onStream({
+        open(info) {
+          if (info.lane === "live") handlers.open(info);
+        },
+        close: () => handlers.close(),
+        event(type, data) {
+          if (type === "data") handlers.frame(data);
+          else if (type === "data-state") handlers.state(data);
+          else if (type === "data-writer") handlers.writer(data);
+        },
+      });
+    },
+    send: relayData,
+    fetchState: fetchLiveState,
+  };
 }

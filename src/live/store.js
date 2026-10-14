@@ -242,6 +242,10 @@ export function createStore({ name, value, ephemeral = false }) {
     get pending() {
       return pending.map((entry) => entry.op);
     },
+    // The same ops with their ids, for a transport that resends them.
+    pendingEntries() {
+      return pending.map((entry) => ({ id: entry.id, op: entry.op }));
+    },
     // The id of the newest op this store has committed (0 before the first).
     get mark() {
       return nextId - 1;
