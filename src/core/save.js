@@ -221,6 +221,13 @@ export function resumeAutosave() {
   savePageThrottled();
 }
 
+// Whether an agent's request currently holds autosave off. A caller that forces a
+// save on its own schedule (live data checkpoints) asks this first, because a
+// forced save would write the browser's bytes over the agent's.
+export function autosaveIsSuspended() {
+  return autosaveSuspended > 0;
+}
+
 // ============================================
 // THE ALL-SAVE HOLD
 // ============================================

@@ -9,11 +9,31 @@ import { createStore } from "../live/store.js";
 import { serializeLive } from "../live/ops.js";
 import { onSnapshot } from "../core/snapshot.js";
 import { onSaveAccepted } from "../core/save-core.js";
+import { savePageForce, baselineSettled, isSaveConflicted, autosaveIsSuspended } from "../core/save.js";
+import { withKeepalive } from "../core/save-core.js";
+import { isEditMode } from "../core/is-edit-mode.js";
+import { createCheckpoints } from "../live/checkpoint.js";
 import { HyperMorph } from "../vendor/hyper-morph.vendor.js";
 
 const NAME = /^[A-Za-z0-9_.:-]{1,64}$/;
 const CAPTURES_KEPT = 16;
 const entries = new Map();
+
+// Saved stores with ops no accepted save holds yet. Only an edit-mode tab saves.
+function unsavedLiveChanges() {
+  if (!isEditMode) return false;
+  for (const entry of entries.values()) {
+    if (!entry.store.ephemeral && entry.store.pending.length > 0) return true;
+  }
+  return false;
+}
+
+const checkpoints = createCheckpoints({
+  needsSave: unsavedLiveChanges,
+  blocked: () => !baselineSettled() || isSaveConflicted() || autosaveIsSuspended(),
+  save: () => savePageForce(),
+  saveNow: () => withKeepalive(true, () => savePageForce()),
+});
 
 function isJsonType(type) {
   const t = (type || "").split(";")[0].trim().toLowerCase();
@@ -92,6 +112,7 @@ export function live(name) {
   }
   const store = createStore({ name, value, ephemeral: tag.ephemeral });
   entries.set(name, { store, pretty: text.includes("\n"), captures: new Map(), confirmed: 0 });
+  if (!tag.ephemeral) store.onLocal(() => checkpoints.changed());
   return store.handle;
 }
 
@@ -149,6 +170,13 @@ export function receiveFrame(html) {
 }
 
 document.addEventListener("clay:sync-applied", (event) => receiveFrame(event.detail?.html));
+
+// The last chance to save live changes made since the previous checkpoint. A
+// keepalive body is capped near 60 KB; a larger page's save may not finish.
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") checkpoints.flush();
+});
+window.addEventListener("pagehide", () => checkpoints.flush());
 
 // For the other live modules: the store behind a name, or every open store.
 export function storeOf(name) {
