@@ -110,7 +110,7 @@ test("the stack paints a person the colour clay.people gives them", async () => 
 
   const faces = avatars();
   expect(faces.length).toBe(1);
-  expect(asColor(faces[0].style.getPropertyValue("background-color"))).toBe(asColor(PERSON_COLORS[person.color]));
+  expect(asColor(faces[0].style.getPropertyValue("color"))).toBe(asColor(PERSON_COLORS[person.color]));
   expect(faces[0].textContent).toBe(person.initials);
   expect(faces[0].textContent).toBe("AC");
 });

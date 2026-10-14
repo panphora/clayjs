@@ -53,9 +53,9 @@ const LABEL_FONT = `500 11px/1.4 ${FONT_MONO}`;
 // resets color-scheme and direction too, which are put back straight after.
 const RESET = ['all:initial', 'color-scheme:inherit', 'direction:ltr', 'unicode-bidi:isolate'];
 
-// The paper a participant's colour sits on: the initials of a solid square, the fill
-// of a hollow one. One literal in both schemes, because every colour the shared
-// person-face palette draws with was chosen against it.
+// The fill of every square, under the participant's colour. One literal in both
+// schemes, because every colour the shared person-face palette draws with was
+// chosen against it.
 const FACE = '#FFFCF6';
 
 /** Every element this module creates, marked the same way. */
@@ -78,7 +78,6 @@ function normalize(data) {
     people.push({
       id: person.id,
       name,
-      canEdit: person.canEdit === true,
       you: person.you === true,
     });
   }
@@ -239,12 +238,7 @@ class Presence {
 
   avatar(person) {
     const color = personColor(person.id);
-    // Solid says this person can change the document; hollow says they are
-    // reading it. The two are the same three colours inverted, so a stack of
-    // both reads as one set rather than as two kinds of thing.
-    const skin = person.canEdit
-      ? [`background-color:${color}`, `color:${FACE}`, `border-color:${FACE}`]
-      : [`background-color:${FACE}`, `color:${color}`, `border-color:${color}`];
+    const skin = [`background-color:${FACE}`, `color:${color}`, `border-color:${color}`];
 
     const el = runtimeRoot(make('div', [
       ...RESET,

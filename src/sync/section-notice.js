@@ -1,7 +1,7 @@
 /**
  * section-notice.js — "<name> changed this section".
  *
- * One dismissible line, shown when a live-sync frame from somebody else
+ * One dismissible line that hides itself after six seconds, shown when a live-sync frame from somebody else
  * actually changed the editable region this reader was working in.
  *
  * HOW "THIS SECTION CHANGED" IS DECIDED, AND WHY BOTH OBVIOUS READINGS ARE WRONG.
@@ -70,6 +70,8 @@ const CONTROLS = new Set(['INPUT', 'TEXTAREA', 'SELECT']);
 // every descendant text node's parent and names no region at all.
 const EDITABLE = '[contenteditable]:not([contenteditable="false"])';
 
+const HIDE_AFTER_MS = 6000;
+
 /** Every element this module creates, marked the same way. */
 function runtimeRoot(el) {
   el.setAttribute('clay', RUNTIME_ONLY);
@@ -104,6 +106,7 @@ class SectionNotice {
     this.content = null;
     this.root = null;
     this.line = null;
+    this._timer = 0;
     this._wired = false;
     this._onFocusIn = (event) => this.remember(event.target);
     this._onEdit = (event) => this.refresh(event.target);
@@ -124,6 +127,7 @@ class SectionNotice {
 
   destroy() {
     if (!this._wired) return;
+    clearTimeout(this._timer);
     this._wired = false;
     this.follow(false);
     document.removeEventListener('focusin', this._onFocusIn);
@@ -172,9 +176,13 @@ class SectionNotice {
     set(this.root, 'display', 'flex');
     this.place();
     this.follow(true);
+    clearTimeout(this._timer);
+    this._timer = setTimeout(() => this.hide(), HIDE_AFTER_MS);
   }
 
   hide() {
+    clearTimeout(this._timer);
+    this._timer = 0;
     if (!this.root) return;
     this.line.textContent = '';
     set(this.root, 'display', 'none');

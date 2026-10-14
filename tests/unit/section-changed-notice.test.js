@@ -232,6 +232,26 @@ test("dismissing takes the notice, and the name, back off the page", async () =>
   sync.stop();
 });
 
+test("the notice hides itself after six seconds", async () => {
+  const sync = await readyTab();
+  focusIn(document.querySelector("#bio"));
+  await sync._doApplyUpdate(sync.lastHtml.replace("mine", "hers"), 5, null, null, ADA);
+  expect(notice().style.getPropertyValue("display")).toBe("flex");
+
+  jest.useFakeTimers();
+  try {
+    sectionNotice.show("Ada Lovelace");
+    jest.advanceTimersByTime(5999);
+    expect(notice().style.getPropertyValue("display")).toBe("flex");
+    jest.advanceTimersByTime(1);
+    expect(notice().style.getPropertyValue("display")).toBe("none");
+    expect(said()).toBe("");
+  } finally {
+    jest.useRealTimers();
+  }
+  sync.stop();
+});
+
 // =============================================================================
 // Silent in four cases, each its own guard
 // =============================================================================

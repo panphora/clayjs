@@ -149,45 +149,40 @@ test("nobody else here means nothing on screen", async () => {
   expect(chip().textContent).toBe("");
 });
 
-test("solid for canEdit, hollow for everyone else", async () => {
+test("every square is hollow, editor or reader", async () => {
   const { presence } = await load();
 
   // The same participant both ways, so the only difference between the two
-  // circles is the one the assertion is about.
+  // squares could be the one the assertion rules out.
   await presence.update({
     people: [{ ...ADA, canEdit: true }, { ...ADA, id: ADA.id, canEdit: false }],
     anonymous: 0,
   });
-  const [solid, hollow] = avatars();
+  const [editor, reader] = avatars();
 
-  const derived = solid.style.getPropertyValue("background-color");
-  const face = solid.style.getPropertyValue("color");
-  expect(derived).not.toBe("");
-  expect(derived).not.toBe(face);
+  const ink = editor.style.getPropertyValue("color");
+  const fill = editor.style.getPropertyValue("background-color");
+  expect(ink).not.toBe("");
+  expect(ink).not.toBe(fill);
+  expect(asColor(editor.style.getPropertyValue("border-color"))).toBe(ink);
 
-  // Hollow is the same three colours inverted: the derived colour becomes the
-  // ink and the ring, and the fill becomes the face.
-  expect(hollow.style.getPropertyValue("color")).toBe(derived);
-  expect(hollow.style.getPropertyValue("background-color")).toBe(face);
-  expect(asColor(hollow.style.getPropertyValue("border-color"))).toBe(derived);
-  expect(asColor(solid.style.getPropertyValue("border-color"))).toBe(face);
+  for (const prop of ["color", "background-color", "border-color"]) {
+    expect(reader.style.getPropertyValue(prop)).toBe(editor.style.getPropertyValue(prop));
+  }
 });
 
 test("the colour comes from the id", async () => {
   const { presence } = await load();
 
-  // Both solid, so the fill is the derived colour in both circles and the
-  // solid/hollow inversion cannot account for a difference between them.
-  const solid = (person) => ({ ...person, canEdit: true });
-  await presence.update({ people: [solid(ADA), solid(GRACE)], anonymous: 0 });
-  const [first, second] = avatars().map((el) => el.style.getPropertyValue("background-color"));
+  await presence.update({ people: [ADA, GRACE], anonymous: 0 });
+  const [first, second] = avatars().map((el) => el.style.getPropertyValue("color"));
   expect(first).not.toBe("");
   expect(first).not.toBe(second);
 
   // The same pseudonyms in a later frame keep the same colours, or a person
   // changes colour every time anybody joins.
-  await presence.update({ people: [solid(GRACE), solid(ADA)], anonymous: 0 });
-  const again = avatars().map((el) => el.style.getPropertyValue("background-color"));
+  await presence.update({ people: [GRACE, ADA], anonymous: 0 });
+  const again = avatars().map((el) => el.style.getPropertyValue("color"));
   expect(again).toEqual([second, first]);
 });
 

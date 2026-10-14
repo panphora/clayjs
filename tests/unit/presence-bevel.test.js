@@ -5,7 +5,7 @@ import { TOKENS, FONT_MONO } from "../../src/ui/bevel.js";
 /**
  * The avatar stack on the generated Bevel subset. Material and type change: square
  * faces, mono initials, Bevel surface and tip. Meaning does not: every participant
- * keeps the colour its pseudonym picks, solid still means canEdit.
+ * keeps the colour its pseudonym picks, and every face is hollow.
  */
 
 const ADA = { id: "p_9f3c21ab7e", name: "Ada Lovelace", canEdit: true, you: false };
@@ -77,13 +77,13 @@ test("the stack follows the page's colour scheme, and a later frame picks up a c
   expect(stack().style.getPropertyValue("color-scheme")).toBe("light");
 });
 
-test("a participant keeps the colour its pseudonym picks, and solid still means canEdit", async () => {
+test("a participant keeps the colour its pseudonym picks, editor or reader", async () => {
   const presence = await load();
   await presence.update({ people: [ADA, { ...ADA, canEdit: false }], anonymous: 0 });
-  const [solid, hollow] = avatars();
-  const colour = solid.style.getPropertyValue("background-color");
+  const [editor, reader] = avatars();
+  const colour = editor.style.getPropertyValue("color");
   expect(colour).toMatch(/^rgb\(/);
-  expect(hollow.style.getPropertyValue("color")).toBe(colour);
+  expect(reader.style.getPropertyValue("color")).toBe(colour);
 });
 
 test("only the faces take a pointer: the corner, the row, the count and the tip let clicks through", async () => {
