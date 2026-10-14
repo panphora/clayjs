@@ -1,0 +1,6 @@
+[
+  { "epoch": "e1", "seq": 3, "text": "{\"score\":1}", "stamp": "e1:3:54351668" },
+  { "epoch": "e1", "seq": 3, "text": "{\n  \"score\": 1\n}", "stamp": "e1:3:3170ec5a" },
+  { "epoch": "6f1c2d3e-0000-4000-8000-000000000000", "seq": 0, "text": "", "stamp": "6f1c2d3e-0000-4000-8000-000000000000:0:811c9dc5" },
+  { "epoch": "e2", "seq": 12, "text": "{\"name\":\"héllo <\"}", "stamp": "e2:12:f8ce49dc" }
+]

@@ -240,3 +240,27 @@ function reuse(cur, next) {
 export function serializeLive(value) {
   return JSON.stringify(value).replace(/</g, "\\u003c");
 }
+
+// A live tag's lineage, `live-at="<epoch>:<seq>:<hash>"`: the room position its
+// value was written at, and a hash of the exact text, so a room can tell its own
+// unedited value from an edit of it.
+const STAMP = /^([A-Za-z0-9-]{1,64}):(0|[1-9]\d*):([0-9a-f]{8})$/;
+
+// FNV-1a over UTF-16 code units, as 8 hex digits. Both copies must agree.
+export function textHash(text) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h.toString(16).padStart(8, "0");
+}
+
+export function stampOf(epoch, seq, text) {
+  return `${epoch}:${seq}:${textHash(text)}`;
+}
+
+export function parseStamp(value) {
+  const m = typeof value === "string" ? STAMP.exec(value) : null;
+  return m ? { epoch: m[1], seq: Number(m[2]), hash: m[3] } : null;
+}

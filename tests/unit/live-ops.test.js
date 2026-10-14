@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import {
   parsePath, cloneJson, validateOp, checkOp, applyOp, applyOps, coalesce, overlaps, assignDeep, serializeLive,
+  textHash, stampOf, parseStamp,
 } from "../../src/live/ops.js";
 
 const cases = JSON.parse(readFileSync(new URL("../fixtures/live-ops.json", import.meta.url), "utf8"));
@@ -200,5 +201,19 @@ describe("assignDeep", () => {
     assignDeep(target, { l: [9] });
     expect(target.l).toBe(list);
     expect(list).toEqual([9]);
+  });
+});
+
+describe("lineage stamps", () => {
+  const stamps = JSON.parse(readFileSync(new URL("../fixtures/live-stamp.json", import.meta.url), "utf8"));
+  for (const c of stamps) {
+    test(`stamp ${c.stamp}`, () => {
+      expect(stampOf(c.epoch, c.seq, c.text)).toBe(c.stamp);
+      expect(parseStamp(c.stamp)).toEqual({ epoch: c.epoch, seq: c.seq, hash: textHash(c.text) });
+    });
+  }
+
+  test("malformed stamps parse to null", () => {
+    for (const bad of ["e1:3", "e1:-1:00000000", "e1:3:zz", "e1:03:00000000", "", null, 7]) expect(parseStamp(bad)).toBeNull();
   });
 });
