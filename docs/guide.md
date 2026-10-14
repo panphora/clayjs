@@ -1099,7 +1099,8 @@ Rules for sapjs in a malleable file:
 - **Every `detail=` panel and `<dialog>` sits inside a `clay="freeze"` wrapper.** Its controls are painted with the open record's values; outside freeze they would save a second copy. Not `editor-ui`, which removes the element from the file. sapjs warns `W31` for a dialog without the wrapper.
 - **Give records a `data-id`**, and `data-id=""` on blueprints: `$add` and `trigger-add` mint fresh ids. Live sync pairs elements by it.
 - **`persist` on bound inputs inside records**, so typed values reach the attributes a save captures.
-- **Re-sync inputs after undo, redo and a sync merge**: they restore the attribute, not the live value sapjs reads. Use the `syncControls` code in 5.3.
+- **Re-sync controls after undo and redo**: they restore the attribute, not the live value sapjs reads (a sync merge moves live values itself). Use the `syncControls` script in [sapjs guide section 8](https://saphtml.com/guide.html#8-work-with-clayjs), which restores inputs, checkboxes, textareas and selects.
+- **`viewmode:` attributes log `W03`** (unknown attribute) in sapjs, for example 4.4's `viewmode:readonly`. The warning is harmless, but it makes a "no warnings" check fail.
 - **Hide blueprints in your own CSS** (`[item][template] { display: none }`); sapjs's own rule arrives only with the script. Sapjs also adds `[hidden] { display: none !important }` page-wide.
 - A pass is batched: after a write, call `Sap.refresh()` before reading painted output. Expressions compile with `new Function`, so a Content Security Policy without `unsafe-eval` breaks them.
 
@@ -1195,7 +1196,7 @@ const setText = (el, text) => { if (el.textContent !== text) el.textContent = te
 
 Recompute on three triggers: record mutations (a `MutationObserver` on the record container, coalesced with a microtask), `clay:sync-applied`, and `hashchange` when the hash affects the view. Observe the record, not the chrome, so derived writes do not trigger themselves.
 
-With sapjs, every derived value here is a paint, and sapjs recomputes on all three triggers by itself: see [sapjs guide section 6](https://saphtml.com/guide.html).
+With sapjs, every derived value here is a paint. sapjs recomputes on record mutations and `clay:sync-applied` by itself, and on hash changes only through `clay-router.js` (`clay:route`); an app with its own hash format keeps a `hashchange` listener that calls `Sap.refresh()`. See [sapjs guide section 6](https://saphtml.com/guide.html).
 
 ### 9.5 Detail views: the record is the modal
 
@@ -1269,7 +1270,7 @@ document.addEventListener("click", (event) => {
 
 ### 9.7 Filters and view switching
 
-- **Filter by hiding** records with a runtime stylesheet (skeleton, kanban) or sap `show=` plus snapshot normalization (finance). Never remove records to filter.
+- **Filter by hiding** records with a runtime stylesheet (skeleton, kanban), or with sapjs through an `each=` view or a frozen stylesheet (8.11). The finance example still uses sap `show=` plus snapshot normalization, an older pattern: `show=` writes `hidden` into saved records. Never remove records to filter.
 - **Switch layouts with CSS** over the same records where possible: a list view can be the board with `display: contents` on columns.
 - **Projection views** (a table of all cards, a calendar, a due-today list) render into an `editor-ui` container and rebuild on record mutation, `clay:sync-applied` and `hashchange`. Edits made in a projection write to the record by id.
 
@@ -1391,7 +1392,7 @@ Missing pieces to add on the same model: a table block (`<table>` with `editmode
 - `main#app[sap]` with a summary of `no-dirty` outputs (budgeted, spent, left), a categories table (`items="categories"`, each row a name, a persisted budget input, computed spent and left, a progress bar via `css:used`) and a transactions table (`items="txns"`, each row date, memo, category with a datalist, amount).
 - Category spent: `calc:spent="sum(root.txns.filter(t => t.cat === item.name), 'amount')"`.
 - Search: a `transient` bound input, `calc:match` and `show="item.match"` per row, `hidden` stripped from snapshots.
-- Rows get stable ids from `claimRowIds` (8.11).
+- Rows get stable ids from `claimRowIds`, a workaround from before sapjs minted unique ids. A new app writes `data-id=""` on the blueprint and lets `trigger-add` mint ids (8.11).
 - CSV import (edit only) and export (both modes).
 - The 7.3 acknowledge workaround for `no-dirty` totals.
 
@@ -1572,7 +1573,6 @@ The saved file is the data. Everyone who can download it can read everything in 
 | `onclone` does not fire for template fragments | 8.7 |
 | `el.nearest` reads a neighbour record's field | 8.7 |
 | `hide()`, `show()`, `css()` write saved inline styles | 8.7 |
-| Sap reuses `row-N` ids after reload | 8.11 |
 | A file whose painted values do not match sap's state writes at load | 8.11 |
 | Dialog prompts are HTML: record text in `clay.confirm` runs a collaborator's markup | 8.6 |
 | `editmode:resource type="inert/javascript"` activates as `javascript` and never runs | 4.4 |
