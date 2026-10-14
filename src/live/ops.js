@@ -1,0 +1,223 @@
+// The operation model behind clay.live stores. Pure: no DOM, no network.
+// Every client and the server apply the same ops to the same value and get
+// byte-identical JSON, object key order included, so nothing here may depend
+// on timing or on where a value came from.
+
+const INDEX = /^(0|[1-9]\d*)$/;
+const OPS = new Set(["set", "del", "add"]);
+
+const isContainer = (v) => v !== null && typeof v === "object";
+const has = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
+
+function setOwn(obj, key, value) {
+  Object.defineProperty(obj, key, { value, enumerable: true, writable: true, configurable: true });
+}
+
+// "players.alice.x" or ["players", "alice", "x"] -> segments. In the dotted form a
+// canonical non-negative integer becomes an index; a key containing a dot needs
+// the array form.
+export function parsePath(path) {
+  if (Array.isArray(path)) {
+    for (const seg of path) checkSegment(seg);
+    return path.slice();
+  }
+  if (typeof path !== "string") throw new TypeError("clay.live: a path is a dotted string or an array of keys");
+  if (path === "") return [];
+  return path.split(".").map((s) => (INDEX.test(s) ? Number(s) : s));
+}
+
+function checkSegment(seg) {
+  if (typeof seg === "string") return;
+  if (Number.isInteger(seg) && seg >= 0) return;
+  throw new TypeError(`clay.live: path segment ${String(seg)} is not a string or a non-negative integer`);
+}
+
+// A deep copy that refuses anything JSON cannot hold, so a stored value can
+// never be mutated through an outside reference and always serializes.
+export function cloneJson(value, seen = new Set()) {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return value;
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) throw new TypeError("clay.live: numbers must be finite");
+    return value;
+  }
+  if (typeof value !== "object") throw new TypeError(`clay.live: a ${typeof value} is not JSON`);
+  if (seen.has(value)) throw new TypeError("clay.live: the value contains a cycle");
+  seen.add(value);
+  let out;
+  if (Array.isArray(value)) {
+    out = [];
+    for (let i = 0; i < value.length; i++) {
+      if (!(i in value)) throw new TypeError("clay.live: sparse arrays are not JSON");
+      out.push(cloneJson(value[i], seen));
+    }
+  } else {
+    const proto = Object.getPrototypeOf(value);
+    if (proto !== Object.prototype && proto !== null) throw new TypeError("clay.live: only plain objects and arrays are JSON");
+    out = {};
+    for (const key of Object.keys(value)) setOwn(out, key, cloneJson(value[key], seen));
+  }
+  seen.delete(value);
+  return out;
+}
+
+// Shape check, before anything is touched. Returns a normalized op with its
+// value already cloned.
+export function validateOp(op) {
+  if (!isContainer(op) || !OPS.has(op.op)) throw new TypeError("clay.live: an op is { op: \"set\" | \"del\" | \"add\", path, ... }");
+  const path = parsePath(op.path);
+  if (op.op === "set") {
+    if (op.value === undefined) throw new TypeError("clay.live: set needs a value; use delete to remove");
+    const value = cloneJson(op.value);
+    if (path.length === 0 && !isContainer(value)) throw new TypeError("clay.live: the whole value must be an object or an array");
+    return { op: "set", path, value };
+  }
+  if (path.length === 0) throw new TypeError(`clay.live: ${op.op} needs a path`);
+  if (op.op === "add") {
+    if (typeof op.n !== "number" || !Number.isFinite(op.n)) throw new TypeError("clay.live: add needs a finite number");
+    return { op: "add", path, n: op.n };
+  }
+  return { op: "del", path };
+}
+
+function indexOf(arr, seg) {
+  if (typeof seg === "number") return seg;
+  if (INDEX.test(seg)) return Number(seg);
+  return -1;
+}
+
+function read(container, seg) {
+  if (Array.isArray(container)) {
+    const i = indexOf(container, seg);
+    return i >= 0 && i < container.length ? container[i] : undefined;
+  }
+  const key = String(seg);
+  return has(container, key) ? container[key] : undefined;
+}
+
+// Throws, without mutating anything, when op cannot apply to root: a string
+// key on a list, or a list index past the end. A missing or non-container
+// step along the way is not an error: applyOp replaces it with a container.
+export function checkOp(root, op) {
+  let node = root;
+  for (let i = 0; i < op.path.length; i++) {
+    const seg = op.path[i];
+    const last = i === op.path.length - 1;
+    if (!isContainer(node)) return;
+    if (Array.isArray(node)) {
+      const idx = indexOf(node, seg);
+      if (idx < 0) throw new TypeError(`clay.live: "${seg}" is not an index of the list at ${op.path.slice(0, i).join(".") || "the root"}`);
+      const limit = last && op.op !== "del" ? node.length : node.length - 1;
+      if (idx > limit && !(last && op.op === "del")) throw new RangeError(`clay.live: index ${idx} is past the end of the list at ${op.path.slice(0, i).join(".") || "the root"}`);
+    }
+    if (last) return;
+    node = read(node, seg);
+  }
+}
+
+function put(container, seg, value) {
+  if (Array.isArray(container)) container[indexOf(container, seg)] = value;
+  else setOwn(container, String(seg), value);
+}
+
+// Applies one checked op. Mutates root and returns it, or returns the new root
+// for a whole-value set.
+export function applyOp(root, op) {
+  const { path } = op;
+  if (path.length === 0) return cloneJson(op.value);
+  let parent = root;
+  for (let i = 0; i < path.length - 1; i++) {
+    let next = read(parent, path[i]);
+    if (!isContainer(next)) {
+      if (op.op === "del") return root;
+      next = typeof path[i + 1] === "number" ? [] : {};
+      put(parent, path[i], next);
+    }
+    parent = next;
+  }
+  const last = path[path.length - 1];
+  if (op.op === "set") {
+    put(parent, last, cloneJson(op.value));
+  } else if (op.op === "add") {
+    const cur = read(parent, last);
+    put(parent, last, (typeof cur === "number" && Number.isFinite(cur) ? cur : 0) + op.n);
+  } else if (Array.isArray(parent)) {
+    const idx = indexOf(parent, last);
+    if (idx >= 0 && idx < parent.length) parent.splice(idx, 1);
+  } else {
+    delete parent[String(last)];
+  }
+  return root;
+}
+
+// Applies a list of ops in order; checks each one against the value as it
+// stands at that point. Callers that need atomicity apply to a clone.
+export function applyOps(root, ops) {
+  let value = root;
+  for (const op of ops) {
+    checkOp(value, op);
+    value = applyOp(value, op);
+  }
+  return value;
+}
+
+const samePath = (a, b) => a.length === b.length && a.every((s, i) => String(s) === String(b[i]));
+
+// Merges neighbouring ops on the same path, without changing the result:
+// set,set -> the later set; add,add -> one add of the sum; set,add -> one set of
+// the sum; set,del and add,del -> the del. A del is never merged with what
+// follows it (on a list it shifts the indexes after it).
+export function coalesce(ops) {
+  const out = [];
+  for (const op of ops) {
+    const prev = out[out.length - 1];
+    if (!prev || prev.op === "del" || !samePath(prev.path, op.path)) {
+      out.push(op);
+      continue;
+    }
+    if (op.op === "set" || op.op === "del") {
+      out[out.length - 1] = op;
+    } else if (prev.op === "add") {
+      out[out.length - 1] = { op: "add", path: prev.path, n: prev.n + op.n };
+    } else {
+      const base = typeof prev.value === "number" ? prev.value : 0;
+      out[out.length - 1] = { op: "set", path: prev.path, value: base + op.n };
+    }
+  }
+  return out;
+}
+
+// True when one path is a prefix of the other: an op on one can change what
+// the other reads.
+export function overlaps(a, b) {
+  const n = Math.min(a.length, b.length);
+  for (let i = 0; i < n; i++) if (String(a[i]) !== String(b[i])) return false;
+  return true;
+}
+
+// Makes target equal next in place, keeping the identity of every nested
+// object or list that still sits at the same path with the same type, so a
+// reference handed out earlier stays live. Object keys end up in next's order.
+// next's own nested values are moved in, not copied: pass a fresh value.
+export function assignDeep(target, next) {
+  if (Array.isArray(target)) {
+    for (let i = 0; i < next.length; i++) target[i] = reuse(i < target.length ? target[i] : undefined, next[i]);
+    target.length = next.length;
+    return target;
+  }
+  const keys = Object.keys(next);
+  const values = keys.map((k) => reuse(has(target, k) ? target[k] : undefined, next[k]));
+  for (const k of Object.keys(target)) delete target[k];
+  keys.forEach((k, i) => setOwn(target, k, values[i]));
+  return target;
+}
+
+function reuse(cur, next) {
+  if (isContainer(cur) && isContainer(next) && Array.isArray(cur) === Array.isArray(next)) return assignDeep(cur, next);
+  return next;
+}
+
+// The text a live store writes into its script tag. `<` is escaped so a value
+// holding "</script>" can never end the element.
+export function serializeLive(value) {
+  return JSON.stringify(value).replace(/</g, "\\u003c");
+}
