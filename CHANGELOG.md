@@ -1,5 +1,14 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- `clay.live(name)` (`?plugins=live`): a `clay="live"` JSON script as an in-memory object for games and other fast-changing state. Writes are ops (`set`, `delete`, `add`, `update`, or plain assignment through `data`), every tab sees them at once, and checkpoints write the value back into the file every 8 seconds and on hide or close. `clay="live ephemeral"` shares a value that is never saved.
+- Fast lane on hosts that advertise `live-data` (hyperclay.com): one room per document orders every change; tabs that join late or miss a change fetch the room's state, and only the room's writer saves checkpoints.
+- Local tab lane: on other hosts, tabs of one document in one browser share live stores at full speed through a BroadcastChannel, with one tab running the room.
+- `live` region token, and `setSaveHeader()` in the save core
+- JSON merges keep list positions for same-length lists, take per-path `merge-key`, keep the authored formatting, and report conflicting keys in the conflict notice
+
 ## [1.10.0] - 2026-10-12
 
 ### Added

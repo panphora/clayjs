@@ -428,6 +428,7 @@ Never saved: JavaScript objects, `localStorage`, canvas pixels, scroll position,
 | `no-watch` | current | yes, remote wins | no | no | no | rarely: high-frequency content that is disposable |
 | `no-undo` | current | yes | yes | yes | no | content with its own undo (richclay sets it at runtime) |
 | `no-data` | current | yes | yes | yes | yes | content the data API and `extractData` must skip |
+| `live` | the store's current value, at checkpoints | never through the merge; the `live` plugin carries it (7.9) | no | no | no | a `clay="live"` JSON tag |
 
 `editor-ui` bundles `no-data no-save no-snapshot no-watch no-undo`. **Use `editor-ui` for chrome, not `no-save`.** A `no-save` element is still inside the snapshot live sync sends to peers. Peers never apply it, but its text travels to every edit-mode tab (viewers receive the saved file, without it), and `no-save` alone still records undo steps. Older docs advised `clay="no-save no-watch"` for chrome; `editor-ui` replaces that.
 
@@ -506,7 +507,8 @@ In order of preference:
    ```
 
    Always escape `<`: a value containing `</script>` ends the element early and corrupts the file on reload. Re-parse on every `clay:sync-applied`, because a merge changes the text, not your parsed object. When two writers change the same key, the incoming value wins and the lost value shows in the conflict notice (7.3).
-4. **`<template>` content: never for mutable data.** It is saved, but edits there never trigger autosave.
+4. **A live JSON script (`clay="live"`)** for state that changes faster than a save: game boards, scores, cursors (7.9).
+5. **`<template>` content: never for mutable data.** It is saved, but edits there never trigger autosave.
 
 ### 5.5 Identity
 
@@ -726,6 +728,7 @@ More engine rules:
 - `freeze`: **the element merges, its contents never do.** A frozen element pairs, moves, is inserted and removed with its record, and its attributes merge. Your copy's contents are never touched, the incoming contents are never read, and a frozen element new to this tab arrives empty.
 - `no-dirty`, `no-watch`: **remote wins.** The incoming copy replaces yours with no merge. Correct for derived values that every tab recomputes.
 - `no-trigger-autosave`: merged like ordinary content.
+- `live`: **ignored by the merge on every side.** The `live` plugin takes the value itself (7.9).
 - Root attributes the library owns (`editmode`, `savestatus`, tokens) are never written by a frame.
 
 **Known issue (ClayJS 1.8.2):** when a frame replaces a `no-dirty` region that this tab had also changed, while the tab also holds an unsaved edit outside that region, the replacement is logged in `clay.conflicts` as a loss and raises the conflict notice, although the docs say it happens with no warning. Two tabs that each edited the data will each have recomputed the totals differently, so this fires on concurrent edits whenever computed totals live in `no-dirty`. Until it is fixed, acknowledge those records yourself, as the finance tracker does:
@@ -738,7 +741,7 @@ document.addEventListener("clay:sync-applied", () => {
 });
 ```
 
-**JSON.** A JSON script without `merge` is one value: two writers changing it means one whole blob goes to the ledger. With `merge="name"` it merges per key: objects per key, arrays of objects by an `id` field, arrays of primitives by value, and lists without an id (grids, boards, repeated values) position by position when both sides kept the same length. `merge-key="taskId"` names another id field for every list, and `merge-key="players:uid, items:sku"` names one per list path (no spaces inside an entry). **A key both sides changed takes the incoming value**, and the lost value goes to the ledger like any other replaced edit: the notice shows a row such as `game → players → alice → x`, with yours and now. Revert cannot put a JSON value back; Download keeps your copy. Use per-entry keys (`notes: { "n-1": ..., "n-2": ... }`) so two people adding entries never touch the same key. When a merge mixes both sides, the text is rewritten in the incoming text's style (one line stays one line, indented stays indented) with `<` written as `\u003c`.
+**JSON.** A JSON script without `merge` is one value: two writers changing it means one whole blob goes to the ledger. With `merge="name"` it merges per key: objects per key, arrays of objects by an `id` field, arrays of primitives by value, and lists without an id (grids, boards, repeated values) position by position when both sides kept the same length. `merge-key="taskId"` names another id field for every list, and `merge-key="players:uid, items:sku"` names one per list path (no spaces inside an entry). **A key both sides changed takes the incoming value**, and the lost value goes to the ledger like any other replaced edit: the notice shows a row such as `game → players → alice → x`, with yours and now. Revert cannot put a JSON value back; Download keeps your copy. Use per-entry keys (`notes: { "n-1": ..., "n-2": ... }`) so two people adding entries never touch the same key. For data several people change at once, use a live store (7.9) instead. When a merge mixes both sides, the text is rewritten in the incoming text's style (one line stays one line, indented stays indented) with `<` written as `\u003c`.
 
 ### 7.4 Focus, typing and long-running editors
 
@@ -776,7 +779,7 @@ The built-in notice reads "Another edit replaced N changes" and offers **Revert 
 
 ### 7.7 Presence
 
-hyperclay.com shows a fixed avatar stack (initials in hollow squares, a "+N viewing" count) when two or more people have the file open. **There is no API**: no event, no roster, no cursor or section data. An app cannot build its own "who is here" or "X is editing this card". HTML Clay and Hyperclay Local have no presence.
+hyperclay.com shows a fixed avatar stack (initials in hollow squares, a "+N viewing" count) when two or more people have the file open. **There is no API**: no event, no roster, no cursor or section data. An app cannot build its own "who is here" or "X is editing this card" from it; share that through a never-saved live store instead (7.9). HTML Clay and Hyperclay Local have no presence.
 
 ### 7.8 Agents
 
@@ -786,6 +789,86 @@ An agent edits a malleable file the way a person in another tab does.
 - **`clay.wire`** (`?plugins=wire`, HTML Clay and Hyperclay Local): `clay.wire.send(payload)` sends a request to a local process started with `htmlclay wire serve file.htmlclay -- my-agent`. The page saves first, so the agent reads what the person sees, and autosave pauses until the agent's edit lands as a disk frame. `run.done` resolves then.
 - **`ai-edit`** (`?plugins=ai-edit`): select text, press Cmd+J, describe the change. The rewrite is previewed in place; Keep saves it, Revert discards it. Available where the host offers the `ai-edit` helper (HTML Clay, Hyperclay Local).
 - **The data API**: a host that announces `data-read`/`data-write` serves `/_/api/<file>`, a JSON read and write face over the file defined by a rules tag (9.9). `clay.readData()` and `clay.writeData()` call it from the page; `writeData` is for agents and other processes, and refuses while the page has unsaved edits.
+
+### 7.9 Live data: `clay="live"`
+
+Everything above moves at save speed: a peer sees your change after your next save. A live store is for state that changes faster than that, such as a game board, a score, a cursor or a timer. It is one JSON script that ClayJS holds as an object in memory. Page code changes it through ops, every tab of the document sees each change at once, and the value is written back into the file at checkpoints.
+
+```html
+<script type="application/json" merge="game" clay="live">
+{"turn": "x", "cells": {"0": "", "1": "", "2": ""}, "wins": {"x": 0, "o": 0}}
+</script>
+<script src="https://clayjs.com/v1/clay.js?plugins=sync,live"></script>
+```
+
+```js
+await clay.ready;
+const game = clay.live("game");
+
+game.on("change", render);            // { source: "local" | "remote" | "state", ops }
+render();
+
+function play(cell) {
+  game.update((d) => {                // one batch, one frame, rolled back if it throws
+    if (d.cells[cell]) return;
+    d.cells[cell] = d.turn;
+    d.turn = d.turn === "x" ? "o" : "x";
+  });
+}
+
+function render() {
+  const d = game.data;                 // read it like a plain object
+  // ...paint the board from d.cells
+}
+```
+
+**The tag.** A `<script type="application/json">` with `merge="name"` and `clay="live"`, holding a JSON object or list. The name is 1 to 64 letters, digits, `_`, `.`, `:` or `-`, and two live tags with the same name are both ignored. Write the tag into the file before people share it: a tag added later is not in the rooms of tabs that loaded before.
+
+**The API.** `clay.live(name)` returns the same handle every time.
+
+- `game.data` is the value, read like a plain object. Writes to it become ops: `game.data.players.alice = { x: 0 }`, `delete game.data.players.bob`.
+- `game.set(path, value)`, `game.delete(path)` and `game.add(path, n = 1)`. A path is a dotted string (`"players.alice.x"`) or an array (`["players", "alice", "x"]`).
+- `game.update(fn)` runs `fn(data)` synchronously and sends what it changed as one batch. If `fn` throws, every change it made is undone.
+- `game.on("change", fn)` and `game.off("change", fn)`. `source` is `local` (this tab), `remote` (another tab), or `state` (the value was replaced from the room or a save).
+- `game.toJSON()` is a copy, `game.ready` a promise of the handle, `game.status.mode` is `fast` or `file` (below).
+
+Two rules for the proxy:
+
+- **Counters use `add`.** `game.data.score += 1` reads the number and writes the sum, so two tabs adding at once both write the same sum and one point is lost. `game.add("score", 1)` sends the increment, and both count.
+- **Lists are written whole.** `push`, `splice` and `sort` replace the entire list, so two tabs pushing at once keep one push. An index assignment (`grid[2][3] = "x"`) changes one cell. Keep collections as objects keyed by id (`players: { "p-7f3a": {...} }`).
+
+**What gets saved, and when.** A live change never marks the page unsaved, never starts autosave and never raises the close warning. A checkpoint writes the current value into the file 8 seconds after the first change, and again when the tab is hidden or closed. Up to 8 seconds of play can be lost, and that is the trade. The close save uses `keepalive`, which browsers only honour for bodies under about 60 KB, so a large page may lose its last few seconds. Every checkpoint is a save, with a version in the host's history. A game page needs no `autosave` attribute for its live data.
+
+**Never-saved stores.** `clay="live ephemeral"` shares the value like any store but never writes it into the file: the tag keeps the text you authored. Use it for cursors, lobbies and presence. Anyone who can open the file can read the authored text, so keep secrets out of it.
+
+**How it travels.** Which lane a store uses depends on the host:
+
+- **hyperclay.com** (the `live-data` capability): every change goes to the document's room on the server, which numbers it and passes it to every editor within a network round trip. Tabs that join late, or that miss a change, fetch the room's whole state. Only one tab, the room's writer, saves the checkpoints. Viewers do not get the fast lane: they see the game at each checkpoint, through ordinary live sync. When an outside save changes a live tag (the code editor, a version restore, a device sync), the room starts over from the file.
+- **Tabs of one browser on HTML Clay or Hyperclay Local**: the tabs share the store at the same speed through the browser itself. One tab runs the room and saves the checkpoints. When it closes, another tab takes over. Use this to playtest a game in several tabs.
+- **Everywhere else** (another device on a local host, a browser without Web Locks): the store moves at save speed. Each incoming save replaces the value, and this tab's own changes that are not yet saved are replayed on top, so an `add` counts exactly once.
+
+`game.status.mode` is `fast` on the first two lanes and `file` on the third. In view mode a store reads normally, but writes stay in the tab and are never sent or saved.
+
+**Load the plugin wherever a live tag exists.** A page without `?plugins=live` still leaves live tags out of the merge, so an incoming save does not update them and the next save writes the old text back.
+
+**Limits on hyperclay.com.** A frame carries at most 128 ops and 16 KB. A store holds at most 128 KB of JSON, a document at most 512 KB across at most 16 stores. One person sends at most 25 frames a second per document (bursts to 40), and ClayJS paces itself to stay under that. A change the room refuses is undone in the tab, with a console warning.
+
+**A two-player example.** The board above plus a never-saved lobby for pointers:
+
+```html
+<script type="application/json" merge="lobby" clay="live ephemeral">{"pointers": {}}</script>
+```
+
+```js
+const lobby = clay.live("lobby");
+const me = crypto.randomUUID?.() ?? String(Math.random());
+document.addEventListener("pointermove", (e) => {
+  lobby.set(["pointers", me], { x: e.clientX, y: e.clientY });
+});
+lobby.on("change", drawPointers);
+```
+
+Wins are counters, so they use `add`: `game.add(["wins", winner], 1)`.
 
 ---
 
@@ -1085,6 +1168,7 @@ Edit-only chrome lives in the same wrapper with `show-when:editmode="true"`, or 
 | Which card or entry is open, the filter, search text, current view, sort | URL hash: `#card=c-brief&q=pricing` | per tab, survives reload, shareable, Back closes the card, never saved or synced |
 | Collapsed sections, column widths, density, last opened entry | `localStorage`, keyed by the file's path | per device and viewer; wrap reads and writes in `try/catch` |
 | Selection, hover, drag state, open menu | memory, or chrome DOM | transient |
+| Pointers, lobbies, who is looking at what, shared live but never saved | a never-saved live store (7.9) | every tab sees it at once, the file never holds it |
 | A default view visitors land on, WIP limits, column names, label definitions | attributes on a settings element in the record | genuinely part of the document |
 
 **Paint per-tab state with a runtime stylesheet** inside chrome, rewritten from the hash, instead of toggling classes or attributes on records:
@@ -1360,7 +1444,7 @@ ClayJS gives one file per document, whole-document saves, save-gated three-way m
 
 Cross-cutting:
 
-- **Collaboration latency** is the autosave cadence: a few seconds after each pause.
+- **Collaboration latency** is the autosave cadence: a few seconds after each pause. State that has to move faster (games, scores, cursors) goes in a live store (7.9).
 - **Per-row permissions** do not exist: edit access is per file. Split data with different audiences into different files.
 - **Background work** (reminders, recurring transactions) cannot run in a closed file. Compute "due" when the file is open.
 - **Privacy:** the saved file is the data. Hiding an element with CSS or `show-when` is presentation, not access control (12.3).
@@ -1378,6 +1462,7 @@ Cross-cutting:
 | Outside disk edits reach open tabs | yes (agents, text editors) | yes | no disk except through device sync |
 | Presence | none | none | avatar stack, no API |
 | `by` on frames, editing marker | no | no | yes |
+| Live stores (7.9) | tabs of one browser at full speed | tabs of one browser at full speed; other devices at save speed | every editor at full speed |
 | Wire and ai-edit | yes | yes | no |
 | Data API write | yes | yes | read only |
 | Uploads | 25 MB, in `~/htmlclay/uploads/` | 25 MB, in the root's `uploads/` | 10, 20 or 100 MB by plan, in the account's `uploads/` |
@@ -1452,6 +1537,10 @@ The saved file is the data. Everyone who can download it can read everything in 
 | Undo and merges restore `checked`/`value` attributes but not what the control shows, and the next save writes what is shown | 5.3, 8.3 |
 | JSON with an unescaped `</script>` corrupts the file | 5.4 |
 | `<template>` content edits never autosave | 5.4 |
+| `+=` on a live counter loses increments from other tabs; use `add` | 7.9 |
+| A list in a live store pushed from two tabs keeps one push | 7.9 |
+| A live tag added after people loaded the page is not in their rooms | 7.9 |
+| Live data gets no close warning; up to 8 s can be lost | 7.9 |
 | Items without ids added in two tabs: one is dropped | 5.5, 7.2 |
 | Cloned records share a `data-id`, which counts as no id | 5.5 |
 | `crypto.randomUUID` is missing outside secure contexts | 5.5 |
