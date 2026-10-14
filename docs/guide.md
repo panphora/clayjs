@@ -1065,59 +1065,41 @@ Bevel (`@panphora/bevel`) is a separate component library with a kanban board, a
 
 Older Hyperclay files can carry attributes ClayJS ignores: `movable`, `movable-handle`, `prevent-enter`, `autosize`, `ajax-form`, `ajax-button`, `send-message`, `upgrade`. Replace them with a few lines of code (`prevent-enter`: a keydown handler; `autosize`: CSS `field-sizing: content`; `movable`: pointer events writing `data-x`/`data-y`). Old saved `<html editmode="false">` and hand-written `option-visibility-styles` style tags are dead weight; ClayJS strips the root attributes on the next save.
 
-### 8.11 sap.js: computed values in markup
+### 8.11 sap.js: records, views and totals in markup
 
-`sap.js` (satellite, also standalone as `@panphora/sapjs`) is a reactive attribute layer whose only store is the DOM. Every change runs one pass that reads the page, computes `calc:` fields in dependency order and writes only changed paints. Use it for number-heavy apps: budgets, invoices, trackers with totals.
+`sap.js` (a satellite, also published standalone as `@panphora/sapjs`) is a reactive attribute layer whose only store is the DOM. Every change runs one pass: it reads the app out of the live page, computes `calc:` fields in dependency order, and writes only the paints that changed. It is the way to build the reactive parts of a malleable document app: totals, filtered and sorted views, a form that adds records, an editor for the selected record.
+
+**Before building an app with sapjs, read the sapjs guide: [saphtml.com/guide.html](https://saphtml.com/guide.html) (Markdown: [saphtml.com/guide.md](https://saphtml.com/guide.md)).** It covers designing records, `each=` views, the three kinds of state, detail editors and dialogs, three complete tested apps, and a trap table. The attribute reference is [saphtml.com/llms.txt](https://saphtml.com/llms.txt). This section covers only what is specific to running sapjs inside ClayJS.
 
 ```html
 <main id="app" sap>
-  <output clay="no-dirty" calc:totalspent="sum(state.txns, 'amount')" text:usd2="state.totalspent">$900.00</output>
+  <output calc:total="sum(state.txns, 'amount')" text:usd2="state.total">$900.00</output>
   <table>
     <tbody items="txns">
-      <tr item id="t-k1">
-        <td><input type="number" step="0.01" bind="amount" persist viewmode:readonly readonly value="900"></td>
-      </tr>
-      <tr item template><td><input type="number" step="0.01" bind="amount" persist viewmode:readonly></td></tr>
+      <tr item template data-id=""><td><input type="number" step="0.01" bind="amount" persist></td></tr>
+      <tr item data-id="t-k1"><td><input type="number" step="0.01" bind="amount" persist value="900"></td></tr>
     </tbody>
   </table>
 </main>
+<script src="https://clayjs.com/v1/sap.js"></script>
 ```
 
-The vocabulary:
+The vocabulary in one breath: `sap` marks an app root; `items="list"` holds `[item]` records and `[item][template]` (or a shared `<template items="list">`) is the blueprint; `bind` two-way binds a control or a text leaf; `state="data-due data-done:presence"` declares fields stored as attributes; `calc:`, `text:fmt`, `show`, `class:`, `css:`, `attr:` and `effect` paint; `each="expr"` renders a view of any array whose rows edit the records they show; `detail="LIST by KEY"` projects one record into a panel or a `<dialog>`; actions are `trigger-add`, `trigger-remove`, `move:`, `sort:`, `set:` and `confirm=`; `Sap(el)` is a write-through proxy and `Sap.batch(label, fn)` makes one undo step. Done means no `sap ✗` console line and `Sap.status().ok === true`.
 
-- `sap` marks an app root. `bind="field"` two-way binds a control (numbers for `type=number`, booleans for checkboxes) or a contenteditable leaf. `items="list"` on a container makes its `[item]` children rows; `[item][template]` is the row blueprint.
-- `calc:name="expr"`, `text:fmt="expr"` (`usd`, `usd2`, `pct`, `int`, `num2`, `compact`, `date`, others), `show="expr"` (toggles `hidden`), `class:name`, `css:name` (sets `--name`), `attr:name`.
-- `effect="stmt"` runs a statement on every pass (fill a scratchpad, set `document.title`). `state="name:transient"` declares a field that lives only in this tab. `state="data-date"` reads and writes the `data-date` attribute and appears in expressions as `item.date`. `each="expr"` with one `<template>` child renders a runtime row per array element, matched by `key="expr"` (default `item.$key`).
-- Expressions see `state`, `item`, `root`, and `sum`, `count`, `avg`, `min`, `max`, `num`, `plural`, `days`. Field names are lowercase identifiers without hyphens.
-- Actions: `trigger-add="list"`, `trigger-remove`, `move:up`, `move:down`, `sort:field`, `set:field="expr"`, `confirm="msg"` (uses `clay.confirm`).
-- JavaScript: `Sap(el)` returns a write-through proxy for the owning row or scope (`$add(list)`, `$remove()`); `Sap.batch(label, fn)` makes one undo step; `Sap.refresh()` runs a pass now.
-- Done means: no `sap ✗` console line, `Sap.status().ok === true`, no `[sap-error]` elements.
+How it fits ClayJS: its paints ride the mutation hub, so they never start an autosave or count as unsaved by themselves. It re-derives on `clay:sync-applied`, `clay:sorted`, `clay:route` and undo. Rows of an `each=` view carry `clay="editor-ui"`, so views never save or sync.
 
-How it fits ClayJS: it rides the mutation hub so its paints never trigger autosave, re-derives on `clay:sync-applied` and on undo, and mirrors bound values into attributes on programmatic writes. `persist` on bound controls keeps typed values. Sap reads a control's live value, not its attribute, so after undo and redo re-sync the inputs first (the `syncControls` code in 5.3) or totals and the next save keep the undone number.
+Rules for sapjs in a malleable file:
 
-Rules for sap in a malleable file, from the finance tracker and the starter templates:
-
-- **A paint computed only from the records is ordinary saved content.** A list count, a card's checklist badge, an entry count in a header: put the paint in the record markup with no region token. It saves and syncs like anything else, and every tab computes the same value, so at load and after a merge sap writes nothing new. This is the normal way to use sap.
-- **A paint that differs per tab goes in a `clay="freeze"` scratchpad**: anything that depends on today's date, the browser's locale or OS, the URL hash, the search box, or data loaded at runtime. Freeze keeps an element's contents, not its attributes, so the per-tab values must be inside the scratchpad: wrap them, or fill the scratchpad from an `effect`, which is re-run on every pass and so also fills a scratchpad that arrived empty from a peer:
-
-  ```html
-  <span class="due-slot" clay="freeze" show="Face.due(item.$el)" effect="Face.paintDue(el, item.$el)"></span>
-  ```
-
-  `show` on the scratchpad itself is fine when it depends only on the record. Write through a guard (`if (el.innerHTML !== html) el.innerHTML = html`) so a pass that changes nothing writes nothing.
-- **Author the file with its computed values already painted.** A mismatch makes sap write at load, which is an edit. Check by comparing the live `#app` after load with the file's. `Sap.status().apps[0].mountWrites` is not a clean signal on its own: in a root that contains `show-when` controls, sap briefly sets `hidden` on them before clay-options starts (a `W30` warning, 10 writes in the finance tracker) and clears it again, which is harmless.
-- **Optionally, computed outputs can go in `clay="no-dirty"`.** Their bytes save with the next real edit, never count as edits themselves, and a peer's frame replaces them. Apply the acknowledge workaround from 7.3 while that known issue stands.
-- **Give rows a `data-id`.** A row's `$key` is its `data-id`, else its `id`, else a key that lives only in this tab. Sap never writes an id at mount, and `$add` mints a fresh `data-id` when the template carries one.
-
-- **Hide the template row in your own CSS**: `[item][template] { display: none }`. Sap's rule is runtime-only and absent before it loads.
-- **Filter by hiding, never by removing**, so totals still see every row. Paint the hiding rule into a frozen stylesheet, so it never saves, syncs or touches a record, and keep the search text in a `transient` field: `<style clay="freeze" text="fmt.hideRules(state.cards)"></style>`. Painting `show=` on saved rows writes `hidden` into them, and that saves.
-- **Views of records are `each` projections.** A sorted, filtered or grouped list, a week grid, the quadrants of a matrix: render them with `each` over the records. Rows are `editor-ui`, so they never save or sync, and actions inside a row (`set:`, `trigger-remove`, `Sap(el)`) reach the record the row stands for.
-- **The open record is the URL hash.** Load `clay-router.js` after `clay.js`, put `route="name"` on the record container, and open a record with `clay.route.set({ name: id })` (`null` closes it). The router marks the record `route-active` (matched by `data-id`; `route="name by data-key"` picks another attribute) and sets `route-name` on `<html>`. ClayJS never saves, syncs or undoes either, so show the open record with CSS on `[route-active]`. Reload keeps it open, Back closes it, and `clay:route` fires on every change.
-- Sap adds `[hidden] { display: none !important }` page-wide.
-- Sap lints `viewmode:` attributes as unknown (`W03` warnings) in 1.8.2. Harmless.
-- `usd2` formats negative numbers as `$-162.40`.
-- A pass is batched: after a write, `Sap.refresh()` before reading painted output.
-- Expressions compile with `new Function`, so a Content Security Policy without `unsafe-eval` breaks them.
+- **Store each record once, as an element; derive everything else.** Counts, totals and card faces computed only from records are ordinary saved content: paint them into the record markup and ship the file pre-painted, so the first pass writes nothing (`mount writes 0`). A mismatch logs `W30` and repaints; the painted value goes out with the next real save.
+- **Per-tab values go in `clay="freeze"`**: anything from today's date, the locale, the URL hash, the search box or runtime data. Freeze saves an element's contents as they were at load, so put the per-tab values inside the frozen element, or fill it from an `effect`, which re-runs every pass.
+- **Per-tab state is `transient`** (`state="q:transient open:transient"`, and `transient` on the bound search input), or the URL hash through `clay-router.js`.
+- **Filter with an `each=` view, or a frozen stylesheet**, never with `show=` on saved records: `show=` writes `hidden` into the record, and that saves and syncs.
+- **Every `detail=` panel and `<dialog>` sits inside a `clay="freeze"` wrapper.** Its controls are painted with the open record's values; outside freeze they would save a second copy. Not `editor-ui`, which removes the element from the file. sapjs warns `W31` for a dialog without the wrapper.
+- **Give records a `data-id`**, and `data-id=""` on blueprints: `$add` and `trigger-add` mint fresh ids. Live sync pairs elements by it.
+- **`persist` on bound inputs inside records**, so typed values reach the attributes a save captures.
+- **Re-sync inputs after undo, redo and a sync merge**: they restore the attribute, not the live value sapjs reads. Use the `syncControls` code in 5.3.
+- **Hide blueprints in your own CSS** (`[item][template] { display: none }`); sapjs's own rule arrives only with the script. Sapjs also adds `[hidden] { display: none !important }` page-wide.
+- A pass is batched: after a write, call `Sap.refresh()` before reading painted output. Expressions compile with `new Function`, so a Content Security Policy without `unsafe-eval` breaks them.
 
 ### 8.12 The CMS, in passing
 
@@ -1211,6 +1193,8 @@ const setText = (el, text) => { if (el.textContent !== text) el.textContent = te
 
 Recompute on three triggers: record mutations (a `MutationObserver` on the record container, coalesced with a microtask), `clay:sync-applied`, and `hashchange` when the hash affects the view. Observe the record, not the chrome, so derived writes do not trigger themselves.
 
+With sapjs, every derived value here is a paint, and sapjs recomputes on all three triggers by itself: see [sapjs guide section 6](https://saphtml.com/guide.html).
+
 ### 9.5 Detail views: the record is the modal
 
 Keep a record's detail fields **inside the record element**, hidden on the card face by CSS, and show the record itself as an overlay with the runtime stylesheet from 9.3.
@@ -1242,6 +1226,8 @@ Why this beats a dialog with a copy:
 Open on a click that is not on an editable field, a handle, an input or a link. Close on the backdrop, Escape (unless typing) and Back. When a peer deletes the open record, `render()` finds it gone and clears the hash. Caveat: `position: fixed` breaks inside an ancestor with `transform`, `filter` or `contain`.
 
 When a dialog must aggregate several records, render it into `editor-ui`, write each change back to its record by id, call `clay.markDirty()` per edit if the record is not written immediately, and re-render it on `clay:sync-applied` without disturbing the focused field.
+
+With sapjs, the record-as-modal pattern works unchanged over `items=` records, and a plain-field editor can be a `detail=` panel or `<dialog>` instead: see [sapjs guide section 7](https://saphtml.com/guide.html).
 
 ### 9.6 Commands
 
@@ -1285,9 +1271,11 @@ document.addEventListener("click", (event) => {
 - **Switch layouts with CSS** over the same records where possible: a list view can be the board with `display: contents` on columns.
 - **Projection views** (a table of all cards, a calendar, a due-today list) render into an `editor-ui` container and rebuild on record mutation, `clay:sync-applied` and `hashchange`. Edits made in a projection write to the record by id.
 
+With sapjs, a projection view is an `each=` attribute, and its rows edit the records they show by themselves: see [sapjs guide section 5](https://saphtml.com/guide.html).
+
 ### 9.8 Computed totals
 
-Plain JavaScript into `editor-ui` (9.4) for counts and progress. Sap for anything with arithmetic across rows, categories and formats (8.11). Store money as integers or as plain numbers in `value` attributes, never as formatted strings.
+Plain JavaScript into `editor-ui` (9.4) for a count or two. Sapjs for anything with arithmetic across rows, categories and formats (8.11, and the expense tracker in sapjs guide section 9). Store money as integers or as plain numbers in `value` attributes, never as formatted strings.
 
 ### 9.9 Import and export
 
@@ -1367,6 +1355,8 @@ Up to about 1,000 records feels instant. From 1,000 to 3,000 there is a visible 
 - Templates: card, checklist item, column, chrome.
 
 Extend with labels (a settings element listing `<li data-label="bug" data-color="…">`, cards carrying `data-labels="bug ui"`), due dates (`data-due` plus a hash filter "due this week"), WIP limits (an attribute on the column, a warning in an `editor-ui` badge), and a list view (a projection or `display: contents`).
+
+With sapjs, the counts and progress badges become paints, the filters an `each=` view or a frozen stylesheet, and checklists nested `items=` lists with a shared blueprint: sapjs guide section 9.2 builds a smaller version as a complete, tested app.
 
 ### 10.2 Block writer
 
