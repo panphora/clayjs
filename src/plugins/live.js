@@ -92,6 +92,14 @@ function ensureLane() {
       } else {
         return;
       }
+      // The writer saves every store in the room, so every live tag is opened,
+      // not only the ones this page's code asked for.
+      for (const name of liveTags(document, { warn: false }).keys()) {
+        if (entries.has(name)) continue;
+        try {
+          live(name);
+        } catch {}
+      }
       fast.start();
     },
     () => {},

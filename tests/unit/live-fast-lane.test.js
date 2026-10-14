@@ -1,7 +1,7 @@
 import { jest } from "@jest/globals";
 import { createStore } from "../../src/live/store.js";
 import { applyOps, cloneJson } from "../../src/live/ops.js";
-import { createFastLane, MIN_GAP_MS, RETRY_MS } from "../../src/live/fast-lane.js";
+import { createFastLane, MIN_GAP_MS, RETRY_MS, FRAME_BYTES } from "../../src/live/fast-lane.js";
 
 /**
  * The fast-lane client against a fake room with the host's rules (seq, epoch,
@@ -46,7 +46,8 @@ function createRoom(initial) {
     if (frame.epoch !== undefined && frame.epoch !== room.epoch) return { status: 200, body: { stale: true, epoch: room.epoch }, retryAfter: 0 };
     if (!(frame.name in room.stores)) return { status: 404, body: { error: "unknown-store" }, retryAfter: 0 };
     const key = frame.name + "\n" + clientId;
-    if (frame.n <= (room.lastN.get(key) || 0)) return { status: 200, body: { duplicate: true, seq: room.seq, epoch: room.epoch }, retryAfter: 0 };
+    const last = room.lastN.get(key);
+    if (last && frame.n <= last.n) return { status: 200, body: { duplicate: true, seq: last.seq, epoch: room.epoch }, retryAfter: 0 };
     let next;
     try {
       next = applyOps(cloneJson(room.stores[frame.name]), frame.ops);
@@ -54,7 +55,7 @@ function createRoom(initial) {
       return { status: 422, body: { error: "bad-op" }, retryAfter: 0 };
     }
     room.stores[frame.name] = next;
-    room.lastN.set(key, frame.n);
+    room.lastN.set(key, { n: frame.n, seq: room.seq + 1 });
     room.seq += 1;
     if (!room.writer) {
       room.writer = clientId;
@@ -314,4 +315,125 @@ test("a frame in flight when the room restarts is not applied twice", async () =
   expect(room.stores.game).toEqual({ score: 11 });
   expect(a.game.toJSON()).toEqual({ score: 11 });
   expect(a.store.pending).toEqual([]);
+});
+
+// A lane for "a" whose state reads can be held open, to answer late.
+function heldClient(room, value) {
+  const store = createStore({ name: "game", value });
+  const entries = new Map([["game", { store }]]);
+  const transport = room.transport("a");
+  const read = transport.fetchState;
+  const held = { gate: null, release: null };
+  transport.fetchState = async () => {
+    if (!held.gate) return read();
+    const state = room.state();
+    await held.gate;
+    return state;
+  };
+  held.hold = () => {
+    held.gate = new Promise((resolve) => (held.release = resolve));
+  };
+  held.open = () => {
+    const release = held.release;
+    held.gate = null;
+    release();
+  };
+  const lane = createFastLane({ transport, entries });
+  store.onLocal((ops) => lane.local("game", ops, store.mark));
+  lane.start();
+  return { store, game: store.handle, lane, held };
+}
+
+test("a state answer that left before newer frames arrived does not rewind them", async () => {
+  const room = createRoom({ game: { score: 0 } });
+  const a = heldClient(room, { score: 0 });
+  const b = client(room, "b", { score: 0 });
+  room.open("a");
+  room.open("b");
+  await settle();
+  a.held.hold();
+  a.lane.storeOpened();
+  b.game.add("score", 1);
+  await settle();
+  a.held.open();
+  await settle();
+  expect(a.game.toJSON()).toEqual({ score: 1 });
+  expect(a.lane.status.seq).toBe(room.seq);
+});
+
+test("a reconnect while an old state read is out reads again, and the old answer is ignored", async () => {
+  const room = createRoom({ game: { score: 0 } });
+  const a = heldClient(room, { score: 0 });
+  room.open("a");
+  await settle();
+  a.held.hold();
+  a.lane.storeOpened();
+  room.close("a");
+  room.restartQuiet({ game: { score: 7 } });
+  room.open("a");
+  a.held.open();
+  await settle();
+  expect(a.lane.status.epoch).toBe(room.epoch);
+  expect(a.game.toJSON()).toEqual({ score: 7 });
+});
+
+test("frames are packed by size, so many small writes go in frames the host takes", async () => {
+  const room = createRoom({ game: { e: {} } });
+  const a = client(room, "a", { e: {} });
+  room.open("a");
+  await settle();
+  a.game.update((d) => {
+    for (let i = 0; i < 128; i++) d.e["k" + i] = { x: i, label: "entity-".repeat(12) };
+  });
+  await settle();
+  expect(room.posts.length).toBeGreaterThan(1);
+  for (const p of room.posts) {
+    const size = new TextEncoder().encode(JSON.stringify({ name: p.name, n: p.n, ops: p.ops, epoch: p.epoch })).length;
+    expect(size).toBeLessThanOrEqual(FRAME_BYTES);
+  }
+  expect(room.stores.game).toEqual(a.game.toJSON());
+  expect(Object.keys(room.stores.game.e)).toHaveLength(128);
+  expect(a.store.pending).toEqual([]);
+});
+
+test("one update larger than a frame is undone locally", async () => {
+  const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
+  const room = createRoom({ game: { s: 0 } });
+  const a = client(room, "a", { s: 0 });
+  room.open("a");
+  await settle();
+  a.game.set("blob", "x".repeat(FRAME_BYTES));
+  await settle();
+  expect(a.game.toJSON()).toEqual({ s: 0 });
+  expect(a.store.pending).toEqual([]);
+  expect(room.posts).toHaveLength(0);
+  expect(warn).toHaveBeenCalled();
+  warn.mockRestore();
+});
+
+test("a state read refused with 401 stops the lane", async () => {
+  const room = createRoom({ game: { s: 0 } });
+  const store = createStore({ name: "game", value: { s: 0 } });
+  const transport = room.transport("a");
+  transport.fetchState = async () => ({ status: 401 });
+  const lane = createFastLane({ transport, entries: new Map([["game", { store }]]) });
+  lane.start();
+  room.open("a");
+  await settle();
+  expect(lane.status.stopped).toBe(true);
+  expect(store.handle.status.mode).toBe("file");
+});
+
+test("a failing state read backs off instead of asking every half second", async () => {
+  const room = createRoom({ game: { s: 0 } });
+  const store = createStore({ name: "game", value: { s: 0 } });
+  const transport = room.transport("a");
+  const reads = jest.fn(async () => null);
+  transport.fetchState = reads;
+  const lane = createFastLane({ transport, entries: new Map([["game", { store }]]) });
+  lane.start();
+  room.open("a");
+  await jest.advanceTimersByTimeAsync(10000);
+  expect(reads.mock.calls.length).toBeLessThanOrEqual(6);
+  expect(reads.mock.calls.length).toBeGreaterThanOrEqual(4);
 });

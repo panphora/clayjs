@@ -35,15 +35,20 @@ export async function relayData(clientId, frame) {
   }
 }
 
-/** The room's { epoch, seq, writer, stores }, or null when it could not be read. */
-export async function fetchLiveState() {
+/**
+ * The room's { epoch, seq, writer, stores }; { status } when the host refused;
+ * null when the request never got an answer. clientId marks this tab as taking part.
+ */
+export async function fetchLiveState(clientId) {
+  const url = dataUrl();
+  if (clientId) url.searchParams.set("client-id", clientId);
   try {
-    const response = await fetch(dataUrl().href, {
+    const response = await fetch(url.href, {
       credentials: "same-origin",
       cache: "no-store",
       headers: { "Document-URL": window.location.href },
     });
-    if (!response.ok) return null;
+    if (!response.ok) return { status: response.status };
     return await response.json();
   } catch {
     return null;

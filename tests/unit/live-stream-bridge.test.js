@@ -133,13 +133,17 @@ describe("server lane", () => {
     expect(await relayData("t", {})).toEqual({ status: 0, body: null, retryAfter: 0 });
   });
 
-  test("fetchLiveState returns the room, or null", async () => {
+  test("fetchLiveState returns the room, a refusal, or null", async () => {
     const { fetchLiveState } = await import("../../src/live/server-lane.js");
     const room = { epoch: "e", seq: 2, writer: null, stores: {} };
     global.fetch = jest.fn(async () => ({ ok: true, json: async () => room }));
     expect(await fetchLiveState()).toEqual(room);
     expect(global.fetch.mock.calls[0][1].headers["Document-URL"]).toBe(window.location.href);
-    global.fetch = jest.fn(async () => ({ ok: false }));
+    global.fetch = jest.fn(async () => ({ ok: false, status: 401 }));
+    expect(await fetchLiveState()).toEqual({ status: 401 });
+    global.fetch = jest.fn(async () => {
+      throw new TypeError("offline");
+    });
     expect(await fetchLiveState()).toBeNull();
   });
 });

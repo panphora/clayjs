@@ -99,6 +99,8 @@ test("flush saves now and cancels the clock; it does nothing when clean or block
   const { state, save, saveNow, cp } = setup();
   cp.changed();
   cp.flush();
+  state.needs = false;
+  await tick(0);
   expect(saveNow).toHaveBeenCalledTimes(1);
   expect(cp.deadline).toBeNull();
   await tick(CHECKPOINT_MS);
@@ -110,4 +112,26 @@ test("flush saves now and cancels the clock; it does nothing when clean or block
   state.blocked = true;
   cp.flush();
   expect(saveNow).toHaveBeenCalledTimes(1);
+});
+
+test("a flush whose save is skipped arms the clock again", async () => {
+  const { save, saveNow, cp } = setup();
+  saveNow.mockImplementation(async () => ({ ok: false, msgType: "skipped" }));
+  cp.changed();
+  cp.flush();
+  await tick(0);
+  expect(cp.deadline).not.toBeNull();
+  await tick(RETRY_MS);
+  expect(save).toHaveBeenCalledTimes(1);
+});
+
+test("a flush whose save throws waits a full interval, then saves", async () => {
+  const { save, saveNow, cp } = setup();
+  saveNow.mockImplementation(async () => {
+    throw new Error("offline");
+  });
+  cp.changed();
+  cp.flush();
+  await tick(CHECKPOINT_MS);
+  expect(save).toHaveBeenCalledTimes(1);
 });

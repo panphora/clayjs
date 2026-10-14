@@ -30,12 +30,21 @@ global.fetch = jest.fn(async (url, init = {}) => {
   return { ok: true, status: 200, json: async () => ({ seq: 1, epoch: "e1" }), headers: { get: () => null } };
 });
 
-const { live, fastLane } = await import("../../src/plugins/live.js");
+const { live, fastLane, storeOf } = await import("../../src/plugins/live.js");
 const bridge = await import("../../src/live/stream-bridge.js");
 
 const flushAsync = async () => {
   for (let i = 0; i < 10; i++) await Promise.resolve();
 };
+
+test("the lane opens every live tag on the page, not only the one code asked for", async () => {
+  document.body.innerHTML =
+    '<script type="application/json" merge="g" clay="live">{"s":0}</script>' +
+    '<script type="application/json" merge="other" clay="live">{"t":0}</script>';
+  live("g");
+  await flushAsync();
+  expect(storeOf("other")).not.toBeNull();
+});
 
 test("joins the room, posts ops, and checkpoints only as the writer after a change", async () => {
   document.body.innerHTML = '<script type="application/json" merge="g" clay="live">{"s":0}</script>';
@@ -46,7 +55,7 @@ test("joins the room, posts ops, and checkpoints only as the writer after a chan
   bridge.streamOpened({ clientId: "tab-1", lane: "live" });
   await flushAsync();
   expect(g.status.mode).toBe("fast");
-  expect(requests.some((r) => r.url.endsWith("/_/sync/data") && (r.init.method || "GET") === "GET")).toBe(true);
+  expect(requests.some((r) => new URL(r.url).pathname === "/_/sync/data" && (r.init.method || "GET") === "GET")).toBe(true);
   expect(deps.needsSave()).toBe(false);
 
   g.add("s", 1);

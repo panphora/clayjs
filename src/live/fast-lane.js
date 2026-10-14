@@ -4,15 +4,20 @@
 // the same frames through a transport:
 //   start({ open, close, frame, state, writer }) -> stop function
 //   send(clientId, { name, n, ops, epoch }) -> Promise<{ status, body, retryAfter }>
-//   fetchState() -> Promise<{ epoch, seq, writer, stores } | null>
+//   fetchState(clientId) -> Promise<{ epoch, seq, writer, stores } | { status } | null>
 
 import { applyOps, cloneJson } from "./ops.js";
 
 export const MIN_GAP_MS = 40;
 export const MAX_OPS = 128;
 export const RETRY_MS = 500;
+export const FRAME_BYTES = 15 * 1024;
+const BUFFER_MAX = 512;
 const RETRY_MAX_MS = 8000;
 const REVOKED = new Set([401, 403]);
+const STATE_GONE = new Set([401, 403, 404]);
+const encoder = new TextEncoder();
+const byteSize = (value) => encoder.encode(JSON.stringify(value)).length;
 
 const transient = (status) => status === 0 || status === 408 || status === 429 || status >= 500;
 
@@ -49,6 +54,12 @@ export function createFastLane({
   let holdUntil = 0;
   let timer = null;
   let retryDelay = RETRY_MS;
+  let resyncDelay = RETRY_MS;
+  // Bumped when the stream opens or closes, and when a state is taken: a state
+  // request answered after either is obsolete.
+  let connection = 0;
+  let stateCount = 0;
+  let fetchAgain = false;
   let unsubscribe = null;
   // Per store: the next n, ops not yet in a frame, and frames sent but not yet
   // seen back (each { n, ops, through, seq, sent }).
@@ -79,7 +90,23 @@ export function createFastLane({
     }
     for (const [name, lane] of lanes) {
       if (!lane.unsent.length || !roomNames.has(name)) continue;
-      const take = lane.unsent.splice(0, MAX_OPS);
+      // Packed by bytes as well as count: the host refuses a body over 16 KB.
+      let size = byteSize({ name, n: lane.n + 1, ops: [], epoch });
+      let count = 0;
+      while (count < lane.unsent.length && count < MAX_OPS) {
+        const more = byteSize(lane.unsent[count].op) + 1;
+        if (size + more > FRAME_BYTES) break;
+        size += more;
+        count++;
+      }
+      if (count === 0) {
+        const [entry] = lane.unsent.splice(0, 1);
+        console.warn(`clay.live("${name}"): one update was larger than ${FRAME_BYTES} bytes, so it was undone`);
+        const store = entries.get(name)?.store;
+        store?.rebase(store.authoritative, { source: "state", through: entry.id });
+        continue;
+      }
+      const take = lane.unsent.splice(0, count);
       const frame = { n: ++lane.n, ops: take.map((entry) => entry.op), through: take[take.length - 1].id, seq: null, sent: false };
       lane.awaiting.push(frame);
       return { name, lane, frame };
@@ -110,12 +137,18 @@ export function createFastLane({
     schedule();
   }
 
-  function confirm(name, lane, frame) {
-    const i = lane.awaiting.indexOf(frame);
-    if (i < 0) return;
-    lane.awaiting.splice(0, i + 1);
-    const store = entries.get(name)?.store;
-    store?.rebase(store.authoritative, { source: "state", through: frame.through });
+  // Every frame the room ordered at or before the applied seq is in the
+  // authoritative values now, whether its answer or its event said so.
+  function settleAwaiting() {
+    for (const [name, lane] of lanes) {
+      let through;
+      while (lane.awaiting.length && lane.awaiting[0].seq !== null && lane.awaiting[0].seq <= seq) {
+        through = lane.awaiting.shift().through;
+      }
+      if (through === undefined) continue;
+      const store = entries.get(name)?.store;
+      store?.rebase(store.authoritative, { source: "state", through });
+    }
   }
 
   function answered(name, lane, frame, { status, body, retryAfter }) {
@@ -126,8 +159,8 @@ export function createFastLane({
         return;
       }
       frame.seq = Number.isInteger(body?.seq) ? body.seq : null;
-      // Its event already went by inside a state this tab took: the ops are in.
-      if (frame.seq !== null && frame.seq <= seq) confirm(name, lane, frame);
+      // Its event already went by, or came inside a state this tab took: the ops are in.
+      settleAwaiting();
       return;
     }
     if (transient(status)) {
@@ -177,12 +210,14 @@ export function createFastLane({
       }
     }
     store.rebase(next, { source: own ? "state" : "remote", through });
+    settleAwaiting();
   }
 
   function onFrame(frame) {
     if (stopped || !frame || !Number.isInteger(frame.seq)) return;
     if (!synced) {
       buffered.push(frame);
+      if (buffered.length > BUFFER_MAX) buffered.shift();
       return;
     }
     if (frame.epoch !== epoch) {
@@ -201,6 +236,12 @@ export function createFastLane({
 
   function applyState(state) {
     if (stopped || !state || typeof state.epoch !== "string") return;
+    stateCount++;
+    // Older than what this tab already applied: keep what it has.
+    if (state.epoch === epoch && Number.isInteger(state.seq) && state.seq < seq) {
+      drain();
+      return;
+    }
     const fresh = state.epoch !== epoch;
     epoch = state.epoch;
     seq = Number.isInteger(state.seq) ? state.seq : 0;
@@ -231,6 +272,11 @@ export function createFastLane({
     }
     if (fresh) onEpoch(epoch);
     onWriter();
+    drain();
+  }
+
+  // Back in step: apply what arrived while the state was being read.
+  function drain() {
     synced = true;
     const later = buffered.filter((frame) => frame.epoch === epoch && frame.seq > seq).sort((a, b) => a.seq - b.seq);
     buffered = [];
@@ -238,17 +284,45 @@ export function createFastLane({
     schedule();
   }
 
+  // Read the room's whole state. Frames wait in the buffer meanwhile, so the
+  // answer and the frames after it apply in order.
   async function resync() {
-    if (fetching || stopped) return;
+    if (stopped) return;
+    if (fetching) {
+      fetchAgain = true;
+      return;
+    }
     fetching = true;
+    fetchAgain = false;
+    synced = false;
+    const asked = { connection, stateCount };
     let state = null;
     try {
-      state = await transport.fetchState();
+      state = await transport.fetchState(clientId);
     } catch {}
     fetching = false;
     if (stopped) return;
-    if (state && typeof state.epoch === "string") applyState(state);
-    else if (connected) setTimer(resync, RETRY_MS);
+    if (asked.connection !== connection || fetchAgain) {
+      if (connected) resync();
+      return;
+    }
+    if (asked.stateCount !== stateCount) {
+      if (synced) return;
+      state = null;
+    }
+    if (state && typeof state.epoch === "string") {
+      resyncDelay = RETRY_MS;
+      applyState(state);
+      return;
+    }
+    if (state && STATE_GONE.has(state.status)) {
+      stop();
+      return;
+    }
+    if (connected) {
+      setTimer(resync, resyncDelay);
+      resyncDelay = Math.min(resyncDelay * 2, RETRY_MAX_MS);
+    }
   }
 
   function stop() {
@@ -265,10 +339,12 @@ export function createFastLane({
     open(info) {
       clientId = info.clientId;
       connected = true;
+      connection++;
       resync();
     },
     close() {
       connected = false;
+      connection++;
       synced = false;
       buffered = [];
     },

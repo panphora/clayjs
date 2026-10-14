@@ -61,10 +61,19 @@ export function createCheckpoints({ needsSave, blocked, save, saveNow, now = () 
       if (deadline === null && !running) arm(now() + CHECKPOINT_MS);
     },
     // The tab is going away or out of sight: save now if anything is unsaved.
+    // A save that did not land arms the clock again, as run() does.
     flush() {
       if (running || !needsSave() || blocked()) return;
       disarm();
-      saveNow();
+      running = true;
+      Promise.resolve()
+        .then(saveNow)
+        .catch(() => null)
+        .then((result) => {
+          running = false;
+          if (!needsSave()) return;
+          arm(now() + (result && !result.ok && result.msgType === "skipped" ? RETRY_MS : CHECKPOINT_MS));
+        });
     },
     get deadline() {
       return deadline;

@@ -65,8 +65,9 @@ export function localTransport({ seed, key = "clay-live:" + window.location.path
     const store = room.stores.get(frame.name);
     if (!store) return { status: 404, body: { error: "unknown-store" }, retryAfter: 0 };
     const nKey = frame.name + "\n" + from;
-    if (frame.n <= (room.lastN.get(nKey) || 0)) {
-      return { status: 200, body: { duplicate: true, seq: room.seq, epoch: room.epoch }, retryAfter: 0 };
+    const last = room.lastN.get(nKey);
+    if (last && frame.n <= last.n) {
+      return { status: 200, body: { duplicate: true, seq: last.seq, epoch: room.epoch }, retryAfter: 0 };
     }
     let ops;
     let next;
@@ -77,7 +78,7 @@ export function localTransport({ seed, key = "clay-live:" + window.location.path
       return { status: 422, body: { error: err.message }, retryAfter: 0 };
     }
     store.value = next;
-    room.lastN.set(nKey, frame.n);
+    room.lastN.set(nKey, { n: frame.n, seq: room.seq + 1 });
     room.seq += 1;
     const data = { epoch: room.epoch, seq: room.seq, name: frame.name, ops, from, n: frame.n };
     post({ type: "data", data });
