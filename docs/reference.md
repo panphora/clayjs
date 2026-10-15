@@ -257,7 +257,8 @@ reachable by direct import but may change in any release.
 ## Ephemeral state
 
 Per-tab state on a saved element: never saved, never sent to peers, never undone, never
-counted as a change, and never written or removed by an incoming merge.
+counted as a change (so `onmutation` does not fire), and never written or removed by an
+incoming merge on an element the tab already has.
 
 - `ephemeral="selected dragging"` — words a script sets for this tab. Edit with
   `clay.ephemeral.add(el, word)`, `remove`, `toggle(el, word, force)` and `has`. Style with
@@ -265,7 +266,8 @@ counted as a change, and never written or removed by an incoming merge.
   (`@plugin "@panphora/clayjs/tailwind";`).
 - `ephemeral:NAME` — makes the element's own `NAME` attribute tab-only:
   `<details ephemeral:open>`. The marker is saved; `NAME` is removed from the saved file.
-  Never applies to `class`, `id`, `data-id` or `clay`.
+  Never applies to `class`, `id`, `data-id`, `value`, `checked`, `selected` or region
+  attributes (`clay`, `no-save`, `freeze` and the rest).
 - `open` on `<dialog>` is tab-only with no marker.
 
 ## Region reference (the clay attribute)

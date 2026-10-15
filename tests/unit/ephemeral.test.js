@@ -165,3 +165,40 @@ describe("an incoming frame cannot write or remove ephemeral state", () => {
     expect(document.querySelector("dialog").hasAttribute("open")).toBe(false);
   });
 });
+
+test("stripEphemeral reaches template contents", () => {
+  const root = document.createElement("div");
+  root.innerHTML = '<template><li ephemeral="selected">a</li><details ephemeral:open open></details><dialog open></dialog></template>';
+  stripEphemeral(root);
+  const html = root.querySelector("template").innerHTML;
+  expect(html).not.toMatch(/ephemeral="/);
+  expect(html).not.toMatch(/<details[^>]*\sopen[\s>=]/);
+  expect(html).not.toMatch(/<dialog[^>]*\sopen[\s>=]/);
+  expect(html).toContain("ephemeral:open");
+});
+
+test("region and form-state attributes can never be ephemeral", () => {
+  const node = el('<input ephemeral:no-save ephemeral:freeze ephemeral:save-remove ephemeral:value ephemeral:checked no-save freeze save-remove value="v" checked>');
+  for (const name of ["no-save", "freeze", "save-remove", "value", "checked", "editor-ui"]) {
+    expect(isEphemeralAttr(name, node)).toBe(false);
+  }
+  const root = document.createElement("div");
+  root.append(node);
+  stripEphemeral(root);
+  for (const name of ["no-save", "freeze", "save-remove", "value", "checked"]) {
+    expect(node.hasAttribute(name)).toBe(true);
+  }
+});
+
+test("an undo scope made with create() ignores ephemeral changes", async () => {
+  const { undo } = await import("../../src/plugins/undo.js");
+  document.body.innerHTML = '<section id="s"><li id="c">a</li><details id="d" ephemeral:open></details></section>';
+  const scoped = undo.create({ scope: document.getElementById("s") });
+  scoped.start?.();
+  ephemeral.add(document.getElementById("c"), "selected");
+  document.getElementById("d").setAttribute("open", "");
+  await new Promise((r) => setTimeout(r, 10));
+  scoped.flush?.();
+  expect(scoped.canUndo).toBe(false);
+  scoped.stop?.();
+});
