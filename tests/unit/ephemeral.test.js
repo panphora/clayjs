@@ -215,6 +215,31 @@ describe("an incoming frame cannot write or remove ephemeral state", () => {
     expect(document.querySelector("input").hasAttribute("ephemeral:disabled")).toBe(true);
     expect(document.querySelector("p").textContent).toBe("b");
   });
+
+  test("a peer that drops the marker takes this tab's open state with it", async () => {
+    document.body.innerHTML = '<details ephemeral:open open><summary>s</summary></details>';
+    const root = document.documentElement.cloneNode(true);
+    const toLive = new Map();
+    const pair = (c, l) => {
+      toLive.set(c, l);
+      for (let i = 0; i < c.childNodes.length; i++) pair(c.childNodes[i], l.childNodes[i]);
+    };
+    pair(root, document.documentElement);
+    stripEphemeral(root);
+    const html = "<!DOCTYPE html>" + root.outerHTML;
+    await HyperMorph.mergeDocument({
+      live: document,
+      base: html,
+      local: { root, toLive: (n) => toLive.get(n) || null },
+      remote: html.replace(' ephemeral:open=""', ""),
+      keepLiveOnly: true,
+      ignoreAttribute: mergeIgnoresAttr,
+      hooks: { beforeAttributeUpdated: mergeVetoesAttr },
+    });
+    const d = document.querySelector("details");
+    expect(d.hasAttribute("ephemeral:open")).toBe(false);
+    expect(d.hasAttribute("open")).toBe(false);
+  });
 });
 
 test("stripEphemeral reaches template contents", () => {
