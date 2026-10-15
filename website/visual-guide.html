@@ -74,6 +74,13 @@
 .vg svg .arr-risk{fill:none;stroke:var(--risk);stroke-width:1.6}
 .vg svg .ahead{fill:var(--muted)}
 .vg svg .ahead-risk{fill:var(--risk)}
+.vg .regions{border:1.5px dashed var(--temp);background:var(--temp-bg);border-radius:8px;padding:12px}
+.vg .regions-head{font-size:14px;margin:0 0 10px}
+.vg .regions-head code{font-weight:650;color:var(--temp)}
+.vg .rtiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px}
+.vg .rtile{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:8px 10px;font-size:13px;line-height:1.4}
+.vg .rtile code{display:block;width:fit-content;margin-bottom:4px;font-size:12.5px}
+.vg .regions-other{margin:16px 0 8px;font-size:14px}
 @media(max-width:900px){.vg .grid3{grid-template-columns:1fr}}
 @media(max-width:700px){.vg .grid2{grid-template-columns:1fr}.vg .anno{--cw:7.5px}.vg .anno pre{padding:0 14px}.vg figure{padding:12px}}
 </style>
@@ -163,6 +170,25 @@
 </ul>
 <p>A <code>clay="freeze"</code> region in the file is saved with the contents it had when the page loaded.</p>
 <p>ClayJS translates every difference between the file and the page that it knows about, in both directions. So keep them as close as the app allows, and mark every difference your code adds.</p>
+
+<figure id="regions">
+<div class="regions">
+<p class="regions-head"><code>clay="editor-ui"</code> is shorthand for all five of these. Use it for UI a script creates or changes.</p>
+<div class="rtiles">
+<div class="rtile"><code>no-save</code>Left out of the saved file. Other open tabs still receive it but never apply it.</div>
+<div class="rtile"><code>no-snapshot</code>Left out of the saved file and of what sync sends. Each tab keeps its own copy.</div>
+<div class="rtile"><code>no-watch</code>Changes here start no autosave and never count as unsaved work.</div>
+<div class="rtile"><code>no-undo</code>Changes here add no undo steps.</div>
+<div class="rtile"><code>no-data</code>Skipped by the JSON data API.</div>
+</div>
+</div>
+<p class="regions-other">Two more, not part of <code>editor-ui</code>:</p>
+<div class="rtiles">
+<div class="rtile"><code>freeze</code>The element saves and syncs, but its contents stay as they were when it appeared. A per-tab scratchpad.</div>
+<div class="rtile"><code>no-dirty</code>Saved, but changes start no autosave, and an outside change replaces it. For values the file must show.</div>
+</div>
+<figcaption>Put a token on any element and it covers everything inside. Combine tokens with spaces: <code>clay="no-save no-undo"</code>.</figcaption>
+</figure>
 
 <h2 id="ladder">2. Four different types of malleable documents (of increasing complexity)</h2>
 <p>Pick the lowest of these four rungs that fits the file. Each rung up moves the page further from the file and costs you more rules. Gray marks a control saved in the file.</p>
