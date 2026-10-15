@@ -55,17 +55,14 @@ export function stripExtensionNoise(root) {
     // querySelectorAll('*') never returns the root itself, so an extension stamp on
     // <html> used to ride into every saved file. The root is the one element an
     // extension can mark on a page with no other match.
-    // Every marker prefix starts with "data-", so an attribute that does not is never
-    // tested, and the attribute list is only copied when a marker is found on it.
+    // The attribute list is only copied when a marker is found on it.
     const strip = (el) => {
       const attrs = el.attributes
       if (!attrs) return
       let found = null
       for (let i = 0; i < attrs.length; i++) {
         const name = attrs[i].name
-        const lower = name.toLowerCase()
-        if (!lower.startsWith('data-')) continue
-        if (EXTENSION_ATTR_PATTERN.test(lower)) (found || (found = [])).push(name)
+        if (EXTENSION_ATTR_PATTERN.test(name.toLowerCase())) (found || (found = [])).push(name)
       }
       if (found) for (const name of found) el.removeAttribute(name)
     }
