@@ -254,6 +254,20 @@ reachable by direct import but may change in any release.
   `pageowner`, so before clayjs boots none of them is present: key CSS on
   `html:not([editmode="true"])`, not `html[editmode="false"]`.
 
+## Ephemeral state
+
+Per-tab state on a saved element: never saved, never sent to peers, never undone, never
+counted as a change, and never written or removed by an incoming merge.
+
+- `ephemeral="selected dragging"` — words a script sets for this tab. Edit with
+  `clay.ephemeral.add(el, word)`, `remove`, `toggle(el, word, force)` and `has`. Style with
+  `[ephemeral~="selected"]`, or the Tailwind variant `ephemeral-selected:`
+  (`@plugin "@panphora/clayjs/tailwind";`).
+- `ephemeral:NAME` — makes the element's own `NAME` attribute tab-only:
+  `<details ephemeral:open>`. The marker is saved; `NAME` is removed from the saved file.
+  Never applies to `class`, `id`, `data-id` or `clay`.
+- `open` on `<dialog>` is tab-only with no marker.
+
 ## Region reference (the clay attribute)
 
 One attribute controls how any element takes part in saving. Keywords combine with

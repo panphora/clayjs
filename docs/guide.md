@@ -46,7 +46,7 @@ Nearly every bug in a malleable file is one of these three leaking into another:
 2. **Chrome is authored in the file and hidden from viewers with `show-when:editmode="true"`.** This is the default: it needs no script and is in place before ClayJS loads. Use `clay="editor-ui"` only for UI a script fills or changes while the page is open, or that viewers must not receive (9.2).
 3. **Derived values are recomputed, never stored as edits.** Write them into `editor-ui` elements, or into `clay="no-dirty"` elements when the saved file must show them.
 4. **Every repeated item has a unique `data-id` from birth.** Mint a fresh one on every create and every duplicate. Sync pairs elements by it.
-5. **Per-tab state stays out of the record.** Which card is open, the filter, the current view: URL hash, `localStorage` or memory, painted through a runtime `<style>` or `editor-ui` elements.
+5. **Per-tab state stays out of the record.** Which card is open, the filter, the current view: URL hash, `localStorage` or memory, painted through `ephemeral` attributes (5.7), a runtime `<style>` or `editor-ui` elements.
 6. **A command writes the record once, in one place,** wrapped in an undo commit. The mutation is what autosave, undo and sync see.
 7. **Adopt the file as it is on load.** Never rewrite the record at boot: it makes the page dirty, it can fall outside the save baseline, and it races peers.
 8. **Reconcile after changes you did not make.** A peer's frame, an agent's disk edit and an undo replay change the DOM under you. Rebuild derived and chrome state on `clay:sync-applied` and on undo and redo.
@@ -406,7 +406,7 @@ A save writes the current document with these changes:
 
 Everything else on the page is written as it is. That includes things builders forget:
 
-- Classes and attributes toggled for UI: `.selected`, `aria-expanded`, `<details open>`, `<dialog open>` (set by `showModal()`), `hidden`.
+- Classes and attributes toggled for UI: `.selected`, `aria-expanded`, `<details open>`, `hidden`. Mark them `ephemeral` instead (5.7). `<dialog open>` is the exception: it is never saved.
 - Inline styles from libraries and helpers: Sortable's `draggable="false"` and `style=""`, `el.hide()`, `All(...).css()`, `body.style.overflow = "hidden"` from an open modal or crop dialog.
 - Any element a script inserted outside an excluded region.
 
@@ -533,6 +533,27 @@ Live sync and undo pair elements across versions by **`data-id`, then `id`**, us
 ### 5.6 Assets
 
 An image's durable form is its `src`. Upload the file and write the returned URL (8.5). Where the host cannot store files, embed a `data:` URL, which works anywhere but makes every save carry the bytes. Keep embedded images small. Every host returns a host path such as `/_/uploads/assets-<name>/photo-ab12.png`, which keeps working on that host when the document is renamed or moved. A document opened straight from disk shows those images broken; Export as zip takes a document with its files.
+
+### 5.7 Ephemeral state: per-tab state on saved elements
+
+A selected card, a row being dragged, an open section: state that belongs to this tab but sits on a saved element. A class or attribute toggled for it is an edit like any other: it marks the page unsaved, starts an autosave, adds an undo step, reaches every peer and lands in the file. Mark it ephemeral instead:
+
+```html
+<li class="card ephemeral-selected:ring-2" data-id="c-7f3a">…</li>
+<details ephemeral:open><summary>Notes</summary>…</details>
+```
+
+```js
+clay.ephemeral.toggle(card, "selected");   // add, remove, toggle(el, word, force), has
+```
+
+- **`ephemeral="selected dragging"`** holds words a script sets for this tab. Style it with `[ephemeral~="selected"]`, or with the Tailwind variant `ephemeral-selected:` (`@plugin "@panphora/clayjs/tailwind";`; Hyperclay's on-save Tailwind has it built in).
+- **`ephemeral:NAME`** makes the element's own `NAME` attribute tab-only: `<details ephemeral:open>`, `<button ephemeral:aria-expanded>`. The marker is saved; the attribute it names is removed from the saved file. Tailwind's own `open:` and `aria-expanded:` variants style these.
+- **`open` on `<dialog>`** is tab-only with no marker: `showModal()` sets it, and a dialog saved open is always a bug.
+- None of it is saved, sent to peers, undone or counted as a change, and an incoming merge, from a peer or from the file on disk, never writes or removes it. The router's `route-active` gets the same treatment.
+- `class`, `id`, `data-id` and `clay` can never be made ephemeral.
+
+Use `ephemeral` for state on one element. State that comes from the URL hash and spans many records (the open card, a filter) is still painted with a runtime stylesheet (9.3).
 
 ---
 
@@ -1145,7 +1166,7 @@ Author chrome in the file and hide it from viewers with `show-when:editmode="tru
 
 Use `clay="editor-ui"` when hiding is not enough:
 
-- **A script changes it after load.** Counts, summaries, status text, a filter bar that reflects its state, a toggled `aria-expanded` or `.selected`. In a saved element each of these changes is an edit: it starts an autosave, adds an undo step, is sent to peers and can conflict with theirs. Inside `editor-ui` none of that happens.
+- **A script changes it after load.** Counts, summaries, status text, a filter bar that reflects its state. (A selection or an open state on a saved element is `ephemeral` instead, 5.7.) In a saved element each of these changes is an edit: it starts an autosave, adds an undo step, is sent to peers and can conflict with theirs. Inside `editor-ui` none of that happens.
 - **It is drawn from data.** Charts, canvases and grids rendered from the record.
 - **It holds per-tab state.** The open card, the current view, the style that paints them (9.3).
 - **Viewers must not receive it.** The saved file has to be clean HTML without the controls.
@@ -1170,11 +1191,11 @@ Edit-only chrome lives in the same wrapper with `show-when:editmode="true"`, or 
 |---|---|---|
 | Which card or entry is open, the filter, search text, current view, sort | URL hash: `#card=c-brief&q=pricing` | per tab, survives reload, shareable, Back closes the card, never saved or synced |
 | Collapsed sections, column widths, density, last opened entry | `localStorage`, keyed by the file's path | per device and viewer; wrap reads and writes in `try/catch` |
-| Selection, hover, drag state, open menu | memory, or chrome DOM | transient |
+| Selection, hover, drag state, open menu | `ephemeral` on the element (5.7), memory, or chrome DOM | transient, never saved or synced |
 | Pointers, lobbies, who is looking at what, shared live but never saved | a never-saved live store (7.9) | every tab sees it at once, the file never holds it |
 | A default view visitors land on, WIP limits, column names, label definitions | attributes on a settings element in the record | genuinely part of the document |
 
-**Paint per-tab state with a runtime stylesheet** inside chrome, rewritten from the hash, instead of toggling classes or attributes on records:
+For state on one element, such as the selected card, use `ephemeral` (5.7). **Paint state that comes from the hash with a runtime stylesheet** inside chrome, rewritten from the hash, instead of toggling classes or attributes on records:
 
 ```js
 const rules = [];
@@ -1538,7 +1559,7 @@ The saved file is the data. Everyone who can download it can read everything in 
 | Records authored with live `contenteditable` stay editable for viewers until the first save | 4.4 |
 | Templates in the inert form give clones that cannot be edited until reload | 4.4 |
 | Unguarded edit-only API calls throw in view mode | 4.5 |
-| `showModal()`, `hidden`, `.selected` and library inline styles save | 5.1 |
+| `hidden`, `.selected`, `<details open>` and library inline styles save; use `ephemeral` | 5.1, 5.7 |
 | `no-save` chrome still reaches peers; use `editor-ui` | 5.2 |
 | Edits in `no-watch` or `no-dirty` are invisible to `save()` and the close warning | 5.2 |
 | Runtime changes inside `freeze` are never saved or synced, even by `force()` | 5.2 |

@@ -48,6 +48,8 @@
 - `live` region token, and `setSaveHeader()` in the save core
 - JSON merges keep list positions for same-length lists, take per-path `merge-key`, keep the authored formatting, and report conflicting keys in the conflict notice
 - `add-from` / `add-to` attributes: a button that adds a list item from a `<template>` in edit mode, with a fresh `data-id` and its first field focused, no script needed
+- `ephemeral` attribute for per-tab state on saved elements: `ephemeral="selected"` is never saved, synced, undone or counted as a change, and incoming merges leave it alone. `clay.ephemeral.add/remove/toggle/has` edit it, and the Tailwind plugin `@panphora/clayjs/tailwind` adds the `ephemeral-selected:` variant
+- `ephemeral:NAME` markers make an element's own attribute per-tab (`<details ephemeral:open>`); `open` on `<dialog>` is per-tab by default
 
 ## [1.10.0] - 2026-10-12
 

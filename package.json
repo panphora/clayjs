@@ -32,6 +32,7 @@
     "./src/*": "./src/*",
     "./entries/*": "./entries/*",
     "./clay.standalone.js": "./dist/clay.standalone.js",
+    "./tailwind": "./src/tailwind.js",
     "./dist/*": "./dist/*",
     "./*": "./entries/*"
   },

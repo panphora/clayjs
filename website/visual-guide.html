@@ -189,6 +189,7 @@
 <div class="rtile"><code>freeze</code>The element saves and syncs, but its contents stay as they were when the page first rendered. A per-tab scratchpad.</div>
 <div class="rtile"><code>no-dirty</code>Saved in the file, but changes here are not treated as edits: no autosave, no unsaved warning. The new value is written whenever something else saves. For computed values the file should show, like a total.</div>
 </div>
+<p class="regions-other">For state on a saved element, such as a selection or an open section, use the <code>ephemeral</code> attribute rather than a region: <code>ephemeral="selected"</code>, or <code>ephemeral:open</code> to make the element's own <code>open</code> tab-only. Neither is saved, synced or undone.</p>
 <figcaption>Put a token on any element and it covers everything inside. Combine tokens with spaces: <code>clay="no-save no-undo"</code>.</figcaption>
 </figure>
 
@@ -366,11 +367,11 @@
 <ul>
 <li>Author controls in the file and hide them from viewers with <code>show-when:editmode="true"</code>. Use <code>clay="editor-ui"</code> only for UI a script creates or changes while the page is open.</li>
 <li>Style edit mode with <code>[editmode="true"]</code> rather than an added class.</li>
-<li>Keep passing state (a dialog's <code>overflow</code>, a drag class) in JS, or remove it in <code>clay.onSnapshot</code>.</li>
+<li>Mark passing state on a saved element <code>ephemeral</code>: <code>clay.ephemeral.toggle(card, "selected")</code>, styled with <code>[ephemeral~="selected"]</code> or Tailwind's <code>ephemeral-selected:</code>. It is never saved, synced or undone.</li>
 </ul>
 <details class="wrong"><summary>Doing it wrong</summary>
 <p><b>An unmarked button.</b> A script appends an "Add item" button at load. The next save writes it into the file, and every open adds one more.</p>
-<p><b>Passing state saved.</b> A dialog sets <code>overflow: hidden</code> on <code>&lt;body&gt;</code>. Save while it is open and the file keeps it, so the page no longer scrolls.</p>
+<p><b>Passing state saved.</b> A click adds <code>.selected</code> to a card. The file keeps it, every collaborator sees your selection, and each click adds an undo step.</p>
 </details>
 </div>
 
@@ -428,7 +429,7 @@
 
 <figure>
 <svg viewBox="0 0 760 400" role="img" aria-labelledby="f5t">
-<title id="f5t">Decision flow: temporary state goes in a JS variable or an editor-ui region; derived state is re-rendered into editor-ui; content viewers see is plain markup; clutter stays in the file, hidden by mode; secrets do not belong in a malleable document.</title>
+<title id="f5t">Decision flow: temporary state goes in a JS variable, an ephemeral attribute or an editor-ui region; derived state is re-rendered into editor-ui; content viewers see is plain markup; clutter stays in the file, hidden by mode; secrets do not belong in a malleable document.</title>
 <rect x="222" y="10" width="316" height="50" rx="6" class="box-ink"/>
 <text x="380" y="40" text-anchor="middle" class="t-b">Should it survive closing and reopening?</text>
 <path d="M222 35 H125 V108" class="arr" marker-end="url(#ah)"/><text x="176" y="28" class="t-s t-m">no</text>
@@ -436,9 +437,9 @@
 
 <rect x="10" y="112" width="230" height="104" rx="6" class="temp"/>
 <text x="24" y="134" class="t-b t-temp">Temporary</text>
-<text x="24" y="154" class="t-s">A JS variable, or DOM marked</text>
-<text x="24" y="170" class="t-s"><tspan class="t-c">clay="editor-ui"</tspan>. Rebuild it on</text>
-<text x="24" y="186" class="t-s">every load. Selection, previews,</text>
+<text x="24" y="154" class="t-s">A JS variable, <tspan class="t-c">ephemeral="…"</tspan> on</text>
+<text x="24" y="170" class="t-s">the element, or <tspan class="t-c">clay="editor-ui"</tspan>.</text>
+<text x="24" y="186" class="t-s">Selection, drag state, previews,</text>
 <text x="24" y="202" class="t-s">rung 3 controls.</text>
 
 <rect x="244" y="112" width="272" height="50" rx="6" class="box-ink"/>
