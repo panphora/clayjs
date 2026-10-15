@@ -186,8 +186,8 @@
 </div>
 <p class="regions-other">Two more, not part of <code>editor-ui</code>:</p>
 <div class="rtiles">
-<div class="rtile"><code>freeze</code>The element saves and syncs, but its contents stay as they were when it appeared. A per-tab scratchpad.</div>
-<div class="rtile"><code>no-dirty</code>Saved, but changes start no autosave, and an outside change replaces it. For values the file must show.</div>
+<div class="rtile"><code>freeze</code>The element saves and syncs, but its contents stay as they were when the page first rendered. A per-tab scratchpad.</div>
+<div class="rtile"><code>no-dirty</code>Saved in the file, but changes here are not treated as edits: no autosave, no unsaved warning. The new value is written whenever something else saves, and a change from another tab or the file wins over yours. For computed values the file should show, like a total.</div>
 </div>
 <figcaption>Put a token on any element and it covers everything inside. Combine tokens with spaces: <code>clay="no-save no-undo"</code>.</figcaption>
 </figure>
