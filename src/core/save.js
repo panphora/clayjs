@@ -21,7 +21,8 @@ import {
   saveFateIsUnknown,
   withKeepalive
 } from "./save-core.js";
-import { captureForComparison, captureForComparisonAndDirty, captureForSaveAndComparison } from "./snapshot.js";
+import { captureForComparison, captureForComparisonAndDirty, captureForSaveAndComparison, captureForDirtyCheck } from "./snapshot.js";
+import { NO_TRIGGER_AUTOSAVE_SELECTOR } from "../lib/region-policy.js";
 import { seedEtag, lastSeenEtag } from "./etag.js";
 import { gateCaptureToken, gateClearIfUnchanged, pageMaybeDirty } from "../lib/dirty-gate.js";
 import { hasUnsavedState } from "../lib/unsaved-state.js";
@@ -189,6 +190,12 @@ let lastSavedContents = '';
 let lastSavedDirty = '';
 // A save was requested while one was on the wire; run one more when it settles.
 let pendingSave = false;
+// An autosave arrived while one of our saves was on the wire. When that save lands
+// it runs the autosave check again, rules and all, rather than an explicit save.
+let pendingAutosave = false;
+// True while a savePage/savePageForce request is on the wire. Only those drain the
+// queue when they land, so an autosave never queues behind a raw saveHtml call.
+let ownSaveOnWire = false;
 
 // ============================================
 // AUTOSAVE SUSPENSION
@@ -236,6 +243,9 @@ export function autosaveIsSuspended() {
 // save asked for meanwhile is remembered and runs on release.
 let previewHold = 0;
 let previewMissed = false;
+// An autosave skipped by the hold. Replayed as an autosave, so it keeps autosave
+// rules (a batching-region edit still waits for an explicit save).
+let previewAutosaveMissed = false;
 const PREVIEW_HOLD_REASON = 'Waiting for the AI edit to be kept or reverted';
 const holdReasons = new Map();
 
@@ -252,8 +262,12 @@ export function releaseAllSaves({ replay = true, reason = PREVIEW_HOLD_REASON } 
   previewHold--;
   if (previewHold > 0) return;
   const missed = previewMissed;
+  const autosaveMissedInHold = previewAutosaveMissed;
   previewMissed = false;
-  if (missed && replay) savePage();
+  previewAutosaveMissed = false;
+  if (!replay) return;
+  if (missed) savePage();
+  else if (autosaveMissedInHold) savePageThrottled();
 }
 
 export function savesHeld() {
@@ -407,10 +421,16 @@ function applySaveResult(result, forComparison, forDirty, label, gateToken, forS
 // dropped, so the newer bytes still go out on the next save; the page is still
 // dirty, so an edit or a close warning will produce one.
 function drainPendingSave() {
-  if (!pendingSave) return;
+  if (!pendingSave && !pendingAutosave) return;
   if (saveFateIsUnknown()) return;
-  pendingSave = false;
-  savePage();
+  if (pendingSave) {
+    pendingSave = false;
+    pendingAutosave = false;
+    savePage();
+    return;
+  }
+  pendingAutosave = false;
+  savePageThrottled();
 }
 
 // State accessors for autosave module
@@ -526,7 +546,9 @@ export function savePage(callback = () => {}) {
     setSavingState();
 
     // Use saveHtml directly with our pre-captured content (avoids double capture)
+    ownSaveOnWire = true;
     saveHtml(forSave, (result) => {
+      ownSaveOnWire = false;
       applySaveResult(result, forComparison, forDirty, 'updated after save', gateToken, forSave);
       if (typeof callback === 'function') {
         callback(result);
@@ -581,7 +603,9 @@ export function savePageForce(callback = () => {}) {
 
     setSavingState();
 
+    ownSaveOnWire = true;
     saveHtml(forSave, (result) => {
+      ownSaveOnWire = false;
       applySaveResult(result, forComparison, forDirty, 'updated after force save', gateToken, forSave);
       if (typeof callback === 'function') {
         callback(result);
@@ -878,7 +902,7 @@ export function savePageThrottled(callback = () => {}) {
   }
 
   if (previewHold > 0) {
-    previewMissed = true;
+    previewAutosaveMissed = true;
     const skipped = skipped_(saveHoldReason());
     callback(skipped);
     return Promise.resolve(skipped);
@@ -894,6 +918,17 @@ export function savePageThrottled(callback = () => {}) {
     return Promise.resolve(skipped);
   }
 
+  // One of our saves is on the wire: queue this autosave instead of copying the
+  // page to compare. When that save lands, drainPendingSave runs this check again.
+  // Not while the page is settling, where every candidate save must pass the
+  // baseline veto below.
+  if (!baselineActive && ownSaveOnWire) {
+    pendingAutosave = true;
+    const skipped = skipped_('Save already in progress');
+    callback(skipped);
+    return Promise.resolve(skipped);
+  }
+
   // For autosave: while the page is still settling, content must differ from BOTH
   // the load-time baseline and the last save, so module setup churn cannot trigger
   // a save. Once settled, the baseline veto is disarmed and only the last save
@@ -901,7 +936,21 @@ export function savePageThrottled(callback = () => {}) {
   // persisted, because it matches the baseline forever.
   // Compare directly - stored versions are already stripped
   const gateToken = gateCaptureToken();
-  const currentForCompare = captureForComparison();
+  let currentForCompare;
+  let dirtyMatchesLastSave;
+  try {
+    currentForCompare = captureForComparison();
+    // This comparison leaves out batching (no-trigger-autosave) regions, which the
+    // gate counts, so on a page that has one the dirty domain must match too.
+    dirtyMatchesLastSave = () => !document.querySelector(NO_TRIGGER_AUTOSAVE_SELECTOR)
+      || (pageMaybeDirty() && captureForDirtyCheck({ flushUndo: false }) === lastSavedDirty);
+  } catch (err) {
+    console.error('savePageThrottled: captureForComparison failed', err);
+    setSaveState('error', err.message);
+    const result = { msg: err.message, msgType: 'error', code: null, etag: null };
+    callback(result);
+    return Promise.resolve(result);
+  }
   const differsFromBaseline = !baselineActive || currentForCompare !== baselineContents;
   const differsFromLastSave = currentForCompare !== lastSavedContents;
 
@@ -909,7 +958,13 @@ export function savePageThrottled(callback = () => {}) {
   logSaveCheck('throttled vs lastSave', !differsFromLastSave);
 
   if (!(differsFromBaseline && differsFromLastSave)) {
-    if (!differsFromLastSave) gateClearIfUnchanged(gateToken);
+    let clear = false;
+    try {
+      clear = !differsFromLastSave && dirtyMatchesLastSave();
+    } catch (err) {
+      console.error('savePageThrottled: captureForDirtyCheck failed', err);
+    }
+    if (clear) gateClearIfUnchanged(gateToken);
     const skipped = skipped_('No changes to save');
     callback(skipped);
     return Promise.resolve(skipped);
