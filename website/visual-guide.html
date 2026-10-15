@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Visual guide · clayjs</title>
-<meta name="description" content="A visual guide to malleable documents: how the file and the open page relate, how sync merges outside edits into a page you are editing, three rules, and where each piece of state belongs.">
+<meta name="description" content="A visual guide to ClayJS and malleable documents: how an HTML file saves itself, how editors and viewers share one file, how regions and ephemeral state work, and how live sync merges changes.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%233E6B52'/%3E%3Cpath d='M21.5 11.2a7 7 0 1 0 0 9.6' fill='none' stroke='%23F1EFEA' stroke-width='3.2' stroke-linecap='round'/%3E%3C/svg%3E">
 <link rel="canonical" href="https://clayjs.com/visual-guide">
 <meta property="og:type" content="website">
@@ -17,44 +17,58 @@
 <script>Prism.hooks.add("complete",function(env){var names=(env.element.dataset.hl||"").split(" ");env.element.querySelectorAll(".token.attr-name").forEach(function(t){if(names.indexOf(t.textContent)>-1)t.classList.add("hl")})});</script>
 <style>
 .vg{--panel:var(--sheet);--accent:var(--glaze);--muted:var(--ink-soft);--keep:var(--glaze);--keep-bg:var(--glaze-tint);--temp:#9A5F14;--temp-bg:#F4E7D2;--risk:var(--rust);--risk-bg:var(--rust-tint)}
-.vg h2{font-size:28px;line-height:1.2;letter-spacing:-.01em;margin:56px 0 14px;padding-top:20px;border-top:1px solid var(--line-soft)}
-.vg h3{font-size:17px;margin:0 0 6px}
-.vg p,.vg ul,.vg ol{max-width:68ch}
-.vg p.lede{max-width:none}
-.vg ul{list-style:disc;padding-left:22px;margin-bottom:14px}
+.vg h2{font-size:28px;line-height:1.2;letter-spacing:-.01em;margin:58px 0 14px;padding-top:24px;border-top:1px solid var(--line-soft)}
+.vg h3{font-size:18px;margin:0 0 8px}
+.vg h3.sub{font-size:20px;margin:34px 0 10px}
+.vg p,.vg ul,.vg ol{max-width:70ch}
+.vg p.lede{max-width:74ch}
+.vg ul,.vg ol{padding-left:22px;margin-bottom:14px}
+.vg ul{list-style:disc}
 .vg li{margin-bottom:6px}
-.vg figure{margin:22px 0 28px;padding:18px;border:1px solid var(--line);background:var(--panel);border-radius:6px}
-.vg figcaption{font-size:14px;color:var(--muted);margin-top:10px}
+.vg figure{margin:22px 0 28px;padding:18px;border:1px solid var(--line);background:var(--panel);border-radius:8px}
+.vg figcaption{font-size:14px;color:var(--muted);margin-top:12px;line-height:1.45}
 .vg svg{display:block;width:100%;height:auto}
-.vg .legend{display:flex;flex-wrap:wrap;gap:14px;font-size:13px;color:var(--muted);margin-top:10px}
-.vg .legend span::before{content:"";display:inline-block;width:14px;height:10px;margin-right:6px;vertical-align:-1px;border:1.5px solid}
+.vg .legend{display:flex;flex-wrap:wrap;gap:16px;font-size:13px;color:var(--muted);margin-top:12px;padding-top:10px;border-top:1px solid var(--line-soft)}
+.vg .legend span::before{content:"";display:inline-block;width:14px;height:10px;margin-right:6px;vertical-align:-1px;border:1.5px solid;border-radius:2px}
 .vg .lg-keep::before{background:var(--keep-bg);border-color:var(--keep)!important}
 .vg .lg-temp::before{background:var(--temp-bg);border-color:var(--temp)!important;border-style:dashed!important}
+.vg .lg-ctl::before{background:var(--panel);border-color:var(--muted)!important}
 .vg .lg-risk::before{background:var(--risk-bg);border-color:var(--risk)!important}
-.vg .grid2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px}
-.vg .grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
-.vg .card ul{font-size:14.5px;margin:10px 0 0;padding-left:18px}
-.vg .wrong{margin-top:12px;border-top:1px solid var(--line-soft);padding-top:8px}
-.vg .wrong summary{cursor:pointer;font-size:14px;color:var(--risk);font-weight:600}
-.vg .wrong p{color:var(--ink-soft)}
-.vg .card pre{overflow-x:auto}
-.vg .card{border:1px solid var(--line);background:var(--paper);border-radius:6px;padding:14px}
-.vg .grid3 .card{background:var(--panel)}
+.vg .grid2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;margin:18px 0}
+.vg .grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin:18px 0}
+.vg .card{border:1px solid var(--line);background:var(--paper);border-radius:8px;padding:16px}
+.vg .grid3 .card,.vg .grid2 .card{background:var(--panel)}
 .vg .card p{font-size:14.5px;margin:6px 0 0}
-.vg .card .fix{color:var(--keep)}
-.vg .card .bad{color:var(--risk)}
-.vg .rung-meta{font-size:13.5px;margin:8px 0 0}
+.vg .card ul{font-size:14.5px;margin:10px 0 0;padding-left:18px}
+.vg .card pre{overflow-x:auto;margin:10px 0 0;font-size:12.5px;padding:12px 14px}
+.vg .wrong{margin-top:12px;border-top:1px solid var(--line-soft);padding-top:8px}
+.vg .wrong summary{cursor:pointer;font-size:13.5px;color:var(--risk);font-weight:600;font-family:var(--mono)}
+.vg .wrong p{color:var(--ink-soft);font-size:13.5px;margin-top:6px}
+.vg .rung-meta{font-size:14px;margin:8px 0 0;line-height:1.5}
 .vg .rung-meta b{font-weight:600}
-.vg .rules{counter-reset:r;list-style:none;padding:0}
-.vg .rules li{counter-increment:r;position:relative;padding:12px 0 12px 46px;border-bottom:1px solid var(--line)}
-.vg .rules li::before{content:counter(r);position:absolute;left:0;top:12px;width:30px;height:30px;border-radius:50%;background:var(--keep-bg);color:var(--keep);font-weight:700;display:grid;place-items:center;font-size:14px}
-.vg .note{font-size:13px;color:var(--muted)}
-.vg .anno{--cw:8.1px;background:var(--char);border-radius:10px;padding:12px 0 14px;margin:14px 0}
+.vg .sec-num{font-family:var(--mono);font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--glaze);display:block;margin-bottom:4px;font-weight:600}
+.vg .toc{margin:26px 0 6px}
+.vg .toc-title{font-family:var(--mono);font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-soft);font-weight:600;margin:0 0 8px}
+.vg .toc ol{margin:0;padding-left:1.4em;font-size:15px;line-height:1.5}
+.vg .toc li{padding:3px 0}
+.vg .toc li::marker{color:var(--ink-soft);font-family:var(--mono);font-size:13px}
+.vg .toc a{text-decoration:none}
+.vg .toc a:hover{text-decoration:underline}
+.vg .regions{border:1.5px dashed var(--temp);background:var(--temp-bg);border-radius:8px;padding:14px}
+.vg .regions-head{font-size:14.5px;margin:0 0 10px;max-width:none}
+.vg .regions-head code{font-weight:650;color:var(--temp)}
+.vg .rtiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:10px}
+.vg .rtile{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:10px 12px;font-size:13.5px;line-height:1.45}
+.vg .rtile code{display:block;width:fit-content;margin-bottom:5px;font-size:12.5px;font-weight:600}
+.vg .regions-other{margin:18px 0 8px;font-size:14.5px;font-weight:600}
+.vg .anno{--cw:8.1px;background:var(--char);border-radius:10px;padding:14px 0 16px;margin:16px 0}
 .vg .anno pre{margin:0;padding:0 18px;border-radius:0;background:none}
 .vg .anno .token.attr-name.hl{color:var(--char-ink);background:color-mix(in srgb,var(--char-attr) 28%,transparent);border-radius:4px;box-shadow:0 0 0 2px color-mix(in srgb,var(--char-attr) 28%,transparent)}
-.vg .tip{position:relative;width:fit-content;max-width:min(56ch,calc(100% - 36px));margin:8px 18px 10px min(calc(18px + var(--in) * var(--cw) - 10px),40%);padding:8px 12px;background:var(--paper);border:1px solid var(--line);border-radius:10px;font-size:13.5px;line-height:1.45;color:var(--ink-soft)}
+.vg .tip{position:relative;width:fit-content;max-width:min(60ch,calc(100% - 36px));margin:8px 18px 12px min(calc(18px + var(--in) * var(--cw) - 10px),38%);padding:9px 13px;background:var(--paper);border:1px solid var(--line);border-radius:10px;font-size:13.5px;line-height:1.48;color:var(--ink-soft)}
 .vg .tip::before{content:"";position:absolute;top:-6px;left:14px;width:10px;height:10px;background:var(--paper);border-left:1px solid var(--line);border-top:1px solid var(--line);transform:rotate(45deg)}
-.vg .tip code{color:var(--glaze);background:var(--glaze-tint)}
+.vg .tip code{color:var(--glaze-deep);background:var(--glaze-tint)}
+.vg .callout{border-left:3px solid var(--glaze);background:var(--panel);padding:12px 16px;border-radius:0 6px 6px 0;margin:16px 0;font-size:15px}
+.vg .callout p{margin:0}
 /* svg vocabulary */
 .vg svg text{fill:var(--ink);font-family:var(--serif);font-size:13px}
 .vg svg .t-s{font-size:11.5px}
@@ -64,6 +78,7 @@
 .vg svg .t-keep{fill:var(--keep)} .vg svg .t-temp{fill:var(--temp)} .vg svg .t-risk{fill:var(--risk)}
 .vg svg .box{fill:var(--paper);stroke:var(--line);stroke-width:1.5}
 .vg svg .box-ink{fill:var(--paper);stroke:var(--muted);stroke-width:1.5}
+.vg svg .box-sheet{fill:var(--sheet);stroke:var(--line);stroke-width:1.5}
 .vg svg .keep{fill:var(--keep-bg);stroke:var(--keep);stroke-width:1.2}
 .vg svg .keep-f{fill:var(--keep)}
 .vg svg .temp{fill:var(--temp-bg);stroke:var(--temp);stroke-width:1.2;stroke-dasharray:4 3}
@@ -71,17 +86,11 @@
 .vg svg .ctl{fill:var(--panel);stroke:var(--muted);stroke-width:1.2}
 .vg svg .ghost{opacity:.35}
 .vg svg .arr{fill:none;stroke:var(--muted);stroke-width:1.6}
+.vg svg .arr-keep{fill:none;stroke:var(--keep);stroke-width:1.6}
 .vg svg .arr-risk{fill:none;stroke:var(--risk);stroke-width:1.6}
 .vg svg .ahead{fill:var(--muted)}
+.vg svg .ahead-keep{fill:var(--keep)}
 .vg svg .ahead-risk{fill:var(--risk)}
-.vg h3.sub{font-size:20px;margin:36px 0 8px}
-.vg .regions{border:1.5px dashed var(--temp);background:var(--temp-bg);border-radius:8px;padding:12px}
-.vg .regions-head{font-size:14px;margin:0 0 10px}
-.vg .regions-head code{font-weight:650;color:var(--temp)}
-.vg .rtiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px}
-.vg .rtile{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:8px 10px;font-size:13px;line-height:1.4}
-.vg .rtile code{display:block;width:fit-content;margin-bottom:4px;font-size:12.5px}
-.vg .regions-other{margin:16px 0 8px;font-size:14px}
 @media(max-width:900px){.vg .grid3{grid-template-columns:1fr}}
 @media(max-width:700px){.vg .grid2{grid-template-columns:1fr}.vg .anno{--cw:7.5px}.vg .anno pre{padding:0 14px}.vg figure{padding:12px}}
 </style>
@@ -105,96 +114,227 @@
   <section style="border-top: none; padding-top: 56px;">
     <span class="eyebrow"><a href="/guide">Guide</a> · Visual</span>
     <h1 class="display" style="font-size: clamp(30px, 4.5vw, 42px);">A visual guide to malleable documents</h1>
-    <p class="lede" style="margin-top: 12px;">How to build a malleable document, for when full-stack software is overkill: one HTML file that holds its own data and saves itself. These diagrams show how the file and the open page relate, and how to keep the two from drifting apart. New to ClayJS? Start with <a href="/get-started">Get started</a>.</p>
+    <p class="lede" style="margin-top: 12px;">ClayJS is a script tag that makes a plain HTML file save its own edits back into itself. There is no separate database and no build step: the HTML file is both the application and the record.</p>
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">Contents</p>
+      <ol>
+        <li><a href="#loop">The save loop: one file in two forms</a></li>
+        <li><a href="#modes">Editors, viewers, and form state</a></li>
+        <li><a href="#regions">Regions and ephemeral state: what gets saved and what does not</a></li>
+        <li><a href="#ladder">Four architecture rungs (of increasing complexity)</a></li>
+        <li><a href="#sync">Live sync, agents, and three rules that prevent drift</a></li>
+        <li><a href="#where">State decision map and complete starter file</a></li>
+      </ol>
+    </nav>
   </section>
 
-
-<h2 id="loop">1. The saved file and the open page</h2>
-<p>A malleable document is both a saved file and an open page. The saved file is the bytes on disk. The open page is the live DOM in an editor's browser. ClayJS turns the file into the page on open, and the page back into a file on save. With the <code>sync</code> plugin, it also merges outside changes into the open page.</p>
+<h2 id="loop"><span class="sec-num">Section 1</span>The save loop: one file in two forms</h2>
+<p>In a traditional web app, HTML is a disposable view rendered from a database. In a malleable document, <strong>the HTML file is the database</strong>. When a user edits text, checks a box, or reorders a list, those changes happen directly in the DOM, and saving writes the updated HTML document back over the file it came from.</p>
+<p>To build with ClayJS without bugs, hold one core distinction in mind: the document exists simultaneously in two forms.</p>
+<ul>
+  <li><strong>The saved file (bytes on disk):</strong> What a visitor or an AI agent reads. It must be complete and accurate before any JavaScript runs: every heading, list item, checked box, and saved total is plain HTML markup.</li>
+  <li><strong>The open page (live DOM in a browser tab):</strong> What an editor interacts with. It contains the saved record <em>plus</em> temporary runtime additions: floating formatting toolbars, drag handles, filter inputs, selection highlights, and ClayJS's own state attributes on <code>&lt;html&gt;</code>.</li>
+</ul>
 
 <figure>
-<svg viewBox="0 0 760 335" role="img" aria-labelledby="f1t">
-<title id="f1t">An agent edits the saved file on disk. ClayJS turns that file into the open page on open, merges outside changes in with the sync plugin, and turns the page back into the file on save.</title>
+<svg viewBox="0 0 780 350" role="img" aria-labelledby="f1t">
+<title id="f1t">How the saved file, the host, and the open page in the browser connect in a loop: opening activates editing and mounts runtime UI, while saving clones the DOM, strips temporary UI, turns editing attributes inert, and POSTs the HTML back to the host.</title>
 <defs>
 <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" class="ahead"/></marker>
+<marker id="ahk" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" class="ahead-keep"/></marker>
 <marker id="ahr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" class="ahead-risk"/></marker>
 </defs>
-<rect x="20" y="10" width="180" height="48" rx="6" class="box-ink"/>
-<text x="110" y="30" text-anchor="middle" class="t-b">AI agent · text editor</text>
-<text x="110" y="47" text-anchor="middle" class="t-s t-m">edits the bytes directly</text>
-<line x1="110" y1="58" x2="110" y2="92" class="arr" marker-end="url(#ah)"/>
 
-<rect x="20" y="96" width="180" height="206" rx="6" class="box-ink"/>
-<text x="36" y="120" class="t-b">saved file</text>
-<rect x="36" y="134" width="120" height="13" rx="2" class="keep"/>
-<rect x="36" y="156" width="148" height="8" rx="2" class="keep"/>
-<rect x="36" y="170" width="128" height="8" rx="2" class="keep"/>
-<rect x="36" y="190" width="140" height="10" rx="2" class="keep"/>
-<rect x="36" y="206" width="140" height="10" rx="2" class="keep"/>
-<rect x="36" y="222" width="140" height="10" rx="2" class="keep"/>
-<text x="36" y="262" class="t-c t-m">inert-contenteditable</text>
-<text x="36" y="280" class="t-c t-m">no editmode attribute</text>
+<!-- External editor / AI agent -->
+<rect x="16" y="12" width="210" height="48" rx="6" class="box-ink"/>
+<text x="121" y="32" text-anchor="middle" class="t-b">AI agent · text editor</text>
+<text x="121" y="48" text-anchor="middle" class="t-s t-m">reads &amp; edits HTML bytes on disk</text>
+<line x1="121" y1="60" x2="121" y2="90" class="arr" marker-end="url(#ah)"/>
 
-<rect x="540" y="40" width="200" height="262" rx="6" class="box-ink"/>
-<text x="556" y="64" class="t-b">open page, editor</text>
-<rect x="556" y="76" width="168" height="22" rx="3" class="temp"/>
-<text x="640" y="91" text-anchor="middle" class="t-s t-temp">toolbar</text>
-<rect x="556" y="110" width="120" height="13" rx="2" class="keep"/>
-<rect x="556" y="132" width="166" height="8" rx="2" class="keep"/>
-<rect x="556" y="146" width="140" height="8" rx="2" class="keep"/>
-<rect x="556" y="166" width="10" height="10" rx="2" class="temp"/><rect x="572" y="166" width="130" height="10" rx="2" class="keep"/>
-<rect x="556" y="182" width="10" height="10" rx="2" class="temp"/><rect x="572" y="182" width="130" height="10" rx="2" class="keep"/>
-<rect x="556" y="198" width="10" height="10" rx="2" class="temp"/><rect x="572" y="198" width="130" height="10" rx="2" class="keep"/>
-<rect x="556" y="220" width="110" height="20" rx="3" class="temp"/>
-<text x="611" y="234" text-anchor="middle" class="t-s t-temp">Change image</text>
-<text x="556" y="262" class="t-c t-m">contenteditable="true"</text>
-<text x="556" y="280" class="t-c t-m">editmode="true"</text>
+<!-- Saved file box -->
+<rect x="16" y="94" width="210" height="214" rx="6" class="box-ink"/>
+<text x="32" y="118" class="t-b">1. Saved file on disk</text>
+<text x="32" y="134" class="t-c t-m">&lt;html lang="en" autosave&gt;</text>
+<rect x="32" y="146" width="140" height="14" rx="2" class="keep"/>
+<text x="38" y="157" class="t-c t-keep">&lt;h1&gt;Project Plan&lt;/h1&gt;</text>
+<rect x="32" y="168" width="176" height="12" rx="2" class="keep"/>
+<rect x="32" y="186" width="176" height="12" rx="2" class="keep"/>
+<rect x="32" y="204" width="152" height="12" rx="2" class="keep"/>
+<text x="32" y="238" class="t-c t-m">inert-contenteditable</text>
+<text x="32" y="254" class="t-c t-m">input disabled checked</text>
+<text x="32" y="270" class="t-c t-m">no editmode or savestatus</text>
+<text x="32" y="292" class="t-s t-keep t-b">Clean, self-contained HTML</text>
 
-<line x1="204" y1="140" x2="536" y2="140" class="arr" marker-end="url(#ah)"/>
-<text x="370" y="130" text-anchor="middle" class="t-b">open and sync</text>
+<!-- Host middle column -->
+<rect x="310" y="118" width="150" height="166" rx="6" class="box-sheet"/>
+<text x="385" y="142" text-anchor="middle" class="t-b">Host</text>
+<text x="385" y="159" text-anchor="middle" class="t-s t-m">HTML Clay (local)</text>
+<text x="385" y="174" text-anchor="middle" class="t-s t-m">Hyperclay (cloud)</text>
+<text x="385" y="189" text-anchor="middle" class="t-s t-m">or 20-line server</text>
+<line x1="326" y1="204" x2="444" y2="204" stroke="var(--line)" stroke-width="1"/>
+<text x="385" y="222" text-anchor="middle" class="t-c t-m">GET page + savetoken</text>
+<text x="385" y="240" text-anchor="middle" class="t-c t-m">POST /_/save</text>
+<text x="385" y="258" text-anchor="middle" class="t-c t-m">SSE /_/sync</text>
 
-<line x1="536" y1="236" x2="204" y2="236" class="arr" marker-end="url(#ah)"/>
-<text x="370" y="226" text-anchor="middle" class="t-b">save out</text>
-<text x="370" y="254" text-anchor="middle" class="t-s t-m">make editing attributes inert,</text>
-<text x="370" y="269" text-anchor="middle" class="t-s t-m">drop stripped regions</text>
+<!-- Top arrows: Open & Sync -->
+<line x1="228" y1="145" x2="306" y2="145" class="arr-keep" marker-end="url(#ahk)"/>
+<line x1="464" y1="145" x2="536" y2="145" class="arr-keep" marker-end="url(#ahk)"/>
+<text x="385" y="90" text-anchor="middle" class="t-b t-keep">Open &amp; live sync →</text>
+<text x="385" y="106" text-anchor="middle" class="t-s t-m">sets editmode="true", activates editors, merges disk/peer frames</text>
 
-<text x="380" y="326" text-anchor="middle" class="t-s t-m">The host (HTML Clay locally, Hyperclay online) writes the file and delivers outside changes. A browser alone cannot.</text>
+<!-- Bottom arrows: Save out -->
+<line x1="536" y1="255" x2="464" y2="255" class="arr" marker-end="url(#ah)"/>
+<line x1="306" y1="255" x2="228" y2="255" class="arr" marker-end="url(#ah)"/>
+<text x="385" y="302" text-anchor="middle" class="t-b">← Snapshot &amp; save (POST /_/save)</text>
+<text x="385" y="318" text-anchor="middle" class="t-s t-m">persists form values, strips editor-ui, makes mode attrs inert</text>
+
+<!-- Open page box -->
+<rect x="540" y="42" width="224" height="266" rx="6" class="box-ink"/>
+<text x="556" y="66" class="t-b">2. Open page (editor tab)</text>
+<rect x="556" y="78" width="192" height="22" rx="3" class="temp"/>
+<text x="652" y="93" text-anchor="middle" class="t-s t-temp">clay="editor-ui" toolbar / filter</text>
+<rect x="556" y="108" width="140" height="14" rx="2" class="keep"/>
+<text x="562" y="119" class="t-c t-keep">&lt;h1&gt;Project Plan&lt;/h1&gt;</text>
+<rect x="556" y="130" width="14" height="12" rx="2" class="temp"/><rect x="574" y="130" width="174" height="12" rx="2" class="keep"/>
+<rect x="556" y="148" width="14" height="12" rx="2" class="temp"/><rect x="574" y="148" width="174" height="12" rx="2" class="keep"/>
+<rect x="556" y="166" width="14" height="12" rx="2" class="temp"/><rect x="574" y="166" width="150" height="12" rx="2" class="keep"/>
+<rect x="556" y="188" width="128" height="20" rx="3" class="temp"/>
+<text x="620" y="202" text-anchor="middle" class="t-s t-temp">ephemeral="selected"</text>
+<text x="556" y="232" class="t-c t-m">editmode="true" savestatus="saved"</text>
+<text x="556" y="248" class="t-c t-m">contenteditable="plaintext-only"</text>
+<text x="556" y="264" class="t-c t-m">input checked (enabled)</text>
+<text x="556" y="292" class="t-s t-temp t-b">Live DOM = record + runtime UI</text>
+
+<text x="390" y="342" text-anchor="middle" class="t-s t-m">A browser tab alone cannot write to disk. The host serves the file and accepts POST /_/save.</text>
 </svg>
-<div class="legend"><span class="lg-keep">durable record: saved, synced, seen by viewers</span><span class="lg-temp">temporary: never saved, rebuilt on every load</span></div>
-<figcaption>Everything green exists in both the file and the page. Everything amber exists only in the open page.</figcaption>
+<div class="legend">
+  <span class="lg-keep">Durable record: saved to disk, synced to peers, seen by viewers</span>
+  <span class="lg-temp">Temporary runtime state: stripped on save, rebuilt on load</span>
+</div>
+<figcaption>Green elements belong to the document record and survive every save. Dashed amber elements and attributes exist only while the page is open in a browser tab.</figcaption>
 </figure>
 
-<p>ClayJS handles two sets of marked regions:</p>
-<ul>
-<li>Stripped regions are <code>clay="editor-ui"</code>, <code>clay="no-save"</code> and <code>clay="no-snapshot"</code>. Saving removes them.</li>
-<li>Excluded regions are those three plus <code>clay="freeze"</code>. Sync skips them.</li>
-</ul>
-<p>A <code>clay="freeze"</code> region in the file is saved with the contents it had when the page loaded.</p>
-<p>ClayJS translates every difference between the file and the page that it knows about, in both directions. So keep them as close as the app allows, and mark every difference your code adds.</p>
+<p>Here is what happens on each half of the loop:</p>
+<ol>
+  <li><strong>Opening the file:</strong> When a host serves the file to an authorized editor (via a <code>savetoken</code> attribute on <code>&lt;html&gt;</code> in HTML Clay, or the owner cookie on Hyperclay), ClayJS sets <code>editmode="true"</code> and <code>pageowner="true|false"</code> on <code>&lt;html&gt;</code>, activates mode-specific attributes, mounts editing plugins, and waits 500 ms of quiet (up to 3 s) before taking its clean baseline snapshot and setting <code>savestatus="saved"</code>.</li>
+  <li><strong>Saving the page:</strong> Triggered by <code>&lt;html autosave&gt;</code> (debounced 1.5 s after your last edit, at most 10 s during continuous typing), <kbd>Cmd+S</kbd> / <kbd>Ctrl+S</kbd>, a click inside <code>[trigger-save]</code>, or calling <code>clay.save()</code>. ClayJS clones the entire document, copies live values from <code>persist</code> controls into attributes, deletes every <code>clay="editor-ui"</code>, <code>no-save</code>, and <code>no-snapshot</code> subtree, converts active mode attributes back to their inert saved form, strips root runtime attributes (<code>editmode</code>, <code>pageowner</code>, <code>savestatus</code>, <code>savetoken</code>, <code>documentetag</code>), and sends the HTML string to <code>POST /_/save</code>. With the default <code>source</code> plugin enabled, ClayJS pairs unchanged elements to their original source byte ranges so only modified elements are reprinted.</li>
+</ol>
 
-<h3 class="sub" id="clay-attributes">The <code>clay</code> attribute</h3>
-<figure id="regions">
+
+<h2 id="modes"><span class="sec-num">Section 2</span>Editors, viewers, and form state</h2>
+<p>A malleable document is one file shared by both its author (in <strong>edit mode</strong>) and any visitor (in <strong>view mode</strong>). You do not build a separate read-only page. Instead, you use four mode attributes, declarative visibility, and form persistence so the saved file is safe and read-only by default, and becomes interactive only when ClayJS enters edit mode.</p>
+
+<figure>
+<svg viewBox="0 0 780 230" role="img" aria-labelledby="f2t">
+<title id="f2t">Comparison of the exact same task row in the saved file (what a viewer receives) versus in the open page when editmode is true.</title>
+<!-- Left: Saved file / Viewer -->
+<rect x="14" y="14" width="352" height="202" rx="6" class="box-ink"/>
+<text x="30" y="38" class="t-b">In the saved file (what a viewer gets)</text>
+<text x="30" y="55" class="t-s t-m">No &lt;html editmode&gt; attribute before boot; inert in view mode</text>
+
+<rect x="30" y="68" width="320" height="34" rx="4" class="keep"/>
+<text x="40" y="83" class="t-c t-keep">&lt;h1 editmode:contenteditable</text>
+<text x="40" y="96" class="t-c t-keep">    inert-contenteditable="plaintext-only"&gt;</text>
+
+<rect x="30" y="110" width="320" height="34" rx="4" class="keep"/>
+<text x="40" y="125" class="t-c t-keep">&lt;input type="checkbox" persist</text>
+<text x="40" y="138" class="t-c t-keep">       viewmode:disabled disabled checked&gt;</text>
+
+<rect x="30" y="152" width="320" height="50" rx="4" class="ctl ghost"/>
+<text x="40" y="170" class="t-c t-m">&lt;button show-when:editmode="true"&gt;+ Add&lt;/button&gt;</text>
+<text x="40" y="188" class="t-s t-m">Hidden at first paint by CSS fallback rule</text>
+
+<!-- Arrows between -->
+<line x1="372" y1="92" x2="408" y2="92" class="arr-keep" marker-end="url(#ahk)"/>
+<text x="390" y="82" text-anchor="middle" class="t-s t-keep t-b">open</text>
+<line x1="408" y1="138" x2="372" y2="138" class="arr" marker-end="url(#ah)"/>
+<text x="390" y="154" text-anchor="middle" class="t-s t-m">save</text>
+
+<!-- Right: Open page in edit mode -->
+<rect x="414" y="14" width="352" height="202" rx="6" class="box-ink"/>
+<text x="430" y="38" class="t-b">In the open page (when editmode="true")</text>
+<text x="430" y="55" class="t-s t-m">&lt;html editmode="true"&gt; set at boot by ClayJS</text>
+
+<rect x="430" y="68" width="320" height="34" rx="4" class="keep"/>
+<text x="440" y="83" class="t-c t-keep">&lt;h1 editmode:contenteditable</text>
+<text x="440" y="96" class="t-c t-temp">    contenteditable="plaintext-only"&gt;</text>
+
+<rect x="430" y="110" width="320" height="34" rx="4" class="keep"/>
+<text x="440" y="125" class="t-c t-keep">&lt;input type="checkbox" persist</text>
+<text x="440" y="138" class="t-c t-temp">       viewmode:disabled checked&gt; (enabled)</text>
+
+<rect x="430" y="152" width="320" height="50" rx="4" class="ctl"/>
+<text x="440" y="170" class="t-c">&lt;button show-when:editmode="true"&gt;+ Add&lt;/button&gt;</text>
+<text x="440" y="188" class="t-s t-keep">Visible and interactive for the editor</text>
+</svg>
+<figcaption>ClayJS translates mode attributes on open and reverses them on save. Author existing records in their saved (inert) form so a visitor never sees editable text or live checkboxes before the first save.</figcaption>
+</figure>
+
+<div class="grid2">
+  <div class="card">
+    <h3>1. The four mode attributes</h3>
+    <p>ClayJS ships exactly four mode attributes. On save, a transform writes their inert form into the file; on load in edit mode, ClayJS activates them:</p>
+    <ul>
+      <li><code>editmode:contenteditable</code> renames <code>contenteditable</code> to <code>inert-contenteditable</code> on save (preserving its value, such as <code>"plaintext-only"</code>) and restores <code>contenteditable</code> in edit mode.</li>
+      <li><code>editmode:onclick</code> renames <code>onclick</code> to <code>inert-onclick</code> on save and restores it in edit mode.</li>
+      <li><code>editmode:resource</code> on <code>&lt;script&gt;</code>, <code>&lt;style&gt;</code>, or <code>&lt;link&gt;</code> prefixes <code>type</code> with <code>inert/</code> on save and strips the prefix in edit mode so the resource runs.</li>
+      <li><code>viewmode:disabled</code> and <code>viewmode:readonly</code> add <code>disabled</code> or <code>readonly</code> in the saved file and remove them in edit mode.</li>
+    </ul>
+    <p><strong>Crucial distinction:</strong> Author existing records in the file in their <em>saved form</em> (<code>inert-contenteditable="plaintext-only"</code>, <code>disabled</code>), but write blueprints inside <code>&lt;template&gt;</code> in their <em>active form</em> (<code>contenteditable="plaintext-only"</code>, no <code>disabled</code>), because templates are cloned while editing and save transforms do not reach inside <code>&lt;template&gt;</code>.</p>
+  </div>
+
+  <div class="card">
+    <h3>2. Hiding controls &amp; persisting inputs</h3>
+    <p><strong>Showing and hiding controls:</strong> Load <code>clay-options.js</code> and put <code>show-when:editmode="true"</code> on edit-only buttons and drag handles. Because the saved file has <em>no</em> <code>editmode</code> attribute on <code>&lt;html&gt;</code> until ClayJS boots, always include this one-line fallback in your <code>&lt;style&gt;</code> block so viewers never see edit controls flash on first load:</p>
+    <pre><code class="language-css">html:not([editmode="true"]) [show-when\:editmode="true"] {
+  display: none;
+}</code></pre>
+    <p><strong>Persisting form controls (<code>persist</code>):</strong> In browsers, typing into an <code>&lt;input&gt;</code> or checking a checkbox changes a live DOM <em>property</em> (<code>.value</code>, <code>.checked</code>), not the HTML attribute. Without <code>persist</code>, saving serializes the old attribute and loses the user's input. Put <code>persist</code> on every record <code>&lt;input&gt;</code>, <code>&lt;textarea&gt;</code>, and <code>&lt;select&gt;</code> so ClayJS mirrors live values into <code>value</code>, <code>checked</code>, and <code>selected</code> attributes on input and before every snapshot.</p>
+  </div>
+</div>
+
+
+<h2 id="regions"><span class="sec-num">Section 3</span>Regions and ephemeral state: what gets saved and what does not</h2>
+<p>Every element in an open malleable document belongs to one of three categories: <strong>Record</strong> (the durable work), <strong>Chrome</strong> (editing UI and navigation), or <strong>Derived</strong> (counts, totals, and projections computed from the record). Almost every bug in a malleable app happens when chrome or derived state leaks into the saved record.</p>
+<p>You control that boundary with two mechanisms: the <code>clay</code> attribute on regions (subtrees), and the <code>ephemeral</code> attribute on individual saved elements.</p>
+
+<figure>
 <div class="regions">
-<p class="regions-head"><code>clay="editor-ui"</code> is shorthand for all five of these. Use it for UI a script creates or changes.</p>
+<p class="regions-head"><code>clay="editor-ui"</code> is the standard region for runtime chrome and tab-only derived views. It is shorthand for all five tokens below:</p>
 <div class="rtiles">
-<div class="rtile"><code>no-save</code>Left out of the saved file. Other open tabs still receive it but never apply it.</div>
-<div class="rtile"><code>no-snapshot</code>Left out of the saved file and of what sync sends. Each tab keeps its own copy.</div>
-<div class="rtile"><code>no-watch</code>Changes here start no autosave and never count as unsaved work.</div>
-<div class="rtile"><code>no-undo</code>Changes here add no undo steps.</div>
-<div class="rtile"><code>no-data</code>Skipped by the JSON data API.</div>
+  <div class="rtile"><code>no-save</code>Removed from the saved file. (Used alone, it still rides sync snapshots to edit tabs, though peers never apply it.)</div>
+  <div class="rtile"><code>no-snapshot</code>Removed from both the saved file and every live-sync snapshot. Each open tab keeps its own private copy.</div>
+  <div class="rtile"><code>no-watch</code>Mutations inside start no autosave, never mark the page dirty, and record no undo steps.</div>
+  <div class="rtile"><code>no-undo</code>Excluded from whole-page undo/redo history (<code>clay.undo</code>).</div>
+  <div class="rtile"><code>no-data</code>Skipped by <code>clay.extractData()</code> and the JSON data API.</div>
 </div>
 </div>
-<p class="regions-other">Two more, not part of <code>editor-ui</code>:</p>
+
+<p class="regions-other">Four additional region tokens for specialized state:</p>
 <div class="rtiles">
-<div class="rtile"><code>freeze</code>The element saves and syncs, but its contents stay as they were when the page first rendered. A per-tab scratchpad.</div>
-<div class="rtile"><code>no-dirty</code>Saved in the file, but changes here are not treated as edits: no autosave, no unsaved warning. The new value is written whenever something else saves. For computed values the file should show, like a total.</div>
+  <div class="rtile"><code>freeze</code><strong>Per-tab scratchpad.</strong> The element itself saves, syncs, and moves with its record, but its inner HTML is always saved as it was when the element first appeared, and its contents never sync.</div>
+  <div class="rtile"><code>no-dirty</code><strong>Saved derived values.</strong> Written to the file whenever another edit saves, so a file opened without JS shows up-to-date totals. Changes here start no autosave, and remote wins on sync.</div>
+  <div class="rtile"><code>no-trigger-autosave</code><strong>Batched heavy editors.</strong> Saved normally and still counts as unsaved work (with a close warning), but edits inside do not start the autosave timer until you call <code>clay.save()</code>.</div>
+  <div class="rtile"><code>live</code><strong>Fast real-time JSON.</strong> Used on a <code>&lt;script type="application/json" merge="name" clay="live"&gt;</code> tag with the <code>live</code> plugin for high-frequency state (games, cursors) checkpointed every 8 s.</div>
 </div>
-<p class="regions-other">For state on a saved element, such as a selection or an open section, use the <code>ephemeral</code> attribute rather than a region: <code>ephemeral="selected"</code>, or <code>ephemeral:open</code> to make the element's own <code>open</code> tab-only. Neither is saved, synced or undone.</p>
-<figcaption>Put a token on any element and it covers everything inside. Combine tokens with spaces: <code>clay="no-save no-undo"</code>.</figcaption>
+
+<p class="regions-other">Per-tab state on a saved element: the <code>ephemeral</code> attribute</p>
+<div class="grid2" style="margin: 8px 0 0;">
+  <div class="rtile">
+    <code>ephemeral="selected dragging"</code>
+    Holds space-separated state tokens for this tab only, toggled with <code>clay.ephemeral.toggle(el, "selected")</code> and styled with <code>[ephemeral~="selected"]</code> or Tailwind's <code>ephemeral-selected:</code>. Never saved, synced, or undone.
+  </div>
+  <div class="rtile">
+    <code>ephemeral:open · ephemeral:aria-expanded</code>
+    Marks the element's own <code>open</code> or <code>aria-expanded</code> attribute as tab-only. The marker stays in the file; the target attribute is stripped on save and ignored by sync. (<code>&lt;dialog open&gt;</code> is tab-only automatically.)
+  </div>
+</div>
+<figcaption>Put a <code>clay</code> token on any element and it governs the entire subtree. Combine tokens with spaces (<code>clay="no-save no-undo"</code>). Because <code>clay="editor-ui"</code> is stripped on save, never put it on elements authored directly in the file or inside a <code>&lt;template&gt;</code>; clone the template after <code>clay.ready</code> and set <code>clay="editor-ui"</code> on the inserted wrapper.</figcaption>
 </figure>
 
-<h2 id="ladder">2. Four different types of malleable documents (of increasing complexity)</h2>
-<p>Pick the lowest of these four rungs that fits the file. Each rung up moves the page further from the file and costs you more rules. Gray marks a control saved in the file.</p>
+
+<h2 id="ladder"><span class="sec-num">Section 4</span>Four architecture rungs (of increasing complexity)</h2>
+<p>Pick the lowest rung that fits your document. Each rung up introduces more separation between the live page and the saved file, requiring one more habit from your code. Gray blocks represent static controls saved in the file.</p>
 
 <div class="grid2">
 <figure style="margin:0">
@@ -213,13 +353,14 @@
 <rect x="20" y="142" width="60" height="14" rx="3" class="ctl"/></g>
 <text x="170" y="99" text-anchor="middle" style="font-size:22px" class="t-keep">=</text>
 </svg>
-<h3>Rung 1. Editors only</h3>
-<p class="rung-meta">The editing UI is the app. Nobody views it anonymously, so nothing is stripped, and controls are ordinary markup in the file. The file and the page are the same, apart from state ClayJS adds on open and removes on save, such as <code>editmode="true"</code> on <code>&lt;html&gt;</code>. So sync has nothing of yours to translate.</p>
+<h3>Rung 1 · Editors only</h3>
+<p class="rung-meta"><strong>When to use:</strong> Personal software or an internal tool where everyone who opens the file is an editor.</p>
+<p class="rung-meta"><strong>How it works:</strong> Controls are ordinary markup in the file. Nothing is hidden or stripped except ClayJS's own root attributes (<code>editmode</code>, <code>savestatus</code>). The open page and the saved file are identical.</p>
 </figure>
 
 <figure style="margin:0">
 <svg viewBox="0 0 340 175" role="img" aria-label="Rung 2: the same bytes; a viewer sees the same content with the controls hidden by mode.">
-<text x="82" y="16" text-anchor="middle" class="t-s t-m">open page</text><text x="336" y="16" text-anchor="end" class="t-s t-m">saved file, as a viewer sees it</text>
+<text x="82" y="16" text-anchor="middle" class="t-s t-m">open page (editor)</text><text x="258" y="16" text-anchor="middle" class="t-s t-m">saved file (viewer)</text>
 <rect x="10" y="24" width="145" height="140" rx="5" class="box-ink"/><rect x="185" y="24" width="145" height="140" rx="5" class="box-ink"/>
 <g><rect x="20" y="34" width="125" height="18" rx="3" class="ctl"/><text x="82" y="47" text-anchor="middle" class="t-s">toolbar</text>
 <rect x="20" y="62" width="80" height="11" rx="2" class="keep"/><rect x="20" y="80" width="120" height="7" rx="2" class="keep"/><rect x="20" y="92" width="105" height="7" rx="2" class="keep"/>
@@ -234,16 +375,16 @@
 </g>
 <text x="170" y="99" text-anchor="middle" style="font-size:22px" class="t-keep">≈</text>
 </svg>
-<h3>Rung 2. Editors and viewers</h3>
-<p class="rung-meta">Controls stay in the file, each marked <code>show-when:editmode="true"</code>. Load <code>clay-options.js</code> to make that attribute work. ClayJS sets <code>editmode="true"</code> on <code>&lt;html&gt;</code> for editors and strips that attribute from the saved file. <a href="#minimal">Section 6</a> shows how to hide them before that script runs.</p>
-<p class="rung-meta">Editors and viewers load the same bytes. Rung 2 adds one difference: editing attributes such as <code>inert-contenteditable</code>, which sync translates for you. The cost is that viewers download the control markup.</p>
+<h3>Rung 2 · Editors and viewers (the default)</h3>
+<p class="rung-meta"><strong>When to use:</strong> Shared documents and lists with static edit buttons and drag handles (<a href="#minimal">Section 6</a>).</p>
+<p class="rung-meta"><strong>How it works:</strong> Static controls stay in the file with <code>show-when:editmode="true"</code> (<code>clay-options.js</code>), and fields use <code>editmode:contenteditable</code> and <code>viewmode:disabled</code>. No script is needed to mount controls, and ClayJS translates mode attributes automatically.</p>
 </figure>
 
 <figure style="margin:0">
-<svg viewBox="0 0 340 175" role="img" aria-label="Rung 3: the open page has its controls in an editor-ui region; the saved file holds only the content, with inert editing attributes.">
+<svg viewBox="0 0 340 175" role="img" aria-label="Rung 3: the open page has runtime chrome in an editor-ui region; the saved file holds only the record.">
 <text x="81" y="16" text-anchor="middle" class="t-s t-m">open page</text><text x="258" y="16" text-anchor="middle" class="t-s t-m">saved file</text>
 <rect x="4" y="24" width="155" height="140" rx="5" class="box-ink"/><rect x="181" y="24" width="155" height="140" rx="5" class="box-ink"/>
-<rect x="14" y="34" width="135" height="18" rx="3" class="temp"/><text x="81" y="47" text-anchor="middle" class="t-s t-temp">editor-ui</text>
+<rect x="14" y="34" width="135" height="18" rx="3" class="temp"/><text x="81" y="47" text-anchor="middle" class="t-s t-temp">clay="editor-ui"</text>
 <rect x="14" y="58" width="132" height="18" rx="2" class="keep"/><rect x="14" y="80" width="120" height="7" rx="2" class="keep"/><rect x="14" y="92" width="105" height="7" rx="2" class="keep"/>
 <rect x="14" y="110" width="9" height="9" class="temp"/><rect x="28" y="110" width="100" height="9" rx="2" class="keep"/>
 <rect x="14" y="125" width="9" height="9" class="temp"/><rect x="28" y="125" width="100" height="9" rx="2" class="keep"/>
@@ -253,9 +394,9 @@
 <rect x="205" y="110" width="100" height="9" rx="2" class="keep"/><rect x="205" y="125" width="100" height="9" rx="2" class="keep"/>
 <text x="170" y="99" text-anchor="middle" style="font-size:22px" class="t-temp">≠</text>
 </svg>
-<h3>Rung 3. Stripped controls</h3>
-<p class="rung-meta">Controls are created at load inside <code>clay="editor-ui"</code>, and fields use <code>editable</code>, <code>editmode:contenteditable</code>, or whatever editable components you want. The saved file is clean viewer HTML.</p>
-<p class="rung-meta">Sync skips the marked controls. You recreate them on every load and bind events by delegation.</p>
+<h3>Rung 3 · Runtime chrome in <code>editor-ui</code></h3>
+<p class="rung-meta"><strong>When to use:</strong> Apps with filter bars, live summaries, runtime stylesheets, or dynamically injected gutters (like <code>examples/skeleton.html</code> and <code>kanban.html</code>).</p>
+<p class="rung-meta"><strong>How it works:</strong> At <code>clay.ready</code>, your script clones a <code>&lt;template&gt;</code> into a <code>clay="editor-ui"</code> wrapper. Saving strips that wrapper completely, and event listeners are delegated on <code>document</code>.</p>
 </figure>
 
 <figure style="margin:0">
@@ -272,86 +413,73 @@
 <text x="257" y="154" text-anchor="middle" class="t-c t-keep">{"q1":3,"q2":7}</text>
 <text x="170" y="99" text-anchor="middle" style="font-size:22px" class="t-temp">≠</text>
 </svg>
-<h3>Rung 4. Rendered views</h3>
-<p class="rung-meta">The record is a <code>merge="store"</code> JSON script. A canvas, chart or grid is drawn from it into a mount created at load inside <code>clay="editor-ui"</code>, so the saved file holds only the record.</p>
-<p class="rung-meta">Sync merges the record and never touches the view. Write one render function and call it on load, after every local change, and on <code>clay:sync-applied</code>, which ClayJS fires after it applies an outside change.</p>
+<h3>Rung 4 · Rendered views &amp; JSON stores</h3>
+<p class="rung-meta"><strong>When to use:</strong> Charts, canvases, formula grids, or fast multiplayer games where HTML elements are a poor fit for the raw data.</p>
+<p class="rung-meta"><strong>How it works:</strong> The record lives in <code>&lt;script type="application/json" merge="store"&gt;</code> (or with <code>clay="live"</code> for sub-second sync). A single <code>render()</code> function draws into a <code>clay="editor-ui"</code> mount on load, after local edits, and on <code>clay:sync-applied</code>.</p>
 </figure>
 </div>
 
-<h2 id="why">3. How sync keeps an editing page in step</h2>
-<p>An agent edits the file on disk while you have it open. Your page holds things the file never does: live editing attributes, and from rung 3 up a toolbar. ClayJS still brings the agent's edit in without disturbing any of that, in three steps.</p>
+<h2 id="sync"><span class="sec-num">Section 5</span>Live sync, agents, and three rules that prevent drift</h2>
+<p>When you load <code>?plugins=sync</code>, every open copy of the file stays in step through a <strong>save-gated, three-way DOM merge</strong>. Whether a collaborator saves in another browser tab or an AI agent edits the <code>.htmlclay</code> file directly on disk, the host pushes the new HTML frame to your open tab and ClayJS merges it into your live page without a reload.</p>
 
 <figure>
 <svg viewBox="0 0 760 310" role="img" aria-labelledby="f3t">
-<title id="f3t">ClayJS reads the agent's edit and the open page the same way, merges them, activates the editing attributes in the result, then applies it to the open page. The toolbar, the caret and unsaved typing are left as they were.</title>
+<title id="f3t">ClayJS compares the common base, your open page, and the incoming file in saved form, merges them three ways, activates mode attributes on the result, and morphs the live DOM in place while leaving editor-ui regions, focus, and caret untouched.</title>
 <rect x="10" y="30" width="216" height="200" rx="6" class="box-ink"/>
-<text x="118" y="20" text-anchor="middle" class="t-b">1. Merge the agent's edit</text>
-<text x="24" y="62" class="t-c">&lt;h1 editmode:contenteditable</text>
-<text x="24" y="78" class="t-c">    inert-contenteditable&gt;</text>
-<rect x="30" y="88" width="150" height="20" rx="3" class="keep"/>
-<text x="38" y="102" class="t-c t-keep">Great Work Studio</text>
-<text x="24" y="124" class="t-c">&lt;/h1&gt;</text>
-<text x="24" y="160" class="t-s t-m">Your page, unsaved edits and</text>
-<text x="24" y="176" class="t-s t-m">all, is read the same way, so</text>
-<text x="24" y="192" class="t-s t-m">the two compare cleanly.</text>
+<text x="118" y="20" text-anchor="middle" class="t-b">1. Three-way merge (saved form)</text>
+<text x="24" y="58" class="t-c">&lt;h1 editmode:contenteditable</text>
+<text x="24" y="74" class="t-c">    inert-contenteditable&gt;</text>
+<rect x="30" y="84" width="156" height="20" rx="3" class="keep"/>
+<text x="38" y="98" class="t-c t-keep">Great Work Studio</text>
+<text x="24" y="120" class="t-c">&lt;/h1&gt;</text>
+<text x="24" y="152" class="t-s t-m">Compares Base, Local (captured</text>
+<text x="24" y="168" class="t-s t-m">in saved form, unsaved edits</text>
+<text x="24" y="184" class="t-s t-m">included), and Incoming bytes</text>
+<text x="24" y="200" class="t-s t-m">from a peer or disk agent.</text>
 
 <line x1="228" y1="130" x2="262" y2="130" class="arr" marker-end="url(#ah)"/>
 
 <rect x="266" y="30" width="214" height="200" rx="6" class="box-ink"/>
-<text x="373" y="20" text-anchor="middle" class="t-b">2. ClayJS activates the result</text>
-<text x="280" y="62" class="t-c">&lt;h1 editmode:contenteditable</text>
-<rect x="290" y="68" width="112" height="16" rx="3" class="temp"/>
-<text x="296" y="80" class="t-c t-temp">contenteditable</text>
-<text x="405" y="80" class="t-c">&gt;</text>
-<rect x="286" y="88" width="150" height="20" rx="3" class="keep"/>
-<text x="294" y="102" class="t-c t-keep">Great Work Studio</text>
-<text x="280" y="124" class="t-c">&lt;/h1&gt;</text>
-<text x="280" y="160" class="t-s t-m">Editing attributes turn on,</text>
-<text x="280" y="176" class="t-s t-m">the same way they do on open.</text>
+<text x="373" y="20" text-anchor="middle" class="t-b">2. Activate for edit mode</text>
+<text x="280" y="58" class="t-c">&lt;h1 editmode:contenteditable</text>
+<rect x="290" y="64" width="112" height="16" rx="3" class="temp"/>
+<text x="296" y="76" class="t-c t-temp">contenteditable</text>
+<text x="405" y="76" class="t-c">&gt;</text>
+<rect x="286" y="84" width="156" height="20" rx="3" class="keep"/>
+<text x="294" y="98" class="t-c t-keep">Great Work Studio</text>
+<text x="280" y="120" class="t-c">&lt;/h1&gt;</text>
+<text x="280" y="152" class="t-s t-m">Mode attributes turn active</text>
+<text x="280" y="168" class="t-s t-m">on the merged tree, just as</text>
+<text x="280" y="184" class="t-s t-m">they do when the page opens.</text>
 
 <line x1="482" y1="130" x2="516" y2="130" class="arr" marker-end="url(#ah)"/>
 
 <rect x="520" y="30" width="230" height="200" rx="6" class="box-ink"/>
-<text x="635" y="20" text-anchor="middle" class="t-b">3. Apply to the open page</text>
+<text x="635" y="20" text-anchor="middle" class="t-b">3. Morph into the live page</text>
 <rect x="534" y="44" width="202" height="24" rx="3" class="temp"/>
-<text x="635" y="60" text-anchor="middle" class="t-s t-temp">toolbar: untouched</text>
-<rect x="534" y="80" width="150" height="20" rx="3" class="keep"/>
-<text x="542" y="94" class="t-c t-keep">Great Work Studio</text>
-<rect x="534" y="110" width="186" height="8" rx="2" class="keep"/>
-<rect x="534" y="124" width="160" height="8" rx="2" class="keep"/>
-<rect x="528" y="146" width="214" height="76" rx="3" class="keep"/>
-<text x="536" y="164" class="t-s t-keep t-b">Still yours:</text>
-<text x="536" y="180" class="t-s t-keep">your caret, your focus, and</text>
-<text x="536" y="196" class="t-s t-keep">unsaved typing in every other</text>
-<text x="536" y="212" class="t-s t-keep">paragraph.</text>
+<text x="635" y="60" text-anchor="middle" class="t-s t-temp">editor-ui toolbar: untouched</text>
+<rect x="534" y="78" width="156" height="20" rx="3" class="keep"/>
+<text x="542" y="92" class="t-c t-keep">Great Work Studio</text>
+<rect x="534" y="106" width="186" height="8" rx="2" class="keep"/>
+<rect x="534" y="120" width="160" height="8" rx="2" class="keep"/>
+<rect x="528" y="140" width="214" height="80" rx="3" class="keep"/>
+<text x="536" y="158" class="t-s t-keep t-b">Preserved in your tab:</text>
+<text x="536" y="174" class="t-s t-keep">· caret &amp; focused input value</text>
+<text x="536" y="190" class="t-s t-keep">· unsaved edits in other words</text>
+<text x="536" y="206" class="t-s t-keep">· ephemeral &amp; freeze state</text>
 
-<text x="380" y="262" text-anchor="middle" class="t-b">ClayJS translates every difference it creates, in both directions.</text>
-<text x="380" y="282" text-anchor="middle" class="t-s t-m">That covers its editing attributes and the <tspan class="t-c">clay="editor-ui"</tspan>, <tspan class="t-c">clay="freeze"</tspan> and <tspan class="t-c">clay="no-…"</tspan> regions.</text>
-<text x="380" y="298" text-anchor="middle" class="t-s t-m">Mark what your own code adds, and it gets the same treatment.</text>
+<text x="380" y="262" text-anchor="middle" class="t-b">After morphing, ClayJS dispatches <tspan class="t-c">clay:sync-applied</tspan> on <tspan class="t-c">document</tspan>.</text>
+<text x="380" y="282" text-anchor="middle" class="t-s t-m">Incoming merges run with the mutation hub, dirty gate, and undo paused, so they never echo into autosave or undo history.</text>
+<text x="380" y="298" text-anchor="middle" class="t-s t-m">If two writers change the exact same word or attribute, the incoming edit wins and yours is saved in <tspan class="t-c">clay.conflicts</tspan> (Revert to mine).</text>
 </svg>
 </figure>
 
-<p>What the merge does for a page you are editing:</p>
-<ul>
-<li><strong>Three-way, not last write wins.</strong> It compares the last version both sides agreed on, your page with its unsaved edits, and the incoming file. Changes to different paragraphs, or to different words of one paragraph, both survive.</li>
-<li><strong>Your session keeps going.</strong> Matched elements are moved, never rebuilt, so the caret follows its characters and listeners, focus and iframes stay put. The focused input keeps its value.</li>
-<li><strong>Editing-only content is left alone.</strong> <code>editor-ui</code>, <code>no-save</code> and <code>no-snapshot</code> regions are skipped on both sides, and a <code>freeze</code> region keeps its contents.</li>
-<li><strong>Nothing is lost quietly.</strong> When both sides change the same word, the incoming edit wins and yours goes to the conflict ledger, where Revert to mine puts it back.</li>
-<li><strong>Merges never echo.</strong> Incoming changes don't trigger autosave and never enter your undo history.</li>
-</ul>
-<p>Two habits keep it that smooth:</p>
-<ul>
-<li>Mark what your boot code adds. An unmarked class or button reads as content, so style edit mode with an <code>[editmode="true"]</code> selector instead of adding a class.</li>
-<li>After <code>clay:sync-applied</code>, rebuild anything inside an excluded region yourself, since sync leaves its contents to you.</li>
-</ul>
-
-<h2 id="mistakes">4. Three rules</h2>
-<p>Follow these three and the file, the open page and every other tab stay in step.</p>
+<p>Follow these three rules and the file on disk, your open page, and every collaborator or agent will never drift apart:</p>
 
 <div class="grid3">
 
 <div class="card">
-<svg viewBox="0 0 320 120" role="img" aria-label="Each time the file opens, another copy of the injected button is saved.">
+<svg viewBox="0 0 320 120" role="img" aria-label="Each time the file opens, another copy of an unmarked injected button is saved into the file.">
 <g><rect x="10" y="20" width="90" height="90" rx="5" class="box-ink"/><text x="55" y="14" text-anchor="middle" class="t-s t-m">open 1</text>
 <rect x="20" y="32" width="70" height="8" rx="2" class="keep"/><rect x="20" y="46" width="60" height="8" rx="2" class="keep"/>
 <rect x="20" y="64" width="40" height="12" rx="2" class="risk"/></g>
@@ -362,48 +490,46 @@
 <rect x="230" y="32" width="70" height="8" rx="2" class="keep"/><rect x="230" y="46" width="60" height="8" rx="2" class="keep"/>
 <rect x="230" y="64" width="40" height="12" rx="2" class="risk"/><rect x="230" y="80" width="40" height="12" rx="2" class="risk"/><rect x="230" y="96" width="40" height="10" rx="2" class="risk"/></g>
 </svg>
-<h3>1. Mark what your code adds</h3>
-<p>The file holds the document. Anything your scripts add as the page opens is temporary, so tell ClayJS.</p>
+<h3>Rule 1 · Mark everything your code adds</h3>
+<p>Unmarked DOM mutations are treated as document edits and written into the file on the next save.</p>
 <ul>
-<li>Author controls in the file and hide them from viewers with <code>show-when:editmode="true"</code>. Use <code>clay="editor-ui"</code> only for UI a script creates or changes while the page is open.</li>
-<li>Style edit mode with <code>[editmode="true"]</code> rather than an added class.</li>
-<li>Mark passing state on a saved element <code>ephemeral</code>: <code>clay.ephemeral.toggle(card, "selected")</code>, styled with <code>[ephemeral~="selected"]</code> or Tailwind's <code>ephemeral-selected:</code>. It is never saved, synced or undone.</li>
+  <li>Author static edit buttons in the file with <code>show-when:editmode="true"</code>.</li>
+  <li>Put script-created UI and derived views inside a <code>clay="editor-ui"</code> container cloned from a <code>&lt;template&gt;</code>.</li>
+  <li>Use <code>clay.ephemeral.toggle(el, "selected")</code> or a runtime stylesheet inside <code>editor-ui</code> for tab-local state, never plain classes or inline styles on records.</li>
 </ul>
-<details class="wrong"><summary>Doing it wrong</summary>
-<p><b>An unmarked button.</b> A script appends an "Add item" button at load. The next save writes it into the file, and every open adds one more.</p>
-<p><b>Passing state saved.</b> A click adds <code>.selected</code> to a card. The file keeps it, every collaborator sees your selection, and each click adds an undo step.</p>
+<details class="wrong"><summary>What goes wrong without it</summary>
+<p><b>Duplicated controls:</b> A script appends an unmarked toolbar at load. Saving writes it into the file, and the next load appends a second copy.</p>
+<p><b>Leaked UI state:</b> Clicking a card adds <code>.selected</code> or <code>hidden</code>. That class autosaves, adds an undo step, and selects or hides the card for every collaborator.</p>
 </details>
 </div>
 
 <div class="card">
-<svg viewBox="0 0 320 120" role="img" aria-label="The record changes from 5 to 9 by sync, but the chart still shows 5.">
+<svg viewBox="0 0 320 120" role="img" aria-label="The record changes from 5 to 9 by sync, but an un-reconciled chart still shows 5.">
 <rect x="10" y="20" width="120" height="80" rx="5" class="box-ink"/><text x="70" y="14" text-anchor="middle" class="t-s t-m">record (synced)</text>
 <rect x="20" y="46" width="100" height="24" rx="3" class="keep"/><text x="70" y="62" text-anchor="middle" class="t-c t-keep">{"sales": 9}</text>
-<rect x="190" y="20" width="120" height="80" rx="5" class="box-ink"/><text x="250" y="14" text-anchor="middle" class="t-s t-m">chart (drawn by JS)</text>
+<rect x="190" y="20" width="120" height="80" rx="5" class="box-ink"/><text x="250" y="14" text-anchor="middle" class="t-s t-m">view (drawn once)</text>
 <rect x="236" y="62" width="28" height="30" class="temp" style="stroke-dasharray:none"/>
 <line x1="236" y1="40" x2="264" y2="40" class="arr-risk" style="stroke-dasharray:3 3"/>
 <text x="250" y="58" text-anchor="middle" class="t-s t-risk">still 5</text>
 <line x1="132" y1="60" x2="186" y2="60" class="arr-risk" style="stroke-dasharray:4 4"/>
-<text x="159" y="52" text-anchor="middle" class="t-s t-risk">?</text>
+<text x="159" y="52" text-anchor="middle" class="t-s t-risk">stale</text>
 </svg>
-<h3>2. Read from the page, and react when it changes</h3>
-<p>The DOM is your data, and sync or an agent can change it at any time.</p>
+<h3>Rule 2 · Adopt the DOM on load, and reconcile on change</h3>
+<p>The live DOM is the single source of truth, and sync or undo can change it under your script at any time.</p>
 <ul>
-<li>Read values from the DOM at <code>clay.ready</code>; write a default only where none exists.</li>
-<li>Give each item an <code>id</code> once, when it is created, and keep it.</li>
-<li>Delegate event listeners, and re-render views on <code>clay:sync-applied</code>.</li>
+  <li>Never rewrite the record at boot. Guard your script with <code>if (window.__appStarted) return;</code>.</li>
+  <li>Give every repeated item a unique <code>data-id</code> when created or cloned so sync pairs items reliably.</li>
+  <li>Delegate events on <code>document</code>, re-render derived views on <code>clay:sync-applied</code>, and re-sync <code>.checked</code> / <code>.value</code> from attributes on <code>clay:sync-applied</code>, <code>undo</code>, and <code>redo</code>.</li>
 </ul>
-<details class="wrong"><summary>Doing it wrong</summary>
-<p><b>Hardcoded defaults.</b> Boot code fills fields from a JS object. The next save writes those values over what an agent or another tab put in the file.</p>
-<p><b>New ids on every load.</b> The page and the file name the same item differently, so after an outside change an edited item shows up twice.</p>
-<p><b>Handlers bound once.</b> An item that arrives by sync has no click handler.</p>
-<p><b>Views drawn once.</b> Sync updates the record, but the chart still shows the old number.</p>
+<details class="wrong"><summary>What goes wrong without it</summary>
+<p><b>Lost or doubled items:</b> Two tabs add items without <code>data-id</code>, or a clone keeps the original's <code>data-id</code>; sync cannot pair them.</p>
+<p><b>Stale controls after undo:</b> Undo restores the <code>checked</code> or <code>value</code> attribute, but the browser still displays the old property and writes it back on the next save.</p>
 </details>
 </div>
 
 <div class="card">
-<svg viewBox="0 0 320 120" role="img" aria-label="Content hidden with CSS still travels to the viewer and shows in view source.">
-<rect x="10" y="20" width="130" height="80" rx="5" class="box-ink"/><text x="75" y="14" text-anchor="middle" class="t-s t-m">file</text>
+<svg viewBox="0 0 320 120" role="img" aria-label="Content hidden with CSS still travels in the saved file and appears in view source.">
+<rect x="10" y="20" width="130" height="80" rx="5" class="box-ink"/><text x="75" y="14" text-anchor="middle" class="t-s t-m">saved file</text>
 <rect x="20" y="34" width="110" height="10" rx="2" class="keep"/>
 <rect x="20" y="54" width="110" height="34" rx="3" class="risk"/><text x="75" y="68" text-anchor="middle" class="t-c t-risk">salary: 90k</text><text x="75" y="82" text-anchor="middle" class="t-c t-risk">display:none</text>
 <line x1="142" y1="60" x2="186" y2="60" class="arr" marker-end="url(#ah)"/><text x="164" y="52" text-anchor="middle" class="t-s t-m">every byte</text>
@@ -411,117 +537,124 @@
 <rect x="200" y="34" width="100" height="10" rx="2" class="keep"/>
 <text x="250" y="72" text-anchor="middle" class="t-s t-risk">view source:</text><text x="250" y="88" text-anchor="middle" class="t-c t-risk">salary: 90k</text>
 </svg>
-<h3>3. The file is what people share</h3>
-<p>Everything in the file reaches everyone who opens it, and nothing outside it survives a reload.</p>
+<h3>Rule 3 · The saved file is what people share</h3>
+<p>Every byte in the saved file is downloaded by everyone who can view the document, and nothing outside the file survives a reload.</p>
 <ul>
-<li>Notes editors share belong in the file, hidden by mode, not in a <code>no-save</code> region.</li>
-<li>Hiding is presentation, not privacy. Secret data goes in a separate file behind its own access.</li>
+  <li>Notes or settings meant to persist for editors belong in the record (hidden from viewers with <code>show-when:editmode="true"</code>), not in <code>no-save</code>.</li>
+  <li>Hiding with CSS, <code>hidden</code>, or <code>show-when:</code> is presentation, not access control. Keep confidential data in a separate file with restricted access.</li>
 </ul>
-<details class="wrong"><summary>Doing it wrong</summary>
-<p><b>Shared notes in <code>no-save</code>.</b> They never reach the file, so they vanish on reload, and other editors' tabs ignore them.</p>
-<p><b>Hiding as privacy.</b> A salary hidden with CSS or view mode still travels in the file, and anyone can read it in view source.</p>
+<details class="wrong"><summary>What goes wrong without it</summary>
+<p><b>Vanishing notes:</b> An editor's scratch notes are placed in <code>no-save</code> or <code>editor-ui</code>; they disappear on the first reload.</p>
+<p><b>Exposed secrets:</b> Private numbers or API keys hidden with <code>show-when:editmode="true"</code> are still readable by any viewer in View Source.</p>
 </details>
 </div>
+
 </div>
 
-<h2 id="where">5. Where each piece of state goes</h2>
-<p>Ask these questions of every element, attribute and variable.</p>
+
+<h2 id="where"><span class="sec-num">Section 6</span>State decision map and complete starter file</h2>
+<p>When adding any element, attribute, or variable to a ClayJS app, trace it through this decision tree:</p>
 
 <figure>
-<svg viewBox="0 0 760 400" role="img" aria-labelledby="f5t">
-<title id="f5t">Decision flow: temporary state goes in a JS variable, an ephemeral attribute or an editor-ui region; derived state is re-rendered into editor-ui; content viewers see is plain markup; clutter stays in the file, hidden by mode; secrets do not belong in a malleable document.</title>
-<rect x="222" y="10" width="316" height="50" rx="6" class="box-ink"/>
-<text x="380" y="40" text-anchor="middle" class="t-b">Should it survive closing and reopening?</text>
-<path d="M222 35 H125 V108" class="arr" marker-end="url(#ah)"/><text x="176" y="28" class="t-s t-m">no</text>
-<path d="M380 60 V108" class="arr" marker-end="url(#ah)"/><text x="388" y="88" class="t-s t-m">yes</text>
+<svg viewBox="0 0 760 405" role="img" aria-labelledby="f5t">
+<title id="f5t">Decision flow: temporary state goes in a JS variable, URL hash, ephemeral attribute, or editor-ui region; derived state is rendered into editor-ui, freeze, or no-dirty; durable content viewers see is plain markup with persist; editor-only controls stay in the file with show-when:editmode="true"; secrets do not belong in a shared malleable document.</title>
+<rect x="216" y="10" width="328" height="48" rx="6" class="box-ink"/>
+<text x="380" y="39" text-anchor="middle" class="t-b">Should it survive closing and reopening the file?</text>
+<path d="M216 34 H125 V106" class="arr" marker-end="url(#ah)"/><text x="168" y="27" class="t-s t-m">no (per-tab)</text>
+<path d="M380 58 V106" class="arr" marker-end="url(#ah)"/><text x="388" y="86" class="t-s t-m">yes (durable)</text>
 
-<rect x="10" y="112" width="230" height="104" rx="6" class="temp"/>
-<text x="24" y="134" class="t-b t-temp">Temporary</text>
-<text x="24" y="154" class="t-s">A JS variable, <tspan class="t-c">ephemeral="…"</tspan> on</text>
-<text x="24" y="170" class="t-s">the element, or <tspan class="t-c">clay="editor-ui"</tspan>.</text>
-<text x="24" y="186" class="t-s">Selection, drag state, previews,</text>
-<text x="24" y="202" class="t-s">rung 3 controls.</text>
+<rect x="10" y="110" width="230" height="114" rx="6" class="temp"/>
+<text x="24" y="132" class="t-b t-temp">Temporary / Per-tab state</text>
+<text x="24" y="151" class="t-s">· URL hash <tspan class="t-c">#q=…</tspan> + runtime <tspan class="t-c">&lt;style&gt;</tspan></text>
+<text x="24" y="167" class="t-s">· <tspan class="t-c">ephemeral="selected"</tspan> or <tspan class="t-c">ephemeral:open</tspan></text>
+<text x="24" y="183" class="t-s">· <tspan class="t-c">clay="editor-ui"</tspan> for runtime chrome</text>
+<text x="24" y="199" class="t-s">· <tspan class="t-c">clay="live ephemeral"</tspan> for live cursors</text>
 
-<rect x="244" y="112" width="272" height="50" rx="6" class="box-ink"/>
-<text x="380" y="142" text-anchor="middle" class="t-b">Is it content, or computed from it?</text>
-<path d="M516 137 H560" class="arr" marker-end="url(#ah)"/><text x="518" y="129" class="t-s t-m">computed</text>
-<path d="M380 162 V218" class="arr" marker-end="url(#ah)"/><text x="388" y="196" class="t-s t-m">content</text>
+<rect x="248" y="110" width="264" height="48" rx="6" class="box-ink"/>
+<text x="380" y="139" text-anchor="middle" class="t-b">Is it record data, or computed from it?</text>
+<path d="M512 134 H552" class="arr" marker-end="url(#ah)"/><text x="514" y="126" class="t-s t-m">computed</text>
+<path d="M380 158 V220" class="arr" marker-end="url(#ah)"/><text x="388" y="194" class="t-s t-m">record</text>
 
-<rect x="564" y="112" width="186" height="104" rx="6" class="temp"/>
-<text x="578" y="134" class="t-b t-temp">Derived</text>
-<text x="578" y="154" class="t-s">Re-render it into</text>
-<text x="578" y="170" class="t-s"><tspan class="t-c">clay="editor-ui"</tspan> on load,</text>
-<text x="578" y="186" class="t-s">after edits, and on</text>
-<text x="578" y="202" class="t-s"><tspan class="t-c">clay:sync-applied</tspan>.</text>
+<rect x="556" y="110" width="194" height="114" rx="6" class="temp"/>
+<text x="570" y="132" class="t-b t-temp">Derived state</text>
+<text x="570" y="151" class="t-s">Recompute on mutation &amp;</text>
+<text x="570" y="167" class="t-s"><tspan class="t-c">clay:sync-applied</tspan> into:</text>
+<text x="570" y="183" class="t-s">· <tspan class="t-c">clay="editor-ui"</tspan> (tab-only)</text>
+<text x="570" y="199" class="t-s">· <tspan class="t-c">clay="freeze"</tspan> (per-tab text)</text>
+<text x="570" y="215" class="t-s">· <tspan class="t-c">clay="no-dirty"</tspan> (in file)</text>
 
-<rect x="260" y="222" width="240" height="50" rx="6" class="box-ink"/>
-<text x="380" y="252" text-anchor="middle" class="t-b">Should viewers see it?</text>
+<rect x="260" y="224" width="240" height="48" rx="6" class="box-ink"/>
+<text x="380" y="253" text-anchor="middle" class="t-b">Should viewers see it?</text>
 <path d="M300 272 V292 H120 V312" class="arr" marker-end="url(#ah)"/><text x="196" y="286" class="t-s t-m">yes</text>
-<path d="M380 272 V312" class="arr" marker-end="url(#ah)"/><text x="388" y="296" class="t-s t-m">no, it's clutter</text>
-<path d="M460 272 V292 H640 V312" class="arr" marker-end="url(#ah)"/><text x="560" y="286" class="t-s t-m">no, it's secret</text>
+<path d="M380 272 V312" class="arr" marker-end="url(#ah)"/><text x="388" y="296" class="t-s t-m">no, editor-only UI</text>
+<path d="M460 272 V292 H640 V312" class="arr" marker-end="url(#ah)"/><text x="560" y="286" class="t-s t-m">no, it is secret</text>
 
-<rect x="10" y="316" width="230" height="76" rx="6" class="keep"/>
-<text x="24" y="338" class="t-b t-keep">Plain markup</text>
-<text x="24" y="358" class="t-s">Text, attributes, child order,</text>
-<text x="24" y="374" class="t-s"><tspan class="t-c">persist</tspan> on form controls. Done.</text>
+<rect x="10" y="316" width="230" height="80" rx="6" class="keep"/>
+<text x="24" y="338" class="t-b t-keep">Plain record markup</text>
+<text x="24" y="356" class="t-s">Elements with <tspan class="t-c">data-id</tspan>, text,</text>
+<text x="24" y="372" class="t-s"><tspan class="t-c">persist</tspan> inputs, child order, or</text>
+<text x="24" y="388" class="t-s"><tspan class="t-c">merge="store"</tspan> JSON script.</text>
 
-<rect x="265" y="316" width="230" height="76" rx="6" class="keep"/>
-<text x="279" y="338" class="t-b t-keep">Hidden from viewers</text>
-<text x="279" y="355" class="t-s">Notes and controls, in the file</text>
-<text x="279" y="370" class="t-s">and hidden by mode:</text>
-<text x="279" y="385" class="t-c">option:editmode="true"</text>
+<rect x="265" y="316" width="230" height="80" rx="6" class="keep"/>
+<text x="279" y="338" class="t-b t-keep">Hidden from viewers by mode</text>
+<text x="279" y="356" class="t-s">Authored in the file and marked</text>
+<text x="279" y="372" class="t-c">show-when:editmode="true"</text>
+<text x="279" y="388" class="t-s">(with <tspan class="t-c">clay-options.js</tspan>).</text>
 
-<rect x="520" y="316" width="230" height="76" rx="6" class="risk"/>
-<text x="534" y="345" class="t-b t-risk">Don't use a malleable</text>
-<text x="534" y="365" class="t-b t-risk">document for this</text>
+<rect x="520" y="316" width="230" height="80" rx="6" class="risk"/>
+<text x="534" y="342" class="t-b t-risk">Keep out of shared files</text>
+<text x="534" y="362" class="t-s">Every viewer downloads the</text>
+<text x="534" y="378" class="t-s">full HTML source. Split secrets</text>
+<text x="534" y="392" class="t-s">into a private file.</text>
 </svg>
 </figure>
 
-<p>If the file itself must show a derived value, render it into a <code>clay="no-dirty"</code> region. Writing there starts no save. The value reaches the file with the next save of other content, and an outside change replaces it.</p>
+<h3 class="sub" id="minimal">The smallest complete Rung 2 file, line by line</h3>
+<p>This 30-line HTML file is a complete task list you can check off, rename, add to, and drag to reorder. It needs zero custom JavaScript: its controls live in the file and hide in view mode (Rung 2).</p>
 
-<h2 id="minimal">6. The smallest rung 2 file</h2>
-<p>This file is a task list you can add to, rename and reorder. Its controls are in the file and hidden from viewers, which makes it rung 2.</p>
 <div class="anno">
-<pre><code class="language-markup">&lt;!DOCTYPE html&gt;
+<pre><code class="language-markup" data-hl="autosave">&lt;!DOCTYPE html&gt;
 &lt;html lang=&quot;en&quot; autosave&gt;
 &lt;head&gt;
   &lt;meta charset=&quot;utf-8&quot;&gt;
   &lt;title&gt;Tasks&lt;/title&gt;
   &lt;style&gt;html:not([editmode=&quot;true&quot;]) [show-when\:editmode=&quot;true&quot;] { display: none }&lt;/style&gt;</code></pre>
-<div class="tip" style="--in:9">Hides the edit controls from viewers before any script runs. The backslash escapes the colon; without it the browser drops the rule. It keys on <code>:not([editmode="true"])</code> because the saved file has no <code>editmode</code> attribute.</div>
+<div class="tip" style="--in:9"><code>autosave</code> on <code>&lt;html&gt;</code> saves 1.5 s after edits settle. The <code>&lt;style&gt;</code> rule hides <code>show-when:editmode="true"</code> controls from viewers before any script loads (the backslash escapes the colon in CSS, and <code>:not([editmode="true"])</code> matches the saved file where <code>editmode</code> is absent).</div>
+
 <pre><code class="language-markup" data-hl="editmode:contenteditable inert-contenteditable">&lt;/head&gt;
 &lt;body&gt;
   &lt;h1 editmode:contenteditable inert-contenteditable=&quot;plaintext-only&quot;&gt;Tasks&lt;/h1&gt;</code></pre>
-<div class="tip" style="--in:6"><code>editmode:contenteditable</code> makes the heading editable for the owner only. It is saved as <code>inert-contenteditable</code>, so a viewer gets plain text from the first open.</div>
-<pre><code class="language-markup" data-hl="sortable">  &lt;ul id=&quot;tasks&quot; sortable=&quot;tasks&quot;&gt;</code></pre>
-<div class="tip" style="--in:17"><code>sortable</code> lets you drag tasks into a new order by the ↕ grip, marked <code>sortable-handle</code>.</div>
-<pre><code class="language-markup" data-hl="data-id show-when:editmode">    &lt;li data-id=&quot;t-1&quot;&gt;&lt;span show-when:editmode=&quot;true&quot; sortable-handle&gt;↕&lt;/span&gt; &lt;span editmode:contenteditable inert-contenteditable=&quot;plaintext-only&quot;&gt;Write the brief&lt;/span&gt;&lt;/li&gt;
-  &lt;/ul&gt;</code></pre>
-<div class="tip" style="--in:8">Every task has its own <code>data-id</code>, so sync and reordering can tell tasks apart. <code>show-when:editmode</code> shows the grip only while editing.</div>
-<pre><code class="language-markup" data-hl="add-from add-to">  &lt;button show-when:editmode=&quot;true&quot; type=&quot;button&quot; add-from=&quot;#task-tpl&quot; add-to=&quot;#tasks&quot;&gt;Add task&lt;/button&gt;</code></pre>
-<div class="tip" style="--in:50"><code>add-from</code> and <code>add-to</code> need no script. In edit mode a click copies the template into the list, gives the copy a fresh <code>data-id</code> and focuses its text.</div>
-<pre><code class="language-markup" data-hl="contenteditable">  &lt;template id=&quot;task-tpl&quot;&gt;
-    &lt;li&gt;&lt;span show-when:editmode=&quot;true&quot; sortable-handle&gt;↕&lt;/span&gt; &lt;span editmode:contenteditable contenteditable=&quot;plaintext-only&quot;&gt;New task&lt;/span&gt;&lt;/li&gt;
-  &lt;/template&gt;</code></pre>
-<div class="tip" style="--in:4">The template is written in its editing form (<code>contenteditable</code>), because a copy is only ever added while someone is editing. It carries no <code>data-id</code>: each copy gets its own.</div>
-<pre><code class="language-markup">
-  &lt;script src=&quot;https://clayjs.com/v1/clay.js?plugins=sync,sortable,indicator&amp;exclude=richclay&quot;&gt;&lt;/script&gt;</code></pre>
-<div class="tip" style="--in:2"><code>sync</code> keeps open tabs in step, <code>sortable</code> enables dragging, <code>indicator</code> shows save status, and <code>exclude=richclay</code> skips the rich-text editor because every field here is plain text.</div>
-<pre><code class="language-markup">  &lt;script src=&quot;https://clayjs.com/v1/clay-options.js&quot;&gt;&lt;/script&gt;</code></pre>
-<div class="tip" style="--in:2"><code>clay-options.js</code> turns each <code>show-when:</code> attribute into one CSS rule, kept in a <code>&lt;style data-name="option-visibility"&gt;</code> tag from the first save.</div>
-<pre><code class="language-markup">&lt;/body&gt;
-&lt;/html&gt;</code></pre>
-</div>
-<p><strong>Try it.</strong> Open the file through your host, such as HTML Clay, then:</p>
-<ol>
-<li>Click Add task and type a name.</li>
-<li>Drag the new task above "Write the brief".</li>
-<li>Wait until the indicator shows saved, then reopen the file.</li>
-</ol>
-<p>The task is still there, with its name and position. There is still only one Add task button: it is part of the file, not added by a script, so saving never duplicates it.</p>
-<p><strong>Going further.</strong> This example is rung 2: the controls are in the file, hidden from viewers. Move to rung 3 only if viewers must get a file with no controls in it. To add undo, a filter and a computed summary, see <a href="examples/skeleton.html">examples/skeleton.html</a>. Its controls are in the file and hidden by mode, as here. Its filter and summary go in <code>clay="editor-ui"</code>, because a script changes them as you use the page.</p>
-<p>Full reference: the <a href="/complete-guide">complete guide</a>.</p>
+<div class="tip" style="--in:6"><code>editmode:contenteditable</code> activates editing for the owner and saves as <code>inert-contenteditable="plaintext-only"</code> so viewers get plain text from the very first open.</div>
 
+<pre><code class="language-markup" data-hl="sortable">&lt;ul id=&quot;tasks&quot; sortable=&quot;tasks&quot;&gt;</code></pre>
+<div class="tip" style="--in:15"><code>sortable="tasks"</code> makes list items draggable in edit mode by their <code>sortable-handle</code> grip and saves the new child order as HTML.</div>
+
+<pre><code class="language-markup" data-hl="data-id show-when:editmode persist viewmode:disabled">    &lt;li data-id=&quot;t-1&quot;&gt;&lt;span show-when:editmode=&quot;true&quot; sortable-handle&gt;↕&lt;/span&gt; &lt;input type=&quot;checkbox&quot; persist viewmode:disabled disabled&gt; &lt;span editmode:contenteditable inert-contenteditable=&quot;plaintext-only&quot;&gt;Write the brief&lt;/span&gt;&lt;/li&gt;
+  &lt;/ul&gt;</code></pre>
+<div class="tip" style="--in:8">Each item has a unique <code>data-id</code> so sync and drag-and-drop can identify it. The checkbox uses <code>persist</code> so checking it writes a <code>checked</code> attribute into the file, and <code>viewmode:disabled disabled</code> so viewers cannot toggle it.</div>
+
+<pre><code class="language-markup" data-hl="add-from add-to">  &lt;button show-when:editmode=&quot;true&quot; type=&quot;button&quot; add-from=&quot;#task-tpl&quot; add-to=&quot;#tasks&quot;&gt;Add task&lt;/button&gt;</code></pre>
+<div class="tip" style="--in:50"><code>add-from</code> and <code>add-to</code> require no JavaScript: clicking in edit mode clones <code>#task-tpl</code> into <code>#tasks</code>, stamps a fresh <code>data-id</code> on the new <code>&lt;li&gt;</code>, and focuses its editable text.</div>
+
+<pre><code class="language-markup" data-hl="contenteditable">  &lt;template id=&quot;task-tpl&quot;&gt;
+    &lt;li&gt;&lt;span show-when:editmode=&quot;true&quot; sortable-handle&gt;↕&lt;/span&gt; &lt;input type=&quot;checkbox&quot; persist viewmode:disabled&gt; &lt;span editmode:contenteditable contenteditable=&quot;plaintext-only&quot;&gt;New task&lt;/span&gt;&lt;/li&gt;
+  &lt;/template&gt;</code></pre>
+<div class="tip" style="--in:4">Blueprints inside <code>&lt;template&gt;</code> are written in their <strong>active</strong> form (live <code>contenteditable</code>, no <code>disabled</code>) and carry no <code>data-id</code>, because they are cloned while editing and each copy receives a fresh id.</div>
+
+<pre><code class="language-markup">  &lt;script src=&quot;https://clayjs.com/v1/clay.js?plugins=sync,sortable,indicator&amp;exclude=richclay&quot;&gt;&lt;/script&gt;
+  &lt;script src=&quot;https://clayjs.com/v1/clay-options.js&quot;&gt;&lt;/script&gt;
+&lt;/body&gt;
+&lt;/html&gt;</code></pre>
+<div class="tip" style="--in:2"><code>sync</code> merges external and peer edits, <code>sortable</code> enables drag reordering, <code>indicator</code> shows the save status chip, and <code>exclude=richclay</code> skips the rich-text editor since every field here is plain text. <code>clay-options.js</code> compiles <code>show-when:editmode="true"</code> into CSS.</div>
+</div>
+
+<p><strong>Try it yourself:</strong> Save those lines as <code>tasks.htmlclay</code> and open the file in <a href="https://htmlclay.com">HTML Clay</a> (or upload it to <a href="https://hyperclay.com">Hyperclay</a>). Click <strong>Add task</strong>, rename the item, check the box, and drag it above "Write the brief". Once the indicator says Saved, inspect the file in a text editor: your new item, its <code>checked</code> attribute, and the new order are all plain HTML on disk, with only one Add task button.</p>
+
+<p><strong>Where to go next:</strong></p>
+<ul>
+  <li>To add Rung 3 features (whole-page undo, a tab-local search filter, and a live summary inside <code>clay="editor-ui"</code>), inspect <a href="examples/skeleton.html"><code>examples/skeleton.html</code></a>.</li>
+  <li>For every API detail, edge case, and recipe (kanban boards, block writers, sap.js budgets, and real-time <code>clay="live"</code> stores), read the <a href="/complete-guide">complete guide</a>.</li>
+</ul>
 </main>
 
 <footer>
