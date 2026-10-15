@@ -335,7 +335,7 @@
 <h3>1. Mark what your code adds</h3>
 <p>The file holds the document. Anything your scripts add as the page opens is temporary, so tell ClayJS.</p>
 <ul>
-<li>Put <code>clay="editor-ui"</code> on controls created at load, or author them in the file and hide them by mode.</li>
+<li>Author controls in the file and hide them from viewers with <code>show-when:editmode="true"</code>. Use <code>clay="editor-ui"</code> only for UI a script creates or changes while the page is open.</li>
 <li>Style edit mode with <code>[editmode="true"]</code> rather than an added class.</li>
 <li>Keep passing state (a dialog's <code>overflow</code>, a drag class) in JS, or remove it in <code>clay.onSnapshot</code>.</li>
 </ul>

@@ -21,8 +21,9 @@ To make a static HTML file malleable: add
 `<script src="https://clayjs.com/v1/clay.js"></script>` as the last element inside `<body>`.
 Add an `autosave` attribute to the `<html>` element. Add an `editable` attribute to each
 element a person should edit as rich text (headings, paragraphs, note containers). Add a
-`persist` attribute to any form control whose value should survive saving. Mark page UI
-that should never be written to disk with `clay="editor-ui"`. Do not write any
+`persist` attribute to any form control whose value should survive saving. Mark editing
+controls with `show-when:editmode="true"` and load `clay-options.js`, so viewers never see
+them. Put UI that a script builds or changes at runtime inside `clay="editor-ui"`. Do not write any
 save logic or add a save button: clayjs saves the whole document automatically, and the
 host writes it to disk.
 
@@ -258,8 +259,9 @@ reachable by direct import but may change in any release.
 One attribute controls how any element takes part in saving. Keywords combine with
 spaces: `clay="freeze no-undo"`.
 
-- `editor-ui` — runtime UI built by script: toolbars, menus, filter boxes, badges,
-  computed counts. Shorthand for `no-data no-save no-snapshot no-watch no-undo`: never
+- `editor-ui` — UI a script builds or changes at runtime: computed counts, status,
+  filter bars, drawn charts. Static controls (buttons, grips, menus) stay in the file,
+  hidden from viewers with `show-when:editmode="true"`. Shorthand for `no-data no-save no-snapshot no-watch no-undo`: never
   saved, never sent to peers, never in undo, never seen by autosave. Create it at
   runtime (an authored `editor-ui` element is gone from the file after the first save).
 - `no-data` — kept in the file and synced, but skipped by `clay.extractData`, the data
@@ -288,7 +290,7 @@ spaces: `clay="freeze no-undo"`.
   it into each save: saved, never marks the page unsaved, not undoable, and live sync leaves
   the tag to the plugin. Read it with `clay.live(name)`.
 
-Recipes: UI chrome (toolbars, badges) → `clay="editor-ui"`. Per-tab generated
+Recipes: edit-only controls (buttons, grips, toolbars) → `show-when:editmode="true"`. UI a script fills or changes (counts, status, drawn views) → `clay="editor-ui"`. Per-tab generated
 text (clocks, status, "overdue") → `clay="freeze"`. Third-party embeds → `clay="no-watch"`. Heavy editors,
 batch the saves → `clay="no-trigger-autosave"`. Self-rendering UI → `clay="no-dirty"`.
 

@@ -35,15 +35,15 @@ Every element on an open page belongs to one of three kinds. Decide which before
 | Kind | What it is | Where it lives | Saved | Sent to peers | Edited by people |
 |---|---|---|---|---|---|
 | **Record** | The work: card titles, checklist items, amounts, block text, order | Ordinary elements, attributes, text and `persist` control values | yes | yes | yes |
-| **Chrome** | Runtime UI: toolbars, menus, filter boxes, gutters, status text, the style that paints the open card | Elements created at load inside `clay="editor-ui"` | no | no | no |
+| **Chrome** | UI for editing: buttons, grips, toolbars, menus, filter boxes, status text | Authored in the file, hidden from viewers with `show-when:editmode="true"`. UI a script fills or changes goes in `clay="editor-ui"` (9.2) | hidden: yes, `editor-ui`: no | hidden: yes, `editor-ui`: no | no |
 | **Derived** | Values computed from the record: counts, progress, totals, outlines | `clay="editor-ui"` (tab only) or `clay="no-dirty"` (saved, remote wins) | only if `no-dirty` | only if `no-dirty` | no |
 
-Nearly every bug in a malleable file is one of these three leaking into another: chrome saved into the file, a derived count merged as if someone typed it, a record edited only in a copy that never reaches the DOM.
+Nearly every bug in a malleable file is one of these three leaking into another: chrome a script changes saved into the file, a derived count merged as if someone typed it, a record edited only in a copy that never reaches the DOM.
 
 ### 1.3 The rules
 
 1. **The DOM is the record.** Everything durable is an element, an attribute, text, child order, or the value of a control marked `persist`. Never keep the authoritative copy in a JavaScript object.
-2. **Chrome is built at runtime inside `clay="editor-ui"`.** It never reaches the file, a peer or undo history. Keep its blueprint in a `<template>` and clone it after `clay.ready`.
+2. **Chrome is authored in the file and hidden from viewers with `show-when:editmode="true"`.** This is the default: it needs no script and is in place before ClayJS loads. Use `clay="editor-ui"` only for UI a script fills or changes while the page is open, or that viewers must not receive (9.2).
 3. **Derived values are recomputed, never stored as edits.** Write them into `editor-ui` elements, or into `clay="no-dirty"` elements when the saved file must show them.
 4. **Every repeated item has a unique `data-id` from birth.** Mint a fresh one on every create and every duplicate. Sync pairs elements by it.
 5. **Per-tab state stays out of the record.** Which card is open, the filter, the current view: URL hash, `localStorage` or memory, painted through a runtime `<style>` or `editor-ui` elements.
@@ -419,7 +419,7 @@ Never saved: JavaScript objects, `localStorage`, canvas pixels, scroll position,
 | Token | Saved file | Sent to peers | Starts autosave | Counts as unsaved | In undo | Use for |
 |---|---|---|---|---|---|---|
 | (none) | current | yes | yes | yes | yes | the record |
-| `editor-ui` | removed | no | no | no | no | **all runtime chrome and tab-only derived values** |
+| `editor-ui` | removed | no | no | no | no | **UI a script fills or changes at runtime, and tab-only derived values** (9.2) |
 | `no-save` | removed | carried in the bytes, never applied | no | no | yes | rarely; prefer `editor-ui` |
 | `no-snapshot` | removed | no (each tab keeps its own) | no | no | yes | part of `editor-ui` |
 | `freeze` | element current, contents as when it appeared | element yes, contents never | no | no | yes | a scratchpad: per-tab generated content in a saved element (9.4) |
@@ -430,7 +430,7 @@ Never saved: JavaScript objects, `localStorage`, canvas pixels, scroll position,
 | `no-data` | current | yes | yes | yes | yes | content the data API and `extractData` must skip |
 | `live` | the store's current value, at checkpoints | never through the merge; the `live` plugin carries it (7.9) | no | no | no | a `clay="live"` JSON tag |
 
-`editor-ui` bundles `no-data no-save no-snapshot no-watch no-undo`. **Use `editor-ui` for chrome, not `no-save`.** A `no-save` element is still inside the snapshot live sync sends to peers. Peers never apply it, but its text travels to every edit-mode tab (viewers receive the saved file, without it), and `no-save` alone still records undo steps. Older docs advised `clay="no-save no-watch"` for chrome; `editor-ui` replaces that.
+`editor-ui` bundles `no-data no-save no-snapshot no-watch no-undo`. **When chrome needs a region, use `editor-ui`, not `no-save`.** A `no-save` element is still inside the snapshot live sync sends to peers. Peers never apply it, but its text travels to every edit-mode tab (viewers receive the saved file, without it), and `no-save` alone still records undo steps. Older docs advised `clay="no-save no-watch"` for chrome; `editor-ui` replaces that.
 
 Legacy spellings still work: `save-remove` is `no-save no-undo`, `save-ignore` is `no-dirty no-undo`, `save-freeze` is `freeze no-undo`, `mutations-ignore` is `no-watch`, `snapshot-remove` is `no-snapshot`.
 
@@ -1132,7 +1132,16 @@ Never store a record twice. A JSON mirror of DOM records, or a rendered copy bes
 
 ### 9.2 Chrome
 
-Clone chrome from a `<template>` into one `clay="editor-ui"` wrapper after `clay.ready`:
+Author chrome in the file and hide it from viewers with `show-when:editmode="true"` (4.3). It needs no script, it is in place before ClayJS loads, and viewers never see it. The file carries its markup, which is harmless as long as nothing changes it.
+
+Use `clay="editor-ui"` when hiding is not enough:
+
+- **A script changes it after load.** Counts, summaries, status text, a filter bar that reflects its state, a toggled `aria-expanded` or `.selected`. In a saved element each of these changes is an edit: it starts an autosave, adds an undo step, is sent to peers and can conflict with theirs. Inside `editor-ui` none of that happens.
+- **It is drawn from data.** Charts, canvases and grids rendered from the record.
+- **It holds per-tab state.** The open card, the current view, the style that paints them (9.3).
+- **Viewers must not receive it.** The saved file has to be clean HTML without the controls.
+
+An `editor-ui` element is removed from every save, so it cannot be authored in the file. Clone it from a `<template>` into one `clay="editor-ui"` wrapper after `clay.ready`:
 
 ```js
 const chrome = document.createElement("div");
@@ -1142,7 +1151,7 @@ chrome.append(document.getElementById("chrome-tpl").content.cloneNode(true));
 board.querySelector(".board-head").append(chrome);
 ```
 
-Chrome may sit inside the record container (the kanban puts its filter in the board header): `editor-ui` removes it wherever it is. Per-item controls (the writer's block gutter, a list's menu button) are inserted into each item as their own `editor-ui` element and re-inserted by `render()` when missing, so items added by a peer get theirs too. A per-item value computed from the record, such as a count, is not chrome: it is saved content (9.4).
+Chrome may sit inside the record container (the kanban puts its filter in the board header): `editor-ui` removes it wherever it is. Per-item controls that never change, such as a grip or a remove button, are authored in the item's `<template>` with `show-when:editmode="true"`. Per-item controls a script manages (the writer's block gutter, a list's menu button) are inserted into each item as their own `editor-ui` element and re-inserted by `render()` when missing, so items added by a peer get theirs too. A per-item value computed from the record, such as a count, is not chrome: it is saved content (9.4).
 
 Edit-only chrome lives in the same wrapper with `show-when:editmode="true"`, or is not built at all in view mode (`if (clay.isEditMode) …`).
 
