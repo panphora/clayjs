@@ -20,6 +20,7 @@ import { onSnapshot, addDocumentTransform } from "../core/snapshot.js";
 import { isEditMode } from "../core/is-edit-mode.js";
 import { FREEZE_SELECTOR } from "../lib/region-policy.js";
 import { ROUTE_ACTIVE_ATTR } from "../lib/root-attrs.js";
+import { stripEphemeral } from "../lib/ephemeral.js";
 import Mutation from "../lib/mutation.js";
 
 const originals = new WeakMap();
@@ -30,12 +31,14 @@ function log(...args) {
   if (saveFreeze.debug) console.log('[save-freeze]', ...args);
 }
 
-// The captured original is what the file keeps, so it must hold no router stamp:
-// the router can mark a child route-active before this capture runs.
+// The captured original is what the file keeps, so it must hold no router stamp
+// and no ephemeral state: either can be set on a child before this capture runs.
 function authoredInnerHTML(el) {
-  if (!el.querySelector(`[${ROUTE_ACTIVE_ATTR}]`)) return el.innerHTML;
+  const html = el.innerHTML;
+  if (!el.querySelector(`[${ROUTE_ACTIVE_ATTR}]`) && !html.includes("ephemeral") && !html.includes("<dialog")) return html;
   const copy = el.cloneNode(true);
   for (const s of copy.querySelectorAll(`[${ROUTE_ACTIVE_ATTR}]`)) s.removeAttribute(ROUTE_ACTIVE_ATTR);
+  for (const child of copy.children) stripEphemeral(child);
   return copy.innerHTML;
 }
 

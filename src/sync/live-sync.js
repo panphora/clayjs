@@ -40,7 +40,7 @@ import { HyperMorph, morph } from "../vendor/hyper-morph.vendor.js";
 const { createIdentityStore } = HyperMorph;
 import Mutation from "../lib/mutation.js";
 import { NO_DIRTY_SELECTOR, LIVE_SELECTOR } from "../lib/region-policy.js";
-import { EXTENSION_NODE_SELECTOR } from '../lib/extension-noise.js';
+import { EXTENSION_NODE_SELECTOR, EXTENSION_ATTR_PATTERN } from '../lib/extension-noise.js';
 import { isEditMode } from "../core/is-edit-mode.js";
 import { mergeTagRecognizers } from "./merge-tags.js";
 import { serializeForSync, captureForComparisonAndDirty, captureSnapshot, originalSnapshotNode, captureForMerge, captureForSaveAndComparison } from '../core/snapshot.js';
@@ -101,9 +101,12 @@ const REMOTE_WINS_SELECTOR = [
   '[clay~="no-watch"]', '[no-watch]', '[mutations-ignore]',
 ].join(',');
 
-// Host tokens, library state and router state, on every side
+// Host tokens, library state, router state and ephemeral state, on every side
 // of a merge: the live root, a snapshot clone's root, a parsed frame's root.
-const isRootLocalAttr = (el, name) => isTabLocalAttr(name, el);
+// Extension marker attributes too: snapshots and frames never carry them, so a
+// disk frame would otherwise strip them from the live inputs they belong to.
+const isRootLocalAttr = (el, name) =>
+  isTabLocalAttr(name, el) || EXTENSION_ATTR_PATTERN.test(name.toLowerCase());
 
 // Identity an author wrote into the page, the fallback behind synthetic ids.
 //

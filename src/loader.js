@@ -1,6 +1,7 @@
 import { resolveModules, MODULES } from "./loader-logic.js";
 import onDomReady from "./lib/dom-ready.js";
 import { initTheme } from "./ui/theme.js";
+import { ephemeral } from "./lib/ephemeral.js";
 
 function domReady() {
   return new Promise((resolve) => onDomReady(resolve));
@@ -91,6 +92,7 @@ function assembleCore(loaded, { isEditMode, isOwner, siteVisibility }, regionPol
 
   clay.readData = pageData.readData;
   clay.writeData = pageData.writeData;
+  clay.ephemeral = ephemeral;
 
   if (save) {
     const saveFn = save.savePage || save.default;

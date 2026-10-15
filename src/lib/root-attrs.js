@@ -8,6 +8,8 @@
  * peer's copy of them must never be applied.
  */
 
+import { isEphemeralAttr } from "./ephemeral.js";
+
 // The save token, in the order a reader tries the two spellings. Spec §9 bounds it to
 // per-file and per-tab and makes the host strip it before writing, so it never reaches
 // disk. But §9 bounds only the save path, and §10 fans a snapshot out to other editors'
@@ -128,10 +130,12 @@ export const ROUTE_ACTIVE_ATTR = "route-active";
 
 /**
  * True when `name` on `el` belongs to this tab rather than to the document:
- * every tab-local root attribute, route-* on a root, and route-active anywhere.
+ * every tab-local root attribute, route-* on a root, route-active anywhere, and
+ * ephemeral state (lib/ephemeral.js) anywhere.
  * Works on the live root and on a snapshot clone's or parsed frame's root.
  */
 export function isTabLocalAttr(name, el) {
+  if (isEphemeralAttr(name, el)) return true;
   if (name === ROUTE_ACTIVE_ATTR) return true;
   if (!el || el.localName !== "html" || el.parentElement) return false;
   return TAB_LOCAL_ROOT_ATTRS.has(name) || name.startsWith(ROUTE_ROOT_PREFIX);

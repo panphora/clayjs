@@ -42,6 +42,7 @@ import { stripExtensionNoise } from '../lib/extension-noise.js';
 import { restoreAuthoredUrls } from '../lib/authored-url.js';
 import { STRIP_FROM_SAVE, STRIP_FROM_COMPARISON, STRIP_FROM_DIRTY_CHECK, NO_TRIGGER_AUTOSAVE_SELECTOR, SNAPSHOT_REMOVE_SELECTOR } from '../lib/region-policy.js';
 import { TAB_LOCAL_ROOT_ATTRS, stripRouteAttrs } from '../lib/root-attrs.js';
+import { stripEphemeral } from '../lib/ephemeral.js';
 import { createContentView } from '../lib/content-dom.js';
 
 // =============================================================================
@@ -267,6 +268,9 @@ export function captureSnapshot({ flushUndo = true, authored = true } = {}) {
 
   // Router state says where this tab is, not what the document holds.
   stripRouteAttrs(clone);
+
+  // So does ephemeral state: a selection, an open dialog, a marked attribute.
+  stripEphemeral(clone);
 
   return clone;
 }
