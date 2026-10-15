@@ -114,3 +114,24 @@ test('extension markers are stripped whatever their case', () => {
 
   expect(g.getAttributeNames()).toEqual(['data-app'])
 })
+
+test('a select with an excluded option keeps the selection of the options that remain', () => {
+  document.body.innerHTML = `<section>
+    <select id="one"><option editor-ui>Pick one</option><option>A</option><option>B</option></select>
+    <select id="many" multiple><option>X</option><option editor-ui>Tools</option><option>Y</option><option>Z</option></select>
+  </section>`
+  const section = document.querySelector('section')
+  section.querySelector('#one').selectedIndex = 2
+  const many = section.querySelector('#many')
+  many.options[0].selected = true
+  many.options[3].selected = true
+
+  const view = createContentView(section)
+  const one = view.root.querySelector('#one')
+  const manyCopy = view.root.querySelector('#many')
+
+  expect(Array.from(one.options, o => o.textContent)).toEqual(['A', 'B'])
+  expect(one.value).toBe('B')
+  expect(Array.from(manyCopy.options, o => o.textContent)).toEqual(['X', 'Y', 'Z'])
+  expect(Array.from(manyCopy.selectedOptions, o => o.textContent)).toEqual(['X', 'Z'])
+})
