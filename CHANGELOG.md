@@ -1,5 +1,33 @@
 # Changelog
 
+## [1.11.2] - 2026-10-15
+
+### Added
+- Ephemeral state: per-tab attributes that are never saved, synced, undone or counted as a change
+- Tailwind plugin for ephemeral state, with docs in both guides and the reference and attributes pages
+- Guide section on libraries that rewrite content
+- Visual guide figure of the clay region tokens and what editor-ui bundles
+
+### Changed
+- Ephemeral state strips template contents, never marks region or form-state attributes, and undo scopes ignore tab-local attributes
+- Ephemeral markers are judged by the merged element
+- A peer that removes an ephemeral marker also removes this tab's value
+- The extension pattern alone decides which attributes the strip removes
+- Docs hide edit controls by mode by default, with editor-ui for UI a script changes
+- Visual guide gives rung 4 one recommended way to build a rendered view, and rung 3 fields can use any editable component
+- Visual guide has clearer try-it steps, next steps after the minimal example, clearer freeze and no-dirty tiles, and simpler rule cards and secrets box
+- The polite pop newsletter ask loads from hyperclay.com
+- Saving a 10,000-row page takes about 400 ms instead of 630 ms
+
+### Fixed
+- An autosave that arrives during an in-flight save is queued instead of dropped
+- The dirty gate on batching pages clears only when nothing changed
+- A marked disabled input keeps its state through merges
+- Pages whose dropdowns contain an excluded option now save
+- A [persist] dropdown with an excluded option saves the options a person picked
+
+
+
 ## [1.11.1] - 2026-10-14
 
 ### Changed
