@@ -39,6 +39,7 @@
 .vg .wrong p{color:var(--ink-soft)}
 .vg .card pre{overflow-x:auto}
 .vg .card{border:1px solid var(--line);background:var(--paper);border-radius:6px;padding:14px}
+.vg .grid3 .card{background:var(--panel)}
 .vg .card p{font-size:14.5px;margin:6px 0 0}
 .vg .card .fix{color:var(--keep)}
 .vg .card .bad{color:var(--risk)}
@@ -399,7 +400,7 @@
 
 <figure>
 <svg viewBox="0 0 760 400" role="img" aria-labelledby="f5t">
-<title id="f5t">Decision flow: temporary state goes in a JS variable or an editor-ui region; derived state is re-rendered into editor-ui; content viewers see is plain markup; clutter stays in the file, hidden by mode; secrets go in a separate file.</title>
+<title id="f5t">Decision flow: temporary state goes in a JS variable or an editor-ui region; derived state is re-rendered into editor-ui; content viewers see is plain markup; clutter stays in the file, hidden by mode; secrets do not belong in a malleable document.</title>
 <rect x="222" y="10" width="316" height="50" rx="6" class="box-ink"/>
 <text x="380" y="40" text-anchor="middle" class="t-b">Should it survive closing and reopening?</text>
 <path d="M222 35 H125 V108" class="arr" marker-end="url(#ah)"/><text x="176" y="28" class="t-s t-m">no</text>
@@ -437,13 +438,13 @@
 
 <rect x="265" y="316" width="230" height="76" rx="6" class="keep"/>
 <text x="279" y="338" class="t-b t-keep">Hidden from viewers</text>
-<text x="279" y="358" class="t-s">Notes and controls, in the file</text>
-<text x="279" y="374" class="t-s">and hidden by mode.</text>
+<text x="279" y="355" class="t-s">Notes and controls, in the file</text>
+<text x="279" y="370" class="t-s">and hidden by mode:</text>
+<text x="279" y="385" class="t-c">option:editmode="true"</text>
 
 <rect x="520" y="316" width="230" height="76" rx="6" class="risk"/>
-<text x="534" y="338" class="t-b t-risk">Not in this file</text>
-<text x="534" y="358" class="t-s">A separate file behind its own</text>
-<text x="534" y="374" class="t-s">access.</text>
+<text x="534" y="345" class="t-b t-risk">Don't use a malleable</text>
+<text x="534" y="365" class="t-b t-risk">document for this</text>
 </svg>
 </figure>
 
