@@ -96,7 +96,17 @@ export default function enablePersistentFormInputValues(filterBySelector = PERSI
     };
     finalize(inputSelector);
     finalize(textareaSelector);
-    finalize(selectSelector);
+    // A select's options pair through provenance, not by index: an excluded option
+    // (editor-ui, no-snapshot) is already gone from the copy, so its options are a
+    // subset of the live ones.
+    for (const control of doc.querySelectorAll(selectSelector)) {
+      if (!provenance.original(control)) continue;
+      for (const option of control.options) {
+        const live = provenance.original(option);
+        if (!(live && live.selected)) option.removeAttribute('selected');
+        else if (!option.hasAttribute('selected')) option.setAttribute('selected', '');
+      }
+    }
   });
 }
 
