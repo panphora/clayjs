@@ -44,7 +44,7 @@ import { EXTENSION_NODE_SELECTOR, EXTENSION_ATTR_PATTERN } from '../lib/extensio
 import { isEditMode } from "../core/is-edit-mode.js";
 import { mergeTagRecognizers } from "./merge-tags.js";
 import { serializeForSync, captureForComparisonAndDirty, captureSnapshot, originalSnapshotNode, captureForMerge, captureForSaveAndComparison } from '../core/snapshot.js';
-import { isTabLocalAttr } from '../lib/root-attrs.js';
+import { mergeIgnoresAttr, mergeVetoesAttr } from '../lib/root-attrs.js';
 import { autosaveActive } from '../lib/autosave-state.js';
 import { enableContentEditable } from '../core/admin-contenteditable.js';
 import { enableOnClick } from '../core/admin-onclick.js';
@@ -105,8 +105,8 @@ const REMOTE_WINS_SELECTOR = [
 // of a merge: the live root, a snapshot clone's root, a parsed frame's root.
 // Extension marker attributes too: snapshots and frames never carry them, so a
 // disk frame would otherwise strip them from the live inputs they belong to.
-const isRootLocalAttr = (el, name) =>
-  isTabLocalAttr(name, el) || EXTENSION_ATTR_PATTERN.test(name.toLowerCase());
+const isRootLocalAttr = (el, name, merged) =>
+  mergeIgnoresAttr(el, name, merged) || EXTENSION_ATTR_PATTERN.test(name.toLowerCase());
 
 // Identity an author wrote into the page, the fallback behind synthetic ids.
 //
@@ -1658,8 +1658,7 @@ class LiveSync {
     const store = this.identity;
     // A frame may neither write these onto our root nor, by not carrying them,
     // take ours away. Returning false is hyper-morph's veto for both directions.
-    const beforeAttributeUpdated = (name, element) =>
-      isTabLocalAttr(name, element) ? false : undefined;
+    const beforeAttributeUpdated = mergeVetoesAttr;
     const authored = uniqueAuthoredIdentity(new WeakMap());
     const sideIdentity = (map) =>
       isIdMap(map) ? { first: authored, map, then: authored } : authored;

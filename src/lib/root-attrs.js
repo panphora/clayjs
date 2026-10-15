@@ -8,7 +8,7 @@
  * peer's copy of them must never be applied.
  */
 
-import { isEphemeralAttr } from "./ephemeral.js";
+import { isEphemeralAttr, isMarkedAttr } from "./ephemeral.js";
 
 // The save token, in the order a reader tries the two spellings. Spec §9 bounds it to
 // per-file and per-tab and makes the host strip it before writing, so it never reaches
@@ -139,6 +139,25 @@ export function isTabLocalAttr(name, el) {
   if (name === ROUTE_ACTIVE_ATTR) return true;
   if (!el || el.localName !== "html" || el.parentElement) return false;
   return TAB_LOCAL_ROOT_ATTRS.has(name) || name.startsWith(ROUTE_ROOT_PREFIX);
+}
+
+/**
+ * hyper-morph's ignoreAttribute for tab-local state. While a merge is applied,
+ * `merged` is the element the live one is becoming, so a frame that adds or
+ * removes an ephemeral:NAME marker together with NAME is judged by the marker
+ * as it ends up, not by attribute order.
+ */
+export function mergeIgnoresAttr(el, name, merged) {
+  return isTabLocalAttr(name, merged || el);
+}
+
+/**
+ * hyper-morph's beforeAttributeUpdated veto: a merge may neither write nor
+ * remove a tab-local attribute. A marker-protected attribute is left to
+ * mergeIgnoresAttr, which reads the marker from the merged element.
+ */
+export function mergeVetoesAttr(name, el) {
+  return isTabLocalAttr(name, el) && !isMarkedAttr(name, el) ? false : undefined;
 }
 
 /** Remove router state from a snapshot clone: route-* on its root, route-active anywhere. */

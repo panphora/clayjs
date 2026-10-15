@@ -148,6 +148,8 @@ itself, with no network.
   Its signature is unchanged on hyper-morph 1.0.
 - `clay.undo` — document-wide undo singleton: `clay.undo.undo()` / `clay.undo.redo()`
   (undo plugin).
+- `clay.ephemeral` — per-tab state on saved elements: `add(el, word)`, `remove`,
+  `toggle(el, word, force)`, `has`. See Ephemeral state.
 - `clay.cms` — the content panel: `clay.cms.open()` (cms plugin).
 - `clay.RichClay` — the rich-text editor class behind `editable` (richclay plugin).
 - `clay.quickcrop(file, opts)` — crop modal: resolves `{blob, dataURL, width, height}`,

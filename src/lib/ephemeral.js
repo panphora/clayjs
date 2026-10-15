@@ -24,6 +24,11 @@ export function isEphemeralAttr(name, el) {
   return el.hasAttribute(MARKER + name);
 }
 
+/** True when `el` carries an ephemeral:NAME marker for `name`. */
+export function isMarkedAttr(name, el) {
+  return !!el && el.nodeType === 1 && el.hasAttribute(MARKER + name);
+}
+
 function stripElement(el) {
   if (el.localName === "dialog" && el.hasAttribute("open")) el.removeAttribute("open");
   if (el.hasAttribute(EPHEMERAL_ATTR)) el.removeAttribute(EPHEMERAL_ATTR);

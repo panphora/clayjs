@@ -1,6 +1,6 @@
 import { jest } from "@jest/globals";
 import { isEphemeralAttr, stripEphemeral, ephemeral } from "../../src/lib/ephemeral.js";
-import { isTabLocalAttr } from "../../src/lib/root-attrs.js";
+import { isTabLocalAttr, mergeIgnoresAttr, mergeVetoesAttr } from "../../src/lib/root-attrs.js";
 import { HyperMorph } from "../../src/vendor/hyper-morph.vendor.js";
 
 const el = (html) => {
@@ -139,14 +139,10 @@ test("the saved bytes carry no ephemeral state", async () => {
 });
 
 describe("an incoming frame cannot write or remove ephemeral state", () => {
-  const beforeAttributeUpdated = (name, element) => (isTabLocalAttr(name, element) ? false : undefined);
   async function morphFrom(html) {
-    const incoming = new DOMParser().parseFromString(html, "text/html");
-    await HyperMorph.morph(document.documentElement, incoming.documentElement, {
-      morphStyle: "outerHTML",
-      ignoreActiveValue: true,
-      head: { style: "merge" },
-      callbacks: { beforeAttributeUpdated },
+    await HyperMorph.morphDocument(document, html, {
+      ignoreAttribute: mergeIgnoresAttr,
+      hooks: { beforeAttributeUpdated: mergeVetoesAttr },
     });
   }
 
@@ -163,6 +159,30 @@ describe("an incoming frame cannot write or remove ephemeral state", () => {
     await morphFrom('<html><head></head><body><ul><li data-id="c-1" ephemeral="selected">a</li></ul><dialog open>d</dialog></body></html>');
     expect(document.querySelector("[ephemeral]")).toBeNull();
     expect(document.querySelector("dialog").hasAttribute("open")).toBe(false);
+  });
+
+  test("a frame that drops the marker hands the attribute back to the file", async () => {
+    document.body.innerHTML = '<details open ephemeral:open><summary>s</summary></details>';
+    await morphFrom('<html><head></head><body><details><summary>s</summary></details></body></html>');
+    const d = document.querySelector("details");
+    expect(d.hasAttribute("ephemeral:open")).toBe(false);
+    expect(d.hasAttribute("open")).toBe(false);
+  });
+
+  test("a frame that drops the marker and sets the attribute applies it", async () => {
+    document.body.innerHTML = '<details ephemeral:open><summary>s</summary></details>';
+    await morphFrom('<html><head></head><body><details open><summary>s</summary></details></body></html>');
+    const d = document.querySelector("details");
+    expect(d.hasAttribute("ephemeral:open")).toBe(false);
+    expect(d.hasAttribute("open")).toBe(true);
+  });
+
+  test("a frame that adds the marker keeps this tab's state", async () => {
+    document.body.innerHTML = '<details open><summary>s</summary></details>';
+    await morphFrom('<html><head></head><body><details ephemeral:open><summary>s</summary></details></body></html>');
+    const d = document.querySelector("details");
+    expect(d.hasAttribute("ephemeral:open")).toBe(true);
+    expect(d.hasAttribute("open")).toBe(true);
   });
 });
 

@@ -553,7 +553,6 @@ clay.ephemeral.toggle(card, "selected");   // add, remove, toggle(el, word, forc
 - None of it is saved, sent to peers, undone or counted as a change, and an incoming merge, from a peer or from the file on disk, never writes or removes it on an element this tab already has. The router's `route-active` gets the same treatment.
 - Identity (`class`, `id`, `data-id`), region attributes (`clay`, `no-save`, `freeze` and the rest) and form state (`value`, `checked`, `selected`, which `persist` owns) can never be made ephemeral.
 - Because ephemeral changes are not changes, `onmutation` and `onglobalmutation` handlers do not fire for them. Update anything derived from a selection in the same function that changes it.
-- Add or remove an `ephemeral:NAME` marker in its own save, not in the same edit that sets `NAME`: a tab that receives both at once can apply them in the wrong order.
 
 Use `ephemeral` for state on one element. State that comes from the URL hash and spans many records (the open card, a filter) is still painted with a runtime stylesheet (9.3).
 
