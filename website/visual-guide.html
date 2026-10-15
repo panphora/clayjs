@@ -243,9 +243,8 @@
 <text x="170" y="99" text-anchor="middle" style="font-size:22px" class="t-temp">≠</text>
 </svg>
 <h3>Rung 4. Rendered views</h3>
-<p class="rung-meta">The durable record is data: markup, or a <code>merge="store"</code> JSON script. A canvas, chart or grid is drawn from it into a mount created at runtime inside <code>clay="editor-ui"</code>. The saved file holds only the record.</p>
-<p class="rung-meta">A <code>clay="freeze"</code> mount also works. Author it empty in the file, and draw into it only after <code>clay.ready</code>. Drawing before <code>clay.ready</code> freezes the drawing into the file.</p>
-<p class="rung-meta">Sync merges the record and never touches the view. Write one render function and call it on load, after every local command, and on <code>clay:sync-applied</code>. ClayJS fires that event after it applies an outside change.</p>
+<p class="rung-meta">The record is a <code>merge="store"</code> JSON script. A canvas, chart or grid is drawn from it into a mount created at load inside <code>clay="editor-ui"</code>, so the saved file holds only the record.</p>
+<p class="rung-meta">Sync merges the record and never touches the view. Write one render function and call it on load, after every local change, and on <code>clay:sync-applied</code>, which ClayJS fires after it applies an outside change.</p>
 </figure>
 </div>
 
