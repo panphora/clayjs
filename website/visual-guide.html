@@ -483,8 +483,14 @@
 <pre><code class="language-markup">&lt;/body&gt;
 &lt;/html&gt;</code></pre>
 </div>
-<p>Open the file through your host. Add a task, rename it, drag it above "Write the brief", and wait for the indicator to show saved. Reopen it: there is still one Add task button, and the task keeps its new name and place.</p>
-<p>Move to rung 3 only when viewers must receive HTML without the controls. For undo, a filter and a computed summary, study <a href="examples/skeleton.html">examples/skeleton.html</a>. It renders the filter and summary into <code>clay="editor-ui"</code> and keeps its controls in the file, hidden by mode.</p>
+<p><strong>Try it.</strong> Open the file through your host, such as HTML Clay, then:</p>
+<ol>
+<li>Click Add task and type a name.</li>
+<li>Drag the new task above "Write the brief".</li>
+<li>Wait until the indicator shows saved, then reopen the file.</li>
+</ol>
+<p>The task is still there, with its name and position. There is still only one Add task button: it is part of the file, not added by a script, so saving never duplicates it.</p>
+<p><strong>Going further.</strong> This example is rung 2: the controls are in the file, hidden from viewers. Move to rung 3 only if viewers must get a file with no controls in it. To add undo, a filter and a computed summary, see <a href="examples/skeleton.html">examples/skeleton.html</a>. Its controls are in the file and hidden by mode, as here. Its filter and summary go in <code>clay="editor-ui"</code>, because a script changes them as you use the page.</p>
 <p>Full reference: the <a href="/complete-guide">complete guide</a>.</p>
 
 </main>
