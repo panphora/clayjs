@@ -25,6 +25,7 @@ import { captureForComparison, captureForComparisonAndDirty, captureForSaveAndCo
 import { seedEtag, lastSeenEtag } from "./etag.js";
 import { gateCaptureToken, gateClearIfUnchanged, pageMaybeDirty } from "../lib/dirty-gate.js";
 import { hasUnsavedState } from "../lib/unsaved-state.js";
+import { NO_TRIGGER_AUTOSAVE_SELECTOR } from "../lib/region-policy.js";
 import { autosaveActive } from "../lib/autosave-state.js";
 import { ROOT_LIBRARY_ATTRS, SAVE_TOKEN_ATTRS, LEGACY_SAVE_TOKEN_ATTRS, HOST_RESPONSE_ATTRS } from "../lib/root-attrs.js";
 import { logSaveCheck, logBaseline } from "../lib/autosave-debug.js";
@@ -894,6 +895,17 @@ export function savePageThrottled(callback = () => {}) {
     return Promise.resolve(skipped);
   }
 
+  // A save is already on the wire: queue one more instead of copying the page to
+  // compare. The queued save makes its own full check when this one lands (see
+  // drainPendingSave), so this never trusts the dirty gate. Not while the page is
+  // settling, where every candidate save must pass the baseline veto below.
+  if (!baselineActive && isSaveInProgress()) {
+    pendingSave = true;
+    const skipped = skipped_('Save already in progress');
+    callback(skipped);
+    return Promise.resolve(skipped);
+  }
+
   // For autosave: while the page is still settling, content must differ from BOTH
   // the load-time baseline and the last save, so module setup churn cannot trigger
   // a save. Once settled, the baseline veto is disarmed and only the last save
@@ -909,7 +921,9 @@ export function savePageThrottled(callback = () => {}) {
   logSaveCheck('throttled vs lastSave', !differsFromLastSave);
 
   if (!(differsFromBaseline && differsFromLastSave)) {
-    if (!differsFromLastSave) gateClearIfUnchanged(gateToken);
+    // This comparison leaves out batching (no-trigger-autosave) regions, which the
+    // gate counts, so it can vouch for the gate only on a page that has none.
+    if (!differsFromLastSave && !document.querySelector(NO_TRIGGER_AUTOSAVE_SELECTOR)) gateClearIfUnchanged(gateToken);
     const skipped = skipped_('No changes to save');
     callback(skipped);
     return Promise.resolve(skipped);

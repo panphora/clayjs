@@ -78,6 +78,10 @@ const PERSIST_CONTROLS = `input${PERSIST}, textarea${PERSIST}, select${PERSIST}`
 // the previous change was spliced back over the newer one and written to disk.
 const GATE_IGNORE = `${STRIP_FROM_DIRTY_CHECK}, ${SNAPSHOT_REMOVE_SELECTOR}`;
 const probeCache = new WeakMap();
+// A [persist] control whose saved state its attributes do not hold: a script set
+// it and a save carried that value. The file now differs from the attributes, so
+// returning to them is a change, and the probe compares against this instead.
+const savedApart = new WeakMap();
 
 // The [persist] probe has to honour GATE_IGNORE too. It scans by attribute, not
 // through the mutation hub, so without this a programmatic .value write inside a
@@ -160,6 +164,11 @@ function serializedStateMatches(el) {
 export function persistProbeDirty() {
   for (const el of gatedPersistControls()) {
     const sig = controlSignature(el);
+    const saved = savedApart.get(el);
+    if (saved !== undefined) {
+      if (sig === saved) continue;
+      return true;
+    }
     if (probeCache.get(el) === sig) continue;
     if (serializedStateMatches(el)) {
       probeCache.set(el, sig);
@@ -210,7 +219,10 @@ export function gateClearIfUnchanged(token) {
   // exact value the capture carried — a programmatic write between capture
   // and completion stays dirty.
   for (const [el, sig] of token.probe) {
-    if (controlSignature(el) === sig) probeCache.set(el, sig);
+    if (controlSignature(el) !== sig) continue;
+    probeCache.set(el, sig);
+    if (serializedStateMatches(el)) savedApart.delete(el);
+    else savedApart.set(el, sig);
   }
   scheduleAnnounce();
 }
