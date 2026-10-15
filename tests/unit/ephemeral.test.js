@@ -184,6 +184,37 @@ describe("an incoming frame cannot write or remove ephemeral state", () => {
     expect(d.hasAttribute("ephemeral:open")).toBe(true);
     expect(d.hasAttribute("open")).toBe(true);
   });
+
+  test("a marked disabled input keeps its state through a frame", async () => {
+    document.body.innerHTML = '<input name="q" ephemeral:disabled disabled><p>a</p>';
+    await morphFrom('<html><head></head><body><input name="q" ephemeral:disabled><p>b</p></body></html>');
+    expect(document.querySelector("input").disabled).toBe(true);
+    expect(document.querySelector("p").textContent).toBe("b");
+  });
+
+  test("a marked disabled input keeps its state through a peer merge against a stripped capture", async () => {
+    document.body.innerHTML = '<input name="q" ephemeral:disabled disabled><p>a</p>';
+    const root = document.documentElement.cloneNode(true);
+    const toLive = new Map();
+    const pair = (c, l) => {
+      toLive.set(c, l);
+      for (let i = 0; i < c.childNodes.length; i++) pair(c.childNodes[i], l.childNodes[i]);
+    };
+    pair(root, document.documentElement);
+    stripEphemeral(root);
+    await HyperMorph.mergeDocument({
+      live: document,
+      base: "<!DOCTYPE html>" + root.outerHTML,
+      local: { root, toLive: (n) => toLive.get(n) || null },
+      remote: "<!DOCTYPE html>" + root.outerHTML.replace("<p>a</p>", "<p>b</p>"),
+      keepLiveOnly: true,
+      ignoreAttribute: mergeIgnoresAttr,
+      hooks: { beforeAttributeUpdated: mergeVetoesAttr },
+    });
+    expect(document.querySelector("input").disabled).toBe(true);
+    expect(document.querySelector("input").hasAttribute("ephemeral:disabled")).toBe(true);
+    expect(document.querySelector("p").textContent).toBe("b");
+  });
 });
 
 test("stripEphemeral reaches template contents", () => {
