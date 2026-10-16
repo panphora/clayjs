@@ -34,7 +34,7 @@ function stylesOnce() {
 
 function focusApp() {
   const next = [...document.querySelectorAll(FOCUSABLE)].find(
-    (el) => !el.disabled && !el.closest("[clay~='editor-ui']")
+    (el) => !el.disabled && !el.closest("[clay~='editor-ui']") && (typeof el.checkVisibility !== "function" || el.checkVisibility())
   );
   if (next) next.focus();
   else document.body.focus();
