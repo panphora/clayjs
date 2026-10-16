@@ -120,10 +120,11 @@ itself, with no network.
   Supplied by the `clay-data.js` satellite. It changes content only and refuses executable
   content, unsafe attributes, unknown keys, and HTML replacement without changing the page.
 - `clay.readData(rules?)` — read the saved file as `{data, etag}`. Always present in core,
-  and rejects when the host does not announce `data-read`.
+  and rejects when the host does not announce `data-read`, and in draft mode, where the saved
+  file is not this visitor's to read, with `code: "DataUnavailableInDraft"`.
 - `clay.writeData(values, {rules, ifMatch})` — conditionally write JSON into the saved file
   and return `{data, etag}`. Always present in core, and rejects when the host does not
-  announce `data-write`.
+  announce `data-write`, and in draft mode with `code: "DataUnavailableInDraft"`.
 - `clay.getHTML()` — the exact HTML string a save would send, after all cleanup.
 - `clay.addDocumentTransform(fn)` — register a callback that receives the cloned
   document before serialization. The live page is never touched. Runs on every change

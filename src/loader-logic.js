@@ -150,6 +150,10 @@ function parseCsv(params, key, enabled, apply) {
 // page that keeps its edits in this browser cannot carry them.
 const DRAFT_DROPS = ["sync", "live", "upload", "quickcrop", "cms", "people", "wire", "ai-edit", "demo", "source"];
 
+// [refetch-on-save] swaps its element for a fresh GET of the same URL after every
+// save, which on a visitor's own draft is a request to the host.
+const DRAFT_DROPS_CORE = ["attrs/refetch-on-save.js"];
+
 export function resolveModules(params, isEditMode, { isDraftMode = false } = {}) {
   const core = [...CORE_WAVES.always];
   if (isEditMode) core.push(...CORE_WAVES.editOnly);
@@ -175,6 +179,10 @@ export function resolveModules(params, isEditMode, { isDraftMode = false } = {})
   for (const name of excluded) enabled.delete(name);
   if (isDraftMode) {
     for (const name of DRAFT_DROPS) enabled.delete(name);
+    for (const path of DRAFT_DROPS_CORE) {
+      const at = core.indexOf(path);
+      if (at > -1) core.splice(at, 1);
+    }
     enabled.add("visitor-drafts");
   }
 

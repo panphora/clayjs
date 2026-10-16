@@ -202,6 +202,16 @@ test("draft mode puts visitor-drafts first and drops every host-facing plugin", 
   expect(plugins).not.toContain("plugins/source.js");
 });
 
+test("draft mode drops the [refetch-on-save] hook, which GETs the host after every save", () => {
+  const edit = resolveModules(params({ plugins: "visitor-drafts" }), true);
+  expect(edit.core).toContain("attrs/refetch-on-save.js");
+
+  const draft = resolveModules(params({ plugins: "visitor-drafts" }), true, { isDraftMode: true });
+  expect(draft.core).not.toContain("attrs/refetch-on-save.js");
+  expect(draft.core).toContain("core/save.js");
+  expect(draft.core).toContain("attrs/onaftersave.js");
+});
+
 test("live is opt-in, loads in view mode, and brings nothing with it", () => {
   const off = resolveModules(new URLSearchParams(""), true);
   expect(off.plugins).not.toContain("plugins/live.js");

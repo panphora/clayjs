@@ -18,11 +18,31 @@ export function draftSlot(doc = document) {
   return value && SLOT.test(value) ? value : null;
 }
 
+let warnedRules = false;
+
+function rulesReady(doc) {
+  const tag = doc.querySelector('script[data-rules-name~="api"]');
+  if (!tag) return false;
+  const version = tag.getAttribute("data-rules-version");
+  let problem = null;
+  if (version !== "1") {
+    problem = `the api rules tag says data-rules-version="${version ?? ""}" and this version reads version 1`;
+  } else {
+    try { JSON.parse(tag.textContent); } catch { problem = "the api rules tag does not hold readable JSON"; }
+  }
+  if (!problem) return true;
+  if (!warnedRules) {
+    warnedRules = true;
+    console.warn(`visitor-drafts: this page keeps no draft (${problem})`);
+  }
+  return false;
+}
+
 export function draftEligible(doc = document, loc = window.location) {
   return requested
     && (loc.protocol === "https:" || loc.protocol === "http:")
     && draftSlot(doc) !== null
-    && doc.querySelector('script[data-rules-name~="api"]') !== null;
+    && rulesReady(doc);
 }
 
 export function setDraftTransport(fn) { transport = fn; }

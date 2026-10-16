@@ -11,12 +11,12 @@ function setOwnerCookie() {
   document.cookie = "isAdminOfCurrentResource=true; path=/";
 }
 
-function setPage({ slot, apiTag = true, attrs = {} } = {}) {
+function setPage({ slot, apiTag = true, api = null, attrs = {} } = {}) {
   const root = document.documentElement;
   for (const name of Array.from(root.attributes, (attribute) => attribute.name)) root.removeAttribute(name);
   if (slot !== undefined) root.setAttribute("visitor-drafts", slot);
   for (const [name, value] of Object.entries(attrs)) root.setAttribute(name, value);
-  document.head.innerHTML = apiTag ? API_TAG : "";
+  document.head.innerHTML = api ?? (apiTag ? API_TAG : "");
   document.body.innerHTML = '<div id="content">start</div>';
 }
 
@@ -24,6 +24,7 @@ async function bootPage({
   params = BASE_PARAMS,
   slot = "draft-slot-1",
   apiTag = true,
+  api = null,
   attrs = {},
   owner = false,
   url = "/notes.html",
@@ -34,7 +35,7 @@ async function bootPage({
   clearCookies();
   if (owner) setOwnerCookie();
   window.history.replaceState({}, "", url);
-  setPage({ slot, apiTag, attrs });
+  setPage({ slot, apiTag, api, attrs });
   window.clay = {};
   const fetchMock = jest.fn(async () => new Response("", { status: 404 }));
   window.fetch = fetchMock;
@@ -121,6 +122,35 @@ test("a page with no api rules tag is not a draft page", async () => {
 
   expect(clay.isDraftMode).toBe(false);
   expect(clay.isEditMode).toBe(false);
+});
+
+test("a rules tag this version cannot read is not a draft page", async () => {
+  const warns = [];
+  const spy = jest.spyOn(console, "warn").mockImplementation((line) => warns.push(String(line)));
+  try {
+    const newer = await bootPage({
+      api: '<script data-rules-name="api" data-rules-version="2" type="application/json">{"title":"h1"}</script>',
+    });
+    expect(newer.clay.isDraftMode).toBe(false);
+    expect(newer.clay.isEditMode).toBe(false);
+    expect(newer.clay.visitorDrafts.active).toBe(false);
+    expect(newer.clay.save).toBeUndefined();
+    expect(document.documentElement.getAttribute("draftmode")).toBeNull();
+    expect(localStorage.getItem("clay:visitor-drafts:draft-slot-1")).toBeNull();
+
+    const broken = await bootPage({
+      api: '<script data-rules-name="api" data-rules-version="1" type="application/json">{"title":"h1"</script>',
+    });
+    expect(broken.clay.isDraftMode).toBe(false);
+    expect(broken.clay.isEditMode).toBe(false);
+    expect(broken.clay.visitorDrafts.active).toBe(false);
+  } finally {
+    spy.mockRestore();
+  }
+
+  expect(warns).toHaveLength(2);
+  expect(warns[0]).toContain('data-rules-version="2"');
+  expect(warns[1]).toContain("readable JSON");
 });
 
 test("a file: page is not a draft page", async () => {

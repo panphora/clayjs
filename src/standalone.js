@@ -9,6 +9,7 @@
    shared pieces. */
 import { boot } from "./loader.js";
 import onDomReady from "./lib/dom-ready.js";
+import { noteBootParams } from "./core/draft-mode.js";
 
 (function () {
   // Suppress every vendored bundle's window auto-export; the loader assembles
@@ -39,6 +40,10 @@ import onDomReady from "./lib/dom-ready.js";
   var script = document.currentScript;
   var params = script && script.src ? new URL(script.src, location.href).searchParams : new URLSearchParams();
   clay.__booted = true;
+  // Before the satellites below: the internals graph reaches core/is-edit-mode.js,
+  // which freezes its draft-mode answer as it evaluates. boot() notes the same
+  // params again, which is harmless.
+  noteBootParams(params);
 
   function domReady() {
     return new Promise(function (r) { onDomReady(r); });

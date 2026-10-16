@@ -110,6 +110,21 @@ export function mountPrompt({ memory, appName, link, onError }) {
     });
   }
 
+  function downloadCurrent() {
+    const getHTML = window.clay && window.clay.getHTML;
+    if (typeof getHTML !== "function" || typeof URL === "undefined" || typeof URL.createObjectURL !== "function") return false;
+    const segment = location.pathname.split("/").filter(Boolean).pop() || "index.html";
+    const objectUrl = URL.createObjectURL(new Blob([getHTML()], { type: "text/html" }));
+    const a = document.createElement("a");
+    a.href = objectUrl;
+    a.download = segment.replace(/\.html$/, ".htmlclay");
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(objectUrl);
+    return true;
+  }
+
   root.addEventListener("click", (e) => {
     const t = e.target.closest("[data-hcp]");
     if (t) {
@@ -122,7 +137,13 @@ export function mountPrompt({ memory, appName, link, onError }) {
       }
       return;
     }
-    if (e.target.closest("[data-hcp-link]")) { mem.downloaded = true; mem.shown = true; memory.save(); }
+    if (e.target.closest("[data-hcp-link]")) {
+      if (root.getAttribute("data-hcp-reason") === "error") {
+        e.preventDefault();
+        downloadCurrent();
+      }
+      mem.downloaded = true; mem.shown = true; memory.save();
+    }
   });
   root.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && root.getAttribute("data-hcp-state") === "card") { set("mini"); tab.focus(); }

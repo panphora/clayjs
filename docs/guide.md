@@ -240,7 +240,7 @@ The test suite checks this file opens without becoming dirty, saves the record a
 - Load order is fixed regardless of how you list them.
 - `exclude=richclay` when the app has no rich text. `exclude=source` saves one request and about 48 KB, at the cost of saves reprinting the whole document instead of keeping hand formatting.
 - Nothing implies `undo`, on purpose: it intercepts Cmd+Z in every text field on the page (8.3).
-- `visitor-drafts` is inert outside draft mode: named on a page with no `visitor-drafts` slot or no `api` rules tag, it loads, warns in the console and draws nothing. Section 14 covers the opt in.
+- `visitor-drafts` is inert outside draft mode: named on a page with no `visitor-drafts` slot, no `api` rules tag, or a rules tag this version cannot read (not `data-rules-version="1"`, or not JSON), it loads, warns in the console and draws nothing. Section 14 covers the opt in.
 
 **A good default for apps:** `?plugins=sync,sortable,undo,indicator`, plus `upload` for images or attachments, plus `exclude=richclay` when there is no rich text.
 
@@ -305,7 +305,7 @@ Your stylesheet still cannot reach these elements: every declaration is inline a
 2. `<html viewonly>` in the file means view. So does a response carrying only the pre-1.9.0 token `htmlclaytoken` (an out-of-date HTML Clay, which also shows an update bar).
 3. `window.clayEditMode`, set by a script before boot.
 4. A `savetoken` attribute the host put on `<html>` (HTML Clay 1.9.0 and newer).
-5. **Draft mode**, on a page that opted in (14): the visitor gets the editing UI and their work stays in their own browser. `?editmode=false`, a `viewonly` attribute, a stale token, `window.clayEditMode` or a save token all turn it off, and only the owner cookie plus `?editmode=true` edits the original (14.3).
+5. **Draft mode**, on a page that opted in (14): the visitor gets the editing UI and their work stays in their own browser. `?editmode=false`, a `viewonly` attribute, a stale token, `window.clayEditMode` or a save token all turn it off, and only the owner cookie plus `?editmode=true` edits the original, except on a `viewonly` document or one with a stale token, where `?editmode=true` is the plain edit mode it always was (14.3).
 6. The `isAdminOfCurrentResource` cookie (hyperclay.com, Hyperclay Local).
 
 Edit mode only asks for the editing UI. On a host that has not authorized this person every save is refused (`savestatus="error"`). The host decides who writes.
@@ -1638,7 +1638,7 @@ A **free document** is a published app anyone can use and keep. The visitor gets
 
 On a page that opts in (14.2), a visitor who is not the owner is in **draft mode**. Every edit-only module loads, so `editable`, `persist`, undo, sortable and the rest behave as they do for the owner, and the autosave pipeline still runs. The save lane is swapped: instead of sending the document to the host, ClayJS extracts the page's `api` JSON out of the bytes a real save would write and stores `{ "v": 1, "savedAt": "2026-10-15T00:00:00.000Z", "data": { ... } }` under `localStorage["clay:visitor-drafts:<slot>"]`. The next load applies that JSON over the file the host served, so an owner's later fix reaches a returning visitor while the visitor's own work stays. The host is never told: no save, no sync, no upload, and no `/_/meta` discovery.
 
-The owner is a visitor here too. Signed in, they get the same private draft unless the URL carries `?editmode=true`, which edits the original file and shows every visitor the change. A file opened in HTML Clay, or from `file:`, always edits the file itself: draft mode needs a page served over `http:` or `https:` (14.3).
+The owner is a visitor here too. Signed in, they get the same private draft unless the URL carries `?editmode=true`, which edits the original file and shows every visitor the change. Two things always edit the file itself: a document opened from `file:`, where draft mode never applies, and HTML Clay, which stamps a save token on the response. Hyperclay Local is not one of them. It serves the folder over `http:` and injects no save token, so its owner is in draft mode like anyone else and adds `?editmode=true` to edit the file (14.3).
 
 ### 14.2 The contract
 
@@ -1670,19 +1670,20 @@ Bump the slot (`-v2`) only when an old draft cannot fit the new rules. A draft t
 The rung is where a free document lives, so the details matter:
 
 - `?editmode=false` is view mode, and nothing below it changes that.
-- `?editmode=true` edits the original **only with the owner cookie**. A query parameter on its own never grants writes to the host: an anonymous visitor with `?editmode=true` stays in draft mode.
+- `?editmode=true` edits the original **only with the owner cookie**, and only on a page that draft mode would otherwise claim. A query parameter on its own never grants writes to the host: an anonymous visitor with `?editmode=true` stays in draft mode.
 - The owner cookie alone is not enough either. The signed in owner gets the same draft as everyone else until they open the page with `?editmode=true`, and the owner chip (14.6) is their way there.
-- `viewonly`, a stale token, `window.clayEditMode` or a `savetoken` the host stamped on `<html>` all turn draft mode off. The first two leave it in view mode; the last two switch the load to edit mode against the host, which still decides who may write (4.1).
-- Draft mode needs all four of the plugin name in `plugins=`, a valid slot, an `http:` or `https:` page and an `api` rules tag. On `file:` it never applies, which is exactly why the download is a real file.
+- `viewonly`, a stale token, `window.clayEditMode` or a `savetoken` the host stamped on `<html>` all turn draft mode off. The first two leave it in view mode; the last two switch the load to edit mode against the host, which still decides who may write (4.1). On a `viewonly` document or one with a stale token, `?editmode=true` is not draft mode either: it is the same edit mode as before, saving to a host that refuses the write.
+- Draft mode needs all four of the plugin name in `plugins=`, a valid slot, an `http:` or `https:` page and an `api` rules tag. That tag also has to carry `data-rules-version="1"` and hold JSON that parses; a newer version or unreadable JSON leaves the page out of draft mode with one console warning naming the problem. On `file:` it never applies, which is exactly why the download is a real file.
 - `<html draftmode="true">` says which mode this load is in, beside `editmode` and `pageowner` (4.2), and is removed from every save.
 
 ### 14.4 What runs in draft mode
 
 `clay.isDraftMode` is true, and everything else follows from it:
 
-- **The plugins that talk to the host are dropped**, even when the page names them: `sync`, `live`, `upload`, `quickcrop`, `cms`, `people`, `wire`, `ai-edit`, `demo` and `source`. `clay.upload`, `clay.cms`, `clay.conflicts` and `clay.source` are absent, and code that guards them (`clay.upload?.(...)`) behaves as it does for a viewer.
+- **The plugins that talk to the host are dropped**, even when the page names them: `sync`, `live`, `upload`, `quickcrop`, `cms`, `people`, `wire`, `ai-edit`, `demo` and `source`. `clay.upload`, `clay.cms`, `clay.conflicts` and `clay.source` are absent, and code that guards them (`clay.upload?.(...)`) behaves as it does for a viewer. The `[refetch-on-save]` attribute is dropped too, since it would fetch its element from the host again after every save.
 - **The save lane is the browser.** `clay.save()` and autosave both run, `savestatus` moves as usual, and the save answers `msgType: "success"` with `msg: "Saved in this browser"`. A storage failure answers the 507 path with `code: "draft-storage"` and fires `clay:drafts-store-failed`; the next good write clears it.
 - **One request reaches the host**, and only when the visitor submits the signup form in the intro: `POST /_/newsletter/subscribe` with `{ email, tags, source, website }`. The plugin makes no other request to the host. The prompt's own stylesheet is a Google Fonts link.
+- **`clay.readData()` and `clay.writeData()` refuse.** Both reject with `code: "DataUnavailableInDraft"`: the saved file belongs to the owner, and this visitor's work is in their browser, so there is nothing for them to read or write there. A page that calls them in draft mode gets that refusal instead of a request (9.9).
 - **`clay.visitorDrafts`** is the plugin's whole surface:
 
 | Member | What it is |
@@ -1704,7 +1705,7 @@ The rung is where a free document lives, so the details matter:
 
 ### 14.5 Restoring and redrawing
 
-The restore runs while ClayJS boots, before `clay.ready` resolves, and applies the stored JSON to the live page with `applyData`. sapjs and any code that waits for `clay.ready` therefore see the restored values, not the authored ones, and sapjs re-derives on the mutations the restore makes, so a count or a total painted in markup is right on the first paint after it.
+The restore runs while ClayJS boots, before `clay.ready` resolves, and applies the stored JSON to the live page with `applyData`. sapjs and any code that waits for `clay.ready` therefore see the restored values, not the authored ones, and sapjs re-derives on the mutations the restore makes, so a count or a total painted in markup is right on the first paint after it. Load `clay.js` before `sap.js` for that: sapjs mounts when `clay.ready` resolves, and a page that mounts it first paints the authored values with no later mutation to correct them (8.12).
 
 Code that drew before `clay.ready` has two ways to hear about the restore: listen for `clay:drafts-restored` on `document`, or call `clay.visitorDrafts.onRestore(fn)`, which runs `fn` at once when the restore already happened. Either way the detail is `{ restored, hadDraft, parked }`.
 
@@ -1730,9 +1731,9 @@ When there is a release video, add it as the first element of the template, and 
 <video src="/_/uploads/assets/kanban/release.mp4" poster="/_/uploads/assets/kanban/release-poster.jpg" controls playsinline preload="metadata"></video>
 ```
 
-A returning visitor does not see the intro again: an earlier dismissal, or a draft, leaves a small **About this app** control at the top right that mounts it on demand. A deep link (a URL with a `#...`) skips the intro so a shared link opens where it points, and `?intro=1` forces it. The template's `signup-tag` attribute names the tag the signup carries; without it the tag is the slot name without its version (`app-reading-list`).
+A returning visitor does not see the intro again: an earlier dismissal, or a draft, leaves a small **About this app** control at the top right that mounts it on demand. Dismissing an intro the control opened puts the control back, so it is always one click away. A deep link (a URL with a `#...`) skips the intro so a shared link opens where it points, and `?intro=1` forces it. The template's `signup-tag` attribute names the tag the signup carries; without it the tag is the slot name without its version (`app-reading-list`).
 
-**The prompt** needs nothing from the app but its name: a small tab at the bottom right ("This app is free to keep") that opens into a card holding the download link, the signup form and "Don't show again". It hides while the intro is on screen and comes back when the intro leaves, opens itself once after the visitor has touched three fields, and stays away for that slot after "Don't show again". A storage failure opens it in its error state, and the next good save clears it.
+**The prompt** needs nothing from the app but its name: a small tab at the bottom right ("This app is free to keep") that opens into a card holding the download link, "Not now" and "Don't show again". The signup form is not here: it lives in the intro above. The prompt hides while the intro is on screen and comes back when the intro leaves, opens itself once after the visitor has touched three fields, and stays away for that slot after "Don't show again". A storage failure opens it in its error state, and the next good save clears it. In that error state the download link does not go to the host, whose download page would read the stored copy that just failed to be written: the plugin builds the file from the live page in the browser instead, named after the page file with `.htmlclay` at the end.
 
 **The download link** is `/_/download<path>?as=htmlclay`, with the page's path (`/_/download?as=htmlclay` for `/`) and `&src=<src>` when this slot has one. `clay.visitorDrafts.downloadUrl()` returns it. **`?src=` is first touch**: the first valid value the page sees for this slot is kept and rides into the download link and every signup. Valid values match `/^[a-z0-9][a-z0-9-]{0,39}$/`.
 

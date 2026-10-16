@@ -21,12 +21,12 @@ function setOwnerCookie() {
   document.cookie = "isAdminOfCurrentResource=true; path=/";
 }
 
-function setPage({ slot, keepStorage = false, head = "", template = "", ui = null, draft = null }) {
+function setPage({ slot, keepStorage = false, head = "", template = "", ui = null, draft = null, body = "" }) {
   const root = document.documentElement;
   for (const name of Array.from(root.attributes, (attribute) => attribute.name)) root.removeAttribute(name);
   if (slot) root.setAttribute("visitor-drafts", slot);
   document.head.innerHTML = `<script type="application/json" data-rules-name="api" data-rules-version="1">${RULES}</script>` + head;
-  document.body.innerHTML = '<h1 id="title">owner title</h1><input id="note" persist value="owner note">' + template;
+  document.body.innerHTML = '<h1 id="title">owner title</h1><input id="note" persist value="owner note">' + body + template;
   if (!keepStorage) localStorage.clear();
   if (ui) localStorage.setItem(keyFor(slot), JSON.stringify(ui));
   if (draft) localStorage.setItem(draftKeyFor(slot), JSON.stringify(draft));
@@ -47,6 +47,7 @@ async function bootPage({
   template = "",
   ui = null,
   draft = null,
+  body = "",
 } = {}) {
   jest.resetModules();
   delete window.clayEditMode;
@@ -54,7 +55,7 @@ async function bootPage({
   clearCookies();
   if (owner) setOwnerCookie();
   window.history.replaceState({}, "", url);
-  setPage({ slot, keepStorage, head, template, ui, draft });
+  setPage({ slot, keepStorage, head, template, ui, draft, body });
   window.clay = {};
   window.scrollTo = () => {};
   window.scrollBy = () => {};
@@ -94,6 +95,39 @@ function submitSignup() {
 
 function prompt() {
   return document.querySelector(".hcp");
+}
+
+function clickDownload() {
+  const event = new MouseEvent("click", { bubbles: true, cancelable: true });
+  prompt().querySelector("[data-hcp-link] span").dispatchEvent(event);
+  return event;
+}
+
+function withDownloadStubs(run) {
+  const blobs = [];
+  const downloads = [];
+  const realCreate = URL.createObjectURL;
+  const realRevoke = URL.revokeObjectURL;
+  const realClick = HTMLAnchorElement.prototype.click;
+  URL.createObjectURL = (blob) => { blobs.push(blob); return "blob:clay-test"; };
+  URL.revokeObjectURL = () => {};
+  HTMLAnchorElement.prototype.click = function () { downloads.push({ href: this.href, download: this.download }); };
+  try {
+    run();
+  } finally {
+    URL.createObjectURL = realCreate;
+    URL.revokeObjectURL = realRevoke;
+    HTMLAnchorElement.prototype.click = realClick;
+  }
+  return { blobs, downloads };
+}
+
+function readBlob(blob) {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.readAsText(blob);
+  });
 }
 
 function linkHref() {
@@ -171,6 +205,48 @@ test("a failed browser write puts the prompt in its error card, and dismiss only
 
   document.dispatchEvent(new CustomEvent("clay:drafts-saved", { detail: {} }));
   expect(aside.getAttribute("data-hcp-reason")).toBe("use");
+});
+
+test("the error card's download carries the live page, not the stale stored draft", async () => {
+  const { fetchMock } = await bootPage({ slot: "ui-error-download" });
+  const aside = prompt();
+  document.dispatchEvent(new CustomEvent("clay:drafts-store-failed", { detail: { error: new Error("full") } }));
+  expect(aside.getAttribute("data-hcp-reason")).toBe("error");
+
+  const note = document.getElementById("note");
+  note.value = "typed but never stored";
+  note.setAttribute("value", "typed but never stored");
+
+  let prevented = null;
+  const { blobs, downloads } = withDownloadStubs(() => { prevented = clickDownload().defaultPrevented; });
+
+  expect(prevented).toBe(true);
+  expect(downloads).toEqual([{ href: "blob:clay-test", download: "notes.htmlclay" }]);
+  expect(blobs).toHaveLength(1);
+  expect(blobs[0].type).toBe("text/html");
+  expect(await readBlob(blobs[0])).toContain("typed but never stored");
+  expect(document.querySelector("a[download]")).toBeNull();
+  expect(fetchMock).not.toHaveBeenCalled();
+});
+
+test("the error card names the download after the page, index.htmlclay at the root", async () => {
+  await bootPage({ slot: "ui-error-download-root", url: "/" });
+  document.dispatchEvent(new CustomEvent("clay:drafts-store-failed", { detail: { error: new Error("full") } }));
+
+  const { downloads } = withDownloadStubs(() => clickDownload());
+
+  expect(downloads).toEqual([{ href: "blob:clay-test", download: "index.htmlclay" }]);
+});
+
+test("outside the error state the download link is a plain link to the host", async () => {
+  await bootPage({ slot: "ui-link-plain" });
+  const href = linkHref();
+
+  const event = clickDownload();
+
+  expect(event.defaultPrevented).toBe(false);
+  expect(linkHref()).toBe(href);
+  expect(document.querySelector("a[download]")).toBeNull();
 });
 
 test("a template puts the intro at the top of the page, where a save never looks", async () => {
@@ -310,6 +386,43 @@ test("a returning visitor gets a small About this app control that reopens the i
   expect(about()).toBeNull();
   expect(intro()).not.toBeNull();
   expect(document.body.firstElementChild).toBe(intro());
+});
+
+test("a field outside the rules never dismisses the intro, and a rule field does", async () => {
+  await bootPage({
+    slot: "ui-intro-no-save",
+    template: INTRO,
+    body: '<input id="search" type="search" clay="no-save">',
+  });
+
+  typeInto(document.getElementById("search"), "que");
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  expect(intro()).not.toBeNull();
+  expect(JSON.parse(localStorage.getItem(keyFor("ui-intro-no-save"))).intro.done).toBeNull();
+
+  typeInto(document.getElementById("note"), "typed note");
+  expect(intro()).toBeNull();
+  expect(JSON.parse(localStorage.getItem(keyFor("ui-intro-no-save"))).intro.done).toBe("use");
+});
+
+test("an intro reopened from the About control brings the control back when it goes", async () => {
+  await bootPage({ slot: "ui-intro-about-return", template: INTRO, ui: { v: 1, intro: { done: "button" } } });
+  expect(about()).not.toBeNull();
+
+  about().click();
+  expect(about()).toBeNull();
+  expect(intro()).not.toBeNull();
+
+  intro().querySelector(".clay-intro__start").click();
+  expect(intro()).toBeNull();
+  expect(about()).not.toBeNull();
+
+  about().click();
+  expect(intro()).not.toBeNull();
+  typeInto(document.getElementById("note"), "typed note");
+  expect(intro()).toBeNull();
+  expect(about()).not.toBeNull();
 });
 
 test("the owner sees which lane they are in", async () => {

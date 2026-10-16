@@ -60,13 +60,14 @@ function mountAbout(opts) {
   button.textContent = COPY.about;
   button.addEventListener("click", () => {
     button.remove();
-    mount(opts);
+    mount({ ...opts, fromAbout: true });
   });
   document.body.appendChild(button);
   return button;
 }
 
-function mount({ memory, template, appName, link, tag, source, prompt, snapshot }) {
+function mount(opts) {
+  const { memory, template, appName, link, tag, source, prompt, snapshot, fromAbout } = opts;
   stylesOnce();
 
   const section = document.createElement("section");
@@ -164,15 +165,30 @@ function mount({ memory, template, appName, link, tag, source, prompt, snapshot 
     if (reason === "button") {
       window.scrollTo({ top: 0 });
       focusApp();
-      return;
+    } else if (anchor && anchor.getBoundingClientRect) {
+      window.scrollBy(0, anchor.getBoundingClientRect().top - before);
     }
-    if (anchor && anchor.getBoundingClientRect) window.scrollBy(0, anchor.getBoundingClientRect().top - before);
+    if (fromAbout) mountAbout(opts);
+  }
+
+  function unchanged() {
+    return !snapshot || snapshot() === baseline;
   }
 
   function onUse(event) {
     if (section.contains(event.target)) return;
-    if (event.type === "clay:dirty" && (!snapshot || snapshot() === baseline)) return;
-    dismiss("use", event.target);
+    if (event.type === "clay:dirty") {
+      if (!unchanged()) dismiss("use", event.target);
+      return;
+    }
+    if (!unchanged()) {
+      dismiss("use", event.target);
+      return;
+    }
+    const target = event.target;
+    setTimeout(() => {
+      if (!gone && !unchanged()) dismiss("use", target);
+    }, 0);
   }
 
   form.addEventListener("submit", (event) => {
