@@ -55,6 +55,7 @@ export const PLUGIN_PATHS = {
   // verify is sent as the ordinary full serialization, so the floor is the behaviour
   // it replaces. `exclude=source` turns it off.
   source:    { path: "plugins/source.js",          editOnly: true,  default: true },
+  "visitor-drafts": { path: "plugins/visitor-drafts.js", editOnly: false, default: false },
 };
 
 // One literal import per module the loader can ask for, so a bundler can see the
@@ -68,6 +69,7 @@ export const PLUGIN_PATHS = {
 // PLUGIN_PATHS has an entry here and that each entry imports the file it names.
 export const MODULES = {
   "core/is-edit-mode.js":       () => import("./core/is-edit-mode.js"),
+  "core/draft-mode.js": () => import("./core/draft-mode.js"),
   "lib/region-policy.js":       () => import("./lib/region-policy.js"),
   "lib/mutation.js":            () => import("./lib/mutation.js"),
   "core/edit-mode.js":          () => import("./core/edit-mode.js"),
@@ -100,12 +102,13 @@ export const MODULES = {
   "plugins/wire.js":            () => import("./plugins/wire.js"),
   "plugins/ai-edit.js":         () => import("./plugins/ai-edit.js"),
   "plugins/demo.js":            () => import("./plugins/demo.js"),
+  "plugins/visitor-drafts.js": () => import("./plugins/visitor-drafts.js"),
   "plugins/source.js":          () => import("./plugins/source.js"),
 };
 
 // `source` is last on purpose: its install captures a save clone, so it wants every
 // plugin that registers a document transform to have registered it first.
-const PLUGIN_ORDER = ["richclay", "indicator", "sortable", "undo", "quickcrop", "upload", "people", "cms", "sync", "live", "wire", "ai-edit", "demo", "source"];
+const PLUGIN_ORDER = ["visitor-drafts", "richclay", "indicator", "sortable", "undo", "quickcrop", "upload", "people", "cms", "sync", "live", "wire", "ai-edit", "demo", "source"];
 
 // A plugin that cannot do its whole job alone. hypercms reads the cropper through
 // a capability lookup (`clay.quickcrop`) and silently uploads the raw file when it
@@ -143,7 +146,11 @@ function parseCsv(params, key, enabled, apply) {
   }
 }
 
-export function resolveModules(params, isEditMode) {
+// Each of these talks to the host or writes outside the visitor's own record, so a
+// page that keeps its edits in this browser cannot carry them.
+const DRAFT_DROPS = ["sync", "live", "upload", "quickcrop", "cms", "people", "wire", "ai-edit", "demo", "source"];
+
+export function resolveModules(params, isEditMode, { isDraftMode = false } = {}) {
   const core = [...CORE_WAVES.always];
   if (isEditMode) core.push(...CORE_WAVES.editOnly);
 
@@ -166,6 +173,10 @@ export function resolveModules(params, isEditMode) {
     for (const implied of IMPLIES[name] || []) enabled.add(implied);
   }
   for (const name of excluded) enabled.delete(name);
+  if (isDraftMode) {
+    for (const name of DRAFT_DROPS) enabled.delete(name);
+    enabled.add("visitor-drafts");
+  }
 
   const plugins = [];
   for (const name of PLUGIN_ORDER) {

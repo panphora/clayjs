@@ -7,7 +7,8 @@
  * For full save system with state management, use save.js instead.
  */
 
-import { isEditMode } from "./is-edit-mode.js";
+import { isEditMode, isDraftMode } from "./is-edit-mode.js";
+import { draftTransport } from "./draft-mode.js";
 import { consumeUserDriven, consumeExplicitSave, markUserDriven } from "../lib/user-gesture.js";
 import { saveToken } from "./host-attrs.js";
 import { lastSeenEtag, conditionalSaves, recordEtag } from "./etag.js";
@@ -379,6 +380,24 @@ function resolveSaveUrl(path) {
   return new URL(path, origin).href;
 }
 
+function draftResponse(status, body) {
+  const text = JSON.stringify(body);
+  return { ok: status >= 200 && status < 300, status, statusText: status === 200 ? "OK" : "Insufficient Storage", text: () => Promise.resolve(text) };
+}
+
+function sendToDraftStore(content) {
+  const send = draftTransport();
+  if (!send) return Promise.resolve(draftResponse(503, { msg: "Saving in this browser is not ready yet", msgType: "error", code: "draft-not-ready" }));
+  return Promise.resolve().then(() => {
+    try {
+      send(content);
+      return draftResponse(200, { msg: "Saved in this browser", msgType: "success" });
+    } catch (error) {
+      return draftResponse(507, { msg: "Couldn't save in this browser. Storage is full or turned off.", msgType: "error", code: error.code || "draft-storage" });
+    }
+  });
+}
+
 /**
  * Send one save and decode one response.
  *
@@ -414,7 +433,7 @@ function sendOnce(content, saveId, etag) {
   const { url, options } = buildSaveRequest(content, userDriven, controller.signal, saveId, etag, keepalive);
   rememberSentId(saveId);
 
-  return fetch(url, options)
+  return (isDraftMode ? sendToDraftStore(content) : fetch(url, options))
     .then(res => res.text().then(text => {
       let data = {};
       if (text) {
@@ -689,6 +708,7 @@ export function replacePageWith(url, callback = () => {}) {
 
     if (!isEditMode) return done(skippedResult('Not in edit mode'));
     if (saveInProgress) return done(skippedResult('Save already in progress'));
+    if (isDraftMode) return done(false);
 
     // Resolved against the document's real location, not a <base href> the page
     // may have set.

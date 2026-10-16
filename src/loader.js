@@ -14,6 +14,8 @@ function domReady() {
 // no clayjs at all.
 export async function boot(base, params, readyResolve) {
   initTheme();
+  const draftMode = await MODULES["core/draft-mode.js"]();
+  draftMode.noteBootParams(params);
 
   await domReady();                                    // Mutation observes document.body
                                                        // unconditionally, and a <head> placement
@@ -30,14 +32,16 @@ export async function boot(base, params, readyResolve) {
 
   const regionPolicy = await MODULES["lib/region-policy.js"]();
 
-  const plan = resolveModules(params, isEditMode);
+  const { isDraftMode } = editMode;
+
+  const plan = resolveModules(params, isEditMode, { isDraftMode });
   const loaded = {};
 
   for (const path of plan.core) {
     loaded[path] = await MODULES[path](); // sequential: order is load-bearing
   }
 
-  assembleCore(loaded, { isEditMode, isOwner, siteVisibility }, regionPolicy); // window.clay MUST be assembled
+  assembleCore(loaded, { isDraftMode, isEditMode, isOwner, siteVisibility }, regionPolicy); // window.clay MUST be assembled
                                                                // before any plugin import
 
   for (const path of plan.plugins) {
@@ -69,7 +73,7 @@ export async function boot(base, params, readyResolve) {
   document.dispatchEvent(new CustomEvent("clay:ready", { detail: { clay: window.clay } }));
 }
 
-function assembleCore(loaded, { isEditMode, isOwner, siteVisibility }, regionPolicy) {
+function assembleCore(loaded, { isDraftMode, isEditMode, isOwner, siteVisibility }, regionPolicy) {
   const clay = window.clay;
 
   const mutation = loaded["lib/mutation.js"];
@@ -77,6 +81,7 @@ function assembleCore(loaded, { isEditMode, isOwner, siteVisibility }, regionPol
 
   Object.assign(clay, {
     toggleEditMode: editModeMod.toggleEditMode,
+    isDraftMode,
     isEditMode,
     isOwner,
     siteVisibility,
@@ -148,6 +153,8 @@ function attachPluginMember(path, mod, loaded) {
     clay.quickcrop = mod.quickcrop || mod.default;
   } else if (path === "plugins/source.js") {
     clay.source = mod.source || mod.default;
+  } else if (path === "plugins/visitor-drafts.js") {
+    clay.visitorDrafts = mod.visitorDrafts;
   }
 }
 

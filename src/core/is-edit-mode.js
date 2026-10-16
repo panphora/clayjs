@@ -1,6 +1,7 @@
 import cookie from "../lib/cookie.js";
 import query from "../lib/query.js";
 import { hasSaveToken, servedStaleToken, servedSiteVisibility } from "./host-attrs.js";
+import { draftEligible } from "./draft-mode.js";
 
 // Edit-mode precedence: an explicit ?editmode=true|false URL param wins, then an
 // authored `viewonly` attribute on <html> (a tool page that must never save its
@@ -11,7 +12,9 @@ import { hasSaveToken, servedStaleToken, servedSiteVisibility } from "./host-att
 // a save token the host put on the root, then the isAdminOfCurrentResource cookie. The
 // global is for standalone uses (demos, htmlclay, any self-saving file) that are
 // always editable and have no owner cookie; setting it before clayjs loads turns
-// on the edit-only modules.
+// on the edit-only modules. On a page that opts into visitor drafts, draft mode
+// comes before ?editmode=true unless the owner cookie is present, and before the
+// owner cookie otherwise.
 //
 // The token sits above the cookie because it is the stronger claim and often the
 // only one visible: the host minted it for this response and nothing else, while
@@ -37,19 +40,34 @@ if (typeof window !== "undefined") {
 const isViewOnlyDocument =
   typeof document !== "undefined" && document.documentElement.hasAttribute("viewonly");
 
-const isEditMode = query.editmode
-  ? query.editmode === "true" // takes precedence over viewonly, the global, token and cookie
-  : isViewOnlyDocument || servedStaleToken()
-    ? false
-    : forcedEditMode != null
-      ? forcedEditMode
-      : hasSaveToken() || Boolean(cookie.get("isAdminOfCurrentResource"));
+const draftCandidate = typeof document !== "undefined" && draftEligible();
+const ownerCookie = Boolean(cookie.get("isAdminOfCurrentResource"));
 
-const isOwner = Boolean(cookie.get("isAdminOfCurrentResource"));
+const isDraftMode =
+  draftCandidate &&
+  query.editmode !== "false" &&
+  !(query.editmode === "true" && ownerCookie) &&
+  !isViewOnlyDocument &&
+  !servedStaleToken() &&
+  forcedEditMode == null &&
+  !hasSaveToken();
+
+const isEditMode = isDraftMode
+  ? true
+  : query.editmode
+    ? query.editmode === "true" // takes precedence over viewonly, the global, token and cookie
+    : isViewOnlyDocument || servedStaleToken()
+      ? false
+      : forcedEditMode != null
+        ? forcedEditMode
+        : hasSaveToken() || ownerCookie;
+
+const isOwner = ownerCookie;
 
 const siteVisibility = servedSiteVisibility;
 
 export {
+  isDraftMode,
   isEditMode,
   isOwner,
   siteVisibility

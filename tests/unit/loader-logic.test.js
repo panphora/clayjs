@@ -187,6 +187,21 @@ describe("resolveModules", () => {
   });
 });
 
+test("draft mode puts visitor-drafts first and drops every host-facing plugin", () => {
+  const { plugins } = resolveModules(
+    params({ plugins: "sync,upload,sortable,undo,visitor-drafts" }),
+    true,
+    { isDraftMode: true }
+  );
+  expect(plugins[0]).toBe("plugins/visitor-drafts.js");
+  expect(plugins).toContain("plugins/sortable.js");
+  expect(plugins).toContain("plugins/undo.js");
+  expect(plugins).toContain("plugins/richclay.js");
+  expect(plugins).not.toContain("sync/live-sync.js");
+  expect(plugins).not.toContain("plugins/upload.js");
+  expect(plugins).not.toContain("plugins/source.js");
+});
+
 test("live is opt-in, loads in view mode, and brings nothing with it", () => {
   const off = resolveModules(new URLSearchParams(""), true);
   expect(off.plugins).not.toContain("plugins/live.js");

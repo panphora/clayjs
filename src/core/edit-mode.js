@@ -1,13 +1,13 @@
 // Edit mode system - combines the editmode toggle with page type setting.
 // Loads in BOTH view and edit mode: toggleEditMode must exist in view mode
 // (it's the way IN), and setPageTypeOnPageLoad marks <html> in either mode.
-import { isEditMode, isOwner } from "./is-edit-mode.js";
+import { isDraftMode, isEditMode, isOwner } from "./is-edit-mode.js";
 import onDomReady from "../lib/dom-ready.js";
 import { addDocumentTransform } from "./snapshot.js";
 
 export function toggleEditMode() {
   const url = new URL(window.location.href);
-  const newMode = isEditMode ? "false" : "true";
+  const newMode = isEditMode && !isDraftMode ? "false" : "true";
   url.searchParams.set('editmode', newMode);
   window.location.href = url.toString();
 }
@@ -23,6 +23,11 @@ export function setPageTypeOnPageLoad () {
   onDomReady(() => {
     document.documentElement.setAttribute("editmode", isEditMode ? "true" : "false");
     document.documentElement.setAttribute("pageowner", isOwner ? "true" : "false");
+    if (isDraftMode) {
+      document.documentElement.setAttribute("draftmode", "true");
+    } else {
+      document.documentElement.removeAttribute("draftmode");
+    }
   });
 }
 

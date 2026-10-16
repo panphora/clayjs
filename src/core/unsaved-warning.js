@@ -15,7 +15,8 @@
  * Requires the 'save-system' module (automatically included as dependency).
  */
 
-import { isEditMode } from "./is-edit-mode.js";
+import { isEditMode, isDraftMode } from "./is-edit-mode.js";
+import { draftStoreFailed } from "./draft-mode.js";
 import { captureForDirtyCheck } from "./snapshot.js";
 import { getLastSavedDirty } from "./save.js";
 import { logUnloadDiffSync, preloadIfEnabled } from "../lib/autosave-debug.js";
@@ -52,6 +53,7 @@ export function hasUnsavedChanges() {
   // Work outside the DOM first: it needs no capture, and a capture that throws
   // must not hide it. The demo plugin does not save it either, so it warns there too.
   if (hasUnsavedState()) return true;
+  if (isDraftMode) return draftStoreFailed();
 
   // The demo plugin saves the page's bytes into this browser's own storage, so
   // leaving loses none of them.

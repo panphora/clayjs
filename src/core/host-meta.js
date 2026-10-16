@@ -14,6 +14,7 @@
  */
 
 import { saveToken } from "./host-attrs.js";
+import { isDraftMode } from "./is-edit-mode.js";
 
 const META_PATH = "/_/meta";
 const META_TIMEOUT_MS = 6000;
@@ -67,6 +68,7 @@ let refreshing = null;
  * @returns {Promise<{spec: ?number, extensions: string[], document: ?Object}>}
  */
 export function hostMeta({ fresh = false } = {}) {
+  if (isDraftMode) return Promise.resolve(bareHost());
   if (!fresh) {
     if (!inFlight) inFlight = fetchMeta().catch(bareHost);
     return inFlight;

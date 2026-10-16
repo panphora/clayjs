@@ -11,7 +11,7 @@
 
 import throttle from "../lib/throttle.js";
 import Mutation from "../lib/mutation.js";
-import { isEditMode, isOwner } from "./is-edit-mode.js";
+import { isDraftMode, isEditMode, isOwner } from "./is-edit-mode.js";
 import {
   saveHtml,
   getPageContents,
@@ -742,7 +742,7 @@ export async function saveOverwritingConflict(callback = () => {}) {
  * @param {string} url - URL to fetch from
  */
 export function replacePageWith(url) {
-  if (!isEditMode) {
+  if (!isEditMode || isDraftMode) {
     return;
   }
 

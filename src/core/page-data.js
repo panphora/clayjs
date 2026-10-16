@@ -132,6 +132,12 @@ async function defaultWriteModules() {
   return { ...save, ...saveCore, ...etag, ...warning, ...editMode };
 }
 
+async function draftRefusal() {
+  const { isDraftMode } = await import("./is-edit-mode.js");
+  if (!isDraftMode) return null;
+  return refusal("DataUnavailableInDraft", "Page data is kept in this browser for this visitor.");
+}
+
 export function createPageDataApi({
   supports = hostSupports,
   token = saveToken,
@@ -151,6 +157,9 @@ export function createPageDataApi({
   }
 
   async function readData(rules) {
+    const draft = await draftRefusal();
+    if (draft) throw draft;
+
     if (!(await supports(DATA_READ))) {
       throw refusal("DataReadUnsupported", "This host does not support reading page data.");
     }
@@ -201,6 +210,9 @@ export function createPageDataApi({
   }
 
   async function writeData(values, { rules, ifMatch } = {}) {
+    const draft = await draftRefusal();
+    if (draft) throw draft;
+
     if (!(await supports(DATA_WRITE))) {
       throw refusal("DataWriteUnsupported", "This host does not support writing page data.");
     }
