@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.12.0] - 2026-10-16
+
+### Added
+- `visitor-drafts` plugin: a visitor who is not the owner gets a private draft kept in their own browser, with an intro, a download prompt and an owner chip
+- Guide section 14 on free documents, with the reading-list example
+
+### Changed
+- Vendors hyper-html-api 0.11.1: attribute presence reads, round-trip checks on writes, seed placement for empty lists
+
+
+
 ## [1.11.3] - 2026-10-15
 
 ### Changed
