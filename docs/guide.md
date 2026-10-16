@@ -233,12 +233,14 @@ The test suite checks this file opens without becoming dirty, saves the record a
 | `wire` | off | yes | `clay.wire`, the channel to a local agent process |
 | `ai-edit` | off | no | select text, ask an agent to rewrite it; implies `wire` |
 | `demo` | off | yes | fakes saving into `localStorage` for public demos |
+| `visitor-drafts` | off | yes | the draft store, `clay.visitorDrafts`, the download prompt, the intro area and the owner chip on a page that opted in (14) |
 
 - Edit-only plugins never load in view mode, even when named. Their members are absent there: test `clay.isEditMode` or `'save' in clay`, never the presence of `clay.RichClay` alone.
 - `exclude` wins over implications. `exclude=wire` also drops `ai-edit`.
 - Load order is fixed regardless of how you list them.
 - `exclude=richclay` when the app has no rich text. `exclude=source` saves one request and about 48 KB, at the cost of saves reprinting the whole document instead of keeping hand formatting.
 - Nothing implies `undo`, on purpose: it intercepts Cmd+Z in every text field on the page (8.3).
+- `visitor-drafts` is inert outside draft mode: named on a page with no `visitor-drafts` slot or no `api` rules tag, it loads, warns in the console and draws nothing. Section 14 covers the opt in.
 
 **A good default for apps:** `?plugins=sync,sortable,undo,indicator`, plus `upload` for images or attachments, plus `exclude=richclay` when there is no rich text.
 
@@ -303,7 +305,8 @@ Your stylesheet still cannot reach these elements: every declaration is inline a
 2. `<html viewonly>` in the file means view. So does a response carrying only the pre-1.9.0 token `htmlclaytoken` (an out-of-date HTML Clay, which also shows an update bar).
 3. `window.clayEditMode`, set by a script before boot.
 4. A `savetoken` attribute the host put on `<html>` (HTML Clay 1.9.0 and newer).
-5. The `isAdminOfCurrentResource` cookie (hyperclay.com, Hyperclay Local).
+5. **Draft mode**, on a page that opted in (14): the visitor gets the editing UI and their work stays in their own browser. `?editmode=false`, a `viewonly` attribute, a stale token, `window.clayEditMode` or a save token all turn it off, and only the owner cookie plus `?editmode=true` edits the original (14.3).
+6. The `isAdminOfCurrentResource` cookie (hyperclay.com, Hyperclay Local).
 
 Edit mode only asks for the editing UI. On a host that has not authorized this person every save is refused (`savestatus="error"`). The host decides who writes.
 
@@ -1624,3 +1627,200 @@ The saved file is the data. Everyone who can download it can read everything in 
 | Saves slow down past about 1,000 records and stall past 3,000 | 9.11 |
 | A version restore on hyperclay.com does not reach open editors | 12.1 |
 | Hidden is not private | 12.3 |
+| Typed values vanish from a visitor's draft: the control has no `persist` | 14.2 |
+---
+
+## 14. Free documents for visitors
+
+A **free document** is a published app anyone can use and keep. The visitor gets the same editing UI the owner gets, their work is kept in their own browser, and the download hands them a file with that work in it. Nothing a visitor does reaches the host.
+
+### 14.1 What a visitor gets
+
+On a page that opts in (14.2), a visitor who is not the owner is in **draft mode**. Every edit-only module loads, so `editable`, `persist`, undo, sortable and the rest behave as they do for the owner, and the autosave pipeline still runs. The save lane is swapped: instead of sending the document to the host, ClayJS extracts the page's `api` JSON out of the bytes a real save would write and stores `{ "v": 1, "savedAt": "2026-10-15T00:00:00.000Z", "data": { ... } }` under `localStorage["clay:visitor-drafts:<slot>"]`. The next load applies that JSON over the file the host served, so an owner's later fix reaches a returning visitor while the visitor's own work stays. The host is never told: no save, no sync, no upload, and no `/_/meta` discovery.
+
+The owner is a visitor here too. Signed in, they get the same private draft unless the URL carries `?editmode=true`, which edits the original file and shows every visitor the change. A file opened in HTML Clay, or from `file:`, always edits the file itself: draft mode needs a page served over `http:` or `https:` (14.3).
+
+### 14.2 The contract
+
+A page that wants draft mode needs all of this. The example in 14.8 carries every item, and its test proves the round trip:
+
+1. An `api` rules tag naming every saved field, with a `cms-template` seed row for every list the rules describe. Hide the seed in your own CSS (`[cms-template] { display: none !important }`), never with `hidden`, which the CMS reads as data (8.13).
+2. `<html visitor-drafts="<site-stem>-v1" autosave>`. The value is the slot: letters, digits, dot, underscore and hyphen, up to 100 characters. It names this app's corner of `localStorage`, so two apps on one origin never mix.
+3. `plugins=visitor-drafts` on the loader tag, plus whatever else the app needs.
+4. `persist` on every control the rules name. A typed value without `persist` is lost at save (5.3), and in draft mode a save is the visitor's own copy.
+5. `data-id` on every record and `data-id=""` on every blueprint. New rows mint their own (`trigger-add` does it, 8.12).
+6. `<meta name="application-name" content="...">`. The prompt, the intro and the download name the app from it, falling back to the title before the first `:` or `|`.
+7. A feedback link the visitor can use: a `mailto:` address in the page, not in the plugin.
+8. Optional: a `<template visitor-intro>` (14.6). No template, no intro; the prompt still shows.
+9. A round trip test in your own repo: write a draft, load the page again with that storage, and check that the values and the computed counts come back.
+
+Bump the slot (`-v2`) only when an old draft cannot fit the new rules. A draft that no longer fits is parked, not thrown away (14.5).
+
+### 14.3 The mode ladder
+
+4.1's list decides the mode. Draft mode is a rung in it, between a save token and the owner cookie:
+
+1. `?editmode=true` or `?editmode=false` in the URL. Only the literal `true` means edit.
+2. `<html viewonly>` in the file, or a response carrying only the pre-1.9.0 token `htmlclaytoken`.
+3. `window.clayEditMode`, set by a script before boot.
+4. A `savetoken` attribute the host put on `<html>`.
+5. **Draft mode**, on a page that opted in (14.2).
+6. The `isAdminOfCurrentResource` cookie (hyperclay.com, Hyperclay Local).
+
+The rung is where a free document lives, so the details matter:
+
+- `?editmode=false` is view mode, and nothing below it changes that.
+- `?editmode=true` edits the original **only with the owner cookie**. A query parameter on its own never grants writes to the host: an anonymous visitor with `?editmode=true` stays in draft mode.
+- The owner cookie alone is not enough either. The signed in owner gets the same draft as everyone else until they open the page with `?editmode=true`, and the owner chip (14.6) is their way there.
+- `viewonly`, a stale token, `window.clayEditMode` or a `savetoken` the host stamped on `<html>` all turn draft mode off. The first two leave it in view mode; the last two switch the load to edit mode against the host, which still decides who may write (4.1).
+- Draft mode needs all four of the plugin name in `plugins=`, a valid slot, an `http:` or `https:` page and an `api` rules tag. On `file:` it never applies, which is exactly why the download is a real file.
+- `<html draftmode="true">` says which mode this load is in, beside `editmode` and `pageowner` (4.2), and is removed from every save.
+
+### 14.4 What runs in draft mode
+
+`clay.isDraftMode` is true, and everything else follows from it:
+
+- **The plugins that talk to the host are dropped**, even when the page names them: `sync`, `live`, `upload`, `quickcrop`, `cms`, `people`, `wire`, `ai-edit`, `demo` and `source`. `clay.upload`, `clay.cms`, `clay.conflicts` and `clay.source` are absent, and code that guards them (`clay.upload?.(...)`) behaves as it does for a viewer.
+- **The save lane is the browser.** `clay.save()` and autosave both run, `savestatus` moves as usual, and the save answers `msgType: "success"` with `msg: "Saved in this browser"`. A storage failure answers the 507 path with `code: "draft-storage"` and fires `clay:drafts-store-failed`; the next good write clears it.
+- **One request reaches the host**, and only when the visitor submits the signup form in the intro: `POST /_/newsletter/subscribe` with `{ email, tags, source, website }`. The plugin makes no other request to the host. The prompt's own stylesheet is a Google Fonts link.
+- **`clay.visitorDrafts`** is the plugin's whole surface:
+
+| Member | What it is |
+|---|---|
+| `active` | `true` when the plugin found a slot and the rules tag, `false` otherwise |
+| `slot` | the slot from `<html visitor-drafts="...">` |
+| `key` | the `localStorage` key, `clay:visitor-drafts:<slot>` |
+| `hasDraft()` | is there a stored draft for this slot |
+| `restored()` | `{ restored, hadDraft, parked }` for this load, or `null` when the plugin is not active |
+| `saveNow()` | write the page to the slot now; `true` when it landed, `false` when it did not |
+| `reset()` | delete this slot and reload the page; nothing outside draft mode |
+| `onRestore(fn)` | call `fn(detail)` at once when the restore already ran, otherwise on `clay:drafts-restored` |
+| `editOriginal()` | navigate to this page with `?editmode=true` |
+| `backToDraft()` | navigate back with `editmode` removed |
+| `downloadUrl()` | the download link the prompt is using, with `src` |
+| `source` | the `?src=` this slot remembers, or `null` (14.6) |
+
+- **Three events** on `document`: `clay:drafts-restored` with `{ restored, hadDraft, parked }`, `clay:drafts-saved` with `{ data }`, and `clay:drafts-store-failed` with `{ error }`.
+
+### 14.5 Restoring and redrawing
+
+The restore runs while ClayJS boots, before `clay.ready` resolves, and applies the stored JSON to the live page with `applyData`. sapjs and any code that waits for `clay.ready` therefore see the restored values, not the authored ones, and sapjs re-derives on the mutations the restore makes, so a count or a total painted in markup is right on the first paint after it.
+
+Code that drew before `clay.ready` has two ways to hear about the restore: listen for `clay:drafts-restored` on `document`, or call `clay.visitorDrafts.onRestore(fn)`, which runs `fn` at once when the restore already happened. Either way the detail is `{ restored, hadDraft, parked }`.
+
+A draft that no longer fits the page is never overwritten. When the stored JSON is not `{ v, data }` (garbage, a bare array, a missing `data`), the raw value is moved to `localStorage["clay:visitor-drafts:<slot>:unreadable:<ISO timestamp>"]`, the slot is cleared, and the page loads as authored with `parked: true` in the detail. When the write is refused only for keys the rules do not know, those keys are dropped and the rest is applied, so adding a field to the rules never costs a visitor their work.
+
+### 14.6 The download prompt and the intro area
+
+Both are runtime chrome: `clay="editor-ui"` and `sap-ignore`, built by the plugin on every load. Neither is in the file, neither is saved or synced, and neither is read by sapjs.
+
+Both remember themselves per slot in `localStorage["clay:visitor-drafts:<slot>:ui"]`, as `{ "v": 1, "prompt": { "shown": ..., "dismissed": ..., "uses": ..., "downloaded": ... }, "intro": { "done": null | "button" | "use" }, "src": ... }`. Clearing that key shows the intro and the prompt again.
+
+**The intro** is authored per app as a `<template visitor-intro>`. The plugin clones it into a section at the top of the page flow, at least one screen tall (`min-height: 100svh`), before the app's own content, and never as an overlay. Pages that lock scrolling (`body { overflow: hidden }`) scroll while it is mounted. It leaves when the visitor presses its start button, or on the first edit that changes the page's `api` data: typing in a field, or any change that alters what the rules extract. Focusing or scrolling never dismisses it, and the field the visitor is typing in does not jump when it goes.
+
+```html
+<template visitor-intro>
+  <p>One paragraph on what the app does and who it is for.</p>
+</template>
+```
+
+When there is a release video, add it as the first element of the template, and no `<video>` before then:
+
+```html
+<video src="/_/uploads/assets/kanban/release.mp4" poster="/_/uploads/assets/kanban/release-poster.jpg" controls playsinline preload="metadata"></video>
+```
+
+A returning visitor does not see the intro again: an earlier dismissal, or a draft, leaves a small **About this app** control at the top right that mounts it on demand. A deep link (a URL with a `#...`) skips the intro so a shared link opens where it points, and `?intro=1` forces it. The template's `signup-tag` attribute names the tag the signup carries; without it the tag is the slot name without its version (`app-reading-list`).
+
+**The prompt** needs nothing from the app but its name: a small tab at the bottom right ("This app is free to keep") that opens into a card holding the download link, the signup form and "Don't show again". It hides while the intro is on screen and comes back when the intro leaves, opens itself once after the visitor has touched three fields, and stays away for that slot after "Don't show again". A storage failure opens it in its error state, and the next good save clears it.
+
+**The download link** is `/_/download<path>?as=htmlclay`, with the page's path (`/_/download?as=htmlclay` for `/`) and `&src=<src>` when this slot has one. `clay.visitorDrafts.downloadUrl()` returns it. **`?src=` is first touch**: the first valid value the page sees for this slot is kept and rides into the download link and every signup. Valid values match `/^[a-z0-9][a-z0-9-]{0,39}$/`.
+
+**The owner chip** shows only to the signed in owner, at the bottom left: it says whether this load is their private draft ("Edit the original") or the original ("Back to my draft") and switches with `clay.visitorDrafts.editOriginal()` and `backToDraft()`.
+
+### 14.7 Migrating an app's own storage
+
+**Not supported yet:** the plugin reads no migration hook, so an app that kept its earlier data under its own `localStorage` key has to move those values into the page from its own code, on the first load after the switch.
+
+### 14.8 A complete example
+
+[`examples/free-reading-list.html`](https://clayjs.com/examples/free-reading-list.html). Plugins `visitor-drafts,indicator&exclude=richclay`, satellites `clay-options` and `sap.js`. A reading list: a title, an author and a status select per book, one scalar goal for the year, and sapjs counting the books that are read. It is the shortest file that carries every item of the contract, and `tests/unit/guide-examples/free-document.test.js` runs it end to end: edit a title, add a book, check the slot, then load the file again with that storage and check the books and the counts come back. The record is authored in the saved form, so sapjs logs its harmless W03 warning for each `viewmode:` attribute (8.12). The `reading` option of a status select carries no `selected`: it is the first option, which is the default, and the row that is `read` marks it.
+
+```html
+<!DOCTYPE html>
+<html lang="en" visitor-drafts="reading-list-v1" autosave>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="application-name" content="Reading list">
+<title>Reading list</title>
+<script type="application/json" data-rules-name="api" data-rules-version="1">
+{
+  "goal": "#goal@value",
+  "books": ["#books > li[item]:not([cms-template])", {
+    "id": "@data-id",
+    "title": ".title",
+    "author": ".author",
+    "status": "select@value"
+  }]
+}
+</script>
+<style>
+  html:not([editmode="true"]) [show-when\:editmode="true"] { display: none }
+  [cms-template] { display: none !important }
+  :root { color-scheme: light dark; --bg: #f3f0e8; --ink: #26241f; --muted: #706b61; --line: #dbd5c8; --accent: #3d6f72 }
+  @media (prefers-color-scheme: dark) { :root { --bg: #1c1e21; --ink: #e9e5dd; --muted: #a39e94; --line: #3b4046; --accent: #82b6b8 } }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.5 system-ui, sans-serif }
+  main { max-width: 640px; margin: 0 auto; padding: 32px 20px 64px }
+  h1 { margin: 0 0 8px; font-size: 26px }
+  .count { color: var(--muted) }
+  .count output { font-variant-numeric: tabular-nums; color: var(--ink) }
+  #books { list-style: none; padding: 0; margin: 20px 0 8px }
+  #books > li { display: flex; gap: 8px; align-items: baseline; padding: 6px 0; border-bottom: 1px solid var(--line) }
+  #books .title { flex: 1 1 auto; font-weight: 500 }
+  #books .author { color: var(--muted); font-size: 14px }
+  button { font: inherit; color: inherit; background: none; border: 1px solid var(--line); border-radius: 6px; padding: 2px 10px; cursor: pointer }
+  input[type="number"] { font: inherit; color: inherit; background: transparent; border: 1px solid var(--line); border-radius: 4px; padding: 2px 6px; width: 5em; text-align: right }
+  select { font: inherit; color: inherit; background: transparent; border: 1px solid var(--line); border-radius: 4px; padding: 2px 4px }
+  .feedback { margin-top: 28px; font-size: 14px; color: var(--muted) }
+  [contenteditable]:focus { outline: 2px solid var(--accent); border-radius: 3px }
+</style>
+</head>
+<body>
+<main id="app" sap>
+  <h1 editmode:contenteditable inert-contenteditable="plaintext-only">Reading list</h1>
+
+  <p class="count">Books read: <output clay="no-dirty" calc:read="state.books.filter(b => b.status === 'read').length" text="state.read">1</output> of <output clay="no-dirty" calc:total="state.books.length" text="state.total">2</output></p>
+
+  <p><label for="goal">Books to read this year</label> <input id="goal" type="number" min="0" step="1" bind="goal" persist viewmode:readonly readonly value="24"></p>
+
+  <ul id="books" items="books">
+    <li item cms-template data-id=""><span class="title"></span><span class="author"></span><select bind="status" persist><option>reading</option><option>read</option></select></li>
+    <li item data-id="b-mmm"><span class="title" editmode:contenteditable inert-contenteditable="plaintext-only">The Mythical Man-Month</span> <span class="author" editmode:contenteditable inert-contenteditable="plaintext-only">Fred Brooks</span> <select bind="status" persist viewmode:disabled disabled><option>reading</option><option selected>read</option></select> <button type="button" show-when:editmode="true" trigger-remove aria-label="Remove book">×</button></li>
+    <li item data-id="b-sicp"><span class="title" editmode:contenteditable inert-contenteditable="plaintext-only">Structure and Interpretation of Computer Programs</span> <span class="author" editmode:contenteditable inert-contenteditable="plaintext-only">Abelson and Sussman</span> <select bind="status" persist viewmode:disabled disabled><option>reading</option><option>read</option></select> <button type="button" show-when:editmode="true" trigger-remove aria-label="Remove book">×</button></li>
+  </ul>
+
+  <p><button type="button" show-when:editmode="true" trigger-add="books">+ Add book</button></p>
+
+  <p class="feedback"><a href="mailto:hello@clayjs.com?subject=Reading%20list">Tell me what this app is missing</a></p>
+
+  <template items="books">
+    <li item data-id="">
+      <span class="title" editmode:contenteditable contenteditable="plaintext-only"></span>
+      <span class="author" editmode:contenteditable contenteditable="plaintext-only"></span>
+      <select bind="status" persist><option>reading</option><option>read</option></select>
+      <button type="button" show-when:editmode="true" trigger-remove aria-label="Remove book">×</button>
+    </li>
+  </template>
+</main>
+
+<template visitor-intro>
+  <p>A reading list that lives in your browser. Add books, set the ones you have read, and keep a goal for the year. Nothing leaves this machine unless you download the file.</p>
+</template>
+
+<script src="https://clayjs.com/v1/clay.js?plugins=visitor-drafts,indicator&exclude=richclay"></script>
+<script src="https://clayjs.com/v1/clay-options.js"></script>
+<script src="https://clayjs.com/v1/sap.js"></script>
+</body>
+</html>
+```

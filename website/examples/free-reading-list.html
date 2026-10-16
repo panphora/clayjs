@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en" visitor-drafts="reading-list-v1" autosave>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="application-name" content="Reading list">
+<title>Reading list</title>
+<script type="application/json" data-rules-name="api" data-rules-version="1">
+{
+  "goal": "#goal@value",
+  "books": ["#books > li[item]:not([cms-template])", {
+    "id": "@data-id",
+    "title": ".title",
+    "author": ".author",
+    "status": "select@value"
+  }]
+}
+</script>
+<style>
+  html:not([editmode="true"]) [show-when\:editmode="true"] { display: none }
+  [cms-template] { display: none !important }
+  :root { color-scheme: light dark; --bg: #f3f0e8; --ink: #26241f; --muted: #706b61; --line: #dbd5c8; --accent: #3d6f72 }
+  @media (prefers-color-scheme: dark) { :root { --bg: #1c1e21; --ink: #e9e5dd; --muted: #a39e94; --line: #3b4046; --accent: #82b6b8 } }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.5 system-ui, sans-serif }
+  main { max-width: 640px; margin: 0 auto; padding: 32px 20px 64px }
+  h1 { margin: 0 0 8px; font-size: 26px }
+  .count { color: var(--muted) }
+  .count output { font-variant-numeric: tabular-nums; color: var(--ink) }
+  #books { list-style: none; padding: 0; margin: 20px 0 8px }
+  #books > li { display: flex; gap: 8px; align-items: baseline; padding: 6px 0; border-bottom: 1px solid var(--line) }
+  #books .title { flex: 1 1 auto; font-weight: 500 }
+  #books .author { color: var(--muted); font-size: 14px }
+  button { font: inherit; color: inherit; background: none; border: 1px solid var(--line); border-radius: 6px; padding: 2px 10px; cursor: pointer }
+  input[type="number"] { font: inherit; color: inherit; background: transparent; border: 1px solid var(--line); border-radius: 4px; padding: 2px 6px; width: 5em; text-align: right }
+  select { font: inherit; color: inherit; background: transparent; border: 1px solid var(--line); border-radius: 4px; padding: 2px 4px }
+  .feedback { margin-top: 28px; font-size: 14px; color: var(--muted) }
+  [contenteditable]:focus { outline: 2px solid var(--accent); border-radius: 3px }
+</style>
+</head>
+<body>
+<main id="app" sap>
+  <h1 editmode:contenteditable inert-contenteditable="plaintext-only">Reading list</h1>
+
+  <p class="count">Books read: <output clay="no-dirty" calc:read="state.books.filter(b => b.status === 'read').length" text="state.read">1</output> of <output clay="no-dirty" calc:total="state.books.length" text="state.total">2</output></p>
+
+  <p><label for="goal">Books to read this year</label> <input id="goal" type="number" min="0" step="1" bind="goal" persist viewmode:readonly readonly value="24"></p>
+
+  <ul id="books" items="books">
+    <li item cms-template data-id=""><span class="title"></span><span class="author"></span><select bind="status" persist><option>reading</option><option>read</option></select></li>
+    <li item data-id="b-mmm"><span class="title" editmode:contenteditable inert-contenteditable="plaintext-only">The Mythical Man-Month</span> <span class="author" editmode:contenteditable inert-contenteditable="plaintext-only">Fred Brooks</span> <select bind="status" persist viewmode:disabled disabled><option>reading</option><option selected>read</option></select> <button type="button" show-when:editmode="true" trigger-remove aria-label="Remove book">×</button></li>
+    <li item data-id="b-sicp"><span class="title" editmode:contenteditable inert-contenteditable="plaintext-only">Structure and Interpretation of Computer Programs</span> <span class="author" editmode:contenteditable inert-contenteditable="plaintext-only">Abelson and Sussman</span> <select bind="status" persist viewmode:disabled disabled><option>reading</option><option>read</option></select> <button type="button" show-when:editmode="true" trigger-remove aria-label="Remove book">×</button></li>
+  </ul>
+
+  <p><button type="button" show-when:editmode="true" trigger-add="books">+ Add book</button></p>
+
+  <p class="feedback"><a href="mailto:hello@clayjs.com?subject=Reading%20list">Tell me what this app is missing</a></p>
+
+  <template items="books">
+    <li item data-id="">
+      <span class="title" editmode:contenteditable contenteditable="plaintext-only"></span>
+      <span class="author" editmode:contenteditable contenteditable="plaintext-only"></span>
+      <select bind="status" persist><option>reading</option><option>read</option></select>
+      <button type="button" show-when:editmode="true" trigger-remove aria-label="Remove book">×</button>
+    </li>
+  </template>
+</main>
+
+<template visitor-intro>
+  <p>A reading list that lives in your browser. Add books, set the ones you have read, and keep a goal for the year. Nothing leaves this machine unless you download the file.</p>
+</template>
+
+<script src="https://clayjs.com/v1/clay.js?plugins=visitor-drafts,indicator&exclude=richclay"></script>
+<script src="https://clayjs.com/v1/clay-options.js"></script>
+<script src="https://clayjs.com/v1/sap.js"></script>
+</body>
+</html>

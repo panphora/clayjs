@@ -50,8 +50,10 @@ conditionally through the URL, in the browser only:
   comma list (`?exclude=source,richclay`); a second `exclude=` parameter is ignored.
 
 Loadable plugins: `richclay` (default on), `source` (default on), `ai-edit` (brings `wire`),
-`indicator`, `sync`, `live`, `sortable`, `undo`, `cms`, `quickcrop`, `upload`, `people`, `wire`, `demo`.
-The default-on plugins load in edit mode only.
+`indicator`, `sync`, `live`, `sortable`, `undo`, `cms`, `quickcrop`, `upload`, `people`, `wire`, `demo`,
+`visitor-drafts`. The default-on plugins load in edit mode only. `visitor-drafts` turns the page into a
+free document: a visitor who is not the owner gets the editing UI and their work is kept in their own
+browser (guide section 14).
 
 Everything else is a separate library ("satellite") with its own script tag: clay-ui,
 clay-events, clay-options, clay-dom, all.js, clay-utils, clay-internals, clay-data,
@@ -135,6 +137,14 @@ itself, with no network.
 - `clay.isEditMode` — whether this session may edit.
 - `clay.isOwner` — whether the platform's owner cookie is set (URL and global overrides
   don't affect it, unlike `isEditMode`).
+- `clay.isDraftMode`: whether this visitor's work is being kept in their own browser instead
+  of saved to the host. Needs a page that opted in with `visitor-drafts` (a slot on `<html>`, the
+  plugin in `plugins=`, an http(s) page, an `api` rules tag), so it is `false` everywhere else.
+  Draft mode also sets `draftmode="true"` on `<html>`, removed from every save (visitor-drafts plugin).
+- `clay.visitorDrafts`: the draft store, with `active`, `slot`, `key`, `hasDraft()`, `restored()`
+  (`{restored, hadDraft, parked}`), `saveNow()`, `reset()`, `onRestore(fn)`, `editOriginal()`,
+  `backToDraft()`, `downloadUrl()`, `source`. Inert outside draft mode. Events:
+  `clay:drafts-restored`, `clay:drafts-saved`, `clay:drafts-store-failed` (visitor-drafts plugin).
 - `clay.siteVisibility` — `"private"` or `"public"` when the host says how it serves this
   site (hyperclay.com tells the owner's tab), otherwise `null`. Read once, at boot.
 - `clay.toggleEditMode()` — flip between edit and view mode (reloads the page).

@@ -38,11 +38,16 @@ function installFetch() {
   });
 }
 
-export async function loadExample(file, { editMode = true } = {}) {
+export async function loadExample(file, { editMode = true, draft = false } = {}) {
   const html = readFileSync(path.join(EXAMPLES, file), "utf8");
   const doc = new DOMParser().parseFromString(html, "text/html");
 
-  window.clayEditMode = editMode;
+  if (draft) {
+    delete window.clayEditMode;
+    delete window.__hyperclayEditMode;
+  } else {
+    window.clayEditMode = editMode;
+  }
   global.EventSource = window.EventSource = FakeEventSource;
   window.scrollTo = () => {};
   if (!window.CSS) window.CSS = {};
@@ -63,7 +68,10 @@ export async function loadExample(file, { editMode = true } = {}) {
   params.set("exclude", [...exclude, "source"].join(","));
   const satellites = scripts.filter((s) => s.src && s !== loader).map((s) => s.getAttribute("src").split("/").pop());
   const inline = scripts.filter((s) => !s.src && !s.type).map((s) => s.textContent);
-  scripts.forEach((s) => s.remove());
+  // A draft-mode page needs its <script data-rules-name="api"> tag in the live
+  // document: that tag is what makes the page eligible for draft mode and what
+  // the store reads its rules from. It is inert JSON, not code, so it stays.
+  scripts.forEach((s) => { if (!(draft && s.hasAttribute("data-rules-name"))) s.remove(); });
 
   for (const a of [...document.documentElement.attributes]) document.documentElement.removeAttribute(a.name);
   for (const a of doc.documentElement.attributes) document.documentElement.setAttribute(a.name, a.value);
@@ -87,7 +95,7 @@ export async function loadExample(file, { editMode = true } = {}) {
   const { boot } = await import("../../../src/loader.js");
   await new Promise((r) => boot(null, params, (clay) => { resolveReady(clay); r(); }));
   await tick(20);
-  if (editMode) await Promise.race([settled, tick(4000)]);
+  if (draft || editMode) await Promise.race([settled, tick(4000)]);
   return window.clay;
 }
 
