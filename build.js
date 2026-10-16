@@ -122,7 +122,7 @@ function rollingHeads(versions) {
 }
 
 // Never follow a symlink out of the tree, and never copy something that is not a
-// regular file. Same rule as malleablehtmlfile's sync-fixtures.mjs, for the same
+// regular file. Same rule as malleabledocument's sync-fixtures.mjs, for the same
 // reason: a copier that follows links can write anywhere.
 async function walk(dir, base = dir) {
   const out = [];

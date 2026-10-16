@@ -49,8 +49,8 @@ fixture's `input.html`/setup or the snapshot algorithm changes on purpose.
    must be empty.
 4. Promote up, then re-check. Both commands are written from the workspace root:
    ```
-   cp -R hyperclayjs/conformance/fixtures/. malleablehtmlfile/fixtures/
-   cd malleablehtmlfile && npm run check-fixtures
+   cp -R hyperclayjs/conformance/fixtures/. malleabledocument/fixtures/
+   cd malleabledocument && npm run check-fixtures
    ```
    `check-fixtures` confirms both clients now match canonical.
 
