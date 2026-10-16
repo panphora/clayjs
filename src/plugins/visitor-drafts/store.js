@@ -1,5 +1,5 @@
 import { extractData, applyData, engine } from "../../vendor/hyper-html-api-data.vendor.js";
-import { draftSlot, setDraftStoreFailed } from "../../core/draft-mode.js";
+import { draftSlot, setDraftTransport, setDraftStoreFailed } from "../../core/draft-mode.js";
 
 export const KEY_PREFIX = "clay:visitor-drafts:";
 
