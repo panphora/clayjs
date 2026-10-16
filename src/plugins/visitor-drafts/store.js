@@ -81,5 +81,9 @@ export function createStore({ doc = document, storage = safeStorage(), now = () 
     try { storage.removeItem(key); } catch {}
   }
 
-  return { slot, key, rules, read, restore, write, writeLive, park, clear };
+  function snapshot() {
+    try { return JSON.stringify(extractData(doc, rules)); } catch { return null; }
+  }
+
+  return { slot, key, rules, read, restore, write, writeLive, park, clear, snapshot };
 }

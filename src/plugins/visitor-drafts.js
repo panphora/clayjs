@@ -1,9 +1,12 @@
 import { isDraftMode, isEditMode, isOwner } from "../core/is-edit-mode.js";
+import { hasSaveToken } from "../core/host-attrs.js";
 import { draftSlot, setDraftTransport } from "../core/draft-mode.js";
 import { createStore, safeStorage } from "./visitor-drafts/store.js";
 import { createUiMemory } from "./visitor-drafts/ui-memory.js";
-import { rememberSource, downloadUrl } from "./visitor-drafts/source.js";
+import { rememberSource, downloadUrl, signupTag } from "./visitor-drafts/source.js";
 import { mountPrompt } from "./visitor-drafts/prompt.js";
+import { mountIntro } from "./visitor-drafts/intro.js";
+import { mountOwnerChip } from "./visitor-drafts/owner-chip.js";
 
 const DOWNLOAD_URL = "/_/download?as=htmlclay";
 
@@ -26,8 +29,11 @@ if (isDraftMode && slot && rulesTag) {
   source = rememberSource(memory);
   downloadLink = downloadUrl(source);
   const appName = document.querySelector('meta[name="application-name"]')?.content?.trim() || document.title.split(/:|\s\|\s/)[0].trim() || "This app";
+  const template = document.querySelector("template[visitor-intro]");
   const start = () => {
     const prompt = mountPrompt({ memory, appName, link: downloadLink });
+    mountIntro({ memory, template, appName, link: downloadLink, tag: signupTag(slot, template), source, hadDraft: result.hadDraft, prompt, snapshot: store.snapshot });
+    if (isOwner) mountOwnerChip();
     document.addEventListener("clay:drafts-store-failed", () => prompt.showError());
     document.addEventListener("clay:drafts-saved", () => prompt.clearError());
   };
@@ -42,6 +48,8 @@ if (isDraftMode && slot && rulesTag) {
   if (!slot) missing.push('a visitor-drafts="<slot>" attribute on <html>');
   if (!rulesTag) missing.push('a <script data-rules-name~="api"> rules tag');
   console.warn(`visitor-drafts: this page keeps no draft (missing ${missing.join(" and ")})`);
+} else if (isOwner && isEditMode && !hasSaveToken()) {
+  mountOwnerChip();
 }
 
 export const ready = Promise.resolve();
