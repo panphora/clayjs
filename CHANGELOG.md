@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.12.1] - 2026-10-16
+
+### Changed
+- `visitor-drafts` intro: shows the document's own `<template visitor-intro>` strip with a close button, unlocks page scrolling while it is up, and dismisses for good on close, scrolling past it, or reaching the end of the page
+- The email sign-up moved into the download card; the About button and intro sign-up are gone
+- The download card says "your work" in every document
+
 ## [1.12.0] - 2026-10-16
 
 ### Added
