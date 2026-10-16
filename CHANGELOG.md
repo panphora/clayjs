@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.11.3] - 2026-10-15
+
+### Changed
+- Rewrote the visual guide around the save loop and state map
+- Refreshed vendored sapjs, hyper-html-api, hypercms, and richclay
+
+
+
 ## [1.11.2] - 2026-10-15
 
 ### Added
