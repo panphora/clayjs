@@ -1,4 +1,5 @@
 import { isDraftMode } from "../../core/is-edit-mode.js";
+import { BOTTOM_UI_CHANGED, announceBottomUi, bottomBarHeight, promptPanel } from "./bottom-ui.js";
 
 export const COPY = {
   draft: "You're seeing a private draft, like a visitor.",
@@ -50,17 +51,23 @@ const CHIP_CSS = `.clay-owner {
   -webkit-font-smoothing: antialiased;
 }
 .clay-owner__action {
-  flex: none; font-weight: 600; color: var(--hcp-brass); cursor: pointer;
+  flex: none; min-height: 0; font-weight: 600; color: var(--hcp-brass); cursor: pointer;
   text-decoration: underline; text-underline-offset: 2px; text-decoration-color: var(--hcp-line-2);
   white-space: nowrap;
 }
-.clay-owner__action:hover { color: var(--hcp-ink); }
+.clay-owner .clay-owner__action:hover { color: var(--hcp-ink); background: none; }
 .clay-owner__x {
   flex: none; display: inline-flex; align-items: center; justify-content: center;
-  width: 24px; height: 24px; font-size: 15px; color: var(--hcp-muted); cursor: pointer;
+  width: 24px; height: 24px; min-height: 0; font-size: 15px; color: var(--hcp-muted); cursor: pointer;
 }
-.clay-owner__x:hover { color: var(--hcp-ink); }
+.clay-owner .clay-owner__x:hover { color: var(--hcp-ink); background: none; }
 .clay-owner__action:focus-visible, .clay-owner__x:focus-visible { outline: 2px solid var(--hcp-brass); outline-offset: 2px; }
+
+.clay-owner svg {
+  display: block; flex: none; width: 1em; height: 1em; line-height: 1;
+  fill: currentColor; stroke: none; stroke-width: 0; stroke-linecap: butt; stroke-linejoin: miter;
+}
+.clay-owner button, .clay-owner a { border-radius: 0; line-height: 1.45; }
 @media (pointer: coarse) {
   .clay-owner__action, .clay-owner__x { min-height: 44px; }
   .clay-owner__x { width: 44px; }
@@ -111,40 +118,60 @@ export function mountOwnerChip() {
   close.className = "clay-owner__x";
   close.setAttribute("aria-label", COPY.close);
   close.textContent = "\u00d7";
-  close.addEventListener("click", () => { chip.remove(); liftOff(); });
+  close.addEventListener("click", () => { chip.remove(); liftOff(); release(); });
 
   chip.append(lead, action, close);
   document.body.appendChild(chip);
+
+  const vars = document.createElement("style");
+  vars.id = "clay-owner-vars";
+  vars.setAttribute("clay", "editor-ui");
+  document.head.appendChild(vars);
+
+  let published = "";
+  function publish(lift) {
+    const next = `:root { --clay-owner-room: ${Math.ceil(chip.getBoundingClientRect().height) + 16}px; }`;
+    if (vars.textContent !== next) vars.textContent = next;
+    if (published === next + lift) return;
+    published = next + lift;
+    announceBottomUi();
+  }
+
+  function release() {
+    vars.remove();
+    announceBottomUi();
+  }
 
   let frame = 0;
   function lift() {
     if (frame) return;
     frame = requestAnimationFrame(() => {
       frame = 0;
-      const y = window.innerHeight - 3;
-      let raise = 0;
-      const hits = document.elementsFromPoint ? document.elementsFromPoint(24, y) : [];
-      for (const hit of hits) {
-        for (let el = hit; el && el !== document.body && el !== document.documentElement; el = el.parentElement) {
-          if (chip.contains(el)) break;
-          const position = getComputedStyle(el).position;
-          if (position === "fixed" || position === "sticky") {
-            raise = Math.max(raise, Math.ceil(window.innerHeight - el.getBoundingClientRect().top));
-            break;
-          }
-        }
-      }
-      chip.style.setProperty("--hcp-lift", (raise > 0 && raise < window.innerHeight / 3 ? raise : 0) + "px");
+      let lift = bottomBarHeight(24, (el) => chip.contains(el) || el.closest("#hcp"));
+      const panel = promptPanel(chip.getBoundingClientRect());
+      const covered = panel >= window.innerHeight / 3;
+      if (panel && !covered) lift = Math.max(lift, panel - 4);
+      chip.style.visibility = covered ? "hidden" : "";
+      chip.style.setProperty("--hcp-lift", lift + "px");
+      publish(covered ? -1 : lift);
     });
   }
 
   function liftOff() {
     removeEventListener("scroll", lift);
     removeEventListener("resize", lift);
+    document.removeEventListener(BOTTOM_UI_CHANGED, lift);
+    document.removeEventListener("transitionend", lift, true);
+    document.removeEventListener("pointerup", lift, true);
+    window.removeEventListener("hashchange", lift);
   }
 
   addEventListener("scroll", lift, { passive: true });
   addEventListener("resize", lift);
+  document.addEventListener(BOTTOM_UI_CHANGED, lift);
+  document.addEventListener("transitionend", lift, true);
+  document.addEventListener("pointerup", lift, true);
+  window.addEventListener("hashchange", lift);
   lift();
 
   return chip;

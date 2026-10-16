@@ -1,31 +1,43 @@
 import { PROMPT_CSS } from "./prompt-style.js";
+import { announceBottomUi, bottomBarHeight } from "./bottom-ui.js";
+
+export const SIGNUP_COPY = {
+  thanks: "Thanks. Check your email for a link to confirm.",
+  failed: "That didn't go through. Check the address and try again.",
+};
 
 const FONT_HREF = "https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500&family=IBM+Plex+Sans:wght@400;500;600&family=Newsreader:opsz,wght@6..72,500&display=swap";
 
 const ASIDE = `<aside class="hcp" id="hcp" hidden aria-label="Download this app" data-hcp-state="tab" data-hcp-reason="open" sap-ignore clay="editor-ui">
   <section class="hcp-card" id="hcp-card" role="dialog" aria-modal="false" aria-labelledby="hcp-title">
-    <button type="button" class="hcp-x" data-hcp="minimize" aria-label="Minimize"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M3 12h10v2H3z"/></svg></button>
+    <button type="button" class="hcp-x" data-hcp="minimize" aria-label="Minimize"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="M5 12h14"/></svg></button>
     <div class="hcp-kicker">Free download</div>
-    <h2 class="hcp-title" id="hcp-title"><span data-hcp-for="use">Your numbers are saved in this browser only.</span><span data-hcp-for="open">This app is free to keep.</span><span data-hcp-for="return">Your numbers are saved in this browser only.</span><span data-hcp-for="error">Your work isn't being saved in this browser.</span></h2>
-    <p class="hcp-body"><span data-hcp-for="open">Download it as one file and use it on your computer, no account needed.</span><span data-hcp-for="use">Download the file to keep them on your computer for good.</span><span data-hcp-for="return">Download the file to keep them on your computer for good.</span><span data-hcp-for="error">Storage is full or turned off here. Download the file to keep what you've done.</span></p>
+    <h2 class="hcp-title" id="hcp-title"><span data-hcp-for="use">Your work is saved in this browser only.</span><span data-hcp-for="open">This app is free to keep.</span><span data-hcp-for="return">Your work is saved in this browser only.</span><span data-hcp-for="error">Your work isn't being saved in this browser.</span></h2>
+    <p class="hcp-body"><span data-hcp-for="open">Download it as one file and use it on your computer, no account needed.</span><span data-hcp-for="use">Download the file to keep it on your computer for good.</span><span data-hcp-for="return">Download the file to keep it on your computer for good.</span><span data-hcp-for="error">Storage is full or turned off here. Download the file to keep what you've done.</span></p>
     <div class="hcp-file">
-      <svg width="26" height="30" viewBox="0 0 26 30" fill="none" aria-hidden="true"><path d="M2 1h15l7 7v21H2z" fill="var(--hcp-surface)" stroke="currentColor" stroke-width="2"/><path d="M17 1v7h7" stroke="currentColor" stroke-width="2"/><path d="M7 15h12M7 19h12M7 23h8" stroke="var(--hcp-muted)" stroke-width="2"/></svg>
-      <div><b class="hcp-name" data-hcp-name>This app</b><small>One file with the whole app and your numbers in it</small></div>
+      <svg width="20" height="20" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M224,144v64a8,8,0,0,1-8,8H40a8,8,0,0,1-8-8V144a8,8,0,0,1,16,0v56H208V144a8,8,0,0,1,16,0Zm-101.66,5.66a8,8,0,0,0,11.32,0l40-40a8,8,0,0,0-11.32-11.32L136,124.69V32a8,8,0,0,0-16,0v92.69L93.66,98.34a8,8,0,0,0-11.32,11.32Z"/></svg>
+      <div><b class="hcp-name" data-hcp-name>This app</b><small>One file with the whole app and your work in it</small></div>
     </div>
-    <p class="hcp-body">Open it with HTML Clay, a free app for Mac, Windows and Linux. It opens the file in a window and saves every change into it, so your numbers stay on your computer.</p>
+    <p class="hcp-body">Open it with HTML Clay, a free app for Mac, Windows and Linux. It opens the file in a window and saves every change into it, so your work stays on your computer.</p>
     <div class="hcp-actions">
-      <a class="hcp-btn hcp-btn--primary" data-hcp-link href="/_/download?as=htmlclay"><span><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M7 1h2v8.6l2.8-2.8 1.4 1.4L8 13.4 2.8 8.2l1.4-1.4L7 9.6zM2 13h12v2H2z"/></svg>Download free</span></a>
+      <a class="hcp-btn hcp-btn--primary" data-hcp-link href="/_/download?as=htmlclay"><span><svg width="16" height="16" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M224,144v64a8,8,0,0,1-8,8H40a8,8,0,0,1-8-8V144a8,8,0,0,1,16,0v56H208V144a8,8,0,0,1,16,0Zm-101.66,5.66a8,8,0,0,0,11.32,0l40-40a8,8,0,0,0-11.32-11.32L136,124.69V32a8,8,0,0,0-16,0v92.69L93.66,98.34a8,8,0,0,0-11.32,11.32Z"/></svg>Download free</span></a>
       <button type="button" class="hcp-btn" data-hcp="minimize"><span>Not now</span></button>
     </div>
+    <form class="hcp-signup" data-hcp-signup novalidate>
+      <label for="hcp-email">I make one of these about every two weeks. Get the next one by email.</label>
+      <div class="hcp-signup-row"><input id="hcp-email" type="email" autocomplete="email" required placeholder="you@example.com"><button type="submit" class="hcp-btn"><span>Send me the next one</span></button></div>
+      <input class="hcp-hp" name="website" tabindex="-1" autocomplete="off" aria-hidden="true">
+      <p class="hcp-msg" role="status" hidden></p>
+    </form>
     <div class="hcp-foot"><small>Free, and the file is yours to keep.</small><button type="button" class="hcp-quiet" data-hcp="dismiss">Don&rsquo;t show again</button></div>
   </section>
   <div class="hcp-dock">
-    <button type="button" class="hcp-btn hcp-tab" data-hcp="open" aria-controls="hcp-card" aria-expanded="false" aria-label="This app is free to keep"><span><svg width="16" height="18" viewBox="0 0 16 18" fill="none" aria-hidden="true"><path d="M1.5 1h8.5l4.5 4.5V17h-13z" stroke="currentColor" stroke-width="2"/><path d="M10 1v5h4.5" stroke="currentColor" stroke-width="2"/><path d="M8 8v6M5.5 11.5 8 14l2.5-2.5" stroke="currentColor" stroke-width="1.8"/></svg><span class="hcp-tab__label">This app is free to keep</span></span></button>
+    <button type="button" class="hcp-btn hcp-tab" data-hcp="open" aria-controls="hcp-card" aria-expanded="false" aria-label="This app is free to keep"><span><svg width="16" height="16" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M224,144v64a8,8,0,0,1-8,8H40a8,8,0,0,1-8-8V144a8,8,0,0,1,16,0v56H208V144a8,8,0,0,1,16,0Zm-101.66,5.66a8,8,0,0,0,11.32,0l40-40a8,8,0,0,0-11.32-11.32L136,124.69V32a8,8,0,0,0-16,0v92.69L93.66,98.34a8,8,0,0,0-11.32,11.32Z"/></svg><span class="hcp-tab__label">This app is free to keep</span></span></button>
     <button type="button" class="hcp-x" data-hcp="dismiss" aria-label="Hide this for good"><svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true"><path d="M1.4 0 6 4.6 10.6 0 12 1.4 7.4 6 12 10.6 10.6 12 6 7.4 1.4 12 0 10.6 4.6 6 0 1.4z"/></svg></button>
   </div>
 </aside>`;
 
-export function mountPrompt({ memory, appName, link, onError }) {
+export function mountPrompt({ memory, appName, link, tag, source }) {
   if (!document.getElementById("hcp-style")) {
     document.head.insertAdjacentHTML("beforeend", `<link rel="stylesheet" clay="editor-ui" href="${FONT_HREF}">\n<style clay="editor-ui" id="hcp-style">${PROMPT_CSS}</style>`);
   }
@@ -38,9 +50,35 @@ export function mountPrompt({ memory, appName, link, onError }) {
   const USES_TO_SHOW = 3;
   const IDLE_MS = 2500;
   const TEXTY = /^(INPUT|TEXTAREA|SELECT)$/;
+  const OUR_UI = "#hcp, .clay-intro, .clay-owner";
 
   const linkEl = root.querySelector("[data-hcp-link]");
   linkEl.href = link;
+
+  const signup = root.querySelector("[data-hcp-signup]");
+  if (signup) {
+    const email = signup.querySelector("#hcp-email");
+    const honey = signup.querySelector(".hcp-hp");
+    const row = signup.querySelector(".hcp-signup-row");
+    const message = signup.querySelector(".hcp-msg");
+    signup.addEventListener("submit", (event) => {
+      event.preventDefault();
+      fetch("/_/newsletter/subscribe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ email: email.value.trim(), tags: [tag], source, website: honey.value }),
+      }).then((response) => {
+        if (!response.ok) throw new Error("signup failed");
+        row.hidden = true;
+        message.textContent = SIGNUP_COPY.thanks;
+        message.hidden = false;
+      }).catch(() => {
+        message.textContent = SIGNUP_COPY.failed;
+        message.hidden = false;
+      });
+    });
+  }
 
   if (appName) root.querySelector("[data-hcp-name]").textContent = appName;
 
@@ -55,7 +93,7 @@ export function mountPrompt({ memory, appName, link, onError }) {
   }
 
   function isHostField(el) {
-    return el && !root.contains(el) && (TEXTY.test(el.tagName) || el.isContentEditable);
+    return el && !root.contains(el) && !el.closest(OUR_UI) && (TEXTY.test(el.tagName) || el.isContentEditable);
   }
 
   let timer = null;
@@ -96,17 +134,10 @@ export function mountPrompt({ memory, appName, link, onError }) {
     if (liftFrame) return;
     liftFrame = requestAnimationFrame(() => {
       liftFrame = 0;
-      const y = innerHeight - 3, x = innerWidth - 24;
-      let raise = 0;
-      const hits = document.elementsFromPoint ? document.elementsFromPoint(x, y) : [];
-      for (let i = 0; i < hits.length; i++) {
-        for (let el = hits[i]; el && el !== document.body && el !== document.documentElement; el = el.parentElement) {
-          if (root.contains(el) || el.closest("[data-hcp-preview]")) break;
-          const pos = getComputedStyle(el).position;
-          if (pos === "fixed" || pos === "sticky") { raise = Math.max(raise, Math.ceil(innerHeight - el.getBoundingClientRect().top)); break; }
-        }
-      }
-      root.style.setProperty("--hcp-lift", (raise > 0 && raise < innerHeight / 3 ? raise : 0) + "px");
+      const raise = bottomBarHeight(innerWidth - 24, (el) => root.contains(el) || el.closest("[data-hcp-preview], .clay-owner"));
+      const next = raise + "px";
+      if (root.style.getPropertyValue("--hcp-lift") !== next) root.style.setProperty("--hcp-lift", next);
+      announceBottomUi();
     });
   }
 
@@ -153,12 +184,7 @@ export function mountPrompt({ memory, appName, link, onError }) {
   function clearError() {
     if (root.getAttribute("data-hcp-reason") === "error") root.setAttribute("data-hcp-reason", "use");
   }
-  function hideForIntro(on) {
-    if (on) root.setAttribute("data-hcp-intro", "");
-    else root.removeAttribute("data-hcp-intro");
-  }
-
-  const api = { set, root, showError, clearError, hideForIntro };
+  const api = { set, root, showError, clearError };
 
   if (mem.dismissed) { root.setAttribute("data-hcp-state", "dismissed"); return api; }
 

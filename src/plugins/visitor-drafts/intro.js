@@ -1,19 +1,20 @@
 import { INTRO_CSS } from "./intro-style.js";
+import { announceBottomUi } from "./bottom-ui.js";
 
 export const COPY = {
-  kicker: "Free app",
-  download: "Download free",
-  signupLabel: "I make one of these about every two weeks. Get the next one by email.",
-  emailPlaceholder: "you@example.com",
-  signup: "Send me the next one",
-  signupThanks: "Thanks. Check your email for a link to confirm.",
-  signupFailed: "That didn't go through. Check the address and try again.",
-  start: (appName) => `Start using ${appName}`,
-  about: "About this app",
+  close: "Hide this introduction",
   label: (appName) => `About ${appName}`,
 };
 
 const FOCUSABLE = "a[href], button, input, select, textarea, [tabindex]:not([tabindex='-1'])";
+const TEXT_ENTRY = "textarea, select";
+const NON_TEXT_INPUT = ["checkbox", "radio", "button", "submit", "reset", "file"];
+
+function isTextEntry(el) {
+  if (el.isContentEditable || el.closest(TEXT_ENTRY)) return true;
+  if (el.tagName !== "INPUT") return false;
+  return NON_TEXT_INPUT.indexOf(el.type) < 0;
+}
 
 function forced() {
   try {
@@ -34,40 +35,23 @@ function stylesOnce() {
 
 function focusApp() {
   const next = [...document.querySelectorAll(FOCUSABLE)].find(
-    (el) => !el.disabled && !el.closest("[clay~='editor-ui']") && (typeof el.checkVisibility !== "function" || el.checkVisibility())
+    (el) => !el.disabled && !isTextEntry(el) && !el.closest("[clay~='editor-ui']") && (typeof el.checkVisibility !== "function" || el.checkVisibility())
   );
-  if (next) next.focus();
-  else document.body.focus();
+  if (next) next.focus({ preventScroll: true });
+  else document.body.focus({ preventScroll: true });
 }
 
-export function mountIntro({ memory, template, appName, link, tag, source, hadDraft, prompt, snapshot }) {
-  if (!template) return null;
-  const opts = { memory, template, appName, link, tag, source, hadDraft, prompt, snapshot };
-  if (forced()) return mount(opts);
-  if (memory.get().intro.done || hadDraft) return mountAbout(opts);
-  if (window.location.hash) return null;
-  if (window.matchMedia && window.matchMedia("print").matches) return null;
-  return mount(opts);
+export function mountIntro({ memory, template, appName, hadDraft }) {
+  if (!template || !template.content.textContent.trim() && !template.content.querySelector("img, svg, video, canvas")) return null;
+  if (!forced()) {
+    if (memory.get().intro.done || hadDraft) return null;
+    if (window.location.hash) return null;
+    if (window.matchMedia && window.matchMedia("print").matches) return null;
+  }
+  return mount({ memory, template, appName });
 }
 
-function mountAbout(opts) {
-  stylesOnce();
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = "clay-about";
-  button.setAttribute("clay", "editor-ui");
-  button.setAttribute("sap-ignore", "");
-  button.textContent = COPY.about;
-  button.addEventListener("click", () => {
-    button.remove();
-    mount({ ...opts, fromAbout: true });
-  });
-  document.body.appendChild(button);
-  return button;
-}
-
-function mount(opts) {
-  const { memory, template, appName, link, tag, source, prompt, snapshot, fromAbout } = opts;
+function mount({ memory, template, appName }) {
   stylesOnce();
 
   const section = document.createElement("section");
@@ -75,157 +59,60 @@ function mount(opts) {
   section.setAttribute("clay", "editor-ui");
   section.setAttribute("sap-ignore", "");
   section.setAttribute("aria-label", COPY.label(appName));
+  section.appendChild(template.content.cloneNode(true));
 
-  const inner = document.createElement("div");
-  inner.className = "clay-intro__inner";
+  const close = document.createElement("button");
+  close.type = "button";
+  close.className = "clay-intro__close";
+  close.setAttribute("aria-label", COPY.close);
+  close.innerHTML = '<svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true"><path d="M1.4 0 6 4.6 10.6 0 12 1.4 7.4 6 12 10.6 10.6 12 6 7.4 1.4 12 0 10.6 4.6 6 0 1.4z"/></svg>';
+  section.appendChild(close);
 
-  const kicker = document.createElement("p");
-  kicker.className = "clay-intro__kicker";
-  kicker.textContent = COPY.kicker;
-
-  const name = document.createElement("h1");
-  name.className = "clay-intro__name";
-  name.textContent = appName;
-
-  const actions = document.createElement("div");
-  actions.className = "clay-intro__actions";
-
-  const download = document.createElement("a");
-  download.className = "clay-intro__download";
-  download.href = link;
-  download.textContent = COPY.download;
-
-  const form = document.createElement("form");
-  form.className = "clay-intro__signup";
-  form.noValidate = true;
-
-  const label = document.createElement("label");
-  label.setAttribute("for", "clay-intro-email");
-  label.textContent = COPY.signupLabel;
-
-  const row = document.createElement("div");
-  row.className = "clay-intro__row";
-
-  const email = document.createElement("input");
-  email.id = "clay-intro-email";
-  email.type = "email";
-  email.autocomplete = "email";
-  email.required = true;
-  email.placeholder = COPY.emailPlaceholder;
-
-  const send = document.createElement("button");
-  send.type = "submit";
-  send.textContent = COPY.signup;
-
-  row.append(email, send);
-
-  const honey = document.createElement("input");
-  honey.className = "clay-intro__hp";
-  honey.name = "website";
-  honey.tabIndex = -1;
-  honey.autocomplete = "off";
-  honey.setAttribute("aria-hidden", "true");
-
-  const message = document.createElement("p");
-  message.className = "clay-intro__msg";
-  message.setAttribute("role", "status");
-  message.hidden = true;
-
-  form.append(label, row, honey, message);
-  actions.append(download, form);
-
-  const start = document.createElement("button");
-  start.type = "button";
-  start.className = "clay-intro__start";
-  start.textContent = COPY.start(appName);
-
-  inner.append(kicker, name, template.content.cloneNode(true), actions, start);
-  section.appendChild(inner);
-
-  let observer = null;
   let gone = false;
+  let frame = 0;
 
-  function stop() {
-    document.removeEventListener("input", onUse, true);
-    document.removeEventListener("change", onUse, true);
-    document.removeEventListener("clay:dirty", onUse, true);
-    if (observer) { observer.disconnect(); observer = null; }
-    if (prompt) prompt.hideForIntro(false);
-  }
-
-  function dismiss(reason, target) {
+  function dismiss(reason) {
     if (gone) return;
     gone = true;
-    const anchor = target && target.getBoundingClientRect ? target : document.activeElement;
-    const before = anchor && anchor.getBoundingClientRect ? anchor.getBoundingClientRect().top : 0;
+    removeEventListener("scroll", onScroll);
+    if (frame) cancelAnimationFrame(frame);
+    const height = section.getBoundingClientRect().height;
+    const before = window.scrollY;
     memory.get().intro.done = reason;
     memory.save();
-    stop();
     section.remove();
-    if (reason === "button") {
-      window.scrollTo({ top: 0 });
-      focusApp();
-    } else if (anchor && anchor.getBoundingClientRect) {
-      window.scrollBy(0, anchor.getBoundingClientRect().top - before);
+    if (reason === "scrolled") {
+      const locked = /hidden|clip/.test(getComputedStyle(document.body).overflowY + getComputedStyle(document.documentElement).overflowY);
+      window.scrollTo(0, locked ? 0 : Math.max(0, before - height));
     }
-    if (fromAbout) mountAbout(opts);
+    announceBottomUi();
+    if (reason !== "scrolled") focusApp();
   }
 
-  function unchanged() {
-    return !snapshot || snapshot() === baseline;
-  }
-
-  function onUse(event) {
-    if (section.contains(event.target)) return;
-    if (event.type === "clay:dirty") {
-      if (!unchanged()) dismiss("use", event.target);
-      return;
-    }
-    if (!unchanged() || event.target?.closest?.("[persist]")) {
-      dismiss("use", event.target);
-      return;
-    }
-    const target = event.target;
-    setTimeout(() => {
-      if (!gone && !unchanged()) dismiss("use", target);
-    }, 0);
-  }
-
-  form.addEventListener("submit", (event) => {
-    event.preventDefault();
-    fetch("/_/newsletter/subscribe", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "same-origin",
-      body: JSON.stringify({ email: email.value.trim(), tags: [tag], source, website: honey.value }),
-    }).then((response) => {
-      if (!response.ok) throw new Error("signup failed");
-      row.hidden = true;
-      message.textContent = COPY.signupThanks;
-      message.hidden = false;
-    }).catch(() => {
-      message.textContent = COPY.signupFailed;
-      message.hidden = false;
+  function onScroll() {
+    if (frame) return;
+    frame = requestAnimationFrame(() => {
+      frame = 0;
+      const bottom = section.getBoundingClientRect().bottom;
+      const atEnd = scrollY > 0 && scrollY + innerHeight >= document.documentElement.scrollHeight - 1;
+      if (bottom < 1 || (atEnd && bottom < innerHeight)) dismiss("scrolled");
     });
+  }
+
+  section.addEventListener("click", (event) => {
+    if (event.target.closest(".clay-intro__close, [visitor-intro-dismiss]")) {
+      dismiss("closed");
+      return;
+    }
+    if (event.target.closest("[visitor-intro-start]")) {
+      event.preventDefault();
+      window.scrollTo({ top: window.scrollY + section.getBoundingClientRect().bottom, behavior: "smooth" });
+    }
   });
 
-  start.addEventListener("click", () => dismiss("button"));
-
-  const baseline = snapshot ? snapshot() : null;
   document.body.prepend(section);
-  document.addEventListener("input", onUse, true);
-  document.addEventListener("change", onUse, true);
-  document.addEventListener("clay:dirty", onUse, true);
-
-  if (prompt) {
-    prompt.hideForIntro(true);
-    if (typeof IntersectionObserver === "function") {
-      observer = new IntersectionObserver((entries) => {
-        for (const entry of entries) prompt.hideForIntro(entry.intersectionRatio > 0.3);
-      });
-      observer.observe(section);
-    }
-  }
+  announceBottomUi();
+  addEventListener("scroll", onScroll, { passive: true });
 
   return section;
 }

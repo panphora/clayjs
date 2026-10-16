@@ -90,7 +90,7 @@ function typeInto(el, value) {
 }
 
 function submitSignup() {
-  document.querySelector(".clay-intro__signup").dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+  document.querySelector("[data-hcp-signup]").dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
 }
 
 function prompt() {
@@ -182,7 +182,7 @@ test("a page that is not in draft mode gets no prompt", async () => {
   await bootPage({ slot: "ui-off-1", owner: true, url: "/notes.html?editmode=true" });
   expect(prompt()).toBeNull();
   expect(intro()).toBeNull();
-  expect([...document.querySelectorAll("[clay='editor-ui']")].map((el) => el.id)).toEqual(["clay-owner-style", "clay-owner"]);
+  expect([...document.querySelectorAll("[clay='editor-ui']")].map((el) => el.id)).toEqual(["clay-owner-style", "clay-owner-vars", "clay-owner"]);
 
   await bootPage({ slot: "ui-off-2", params: "plugins=undo&exclude=richclay,source" });
   expect(prompt()).toBeNull();
@@ -249,48 +249,110 @@ test("outside the error state the download link is a plain link to the host", as
   expect(document.querySelector("a[download]")).toBeNull();
 });
 
-test("a template puts the intro at the top of the page, where a save never looks", async () => {
+test("a template puts its own strip at the top of the body with one close button", async () => {
   const { clay } = await bootPage({ slot: "ui-intro-1", template: INTRO });
 
-  expect(intro()).not.toBeNull();
-  expect(document.body.firstElementChild).toBe(intro());
-  expect(intro().getAttribute("clay")).toBe("editor-ui");
-  expect(intro().hasAttribute("sap-ignore")).toBe(true);
-  expect(intro().getAttribute("aria-label")).toBe("About This app");
-  expect(intro().querySelector(".clay-intro__name").textContent).toBe("This app");
-  expect(intro().querySelector(".clay-intro__download").getAttribute("href")).toBe("/_/download/notes.html?as=htmlclay");
-  expect(intro().querySelector(".clay-intro__start").textContent).toBe("Start using This app");
-  expect(intro().textContent).toContain("Track your week.");
-  expect(styleText("clay-intro-style")).toContain("min-height: 100svh");
+  const section = intro();
+  expect(section).not.toBeNull();
+  expect(section.tagName).toBe("SECTION");
+  expect(document.body.firstElementChild).toBe(section);
+  expect(section.getAttribute("clay")).toBe("editor-ui");
+  expect(section.hasAttribute("sap-ignore")).toBe(true);
+  expect(section.textContent).toContain("Track your week.");
+  expect(section.querySelectorAll(".clay-intro__close").length).toBe(1);
 
   const html = clay.getHTML();
   expect(html).not.toContain("clay-intro");
   expect(html).not.toContain("hcp");
-  expect(html).toContain("<template visitor-intro=\"\"><p>Track your week.</p></template>");
+  expect(html).toContain('<template visitor-intro=""><p>Track your week.</p></template>');
 });
 
-test("a page that locks its own scrolling scrolls while the intro is mounted", async () => {
+test("an empty or whitespace-only template mounts no intro", async () => {
+  await bootPage({ slot: "ui-intro-empty", template: "<template visitor-intro></template>" });
+  expect(intro()).toBeNull();
+
+  await bootPage({ slot: "ui-intro-blank", template: "<template visitor-intro>   \n  </template>" });
+  expect(intro()).toBeNull();
+});
+
+test("the close button removes the intro for good and remembers why", async () => {
+  const { key } = await bootPage({ slot: "ui-intro-close", template: INTRO });
+
+  intro().querySelector(".clay-intro__close").click();
+  expect(intro()).toBeNull();
+  expect(JSON.parse(localStorage.getItem(key)).intro.done).toBe("closed");
+
+  await bootPage({ slot: "ui-intro-close", template: INTRO, keepStorage: true });
+  expect(intro()).toBeNull();
+});
+
+test("an element marked visitor-intro-dismiss closes the intro the same way", async () => {
   const { key } = await bootPage({
+    slot: "ui-intro-dismiss",
+    template: '<template visitor-intro><p>Hello.</p><button type="button" visitor-intro-dismiss>No thanks</button></template>',
+  });
+
+  intro().querySelector("[visitor-intro-dismiss]").click();
+  expect(intro()).toBeNull();
+  expect(JSON.parse(localStorage.getItem(key)).intro.done).toBe("closed");
+});
+
+test("scrolling the intro past the top removes it, and a part-visible one stays", async () => {
+  const { key } = await bootPage({ slot: "ui-intro-scroll", template: INTRO });
+  const section = intro();
+  section.getBoundingClientRect = () => ({ bottom: -1 });
+  window.dispatchEvent(new Event("scroll"));
+  await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
+  expect(intro()).toBeNull();
+  expect(JSON.parse(localStorage.getItem(key)).intro.done).toBe("scrolled");
+
+  await bootPage({ slot: "ui-intro-scroll-kept", template: INTRO });
+  const kept = intro();
+  kept.getBoundingClientRect = () => ({ bottom: 50 });
+  window.dispatchEvent(new Event("scroll"));
+  await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  expect(intro()).not.toBeNull();
+});
+
+test("a page that locks its own scrolling can scroll while the intro is mounted", async () => {
+  await bootPage({
     slot: "ui-intro-locked",
     template: INTRO,
     head: "<style>html,body{height:100%}body{overflow:hidden}</style>",
   });
 
   expect(document.body.firstElementChild).toBe(intro());
-  expect(intro().classList.contains("clay-intro--overlay")).toBe(false);
   expect(styleText("clay-intro-style")).toContain(
-    "html:has(> body > .clay-intro), body:has(> .clay-intro) { height: auto !important; min-height: 100%; overflow-y: auto !important; }"
+    "html:has(> body > .clay-intro) { height: auto !important; overflow-y: auto !important; }\nbody:has(> .clay-intro) { height: auto !important; overflow: visible !important; }"
   );
-
-  typeInto(document.getElementById("note"), "typed note");
-  expect(intro()).toBeNull();
-  expect(JSON.parse(localStorage.getItem(key)).intro.done).toBe("use");
 });
 
-test("the intro stands aside for a returning visitor, a deep link and print", async () => {
-  await bootPage({ slot: "ui-intro-done", template: INTRO, ui: { v: 1, intro: { done: "button" } } });
+test("the start link scrolls to the bottom edge of the intro, past a hidden svg", async () => {
+  await bootPage({
+    slot: "ui-intro-start",
+    template: '<template visitor-intro><p>Track your week.</p><a href="#board" visitor-intro-start>Start</a></template>',
+    body: "<svg hidden></svg>",
+  });
+  const section = intro();
+  document.getElementById("title").remove();
+  document.getElementById("note").remove();
+  expect(section.nextElementSibling.tagName).toBe("svg");
+  expect(section.nextElementSibling.hasAttribute("hidden")).toBe(true);
+  section.getBoundingClientRect = () => ({ bottom: 320, height: 320 });
+  const scrollTo = jest.fn();
+  window.scrollTo = scrollTo;
+
+  intro().querySelector("[visitor-intro-start]").click();
+
+  expect(scrollTo).toHaveBeenCalledTimes(1);
+  expect(scrollTo.mock.calls[0][0]).toEqual({ top: 320, behavior: "smooth" });
+  expect(intro()).not.toBeNull();
+});
+
+test("the intro stands aside for a returning visitor, a draft and a deep link, and ?intro=1 forces it", async () => {
+  await bootPage({ slot: "ui-intro-done", template: INTRO, ui: { v: 1, intro: { done: "closed" } } });
   expect(intro()).toBeNull();
-  expect(about()).not.toBeNull();
 
   await bootPage({
     slot: "ui-intro-draft",
@@ -298,11 +360,9 @@ test("the intro stands aside for a returning visitor, a deep link and print", as
     draft: { v: 1, savedAt: "2026-10-15T00:00:00.000Z", data: { title: "draft title", note: "typed note" } },
   });
   expect(intro()).toBeNull();
-  expect(about()).not.toBeNull();
 
   await bootPage({ slot: "ui-intro-hash", template: INTRO, url: "/notes.html#card=c1" });
   expect(intro()).toBeNull();
-  expect(about()).toBeNull();
 
   const original = window.matchMedia;
   window.matchMedia = (query) => ({ matches: query.includes("print"), media: query, addEventListener() {}, removeEventListener() {} });
@@ -313,37 +373,24 @@ test("the intro stands aside for a returning visitor, a deep link and print", as
     window.matchMedia = original;
   }
 
-  await bootPage({ slot: "ui-intro-forced", template: INTRO, url: "/notes.html?intro=1", ui: { v: 1, intro: { done: "button" } } });
+  await bootPage({ slot: "ui-intro-forced", template: INTRO, url: "/notes.html?intro=1", ui: { v: 1, intro: { done: "closed" } } });
   expect(intro()).not.toBeNull();
 });
 
-test("using the app dismisses the intro, and so does its start button", async () => {
-  const used = await bootPage({ slot: "ui-intro-use", template: INTRO });
-  typeInto(document.getElementById("note"), "typed note");
-  expect(intro()).toBeNull();
-  expect(JSON.parse(localStorage.getItem(used.key)).intro.done).toBe("use");
-  expect(document.activeElement).toBe(document.getElementById("note"));
+test("no About this app control ever appears, even for a returning visitor", async () => {
+  await bootPage({ slot: "ui-intro-no-about", template: INTRO, ui: { v: 1, intro: { done: "closed" } } });
 
-  await bootPage({ slot: "ui-intro-button", template: INTRO });
-  intro().querySelector(".clay-intro__start").click();
   expect(intro()).toBeNull();
-  expect(JSON.parse(localStorage.getItem(keyFor("ui-intro-button"))).intro.done).toBe("button");
-  expect(document.activeElement).toBe(document.getElementById("note"));
-
-  await bootPage({ slot: "ui-intro-dirty", template: INTRO });
-  document.dispatchEvent(new CustomEvent("clay:dirty"));
-  expect(intro()).not.toBeNull();
-  const note = document.getElementById("note");
-  note.value = "changed by a click";
-  note.setAttribute("value", "changed by a click");
-  document.dispatchEvent(new CustomEvent("clay:dirty"));
-  expect(intro()).toBeNull();
-  expect(JSON.parse(localStorage.getItem(keyFor("ui-intro-dirty"))).intro.done).toBe("use");
+  expect(about()).toBeNull();
+  expect(document.getElementById("clay-intro-style")?.textContent || "").not.toContain(".clay-about");
 });
 
-test("the intro's signup posts the address, the app tag and the channel", async () => {
+test("the download card holds the signup form and posts the address, the app tag and the channel", async () => {
   const first = await bootPage({ slot: "kanban-v1", template: INTRO, url: "/kanban.html?src=bsky" });
-  document.getElementById("clay-intro-email").value = "reader@example.com";
+  expect(prompt().querySelector("[data-hcp-signup]")).not.toBeNull();
+  expect(document.getElementById("hcp-email")).not.toBeNull();
+
+  document.getElementById("hcp-email").value = "reader@example.com";
   submitSignup();
   await new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -359,70 +406,53 @@ test("the intro's signup posts the address, the app tag and the channel", async 
     source: "bsky",
     website: "",
   });
-  expect(document.querySelector(".clay-intro__msg").textContent).toBe("That didn't go through. Check the address and try again.");
+  expect(prompt().querySelector(".hcp-msg").textContent).toBe("That didn't go through. Check the address and try again.");
+  expect(prompt().querySelector(".hcp-signup-row").hidden).toBe(false);
 
   const second = await bootPage({ slot: "field-pad-v1", template: '<template visitor-intro signup-tag="field-pad"><p>Pad.</p></template>' });
-  document.getElementById("clay-intro-email").value = "reader@example.com";
+  document.getElementById("hcp-email").value = "reader@example.com";
   submitSignup();
   await new Promise((resolve) => setTimeout(resolve, 0));
   expect(JSON.parse(second.fetchMock.mock.calls[0][1].body).tags).toEqual(["app-field-pad"]);
 });
 
-test("a returning visitor gets a small About this app control that reopens the intro", async () => {
-  await bootPage({ slot: "ui-intro-about", template: INTRO, ui: { v: 1, intro: { done: "button" } } });
+test("a successful signup hides the row and shows the thanks copy", async () => {
+  await bootPage({ slot: "ui-signup-ok" });
+  window.fetch = jest.fn(async () => ({ ok: true }));
 
-  expect(intro()).toBeNull();
-  expect(about()).not.toBeNull();
-  expect(about().textContent).toBe("About this app");
-  expect(about().getAttribute("clay")).toBe("editor-ui");
-  expect(about().hasAttribute("sap-ignore")).toBe(true);
-  const css = styleText("clay-intro-style");
-  expect(css).toContain(".clay-about {");
-  expect(css).toContain("position: fixed; top: 12px; right: 12px");
-  expect(css).toContain("font-size: 13px");
-  expect(css).toContain("@media (pointer: coarse) {");
-
-  about().click();
-  expect(about()).toBeNull();
-  expect(intro()).not.toBeNull();
-  expect(document.body.firstElementChild).toBe(intro());
-});
-
-test("a field outside the rules never dismisses the intro, and a rule field does", async () => {
-  await bootPage({
-    slot: "ui-intro-no-save",
-    template: INTRO,
-    body: '<input id="search" type="search" clay="no-save">',
-  });
-
-  typeInto(document.getElementById("search"), "que");
+  document.getElementById("hcp-email").value = "reader@example.com";
+  submitSignup();
   await new Promise((resolve) => setTimeout(resolve, 0));
 
-  expect(intro()).not.toBeNull();
-  expect(JSON.parse(localStorage.getItem(keyFor("ui-intro-no-save"))).intro.done).toBeNull();
-
-  typeInto(document.getElementById("note"), "typed note");
-  expect(intro()).toBeNull();
-  expect(JSON.parse(localStorage.getItem(keyFor("ui-intro-no-save"))).intro.done).toBe("use");
+  expect(prompt().querySelector(".hcp-signup-row").hidden).toBe(true);
+  expect(prompt().querySelector(".hcp-msg").textContent).toBe("Thanks. Check your email for a link to confirm.");
+  expect(prompt().querySelector(".hcp-msg").hidden).toBe(false);
 });
 
-test("an intro reopened from the About control brings the control back when it goes", async () => {
-  await bootPage({ slot: "ui-intro-about-return", template: INTRO, ui: { v: 1, intro: { done: "button" } } });
-  expect(about()).not.toBeNull();
+test("the card's signup field is ours: typing in it is not a use of the app", async () => {
+  const { key } = await bootPage({ slot: "ui-signup-typing", template: INTRO });
+  const email = document.getElementById("hcp-email");
 
-  about().click();
-  expect(about()).toBeNull();
-  expect(intro()).not.toBeNull();
+  typeInto(email, "r");
+  typeInto(email, "re");
+  typeInto(email, "rea");
+  await new Promise((resolve) => setTimeout(resolve, 2600));
 
-  intro().querySelector(".clay-intro__start").click();
-  expect(intro()).toBeNull();
-  expect(about()).not.toBeNull();
+  expect(prompt().getAttribute("data-hcp-state")).toBe("tab");
+  const record = JSON.parse(localStorage.getItem(key) || "{}");
+  expect(record.prompt?.uses || 0).toBe(0);
+});
 
-  about().click();
-  expect(intro()).not.toBeNull();
-  typeInto(document.getElementById("note"), "typed note");
-  expect(intro()).toBeNull();
-  expect(about()).not.toBeNull();
+test("the card's minimize button is a boxed minus and the download controls use bevel's download icon", async () => {
+  await bootPage({ slot: "ui-icons" });
+
+  const minimize = prompt().querySelector('.hcp-card .hcp-x[data-hcp="minimize"]');
+  expect(minimize.querySelector("path").getAttribute("d")).toBe("M5 12h14");
+
+  const download = "M224,144v64a8,8,0,0,1-8,8H40a8,8,0,0,1-8-8V144a8,8,0,0,1,16,0v56H208V144a8,8,0,0,1,16,0Zm-101.66,5.66a8,8,0,0,0,11.32,0l40-40a8,8,0,0,0-11.32-11.32L136,124.69V32a8,8,0,0,0-16,0v92.69L93.66,98.34a8,8,0,0,0-11.32,11.32Z";
+  expect(prompt().querySelector("[data-hcp-link] svg path").getAttribute("d")).toBe(download);
+  expect(prompt().querySelector(".hcp-tab svg path").getAttribute("d")).toBe(download);
+  expect(prompt().querySelector(".hcp-file svg path").getAttribute("d")).toBe(download);
 });
 
 test("the owner sees which lane they are in", async () => {

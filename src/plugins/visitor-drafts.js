@@ -30,8 +30,8 @@ if (isDraftMode && slot && rulesTag) {
   const appName = document.querySelector('meta[name="application-name"]')?.content?.trim() || document.title.split(/:|\s\|\s/)[0].trim() || "This app";
   const template = document.querySelector("template[visitor-intro]");
   const start = () => {
-    const prompt = mountPrompt({ memory, appName, link: downloadLink });
-    mountIntro({ memory, template, appName, link: downloadLink, tag: signupTag(slot, template), source, hadDraft: result.hadDraft, prompt, snapshot: store.snapshot });
+    const prompt = mountPrompt({ memory, appName, link: downloadLink, tag: signupTag(slot, template), source });
+    mountIntro({ memory, template, appName, hadDraft: result.hadDraft });
     if (isOwner) mountOwnerChip();
     document.addEventListener("clay:drafts-store-failed", () => prompt.showError());
     document.addEventListener("clay:drafts-saved", () => prompt.clearError());

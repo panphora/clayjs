@@ -1,8 +1,8 @@
 /**
  * The intro and a [persist] textarea bound by a text rule. persist keeps a typed
  * textarea's value in a data-value attribute, so the page's api data does not change
- * while the visitor types and a comparison against it never sees the edit. Input in a
- * persisted control is the visitor using the app, so the intro goes.
+ * while the visitor types. The intro no longer reacts to the app being used: it goes
+ * only when the visitor closes it or scrolls past it, so typing here leaves it mounted.
  */
 import { jest } from "@jest/globals";
 
@@ -47,7 +47,7 @@ function intro() {
   return document.querySelector(".clay-intro");
 }
 
-test("typing into a persist textarea bound by a text rule closes the intro", async () => {
+test("typing into a persist textarea bound by a text rule leaves the intro mounted", async () => {
   const { key, uiKey } = await bootPage({ slot: "intro-persist-1" });
 
   expect(intro()).not.toBeNull();
@@ -59,7 +59,7 @@ test("typing into a persist textarea bound by a text rule closes the intro", asy
   entry.dispatchEvent(new Event("input", { bubbles: true }));
   await new Promise((resolve) => setTimeout(resolve, 0));
 
-  expect(intro()).toBeNull();
-  expect(JSON.parse(localStorage.getItem(uiKey)).intro.done).toBe("use");
+  expect(intro()).not.toBeNull();
+  expect(JSON.parse(localStorage.getItem(uiKey)).intro.done).toBeNull();
   expect(localStorage.getItem(key)).toBeNull();
 });

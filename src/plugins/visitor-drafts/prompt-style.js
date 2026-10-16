@@ -54,14 +54,22 @@ export const PROMPT_CSS = `.hcp {
   transition: bottom .25s ease, opacity .2s ease;
   pointer-events: none;
 }
-.hcp[hidden], .hcp[data-hcp-state="dismissed"], .hcp[data-hcp-state="off"], .hcp[data-hcp-intro] { display: none; }
+.hcp[hidden], .hcp[data-hcp-state="dismissed"], .hcp[data-hcp-state="off"] { display: none; }
 .hcp[data-hcp-typing] { opacity: 0; visibility: hidden; }
 .hcp > * { pointer-events: auto; }
-.hcp svg { display: block; flex: none; }
+.hcp svg {
+  display: block; flex: none; width: 16px; height: 16px; line-height: 1;
+  fill: none; stroke: none; stroke-width: 0; stroke-linecap: butt; stroke-linejoin: miter;
+}
+.hcp .hcp-x svg, .hcp .hcp-actions .hcp-btn svg, .hcp-tab svg, .hcp-file svg { fill: currentColor; }
+.hcp .hcp-file svg { width: 20px; height: 20px; }
+.hcp .hcp-tab svg { width: 16px; height: 18px; }
+.hcp .hcp-dock .hcp-x svg { width: 12px; height: 12px; }
+.hcp button, .hcp a { border-radius: 0; line-height: 1.5; }
 
 .hcp-btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 7px;
-  height: 34px; padding: 0 14px;
+  height: 34px; min-height: 0; padding: 0 14px;
   font-family: var(--hcp-sans); font-size: 14px; font-weight: 500; line-height: 1.5;
   white-space: nowrap; text-decoration: none; cursor: pointer; user-select: none;
   color: var(--hcp-ink); background: var(--hcp-face);
@@ -69,7 +77,7 @@ export const PROMPT_CSS = `.hcp {
   border-color: var(--hcp-edge-hi) var(--hcp-edge-lo) var(--hcp-edge-lo) var(--hcp-edge-hi);
   outline: none;
 }
-.hcp-btn:hover { background: color-mix(in srgb, var(--hcp-face), var(--hcp-edge-hi) 45%); color: var(--hcp-ink); }
+.hcp .hcp-btn:hover { background: color-mix(in srgb, var(--hcp-face), var(--hcp-edge-hi) 45%); color: var(--hcp-ink); }
 .hcp-btn:active { border-color: var(--hcp-edge-lo) var(--hcp-edge-hi) var(--hcp-edge-hi) var(--hcp-edge-lo); }
 .hcp-btn:active > span { translate: 1px 1px; }
 .hcp-btn > span { display: inline-flex; align-items: center; gap: 7px; }
@@ -80,18 +88,18 @@ export const PROMPT_CSS = `.hcp {
   --hcp-edge-lo: color-mix(in srgb, var(--hcp-ink), black 32%);
   color: var(--hcp-ground);
 }
-.hcp-btn--primary:hover { background: color-mix(in srgb, var(--hcp-ink), var(--hcp-ground) 12%); color: var(--hcp-ground); }
+.hcp .hcp-btn--primary:hover { background: color-mix(in srgb, var(--hcp-ink), var(--hcp-ground) 12%); color: var(--hcp-ground); }
 
 .hcp-dock { display: flex; align-items: stretch; box-shadow: 0 6px 16px -8px rgba(43, 36, 27, .45); }
 .hcp-tab { font-size: 13.5px; padding: 0 12px 0 10px; }
 .hcp-tab svg { color: var(--hcp-brass); }
 .hcp-dock .hcp-x {
-  width: 26px; height: 34px; display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 34px; min-height: 0; border-radius: 0; display: inline-flex; align-items: center; justify-content: center;
   background: var(--hcp-face); color: var(--hcp-muted); cursor: pointer;
   border: 2px solid; border-left: 0;
   border-color: var(--hcp-edge-hi) var(--hcp-edge-lo) var(--hcp-edge-lo) var(--hcp-edge-hi);
 }
-.hcp-dock .hcp-x:hover { color: var(--hcp-ink); }
+.hcp .hcp-dock .hcp-x:hover { color: var(--hcp-ink); background: var(--hcp-face); }
 .hcp-tab__label { display: inline; }
 .hcp[data-hcp-state="mini"] .hcp-tab__label,
 .hcp[data-hcp-state="mini"] .hcp-dock .hcp-x { display: none; }
@@ -109,11 +117,13 @@ export const PROMPT_CSS = `.hcp {
 @keyframes hcp-rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
 
 .hcp-card .hcp-x {
-  position: absolute; top: 10px; right: 10px; width: 28px; height: 28px;
+  position: absolute; top: 12px; right: 12px; width: 24px; height: 24px; min-height: 0;
   display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--hcp-line-2); border-radius: 3px; background: var(--hcp-surface);
   color: var(--hcp-muted); cursor: pointer;
 }
-.hcp-card .hcp-x:hover { color: var(--hcp-ink); background: var(--hcp-sunk); }
+.hcp .hcp-card .hcp-x:hover { color: var(--hcp-ink); border-color: var(--hcp-muted); background: var(--hcp-surface); }
+.hcp .hcp-card .hcp-x svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 2; }
 .hcp-kicker {
   display: flex; align-items: center; gap: 8px;
   font-family: var(--hcp-mono); font-size: 11px; font-weight: 500; letter-spacing: .08em; text-transform: uppercase;
@@ -141,14 +151,29 @@ export const PROMPT_CSS = `.hcp {
 .hcp-file small { display: block; font-size: 12px; color: var(--hcp-muted); line-height: 1.4; }
 .hcp-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
 .hcp-actions .hcp-btn--primary { flex: 1 1 auto; }
+.hcp-signup { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--hcp-line); }
+.hcp-signup label { display: block; font-size: 13px; line-height: 1.45; color: var(--hcp-ink-2); margin-bottom: 8px; }
+.hcp-signup-row { display: flex; gap: 8px; }
+.hcp-signup-row[hidden] { display: none; }
+.hcp-signup input[type="email"] {
+  flex: 1 1 auto; min-width: 0; height: 34px; padding: 0 10px; margin: 0;
+  font: 14px var(--hcp-sans); color: var(--hcp-ink); background: var(--hcp-surface);
+  border: 1px solid var(--hcp-line-2); border-radius: 0; box-shadow: none;
+}
+.hcp-signup input[type="email"]:focus-visible { outline: 2px solid var(--hcp-brass); outline-offset: 1px; }
+.hcp-hp { position: absolute; left: -9999px; width: 1px; height: 1px; opacity: 0; }
+.hcp-msg { margin-top: 8px; font-size: 13px; color: var(--hcp-ink-2); }
+.hcp[data-hcp-reason="error"] .hcp-signup { display: none; }
+@media (max-width: 360px) { .hcp-signup-row { flex-direction: column; } }
 .hcp-foot { margin-top: 12px; display: flex; justify-content: space-between; align-items: center; gap: 10px; }
 .hcp-foot small { font-size: 12px; color: var(--hcp-muted); }
 .hcp-quiet {
+  min-height: 0; border-radius: 0;
   font-size: 12px; color: var(--hcp-muted); cursor: pointer;
   text-decoration: underline; text-underline-offset: 2px; text-decoration-color: var(--hcp-line-2);
   white-space: nowrap;
 }
-.hcp-quiet:hover { color: var(--hcp-ink); }
+.hcp .hcp-quiet:hover { color: var(--hcp-ink); background: none; }
 
 @media (max-width: 480px) {
   .hcp { right: 12px; bottom: calc(12px + var(--hcp-lift)); }
@@ -157,7 +182,7 @@ export const PROMPT_CSS = `.hcp {
 }
 @media (pointer: coarse) {
   .hcp-btn, .hcp-dock .hcp-x, .hcp-card .hcp-x { min-height: 44px; }
-  .hcp-card .hcp-x { width: 44px; }
+  .hcp-card .hcp-x { width: 44px; height: 44px; top: 6px; right: 6px; }
   .hcp-quiet { display: inline-flex; align-items: center; min-height: 44px; }
 }
 @media (prefers-reduced-motion: reduce) {
