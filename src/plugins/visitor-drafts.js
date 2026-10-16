@@ -1,12 +1,17 @@
 import { isDraftMode, isEditMode, isOwner } from "../core/is-edit-mode.js";
 import { draftSlot, setDraftTransport } from "../core/draft-mode.js";
-import { createStore } from "./visitor-drafts/store.js";
+import { createStore, safeStorage } from "./visitor-drafts/store.js";
+import { createUiMemory } from "./visitor-drafts/ui-memory.js";
+import { rememberSource, downloadUrl } from "./visitor-drafts/source.js";
+import { mountPrompt } from "./visitor-drafts/prompt.js";
 
 const DOWNLOAD_URL = "/_/download?as=htmlclay";
 
 let store = null;
 let restoredDetail = null;
 let pending = false;
+let downloadLink = DOWNLOAD_URL;
+let source = null;
 
 const slot = draftSlot();
 const rulesTag = document.querySelector('script[data-rules-name~="api"]');
@@ -17,6 +22,16 @@ if (isDraftMode && slot && rulesTag) {
   const result = store.restore();
   restoredDetail = { restored: result.restored, hadDraft: result.hadDraft, parked: Boolean(result.parked) };
   document.dispatchEvent(new CustomEvent("clay:drafts-restored", { detail: restoredDetail }));
+  const memory = createUiMemory(slot, safeStorage());
+  source = rememberSource(memory);
+  downloadLink = downloadUrl(source);
+  const appName = document.querySelector('meta[name="application-name"]')?.content?.trim() || document.title.split(/:|\s\|\s/)[0].trim() || "This app";
+  const start = () => {
+    const prompt = mountPrompt({ memory, appName, link: downloadLink });
+    document.addEventListener("clay:drafts-store-failed", () => prompt.showError());
+    document.addEventListener("clay:drafts-saved", () => prompt.clearError());
+  };
+  document.readyState === "loading" ? document.addEventListener("DOMContentLoaded", start, { once: true }) : start();
   document.addEventListener("clay:dirty", () => { pending = true; });
   document.addEventListener("clay:drafts-saved", () => { pending = false; });
   const flush = () => { if (pending) store.writeLive(); };
@@ -80,6 +95,6 @@ export const visitorDrafts = store ? {
     window.location.href = url.toString();
     return true;
   },
-  downloadUrl: () => DOWNLOAD_URL,
-  source: null,
+  downloadUrl: () => downloadLink,
+  source,
 } : inertVisitorDrafts();
