@@ -27,6 +27,7 @@ test("a tab that restored a draft and was never touched leaves a newer save from
 test("a save arriving from another tab as a storage event is applied when this tab is untouched and ignored when it has its own edit", async () => {
   const { key, events } = await bootDraftTab({ slot: "tabs-event-1", draft: DRAFT });
 
+  localStorage.setItem(key, JSON.stringify(NEWER));
   window.dispatchEvent(new StorageEvent("storage", { key, newValue: JSON.stringify(NEWER) }));
 
   expect(document.getElementById("title").textContent).toBe("newer from the other tab");
@@ -41,9 +42,18 @@ test("a save arriving from another tab as a storage event is applied when this t
   note.dispatchEvent(new Event("input", { bubbles: true }));
   await settle();
 
+  localStorage.setItem(own.key, JSON.stringify(NEWER));
   window.dispatchEvent(new StorageEvent("storage", { key: own.key, newValue: JSON.stringify(NEWER) }));
 
   expect(document.getElementById("title").textContent).toBe("draft title");
   expect(document.getElementById("note").value).toBe("my own edit");
   expect(visibleRows()).toEqual([["r2", "Second"]]);
+});
+
+test("an untouched tab's save does not bring back a draft another tab reset", async () => {
+  const { clay, key } = await bootDraftTab({ slot: "tabs-reset-save-1", draft: DRAFT });
+  localStorage.removeItem(key);
+  window.dispatchEvent(new StorageEvent("storage", { key, newValue: null }));
+  await clay.save();
+  expect(localStorage.getItem(key)).toBeNull();
 });

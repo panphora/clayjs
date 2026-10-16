@@ -256,6 +256,9 @@ test("a storage that refuses the write makes the close warning warn before any a
     note.value = "typed but never stored";
     note.dispatchEvent(new Event("input", { bubbles: true }));
 
+    const unload = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(unload);
+    expect(unload.defaultPrevented).toBe(true);
     expect(clay.hasUnsavedChanges()).toBe(true);
     expect(localStorage.getItem(key)).toBeNull();
   } finally {

@@ -43,7 +43,7 @@ function setPage({ slot, draft }) {
   if (draft) localStorage.setItem(keyFor(slot), JSON.stringify(draft));
 }
 
-export async function bootDraftTab({ slot, draft = null } = {}) {
+async function prepareTab({ slot, draft }) {
   jest.resetModules();
   delete window.clayEditMode;
   delete window.__hyperclayEditMode;
@@ -63,8 +63,39 @@ export async function bootDraftTab({ slot, draft = null } = {}) {
   global.fetch = fetchMock;
   const events = [];
   for (const name of WATCHED) document.addEventListener(name, (event) => events.push({ name, detail: event.detail }));
-  const { boot } = await import("../../../src/loader.js");
-  await new Promise((resolve) => boot(null, new URLSearchParams(PARAMS), (clay) => { settleReady(clay); resolve(clay); }));
+  return { key: keyFor(slot), events, settleReady };
+}
+
+function startBoot(tab) {
+  return import("../../../src/loader.js").then(({ boot }) => new Promise((resolve) => {
+    boot(null, new URLSearchParams(PARAMS), (clay) => { tab.settleReady(clay); resolve(clay); });
+  }));
+}
+
+export async function bootDraftTab({ slot, draft = null } = {}) {
+  const tab = await prepareTab({ slot, draft });
+  await startBoot(tab);
   await settle();
-  return { clay: window.clay, key: keyFor(slot), events };
+  return { clay: window.clay, key: tab.key, events: tab.events };
+}
+
+// A tab caught between its restore and clay.ready: a plugin after visitor-drafts in
+// PLUGIN_ORDER is held pending, so the page shows the draft and takes input while
+// boot is still running.
+export async function bootDraftTabHolding({ slot, draft = null, path = "plugins/undo.js" } = {}) {
+  const tab = await prepareTab({ slot, draft });
+  const { MODULES } = await import("../../../src/loader-logic.js");
+  const real = MODULES[path];
+  let reached;
+  let finish;
+  const imported = new Promise((resolve) => { reached = resolve; });
+  const gate = new Promise((resolve) => { finish = resolve; });
+  MODULES[path] = async () => { reached(); await gate; return real(); };
+  const booted = startBoot(tab);
+  await imported;
+  return {
+    key: tab.key,
+    events: tab.events,
+    release: async () => { finish(); await booted; await settle(); return window.clay; },
+  };
 }

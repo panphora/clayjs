@@ -181,7 +181,7 @@ function mount(opts) {
       if (!unchanged()) dismiss("use", event.target);
       return;
     }
-    if (!unchanged()) {
+    if (!unchanged() || event.target?.closest?.("[persist]")) {
       dismiss("use", event.target);
       return;
     }

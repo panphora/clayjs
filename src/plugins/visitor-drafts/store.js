@@ -28,11 +28,20 @@ function dropPath(data, label) {
   if (node && typeof node === "object") delete node[parts[parts.length - 1]];
 }
 
-function fits(data, extracted) {
-  for (const name of Object.keys(data)) {
-    if (JSON.stringify(data[name]) !== JSON.stringify(extracted[name])) return false;
+// True when everything `wanted` says is present in `got`. Extra fields in `got`
+// (a rule the draft predates) and key order do not matter.
+export function fitsInto(wanted, got) {
+  if (Array.isArray(wanted)) {
+    return Array.isArray(got) && got.length === wanted.length && wanted.every((item, i) => fitsInto(item, got[i]));
   }
-  return true;
+  if (isPlain(wanted)) {
+    return isPlain(got) && Object.keys(wanted).every((name) => fitsInto(wanted[name], got[name]));
+  }
+  return wanted === got;
+}
+
+function same(a, b) {
+  return fitsInto(a, b) && fitsInto(b, a);
 }
 
 function storageFailure(doc, error) {
@@ -49,8 +58,8 @@ export function createStore({ doc = document, storage = safeStorage(), now = () 
   const rules = engine.findRulesIn(doc, "api").rules;
 
   let lastRaw = null;
-  let lastData = null;
-  let blocked = false;
+  let base = null;
+  let unparked = null;
   let stopped = false;
 
   function getRaw() {
@@ -71,64 +80,130 @@ export function createStore({ doc = document, storage = safeStorage(), now = () 
     return { raw, record: parse(raw) };
   }
 
-  function park(raw) {
+  function live() {
+    return extractData(doc, rules);
+  }
+
+  function snapshot() {
+    try { return JSON.stringify(live()); } catch { return null; }
+  }
+
+  function park(raw, { keepSlot = false } = {}) {
     const parkedKey = key + ":unreadable:" + now().toISOString();
     try {
       storage.setItem(parkedKey, raw);
     } catch {
-      blocked = true;
+      unparked = raw;
       console.warn("visitor-drafts: this browser's saved copy no longer fits the page, and there is no room to keep it aside; nothing will be saved over it");
       return null;
     }
-    try { storage.removeItem(key); } catch {}
-    console.warn("visitor-drafts: this browser's saved copy no longer fits the page; it was kept under", parkedKey);
+    unparked = null;
+    if (!keepSlot) { try { storage.removeItem(key); } catch {} }
+    console.warn(keepSlot
+      ? "visitor-drafts: part of this browser's saved copy no longer fits the page; the original was kept under"
+      : "visitor-drafts: this browser's saved copy no longer fits the page; it was kept under", parkedKey);
     return parkedKey;
   }
 
-  function parked(raw) {
-    const parkedKey = park(raw);
-    return blocked ? { restored: false, hadDraft: true, parked: false, blocked: true } : { restored: false, hadDraft: true, parked: true };
+  // Applies `data` to a copy of the page first, so a draft that does not fit never
+  // touches the live page. Top-level keys that do not read back are dropped.
+  function fit(data) {
+    const wanted = JSON.parse(JSON.stringify(data));
+    const dropped = [];
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const trial = doc.cloneNode(true);
+      try {
+        applyData(trial, wanted, rules);
+      } catch (error) {
+        const unknown = error?.details?.unknownKeys ?? error?.unknownKeys;
+        if (Array.isArray(unknown) && unknown.length) {
+          for (const label of unknown) dropPath(wanted, label);
+          continue;
+        }
+        return null;
+      }
+      const got = extractData(trial, rules);
+      const misfits = Object.keys(wanted).filter((name) => !fitsInto(wanted[name], got[name]));
+      if (!misfits.length) return { data: wanted, dropped };
+      for (const name of misfits) delete wanted[name];
+      dropped.push(...misfits);
+    }
+    return null;
   }
 
-  function apply(data) {
-    try {
-      applyData(doc, data, rules);
-    } catch (error) {
-      const unknown = error?.details?.unknownKeys ?? error?.unknownKeys;
-      if (error?.code !== "WriteRejected" && error?.name !== "WriteRejected") throw error;
-      if (!Array.isArray(unknown) || !unknown.length) throw error;
-      data = JSON.parse(JSON.stringify(data));
-      for (const label of unknown) dropPath(data, label);
-      applyData(doc, data, rules);
-    }
-    if (!fits(data, extractData(doc, rules))) throw new Error("draft did not fit the page");
-    return data;
+  function parkedResult(raw) {
+    const parkedKey = park(raw);
+    base = live();
+    return parkedKey
+      ? { restored: false, hadDraft: true, parked: true }
+      : { restored: false, hadDraft: true, parked: false, blocked: true };
   }
 
   function restore() {
     const found = read();
-    if (!found) return { restored: false, hadDraft: false };
-    if (!found.record) return parked(found.raw);
-    let data;
-    try { data = apply(found.record.data); } catch { return parked(found.raw); }
+    if (!found) {
+      base = live();
+      return { restored: false, hadDraft: false };
+    }
+    if (!found.record) return parkedResult(found.raw);
+    const fitted = fit(found.record.data);
+    if (!fitted || !Object.keys(fitted.data).length) return parkedResult(found.raw);
+    applyData(doc, fitted.data, rules);
     lastRaw = found.raw;
-    return { restored: true, hadDraft: true, data };
+    base = live();
+    if (fitted.dropped.length) {
+      const parkedKey = park(found.raw, { keepSlot: true });
+      return { restored: true, hadDraft: true, data: fitted.data, partial: true, parked: Boolean(parkedKey), blocked: !parkedKey };
+    }
+    return { restored: true, hadDraft: true, data: fitted.data };
   }
 
-  function dataOf(html) {
-    return extractData(new DOMParser().parseFromString(html, "text/html"), rules);
+  function changed() {
+    if (stopped) return false;
+    const current = snapshot();
+    return current === null || current !== JSON.stringify(base);
+  }
+
+  // Another tab may have written since this tab last read or wrote. Keys this tab
+  // did not change take the other tab's value, so neither tab's edit is lost.
+  function merge(mine) {
+    const current = getRaw();
+    if (current == null || current === lastRaw) return { data: mine, theirs: null };
+    const record = parse(current);
+    if (!record) return { data: mine, theirs: null };
+    const merged = { ...mine };
+    const taken = {};
+    for (const name of Object.keys(record.data)) {
+      if (base && same(mine[name], base[name]) && !same(mine[name], record.data[name])) {
+        merged[name] = record.data[name];
+        taken[name] = record.data[name];
+      }
+    }
+    return { data: merged, theirs: Object.keys(taken).length ? taken : null };
+  }
+
+  function adopt(data) {
+    const fitted = fit(data);
+    if (!fitted || !Object.keys(fitted.data).length) return false;
+    applyData(doc, fitted.data, rules);
+    try { window.Sap?.refresh?.(); } catch {}
+    doc.dispatchEvent(new CustomEvent("clay:drafts-restored", { detail: { restored: true, hadDraft: true, parked: false, external: true } }));
+    return true;
   }
 
   function write(html) {
-    const data = dataOf(html);
-    const json = JSON.stringify(data);
-    if (stopped) return data;
-    if (json === lastData && getRaw() === lastRaw) {
-      setDraftStoreFailed(false);
-      doc.dispatchEvent(new CustomEvent("clay:drafts-saved", { detail: { data, unchanged: true } }));
-      return data;
+    if (stopped) return null;
+    if (unparked != null && park(unparked, { keepSlot: true }) === null) {
+      throw storageFailure(doc, new Error("an earlier saved copy could not be kept aside"));
     }
-    if (blocked) throw storageFailure(doc, new Error("an unreadable saved copy could not be kept aside"));
+    const mine = extractData(new DOMParser().parseFromString(html, "text/html"), rules);
+    const current = getRaw();
+    if (!changed() && (current === lastRaw || current == null)) {
+      setDraftStoreFailed(false);
+      doc.dispatchEvent(new CustomEvent("clay:drafts-saved", { detail: { data: mine, unchanged: true } }));
+      return mine;
+    }
+    const { data, theirs } = merge(mine);
     const raw = JSON.stringify({ v: RECORD_VERSION, savedAt: now().toISOString(), data });
     try {
       if (!storage) throw new Error("no storage");
@@ -136,25 +211,12 @@ export function createStore({ doc = document, storage = safeStorage(), now = () 
     } catch (error) {
       throw storageFailure(doc, error);
     }
+    if (theirs) adopt(theirs);
     lastRaw = raw;
-    lastData = json;
+    base = live();
     setDraftStoreFailed(false);
     doc.dispatchEvent(new CustomEvent("clay:drafts-saved", { detail: { data } }));
     return data;
-  }
-
-  function liveJson() {
-    return JSON.stringify(dataOf(window.clay.getHTML()));
-  }
-
-  function settleBaseline() {
-    if (lastData !== null) return;
-    try { lastData = liveJson(); } catch {}
-  }
-
-  function changed() {
-    if (stopped) return false;
-    try { return liveJson() !== lastData; } catch { return true; }
   }
 
   function writeLive() {
@@ -162,29 +224,29 @@ export function createStore({ doc = document, storage = safeStorage(), now = () 
   }
 
   function flush() {
-    if (!changed()) return true;
+    if (stopped || !changed()) return true;
     return writeLive();
   }
 
-  function adoptExternal(raw) {
-    if (stopped || raw == null || raw === lastRaw) return false;
+  // A storage event can arrive late, so read the slot itself rather than trusting
+  // the event's value. A tab with its own edit merges at its next save instead.
+  function adoptExternal() {
+    if (stopped) return false;
+    const raw = getRaw();
+    if (raw == null || raw === lastRaw || changed()) return false;
     const record = parse(raw);
-    if (!record || changed()) return false;
-    try { apply(record.data); } catch { return false; }
+    if (!record || !adopt(record.data)) return false;
     lastRaw = raw;
-    try { lastData = liveJson(); } catch { lastData = null; }
-    doc.dispatchEvent(new CustomEvent("clay:drafts-restored", { detail: { restored: true, hadDraft: true, parked: false, external: true } }));
+    base = live();
     return true;
   }
 
   function clear() {
     stopped = true;
+    unparked = null;
+    setDraftStoreFailed(false);
     try { storage.removeItem(key); } catch {}
   }
 
-  function snapshot() {
-    try { return JSON.stringify(extractData(doc, rules)); } catch { return null; }
-  }
-
-  return { slot, key, rules, read, restore, write, writeLive, flush, changed, settleBaseline, adoptExternal, park, clear, snapshot };
+  return { slot, key, rules, read, restore, write, writeLive, flush, changed, adoptExternal, park, clear, snapshot };
 }

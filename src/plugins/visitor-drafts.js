@@ -38,8 +38,7 @@ if (isDraftMode && slot && rulesTag) {
   };
   document.readyState === "loading" ? document.addEventListener("DOMContentLoaded", start, { once: true }) : start();
   setDraftFlush(() => store.flush());
-  window.clay?.ready?.then(() => store.settleBaseline());
-  window.addEventListener("storage", (event) => { if (event.key === store.key) store.adoptExternal(event.newValue); });
+  window.addEventListener("storage", (event) => { if (event.key === store.key) store.adoptExternal(); });
   const flush = () => store.flush();
   document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") flush(); });
   window.addEventListener("pagehide", flush);
