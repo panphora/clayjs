@@ -159,7 +159,7 @@ test("an unreadable record is parked under a side key and the owner's content st
 test("a record that no longer fits the page is parked with a warning, not applied", () => {
   setPage();
   const storage = fakeStorage({
-    [KEY]: record({ title: "draft title", rows: "not a list" }),
+    [KEY]: record({ rows: "not a list" }),
   });
   const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
   const store = createStore({ doc: document, storage, now: () => new Date(SAVED_AT) });
@@ -222,7 +222,7 @@ test("a browser with no usable storage fails the write and restores nothing", ()
 
 test("a copy that cannot be parked blocks the store instead of letting a save overwrite it", () => {
   setPage();
-  const raw = record({ title: "draft title", rows: "not a list" });
+  const raw = record({ rows: "not a list" });
   const storage = fakeStorage({ [KEY]: raw });
   const setItem = storage.setItem;
   storage.setItem = (name, value) => {
@@ -293,4 +293,18 @@ test("a field inside a row that the rules no longer name is dropped and the rest
   expect(document.getElementById("title").value).toBe("kept title");
   expect(visibleRows()).toEqual([["r1", "First"], ["r2", "Second"]]);
   expect(storage.getItem(KEY)).not.toBeNull();
+});
+
+test("a key that cannot be applied is dropped and the rest of the draft restores", () => {
+  setPage();
+  const raw = record({ title: "draft title", rows: "not a list" });
+  const storage = fakeStorage({ [KEY]: raw });
+  jest.spyOn(console, "warn").mockImplementation(() => {});
+  const store = createStore({ doc: document, storage, now: () => new Date(SAVED_AT) });
+
+  expect(store.restore()).toEqual({ restored: true, hadDraft: true, data: { title: "draft title" }, partial: true, parked: true, blocked: false });
+  expect(document.getElementById("title").value).toBe("draft title");
+  expect(visibleRows()).toEqual([["r1", "First"]]);
+  expect(JSON.parse(storage.getItem(KEY)).data).toEqual({ title: "draft title" });
+  expect(storage.getItem(KEY + ":unreadable:" + SAVED_AT)).toBe(raw);
 });

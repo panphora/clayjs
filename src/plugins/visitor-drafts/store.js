@@ -44,6 +44,72 @@ function same(a, b) {
   return fitsInto(a, b) && fitsInto(b, a);
 }
 
+const hasIds = (rows) => Array.isArray(rows)
+  && rows.every((row) => isPlain(row) && (typeof row.id === "string" || typeof row.id === "number"))
+  && new Set(rows.map((row) => row.id)).size === rows.length;
+
+// Fields a draft predates take the page's current value, matched by row id, so
+// the engine pairs rows by what the visitor saved rather than by position.
+function complete(draft, page, top = false) {
+  if (isPlain(draft) && isPlain(page)) {
+    const out = { ...draft };
+    for (const name of Object.keys(page)) {
+      if (name in draft) out[name] = complete(draft[name], page[name]);
+      else if (!top) out[name] = page[name];
+    }
+    return out;
+  }
+  if (hasIds(draft) && hasIds(page)) {
+    const byId = new Map(page.map((row) => [row.id, row]));
+    return draft.map((row) => (byId.has(row.id) ? complete(row, byId.get(row.id)) : row));
+  }
+  return draft;
+}
+
+// Three-way merge of this tab's value with another tab's, from the value both
+// started at. Objects merge per field and lists of rows with an `id` merge per
+// row. Anything else both tabs changed is a conflict: this tab's value wins.
+export function merge3(base, mine, theirs) {
+  if (same(mine, theirs) || same(theirs, base)) return { value: mine, conflict: false };
+  if (same(mine, base)) return { value: theirs, conflict: false };
+  if (isPlain(mine) && isPlain(theirs)) {
+    const value = {};
+    let conflict = false;
+    for (const name of new Set([...Object.keys(mine), ...Object.keys(theirs)])) {
+      const part = merge3(isPlain(base) ? base[name] : undefined, mine[name], theirs[name]);
+      conflict ||= part.conflict;
+      if (part.value !== undefined) value[name] = part.value;
+    }
+    return { value, conflict };
+  }
+  if (hasIds(mine) && hasIds(theirs) && (base === undefined || hasIds(base))) {
+    const before = new Map((base || []).map((row) => [row.id, row]));
+    const ours = new Map(mine.map((row) => [row.id, row]));
+    const others = new Map(theirs.map((row) => [row.id, row]));
+    const value = [];
+    let conflict = false;
+    for (const row of mine) {
+      const was = before.get(row.id);
+      const other = others.get(row.id);
+      if (!other) {
+        if (was && same(row, was)) continue;
+        if (was) conflict = true;
+        value.push(row);
+        continue;
+      }
+      const part = merge3(was, row, other);
+      conflict ||= part.conflict;
+      value.push(part.value);
+    }
+    theirs.forEach((row, index) => {
+      if (!ours.has(row.id) && !before.has(row.id)) value.splice(Math.min(index, value.length), 0, row);
+      else if (!ours.has(row.id) && !same(row, before.get(row.id))) conflict = true;
+    });
+    return { value, conflict };
+  }
+  return { value: mine, conflict: true };
+}
+
 function storageFailure(doc, error) {
   setDraftStoreFailed(true);
   doc.dispatchEvent(new CustomEvent("clay:drafts-store-failed", { detail: { error } }));
@@ -84,8 +150,16 @@ export function createStore({ doc = document, storage = safeStorage(), now = () 
     return extractData(doc, rules);
   }
 
+  // What a save would store right now: persisted controls keep typing in their
+  // live value, which only the save capture copies into the markup.
+  function captured() {
+    const getHTML = window.clay?.getHTML;
+    if (typeof getHTML !== "function") return live();
+    return extractData(new DOMParser().parseFromString(getHTML.call(window.clay), "text/html"), rules);
+  }
+
   function snapshot() {
-    try { return JSON.stringify(live()); } catch { return null; }
+    try { return JSON.stringify(captured()); } catch { return null; }
   }
 
   function park(raw, { keepSlot = false } = {}) {
@@ -108,7 +182,7 @@ export function createStore({ doc = document, storage = safeStorage(), now = () 
   // Applies `data` to a copy of the page first, so a draft that does not fit never
   // touches the live page. Top-level keys that do not read back are dropped.
   function fit(data) {
-    const wanted = JSON.parse(JSON.stringify(data));
+    const wanted = complete(JSON.parse(JSON.stringify(data)), live(), true);
     const dropped = [];
     for (let attempt = 0; attempt < 4; attempt++) {
       const trial = doc.cloneNode(true);
@@ -120,7 +194,13 @@ export function createStore({ doc = document, storage = safeStorage(), now = () 
           for (const label of unknown) dropPath(wanted, label);
           continue;
         }
-        return null;
+        const failing = Object.keys(wanted).filter((name) => {
+          try { applyData(doc.cloneNode(true), { [name]: wanted[name] }, rules); return false; } catch { return true; }
+        });
+        if (!failing.length) return null;
+        for (const name of failing) delete wanted[name];
+        dropped.push(...failing);
+        continue;
       }
       const got = extractData(trial, rules);
       const misfits = Object.keys(wanted).filter((name) => !fitsInto(wanted[name], got[name]));
@@ -133,6 +213,7 @@ export function createStore({ doc = document, storage = safeStorage(), now = () 
 
   function parkedResult(raw) {
     const parkedKey = park(raw);
+    if (!parkedKey) lastRaw = raw;
     base = live();
     return parkedKey
       ? { restored: false, hadDraft: true, parked: true }
@@ -153,6 +234,10 @@ export function createStore({ doc = document, storage = safeStorage(), now = () 
     base = live();
     if (fitted.dropped.length) {
       const parkedKey = park(found.raw, { keepSlot: true });
+      if (parkedKey) {
+        const raw = JSON.stringify({ v: RECORD_VERSION, savedAt: found.record.savedAt, data: fitted.data });
+        try { storage.setItem(key, raw); lastRaw = raw; } catch {}
+      }
       return { restored: true, hadDraft: true, data: fitted.data, partial: true, parked: Boolean(parkedKey), blocked: !parkedKey };
     }
     return { restored: true, hadDraft: true, data: fitted.data };
@@ -160,35 +245,44 @@ export function createStore({ doc = document, storage = safeStorage(), now = () 
 
   function changed() {
     if (stopped) return false;
-    const current = snapshot();
-    return current === null || current !== JSON.stringify(base);
+    try { return !same(captured(), base); } catch { return true; }
   }
 
-  // Another tab may have written since this tab last read or wrote. Keys this tab
-  // did not change take the other tab's value, so neither tab's edit is lost.
+  function keepConflict(raw) {
+    const conflictKey = key + ":conflict:" + now().toISOString();
+    try {
+      storage.setItem(conflictKey, raw);
+      console.warn("visitor-drafts: another tab changed the same thing; its copy was kept under", conflictKey);
+    } catch {
+      console.warn("visitor-drafts: another tab changed the same thing, and there is no room to keep its copy");
+    }
+  }
+
+  // Another tab may have written since this tab last read or wrote. Its changes
+  // merge into this tab's, so neither tab's edit is lost.
+  // Keys the stored record has and this page's rules do not (a tab opened before
+  // the owner added a field) are carried through, so an older tab cannot erase them.
   function merge(mine) {
     const current = getRaw();
-    if (current == null || current === lastRaw) return { data: mine, theirs: null };
-    const record = parse(current);
-    if (!record) return { data: mine, theirs: null };
-    const merged = { ...mine };
-    const taken = {};
-    for (const name of Object.keys(record.data)) {
-      if (base && same(mine[name], base[name]) && !same(mine[name], record.data[name])) {
-        merged[name] = record.data[name];
-        taken[name] = record.data[name];
-      }
+    const record = current == null ? null : parse(current);
+    if (!record) return { data: mine, stored: null };
+    let data = { ...mine };
+    if (current !== lastRaw) {
+      const merged = merge3(base, mine, record.data);
+      if (merged.conflict) keepConflict(current);
+      data = merged.value;
     }
-    return { data: merged, theirs: Object.keys(taken).length ? taken : null };
+    for (const name of Object.keys(record.data)) if (!(name in data)) data[name] = record.data[name];
+    return { data, stored: same(data, record.data) ? current : null };
   }
 
   function adopt(data) {
     const fitted = fit(data);
-    if (!fitted || !Object.keys(fitted.data).length) return false;
+    if (!fitted || !Object.keys(fitted.data).length) return null;
     applyData(doc, fitted.data, rules);
     try { window.Sap?.refresh?.(); } catch {}
     doc.dispatchEvent(new CustomEvent("clay:drafts-restored", { detail: { restored: true, hadDraft: true, parked: false, external: true } }));
-    return true;
+    return fitted.data;
   }
 
   function write(html) {
@@ -198,22 +292,24 @@ export function createStore({ doc = document, storage = safeStorage(), now = () 
     }
     const mine = extractData(new DOMParser().parseFromString(html, "text/html"), rules);
     const current = getRaw();
-    if (!changed() && (current === lastRaw || current == null)) {
+    if (same(mine, base) && (current === lastRaw || current == null)) {
       setDraftStoreFailed(false);
       doc.dispatchEvent(new CustomEvent("clay:drafts-saved", { detail: { data: mine, unchanged: true } }));
       return mine;
     }
-    const { data, theirs } = merge(mine);
-    const raw = JSON.stringify({ v: RECORD_VERSION, savedAt: now().toISOString(), data });
-    try {
-      if (!storage) throw new Error("no storage");
-      storage.setItem(key, raw);
-    } catch (error) {
-      throw storageFailure(doc, error);
+    const { data, stored } = merge(mine);
+    const raw = stored ?? JSON.stringify({ v: RECORD_VERSION, savedAt: now().toISOString(), data });
+    if (!stored) {
+      try {
+        if (!storage) throw new Error("no storage");
+        storage.setItem(key, raw);
+      } catch (error) {
+        throw storageFailure(doc, error);
+      }
     }
-    if (theirs) adopt(theirs);
+    if (!same(data, mine)) adopt(data);
     lastRaw = raw;
-    base = live();
+    base = data;
     setDraftStoreFailed(false);
     doc.dispatchEvent(new CustomEvent("clay:drafts-saved", { detail: { data } }));
     return data;
@@ -224,7 +320,7 @@ export function createStore({ doc = document, storage = safeStorage(), now = () 
   }
 
   function flush() {
-    if (stopped || !changed()) return true;
+    if (stopped) return true;
     return writeLive();
   }
 
@@ -235,9 +331,10 @@ export function createStore({ doc = document, storage = safeStorage(), now = () 
     const raw = getRaw();
     if (raw == null || raw === lastRaw || changed()) return false;
     const record = parse(raw);
-    if (!record || !adopt(record.data)) return false;
+    const adopted = record && adopt(record.data);
+    if (!adopted) return false;
     lastRaw = raw;
-    base = live();
+    base = { ...base, ...adopted };
     return true;
   }
 

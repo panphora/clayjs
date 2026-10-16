@@ -51,7 +51,7 @@ afterEach(() => {
 
 test("a save keeps the original aside once there is room, then writes", () => {
   setPage();
-  const raw = record({ title: "draft title", rows: "not a list" });
+  const raw = record({ rows: "not a list" });
   const storage = fakeStorage({ [KEY]: raw });
   let refuse = true;
   const setItem = storage.setItem;

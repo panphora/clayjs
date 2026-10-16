@@ -86,8 +86,8 @@ window.addEventListener('beforeunload', (event) => {
     return;
   }
 
-  if (isDraftMode) flushDraft();
-  if (!hasUnsavedChanges()) return;
+  const flushed = isDraftMode ? flushDraft() : true;
+  if (flushed && !hasUnsavedChanges()) return;
 
   event.preventDefault();
   event.returnValue = '';

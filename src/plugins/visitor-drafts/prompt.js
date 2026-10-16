@@ -121,7 +121,7 @@ export function mountPrompt({ memory, appName, link, onError }) {
     document.body.appendChild(a);
     a.click();
     a.remove();
-    setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+    setTimeout(() => URL.revokeObjectURL?.(objectUrl), 1000);
     return true;
   }
 

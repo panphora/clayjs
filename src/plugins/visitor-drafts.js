@@ -22,7 +22,7 @@ if (isDraftMode && slot && rulesTag) {
   store = createStore();
   setDraftTransport((html) => store.write(html));
   const result = store.restore();
-  restoredDetail = { restored: result.restored, hadDraft: result.hadDraft, parked: Boolean(result.parked) };
+  restoredDetail = { restored: result.restored, hadDraft: result.hadDraft, parked: Boolean(result.parked), ...(result.partial && { partial: true }), ...(result.blocked && { blocked: true }) };
   document.dispatchEvent(new CustomEvent("clay:drafts-restored", { detail: restoredDetail }));
   const memory = createUiMemory(slot, safeStorage());
   source = rememberSource(memory);
