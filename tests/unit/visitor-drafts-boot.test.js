@@ -242,3 +242,49 @@ test("editOriginal and backToDraft move the editmode param both ways", async () 
     Object.defineProperty(window, "location", { value: realLocation, configurable: true });
   }
 });
+
+test("a storage that refuses the write makes the close warning warn before any autosave ran", async () => {
+  const { clay, key } = await bootPage({ slot: "boot-unsaved-2" });
+
+  const realSetItem = Storage.prototype.setItem;
+  Storage.prototype.setItem = function (name, value) {
+    if (String(name) === key) throw new Error("QuotaExceededError");
+    return realSetItem.call(this, name, value);
+  };
+  try {
+    const note = document.getElementById("note");
+    note.value = "typed but never stored";
+    note.dispatchEvent(new Event("input", { bubbles: true }));
+
+    expect(clay.hasUnsavedChanges()).toBe(true);
+    expect(localStorage.getItem(key)).toBeNull();
+  } finally {
+    Storage.prototype.setItem = realSetItem;
+  }
+});
+
+test("the owner editing the original can go back to their draft", async () => {
+  const { clay } = await bootPage({ slot: "boot-owner-edit-2", owner: true, url: "/notes.html?editmode=true" });
+
+  expect(clay.isDraftMode).toBe(false);
+  expect(clay.visitorDrafts.active).toBe(false);
+
+  const realLocation = window.location;
+  const fake = {
+    href: "http://localhost/notes.html?editmode=true&other=1",
+    search: "?editmode=true&other=1",
+    protocol: "http:",
+    pathname: "/notes.html",
+    hostname: "localhost",
+    origin: "http://localhost",
+  };
+  Object.defineProperty(window, "location", { value: fake, configurable: true });
+  try {
+    expect(clay.visitorDrafts.backToDraft()).toBe(true);
+    expect(fake.href).toBe("http://localhost/notes.html?other=1");
+    expect(clay.visitorDrafts.editOriginal()).toBe(true);
+    expect(fake.href).toBe("http://localhost/notes.html?other=1&editmode=true");
+  } finally {
+    Object.defineProperty(window, "location", { value: realLocation, configurable: true });
+  }
+});

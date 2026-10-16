@@ -27,5 +27,11 @@ export function draftEligible(doc = document, loc = window.location) {
 
 export function setDraftTransport(fn) { transport = fn; }
 export function draftTransport() { return transport; }
+let flushHook = null;
+export function setDraftFlush(fn) { flushHook = fn; }
+export function flushDraft() {
+  if (!flushHook) return true;
+  try { return flushHook() !== false; } catch { return false; }
+}
 export function setDraftStoreFailed(value) { storeFailed = Boolean(value); }
 export function draftStoreFailed() { return storeFailed; }

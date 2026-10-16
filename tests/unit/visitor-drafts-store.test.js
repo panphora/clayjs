@@ -219,3 +219,78 @@ test("a browser with no usable storage fails the write and restores nothing", ()
   expect(warn).not.toHaveBeenCalled();
   refused.stop();
 });
+
+test("a copy that cannot be parked blocks the store instead of letting a save overwrite it", () => {
+  setPage();
+  const raw = record({ title: "draft title", rows: "not a list" });
+  const storage = fakeStorage({ [KEY]: raw });
+  const setItem = storage.setItem;
+  storage.setItem = (name, value) => {
+    if (String(name).includes(":unreadable:")) throw new Error("QuotaExceededError");
+    setItem(name, value);
+  };
+  const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
+  const refused = collect("clay:drafts-store-failed");
+  const store = createStore({ doc: document, storage, now: () => new Date(SAVED_AT) });
+
+  expect(store.restore()).toEqual({ restored: false, hadDraft: true, parked: false, blocked: true });
+  expect(warn).toHaveBeenCalledWith(
+    "visitor-drafts: this browser's saved copy no longer fits the page, and there is no room to keep it aside; nothing will be saved over it"
+  );
+
+  let thrown = null;
+  try { store.write(savedPage()); } catch (error) { thrown = error; }
+
+  expect(thrown).not.toBeNull();
+  expect(thrown.code).toBe("draft-storage");
+  expect(thrown.message).toBe("Couldn't save in this browser. Storage is full or turned off.");
+  expect(draftStoreFailed()).toBe(true);
+  expect(refused.seen.length).toBe(1);
+  expect(storage.getItem(KEY)).toBe(raw);
+  expect(storage.keys()).toEqual([KEY]);
+  expect(document.getElementById("title").value).toBe("owner title");
+  refused.stop();
+});
+
+test("a record without a version marker, or with an unsupported one, is parked and not applied", () => {
+  const unreadable = [
+    JSON.stringify({ data: { title: "no version", note: "no version" } }),
+    JSON.stringify({ v: 999, data: { title: "from the future", note: "from the future" } }),
+  ];
+
+  for (const raw of unreadable) {
+    setPage();
+    const storage = fakeStorage({ [KEY]: raw });
+    const store = createStore({ doc: document, storage, now: () => new Date(SAVED_AT) });
+
+    expect(store.restore()).toEqual({ restored: false, hadDraft: true, parked: true });
+    expect(storage.getItem(KEY)).toBeNull();
+    expect(storage.getItem(KEY + ":unreadable:" + SAVED_AT)).toBe(raw);
+    expect(document.getElementById("title").value).toBe("owner title");
+    expect(visibleRows()).toEqual([["r1", "First"]]);
+  }
+});
+
+test("a field inside a row that the rules no longer name is dropped and the rest restores", () => {
+  setPage();
+  const storage = fakeStorage({
+    [KEY]: record({
+      title: "kept title",
+      note: "kept note",
+      rows: [{ id: "r1", name: "First", color: "red" }, { id: "r2", name: "Second", color: "blue" }],
+    }),
+  });
+  const store = createStore({ doc: document, storage });
+
+  const result = store.restore();
+
+  expect(result.restored).toBe(true);
+  expect(result.data).toEqual({
+    title: "kept title",
+    note: "kept note",
+    rows: [{ id: "r1", name: "First" }, { id: "r2", name: "Second" }],
+  });
+  expect(document.getElementById("title").value).toBe("kept title");
+  expect(visibleRows()).toEqual([["r1", "First"], ["r2", "Second"]]);
+  expect(storage.getItem(KEY)).not.toBeNull();
+});

@@ -1,6 +1,6 @@
 import { isDraftMode, isEditMode, isOwner } from "../core/is-edit-mode.js";
 import { hasSaveToken } from "../core/host-attrs.js";
-import { draftSlot, setDraftTransport } from "../core/draft-mode.js";
+import { draftSlot, setDraftTransport, setDraftFlush } from "../core/draft-mode.js";
 import { createStore, safeStorage } from "./visitor-drafts/store.js";
 import { createUiMemory } from "./visitor-drafts/ui-memory.js";
 import { rememberSource, downloadUrl, signupTag } from "./visitor-drafts/source.js";
@@ -12,7 +12,6 @@ const DOWNLOAD_URL = "/_/download?as=htmlclay";
 
 let store = null;
 let restoredDetail = null;
-let pending = false;
 let downloadLink = DOWNLOAD_URL;
 let source = null;
 
@@ -38,9 +37,10 @@ if (isDraftMode && slot && rulesTag) {
     document.addEventListener("clay:drafts-saved", () => prompt.clearError());
   };
   document.readyState === "loading" ? document.addEventListener("DOMContentLoaded", start, { once: true }) : start();
-  document.addEventListener("clay:dirty", () => { pending = true; });
-  document.addEventListener("clay:drafts-saved", () => { pending = false; });
-  const flush = () => { if (pending) store.writeLive(); };
+  setDraftFlush(() => store.flush());
+  window.clay?.ready?.then(() => store.settleBaseline());
+  window.addEventListener("storage", (event) => { if (event.key === store.key) store.adoptExternal(event.newValue); });
+  const flush = () => store.flush();
   document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") flush(); });
   window.addEventListener("pagehide", flush);
 } else if (!slot || !rulesTag) {
@@ -54,6 +54,20 @@ if (isDraftMode && slot && rulesTag) {
 
 export const ready = Promise.resolve();
 
+function editOriginal() {
+  const url = new URL(window.location.href);
+  url.searchParams.set("editmode", "true");
+  window.location.href = url.toString();
+  return true;
+}
+
+function backToDraft() {
+  const url = new URL(window.location.href);
+  url.searchParams.delete("editmode");
+  window.location.href = url.toString();
+  return true;
+}
+
 function inertVisitorDrafts() {
   return {
     active: false,
@@ -64,8 +78,8 @@ function inertVisitorDrafts() {
     saveNow: () => false,
     reset: () => false,
     onRestore: () => false,
-    editOriginal: () => false,
-    backToDraft: () => false,
+    editOriginal,
+    backToDraft,
     downloadUrl: () => DOWNLOAD_URL,
     source: null,
   };
@@ -91,18 +105,8 @@ export const visitorDrafts = store ? {
     document.addEventListener("clay:drafts-restored", (event) => fn(event.detail), { once: true });
     return false;
   },
-  editOriginal() {
-    const url = new URL(window.location.href);
-    url.searchParams.set("editmode", "true");
-    window.location.href = url.toString();
-    return true;
-  },
-  backToDraft() {
-    const url = new URL(window.location.href);
-    url.searchParams.delete("editmode");
-    window.location.href = url.toString();
-    return true;
-  },
+  editOriginal,
+  backToDraft,
   downloadUrl: () => downloadLink,
   source,
 } : inertVisitorDrafts();
