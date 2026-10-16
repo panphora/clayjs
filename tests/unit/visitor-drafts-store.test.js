@@ -305,6 +305,6 @@ test("a key that cannot be applied is dropped and the rest of the draft restores
   expect(store.restore()).toEqual({ restored: true, hadDraft: true, data: { title: "draft title" }, partial: true, parked: true, blocked: false });
   expect(document.getElementById("title").value).toBe("draft title");
   expect(visibleRows()).toEqual([["r1", "First"]]);
-  expect(JSON.parse(storage.getItem(KEY)).data).toEqual({ title: "draft title" });
+  expect(storage.getItem(KEY)).toBe(raw);
   expect(storage.getItem(KEY + ":unreadable:" + SAVED_AT)).toBe(raw);
 });

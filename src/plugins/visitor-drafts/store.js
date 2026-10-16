@@ -67,8 +67,9 @@ function complete(draft, page, top = false) {
 }
 
 // Three-way merge of this tab's value with another tab's, from the value both
-// started at. Objects merge per field and lists of rows with an `id` merge per
-// row. Anything else both tabs changed is a conflict: this tab's value wins.
+// started at. Top-level keys and nested objects merge per field. A list both tabs
+// changed is a conflict, since a card moved between lists or a reorder cannot be
+// told apart from a delete and an add: this tab's value wins.
 export function merge3(base, mine, theirs) {
   if (same(mine, theirs) || same(theirs, base)) return { value: mine, conflict: false };
   if (same(mine, base)) return { value: theirs, conflict: false };
@@ -80,31 +81,6 @@ export function merge3(base, mine, theirs) {
       conflict ||= part.conflict;
       if (part.value !== undefined) value[name] = part.value;
     }
-    return { value, conflict };
-  }
-  if (hasIds(mine) && hasIds(theirs) && (base === undefined || hasIds(base))) {
-    const before = new Map((base || []).map((row) => [row.id, row]));
-    const ours = new Map(mine.map((row) => [row.id, row]));
-    const others = new Map(theirs.map((row) => [row.id, row]));
-    const value = [];
-    let conflict = false;
-    for (const row of mine) {
-      const was = before.get(row.id);
-      const other = others.get(row.id);
-      if (!other) {
-        if (was && same(row, was)) continue;
-        if (was) conflict = true;
-        value.push(row);
-        continue;
-      }
-      const part = merge3(was, row, other);
-      conflict ||= part.conflict;
-      value.push(part.value);
-    }
-    theirs.forEach((row, index) => {
-      if (!ours.has(row.id) && !before.has(row.id)) value.splice(Math.min(index, value.length), 0, row);
-      else if (!ours.has(row.id) && !same(row, before.get(row.id))) conflict = true;
-    });
     return { value, conflict };
   }
   return { value: mine, conflict: true };
@@ -158,11 +134,28 @@ export function createStore({ doc = document, storage = safeStorage(), now = () 
     return extractData(new DOMParser().parseFromString(getHTML.call(window.clay), "text/html"), rules);
   }
 
+  function storedKeys() {
+    try {
+      if (typeof storage.keys === "function") return storage.keys();
+      const names = [];
+      for (let i = 0; i < storage.length; i++) names.push(storage.key(i));
+      return names;
+    } catch {
+      return [];
+    }
+  }
+
   function snapshot() {
     try { return JSON.stringify(captured()); } catch { return null; }
   }
 
   function park(raw, { keepSlot = false } = {}) {
+    const kept = storedKeys().find((name) => name.startsWith(key + ":unreadable:") && storage.getItem(name) === raw);
+    if (kept) {
+      unparked = null;
+      if (!keepSlot) { try { storage.removeItem(key); } catch {} }
+      return kept;
+    }
     const parkedKey = key + ":unreadable:" + now().toISOString();
     try {
       storage.setItem(parkedKey, raw);
@@ -234,45 +227,44 @@ export function createStore({ doc = document, storage = safeStorage(), now = () 
     base = live();
     if (fitted.dropped.length) {
       const parkedKey = park(found.raw, { keepSlot: true });
-      if (parkedKey) {
-        const raw = JSON.stringify({ v: RECORD_VERSION, savedAt: found.record.savedAt, data: fitted.data });
-        try { storage.setItem(key, raw); lastRaw = raw; } catch {}
-      }
       return { restored: true, hadDraft: true, data: fitted.data, partial: true, parked: Boolean(parkedKey), blocked: !parkedKey };
     }
     return { restored: true, hadDraft: true, data: fitted.data };
   }
 
+  // `base` may hold fields this page cannot read (carried from a tab on newer
+  // rules), so only what the page captures is compared.
   function changed() {
     if (stopped) return false;
-    try { return !same(captured(), base); } catch { return true; }
+    try { return !fitsInto(captured(), base); } catch { return true; }
   }
 
+  // One copy, the latest: a save that would replace another tab's change keeps it
+  // here first, and does not save at all when there is no room for it.
   function keepConflict(raw) {
-    const conflictKey = key + ":conflict:" + now().toISOString();
+    const conflictKey = key + ":conflict";
     try {
       storage.setItem(conflictKey, raw);
-      console.warn("visitor-drafts: another tab changed the same thing; its copy was kept under", conflictKey);
-    } catch {
-      console.warn("visitor-drafts: another tab changed the same thing, and there is no room to keep its copy");
+    } catch (error) {
+      throw storageFailure(doc, error);
     }
+    console.warn("visitor-drafts: another tab changed the same thing; its copy was kept under", conflictKey);
   }
 
-  // Another tab may have written since this tab last read or wrote. Its changes
-  // merge into this tab's, so neither tab's edit is lost.
-  // Keys the stored record has and this page's rules do not (a tab opened before
-  // the owner added a field) are carried through, so an older tab cannot erase them.
+  // Another tab may have written since this tab last read or wrote: what only it
+  // changed is taken. Fields the stored record has and this page's rules lack (a
+  // tab opened before the owner added a field) are carried through, at any depth.
   function merge(mine) {
     const current = getRaw();
     const record = current == null ? null : parse(current);
     if (!record) return { data: mine, stored: null };
-    let data = { ...mine };
+    let data = mine;
     if (current !== lastRaw) {
       const merged = merge3(base, mine, record.data);
       if (merged.conflict) keepConflict(current);
       data = merged.value;
     }
-    for (const name of Object.keys(record.data)) if (!(name in data)) data[name] = record.data[name];
+    data = complete(data, record.data);
     return { data, stored: same(data, record.data) ? current : null };
   }
 
@@ -292,7 +284,7 @@ export function createStore({ doc = document, storage = safeStorage(), now = () 
     }
     const mine = extractData(new DOMParser().parseFromString(html, "text/html"), rules);
     const current = getRaw();
-    if (same(mine, base) && (current === lastRaw || current == null)) {
+    if (fitsInto(mine, base) && (current === lastRaw || current == null)) {
       setDraftStoreFailed(false);
       doc.dispatchEvent(new CustomEvent("clay:drafts-saved", { detail: { data: mine, unchanged: true } }));
       return mine;
@@ -307,7 +299,8 @@ export function createStore({ doc = document, storage = safeStorage(), now = () 
         throw storageFailure(doc, error);
       }
     }
-    if (!same(data, mine)) adopt(data);
+    const taken = Object.keys(mine).filter((name) => !fitsInto(mine[name], data[name]));
+    if (taken.length) adopt(Object.fromEntries(taken.map((name) => [name, data[name]])));
     lastRaw = raw;
     base = data;
     setDraftStoreFailed(false);
@@ -320,7 +313,7 @@ export function createStore({ doc = document, storage = safeStorage(), now = () 
   }
 
   function flush() {
-    if (stopped) return true;
+    if (stopped || !changed()) return true;
     return writeLive();
   }
 

@@ -97,7 +97,7 @@ test("a value that no longer reads back is dropped, the rest restores, and the o
   expect(visibleRows()).toEqual([["r2", "Second"]]);
   // The value the page can no longer hold never reaches the live page.
   expect(document.getElementById("size").value).toBe("small");
-  expect(JSON.parse(storage.getItem(KEY)).data).toEqual({ title: "draft title", rows: [{ id: "r2", name: "Second" }] });
+  expect(storage.getItem(KEY)).toBe(raw);
   expect(storage.getItem(KEY + ":unreadable:" + SAVED_AT)).toBe(raw);
   expect(warn).toHaveBeenCalledWith(
     "visitor-drafts: part of this browser's saved copy no longer fits the page; the original was kept under",
@@ -105,6 +105,6 @@ test("a value that no longer reads back is dropped, the rest restores, and the o
   );
 
   const again = createStore({ doc: document, storage, now: () => new Date("2026-10-16T12:00:00.000Z") });
-  expect(again.restore()).toEqual({ restored: true, hadDraft: true, data: { title: "draft title", rows: [{ id: "r2", name: "Second" }] } });
+  expect(again.restore()).toMatchObject({ restored: true, partial: true, parked: true, data: { title: "draft title", rows: [{ id: "r2", name: "Second" }] } });
   expect(storage.keys().filter((name) => name.includes(":unreadable:"))).toHaveLength(1);
 });

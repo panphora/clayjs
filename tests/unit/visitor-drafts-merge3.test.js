@@ -26,7 +26,7 @@ test("a field both tabs set to the same value is not a conflict", () => {
   expect(merge3(base, mine, theirs)).toEqual({ value: mine, conflict: false });
 });
 
-test("rows added, removed and edited in either tab all survive", () => {
+test("a list only one tab changed is taken whole, and a list both changed is a conflict", () => {
   const base = { rows: rows(["r1", "One"], ["r2", "Two"]) };
   const two = { rows: rows(["r1", "One"], ["r2", "Two"]) };
 
@@ -38,14 +38,19 @@ test("rows added, removed and edited in either tab all survive", () => {
     value: { rows: rows(["r1", "One"]) },
     conflict: false,
   });
-  expect(merge3(base, two, { rows: rows(["r1", "One"]) })).toEqual({
-    value: { rows: rows(["r1", "One"]) },
-    conflict: false,
-  });
   expect(merge3(base, { rows: rows(["r1", "A one"], ["r2", "Two"]) }, { rows: rows(["r1", "One"], ["r2", "B two"]) })).toEqual({
-    value: { rows: rows(["r1", "A one"], ["r2", "B two"]) },
-    conflict: false,
+    value: { rows: rows(["r1", "A one"], ["r2", "Two"]) },
+    conflict: true,
   });
+});
+
+test("a card moved to different lists in two tabs is a conflict, never two copies", () => {
+  const card = (id) => ({ id, title: id });
+  const base = { lists: [{ id: "todo", cards: [card("c1")] }, { id: "doing", cards: [] }, { id: "done", cards: [] }] };
+  const mine = { lists: [{ id: "todo", cards: [] }, { id: "doing", cards: [card("c1")] }, { id: "done", cards: [] }] };
+  const theirs = { lists: [{ id: "todo", cards: [] }, { id: "doing", cards: [] }, { id: "done", cards: [card("c1")] }] };
+
+  expect(merge3(base, mine, theirs)).toEqual({ value: mine, conflict: true });
 });
 
 test("a row removed in one tab and edited in the other is a conflict", () => {
