@@ -13,6 +13,6 @@
     "@panphora/clayjs/entries/sap.js",
     "@panphora/clayjs/clay.standalone.js"
   ],
-  "members": ["THIRD-PARTY-NOTICES.md"],
+  "members": ["THIRD-PARTY-NOTICES.md", "docs/guide.md"],
   "families": ["./entries/*", "./dist/*", "./src/*"]
 }

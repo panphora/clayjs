@@ -29,6 +29,7 @@
   "exports": {
     "./package.json": "./package.json",
     "./THIRD-PARTY-NOTICES.md": "./THIRD-PARTY-NOTICES.md",
+    "./guide.md": "./docs/guide.md",
     "./src/*": "./src/*",
     "./entries/*": "./entries/*",
     "./clay.standalone.js": "./dist/clay.standalone.js",
@@ -41,6 +42,7 @@
     "entries/",
     "dist/",
     "THIRD-PARTY-NOTICES.md",
+    "docs/guide.md",
     "src/"
   ],
   "publishConfig": {
