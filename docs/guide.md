@@ -791,7 +791,7 @@ An agent edits a malleable file the way a person in another tab does.
 
 - **Editing the file on disk** (HTML Clay, Hyperclay Local): the host notices the change and pushes a `disk` frame. The open tab merges it three ways, so the person's unsaved typing in other paragraphs survives, and an overlap goes to the ledger. Tell agents to address elements by `data-id`, never by position, and to leave chrome alone (it is not in the file anyway).
 - **`clay.wire`** (`?plugins=wire`, HTML Clay and Hyperclay Local): `clay.wire.send(payload)` sends a request to a local process started with `htmlclay wire serve file.htmlclay -- my-agent`. The page saves first, so the agent reads what the person sees, and autosave pauses until the agent's edit lands as a disk frame. `run.done` resolves then.
-- **`ai-edit`** (`?plugins=ai-edit`): select text, press Cmd+J, describe the change. The rewrite is previewed in place; Keep saves it, Revert discards it. Available where the host offers the `ai-edit` helper (HTML Clay, Hyperclay Local).
+- **`ai-edit`** (`?plugins=ai-edit`): select text, press Cmd+J, describe the change. The rewrite is previewed in place; Keep saves it, Revert discards it. Available where the host offers the `ai-edit` helper: HTML Clay, Hyperclay Local, and hyperclay.com (for the owner and team editors on a paid plan, billed to the document's AI credits).
 - **The data API**: a host that announces `data-read`/`data-write` serves `/_/api/<file>`, a JSON read and write face over the file defined by a rules tag (9.9). `clay.readData()` and `clay.writeData()` call it from the page; `writeData` is for agents and other processes, and refuses while the page has unsaved edits.
 
 ### 7.9 Live data: `clay="live"`
@@ -1496,7 +1496,7 @@ Cross-cutting:
 | Presence | none | none | avatar stack, no API |
 | `by` on frames, editing marker | no | no | yes |
 | Live stores (7.9) | tabs of one browser at full speed | tabs of one browser at full speed; other devices at save speed | every editor at full speed |
-| Wire and ai-edit | yes | yes | no |
+| Wire and ai-edit | yes | yes | ai-edit only, for owners and team editors on a paid plan |
 | Data API write | yes | yes | read only |
 | Uploads | 25 MB, in `~/htmlclay/uploads/` | 25 MB, in the root's `uploads/` | 10, 20 or 100 MB by plan, in the account's `uploads/` |
 | Version history | yes | 60 days, newest 20 | a version per save; a restore does not reach open editors' tabs, so reload after restoring |
