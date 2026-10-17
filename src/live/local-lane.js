@@ -20,6 +20,7 @@
 
 import { applyOps, applyOp, checkOp, cloneJson, validateOp, serializeLive, textHash, diffOps } from "./ops.js";
 import { HyperMorph } from "../vendor/hyper-morph.vendor.js";
+import { movesSince } from "./moves.js";
 
 const VERSION = 4;
 export const REQUEST_MS = 2000;
@@ -118,14 +119,20 @@ export function localTransport({ seed, key = "clay-live:" + window.location.path
 
   const landedIn = (m) => (m.behind || m.landed === null ? -1 : m.landed);
 
-  function roomState() {
+  function roomState(since = null) {
     const stores = {};
     const meta = {};
     for (const [name, m] of mirror.stores) {
       stores[name] = { value: cloneJson(m.value), ephemeral: m.ephemeral, seen: receiptsFor(name), last: m.last, landed: landedIn(m) };
       meta[name] = { log: m.log, last: m.last, landed: m.landed, floor: m.floor, behind: m.behind, file: m.file, inFile: m.inFile };
     }
-    return { epoch: room.epoch, seq: room.seq, writer: clientId, stores, mirror: { seen: [...mirror.seen], stores: meta } };
+    const state = { epoch: room.epoch, seq: room.seq, writer: clientId, stores, mirror: { seen: [...mirror.seen], stores: meta } };
+    if (since && since.epoch === mirror.epoch) {
+      const moves = {};
+      for (const [name, m] of mirror.stores) moves[name] = movesSince(m, since);
+      state.moves = moves;
+    }
+    return state;
   }
 
   function alreadyMerged(m, frame) {
@@ -507,7 +514,7 @@ export function localTransport({ seed, key = "clay-live:" + window.location.path
     } else if (room && m.type === "post") {
       if (m.epoch === room.epoch) post({ type: "answer", to: m.from, rid: m.rid, result: roomApply(m.from, m.frame) });
     } else if (room && m.type === "state-request") {
-      post({ type: "answer", to: m.from, rid: m.rid, result: roomState() });
+      post({ type: "answer", to: m.from, rid: m.rid, result: roomState(m.since) });
     }
   }
 
@@ -554,11 +561,11 @@ export function localTransport({ seed, key = "clay-live:" + window.location.path
     // The sequencer's state, installed into the mirror first. An answer to a
     // request made before the mirror changed (another state, or this tab
     // starting a room) is dropped: the lane asks again or already has it.
-    async fetchState() {
-      if (room) return roomState();
+    async fetchState(_clientId, since = null) {
+      if (room) return roomState(since);
       const asked = gen;
-      const state = await request({ type: "state-request" });
-      if (room) return roomState();
+      const state = await request({ type: "state-request", since });
+      if (room) return roomState(since);
       if (asked !== gen || !install(state)) return null;
       return state;
     },

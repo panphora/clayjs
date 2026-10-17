@@ -27,6 +27,7 @@ function createRoom(initial, marks = {}) {
     lastN: new Map(),
     clients: new Map(),
     posts: [],
+    reads: [],
     conn: undefined,
     withSeen: false,
     drop: () => false,
@@ -106,7 +107,10 @@ function createRoom(initial, marks = {}) {
       await null;
       return wrap((f) => room.post(id, f))(frame);
     },
-    fetchState: async (id) => room.state(id),
+    fetchState: async (id, since) => {
+      room.reads.push(since);
+      return room.state(id);
+    },
   });
   room.open = (clientId) => {
     const client = room.clients.get(clientId);
@@ -1160,4 +1164,55 @@ describe("review regressions", () => {
     expect(a.game.toJSON()).toEqual({ s: 1 });
     expect(a.store.pending).toEqual([]);
   });
+});
+
+test("the first state read of a tab carries no since", async () => {
+  const room = createRoom({ game: { score: 0 } });
+  const a = client(room, "a", { score: 0 });
+  room.open("a");
+  await settle();
+  expect(room.reads[0]).toBeNull();
+});
+
+test("a reconnect reads with the room position this tab has applied", async () => {
+  const room = createRoom({ game: { s: 0 } });
+  const a = client(room, "a", { s: 0 });
+  room.open("a");
+  await settle();
+  a.game.add("s", 1);
+  await settle();
+  a.game.add("s", 1);
+  await settle();
+  a.game.add("s", 1);
+  await settle();
+  expect(a.lane.status.seq).toBe(3);
+
+  room.close("a");
+  room.open("a");
+  await settle();
+  expect(room.reads.at(-1)).toEqual({ epoch: "e1", seq: 3 });
+});
+
+test("after an epoch change the read names the new epoch only once this tab applied a seq in it", async () => {
+  const room = createRoom({ game: { s: 0 } });
+  const a = client(room, "a", { s: 0 });
+  room.open("a");
+  await settle();
+  a.game.add("s", 1);
+  await settle();
+
+  room.restart({ game: { s: 10 } });
+  await settle();
+  expect(a.lane.status.epoch).toBe("e2");
+  expect(a.lane.status.seq).toBe(0);
+  a.lane.refresh();
+  await settle();
+  expect(room.reads.at(-1)).toBeNull();
+
+  a.game.add("s", 1);
+  await settle();
+  expect(a.lane.status.seq).toBe(1);
+  a.lane.refresh();
+  await settle();
+  expect(room.reads.at(-1)).toEqual({ epoch: "e2", seq: 1 });
 });

@@ -487,7 +487,7 @@ export function createFastLane({
     const asked = { connection, stateCount };
     let state = null;
     try {
-      state = await transport.fetchState(clientId);
+      state = await transport.fetchState(clientId, epoch !== null && seq > 0 ? { epoch, seq } : null);
     } catch {}
     fetching = false;
     if (stopped) return;

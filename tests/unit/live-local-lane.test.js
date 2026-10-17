@@ -863,3 +863,52 @@ test("without BroadcastChannel or Web Locks there is no local lane", async () =>
   Object.defineProperty(navigator, "locks", { configurable: true, value: undefined });
   expect(localLaneSupported()).toBe(false);
 });
+
+test("a tab that re-reads the room is answered the sequencer's moves since its seq", async () => {
+  const a = tab({ game: { value: { score: 0 } } });
+  await settle();
+  const b = tab({ game: { value: { score: 0 } } });
+  await settle();
+  a.game.add("score", 1);
+  await settle();
+  a.game.add("score", 1);
+  await settle();
+  const epoch = b.lane.status.epoch;
+
+  const pending = b.transport.fetchState(b.transport.clientId, { epoch, seq: 0 });
+  await settle();
+  const state = await pending;
+  expect(state.moves.game.map((move) => move.seq)).toEqual([1, 2]);
+  expect(state.moves.game.every((move) => Object.keys(move).join() === "seq,ops")).toBe(true);
+});
+
+test("a since below the log's floor leaves that store's moves null", async () => {
+  const a = tab({ game: { value: {} } });
+  await settle();
+  const b = tab({ game: { value: {} } });
+  await settle();
+  for (let i = 0; i < 30; i++) {
+    a.game.set("k" + i, "x".repeat(11000));
+    await settle();
+  }
+  const epoch = b.lane.status.epoch;
+
+  const pending = b.transport.fetchState(b.transport.clientId, { epoch, seq: 0 });
+  await settle();
+  const state = await pending;
+  expect(state.moves.game).toBeNull();
+});
+
+test("a read with no since carries no moves", async () => {
+  const a = tab({ game: { value: { score: 0 } } });
+  await settle();
+  const b = tab({ game: { value: { score: 0 } } });
+  await settle();
+  a.game.add("score", 1);
+  await settle();
+
+  const pending = b.transport.fetchState(b.transport.clientId);
+  await settle();
+  const state = await pending;
+  expect("moves" in state).toBe(false);
+});
