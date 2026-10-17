@@ -186,3 +186,55 @@ test("after a failed save, soon does not save again before the retry time", asyn
   }
   expect(save.mock.calls.length - failed).toBeLessThanOrEqual(8);
 });
+
+test("within arms a save ms from now when no deadline is set", async () => {
+  const { save, cp } = setup();
+  cp.within(1500);
+  await tick(1499);
+  expect(save).not.toHaveBeenCalled();
+  await tick(1);
+  expect(save).toHaveBeenCalledTimes(1);
+});
+
+test("within leaves an earlier deadline alone", async () => {
+  const { save, cp } = setup();
+  cp.soon();
+  const armed = cp.deadline;
+  cp.within(1500);
+  expect(cp.deadline).toBe(armed);
+  await tick(0);
+  expect(save).toHaveBeenCalledTimes(1);
+});
+
+test("within moves an 8 s deadline earlier to the requested one", async () => {
+  const { save, cp } = setup();
+  cp.changed();
+  cp.within(1500);
+  await tick(1500);
+  expect(save).toHaveBeenCalledTimes(1);
+});
+
+test("after a failed save, within arms no earlier than the retry time", async () => {
+  const { save, cp } = setup({ result: { ok: false, msgType: "error" } });
+  cp.changed();
+  await tick(CHECKPOINT_MS);
+  expect(save).toHaveBeenCalledTimes(1);
+  const armed = cp.deadline;
+  cp.within(100);
+  expect(cp.deadline).toBe(armed);
+  await tick(100);
+  expect(save).toHaveBeenCalledTimes(1);
+});
+
+test("within is a no-op while a save runs", async () => {
+  const { save, cp } = setup();
+  let resolve;
+  save.mockImplementation(() => new Promise((r) => (resolve = r)));
+  cp.changed();
+  await tick(CHECKPOINT_MS);
+  expect(save).toHaveBeenCalledTimes(1);
+  cp.within(1500);
+  expect(cp.deadline).toBeNull();
+  resolve({ ok: true });
+  await tick(0);
+});

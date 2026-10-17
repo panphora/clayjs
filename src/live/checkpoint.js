@@ -95,6 +95,13 @@ export function createCheckpoints({ needsSave, blocked, save, saveNow, now = () 
       const at = Math.max(now(), retryAt);
       if (deadline === null || at < deadline) arm(at);
     },
+    // Save no later than ms from now (the page editor's pause save). Never
+    // later than a deadline already set, never before a failed save's retry time.
+    within(ms) {
+      if (running) return;
+      const at = Math.max(now() + ms, retryAt);
+      if (deadline === null || at < deadline) arm(at);
+    },
     // True while the hide/close save is being made.
     get flushing() {
       return flushing;

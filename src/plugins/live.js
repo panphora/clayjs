@@ -61,10 +61,17 @@ function unsavedLiveChanges() {
   return false;
 }
 
+// Callbacks waiting for the file to catch up, run after every checkpoint save
+// and every time the room reports a landing.
+const fileWaiters = new Set();
+function fileMoved() {
+  for (const fn of [...fileWaiters]) fn();
+}
+
 const checkpoints = createCheckpoints({
   needsSave: unsavedLiveChanges,
   blocked: () => !baselineSettled() || isSaveConflicted() || autosaveIsSuspended(),
-  save: () => savePageForce(),
+  save: () => savePageForce().finally(fileMoved),
   saveNow: () => withKeepalive(true, () => savePageForce()),
 });
 
@@ -124,7 +131,10 @@ function laneOptions(transport) {
     entries,
     onWriter: () => checkpoints.changed(),
     onApplied: liveMoved,
-    onLanded: liveMoved,
+    onLanded: () => {
+      liveMoved();
+      fileMoved();
+    },
     onCheckpoint: () => checkpoints.soon(),
     onLeave: (name, at) => {
       const entry = entries.get(name);
@@ -441,6 +451,43 @@ export function openStores() {
 // The fast lane, for tests and the local tab lane.
 export function fastLane() {
   return fast;
+}
+
+// The page editor's pause save: checkpoint within ms of now. Only the room's
+// writer saves, so in other tabs this changes nothing.
+export function checkpointWithin(ms) {
+  checkpoints.within(ms);
+}
+
+// Resolves { ok: true } once the file holds every live change this tab knows
+// of now, or { ok: false, code: "timeout" }. The writer saves as soon as it
+// can; another tab waits for the writer's save to land.
+export function requestCheckpoint({ timeoutMs = 10_000 } = {}) {
+  const target = new Map();
+  for (const [name, entry] of entries) {
+    if (entry.store.ephemeral) continue;
+    target.set(name, entry.store.handle.status.mode === "fast" ? entry.last ?? 0 : null);
+  }
+  const reached = () => [...target].every(([name, last]) => {
+    const entry = entries.get(name);
+    if (!entry) return true;
+    if (last === null || entry.store.handle.status.mode !== "fast") return entry.store.pending.length === 0;
+    return (entry.landed ?? 0) >= last;
+  });
+  if (reached()) return Promise.resolve({ ok: true });
+  return new Promise((resolve) => {
+    const finish = (result) => {
+      clearTimeout(timer);
+      fileWaiters.delete(check);
+      resolve(result);
+    };
+    const check = () => {
+      if (reached()) finish({ ok: true });
+    };
+    const timer = setTimeout(() => finish({ ok: false, code: "timeout" }), timeoutMs);
+    fileWaiters.add(check);
+    if (isEditMode && (!fast || fast.isWriter())) checkpoints.soon();
+  });
 }
 
 export default live;
