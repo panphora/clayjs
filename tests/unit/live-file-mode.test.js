@@ -39,6 +39,17 @@ test("< is escaped, and an authored multi-line tag is written pretty", () => {
   expect(captured("a2")).toBe('{\n  "n": 1,\n  "msg": "\\u003c/script>"\n}');
 });
 
+test("live-format=\"lines\" writes each entry of a top-level object on its own line", () => {
+  document.body.innerHTML = `<script type="application/json" merge="a2l" clay="live" live-format="lines">{"blocks":{"p":{"c":"one"}},"deleted":{},"n":1}</script>`;
+  const store = live("a2l");
+  store.set("blocks.q", { c: "</script>" });
+  const text = captured("a2l");
+  expect(text).toBe('{"blocks":{\n"p":{"c":"one"},\n"q":{"c":"\\u003c/script>"}\n},\n"deleted":{},\n"n":1}');
+  expect(JSON.parse(text)).toEqual({ blocks: { p: { c: "one" }, q: { c: "</script>" } }, deleted: {}, n: 1 });
+  store.set("blocks.p.c", "two");
+  expect(captured("a2l").split("\n").filter((line) => line.includes("two"))).toEqual(['"p":{"c":"two"},']);
+});
+
 test("a never-saved store writes nothing into captures", () => {
   document.body.innerHTML = tag("a3", '{"x":0}', "live ephemeral");
   live("a3").set("x", 5);

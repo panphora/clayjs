@@ -225,7 +225,22 @@ function parseHtml(html) {
 // ops (the room may still refuse them).
 function textOf(entry) {
   const value = entry.store.handle.status.mode === "fast" ? entry.store.authoritative : entry.store.value;
-  return entry.pretty ? JSON.stringify(value, null, 2).replace(/</g, "\\u003c") : serializeLive(value);
+  if (entry.layout === "lines") return serializeLines(value);
+  return entry.layout === "pretty" ? JSON.stringify(value, null, 2).replace(/</g, "\\u003c") : serializeLive(value);
+}
+
+const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+
+// live-format="lines": each entry of each top-level object on its own line, so
+// a version diff of a large store (a page's blocks) shows only the entries
+// that changed.
+export function serializeLines(value) {
+  if (!isObject(value)) return serializeLive(value);
+  const parts = Object.entries(value).map(([key, inner]) => {
+    if (!isObject(inner) || !Object.keys(inner).length) return `${serializeLive(key)}:${serializeLive(inner)}`;
+    return `${serializeLive(key)}:{\n${Object.entries(inner).map(([k, v]) => `${serializeLive(k)}:${serializeLive(v)}`).join(",\n")}\n}`;
+  });
+  return `{${parts.join(",\n")}}`;
 }
 
 // A value another tab saved or relayed. It never confirms this tab's ops: equal
@@ -253,7 +268,8 @@ export function live(name) {
     throw new SyntaxError(`clay.live("${name}"): the tag's JSON does not parse: ${err.message}`);
   }
   const store = createStore({ name, value, ephemeral: tag.ephemeral });
-  const entry = { store, pretty: text.includes("\n"), framesSince: false, last: 0, landed: 0, leftAt: null };
+  const layout = tag.element.getAttribute("live-format") === "lines" ? "lines" : text.includes("\n") ? "pretty" : "line";
+  const entry = { store, layout, framesSince: false, last: 0, landed: 0, leftAt: null };
   entries.set(name, entry);
   if (!tag.ephemeral) store.onLocal(() => checkpoints.changed());
   store.onLocal((ops) => fast?.local(name, ops, store.mark));
