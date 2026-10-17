@@ -151,22 +151,7 @@ export const PROMPT_CSS = `.hcp {
 .hcp-file small { display: block; font-size: 12px; color: var(--hcp-muted); line-height: 1.4; }
 .hcp-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
 .hcp-actions .hcp-btn--primary { flex: 1 1 auto; }
-.hcp-signup { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--hcp-line); }
-.hcp-signup label { display: block; font-size: 13px; line-height: 1.45; color: var(--hcp-ink-2); margin-bottom: 8px; }
-.hcp-signup-row { display: flex; gap: 8px; }
-.hcp-signup-row[hidden] { display: none; }
-.hcp-signup input[type="email"] {
-  flex: 1 1 auto; min-width: 0; height: 34px; padding: 0 10px; margin: 0;
-  font: 14px var(--hcp-sans); color: var(--hcp-ink); background: var(--hcp-surface);
-  border: 1px solid var(--hcp-line-2); border-radius: 0; box-shadow: none;
-}
-.hcp-signup input[type="email"]:focus-visible { outline: 2px solid var(--hcp-brass); outline-offset: 1px; }
-.hcp-hp { position: absolute; left: -9999px; width: 1px; height: 1px; opacity: 0; }
-.hcp-msg { margin-top: 8px; font-size: 13px; color: var(--hcp-ink-2); }
-.hcp[data-hcp-reason="error"] .hcp-signup { display: none; }
-@media (max-width: 360px) { .hcp-signup-row { flex-direction: column; } }
-.hcp-foot { margin-top: 12px; display: flex; justify-content: space-between; align-items: center; gap: 10px; }
-.hcp-foot small { font-size: 12px; color: var(--hcp-muted); }
+.hcp-foot { margin-top: 12px; display: flex; justify-content: flex-end; }
 .hcp-quiet {
   min-height: 0; border-radius: 0;
   font-size: 12px; color: var(--hcp-muted); cursor: pointer;

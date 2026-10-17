@@ -1,11 +1,6 @@
 import { PROMPT_CSS } from "./prompt-style.js";
 import { announceBottomUi, bottomBarHeight } from "./bottom-ui.js";
 
-export const SIGNUP_COPY = {
-  thanks: "Thanks. Check your email for a link to confirm.",
-  failed: "That didn't go through. Check the address and try again.",
-};
-
 const FONT_HREF = "https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500&family=IBM+Plex+Sans:wght@400;500;600&family=Newsreader:opsz,wght@6..72,500&display=swap";
 
 const ASIDE = `<aside class="hcp" id="hcp" hidden aria-label="Download this app" data-hcp-state="tab" data-hcp-reason="open" sap-ignore clay="editor-ui">
@@ -18,18 +13,10 @@ const ASIDE = `<aside class="hcp" id="hcp" hidden aria-label="Download this app"
       <svg width="20" height="20" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M224,144v64a8,8,0,0,1-8,8H40a8,8,0,0,1-8-8V144a8,8,0,0,1,16,0v56H208V144a8,8,0,0,1,16,0Zm-101.66,5.66a8,8,0,0,0,11.32,0l40-40a8,8,0,0,0-11.32-11.32L136,124.69V32a8,8,0,0,0-16,0v92.69L93.66,98.34a8,8,0,0,0-11.32,11.32Z"/></svg>
       <div><b class="hcp-name" data-hcp-name>This app</b><small>One file with the whole app and your work in it</small></div>
     </div>
-    <p class="hcp-body">Open it with HTML Clay, a free app for Mac, Windows and Linux. It opens the file in a window and saves every change into it, so your work stays on your computer.</p>
     <div class="hcp-actions">
       <a class="hcp-btn hcp-btn--primary" data-hcp-link href="/_/download?as=htmlclay"><span><svg width="16" height="16" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M224,144v64a8,8,0,0,1-8,8H40a8,8,0,0,1-8-8V144a8,8,0,0,1,16,0v56H208V144a8,8,0,0,1,16,0Zm-101.66,5.66a8,8,0,0,0,11.32,0l40-40a8,8,0,0,0-11.32-11.32L136,124.69V32a8,8,0,0,0-16,0v92.69L93.66,98.34a8,8,0,0,0-11.32,11.32Z"/></svg>Download free</span></a>
-      <button type="button" class="hcp-btn" data-hcp="minimize"><span>Not now</span></button>
     </div>
-    <form class="hcp-signup" data-hcp-signup novalidate>
-      <label for="hcp-email">I make one of these about every two weeks. Get the next one by email.</label>
-      <div class="hcp-signup-row"><input id="hcp-email" type="email" autocomplete="email" required placeholder="you@example.com"><button type="submit" class="hcp-btn"><span>Send me the next one</span></button></div>
-      <input class="hcp-hp" name="website" tabindex="-1" autocomplete="off" aria-hidden="true">
-      <p class="hcp-msg" role="status" hidden></p>
-    </form>
-    <div class="hcp-foot"><small>Free, and the file is yours to keep.</small><button type="button" class="hcp-quiet" data-hcp="dismiss">Don&rsquo;t show again</button></div>
+    <div class="hcp-foot"><button type="button" class="hcp-quiet" data-hcp="dismiss">Don&rsquo;t show again</button></div>
   </section>
   <div class="hcp-dock">
     <button type="button" class="hcp-btn hcp-tab" data-hcp="open" aria-controls="hcp-card" aria-expanded="false" aria-label="This app is free to keep"><span><svg width="16" height="16" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M224,144v64a8,8,0,0,1-8,8H40a8,8,0,0,1-8-8V144a8,8,0,0,1,16,0v56H208V144a8,8,0,0,1,16,0Zm-101.66,5.66a8,8,0,0,0,11.32,0l40-40a8,8,0,0,0-11.32-11.32L136,124.69V32a8,8,0,0,0-16,0v92.69L93.66,98.34a8,8,0,0,0-11.32,11.32Z"/></svg><span class="hcp-tab__label">This app is free to keep</span></span></button>
@@ -37,7 +24,7 @@ const ASIDE = `<aside class="hcp" id="hcp" hidden aria-label="Download this app"
   </div>
 </aside>`;
 
-export function mountPrompt({ memory, appName, link, tag, source }) {
+export function mountPrompt({ memory, appName, link }) {
   if (!document.getElementById("hcp-style")) {
     document.head.insertAdjacentHTML("beforeend", `<link rel="stylesheet" clay="editor-ui" href="${FONT_HREF}">\n<style clay="editor-ui" id="hcp-style">${PROMPT_CSS}</style>`);
   }
@@ -54,31 +41,6 @@ export function mountPrompt({ memory, appName, link, tag, source }) {
 
   const linkEl = root.querySelector("[data-hcp-link]");
   linkEl.href = link;
-
-  const signup = root.querySelector("[data-hcp-signup]");
-  if (signup) {
-    const email = signup.querySelector("#hcp-email");
-    const honey = signup.querySelector(".hcp-hp");
-    const row = signup.querySelector(".hcp-signup-row");
-    const message = signup.querySelector(".hcp-msg");
-    signup.addEventListener("submit", (event) => {
-      event.preventDefault();
-      fetch("/_/newsletter/subscribe", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "same-origin",
-        body: JSON.stringify({ email: email.value.trim(), tags: [tag], source, website: honey.value }),
-      }).then((response) => {
-        if (!response.ok) throw new Error("signup failed");
-        row.hidden = true;
-        message.textContent = SIGNUP_COPY.thanks;
-        message.hidden = false;
-      }).catch(() => {
-        message.textContent = SIGNUP_COPY.failed;
-        message.hidden = false;
-      });
-    });
-  }
 
   if (appName) root.querySelector("[data-hcp-name]").textContent = appName;
 

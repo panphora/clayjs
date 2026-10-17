@@ -3,7 +3,7 @@ import { hasSaveToken } from "../core/host-attrs.js";
 import { draftSlot, setDraftTransport, setDraftFlush } from "../core/draft-mode.js";
 import { createStore, safeStorage } from "./visitor-drafts/store.js";
 import { createUiMemory } from "./visitor-drafts/ui-memory.js";
-import { rememberSource, downloadUrl, signupTag } from "./visitor-drafts/source.js";
+import { rememberSource, downloadUrl } from "./visitor-drafts/source.js";
 import { mountPrompt } from "./visitor-drafts/prompt.js";
 import { mountIntro } from "./visitor-drafts/intro.js";
 import { mountOwnerChip } from "./visitor-drafts/owner-chip.js";
@@ -30,7 +30,7 @@ if (isDraftMode && slot && rulesTag) {
   const appName = document.querySelector('meta[name="application-name"]')?.content?.trim() || document.title.split(/:|\s\|\s/)[0].trim() || "This app";
   const template = document.querySelector("template[visitor-intro]");
   const start = () => {
-    const prompt = mountPrompt({ memory, appName, link: downloadLink, tag: signupTag(slot, template), source });
+    const prompt = mountPrompt({ memory, appName, link: downloadLink });
     mountIntro({ memory, template, appName, hadDraft: result.hadDraft });
     if (isOwner) mountOwnerChip();
     document.addEventListener("clay:drafts-store-failed", () => prompt.showError());

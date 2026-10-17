@@ -14,8 +14,3 @@ export function downloadUrl(src, loc = window.location) {
   return `/_/download${path}?as=htmlclay${src ? `&src=${encodeURIComponent(src)}` : ""}`;
 }
 
-export function signupTag(slot, template) {
-  const explicit = template?.getAttribute("signup-tag");
-  const name = explicit || slot.replace(/-v\d+$/, "");
-  return `app-${name}`.slice(0, 50);
-}

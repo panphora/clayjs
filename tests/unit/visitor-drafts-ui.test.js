@@ -89,10 +89,6 @@ function typeInto(el, value) {
   el.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
-function submitSignup() {
-  document.querySelector("[data-hcp-signup]").dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
-}
-
 function prompt() {
   return document.querySelector(".hcp");
 }
@@ -385,62 +381,16 @@ test("no About this app control ever appears, even for a returning visitor", asy
   expect(document.getElementById("clay-intro-style")?.textContent || "").not.toContain(".clay-about");
 });
 
-test("the download card holds the signup form and posts the address, the app tag and the channel", async () => {
-  const first = await bootPage({ slot: "kanban-v1", template: INTRO, url: "/kanban.html?src=bsky" });
-  expect(prompt().querySelector("[data-hcp-signup]")).not.toBeNull();
-  expect(document.getElementById("hcp-email")).not.toBeNull();
+test("the download card holds only the pitch, the file, the download link and Don't show again", async () => {
+  const { fetchMock } = await bootPage({ slot: "kanban-v1", template: INTRO, url: "/kanban.html?src=bsky" });
+  const card = prompt().querySelector(".hcp-card");
 
-  document.getElementById("hcp-email").value = "reader@example.com";
-  submitSignup();
-  await new Promise((resolve) => setTimeout(resolve, 0));
-
-  expect(first.fetchMock).toHaveBeenCalledTimes(1);
-  const [url, options] = first.fetchMock.mock.calls[0];
-  expect(url).toBe("/_/newsletter/subscribe");
-  expect(options.method).toBe("POST");
-  expect(options.headers).toEqual({ "Content-Type": "application/json" });
-  expect(options.credentials).toBe("same-origin");
-  expect(JSON.parse(options.body)).toEqual({
-    email: "reader@example.com",
-    tags: ["app-kanban"],
-    source: "bsky",
-    website: "",
-  });
-  expect(prompt().querySelector(".hcp-msg").textContent).toBe("That didn't go through. Check the address and try again.");
-  expect(prompt().querySelector(".hcp-signup-row").hidden).toBe(false);
-
-  const second = await bootPage({ slot: "field-pad-v1", template: '<template visitor-intro signup-tag="field-pad"><p>Pad.</p></template>' });
-  document.getElementById("hcp-email").value = "reader@example.com";
-  submitSignup();
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  expect(JSON.parse(second.fetchMock.mock.calls[0][1].body).tags).toEqual(["app-field-pad"]);
-});
-
-test("a successful signup hides the row and shows the thanks copy", async () => {
-  await bootPage({ slot: "ui-signup-ok" });
-  window.fetch = jest.fn(async () => ({ ok: true }));
-
-  document.getElementById("hcp-email").value = "reader@example.com";
-  submitSignup();
-  await new Promise((resolve) => setTimeout(resolve, 0));
-
-  expect(prompt().querySelector(".hcp-signup-row").hidden).toBe(true);
-  expect(prompt().querySelector(".hcp-msg").textContent).toBe("Thanks. Check your email for a link to confirm.");
-  expect(prompt().querySelector(".hcp-msg").hidden).toBe(false);
-});
-
-test("the card's signup field is ours: typing in it is not a use of the app", async () => {
-  const { key } = await bootPage({ slot: "ui-signup-typing", template: INTRO });
-  const email = document.getElementById("hcp-email");
-
-  typeInto(email, "r");
-  typeInto(email, "re");
-  typeInto(email, "rea");
-  await new Promise((resolve) => setTimeout(resolve, 2600));
-
-  expect(prompt().getAttribute("data-hcp-state")).toBe("tab");
-  const record = JSON.parse(localStorage.getItem(key) || "{}");
-  expect(record.prompt?.uses || 0).toBe(0);
+  expect(card.querySelector("form, input")).toBeNull();
+  expect(card.textContent).not.toContain("HTML Clay");
+  expect(card.textContent).not.toContain("Not now");
+  expect(card.querySelector("[data-hcp-link]").getAttribute("href")).toBe("/_/download/kanban.html?as=htmlclay&src=bsky");
+  expect(card.querySelector(".hcp-foot [data-hcp=dismiss]").textContent).toBe("Don\u2019t show again");
+  expect(fetchMock).not.toHaveBeenCalled();
 });
 
 test("the card's minimize button is a boxed minus and the download controls use bevel's download icon", async () => {
