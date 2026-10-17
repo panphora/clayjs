@@ -40,14 +40,12 @@
 <main class="page">
 
   <section style="border-top: none; padding-top: 56px;">
-    <span class="eyebrow">Advanced</span>
     <h1 class="display" style="font-size: clamp(30px, 4.5vw, 42px);">When you need more</h1>
     <p class="lede" style="margin-top: 12px;">Everything here is optional. The first half is advanced control over the save lifecycle itself; the second half is separate libraries you add with their own script tags.</p>
   </section>
 
   <!-- ====== REGION REFERENCE ====== -->
   <section id="regions">
-    <span class="eyebrow">The clay attribute</span>
     <h2 class="section-title">Region reference</h2>
     <p>One attribute controls how any element takes part in saving. Keywords combine with spaces: <code>clay="freeze no-undo"</code>.</p>
     <table>
@@ -77,7 +75,6 @@
 
   <!-- ====== CUSTOM ATTRIBUTES THAT RESPECT REGIONS ====== -->
   <section id="custom-attrs">
-    <span class="eyebrow">Your own attributes</span>
     <h2 class="section-title">Respecting regions from your own code</h2>
     <p>Writing a custom attribute that touches the save? Ask clayjs what a region means instead of matching <code>[no-save]</code> yourself. That's what <code>clay.internals.region</code> is for: it's the same policy the library uses, so your attribute can't stop agreeing with it two releases from now. It needs one extra script tag, the <a href="/docs#internals">internals satellite</a>.</p>
     <pre><code class="language-markup">&lt;script src="https://clayjs.com/v1/clay-internals.js"&gt;&lt;/script&gt;</code></pre>
@@ -101,7 +98,6 @@ clay.internals.addDocumentTransform(clone =&gt; {
 
   <!-- ====== ADVANCED SAVE ATTRIBUTES ====== -->
   <section id="save-attrs">
-    <span class="eyebrow">Hooks into the save</span>
     <h2 class="section-title">Advanced save attributes</h2>
 
     <div class="libcard">
@@ -139,7 +135,6 @@ clay.internals.addDocumentTransform(clone =&gt; {
 
   <!-- ====== SEPARATE LIBRARIES ====== -->
   <section id="libraries">
-    <span class="eyebrow">Separate libraries</span>
     <h2 class="section-title">Bring them in when the problem shows up</h2>
     <p>These aren't checkboxes; each is its own library with its own script tag and docs. Like clayjs, they are HTML-first with no build step.</p>
     <p class="small">Each loads as a plain <code>&lt;script&gt;</code>. To call one from an inline script right after its tag, wait for it first: <code>await clay.loaded.ui</code> (or <code>.dom</code>, <code>.all</code>, <code>.utils</code>, <code>.events</code>, <code>.options</code>, <code>.data</code>, <code>.sap</code>).</p>

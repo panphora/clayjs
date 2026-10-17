@@ -75,7 +75,6 @@ export function renderGuide(markdown, shellHtml) {
   main.className = 'page guide';
   main.innerHTML = `
   <section style="border-top: none; padding-top: 56px;">
-    <span class="eyebrow"><a href="/guide">Guide</a> · Complete</span>
     <h1 class="display" style="font-size: clamp(30px, 4.5vw, 42px);">${title}</h1>
     <details class="fold toc"><summary><span class="prob">Contents</span></summary><div class="fold-body"><ol>${toc.join('')}</ol></div></details>
   </section>

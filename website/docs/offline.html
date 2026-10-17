@@ -40,14 +40,12 @@
 <main class="page">
 
   <section style="border-top: none; padding-top: 56px;">
-    <span class="eyebrow"><a href="/docs">Docs</a> · Offline</span>
     <h1 class="display" style="font-size: clamp(30px, 4.5vw, 42px);">One file, no network</h1>
     <p class="lede" style="margin-top: 12px;"><code>clay.js</code> is a 3 KB bootstrap that fetches the modules a page asked for. The standalone build is every one of those modules in a single readable file. Download it once, keep it beside your HTML, and the page loads with no connection at all.</p>
   </section>
 
   <!-- ====== DOWNLOAD ====== -->
   <section id="download">
-    <span class="eyebrow">Download</span>
     <h2 class="section-title">clay.standalone.js</h2>
     <p><a class="btn" href="/v1/clay.standalone.js" download>Download clay.standalone.js</a></p>
     <p class="small">About 1 MB of readable source. MIT-0 for the clayjs code; the third-party notices for the libraries inside are on the first lines of the file. <code>/v1/clay.standalone.js</code> is the newest 1.x; <code>/1.1.0/clay.standalone.js</code> is that exact release, forever. The first line of the file names its version. It is also in the npm package, at <code>dist/clay.standalone.js</code>.</p>
@@ -55,7 +53,6 @@
 
   <!-- ====== USE ====== -->
   <section id="use">
-    <span class="eyebrow">Use</span>
     <h2 class="section-title">The same tag, pointed at the file</h2>
     <pre><code class="language-markup">&lt;script src="clay.standalone.js?plugins=sync"&gt;&lt;/script&gt;</code></pre>
     <p>Same query params as <code>clay.js</code>: <code>plugins</code> and <code>exclude</code>. Everything is inside the file, so <code>plugins=</code> decides what runs, not what downloads. The <a href="/advanced">satellites</a> are inside too: <code>await clay.loaded.ui</code>, <code>clay.loaded.sap</code> and the rest work without a tag of their own.</p>
@@ -65,7 +62,6 @@
 
   <!-- ====== SAVING ====== -->
   <section id="saving">
-    <span class="eyebrow">Saving</span>
     <h2 class="section-title">Offline still needs a writer</h2>
     <p>The library is now on your disk. Saving is a separate job: something has to take the edited document and write the bytes. <a href="https://htmlclay.com">HTML Clay</a> does that on the machine itself, with no network. It serves the file at <code>127.0.0.1</code>, stamps the save token that switches clayjs into edit mode, and writes every save back to disk. Wi-Fi off, everything works.</p>
     <p class="small">A file opened straight from disk (<code>file://</code>) loads and renders, but has nowhere to post a save to. It stays in view mode unless you force edit mode, and then a save reports an error and your edits stay in the tab.</p>
@@ -73,7 +69,6 @@
 
   <!-- ====== EXCEPTIONS ====== -->
   <section id="network">
-    <span class="eyebrow">Two exceptions</span>
     <h2 class="section-title">What still reaches out</h2>
     <p>Both are opt-in, and both fail soft.</p>
     <table>
@@ -85,7 +80,6 @@
 
   <!-- ====== UPDATING ====== -->
   <section id="updating">
-    <span class="eyebrow">Updating</span>
     <h2 class="section-title">When you want a newer clayjs</h2>
     <p>Download again and replace the file. Nothing else changes: the tag, the params and your document stay as they are. To see what you have, read the first line of the file.</p>
     <p class="small">The rolling <code>/v1/</code> URL updates on its own for pages that load from the network. A file you downloaded does not, on purpose.</p>
