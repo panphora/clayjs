@@ -347,12 +347,13 @@ const blocks = [`
 
 for (const major of heads.keys()) {
   blocks.push(`/v${major}/*\n  Cache-Control: public, max-age=600`);
-  blocks.push(`/v${major}/src/*\n  Access-Control-Allow-Origin: *`);
 }
 for (const version of pins) {
   blocks.push(`/${version}/*\n  Cache-Control: public, max-age=31536000, immutable`);
-  blocks.push(`/${version}/src/*\n  Access-Control-Allow-Origin: *`);
 }
+// One placeholder rule gives every prefix's module tree its CORS header, rolling and pinned
+// alike, so a release costs one rule instead of two. No site path has a src/ directory.
+blocks.push(`/:prefix/src/*\n  Access-Control-Allow-Origin: *`);
 // Cloudflare Pages serves an HTML page at its extensionless path and answers the
 // .html spelling with a 307, so a rule naming only the file lands on the redirect
 // and the page itself carries no Cache-Control at all. Both spellings get the rule,
@@ -380,7 +381,7 @@ const headers = (await readFile(headersPath, 'utf8')).trimEnd() + '\n' + blocks.
 await writeFile(headersPath, headers);
 
 // Cloudflare Pages stops at 100 rules and ignores the rest, silently. Each release
-// adds two, so this grows on its own and the first symptom would be a pinned prefix
+// adds one, so this grows on its own and the first symptom would be a pinned prefix
 // quietly losing its CORS header long after the release that crossed the line.
 const ruleCount = headers.split('\n').filter((line) => line.startsWith('/')).length;
 if (ruleCount > 90) {
