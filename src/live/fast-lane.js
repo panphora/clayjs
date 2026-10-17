@@ -91,6 +91,8 @@ export function createFastLane({
   // newest op id ever put in a frame.
   const lanes = new Map();
 
+  const tell = (name, event) => entries.get(name)?.store.deliver?.({ code: null, n: null, seq: null, through: null, retryAfter: null, ...event });
+
   function laneOf(name) {
     let lane = lanes.get(name);
     if (!lane) lanes.set(name, (lane = { n: 0, unsent: [], awaiting: [], framed: 0 }));
@@ -115,7 +117,7 @@ export function createFastLane({
     const store = entries.get(name)?.store;
     let through = 0;
     for (const frame of lane.awaiting) if (!unapplied(frame)) through = frame.through;
-    if (store && through) store.rebase(store.authoritative, { source: "state", through });
+    if (store && through) store.rebase(store.authoritative, { source: "state", through, cause: "leave" });
     onLeave(name, { epoch, seq });
     lane.unsent = [];
     lane.awaiting = [];
@@ -156,7 +158,8 @@ export function createFastLane({
         const [entry] = lane.unsent.splice(0, 1);
         console.warn(`clay.live("${name}"): one update was larger than ${FRAME_BYTES} bytes, so it was undone`);
         const store = entries.get(name)?.store;
-        store?.rebase(store.authoritative, { source: "state", through: entry.id });
+        store?.rebase(store.authoritative, { source: "state", through: entry.id, cause: "undone" });
+        tell(name, { phase: "undone", code: "op-too-large", through: entry.id });
         continue;
       }
       const take = lane.unsent.splice(0, count);
@@ -178,6 +181,7 @@ export function createFastLane({
     const sentEpoch = epoch;
     frame.sentOn = connection;
     frame.sent = true;
+    tell(name, { phase: "sent", n: frame.n, through: frame.through });
     // Refusal is evidence about earlier attempts only: this one may apply.
     frame.refused = false;
     inFlight = true;
@@ -212,7 +216,7 @@ export function createFastLane({
     }
     lane.awaiting.splice(lane.awaiting.indexOf(frame), 1);
     const store = entries.get(name)?.store;
-    store?.rebase(store.authoritative, { source: "state", through: frame.through });
+    store?.rebase(store.authoritative, { source: "state", through: frame.through, cause: "decided" });
   }
 
   // Every frame the room ordered at or before the applied seq is in the
@@ -225,7 +229,7 @@ export function createFastLane({
       }
       if (through === undefined) continue;
       const store = entries.get(name)?.store;
-      store?.rebase(store.authoritative, { source: "state", through });
+      store?.rebase(store.authoritative, { source: "state", through, cause: "settled" });
     }
   }
 
@@ -246,12 +250,14 @@ export function createFastLane({
         return;
       }
       frame.seq = Number.isInteger(body?.seq) ? body.seq : null;
+      tell(name, { phase: "landed", n: frame.n, seq: frame.seq, through: frame.through });
       // Its event already went by, or came inside a state this tab took: the ops are in.
       settleAwaiting();
       return;
     }
     if (transient(status)) {
       frame.sent = false;
+      tell(name, { phase: "retry", code: body?.code ?? (status === 0 ? "offline" : status === 429 ? "rate-limited" : "server"), n: frame.n, through: frame.through, retryAfter: retryAfter ?? null });
       if (unhandled(status)) frame.refused = true;
       else {
         frame.uncertain = true;
@@ -268,6 +274,7 @@ export function createFastLane({
       // The room holds a receipt for every connected sender and has no room for
       // this one: this store goes at save speed until the room takes it back.
       if (status === 503 && body?.code === "busy") {
+        tell(name, { phase: "left", code: "busy", n: frame.n, through: frame.through });
         console.warn(`clay.live("${name}"): the room is full, so it stays at save speed for now`);
         roomNames.delete(name);
         leaveRoom(name, lane);
@@ -285,12 +292,14 @@ export function createFastLane({
       return;
     }
     if (REVOKED.has(status)) {
+      tell(name, { phase: "refused", code: "revoked", n: frame.n, through: frame.through });
       if (!frame.uncertain) frame.refused = true;
       stop();
       return;
     }
     const reason = body?.error || body?.code || `status ${status}`;
     if (status === 404) {
+      tell(name, { phase: "left", code: "no-store", n: frame.n, through: frame.through });
       console.warn(`clay.live("${name}"): the room has no such store, so it stays at save speed (${reason})`);
       frame.refused = true;
       roomNames.delete(name);
@@ -299,8 +308,9 @@ export function createFastLane({
     }
     lane.awaiting.splice(lane.awaiting.indexOf(frame), 1);
     const store = entries.get(name)?.store;
+    tell(name, { phase: "refused", code: body?.code ?? "refused", n: frame.n, through: frame.through });
     console.warn(`clay.live("${name}"): the host refused an update, so it was undone (${reason})`);
-    store?.rebase(store.authoritative, { source: "state", through: frame.through });
+    store?.rebase(store.authoritative, { source: "state", through: frame.through, cause: "refused" });
   }
 
   function apply(frame) {
@@ -321,10 +331,11 @@ export function createFastLane({
       const i = lane.awaiting.findIndex((sent) => sent.n === frame.n);
       if (i >= 0) {
         through = lane.awaiting[i].through;
+        tell(frame.name, { phase: "echoed", n: frame.n, seq: frame.seq, through });
         lane.awaiting.splice(0, i + 1);
       }
     }
-    store.rebase(next, { source: own ? "state" : "remote", through });
+    store.rebase(next, { source: own ? "state" : "remote", through, frame: { seq: frame.seq, from: frame.from, n: frame.n, ops: frame.ops } });
     entries.get(frame.name).last = frame.seq;
     onApplied();
     if (frame.checkpoint === true) onCheckpoint();
@@ -411,7 +422,7 @@ export function createFastLane({
           frame.seq = null;
         }
         lane.awaiting = resend;
-        entry.store.rebase(room.value, { source: "state", through: through || undefined });
+        entry.store.rebase(room.value, { source: "state", through: through || undefined, room: { seq, fresh: true, moves: state.moves?.[name] ?? null, floor: Number.isInteger(room.floor) ? room.floor : null } });
         lane.unsent = unframed(name, lane);
       } else {
         const seen = room.seen ? room.seen[clientId] : undefined;
@@ -439,7 +450,7 @@ export function createFastLane({
           }
         }
         lane.awaiting = next;
-        entry.store.rebase(room.value, { source: "state", through });
+        entry.store.rebase(room.value, { source: "state", through, room: { seq, fresh: false, moves: state.moves?.[name] ?? null, floor: Number.isInteger(room.floor) ? room.floor : null } });
         // Back in the room after a spell at save speed: frame what was made meanwhile.
         if (rejoined) {
           lane.unsent = unframed(name, lane);
@@ -544,7 +555,10 @@ export function createFastLane({
         stateCount++;
         for (const [name, landed] of Object.entries(data.landed)) {
           const entry = entries.get(name);
-          if (entry && Number.isInteger(landed)) entry.landed = landed;
+          if (entry && Number.isInteger(landed)) {
+            entry.landed = landed;
+            tell(name, { phase: "checkpointed", seq: landed });
+          }
         }
         onLanded();
       }

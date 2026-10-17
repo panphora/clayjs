@@ -47,6 +47,8 @@ export function createStore({ name, value, ephemeral = false }) {
   let mode = "file";
   const listeners = new Set();
   const sinks = new Set();
+  const rebases = new Set();
+  const deliveries = new Set();
   const views = new WeakMap();
 
   function emit(source, ops) {
@@ -275,17 +277,46 @@ export function createStore({ name, value, ephemeral = false }) {
     // `confirmed` pending ops, or every op up to the mark `through`. The rest
     // replay over it; a pending op that no longer applies is dropped too.
     // Listeners hear about it only when the value page code sees changed.
-    rebase(next, { source = "remote", confirmed = 0, through } = {}) {
+    rebase(next, { source = "remote", confirmed = 0, through, frame = null, room = null, cause = null } = {}) {
       if (!isContainer(next) || kind(next) !== kind(state)) {
         console.warn(`clay.live("${name}"): ignored an incoming value that is not ${kind(state)}`);
         return false;
       }
       const before = serializeLive(state);
+      const prev = authoritative;
       authoritative = cloneJson(next);
       pending = through === undefined ? pending.slice(confirmed) : pending.filter((entry) => entry.id > through);
       rebuild();
+      for (const fn of [...rebases]) {
+        try {
+          fn({ source, frame, room, cause, prev, next: authoritative });
+        } catch (err) {
+          console.error(`clay.live("${name}"): a rebase listener threw`, err);
+        }
+      }
       if (serializeLive(state) !== before) emit(source, null);
       return true;
+    },
+    // Every rebase, whether or not the value page code sees changed, with what
+    // caused it: the frame the room applied, the state read, or the lane's own
+    // settling. For the page editor; never on the handle.
+    onRebase(fn) {
+      rebases.add(fn);
+      return () => rebases.delete(fn);
+    },
+    // What became of this tab's frames: { phase, code, n, seq, through, retryAfter }.
+    onDelivery(fn) {
+      deliveries.add(fn);
+      return () => deliveries.delete(fn);
+    },
+    deliver(event) {
+      for (const fn of [...deliveries]) {
+        try {
+          fn(event);
+        } catch (err) {
+          console.error(`clay.live("${name}"): a delivery listener threw`, err);
+        }
+      }
     },
   };
 }
