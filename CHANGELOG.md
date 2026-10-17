@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.12.2] - 2026-10-16
+
+### Added
+- Message plugin for contact forms that send to the document's owner, using the host's bot check token
+- Page plugin phase 1 with a ProseMirror vendor bundle, page schema and block record model
+
+### Changed
+- Vendored hyper-html-api 0.11.2, which keeps the leading newline in pre and textarea writes
+- Card test drops the duplicate link check and an assertion that could not fail
+- Download tab slides in from the right 3s after load, over 2.4s
+- Download card shows only the pitch, the file and the download link
+- Spec repo references follow the rename to malleabledocument
+
+
+
 ## [1.12.1] - 2026-10-16
 
 ### Changed
