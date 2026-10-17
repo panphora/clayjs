@@ -76,6 +76,17 @@ export default function enablePersistentFormInputValues(filterBySelector = PERSI
     if ((el.matches(inputSelector) && (el.type === 'checkbox' || el.type === 'radio')) ||
         el.matches(selectSelector)) {
       serializeControlToAttributes(el);
+      // Checking a radio unchecks its group without a change event on the others,
+      // so their checked attributes are cleared here; otherwise two radios in one
+      // group carry checked and an undo or reload picks the wrong one.
+      if (el.type === 'radio' && el.name) {
+        const group = el.form ? [...el.form.elements] : [...document.getElementsByName(el.name)];
+        for (const other of group) {
+          if (other !== el && other.type === 'radio' && other.name === el.name && other.form === el.form && other.matches(inputSelector)) {
+            serializeControlToAttributes(other);
+          }
+        }
+      }
     }
   }, true);
 

@@ -81,6 +81,8 @@ export async function loadExample(file, { editMode = true, draft = false } = {})
   let resolveReady;
   window.clay = { loaded: {} };
   window.clay.ready = new Promise((r) => { resolveReady = r; });
+  const bootstrap = readFileSync(path.join(process.cwd(), "entries/clay.js"), "utf8");
+  new Function("clay", bootstrap.match(/if \(!clay\.start\) \{[\s\S]*?\n {4}\};\n {2}\}/)[0])(window.clay);
   const settled = new Promise((r) => document.addEventListener("clay:baseline-settled", r, { once: true }));
 
   for (const name of satellites) {

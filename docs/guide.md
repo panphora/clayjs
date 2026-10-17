@@ -104,10 +104,7 @@ Start every app from [`examples/skeleton.html`](https://clayjs.com/examples/skel
 <script src="https://clayjs.com/v1/clay-options.js"></script>
 <script src="https://clayjs.com/v1/clay-ui.js"></script>
 <script>
-clay.ready.then(() => {
-  if (window.__appStarted) return;
-  window.__appStarted = true;
-
+clay.start(() => {
   const items = document.getElementById("items");
   const newId = (prefix) => prefix + "-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   const command = (label, fn) => (clay.undo ? clay.undo.commit(label, fn) : fn());
@@ -142,10 +139,6 @@ clay.ready.then(() => {
     setText(chrome.querySelector("#view-state"), hidden.map((li) => `#items > [data-id="${CSS.escape(li.dataset.id)}"]{display:none}`).join("\n"));
   }
 
-  function syncCheckboxes() {
-    for (const box of items.querySelectorAll("input[type=checkbox]")) box.checked = box.hasAttribute("checked");
-  }
-
   document.addEventListener("click", (event) => {
     const button = event.target.closest("[data-action]");
     if (!button || !clay.isEditMode) return;
@@ -168,12 +161,8 @@ clay.ready.then(() => {
     }
   });
 
-  document.addEventListener("clay:sync-applied", () => { syncCheckboxes(); render(); });
-  clay.undo?.on("undo", syncCheckboxes);
-  clay.undo?.on("redo", syncCheckboxes);
   window.addEventListener("hashchange", () => { filter.value = new URLSearchParams(location.hash.slice(1)).get("q") || ""; render(); });
-  new MutationObserver(render).observe(items, { subtree: true, childList: true, attributes: true, characterData: true });
-  render();
+  clay.effect(render);
 });
 </script>
 </body>
@@ -188,13 +177,12 @@ What each part does, and the section that explains it:
 - **The templates** are blueprints. `item-tpl` holds a new row in its **active form** (`contenteditable="plaintext-only"`, no `disabled`), because a clone is inserted while the owner is editing and the mode transform never touches template content (4.4).
 - **`chrome-tpl`** is cloned once into a `clay="editor-ui"` wrapper. The summary, the filter and the `#view-state` style live there, so none of them is saved, synced or undone (5.2, 9.3).
 - **The script tags**: core with `sync,sortable,undo,indicator`, `exclude=richclay` because this app has no rich text, then the `clay-options` and `clay-ui` satellites (3).
-- **The boot guard** `window.__appStarted` stops a second run if a live-sync merge re-inserts the script (9.10).
+- **`clay.start`** runs the app code once, after boot. A live-sync merge can re-insert the script, and the repeat call does nothing (9.10).
 - **`newId`** makes ids from a timestamp and random suffix. `crypto.randomUUID` exists only in secure contexts, so it fails on a file served over plain http from another machine (5.5).
 - **`command`** wraps every record write in an undo step when the undo plugin is loaded (8.3).
 - **The `onSnapshot` hook** strips Sortable's drag residue (`draggable="false"`, empty `style`, drag classes) from every snapshot, so a drag never writes it into the file (6.6).
 - **`render`** derives the summary and the filter style from the record. It writes only when text changes, because writing the same text is still a mutation (9.4).
-- **`syncCheckboxes`** puts each checkbox's displayed state back in step with its `checked` attribute after undo, redo or a merge, which change the attribute but not the property (8.3).
-- **The `MutationObserver`** re-renders on any record change: local typing, drag, merge or undo. It observes only the record, so the chrome's own writes do not feed back.
+- **`clay.effect(render)`** runs `render` now and again after any change to the document: local typing, a drag, a merge, undo or redo. `render` writes only into the chrome, and an effect's own writes never re-trigger it (7.5).
 
 The test suite checks this file opens without becoming dirty, saves the record and no chrome, keeps the filter out of the file, keeps undo and the screen in step, mints unique ids, merges a peer's edit beside an unsaved local edit, and gives a viewer inert text and disabled checkboxes.
 
@@ -267,7 +255,7 @@ Satellites do not wait for `clay.ready` and work without `clay.js` at all, inclu
 
 ### 3.4 `clay.ready`
 
-`clay.ready` is a promise that resolves with `window.clay` once boot is done and every plugin has loaded. `clay:ready` fires on `document` at the same moment. Before it resolves, members like `clay.save` and `clay.undo` do not exist. Start app code with `clay.ready.then(...)`.
+`clay.ready` is a promise that resolves with `window.clay` once boot is done and every plugin has loaded. `clay:ready` fires on `document` at the same moment. Before it resolves, members like `clay.save` and `clay.undo` do not exist. Start app code with `clay.start(...)`: it waits for `clay.ready` and runs once per page (9.10).
 
 You can set configuration before the tag, and the loader merges into it: `window.clay = { saveToast: true }`.
 
@@ -465,32 +453,7 @@ A control's typed value is a property, not an attribute, and serialization only 
 - A persist control's value change counts as an edit and starts autosave.
 - Do not persist a filter or search box. Those are tab-local: put them in chrome (9.3).
 
-**After undo, redo or a merge, the screen can disagree with the file.** Undo and sync restore the attribute, but the browser's checkbox and input display follow the property once the user has touched the control. Re-sync the property from the attribute on all three events, as the skeleton and kanban do for checkboxes:
-
-```js
-function syncCheckboxes() {
-  for (const box of root.querySelectorAll("input[type=checkbox][persist]")) box.checked = box.hasAttribute("checked");
-}
-document.addEventListener("clay:sync-applied", syncCheckboxes);
-clay.undo?.on("undo", syncCheckboxes);
-clay.undo?.on("redo", syncCheckboxes);
-```
-
-Text and number inputs need the same for `value`, and it matters more there: a save copies the live value into the file, so after an undo that left the old number on screen, the next save writes the undone value back. The finance tracker re-syncs every persisted input, skipping the focused one after a merge (7.4), then refreshes sap:
-
-```js
-function syncControls({ keepFocused = false } = {}) {
-  for (const input of app.querySelectorAll("input[persist]")) {
-    if (keepFocused && input === document.activeElement) continue;
-    const value = input.getAttribute("value") ?? "";
-    if (input.value !== value) input.value = value;
-  }
-  Sap.refresh();
-}
-clay.undo?.on("undo", () => syncControls());
-clay.undo?.on("redo", () => syncControls());
-document.addEventListener("clay:sync-applied", () => syncControls({ keepFocused: true }));
-```
+**After undo, redo or a merge, ClayJS puts each control's display back in step with its attributes.** A control the user has touched shows its live property, not its attribute, so a merge and the undo plugin copy `checked`, `value` and `selected` back onto the property (undo does this for `persist` controls outside `no-undo` regions). A merge leaves the focused text field alone; undo, which the user asked for, restores it too.
 
 ### 5.4 Where to keep data that is not visible text
 
@@ -777,16 +740,31 @@ document.addEventListener("clay:sync-applied", () => {
 
 ### 7.5 Reconciling in app code
 
-After `clay:sync-applied`, rebuild everything derived from the record and every piece of chrome that points into it:
+Draw everything derived from the record inside `clay.effect(fn)`. It runs `fn` on the next microtask, then again after every change the mutation hub observes (local edits, drags, undo and redo) and after every merge, batched to one run per microtask. Changes inside `editor-ui` or `no-watch` regions, ephemeral attributes and live properties with no attribute change do not re-run it. `fn` runs with the hub paused, so its own writes never re-trigger it, start an autosave or enter undo history. It returns a function that stops it.
 
 ```js
-document.addEventListener("clay:sync-applied", (event) => {
-  syncCheckboxes();
-  render();
+clay.effect(() => {
+  const rows = items.querySelectorAll(":scope > li");
+  const done = items.querySelectorAll("input[checked]").length;
+  setText(summary, `${done} of ${rows.length} read`);
 });
 ```
 
-- Re-render derived values and projections.
+Rules for `fn`:
+
+- **Keep it synchronous.** Writes after an `await` land outside the pause and would re-trigger it forever, so an effect whose `fn` returns a promise is stopped with a console error.
+- **Do not call `clay.undo.commit` inside it.** A commit drains the hub's records, so the effect's writes reach autosave and the effect again.
+- **One effect does not see another's writes**, because each runs paused. Draw values that depend on each other in one effect.
+- **A derived value saved in the record** (a count painted in markup, 9.4) is written with the hub paused, so a repaint after a merge leaves the page dirty with no save scheduled. Put saved derived values in `clay="no-dirty"`, or in chrome.
+
+Work that belongs to a merge alone goes in a `clay:sync-applied` listener:
+
+```js
+document.addEventListener("clay:sync-applied", (event) => {
+  if (openId && !cardById(openId)) closeCard();
+});
+```
+
 - Close or repoint any view whose record a peer deleted. The kanban closes the open card when its id is gone: `if (openId && !cardById(openId)) return writeHash({ card: "" }, { replace: true });`
 - Re-parse any JSON you parsed earlier.
 - Re-attach any per-element setup that a re-created element lost (the writer re-injects block gutters on every render).
@@ -1012,7 +990,6 @@ Traps:
 
 Traps:
 
-- **Undo of a `persist` control restores the attribute, not what is shown** (5.3). Re-sync `.checked` and `.value` on `undo` and `redo`.
 - **It takes Cmd+Z in every text field**, including inputs it does not record (a non-persist input), so their native undo is lost.
 - History is per tab, capped at 100, and not saved.
 - Undoing a delete re-inserts the original node even if a peer re-created an equivalent; dedupe by `data-id` on `clay:sync-applied` if that matters.
@@ -1134,7 +1111,7 @@ Rules for sapjs in a malleable file:
 - **Every `detail=` panel and `<dialog>` sits inside a `clay="freeze"` wrapper.** Its controls are painted with the open record's values; outside freeze they would save a second copy. Not `editor-ui`, which removes the element from the file. sapjs warns `W31` for a dialog without the wrapper.
 - **Give records a `data-id`**, and `data-id=""` on blueprints: `$add` and `trigger-add` mint fresh ids. Live sync pairs elements by it.
 - **`persist` on bound inputs inside records**, so typed values reach the attributes a save captures.
-- **Re-sync controls after undo and redo**: they restore the attribute, not the live value sapjs reads (a sync merge moves live values itself). Use the `syncControls` script in [sapjs guide section 8](https://saphtml.com/guide.html#8-work-with-clayjs), which restores inputs, checkboxes, textareas and selects.
+- **Undo and redo restore `persist` controls' live values** from their attributes, and a sync merge does the same, so sapjs reads what the file says. Controls without `persist` are not restored; give them `persist` or re-sync them yourself.
 - **`viewmode:` attributes log `W03`** (unknown attribute) in sapjs, for example 4.4's `viewmode:readonly`. The warning is harmless, but it makes a "no warnings" check fail.
 - **Hide blueprints in your own CSS** (`[item][template] { display: none }`); sapjs's own rule arrives only with the script. Sapjs also adds `[hidden] { display: none !important }` page-wide.
 - A pass is batched: after a write, call `Sap.refresh()` before reading painted output. Expressions compile with `new Function`, so a Content Security Policy without `unsafe-eval` breaks them.
@@ -1257,7 +1234,7 @@ Always write derived text through a guard, because writing the same text is stil
 const setText = (el, text) => { if (el.textContent !== text) el.textContent = text; };
 ```
 
-Recompute on three triggers: record mutations (a `MutationObserver` on the record container, coalesced with a microtask), `clay:sync-applied`, and `hashchange` when the hash affects the view. Observe the record, not the chrome, so derived writes do not trigger themselves.
+Recompute inside `clay.effect(render)`, which covers record mutations, merges, undo and redo (7.5), and call `render()` from a `hashchange` listener when the hash affects the view.
 
 With sapjs, every derived value here is a paint. sapjs recomputes on record mutations and `clay:sync-applied` by itself, and on hash changes only through `clay-router.js` (`clay:route`); an app with its own hash format keeps a `hashchange` listener that calls `Sap.refresh()`. See [sapjs guide section 6](https://saphtml.com/guide.html).
 
@@ -1382,15 +1359,15 @@ A rules tag with `data-rules-name="api"` gives agents and the host's data API th
 
 ### 9.10 The boot guard
 
-A live-sync merge can re-insert an inline script, which runs it again: every listener doubles and every chrome element appears twice. Guard the app script:
+A live-sync merge can re-insert an inline script, which runs it again: every listener doubles and every chrome element appears twice. Start the app with `clay.start`. It runs its function once per page, after `clay.ready`, and a repeat call does nothing:
 
 ```js
-clay.ready.then(() => {
-  if (window.__boardStarted) return;
-  window.__boardStarted = true;
+clay.start(() => {
   …
 });
 ```
+
+A page with more than one app script names each one so they do not share a slot: `clay.start("board", fn)`.
 
 ### 9.11 Size
 

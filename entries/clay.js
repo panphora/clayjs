@@ -23,6 +23,28 @@
 
   if (!clay.ready) mintReady();
 
+  // clay.start runs app code once per page, after boot. A live-sync merge can
+  // re-insert an inline script and run it again; the repeat call is a no-op.
+  // It lives in the bootstrap so an inline script can call it before boot ends.
+  if (!clay.start) {
+    var started = Object.create(null);
+    clay.start = function (name, fn) {
+      if (typeof name === "function") { fn = name; name = ""; }
+      if (started[name]) return;
+      started[name] = true;
+      // A failed boot rejects the old promise after minting a new one, so a call
+      // made before the failure waits for the corrected tag's boot instead.
+      var wait = function () {
+        var ready = clay.ready;
+        return ready.then(fn, function (err) {
+          if (clay.ready === ready) throw err;
+          return wait();
+        });
+      };
+      return wait();
+    };
+  }
+
   var script = document.currentScript;
   if (!script || !script.src) {
     console.error("clayjs: could not determine my own URL (load me with a classic <script src=...>, not type=\"module\")");

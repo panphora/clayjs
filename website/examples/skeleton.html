@@ -44,10 +44,7 @@
 <script src="https://clayjs.com/v1/clay-options.js"></script>
 <script src="https://clayjs.com/v1/clay-ui.js"></script>
 <script>
-clay.ready.then(() => {
-  if (window.__appStarted) return;
-  window.__appStarted = true;
-
+clay.start(() => {
   const items = document.getElementById("items");
   const newId = (prefix) => prefix + "-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   const command = (label, fn) => (clay.undo ? clay.undo.commit(label, fn) : fn());
@@ -82,10 +79,6 @@ clay.ready.then(() => {
     setText(chrome.querySelector("#view-state"), hidden.map((li) => `#items > [data-id="${CSS.escape(li.dataset.id)}"]{display:none}`).join("\n"));
   }
 
-  function syncCheckboxes() {
-    for (const box of items.querySelectorAll("input[type=checkbox]")) box.checked = box.hasAttribute("checked");
-  }
-
   document.addEventListener("click", (event) => {
     const button = event.target.closest("[data-action]");
     if (!button || !clay.isEditMode) return;
@@ -108,12 +101,8 @@ clay.ready.then(() => {
     }
   });
 
-  document.addEventListener("clay:sync-applied", () => { syncCheckboxes(); render(); });
-  clay.undo?.on("undo", syncCheckboxes);
-  clay.undo?.on("redo", syncCheckboxes);
   window.addEventListener("hashchange", () => { filter.value = new URLSearchParams(location.hash.slice(1)).get("q") || ""; render(); });
-  new MutationObserver(render).observe(items, { subtree: true, childList: true, attributes: true, characterData: true });
-  render();
+  clay.effect(render);
 });
 </script>
 </body>

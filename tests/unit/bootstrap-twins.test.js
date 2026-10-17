@@ -43,3 +43,9 @@ test("the failed-boot retry path is the same in both bootstraps", () => {
   const end = "if (reject) reject(err);";
   expect(piece(standalone, start, end)).toBe(piece(clayjs, start, end));
 });
+
+test("clay.start is the same in both bootstraps", () => {
+  const start = "if (!clay.start) {";
+  const end = "return wait();";
+  expect(piece(standalone, start, end)).toBe(piece(clayjs, start, end));
+});
