@@ -50,7 +50,7 @@ export function mountPrompt({ memory, appName, link }) {
     root.setAttribute("data-hcp-state", state);
     if (reason) root.setAttribute("data-hcp-reason", reason);
     tab.setAttribute("aria-expanded", state === "card" ? "true" : "false");
-    if (state === "card") { mem.shown = true; memory.save(); }
+    if (state === "card") { mem.shown = true; memory.save(); root.setAttribute("data-hcp-arrived", ""); }
     lift();
   }
 
@@ -137,6 +137,9 @@ export function mountPrompt({ memory, appName, link }) {
       }
       mem.downloaded = true; mem.shown = true; memory.save();
     }
+  });
+  root.addEventListener("animationend", (e) => {
+    if (e.animationName === "hcp-arrive" || e.animationName === "hcp-arrive-fade") root.setAttribute("data-hcp-arrived", "");
   });
   root.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && root.getAttribute("data-hcp-state") === "card") { set("mini"); tab.focus(); }

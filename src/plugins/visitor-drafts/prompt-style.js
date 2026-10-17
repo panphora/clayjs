@@ -91,6 +91,8 @@ export const PROMPT_CSS = `.hcp {
 .hcp .hcp-btn--primary:hover { background: color-mix(in srgb, var(--hcp-ink), var(--hcp-ground) 12%); color: var(--hcp-ground); }
 
 .hcp-dock { display: flex; align-items: stretch; box-shadow: 0 6px 16px -8px rgba(43, 36, 27, .45); }
+.hcp:not([data-hcp-arrived]) .hcp-dock { animation: hcp-arrive 2.4s cubic-bezier(.16, 1, .3, 1) 3s both; }
+@keyframes hcp-arrive { from { transform: translateX(calc(100% + 48px)); } to { transform: none; } }
 .hcp-tab { font-size: 13.5px; padding: 0 12px 0 10px; }
 .hcp-tab svg { color: var(--hcp-brass); }
 .hcp-dock .hcp-x {
@@ -173,6 +175,8 @@ export const PROMPT_CSS = `.hcp {
 @media (prefers-reduced-motion: reduce) {
   .hcp { transition: none; }
   .hcp[data-hcp-state="card"] .hcp-card { animation: none; }
+  .hcp:not([data-hcp-arrived]) .hcp-dock { animation: hcp-arrive-fade .4s ease 3s both; }
+  @keyframes hcp-arrive-fade { from { opacity: 0; } to { opacity: 1; } }
   .hcp-btn:active > span { translate: none; }
 }
 @media (forced-colors: active) {
