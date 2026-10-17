@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.13.0] - 2026-10-17
+
+### Added
+- The guide now ships in the npm package as @panphora/clayjs/guide.md
+- Page binding puts a ProseMirror editor on the replayed merge
+- Page replay uses a hybrid replayed merge for text blocks
+- Live adds a checkpoint nudge, requestCheckpoint, and flushable unsaved state
+- Live stores get an internal rebase hook and delivery events for the page editor
+- A live room double that follows the server's rules, floor, checkpoint flag and since
+
+### Changed
+- The src/ CORS header now uses one placeholder rule for every prefix, so _headers grows by one rule per release
+- Bumped sap to 0.5.2 and synced the hypercms vendor bundle
+- Removed eyebrow labels from every clayjs.com page
+- Live state reads ask for the room's moves since the last applied seq
+
+### Fixed
+- The vendored sapjs no longer raises W30 after a visitor draft restore, and its warnings print as warnings
+
+
+
 ## [1.12.2] - 2026-10-16
 
 ### Added
