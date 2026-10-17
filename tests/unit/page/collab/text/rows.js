@@ -4,9 +4,9 @@
 // text and its expected notices: a notice no entry in `notices` matches fails
 // the row, and so does an entry no notice matches.
 //   import { ROWS, runRow } from "./rows.js"
-//   node --import ./env.js tests/unit/page/collab/text/rows.js [id ...]
+//   [ENGINES=blocks] node --import ./tests/unit/page/collab/env-dom.js tests/unit/page/collab/text/rows.js [id ...]
 import { Sim, createRoom } from "../room-double.js";
-import { makeTab } from "./tab.js";
+import { engine as textEngine } from "./tab.js";
 import { createReplay, step, join, LIMITS } from "../../../../../src/page/replay.js";
 
 const clone = (v) => JSON.parse(JSON.stringify(v));
@@ -26,6 +26,7 @@ const typing = (n) => () => {
   return out;
 };
 
+// Mark keys are inline.js's: "b" strong, "i" em, "c" code, 'a["<href>"]' a link.
 // Script actions for tab rows, each at a simulated ms:
 //   { tab, caret, type, cps, key }  type at the caret (number, "end" = before the
 //                                   final period, { after }, { before }); cps 0 = one write
@@ -162,25 +163,39 @@ export const ROWS = [
     { at: 1000, tab: "b", caret: { after: "brown" }, type: "ish" },
   ], expect: { text: "The quick brownish fox jumps over the lazy dog.", marks: [["brown", "b"], ["ish", ""]], notices: [] } },
   { id: "marks-inside", source: "marks: a link, typing inside it", tabs: ["a", "b"], policy: "text typed inside a range a peer formats keeps the typist's marks when it lands after the format (here: the link splits around -ish), and takes the format when it lands first", script: [
-    { at: 1000, tab: "a", format: "quick brown", key: "a:https://x.test" },
+    { at: 1000, tab: "a", format: "quick brown", key: 'a["https://x.test"]' },
     { at: 1000, tab: "b", caret: { after: "quick" }, type: "-ish" },
-  ], expect: { text: "The quick-ish brown fox jumps over the lazy dog.", marks: [["quick", "a:https://x.test"], ["brown", "a:https://x.test"]], notices: [] } },
+  ], expect: { text: "The quick-ish brown fox jumps over the lazy dog.", marks: [["quick", 'a["https://x.test"]'], ["brown", 'a["https://x.test"]']], notices: [] } },
   { id: "marks-code", source: "marks: code typed by one tab, italic by the other", tabs: ["a", "b"], script: [
-    { at: 1000, tab: "a", caret: { after: "fox" }, type: " x()", key: "code" },
+    { at: 1000, tab: "a", caret: { after: "fox" }, type: " x()", key: "c" },
     { at: 1000, tab: "b", format: "jumps", key: "i" },
-  ], expect: { text: "The quick brown fox x() jumps over the lazy dog.", marks: [["x()", "code"], ["jumps", "i"]], notices: [] } },
+  ], expect: { text: "The quick brown fox x() jumps over the lazy dog.", marks: [["x()", "c"], ["jumps", "i"]], notices: [] } },
   { id: "marks-emoji", source: "marks: a bold emoji, typing on both sides", text: "I 😀 you.", tabs: ["a", "b"], script: [
     { at: 1000, tab: "a", format: "😀", key: "b" },
     { at: 1000, tab: "b", caret: { after: "😀" }, type: " 🎉日本" },
     { at: 1000, tab: "a", caret: 2, type: "👍" },
   ], expect: { text: "I 👍😀 🎉日本 you.", marks: [["😀", "b"], ["👍", ""], [" 🎉日本", ""]], notices: [] } },
 
-  { id: "core-aaaa", kind: "core", source: "Astra: aaaa through the fallback (a tab that joined with no history)", policy: "a replay with no history before a write places its delete by a diff; when that may hit the wrong character it says so in an inexact notice, and the writer's repair then brings it to the agreed text", seed: "aaaa", me: "c", steps: [
+  { id: "core-aaaa", kind: "core", source: "Astra: aaaa through the fallback (a tab that joined with no history)", policy: "a replay with no history before a write places its delete by a diff; when that may hit the wrong character it says so in an inexact notice, and the writer's repair then brings it to the agreed text and withdraws the notice", seed: "aaaa", me: "c", steps: [
     ["join", { t: "p", c: "aaa" }, 1],
     ["step", del("b", 0, "aaaa", 3, 4), 2],
-    ["expect", "aaa"],
+    ["expect", "aaa", ["inexact"]],
     ["step", { t: "p", c: "aa", w: { a: "a", e: "e1", g: 2 } }, 3],
-  ], expect: { text: "aa", notices: [{ kind: "inexact", includes: "a" }] } },
+  ], expect: { text: "aa", notices: [] } },
+  { id: "core-aaaa-agreed", kind: "core", source: "the stale inexact notice, when the diff guessed right", policy: "a repair that agrees with the guess withdraws the notice too", seed: "aaaa", me: "c", steps: [
+    ["join", { t: "p", c: "aaa" }, 1],
+    ["step", del("b", 0, "aaaa", 3, 4), 2],
+    ["expect", "aaa", ["inexact"]],
+    ["step", { t: "p", c: "aaa", w: { a: "a", e: "e1", g: 2 } }, 3],
+  ], expect: { text: "aaa", notices: [], check: (r) => (r.stats.agreed === 1 ? null : "not agreed") } },
+  { id: "core-fields", kind: "core", source: "w.f: a typing write after a peer's toggle", policy: "S takes from a write only the fields it names in f, so a typing write made before a peer's toggle keeps the toggle", seed: { t: "list_item", kind: "check", c: "Ship it" }, steps: [
+    ["step", { t: "list_item", kind: "check", checked: true, c: "Ship it", w: { a: "a", e: "e1", k: 0, s: [[0, 0, "", 7]], f: ["checked"] } }, 1],
+    ["step", { t: "list_item", kind: "check", c: "Ship it now", w: { a: "b", e: "e1", k: 0, s: [[7, 7, "", 7]], f: [] } }, 2],
+  ], expect: { text: "Ship it now", notices: [], check: (r) => (r.S.checked === true && r.S.kind === "check" ? null : `fields ${JSON.stringify(r.S)}`) } },
+  { id: "core-fields-cleared", kind: "core", source: "w.f: a field set back to its default is left out of the write", seed: { t: "list_item", kind: "check", checked: true, c: "Ship it" }, steps: [
+    ["step", { t: "list_item", kind: "check", c: "Ship it", w: { a: "a", e: "e1", k: 0, s: [[0, 0, "", 7]], f: ["checked"] } }, 1],
+    ["step", { t: "list_item", kind: "check", checked: true, c: "Ship it now", w: { a: "b", e: "e1", k: 0, s: [[7, 7, "", 7]], f: [] } }, 2],
+  ], expect: { text: "Ship it now", notices: [], check: (r) => (!("checked" in r.S) ? null : `fields ${JSON.stringify(r.S)}`) } },
   { id: "core-window", kind: "core", source: "Astra: repair through seq 0 after 513 inserts, divergent", seed: "a", steps: () => [...typing(513)(), ["step", { t: "p", c: "A", w: { a: "a", e: "e1", g: 0 } }, 514]],
     expect: { text: "A" + "x".repeat(513), notices: [], check: (r) => (r.stats.rewinds === 1 ? null : `rewinds ${r.stats.rewinds}`) } },
   { id: "core-window-agreed", kind: "core", source: "Astra: repair through seq 0 after 513 inserts, agreed", seed: "a", steps: () => [...typing(513)(), ["step", { t: "p", c: "a", w: { a: "a", e: "e1", g: 0 } }, 514]],
@@ -228,9 +243,10 @@ function checkResult(row, { final, marks, notices }, problems) {
   for (const n of notices) if (!e.notices.some((x) => match(n, x))) problems.push(`unexpected notice ${n.tab ? n.tab + " " : ""}${n.kind}: ${JSON.stringify(n.lost)}`);
 }
 
-async function runTab(row) {
+async function runTab(row, engine) {
+  const { makeTab } = engine;
   const sim = new Sim(row.seed ?? 1);
-  const initial = { blocks: { p: { t: "p", c: row.text ?? P } }, deleted: {} };
+  const initial = engine.initial(row.text ?? P);
   const rf = row.refuse;
   const refuse = rf ? (id) => (id === rf.tab && sim.t >= rf.from && sim.t <= rf.to ? { status: rf.status, body: { code: rf.status === 413 ? "too-large" : "refused" } } : null) : () => null;
   const room = createRoom(sim, { page: initial }, { latency: () => 40, answerLatency: () => 40, refuse });
@@ -258,9 +274,11 @@ async function runTab(row) {
   const act = (a, t) => {
     if (a.replace !== undefined) { const [f, e] = rangeOf(t.view, a.replace); t.replace(f, e, a.text ?? "", a.key ?? ""); }
     else if (a.format !== undefined) { const [f, e] = rangeOf(t.view, a.format); t.format(f, e, a.key); }
+    else if (a.split !== undefined && t.split) tails[a.tab] = t.split(a.split);
     else if (a.split !== undefined) { tails[a.tab] = t.view.slice(a.split); t.replace(a.split, t.view.length, ""); }
     else if (a.remove) t.remove();
     else if (a.compose !== undefined) t.compose(a.compose);
+    else if (a.undo && t.undo) t.undo();
     else if (a.undo) undo(t);
     else if (a.offline) room.close(a.offline);
     else if (a.online) room.open(a.online);
@@ -268,7 +286,7 @@ async function runTab(row) {
     else if (a.restart) room.restart({ page: file });
     else if (a.inject) {
       if (!z) { z = room.transport("z"); z.start({ open() {}, close() {}, frame() {}, writer() {} }); room.open("z"); }
-      const value = a.inject.w ? { ...a.inject, w: { ...a.inject.w, e: room.epoch } } : a.inject;
+      const value = engine.adapt(a.inject.w ? { ...a.inject, w: { ...a.inject.w, e: room.epoch } } : a.inject);
       z.send("z", { name: "page", n: ++zn, epoch: room.epoch, ops: [{ op: "set", path: ["blocks", "p"], value }] });
     } else if (a.view) {
       const v = tabs.get(a.view.tab).view;
@@ -301,6 +319,8 @@ async function runTab(row) {
   checkResult(row, { final, marks, notices }, problems);
   const extra = row.expect.check?.({ room, tabs, sim });
   if (extra) problems.push(extra);
+  problems.push(...engine.check({ room, tabs, sim }));
+  if (engine.reload) problems.push(...(await engine.reload({ sim, room, tabs })));
   return { final, views, notices, problems };
 }
 
@@ -311,7 +331,10 @@ function runCore(row) {
   for (const [op, ...args] of typeof row.steps === "function" ? row.steps() : row.steps) {
     if (op === "step") step(r, args[0], args[1]);
     else if (op === "join") join(r, args[0], args[1], args[2] ?? {});
-    else if (op === "expect" && (r.S ? r.S.c : null) !== args[0]) problems.push(`midway ${JSON.stringify(r.S && r.S.c)}`);
+    else if (op === "expect") {
+      if ((r.S ? r.S.c : null) !== args[0]) problems.push(`midway ${JSON.stringify(r.S && r.S.c)}`);
+      if (args[1] && JSON.stringify(r.conflicts.map((n) => n.kind)) !== JSON.stringify(args[1])) problems.push(`midway notices ${JSON.stringify(r.conflicts)}`);
+    }
   }
   const final = r.S ? r.S.c : null;
   checkResult(row, { final, marks: r.marks, notices: r.conflicts }, problems);
@@ -320,11 +343,11 @@ function runCore(row) {
   return { final, views: [final], notices: r.conflicts, problems };
 }
 
-export async function runRow(row) {
+export async function runRow(row, engine = textEngine) {
   const saved = { ...LIMITS };
   Object.assign(LIMITS, row.limits ?? {});
   try {
-    const out = row.kind === "core" ? runCore(row) : await runTab(row);
+    const out = row.kind === "core" ? runCore(row) : await runTab(row, engine);
     return { id: row.id, source: row.source, policy: row.policy ?? null, pass: out.problems.length === 0, ...out };
   } finally {
     Object.assign(LIMITS, saved);
@@ -333,10 +356,11 @@ export async function runRow(row) {
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const only = process.argv.slice(2);
+  const [engine] = await (await import("../engines.js")).engines(process.env.ENGINES || "text");
   const show = (s) => (s === null ? "(no block)" : s.length > 70 ? s.slice(0, 33) + "…" + s.slice(-33) : s);
   let failed = 0;
   for (const row of ROWS.filter((x) => !only.length || only.includes(x.id))) {
-    const out = await runRow(row);
+    const out = await runRow(row, engine);
     if (!out.pass) failed++;
     const kinds = [...new Set(out.notices.map((n) => `${n.kind}: ${JSON.stringify(n.lost)}`))];
     console.log(`${out.pass ? "pass" : "FAIL"}  ${row.id.padEnd(22)} ${JSON.stringify(show(out.final))}${kinds.length ? "\n      notices: " + kinds.join(" | ").slice(0, 300) : ""}${out.policy ? "\n      policy: " + out.policy : ""}${out.problems.length ? "\n      " + out.problems.join("\n      ") : ""}`);

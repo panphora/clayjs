@@ -226,3 +226,5 @@ export function makeTab(sim, room, id, initial, opts = {}) {
   tab.allNotices = () => [...r.conflicts, ...tab.notices];
   return tab;
 }
+
+export const engine = { name: "text", makeTab, initial: (c) => ({ blocks: { p: { t: "p", c } }, deleted: {} }), adapt: (value) => value, check: () => [] };

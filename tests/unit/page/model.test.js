@@ -13,19 +13,20 @@ import { state as pmState } from "../../../src/vendor/prosemirror.vendor.js";
  */
 
 const text = (t, marks) => ({ type: "text", text: t, ...(marks ? { marks } : {}) });
+const keys = (t, key) => new Array(t.length).fill(key);
 
 const EVERY_KIND = {
-  "b-title": { t: "heading", pos: "1", level: 1, c: [text("Relay launch review")] },
-  "b-p": { t: "paragraph", pos: "2", c: [text("We "), text("fixed", [{ type: "strong" }]), text(" it, "), text("see", [{ type: "link", attrs: { href: "https://example.com" } }]), { type: "hard_break" }, text("next")] },
-  "b-empty": { t: "paragraph", pos: "3", c: [] },
-  "b-li": { t: "list_item", pos: "4", indent: 1, c: [text("Nested bullet")] },
-  "b-check": { t: "list_item", pos: "5", kind: "check", checked: true, owner: "Jules", due: "2026-10-23", c: [text("Check mobile empty state")] },
-  "b-callout": { t: "callout", pos: "6", c: [text("Decision: launch")] },
-  "b-code": { t: "code_block", pos: "7", lang: "js", c: [text("const a = 1;\n<b>")] },
-  "b-toggle": { t: "toggle", pos: "8", c: [text("Interview notes")] },
-  "b-inside": { t: "paragraph", pos: "9", parent: "b-toggle", c: [text("Lena: it clicked")] },
+  "b-title": { t: "heading", pos: "1", level: 1, c: "Relay launch review" },
+  "b-p": { t: "paragraph", pos: "2", c: "We fixed it, see\ufffcnext", m: [...keys("We ", ""), ...keys("fixed", "b"), ...keys(" it, ", ""), ...keys("see", 'a["https://example.com"]'), '@{"type":"hard_break"}', ...keys("next", "")] },
+  "b-empty": { t: "paragraph", pos: "3", c: "" },
+  "b-li": { t: "list_item", pos: "4", indent: 1, c: "Nested bullet" },
+  "b-check": { t: "list_item", pos: "5", kind: "check", checked: true, owner: "Jules", due: "2026-10-23", c: "Check mobile empty state" },
+  "b-callout": { t: "callout", pos: "6", c: "Decision: launch" },
+  "b-code": { t: "code_block", pos: "7", lang: "js", c: "const a = 1;\n<b>" },
+  "b-toggle": { t: "toggle", pos: "8", c: "Interview notes" },
+  "b-inside": { t: "paragraph", pos: "9", parent: "b-toggle", c: "Lena: it clicked" },
   "b-hr": { t: "divider", pos: "A" },
-  "b-img": { t: "image", pos: "B", src: "/_/uploads/a/b.png", alt: "Inbox", caption: "The sample inbox", w: 480 },
+  "b-img": { t: "image", pos: "B", src: "/_/uploads/a/b.png", alt: "Inbox", caption: "The sample inbox", width: 480 },
   "t-1": {
     t: "table", pos: "C",
     cols: { c1: { pos: "1", name: "week", kind: "text" }, c2: { pos: "2", name: "signups", kind: "number" } },
@@ -55,8 +56,23 @@ test("every block kind survives record -> document -> record", () => {
 });
 
 test("attributes at their default are left out of a block's JSON", () => {
-  const node = nodeFromBlock(schema, "b-x", { t: "list_item", pos: "1", c: [text("a")] });
-  expect(blockJson(node)).toEqual({ t: "list_item", pos: "1", c: [text("a")] });
+  const node = nodeFromBlock(schema, "b-x", { t: "list_item", pos: "1", c: "a" });
+  expect(blockJson(node)).toEqual({ t: "list_item", pos: "1", c: "a" });
+});
+
+test("a record in ProseMirror's inline JSON opens, and saves in the flat form", () => {
+  const node = nodeFromBlock(schema, "b-x", { t: "paragraph", pos: "1", c: [text("We "), text("fixed", [{ type: "strong" }]), { type: "hard_break" }] });
+  expect(blockJson(node)).toEqual({ t: "paragraph", pos: "1", c: "We fixed\ufffc", m: [...keys("We ", ""), ...keys("fixed", "b"), '@{"type":"hard_break"}'] });
+});
+
+test("no node attr uses a key the record reserves", () => {
+  const reserved = new Set(["t", "c", "m", "w", "rows"]);
+  for (const [name, type] of Object.entries(schema.nodes)) for (const attr of Object.keys(type.attrs)) expect(`${name}.${attr}`).not.toMatch(new RegExp(`\\.(${[...reserved].join("|")})$`));
+});
+
+test("a write's w never reaches the node", () => {
+  const node = nodeFromBlock(schema, "b-x", { t: "paragraph", pos: "1", c: "a", w: { a: "t1", k: 3, s: [] } });
+  expect(node.attrs).toEqual({ id: "b-x", pos: "1", parent: null });
 });
 
 test("order is pos, then id for a tie", () => {
@@ -93,7 +109,7 @@ test("keysBetween spreads a large insert with short keys", () => {
 });
 
 test("opening a record assigns nothing", () => {
-  const blocks = { "b-1": { t: "paragraph", pos: "V", c: [text("a")] } };
+  const blocks = { "b-1": { t: "paragraph", pos: "V", c: "a" } };
   const s = editor(blocks);
   expect(blockMap(s.doc)).toEqual(blocks);
 });
@@ -111,8 +127,8 @@ test("a split keeps the id on the retained half and gives the new half one betwe
   expect(ids[2]).toBe("b-2");
   expect(ids[1]).toMatch(/^b-[0-9a-z]+$/);
   const map = blockMap(s.doc);
-  expect(map["b-1"].c).toEqual([text("First")]);
-  expect(map[ids[1]].c).toEqual([text(" half")]);
+  expect(map["b-1"].c).toBe("First");
+  expect(map[ids[1]].c).toBe(" half");
   expect(map["b-1"].pos < map[ids[1]].pos && map[ids[1]].pos < map["b-2"].pos).toBe(true);
 });
 
@@ -128,6 +144,41 @@ test("a pasted copy of a block gets a fresh id, the original keeps its own", () 
   expect(ids.slice(0, 2)).toEqual(["b-1", "b-2"]);
   expect(ids[2]).not.toBe("b-1");
   expect(blockMap(s.doc)[ids[2]].pos > "2").toBe(true);
+});
+
+test("Enter at the start of a block keeps the id on the half with the text", () => {
+  let s = editor({
+    "b-1": { t: "paragraph", pos: "1", c: [text("one")] },
+    "b-2": { t: "paragraph", pos: "2", c: [text("two")] },
+  });
+  s = s.apply(s.tr.split(find(s.doc, "b-2").offset + 1));
+  const ids = [];
+  s.doc.forEach((n) => ids.push([n.attrs.id, n.textContent]));
+  expect(ids[0]).toEqual(["b-1", "one"]);
+  expect(ids[1][0]).not.toBe("b-2");
+  expect(ids[2]).toEqual(["b-2", "two"]);
+  expect(blockMap(s.doc)[ids[1][0]].pos < "2").toBe(true);
+});
+
+test("a copy pasted before the original gets the fresh id, block or table row", () => {
+  let s = editor({
+    "b-1": { t: "paragraph", pos: "1", c: [text("one")] },
+    "b-2": { t: "paragraph", pos: "2", c: [text("two")] },
+    "t-1": EVERY_KIND["t-1"],
+  });
+  s = s.apply(s.tr.insert(find(s.doc, "b-2").offset, find(s.doc, "b-2").node));
+  const ids = [];
+  s.doc.forEach((n) => ids.push(n.attrs.id));
+  expect(ids[0]).toBe("b-1");
+  expect(ids[1]).not.toBe("b-2");
+  expect(ids.slice(2)).toEqual(["b-2", "t-1"]);
+  const table = find(s.doc, "t-1");
+  s = s.apply(s.tr.insert(table.offset + 1, table.node.child(1)));
+  expect(Object.keys(blockMap(s.doc)["t-1"].rows).filter((id) => /^r\d$/.test(id))).toEqual(["r1", "r2"]);
+  const order = [];
+  find(s.doc, "t-1").node.forEach((row) => order.push(row.attrs.id));
+  expect(order[0]).toMatch(/^r-/);
+  expect(order.slice(1)).toEqual(["r1", "r2"]);
 });
 
 test("moving a block rewrites only that block's pos", () => {
@@ -181,7 +232,7 @@ test("a keystroke is one small set op on that block", () => {
   const { before: was, after: now } = changedBlocks(before, s.doc);
   const ops = diffOps(was, now, ["blocks"]);
   const elapsed = performance.now() - started;
-  expect(ops).toEqual([{ op: "set", path: ["blocks", "b-100", "c", 0, "text"], value: "Par!agraph 100 with some words in it" }]);
+  expect(ops).toEqual([{ op: "set", path: ["blocks", "b-100", "c"], value: "Par!agraph 100 with some words in it" }]);
   expect(elapsed).toBeLessThan(50);
 });
 

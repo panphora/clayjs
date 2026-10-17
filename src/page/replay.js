@@ -14,6 +14,9 @@
 //   g  on a repair: the seq the writer computed S through
 //   h  on a heal: the seq the healing tab had reached in the lost room
 //   u  on a heal: per splice, the lost room's seq of its write (null: unknown)
+//   f  the non-text fields the write changed: S takes only those from it, so a
+//      typing write never undoes a peer's toggle or move. Without f, S takes
+//      every field of the write.
 //
 // Placement, the first that applies:
 //   1. the step mapper, when this replay's history reaches back to k: positions
@@ -23,8 +26,6 @@
 //      when a delete cannot be placed exactly;
 //   3. merge3Text, with the losing side in a notice.
 import { HyperMorph } from "../vendor/hyper-morph.vendor.js";
-import { textHash } from "../live/ops.js";
-
 const { merge3Text, diff } = HyperMorph;
 
 export const LIMITS = { logEntries: 1024, logBytes: 256 * 1024 };
@@ -35,11 +36,36 @@ export const strip = (v) => {
   return rest;
 };
 const canon = (v) => (Array.isArray(v) ? `[${v.map(canon).join(",")}]` : v && typeof v === "object" ? `{${Object.keys(v).sort().map((k) => JSON.stringify(k) + ":" + canon(v[k])).join(",")}}` : JSON.stringify(v ?? null));
-export const hashOf = (v) => textHash(canon(strip(v)));
+// 64 bits in two 32-bit lanes, so a divergent value never passes as agreed.
+function hash64(text) {
+  let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (h1 >>> 0).toString(16).padStart(8, "0") + (h2 >>> 0).toString(16).padStart(8, "0");
+}
+export const hashOf = (v) => hash64(canon(strip(v)));
 
 const blank = (n) => new Array(n).fill("");
 const put = (arr, from, to, items) => [...arr.slice(0, from), ...items, ...arr.slice(to)];
 const marksOf = (v) => (v && Array.isArray(v.m) && v.m.length === v.c.length ? v.m : null);
+// The fields S takes from write X (see f above).
+function fieldsOf(r, X) {
+  const f = X.w && X.w.f;
+  if (!Array.isArray(f) || !r.S) return strip(X);
+  const out = { ...r.S };
+  for (const name of f) {
+    if (name === "c" || name === "m" || name === "w") continue;
+    if (Object.prototype.hasOwnProperty.call(X, name)) out[name] = X[name];
+    else delete out[name];
+  }
+  return out;
+}
+
 export function withMarks(fields, c, marks) {
   const { c: _c, m: _m, w: _w, ...rest } = fields;
   return marks && marks.some(Boolean) ? { ...rest, c, m: marks } : { ...rest, c };
@@ -323,6 +349,7 @@ const ownSteps = (r, x, k, except) => r.log.filter((e) => e !== except && e.seq 
 function placeSteps(r, X, entry, steps) {
   const { a: x, k } = X.w;
   const own = ownSteps(r, x, k, entry);
+  const fields = fieldsOf(r, X);
   let c = r.S.c, marks = r.marks, prov = r.prov;
   const seen = (pv) => pv.q <= k || pv.a === x;
   for (const s of steps) {
@@ -363,7 +390,7 @@ function placeSteps(r, X, entry, steps) {
     entry.events.push({ own: true, at: F });
     own.push(s);
     entry.authored.push(s);
-    r.S = withMarks(strip(X), c, marks);
+    r.S = withMarks(fields, c, marks);
     r.marks = marks;
     r.prov = prov;
   }
@@ -373,6 +400,7 @@ function placeSteps(r, X, entry, steps) {
 // 2. The base the write describes, placed by a diff; 3. merge3Text.
 function placeByBase(r, X, entry, ch, seq, { skip = () => false, heal = false } = {}) {
   const x = X.w.a;
+  const fields = fieldsOf(r, X);
   let base = ch.base.c;
   let c = r.S.c, marks = r.marks, prov = r.prov;
   const events = [], applied = [], notes = [];
@@ -398,7 +426,7 @@ function placeByBase(r, X, entry, ch, seq, { skip = () => false, heal = false } 
     entry.applied.push(...applied);
     if (!heal) entry.authored.push(...ch.steps);
     for (const n of notes) { note(r, n); r.stats.inexact++; }
-    r.S = withMarks(strip(X), c, marks);
+    r.S = withMarks(fields, c, marks);
     r.marks = marks;
     r.prov = prov;
     r.stats.fallback++;
@@ -417,7 +445,7 @@ function placeByBase(r, X, entry, ch, seq, { skip = () => false, heal = false } 
     if (lost.trim()) note(r, { kind: "merge", lost, kept: enc ? enc.decode(cf.remote).c : cf.remote, by: x, seq });
   }
   if (!enc) note(r, { kind: "marks", lost: "", by: x, seq });
-  r.S = withMarks(strip(X), out.c, out.m);
+  r.S = withMarks(fields, out.c, out.m);
   r.marks = out.m;
   r.prov = Array.from({ length: out.c.length }, () => ({ a: null, q: seq }));
   entry.whole = true;
@@ -433,14 +461,21 @@ function repair(r, X, seq, entry) {
   entry.repair = n;
   if (X.w.e !== r.epoch || r.tomb) return;
   const mine = hashAt(r, n);
-  if (mine !== null && mine === hashOf(X)) { r.stats.agreed++; return; }
+  if (mine !== null && mine === hashOf(X)) { r.stats.agreed++; settled(r, n); return; }
   if (Number.isInteger(n) && n >= r.kept && n <= r.seq) {
     rewind(r, n, X, seq, entry);
     r.behind = false;
+    settled(r, n);
     return;
   }
   r.stats.refused++;
   r.behind = true;
+}
+
+// The writer placed every write through seq n exactly: a delete this replay
+// could only place by a diff before then is no longer in doubt.
+function settled(r, n) {
+  r.conflicts = r.conflicts.filter((c) => !(c.kind === "inexact" && c.seq <= n));
 }
 
 // S at seq n becomes V, and every later op this replay holds is applied again

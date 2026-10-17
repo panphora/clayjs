@@ -1,8 +1,9 @@
 // The page's live record and its ProseMirror document, and the way between them.
 //
-// The record is a flat map of blocks keyed by id: { "b-k1": { t, pos, ...attrs, c } }.
-// `t` is the node type, `pos` a fractional order key, `c` the inline content in
-// ProseMirror's JSON. Attributes equal to their schema default are left out, so
+// The record is a flat map of blocks keyed by id: { "b-k1": { t, pos, ...attrs, c, m } }.
+// `t` is the node type, `pos` a fractional order key, `c` a text block's flat
+// text and `m` its mark keys, one per UTF-16 unit, left out when there are none
+// (inline.js). Attributes equal to their schema default are left out, so
 // a block's JSON is as small as the block. A table keeps its rows as an object
 // keyed by row id ({ pos, cells: { <col id>: text } }), never a list, because a
 // list in a live store is written whole and two tabs adding rows keep one.
@@ -10,7 +11,8 @@
 // Order is (pos, id): pos strings compare as plain strings, and the id breaks
 // the tie two tabs inserting at the same spot leave behind. Ids and positions
 // are only ever assigned by a local edit (identityPlugin), never on open.
-import { model, state } from "../vendor/prosemirror.vendor.js";
+import { model, state, transform } from "../vendor/prosemirror.vendor.js";
+import { flatten, unflatten } from "./inline.js";
 
 export const REMOTE = "clay-page-remote";
 
@@ -94,7 +96,9 @@ export function blockJson(node) {
     });
     out.rows = rows;
   } else if (node.type.spec.content) {
-    out.c = node.content.toJSON() || [];
+    const { c, m } = flatten(node.content);
+    out.c = c;
+    if (m.some(Boolean)) out.m = m;
   }
   return out;
 }
@@ -106,7 +110,7 @@ export function blockMap(doc) {
 }
 
 export function nodeFromBlock(schema, id, blockValue) {
-  const { t, pos, c, rows, ...attrs } = blockValue;
+  const { t, pos, c, m, w, rows, ...attrs } = blockValue;
   if (t === "table") {
     const cols = orderedIds(attrs.cols || {});
     const { table_row: rowType, table_cell: cellType } = schema.nodes;
@@ -119,7 +123,11 @@ export function nodeFromBlock(schema, id, blockValue) {
     ));
     return schema.nodes.table.createChecked({ ...attrs, id, pos }, children);
   }
-  return model.Node.fromJSON(schema, { type: t, attrs: { ...attrs, id, pos }, ...(c && c.length ? { content: c } : {}) });
+  const type = schema.nodes[t];
+  if (!type) throw new RangeError(`page: unknown block type ${t}`);
+  // A record from before the flat form holds ProseMirror's inline JSON.
+  const content = typeof c === "string" ? unflatten(schema, c, m, type) : Array.isArray(c) && c.length ? model.Fragment.fromJSON(schema, c) : null;
+  return type.create({ ...attrs, id, pos }, content);
 }
 
 export function docFromBlocks(schema, blocks) {
@@ -165,16 +173,16 @@ function longestIncreasing(keys) {
   return keep;
 }
 
-// For siblings [{ id, pos }] in document order: the new { id, pos } each needs,
-// or null. A missing id, or the second holder of an id (a split copies attrs
-// to the new half, so the retained half keeps its id), gets a fresh one.
+// For siblings [{ id, pos, rank }] in document order: the new { id, pos } each
+// needs, or null. A missing id, or a second holder of an id, gets a fresh one.
+// Of several holders, the highest rank keeps the id, the first on a tie: a
+// split copies attrs to the new half, and a pasted copy lands beside the original.
 export function repairSiblings(items, prefix) {
-  const seen = new Set();
-  const fresh = items.map(({ id }) => {
-    if (!id || seen.has(id)) return true;
-    seen.add(id);
-    return false;
+  const keeper = new Map();
+  items.forEach(({ id, rank = 0 }, i) => {
+    if (id && (!keeper.has(id) || rank > (items[keeper.get(id)].rank ?? 0))) keeper.set(id, i);
   });
+  const fresh = items.map(({ id }, i) => !id || keeper.get(id) !== i);
   const keep = longestIncreasing(items.map(({ pos }, i) => (!fresh[i] && isKey(pos) ? pos : null)));
   const out = items.map(() => null);
   for (let i = 0; i < items.length;) {
@@ -192,20 +200,40 @@ export function repairSiblings(items, prefix) {
 
 export function identityPlugin() {
   return new state.Plugin({
-    appendTransaction(transactions, _old, next) {
+    appendTransaction(transactions, old, next) {
       if (!transactions.some((tr) => tr.docChanged && !tr.getMeta(REMOTE))) return null;
       const tr = next.tr;
       const fix = (node, at, change) => { if (change) tr.setNodeMarkup(at, null, { ...node.attrs, ...change }); };
+      // Of two holders of an id, the one with the old block's content keeps it
+      // (Enter at the start of a block moves its text down), then the one the
+      // old block maps to (a pasted copy lands beside the original).
+      const mapping = new transform.Mapping();
+      for (const t of transactions) mapping.appendMapping(t.mapping);
+      const was = new Map();
+      const track = (node, at) => {
+        if (!node.attrs.id) return;
+        const r = mapping.mapResult(at, 1);
+        was.set(node.attrs.id, { node, at: r.deleted ? null : r.pos });
+      };
+      old.doc.forEach((node, offset) => {
+        track(node, offset);
+        if (node.type.name === "table") node.forEach((row, rowOffset) => track(row, offset + 1 + rowOffset));
+      });
+      const rank = (node, at) => {
+        const w = was.get(node.attrs.id);
+        return w ? (w.node.content.eq(node.content) ? 2 : 0) + (w.at === at ? 1 : 0) : 0;
+      };
+      const items = (list) => list.map(({ node, at }) => ({ ...node.attrs, rank: rank(node, at) }));
 
       const top = [];
-      next.doc.forEach((node, offset) => top.push({ node, offset }));
-      repairSiblings(top.map(({ node }) => node.attrs), "b").forEach((change, i) => fix(top[i].node, top[i].offset, change));
+      next.doc.forEach((node, offset) => top.push({ node, at: offset }));
+      repairSiblings(items(top), "b").forEach((change, i) => fix(top[i].node, top[i].at, change));
 
-      for (const { node, offset } of top) {
+      for (const { node, at: offset } of top) {
         if (node.type.name !== "table") continue;
         const rows = [];
-        node.forEach((row, rowOffset) => rows.push({ row, at: offset + 1 + rowOffset }));
-        repairSiblings(rows.map(({ row }) => row.attrs), "r").forEach((change, i) => fix(rows[i].row, rows[i].at, change));
+        node.forEach((row, rowOffset) => rows.push({ node: row, at: offset + 1 + rowOffset }));
+        repairSiblings(items(rows), "r").forEach((change, i) => fix(rows[i].node, rows[i].at, change));
       }
       return tr.docChanged ? tr : null;
     },

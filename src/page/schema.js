@@ -80,7 +80,7 @@ export const schema = new model.Schema({
       group: "block",
       atom: true,
       draggable: true,
-      attrs: { ...block, src: { default: "" }, alt: { default: "" }, caption: { default: "" }, w: { default: null } },
+      attrs: { ...block, src: { default: "" }, alt: { default: "" }, caption: { default: "" }, width: { default: null } },
       toDOM: (n) => ["figure", ref(n), ["img", { src: n.attrs.src, alt: n.attrs.alt }], ["figcaption", n.attrs.caption]],
     },
     table: {

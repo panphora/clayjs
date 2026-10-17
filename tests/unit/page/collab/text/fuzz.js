@@ -2,9 +2,9 @@
 // words, drop offline and lose the room, on the room double. Every metric
 // counts whole words and their order.
 //   import { scenario, SUITES } from "./fuzz.js"
-//   node --import ./env.js tests/unit/page/collab/text/fuzz.js [suite] [seeds]
+//   [ENGINES=blocks] node --import ./tests/unit/page/collab/env-dom.js tests/unit/page/collab/text/fuzz.js [suite] [seeds]
 import { Sim, createRoom } from "../room-double.js";
-import { makeTab } from "./tab.js";
+import { engine as textEngine } from "./tab.js";
 
 const clone = (v) => JSON.parse(JSON.stringify(v));
 
@@ -25,9 +25,10 @@ const start = (v) => v.indexOf(" quick");
  * @param {number} o.seed
  * @returns {Promise<{converged, lost, dup, garbled, misordered, silentLost, inNotice, frames, repairs, heals, lostSeconds, final, views, gone}>}
  */
-export async function scenario({ tabs: ids, carets, deleters = [], chaos = null, seed, words = 12, cps = 7, latency = [20, 120], hook = null }) {
+export async function scenario({ tabs: ids, carets, deleters = [], chaos = null, seed, words = 12, cps = 7, latency = [20, 120], hook = null, engine = textEngine }) {
+  const { makeTab } = engine;
   const sim = new Sim(seed);
-  const initial = { blocks: { p: { t: "p", c: TEXT } }, deleted: {} };
+  const initial = engine.initial(TEXT);
   const lat = () => latency[0] + sim.rand() * (latency[1] - latency[0]);
   const room = createRoom(sim, { page: initial }, { latency: lat, answerLatency: lat });
   const tabs = ids.map((id) => makeTab(sim, room, id, clone(initial)));
@@ -113,6 +114,9 @@ export async function scenario({ tabs: ids, carets, deleters = [], chaos = null,
   }
   await sim.run(60000);
   await sim.idle(5000);
+  const byId = new Map(tabs.map((t) => [t.id, t]));
+  const problems = engine.check({ room, tabs: byId });
+  if (engine.reload) problems.push(...(await engine.reload({ sim, room, tabs: byId })));
 
   const block = room.stores.get("page").value.blocks.p;
   const final = block && !room.stores.get("page").value.deleted?.p ? block.c : null;
@@ -155,7 +159,7 @@ export async function scenario({ tabs: ids, carets, deleters = [], chaos = null,
     converged, lost, dup, garbled, misordered, silentLost: lost - inNotice, inNotice,
     frames: room.frames, repairs: tabs.reduce((n, t) => n + t.repairs, 0), heals: tabs.reduce((n, t) => n + t.heals, 0),
     lostSeconds, final, views: tabs.map((t) => t.view), gone, deleted, cut: [...cutWords],
-    stats: tabs.map((t) => t.r.stats),
+    stats: tabs.map((t) => t.r && t.r.stats), problems,
   };
 }
 
@@ -179,18 +183,19 @@ export const SUITES = {
   },
 };
 
-export async function runSuite(name, seeds, onExample = () => {}) {
+export async function runSuite(name, seeds, onExample = () => {}, engine = textEngine) {
   const rows = [];
   for (const [label, sc] of Object.entries(SUITES[name])) {
-    const agg = { converged: 0, lost: 0, silentLost: 0, inNotice: 0, garbled: 0, dup: 0, misordered: 0, frames: 0, repairs: 0, heals: 0, maxLostSeconds: 0 };
+    const agg = { converged: 0, lost: 0, silentLost: 0, inNotice: 0, garbled: 0, dup: 0, misordered: 0, frames: 0, repairs: 0, heals: 0, maxLostSeconds: 0, unreloaded: 0 };
     for (let s = 1; s <= seeds; s++) {
-      const out = await scenario({ ...sc, seed: s * 7919 });
+      const out = await scenario({ ...sc, seed: s * 7919, engine });
       agg.converged += out.converged ? 1 : 0;
       for (const k of ["lost", "silentLost", "inNotice", "garbled", "dup", "misordered", "frames", "repairs", "heals"]) agg[k] += out[k];
       agg.maxLostSeconds = Math.max(agg.maxLostSeconds, ...Object.values(out.lostSeconds));
-      if (!out.converged || out.silentLost || out.garbled || out.dup || out.misordered) onExample(label, s * 7919, out);
+      if (out.problems.length) agg.unreloaded++;
+      if (!out.converged || out.silentLost || out.garbled || out.dup || out.misordered || out.problems.length) onExample(label, s * 7919, out);
     }
-    rows.push({ scenario: label, converged: `${agg.converged}/${seeds}`, lost: agg.lost, silentLost: agg.silentLost, inNotice: agg.inNotice, garbled: agg.garbled, dup: agg.dup, misordered: agg.misordered, framesPerRun: Math.round(agg.frames / seeds), repairsPerRun: +(agg.repairs / seeds).toFixed(1), heals: agg.heals, maxLostSecondsPerTab: +agg.maxLostSeconds.toFixed(2) });
+    rows.push({ scenario: label, converged: `${agg.converged}/${seeds}`, lost: agg.lost, silentLost: agg.silentLost, inNotice: agg.inNotice, garbled: agg.garbled, dup: agg.dup, misordered: agg.misordered, framesPerRun: Math.round(agg.frames / seeds), repairsPerRun: +(agg.repairs / seeds).toFixed(1), heals: agg.heals, maxLostSecondsPerTab: +agg.maxLostSeconds.toFixed(2), unreloaded: agg.unreloaded });
   }
   return rows;
 }
@@ -198,10 +203,11 @@ export async function runSuite(name, seeds, onExample = () => {}) {
 if (import.meta.url === `file://${process.argv[1]}`) {
   const names = process.argv[2] && process.argv[2] !== "all" ? [process.argv[2]] : Object.keys(SUITES);
   const seeds = Number(process.argv[3] || 40);
+  const [engine] = await (await import("../engines.js")).engines(process.env.ENGINES || "text");
   for (const name of names) {
     const rows = await runSuite(name, seeds, (label, seed, out) => {
-      if (process.env.SHOW) console.log("EXAMPLE", label, seed, JSON.stringify({ final: out.final, views: out.views, gone: out.gone, converged: out.converged }));
-    });
+      if (process.env.SHOW) console.log("EXAMPLE", label, seed, JSON.stringify({ final: out.final, views: out.views, gone: out.gone, converged: out.converged, problems: out.problems }));
+    }, engine);
     console.log(`\n## ${name}, ${seeds} seeds`);
     console.table(rows);
   }
