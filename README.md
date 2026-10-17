@@ -51,7 +51,7 @@ query params on the script URL:
 <script src="https://clayjs.com/v1/clay.js?plugins=sync,cms&exclude=indicator"></script>
 ```
 
-- `?plugins=` — add optional plugins: `sync`, `live`, `cms`, `undo`, `sortable`, `indicator`, `ai-edit`, `quickcrop`, `upload`, `wire`, `demo`, `visitor-drafts`.
+- `?plugins=` — add optional plugins: `sync`, `live`, `cms`, `undo`, `sortable`, `indicator`, `ai-edit`, `quickcrop`, `upload`, `wire`, `message`, `demo`, `visitor-drafts`.
   In edit mode `richclay` and `source` load by default. `ai-edit` brings `wire` with it.
   `cms` brings `quickcrop` with it, because the CMS uses it for `data-hcms-crop` image fields.
   `visitor-drafts` turns the page into a free document: a visitor who is not the owner gets the editing

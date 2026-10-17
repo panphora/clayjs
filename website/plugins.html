@@ -107,6 +107,19 @@
     </div>
 
     <div class="libcard">
+      <div class="lib-name" id="message">message <span class="tag">plugin · ask by name</span></div>
+      <p class="lib-prob">“I put a contact form on my page and want the messages in my inbox.”</p>
+      <p>A form marked <code>message-form</code> is sent to the document's owner on the host, with a bot check nobody sees: the page asks the host for a one-time token when the visitor starts filling the form, and the host refuses a message without one. The form resets and the attribute's text shows as a toast.</p>
+      <pre><code class="language-markup">&lt;script src="https://clayjs.com/v1/clay.js?plugins=message"&gt;&lt;/script&gt;
+&lt;form message-form="Thanks, I'll reply soon"&gt;
+  &lt;input name="email" type="email" required&gt;
+  &lt;textarea name="message" required&gt;&lt;/textarea&gt;
+  &lt;button&gt;Send&lt;/button&gt;
+&lt;/form&gt;</code></pre>
+      <p class="small"><code>clay.message.send(data)</code> sends from your own code and resolves <code>{ ok, error }</code>, never rejecting. The form fires <code>clay:message-sent</code> or <code>clay:message-failed</code>; cancel it to show your own confirmation instead of the toast. Needs a host with a message endpoint, such as hyperclay.com.</p>
+    </div>
+
+    <div class="libcard">
       <div class="lib-name" id="wire">wire <span class="tag">plugin · ask by name</span></div>
       <p class="lib-prob">“I want a program on my own machine to work on this file while I have it open.”</p>
       <p>A per-file control channel between the page and a process running in your terminal. The page sends a request, the process answers with progress, and the process edits <em>the file</em>. HTML never travels over the wire: the change reaches your open page as an ordinary external file change, through live sync. Nothing in the wire depends on what a payload contains.</p>

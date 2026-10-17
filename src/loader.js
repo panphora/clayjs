@@ -141,6 +141,8 @@ function attachPluginMember(path, mod, loaded) {
     clay.people = mod.people;
     clay.author = mod.author;
     Object.defineProperty(clay, "me", { get: mod.currentMe, configurable: true, enumerable: true });
+  } else if (path === "plugins/message.js") {
+    clay.message = mod.message;
   } else if (path === "plugins/wire.js") {
     clay.wire = mod.wire || mod.default;
   } else if (path === "plugins/ai-edit.js") {

@@ -42,6 +42,9 @@ export const PLUGIN_PATHS = {
   // Who is editing and who wrote what. Not editOnly: a reader still sees names.
   people:    { path: "plugins/people.js",          editOnly: false, default: false },
   wire:      { path: "plugins/wire.js",            editOnly: false, default: false },
+  // A visitor's contact form to the document's owner. Not editOnly: visitors are
+  // who send messages.
+  message:   { path: "plugins/message.js",         editOnly: false, default: false },
   // Edit mode only: the AI comment box is an editing gesture. Opt in with
   // `plugins=ai-edit`; it stays dormant on any host that does not list a ready
   // `ai-edit` helper.
@@ -100,6 +103,7 @@ export const MODULES = {
   "plugins/upload.js":          () => import("./plugins/upload.js"),
   "plugins/people.js":          () => import("./plugins/people.js"),
   "plugins/wire.js":            () => import("./plugins/wire.js"),
+  "plugins/message.js":         () => import("./plugins/message.js"),
   "plugins/ai-edit.js":         () => import("./plugins/ai-edit.js"),
   "plugins/demo.js":            () => import("./plugins/demo.js"),
   "plugins/visitor-drafts.js": () => import("./plugins/visitor-drafts.js"),
@@ -108,7 +112,7 @@ export const MODULES = {
 
 // `source` is last on purpose: its install captures a save clone, so it wants every
 // plugin that registers a document transform to have registered it first.
-const PLUGIN_ORDER = ["visitor-drafts", "richclay", "indicator", "sortable", "undo", "quickcrop", "upload", "people", "cms", "sync", "live", "wire", "ai-edit", "demo", "source"];
+const PLUGIN_ORDER = ["visitor-drafts", "richclay", "indicator", "sortable", "undo", "quickcrop", "upload", "people", "cms", "sync", "live", "message", "wire", "ai-edit", "demo", "source"];
 
 // A plugin that cannot do its whole job alone. hypercms reads the cropper through
 // a capability lookup (`clay.quickcrop`) and silently uploads the raw file when it

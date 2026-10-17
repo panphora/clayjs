@@ -231,6 +231,7 @@ The test suite checks this file opens without becoming dirty, saves the record a
 | `quickcrop` | off | yes | `clay.quickcrop` |
 | `cms` | off | yes | `clay.cms`; implies `quickcrop` and `upload` |
 | `wire` | off | yes | `clay.wire`, the channel to a local agent process |
+| `message` | off | yes | `message-form`: a visitor's contact form to the owner, `clay.message` (8.14) |
 | `ai-edit` | off | no | select text, ask an agent to rewrite it; implies `wire` |
 | `demo` | off | yes | fakes saving into `localStorage` for public demos |
 | `visitor-drafts` | off | yes | the draft store, `clay.visitorDrafts`, the download prompt, the intro area and the owner chip on a page that opted in (14) |
@@ -1099,7 +1100,7 @@ Bevel (`@panphora/bevel`) is a separate component library with a kanban board, a
 
 ### 8.11 Attributes from older Hyperclay files
 
-Older Hyperclay files can carry attributes ClayJS ignores: `movable`, `movable-handle`, `prevent-enter`, `autosize`, `ajax-form`, `ajax-button`, `send-message`, `upgrade`. Replace them with a few lines of code (`prevent-enter`: a keydown handler; `autosize`: CSS `field-sizing: content`; `movable`: pointer events writing `data-x`/`data-y`). Old saved `<html editmode="false">` and hand-written `option-visibility-styles` style tags are dead weight; ClayJS strips the root attributes on the next save.
+Older Hyperclay files can carry attributes ClayJS ignores: `movable`, `movable-handle`, `prevent-enter`, `autosize`, `ajax-form`, `ajax-button`, `send-message`, `upgrade`. Replace them with a few lines of code (`prevent-enter`: a keydown handler; `autosize`: CSS `field-sizing: content`; `movable`: pointer events writing `data-x`/`data-y`; `send-message`: the `message` plugin, 8.14). Old saved `<html editmode="false">` and hand-written `option-visibility-styles` style tags are dead weight; ClayJS strips the root attributes on the next save.
 
 ### 8.12 sap.js: records, views and totals in markup
 
@@ -1151,6 +1152,25 @@ Rules for sapjs in a malleable file:
 It fits content sites: landing pages, menus, pricing, FAQs, team pages, where the layout is fixed and a non-developer changes copy and images. It does not fit apps where editing is the product: its form is a separate surface from the content, new list items clone the first item's attributes (including its state), and rich text inside lists is flattened in the sidebar. A file can use both: the CMS owns the header copy, the app owns `<main>`, and the rules never reach into the app's region. Give every list that can become empty a `cms-template` seed hidden by CSS, not by the `hidden` attribute (which is copied into every new item). Add `sortable` to the plugin list for drag in the sidebar.
 
 ---
+
+### 8.14 message: contact forms
+
+`?plugins=message` sends a visitor's form to the document's owner. On hyperclay.com the owner gets it by email and in their messages.
+
+```html
+<form message-form="Thanks, I'll reply soon">
+  <input name="email" type="email" required>
+  <textarea name="message" required></textarea>
+  <button>Send</button>
+</form>
+```
+
+- On submit the fields go as JSON to the host's `/_/message`. The form resets, the attribute's text shows as a toast, and the form fires `clay:message-sent` or `clay:message-failed` (`detail` is `{ ok, error }`). Call `event.preventDefault()` on it to draw your own confirmation instead of the toast.
+- A form whose `action` is `/_/message` is taken over the same way, so a hand-written `<form method="post" action="/_/message">` works once the plugin is loaded.
+- `clay.message.send(data)` sends from your own code. It resolves `{ ok, error }` and never rejects.
+- **The bot check is invisible and needs the plugin.** When the visitor first focuses or types in the form, the plugin fetches a one-time token from `/_/form-token`; the host refuses a message without one. A form posted without the plugin, or with JavaScript off, gets an error, never a silent drop.
+- Field names are what the owner reads (`**email**: ...`). Do not name a field `formToken` or `formSignals`.
+- A submit handler of your own that calls `preventDefault()` keeps the form to itself; the plugin leaves it alone.
 
 ## 9. App architecture
 

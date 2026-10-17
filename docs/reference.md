@@ -535,6 +535,12 @@ token variant, `POST /_/save/{token}`, read from `<html savetoken>`.
   `clay.people`, `clay.author`. Names live in the document as
   `<div clay-people hidden><data value="id">Name</data></div>`, and authored elements
   carry `data-by="id"`.
+- `message` (ask by name) — a visitor's contact form to the document's owner. A form
+  with `message-form="<confirmation text>"`, or with `action="/_/message"`, is POSTed as
+  JSON to `/_/message` with the `Document-URL` header, carrying a one-time token from
+  `GET /_/form-token` (the host's bot check). `clay.message.send(data)` resolves
+  `{ ok, error }` and never rejects. Events on the form: `clay:message-sent`,
+  `clay:message-failed` (cancel to skip the toast).
 - `wire` (`?plugins=wire,sync`) — a per-file control channel between the page and a
   process running in the user's terminal (see `htmlclay wire serve <file> -- <cmd>`).
   The page sends a request, the process answers with progress, and the process edits
