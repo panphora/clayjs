@@ -8,6 +8,7 @@
 import { Sim, createRoom } from "../room-double.js";
 import { engine as textEngine } from "./tab.js";
 import { createReplay, step, join, LIMITS } from "../../../../../src/page/replay.js";
+import { unitsOf } from "../../../../../src/page/inline.js";
 
 const clone = (v) => JSON.parse(JSON.stringify(v));
 
@@ -170,6 +171,20 @@ export const ROWS = [
     { at: 1000, tab: "a", caret: { after: "fox" }, type: " x()", key: "c" },
     { at: 1000, tab: "b", format: "jumps", key: "i" },
   ], expect: { text: "The quick brown fox x() jumps over the lazy dog.", marks: [["x()", "c"], ["jumps", "i"]], notices: [] } },
+  { id: "marks-restart", source: "run-length marks: formatted typing through a restart, healed", tabs: ["a", "b"], script: [
+    { at: 1000, tab: "a", caret: { after: "quick" }, type: " red", key: "i" },
+    { at: 2000, checkpoint: true },
+    { at: 3000, tab: "b", caret: "end", type: " again and again", key: 'a["https://x.test"]' },
+    { at: 3000, tab: "a", caret: { after: "brown" }, type: " big and bold", key: "b" },
+    { at: 4000, restart: true },
+  ], expect: { text: "The quick red brown big and bold fox jumps over the lazy dog again and again.", marks: [[" red", "i"], [" big and bold", "b"], [" again and again", 'a["https://x.test"]']], notices: [] } },
+  { id: "marks-heal", source: "run-length marks: formatted writes lost in a restart, the heal the last write", tabs: ["a", "b"], script: [
+    { at: 1000, tab: "a", caret: { after: "quick" }, type: " red", key: "i" },
+    { at: 2000, checkpoint: true },
+    { at: 3000, tab: "a", caret: { after: "brown" }, type: " big", key: "b", cps: 0 },
+    { at: 3000, tab: "b", caret: "end", type: " again", key: 'a["https://x.test"]', cps: 0 },
+    { at: 4000, restart: true },
+  ], expect: { text: "The quick red brown big fox jumps over the lazy dog again.", marks: [[" red", "i"], [" big", "b"], [" again", 'a["https://x.test"]']], notices: [], check: ({ tabs }) => ([...tabs.values()].some((t) => t.heals > 0) ? null : "no tab healed") } },
   { id: "marks-emoji", source: "marks: a bold emoji, typing on both sides", text: "I 😀 you.", tabs: ["a", "b"], script: [
     { at: 1000, tab: "a", format: "😀", key: "b" },
     { at: 1000, tab: "b", caret: { after: "😀" }, type: " 🎉日本" },
@@ -307,7 +322,7 @@ async function runTab(row, engine) {
   const raw = (v.blocks && v.blocks.p) || null;
   const live = raw && !(v.deleted && v.deleted.p);
   const final = live ? raw.c : null;
-  const marks = live ? raw.m ?? new Array(raw.c.length).fill("") : null;
+  const marks = live ? unitsOf(raw.m, raw.c.length) ?? new Array(raw.c.length).fill("") : null;
   const views = [...tabs.values()].map((t) => t.view);
   if (row.expect.text === null && raw) problems.push(`the room still holds a block under the tombstone: ${JSON.stringify(raw.c)}`);
   for (const t of tabs.values()) {

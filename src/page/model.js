@@ -12,7 +12,7 @@
 // the tie two tabs inserting at the same spot leave behind. Ids and positions
 // are only ever assigned by a local edit (identityPlugin), never on open.
 import { model, state, transform } from "../vendor/prosemirror.vendor.js";
-import { flatten, unflatten } from "./inline.js";
+import { flatten, unflatten, unitsOf } from "./inline.js";
 
 export const REMOTE = "clay-page-remote";
 
@@ -126,7 +126,7 @@ export function nodeFromBlock(schema, id, blockValue) {
   const type = schema.nodes[t];
   if (!type) throw new RangeError(`page: unknown block type ${t}`);
   // A record from before the flat form holds ProseMirror's inline JSON.
-  const content = typeof c === "string" ? unflatten(schema, c, m, type) : Array.isArray(c) && c.length ? model.Fragment.fromJSON(schema, c) : null;
+  const content = typeof c === "string" ? unflatten(schema, c, unitsOf(m, c.length), type) : Array.isArray(c) && c.length ? model.Fragment.fromJSON(schema, c) : null;
   return type.create({ ...attrs, id, pos }, content);
 }
 
@@ -198,9 +198,31 @@ export function repairSiblings(items, prefix) {
   return out;
 }
 
+// True when every step of tr edits inside one top-level textblock: its text
+// and marks change, never which blocks the page has, their order or attrs.
+export function insideTextblocks(tr) {
+  for (let i = 0; i < tr.steps.length; i++) {
+    const step = tr.steps[i];
+    if (step instanceof transform.ReplaceStep) {
+      if (step.slice.openStart || step.slice.openEnd) return false;
+      for (let j = 0; j < step.slice.content.childCount; j++) if (!step.slice.content.child(j).isInline) return false;
+    } else if (!(step instanceof transform.AddMarkStep || step instanceof transform.RemoveMarkStep)) return false;
+    const $from = tr.docs[i].resolve(step.from), $to = tr.docs[i].resolve(step.to);
+    if ($from.depth !== 1 || $to.depth !== 1 || $from.index(0) !== $to.index(0) || !$from.parent.isTextblock) return false;
+  }
+  return true;
+}
+
 export function identityPlugin() {
+  // Documents with nothing to repair. An edit inside textblocks keeps a
+  // document that way, so it skips the walk over every block.
+  const clean = new WeakSet();
   return new state.Plugin({
     appendTransaction(transactions, old, next) {
+      if (clean.has(old.doc) && transactions.every(insideTextblocks)) {
+        clean.add(next.doc);
+        return null;
+      }
       if (!transactions.some((tr) => tr.docChanged && !tr.getMeta(REMOTE))) return null;
       const tr = next.tr;
       const fix = (node, at, change) => { if (change) tr.setNodeMarkup(at, null, { ...node.attrs, ...change }); };
@@ -235,6 +257,7 @@ export function identityPlugin() {
         node.forEach((row, rowOffset) => rows.push({ node: row, at: offset + 1 + rowOffset }));
         repairSiblings(items(rows), "r").forEach((change, i) => fix(rows[i].node, rows[i].at, change));
       }
+      if (!tr.docChanged) clean.add(next.doc);
       return tr.docChanged ? tr : null;
     },
   });

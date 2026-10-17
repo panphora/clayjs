@@ -140,7 +140,9 @@ describe("server lane", () => {
     expect(await fetchLiveState()).toEqual(room);
     expect(global.fetch.mock.calls[0][1].headers["Document-URL"]).toBe(window.location.href);
     global.fetch = jest.fn(async () => ({ ok: false, status: 401 }));
-    expect(await fetchLiveState()).toEqual({ status: 401 });
+    expect(await fetchLiveState()).toEqual({ status: 401, code: null, retryAfter: 0 });
+    global.fetch = jest.fn(async () => ({ ok: false, status: 503, headers: { get: (h) => (h === "Retry-After" ? "60" : null) }, json: async () => ({ code: "busy" }) }));
+    expect(await fetchLiveState()).toEqual({ status: 503, code: "busy", retryAfter: 60 });
     global.fetch = jest.fn(async () => {
       throw new TypeError("offline");
     });

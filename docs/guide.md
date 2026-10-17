@@ -857,7 +857,7 @@ Two rules for the proxy:
 
 **Load the plugin wherever a live tag exists.** A page without `?plugins=live` still leaves live tags out of the merge, so an incoming save does not update them and the next save writes the old text back.
 
-**Limits on hyperclay.com.** A frame carries at most 128 ops and 16 KB. A store holds at most 128 KB of JSON, a document at most 512 KB across at most 16 stores. One person sends at most 25 frames a second per document (bursts to 40), and ClayJS paces itself to stay under that. A change the room refuses is undone in the tab, with a console warning.
+**Limits on hyperclay.com.** A frame carries at most 128 ops and 64 KB, so one value written in a single change, such as a paragraph in the page editor, can be up to about 60 KB. A store holds at most 1 MB of JSON, a document at most 2 MB across at most 16 stores. One person sends at most 25 frames a second per document (bursts to 40), and ClayJS paces itself to stay under that. A change the room refuses, or one too large for a frame, is undone in the tab, with a console warning; the page editor also puts the text in a notice with Restore. When the server holds as much live data as it can, a document without a room, or a change that would grow one, moves at save speed and tries the room again a minute later.
 
 **A two-player example.** The board above plus a never-saved lobby for pointers:
 

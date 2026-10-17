@@ -1,5 +1,5 @@
 import { schema } from "../../../src/page/schema.js";
-import { ATOM, CODES, flatten, markKey, marksOf, unflatten } from "../../../src/page/inline.js";
+import { ATOM, CODES, flatten, markKey, marksOf, packMarks, runsOf, unflatten, unitsOf, unpackMarks } from "../../../src/page/inline.js";
 import { createReplay, encodeForMerge, step } from "../../../src/page/replay.js";
 import { model } from "../../../src/vendor/prosemirror.vendor.js";
 
@@ -110,4 +110,32 @@ test("a private-use character survives a merge by merge3Text with marks on both 
   expect(r.S.c).toBe("\ue000 ONE two \ue001");
   expect(r.S.m).toEqual(mine);
   expect(r.conflicts.map((n) => [n.kind, n.lost])).toEqual([["merge", "uno"]]);
+});
+
+test("the record keeps marks as runs: neighbours merged, counts adding up to the text, and back", () => {
+  const m = [...keys("The ", ""), ...keys("quick", "b"), ...keys(" ", ""), ...keys("link", 'a["https://x.test"]'), ...keys(" tail", "")];
+  const runs = runsOf(m);
+  expect(runs).toEqual([[4, ""], [5, "b"], [1, ""], [4, 'a["https://x.test"]'], [5, ""]]);
+  expect(unitsOf(runs, m.length)).toEqual(m);
+  expect(unitsOf([[2, "b"], [3, ""]], 5)).toEqual(["b", "b", "", "", ""]);
+  expect(unitsOf(m, m.length)).toBe(m);
+  expect(unitsOf(undefined, 3)).toBeUndefined();
+  for (const bad of [[[0, "b"]], [[1.5, "b"]], [[2, 3]], [[6, "b"]], [[3, "b"], "x"], [[2, "b"]], [[2, "b"], [4, ""]]]) expect(unitsOf(bad, 5)).toBeNull();
+});
+
+test("a block and a write pack m and each splice's removed marks as runs, and unpack to the same value", () => {
+  const X = { t: "paragraph", pos: "M", c: "ab cd", m: ["b", "b", "", "", ""], w: { a: "t", e: "e1", k: 3, s: [[2, 4, "xy", 4, ["i", "i"]], [0, 0, "", 5]] } };
+  const packed = packMarks(X);
+  expect(packed.m).toEqual([[2, "b"], [3, ""]]);
+  expect(packed.w.s[0]).toEqual([2, 4, "xy", 4, [[2, "i"]]]);
+  expect(packed.w.s[1]).toBe(X.w.s[1]);
+  expect(X.m).toEqual(["b", "b", "", "", ""]);
+  expect(unpackMarks(packed)).toEqual(X);
+  const legacy = { t: "paragraph", pos: "M", c: "ab", m: ["b", ""] };
+  expect(unpackMarks(legacy)).toBe(legacy);
+  expect(unpackMarks({ t: "paragraph", pos: "M", c: "ab", m: [[9, "b"]] })).toEqual({ t: "paragraph", pos: "M", c: "ab", m: [] });
+  expect(unpackMarks({ t: "paragraph", pos: "M", c: "ab", m: [[1, "b"]] })).toEqual({ t: "paragraph", pos: "M", c: "ab", m: [] });
+  const blank = { t: "paragraph", pos: "M", c: "ab", m: ["", ""] };
+  expect(packMarks(blank).m).toEqual([[2, ""]]);
+  expect(unpackMarks(packMarks(blank))).toEqual(blank);
 });

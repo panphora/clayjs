@@ -1,11 +1,11 @@
 // A room double with the hyperclay server's rules, on a simulated clock.
 // Rules cited: hyperclay/server-lib/live-data-rooms.js (apply, limits, writer,
-// checkpoint), live-data-actions.js (rate bucket, error status), hey.js:1672
-// (16 KB body). Delivery: each client's stream is FIFO with its own latency;
+// checkpoint), live-data-actions.js (rate bucket, error status), hey.js:1681
+// (64 KB body). Delivery: each client's stream is FIFO with its own latency;
 // a POST answer has an independent latency, so it can beat or trail the event.
-import { applyOps, cloneJson, serializeLive, validateOp } from "../../../../src/live/ops.js";
+import { applyTracked, cloneJson, serializeLive, sizeChange, undoTracked, validateOp } from "../../../../src/live/ops.js";
 
-export const LIMITS = { opsPerFrame: 128, storeBytes: 128 * 1024, roomBytes: 512 * 1024, logEntries: 4096, logBytes: 256 * 1024, bodyBytes: 16 * 1024 };
+export const LIMITS = { opsPerFrame: 128, storeBytes: 1024 * 1024, roomBytes: 2 * 1024 * 1024, logEntries: 4096, logBytes: 256 * 1024, bodyBytes: 64 * 1024 };
 export const RATE = { perSecond: 25, burst: 40 };
 const encoder = new TextEncoder();
 const utf8 = (text) => encoder.encode(text).length;
@@ -116,15 +116,29 @@ export function createRoom(sim, initialStores, { latency = () => 40, answerLaten
     const nKey = frame.name + "\n" + clientId;
     const last = room.lastN.get(nKey);
     if (last && frame.n <= last.n) return { status: 200, body: { duplicate: true, seq: last.seq, epoch: room.epoch } };
-    let ops, value;
+    // In place, as live-data-rooms.js apply does: sized slot by slot, taken back when refused.
+    let ops;
+    let value = store.value;
+    let b = store.bytes;
+    const done = [];
+    const undo = () => { for (let i = done.length - 1; i >= 0; i--) undoTracked(done[i]); };
     try {
       ops = frame.ops.map(validateOp);
-      value = applyOps(cloneJson(store.value), ops);
+      for (const op of ops) {
+        const rec = applyTracked(value, op);
+        if (!rec) continue;
+        done.push(rec);
+        b += sizeChange(rec, bytes, b);
+        value = rec.root;
+      }
     } catch (err) {
+      undo();
       return { status: 422, body: { code: "bad-op", error: err.message } };
     }
-    const b = bytes(value);
-    if (b > LIMITS.storeBytes || roomBytes() - store.bytes + b > LIMITS.roomBytes) return { status: 413, body: { code: "too-large" } };
+    if (b > LIMITS.storeBytes || roomBytes() - store.bytes + b > LIMITS.roomBytes) {
+      undo();
+      return { status: 413, body: { code: "too-large" } };
+    }
     store.value = value;
     store.bytes = b;
     room.seq += 1;

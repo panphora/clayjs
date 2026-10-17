@@ -142,6 +142,15 @@ export function check({ room, tabs }) {
   for (const t of tabs.values()) {
     if (!t.editor.state.doc.eq(reloaded)) problems.push(`${t.id}: the editor differs from a reload of the checkpoint: ${JSON.stringify(t.blocks())} vs ${JSON.stringify(reloadedBlocks(reloaded))}`);
     if (t.store.pending.length) problems.push(`${t.id}: ${t.store.pending.length} ops still pending`);
+    for (const B of t.binding.blocks.values()) {
+      const lost = B.unechoed.filter((u) => u.value && u.value.w && u.seq !== null).length;
+      if (lost) problems.push(`${t.id}: ${lost} landed writes to ${B.id} never came back`);
+    }
+  }
+  // A tab writes marks as runs (inline.js), never one key per unit.
+  for (const [id, b] of Object.entries(value.blocks ?? {})) {
+    const perUnit = (m) => Array.isArray(m) && m.length > 0 && !Array.isArray(m[0]);
+    if (b && b.w && tabs.has(b.w.a) && (perUnit(b.m) || (b.w.s ?? []).some((sp) => Array.isArray(sp) && perUnit(sp[4])))) problems.push(`${id}: the record holds marks one key per unit`);
   }
   return problems;
 }

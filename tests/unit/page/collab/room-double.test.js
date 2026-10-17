@@ -36,10 +36,10 @@ function make({ stores = { doc: { n: 0 } }, room: roomOptions } = {}) {
   return { sim, room, connect, send, readState };
 }
 
-test("a frame whose body is over 16 KB is refused 413", async () => {
+test("a frame whose body is over 64 KB is refused 413", async () => {
   const { connect, send } = make();
   const a = connect("a");
-  const res = await send(a, { epoch: "e1", name: "doc", n: 1, ops: [{ op: "set", path: ["big"], value: "x".repeat(20000) }] });
+  const res = await send(a, { epoch: "e1", name: "doc", n: 1, ops: [{ op: "set", path: ["big"], value: "x".repeat(70000) }] });
   expect(res.status).toBe(413);
   expect(res.body.code).toBe("too-large");
 });
@@ -110,14 +110,14 @@ test("the store cap and the room cap are both refused 413", async () => {
   const first = make();
   const a = first.connect("a");
   let crossed = null;
-  for (let i = 0; i < 9; i++) {
+  for (let i = 0; i < Math.ceil(LIMITS.storeBytes / 15000) + 1; i++) {
     const res = await first.send(a, { epoch: "e1", name: "doc", n: i + 1, ops: [{ op: "set", path: ["p" + i], value: "x".repeat(15000) }] });
     if (res.status !== 200) crossed = res;
   }
   expect(crossed.status).toBe(413);
   expect(crossed.body.code).toBe("too-large");
 
-  const big = { big: "x".repeat(130990) };
+  const big = { big: "x".repeat(LIMITS.roomBytes / 4 - 82) };
   const second = make({ stores: { s0: big, s1: big, s2: big, s3: big, extra: {} } });
   const b = second.connect("b");
   const res = await second.send(b, { epoch: "e1", name: "extra", n: 1, ops: [{ op: "set", path: ["big"], value: "y".repeat(3000) }] });

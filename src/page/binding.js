@@ -17,15 +17,41 @@
 // the undo history) once this tab has no write for it in flight and is not
 // composing, so a release never has unconfirmed local steps under it.
 import { state as pmState, transform as pmTransform } from "../vendor/prosemirror.vendor.js";
-import { REMOTE, blockJson, docFromBlocks, newId, nodeFromBlock } from "./model.js";
-import { flatten, marksOf, unflatten } from "./inline.js";
-import { createReplay, hashOf, join, mapCaret, regions, step, strip, tombstone } from "./replay.js";
+import { REMOTE, blockJson, docFromBlocks, insideTextblocks, newId, nodeFromBlock } from "./model.js";
+import { flatten, marksOf, packMarks, unflatten, unpackMarks } from "./inline.js";
+import { createReplay, healChain, mapCaret, regions, repairOf, strip } from "./replay.js";
+import { createHealCheck } from "./heal-check.js";
 import { registerUnsavedState } from "../lib/unsaved-state.js";
+import { cloneJson } from "../live/ops.js";
 
 const { TextSelection } = pmState;
-const rawOf = (value, id) => (value && value.blocks && value.blocks[id]) || null;
+// A copy of a block of the record, with one mark key per unit (the record
+// keeps runs). A copy, because the store changes its value in place.
+const rawOf = (value, id) => {
+  const raw = (value && value.blocks && value.blocks[id]) || null;
+  return raw && typeof raw === "object" ? unpackMarks(cloneJson(raw)) : raw;
+};
 const tombOf = (value, id) => !!(value && value.deleted && value.deleted[id]);
-const same = (a, b) => (a === null || b === null ? a === b : hashOf(a) === hashOf(b));
+// hashOf(a) === hashOf(b) on JSON values, without building either string:
+// the same values without w, keys in any order.
+const equalJson = (a, b) => {
+  if (a === b) return true;
+  if (Array.isArray(a)) {
+    if (!Array.isArray(b) || a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) if (!equalJson(a[i], b[i])) return false;
+    return true;
+  }
+  if (a && typeof a === "object") {
+    if (!b || typeof b !== "object" || Array.isArray(b)) return false;
+    const keys = Object.keys(a);
+    if (keys.length !== Object.keys(b).length) return false;
+    for (const k of keys) if (!Object.prototype.hasOwnProperty.call(b, k) || !equalJson(a[k], b[k])) return false;
+    return true;
+  }
+  return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+};
+export const sameJson = (a, b) => equalJson(strip(a), strip(b));
+const same = (a, b) => (a === null || b === null ? a === b : sameJson(a, b));
 const keyAt = (m, i) => (m && m[i]) || "";
 const isHigh = (u) => u >= 0xd800 && u <= 0xdbff;
 const isLow = (u) => u >= 0xdc00 && u <= 0xdfff;
@@ -44,14 +70,17 @@ function blockOf(op) {
 }
 
 // One frame's ops as block ops, in order: { id, X } (X null: deleted) or
-// { id, tombstone: true }. An op deeper than a block (a data API set on one
-// field) or on the whole map takes the block's value after the frame, whole.
-function blockOps(ops, prev, next) {
+// { id, tombstone: true }, X with one mark key per unit; a set of one block
+// also carries the value as sent. An op deeper than a block (a data API set on
+// one field) or on the whole map takes the block's value after the frame, whole.
+// before(path): what the record held there before the frame (the store's
+// rebase event), or null.
+function blockOps(ops, before, next) {
   const out = [];
   for (const op of ops) {
     const [root, id] = op.path;
     if (op.path.length === 0 || (op.path.length === 1 && root === "blocks")) {
-      const ids = new Set([...Object.keys(prev?.blocks ?? {}), ...Object.keys(next?.blocks ?? {})]);
+      const ids = new Set([...Object.keys((before && before(["blocks"])) ?? {}), ...Object.keys(next?.blocks ?? {})]);
       for (const k of ids) out.push({ id: k, X: rawOf(next, k) ? strip(rawOf(next, k)) : null });
       if (op.path.length === 0) for (const k of Object.keys(next?.deleted ?? {})) out.push({ id: k, tombstone: true });
       continue;
@@ -62,7 +91,7 @@ function blockOps(ops, prev, next) {
       continue;
     }
     if (root !== "blocks") continue;
-    if (op.path.length === 2) out.push({ id: String(id), X: op.op === "set" ? op.value : null });
+    if (op.path.length === 2) out.push({ id: String(id), X: op.op === "set" ? unpackMarks(op.value) : null, sent: op.op === "set" ? op.value : null });
     else out.push({ id: String(id), X: rawOf(next, id) ? strip(rawOf(next, id)) : null });
   }
   return out;
@@ -188,6 +217,7 @@ export function createPageBinding({ schema, store, lane, me, setTimer = setTimeo
       B.r = createReplay(raw ? strip(raw) : null, { seq, epoch: epochNow(), me });
       B.r.tomb = tombOf(value, id);
       if (B.r.tomb) B.r.S = null;
+      B.heal = createHealCheck({ r: B.r, me, quiet, setTimer, clearTimer, ready: () => readyFor(B), notice: (lost) => notice({ kind: "heal", id, lost, by: me }) });
     } else B.tomb = tombOf(value, id);
     blocks.set(id, B);
     return B;
@@ -209,6 +239,7 @@ export function createPageBinding({ schema, store, lane, me, setTimer = setTimeo
     // paste of a deleted block) is a new block.
     appendTransaction(trs, old, next) {
       if (!trs.some((tr) => tr.docChanged && !tr.getMeta(REMOTE))) return null;
+      if (trs.every(insideTextblocks)) return null;
       const had = new Set();
       old.doc.forEach((node) => had.add(node.attrs.id));
       const tr = next.tr;
@@ -246,11 +277,15 @@ export function createPageBinding({ schema, store, lane, me, setTimer = setTimeo
       const value = blockJson(node);
       if (!old) { writes.push({ id, value }); continue; }
       const prevJson = blockJson(old);
-      if (hashOf(prevJson) === hashOf(value)) continue;
+      if (sameJson(prevJson, value)) continue;
       const B = blocks.get(id);
       if (!B || !B.text || !node.isTextblock || !old.isTextblock) { writes.push({ id, value }); continue; }
       const sp = spliceFrom({ c: prevJson.c, m: flatten(old.content).m }, { c: value.c, m: flatten(node.content).m }, ranges.get(id));
       const w = { a: me, e: epochNow(), k: B.k, s: [sp ?? [0, 0, "", prevJson.c.length]], f: changedFields(prevJson, value) };
+      const put = sp ? value.c.slice(sp[0], sp[0] + value.c.length - prevJson.c.length + sp[1] - sp[0]) : null;
+      if (!sp) B.heal.editTo(prevJson.c, value.c);
+      else if (put !== prevJson.c.slice(sp[0], sp[1])) B.heal.edit(sp[0], sp[1], put);
+      B.heal.wrote({ ...value, w });
       writes.push({ id, value: { ...value, w } });
     }
     if (!writes.length) return;
@@ -262,7 +297,7 @@ export function createPageBinding({ schema, store, lane, me, setTimer = setTimeo
           delete d.blocks[x.id];
           if (d.deleted) d.deleted[x.id] = true;
           else d.deleted = { [x.id]: true };
-        } else d.blocks[x.id] = x.value;
+        } else d.blocks[x.id] = packMarks(x.value);
       }
     });
     for (const x of writes) {
@@ -288,10 +323,11 @@ export function createPageBinding({ schema, store, lane, me, setTimer = setTimeo
     }
   }
 
-  function send(B, value) {
+  function send(B, value, ids) {
+    if (value && B.heal) B.heal.wrote(value, ids ?? B.heal.agreedIds());
     const mark = store.mark;
     if (value === null) store.handle.delete(["blocks", B.id]);
-    else store.handle.set(["blocks", B.id], value);
+    else store.handle.set(["blocks", B.id], packMarks(value));
     sent(mark);
   }
 
@@ -309,7 +345,7 @@ export function createPageBinding({ schema, store, lane, me, setTimer = setTimeo
       for (const B of blocks.values()) for (const u of B.unechoed) if (u.seq === null && u.id <= ev.through) u.seq = ev.seq;
     }
     if (ev.phase === "refused" || ev.phase === "undone") {
-      for (const [opId, id] of opBlock) if (opId <= ev.through) { const B = blocks.get(id); if (B) { B.refused = true; dirty.add(id); } }
+      for (const [opId, id] of opBlock) if (opId <= ev.through && (ev.from == null || opId >= ev.from)) { const B = blocks.get(id); if (B) { B.refused = true; dirty.add(id); } }
     }
   });
 
@@ -319,19 +355,22 @@ export function createPageBinding({ schema, store, lane, me, setTimer = setTimeo
     if (i >= 0) B.unechoed.splice(0, i + 1);
   }
 
-  function replayOps(ops, at, prev, next) {
-    for (const op of blockOps(ops, prev, next)) {
-      const B = ensure(op.id, prev, op.X);
+  // The record before a frame, as far as ensure reads it for one block.
+  const priorOf = (before, id) => ({ blocks: { [id]: before(["blocks", id]) }, deleted: { [id]: before(["deleted", id]) } });
+
+  function replayOps(ops, at, before, next) {
+    for (const op of blockOps(ops, before, next)) {
+      const B = blocks.get(op.id) ?? ensure(op.id, priorOf(before, op.id), op.X);
       dirty.add(op.id);
       if (op.tombstone) {
-        if (B.text) tombstone(B.r, at);
+        if (B.text) B.heal.tombstone(at);
         else B.tomb = true;
         continue;
       }
       if (!B.text) continue;
       const X = op.X && Array.isArray(op.X.c) ? { ...blockJson(nodeFromBlock(schema, op.id, op.X)), ...(op.X.w ? { w: op.X.w } : {}) } : op.X;
-      if (X && X.w && X.w.a === me) echoed(B, X);
-      step(B.r, X, at);
+      if (X && X.w && X.w.a === me) echoed(B, op.sent ?? X);
+      B.heal.step(X, at);
     }
     advance(at);
   }
@@ -347,20 +386,20 @@ export function createPageBinding({ schema, store, lane, me, setTimer = setTimeo
     }
   }
 
-  store.onRebase(({ frame, room, prev, next }) => {
+  store.onRebase(({ frame, room, before, next }) => {
     if (frame) {
-      replayOps(frame.ops, frame.seq, prev, next);
+      replayOps(frame.ops, frame.seq, before, next);
       checkpointWithin(1500);
     } else if (room && room.fresh) onEpoch(room, next);
     else if (room && Array.isArray(room.moves)) {
-      for (const mv of room.moves) if (mv.seq > seq) replayOps(mv.ops, mv.seq, prev, next);
+      for (const mv of room.moves) if (mv.seq > seq) replayOps(mv.ops, mv.seq, before, next);
     } else if (room) {
       const ids = new Set([...blocks.keys(), ...Object.keys(next?.blocks ?? {})]);
       for (const id of ids) {
         const B = ensure(id, next);
         dirty.add(id);
         if (!B.text) { B.tomb = tombOf(next, id); continue; }
-        if (room.seq !== B.r.seq || !same(rawOf(next, id), B.r.S)) join(B.r, rawOf(next, id), room.seq, { tomb: tombOf(next, id) });
+        if (room.seq !== B.r.seq || !same(rawOf(next, id), B.r.S)) B.heal.join(rawOf(next, id), room.seq, { tomb: tombOf(next, id) });
         // Writes the joined value already holds never come back one by one.
         B.unechoed = B.unechoed.filter((u) => u.seq === null || u.seq > room.seq);
       }
@@ -396,23 +435,33 @@ export function createPageBinding({ schema, store, lane, me, setTimer = setTimeo
       const lost = B.unechoed;
       B.unechoed = lost.filter((u) => pending.has(u.id));
       const oldSeq = r.seq;
+      const base = r.S, baseMarks = r.marks;
       const chain = [], u = [];
       if (!first) {
         for (const x of lost) {
           if (!x.value || !x.value.w || x.value.w.g !== undefined) continue;
-          step(r, x.value, r.seq);
+          B.heal.step(unpackMarks(x.value), r.seq);
           for (const sp of r.log[r.log.length - 1].applied) { chain.push(sp.slice(0, 3).concat([sp[3]], sp[4] && sp[4].some(Boolean) ? [sp[4]] : [])); u.push(x.seq); }
         }
       }
-      const healed = first ? null : r.S;
-      join(r, rawOf(next, id), room.seq, { epoch: now, moves: room.moves ? mine : null, since: 0, tomb: tombOf(next, id) && !mine.some((mv) => mv.tombstone) });
+      const healed = first ? null : r.S, healIds = first ? null : B.heal.agreedIds();
+      if (!first) B.heal.arm();
+      B.heal.join(rawOf(next, id), room.seq, { epoch: now, moves: room.moves ? mine : null, since: 0, tomb: tombOf(next, id) && !mine.some((mv) => mv.tombstone) });
       B.k = null;
       if (healed && !r.tomb && !same(healed, r.S)) {
         stats.heals++;
-        const value = { ...strip(healed), w: { a: me, e: now, h: oldSeq, s: chain, u } };
-        queueMicrotask(() => send(B, value));
+        const value = { ...strip(healed), w: { a: me, e: now, h: oldSeq, ...healChain(base, baseMarks, healed, chain, u) } };
+        queueMicrotask(() => send(B, value, healIds));
       }
     }
+  }
+
+  // The heal check (heal-check.js) runs once the editor shows the agreed text
+  // and nothing of the block is in flight.
+  function readyFor(B) {
+    const found = view ? findBlock(view.state.doc, B.id) : null;
+    const shown = found && found.node.isTextblock ? flatten(found.node.content).c : null;
+    return !(heldIds().has(B.id) || B.unechoed.length || composing || shown !== (B.r.S ? B.r.S.c : null));
   }
 
   // Show every changed block whose writes have all landed, in one transaction.
@@ -449,7 +498,8 @@ export function createPageBinding({ schema, store, lane, me, setTimer = setTimeo
           const k = B.k;
           carets.set(id, (off) => mapCaret(B.r, me, k, off, E.c));
           textSteps(tr, B, found, E, S);
-        } else if (hashOf(blockJson(found.node)) !== hashOf(S)) tr.replaceWith(found.pos, found.pos + found.node.nodeSize, nodeFromBlock(schema, id, S));
+          B.heal.released(S.c);
+        } else if (!sameJson(blockJson(found.node), S)) tr.replaceWith(found.pos, found.pos + found.node.nodeSize, nodeFromBlock(schema, id, S));
         order.push(B);
       }
       B.k = B.text ? B.r.seq : seq;
@@ -560,11 +610,12 @@ export function createPageBinding({ schema, store, lane, me, setTimer = setTimeo
     B.timer = null;
     const raw = rawOf(store.authoritative, B.id);
     const S = agreedOf(B);
-    if (same(raw, S)) { if (B.r) B.r.behind = false; return; }
+    if (same(raw, S)) { if (B.r) { B.r.behind = false; B.r.counter = false; } return; }
     const writer = lane.isWriter();
     const tomb = B.text ? B.r.tomb : B.tomb;
-    if (!writer && !(B.r && B.r.behind) && !tomb) return;
-    B.timer = setTimer(() => (lane.isWriter() ? repair(B) : follow(B)), writer ? quiet : quiet * 4);
+    const counter = !!(B.r && B.r.counter);
+    if (!writer && !(B.r && B.r.behind) && !tomb && !counter) return;
+    B.timer = setTimer(() => (lane.isWriter() || (B.r && B.r.counter) ? repair(B) : follow(B)), writer || counter ? quiet : quiet * 4);
   }
 
   function repair(B) {
@@ -574,7 +625,7 @@ export function createPageBinding({ schema, store, lane, me, setTimer = setTimeo
     if (same(raw, S)) return;
     stats.repairs++;
     if (!S) send(B, null);
-    else if (B.text) send(B, { ...S, w: { a: me, e: epochNow(), g: B.r.seq } });
+    else if (B.text) { send(B, { ...S, w: { ...repairOf(B.r, me), e: epochNow() } }); B.r.counter = false; }
   }
 
   function follow(B) {
@@ -583,7 +634,7 @@ export function createPageBinding({ schema, store, lane, me, setTimer = setTimeo
     if (tomb && rawOf(store.authoritative, B.id)) { stats.repairs++; send(B, null); return; }
     if (!B.text || !B.r.behind) return;
     stats.follows++;
-    join(B.r, rawOf(store.authoritative, B.id), B.r.seq, { tomb: tombOf(store.authoritative, B.id) });
+    B.heal.join(rawOf(store.authoritative, B.id), B.r.seq, { tomb: tombOf(store.authoritative, B.id) });
     dirty.add(B.id);
     releaseAll();
   }
@@ -640,7 +691,7 @@ export function createPageBinding({ schema, store, lane, me, setTimer = setTimeo
     dispose() {
       unsaved.dispose();
       unsavedHeld.dispose();
-      for (const B of blocks.values()) clearTimer(B.timer);
+      for (const B of blocks.values()) { clearTimer(B.timer); B.heal?.dispose(); }
       view = null;
     },
   };

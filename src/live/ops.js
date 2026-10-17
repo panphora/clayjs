@@ -176,6 +176,83 @@ export function applyOps(root, ops) {
   return value;
 }
 
+// applyOp, keeping what it changed so a caller can size the change or take it
+// back. null when the op changes nothing. Otherwise root is the value to go on
+// with (a new one only for a whole-value set, where at is null and old is the
+// previous root), and at[key] is the one slot the op changed, at path. kind
+// says how: "put" replaced old, "add" made the slot (a new key, or an item
+// appended to a list of size items), "remove" took old out. For an object, keys
+// lists its keys before a remove, and empty says it had none before an add.
+// Checks the op first, so a throw changes nothing.
+export function applyTracked(root, op) {
+  checkOp(root, op);
+  const { path } = op;
+  if (path.length === 0) {
+    return { root: cloneJson(op.value), at: null, key: null, kind: "put", old: root, path: [], size: 0, keys: null, empty: false };
+  }
+  let at = root;
+  let depth = path.length - 1;
+  for (let i = 0; i < path.length - 1; i++) {
+    const next = read(at, path[i]);
+    if (!isContainer(next)) {
+      if (op.op === "del") return null;
+      depth = i;
+      break;
+    }
+    at = next;
+  }
+  const list = Array.isArray(at);
+  const key = list ? indexOf(at, path[depth]) : String(path[depth]);
+  const size = list ? at.length : 0;
+  const had = list ? key < size : has(at, key);
+  if (op.op === "del" && !had) return null;
+  const kind = op.op === "del" ? "remove" : had ? "put" : "add";
+  const rec = { root, at, key, kind, old: had ? at[key] : undefined, path: path.slice(0, depth + 1), size, keys: null, empty: false };
+  if (!list && kind === "remove") rec.keys = Object.keys(at);
+  if (!list && kind === "add") rec.empty = isEmpty(at);
+  applyOp(root, op);
+  return rec;
+}
+
+function isEmpty(obj) {
+  for (const key in obj) if (has(obj, key)) return false;
+  return true;
+}
+
+// Takes back one applyTracked change; a frame's records go back newest first.
+// Returns the root as it was before that op.
+export function undoTracked(rec) {
+  const { at, key, kind, old } = rec;
+  if (at === null) return old;
+  if (Array.isArray(at)) {
+    if (kind === "put") at[key] = old;
+    else if (kind === "add") at.length = rec.size;
+    else at.splice(key, 0, old);
+  } else if (kind === "put") setOwn(at, key, old);
+  else if (kind === "add") delete at[key];
+  else if (rec.keys[rec.keys.length - 1] === key) setOwn(at, key, old);
+  else {
+    // Back in its place: every key after it is put back behind it.
+    const values = rec.keys.map((k) => (k === key ? old : at[k]));
+    for (const k of rec.keys) if (k !== key) delete at[k];
+    rec.keys.forEach((k, i) => setOwn(at, k, values[i]));
+  }
+  return rec.root;
+}
+
+// What one applyTracked change did to the length of serializeLive(root), with
+// size(v) the length of serializeLive(v) in the caller's unit and total the
+// root's length before. Call it before the next op touches the slot.
+export function sizeChange(rec, size, total) {
+  const { at, key, kind, old } = rec;
+  if (at === null) return size(rec.root) - total;
+  const list = Array.isArray(at);
+  const slot = list ? 0 : size(key) + 1;
+  if (kind === "put") return size(at[key]) - size(old);
+  if (kind === "add") return slot + size(at[key]) + ((list ? rec.size > 0 : !rec.empty) ? 1 : 0);
+  return -(slot + size(old)) - ((list ? rec.size : rec.keys.length) > 1 ? 1 : 0);
+}
+
 const samePath = (a, b) => a.length === b.length && a.every((s, i) => String(s) === String(b[i]));
 
 // Merges neighbouring ops on the same path, without changing the result:

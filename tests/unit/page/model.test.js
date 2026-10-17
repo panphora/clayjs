@@ -1,6 +1,6 @@
 import { schema } from "../../../src/page/schema.js";
 import {
-  REMOTE, blockJson, blockMap, changedBlocks, docFromBlocks, identityPlugin, isKey,
+  REMOTE, blockJson, blockMap, changedBlocks, docFromBlocks, identityPlugin, insideTextblocks, isKey,
   keyBetween, keysBetween, nodeFromBlock, orderedIds, repairSiblings,
 } from "../../../src/page/model.js";
 import { diffOps } from "../../../src/live/ops.js";
@@ -243,4 +243,54 @@ test("repairSiblings reorders only what is out of order", () => {
   expect(out[3]).toBeNull();
   expect(out[1].id).toBe("b");
   expect(out[1].pos > "1" && out[1].pos < "3").toBe(true);
+});
+
+test("insideTextblocks holds for text and marks inside one block, never for a change to which blocks there are", () => {
+  const s = editor({
+    "b-1": { t: "paragraph", pos: "1", c: [text("one two")] },
+    "b-2": { t: "paragraph", pos: "2", c: [text("three")] },
+    "t-1": {
+      t: "table", pos: "3", cols: { c1: { pos: "1", name: "a", kind: "text" } },
+      rows: { r1: { pos: "1", cells: { c1: "x" } }, r2: { pos: "2", cells: { c1: "y" } } },
+    },
+  });
+  const p1 = find(s.doc, "b-1").offset, p2 = find(s.doc, "b-2").offset, t = find(s.doc, "t-1");
+  const row = t.node.child(0);
+  const inside = (tr) => insideTextblocks(tr);
+  expect(inside(s.tr.insertText("x", p1 + 2))).toBe(true);
+  expect(inside(s.tr.delete(p1 + 1, p1 + 3))).toBe(true);
+  expect(inside(s.tr.addMark(p1 + 1, p1 + 4, schema.marks.strong.create()))).toBe(true);
+  expect(inside(s.tr.addMark(p1 + 1, p1 + 4, schema.marks.strong.create()).removeMark(p1 + 2, p1 + 3, schema.marks.strong))).toBe(true);
+  expect(inside(s.tr.insert(p1 + 2, schema.nodes.hard_break.create()))).toBe(true);
+  expect(inside(s.tr.insertText("x", p1 + 2).insertText("y", p2 + 2))).toBe(true);
+  expect(inside(s.tr.split(p1 + 4))).toBe(false);
+  expect(inside(s.tr.delete(p1 + 4, p2 + 3))).toBe(false);
+  expect(inside(s.tr.delete(p1 + 8, p2 + 1))).toBe(false);
+  expect(inside(s.tr.insert(p2, find(s.doc, "b-1").node))).toBe(false);
+  expect(inside(s.tr.setNodeMarkup(p1, schema.nodes.heading, { ...find(s.doc, "b-1").node.attrs, level: 2 }))).toBe(false);
+  expect(inside(s.tr.setNodeAttribute(p1, "pos", "0"))).toBe(false);
+  expect(inside(s.tr.delete(t.offset + 1, t.offset + 1 + row.nodeSize))).toBe(false);
+  expect(inside(s.tr.insertText("z", t.offset + 3))).toBe(false);
+});
+
+test("after a keystroke, which skips the walk over every block, a split and a pasted copy are still repaired", () => {
+  let s = editor({
+    "b-1": { t: "paragraph", pos: "1", c: [text("First half")] },
+    "b-2": { t: "paragraph", pos: "2", c: [text("Next")] },
+  });
+  s = s.apply(s.tr.insertText("!", find(s.doc, "b-2").offset + 1));
+  s = s.apply(s.tr.insertText("?", find(s.doc, "b-2").offset + 1));
+  s = s.apply(s.tr.split(find(s.doc, "b-1").offset + 1 + "First".length));
+  s = s.apply(s.tr.insertText("x", find(s.doc, "b-1").offset + 1));
+  s = s.apply(s.tr.insert(s.doc.content.size, find(s.doc, "b-1").node));
+  const ids = [];
+  s.doc.forEach((n) => ids.push(n.attrs.id));
+  expect(new Set(ids).size).toBe(4);
+  expect(ids[0]).toBe("b-1");
+  expect(ids[2]).toBe("b-2");
+  const map = blockMap(s.doc);
+  const order = ids.map((id) => map[id].pos);
+  expect([...order].sort()).toEqual(order);
+  expect(new Set(order).size).toBe(4);
+  expect(map["b-2"].c).toBe("?!Next");
 });

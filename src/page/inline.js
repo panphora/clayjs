@@ -1,5 +1,5 @@
 // A text block's inline content as the live record keeps it: c, its flat text,
-// and m, one mark key per UTF-16 unit of c. The replay (replay.js) merges in
+// and m, one mark key per UTF-16 unit of c (stored as runs, below). The replay (replay.js) merges in
 // this form; the editor gets ProseMirror nodes back from it.
 //
 // A mark key lists a unit's marks in schema order, one code each, a mark with
@@ -85,6 +85,65 @@ export function flatten(content) {
     }
   });
   return { c, m };
+}
+
+// The record keeps m as runs instead, [[count, key], ...] in order, so its
+// size follows the formatting rather than the length of the text: neighbouring
+// runs differ, and the counts add up to the length of c. Memory keeps one key
+// per unit, and so do records written before runs; both open.
+export function runsOf(m) {
+  const out = [];
+  for (const key of m) {
+    const last = out[out.length - 1];
+    if (last && last[1] === key) last[0]++;
+    else out.push([1, key]);
+  }
+  return out;
+}
+
+const isRuns = (m) => Array.isArray(m) && Array.isArray(m[0]);
+
+// One key per unit for `length` units, from runs; per-unit keys come back as
+// they are. null for runs that do not cover exactly `length` units: a write
+// that changed c alone keeps none of its marks, as a per-unit list of the
+// wrong length keeps none in the replay.
+export function unitsOf(m, length) {
+  if (!isRuns(m)) return m;
+  const out = [];
+  for (const run of m) {
+    if (!Array.isArray(run) || !Number.isInteger(run[0]) || run[0] < 1 || typeof run[1] !== "string" || out.length + run[0] > length) return null;
+    for (let i = 0; i < run[0]; i++) out.push(run[1]);
+  }
+  return out.length === length ? out : null;
+}
+
+// A block or a write as the record keeps it: m, and the removed marks of each
+// of its splices, as runs.
+export function packMarks(X) {
+  if (!X || typeof X !== "object") return X;
+  const out = { ...X };
+  if (Array.isArray(X.m) && !isRuns(X.m)) out.m = runsOf(X.m);
+  if (X.w && Array.isArray(X.w.s) && X.w.s.some((sp) => Array.isArray(sp) && Array.isArray(sp[4]) && !isRuns(sp[4]))) {
+    out.w = { ...X.w, s: X.w.s.map((sp) => (Array.isArray(sp) && Array.isArray(sp[4]) && !isRuns(sp[4]) ? [...sp.slice(0, 4), runsOf(sp[4]), ...sp.slice(5)] : sp)) };
+  }
+  return out;
+}
+
+// The same block or write with one key per unit, as memory and replay.js keep
+// it; X itself when it already is. Runs that do not cover the text come back
+// as an empty list: like a per-unit list of the wrong length, it gives no
+// marks, and the writer's repair rewrites the block.
+export function unpackMarks(X) {
+  if (!X || typeof X !== "object") return X;
+  const runs = isRuns(X.m) && typeof X.c === "string";
+  const spliced = X.w && Array.isArray(X.w.s) && X.w.s.some((sp) => Array.isArray(sp) && isRuns(sp[4]));
+  if (!runs && !spliced) return X;
+  const out = { ...X };
+  if (runs) out.m = unitsOf(X.m, X.c.length) ?? [];
+  if (spliced) {
+    out.w = { ...X.w, s: X.w.s.map((sp) => (Array.isArray(sp) && isRuns(sp[4]) ? [...sp.slice(0, 4), unitsOf(sp[4], typeof sp[2] === "string" ? sp[2].length : 0) ?? [], ...sp.slice(5)] : sp)) };
+  }
+  return out;
 }
 
 const isHigh = (u) => u >= 0xd800 && u <= 0xdbff;

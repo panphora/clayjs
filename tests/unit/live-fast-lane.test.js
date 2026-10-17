@@ -409,7 +409,7 @@ test("frames are packed by size, so many small writes go in frames the host take
   room.open("a");
   await settle();
   a.game.update((d) => {
-    for (let i = 0; i < 128; i++) d.e["k" + i] = { x: i, label: "entity-".repeat(12) };
+    for (let i = 0; i < 128; i++) d.e["k" + i] = { x: i, label: "entity-".repeat(80) };
   });
   await settle();
   expect(room.posts.length).toBeGreaterThan(1);

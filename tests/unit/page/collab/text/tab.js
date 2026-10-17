@@ -8,7 +8,8 @@
 // the tombstone in the same frame, so a stale write never brings the block back.
 import { createStore } from "../../../../../src/live/store.js";
 import { createFastLane } from "../../../../../src/live/fast-lane.js";
-import { createReplay, step, tombstone, join, mapCaret, hashOf, spliceFor, withMarks, regions, strip } from "../../../../../src/page/replay.js";
+import { createReplay, mapCaret, hashOf, spliceFor, withMarks, regions, strip, healChain, repairOf } from "../../../../../src/page/replay.js";
+import { createHealCheck } from "../../../../../src/page/heal-check.js";
 
 const ID = "p";
 const rawOf = (v) => (v && v.blocks && v.blocks[ID]) || null;
@@ -45,6 +46,14 @@ export function makeTab(sim, room, id, initial, opts = {}) {
   let refused = false;
   // This tab's writes not yet seen in the stream: { id (store op id), json, value, seq (when landed) }.
   let unechoed = [];
+  // After a room loss, once the heals have settled: what this tab typed and the
+  // agreed text lacks goes in a heal notice, for Restore (heal-check.js).
+  const heal = createHealCheck({
+    r, me: id, quiet, setTimer: sim.setTimer, clearTimer: sim.clearTimer,
+    ready: () => !(store.pending.length || unechoed.length || tab.composing || tab.view !== (r.S ? r.S.c : null)),
+    notice: (lost) => tab.notices.push({ kind: "heal", lost, by: id }),
+  });
+  tab.heal = heal;
 
   // Proposed server rule: `since` answers the room's moves after that seq in the
   // same epoch; for another epoch it answers the moves since the epoch began.
@@ -73,9 +82,9 @@ export function makeTab(sim, room, id, initial, opts = {}) {
   }
   function replay(ops, seq) {
     for (const op of blockOps(ops)) {
-      if (op.tombstone) { tombstone(r, seq); continue; }
+      if (op.tombstone) { heal.tombstone(seq); continue; }
       if (op.X && op.X.w && op.X.w.a === id) echoed(op.X);
-      step(r, op.X, seq);
+      heal.step(op.X, seq);
     }
   }
 
@@ -83,7 +92,7 @@ export function makeTab(sim, room, id, initial, opts = {}) {
     if (frame) replay(frame.ops, frame.seq);
     else if (rs && rs.fresh) onEpoch(rs, next);
     else if (rs && Array.isArray(rs.moves)) { for (const mv of rs.moves) if (mv.seq > r.seq) replay(mv.ops, mv.seq); }
-    else if (rs && (rs.seq !== r.seq || !same(rawOf(next), r.S))) join(r, rawOf(next), rs.seq, { tomb: tombOf(next) });
+    else if (rs && (rs.seq !== r.seq || !same(rawOf(next), r.S))) heal.join(rawOf(next), rs.seq, { tomb: tombOf(next) });
     if (rs) r.seq = Math.max(r.seq, rs.seq);
     queueMicrotask(release);
   });
@@ -99,31 +108,34 @@ export function makeTab(sim, room, id, initial, opts = {}) {
     const moves = (rs.moves ?? []).flatMap((mv) => blockOps(mv.ops).map((op) => ({ seq: mv.seq, ...op })));
     if (r.epoch === null) {
       r.epoch = epoch;
-      if (rs.moves) for (const mv of moves) mv.tombstone ? tombstone(r, mv.seq) : step(r, mv.X, mv.seq);
-      else join(r, rawOf(next), rs.seq, { tomb: tombOf(next) });
+      if (rs.moves) for (const mv of moves) mv.tombstone ? heal.tombstone(mv.seq) : heal.step(mv.X, mv.seq);
+      else heal.join(rawOf(next), rs.seq, { tomb: tombOf(next) });
       return;
     }
     const pending = new Set(store.pendingEntries().map((e) => e.id));
     const lost = unechoed;
     unechoed = unechoed.filter((u) => pending.has(u.id));
     const oldSeq = r.seq;
+    const base = r.S, baseMarks = r.marks;
     const chain = [], u = [];
     for (const x of lost) {
       if (!x.value || !x.value.w || x.value.w.g !== undefined) continue;
-      step(r, x.value, r.seq);
+      heal.step(x.value, r.seq);
       for (const sp of r.log[r.log.length - 1].applied) { chain.push(sp.slice(0, 3).concat([sp[3]], sp[4] && sp[4].some(Boolean) ? [sp[4]] : [])); u.push(x.seq); }
     }
-    const healed = r.S;
-    join(r, rawOf(next), rs.seq, { epoch, moves: rs.moves ? moves : null, since: 0, tomb: tombOf(next) && !moves.some((mv) => mv.tombstone) });
+    const healed = r.S, healIds = heal.agreedIds();
+    heal.arm();
+    heal.join(rawOf(next), rs.seq, { epoch, moves: rs.moves ? moves : null, since: 0, tomb: tombOf(next) && !moves.some((mv) => mv.tombstone) });
     tab.k = null;
     if (healed && !r.tomb && !same(healed, r.S)) {
       tab.heals++;
-      const value = { ...strip(healed), w: { a: id, e: epoch, h: oldSeq, s: chain, u } };
-      queueMicrotask(() => send(value));
+      const value = { ...strip(healed), w: { a: id, e: epoch, h: oldSeq, ...healChain(base, baseMarks, healed, chain, u) } };
+      queueMicrotask(() => send(value, healIds));
     }
   }
 
-  function send(value) {
+  function send(value, ids) {
+    heal.wrote(value, ids);
     tab.writes++;
     tab.bytes.push(JSON.stringify(value).length);
     store.handle.set(["blocks", ID], value);
@@ -153,6 +165,7 @@ export function makeTab(sim, room, id, initial, opts = {}) {
         tab.view = S.c;
         tab.marks = r.marks.slice();
       }
+      heal.released(tab.view);
       fields = (({ c, m, w, ...rest }) => rest)(S);
     }
     refused = false;
@@ -169,26 +182,26 @@ export function makeTab(sim, room, id, initial, opts = {}) {
     sim.clearTimer(timer);
     timer = null;
     const raw = rawOf(store.authoritative);
-    if (same(raw, r.S)) { r.behind = false; return; }
+    if (same(raw, r.S)) { r.behind = false; r.counter = false; return; }
     const writer = lane.isWriter();
-    if (!writer && !r.behind && !r.tomb) return;
-    timer = sim.setTimer(writer ? repair : follow, writer ? quiet : quiet * 4);
+    if (!writer && !r.behind && !r.tomb && !r.counter) return;
+    timer = sim.setTimer(writer || r.counter ? repair : follow, writer || r.counter ? quiet : quiet * 4);
   }
   function repair() {
-    if (!lane.isWriter()) return follow();
+    if (!lane.isWriter() && !r.counter) return follow();
     if (store.pending.length || tab.composing || tab.view !== (r.S ? r.S.c : null)) return;
     if (same(rawOf(store.authoritative), r.S)) return;
     tab.repairs++;
     if (!r.S) store.handle.delete(["blocks", ID]);
-    else send({ ...r.S, w: { a: id, e: r.epoch, g: r.seq } });
+    else { send({ ...r.S, w: repairOf(r, id) }, heal.agreedIds()); r.counter = false; }
   }
   function follow() {
-    if (lane.isWriter()) return repair();
+    if (lane.isWriter() || r.counter) return repair();
     if (store.pending.length || tab.composing) return;
     if (r.tomb && rawOf(store.authoritative)) { tab.repairs++; store.handle.delete(["blocks", ID]); return; }
     if (!r.behind) return;
     tab.follows++;
-    join(r, rawOf(store.authoritative), r.seq, { tomb: tombOf(store.authoritative) });
+    heal.join(rawOf(store.authoritative), r.seq, { tomb: tombOf(store.authoritative) });
     release();
   }
 
@@ -196,6 +209,7 @@ export function makeTab(sim, room, id, initial, opts = {}) {
     if (tab.view === null) return;
     tab.edited = true;
     const s = spliceFor(tab.view, tab.marks, from, to);
+    heal.edit(from, to, text);
     tab.view = tab.view.slice(0, from) + text + tab.view.slice(to);
     tab.marks = put(tab.marks, from, to, new Array(text.length).fill(key));
     tab.caret = from + text.length;

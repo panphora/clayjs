@@ -18,7 +18,7 @@
 // where in the log it starts, the moves after that go back on top, and the
 // merge itself is logged as a diff so a later file stamped before it keeps it.
 
-import { applyOps, applyOp, checkOp, cloneJson, validateOp, serializeLive, textHash, diffOps } from "./ops.js";
+import { applyOp, applyTracked, checkOp, cloneJson, undoTracked, validateOp, serializeLive, textHash, diffOps } from "./ops.js";
 import { HyperMorph } from "../vendor/hyper-morph.vendor.js";
 import { movesSince } from "./moves.js";
 
@@ -27,6 +27,28 @@ export const REQUEST_MS = 2000;
 export const CLOSE_WAIT_MS = 500;
 export const LOG_ENTRIES = 1024;
 export const LOG_BYTES = 256 * 1024;
+
+// ops applied to value in place, all or none: a throw takes back the ones
+// before it. Returns the value to go on with, and how to take the ops back.
+function applyAll(value, ops) {
+  const done = [];
+  const undo = () => {
+    for (let i = done.length - 1; i >= 0; i--) undoTracked(done[i]);
+  };
+  try {
+    for (const op of ops) {
+      const rec = applyTracked(value, op);
+      if (rec) {
+        done.push(rec);
+        value = rec.root;
+      }
+    }
+  } catch (err) {
+    undo();
+    throw err;
+  }
+  return { value, undo };
+}
 
 const encoder = new TextEncoder();
 
@@ -99,7 +121,7 @@ export function localTransport({ seed, key = "clay-live:" + window.location.path
   function advance(data) {
     const m = mirror.stores.get(data.name);
     if (m) {
-      m.value = applyOps(cloneJson(m.value), data.ops);
+      m.value = applyAll(m.value, data.ops).value;
       m.last = data.seq;
       if (!m.ephemeral) pushLog(m, { seq: data.seq, ops: data.ops });
     }
@@ -322,7 +344,7 @@ export function localTransport({ seed, key = "clay-live:" + window.location.path
     let ops;
     try {
       ops = frame.ops.map(validateOp);
-      applyOps(cloneJson(m.value), ops);
+      applyAll(m.value, ops).undo();
     } catch (err) {
       return { status: 422, body: { error: err.message }, retryAfter: 0 };
     }

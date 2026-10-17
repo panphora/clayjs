@@ -13,12 +13,13 @@
 // the room's log rebuilds the value; -1: rewrite now). Both are numbers in the
 // current epoch, taken from the room and never carried across epochs.
 
-import { applyOps, cloneJson } from "./ops.js";
-
 export const MIN_GAP_MS = 40;
 export const MAX_OPS = 128;
 export const RETRY_MS = 500;
-export const FRAME_BYTES = 15 * 1024;
+export const FRAME_BYTES = 63 * 1024;
+// What a host still on the old 16 KB body cap takes: a multi-op frame it
+// answers 413 is packed again at this size for the rest of the session.
+export const OLD_FRAME_BYTES = 15 * 1024;
 const BUFFER_MAX = 512;
 const RETRY_MAX_MS = 8000;
 const REVOKED = new Set([401, 403]);
@@ -76,6 +77,7 @@ export function createFastLane({
   let holdUntil = 0;
   let timer = null;
   let retryDelay = RETRY_MS;
+  let frameBytes = FRAME_BYTES;
   let resyncDelay = RETRY_MS;
   // Bumped when the stream opens or closes, and when a state is taken: a state
   // request answered after either is obsolete.
@@ -145,25 +147,27 @@ export function createFastLane({
     }
     for (const [name, lane] of lanes) {
       if (!lane.unsent.length || !roomNames.has(name) || held(name)) continue;
-      // Packed by bytes as well as count: the host refuses a body over 16 KB.
+      // Packed by bytes as well as count: the host refuses a body over 64 KB.
       let size = byteSize({ name, n: lane.n + 1, ops: [], epoch });
       let count = 0;
       while (count < lane.unsent.length && count < MAX_OPS) {
         const more = byteSize(lane.unsent[count].op) + 1;
-        if (size + more > FRAME_BYTES) break;
+        if (size + more > frameBytes) break;
         size += more;
         count++;
       }
+      // One op larger than a frame: only that op is undone, and the ops queued
+      // after it go on (nextFrame starts over).
       if (count === 0) {
         const [entry] = lane.unsent.splice(0, 1);
-        console.warn(`clay.live("${name}"): one update was larger than ${FRAME_BYTES} bytes, so it was undone`);
+        console.warn(`clay.live("${name}"): one update was larger than ${frameBytes} bytes, so it was undone`);
         const store = entries.get(name)?.store;
-        store?.rebase(store.authoritative, { source: "state", through: entry.id, cause: "undone" });
-        tell(name, { phase: "undone", code: "op-too-large", through: entry.id });
-        continue;
+        tell(name, { phase: "undone", code: "op-too-large", from: entry.id, through: entry.id });
+        store?.rebase(store.authoritative, { source: "state", drop: [entry.id, entry.id], cause: "undone" });
+        return nextFrame();
       }
       const take = lane.unsent.splice(0, count);
-      const frame = { n: ++lane.n, ops: take.map((entry) => entry.op), through: take[take.length - 1].id, seq: null, sent: false };
+      const frame = { n: ++lane.n, ops: take.map((entry) => entry.op), entries: take, first: take[0].id, through: take[take.length - 1].id, seq: null, sent: false };
       lane.framed = Math.max(lane.framed, frame.through);
       lane.awaiting.push(frame);
       return { name, lane, frame };
@@ -307,20 +311,26 @@ export function createFastLane({
       return;
     }
     lane.awaiting.splice(lane.awaiting.indexOf(frame), 1);
+    // A host still on the old body cap: pack its ops again, smaller, and send
+    // them again. Only an op too large on its own is refused.
+    if (status === 413 && frame.entries?.length > 1 && frameBytes > OLD_FRAME_BYTES) {
+      frameBytes = OLD_FRAME_BYTES;
+      console.warn(`clay.live("${name}"): the host takes smaller updates, so they go in frames of ${frameBytes} bytes`);
+      lane.unsent.unshift(...frame.entries);
+      return;
+    }
     const store = entries.get(name)?.store;
-    tell(name, { phase: "refused", code: body?.code ?? "refused", n: frame.n, through: frame.through });
+    tell(name, { phase: "refused", code: body?.code ?? "refused", n: frame.n, from: frame.first, through: frame.through });
     console.warn(`clay.live("${name}"): the host refused an update, so it was undone (${reason})`);
-    store?.rebase(store.authoritative, { source: "state", through: frame.through, cause: "refused" });
+    store?.rebase(store.authoritative, { source: "state", drop: frame.first === undefined ? undefined : [frame.first, frame.through], through: frame.first === undefined ? frame.through : undefined, cause: "refused" });
   }
 
   function apply(frame) {
     seq = frame.seq;
     const store = entries.get(frame.name)?.store;
     if (!store || !roomNames.has(frame.name)) return;
-    let next;
-    try {
-      next = applyOps(cloneJson(store.authoritative), frame.ops);
-    } catch {
+    const ops = store.checkOps(frame.ops);
+    if (!ops) {
       resync();
       return;
     }
@@ -335,7 +345,7 @@ export function createFastLane({
         lane.awaiting.splice(0, i + 1);
       }
     }
-    store.rebase(next, { source: own ? "state" : "remote", through, frame: { seq: frame.seq, from: frame.from, n: frame.n, ops: frame.ops } });
+    store.rebaseOps(ops, { source: own ? "state" : "remote", through, frame: { seq: frame.seq, from: frame.from, n: frame.n, ops: frame.ops } });
     entries.get(frame.name).last = frame.seq;
     onApplied();
     if (frame.checkpoint === true) onCheckpoint();
@@ -506,6 +516,30 @@ export function createFastLane({
     }
     if (state && STATE_GONE.has(state.status)) {
       stop();
+      return;
+    }
+    // The host has no room for this document now: it holds as much live data
+    // as it can (503 busy), or it is not answering (any other 503). Every
+    // store goes at save speed, with its own pending ops, so a save never
+    // writes the room's stale value. The lane asks again after Retry-After, a
+    // minute for busy, or its usual backoff.
+    if (state && state.status === 503) {
+      const busy = state.code === "busy";
+      for (const [name, entry] of entries) {
+        if (entry.store.handle.status.mode !== "fast") continue;
+        tell(name, { phase: "left", code: busy ? "busy" : "unavailable" });
+        console.warn(`clay.live("${name}"): the host has no room for this document now, so it stays at save speed for now`);
+        leaveRoom(name, laneOf(name));
+      }
+      roomNames = new Set();
+      if (!connected) return;
+      if (busy || state.retryAfter > 0) {
+        resyncDelay = RETRY_MS;
+        setTimer(resync, (state.retryAfter > 0 ? state.retryAfter : 60) * 1000);
+      } else {
+        setTimer(resync, resyncDelay);
+        resyncDelay = Math.min(resyncDelay * 2, RETRY_MAX_MS);
+      }
       return;
     }
     if (connected) {
