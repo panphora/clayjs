@@ -138,3 +138,26 @@ describe("pasting into a paragraph", () => {
     expect(short(paste(s, part))).toBe("Xpha@0 | Bey@0");
   });
 });
+
+describe("pasted links", () => {
+  const links = (html) => {
+    const box = document.createElement("div");
+    box.innerHTML = html;
+    const out = [];
+    B.clipboardParser.parseSlice(box).content.descendants((n) => {
+      if (n.isText) out.push([n.text, n.marks.find((m) => m.type.name === "link")?.attrs.href ?? null]);
+    });
+    return out;
+  };
+
+  test("script, data and file addresses lose the link but keep the text", () => {
+    expect(links('<p><a href="javascript:alert(1)">a</a> <a href=" JaVaScRiPt:x">b</a> <a href="data:text/html,x">c</a> <a href="vbscript:x">d</a> <a href="file:///etc">e</a></p>')
+      .filter(([, h]) => h !== null)).toEqual([]);
+    expect(links('<p><a href="javascript:alert(1)">a</a></p>')).toEqual([["a", null]]);
+  });
+
+  test("http, mailto, fragments and paths are kept", () => {
+    expect(links('<p><a href="https://x.com/a">a</a><a href="mailto:m@x.com">b</a><a href="#top">c</a><a href="/p">d</a></p>'))
+      .toEqual([["a", "https://x.com/a"], ["b", "mailto:m@x.com"], ["c", "#top"], ["d", "/p"]]);
+  });
+});

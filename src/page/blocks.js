@@ -5,6 +5,7 @@
 import { model, state, view as pmView, commands, history } from "../vendor/prosemirror.vendor.js";
 import { schema } from "./schema.js";
 import { REMOTE, newId } from "./model.js";
+import { safeHref } from "./link.js";
 
 const { Plugin, PluginKey, TextSelection, NodeSelection, Selection } = state;
 const N = schema.nodes;
@@ -875,7 +876,7 @@ export const clipboardParser = new model.DOMParser(schema, [
   { tag: "s", mark: "strike" },
   { tag: "del", mark: "strike" },
   { tag: "code", mark: "code" },
-  { tag: "a[href]", mark: "link", getAttrs: (d) => ({ href: d.getAttribute("href") }) },
+  { tag: "a[href]", mark: "link", getAttrs: (d) => { const href = safeHref(d.getAttribute("href")); return href ? { href } : false; } },
 ]);
 
 // Every pasted block arrives with no id and no pos (identityPlugin mints and
