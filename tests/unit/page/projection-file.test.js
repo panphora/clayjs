@@ -60,3 +60,15 @@ test("a file with no name shows 'file' as the link text", () => {
   const { html } = roundTrip({ blocks: { f: { t: "file", pos: "1", src: "/u/x" } }, deleted: {} });
   expect(html).toContain(">file</a>");
 });
+
+test("an image's alignment round-trips through bytes; centre and unknown values are left out", () => {
+  const { model, parsed, html } = roundTrip({ blocks: {
+    l: { t: "image", pos: "1", src: "/u/a.png", align: "left" },
+    r: { t: "image", pos: "2", src: "/u/b.png", align: "right", width: 240 },
+    c: { t: "image", pos: "3", src: "/u/c.png" },
+    x: { t: "image", pos: "4", src: "/u/d.png", align: "middle" },
+  }, deleted: {} });
+  expect(model.map((i) => i.align ?? null)).toEqual(["left", "right", null, null]);
+  expect(html).toContain('data-align="left"');
+  expect(canon(parsed)).toBe(canon(model));
+});

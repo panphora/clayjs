@@ -107,7 +107,7 @@ class LinkPopover {
     const href = text ? safeHref(text) : null;
     if (text && !href) { this.input.setAttribute("aria-invalid", "true"); return; }
     const st = this.view.state;
-    const r = linkKey.getState(st);
+    const r = linkKey.getState(st) ?? (this.mode === "view" ? this.range : null);
     if (!r) return this.close();
     let tr;
     if (r.from === r.to) {

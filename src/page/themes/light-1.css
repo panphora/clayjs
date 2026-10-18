@@ -9,6 +9,7 @@
   --page-ink-faint: #A1A09B;
   --page-rule: rgba(35, 34, 31, 0.08);
   --page-accent: #2F5E9E;
+  --page-link: #164583;
   --page-caret: #2F5E9E;
   --page-selection: rgba(88, 120, 170, 0.20);
 
@@ -87,7 +88,8 @@
 .page-shell .page-li[data-kind="bullet"][data-indent="3"]::before,
 .page-shell .page-li[data-kind="bullet"][data-indent="5"]::before,
 .page-shell .page-li[data-kind="bullet"][data-indent="7"]::before {
-  content: "◦";
+  background: none;
+  border: 1.5px solid currentColor;
 }
 
 .page-shell .page-li[data-kind="ordered"]::before {
@@ -106,8 +108,8 @@
 .page-shell .page-toggle-button::before {
   content: "";
   display: block;
-  width: 16px;
-  height: 16px;
+  width: 22px;
+  height: 22px;
   background: currentColor;
   clip-path: polygon(37.5% 28%, 65.6% 50%, 37.5% 72%);
 }

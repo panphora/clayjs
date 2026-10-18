@@ -310,6 +310,16 @@ describe("the link popover", () => {
     expect(linkRange(view.state.doc, a + 5)).toBeNull();
   });
 
+  test("Remove on the quiet card removes the link without opening Edit first", () => {
+    const { view, pop, a } = setup();
+    view.hasFocus = () => true;
+    view.dispatch(view.state.tr.addMark(a + 3, a + 7, LINK.create({ href: "https://example.com" })));
+    select(view, a + 5);
+    expect(pop.dataset.mode).toBe("view");
+    pop.querySelector('[data-act="remove"]').click();
+    expect(linkRange(view.state.doc, a + 5)).toBeNull();
+  });
+
   test("a mousedown outside the popover closes the editor without applying", () => {
     const { view, pop, input, a } = setup();
     select(view, a + 3, a + 7);

@@ -328,6 +328,12 @@ export function pickFiles(view, accept, place = hostPlace(view.state, view.state
 
 const MIN_WIDTH = 48;
 
+const ALIGNS = [
+  ["left", "Align left", '<path d="M2.5 3.5h11M2.5 6.5h6M2.5 9.5h11M2.5 12.5h6"/>'],
+  ["center", "Centre", '<path d="M2.5 3.5h11M5 6.5h6M2.5 9.5h11M5 12.5h6"/>'],
+  ["right", "Align right", '<path d="M2.5 3.5h11M7.5 6.5h6M2.5 9.5h11M7.5 12.5h6"/>'],
+];
+
 export class ImageView {
   constructor(node, view, getPos) {
     this.node = node;
@@ -348,7 +354,25 @@ export class ImageView {
     this.handle.className = "page-image-handle";
     this.handle.setAttribute("aria-hidden", "true");
     this.handle.addEventListener("pointerdown", (e) => this.resize(e));
-    this.frame.append(this.img, this.handle);
+    this.alignBar = doc.createElement("div");
+    this.alignBar.className = "page-image-align";
+    this.alignBar.setAttribute("role", "toolbar");
+    this.alignBar.setAttribute("aria-label", "Image alignment");
+    for (const [value, label, path] of ALIGNS) {
+      const b = doc.createElement("button");
+      b.type = "button";
+      b.dataset.align = value;
+      b.setAttribute("aria-label", label);
+      b.title = label;
+      b.innerHTML = `<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">${path}</svg>`;
+      this.alignBar.append(b);
+    }
+    this.alignBar.addEventListener("mousedown", (e) => e.preventDefault());
+    this.alignBar.addEventListener("click", (e) => {
+      const b = e.target.closest("[data-align]");
+      if (b) this.setAlign(b.dataset.align === "center" ? null : b.dataset.align);
+    });
+    this.frame.append(this.img, this.handle, this.alignBar);
     this.caption = doc.createElement("figcaption");
     this.caption.className = "page-image-caption";
     this.caption.contentEditable = "plaintext-only";
@@ -371,6 +395,9 @@ export class ImageView {
     if (this.img.getAttribute("src") !== node.attrs.src) this.img.src = node.attrs.src;
     this.img.alt = node.attrs.alt || "";
     this.frame.style.width = node.attrs.width ? `${node.attrs.width}px` : "";
+    if (node.attrs.align) this.dom.dataset.align = node.attrs.align;
+    else delete this.dom.dataset.align;
+    for (const b of this.alignBar.children) b.setAttribute("aria-pressed", String((node.attrs.align ?? "center") === b.dataset.align));
     if (this.dom.ownerDocument.activeElement !== this.caption) this.caption.textContent = node.attrs.caption || "";
     this.caption.toggleAttribute("data-empty", !node.attrs.caption);
   }
@@ -379,6 +406,12 @@ export class ImageView {
     if (node.type !== this.node.type) return false;
     this.render(node);
     return true;
+  }
+
+  setAlign(align) {
+    const pos = this.getPos();
+    if (pos == null || align === (this.node.attrs.align ?? null)) return;
+    this.view.dispatch(asStep(this.view.state.tr.setNodeMarkup(pos, null, { ...this.node.attrs, align })));
   }
 
   commitCaption() {
@@ -420,7 +453,7 @@ export class ImageView {
 
   selectNode() { this.dom.classList.add("is-selected"); }
   deselectNode() { this.dom.classList.remove("is-selected"); }
-  stopEvent(event) { return this.caption.contains(event.target) || event.target.classList?.contains("page-image-handle"); }
+  stopEvent(event) { return this.caption.contains(event.target) || this.alignBar.contains(event.target) || event.target.classList?.contains("page-image-handle"); }
   ignoreMutation() { return true; }
 }
 

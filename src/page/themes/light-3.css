@@ -75,7 +75,7 @@
 .page-shell .page-editor .page-li[data-kind="bullet"][data-indent="1"]::before,
 .page-shell .page-editor .page-li[data-kind="bullet"][data-indent="3"]::before,
 .page-shell .page-editor .page-li[data-kind="bullet"][data-indent="5"]::before,
-.page-shell .page-editor .page-li[data-kind="bullet"][data-indent="7"]::before { content: "\25E6"; }
+.page-shell .page-editor .page-li[data-kind="bullet"][data-indent="7"]::before { background: none; border: 1.5px solid currentColor; }
 .page-shell .page-editor .page-li[data-kind="check"] { margin-block: 0.25em; }
 .page-shell .page-editor .page-li[data-kind="check"][data-checked="true"] { text-decoration-color: #e3e5dc; }
 

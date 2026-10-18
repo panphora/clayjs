@@ -14,7 +14,7 @@ import { BLOCK_TYPES, MENU_ITEMS, blockTypeOf, turnInto, insertAfter, rankItems,
 
 export { BLOCK_TYPES, blockTypeOf, turnInto, insertAfter } from "./items.js";
 
-const { Plugin, PluginKey, TextSelection } = state;
+const { Plugin, PluginKey, TextSelection, NodeSelection } = state;
 const M = schema.marks;
 const N = schema.nodes;
 
@@ -59,24 +59,76 @@ const ICONS = {
   strike: svg('<path d="M3 8h10M10.8 5.2C10.5 4 9.4 3.2 8 3.2c-1.7 0-2.8.9-2.8 2.1M5.2 10.8c.3 1.2 1.4 2 2.8 2 1.7 0 2.8-.9 2.8-2.1"/>'),
   code: svg('<path d="M6 4.5 2.5 8 6 11.5M10 4.5 13.5 8 10 11.5"/>'),
   link: svg('<path d="M7 9a2.5 2.5 0 0 0 3.5 0l2-2A2.5 2.5 0 0 0 9 3.5l-.7.7M9 7a2.5 2.5 0 0 0-3.5 0l-2 2A2.5 2.5 0 0 0 7 12.5l.7-.7"/>'),
+  bullet: svg('<path d="M6.5 4.5h7M6.5 8h7M6.5 11.5h7"/><path stroke-width="2.4" d="M3 4.5h.01M3 8h.01M3 11.5h.01"/>'),
+  ordered: svg('<path d="M7 4.5h6.5M7 8h6.5M7 11.5h6.5M2.5 3.5l1-.5v3M2.5 9.3c.2-.5.6-.8 1.1-.8.6 0 1 .4 1 .9 0 .9-2.1 1.4-2.1 2.6h2.1"/>'),
+  check: svg('<rect x="2.5" y="2.5" width="11" height="11" rx="2.5"/><path d="M5.5 8.2l1.8 1.8 3.4-4"/>'),
 };
-const MARK_TOOLS = [
+const TOOLS = [
   ["strong", "Bold"],
   ["em", "Italic"],
   ["strike", "Strikethrough"],
-  ["code", "Code"],
   ["link", "Link"],
+  ["bullet", "Bulleted list"],
+  ["ordered", "Numbered list"],
+  ["check", "Checklist"],
+  ["code", "Code"],
 ];
+const LIST_KINDS = new Set(["bullet", "ordered", "check"]);
+const LINE_TYPES = new Set(["paragraph", "heading", "list_item"]);
 
-function markActive(st, type) {
+const blocksIn = (st) => {
+  const { $from, $to } = st.selection;
+  const out = [];
+  for (let i = $from.index(0); i <= Math.min($to.index(0), st.doc.childCount - 1); i++) out.push(i);
+  return out;
+};
+
+const listActive = (st, kind) => blocksIn(st).every((i) => { const n = st.doc.child(i); return n.type === N.list_item && n.attrs.kind === kind; });
+
+// The selection covers whole lines when it runs from the start of its first
+// block to the end of its last, and every block is a plain line of text.
+function wholeLines(st) {
+  const { $from, $to, empty } = st.selection;
+  if (empty || !(st.selection instanceof TextSelection) || $from.depth !== 1 || $to.depth !== 1) return null;
+  if ($from.parentOffset !== 0 || $to.parentOffset !== $to.parent.content.size) return null;
+  const idx = blocksIn(st);
+  return idx.every((i) => LINE_TYPES.has(st.doc.child(i).type.name)) ? idx : null;
+}
+
+function codeBlockTr(st, idx) {
+  const first = st.doc.child(idx[0]);
+  const from = st.selection.$from.before(1);
+  const to = st.selection.$to.after(1);
+  const text = idx.map((i) => st.doc.child(i).textContent).join("\n");
+  const { id, pos, parent } = first.attrs;
+  const tr = st.tr.replaceWith(from, to, N.code_block.create({ id, pos, parent }, text ? schema.text(text) : null));
+  return tr.setSelection(TextSelection.create(tr.doc, from + 1, from + 1 + text.length));
+}
+
+function toolActive(st, name) {
+  if (LIST_KINDS.has(name)) return listActive(st, name);
+  if (name === "code" && blocksIn(st).every((i) => st.doc.child(i).type === N.code_block)) return true;
+  const type = M[name];
   const { from, to, empty, $from } = st.selection;
   if (empty) return !!type.isInSet(st.storedMarks || $from.marks());
   return st.doc.rangeHasMark(from, to, type);
 }
 
+function runList(view, kind) {
+  const st = view.state;
+  const item = BLOCK_TYPES.find((b) => b.key === (listActive(st, kind) ? "text" : kind));
+  const tr = st.tr;
+  for (const i of blocksIn(st)) if (tr.doc.child(i).isTextblock && tr.doc.child(i).type !== N.code_block) retype(tr, i, item);
+  if (tr.docChanged) view.dispatch(asStep(tr));
+}
+
 function runMark(view, name) {
   if (name === "link") return openLinkEditor(view);
-  else commands.toggleMark(M[name])(view.state, view.dispatch);
+  const st = view.state;
+  const lines = name === "code" ? wholeLines(st) : null;
+  if (LIST_KINDS.has(name)) runList(view, name);
+  else if (lines) view.dispatch(asStep(codeBlockTr(st, lines)).scrollIntoView());
+  else commands.toggleMark(M[name])(st, view.dispatch);
   view.focus();
 }
 
@@ -107,13 +159,13 @@ class Chrome {
 
     this.dock = el("div", "page-dock", { role: "toolbar", "aria-label": "Formatting" });
     this.turn = el("button", "page-tool page-tool-turn", { type: "button", "aria-haspopup": "menu" });
-    this.dock.append(this.turn, el("span", "page-tool-sep"), ...MARK_TOOLS.map(([n, l]) => toolButton(n, l)));
+    this.dock.append(this.turn, el("span", "page-tool-sep"), ...TOOLS.map(([n, l]) => toolButton(n, l)));
     this.plus = el("button", "page-plus", { type: "button", "aria-label": "Add a block", title: "Add a block" });
     this.plus.innerHTML = ICONS.plus;
     this.grip = el("button", "page-grip", { type: "button", "aria-label": "Block actions", title: "Drag to move, click for actions", "aria-haspopup": "menu" });
     this.grip.innerHTML = ICONS.grip;
     this.bubble = el("div", "page-bubble", { role: "toolbar", "aria-label": "Selection", hidden: "" });
-    this.bubble.append(...MARK_TOOLS.map(([n, l]) => toolButton(n, l)));
+    this.bubble.append(...TOOLS.map(([n, l]) => toolButton(n, l)));
     this.menuId = `page-menu-${++menuCount}`;
     this.menuEl = el("div", "page-menu", { role: "menu", id: this.menuId, hidden: "" });
     this.scrim = el("div", "page-scrim", { hidden: "" });
@@ -167,7 +219,7 @@ class Chrome {
 
   blockIndex() {
     const st = this.view.state, sel = st.selection;
-    const pos = sel instanceof BlockSelection ? sel.from : sel.head;
+    const pos = sel instanceof BlockSelection || sel instanceof NodeSelection ? sel.from : sel.head;
     return Math.min(st.doc.resolve(pos).index(0), st.doc.childCount - 1);
   }
 
@@ -387,10 +439,10 @@ class Chrome {
     const st = view.state;
     const node = st.doc.child(this.blockIndex());
     this.turn.textContent = `${blockTypeOf(node).label} ▾`;
-    for (const b of this.dock.querySelectorAll("[data-cmd]")) b.setAttribute("aria-pressed", String(markActive(st, M[b.dataset.cmd])));
+    for (const b of this.dock.querySelectorAll("[data-cmd]")) b.setAttribute("aria-pressed", String(toolActive(st, b.dataset.cmd)));
     const showBubble = !st.selection.empty && st.selection instanceof TextSelection && view.hasFocus();
     this.bubble.hidden = !showBubble;
-    if (showBubble) for (const b of this.bubble.querySelectorAll("[data-cmd]")) b.setAttribute("aria-pressed", String(markActive(st, M[b.dataset.cmd])));
+    if (showBubble) for (const b of this.bubble.querySelectorAll("[data-cmd]")) b.setAttribute("aria-pressed", String(toolActive(st, b.dataset.cmd)));
     this.grip.classList.toggle("is-on", st.selection instanceof BlockSelection);
     this.slashQuery();
     this.place();

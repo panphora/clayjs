@@ -10,6 +10,7 @@
   --page-ink-faint: #9B968C;
   --page-rule: rgba(31, 30, 27, 0.08);
   --page-accent: #8A6A2E;
+  --page-link: #6d4e0b;
   --page-caret: #2B2926;
   --page-selection: rgba(196, 152, 74, 0.22);
 
@@ -118,8 +119,8 @@
 .page-shell .page-editor .page-toggle-button::before {
   content: "";
   display: inline-block;
-  width: 10px;
-  height: 10px;
+  width: 14px;
+  height: 14px;
   background: var(--page-toggle-ink);
   clip-path: polygon(30% 20%, 80% 50%, 30% 80%);
   transform-origin: 50% 50%;
@@ -137,8 +138,6 @@
 .page-shell .page-dock {
   gap: 2px;
   padding: 3px 6px;
-  -webkit-backdrop-filter: blur(6px);
-  backdrop-filter: blur(6px);
 }
 
 .page-shell .page-dock .page-tool {

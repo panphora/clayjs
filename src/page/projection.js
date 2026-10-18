@@ -24,7 +24,7 @@ export const DEFAULTS = {
   code_block: { parent: null, lang: "" },
   toggle: { parent: null, open: false },
   divider: { parent: null },
-  image: { parent: null, src: "", alt: "", caption: "", width: null },
+  image: { parent: null, src: "", alt: "", caption: "", width: null, align: null },
   file: { parent: null, src: "", name: "", size: null, mime: null },
   table: { parent: null, cols: {}, sort: null },
   chart: { parent: null, source: null, kind: "line", x: null, series: [], title: "", highlight: null },
@@ -237,6 +237,7 @@ function projectOne({ id, b, t, parent, indent }) {
   if (t === "list_item") fields.indent = indent;
   if (t === "heading") fields.level = clampLevel(attrs.level ?? 2);
   if (t === "image" && fields.width != null) fields.width = widthOf(String(fields.width));
+  if (t === "image") fields.align = alignOf(fields.align);
   if (t === "image" && typeof fields.caption === "string") fields.caption = normalizeText(fields.caption, null).c;
   if (t === "chart" && typeof fields.title === "string") fields.title = normalizeText(fields.title, null).c;
   if (t === "table") Object.assign(fields, projectTable(b));
@@ -259,6 +260,7 @@ function projectOne({ id, b, t, parent, indent }) {
 
 const clampLevel = (l) => Math.min(6, Math.max(1, Number.isInteger(l) ? l : 2));
 const widthOf = (s) => (/^\d+$/.test(s) ? Number(s) : s);
+export const alignOf = (a) => (a === "left" || a === "right" ? a : null);
 
 export function project(blocks) {
   return layout(blocks).map(projectOne);
@@ -327,7 +329,7 @@ function renderLeaf(item, clean) {
     case "callout": return `<aside${id} class="page-callout">${inlineOf(item)}</aside>`;
     case "code_block": return `<pre${id}${attr("data-lang", item.lang || null)}><code>${escText(item.c ?? "")}</code></pre>`;
     case "divider": return `<hr${id}>`;
-    case "image": return `<figure${id} data-type="image"><img${attr("src", item.src ?? "")}${attr("alt", item.alt ?? "")}${attr("width", item.width ?? null)}>${item.caption ? `<figcaption>${escText(item.caption)}</figcaption>` : ""}</figure>`;
+    case "image": return `<figure${id} data-type="image"${attr("data-align", item.align ?? null)}><img${attr("src", item.src ?? "")}${attr("alt", item.alt ?? "")}${attr("width", item.width ?? null)}>${item.caption ? `<figcaption>${escText(item.caption)}</figcaption>` : ""}</figure>`;
     case "file": {
       const href = /^(https?:\/\/|\/(?!\/))/i.test(item.src ?? "") ? item.src : null;
       return `<div${id} data-type="file"${attr("data-src", item.src ?? "")}${attr("data-name", item.name ?? "")}${attr("data-size", item.size ?? null)}${attr("data-mime", item.mime ?? null)}><a${attr("href", href)} rel="noopener noreferrer">${escText(item.name || "file")}</a></div>`;
@@ -535,7 +537,7 @@ export function parseArticle(article) {
     const img = tag === "IMG" ? el : (tag === "FIGURE" || onlyImage) ? el.querySelector(":scope > img") : null;
     if (img) {
       const w = img.getAttribute("width");
-      return push(el, "image", parent, omitDefaults("image", { ...P, src: img.getAttribute("src") || "", alt: img.getAttribute("alt") || "", caption: tag === "FIGURE" ? text(el.querySelector(":scope > figcaption")) : "", width: w === null ? null : widthOf(w) }));
+      return push(el, "image", parent, omitDefaults("image", { ...P, src: img.getAttribute("src") || "", alt: img.getAttribute("alt") || "", caption: tag === "FIGURE" ? text(el.querySelector(":scope > figcaption")) : "", width: w === null ? null : widthOf(w), align: tag === "FIGURE" ? alignOf(el.getAttribute("data-align")) : null }));
     }
     if (tag === "TABLE") return push(el, "table", parent, tableOf(el, P));
     if (tag === "SECTION" && el.getAttribute("data-type") === "board") return push(el, "board", parent, boardOf(el, P));

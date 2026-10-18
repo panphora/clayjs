@@ -35,6 +35,32 @@ describe("ImageView", () => {
     expect(caption(view).getAttribute("aria-label")).toBe("Caption");
   });
 
+  test("the align bar sets left and right as one undo step each, and Centre clears the attribute", () => {
+    const view = image();
+    const bar = figure(view).querySelector(".page-image-align");
+    const pressed = () => [...bar.children].filter((b) => b.getAttribute("aria-pressed") === "true").map((b) => b.dataset.align);
+    expect([figure(view).dataset.align, pressed()]).toEqual([undefined, ["center"]]);
+    bar.querySelector('[data-align="left"]').click();
+    expect([attrs(view).align, figure(view).dataset.align, pressed()]).toEqual(["left", "left", ["left"]]);
+    bar.querySelector('[data-align="right"]').click();
+    expect(attrs(view).align).toBe("right");
+    history.undo(view.state, view.dispatch);
+    expect(attrs(view).align).toBe("left");
+    bar.querySelector('[data-align="center"]').click();
+    expect([attrs(view).align, figure(view).dataset.align]).toEqual([null, undefined]);
+  });
+
+  test("a copied image keeps its width and alignment when pasted back", async () => {
+    const { model } = await import("../../../src/vendor/prosemirror.vendor.js");
+    const view = image({ width: 300, align: "right" });
+    const dom = model.DOMSerializer.fromSchema(view.state.schema).serializeNode(view.state.doc.child(1));
+    const back = view.someProp("clipboardParser", (p) => p) ?? model.DOMParser.fromSchema(view.state.schema);
+    const wrap = document.createElement("div");
+    wrap.append(dom);
+    const node = back.parseSlice(wrap).content.firstChild;
+    expect([node.type.name, node.attrs.width, node.attrs.align]).toEqual(["image", 300, "right"]);
+  });
+
   test("a pixel width is the frame's width, and no width leaves it automatic", () => {
     const view = image({ width: 320 });
     expect(frame(view).style.width).toBe("320px");

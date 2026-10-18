@@ -7,6 +7,8 @@ import { schema } from "./schema.js";
 import { REMOTE, newId } from "./model.js";
 import { safeHref, safeSrc } from "./link.js";
 
+const alignOf = (a) => (a === "left" || a === "right" ? a : null);
+
 const { Plugin, PluginKey, TextSelection, NodeSelection, Selection } = state;
 const N = schema.nodes;
 const isList = (n) => n.type === N.list_item;
@@ -971,7 +973,7 @@ export const clipboardParser = new model.DOMParser(schema, [
   { tag: "aside.page-callout", node: "callout", getAttrs: (d) => ({ parent: parentAttr(d) }) },
   { tag: 'figure:not([data-type]), figure[data-type="image"]', node: "image", getAttrs: (d) => {
     const img = d.querySelector("img"), src = safeSrc(img?.getAttribute("src"));
-    return src ? { src, alt: img.getAttribute("alt") || "", caption: d.querySelector("figcaption")?.textContent || "", width: numberAttr(d.getAttribute("data-width") ?? img.getAttribute("width"), 1), parent: parentAttr(d) } : false;
+    return src ? { src, alt: img.getAttribute("alt") || "", caption: d.querySelector("figcaption")?.textContent || "", width: numberAttr(d.getAttribute("data-width") ?? img.getAttribute("width"), 1), align: alignOf(d.getAttribute("data-align")), parent: parentAttr(d) } : false;
   } },
   { tag: "img[src]", node: "image", getAttrs: (d) => {
     const src = safeSrc(d.getAttribute("src"));

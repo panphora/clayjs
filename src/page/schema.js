@@ -81,8 +81,8 @@ export const schema = new model.Schema({
       group: "block",
       atom: true,
       draggable: true,
-      attrs: { ...block, src: { default: "" }, alt: { default: "" }, caption: { default: "" }, width: { default: null } },
-      toDOM: (n) => ["figure", ref(n), ["img", { src: n.attrs.src, alt: n.attrs.alt }], ["figcaption", n.attrs.caption]],
+      attrs: { ...block, src: { default: "" }, alt: { default: "" }, caption: { default: "" }, width: { default: null }, align: { default: null } },
+      toDOM: (n) => ["figure", ref(n, { "data-type": "image", ...(n.attrs.width ? { "data-width": String(n.attrs.width) } : {}), ...(n.attrs.align ? { "data-align": n.attrs.align } : {}) }), ["img", { src: n.attrs.src, alt: n.attrs.alt }], ["figcaption", n.attrs.caption]],
     },
     file: {
       group: "block",

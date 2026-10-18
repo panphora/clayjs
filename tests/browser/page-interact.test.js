@@ -327,3 +327,98 @@ describe('menus, links and uploads in a browser', () => {
     expect(box(grip()).width).to.be.greaterThan(0);
   });
 });
+
+describe('Backspace and Delete with a selection', () => {
+  const THREE = () => ({
+    a: { t: 'paragraph', pos: 'V', c: 'First line' },
+    b: { t: 'paragraph', pos: 'W', c: 'Second line' },
+    c: { t: 'paragraph', pos: 'X', c: 'Third line' },
+  });
+  const text = () => { const r = []; view.state.doc.forEach((n) => r.push(n.textContent)); return r; };
+
+  for (const key of ['Backspace', 'Delete']) {
+    it(`${key} deletes a text selection made with the mouse`, async () => {
+      setup(THREE());
+      const a = box(el('a')), b = box(el('b'));
+      await move(a.left + 2, a.top + a.height / 2);
+      await sendMouse({ type: 'down' });
+      await move(b.left + 30, b.top + b.height / 2);
+      await sendMouse({ type: 'up' });
+      await settle();
+      expect(view.state.selection.empty).to.equal(false);
+      await press(key);
+      expect(text().length).to.equal(2);
+    });
+
+    it(`${key} deletes the selection after a bubble button was clicked`, async () => {
+      setup(THREE());
+      mount.style.paddingLeft = '200px';
+      const a = box(el('a'));
+      await move(a.left + 1, a.top + a.height / 2);
+      await sendMouse({ type: 'down' });
+      await sendMouse({ type: 'up' });
+      for (let i = 0; i < 5; i++) await sendKeys({ press: 'Shift+ArrowRight' });
+      await settle();
+      const bubble = mount.querySelector('.page-bubble');
+      expect(bubble.hidden, 'bubble shown').to.equal(false);
+      const picked = view.state.doc.textBetween(view.state.selection.from, view.state.selection.to);
+      await move(...center(bubble.querySelector('[data-cmd="strong"]')));
+      await sendMouse({ type: 'down' });
+      await sendMouse({ type: 'up' });
+      await settle();
+      expect(view.state.doc.rangeHasMark(view.state.selection.from, view.state.selection.to, view.state.schema.marks.strong), 'bold applied').to.equal(true);
+      await press(key);
+      expect(text()[0]).to.equal('First line'.slice(picked.length));
+    });
+
+    it(`${key} deletes the blocks a grip click selected, with the actions menu open`, async () => {
+      setup(THREE());
+      await hover('b');
+      await move(...center(grip()));
+      await sendMouse({ type: 'down' });
+      await sendMouse({ type: 'up' });
+      await settle();
+      expect(isBlockSelection()).to.equal(true);
+      await press(key);
+      expect(ids()).to.deep.equal(['a', 'c']);
+    });
+
+    it(`${key} after Mod+A deletes everything`, async () => {
+      setup(THREE());
+      put(startOf('b', 2));
+      await press(`${MOD}+a`);
+      await press(`${MOD}+a`);
+      await press(key);
+      expect(text().join('')).to.equal('');
+    });
+
+    it(`${key} deletes a selection that runs from a nested checklist item into a toggle`, async () => {
+      setup({
+        p: { t: 'paragraph', pos: 'V', c: 'Intro' },
+        l1: { t: 'list_item', kind: 'check', pos: 'W', c: 'Parent task' },
+        l2: { t: 'list_item', kind: 'check', indent: 1, checked: true, pos: 'X', c: 'Child task' },
+        t: { t: 'toggle', pos: 'Y', open: true, c: 'Toggle title' },
+        tb: { t: 'paragraph', pos: 'Z', parent: 't', c: 'Inside' },
+      });
+      const a = box(el('l2'));
+      await move(a.left + 40, a.top + a.height / 2);
+      await sendMouse({ type: 'down' });
+      await sendMouse({ type: 'up' });
+      for (let i = 0; i < 4; i++) await sendKeys({ press: 'Shift+ArrowDown' });
+      await settle();
+      const before = view.state.doc.textContent;
+      await press(key);
+      expect(view.state.doc.textContent).to.not.equal(before);
+    });
+
+    it(`${key} deletes a clicked image`, async () => {
+      setup({ a: { t: 'paragraph', pos: 'V', c: 'Above' }, i: { t: 'image', pos: 'W', src: 'data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==', width: 200 }, c: { t: 'paragraph', pos: 'X', c: 'Below' } });
+      await move(...center(mount.querySelector('.page-image-frame')));
+      await sendMouse({ type: 'down' });
+      await sendMouse({ type: 'up' });
+      await settle();
+      await press(key);
+      expect(ids()).to.deep.equal(['a', 'c']);
+    });
+  }
+});

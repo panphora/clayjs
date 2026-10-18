@@ -1,4 +1,5 @@
 import { editor, key, posOf, select, shape } from "./view-helpers.js";
+import { state as pmState } from "../../../src/vendor/prosemirror.vendor.js";
 
 /**
  * The gutter follows the hovered block: the plus and the grip sit on its first
@@ -126,4 +127,17 @@ test.each(["plus", "grip"])("F17 the phone %s acts on the caret despite retained
       expect(shape(view)).toBe("A | heading | B | C");
     } else expect(view.state.selection.span(view.state.doc)).toEqual({ lo: 0, hi: 0 });
   } finally { window.matchMedia = media; view.destroy(); }
+});
+
+test("a selected divider, image or file keeps the plus and the grip beside it, not on the block below", () => {
+  for (const atom of [["d", "divider", ""], ["i", "image", "", { src: "https://example.com/a.png" }], ["f", "file", "", { src: "https://example.com/a.pdf", name: "a.pdf" }]]) {
+    const view = gutter([["a", "paragraph", "A"], atom, ["c", "paragraph", "C"]]);
+    const caretTop = top(view, ".page-plus");
+    select(view, posOf(view, "c"));
+    const below = top(view, ".page-plus");
+    view.dispatch(view.state.tr.setSelection(pmState.NodeSelection.create(view.state.doc, view.state.doc.child(0).nodeSize)));
+    expect([atom[1], top(view, ".page-plus"), top(view, ".page-grip")]).not.toEqual([atom[1], below, below]);
+    expect(top(view, ".page-plus")).not.toBe(caretTop);
+    document.body.innerHTML = "";
+  }
 });
