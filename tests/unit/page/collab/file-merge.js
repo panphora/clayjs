@@ -34,8 +34,9 @@ function placed(room, store, at) {
 }
 
 function provenBy(room, name, file, stamped) {
-  if (!file.by || !stamped || file.at.epoch !== room.epoch) return null;
+  if (!file.by || !stamped) return null;
   if (file.by.v === 2) return file.by;
+  if (file.at.epoch !== room.epoch) return null;
   const last = room.lastN.get(name + "\n" + file.by.client);
   return file.by.n <= (last ? last.n : 0) + 1 ? file.by : null;
 }
@@ -53,7 +54,7 @@ export function mergeFile(room, name, file, { limits, restored = false } = {}) {
     return { changed: false, dropped: false, landedMoved: before !== -1 };
   }
   const by = restored ? null : provenBy(room, name, file, stamped);
-  const frames = frameSet(by);
+  const frames = file.at?.epoch === room.epoch ? frameSet(by) : [];
   const ancestry = descendants(by);
   const own = (entry) => {
     if (!by) return false;
@@ -100,7 +101,7 @@ export function mergeFile(room, name, file, { limits, restored = false } = {}) {
   }
   store.landed = entries.length ? base : store.last;
   if (by?.v === 2) {
-    for (const [client, ranges] of by.frames) saveReceipt(room, name + "\n" + client, ranges, store.last, limits.receipts ?? 4096);
+    for (const [client, ranges] of frames) saveReceipt(room, name + "\n" + client, ranges, store.last, limits.receipts ?? 4096);
   } else if (by) {
     const nKey = name + "\n" + by.client;
     const last = room.lastN.get(nKey);

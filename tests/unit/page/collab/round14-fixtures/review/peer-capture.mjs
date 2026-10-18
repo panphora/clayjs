@@ -1,0 +1,12 @@
+window.clayEditMode = true;
+for (const k of ['Event', 'CustomEvent', 'EventTarget']) globalThis[k] = window[k];
+document.documentElement.innerHTML = process.argv[2];
+globalThis.fetch = async () => ({ok:false,status:503,text:async()=>'',json:async()=>({})});
+const C = new URL('../../../../../../src', import.meta.url).pathname;
+const {live} = await import(`${C}/plugins/live.js`);
+const {captureForSaveAndComparison} = await import(`${C}/core/snapshot.js`);
+const s = live('s');
+s.set('peer', true);
+const html = captureForSaveAndComparison({flushUndo:false}).forSave;
+console.log(html);
+process.exit(0);

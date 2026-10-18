@@ -5,7 +5,7 @@
 // ops when the save that carried them is accepted (never from an incoming frame),
 // and takes the values other tabs saved or relayed from each live-sync frame.
 
-import { parseBy, frameSet, descendants, unionRanges, formatBy } from "../live/provenance.js";
+import { contains, parseBy, frameSet, descendants, unionRanges, formatBy } from "../live/provenance.js";
 import { createStore } from "../live/store.js";
 import { serializeLive, stampOf, parseStamp, textHash } from "../live/ops.js";
 import { onSnapshot } from "../core/snapshot.js";
@@ -44,7 +44,7 @@ function captureLineage(entry) {
   const frames = unionRanges(base.frames ?? [], pending.frames);
   const ancestors = base.ancestors ?? [];
   const text = serializeLive(entry.store.value);
-  const key = JSON.stringify([base.epoch, base.seq, frames, ancestors, text]);
+  const key = JSON.stringify([base.epoch, base.seq, frames, ancestors, entry.store.mark, text]);
   if (entry.capture?.key === key) return entry.capture.value;
   const by = { v: 2, frames, ancestors, capture: [captureAuthor, ++captureNumber] };
   const encoded = formatBy(by);
@@ -313,7 +313,7 @@ export function live(name) {
   }
   const store = createStore({ name, value, ephemeral: tag.ephemeral });
   const layout = tag.element.getAttribute("live-format") === "lines" ? "lines" : text.includes("\n") ? "pretty" : "line";
-  const entry = { store, layout, framesSince: false, last: 0, landed: 0, leftAt: lineageOf(tag.element) };
+  const entry = { store, layout, framesSince: false, last: 0, landed: 0, leftAt: lineageOf(tag.element), captureOps: new Map() };
   entries.set(name, entry);
   store.onRebase((event) => {
     if (store.handle.status.mode === "file" && ["undone", "refused", "decided"].includes(event.cause)) entry.leftAt = null;
@@ -374,6 +374,10 @@ document.addEventListener("clay:snapshot-ready", (event) => {
     const lineage = mode === "file" ? lineageOf(tag.element) : null;
     stores.set(entry.store.name, { mode, mark: entry.store.mark, canonical: canonical(tag.element.textContent), at, lineage, by: tag.element.getAttribute("live-by") });
     if (lineage && !lineage.disk && entry.leftAt) entry.leftAt = { ...entry.leftAt, ancestors: lineage.ancestors };
+    const proof = parseBy(tag.element.getAttribute("live-by"));
+    if (mode === "file" && proof?.v === 2) {
+      entry.captureOps.set(JSON.stringify(proof.capture), { capture: proof.capture, ids: entry.store.pendingEntries().map((e) => e.id) });
+    }
     entry.framesSince = false;
     // A close save is answered after the page is gone: the local room learns
     // how far the file reaches now. Should the save fail, a later merge drops
@@ -492,6 +496,12 @@ export function receiveFrame(html, seq = null) {
       const lineage = lineageOf(tag.element);
       const sameEpoch = lineage && !lineage.disk && (!fast?.status.epoch || lineage.epoch === fast.status.epoch);
       if (sameEpoch) dropIds = fast?.captured(name, lineage, parseBy(by)) ?? [];
+      if (lineage && !lineage.disk) {
+        for (const [key, captured] of entry.captureOps) if (contains(lineage.ancestors, ...captured.capture)) {
+          dropIds.push(...captured.ids);
+          entry.captureOps.delete(key);
+        }
+      }
       entry.leftAt = sameEpoch ? lineage : lineage?.disk ? lineage : null;
     }
     if (pageTag && (!entry || entry.store.handle.status.mode === "file")) {

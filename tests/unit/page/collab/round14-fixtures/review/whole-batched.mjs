@@ -1,0 +1,21 @@
+import assert from 'node:assert/strict';
+import { makeRoom } from './real-room.mjs';
+import { Sim } from '../../room-double.js';
+import { engine, find } from '../../blocks/editor-tab.js';
+const initial=()=>({blocks:{p:{t:'paragraph',pos:'M',c:'Start.'},i:{t:'image',pos:'N',src:'a.png',caption:'one'},q:{t:'paragraph',pos:'V',c:''}},deleted:{}});
+const caption=(a,text)=>{const f=find(a.editor.state.doc,'i');a.editor.dispatch(a.editor.state.tr.setNodeMarkup(f.pos,null,{...f.node.attrs,caption:text}));};
+const sim=new Sim(),room=makeRoom(sim,initial());
+const a=engine.makeTab(sim,room,'a',initial()),b=engine.makeTab(sim,room,'b',initial());
+a.start();b.start();await sim.run(500);
+caption(a,'two');
+if(process.argv[2]==='separate') await sim.run(1000);
+caption(a,'three');
+await sim.run(1500);
+const before={room:room.stores.get('page').value.blocks.i.caption,mine:a.binding.blocks.get('i').mine,posts:room.posts.map(p=>({n:p.frame.n,ops:p.frame.ops.length}))};
+assert.equal(before.room,'three');
+room.restart({page:initial()});
+await sim.run(10000);await sim.idle(3000);
+const result={room:room.stores.get('page').value.blocks.i.caption,a:find(a.editor.state.doc,'i').node.attrs.caption,b:find(b.editor.state.doc,'i').node.attrs.caption,heals:[a.heals,b.heals],notices:[...a.allNotices(),...b.allNotices()]};
+console.log(JSON.stringify({variant:process.argv[2]??'batched',before,result}));
+assert.equal(result.room,'three');
+for(const t of [a,b]){t.binding.dispose();t.editor.destroy();t.lane.stop();}
