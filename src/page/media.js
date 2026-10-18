@@ -9,7 +9,7 @@ import { outline } from "./blocks.js";
 import { newId } from "./model.js";
 import { asStep } from "./blocksel.js";
 import { announce } from "./announce.js";
-import { safeHref } from "./link.js";
+import { safeHref, safeFileHref } from "./address.js";
 
 const { Plugin, PluginKey } = state;
 const { Decoration, DecorationSet } = pmView;
@@ -119,14 +119,19 @@ async function run(view, it) {
     last = percent;
     if (live(view, it.id)) update(view, it.id, { percent });
   };
-  const res = await rt.upload(it.file, { onProgress, signal: abort.signal });
+  let res = await rt.upload(it.file, { onProgress, signal: abort.signal });
   rt.aborts.delete(it.id);
   if (!runtime.has(view) || !live(view, it.id)) return;
-  if (res.ok) {
-    settle(it, view, placeTr(view.state, it.id, attrsFor(it, res.uploads[0].url)));
-    announce(view, `${it.name} added`);
-    return;
+  if (res?.ok) {
+    const src = safeFileHref(res.uploads?.[0]?.url);
+    if (src) {
+      settle(it, view, placeTr(view.state, it.id, attrsFor(it, src)));
+      announce(view, `${it.name} added`);
+      return;
+    }
+    res = { code: "bad-response", msg: "The upload returned an invalid address" };
   }
+  if (!res || typeof res !== "object") res = { code: "bad-response", msg: "The upload returned an invalid response" };
   if (res.code === "aborted") return settle(it, view, removeTr(view.state, it.id));
   if (res.code === "unsupported") {
     const canEmbed = it.kind === "image" && it.file.size <= EMBED_MAX;

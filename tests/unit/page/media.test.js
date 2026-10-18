@@ -344,3 +344,14 @@ describe("without an upload option", () => {
     }
   });
 });
+
+test.each(["javascript:void(0)", "data:text/html,canary", "file:///canary", null, 42])("F5 upload address %j is refused before insertion", async (url) => {
+  const view = editor([["p", "paragraph", ""]], { upload: async () => ok(url) });
+  try {
+    insertFiles(view, [file("a.txt", "text/plain")]);
+    await tick();
+    expect(view.state.doc.childCount).toBe(1);
+    expect(view.state.doc.firstChild.type.name).toBe("paragraph");
+    expect(items(view)[0]).toMatchObject({ state: "error", code: "bad-response" });
+  } finally { view.destroy(); }
+});

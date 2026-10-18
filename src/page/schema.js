@@ -10,6 +10,7 @@
 // toDOM here draws the editing surface. The saved, readable HTML is the
 // projection's job, not this file's.
 import { model } from "../vendor/prosemirror.vendor.js";
+import { safeHref, safeFileHref } from "./address.js";
 
 const block = { id: { default: null }, pos: { default: null }, parent: { default: null } };
 const ref = (n, extra = {}) => ({ "data-id": n.attrs.id, ...extra });
@@ -87,8 +88,8 @@ export const schema = new model.Schema({
       group: "block",
       atom: true,
       attrs: { ...block, src: { default: "" }, name: { default: "" }, size: { default: null }, mime: { default: null } },
-      toDOM: (n) => ["div", ref(n, { class: "page-file", "data-type": "file", "data-src": n.attrs.src, "data-name": n.attrs.name, "data-size": n.attrs.size == null ? "" : String(n.attrs.size), "data-mime": n.attrs.mime ?? "" }),
-        ["a", { href: n.attrs.src, target: "_blank", rel: "noopener noreferrer" }, n.attrs.name || "file"]],
+      toDOM: (n) => ["div", ref(n, { class: "page-file", "data-type": "file", "data-src": safeFileHref(n.attrs.src) ?? "", "data-name": n.attrs.name, "data-size": n.attrs.size == null ? "" : String(n.attrs.size), "data-mime": n.attrs.mime ?? "" }),
+        ["a", { href: safeFileHref(n.attrs.src), target: "_blank", rel: "noopener noreferrer" }, n.attrs.name || "file"]],
     },
     table: {
       group: "block",
@@ -158,7 +159,7 @@ export const schema = new model.Schema({
     link: {
       attrs: { href: {} },
       inclusive: false,
-      toDOM: (m) => ["a", { href: m.attrs.href }, 0],
+      toDOM: (m) => ["a", { href: safeHref(m.attrs.href) }, 0],
     },
   },
 });

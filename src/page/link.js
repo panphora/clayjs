@@ -1,29 +1,17 @@
 // Link addresses the editor will store. #fragments, same-site paths, http(s),
 // mailto and tel pass; a bare domain gets https:// and a bare address mailto:.
 // Any other scheme (javascript:, data:, vbscript:, file:) is refused with null.
-import { state, view as pmView, history } from "../vendor/prosemirror.vendor.js";
+import { state, view as pmView } from "../vendor/prosemirror.vendor.js";
 import { schema } from "./schema.js";
+import { safeHref } from "./address.js";
+import { asStep } from "./blocksel.js";
 
 const { Plugin, PluginKey, TextSelection } = state;
 const { Decoration, DecorationSet } = pmView;
 const LINK = schema.marks.link;
 
-const SAFE_SCHEME = /^(https?:|mailto:|tel:)/i;
-
-export function safeHref(raw) {
-  const s = String(raw ?? "").trim().replace(/[\u0000-\u001f\u007f]/g, "");
-  if (!s) return null;
-  if (s.startsWith("#") || (s.startsWith("/") && !s.startsWith("//"))) return s;
-  if (SAFE_SCHEME.test(s)) return s;
-  if (/^[a-z][a-z0-9+.-]*:/i.test(s)) return null;
-  if (/^(\/\/)?[\w-]+(\.[\w-]+)+(:\d+)?([/?#]\S*)?$/.test(s)) return `https://${s.replace(/^\/\//, "")}`;
-  if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s)) return `mailto:${s}`;
-  return null;
-}
-
-export const isUrlText = (text) => !/\s/.test(text.trim()) && safeHref(text) !== null && /[.:/]/.test(text);
-
-export const safeSrc = (s) => (s && /^data:image\/(png|jpeg|gif|webp);/i.test(s) && s.length <= 2_100_000 ? s : safeHref(s));
+export { safeHref, safeSrc } from "./address.js";
+export const isUrlText = (text) => /^(https?:\/\/|mailto:|tel:|www\.)\S+$/i.test(text.trim()) && safeHref(text) !== null;
 
 export function linkRange(doc, pos) {
   const $p = doc.resolve(pos);
@@ -44,7 +32,7 @@ export function linkRange(doc, pos) {
 export function setLinkTr(st, from, to, href) {
   const tr = st.tr.removeMark(from, to, LINK);
   if (href) tr.addMark(from, to, LINK.create({ href }));
-  return history.closeHistory(tr);
+  return asStep(tr);
 }
 
 export const linkKey = new PluginKey("page-link");
@@ -119,7 +107,8 @@ class LinkPopover {
     const href = text ? safeHref(text) : null;
     if (text && !href) { this.input.setAttribute("aria-invalid", "true"); return; }
     const st = this.view.state;
-    const r = linkKey.getState(st) ?? this.range;
+    const r = linkKey.getState(st);
+    if (!r) return this.close();
     let tr;
     if (r.from === r.to) {
       if (!href) return this.close();
@@ -129,7 +118,7 @@ class LinkPopover {
       tr = setLinkTr(st, r.from, r.to, href);
       tr.setSelection(TextSelection.create(tr.doc, r.to));
     }
-    this.view.dispatch(tr.setMeta(linkKey, null));
+    this.view.dispatch(asStep(tr).setMeta(linkKey, null));
     this.close();
   }
 
@@ -145,14 +134,15 @@ class LinkPopover {
 
   render() {
     const editing = this.mode === "edit";
-    const href = this.range?.href;
+    const href = safeHref(this.range?.href);
     this.dom.dataset.mode = this.mode ?? "";
     this.input.hidden = !editing;
     this.url.hidden = editing;
     this.edit.hidden = editing;
     this.open.hidden = !href;
-    this.remove.hidden = !href;
+    this.remove.hidden = !this.range?.href;
     if (href) { this.open.href = href; this.url.href = href; this.url.textContent = href.replace(/^https?:\/\//, ""); }
+    else { this.open.removeAttribute("href"); this.url.removeAttribute("href"); this.url.textContent = ""; }
     this.dom.hidden = false;
     this.place();
   }
@@ -168,7 +158,15 @@ class LinkPopover {
 
   update(view) {
     this.view = view;
-    if (this.mode === "edit") return this.place();
+    if (this.mode === "edit") {
+      const range = linkKey.getState(view.state);
+      if (range) { this.range = { ...this.range, ...range }; return this.place(); }
+      this.mode = null;
+      this.range = null;
+      this.dom.hidden = true;
+      this.dom.dataset.mode = "";
+      return;
+    }
     const sel = view.state.selection;
     const r = sel instanceof TextSelection && sel.empty && view.hasFocus() ? linkRange(view.state.doc, sel.head) : null;
     if (!r || sel.head === r.from || sel.head === r.to) {
@@ -214,7 +212,11 @@ export function linkPlugin() {
       apply(tr, value) {
         const m = tr.getMeta(linkKey);
         if (m !== undefined) return m;
-        return value && tr.docChanged ? { from: tr.mapping.map(value.from, 1), to: tr.mapping.map(value.to, -1) } : value;
+        if (!value || !tr.docChanged) return value;
+        const from = tr.mapping.mapResult(value.from, 1);
+        const to = tr.mapping.mapResult(value.to, value.from === value.to ? 1 : -1);
+        if (from.deletedAcross || to.deletedAcross || (value.from !== value.to && from.pos >= to.pos)) return null;
+        return { from: from.pos, to: to.pos };
       },
     },
     view: (view) => new LinkPopover(view),
@@ -235,8 +237,9 @@ export function linkPlugin() {
       handleClick(view, pos, event) {
         if (!(event.metaKey || event.ctrlKey)) return false;
         const r = linkRange(view.state.doc, pos);
-        if (!r) return false;
-        view.dom.ownerDocument.defaultView.open(r.href, "_blank", "noopener,noreferrer");
+        const href = safeHref(r?.href);
+        if (!href) return false;
+        view.dom.ownerDocument.defaultView.open(href, "_blank", "noopener,noreferrer");
         return true;
       },
     },

@@ -1,8 +1,9 @@
 import { jest } from "@jest/globals";
-import { state as pmState } from "../../../src/vendor/prosemirror.vendor.js";
+import { state as pmState, model as pmModel, history } from "../../../src/vendor/prosemirror.vendor.js";
 import { schema } from "../../../src/page/schema.js";
+import { REMOTE } from "../../../src/page/model.js";
 import { safeHref, safeSrc, isUrlText, linkRange, setLinkTr, linkKey } from "../../../src/page/link.js";
-import { editor, key, keyOn, posOf, select } from "./view-helpers.js";
+import { editor, key, keyOn, posOf, select, typeText } from "./view-helpers.js";
 
 const { TextSelection } = pmState;
 const LINK = schema.marks.link;
@@ -41,7 +42,8 @@ describe("safeHref", () => {
 
   test("isUrlText accepts a single address and nothing with spaces or only a word", () => {
     expect(isUrlText("https://a.io")).toBe(true);
-    expect(isUrlText("b.io")).toBe(true);
+    expect(isUrlText("b.io")).toBe(false);
+    expect(isUrlText("www.b.io")).toBe(true);
     expect(isUrlText("hello")).toBe(false);
     expect(isUrlText("hello there")).toBe(false);
     expect(isUrlText("javascript:alert(1)")).toBe(false);
@@ -108,8 +110,8 @@ describe("the link plugin", () => {
   test("pasting a URL at a caret inserts it as linked text", () => {
     const view = page();
     select(view, posOf(view, "p", true));
-    expect(paste(view, "b.io")).toBe(true);
-    expect(view.state.doc.child(0).textContent).toBe("go here nowb.io");
+    expect(paste(view, "https://b.io")).toBe(true);
+    expect(view.state.doc.child(0).textContent).toBe("go here nowhttps://b.io");
     expect(linkRange(view.state.doc, view.state.selection.head - 1).href).toBe("https://b.io");
   });
 
@@ -344,5 +346,94 @@ describe("the link popover", () => {
     const { view, pop } = setup();
     view.destroy();
     expect(pop.isConnected).toBe(false);
+  });
+});
+
+describe("review regressions", () => {
+  test("F5 file clipboard serialization never emits an unsafe address", () => {
+    const file = schema.nodes.file.create({ src: "javascript:void(0)", name: "file" });
+    const dom = pmModel.DOMSerializer.fromSchema(schema).serializeNode(file);
+    expect(dom.querySelector("a").hasAttribute("href")).toBe(false);
+    expect(dom.dataset.src).toBe("");
+  });
+
+  test("F5 stored unsafe links are inert on the editing surface", () => {
+    const view = editor([["p", "paragraph", "link"]]);
+    try {
+      view.dispatch(view.state.tr.addMark(1, 5, LINK.create({ href: "javascript:void(0)" })));
+      expect(view.dom.querySelector("a").hasAttribute("href")).toBe(false);
+    } finally { view.destroy(); }
+  });
+
+  test("F5 stored unsafe links never reach the popover anchors", () => {
+    const view = editor([["p", "paragraph", "link"]]);
+    try {
+      view.coordsAtPos = () => ({ left: 0, bottom: 20 });
+      view.dispatch(view.state.tr.addMark(1, 5, LINK.create({ href: "https://example.test" })));
+      select(view, 2);
+      key(view, "k", { ctrlKey: true });
+      keyOn(view.dom.parentElement.querySelector(".page-link-input"), "Escape");
+      view.dispatch(view.state.tr.addMark(1, 5, LINK.create({ href: "javascript:void(0)" })));
+      key(view, "k", { ctrlKey: true });
+      for (const a of view.dom.parentElement.querySelectorAll(".page-link a")) expect(a.hasAttribute("href")).toBe(false);
+    } finally { view.destroy(); }
+  });
+
+  test("F5 Mod+click refuses stored unsafe links", () => {
+    const view = editor([["p", "paragraph", "link"]]);
+    const open = jest.spyOn(window, "open").mockImplementation(() => null).mockClear();
+    try {
+      view.dispatch(view.state.tr.addMark(1, 5, LINK.create({ href: "javascript:void(0)" })));
+      expect(linkKey.get(view.state).props.handleClick(view, 2, { ctrlKey: true })).toBe(false);
+      expect(open).not.toHaveBeenCalled();
+    } finally { open.mockRestore(); view.destroy(); }
+  });
+
+  test("F6 deleting a pending target closes the popover without stale coordinates", () => {
+    const view = editor([["p", "paragraph", "long target text here"]]);
+    try {
+      view.coordsAtPos = (pos) => { view.state.doc.resolve(pos); return { left: 0, bottom: 20 }; };
+      select(view, 12, 17);
+      key(view, "k", { ctrlKey: true });
+      expect(() => view.dispatch(view.state.tr.delete(1, 22).setMeta(REMOTE, true))).not.toThrow();
+      expect(linkKey.getState(view.state)).toBeNull();
+      expect(view.dom.parentElement.querySelector(".page-link").hidden).toBe(true);
+    } finally { view.destroy(); }
+  });
+
+  test("F6 a collapsed pending insertion keeps one mapped position", () => {
+    const view = editor([["p", "paragraph", "text"]]);
+    try {
+      view.coordsAtPos = () => ({ left: 0, bottom: 20 });
+      select(view, 3);
+      key(view, "k", { ctrlKey: true });
+      view.dispatch(view.state.tr.insertText("remote", 3).setMeta(REMOTE, true));
+      expect(linkKey.getState(view.state)).toEqual({ from: 9, to: 9 });
+    } finally { view.destroy(); }
+  });
+
+  test("F14 bare-caret link insertion and following typing undo separately", () => {
+    const view = editor([["p", "paragraph", "text"]]);
+    try {
+      view.coordsAtPos = () => ({ left: 0, bottom: 20 });
+      select(view, posOf(view, "p", true));
+      key(view, "k", { ctrlKey: true });
+      const input = view.dom.parentElement.querySelector(".page-link-input");
+      input.value = "example.test";
+      keyOn(input, "Enter");
+      typeText(view, "!");
+      expect(history.undoDepth(view.state)).toBe(2);
+      history.undo(view.state, view.dispatch);
+      expect(view.state.doc.textContent).toBe("textexample.test");
+    } finally { view.destroy(); }
+  });
+
+  test.each(["e.g", "v1.2", "1.5", "package.json"])("F19 dotted text %s uses normal paste", (text) => {
+    const view = editor([["p", "paragraph", "text"]]);
+    try {
+      select(view, 1, 5);
+      expect(linkKey.get(view.state).props.handlePaste(view, { clipboardData: { getData: () => text } })).toBe(false);
+      expect(view.state.doc.firstChild.firstChild.marks).toEqual([]);
+    } finally { view.destroy(); }
   });
 });
