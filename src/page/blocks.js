@@ -145,6 +145,7 @@ function touched(doc, sel, ents) {
   if (b > a && sel.to <= ents[b].at) b--;
   return [Math.min(a, ents.length - 1), b];
 }
+export const touchedBlocks = touched;
 
 // The selection lifted to whole sibling subtrees: [lo, hi] are block indices,
 // every root in it shares the outline parent `up`.
@@ -157,6 +158,65 @@ export function siblingSpan(ents, a, b) {
   return { lo, hi, up };
 }
 
+// ---- block selection --------------------------------------------------------
+
+// A selection of whole top-level blocks. anchor and head are block boundaries
+// (depth-0 positions), so from..to covers whole blocks; the commands lift it to
+// whole sibling subtrees (siblingSpan), so a selected toggle carries its body.
+// It is invisible to ProseMirror (the DOM selection is hidden) and drawn with
+// node decorations by blocksel.js.
+const boundary = (doc, pos, side) => {
+  const $p = doc.resolve(Math.max(0, Math.min(pos, doc.content.size)));
+  if ($p.depth === 0) return $p.pos;
+  return side < 0 ? $p.before(1) : $p.after(1);
+};
+const rootIds = (doc, from, to) => { const r = []; doc.nodesBetween(from, to, (n) => { r.push(n.attrs.id); return false; }); return r; };
+
+export class BlockSelection extends Selection {
+  // A block landing at an edge stays outside the selection. A block landing
+  // between two selected blocks ends it: the selection never grows to include
+  // what someone else inserted, it falls back to a caret in the first block.
+  map(doc, mapping) {
+    const fwd = this.anchor <= this.head;
+    const a = boundary(doc, mapping.map(this.anchor, fwd ? 1 : -1), fwd ? -1 : 1);
+    const h = boundary(doc, mapping.map(this.head, fwd ? -1 : 1), fwd ? 1 : -1);
+    const from = Math.min(a, h), to = Math.max(a, h);
+    const before = rootIds(this.$from.doc, this.from, this.to);
+    if (from === to || rootIds(doc, from, to).some((id) => !before.includes(id))) return Selection.near(doc.resolve(from));
+    return new BlockSelection(doc.resolve(a), doc.resolve(h));
+  }
+  eq(other) {
+    return other instanceof BlockSelection && other.anchor === this.anchor && other.head === this.head;
+  }
+  toJSON() {
+    return { type: "page-block", anchor: this.anchor, head: this.head };
+  }
+  static fromJSON(doc, json) {
+    return new BlockSelection(doc.resolve(json.anchor), doc.resolve(json.head));
+  }
+  getBookmark() {
+    return new BlockBookmark(this.anchor, this.head);
+  }
+  span(doc = this.$from.doc) {
+    return { lo: doc.resolve(this.from).index(0), hi: doc.resolve(this.to).index(0) - 1 };
+  }
+}
+BlockSelection.prototype.visible = false;
+Selection.jsonID("page-block", BlockSelection);
+
+class BlockBookmark {
+  constructor(anchor, head) { this.anchor = anchor; this.head = head; }
+  map(mapping) {
+    const fwd = this.anchor <= this.head;
+    return new BlockBookmark(mapping.map(this.anchor, fwd ? 1 : -1), mapping.map(this.head, fwd ? -1 : 1));
+  }
+  resolve(doc) {
+    const fwd = this.anchor <= this.head;
+    const a = boundary(doc, this.anchor, fwd ? -1 : 1), h = boundary(doc, this.head, fwd ? 1 : -1);
+    return a === h ? Selection.near(doc.resolve(a)) : new BlockSelection(doc.resolve(a), doc.resolve(h));
+  }
+}
+
 const prevSibling = (ents, i) => {
   for (let j = i - 1; j >= 0; j--) if (ents[j].up === ents[i].up) return j;
   return -1;
@@ -166,7 +226,7 @@ const prevSibling = (ents, i) => {
 // current doc, outside the span). Moved nodes get pos null: identityPlugin
 // then gives exactly those blocks new keys between their new neighbours and
 // leaves every other key alone. `attrs(ent)` returns attr changes per block.
-export function moveSpanTr(st, ents, lo, hi, target, attrs = () => null) {
+export function moveSpanTr(st, ents, lo, hi, target, attrs = () => null, sel = st.selection) {
   const from = ents[lo].at, to = ents[hi].end, size = to - from;
   const nodes = [];
   for (let k = lo; k <= hi; k++) {
@@ -176,8 +236,9 @@ export function moveSpanTr(st, ents, lo, hi, target, attrs = () => null) {
   const tr = st.tr.delete(from, to);
   const at = target > from ? target - size : target;
   tr.insert(at, nodes);
-  const shift = at - from, sel = st.selection;
-  if (sel instanceof NodeSelection) tr.setSelection(NodeSelection.create(tr.doc, sel.from + shift));
+  const shift = at - from;
+  if (sel instanceof BlockSelection) tr.setSelection(new BlockSelection(tr.doc.resolve(sel.anchor + shift), tr.doc.resolve(sel.head + shift)));
+  else if (sel instanceof NodeSelection) tr.setSelection(NodeSelection.create(tr.doc, sel.from + shift));
   else tr.setSelection(TextSelection.create(tr.doc, sel.anchor + shift, sel.head + shift));
   return tr;
 }

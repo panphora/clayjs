@@ -5,6 +5,7 @@
 // --page-* tokens in editor.js (contract: default-page/v1/look/THEME-CONTRACT.md).
 import { state, commands } from "../vendor/prosemirror.vendor.js";
 import { schema } from "./schema.js";
+import { BlockSelection } from "./blocks.js";
 import { BLOCK_TYPES, blockTypeOf, turnInto, insertAfter } from "./items.js";
 
 export { BLOCK_TYPES, blockTypeOf, turnInto, insertAfter } from "./items.js";
@@ -119,7 +120,9 @@ class Chrome {
   }
 
   blockIndex() {
-    return this.view.state.selection.$head.index(0);
+    const st = this.view.state, sel = st.selection;
+    const pos = sel instanceof BlockSelection ? sel.from : sel.head;
+    return Math.min(st.doc.resolve(pos).index(0), st.doc.childCount - 1);
   }
 
   fromPlus() {
