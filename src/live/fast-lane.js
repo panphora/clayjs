@@ -87,8 +87,9 @@ export function createFastLane({
   let conn;
   let stateCount = 0;
   let fetchAgain = false;
-  // A store left the room, so frames went by that its value never took: the
-  // next state read asks for every store whole, never for the moves since seq.
+  // A store left the room, so frames went by that its value never took: state
+  // reads ask for every store whole, never for the moves since seq, until a
+  // state is applied.
   let missed = false;
   let unsubscribe = null;
   // Per store: the next n, ops not yet in a frame, frames sent but not yet seen
@@ -109,6 +110,15 @@ export function createFastLane({
     const store = entries.get(name)?.store;
     if (!store) return [];
     return store.pendingEntries().filter((pending) => pending.id > lane.framed);
+  }
+
+  // A frame none of whose ops is pending any more (a save at save speed took
+  // them, and the room merges that file) leaves the lane: never sent again.
+  function prune(name, lane) {
+    const store = entries.get(name)?.store;
+    if (!store) return;
+    const live = new Set(store.pendingEntries().map((pending) => pending.id));
+    lane.awaiting = lane.awaiting.filter((frame) => frame === flying || !frame.entries || frame.entries.some((e) => live.has(e.id)));
   }
 
   // Never applied: every attempt was refused before the room handled it.
@@ -146,7 +156,7 @@ export function createFastLane({
   // oldest unsent ops of one store; stores take turns.
   function nextFrame() {
     for (const [name, lane] of lanes) {
-      if (!roomNames.has(name)) continue;
+      if (!roomNames.has(name) || held(name)) continue;
       const retry = lane.awaiting.find((frame) => !frame.sent);
       if (retry) return { name, lane, frame: retry };
     }
@@ -432,6 +442,8 @@ export function createFastLane({
     }
     const fresh = state.epoch !== epoch;
     let joined = false;
+    // Every store is read whole here; one that is out of this state sets it again.
+    missed = false;
     epoch = state.epoch;
     seq = Number.isInteger(state.seq) ? state.seq : 0;
     writer = state.writer ?? null;
@@ -441,13 +453,11 @@ export function createFastLane({
     for (const [name, entry] of entries) {
       const room = stores[name];
       const lane = laneOf(name);
-      // A frame none of whose ops is pending any more (a save at save speed
-      // took them, and the room merged that file) is never sent again.
-      const live = new Set(entry.store.pendingEntries().map((pending) => pending.id));
-      lane.awaiting = lane.awaiting.filter((frame) => frame === flying || !frame.entries || frame.entries.some((e) => live.has(e.id)));
+      prune(name, lane);
       if (!room) {
         // Already out: its value still descends from where it left.
         if (!lane.out) leaveRoom(name, lane);
+        else missed = true;
         continue;
       }
       const rejoined = entry.store.handle.status.mode === "file";
@@ -527,12 +537,9 @@ export function createFastLane({
     synced = false;
     const asked = { connection, stateCount };
     let state = null;
-    const whole = missed;
-    missed = false;
     try {
-      state = await transport.fetchState(clientId, epoch !== null && seq > 0 && !whole ? { epoch, seq } : null);
+      state = await transport.fetchState(clientId, epoch !== null && seq > 0 && !missed ? { epoch, seq } : null);
     } catch {}
-    if (whole && !(state && typeof state.epoch === "string")) missed = true;
     fetching = false;
     if (stopped) return;
     if (asked.connection !== connection || fetchAgain) {
@@ -614,7 +621,12 @@ export function createFastLane({
       buffered = [];
     },
     frame: onFrame,
-    state: applyState,
+    // A broadcast state carries no moves. While a store is out, the rejoin
+    // goes through this tab's own read, which carries them.
+    state(state) {
+      if (missed && state && !("moves" in state)) resync();
+      else applyState(state);
+    },
     // The room's writer, and how far the file reaches when a save landed.
     writer(data) {
       if (!data || data.epoch !== epoch) return;
@@ -651,8 +663,15 @@ export function createFastLane({
     // what was framed (an accepted save's ops have left pending).
     release(name) {
       if (stopped || epoch === null || !roomNames.has(name)) return;
-      laneOf(name).unsent = unframed(name, laneOf(name));
+      const lane = laneOf(name);
+      prune(name, lane);
+      lane.unsent = unframed(name, lane);
       schedule();
+    },
+    // The last frame number this tab gave the store: a save made while it is
+    // out of the room holds every frame through it (live-by).
+    framed(name) {
+      return lanes.get(name)?.n ?? 0;
     },
     // Read the room again: a store opened after this tab joined, or a save the
     // room merged whose state may not have arrived yet.

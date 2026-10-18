@@ -21,7 +21,7 @@
 // Paths that rebuild the units, so ids do not ride along: setWhole (a join, a
 // non-exact rewind, a whole write, a heal that wins whole), the merge3 fallback
 // in placeByBase, and healMerge3. After one of those, the ids carry over by a
-// character alignment of the agreed text before and after (alignUnits), and a
+// character alignment of the agreed text before and after (alignSure), and a
 // unit the step itself made can take back an id: from this tab's own write or
 // heal when it is the one stepped (the ids it sent), and while a check is
 // armed, from the agreed text just before the loss. A rebase (an exact repair)
@@ -31,72 +31,96 @@
 // (so it can be lost) for a heal, a repair, a join or a whole write.
 import { step, join, tombstone, chainOf } from "./replay.js";
 
-const MAX_EDITS = 2000;
+// The sure-match check costs one cell per pair of units in its window: past
+// SURE_CELLS (about 1000 × 1000 units changed) it gives up and calls the
+// window not sure. MARGIN is how far into the common prefix and suffix it
+// first looks; it looks further while repeated text there could shift.
+export const SURE_CELLS = 1 << 20;
+const MARGIN = 8;
 
-// For each unit of b, the index of the unit of a it is, or -1: a common prefix
-// and suffix, and a shortest edit script (Myers) on the rest, given up past
-// MAX_EDITS edits (the rest then counts as replaced).
-export function alignUnits(a, b) {
+// Which units of b are surely which units of a: the pairs every longest common
+// subsequence of a and b matches. A pair counts as sure only when forbidding it
+// makes the alignment worse; two alignments that agree prove nothing, since
+// repeated text can match either copy. map[j] is the unit of a that b's unit j
+// surely is, or -1; `unsure` lists the units of a some longest alignment keeps
+// and no sure pair does (repeated text, not proven kept).
+//
+// The check runs on the part between the common prefix and suffix, plus a
+// margin of each. When the margin's outer pair is sure, so is everything past
+// it (a text matched against itself has one longest alignment); when it is
+// not, the margin doubles. A window past SURE_CELLS is all unsure.
+export function alignSure(a, b) {
   const map = new Int32Array(b.length).fill(-1);
-  let p = 0;
   const n = Math.min(a.length, b.length);
-  while (p < n && a.charCodeAt(p) === b.charCodeAt(p)) { map[p] = p; p++; }
+  let p = 0;
+  while (p < n && a.charCodeAt(p) === b.charCodeAt(p)) p++;
   let s = 0;
-  while (s < n - p && a.charCodeAt(a.length - 1 - s) === b.charCodeAt(b.length - 1 - s)) { map[b.length - 1 - s] = a.length - 1 - s; s++; }
-  const A = a.slice(p, a.length - s), B = b.slice(p, b.length - s);
-  if (!A.length || !B.length) return map;
-  const N = A.length, M = B.length, max = Math.min(N + M, MAX_EDITS);
-  const off = max + 1;
-  const v = new Int32Array(2 * max + 3);
-  const trace = [];
-  let found = false;
-  for (let d = 0; d <= max && !found; d++) {
-    trace.push(v.slice());
-    for (let k = -d; k <= d; k += 2) {
-      let x = k === -d || (k !== d && v[off + k - 1] < v[off + k + 1]) ? v[off + k + 1] : v[off + k - 1] + 1;
-      let y = x - k;
-      while (x < N && y < M && A.charCodeAt(x) === B.charCodeAt(y)) { x++; y++; }
-      v[off + k] = x;
-      if (x >= N && y >= M) { found = true; break; }
+  while (s < n - p && a.charCodeAt(a.length - 1 - s) === b.charCodeAt(b.length - 1 - s)) s++;
+  const shift = a.length - b.length;
+  for (let m = MARGIN; ; m *= 2) {
+    const mp = Math.min(p, m), ms = Math.min(s, m);
+    const a0 = p - mp, b0 = a0, N = a.length - s + ms - a0, M = b.length - s + ms - b0;
+    const outside = () => {
+      for (let j = 0; j < b0; j++) map[j] = j;
+      for (let j = b0 + M; j < b.length; j++) map[j] = j + shift;
+    };
+    if ((N + 1) * (M + 1) > SURE_CELLS) {
+      outside();
+      const unsure = [];
+      for (let i = a0; i < a0 + N; i++) unsure.push(i);
+      return { map, unsure };
     }
+    const { sure, kept } = surePairs(a, a0, N, b, b0, M);
+    const done = mp === p && ms === s;
+    if (!done && !((mp === p || sure[0] === 0) && (ms === s || sure[M - 1] === N - 1))) continue;
+    outside();
+    const proven = new Uint8Array(N);
+    for (let j = 0; j < M; j++) if (sure[j] >= 0) { map[b0 + j] = a0 + sure[j]; proven[sure[j]] = 1; }
+    const unsure = [];
+    for (let i = 0; i < N; i++) if (kept[i] && !proven[i]) unsure.push(a0 + i);
+    return { map, unsure };
   }
-  if (!found) return map;
-  let x = N, y = M;
-  for (let d = trace.length - 1; d > 0; d--) {
-    const t = trace[d];
-    const k = x - y;
-    const prev = k === -d || (k !== d && t[off + k - 1] < t[off + k + 1]) ? k + 1 : k - 1;
-    const px = t[off + prev], py = px - prev;
-    while (x > px && y > py) { x--; y--; map[p + y] = p + x; }
-    if (x === px) y--; else x--;
-  }
-  while (x > 0 && y > 0) { x--; y--; map[p + y] = p + x; }
-  return map;
 }
 
-const reverse = (t) => { let out = ""; for (let i = t.length - 1; i >= 0; i--) out += t[i]; return out; };
-
-// alignUnits, keeping only the matches that hold either way: the alignment
-// that matches from the start (alignUnits) and the one that matches from the
-// end (alignUnits of the reversed texts) agree on them. Repeated text gives
-// two equally short edit scripts that pair a unit with different copies; a
-// unit they disagree on is not proven kept, so it maps to -1 here, and
-// `unsure` lists the units of a either alignment keeps that this map does not.
-export function alignSure(a, b) {
-  const fwd = alignUnits(a, b);
-  const rev = alignUnits(reverse(a), reverse(b));
-  const map = new Int32Array(b.length).fill(-1);
-  const keptF = new Uint8Array(a.length), keptS = new Uint8Array(a.length);
-  for (let j = 0; j < b.length; j++) {
-    const r = rev[b.length - 1 - j];
-    const back = r >= 0 ? a.length - 1 - r : -1;
-    if (fwd[j] >= 0) keptF[fwd[j]] = 1;
-    if (back >= 0) keptF[back] = 1;
-    if (fwd[j] >= 0 && fwd[j] === back) { map[j] = fwd[j]; keptS[fwd[j]] = 1; }
+// The longest common subsequences of a[a0, a0 + N) and b[b0, b0 + M): F holds
+// the LCS of every pair of prefixes, G of every pair of suffixes. A matching
+// pair (i, j) is on some longest alignment when F + 1 + G through it is the
+// LCS; it is then the alignment's (F[i][j] + 1)-th match, and it is on every
+// longest alignment exactly when no other such pair has that rank.
+function surePairs(a, a0, N, b, b0, M) {
+  const W = M + 1;
+  const F = new Uint16Array((N + 1) * W), G = new Uint16Array((N + 1) * W);
+  for (let i = 1; i <= N; i++) {
+    const c = a.charCodeAt(a0 + i - 1);
+    for (let j = 1; j <= M; j++) {
+      const k = i * W + j;
+      F[k] = c === b.charCodeAt(b0 + j - 1) ? F[k - W - 1] + 1 : Math.max(F[k - W], F[k - 1]);
+    }
   }
-  const unsure = [];
-  for (let i = 0; i < a.length; i++) if (keptF[i] && !keptS[i]) unsure.push(i);
-  return { map, unsure };
+  for (let i = N - 1; i >= 0; i--) {
+    const c = a.charCodeAt(a0 + i);
+    for (let j = M - 1; j >= 0; j--) {
+      const k = i * W + j;
+      G[k] = c === b.charCodeAt(b0 + j) ? G[k + W + 1] + 1 : Math.max(G[k + W], G[k + 1]);
+    }
+  }
+  const L = F[N * W + M];
+  const count = new Uint32Array(L + 1), at = new Int32Array(L + 1).fill(-1);
+  const kept = new Uint8Array(N);
+  for (let i = 0; i < N; i++) {
+    const c = a.charCodeAt(a0 + i);
+    for (let j = 0; j < M; j++) {
+      if (c !== b.charCodeAt(b0 + j)) continue;
+      const rank = F[i * W + j];
+      if (rank + 1 + G[(i + 1) * W + j + 1] !== L) continue;
+      kept[i] = 1;
+      count[rank]++;
+      at[rank] = i * W + j;
+    }
+  }
+  const sure = new Int32Array(M).fill(-1);
+  for (let r = 0; r < L; r++) if (count[r] === 1) sure[at[r] % W] = Math.floor(at[r] / W);
+  return { sure, kept };
 }
 
 // The ids of b's units, carried from a's ids through the alignment; the ids of
@@ -277,11 +301,11 @@ export function createHealCheck({ r, me, quiet = 500, setTimer, clearTimer, read
     join(X, seq, opts) { around(null, "room", () => join(r, X, seq, opts)); },
     tombstone(seq) { for (const u of visible(r)) if (u.id) peer.add(u.id); tombstone(r, seq); },
     agreedIds,
-    // A notice (a refusal's) named every unit the editor shows and the agreed
-    // text lacks: they are accounted for, like this tab's own deletes.
-    named() {
-      const agreed = new Set(agreedIds());
-      for (const id of view) if (id && !agreed.has(id)) erased.add(id);
+    // A notice (a refusal's) named the editor's text in these [from, to)
+    // ranges: those units are accounted for, like this tab's own deletes. Text
+    // the agreed text holds but could not identify is not among them.
+    named(ranges) {
+      for (const [from, to] of ranges) for (let i = from; i < to; i++) if (view[i]) erased.add(view[i]);
     },
     // The editor now shows `shown` (the agreed text, after a release).
     released(shown) {

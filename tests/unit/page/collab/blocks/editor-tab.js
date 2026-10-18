@@ -36,18 +36,13 @@ export function makeTab(sim, room, id, init, opts = {}) {
   const store = createStore({ name: "page", value: init });
   const entries = new Map([["page", { store }]]);
   const transport = room.transport(id, { person: opts.person ?? id });
-  // The proposed server rule for `since`: the moves after that seq in the same
-  // epoch; for another epoch (or a first read), the epoch's moves from 0.
-  const wrapped = {
-    ...transport,
-    fetchState: async (cid, since) => {
-      const state = await transport.fetchState(cid, since ? since.seq : 0);
-      if (since && state && typeof state.epoch === "string" && state.epoch !== since.epoch) return room.state(cid, 0);
-      return state;
-    },
-  };
   let binding = null;
-  const lane = createFastLane({ transport: wrapped, entries, now: sim.now, setTimer: sim.setTimer, clearTimer: sim.clearTimer, onWriter: () => binding?.writerChanged() });
+  // What the live plugin keeps for a save (plugins/live.js): where the store
+  // left the room, and the file-mode save on the wire, which holds the lane.
+  let leftAt = null;
+  let saving = null;
+  const held = () => !!saving && saving.mode === "file" && store.pendingEntries().some((e) => e.id <= saving.mark);
+  const lane = createFastLane({ transport, entries, now: sim.now, setTimer: sim.setTimer, clearTimer: sim.clearTimer, onWriter: () => binding?.writerChanged(), onLeave: (_name, at) => { leftAt = at; }, held });
   store.onLocal((ops) => lane.local("page", ops, store.mark));
   binding = createPageBinding({ schema, store, lane, me: id, setTimer: sim.setTimer, clearTimer: sim.clearTimer, quiet: opts.quiet ?? 500 });
   const el = document.createElement("div");
@@ -122,6 +117,33 @@ export function makeTab(sim, room, id, init, opts = {}) {
     undo() { return pmHistory.undo(editor.state, editor.dispatch); },
     compose(on) { editor.dom.dispatchEvent(new CompositionEvent(on ? "compositionstart" : "compositionend", { bubbles: true, data: "" })); },
     start() { lane.start(); room.open(id); },
+    // A save of the page, as the live plugin makes it: the capture (in fast
+    // mode the room's value at the lane's position; out of the room the store's
+    // value, stamped where it left, with live-by), the host's merge `answer / 2`
+    // ms later (room.fileWritten, which sends the room's state on the stream),
+    // and the answer after `answer` ms (confirmSaved). Returns the capture.
+    save({ answer = 80, by = true } = {}) {
+      const mode = store.handle.status.mode;
+      const fastMode = mode === "fast";
+      const value = JSON.parse(JSON.stringify(fastMode ? store.authoritative : store.value));
+      const at = fastMode ? { epoch: lane.status.epoch, seq: lane.status.seq } : leftAt;
+      const n = lane.framed?.("page") ?? 0;
+      const stamp = { at, by: !fastMode && by && leftAt && n > 0 ? { client: id, n } : null };
+      const mark = store.mark;
+      if (!fastMode) saving = { mark, mode };
+      const capture = { mode, value, mark, ...stamp };
+      sim.after(answer / 2, () => room.fileWritten("page", value, at, stamp.by));
+      sim.after(answer, () => {
+        if (saving && saving.mark === mark) saving = null;
+        if (fastMode) return;
+        if (store.handle.status.mode === "fast") {
+          store.rebase(store.authoritative, { source: "state", through: mark });
+          lane.release("page");
+          lane.refresh();
+        } else store.confirm(mark);
+      });
+      return capture;
+    },
     allNotices() { return binding.notices(); },
     // The page's blocks in order, as [id, flat text].
     blocks() {

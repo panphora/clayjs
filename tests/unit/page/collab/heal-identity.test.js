@@ -216,6 +216,94 @@ test("a join that keeps all the text, repeated words included, gives no notice",
   expect(h.notices).toEqual([]);
 });
 
+// Round 9 review, Opus 4 and Astra 2: two alignments that agree do not prove
+// a match. A unit counts as kept only when every longest alignment keeps it.
+const nonSpace = (t) => t.replace(/\s/g, "").length;
+
+test("Opus 4: 'the cat.' → 'the the cat Yes.', room back to 'the cat.': both 'the' and ' Yes' are named", () => {
+  for (const at of [0, 4]) {
+    const h = harness("the cat.");
+    h.write("a", at, at, "the ");
+    h.write("a", 11, 11, " Yes");
+    expect(h.r.S.c).toBe("the the cat Yes.");
+    h.lose("the cat.");
+    expect(h.notices.map((t) => t.trim()).sort()).toEqual(["Yes", "the"]);
+  }
+});
+
+test("Astra 2: 'the end.' with 'the ' typed in front, room back to 'the dog.': 'the' is named", () => {
+  const h = harness("the end.");
+  h.write("a", 0, 0, "the ");
+  h.lose("the dog.");
+  expect(h.notices.map((t) => t.trim())).toEqual(["the"]);
+});
+
+test("Astra 2: 'aa' → 'aaa', room back to 'ab': the typed 'a' is named", () => {
+  const h = harness("aa");
+  h.write("a", 0, 0, "a");
+  h.lose("ab");
+  expect(h.notices).toEqual(["a"]);
+});
+
+test("Astra 2: 'go go' → 'go go go', room back to 'go no': the typed 'go ' is named", () => {
+  const h = harness("go go");
+  h.write("a", 0, 0, "go ");
+  h.lose("go no");
+  expect(h.notices.map((t) => t.trim())).toEqual(["go"]);
+});
+
+test("Opus 4: 'I said no.' → 'I said no, no Bye.', room back to 'I said no.': every lost character is named", () => {
+  for (const [at, t] of [[7, "no, "], [9, ", no"], [6, " no,"]]) {
+    const h = harness("I said no.");
+    h.write("a", at, at, t);
+    h.write("a", 13, 13, " Bye");
+    expect(h.r.S.c).toBe("I said no, no Bye.");
+    h.lose("I said no.");
+    expect(nonSpace(h.notices.join(""))).toBe(nonSpace(", no Bye"));
+  }
+});
+
+test("Opus 4: 'See the cat and the dog.' with ' the' and ' Done' typed, room back: both are named", () => {
+  for (const [at, t] of [[3, " the"], [4, "the "], [7, " the"]]) {
+    const h = harness("See the cat and the dog.");
+    h.write("a", at, at, t);
+    h.write("a", 27, 27, " Done");
+    expect(h.r.S.c).toBe("See the the cat and the dog Done.");
+    h.lose("See the cat and the dog.");
+    expect(nonSpace(h.notices.join(""))).toBe(nonSpace(" the Done"));
+  }
+});
+
+// Opus 4's randomized run: several words typed from a small vocabulary (so
+// they repeat what stands), then the room comes back as the text before them.
+// Every typed character is lost, and the notices must name at least as many.
+test("Opus 4: randomized multi-edit, 20,000 runs: no run names fewer non-space characters than it lost", () => {
+  let s = 7;
+  const rand = (n) => { s = (s * 1664525 + 1013904223) >>> 0; return s % n; };
+  const vocab = ["the", "cat", "no", "a", "dog", "the cat", "no no"];
+  let short = 0;
+  const bad = [];
+  for (let run = 0; run < 20000; run++) {
+    const words = Array.from({ length: 2 + rand(4) }, () => vocab[rand(vocab.length)]);
+    const base = words.join(" ") + ".";
+    const h = harness(base);
+    let typed = 0;
+    for (let e = 0, edits = 2 + rand(3); e < edits; e++) {
+      const c = h.r.S.c;
+      const spots = [0];
+      for (let i = 0; i < c.length; i++) if (c[i] === " " || c[i] === ".") spots.push(i);
+      const at = spots[rand(spots.length)];
+      const word = vocab[rand(vocab.length)];
+      const t = at === 0 ? word + " " : " " + word;
+      h.write("a", at, at, t);
+      typed += nonSpace(t);
+    }
+    h.lose(base);
+    if (nonSpace(h.notices.join("")) < typed) { short++; if (bad.length < 3) bad.push({ base, typed: h.r.S.c, notices: h.notices }); }
+  }
+  expect({ short, bad }).toEqual({ short: 0, bad: [] });
+});
+
 // Round 8 review, Opus 5: Enter mid-paragraph, then typing into the new block
 // within 10 ms, before its first release. Its text is tracked from the first
 // keystroke, so a loss that drops the typing gets a notice.

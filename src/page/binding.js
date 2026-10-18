@@ -22,7 +22,7 @@ import { flatten, marksOf, packMarks, unflatten, unpackMarks } from "./inline.js
 import { createReplay, healChain, mapCaret, regions, repairOf, strip } from "./replay.js";
 import { createHealCheck } from "./heal-check.js";
 import { registerUnsavedState } from "../lib/unsaved-state.js";
-import { cloneJson } from "../live/ops.js";
+import { applyOp, cloneJson } from "../live/ops.js";
 
 const { TextSelection } = pmState;
 // A copy of a block of the record, with one mark key per unit (the record
@@ -30,6 +30,11 @@ const { TextSelection } = pmState;
 const rawOf = (value, id) => {
   const raw = (value && value.blocks && value.blocks[id]) || null;
   return raw && typeof raw === "object" ? unpackMarks(cloneJson(raw)) : raw;
+};
+const readAt = (root, path) => {
+  let node = root;
+  for (const seg of path) node = node && typeof node === "object" ? node[seg] : undefined;
+  return node;
 };
 const tombOf = (value, id) => !!(value && value.deleted && value.deleted[id]);
 // hashOf(a) === hashOf(b) on JSON values, without building either string:
@@ -92,7 +97,8 @@ function blockOps(ops, before, next) {
     }
     if (root !== "blocks") continue;
     if (op.path.length === 2) out.push({ id: String(id), X: op.op === "set" ? unpackMarks(op.value) : null, sent: op.op === "set" ? op.value : null });
-    else out.push({ id: String(id), X: rawOf(next, id) ? strip(rawOf(next, id)) : null });
+    // A merge's diff sets many fields of one block: one step for them all.
+    else if (!(out.length && out[out.length - 1].deep === String(id))) out.push({ id: String(id), X: rawOf(next, id) ? strip(rawOf(next, id)) : null, deep: String(id) });
   }
   return out;
 }
@@ -196,6 +202,8 @@ export function createPageBinding({ schema, store, lane, me, setTimer = setTimeo
   const dirty = new Set();
   const opBlock = new Map();
   const own = [];
+  // Text blocks with writes the stream has not brought back (B.unechoed).
+  const waiting = new Set();
   const stats = { writes: 0, releases: 0, repairs: 0, follows: 0, heals: 0 };
   const waiters = new Set();
   let view = null;
@@ -360,7 +368,7 @@ export function createPageBinding({ schema, store, lane, me, setTimer = setTimeo
       if (id === null) continue;
       opBlock.set(e.id, id);
       const B = blocks.get(id);
-      if (B && B.text && e.op.op === "set" && e.op.path.length === 2 && e.op.path[0] === "blocks") B.unechoed.push({ id: e.id, json: JSON.stringify(e.op.value), value: e.op.value, seq: null });
+      if (B && B.text && e.op.op === "set" && e.op.path.length === 2 && e.op.path[0] === "blocks") { B.unechoed.push({ id: e.id, json: JSON.stringify(e.op.value), value: e.op.value, seq: null }); waiting.add(B); }
       // A delete the stream has not brought back: a room loss heals it too.
       if (B && e.op.op === "del" && e.op.path.length === 2 && e.op.path[0] === "blocks") B.unechoedDel = e.id;
     }
@@ -375,11 +383,50 @@ export function createPageBinding({ schema, store, lane, me, setTimer = setTimeo
     sent(mark);
   }
 
-  // Blocks with a write in flight ("*": an op on the whole map holds them all).
+  // Blocks with a write in flight ("*": an op on the whole map holds them all),
+  // and blocks with a write a save carried that the room has not had.
   function heldIds() {
     const out = new Set();
-    for (const e of store.pendingEntries()) out.add(blockOf(e.op) ?? "*");
+    const pending = new Set();
+    for (const e of store.pendingEntries()) { out.add(blockOf(e.op) ?? "*"); pending.add(e.id); }
+    for (const B of waiting) {
+      if (!B.unechoed.length) waiting.delete(B);
+      else if (carried(B, pending).length) out.add(B.id);
+    }
     return out;
+  }
+
+  // This tab's text writes that left pending without the room having them: a
+  // save made while out of the room took them (the file holds them), and the
+  // host's merge may have replayed a peer's later write over them.
+  function carried(B, pending) {
+    if (!B.text || !B.unechoed.length) return [];
+    return B.unechoed.filter((u) => u.seq === null && !pending.has(u.id));
+  }
+
+  // Back in the same room after a save took writes it never had: each goes to
+  // the room again as it was made, as the lane would have sent it had no save
+  // taken it, so every tab places it by its steps, with the heal check armed.
+  // When the room held the last one's text since (the merge kept it), none is
+  // sent again.
+  function resend(carry, from) {
+    for (const [B, list] of carry) {
+      const pending = new Set(store.pendingEntries().map((e) => e.id));
+      const left = carried(B, pending).filter((u) => list.includes(u));
+      B.unechoed = B.unechoed.filter((u) => !list.includes(u));
+      const last = left[left.length - 1];
+      const kept = (X) => !!X && X.c === last.value.c;
+      if (!last || kept(B.r.S) || B.r.log.some((e) => e.seq > from && kept(e.X))) continue;
+      stats.heals++;
+      B.heal.arm();
+      queueMicrotask(() => {
+        for (const u of left) {
+          const mark = store.mark;
+          store.handle.set(["blocks", B.id], u.value);
+          sent(mark);
+        }
+      });
+    }
   }
 
   // ---- remote side ---------------------------------------------------------
@@ -437,14 +484,43 @@ export function createPageBinding({ schema, store, lane, me, setTimer = setTimeo
     }
   }
 
-  store.onRebase(({ frame, room, before, next }) => {
+  // The moves of a state read, each with the record before and after it, from
+  // the record before the read: an op deeper than a block takes the block's
+  // value after its own move, never after the last one (a merge's diff).
+  // ev.prev is read only then: the store copies it on first read.
+  function replayMoves(moves, ev, before, next) {
+    const later = moves.filter((mv) => mv.seq > seq);
+    const deep = later.some((mv) => mv.ops.some((op) => op.path[0] !== "deleted" && !(op.path[0] === "blocks" && op.path.length === 2)));
+    if (!deep) {
+      for (const mv of later) replayOps(mv.ops, mv.seq, before, next);
+      return;
+    }
+    let cur = cloneJson(ev.prev ?? {});
+    for (const mv of later) {
+      const was = cur;
+      let after = cloneJson(was);
+      for (const op of mv.ops) { try { after = applyOp(after, op); } catch {} }
+      replayOps(mv.ops, mv.seq, (path) => readAt(was, path), after);
+      cur = after;
+    }
+  }
+
+  store.onRebase((ev) => {
+    const { frame, room, before, next } = ev;
+    const carry = new Map(), from = seq;
+    if (room && !room.fresh) {
+      const pending = new Set(store.pendingEntries().map((e) => e.id));
+      for (const B of waiting) {
+        const list = carried(B, pending);
+        if (!list.length) continue;
+        carry.set(B, list);
+      }
+    }
     if (frame) {
       replayOps(frame.ops, frame.seq, before, next);
       checkpointWithin(1500);
     } else if (room && room.fresh) onEpoch(room, next);
-    else if (room && Array.isArray(room.moves)) {
-      for (const mv of room.moves) if (mv.seq > seq) replayOps(mv.ops, mv.seq, before, next);
-    } else if (room) {
+    else if (room && Array.isArray(room.moves)) replayMoves(room.moves, ev, before, next); else if (room) {
       const ids = new Set([...blocks.keys(), ...Object.keys(next?.blocks ?? {})]);
       for (const id of ids) {
         const B = ensure(id, next);
@@ -461,6 +537,7 @@ export function createPageBinding({ schema, store, lane, me, setTimer = setTimeo
       }
     }
     if (room) advance(room.seq);
+    if (carry.size) resend(carry, from);
     for (const B of blocks.values()) if (B.unechoed.length || B.refused) dirty.add(B.id);
     for (const opId of opBlock.keys()) if (!store.pendingEntries().some((e) => e.id === opId)) opBlock.delete(opId);
     queueMicrotask(releaseAll);
@@ -592,10 +669,10 @@ export function createPageBinding({ schema, store, lane, me, setTimer = setTimeo
         if (B.text && found.node.isTextblock && isText(S.t)) {
           const E = flatten(found.node.content);
           if (B.refused) {
-            let named = false;
-            for (const g of regions(E.c, S.c)) if (g.to > g.from && E.c.slice(g.from, g.to).trim()) { notice({ kind: "refused", id, lost: E.c.slice(g.from, g.to) }); named = true; }
+            const named = [];
+            for (const g of regions(E.c, S.c)) if (g.to > g.from && E.c.slice(g.from, g.to).trim()) { notice({ kind: "refused", id, lost: E.c.slice(g.from, g.to) }); named.push([g.from, g.to]); }
             // That text is in a notice already: the heal check never names it again.
-            if (named) B.heal.named();
+            if (named.length) B.heal.named(named);
           }
           const k = B.k;
           carets.set(id, (off) => mapCaret(B.r, me, k, off, E.c));

@@ -430,6 +430,40 @@ test("a hide save on the wire when the page closes tells the local room it lande
   window.dispatchEvent(new Event("pageshow"));
 });
 
+// Round 9 review, Opus 1 and 3, Astra 1: a save made out of the room names
+// this tab and its last frame, so the host's merge never replays those frames
+// over the file; a fast-mode capture names no frames.
+test("a store out of the room saves with live-by: this tab and the last frame it gave the store", async () => {
+  document.body.innerHTML = tag("by", '{"s":0}');
+  const by = live("by");
+  await flushAsync();
+  bridge.streamOpened({ clientId: "tab-1", lane: "live" });
+  await flushAsync();
+  await join({ by: { value: { s: 0 }, ephemeral: false, last: 0, landed: 0 } });
+  expect(by.status.mode).toBe("fast");
+  const inFast = new DOMParser().parseFromString(snapshot.captureForSaveAndComparison({ flushUndo: false }).forSave, "text/html").querySelector('script[merge="by"]');
+  expect(inFast.hasAttribute("live-by")).toBe(false);
+
+  const mock = global.fetch;
+  global.fetch = jest.fn(async (url, init = {}) => {
+    if (String(url).includes("/_/sync/") && (init.method || "GET") === "POST") {
+      return { ok: false, status: 503, json: async () => ({ code: "busy" }), headers: { get: (h) => (h.toLowerCase() === "retry-after" ? "60" : null) } };
+    }
+    return mock(url, init);
+  });
+  by.add("s", 1);
+  await wait(80);
+  await flushAsync();
+  global.fetch = mock;
+  expect(by.status.mode).toBe("file");
+  by.add("s", 1);
+
+  const saved = new DOMParser().parseFromString(snapshot.captureForSaveAndComparison({ flushUndo: false }).forSave, "text/html").querySelector('script[merge="by"]');
+  expect(saved.getAttribute("live-by")).toBe(`tab-1:${fastLane().framed("by")}`);
+  expect(fastLane().framed("by")).toBeGreaterThan(0);
+  expect(saved.textContent).toBe('{"s":2}');
+});
+
 test("a store whose lane stopped saves with the stamp of where it left", async () => {
   document.body.innerHTML = tag("st", '{"s":0}', stampOf("e1", 0, '{"s":0}'));
   const st = live("st");
@@ -461,3 +495,4 @@ test("a store whose lane stopped saves with the stamp of where it left", async (
   const saved = new DOMParser().parseFromString(body, "text/html").querySelector('script[merge="st"]');
   expect(saved.getAttribute("live-at")).toBe(stampOf(left.epoch, left.seq, serializeLive(storeOf("st").value)));
 });
+

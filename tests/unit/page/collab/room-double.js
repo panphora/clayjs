@@ -3,7 +3,7 @@
 // checkpoint), live-data-actions.js (rate bucket, error status), hey.js:1681
 // (64 KB body). Delivery: each client's stream is FIFO with its own latency;
 // a POST answer has an independent latency, so it can beat or trail the event.
-import { applyTracked, cloneJson, serializeLive, sizeChange, undoTracked, validateOp } from "../../../../src/live/ops.js";
+import { applyOp, applyTracked, checkOp, cloneJson, diffOps, serializeLive, sizeChange, undoTracked, validateOp } from "../../../../src/live/ops.js";
 
 export const LIMITS = { opsPerFrame: 128, storeBytes: 1024 * 1024, roomBytes: 2 * 1024 * 1024, logEntries: 4096, logBytes: 256 * 1024, bodyBytes: 64 * 1024 };
 export const RATE = { perSecond: 25, burst: 40 };
@@ -146,7 +146,7 @@ export function createRoom(sim, initialStores, { latency = () => 40, answerLaten
     room.seq += 1;
     store.last = room.seq;
     const logged = utf8(JSON.stringify(ops));
-    store.log.push({ seq: room.seq, ops, bytes: logged });
+    store.log.push({ seq: room.seq, ops, bytes: logged, from: clientId, n: frame.n });
     store.logBytes += logged;
     while (store.log.length > LIMITS.logEntries || store.logBytes > LIMITS.logBytes) {
       const gone = store.log.shift();
@@ -161,6 +161,38 @@ export function createRoom(sim, initialStores, { latency = () => 40, answerLaten
     for (const id of room.clients.keys()) deliver(id, "frame", data);
     return { status: 200, body: { seq: room.seq, epoch: room.epoch } };
   }
+
+  // A save of the file landed (live-data-rooms.js fileWritten): the file's
+  // value with the room's moves after its stamp replayed on top, less the
+  // saving tab's own frames through live-by's n, which the value holds. A
+  // changed value is logged as a diff and every tab gets the room's state
+  // (live-data-registry.js data-state); otherwise how far the file reaches
+  // goes out on a writer event. at: { epoch, seq } or null; by: { client, n } or null.
+  room.fileWritten = (name, fileValue, at = null, by = null) => {
+    const store = room.stores.get(name);
+    if (!store) return null;
+    const base = at && at.epoch === room.epoch && at.seq <= room.seq ? at.seq : store.landed;
+    const skip = by && at && at.epoch === room.epoch ? by : null;
+    let value = cloneJson(fileValue);
+    const entries = store.log.filter((e) => e.seq > base && !(skip && e.from === skip.client && e.n <= skip.n));
+    for (const e of entries) for (const op of e.ops) { try { checkOp(value, op); value = applyOp(value, op); } catch {} }
+    const changed = serializeLive(value) !== serializeLive(store.value);
+    if (changed) {
+      const ops = diffOps(store.value, value);
+      store.value = value;
+      store.bytes = bytes(value);
+      room.seq += 1;
+      store.last = room.seq;
+      const logged = utf8(JSON.stringify(ops));
+      store.log.push({ seq: room.seq, ops, bytes: logged, ...(skip && { from: skip.client, n: skip.n }) });
+      store.logBytes += logged;
+    }
+    store.landed = entries.length ? base : store.last;
+    room.merges = (room.merges || 0) + 1;
+    if (changed) for (const cid of room.clients.keys()) deliver(cid, "state", room.state(cid));
+    else for (const cid of room.clients.keys()) deliver(cid, "writer", { epoch: room.epoch, writer: room.writer, landed: { [name]: store.landed } });
+    return { changed, value: cloneJson(store.value) };
+  };
 
   // The harness marks a landed checkpoint save so `pressed` counts from there.
   room.land = (name, seq) => {
@@ -210,9 +242,15 @@ export function createRoom(sim, initialStores, { latency = () => 40, answerLaten
         sim.after(lat / 2, () => resolve({ retryAfter: 0, ...result }));
       });
     }),
+    // live-data-rooms.js state(): a tab's own read (since its { epoch, seq },
+    // or null for a first read) carries the moves after its seq in its own
+    // epoch, else this epoch's from 0. A number is a seq of this epoch.
     fetchState: (id, since) => new Promise((resolve) => {
       const lat = answerLatency(id);
-      sim.after(lat, () => resolve(room.state(id, since)));
+      sim.after(lat, () => {
+        const from = typeof since === "number" ? since : since && since.epoch === room.epoch && Number.isInteger(since.seq) ? since.seq : 0;
+        resolve(room.state(id, from));
+      });
     }),
   });
 

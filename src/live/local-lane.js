@@ -141,7 +141,10 @@ export function localTransport({ seed, key = "clay-live:" + window.location.path
 
   const landedIn = (m) => (m.behind || m.landed === null ? -1 : m.landed);
 
-  function roomState(since = null) {
+  // A client's own read (since is its { epoch, seq }, or null for a first read)
+  // carries moves, as the host's state() does: those after its seq in its own
+  // epoch, else this epoch's from its start. A broadcast passes no since.
+  function roomState(since) {
     const stores = {};
     const meta = {};
     for (const [name, m] of mirror.stores) {
@@ -149,9 +152,10 @@ export function localTransport({ seed, key = "clay-live:" + window.location.path
       meta[name] = { log: m.log, last: m.last, landed: m.landed, floor: m.floor, behind: m.behind, file: m.file, inFile: m.inFile };
     }
     const state = { epoch: room.epoch, seq: room.seq, writer: clientId, stores, mirror: { seen: [...mirror.seen], stores: meta } };
-    if (since && since.epoch === mirror.epoch) {
+    if (since !== undefined) {
+      const from = since && since.epoch === mirror.epoch && Number.isInteger(since.seq) ? since.seq : 0;
       const moves = {};
-      for (const [name, m] of mirror.stores) moves[name] = movesSince(m, since);
+      for (const [name, m] of mirror.stores) moves[name] = movesSince(m, { seq: from });
       state.moves = moves;
     }
     return state;

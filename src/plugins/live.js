@@ -296,9 +296,16 @@ onSnapshot((clone) => {
     // host merges a later write of the file from that position.
     if (entry.store.handle.status.mode === "fast" && fast) {
       tag.element.setAttribute("live-at", stampOf(fast.status.epoch, fast.status.seq, serializeLive(entry.store.authoritative)));
+      tag.element.removeAttribute("live-by");
     } else if (entry.leftAt) {
-      // Left the room: the value descends from the room position it left at.
+      // Left the room: the value descends from the room position it left at,
+      // and holds every frame this tab gave the store (live-by), landed or not:
+      // the host's merge never replays those over it.
       tag.element.setAttribute("live-at", stampOf(entry.leftAt.epoch, entry.leftAt.seq, serializeLive(entry.store.value)));
+      const n = fast?.framed(entry.store.name) ?? 0;
+      const client = fast?.status.clientId;
+      if (n > 0 && typeof client === "string") tag.element.setAttribute("live-by", `${client}:${n}`);
+      else tag.element.removeAttribute("live-by");
     }
   }
 });
@@ -420,6 +427,7 @@ export function receiveFrame(html, seq = null) {
     const text = tag.element.textContent;
     const entry = entries.get(name);
     const at = tag.element.getAttribute("live-at");
+    const by = tag.element.getAttribute("live-by");
     const pageTag = page.get(name)?.element;
     // The page's tag keeps the lineage of the version this tab last took, so a
     // file-mode save claims what it descends from.
@@ -427,6 +435,8 @@ export function receiveFrame(html, seq = null) {
     if (pageTag && (!entry || entry.store.handle.status.mode === "file")) {
       if (at === null) pageTag.removeAttribute("live-at");
       else if (pageTag.getAttribute("live-at") !== at) pageTag.setAttribute("live-at", at);
+      if (by === null) pageTag.removeAttribute("live-by");
+      else if (pageTag.getAttribute("live-by") !== by) pageTag.setAttribute("live-by", by);
     }
     if (entry && !entry.store.ephemeral) {
       if (entry.store.handle.status.mode === "file") receive(entry, text, "remote");

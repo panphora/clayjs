@@ -91,3 +91,44 @@ test("Opus 3: a write still on the wire at the loss stays in the editor and in s
   const out = await lostThenBusy(1010);
   expect(out).toEqual({ during: [kept, kept], room: "Start. hello world", view: "Start. hello world" });
 });
+
+// Round 9 review, Opus 2: the whole read after the busy minute is thrown away
+// (the stream reconnects during it, or a save's landed event comes in), and the
+// read that replaces it must still be whole.
+async function busyPeerWithEventDuringRead(during) {
+  const sim = new Sim(5), initial = engine.initial("Start.");
+  let aPosts = 0, slow = false;
+  const room = createRoom(sim, { page: copy(initial) }, { latency: () => 60, answerLatency: (id) => (slow && id === "a" ? 4000 : 40), refuse: (id) => (id === "a" && ++aPosts === 2 ? { status: 503, body: { code: "busy" }, retryAfter: 60 } : null) });
+  const a = engine.makeTab(sim, room, "a", copy(initial));
+  const b = engine.makeTab(sim, room, "b", copy(initial));
+  a.start(); b.start();
+  await sim.run(500);
+  sim.at(600, () => { a.caret = 6; a.type(" A1"); });
+  sim.at(1000, () => { a.type(" A2"); });
+  sim.at(2000, () => { b.caret = b.view.length; b.type(" B"); });
+  // b leaves once its write is in, so no other writer repairs the room for a.
+  await sim.run(30000);
+  const bView = b.view;
+  room.close("b");
+  close(b);
+  // a's retry reads at about 61 s; its answer takes 4 s.
+  sim.at(60500, () => { slow = true; });
+  sim.at(62000, () => { slow = false; during(room); });
+  await sim.run(120000);
+  await sim.idle(5000);
+  const out = { room: text(room), a: a.view, b: bView };
+  close(a);
+  return out;
+}
+
+test("Opus 2: a reconnect during the whole read leaves the next read whole, and the room and a end with A2 and B", async () => {
+  const out = await busyPeerWithEventDuringRead((room) => { room.close("a"); room.open("a"); });
+  expect(out).toEqual({ room: out.room, a: out.room, b: "Start. A1 B" });
+  for (const piece of [" A1", " A2", " B"]) expect(out.room.split(piece).length - 1).toBe(1);
+});
+
+test("Opus 2: a save's landed event during the whole read leaves the next read whole, and the room and a end with A2 and B", async () => {
+  const out = await busyPeerWithEventDuringRead((room) => { room.fileWritten("page", copy(room.stores.get("page").value), { epoch: room.epoch, seq: room.seq }); });
+  expect(out).toEqual({ room: out.room, a: out.room, b: "Start. A1 B" });
+  for (const piece of [" A1", " A2", " B"]) expect(out.room.split(piece).length - 1).toBe(1);
+});

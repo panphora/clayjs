@@ -899,7 +899,9 @@ test("a since below the log's floor leaves that store's moves null", async () =>
   expect(state.moves.game).toBeNull();
 });
 
-test("a read with no since carries no moves", async () => {
+// Round 9 review, Opus 7: the host's rule. A first read, and a read from
+// another epoch, carry this epoch's moves from its start.
+test("Opus 7: a first read, and a read from another epoch, carry the epoch's moves from 0", async () => {
   const a = tab({ game: { value: { score: 0 } } });
   await settle();
   const b = tab({ game: { value: { score: 0 } } });
@@ -907,8 +909,10 @@ test("a read with no since carries no moves", async () => {
   a.game.add("score", 1);
   await settle();
 
-  const pending = b.transport.fetchState(b.transport.clientId);
+  const first = b.transport.fetchState(b.transport.clientId);
   await settle();
-  const state = await pending;
-  expect("moves" in state).toBe(false);
+  expect((await first).moves.game.map((move) => move.seq)).toEqual([1]);
+  const other = b.transport.fetchState(b.transport.clientId, { epoch: "an-older-room", seq: 1 });
+  await settle();
+  expect((await other).moves.game.map((move) => move.seq)).toEqual([1]);
 });
