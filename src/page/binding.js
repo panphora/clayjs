@@ -328,10 +328,17 @@ export function createPageBinding({ schema, store, lane, me, setTimer = setTimeo
       if (trs.every(insideTextblocks)) return null;
       const had = new Set();
       old.doc.forEach((node) => had.add(node.attrs.id));
+      const renamed = new Map();
+      next.doc.forEach((node) => {
+        const id = node.attrs.id;
+        if (id && !had.has(id) && tombOf(store.value, id)) renamed.set(id, newId("b"));
+      });
+      if (!renamed.size) return null;
       const tr = next.tr;
       next.doc.forEach((node, offset) => {
-        const id = node.attrs.id;
-        if (id && !had.has(id) && tombOf(store.value, id)) tr.setNodeMarkup(offset, null, { ...node.attrs, id: newId("b") });
+        const id = renamed.get(node.attrs.id);
+        const parent = renamed.get(node.attrs.parent);
+        if (id || parent) tr.setNodeMarkup(offset, null, { ...node.attrs, ...(id ? { id } : {}), ...(parent ? { parent } : {}) });
       });
       return tr.docChanged ? tr : null;
     },

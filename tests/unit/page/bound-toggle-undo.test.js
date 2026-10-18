@@ -41,10 +41,9 @@ async function setup() {
   return { sim, room, a, b };
 }
 
-// Expected to fail until S1 fixes the binding's re-id of a restored block
-// (binding.js). test.failing passes while the bug exists; when S1's fix lands
-// it fails, and S1 turns it into a plain test.
-test.failing("a toggle with a body deleted and undone is whole again in both tabs and in the record", async () => {
+// S1 fixed the binding's re-id of a restored block (binding.js): a block
+// whose parent was renamed follows the rename.
+test("a toggle with a body deleted and undone is whole again in both tabs and in the record", async () => {
   const { sim, room, a, b } = await setup();
   try {
     const ed = a.editor;
