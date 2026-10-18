@@ -9,6 +9,7 @@ import { outline } from "./blocks.js";
 import { newId } from "./model.js";
 import { asStep } from "./blocksel.js";
 import { announce } from "./announce.js";
+import { safeHref } from "./link.js";
 
 const { Plugin, PluginKey } = state;
 const { Decoration, DecorationSet } = pmView;
@@ -295,4 +296,151 @@ export function pickFiles(view, accept, place) {
   rt.input.accept = accept;
   rt.input.click();
   return true;
+}
+
+const MIN_WIDTH = 48;
+
+export class ImageView {
+  constructor(node, view, getPos) {
+    this.node = node;
+    this.view = view;
+    this.getPos = getPos;
+    const doc = view.dom.ownerDocument;
+    this.dom = doc.createElement("figure");
+    this.dom.className = "page-image";
+    this.dom.draggable = false;
+    this.frame = doc.createElement("div");
+    this.frame.className = "page-image-frame";
+    this.img = doc.createElement("img");
+    this.img.draggable = false;
+    this.img.addEventListener("error", () => this.dom.toggleAttribute("data-broken", true));
+    this.img.addEventListener("load", () => this.dom.removeAttribute("data-broken"));
+    this.handle = doc.createElement("span");
+    this.handle.className = "page-image-handle";
+    this.handle.setAttribute("aria-hidden", "true");
+    this.handle.addEventListener("pointerdown", (e) => this.resize(e));
+    this.frame.append(this.img, this.handle);
+    this.caption = doc.createElement("figcaption");
+    this.caption.className = "page-image-caption";
+    this.caption.contentEditable = "plaintext-only";
+    this.caption.setAttribute("aria-label", "Caption");
+    this.caption.dataset.placeholder = "Add a caption";
+    this.caption.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); this.commitCaption(); this.view.focus(); }
+      if (e.key === "Escape") { e.preventDefault(); this.caption.textContent = this.node.attrs.caption; this.view.focus(); }
+    });
+    this.caption.addEventListener("blur", () => this.commitCaption());
+    this.caption.addEventListener("input", () => this.caption.toggleAttribute("data-empty", !this.caption.textContent));
+    this.dom.append(this.frame, this.caption);
+    this.render(node);
+  }
+
+  render(node) {
+    this.node = node;
+    this.dom.dataset.id = node.attrs.id ?? "";
+    if (this.img.getAttribute("src") !== node.attrs.src) this.img.src = node.attrs.src;
+    this.img.alt = node.attrs.alt || "";
+    this.frame.style.width = node.attrs.width ? `${node.attrs.width}px` : "";
+    if (this.dom.ownerDocument.activeElement !== this.caption) this.caption.textContent = node.attrs.caption || "";
+    this.caption.toggleAttribute("data-empty", !node.attrs.caption);
+  }
+
+  update(node) {
+    if (node.type !== this.node.type) return false;
+    this.render(node);
+    return true;
+  }
+
+  commitCaption() {
+    const text = this.caption.textContent.replace(/\s+/g, " ").trim();
+    const pos = this.getPos();
+    if (pos == null || text === (this.node.attrs.caption || "")) return;
+    this.view.dispatch(asStep(this.view.state.tr.setNodeMarkup(pos, null, { ...this.node.attrs, caption: text })));
+  }
+
+  resize(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    const col = this.view.dom.getBoundingClientRect().width;
+    const start = this.frame.getBoundingClientRect().width;
+    const rtl = this.dom.ownerDocument.defaultView.getComputedStyle(this.dom).direction === "rtl";
+    const x0 = event.clientX;
+    const target = event.currentTarget;
+    target.setPointerCapture?.(event.pointerId);
+    let width = this.node.attrs.width;
+    const move = (e) => {
+      const dx = (e.clientX - x0) * (rtl ? -1 : 1);
+      width = Math.max(MIN_WIDTH, Math.min(Math.floor(col) || MIN_WIDTH, Math.round(start + dx)));
+      this.frame.style.width = `${width}px`;
+    };
+    const done = (commit) => {
+      target.removeEventListener("pointermove", move);
+      target.removeEventListener("pointerup", up);
+      target.removeEventListener("pointercancel", cancel);
+      const pos = this.getPos();
+      if (commit && pos != null && width !== this.node.attrs.width) this.view.dispatch(asStep(this.view.state.tr.setNodeMarkup(pos, null, { ...this.node.attrs, width })));
+      else this.frame.style.width = this.node.attrs.width ? `${this.node.attrs.width}px` : "";
+    };
+    const up = () => done(true);
+    const cancel = () => done(false);
+    target.addEventListener("pointermove", move);
+    target.addEventListener("pointerup", up);
+    target.addEventListener("pointercancel", cancel);
+  }
+
+  selectNode() { this.dom.classList.add("is-selected"); }
+  deselectNode() { this.dom.classList.remove("is-selected"); }
+  stopEvent(event) { return this.caption.contains(event.target) || event.target.classList?.contains("page-image-handle"); }
+  ignoreMutation() { return true; }
+}
+
+const sizeLabel = (bytes) => {
+  if (bytes == null) return "";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+};
+
+export class FileView {
+  constructor(node, view) {
+    this.node = node;
+    const doc = view.dom.ownerDocument;
+    this.dom = doc.createElement("div");
+    this.dom.className = "page-file";
+    this.link = doc.createElement("a");
+    this.link.className = "page-file-link";
+    this.link.target = "_blank";
+    this.link.rel = "noopener noreferrer";
+    this.icon = doc.createElement("span");
+    this.icon.className = "page-file-icon";
+    this.icon.textContent = "⎘";
+    this.name = doc.createElement("span");
+    this.name.className = "page-file-name";
+    this.meta = doc.createElement("span");
+    this.meta.className = "page-file-meta";
+    this.link.append(this.icon, this.name, this.meta);
+    this.dom.append(this.link);
+    this.render(node);
+  }
+
+  render(node) {
+    this.node = node;
+    this.dom.dataset.id = node.attrs.id ?? "";
+    const href = safeHref(node.attrs.src);
+    if (href) this.link.setAttribute("href", href);
+    else this.link.removeAttribute("href");
+    this.name.textContent = node.attrs.name || "file";
+    this.meta.textContent = sizeLabel(node.attrs.size);
+  }
+
+  update(node) {
+    if (node.type !== this.node.type) return false;
+    this.render(node);
+    return true;
+  }
+
+  selectNode() { this.dom.classList.add("is-selected"); }
+  deselectNode() { this.dom.classList.remove("is-selected"); }
+  stopEvent(event) { return this.link.contains(event.target); }
+  ignoreMutation() { return true; }
 }

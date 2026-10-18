@@ -14,7 +14,7 @@ import { chromePlugin } from "./chrome.js";
 import { linkPlugin } from "./link.js";
 import { blockSelectionPlugin } from "./blocksel.js";
 import { markdownPlugin, backspaceToParagraph } from "./markdown.js";
-import { mediaPlugin } from "./media.js";
+import { mediaPlugin, ImageView, FileView } from "./media.js";
 
 const STYLE_ID = "page-editor-style";
 const INDENTS = [1, 2, 3, 4, 5, 6, 7, 8];
@@ -116,6 +116,18 @@ ${INDENTS.map((n) => `.page-editor .page-li[data-indent="${n}"] { --li-indent: $
 .page-link-btn { display: inline-grid; place-items: center; min-width: 30px; height: 30px; padding: 0 6px; border: 0; border-radius: 6px; background: none; color: inherit; font: inherit; cursor: pointer; }
 .page-link-btn:hover { background: var(--page-pop-hover); }
 .page-live { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.page-editor .page-image { margin-inline: 0; }
+.page-image-frame { position: relative; margin: 0 auto; max-width: 100%; }
+.page-image-frame img { display: block; width: 100%; height: auto; border-radius: var(--page-image-radius, 6px); }
+.page-image[data-broken] .page-image-frame { min-height: 80px; background: var(--page-code-bg); border-radius: var(--page-image-radius, 6px); }
+.page-image-handle { position: absolute; top: 50%; inset-inline-end: 6px; width: 6px; height: 36px; margin-top: -18px; border-radius: 3px; background: var(--page-chrome-ink-moved); opacity: 0; cursor: ew-resize; touch-action: none; transition: opacity var(--page-fade); }
+.page-image:hover .page-image-handle, .page-image.is-selected .page-image-handle { opacity: 1; }
+.page-image.is-selected .page-image-frame img { outline: 2px solid var(--page-selection); outline-offset: 2px; }
+.page-image-caption { margin-top: 6px; color: var(--page-ink-soft); font-size: 0.88em; text-align: center; outline: none; }
+.page-image-caption[data-empty]::before { content: attr(data-placeholder); color: var(--page-ink-faint); }
+.page-image:not(.is-selected) .page-image-caption[data-empty]:not(:focus) { display: none; }
+.page-file-link { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border: 1px solid var(--page-rule); border-radius: 8px; color: var(--page-ink); text-decoration: none; }
+.page-file-meta { margin-inline-start: auto; color: var(--page-ink-faint); font-size: 0.88em; }
 .page-upload { display: flex; align-items: center; gap: 10px; margin: var(--page-block-gap) 0; padding: 8px 12px; border: 1px dashed var(--page-rule); border-radius: 8px; color: var(--page-ink-soft); font-size: 0.88em; }
 .page-upload-preview { width: 40px; height: 40px; object-fit: cover; border-radius: 4px; opacity: 0.6; }
 .page-upload-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -139,9 +151,11 @@ ${INDENTS.map((n) => `.page-editor .page-li[data-indent="${n}"] { --li-indent: $
   .page-link { position: fixed; left: 0; right: 0; top: auto; bottom: 0; max-width: none; padding: 8px 16px calc(8px + env(safe-area-inset-bottom)); border-radius: 0; border-width: 1px 0 0; }
   .page-link-input { min-width: 0; height: 44px; font-size: 16px; }
   .page-link-btn, .page-upload-btn { min-width: 44px; height: 44px; }
+  .page-image-frame { width: 100% !important; }
+  .page-image-handle { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .page-dock, .page-plus, .page-toggle-button, .page-upload-bar > span { transition: none; }
+  .page-dock, .page-plus, .page-toggle-button, .page-image-handle, .page-upload-bar > span { transition: none; }
 }
 }
 `;
@@ -229,6 +243,10 @@ export function createPageEditor(mount, { blocks = null, onChange = null, upload
   const view = new pmView.EditorView(shell, {
     state: pageState(blocks, { upload }),
     attributes: { class: "page-editor" },
+    nodeViews: {
+      image: (node, v, getPos) => new ImageView(node, v, getPos),
+      file: (node, v) => new FileView(node, v),
+    },
     handleDOMEvents: { mousedown: checkboxClick },
     dispatchTransaction(tr) {
       if (afterStep && tr.docChanged && !tr.getMeta(STEP)) history.closeHistory(tr);
