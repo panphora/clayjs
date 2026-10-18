@@ -124,3 +124,45 @@ for (const [label, move] of [
     if (label.startsWith("a real move")) expect(after.room).toEqual(["q", "p"]);
   });
 }
+
+for (const release of ['watchdog', 'transaction', 'release']) {
+  test(`Astra 5 composition-no-end: real mousedown releases the move via ${release}`, async () => {
+    const { sim, room, a, b, done } = setup();
+    await sim.run(500);
+    caretAt(a, 'p', 6);
+    a.compose(true);
+    a.input(' 日本');
+    const pElement = a.editor.dom.children[0];
+    const f = find(b.editor.state.doc, 'q');
+    b.editor.dispatch(b.editor.state.tr.delete(f.pos, f.pos + f.node.nodeSize).insert(0, f.node));
+    await sim.run(2000);
+    expect(order(a)).toEqual(['p', 'q']);
+    expect(a.editor.dom.children[0]).toBe(pElement);
+    a.editor.posAtCoords = () => null;
+    a.editor.dom.dispatchEvent(new window.MouseEvent('mousedown', { bubbles: true }));
+    expect(a.editor.composing).toBe(false);
+    if (release === 'transaction') a.editor.dispatch(a.editor.state.tr.setMeta('probe', true));
+    if (release === 'release') a.binding.writerChanged();
+    await sim.run(release === 'watchdog' ? 6000 : 2100);
+    expect(order(a)).toEqual(roomOrder(room));
+    expect(order(a)).toEqual(['q', 'p']);
+    expect(textOf(a, 'p')).toBe('Start. 日本');
+    expect(pendingIds().includes('page:held')).toBe(false);
+    expect([...a.allNotices(), ...b.allNotices()]).toEqual([]);
+    done();
+  });
+}
+
+test('the watchdog never releases an editor that is still composing', async () => {
+  const { sim, a, b, done } = setup();
+  await sim.run(500);
+  caretAt(a, 'p', 6);
+  a.compose(true);
+  const f = find(b.editor.state.doc, 'q');
+  b.editor.dispatch(b.editor.state.tr.delete(f.pos, f.pos + f.node.nodeSize).insert(0, f.node));
+  await sim.run(16000);
+  expect(a.editor.composing).toBe(true);
+  expect(order(a)).toEqual(['p', 'q']);
+  expect(pendingIds().includes('page:held')).toBe(true);
+  done();
+});

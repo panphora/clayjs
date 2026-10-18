@@ -213,6 +213,23 @@ export function createPageBinding({ schema, store, lane, me, setTimer = setTimeo
   // (that block's id), or the whole page ("*") when the head is in no block or
   // the composition moves to another block; null when none is open.
   let composing = null;
+  let compositionTimer = null;
+  function reconcileComposition() {
+    if (composing === null || !view || view.composing) return false;
+    composing = null;
+    clearTimer(compositionTimer);
+    compositionTimer = null;
+    return true;
+  }
+  function watchComposition() {
+    clearTimer(compositionTimer);
+    compositionTimer = setTimer(() => {
+      compositionTimer = null;
+      if (!view || composing === null) return;
+      if (reconcileComposition()) releaseAll();
+      else watchComposition();
+    }, 5000);
+  }
   const holds = (id) => composing === "*" || (composing !== null && composing === id);
   const headBlock = (v) => {
     const sel = v.state.selection;
@@ -294,8 +311,14 @@ export function createPageBinding({ schema, store, lane, me, setTimer = setTimeo
     // a block too, before it knows the drop is a move.
     props: {
       handleDOMEvents: {
-        compositionstart(v) { composing = headBlock(v); return false; },
-        compositionend() { composing = null; setTimer(releaseAll, 0); return false; },
+        compositionstart(v) { composing = headBlock(v); watchComposition(); return false; },
+        compositionend() {
+          composing = null;
+          clearTimer(compositionTimer);
+          compositionTimer = null;
+          setTimer(releaseAll, 0);
+          return false;
+        },
       },
     },
     // A block that comes back under its tombstone's id (undo of a delete, a
@@ -320,9 +343,11 @@ export function createPageBinding({ schema, store, lane, me, setTimer = setTimeo
     const prev = view.state;
     const { state, transactions } = prev.applyTransaction(tr);
     view.updateState(state);
+    const compositionEnded = reconcileComposition();
     if (composing !== null && composing !== "*" && headBlock(view) !== composing) composing = "*";
     const local = transactions.filter((t) => !t.getMeta(REMOTE));
     if (local.some((t) => t.docChanged) && !transactions.some((t) => t.getMeta(REMOTE))) commit(prev.doc, state.doc, local);
+    if (compositionEnded) queueMicrotask(releaseAll);
   }
 
   function commit(prevDoc, nextDoc, trs) {
@@ -681,6 +706,7 @@ export function createPageBinding({ schema, store, lane, me, setTimer = setTimeo
 
   // Show every changed block whose writes have all landed, in one transaction.
   function releaseAll() {
+    reconcileComposition();
     if (!view || composing === "*" || (composing === null && view.composing)) return;
     const held = heldIds();
     if (held.has("*")) return;
@@ -918,6 +944,9 @@ export function createPageBinding({ schema, store, lane, me, setTimer = setTimeo
       return [...out, ...own];
     },
     dispose() {
+      clearTimer(compositionTimer);
+      compositionTimer = null;
+      composing = null;
       unsaved.dispose();
       unsavedHeld.dispose();
       for (const B of blocks.values()) { clearTimer(B.timer); B.heal?.dispose(); }
