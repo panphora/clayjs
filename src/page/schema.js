@@ -83,6 +83,13 @@ export const schema = new model.Schema({
       attrs: { ...block, src: { default: "" }, alt: { default: "" }, caption: { default: "" }, width: { default: null } },
       toDOM: (n) => ["figure", ref(n), ["img", { src: n.attrs.src, alt: n.attrs.alt }], ["figcaption", n.attrs.caption]],
     },
+    file: {
+      group: "block",
+      atom: true,
+      attrs: { ...block, src: { default: "" }, name: { default: "" }, size: { default: null }, mime: { default: null } },
+      toDOM: (n) => ["div", ref(n, { class: "page-file", "data-type": "file", "data-src": n.attrs.src, "data-name": n.attrs.name, "data-size": n.attrs.size == null ? "" : String(n.attrs.size), "data-mime": n.attrs.mime ?? "" }),
+        ["a", { href: n.attrs.src, target: "_blank", rel: "noopener noreferrer" }, n.attrs.name || "file"]],
+    },
     table: {
       group: "block",
       content: "table_row+",

@@ -25,6 +25,7 @@ export const DEFAULTS = {
   toggle: { parent: null, open: false },
   divider: { parent: null },
   image: { parent: null, src: "", alt: "", caption: "", width: null },
+  file: { parent: null, src: "", name: "", size: null, mime: null },
   table: { parent: null, cols: {}, sort: null },
   chart: { parent: null, source: null, kind: "line", x: null, series: [], title: "", highlight: null },
   board: { parent: null, columns: {}, cards: {} },
@@ -327,6 +328,10 @@ function renderLeaf(item, clean) {
     case "code_block": return `<pre${id}${attr("data-lang", item.lang || null)}><code>${escText(item.c ?? "")}</code></pre>`;
     case "divider": return `<hr${id}>`;
     case "image": return `<figure${id} data-type="image"><img${attr("src", item.src ?? "")}${attr("alt", item.alt ?? "")}${attr("width", item.width ?? null)}>${item.caption ? `<figcaption>${escText(item.caption)}</figcaption>` : ""}</figure>`;
+    case "file": {
+      const href = /^(https?:\/\/|\/(?!\/))/i.test(item.src ?? "") ? item.src : null;
+      return `<div${id} data-type="file"${attr("data-src", item.src ?? "")}${attr("data-name", item.name ?? "")}${attr("data-size", item.size ?? null)}${attr("data-mime", item.mime ?? null)}><a${attr("href", href)} rel="noopener noreferrer">${escText(item.name || "file")}</a></div>`;
+    }
     case "table": {
       const head = item.cols.map((c) => `<th${attr("data-col", c.id)}${attr("data-kind", c.kind ?? null)}>${escText(c.name)}</th>`).join("");
       const body = item.rows.map((r) => `<tr${attr("data-id", r.id)}>${item.cols.map((c) => `<td>${escText(r.cells[c.id] ?? "")}</td>`).join("")}</tr>`).join("\n");
@@ -522,6 +527,10 @@ export function parseArticle(article) {
       let series = [];
       try { series = JSON.parse(d("series") || "[]"); } catch {}
       return push(el, "chart", parent, omitDefaults("chart", { ...P, source: d("source"), kind: d("kind") || "line", x: d("x"), series, title: text(el.querySelector(":scope > figcaption")), highlight: d("highlight") }));
+    }
+    if (tag === "DIV" && el.getAttribute("data-type") === "file") {
+      const size = el.getAttribute("data-size");
+      return push(el, "file", parent, omitDefaults("file", { ...P, src: el.getAttribute("data-src") || "", name: el.getAttribute("data-name") || "", size: size === null || size === "" || !Number.isFinite(+size) ? null : +size, mime: el.getAttribute("data-mime") || null }));
     }
     const img = tag === "IMG" ? el : (tag === "FIGURE" || onlyImage) ? el.querySelector(":scope > img") : null;
     if (img) {

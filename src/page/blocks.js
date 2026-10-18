@@ -5,7 +5,7 @@
 import { model, state, view as pmView, commands, history } from "../vendor/prosemirror.vendor.js";
 import { schema } from "./schema.js";
 import { REMOTE, newId } from "./model.js";
-import { safeHref } from "./link.js";
+import { safeHref, safeSrc } from "./link.js";
 
 const { Plugin, PluginKey, TextSelection, NodeSelection, Selection } = state;
 const N = schema.nodes;
@@ -927,6 +927,18 @@ export const clipboardParser = new model.DOMParser(schema, [
   { tag: "pre", node: "code_block", preserveWhitespace: "full", getAttrs: (d) => ({ parent: parentAttr(d) }) },
   { tag: "hr", node: "divider", getAttrs: (d) => ({ parent: parentAttr(d) }) },
   { tag: "aside.page-callout", node: "callout", getAttrs: (d) => ({ parent: parentAttr(d) }) },
+  { tag: "figure:not([data-type])", node: "image", getAttrs: (d) => {
+    const img = d.querySelector("img"), src = safeSrc(img?.getAttribute("src"));
+    return src ? { src, alt: img.getAttribute("alt") || "", caption: d.querySelector("figcaption")?.textContent || "", width: +d.getAttribute("data-width") || null, parent: parentAttr(d) } : false;
+  } },
+  { tag: "img[src]", node: "image", getAttrs: (d) => {
+    const src = safeSrc(d.getAttribute("src"));
+    return src ? { src, alt: d.getAttribute("alt") || "", parent: parentAttr(d) } : false;
+  } },
+  { tag: "div.page-file", node: "file", getAttrs: (d) => {
+    const src = safeHref(d.getAttribute("data-src"));
+    return src ? { src, name: d.getAttribute("data-name") || "file", size: +d.getAttribute("data-size") || null, mime: d.getAttribute("data-mime") || null, parent: parentAttr(d) } : false;
+  } },
   { tag: "p", node: "paragraph", getAttrs: (d) => ({ parent: parentAttr(d) }) },
   { tag: "br", node: "hard_break" },
   { tag: "strong", mark: "strong" },
@@ -986,6 +998,7 @@ class ClipboardSerializer extends model.DOMSerializer {
       if (!dom || dom.nodeType !== 1) return;
       if (parentOf(n) !== null) dom.setAttribute("data-page-parent", parentOf(n));
       if (isToggle(n) && n.attrs.id) dom.setAttribute("data-page-toggle", n.attrs.id);
+      if (n.type === N.image && n.attrs.width) dom.setAttribute("data-width", String(n.attrs.width));
     });
     return out;
   }
