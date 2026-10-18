@@ -170,21 +170,36 @@ const boundary = (doc, pos, side) => {
   if ($p.depth === 0) return $p.pos;
   return side < 0 ? $p.before(1) : $p.after(1);
 };
-const rootStarts = (doc, from, to) => { const r = []; doc.nodesBetween(from, to, (n, pos) => { r.push(pos); return false; }); return r; };
+const blockRef = (e) => ({ id: e.node.attrs.id, at: e.at, node: e.node });
+const matchesRef = (e, ref) => ref.id ? e.node.attrs.id === ref.id : e.at === ref.at && e.node.type === ref.node.type && e.node.content.eq(ref.node.content);
+
+export function captureSpan(ents, lo, hi) {
+  const roots = [];
+  for (let i = lo; i <= hi; i = ents[i].subEnd + 1) roots.push(blockRef(ents[i]));
+  return { roots, members: ents.slice(lo, hi + 1).map(blockRef) };
+}
+
+export function resolveSpan(ents, span) {
+  const roots = span.roots.map((ref) => ents.findIndex((e) => matchesRef(e, ref))).filter((i) => i >= 0);
+  if (!roots.length || roots.some((i) => ents[i].hidden)) return null;
+  const lo = roots[0], up = ents[lo].up;
+  let hi = ents[lo].subEnd;
+  for (const i of roots.slice(1)) {
+    if (i !== hi + 1 || ents[i].up !== up) return null;
+    hi = ents[i].subEnd;
+  }
+  if (ents.slice(lo, hi + 1).some((e) => !span.members.some((ref) => matchesRef(e, ref)))) return null;
+  return { lo, hi };
+}
+
+const mapSpan = (span, mapping) => {
+  const map = (ref) => ({ ...ref, at: mapping.map(ref.at, 1) });
+  return { roots: span.roots.map(map), members: span.members.map(map) };
+};
 
 export class BlockSelection extends Selection {
-  // A block landing at an edge stays outside the selection. A block landing
-  // between two selected blocks ends it: the selection never grows to include
-  // what someone else inserted, it falls back to a caret in the first block.
-  // A block is one of ours when it starts where one of our blocks' starts maps to.
   map(doc, mapping) {
-    const fwd = this.anchor <= this.head;
-    const a = boundary(doc, mapping.map(this.anchor, fwd ? 1 : -1), fwd ? -1 : 1);
-    const h = boundary(doc, mapping.map(this.head, fwd ? -1 : 1), fwd ? 1 : -1);
-    const from = Math.min(a, h), to = Math.max(a, h);
-    const kept = rootStarts(this.$from.doc, this.from, this.to).map((pos) => mapping.map(pos, 1));
-    if (from === to || rootStarts(doc, from, to).some((pos) => !kept.includes(pos))) return Selection.near(doc.resolve(from));
-    return new BlockSelection(doc.resolve(a), doc.resolve(h));
+    return this.getBookmark().map(mapping).resolve(doc);
   }
   eq(other) {
     return other instanceof BlockSelection && other.anchor === this.anchor && other.head === this.head;
@@ -196,7 +211,8 @@ export class BlockSelection extends Selection {
     return new BlockSelection(doc.resolve(json.anchor), doc.resolve(json.head));
   }
   getBookmark() {
-    return new BlockBookmark(this.anchor, this.head);
+    const { lo, hi } = this.span();
+    return new BlockBookmark(this.anchor, this.head, captureSpan(outline(this.$from.doc), lo, hi));
   }
   span(doc = this.$from.doc) {
     return { lo: doc.resolve(this.from).index(0), hi: doc.resolve(this.to).index(0) - 1 };
@@ -206,15 +222,19 @@ BlockSelection.prototype.visible = false;
 Selection.jsonID("page-block", BlockSelection);
 
 class BlockBookmark {
-  constructor(anchor, head) { this.anchor = anchor; this.head = head; }
+  constructor(anchor, head, span) { this.anchor = anchor; this.head = head; this.span = span; }
   map(mapping) {
     const fwd = this.anchor <= this.head;
-    return new BlockBookmark(mapping.map(this.anchor, fwd ? 1 : -1), mapping.map(this.head, fwd ? -1 : 1));
+    return new BlockBookmark(mapping.map(this.anchor, fwd ? 1 : -1), mapping.map(this.head, fwd ? -1 : 1), mapSpan(this.span, mapping));
   }
   resolve(doc) {
-    const fwd = this.anchor <= this.head;
-    const a = boundary(doc, this.anchor, fwd ? -1 : 1), h = boundary(doc, this.head, fwd ? 1 : -1);
-    return a === h ? Selection.near(doc.resolve(a)) : new BlockSelection(doc.resolve(a), doc.resolve(h));
+    const ents = outline(doc), span = resolveSpan(ents, this.span);
+    if (!span) {
+      const first = ents.find((e) => matchesRef(e, this.span.roots[0]));
+      return Selection.near(doc.resolve(first?.at ?? boundary(doc, Math.min(this.anchor, this.head), -1)));
+    }
+    const from = ents[span.lo].at, to = ents[span.hi].end;
+    return this.anchor <= this.head ? new BlockSelection(doc.resolve(from), doc.resolve(to)) : new BlockSelection(doc.resolve(to), doc.resolve(from));
   }
 }
 

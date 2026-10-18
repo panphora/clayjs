@@ -133,7 +133,6 @@ export function exitToText(st, dispatch) {
 }
 
 export function selectAllBlocks(st, dispatch) {
-  if (st.selection instanceof BlockSelection) return false;
   const { $from, $to } = st.selection;
   const one = $from.depth === 1 && $from.sameParent($to);
   const whole = one && $from.parentOffset === 0 && $to.parentOffset === $to.parent.content.size;
@@ -151,8 +150,14 @@ export const typeIntoBlocks = (view, text) => {
   const ents = outline(st.doc);
   const { lo, hi } = sel.span(st.doc);
   const at = endOfFirstText(st.doc, ents, lo, hi);
-  if (at < 0) return true;
-  const tr = st.tr.setSelection(TextSelection.create(st.doc, at)).insertText(text);
+  const tr = st.tr;
+  if (at < 0) {
+    const to = ents[hi].end;
+    tr.insert(to, N.paragraph.create({ parent: ents[lo].node.attrs.parent ?? null }));
+    tr.setSelection(TextSelection.create(tr.doc, to + 1));
+    asStep(tr);
+  } else tr.setSelection(TextSelection.create(tr.doc, at));
+  tr.insertText(text);
   view.dispatch(tr.scrollIntoView());
   return true;
 };
@@ -164,7 +169,6 @@ const leaveSummaryDown = (st, dispatch, view) => {
   if ($a.depth !== 1 || $a.parent.type !== N.toggle || $a.parent.attrs.open || $a.index(0) !== $h.index(0)) return false;
   const ents = outline(st.doc);
   const i = $a.index(0);
-  if (ents[i].subEnd === i) return false;
   const j = visibleIdx(ents, ents[i].subEnd + 1, 1);
   if (j < 0) return false;
   if (dispatch) dispatch(st.tr.setSelection(selectBlocks(st.doc, i, j, ents)).scrollIntoView());
@@ -181,6 +185,8 @@ export const blockSelKeys = {
   "Shift-ArrowUp": extendBlock(-1),
   "Shift-ArrowDown": (st, d, v) => extendBlock(1)(st, d) || leaveSummaryDown(st, d, v),
   Backspace: deleteBlocks,
+  "Alt-Backspace": deleteBlocks,
+  "Ctrl-h": deleteBlocks,
   Delete: deleteBlocks,
   "Mod-d": duplicateBlocks,
   "Mod-a": selectAllBlocks,
@@ -228,7 +234,7 @@ export function blockSelectionPlugin() {
           const ents = outline(view.state.doc);
           const j = Math.min(view.state.doc.resolve(hit.inside >= 0 ? hit.inside : hit.pos).index(0), ents.length - 1);
           const { lo, hi } = sel.span(view.state.doc);
-          const anchorIdx = sel.anchor <= sel.head ? lo : hi;
+          const anchorIdx = sel.anchor <= sel.head ? lo : rootAt(ents, lo, hi, 1);
           event.preventDefault();
           view.dispatch(view.state.tr.setSelection(selectBlocks(view.state.doc, anchorIdx, j, ents)));
           return true;

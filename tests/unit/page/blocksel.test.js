@@ -213,11 +213,14 @@ describe("the plugin in a real view", () => {
     expect(v.state.selection.$head.parent.attrs.id).toBe("b");
   });
 
-  test("typing over selected blocks that have no text block inserts nothing", () => {
+  test("F12 typing over atom blocks inserts a paragraph after the span", () => {
     const v = editor([["a", "paragraph", "A"], ["d", "divider", ""]]);
     v.dispatch(v.state.tr.setSelection(S.selectBlocks(v.state.doc, 1)));
     expect(typeText(v, "x")).toBe(true);
-    expect(v.state.doc.textContent).toBe("A");
+    expect(v.state.doc.textContent).toBe("Ax");
+    expect(v.state.doc.child(1).type.name).toBe("divider");
+    expect(v.state.doc.child(2).type.name).toBe("paragraph");
+    expect(v.state.selection.$head.index(0)).toBe(2);
   });
 
   test("Backspace deletes the blocks and Mod+Z restores them with the block selection", () => {
@@ -299,13 +302,15 @@ describe("Shift+Down from a closed toggle's summary", () => {
     expect(back.doc.childCount).toBe(5);
   });
 
-  test("does nothing when the caret is not at the last line, the toggle is open, has no body, or is the last block", () => {
+  test("does nothing when the caret is not at the last line, the toggle is open, or is the last block", () => {
     const cmd = S.blockSelKeys["Shift-ArrowDown"];
     expect(cmd(inSummary(), null, { endOfTextblock: () => false })).toBe(false);
     const open = caret(make([["t", "toggle", "T", { open: true }], ["b1", "paragraph", "b1", { parent: "t" }], ["z", "paragraph", "Z"]]), "t", 1);
     expect(cmd(open, null, view)).toBe(false);
     const empty = caret(make([["t", "toggle", "T", { open: false }], ["z", "paragraph", "Z"]]), "t", 1);
-    expect(cmd(empty, null, view)).toBe(false);
+    let out = empty;
+    expect(cmd(empty, (tr) => { out = empty.apply(tr); }, view)).toBe(true);
+    expect(spanIds(out)).toEqual(["t", "z"]);
     const last = caret(make([["p", "paragraph", "P"], ["t", "toggle", "T", { open: false }], ["b1", "paragraph", "b1", { parent: "t" }]]), "t", 1);
     expect(cmd(last, null, view)).toBe(false);
   });
@@ -323,5 +328,91 @@ describe("Shift+Down from a closed toggle's summary", () => {
     const s = make(TOGGLE);
     const across = s.apply(s.tr.setSelection(TextSelection.create(s.doc, 2, B.outline(s.doc)[1].at + 2)));
     expect(S.blockSelKeys["Shift-ArrowDown"](across, null, view)).toBe(false);
+  });
+});
+
+describe("review regressions", () => {
+  test("F1 appended remote children clear whole-subtree selection and its bookmark", () => {
+    const v = editor([["t", "toggle", "T", { open: true }], ["b", "paragraph", "B", { parent: "t" }], ["z", "paragraph", "Z"]]);
+    try {
+      v.dispatch(v.state.tr.setSelection(S.selectBlocks(v.state.doc, 0)));
+      const bookmark = v.state.selection.getBookmark();
+      const at = B.outline(v.state.doc)[1].end;
+      const tr = v.state.tr.insert(at, schema.nodes.paragraph.create({ id: "new", pos: "CZ", parent: "t" }, schema.text("New"))).setMeta(REMOTE, true);
+      v.dispatch(tr);
+      expect(v.state.selection).toBeInstanceOf(TextSelection);
+      expect(bookmark.map(tr.mapping).resolve(tr.doc)).toBeInstanceOf(TextSelection);
+      expect(v.dom.parentElement.querySelector(".page-live").textContent).toBe("Block selection cleared because the document changed");
+      expect(S.deleteBlocks(v.state, v.dispatch)).toBe(false);
+      expect(v.state.doc.child(2).attrs.parent).toBe("t");
+    } finally { v.destroy(); }
+  });
+
+  test("F1 a remote move cannot silently drop a selected root", () => {
+    const v = editor(FLAT);
+    try {
+      v.dispatch(v.state.tr.setSelection(S.selectBlocks(v.state.doc, 0, 1)));
+      const a = v.state.doc.child(0);
+      const tr = v.state.tr.delete(0, a.nodeSize);
+      tr.insert(tr.doc.content.size, a).setMeta(REMOTE, true);
+      v.dispatch(tr);
+      expect(v.state.selection).toBeInstanceOf(TextSelection);
+      expect(v.state.selection.$head.parent.attrs.id).toBe("a");
+      expect(v.dom.parentElement.querySelector(".page-live").textContent).toMatch(/document changed/);
+    } finally { v.destroy(); }
+  });
+
+  test("F1 remote collapse announces the reason for clearing a hidden root", () => {
+    const v = editor([["t", "toggle", "T", { open: true }], ["b", "paragraph", "B", { parent: "t" }], ["z", "paragraph", "Z"]]);
+    try {
+      v.dispatch(v.state.tr.setSelection(S.selectBlocks(v.state.doc, 1)));
+      v.dispatch(v.state.tr.setNodeMarkup(0, null, { ...v.state.doc.child(0).attrs, open: false }).setMeta(REMOTE, true));
+      expect(v.state.selection).toBeInstanceOf(TextSelection);
+      expect(v.dom.parentElement.querySelector(".page-live").textContent).toBe("Block selection cleared because the document changed");
+    } finally { v.destroy(); }
+  });
+
+  test("F4 Mod+A stays in block mode and typing preserves the document", () => {
+    const v = editor(FLAT);
+    try {
+      select(v, posOf(v, "b"));
+      key(v, "Escape");
+      expect(key(v, "a", { ctrlKey: true })).toBe(true);
+      expect(v.state.selection).toBeInstanceOf(BlockSelection);
+      expect(spanIds(v.state)).toEqual(["a", "b", "c", "d"]);
+      typeText(v, "x");
+      expect(v.state.doc.textContent).toBe("AxBCD");
+    } finally { v.destroy(); }
+  });
+
+  test.each([["Backspace", { altKey: true }], ["h", { ctrlKey: true }]])("F4 delete shortcut %s consumes and deletes selected blocks", (k, options) => {
+    const v = editor(FLAT);
+    try {
+      v.dispatch(v.state.tr.setSelection(S.selectBlocks(v.state.doc, 1)));
+      expect(key(v, k, options)).toBe(true);
+      expect(v.state.doc.textContent).toBe("ACD");
+    } finally { v.destroy(); }
+  });
+
+  test("F12 a closed summary with no body selects through the next block", () => {
+    const v = editor([["t", "toggle", "T", { open: false }], ["z", "paragraph", "Z"]]);
+    try {
+      v.endOfTextblock = () => true;
+      select(v, posOf(v, "t", true));
+      expect(key(v, "ArrowDown", { shiftKey: true })).toBe(true);
+      expect(spanIds(v.state)).toEqual(["t", "z"]);
+    } finally { v.destroy(); }
+  });
+
+  test("F13 reverse Shift+click anchors on the selected root", () => {
+    const v = editor([["a", "paragraph", "A"], ["t", "toggle", "T", { open: true }], ["b1", "paragraph", "B1", { parent: "t" }], ["b2", "paragraph", "B2", { parent: "t" }]]);
+    try {
+      v.dispatch(v.state.tr.setSelection(S.selectBlocks(v.state.doc, 1, 0)));
+      const at = B.outline(v.state.doc)[2].at;
+      v.posAtCoords = () => ({ pos: at + 1, inside: at });
+      const event = new MouseEvent("mousedown", { button: 0, shiftKey: true, cancelable: true });
+      expect(S.blockSelKey.get(v.state).props.handleDOMEvents.mousedown(v, event)).toBe(true);
+      expect(spanIds(v.state)).toEqual(["t", "b1", "b2"]);
+    } finally { v.destroy(); }
   });
 });
