@@ -14,6 +14,7 @@ import { chromePlugin } from "./chrome.js";
 import { linkPlugin } from "./link.js";
 import { blockSelectionPlugin } from "./blocksel.js";
 import { markdownPlugin, backspaceToParagraph } from "./markdown.js";
+import { mediaPlugin } from "./media.js";
 
 const STYLE_ID = "page-editor-style";
 const INDENTS = [1, 2, 3, 4, 5, 6, 7, 8];
@@ -115,6 +116,15 @@ ${INDENTS.map((n) => `.page-editor .page-li[data-indent="${n}"] { --li-indent: $
 .page-link-btn { display: inline-grid; place-items: center; min-width: 30px; height: 30px; padding: 0 6px; border: 0; border-radius: 6px; background: none; color: inherit; font: inherit; cursor: pointer; }
 .page-link-btn:hover { background: var(--page-pop-hover); }
 .page-live { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.page-upload { display: flex; align-items: center; gap: 10px; margin: var(--page-block-gap) 0; padding: 8px 12px; border: 1px dashed var(--page-rule); border-radius: 8px; color: var(--page-ink-soft); font-size: 0.88em; }
+.page-upload-preview { width: 40px; height: 40px; object-fit: cover; border-radius: 4px; opacity: 0.6; }
+.page-upload-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.page-upload-bar { flex: 1; height: 2px; border-radius: 1px; background: var(--page-rule); overflow: hidden; }
+.page-upload-bar > span { display: block; height: 100%; background: var(--page-progress, var(--page-ink-soft)); transition: width 200ms; }
+.page-upload[data-state="error"] .page-upload-msg, .page-upload[data-state="embed-choice"] .page-upload-msg { flex: 1; }
+.page-upload[data-state="error"] .page-upload-msg { color: var(--page-danger, #9E3B2F); }
+.page-upload-btn { border: 0; padding: 4px 8px; border-radius: 6px; background: none; color: inherit; font: inherit; cursor: pointer; }
+.page-upload-btn:hover { background: var(--page-pop-hover); }
 .page-scrim { display: none; }
 .page-shell [hidden] { display: none !important; }
 
@@ -128,10 +138,10 @@ ${INDENTS.map((n) => `.page-editor .page-li[data-indent="${n}"] { --li-indent: $
   .page-menu-item { min-height: 48px; font-size: 16px; }
   .page-link { position: fixed; left: 0; right: 0; top: auto; bottom: 0; max-width: none; padding: 8px 16px calc(8px + env(safe-area-inset-bottom)); border-radius: 0; border-width: 1px 0 0; }
   .page-link-input { min-width: 0; height: 44px; font-size: 16px; }
-  .page-link-btn { min-width: 44px; height: 44px; }
+  .page-link-btn, .page-upload-btn { min-width: 44px; height: 44px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .page-dock, .page-plus, .page-toggle-button { transition: none; }
+  .page-dock, .page-plus, .page-toggle-button, .page-upload-bar > span { transition: none; }
 }
 }
 `;
@@ -156,7 +166,9 @@ const markKeys = {
   "Mod-Shift-s": commands.toggleMark(schema.marks.strike),
 };
 
-export function pagePlugins() {
+const defaultUpload = (file, options) => globalThis.clay?.upload?.(file, options) ?? Promise.resolve({ ok: false, code: "unavailable", msg: "File uploads are not available in this editor" });
+
+export function pagePlugins({ upload = defaultUpload } = {}) {
   return [
     chromePlugin(),
     linkPlugin(),
@@ -169,6 +181,7 @@ export function pagePlugins() {
     structurePlugin(),
     identityPlugin(),
     collapsePlugin(),
+    mediaPlugin({ upload }),
     pastePlugin(),
     history.history(),
     dropcursor.dropCursor(),
@@ -176,9 +189,9 @@ export function pagePlugins() {
   ];
 }
 
-export function pageState(blocks) {
+export function pageState(blocks, options) {
   const record = blocks && Object.keys(blocks).length ? blocks : { [newId()]: { t: "paragraph", pos: keyBetween(), c: "" } };
-  return state.EditorState.create({ doc: docFromBlocks(schema, record), plugins: pagePlugins() });
+  return state.EditorState.create({ doc: docFromBlocks(schema, record), plugins: pagePlugins(options) });
 }
 
 // Clicking a checklist box (drawn by ::before in the item's start gutter)
@@ -201,7 +214,7 @@ function checkboxClick(view, event) {
 // Mounts the editor in `mount`, inside a .page-shell wrapper (the surface a
 // theme styles). `onChange(record)` gets the block record (blockMap) after
 // every transaction that changed the document.
-export function createPageEditor(mount, { blocks = null, onChange = null } = {}) {
+export function createPageEditor(mount, { blocks = null, onChange = null, upload } = {}) {
   const doc = mount.ownerDocument;
   if (!doc.getElementById(STYLE_ID)) {
     const style = doc.createElement("style");
@@ -214,7 +227,7 @@ export function createPageEditor(mount, { blocks = null, onChange = null } = {})
   mount.appendChild(shell);
   let afterStep = false;
   const view = new pmView.EditorView(shell, {
-    state: pageState(blocks),
+    state: pageState(blocks, { upload }),
     attributes: { class: "page-editor" },
     handleDOMEvents: { mousedown: checkboxClick },
     dispatchTransaction(tr) {
