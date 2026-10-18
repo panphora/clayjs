@@ -2,6 +2,9 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as B from "../../../src/page/blocks.js";
+import { selectBlocks } from "../../../src/page/blocksel.js";
+import { renderBlocks } from "../../../src/page/projection.js";
+import { editor } from "./view-helpers.js";
 import { make, caret, at, short } from "./blocks-helpers.js";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
@@ -159,5 +162,65 @@ describe("pasted links", () => {
   test("http, mailto, fragments and paths are kept", () => {
     expect(links('<p><a href="https://x.com/a">a</a><a href="mailto:m@x.com">b</a><a href="#top">c</a><a href="/p">d</a></p>'))
       .toEqual([["a", "https://x.com/a"], ["b", "mailto:m@x.com"], ["c", "#top"], ["d", "/p"]]);
+  });
+});
+
+describe("F8 media and block selection paste", () => {
+  const parse = (html) => {
+    const box = document.createElement("div");
+    box.innerHTML = B.flattenPastedHTML(html);
+    return B.clipboardParser.parse(box);
+  };
+
+  test("inline media and trailing marked text stay in their pasted toggle", () => {
+    const view = editor([["p", "paragraph", ""]]);
+    try {
+      view.pasteHTML('<details open><summary>T</summary><p><strong>before <img src="https://example.test/a.png"> after</strong></p></details>', new Event("paste"));
+      const nodes = [];
+      view.state.doc.forEach((n) => nodes.push(n));
+      const toggle = nodes.find((n) => n.type.name === "toggle");
+      expect(nodes.map((n) => n.type.name)).toEqual(["toggle", "paragraph", "image", "paragraph"]);
+      expect(nodes.slice(1).map((n) => n.attrs.parent)).toEqual([toggle.attrs.id, toggle.attrs.id, toggle.attrs.id]);
+      expect(nodes[3].firstChild.marks.map((m) => m.type.name)).toEqual(["strong"]);
+    } finally { view.destroy(); }
+  });
+
+  test("pasting over the last selected toggle child preserves the owner", () => {
+    const view = editor([["t", "toggle", "T", { open: true }], ["b1", "paragraph", "B1", { parent: "t" }], ["b2", "paragraph", "B2", { parent: "t" }], ["z", "paragraph", "Z"]]);
+    try {
+      view.dispatch(view.state.tr.setSelection(selectBlocks(view.state.doc, 2)));
+      view.pasteHTML("<p>X</p>", new Event("paste"));
+      expect(view.state.doc.child(2).textContent).toBe("X");
+      expect(view.state.doc.child(2).attrs.parent).toBe("t");
+      expect(view.state.doc.child(3).attrs.id).toBe("z");
+    } finally { view.destroy(); }
+  });
+
+  test("saved image and file projections round-trip with metadata", () => {
+    const { html } = renderBlocks({
+      i: { t: "image", pos: "B", src: "/photo.png", alt: "Photo", caption: "Caption", width: 320 },
+      f: { t: "file", pos: "C", src: "/empty.txt", name: "empty.txt", size: 0, mime: "text/plain" },
+    });
+    const doc = parse(html);
+    expect(doc.childCount).toBe(2);
+    expect(doc.child(0).type.name).toBe("image");
+    expect(doc.child(0).attrs).toMatchObject({ src: "/photo.png", alt: "Photo", caption: "Caption", width: 320 });
+    expect(doc.child(1).type.name).toBe("file");
+    expect(doc.child(1).attrs).toMatchObject({ src: "/empty.txt", name: "empty.txt", size: 0, mime: "text/plain" });
+  });
+
+  test("a zero-byte clipboard file keeps its known size", () => {
+    expect(parse('<div class="page-file" data-src="/empty" data-size="0"></div>').firstChild.attrs.size).toBe(0);
+  });
+
+  test.each(["-5.5", "12.7", "Infinity"])("invalid image width %s becomes automatic", (width) => {
+    expect(parse(`<figure data-width="${width}"><img src="/photo.png"></figure>`).firstChild.attrs.width).toBeNull();
+  });
+
+  test("control: splitting a list wrapper keeps the inline image", () => {
+    const doc = parse('<ul><li>before <img src="/photo.png"> after</li></ul>');
+    expect(doc.childCount).toBe(3);
+    expect(doc.child(1).type.name).toBe("image");
+    expect(doc.textContent).toContain("after");
   });
 });

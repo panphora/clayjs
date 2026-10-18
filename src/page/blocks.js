@@ -929,9 +929,31 @@ export function flattenPastedHTML(html, doc = globalThis.document) {
     d.removeAttribute("data-depth");
     prev = d;
   }
+  const splitImages = (node) => {
+    if (node.nodeType !== 1 || node.tagName === "IMG") return [node.cloneNode(true)];
+    const parts = [];
+    let part = node.cloneNode(false);
+    for (const child of node.childNodes) for (const piece of splitImages(child)) {
+      if (piece.nodeType === 1 && piece.tagName === "IMG") {
+        if (part.hasChildNodes()) parts.push(part);
+        parts.push(piece);
+        part = node.cloneNode(false);
+      } else part.appendChild(piece);
+    }
+    if (part.hasChildNodes() || !parts.length) parts.push(part);
+    return parts;
+  };
+  for (const child of [...out.children]) {
+    if (!child.matches("p, h1, h2, h3, h4, h5, h6, aside, div[data-page-li], div.page-li") || !child.querySelector("img")) continue;
+    const pieces = splitImages(child);
+    const parent = child.getAttribute("data-page-parent");
+    if (parent) for (const piece of pieces) piece.setAttribute("data-page-parent", parent);
+    child.replaceWith(...pieces);
+  }
   return out.innerHTML;
 }
 
+const numberAttr = (value, min = 0) => value !== null && value !== "" && Number.isInteger(+value) && +value >= min ? +value : null;
 const parentAttr = (dom) => dom.getAttribute("data-page-parent") || null;
 
 // The clipboard parser: the schema has toDOM only, so paste gets its own rules.
@@ -947,17 +969,17 @@ export const clipboardParser = new model.DOMParser(schema, [
   { tag: "pre", node: "code_block", preserveWhitespace: "full", getAttrs: (d) => ({ parent: parentAttr(d) }) },
   { tag: "hr", node: "divider", getAttrs: (d) => ({ parent: parentAttr(d) }) },
   { tag: "aside.page-callout", node: "callout", getAttrs: (d) => ({ parent: parentAttr(d) }) },
-  { tag: "figure:not([data-type])", node: "image", getAttrs: (d) => {
+  { tag: 'figure:not([data-type]), figure[data-type="image"]', node: "image", getAttrs: (d) => {
     const img = d.querySelector("img"), src = safeSrc(img?.getAttribute("src"));
-    return src ? { src, alt: img.getAttribute("alt") || "", caption: d.querySelector("figcaption")?.textContent || "", width: +d.getAttribute("data-width") || null, parent: parentAttr(d) } : false;
+    return src ? { src, alt: img.getAttribute("alt") || "", caption: d.querySelector("figcaption")?.textContent || "", width: numberAttr(d.getAttribute("data-width") ?? img.getAttribute("width"), 1), parent: parentAttr(d) } : false;
   } },
   { tag: "img[src]", node: "image", getAttrs: (d) => {
     const src = safeSrc(d.getAttribute("src"));
-    return src ? { src, alt: d.getAttribute("alt") || "", parent: parentAttr(d) } : false;
+    return src ? { src, alt: d.getAttribute("alt") || "", width: numberAttr(d.getAttribute("width"), 1), parent: parentAttr(d) } : false;
   } },
-  { tag: "div.page-file", node: "file", getAttrs: (d) => {
+  { tag: 'div.page-file, div[data-type="file"]', node: "file", getAttrs: (d) => {
     const src = safeHref(d.getAttribute("data-src"));
-    return src ? { src, name: d.getAttribute("data-name") || "file", size: +d.getAttribute("data-size") || null, mime: d.getAttribute("data-mime") || null, parent: parentAttr(d) } : false;
+    return src ? { src, name: d.getAttribute("data-name") || "file", size: numberAttr(d.getAttribute("data-size")), mime: d.getAttribute("data-mime") || null, parent: parentAttr(d) } : false;
   } },
   { tag: "p", node: "paragraph", getAttrs: (d) => ({ parent: parentAttr(d) }) },
   { tag: "br", node: "hard_break" },
@@ -983,7 +1005,8 @@ export const clipboardParser = new model.DOMParser(schema, [
 // their first line merging into the paragraph.
 export function remapPasted(slice, st) {
   const $from = st.selection.$from;
-  const host = $from.depth >= 1 ? $from.node(1) : null;
+  const selected = st.selection instanceof BlockSelection;
+  const host = selected ? st.doc.child(st.selection.span().lo) : $from.depth >= 1 ? $from.node(1) : null;
   const destParent = host ? parentOf(host) : null;
   const base = host && isList(host) ? host.attrs.indent : 0;
   const ids = new Map();
@@ -1002,7 +1025,7 @@ export function remapPasted(slice, st) {
   const last = nodes[nodes.length - 1];
   const fresh = new Set(ids.values());
   const openEnd = intoText && (structural(last) || (last && fresh.has(parentOf(last)))) ? 0 : slice.openEnd;
-  return new model.Slice(model.Fragment.from(nodes), openStart, openEnd);
+  return new model.Slice(model.Fragment.from(nodes), selected ? 0 : openStart, selected ? 0 : openEnd);
 }
 
 // The clipboard serializer: the schema's toDOM, plus each copied block's
