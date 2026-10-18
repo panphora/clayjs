@@ -108,6 +108,22 @@ export function pageToMarkdown(html, url) {
     note.firstChild?.append(`Diagram: ${label}`);
     svg.replaceWith(note);
   });
+  // A Pele diagram keeps its Mermaid source in a hidden <pre>: give agents that
+  // source as a fenced block. An animation is replaced by its label.
+  main.querySelectorAll('figure:has(> pre.pele-src)').forEach((fig) => {
+    const code = doc.createElement('code');
+    code.className = 'language-mermaid';
+    code.textContent = fig.querySelector('pre.pele-src').textContent;
+    const pre = doc.createElement('pre');
+    pre.append(code);
+    fig.replaceWith(pre);
+  });
+  main.querySelectorAll('figure.vg-motion[aria-label]').forEach((fig) => {
+    const note = doc.createElement('p');
+    note.innerHTML = '<em></em>';
+    note.firstChild.append(`Animation: ${fig.getAttribute('aria-label')}`);
+    fig.replaceWith(note);
+  });
   main.querySelectorAll('.pager').forEach((n) => n.remove());
   main.querySelectorAll('.doc-rows').forEach((rows) => {
     const list = doc.createElement('ul');
