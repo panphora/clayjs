@@ -205,11 +205,11 @@ export function createRoom(sim, initialStores, { latency = () => 40, answerLaten
     };
     // live-data-rooms.js state(): past movesBytes over every store, a store's moves are null.
     if (typeof since === "number") {
-      let budget = LIMITS.movesBytes;
-      state.moves = {};
+      state.moves = Object.fromEntries([...room.stores.keys()].map((name) => [name, null]));
+      let budget = LIMITS.movesBytes - utf8(JSON.stringify(state.moves));
       for (const [name, s] of room.stores) {
         const list = room.logSince(name, since);
-        const size = list ? s.log.reduce((n, e) => (e.seq > since ? n + e.bytes : n), 0) : 0;
+        const size = list ? 2 + list.reduce((sum, move) => sum + utf8(JSON.stringify(move)) + 1, 0) - (list.length ? 1 : 0) - 4 : 0;
         if (list && size > budget) { state.moves[name] = null; continue; }
         budget -= size;
         state.moves[name] = list;
