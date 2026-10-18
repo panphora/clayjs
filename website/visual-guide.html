@@ -934,15 +934,15 @@ scene(st, { cursor: [430, 270] })
   </div>
 
   <h2 id="where">Where state goes</h2>
-  <p>Everything in a document belongs in one of five places. Find the kind of thing you are adding, and put it where its box says.</p>
+  <p>ClayJS saves the live DOM back to the file, so where you put state in the page decides whether it saves, syncs to other people or stays in your tab. Match each piece of your app to one of the five places below.</p>
 
   <div class="state-grid">
     <div class="state-box">
       <h3>Records</h3>
-      <p class="desc">The content itself: list items, cards, rows and notes. Everyone sees them, and they save with the file.</p>
+      <p class="desc">Your saved content: list items, kanban cards, table rows and notes. Everyone sees them, and they save into the file.</p>
       <ul>
-        <li>Write them as ordinary HTML, with a unique <code>data-id</code> on each item.</li>
-        <li>Put <code>persist</code> on any checkbox, input or select whose value should save, and <code>viewmode:disabled disabled</code> so viewers cannot change it.</li>
+        <li>Put them directly in the HTML as ordinary elements, with a unique <code>data-id</code> on each item so sync and undo can match them.</li>
+        <li>Add <code>persist</code> to any checkbox, input or select whose value should save, and <code>viewmode:disabled disabled</code> so viewers cannot change it.</li>
       </ul>
       <pre><code class="language-markup">&lt;li data-id="t-1"&gt;
   &lt;input type="checkbox" persist viewmode:disabled disabled&gt;
@@ -952,43 +952,44 @@ scene(st, { cursor: [430, 270] })
 
     <div class="state-box">
       <h3>Edit controls</h3>
-      <p class="desc">Buttons, drag handles and anything else only editors use, written once in the file.</p>
+      <p class="desc">Add buttons, delete buttons, drag handles and other fixed controls that only editors use.</p>
       <ul>
-        <li>Keep them in the file with <code>show-when:editmode="true"</code>, so viewers never see them.</li>
-        <li>Load <code>clay-options.js</code> and add its one-line CSS fallback rule.</li>
+        <li>Write them once in the HTML with <code>show-when:editmode="true"</code> so viewers never see them.</li>
+        <li>Load <code>clay-options.js</code> and include its one-line CSS fallback rule so controls stay hidden before scripts run.</li>
       </ul>
       <pre><code class="language-markup">&lt;button type="button" show-when:editmode="true"&gt;+ Add&lt;/button&gt;</code></pre>
     </div>
 
     <div class="state-box">
-      <h3>Complex edit controls and derived counts</h3>
-      <p class="desc">Toolbars, filters and counts your script builds when the page opens.</p>
+      <h3>Complex editor controls and derived counts</h3>
+      <p class="desc">Toolbars, menus, filter bars and live counts that your JavaScript builds or updates while the page is open.</p>
       <ul>
-        <li>Clone them from a <code>&lt;template&gt;</code> into a <code>clay="editor-ui"</code> element inside <code>clay.start</code>. That element is never saved, so it cannot pile up in the file.</li>
-        <li>A total that must appear in the saved file goes in <code>clay="no-dirty"</code>. It still saves, but redrawing it is not an edit, so recomputing it on open never starts a save or a close warning.</li>
+        <li>Clone script-built controls from a <code>&lt;template&gt;</code> into a <code>clay="editor-ui"</code> element inside <code>clay.start</code>. That region is never saved, so runtime UI never piles up in the file.</li>
+        <li>If a computed total must be saved in the file, put it in <code>clay="no-dirty"</code> so your script can recalculate it without ClayJS treating that update as a user edit. It saves alongside real edits and an incoming sync may replace it, but updating it never marks the page unsaved, autosaves or warns on close.</li>
       </ul>
-      <pre><code class="language-markup">&lt;!-- cloned at runtime, never written in the file --&gt;
+      <pre><code class="language-markup">&lt;!-- cloned in clay.start, never saved --&gt;
 &lt;div clay="editor-ui"&gt;2 of 5 done&lt;/div&gt;
+&lt;!-- saved in the file, but recalculating is not an edit --&gt;
 &lt;output clay="no-dirty"&gt;$900.00&lt;/output&gt;</code></pre>
     </div>
 
     <div class="state-box">
       <h3>Temporary toggles and popovers</h3>
-      <p class="desc">What is selected, which card is open, what the filter says: state that belongs to one tab and should not reach anyone else.</p>
+      <p class="desc">Which item is selected, which popover or details box is open, or what is in the search box. This state belongs to one tab and should never save or sync.</p>
       <ul>
-        <li>Mark selection or open state with <code>ephemeral</code>. It stays in your tab and never saves.</li>
-        <li>Keep a search query or open card in the URL hash (<code>#q=design</code>), and paint it with a <code>&lt;style&gt;</code> inside <code>editor-ui</code>.</li>
+        <li>Mark temporary state on a saved element with <code>ephemeral="selected"</code> or <code>ephemeral:open</code> so it stays in your tab and never saves.</li>
+        <li>Keep a search query or open card ID in the URL hash, such as <code>#q=design</code>, and apply it with a <code>&lt;style&gt;</code> tag inside <code>clay="editor-ui"</code>.</li>
       </ul>
-      <pre><code class="language-markup">&lt;li class="card" data-id="c-1" ephemeral="selected"&gt;…&lt;/li&gt;
-&lt;details ephemeral:open&gt;…&lt;/details&gt;</code></pre>
+      <pre><code class="language-markup">&lt;li class="card" data-id="c-1" ephemeral="selected"&gt;...&lt;/li&gt;
+&lt;details ephemeral:open&gt;...&lt;/details&gt;</code></pre>
     </div>
 
     <div class="state-box">
-      <h3>Data-rich apps, games and real-time state</h3>
-      <p class="desc">Apps with their own schema, like a game board or a budget model, whose data is not naturally HTML.</p>
+      <h3>Data-rich apps and games</h3>
+      <p class="desc">Applications with their own schema, like a chart model or spreadsheet grid, and real-time games that update faster than a file save.</p>
       <ul>
-        <li>Store the data in a JSON <code>&lt;script&gt;</code> tag with a <code>merge</code> name, such as <code>merge="game"</code>, and draw the page from it.</li>
-        <li>Add <code>clay="live"</code> with <code>?plugins=sync,live</code> for sub-second updates on hyperclay.com and between tabs of one browser.</li>
+        <li>Put structured data in a JSON <code>&lt;script&gt;</code> tag with a <code>merge</code> name, such as <code>merge="game"</code>, and render the page from it.</li>
+        <li>Add <code>clay="live"</code> with <code>?plugins=sync,live</code> for sub-second sync on hyperclay.com and between tabs of one browser.</li>
       </ul>
       <pre><code class="language-markup">&lt;script type="application/json" merge="game" clay="live"&gt;
   {"turn": "x", "score": 0}
