@@ -74,16 +74,42 @@ export function alignUnits(a, b) {
   return map;
 }
 
-// The ids of b's units, carried from a's ids through the alignment, and the
-// ids of a's units that b does not hold.
+const reverse = (t) => { let out = ""; for (let i = t.length - 1; i >= 0; i--) out += t[i]; return out; };
+
+// alignUnits, keeping only the matches that hold either way: the alignment
+// that matches from the start (alignUnits) and the one that matches from the
+// end (alignUnits of the reversed texts) agree on them. Repeated text gives
+// two equally short edit scripts that pair a unit with different copies; a
+// unit they disagree on is not proven kept, so it maps to -1 here, and
+// `unsure` lists the units of a either alignment keeps that this map does not.
+export function alignSure(a, b) {
+  const fwd = alignUnits(a, b);
+  const rev = alignUnits(reverse(a), reverse(b));
+  const map = new Int32Array(b.length).fill(-1);
+  const keptF = new Uint8Array(a.length), keptS = new Uint8Array(a.length);
+  for (let j = 0; j < b.length; j++) {
+    const r = rev[b.length - 1 - j];
+    const back = r >= 0 ? a.length - 1 - r : -1;
+    if (fwd[j] >= 0) keptF[fwd[j]] = 1;
+    if (back >= 0) keptF[back] = 1;
+    if (fwd[j] >= 0 && fwd[j] === back) { map[j] = fwd[j]; keptS[fwd[j]] = 1; }
+  }
+  const unsure = [];
+  for (let i = 0; i < a.length; i++) if (keptF[i] && !keptS[i]) unsure.push(i);
+  return { map, unsure };
+}
+
+// The ids of b's units, carried from a's ids through the alignment; the ids of
+// a's units that b surely does not hold (gone); and the ids no alignment proves
+// kept or gone (doubt: repeated text).
 function carry(a, aIds, b) {
-  const map = alignUnits(a, b);
+  const { map, unsure } = alignSure(a, b);
   const ids = new Array(b.length).fill(0);
-  const kept = new Set();
+  const kept = new Set(unsure);
   for (let j = 0; j < b.length; j++) if (map[j] >= 0) { ids[j] = aIds[map[j]] ?? 0; kept.add(map[j]); }
   const gone = [];
   for (let i = 0; i < a.length; i++) if (!kept.has(i) && aIds[i]) gone.push(aIds[i]);
-  return { ids, gone };
+  return { ids, gone, doubt: unsure.map((i) => aIds[i]).filter(Boolean) };
 }
 
 const visible = (r) => r.units.filter((u) => !u.del);
@@ -112,9 +138,15 @@ export function createHealCheck({ r, me, quiet = 500, setTimer, clearTimer, read
   let view = new Array(r.S ? r.S.c.length : 0).fill(0);
   const runOf = new Map(), chOf = new Map();
   const erased = new Set(), peer = new Set();
+  // Ids a rebuild could not prove kept or gone (repeated text): at risk at the
+  // next loss, so a check names them unless they show again.
+  const doubtful = new Set();
   const sent = new Map();
   let lastRun = 0, lastEnd = -1;
   let risk = null, pre = null, timer = null;
+  // A block this tab made: its text and ids as made (created), for the write
+  // that made it, which carries no w.
+  let seed = null;
 
   const keys = new WeakMap();
   const keyOf = (X) => {
@@ -186,7 +218,7 @@ export function createHealCheck({ r, me, quiet = 500, setTimer, clearTimer, read
   function adopt(vis, made, from) {
     if (!from || !from.ids.some(Boolean)) return;
     const c = vis.map((u) => u.ch).join("");
-    const map = alignUnits(from.text, c);
+    const { map } = alignSure(from.text, c);
     const used = new Set(vis.map((u) => u.id).filter(Boolean));
     vis.forEach((u, j) => {
       if (u.id || !made.has(u) || map[j] < 0) return;
@@ -205,7 +237,7 @@ export function createHealCheck({ r, me, quiet = 500, setTimer, clearTimer, read
     const tagged = [];
     let count = 0;
     for (const u of arr) if (!u.del) { if (u.id) tagged.push([count, u]); count++; }
-    const mine = kind === "own" || (kind === "room" && X && X.w && X.w.a === me) ? sent.get(keyOf(X)) : null;
+    const mine = kind === "own" || (kind === "room" && X && X.w && X.w.a === me) ? sent.get(keyOf(X)) : seed && X && !X.w && X.c === seed.text ? seed : null;
     const back = kind !== "peer" && (mine || pre);
     // Units a placed write of this tab's own makes carry their ids already.
     const had = back && kind === "room" ? new Set(arr) : null;
@@ -222,6 +254,7 @@ export function createHealCheck({ r, me, quiet = 500, setTimer, clearTimer, read
       const used = new Set(vis.map((u) => u.id).filter(Boolean));
       vis.forEach((u, j) => { if (!u.id && out.ids[j] && !used.has(out.ids[j])) { u.id = out.ids[j]; used.add(u.id); } });
       for (const id of out.gone) if (!used.has(id)) by(id, kind === "own" ? me : kind === "peer" ? X.w.a : null);
+      for (const id of out.doubt) if (!used.has(id)) { doubtful.add(id); if (risk) risk.add(id); }
     }
     if (back) {
       const made = rebuilt ? new Set(vis) : new Set(vis.filter((u) => !had.has(u)));
@@ -234,10 +267,22 @@ export function createHealCheck({ r, me, quiet = 500, setTimer, clearTimer, read
 
   return {
     edit, editTo, wrote,
+    // This tab made the block with this text: every unit is its own.
+    created(text) {
+      if (view.length || !text) return;
+      edit(0, 0, text);
+      seed = { text, ids: view.slice() };
+    },
     step(X, seq) { around(X, kindOf(X, me), () => step(r, X, seq)); },
     join(X, seq, opts) { around(null, "room", () => join(r, X, seq, opts)); },
     tombstone(seq) { for (const u of visible(r)) if (u.id) peer.add(u.id); tombstone(r, seq); },
     agreedIds,
+    // A notice (a refusal's) named every unit the editor shows and the agreed
+    // text lacks: they are accounted for, like this tab's own deletes.
+    named() {
+      const agreed = new Set(agreedIds());
+      for (const id of view) if (id && !agreed.has(id)) erased.add(id);
+    },
     // The editor now shows `shown` (the agreed text, after a release).
     released(shown) {
       const c = r.S ? r.S.c : "";
@@ -248,6 +293,7 @@ export function createHealCheck({ r, me, quiet = 500, setTimer, clearTimer, read
     arm() {
       risk ??= new Set();
       for (const id of view) if (id) risk.add(id);
+      for (const id of doubtful) risk.add(id);
       const ids = agreedIds();
       for (const id of ids) if (id) risk.add(id);
       pre = { text: r.S ? r.S.c : "", ids };
@@ -279,6 +325,7 @@ export function createHealCheck({ r, me, quiet = 500, setTimer, clearTimer, read
     if (!risk) return;
     if (!ready()) { timer = setTimer(check, quiet * 2); return; }
     if (r.S) for (const lost of lostRuns()) notice(lost);
+    for (const id of risk) doubtful.delete(id);
     risk = null;
     pre = null;
   }

@@ -6,6 +6,8 @@
 import { jest } from "@jest/globals";
 import { createFastLane } from "../../src/live/fast-lane.js";
 import { createStore } from "../../src/live/store.js";
+import { Sim } from "./page/collab/room-double.js";
+import { createCheckpoints, CHECKPOINT_MS } from "../../src/live/checkpoint.js";
 
 function harness() {
   let t = 0;
@@ -96,4 +98,94 @@ test("Opus 1 (reviewer fixture shape): a plain 503 state read, with no code, als
   lane.stop();
   warn.mockRestore();
   expect(status).toEqual({ mode: "file", value: { n: 5 }, pending: 1 });
+});
+
+// Round 8 review: the edit comes before the 503, and the real checkpoint
+// scheduler (checkpoint.js) runs with the save predicate plugins/live.js uses.
+// Leaving the room never drops a write (Astra 1, Opus 3), and it wakes the
+// checkpoints, so the edit is saved within the save-speed interval (Astra 3).
+
+function scheduled(transport) {
+  const sim = new Sim(1);
+  const store = createStore({ name: "s", value: { n: 0 } });
+  const entry = { store, last: 0, landed: 0, leftAt: null };
+  const saves = [];
+  let lane;
+  const checkpoints = createCheckpoints({
+    needsSave: () => (store.handle.status.mode === "fast" ? lane.isWriter() && entry.landed < entry.last : store.pending.length > 0),
+    blocked: () => false,
+    save: async () => { saves.push({ at: sim.now(), value: JSON.parse(JSON.stringify(store.value)), leftAt: entry.leftAt }); store.confirm(store.mark); return { ok: true }; },
+    saveNow: () => {},
+    now: sim.now, setTimer: sim.setTimer, clearTimer: sim.clearTimer,
+  });
+  lane = createFastLane({
+    transport, entries: new Map([["s", entry]]), now: sim.now, setTimer: sim.setTimer, clearTimer: sim.clearTimer,
+    onApplied: () => checkpoints.changed(), onWriter: () => checkpoints.changed(),
+    onLeave: (_name, at) => { entry.leftAt = at; },
+  });
+  store.onLocal(() => checkpoints.changed());
+  store.onLocal((ops) => lane.local("s", ops, store.mark));
+  lane.start();
+  return { sim, store, lane, saves, checkpoints };
+}
+
+test("Astra 1: a 503 state read while a frame is on the wire, then that frame answered 503, keeps the write pending and the save writes it", async () => {
+  const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
+  let handlers, busy = false, posts = 0;
+  const transport = {
+    start(x) { handlers = x; return () => {}; },
+    async fetchState() { return busy ? { status: 503, code: "busy", retryAfter: 60 } : { epoch: "e1", seq: 0, writer: "a", stores: { s: { value: { n: 0 }, last: 0, landed: 0, seen: {} } } }; },
+    send() { posts++; return new Promise((resolve) => t.sim.after(100, () => resolve({ status: 503, body: { code: "busy" }, retryAfter: 60 }))); },
+  };
+  const t = scheduled(transport);
+  t.sim.at(0, () => handlers.open({ clientId: "a" }));
+  t.sim.at(100, () => t.store.handle.set(["n"], 5));
+  t.sim.at(120, () => { busy = true; handlers.close(); handlers.open({ clientId: "a" }); });
+  await t.sim.run(1000);
+  expect({ mode: t.store.handle.status.mode, value: t.store.value, pending: t.store.pending.length, posts }).toEqual({ mode: "file", value: { n: 5 }, pending: 1, posts: 1 });
+  await t.sim.run(1000 + CHECKPOINT_MS + 1000);
+  t.lane.stop();
+  warn.mockRestore();
+  expect(t.saves.map((s) => s.value)).toEqual([{ n: 5 }]);
+});
+
+test("Opus 3: a write that landed but had not come back when the room was lost stays pending through a 503 busy minute, and the save writes it", async () => {
+  const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
+  let handlers, busy = false;
+  const transport = {
+    start(x) { handlers = x; return () => {}; },
+    async fetchState() { return busy ? { status: 503, code: "busy", retryAfter: 60 } : { epoch: "e1", seq: 0, writer: "a", stores: { s: { value: { n: 0 }, last: 0, landed: 0, seen: {} } } }; },
+    // Lands at seq 1; its echo never comes: the room is lost first.
+    async send() { return { status: 200, body: { epoch: "e1", seq: 1 } }; },
+  };
+  const t = scheduled(transport);
+  t.sim.at(0, () => handlers.open({ clientId: "a" }));
+  t.sim.at(100, () => t.store.handle.set(["n"], 5));
+  t.sim.at(300, () => { busy = true; handlers.close(); handlers.open({ clientId: "a" }); });
+  await t.sim.run(5000);
+  expect({ mode: t.store.handle.status.mode, value: t.store.value, pending: t.store.pending.length }).toEqual({ mode: "file", value: { n: 5 }, pending: 1 });
+  await t.sim.run(30_000);
+  t.lane.stop();
+  warn.mockRestore();
+  expect(t.saves.map((s) => s.value)).toEqual([{ n: 5 }]);
+});
+
+test("Astra 3: an edit made offline in fast mode is saved within the save-speed interval once a 503 busy state read leaves the room", async () => {
+  const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
+  let handlers, busy = false;
+  const transport = {
+    start(x) { handlers = x; return () => {}; },
+    async fetchState() { return busy ? { status: 503, code: "busy", retryAfter: 60 } : { epoch: "e1", seq: 0, writer: "a", stores: { s: { value: { n: 0 }, last: 0, landed: 0 } } }; },
+    async send() { throw new Error("no frame while offline or out of the room"); },
+  };
+  const t = scheduled(transport);
+  t.sim.at(0, () => handlers.open({ clientId: "a" }));
+  t.sim.at(500, () => handlers.close());
+  t.sim.at(600, () => t.store.handle.set(["n"], 5));
+  t.sim.at(10_000, () => { busy = true; handlers.open({ clientId: "a" }); });
+  await t.sim.run(10_000 + CHECKPOINT_MS + 1000);
+  t.lane.stop();
+  warn.mockRestore();
+  expect(t.saves.map((s) => s.value)).toEqual([{ n: 5 }]);
+  expect(t.saves[0].at).toBeLessThanOrEqual(10_000 + CHECKPOINT_MS);
 });

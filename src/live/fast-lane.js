@@ -87,6 +87,9 @@ export function createFastLane({
   let conn;
   let stateCount = 0;
   let fetchAgain = false;
+  // A store left the room, so frames went by that its value never took: the
+  // next state read asks for every store whole, never for the moves since seq.
+  let missed = false;
   let unsubscribe = null;
   // Per store: the next n, ops not yet in a frame, frames sent but not yet seen
   // back (each { n, ops, through, seq, sent, refused, uncertain }), and the
@@ -111,21 +114,22 @@ export function createFastLane({
   // Never applied: every attempt was refused before the room handled it.
   const unapplied = (frame) => frame.refused === true && !frame.uncertain;
 
-  // Stop sending this store: it leaves the room. A frame the room may have
-  // applied is dropped from pending (never replayed over a file that may hold
-  // it); a frame refused unapplied, and ops never framed, stay pending for file
-  // mode. Refused frames come last: a refusal stops sending until the next state.
+  // Stop sending this store: it leaves the room. Every op the room has not
+  // confirmed stays pending, so the next save writes it: an op never framed, a
+  // frame refused, a frame that landed but has not come back, and the frame on
+  // the wire, whose answer decides it (decide). The frames stay as records: a
+  // rejoin settles each by the room's answer or receipt, or sends it again.
+  // Leaving wakes the checkpoints (onApplied): what is pending now saves at
+  // save speed.
   function leaveRoom(name, lane) {
     const store = entries.get(name)?.store;
-    let through = 0;
-    for (const frame of lane.awaiting) if (!unapplied(frame)) through = frame.through;
-    if (store && through) store.rebase(store.authoritative, { source: "state", through, cause: "leave" });
+    for (const frame of lane.awaiting) if (frame === flying) frame.undecided = true;
+    missed = true;
+    lane.out = true;
     onLeave(name, { epoch, seq });
     lane.unsent = [];
-    lane.awaiting = [];
-    // What is left pending is framed afresh if the store comes back.
-    lane.framed = through;
     store?.setMode("file");
+    onApplied();
   }
 
   function schedule() {
@@ -142,6 +146,7 @@ export function createFastLane({
   // oldest unsent ops of one store; stores take turns.
   function nextFrame() {
     for (const [name, lane] of lanes) {
+      if (!roomNames.has(name)) continue;
       const retry = lane.awaiting.find((frame) => !frame.sent);
       if (retry) return { name, lane, frame: retry };
     }
@@ -218,6 +223,17 @@ export function createFastLane({
       frame.seq = null;
       return;
     }
+    // Its store left the room meanwhile: its ops stay pending for the save,
+    // and the frame waits for the rejoin, which settles it by its seq or the
+    // room's receipt.
+    if (!roomNames.has(name)) {
+      if (status >= 200 && status < 300 && Number.isInteger(body?.seq) && !body?.stale) frame.seq = body.seq;
+      else {
+        frame.uncertain = true;
+        frame.uncertainSince ??= frame.sentOn;
+      }
+      return;
+    }
     lane.awaiting.splice(lane.awaiting.indexOf(frame), 1);
     const store = entries.get(name)?.store;
     store?.rebase(store.authoritative, { source: "state", through: frame.through, cause: "decided" });
@@ -227,6 +243,7 @@ export function createFastLane({
   // authoritative values now, whether its answer or its event said so.
   function settleAwaiting() {
     for (const [name, lane] of lanes) {
+      if (!roomNames.has(name)) continue;
       let through;
       while (lane.awaiting.length && lane.awaiting[0].seq !== null && lane.awaiting[0].seq <= seq) {
         through = lane.awaiting.shift().through;
@@ -312,11 +329,15 @@ export function createFastLane({
     }
     lane.awaiting.splice(lane.awaiting.indexOf(frame), 1);
     // A host still on the old body cap: pack its ops again, smaller, and send
-    // them again. Only an op too large on its own is refused.
-    if (status === 413 && frame.entries?.length > 1 && frameBytes > OLD_FRAME_BYTES) {
+    // them again. Only an op too large on its own is refused. That host's 413
+    // comes from its body parser, with no code; the room's own size refusal
+    // (a store or room cap, code "too-large") is a refusal like any other.
+    if (status === 413 && !body?.code && frame.entries?.length > 1 && frameBytes > OLD_FRAME_BYTES) {
       frameBytes = OLD_FRAME_BYTES;
       console.warn(`clay.live("${name}"): the host takes smaller updates, so they go in frames of ${frameBytes} bytes`);
       lane.unsent.unshift(...frame.entries);
+      // Unframed again: a new room's state frames them afresh (unframed()).
+      lane.framed = frame.first - 1;
       return;
     }
     const store = entries.get(name)?.store;
@@ -328,7 +349,11 @@ export function createFastLane({
   function apply(frame) {
     seq = frame.seq;
     const store = entries.get(frame.name)?.store;
-    if (!store || !roomNames.has(frame.name)) return;
+    if (!store) return;
+    if (!roomNames.has(frame.name)) {
+      missed = true;
+      return;
+    }
     const ops = store.checkOps(frame.ops);
     if (!ops) {
       resync();
@@ -416,11 +441,17 @@ export function createFastLane({
     for (const [name, entry] of entries) {
       const room = stores[name];
       const lane = laneOf(name);
+      // A frame none of whose ops is pending any more (a save at save speed
+      // took them, and the room merged that file) is never sent again.
+      const live = new Set(entry.store.pendingEntries().map((pending) => pending.id));
+      lane.awaiting = lane.awaiting.filter((frame) => frame === flying || !frame.entries || frame.entries.some((e) => live.has(e.id)));
       if (!room) {
-        leaveRoom(name, lane);
+        // Already out: its value still descends from where it left.
+        if (!lane.out) leaveRoom(name, lane);
         continue;
       }
       const rejoined = entry.store.handle.status.mode === "file";
+      lane.out = false;
       entry.store.setMode("fast");
       entry.last = Number.isInteger(room.last) ? room.last : 0;
       entry.landed = Number.isInteger(room.landed) ? room.landed : 0;
@@ -496,9 +527,12 @@ export function createFastLane({
     synced = false;
     const asked = { connection, stateCount };
     let state = null;
+    const whole = missed;
+    missed = false;
     try {
-      state = await transport.fetchState(clientId, epoch !== null && seq > 0 ? { epoch, seq } : null);
+      state = await transport.fetchState(clientId, epoch !== null && seq > 0 && !whole ? { epoch, seq } : null);
     } catch {}
+    if (whole && !(state && typeof state.epoch === "string")) missed = true;
     fetching = false;
     if (stopped) return;
     if (asked.connection !== connection || fetchAgain) {
@@ -556,6 +590,7 @@ export function createFastLane({
     unsubscribe?.();
     for (const [name, entry] of entries) {
       const lane = lanes.get(name);
+      if (lane?.out) continue;
       if (lane) leaveRoom(name, lane);
       else {
         onLeave(name, { epoch, seq });

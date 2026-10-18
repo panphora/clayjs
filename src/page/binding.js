@@ -301,9 +301,13 @@ export function createPageBinding({ schema, store, lane, me, setTimer = setTimeo
       }
     });
     for (const x of writes) {
+      const made = !blocks.has(x.id);
       const B = ensure(x.id, null, x.value);
       B.edited = true;
       if (x.del) B.removedFrom = x.text;
+      // A block this tab made (a split's second half, a paste): its text is
+      // tracked from its first unit, before the block's first release.
+      else if (made && B.heal && typeof x.value.c === "string") B.heal.created(x.value.c);
     }
     sent(mark);
     stats.writes++;
@@ -320,6 +324,8 @@ export function createPageBinding({ schema, store, lane, me, setTimer = setTimeo
       opBlock.set(e.id, id);
       const B = blocks.get(id);
       if (B && B.text && e.op.op === "set" && e.op.path.length === 2 && e.op.path[0] === "blocks") B.unechoed.push({ id: e.id, json: JSON.stringify(e.op.value), value: e.op.value, seq: null });
+      // A delete the stream has not brought back: a room loss heals it too.
+      if (B && e.op.op === "del" && e.op.path.length === 2 && e.op.path[0] === "blocks") B.unechoedDel = e.id;
     }
   }
 
@@ -345,7 +351,13 @@ export function createPageBinding({ schema, store, lane, me, setTimer = setTimeo
       for (const B of blocks.values()) for (const u of B.unechoed) if (u.seq === null && u.id <= ev.through) u.seq = ev.seq;
     }
     if (ev.phase === "refused" || ev.phase === "undone") {
-      for (const [opId, id] of opBlock) if (opId <= ev.through && (ev.from == null || opId >= ev.from)) { const B = blocks.get(id); if (B) { B.refused = true; dirty.add(id); } }
+      const hit = (opId) => opId <= ev.through && (ev.from == null || opId >= ev.from);
+      for (const [opId, id] of opBlock) if (hit(opId)) { const B = blocks.get(id); if (B) { B.refused = true; dirty.add(id); } }
+      // A refused write is out of recovery: never waited for, never healed back.
+      for (const B of blocks.values()) {
+        if (B.unechoed.length) B.unechoed = B.unechoed.filter((u) => !hit(u.id));
+        if (B.unechoedDel && hit(B.unechoedDel)) B.unechoedDel = null;
+      }
     }
   });
 
@@ -363,6 +375,7 @@ export function createPageBinding({ schema, store, lane, me, setTimer = setTimeo
       const B = blocks.get(op.id) ?? ensure(op.id, priorOf(before, op.id), op.X);
       dirty.add(op.id);
       if (op.tombstone) {
+        B.unechoedDel = null;
         if (B.text) B.heal.tombstone(at);
         else B.tomb = true;
         continue;
@@ -427,6 +440,25 @@ export function createPageBinding({ schema, store, lane, me, setTimer = setTimeo
       const B = ensure(id, next, moves.find((mv) => mv.id === id)?.X);
       dirty.add(id);
       const mine = moves.filter((mv) => mv.id === id);
+      // The lost room had the block deleted (its tombstone, or this tab's own
+      // delete the stream never brought back) and the new room has it: the
+      // delete heals like the text does, so a join's second half never comes
+      // back as a duplicate.
+      const wasGone = B.text ? B.r.tomb : B.tomb;
+      const lostDel = !first && (wasGone || (B.unechoedDel && !pending.has(B.unechoedDel))) && rawOf(next, id) && !tombOf(next, id);
+      B.unechoedDel = null;
+      if (lostDel) {
+        stats.heals++;
+        queueMicrotask(() => {
+          const mark = store.mark;
+          store.handle.update((d) => {
+            if (d.blocks) delete d.blocks[id];
+            if (d.deleted) d.deleted[id] = true;
+            else d.deleted = { [id]: true };
+          });
+          sent(mark);
+        });
+      }
       if (!B.text) {
         B.tomb = tombOf(next, id);
         continue;
@@ -494,7 +526,12 @@ export function createPageBinding({ schema, store, lane, me, setTimer = setTimeo
       else {
         if (B.text && found.node.isTextblock && isText(S.t)) {
           const E = flatten(found.node.content);
-          if (B.refused) for (const g of regions(E.c, S.c)) if (g.to > g.from && E.c.slice(g.from, g.to).trim()) notice({ kind: "refused", id, lost: E.c.slice(g.from, g.to) });
+          if (B.refused) {
+            let named = false;
+            for (const g of regions(E.c, S.c)) if (g.to > g.from && E.c.slice(g.from, g.to).trim()) { notice({ kind: "refused", id, lost: E.c.slice(g.from, g.to) }); named = true; }
+            // That text is in a notice already: the heal check never names it again.
+            if (named) B.heal.named();
+          }
           const k = B.k;
           carets.set(id, (off) => mapCaret(B.r, me, k, off, E.c));
           textSteps(tr, B, found, E, S);

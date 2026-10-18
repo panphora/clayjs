@@ -106,7 +106,9 @@ export function createRoom(sim, initialStores, { latency = () => 40, answerLaten
     room.posts++;
     const extra = refuse(clientId, frame, room);
     if (extra) return extra;
-    if (utf8(JSON.stringify(frame)) > LIMITS.bodyBytes) return { status: 413, body: { code: "too-large", error: "body" } };
+    // The host's body parser answers before the room sees the frame: no code,
+    // unlike the room's own size refusal below.
+    if (utf8(JSON.stringify(frame)) > LIMITS.bodyBytes) return { status: 413, body: { error: "request entity too large" } };
     const person = room.clients.get(clientId)?.person ?? clientId;
     if (!take(person)) { room.limited = (room.limited || 0) + 1; return { status: 429, body: { code: "rate-limited" }, retryAfter: 1 }; }
     if (frame.epoch !== undefined && frame.epoch !== room.epoch) return { status: 200, body: { stale: true, epoch: room.epoch } };

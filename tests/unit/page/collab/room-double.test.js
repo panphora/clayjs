@@ -36,12 +36,14 @@ function make({ stores = { doc: { n: 0 } }, room: roomOptions } = {}) {
   return { sim, room, connect, send, readState };
 }
 
-test("a frame whose body is over 64 KB is refused 413", async () => {
+// The host's body parser refuses it before the room sees it, with no code: a
+// client tells it from the room's own too-large refusal (round 8 review, Opus 2).
+test("a frame whose body is over 64 KB is refused 413, with no code", async () => {
   const { connect, send } = make();
   const a = connect("a");
   const res = await send(a, { epoch: "e1", name: "doc", n: 1, ops: [{ op: "set", path: ["big"], value: "x".repeat(70000) }] });
   expect(res.status).toBe(413);
-  expect(res.body.code).toBe("too-large");
+  expect(res.body.code).toBeUndefined();
 });
 
 test("41 sends at one moment: the 41st is 429, the first 40 are 200, and time refills the bucket", async () => {

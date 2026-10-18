@@ -628,7 +628,7 @@ describe("frames in flight when the room changes", () => {
 });
 
 describe("a store leaving the room", () => {
-  test("a store missing from a new state drops the ops in flight and keeps unframed ops pending", async () => {
+  test("a store missing from a new state keeps every op pending, the ops in flight too (round 8 review, Astra 1 and Opus 3)", async () => {
     const room = createRoom({ game: { s: 0 } });
     let holding = false;
     const a = client(room, "a", { s: 0 }, { wrap: lostOnce(room), held: () => holding });
@@ -643,7 +643,7 @@ describe("a store leaving the room", () => {
     room.broadcast("state", { epoch: "e1", seq: room.seq, writer: null, stores: {} });
     await settle();
     expect(a.game.status.mode).toBe("file");
-    expect(a.store.pending).toEqual([{ op: "set", path: ["flag"], value: true }]);
+    expect(a.store.pending).toEqual([{ op: "add", path: ["s"], n: 1 }, { op: "set", path: ["flag"], value: true }]);
     expect(room.posts).toHaveLength(1);
   });
 
@@ -845,7 +845,11 @@ describe("review regressions", () => {
     expect(a.store.pending).toEqual([]);
   });
 
-  test("stopping the lane drops a frame the room may have applied, so file mode never replays it", async () => {
+  // Round 8 review (Astra 1, Opus 3): leaving the room never drops a write.
+  // The frame's fate is unknown, so its op stays pending and the next save
+  // writes it. If the room did apply it, a merge of that save may count it
+  // twice: an imperfect result, never a silent loss.
+  test("stopping the lane keeps a frame the room may have applied pending, so file mode saves it", async () => {
     const room = createRoom({ game: { s: 0 } });
     let attempts = 0;
     const wrap = (post) => (frame) => {
@@ -865,12 +869,12 @@ describe("review regressions", () => {
     expect(room.stores.game).toEqual({ s: 1 });
     expect(a.lane.status.stopped).toBe(true);
     expect(a.game.status.mode).toBe("file");
-    expect(a.store.pending).toEqual([]);
+    expect(a.store.pending).toEqual([{ op: "add", path: ["s"], n: 1 }]);
     expect(room.posts).toHaveLength(1);
 
     a.game.set("flag", true);
     await settle();
-    expect(a.store.pending).toEqual([{ op: "set", path: ["flag"], value: true }]);
+    expect(a.store.pending).toEqual([{ op: "add", path: ["s"], n: 1 }, { op: "set", path: ["flag"], value: true }]);
     expect(room.posts).toHaveLength(1);
     expect(room.stores.game).toEqual({ s: 1 });
   });

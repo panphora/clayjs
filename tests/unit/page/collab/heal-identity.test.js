@@ -12,7 +12,7 @@ const all = await engines("blocks,text");
 // a types a sentence, the room restarts from the file, and an edit follows
 // inside the check window (quiet × 6 = 3 s after the new epoch).
 const typed = " The quick brown fox jumps";
-const afterLoss = (id, source, act, text, only = null) => ({
+const afterLoss = (id, source, act, text, only = null, more = {}) => ({
   id, source, text: "Start.", tabs: ["a", "b"], only,
   script: [
     { at: 600, tab: "a", caret: 6, type: typed, cps: 0 },
@@ -20,12 +20,24 @@ const afterLoss = (id, source, act, text, only = null) => ({
     { at: 2000, restart: true },
     ...act,
   ],
-  expect: { text, notices: [] },
+  expect: { text, notices: [], ...more },
 });
+
+// The tail of a split lives on as its own block, in the room and every tab
+// (round 8 review: the Enter row checked only the first half).
+const tailBlock = (tail) => ({ room, tabs }) => {
+  // The text engine has one block: its split only cuts the tail (rows.js).
+  if (![...tabs.values()].every((t) => t.blocks)) return null;
+  const v = room.stores.get("page").value;
+  const live = Object.entries(v.blocks).filter(([id]) => !(v.deleted && v.deleted[id])).map(([, b]) => b.c);
+  if (!live.includes(tail)) return `the room has no block ${JSON.stringify(tail)}: ${JSON.stringify(live)}`;
+  for (const t of tabs.values()) if (t.blocks && !t.blocks().some(([, c]) => c === tail)) return `${t.id} has no block ${JSON.stringify(tail)}`;
+  return null;
+};
 
 const ROWS = [
   afterLoss("own backspace of the last word", "Opus 3", [{ at: 2600, tab: "a", replace: " jumps", text: "" }], "Start. The quick brown fox"),
-  afterLoss("own Enter mid-paragraph", "Opus 3", [{ at: 2600, tab: "a", split: 16 }], "Start. The quick"),
+  afterLoss("own Enter mid-paragraph", "Opus 3", [{ at: 2600, tab: "a", split: 16 }], "Start. The quick", null, { tail: { a: " brown fox jumps" }, check: tailBlock(" brown fox jumps") }),
   afterLoss("peer deletes a's word", "Opus 3", [{ at: 2600, tab: "b", replace: " brown", text: "" }], "Start. The quick fox jumps"),
   afterLoss("own edit of a middle word", "Opus 3", [{ at: 2600, tab: "a", caret: { after: "quick" }, type: "est", cps: 0 }], "Start. The quickest brown fox jumps"),
   afterLoss("own undo of the typing", "Opus 3", [{ at: 2600, tab: "a", undo: true }], "Start.", "blocks"),
@@ -186,13 +198,100 @@ test("a format keeps the ids of the text it covers: not an own delete, so a late
   a.binding.dispose(); a.editor.destroy(); a.lane.stop();
 });
 
+// Round 8 review, Astra 4: repeated text. This tab types "the " in front of
+// "the end."; a room rebuilt from "the end." holds one "the ", and an
+// alignment cannot tell which copy it is. Not proven kept, so it gets a notice.
+test("Astra 4: a lost copy of repeated text gets a notice", () => {
+  const h = harness("the end.");
+  h.write("a", 0, 0, "the ");
+  expect(h.r.S.c).toBe("the the end.");
+  h.lose("the end.");
+  expect(h.notices.map((t) => t.trim())).toEqual(["the"]);
+});
+
+test("a join that keeps all the text, repeated words included, gives no notice", () => {
+  const h = harness("the end.");
+  h.write("a", 0, 0, "the ");
+  h.lose("the the end.");
+  expect(h.notices).toEqual([]);
+});
+
+// Round 8 review, Opus 5: Enter mid-paragraph, then typing into the new block
+// within 10 ms, before its first release. Its text is tracked from the first
+// keystroke, so a loss that drops the typing gets a notice.
+test("Opus 5: text typed into a block this tab just made, before its first release, is tracked", async () => {
+  const { Sim, createRoom } = await import("./room-double.js");
+  const { engine, find } = await import("./blocks/editor-tab.js");
+  const { state: pmState } = await import("../../../../src/vendor/prosemirror.vendor.js");
+  const sim = new Sim(3), initial = engine.initial("The quick brown fox jumps");
+  const room = createRoom(sim, { page: JSON.parse(JSON.stringify(initial)) }, { latency: () => 60, answerLatency: () => 60 });
+  const a = engine.makeTab(sim, room, "a", JSON.parse(JSON.stringify(initial)));
+  a.start();
+  await sim.run(500);
+  let tail;
+  sim.at(600, () => { tail = a.split(9); });
+  sim.at(610, () => {
+    const ed = a.editor;
+    const ids = [];
+    ed.state.doc.forEach((n) => ids.push(n.attrs.id));
+    const b = find(ed.state.doc, ids[1]);
+    ed.dispatch(ed.state.tr.setSelection(pmState.TextSelection.create(ed.state.doc, b.pos + b.node.nodeSize - 1)));
+    a.input(" more");
+  });
+  await sim.run(4000);
+  const order = [];
+  a.editor.state.doc.forEach((n) => order.push([n.attrs.id, n.textContent]));
+  const B = a.binding.blocks.get(order[1][0]);
+  expect(B.r.S.c).toBe(" brown fox jumps more");
+  expect(B.heal.ids.agreed.every(Boolean)).toBe(true);
+  B.heal.arm();
+  B.heal.join({ t: "paragraph", c: tail }, 999, { epoch: "lost", since: 0 });
+  B.heal.released(tail);
+  const lost = B.heal.lostRuns();
+  a.binding.dispose(); a.editor.destroy(); a.lane.stop();
+  expect(lost).toEqual([" more"]);
+});
+
+// Round 8 review, Opus 6: a join (Backspace at the start of q) after the last
+// checkpoint, then one room loss. The heal carries q's deletion as well as p's
+// text, so q never comes back as a duplicate of the joined text.
+test("Opus 6: a join across a room loss does not duplicate the joined text", async () => {
+  const { Sim, createRoom } = await import("./room-double.js");
+  const { engine, find } = await import("./blocks/editor-tab.js");
+  const sim = new Sim(3);
+  const initial = { blocks: { p: { t: "paragraph", pos: "M", c: "Start." }, q: { t: "paragraph", pos: "V", c: " world" } }, deleted: {} };
+  const room = createRoom(sim, { page: JSON.parse(JSON.stringify(initial)) }, { latency: () => 60, answerLatency: () => 60 });
+  const a = engine.makeTab(sim, room, "a", JSON.parse(JSON.stringify(initial)));
+  const b = engine.makeTab(sim, room, "b", JSON.parse(JSON.stringify(initial)));
+  a.start(); b.start();
+  await sim.run(500);
+  sim.at(1000, () => {
+    const ed = a.editor, p = find(ed.state.doc, "p");
+    const end = p.pos + p.node.nodeSize - 1;
+    ed.dispatch(ed.state.tr.delete(end, end + 2));
+  });
+  await sim.run(1500);
+  sim.at(2000, () => room.restart({ page: JSON.parse(JSON.stringify(initial)) }));
+  await sim.run(20000);
+  await sim.idle(5000);
+  const v = room.stores.get("page").value;
+  const out = { a: a.blocks(), b: b.blocks(), room: Object.entries(v.blocks).filter(([id]) => !v.deleted[id]).map(([id, x]) => [id, x.c]) };
+  for (const t of [a, b]) { t.binding.dispose(); t.editor.destroy(); t.lane.stop(); }
+  const one = [["p", "Start. world"]];
+  expect(out).toEqual({ a: one, b: one, room: one });
+});
+
 // Two room losses 1 s apart while three tabs type, each typed character a code
 // point typed once, so a character's text is its identity. A tab's heal check
 // (its notices carry no seq) may name only characters the text lacks. In the
 // binding, the heal a tab sends after a loss once took the ids of the joined
 // text instead of the healed text, so its own heal came back without ids and
 // the check named text that was there.
-describe.each(all.map((e) => [e.name, e]))("heal check notices only absent text, %s engine", (_name, engine) => {
+// The seeds whose two losses destroy typed text (ran: the rest lose none), so
+// the silent check above has something to catch on every engine.
+const LOSES = { blocks: [2, 5, 6], text: [2, 5, 6] };
+
+describe.each(all.map((e) => [e.name, e]))("heal check notices only absent text, and names all of it, %s engine", (_name, engine) => {
   test.each([1, 2, 3, 4, 5, 6])("two losses 1 s apart, seed %i", async (n) => {
     const { Sim, createRoom } = await import("./room-double.js");
     const sim = new Sim(n * 7919);
@@ -218,9 +317,17 @@ describe.each(all.map((e) => [e.name, e]))("heal check notices only absent text,
     await sim.run(30000);
     await sim.idle(5000);
     const final = room.stores.get("page").value.blocks.p.c;
-    const named = tabs.flatMap((t) => t.allNotices().filter((x) => x.kind === "heal" && x.seq === undefined).map((x) => x.lost)).join("");
-    const kept = [...new Set(named)].filter((ch) => ch.trim() && final.includes(ch));
+    const heals = tabs.flatMap((t) => t.allNotices().filter((x) => x.kind === "heal" && x.seq === undefined).map((x) => x.lost)).join("");
+    const named = tabs.flatMap((t) => t.allNotices().map((x) => x.lost ?? "")).join("");
+    const kept = [...new Set(heals)].filter((ch) => ch.trim() && final.includes(ch));
+    // Every typed character the final text lacks is in a notice: with every
+    // notice suppressed, this fails on the seeds that lose text (round 8 review).
+    const lost = [];
+    for (let c = 0x4e00; c < code; c++) { const ch = String.fromCodePoint(c); if (!final.includes(ch)) lost.push(ch); }
+    const silent = lost.filter((ch) => !named.includes(ch));
     for (const t of tabs) { if (t.binding) { t.binding.dispose(); t.editor.destroy(); } t.lane.stop(); }
     expect(kept).toEqual([]);
+    expect(silent).toEqual([]);
+    if (LOSES[_name]?.includes(n)) expect(lost.length).toBeGreaterThan(0);
   }, 60_000);
 });
