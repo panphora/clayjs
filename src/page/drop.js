@@ -11,7 +11,12 @@ function chainAfter(ents, byId, k) {
   const chain = [];
   const n = ents[k].node;
   if (isToggle(n) && n.attrs.open && !ents[k].hidden) chain.unshift(n.attrs.id);
-  for (let p = parentOf(n); p !== null; p = parentOf(ents[byId.get(p)].node)) chain.unshift(p);
+  for (let p = parentOf(n); p !== null && !chain.includes(p);) {
+    const e = ents[byId.get(p)];
+    if (!e) break;
+    chain.unshift(p);
+    p = parentOf(e.node);
+  }
   const out = [null];
   for (const id of chain) {
     const e = ents[byId.get(id)];

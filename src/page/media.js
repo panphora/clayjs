@@ -308,6 +308,7 @@ export class ImageView {
     const doc = view.dom.ownerDocument;
     this.dom = doc.createElement("figure");
     this.dom.className = "page-image";
+    this.dom.addEventListener("dragstart", (event) => { event.preventDefault(); event.stopPropagation(); });
     this.dom.draggable = false;
     this.frame = doc.createElement("div");
     this.frame.className = "page-image-frame";
@@ -407,6 +408,7 @@ export class FileView {
     const doc = view.dom.ownerDocument;
     this.dom = doc.createElement("div");
     this.dom.className = "page-file";
+    this.dom.addEventListener("dragstart", (event) => { event.preventDefault(); event.stopPropagation(); });
     this.link = doc.createElement("a");
     this.link.className = "page-file-link";
     this.link.target = "_blank";

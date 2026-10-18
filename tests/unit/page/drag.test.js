@@ -291,3 +291,59 @@ describe("the editor around it", () => {
     expect(Object.keys(blockMap(view.state.doc)).sort()).toEqual(["a", "b", "c", "d"]);
   });
 });
+
+describe("review regressions", () => {
+  test("F2 a deleted dragged child cannot recruit the next sibling", () => {
+    const view = page([["t", "toggle", "T", { open: true }], ["b", "paragraph", "B", { parent: "t" }], ["c", "paragraph", "C"], ["d", "paragraph", "D"]]);
+    try {
+      drag(view, 0, 114);
+      const at = view.state.doc.child(0).nodeSize;
+      view.dispatch(view.state.tr.delete(at, at + view.state.doc.child(1).nodeSize).setMeta(REMOTE, true));
+      layout(view);
+      grip(view).dispatchEvent(ptr("pointermove", { clientX: 5, clientY: 84 }));
+      drop(view);
+      expect(shape(view)).toBe("C | D | T");
+    } finally { view.destroy(); }
+  });
+
+  test("F2 separating dragged roots cancels rather than dragging a replacement", () => {
+    const view = page(FOUR);
+    try {
+      view.dispatch(view.state.tr.setSelection(selectBlocks(view.state.doc, 0, 1)));
+      drag(view, 0, 114);
+      const a = view.state.doc.child(0);
+      const tr = view.state.tr.delete(0, a.nodeSize);
+      tr.insert(tr.doc.content.size, a).setMeta(REMOTE, true);
+      view.dispatch(tr);
+      const before = view.state.doc;
+      layout(view);
+      drop(view);
+      expect(view.state.doc === before).toBe(true);
+      expect(live(view)).toBe("Move cancelled");
+    } finally { view.destroy(); }
+  });
+
+  test.each(["pointercancel", "lostpointercapture"])("F3 %s cancels without moving blocks", (event) => {
+    const view = page(FOUR);
+    try {
+      const before = view.state.doc;
+      drag(view, 0, 84);
+      grip(view).dispatchEvent(ptr(event));
+      expect(view.state.doc === before).toBe(true);
+      expect(shell(view).classList.contains("is-dragging")).toBe(false);
+      expect(line(view).hidden).toBe(true);
+      expect(live(view)).toBe("Move cancelled");
+      drop(view);
+      expect(view.state.doc === before).toBe(true);
+    } finally { view.destroy(); }
+  });
+
+  test.each([".page-image", ".page-image-caption", ".page-file-link"])("F11 native drag from %s is prevented outside block mode", (selector) => {
+    const view = page([["p", "paragraph", "P"], ["i", "image", "", { src: "https://example.test/i.png", caption: "caption" }], ["f", "file", "", { src: "https://example.test/f", name: "file" }]]);
+    try {
+      const event = new Event("dragstart", { bubbles: true, cancelable: true });
+      shell(view).querySelector(selector).dispatchEvent(event);
+      expect(event.defaultPrevented).toBe(true);
+    } finally { view.destroy(); }
+  });
+});

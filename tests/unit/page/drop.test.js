@@ -180,3 +180,10 @@ describe("summaryTarget", () => {
     expect(summaryTarget(s, ents, 0, 0, 99)).toBeNull();
   });
 });
+
+test("F2 dangling remote parents do not crash gap target calculation", () => {
+  const s = make([["a", "paragraph", "A"], ["b", "paragraph", "B", { parent: "missing" }]]);
+  let targets;
+  expect(() => { targets = gapTargets(s, outline(s.doc), 0, 0, -1); }).not.toThrow();
+  expect(Array.isArray(targets)).toBe(true);
+});

@@ -1,4 +1,4 @@
-import { outline, siblingSpan, BlockSelection } from "./blocks.js";
+import { outline, siblingSpan, BlockSelection, captureSpan, resolveSpan } from "./blocks.js";
 import { selectBlocks, asStep } from "./blocksel.js";
 import { gapTargets, summaryTarget, pickTarget, moveSpanTo } from "./drop.js";
 import { announce } from "./announce.js";
@@ -30,6 +30,7 @@ export class BlockDrag {
     this.state = null;
     this.onMove = (e) => this.move(e);
     this.onUp = (e) => this.end(e);
+    this.onCancel = (e) => { if (e.pointerId === this.state?.pointer) this.cancel(); };
     this.onKey = (e) => {
       if (e.key === "Escape" && this.state?.active) {
         e.preventDefault();
@@ -47,14 +48,15 @@ export class BlockDrag {
     const inSel = sel instanceof BlockSelection && ents[index].at >= sel.from && ents[index].end <= sel.to;
     const { lo, hi } = inSel ? sel.span(st.doc) : siblingSpan(ents, index, index);
     this.state = {
-      index, lo, hi, id: ents[lo].node.attrs.id, touch: event.pointerType === "touch",
+      index, span: captureSpan(ents, lo, hi), touch: event.pointerType === "touch",
       pointer: event.pointerId, x0: event.clientX, y0: event.clientY, x: event.clientX, y: event.clientY,
       active: false, raf: 0, gap: undefined, targets: [], target: null,
     };
     this.grip.setPointerCapture?.(event.pointerId);
     this.grip.addEventListener("pointermove", this.onMove);
     this.grip.addEventListener("pointerup", this.onUp);
-    this.grip.addEventListener("pointercancel", this.onUp);
+    this.grip.addEventListener("pointercancel", this.onCancel);
+    this.grip.addEventListener("lostpointercapture", this.onCancel);
     event.preventDefault();
   }
 
@@ -74,9 +76,11 @@ export class BlockDrag {
   begin() {
     const s = this.state;
     if (!s || s.active) return;
+    const st = this.view.state, ents = outline(st.doc);
+    const span = resolveSpan(ents, s.span);
+    if (!span) return this.cancel();
     s.active = true;
-    const st = this.view.state;
-    this.view.dispatch(st.tr.setSelection(selectBlocks(st.doc, s.lo, s.hi)));
+    this.view.dispatch(st.tr.setSelection(selectBlocks(st.doc, span.lo, span.hi)));
     this.shell.classList.add("is-dragging");
     const probe = this.shell.appendChild(document.createElement("div"));
     probe.style.cssText = "position:absolute;visibility:hidden;width:var(--page-indent)";
@@ -90,9 +94,10 @@ export class BlockDrag {
 
   track() {
     const s = this.state, view = this.view, st = view.state;
-    const ents = outline(st.doc);
-    const lo = ents.findIndex((e) => e.node.attrs.id === s.id);
-    const hi = lo + (s.hi - s.lo);
+    if (!s) return;
+    const ents = outline(st.doc), span = resolveSpan(ents, s.span);
+    if (!span) return this.cancel();
+    const { lo, hi } = span;
     let next = -1, line = null, over = null;
     for (const e of ents) {
       if (e.hidden) continue;
@@ -153,12 +158,13 @@ export class BlockDrag {
       return;
     }
     this.track();
+    if (this.state !== s) return;
     const target = s.target;
     const st = this.view.state, ents = outline(st.doc);
-    const lo = ents.findIndex((e) => e.node.attrs.id === s.id);
+    const span = resolveSpan(ents, s.span);
     this.stop();
-    if (!target || lo < 0) return;
-    const hi = lo + (s.hi - s.lo);
+    if (!target || !span) return;
+    const { lo, hi } = span;
     const same = !target.open && (target.at === ents[lo].at || target.at === ents[hi].end) && target.parent === (ents[lo].node.attrs.parent ?? null)
       && (ents[lo].node.type.name !== "list_item" || target.indent === ents[lo].node.attrs.indent);
     if (same) return;
@@ -176,16 +182,17 @@ export class BlockDrag {
   stop() {
     const s = this.state;
     if (!s) return;
+    this.state = null;
     cancelAnimationFrame(s.raf);
-    this.grip.releasePointerCapture?.(s.pointer);
     this.grip.removeEventListener("pointermove", this.onMove);
     this.grip.removeEventListener("pointerup", this.onUp);
-    this.grip.removeEventListener("pointercancel", this.onUp);
+    this.grip.removeEventListener("pointercancel", this.onCancel);
+    this.grip.removeEventListener("lostpointercapture", this.onCancel);
+    this.grip.releasePointerCapture?.(s.pointer);
     window.removeEventListener("keydown", this.onKey, true);
     this.shell.classList.remove("is-dragging");
     delete this.shell.dataset.drop;
     this.line.hidden = true;
-    this.state = null;
   }
 
   destroy() {
