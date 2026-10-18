@@ -1,0 +1,188 @@
+import { jest } from "@jest/globals";
+import { state as pmState } from "../../../src/vendor/prosemirror.vendor.js";
+import { schema } from "../../../src/page/schema.js";
+import { safeHref, safeSrc, isUrlText, linkRange, setLinkTr, linkKey } from "../../../src/page/link.js";
+import { editor, key, keyOn, posOf, select } from "./view-helpers.js";
+
+const { TextSelection } = pmState;
+const LINK = schema.marks.link;
+
+/**
+ * Link addresses and the link plugin's model: what is safe to store, the run of
+ * text a link covers, URL paste, Mod+click and the pending highlight.
+ */
+
+afterEach(() => { document.body.innerHTML = ""; });
+
+describe("safeHref", () => {
+  test.each([
+    ["https://a.io/x?y=1#z", "https://a.io/x?y=1#z"],
+    ["HTTP://A.IO", "HTTP://A.IO"],
+    ["mailto:me@a.io", "mailto:me@a.io"],
+    ["tel:+15551234", "tel:+15551234"],
+    ["/docs/page", "/docs/page"],
+    ["#section", "#section"],
+    ["example.com", "https://example.com"],
+    ["//cdn.example.com:8080/x", "https://cdn.example.com:8080/x"],
+    ["//cdn.example.com/x", "https://cdn.example.com/x"],
+    ["me@a.io", "mailto:me@a.io"],
+    ["  https://a.io  ", "https://a.io"],
+    ["javascript:alert(1)", null],
+    ["JaVaScRiPt:alert(1)", null],
+    ["java\tscript:alert(1)", null],
+    ["data:text/html,<b>x</b>", null],
+    ["vbscript:x", null],
+    ["file:///etc/hosts", null],
+    ["", null],
+    ["two words", null],
+  ])("%j gives %j", (raw, want) => {
+    expect(safeHref(raw)).toBe(want);
+  });
+
+  test("isUrlText accepts a single address and nothing with spaces or only a word", () => {
+    expect(isUrlText("https://a.io")).toBe(true);
+    expect(isUrlText("b.io")).toBe(true);
+    expect(isUrlText("hello")).toBe(false);
+    expect(isUrlText("hello there")).toBe(false);
+    expect(isUrlText("javascript:alert(1)")).toBe(false);
+  });
+
+  test("safeSrc lets a small raster data: image through, refuses svg, scripts and huge payloads", () => {
+    expect(safeSrc("data:image/png;base64,AAAA")).toBe("data:image/png;base64,AAAA");
+    expect(safeSrc("data:image/svg+xml;base64,AAAA")).toBeNull();
+    expect(safeSrc("javascript:alert(1)")).toBeNull();
+    expect(safeSrc(`data:image/png;base64,${"A".repeat(2_100_001)}`)).toBeNull();
+    expect(safeSrc("https://a.io/p.png")).toBe("https://a.io/p.png");
+    expect(safeSrc("")).toBeNull();
+  });
+});
+
+describe("linkRange and setLinkTr", () => {
+  const withLinks = () => {
+    const view = editor([["p", "paragraph", "go here now"]]);
+    const a = posOf(view, "p");
+    view.dispatch(view.state.tr.addMark(a + 3, a + 7, LINK.create({ href: "https://a.io" })));
+    return view;
+  };
+
+  test("linkRange returns the whole run of the link from inside it or its left edge, and null outside it or at its right edge", () => {
+    const view = withLinks();
+    const a = posOf(view, "p");
+    expect(linkRange(view.state.doc, a + 5)).toEqual({ from: a + 3, to: a + 7, href: "https://a.io" });
+    expect(linkRange(view.state.doc, a + 3)).toEqual({ from: a + 3, to: a + 7, href: "https://a.io" });
+    expect(linkRange(view.state.doc, a + 7)).toBeNull();
+    expect(linkRange(view.state.doc, a + 1)).toBeNull();
+    expect(linkRange(view.state.doc, a + 9)).toBeNull();
+  });
+
+  test("a link split by a bold stretch is still one run", () => {
+    const view = withLinks();
+    const a = posOf(view, "p");
+    view.dispatch(view.state.tr.addMark(a + 4, a + 6, schema.marks.strong.create()));
+    expect(linkRange(view.state.doc, a + 3)).toEqual({ from: a + 3, to: a + 7, href: "https://a.io" });
+  });
+
+  test("setLinkTr replaces the link on a range and an empty href removes it", () => {
+    const view = withLinks();
+    const a = posOf(view, "p");
+    view.dispatch(setLinkTr(view.state, a + 3, a + 7, "https://b.io"));
+    expect(linkRange(view.state.doc, a + 5).href).toBe("https://b.io");
+    view.dispatch(setLinkTr(view.state, a + 3, a + 7, null));
+    expect(linkRange(view.state.doc, a + 5)).toBeNull();
+  });
+});
+
+describe("the link plugin", () => {
+  const paste = (view, text) => !!view.someProp("handlePaste", (f) => f(view, { clipboardData: { getData: (t) => (t === "text/plain" ? text : "") } }, null));
+  const page = () => editor([["p", "paragraph", "go here now"], ["c", "code_block", "x.io"]]);
+
+  test("pasting a URL over a text selection links it", () => {
+    const view = page();
+    const a = posOf(view, "p");
+    select(view, a, a + 2);
+    expect(paste(view, "https://a.io/x")).toBe(true);
+    expect(linkRange(view.state.doc, a + 1).href).toBe("https://a.io/x");
+    expect(view.state.doc.child(0).textContent).toBe("go here now");
+  });
+
+  test("pasting a URL at a caret inserts it as linked text", () => {
+    const view = page();
+    select(view, posOf(view, "p", true));
+    expect(paste(view, "b.io")).toBe(true);
+    expect(view.state.doc.child(0).textContent).toBe("go here nowb.io");
+    expect(linkRange(view.state.doc, view.state.selection.head - 1).href).toBe("https://b.io");
+  });
+
+  test("a pasted URL is one undo step", () => {
+    const view = page();
+    const a = posOf(view, "p");
+    select(view, a, a + 2);
+    paste(view, "https://a.io");
+    key(view, "z", { ctrlKey: true });
+    expect(linkRange(view.state.doc, a + 1)).toBeNull();
+  });
+
+  test("ordinary text, a javascript: address and a URL in code take the normal paste", () => {
+    const view = page();
+    select(view, posOf(view, "p"));
+    expect(paste(view, "hello there")).toBe(false);
+    expect(paste(view, "javascript:alert(1)")).toBe(false);
+    select(view, posOf(view, "c"));
+    expect(paste(view, "c.io")).toBe(false);
+  });
+
+  test("a clipboard that carries files is left to the upload code even when its text looks like an address", () => {
+    const view = page();
+    select(view, posOf(view, "p"));
+    const data = { files: [{}], getData: (t) => (t === "text/plain" ? "note.txt" : "") };
+    expect(!!linkKey.get(view.state).props.handlePaste(view, { clipboardData: data })).toBe(false);
+  });
+
+  test("a URL over a selection that spans two blocks takes the normal paste", () => {
+    const view = page();
+    select(view, posOf(view, "p"), posOf(view, "c"));
+    expect(paste(view, "https://a.io")).toBe(false);
+  });
+
+  test("Mod+K is swallowed even when there is nothing to open", () => {
+    const view = page();
+    select(view, posOf(view, "c"));
+    expect(key(view, "k", { ctrlKey: true })).toBe(true);
+  });
+
+  test("Mod+click on a link opens it in a new tab with noopener, a plain click does not", () => {
+    const view = page();
+    const a = posOf(view, "p");
+    view.dispatch(view.state.tr.addMark(a + 3, a + 7, LINK.create({ href: "https://a.io" })));
+    const open = jest.fn();
+    view.dom.ownerDocument.defaultView.open = open;
+    const click = (init) => view.someProp("handleClick", (f) => f(view, a + 5, init));
+    expect(click({ ctrlKey: false, metaKey: false })).toBeFalsy();
+    expect(open).not.toHaveBeenCalled();
+    expect(click({ ctrlKey: true })).toBe(true);
+    expect(open).toHaveBeenCalledWith("https://a.io", "_blank", "noopener,noreferrer");
+  });
+
+  test("the pending range is drawn, and it maps through an edit above it", () => {
+    const view = page();
+    const a = posOf(view, "p");
+    view.dispatch(view.state.tr.setMeta(linkKey, { from: a + 3, to: a + 7 }));
+    expect(view.dom.querySelectorAll(".page-link-pending").length).toBe(1);
+    view.dispatch(view.state.tr.insertText("xy", a));
+    expect(linkKey.getState(view.state)).toEqual({ from: a + 5, to: a + 9 });
+    view.dispatch(view.state.tr.setMeta(linkKey, null));
+    expect(view.dom.querySelectorAll(".page-link-pending").length).toBe(0);
+  });
+
+  test("the clipboard parser drops a pasted javascript: link and keeps its text", () => {
+    const view = page();
+    const slice = view.someProp("clipboardParser", (p) => p).parseSlice(
+      Object.assign(document.createElement("div"), { innerHTML: '<p>see <a href="javascript:alert(1)">here</a> and <a href="https://ok.io">ok</a></p>' }),
+      { context: view.state.doc.resolve(1) },
+    );
+    const links = [];
+    slice.content.descendants((n) => { n.marks.forEach((m) => { if (m.type === LINK) links.push(m.attrs.href); }); });
+    expect(slice.content.textBetween(0, slice.content.size, " ")).toContain("see here and ok");
+    expect(links).toEqual(["https://ok.io"]);
+  });
+});

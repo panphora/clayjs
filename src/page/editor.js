@@ -11,6 +11,7 @@ import { schema } from "./schema.js";
 import { identityPlugin, docFromBlocks, blockMap, keyBetween, newId } from "./model.js";
 import { blockKeys, structurePlugin, collapsePlugin, pastePlugin, STEP } from "./blocks.js";
 import { chromePlugin } from "./chrome.js";
+import { linkPlugin } from "./link.js";
 import { blockSelectionPlugin } from "./blocksel.js";
 import { markdownPlugin, backspaceToParagraph } from "./markdown.js";
 
@@ -106,6 +107,7 @@ ${INDENTS.map((n) => `.page-editor .page-li[data-indent="${n}"] { --li-indent: $
 .page-editor.ProseMirror-hideselection { caret-color: transparent; }
 .page-editor.ProseMirror-hideselection *::selection { background: transparent; }
 .page-editor .page-block-selected { background: var(--page-block-selected, rgba(88, 120, 170, 0.12)); box-shadow: -6px 0 0 var(--page-block-selected, rgba(88, 120, 170, 0.12)), 6px 0 0 var(--page-block-selected, rgba(88, 120, 170, 0.12)); border-radius: 4px; }
+.page-editor .page-link-pending { background: var(--page-selection); }
 .page-live { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .page-scrim { display: none; }
 .page-shell [hidden] { display: none !important; }
@@ -148,6 +150,7 @@ const markKeys = {
 export function pagePlugins() {
   return [
     chromePlugin(),
+    linkPlugin(),
     blockSelectionPlugin(),
     markdownPlugin(),
     keymap.keymap(markKeys),
