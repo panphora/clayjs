@@ -163,6 +163,17 @@ function kindOf(X, me) {
  * @param {(lost: string) => void} o.notice - one heal notice, per run typed;
  *   none for a block that is gone, whose `removed` notice holds its text
  */
+const LONG_WORD = 64;
+const segmenter = typeof Intl !== "undefined" && Intl.Segmenter ? new Intl.Segmenter(undefined, { granularity: "word" }) : null;
+
+// [start, end) UTF-16 offsets of each word segment of text, in order, covering it.
+function wordSegments(text) {
+  if (segmenter) return Array.from(segmenter.segment(text), (s) => [s.index, s.index + s.segment.length]);
+  const out = [];
+  for (const m of text.matchAll(/\s|\S+/gu)) out.push([m.index, m.index + m[0].length]);
+  return out;
+}
+
 export function createHealCheck({ r, me, quiet = 500, setTimer, clearTimer, ready, notice }) {
   let next = 1;
   let view = new Array(r.S ? r.S.c.length : 0).fill(0);
@@ -342,8 +353,10 @@ export function createHealCheck({ r, me, quiet = 500, setTimer, clearTimer, read
   };
 
   // What a check names, one text a run: the lost units, each widened to the
-  // whole word it is in, with the space before it. A word is the run's units
-  // as they stand (this tab's and peers' deletes left out), split at spaces.
+  // whole word it is in, with the space before it. A word is a word segment of
+  // the run's units as they stand (this tab's and peers' deletes left out), so
+  // CJK splits into its words; a word over LONG_WORD units (a URL, base64)
+  // names only its lost units. One pass a run.
   function lostRuns() {
     if (!risk) return [];
     const shown = new Set(view.filter(Boolean));
@@ -357,23 +370,20 @@ export function createHealCheck({ r, me, quiet = 500, setTimer, clearTimer, read
       if (!members.has(run)) members.set(run, []);
       members.get(run).push(id);
     }
-    const space = (id) => !chOf.get(id).trim();
     const runs = new Map();
     for (const run of new Set([...lost].map((id) => runOf.get(id)))) {
       const ids = members.get(run).sort((a, b) => a - b);
+      const units = ids.map((id) => chOf.get(id));
       const named = new Uint8Array(ids.length);
-      for (let i = 0; i < ids.length; i++) {
-        if (!lost.has(ids[i])) continue;
-        named[i] = 1;
-        if (space(ids[i])) continue;
-        let lo = i, hi = i;
-        while (lo > 0 && !space(ids[lo - 1])) lo--;
-        while (hi < ids.length - 1 && !space(ids[hi + 1])) hi++;
-        if (lo > 0) lo--;
-        for (let k = lo; k <= hi; k++) named[k] = 1;
+      for (const [start, end] of wordSegments(units.join(""))) {
+        let any = false;
+        for (let k = start; k < end; k++) if (lost.has(ids[k])) { named[k] = 1; any = true; }
+        if (!any || end - start > LONG_WORD || !units[start].trim()) continue;
+        named.fill(1, start, end);
+        if (start > 0 && !units[start - 1].trim()) named[start - 1] = 1;
       }
       let text = "";
-      for (let i = 0; i < ids.length; i++) if (named[i]) text += chOf.get(ids[i]);
+      for (let i = 0; i < ids.length; i++) if (named[i]) text += units[i];
       runs.set(run, text);
     }
     return [...runs.entries()].sort((x, y) => x[0] - y[0]).map(([, t]) => t).filter((t) => t.trim());
