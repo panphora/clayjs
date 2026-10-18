@@ -5,6 +5,7 @@
 // ops when the save that carried them is accepted (never from an incoming frame),
 // and takes the values other tabs saved or relayed from each live-sync frame.
 
+import { parseBy, frameSet, descendants, unionRanges, formatBy } from "../live/provenance.js";
 import { createStore } from "../live/store.js";
 import { serializeLive, stampOf, parseStamp, textHash } from "../live/ops.js";
 import { onSnapshot } from "../core/snapshot.js";
@@ -21,6 +22,37 @@ import { localTransport, localLaneSupported } from "../live/local-lane.js";
 
 const NAME = /^[A-Za-z0-9_.:-]{1,64}$/;
 const entries = new Map();
+
+const captureAuthor = 'save_' + [...crypto.getRandomValues(new Uint32Array(4))].map((n) => n.toString(16).padStart(8, '0')).join('');
+let captureNumber = 0;
+
+function lineageOf(element) {
+  const at = parseStamp(element.getAttribute('live-at'));
+  if (!at || at.hash !== hashOfText(element.textContent)) return null;
+  const raw = element.getAttribute('live-by');
+  const by = raw === null ? null : parseBy(raw);
+  if (raw !== null && !by) return null;
+  if (by && by.v !== 2) return { disk: true };
+  return { epoch: at.epoch, seq: at.seq, frames: frameSet(by), ancestors: descendants(by) };
+}
+
+function captureLineage(entry) {
+  const base = entry.leftAt;
+  if (!base || base.disk) return null;
+  const pending = fast?.pendingFrames(entry.store.name, base) ?? { frames: [], complete: true };
+  if (!pending.complete) return null;
+  const frames = unionRanges(base.frames ?? [], pending.frames);
+  const ancestors = base.ancestors ?? [];
+  const text = serializeLive(entry.store.value);
+  const key = JSON.stringify([base.epoch, base.seq, frames, ancestors, text]);
+  if (entry.capture?.key === key) return entry.capture.value;
+  const by = { v: 2, frames, ancestors, capture: [captureAuthor, ++captureNumber] };
+  const encoded = formatBy(by);
+  const value = encoded ? { at: stampOf(base.epoch, base.seq, text), by: encoded } : null;
+  entry.capture = { key, value };
+  return value;
+}
+
 
 // What the save on the wire captured, per saved store: { mode, mark, canonical,
 // at }. Set by the save's own capture, taken by its acceptance or its failure.
@@ -120,7 +152,10 @@ function endPin(pin, maybeLanded) {
   for (const [name, saved] of pin) {
     const entry = entries.get(name);
     if (!entry || saved.mode !== "file") continue;
-    if (maybeLanded) dropThrough(entry, saved.mark);
+    if (maybeLanded) {
+      if (entry.store.handle.status.mode === "file") entry.leftAt = null;
+      dropThrough(entry, saved.mark);
+    }
     if (entry.store.handle.status.mode === "fast") fast?.release(name);
   }
 }
@@ -138,7 +173,7 @@ function laneOptions(transport) {
     onCheckpoint: () => checkpoints.soon(),
     onLeave: (name, at) => {
       const entry = entries.get(name);
-      if (entry) entry.leftAt = at;
+      if (entry?.store.handle.status.mode === "fast") entry.leftAt = { ...at, frames: [], ancestors: [] };
     },
     held: heldBySave,
   };
@@ -254,14 +289,14 @@ function hashOfText(text) {
   }
 }
 
-function receive(entry, text, source, through) {
+function receive(entry, text, source, dropIds) {
   let value;
   try {
     value = HyperMorph.parseJsonRelaxed(text);
   } catch {
     return;
   }
-  if (entry.store.rebase(value, { source, ...(through > 0 && { through }) })) entry.framesSince = true;
+  if (entry.store.rebase(value, { source, ...(dropIds?.length && { dropIds }) })) entry.framesSince = true;
 }
 
 export function live(name) {
@@ -278,8 +313,11 @@ export function live(name) {
   }
   const store = createStore({ name, value, ephemeral: tag.ephemeral });
   const layout = tag.element.getAttribute("live-format") === "lines" ? "lines" : text.includes("\n") ? "pretty" : "line";
-  const entry = { store, layout, framesSince: false, last: 0, landed: 0, leftAt: null };
+  const entry = { store, layout, framesSince: false, last: 0, landed: 0, leftAt: lineageOf(tag.element) };
   entries.set(name, entry);
+  store.onRebase((event) => {
+    if (store.handle.status.mode === "file" && ["undone", "refused", "decided"].includes(event.cause)) entry.leftAt = null;
+  });
   if (!tag.ephemeral) store.onLocal(() => checkpoints.changed());
   store.onLocal((ops) => fast?.local(name, ops, store.mark));
   store.handle.on("change", () => {
@@ -306,23 +344,15 @@ onSnapshot((clone) => {
     if (entry.store.handle.status.mode === "fast" && fast) {
       tag.element.setAttribute("live-at", stampOf(fast.status.epoch, fast.status.seq, serializeLive(entry.store.authoritative)));
       tag.element.removeAttribute("live-by");
-    } else if (entry.leftAt?.disk) {
-      // Out of the room, after a save of it was accepted: the value descends
-      // from the file on disk, which holds this tab's frames and the room's
-      // merge of them. No stamp: the host replays only what the file lacks.
-      tag.element.removeAttribute("live-at");
-      tag.element.removeAttribute("live-by");
-    } else if (entry.leftAt) {
-      // Left the room: the value descends from the room position it left at,
-      // and holds every frame this tab gave the store (live-by), landed or not:
-      // the host's merge never replays those over it. live-by sits only beside
-      // a stamp whose hash is this value's, so the host can tell the capture
-      // from an edit of it.
-      tag.element.setAttribute("live-at", stampOf(entry.leftAt.epoch, entry.leftAt.seq, serializeLive(entry.store.value)));
-      const n = fast?.framed(entry.store.name) ?? 0;
-      const client = fast?.status.clientId;
-      if (n > 0 && typeof client === "string") tag.element.setAttribute("live-by", `${client}:${n}`);
-      else tag.element.removeAttribute("live-by");
+    } else {
+      const capture = captureLineage(entry);
+      if (capture) {
+        tag.element.setAttribute("live-at", capture.at);
+        tag.element.setAttribute("live-by", capture.by);
+      } else {
+        tag.element.removeAttribute("live-at");
+        tag.element.removeAttribute("live-by");
+      }
     }
   }
 });
@@ -341,7 +371,9 @@ document.addEventListener("clay:snapshot-ready", (event) => {
     if (!tag) continue;
     const mode = entry.store.handle.status.mode === "fast" && fast ? "fast" : "file";
     const at = mode === "fast" ? { epoch: fast.status.epoch, seq: fast.status.seq } : null;
-    stores.set(entry.store.name, { mode, mark: entry.store.mark, canonical: canonical(tag.element.textContent), at });
+    const lineage = mode === "file" ? lineageOf(tag.element) : null;
+    stores.set(entry.store.name, { mode, mark: entry.store.mark, canonical: canonical(tag.element.textContent), at, lineage, by: tag.element.getAttribute("live-by") });
+    if (lineage && !lineage.disk && entry.leftAt) entry.leftAt = { ...entry.leftAt, ancestors: lineage.ancestors };
     entry.framesSince = false;
     // A close save is answered after the page is gone: the local room learns
     // how far the file reaches now. Should the save fail, a later merge drops
@@ -413,11 +445,11 @@ export function confirmSaved(html) {
       // after this answer: read it, so the view holds these ops again.
       fast?.refresh();
     } else if (entry.framesSince) {
-      dropThrough(entry, saved.mark);
+      if (!entry.leftAt || entry.leftAt.disk) dropThrough(entry, saved.mark);
     } else {
       entry.store.confirm(saved.mark);
+      entry.leftAt = saved.lineage && tag.element.getAttribute("live-by") === saved.by ? saved.lineage : { disk: true };
     }
-    if (mode === "file" && entry.leftAt) entry.leftAt = { disk: true };
   }
 }
 
@@ -455,12 +487,12 @@ export function receiveFrame(html, seq = null) {
     // Only a capture counts (the value is the one its stamp hashes); for
     // anything else the page's tag takes the incoming lineage, as for a store
     // that was never in the room.
-    let through = 0;
+    let dropIds = [];
     if (entry && entry.store.handle.status.mode === "file") {
-      const stamp = entry.leftAt ? parseStamp(at) : null;
-      const capture = !!stamp && stamp.epoch === fast?.status.epoch && stamp.hash === hashOfText(text);
-      if (capture) through = fast.landedBy(name, stamp);
-      entry.leftAt = capture ? { epoch: stamp.epoch, seq: stamp.seq } : null;
+      const lineage = lineageOf(tag.element);
+      const sameEpoch = lineage && !lineage.disk && (!fast?.status.epoch || lineage.epoch === fast.status.epoch);
+      if (sameEpoch) dropIds = fast?.captured(name, lineage, parseBy(by)) ?? [];
+      entry.leftAt = sameEpoch ? lineage : lineage?.disk ? lineage : null;
     }
     if (pageTag && (!entry || entry.store.handle.status.mode === "file")) {
       if (at === null) pageTag.removeAttribute("live-at");
@@ -469,7 +501,7 @@ export function receiveFrame(html, seq = null) {
       else if (pageTag.getAttribute("live-by") !== by) pageTag.setAttribute("live-by", by);
     }
     if (entry && !entry.store.ephemeral) {
-      if (entry.store.handle.status.mode === "file") receive(entry, text, "remote", through);
+      if (entry.store.handle.status.mode === "file") receive(entry, text, "remote", dropIds);
       continue;
     }
     if (pageTag && pageTag.textContent !== text) pageTag.textContent = text;

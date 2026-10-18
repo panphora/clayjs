@@ -1,6 +1,7 @@
 import { jest } from "@jest/globals";
 import { mergeFile } from "./page/collab/file-merge.js";
 import { LIMITS } from "./page/collab/room-double.js";
+import { parseBy, contains } from "../../src/live/provenance.js";
 import { applyOp, cloneJson, serializeLive, stampOf, textHash } from "../../src/live/ops.js";
 
 /**
@@ -62,14 +63,14 @@ const fileOf = (html, name) => {
   const at = t.getAttribute("live-at");
   const by = t.getAttribute("live-by");
   const m = at && /^(.+):(\d+):([0-9a-f]{8})$/.exec(at);
-  const b = by && /^(.+):(\d+)$/.exec(by);
-  return { value: JSON.parse(t.textContent), at: m ? { epoch: m[1], seq: Number(m[2]), hash: m[3] } : null, by: b ? { client: b[1], n: Number(b[2]) } : null };
+  const b = parseBy(by);
+  return { value: JSON.parse(t.textContent), at: m ? { epoch: m[1], seq: Number(m[2]), hash: m[3] } : null, by: b };
 };
 
 // a's first change lands at seq 1 without its event; its second is answered
 // 503 busy, so the store leaves the room at e1:0. Then (peer) the writer b's
 // checkpoint, stamped e1:1, reaches a; then a saves.
-async function run(initial, first, second, { peer = true, after = null } = {}) {
+async function run(initial, first, second, { peer = true, after = null, echoed = false, stale = false, beforeCapture = null } = {}) {
   jest.resetModules();
   const name = "s";
   const room = makeRoom(name, initial);
@@ -95,18 +96,24 @@ async function run(initial, first, second, { peer = true, after = null } = {}) {
   await tick();
   first(s);
   await wait(60);
+  if (echoed) {
+    const frame = room.stores.get(name).log[0];
+    bridge.streamEvent("data", { epoch: room.epoch, name, ...frame });
+    await tick();
+  }
   second(s);
   await wait(60);
   await tick();
   const mode = s.status.mode;
   if (peer) {
-    const v = cloneJson(room.stores.get(name).value);
+    const v = cloneJson(stale ? initial : room.stores.get(name).value);
     const text = serializeLive(v);
-    const bHtml = `<html><head></head><body><script type="application/json" merge="${name}" clay="live" live-at="${stampOf("e1", room.seq, text)}">${text}</script></body></html>`;
+    const bHtml = `<html><head></head><body><script type="application/json" merge="${name}" clay="live" live-at="${stampOf("e1", stale ? 0 : room.seq, text)}">${text}</script></body></html>`;
     mergeFile(room, name, fileOf(bHtml, name), { limits: LIMITS });
     receiveFrame(bHtml);
     await tick();
   }
+  if (beforeCapture) await beforeCapture({ receiveFrame, room });
   const aHtml = snapshot.captureForSaveAndComparison({ flushUndo: false }).forSave;
   const file = fileOf(aHtml, name);
   mergeFile(room, name, file, { limits: LIMITS });
@@ -119,14 +126,16 @@ for (const peer of [true, false]) {
   test(`${label}: a counter add that landed without its echo counts once`, async () => {
     const out = await run({ n: 0 }, (s) => s.add("n", 1), (s) => s.set("flag", true), { peer });
     expect(out.mode).toBe("file");
-    expect(out.file.by).toEqual({ client: "a", n: 2 });
+    expect(out.file.by.v).toBe(2);
+    expect(out.file.by.frames).toEqual([["a", peer ? [[2, 2]] : [[1, 2]]]]);
     expect(out.file.liveAt.startsWith(peer ? "e1:1:" : "e1:0:")).toBe(true);
     expect(out.room).toEqual({ n: 1, flag: true });
   });
 
   test(`${label}: a list delete that landed without its echo deletes one item`, async () => {
     const out = await run({ items: ["a", "b", "c"] }, (s) => s.delete(["items", 0]), (s) => s.set("flag", true), { peer });
-    expect(out.file.by).toEqual({ client: "a", n: 2 });
+    expect(out.file.by.v).toBe(2);
+    expect(out.file.by.frames).toEqual([["a", peer ? [[2, 2]] : [[1, 2]]]]);
     expect(out.room).toEqual({ items: ["b", "c"], flag: true });
   });
 
@@ -137,11 +146,8 @@ for (const peer of [true, false]) {
   });
 }
 
-// Round 11 review, Astra 3: two captures while out must not both claim the
-// same frames with a stamp. After a save made out of the room is accepted,
-// the store descends from the file: the next capture carries no stamp and no
-// live-by, and the host replays only what the file lacks (its inFile).
-test("Astra 3: a second save while still out has no stamp; the host keeps its newer value and a peer's write", async () => {
+// A confirmed capture retains exact lineage while its ops leave pending.
+test("Astra 3: a confirmed second save retains exact lineage and a peer's write", async () => {
   const out = await run({ x: 0 }, (s) => s.set("x", 1), (s) => s.set("x", 2), {
     peer: false,
     after: async ({ s, room, aHtml, snapshot, name }) => {
@@ -152,8 +158,93 @@ test("Astra 3: a second save while still out has no stamp; the host keeps its ne
       const second = snapshot.captureForSaveAndComparison({ flushUndo: false }).forSave;
       const t = tagOf(second, name);
       mergeFile(room, name, fileOf(second, name), { limits: LIMITS });
-      return { at: t.getAttribute("live-at"), by: t.getAttribute("live-by"), room: room.stores.get(name).value };
+      return { stamped: t.getAttribute("live-at").startsWith("e1:0:"), exact: parseBy(t.getAttribute("live-by")).v === 2, room: room.stores.get(name).value };
     },
   });
-  expect(out).toEqual({ at: null, by: null, room: { x: 3, y: 7 } });
+  expect(out).toEqual({ stamped: true, exact: true, room: { x: 3, y: 7 } });
+});
+
+for (const kind of ['counter', 'list']) {
+  test(`Astra 1 stale-peer-checkpoint ${kind}, echoed: the capture never claims the missing frame`, async () => {
+    const initial = kind === 'counter' ? { n: 0 } : { items: ['a', 'b', 'c'] };
+    const expected = kind === 'counter' ? { n: 1, flag: true } : { items: ['b', 'c'], flag: true };
+    const out = await run(initial, (s) => kind === 'counter' ? s.add('n', 1) : s.delete(['items', 0]), (s) => s.set('flag', true), { echoed: true, stale: true });
+    expect(contains(out.file.by.frames, 'a', 1)).toBe(false);
+    expect(contains(out.file.by.frames, 'a', 2)).toBe(true);
+    expect(out.room).toEqual(expected);
+  });
+}
+
+test('Sonnet 2 peer-out-save pending: a later capture keeps the peer frame set', async () => {
+  const out = await run({ n: 0 }, (s) => s.set('flag', true), (s) => s.add('n', 10), {
+    peer: false,
+    beforeCapture: async ({ receiveFrame, room }) => {
+      room.apply('x', { name: 's', n: 1, ops: [{ op: 'add', path: ['n'], n: 1 }] });
+      const value = { n: 1 };
+      const by = 'v2|x:1||peerSave:1';
+      const text = serializeLive(value);
+      const html = `<script type="application/json" merge="s" clay="live" live-at="${stampOf('e1', 0, text)}" live-by="${by}">${text}</script>`;
+      mergeFile(room, 's', fileOf(html, 's'), { limits: LIMITS });
+      receiveFrame(html);
+    },
+  });
+  expect(contains(out.file.by.frames, 'x', 1)).toBe(true);
+  expect(contains(out.file.by.ancestors, 'peerSave', 1)).toBe(true);
+  expect(out.room).toEqual({ n: 11, flag: true });
+});
+
+for (const confirmed of [false, true]) {
+  test(`Sonnet 1 second-save-leaf ${confirmed ? 'confirmed' : 'unconfirmed'}: later file-only edits survive`, async () => {
+    const out = await run({ m: 0 }, (s) => s.set('m', 1), (s) => s.set('m', 2), {
+      peer: false,
+      after: async ({ s, room, aHtml, snapshot, name }) => {
+        if (confirmed) (await import('../../src/plugins/live.js')).confirmSaved(aHtml);
+        s.set('m', 5);
+        const html = snapshot.captureForSaveAndComparison({ flushUndo: false }).forSave;
+        const first = fileOf(aHtml, name), second = fileOf(html, name);
+        expect(contains(second.by.ancestors, ...first.by.capture)).toBe(true);
+        mergeFile(room, name, second, { limits: LIMITS });
+        return room.stores.get(name).value;
+      },
+    });
+    expect(out).toEqual({ m: 5 });
+  });
+}
+
+test('reload mid-spell retains loaded frame provenance before a room is available', async () => {
+  jest.resetModules();
+  const initial = { n: 1 };
+  const text = serializeLive(initial);
+  document.body.innerHTML = `<script type="application/json" merge="reload" clay="live" live-at="${stampOf('e1', 0, text)}" live-by="v2|x:1||peerSave:1">${text}</script>`;
+  global.fetch = jest.fn(async () => ({ ok: false, status: 503, json: async () => ({ code: 'busy' }), headers: { get: () => '60' } }));
+  const plugin = await import('../../src/plugins/live.js');
+  const snapshot = await import('../../src/core/snapshot.js');
+  const s = plugin.live('reload');
+  s.add('n', 10);
+  const html = snapshot.captureForSaveAndComparison({ flushUndo: false }).forSave;
+  const file = fileOf(html, 'reload');
+  expect(file.value).toEqual({ n: 11 });
+  expect(contains(file.by.frames, 'x', 1)).toBe(true);
+  expect(contains(file.by.ancestors, 'peerSave', 1)).toBe(true);
+  expect(file.by.capture[0]).not.toBe('peerSave');
+  plugin.fastLane()?.stop();
+});
+
+test('overflow strips both attributes instead of emitting a truncated exact set', async () => {
+  jest.resetModules();
+  const frames = Array.from({ length: 254 }, (_, i) => 2 * i + 1).join(',');
+  const text = '{"n":1}';
+  document.body.innerHTML = `<script type="application/json" merge="cap" clay="live" live-at="${stampOf('e1', 0, text)}" live-by="v2|x:${frames}||peerSave:1">${text}</script>`;
+  const plugin = await import('../../src/plugins/live.js');
+  const snapshot = await import('../../src/core/snapshot.js');
+  plugin.live('cap').set('flag', true);
+  // 254 frame ranges + one ancestor + one new capture still fits exactly.
+  let html = snapshot.captureForSaveAndComparison({ flushUndo: false }).forSave;
+  expect(fileOf(html, 'cap').by.v).toBe(2);
+  plugin.live('cap').set('flag', false);
+  html = snapshot.captureForSaveAndComparison({ flushUndo: false }).forSave;
+  const tag = tagOf(html, 'cap');
+  expect(tag.hasAttribute('live-at')).toBe(false);
+  expect(tag.hasAttribute('live-by')).toBe(false);
+  plugin.fastLane()?.stop();
 });

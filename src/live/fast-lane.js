@@ -677,20 +677,9 @@ export function createFastLane({
       lane.unsent = unframed(name, lane);
       schedule();
     },
-    // The last frame number this tab gave the store: a save made while it is
-    // out of the room holds every frame through it (live-by).
+    // Lifetime frame counter retained for the legacy fixture harness.
     framed(name) {
       return lanes.get(name)?.n ?? 0;
-    },
-    // A value stamped at `at` (a peer's save) reached a store that is out of
-    // the room: its frames that landed at or before at.seq in this room are in
-    // that value. They leave the lane; returns the op id they reach (0: none).
-    landedBy(name, at) {
-      const lane = lanes.get(name);
-      if (!lane || !at || at.epoch !== epoch || !Number.isInteger(at.seq)) return 0;
-      let through = 0;
-      while (lane.awaiting.length && lane.awaiting[0] !== flying && lane.awaiting[0].seq !== null && lane.awaiting[0].seq <= at.seq) through = lane.awaiting.shift().through;
-      return through;
     },
     pendingFrames(name, at) {
       const lane = lanes.get(name);

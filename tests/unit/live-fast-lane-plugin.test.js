@@ -1,3 +1,4 @@
+import { parseBy } from "../../src/live/provenance.js";
 import { jest } from "@jest/globals";
 
 /**
@@ -459,7 +460,7 @@ test("a store out of the room saves with live-by: this tab and the last frame it
   by.add("s", 1);
 
   const saved = new DOMParser().parseFromString(snapshot.captureForSaveAndComparison({ flushUndo: false }).forSave, "text/html").querySelector('script[merge="by"]');
-  expect(saved.getAttribute("live-by")).toBe(`tab-1:${fastLane().framed("by")}`);
+  expect(parseBy(saved.getAttribute("live-by")).frames).toEqual([["tab-1", [[fastLane().framed("by"), fastLane().framed("by")]]]]);
   expect(fastLane().framed("by")).toBeGreaterThan(0);
   expect(saved.textContent).toBe('{"s":2}');
 });
