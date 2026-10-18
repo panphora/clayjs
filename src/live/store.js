@@ -165,7 +165,7 @@ export function createStore({ name, value, ephemeral = false }) {
 
   // drop: [first, last], the pending ops with ids in that range are taken out
   // (an op the host refused); the others stay.
-  function rebase(next, { source = "remote", confirmed = 0, through, drop, frame = null, room = null, cause = null } = {}) {
+  function rebase(next, { source = "remote", confirmed = 0, through, drop, dropIds, frame = null, room = null, cause = null } = {}) {
     if (!isContainer(next) || kind(next) !== kind(state)) {
       console.warn(`clay.live("${name}"): ignored an incoming value that is not ${kind(state)}`);
       return false;
@@ -174,6 +174,7 @@ export function createStore({ name, value, ephemeral = false }) {
     const prev = authoritative;
     authoritative = cloneJson(next);
     if (drop) pending = pending.filter((entry) => entry.id < drop[0] || entry.id > drop[1]);
+    else if (dropIds) { const ids = new Set(dropIds); pending = pending.filter((entry) => !ids.has(entry.id)); }
     else pending = through === undefined ? pending.slice(confirmed) : pending.filter((entry) => entry.id > through);
     rebuild();
     tell({ source, frame, room, cause, prev, before: (path) => readPath(prev, path), next: authoritative });

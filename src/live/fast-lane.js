@@ -13,6 +13,8 @@
 // the room's log rebuilds the value; -1: rewrite now). Both are numbers in the
 // current epoch, taken from the room and never carried across epochs.
 
+import { unionRanges, contains, frameSet, hasNumber } from "./provenance.js";
+
 export const MIN_GAP_MS = 40;
 export const MAX_OPS = 128;
 export const RETRY_MS = 500;
@@ -97,7 +99,7 @@ export function createFastLane({
   // newest op id ever put in a frame.
   const lanes = new Map();
 
-  const tell = (name, event) => entries.get(name)?.store.deliver?.({ code: null, n: null, seq: null, through: null, retryAfter: null, ...event });
+  const tell = (name, event) => entries.get(name)?.store.deliver?.({ code: null, n: null, seq: null, through: null, retryAfter: null, client: clientId, ...event });
 
   function laneOf(name) {
     let lane = lanes.get(name);
@@ -200,9 +202,11 @@ export function createFastLane({
     lanes.delete(name);
     lanes.set(name, lane);
     const sentEpoch = epoch;
+    frame.epoch = sentEpoch;
+    frame.client = clientId;
     frame.sentOn = connection;
     frame.sent = true;
-    tell(name, { phase: "sent", n: frame.n, through: frame.through });
+    tell(name, { phase: "sent", n: frame.n, first: frame.first, through: frame.through });
     // Refusal is evidence about earlier attempts only: this one may apply.
     frame.refused = false;
     inFlight = true;
@@ -421,17 +425,17 @@ export function createFastLane({
   function sortAwaiting(awaiting, room) {
     const seen = room.seen ? (room.seen[clientId] ?? 0) : null;
     const resend = [];
-    let through = 0;
+    const dropIds = [];
     for (const frame of awaiting) {
-      if (seen !== null && frame.n <= seen) through = frame.through;
+      if ((seen !== null && frame.n <= seen) || hasNumber(room.saved, frame.n)) dropIds.push(...frame.entries.map((e) => e.id));
       else if (frame.sent && frame === flying) {
         // Still on the wire: its answer decides.
         frame.undecided = true;
         resend.push(frame);
       } else if (unapplied(frame)) resend.push(frame);
-      else through = frame.through;
+      else dropIds.push(...frame.entries.map((e) => e.id));
     }
-    return { resend, through };
+    return { resend, dropIds };
   }
 
   function applyState(state) {
@@ -469,25 +473,27 @@ export function createFastLane({
       entry.last = Number.isInteger(room.last) ? room.last : 0;
       entry.landed = Number.isInteger(room.landed) ? room.landed : 0;
       if (fresh) {
-        const { resend, through } = sortAwaiting(lane.awaiting, room);
+        const { resend, dropIds } = sortAwaiting(lane.awaiting, room);
         for (const frame of resend) {
           if (frame.undecided) continue;
           frame.sent = false;
           frame.seq = null;
         }
         lane.awaiting = resend;
-        entry.store.rebase(room.value, { source: "state", through: through || undefined, room: { seq, fresh: true, moves: state.moves?.[name] ?? null, floor: Number.isInteger(room.floor) ? room.floor : null } });
+        entry.store.rebase(room.value, { source: "state", dropIds, room: { seq, fresh: true, moves: state.moves?.[name] ?? null, floor: Number.isInteger(room.floor) ? room.floor : null } });
         lane.unsent = unframed(name, lane);
       } else {
         const seen = room.seen ? room.seen[clientId] : undefined;
         const next = [];
-        let through;
+        const dropIds = [];
         for (const frame of lane.awaiting) {
-          if (frame === flying) {
+          if (hasNumber(room.saved, frame.n)) {
+            dropIds.push(...frame.entries.map((e) => e.id));
+          } else if (frame === flying) {
             next.push(frame);
           } else if ((frame.seq !== null && frame.seq <= seq) || (seen !== undefined && frame.n <= seen)) {
             // In this state, by its answer or by the room's receipt.
-            through = frame.through;
+            dropIds.push(...frame.entries.map((e) => e.id));
           } else if (frame.seq !== null) {
             // Answered as applied after this state was read: its event is on its way.
             next.push(frame);
@@ -500,11 +506,11 @@ export function createFastLane({
             next.push(frame);
           } else {
             // Unanswered, and the stream reconnected since: its receipt may be gone.
-            through = frame.through;
+            dropIds.push(...frame.entries.map((e) => e.id));
           }
         }
         lane.awaiting = next;
-        entry.store.rebase(room.value, { source: "state", through, room: { seq, fresh: false, moves: state.moves?.[name] ?? null, floor: Number.isInteger(room.floor) ? room.floor : null } });
+        entry.store.rebase(room.value, { source: "state", dropIds, room: { seq, fresh: false, moves: state.moves?.[name] ?? null, floor: Number.isInteger(room.floor) ? room.floor : null } });
         // Back in the room after a spell at save speed: frame what was made meanwhile.
         if (rejoined) {
           lane.unsent = unframed(name, lane);
@@ -685,6 +691,35 @@ export function createFastLane({
       let through = 0;
       while (lane.awaiting.length && lane.awaiting[0] !== flying && lane.awaiting[0].seq !== null && lane.awaiting[0].seq <= at.seq) through = lane.awaiting.shift().through;
       return through;
+    },
+    pendingFrames(name, at) {
+      const lane = lanes.get(name);
+      const ids = new Set(entries.get(name)?.store.pendingEntries().map((e) => e.id) ?? []);
+      let frames = [];
+      let complete = true;
+      for (const frame of lane?.awaiting ?? []) {
+        const present = frame.entries.filter((e) => ids.has(e.id));
+        if (!present.length) continue;
+        if (present.length !== frame.entries.length || frame.epoch !== at?.epoch || !frame.client) {
+          complete = false;
+          continue;
+        }
+        frames = unionRanges(frames, [[frame.client, [[frame.n, frame.n]]]]);
+      }
+      return { frames, complete };
+    },
+    captured(name, at, by) {
+      const lane = lanes.get(name);
+      if (!lane || !at || at.epoch !== epoch) return [];
+      const included = frameSet(by);
+      const dropIds = [];
+      lane.awaiting = lane.awaiting.filter((frame) => {
+        const held = frame.epoch === at.epoch &&
+          (contains(included, frame.client, frame.n) || (frame.seq !== null && frame.seq <= at.seq));
+        if (held) dropIds.push(...frame.entries.map((e) => e.id));
+        return !held;
+      });
+      return dropIds;
     },
     // Read the room again: a store opened after this tab joined, or a save the
     // room merged whose state may not have arrived yet.
