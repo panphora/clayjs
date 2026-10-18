@@ -268,3 +268,144 @@ describe("anchoring", () => {
     expect(y(view)).toBe("494px");
   });
 });
+
+describe("the actions menu", () => {
+  const selectedIds = (view) => {
+    const { lo, hi } = view.state.selection.span(view.state.doc);
+    const out = [];
+    for (let i = lo; i <= hi; i++) out.push(view.state.doc.child(i).attrs.id);
+    return out;
+  };
+  const row = (view, label) => rows(view).find((r) => r.querySelector(".page-menu-label").textContent === label);
+  const FOLD = [["p", "paragraph", "P"], ["t", "toggle", "T"], ["b1", "paragraph", "b1", { parent: "t" }], ["z", "paragraph", "Z"]];
+
+  test("Mod+/ opens it and selects the caret's block with its hidden body", () => {
+    const view = open(FOLD, "t");
+    expect(key(view, "/", { ctrlKey: true })).toBe(true);
+    expect(isOpen(view)).toBe(true);
+    expect(selectedIds(view)).toEqual(["t", "b1"]);
+    expect(labels(view)).toEqual(["Turn into", "Duplicate", "Move up", "Move down", "Indent", "Outdent", "Delete"]);
+  });
+
+  test("it also opens on Cmd+/ and the highlight starts on the first row", () => {
+    const view = open(FOLD, "p");
+    key(view, "/", { metaKey: true });
+    expect(isOpen(view)).toBe(true);
+    expect(view.dom.getAttribute("aria-activedescendant")).toBe(`${menu(view).id}-0`);
+  });
+
+  test("Move up moves the selected block above its previous sibling and keeps it selected", () => {
+    const view = open(FOLD, "t");
+    key(view, "/", { ctrlKey: true });
+    row(view, "Move up").click();
+    expect(shape(view)).toBe("T | b1<t | P | Z");
+    expect(selectedIds(view)).toEqual(["t", "b1"]);
+    expect(isOpen(view)).toBe(false);
+  });
+
+  test("Duplicate copies the block with its body and selects the copy; one undo removes it", () => {
+    const view = open(FOLD, "t");
+    key(view, "/", { ctrlKey: true });
+    row(view, "Duplicate").click();
+    expect(shape(view).split(" | ").length).toBe(6);
+    expect(selectedIds(view)).not.toContain("t");
+  });
+
+  test("Delete removes the span", () => {
+    const view = open(FOLD, "t");
+    key(view, "/", { ctrlKey: true });
+    row(view, "Delete").click();
+    expect(shape(view)).toBe("P | Z");
+  });
+
+  test("Indent and Outdent work on a list item through the menu", () => {
+    const view = open([["a", "list_item", "A"], ["b", "list_item", "B"]], "b");
+    key(view, "/", { ctrlKey: true });
+    row(view, "Indent").click();
+    expect(view.state.doc.child(1).attrs.indent).toBe(1);
+    key(view, "/", { ctrlKey: true });
+    row(view, "Outdent").click();
+    expect(view.state.doc.child(1).attrs.indent).toBe(0);
+  });
+
+  test("Turn into opens the type list and retypes every selected block, keeping each id", () => {
+    const view = open([["a", "paragraph", "A"], ["b", "paragraph", "B"], ["z", "paragraph", "Z"]], "a");
+    view.dispatch(view.state.tr.setSelection(selectBlocks(view.state.doc, 0, 1)));
+    key(view, "/", { ctrlKey: true });
+    expect(selectedIds(view)).toEqual(["a", "b"]);
+    row(view, "Turn into").click();
+    expect(menu(view).querySelector(".page-menu-title").textContent).toBe("Turn into");
+    rows(view)[1].click();
+    expect([...Array(3).keys()].map((i) => [view.state.doc.child(i).type.name, view.state.doc.child(i).attrs.id])).toEqual([["heading", "a"], ["heading", "b"], ["paragraph", "z"]]);
+  });
+
+  test("Turn into is not offered when a selected block is not text", () => {
+    const view = open([["a", "paragraph", "A"], ["d", "divider", ""]], "a");
+    view.dispatch(view.state.tr.setSelection(selectBlocks(view.state.doc, 0, 1)));
+    key(view, "/", { ctrlKey: true });
+    expect(selectedIds(view)).toEqual(["a", "d"]);
+    expect(labels(view)).not.toContain("Turn into");
+  });
+
+  test("Escape closes it and keeps the block selection", () => {
+    const view = open(FOLD, "p");
+    key(view, "/", { ctrlKey: true });
+    key(view, "Escape");
+    expect(isOpen(view)).toBe(false);
+    expect(selectedIds(view)).toEqual(["p"]);
+  });
+});
+
+describe("the actions menu on an image", () => {
+  const IMG = [["p", "paragraph", "P"], ["i", "image", "", { src: "/a.png", alt: "", caption: "" }]];
+  const row = (view, label) => rows(view).find((r) => r.querySelector(".page-menu-label").textContent === label);
+  const onImage = () => {
+    const view = open(IMG, "p");
+    view.dispatch(view.state.tr.setSelection(selectBlocks(view.state.doc, 1)));
+    return view;
+  };
+  const popover = (view) => view.dom.parentElement.querySelector('.page-link[data-mode="alt"]');
+  const press = (input, k) => input.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true }));
+
+  test("an image gets Alt text, Small, Medium and Full width after the common actions", () => {
+    const view = onImage();
+    key(view, "/", { ctrlKey: true });
+    expect(labels(view)).toEqual(["Duplicate", "Move up", "Move down", "Indent", "Outdent", "Delete", "Alt text…", "Small", "Medium", "Full width"]);
+  });
+
+  test("Small, Medium and Full width set the pixel width, each as one step", () => {
+    const view = onImage();
+    for (const [label, width] of [["Small", 240], ["Medium", 480], ["Full width", null]]) {
+      key(view, "/", { ctrlKey: true });
+      row(view, label).click();
+      expect(view.state.doc.child(1).attrs.width).toBe(width);
+    }
+  });
+
+  test("Alt text opens a one-field popover; Enter saves it as one undo step", () => {
+    const view = onImage();
+    key(view, "/", { ctrlKey: true });
+    row(view, "Alt text…").click();
+    const input = popover(view).querySelector(".page-link-input");
+    expect(input.getAttribute("aria-label")).toBe("Alt text");
+    input.value = "  A red door  ";
+    press(input, "Enter");
+    expect(popover(view)).toBeNull();
+    expect(view.state.doc.child(1).attrs.alt).toBe("A red door");
+    history.undo(view.state, view.dispatch);
+    expect(view.state.doc.child(1).attrs.alt).toBe("");
+  });
+
+  test("Escape closes the popover and leaves the alt text alone, and it opens showing the current text", () => {
+    const view = onImage();
+    view.dispatch(view.state.tr.setNodeMarkup(view.state.doc.child(0).nodeSize, null, { ...view.state.doc.child(1).attrs, alt: "Door" }));
+    key(view, "/", { ctrlKey: true });
+    row(view, "Alt text…").click();
+    const input = popover(view).querySelector(".page-link-input");
+    expect(input.value).toBe("Door");
+    input.value = "changed";
+    press(input, "Escape");
+    expect(popover(view)).toBeNull();
+    expect(view.state.doc.child(1).attrs.alt).toBe("Door");
+  });
+});

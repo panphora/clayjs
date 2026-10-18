@@ -5,14 +5,49 @@
 // --page-* tokens in editor.js (contract: default-page/v1/look/THEME-CONTRACT.md).
 import { state, commands } from "../vendor/prosemirror.vendor.js";
 import { schema } from "./schema.js";
-import { BlockSelection } from "./blocks.js";
+import { BlockSelection, outline, moveBlock, indentBlocks, outdentBlocks } from "./blocks.js";
+import { currentSpan, selectBlocks, duplicateBlocks, deleteBlocks } from "./blocksel.js";
+import { openAltEditor, setImageAttrs } from "./media.js";
 import { openLinkEditor } from "./link.js";
-import { BLOCK_TYPES, MENU_ITEMS, blockTypeOf, turnInto, insertAfter, rankItems, runItem } from "./items.js";
+import { BLOCK_TYPES, MENU_ITEMS, blockTypeOf, turnInto, insertAfter, rankItems, runItem, retype } from "./items.js";
 
 export { BLOCK_TYPES, blockTypeOf, turnInto, insertAfter } from "./items.js";
 
 const { Plugin, PluginKey, TextSelection } = state;
 const M = schema.marks;
+const N = schema.nodes;
+
+const MOD = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+";
+
+const selectedRoots = (st) => {
+  const ents = outline(st.doc);
+  const { lo, hi } = st.selection.span(st.doc);
+  return ents.slice(lo, hi + 1).filter((e) => e.up === ents[lo].up);
+};
+
+const imageId = (view, index) => view.state.doc.child(index).attrs.id;
+
+export const ACTION_ITEMS = [
+  { key: "turn", label: "Turn into", icon: "↻", hint: "›", only: "text", run: (view, chrome) => chrome.openMenu("turn", chrome.plus) },
+  { key: "duplicate", label: "Duplicate", icon: "⧉", hint: `${MOD}D`, run: (view) => duplicateBlocks(view.state, view.dispatch) },
+  { key: "up", label: "Move up", icon: "↑", hint: `${MOD}⇧↑`, run: (view) => moveBlock(-1)(view.state, view.dispatch) },
+  { key: "down", label: "Move down", icon: "↓", hint: `${MOD}⇧↓`, run: (view) => moveBlock(1)(view.state, view.dispatch) },
+  { key: "indent", label: "Indent", icon: "→", hint: "Tab", run: (view) => indentBlocks(view.state, view.dispatch) },
+  { key: "outdent", label: "Outdent", icon: "←", hint: "⇧Tab", run: (view) => outdentBlocks(view.state, view.dispatch) },
+  { key: "delete", label: "Delete", icon: "×", hint: "Del", run: (view) => deleteBlocks(view.state, view.dispatch) },
+  { key: "alt", label: "Alt text…", icon: "Aa", only: "image", focus: false, run: (view, chrome, index) => openAltEditor(view, imageId(view, index)) },
+  { key: "small", label: "Small", icon: "▫", only: "image", run: (view, chrome, index) => setImageAttrs(view, imageId(view, index), { width: 240 }) },
+  { key: "medium", label: "Medium", icon: "◻", only: "image", run: (view, chrome, index) => setImageAttrs(view, imageId(view, index), { width: 480 }) },
+  { key: "full", label: "Full width", icon: "⬜", only: "image", run: (view, chrome, index) => setImageAttrs(view, imageId(view, index), { width: null }) },
+];
+
+const actionsFor = (st) => {
+  if (!(st.selection instanceof BlockSelection)) return [];
+  const roots = selectedRoots(st);
+  const text = roots.every((e) => e.node.isTextblock);
+  const image = roots.length === 1 && roots[0].node.type === N.image;
+  return ACTION_ITEMS.filter((a) => (a.only === "text" ? text : a.only === "image" ? image : true));
+};
 
 const svg = (body) => `<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
 const ICONS = {
@@ -151,7 +186,15 @@ class Chrome {
   }
 
   menuItems(m) {
+    if (m.mode === "actions") return actionsFor(this.view.state);
     return rankItems(m.mode === "turn" ? BLOCK_TYPES : MENU_ITEMS, m.query);
+  }
+
+  openActions(anchor = this.plus) {
+    const st = this.view.state;
+    const { lo, hi } = currentSpan(st);
+    this.view.dispatch(st.tr.setSelection(selectBlocks(st.doc, lo, hi)));
+    this.openMenu("actions", anchor, null, lo);
   }
 
   renderMenu() {
@@ -206,9 +249,16 @@ class Chrome {
     }
     this.closeMenu();
     if (m.mode === "turn") {
-      const tr = turnInto(st, this.blockIndex(), item);
+      let tr = null;
+      if (st.selection instanceof BlockSelection) {
+        tr = st.tr;
+        for (const root of selectedRoots(st)) retype(tr, root.i, item);
+      } else tr = turnInto(st, this.blockIndex(), item);
       if (tr) this.view.dispatch(tr.scrollIntoView());
       this.view.focus();
+    } else if (m.mode === "actions") {
+      item.run(this.view, this, m.index);
+      if (!this.menu && item.focus !== false) this.view.focus();
     } else {
       runItem(this.view, item, m.slashAt !== null ? this.blockIndex() : m.index);
     }
@@ -324,7 +374,15 @@ export function chromePlugin() {
       return chrome;
     },
     props: {
-      handleKeyDown: (view, event) => chrome?.key(event) ?? false,
+      handleKeyDown(view, event) {
+        if (!chrome) return false;
+        if (event.key === "/" && (event.metaKey || event.ctrlKey) && !event.altKey && !chrome.menu) {
+          event.preventDefault();
+          chrome.openActions();
+          return true;
+        }
+        return chrome.key(event);
+      },
       handleTextInput(view, from, to, text) {
         if (text !== "/" || !chrome) return false;
         const $from = view.state.doc.resolve(from);
