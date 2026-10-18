@@ -5,10 +5,11 @@
 // --page-* tokens in editor.js (contract: default-page/v1/look/THEME-CONTRACT.md).
 import { state, commands } from "../vendor/prosemirror.vendor.js";
 import { schema } from "./schema.js";
-import { outline, subtreeRange } from "./blocks.js";
+import { BLOCK_TYPES, blockTypeOf, turnInto, insertAfter } from "./items.js";
+
+export { BLOCK_TYPES, blockTypeOf, turnInto, insertAfter } from "./items.js";
 
 const { Plugin, PluginKey, TextSelection } = state;
-const N = schema.nodes;
 const M = schema.marks;
 
 const svg = (body) => `<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
@@ -27,48 +28,6 @@ const MARK_TOOLS = [
   ["code", "Code"],
   ["link", "Link"],
 ];
-
-export const BLOCK_TYPES = [
-  { key: "text", label: "Text", icon: "T", type: "paragraph" },
-  { key: "h1", label: "Heading 1", icon: "H1", type: "heading", attrs: { level: 1 } },
-  { key: "h2", label: "Heading 2", icon: "H2", type: "heading", attrs: { level: 2 } },
-  { key: "h3", label: "Heading 3", icon: "H3", type: "heading", attrs: { level: 3 } },
-  { key: "bullet", label: "Bulleted list", icon: "•", type: "list_item", attrs: { kind: "bullet" } },
-  { key: "ordered", label: "Numbered list", icon: "1.", type: "list_item", attrs: { kind: "ordered" } },
-  { key: "check", label: "Checklist", icon: "☐", type: "list_item", attrs: { kind: "check" } },
-  { key: "toggle", label: "Toggle", icon: "▸", type: "toggle", attrs: { open: true } },
-  { key: "callout", label: "Callout", icon: "!", type: "callout" },
-  { key: "code", label: "Code", icon: "</>", type: "code_block" },
-];
-
-// Which entry of BLOCK_TYPES a block is, for the toolbar's "Text ▾" label.
-export function blockTypeOf(node) {
-  const t = node.type.name;
-  return BLOCK_TYPES.find((b) => b.type === t && (!b.attrs
-    || (t === "heading" ? b.attrs.level === node.attrs.level : t === "list_item" ? b.attrs.kind === node.attrs.kind : true))) ?? BLOCK_TYPES[0];
-}
-
-// Turn the top-level textblock at `index` into `item`. It keeps its id, pos and
-// parent; a list item turned into another list kind keeps its indent.
-export function turnInto(st, index, item) {
-  const node = st.doc.child(index);
-  if (!node.isTextblock) return null;
-  let at = 0;
-  for (let i = 0; i < index; i++) at += st.doc.child(i).nodeSize;
-  const keep = { id: node.attrs.id, pos: node.attrs.pos, parent: node.attrs.parent };
-  if (node.type === N.list_item && item.type === "list_item") keep.indent = node.attrs.indent;
-  return st.tr.setBlockType(at + 1, at + node.nodeSize - 1, N[item.type], { ...keep, ...(item.attrs || {}) });
-}
-
-// A new empty paragraph after the block at `index` and its subtree, at the
-// block's own level, with the caret in it.
-export function insertAfter(st, index) {
-  const ents = outline(st.doc);
-  const { to } = subtreeRange(ents, index);
-  const node = st.doc.child(index);
-  const tr = st.tr.insert(to, N.paragraph.create({ parent: node.attrs.parent ?? null }));
-  return tr.setSelection(TextSelection.create(tr.doc, to + 1));
-}
 
 function markActive(st, type) {
   const { from, to, empty, $from } = st.selection;
