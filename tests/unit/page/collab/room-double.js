@@ -3,9 +3,10 @@
 // checkpoint), live-data-actions.js (rate bucket, error status), hey.js:1681
 // (64 KB body). Delivery: each client's stream is FIFO with its own latency;
 // a POST answer has an independent latency, so it can beat or trail the event.
-import { applyOp, applyTracked, checkOp, cloneJson, diffOps, serializeLive, sizeChange, undoTracked, validateOp } from "../../../../src/live/ops.js";
+import { applyTracked, cloneJson, serializeLive, sizeChange, undoTracked, validateOp } from "../../../../src/live/ops.js";
+import { evict, mergeFile } from "./file-merge.js";
 
-export const LIMITS = { opsPerFrame: 128, storeBytes: 1024 * 1024, roomBytes: 2 * 1024 * 1024, logEntries: 4096, logBytes: 256 * 1024, bodyBytes: 64 * 1024 };
+export const LIMITS = { opsPerFrame: 128, storeBytes: 1024 * 1024, roomBytes: 2 * 1024 * 1024, logEntries: 4096, logBytes: 256 * 1024, bodyBytes: 64 * 1024, movesBytes: 1024 * 1024, receipts: 4096 };
 export const RATE = { perSecond: 25, burst: 40 };
 const encoder = new TextEncoder();
 const utf8 = (text) => encoder.encode(text).length;
@@ -59,7 +60,7 @@ export function createRoom(sim, initialStores, { latency = () => 40, answerLaten
     epoch: "e1", seq: 0, writer: null, lastN: new Map(), buckets: new Map(), clients: new Map(),
     stores: new Map(), frames: 0, refused: [], posts: 0,
   };
-  for (const [name, value] of Object.entries(initialStores)) room.stores.set(name, { value: cloneJson(value), bytes: bytes(value), last: 0, landed: 0, floor: 0, log: [], logBytes: 0 });
+  for (const [name, value] of Object.entries(initialStores)) room.stores.set(name, { value: cloneJson(value), bytes: bytes(value), from: null, last: 0, landed: 0, floor: 0, log: [], logBytes: 0, inFile: new Set() });
   room.lastSentAt = new Map();
   // live-data-rooms.js leave(): the writer leaving elects the connected
   // participant that sent most recently; live-data-actions.js sends data-writer.
@@ -148,11 +149,8 @@ export function createRoom(sim, initialStores, { latency = () => 40, answerLaten
     const logged = utf8(JSON.stringify(ops));
     store.log.push({ seq: room.seq, ops, bytes: logged, from: clientId, n: frame.n });
     store.logBytes += logged;
-    while (store.log.length > LIMITS.logEntries || store.logBytes > LIMITS.logBytes) {
-      const gone = store.log.shift();
-      store.logBytes -= gone.bytes;
-      store.floor = gone.seq;
-    }
+    evict(store, LIMITS);
+    room.lastN.delete(nKey);
     room.lastN.set(nKey, { n: frame.n, seq: room.seq });
     room.lastSentAt.set(clientId, sim.now());
     if (!room.writer) setWriter(clientId);
@@ -162,36 +160,19 @@ export function createRoom(sim, initialStores, { latency = () => 40, answerLaten
     return { status: 200, body: { seq: room.seq, epoch: room.epoch } };
   }
 
-  // A save of the file landed (live-data-rooms.js fileWritten): the file's
-  // value with the room's moves after its stamp replayed on top, less the
-  // saving tab's own frames through live-by's n, which the value holds. A
-  // changed value is logged as a diff and every tab gets the room's state
-  // (live-data-registry.js data-state); otherwise how far the file reaches
-  // goes out on a writer event. at: { epoch, seq } or null; by: { client, n } or null.
-  room.fileWritten = (name, fileValue, at = null, by = null) => {
-    const store = room.stores.get(name);
-    if (!store) return null;
-    const base = at && at.epoch === room.epoch && at.seq <= room.seq ? at.seq : store.landed;
-    const skip = by && at && at.epoch === room.epoch ? by : null;
-    let value = cloneJson(fileValue);
-    const entries = store.log.filter((e) => e.seq > base && !(skip && e.from === skip.client && e.n <= skip.n));
-    for (const e of entries) for (const op of e.ops) { try { checkOp(value, op); value = applyOp(value, op); } catch {} }
-    const changed = serializeLive(value) !== serializeLive(store.value);
-    if (changed) {
-      const ops = diffOps(store.value, value);
-      store.value = value;
-      store.bytes = bytes(value);
-      room.seq += 1;
-      store.last = room.seq;
-      const logged = utf8(JSON.stringify(ops));
-      store.log.push({ seq: room.seq, ops, bytes: logged, ...(skip && { from: skip.client, n: skip.n }) });
-      store.logBytes += logged;
-    }
-    store.landed = entries.length ? base : store.last;
+  // A save of the file landed (live-data-rooms.js fileWritten, through the
+  // same rule in file-merge.js). A changed value is logged as a diff and every
+  // tab gets the room's state (live-data-registry.js data-state); otherwise
+  // how far the file reaches goes out on a writer event.
+  // at: { epoch, seq, hash } or null; by: { client, n } or null.
+  room.fileWritten = (name, fileValue, at = null, by = null, { restored = false } = {}) => {
+    const result = mergeFile(room, name, { value: fileValue, at, by }, { limits: LIMITS, restored });
+    if (!result) return null;
     room.merges = (room.merges || 0) + 1;
-    if (changed) for (const cid of room.clients.keys()) deliver(cid, "state", room.state(cid));
+    const store = room.stores.get(name);
+    if (result.changed) for (const cid of room.clients.keys()) deliver(cid, "state", room.state(cid));
     else for (const cid of room.clients.keys()) deliver(cid, "writer", { epoch: room.epoch, writer: room.writer, landed: { [name]: store.landed } });
-    return { changed, value: cloneJson(store.value) };
+    return { changed: result.changed, value: store ? cloneJson(store.value) : null };
   };
 
   // The harness marks a landed checkpoint save so `pressed` counts from there.
@@ -220,7 +201,18 @@ export function createRoom(sim, initialStores, { latency = () => 40, answerLaten
         seen: { [clientId]: room.lastN.get(name + "\n" + clientId)?.n ?? 0 },
       }])),
     };
-    if (typeof since === "number") state.moves = Object.fromEntries([...room.stores.keys()].map((name) => [name, room.logSince(name, since)]));
+    // live-data-rooms.js state(): past movesBytes over every store, a store's moves are null.
+    if (typeof since === "number") {
+      let budget = LIMITS.movesBytes;
+      state.moves = {};
+      for (const [name, s] of room.stores) {
+        const list = room.logSince(name, since);
+        const size = list ? s.log.reduce((n, e) => (e.seq > since ? n + e.bytes : n), 0) : 0;
+        if (list && size > budget) { state.moves[name] = null; continue; }
+        budget -= size;
+        state.moves[name] = list;
+      }
+    }
     return state;
   };
 
@@ -280,7 +272,7 @@ export function createRoom(sim, initialStores, { latency = () => 40, answerLaten
     room.lastSentAt = new Map();
     room.lastN = new Map();
     room.stores = new Map();
-    for (const [name, value] of Object.entries(fileStores)) room.stores.set(name, { value: cloneJson(value), bytes: bytes(value), last: 0, landed: 0, floor: 0, log: [], logBytes: 0 });
+    for (const [name, value] of Object.entries(fileStores)) room.stores.set(name, { value: cloneJson(value), bytes: bytes(value), from: null, last: 0, landed: 0, floor: 0, log: [], logBytes: 0, inFile: new Set() });
     for (const id of room.clients.keys()) { const c = room.clients.get(id); if (c.connected) { room.close(id); sim.after(200, () => room.open(id)); } }
   };
   return room;

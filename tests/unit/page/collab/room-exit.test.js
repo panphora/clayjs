@@ -3,6 +3,7 @@
 // fixture shapes, with the real binding, store and fast lane on the room double.
 import { jest } from "@jest/globals";
 import { Sim, createRoom } from "./room-double.js";
+import { serializeLive, textHash } from "../../../../src/live/ops.js";
 import { engine } from "./blocks/editor-tab.js";
 
 let warn;
@@ -128,7 +129,7 @@ test("Opus 2: a reconnect during the whole read leaves the next read whole, and 
 });
 
 test("Opus 2: a save's landed event during the whole read leaves the next read whole, and the room and a end with A2 and B", async () => {
-  const out = await busyPeerWithEventDuringRead((room) => { room.fileWritten("page", copy(room.stores.get("page").value), { epoch: room.epoch, seq: room.seq }); });
+  const out = await busyPeerWithEventDuringRead((room) => { const v = copy(room.stores.get("page").value); room.fileWritten("page", v, { epoch: room.epoch, seq: room.seq, hash: textHash(serializeLive(v)) }); });
   expect(out).toEqual({ room: out.room, a: out.room, b: "Start. A1 B" });
   for (const piece of [" A1", " A2", " B"]) expect(out.room.split(piece).length - 1).toBe(1);
 });

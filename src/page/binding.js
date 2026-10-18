@@ -238,8 +238,9 @@ export function createPageBinding({ schema, store, lane, me, setTimer = setTimeo
     } else {
       B.tomb = tombOf(value, id);
       // A block written whole: this tab's last write to it while that write is
-      // the latest the tab knows (mine), the writes not yet seen back (ownSent),
-      // and the values the tab has seen it hold (seen), for a room loss.
+      // the latest the tab knows (mine), the writes not yet seen back (ownSent,
+      // each { value, id: its op, seq: where it landed }), and the values the
+      // tab has seen it hold (seen), for a room loss.
       B.mine = null;
       B.ownSent = [];
       B.seen = raw ? [strip(raw)] : [];
@@ -255,14 +256,28 @@ export function createPageBinding({ schema, store, lane, me, setTimer = setTimeo
     if (B.seen.length > 32) B.seen.shift();
   }
 
-  // A whole value of block B came in the stream: this tab's own, or a peer's
-  // later write, which ends this tab's claim to it.
-  function cameWhole(B, X) {
+  // A whole value of block B came in the stream at room seq `at` (a frame's,
+  // or a state's): this tab's own, or another value. Another value ends this
+  // tab's claim only when it is ordered after every write of this tab's own
+  // not yet seen back, by room seq, never by content: an own write that landed
+  // later, or is still on its way (its op still pending), keeps the claim.
+  function cameWhole(B, X, at = null) {
     remember(B, X);
-    const i = X ? B.ownSent.findIndex((v) => sameJson(v, X)) : -1;
-    if (i >= 0) B.ownSent.splice(0, i + 1);
-    else if (B.mine && !(X && sameJson(X, B.mine.value))) { B.mine = null; B.ownSent = []; }
+    const i = X ? B.ownSent.findIndex((v) => sameJson(v.value, X)) : -1;
+    if (i >= 0) {
+      B.ownSent.splice(0, i + 1);
+      return;
+    }
+    if (!B.mine || (X && sameJson(X, B.mine.value))) return;
+    const pending = new Set(store.pendingEntries().map((e) => e.id));
+    B.ownSent = B.ownSent.filter((v) => (v.seq !== null ? at === null || v.seq > at : v.id === undefined || pending.has(v.id)));
+    if (!B.ownSent.length) B.mine = null;
   }
+  const sentWhole = (B, value) => {
+    B.mine = { value: strip(value) };
+    B.ownSent.push({ value: strip(value), id: undefined, seq: null });
+    remember(B, value);
+  };
 
   const plugin = new pmState.Plugin({
     // A pasted copy of a block gets a new id from identityPlugin (model.js),
@@ -348,7 +363,7 @@ export function createPageBinding({ schema, store, lane, me, setTimer = setTimeo
       if (x.del) B.removedFrom = x.text;
       if (!B.text) {
         if (x.del) { B.mine = null; B.ownSent = []; }
-        else { B.mine = { value: strip(x.value) }; B.ownSent.push(strip(x.value)); remember(B, x.value); }
+        else sentWhole(B, x.value);
       }
       // A block this tab made (a split's second half, a paste): its text is
       // tracked from its first unit, before the block's first release.
@@ -369,6 +384,7 @@ export function createPageBinding({ schema, store, lane, me, setTimer = setTimeo
       opBlock.set(e.id, id);
       const B = blocks.get(id);
       if (B && B.text && e.op.op === "set" && e.op.path.length === 2 && e.op.path[0] === "blocks") { B.unechoed.push({ id: e.id, json: JSON.stringify(e.op.value), value: e.op.value, seq: null }); waiting.add(B); }
+      if (B && !B.text && e.op.op === "set" && e.op.path.length === 2 && e.op.path[0] === "blocks") { const v = B.ownSent[B.ownSent.length - 1]; if (v && v.id === undefined) v.id = e.id; }
       // A delete the stream has not brought back: a room loss heals it too.
       if (B && e.op.op === "del" && e.op.path.length === 2 && e.op.path[0] === "blocks") B.unechoedDel = e.id;
     }
@@ -376,7 +392,7 @@ export function createPageBinding({ schema, store, lane, me, setTimer = setTimeo
 
   function send(B, value, ids) {
     if (value && B.heal) B.heal.wrote(value, ids ?? B.heal.agreedIds());
-    if (value && !B.text) { B.mine = { value: strip(value) }; B.ownSent.push(strip(value)); remember(B, value); }
+    if (value && !B.text) sentWhole(B, value);
     const mark = store.mark;
     if (value === null) store.handle.delete(["blocks", B.id]);
     else store.handle.set(["blocks", B.id], packMarks(value));
@@ -433,7 +449,10 @@ export function createPageBinding({ schema, store, lane, me, setTimer = setTimeo
 
   store.onDelivery((ev) => {
     if ((ev.phase === "landed" || ev.phase === "echoed") && Number.isInteger(ev.seq)) {
-      for (const B of blocks.values()) for (const u of B.unechoed) if (u.seq === null && u.id <= ev.through) u.seq = ev.seq;
+      for (const B of blocks.values()) {
+        for (const u of B.unechoed) if (u.seq === null && u.id <= ev.through) u.seq = ev.seq;
+        if (!B.text) for (const v of B.ownSent) if (v.seq === null && v.id !== undefined && v.id <= ev.through) v.seq = ev.seq;
+      }
     }
     if (ev.phase === "refused" || ev.phase === "undone") {
       const hit = (opId) => opId <= ev.through && (ev.from == null || opId >= ev.from);
@@ -465,7 +484,7 @@ export function createPageBinding({ schema, store, lane, me, setTimer = setTimeo
         else B.tomb = true;
         continue;
       }
-      if (!B.text) { cameWhole(B, op.X ? strip(op.X) : null); continue; }
+      if (!B.text) { cameWhole(B, op.X ? strip(op.X) : null, at); continue; }
       const X = op.X && Array.isArray(op.X.c) ? { ...blockJson(nodeFromBlock(schema, op.id, op.X)), ...(op.X.w ? { w: op.X.w } : {}) } : op.X;
       if (X && X.w && X.w.a === me) echoed(B, op.sent ?? X);
       B.heal.step(X, at);
@@ -528,10 +547,10 @@ export function createPageBinding({ schema, store, lane, me, setTimer = setTimeo
         if (!B.text) {
           B.tomb = tombOf(next, id);
           const raw = rawOf(next, id);
-          if (raw) cameWhole(B, strip(raw));
+          if (raw) cameWhole(B, strip(raw), room.seq);
           continue;
         }
-        if (room.seq !== B.r.seq || !same(rawOf(next, id), B.r.S)) B.heal.join(rawOf(next, id), room.seq, { tomb: tombOf(next, id) });
+        if (room.seq !== B.r.seq || !same(rawOf(next, id), B.r.S)) B.heal.join(rawOf(next, id), room.seq, { tomb: tombOf(next, id), shown: shownText(B) });
         // Writes the joined value already holds never come back one by one.
         B.unechoed = B.unechoed.filter((u) => u.seq === null || u.seq > room.seq);
       }
@@ -630,6 +649,12 @@ export function createPageBinding({ schema, store, lane, me, setTimer = setTimeo
     }
   }
 
+  // The editor's text of text block B, or null.
+  function shownText(B) {
+    const found = view ? findBlock(view.state.doc, B.id) : null;
+    return found && found.node.isTextblock ? flatten(found.node.content).c : null;
+  }
+
   // The heal check (heal-check.js) runs once the editor shows the agreed text
   // and nothing of the block is in flight.
   function readyFor(B) {
@@ -685,7 +710,16 @@ export function createPageBinding({ schema, store, lane, me, setTimer = setTimeo
       B.refused = false;
       stats.releases++;
     }
-    for (const B of order) place(tr, B);
+    // While a composition holds a block, no block moves on the page: a move
+    // shown by halves (one block's new place, not the other's) would push the
+    // composing block around. A new block goes in now; every one waits to be
+    // placed again at the composition's end (releaseAll after compositionend).
+    if (composing !== null) {
+      for (const B of order) {
+        if (!findBlock(tr.doc, B.id)) place(tr, B);
+        dirty.add(B.id);
+      }
+    } else for (const B of order) place(tr, B);
     if (tr.docChanged) {
       const placeCaret = (x) => {
         if (!x || !x.id) return null;

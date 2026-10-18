@@ -4,7 +4,7 @@
 // whatever text the merge left out, or names it. The real binding, store and
 // fast lane on the room double, whose fileWritten is the host's merge.
 import { jest } from "@jest/globals";
-import { Sim, createRoom } from "./room-double.js";
+import { Sim, createRoom, LIMITS } from "./room-double.js";
 import { engine } from "./blocks/editor-tab.js";
 
 let warn;
@@ -18,7 +18,8 @@ const lostText = (tabs) => tabs.flatMap((t) => t.allNotices().map((n) => n.lost)
 
 // Round 9's room-exit test: " one" lands but its frame has not come back when
 // " two" is answered 503 busy. Then a saves at 9 s.
-async function ownLanded({ answer, by = true, peerAt = null }) {
+async function ownLanded({ answer, by = true, peerAt = null, logEntries = 4096, peerText = " B" }) {
+  LIMITS.logEntries = logEntries;
   const sim = new Sim(5), initial = engine.initial("Start.");
   let posts = 0;
   const room = createRoom(sim, { page: copy(initial) }, { latency: () => 400, answerLatency: () => 40, refuse: () => (++posts === 2 ? { status: 503, body: { code: "busy" }, retryAfter: 60 } : null) });
@@ -26,7 +27,7 @@ async function ownLanded({ answer, by = true, peerAt = null }) {
   const b = peerAt ? engine.makeTab(sim, room, "b", copy(initial)) : null;
   a.start();
   await sim.run(500);
-  if (b) { b.start(); await sim.run(900); sim.at(peerAt, () => { b.caret = b.view.length; b.type(" B"); }); }
+  if (b) { b.start(); await sim.run(900); sim.at(peerAt, () => { b.caret = b.view.length; b.type(peerText); }); }
   sim.at(1000, () => { a.caret = 6; a.type(" one"); });
   sim.at(1100, () => { a.type(" two"); });
   let capture;
@@ -37,12 +38,13 @@ async function ownLanded({ answer, by = true, peerAt = null }) {
   await sim.idle(5000);
   const out = { capture: { mode: capture.mode, at: capture.at, by: capture.by }, atSave, room: text(room), view: a.view, notices: lostText(b ? [a, b] : [a]), posts, b: b?.view };
   close(...(b ? [a, b] : [a]));
+  LIMITS.logEntries = 4096;
   return out;
 }
 
 test("Opus 1a: a tab's own landed write and its busy next write both survive a save at 9 s (answer first)", async () => {
   const out = await ownLanded({ answer: 80 });
-  expect(out.capture).toEqual({ mode: "file", at: { epoch: "e1", seq: 0 }, by: { client: "a", n: 2 } });
+  expect(out.capture).toEqual({ mode: "file", at: { epoch: "e1", seq: 0, hash: expect.any(String) }, by: { client: "a", n: 2 } });
   expect({ room: out.room, view: out.view, notices: out.notices }).toEqual({ room: "Start. one two", view: "Start. one two", notices: [] });
 });
 
@@ -91,6 +93,7 @@ for (const writer of ["a", "b"]) for (const answer of [80, 2000]) {
 // the room double's merge. Opus 1a's generic case and Astra 1 / Opus 3.
 import { createStore } from "../../../../src/live/store.js";
 import { createFastLane } from "../../../../src/live/fast-lane.js";
+import { serializeLive, textHash } from "../../../../src/live/ops.js";
 
 async function plainStore(initial, first, second, { answer = 80 } = {}) {
   const sim = new Sim(5);
@@ -112,7 +115,7 @@ async function plainStore(initial, first, second, { answer = 80 } = {}) {
     const value = copy(store.value), mark = store.mark;
     saving = { mark };
     const by = { client: "a", n: lane.framed?.("s") ?? 0 };
-    sim.after(answer / 2, () => room.fileWritten("s", value, leftAt, by));
+    sim.after(answer / 2, () => room.fileWritten("s", value, { ...leftAt, hash: textHash(serializeLive(value)) }, by));
     sim.after(answer, () => {
       saving = null;
       if (store.handle.status.mode === "fast") { store.rebase(store.authoritative, { source: "state", through: mark }); lane.release("s"); lane.refresh(); }
@@ -140,5 +143,16 @@ for (const answer of [80, 2000]) {
   test(`Astra 1: a list delete that landed without coming back deletes one item after a save (answer after ${answer} ms)`, async () => {
     const out = await plainStore({ items: ["a", "b", "c"] }, (h) => h.delete(["items", 0]), (h) => h.set("flag", true), { answer });
     expect(out).toEqual({ room: { items: ["b", "c"], flag: true }, tab: { items: ["b", "c"], flag: true }, mode: "fast", pending: 0, posts: out.posts });
+  });
+}
+
+// Round 11 review, Opus 4: the same, with the room's log evicted before a is
+// back (moves null), so a rejoins by the join path. Its own " one", which the
+// room holds, is not named in a heal notice.
+for (const peerText of [" B", " B C D"]) {
+  test(`Opus 4: a rejoin after a save, with the log evicted, gives no false heal notice (peer types '${peerText}')`, async () => {
+    const out = await ownLanded({ answer: 80, peerAt: 9200, logEntries: 2, peerText });
+    expect({ view: out.view, b: out.b, notices: out.notices }).toEqual({ view: out.room, b: out.room, notices: [] });
+    for (const piece of [" one", " two", ...peerText.trim().split(" ").map((w) => " " + w)]) expect(out.room.split(piece).length - 1).toBe(1);
   });
 }

@@ -93,3 +93,34 @@ test("rule 2: a peer's edit above the composing block shifts it without touching
   expect(during).toEqual({ p: "Peer: Start.", q: "Other. 日本", sameNode: true, head: 14 + 1 + 9 });
   expect(after).toEqual(["Peer: Start.", "Other. 日本"]);
 });
+
+// Round 11 review, Opus 5: while a composes in p, b's move of q comes with b's
+// binding re-keying p to keep its order. a held p's half and applied q's, so a
+// showed [q, p] while the room and b had [p, q]. Now no block moves on a's page
+// until compositionend; then it shows the room's order.
+const order = (t) => { const o = []; t.editor.state.doc.forEach((n) => o.push(n.attrs.id)); return o; };
+const roomOrder = (room) => Object.entries(room.stores.get("page").value.blocks).sort(([i, x], [j, y]) => (x.pos < y.pos ? -1 : x.pos > y.pos ? 1 : i < j ? -1 : 1)).map(([id]) => id);
+for (const [label, move] of [
+  ["Opus 5: q's pos changed so it sorts first (b re-keys p)", (b) => { const f = find(b.editor.state.doc, "q"); b.editor.dispatch(b.editor.state.tr.setNodeMarkup(f.pos, null, { ...f.node.attrs, pos: "A" })); }],
+  ["a real move: b drags q above p", (b) => { const ed = b.editor, f = find(ed.state.doc, "q"); const node = f.node; const tr = ed.state.tr.delete(f.pos, f.pos + node.nodeSize); tr.insert(0, node); ed.dispatch(tr); }],
+]) {
+  test(`${label}: no block moves on the page during a composition; after it, the room's order`, async () => {
+    const { sim, room, a, b, done } = setup();
+    await sim.run(500);
+    let pEl = null;
+    sim.at(600, () => { caretAt(a, "p", 6); a.compose(true); a.input(" 日本"); pEl = a.editor.dom.children[0]; });
+    sim.at(700, () => move(b));
+    await sim.run(2000);
+    const during = { a: order(a), composing: a.editor.composing, sameElement: a.editor.dom.children[0] === pEl && pEl.isConnected };
+    sim.at(2100, () => a.compose(false));
+    await sim.run(5000);
+    await sim.idle(2000);
+    const after = { a: order(a), b: order(b), room: roomOrder(room), text: textOf(a, "p") };
+    done();
+    expect(during).toEqual({ a: ["p", "q"], composing: true, sameElement: true });
+    expect(after.a).toEqual(after.room);
+    expect(after.b).toEqual(after.room);
+    expect(after.text).toBe("Start. 日本");
+    if (label.startsWith("a real move")) expect(after.room).toEqual(["q", "p"]);
+  });
+}

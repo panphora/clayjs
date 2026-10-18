@@ -130,3 +130,36 @@ test("rule 1: a table is one value: a cell edit lost with the room comes back", 
   for (const t of [a, b]) { t.binding.dispose(); t.editor.destroy(); t.lane.stop(); }
   expect(out).toEqual({ room: "xy", a: "xy", b: "xy", notices: 0 });
 });
+
+// Round 11 review, Astra 1: b writes the caption at 600 ms, a at 620 ms, and
+// the room orders b's first. b's value reaching a before a's echo is ordered
+// before a's write, so it must not end a's claim: a's echo makes "mine" the
+// latest value a tab can heal. Then the room restarts from the file.
+for (const gap of [20, 200]) {
+  test(`Astra 1: a peer's earlier write does not erase the claim of a later own whole write (a ${gap} ms after b)`, async () => {
+    const { sim, room, a, b } = setup();
+    await sim.run(500);
+    sim.at(600, () => caption(b, "peer"));
+    sim.at(600 + gap, () => caption(a, "mine"));
+    await sim.run(1000);
+    expect([room.stores.get("page").value.blocks.i.caption, image(a), image(b)]).toEqual(["mine", "mine", "mine"]);
+    room.restart({ page: initial() });
+    await sim.run(10000);
+    await sim.idle(3000);
+    const heals = a.heals;
+    expect({ ...result(room, a, b), heals }).toEqual({ room: "mine", a: "mine", b: "mine", notices: [], heals: 1 });
+  });
+}
+
+test("a peer's write ordered after this tab's echoed write ends this tab's claim: the peer's value heals", async () => {
+  const { sim, room, a, b } = setup();
+  await sim.run(500);
+  sim.at(600, () => caption(a, "mine"));
+  sim.at(900, () => caption(b, "peer"));
+  await sim.run(1300);
+  room.restart({ page: initial() });
+  await sim.run(10000);
+  await sim.idle(3000);
+  const heals = [a.heals, b.heals];
+  expect({ ...result(room, a, b), heals }).toEqual({ room: "peer", a: "peer", b: "peer", notices: [], heals: [0, 1] });
+});

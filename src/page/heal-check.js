@@ -48,7 +48,9 @@ const MARGIN = 8;
 // The check runs on the part between the common prefix and suffix, plus a
 // margin of each. When the margin's outer pair is sure, so is everything past
 // it (a text matched against itself has one longest alignment); when it is
-// not, the margin doubles. A window past SURE_CELLS is all unsure.
+// not, the margin doubles. Past SURE_CELLS it stops: a side whose outer pair
+// some window proved sure keeps what lies past that window; everything else,
+// prefix and suffix included, is unsure (not proven kept).
 export function alignSure(a, b) {
   const map = new Int32Array(b.length).fill(-1);
   const n = Math.min(a.length, b.length);
@@ -57,23 +59,27 @@ export function alignSure(a, b) {
   let s = 0;
   while (s < n - p && a.charCodeAt(a.length - 1 - s) === b.charCodeAt(b.length - 1 - s)) s++;
   const shift = a.length - b.length;
+  // The units past which each side is proven: [0, left) and [a.length - right, a.length) of a.
+  let left = 0, right = 0;
   for (let m = MARGIN; ; m *= 2) {
     const mp = Math.min(p, m), ms = Math.min(s, m);
     const a0 = p - mp, b0 = a0, N = a.length - s + ms - a0, M = b.length - s + ms - b0;
-    const outside = () => {
-      for (let j = 0; j < b0; j++) map[j] = j;
-      for (let j = b0 + M; j < b.length; j++) map[j] = j + shift;
+    const outside = (l, r) => {
+      for (let j = 0; j < l; j++) map[j] = j;
+      for (let j = b.length - r; j < b.length; j++) map[j] = j + shift;
     };
     if ((N + 1) * (M + 1) > SURE_CELLS) {
-      outside();
+      outside(left, right);
       const unsure = [];
-      for (let i = a0; i < a0 + N; i++) unsure.push(i);
+      for (let i = left; i < a.length - right; i++) unsure.push(i);
       return { map, unsure };
     }
     const { sure, kept } = surePairs(a, a0, N, b, b0, M);
-    const done = mp === p && ms === s;
-    if (!done && !((mp === p || sure[0] === 0) && (ms === s || sure[M - 1] === N - 1))) continue;
-    outside();
+    const leftSure = mp === p || sure[0] === 0, rightSure = ms === s || sure[M - 1] === N - 1;
+    if (leftSure) left = Math.max(left, a0);
+    if (rightSure) right = Math.max(right, a.length - (a0 + N));
+    if (!(leftSure && rightSure)) continue;
+    outside(b0, b.length - (b0 + M));
     const proven = new Uint8Array(N);
     for (let j = 0; j < M; j++) if (sure[j] >= 0) { map[b0 + j] = a0 + sure[j]; proven[sure[j]] = 1; }
     const unsure = [];
@@ -254,7 +260,9 @@ export function createHealCheck({ r, me, quiet = 500, setTimer, clearTimer, read
   // Around every replay call: who deleted the units with ids, then, where
   // the units were rebuilt (r.rebuilds), the ids carried over, and ids taken
   // back by units the call made. A block this tab never typed in has no ids.
-  function around(X, kind, fn) {
+  // shown: the editor's text now (its ids are `view`), for a join: units the
+  // join made take back the ids of this tab's text the editor shows.
+  function around(X, kind, fn, shown = null) {
     if (next === 1) { fn(); return; }
     const rebuilds = r.rebuilds, beforeText = r.S ? r.S.c : "";
     const arr = r.units;
@@ -262,7 +270,8 @@ export function createHealCheck({ r, me, quiet = 500, setTimer, clearTimer, read
     let count = 0;
     for (const u of arr) if (!u.del) { if (u.id) tagged.push([count, u]); count++; }
     const mine = kind === "own" || (kind === "room" && X && X.w && X.w.a === me) ? sent.get(keyOf(X)) : seed && X && !X.w && X.c === seed.text ? seed : null;
-    const back = kind !== "peer" && (mine || pre);
+    const fromView = typeof shown === "string" && shown.length === view.length ? { text: shown, ids: view.slice() } : null;
+    const back = kind !== "peer" && (mine || pre || fromView);
     // Units a placed write of this tab's own makes carry their ids already.
     const had = back && kind === "room" ? new Set(arr) : null;
     fn();
@@ -285,6 +294,7 @@ export function createHealCheck({ r, me, quiet = 500, setTimer, clearTimer, read
       if (made.size) {
         if (mine) adopt(vis, made, mine);
         if (pre) adopt(vis, made, pre);
+        if (fromView) adopt(vis, made, fromView);
       }
     }
   }
@@ -298,7 +308,7 @@ export function createHealCheck({ r, me, quiet = 500, setTimer, clearTimer, read
       seed = { text, ids: view.slice() };
     },
     step(X, seq) { around(X, kindOf(X, me), () => step(r, X, seq)); },
-    join(X, seq, opts) { around(null, "room", () => join(r, X, seq, opts)); },
+    join(X, seq, opts) { around(null, "room", () => join(r, X, seq, opts), opts?.shown ?? null); },
     tombstone(seq) { for (const u of visible(r)) if (u.id) peer.add(u.id); tombstone(r, seq); },
     agreedIds,
     // A notice (a refusal's) named the editor's text in these [from, to)
@@ -331,17 +341,42 @@ export function createHealCheck({ r, me, quiet = 500, setTimer, clearTimer, read
     dispose() { if (timer !== null) clearTimer(timer); timer = null; },
   };
 
+  // What a check names, one text a run: the lost units, each widened to the
+  // whole word it is in, with the space before it. A word is the run's units
+  // as they stand (this tab's and peers' deletes left out), split at spaces.
   function lostRuns() {
     if (!risk) return [];
     const shown = new Set(view.filter(Boolean));
     for (const id of agreedIds()) if (id) shown.add(id);
-    const runs = new Map();
-    for (const id of [...risk].sort((a, b) => a - b)) {
-      if (shown.has(id) || erased.has(id) || peer.has(id)) continue;
-      const run = runOf.get(id);
-      runs.set(run, (runs.get(run) ?? "") + chOf.get(id));
+    const lost = new Set();
+    for (const id of risk) if (!shown.has(id) && !erased.has(id) && !peer.has(id)) lost.add(id);
+    if (!lost.size) return [];
+    const members = new Map();
+    for (const [id, run] of runOf) {
+      if (erased.has(id) || peer.has(id)) continue;
+      if (!members.has(run)) members.set(run, []);
+      members.get(run).push(id);
     }
-    return [...runs.values()].filter((t) => t.trim());
+    const space = (id) => !chOf.get(id).trim();
+    const runs = new Map();
+    for (const run of new Set([...lost].map((id) => runOf.get(id)))) {
+      const ids = members.get(run).sort((a, b) => a - b);
+      const named = new Uint8Array(ids.length);
+      for (let i = 0; i < ids.length; i++) {
+        if (!lost.has(ids[i])) continue;
+        named[i] = 1;
+        if (space(ids[i])) continue;
+        let lo = i, hi = i;
+        while (lo > 0 && !space(ids[lo - 1])) lo--;
+        while (hi < ids.length - 1 && !space(ids[hi + 1])) hi++;
+        if (lo > 0) lo--;
+        for (let k = lo; k <= hi; k++) named[k] = 1;
+      }
+      let text = "";
+      for (let i = 0; i < ids.length; i++) if (named[i]) text += chOf.get(ids[i]);
+      runs.set(run, text);
+    }
+    return [...runs.entries()].sort((x, y) => x[0] - y[0]).map(([, t]) => t).filter((t) => t.trim());
   }
 
   function check() {

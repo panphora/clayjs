@@ -6,7 +6,7 @@
 // and takes the values other tabs saved or relayed from each live-sync frame.
 
 import { createStore } from "../live/store.js";
-import { serializeLive, stampOf, parseStamp } from "../live/ops.js";
+import { serializeLive, stampOf, parseStamp, textHash } from "../live/ops.js";
 import { onSnapshot } from "../core/snapshot.js";
 import { onSaveAccepted, isSaveInProgress } from "../core/save-core.js";
 import { savePageForce, baselineSettled, isSaveConflicted, autosaveIsSuspended } from "../core/save.js";
@@ -244,15 +244,24 @@ export function serializeLines(value) {
 }
 
 // A value another tab saved or relayed. It never confirms this tab's ops: equal
-// text from a peer is not this tab's save.
-function receive(entry, text, source) {
+// text from a peer is not this tab's save. through: this tab's ops the value
+// already holds (its frames that landed before the value's stamp).
+function hashOfText(text) {
+  try {
+    return textHash(serializeLive(HyperMorph.parseJsonRelaxed(text)));
+  } catch {
+    return null;
+  }
+}
+
+function receive(entry, text, source, through) {
   let value;
   try {
     value = HyperMorph.parseJsonRelaxed(text);
   } catch {
     return;
   }
-  if (entry.store.rebase(value, { source })) entry.framesSince = true;
+  if (entry.store.rebase(value, { source, ...(through > 0 && { through }) })) entry.framesSince = true;
 }
 
 export function live(name) {
@@ -297,10 +306,18 @@ onSnapshot((clone) => {
     if (entry.store.handle.status.mode === "fast" && fast) {
       tag.element.setAttribute("live-at", stampOf(fast.status.epoch, fast.status.seq, serializeLive(entry.store.authoritative)));
       tag.element.removeAttribute("live-by");
+    } else if (entry.leftAt?.disk) {
+      // Out of the room, after a save of it was accepted: the value descends
+      // from the file on disk, which holds this tab's frames and the room's
+      // merge of them. No stamp: the host replays only what the file lacks.
+      tag.element.removeAttribute("live-at");
+      tag.element.removeAttribute("live-by");
     } else if (entry.leftAt) {
       // Left the room: the value descends from the room position it left at,
       // and holds every frame this tab gave the store (live-by), landed or not:
-      // the host's merge never replays those over it.
+      // the host's merge never replays those over it. live-by sits only beside
+      // a stamp whose hash is this value's, so the host can tell the capture
+      // from an edit of it.
       tag.element.setAttribute("live-at", stampOf(entry.leftAt.epoch, entry.leftAt.seq, serializeLive(entry.store.value)));
       const n = fast?.framed(entry.store.name) ?? 0;
       const client = fast?.status.clientId;
@@ -400,6 +417,7 @@ export function confirmSaved(html) {
     } else {
       entry.store.confirm(saved.mark);
     }
+    if (mode === "file" && entry.leftAt) entry.leftAt = { disk: true };
   }
 }
 
@@ -430,8 +448,20 @@ export function receiveFrame(html, seq = null) {
     const by = tag.element.getAttribute("live-by");
     const pageTag = page.get(name)?.element;
     // The page's tag keeps the lineage of the version this tab last took, so a
-    // file-mode save claims what it descends from.
-    if (entry && entry.store.handle.status.mode === "file") entry.leftAt = null;
+    // file-mode save claims what it descends from. A store out of the room
+    // descends from the incoming value's room position when it is of this
+    // room: its frames that landed at or before it are in that value and leave
+    // pending, and its save stamps that position with its own live-by.
+    // Only a capture counts (the value is the one its stamp hashes); for
+    // anything else the page's tag takes the incoming lineage, as for a store
+    // that was never in the room.
+    let through = 0;
+    if (entry && entry.store.handle.status.mode === "file") {
+      const stamp = entry.leftAt ? parseStamp(at) : null;
+      const capture = !!stamp && stamp.epoch === fast?.status.epoch && stamp.hash === hashOfText(text);
+      if (capture) through = fast.landedBy(name, stamp);
+      entry.leftAt = capture ? { epoch: stamp.epoch, seq: stamp.seq } : null;
+    }
     if (pageTag && (!entry || entry.store.handle.status.mode === "file")) {
       if (at === null) pageTag.removeAttribute("live-at");
       else if (pageTag.getAttribute("live-at") !== at) pageTag.setAttribute("live-at", at);
@@ -439,7 +469,7 @@ export function receiveFrame(html, seq = null) {
       else if (pageTag.getAttribute("live-by") !== by) pageTag.setAttribute("live-by", by);
     }
     if (entry && !entry.store.ephemeral) {
-      if (entry.store.handle.status.mode === "file") receive(entry, text, "remote");
+      if (entry.store.handle.status.mode === "file") receive(entry, text, "remote", through);
       continue;
     }
     if (pageTag && pageTag.textContent !== text) pageTag.textContent = text;

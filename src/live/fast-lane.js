@@ -130,11 +130,13 @@ export function createFastLane({
   // the wire, whose answer decides it (decide). The frames stay as records: a
   // rejoin settles each by the room's answer or receipt, or sends it again.
   // Leaving wakes the checkpoints (onApplied): what is pending now saves at
-  // save speed.
-  function leaveRoom(name, lane) {
+  // save speed. kept: the room still holds the store, so its frames go by
+  // while this tab is out, and the rejoin reads it whole (missed). A store the
+  // room does not hold has no frames to miss.
+  function leaveRoom(name, lane, kept = true) {
     const store = entries.get(name)?.store;
     for (const frame of lane.awaiting) if (frame === flying) frame.undecided = true;
-    missed = true;
+    if (kept) missed = true;
     lane.out = true;
     onLeave(name, { epoch, seq });
     lane.unsent = [];
@@ -334,7 +336,7 @@ export function createFastLane({
       console.warn(`clay.live("${name}"): the room has no such store, so it stays at save speed (${reason})`);
       frame.refused = true;
       roomNames.delete(name);
-      leaveRoom(name, lane);
+      leaveRoom(name, lane, false);
       return;
     }
     lane.awaiting.splice(lane.awaiting.indexOf(frame), 1);
@@ -442,7 +444,7 @@ export function createFastLane({
     }
     const fresh = state.epoch !== epoch;
     let joined = false;
-    // Every store is read whole here; one that is out of this state sets it again.
+    // Every store is read whole here.
     missed = false;
     epoch = state.epoch;
     seq = Number.isInteger(state.seq) ? state.seq : 0;
@@ -455,9 +457,10 @@ export function createFastLane({
       const lane = laneOf(name);
       prune(name, lane);
       if (!room) {
-        // Already out: its value still descends from where it left.
-        if (!lane.out) leaveRoom(name, lane);
-        else missed = true;
+        // Not in the room (too large, too many stores, or opened after it):
+        // there are no frames of it to miss. Already out: its value still
+        // descends from where it left.
+        if (!lane.out) leaveRoom(name, lane, false);
         continue;
       }
       const rejoined = entry.store.handle.status.mode === "file";
@@ -672,6 +675,16 @@ export function createFastLane({
     // out of the room holds every frame through it (live-by).
     framed(name) {
       return lanes.get(name)?.n ?? 0;
+    },
+    // A value stamped at `at` (a peer's save) reached a store that is out of
+    // the room: its frames that landed at or before at.seq in this room are in
+    // that value. They leave the lane; returns the op id they reach (0: none).
+    landedBy(name, at) {
+      const lane = lanes.get(name);
+      if (!lane || !at || at.epoch !== epoch || !Number.isInteger(at.seq)) return 0;
+      let through = 0;
+      while (lane.awaiting.length && lane.awaiting[0] !== flying && lane.awaiting[0].seq !== null && lane.awaiting[0].seq <= at.seq) through = lane.awaiting.shift().through;
+      return through;
     },
     // Read the room again: a store opened after this tab joined, or a save the
     // room merged whose state may not have arrived yet.

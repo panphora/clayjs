@@ -6,6 +6,7 @@
 import { createStore } from "../../../../../src/live/store.js";
 import { createFastLane } from "../../../../../src/live/fast-lane.js";
 import { createPageBinding, docFromRecord } from "../../../../../src/page/binding.js";
+import { serializeLive, textHash } from "../../../../../src/live/ops.js";
 import { schema } from "../../../../../src/page/schema.js";
 import { identityPlugin } from "../../../../../src/page/model.js";
 import { flatten, marksOf } from "../../../../../src/page/inline.js";
@@ -119,16 +120,19 @@ export function makeTab(sim, room, id, init, opts = {}) {
     start() { lane.start(); room.open(id); },
     // A save of the page, as the live plugin makes it: the capture (in fast
     // mode the room's value at the lane's position; out of the room the store's
-    // value, stamped where it left, with live-by), the host's merge `answer / 2`
-    // ms later (room.fileWritten, which sends the room's state on the stream),
-    // and the answer after `answer` ms (confirmSaved). Returns the capture.
+    // value, stamped where it left, with live-by; after a save made out of the
+    // room was accepted, no stamp: the value descends from the file), the
+    // host's merge `answer / 2` ms later (room.fileWritten, which sends the
+    // room's state on the stream), and the answer after `answer` ms
+    // (confirmSaved). Returns the capture.
     save({ answer = 80, by = true } = {}) {
       const mode = store.handle.status.mode;
       const fastMode = mode === "fast";
       const value = JSON.parse(JSON.stringify(fastMode ? store.authoritative : store.value));
-      const at = fastMode ? { epoch: lane.status.epoch, seq: lane.status.seq } : leftAt;
+      const where = fastMode ? { epoch: lane.status.epoch, seq: lane.status.seq } : leftAt && !leftAt.disk ? leftAt : null;
+      const at = where ? { epoch: where.epoch, seq: where.seq, hash: textHash(serializeLive(value)) } : null;
       const n = lane.framed?.("page") ?? 0;
-      const stamp = { at, by: !fastMode && by && leftAt && n > 0 ? { client: id, n } : null };
+      const stamp = { at, by: !fastMode && by && at && n > 0 ? { client: id, n } : null };
       const mark = store.mark;
       if (!fastMode) saving = { mark, mode };
       const capture = { mode, value, mark, ...stamp };
@@ -140,7 +144,10 @@ export function makeTab(sim, room, id, init, opts = {}) {
           store.rebase(store.authoritative, { source: "state", through: mark });
           lane.release("page");
           lane.refresh();
-        } else store.confirm(mark);
+        } else {
+          store.confirm(mark);
+          if (leftAt) leftAt = { disk: true };
+        }
       });
       return capture;
     },

@@ -304,6 +304,54 @@ test("Opus 4: randomized multi-edit, 20,000 runs: no run names fewer non-space c
   expect({ short, bad }).toEqual({ short: 0, bad: [] });
 });
 
+// Round 11 review, Astra 2 and Opus 2: past SURE_CELLS, a side no window
+// proved sure is not proven kept either, so a lost copy of repeated text far
+// from where the check stopped is named, never carried onto another copy.
+test("Astra 2: 'the ' × 512 + 'end.' with 'the ' typed in front, room back: 'the' is named (and at 60 KB)", () => {
+  for (const reps of [512, 15000]) {
+    const base = "the ".repeat(reps) + "end.";
+    const h = harness(base);
+    h.write("a", 0, 0, "the ");
+    h.lose(base);
+    expect(h.notices.map((t) => t.trim())).toEqual(["the"]);
+  }
+});
+
+test("Opus 2: 'ha ' × k with one more 'ha ' typed at 3, room back: it is named at every length", () => {
+  for (const reps of [100, 340, 350, 400, 1000, 4000, 20000]) {
+    const base = "ha ".repeat(reps) + "end.";
+    const h = harness(base);
+    h.write("a", 3, 3, "ha ");
+    h.lose(base);
+    expect([reps, h.notices.map((t) => t.trim())]).toEqual([reps, ["ha"]]);
+  }
+});
+
+test("Opus 2: '=' × 60000 with '===' typed in the middle, room back: it is named", () => {
+  const base = "=".repeat(60000);
+  const h = harness(base);
+  h.write("a", 30000, 30000, "===");
+  h.lose(base);
+  expect(h.notices).toEqual(["==="]);
+});
+
+// Round 12, decision 5: a notice names the whole word a lost unit is in, with
+// the space before it, even when the rest of the word is still there.
+test("a word partly lost is named whole, with the space before it", () => {
+  const h = harness("x.");
+  h.write("a", 1, 1, " hello");
+  expect(h.r.S.c).toBe("x hello.");
+  h.lose("x hel.");
+  expect(h.notices).toEqual([" hello"]);
+});
+
+test("a word whose letters all stand gives no notice, and only the lost word of a run is named", () => {
+  const h = harness("x.");
+  h.write("a", 1, 1, " one dog sun");
+  h.lose("x one sun.");
+  expect(h.notices.map((t) => t.trim())).toEqual(["dog"]);
+});
+
 // Round 8 review, Opus 5: Enter mid-paragraph, then typing into the new block
 // within 10 ms, before its first release. Its text is tracked from the first
 // keystroke, so a loss that drops the typing gets a notice.
@@ -405,9 +453,11 @@ describe.each(all.map((e) => [e.name, e]))("heal check notices only absent text,
     await sim.run(30000);
     await sim.idle(5000);
     const final = room.stores.get("page").value.blocks.p.c;
-    const heals = tabs.flatMap((t) => t.allNotices().filter((x) => x.kind === "heal" && x.seq === undefined).map((x) => x.lost)).join("");
+    const heals = tabs.flatMap((t) => t.allNotices().filter((x) => x.kind === "heal" && x.seq === undefined).map((x) => x.lost)).join(" ");
     const named = tabs.flatMap((t) => t.allNotices().map((x) => x.lost ?? "")).join("");
-    const kept = [...new Set(heals)].filter((ch) => ch.trim() && final.includes(ch));
+    // A notice names whole words (round 12): a word it names that the final
+    // text holds whole is a false notice.
+    const kept = heals.split(/\s+/).filter((w) => w && [...w].every((ch) => final.includes(ch)));
     // Every typed character the final text lacks is in a notice: with every
     // notice suppressed, this fails on the seeds that lose text (round 8 review).
     const lost = [];
