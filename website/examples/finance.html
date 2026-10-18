@@ -149,9 +149,7 @@
 <script src="https://clayjs.com/v1/clay-ui.js"></script>
 <script src="https://clayjs.com/v1/sap.js"></script>
 <script>
-clay.ready.then(async () => {
-  if (window.__budgetStarted) return;
-  window.__budgetStarted = true;
+clay.start(async () => {
   await clay.loaded.sap;
 
   const app = document.getElementById("app");

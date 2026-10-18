@@ -707,9 +707,9 @@ More engine rules:
 
 - Text merges word by word inside a block, and formatting merges per character. Inline `<style>` text merges word by word. Scripts, textarea text and comments merge as whole values.
 - Matched live nodes are moved, not recreated, so listeners, focus, caret and iframes survive. An element that matches nothing (re-keyed, or changed beyond recognition among similar siblings) is removed and inserted fresh, and listeners attached directly to it are gone. **Use delegated listeners** on `document` or a stable root.
-- A new or changed inline `<script>` in the frame runs once after the merge. Hence the boot guard (9.10).
+- A new or changed inline `<script>` in the frame runs once after the merge. Hence `clay.start` (9.10).
 - Window scroll is restored. Inner scroll containers are not, except the focused element's own.
-- The merge runs with the mutation hub, the dirty gate and undo paused: incoming changes never autosave and never enter undo history. Your own `MutationObserver` still sees them, which is how the examples re-render.
+- The merge runs with the mutation hub, the dirty gate and undo paused: incoming changes never autosave and never enter undo history. `clay.effect` re-runs after it through `clay:sync-applied`, which is how the examples re-render (7.5).
 
 ### 7.3 Regions and JSON under sync
 
@@ -756,6 +756,8 @@ Rules for `fn`:
 - **Do not call `clay.undo.commit` inside it.** A commit drains the hub's records, so the effect's writes reach autosave and the effect again.
 - **One effect does not see another's writes**, because each runs paused. Draw values that depend on each other in one effect.
 - **A derived value saved in the record** (a count painted in markup, 9.4) is written with the hub paused, so a repaint after a merge leaves the page dirty with no save scheduled. Put saved derived values in `clay="no-dirty"`, or in chrome.
+
+In edit mode each effect warns once in the console when it breaks one of these rules: a write to saved content outside `no-dirty` and `editor-ui`, a `clay.undo.commit` call, an effect created inside it, or more than 50 runs in a second (usually a timer or async callback it started that keeps changing the document). The effect keeps running; the warning names the element or command.
 
 Work that belongs to a merge alone goes in a `clay:sync-applied` listener:
 
@@ -1357,7 +1359,7 @@ Sap.batch("Import CSV", () => {
 
 A rules tag with `data-rules-name="api"` gives agents and the host's data API the same shape your export uses.
 
-### 9.10 The boot guard
+### 9.10 Starting the app once
 
 A live-sync merge can re-insert an inline script, which runs it again: every listener doubles and every chrome element appears twice. Start the app with `clay.start`. It runs its function once per page, after `clay.ready`, and a repeat call does nothing:
 
@@ -1537,9 +1539,9 @@ The saved file is the data. Everyone who can download it can read everything in 
 8. All chrome is cloned from a `<template>` into `clay="editor-ui"` after `clay.ready`; nothing in the file is chrome.
 9. Tab-local state is in the hash, `localStorage` or memory, painted through a runtime style; opening, filtering and searching leave `clay.hasUnsavedChanges()` false.
 10. Derived values are in `editor-ui`, or `no-dirty` when the file must show them; every derived write is guarded.
-11. Commands are wrapped in `clay.undo.commit`; checkboxes and inputs are re-synced from attributes on undo, redo and `clay:sync-applied`.
-12. A `clay:sync-applied` handler re-renders and closes views whose record vanished.
-13. The app script has a boot guard; all listeners are delegated.
+11. Commands are wrapped in `clay.undo.commit`; derived views are drawn in `clay.effect`, with no effect warnings in the console.
+12. Views whose record a peer deleted are closed, in the effect or a `clay:sync-applied` handler.
+13. The app script starts with `clay.start`; all listeners are delegated.
 14. Nothing writes the record at boot.
 15. Edit-only calls are guarded for view mode, and edit actions check `clay.isEditMode`.
 16. `clay.confirm` calls have a rejection handler.

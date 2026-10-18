@@ -111,9 +111,7 @@
 <script src="https://clayjs.com/v1/clay.js?plugins=sync,sortable,undo,upload,indicator"></script>
 <script src="https://clayjs.com/v1/clay-ui.js"></script>
 <script>
-clay.ready.then(() => {
-  if (window.__writerStarted) return;
-  window.__writerStarted = true;
+clay.start(() => {
 
   const blocks = document.getElementById("blocks");
   const newId = (prefix) => prefix + "-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
@@ -312,10 +310,6 @@ clay.ready.then(() => {
     setText(chrome.querySelector("#status"), `${words} words`);
   }
 
-  function syncCheckboxes() {
-    for (const box of blocks.querySelectorAll(".todos input[type=checkbox]")) box.checked = box.hasAttribute("checked");
-  }
-
   document.addEventListener("click", (event) => {
     const link = event.target.closest("#outline a");
     if (link) {
@@ -366,21 +360,7 @@ clay.ready.then(() => {
     slashParagraph = para;
   });
 
-  document.addEventListener("clay:sync-applied", () => {
-    syncCheckboxes();
-    render();
-  });
-  clay.undo?.on("undo", syncCheckboxes);
-  clay.undo?.on("redo", syncCheckboxes);
-
-  let queued = false;
-  new MutationObserver(() => {
-    if (queued) return;
-    queued = true;
-    queueMicrotask(() => { queued = false; render(); });
-  }).observe(blocks, { subtree: true, childList: true, attributes: true, characterData: true });
-
-  render();
+  clay.effect(render);
 });
 </script>
 </body>

@@ -22,6 +22,18 @@ const withTabLocal = (opts = {}) => {
 const createScope = undo.create.bind(undo)
 undo.create = (opts) => createScope(withTabLocal(opts))
 
+// A commit inside clay.effect drains the paused hub's records, so the effect's
+// own writes reach autosave and re-trigger it. Warn once; the commit still runs.
+const commit = undo.commit.bind(undo)
+let warnedEffectCommit = false
+undo.commit = (label, fn) => {
+  if (!warnedEffectCommit && window.clay?.effect?.running) {
+    warnedEffectCommit = true
+    console.warn(`clay.effect: undo.commit("${label}") was called inside an effect. Run commands from event handlers, not from an effect.`)
+  }
+  return commit(label, fn)
+}
+
 // Undo and redo restore attributes. A control the user has touched shows its
 // live property instead (the WHATWG dirty flag), so copy the attributes back, as
 // a sync merge does. Undo is the user's own request, so the focused field is

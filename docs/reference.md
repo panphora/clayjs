@@ -88,7 +88,9 @@ itself, with no network.
   calls share one slot, so a page with several app scripts names each one.
 - `clay.effect(fn)` — run `fn` on the next microtask and again after every observed change
   to the document, including merges, undo and redo. Its own writes never re-trigger it.
-  `fn` must be synchronous. Returns a stop function.
+  `fn` must be synchronous. Returns a stop function. In edit mode it warns once per effect
+  about a write to saved content outside `no-dirty`/`editor-ui`, `clay.undo.commit` inside
+  `fn`, an effect created inside `fn`, or more than 50 runs in a second.
 - `clay.theme(options)` — theme the UI ClayJS draws (dialogs and the people name prompt).
   `options` is `{ auto, colorScheme, tokens, parts }`, the same shape as `window.clayTheme`
   set before the loader. `clay.theme(false)` keeps the exact Bevel look, `clay.theme(null)`

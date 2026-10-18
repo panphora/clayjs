@@ -183,9 +183,7 @@
 <script src="https://clayjs.com/v1/clay-options.js"></script>
 <script src="https://clayjs.com/v1/clay-ui.js"></script>
 <script>
-clay.ready.then(() => {
-  if (window.__boardStarted) return;
-  window.__boardStarted = true;
+clay.start(() => {
 
   const board = document.getElementById("board");
   const newId = (prefix) => prefix + "-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
@@ -236,12 +234,6 @@ clay.ready.then(() => {
     range.collapse(false);
     getSelection().removeAllRanges();
     getSelection().addRange(range);
-  }
-
-  function syncCheckboxes() {
-    for (const box of board.querySelectorAll(".checklist input[type=checkbox]")) {
-      box.checked = box.hasAttribute("checked");
-    }
   }
 
   function derived(host, className, after) {
@@ -367,23 +359,10 @@ clay.ready.then(() => {
     logActivity(item, "Moved to " + to.closest(".column").querySelector("h2").textContent.trim());
   });
 
-  document.addEventListener("clay:sync-applied", () => {
-    syncCheckboxes();
-    render();
-  });
-  clay.undo?.on("undo", syncCheckboxes);
-  clay.undo?.on("redo", syncCheckboxes);
   window.addEventListener("hashchange", render);
 
-  let queued = false;
-  new MutationObserver(() => {
-    if (queued) return;
-    queued = true;
-    queueMicrotask(() => { queued = false; render(); });
-  }).observe(board, { subtree: true, childList: true, attributes: true, characterData: true });
-
   mountChrome();
-  render();
+  clay.effect(render);
 });
 </script>
 </body>
