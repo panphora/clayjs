@@ -29,7 +29,8 @@ const LIGHT = `
   --page-chrome-line-rest: rgba(35, 34, 31, 0.06); --page-chrome-line-moved: rgba(35, 34, 31, 0.11);
   --page-pop-bg: #FBFAF7; --page-pop-ink: #23221F; --page-pop-muted: #6B6862; --page-pop-line: rgba(35, 34, 31, 0.10);
   --page-pop-shadow: 0 1px 2px rgba(35, 34, 31, 0.05), 0 8px 24px rgba(35, 34, 31, 0.08); --page-pop-hover: rgba(35, 34, 31, 0.06);
-  --page-scrim: rgba(35, 34, 31, 0.12);`;
+  --page-scrim: rgba(35, 34, 31, 0.12);
+  --page-danger: #9E3B2F; --page-block-selected: rgba(88, 120, 170, 0.12);`;
 
 const DARK = `
   --page-bg: #1A1A18; --page-ink: #E7E4DC; --page-ink-soft: #A3A098; --page-ink-faint: #75726B;
@@ -41,7 +42,8 @@ const DARK = `
   --page-chrome-line-rest: rgba(231, 228, 220, 0.06); --page-chrome-line-moved: rgba(231, 228, 220, 0.11);
   --page-pop-bg: #222220; --page-pop-ink: #E7E4DC; --page-pop-muted: #A3A098; --page-pop-line: rgba(231, 228, 220, 0.10);
   --page-pop-shadow: 0 1px 2px rgba(10, 10, 9, 0.3), 0 10px 28px rgba(10, 10, 9, 0.35); --page-pop-hover: rgba(231, 228, 220, 0.07);
-  --page-scrim: rgba(10, 10, 9, 0.35);`;
+  --page-scrim: rgba(10, 10, 9, 0.35);
+  --page-danger: #E08A7A; --page-block-selected: rgba(120, 155, 210, 0.18);`;
 
 export const PAGE_EDITOR_CSS = `
 @layer page {
