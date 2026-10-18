@@ -266,14 +266,18 @@ function checkboxClick(view, event) {
 // every transaction that changed the document.
 export function createPageEditor(mount, { blocks = null, onChange = null, upload, highlight } = {}) {
   const doc = mount.ownerDocument;
-  let style = doc.getElementById(STYLE_ID);
-  if (!style) {
-    style = doc.createElement("style");
+  // The style saves with the page, so the next load paints styled at once. Each
+  // load puts the current CSS in a fresh tag and drops the saved one, so a page
+  // saved by an older editor picks up newer styles.
+  const saved = [...doc.querySelectorAll(`#${STYLE_ID}`)];
+  if (saved.length !== 1 || saved[0].textContent !== PAGE_EDITOR_CSS) {
+    const style = doc.createElement("style");
     style.id = STYLE_ID;
-    doc.head.appendChild(style);
+    style.textContent = PAGE_EDITOR_CSS;
+    if (saved[0]) saved[0].after(style);
+    else doc.head.appendChild(style);
+    for (const old of saved) old.remove();
   }
-  style.setAttribute("clay", "editor-ui");
-  if (style.textContent !== PAGE_EDITOR_CSS) style.textContent = PAGE_EDITOR_CSS;
   const shell = doc.createElement("div");
   shell.className = "page-shell";
   shell.setAttribute("clay", "editor-ui");
