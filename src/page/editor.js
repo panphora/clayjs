@@ -102,9 +102,10 @@ ${INDENTS.map((n) => `.page-editor .page-li[data-indent="${n}"] { --li-indent: $
 .page-menu { left: var(--page-pop-x, 0px); top: var(--page-pop-y, 0px); width: 260px; max-height: 340px; overflow-y: auto; padding: 6px; font-size: 14px; }
 .page-menu-title { padding: 4px 10px 6px; color: var(--page-pop-muted); font-size: 12px; }
 .page-menu-item { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 34px; padding: 4px 10px; border: 0; border-radius: 7px; background: none; color: inherit; font: inherit; text-align: start; cursor: pointer; }
-.page-menu-item[aria-selected="true"], .page-menu-item:hover { background: var(--page-pop-hover); }
+.page-menu-item[aria-selected="true"], .page-menu-item.is-active, .page-menu-item:hover { background: var(--page-pop-hover); }
 .page-menu-icon { display: grid; place-items: center; width: 24px; height: 24px; border: 1px solid var(--page-pop-line); border-radius: 6px; color: var(--page-pop-muted); font-size: 12px; flex: none; }
 .page-menu-hint { margin-inline-start: auto; color: var(--page-pop-muted); font-size: 12px; }
+.page-menu-empty { padding: 8px 10px; color: var(--page-pop-muted); font-size: 13px; }
 .page-editor.ProseMirror-hideselection { caret-color: transparent; }
 .page-editor.ProseMirror-hideselection *::selection { background: transparent; }
 .page-editor .page-block-selected { background: var(--page-block-selected, rgba(88, 120, 170, 0.12)); box-shadow: -6px 0 0 var(--page-block-selected, rgba(88, 120, 170, 0.12)), 6px 0 0 var(--page-block-selected, rgba(88, 120, 170, 0.12)); border-radius: 4px; }

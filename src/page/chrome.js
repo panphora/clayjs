@@ -7,7 +7,7 @@ import { state, commands } from "../vendor/prosemirror.vendor.js";
 import { schema } from "./schema.js";
 import { BlockSelection } from "./blocks.js";
 import { openLinkEditor } from "./link.js";
-import { BLOCK_TYPES, blockTypeOf, turnInto, insertAfter } from "./items.js";
+import { BLOCK_TYPES, MENU_ITEMS, blockTypeOf, turnInto, insertAfter, rankItems, runItem } from "./items.js";
 
 export { BLOCK_TYPES, blockTypeOf, turnInto, insertAfter } from "./items.js";
 
@@ -57,6 +57,7 @@ function toolButton(name, label) {
 }
 
 const MOVED_MS = 1600;
+let menuCount = 0;
 export const chromeKey = new PluginKey("page-chrome");
 
 class Chrome {
@@ -73,7 +74,8 @@ class Chrome {
     this.plus.innerHTML = ICONS.plus;
     this.bubble = el("div", "page-bubble", { role: "toolbar", "aria-label": "Selection", hidden: "" });
     this.bubble.append(...MARK_TOOLS.map(([n, l]) => toolButton(n, l)));
-    this.menuEl = el("div", "page-menu", { role: "menu", hidden: "" });
+    this.menuId = `page-menu-${++menuCount}`;
+    this.menuEl = el("div", "page-menu", { role: "menu", id: this.menuId, hidden: "" });
     this.scrim = el("div", "page-scrim", { hidden: "" });
     this.shell.insertBefore(this.dock, view.dom);
     this.shell.append(this.plus, this.bubble, this.scrim, this.menuEl);
@@ -118,15 +120,13 @@ class Chrome {
     return Math.min(st.doc.resolve(pos).index(0), st.doc.childCount - 1);
   }
 
+  gutterIndex() {
+    return this.blockIndex();
+  }
+
   fromPlus() {
-    const st = this.view.state;
-    const i = this.blockIndex();
-    const node = st.doc.child(i);
-    if (!(node.isTextblock && node.content.size === 0)) {
-      this.view.dispatch(insertAfter(st, i).scrollIntoView());
-    }
     this.view.focus();
-    this.openMenu("turn", this.plus);
+    this.openMenu("insert", this.plus, null, this.gutterIndex());
   }
 
   toggleMenu(mode, anchor) {
@@ -134,9 +134,11 @@ class Chrome {
     else this.openMenu(mode, anchor);
   }
 
-  openMenu(mode, anchor, slashAt = null) {
-    this.menu = { mode, anchor, slashAt, query: "", active: 0, items: BLOCK_TYPES };
+  openMenu(mode, anchor, slashAt = null, index = null) {
+    this.menu = { mode, anchor, slashAt, index, query: "", active: 0, items: [] };
     anchor.setAttribute("aria-expanded", "true");
+    this.view.dom.setAttribute("aria-haspopup", "menu");
+    this.view.dom.setAttribute("aria-controls", this.menuId);
     this.renderMenu();
   }
 
@@ -145,25 +147,46 @@ class Chrome {
     this.menu = null;
     this.menuEl.hidden = true;
     this.scrim.hidden = true;
+    for (const name of ["aria-haspopup", "aria-controls", "aria-activedescendant"]) this.view.dom.removeAttribute(name);
+  }
+
+  menuItems(m) {
+    return rankItems(m.mode === "turn" ? BLOCK_TYPES : MENU_ITEMS, m.query);
   }
 
   renderMenu() {
     const m = this.menu;
-    m.items = BLOCK_TYPES.filter((b) => b.label.toLowerCase().includes(m.query.toLowerCase()));
-    if (!m.items.length) return this.closeMenu();
-    m.active = Math.min(m.active, m.items.length - 1);
-    const title = el("div", "page-menu-title");
-    title.textContent = m.query ? `Turn into “${m.query}”` : "Turn into";
-    const rows = m.items.map((b, i) => {
-      const row = el("button", "page-menu-item", { type: "button", role: "menuitem", "data-index": String(i), "aria-selected": i === m.active ? "true" : "false" });
+    m.items = this.menuItems(m);
+    m.active = Math.min(m.active, Math.max(0, m.items.length - 1));
+    const nodes = [];
+    if (m.mode === "turn") {
+      const title = el("div", "page-menu-title");
+      title.textContent = m.query ? `Turn into “${m.query}”` : "Turn into";
+      nodes.push(title);
+    }
+    if (!m.items.length) {
+      const none = el("div", "page-menu-empty");
+      none.textContent = "No matching blocks";
+      nodes.push(none);
+    }
+    m.items.forEach((b, i) => {
+      const active = i === m.active;
+      const row = el("button", `page-menu-item${active ? " is-active" : ""}`, { type: "button", role: "menuitem", tabindex: "-1", id: `${this.menuId}-${i}`, "data-index": String(i), "aria-selected": active ? "true" : "false" });
       const icon = el("span", "page-menu-icon");
       icon.textContent = b.icon;
       const label = el("span", "page-menu-label");
       label.textContent = b.label;
       row.append(icon, label);
-      return row;
+      if (b.hint) {
+        const hint = el("span", "page-menu-hint");
+        hint.textContent = b.hint;
+        row.append(hint);
+      }
+      nodes.push(row);
     });
-    this.menuEl.replaceChildren(title, ...rows);
+    this.menuEl.replaceChildren(...nodes);
+    if (m.items.length) this.view.dom.setAttribute("aria-activedescendant", `${this.menuId}-${m.active}`);
+    else this.view.dom.removeAttribute("aria-activedescendant");
     this.menuEl.hidden = false;
     this.scrim.hidden = false;
     this.place();
@@ -182,9 +205,13 @@ class Chrome {
       }
     }
     this.closeMenu();
-    const tr = turnInto(st, this.blockIndex(), item);
-    if (tr) this.view.dispatch(tr.scrollIntoView());
-    this.view.focus();
+    if (m.mode === "turn") {
+      const tr = turnInto(st, this.blockIndex(), item);
+      if (tr) this.view.dispatch(tr.scrollIntoView());
+      this.view.focus();
+    } else {
+      runItem(this.view, item, m.slashAt !== null ? this.blockIndex() : m.index);
+    }
   }
 
   // Keys while the menu is open; anything else falls through to the editor.
@@ -192,16 +219,23 @@ class Chrome {
     const m = this.menu;
     if (!m) return false;
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-      m.active = (m.active + (event.key === "ArrowDown" ? 1 : -1) + m.items.length) % m.items.length;
-      this.renderMenu();
+      if (m.items.length) {
+        m.active = (m.active + (event.key === "ArrowDown" ? 1 : -1) + m.items.length) % m.items.length;
+        this.renderMenu();
+      }
       return true;
     }
-    if (event.key === "Enter") { this.pick(m.active); return true; }
+    if (event.key === "Enter") {
+      if (m.items.length) this.pick(m.active);
+      return true;
+    }
     if (event.key === "Escape") { this.closeMenu(); return true; }
     return false;
   }
 
-  // "/" typed in an empty block opens the menu; the text typed after it filters.
+  // "/" typed at the start of a line or after a space opens the menu; the text
+  // typed after it filters. With no match the menu stays up saying so, until a
+  // space ends the session or Backspace brings a match back.
   slashQuery() {
     const m = this.menu;
     if (!m || m.slashAt === null) return;
@@ -210,6 +244,7 @@ class Chrome {
     if ($head.pos < m.slashAt || m.slashAt < start || this.view.state.doc.textBetween(m.slashAt - 1, m.slashAt) !== "/") return this.closeMenu();
     m.query = this.view.state.doc.textBetween(m.slashAt, $head.pos);
     m.active = 0;
+    if (/\s$/.test(m.query) && !this.menuItems(m).length) return this.closeMenu();
     this.renderMenu();
   }
 
@@ -238,10 +273,21 @@ class Chrome {
       this.bubble.style.setProperty("--page-pop-y", `${Math.min(a.top, b.top) - shellBox.top}px`);
     }
     if (this.menu) {
-      const r = this.menu.anchor === this.plus || this.menu.slashAt !== null ? (dom?.getBoundingClientRect?.() ?? edBox) : this.menu.anchor.getBoundingClientRect();
-      const left = this.menu.anchor === this.turn ? r.left : r.left;
+      const m = this.menu;
+      let left, top;
+      if (m.slashAt !== null) {
+        const c = view.coordsAtPos(m.slashAt - 1);
+        left = c.left;
+        top = c.bottom + 6;
+        const height = this.menuEl.offsetHeight;
+        if (top + height > window.innerHeight - 8 && c.top - 6 - height >= 8) top = c.top - 6 - height;
+      } else {
+        const r = m.anchor === this.plus ? (dom?.getBoundingClientRect?.() ?? edBox) : m.anchor.getBoundingClientRect();
+        left = r.left;
+        top = r.bottom + 6;
+      }
       this.menuEl.style.setProperty("--page-pop-x", `${Math.max(8, Math.min(left - shellBox.left, shellBox.width - 280))}px`);
-      this.menuEl.style.setProperty("--page-pop-y", `${r.bottom - shellBox.top + 6}px`);
+      this.menuEl.style.setProperty("--page-pop-y", `${top - shellBox.top}px`);
     }
   }
 
@@ -282,9 +328,10 @@ export function chromePlugin() {
       handleTextInput(view, from, to, text) {
         if (text !== "/" || !chrome) return false;
         const $from = view.state.doc.resolve(from);
-        if ($from.depth !== 1 || $from.parent.content.size !== 0 || $from.parent.type.spec.code) return false;
+        if ($from.depth !== 1 || !$from.parent.isTextblock || $from.parent.type.spec.code) return false;
+        if ($from.parentOffset > 0 && !/\s/.test(view.state.doc.textBetween(from - 1, from))) return false;
         view.dispatch(view.state.tr.insertText("/", from, to));
-        chrome.openMenu("turn", chrome.plus, from + 1);
+        chrome.openMenu("insert", chrome.plus, from + 1);
         return true;
       },
       handleDOMEvents: {

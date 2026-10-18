@@ -101,3 +101,14 @@ describe("dividers", () => {
     expect([out.doc.child(1).attrs.parent, out.doc.child(2).attrs.parent]).toEqual(["t", "t"]);
   });
 });
+
+describe("the menu list", () => {
+  test("lists the ten block types, then Divider, Image and File", () => {
+    expect(I.MENU_ITEMS.map((i) => i.key)).toEqual(["text", "h1", "h2", "h3", "bullet", "ordered", "check", "toggle", "callout", "code", "divider", "image", "file"]);
+  });
+
+  test("picture, photo and attachment find Image and File through aliases", () => {
+    expect(keys("pic")[0]).toBe("image");
+    expect(keys("attach")[0]).toBe("file");
+  });
+});

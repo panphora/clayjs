@@ -6,6 +6,8 @@ import { state } from "../vendor/prosemirror.vendor.js";
 import { schema } from "./schema.js";
 import { isKey, keyBetween, newId } from "./model.js";
 import { outline, subtreeRange } from "./blocks.js";
+import { asStep } from "./blocksel.js";
+import { pickFiles, hostPlace } from "./media.js";
 
 const { TextSelection } = state;
 const N = schema.nodes;
@@ -25,6 +27,8 @@ export const BLOCK_TYPES = [
 
 export const INSERT_ITEMS = [
   { key: "divider", label: "Divider", icon: "—", hint: "---", aliases: ["hr", "line", "separator", "rule"], insert: "divider" },
+  { key: "image", label: "Image", icon: "▣", aliases: ["img", "picture", "photo"], insert: "image" },
+  { key: "file", label: "File", icon: "⎘", aliases: ["upload", "attachment", "pdf"], insert: "file" },
 ];
 
 export const MENU_ITEMS = [...BLOCK_TYPES, ...INSERT_ITEMS];
@@ -110,4 +114,23 @@ export function rankItems(items, query) {
     return Infinity;
   };
   return items.map((it, order) => ({ it, order, rank: rank(it) })).filter((x) => x.rank !== Infinity).sort((a, b) => a.rank - b.rank || a.order - b.order).map((x) => x.it);
+}
+
+// What a pick does in the insert menu for the block at `index`. A divider and
+// the file pickers have their own placement; a block type retypes an empty line
+// and otherwise goes into a new block below the line's whole subtree.
+export function runItem(view, item, index) {
+  const st = view.state;
+  if (item.insert === "image" || item.insert === "file") return pickFiles(view, item.insert === "image" ? "image/*" : "", hostPlace(st, index));
+  const node = st.doc.child(index);
+  let tr;
+  if (item.insert === "divider") tr = insertDivider(st, index);
+  else if (node.isTextblock && node.content.size === 0) tr = retype(st.tr, index, item);
+  else {
+    tr = insertAfter(st, index);
+    tr = retype(tr, tr.doc.resolve(tr.selection.head).index(0), item);
+  }
+  view.dispatch(asStep(tr).scrollIntoView());
+  view.focus();
+  return true;
 }
