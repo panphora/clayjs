@@ -106,3 +106,37 @@ describe("review round 1", () => {
     expect(kinds(view)).toEqual(["paragraph", "divider", "paragraph"]);
   });
 });
+
+describe("Code toggles a code block back into text", () => {
+  const setup = (spec) => {
+    const view = editor(spec);
+    view.hasFocus = () => true;
+    view.coordsAtPos = () => ({ left: 40, right: 48, top: 100, bottom: 120 });
+    return view;
+  };
+
+  test("whole lines become a code block, and Code again turns it back into those lines, keeping the first id", () => {
+    const view = setup([["a", "paragraph", "one"], ["b", "paragraph", "two"], ["c", "paragraph", "after"]]);
+    select(view, posOf(view, "a"), posOf(view, "b", true));
+    tool(view, "code").click();
+    expect(kinds(view)).toEqual(["code_block", "paragraph"]);
+    expect(tool(view, "code").getAttribute("aria-pressed")).toBe("true");
+    tool(view, "code").click();
+    expect(kinds(view)).toEqual(["paragraph", "paragraph", "paragraph"]);
+    expect(shape(view)).toBe("one | two | after");
+    expect(view.state.doc.child(0).attrs.id).toBe("a");
+    expect(new Set([...Array(3)].map((_, i) => view.state.doc.child(i).attrs.id)).size).toBe(3);
+    expect(view.state.doc.textBetween(view.state.selection.from, view.state.selection.to, "\n")).toBe("one\ntwo");
+  });
+
+  test("with only the caret in a code block, Code turns it into text, and one undo brings the block back", async () => {
+    const { history } = await import("../../../src/vendor/prosemirror.vendor.js");
+    const view = setup([["k", "code_block", "x = 1\ny = 2", { lang: "python" }]]);
+    view.dispatch(view.state.tr.setSelection(view.state.selection.constructor.near(view.state.doc.resolve(3))));
+    tool(view, "code").click();
+    expect(shape(view)).toBe("x = 1 | y = 2");
+    history.undo(view.state, view.dispatch);
+    expect(kinds(view)).toEqual(["code_block"]);
+    expect(view.state.doc.child(0).textContent).toBe("x = 1\ny = 2");
+  });
+});

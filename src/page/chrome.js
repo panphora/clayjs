@@ -118,9 +118,30 @@ function codeBlockTr(st, idx) {
   return tr.setSelection(TextSelection.create(tr.doc, from + 1, from + 1 + text.length));
 }
 
+// The way back: each selected code block becomes one text line per line of code.
+// The first line keeps the block's id; the rest get new ids from the identity plugin.
+function codeLinesTr(st, idx) {
+  const tr = st.tr;
+  const from = st.doc.resolve(st.selection.from).before(1);
+  let end = 0;
+  for (const i of [...idx].reverse()) {
+    let at = 0;
+    for (let k = 0; k < i; k++) at += st.doc.child(k).nodeSize;
+    const node = st.doc.child(i);
+    const { id, pos, parent } = node.attrs;
+    const lines = node.textContent.split("\n").map((line, k) => N.paragraph.create(k === 0 ? { id, pos, parent } : { parent }, line ? schema.text(line) : null));
+    tr.replaceWith(at, at + node.nodeSize, lines);
+    if (!end) end = at + lines.reduce((n, l) => n + l.nodeSize, 0);
+  }
+  end = tr.mapping.slice(1).map(end);
+  return tr.setSelection(TextSelection.create(tr.doc, from + 1, end - 1));
+}
+
+const allCode = (st) => { const idx = blocksIn(st); return idx.length > 0 && idx.every((i) => st.doc.child(i).type === N.code_block) ? idx : null; };
+
 function toolActive(st, name) {
   if (LIST_KINDS.has(name)) return listActive(st, name);
-  if (name === "code" && blocksIn(st).every((i) => st.doc.child(i).type === N.code_block)) return true;
+  if (name === "code" && allCode(st)) return true;
   const type = M[name];
   const { from, to, empty, $from } = st.selection;
   if (empty) return !!type.isInSet(st.storedMarks || $from.marks());
@@ -139,8 +160,10 @@ function runList(view, kind) {
 function runMark(view, name) {
   if (name === "link") return openLinkEditor(view);
   const st = view.state;
-  const lines = name === "code" ? wholeLines(st) : null;
+  const code = name === "code" ? allCode(st) : null;
+  const lines = name === "code" && !code ? wholeLines(st) : null;
   if (LIST_KINDS.has(name)) runList(view, name);
+  else if (code) view.dispatch(asStep(codeLinesTr(st, code)).scrollIntoView());
   else if (lines) view.dispatch(asStep(codeBlockTr(st, lines)).scrollIntoView());
   else commands.toggleMark(M[name])(st, view.dispatch);
   view.focus();
