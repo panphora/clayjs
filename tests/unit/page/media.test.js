@@ -1,7 +1,7 @@
 import { jest } from "@jest/globals";
 import { history } from "../../../src/vendor/prosemirror.vendor.js";
 import { blockMap } from "../../../src/page/model.js";
-import { mediaKey, placeTr, removeTr, insertFiles, pickFiles, hostPlace, EMBED_MAX } from "../../../src/page/media.js";
+import { mediaKey, placeTr, removeTr, insertFiles, cancelUpload, pickFiles, hostPlace, EMBED_MAX } from "../../../src/page/media.js";
 import { editor, posOf, select } from "./view-helpers.js";
 
 /**
@@ -354,4 +354,74 @@ test.each(["javascript:void(0)", "data:text/html,canary", "file:///canary", null
     expect(view.state.doc.firstChild.type.name).toBe("paragraph");
     expect(items(view)[0]).toMatchObject({ state: "error", code: "bad-response" });
   } finally { view.destroy(); }
+});
+
+describe("review upload regressions", () => {
+  test("F7 cancelling removes the widget immediately and ignores a late success", async () => {
+    let finish;
+    const view = editor([["p", "paragraph", ""]], { upload: () => new Promise((resolve) => { finish = resolve; }) });
+    try {
+      insertFiles(view, [file("a.txt", "text/plain")]);
+      cancelUpload(view, items(view)[0].id);
+      expect(items(view).length).toBe(0);
+      expect(widget(view)).toBeNull();
+      finish(ok("/late.txt"));
+      await tick();
+      expect(view.state.doc.firstChild.attrs.id).toBe("p");
+      expect(view.state.doc.childCount).toBe(1);
+    } finally { view.destroy(); }
+  });
+
+  test("F7 rejected upload adapters enter a retryable error state", async () => {
+    const view = editor([["p", "paragraph", ""]], { upload: async () => { throw new Error("adapter failed"); } });
+    try {
+      insertFiles(view, [file("a.txt", "text/plain")]);
+      await tick();
+      expect([items(view)[0].state, items(view)[0].code]).toEqual(["error", "network"]);
+      expect(view.dom.querySelector('[data-act="retry"]')).not.toBeNull();
+    } finally { view.destroy(); }
+  });
+
+  test("F7 destroying a pending upload releases its preview once", async () => {
+    const create = URL.createObjectURL, revoke = URL.revokeObjectURL;
+    URL.createObjectURL = jest.fn(() => "blob:preview");
+    URL.revokeObjectURL = jest.fn();
+    let finish;
+    const view = editor([["p", "paragraph", ""]], { upload: () => new Promise((resolve) => { finish = resolve; }) });
+    try {
+      insertFiles(view, [file()]);
+      view.destroy();
+      expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1);
+      expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:preview");
+      finish(ok("/late.png"));
+      await tick();
+      expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1);
+    } finally {
+      if (!view.isDestroyed) view.destroy();
+      URL.createObjectURL = create;
+      URL.revokeObjectURL = revoke;
+    }
+  });
+
+  test("F7 joining away an upload boundary preserves batch order", async () => {
+    const { view, up } = page([["a", "paragraph", "aaaa"], ["b", "paragraph", "bbbb"]]);
+    try {
+      insertFiles(view, [file("one.txt", "text/plain"), file("two.txt", "text/plain")], hostPlace(view.state, 0));
+      view.dispatch(view.state.tr.join(view.state.doc.firstChild.nodeSize));
+      up.calls[0].resolve(ok("/one.txt")); await tick();
+      up.calls[1].resolve(ok("/two.txt")); await tick();
+      expect(names(view)).toEqual(["aaaabbbb", "/one.txt", "/two.txt"]);
+    } finally { view.destroy(); }
+  });
+
+  test.each(["image/avif", "image/svg+xml", "image/bmp", "image/heic", "image/x-icon", "image/tiff"])("F20 %s has no embed offer that paste would discard", async (type) => {
+    const view = editor([["p", "paragraph", ""]], { upload: async () => fail("unsupported") });
+    try {
+      insertFiles(view, [file("image", type)]);
+      await tick();
+      expect(items(view)[0].state).toBe("error");
+      expect(view.dom.querySelector('[data-act="embed"]')).toBeNull();
+      expect(items(view)[0].message).toBe("This host doesn't store files.");
+    } finally { view.destroy(); }
+  });
 });

@@ -36,7 +36,7 @@ const mediaState = {
   init: () => ({ items: [], placed: {} }),
   apply(tr, value) {
     let { items, placed } = value;
-    if (tr.docChanged) items = items.map((it) => ({ ...it, pos: tr.mapping.map(it.pos, -1) }));
+    if (tr.docChanged) items = items.map((it) => ({ ...it, pos: boundary(tr.doc, tr.mapping.map(it.pos, -1)) }));
     const m = tr.getMeta(mediaKey);
     if (m?.add) items = [...items, ...m.add];
     if (m?.update) items = items.map((it) => (it.id === m.update.id ? { ...it, ...m.update } : it));
@@ -68,7 +68,7 @@ export function placeTr(st, id, attrs) {
   const node = (it.kind === "image" ? N.image : N.file).create({ ...attrs, id: blockId, pos: null, parent: it.parent });
   const tr = st.tr.insert(at, node);
   if (!items.some((x) => x.group === it.group && x.id !== id)) dropEmptyHost(tr, it.replaceId, [...(placed[it.group] || []), blockId]);
-  return asStep(tr).setMeta(mediaKey, { placed: { id, at: it.pos, size: node.nodeSize, blockId } });
+  return asStep(tr).setMeta(mediaKey, { placed: { id, at, size: node.nodeSize, blockId } });
 }
 
 export function removeTr(st, id) {
@@ -117,9 +117,11 @@ async function run(view, it) {
   const onProgress = ({ percent }) => {
     if (percent - last < 5 && percent !== 100) return;
     last = percent;
-    if (live(view, it.id)) update(view, it.id, { percent });
+    if (runtime.has(view) && live(view, it.id)) update(view, it.id, { percent });
   };
-  let res = await rt.upload(it.file, { onProgress, signal: abort.signal });
+  let res;
+  try { res = await rt.upload(it.file, { onProgress, signal: abort.signal }); }
+  catch { res = { code: "network", msg: "Upload failed" }; }
   rt.aborts.delete(it.id);
   if (!runtime.has(view) || !live(view, it.id)) return;
   if (res?.ok) {
@@ -134,10 +136,10 @@ async function run(view, it) {
   if (!res || typeof res !== "object") res = { code: "bad-response", msg: "The upload returned an invalid response" };
   if (res.code === "aborted") return settle(it, view, removeTr(view.state, it.id));
   if (res.code === "unsupported") {
-    const canEmbed = it.kind === "image" && it.file.size <= EMBED_MAX;
+    const canEmbed = /^image\/(png|jpeg|gif|webp)$/i.test(it.file.type) && it.file.size <= EMBED_MAX;
     const message = canEmbed
       ? "This host doesn't store files. You can keep this image inside the document, which makes the document larger."
-      : it.kind === "image" ? "This host doesn't store files, and this image is over 1.5 MB, too large to keep inside the document." : "This host doesn't store files.";
+      : it.kind === "image" && it.file.size > EMBED_MAX ? "This host doesn't store files, and this image is over 1.5 MB, too large to keep inside the document." : "This host doesn't store files.";
     update(view, it.id, { state: canEmbed ? "embed-choice" : "error", code: res.code, message });
     announce(view, `${it.name}: ${message}`);
     return;
@@ -165,10 +167,11 @@ export function retryUpload(view, id) {
 
 export function cancelUpload(view, id) {
   const rt = runtime.get(view);
-  const abort = rt.aborts.get(id);
-  if (abort) return abort.abort();
+  const abort = rt?.aborts.get(id);
   const it = live(view, id);
   if (it) settle(it, view, removeTr(view.state, id));
+  rt?.aborts.delete(id);
+  abort?.abort();
 }
 
 function button(doc, act, label, id) {
@@ -257,9 +260,11 @@ export function mediaPlugin({ upload }) {
       return {
         destroy() {
           view.dom.removeEventListener("click", onClick);
-          for (const a of runtime.get(view).aborts.values()) a.abort();
-          input.remove();
+          const rt = runtime.get(view);
           runtime.delete(view);
+          for (const it of mediaKey.getState(view.state).items) if (it.preview) URL.revokeObjectURL?.(it.preview);
+          for (const a of rt.aborts.values()) a.abort();
+          input.remove();
         },
       };
     },
@@ -332,6 +337,7 @@ export class ImageView {
     this.caption.setAttribute("aria-label", "Caption");
     this.caption.dataset.placeholder = "Add a caption";
     this.caption.addEventListener("keydown", (e) => {
+      if (e.isComposing || this.view.composing) return;
       if (e.key === "Enter") { e.preventDefault(); this.commitCaption(); this.view.focus(); }
       if (e.key === "Escape") { e.preventDefault(); this.caption.textContent = this.node.attrs.caption; this.view.focus(); }
     });
@@ -494,19 +500,20 @@ export function openAltEditor(view, id) {
   }
   shell.append(box);
   let done = false;
-  const close = (commit) => {
+  const close = (commit, refocus = true) => {
     if (done) return;
     done = true;
     const value = input.value.trim();
     box.remove();
-    if (commit) setImageAttrs(view, id, { alt: value });
-    view.focus();
+    const i = indexOfId(view.state.doc, id);
+    if (commit && i >= 0 && value !== view.state.doc.child(i).attrs.alt) setImageAttrs(view, id, { alt: value });
+    if (refocus) view.focus();
   };
   input.addEventListener("keydown", (e) => {
     if (e.key === "Enter") { e.preventDefault(); close(true); }
     else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); close(false); }
   });
-  input.addEventListener("blur", () => close(false));
+  input.addEventListener("blur", () => close(true, false));
   input.focus();
   return true;
 }

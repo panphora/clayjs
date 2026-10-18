@@ -1,4 +1,5 @@
 import { history } from "../../../src/vendor/prosemirror.vendor.js";
+import { openAltEditor } from "../../../src/page/media.js";
 import { editor } from "./view-helpers.js";
 
 /**
@@ -181,4 +182,34 @@ describe("FileView", () => {
     const view = file({ name: "" });
     expect(view.dom.querySelector(".page-file-name").textContent).toBe("file");
   });
+});
+
+test("F15 IME Enter in a caption leaves the candidate and saved caption alone", () => {
+  const view = image();
+  try {
+    caption(view).textContent = "composing";
+    const event = new KeyboardEvent("keydown", { key: "Enter", isComposing: true, bubbles: true, cancelable: true });
+    caption(view).dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(false);
+    expect(attrs(view).caption).toBe("Front door");
+    expect(caption(view).textContent).toBe("composing");
+  } finally { view.destroy(); }
+});
+
+test("F22 blurring alt text commits it, while Escape still cancels", () => {
+  const view = image();
+  try {
+    openAltEditor(view, "i");
+    let input = view.dom.parentElement.querySelector('[data-mode="alt"] input');
+    input.value = "New description";
+    input.dispatchEvent(new Event("blur"));
+    expect(attrs(view).alt).toBe("New description");
+    history.undo(view.state, view.dispatch);
+    expect(attrs(view).alt).toBe("A door");
+    openAltEditor(view, "i");
+    input = view.dom.parentElement.querySelector('[data-mode="alt"] input');
+    input.value = "Discard";
+    press(input, "Escape");
+    expect(attrs(view).alt).toBe("A door");
+  } finally { view.destroy(); }
 });
