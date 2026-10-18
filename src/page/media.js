@@ -29,15 +29,24 @@ export function hostPlace(st, i) {
   const ents = outline(st.doc);
   const e = ents[Math.min(i, ents.length - 1)];
   const empty = e.node.type === N.paragraph && e.node.content.size === 0;
-  return { at: empty ? e.at : ents[e.subEnd].end, parent: e.node.attrs.parent ?? null, replaceId: empty ? e.node.attrs.id : null };
+  return { hostId: e.node.attrs.id, at: empty ? e.at : ents[e.subEnd].end, parent: e.node.attrs.parent ?? null, replaceId: empty ? e.node.attrs.id : null };
 }
 
 const mediaState = {
-  init: () => ({ items: [], placed: {} }),
+  init: () => ({ items: [], placed: {}, picker: null }),
   apply(tr, value) {
-    let { items, placed } = value;
+    let { items, placed, picker } = value;
     if (tr.docChanged) items = items.map((it) => ({ ...it, pos: boundary(tr.doc, tr.mapping.map(it.pos, -1)) }));
+    if (picker && tr.docChanged) {
+      picker = { ...picker, place: { ...picker.place, at: boundary(tr.doc, tr.mapping.map(picker.place.at, -1)) } };
+      if (picker.remove) {
+        const from = tr.mapping.map(picker.remove.from, 1), to = tr.mapping.map(picker.remove.to, -1);
+        picker = from <= to && tr.doc.textBetween(from, to) === picker.remove.text
+          ? { ...picker, remove: { ...picker.remove, from, to } } : null;
+      }
+    }
     const m = tr.getMeta(mediaKey);
+    if (m?.picker !== undefined) picker = m.picker;
     if (m?.add) items = [...items, ...m.add];
     if (m?.update) items = items.map((it) => (it.id === m.update.id ? { ...it, ...m.update } : it));
     if (m?.placed) {
@@ -48,7 +57,7 @@ const mediaState = {
     }
     if (m?.remove) items = items.filter((it) => it.id !== m.remove);
     for (const g of Object.keys(placed)) if (!items.some((it) => it.group === g)) { placed = { ...placed }; delete placed[g]; }
-    return { items, placed };
+    return { items, placed, picker };
   },
 };
 
@@ -240,13 +249,21 @@ export function mediaPlugin({ upload }) {
       input.hidden = true;
       input.className = "page-file-input";
       view.dom.parentElement.append(input);
-      runtime.set(view, { upload, aborts: new Map(), input, place: null });
+      runtime.set(view, { upload, aborts: new Map(), input });
       input.addEventListener("change", () => {
-        const rt = runtime.get(view);
-        if (input.files?.length) insertFiles(view, input.files, rt.place ?? undefined);
+        const picker = mediaKey.getState(view.state).picker;
+        view.dispatch(view.state.tr.setMeta(mediaKey, { picker: null }));
+        if (input.files?.length && picker) {
+          const index = indexOfId(view.state.doc, picker.place.hostId);
+          if (!picker.place.hostId || index >= 0) {
+            if (picker.remove) view.dispatch(asStep(view.state.tr.delete(picker.remove.from, picker.remove.to)));
+            insertFiles(view, input.files, index >= 0 ? hostPlace(view.state, index) : picker.place);
+          }
+        }
         input.value = "";
         view.focus();
       });
+      input.addEventListener("cancel", () => view.dispatch(view.state.tr.setMeta(mediaKey, { picker: null })));
       const onClick = (e) => {
         const b = e.target.closest?.(".page-upload-btn");
         if (!b) return;
@@ -299,10 +316,11 @@ export function mediaPlugin({ upload }) {
   });
 }
 
-export function pickFiles(view, accept, place) {
+export function pickFiles(view, accept, place = hostPlace(view.state, view.state.selection.$head.index(0)), remove = null) {
   const rt = runtime.get(view);
   if (!rt) return false;
-  rt.place = place;
+  const picker = { place, remove: remove && { ...remove, text: view.state.doc.textBetween(remove.from, remove.to) } };
+  view.dispatch(view.state.tr.setMeta(mediaKey, { picker }));
   rt.input.accept = accept;
   rt.input.click();
   return true;

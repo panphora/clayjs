@@ -13,10 +13,10 @@ const N = schema.nodes;
 const inlineCode = (st, start, end) => st.doc.rangeHasMark(start, end, schema.marks.code)
   || !!schema.marks.code.isInSet(st.storedMarks || st.selection.$from.marks());
 
-const blockRule = (re, item, from = ["paragraph"]) => new InputRule(re, (st, match, start, end) => {
+const blockRule = (re, item, from = ["paragraph"], entire = false) => new InputRule(re, (st, match, start, end) => {
   const $s = st.doc.resolve(start);
   if (!st.selection.empty || $s.depth !== 1 || $s.parentOffset !== 0 || !from.includes($s.parent.type.name)) return null;
-  if (inlineCode(st, start, end)) return null;
+  if ((entire && end !== $s.end()) || inlineCode(st, start, end)) return null;
   return asStep(retype(st.tr.delete(start, end), $s.index(0), typeof item === "function" ? item(match) : item));
 });
 
@@ -35,7 +35,7 @@ export const MARKDOWN_RULES = [
   blockRule(/^\d+[.)]\s$/, { type: "list_item", attrs: { kind: "ordered" } }, LISTS),
   blockRule(/^\[( |x|X)?\]\s$/, (m) => ({ type: "list_item", attrs: { kind: "check", checked: !!m[1] && m[1] !== " " } }), LISTS),
   blockRule(/^>\s$/, { type: "toggle", attrs: { open: true } }),
-  blockRule(/^```$/, { type: "code_block" }),
+  blockRule(/^```$/, { type: "code_block" }, ["paragraph"], true),
   dividerRule,
 ];
 
@@ -46,6 +46,6 @@ export function backspaceToParagraph(st, dispatch) {
   if (!empty || $from.depth !== 1 || $from.parentOffset !== 0) return false;
   const n = $from.parent;
   if (!(n.type === N.heading || n.type === N.callout || (n.type === N.code_block && n.content.size === 0))) return false;
-  if (dispatch) dispatch(st.tr.setNodeMarkup($from.before(), N.paragraph, { id: n.attrs.id, pos: n.attrs.pos, parent: n.attrs.parent }));
+  if (dispatch) dispatch(asStep(st.tr.setNodeMarkup($from.before(), N.paragraph, { id: n.attrs.id, pos: n.attrs.pos, parent: n.attrs.parent })));
   return true;
 }

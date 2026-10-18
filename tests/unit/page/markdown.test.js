@@ -1,4 +1,4 @@
-import { state as pmState } from "../../../src/vendor/prosemirror.vendor.js";
+import { state as pmState, history } from "../../../src/vendor/prosemirror.vendor.js";
 import { schema } from "../../../src/page/schema.js";
 import { editor, key, posOf, select, typeText, shape } from "./view-helpers.js";
 
@@ -192,4 +192,29 @@ describe("Backspace", () => {
     key(view, "S", { ctrlKey: true, shiftKey: true, keyCode: 83 });
     expect(view.state.doc.rangeHasMark(1, 5, schema.marks.strike)).toBe(true);
   });
+});
+
+test("F14 Backspace conversion and following typing undo separately", () => {
+  const view = editor([["h", "heading", "hello", { level: 1 }]]);
+  try {
+    select(view, 1);
+    key(view, "Backspace");
+    typeText(view, "!");
+    expect(history.undoDepth(view.state)).toBe(2);
+    history.undo(view.state, view.dispatch);
+    expect(view.state.doc.firstChild.type.name).toBe("paragraph");
+    expect(view.state.doc.textContent).toBe("hello");
+  } finally { view.destroy(); }
+});
+
+test("F21 a code fence before existing marked text leaves that text and its marks intact", () => {
+  const view = editor([["p", "paragraph", "see docs"]]);
+  try {
+    view.dispatch(view.state.tr.addMark(1, 9, schema.marks.link.create({ href: "https://example.test" })));
+    select(view, 1);
+    typeAll(view, "```");
+    expect(view.state.doc.firstChild.type.name).toBe("paragraph");
+    expect(view.state.doc.textContent).toBe("```see docs");
+    expect(view.state.doc.rangeHasMark(4, 12, schema.marks.link)).toBe(true);
+  } finally { view.destroy(); }
 });

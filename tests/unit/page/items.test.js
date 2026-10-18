@@ -91,7 +91,9 @@ describe("dividers", () => {
     const s = make([["t", "toggle", "T", { open: true }], ["b", "paragraph", "body", { parent: "t" }], ["z", "paragraph", "Z"]]);
     const out = s.apply(I.insertDivider(s, 0));
     expect(out.doc.child(2).type.name).toBe("divider");
-    expect(short(out)).toBe("T | body<t |  | Z");
+    expect(short(out)).toBe("T | body<t |  |  | Z");
+    expect(out.doc.child(3).type.name).toBe("paragraph");
+    expect(out.selection.$head.index(0)).toBe(3);
     expect(out.doc.child(2).attrs.parent).toBeNull();
   });
 

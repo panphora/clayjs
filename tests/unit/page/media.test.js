@@ -1,6 +1,6 @@
 import { jest } from "@jest/globals";
 import { history } from "../../../src/vendor/prosemirror.vendor.js";
-import { blockMap } from "../../../src/page/model.js";
+import { blockMap, REMOTE } from "../../../src/page/model.js";
 import { mediaKey, placeTr, removeTr, insertFiles, cancelUpload, pickFiles, hostPlace, EMBED_MAX } from "../../../src/page/media.js";
 import { editor, posOf, select } from "./view-helpers.js";
 
@@ -424,4 +424,32 @@ describe("review upload regressions", () => {
       expect(items(view)[0].message).toBe("This host doesn't store files.");
     } finally { view.destroy(); }
   });
+});
+
+test("F10 a file chooser follows its host through a remote insertion", async () => {
+  const { view, up } = page([["a", "paragraph", "AAAA"], ["b", "paragraph", "BBBB"]]);
+  try {
+    pickFiles(view, "", hostPlace(view.state, 0));
+    view.dispatch(view.state.tr.insert(0, view.state.schema.nodes.paragraph.create({ id: "r", pos: "A" }, view.state.schema.text("RRRR"))).setMeta(REMOTE, true));
+    const input = view.dom.parentElement.querySelector(".page-file-input");
+    Object.defineProperty(input, "files", { value: [file("a.txt", "text/plain")] });
+    input.dispatchEvent(new Event("change"));
+    up.calls[0].resolve(ok("/a.txt"));
+    await tick();
+    expect(names(view)).toEqual(["RRRR", "AAAA", "/a.txt", "BBBB"]);
+  } finally { view.destroy(); }
+});
+
+test("F10 accepting a chooser removes only its mapped slash query", async () => {
+  const { view, up } = page([["a", "paragraph", "/image"], ["b", "paragraph", "B"]]);
+  try {
+    pickFiles(view, "image/*", hostPlace(view.state, 0), { from: 1, to: 7 });
+    view.dispatch(view.state.tr.insertText("prefix ", 1).setMeta(REMOTE, true));
+    const input = view.dom.parentElement.querySelector(".page-file-input");
+    Object.defineProperty(input, "files", { value: [file()] });
+    input.dispatchEvent(new Event("change"));
+    up.calls[0].resolve(ok("/a.png"));
+    await tick();
+    expect(names(view)).toEqual(["prefix ", "/a.png", "B"]);
+  } finally { view.destroy(); }
 });

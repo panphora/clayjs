@@ -6,7 +6,7 @@
 import { state, commands } from "../vendor/prosemirror.vendor.js";
 import { schema } from "./schema.js";
 import { BlockSelection, outline, siblingSpan, moveBlock, indentBlocks, outdentBlocks } from "./blocks.js";
-import { currentSpan, selectBlocks, duplicateBlocks, deleteBlocks } from "./blocksel.js";
+import { currentSpan, selectBlocks, duplicateBlocks, deleteBlocks, asStep, typeIntoBlocks } from "./blocksel.js";
 import { openAltEditor, setImageAttrs } from "./media.js";
 import { BlockDrag } from "./drag.js";
 import { openLinkEditor } from "./link.js";
@@ -75,7 +75,7 @@ function markActive(st, type) {
 }
 
 function runMark(view, name) {
-  if (name === "link") openLinkEditor(view);
+  if (name === "link") return openLinkEditor(view);
   else commands.toggleMark(M[name])(view.state, view.dispatch);
   view.focus();
 }
@@ -172,6 +172,7 @@ class Chrome {
   }
 
   gutterIndex() {
+    if (this.view.dom.ownerDocument.defaultView.matchMedia?.("(max-width: 560px)").matches) return this.blockIndex();
     return Math.min(this.hover ?? this.blockIndex(), this.view.state.doc.childCount - 1);
   }
 
@@ -181,7 +182,7 @@ class Chrome {
   }
 
   trackHover(event) {
-    if (this.menu || this.drag.state) return;
+    if (this.menu || this.drag.state || [this.plus, this.grip, this.dock, this.bubble].some((part) => part.contains(event.target))) return;
     const view = this.view;
     const hit = view.posAtCoords({ left: view.dom.getBoundingClientRect().left + 2, top: event.clientY });
     if (!hit) return;
@@ -281,14 +282,8 @@ class Chrome {
     const m = this.menu;
     const item = m?.items[i];
     if (!item) return;
-    let st = this.view.state;
-    if (m.slashAt !== null) {
-      const end = st.selection.head;
-      if (end >= m.slashAt) {
-        this.view.dispatch(st.tr.delete(m.slashAt - 1, end));
-        st = this.view.state;
-      }
-    }
+    const st = this.view.state;
+    const remove = m.slashAt !== null && st.selection.head >= m.slashAt ? { from: m.slashAt - 1, to: st.selection.head } : null;
     this.closeMenu();
     if (m.mode === "turn") {
       let tr = null;
@@ -296,18 +291,19 @@ class Chrome {
         tr = st.tr;
         for (const root of selectedRoots(st)) retype(tr, root.i, item);
       } else tr = turnInto(st, this.blockIndex(), item);
-      if (tr) this.view.dispatch(tr.scrollIntoView());
+      if (tr) this.view.dispatch(asStep(tr).scrollIntoView());
       this.view.focus();
     } else if (m.mode === "actions") {
       item.run(this.view, this, m.index);
       if (!this.menu && item.focus !== false) this.view.focus();
     } else {
-      runItem(this.view, item, m.slashAt !== null ? this.blockIndex() : m.index);
+      runItem(this.view, item, m.slashAt !== null ? this.blockIndex() : m.index, remove);
     }
   }
 
   // Keys while the menu is open; anything else falls through to the editor.
   key(event) {
+    if (event.isComposing || this.view.composing) return false;
     const m = this.menu;
     if (!m) return false;
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
@@ -432,14 +428,17 @@ export function chromePlugin() {
       },
       handleTextInput(view, from, to, text) {
         if (text !== "/" || !chrome) return false;
+        const inserted = typeIntoBlocks(view, text);
+        if (inserted) from = view.state.selection.from - 1;
         const $from = view.state.doc.resolve(from);
-        if ($from.depth !== 1 || !$from.parent.isTextblock || $from.parent.type.spec.code) return false;
-        if ($from.parentOffset > 0 && !/\s/.test(view.state.doc.textBetween(from - 1, from))) return false;
-        view.dispatch(view.state.tr.insertText("/", from, to));
+        if ($from.depth !== 1 || !$from.parent.isTextblock || $from.parent.type.spec.code) return inserted;
+        if ($from.parentOffset > 0 && !/\s/.test(view.state.doc.textBetween(from - 1, from, "", "\n"))) return inserted;
+        if (!inserted) view.dispatch(view.state.tr.insertText("/", from, to));
         chrome.openMenu("insert", chrome.plus, from + 1);
         return true;
       },
       handleDOMEvents: {
+        keydown(view, event) { return event.isComposing || view.composing; },
         blur(view) {
           if (chrome) chrome.bubble.hidden = true;
           return false;

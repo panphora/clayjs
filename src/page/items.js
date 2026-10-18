@@ -62,11 +62,11 @@ export function turnInto(st, index, item) {
 
 // A new empty paragraph after the block at `index` and its subtree, at the
 // block's own level, with the caret in it.
-export function insertAfter(st, index) {
-  const ents = outline(st.doc);
+export function insertAfter(st, index, tr = st.tr) {
+  const ents = outline(tr.doc);
   const { to } = subtreeRange(ents, index);
-  const node = st.doc.child(index);
-  const tr = st.tr.insert(to, N.paragraph.create({ parent: node.attrs.parent ?? null }));
+  const node = tr.doc.child(index);
+  tr.insert(to, N.paragraph.create({ parent: node.attrs.parent ?? null }));
   return tr.setSelection(TextSelection.create(tr.doc, to + 1));
 }
 
@@ -92,11 +92,17 @@ export function replaceWithDivider(tr, index) {
 
 // Insert a divider for the block at `index`: in place of an empty paragraph,
 // otherwise after the block's whole subtree at the block's own level.
-export function insertDivider(st, index) {
-  const node = st.doc.child(index);
-  if (node.type === N.paragraph && node.content.size === 0) return replaceWithDivider(st.tr, index);
-  const { to } = subtreeRange(outline(st.doc), index);
-  return st.tr.insert(to, N.divider.create({ parent: node.attrs.parent ?? null }));
+export function insertDivider(st, index, tr = st.tr) {
+  const node = tr.doc.child(index);
+  if (node.type === N.paragraph && node.content.size === 0) return replaceWithDivider(tr, index);
+  const ents = outline(tr.doc), end = ents[index].subEnd;
+  const to = ents[end].end, next = ents[end + 1]?.node.attrs.pos ?? null;
+  const pos = keyAfter(ents[end].node.attrs.pos, next), parent = node.attrs.parent ?? null;
+  tr.insert(to, [
+    N.divider.create({ id: newId(), pos, parent }),
+    N.paragraph.create({ id: newId(), pos: keyAfter(pos, next), parent }),
+  ]);
+  return tr.setSelection(TextSelection.create(tr.doc, to + 2));
 }
 
 // Exact name or alias first, then label prefix, word or alias prefix,
@@ -119,15 +125,16 @@ export function rankItems(items, query) {
 // What a pick does in the insert menu for the block at `index`. A divider and
 // the file pickers have their own placement; a block type retypes an empty line
 // and otherwise goes into a new block below the line's whole subtree.
-export function runItem(view, item, index) {
+export function runItem(view, item, index, remove = null) {
   const st = view.state;
-  if (item.insert === "image" || item.insert === "file") return pickFiles(view, item.insert === "image" ? "image/*" : "", hostPlace(st, index));
-  const node = st.doc.child(index);
-  let tr;
-  if (item.insert === "divider") tr = insertDivider(st, index);
-  else if (node.isTextblock && node.content.size === 0) tr = retype(st.tr, index, item);
+  if (item.insert === "image" || item.insert === "file") return pickFiles(view, item.insert === "image" ? "image/*" : "", hostPlace(st, index), remove);
+  let tr = st.tr;
+  if (remove) tr.delete(remove.from, remove.to);
+  const node = tr.doc.child(index);
+  if (item.insert === "divider") tr = insertDivider(st, index, tr);
+  else if (node.isTextblock && node.content.size === 0) tr = retype(tr, index, item);
   else {
-    tr = insertAfter(st, index);
+    tr = insertAfter(st, index, tr);
     tr = retype(tr, tr.doc.resolve(tr.selection.head).index(0), item);
   }
   view.dispatch(asStep(tr).scrollIntoView());

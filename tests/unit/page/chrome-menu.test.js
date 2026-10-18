@@ -179,7 +179,8 @@ describe("the plus", () => {
     const view = open([["a", "list_item", "A"], ["a1", "list_item", "A1", { indent: 1 }], ["z", "paragraph", "Z"]], "a");
     plus(view).click();
     rows(view).find((r) => r.textContent.startsWith("—")).click();
-    expect(shape(view)).toBe("A | A1 | divider | Z");
+    expect(shape(view)).toBe("A | A1 | divider | paragraph | Z");
+    expect(view.state.selection.$head.index(0)).toBe(3);
   });
 
   test("Image opens the picker for images and File for anything, placed after the block", () => {
@@ -407,5 +408,91 @@ describe("the actions menu on an image", () => {
     press(input, "Escape");
     expect(popover(view)).toBeNull();
     expect(view.state.doc.child(1).attrs.alt).toBe("Door");
+  });
+});
+
+describe("review menu regressions", () => {
+  test("F9 plus Divider adds a following paragraph and selects its caret", () => {
+    const view = open([["p", "paragraph", "hello"]]);
+    try {
+      view.dom.parentElement.querySelector(".page-plus").click();
+      rows(view)[10].click();
+      expect(view.state.doc.childCount).toBe(3);
+      expect(view.state.doc.child(1).type.name).toBe("divider");
+      expect(view.state.doc.child(2).type.name).toBe("paragraph");
+      expect(view.state.selection.$head.index(0)).toBe(2);
+    } finally { view.destroy(); }
+  });
+
+  test("F9 one undo restores a slash divider query", () => {
+    const view = open([["p", "paragraph", ""]]);
+    try {
+      type(view, "/divider");
+      key(view, "Enter");
+      history.undo(view.state, view.dispatch);
+      expect(view.state.doc.textContent).toBe("/divider");
+    } finally { view.destroy(); }
+  });
+
+  test("F10 cancelling the slash file picker keeps its query", () => {
+    const view = open([["p", "paragraph", ""]]);
+    try {
+      type(view, "/image");
+      key(view, "Enter");
+      view.dom.parentElement.querySelector(".page-file-input").dispatchEvent(new Event("cancel"));
+      expect(view.state.doc.textContent).toBe("/image");
+    } finally { view.destroy(); }
+  });
+
+  test("F12 slash after a hard break opens the menu", () => {
+    const view = open([["p", "paragraph", "hello"]]);
+    try {
+      key(view, "Enter", { shiftKey: true });
+      typeText(view, "/");
+      expect(isOpen(view)).toBe(true);
+    } finally { view.destroy(); }
+  });
+
+  test("F12 slash from block mode opens the menu at its actual insertion point", () => {
+    const view = open([["p", "paragraph", ""]]);
+    try {
+      view.dispatch(view.state.tr.setSelection(selectBlocks(view.state.doc, 0)));
+      typeText(view, "/");
+      expect(isOpen(view)).toBe(true);
+      expect(view.state.doc.textContent).toBe("/");
+    } finally { view.destroy(); }
+  });
+
+  test("F14 Turn into and following typing undo separately", () => {
+    const view = open([["p", "paragraph", "hello"]]);
+    try {
+      view.dom.parentElement.querySelector(".page-tool-turn").click();
+      rows(view)[1].click();
+      typeText(view, "!");
+      expect(history.undoDepth(view.state)).toBe(2);
+      history.undo(view.state, view.dispatch);
+      expect(view.state.doc.firstChild.type.name).toBe("heading");
+      expect(view.state.doc.textContent).toBe("hello");
+    } finally { view.destroy(); }
+  });
+
+  test("F15 IME Enter does not pick a slash row", () => {
+    const view = open([["p", "paragraph", ""]]);
+    try {
+      type(view, "/h1");
+      const before = view.state.doc;
+      key(view, "Enter", { isComposing: true });
+      expect(view.state.doc === before).toBe(true);
+      expect(isOpen(view)).toBe(true);
+    } finally { view.destroy(); }
+  });
+
+  test("F16 the toolbar Link button leaves focus in the address field", () => {
+    const view = open([["p", "paragraph", "hello"]]);
+    try {
+      select(view, 1, 4);
+      view.dom.parentElement.querySelector('.page-dock [data-cmd="link"]').click();
+      expect(document.activeElement).toBe(view.dom.parentElement.querySelector(".page-link-input"));
+    } finally { view.destroy(); }
   });
 });

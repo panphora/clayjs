@@ -113,3 +113,17 @@ test("Move down from the grip's menu moves the hovered block", () => {
   [...view.dom.parentElement.querySelectorAll(".page-menu-item")].find((r) => r.textContent.includes("Move down")).click();
   expect(shape(view)).toBe("B | A | C");
 });
+
+test.each(["plus", "grip"])("F17 the phone %s acts on the caret despite retained hover", (control) => {
+  const media = window.matchMedia;
+  const view = gutter(DOC, "a");
+  try {
+    move(view, 2 * ROW + 2);
+    window.matchMedia = () => ({ matches: true });
+    part(view, `.page-${control}`).click();
+    if (control === "plus") {
+      part(view, ".page-menu-item:nth-child(2)").click();
+      expect(shape(view)).toBe("A | heading | B | C");
+    } else expect(view.state.selection.span(view.state.doc)).toEqual({ lo: 0, hi: 0 });
+  } finally { window.matchMedia = media; view.destroy(); }
+});
