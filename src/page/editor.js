@@ -6,12 +6,13 @@
 // `page` cascade layer, so a theme is one plain stylesheet that sets tokens on
 // .page-shell (and adds scoped rules where it needs to); unlayered theme rules
 // always win. Contract: plans/.../default-page/v1/look/THEME-CONTRACT.md
-import { state, view as pmView, keymap, commands, history, dropcursor, gapcursor } from "../vendor/prosemirror.vendor.js";
+import { state, view as pmView, keymap, commands, history, dropcursor, gapcursor, inputrules } from "../vendor/prosemirror.vendor.js";
 import { schema } from "./schema.js";
 import { identityPlugin, docFromBlocks, blockMap, keyBetween, newId } from "./model.js";
 import { blockKeys, structurePlugin, collapsePlugin, pastePlugin, STEP } from "./blocks.js";
 import { chromePlugin } from "./chrome.js";
 import { blockSelectionPlugin } from "./blocksel.js";
+import { markdownPlugin, backspaceToParagraph } from "./markdown.js";
 
 const STYLE_ID = "page-editor-style";
 const INDENTS = [1, 2, 3, 4, 5, 6, 7, 8];
@@ -138,10 +139,18 @@ const editKeys = {
   "Mod-i": commands.toggleMark(schema.marks.em),
 };
 
+const markKeys = {
+  Backspace: commands.chainCommands(inputrules.undoInputRule, backspaceToParagraph),
+  "Mod-e": commands.toggleMark(schema.marks.code),
+  "Mod-Shift-s": commands.toggleMark(schema.marks.strike),
+};
+
 export function pagePlugins() {
   return [
     chromePlugin(),
     blockSelectionPlugin(),
+    markdownPlugin(),
+    keymap.keymap(markKeys),
     keymap.keymap(blockKeys),
     keymap.keymap(editKeys),
     keymap.keymap(commands.baseKeymap),
