@@ -6,10 +6,10 @@
 // `page` cascade layer, so a theme is one plain stylesheet that sets tokens on
 // .page-shell (and adds scoped rules where it needs to); unlayered theme rules
 // always win. Contract: plans/.../default-page/v1/look/THEME-CONTRACT.md
-import { state, view as pmView, keymap, commands, history, dropcursor, gapcursor, inputrules } from "../vendor/prosemirror.vendor.js";
+import { state, view as pmView, keymap, commands, history, gapcursor, inputrules } from "../vendor/prosemirror.vendor.js";
 import { schema } from "./schema.js";
 import { identityPlugin, docFromBlocks, blockMap, keyBetween, newId } from "./model.js";
-import { blockKeys, structurePlugin, collapsePlugin, pastePlugin, STEP } from "./blocks.js";
+import { blockKeys, structurePlugin, collapsePlugin, pastePlugin, BlockSelection, STEP } from "./blocks.js";
 import { chromePlugin } from "./chrome.js";
 import { linkPlugin } from "./link.js";
 import { blockSelectionPlugin } from "./blocksel.js";
@@ -108,6 +108,10 @@ ${INDENTS.map((n) => `.page-editor .page-li[data-indent="${n}"] { --li-indent: $
 .page-menu-icon { display: grid; place-items: center; width: 24px; height: 24px; border: 1px solid var(--page-pop-line); border-radius: 6px; color: var(--page-pop-muted); font-size: 12px; flex: none; }
 .page-menu-hint { margin-inline-start: auto; color: var(--page-pop-muted); font-size: 12px; }
 .page-menu-empty { padding: 8px 10px; color: var(--page-pop-muted); font-size: 13px; }
+.page-shell.is-dragging, .page-shell.is-dragging .page-grip { cursor: grabbing; }
+.page-shell[data-drop="none"] { cursor: no-drop; }
+.page-drop { position: absolute; z-index: 3; left: var(--page-drop-x, 0px); top: var(--page-drop-y, 0px); width: var(--page-drop-w, 0px); height: 2px; margin-top: -1px; border-radius: 1px; background: var(--page-drop, var(--page-accent)); pointer-events: none; }
+.page-shell.is-dragging .page-block-selected { opacity: 0.45; }
 .page-editor.ProseMirror-hideselection { caret-color: transparent; }
 .page-editor.ProseMirror-hideselection *::selection { background: transparent; }
 .page-editor .page-block-selected { background: var(--page-block-selected, rgba(88, 120, 170, 0.12)); box-shadow: -6px 0 0 var(--page-block-selected, rgba(88, 120, 170, 0.12)), 6px 0 0 var(--page-block-selected, rgba(88, 120, 170, 0.12)); border-radius: 4px; }
@@ -202,7 +206,6 @@ export function pagePlugins({ upload = defaultUpload } = {}) {
     mediaPlugin({ upload }),
     pastePlugin(),
     history.history(),
-    dropcursor.dropCursor(),
     gapcursor.gapCursor(),
   ];
 }
@@ -251,7 +254,15 @@ export function createPageEditor(mount, { blocks = null, onChange = null, upload
       image: (node, v, getPos) => new ImageView(node, v, getPos),
       file: (node, v) => new FileView(node, v),
     },
-    handleDOMEvents: { mousedown: checkboxClick },
+    handleDOMEvents: {
+      mousedown: checkboxClick,
+      dragstart(v, event) {
+        const sel = v.state.selection;
+        if (!(sel instanceof state.NodeSelection || sel instanceof BlockSelection)) return false;
+        event.preventDefault();
+        return true;
+      },
+    },
     dispatchTransaction(tr) {
       if (afterStep && tr.docChanged && !tr.getMeta(STEP)) history.closeHistory(tr);
       if (tr.docChanged) afterStep = !!tr.getMeta(STEP);

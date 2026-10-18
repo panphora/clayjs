@@ -8,6 +8,7 @@ import { schema } from "./schema.js";
 import { BlockSelection, outline, siblingSpan, moveBlock, indentBlocks, outdentBlocks } from "./blocks.js";
 import { currentSpan, selectBlocks, duplicateBlocks, deleteBlocks } from "./blocksel.js";
 import { openAltEditor, setImageAttrs } from "./media.js";
+import { BlockDrag } from "./drag.js";
 import { openLinkEditor } from "./link.js";
 import { BLOCK_TYPES, MENU_ITEMS, blockTypeOf, turnInto, insertAfter, rankItems, runItem, retype } from "./items.js";
 
@@ -129,7 +130,10 @@ class Chrome {
     }
     this.turn.addEventListener("click", () => this.toggleMenu("turn", this.turn));
     this.plus.addEventListener("click", () => this.fromPlus());
-    this.grip.addEventListener("click", () => (this.menu ? this.closeMenu() : this.openActions(this.grip, this.gutterIndex())));
+    this.grip.addEventListener("click", (e) => {
+      if (e.detail === 0) this.gripAction(this.gutterIndex());
+    });
+    this.drag = new BlockDrag(view, this.grip, { index: () => this.gutterIndex(), onClick: (i) => this.gripAction(i) });
     this.scrim.addEventListener("click", () => this.closeMenu());
     this.menuEl.addEventListener("click", (e) => {
       const row = e.target.closest(".page-menu-item");
@@ -171,8 +175,13 @@ class Chrome {
     return Math.min(this.hover ?? this.blockIndex(), this.view.state.doc.childCount - 1);
   }
 
+  gripAction(index) {
+    if (this.menu) this.closeMenu();
+    else this.openActions(this.grip, index);
+  }
+
   trackHover(event) {
-    if (this.menu) return;
+    if (this.menu || this.drag.state) return;
     const view = this.view;
     const hit = view.posAtCoords({ left: view.dom.getBoundingClientRect().left + 2, top: event.clientY });
     if (!hit) return;
@@ -393,6 +402,7 @@ class Chrome {
 
   destroy() {
     clearTimeout(this.movedTimer);
+    this.drag.destroy();
     this.shell.removeEventListener("mousemove", this.onMove);
     this.shell.removeEventListener("mouseleave", this.onLeave);
     this.shell.removeEventListener("keydown", this.onKey);
