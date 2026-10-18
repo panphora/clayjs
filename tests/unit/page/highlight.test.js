@@ -161,3 +161,22 @@ describe("review round 1", () => {
     }
   });
 });
+
+test("typing in a coloured block keeps its colours until the new ones arrive, so it never flashes uncoloured", async () => {
+  const held = [];
+  const run = (code) => new Promise((r) => held.push(() => r([[{ content: code.slice(0, 5), offset: 0, color: "var(--page-code-token-keyword)", fontStyle: 0 }]])));
+  const view = editor([["c", "code_block", "const x = 1", { lang: "javascript" }]], { highlight: { tokenize: run, delay: 0 } });
+  await wait();
+  held.shift()();
+  await wait();
+  expect(decos(view).length).toBe(1);
+  select(view, posOf(view, "c", true));
+  for (const ch of " + 2") {
+    typeText(view, ch);
+    await wait();
+    expect(decos(view).map((d) => [d.from, d.to])).toEqual([[1, 6]]);
+  }
+  while (held.length) held.shift()();
+  await wait();
+  expect(decos(view).length).toBe(1);
+});

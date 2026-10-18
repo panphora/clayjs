@@ -70,7 +70,9 @@ const CACHE_SIZE = 200;
 
 // Each pass rebuilds every code block's colours from a cache of token runs keyed
 // by language and text, so colours follow undo, retyping and deletion without
-// tracking what each edit did to the old decorations.
+// tracking what each edit did to the old decorations. While new text waits for
+// its tokens, the block keeps its old colours, mapped through the edit, so
+// typing never flashes the block uncoloured.
 class Highlighter {
   constructor(view, run, delay) {
     this.view = view;
@@ -106,6 +108,7 @@ class Highlighter {
     if (view.isDestroyed) return;
     const decos = [];
     const seen = new Map();
+    const current = highlightKey.getState(view.state);
     view.state.doc.forEach((node, pos) => {
       if (node.type !== schema.nodes.code_block) return;
       const id = node.attrs.id;
@@ -121,7 +124,9 @@ class Highlighter {
           const style = styleOf(t);
           if (style && t.content) decos.push(Decoration.inline(pos + 1 + t.offset, pos + 1 + t.offset + t.content.length, { style }));
         }
-      } else if ((!this.io || this.visible.has(id)) && !this.pending.has(key)) {
+      } else {
+        decos.push(...current.find(pos, pos + node.nodeSize));
+        if ((this.io && !this.visible.has(id)) || this.pending.has(key)) return;
         this.pending.add(key);
         this.run(text, lang).then((lines) => lines.flat(), () => []).then((flat) => {
           this.pending.delete(key);
