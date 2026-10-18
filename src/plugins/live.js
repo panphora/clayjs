@@ -13,6 +13,7 @@ import { onSaveAccepted, isSaveInProgress } from "../core/save-core.js";
 import { savePageForce, baselineSettled, isSaveConflicted, autosaveIsSuspended } from "../core/save.js";
 import { withKeepalive } from "../core/save-core.js";
 import { isEditMode } from "../core/is-edit-mode.js";
+import { registerUnsavedState } from "../lib/unsaved-state.js";
 import { createCheckpoints } from "../live/checkpoint.js";
 import { HyperMorph } from "../vendor/hyper-morph.vendor.js";
 import { hostSupports } from "../core/host-meta.js";
@@ -25,6 +26,9 @@ const entries = new Map();
 
 const captureAuthor = 'save_' + [...crypto.getRandomValues(new Uint32Array(4))].map((n) => n.toString(16).padStart(8, '0')).join('');
 let captureNumber = 0;
+let anonymousCaptures = 0;
+
+export const HOLD_MS = 45_000;
 
 function lineageOf(element) {
   const at = parseStamp(element.getAttribute('live-at'));
@@ -55,9 +59,120 @@ function captureLineage(entry, forSave) {
 
 
 // What the save on the wire captured, per saved store: { mode, mark, canonical,
-// at }. Set by the save's own capture, taken by its acceptance or its failure.
-// Only one save is on the wire at a time.
+// at, key }. Set by the save's own capture, taken by its acceptance or its
+// failure. Only one save is on the wire at a time.
 let pinned = null;
+
+function pruneCaptures(entry) {
+  if (!entry.captureOps.size) return;
+  const pending = new Set(entry.store.pendingEntries().map((item) => item.id));
+  for (const [key, captured] of entry.captureOps) {
+    captured.ids = captured.ids.filter((id) => pending.has(id));
+    if (!captured.ids.length) entry.captureOps.delete(key);
+  }
+  if (![...entry.captureOps.values()].some((captured) => captured.ended)) disarm(entry);
+}
+
+const onWire = (name, key) => pinned?.get(name)?.key === key && isSaveInProgress();
+
+function heldIds(name) {
+  const entry = entries.get(name);
+  if (!entry || !entry.captureOps.size) return [];
+  const pending = new Set(entry.store.pendingEntries().map((item) => item.id));
+  const ids = new Set();
+  for (const [key, captured] of entry.captureOps) {
+    if (!captured.ended && !onWire(name, key)) continue;
+    for (const id of captured.ids) if (pending.has(id)) ids.add(id);
+  }
+  return [...ids];
+}
+
+function endedCapture(entry) {
+  for (const [key, captured] of entry.captureOps) if (captured.ended) return [key, captured];
+  return null;
+}
+
+registerUnsavedState({ id: "live:held", isPending: () => [...entries.values()].some((entry) => endedCapture(entry)) });
+
+const inFlight = (entry) => [...entry.captureOps].some(([key, captured]) => !captured.ended && onWire(entry.store.name, key));
+
+function describeOp({ op, path, n, value }) {
+  const where = path.length ? path.join(".") : "the whole value";
+  const text = op === "add" ? `${where} + ${n}` : op === "del" ? `${where} removed` : `${where} = ${JSON.stringify(value)}`;
+  return text.length > 60 ? `${text.slice(0, 57)}...` : text;
+}
+
+function arm(entry) {
+  clearTimeout(entry.timer);
+  entry.timer = setTimeout(() => {
+    entry.timer = null;
+    giveUp(entry);
+  }, HOLD_MS);
+}
+
+function disarm(entry) {
+  clearTimeout(entry.timer);
+  entry.timer = null;
+}
+
+function giveUp(entry, { read = true } = {}) {
+  const name = entry.store.name;
+  const ids = heldIds(name);
+  disarm(entry);
+  entry.withheld = false;
+  entry.reading = false;
+  if (ids.length) {
+    const lost = entry.store.pendingEntries().filter((item) => ids.includes(item.id)).map((item) => item.op);
+    if (entry.store.handle.status.mode === "file") entry.leftAt = null;
+    entry.store.rebase(entry.store.authoritative, { source: "state", dropIds: ids });
+    const shown = lost.slice(0, 5).map(describeOp).join("; ");
+    const more = lost.length > 5 ? ` and ${lost.length - 5} more` : "";
+    const message = `A save of "${name}" ended without an answer, so ${lost.length === 1 ? "this edit was" : "these edits were"} not sent again: ${shown}${more}. Check the value, and redo ${lost.length === 1 ? "it" : "any"} if missing.`;
+    console.warn(`clay.live("${name}"): ${message}`, lost);
+    document.dispatchEvent(new CustomEvent("clay:live-notice", { detail: { name, code: "save-uncertain", ops: lost, message } }));
+  }
+  if (read) fast?.release(name, { read: fast.roomBound(name) });
+}
+
+function settle(entry) {
+  pruneCaptures(entry);
+  const name = entry.store.name;
+  if (!entry.withheld || entry.reading || heldIds(name).length) return;
+  if (!fast?.roomBound(name)) {
+    entry.withheld = false;
+    disarm(entry);
+    return;
+  }
+  entry.reading = true;
+  arm(entry);
+  fast.release(name, { read: true });
+}
+
+function taken(name) {
+  const entry = entries.get(name);
+  if (!entry || (!entry.withheld && !entry.reading)) return;
+  entry.withheld = false;
+  entry.reading = false;
+  if (![...entry.captureOps.values()].some((captured) => captured.ended)) disarm(entry);
+}
+
+function ended(entry, key) {
+  const captured = entry.captureOps.get(key);
+  const name = entry.store.name;
+  if (!captured) {
+    if (entry.store.handle.status.mode === "file") entry.leftAt = null;
+    return;
+  }
+  captured.ended = true;
+  if (!fast?.roomBound(name)) {
+    giveUp(entry, { read: false });
+    return;
+  }
+  entry.withheld = true;
+  entry.reading = true;
+  arm(entry);
+  fast.release(name, { read: true });
+}
 
 // A JSON text as the value it holds, so formatting (spacing, key order) never
 // decides a match.
@@ -132,16 +247,6 @@ function liveMoved() {
   checkpoints.changed();
 }
 
-// The fast lane frames nothing of a store while some of its pending ops are in
-// a file-mode save on the wire: the file may hold them, and the room merges the file.
-function heldBySave(name) {
-  const entry = entries.get(name);
-  if (!entry) return false;
-  const saved = pinned?.get(name);
-  const through = saved?.mode === "file" && isSaveInProgress() ? saved.mark : 0;
-  return through > 0 && entry.store.pendingEntries().some((pending) => pending.id <= through);
-}
-
 // Drop a store's ops through mark: a save that may have landed holds them.
 function dropThrough(entry, mark) {
   entry.store.rebase(entry.store.authoritative, { source: "state", through: mark });
@@ -150,15 +255,17 @@ function dropThrough(entry, mark) {
 // A save ended without being accepted. maybeLanded: it may have reached the
 // file (an error or a lost answer). Ops it carried in file mode go on (to the
 // room, or the next save) when it surely did not land. When it may have, they
-// are dropped, never sent again: if it landed, the file brings them back.
+// are never sent again, and are given up unless proof of the file's value
+// settles them first (see ended).
 function endPin(pin, maybeLanded) {
   if (!pin) return;
   for (const [name, saved] of pin) {
     const entry = entries.get(name);
     if (!entry || saved.mode !== "file") continue;
-    if (maybeLanded) {
-      if (entry.store.handle.status.mode === "file") entry.leftAt = null;
-      dropThrough(entry, saved.mark);
+    if (maybeLanded) ended(entry, saved.key);
+    else {
+      entry.captureOps.delete(saved.key);
+      settle(entry);
     }
     if (entry.store.handle.status.mode === "fast") fast?.release(name);
   }
@@ -179,7 +286,22 @@ function laneOptions(transport) {
       const entry = entries.get(name);
       if (entry?.store.handle.status.mode === "fast") entry.leftAt = { ...at, frames: [], ancestors: [] };
     },
-    held: heldBySave,
+    held: (name) => heldIds(name).length > 0,
+    heldIds,
+    hold: (name) => {
+      const entry = entries.get(name);
+      if (!entry) return false;
+      if (inFlight(entry)) {
+        entry.withheld = true;
+        return true;
+      }
+      giveUp(entry, { read: false });
+      return false;
+    },
+    taken,
+    onStop: () => {
+      for (const entry of entries.values()) if (!inFlight(entry)) giveUp(entry, { read: false });
+    },
   };
 }
 
@@ -320,7 +442,7 @@ export function live(name) {
   }
   const store = createStore({ name, value, ephemeral: tag.ephemeral });
   const layout = tag.element.getAttribute("live-format") === "lines" ? "lines" : text.includes("\n") ? "pretty" : "line";
-  const entry = { store, layout, framesSince: false, last: 0, landed: 0, leftAt: lineageOf(tag.element), captureOps: new Map() };
+  const entry = { store, layout, framesSince: false, last: 0, landed: 0, leftAt: lineageOf(tag.element), captureOps: new Map(), withheld: false, reading: false, timer: null };
   entries.set(name, entry);
   store.onDelivery((event) => {
     if (event.code === "receipt-expired") document.dispatchEvent(new CustomEvent("clay:live-notice", {
@@ -328,6 +450,7 @@ export function live(name) {
     }));
   });
   store.onRebase((event) => {
+    settle(entry);
     if (store.handle.status.mode === "file" && ["undone", "refused", "decided"].includes(event.cause)) entry.leftAt = null;
   });
   if (!tag.ephemeral) store.onLocal(() => checkpoints.changed());
@@ -349,6 +472,15 @@ onSnapshot((clone, { forSave }) => {
     if (entry.store.ephemeral) continue;
     const tag = tags.get(entry.store.name);
     if (!tag) continue;
+    const resent = forSave && entry.store.handle.status.mode === "file" ? endedCapture(entry)?.[1] : null;
+    if (resent) {
+      tag.element.textContent = resent.text;
+      for (const [attribute, value] of [["live-at", resent.at], ["live-by", resent.by]]) {
+        if (value === null) tag.element.removeAttribute(attribute);
+        else tag.element.setAttribute(attribute, value);
+      }
+      continue;
+    }
     const text = textOf(entry);
     tag.element.textContent = text;
     // The room position this value was written at, and a hash of the value: the
@@ -393,12 +525,19 @@ document.addEventListener("clay:snapshot-ready", (event) => {
     const mode = entry.store.handle.status.mode === "fast" && fast ? "fast" : "file";
     const at = mode === "fast" ? { epoch: fast.status.epoch, seq: fast.status.seq } : null;
     const lineage = mode === "file" ? lineageOf(tag.element) : null;
-    stores.set(entry.store.name, { mode, mark: entry.store.mark, canonical: canonical(tag.element.textContent), at, lineage, by: tag.element.getAttribute("live-by") });
-    if (lineage && !lineage.disk && entry.leftAt) entry.leftAt = { ...entry.leftAt, ancestors: lineage.ancestors };
     const proof = parseBy(tag.element.getAttribute("live-by"));
-    if (mode === "file" && proof?.v === 2) {
-      if (proof.capture[0] === captureAuthor) captureNumber = Math.max(captureNumber, proof.capture[1]);
-      entry.captureOps.set(JSON.stringify(proof.capture), { capture: proof.capture, ids: entry.store.pendingEntries().map((e) => e.id) });
+    const resent = mode === "file" ? endedCapture(entry) : null;
+    const pending = entry.store.pendingEntries().map((e) => e.id);
+    const carried = resent ? resent[1].ids.filter((id) => pending.includes(id)) : mode === "file" ? pending : [];
+    const capture = mode === "file" && proof?.v === 2 ? proof.capture : null;
+    const key = !carried.length ? null : resent ? resent[0] : capture ? JSON.stringify(capture) : `anonymous:${++anonymousCaptures}`;
+    const mark = resent ? resent[1].mark : entry.store.mark;
+    stores.set(entry.store.name, { mode, mark, canonical: canonical(tag.element.textContent), at, lineage, by: tag.element.getAttribute("live-by"), key });
+    if (lineage && !lineage.disk && entry.leftAt) entry.leftAt = { ...entry.leftAt, ancestors: lineage.ancestors };
+    if (capture && capture[0] === captureAuthor) captureNumber = Math.max(captureNumber, capture[1]);
+    if (key) {
+      entry.captureOps.set(key, { capture, ids: carried, ended: false, mark, text: tag.element.textContent, at: tag.element.getAttribute("live-at"), by: tag.element.getAttribute("live-by") });
+      pruneCaptures(entry);
     }
     entry.framesSince = false;
     // A close save is answered after the page is gone: the local room learns
@@ -453,7 +592,11 @@ export function confirmSaved(html) {
     const tag = tags.get(name);
     const mode = entry.store.handle.status.mode;
     if (!tag || canonical(tag.element.textContent) !== saved.canonical) {
-      if (saved.mode === "file" && mode === "fast") fast?.release(name);
+      if (saved.mode === "file") {
+        if (fast?.roomBound(name)) dropThrough(entry, saved.mark);
+        if (mode === "fast") fast?.release(name);
+        settle(entry);
+      }
       continue;
     }
     if (saved.mode === "fast") {
@@ -471,11 +614,12 @@ export function confirmSaved(html) {
       // after this answer: read it, so the view holds these ops again.
       fast?.refresh();
     } else if (entry.framesSince) {
-      if (!entry.leftAt || entry.leftAt.disk) dropThrough(entry, saved.mark);
+      if (!entry.leftAt || entry.leftAt.disk || fast?.roomBound(name)) dropThrough(entry, saved.mark);
     } else {
       entry.store.confirm(saved.mark);
       entry.leftAt = saved.lineage && tag.element.getAttribute("live-by") === saved.by ? saved.lineage : { disk: true };
     }
+    settle(entry);
   }
 }
 
@@ -505,6 +649,10 @@ export function receiveFrame(html, seq = null) {
     const at = tag.element.getAttribute("live-at");
     const by = tag.element.getAttribute("live-by");
     const pageTag = page.get(name)?.element;
+    if (entry && !entry.store.ephemeral && entry.store.handle.status.mode === "file" && at !== null && by === null && (entry.withheld || heldIds(name).length)) {
+      entry.withheld = true;
+      continue;
+    }
     // The page's tag keeps the lineage of the version this tab last took, so a
     // file-mode save claims what it descends from. A store out of the room
     // descends from the incoming value's room position when it is of this
@@ -520,7 +668,7 @@ export function receiveFrame(html, seq = null) {
       if (sameEpoch) dropIds = fast?.captured(name, lineage, parseBy(by)) ?? [];
       else if (lineage?.disk) dropIds = fast?.captured(name, parseStamp(at), null) ?? [];
       if (lineage && !lineage.disk) {
-        for (const [key, captured] of entry.captureOps) if (contains(lineage.ancestors, ...captured.capture)) {
+        for (const [key, captured] of entry.captureOps) if (captured.capture && contains(lineage.ancestors, ...captured.capture)) {
           dropIds.push(...captured.ids);
           entry.captureOps.delete(key);
         }

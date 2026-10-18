@@ -4,7 +4,8 @@
 // the same frames through a transport:
 //   start({ open, close, frame, state, writer }) -> stop function
 //   send(clientId, { name, n, ops, epoch }) -> Promise<{ status, body, retryAfter }>
-//   fetchState(clientId) -> Promise<{ epoch, seq, writer, stores } | { status } | null>
+//   fetchState(clientId, since, { signal }) -> Promise<{ epoch, seq, writer, stores } | { status } | null>
+//     answered within STATE_TIMEOUT_MS or abandoned: its signal aborts and the read is made again
 // A new room (a new epoch) holds some of this tab's frames still in flight; see
 // sortAwaiting for how each is sorted.
 //
@@ -18,6 +19,7 @@ import { unionRanges, contains, frameSet, hasNumber } from "./provenance.js";
 export const MIN_GAP_MS = 40;
 export const MAX_OPS = 128;
 export const RETRY_MS = 500;
+export const STATE_TIMEOUT_MS = 10_000;
 export const FRAME_BYTES = 63 * 1024;
 // What a host still on the old 16 KB body cap takes: a multi-op frame it
 // answers 413 is packed again at this size for the rest of the session.
@@ -45,6 +47,12 @@ const unhandled = (status) => status === 429 || status === 503;
  * @param {(name: string) => boolean} [options.held] - a save still on the wire carries some of
  *   this store's pending ops in file mode: nothing of the store is framed until release(name),
  *   so those ops are framed in order if the save does not land, and never if it does
+ * @param {(name: string) => number[]} [options.heldIds] - the ids of those ops: a room state
+ *   cannot say whether they are in its value, so it is not applied to the store until the
+ *   room's receipts hold their frames or hold(name, ids) lets go of them
+ * @param {(name: string, ids: number[]) => boolean} [options.hold] - true to keep waiting for
+ *   the save's answer; false when the ops left pending (the caller gave up on them)
+ * @param {(name: string) => void} [options.taken] - the store took a room state
  * @param {() => void} [options.onStop] - the lane stopped for good
  */
 export function createFastLane({
@@ -57,6 +65,9 @@ export function createFastLane({
   onLanded = () => {},
   onCheckpoint = () => {},
   held = () => false,
+  heldIds = () => [],
+  hold = () => true,
+  taken = () => {},
   onStop = () => {},
   now = () => Date.now(),
   setTimer = setTimeout,
@@ -80,6 +91,7 @@ export function createFastLane({
   let lastSentAt = -Infinity;
   let holdUntil = 0;
   let timer = null;
+  let readTimer = null;
   let retryDelay = RETRY_MS;
   let frameBytes = FRAME_BYTES;
   let resyncDelay = RETRY_MS;
@@ -91,6 +103,7 @@ export function createFastLane({
   let conn;
   let stateCount = 0;
   let fetchAgain = false;
+  let reads = 0;
   // A store left the room, so frames went by that its value never took: state
   // reads ask for every store whole, never for the moves since seq, until a
   // state is applied.
@@ -442,7 +455,24 @@ export function createFastLane({
     return { resend, dropIds };
   }
 
-  function applyState(state) {
+  function waiting(name, lane, room, fresh) {
+    const ids = heldIds(name);
+    if (!ids.length) return false;
+    if (!fresh) {
+      const covered = new Set();
+      for (const frame of lane.awaiting) {
+        if (hasNumber(room.saved, frame.n)) for (const op of frame.entries ?? []) covered.add(op.id);
+      }
+      if (ids.every((id) => covered.has(id))) return false;
+    }
+    if (!hold(name, ids)) {
+      prune(name, lane);
+      return false;
+    }
+    return true;
+  }
+
+  function applyState(state, read = 0) {
     if (stopped || !state || typeof state.epoch !== "string") return;
     stateCount++;
     // Older than what this tab already applied: keep what it has.
@@ -462,10 +492,13 @@ export function createFastLane({
     if ("conn" in state) conn = state.conn;
     const stores = state.stores || {};
     roomNames = new Set(Object.keys(stores));
+    let skipped = false;
+    let readDue = false;
     for (const [name, entry] of entries) {
       const room = stores[name];
       const lane = laneOf(name);
       prune(name, lane);
+      lane.room = !!room;
       if (!room) {
         // Not in the room (too large, too many stores, or opened after it):
         // there are no frames of it to miss. Already out: its value still
@@ -473,13 +506,26 @@ export function createFastLane({
         if (!lane.out) leaveRoom(name, lane, false);
         continue;
       }
+      const behind = lane.after !== undefined && read < lane.after;
+      if (behind || waiting(name, lane, room, fresh || lane.stale === true)) {
+        roomNames.delete(name);
+        lane.deferred = true;
+        if (fresh) lane.stale = true;
+        if (behind) readDue = true;
+        skipped = true;
+        continue;
+      }
+      const wholly = fresh || lane.stale === true;
+      lane.deferred = false;
+      lane.stale = false;
+      lane.after = undefined;
       const rejoined = entry.store.handle.status.mode === "file";
       lane.out = false;
       entry.store.setMode("fast");
       entry.last = Number.isInteger(room.last) ? room.last : 0;
       entry.landed = Number.isInteger(room.landed) ? room.landed : 0;
       const expired = [];
-      if (!fresh && receiptGeneration !== null) {
+      if (!wholly && receiptGeneration !== null) {
         const seen = room.seen?.[clientId];
         lane.awaiting = lane.awaiting.filter((frame) => {
           const known = hasNumber(room.saved, frame.n) || (seen !== undefined && frame.n <= seen) || (frame.seq !== null && frame.seq <= seq);
@@ -490,7 +536,7 @@ export function createFastLane({
           return false;
         });
       }
-      if (fresh) {
+      if (wholly) {
         const { resend, dropIds } = sortAwaiting(lane.awaiting, room);
         for (const frame of resend) {
           if (frame.undecided) continue;
@@ -536,11 +582,14 @@ export function createFastLane({
           joined = true;
         }
       }
+      taken(name);
     }
+    if (skipped) missed = true;
     if (fresh || joined) onEpoch(epoch);
     onApplied();
     onWriter();
     drain();
+    if (readDue) resync();
   }
 
   // Back in step: apply what arrived while the state was being read.
@@ -563,11 +612,21 @@ export function createFastLane({
     fetching = true;
     fetchAgain = false;
     synced = false;
-    const asked = { connection, stateCount };
+    const asked = { connection, stateCount, read: ++reads };
     let state = null;
+    const abort = typeof AbortController === "function" ? new AbortController() : null;
+    const expired = new Promise((resolve) => {
+      readTimer = setTimer(() => {
+        readTimer = null;
+        abort?.abort();
+        resolve(null);
+      }, STATE_TIMEOUT_MS);
+    });
     try {
-      state = await transport.fetchState(clientId, epoch !== null && seq > 0 && !missed ? { epoch, seq } : null);
+      state = await Promise.race([transport.fetchState(clientId, epoch !== null && seq > 0 && !missed ? { epoch, seq } : null, abort ? { signal: abort.signal } : {}), expired]);
     } catch {}
+    if (readTimer !== null) clearTimer(readTimer);
+    readTimer = null;
     fetching = false;
     if (stopped) return;
     if (asked.connection !== connection || fetchAgain) {
@@ -580,7 +639,7 @@ export function createFastLane({
     }
     if (state && typeof state.epoch === "string") {
       resyncDelay = RETRY_MS;
-      applyState(state);
+      applyState(state, asked.read);
       return;
     }
     if (state && STATE_GONE.has(state.status)) {
@@ -622,6 +681,8 @@ export function createFastLane({
     stopped = true;
     if (timer !== null) clearTimer(timer);
     timer = null;
+    if (readTimer !== null) clearTimer(readTimer);
+    readTimer = null;
     unsubscribe?.();
     for (const [name, entry] of entries) {
       const lane = lanes.get(name);
@@ -688,10 +749,18 @@ export function createFastLane({
       schedule();
     },
     // The save that held this store ended: frame whatever is still pending past
-    // what was framed (an accepted save's ops have left pending).
-    release(name) {
-      if (stopped || epoch === null || !roomNames.has(name)) return;
+    // what was framed (an accepted save's ops have left pending). A state it
+    // kept from the store, or a value the caller kept (read), is replaced by a
+    // read of the room, which frames what is pending when the store takes it.
+    release(name, { read = false } = {}) {
+      if (stopped || epoch === null) return;
       const lane = laneOf(name);
+      if (lane.deferred || read) {
+        lane.after = reads + 1;
+        if (connected) resync();
+        return;
+      }
+      if (!roomNames.has(name)) return;
       prune(name, lane);
       lane.unsent = unframed(name, lane);
       schedule();
@@ -756,6 +825,9 @@ export function createFastLane({
     },
     storeOpened() {
       if (epoch !== null && connected) resync();
+    },
+    roomBound(name) {
+      return !stopped && lanes.get(name)?.room === true;
     },
     isWriter() {
       return writer !== null && writer === clientId;

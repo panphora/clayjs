@@ -45,5 +45,8 @@ document.addEventListener("clay:save-saved", (e) => {
 });
 document.addEventListener("clay:save-error", () => toastPersistent("Couldn't save", "error"));
 document.addEventListener("clay:save-offline", () => toastPersistent("Offline, not saved", "warning"));
+document.addEventListener("clay:live-notice", (e) => {
+  if (e.detail?.code === "save-uncertain") toastPersistent(e.detail.message, "warning");
+});
 
 export { toast, toastPersistent, ask, consent, tell, snippet, themodal };

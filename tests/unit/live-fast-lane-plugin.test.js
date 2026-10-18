@@ -44,14 +44,15 @@ const requests = [];
 let room = { epoch: "e1", seq: 0, writer: null, provenanceVersion: 2, receiptGeneration: 0, stores: { g: { value: { s: 0 }, ephemeral: false, last: 0, landed: 0 } } };
 // Set to a promise to keep a document save on the wire until it settles.
 let saveGate = null;
+let hangState = false;
 global.fetch = jest.fn(async (url, init = {}) => {
   if (saveGate && !String(url).includes("/_/sync/")) return saveGate;
   requests.push({ url: String(url), init });
-  if ((init.method || "GET") === "GET") return { ok: true, status: 200, json: async () => room };
+  if ((init.method || "GET") === "GET") return hangState ? new Promise(() => {}) : { ok: true, status: 200, json: async () => room };
   return { ok: true, status: 200, json: async () => ({ seq: room.seq + 1, epoch: room.epoch }), headers: { get: () => null } };
 });
 
-const { live, fastLane, storeOf, confirmSaved, receiveFrame } = await import("../../src/plugins/live.js");
+const { live, fastLane, storeOf, confirmSaved, receiveFrame, HOLD_MS } = await import("../../src/plugins/live.js");
 const bridge = await import("../../src/live/stream-bridge.js");
 const snapshot = await import("../../src/core/snapshot.js");
 const { saveHtml } = await import("../../src/core/save-core.js");
@@ -73,6 +74,10 @@ const join = async (stores) => {
   bridge.streamEvent("data-state", room);
   await flushAsync();
 };
+
+const notices = [];
+document.addEventListener("clay:live-notice", (event) => notices.push(event.detail));
+beforeEach(() => { notices.length = 0; });
 
 const posts = (name) => requests.filter((r) => r.init.method === "POST" && JSON.parse(r.init.body).name === name);
 
@@ -191,7 +196,7 @@ test("a fast-mode pin confirms nothing", async () => {
   expect(posts("g")).toEqual([]);
 });
 
-test("ops a file-mode save carries are not framed while it is on the wire", async () => {
+test("a room state waits for the answer of a file-mode save that carries ops, and they are never framed", async () => {
   document.body.innerHTML = tag("g", '{"s":0}') + tag("h", '{"n":0}');
   const h = live("h");
   await flushAsync();
@@ -207,8 +212,10 @@ test("ops a file-mode save carries are not framed while it is on the wire", asyn
   let endSave;
   saveGate = new Promise((resolve) => { endSave = resolve; });
   saveHtml(body);
-  await join({ g: { value: { s: 0 }, ephemeral: false, last: 0, landed: 0 }, h: { value: { n: 0 }, ephemeral: false, last: 0, landed: 0 } });
-  expect(h.status.mode).toBe("fast");
+  await join({ g: { value: { s: 0 }, ephemeral: false, last: 0, landed: 0 }, h: { value: { n: 1 }, ephemeral: false, last: 0, landed: 0 } });
+  expect(h.status.mode).toBe("file");
+  expect(h.toJSON()).toEqual({ n: 1 });
+  expect(storeOf("h").pending).toHaveLength(1);
   await wait(80);
   expect(posts("h")).toEqual([]);
 
@@ -216,6 +223,8 @@ test("ops a file-mode save carries are not framed while it is on the wire", asyn
   saveGate = null;
   endSave({ ok: false, status: 500, text: async () => "", json: async () => ({}), headers: { get: () => null } });
   await wait(80);
+  expect(h.status.mode).toBe("fast");
+  expect(h.toJSON()).toEqual({ n: 1 });
   expect(storeOf("h").pending).toEqual([]);
   expect(posts("h")).toEqual([]);
 });
@@ -271,6 +280,8 @@ test("a file-mode save that may have landed drops its ops instead of sending the
   await wait(80);
   expect(posts("h")).toEqual([]);
   expect(storeOf("h").pending).toEqual([]);
+  expect(notices).toHaveLength(1);
+  expect(notices[0]).toMatchObject({ name: "h", code: "save-uncertain", ops: [{ op: "add", path: ["n"], n: 1 }] });
 });
 
 test("a file-mode save that may have landed before the store joined is never sent to the room", async () => {
@@ -334,7 +345,8 @@ test("an accepted file-mode save whose data-state came first is not counted agai
   saveHtml(body);
 
   await join({ g: { value: { s: 0 }, ephemeral: false, last: 0, landed: 0 }, q: { value: { s: 1 }, ephemeral: false, last: 1, landed: 1 } });
-  expect(q.status.mode).toBe("fast");
+  expect(q.status.mode).toBe("file");
+  expect(q.toJSON()).toEqual({ s: 1 });
   expect(storeOf("q").pending).toHaveLength(1);
 
   confirmSaved(body);
@@ -345,6 +357,8 @@ test("an accepted file-mode save whose data-state came first is not counted agai
   saveGate = null;
   endSave({ ok: true, status: 200, text: async () => JSON.stringify({ etag: "saved" }), json: async () => ({}), headers: { get: () => null } });
   await wait(80);
+  expect(q.status.mode).toBe("fast");
+  expect(q.toJSON()).toEqual({ s: 1 });
   expect(posts("q")).toEqual([]);
 });
 
@@ -379,6 +393,7 @@ test("a save that timed out and then got a 4xx may have landed", async () => {
   await wait(80);
   expect(posts("hadTimeout")).toEqual([]);
   expect(storeOf("hadTimeout").pending).toEqual([]);
+  expect(notices.map((notice) => notice.name)).toEqual(["hadTimeout"]);
   expect(posts("noTimeout")).toHaveLength(1);
   expect(JSON.parse(posts("noTimeout")[0].init.body).ops).toEqual([{ op: "add", path: ["n"], n: 1 }]);
 });
@@ -400,6 +415,8 @@ test("a file-mode save that may have landed drops its ops at once, and a peer's 
   await flushAsync();
   expect(storeOf("us").pending).toEqual([]);
   expect(storeOf("us").authoritative).toEqual({ n: 0 });
+  expect(notices).toHaveLength(1);
+  expect(notices[0]).toMatchObject({ name: "us", code: "save-uncertain" });
 
   receiveFrame(tag("us", '{"n":1}'));
   await flushAsync();
@@ -496,4 +513,5 @@ test("a store whose lane stopped saves with the stamp of where it left", async (
   const saved = new DOMParser().parseFromString(body, "text/html").querySelector('script[merge="st"]');
   expect(saved.getAttribute("live-at")).toBe(stampOf(left.epoch, left.seq, serializeLive(storeOf("st").value)));
 });
+
 

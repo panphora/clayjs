@@ -39,7 +39,7 @@ export async function relayData(clientId, frame) {
  * The room's { epoch, seq, writer, stores }; { status } when the host refused;
  * null when the request never got an answer. clientId marks this tab as taking part.
  */
-export async function fetchLiveState(clientId, since = null) {
+export async function fetchLiveState(clientId, since = null, { signal } = {}) {
   const url = dataUrl();
   if (clientId) url.searchParams.set("client-id", clientId);
   if (since && typeof since.epoch === "string" && Number.isInteger(since.seq)) url.searchParams.set("since", `${since.epoch}:${since.seq}`);
@@ -48,6 +48,7 @@ export async function fetchLiveState(clientId, since = null) {
       credentials: "same-origin",
       cache: "no-store",
       headers: { "Document-URL": window.location.href },
+      signal,
     });
     if (!response.ok) {
       let body = null;
