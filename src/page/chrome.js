@@ -6,6 +6,7 @@
 import { state, commands } from "../vendor/prosemirror.vendor.js";
 import { schema } from "./schema.js";
 import { BlockSelection } from "./blocks.js";
+import { openLinkEditor } from "./link.js";
 import { BLOCK_TYPES, blockTypeOf, turnInto, insertAfter } from "./items.js";
 
 export { BLOCK_TYPES, blockTypeOf, turnInto, insertAfter } from "./items.js";
@@ -36,16 +37,8 @@ function markActive(st, type) {
   return st.doc.rangeHasMark(from, to, type);
 }
 
-function toggleLink(view) {
-  const st = view.state;
-  if (markActive(st, M.link)) return commands.toggleMark(M.link)(st, view.dispatch);
-  const href = window.prompt("Link to", "https://");
-  if (!href || href === "https://") return false;
-  return commands.toggleMark(M.link, { href })(st, view.dispatch);
-}
-
 function runMark(view, name) {
-  if (name === "link") toggleLink(view);
+  if (name === "link") openLinkEditor(view);
   else commands.toggleMark(M[name])(view.state, view.dispatch);
   view.focus();
 }

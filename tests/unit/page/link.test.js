@@ -186,3 +186,163 @@ describe("the link plugin", () => {
     expect(links).toEqual(["https://ok.io"]);
   });
 });
+
+describe("the link popover", () => {
+  const setup = (blocks = [["p", "paragraph", "go here now"], ["c", "code_block", "x.io"]]) => {
+    const view = editor(blocks);
+    view.coordsAtPos = () => ({ left: 10, right: 10, top: 20, bottom: 30 });
+    const pop = view.dom.parentElement.querySelector(".page-link");
+    const input = pop.querySelector(".page-link-input");
+    return { view, pop, input, a: posOf(view, "p") };
+  };
+  const modK = (view) => key(view, "k", { ctrlKey: true });
+
+  test("the popover exists, hidden, inside the shell", () => {
+    const { view, pop } = setup();
+    expect(pop.parentElement).toBe(view.dom.parentElement);
+    expect([pop.hidden, pop.getAttribute("role")]).toEqual([true, "dialog"]);
+  });
+
+  test("Mod+K on a text selection opens the edit mode with the field focused and the selection still drawn", () => {
+    const { view, pop, input, a } = setup();
+    select(view, a + 3, a + 7);
+    expect(modK(view)).toBe(true);
+    expect([pop.hidden, pop.dataset.mode, document.activeElement === input]).toEqual([false, "edit", true]);
+    expect(view.dom.querySelectorAll(".page-link-pending").length).toBe(1);
+  });
+
+  test("an unsafe address is refused: the field is marked invalid and the editor stays open", () => {
+    const { view, pop, input, a } = setup();
+    select(view, a + 3, a + 7);
+    modK(view);
+    input.value = "javascript:alert(1)";
+    keyOn(input, "Enter");
+    expect([input.getAttribute("aria-invalid"), pop.hidden, linkRange(view.state.doc, a + 5)]).toEqual(["true", false, null]);
+  });
+
+  test("Enter applies a bare domain as https, closes the popover and clears the pending highlight", () => {
+    const { view, pop, input, a } = setup();
+    select(view, a + 3, a + 7);
+    modK(view);
+    input.value = "example.com";
+    keyOn(input, "Enter");
+    expect(linkRange(view.state.doc, a + 5)).toEqual({ from: a + 3, to: a + 7, href: "https://example.com" });
+    expect([pop.hidden, view.dom.querySelectorAll(".page-link-pending").length]).toEqual([true, 0]);
+  });
+
+  test("Mod+K with the caret inside a link edits that link, prefilled", () => {
+    const { view, input, a } = setup();
+    view.dispatch(view.state.tr.addMark(a + 3, a + 7, LINK.create({ href: "https://example.com" })));
+    select(view, a + 5);
+    expect(modK(view)).toBe(true);
+    expect(input.value).toBe("https://example.com");
+  });
+
+  test("Esc closes the field, changes nothing and leaves the quiet card for the link under the caret", () => {
+    const { view, pop, input, a } = setup();
+    view.dispatch(view.state.tr.addMark(a + 3, a + 7, LINK.create({ href: "https://example.com" })));
+    select(view, a + 5);
+    modK(view);
+    input.value = "other.io";
+    keyOn(input, "Escape");
+    expect(pop.dataset.mode).toBe("view");
+    expect(document.activeElement).toBe(view.dom);
+    expect(linkRange(view.state.doc, a + 5).href).toBe("https://example.com");
+  });
+
+  test("an emptied field removes the link, and one undo brings it back", () => {
+    const { view, input, a } = setup();
+    view.dispatch(view.state.tr.addMark(a + 3, a + 7, LINK.create({ href: "https://example.com" })));
+    select(view, a + 5);
+    modK(view);
+    input.value = "";
+    keyOn(input, "Enter");
+    expect(linkRange(view.state.doc, a + 5)).toBeNull();
+    key(view, "z", { ctrlKey: true });
+    expect(linkRange(view.state.doc, a + 5).href).toBe("https://example.com");
+  });
+
+  test("Mod+K at a bare caret opens an empty field and Enter inserts the address as linked text", () => {
+    const { view, input, a } = setup();
+    select(view, a + 11);
+    modK(view);
+    input.value = "b.io";
+    keyOn(input, "Enter");
+    expect(view.state.doc.child(0).textContent).toBe("go here nowb.io");
+    expect(linkRange(view.state.doc, view.state.selection.head - 1).href).toBe("https://b.io");
+  });
+
+  test("Mod+K in a code block, or across blocks, opens nothing but is swallowed", () => {
+    const { view, pop } = setup();
+    select(view, posOf(view, "c"));
+    expect(modK(view)).toBe(true);
+    select(view, posOf(view, "p"), posOf(view, "c"));
+    expect(modK(view)).toBe(true);
+    expect(pop.hidden).toBe(true);
+  });
+
+  test("with the caret strictly inside a link and the editor focused a quiet card shows the address, Edit and Remove", () => {
+    const { view, pop, a } = setup();
+    view.hasFocus = () => true;
+    view.dispatch(view.state.tr.addMark(a + 3, a + 7, LINK.create({ href: "https://example.com/x" })));
+    select(view, a + 5);
+    expect([pop.hidden, pop.dataset.mode]).toEqual([false, "view"]);
+    expect(pop.querySelector(".page-link-url").textContent).toBe("example.com/x");
+    expect(pop.querySelector('[data-act="open"]').getAttribute("target")).toBe("_blank");
+    expect(pop.querySelector('[data-act="open"]').getAttribute("rel")).toBe("noopener noreferrer");
+    select(view, a + 3);
+    expect(pop.hidden).toBe(true);
+    select(view, a + 7);
+    expect(pop.hidden).toBe(true);
+  });
+
+  test("Remove on the card removes the link and Edit opens the field", () => {
+    const { view, pop, input, a } = setup();
+    view.hasFocus = () => true;
+    view.dispatch(view.state.tr.addMark(a + 3, a + 7, LINK.create({ href: "https://example.com" })));
+    select(view, a + 5);
+    pop.querySelector('[data-act="edit"]').click();
+    expect([pop.dataset.mode, input.value]).toEqual(["edit", "https://example.com"]);
+    input.value = "";
+    pop.querySelector('[data-act="remove"]').click();
+    expect(linkRange(view.state.doc, a + 5)).toBeNull();
+  });
+
+  test("a mousedown outside the popover closes the editor without applying", () => {
+    const { view, pop, input, a } = setup();
+    select(view, a + 3, a + 7);
+    modK(view);
+    input.value = "typed.io";
+    document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    expect(pop.hidden).toBe(true);
+    expect(linkRange(view.state.doc, a + 5)).toBeNull();
+  });
+
+  test("the pending range follows an edit made while the field is open", () => {
+    const { view, input, a } = setup();
+    select(view, a + 3, a + 7);
+    modK(view);
+    view.dispatch(view.state.tr.insertText("zz", a));
+    input.value = "https://a.io";
+    keyOn(input, "Enter");
+    expect(linkRange(view.state.doc, a + 7)).toEqual({ from: a + 5, to: a + 9, href: "https://a.io" });
+  });
+
+  test("the toolbar link button opens the popover and never calls window.prompt", () => {
+    const { view, pop, a } = setup();
+    const prompt = jest.fn();
+    window.prompt = prompt;
+    select(view, a + 3, a + 7);
+    const button = view.dom.parentElement.querySelector('.page-tool[data-mark="link"], .page-tool[aria-label="Link"]');
+    button.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+    button.click();
+    expect(prompt).not.toHaveBeenCalled();
+    expect(pop.dataset.mode).toBe("edit");
+  });
+
+  test("destroying the view removes the popover and its document listener", () => {
+    const { view, pop } = setup();
+    view.destroy();
+    expect(pop.isConnected).toBe(false);
+  });
+});
