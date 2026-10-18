@@ -170,19 +170,20 @@ const boundary = (doc, pos, side) => {
   if ($p.depth === 0) return $p.pos;
   return side < 0 ? $p.before(1) : $p.after(1);
 };
-const rootIds = (doc, from, to) => { const r = []; doc.nodesBetween(from, to, (n) => { r.push(n.attrs.id); return false; }); return r; };
+const rootStarts = (doc, from, to) => { const r = []; doc.nodesBetween(from, to, (n, pos) => { r.push(pos); return false; }); return r; };
 
 export class BlockSelection extends Selection {
   // A block landing at an edge stays outside the selection. A block landing
   // between two selected blocks ends it: the selection never grows to include
   // what someone else inserted, it falls back to a caret in the first block.
+  // A block is one of ours when it starts where one of our blocks' starts maps to.
   map(doc, mapping) {
     const fwd = this.anchor <= this.head;
     const a = boundary(doc, mapping.map(this.anchor, fwd ? 1 : -1), fwd ? -1 : 1);
     const h = boundary(doc, mapping.map(this.head, fwd ? -1 : 1), fwd ? 1 : -1);
     const from = Math.min(a, h), to = Math.max(a, h);
-    const before = rootIds(this.$from.doc, this.from, this.to);
-    if (from === to || rootIds(doc, from, to).some((id) => !before.includes(id))) return Selection.near(doc.resolve(from));
+    const kept = rootStarts(this.$from.doc, this.from, this.to).map((pos) => mapping.map(pos, 1));
+    if (from === to || rootStarts(doc, from, to).some((pos) => !kept.includes(pos))) return Selection.near(doc.resolve(from));
     return new BlockSelection(doc.resolve(a), doc.resolve(h));
   }
   eq(other) {
