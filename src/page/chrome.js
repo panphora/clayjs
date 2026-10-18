@@ -76,14 +76,27 @@ const TOOLS = [
 const LIST_KINDS = new Set(["bullet", "ordered", "check"]);
 const LINE_TYPES = new Set(["paragraph", "heading", "list_item"]);
 
+// The top-level blocks a toolbar command acts on. A nonempty selection's end is
+// exclusive, so a block that only starts there is left out.
 const blocksIn = (st) => {
-  const { $from, $to } = st.selection;
+  const sel = st.selection;
+  if (sel instanceof BlockSelection) return selectedRoots(st).map((e) => e.i);
+  const { $from, $to, empty } = sel;
+  const last = Math.min(!empty && $to.depth === 0 ? $to.index(0) - 1 : $to.index(0), st.doc.childCount - 1);
   const out = [];
-  for (let i = $from.index(0); i <= Math.min($to.index(0), st.doc.childCount - 1); i++) out.push(i);
+  for (let i = $from.index(0); i <= last; i++) out.push(i);
   return out;
 };
 
-const listActive = (st, kind) => blocksIn(st).every((i) => { const n = st.doc.child(i); return n.type === N.list_item && n.attrs.kind === kind; });
+const listable = (st) => blocksIn(st).filter((i) => { const n = st.doc.child(i); return n.isTextblock && n.type !== N.code_block; });
+const isKind = (node, kind) => node.type === N.list_item && node.attrs.kind === kind;
+const listActive = (st, kind) => { const idx = listable(st); return idx.length > 0 && idx.every((i) => isKind(st.doc.child(i), kind)); };
+
+const lineText = (node) => {
+  let text = "";
+  node.forEach((c) => { text += c.isText ? c.text : c.type === N.hard_break ? "\n" : ""; });
+  return text;
+};
 
 // The selection covers whole lines when it runs from the start of its first
 // block to the end of its last, and every block is a plain line of text.
@@ -99,7 +112,7 @@ function codeBlockTr(st, idx) {
   const first = st.doc.child(idx[0]);
   const from = st.selection.$from.before(1);
   const to = st.selection.$to.after(1);
-  const text = idx.map((i) => st.doc.child(i).textContent).join("\n");
+  const text = idx.map((i) => lineText(st.doc.child(i))).join("\n");
   const { id, pos, parent } = first.attrs;
   const tr = st.tr.replaceWith(from, to, N.code_block.create({ id, pos, parent }, text ? schema.text(text) : null));
   return tr.setSelection(TextSelection.create(tr.doc, from + 1, from + 1 + text.length));
@@ -116,9 +129,10 @@ function toolActive(st, name) {
 
 function runList(view, kind) {
   const st = view.state;
-  const item = BLOCK_TYPES.find((b) => b.key === (listActive(st, kind) ? "text" : kind));
+  const off = listActive(st, kind);
+  const item = BLOCK_TYPES.find((b) => b.key === (off ? "text" : kind));
   const tr = st.tr;
-  for (const i of blocksIn(st)) if (tr.doc.child(i).isTextblock && tr.doc.child(i).type !== N.code_block) retype(tr, i, item);
+  for (const i of listable(st)) if (off || !isKind(tr.doc.child(i), kind)) retype(tr, i, item);
   if (tr.docChanged) view.dispatch(asStep(tr));
 }
 

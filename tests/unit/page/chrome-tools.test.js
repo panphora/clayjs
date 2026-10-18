@@ -1,4 +1,4 @@
-import { editor, posOf, select, shape } from "./view-helpers.js";
+import { editor, key, posOf, select, shape, typeText } from "./view-helpers.js";
 
 afterEach(() => { document.body.innerHTML = ""; });
 
@@ -55,4 +55,54 @@ test("Code over part of a line stays inline code", () => {
   tool(view, "code").click();
   expect(kinds(view)).toEqual(["paragraph", "paragraph", "paragraph"]);
   expect(view.state.doc.rangeHasMark(posOf(view, "a") + 1, posOf(view, "a") + 3, view.state.schema.marks.code)).toBe(true);
+});
+
+describe("review round 1", () => {
+  const setup = (spec) => {
+    const view = editor(spec);
+    view.hasFocus = () => true;
+    view.coordsAtPos = () => ({ left: 40, right: 48, top: 100, bottom: 120 });
+    return view;
+  };
+  const dock = (view, name) => bar(view, ".page-dock").querySelector(`[data-cmd="${name}"]`);
+
+  test("Code over a whole line keeps its Shift+Enter breaks as newlines", () => {
+    const view = setup([["a", "paragraph", "first"], ["b", "paragraph", "after"]]);
+    select(view, posOf(view, "a", true));
+    key(view, "Enter", { shiftKey: true });
+    typeText(view, "second");
+    select(view, posOf(view, "a"), posOf(view, "a", true));
+    tool(view, "code").click();
+    expect(view.state.doc.child(0).textContent).toBe("first\nsecond");
+  });
+
+  test("a block selection of one block or a selected image never changes the block after it", async () => {
+    const { selectBlocks } = await import("../../../src/page/blocksel.js");
+    const view = setup(DOC);
+    view.dispatch(view.state.tr.setSelection(selectBlocks(view.state.doc, 0, 0)));
+    dock(view, "bullet").click();
+    expect(kinds(view)).toEqual(["bullet", "paragraph", "paragraph"]);
+    const img = setup([["i", "image", "", { src: "/a.png" }], ["p", "paragraph", "P"]]);
+    const { state: pm } = await import("../../../src/vendor/prosemirror.vendor.js");
+    img.dispatch(img.state.tr.setSelection(pm.NodeSelection.create(img.state.doc, 0)));
+    bar(img, ".page-dock").querySelector('[data-cmd="ordered"]').click();
+    expect(kinds(img)).toEqual(["image", "paragraph"]);
+  });
+
+  test("Checklist over a mixed selection keeps the existing task's checked, owner and due", () => {
+    const view = setup([["t", "list_item", "Task", { kind: "check", checked: true, owner: "Pat", due: "2026-10-20" }], ["p", "paragraph", "New"]]);
+    select(view, posOf(view, "t"), posOf(view, "p", true));
+    tool(view, "check").click();
+    expect(kinds(view)).toEqual(["check", "check"]);
+    const { checked, owner, due } = view.state.doc.child(0).attrs;
+    expect([checked, owner, due]).toEqual([true, "Pat", "2026-10-20"]);
+  });
+
+  test("a list with a divider inside the selection toggles off, and the divider stays", () => {
+    const view = setup([["a", "list_item", "A"], ["d", "divider", ""], ["b", "list_item", "B"]]);
+    select(view, posOf(view, "a") + 1, posOf(view, "b") + 1);
+    expect(tool(view, "bullet").getAttribute("aria-pressed")).toBe("true");
+    tool(view, "bullet").click();
+    expect(kinds(view)).toEqual(["paragraph", "divider", "paragraph"]);
+  });
 });

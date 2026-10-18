@@ -97,3 +97,67 @@ test("the real Shiki bundle loads on demand and colours JavaScript keywords", as
   expect(byText.const).toBe("var(--page-code-token-keyword)");
   expect(byText["// note"]).toBe("var(--page-code-token-comment)");
 });
+
+describe("review round 1", () => {
+  test("turning a coloured code block into text drops its colours", async () => {
+    const { run } = fake();
+    const view = editor([["c", "code_block", "const x = 1", { lang: "javascript" }]], { highlight: { tokenize: run, delay: 0 } });
+    await wait();
+    expect(decos(view).length).toBe(1);
+    const { turnInto, BLOCK_TYPES } = await import("../../../src/page/chrome.js");
+    view.dispatch(turnInto(view.state, 0, BLOCK_TYPES[0]));
+    await wait();
+    expect(view.state.doc.child(0).type.name).toBe("paragraph");
+    expect(decos(view)).toEqual([]);
+  });
+
+  test("deleting a coloured block and undoing brings its colours back without tokenizing again", async () => {
+    const { calls, run } = fake();
+    const view = editor([["p", "paragraph", "P"], ["c", "code_block", "const x = 1", { lang: "javascript" }]], { highlight: { tokenize: run, delay: 0 } });
+    await wait();
+    const n = view.state.doc.child(0).nodeSize;
+    view.dispatch(view.state.tr.delete(n, n + view.state.doc.child(1).nodeSize));
+    await wait();
+    expect(decos(view)).toEqual([]);
+    history.undo(view.state, view.dispatch);
+    await wait();
+    expect(decos(view).length).toBe(1);
+    expect(calls.length).toBe(1);
+  });
+
+  test("replacing all the code and undoing before the pause restores the colours", async () => {
+    const { run } = fake();
+    const view = editor([["c", "code_block", "const x = 1", { lang: "javascript" }]], { highlight: { tokenize: run, delay: 30 } });
+    await wait(50);
+    select(view, posOf(view, "c"), posOf(view, "c", true));
+    typeText(view, "q");
+    history.undo(view.state, view.dispatch);
+    await wait(60);
+    expect(view.state.doc.child(0).textContent).toBe("const x = 1");
+    expect(decos(view).length).toBe(1);
+  });
+
+  test("a removed code block is no longer observed", async () => {
+    const observed = new Set();
+    const win = document.defaultView;
+    const prev = win.IntersectionObserver;
+    win.IntersectionObserver = class {
+      constructor(cb) { this.cb = cb; }
+      observe(el) { observed.add(el); this.cb([{ target: el, isIntersecting: true }]); }
+      unobserve(el) { observed.delete(el); }
+      disconnect() { observed.clear(); }
+    };
+    try {
+      const { run } = fake();
+      const view = editor([["p", "paragraph", "P"], ["c", "code_block", "x", { lang: "javascript" }]], { highlight: { tokenize: run, delay: 0 } });
+      await wait();
+      expect(observed.size).toBe(1);
+      const n = view.state.doc.child(0).nodeSize;
+      view.dispatch(view.state.tr.delete(n, n + view.state.doc.child(1).nodeSize));
+      await wait();
+      expect(observed.size).toBe(0);
+    } finally {
+      win.IntersectionObserver = prev;
+    }
+  });
+});

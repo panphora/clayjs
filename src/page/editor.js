@@ -144,10 +144,10 @@ ${INDENTS.map((n) => `.page-editor .page-li[data-indent="${n}"] { --li-indent: $
 .page-image:hover .page-image-handle, .page-image.is-selected .page-image-handle { opacity: 1; }
 .page-editor .page-image.page-block-selected { background: none; box-shadow: none; }
 .page-editor .page-image.page-block-selected .page-image-frame { box-shadow: 0 0 0 6px var(--page-block-selected, rgba(88, 120, 170, 0.12)); border-radius: var(--page-image-radius, 6px); }
-.page-image[data-align="left"] .page-image-frame { margin-inline: 0 auto; }
-.page-image[data-align="right"] .page-image-frame { margin-inline: auto 0; }
-.page-image[data-align="left"] .page-image-caption { text-align: start; }
-.page-image[data-align="right"] .page-image-caption { text-align: end; }
+.page-image[data-align="left"] .page-image-frame { margin-left: 0; margin-right: auto; }
+.page-image[data-align="right"] .page-image-frame { margin-left: auto; margin-right: 0; }
+.page-image[data-align="left"] .page-image-caption { text-align: left; }
+.page-image[data-align="right"] .page-image-caption { text-align: right; }
 .page-image-align { position: absolute; top: 8px; inset-inline-end: 8px; display: none; gap: 1px; padding: 2px; background: var(--page-pop-bg); color: var(--page-pop-ink); border: 1px solid var(--page-pop-line); box-shadow: var(--page-pop-shadow); border-radius: 7px; }
 .page-image.is-selected .page-image-align, .page-image.page-block-selected .page-image-align { display: flex; }
 .page-image-align button { display: grid; place-items: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 5px; background: none; color: inherit; cursor: pointer; }

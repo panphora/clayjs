@@ -65,31 +65,35 @@ const styleOf = (t) => {
 
 export const highlightKey = new PluginKey("page-highlight");
 
-function findBlock(doc, id) {
-  let found = null;
-  doc.forEach((node, offset) => { if (!found && node.type === schema.nodes.code_block && node.attrs.id === id) found = { node, pos: offset }; });
-  return found;
-}
 
+const CACHE_SIZE = 200;
+
+// Each pass rebuilds every code block's colours from a cache of token runs keyed
+// by language and text, so colours follow undo, retyping and deletion without
+// tracking what each edit did to the old decorations.
 class Highlighter {
   constructor(view, run, delay) {
     this.view = view;
     this.run = run;
     this.delay = delay;
-    this.done = new Map();
+    this.cache = new Map();
+    this.pending = new Set();
     this.visible = new Set();
+    this.targets = new Map();
     this.timer = 0;
     const IO = view.dom.ownerDocument.defaultView.IntersectionObserver;
     this.io = IO ? new IO((entries) => {
-      for (const e of entries) this.visible[e.isIntersecting ? "add" : "delete"](e.target.dataset.id);
+      for (const e of entries) {
+        const id = e.target.dataset.id;
+        if (this.targets.get(id) === e.target) this.visible[e.isIntersecting ? "add" : "delete"](id);
+      }
       this.schedule(0);
     }, { rootMargin: "200px 0px" }) : null;
-    this.observed = new WeakSet();
     this.schedule(0);
   }
 
   update(view, prev) {
-    if (!prev || !view.state.doc.eq(prev.doc)) this.schedule(this.delay);
+    if (!prev || view.state.doc !== prev.doc) this.schedule(this.delay);
   }
 
   schedule(ms) {
@@ -100,42 +104,52 @@ class Highlighter {
   pass() {
     const { view } = this;
     if (view.isDestroyed) return;
+    const decos = [];
+    const seen = new Map();
     view.state.doc.forEach((node, pos) => {
       if (node.type !== schema.nodes.code_block) return;
       const id = node.attrs.id;
       const dom = view.nodeDOM(pos);
-      if (this.io && dom && !this.observed.has(dom)) { this.observed.add(dom); this.io.observe(dom); }
+      if (dom) seen.set(id, dom);
       const lang = langOf(node.attrs.lang);
-      const key = `${lang}\n${node.textContent}`;
-      if (this.done.get(id) === key) return;
-      if (!lang) {
-        this.done.set(id, key);
-        this.apply(id, key, []);
-        return;
+      if (!lang) return;
+      const text = node.textContent;
+      const key = `${lang}\n${text}`;
+      const tokens = this.cache.get(key);
+      if (tokens) {
+        for (const t of tokens) {
+          const style = styleOf(t);
+          if (style && t.content) decos.push(Decoration.inline(pos + 1 + t.offset, pos + 1 + t.offset + t.content.length, { style }));
+        }
+      } else if ((!this.io || this.visible.has(id)) && !this.pending.has(key)) {
+        this.pending.add(key);
+        this.run(text, lang).then((lines) => lines.flat(), () => []).then((flat) => {
+          this.pending.delete(key);
+          this.cache.set(key, flat);
+          if (this.cache.size > CACHE_SIZE) this.cache.delete(this.cache.keys().next().value);
+          this.schedule(0);
+        });
       }
-      if (this.io && !this.visible.has(id)) return;
-      this.done.set(id, key);
-      this.run(node.textContent, lang).then(
-        (lines) => this.apply(id, key, lines.flat()),
-        () => {},
-      );
     });
+    this.track(seen);
+    const sig = (list) => list.map((d) => `${d.from}:${d.to}:${d.type.attrs.style}`).join("|");
+    if (sig(decos) === sig(highlightKey.getState(view.state).find())) return;
+    view.dispatch(view.state.tr.setMeta(highlightKey, decos).setMeta("addToHistory", false));
   }
 
-  apply(id, key, tokens) {
-    const { view } = this;
-    if (view.isDestroyed || this.done.get(id) !== key) return;
-    const at = findBlock(view.state.doc, id);
-    if (!at || `${langOf(at.node.attrs.lang)}\n${at.node.textContent}` !== key) return;
-    const start = at.pos + 1;
-    const decos = [];
-    for (const t of tokens) {
-      const style = styleOf(t);
-      if (style && t.content) decos.push(Decoration.inline(start + t.offset, start + t.offset + t.content.length, { style }));
+  track(seen) {
+    if (!this.io) return;
+    for (const [id, dom] of this.targets) {
+      if (seen.get(id) === dom) continue;
+      this.io.unobserve(dom);
+      this.targets.delete(id);
+      this.visible.delete(id);
     }
-    const set = highlightKey.getState(view.state);
-    if (!decos.length && !set.find(at.pos, at.pos + at.node.nodeSize).length) return;
-    view.dispatch(view.state.tr.setMeta(highlightKey, { from: at.pos, to: at.pos + at.node.nodeSize, decos }).setMeta("addToHistory", false));
+    for (const [id, dom] of seen) {
+      if (this.targets.get(id) === dom) continue;
+      this.targets.set(id, dom);
+      this.io.observe(dom);
+    }
   }
 
   destroy() {
@@ -150,9 +164,8 @@ export function highlightPlugin({ tokenize: run = tokenize, delay = 300 } = {}) 
     state: {
       init: () => DecorationSet.empty,
       apply(tr, set) {
-        set = set.map(tr.mapping, tr.doc);
-        const meta = tr.getMeta(highlightKey);
-        return meta ? set.remove(set.find(meta.from, meta.to)).add(tr.doc, meta.decos) : set;
+        const decos = tr.getMeta(highlightKey);
+        return decos ? DecorationSet.create(tr.doc, decos) : set.map(tr.mapping, tr.doc);
       },
     },
     props: { decorations: (st) => highlightKey.getState(st) },
