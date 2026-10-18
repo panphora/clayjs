@@ -35,13 +35,15 @@ test('a save receipt for 5 does not suppress 4, and a POST preserves future save
   expect(receiptHas(postReceipt(last, 4, 9), 5)).toBe(true);
 });
 
-test('receipt exhaustion closes admission instead of forgetting inclusion', () => {
+test('receipt exhaustion advances a generation barrier and keeps admission open', () => {
   const room = { lastN: new Map([['s\na', { n: 1, seq: 1 }]]) };
   saveReceipt(room, 's\nb', [[5, 5]], 2, 1);
   expect(room.lastN.size).toBe(1);
-  expect(room.receiptsBlocked).toBe(true);
+  expect(room.receiptGeneration).toBe(1);
+  expect(room.receiptsBlocked).toBeUndefined();
   saveReceipt(room, 's\na', Array.from({ length: 257 }, (_, i) => [i * 2 + 3, i * 2 + 3]), 3, 1);
-  expect(room.lastN.get('s\na').blocked).toBe(true);
+  expect(room.lastN.get('s\na').saved).toHaveLength(256);
+  expect(room.receiptGeneration).toBe(3);
 });
 
 test('exact receipt ranges are charged and released with their record', () => {

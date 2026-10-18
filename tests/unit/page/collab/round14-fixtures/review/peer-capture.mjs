@@ -6,6 +6,7 @@ const C = new URL('../../../../../../src', import.meta.url).pathname;
 const {live} = await import(`${C}/plugins/live.js`);
 const {captureForSaveAndComparison} = await import(`${C}/core/snapshot.js`);
 const s = live('s');
+for (let i = 0; i < 20; i++) await Promise.resolve();
 s.set('peer', true);
 const html = captureForSaveAndComparison({flushUndo:false}).forSave;
 console.log(html);

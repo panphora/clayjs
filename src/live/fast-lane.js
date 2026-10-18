@@ -66,6 +66,8 @@ export function createFastLane({
   let connected = false;
   let synced = false;
   let epoch = null;
+  let receiptGeneration = null;
+  let provenanceVersion = 0;
   let seq = 0;
   let writer = null;
   let roomNames = new Set();
@@ -186,7 +188,7 @@ export function createFastLane({
         return nextFrame();
       }
       const take = lane.unsent.splice(0, count);
-      const frame = { n: ++lane.n, ops: take.map((entry) => entry.op), entries: take, first: take[0].id, through: take[take.length - 1].id, seq: null, sent: false };
+      const frame = { n: ++lane.n, ops: take.map((entry) => entry.op), entries: take, first: take[0].id, through: take[take.length - 1].id, seq: null, sent: false, receiptGeneration };
       lane.framed = Math.max(lane.framed, frame.through);
       lane.awaiting.push(frame);
       return { name, lane, frame };
@@ -214,7 +216,7 @@ export function createFastLane({
     lastSentAt = now();
     let result;
     try {
-      result = await transport.send(clientId, { name, n: frame.n, ops: frame.ops, epoch: sentEpoch, ...(conn !== undefined && { conn }) });
+      result = await transport.send(clientId, { name, n: frame.n, ops: frame.ops, epoch: sentEpoch, ...(conn !== undefined && { conn }), ...(frame.receiptGeneration !== null && { receiptGeneration: frame.receiptGeneration }) });
     } catch {
       result = null;
     }
@@ -357,9 +359,10 @@ export function createFastLane({
       return;
     }
     const store = entries.get(name)?.store;
-    tell(name, { phase: "refused", code: body?.code ?? "refused", n: frame.n, from: frame.first, through: frame.through });
+    tell(name, { phase: "refused", code: body?.code ?? "refused", n: frame.n, from: frame.first, through: frame.through, ...(body?.code === "receipt-expired" && { ops: frame.ops }) });
     console.warn(`clay.live("${name}"): the host refused an update, so it was undone (${reason})`);
     store?.rebase(store.authoritative, { source: "state", drop: frame.first === undefined ? undefined : [frame.first, frame.through], through: frame.first === undefined ? frame.through : undefined, cause: "refused" });
+    if (body?.code === "receipt-expired") resync();
   }
 
   function apply(frame) {
@@ -447,6 +450,8 @@ export function createFastLane({
       return;
     }
     const fresh = state.epoch !== epoch;
+    provenanceVersion = Number.isInteger(state.provenanceVersion) ? state.provenanceVersion : 0;
+    receiptGeneration = Number.isSafeInteger(state.receiptGeneration) ? state.receiptGeneration : null;
     let joined = false;
     // Every store is read whole here.
     missed = false;
@@ -472,12 +477,25 @@ export function createFastLane({
       entry.store.setMode("fast");
       entry.last = Number.isInteger(room.last) ? room.last : 0;
       entry.landed = Number.isInteger(room.landed) ? room.landed : 0;
+      const expired = [];
+      if (!fresh && receiptGeneration !== null) {
+        const seen = room.seen?.[clientId];
+        lane.awaiting = lane.awaiting.filter((frame) => {
+          const known = hasNumber(room.saved, frame.n) || (seen !== undefined && frame.n <= seen) || (frame.seq !== null && frame.seq <= seq);
+          if (known || (frame.receiptGeneration ?? 0) === receiptGeneration) return true;
+          expired.push(...frame.entries.map((e) => e.id));
+          tell(name, { phase: "refused", code: "receipt-expired", n: frame.n, from: frame.first, through: frame.through, ops: frame.ops });
+          console.warn(`clay.live("${name}"): the room retired an update receipt, so the update was not replayed. Check the saved value before restoring it.`);
+          return false;
+        });
+      }
       if (fresh) {
         const { resend, dropIds } = sortAwaiting(lane.awaiting, room);
         for (const frame of resend) {
           if (frame.undecided) continue;
           frame.sent = false;
           frame.seq = null;
+          frame.receiptGeneration = receiptGeneration;
         }
         lane.awaiting = resend;
         entry.store.rebase(room.value, { source: "state", dropIds, room: { seq, fresh: true, moves: state.moves?.[name] ?? null, floor: Number.isInteger(room.floor) ? room.floor : null } });
@@ -485,7 +503,7 @@ export function createFastLane({
       } else {
         const seen = room.seen ? room.seen[clientId] : undefined;
         const next = [];
-        const dropIds = [];
+        const dropIds = [...expired];
         for (const frame of lane.awaiting) {
           if (hasNumber(room.saved, frame.n)) {
             dropIds.push(...frame.entries.map((e) => e.id));
@@ -681,8 +699,28 @@ export function createFastLane({
     framed(name) {
       return lanes.get(name)?.n ?? 0;
     },
-    pendingFrames(name, at) {
+    pendingFrames(name, at, { reserve = false } = {}) {
       const lane = lanes.get(name);
+      if (reserve && lane && clientId && epoch === at?.epoch) {
+        const pending = unframed(name, lane);
+        while (pending.length) {
+          let size = byteSize({ name, n: lane.n + 1, ops: [], epoch });
+          let count = 0;
+          while (count < pending.length && count < MAX_OPS) {
+            const more = byteSize(pending[count].op) + 1;
+            if (count && size + more > frameBytes) break;
+            size += more;
+            count++;
+          }
+          const take = pending.splice(0, count);
+          const frame = { n: ++lane.n, ops: take.map((e) => e.op), entries: take,
+            first: take[0].id, through: take[take.length - 1].id, seq: null,
+            sent: false, refused: true, epoch, client: clientId, receiptGeneration };
+          lane.awaiting.push(frame);
+          lane.framed = frame.through;
+        }
+        lane.unsent = [];
+      }
       const ids = new Set(entries.get(name)?.store.pendingEntries().map((e) => e.id) ?? []);
       let frames = [];
       let complete = true;
@@ -722,7 +760,7 @@ export function createFastLane({
       return writer !== null && writer === clientId;
     },
     get status() {
-      return { connected, synced, epoch, seq, writer, clientId, stopped };
+      return { connected, synced, epoch, seq, writer, clientId, stopped, provenanceVersion, receiptGeneration };
     },
     stop,
   };

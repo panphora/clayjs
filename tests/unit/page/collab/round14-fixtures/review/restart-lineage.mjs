@@ -13,7 +13,7 @@ let room = rooms.open("doc", document.documentElement.outerHTML);
 let posts = 0;
 globalThis.fetch = async (url, init = {}) => {
   const u = new URL(String(url));
-  if (u.pathname === "/_/meta") return { ok: true, status: 200, text: async () => JSON.stringify({ spec: 1, extensions: ["live-data"] }) };
+  if (u.pathname === "/_/meta") return { ok: true, status: 200, text: async () => JSON.stringify({ spec: 1, extensions: ["live-data", "live-provenance"] }) };
   if (u.pathname === "/_/sync/data") {
     const cid = u.searchParams.get("client-id");
     if ((init.method || "GET") === "GET") {

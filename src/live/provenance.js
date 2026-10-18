@@ -91,19 +91,26 @@ export function replaceReceipt(room, key, next) {
   return delta;
 }
 
+export function retireReceipt(room, key) {
+  const bytes = receiptBytes(room.lastN.get(key));
+  room.lastN.delete(key);
+  room.receiptBytes = (room.receiptBytes ?? 0) - bytes;
+  room.receiptGeneration = (room.receiptGeneration ?? 0) + 1;
+  return -bytes;
+}
+
 export function saveReceipt(room, key, ranges, seq, limit) {
   const last = room.lastN.get(key);
   if (!last && room.lastN.size >= limit) {
-    room.receiptsBlocked = true;
-    return;
+    retireReceipt(room, room.lastN.keys().next().value);
   }
   const next = last ? { ...last } : { n: 0, seq: 0 };
-  if (next.blocked) return;
   const kept = unionRanges([['r', next.saved ?? []]], [['r', ranges]])[0]?.[1]
     .filter(([, hi]) => hi > next.n).map(([lo, hi]) => [Math.max(lo, next.n + 1), hi]) ?? [];
   if (kept.length > RANGE_LIMIT) {
-    next.blocked = true;
-    next.saved = [];
+    retireReceipt(room, key);
+    next.saved = kept.slice(-RANGE_LIMIT);
+    next.savedSeq = Math.max(next.savedSeq ?? 0, seq);
   } else {
     if (kept.length) {
       next.saved = kept;

@@ -4,7 +4,7 @@
 // (64 KB body). Delivery: each client's stream is FIFO with its own latency;
 // a POST answer has an independent latency, so it can beat or trail the event.
 import { applyTracked, cloneJson, serializeLive, sizeChange, undoTracked, validateOp } from "../../../../src/live/ops.js";
-import { receiptHas, postReceipt, replaceReceipt } from "../../../../src/live/provenance.js";
+import { receiptHas, postReceipt, replaceReceipt, retireReceipt } from "../../../../src/live/provenance.js";
 import { evict, mergeFile } from "./file-merge.js";
 
 export const LIMITS = { opsPerFrame: 128, storeBytes: 1024 * 1024, roomBytes: 2 * 1024 * 1024, logEntries: 4096, logBytes: 256 * 1024, bodyBytes: 64 * 1024, movesBytes: 1024 * 1024, receipts: 4096 };
@@ -120,7 +120,12 @@ export function createRoom(sim, initialStores, { latency = () => 40, answerLaten
     const nKey = frame.name + "\n" + clientId;
     const last = room.lastN.get(nKey);
     if (receiptHas(last, frame.n)) return { status: 200, body: { duplicate: true, seq: frame.n <= last.n ? last.seq : last.savedSeq, epoch: room.epoch } };
-    if (last?.blocked || (!last && room.receiptsBlocked)) return { status: 503, body: { code: "busy" } };
+    if ((frame.receiptGeneration ?? 0) !== (room.receiptGeneration ?? 0)) return { status: 409, body: { code: "receipt-expired" } };
+    if (!last && room.lastN.size >= LIMITS.receipts) {
+      const victim = [...room.lastN.keys()].find((key) => !room.clients.get(key.slice(key.indexOf("\n") + 1))?.connected);
+      if (victim === undefined) return { status: 503, body: { code: "busy" } };
+      retireReceipt(room, victim);
+    }
     // In place, as live-data-rooms.js apply does: sized slot by slot, taken back when refused.
     let ops;
     let value = store.value;
@@ -197,6 +202,7 @@ export function createRoom(sim, initialStores, { latency = () => 40, answerLaten
   room.state = (clientId, since) => {
     const state = {
       epoch: room.epoch, seq: room.seq, writer: room.writer,
+      provenanceVersion: 2, receiptGeneration: room.receiptGeneration ?? 0,
       stores: Object.fromEntries([...room.stores].map(([name, s]) => [name, {
         value: cloneJson(s.value), ephemeral: false, last: s.last, landed: s.landed, floor: s.floor,
         seen: { [clientId]: room.lastN.get(name + "\n" + clientId)?.n ?? 0 },
@@ -273,7 +279,7 @@ export function createRoom(sim, initialStores, { latency = () => 40, answerLaten
     room.writer = null;
     room.lastSentAt = new Map();
     room.lastN = new Map();
-    room.receiptsBlocked = false;
+    room.receiptGeneration = 0;
     room.receiptBytes = 0;
     room.stores = new Map();
     for (const [name, value] of Object.entries(fileStores)) room.stores.set(name, { value: cloneJson(value), bytes: bytes(value), from: null, last: 0, landed: 0, floor: 0, log: [], logBytes: 0, inFile: new Set() });

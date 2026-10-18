@@ -23,7 +23,7 @@ await jest.unstable_mockModule("../../src/live/checkpoint.js", () => ({
 }));
 await jest.unstable_mockModule("../../src/core/host-meta.js", () => ({
   hostSupports: async () => false,
-  hostMeta: async () => ({ spec: 1, extensions: ["live-data"], document: null }),
+  hostMeta: async () => ({ spec: 1, extensions: ["live-data", "live-provenance"], document: null }),
 }));
 // No live-data host here, so the plugin takes its local tab lane: a stub that
 // records what the plugin reports to it and hands the transport itself to the
@@ -41,7 +41,7 @@ await jest.unstable_mockModule("../../src/live/local-lane.js", () => ({
 
 window.clayEditMode = true;
 const requests = [];
-let room = { epoch: "e1", seq: 0, writer: null, stores: { g: { value: { s: 0 }, ephemeral: false, last: 0, landed: 0 } } };
+let room = { epoch: "e1", seq: 0, writer: null, provenanceVersion: 2, receiptGeneration: 0, stores: { g: { value: { s: 0 }, ephemeral: false, last: 0, landed: 0 } } };
 // Set to a promise to keep a document save on the wire until it settles.
 let saveGate = null;
 global.fetch = jest.fn(async (url, init = {}) => {
@@ -69,7 +69,7 @@ const tag = (name, json, at) => `<script type="application/json" merge="${name}"
 // The room changes: a new epoch, this tab as its writer, these stores.
 let epochs = 1;
 const join = async (stores) => {
-  room = { epoch: `e${++epochs}`, seq: 0, writer: "tab-1", stores };
+  room = { epoch: `e${++epochs}`, seq: 0, writer: "tab-1", provenanceVersion: 2, receiptGeneration: 0, stores };
   bridge.streamEvent("data-state", room);
   await flushAsync();
 };
@@ -101,7 +101,7 @@ test("joins the room, posts ops, and checkpoints only as the writer after a chan
   await flushAsync();
   const post = posts("g").at(-1);
   expect(new URL(post.url).searchParams.get("client-id")).toBe("tab-1");
-  expect(JSON.parse(post.init.body)).toEqual({ name: "g", n: 1, ops: [{ op: "add", path: ["s"], n: 1 }], epoch: "e1" });
+  expect(JSON.parse(post.init.body)).toEqual({ name: "g", n: 1, ops: [{ op: "add", path: ["s"], n: 1 }], epoch: "e1", receiptGeneration: 0 });
 
   bridge.streamEvent("data", { epoch: "e1", seq: 1, name: "g", ops: [{ op: "add", path: ["s"], n: 1 }], from: "tab-1", n: 1 });
   expect(g.toJSON()).toEqual({ s: 1 });
@@ -434,7 +434,7 @@ test("a hide save on the wire when the page closes tells the local room it lande
 // Round 9 review, Opus 1 and 3, Astra 1: a save made out of the room names
 // this tab and its last frame, so the host's merge never replays those frames
 // over the file; a fast-mode capture names no frames.
-test("a store out of the room saves with live-by: this tab and the last frame it gave the store", async () => {
+test("a store out of the room saves with live-by: this tab's refused frame and the frame reserved for its unframed tail", async () => {
   document.body.innerHTML = tag("by", '{"s":0}');
   const by = live("by");
   await flushAsync();
@@ -460,8 +460,8 @@ test("a store out of the room saves with live-by: this tab and the last frame it
   by.add("s", 1);
 
   const saved = new DOMParser().parseFromString(snapshot.captureForSaveAndComparison({ flushUndo: false }).forSave, "text/html").querySelector('script[merge="by"]');
-  expect(parseBy(saved.getAttribute("live-by")).frames).toEqual([["tab-1", [[fastLane().framed("by"), fastLane().framed("by")]]]]);
-  expect(fastLane().framed("by")).toBeGreaterThan(0);
+  expect(parseBy(saved.getAttribute("live-by")).frames).toEqual([["tab-1", [[1, 2]]]]);
+  expect(fastLane().framed("by")).toBe(2);
   expect(saved.textContent).toBe('{"s":2}');
 });
 

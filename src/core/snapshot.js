@@ -224,7 +224,7 @@ function clonePreventingOnclone(node, deep = true) {
   finally { window.__preventOnclone = prev; }
 }
 
-export function captureSnapshot({ flushUndo = true, authored = true } = {}) {
+export function captureSnapshot({ flushUndo = true, authored = true, forSave = false } = {}) {
   // Force-close any pending undo idle batch BEFORE cloning the DOM, so the
   // snapshot reflects a clean undo boundary. Without this, a save that fires
   // mid-typing would leave the idle batch open across the save boundary, and
@@ -245,7 +245,7 @@ export function captureSnapshot({ flushUndo = true, authored = true } = {}) {
 
   for (const hook of snapshotHooks) {
     stripSnapshotRegions(clone);
-    hook(clone, { original: originalSnapshotNode });
+    hook(clone, { original: originalSnapshotNode, forSave });
   }
 
   // Put back any URL clay rewrote at runtime (cache-bust, refetch-on-save) so
@@ -448,7 +448,7 @@ export function captureForComparisonAndDirty({ flushUndo = true } = {}) {
  * @returns {{ forSave: string, forComparison: string, forDirty: string }}
  */
 export function captureForSaveAndComparison({ emitForSync = true, flushUndo = true } = {}) {
-  const clone = captureSnapshot({ flushUndo });
+  const clone = captureSnapshot({ flushUndo, forSave: emitForSync });
 
   // Emit for live-sync before any stripping.
   //

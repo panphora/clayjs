@@ -36,17 +36,17 @@ function lineageOf(element) {
   return { epoch: at.epoch, seq: at.seq, frames: frameSet(by), ancestors: descendants(by) };
 }
 
-function captureLineage(entry) {
+function captureLineage(entry, forSave) {
   const base = entry.leftAt;
   if (!base || base.disk) return null;
-  const pending = fast?.pendingFrames(entry.store.name, base) ?? { frames: [], complete: true };
+  const pending = fast?.pendingFrames(entry.store.name, base, { reserve: forSave }) ?? { frames: [], complete: true };
   if (!pending.complete) return null;
   const frames = unionRanges(base.frames ?? [], pending.frames);
   const ancestors = base.ancestors ?? [];
   const text = serializeLive(entry.store.value);
   const key = JSON.stringify([base.epoch, base.seq, frames, ancestors, entry.store.mark, text]);
   if (entry.capture?.key === key) return entry.capture.value;
-  const by = { v: 2, frames, ancestors, capture: [captureAuthor, ++captureNumber] };
+  const by = { v: 2, frames, ancestors, capture: [captureAuthor, captureNumber + 1] };
   const encoded = formatBy(by);
   const value = encoded ? { at: stampOf(base.epoch, base.seq, text), by: encoded } : null;
   entry.capture = { key, value };
@@ -111,6 +111,10 @@ const checkpoints = createCheckpoints({
 // clay.live() call in an edit-mode tab.
 let fast = null;
 let laneRequested = false;
+let serverLane = null;
+// The host merges exact save provenance (live-by v2); without it a save that
+// needs provenance is refused rather than risk applying an edit twice.
+let provenanceHost = false;
 let local = null;
 // True from pagehide until the page is shown again (a page kept for back and
 // forward): only a closing page's save is reported to the local room at capture.
@@ -202,7 +206,10 @@ function ensureLane() {
   if (laneRequested || !isEditMode) return;
   laneRequested = true;
   hostSupports("live-data").then(
-    (supported) => {
+    async (supported) => {
+      const provenance = supported && (await hostSupports("live-provenance"));
+      serverLane = supported;
+      provenanceHost = provenance;
       if (supported) {
         fast = createFastLane(laneOptions(serverTransport()));
       } else if (localLaneSupported()) {
@@ -315,6 +322,11 @@ export function live(name) {
   const layout = tag.element.getAttribute("live-format") === "lines" ? "lines" : text.includes("\n") ? "pretty" : "line";
   const entry = { store, layout, framesSince: false, last: 0, landed: 0, leftAt: lineageOf(tag.element), captureOps: new Map() };
   entries.set(name, entry);
+  store.onDelivery((event) => {
+    if (event.code === "receipt-expired") document.dispatchEvent(new CustomEvent("clay:live-notice", {
+      detail: { name, code: event.code, ops: event.ops, message: "The room retired an update receipt. Check the saved value before restoring this update." },
+    }));
+  });
   store.onRebase((event) => {
     if (store.handle.status.mode === "file" && ["undone", "refused", "decided"].includes(event.cause)) entry.leftAt = null;
   });
@@ -330,7 +342,7 @@ export function live(name) {
 
 // Every capture carries each saved store's current value. A never-saved store
 // writes nothing: its tag keeps the text the file has.
-onSnapshot((clone) => {
+onSnapshot((clone, { forSave }) => {
   if (!entries.size) return;
   const tags = liveTags(clone, { warn: false });
   for (const entry of entries.values()) {
@@ -345,7 +357,16 @@ onSnapshot((clone) => {
       tag.element.setAttribute("live-at", stampOf(fast.status.epoch, fast.status.seq, serializeLive(entry.store.authoritative)));
       tag.element.removeAttribute("live-by");
     } else {
-      const capture = captureLineage(entry);
+      const needsProvenance = entry.store.pending.length > 0 || (entry.leftAt && !entry.leftAt.disk);
+      const unknown = serverLane === null && entry.leftAt && !entry.leftAt.disk;
+      if (forSave && needsProvenance && (unknown || (serverLane && !provenanceHost))) {
+        const message = "This host must update its live data protocol before this save can be sent. Your edits are still in this tab.";
+        console.warn(`clay.live("${entry.store.name}"): ${message}`);
+        document.dispatchEvent(new CustomEvent("clay:live-notice", { detail: { name: entry.store.name, code: "provenance-unsupported", message } }));
+        fast?.refresh();
+        throw Object.assign(new Error(message), { code: "provenance-unsupported" });
+      }
+      const capture = captureLineage(entry, forSave);
       if (capture) {
         tag.element.setAttribute("live-at", capture.at);
         tag.element.setAttribute("live-by", capture.by);
@@ -376,6 +397,7 @@ document.addEventListener("clay:snapshot-ready", (event) => {
     if (lineage && !lineage.disk && entry.leftAt) entry.leftAt = { ...entry.leftAt, ancestors: lineage.ancestors };
     const proof = parseBy(tag.element.getAttribute("live-by"));
     if (mode === "file" && proof?.v === 2) {
+      if (proof.capture[0] === captureAuthor) captureNumber = Math.max(captureNumber, proof.capture[1]);
       entry.captureOps.set(JSON.stringify(proof.capture), { capture: proof.capture, ids: entry.store.pendingEntries().map((e) => e.id) });
     }
     entry.framesSince = false;
@@ -496,6 +518,7 @@ export function receiveFrame(html, seq = null) {
       const lineage = lineageOf(tag.element);
       const sameEpoch = lineage && !lineage.disk && (!fast?.status.epoch || lineage.epoch === fast.status.epoch);
       if (sameEpoch) dropIds = fast?.captured(name, lineage, parseBy(by)) ?? [];
+      else if (lineage?.disk) dropIds = fast?.captured(name, parseStamp(at), null) ?? [];
       if (lineage && !lineage.disk) {
         for (const [key, captured] of entry.captureOps) if (contains(lineage.ancestors, ...captured.capture)) {
           dropIds.push(...captured.ids);

@@ -20,8 +20,8 @@ await jest.unstable_mockModule("../../src/live/checkpoint.js", () => ({
   createCheckpoints: () => ({ changed() {}, soon() {}, within() {}, flush() {}, flushing: false, deadline: null }),
 }));
 await jest.unstable_mockModule("../../src/core/host-meta.js", () => ({
-  hostSupports: async (ext) => ext === "live-data",
-  hostMeta: async () => ({ spec: 1, extensions: ["live-data"], document: null }),
+  hostSupports: async (ext) => ext === "live-data" || ext === "live-provenance",
+  hostMeta: async () => ({ spec: 1, extensions: ["live-data", "live-provenance"], document: null }),
 }));
 
 window.clayEditMode = true;
@@ -51,7 +51,7 @@ function makeRoom(name, value) {
     return { seq: room.seq, epoch: room.epoch };
   };
   room.state = (cid) => ({
-    epoch: room.epoch, seq: room.seq, writer: room.writer,
+    epoch: room.epoch, seq: room.seq, writer: room.writer, provenanceVersion: 2, receiptGeneration: 0,
     stores: Object.fromEntries([...room.stores].map(([n, s]) => [n, { value: cloneJson(s.value), ephemeral: false, last: s.last, landed: s.landed, floor: s.floor, seen: { [cid]: room.lastN.get(n + "\n" + cid)?.n ?? 0 } }])),
   });
   return room;
@@ -220,6 +220,7 @@ test('reload mid-spell retains loaded frame provenance before a room is availabl
   const plugin = await import('../../src/plugins/live.js');
   const snapshot = await import('../../src/core/snapshot.js');
   const s = plugin.live('reload');
+  await tick();
   s.add('n', 10);
   const html = snapshot.captureForSaveAndComparison({ flushUndo: false }).forSave;
   const file = fileOf(html, 'reload');
@@ -237,6 +238,8 @@ test('overflow strips both attributes instead of emitting a truncated exact set'
   document.body.innerHTML = `<script type="application/json" merge="cap" clay="live" live-at="${stampOf('e1', 0, text)}" live-by="v2|x:${frames}||peerSave:1">${text}</script>`;
   const plugin = await import('../../src/plugins/live.js');
   const snapshot = await import('../../src/core/snapshot.js');
+  plugin.live('cap');
+  await tick();
   plugin.live('cap').set('flag', true);
   // 254 frame ranges + one ancestor + one new capture still fits exactly.
   let html = snapshot.captureForSaveAndComparison({ flushUndo: false }).forSave;
