@@ -85,6 +85,8 @@
 .vg .rule-row:first-of-type { padding-top: 8px; }
 .vg .rule-visuals { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
 .vg .rule-visuals .vg-visual { margin: 0; }
+.vg .rule-visuals .vg-motion { margin: 0; padding: 14px; background: var(--sheet); border: 1px solid var(--line); border-radius: 10px; }
+.vg .rule-visuals .um { margin: 0; }
 .vg .rule-body h3 { font-size: 21px; margin-bottom: 8px; }
 .vg .rule-body p { font-size: 16px; margin-bottom: 10px; }
 .vg .rule-body ul { font-size: 15.5px; margin-bottom: 0; }
@@ -100,7 +102,8 @@
   border-radius: 10px;
   padding: 16px 18px;
 }
-.vg .state-box h3 { font-size: 17.5px; margin-bottom: 8px; }
+.vg .state-box h3 { font-size: 17.5px; margin-bottom: 4px; }
+.vg .state-box .desc { font-size: 14.5px; color: var(--ink-soft); margin: 0 0 10px; line-height: 1.5; }
 .vg .state-box ul { font-size: 14.5px; margin: 0; padding-left: 18px; }
 .vg .state-box li { margin-bottom: 8px; line-height: 1.5; }
 .vg .state-box li:last-child { margin-bottom: 0; }
@@ -181,6 +184,11 @@
 .um-src { position: absolute; background: var(--char); border-radius: 8px; padding: 10px 12px; font: 11.5px/1.65 var(--mono); color: var(--char-ink); box-shadow: 0 8px 22px rgb(40 30 20 / .18); }
 .um-src .t { color: var(--char-tag); }
 .um-src .a { color: var(--char-attr); }
+.ls-box { position: relative; flex: none; width: 18px; height: 18px; border: 1.5px solid var(--ink-faint); border-radius: 4px; }
+.ls-fill { position: absolute; inset: -1.5px; border-radius: 4px; background: var(--glaze); overflow: hidden; }
+.ls-mark { position: absolute; inset: 0; width: 100%; height: 100%; fill: none; stroke: var(--sheet); stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+.ls-cover { position: absolute; inset: 0; background: var(--glaze); }
+.um-src .gt { display: inline-block; }
 .um-src .hot { color: var(--char-val); background: rgb(163 80 46 / .35); border-radius: 3px; padding: 0 3px; margin: 0 -3px; }
 </style>
 <script>
@@ -218,48 +226,36 @@
   <p>When you load <code>?plugins=sync</code>, ClayJS handles live collaboration and external file edits automatically. Every accepted save from another browser tab, or any direct edit to the file on disk from a text editor or AI agent, merges into your open page in place through a three-way DOM merge without a reload.</p>
   <p>You do not write merge logic or networking code. Your only job as the author is to mark temporary UI state so it does not get written into the saved file and broadcast to everyone else.</p>
 
-  <figure class="vg-motion" data-visual="live-sync-automatic" role="img" aria-label="Two tabs show the same task list. An AI agent edits the file, and both tabs update in place without a reload.">
-<div class="um" data-um="live-sync-automatic"><div class="um-fit"><div class="um-fit-inner"><div class="um-stage plain">
-<div class="um-page a" style="left:30px;width:240px;top:20px;height:224px">
+  <figure class="vg-motion" data-visual="live-sync-automatic" role="img" aria-label="Checking two boxes in one tab checks them in the other open tab too, with no reload.">
+<div class="um" data-um="live-sync-automatic"><div class="um-fit"><div class="um-fit-inner"><div class="um-stage plain" style="height:226px">
+<div class="um-page a" style="left:30px;width:240px;top:24px;height:178px">
 <div class="um-bar"><i></i><i></i><i></i><span style="margin-left:6px">Tab A</span></div>
 <div class="um-body">
-<div class="um-task" style="border-top:0"><span class="um-swap"><span class="old">Draft the brief</span><span class="new later">Final brief</span></span></div>
-<div class="um-task">Book the venue</div>
-<div class="um-task later add">Send invites</div>
-</div></div><div class="um-page b" style="left:290px;width:240px;top:20px;height:224px">
+<div class="um-task" style="border-top:0"><span class="ls-box b1"><span class="ls-fill later"><svg class="ls-mark" viewBox="0 0 18 18"><path d="M4.3 9.4 L7.7 12.6 L13.9 5.2"/></svg><span class="ls-cover"></span></span></span>Go bird watching</div>
+<div class="um-task"><span class="ls-box b2"><span class="ls-fill later"><svg class="ls-mark" viewBox="0 0 18 18"><path d="M4.3 9.4 L7.7 12.6 L13.9 5.2"/></svg><span class="ls-cover"></span></span></span>Go to the library</div>
+<div class="um-task"><span class="ls-box b3"></span>Bake bread</div>
+</div></div><div class="um-page b" style="left:290px;width:240px;top:24px;height:178px">
 <div class="um-bar"><i></i><i></i><i></i><span style="margin-left:6px">Tab B</span></div>
 <div class="um-body">
-<div class="um-task" style="border-top:0"><span class="um-swap"><span class="old">Draft the brief</span><span class="new later">Final brief</span></span></div>
-<div class="um-task">Book the venue</div>
-<div class="um-task later add">Send invites</div>
+<div class="um-task" style="border-top:0"><span class="ls-box b1"><span class="ls-fill later"><svg class="ls-mark" viewBox="0 0 18 18"><path d="M4.3 9.4 L7.7 12.6 L13.9 5.2"/></svg><span class="ls-cover"></span></span></span>Go bird watching</div>
+<div class="um-task"><span class="ls-box b2"><span class="ls-fill later"><svg class="ls-mark" viewBox="0 0 18 18"><path d="M4.3 9.4 L7.7 12.6 L13.9 5.2"/></svg><span class="ls-cover"></span></span></span>Go to the library</div>
+<div class="um-task"><span class="ls-box b3"></span>Bake bread</div>
 </div></div>
-<span class="um-chip later agent" style="left:226px;top:258px">AI agent edits the file</span>
 </div></div></div></div>
 <script type="module">
 import { scene } from '/uimotion.js'
 window.umFit?.()
 const st = document.querySelector('[data-um="live-sync-automatic"] .um-stage')
-const reload = (s, body) => s
-  .tween(body, 'opacity', 0.25, { duration: 160, ease: 'linear' })
-  .wait(120)
-  .tween(body, 'opacity', 1, { duration: 200, ease: 'linear' })
-scene(st, { cursor: [150, 285] })
-  .wait(400)
-  .click('.a .um-swap')
-  .with(285).tween('.a .old', 'opacity', 0, { duration: 160, ease: 'linear' })
-  .with(80).rise('.a .new', { fade: 0 })
-  .wait(700)
-  .tween('.b .old', 'opacity', 0, { duration: 160, ease: 'linear' })
-  .with(80).rise('.b .new', { fade: 0 })
-  .wait(1000)
-  .pop('.agent', { from: 0.92 })
-  .wait(500)
-  .rise('.add', { fade: 0, stagger: 150 })
-  .wait(1600)
-  .tween('.agent', 'opacity', 0, { duration: 200, ease: 'linear' })
-  .wait(500)
-  .reset()
-  .play()
+const check = (s, box, at) => s
+  .with(at).tween(`${box} .ls-fill`, 'opacity', 1, { from: 0, duration: 120, ease: 'linear' })
+  .with(70).tween(`${box} .ls-cover`, 'translate', [18, 0], { duration: 340, ease: 'standard' })
+let s = scene(st, { cursor: [170, 205] }).wait(500).click('.a .b1')
+s = check(s, '.a .b1', 285)
+s = check(s, '.b .b1', 450)
+s = s.wait(150).click('.a .b2')
+s = check(s, '.a .b2', 285)
+s = check(s, '.b .b2', 450)
+s.wait(1900).reset().play()
 </script>
 </figure>
 
@@ -294,7 +290,7 @@ scene(st, { cursor: [150, 285] })
 .d-viewmode-hide-controls-opus .badge { fill: var(--glaze-tint); }
 .d-viewmode-hide-controls-opus .t-glaze { fill: var(--glaze); }
 .d-viewmode-hide-controls-opus .item { fill: var(--paper); stroke: var(--line); stroke-width: 1.5; }
-.d-viewmode-hide-controls-opus .grip { fill: var(--ink-soft); }
+.d-viewmode-hide-controls-opus .grip { fill: var(--glaze); }
 .d-viewmode-hide-controls-opus .btn { fill: var(--glaze-tint); stroke: var(--glaze); stroke-width: 1.5; }
 .d-viewmode-hide-controls-opus .hid { fill: none; stroke: var(--ink-faint); stroke-width: 1.5; stroke-dasharray: 4 4; opacity: .6; }
 </style>
@@ -304,7 +300,8 @@ scene(st, { cursor: [150, 285] })
   <rect class="badge" x="12" y="10" width="232" height="28" rx="14"/>
   <text class="m t-glaze" x="24" y="29" font-size="14">show-when:editmode="true"</text>
 
-  <text class="soft" x="12" y="94" font-size="16">Editor</text>
+  <text class="soft" x="12" y="88" font-size="16">Editor</text>
+  <text class="m t-glaze" x="12" y="105" font-size="11.5">edit mode</text>
   <rect class="item" x="92" y="64" width="296" height="46" rx="8"/>
   <circle class="grip" cx="108" cy="79" r="2"/>
   <circle class="grip" cx="115" cy="79" r="2"/>
@@ -316,7 +313,8 @@ scene(st, { cursor: [150, 285] })
   <rect class="btn" x="306" y="74" width="70" height="26" rx="6"/>
   <text class="t-glaze" x="341" y="92" font-size="15" style="text-anchor: middle">+ Add</text>
 
-  <text class="soft" x="12" y="184" font-size="16">Viewer</text>
+  <text class="soft" x="12" y="178" font-size="16">Viewer</text>
+  <text class="m t-glaze" x="12" y="195" font-size="11.5">view mode</text>
   <rect class="item" x="92" y="154" width="296" height="46" rx="8"/>
   <text x="108" y="183" font-size="17">Buy milk</text>
   <rect class="hid" x="306" y="164" width="70" height="26" rx="6"/>
@@ -339,31 +337,28 @@ scene(st, { cursor: [150, 285] })
 .d-viewmode-editable-text-opus .t-glaze { fill: var(--glaze); }
 .d-viewmode-editable-text-opus .edit { fill: var(--sheet); stroke: var(--glaze); stroke-width: 1.5; }
 .d-viewmode-editable-text-opus .caret { stroke: var(--glaze); stroke-width: 2.5; stroke-linecap: round; }
-.d-viewmode-editable-text-opus .tag-on { fill: var(--glaze-tint); }
+.d-viewmode-editable-text-opus .tag-on { fill: var(--glaze-tint); stroke: var(--glaze); stroke-width: 1; }
 .d-viewmode-editable-text-opus .tool { fill: var(--sheet); stroke: var(--line); stroke-width: 1; }
 .d-viewmode-editable-text-opus .tag-off { fill: var(--paper); stroke: var(--line); stroke-width: 1; }
 </style>
-<svg viewBox="0 0 400 236" width="100%" role="img">
-  <title>In edit mode an editable element is a rich text editor; viewers get plain markup.</title>
+<svg viewBox="0 0 400 206" width="100%" role="img">
+  <title>In edit mode an editable element is a rich text editor; viewers get a plain div.</title>
 
-  <rect class="badge" x="12" y="10" width="92" height="28" rx="14"/>
-  <text class="m t-glaze" x="24" y="29" font-size="14">editable</text>
+  <text class="soft" x="12" y="68" font-size="16">Editor</text>
+  <rect class="tool" x="88" y="12" width="84" height="24" rx="5"/>
+  <text x="101" y="29" font-size="14" font-weight="700">B</text>
+  <text x="125" y="29" font-size="14" font-style="italic">I</text>
+  <text x="147" y="29" font-size="14" text-decoration="underline">U</text>
+  <rect class="edit" x="88" y="42" width="206" height="40" rx="5"/>
+  <text x="98" y="70" font-size="24" font-weight="700">Weekly notes</text>
+  <line class="caret" x1="282" y1="50" x2="282" y2="74"/>
+  <rect class="tag-on" x="88" y="90" width="148" height="22" rx="4"/>
+  <text class="m t-glaze" x="96" y="105" font-size="14">rich text editor</text>
 
-  <text class="soft" x="12" y="104" font-size="16">Editor</text>
-  <rect class="tool" x="88" y="46" width="84" height="24" rx="5"/>
-  <text x="101" y="63" font-size="14" font-weight="700">B</text>
-  <text x="125" y="63" font-size="14" font-style="italic">I</text>
-  <text x="147" y="63" font-size="14" text-decoration="underline">U</text>
-  <rect class="edit" x="88" y="76" width="206" height="40" rx="5"/>
-  <text x="98" y="104" font-size="24" font-weight="700">Weekly notes</text>
-  <line class="caret" x1="282" y1="84" x2="282" y2="108"/>
-  <rect class="tag-on" x="88" y="124" width="148" height="22" rx="4"/>
-  <text class="m t-glaze" x="96" y="139" font-size="14">rich text editor</text>
-
-  <text class="soft" x="12" y="192" font-size="16">Viewer</text>
-  <text x="98" y="192" font-size="24" font-weight="700">Weekly notes</text>
-  <rect class="tag-off" x="88" y="206" width="120" height="22" rx="4"/>
-  <text class="m soft" x="96" y="221" font-size="14">plain markup</text>
+  <text class="soft" x="12" y="166" font-size="16">Viewer</text>
+  <text x="98" y="160" font-size="24" font-weight="700">Weekly notes</text>
+  <rect class="tag-off" x="88" y="174" width="92" height="22" rx="4"/>
+  <text class="m soft" x="96" y="189" font-size="14">plain div</text>
 </svg>
 </div>
 </figure>
@@ -374,30 +369,28 @@ scene(st, { cursor: [150, 285] })
       <h3>Keeping form values</h3>
       <p>Put <code>persist</code> on checkboxes, inputs, and selects so ClayJS copies their live browser state into HTML attributes on save. Add <code>viewmode:disabled disabled</code> to lock them for viewers.</p>
       <figure class="vg-motion" data-visual="viewmode-persist-inputs" role="img" aria-label="Checking a box marked persist writes the checked attribute into the HTML, so the saved file keeps it.">
-<div class="um" data-um="viewmode-persist-inputs"><div class="um-fit"><div class="um-fit-inner"><div class="um-stage plain" style="width:380px;height:220px">
-<div class="um-page" style="left:10px;top:14px;width:360px;height:104px">
+<div class="um" data-um="viewmode-persist-inputs"><div class="um-fit"><div class="um-fit-inner"><div class="um-stage plain" style="width:560px;height:236px">
+<div class="um-page" style="left:14px;top:16px;width:532px;height:110px">
 <div class="um-bar"><i></i><i></i><i></i><span style="margin-left:6px">tasks.html</span><span class="sp"></span><span class="um-pill later saved">saved</span></div>
-<div class="um-body"><div class="um-task" style="border-top:0"><span class="um-box cb"><span class="um-tick later tick"></span></span>Email the team</div></div>
+<div class="um-body"><div class="um-task" style="border-top:0;font-size:17px"><span class="um-box cb"><span class="um-tick later tick"></span></span>Email the team</div></div>
 </div>
-<div class="um-src" style="left:10px;top:136px;width:360px;font-size:13px">
-<span class="t">&lt;input</span> <span class="a">type</span>="checkbox" <span class="a">persist</span> <span class="later on" style="display:inline-block"><span class="a">checked</span></span><span class="t">&gt;</span>
+<div class="um-src" style="left:14px;top:146px;width:532px;font-size:16px;padding:14px 16px">
+<span class="t">&lt;input</span> <span class="a">type</span>="checkbox" <span class="a">persist</span><span class="on later" style="display:inline-block">&nbsp;<span class="a">checked</span></span><span class="t gt">&gt;</span>
 </div>
 </div></div></div></div>
 <script type="module">
 import { scene } from '/uimotion.js'
 window.umFit?.()
 const st = document.querySelector('[data-um="viewmode-persist-inputs"] .um-stage')
-const reload = (s, body) => s
-  .tween(body, 'opacity', 0.25, { duration: 160, ease: 'linear' })
-  .wait(120)
-  .tween(body, 'opacity', 1, { duration: 200, ease: 'linear' })
-scene(st, { cursor: [250, 205] })
+const w = st.querySelector('.on').offsetWidth
+scene(st, { cursor: [330, 210] })
   .wait(500)
   .click('.cb')
   .with(285).pop('.tick', { from: 0.6, overshoot: true })
-  .wait(700)
+  .wait(600)
   .pop('.saved', { from: 0.9 })
-  .with(150).rise('.on', { fade: 0 })
+  .with(120).tween('.gt', 'translate', [0, 0], { from: [-w, 0], duration: 300, ease: 'standard' })
+  .with(120).tween('.on', 'opacity', 1, { from: 0, duration: 220, ease: 'linear' })
   .wait(2200)
   .reset()
   .play()
@@ -941,14 +934,15 @@ scene(st, { cursor: [430, 270] })
   </div>
 
   <h2 id="where">Where state goes</h2>
-  <p>Use this map to decide where each piece of data or UI belongs:</p>
+  <p>Everything in a document belongs in one of five places. Find the kind of thing you are adding, and put it where its box says.</p>
 
   <div class="state-grid">
     <div class="state-box">
-      <h3>Durable record (viewers see it)</h3>
+      <h3>Records</h3>
+      <p class="desc">The content itself: list items, cards, rows and notes. Everyone sees them, and they save with the file.</p>
       <ul>
-        <li>Ordinary HTML elements with unique <code>data-id</code> attributes, authored in their saved inert form.</li>
-        <li>Form controls with <code>persist</code> and <code>viewmode:disabled disabled</code>.</li>
+        <li>Write them as ordinary HTML, with a unique <code>data-id</code> on each item.</li>
+        <li>Put <code>persist</code> on any checkbox, input or select whose value should save, and <code>viewmode:disabled disabled</code> so viewers cannot change it.</li>
       </ul>
       <pre><code class="language-markup">&lt;li data-id="t-1"&gt;
   &lt;input type="checkbox" persist viewmode:disabled disabled&gt;
@@ -957,19 +951,21 @@ scene(st, { cursor: [430, 270] })
     </div>
 
     <div class="state-box">
-      <h3>Static editor controls</h3>
+      <h3>Edit controls</h3>
+      <p class="desc">Buttons, drag handles and anything else only editors use, written once in the file.</p>
       <ul>
-        <li>Buttons and drag handles that never change at runtime stay in the file with <code>show-when:editmode="true"</code>.</li>
-        <li>Pair with <code>clay-options.js</code> and the one-line CSS fallback rule.</li>
+        <li>Keep them in the file with <code>show-when:editmode="true"</code>, so viewers never see them.</li>
+        <li>Load <code>clay-options.js</code> and add its one-line CSS fallback rule.</li>
       </ul>
       <pre><code class="language-markup">&lt;button type="button" show-when:editmode="true"&gt;+ Add&lt;/button&gt;</code></pre>
     </div>
 
     <div class="state-box">
-      <h3>Runtime chrome and derived counts</h3>
+      <h3>Complex edit controls and derived counts</h3>
+      <p class="desc">Toolbars, filters and counts your script builds when the page opens.</p>
       <ul>
-        <li>Clone toolbars, filters, and tab-only counts from a <code>&lt;template&gt;</code> into <code>clay="editor-ui"</code> at <code>clay.ready</code>.</li>
-        <li>Use <code>clay="no-dirty"</code> for totals saved in the file, or <code>clay="freeze"</code> for per-tab text inside a saved element.</li>
+        <li>Clone them from a <code>&lt;template&gt;</code> into a <code>clay="editor-ui"</code> element inside <code>clay.start</code>. That element is never saved, so it cannot pile up in the file.</li>
+        <li>A total that must appear in the saved file goes in <code>clay="no-dirty"</code>. It still saves, but redrawing it is not an edit, so recomputing it on open never starts a save or a close warning.</li>
       </ul>
       <pre><code class="language-markup">&lt;!-- cloned at runtime, never written in the file --&gt;
 &lt;div clay="editor-ui"&gt;2 of 5 done&lt;/div&gt;
@@ -977,20 +973,22 @@ scene(st, { cursor: [430, 270] })
     </div>
 
     <div class="state-box">
-      <h3>Per-tab UI state</h3>
+      <h3>Temporary toggles and popovers</h3>
+      <p class="desc">What is selected, which card is open, what the filter says: state that belongs to one tab and should not reach anyone else.</p>
       <ul>
-        <li>Keep filter queries and open-card IDs in the URL hash (<code>#q=design</code>) and paint them with a runtime <code>&lt;style&gt;</code> inside <code>editor-ui</code>.</li>
-        <li>Mark single-element selection or open state with <code>ephemeral</code>.</li>
+        <li>Mark selection or open state with <code>ephemeral</code>. It stays in your tab and never saves.</li>
+        <li>Keep a search query or open card in the URL hash (<code>#q=design</code>), and paint it with a <code>&lt;style&gt;</code> inside <code>editor-ui</code>.</li>
       </ul>
       <pre><code class="language-markup">&lt;li class="card" data-id="c-1" ephemeral="selected"&gt;…&lt;/li&gt;
 &lt;details ephemeral:open&gt;…&lt;/details&gt;</code></pre>
     </div>
 
     <div class="state-box">
-      <h3>JSON models and fast live state</h3>
+      <h3>Data-rich apps, games and real-time state</h3>
+      <p class="desc">Apps with their own schema, like a game board or a budget model, whose data is not naturally HTML.</p>
       <ul>
-        <li>Store non-DOM data in a <code>merge="store"</code> JSON script tag, and add <code>clay="live"</code> (with <code>?plugins=sync,live</code>) for sub-second sync on hyperclay.com and between tabs of one browser.</li>
-        <li>Keep private secrets out of shared files altogether; put them in a separate restricted file.</li>
+        <li>Store the data in a JSON <code>&lt;script&gt;</code> tag with a <code>merge</code> name, such as <code>merge="game"</code>, and draw the page from it.</li>
+        <li>Add <code>clay="live"</code> with <code>?plugins=sync,live</code> for sub-second updates on hyperclay.com and between tabs of one browser.</li>
       </ul>
       <pre><code class="language-markup">&lt;script type="application/json" merge="game" clay="live"&gt;
   {"turn": "x", "score": 0}
