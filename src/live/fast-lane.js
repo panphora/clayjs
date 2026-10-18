@@ -239,6 +239,7 @@ export function createFastLane({
       frame.refused = true;
       frame.sent = false;
       frame.seq = null;
+      if (frame.epoch !== epoch) frame.receiptGeneration = receiptGeneration;
       return;
     }
     // Its store left the room meanwhile: its ops stay pending for the save,
