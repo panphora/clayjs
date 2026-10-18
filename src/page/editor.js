@@ -11,6 +11,7 @@ import { schema } from "./schema.js";
 import { identityPlugin, docFromBlocks, blockMap, keyBetween, newId } from "./model.js";
 import { blockKeys, structurePlugin, collapsePlugin, pastePlugin, BlockSelection, STEP } from "./blocks.js";
 import { chromePlugin } from "./chrome.js";
+import { announcementPlugin } from "./announce.js";
 import { linkPlugin } from "./link.js";
 import { blockSelectionPlugin } from "./blocksel.js";
 import { markdownPlugin, backspaceToParagraph } from "./markdown.js";
@@ -136,6 +137,7 @@ ${INDENTS.map((n) => `.page-editor .page-li[data-indent="${n}"] { --li-indent: $
 .page-image-caption[data-empty]::before { content: attr(data-placeholder); color: var(--page-ink-faint); }
 .page-image:not(.is-selected) .page-image-caption[data-empty]:not(:focus) { display: none; }
 .page-file-link { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border: 1px solid var(--page-rule); border-radius: 8px; color: var(--page-ink); text-decoration: none; }
+.page-file-name { min-width: 0; overflow-wrap: anywhere; }
 .page-file-meta { margin-inline-start: auto; color: var(--page-ink-faint); font-size: 0.88em; }
 .page-upload { display: flex; align-items: center; gap: 10px; margin: var(--page-block-gap) 0; padding: 8px 12px; border: 1px dashed var(--page-rule); border-radius: 8px; color: var(--page-ink-soft); font-size: 0.88em; }
 .page-upload-preview { width: 40px; height: 40px; object-fit: cover; border-radius: 4px; opacity: 0.6; }
@@ -194,6 +196,7 @@ const defaultUpload = (file, options) => globalThis.clay?.upload?.(file, options
 
 export function pagePlugins({ upload = defaultUpload } = {}) {
   return [
+    announcementPlugin(),
     chromePlugin(),
     linkPlugin(),
     blockSelectionPlugin(),
@@ -247,6 +250,8 @@ export function createPageEditor(mount, { blocks = null, onChange = null, upload
   }
   const shell = doc.createElement("div");
   shell.className = "page-shell";
+  shell.setAttribute("clay", "editor-ui");
+  shell.setAttribute("sap-ignore", "");
   mount.appendChild(shell);
   let afterStep = false;
   const view = new pmView.EditorView(shell, {
@@ -273,10 +278,5 @@ export function createPageEditor(mount, { blocks = null, onChange = null, upload
       if (onChange && view.state.doc !== before) onChange(blockMap(view.state.doc));
     },
   });
-  const live = doc.createElement("div");
-  live.className = "page-live";
-  live.setAttribute("role", "status");
-  live.setAttribute("aria-live", "polite");
-  shell.appendChild(live);
   return view;
 }

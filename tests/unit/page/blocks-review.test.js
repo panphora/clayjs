@@ -1,8 +1,10 @@
-import { createPageEditor, pageState } from "../../../src/page/editor.js";
+import { createPageEditor as makePageEditor, pageState } from "../../../src/page/editor.js";
 import { state as pmState, history } from "../../../src/vendor/prosemirror.vendor.js";
 import { blockMap } from "../../../src/page/model.js";
 import { schema } from "../../../src/page/schema.js";
 
+import { trackView } from "./view-helpers.js";
+const createPageEditor = (...args) => trackView(makePageEditor(...args));
 const { TextSelection } = pmState;
 globalThis.ClipboardEvent ??= class ClipboardEvent extends Event {};
 

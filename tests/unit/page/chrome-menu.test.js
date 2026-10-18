@@ -285,7 +285,7 @@ describe("the actions menu", () => {
     expect(key(view, "/", { ctrlKey: true })).toBe(true);
     expect(isOpen(view)).toBe(true);
     expect(selectedIds(view)).toEqual(["t", "b1"]);
-    expect(labels(view)).toEqual(["Turn into", "Duplicate", "Move up", "Move down", "Indent", "Outdent", "Delete"]);
+    expect(labels(view)).toEqual(["Move up", "Move down", "Indent", "Outdent", "Duplicate", "Delete", "Turn into"]);
   });
 
   test("it also opens on Cmd+/ and the highlight starts on the first row", () => {
@@ -371,7 +371,7 @@ describe("the actions menu on an image", () => {
   test("an image gets Alt text, Small, Medium and Full width after the common actions", () => {
     const view = onImage();
     key(view, "/", { ctrlKey: true });
-    expect(labels(view)).toEqual(["Duplicate", "Move up", "Move down", "Indent", "Outdent", "Delete", "Alt text…", "Small", "Medium", "Full width"]);
+    expect(labels(view)).toEqual(["Move up", "Move down", "Indent", "Outdent", "Duplicate", "Delete", "Alt text…", "Small", "Medium", "Full width"]);
   });
 
   test("Small, Medium and Full width set the pixel width, each as one step", () => {

@@ -1,6 +1,9 @@
-import { createPageEditor, pageState, PAGE_EDITOR_CSS } from "../../../src/page/editor.js";
+import { createPageEditor as makePageEditor, pageState, PAGE_EDITOR_CSS } from "../../../src/page/editor.js";
 import { state as pmState } from "../../../src/vendor/prosemirror.vendor.js";
 
+import { trackView, editor } from "./view-helpers.js";
+import { ACTION_ITEMS } from "../../../src/page/chrome.js";
+const createPageEditor = (...args) => trackView(makePageEditor(...args));
 const { TextSelection } = pmState;
 
 /**
@@ -69,4 +72,51 @@ test("Enter on an empty nested item outdents through the wired keymap", () => {
   caretIn(view, "e");
   key(view, "Enter");
   expect(view.state.doc.child(1).attrs.indent).toBe(0);
+});
+
+test("F18 a bare mount excludes its runtime shell from save capture", async () => {
+  const view = createPageEditor(mount(), { blocks: { p: { t: "paragraph", pos: "B", c: "Hello" } } });
+  const shell = view.dom.parentElement;
+  expect(shell.getAttribute("clay")).toBe("editor-ui");
+  expect(shell.hasAttribute("sap-ignore")).toBe(true);
+  key(view, "Escape");
+  expect(shell.querySelector(".page-live").textContent).toBe("1 block selected");
+  const { captureForSaveAndComparison } = await import("../../../src/core/snapshot.js");
+  const { forSave } = captureForSaveAndComparison({ flushUndo: false, emitForSync: false });
+  const saved = new DOMParser().parseFromString(forSave, "text/html");
+  expect(saved.querySelector(".page-shell, .page-live, .page-dock, .page-link")).toBeNull();
+});
+
+test("F18 destroying a view removes its live region", () => {
+  const view = createPageEditor(mount());
+  const live = view.dom.parentElement.querySelector(".page-live");
+  view.destroy();
+  expect(live.isConnected).toBe(false);
+});
+
+test("F23 long filenames can shrink and wrap within the file row", () => {
+  const rules = document.createElement("style");
+  const css = PAGE_EDITOR_CSS.match(/\.page-file-name\s*\{[^}]+\}/)?.[0];
+  expect(css).toBeTruthy();
+  rules.textContent = css;
+  document.head.appendChild(rules);
+  const view = editor([["f", "file", "", { src: "/f", name: "verylongfilename".repeat(30) }]]);
+  const style = getComputedStyle(view.dom.querySelector(".page-file-name"));
+  expect(style.minWidth).toBe("0");
+  expect(style.overflowWrap).toBe("anywhere");
+});
+
+test("F23 block actions follow the specified phone order", () => {
+  expect(ACTION_ITEMS.slice(0, 7).map((item) => item.label)).toEqual(["Move up", "Move down", "Indent", "Outdent", "Duplicate", "Delete", "Turn into"]);
+});
+
+describe("F24 fixture teardown", () => {
+  let previous;
+  test("creates a real view for the next test's teardown assertion", () => {
+    previous = editor([["p", "paragraph", "fixture"]]);
+    expect(previous.isDestroyed).toBe(false);
+  });
+  test("destroys the preceding view before clearing its document", () => {
+    expect(previous.isDestroyed).toBe(true);
+  });
 });

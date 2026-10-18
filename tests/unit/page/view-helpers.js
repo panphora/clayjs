@@ -2,6 +2,12 @@ import { createPageEditor } from "../../../src/page/editor.js";
 import { state as pmState } from "../../../src/vendor/prosemirror.vendor.js";
 
 const { TextSelection } = pmState;
+const views = new Set();
+export const trackView = (view) => { views.add(view); return view; };
+afterEach(() => {
+  for (const view of views) if (!view.isDestroyed) view.destroy();
+  views.clear();
+});
 
 // spec: [id, type, text, attrs]; positions are "B", "C", ... so order is spec order.
 export const blocksOf = (spec) => {
@@ -9,7 +15,7 @@ export const blocksOf = (spec) => {
   spec.forEach(([id, t, c, attrs = {}], i) => { out[id] = { t, pos: String.fromCharCode(66 + i), c, ...attrs }; });
   return out;
 };
-export const editor = (spec, options = {}) => createPageEditor(document.body.appendChild(document.createElement("div")), { blocks: blocksOf(spec), ...options });
+export const editor = (spec, options = {}) => trackView(createPageEditor(document.body.appendChild(document.createElement("div")), { blocks: blocksOf(spec), ...options }));
 export const posOf = (view, id, end = false) => {
   let p = null;
   view.state.doc.forEach((n, o) => { if (n.attrs.id === id) p = end ? o + n.nodeSize - 1 : o + 1; });
