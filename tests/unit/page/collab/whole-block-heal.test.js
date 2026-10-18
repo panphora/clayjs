@@ -163,3 +163,39 @@ test("a peer's write ordered after this tab's echoed write ends this tab's claim
   const heals = [a.heals, b.heals];
   expect({ ...result(room, a, b), heals }).toEqual({ room: "peer", a: "peer", b: "peer", notices: [], heals: [0, 1] });
 });
+
+test('Astra 2 whole-equal-pending: an earlier equal peer write cannot consume a later own identity', async () => {
+  const { sim, room, a, b } = setup();
+  const c = engine.makeTab(sim, room, 'c', initial());
+  c.start();
+  await sim.run(500);
+  sim.at(600, () => caption(b, 'mine'));
+  sim.at(610, () => caption(c, 'peer'));
+  sim.at(620, () => caption(a, 'mine'));
+  await sim.run(1000);
+  expect([image(a), image(b), image(c)]).toEqual(['mine', 'mine', 'mine']);
+  expect(a.binding.blocks.get('i').mine.value.caption).toBe('mine');
+  room.restart({ page: initial() });
+  await sim.run(10000);
+  await sim.idle(3000);
+  const cImage = image(c), cNotices = c.allNotices();
+  c.binding.dispose(); c.editor.destroy(); c.lane.stop();
+  const heals = [a.heals, b.heals, c.heals];
+  expect({ ...result(room, a, b), c: cImage, cNotices, heals }).toEqual({ room: 'mine', a: 'mine', b: 'mine', notices: [], c: 'mine', cNotices: [], heals: [1, 0, 0] });
+});
+
+test('an equal peer write ordered after the own echo ends the old claim by identity', async () => {
+  const { sim, room, a, b } = setup();
+  await sim.run(500);
+  room.close('b');
+  caption(a, 'mine');
+  await sim.run(1000);
+  caption(b, 'mine');
+  room.open('b');
+  await sim.run(1500);
+  expect(a.binding.blocks.get('i').mine).toBeNull();
+  room.restart({ page: initial() });
+  await sim.run(10000);
+  const heals = [a.heals, b.heals];
+  expect({ ...result(room, a, b), heals }).toEqual({ room: 'mine', a: 'mine', b: 'mine', notices: [], heals: [0, 1] });
+});

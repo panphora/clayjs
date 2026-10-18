@@ -261,21 +261,29 @@ export function createPageBinding({ schema, store, lane, me, setTimer = setTimeo
   // tab's claim only when it is ordered after every write of this tab's own
   // not yet seen back, by room seq, never by content: an own write that landed
   // later, or is still on its way (its op still pending), keeps the claim.
-  function cameWhole(B, X, at = null) {
+  function cameWhole(B, X, at = null, frame = null) {
     remember(B, X);
-    const i = X ? B.ownSent.findIndex((v) => sameJson(v.value, X)) : -1;
-    if (i >= 0) {
-      B.ownSent.splice(0, i + 1);
+    if (!frame) {
+      const delivered = B.ownSent.find((v) => v.seq === at && v.client !== null && v.n !== null);
+      if (delivered) frame = { from: delivered.client, n: delivered.n };
+    }
+    const matches = (v) => frame && v.client === frame.from && v.n === frame.n;
+    const echoed = B.ownSent.filter(matches);
+    if (echoed.length) {
+      const last = echoed[echoed.length - 1];
+      B.ownSent = B.ownSent.filter((v) => !matches(v));
+      if (!B.ownSent.some((v) => v.id > last.id)) B.mine = { value: last.value };
       return;
     }
-    if (!B.mine || (X && sameJson(X, B.mine.value))) return;
+    if (!B.mine) return;
     const pending = new Set(store.pendingEntries().map((e) => e.id));
-    B.ownSent = B.ownSent.filter((v) => (v.seq !== null ? at === null || v.seq > at : v.id === undefined || pending.has(v.id)));
+    B.ownSent = B.ownSent.filter((v) => v.seq !== null ? at === null || v.seq > at : v.id === undefined || pending.has(v.id));
     if (!B.ownSent.length) B.mine = null;
   }
+
   const sentWhole = (B, value) => {
     B.mine = { value: strip(value) };
-    B.ownSent.push({ value: strip(value), id: undefined, seq: null });
+    B.ownSent.push({ value: strip(value), id: undefined, seq: null, client: null, n: null });
     remember(B, value);
   };
 
@@ -448,10 +456,18 @@ export function createPageBinding({ schema, store, lane, me, setTimer = setTimeo
   // ---- remote side ---------------------------------------------------------
 
   store.onDelivery((ev) => {
+    if (ev.phase === "sent") {
+      for (const B of blocks.values()) if (!B.text) {
+        for (const v of B.ownSent) if (v.id >= ev.first && v.id <= ev.through) {
+          v.client = ev.client;
+          v.n = ev.n;
+        }
+      }
+    }
     if ((ev.phase === "landed" || ev.phase === "echoed") && Number.isInteger(ev.seq)) {
       for (const B of blocks.values()) {
         for (const u of B.unechoed) if (u.seq === null && u.id <= ev.through) u.seq = ev.seq;
-        if (!B.text) for (const v of B.ownSent) if (v.seq === null && v.id !== undefined && v.id <= ev.through) v.seq = ev.seq;
+        if (!B.text) for (const v of B.ownSent) if (v.client === ev.client && v.n === ev.n) v.seq = ev.seq;
       }
     }
     if (ev.phase === "refused" || ev.phase === "undone") {
@@ -474,7 +490,7 @@ export function createPageBinding({ schema, store, lane, me, setTimer = setTimeo
   // The record before a frame, as far as ensure reads it for one block.
   const priorOf = (before, id) => ({ blocks: { [id]: before(["blocks", id]) }, deleted: { [id]: before(["deleted", id]) } });
 
-  function replayOps(ops, at, before, next) {
+  function replayOps(ops, at, before, next, frame = null) {
     for (const op of blockOps(ops, before, next)) {
       const B = blocks.get(op.id) ?? ensure(op.id, priorOf(before, op.id), op.X);
       dirty.add(op.id);
@@ -484,7 +500,7 @@ export function createPageBinding({ schema, store, lane, me, setTimer = setTimeo
         else B.tomb = true;
         continue;
       }
-      if (!B.text) { cameWhole(B, op.X ? strip(op.X) : null, at); continue; }
+      if (!B.text) { cameWhole(B, op.X ? strip(op.X) : null, at, frame); continue; }
       const X = op.X && Array.isArray(op.X.c) ? { ...blockJson(nodeFromBlock(schema, op.id, op.X)), ...(op.X.w ? { w: op.X.w } : {}) } : op.X;
       if (X && X.w && X.w.a === me) echoed(B, op.sent ?? X);
       B.heal.step(X, at);
@@ -536,7 +552,7 @@ export function createPageBinding({ schema, store, lane, me, setTimer = setTimeo
       }
     }
     if (frame) {
-      replayOps(frame.ops, frame.seq, before, next);
+      replayOps(frame.ops, frame.seq, before, next, frame);
       checkpointWithin(1500);
     } else if (room && room.fresh) onEpoch(room, next);
     else if (room && Array.isArray(room.moves)) replayMoves(room.moves, ev, before, next); else if (room) {
@@ -547,7 +563,7 @@ export function createPageBinding({ schema, store, lane, me, setTimer = setTimeo
         if (!B.text) {
           B.tomb = tombOf(next, id);
           const raw = rawOf(next, id);
-          if (raw) cameWhole(B, strip(raw), room.seq);
+          if (raw && !sameJson(rawOf(ev.prev, id), raw)) cameWhole(B, strip(raw), room.seq);
           continue;
         }
         if (room.seq !== B.r.seq || !same(rawOf(next, id), B.r.S)) B.heal.join(rawOf(next, id), room.seq, { tomb: tombOf(next, id), shown: shownText(B) });
