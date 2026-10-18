@@ -34,6 +34,17 @@ test("mounts with the page-editor class and injects the CSS once", () => {
   expect(styles[0].textContent).toBe(PAGE_EDITOR_CSS);
 });
 
+test("a stale editor style saved into the page is refreshed, and the style is marked so the save leaves it out", () => {
+  const old = document.head.appendChild(document.createElement("style"));
+  old.id = "page-editor-style";
+  old.textContent = ".page-editor pre { white-space: pre; }";
+  createPageEditor(mount());
+  const styles = document.querySelectorAll("#page-editor-style");
+  expect(styles.length).toBe(1);
+  expect(styles[0].textContent).toBe(PAGE_EDITOR_CSS);
+  expect(styles[0].getAttribute("clay")).toBe("editor-ui");
+});
+
 test("an empty record starts as one empty paragraph", () => {
   const s = pageState(null);
   expect(s.doc.childCount).toBe(1);

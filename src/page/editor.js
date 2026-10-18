@@ -266,12 +266,14 @@ function checkboxClick(view, event) {
 // every transaction that changed the document.
 export function createPageEditor(mount, { blocks = null, onChange = null, upload, highlight } = {}) {
   const doc = mount.ownerDocument;
-  if (!doc.getElementById(STYLE_ID)) {
-    const style = doc.createElement("style");
+  let style = doc.getElementById(STYLE_ID);
+  if (!style) {
+    style = doc.createElement("style");
     style.id = STYLE_ID;
-    style.textContent = PAGE_EDITOR_CSS;
     doc.head.appendChild(style);
   }
+  style.setAttribute("clay", "editor-ui");
+  if (style.textContent !== PAGE_EDITOR_CSS) style.textContent = PAGE_EDITOR_CSS;
   const shell = doc.createElement("div");
   shell.className = "page-shell";
   shell.setAttribute("clay", "editor-ui");
