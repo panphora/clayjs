@@ -342,7 +342,7 @@ describe('Backspace and Delete with a selection', () => {
       const a = box(el('a')), b = box(el('b'));
       await move(a.left + 2, a.top + a.height / 2);
       await sendMouse({ type: 'down' });
-      await move(b.left + 30, b.top + b.height / 2);
+      for (let k = 1; k <= 6; k++) await move(a.left + 2 + (b.left + 30 - a.left - 2) * k / 6, a.top + a.height / 2 + (b.top - a.top) * k / 6);
       await sendMouse({ type: 'up' });
       await settle();
       expect(view.state.selection.empty).to.equal(false);
@@ -440,6 +440,19 @@ describe('code block colours in a browser', () => {
     expect(keywordSpans('far').length).to.equal(0);
     el('far').scrollIntoView();
     expect(await until(() => keywordSpans('far').length > 0)).to.equal(true);
+  });
+
+  it('a long plain line wraps inside its block; a long line of code scrolls inside the block instead', async () => {
+    const long = 'Every gesture below is listed under What to try. Nothing here is saved anywhere but this file. '.repeat(3);
+    setup({ p: { t: 'code_block', pos: 'V', c: long }, j: { t: 'code_block', pos: 'W', lang: 'javascript', c: `const s = "${long}"` } });
+    await settle();
+    const plain = el('p'), code = el('j');
+    expect(plain.scrollWidth).to.be.at.most(plain.clientWidth);
+    expect(box(plain).width).to.be.at.most(box(view.dom).width + 1);
+    expect(code.scrollWidth).to.be.at.most(code.clientWidth);
+    const inner = code.querySelector('code');
+    expect(inner.scrollWidth).to.be.greaterThan(inner.clientWidth);
+    expect(getComputedStyle(inner).overflowX).to.equal('auto');
   });
 
   it('the language picker colours a plain block', async () => {

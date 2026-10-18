@@ -78,7 +78,9 @@ export const PAGE_EDITOR_CSS = `
 .page-editor code { font-family: var(--page-font-mono); font-size: 0.88em; background: var(--page-code-bg); color: var(--page-code-ink); border-radius: 4px; padding: 0.1em 0.3em; }
 .page-editor pre { font-family: var(--page-font-mono); font-size: 0.88em; background: var(--page-code-bg); color: var(--page-code-ink); border-radius: 8px; padding: 12px 14px; }
 .page-editor pre code { background: none; padding: 0; font-size: inherit; }
-.page-editor pre { position: relative; padding-top: 32px; }
+.page-editor pre { position: relative; padding-top: 32px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.page-editor pre[data-lang] { white-space: pre; overflow-wrap: normal; }
+.page-editor pre[data-lang] > code { display: block; overflow-x: auto; }
 .page-code-lang { position: absolute; top: 5px; inset-inline-end: 6px; max-width: 120px; height: 24px; padding: 0 4px; border: 0; border-radius: 5px; background: none; color: var(--page-ink-faint); font: 12px/1 var(--page-font); opacity: 0; cursor: pointer; transition: opacity var(--page-fade); }
 .page-editor pre:hover .page-code-lang, .page-editor pre:focus-within .page-code-lang, .page-code-lang:focus-visible, .page-editor pre[data-lang] .page-code-lang { opacity: 1; }
 .page-code-lang:hover, .page-code-lang:focus-visible { background: var(--page-pop-hover); color: var(--page-ink-soft); }
