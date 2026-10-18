@@ -17,6 +17,13 @@ test("selecting the whole page does not throw", () => {
   expect(() => view.dispatch(view.state.tr.setSelection(new AllSelection(view.state.doc)))).not.toThrow();
 });
 
+test("Mod+A twice does not throw", () => {
+  const view = two();
+  select(view, posOf(view, "a"));
+  expect(() => { key(view, "a", { ctrlKey: true }); key(view, "a", { ctrlKey: true }); }).not.toThrow();
+  expect(view.state.selection.to).toBe(view.state.doc.content.size);
+});
+
 test("with the whole page selected the toolbar names the last block's type", () => {
   const view = editor([["a", "paragraph", "A"], ["h", "heading", "H", { level: 1 }]]);
   view.dispatch(view.state.tr.setSelection(new AllSelection(view.state.doc)));

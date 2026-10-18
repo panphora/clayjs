@@ -166,3 +166,162 @@ describe("deleting and duplicating", () => {
     expect(out.selection instanceof TextSelection).toBe(true);
   });
 });
+
+describe("the plugin in a real view", () => {
+  const view = (spec = FLAT) => editor(spec);
+
+  test("Esc selects the caret's block and draws .page-block-selected", () => {
+    const v = view();
+    select(v, posOf(v, "b"));
+    expect(key(v, "Escape")).toBe(true);
+    expect(v.state.selection instanceof BlockSelection).toBe(true);
+    expect(v.dom.querySelectorAll(".page-block-selected").length).toBe(1);
+    expect(v.dom.querySelector(".page-block-selected").textContent).toBe("B");
+  });
+
+  test("a focused editor hides the browser's own selection while blocks are selected and shows it again after", () => {
+    const v = view();
+    v.focus();
+    select(v, posOf(v, "b"));
+    key(v, "Escape");
+    expect(v.dom.classList.contains("ProseMirror-hideselection")).toBe(true);
+    key(v, "Escape");
+    expect(v.dom.classList.contains("ProseMirror-hideselection")).toBe(false);
+  });
+
+  test("the live region announces the selection and its clearing", () => {
+    const v = view();
+    select(v, posOf(v, "b"));
+    key(v, "Escape");
+    const live = v.dom.parentElement.querySelector(".page-live");
+    expect(live.textContent).toBe("1 block selected");
+    key(v, "ArrowDown", { shiftKey: true });
+    expect(live.textContent).toBe("2 blocks selected");
+    key(v, "Escape");
+    expect(live.textContent).toBe("Selection cleared");
+  });
+
+  test("typing leaves block mode, puts the caret at the end of the first selected text block and inserts the character", () => {
+    const v = view();
+    select(v, posOf(v, "b"));
+    key(v, "Escape");
+    key(v, "ArrowDown", { shiftKey: true });
+    expect(typeText(v, "x")).toBe(true);
+    expect(v.state.selection instanceof TextSelection).toBe(true);
+    expect(v.state.doc.child(1).textContent).toBe("Bx");
+    expect(v.state.doc.child(2).textContent).toBe("C");
+    expect(v.state.selection.$head.parent.attrs.id).toBe("b");
+  });
+
+  test("typing over selected blocks that have no text block inserts nothing", () => {
+    const v = editor([["a", "paragraph", "A"], ["d", "divider", ""]]);
+    v.dispatch(v.state.tr.setSelection(S.selectBlocks(v.state.doc, 1)));
+    expect(typeText(v, "x")).toBe(true);
+    expect(v.state.doc.textContent).toBe("A");
+  });
+
+  test("Backspace deletes the blocks and Mod+Z restores them with the block selection", () => {
+    const v = view();
+    select(v, posOf(v, "b"));
+    key(v, "Escape");
+    key(v, "Backspace");
+    expect(v.state.doc.childCount).toBe(3);
+    key(v, "z", { ctrlKey: true });
+    expect(v.state.doc.childCount).toBe(4);
+    expect(v.state.selection instanceof BlockSelection).toBe(true);
+  });
+
+  test("Enter returns to text at the end of the first selected block", () => {
+    const v = view();
+    select(v, posOf(v, "c"));
+    key(v, "Escape");
+    key(v, "Enter");
+    expect(v.state.selection instanceof TextSelection).toBe(true);
+    expect(v.state.selection.$head.parent.attrs.id).toBe("c");
+  });
+
+  test("Mod+A twice selects every block", () => {
+    const v = view();
+    select(v, posOf(v, "b", false) + 1);
+    key(v, "a", { ctrlKey: true });
+    key(v, "a", { ctrlKey: true });
+    expect(v.state.selection instanceof BlockSelection).toBe(true);
+    expect(v.dom.querySelectorAll(".page-block-selected").length).toBe(4);
+  });
+
+  test("the chrome survives a block selection of the last block", () => {
+    const v = view();
+    select(v, posOf(v, "d"));
+    expect(() => key(v, "Escape")).not.toThrow();
+    expect(v.state.selection instanceof BlockSelection).toBe(true);
+  });
+
+  test("a remote block landing inside the selection clears it and says so; one at the edge does not", () => {
+    const v = view();
+    select(v, posOf(v, "a"));
+    key(v, "Escape");
+    key(v, "ArrowDown", { shiftKey: true });
+    const live = v.dom.parentElement.querySelector(".page-live");
+    const para = schema.nodes.paragraph.create({ id: "r1", pos: "Zz" }, schema.text("R"));
+    const edge = v.state.selection.to;
+    v.dispatch(v.state.tr.insert(edge, para).setMeta(REMOTE, true).setMeta("addToHistory", false));
+    expect(v.state.selection instanceof BlockSelection).toBe(true);
+    expect(live.textContent).not.toMatch(/document changed/);
+    const middle = v.state.doc.child(0).nodeSize;
+    v.dispatch(v.state.tr.insert(middle, schema.nodes.paragraph.create({ id: "r2", pos: "Zy" }, schema.text("R2"))).setMeta(REMOTE, true).setMeta("addToHistory", false));
+    expect(v.state.selection instanceof TextSelection).toBe(true);
+    expect(v.state.selection.$head.parent.attrs.id).toBe("a");
+    expect(live.textContent).toBe("Block selection cleared because the document changed");
+  });
+});
+
+describe("Shift+Down from a closed toggle's summary", () => {
+  const view = { endOfTextblock: () => true };
+  const inSummary = (id = "t") => caret(make(TOGGLE), id, 1);
+
+  test("switches to a block selection of the toggle, its body and the next block", () => {
+    let out = null;
+    const handled = S.blockSelKeys["Shift-ArrowDown"](inSummary(), (tr) => { out = inSummary().apply(tr); }, view);
+    expect(handled).toBe(true);
+    expect(out.selection instanceof BlockSelection).toBe(true);
+    expect(spanIds(out)).toEqual(["t", "b1", "b2", "z"]);
+  });
+
+  test("Backspace then deletes the toggle, its body and the next block, and one undo brings them back", () => {
+    const s0 = caret(make(TOGGLE, [history.history()]), "t", 1);
+    let sel = s0;
+    S.blockSelKeys["Shift-ArrowDown"](s0, (tr) => { sel = s0.apply(tr); }, view);
+    const gone = run(sel, S.deleteBlocks);
+    expect(short(gone)).toBe("P");
+    let back = gone;
+    history.undo(gone, (tr) => { back = gone.apply(tr); });
+    expect(Object.keys(blockMap(back.doc)).sort()).toEqual(["b1", "b2", "p", "t", "z"]);
+    expect(back.doc.childCount).toBe(5);
+  });
+
+  test("does nothing when the caret is not at the last line, the toggle is open, has no body, or is the last block", () => {
+    const cmd = S.blockSelKeys["Shift-ArrowDown"];
+    expect(cmd(inSummary(), null, { endOfTextblock: () => false })).toBe(false);
+    const open = caret(make([["t", "toggle", "T", { open: true }], ["b1", "paragraph", "b1", { parent: "t" }], ["z", "paragraph", "Z"]]), "t", 1);
+    expect(cmd(open, null, view)).toBe(false);
+    const empty = caret(make([["t", "toggle", "T", { open: false }], ["z", "paragraph", "Z"]]), "t", 1);
+    expect(cmd(empty, null, view)).toBe(false);
+    const last = caret(make([["p", "paragraph", "P"], ["t", "toggle", "T", { open: false }], ["b1", "paragraph", "b1", { parent: "t" }]]), "t", 1);
+    expect(cmd(last, null, view)).toBe(false);
+  });
+
+  test("is reached through the editor's key handling when the caret is on the last line", () => {
+    const v = editor(TOGGLE);
+    v.endOfTextblock = () => true;
+    select(v, posOf(v, "t", true));
+    expect(key(v, "ArrowDown", { shiftKey: true })).toBe(true);
+    expect(v.state.selection instanceof BlockSelection).toBe(true);
+    expect(spanIds(v.state)).toEqual(["t", "b1", "b2", "z"]);
+  });
+
+  test("a text selection that started above the toggle is left to the collapse plugin", () => {
+    const s = make(TOGGLE);
+    const across = s.apply(s.tr.setSelection(TextSelection.create(s.doc, 2, B.outline(s.doc)[1].at + 2)));
+    expect(S.blockSelKeys["Shift-ArrowDown"](across, null, view)).toBe(false);
+  });
+});

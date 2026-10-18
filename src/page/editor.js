@@ -11,6 +11,7 @@ import { schema } from "./schema.js";
 import { identityPlugin, docFromBlocks, blockMap, keyBetween, newId } from "./model.js";
 import { blockKeys, structurePlugin, collapsePlugin, pastePlugin, STEP } from "./blocks.js";
 import { chromePlugin } from "./chrome.js";
+import { blockSelectionPlugin } from "./blocksel.js";
 
 const STYLE_ID = "page-editor-style";
 const INDENTS = [1, 2, 3, 4, 5, 6, 7, 8];
@@ -101,6 +102,10 @@ ${INDENTS.map((n) => `.page-editor .page-li[data-indent="${n}"] { --li-indent: $
 .page-menu-item[aria-selected="true"], .page-menu-item:hover { background: var(--page-pop-hover); }
 .page-menu-icon { display: grid; place-items: center; width: 24px; height: 24px; border: 1px solid var(--page-pop-line); border-radius: 6px; color: var(--page-pop-muted); font-size: 12px; flex: none; }
 .page-menu-hint { margin-inline-start: auto; color: var(--page-pop-muted); font-size: 12px; }
+.page-editor.ProseMirror-hideselection { caret-color: transparent; }
+.page-editor.ProseMirror-hideselection *::selection { background: transparent; }
+.page-editor .page-block-selected { background: var(--page-block-selected, rgba(88, 120, 170, 0.12)); box-shadow: -6px 0 0 var(--page-block-selected, rgba(88, 120, 170, 0.12)), 6px 0 0 var(--page-block-selected, rgba(88, 120, 170, 0.12)); border-radius: 4px; }
+.page-live { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .page-scrim { display: none; }
 .page-shell [hidden] { display: none !important; }
 
@@ -136,6 +141,7 @@ const editKeys = {
 export function pagePlugins() {
   return [
     chromePlugin(),
+    blockSelectionPlugin(),
     keymap.keymap(blockKeys),
     keymap.keymap(editKeys),
     keymap.keymap(commands.baseKeymap),
@@ -198,5 +204,10 @@ export function createPageEditor(mount, { blocks = null, onChange = null } = {})
       if (onChange && view.state.doc !== before) onChange(blockMap(view.state.doc));
     },
   });
+  const live = doc.createElement("div");
+  live.className = "page-live";
+  live.setAttribute("role", "status");
+  live.setAttribute("aria-live", "polite");
+  shell.appendChild(live);
   return view;
 }

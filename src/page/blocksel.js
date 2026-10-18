@@ -3,12 +3,13 @@
 // span", the block selection or the blocks a text selection touches, lifted to
 // whole sibling subtrees. BlockSelection itself lives in blocks.js because
 // moveSpanTr needs it.
-import { state, history } from "../vendor/prosemirror.vendor.js";
+import { state, history, view as pmView, keymap } from "../vendor/prosemirror.vendor.js";
 import { schema } from "./schema.js";
 import { outline, siblingSpan, touchedBlocks, BlockSelection, STEP } from "./blocks.js";
-import { newId } from "./model.js";
+import { newId, REMOTE } from "./model.js";
+import { announce } from "./announce.js";
 
-const { Selection, TextSelection, NodeSelection } = state;
+const { Selection, TextSelection, NodeSelection, Plugin, PluginKey } = state;
 const N = schema.nodes;
 
 export const asStep = (tr) => history.closeHistory(tr).setMeta(STEP, true);
@@ -142,4 +143,108 @@ export function selectAllBlocks(st, dispatch) {
   }
   if (dispatch) dispatch(st.tr.setSelection(new BlockSelection(st.doc.resolve(0), st.doc.resolve(st.doc.content.size))));
   return true;
+}
+
+export const typeIntoBlocks = (view, text) => {
+  const st = view.state, sel = st.selection;
+  if (!(sel instanceof BlockSelection)) return false;
+  const ents = outline(st.doc);
+  const { lo, hi } = sel.span(st.doc);
+  const at = endOfFirstText(st.doc, ents, lo, hi);
+  if (at < 0) return true;
+  const tr = st.tr.setSelection(TextSelection.create(st.doc, at)).insertText(text);
+  view.dispatch(tr.scrollIntoView());
+  return true;
+};
+
+const leaveSummaryDown = (st, dispatch, view) => {
+  const sel = st.selection;
+  if (!(sel instanceof TextSelection) || !view?.endOfTextblock("down")) return false;
+  const { $anchor: $a, $head: $h } = sel;
+  if ($a.depth !== 1 || $a.parent.type !== N.toggle || $a.parent.attrs.open || $a.index(0) !== $h.index(0)) return false;
+  const ents = outline(st.doc);
+  const i = $a.index(0);
+  if (ents[i].subEnd === i) return false;
+  const j = visibleIdx(ents, ents[i].subEnd + 1, 1);
+  if (j < 0) return false;
+  if (dispatch) dispatch(st.tr.setSelection(selectBlocks(st.doc, i, j, ents)).scrollIntoView());
+  return true;
+};
+
+const only = (cmd) => (st, d, v) => st.selection instanceof BlockSelection && cmd(st, d, v);
+
+export const blockSelKeys = {
+  Escape: (st, d) => exitToText(st, d) || selectCurrentBlock(st, d),
+  Enter: only(exitToText),
+  ArrowUp: stepBlock(-1),
+  ArrowDown: stepBlock(1),
+  "Shift-ArrowUp": extendBlock(-1),
+  "Shift-ArrowDown": (st, d, v) => extendBlock(1)(st, d) || leaveSummaryDown(st, d, v),
+  Backspace: deleteBlocks,
+  Delete: deleteBlocks,
+  "Mod-d": duplicateBlocks,
+  "Mod-a": selectAllBlocks,
+};
+
+export const blockSelKey = new PluginKey("page-blocksel");
+
+const countOf = (st) => {
+  const sel = st.selection;
+  const { lo, hi } = sel.span(st.doc);
+  return outline(st.doc).filter((e) => e.i >= lo && e.i <= hi && !e.hidden).length;
+};
+
+export function blockSelectionPlugin() {
+  const keys = keymap.keymap(blockSelKeys);
+  return new Plugin({
+    key: blockSelKey,
+    state: {
+      init: () => 0,
+      apply: (tr, notice, prev, next) => (tr.getMeta(REMOTE) && prev.selection instanceof BlockSelection && !(next.selection instanceof BlockSelection) ? notice + 1 : notice),
+    },
+    props: {
+      handleKeyDown: (view, event) => keys.props.handleKeyDown(view, event),
+      handleTextInput: (view, from, to, text) => typeIntoBlocks(view, text),
+      decorations(st) {
+        const sel = st.selection;
+        if (!(sel instanceof BlockSelection)) return null;
+        const decos = [];
+        st.doc.nodesBetween(sel.from, sel.to, (n, pos) => {
+          decos.push(pmView.Decoration.node(pos, pos + n.nodeSize, { class: "page-block-selected" }));
+          return false;
+        });
+        return pmView.DecorationSet.create(st.doc, decos);
+      },
+      createSelectionBetween(view, $anchor, $head) {
+        const sel = view.state.selection;
+        return sel instanceof BlockSelection && $anchor.pos === sel.anchor && $head.pos === sel.head ? sel : null;
+      },
+      handleDOMEvents: {
+        mousedown(view, event) {
+          const sel = view.state.selection;
+          if (!event.shiftKey || !(sel instanceof BlockSelection) || event.button !== 0) return false;
+          const hit = view.posAtCoords({ left: event.clientX, top: event.clientY });
+          if (!hit) return false;
+          const ents = outline(view.state.doc);
+          const j = Math.min(view.state.doc.resolve(hit.inside >= 0 ? hit.inside : hit.pos).index(0), ents.length - 1);
+          const { lo, hi } = sel.span(view.state.doc);
+          const anchorIdx = sel.anchor <= sel.head ? lo : hi;
+          event.preventDefault();
+          view.dispatch(view.state.tr.setSelection(selectBlocks(view.state.doc, anchorIdx, j, ents)));
+          return true;
+        },
+      },
+    },
+    view: () => ({
+      update(view, prev) {
+        const a = view.state.selection, b = prev.selection;
+        if (a instanceof BlockSelection && !a.eq(b)) {
+          const n = countOf(view.state);
+          announce(view, `${n} ${n === 1 ? "block" : "blocks"} selected`);
+        } else if (b instanceof BlockSelection && !(a instanceof BlockSelection)) {
+          announce(view, blockSelKey.getState(view.state) !== blockSelKey.getState(prev) ? "Block selection cleared because the document changed" : "Selection cleared");
+        }
+      },
+    }),
+  });
 }
