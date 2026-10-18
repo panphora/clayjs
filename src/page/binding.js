@@ -15,7 +15,7 @@
 // Remote side: each frame's ops go through the replays in room order. A block
 // is released into the editor (its agreed value, as minimal steps kept out of
 // the undo history) once this tab has no write for it in flight and is not
-// composing, so a release never has unconfirmed local steps under it.
+// composing in it, so a release never has unconfirmed local steps under it.
 import { state as pmState, transform as pmTransform } from "../vendor/prosemirror.vendor.js";
 import { REMOTE, blockJson, docFromBlocks, insideTextblocks, newId, nodeFromBlock } from "./model.js";
 import { flatten, marksOf, packMarks, unflatten, unpackMarks } from "./inline.js";
@@ -201,7 +201,16 @@ export function createPageBinding({ schema, store, lane, me, setTimer = setTimeo
   let view = null;
   let epoch = null;
   let seq = 0;
-  let composing = false;
+  // An open composition holds the block of the selection head at its start
+  // (that block's id), or the whole page ("*") when the head is in no block or
+  // the composition moves to another block; null when none is open.
+  let composing = null;
+  const holds = (id) => composing === "*" || (composing !== null && composing === id);
+  const headBlock = (v) => {
+    const sel = v.state.selection;
+    if (!(sel instanceof TextSelection) || sel.$head.depth < 1) return "*";
+    return sel.$head.node(1).attrs.id || "*";
+  };
 
   const isText = (t) => !!schema.nodes[t]?.isTextblock;
   const agreedOf = (B) => (B.text ? B.r.S : B.tomb ? null : strip(rawOf(store.authoritative, B.id)));
@@ -218,11 +227,34 @@ export function createPageBinding({ schema, store, lane, me, setTimer = setTimeo
       B.r.tomb = tombOf(value, id);
       if (B.r.tomb) B.r.S = null;
       B.heal = createHealCheck({ r: B.r, me, quiet, setTimer, clearTimer, ready: () => readyFor(B), notice: (lost) => notice({ kind: "heal", id, lost, by: me }) });
-    } else B.tomb = tombOf(value, id);
+    } else {
+      B.tomb = tombOf(value, id);
+      // A block written whole: this tab's last write to it while that write is
+      // the latest the tab knows (mine), the writes not yet seen back (ownSent),
+      // and the values the tab has seen it hold (seen), for a room loss.
+      B.mine = null;
+      B.ownSent = [];
+      B.seen = raw ? [strip(raw)] : [];
+    }
     blocks.set(id, B);
     return B;
   }
   for (const id of Object.keys(store.authoritative?.blocks ?? {})) ensure(id, store.authoritative);
+
+  function remember(B, X) {
+    if (!X || B.seen.some((v) => sameJson(v, X))) return;
+    B.seen.push(strip(X));
+    if (B.seen.length > 32) B.seen.shift();
+  }
+
+  // A whole value of block B came in the stream: this tab's own, or a peer's
+  // later write, which ends this tab's claim to it.
+  function cameWhole(B, X) {
+    remember(B, X);
+    const i = X ? B.ownSent.findIndex((v) => sameJson(v, X)) : -1;
+    if (i >= 0) B.ownSent.splice(0, i + 1);
+    else if (B.mine && !(X && sameJson(X, B.mine.value))) { B.mine = null; B.ownSent = []; }
+  }
 
   const plugin = new pmState.Plugin({
     // A pasted copy of a block gets a new id from identityPlugin (model.js),
@@ -231,8 +263,8 @@ export function createPageBinding({ schema, store, lane, me, setTimer = setTimeo
     // a block too, before it knows the drop is a move.
     props: {
       handleDOMEvents: {
-        compositionstart() { composing = true; return false; },
-        compositionend() { composing = false; setTimer(releaseAll, 0); return false; },
+        compositionstart(v) { composing = headBlock(v); return false; },
+        compositionend() { composing = null; setTimer(releaseAll, 0); return false; },
       },
     },
     // A block that comes back under its tombstone's id (undo of a delete, a
@@ -257,6 +289,7 @@ export function createPageBinding({ schema, store, lane, me, setTimer = setTimeo
     const prev = view.state;
     const { state, transactions } = prev.applyTransaction(tr);
     view.updateState(state);
+    if (composing !== null && composing !== "*" && headBlock(view) !== composing) composing = "*";
     const local = transactions.filter((t) => !t.getMeta(REMOTE));
     if (local.some((t) => t.docChanged) && !transactions.some((t) => t.getMeta(REMOTE))) commit(prev.doc, state.doc, local);
   }
@@ -305,6 +338,10 @@ export function createPageBinding({ schema, store, lane, me, setTimer = setTimeo
       const B = ensure(x.id, null, x.value);
       B.edited = true;
       if (x.del) B.removedFrom = x.text;
+      if (!B.text) {
+        if (x.del) { B.mine = null; B.ownSent = []; }
+        else { B.mine = { value: strip(x.value) }; B.ownSent.push(strip(x.value)); remember(B, x.value); }
+      }
       // A block this tab made (a split's second half, a paste): its text is
       // tracked from its first unit, before the block's first release.
       else if (made && B.heal && typeof x.value.c === "string") B.heal.created(x.value.c);
@@ -331,6 +368,7 @@ export function createPageBinding({ schema, store, lane, me, setTimer = setTimeo
 
   function send(B, value, ids) {
     if (value && B.heal) B.heal.wrote(value, ids ?? B.heal.agreedIds());
+    if (value && !B.text) { B.mine = { value: strip(value) }; B.ownSent.push(strip(value)); remember(B, value); }
     const mark = store.mark;
     if (value === null) store.handle.delete(["blocks", B.id]);
     else store.handle.set(["blocks", B.id], packMarks(value));
@@ -352,7 +390,7 @@ export function createPageBinding({ schema, store, lane, me, setTimer = setTimeo
     }
     if (ev.phase === "refused" || ev.phase === "undone") {
       const hit = (opId) => opId <= ev.through && (ev.from == null || opId >= ev.from);
-      for (const [opId, id] of opBlock) if (hit(opId)) { const B = blocks.get(id); if (B) { B.refused = true; dirty.add(id); } }
+      for (const [opId, id] of opBlock) if (hit(opId)) { const B = blocks.get(id); if (B) { B.refused = true; dirty.add(id); if (!B.text) { B.mine = null; B.ownSent = []; } } }
       // A refused write is out of recovery: never waited for, never healed back.
       for (const B of blocks.values()) {
         if (B.unechoed.length) B.unechoed = B.unechoed.filter((u) => !hit(u.id));
@@ -380,7 +418,7 @@ export function createPageBinding({ schema, store, lane, me, setTimer = setTimeo
         else B.tomb = true;
         continue;
       }
-      if (!B.text) continue;
+      if (!B.text) { cameWhole(B, op.X ? strip(op.X) : null); continue; }
       const X = op.X && Array.isArray(op.X.c) ? { ...blockJson(nodeFromBlock(schema, op.id, op.X)), ...(op.X.w ? { w: op.X.w } : {}) } : op.X;
       if (X && X.w && X.w.a === me) echoed(B, op.sent ?? X);
       B.heal.step(X, at);
@@ -411,7 +449,12 @@ export function createPageBinding({ schema, store, lane, me, setTimer = setTimeo
       for (const id of ids) {
         const B = ensure(id, next);
         dirty.add(id);
-        if (!B.text) { B.tomb = tombOf(next, id); continue; }
+        if (!B.text) {
+          B.tomb = tombOf(next, id);
+          const raw = rawOf(next, id);
+          if (raw) cameWhole(B, strip(raw));
+          continue;
+        }
         if (room.seq !== B.r.seq || !same(rawOf(next, id), B.r.S)) B.heal.join(rawOf(next, id), room.seq, { tomb: tombOf(next, id) });
         // Writes the joined value already holds never come back one by one.
         B.unechoed = B.unechoed.filter((u) => u.seq === null || u.seq > room.seq);
@@ -435,6 +478,7 @@ export function createPageBinding({ schema, store, lane, me, setTimer = setTimeo
     epoch = now;
     seq = room.seq;
     const pending = new Set(store.pendingEntries().map((e) => e.id));
+    const held = heldIds();
     const ids = new Set([...blocks.keys(), ...Object.keys(next?.blocks ?? {}), ...moves.map((mv) => mv.id)]);
     for (const id of ids) {
       const B = ensure(id, next, moves.find((mv) => mv.id === id)?.X);
@@ -445,7 +489,10 @@ export function createPageBinding({ schema, store, lane, me, setTimer = setTimeo
       // delete heals like the text does, so a join's second half never comes
       // back as a duplicate.
       const wasGone = B.text ? B.r.tomb : B.tomb;
-      const lostDel = !first && (wasGone || (B.unechoedDel && !pending.has(B.unechoedDel))) && rawOf(next, id) && !tombOf(next, id);
+      // A peer's write to the block in the new epoch wins over a lost delete:
+      // nothing typed was lost, so nothing is noticed.
+      const peerChanged = mine.some((mv) => !mv.tombstone && !(mv.X && mv.X.w && mv.X.w.a === me) && !(B.mine && mv.X && sameJson(strip(mv.X), B.mine.value)));
+      const lostDel = !first && !peerChanged && (wasGone || (B.unechoedDel && !pending.has(B.unechoedDel))) && rawOf(next, id) && !tombOf(next, id);
       B.unechoedDel = null;
       if (lostDel) {
         stats.heals++;
@@ -461,6 +508,24 @@ export function createPageBinding({ schema, store, lane, me, setTimer = setTimeo
       }
       if (!B.text) {
         B.tomb = tombOf(next, id);
+        const raw = rawOf(next, id), now = raw ? strip(raw) : null;
+        const lostWhole = !first && !lostDel && B.mine && !(now && sameJson(now, B.mine.value)) && !held.has(id);
+        if (lostWhole) {
+          const v = B.mine.value;
+          // The new room holds a value this tab has seen (an older one, from the
+          // file) and no peer wrote the block since: this tab's write heals. A
+          // peer's write, or a value this tab never saw, wins, with a notice
+          // that keeps this tab's value for Restore.
+          if (peerChanged || B.tomb || (now && !B.seen.some((x) => sameJson(x, now)))) {
+            B.mine = null;
+            B.ownSent = [];
+            notice({ kind: "heal", id, lost: "", by: me, block: v });
+          } else {
+            stats.heals++;
+            queueMicrotask(() => send(B, v));
+          }
+        }
+        B.seen = now ? [now] : [];
         continue;
       }
       const r = B.r;
@@ -493,15 +558,15 @@ export function createPageBinding({ schema, store, lane, me, setTimer = setTimeo
   function readyFor(B) {
     const found = view ? findBlock(view.state.doc, B.id) : null;
     const shown = found && found.node.isTextblock ? flatten(found.node.content).c : null;
-    return !(heldIds().has(B.id) || B.unechoed.length || composing || shown !== (B.r.S ? B.r.S.c : null));
+    return !(heldIds().has(B.id) || B.unechoed.length || holds(B.id) || shown !== (B.r.S ? B.r.S.c : null));
   }
 
   // Show every changed block whose writes have all landed, in one transaction.
   function releaseAll() {
-    if (!view || composing || view.composing) return;
+    if (!view || composing === "*" || (composing === null && view.composing)) return;
     const held = heldIds();
     if (held.has("*")) return;
-    const ids = [...dirty].filter((id) => !held.has(id));
+    const ids = [...dirty].filter((id) => !held.has(id) && !holds(id));
     if (!ids.length) return;
     const tr = view.state.tr;
     const sel = view.state.selection;
@@ -656,7 +721,7 @@ export function createPageBinding({ schema, store, lane, me, setTimer = setTimeo
   }
 
   function repair(B) {
-    if (heldIds().has(B.id) || composing || dirty.has(B.id)) return;
+    if (heldIds().has(B.id) || holds(B.id) || dirty.has(B.id)) return;
     const raw = rawOf(store.authoritative, B.id);
     const S = agreedOf(B);
     if (same(raw, S)) return;
@@ -666,7 +731,7 @@ export function createPageBinding({ schema, store, lane, me, setTimer = setTimeo
   }
 
   function follow(B) {
-    if (heldIds().has(B.id) || composing) return;
+    if (heldIds().has(B.id) || holds(B.id)) return;
     const tomb = B.text ? B.r.tomb : B.tomb;
     if (tomb && rawOf(store.authoritative, B.id)) { stats.repairs++; send(B, null); return; }
     if (!B.text || !B.r.behind) return;
@@ -695,7 +760,7 @@ export function createPageBinding({ schema, store, lane, me, setTimer = setTimeo
     });
   }
   const unsaved = registerUnsavedState({ id: "page:live", isPending: () => store.pending.length > 0, flush });
-  const unsavedHeld = registerUnsavedState({ id: "page:held", isPending: () => composing });
+  const unsavedHeld = registerUnsavedState({ id: "page:held", isPending: () => composing !== null });
 
   return {
     plugin,
