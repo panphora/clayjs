@@ -9,6 +9,8 @@
 // Returns null when the store is unknown, else { changed, dropped, landedMoved }.
 import { applyOp, checkOp, cloneJson, diffOps, serializeLive, textHash } from "../../../../src/live/ops.js";
 
+import { frameSet, contains, descendants, saveReceipt, postReceipt, replaceReceipt } from "../../../../src/live/provenance.js";
+
 const encoder = new TextEncoder();
 const utf8 = (text) => encoder.encode(text).length;
 
@@ -33,13 +35,14 @@ function placed(room, store, at) {
 
 function provenBy(room, name, file, stamped) {
   if (!file.by || !stamped || file.at.epoch !== room.epoch) return null;
+  if (file.by.v === 2) return file.by;
   const last = room.lastN.get(name + "\n" + file.by.client);
   return file.by.n <= (last ? last.n : 0) + 1 ? file.by : null;
 }
 
 export function mergeFile(room, name, file, { limits, restored = false } = {}) {
   const store = room.stores.get(name);
-  if (!store) return null;
+  if (!store || store.ephemeral || file.value === null || typeof file.value !== "object" || Array.isArray(file.value) !== Array.isArray(store.value)) return null;
   store.inFile ??= new Set();
   let value = cloneJson(file.value);
   const before = store.landed;
@@ -50,7 +53,14 @@ export function mergeFile(room, name, file, { limits, restored = false } = {}) {
     return { changed: false, dropped: false, landedMoved: before !== -1 };
   }
   const by = restored ? null : provenBy(room, name, file, stamped);
-  const own = (entry) => !!by && !entry.merge && entry.from === by.client && entry.n <= by.n;
+  const frames = frameSet(by);
+  const ancestry = descendants(by);
+  const own = (entry) => {
+    if (!by) return false;
+    if (!entry.merge) return contains(frames, entry.from, entry.n);
+    const p = entry.provenance;
+    return by.v === 2 && p && p.at.epoch === file.at.epoch && p.at.seq === file.at.seq && contains(ancestry, ...p.capture);
+  };
   if (stamped) store.inFile.clear();
   const entries = [];
   for (const entry of store.log) {
@@ -80,20 +90,22 @@ export function mergeFile(room, name, file, { limits, restored = false } = {}) {
     store.bytes = bytes;
     room.seq += 1;
     store.last = room.seq;
-    const logged = utf8(JSON.stringify(ops));
-    store.log.push({ seq: room.seq, ops, bytes: logged, merge: true });
+    const provenance = by?.v === 2 ? { at: { epoch: file.at.epoch, seq: file.at.seq }, by: by.frames, capture: by.capture } : null;
+    const logged = utf8(JSON.stringify(provenance ? { ops, provenance } : ops));
+    store.log.push({ seq: room.seq, ops, bytes: logged, merge: true, ...(provenance && { provenance }) });
     store.inFile.add(room.seq);
     store.logBytes += logged;
     evict(store, limits);
     changed = true;
   }
   store.landed = entries.length ? base : store.last;
-  if (by) {
+  if (by?.v === 2) {
+    for (const [client, ranges] of by.frames) saveReceipt(room, name + "\n" + client, ranges, store.last, limits.receipts ?? 4096);
+  } else if (by) {
     const nKey = name + "\n" + by.client;
     const last = room.lastN.get(nKey);
     if ((!last || last.n < by.n) && (last || room.lastN.size < (limits.receipts ?? Infinity))) {
-      room.lastN.delete(nKey);
-      room.lastN.set(nKey, { n: by.n, seq: store.last });
+      replaceReceipt(room, nKey, postReceipt(last, by.n, store.last));
     }
   }
   return { changed, dropped: false, landedMoved: store.landed !== before };

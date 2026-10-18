@@ -4,6 +4,7 @@
 // (64 KB body). Delivery: each client's stream is FIFO with its own latency;
 // a POST answer has an independent latency, so it can beat or trail the event.
 import { applyTracked, cloneJson, serializeLive, sizeChange, undoTracked, validateOp } from "../../../../src/live/ops.js";
+import { receiptHas, postReceipt, replaceReceipt } from "../../../../src/live/provenance.js";
 import { evict, mergeFile } from "./file-merge.js";
 
 export const LIMITS = { opsPerFrame: 128, storeBytes: 1024 * 1024, roomBytes: 2 * 1024 * 1024, logEntries: 4096, logBytes: 256 * 1024, bodyBytes: 64 * 1024, movesBytes: 1024 * 1024, receipts: 4096 };
@@ -118,7 +119,8 @@ export function createRoom(sim, initialStores, { latency = () => 40, answerLaten
     if (!Number.isInteger(frame.n) || frame.n < 1 || !Array.isArray(frame.ops) || !frame.ops.length || frame.ops.length > LIMITS.opsPerFrame) return { status: 400, body: { code: "bad-frame" } };
     const nKey = frame.name + "\n" + clientId;
     const last = room.lastN.get(nKey);
-    if (last && frame.n <= last.n) return { status: 200, body: { duplicate: true, seq: last.seq, epoch: room.epoch } };
+    if (receiptHas(last, frame.n)) return { status: 200, body: { duplicate: true, seq: frame.n <= last.n ? last.seq : last.savedSeq, epoch: room.epoch } };
+    if (last?.blocked || (!last && room.receiptsBlocked)) return { status: 503, body: { code: "busy" } };
     // In place, as live-data-rooms.js apply does: sized slot by slot, taken back when refused.
     let ops;
     let value = store.value;
@@ -150,8 +152,7 @@ export function createRoom(sim, initialStores, { latency = () => 40, answerLaten
     store.log.push({ seq: room.seq, ops, bytes: logged, from: clientId, n: frame.n });
     store.logBytes += logged;
     evict(store, LIMITS);
-    room.lastN.delete(nKey);
-    room.lastN.set(nKey, { n: frame.n, seq: room.seq });
+    replaceReceipt(room, nKey, postReceipt(last, frame.n, room.seq));
     room.lastSentAt.set(clientId, sim.now());
     if (!room.writer) setWriter(clientId);
     room.frames++;
@@ -199,6 +200,7 @@ export function createRoom(sim, initialStores, { latency = () => 40, answerLaten
       stores: Object.fromEntries([...room.stores].map(([name, s]) => [name, {
         value: cloneJson(s.value), ephemeral: false, last: s.last, landed: s.landed, floor: s.floor,
         seen: { [clientId]: room.lastN.get(name + "\n" + clientId)?.n ?? 0 },
+        ...(room.lastN.get(name + "\n" + clientId)?.saved?.length && { saved: room.lastN.get(name + "\n" + clientId).saved }),
       }])),
     };
     // live-data-rooms.js state(): past movesBytes over every store, a store's moves are null.
@@ -271,6 +273,8 @@ export function createRoom(sim, initialStores, { latency = () => 40, answerLaten
     room.writer = null;
     room.lastSentAt = new Map();
     room.lastN = new Map();
+    room.receiptsBlocked = false;
+    room.receiptBytes = 0;
     room.stores = new Map();
     for (const [name, value] of Object.entries(fileStores)) room.stores.set(name, { value: cloneJson(value), bytes: bytes(value), from: null, last: 0, landed: 0, floor: 0, log: [], logBytes: 0, inFile: new Set() });
     for (const id of room.clients.keys()) { const c = room.clients.get(id); if (c.connected) { room.close(id); sim.after(200, () => room.open(id)); } }
