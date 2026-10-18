@@ -16,6 +16,7 @@ import { linkPlugin } from "./link.js";
 import { blockSelectionPlugin } from "./blocksel.js";
 import { markdownPlugin, backspaceToParagraph } from "./markdown.js";
 import { mediaPlugin, ImageView, FileView } from "./media.js";
+import { highlightPlugin, CodeBlockView } from "./highlight.js";
 
 const STYLE_ID = "page-editor-style";
 const INDENTS = [1, 2, 3, 4, 5, 6, 7, 8];
@@ -25,6 +26,7 @@ const LIGHT = `
   --page-rule: rgba(35, 34, 31, 0.10); --page-accent: #2F5E9E; --page-link: #164583; --page-selection: rgba(88, 120, 170, 0.20);
   --page-check-border: rgba(35, 34, 31, 0.35); --page-check-fill: #23221F; --page-check-ink: #F7F6F2;
   --page-callout-bg: rgba(35, 34, 31, 0.04); --page-code-bg: rgba(35, 34, 31, 0.05);
+  --page-code-token-keyword: #8A3B6E; --page-code-token-constant: #1F5A8A; --page-code-token-string: #3E6A28; --page-code-token-string-expression: #3E6A28; --page-code-token-comment: #8B877E; --page-code-token-function: #5E4596; --page-code-token-parameter: #8A5A1E; --page-code-token-punctuation: var(--page-ink-soft); --page-code-token-link: var(--page-link);
   --page-chrome-ink-rest: rgba(35, 34, 31, 0.20); --page-chrome-ink-moved: rgba(35, 34, 31, 0.34);
   --page-chrome-bg-rest: rgba(35, 34, 31, 0.02); --page-chrome-bg-moved: rgba(35, 34, 31, 0.04);
   --page-chrome-line-rest: rgba(35, 34, 31, 0.06); --page-chrome-line-moved: rgba(35, 34, 31, 0.11);
@@ -38,6 +40,7 @@ const DARK = `
   --page-rule: rgba(231, 228, 220, 0.10); --page-accent: #8DB0E6; --page-link: #8DB0E6; --page-selection: rgba(120, 155, 210, 0.28);
   --page-check-border: rgba(231, 228, 220, 0.35); --page-check-fill: #E7E4DC; --page-check-ink: #1A1A18;
   --page-callout-bg: rgba(231, 228, 220, 0.05); --page-code-bg: rgba(231, 228, 220, 0.06);
+  --page-code-token-keyword: #D9A0C8; --page-code-token-constant: #8DB0E6; --page-code-token-string: #A9C98B; --page-code-token-string-expression: #A9C98B; --page-code-token-comment: #75726B; --page-code-token-function: #BBA6E6; --page-code-token-parameter: #E0B47A; --page-code-token-punctuation: var(--page-ink-soft); --page-code-token-link: var(--page-link);
   --page-chrome-ink-rest: rgba(231, 228, 220, 0.18); --page-chrome-ink-moved: rgba(231, 228, 220, 0.30);
   --page-chrome-bg-rest: rgba(231, 228, 220, 0.02); --page-chrome-bg-moved: rgba(231, 228, 220, 0.04);
   --page-chrome-line-rest: rgba(231, 228, 220, 0.06); --page-chrome-line-moved: rgba(231, 228, 220, 0.11);
@@ -75,6 +78,10 @@ export const PAGE_EDITOR_CSS = `
 .page-editor code { font-family: var(--page-font-mono); font-size: 0.88em; background: var(--page-code-bg); color: var(--page-code-ink); border-radius: 4px; padding: 0.1em 0.3em; }
 .page-editor pre { font-family: var(--page-font-mono); font-size: 0.88em; background: var(--page-code-bg); color: var(--page-code-ink); border-radius: 8px; padding: 12px 14px; }
 .page-editor pre code { background: none; padding: 0; font-size: inherit; }
+.page-editor pre { position: relative; padding-top: 32px; }
+.page-code-lang { position: absolute; top: 5px; inset-inline-end: 6px; max-width: 120px; height: 24px; padding: 0 4px; border: 0; border-radius: 5px; background: none; color: var(--page-ink-faint); font: 12px/1 var(--page-font); opacity: 0; cursor: pointer; transition: opacity var(--page-fade); }
+.page-editor pre:hover .page-code-lang, .page-editor pre:focus-within .page-code-lang, .page-code-lang:focus-visible, .page-editor pre[data-lang] .page-code-lang { opacity: 1; }
+.page-code-lang:hover, .page-code-lang:focus-visible { background: var(--page-pop-hover); color: var(--page-ink-soft); }
 .page-editor .page-callout { background: var(--page-callout-bg); border: 1px solid var(--page-callout-line); border-radius: 8px; padding: 10px 14px; }
 .page-editor hr { border: 0; border-top: 1px solid var(--page-rule); margin-block: 1.2em; }
 .page-editor .page-hidden { display: none; }
@@ -208,7 +215,7 @@ const markKeys = {
 
 const defaultUpload = (file, options) => globalThis.clay?.upload?.(file, options) ?? Promise.resolve({ ok: false, code: "unavailable", msg: "File uploads are not available in this editor" });
 
-export function pagePlugins({ upload = defaultUpload } = {}) {
+export function pagePlugins({ upload = defaultUpload, highlight } = {}) {
   return [
     announcementPlugin(),
     chromePlugin(),
@@ -223,6 +230,7 @@ export function pagePlugins({ upload = defaultUpload } = {}) {
     identityPlugin(),
     collapsePlugin(),
     mediaPlugin({ upload }),
+    highlightPlugin(highlight),
     pastePlugin(),
     history.history(),
     gapcursor.gapCursor(),
@@ -254,7 +262,7 @@ function checkboxClick(view, event) {
 // Mounts the editor in `mount`, inside a .page-shell wrapper (the surface a
 // theme styles). `onChange(record)` gets the block record (blockMap) after
 // every transaction that changed the document.
-export function createPageEditor(mount, { blocks = null, onChange = null, upload } = {}) {
+export function createPageEditor(mount, { blocks = null, onChange = null, upload, highlight } = {}) {
   const doc = mount.ownerDocument;
   if (!doc.getElementById(STYLE_ID)) {
     const style = doc.createElement("style");
@@ -269,11 +277,12 @@ export function createPageEditor(mount, { blocks = null, onChange = null, upload
   mount.appendChild(shell);
   let afterStep = false;
   const view = new pmView.EditorView(shell, {
-    state: pageState(blocks, { upload }),
+    state: pageState(blocks, { upload, highlight }),
     attributes: { class: "page-editor" },
     nodeViews: {
       image: (node, v, getPos) => new ImageView(node, v, getPos),
       file: (node, v) => new FileView(node, v),
+      code_block: (node, v, getPos) => new CodeBlockView(node, v, getPos),
     },
     handleDOMEvents: {
       mousedown: checkboxClick,

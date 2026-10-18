@@ -968,7 +968,7 @@ export const clipboardParser = new model.DOMParser(schema, [
   { tag: "h2", node: "heading", getAttrs: (d) => ({ level: 2, parent: parentAttr(d) }) },
   { tag: "h3", node: "heading", getAttrs: (d) => ({ level: 3, parent: parentAttr(d) }) },
   { tag: "h4", node: "heading", getAttrs: (d) => ({ level: 3, parent: parentAttr(d) }) },
-  { tag: "pre", node: "code_block", preserveWhitespace: "full", getAttrs: (d) => ({ parent: parentAttr(d) }) },
+  { tag: "pre", node: "code_block", preserveWhitespace: "full", getAttrs: (d) => ({ lang: d.getAttribute("data-lang") || "", parent: parentAttr(d) }) },
   { tag: "hr", node: "divider", getAttrs: (d) => ({ parent: parentAttr(d) }) },
   { tag: "aside.page-callout", node: "callout", getAttrs: (d) => ({ parent: parentAttr(d) }) },
   { tag: 'figure:not([data-type]), figure[data-type="image"]', node: "image", getAttrs: (d) => {

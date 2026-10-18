@@ -422,3 +422,32 @@ describe('Backspace and Delete with a selection', () => {
     });
   }
 });
+
+describe('code block colours in a browser', () => {
+  const until = async (fn, ms = 4000) => { const end = Date.now() + ms; while (Date.now() < end) { if (fn()) return true; await settle(50); } return false; };
+  const keywordSpans = (id) => [...el(id).querySelectorAll('code span[style]')].filter((s) => s.getAttribute('style').includes('--page-code-token-keyword'));
+
+  it('a block on screen is coloured by Shiki; one far below waits until it is scrolled into view', async () => {
+    const blocks = LONG(80);
+    blocks.top = { t: 'code_block', pos: 'A', lang: 'javascript', c: 'const a = 1' };
+    blocks.far = { t: 'code_block', pos: 'ZZZ', lang: 'python', c: 'def f():\n  return 1' };
+    setup(blocks);
+    expect(await until(() => keywordSpans('top').length > 0)).to.equal(true);
+    const span = keywordSpans('top')[0];
+    expect(span.textContent).to.equal('const');
+    expect(getComputedStyle(span).color).to.not.equal(getComputedStyle(el('top').querySelector('code')).color);
+    await settle(400);
+    expect(keywordSpans('far').length).to.equal(0);
+    el('far').scrollIntoView();
+    expect(await until(() => keywordSpans('far').length > 0)).to.equal(true);
+  });
+
+  it('the language picker colours a plain block', async () => {
+    setup({ c: { t: 'code_block', pos: 'V', c: 'SELECT 1 FROM t' } });
+    const picker = el('c').querySelector('select.page-code-lang');
+    picker.value = 'sql';
+    picker.dispatchEvent(new Event('change'));
+    expect(view.state.doc.child(0).attrs.lang).to.equal('sql');
+    expect(await until(() => keywordSpans('c').length > 0)).to.equal(true);
+  });
+});
