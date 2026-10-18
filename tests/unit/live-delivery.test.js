@@ -211,7 +211,7 @@ test("a writer event with landed tells checkpointed with that seq", async () => 
   await settle();
   a.events.length = 0;
   room.clients.get("a").handlers.writer({ epoch: "e1", writer: "b", landed: { game: 7 } });
-  expect(a.events).toEqual([{ code: null, n: null, seq: 7, through: null, retryAfter: null, phase: "checkpointed" }]);
+  expect(a.events).toEqual([{ client: "a", code: null, n: null, seq: 7, through: null, retryAfter: null, phase: "checkpointed" }]);
   expect(a.entries.get("game").landed).toBe(7);
 });
 
