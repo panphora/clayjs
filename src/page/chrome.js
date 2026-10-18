@@ -5,7 +5,7 @@
 // --page-* tokens in editor.js (contract: default-page/v1/look/THEME-CONTRACT.md).
 import { state, commands } from "../vendor/prosemirror.vendor.js";
 import { schema } from "./schema.js";
-import { BlockSelection, outline, moveBlock, indentBlocks, outdentBlocks } from "./blocks.js";
+import { BlockSelection, outline, siblingSpan, moveBlock, indentBlocks, outdentBlocks } from "./blocks.js";
 import { currentSpan, selectBlocks, duplicateBlocks, deleteBlocks } from "./blocksel.js";
 import { openAltEditor, setImageAttrs } from "./media.js";
 import { openLinkEditor } from "./link.js";
@@ -52,6 +52,7 @@ const actionsFor = (st) => {
 const svg = (body) => `<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
 const ICONS = {
   plus: svg('<path d="M8 3.5v9M3.5 8h9"/>'),
+  grip: svg('<path stroke-width="2.2" d="M6 3.5h.01M10 3.5h.01M6 8h.01M10 8h.01M6 12.5h.01M10 12.5h.01"/>'),
   strong: svg('<path d="M5 3h4a2.5 2.5 0 0 1 0 5H5zM5 8h4.6a2.5 2.5 0 0 1 0 5H5z"/>'),
   em: svg('<path d="M10 3H6.5M9.5 13H6M9 3l-2 10"/>'),
   strike: svg('<path d="M3 8h10M10.8 5.2C10.5 4 9.4 3.2 8 3.2c-1.7 0-2.8.9-2.8 2.1M5.2 10.8c.3 1.2 1.4 2 2.8 2 1.7 0 2.8-.9 2.8-2.1"/>'),
@@ -101,22 +102,25 @@ class Chrome {
     this.shell = view.dom.parentElement;
     this.menu = null;
     this.movedTimer = 0;
+    this.hover = null;
 
     this.dock = el("div", "page-dock", { role: "toolbar", "aria-label": "Formatting" });
     this.turn = el("button", "page-tool page-tool-turn", { type: "button", "aria-haspopup": "menu" });
     this.dock.append(this.turn, el("span", "page-tool-sep"), ...MARK_TOOLS.map(([n, l]) => toolButton(n, l)));
     this.plus = el("button", "page-plus", { type: "button", "aria-label": "Add a block", title: "Add a block" });
     this.plus.innerHTML = ICONS.plus;
+    this.grip = el("button", "page-grip", { type: "button", "aria-label": "Block actions", title: "Drag to move, click for actions", "aria-haspopup": "menu" });
+    this.grip.innerHTML = ICONS.grip;
     this.bubble = el("div", "page-bubble", { role: "toolbar", "aria-label": "Selection", hidden: "" });
     this.bubble.append(...MARK_TOOLS.map(([n, l]) => toolButton(n, l)));
     this.menuId = `page-menu-${++menuCount}`;
     this.menuEl = el("div", "page-menu", { role: "menu", id: this.menuId, hidden: "" });
     this.scrim = el("div", "page-scrim", { hidden: "" });
     this.shell.insertBefore(this.dock, view.dom);
-    this.shell.append(this.plus, this.bubble, this.scrim, this.menuEl);
+    this.shell.append(this.plus, this.grip, this.bubble, this.scrim, this.menuEl);
 
     const keepFocus = (e) => e.preventDefault();
-    for (const part of [this.dock, this.plus, this.bubble, this.menuEl]) part.addEventListener("mousedown", keepFocus);
+    for (const part of [this.dock, this.plus, this.grip, this.bubble, this.menuEl]) part.addEventListener("mousedown", keepFocus);
     for (const bar of [this.dock, this.bubble]) {
       bar.addEventListener("click", (e) => {
         const b = e.target.closest("[data-cmd]");
@@ -125,25 +129,33 @@ class Chrome {
     }
     this.turn.addEventListener("click", () => this.toggleMenu("turn", this.turn));
     this.plus.addEventListener("click", () => this.fromPlus());
+    this.grip.addEventListener("click", () => (this.menu ? this.closeMenu() : this.openActions(this.grip, this.gutterIndex())));
     this.scrim.addEventListener("click", () => this.closeMenu());
     this.menuEl.addEventListener("click", (e) => {
       const row = e.target.closest(".page-menu-item");
       if (row) this.pick(Number(row.dataset.index));
     });
-    this.onMove = () => {
+    this.onMove = (e) => {
       this.shell.classList.add("is-moved");
       clearTimeout(this.movedTimer);
       this.movedTimer = setTimeout(() => this.shell.classList.remove("is-moved"), MOVED_MS);
+      this.trackHover(e);
     };
-    this.onKey = () => { clearTimeout(this.movedTimer); this.shell.classList.remove("is-moved"); };
+    this.onKey = () => {
+      clearTimeout(this.movedTimer);
+      this.shell.classList.remove("is-moved");
+      this.setHover(null);
+    };
+    this.onLeave = () => this.setHover(null);
     this.onResize = () => this.place();
     this.onDocDown = (e) => {
       if (!this.menu) return;
-      if ([this.menuEl, this.plus, this.turn].some((part) => part.contains(e.target))) return;
+      if ([this.menuEl, this.plus, this.grip, this.turn].some((part) => part.contains(e.target))) return;
       this.closeMenu();
     };
     document.addEventListener("mousedown", this.onDocDown, true);
     this.shell.addEventListener("mousemove", this.onMove);
+    this.shell.addEventListener("mouseleave", this.onLeave);
     this.shell.addEventListener("keydown", this.onKey);
     window.addEventListener("resize", this.onResize);
     this.update(view, null);
@@ -156,7 +168,25 @@ class Chrome {
   }
 
   gutterIndex() {
-    return this.blockIndex();
+    return Math.min(this.hover ?? this.blockIndex(), this.view.state.doc.childCount - 1);
+  }
+
+  trackHover(event) {
+    if (this.menu) return;
+    const view = this.view;
+    const hit = view.posAtCoords({ left: view.dom.getBoundingClientRect().left + 2, top: event.clientY });
+    if (!hit) return;
+    const doc = view.state.doc;
+    const ents = outline(doc);
+    let i = Math.min(doc.resolve(hit.inside >= 0 ? hit.inside : hit.pos).index(0), ents.length - 1);
+    while (i > 0 && ents[i].hidden) i--;
+    this.setHover(i);
+  }
+
+  setHover(i) {
+    if (i === this.hover) return;
+    this.hover = i;
+    this.place();
   }
 
   fromPlus() {
@@ -190,10 +220,13 @@ class Chrome {
     return rankItems(m.mode === "turn" ? BLOCK_TYPES : MENU_ITEMS, m.query);
   }
 
-  openActions(anchor = this.plus) {
+  openActions(anchor = this.plus, at = null) {
     const st = this.view.state;
-    const { lo, hi } = currentSpan(st);
-    this.view.dispatch(st.tr.setSelection(selectBlocks(st.doc, lo, hi)));
+    const ents = outline(st.doc);
+    const sel = st.selection;
+    const inside = at !== null && sel instanceof BlockSelection && sel.span(st.doc).lo <= at && at <= sel.span(st.doc).hi;
+    const { lo, hi } = at === null || inside ? currentSpan(st, ents) : siblingSpan(ents, at, at);
+    this.view.dispatch(st.tr.setSelection(selectBlocks(st.doc, lo, hi, ents)));
     this.openMenu("actions", anchor, null, lo);
   }
 
@@ -303,15 +336,17 @@ class Chrome {
     const st = view.state;
     const shellBox = this.shell.getBoundingClientRect();
     const edBox = view.dom.getBoundingClientRect();
-    const i = this.blockIndex();
+    const i = this.gutterIndex();
     let at = 0;
     for (let k = 0; k < i; k++) at += st.doc.child(k).nodeSize;
     const dom = view.nodeDOM(at);
     if (dom && dom.getBoundingClientRect) {
       const r = dom.getBoundingClientRect();
       const lineH = parseFloat(getComputedStyle(dom).lineHeight) || r.height;
-      this.plus.style.setProperty("--page-plus-top", `${r.top - shellBox.top + Math.min(r.height, lineH) / 2}px`);
-      this.plus.style.setProperty("--page-plus-left", `${r.left - shellBox.left}px`);
+      for (const part of [this.plus, this.grip]) {
+        part.style.setProperty("--page-plus-top", `${r.top - shellBox.top + Math.min(r.height, lineH) / 2}px`);
+        part.style.setProperty("--page-plus-left", `${r.left - shellBox.left}px`);
+      }
     }
     this.plus.style.setProperty("--page-text-left", `${edBox.left - shellBox.left}px`);
 
@@ -351,6 +386,7 @@ class Chrome {
     const showBubble = !st.selection.empty && st.selection instanceof TextSelection && view.hasFocus();
     this.bubble.hidden = !showBubble;
     if (showBubble) for (const b of this.bubble.querySelectorAll("[data-cmd]")) b.setAttribute("aria-pressed", String(markActive(st, M[b.dataset.cmd])));
+    this.grip.classList.toggle("is-on", st.selection instanceof BlockSelection);
     this.slashQuery();
     this.place();
   }
@@ -358,10 +394,11 @@ class Chrome {
   destroy() {
     clearTimeout(this.movedTimer);
     this.shell.removeEventListener("mousemove", this.onMove);
+    this.shell.removeEventListener("mouseleave", this.onLeave);
     this.shell.removeEventListener("keydown", this.onKey);
     window.removeEventListener("resize", this.onResize);
     document.removeEventListener("mousedown", this.onDocDown, true);
-    for (const part of [this.dock, this.plus, this.bubble, this.scrim, this.menuEl]) part.remove();
+    for (const part of [this.dock, this.plus, this.grip, this.bubble, this.scrim, this.menuEl]) part.remove();
   }
 }
 
