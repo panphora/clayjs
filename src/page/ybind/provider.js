@@ -33,10 +33,64 @@ export function yValueOf(ydoc) {
   return { v: 1, g: 0, y: { seed: enc(Y.encodeStateAsUpdateV2(ydoc)) } };
 }
 
-export function docFromValue(value) {
+export class YDecodeError extends Error {
+  constructor(code, message) {
+    super(message);
+    this.name = "YDecodeError";
+    this.code = code;
+  }
+}
+
+const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}(?:==)?|[A-Za-z0-9+/]{3}=?)?$/;
+
+function strictEntries(value) {
+  if (value?.v !== 1 || !value.y || typeof value.y !== "object" || Array.isArray(value.y)) {
+    throw new YDecodeError("invalid-value", "Expected a version 1 Yjs page value");
+  }
+  const groups = new Map();
+  const whole = new Set();
+  for (const [key, text] of Object.entries(value.y)) {
+    if (typeof text !== "string") throw new YDecodeError("invalid-update", `Invalid Yjs update: ${key}`);
+    const part = PART_KEY.exec(key);
+    if (!part) { whole.add(key); continue; }
+    const index = Number(part[2]), count = Number(part[3]);
+    if (!Number.isSafeInteger(index) || !Number.isSafeInteger(count) || count < 1 || index >= count) {
+      throw new YDecodeError("invalid-update", `Invalid Yjs update part: ${key}`);
+    }
+    const group = groups.get(part[1]) ?? { count, indices: new Set() };
+    if (group.count !== count || group.indices.has(index)) {
+      throw new YDecodeError("invalid-update", `Conflicting Yjs update parts: ${part[1]}`);
+    }
+    group.indices.add(index);
+    groups.set(part[1], group);
+  }
+  for (const [key, group] of groups) {
+    if (whole.has(key)) throw new YDecodeError("invalid-update", `Conflicting Yjs update forms: ${key}`);
+    if (group.indices.size !== group.count) throw new YDecodeError("incomplete-update", `Incomplete Yjs update: ${key}`);
+  }
+  return entriesOf(value.y);
+}
+
+export function docFromValue(value, { strict = false } = {}) {
+  const entries = strict ? strictEntries(value) : entriesOf(value.y);
   const d = new Y.Doc();
-  for (const [, v] of entriesOf(value.y)) Y.applyUpdateV2(d, dec(v), NET);
-  return d;
+  try {
+    for (const [key, value] of entries) {
+      const text = strict ? value.replace(/[\t\n\f\r ]/g, "") : value;
+      if (strict && !BASE64.test(text)) throw new YDecodeError("invalid-update", `Invalid base64 in Yjs update: ${key}`);
+      Y.applyUpdateV2(d, dec(text), NET);
+    }
+    if (strict && (d.store.pendingStructs || d.store.pendingDs)) {
+      throw new YDecodeError("unresolved-update", "Yjs page updates have missing prerequisites");
+    }
+    return d;
+  } catch (error) {
+    d.destroy();
+    if (strict && !(error instanceof YDecodeError)) {
+      throw new YDecodeError("invalid-update", `Invalid Yjs page update: ${error.message}`);
+    }
+    throw error;
+  }
 }
 
 const sameDeletes = (a, b) => Y.equalDeleteSets(Y.createDeleteSetFromStructStore(a.store), Y.createDeleteSetFromStructStore(b.store));
