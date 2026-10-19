@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Yjs page lab</title>
+  <script>window.clayEditMode = true;</script>
+  <script src="/v1/clay.js?plugins=live"></script>
+  <style>
+    body { font: 16px/1.5 system-ui, sans-serif; margin: 1rem; }
+    .lab { display: grid; grid-template-columns: minmax(0, 1fr) 18rem; gap: 1rem; }
+    .lab-editor { border: 1px solid #888; padding: .5rem 1rem; min-height: 14rem; white-space: pre-wrap; }
+    .lab-editor .ProseMirror { outline: none; min-height: 12rem; }
+    .lab-panel dl { display: grid; grid-template-columns: auto 1fr; gap: .2rem .8rem; margin: 0 0 .8rem; }
+    .lab-panel dd { margin: 0; font-family: ui-monospace, monospace; word-break: break-all; }
+    @media (max-width: 40rem) { .lab { grid-template-columns: minmax(0, 1fr); } }
+  </style>
+</head>
+<body>
+  <h1>Yjs page lab</h1>
+  <p>Open this page in two or three windows of the same browser.</p>
+  <script type="application/json" merge="page" clay="live ephemeral">{"v":1,"g":0,"y":{"seed-0000":"AAACQQkMAkKMAQRCtgIEQhAEAB0FACcAKACEAIUAJwAoAIQAhQAnACgAhACFACcAKMIBrwFmbG93YXR0cnNsYWIxdFRoZSBmaXJzdCBwYXJhZ3JhcGggb2YgdGhlIGxhYiBwYWdlLmF0dHJzbGFiMnRBIHNlY29uZCBwYXJhZ3JhcGgsIGEgbGl0dGxlIGxvbmdlciB0aGFuIHRoZSBmaXJzdCBvbmUsIHNvIHRoYXQgYSBjYXJldCBoYXMgcm9vbSB0byBtb3ZlLmF0dHJzbGFiM3RUaGlyZC5hdHRyc2xhYjR0BAUEASQFBAGZAQUEAQYFBAEPAQEAAAEAAAABAAAAAQAAAkECAkECAQ8AdgEBYncEbGFiMXcJcGFyYWdyYXBodgEBYncEbGFiMncJcGFyYWdyYXBodgEBYncEbGFiM3cJcGFyYWdyYXBodgEBYncEbGFiNHcJcGFyYWdyYXBoAA=="}}</script>
+  <div id="lab-root" clay="no-save no-watch"></div>
+  <script type="module" src="/tests/fixtures/ypage-lab/boot.js"></script>
+</body>
+</html>
