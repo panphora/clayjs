@@ -34,17 +34,16 @@ test("mounts with the page-editor class and injects the CSS once", () => {
   expect(styles[0].textContent).toBe(PAGE_EDITOR_CSS);
 });
 
-test("a stale editor style saved into the page is replaced by a fresh tag with the current CSS, which saves with the page", () => {
+test("a stale editor style saved into the page gets the current CSS in place, and is no-dirty so the update is never an edit", () => {
   const old = document.head.appendChild(document.createElement("style"));
   old.id = "page-editor-style";
   old.textContent = ".page-editor pre { white-space: pre; }";
   createPageEditor(mount());
   const styles = document.querySelectorAll("#page-editor-style");
   expect(styles.length).toBe(1);
+  expect(styles[0]).toBe(old);
   expect(styles[0].textContent).toBe(PAGE_EDITOR_CSS);
-  expect(styles[0]).not.toBe(old);
-  expect(old.isConnected).toBe(false);
-  expect(styles[0].hasAttribute("clay")).toBe(false);
+  expect(styles[0].getAttribute("clay")).toBe("no-dirty");
 });
 
 test("an empty record starts as one empty paragraph", () => {

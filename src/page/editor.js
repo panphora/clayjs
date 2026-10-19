@@ -17,6 +17,7 @@ import { blockSelectionPlugin } from "./blocksel.js";
 import { markdownPlugin, backspaceToParagraph } from "./markdown.js";
 import { mediaPlugin, ImageView, FileView } from "./media.js";
 import { highlightPlugin, CodeBlockView } from "./highlight.js";
+import { style } from "../lib/style.js";
 
 const STYLE_ID = "page-editor-style";
 const INDENTS = [1, 2, 3, 4, 5, 6, 7, 8];
@@ -266,18 +267,9 @@ function checkboxClick(view, event) {
 // every transaction that changed the document.
 export function createPageEditor(mount, { blocks = null, onChange = null, upload, highlight } = {}) {
   const doc = mount.ownerDocument;
-  // The style saves with the page, so the next load paints styled at once. Each
-  // load puts the current CSS in a fresh tag and drops the saved one, so a page
-  // saved by an older editor picks up newer styles.
-  const saved = [...doc.querySelectorAll(`#${STYLE_ID}`)];
-  if (saved.length !== 1 || saved[0].textContent !== PAGE_EDITOR_CSS) {
-    const style = doc.createElement("style");
-    style.id = STYLE_ID;
-    style.textContent = PAGE_EDITOR_CSS;
-    if (saved[0]) saved[0].after(style);
-    else doc.head.appendChild(style);
-    for (const old of saved) old.remove();
-  }
+  const legacy = doc.querySelector(`#${STYLE_ID}:not([data-name])`);
+  if (legacy) legacy.dataset.name = STYLE_ID;
+  style(STYLE_ID, PAGE_EDITOR_CSS).id = STYLE_ID;
   const shell = doc.createElement("div");
   shell.className = "page-shell";
   shell.setAttribute("clay", "editor-ui");

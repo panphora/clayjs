@@ -3,6 +3,7 @@ import onDomReady from "./lib/dom-ready.js";
 import { initTheme } from "./ui/theme.js";
 import { ephemeral } from "./lib/ephemeral.js";
 import { effect } from "./lib/effect.js";
+import { style } from "./lib/style.js";
 
 function domReady() {
   return new Promise((resolve) => onDomReady(resolve));
@@ -100,6 +101,7 @@ function assembleCore(loaded, { isDraftMode, isEditMode, isOwner, siteVisibility
   clay.writeData = pageData.writeData;
   clay.ephemeral = ephemeral;
   clay.effect = effect;
+  clay.style = style;
 
   if (save) {
     const saveFn = save.savePage || save.default;
