@@ -124,6 +124,7 @@ export function createStore({ name, value, ephemeral = false }) {
   const listeners = new Set();
   const sinks = new Set();
   const rebases = new Set();
+  const confirmations = new Set();
   const deliveries = new Set();
   const views = new WeakMap();
 
@@ -392,6 +393,17 @@ export function createStore({ name, value, ephemeral = false }) {
         coherent = false;
       }
       pending = pending.filter((entry) => entry.id > through);
+      for (const fn of [...confirmations]) {
+        try {
+          fn({ through });
+        } catch (err) {
+          console.error(`clay.live("${name}"): a confirmation listener threw`, err);
+        }
+      }
+    },
+    onConfirm(fn) {
+      confirmations.add(fn);
+      return () => confirmations.delete(fn);
     },
     // A new value from outside. Ops already in it are dropped: the first
     // `confirmed` pending ops, or every op up to the mark `through`. The rest
