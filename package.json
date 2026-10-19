@@ -63,6 +63,7 @@
     "deploy": "node build.js && wrangler deploy && git rev-parse HEAD > .deploy",
     "build:parse5": "node scripts/build-parse5-vendor.mjs",
     "build:prosemirror": "node scripts/build-prosemirror-vendor.mjs",
+    "build:yjs": "node scripts/build-yjs-vendor.mjs",
     "build:bevel": "node scripts/build-bevel-subset.mjs",
     "check:bevel": "node scripts/build-bevel-subset.mjs --check",
     "build:skins": "node scripts/build-vendor-skins.mjs",
@@ -78,6 +79,7 @@
     "jest": "^29.7.0",
     "jest-environment-jsdom": "^29.7.0",
     "jsdom": "^20.0.3",
+    "lib0": "0.2.119",
     "marked": "^18.0.14",
     "parse5": "^7.3.0",
     "playwright": "1.62.1",
@@ -93,7 +95,8 @@
     "prosemirror-transform": "1.12.2",
     "prosemirror-view": "1.42.6",
     "turndown": "^7.2.4",
-    "turndown-plugin-gfm": "^1.0.2"
+    "turndown-plugin-gfm": "^1.0.2",
+    "yjs": "13.6.27"
   },
   "hyper": {
     "kind": "lib",

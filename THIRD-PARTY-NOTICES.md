@@ -52,6 +52,12 @@ or carry third-party code, and keep their original licenses.
 - Copyright (c) 2020 Phosphor Icons
 - https://github.com/phosphor-icons/core
 
+## Yjs 13.6.27 and lib0 0.2.119 (MIT)
+
+- File: src/vendor/yjs.vendor.js (bundled by scripts/build-yjs-vendor.mjs)
+- Copyright (c) 2023 Kevin Jahns
+- https://github.com/yjs/yjs, https://github.com/dmonad/lib0
+
 ## First-party vendored modules
 
 The remaining files in src/vendor/ (hypercms, hyper-morph, hyper-undo, quickcrop,
