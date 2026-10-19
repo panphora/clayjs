@@ -1,4 +1,5 @@
 import { attrKeys, sameJson } from "./layout.js";
+import { blockJson } from "../model.js";
 import { marksKey, marksAttrs } from "./marks.js";
 
 const implicitFlags = (doc) => {
@@ -6,7 +7,7 @@ const implicitFlags = (doc) => {
   doc.forEach((block) => { const id = block.attrs.id; const imp = typeof id === "string" && id.startsWith("~") && !seen.has(id); if (imp) seen.add(id); out.push(imp); });
   return out;
 };
-const pickAttrs = (node) => { const o = {}; for (const k of attrKeys(node.type)) o[k] = node.attrs[k]; return o; };
+const pickAttrs = (node) => { const o = {}; for (const k of attrKeys(node.type)) o[k] = node.attrs[k]; if (node.type.name === "table") o.rows = blockJson(node).rows; return o; };
 
 export function tokensOf(doc, alias = new Map(), visible = null) {
   const toks = [];

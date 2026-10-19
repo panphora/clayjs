@@ -1,4 +1,5 @@
 import { schema } from "../schema.js";
+import { nodeFromBlock } from "../model.js";
 import { attrKeys, defaultOf } from "./layout.js";
 
 export const fieldsOf = (pd, b, type) => {
@@ -12,6 +13,7 @@ export function docOf(pd, w) {
   const nodes = w.visible.map((b) => {
     const type = schema.nodes[b.t] ?? schema.nodes.paragraph;
     const attrs = { id: b.id, pos: null, ...fieldsOf(pd, b, type) };
+    if (type.name === "table" && Object.keys(attrs.rows ?? {}).length) return nodeFromBlock(schema, b.id, { t: "table", ...attrs });
     if (!type.isTextblock) return type.create(attrs);
     const content = [];
     for (const r of b.runs) {

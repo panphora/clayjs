@@ -6,6 +6,14 @@ import { CHUNK_CHARS, insertTokens, applyRegion, markRange } from "./writer.js";
 
 const { AddMarkStep, RemoveMarkStep, AttrStep, Mapping } = transform;
 
+const tableRange = (doc, from, to) => {
+  const start = doc.resolve(from), end = doc.resolve(to);
+  return [
+    start.depth && start.node(1).type.name === "table" ? start.before(1) : from,
+    end.depth && end.node(1).type.name === "table" ? end.after(1) : to,
+  ];
+};
+
 export function localGroup(pd, transactions, w, stats, um = null) {
   const steps = [], docs = [], maps = [];
   for (const tr of transactions) tr.steps.forEach((s, i) => { steps.push(s); docs.push(tr.docs[i]); maps.push(s.getMap()); });
@@ -28,7 +36,11 @@ export function localGroup(pd, transactions, w, stats, um = null) {
     const ranges = [];
     if (step instanceof AttrStep) ranges.push([step.pos, step.pos + 1, step.pos, step.pos + 1]);
     else step.getMap().forEach((os, oe, ns, ne) => ranges.push([os, oe, ns, ne]));
-    for (const [os, oe, ns, ne] of ranges) regions.push({ oa: back.map(os, -1), ob: back.map(oe, 1), na: fwd.map(ns, -1), nb: fwd.map(ne, 1) });
+    for (const [os, oe, ns, ne] of ranges) {
+      const [oa, ob] = tableRange(d0, back.map(os, -1), back.map(oe, 1));
+      const [na, nb] = tableRange(dm, fwd.map(ns, -1), fwd.map(ne, 1));
+      regions.push({ oa, ob, na, nb });
+    }
   });
   regions.sort((x, y) => x.oa - y.oa || x.na - y.na);
   const merged = [];

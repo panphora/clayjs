@@ -22,8 +22,8 @@ export function posAtY(doc, holes, tokens, y) {
   return first < 0 ? doc.content.size : first;
 }
 
-export const shapeOf = (doc) => { const out = []; doc.forEach((b) => out.push([b.type.name, b.attrs.id, JSON.stringify(Object.fromEntries(attrKeys(b.type).map((k) => [k, b.attrs[k]]))), b.isTextblock ? JSON.stringify(b.content.toJSON()) : null])); return JSON.stringify(out); };
-export const bareShape = (doc) => { const out = []; doc.forEach((b) => out.push([b.type.name, JSON.stringify(Object.fromEntries(attrKeys(b.type).map((k) => [k, b.attrs[k]]))), b.isTextblock ? JSON.stringify(b.content.toJSON()) : null])); return JSON.stringify(out); };
+export const shapeOf = (doc) => { const out = []; doc.forEach((b) => out.push([b.type.name, b.attrs.id, JSON.stringify(Object.fromEntries(attrKeys(b.type).map((k) => [k, b.attrs[k]]))), b.isTextblock || b.type.name === "table" ? JSON.stringify(b.content.toJSON()) : null])); return JSON.stringify(out); };
+export const bareShape = (doc) => { const out = []; doc.forEach((b) => out.push([b.type.name, JSON.stringify(Object.fromEntries(attrKeys(b.type).map((k) => [k, b.attrs[k]]))), b.isTextblock || b.type.name === "table" ? JSON.stringify(b.content.toJSON()) : null])); return JSON.stringify(out); };
 
 export function docDiff(oldDoc, newDoc) {
   const start = oldDoc.content.findDiffStart(newDoc.content);
@@ -87,6 +87,7 @@ export function createBridge({ pd, onNotice = () => {}, stats = { groups: 0, mis
     if (!view || t.origin === LOCAL || t.origin === um || saved) return;
     const sel = view.state.selection;
     if (!(sel instanceof pmState.TextSelection)) return;
+    if ([sel.$anchor, sel.$head].some((pos) => pos.depth && pos.node(1).type.name === "table")) return;
     const rel = (pos) => Y.createRelativePositionFromTypeIndex(pd.flow, yIndexAt(view.state.doc, w.holes, pos));
     saved = { anchor: rel(sel.anchor), head: rel(sel.head) };
   };

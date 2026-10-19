@@ -7,8 +7,8 @@ export const SEED = "page-seed";
 export const REMOTE_META = REMOTE;
 
 const SKIP = new Set(["id", "pos"]);
-export const attrKeys = (type) => Object.keys(type.spec.attrs || {}).filter((k) => !SKIP.has(k));
-export const defaultOf = (type, k) => type.spec.attrs[k].default;
+export const attrKeys = (type) => [...Object.keys(type.spec.attrs || {}).filter((k) => !SKIP.has(k)), ...(type.name === "table" ? ["rows"] : [])];
+export const defaultOf = (type, k) => type.name === "table" && k === "rows" ? {} : type.spec.attrs[k].default;
 export const sameJson = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 export const idKey = (id) => `${id.client}.${id.clock}`;
 export const parseKey = (k) => { const i = k.indexOf("."); return { client: +k.slice(0, i), clock: +k.slice(i + 1) }; };
