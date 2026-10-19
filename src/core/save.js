@@ -27,6 +27,8 @@ import { seedEtag, lastSeenEtag } from "./etag.js";
 import { gateCaptureToken, gateClearIfUnchanged, pageMaybeDirty } from "../lib/dirty-gate.js";
 import { hasUnsavedState } from "../lib/unsaved-state.js";
 import { autosaveActive } from "../lib/autosave-state.js";
+import { registerStyleAdoption } from "../lib/style-adoption.js";
+import { styleComparisonStripper } from "./style-comparisons.js";
 import { ROOT_LIBRARY_ATTRS, SAVE_TOKEN_ATTRS, LEGACY_SAVE_TOKEN_ATTRS, HOST_RESPONSE_ATTRS } from "../lib/root-attrs.js";
 import { logSaveCheck, logBaseline } from "../lib/autosave-debug.js";
 import { initUserGesture, markExplicitSave, clearExplicitSave } from "../lib/user-gesture.js";
@@ -188,6 +190,8 @@ let unsavedChanges = false;
 // the split is observable there.
 let lastSavedContents = '';
 let lastSavedDirty = '';
+let baselineRevision = 0;
+const inFlightComparisons = new Set();
 // A save was requested while one was on the wire; run one more when it settles.
 let pendingSave = false;
 // An autosave arrived while one of our saves was on the wire. When that save lands
@@ -378,8 +382,7 @@ function applySaveResult(result, forComparison, forDirty, label, gateToken, forS
   if (result.ok) {
     // Both baselines advance from the SAME pre-request capture, never from the
     // live DOM, so an edit made while the request was on the wire stays unsaved.
-    lastSavedContents = forComparison;
-    lastSavedDirty = forDirty;
+    setLastSavedBaselines(forComparison, forDirty);
     lastSavedBytes = forSave;
     unsavedChanges = false;
     // Generation-checked: clears the scoped-sync dirty gate only if nothing
@@ -455,14 +458,14 @@ export function getLastSavedBytes() { return lastSavedBytes; }
 export function setLastSavedBaselines(forComparison, forDirty) {
   lastSavedContents = forComparison;
   lastSavedDirty = forDirty;
+  baselineRevision++;
 }
 
 // Kept for back-compat: a caller with one string means the page has no batching
 // region, or it does not know about the split. Setting both from it is the safe
 // reading, since the domains coincide exactly when there is no such region.
 export function setLastSavedContents(val) {
-  lastSavedContents = val;
-  lastSavedDirty = val;
+  setLastSavedBaselines(val, val);
 }
 
 /**
@@ -546,10 +549,13 @@ export function savePage(callback = () => {}) {
     setSavingState();
 
     // Use saveHtml directly with our pre-captured content (avoids double capture)
+    const comparison = { forComparison, forDirty };
+    inFlightComparisons.add(comparison);
     ownSaveOnWire = true;
     saveHtml(forSave, (result) => {
       ownSaveOnWire = false;
-      applySaveResult(result, forComparison, forDirty, 'updated after save', gateToken, forSave);
+      inFlightComparisons.delete(comparison);
+      applySaveResult(result, comparison.forComparison, comparison.forDirty, 'updated after save', gateToken, forSave);
       if (typeof callback === 'function') {
         callback(result);
       }
@@ -603,10 +609,13 @@ export function savePageForce(callback = () => {}) {
 
     setSavingState();
 
+    const comparison = { forComparison, forDirty };
+    inFlightComparisons.add(comparison);
     ownSaveOnWire = true;
     saveHtml(forSave, (result) => {
       ownSaveOnWire = false;
-      applySaveResult(result, forComparison, forDirty, 'updated after force save', gateToken, forSave);
+      inFlightComparisons.delete(comparison);
+      applySaveResult(result, comparison.forComparison, comparison.forDirty, 'updated after force save', gateToken, forSave);
       if (typeof callback === 'function') {
         callback(result);
       }
@@ -774,6 +783,17 @@ let baselineActive = true;
 let baselineSettledAt = false;
 export function baselineSettled() { return baselineSettledAt; }
 
+registerStyleAdoption(identity => {
+  const strip = styleComparisonStripper(identity);
+  lastSavedContents = strip(lastSavedContents);
+  lastSavedDirty = strip(lastSavedDirty);
+  baselineContents = strip(baselineContents);
+  for (const comparison of inFlightComparisons) {
+    comparison.forComparison = strip(comparison.forComparison);
+    comparison.forDirty = strip(comparison.forDirty);
+  }
+});
+
 // ============================================
 // BASELINE CAPTURE (Settled Signal)
 // ============================================
@@ -787,7 +807,7 @@ export function baselineSettled() { return baselineSettledAt; }
 // WHY IMMEDIATE + CONDITIONAL UPDATE:
 // We set baseline immediately as a safety net. If the user edits or saves
 // before settle completes, we don't overwrite their work. The settled snapshot
-// only replaces baseline if nothing changed (lastSavedContents === immediateContents).
+// only replaces baseline if no user input or baseline installation intervened.
 
 const SETTLE_MS = 500;        // Wait for no mutations for this long
 const MAX_SETTLE_MS = 3000;   // Max time to wait before forcing capture
@@ -803,8 +823,8 @@ function initBaselineCapture() {
   // This ensures saves during settle window work correctly
   // Store stripped version so comparisons are direct (no parsing needed)
   const { forComparison: immediateContents, forDirty: immediateDirty } = captureForComparisonAndDirty();
-  lastSavedContents = immediateContents;
-  lastSavedDirty = immediateDirty;
+  setLastSavedBaselines(immediateContents, immediateDirty);
+  const immediateRevision = baselineRevision;
   baselineContents = immediateContents;
   logBaseline('immediate capture', `${immediateContents.length} chars`);
 
@@ -829,18 +849,14 @@ function initBaselineCapture() {
     if (unsubscribeMutation) unsubscribeMutation();
     userEditEvents.forEach(evt => document.removeEventListener(evt, markUserEdited, true));
 
-    // Only update if no user edits AND no saves occurred during settle.
-    // BOTH baselines have to be untouched, not just the autosave one: a save
-    // whose only change was inside a batching region advances lastSavedDirty
-    // while leaving lastSavedContents byte-identical to the immediate capture.
-    // Checking one would let a second, unsent edit in that region be captured
-    // here as though it had been saved.
-    if (!userEdited && lastSavedContents === immediateContents && lastSavedDirty === immediateDirty) {
+    // Adoption only removes owned styles from comparison state. It does not
+    // advance this revision. A save or sync installation does, even when its
+    // comparison bytes match, so settle cannot absorb a later unsent edit.
+    if (!userEdited && baselineRevision === immediateRevision) {
       // Store stripped version so comparisons are direct (no parsing needed)
       const gateToken = gateCaptureToken();
       const { forComparison: contents, forDirty: contentsDirty } = captureForComparisonAndDirty();
-      lastSavedContents = contents;
-      lastSavedDirty = contentsDirty;
+      setLastSavedBaselines(contents, contentsDirty);
       baselineContents = contents;
       // Boot churn (modules rewriting attributes at DOM-ready) counted toward
       // the scoped-sync gate; the settled baseline is the proof it wasn't edits.

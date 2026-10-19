@@ -273,6 +273,46 @@ s.wait(1900).reset().play()
     <li><code>clay="freeze"</code> turns a saved element's inner HTML into a per-tab scratchpad (the element saves and syncs, but its runtime contents never leave the tab), while <code>clay="no-dirty"</code> marks derived totals that save into the file alongside real edits without triggering saves on their own.</li>
   </ul>
 
+  <div class="card" id="script-owned-styles">
+    <h3>Styles that stay in the file</h3>
+    <p><code>clay.style("app-colors", css)</code> refreshes a saved style in place. The old CSS paints first, then the script supplies the current CSS. This update does not count as an edit.</p>
+    <figure class="vg-figure" data-visual="script-owned-styles">
+      <style>
+        #script-owned-styles .style-states { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr)); gap: 14px; }
+        #script-owned-styles .style-state { padding: 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--sheet); }
+        #script-owned-styles .style-state h4 { margin: 0 0 12px; font-size: 16px; }
+        #script-owned-styles .style-state pre { margin: 0; padding: 0; border: 0; background: none; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
+        #script-owned-styles .style-state code { padding: 0; background: none; }
+        #script-owned-styles .style-state p { margin: 12px 0 0; font-size: 14px; color: var(--ink-soft); }
+        #script-owned-styles .style-status { display: inline-block; padding: 5px 9px; border-radius: 5px; background: var(--glaze-tint); color: var(--glaze-deep); font-size: 14px; }
+      </style>
+      <div class="style-states">
+        <div class="style-state">
+          <h4>The saved file</h4>
+          <pre><code>&lt;style data-name="app-colors"
+       clay="no-dirty"&gt;
+  .status { color: red; }
+&lt;/style&gt;</code></pre>
+          <p>CSS is there before the script runs.</p>
+        </div>
+        <div class="style-state">
+          <h4>After the script runs</h4>
+          <pre><code>&lt;style data-name="app-colors"
+       clay="no-dirty"&gt;
+  .status { color: blue; }
+&lt;/style&gt;</code></pre>
+          <p>The same tag holds the current CSS.</p>
+        </div>
+        <div class="style-state">
+          <h4>The page stays clean</h4>
+          <span class="style-status">No unsaved changes</span>
+          <p>No undo step, autosave, or close warning from this update. The next real save carries the new CSS.</p>
+        </div>
+      </div>
+    </figure>
+    <p class="note">Use <code>editor-ui</code> for styles that must stay in one tab. See <a href="/complete-guide#9-12-styles-a-script-writes">styles a script writes</a>.</p>
+  </div>
+
   <h2 id="modes">Editors and viewers</h2>
   <p>You might not need any of this. If you are building a document or tool that only you and your colleagues open to edit, every control can stay visible and active all the time.</p>
 

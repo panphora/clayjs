@@ -91,6 +91,14 @@ itself, with no network.
   `fn` must be synchronous. Returns a stop function. In edit mode it warns once per effect
   about a write to saved content outside `no-dirty`/`editor-ui`, `clay.undo.commit` inside
   `fn`, an effect created inside `fn`, or more than 50 runs in a second.
+- `clay.style(name, css)` creates or refreshes a named `<style>` in place and returns
+  the element. `clay.style(href)` does the same for a stylesheet `<link>`, matching
+  by URL origin and path so a new `?v=` updates the existing link. Both mark the tag
+  `clay="no-dirty"`: it stays in saved HTML for the next load, but refreshing it does
+  not add an undo step, start an autosave, or raise the close warning. The next real save carries the
+  current CSS or URL. Available in both modes after `clay.ready`; returns immediately,
+  without waiting for an external stylesheet to load. Use `editor-ui` instead for
+  styles that must stay in this tab. See guide section 9.12.
 - `clay.theme(options)` — theme the UI ClayJS draws (dialogs and the people name prompt).
   `options` is `{ auto, colorScheme, tokens, parts }`, the same shape as `window.clayTheme`
   set before the loader. `clay.theme(false)` keeps the exact Bevel look, `clay.theme(null)`

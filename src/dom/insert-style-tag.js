@@ -1,3 +1,12 @@
+export function getStyleBaseUrl(url) {
+  try {
+    const parsed = new URL(url, window.location.href);
+    return parsed.origin + parsed.pathname;
+  } catch {
+    return url;
+  }
+}
+
 /**
  * Insert styles into the document (inline CSS or external stylesheet).
  *
@@ -62,24 +71,14 @@ function insertStyles(nameOrHref, cssOrCallback, callback) {
   const href = nameOrHref;
   const cb = typeof cssOrCallback === 'function' ? cssOrCallback : undefined;
 
-  // Helper to get base URL without query params (for comparison)
-  const getBaseUrl = (url) => {
-    try {
-      const parsed = new URL(url, window.location.href);
-      return parsed.origin + parsed.pathname;
-    } catch {
-      return url;
-    }
-  };
-
   // Normalize href to full URL path (without query params) for comparison
-  const normalizedHref = getBaseUrl(href);
+  const normalizedHref = getStyleBaseUrl(href);
 
   // Find all links with matching normalized path (ignoring query params like ?v=)
   const existingLinks = [...document.querySelectorAll('link[rel="stylesheet"]')]
     .filter(el => {
       try {
-        return getBaseUrl(el.getAttribute('href')) === normalizedHref;
+        return getStyleBaseUrl(el.getAttribute('href')) === normalizedHref;
       } catch {
         return false;
       }

@@ -1,4 +1,6 @@
-import { insertStyles } from "../dom/insert-style-tag.js";
+import { insertStyles, getStyleBaseUrl } from "../dom/insert-style-tag.js";
+import Mutation from "./mutation.js";
+import { adoptStyleComparisons } from "./style-adoption.js";
 
 // A style a script owns. The tag saves with the page, so the next load paints
 // styled before any script runs. Each call writes the current CSS into the saved
@@ -12,9 +14,31 @@ const markNoDirty = (el) => {
 };
 
 export function style(nameOrHref, css) {
-  if (typeof css === "string") return insertStyles(nameOrHref, css, markNoDirty);
-  return insertStyles(nameOrHref, (link) => {
-    markNoDirty(link);
-    if (link.getAttribute("href") !== nameOrHref) link.setAttribute("href", nameOrHref);
-  });
+  return writeStyle(nameOrHref, css);
+}
+
+export function styleWithLegacyId(name, css, legacyId) {
+  return writeStyle(name, css, legacyId);
+}
+
+function writeStyle(nameOrHref, css, legacyId) {
+  const inline = typeof css === "string";
+  const identity = inline ? { name: nameOrHref, legacyId } : { href: getStyleBaseUrl(nameOrHref) };
+  const legacy = legacyId === undefined ? [] : document.querySelectorAll(`style[id="${legacyId}"]:not([data-name])`);
+  Mutation.pause();
+  try {
+    adoptStyleComparisons(identity);
+    for (const el of legacy) el.dataset.name = nameOrHref;
+    if (inline) {
+      const el = insertStyles(nameOrHref, css, markNoDirty);
+      if (legacyId !== undefined) el.id = legacyId;
+      return el;
+    }
+    return insertStyles(nameOrHref, (link) => {
+      markNoDirty(link);
+      if (link.getAttribute("href") !== nameOrHref) link.setAttribute("href", nameOrHref);
+    });
+  } finally {
+    Mutation.resume();
+  }
 }

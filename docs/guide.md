@@ -1384,6 +1384,28 @@ Every save captures and serializes the whole document, every change check captur
 
 Up to about 1,000 records feels instant. From 1,000 to 3,000 there is a visible hitch at each save. Past about 3,000 records or 1.5 MB, autosave stalls typing and peers lag. Hosts cap a save at 5 MB (hyperclay.com), 20 MB (Hyperclay Local) and 50 MB (HTML Clay). Design for archiving: one file per year, a hidden archive section that can move to another file, or one file per project.
 
+### 9.12 Styles a script writes
+
+Use `clay.style` when a script owns CSS that should stay in the saved document. The saved style paints the next load before the script runs. When the script runs, it refreshes that same tag with its current CSS:
+
+```js
+await clay.ready;
+clay.style("app-colors", ".status { color: blue; }");
+```
+
+The name identifies a `<style data-name="app-colors" clay="no-dirty">` in the document's head. A repeated call updates the existing tag in place. Refreshing it does not add an undo step, start an autosave, or raise the close warning. The next real save includes the current CSS. On the first load, before any save has carried the tag, the script creates it.
+
+The one-argument form keeps an external stylesheet link current:
+
+```js
+await clay.ready;
+const link = clay.style("/app.css?v=2");
+```
+
+If the saved file has `/app.css?v=1`, this updates that link's `href` to `/app.css?v=2`. Matching uses the URL's origin and path, ignoring its query and fragment. The link is also `no-dirty` and travels with the next real save. Both forms return the element synchronously; the link form does not wait for the stylesheet to load. Both work in edit and view mode.
+
+Use `clay="editor-ui"` instead for CSS that viewers must not receive or that represents per-tab state, such as a temporary filter. Those styles are stripped from saved HTML. `clay.style` is for CSS that belongs in the file; changing its name on every load creates another saved tag. Adding or rewriting a plain style tag without `no-dirty` can raise the leave warning even though the person edited nothing.
+
 ---
 
 ## 10. Recipes
@@ -1624,6 +1646,7 @@ The saved file is the data. Everyone who can download it can read everything in 
 | `applyData` pairs rows by content and order, not by id | 9.9 |
 | Activity logged from a mutation observer also logs peers and undo | 9.6 |
 | Saves slow down past about 1,000 records and stall past 3,000 | 9.11 |
+| Updating a runtime style tag without `no-dirty` can raise the leave warning | 9.12 |
 | A version restore on hyperclay.com does not reach open editors | 12.1 |
 | Hidden is not private | 12.3 |
 | Typed values vanish from a visitor's draft: the control has no `persist` | 14.2 |

@@ -21,8 +21,11 @@ beforeAll(async () => {
   window.clayEditMode = true;
   window.clay = {};
   window.fetch = async (url, opts) => {
-    if (opts?.method === "POST") saves++;
-    return new Response("", { status: 404 });
+    if (opts?.method === "POST") {
+      saves++;
+      return { ok: true, status: 200, text: async () => JSON.stringify({ msg: "Saved", msgType: "success" }) };
+    }
+    return { ok: false, status: 404, statusText: "Not Found", text: async () => "" };
   };
   document.head.insertAdjacentHTML(
     "beforeend",
