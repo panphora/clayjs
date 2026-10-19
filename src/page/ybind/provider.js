@@ -43,7 +43,9 @@ const sameDeletes = (a, b) => Y.equalDeleteSets(Y.createDeleteSetFromStructStore
 const svEqual = (a, b) => { if (a.size !== b.size) return false; for (const [c, n] of a) if (b.get(c) !== n) return false; return true; };
 
 export function createYProvider({ store, ydoc, compact: limits = {}, setTimer = setTimeout, clearTimer = clearTimeout, stats = { applied: 0, offered: 0, compactions: 0 } }) {
+  const initial = entriesOf(store.value.y);
   const known = new Set();
+  let canCompact = !initial.some(([k]) => k[0] === "m");
   let counter = 0;
   const me = ydoc.clientID.toString(36);
   const nextKey = (p) => `${p}${me}-${(counter++).toString(36)}`;
@@ -55,11 +57,12 @@ export function createYProvider({ store, ydoc, compact: limits = {}, setTimer = 
     return Array.from({ length: n }, (_, i) => [`${key}.${i}.${n}`, s.slice(i * PART, (i + 1) * PART)]);
   };
   const put = (key, bytes) => {
+    canCompact = true;
     known.add(key);
     for (const [k, v] of partsOf(key, enc(bytes))) store.handle.set(["y", k], v);
   };
 
-  for (const [k] of entriesOf(store.value.y)) known.add(k);
+  for (const [k] of initial) known.add(k);
 
   const onUpdate = (u, origin) => {
     if (origin === NET) return;
@@ -69,6 +72,7 @@ export function createYProvider({ store, ydoc, compact: limits = {}, setTimer = 
 
   const applyKey = (k, v) => {
     if (known.has(k)) return;
+    canCompact = true;
     known.add(k);
     stats.applied++;
     Y.applyUpdateV2(ydoc, dec(v), NET);
@@ -150,6 +154,7 @@ export function createYProvider({ store, ydoc, compact: limits = {}, setTimer = 
   }
 
   function maybeCompact() {
+    if (!canCompact) return false;
     const auth = store.authoritative.y;
     if (fold) return finishFold(auth);
     const entries = entriesOf(auth);
