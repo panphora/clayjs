@@ -9,7 +9,8 @@
 // Cmd+Z takes the whole adoption back.
 import { model as pmModel, history } from "../vendor/prosemirror.vendor.js";
 import { blockMap, nodeFromBlock, repairSiblings } from "./model.js";
-import { project, canon, UNPROJECTED, blocksOfValues, revOf, parseModel, renderModel, fragmentCleaner } from "./projection.js";
+import { project, canon, UNPROJECTED, revOf, parseModel, renderModel, fragmentCleaner } from "./projection.js";
+import { blocksFromPageValues } from "./ybind/decode.js";
 
 export const ADOPT = "page-adopt";
 const same = (a, b) => canon(a) === canon(b);
@@ -123,7 +124,7 @@ export function adoptionTransaction(state, plan) {
   const tr = state.tr;
   const projected = new Map(project(current).map((item) => [item.id, item]));
   const displaced = {};
-  for (const id of plan.edited.keys()) {
+  for (const id of [...plan.edited.keys(), ...plan.deleted]) {
     const was = plan.base.get(id), now = projected.get(id);
     if (was && now && !same(body(was), body(now))) displaced[id] = current[id];
   }
@@ -211,7 +212,7 @@ export function adoptionTransaction(state, plan) {
 // checkpoint stamps the new blocks' ids) give the same new block the same id.
 export function classifyFile(article, tagValues) {
   const R = article.getAttribute("data-rev");
-  const base = blocksOfValues(tagValues);
+  const base = blocksFromPageValues(tagValues);
   const model = project(base);
   const known = new Map(model.map((i) => [i.id, i]));
   const seed = R ?? "";

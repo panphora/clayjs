@@ -117,7 +117,10 @@ export function createBridge({ pd, onNotice = () => {}, stats = { groups: 0, mis
       view.updateState(state);
       if (!local.length) return;
       w = walk(pd);
-      localGroup(pd, local, w, stats, um);
+      const adoption = local.some((t) => t.getMeta("page-adopt"));
+      if (adoption) um.stopCapturing();
+      try { localGroup(pd, local, w, stats, um); }
+      finally { if (adoption) um.stopCapturing(); }
       const derived = refresh();
       if (bareShape(derived) !== bareShape(view.state.doc)) {
         stats.mismatch++;
