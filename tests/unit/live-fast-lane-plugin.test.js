@@ -515,3 +515,34 @@ test("a store whose lane stopped saves with the stamp of where it left", async (
 });
 
 
+
+
+test("a capture failure preserves an earlier uncertain capture until it is confirmed", async () => {
+  document.body.innerHTML = tag("captureRetry", '{"n":0}');
+  const value = live("captureRetry");
+  await flushAsync();
+  expect(value.status.mode).toBe("file");
+  const bound = jest.spyOn(fastLane(), "roomBound").mockImplementation((name) => name === "captureRetry");
+  hangState = true;
+  try {
+    value.add("n", 1);
+    snapshot.captureForSaveAndComparison({ flushUndo: false });
+    document.dispatchEvent(new CustomEvent("clay:save-error", { detail: { status: 502 } }));
+    value.add("n", 10);
+    const carried = (html) => JSON.parse(new DOMParser().parseFromString(html, "text/html").querySelector('[merge="captureRetry"]').textContent).n;
+    const retry = snapshot.captureForSaveAndComparison({ flushUndo: false }).forSave;
+    expect(carried(retry)).toBe(1);
+    document.dispatchEvent(new CustomEvent("clay:save-error", { detail: { sent: false } }));
+    expect(value.toJSON().n).toBe(11);
+    expect(storeOf("captureRetry").pending).toHaveLength(2);
+    const next = snapshot.captureForSaveAndComparison({ flushUndo: false }).forSave;
+    expect(carried(next)).toBe(1);
+    expect(notices).toEqual([]);
+    confirmSaved(next);
+    expect(storeOf("captureRetry").pending).toHaveLength(1);
+    expect(value.toJSON().n).toBe(11);
+  } finally {
+    bound.mockRestore();
+    hangState = false;
+  }
+});

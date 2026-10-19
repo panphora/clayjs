@@ -519,7 +519,7 @@ export function savePage(callback = () => {}) {
     } catch (err) {
       console.error('savePage: captureForSaveAndComparison failed', err);
       clearExplicitSave();
-      setSaveState('error', err.message);
+      setSaveState('error', err.message, '', { sent: false });
       const result = { msg: err.message, msgType: 'error', code: null, etag: null };
       if (typeof callback === 'function') {
         callback(result);
@@ -599,7 +599,7 @@ export function savePageForce(callback = () => {}) {
       ({ forSave, forComparison, forDirty } = captureForSaveAndComparison());
     } catch (err) {
       console.error('savePageForce: captureForSaveAndComparison failed', err);
-      setSaveState('error', err.message);
+      setSaveState('error', err.message, '', { sent: false });
       const result = { msg: err.message, msgType: 'error', code: null, etag: null };
       if (typeof callback === 'function') {
         callback(result);

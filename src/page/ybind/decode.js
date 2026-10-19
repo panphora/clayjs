@@ -1,7 +1,7 @@
 import * as Y from "../../vendor/yjs.vendor.js";
 import { schema } from "../schema.js";
 import { markKey } from "../inline.js";
-import { ATOM, BREAK, DEFAULTS, runsOf } from "../projection.js";
+import { ATOM, BREAK, DEFAULTS, blocksOfValues, runsOf } from "../projection.js";
 import { createPageDoc, attrKeys, defaultOf, sameJson } from "./layout.js";
 import { markName } from "./marks.js";
 import { walk } from "./walk.js";
@@ -74,4 +74,15 @@ export function blocksFromYValue(value) {
   } finally {
     doc.destroy();
   }
+}
+
+export function blocksFromPageValues(values) {
+  if (values.some((value) => !value || typeof value !== "object" || Array.isArray(value))) {
+    throw new YDecodeError("invalid-value", "Expected a page data object");
+  }
+  if (!values.some((value) => Object.hasOwn(value, "y") || Object.hasOwn(value, "v"))) return blocksOfValues(values);
+  if (values.length !== 1 || Object.hasOwn(values[0], "blocks") || Object.hasOwn(values[0], "deleted")) {
+    throw new YDecodeError("invalid-value", "A Yjs page must have one page tag without hybrid block data");
+  }
+  return blocksFromYValue(values[0]);
 }

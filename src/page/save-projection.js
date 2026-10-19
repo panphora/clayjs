@@ -6,7 +6,9 @@
 import "../attrs/save-freeze.js";
 import { addDocumentTransform } from "../core/snapshot.js";
 import { HyperMorph } from "../vendor/hyper-morph.vendor.js";
-import { blocksOfValues, fragmentCleaner, project, renderModel, revOf } from "./projection.js";
+import { fragmentCleaner, project, renderModel, revOf } from "./projection.js";
+import { blocksFromPageValues } from "./ybind/decode.js";
+import { YDecodeError } from "./ybind/provider.js";
 
 export const ARTICLE = "article[data-page]";
 const PAGE = /^page(\.[0-9]+)?$/;
@@ -24,8 +26,11 @@ let memo = null;
 export function renderFromTags(texts) {
   const key = texts.join("\u0000");
   if (memo && memo.key === key) return memo;
-  const values = texts.map((text) => { try { return HyperMorph.parseJsonRelaxed(text); } catch { return null; } });
-  const blocks = blocksOfValues(values);
+  const values = texts.map((text) => {
+    try { return HyperMorph.parseJsonRelaxed(text); }
+    catch { throw new YDecodeError("invalid-json", "Cannot read the page data as JSON"); }
+  });
+  const blocks = blocksFromPageValues(values);
   const model = project(blocks);
   const fallbackOf = (id) => {
     const html = blocks[id]?.artifact?.fallbackHtml;

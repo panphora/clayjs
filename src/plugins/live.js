@@ -262,7 +262,7 @@ function endPin(pin, maybeLanded) {
   for (const [name, saved] of pin) {
     const entry = entries.get(name);
     if (!entry || saved.mode !== "file") continue;
-    if (maybeLanded) ended(entry, saved.key);
+    if (maybeLanded || saved.maybeLanded) ended(entry, saved.key);
     else {
       entry.captureOps.delete(saved.key);
       settle(entry);
@@ -532,7 +532,7 @@ document.addEventListener("clay:snapshot-ready", (event) => {
     const capture = mode === "file" && proof?.v === 2 ? proof.capture : null;
     const key = !carried.length ? null : resent ? resent[0] : capture ? JSON.stringify(capture) : `anonymous:${++anonymousCaptures}`;
     const mark = resent ? resent[1].mark : entry.store.mark;
-    stores.set(entry.store.name, { mode, mark, canonical: canonical(tag.element.textContent), at, lineage, by: tag.element.getAttribute("live-by"), key });
+    stores.set(entry.store.name, { mode, mark, canonical: canonical(tag.element.textContent), at, lineage, by: tag.element.getAttribute("live-by"), key, maybeLanded: !!resent });
     if (lineage && !lineage.disk && entry.leftAt) entry.leftAt = { ...entry.leftAt, ancestors: lineage.ancestors };
     if (capture && capture[0] === captureAuthor) captureNumber = Math.max(captureNumber, capture[1]);
     if (key) {
@@ -560,15 +560,15 @@ document.addEventListener("clay:save-conflict", (event) => {
   pinned = null;
   endPin(previous, event.detail?.hadTimeout === true);
 });
-// Only a 4xx answer proves the host wrote nothing, and only when no attempt of
-// the save timed out. A lost connection, a timeout or a 5xx (a proxy's 502 can
-// follow a write) may have landed.
+// A failed capture sent nothing. Otherwise only a 4xx proves the host wrote
+// nothing, and only when no attempt timed out. A lost connection, a timeout
+// or a 5xx (a proxy's 502 can follow a write) may have landed.
 for (const type of ["clay:save-error", "clay:save-offline"]) {
   document.addEventListener(type, (event) => {
     const status = event.detail?.status;
     const previous = pinned;
     pinned = null;
-    endPin(previous, event.detail?.hadTimeout === true || !(status >= 400 && status < 500));
+    endPin(previous, event.detail?.hadTimeout === true || (event.detail?.sent !== false && !(status >= 400 && status < 500)));
   });
 }
 
