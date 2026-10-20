@@ -153,6 +153,58 @@ test("draft mode mounts one prompt whose link points at this page's download", a
   }
 });
 
+test("closing the notice keeps a download icon, remembers it, and can reopen the card", async () => {
+  const { key, clay } = await bootPage({ slot: "ui-prompt-minimize" });
+  const aside = prompt();
+  const tab = aside.querySelector("[data-hcp=open]");
+  aside.querySelector(".hcp-dock .hcp-x").click();
+
+  expect(aside.hidden).toBe(false);
+  expect(aside.getAttribute("data-hcp-state")).toBe("mini");
+  expect(tab.getAttribute("aria-expanded")).toBe("false");
+  expect(document.activeElement).toBe(tab);
+  expect(JSON.parse(localStorage.getItem(key)).prompt.shown).toBe(true);
+  expect(clay.getHTML()).not.toContain('id="hcp"');
+
+  await bootPage({ slot: "ui-prompt-minimize", keepStorage: true });
+  expect(prompt().hidden).toBe(false);
+  expect(prompt().getAttribute("data-hcp-state")).toBe("mini");
+  prompt().querySelector("[data-hcp=open]").click();
+  expect(prompt().getAttribute("data-hcp-state")).toBe("card");
+  expect(prompt().querySelector("[data-hcp=open]").getAttribute("aria-expanded")).toBe("true");
+  expect(document.activeElement).toBe(prompt().querySelector("[data-hcp-link]"));
+  expect(linkHref()).toBe("/_/download/notes.html?as=htmlclay");
+  expect(clickDownload().defaultPrevented).toBe(false);
+});
+
+test("previously dismissed notices keep a usable icon and storage errors can still open the card", async () => {
+  await bootPage({ slot: "ui-prompt-old-dismissal", ui: { v: 1, prompt: { dismissed: true } } });
+  expect(prompt().hidden).toBe(false);
+  expect(prompt().getAttribute("data-hcp-state")).toBe("mini");
+  prompt().querySelector("[data-hcp=open]").click();
+  expect(prompt().getAttribute("data-hcp-state")).toBe("card");
+  prompt().querySelector(".hcp-card [data-hcp=minimize]").click();
+  expect(prompt().getAttribute("data-hcp-state")).toBe("mini");
+  document.dispatchEvent(new CustomEvent("clay:drafts-store-failed"));
+  expect(prompt().getAttribute("data-hcp-state")).toBe("card");
+  expect(prompt().getAttribute("data-hcp-reason")).toBe("error");
+});
+
+test("Don't show again stops reminders while preserving the download icon across reloads", async () => {
+  const { key } = await bootPage({ slot: "ui-prompt-no-reminders" });
+  prompt().querySelector("[data-hcp=open]").click();
+  prompt().querySelector(".hcp-quiet[data-hcp=dismiss]").click();
+  expect(prompt().hidden).toBe(false);
+  expect(prompt().getAttribute("data-hcp-state")).toBe("mini");
+  expect(JSON.parse(localStorage.getItem(key)).prompt.dismissed).toBe(true);
+
+  await bootPage({ slot: "ui-prompt-no-reminders", keepStorage: true });
+  expect(prompt().hidden).toBe(false);
+  expect(prompt().getAttribute("data-hcp-state")).toBe("mini");
+  prompt().querySelector("[data-hcp=open]").click();
+  expect(prompt().getAttribute("data-hcp-state")).toBe("card");
+});
+
 test("the first ?src= for a slot is kept and never replaced", async () => {
   const first = await bootPage({ slot: "ui-src-1", url: "/kanban.html?src=bsky" });
   expect(linkHref()).toBe("/_/download/kanban.html?as=htmlclay&src=bsky");
