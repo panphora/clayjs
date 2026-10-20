@@ -20,7 +20,7 @@ const ASIDE = `<aside class="hcp" id="hcp" hidden aria-label="Download this app"
   </section>
   <div class="hcp-dock">
     <button type="button" class="hcp-btn hcp-tab" data-hcp="open" aria-controls="hcp-card" aria-expanded="false" aria-label="This app is free to keep"><span><svg width="16" height="16" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M224,144v64a8,8,0,0,1-8,8H40a8,8,0,0,1-8-8V144a8,8,0,0,1,16,0v56H208V144a8,8,0,0,1,16,0Zm-101.66,5.66a8,8,0,0,0,11.32,0l40-40a8,8,0,0,0-11.32-11.32L136,124.69V32a8,8,0,0,0-16,0v92.69L93.66,98.34a8,8,0,0,0-11.32,11.32Z"/></svg><span class="hcp-tab__label">This app is free to keep</span></span></button>
-    <button type="button" class="hcp-x" data-hcp="dismiss" aria-label="Hide this for good"><svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true"><path d="M1.4 0 6 4.6 10.6 0 12 1.4 7.4 6 12 10.6 10.6 12 6 7.4 1.4 12 0 10.6 4.6 6 0 1.4z"/></svg></button>
+    <button type="button" class="hcp-x" data-hcp="minimize" aria-label="Minimize download notice"><svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true"><path d="M1.4 0 6 4.6 10.6 0 12 1.4 7.4 6 12 10.6 10.6 12 6 7.4 1.4 12 0 10.6 4.6 6 0 1.4z"/></svg></button>
   </div>
 </aside>`;
 
@@ -50,7 +50,7 @@ export function mountPrompt({ memory, appName, link }) {
     root.setAttribute("data-hcp-state", state);
     if (reason) root.setAttribute("data-hcp-reason", reason);
     tab.setAttribute("aria-expanded", state === "card" ? "true" : "false");
-    if (state === "card") { mem.shown = true; memory.save(); root.setAttribute("data-hcp-arrived", ""); }
+    if (state === "card" || state === "mini") { mem.shown = true; memory.save(); root.setAttribute("data-hcp-arrived", ""); }
     lift();
   }
 
@@ -126,7 +126,7 @@ export function mountPrompt({ memory, appName, link }) {
       else if (act === "minimize") { set("mini"); tab.focus(); }
       else if (act === "dismiss") {
         if (root.getAttribute("data-hcp-reason") === "error") { set("mini"); tab.focus(); }
-        else { mem.dismissed = true; memory.save(); set("dismissed"); }
+        else { mem.dismissed = true; set("mini"); tab.focus(); }
       }
       return;
     }
@@ -151,8 +151,6 @@ export function mountPrompt({ memory, appName, link }) {
   }
   const api = { set, root, showError, clearError };
 
-  if (mem.dismissed) { root.setAttribute("data-hcp-state", "dismissed"); return api; }
-
   document.addEventListener("input", onUse, true);
   document.addEventListener("change", onUse, true);
   document.addEventListener("focusin", onFocusIn);
@@ -161,7 +159,7 @@ export function mountPrompt({ memory, appName, link }) {
   addEventListener("resize", lift);
   document.addEventListener("transitionend", lift, true);
 
-  set(mem.shown ? "mini" : "tab");
+  set(mem.shown || mem.dismissed ? "mini" : "tab");
   if (!mem.shown && (mem.uses || 0) >= USES_TO_SHOW) maybeShow("return");
 
   return api;
