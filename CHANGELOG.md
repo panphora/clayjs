@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.13.1] - 2026-10-19
+
+### Fixed
+- Closing the free app download notice keeps an icon that reopens the download card.
+- Minimized and previously dismissed notices retain download access after reload.
+
 ## [1.13.0] - 2026-10-17
 
 ### Added
