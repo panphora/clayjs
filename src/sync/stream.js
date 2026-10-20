@@ -9,7 +9,7 @@ document.addEventListener('clay:workspace-foreground', () => { workspaceBackgrou
 const pageHidden = () => document.hidden || workspaceBackground;
 
 export class SyncStream extends EventTarget {
-  constructor(url, { shared = false, documentURL, lane, startupCheck = false } = {}) {
+  constructor(url, { shared = false, sharedData = false, documentURL, lane, clientId, startupCheck = false, keepAliveWhenHidden = false } = {}) {
     super();
     this.url = url;
     this.readyState = 0;
@@ -17,8 +17,11 @@ export class SyncStream extends EventTarget {
     this.onmessage = null;
     this.onerror = null;
     this._shared = shared && typeof SharedWorker === 'function';
+    this._sharedData = sharedData;
     this._documentURL = documentURL;
     this._lane = lane;
+    this._clientId = clientId;
+    this._keepAliveWhenHidden = keepAliveWhenHidden;
     this._since = 0;
     this._closed = false;
     this._suspended = false;
@@ -35,17 +38,17 @@ export class SyncStream extends EventTarget {
     this._visibility = () => {
       clearTimeout(this._hiddenTimer);
       if (pageHidden()) {
-        this._worker?.port.postMessage({ v: 1, type: 'hidden' });
-        this._hiddenTimer = setTimeout(() => this._suspend(), HIDDEN_DELAY);
+        if (this._worker) this._postWorker(this._worker, 'hidden');
+        if (!this._keepAliveWhenHidden) this._hiddenTimer = setTimeout(() => this._suspend(), HIDDEN_DELAY);
       } else {
         if (this._suspended) this._resume();
         else if (this._worker) {
-          this._worker.port.postMessage({ v: 1, type: 'visible' });
+          this._postWorker(this._worker, 'visible');
         }
       }
     };
-    this._pagehide = () => this._suspend();
-    this._pageshow = () => { if (!pageHidden()) this._resume(); };
+    this._pagehide = () => this._suspend(true);
+    this._pageshow = () => { if (!pageHidden() || this._keepAliveWhenHidden) this._resume(); };
     document.addEventListener('visibilitychange', this._visibility);
     document.addEventListener('clay:workspace-background', this._visibility);
     document.addEventListener('clay:workspace-foreground', this._visibility);
@@ -62,14 +65,22 @@ export class SyncStream extends EventTarget {
     this[`on${type}`]?.(event);
   }
 
+  _postWorker(worker, type, fields = {}) {
+    worker.port.postMessage({ v: this._sharedData ? 2 : 1, type, ...fields });
+  }
+
   _open() {
     if (this._closed || this._suspended) return;
     this.readyState = 0;
     if (!this._shared) return this._openDirect();
     try {
-      const worker = new SharedWorker(new URL('/_/sync/worker.js', window.location.origin).href, 'clay-sync');
+      const worker = new SharedWorker(
+        new URL(this._sharedData ? '/_/sync/data-worker.js' : '/_/sync/worker.js', window.location.origin).href,
+        this._sharedData ? 'clay-sync-data' : 'clay-sync'
+      );
       this._worker = worker;
       let lastReply = Date.now();
+      let greeted = false;
       worker.onerror = () => {
         if (this._worker !== worker) return;
         this._shared = false;
@@ -78,13 +89,39 @@ export class SyncStream extends EventTarget {
       };
       this._startTimer = setTimeout(worker.onerror, START_TIMEOUT);
       worker.port.onmessage = ({ data }) => {
-        if (this._worker !== worker || data?.v !== 1) return;
+        if (this._worker !== worker || data?.v !== (this._sharedData ? 2 : 1)) return;
+        if (this._sharedData) {
+          if (data.type === 'unsupported') {
+            worker.onerror();
+            return;
+          }
+          if (data.type === 'gone') {
+            this.readyState = 2;
+            this._emit('error');
+            this.close();
+            return;
+          }
+          if (!greeted) {
+            if (data.type !== 'hello') return;
+            if (!Array.isArray(data.features) || !data.features.includes('live-data')) {
+              worker.onerror();
+              return;
+            }
+            greeted = true;
+            clearTimeout(this._startTimer);
+            lastReply = Date.now();
+            return;
+          }
+          if (data.type === 'hello') return;
+        }
         lastReply = Date.now();
-        if (['status', 'pong', 'cursor', 'frame', 'gone'].includes(data.type)) clearTimeout(this._startTimer);
+        if (!this._sharedData && ['status', 'pong', 'cursor', 'frame', 'gone'].includes(data.type)) clearTimeout(this._startTimer);
         if (data.type === 'status') {
           if (data.state === 'open') {
-            this.readyState = 1;
-            this._emit('open');
+            if (!this._sharedData || this.readyState !== 1) {
+              this.readyState = 1;
+              this._emit('open');
+            }
           } else if (data.state === 'connecting') {
             this.readyState = 0;
             this._emit('error');
@@ -100,6 +137,9 @@ export class SyncStream extends EventTarget {
         } else if (data.type === 'frame' && typeof data.data === 'string') {
           this._remember(data.data);
           this._emit('message', data.data);
+        } else if (this._sharedData && data.type === 'event' && ['data', 'data-state', 'data-writer'].includes(data.event)
+          && data.data !== null && typeof data.data === 'object' && !Array.isArray(data.data)) {
+          try { this._emit(data.event, JSON.stringify(data.data)); } catch {}
         } else if (data.type === 'gone') {
           this.readyState = 2;
           this._emit('error');
@@ -107,14 +147,16 @@ export class SyncStream extends EventTarget {
         }
       };
       worker.port.start();
-      worker.port.postMessage({ v: 1, type: pageHidden() ? 'hidden' : 'visible' });
-      worker.port.postMessage({ v: 1, type: 'subscribe', document: this._documentURL, lane: this._lane, since: this._since });
+      this._postWorker(worker, pageHidden() ? 'hidden' : 'visible');
+      const subscription = { document: this._documentURL, lane: this._lane, since: this._since };
+      if (this._sharedData && this._lane === 'live') subscription.clientId = this._clientId;
+      this._postWorker(worker, 'subscribe', subscription);
       this._pingTimer = setInterval(() => {
         if (this._worker !== worker) return;
         if (Date.now() - lastReply > PING_INTERVAL * 3) {
           this._repair = true;
           this._reopen();
-        } else worker.port.postMessage({ v: 1, type: 'ping' });
+        } else this._postWorker(worker, 'ping');
       }, PING_INTERVAL);
     } catch {
       this._shared = false;
@@ -170,7 +212,7 @@ export class SyncStream extends EventTarget {
       this._worker = null;
       worker.onerror = null;
       worker.port.onmessage = null;
-      try { worker.port.postMessage({ v: 1, type: 'unsubscribe' }); } catch {}
+      try { this._postWorker(worker, 'unsubscribe'); } catch {}
       worker.port.close();
     }
     if (this._source) {
@@ -180,16 +222,20 @@ export class SyncStream extends EventTarget {
   }
 
   _reopen() {
+    const notify = (this._sharedData || this._keepAliveWhenHidden) && this.readyState === 1;
+    this.readyState = 0;
+    if (notify) this._emit('error');
     this._disconnect();
     this._open();
   }
 
-  _suspend() {
+  _suspend(pageExit = false) {
     clearTimeout(this._hiddenTimer);
     if (this._closed || this._suspended) return;
     this._suspended = true;
     this._repair = true;
     this.readyState = 0;
+    if (pageExit && this._keepAliveWhenHidden) this._emit('error');
     this._disconnect();
   }
 

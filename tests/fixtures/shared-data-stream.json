@@ -1,0 +1,171 @@
+{
+  "document": "http://localhost/file.htmlclay",
+  "ports": [
+    {
+      "role": "editor_A",
+      "subscribe": {
+        "v": 2,
+        "type": "subscribe",
+        "document": "http://localhost/file.htmlclay",
+        "lane": "live",
+        "since": 0,
+        "clientId": "editor_A"
+      },
+      "receive": [
+        {
+          "v": 2,
+          "type": "hello",
+          "features": [
+            "live-data"
+          ]
+        },
+        {
+          "v": 2,
+          "type": "status",
+          "state": "connecting"
+        },
+        {
+          "v": 2,
+          "type": "cursor",
+          "seq": 12,
+          "resync": false
+        },
+        {
+          "v": 2,
+          "type": "status",
+          "state": "open"
+        },
+        {
+          "v": 2,
+          "type": "frame",
+          "data": "{\"seq\":12,\"html\":\"<p>saved</p>\"}"
+        },
+        {
+          "v": 2,
+          "type": "event",
+          "event": "data",
+          "data": {
+            "epoch": "e1",
+            "seq": 900,
+            "name": "game",
+            "ops": [
+              {
+                "op": "add",
+                "path": [
+                  "score"
+                ],
+                "n": 1
+              }
+            ],
+            "from": "editor_A",
+            "n": 7,
+            "checkpoint": false
+          }
+        },
+        {
+          "v": 2,
+          "type": "event",
+          "event": "data-state",
+          "data": {
+            "epoch": "e1",
+            "seq": 901,
+            "writer": "editor_B",
+            "stores": {
+              "game": {
+                "value": {
+                  "score": 901
+                },
+                "ephemeral": false,
+                "from": null,
+                "landed": 901,
+                "floor": 0,
+                "last": 901,
+                "seen": {
+                  "editor_A": 7
+                },
+                "saved": [
+                  [
+                    8,
+                    8
+                  ]
+                ]
+              }
+            },
+            "provenanceVersion": 2,
+            "receiptGeneration": 0
+          }
+        },
+        {
+          "v": 2,
+          "type": "event",
+          "event": "data-writer",
+          "data": {
+            "epoch": "e1",
+            "writer": "editor_B"
+          }
+        },
+        {
+          "v": 2,
+          "type": "status",
+          "state": "connecting"
+        },
+        {
+          "v": 2,
+          "type": "cursor",
+          "seq": 12,
+          "resync": false
+        },
+        {
+          "v": 2,
+          "type": "status",
+          "state": "open"
+        }
+      ],
+      "reconnectSubscribe": {
+        "v": 2,
+        "type": "subscribe",
+        "document": "http://localhost/file.htmlclay",
+        "lane": "live",
+        "since": 12,
+        "clientId": "editor_A"
+      }
+    },
+    {
+      "role": "saved-viewer",
+      "subscribe": {
+        "v": 2,
+        "type": "subscribe",
+        "document": "http://localhost/file.htmlclay",
+        "lane": "saved",
+        "since": 0
+      },
+      "receive": [
+        {
+          "v": 2,
+          "type": "hello",
+          "features": [
+            "live-data"
+          ]
+        },
+        {
+          "v": 2,
+          "type": "cursor",
+          "seq": 12,
+          "resync": false
+        },
+        {
+          "v": 2,
+          "type": "status",
+          "state": "open"
+        }
+      ],
+      "reconnectSubscribe": {
+        "v": 2,
+        "type": "subscribe",
+        "document": "http://localhost/file.htmlclay",
+        "lane": "saved",
+        "since": 12
+      }
+    }
+  ]
+}

@@ -1,4 +1,5 @@
 import { jest } from "@jest/globals";
+import { onStream } from '../../src/live/stream-bridge.js';
 
 /**
  * Which live-sync wire the client speaks, and how it decides.
@@ -26,11 +27,14 @@ let LiveSync;
 let resetHostMeta;
 
 beforeAll(async () => {
+  window.clayEditMode = true;
   global.EventSource = FakeEventSource;
   window.EventSource = FakeEventSource;
   ({ LiveSync } = await import("../../src/sync/live-sync.js"));
   ({ resetHostMeta } = await import("../../src/core/host-meta.js"));
 });
+
+afterAll(() => { delete window.clayEditMode; });
 
 beforeEach(() => {
   resetHostMeta();
@@ -42,11 +46,16 @@ afterEach(() => {
 });
 
 test.each([
-  [['sync', 'sync-worker'], true],
-  [['sync'], false],
-  [['sync', 'sync-worker', 'presence'], false],
-  [['sync-worker'], false],
-])('shared-worker discovery %j selects the compatible transport', async (extensions, shared) => {
+  [['sync', 'sync-worker'], 'v1'],
+  [['sync', 'live-data', 'sync-worker-data'], 'v2'],
+  [['sync', 'live-data', 'sync-worker-data', 'presence'], 'direct'],
+  [['sync', 'live-data', 'sync-worker'], 'direct'],
+  [['sync', 'sync-worker-data'], 'direct'],
+  [['live-data', 'sync-worker-data'], 'direct'],
+  [['sync'], 'direct'],
+  [['sync', 'sync-worker', 'presence'], 'direct'],
+  [['sync-worker'], 'direct'],
+])('shared-worker discovery %j selects the compatible transport', async (extensions, transport) => {
   const workers = [];
   global.SharedWorker = class {
     constructor(url, name) {
@@ -57,19 +66,62 @@ test.each([
   };
   const sync = await startedAgainst(host({ meta: { spec: 1, extensions } }));
   try {
-    expect(workers).toHaveLength(shared ? 1 : 0);
-    if (shared) {
-      expect(workers[0].name).toBe('clay-sync');
-      expect(workers[0].port.postMessage).toHaveBeenCalledWith(expect.objectContaining({ type: 'subscribe', since: 0 }));
+    expect(workers).toHaveLength(transport === 'direct' ? 0 : 1);
+    if (transport !== 'direct') {
+      expect(workers[0].url).toBe(`http://localhost/_/sync/${transport === 'v2' ? 'data-worker.js' : 'worker.js'}`);
+      expect(workers[0].name).toBe(transport === 'v2' ? 'clay-sync-data' : 'clay-sync');
+      const subscribe = workers[0].port.postMessage.mock.calls[1][0];
+      expect(subscribe).toEqual({
+        v: transport === 'v2' ? 2 : 1, type: 'subscribe', document: window.location.href,
+        lane: sync.lane, since: 0,
+        ...(transport === 'v2' && sync.lane === 'live' ? { clientId: sync.clientId } : {}),
+      });
       const apply = jest.spyOn(sync, 'applyUpdate').mockImplementation(() => {});
-      workers[0].port.onmessage({ data: { v: 1, type: 'cursor', seq: 42, resync: false } });
-      workers[0].port.onmessage({ data: { v: 1, type: 'frame', data: JSON.stringify({ seq: 42, html: 'peer', sender: 'peer' }) } });
+      const send = data => workers[0].port.onmessage({ data: { v: transport === 'v2' ? 2 : 1, ...data } });
+      if (transport === 'v2') send({ type: 'hello', features: ['live-data'] });
+      send({ type: 'cursor', seq: 42, resync: false });
+      send({ type: 'frame', data: JSON.stringify({ seq: 42, html: 'peer', sender: 'peer' }) });
       expect(apply).toHaveBeenCalledTimes(1);
-      workers[0].port.onmessage({ data: { v: 1, type: 'frame', data: JSON.stringify({ seq: 43, html: 'own', sender: sync.clientId }) } });
+      send({ type: 'frame', data: JSON.stringify({ seq: 43, html: 'own', sender: sync.clientId }) });
       expect(apply).toHaveBeenCalledTimes(1);
       expect(sync.lastSeenSeq).toBe(43);
+    } else {
+      expect(new URL(sync.sse.url).searchParams.get('client-id')).toBe(sync.clientId);
+      expect(new URL(sync.sse.url).searchParams.get('resume-id')).toBe(sync.resumeId);
     }
   } finally { sync.stop(); }
+});
+
+test('v2 live stream delivers readiness and parsed room events through the real bridge', async () => {
+  let worker;
+  global.SharedWorker = class {
+    constructor() {
+      worker = this;
+      this.port = { start() {}, close() {}, postMessage: jest.fn() };
+    }
+  };
+  const sync = await startedAgainst(host({ meta: { spec: 1, extensions: ['sync', 'live-data', 'sync-worker-data'] } }));
+  expect(sync.lane).toBe('live');
+  const opened = jest.fn(), closed = jest.fn(), event = jest.fn();
+  const unsubscribe = onStream({ open: opened, close: closed, event });
+  const send = data => worker.port.onmessage({ data: { v: 2, ...data } });
+  try {
+    send({ type: 'hello', features: ['live-data'] });
+    send({ type: 'status', state: 'open' });
+    expect(opened).toHaveBeenCalledWith({ clientId: sync.clientId, lane: sync.lane });
+    const payloads = [
+      ['data', { seq: 900, op: { kind: 'set' } }],
+      ['data-state', { seen: { [sync.clientId]: 7 }, saved: { [sync.clientId]: 5 }, pageTransition: 'stable' }],
+      ['data-writer', { clientId: sync.clientId, conn: 'proof' }],
+    ];
+    for (const [name, data] of payloads) send({ type: 'event', event: name, data });
+    expect(event.mock.calls).toEqual(payloads.map(([name, data]) => [name, data]));
+    send({ type: 'status', state: 'connecting' });
+    expect(closed).toHaveBeenCalledTimes(1);
+  } finally {
+    unsubscribe();
+    sync.stop();
+  }
 });
 
 // `/_/meta` answers first; everything after it is the relay.
@@ -127,6 +179,10 @@ test("a host with no /_/meta at all falls back to the legacy wire", async () => 
 
   expect(sync._profile.name).toBe("legacy");
   expect(sync.sse.url).toContain("/_/live-sync/stream");
+  expect(sync._sharedSync).toBe(false);
+  expect(sync._sharedData).toBe(false);
+  expect(sync._liveData).toBe(false);
+  sync.stop();
 });
 
 test("a snapshot produced while discovery is in flight is sent, not dropped", async () => {

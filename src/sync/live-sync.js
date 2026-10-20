@@ -287,6 +287,9 @@ class LiveSync {
     // document, and hostMeta() memoizes the request itself.
     this._profile = null;
     this._profilePromise = null;
+    this._sharedData = false;
+    this._sharedSync = false;
+    this._liveData = false;
     this._editing = null;
     this._ready = null;
     // Bumped by every start(), so a discovery that resolves after a stop/restart
@@ -701,8 +704,13 @@ class LiveSync {
       this._profilePromise = hostMeta()
         .then((meta) => {
           const extensions = meta?.extensions || [];
-          this._sharedSync = extensions.includes('sync') && extensions.includes('sync-worker') && !extensions.includes('presence');
-          return extensions.includes('sync') ? WIRE_PROFILES.spec : WIRE_PROFILES.legacy;
+          const hasSync = extensions.includes('sync');
+          const hasLiveData = extensions.includes('live-data');
+          const hasPresence = extensions.includes('presence');
+          this._sharedData = hasSync && hasLiveData && extensions.includes('sync-worker-data') && !hasPresence;
+          this._sharedSync = hasSync && !hasPresence && (this._sharedData || (extensions.includes('sync-worker') && !hasLiveData));
+          this._liveData = hasLiveData;
+          return hasSync ? WIRE_PROFILES.spec : WIRE_PROFILES.legacy;
         })
         .catch(() => WIRE_PROFILES.legacy)
         .then((profile) => {
@@ -787,8 +795,11 @@ class LiveSync {
     // would otherwise point the sync stream at an origin the document chose.
     this.sse = new SyncStream(new URL(path, window.location.origin).href, {
       shared: this._sharedSync,
+      sharedData: this._sharedData,
       documentURL: window.location.href,
       lane: this.lane,
+      clientId: this.clientId,
+      keepAliveWhenHidden: this._liveData && this.lane === 'live',
       // Only a response that named its own version gives this tab anything to
       // compare against. On a host that served none there is no provenance to
       // check, and the page keeps its pre-1.9.0 startup behavior.
