@@ -1,5 +1,5 @@
 import * as Y from "../../vendor/yjs.vendor.js";
-import { REMOTE_META, LOCAL, attrKeys } from "./layout.js";
+import { REMOTE_META, LOCAL, HISTORY_META, attrKeys } from "./layout.js";
 import { walk, hashText } from "./walk.js";
 import { docOf } from "./doc.js";
 import { localGroup } from "./group.js";
@@ -52,7 +52,7 @@ export function keepViewPos(derived, current) {
 export function createBridge({ pd, onNotice = () => {}, stats = { groups: 0, mismatch: 0, renders: 0, first: null }, captureTimeout = 500 }) {
   let view = null;
   let w = walk(pd);
-  const um = new Y.UndoManager([pd.flow, pd.attrs, pd.gone], { trackedOrigins: new Set([LOCAL]), captureTimeout });
+  const um = new Y.UndoManager([pd.flow, pd.attrs, pd.gone], { trackedOrigins: new Set([LOCAL]), captureTimeout, captureTransaction: (tr) => tr.meta.get(HISTORY_META) !== false });
   const noticed = new Map();
   const refresh = () => {
     w = walk(pd);
@@ -117,10 +117,8 @@ export function createBridge({ pd, onNotice = () => {}, stats = { groups: 0, mis
       view.updateState(state);
       if (!local.length) return;
       w = walk(pd);
-      const adoption = local.some((t) => t.getMeta("page-adopt"));
-      if (adoption) um.stopCapturing();
-      try { localGroup(pd, local, w, stats, um); }
-      finally { if (adoption) um.stopCapturing(); }
+      const history = transactions.every((t) => t.getMeta("addToHistory") !== false);
+      localGroup(pd, local, w, stats, um, history);
       const derived = refresh();
       if (bareShape(derived) !== bareShape(view.state.doc)) {
         stats.mismatch++;
@@ -130,7 +128,9 @@ export function createBridge({ pd, onNotice = () => {}, stats = { groups: 0, mis
     },
     restore(key) {
       if (!pd.gone.has(key)) return;
+      um.stopCapturing();
       pd.ydoc.transact(() => { pd.gone.delete(key); }, LOCAL);
+      um.stopCapturing();
       render();
     },
     undo() { return um.undo() !== null; },

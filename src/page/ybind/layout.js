@@ -5,6 +5,7 @@ export const LOCAL = "page-local";
 export const NET = "page-net";
 export const SEED = "page-seed";
 export const REMOTE_META = REMOTE;
+export const HISTORY_META = Symbol("page-history");
 
 const SKIP = new Set(["id", "pos"]);
 export const attrKeys = (type) => [...Object.keys(type.spec.attrs || {}).filter((k) => !SKIP.has(k)), ...(type.name === "table" ? ["rows"] : [])];

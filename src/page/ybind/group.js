@@ -1,6 +1,6 @@
 import { transform } from "../../vendor/prosemirror.vendor.js";
 import { schema } from "../schema.js";
-import { LOCAL, attrKeys, defaultOf, mintId } from "./layout.js";
+import { LOCAL, HISTORY_META, attrKeys, defaultOf, mintId } from "./layout.js";
 import { tokensOf, tokenIndex, yAfter } from "./tokens.js";
 import { CHUNK_CHARS, insertTokens, applyRegion, markRange } from "./writer.js";
 
@@ -14,7 +14,7 @@ const tableRange = (doc, from, to) => {
   ];
 };
 
-export function localGroup(pd, transactions, w, stats, um = null) {
+export function localGroup(pd, transactions, w, stats, um = null, history = true) {
   const steps = [], docs = [], maps = [];
   for (const tr of transactions) tr.steps.forEach((s, i) => { steps.push(s); docs.push(tr.docs[i]); maps.push(s.getMap()); });
   if (!steps.length) return;
@@ -25,8 +25,8 @@ export function localGroup(pd, transactions, w, stats, um = null) {
   implicit.sort((a, b) => b.tok - a.tok);
   for (const m of implicit) { m.alias = mintId(pd); alias.set(m.id, m.alias); }
   const holes = alias.size ? w.holes.map((h) => ({ at: h.at + implicit.filter((m) => m.tok < h.at).length, len: h.len })) : w.holes;
-  const ia = tokenIndex(d0, alias, w.visible), ib = tokenIndex(dm, new Map(), w.visible);
-  const bt = tokensOf(d0, alias, w.visible), at = tokensOf(dm, new Map(), w.visible);
+  const ia = tokenIndex(d0, alias, w.visible), ib = tokenIndex(dm, alias, w.visible);
+  const bt = tokensOf(d0, alias, w.visible), at = tokensOf(dm, alias, w.visible);
   const regions = [];
   const markSteps = [];
   steps.forEach((step, i) => {
@@ -51,7 +51,7 @@ export function localGroup(pd, transactions, w, stats, um = null) {
   }
   const span = merged.reduce((n, r) => n + (ib[r.nb] - ib[r.na]), 0);
   const chunked = span > CHUNK_CHARS;
-  const tx = chunked ? (fn) => pd.ydoc.transact(fn, LOCAL) : (fn) => fn();
+  const tx = chunked ? (fn) => pd.ydoc.transact((tr) => { tr.meta.set(HISTORY_META, history); fn(); }, LOCAL) : (fn) => fn();
   const ctx = { pd, holes, bt, tx };
   const sig = (toks) => toks.filter((t) => t.k === "b").map((t) => `${t.id}|${t.t}|${JSON.stringify(t.attrs)}`).join("\n");
   const structural = markSteps.length > 0 || sig(bt) !== sig(at);
@@ -73,10 +73,16 @@ export function localGroup(pd, transactions, w, stats, um = null) {
       tx(() => markRange({ pd, holes: ctx.holes }, from, to, name, val, at));
     }
   };
-  if (structural) um?.stopCapturing();
-  if (chunked) write();
-  else pd.ydoc.transact(write, LOCAL);
-  if (structural) um?.stopCapturing();
+  um?.stopCapturing();
+  const timeout = um?.captureTimeout;
+  if (um) um.captureTimeout = Infinity;
+  try {
+    if (chunked) write();
+    else pd.ydoc.transact((tr) => { tr.meta.set(HISTORY_META, history); write(); }, LOCAL);
+  } finally {
+    if (um) um.captureTimeout = timeout;
+    um?.stopCapturing();
+  }
   stats.groups++;
   stats.lastGroup = { chunked, structural, span };
 }
