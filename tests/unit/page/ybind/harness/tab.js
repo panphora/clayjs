@@ -65,7 +65,7 @@ export function makeYTab(sim, room, id, init, opts = {}) {
       });
       return capture;
     },
-    allNotices() { return notices; },
+    allNotices() { const rec = []; binding.subscribeRecovery((snap) => { if (snap.recoverable.length || snap.notices.length) rec.push(snap); })(); return [...notices, ...rec]; },
     blocks() {
       const out = [];
       editor.state.doc.forEach((node) => out.push([node.attrs.id, node.isTextblock ? node.textContent : node.type.name]));

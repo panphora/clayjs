@@ -58,6 +58,7 @@ const snapshot = await import("../../src/core/snapshot.js");
 const { saveCapturedHtml } = await import("../../src/core/save-core.js");
 const { savePageForce } = await import("../../src/core/save.js");
 const { stampOf, textHash, parseStamp, serializeLive } = await import("../../src/live/ops.js");
+const { FRAME_BYTES } = await import("../../src/live/fast-lane.js");
 
 const flushAsync = async () => {
   for (let i = 0; i < 10; i++) await Promise.resolve();
@@ -126,6 +127,21 @@ test("joins the room, posts ops, and checkpoints only as the writer after a chan
 
   bridge.streamEvent("data-writer", { epoch: "e1", writer: "tab-1", landed: { g: 1 } });
   expect(deps.needsSave()).toBe(false);
+});
+
+test("a single op too large for a frame is announced to the user", async () => {
+  document.body.innerHTML = tag("g", '{"s":0}');
+  const g = live("g");
+  await flushAsync();
+  bridge.streamOpened({ clientId: "tab-1", lane: "live" });
+  await flushAsync();
+  g.set("blob", "x".repeat(FRAME_BYTES + 100));
+  await wait(120);
+  expect(notices.find((n) => n.code === "op-too-large")).toMatchObject({
+    name: "g",
+    code: "op-too-large",
+    message: "That change was too large to share, so it was undone.",
+  });
 });
 
 test("after a room change the writer saves the new room's moves", async () => {

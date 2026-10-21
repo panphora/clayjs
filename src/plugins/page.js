@@ -4,13 +4,15 @@ import { classifyFile } from "../page/adopt.js";
 import { renderFromTags } from "../page/save-projection.js";
 import { blocksFromYValue } from "../page/ybind/decode.js";
 import { createYPageBinding } from "../page/ybind/binding.js";
+import { authorIdentity } from "../page/ybind/author.js";
 import { yValueOf } from "../page/ybind/provider.js";
 import { registerUnsavedState } from "../lib/unsaved-state.js";
 import { hostMeta } from "../core/host-meta.js";
 import { storeOf, checkpointWithin, requestCheckpoint, fastLane, pageLaneReady, pageWriterReady } from "./live.js";
 import { HyperMorph } from "../vendor/hyper-morph.vendor.js";
 import { saveStateFor, BLOCKED_TEXT, RETRY_TEXT, downloadPageCopy, copyPageText } from "../page/save-states.js";
-import { toastPersistent, dismissPersistent } from "../ui/toast.js";
+import toast, { toastPersistent, dismissPersistent } from "../ui/toast.js";
+import { createRecoverList, focusBlock } from "../page/recover.js";
 import { createToolHost } from "../page/tools.js";
 import { createAiTool } from "../page/ai-tool.js";
 import { tablesFromDoc } from "../page/tool-data.js";
@@ -30,6 +32,17 @@ let active = null;
 
 // Shorter than installAdoption's 10 s hold, so an unelected room still adopts.
 export const WRITER_WAIT_MS = 8_000;
+
+function scrollToHashBlock(view, loc = globalThis.location) {
+  const raw = loc?.hash?.slice(1);
+  if (!raw) return;
+  let id;
+  try { id = decodeURIComponent(raw); } catch { return; }
+  let found = -1;
+  view.state.doc.forEach((node, pos) => { if (found < 0 && node.attrs.id === id) found = pos; });
+  if (found < 0) return;
+  globalThis.requestAnimationFrame?.(() => view.nodeDOM(found)?.scrollIntoView?.({ block: "start" }));
+}
 
 function abandon(inst) {
   if (active === inst) active = null;
@@ -114,6 +127,7 @@ function listenForSaves(inst) {
   });
   listen(inst, "clay:live-notice", (event) => {
     if (event.detail?.name !== "page") return;
+    if (event.detail?.code === "op-too-large") return;
     const code = event.detail?.code ?? null;
     applySaveState(inst, saveStateFor({ code }), code, event.detail?.message ?? "");
   });
@@ -152,6 +166,7 @@ function dispose() {
   dismissPersistent(RETRY_TEXT);
   dismissPersistent(BLOCKED_TEXT);
   try { inst.adoption?.dispose(); } catch (error) { console.error("clayjs: page plugin adoption failed to dispose", error); }
+  try { inst.recover?.destroy(); } catch (error) { console.error("clayjs: page plugin recover list failed to dispose", error); }
   try { inst.view?.destroy(); } catch (error) { console.error("clayjs: page plugin view failed to destroy", error); }
   inst.aiTool?.dispose();
   inst.toolHost?.dispose();
@@ -219,8 +234,11 @@ async function run(inst, gen, options = {}) {
     registered?.changed();
     return result;
   };
+  const identity = authorIdentity();
   const binding = createYPageBinding({
     store,
+    authorToken: identity.token,
+    ownedTokens: identity.owned,
     checkpointWithin,
     requestCheckpoint,
     registerUnsavedState: (def) => {
@@ -276,6 +294,14 @@ async function run(inst, gen, options = {}) {
   editorView = view;
   inst.view = view;
   binding.attach(view);
+  scrollToHashBlock(view);
+  inst.recover = createRecoverList({
+    binding,
+    mount: view.dom.closest(".page-shell") ?? article,
+    ownTokens: [identity.token, ...identity.owned],
+    onRestored: (id) => focusBlock(view, id),
+    onStale: () => toast("That change was updated. The list now shows the latest version.", "warning"),
+  });
 
   // A hand-edited article is adopted by the room's elected writer only. With a
   // lane but no writer yet, this tab claims the room (a redundant set of an

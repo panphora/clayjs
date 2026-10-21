@@ -4,6 +4,7 @@ import { cloneJson, formatBy, serializeLive, stampOf, textHash, unionRanges } fr
 import { blocksFromYValue } from '../../page/ybind/decode.js';
 import { YDecodeError } from '../../page/ybind/provider.js';
 import { canon, fragmentCleaner, renderBlocks } from '../../page/projection.js';
+import { classifyFile } from '../../page/adopt.js';
 
 const PAGE = /^page(\.[0-9]+)?$/;
 const NAME = /^[A-Za-z0-9_.:-]{1,64}$/;
@@ -110,7 +111,23 @@ export function renderCheckpoint(currentHtml, capture, { createDocument }) {
   const doc = createDocument();
   if (!doc?.createElement) return { kind: 'refused', reason: 'invalid-document' };
   let rendered;
-  try { rendered = renderBlocks(decoded.blocks, { clean: fragmentCleaner(doc) }); }
+  try {
+    const article = doc.createElement('article');
+    const articleLoc = placement.article.sourceCodeLocation;
+    const revision = attr(placement.article, 'data-rev');
+    if (revision !== undefined) article.setAttribute('data-rev', revision);
+    article.innerHTML = currentHtml.slice(articleLoc.startTag.endOffset, articleLoc.endTag.startOffset);
+    const pageValues = [...placement.tags].filter(([name]) => PAGE.test(name)).map(([, node]) => {
+      const loc = node.sourceCodeLocation;
+      return parseJsonRelaxed(currentHtml.slice(loc.startTag.endOffset, loc.endTag.startOffset));
+    });
+    if (classifyFile(article, pageValues).kind === 'adopt') return { kind: 'refused', reason: 'needs-adoption' };
+    rendered = renderBlocks(decoded.blocks, { clean: fragmentCleaner(doc) });
+  }
+  catch (error) {
+    if (error instanceof YDecodeError || error instanceof SyntaxError) return { kind: 'refused', reason: 'invalid-document' };
+    throw error;
+  }
   finally { doc.defaultView?.close?.(); }
   const edits = [];
   for (const store of capture.stores) {

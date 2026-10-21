@@ -43,6 +43,30 @@ test("markSaved leaves a store with later frames dirty and refuses a replaced ro
   expect(rooms.markSaved(room, { seq: room.seq, stores: [{ name: "game" }] })).toBe(false);
 });
 
+test("an identical set elects its writer and records a receipt without dirtying the room", () => {
+  const { rooms } = setup();
+  const room = rooms.open("/a.html", DOC);
+  const claim = { name: "game", n: 1, ops: [{ op: "set", path: ["score"], value: 0 }] };
+  const accepted = rooms.apply(room, "A", claim, { connected: ["A"] });
+  expect(accepted).toMatchObject({ seq: 0, writer: "A" });
+  expect(room.seq).toBe(0);
+  expect(room.stores.get("game").last).toBe(0);
+  expect(room.stores.get("game").log).toEqual([]);
+  expect(roomIsDirty(room)).toBe(false);
+  expect(rooms.apply(room, "A", claim).duplicate).toBe(true);
+  expect(rooms.state(room, "A").stores.game.seen.A).toBe(1);
+  const changed = rooms.apply(room, "A", { ...claim, n: 2, ops: [{ op: "set", path: ["score"], value: 1 }] });
+  expect(changed.seq).toBe(1);
+  expect(room.stores.get("game").last).toBe(1);
+  expect(roomIsDirty(room)).toBe(true);
+
+  const nested = rooms.open("/nested.html", tag("game", { options: { a: 1, b: 2 } }));
+  const equalObject = rooms.apply(nested, "B", { name: "game", n: 1, ops: [{ op: "set", path: ["options"], value: { b: 2, a: 1 } }] });
+  expect(equalObject.seq).toBe(0);
+  expect(nested.stores.get("game").value.options).toEqual({ a: 1, b: 2 });
+  expect(roomIsDirty(nested)).toBe(false);
+});
+
 test("rekey moves the same room object and refuses an occupied destination or a missing source", () => {
   const { rooms } = setup();
   const room = rooms.open("/a.html", DOC);

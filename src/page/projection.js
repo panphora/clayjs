@@ -9,6 +9,7 @@
 // as runs, and with tables and boards holding ordered arrays instead of
 // pos-keyed maps. parse(render(blocks)) equals project(blocks) for every kind.
 import { chartModel, renderChartSvg } from "./rich/chart.js";
+import { cellText } from "./rich/cell.js";
 
 export const ATOM = "￼";
 export const BREAK = '@{"type":"hard_break"}';
@@ -203,13 +204,25 @@ const omitDefaults = (t, fields) => {
   return out;
 };
 
+const columnWidth = (value) => (typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.round(value) : null);
+
+function cellModel(value) {
+  if (value === null || typeof value !== "object" || typeof value.c !== "string") return normalizeText(cellText(value), null).c;
+  const raw = unitsOf(value.m, value.c.length);
+  const units = raw && raw.map((k, i) => (!k ? "" : k[0] === "@" ? (k === BREAK && value.c[i] === ATOM ? k : "") : keyOfMarks(safeMarks(marksOfKey(k)))));
+  if (!units) return normalizeText(cellText(value), null).c;
+  const n = normalizeText(value.c, units);
+  const fields = textFields(n.c, n.units);
+  return fields.m ? fields : fields.c;
+}
+
 function projectTable(b) {
   const cols = b.cols && typeof b.cols === "object" ? b.cols : {};
   const rows = b.rows && typeof b.rows === "object" ? b.rows : {};
   const colIds = orderedIds(cols);
   return {
-    cols: colIds.map((id) => ({ id, name: normalizeText(String(cols[id].name ?? ""), null).c, ...(cols[id].kind != null ? { kind: String(cols[id].kind) } : {}) })),
-    rows: orderedIds(rows).map((id) => ({ id, cells: Object.fromEntries(colIds.map((col) => [col, normalizeText(String(rows[id].cells?.[col] ?? ""), null).c])) })),
+    cols: colIds.map((id) => ({ id, name: normalizeText(String(cols[id].name ?? ""), null).c, ...(cols[id].kind != null ? { kind: String(cols[id].kind) } : {}), ...(columnWidth(cols[id].width) ? { width: columnWidth(cols[id].width) } : {}) })),
+    rows: orderedIds(rows).map((id) => ({ id, cells: Object.fromEntries(colIds.map((col) => [col, cellModel(rows[id].cells?.[col])])) })),
   };
 }
 
@@ -320,6 +333,7 @@ export function renderInline(c, m) {
 }
 
 const inlineOf = (item) => renderInline(item.c ?? "", item.m);
+const cellHtml = (cell) => (typeof cell === "string" ? escText(cell) : cell && typeof cell === "object" ? renderInline(String(cell.c ?? ""), cell.m) : "");
 const dataAttrs = (obj) => Object.entries(obj).map(([k, v]) => attr(`data-${k}`, v)).join("");
 
 function renderLeaf(item, clean, tables) {
@@ -336,8 +350,8 @@ function renderLeaf(item, clean, tables) {
       return `<div${id} data-type="file"${attr("data-src", item.src ?? "")}${attr("data-name", item.name ?? "")}${attr("data-size", item.size ?? null)}${attr("data-mime", item.mime ?? null)}><a${attr("href", href)} rel="noopener noreferrer">${escText(item.name || "file")}</a></div>`;
     }
     case "table": {
-      const head = item.cols.map((c) => `<th${attr("data-col", c.id)}${attr("data-kind", c.kind ?? null)}>${escText(c.name)}</th>`).join("");
-      const body = item.rows.map((r) => `<tr${attr("data-id", r.id)}>${item.cols.map((c) => `<td>${escText(r.cells[c.id] ?? "")}</td>`).join("")}</tr>`).join("\n");
+      const head = item.cols.map((c) => `<th${attr("data-col", c.id)}${attr("data-kind", c.kind ?? null)}${attr("data-width", c.width ?? null)}${attr("style", c.width ? `width:${c.width}px` : null)}>${escText(c.name)}</th>`).join("");
+      const body = item.rows.map((r) => `<tr${attr("data-id", r.id)}>${item.cols.map((c) => `<td>${cellHtml(r.cells[c.id])}</td>`).join("")}</tr>`).join("\n");
       return `<table${id}${attr("data-sort", item.sort != null ? JSON.stringify(item.sort) : null)}>\n<thead><tr>${head}</tr></thead>\n<tbody>\n${body}\n</tbody>\n</table>`;
     }
     case "chart": {
@@ -555,11 +569,11 @@ export function parseArticle(article) {
   const tableOf = (el, P) => {
     const headRow = el.querySelector(":scope > thead > tr") || null;
     const ths = headRow ? [...headRow.children] : [];
-    const cols = ths.map((th) => ({ id: th.getAttribute("data-col"), name: text(th), ...(th.hasAttribute("data-kind") ? { kind: th.getAttribute("data-kind") } : {}) }));
+    const cols = ths.map((th) => ({ id: th.getAttribute("data-col"), name: text(th), ...(th.hasAttribute("data-kind") ? { kind: th.getAttribute("data-kind") } : {}), ...(columnWidth(Number(th.getAttribute("data-width"))) ? { width: columnWidth(Number(th.getAttribute("data-width"))) } : {}) }));
     const trs = [...el.querySelectorAll(":scope > tbody > tr, :scope > tr")];
     const width = Math.max(cols.length, ...trs.map((tr) => tr.children.length), 0);
     while (cols.length < width) cols.push({ id: null, name: "" });
-    const rows = trs.map((tr) => ({ id: tr.getAttribute("data-id"), cellsAt: [...tr.children].map((td) => text(td)) }));
+    const rows = trs.map((tr) => ({ id: tr.getAttribute("data-id"), cellsAt: [...tr.children].map((td) => { const fields = tf(td); return fields.m ? fields : fields.c; }) }));
     let sort = null;
     try { sort = el.hasAttribute("data-sort") ? JSON.parse(el.getAttribute("data-sort")) : null; } catch {}
     return { ...omitDefaults("table", { ...P, sort }), cols, rows };

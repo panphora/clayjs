@@ -437,6 +437,24 @@ test("one update larger than a frame is undone locally", async () => {
   warn.mockRestore();
 });
 
+test("an op queued after an oversized one still goes out", async () => {
+  const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
+  const room = createRoom({ game: { s: 0 } });
+  const a = client(room, "a", { s: 0 });
+  room.open("a");
+  await settle();
+  a.game.set("blob", "x".repeat(FRAME_BYTES));
+  a.game.add("s", 1);
+  await settle();
+  expect(a.game.toJSON()).toEqual({ s: 1 });
+  expect(room.stores.game).toEqual({ s: 1 });
+  expect(a.store.pending).toEqual([]);
+  expect(a.lane.status.seq).toBe(room.seq);
+  expect(room.posts.length).toBeGreaterThan(0);
+  expect(warn).toHaveBeenCalled();
+  warn.mockRestore();
+});
+
 test("a state read refused with 401 stops the lane", async () => {
   const room = createRoom({ game: { s: 0 } });
   const store = createStore({ name: "game", value: { s: 0 } });

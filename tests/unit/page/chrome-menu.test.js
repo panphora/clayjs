@@ -2,6 +2,7 @@ import { jest } from "@jest/globals";
 import { history } from "../../../src/vendor/prosemirror.vendor.js";
 import { selectBlocks } from "../../../src/page/blocksel.js";
 import { editor, key, posOf, select, shape, typeText } from "./view-helpers.js";
+import { ACTION_ITEMS, blockLink } from "../../../src/page/chrome.js";
 
 /**
  * The block menu: the slash trigger and its session, the plus, the ranking
@@ -30,7 +31,7 @@ describe("the slash trigger", () => {
     const view = open([["e", "paragraph", ""]]);
     expect(typeText(view, "/")).toBe(true);
     expect(isOpen(view)).toBe(true);
-    expect(labels(view)).toEqual(["Text", "Heading 1", "Heading 2", "Heading 3", "Bulleted list", "Numbered list", "Checklist", "Toggle", "Callout", "Code", "Divider", "Image", "File", "Table", "Import CSV…"]);
+    expect(labels(view)).toEqual(["Text", "Heading 1", "Heading 2", "Heading 3", "Bulleted list", "Numbered list", "Checklist", "Toggle", "Callout", "Code", "Divider", "Image", "File", "Table", "Import CSV…", "Board"]);
   });
 
   test("opens after a space in the middle of a line, and at the start of a line that has text", () => {
@@ -119,7 +120,7 @@ describe("no match", () => {
     expect(isOpen(view)).toBe(true);
     backspace(view);
     backspace(view);
-    expect(rows(view).length).toBe(15);
+    expect(rows(view).length).toBe(16);
   });
 
   test("a space after a query with no match ends the session", () => {
@@ -285,7 +286,7 @@ describe("the actions menu", () => {
     expect(key(view, "/", { ctrlKey: true })).toBe(true);
     expect(isOpen(view)).toBe(true);
     expect(selectedIds(view)).toEqual(["t", "b1"]);
-    expect(labels(view)).toEqual(["Move up", "Move down", "Indent", "Outdent", "Duplicate", "Delete", "Turn into"]);
+    expect(labels(view)).toEqual(["Move up", "Move down", "Indent", "Outdent", "Duplicate", "Delete", "Turn into", "Copy link"]);
   });
 
   test("it also opens on Cmd+/ and the highlight starts on the first row", () => {
@@ -371,7 +372,7 @@ describe("the actions menu on an image", () => {
   test("an image gets Alt text, Small, Medium and Full width after the common actions", () => {
     const view = onImage();
     key(view, "/", { ctrlKey: true });
-    expect(labels(view)).toEqual(["Move up", "Move down", "Indent", "Outdent", "Duplicate", "Delete", "Alt text…", "Small", "Medium", "Full width"]);
+    expect(labels(view)).toEqual(["Move up", "Move down", "Indent", "Outdent", "Duplicate", "Delete", "Copy link", "Alt text…", "Small", "Medium", "Full width"]);
   });
 
   test("Small, Medium and Full width set the pixel width, each as one step", () => {
@@ -494,5 +495,16 @@ describe("review menu regressions", () => {
       view.dom.parentElement.querySelector('.page-dock [data-cmd="link"]').click();
       expect(document.activeElement).toBe(view.dom.parentElement.querySelector(".page-link-input"));
     } finally { view.destroy(); }
+  });
+});
+
+describe("block actions", () => {
+  test("Copy link follows Turn into, after the F23 phone order", () => {
+    const keys = ACTION_ITEMS.map((a) => a.key);
+    expect(keys.indexOf("link")).toBe(keys.indexOf("turn") + 1);
+  });
+
+  test("block links point at the block id on the current page", () => {
+    expect(blockLink("a b", { origin: "https://x.test", pathname: "/doc.html", search: "" })).toBe("https://x.test/doc.html#a%20b");
   });
 });

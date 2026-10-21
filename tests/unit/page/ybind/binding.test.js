@@ -4,7 +4,7 @@ import { schema } from "../../../../src/page/schema.js";
 import { identityPlugin } from "../../../../src/page/model.js";
 import { state as pmState, view as pmView, model as pmModel, commands } from "../../../../src/vendor/prosemirror.vendor.js";
 import { toBase64 } from "../../../../src/vendor/yjs.vendor.js";
-import { createYPageBinding, seedValue, blocksFromYValue, LOCAL } from "../../../../src/page/ybind/index.js";
+import { createYPageBinding, seedValue, blocksFromYValue, removeKey, canonicalRevision, LOCAL } from "../../../../src/page/ybind/index.js";
 
 const { EditorState, TextSelection } = pmState;
 const open = (blocks, extra = {}) => {
@@ -68,7 +68,10 @@ test("a single tab: typing, Enter, Backspace, undo, redo, block delete", () => {
   const pos = view.state.doc.child(0).nodeSize;
   view.dispatch(view.state.tr.delete(pos, pos + q.nodeSize));
   expect(texts(view)).toEqual(["helloX"]);
-  expect([...pd.gone.values()]).toEqual([{ b: "q", e: null }]);
+  const removed = [...pd.gone.values()];
+  expect(removed).toHaveLength(1);
+  expect(removed[0].blockId).toBe("q");
+  expect(removed[0].end).toBe(null);
   binding.undo();
   expect(texts(view)).toEqual(["helloX", "world"]);
   expect(pd.gone.size).toBe(0);
@@ -110,17 +113,20 @@ test("marks", () => {
   expect(view.state.doc.child(0).content.toJSON()).toEqual([{ type: "text", text: "heXllo" }]);
 });
 
-test("an edit inside a block a peer removed raises one notice and Restore brings the block back", () => {
-  const notices = [];
-  const { view, binding, pd } = open([{ id: "p", text: "hello" }, { id: "q", text: "world" }], { onNotice: (n) => notices.push(n) });
+test("a peer removal exposes the block through the shared recovery list and Restore brings the block back", () => {
+  const { view, binding, pd } = open([{ id: "p", text: "hello" }, { id: "q", text: "world" }]);
   let key = null;
   for (let it = pd.flow._start; it; it = it.right) if (!it.deleted && it.content.embed && it.content.embed.b === "q") key = `${it.id.client}.${it.id.clock}`;
-  pd.ydoc.transact(() => pd.gone.set(key, { b: "q", e: null }), "page-net");
+  pd.ydoc.transact(() => pd.gone.set(removeKey(key, "move-1"), { blockId: "q", end: null, sv: [] }), "page-net");
   expect(texts(view)).toEqual(["hello"]);
-  expect(notices.length).toBe(1);
-  expect(notices[0]).toMatchObject({ kind: "deleted-block-edit", id: "q", text: "world" });
-  expect(binding.notices.length).toBe(1);
-  expect(binding.notices[0].key).toBe(notices[0].key);
-  binding.restore(notices[0].key);
+  expect(binding.recoverable).toHaveLength(1);
+  const record = binding.recoverable[0];
+  expect(record.source).toBe(key);
+  expect(record.blockId).toBe("q");
+  expect(record.blocks[0].runs.some((run) => run.displaced)).toBe(true);
+  expect(record.revision).toBe(canonicalRevision(JSON.parse(record.revision)));
+  expect(binding.restore(record.source, "not-the-revision")).toEqual({ status: "stale", notice: null });
+  expect(binding.restore(record.source, record.revision)).toEqual({ status: "restored", id: `recovered:${key}` });
   expect(texts(view)).toEqual(["hello", "world"]);
+  expect(binding.recoverable).toEqual([]);
 });

@@ -97,6 +97,8 @@ export async function runPlan(plan, cfg = DEFAULT, { seed = 1, quiet = false } =
   for (const id of cfg.tabs) tabs.set(id, makeYTab(sim, room, id, clone(initial), { compact: cfg.compact }));
 
   const ev = new Map();
+  const undoCaps = new WeakMap();
+  const undone = new Set();
   const log = (c, kind, tab) => { (ev.get(c) ?? ev.set(c, []).get(c)).push({ kind, tab, t: sim.now() }); };
   for (const t of tabs.values()) {
     const view = t.editor;
@@ -137,7 +139,16 @@ export async function runPlan(plan, cfg = DEFAULT, { seed = 1, quiet = false } =
       if (a.kind === 'busy') { room.refuseUntil = sim.now() + a.len; refuse.until.set(t.id, sim.now() + a.len); return; }
       if (a.kind === 'save') { t.save({ answer: a.answer }); return; }
       if (!t) return;
+      const prevItem = t.bridge.um.undoStack.at(-1);
       act(t, a);
+      if (a.kind !== 'undo' && a.kind !== 'redo') {
+        const item = t.bridge.um.undoStack.at(-1);
+        if (item && item !== prevItem) {
+          const chars = [];
+          for (const [c, es] of ev) if (es.some((e) => e.kind === 'ins' && e.tab === t.id && e.t === a.at)) chars.push(c);
+          if (chars.length) undoCaps.set(item, chars);
+        }
+      }
     } catch (err) { errors.push(`at ${a.at} ${a.tab} ${a.kind}: ${err.stack?.split('\n').slice(0, 3).join(' | ')}`); }
   };
 
@@ -200,8 +211,25 @@ export async function runPlan(plan, cfg = DEFAULT, { seed = 1, quiet = false } =
     } else if (a.kind === 'join') {
       const p = pick(t, a.f[0], a.f[1]); if (!p || p.list.indexOf(p.list.find((x) => x.pos === p.pos)) === 0) return;
       sel(t, p.pos + 1); run(commands.joinBackward);
-    } else if (a.kind === 'undo') t.bridge.undo();
-    else if (a.kind === 'redo') t.bridge.redo();
+    } else if (a.kind === 'undo') {
+      const stack = [...t.bridge.um.undoStack];
+      if (t.bridge.undo()) {
+        const item = stack[t.bridge.um.undoStack.length];
+        const chars = item ? (undoCaps.get(item) ?? []) : [];
+        const top = t.bridge.um.redoStack.at(-1);
+        if (top && chars.length) undoCaps.set(top, chars);
+        for (const c of chars) undone.add(c);
+      }
+    } else if (a.kind === 'redo') {
+      const stack = [...t.bridge.um.redoStack];
+      if (t.bridge.redo()) {
+        const item = stack[t.bridge.um.redoStack.length];
+        const chars = item ? (undoCaps.get(item) ?? []) : [];
+        const top = t.bridge.um.undoStack.at(-1);
+        if (top && chars.length) undoCaps.set(top, chars);
+        for (const c of chars) undone.delete(c);
+      }
+    }
     else if (a.kind === 'paste') {
       const p = pick(t, a.f[0], a.f[1]); if (!p) return;
       const to = p.pos + 1 + Math.min(p.len, p.off + Math.floor(a.f[2] * 4));
@@ -254,7 +282,7 @@ export async function runPlan(plan, cfg = DEFAULT, { seed = 1, quiet = false } =
     const n = count.get(c) ?? 0;
     const inNotice = noticeText.includes(c);
     if (ins <= 1 && kinds[kinds.length - 1] !== 'del' && (ins === 1 || kinds[0] === 'init') && del === 0) {
-      if (n === 0 && !inNotice) findings.push({ cls: 'silent-loss', detail: `${c} U+${c.charCodeAt(0).toString(16)} typed/initial by ${es[0].tab} at ${es[0].t}` });
+      if (n === 0 && !inNotice && !undone.has(c)) findings.push({ cls: 'silent-loss', detail: `${c} U+${c.charCodeAt(0).toString(16)} typed/initial by ${es[0].tab} at ${es[0].t}` });
     }
     const removedBy = new Set(notices.filter((x) => x.kind === 'removed').map((x) => x.tab));
     const extraIns = kinds[0] === 'init' ? ins : Math.max(0, ins - 1);

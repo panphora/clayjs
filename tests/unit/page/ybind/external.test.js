@@ -197,3 +197,61 @@ test("board replacements emit independent leaf field updates", () => {
   try { expect(removedDoc.getMap("boardFields").get('["bd","card","b","alive"]')).toBe(false); }
   finally { removedDoc.destroy(); }
 });
+
+const TABLE = { t: "table", pos: "1", cols: { c1: { pos: "1", name: "Week" }, c2: { pos: "2", name: "Signups", kind: "number" } }, rows: { r1: { pos: "1", cells: { c1: "Sep 21", c2: "58" } }, r2: { pos: "2", cells: { c1: "Sep 28", c2: "41" } } } };
+const tableFieldsOf = (value) => {
+  const doc = docFromValue(value, { strict: true });
+  try { return Object.fromEntries(doc.getMap("tableFields").entries()); } finally { doc.destroy(); }
+};
+const withCell = (rows, row, col, cell) => ({ ...rows, [row]: { ...rows[row], cells: { ...rows[row].cells, [col]: cell } } });
+
+test("table replacements emit independent leaf field updates and keep the seed", () => {
+  const value = seed({ tbl: clone(TABLE) });
+  const { blocks, revision } = run("read", value).result;
+  const a = run("write", value, { expectedRevision: revision, changes: [{ id: "tbl", attrs: { rows: withCell(blocks.tbl.rows, "r1", "c1", "Sep 20") } }] }).result;
+  const b = run("write", value, { expectedRevision: revision, changes: [{ id: "tbl", attrs: { rows: withCell(blocks.tbl.rows, "r2", "c2", "44") } }] }).result;
+  expect(tableFieldsOf(a.value)).toEqual({ '["tbl","cell","r1","c1"]': "Sep 20" });
+  const doc = docFromValue(value, { strict: true });
+  try {
+    for (const updates of [a.updates, b.updates]) for (const [, bytes] of entriesOf(updates)) Y.applyUpdateV2(doc, dec(bytes));
+    const merged = blocksFromYValue(yValueOf(doc));
+    expect(merged.tbl.rows.r1.cells.c1).toBe("Sep 20");
+    expect(merged.tbl.rows.r2.cells.c2).toBe("44");
+    expect(doc.getMap("attrs").get("tbl").get("rows")).toEqual(TABLE.rows);
+  } finally { doc.destroy(); }
+});
+
+test("table writes add and remove rows and columns as alive fields", () => {
+  const value = seed({ tbl: clone(TABLE) });
+  const { blocks, revision } = run("read", value).result;
+  const rows = { r2: blocks.tbl.rows.r2, r3: { pos: "3", cells: { c1: "Oct 5", c3: "new" } } };
+  const cols = { ...blocks.tbl.cols, c3: { pos: "3", name: "Note", width: 140 } };
+  const written = run("write", value, { expectedRevision: revision, changes: [{ id: "tbl", attrs: { rows, cols } }] }).result;
+  expect(written.blocks.tbl.rows).toEqual(rows);
+  expect(written.blocks.tbl.cols).toEqual(cols);
+  expect(tableFieldsOf(written.value)).toEqual({
+    '["tbl","col","c3","alive"]': true, '["tbl","col","c3","name"]': "Note", '["tbl","col","c3","width"]': 140, '["tbl","col","c3","pos"]': "3",
+    '["tbl","row","r1","alive"]': false,
+    '["tbl","row","r3","alive"]': true, '["tbl","row","r3","pos"]': "3", '["tbl","cell","r3","c1"]': "Oct 5", '["tbl","cell","r3","c3"]': "new",
+  });
+  const again = run("write", written.value, { expectedRevision: written.revision, changes: [{ id: "tbl", attrs: { rows: written.blocks.tbl.rows } }] }).result;
+  expect(tableFieldsOf(again.value)).toEqual(tableFieldsOf(written.value));
+  expect(again.blocks).toEqual(written.blocks);
+});
+
+test("table writes keep marked cells and refuse malformed cells and widths", () => {
+  const value = seed({ tbl: clone(TABLE) });
+  const { blocks, revision } = run("read", value).result;
+  const marked = { c: "Sep 21", m: [[3, "b"], [3, ""]] };
+  const written = run("write", value, { expectedRevision: revision, changes: [{ id: "tbl", attrs: { rows: withCell(blocks.tbl.rows, "r1", "c1", marked) } }] }).result;
+  expect(written.blocks.tbl.rows.r1.cells.c1).toEqual(marked);
+  const unchanged = run("write", written.value, { expectedRevision: written.revision, changes: [{ id: "tbl", attrs: { rows: written.blocks.tbl.rows } }] }).result;
+  expect(tableFieldsOf(unchanged.value)).toEqual(tableFieldsOf(written.value));
+  for (const rows of [withCell(blocks.tbl.rows, "r1", "c1", { c: "x", m: [[2, "b"]] }), withCell(blocks.tbl.rows, "r1", "c1", 5), withCell(blocks.tbl.rows, "r1", "", "x")]) {
+    expect(run("write", value, { expectedRevision: revision, changes: [{ id: "tbl", attrs: { rows } }] }).error.code).toBe("invalid-content");
+  }
+  for (const width of [0, -1, "120"]) {
+    const cols = { ...blocks.tbl.cols, c1: { ...blocks.tbl.cols.c1, width } };
+    expect(run("write", value, { expectedRevision: revision, changes: [{ id: "tbl", attrs: { cols } }] }).error.code).toBe("invalid-content");
+  }
+});

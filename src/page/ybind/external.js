@@ -3,10 +3,12 @@ import { transform } from "../../vendor/prosemirror.vendor.js";
 import { schema } from "../schema.js";
 import { nodeFromBlock } from "../model.js";
 import { ATOM, BREAK, canon, normalizeText, renderBlocks, runsOf, unitsOf } from "../projection.js";
-import { boardKey } from "./board.js";
+import { writeBoard } from "./board.js";
+import { validCell, writeTable } from "./table.js";
 import { blocksFromYValue } from "./decode.js";
 import { docOf } from "./doc.js";
-import { createPageDoc, attrKeys, defaultOf } from "./layout.js";
+import { createPageDoc, attrKeys, defaultOf, mintOp } from "./layout.js";
+import { createProjectionMap } from "./projection-map.js";
 import { docFromValue, enc, PART, YDecodeError } from "./provider.js";
 import { tokensOf, tokenIndex } from "./tokens.js";
 import { walk } from "./walk.js";
@@ -32,8 +34,8 @@ function tableEntities(kind, value) {
   if (!record(value)) return false;
   return Object.entries(value).every(([id, item]) => {
     if (!idOk(id) || !record(item) || typeof item.pos !== "string") return false;
-    if (kind === "cols") return typeof item.name === "string" && (item.kind === undefined || typeof item.kind === "string") && Object.keys(item).every((key) => ["pos", "name", "kind"].includes(key));
-    return record(item.cells) && Object.values(item.cells).every((cell) => typeof cell === "string") && Object.keys(item).every((key) => ["pos", "cells"].includes(key));
+    if (kind === "cols") return typeof item.name === "string" && (item.kind === undefined || typeof item.kind === "string") && (item.width === undefined || (typeof item.width === "number" && Number.isFinite(item.width) && item.width > 0)) && Object.keys(item).every((key) => ["pos", "name", "kind", "width"].includes(key));
+    return record(item.cells) && Object.entries(item.cells).every(([col, cell]) => idOk(col) && validCell(cell)) && Object.keys(item).every((key) => ["pos", "cells"].includes(key));
   });
 }
 
@@ -93,27 +95,6 @@ function validateChanges(changes, blocks) {
   });
 }
 
-function writeBoard(pd, id, kind, before, after) {
-  for (const entityId of new Set([...Object.keys(before), ...Object.keys(after)])) {
-    const old = before[entityId], next = after[entityId];
-    const field = (name, value) => {
-      const key = boardKey(id, kind, entityId, name);
-      if (!same(pd.boardFields.get(key), value)) pd.boardFields.set(key, value);
-    };
-    if (!next) { field("alive", false); continue; }
-    if (!old) field("alive", true);
-    if (kind === "column") {
-      if (!old || old.name !== next.name) field("name", next.name);
-      if (!old || old.pos !== next.pos) field("pos", next.pos);
-    } else {
-      for (const name of ["title", "owner", "due"]) if (!old || old[name] !== next[name]) field(name, next[name] ?? null);
-      const oldPlacement = old ? { columnId: old.col, pos: old.pos } : null;
-      const placement = { columnId: next.col, pos: next.pos };
-      if (!same(oldPlacement, placement)) field("placement", placement);
-    }
-  }
-}
-
 async function revisionOf(doc) {
   const bytes = await globalThis.crypto.subtle.digest("SHA-256", Y.encodeStateAsUpdateV2(doc));
   return Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, "0")).join("");
@@ -162,22 +143,24 @@ export async function writeYValue(value, { expectedRevision, changes } = {}) {
     const newTokens = tokensOf(tr.doc, new Map(), w.visible);
     const oldIndex = tokenIndex(before, new Map(), w.visible);
     const newIndex = tokenIndex(tr.doc, new Map(), w.visible);
+    const sv = [...Y.decodeStateVector(Y.encodeStateVector(doc)).entries()].sort((a, b) => a[0] - b[0]);
+    const ctx = { pd, map: createProjectionMap(w, pd.flow.length), bt: oldTokens, tx: (fn) => fn(), copies: w.copies, fences: w.fences, sv, operationId: mintOp(pd), recovered: new Map(w.visible.filter((seg) => seg.recovered).map((seg) => [seg.id, seg.sourceKey])) };
     doc.transact(() => {
       for (const edit of contentEdits) {
         const old = locations.get(edit.id), next = after.get(edit.id);
         const start = oldIndex[old.offset + 1], end = oldIndex[old.offset + old.node.nodeSize - 1];
         const nextStart = newIndex[next.offset + 1], nextEnd = newIndex[next.offset + next.node.nodeSize - 1];
-        applyRegion({ pd, holes: w.holes, bt: oldTokens, tx: (fn) => fn() }, start, oldTokens.slice(start, end), newTokens.slice(nextStart, nextEnd));
+        applyRegion(ctx, start, oldTokens.slice(start, end), newTokens.slice(nextStart, nextEnd));
       }
       for (const edit of edits) {
         const { id, current, next, attrs } = edit;
-        if (current.t === "board") {
-          if (Object.hasOwn(attrs, "columns")) writeBoard(pd, id, "column", current.columns ?? {}, next.columns);
-          if (Object.hasOwn(attrs, "cards")) writeBoard(pd, id, "card", current.cards ?? {}, next.cards);
-        }
+        if (current.t === "board" && (Object.hasOwn(attrs, "columns") || Object.hasOwn(attrs, "cards"))) writeBoard(pd, id, current, next);
+        const table = current.t === "table" && !ctx.recovered.has(id) && pd.attrs.get(id)?.get("t") === "table";
+        if (table && (Object.hasOwn(attrs, "cols") || Object.hasOwn(attrs, "rows"))) writeTable(pd, id, current, next);
         const map = pd.attrs.get(id);
         for (const key of Object.keys(attrs)) {
           if (current.t === "board" && (key === "columns" || key === "cards")) continue;
+          if (table && (key === "cols" || key === "rows")) continue;
           const old = map?.has(key) ? map.get(key) : defaultOf(schema.nodes[current.t], key);
           if (!same(old, next[key])) {
             if (map) map.set(key, copy(next[key]));

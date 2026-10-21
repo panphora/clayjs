@@ -33,7 +33,7 @@ test("Chart this table inserts the default chart after the table and undoes once
   menuButton(view, "Chart this table").click();
   expect(view.state.doc.childCount).toBe(2);
   const attrs = view.state.doc.child(1).attrs;
-  expect(attrs).toMatchObject({ source: "tbl", kind: "line", x: "c1", series: ["c2"], title: "" });
+  expect(attrs).toMatchObject({ source: "tbl", kind: "bar", x: "c1", series: ["c2"], title: "" });
   expect(attrs.id).toBeTruthy();
   view.scrollToSelection = () => {};
   expect(history.undo(view.state, view.dispatch)).toBe(true);

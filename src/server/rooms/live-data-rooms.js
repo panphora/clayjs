@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import { parseJsonRelaxed } from 'hyper-morph/json-parse';
 import { validateOp, checkOp, applyOp, applyTracked, undoTracked, sizeChange, cloneJson, serializeLive, textHash, diffOps } from './live-data-ops.js';
 import { liveTags } from './live-data-tags.js';
@@ -761,6 +762,10 @@ export function createRooms({ now = Date.now, newEpoch = randomUUID, liveBytes =
         for (const op of ops) {
           const rec = applyTracked(value, op);
           if (!rec) continue;
+          if (op.op === 'set' && isDeepStrictEqual(rec.old, rec.at === null ? rec.root : rec.at[rec.key])) {
+            undoTracked(rec);
+            continue;
+          }
           done.push(rec);
           bytes += sizeChange(rec, sizeOf, bytes);
           value = rec.root;
@@ -782,8 +787,8 @@ export function createRooms({ now = Date.now, newEpoch = randomUUID, liveBytes =
         undo();
         return { error: 'too-large' };
       }
-      const logged = byteLength(JSON.stringify(ops));
-      const grows = bytes - store.bytes + logAfter(store, logged) - store.logBytes;
+      const logged = done.length ? byteLength(JSON.stringify(ops)) : 0;
+      const grows = done.length ? bytes - store.bytes + logAfter(store, logged) - store.logBytes : 0;
       const retiredBytes = victim === null ? 0 : receiptBytes(room.lastN.get(victim));
       if (grows > 0 && used + grows - retiredBytes > liveBytes) {
         undo();
@@ -793,11 +798,13 @@ export function createRooms({ now = Date.now, newEpoch = randomUUID, liveBytes =
       used += grows;
       store.value = value;
       store.bytes = bytes;
-      room.seq += 1;
-      store.last = room.seq;
-      store.log.push({ seq: room.seq, ops, bytes: logged, from: clientId, n: frame.n });
-      store.logBytes += logged;
-      evict(store);
+      if (done.length) {
+        room.seq += 1;
+        store.last = room.seq;
+        store.log.push({ seq: room.seq, ops, bytes: logged, from: clientId, n: frame.n });
+        store.logBytes += logged;
+        evict(store);
+      }
       // Least recently used first, so the cap forgets a sender long gone.
       used += replaceReceipt(room, nKey, postReceipt(last, frame.n, room.seq));
       room.retiredReceipts?.delete(nKey);

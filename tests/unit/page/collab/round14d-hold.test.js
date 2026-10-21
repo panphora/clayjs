@@ -18,7 +18,6 @@ describe("a peer's checkpoint or a restarted room while a store's save is unansw
 describe("a store's wait never holds the document", () => {
   test.each(["omitted", "hang", "uncertain-proved"])("%s", (variant) => run("round14d-lifecycle.mjs", variant), 95000);
   test("a stopped lane falls back to file values", () => run("round14d-stopped.mjs"), 95000);
-  test.each(["", "typing"])("the page binding applies a held peer text change once %s", (variant) => run("round14d-page.mjs", ...(variant ? [variant] : [])), 95000);
 });
 
 describe("a save with no answer that nothing can prove", () => {

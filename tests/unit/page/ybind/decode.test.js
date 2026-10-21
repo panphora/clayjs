@@ -7,6 +7,7 @@ import { ATOM, BREAK, DEFAULTS, orderedIds, unitsOf, runsOf, project, renderMode
 import { blocksFromYValue, createPageDoc, walk, docOf } from "../../../../src/page/ybind/core.js";
 import { yValueOf, docFromValue, YDecodeError } from "../../../../src/page/ybind/provider.js";
 import { boardKey } from "../../../../src/page/ybind/board.js";
+import { tableKey } from "../../../../src/page/ybind/table.js";
 import { RECORD } from "../fixtures/all-kinds.js";
 
 let docs;
@@ -118,6 +119,43 @@ test.each([
 ])("refuses malformed board field: %s", (_, key, value) => {
   const { pd } = fixture();
   pd.boardFields.set(key, value);
+  expect(() => blocksFromYValue(yValueOf(pd.ydoc))).toThrow(expect.objectContaining({ code: "unsupported-content" }));
+});
+
+test("resolves table fields over the seed in the editor, the decoder and the article", () => {
+  const { pd } = fixture();
+  const marked = { c: "invite <first> now", m: [[6, "b"], [12, ""]] };
+  pd.tableFields.set(tableKey("tbl", "cell", "r2", "c3"), marked);
+  pd.tableFields.set(tableKey("tbl", "row", "r1", "alive"), false);
+  pd.tableFields.set(tableKey("tbl", "row", "r3", "alive"), true);
+  pd.tableFields.set(tableKey("tbl", "row", "r3", "pos"), "3");
+  pd.tableFields.set(tableKey("tbl", "cell", "r3", "c1"), "Oct 5");
+  pd.tableFields.set(tableKey("tbl", "cell", "r3", "c2"), "63");
+  pd.tableFields.set(tableKey("tbl", "col", "c3", "name"), "Notes");
+  pd.tableFields.set(tableKey("tbl", "col", "c2", "width"), 96);
+  const table = blocksFromYValue(yValueOf(pd.ydoc)).tbl;
+  expect(table.rows).toEqual({ r2: { pos: "2", cells: { c1: "Sep 28", c2: "41", c3: marked } }, r3: { pos: "3", cells: { c1: "Oct 5", c2: "63" } } });
+  expect(table.cols).toEqual({ ...RECORD.blocks.tbl.cols, c2: { ...RECORD.blocks.tbl.cols.c2, width: 96 }, c3: { pos: "3", name: "Notes" } });
+  let node = null;
+  docOf(pd, walk(pd)).forEach((child) => { if (child.attrs.id === "tbl") node = child; });
+  expect(node.childCount).toBe(2);
+  expect(node.child(0).child(2).textContent).toBe("invite <first> now");
+  expect(node.child(1).attrs.id).toBe("r3");
+  expect(node.attrs.cols.c3.name).toBe("Notes");
+  const html = renderModel(project({ tbl: table }));
+  expect(html).toContain("<td><strong>invite</strong> &lt;first&gt; now</td>");
+  expect(html).toContain("<th data-col=\"c3\">Notes</th>");
+  expect(html).not.toContain("[object Object]");
+});
+
+test.each([
+  ["a three-part key", '["tbl","row","r1"]', true],
+  ["an unknown row field", tableKey("tbl", "row", "r1", "name"), "x"],
+  ["a malformed cell", tableKey("tbl", "cell", "r1", "c1"), { c: "x", m: [[2, "b"]] }],
+  ["a key for a table that is not on the page", tableKey("gone", "col", "c1", "width"), -1],
+])("refuses a malformed table field: %s", (_, key, value) => {
+  const { pd } = fixture();
+  pd.tableFields.set(key, value);
   expect(() => blocksFromYValue(yValueOf(pd.ydoc))).toThrow(expect.objectContaining({ code: "unsupported-content" }));
 });
 

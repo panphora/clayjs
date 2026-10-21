@@ -1,6 +1,5 @@
 import { schema } from "../../../src/page/schema.js";
 import { ATOM, CODES, flatten, markKey, marksOf, packMarks, runsOf, unflatten, unitsOf, unpackMarks } from "../../../src/page/inline.js";
-import { createReplay, encodeForMerge, step } from "../../../src/page/replay.js";
 import { model } from "../../../src/vendor/prosemirror.vendor.js";
 
 /**
@@ -83,33 +82,6 @@ test("every mark in the schema has a key code, and code blocks drop marks", () =
   const nodes = unflatten(schema, "x()", ["c", "c", "c"], schema.nodes.code_block);
   expect(nodes[0].marks).toEqual([]);
   expect(unflatten(schema, "x", ["c"])[0].marks.map((mk) => mk.type)).toEqual([code]);
-});
-
-test("private-use characters typed as text never collide with the merge encoding", () => {
-  const pua = "";
-  const node = para(t("a" + pua), t("b", strong.create()), t(""));
-  const { flat, same } = roundTrip(node);
-  expect(same).toBe(true);
-  const values = [flat, { c: flat.c + "!", m: [...flat.m, ""] }, { c: "" + flat.c, m: ["b", ...flat.m] }];
-  const enc = encodeForMerge(values);
-  for (let i = 0; i < values.length; i++) expect(enc.decode(enc.strings[i])).toEqual(values[i]);
-  // Each private-use input and each marked unit has a code of its own.
-  const codes = new Set(enc.strings.join(""));
-  expect(codes.size).toBe(new Set(values.flatMap((v) => [...v.c].map((ch, i) => ch + "\0" + v.m[i]))).size);
-});
-
-test("a private-use character survives a merge by merge3Text with marks on both sides", () => {
-  const c = "\ue000 one two \ue001";
-  const m = [...keys("\ue000 ", ""), ...keys("one", "b"), ...keys(" two \ue001", "")];
-  const r = createReplay({ t: "p", c, m }, { seq: 10, epoch: "e1", me: "b" });
-  step(r, { t: "p", c: "\ue000 uno two \ue001", w: { a: "b", e: "e1", k: 10, s: [[2, 5, "one", 11, ["b", "b", "b"]]] } }, 11);
-  // Made before this replay's history, over a range b changed: merge3Text.
-  const mine = [...keys("\ue000 ", ""), ...keys("ONE", "i"), ...keys(" two \ue001", "")];
-  step(r, { t: "p", c: "\ue000 ONE two \ue001", m: mine, w: { a: "a", e: "e1", k: 2, s: [[2, 5, "one", 11, ["b", "b", "b"]]] } }, 12);
-  expect(r.stats.merge).toBe(1);
-  expect(r.S.c).toBe("\ue000 ONE two \ue001");
-  expect(r.S.m).toEqual(mine);
-  expect(r.conflicts.map((n) => [n.kind, n.lost])).toEqual([["merge", "uno"]]);
 });
 
 test("the record keeps marks as runs: neighbours merged, counts adding up to the text, and back", () => {

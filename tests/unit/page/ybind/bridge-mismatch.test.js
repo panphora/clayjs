@@ -64,8 +64,7 @@ test("an implicit block split maps its alias into both sides of the writer", () 
   expect(tab.binding.stats.mismatch).toBe(0);
 });
 
-test.todo("E4: preserve a survivor when join removes the break ending an open-ended gone range");
-test.skip("an open-ended gone boundary does not consume a joined survivor", () => {
+test("an open-ended gone boundary does not consume a joined survivor", () => {
   const tab = open([{ id: "p", text: "A" }, { id: "q", text: "hidden" }, { id: "r", text: "B" }]);
   const q = breakAt(tab.binding.pd, "q");
   tab.binding.pd.ydoc.transact(() => tab.binding.pd.gone.set(q.key, { b: "q", e: null }), NET);
@@ -78,8 +77,7 @@ test.skip("an open-ended gone boundary does not consume a joined survivor", () =
   expect(tab.binding.stats.mismatch).toBe(0);
 });
 
-test.todo("E4: deleting a block with adjacent duplicate breaks must remove its visible copy");
-test.skip("deleting one of two adjacent copies of a break removes the visible block", () => {
+test("deleting one of two adjacent copies of a break removes the visible block", () => {
   const tab = open([{ id: "p", text: "A" }, { id: "q", text: "B" }]);
   const q = breakAt(tab.binding.pd, "q");
   tab.binding.pd.ydoc.transact(() => tab.binding.pd.flow.insertEmbed(q.at, { b: "q" }), NET);
@@ -92,8 +90,7 @@ test.skip("deleting one of two adjacent copies of a break removes the visible bl
   expect(tab.binding.stats.mismatch).toBe(0);
 });
 
-test.todo("E4: joining the winning copy must not reveal content under a duplicate break");
-test.skip("joining an empty winning copy does not reveal a hidden duplicate", () => {
+test("joining an empty winning copy does not reveal a hidden duplicate", () => {
   const tab = open([{ id: "p", text: "A" }, { id: "q", text: "X" }, { id: "r", text: "B" }]);
   const q = breakAt(tab.binding.pd, "q");
   const peer = new Y.Doc();

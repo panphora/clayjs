@@ -191,6 +191,20 @@ test('a later edit makes the previous file non-current', () => {
   expect(isCheckpointCurrent(result.html, capture())).toBe(false);
 });
 
+test('a hand-edited article refuses a dirty checkpoint until adoption', () => {
+  const { rooms, room, source, capture, render } = roomOf(seedValue([{ id: 'p', t: 'paragraph', text: 'abc' }]));
+  const saved = render(source);
+  expect(saved.kind).toBe('ok');
+  const handEdited = saved.html.replace('<p data-id="p">abc</p>', '<p data-id="p">HAND EDIT</p>');
+  apply(rooms, room, '100', 'game', 1, [{ op: 'add', path: ['score'], n: 1 }]);
+  expect(isCheckpointCurrent(handEdited, capture())).toBe(false);
+  expect(render(handEdited)).toEqual({ kind: 'refused', reason: 'needs-adoption' });
+  const ordinary = render(saved.html);
+  expect(ordinary.kind).toBe('ok');
+  expect(ordinary.html).toContain('<p data-id="p">abc</p>');
+  expect(ordinary.html).toContain('"score":1');
+});
+
 test('built CJS and ESM entries load in plain Node without DOM globals', async () => {
   await buildServerCheckpoint();
   const script = `

@@ -1,6 +1,7 @@
 import * as Y from "../../vendor/yjs.vendor.js";
 import { toBase64, fromBase64 } from "../../vendor/yjs.vendor.js";
 import { NET } from "./layout.js";
+import { ORIGINS_ORIGIN } from "./origins.js";
 import { PART_KEY, BASE64, entriesOf, captureYValue } from "./parts.js";
 
 export { entriesOf } from "./parts.js";
@@ -101,7 +102,7 @@ export function createYProvider({ store, ydoc, compact: limits = {}, setTimer = 
   for (const [k] of initial) known.add(k);
 
   const onUpdate = (u, origin) => {
-    if (origin === NET) return;
+    if (origin === NET || origin === ORIGINS_ORIGIN) return;
     put(nextKey("u"), u);
   };
   ydoc.on("updateV2", onUpdate);
