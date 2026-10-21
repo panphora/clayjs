@@ -434,6 +434,29 @@ let local = null;
 // forward): only a closing page's save is reported to the local room at capture.
 let closing = false;
 
+// The page plugin's one-shot gates: the fast lane's setup, and the room's
+// writer election. Both resolve null when this tab has no lane at all.
+let laneReady = null;
+let writerReady = null;
+let settleLane = null;
+let settleWriter = null;
+
+function laneGates() {
+  if (!laneReady) {
+    laneReady = new Promise((resolve) => { settleLane = resolve; });
+    writerReady = new Promise((resolve) => { settleWriter = resolve; });
+  }
+  return { laneReady, writerReady };
+}
+
+export function pageLaneReady() {
+  return laneGates().laneReady;
+}
+
+export function pageWriterReady() {
+  return laneGates().writerReady;
+}
+
 // The room's numbers moved: a file the room cannot rebuild from (landed -1) is
 // saved over now, anything else on the usual deadline.
 function liveMoved() {
@@ -501,7 +524,10 @@ function laneOptions(transport) {
   return {
     transport,
     entries,
-    onWriter: () => checkpoints.changed(),
+    onWriter: () => {
+      checkpoints.changed();
+      if (fast && fast.status.writer !== null) settleWriter?.(fast);
+    },
     onApplied: liveMoved,
     onLanded: () => {
       liveMoved();
@@ -558,6 +584,7 @@ function seedLocalRoom() {
 }
 
 function ensureLane() {
+  laneGates();
   if (laneRequested || !isEditMode) return;
   laneRequested = true;
   hostMeta.hostSupports("live-data").then(
@@ -571,6 +598,8 @@ function ensureLane() {
         local = localTransport({ seed: seedLocalRoom });
         fast = createFastLane(laneOptions(local));
       } else {
+        settleLane?.(null);
+        settleWriter?.(null);
         return;
       }
       // The writer saves every store in the room, so every live tag is opened,
@@ -588,9 +617,13 @@ function ensureLane() {
         if (entry.historicalRefreshPending) fast.release(name, { read: true });
       }
       fast.start();
+      settleLane?.(fast);
+      if (fast.status.writer !== null) settleWriter?.(fast);
     },
-    () => {},
-  );
+  ).catch(() => {
+    settleLane?.(null);
+    settleWriter?.(null);
+  });
 }
 
 function isJsonType(type) {

@@ -67,10 +67,9 @@ export function buildRecovery(records, { refused = false } = {}) {
   };
 }
 
-export function downloadRecovery(records, { refused = false } = {}) {
+export function downloadHtml({ html, name }) {
   let url = null;
   try {
-    const { html, name } = buildRecovery(records, { refused });
     url = URL.createObjectURL(new Blob([html], { type: "text/html" }));
     const a = document.createElement("a");
     a.setAttribute("clay", "no-save no-watch no-snapshot");
@@ -86,6 +85,16 @@ export function downloadRecovery(records, { refused = false } = {}) {
   } catch (err) {
     console.error("clayjs: could not build the download", err);
     if (url) URL.revokeObjectURL(url);
+    return false;
+  }
+}
+
+export function downloadRecovery(records, { refused = false } = {}) {
+  try {
+    const { html, name } = buildRecovery(records, { refused });
+    return downloadHtml({ html, name });
+  } catch (err) {
+    console.error("clayjs: could not build the download", err);
     return false;
   }
 }

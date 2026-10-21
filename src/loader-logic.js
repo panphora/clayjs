@@ -31,6 +31,7 @@ export const PLUGIN_PATHS = {
   // A live JSON tag as an in-memory object (clay.live). Not editOnly: a reader's
   // tab still shows the game, and its writes stay in that tab.
   live:      { path: "plugins/live.js",           editOnly: false, default: false },
+  page:      { path: "plugins/page.js",           editOnly: true,  default: false },
   sortable:  { path: "plugins/sortable.js",        editOnly: true,  default: false },
   undo:      { path: "plugins/undo.js",            editOnly: true,  default: false },
   cms:       { path: "plugins/cms.js",             editOnly: false, default: false },
@@ -96,6 +97,7 @@ export const MODULES = {
   "plugins/indicator.js":       () => import("./plugins/indicator.js"),
   "sync/live-sync.js":          () => import("./sync/live-sync.js"),
   "plugins/live.js":            () => import("./plugins/live.js"),
+  "plugins/page.js":            () => import("./plugins/page.js"),
   "plugins/sortable.js":        () => import("./plugins/sortable.js"),
   "plugins/undo.js":            () => import("./plugins/undo.js"),
   "plugins/cms.js":             () => import("./plugins/cms.js"),
@@ -112,7 +114,7 @@ export const MODULES = {
 
 // `source` is last on purpose: its install captures a save clone, so it wants every
 // plugin that registers a document transform to have registered it first.
-const PLUGIN_ORDER = ["visitor-drafts", "richclay", "indicator", "sortable", "undo", "quickcrop", "upload", "people", "cms", "sync", "live", "message", "wire", "ai-edit", "demo", "source"];
+const PLUGIN_ORDER = ["visitor-drafts", "richclay", "indicator", "sortable", "undo", "quickcrop", "upload", "people", "cms", "sync", "live", "page", "message", "wire", "ai-edit", "demo", "source"];
 
 // A plugin that cannot do its whole job alone. hypercms reads the cropper through
 // a capability lookup (`clay.quickcrop`) and silently uploads the raw file when it
@@ -134,7 +136,7 @@ const PLUGIN_ORDER = ["visitor-drafts", "richclay", "indicator", "sortable", "un
 // that asks for it has to have the wire. The wire loads first in the order above.
 // It does not bring undo: hyper-undo takes Cmd+Z for the whole window, text fields
 // included, which a page that never asked for it should not get by default.
-const IMPLIES = { cms: ["quickcrop", "upload"], "ai-edit": ["wire"] };
+const IMPLIES = { cms: ["quickcrop", "upload"], "ai-edit": ["wire"], page: ["live"] };
 
 function parseCsv(params, key, enabled, apply) {
   const raw = params.get(key);
@@ -152,7 +154,7 @@ function parseCsv(params, key, enabled, apply) {
 
 // Each of these talks to the host or writes outside the visitor's own record, so a
 // page that keeps its edits in this browser cannot carry them.
-const DRAFT_DROPS = ["sync", "live", "upload", "quickcrop", "cms", "people", "wire", "ai-edit", "demo", "source"];
+const DRAFT_DROPS = ["sync", "live", "page", "upload", "quickcrop", "cms", "people", "wire", "ai-edit", "demo", "source"];
 
 // [refetch-on-save] swaps its element for a fresh GET of the same URL after every
 // save, which on a visitor's own draft is a request to the host.

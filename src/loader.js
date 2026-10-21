@@ -137,6 +137,8 @@ function attachPluginMember(path, mod, loaded) {
     loaded["core/page-data.js"].setPageDataLiveSync(mod.liveSync);
   } else if (path === "plugins/live.js") {
     clay.live = mod.live;
+  } else if (path === "plugins/page.js") {
+    clay.page = mod.page;
   } else if (path === "plugins/cms.js") {
     clay.cms = mod.cms || mod.default;
   } else if (path === "plugins/upload.js") {

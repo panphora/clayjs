@@ -16,12 +16,15 @@ const LABELS = {
   saved: "Saved",
   error: "Couldn't save",
   offline: "Offline, not saved",
+  retrying: "Saving…",
+  blocked: "Can't save here",
 };
 
-// States that stay on screen instead of fading, because 'saving' is still in flight.
-const STICKY = new Set(["saving"]);
+// States that stay on screen instead of fading: a save still in flight, one that
+// keeps trying, and one the host will not take without a person's help.
+const STICKY = new Set(["saving", "retrying", "blocked"]);
 
-const ALARMING = new Set(["error", "offline"]);
+const ALARMING = new Set(["error", "offline", "blocked"]);
 
 const REST = [`background:${TOKENS.surface}`, `color:${TOKENS.ink}`, `border-color:${TOKENS["line-2"]}`];
 const ALARM = [
@@ -34,7 +37,9 @@ let el = null;
 let hideTimer = null;
 
 function ensure() {
-  if (el) return el;
+  // Looked up on every call, never trusted once detached: a live-sync morph or a
+  // caller can empty the body, and a detached chip would swallow every later state.
+  if (el && el.isConnected) return el;
   const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
   el = bevelSurface("div", [
     "position:fixed", "right:16px", "bottom:16px", "z-index:2147483000",
@@ -49,9 +54,13 @@ function ensure() {
 }
 
 function show(state) {
+  if (!LABELS[state]) return;
   // A failed or offline save is the persistent toast's to report when clay-ui is loaded,
-  // and so is saved when the page turned on clay.saveToast.
-  if (saveFeedback.toasts && (ALARMING.has(state) || (state === "saved" && saveFeedback.savedToast))) {
+  // and so is saved when the page turned on clay.saveToast. Blocked is the exception:
+  // the page cannot save at all, so the chip stays even beside the generic toast.
+  const ownedByToast = state !== "blocked" &&
+    (ALARMING.has(state) || (state === "saved" && saveFeedback.savedToast));
+  if (saveFeedback.toasts && ownedByToast) {
     clearTimeout(hideTimer);
     if (el) {
       set(el, "opacity", "0");
@@ -76,6 +85,7 @@ function init() {
   for (const state of Object.keys(LABELS)) {
     document.addEventListener("clay:save-" + state, () => show(state));
   }
+  document.addEventListener("clay:page-save-state", (event) => show(event.detail?.state));
 }
 
 onDomReady(init);

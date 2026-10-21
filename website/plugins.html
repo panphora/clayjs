@@ -143,6 +143,11 @@ game.on("change", render);</code></pre>
     </div>
 
     <div class="libcard">
+      <div class="lib-name" id="page">page <span class="tag">plugin &middot; ask by name</span></div>
+      <p>The page plugin opens one <code>article[data-page]</code> with one <code>merge="page" clay="live"</code> Yjs store in the page editor. It loads only in edit mode and requires a host that advertises the <code>page</code> extension. Without that extension, the saved article stays readable. <code>clay.page.flush()</code> waits for its edits to reach a checkpoint.</p>
+    </div>
+
+    <div class="libcard">
       <div class="lib-name" id="visitor-drafts">visitor-drafts <span class="tag">plugin &middot; ask by name</span></div>
       <p class="lib-prob">&ldquo;I want to give this app away, and let people use it before they download it.&rdquo;</p>
       <p>A free document. A visitor who is not the owner gets the same editing UI the owner gets, and their work is kept as the page's own JSON in their own browser: never a save, a sync or an upload to the host. On every load that JSON is applied over the file you published, so a fix you make still reaches them. The plugin also draws the download prompt, the optional intro area and the owner's chip.</p>

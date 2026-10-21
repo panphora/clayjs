@@ -4,7 +4,7 @@
 // The Hyperclay dashboard's toast (Bevel's React toast with the dashboard's overrides),
 // drawn inline: a 3px tone edge, a 16px Bevel glyph, 13.5px semibold text, a quiet close.
 import { set } from "../lib/hostile-css.js";
-import { bevelBox, bevelSurface, bevelText, pageScheme, protectIcon } from "./bevel-controls.js";
+import { bevelBox, bevelSurface, bevelText, bevelButton, pageScheme, protectIcon } from "./bevel-controls.js";
 import { TOKENS, RULES, GLYPHS } from "./bevel.js";
 
 const TONES = {
@@ -39,7 +39,7 @@ function stack() {
   return box;
 }
 
-function build(message, type) {
+function build(message, type, { detail = "", actions = [] } = {}) {
   const tone = TONES[type];
   const el = bevelSurface("div", [
     "display:flex", "align-items:flex-start", ...RULES.toast, "width:100%",
@@ -48,13 +48,29 @@ function build(message, type) {
     ...HIDDEN, `transition:${motion()}`,
   ]);
   el.setAttribute("data-clay-toast", type);
+  const body = bevelBox("div", ["flex:1 1 auto", "min-width:0", "display:flex", "flex-direction:column", "gap:8px"]);
+  const head = bevelBox("div", ["display:flex", "align-items:flex-start", "gap:8px"]);
   const glyph = bevelText("span", ["display:inline-grid", "flex:none", "padding-top:1px", `color:${tone.edge}`]);
   glyph.innerHTML = tone.icon;
   protectIcon(glyph.firstElementChild, 16);
   // A message can carry a filename, and a filename is whatever whoever wrote the
   // file chose. It goes in as text so markup in a name can never become markup here.
   const text = bevelText("span", ["flex:1 1 auto", "min-width:120px", ...RULES.toastTitle, "overflow-wrap:anywhere"], message);
-  el.append(glyph, text);
+  head.append(glyph, text);
+  body.append(head);
+  // Detail and actions are the same untrusted text as the title: textContent for
+  // both, so a reason string can never become markup in the toast either.
+  if (detail) {
+    body.append(bevelText("span", ["display:block", `color:${TOKENS.muted}`, "overflow-wrap:anywhere"], detail));
+  }
+  if (actions.length) {
+    const row = bevelBox("div", ["display:flex", "flex-wrap:wrap", "gap:8px"]);
+    for (const { label, onClick } of actions) {
+      row.append(bevelButton(label, { small: true, variant: "quiet", onClick }));
+    }
+    body.append(row);
+  }
+  el.append(body);
   return el;
 }
 
@@ -109,14 +125,14 @@ function toast(message, messageType = "success") {
 const activePersistentToasts = new Map();
 
 // Persistent toast function - doesn't auto-dismiss, requires click to close
-function toastPersistent(message, messageType = "warning") {
+function toastPersistent(message, messageType = "warning", { detail = "", actions = [] } = {}) {
   const existing = activePersistentToasts.get(message);
   if (existing) {
     dismiss(existing);
     activePersistentToasts.delete(message);
   }
 
-  const el = build(message, TONES[messageType] ? messageType : "warning");
+  const el = build(message, TONES[messageType] ? messageType : "warning", { detail, actions });
   set(el, "cursor", "default");
   const close = closeButton((e) => {
     e.stopPropagation();

@@ -201,14 +201,14 @@ const insertHardBreak = (st, dispatch) => {
   return true;
 };
 
-const editKeys = {
-  "Mod-z": history.undo,
-  "Shift-Mod-z": history.redo,
-  "Mod-y": history.redo,
+const editKeys = ({ history: useHistory = true, undo, redo } = {}) => ({
+  "Mod-z": useHistory ? history.undo : () => { undo?.(); return true; },
+  "Shift-Mod-z": useHistory ? history.redo : () => { redo?.(); return true; },
+  "Mod-y": useHistory ? history.redo : () => { redo?.(); return true; },
   "Shift-Enter": insertHardBreak,
   "Mod-b": commands.toggleMark(schema.marks.strong),
   "Mod-i": commands.toggleMark(schema.marks.em),
-};
+});
 
 const markKeys = {
   Backspace: commands.chainCommands(inputrules.undoInputRule, backspaceToParagraph),
@@ -218,7 +218,7 @@ const markKeys = {
 
 const defaultUpload = (file, options) => globalThis.clay?.upload?.(file, options) ?? Promise.resolve({ ok: false, code: "unavailable", msg: "File uploads are not available in this editor" });
 
-export function pagePlugins({ upload = defaultUpload, highlight } = {}) {
+export function pagePlugins({ upload = defaultUpload, highlight, history: useHistory = true, undo, redo } = {}) {
   return [
     announcementPlugin(),
     chromePlugin(),
@@ -227,7 +227,7 @@ export function pagePlugins({ upload = defaultUpload, highlight } = {}) {
     markdownPlugin(),
     keymap.keymap(markKeys),
     keymap.keymap(blockKeys),
-    keymap.keymap(editKeys),
+    keymap.keymap(editKeys({ history: useHistory, undo, redo })),
     keymap.keymap(commands.baseKeymap),
     structurePlugin(),
     identityPlugin(),
@@ -235,14 +235,15 @@ export function pagePlugins({ upload = defaultUpload, highlight } = {}) {
     mediaPlugin({ upload }),
     highlightPlugin(highlight),
     pastePlugin(),
-    history.history(),
+    useHistory ? history.history() : null,
     gapcursor.gapCursor(),
-  ];
+  ].filter(Boolean);
 }
 
-export function pageState(blocks, options) {
+export function pageState(blocks, options = {}) {
   const record = blocks && Object.keys(blocks).length ? blocks : { [newId()]: { t: "paragraph", pos: keyBetween(), c: "" } };
-  return state.EditorState.create({ doc: docFromBlocks(schema, record), plugins: pagePlugins(options) });
+  const doc = options.doc ?? docFromBlocks(schema, record);
+  return state.EditorState.create({ doc, plugins: pagePlugins(options) });
 }
 
 // Clicking a checklist box (drawn by ::before in the item's start gutter)
@@ -265,7 +266,7 @@ function checkboxClick(view, event) {
 // Mounts the editor in `mount`, inside a .page-shell wrapper (the surface a
 // theme styles). `onChange(record)` gets the block record (blockMap) after
 // every transaction that changed the document.
-export function createPageEditor(mount, { blocks = null, onChange = null, upload, highlight } = {}) {
+export function createPageEditor(mount, { blocks = null, onChange = null, upload, highlight, doc: initialDoc, dispatch, history: useHistory = true, undo, redo, editable = true } = {}) {
   const doc = mount.ownerDocument;
   styleWithLegacyId(STYLE_ID, PAGE_EDITOR_CSS, STYLE_ID);
   const shell = doc.createElement("div");
@@ -275,8 +276,9 @@ export function createPageEditor(mount, { blocks = null, onChange = null, upload
   mount.appendChild(shell);
   let afterStep = false;
   const view = new pmView.EditorView(shell, {
-    state: pageState(blocks, { upload, highlight }),
+    state: pageState(blocks, { upload, highlight, doc: initialDoc, history: useHistory, undo, redo }),
     attributes: { class: "page-editor" },
+    editable: () => editable,
     nodeViews: {
       image: (node, v, getPos) => new ImageView(node, v, getPos),
       file: (node, v) => new FileView(node, v),
@@ -292,6 +294,10 @@ export function createPageEditor(mount, { blocks = null, onChange = null, upload
       },
     },
     dispatchTransaction(tr) {
+      if (dispatch) {
+        dispatch(tr);
+        return;
+      }
       if (afterStep && tr.docChanged && !tr.getMeta(STEP)) history.closeHistory(tr);
       if (tr.docChanged) afterStep = !!tr.getMeta(STEP);
       const before = view.state.doc;
