@@ -25,6 +25,19 @@ function run(op, value, options) {
   return JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e", child], { input: JSON.stringify({ op, value, options }), encoding: "utf8" }));
 }
 
+test("exports the DOM-free article projection for adapters", () => {
+  const out = execFileSync(process.execPath, ["--input-type=module", "-e", `
+    if (typeof document !== "undefined") throw new Error("Unexpected browser globals");
+    const { projection } = await import("@panphora/clayjs/page/yjs");
+    const html = projection.renderBlocks([{ id: "p", t: "paragraph", pos: "1", c: "hi" }]);
+    process.stdout.write(JSON.stringify({ keys: Object.keys(projection).sort(), frozen: Object.isFrozen(projection), html }));
+  `], { encoding: "utf8" });
+  const { keys, frozen, html } = JSON.parse(out);
+  expect(keys).toEqual(["ATOM", "BREAK", "canon", "normalizeText", "renderBlocks", "runsOf"]);
+  expect(frozen).toBe(true);
+  expect(html.html).toBe("<p data-id=\"0\">hi</p>");
+});
+
 test("loads the exported codec in plain Node and revisions include deletions and seed identity", () => {
   const value = seed({ p: { t: "paragraph", pos: "1", c: "abc" } });
   const first = run("read", value).result;

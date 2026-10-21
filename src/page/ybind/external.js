@@ -2,7 +2,7 @@ import * as Y from "../../vendor/yjs.vendor.js";
 import { transform } from "../../vendor/prosemirror.vendor.js";
 import { schema } from "../schema.js";
 import { nodeFromBlock } from "../model.js";
-import { ATOM, BREAK, canon, unitsOf } from "../projection.js";
+import { ATOM, BREAK, canon, normalizeText, renderBlocks, runsOf, unitsOf } from "../projection.js";
 import { boardKey } from "./board.js";
 import { blocksFromYValue } from "./decode.js";
 import { docOf } from "./doc.js";
@@ -118,6 +118,8 @@ async function revisionOf(doc) {
   const bytes = await globalThis.crypto.subtle.digest("SHA-256", Y.encodeStateAsUpdateV2(doc));
   return Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
+
+export const projection = Object.freeze({ ATOM, BREAK, canon, normalizeText, renderBlocks, runsOf });
 
 export async function readYValue(value) {
   const doc = docFromValue(value, { strict: true });
