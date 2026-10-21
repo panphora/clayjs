@@ -21,11 +21,14 @@ import { highlightPlugin, CodeBlockView } from "./highlight.js";
 import { tableKeys, tablePlugin, TableView, TableCellView } from "./table.js";
 import { tableSelectPlugin } from "./table-select.js";
 import { chartPlugin, ChartView } from "./chart.js";
+import { BoardView } from "./board-view.js";
+import { boardPlugin, cardPanel } from "./board-panel.js";
 import { ToolView } from "./tool-view.js";
 import { createToolHost } from "./tools.js";
 import { checklistPlugin, checklistKeys } from "./checklist.js";
 import { csvImportPlugin } from "./csv-import.js";
 import { TABLE_CSS } from "./table-style.js";
+import { BOARD_CSS } from "./board-style.js";
 import { styleWithLegacyId } from "../lib/style.js";
 
 const STYLE_ID = "page-editor-style";
@@ -220,6 +223,7 @@ ${INDENTS.map((n) => `:where(article[data-page], .page-editor) .page-li[data-ind
 .page-scrim { display: none; }
 .page-shell [hidden] { display: none !important; }
 ${TABLE_CSS}
+${BOARD_CSS}
 @media (max-width: 560px) {
   .page-dock { display: none; }
   .page-plus { position: fixed; top: auto; left: 16px; bottom: calc(16px + env(safe-area-inset-bottom)); width: 44px; height: 44px; border-radius: 22px; }
@@ -290,6 +294,7 @@ export function pagePlugins({ upload = defaultUpload, highlight, history: useHis
     identityPlugin(),
     tablePlugin(),
     chartPlugin(),
+    boardPlugin(),
     checklistPlugin(),
     csvImportPlugin({ upload }),
     collapsePlugin(),
@@ -327,7 +332,7 @@ function checkboxClick(view, event) {
 // Mounts the editor in `mount`, inside a .page-shell wrapper (the surface a
 // theme styles). `onChange(record)` gets the block record (blockMap) after
 // every transaction that changed the document.
-export function createPageEditor(mount, { blocks = null, onChange = null, upload, highlight, doc: initialDoc, dispatch, history: useHistory = true, undo, redo, editable = true, toolHost: providedToolHost = null, onAiTool = null, reviseTool = null } = {}) {
+export function createPageEditor(mount, { blocks = null, onChange = null, upload, highlight, doc: initialDoc, dispatch, history: useHistory = true, undo, redo, editable = true, toolHost: providedToolHost = null, onAiTool = null, reviseTool = null, board = null } = {}) {
   const doc = mount.ownerDocument;
   const toolHost = providedToolHost ?? createToolHost({ mode: "edit" });
   styleWithLegacyId(STYLE_ID, PAGE_EDITOR_CSS, STYLE_ID);
@@ -349,6 +354,7 @@ export function createPageEditor(mount, { blocks = null, onChange = null, upload
       chart: (node, v, getPos) => new ChartView(node, v, getPos),
       tool: (node, v, getPos) => new ToolView(node, v, getPos, { host: toolHost, revise: reviseTool }),
       table_cell: (node, v, getPos) => new TableCellView(node, v, getPos),
+      ...(board ? { board: (node, v, getPos) => new BoardView(node, v, getPos, { commands: board, undo, redo, panel: cardPanel(v) }) } : {}),
     },
     handleDOMEvents: {
       mousedown: checkboxClick,

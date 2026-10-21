@@ -286,6 +286,7 @@ async function run(inst, gen, options = {}) {
     history: false,
     undo: binding.undo,
     redo: binding.redo,
+    board: binding.board,
     editable: false,
     toolHost,
     onAiTool: inst.aiTool ? (_view, remove) => inst.aiTool.open({ remove }) : null,
