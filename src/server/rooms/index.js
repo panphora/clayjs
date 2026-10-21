@@ -52,4 +52,4 @@ export { makePageTransition, pageTransitionState } from './live-page-history.js'
 
 export { documentEtag, ifMatchSatisfied } from './spec-wire.js';
 
-export { LIVE_LIMITS, REFUSED_MS, createRooms, PersistentReservationError } from './live-data-rooms.js';
+export { LIVE_LIMITS, REFUSED_MS, createRooms, roomIsDirty, PersistentReservationError } from './live-data-rooms.js';

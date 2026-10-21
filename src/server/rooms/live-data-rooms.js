@@ -171,6 +171,19 @@ function provenBy(room, name, tag, stamped) {
 // file being read, while the rooms stay as full.
 export const REFUSED_MS = 10 * 60 * 1000;
 
+/**
+ * Whether a room holds accepted state the file does not: at least one non-ephemeral store whose
+ * latest change (`last`) the file does not reach (`landed`), including `landed === -1`, where the
+ * log no longer reaches the file's base. Presence never dirties a room. Read against the room
+ * itself, so a sweep or a checkpoint decision never depends on a scheduled timer or a flag.
+ */
+export function roomIsDirty(room) {
+  for (const store of room.stores.values()) {
+    if (!store.ephemeral && store.last !== store.landed) return true;
+  }
+  return false;
+}
+
 export class PersistentReservationError extends Error {
   constructor(code) {
     super(`Persistent reservation refused: ${code}`);
@@ -864,11 +877,13 @@ export function createRooms({ now = Date.now, newEpoch = randomUUID, liveBytes =
      * seen for that long. Their receipts stay as long as the room: a sender that
      * comes back and resends gets a duplicate, never a second apply.
      * @param {(key: string) => string[]} [connectedOf] - client ids on a room's stream
+     * @param {{ mayExpire?: (room: object) => boolean }} [options] - mayExpire refuses one room's
+     *   deletion; a dirty room is retained for its checkpoint rather than retired unsaved
      */
-    sweep(connectedOf = () => []) {
+    sweep(connectedOf = () => [], { mayExpire = () => true } = {}) {
       const t = now();
       for (const [key, room] of rooms) {
-        if (!pageReservations.has(key) && !persistentReservations.has(key) && room.emptySince !== null && t - room.emptySince >= LIVE_LIMITS.retainMs) {
+        if (!roomIsDirty(room) && mayExpire(room) && !pageReservations.has(key) && !persistentReservations.has(key) && room.emptySince !== null && t - room.emptySince >= LIVE_LIMITS.retainMs) {
           used -= heldBy(room);
           rooms.delete(key);
           continue;
@@ -880,6 +895,41 @@ export function createRooms({ now = Date.now, newEpoch = randomUUID, liveBytes =
           room.lastSentAt.delete(id);
         }
       }
+    },
+
+    /**
+     * The document this room holds now lives at another path (it was moved): the room follows it, so
+     * its frames, its dirty state and its checkpoint keep naming one document instead of a stale
+     * address. Refused when there is no room at `from`, when `to` is already another room's, or when
+     * `from` is under a persistent reservation (that owner moves it with rekeyPersistent).
+     */
+    rekey(from, to) {
+      const room = rooms.get(from);
+      if (!room) return false;
+      if (from === to) return true;
+      if (rooms.has(to) || persistentReservations.has(from)) return false;
+      rooms.delete(from);
+      room.key = to;
+      rooms.set(to, room);
+      return true;
+    },
+
+    /**
+     * The file was confirmed to hold this capture's values (`isCheckpointCurrent`), so per captured
+     * store `landed` catches up to the seq the capture pinned. A store with later frames keeps them
+     * dirty: only what the file really holds stops being unsaved.
+     */
+    markSaved(room, capture) {
+      if (rooms.get(room.key) !== room) return false;
+      let changed = false;
+      for (const { name } of capture.stores) {
+        const store = room.stores.get(name);
+        if (!store || store.ephemeral || store.last > capture.seq) continue;
+        if (store.landed === store.last) continue;
+        store.landed = store.last;
+        changed = true;
+      }
+      return changed;
     },
 
     /** Every room's key. */
