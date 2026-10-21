@@ -58,6 +58,13 @@ or carry third-party code, and keep their original licenses.
 - Copyright (c) 2023 Kevin Jahns
 - https://github.com/yjs/yjs, https://github.com/dmonad/lib0
 
+## Cheerio 1.2.0 (MIT)
+
+- Bundled into dist/server/rooms.cjs by scripts/build-server-rooms.mjs, the Node
+  room core behind @panphora/clayjs/server/rooms.
+- Copyright (c) 2022 The Cheerio contributors
+- https://github.com/cheeriojs/cheerio
+
 ## First-party vendored modules
 
 The remaining files in src/vendor/ (hypercms, hyper-morph, hyper-undo, quickcrop,

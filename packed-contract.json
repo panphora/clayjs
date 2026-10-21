@@ -11,8 +11,18 @@
     "@panphora/clayjs/entries/clay-ui.js",
     "@panphora/clayjs/entries/clay-utils.js",
     "@panphora/clayjs/entries/sap.js",
-    "@panphora/clayjs/clay.standalone.js"
+    "@panphora/clayjs/clay.standalone.js",
+    "@panphora/clayjs/server/rooms"
   ],
-  "members": ["THIRD-PARTY-NOTICES.md", "docs/guide.md"],
-  "families": ["./entries/*", "./dist/*", "./src/*"]
+  "members": [
+    "THIRD-PARTY-NOTICES.md",
+    "dist/server/rooms.cjs",
+    "dist/server/rooms.mjs",
+    "docs/guide.md"
+  ],
+  "families": [
+    "./entries/*",
+    "./dist/*",
+    "./src/*"
+  ]
 }

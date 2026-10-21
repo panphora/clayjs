@@ -44,6 +44,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { build as esbuild } from 'esbuild';
 import { emitDocs } from './scripts/site-docs.mjs';
+import { buildServerRooms } from './scripts/build-server-rooms.mjs';
 
 const run = promisify(execFile);
 
@@ -104,6 +105,7 @@ async function emitStandalone() {
       }
     }
   }
+  return result.metafile;
 }
 
 // Everything else in "files" is served once, at the site root.
@@ -267,9 +269,15 @@ if (!/^\d+\.\d+\.\d+$/.test(pkg.version)) {
 // dist/ first: the working tree's own version is served from the tree, so its
 // single-file build has to exist before the copy below. `--standalone` stops here,
 // for a rebuild of that one file with no site and no registry lookup.
-await emitStandalone();
+const standaloneMeta = await emitStandalone();
+await buildServerRooms();
+for (const file of Object.keys(standaloneMeta.inputs)) {
+  if (file.includes('src/server/rooms/')) {
+    throw new Error(`the standalone build must not include ${file}; the server rooms are a Node entry`);
+  }
+}
 if (process.argv.includes('--standalone')) {
-  console.log(`built dist/${STANDALONE}`);
+  console.log(`built dist/${STANDALONE} and dist/server/rooms.cjs`);
   process.exit(0);
 }
 

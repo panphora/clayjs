@@ -63,5 +63,6 @@ test("carries the core, every plugin and every satellite", () => {
 });
 
 test("writes exactly the file the unversioned-URL guard pins", () => {
-  expect(readdirSync(join(ROOT, "dist"))).toEqual(["clay.standalone.js"]);
+  expect(readdirSync(join(ROOT, "dist")).sort()).toEqual(["clay.standalone.js", "server"]);
+  expect(readdirSync(join(ROOT, "dist/server")).sort()).toEqual(["rooms.cjs", "rooms.mjs"]);
 });
