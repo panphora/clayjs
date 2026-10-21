@@ -55,7 +55,7 @@ global.fetch = jest.fn(async (url, init = {}) => {
 const { live, fastLane, storeOf, confirmSaved, receiveFrame, HOLD_MS } = await import("../../src/plugins/live.js");
 const bridge = await import("../../src/live/stream-bridge.js");
 const snapshot = await import("../../src/core/snapshot.js");
-const { saveHtml } = await import("../../src/core/save-core.js");
+const { saveCapturedHtml } = await import("../../src/core/save-core.js");
 const { savePageForce } = await import("../../src/core/save.js");
 const { stampOf, textHash, parseStamp, serializeLive } = await import("../../src/live/ops.js");
 
@@ -208,10 +208,13 @@ test("a room state waits for the answer of a file-mode save that carries ops, an
   await flushAsync();
   expect(posts("h")).toEqual([]);
 
-  const body = snapshot.captureForSaveAndComparison({ flushUndo: false }).forSave;
+  // C2a: only a captured save binds the pin it announces. This used to send the
+  // captured body through raw saveHtml, which no longer stands in for one.
+  const capture = snapshot.captureForSaveAndComparison({ flushUndo: false });
+  const body = capture.forSave;
   let endSave;
   saveGate = new Promise((resolve) => { endSave = resolve; });
-  saveHtml(body);
+  saveCapturedHtml(body, capture.captureId);
   await join({ g: { value: { s: 0 }, ephemeral: false, last: 0, landed: 0 }, h: { value: { n: 1 }, ephemeral: false, last: 0, landed: 0 } });
   expect(h.status.mode).toBe("file");
   expect(h.toJSON()).toEqual({ n: 1 });
@@ -339,10 +342,13 @@ test("an accepted file-mode save whose data-state came first is not counted agai
   expect(q.status.mode).toBe("file");
   q.add("s", 1);
   await flushAsync();
-  const body = snapshot.captureForSaveAndComparison({ flushUndo: false }).forSave;
+  // C2a: a raw saveHtml no longer stands in for a captured save, so the pin is
+  // bound by the capture the save announces.
+  const capture = snapshot.captureForSaveAndComparison({ flushUndo: false });
+  const body = capture.forSave;
   let endSave;
   saveGate = new Promise((resolve) => { endSave = resolve; });
-  saveHtml(body);
+  saveCapturedHtml(body, capture.captureId);
 
   await join({ g: { value: { s: 0 }, ephemeral: false, last: 0, landed: 0 }, q: { value: { s: 1 }, ephemeral: false, last: 1, landed: 1 } });
   expect(q.status.mode).toBe("file");

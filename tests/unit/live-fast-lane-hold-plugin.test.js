@@ -49,7 +49,7 @@ global.fetch = jest.fn(async (url, init = {}) => {
 const { live, storeOf, fastLane, receiveFrame, HOLD_MS } = await import("../../src/plugins/live.js");
 const bridge = await import("../../src/live/stream-bridge.js");
 const snapshot = await import("../../src/core/snapshot.js");
-const { saveHtml } = await import("../../src/core/save-core.js");
+const { saveCapturedHtml } = await import("../../src/core/save-core.js");
 
 const flushAsync = async () => {
   for (let i = 0; i < 10; i++) await Promise.resolve();
@@ -83,15 +83,29 @@ const roomBoundSave = async (name) => {
   await join({ g: { value: { s: 0 }, ephemeral: false, last: 0, landed: 0 } });
   store.add("n", 1);
   await flushAsync();
-  const body = snapshot.captureForSaveAndComparison({ flushUndo: false }).forSave;
+  // C2a: the save must carry the capture it announces. A raw saveHtml no longer
+  // binds the pin, so this sends the captured body through saveCapturedHtml.
+  const capture = snapshot.captureForSaveAndComparison({ flushUndo: false });
+  const body = capture.forSave;
   let endSave;
   saveGate = new Promise((resolve) => { endSave = resolve; });
-  saveHtml(body);
+  const savePromise = saveCapturedHtml(body, capture.captureId);
   await join({ g: { value: { s: 0 }, ephemeral: false, last: 0, landed: 0 }, [name]: { value: { n: 1 }, ephemeral: false, last: 0, landed: 0 } });
   expect(store.status.mode).toBe("file");
   expect(storeOf(name).pending).toHaveLength(1);
   return {
     store,
+    refuse: async (status, code) => {
+      endSave({
+        ok: false,
+        status,
+        text: async () => JSON.stringify({ msg: code, code }),
+        headers: { get: (name) => name.toLowerCase() === "retry-after" ? "0" : null },
+      });
+      const result = await savePromise;
+      saveGate = null;
+      document.dispatchEvent(new CustomEvent("clay:save-error", { detail: result }));
+    },
     loseAnswer: () => {
       document.dispatchEvent(new CustomEvent("clay:save-error", { detail: { status: 502 } }));
       saveGate = null;
@@ -99,6 +113,13 @@ const roomBoundSave = async (name) => {
     },
   };
 };
+
+test("a page-converting refusal releases the captured edits without an uncertainty notice", async () => {
+  const { refuse } = await roomBoundSave("precommit");
+  await refuse(503, "page-converting");
+  await wait(120);
+  expect(notices.filter((notice) => notice.name === "precommit" && notice.code === "save-uncertain")).toEqual([]);
+});
 
 test("a room-bound store whose save ended without an answer gives its ops up at the first read that does not prove them", async () => {
   const { store, loseAnswer } = await roomBoundSave("rb");

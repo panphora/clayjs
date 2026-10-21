@@ -58,6 +58,17 @@ const snapshotProvenance = new WeakMap();
 // second renderer would be two answers to "what bytes does this save send".
 let saveRenderer = null;
 
+// The capture identity for save captures. A refused save that may retry reads it
+// before sending and again before each retry: a capture newer than the one those
+// bytes describe means the attempt is already superseded and must not be re-sent.
+// It is an opaque local count, monotone per loaded module, and never goes on the
+// wire; it is what binds one capture to the exact requests that carried its body.
+let captureCounter = 0;
+
+export function currentCaptureId() {
+  return captureCounter;
+}
+
 export function originalSnapshotNode(cloneNode) {
   return snapshotProvenance.get(cloneNode) || null;
 }
@@ -224,7 +235,7 @@ function clonePreventingOnclone(node, deep = true) {
   finally { window.__preventOnclone = prev; }
 }
 
-export function captureSnapshot({ flushUndo = true, authored = true, forSave = false } = {}) {
+export function captureSnapshot({ flushUndo = true, authored = true, forSave = false, requestRefresh = false } = {}) {
   // Force-close any pending undo idle batch BEFORE cloning the DOM, so the
   // snapshot reflects a clean undo boundary. Without this, a save that fires
   // mid-typing would leave the idle batch open across the save boundary, and
@@ -245,7 +256,7 @@ export function captureSnapshot({ flushUndo = true, authored = true, forSave = f
 
   for (const hook of snapshotHooks) {
     stripSnapshotRegions(clone);
-    hook(clone, { original: originalSnapshotNode, forSave });
+    hook(clone, { original: originalSnapshotNode, forSave, requestRefresh });
   }
 
   // Put back any URL clay rewrote at runtime (cache-bust, refetch-on-save) so
@@ -445,10 +456,12 @@ export function captureForComparisonAndDirty({ flushUndo = true } = {}) {
  *
  * @param {Object} options
  * @param {boolean} options.emitForSync - Whether to emit snapshot-ready event (default: true)
- * @returns {{ forSave: string, forComparison: string, forDirty: string }}
+ * @returns {{ forSave: string, forComparison: string, forDirty: string, captureId: number }}
  */
-export function captureForSaveAndComparison({ emitForSync = true, flushUndo = true } = {}) {
-  const clone = captureSnapshot({ flushUndo, forSave: emitForSync });
+export function captureForSaveAndComparison({ emitForSync = true, flushUndo = true, requestRefresh = false } = {}) {
+  if (!Number.isSafeInteger(captureCounter + 1)) throw new Error('Save capture identity exhausted');
+  const captureId = ++captureCounter;
+  const clone = captureSnapshot({ flushUndo, forSave: emitForSync, requestRefresh });
 
   // Emit for live-sync before any stripping.
   //
@@ -459,7 +472,7 @@ export function captureForSaveAndComparison({ emitForSync = true, flushUndo = tr
   // and a baseline the dirty check cannot reproduce warns on close forever.
   if (emitForSync) {
     document.dispatchEvent(new CustomEvent('clay:snapshot-ready', {
-      detail: { documentElement: clone, forSave: true }
+      detail: { documentElement: clone, forSave: true, captureId }
     }));
   }
 
@@ -515,7 +528,7 @@ export function captureForSaveAndComparison({ emitForSync = true, flushUndo = tr
     forDirty = "<!DOCTYPE html>" + dirtyClone.outerHTML;
   }
 
-  return { forSave, forComparison, forDirty };
+  return { forSave, forComparison, forDirty, captureId };
 }
 
 /**

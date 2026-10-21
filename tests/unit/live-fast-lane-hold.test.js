@@ -284,6 +284,36 @@ test("a read can be asked of a store that was not skipped", async () => {
   t.lane.stop();
 });
 
+test("a read release before the first epoch bars a state until the read that follows it", async () => {
+  const r = room();
+  const t = tab(r);
+  // Asked for before any room exists: the barrier is armed, and there is nothing
+  // to fetch yet.
+  t.lane.release("s", { read: true });
+  let open;
+  r.gate = new Promise((resolve) => {
+    open = resolve;
+  });
+  t.open();
+  await jest.advanceTimersByTimeAsync(0);
+  expect(r.reads).toBe(1);
+
+  // A state that arrives while that first read is in flight is behind the barrier.
+  r.values.s = { n: 7 };
+  t.handlers.state(r.state());
+  await jest.advanceTimersByTimeAsync(0);
+  expect(t.stores.s.handle.status.mode).toBe("file");
+  expect(t.stores.s.value).toEqual({ n: 0 });
+
+  // The read that follows it is the one that counts.
+  r.gate = null;
+  open();
+  await settle();
+  expect(t.stores.s.handle.status.mode).toBe("fast");
+  expect(t.stores.s.value).toEqual({ n: 7 });
+  t.lane.stop();
+});
+
 describe("the read that replaces a kept state always ends", () => {
   const heldTab = async (r, options = {}) => {
     const held = { s: [1] };

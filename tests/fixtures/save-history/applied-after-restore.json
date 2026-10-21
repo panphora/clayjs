@@ -1,0 +1,72 @@
+{
+  "case": "applied-after-restore",
+  "provenance": {
+    "hyperclay": "HEAD",
+    "acceptedTest": "hyperclay/tests/db/save-history.test.js > answers applied for a save that landed, and still answers applied after a restore rewrites the file (second lookup)",
+    "server": [
+      "server-lib/save-history.js:46-78",
+      "server-lib/state-actions.js:3541-3612"
+    ],
+    "echo": "server-lib/state-actions.js:3606 echoes the requested Save-ID and Save-Request-Hash into document.saveOutcome; the recorded identity below is the accepted test's, and a caller with a different attempt gets its own echoed back unchanged.",
+    "note": "A restore rewrote the file to CURRENT, so the current ETag and the in-memory receipt describe CURRENT and no receipt is present, while the durable row still proves attempt-1 over NEXT."
+  },
+  "inputs": {
+    "NEXT": "<!doctype html><html><head><title>history</title></head><body><h1>next</h1></body></html>",
+    "LATER": "<!doctype html><html><head><title>history</title></head><body><h1>later</h1></body></html>",
+    "CURRENT": "<!doctype html><html><head><title>history</title></head><body><h1>current</h1></body></html>",
+    "NEXT_HASH": "ca58d479a926dbb83db36c54573ca65a7d8ec13f9036156a122455f11d6a806d",
+    "LATER_HASH": "69132f1abadce918332b9e26831cce9881f7238194d090bebcc30a485397f65f",
+    "NEXT_ETAG": "ca58d479a926dbb8",
+    "CURRENT_ETAG": "5aaa99def458a035"
+  },
+  "request": {
+    "method": "GET",
+    "path": "/_/meta",
+    "headers": {
+      "Document-URL": "https://dana.example.com/save-history.html",
+      "Save-ID": "attempt-1",
+      "Save-Request-Hash": "ca58d479a926dbb83db36c54573ca65a7d8ec13f9036156a122455f11d6a806d"
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "cache-control": "private, no-store",
+      "content-type": "application/json; charset=utf-8"
+    },
+    "body": {
+      "spec": 1,
+      "extensions": [
+        "conditional",
+        "data-read",
+        "format",
+        "live-data",
+        "live-provenance",
+        "people",
+        "presence",
+        "presence-editing",
+        "receipts",
+        "save-history",
+        "scoped-stylesheet",
+        "sync",
+        "upload"
+      ],
+      "document": {
+        "etag": "5aaa99def458a035",
+        "upload": "<dynamic: uploadConfigFor(uploadPayerFor(req))>",
+        "people": "<dynamic: documentPeopleFor(req, node, owner)>",
+        "saveOutcome": {
+          "saveId": "attempt-1",
+          "requestHash": "ca58d479a926dbb83db36c54573ca65a7d8ec13f9036156a122455f11d6a806d",
+          "status": "applied"
+        }
+      }
+    }
+  },
+  "dynamic": {
+    "document.upload": "server-lib/state-actions.js:3582-3591 uploadConfigFor(uploadPayerFor(req)): per caller and plan",
+    "document.people": "server-lib/state-actions.js:3593 + server-lib/document-people.js:14-31 publicPerson attributionId and team members: per caller",
+    "document.helpers": "server-lib/state-actions.js:3599: present for callers allowed to use hosted AI",
+    "extensions.wire": "server-lib/state-actions.js:3530-3533: present when hosted AI is enabled"
+  }
+}

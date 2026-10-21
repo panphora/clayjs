@@ -504,6 +504,12 @@ export function createFastLane({
         // there are no frames of it to miss. Already out: its value still
         // descends from where it left.
         if (!lane.out) leaveRoom(name, lane, false);
+        // A read the barrier waited for says no room holds this store: the file is its authority.
+        if (lane.after !== undefined && read >= lane.after) {
+          lane.after = undefined;
+          lane.deferred = false;
+          taken(name);
+        }
         continue;
       }
       const behind = lane.after !== undefined && read < lane.after;
@@ -753,13 +759,17 @@ export function createFastLane({
     // kept from the store, or a value the caller kept (read), is replaced by a
     // read of the room, which frames what is pending when the store takes it.
     release(name, { read = false } = {}) {
-      if (stopped || epoch === null) return;
+      if (stopped) return;
       const lane = laneOf(name);
+      // A read release arms the barrier even before the first epoch exists: the
+      // state that may apply has to be one read after this, and a lane that has
+      // not joined a room yet has nothing to fetch.
       if (lane.deferred || read) {
         lane.after = reads + 1;
-        if (connected) resync();
+        if (epoch !== null && connected) resync();
         return;
       }
+      if (epoch === null) return;
       if (!roomNames.has(name)) return;
       prune(name, lane);
       lane.unsent = unframed(name, lane);

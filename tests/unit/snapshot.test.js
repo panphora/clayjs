@@ -29,9 +29,12 @@ test("strips no-save (clay + legacy), no-snapshot, and extension noise; keeps co
 // The save lane carries the document and nothing else (spec §3). The capture used
 // to also return an unstripped snapshot for a JSON envelope; the snapshot's home
 // is the §10 relay, and the live-sync plugin reads it off `clay:snapshot-ready`.
-test("the capture returns the save and both comparison copies, and nothing else", () => {
+// It also returns the opaque capture id that binds those bytes to the exact save
+// attempts made from them; it never goes on the wire.
+test("the capture returns the save and both comparison copies, plus its capture id", () => {
   const result = captureForSaveAndComparison();
-  expect(Object.keys(result).sort()).toEqual(["forComparison", "forDirty", "forSave"]);
+  expect(Object.keys(result).sort()).toEqual(["captureId", "forComparison", "forDirty", "forSave"]);
+  expect(Number.isSafeInteger(result.captureId)).toBe(true);
   expect(result.forSave).toContain("KEEPME");
   expect(result.forComparison).not.toContain("NOSAVEREGION");
   expect(result.forDirty).not.toContain("NOSAVEREGION");

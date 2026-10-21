@@ -107,6 +107,81 @@ export function resetHostMeta() {
   refreshing = null;
 }
 
+/**
+ * Ask the host what became of one identified save.
+ *
+ * The same discovery document answers it, but this is a separate request with its
+ * own abort timer: it must not share the memoized discovery promise, must not
+ * update the cached document, and must not record any ETag. Two concurrent
+ * questions get two independent answers.
+ *
+ * The host must have advertised `save-history`, the response must be a spec
+ * document that still advertises it, and the echoed id and hash must match this
+ * question exactly. Anything else, including a network failure or a timeout at
+ * six seconds, is null; a wrong or missing answer is never read as "not applied".
+ *
+ * @param {Object} query
+ * @param {string} query.saveId
+ * @param {string} query.requestHash
+ * @param {AbortSignal} [query.signal]
+ * @returns {Promise<?{saveId: string, requestHash: string, status: "applied"|"unknown"}>}
+ */
+export async function querySaveOutcome({ saveId, requestHash, signal } = {}) {
+  if (isDraftMode) return null;
+  if (typeof saveId !== 'string' || !saveId) return null;
+  if (typeof requestHash !== 'string' || !requestHash) return null;
+  if (!/^https?:$/.test(window.location.protocol)) return null;
+  if (signal?.aborted) return null;
+
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  const timeoutId = setTimeout(abort, META_TIMEOUT_MS);
+  signal?.addEventListener('abort', abort);
+  try {
+    const meta = await hostMeta();
+    if (hostMetaOutcome(meta) !== 'ok' || !meta.extensions.includes('save-history')) return null;
+    if (controller.signal.aborted) return null;
+
+    const token = saveToken();
+    const path = token ? `${META_PATH}/${token}` : META_PATH;
+    const res = await fetch(new URL(path, window.location.origin).href, {
+      method: 'GET',
+      credentials: token ? 'omit' : 'same-origin',
+      headers: {
+        'Document-URL': window.location.href,
+        'Save-ID': saveId,
+        'Save-Request-Hash': requestHash
+      },
+      cache: 'no-store',
+      redirect: 'manual',
+      signal: controller.signal
+    });
+    if (!res.ok) return null;
+    const text = await res.text();
+    if (!text) return null;
+
+    let body;
+    try {
+      body = JSON.parse(text);
+    } catch (_) {
+      return null;
+    }
+    if (!body || typeof body !== 'object' || typeof body.spec !== 'number') return null;
+    if (!Array.isArray(body.extensions) || !body.extensions.includes('save-history')) return null;
+    const outcome = body.document && typeof body.document === 'object' ? body.document.saveOutcome : null;
+    if (!outcome || typeof outcome !== 'object') return null;
+    if (outcome.saveId !== saveId || outcome.requestHash !== requestHash) return null;
+    if (outcome.status !== 'applied' && outcome.status !== 'unknown') return null;
+
+    return { saveId, requestHash, status: outcome.status };
+  } catch (_) {
+    return null;
+  } finally {
+    clearTimeout(timeoutId);
+    signal?.removeEventListener('abort', abort);
+  }
+}
+
 async function fetchMeta() {
   // A file opened from disk has no host to ask, and fetch would only throw.
   if (!/^https?:$/.test(window.location.protocol)) return settle("none");

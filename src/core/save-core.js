@@ -16,7 +16,8 @@ import { hostMeta } from "./host-meta.js";
 import {
   getPageContents,
   onSnapshot,
-  addDocumentTransform
+  addDocumentTransform,
+  currentCaptureId
 } from "./snapshot.js";
 
 // =============================================================================
@@ -99,12 +100,70 @@ export function onSaveAccepted(callback) {
   saveAcceptedHooks.push(callback);
 }
 
-function notifySaveAccepted(html) {
+function notifySaveAccepted(html, captureId) {
   for (const hook of saveAcceptedHooks) {
     try {
-      hook(html);
+      hook(html, { captureId: captureId ?? null });
     } catch (err) {
       console.error('clayjs: onSaveAccepted hook failed:', err);
+    }
+  }
+}
+
+// Listeners for "this exact body is about to leave". One call per real fetch, with
+// the capture identity the bytes came from, so a recovery can bind its evidence to
+// the request rather than guess from timing or from the newest global capture.
+const saveAttemptHooks = [];
+// Listeners for "this logical save has settled", once each. The point is the pair
+// (which capture, which actual sends), which is what an uncertain attempt later
+// has to prove.
+const saveOutcomeHooks = [];
+
+/**
+ * Observe each real send of a save, synchronously before the fetch.
+ *
+ * @param {Function} listener - Receives {captureId, saveId, html, etag}
+ * @returns {Function} unsubscribe
+ */
+export function onSaveAttempt(listener) {
+  saveAttemptHooks.push(listener);
+  return () => {
+    const index = saveAttemptHooks.indexOf(listener);
+    if (index >= 0) saveAttemptHooks.splice(index, 1);
+  };
+}
+
+/**
+ * Observe the settlement of one logical save, after any accepted hook and before
+ * the caller's callback.
+ *
+ * @param {Function} listener - Receives {captureId, result, attempts, sent}
+ * @returns {Function} unsubscribe
+ */
+export function onSaveOutcome(listener) {
+  saveOutcomeHooks.push(listener);
+  return () => {
+    const index = saveOutcomeHooks.indexOf(listener);
+    if (index >= 0) saveOutcomeHooks.splice(index, 1);
+  };
+}
+
+function notifySaveAttempt(attempt) {
+  for (const hook of saveAttemptHooks) {
+    try {
+      hook(attempt);
+    } catch (err) {
+      console.error('clayjs: onSaveAttempt hook failed:', err);
+    }
+  }
+}
+
+function notifySaveOutcome(outcome) {
+  for (const hook of saveOutcomeHooks) {
+    try {
+      hook(outcome);
+    } catch (err) {
+      console.error('clayjs: onSaveOutcome hook failed:', err);
     }
   }
 }
@@ -238,12 +297,17 @@ function errorResult(err) {
   // truncation refusal, a 409 that lifts itself within a second, which suspended
   // autosave over a condition that had already cleared.
   const conflicted = !timedOut && err.status === 412;
+  // A save the host has already applied is proof a write happened, but not proof
+  // of what the document holds now: the client's edits are neither confirmed on
+  // disk nor known to be absent. It is an uncertain outcome, like a timeout, and
+  // until recovery lands it is carried as one rather than reported as a failure.
+  const alreadyApplied = !timedOut && !conflicted && err.code === 'save-already-applied';
   return {
     ok: false,
     msg: timedOut ? 'Server not responding' : (err.message || 'Save failed'),
     // A timeout is not evidence the write failed. The request may well have landed,
     // so this reports "we do not know" rather than asserting something false.
-    msgType: timedOut ? 'unknown' : (conflicted ? 'conflict' : 'error'),
+    msgType: timedOut || alreadyApplied ? 'unknown' : (conflicted ? 'conflict' : 'error'),
     code: timedOut ? 'timeout' : (conflicted ? 'conflict' : (err.code ?? null)),
     changedBy: conflicted ? (err.changedBy ?? null) : null,
     // A refusal that may be answering this tab's own timed-out write. Only the
@@ -258,12 +322,77 @@ function errorResult(err) {
     // An attempt of this save timed out, so it may have landed whatever the
     // final answer says.
     hadTimeout: timedOut || err.hadTimeout === true,
+    // The typed refusal behind `code`, kept for the caller: `page-capacity` carries
+    // which limit was hit, the conversion codes carry which condition failed.
+    reason: err.reason ?? null,
+    // Only meaningful while a save can still retry; a caller sees how long the
+    // host asked it to wait. Null when the host named no delay.
+    retryAfter: err.retryAfter ?? null,
+    // The host's answer to a save that already happened. Only `save-already-applied`
+    // produces one, and recovery is what will act on it.
+    saveOutcome: err.saveOutcome ?? null,
     etag: null
   };
 }
 
 function skippedResult(msg) {
   return { ok: false, msg, msgType: 'skipped', code: null, etag: null };
+}
+
+// The metadata a caller attaches to a capture was refused here, before anything
+// went out. The host's own grammar is the only definition of valid, so an
+// `invalid-header` here is the same answer a host would have given, without the
+// request. Nothing about an ordinary save changes.
+function invalidHeaderResult() {
+  return { ok: false, msg: 'Invalid page conversion metadata', msgType: 'error', code: 'invalid-header', etag: null };
+}
+
+// How many extra sends one logical save may make while the host is still
+// converting the page. `page-converting` is a pre-commit refusal, so the same
+// body is worth offering again; anything else is surfaced on the first answer.
+const PAGE_CONVERTING_MAX_RETRIES = 3;
+const HTTP_DATE = /^(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun), \d{2} (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{4} \d{2}:\d{2}:\d{2} GMT|(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday), \d{2}-(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)-\d{2} \d{2}:\d{2}:\d{2} GMT|(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) (?: \d|\d{2}) \d{2}:\d{2}:\d{2} \d{4})$/;
+
+/**
+ * Decode a `Retry-After` header into whole seconds.
+ *
+ * The header is either an integer number of seconds or an HTTP date, per RFC 7231.
+ * A date is measured against now, because that is the only clock both sides could
+ * mean. Clamped to 0..3600 so a bogus or hostile value cannot park a save for a
+ * day; anything that is neither shape, or absent, is null.
+ */
+function parseRetryAfter(value) {
+  if (value == null) return null;
+  const raw = String(value).trim();
+  if (!raw) return null;
+  if (/^-?\d+$/.test(raw)) return Math.max(0, Math.min(3600, Number(raw)));
+  if (!HTTP_DATE.test(raw)) return null;
+  const when = Date.parse(raw);
+  if (Number.isNaN(when)) return null;
+  return Math.max(0, Math.min(3600, Math.round((when - Date.now()) / 1000)));
+}
+
+// The host grammar for `Page-Conversion`, from `server-lib/page-conversion.js`:
+// `file` takes a 64-lowercase-hex baseline and no epoch; `room` takes the same
+// baseline plus an epoch of [A-Za-z0-9-]{1,64}. Validating here means a caller
+// with bad metadata gets a typed answer instead of a wasted round trip.
+const CONVERSION_BASE = /^[0-9a-f]{64}$/;
+const CONVERSION_EPOCH = /^[A-Za-z0-9-]{1,64}$/;
+
+function formatConversionHeader(conversion) {
+  if (conversion == null) return { header: null };
+  if (typeof conversion !== 'object') return { invalid: true };
+  const { source, base, epoch } = conversion;
+  if (typeof base !== 'string' || !CONVERSION_BASE.test(base)) return { invalid: true };
+  if (source === 'file') {
+    if (epoch != null) return { invalid: true };
+    return { header: `v1; source=file; base=${base}` };
+  }
+  if (source === 'room') {
+    if (typeof epoch !== 'string' || !CONVERSION_EPOCH.test(epoch)) return { invalid: true };
+    return { header: `v1; source=room; base=${base}; epoch=${epoch}` };
+  }
+  return { invalid: true };
 }
 
 // =============================================================================
@@ -305,9 +434,10 @@ function skippedResult(msg) {
  * @param {string} saveId - this attempt's §6 receipt id
  * @param {?string} etag - the stamp to send as If-Match, or null
  * @param {boolean} keepalive - whether to ask the transport to see the request through
+ * @param {?string} conversionHeader - the `Page-Conversion` value for this logical save, or null
  * @returns {{url: string, options: Object}}
  */
-function buildSaveRequest(content, userDriven, signal, saveId, etag, keepalive = false) {
+function buildSaveRequest(content, userDriven, signal, saveId, etag, keepalive = false, conversionHeader = null) {
   const token = saveToken();
   const path = token ? `${SAVE_PATH}/${token}` : SAVE_PATH;
   const options = {
@@ -333,6 +463,11 @@ function buildSaveRequest(content, userDriven, signal, saveId, etag, keepalive =
   };
 
   for (const [name, value] of extraSaveHeaders) options.headers[name] = value;
+
+  // The conversion request belongs to ONE logical save, and goes on every attempt
+  // of it. Set after the process-global headers so the capture-bound value is the
+  // one that describes these bytes.
+  if (conversionHeader) options.headers['Page-Conversion'] = conversionHeader;
 
   if (etag) options.headers['If-Match'] = etag;
 
@@ -411,9 +546,15 @@ function sendToDraftStore(content) {
  * instead of the status.
  *
  * @param {string} content - HTML to save
+ * @param {string} saveId - this attempt's receipt id
+ * @param {?string} etag - the stamp to send as If-Match, or null
+ * @param {Object} [context]
+ * @param {?number} [context.captureId] - the capture these bytes came from
+ * @param {?string} [context.conversionHeader] - per-logical-save conversion header
+ * @param {Array} [context.attempts] - collects each unique actual send
  * @returns {Promise<Object>} The server's response body
  */
-function sendOnce(content, saveId, etag) {
+function sendOnce(content, saveId, etag, { captureId = null, conversionHeader = null, attempts = [] } = {}) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), SAVE_TIMEOUT_MS);
 
@@ -430,8 +571,17 @@ function sendOnce(content, saveId, etag) {
   // returns early never reaches this point, so the hint cannot leak onto a later one.
   const keepalive = nextSaveKeepalive;
   nextSaveKeepalive = false;
-  const { url, options } = buildSaveRequest(content, userDriven, controller.signal, saveId, etag, keepalive);
+  const { url, options } = buildSaveRequest(content, userDriven, controller.signal, saveId, etag, keepalive, conversionHeader);
   rememberSentId(saveId);
+
+  // A draft save is not a request to any host and has no receipt to recover, so it
+  // is not an attempt as far as this feature is concerned.
+  if (!isDraftMode) {
+    if (!attempts.some(attempt => attempt.saveId === saveId && attempt.etag === (etag ?? null))) {
+      attempts.push({ saveId, etag: etag ?? null });
+    }
+    notifySaveAttempt({ captureId, saveId, html: content, etag: etag ?? null });
+  }
 
   return (isDraftMode ? sendToDraftStore(content) : fetch(url, options))
     .then(res => res.text().then(text => {
@@ -457,6 +607,14 @@ function sendOnce(content, saveId, etag) {
         // whether the document was moved by this tab's own earlier save.
         error.etag = data.etag ?? null;
         error.saveId = data.saveId ?? null;
+        // The refusal's own vocabulary. `reason` is the typed cause behind the
+        // stable `code`, and both ride out unchanged so a caller can act on the
+        // specific one. `saveOutcome` is the host's receipt answer to a duplicate
+        // that already landed, and it is the whole reply to a client whose own
+        // response was lost.
+        error.reason = typeof data.reason === 'string' ? data.reason : null;
+        error.saveOutcome = data.saveOutcome ?? null;
+        error.retryAfter = parseRetryAfter(res.headers?.get?.('Retry-After'));
         throw error;
       }
       // The one place a stamp is ever learned from a save (§6). A response with no
@@ -579,9 +737,13 @@ async function recoverUnknownSave() {
  * Each recovery sends at most one further request, so a save can never loop.
  *
  * @param {string} content - HTML to save
+ * @param {Object} [context]
+ * @param {?number} [context.captureId] - the capture these bytes came from
+ * @param {?string} [context.conversionHeader] - per-logical-save conversion header
+ * @param {Array} [context.attempts] - collects each unique actual send
  * @returns {Promise<Object>} The server's response body
  */
-async function sendSave(content) {
+async function sendSave(content, { captureId = null, conversionHeader = null, attempts = [] } = {}) {
   // The re-send below is a RETRY of this attempt, so it carries this same id:
   // whichever of the two requests the host ends up storing, its receipt then
   // answers for this save. A fresh id on the re-send would leave the first
@@ -595,9 +757,18 @@ async function sendSave(content) {
   // is fast and conclusive, so it gets its own turn regardless.
   let reSent = false;
   let duplicateResolved = false;
+  // `page-converting` is the one refusal that is worth offering the same bytes
+  // again: the host has written nothing and is telling us when it expects to be
+  // ready. The capture these bytes came from is pinned here, so a capture made
+  // while we wait — newer edits, a disk frame — cancels the retry instead of
+  // being overwritten by stale bytes.
+  let convertingRetries = 0;
+  // A bound save retries only while its own capture is still the newest. A raw
+  // save has no capture identity, so it uses the newest capture at send time.
+  const retryGuard = captureId ?? currentCaptureId();
   for (;;) {
     try {
-      return await sendOnce(content, saveId, etag);
+      return await sendOnce(content, saveId, etag, { captureId, conversionHeader, attempts });
     } catch (err) {
       if (reSent) err.hadTimeout = true;
       if (err.name === 'AbortError') {
@@ -626,6 +797,16 @@ async function sendSave(content) {
         continue;
       }
 
+      if (err.code === 'page-converting' && convertingRetries < PAGE_CONVERTING_MAX_RETRIES) {
+        if (currentCaptureId() !== retryGuard) throw err;
+        convertingRetries += 1;
+        // Default a missing or unparseable header to one second, so a host that
+        // asks for a retry without naming a delay still gets a bounded one.
+        await new Promise((resolve) => setTimeout(resolve, Math.max(0, err.retryAfter ?? 1) * 1000));
+        if (currentCaptureId() !== retryGuard) throw err;
+        continue;
+      }
+
       throw err;
     }
   }
@@ -634,6 +815,62 @@ async function sendSave(content) {
 // =============================================================================
 // SAVE FUNCTIONS
 // =============================================================================
+
+// One private implementation behind every entry point, so the hooks see the same
+// thing whether the bytes came from a bound capture or a raw caller. `captureId`
+// is null for a raw save: it belongs to no capture and can confirm none.
+function runSave(html, captureId, callback, conversion) {
+  return new Promise((resolve) => {
+    const attempts = [];
+    const finished = (result, accepted = false) => {
+      if (accepted) notifySaveAccepted(html, captureId ?? null);
+      notifySaveOutcome({
+        captureId: captureId ?? null,
+        result,
+        attempts,
+        sent: attempts.length > 0
+      });
+      if (typeof callback === 'function') callback(result);
+      resolve(result);
+    };
+
+    if (!isEditMode && !window.clay?.testMode) {
+      return finished(skippedResult('Not in edit mode'));
+    }
+    if (saveInProgress) {
+      return finished(skippedResult('Save already in progress'));
+    }
+
+    // Refused locally and before the lane is claimed: no request is made, and the
+    // caller gets the same typed `invalid-header` a host would have sent back.
+    const formatted = formatConversionHeader(conversion);
+    if (formatted.invalid) {
+      return finished(invalidHeaderResult());
+    }
+
+    saveInProgress = true;
+
+    // Test mode: skip network request, return mock success
+    if (window.clay?.testMode) {
+      setTimeout(() => {
+        saveInProgress = false;
+        finished(successResult({ msg: 'Test mode: save skipped' }));
+      }, 0);
+      return;
+    }
+
+    sendSave(html, { captureId, conversionHeader: formatted.header, attempts })
+      .then(successResult, errorResult)
+      // Clear the flag BEFORE handing the result back, so a caller that queues a
+      // follow-up save can start it immediately rather than being told the lane
+      // is busy by the save that just finished.
+      .then(result => {
+        saveInProgress = false;
+        if (result.ok) notifySaveAccepted(html, captureId ?? null);
+        finished(result);
+      });
+  });
+}
 
 /**
  * Save specific HTML content to the server.
@@ -650,41 +887,39 @@ async function sendSave(content) {
  * if (msgType === 'error') console.error('Save failed:', msg);
  */
 export function saveHtml(html, callback = () => {}) {
-  return new Promise((resolve) => {
-    const done = (result) => {
-      if (typeof callback === 'function') callback(result);
-      resolve(result);
-    };
+  return runSave(html, null, callback, null);
+}
 
-    if (!isEditMode && !window.clay?.testMode) {
-      return done(skippedResult('Not in edit mode'));
-    }
-    if (saveInProgress) {
-      return done(skippedResult('Save already in progress'));
-    }
+/**
+ * Save HTML that came from a specific capture.
+ *
+ * The capture id travels only in-process: it is what lets an attempt hook and an
+ * outcome hook agree that these bytes and that snapshot are the same save. A
+ * `conversion` request rides every attempt of this one logical save and no other.
+ *
+ * @param {string} html
+ * @param {?number} captureId
+ * @param {Function} [callback]
+ * @param {Object} [options]
+ * @param {Object} [options.conversion] - {source:'file', base} or {source:'room', base, epoch}
+ * @returns {Promise<Object>}
+ */
+export function saveCapturedHtml(html, captureId, callback = () => {}, { conversion } = {}) {
+  return runSave(html, captureId, callback, conversion);
+}
 
-    saveInProgress = true;
-
-    // Test mode: skip network request, return mock success
-    if (window.clay?.testMode) {
-      setTimeout(() => {
-        saveInProgress = false;
-        done(successResult({ msg: 'Test mode: save skipped' }));
-      }, 0);
-      return;
-    }
-
-    sendSave(html)
-      .then(successResult, errorResult)
-      // Clear the flag BEFORE handing the result back, so a caller that queues a
-      // follow-up save can start it immediately rather than being told the lane
-      // is busy by the save that just finished.
-      .then(result => {
-        saveInProgress = false;
-        if (result.ok) notifySaveAccepted(html);
-        done(result);
-      });
-  });
+/**
+ * Internal entry point for the dormant adoption path: request conversion while
+ * saving a capture's body. Not published on `window.clay`.
+ *
+ * @param {Object} request
+ * @param {string} request.html
+ * @param {?number} request.captureId
+ * @param {Object} request.conversion
+ * @returns {Promise<Object>}
+ */
+export function saveConversion({ html, captureId, conversion }) {
+  return runSave(html, captureId ?? null, undefined, conversion);
 }
 
 /**

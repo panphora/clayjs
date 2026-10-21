@@ -46,9 +46,12 @@ await tick();
 busy = true;
 for (let i = 0; i < 2; i++) { s.add("n", 1); await wait(30); }
 await tick();
-const html = snapshot.captureForSaveAndComparison({ flushUndo: false }).forSave;
-const { saveHtml, isSaveInProgress } = await import(`${C}/core/save-core.js`);
-const saving = saveHtml(html);
+const capture = snapshot.captureForSaveAndComparison({ flushUndo: false });
+const html = capture.forSave;
+const { saveCapturedHtml, isSaveInProgress } = await import(`${C}/core/save-core.js`);
+// C2a: the pin binds to the capture this save announces. A raw saveHtml no longer
+// stands in for a captured save.
+const saving = saveCapturedHtml(html, capture.captureId);
 assert.equal(isSaveInProgress(), true);
 rooms.fileWritten("doc", html);
 if (variant !== "control") { rooms.drop("doc"); room = rooms.open("doc", html); }

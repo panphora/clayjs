@@ -13,7 +13,7 @@ import throttle from "../lib/throttle.js";
 import Mutation from "../lib/mutation.js";
 import { isDraftMode, isEditMode, isOwner } from "./is-edit-mode.js";
 import {
-  saveHtml,
+  saveCapturedHtml,
   getPageContents,
   replacePageWith as replacePageWithCore,
   addDocumentTransform,
@@ -378,7 +378,7 @@ function skipped_(msg) {
  * where the write may or may not have landed, so it is not treated as success
  * either.
  */
-function applySaveResult(result, forComparison, forDirty, label, gateToken, forSave = null) {
+function applySaveResult(result, forComparison, forDirty, label, gateToken, forSave = null, captureId = null) {
   if (result.ok) {
     // Both baselines advance from the SAME pre-request capture, never from the
     // live DOM, so an edit made while the request was on the wire stays unsaved.
@@ -400,9 +400,23 @@ function applySaveResult(result, forComparison, forDirty, label, gateToken, forS
       changedBy: result.changedBy ?? null,
       afterTimeout: result.afterTimeout === true,
       etag: result.conflictEtag ?? null,
+      code: result.code ?? null,
+      reason: result.reason ?? null,
+      retryAfter: result.retryAfter ?? null,
+      captureId,
     });
   } else if (result.msgType !== 'skipped') {
-    const extra = { status: result.status ?? null, hadTimeout: result.hadTimeout === true };
+    const extra = {
+      status: result.status ?? null,
+      hadTimeout: result.hadTimeout === true,
+      // The host's typed refusal, so a listener can react to the specific code
+      // rather than reading the message. `retryAfter` is only set where the host
+      // asked for a delay.
+      code: result.code ?? null,
+      reason: result.reason ?? null,
+      retryAfter: result.retryAfter ?? null,
+      captureId,
+    };
     if (!navigator.onLine) {
       setSaveState('offline', result.msg, '', extra);
     } else {
@@ -512,15 +526,15 @@ export function savePage(callback = () => {}) {
     // Single capture: clone once, get both versions
     // forSave strips non-persisted regions ([no-save]/[save-remove])
     // forComparison additionally strips every autosave-off region
-    let forSave, forComparison, forDirty;
+    let forSave, forComparison, forDirty, captureId;
     const gateToken = gateCaptureToken();
     try {
-      ({ forSave, forComparison, forDirty } = captureForSaveAndComparison());
+      ({ forSave, forComparison, forDirty, captureId } = captureForSaveAndComparison({ requestRefresh: true }));
     } catch (err) {
       console.error('savePage: captureForSaveAndComparison failed', err);
       clearExplicitSave();
-      setSaveState('error', err.message, '', { sent: false });
-      const result = { msg: err.message, msgType: 'error', code: null, etag: null };
+      setSaveState('error', err.message, '', { sent: false, code: err.code ?? null });
+      const result = { msg: err.message, msgType: 'error', code: err.code ?? null, etag: null };
       if (typeof callback === 'function') {
         callback(result);
       }
@@ -548,14 +562,14 @@ export function savePage(callback = () => {}) {
     // Start debounced 'saving' state (only shows if save takes >500ms)
     setSavingState();
 
-    // Use saveHtml directly with our pre-captured content (avoids double capture)
+    // Use the captured save path with our pre-captured content (avoids double capture)
     const comparison = { forComparison, forDirty };
     inFlightComparisons.add(comparison);
     ownSaveOnWire = true;
-    saveHtml(forSave, (result) => {
+    saveCapturedHtml(forSave, captureId, (result) => {
       ownSaveOnWire = false;
       inFlightComparisons.delete(comparison);
-      applySaveResult(result, comparison.forComparison, comparison.forDirty, 'updated after save', gateToken, forSave);
+      applySaveResult(result, comparison.forComparison, comparison.forDirty, 'updated after save', gateToken, forSave, captureId);
       if (typeof callback === 'function') {
         callback(result);
       }
@@ -593,14 +607,14 @@ export function savePageForce(callback = () => {}) {
       setOfflineStateQuiet();
     }
 
-    let forSave, forComparison, forDirty;
+    let forSave, forComparison, forDirty, captureId;
     const gateToken = gateCaptureToken();
     try {
-      ({ forSave, forComparison, forDirty } = captureForSaveAndComparison());
+      ({ forSave, forComparison, forDirty, captureId } = captureForSaveAndComparison({ requestRefresh: true }));
     } catch (err) {
       console.error('savePageForce: captureForSaveAndComparison failed', err);
-      setSaveState('error', err.message, '', { sent: false });
-      const result = { msg: err.message, msgType: 'error', code: null, etag: null };
+      setSaveState('error', err.message, '', { sent: false, code: err.code ?? null });
+      const result = { msg: err.message, msgType: 'error', code: err.code ?? null, etag: null };
       if (typeof callback === 'function') {
         callback(result);
       }
@@ -612,10 +626,10 @@ export function savePageForce(callback = () => {}) {
     const comparison = { forComparison, forDirty };
     inFlightComparisons.add(comparison);
     ownSaveOnWire = true;
-    saveHtml(forSave, (result) => {
+    saveCapturedHtml(forSave, captureId, (result) => {
       ownSaveOnWire = false;
       inFlightComparisons.delete(comparison);
-      applySaveResult(result, comparison.forComparison, comparison.forDirty, 'updated after force save', gateToken, forSave);
+      applySaveResult(result, comparison.forComparison, comparison.forDirty, 'updated after force save', gateToken, forSave, captureId);
       if (typeof callback === 'function') {
         callback(result);
       }

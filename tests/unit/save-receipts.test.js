@@ -42,6 +42,15 @@ function installRouter() {
       ok: status < 400,
       status,
       statusText: "",
+      // Read the way Headers.get does, case-insensitively, so a refusal can carry
+      // Retry-After exactly as a host sends it.
+      headers: {
+        get: (name) => {
+          const table = answer.headers || {};
+          const key = Object.keys(table).find((k) => k.toLowerCase() === String(name).toLowerCase());
+          return key === undefined ? null : table[key];
+        }
+      },
       text: async () => JSON.stringify(answer.body ?? {})
     };
   });
@@ -381,4 +390,103 @@ test("a receipts host that lost its pair leaves the question open", async () => 
 
   expect(conflicts).toHaveLength(1);
   expect(conflicts[0].afterTimeout).toBe(true);
+});
+
+// The tests above end on a refusal, so the conflict hold is still up. Clear it the
+// way a person would, with a save that lands, before testing the refusal codes.
+describe("typed refusals through a receipts host", () => {
+  beforeEach(async () => {
+    responses.save = accepted("hold-cleared");
+    await edit("clearing the conflict hold");
+    await saveMod.savePage();
+    installRouter();
+    await rediscover();
+    document.documentElement.removeAttribute("savestatus");
+    expect(saveMod.isSaveConflicted()).toBe(false);
+  });
+
+  // `save-already-applied` is the host saying this save happened, and it is not the
+  // same claim as "your current bytes are on disk now". Until recovery can act on it
+  // the outcome is uncertain: no accepted callback, no baseline update, and the
+  // captured edits are left pending rather than dropped or replayed.
+  test("a save-already-applied 409 is uncertain, not a success and not a conflict", async () => {
+    const outcome = { saveId: "save-1", requestHash: "hash-1", status: "applied" };
+    responses.save = () => ({
+      status: 409,
+      body: {
+        msg: "This save already happened. Refresh to see the current content.",
+        msgType: "error",
+        code: "save-already-applied",
+        saveOutcome: outcome
+      }
+    });
+
+    const saved = [];
+    document.addEventListener("clay:save-saved", (e) => saved.push(e.detail));
+    await edit("a response that never came back");
+    const result = await saveMod.savePage();
+
+    expect(result.ok).toBe(false);
+    expect(result.msgType).toBe("unknown");
+    expect(result.code).toBe("save-already-applied");
+    expect(result.saveOutcome).toEqual(outcome);
+    expect(saved).toHaveLength(0);
+    expect(saveMod.isSaveConflicted()).toBe(false);
+    expect(saveMod.getUnsavedChanges()).toBe(true);
+    expect(calls.save).toHaveLength(1);
+  });
+
+  // The receipts host answers a conversion refusal with the typed cause. It is an
+  // ordinary error answer: nothing timed out, so it must not be reported as an
+  // uncertain save, and it is not a conflict that triggers 412 recovery.
+  test("a conversion refusal keeps its reason and is never marked uncertain", async () => {
+    responses.save = () => ({
+      status: 409,
+      body: {
+        msg: "This save was built for a different source.",
+        msgType: "error",
+        code: "page-conversion-stale",
+        reason: "source-changed"
+      }
+    });
+
+    const seen = [];
+    const onError = (e) => seen.push(e.detail);
+    document.addEventListener("clay:save-error", onError);
+    await edit("a stale conversion");
+    const result = await saveMod.savePage();
+    document.removeEventListener("clay:save-error", onError);
+
+    expect(result.ok).toBe(false);
+    expect(result.msgType).toBe("error");
+    expect(result.code).toBe("page-conversion-stale");
+    expect(result.reason).toBe("source-changed");
+    expect(result.hadTimeout).toBe(false);
+    expect(saveMod.isSaveConflicted()).toBe(false);
+    expect(seen).toHaveLength(1);
+    expect(seen[0].reason).toBe("source-changed");
+    expect(seen[0].hadTimeout).toBe(false);
+    expect(calls.save).toHaveLength(1);
+  });
+
+  // A pre-commit `page-converting` refusal is the one code worth retrying, and the
+  // retry is the same logical save: it must carry the same receipt id so the host
+  // can still answer for the write whichever attempt lands.
+  test("a page-converting retry keeps the same receipt id", async () => {
+    responses.save = (n) => (n === 1
+      ? {
+          status: 503,
+          headers: { "Retry-After": "0" },
+          body: { msg: "Converting the page.", msgType: "error", code: "page-converting", reason: "page-converting" }
+        }
+      : accepted("stored-after-conversion")());
+
+    await edit("converting");
+    const result = await saveMod.savePage();
+
+    expect(result.ok).toBe(true);
+    expect(calls.save).toHaveLength(2);
+    expect(headerOf(1, "Save-ID")).toBe(headerOf(0, "Save-ID"));
+    expect(headerOf(1, "If-Match")).toBe(headerOf(0, "If-Match"));
+  });
 });

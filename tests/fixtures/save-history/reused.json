@@ -1,0 +1,41 @@
+{
+  "case": "reused",
+  "provenance": {
+    "hyperclay": "HEAD",
+    "acceptedTest": "hyperclay/tests/db/save-history.test.js > answers 409 save-id-reused when the same id carries a different body",
+    "server": [
+      "server-lib/document-save.js:155-160",
+      "server-lib/state-actions.js:1466-1476"
+    ],
+    "echo": "server-lib/document-save.js:65,157 hashes the submitted body (requestHashFor(requestHtml)) and echoes the request's own Save-ID; the recorded identity below is the accepted test's.",
+    "note": "Refused rather than answered with the earlier attempt's proof, so no saveOutcome is present."
+  },
+  "inputs": {
+    "NEXT": "<!doctype html><html><head><title>history</title></head><body><h1>next</h1></body></html>",
+    "LATER": "<!doctype html><html><head><title>history</title></head><body><h1>later</h1></body></html>",
+    "CURRENT": "<!doctype html><html><head><title>history</title></head><body><h1>current</h1></body></html>",
+    "NEXT_HASH": "ca58d479a926dbb83db36c54573ca65a7d8ec13f9036156a122455f11d6a806d",
+    "LATER_HASH": "69132f1abadce918332b9e26831cce9881f7238194d090bebcc30a485397f65f"
+  },
+  "request": {
+    "method": "POST",
+    "path": "/_/save",
+    "headers": {
+      "Content-Type": "text/html",
+      "Document-URL": "https://dana.example.com/save-history.html",
+      "Save-ID": "attempt-1"
+    }
+  },
+  "response": {
+    "status": 409,
+    "headers": {
+      "content-type": "application/json; charset=utf-8"
+    },
+    "body": {
+      "msg": "That save id was already used for a different change.",
+      "msgType": "error",
+      "code": "save-id-reused"
+    }
+  },
+  "dynamic": {}
+}

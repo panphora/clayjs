@@ -38,6 +38,15 @@ function installRouter() {
       ok: status < 400,
       status,
       statusText: "",
+      // Read the way Headers.get does, case-insensitively, so a refusal can carry
+      // Retry-After exactly as a host sends it.
+      headers: {
+        get: (name) => {
+          const table = answer.headers || {};
+          const key = Object.keys(table).find((k) => k.toLowerCase() === String(name).toLowerCase());
+          return key === undefined ? null : table[key];
+        }
+      },
       // `text` lets a case answer with a genuinely empty body, which is what a
       // proxy does when it refuses on the host's behalf.
       text: async () => (answer.text !== undefined ? answer.text : JSON.stringify(answer.body ?? {}))
@@ -53,6 +62,10 @@ const refused = () => ({
 
 function ifMatchOf(index) {
   return calls.save[index][1].headers["If-Match"];
+}
+
+function headerOf(index, name) {
+  return calls.save[index][1].headers[name];
 }
 
 async function edit(text) {
@@ -438,5 +451,224 @@ describe("live sync", () => {
     // §10 relays never write to disk, so the stamp is still true after one lands.
     expect(calls.meta).toHaveLength(before);
     expect(ifMatchOf(calls.save.length - 1)).toBe("seed-s");
+  });
+});
+
+// The host answers a page refusal with a stable `code`, the typed `reason` behind
+// it, and on a 503 a `Retry-After`. None of that survived the response boundary
+// before: the never-rejecting result carried only a message, a status and the
+// conflict fields, so a caller could not tell a capacity refusal from a stale
+// conversion, and `retryAfter` was dropped entirely.
+describe("typed refusals from the host contract", () => {
+  const ROWS = [
+    { label: "invalid-header", status: 400, code: "page-conversion-refused", reason: "invalid-header" },
+    { label: "invalid-capture", status: 422, code: "page-conversion-refused", reason: "invalid-capture" },
+    { label: "invalid-source", status: 409, code: "page-conversion-refused", reason: "invalid-source" },
+    { label: "ambiguous-source", status: 409, code: "page-conversion-refused", reason: "ambiguous-source" },
+    { label: "room-page-authority", status: 409, code: "page-conversion-refused", reason: "room-page-authority" },
+    { label: "implicit-conversion", status: 409, code: "page-conversion-required", reason: "implicit-conversion" },
+    { label: "source-changed", status: 409, code: "page-conversion-stale", reason: "source-changed" },
+    { label: "room-changed", status: 409, code: "page-conversion-stale", reason: "room-changed" },
+    { label: "room-required", status: 409, code: "page-conversion-stale", reason: "room-required" },
+    { label: "page-converting", status: 503, code: "page-converting", reason: "page-converting", header: "0", delay: 0, sends: 4 },
+    { label: "budget", status: 503, code: "page-capacity", reason: "budget", header: "60", delay: 60 },
+    { label: "receipt-capacity", status: 503, code: "page-capacity", reason: "receipt-capacity", header: "60", delay: 60 },
+    { label: "file-changed", status: 428, code: "page-condition-required", reason: "file-changed" },
+    { label: "save-id-reused", status: 409, code: "save-id-reused" },
+  ];
+
+  beforeEach(async () => {
+    responses.meta = { spec: 1, extensions: ["conditional"], document: { etag: "seed-typed" } };
+    await rediscover();
+  });
+
+  for (const row of ROWS) {
+    test(`${row.label}: ${row.code} is surfaced with its reason and is not a conflict`, async () => {
+      responses.save = () => ({
+        status: row.status,
+        headers: row.header ? { "Retry-After": row.header } : undefined,
+        body: {
+          msg: `${row.code} refusal`,
+          msgType: "error",
+          code: row.code,
+          ...(row.reason ? { reason: row.reason } : {}),
+        },
+      });
+
+      const seen = [];
+      const onError = (e) => seen.push(e.detail);
+      document.addEventListener("clay:save-error", onError);
+      await edit(`refused: ${row.label}`);
+      const result = await saveMod.savePage();
+      document.removeEventListener("clay:save-error", onError);
+
+      expect(result.ok).toBe(false);
+      expect(result.msgType).toBe("error");
+      expect(result.code).toBe(row.code);
+      expect(result.reason).toBe(row.reason ?? null);
+      expect(result.retryAfter).toBe(row.delay ?? null);
+      expect(result.saveOutcome).toBeNull();
+      expect(saveMod.isSaveConflicted()).toBe(false);
+      expect(document.documentElement.getAttribute("savestatus")).toBe("error");
+      expect(calls.save).toHaveLength(row.sends ?? 1);
+      expect(seen).toHaveLength(1);
+      expect(seen[0].code).toBe(row.code);
+      expect(seen[0].reason).toBe(row.reason ?? null);
+      expect(seen[0].retryAfter).toBe(row.delay ?? null);
+    });
+  }
+
+  test("a 412 is still a conflict and carries no conversion fields", async () => {
+    responses.save = refused;
+    await edit("an ordinary conflict");
+    const result = await saveMod.savePage();
+
+    expect(result.msgType).toBe("conflict");
+    expect(result.code).toBe("conflict");
+    expect(result.reason).toBeNull();
+    expect(result.retryAfter).toBeNull();
+    expect(result.saveOutcome).toBeNull();
+    expect(saveMod.isSaveConflicted()).toBe(true);
+  });
+
+  test("Retry-After as an HTTP date is decoded relative to now", async () => {
+    const when = new Date(Date.now() + 10000).toUTCString();
+    responses.save = () => ({
+      status: 503,
+      headers: { "Retry-After": when },
+      body: { msg: "Over budget.", msgType: "error", code: "page-capacity", reason: "budget" },
+    });
+
+    await edit("dated retry");
+    const result = await saveMod.savePage();
+
+    expect(result.retryAfter).toBeGreaterThanOrEqual(9);
+    expect(result.retryAfter).toBeLessThanOrEqual(10);
+  });
+
+  test("a Retry-After that is neither a number nor a date is null", async () => {
+    responses.save = () => ({
+      status: 503,
+      headers: { "Retry-After": "soon" },
+      body: { msg: "Over budget.", msgType: "error", code: "page-capacity", reason: "budget" },
+    });
+
+    await edit("nonsense retry");
+    const result = await saveMod.savePage();
+
+    expect(result.retryAfter).toBeNull();
+  });
+
+  test.each(["1.5", "2026-10-22"])("a parseable non-HTTP date %s is invalid", async (header) => {
+    responses.save = () => ({
+      status: 503,
+      headers: { "Retry-After": header },
+      body: { msg: "Over budget.", msgType: "error", code: "page-capacity", reason: "budget" },
+    });
+
+    await edit(`invalid retry ${header}`);
+    const result = await saveMod.savePage();
+
+    expect(result.retryAfter).toBeNull();
+  });
+
+  test("Retry-After is clamped to an hour", async () => {
+    responses.save = () => ({
+      status: 503,
+      headers: { "Retry-After": "99999" },
+      body: { msg: "Over budget.", msgType: "error", code: "page-capacity", reason: "budget" },
+    });
+
+    await edit("absurd retry");
+    const result = await saveMod.savePage();
+
+    expect(result.retryAfter).toBe(3600);
+  });
+});
+
+describe("page-converting retries inside one logical save", () => {
+  const converting = () => ({
+    status: 503,
+    headers: { "Retry-After": "1" },
+    body: { msg: "Converting the page.", msgType: "error", code: "page-converting", reason: "page-converting" },
+  });
+
+  beforeEach(async () => {
+    responses.meta = { spec: 1, extensions: ["conditional"], document: { etag: "seed-conv" } };
+    await rediscover();
+    jest.useFakeTimers();
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  test("waits the header's seconds, then re-sends the same body, Save-ID and If-Match", async () => {
+    responses.save = (n) => (n === 1 ? converting() : accepted("stored-conv")());
+    await edit("still converting");
+    const pending = saveMod.savePage();
+    await jest.advanceTimersByTimeAsync(0);
+
+    expect(calls.save).toHaveLength(1);
+    await jest.advanceTimersByTimeAsync(999);
+    expect(calls.save).toHaveLength(1);
+    await jest.advanceTimersByTimeAsync(1);
+    const result = await pending;
+
+    expect(result.ok).toBe(true);
+    expect(calls.save).toHaveLength(2);
+    expect(headerOf(1, "Save-ID")).toBe(headerOf(0, "Save-ID"));
+    expect(headerOf(1, "If-Match")).toBe(headerOf(0, "If-Match"));
+    expect(calls.save[1][1].body).toBe(calls.save[0][1].body);
+  });
+
+  test("stops after three extra attempts and surfaces the refusal", async () => {
+    responses.save = converting;
+    await edit("never converts");
+    const pending = saveMod.savePage();
+    await jest.advanceTimersByTimeAsync(0);
+    for (let i = 0; i < 3; i++) await jest.advanceTimersByTimeAsync(1000);
+    const result = await pending;
+
+    expect(result.ok).toBe(false);
+    expect(result.code).toBe("page-converting");
+    expect(result.msgType).toBe("error");
+    expect(result.hadTimeout).toBe(false);
+    expect(calls.save).toHaveLength(4);
+  });
+
+  test("a newer capture cancels the retry, so stale bytes are not re-sent", async () => {
+    responses.save = (n) => (n === 1 ? converting() : accepted("should-not-arrive")());
+    await edit("superseded");
+    const pending = saveMod.savePage();
+    await jest.advanceTimersByTimeAsync(0);
+    expect(calls.save).toHaveLength(1);
+
+    const snap = await import("../../src/core/snapshot.js");
+    snap.captureForSaveAndComparison({ emitForSync: false });
+
+    await jest.advanceTimersByTimeAsync(1000);
+    const result = await pending;
+
+    expect(result.ok).toBe(false);
+    expect(result.code).toBe("page-converting");
+    expect(calls.save).toHaveLength(1);
+  });
+
+  test("a bound capture already superseded before sending gets no conversion retry", async () => {
+    responses.save = converting;
+    const snap = await import("../../src/core/snapshot.js");
+    const { saveCapturedHtml } = await import("../../src/core/save-core.js");
+    const older = snap.captureForSaveAndComparison({ emitForSync: false });
+    const newer = snap.captureForSaveAndComparison({ emitForSync: false });
+    expect(newer.captureId).toBeGreaterThan(older.captureId);
+
+    const pending = saveCapturedHtml(older.forSave, older.captureId);
+    await jest.advanceTimersByTimeAsync(0);
+    await jest.advanceTimersByTimeAsync(1000);
+    const result = await pending;
+
+    expect(result.code).toBe("page-converting");
+    expect(calls.save).toHaveLength(1);
   });
 });
