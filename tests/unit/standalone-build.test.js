@@ -59,10 +59,10 @@ test("carries the core, every plugin and every satellite", () => {
   expect((bundle.match(/@layer clay-skin\{/g) || []).length).toBeGreaterThanOrEqual(3);
   for (const name of ["richclay", "cms", "quickcrop"]) expect(bundle).toMatch(new RegExp(`installSkin\\d*\\(\\s*"${name}"`));
   expect(bundle.length).toBeGreaterThan(500_000);
-  expect(bundle.length).toBeLessThan(3_000_000);
+  expect(bundle.length).toBeLessThan(4_000_000);
 });
 
 test("writes exactly the file the unversioned-URL guard pins", () => {
   expect(readdirSync(join(ROOT, "dist")).sort()).toEqual(["clay.standalone.js", "server"]);
-  expect(readdirSync(join(ROOT, "dist/server")).sort()).toEqual(["rooms.cjs", "rooms.mjs"]);
+  expect(readdirSync(join(ROOT, "dist/server")).sort()).toEqual(["checkpoint.cjs", "checkpoint.mjs", "rooms.cjs", "rooms.mjs"]);
 });

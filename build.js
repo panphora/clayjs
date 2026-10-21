@@ -91,6 +91,18 @@ async function emitStandalone() {
     // sortable.js handles both branches, so the warning carries no information.
     logOverride: { 'commonjs-variable-in-esm': 'silent' },
     metafile: true,
+    // Shiki's grammars would double the file, so code blocks stay uncoloured here
+    // and the CDN build keeps loading colours on demand.
+    plugins: [{
+      name: 'no-shiki',
+      setup(build) {
+        build.onResolve({ filter: /vendor\/shiki\/shiki\.vendor\.js$/ }, () => ({ path: 'shiki', namespace: 'no-shiki' }));
+        build.onLoad({ filter: /.*/, namespace: 'no-shiki' }, () => ({
+          contents: 'export const codeToTokensBase = (code) => code.split("\\n").map((content) => [{ content }]);',
+          loader: 'js',
+        }));
+      },
+    }],
     banner: {
       js: `/* clayjs ${pkg.version} standalone build: every clayjs module in one file. https://clayjs.com/offline\n` +
         `   Third-party code inside keeps its own license (Sortable MIT, Squire MIT, DOMPurify Apache-2.0 OR MPL-2.0, MicroModal MIT, parse5 MIT): https://clayjs.com/THIRD-PARTY-NOTICES.md */`,

@@ -67,8 +67,7 @@ export function startPageView(doc = document) {
     const tag = source.querySelector('script[type="application/json"][merge="page"]');
     if (!tag) return null;
     const value = JSON.parse(tag.textContent);
-    const decoder = "./ybind/external.js";
-    const { readYValue } = await import(decoder);
+    const { readYValue } = await import("./ybind/external.js");
     const { blocks } = await readYValue(value);
     const stateTag = source.querySelector('script[type="application/json"][merge="page.tools"]');
     const state = stateTag ? JSON.parse(stateTag.textContent) : {};

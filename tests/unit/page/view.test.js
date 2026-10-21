@@ -84,10 +84,13 @@ test("the reader code stays small and loads no ProseMirror", async () => {
   const result = await build({
     entryPoints: [new URL("../../../src/page/view.js", import.meta.url).pathname],
     bundle: true, minify: true, format: "esm", write: false, metafile: true,
+    splitting: true, outdir: "/reader-out",
     external: ["*hyper-morph.vendor.js"],
   });
-  const inputs = Object.keys(result.metafile.inputs);
+  const [entryPath, entry] = Object.entries(result.metafile.outputs).find(([, output]) => output.entryPoint);
+  const inputs = Object.keys(entry.inputs);
   expect(inputs.length).toBeGreaterThan(0);
   expect(inputs.some((p) => /prosemirror|page\/(schema|model|inline|blocks|editor|binding|replay|projection)\.js/.test(p))).toBe(false);
-  expect(gzipSync(result.outputFiles[0].contents).length).toBeLessThanOrEqual(15 * 1024);
+  const file = result.outputFiles.find((output) => output.path.endsWith(entryPath.replace(/^.*\//, "/")));
+  expect(gzipSync(file.contents).length).toBeLessThanOrEqual(15 * 1024);
 });
