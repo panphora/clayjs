@@ -17,6 +17,9 @@ import { blockSelectionPlugin } from "./blocksel.js";
 import { markdownPlugin, backspaceToParagraph } from "./markdown.js";
 import { mediaPlugin, ImageView, FileView } from "./media.js";
 import { highlightPlugin, CodeBlockView } from "./highlight.js";
+import { tableKeys, tablePlugin, TableView, TableCellView } from "./table.js";
+import { checklistPlugin, checklistKeys } from "./checklist.js";
+import { csvImportPlugin } from "./csv-import.js";
 import { styleWithLegacyId } from "../lib/style.js";
 
 const STYLE_ID = "page-editor-style";
@@ -172,6 +175,24 @@ ${INDENTS.map((n) => `.page-editor .page-li[data-indent="${n}"] { --li-indent: $
 .page-upload[data-state="error"] .page-upload-msg { color: var(--page-danger, #9E3B2F); }
 .page-upload-btn { border: 0; padding: 4px 8px; border-radius: 6px; background: none; color: inherit; font: inherit; cursor: pointer; }
 .page-upload-btn:hover { background: var(--page-pop-hover); }
+.page-csv-error { margin: 8px 0; color: var(--page-danger); font-size: 14px; }
+.page-editor .page-table { max-width: 100%; min-width: 0; border: 1px solid var(--page-rule); border-radius: 8px; }
+.page-table-scroll { max-width: 100%; overflow-x: auto; }
+.page-table table { border-collapse: collapse; min-width: max-content; width: 100%; table-layout: auto; }
+.page-table th, .page-table td { min-width: 120px; padding: 6px 10px; border-inline-end: 1px solid var(--page-rule); border-block-end: 1px solid var(--page-rule); text-align: start; white-space: pre-wrap; }
+.page-table th { background: var(--page-code-bg); color: var(--page-ink-soft); font-weight: 600; }
+.page-table th[data-kind="number"], .page-table td[data-kind="number"] { text-align: end; }
+.page-table th[aria-sort="ascending"] button::after { content: " ↑"; }
+.page-table th[aria-sort="descending"] button::after { content: " ↓"; }
+.page-table th button, .page-table-row-menu, .page-check-chip { border: 0; border-radius: 5px; background: none; color: inherit; font: inherit; cursor: pointer; }
+.page-table th button:hover, .page-table-row-menu:hover, .page-check-chip:hover { background: var(--page-pop-hover); }
+.page-table-row-menu { opacity: 0; font-size: 12px; color: var(--page-ink-soft); }
+.page-table tr:hover .page-table-row-menu, .page-table tr:focus-within .page-table-row-menu, .page-table-row-menu:focus-visible { opacity: 1; }
+.page-check-controls { display: inline-flex; gap: 4px; margin-inline-start: 8px; color: var(--page-ink-soft); font-size: 0.78em; text-decoration: none; }
+.page-check-controls[data-empty="true"] { opacity: 0; }
+.page-li:hover .page-check-controls, .page-li:focus-within .page-check-controls { opacity: 1; }
+.page-check-popup { display: inline-flex; gap: 4px; padding: 4px; background: var(--page-pop-bg); color: var(--page-pop-ink); border: 1px solid var(--page-pop-line); border-radius: var(--page-pop-radius); box-shadow: var(--page-pop-shadow); }
+.page-check-popup input { font: inherit; color: inherit; background: var(--page-pop-bg); border: 1px solid var(--page-pop-line); }
 .page-scrim { display: none; }
 .page-shell [hidden] { display: none !important; }
 
@@ -189,6 +210,7 @@ ${INDENTS.map((n) => `.page-editor .page-li[data-indent="${n}"] { --li-indent: $
   .page-link-btn, .page-upload-btn { min-width: 44px; height: 44px; }
   .page-image-frame { width: 100% !important; }
   .page-image-handle { display: none; }
+  .page-table th button, .page-table-row-menu, .page-check-chip, .page-check-popup button, .page-menu-item { min-height: 44px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .page-dock, .page-plus, .page-grip, .page-toggle-button, .page-image-handle, .page-upload-bar > span { transition: none; }
@@ -226,11 +248,16 @@ export function pagePlugins({ upload = defaultUpload, highlight, history: useHis
     blockSelectionPlugin(),
     markdownPlugin(),
     keymap.keymap(markKeys),
+    tableKeys,
+    checklistKeys,
     keymap.keymap(blockKeys),
     keymap.keymap(editKeys({ history: useHistory, undo, redo })),
     keymap.keymap(commands.baseKeymap),
     structurePlugin(),
     identityPlugin(),
+    tablePlugin(),
+    checklistPlugin(),
+    csvImportPlugin({ upload }),
     collapsePlugin(),
     mediaPlugin({ upload }),
     highlightPlugin(highlight),
@@ -283,6 +310,8 @@ export function createPageEditor(mount, { blocks = null, onChange = null, upload
       image: (node, v, getPos) => new ImageView(node, v, getPos),
       file: (node, v) => new FileView(node, v),
       code_block: (node, v, getPos) => new CodeBlockView(node, v, getPos),
+      table: (node, v, getPos) => new TableView(node, v, getPos),
+      table_cell: (node, v, getPos) => new TableCellView(node, v, getPos),
     },
     handleDOMEvents: {
       mousedown: checkboxClick,

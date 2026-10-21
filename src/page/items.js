@@ -8,6 +8,8 @@ import { isKey, keyBetween, newId } from "./model.js";
 import { outline, subtreeRange } from "./blocks.js";
 import { asStep } from "./blocksel.js";
 import { pickFiles, hostPlace } from "./media.js";
+import { makeTable, insertTableNode } from "./table.js";
+import { pickCsv } from "./csv-import.js";
 
 const { TextSelection } = state;
 const N = schema.nodes;
@@ -29,6 +31,8 @@ export const INSERT_ITEMS = [
   { key: "divider", label: "Divider", icon: "—", hint: "---", aliases: ["hr", "line", "separator", "rule"], insert: "divider" },
   { key: "image", label: "Image", icon: "▣", aliases: ["img", "picture", "photo"], insert: "image" },
   { key: "file", label: "File", icon: "⎘", aliases: ["upload", "attachment", "pdf"], insert: "file" },
+  { key: "table", label: "Table", icon: "▦", aliases: ["grid", "spreadsheet"], insert: "table" },
+  { key: "csv", label: "Import CSV…", icon: "⇧", aliases: ["comma separated", "import"], insert: "csv" },
 ];
 
 export const MENU_ITEMS = [...BLOCK_TYPES, ...INSERT_ITEMS];
@@ -128,6 +132,8 @@ export function rankItems(items, query) {
 export function runItem(view, item, index, remove = null) {
   const st = view.state;
   if (item.insert === "image" || item.insert === "file") return pickFiles(view, item.insert === "image" ? "image/*" : "", hostPlace(st, index), remove);
+  if (item.insert === "csv") return pickCsv(view, remove);
+  if (item.insert === "table") return insertTableNode(st, view.dispatch, makeTable(), remove);
   let tr = st.tr;
   if (remove) tr.delete(remove.from, remove.to);
   const node = tr.doc.child(index);

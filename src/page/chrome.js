@@ -185,6 +185,16 @@ function toolButton(name, label) {
 const MOVED_MS = 1600;
 let menuCount = 0;
 export const chromeKey = new PluginKey("page-chrome");
+const chromeFor = new WeakMap();
+
+export function openPageMenu(view, anchor, items) {
+  const chrome = chromeFor.get(view);
+  if (!chrome) return false;
+  chrome.openMenu("external", anchor);
+  chrome.menu.externalItems = items;
+  chrome.renderMenu();
+  return true;
+}
 
 class Chrome {
   constructor(view) {
@@ -227,6 +237,9 @@ class Chrome {
     this.menuEl.addEventListener("click", (e) => {
       const row = e.target.closest(".page-menu-item");
       if (row) this.pick(Number(row.dataset.index));
+    });
+    this.menuEl.addEventListener("keydown", (e) => {
+      if (this.key(e)) e.preventDefault();
     });
     this.onMove = (e) => {
       this.shell.classList.add("is-moved");
@@ -315,6 +328,7 @@ class Chrome {
   }
 
   menuItems(m) {
+    if (m.mode === "external") return m.externalItems || [];
     if (m.mode === "actions") return actionsFor(this.view.state);
     return rankItems(m.mode === "turn" ? BLOCK_TYPES : MENU_ITEMS, m.query);
   }
@@ -346,9 +360,9 @@ class Chrome {
     }
     m.items.forEach((b, i) => {
       const active = i === m.active;
-      const row = el("button", `page-menu-item${active ? " is-active" : ""}`, { type: "button", role: "menuitem", tabindex: "-1", id: `${this.menuId}-${i}`, "data-index": String(i), "aria-selected": active ? "true" : "false" });
+      const row = el("button", `page-menu-item${active ? " is-active" : ""}`, { type: "button", role: "menuitem", tabindex: m.mode === "external" ? "0" : "-1", id: `${this.menuId}-${i}`, "data-index": String(i), "aria-selected": active ? "true" : "false" });
       const icon = el("span", "page-menu-icon");
-      icon.textContent = b.icon;
+      icon.textContent = b.icon || "";
       const label = el("span", "page-menu-label");
       label.textContent = b.label;
       row.append(icon, label);
@@ -365,6 +379,7 @@ class Chrome {
     this.menuEl.hidden = false;
     this.scrim.hidden = false;
     this.place();
+    if (m.mode === "external") this.menuEl.querySelector("button")?.focus();
   }
 
   pick(i) {
@@ -382,7 +397,7 @@ class Chrome {
       } else tr = turnInto(st, this.blockIndex(), item);
       if (tr) this.view.dispatch(asStep(tr).scrollIntoView());
       this.view.focus();
-    } else if (m.mode === "actions") {
+    } else if (m.mode === "actions" || m.mode === "external") {
       item.run(this.view, this, m.index);
       if (!this.menu && item.focus !== false) this.view.focus();
     } else {
@@ -399,6 +414,7 @@ class Chrome {
       if (m.items.length) {
         m.active = (m.active + (event.key === "ArrowDown" ? 1 : -1) + m.items.length) % m.items.length;
         this.renderMenu();
+        if (m.mode === "external") this.menuEl.querySelectorAll("button")[m.active]?.focus();
       }
       return true;
     }
@@ -503,6 +519,7 @@ export function chromePlugin() {
     key: chromeKey,
     view(view) {
       chrome = new Chrome(view);
+      chromeFor.set(view, chrome);
       return chrome;
     },
     props: {
