@@ -1,6 +1,6 @@
-import { editor, select, key } from "./view-helpers.js";
+import { editor, select, key, posOf } from "./view-helpers.js";
 import { blockJson, orderedIds } from "../../../src/page/model.js";
-import { history } from "../../../src/vendor/prosemirror.vendor.js";
+import { history, state as pmState } from "../../../src/vendor/prosemirror.vendor.js";
 import { gridFromClipboard } from "../../../src/page/table-paste.js";
 
 const clip = (data) => ({ clipboardData: { files: [], getData: (type) => data[type] ?? "" }, preventDefault() {} });
@@ -99,4 +99,54 @@ test("pasting a rectangle into a cell overwrites from that cell, adds rows and d
   expect(paste(view, { "text/plain": "p\tP\nq\tQ\nr\tR" })).toBe(true);
   expect(grid(tableOf(view))).toEqual([["a1", "p"], ["a2", "q"], ["", "r"]]);
   expect(view.state.selection.$head.index(1)).toBe(2);
+});
+
+const kinds = (view) => { const out = []; view.state.doc.forEach((node) => out.push(node.type.name)); return out; };
+const texts = (view) => { const out = []; view.state.doc.forEach((node) => out.push(node.textContent)); return out; };
+const spec = (n) => Array.from({ length: n }, (_, i) => [`b${i}`, "paragraph", `block${i}`]);
+const tsv = { "text/plain": "X\tY\n1\t2" };
+
+test("select all and paste a two-line grid leaves one table, not a document of fragments", () => {
+  const view = editor(spec(4));
+  view.dispatch(view.state.tr.setSelection(new pmState.AllSelection(view.state.doc)));
+  expect(paste(view, tsv)).toBe(true);
+  expect(kinds(view).filter((name) => name === "table")).toHaveLength(1);
+  expect(kinds(view)[0]).toBe("table");
+  const table = tableOf(view);
+  expect(names(table)).toEqual(["X", "Y"]);
+  expect(grid(table)).toEqual([["1", "2"]]);
+});
+
+test("a forward selection across three paragraphs is replaced by the pasted table, unsplit", () => {
+  const view = editor(spec(5));
+  select(view, posOf(view, "b0"), posOf(view, "b2", true));
+  expect(paste(view, tsv)).toBe(true);
+  expect(kinds(view)).toEqual(["table", "paragraph", "paragraph"]);
+  expect(texts(view).slice(1)).toEqual(["block3", "block4"]);
+  expect(grid(tableOf(view))).toEqual([["1", "2"]]);
+});
+
+test("tab-indented code pasted into a code block is left to the editor", () => {
+  const view = editor([["c1", "code_block", "x"]]);
+  select(view, posOf(view, "c1") + 1);
+  expect(paste(view, { "text/plain": "function f() {\n\treturn 1;\n}" })).toBe(false);
+  expect(kinds(view)).toEqual(["code_block"]);
+});
+
+test("a lone tab-separated line with no HTML is left to the editor", () => {
+  const view = editor([["p1", "paragraph", "Note"]]);
+  select(view, posOf(view, "p1") + 4);
+  expect(paste(view, { "text/plain": "Total:\t42" })).toBe(false);
+  expect(kinds(view)).toEqual(["paragraph"]);
+  expect(texts(view)).toEqual(["Note"]);
+});
+
+test("the same lone line with a one-row HTML table makes a table", () => {
+  const view = editor([["p1", "paragraph", "Note"]]);
+  select(view, posOf(view, "p1") + 4);
+  expect(paste(view, { "text/html": "<table><tr><td>Total:</td><td>42</td></tr></table>", "text/plain": "Total:\t42" })).toBe(true);
+  expect(kinds(view)).toContain("table");
+  const table = tableOf(view);
+  expect(names(table)).toEqual(["Column 1", "Column 2"]);
+  expect(grid(table)).toEqual([["Total:", "42"]]);
 });

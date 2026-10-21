@@ -34,6 +34,17 @@ const validValue = (field, value) => {
   return typeof value === "string";
 };
 
+// Peers can each delete a different last column or row; a table must keep one,
+// so the first removed one by position stays until someone edits the table.
+function keepOne(live, dead) {
+  if (Object.keys(live).length) return;
+  const [first] = Object.keys(dead).sort((x, y) => {
+    const px = dead[x].pos ?? "", py = dead[y].pos ?? "";
+    return px !== py ? (px < py ? -1 : 1) : x < y ? -1 : x > y ? 1 : 0;
+  });
+  if (first) live[first] = dead[first];
+}
+
 export function resolveTableFields(fields, blockId = null, seed = null) {
   const rows = new Map(), cols = new Map(), cells = new Map();
   for (const [key, value] of fields) {
@@ -59,8 +70,8 @@ export function resolveTableFields(fields, blockId = null, seed = null) {
   }
   const outCols = { ...(record(seed?.cols) ? seed.cols : {}) };
   const outRows = { ...(record(seed?.rows) ? seed.rows : {}) };
+  const deadCols = {}, deadRows = {};
   for (const [id, over] of cols) {
-    if (over.alive === false || (!Object.hasOwn(outCols, id) && over.alive !== true)) { delete outCols[id]; continue; }
     const col = record(outCols[id]) ? { ...outCols[id] } : {};
     if (!Object.hasOwn(col, "pos")) col.pos = "";
     if (!Object.hasOwn(col, "name")) col.name = "";
@@ -69,17 +80,28 @@ export function resolveTableFields(fields, blockId = null, seed = null) {
       if (over[field] === null) delete col[field];
       else col[field] = over[field];
     }
+    if (over.alive === false || (!Object.hasOwn(outCols, id) && over.alive !== true)) {
+      if (over.alive === false) deadCols[id] = col;
+      delete outCols[id];
+      continue;
+    }
     outCols[id] = col;
   }
   for (const id of new Set([...rows.keys(), ...cells.keys()])) {
     const over = rows.get(id) ?? {};
-    if (over.alive === false || (!Object.hasOwn(outRows, id) && over.alive !== true)) { delete outRows[id]; continue; }
     const row = { pos: "", cells: {}, ...(record(outRows[id]) ? outRows[id] : {}) };
     if (Object.hasOwn(over, "pos")) row.pos = over.pos;
     const own = cells.get(id);
     if (own) row.cells = { ...(record(row.cells) ? row.cells : {}), ...Object.fromEntries([...own].map(([colId, value]) => [colId, copy(value)])) };
+    if (over.alive === false || (!Object.hasOwn(outRows, id) && over.alive !== true)) {
+      if (over.alive === false) deadRows[id] = row;
+      delete outRows[id];
+      continue;
+    }
     outRows[id] = row;
   }
+  keepOne(outCols, deadCols);
+  keepOne(outRows, deadRows);
   return { cols: outCols, rows: outRows };
 }
 
@@ -105,7 +127,7 @@ export function tableChanges(tableId, fields, seed, before, after) {
       if (old) push(tableKey(tableId, "col", id, "alive"), false);
       continue;
     }
-    if (!old) push(tableKey(tableId, "col", id, "alive"), true);
+    if (!old || stored(tableKey(tableId, "col", id, "alive"), true) === false) push(tableKey(tableId, "col", id, "alive"), true);
     for (const field of COL_FIELDS) {
       const key = tableKey(tableId, "col", id, field);
       const prior = old ? fieldOf(old, field) : stored(key, fieldOf(seed?.cols?.[id], field));
@@ -118,7 +140,7 @@ export function tableChanges(tableId, fields, seed, before, after) {
       if (old) push(tableKey(tableId, "row", id, "alive"), false);
       continue;
     }
-    if (!old) push(tableKey(tableId, "row", id, "alive"), true);
+    if (!old || stored(tableKey(tableId, "row", id, "alive"), true) === false) push(tableKey(tableId, "row", id, "alive"), true);
     const posKey = tableKey(tableId, "row", id, "pos");
     const pos = next.pos ?? "";
     if (stored(posKey, seed?.rows?.[id]?.pos ?? "") !== pos) push(posKey, pos);

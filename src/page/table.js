@@ -1,6 +1,7 @@
 import { state, keymap } from "../vendor/prosemirror.vendor.js";
 import { schema } from "./schema.js";
 import { keyBetween, keysBetween, newId, orderedIds, cellContent } from "./model.js";
+import { slotKey } from "./ybind/board-commands.js";
 import { parseDecimal, COLUMN_KINDS } from "./rich/csv.js";
 import { columnKinds, KIND_ICONS, KIND_LABELS } from "./table-kinds.js";
 import { asStep } from "./blocksel.js";
@@ -156,7 +157,7 @@ export const addColumn = (after = true) => (st, dispatch) => changeTable(st, dis
   const ids = columns(table);
   const index = found.cell + (after ? 1 : 0);
   const id = newId("c");
-  const cols = { ...table.attrs.cols, [id]: { pos: keyBetween(table.attrs.cols[ids[index - 1]]?.pos ?? null, table.attrs.cols[ids[index]]?.pos ?? null), name: `Column ${ids.length + 1}` } };
+  const cols = { ...table.attrs.cols, [id]: { pos: slotKey(ids.map((col) => table.attrs.cols[col]?.pos ?? ""), index), name: `Column ${ids.length + 1}` } };
   const rows = table.content.content.map((row) => {
     const cells = [...row.content.content];
     cells.splice(index, 0, N.table_cell.create({ col: id }));
@@ -192,7 +193,7 @@ export const moveColumn = (delta) => (st, dispatch) => changeTable(st, dispatch,
   const order = [...ids];
   const [id] = order.splice(found.cell, 1);
   order.splice(to, 0, id);
-  const pos = keyBetween(table.attrs.cols[order[to - 1]]?.pos ?? null, table.attrs.cols[order[to + 1]]?.pos ?? null);
+  const pos = slotKey(order.filter((col) => col !== id).map((col) => table.attrs.cols[col]?.pos ?? ""), to);
   const cols = { ...table.attrs.cols, [id]: { ...table.attrs.cols[id], pos } };
   const rows = table.content.content.map((row) => {
     const cells = [...row.content.content];
@@ -274,6 +275,7 @@ export function pasteTable(view, event) {
   const data = event.clipboardData;
   if (!data || data.files?.length) return false;
   const st = view.state;
+  if (st.selection.$from.parent.type.spec.code) return false;
   const rect = rectTopLeft(st);
   const text = data.getData("text/plain").replace(/\r?\n$/, "");
   const found = gridFromClipboard(data.getData("text/html"), data.getData("text/plain"), view.dom.ownerDocument)
@@ -288,13 +290,18 @@ export function pasteTable(view, event) {
     return pasteGrid(found.grid)(st, view.dispatch);
   }
   if (found.width * found.height < 2) return false;
+  if (found.height < 2 && !/<table[\s>]/i.test(data.getData("text/html"))) return false;
   const table = tableFromGrid(found.grid, { header: !found.own && found.height > 1 });
   if (!table) return false;
   if (tableSize(table) > TABLE_IMPORT_LIMIT) {
     toast("This paste is too large for one table.", "error");
     return true;
   }
-  const { from, to, empty } = st.selection;
+  const { from, to, empty, $from, $to } = st.selection;
+  if (!empty && $from.index(0) !== $to.index(0)) {
+    view.dispatch(st.tr.deleteSelection());
+    return insertTableNode(view.state, view.dispatch, table);
+  }
   return insertTableNode(st, view.dispatch, table, empty ? null : { from, to });
 }
 
