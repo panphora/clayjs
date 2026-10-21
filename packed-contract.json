@@ -12,7 +12,8 @@
     "@panphora/clayjs/entries/clay-utils.js",
     "@panphora/clayjs/entries/sap.js",
     "@panphora/clayjs/clay.standalone.js",
-    "@panphora/clayjs/server/rooms"
+    "@panphora/clayjs/server/rooms",
+    "@panphora/clayjs/page/yjs"
   ],
   "members": [
     "THIRD-PARTY-NOTICES.md",

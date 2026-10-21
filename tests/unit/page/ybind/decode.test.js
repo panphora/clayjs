@@ -6,6 +6,7 @@ import { marksOf } from "../../../../src/page/inline.js";
 import { ATOM, BREAK, DEFAULTS, orderedIds, unitsOf, runsOf, project, renderModel } from "../../../../src/page/projection.js";
 import { blocksFromYValue, createPageDoc, walk, docOf } from "../../../../src/page/ybind/core.js";
 import { yValueOf, docFromValue, YDecodeError } from "../../../../src/page/ybind/provider.js";
+import { boardKey } from "../../../../src/page/ybind/board.js";
 import { RECORD } from "../fixtures/all-kinds.js";
 
 let docs;
@@ -20,8 +21,19 @@ function fixture(record = RECORD) {
   pd.ydoc.transact(() => {
     for (const id of orderedIds(record.blocks).filter((id) => !record.deleted?.[id])) {
       const { pos, w, c, m, ...fields } = clone(record.blocks[id]);
-      const attrs = new Y.Map(Object.entries(fields));
+      const attrs = new Y.Map(Object.entries(fields).filter(([key]) => fields.t !== "board" || key !== "columns" && key !== "cards"));
       pd.attrs.set(id, attrs);
+      if (fields.t === "board") {
+        for (const [columnId, column] of Object.entries(fields.columns ?? {})) {
+          pd.boardFields.set(boardKey(id, "column", columnId, "alive"), true);
+          for (const key of ["name", "pos"]) pd.boardFields.set(boardKey(id, "column", columnId, key), column[key]);
+        }
+        for (const [cardId, card] of Object.entries(fields.cards ?? {})) {
+          pd.boardFields.set(boardKey(id, "card", cardId, "alive"), true);
+          for (const key of ["title", "owner", "due"]) if (card[key] !== undefined) pd.boardFields.set(boardKey(id, "card", cardId, key), card[key]);
+          pd.boardFields.set(boardKey(id, "card", cardId, "placement"), { columnId: card.col, pos: card.pos });
+        }
+      }
       pd.flow.insertEmbed(pd.flow.length, { b: id }, {});
       if (c) {
         const units = unitsOf(m, c.length) ?? Array(c.length).fill("");
@@ -71,6 +83,42 @@ test("covers file blocks, every supported top-level type, and UTF-16 mark length
   expect(new Set(Object.values(actual).map((block) => block.t))).toEqual(new Set(Object.keys(DEFAULTS)));
   expect(actual).toEqual(expected);
   expect(actual.unicode).toMatchObject({ c: "😀\uFFFC", m: [[2, "s"], [1, ""]] });
+});
+
+test("resolves board fields in the editor and decoder, including hidden and missing-column cards", () => {
+  const { pd } = fixture();
+  pd.boardFields.set(boardKey("bd", "card", "c", "alive"), false);
+  pd.boardFields.set(boardKey("bd", "card", "b", "placement"), { columnId: "lost", pos: "2" });
+  const board = blocksFromYValue(yValueOf(pd.ydoc)).bd;
+  const projected = docOf(pd, walk(pd)).child(24).attrs;
+  expect(board.columns).toEqual(RECORD.blocks.bd.columns);
+  expect(board.cards).toEqual({ a: RECORD.blocks.bd.cards.a, b: { ...RECORD.blocks.bd.cards.b, col: "lost" } });
+  expect(projected.columns).toEqual(board.columns);
+  expect(projected.cards).toEqual(board.cards);
+  expect(renderModel(project({ bd: board }))).toContain("data-missing");
+});
+
+test("refuses nonempty unknown roots and ignores empty unknown roots", () => {
+  const { pd } = fixture({ blocks: { p: { t: "paragraph", pos: "1", c: "text" } } });
+  pd.ydoc.getMap("future");
+  expect(blocksFromYValue(yValueOf(pd.ydoc)).p.c).toBe("text");
+  pd.ydoc.getMap("future").set("payload", true);
+  expect(() => blocksFromYValue(yValueOf(pd.ydoc))).toThrow(expect.objectContaining({ code: "unsupported-content" }));
+  pd.ydoc.getMap("future").delete("payload");
+  expect(blocksFromYValue(yValueOf(pd.ydoc)).p.c).toBe("text");
+});
+
+test.each([
+  ["not JSON", "broken", true],
+  ["wrong tuple length", '["bd","card","a"]', true],
+  ["unknown field", boardKey("bd", "card", "a", "future"), true],
+  ["unknown entity kind", boardKey("bd", "widget", "a", "title"), "x"],
+  ["wrong alive value", boardKey("bd", "card", "a", "alive"), "yes"],
+  ["wrong placement", boardKey("bd", "card", "a", "placement"), { columnId: "k1", pos: 2 }],
+])("refuses malformed board field: %s", (_, key, value) => {
+  const { pd } = fixture();
+  pd.boardFields.set(key, value);
+  expect(() => blocksFromYValue(yValueOf(pd.ydoc))).toThrow(expect.objectContaining({ code: "unsupported-content" }));
 });
 
 test("runs the exported decoder in a fresh Node process without a DOM", () => {

@@ -21,7 +21,7 @@ const fresh = () => { const pd = createPageDoc(); pd.ydoc.clientID = 7; return p
 test("layout", () => {
   const pd = createPageDoc();
   expect(pd.flow).toBeInstanceOf(Y.Text);
-  for (const k of ["attrs", "gone"]) expect(pd[k]).toBeInstanceOf(Y.Map);
+  for (const k of ["attrs", "gone", "boardFields"]) expect(pd[k]).toBeInstanceOf(Y.Map);
   expect(pd.ydoc).toBeInstanceOf(Y.Doc);
   const a = mintId(pd), b = mintId(pd);
   expect(a).not.toBe(b);

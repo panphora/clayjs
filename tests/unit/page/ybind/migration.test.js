@@ -4,7 +4,7 @@ import * as Y from "../../../../src/vendor/yjs.vendor.js";
 import { migrateHybridValues, YMigrationError } from "../../../../src/page/ybind/migrate.js";
 import { blocksFromYValue } from "../../../../src/page/ybind/decode.js";
 import { createPageDoc, mintOp, mintId } from "../../../../src/page/ybind/layout.js";
-import { entriesOf, dec, yValueOf, PART } from "../../../../src/page/ybind/provider.js";
+import { entriesOf, dec, yValueOf, docFromValue, PART } from "../../../../src/page/ybind/provider.js";
 import { seedValue } from "../../../../src/page/ybind/seed.js";
 import { orderedIds, project, renderModel } from "../../../../src/page/projection.js";
 import { RECORD } from "../fixtures/all-kinds.js";
@@ -24,6 +24,14 @@ test("preserves every visible block, its formatting and non-text payloads", () =
   expect(Object.keys(blocks)).toHaveLength(28);
   expect(blocks).toEqual(expected);
   expect(blocks.tbl.rows).toEqual(RECORD.blocks.tbl.rows);
+  const doc = docFromValue(value, { strict: true });
+  try {
+    expect(doc.getMap("attrs").get("bd").has("columns")).toBe(false);
+    expect(doc.getMap("attrs").get("bd").has("cards")).toBe(false);
+    expect(doc.getMap("boardFields").get('["bd","card","a","title"]')).toBe("Sample inbox");
+    expect(blocks.bd.columns).toEqual(RECORD.blocks.bd.columns);
+    expect(blocks.bd.cards).toEqual(RECORD.blocks.bd.cards);
+  } finally { doc.destroy(); }
   expect(blocks.tool).toMatchObject({ artifact: RECORD.blocks.tool.artifact, rev: "r1", state: { n: 1 } });
   expect(renderModel(project(blocks))).toBe(renderModel(project(expected)));
   expect(JSON.stringify(RECORD)).toBe(before);

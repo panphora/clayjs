@@ -34,6 +34,7 @@
     "./entries/*": "./entries/*",
     "./clay.standalone.js": "./dist/clay.standalone.js",
     "./tailwind": "./src/tailwind.js",
+    "./page/yjs": "./src/page/ybind/external.js",
     "./dist/*": "./dist/*",
     "./server/rooms": {
       "import": "./dist/server/rooms.mjs",
