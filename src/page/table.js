@@ -4,6 +4,7 @@ import { keyBetween, keysBetween, newId, orderedIds } from "./model.js";
 import { parseDecimal } from "./rich/csv.js";
 import { asStep } from "./blocksel.js";
 import { openPageMenu } from "./chrome.js";
+import { insertChartAfterTable } from "./chart.js";
 import { REMOTE_META } from "./ybind/layout.js";
 
 const { Plugin, TextSelection } = state;
@@ -296,6 +297,7 @@ export class TableView {
           { label: "Kind ▸", run: () => openPageMenu(this.view, control, ["text", "number", "date"].map((kind) => ({ label: kind[0].toUpperCase() + kind.slice(1), run: run(setColumnKind(colId, kind)) }))), focus: false },
           { label: "Sort ascending", run: run(sortBy(colId, "asc")) },
           { label: "Sort descending", run: run(sortBy(colId, "desc")) },
+          { label: "Chart this table", run: () => insertChartAfterTable(this.view, this.getPos()) },
           { label: "Insert column left", run: run(addColumn(false)) },
           { label: "Insert column right", run: run(addColumn(true)) },
           { label: "Delete column", run: run(deleteColumn) },

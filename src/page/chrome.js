@@ -360,7 +360,7 @@ class Chrome {
     }
     m.items.forEach((b, i) => {
       const active = i === m.active;
-      const row = el("button", `page-menu-item${active ? " is-active" : ""}`, { type: "button", role: "menuitem", tabindex: m.mode === "external" ? "0" : "-1", id: `${this.menuId}-${i}`, "data-index": String(i), "aria-selected": active ? "true" : "false" });
+      const row = el("button", `page-menu-item${active ? " is-active" : ""}`, { type: "button", role: typeof b.checked === "boolean" ? "menuitemcheckbox" : "menuitem", tabindex: m.mode === "external" ? "0" : "-1", id: `${this.menuId}-${i}`, "data-index": String(i), "aria-selected": active ? "true" : "false", ...(typeof b.checked === "boolean" ? { "aria-checked": String(b.checked) } : {}) });
       const icon = el("span", "page-menu-icon");
       icon.textContent = b.icon || "";
       const label = el("span", "page-menu-label");

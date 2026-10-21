@@ -8,6 +8,7 @@
 // defaults left out exactly as model.js blockJson leaves them out, with marks
 // as runs, and with tables and boards holding ordered arrays instead of
 // pos-keyed maps. parse(render(blocks)) equals project(blocks) for every kind.
+import { chartModel, renderChartSvg } from "./rich/chart.js";
 
 export const ATOM = "￼";
 export const BREAK = '@{"type":"hard_break"}';
@@ -321,7 +322,7 @@ export function renderInline(c, m) {
 const inlineOf = (item) => renderInline(item.c ?? "", item.m);
 const dataAttrs = (obj) => Object.entries(obj).map(([k, v]) => attr(`data-${k}`, v)).join("");
 
-function renderLeaf(item, clean) {
+function renderLeaf(item, clean, tables) {
   const id = attr("data-id", item.id);
   switch (item.t) {
     case "paragraph": return `<p${id}>${inlineOf(item)}</p>`;
@@ -341,7 +342,8 @@ function renderLeaf(item, clean) {
     }
     case "chart": {
       const data = dataAttrs({ source: item.source ?? null, kind: item.kind ?? null, x: item.x ?? null, series: item.series ? JSON.stringify(item.series) : null, highlight: item.highlight ?? null });
-      return `<figure${id} data-type="chart"${data}>${item.title ? `<figcaption>${escText(item.title)}</figcaption>` : ""}</figure>`;
+      const chart = chartModel({ id: item.id, type: item.kind ?? "line", x: item.x, series: item.series ?? [], title: item.title ?? "", highlight: item.highlight }, tables.get(item.source));
+      return `<figure${id} data-type="chart"${data}>${renderChartSvg(chart, { width: 640, height: 320 })}<figcaption>${escText(item.title ?? "")}</figcaption></figure>`;
     }
     case "board": {
       const cols = [...item.columns.map((c) => ({ ...c, known: true })), ...[...new Set(item.cards.map((k) => k.col))].filter((col) => !item.columns.some((c) => c.id === col)).map((col) => ({ id: col, known: false }))];
@@ -388,6 +390,7 @@ export function fragmentCleaner(doc) {
 // (whitespace inside an <li> would be text). Tool fallbacks come from fallbackOf(id).
 export function renderModel(model, { fallbackOf = () => "", clean = RAW } = {}) {
   const lines = [];
+  const tables = new Map(model.filter((item) => item.t === "table").map((item) => [item.id, item]));
   const stack = [null];
   const lists = [];
   const add = (s) => { if (lists.length) lines[lines.length - 1] += s; else lines.push(s); };
@@ -415,7 +418,7 @@ export function renderModel(model, { fallbackOf = () => "", clean = RAW } = {}) 
       continue;
     }
     if (item.t === "tool") { add(`<section${attr("data-id", item.id)} data-type="tool">${clean.fallback(fallbackOf(item.id))}</section>`); continue; }
-    add(renderLeaf(item, clean));
+    add(renderLeaf(item, clean, tables));
   }
   closeLists();
   while (stack.length > 1) { add("</details>"); stack.pop(); }

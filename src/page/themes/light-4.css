@@ -3,6 +3,13 @@
 /* Light 4: warm paper, compact Inter with small 14px section heads, amber selection and frosted faint chrome, from the Gemini Argon bake-off seat. */
 
 .page-shell {
+  --chart-1: #8A6A2E;
+  --chart-2: #6d4e0b;
+  --chart-3: #6E6A62;
+  --chart-4: #2B2926;
+  --chart-5: #9B968C;
+  --chart-6: #3B3833;
+  --chart-text: #2B2926;
   --page-bg: #FAF8F4;
   --page-ink: #2B2926;
   --page-ink-strong: #1E1D1A;
@@ -72,6 +79,9 @@
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
+
+article[data-page] figure[data-type="chart"] { --chart-1: #8A6A2E; --chart-2: #6d4e0b; --chart-3: #6E6A62; --chart-4: #2B2926; --chart-5: #9B968C; --chart-6: #3B3833; --chart-text: #2B2926; max-width: 100%; }
+article[data-page] figure[data-type="chart"] > svg { display: block; width: 100%; height: auto; color: var(--chart-text); font: 12px Inter, sans-serif; }
 
 .page-shell .page-editor {
   letter-spacing: -0.006em;

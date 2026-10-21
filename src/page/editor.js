@@ -18,6 +18,7 @@ import { markdownPlugin, backspaceToParagraph } from "./markdown.js";
 import { mediaPlugin, ImageView, FileView } from "./media.js";
 import { highlightPlugin, CodeBlockView } from "./highlight.js";
 import { tableKeys, tablePlugin, TableView, TableCellView } from "./table.js";
+import { chartPlugin, ChartView } from "./chart.js";
 import { checklistPlugin, checklistKeys } from "./checklist.js";
 import { csvImportPlugin } from "./csv-import.js";
 import { styleWithLegacyId } from "../lib/style.js";
@@ -51,11 +52,13 @@ const DARK = `
   --page-pop-bg: #222220; --page-pop-ink: #E7E4DC; --page-pop-muted: #A3A098; --page-pop-line: rgba(231, 228, 220, 0.10);
   --page-pop-shadow: 0 1px 2px rgba(10, 10, 9, 0.3), 0 10px 28px rgba(10, 10, 9, 0.35); --page-pop-hover: rgba(231, 228, 220, 0.07);
   --page-scrim: rgba(10, 10, 9, 0.35);
-  --page-danger: #E08A7A; --page-block-selected: rgba(120, 155, 210, 0.18);`;
+  --page-danger: #E08A7A; --page-block-selected: rgba(120, 155, 210, 0.18);
+  --chart-1: #8DB0E6; --chart-2: #D9A0C8; --chart-3: #A9C98B; --chart-4: #BBA6E6; --chart-5: #E0B47A; --chart-6: #A3A098;`;
 
 export const PAGE_EDITOR_CSS = `
 @layer page {
 :where(.page-shell) {${LIGHT}
+  --chart-1: #2F5E9E; --chart-2: #164583; --chart-3: #5B5953; --chart-4: #8A3B6E; --chart-5: #3E6A28; --chart-6: #8A5A1E;
   --page-ink-strong: var(--page-ink); --page-caret: var(--page-accent);
   --page-font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; --page-font-display: var(--page-font); --page-font-heading: var(--page-font);
   --page-font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
@@ -177,6 +180,11 @@ ${INDENTS.map((n) => `.page-editor .page-li[data-indent="${n}"] { --li-indent: $
 .page-upload-btn:hover { background: var(--page-pop-hover); }
 .page-csv-error { margin: 8px 0; color: var(--page-danger); font-size: 14px; }
 .page-editor .page-table { max-width: 100%; min-width: 0; border: 1px solid var(--page-rule); border-radius: 8px; }
+.page-editor .page-chart { position: relative; max-width: 100%; min-width: 0; margin-inline: 0; color: var(--page-ink); }
+.page-chart-plot svg { display: block; width: 100%; height: auto; color: var(--chart-text, var(--page-ink-soft)); font: 12px var(--page-font); }
+.page-chart figcaption { color: var(--page-ink-soft); font-size: 0.88em; text-align: center; }
+.page-chart-settings { display: block; margin: 8px auto 0; padding: 4px 10px; border: 1px solid var(--page-rule); border-radius: 6px; background: var(--page-pop-bg); color: var(--page-ink); font: inherit; cursor: pointer; }
+.page-chart-title-input { display: block; width: min(100%, 24em); box-sizing: border-box; margin: 6px auto; padding: 4px 8px; border: 1px solid var(--page-rule); border-radius: 6px; background: var(--page-pop-bg); color: var(--page-ink); font: inherit; }
 .page-table-scroll { max-width: 100%; overflow-x: auto; }
 .page-table table { border-collapse: collapse; min-width: max-content; width: 100%; table-layout: auto; }
 .page-table th, .page-table td { min-width: 120px; padding: 6px 10px; border-inline-end: 1px solid var(--page-rule); border-block-end: 1px solid var(--page-rule); text-align: start; white-space: pre-wrap; }
@@ -256,6 +264,7 @@ export function pagePlugins({ upload = defaultUpload, highlight, history: useHis
     structurePlugin(),
     identityPlugin(),
     tablePlugin(),
+    chartPlugin(),
     checklistPlugin(),
     csvImportPlugin({ upload }),
     collapsePlugin(),
@@ -311,6 +320,7 @@ export function createPageEditor(mount, { blocks = null, onChange = null, upload
       file: (node, v) => new FileView(node, v),
       code_block: (node, v, getPos) => new CodeBlockView(node, v, getPos),
       table: (node, v, getPos) => new TableView(node, v, getPos),
+      chart: (node, v, getPos) => new ChartView(node, v, getPos),
       table_cell: (node, v, getPos) => new TableCellView(node, v, getPos),
     },
     handleDOMEvents: {

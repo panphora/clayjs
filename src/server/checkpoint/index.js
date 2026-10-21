@@ -70,7 +70,7 @@ function projection(capture) {
   if (!page || capture.stores.some((store) => PAGE.test(store.name) && store.name !== 'page')) return { kind: 'refused', reason: 'invalid-document' };
   try {
     const blocks = blocksFromYValue(page.value);
-    if (Object.values(blocks).some((block) => ['table', 'chart', 'tool'].includes(block.t))) {
+    if (Object.values(blocks).some((block) => block.t === 'tool' || (block.t === 'table' && !Object.keys(block.cols ?? {}).length))) {
       return { kind: 'refused', reason: 'unsupported-projection' };
     }
     return { kind: 'ok', blocks };

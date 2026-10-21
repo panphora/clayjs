@@ -1,6 +1,13 @@
 /* Light 3: sage-grey paper with a Georgia title, quiet green-grey chrome and soft wash highlights, from the Codex bake-off seat. */
 
 .page-shell {
+  --chart-1: #3c5039;
+  --chart-2: #303931;
+  --chart-3: #727c70;
+  --chart-4: #495048;
+  --chart-5: #8c9187;
+  --chart-6: #c9cdbe;
+  --chart-text: #495048;
   --page-bg: #f8f7f3;
   --page-ink: #495048;
   --page-ink-strong: #303931;
@@ -65,6 +72,9 @@
   --page-bar-ink: #727c70;
   --page-scrim: rgba(36, 44, 32, 0.12);
 }
+
+article[data-page] figure[data-type="chart"] { --chart-1: #3c5039; --chart-2: #303931; --chart-3: #727c70; --chart-4: #495048; --chart-5: #8c9187; --chart-6: #c9cdbe; --chart-text: #495048; max-width: 100%; }
+article[data-page] figure[data-type="chart"] > svg { display: block; width: 100%; height: auto; color: var(--chart-text); font: 12px system-ui, sans-serif; }
 
 .page-shell .page-editor { letter-spacing: 0.002em; }
 .page-shell .page-editor h1 { margin-block: 0 0.74em; }

@@ -15,6 +15,7 @@ import { boardKey } from '../../src/page/ybind/board.js';
 import { createPageDoc } from '../../src/page/ybind/layout.js';
 import { seedValue } from '../../src/page/ybind/seed.js';
 import { docFromValue, enc, yValueOf } from '../../src/page/ybind/provider.js';
+import { chartModel, renderChartSvg } from '../../src/page/rich/chart.js';
 
 const tag = (name, value, ephemeral = false) =>
   `<script type="application/json" clay="live${ephemeral ? ' ephemeral' : ''}" merge="${name}">${serializeLive(value)}</script>`;
@@ -150,6 +151,24 @@ test('refuses unknown page content and table projection', () => {
   expect(roomOf(bad).render()).toEqual({ kind: 'refused', reason: 'unknown-page-content' });
   const table = seedValue([{ id: 't', t: 'table' }]);
   expect(roomOf(table).render()).toEqual({ kind: 'refused', reason: 'unsupported-projection' });
+});
+
+test('renders a table chart through the shared checkpoint projection', () => {
+  const value = seedValue([
+    { id: 'tbl', t: 'table', attrs: {
+      cols: { c1: { pos: '1', name: 'Week' }, c2: { pos: '2', name: 'Count', kind: 'number' } },
+      rows: { r1: { pos: '1', cells: { c1: 'First', c2: '2' } }, r2: { pos: '2', cells: { c1: 'Second', c2: '4' } } },
+    } },
+    { id: 'ch', t: 'chart', attrs: { source: 'tbl', x: 'c1', series: ['c2'], title: 'Counts' } },
+  ]);
+  const result = roomOf(value).render();
+  expect(result.kind).toBe('ok');
+  const model = chartModel({ id: 'ch', type: 'line', x: 'c1', series: ['c2'], title: 'Counts' }, {
+    cols: [{ id: 'c1', name: 'Week' }, { id: 'c2', name: 'Count' }],
+    rows: [{ id: 'r1', cells: { c1: 'First', c2: '2' } }, { id: 'r2', cells: { c1: 'Second', c2: '4' } }],
+  });
+  expect(result.html).toContain(renderChartSvg(model, { width: 640, height: 320 }));
+  expect(result.html).toContain('<figcaption>Counts</figcaption>');
 });
 
 test('refuses a document missing its page article or a persistent tag', () => {

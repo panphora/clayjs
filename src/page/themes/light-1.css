@@ -2,6 +2,13 @@
 @import url("https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,500&family=Inter:wght@400;500;600&display=swap");
 
 .page-shell {
+  --chart-1: #2F5E9E;
+  --chart-2: #164583;
+  --chart-3: #5B5953;
+  --chart-4: #23221F;
+  --chart-5: #A1A09B;
+  --chart-6: #6B6862;
+  --chart-text: #23221F;
   --page-bg: #F7F6F2;
   --page-ink: #23221F;
   --page-ink-strong: #23221F;
@@ -70,6 +77,9 @@
 
   -webkit-font-smoothing: antialiased;
 }
+
+article[data-page] figure[data-type="chart"] { --chart-1: #2F5E9E; --chart-2: #164583; --chart-3: #5B5953; --chart-4: #23221F; --chart-5: #A1A09B; --chart-6: #6B6862; --chart-text: #23221F; max-width: 100%; }
+article[data-page] figure[data-type="chart"] > svg { display: block; width: 100%; height: auto; color: var(--chart-text); font: 12px Inter, sans-serif; }
 
 .page-shell .page-li {
   --page-block-gap: 0.35em;

@@ -2,6 +2,13 @@
 @import url("https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&display=swap");
 
 .page-shell {
+  --chart-1: #2f5d50;
+  --chart-2: #18473b;
+  --chart-3: #57534c;
+  --chart-4: #23211e;
+  --chart-5: #8f8a81;
+  --chart-6: #2a2825;
+  --chart-text: #23211e;
   --page-bg: #faf8f4;
   --page-ink: #23211e;
   --page-ink-strong: #23211e;
@@ -70,6 +77,9 @@
 
   -webkit-font-smoothing: antialiased;
 }
+
+article[data-page] figure[data-type="chart"] { --chart-1: #2f5d50; --chart-2: #18473b; --chart-3: #57534c; --chart-4: #23211e; --chart-5: #8f8a81; --chart-6: #2a2825; --chart-text: #23211e; max-width: 100%; }
+article[data-page] figure[data-type="chart"] > svg { display: block; width: 100%; height: auto; color: var(--chart-text); font: 12px Newsreader, serif; }
 
 .page-shell .page-editor h1 { margin: 0 0 .7em; }
 .page-shell .page-editor h2 { line-height: 1.3; margin: 1.9em 0 .45em; }
