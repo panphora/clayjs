@@ -40,6 +40,10 @@
       "import": "./dist/server/rooms.mjs",
       "require": "./dist/server/rooms.cjs"
     },
+    "./server/checkpoint": {
+      "import": "./dist/server/checkpoint.mjs",
+      "require": "./dist/server/checkpoint.cjs"
+    },
     "./*": "./entries/*"
   },
   "files": [

@@ -13,12 +13,15 @@
     "@panphora/clayjs/entries/sap.js",
     "@panphora/clayjs/clay.standalone.js",
     "@panphora/clayjs/server/rooms",
+    "@panphora/clayjs/server/checkpoint",
     "@panphora/clayjs/page/yjs"
   ],
   "members": [
     "THIRD-PARTY-NOTICES.md",
     "dist/server/rooms.cjs",
     "dist/server/rooms.mjs",
+    "dist/server/checkpoint.cjs",
+    "dist/server/checkpoint.mjs",
     "docs/guide.md"
   ],
   "families": [

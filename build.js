@@ -45,6 +45,7 @@ import { promisify } from 'node:util';
 import { build as esbuild } from 'esbuild';
 import { emitDocs } from './scripts/site-docs.mjs';
 import { buildServerRooms } from './scripts/build-server-rooms.mjs';
+import { buildServerCheckpoint } from './scripts/build-server-checkpoint.mjs';
 
 const run = promisify(execFile);
 
@@ -271,13 +272,14 @@ if (!/^\d+\.\d+\.\d+$/.test(pkg.version)) {
 // for a rebuild of that one file with no site and no registry lookup.
 const standaloneMeta = await emitStandalone();
 await buildServerRooms();
+await buildServerCheckpoint();
 for (const file of Object.keys(standaloneMeta.inputs)) {
-  if (file.includes('src/server/rooms/')) {
-    throw new Error(`the standalone build must not include ${file}; the server rooms are a Node entry`);
+  if (file.includes('src/server/rooms/') || file.includes('src/server/checkpoint/')) {
+    throw new Error(`the standalone build must not include ${file}; server code is a Node entry`);
   }
 }
 if (process.argv.includes('--standalone')) {
-  console.log(`built dist/${STANDALONE} and dist/server/rooms.cjs`);
+  console.log(`built dist/${STANDALONE} and dist/server/{rooms,checkpoint}.cjs`);
   process.exit(0);
 }
 
