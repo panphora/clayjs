@@ -19,6 +19,8 @@ import { mediaPlugin, ImageView, FileView } from "./media.js";
 import { highlightPlugin, CodeBlockView } from "./highlight.js";
 import { tableKeys, tablePlugin, TableView, TableCellView } from "./table.js";
 import { chartPlugin, ChartView } from "./chart.js";
+import { ToolView } from "./tool-view.js";
+import { createToolHost } from "./tools.js";
 import { checklistPlugin, checklistKeys } from "./checklist.js";
 import { csvImportPlugin } from "./csv-import.js";
 import { styleWithLegacyId } from "../lib/style.js";
@@ -185,6 +187,14 @@ ${INDENTS.map((n) => `.page-editor .page-li[data-indent="${n}"] { --li-indent: $
 .page-chart figcaption { color: var(--page-ink-soft); font-size: 0.88em; text-align: center; }
 .page-chart-settings { display: block; margin: 8px auto 0; padding: 4px 10px; border: 1px solid var(--page-rule); border-radius: 6px; background: var(--page-pop-bg); color: var(--page-ink); font: inherit; cursor: pointer; }
 .page-chart-title-input { display: block; width: min(100%, 24em); box-sizing: border-box; margin: 6px auto; padding: 4px 8px; border: 1px solid var(--page-rule); border-radius: 6px; background: var(--page-pop-bg); color: var(--page-ink); font: inherit; }
+.page-tool-block { position: relative; min-height: 48px; border: 1px solid var(--page-rule); border-radius: 8px; padding: 12px; }
+.page-tool-settings { position: absolute; top: 4px; inset-inline-end: 4px; border: 0; border-radius: 5px; background: var(--page-pop-bg); color: var(--page-ink-soft); font: 12px var(--page-font); padding: 5px 8px; cursor: pointer; opacity: 0; }
+.page-tool-block:hover .page-tool-settings, .page-tool-block:focus-within .page-tool-settings { opacity: 1; }
+.page-ai-panel { position: relative; z-index: 5; width: min(520px, 100%); box-sizing: border-box; margin: 12px auto; padding: 14px; border: 1px solid var(--page-pop-line); border-radius: 10px; background: var(--page-pop-bg); color: var(--page-pop-ink); box-shadow: var(--page-pop-shadow); }
+.page-ai-panel textarea { width: 100%; min-height: 88px; box-sizing: border-box; padding: 8px; border: 1px solid var(--page-pop-line); border-radius: 6px; background: var(--page-pop-bg); color: inherit; font: inherit; resize: vertical; }
+.page-ai-actions { display: flex; gap: 8px; margin-top: 8px; }
+.page-ai-actions button { border: 1px solid var(--page-pop-line); border-radius: 6px; background: var(--page-pop-bg); color: inherit; font: inherit; padding: 5px 10px; cursor: pointer; }
+.page-ai-status, [data-tool-note], [data-tool-error] { color: var(--page-danger); font-size: 0.85em; }
 .page-table-scroll { max-width: 100%; overflow-x: auto; }
 .page-table table { border-collapse: collapse; min-width: max-content; width: 100%; table-layout: auto; }
 .page-table th, .page-table td { min-width: 120px; padding: 6px 10px; border-inline-end: 1px solid var(--page-rule); border-block-end: 1px solid var(--page-rule); text-align: start; white-space: pre-wrap; }
@@ -248,10 +258,16 @@ const markKeys = {
 
 const defaultUpload = (file, options) => globalThis.clay?.upload?.(file, options) ?? Promise.resolve({ ok: false, code: "unavailable", msg: "File uploads are not available in this editor" });
 
-export function pagePlugins({ upload = defaultUpload, highlight, history: useHistory = true, undo, redo } = {}) {
+export function pagePlugins({ upload = defaultUpload, highlight, history: useHistory = true, undo, redo, onAiTool = null, toolHost = null } = {}) {
   return [
     announcementPlugin(),
-    chromePlugin(),
+    chromePlugin({ onAiTool }),
+    toolHost && new state.Plugin({
+      view(view) {
+        let previous = view.state.doc;
+        return { update(next) { if (next.state.doc !== previous) { previous = next.state.doc; toolHost.tablesChanged(); } } };
+      },
+    }),
     linkPlugin(),
     blockSelectionPlugin(),
     markdownPlugin(),
@@ -302,8 +318,9 @@ function checkboxClick(view, event) {
 // Mounts the editor in `mount`, inside a .page-shell wrapper (the surface a
 // theme styles). `onChange(record)` gets the block record (blockMap) after
 // every transaction that changed the document.
-export function createPageEditor(mount, { blocks = null, onChange = null, upload, highlight, doc: initialDoc, dispatch, history: useHistory = true, undo, redo, editable = true } = {}) {
+export function createPageEditor(mount, { blocks = null, onChange = null, upload, highlight, doc: initialDoc, dispatch, history: useHistory = true, undo, redo, editable = true, toolHost: providedToolHost = null, onAiTool = null, reviseTool = null } = {}) {
   const doc = mount.ownerDocument;
+  const toolHost = providedToolHost ?? createToolHost({ mode: "edit" });
   styleWithLegacyId(STYLE_ID, PAGE_EDITOR_CSS, STYLE_ID);
   const shell = doc.createElement("div");
   shell.className = "page-shell";
@@ -312,7 +329,7 @@ export function createPageEditor(mount, { blocks = null, onChange = null, upload
   mount.appendChild(shell);
   let afterStep = false;
   const view = new pmView.EditorView(shell, {
-    state: pageState(blocks, { upload, highlight, doc: initialDoc, history: useHistory, undo, redo }),
+    state: pageState(blocks, { upload, highlight, doc: initialDoc, history: useHistory, undo, redo, onAiTool, toolHost }),
     attributes: { class: "page-editor" },
     editable: () => editable,
     nodeViews: {
@@ -321,6 +338,7 @@ export function createPageEditor(mount, { blocks = null, onChange = null, upload
       code_block: (node, v, getPos) => new CodeBlockView(node, v, getPos),
       table: (node, v, getPos) => new TableView(node, v, getPos),
       chart: (node, v, getPos) => new ChartView(node, v, getPos),
+      tool: (node, v, getPos) => new ToolView(node, v, getPos, { host: toolHost, revise: reviseTool }),
       table_cell: (node, v, getPos) => new TableCellView(node, v, getPos),
     },
     handleDOMEvents: {

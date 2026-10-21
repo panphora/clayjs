@@ -131,6 +131,18 @@ test("an unsupported host keeps the article untouched and reports blocked", asyn
   document.removeEventListener("clay:page-save-state", onState);
 });
 
+test("the AI entry follows the host capability", async () => {
+  setPage([{ id: "p", t: "paragraph", text: "" }]);
+  await page.install({ transport: { request: async () => ({}), cancel: () => {} } });
+  page.view.dom.parentElement.querySelector(".page-plus").click();
+  expect(page.view.dom.parentElement.querySelector(".page-menu").textContent).not.toContain("Make a tool with AI");
+
+  extensions = ["page", "page-tool/1"];
+  await page.install({ transport: { request: async () => ({}), cancel: () => {} } });
+  page.view.dom.parentElement.querySelector(".page-plus").click();
+  expect(page.view.dom.parentElement.querySelector(".page-menu").textContent).toContain("Make a tool with AI");
+});
+
 test("legacy hybrid and malformed page data warn and stay readable without mounting", async () => {
   const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
   const record = { blocks: { p: { t: "paragraph", pos: "1", c: "Hello" } }, deleted: {} };

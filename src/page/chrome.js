@@ -197,8 +197,9 @@ export function openPageMenu(view, anchor, items) {
 }
 
 class Chrome {
-  constructor(view) {
+  constructor(view, onAiTool) {
     this.view = view;
+    this.onAiTool = onAiTool;
     this.shell = view.dom.parentElement;
     this.menu = null;
     this.movedTimer = 0;
@@ -330,7 +331,10 @@ class Chrome {
   menuItems(m) {
     if (m.mode === "external") return m.externalItems || [];
     if (m.mode === "actions") return actionsFor(this.view.state);
-    return rankItems(m.mode === "turn" ? BLOCK_TYPES : MENU_ITEMS, m.query);
+    const items = m.mode === "turn" ? BLOCK_TYPES : this.onAiTool
+      ? [...MENU_ITEMS, { key: "ai", label: "Make a tool with AI…", icon: "✦", aliases: ["tool", "generate"], insert: "ai" }]
+      : MENU_ITEMS;
+    return rankItems(items, m.query);
   }
 
   openActions(anchor = this.plus, at = null) {
@@ -401,7 +405,8 @@ class Chrome {
       item.run(this.view, this, m.index);
       if (!this.menu && item.focus !== false) this.view.focus();
     } else {
-      runItem(this.view, item, m.slashAt !== null ? this.blockIndex() : m.index, remove);
+      if (item.insert === "ai") this.onAiTool(this.view, remove);
+      else runItem(this.view, item, m.slashAt !== null ? this.blockIndex() : m.index, remove);
     }
   }
 
@@ -513,12 +518,12 @@ class Chrome {
   }
 }
 
-export function chromePlugin() {
+export function chromePlugin({ onAiTool = null } = {}) {
   let chrome = null;
   return new Plugin({
     key: chromeKey,
     view(view) {
-      chrome = new Chrome(view);
+      chrome = new Chrome(view, onAiTool);
       chromeFor.set(view, chrome);
       return chrome;
     },

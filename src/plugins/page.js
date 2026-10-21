@@ -11,6 +11,10 @@ import { storeOf, checkpointWithin, requestCheckpoint, fastLane, pageLaneReady, 
 import { HyperMorph } from "../vendor/hyper-morph.vendor.js";
 import { saveStateFor, BLOCKED_TEXT, RETRY_TEXT, downloadPageCopy, copyPageText } from "../page/save-states.js";
 import { toastPersistent, dismissPersistent } from "../ui/toast.js";
+import { createToolHost } from "../page/tools.js";
+import { createAiTool } from "../page/ai-tool.js";
+import { tablesFromDoc } from "../page/tool-data.js";
+import { capabilityAdvertised } from "../page/rich/page-tool.js";
 
 const ARTICLE_SEL = "article[data-page]";
 const TAG_SEL = 'script[type="application/json"][merge="page"][clay~="live"]';
@@ -149,6 +153,8 @@ function dispose() {
   dismissPersistent(BLOCKED_TEXT);
   try { inst.adoption?.dispose(); } catch (error) { console.error("clayjs: page plugin adoption failed to dispose", error); }
   try { inst.view?.destroy(); } catch (error) { console.error("clayjs: page plugin view failed to destroy", error); }
+  inst.aiTool?.dispose();
+  inst.toolHost?.dispose();
   if (inst.article) {
     const shell = inst.article.querySelector(".page-shell");
     if (shell) shell.remove();
@@ -158,7 +164,7 @@ function dispose() {
   restoreArticle(inst);
 }
 
-async function run(inst, gen) {
+async function run(inst, gen, options = {}) {
   const articles = document.querySelectorAll(ARTICLE_SEL);
   const tags = document.querySelectorAll(TAG_SEL);
   if (!articles.length && !tags.length) return abandon(inst);
@@ -235,6 +241,26 @@ async function run(inst, gen) {
   inst.bootHtml = source.article.innerHTML;
   inst.bootRev = source.article.getAttribute("data-rev");
 
+  let toolsStore = null;
+  if (document.querySelector('script[type="application/json"][merge="page.tools"][clay~="live"]')) {
+    try {
+      toolsStore = window.clay.live("page.tools");
+      await toolsStore.ready;
+    } catch (error) {
+      console.warn("clayjs: page plugin could not open the tool store", error);
+    }
+  }
+  if (gen !== generation) return;
+  let editorView = null;
+  const toolHost = createToolHost({
+    store: toolsStore, mode: "edit",
+    tables: () => tablesFromDoc(editorView?.state.doc ?? binding.doc()).map(({ id, cols, rows }) => ({ id, cols, rows })),
+  });
+  inst.toolHost = toolHost;
+  const transport = window.clay?.wire?.pageTool ?? options.transport ?? null;
+  if (capabilityAdvertised(meta)) {
+    inst.aiTool = createAiTool({ getView: () => inst.view, store: toolsStore, transport, acceptState: options.acceptState });
+  }
   article.innerHTML = "";
   const view = createPageEditor(article, {
     doc: binding.doc(),
@@ -243,7 +269,11 @@ async function run(inst, gen) {
     undo: binding.undo,
     redo: binding.redo,
     editable: false,
+    toolHost,
+    onAiTool: inst.aiTool ? (_view, remove) => inst.aiTool.open({ remove }) : null,
+    reviseTool: inst.aiTool ? (toolId, rev) => inst.aiTool.open({ target: { toolId, rev } }) : null,
   });
+  editorView = view;
   inst.view = view;
   binding.attach(view);
 
@@ -287,12 +317,12 @@ async function run(inst, gen) {
   view.setProps({ editable: () => true });
 }
 
-function install() {
+function install(options = {}) {
   dispose();
   const gen = ++generation;
-  const inst = { gen, article: null, view: null, binding: null, adoption: null, source: null, store: null, bootHtml: "", bootRev: null, flush: null, listeners: [], retryTimer: null, retryShown: false };
+  const inst = { gen, article: null, view: null, binding: null, adoption: null, source: null, store: null, toolHost: null, aiTool: null, bootHtml: "", bootRev: null, flush: null, listeners: [], retryTimer: null, retryShown: false };
   active = inst;
-  return run(inst, gen).catch((error) => {
+  return run(inst, gen, options).catch((error) => {
     console.error("clayjs: page plugin failed to install", error);
     if (active === inst) dispose();
   });
