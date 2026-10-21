@@ -26,6 +26,7 @@ function sourceBlocks(values) {
     if (value.deleted != null && !record(value.deleted)) fail("Invalid hybrid page tombstones");
     for (const [id, block] of Object.entries(value.blocks)) {
       if (!value.deleted?.[id] && (!id || id === "__proto__" || !record(block))) fail(`Invalid hybrid page block: ${id}`);
+      if (!value.deleted?.[id] && (/^~|~\d+$/).test(id)) fail(`Reserved hybrid page block id: ${id}`);
     }
   }
   return blocksOfValues(values);

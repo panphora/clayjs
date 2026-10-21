@@ -4,7 +4,7 @@ import { schema } from "../../../../src/page/schema.js";
 import { identityPlugin } from "../../../../src/page/model.js";
 import { state as pmState, view as pmView, model as pmModel, commands } from "../../../../src/vendor/prosemirror.vendor.js";
 import { toBase64 } from "../../../../src/vendor/yjs.vendor.js";
-import { createYPageBinding, seedValue, LOCAL } from "../../../../src/page/ybind/index.js";
+import { createYPageBinding, seedValue, blocksFromYValue, LOCAL } from "../../../../src/page/ybind/index.js";
 
 const { EditorState, TextSelection } = pmState;
 const open = (blocks, extra = {}) => {
@@ -16,6 +16,25 @@ const open = (blocks, extra = {}) => {
 };
 const texts = (view) => { const o = []; view.state.doc.forEach((n) => o.push(n.textContent)); return o; };
 const at = (view, n) => view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, n)));
+
+test("authored ids shaped like internal ids keep edits on their own blocks", () => {
+  const leading = open([{ id: "~intro", text: "Hello" }, { id: "b2", text: "World" }]);
+  const second = leading.view.state.doc.child(0).nodeSize;
+  leading.view.dispatch(leading.view.state.tr.insertText("X", second + 1));
+  const firstBlocks = blocksFromYValue(leading.store.value);
+  expect(firstBlocks["~intro"].c).toBe("Hello");
+  expect(firstBlocks.b2.c).toBe("XWorld");
+  expect(leading.binding.stats.mismatch).toBe(0);
+
+  const trailing = open([{ id: "intro", text: "Title" }, { id: "intro~2", text: "Body" }]);
+  const pos = trailing.view.state.doc.child(0).nodeSize;
+  const node = trailing.view.state.doc.child(1);
+  trailing.view.dispatch(trailing.view.state.tr.setNodeMarkup(pos, schema.nodes.heading, { ...node.attrs, level: 3 }));
+  const secondBlocks = blocksFromYValue(trailing.store.value);
+  expect(secondBlocks.intro.t).toBe("paragraph");
+  expect(secondBlocks["intro~2"].t).toBe("heading");
+  expect(trailing.binding.stats.mismatch).toBe(0);
+});
 
 test("a single tab: typing, Enter, Backspace, undo, redo, block delete", () => {
   const { view, binding, pd } = open([{ id: "p", text: "hello" }, { id: "q", text: "world" }]);

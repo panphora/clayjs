@@ -1,33 +1,16 @@
 import * as Y from "../../vendor/yjs.vendor.js";
 import { toBase64, fromBase64 } from "../../vendor/yjs.vendor.js";
 import { NET } from "./layout.js";
+import { PART_KEY, BASE64, entriesOf, captureYValue } from "./parts.js";
+
+export { entriesOf } from "./parts.js";
 
 export const enc = (u) => toBase64(u);
 export const dec = (s) => fromBase64(s);
 
 export const PART = 12 * 1024;
-const PART_KEY = /^(.+)\.(\d+)\.(\d+)$/;
-
 const baseOf = (k) => PART_KEY.exec(k)?.[1] ?? k;
 const sameBytes = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
-
-export function entriesOf(y) {
-  const whole = [];
-  const parts = new Map();
-  for (const k of Object.keys(y).sort()) {
-    const m = PART_KEY.exec(k);
-    if (!m) { whole.push([k, y[k]]); continue; }
-    const group = parts.get(m[1]) ?? { n: Number(m[3]), got: [] };
-    group.got[Number(m[2])] = y[k];
-    parts.set(m[1], group);
-  }
-  for (const [k, group] of parts) {
-    let have = 0;
-    for (let i = 0; i < group.n; i++) if (typeof group.got[i] === "string") have++;
-    if (have === group.n) whole.push([k, group.got.join("")]);
-  }
-  return whole;
-}
 
 export function yValueOf(ydoc) {
   return { v: 1, g: 0, y: { seed: enc(Y.encodeStateAsUpdateV2(ydoc)) } };
@@ -40,8 +23,6 @@ export class YDecodeError extends Error {
     this.code = code;
   }
 }
-
-const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}(?:==)?|[A-Za-z0-9+/]{3}=?)?$/;
 
 function strictEntries(value) {
   if (value?.v !== 1 || !value.y || typeof value.y !== "object" || Array.isArray(value.y)) {
@@ -113,7 +94,8 @@ export function createYProvider({ store, ydoc, compact: limits = {}, setTimer = 
   const put = (key, bytes) => {
     canCompact = true;
     known.add(key);
-    for (const [k, v] of partsOf(key, enc(bytes))) store.handle.set(["y", k], v);
+    const parts = partsOf(key, enc(bytes));
+    store.handle.update((data) => { for (const [k, v] of parts) data.y[k] = v; });
   };
 
   for (const [k] of initial) known.add(k);
@@ -133,13 +115,14 @@ export function createYProvider({ store, ydoc, compact: limits = {}, setTimer = 
   };
 
   let wantReconcile = false;
-  const schedule = (full) => {
+  let reconcilePending = false;
+  const schedule = (full, recovery) => {
     wantReconcile ||= full;
+    reconcilePending ||= recovery;
     if (timer) return;
     timer = setTimer(() => {
       timer = null;
       const full = wantReconcile;
-      wantReconcile = false;
       if (full) reconcile();
       maybeCompact();
     }, 0);
@@ -154,11 +137,13 @@ export function createYProvider({ store, ydoc, compact: limits = {}, setTimer = 
     const sv = Y.encodeStateVector(scratch);
     const mine = Y.decodeStateVector(Y.encodeStateVector(ydoc));
     const theirs = Y.decodeStateVector(sv);
-    if (svEqual(mine, theirs) && sameDeletes(ydoc, scratch)) { scratch.destroy(); return false; }
+    if (svEqual(mine, theirs) && sameDeletes(ydoc, scratch)) { scratch.destroy(); wantReconcile = false; reconcilePending = false; return false; }
     const diff = Y.encodeStateAsUpdateV2(ydoc, sv);
     scratch.destroy();
     stats.offered++;
     put(nextKey("r"), diff);
+    wantReconcile = false;
+    reconcilePending = false;
     return true;
   }
 
@@ -225,7 +210,9 @@ export function createYProvider({ store, ydoc, compact: limits = {}, setTimer = 
     const key = nextKey("m");
     known.add(key);
     const parts = partsOf(key, merged);
-    fold = { key, parts: parts.map(([k]) => k), inputs: new Set(entries.map(([k]) => k)) };
+    const captured = captureYValue({ v: 1, y: auth }).y;
+    const incompleteFolds = Object.keys(auth).filter((k) => !(k in captured)).map(baseOf).filter((k) => k[0] === "m");
+    fold = { key, parts: parts.map(([k]) => k), inputs: new Set([...entries.map(([k]) => k), ...incompleteFolds]) };
     store.handle.update((data) => { for (const [k, v] of parts) data.y[k] = v; });
     stats.compactions++;
     return true;
@@ -241,8 +228,8 @@ export function createYProvider({ store, ydoc, compact: limits = {}, setTimer = 
     } else {
       for (const [k, v] of entriesOf(ev.next.y ?? {})) applyKey(k, v);
     }
-    schedule(ev.source !== "remote" || !ops);
+    schedule(ev.source !== "remote" || !ops, ev.source !== "remote");
   });
 
-  return { known, stats, settle, reconcile, compact: maybeCompact, dispose() { off(); ydoc.off("updateV2", onUpdate); if (timer) clearTimer(timer); } };
+  return { known, stats, settle, reconcile, get reconcilePending() { return reconcilePending; }, compact: maybeCompact, dispose() { off(); ydoc.off("updateV2", onUpdate); if (timer) clearTimer(timer); } };
 }

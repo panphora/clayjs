@@ -25,8 +25,8 @@ export function localGroup(pd, transactions, w, stats, um = null) {
   implicit.sort((a, b) => b.tok - a.tok);
   for (const m of implicit) { m.alias = mintId(pd); alias.set(m.id, m.alias); }
   const holes = alias.size ? w.holes.map((h) => ({ at: h.at + implicit.filter((m) => m.tok < h.at).length, len: h.len })) : w.holes;
-  const ia = tokenIndex(d0, alias), ib = tokenIndex(dm, new Map());
-  const bt = tokensOf(d0, alias, w.visible), at = tokensOf(dm, new Map());
+  const ia = tokenIndex(d0, alias, w.visible), ib = tokenIndex(dm, new Map(), w.visible);
+  const bt = tokensOf(d0, alias, w.visible), at = tokensOf(dm, new Map(), w.visible);
   const regions = [];
   const markSteps = [];
   steps.forEach((step, i) => {

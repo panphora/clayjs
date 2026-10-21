@@ -1,7 +1,8 @@
 import { jest } from "@jest/globals";
 import { execFileSync } from "node:child_process";
+import * as Y from "../../../../src/vendor/yjs.vendor.js";
 import { createStore } from "../../../../src/live/store.js";
-import { registerUnsavedState, pendingIds, flushUnsaved } from "../../../../src/lib/unsaved-state.js";
+import { registerUnsavedState, pendingIds, hasUnsavedState, flushUnsaved } from "../../../../src/lib/unsaved-state.js";
 import { createYPageBinding, seedValue, LOCAL, docFromValue, yValueOf } from "../../../../src/page/ybind/index.js";
 
 let opened;
@@ -87,6 +88,51 @@ test("reconciliation restores a dropped local update before flush can report suc
   store.confirm(store.mark);
   await expect(flushed).resolves.toEqual({ ok: true });
   expect(binding.doc().textContent).toBe("First!");
+});
+
+test("the unsaved registry flushes a dropped update before deferred reconciliation", async () => {
+  const { store, binding } = open({ registerUnsavedState, checkpointWithin: () => {} });
+  const original = JSON.parse(JSON.stringify(store.value));
+  edit(binding);
+  store.rebase(original, { source: "state", drop: [1, store.mark] });
+  expect(store.pending).toEqual([]);
+  expect(binding.provider.reconcilePending).toBe(true);
+  expect(hasUnsavedState()).toBe(true);
+  const flushed = flushUnsaved();
+  await Promise.resolve();
+  expect(binding.provider.stats.offered).toBe(1);
+  expect(binding.provider.reconcilePending).toBe(false);
+  expect(store.pending.length).toBeGreaterThan(0);
+  store.confirm(store.mark);
+  await expect(flushed).resolves.toEqual({ ok: true, pending: [] });
+  expect(binding.doc().textContent).toBe("First!");
+});
+
+test("a waiting flush does not duplicate a multipart local update", async () => {
+  const run = async (waiting) => {
+    const ydoc = new Y.Doc();
+    ydoc.clientID = 5;
+    const { store, binding } = open({ ydoc, checkpointWithin: () => {} });
+    edit(binding);
+    const flushed = waiting ? binding.flush() : null;
+    edit(binding, "0123456789abcdef".repeat(3750));
+    await Promise.resolve();
+    const result = {
+      keys: Object.keys(store.value.y).sort(),
+      bytes: Object.values(store.value.y).reduce((total, part) => total + part.length, 0),
+      offered: binding.provider.stats.offered,
+    };
+    if (flushed) {
+      binding.dispose();
+      await flushed;
+    }
+    return result;
+  };
+  const withoutFlush = await run(false);
+  const duringFlush = await run(true);
+  expect(withoutFlush.keys.some((key) => /\.\d+\.\d+$/.test(key))).toBe(true);
+  expect(duringFlush).toEqual(withoutFlush);
+  expect(duringFlush.offered).toBe(0);
 });
 
 test("remote updates do not request a local checkpoint or become unsaved work", () => {

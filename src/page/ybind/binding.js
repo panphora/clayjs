@@ -11,10 +11,16 @@ export function createYPageBinding({ store, ydoc = new Y.Doc(), onNotice = () =>
   const bridge = createBridge({ pd, onNotice, stats, captureTimeout });
   const waiters = new Set();
   let disposed = false;
-  const unsaved = registerUnsavedState?.({ id: "page:live", isPending: () => store.pending.length > 0, flush });
+  let checksQueued = false;
+  const unsaved = registerUnsavedState?.({ id: "page:live", isPending: () => store.pending.length > 0 || provider.reconcilePending, flush });
   const changed = () => {
     unsaved?.changed();
-    for (const waiter of [...waiters]) waiter.check();
+    if (checksQueued) return;
+    checksQueued = true;
+    Promise.resolve().then(() => {
+      checksQueued = false;
+      if (!disposed) for (const waiter of [...waiters]) waiter.check();
+    });
   };
   const offLocal = store.onLocal(() => { checkpointWithin(1500); changed(); });
   const offRebase = store.onRebase(changed);

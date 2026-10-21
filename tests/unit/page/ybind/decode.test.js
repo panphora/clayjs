@@ -115,6 +115,23 @@ test("decodes implicit text, empty pages, and plain text after an atom", () => {
   expect(typeof docOf).toBe("function");
 });
 
+test("keeps both implicit paragraphs after duplicate atom markers in the article", () => {
+  const pd = createPageDoc(track(new Y.Doc()));
+  pd.ydoc.transact(() => {
+    pd.attrs.set("img", new Y.Map([["t", "divider"]]));
+    pd.flow.insertEmbed(0, { b: "img" }, {});
+    pd.flow.insert(pd.flow.length, "first orphan text", {});
+    pd.flow.insertEmbed(pd.flow.length, { b: "img" }, {});
+    pd.flow.insert(pd.flow.length, "second orphan text", {});
+  });
+  const blocks = blocksFromYValue(yValueOf(pd.ydoc));
+  const texts = Object.values(blocks).map((block) => block.c).filter(Boolean);
+  expect(texts).toEqual(["first orphan text", "second orphan text"]);
+  const html = renderModel(project(blocks));
+  expect(html).toContain("first orphan text");
+  expect(html).toContain("second orphan text");
+});
+
 test("accepts complete multipart captures and propagates strict loading failures", () => {
   const { value, expected } = fixture();
   const text = value.y.seed;

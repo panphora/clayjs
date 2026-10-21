@@ -140,6 +140,14 @@ test("whitespace normalization", () => {
   expect(second[0].c).toBe("a  b");
 });
 
+test("adoption mints stable ids for authored blocks with internal id shapes", () => {
+  const article = articleOf('<p data-id="~note">Note</p><p data-id="intro~2">Body</p><p data-id="safe">Safe</p>');
+  const first = parseModel(article, { seed: "fixed" });
+  expect(first.map((item) => item.id)).toEqual([expect.stringMatching(/^b-a/), expect.stringMatching(/^b-a/), "safe"]);
+  expect(first[0].id).not.toBe(first[1].id);
+  expect(parseModel(article, { seed: "fixed" })).toEqual(first);
+});
+
 test("escaping", () => {
   const href = 'https://x.test/?q="';
   const key = "a" + JSON.stringify([href]);

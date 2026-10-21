@@ -20,6 +20,7 @@ import { hostSupports } from "../core/host-meta.js";
 import { createFastLane } from "../live/fast-lane.js";
 import { serverTransport } from "../live/server-lane.js";
 import { localTransport, localLaneSupported } from "../live/local-lane.js";
+import { captureYValue } from "../page/ybind/parts.js";
 
 const NAME = /^[A-Za-z0-9_.:-]{1,64}$/;
 const entries = new Map();
@@ -388,7 +389,9 @@ function parseHtml(html) {
 // In fast mode a capture writes the room's value, never this tab's unconfirmed
 // ops (the room may still refuse them).
 function textOf(entry) {
-  const value = entry.store.handle.status.mode === "fast" ? entry.store.authoritative : entry.store.value;
+  const fastMode = entry.store.handle.status.mode === "fast";
+  const current = fastMode ? entry.store.authoritative : entry.store.value;
+  const value = fastMode && /^page(\.[0-9]+)?$/.test(entry.store.name) ? captureYValue(current) : current;
   if (entry.layout === "lines") return serializeLines(value);
   return entry.layout === "pretty" ? JSON.stringify(value, null, 2).replace(/</g, "\\u003c") : serializeLive(value);
 }

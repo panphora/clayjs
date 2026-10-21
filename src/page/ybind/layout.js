@@ -15,8 +15,6 @@ export const parseKey = (k) => { const i = k.indexOf("."); return { client: +k.s
 export const isHigh = (u) => u >= 0xd800 && u <= 0xdbff;
 export const isLow = (u) => u >= 0xdc00 && u <= 0xdfff;
 
-export const baseOfId = (id) => { const m = /^(.+)~\d+$/.exec(id); return m ? m[1] : id; };
-
 let opCounter = 0;
 export const mintOp = (pd) => `${pd.ydoc.clientID.toString(36)}-${(opCounter++).toString(36)}`;
 let idCounter = 0;

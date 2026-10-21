@@ -123,6 +123,8 @@ test.each([
   ["unknown atom", [{ blocks: { p: { t: "paragraph", c: "\uFFFC", m: [[1, '@{"type":"future_atom"}']] } } }]],
   ["marks on code", [{ blocks: { p: { t: "code_block", c: "text", m: [[4, "b"]] } } }]],
   ["text on image", [{ blocks: { p: { t: "image", c: "keep this" } } }]],
+  ["implicit-shaped id", [{ blocks: { "~intro": { t: "paragraph", c: "text" } } }]],
+  ["copy-shaped id", [{ blocks: { "intro~2": { t: "paragraph", c: "text" } } }]],
 ])("refuses %s before returning a replacement", (_, values) => {
   const before = JSON.stringify(values);
   expect(() => migrateHybridValues(values)).toThrow(YMigrationError);

@@ -17,8 +17,9 @@ test("tokens and indexes of a three block document", () => {
 
 test("an implicit start block has no break token", () => {
   const imp = schema.nodes.doc.create(null, [para("~start", schema.text("lead")), para("p", schema.text("x"))]);
-  expect(Array.from(tokenIndex(imp)).join(",")).toBe("0,0,1,2,3,4,4,5,6,6");
-  expect(tokensOf(imp).map((t) => (t.k === "c" ? t.ch : "[" + t.id))).toEqual(["l", "e", "a", "d", "[p", "x"]);
+  const visible = [{ id: "~start", implicit: true }, { id: "p", implicit: false }];
+  expect(Array.from(tokenIndex(imp, new Map(), visible)).join(",")).toBe("0,0,1,2,3,4,4,5,6,6");
+  expect(tokensOf(imp, new Map(), visible).map((t) => (t.k === "c" ? t.ch : "[" + t.id))).toEqual(["l", "e", "a", "d", "[p", "x"]);
 });
 
 test("holes shift positions", () => {

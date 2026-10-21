@@ -91,6 +91,33 @@ test("page and style updates stay out of comparison while the save carries both"
   expect(doc.getElementById("owned-style").textContent).toBe(".page { color: blue; }");
 });
 
+test("fast captures omit only incomplete multipart groups from the saved page tag", () => {
+  const store = storeOf("page");
+  const value = seed();
+  const text = Object.values(value.y).join("");
+  const half = Math.floor(text.length / 2);
+  const first = { ...value, y: { ...value.y, "orphan.0.2": text.slice(0, half) } };
+  store.setMode("fast");
+  try {
+    store.rebase(first, { source: "remote" });
+    const partial = parse(snapshot.captureForSaveAndComparison({ emitForSync: false, flushUndo: false }).forSave);
+    expect(partial.querySelector("article").textContent).toBe("First");
+    expect(tagValue(partial).y).toEqual(value.y);
+    expect(store.authoritative.y["orphan.0.2"]).toBe(first.y["orphan.0.2"]);
+
+    const complete = { ...value, y: { ...first.y, "orphan.1.2": text.slice(half) } };
+    store.rebase(complete, { source: "remote" });
+    const finished = parse(snapshot.captureForSaveAndComparison({ emitForSync: false, flushUndo: false }).forSave);
+    expect(tagValue(finished).y).toEqual(complete.y);
+    expect(finished.querySelector("article").textContent).toBe("First");
+
+    store.rebase({ ...value, y: { ...value.y, "bad.0.2": "@@bad@@" } }, { source: "remote" });
+    expect(() => snapshot.captureForSaveAndComparison({ emitForSync: false, flushUndo: false })).toThrow(YDecodeError);
+  } finally {
+    store.setMode("file");
+  }
+});
+
 test.each([
   ["malformed", { seed: "@@bad@@" }],
   ["incomplete", { "seed.0.2": "AAAA" }],

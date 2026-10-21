@@ -594,7 +594,7 @@ export function resolveIds(items, { seed = "", known = new Map(), taken = new Se
     const eq = k ? list.find((i) => same(stripId(items[i]), stripId(k))) : undefined;
     keeper.set(id, eq ?? list[0]);
   }
-  const ids = items.map((item, i) => (item.id && keeper.get(item.id) === i ? item.id : mint("b")));
+  const ids = items.map((item, i) => (item.id && !(/^~|~\d+$/).test(item.id) && keeper.get(item.id) === i ? item.id : mint("b")));
   const out = items.map((item, i) => {
     const { id, parent, ...rest } = item;
     const p = parent && typeof parent === "object" ? ids[parent.ref] : parent;

@@ -2,6 +2,7 @@ import * as Y from "../../../../src/vendor/yjs.vendor.js";
 import { createStore } from "../../../../src/live/store.js";
 import { NET } from "../../../../src/page/ybind/layout.js";
 import { createYProvider, enc, dec, PART, entriesOf, docFromValue } from "../../../../src/page/ybind/provider.js";
+import { captureYValue } from "../../../../src/page/ybind/parts.js";
 import { seedValue } from "../../../../src/page/ybind/seed.js";
 
 let queue;
@@ -201,4 +202,21 @@ test("compaction folds a complete long entry and leaves an incomplete one", () =
   for (const k of Object.keys(done)) expect(store.value.y[k]).toBeUndefined();
   for (const [k, v] of Object.entries(half)) expect(store.value.y[k]).toBe(v);
   expect(textOf(store.value)).toContain("y".repeat(30000));
+  const captured = docFromValue(captureYValue(store.value), { strict: true });
+  expect(captured.getText("flow").toString()).toContain("y".repeat(30000));
+  captured.destroy();
+});
+
+test("a later fold removes an incomplete older fold after covering its state", () => {
+  const { store, ydoc, provider } = start();
+  for (let i = 0; i < 40; i++) ydoc.getText("flow").insert(i, "x");
+  store.handle.set(["y", "mold.0.2"], "AAAA");
+  store.rebase(JSON.parse(JSON.stringify(store.value)), { source: "remote", confirmed: store.pending.length });
+  expect(entriesOf(store.authoritative.y).some(([key]) => key === "mold")).toBe(false);
+  expect(docFromValue(captureYValue(store.authoritative), { strict: true }).getText("flow").toString()).toBe("x".repeat(40));
+  flush();
+  expect(provider.stats.compactions).toBe(1);
+  confirmAll(store);
+  expect(store.value.y["mold.0.2"]).toBeUndefined();
+  expect(docFromValue(store.value, { strict: true }).getText("flow").toString()).toBe("x".repeat(40));
 });

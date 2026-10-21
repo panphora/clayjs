@@ -6,12 +6,12 @@ import { localGroup } from "./group.js";
 import { tokenIndex, yBefore } from "./tokens.js";
 import { state as pmState } from "../../vendor/prosemirror.vendor.js";
 
-const yIndexAt = (doc, holes, pos) => yBefore(holes, tokenIndex(doc)[pos]);
+const yIndexAt = (doc, holes, pos, visible) => yBefore(holes, tokenIndex(doc, new Map(), visible)[pos]);
 
-export function posAtY(doc, holes, tokens, y) {
+export function posAtY(doc, holes, tokens, y, visible = null) {
   let lo = 0, hi = tokens;
   while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (yBefore(holes, mid) <= y) lo = mid; else hi = mid - 1; }
-  const idx = tokenIndex(doc);
+  const idx = tokenIndex(doc, new Map(), visible);
   let first = -1;
   for (let p = 0; p < idx.length; p++) {
     if (idx[p] < lo) continue;
@@ -77,7 +77,7 @@ export function createBridge({ pd, onNotice = () => {}, stats = { groups: 0, mis
     const tr = view.state.tr.replace(d.start, d.endA, derived.slice(d.start, d.endB)).setMeta(REMOTE_META, true).setMeta("addToHistory", false);
     if (own) tr.setMeta("yundo", true);
     if (keep) {
-      const at = (rel) => { const abs = Y.createAbsolutePositionFromRelativePosition(rel, pd.ydoc); return abs ? posAtY(tr.doc, w.holes, w.tokens, abs.index) : null; };
+      const at = (rel) => { const abs = Y.createAbsolutePositionFromRelativePosition(rel, pd.ydoc); return abs ? posAtY(tr.doc, w.holes, w.tokens, abs.index, w.visible) : null; };
       const anchor = at(keep.anchor), head = at(keep.head);
       if (anchor !== null && head !== null) tr.setSelection(pmState.TextSelection.create(tr.doc, anchor, head));
     }
@@ -88,7 +88,7 @@ export function createBridge({ pd, onNotice = () => {}, stats = { groups: 0, mis
     const sel = view.state.selection;
     if (!(sel instanceof pmState.TextSelection)) return;
     if ([sel.$anchor, sel.$head].some((pos) => pos.depth && pos.node(1).type.name === "table")) return;
-    const rel = (pos) => Y.createRelativePositionFromTypeIndex(pd.flow, yIndexAt(view.state.doc, w.holes, pos));
+    const rel = (pos) => Y.createRelativePositionFromTypeIndex(pd.flow, yIndexAt(view.state.doc, w.holes, pos, w.visible));
     saved = { anchor: rel(sel.anchor), head: rel(sel.head) };
   };
   const onAfter = (t) => {

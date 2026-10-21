@@ -1,6 +1,6 @@
 import * as Y from "../../vendor/yjs.vendor.js";
 import { schema } from "../schema.js";
-import { attrKeys, defaultOf, sameJson, idKey, isHigh, isLow, baseOfId, mintOp } from "./layout.js";
+import { attrKeys, defaultOf, sameJson, idKey, isHigh, isLow, mintOp } from "./layout.js";
 import { markName, isCancel } from "./marks.js";
 import { sameTok, yAfter, yBefore } from "./tokens.js";
 
@@ -139,7 +139,7 @@ export function applyRegion(ctx, ta, oldToks, newToks) {
       const whole = next <= end && next !== abs + 1;
       const nextBrk = next < bt.length ? bt[next].brk : null;
       if (!whole) return;
-      ctx.tx(() => pd.gone.set(idKey(t.brk), { b: baseOfId(t.id), e: nextBrk ? idKey(nextBrk) : null }));
+      ctx.tx(() => pd.gone.set(idKey(t.brk), { b: t.id, e: nextBrk ? idKey(nextBrk) : null }));
       softAt.add(abs);
     });
     const keep = [];
@@ -171,7 +171,7 @@ export function applyRegion(ctx, ta, oldToks, newToks) {
     else insertTokens(pd, yBefore(holes, e.at), e.i.toks, ctx.tx);
   }
   for (const [ob, nb] of attrs) ctx.tx(() => {
-    const base = baseOfId(ob.id);
+    const base = ob.id;
     const m = pd.attrs.get(base);
     if (m) {
       if (ob.t !== nb.t) m.set("t", nb.t);

@@ -142,6 +142,18 @@ test("the article wins changed blocks and records edited and deleted peer versio
   expect(shapeOf(tab.view.state.doc)).toBe(afterShape);
 });
 
+test("adoption remints an inserted block id that looks implicit", async () => {
+  const source = file((article) => article.insertAdjacentHTML("beforeend", '<p data-id="~note">Inserted</p>'));
+  const tab = open();
+  const { controller } = install(tab, source);
+  await controller.idle();
+  const after = blocks(tab);
+  expect(after["~note"]).toBeUndefined();
+  expect(after.p1.c).toBe(record.blocks.p1.c);
+  expect(Object.values(after).find((block) => block.c === "Inserted")).toBeDefined();
+  expect(tab.binding.stats.mismatch).toBe(0);
+});
+
 test("typing before and after adoption stays in separate Yjs undo groups", async () => {
   const tab = open();
   append(tab, "p2", " before");

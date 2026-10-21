@@ -67,7 +67,18 @@ export function blocksFromYValue(value) {
   try {
     const pd = createPageDoc(doc);
     validateFlow(pd);
-    return Object.fromEntries(walk(pd).visible.map((block, index) => [block.id, blockOf(pd, block, index)]));
+    const visible = walk(pd).visible;
+    const reserved = new Set(visible.filter((block) => !block.implicit).map((block) => block.id));
+    const used = new Set();
+    return Object.fromEntries(visible.map((block, index) => {
+      let id = block.id;
+      if (used.has(id) || (block.implicit && reserved.has(id))) {
+        let copy = 2;
+        do { id = `${block.id}~${copy++}`; } while (used.has(id) || reserved.has(id));
+      }
+      used.add(id);
+      return [id, blockOf(pd, block, index)];
+    }));
   } catch (error) {
     if (error instanceof YDecodeError) throw error;
     throw new YDecodeError("invalid-content", `Invalid Yjs page content: ${error.message}`);

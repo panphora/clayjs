@@ -2,16 +2,27 @@ import { attrKeys, sameJson } from "./layout.js";
 import { blockJson } from "../model.js";
 import { marksKey, marksAttrs } from "./marks.js";
 
-const implicitFlags = (doc) => {
-  const seen = new Set(), out = [];
-  doc.forEach((block) => { const id = block.attrs.id; const imp = typeof id === "string" && id.startsWith("~") && !seen.has(id); if (imp) seen.add(id); out.push(imp); });
+const implicitFlags = (doc, visible) => {
+  const byId = new Map(), out = [];
+  for (const segment of visible ?? []) {
+    const flags = byId.get(segment.id) ?? [];
+    flags.push(segment.implicit);
+    byId.set(segment.id, flags);
+  }
+  const next = new Map();
+  doc.forEach((block) => {
+    const id = block.attrs.id;
+    const index = next.get(id) ?? 0;
+    out.push(byId.get(id)?.[index] ?? false);
+    next.set(id, index + 1);
+  });
   return out;
 };
 const pickAttrs = (node) => { const o = {}; for (const k of attrKeys(node.type)) o[k] = node.attrs[k]; if (node.type.name === "table") o.rows = blockJson(node).rows; return o; };
 
 export function tokensOf(doc, alias = new Map(), visible = null) {
   const toks = [];
-  const flags = implicitFlags(doc);
+  const flags = implicitFlags(doc, visible);
   doc.forEach((block, _o, index) => {
     const implicit = flags[index] && !alias.has(block.attrs.id);
     const brk = visible ? visible[index]?.brk ?? null : null;
@@ -24,10 +35,10 @@ export function tokensOf(doc, alias = new Map(), visible = null) {
   return toks;
 }
 
-export function tokenIndex(doc, alias = new Map()) {
+export function tokenIndex(doc, alias = new Map(), visible = null) {
   const out = new Int32Array(doc.content.size + 1);
   let t = 0;
-  const flags = implicitFlags(doc);
+  const flags = implicitFlags(doc, visible);
   doc.forEach((block, o, index) => {
     const implicit = flags[index] && !alias.has(block.attrs.id);
     const open = implicit ? 0 : 1;
