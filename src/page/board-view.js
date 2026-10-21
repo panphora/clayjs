@@ -4,6 +4,7 @@ import { announce } from "./announce.js";
 import { BoardDrag } from "./board-drag.js";
 
 const N = schema.nodes;
+const boardViews = new WeakMap();
 const DUE = /^\d{4}-\d{2}-\d{2}$/;
 let boards = 0;
 
@@ -87,6 +88,9 @@ export class BoardView {
     this.panel = panel;
     this.uid = `page-board-${++boards}`;
     this.menu = null;
+    const views = boardViews.get(view) ?? new Map();
+    boardViews.set(view, views);
+    views.set(node.attrs.id, this);
     this.editing = null;
     this.rendering = false;
     const doc = view.dom.ownerDocument;
@@ -101,7 +105,7 @@ export class BoardView {
     this.dom.addEventListener("change", (event) => this.change(event));
     this.dom.addEventListener("keydown", (event) => this.keydown(event));
     this.dom.addEventListener("focusout", (event) => this.focusout(event));
-    this.dom.addEventListener("mousedown", (event) => { if (event.target.closest?.(".page-board-colmenu")) event.preventDefault(); });
+    this.dom.addEventListener("mousedown", (event) => { if (event.target.closest?.("button")) event.preventDefault(); });
     this.dragger = new BoardDrag(this);
     this.render();
   }
@@ -276,6 +280,7 @@ export class BoardView {
     const input = el(this.dom.ownerDocument, "input", cls, { type: "text", "aria-label": label, "data-focus": key, placeholder: cls === "page-board-new" ? "Card title" : "Column name" });
     input.value = value;
     input.addEventListener("keydown", (event) => {
+      if (event.isComposing || event.keyCode === 229) return;
       if (event.key === "Enter") { event.preventDefault(); this.finishEdit(true, true); }
       else if (event.key === "Escape") { event.preventDefault(); this.finishEdit(false, true); }
     });
@@ -303,8 +308,14 @@ export class BoardView {
     if (!editing) return;
     const value = editing.input.value.trim();
     if (editing.kind === "card" && save && value && refocus) {
-      editing.input.value = "";
-      this.run("createCard", { columnId: editing.id, title: value });
+      const result = this.run("createCard", { columnId: editing.id, title: value });
+      if (result?.status !== "refused") editing.input.value = "";
+      else if (!this.board.columns[editing.id]) {
+        this.editing = null;
+        this.render();
+        this.focusKey("add-column");
+        return;
+      }
       this.focusKey(`new:${editing.id}`);
       return;
     }
@@ -363,6 +374,7 @@ export class BoardView {
     const target = event.target.closest?.("[data-action]");
     if (!target || !this.dom.contains(target) || target.disabled) return;
     const { action, col, card } = target.dataset;
+    if (this.editing && action !== "add-card" && action !== "add-column" && action !== "rename") this.finishEdit(true, false);
     if (action === "card") this.openCard(card);
     else if (action === "colmenu") { if (this.menu === col) this.closeMenu(true); else this.openMenu(col); }
     else if (action === "rename") this.startEdit("rename", col);
@@ -411,7 +423,7 @@ export class BoardView {
   }
 
   update(node) {
-    if (node.type !== N.board) return false;
+    if (node.type !== N.board || node.attrs.id !== this.node.attrs.id) return false;
     const changed = !node.sameMarkup(this.node);
     this.node = node;
     if (changed) this.render();
@@ -423,6 +435,13 @@ export class BoardView {
   ignoreMutation() { return true; }
 
   destroy() {
+    const views = boardViews.get(this.view);
+    const next = views?.get(this.blockId);
+    if (this.editing && next && next !== this) {
+      next.editing = this.editing;
+      next.render();
+    }
+    if (next === this) views.delete(this.blockId);
     this.dragger.stop();
   }
 }

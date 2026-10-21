@@ -42,6 +42,6 @@ connection, and HTML Clay saves it with none either. See
 
 Type into the page, wait a moment for the status chip to say `Saved`, then open the file
 in a text editor. Your words are in the HTML, in the element you typed them into. There
-is no database and no JSON anywhere: the document is the app and the data.
+is no database and no JSON anywhere in `notes.html`: the document is the app and the data.
 
 Then reload the page. What comes back is what is on disk.

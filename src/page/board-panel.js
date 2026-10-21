@@ -40,6 +40,7 @@ export class CardPanel {
     this.textField(this.title, () => this.commitTitle());
     this.textField(this.ownerInput, () => this.commitOwner());
     this.dom.addEventListener("click", (event) => this.click(event));
+    this.dom.addEventListener("mousedown", (event) => { if (event.target.closest?.("button")) event.preventDefault(); });
     this.dom.addEventListener("change", (event) => { if (event.target.dataset.focus === "column") this.moveTo(event.target.value); });
     this.dom.addEventListener("keydown", (event) => this.keydown(event));
     this.scrim.addEventListener("click", () => this.hide(true));
@@ -47,6 +48,7 @@ export class CardPanel {
 
   textField(input, commit) {
     input.addEventListener("keydown", (event) => {
+      if (event.isComposing || event.keyCode === 229) return;
       if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); commit(); }
       else if (event.key === "Escape") { event.preventDefault(); this.hide(true); }
     });
@@ -133,12 +135,15 @@ export class CardPanel {
   commitTitle() {
     const card = this.card();
     const title = this.title.value.replace(/\s*\n\s*/g, " ");
+    this.title.value = title;
     if (card && title !== card.title) this.run("editCard", { title });
   }
 
   commitOwner() {
     const card = this.card();
-    const owner = this.ownerInput.value.trim() || null;
+    const typed = this.ownerInput.value.trim();
+    this.ownerInput.value = typed;
+    const owner = typed || null;
     if (card && owner !== (card.owner ?? null)) this.run("editCard", { owner });
   }
 
@@ -208,7 +213,7 @@ export class CardPanel {
       if (!ownerDirty) this.ownerInput.value = this.ownerBase;
       this.fields.replaceChildren(this.columnField(board, card), this.ownerField(card), this.dueField(card));
       this.actions.replaceChildren(...this.actionButtons(board, card));
-      if (key && key !== "title" && this.focusKey(key) && range) doc.activeElement.setSelectionRange?.(...range);
+      if (key && key !== "title" && this.focusKey(key)) { if (range) doc.activeElement.setSelectionRange?.(...range); }
       else if (key === "up" || key === "down") this.focusKey(key === "up" ? "down" : "up");
     } finally {
       this.rendering = false;
@@ -305,9 +310,10 @@ export class CardPanel {
     const target = event.target.closest?.("[data-action]");
     if (!target || target.disabled) return;
     const action = target.dataset.action;
+    if (action !== "close") this.commitTitle();
     if (action === "close") this.hide(true);
-    else if (action === "owner") this.run("editCard", { owner: target.dataset.owner });
-    else if (action === "owner-none") this.run("editCard", { owner: null });
+    else if (action === "owner") { this.ownerInput.value = this.ownerBase; this.run("editCard", { owner: target.dataset.owner }); }
+    else if (action === "owner-none") { this.ownerInput.value = this.ownerBase; this.run("editCard", { owner: null }); }
     else if (action === "due") this.openDue();
     else if (action === "up" || action === "down") this.step(action === "up" ? -1 : 1);
     else if (action === "delete") this.remove();

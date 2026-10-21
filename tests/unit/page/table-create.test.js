@@ -2,6 +2,10 @@ import { editor, select, key, posOf } from "./view-helpers.js";
 import { blockJson, orderedIds } from "../../../src/page/model.js";
 import { history, state as pmState } from "../../../src/vendor/prosemirror.vendor.js";
 import { gridFromClipboard } from "../../../src/page/table-paste.js";
+import * as Y from "../../../src/vendor/yjs.vendor.js";
+import { createStore } from "../../../src/live/store.js";
+import { createPageEditor } from "../../../src/page/editor.js";
+import { createYPageBinding, seedValue } from "../../../src/page/ybind/index.js";
 
 const clip = (data) => ({ clipboardData: { files: [], getData: (type) => data[type] ?? "" }, preventDefault() {} });
 const paste = (view, data) => view.someProp("handlePaste", (f) => f(view, clip(data), null)) ?? false;
@@ -149,4 +153,38 @@ test("the same lone line with a one-row HTML table makes a table", () => {
   const table = tableOf(view);
   expect(names(table)).toEqual(["Column 1", "Column 2"]);
   expect(grid(table)).toEqual([["Total:", "42"]]);
+});
+
+test("one Undo restores three whole paragraphs replaced by a multi-block paste", () => {
+  const view = editor(spec(5));
+  const before = view.state.doc;
+  select(view, posOf(view, "b0"), posOf(view, "b2", true));
+  expect(paste(view, tsv)).toBe(true);
+  expect(kinds(view)).toEqual(["table", "paragraph", "paragraph"]);
+  expect(history.undo(view.state, view.dispatch)).toBe(true);
+  expect(view.state.doc.eq(before)).toBe(true);
+});
+
+test("one Undo through the Yjs binding restores three whole paragraphs replaced by a multi-block paste", () => {
+  const value = seedValue([0, 1, 2, 3, 4].map((i) => ({ id: `b${i}`, text: `block${i}` })));
+  const store = createStore({ name: "page", value });
+  const binding = createYPageBinding({ store, setTimer: () => 1, clearTimer: () => {} });
+  const view = createPageEditor(document.body.appendChild(document.createElement("div")), { doc: binding.doc(), dispatch: binding.dispatch, history: false, undo: binding.undo, redo: binding.redo, board: binding.board });
+  binding.attach(view);
+  select(view, posOf(view, "b0"), posOf(view, "b2", true));
+  expect(paste(view, tsv)).toBe(true);
+  expect(kinds(view)).toEqual(["table", "paragraph", "paragraph"]);
+  expect(binding.undo()).toBe(true);
+  const restored = [];
+  view.state.doc.forEach((node) => restored.push([node.type.name, node.attrs.id, node.textContent]));
+  expect(restored).toEqual([
+    ["paragraph", "b0", "block0"],
+    ["paragraph", "b1", "block1"],
+    ["paragraph", "b2", "block2"],
+    ["paragraph", "b3", "block3"],
+    ["paragraph", "b4", "block4"],
+  ]);
+  view.destroy();
+  binding.dispose();
+  binding.ydoc.destroy();
 });

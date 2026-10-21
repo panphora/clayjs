@@ -1,4 +1,5 @@
-import { CARDS, tick, open, nodeBoard, stored, lanes, control, keyOn, deliver, settled } from "./board-helpers.js";
+import { COLUMNS, CARDS, clone, tick, open, nodeBoard, stored, lanes, control, keyOn, deliver, settled } from "./board-helpers.js";
+import { seedValue } from "../../../src/page/ybind/index.js";
 
 afterEach(() => { delete globalThis.clay; });
 
@@ -250,4 +251,128 @@ test("opening another card commits the first card's typing and moves the panel",
   expect(card(tab, "c").getAttribute("aria-expanded")).toBe("true");
   expect(tab.view.dom.parentElement.querySelectorAll(".page-board-panel")).toHaveLength(1);
   expect(tab.updates).toHaveLength(1);
+});
+
+test("a normalized owner commit leaves the field clean and a peer's later owner survives this tab's close", async () => {
+  const a = open(), b = open();
+  card(a, "b").click();
+  const owner = inPanel(a, "owner-name");
+  owner.focus();
+  owner.value = "Sam ";
+  owner.blur();
+  await tick();
+  expect(stored(a).cards.b.owner).toBe("Sam");
+  expect(inPanel(a, "owner-name").value).toBe("Sam");
+  deliver(a, b);
+  b.binding.board.editCard("bd", "b", { owner: "Lee" });
+  deliver(b, a);
+  expect(inPanel(a, "owner-name").value).toBe("Lee");
+  expect(stored(a).cards.b.owner).toBe("Lee");
+  inPanel(a, "close").click();
+  deliver(a, b);
+  for (const tab of [a, b]) expect(stored(tab).cards.b.owner).toBe("Lee");
+  settled(a);
+  settled(b);
+});
+
+test("a normalized title commit leaves the field clean and a peer's later title survives this tab's close", async () => {
+  const a = open(), b = open();
+  card(a, "a").click();
+  const title = inPanel(a, "title");
+  title.focus();
+  title.value = "Invite\nflow";
+  title.blur();
+  await tick();
+  expect(stored(a).cards.a.title).toBe("Invite flow");
+  expect(inPanel(a, "title").value).toBe("Invite flow");
+  deliver(a, b);
+  b.binding.board.editCard("bd", "a", { title: "Peer title" });
+  deliver(b, a);
+  expect(inPanel(a, "title").value).toBe("Peer title");
+  expect(stored(a).cards.a.title).toBe("Peer title");
+  inPanel(a, "close").click();
+  deliver(a, b);
+  for (const tab of [a, b]) expect(stored(tab).cards.a.title).toBe("Peer title");
+  settled(a);
+  settled(b);
+});
+
+test("closing the panel after an Undo does not re-apply the undone owner", async () => {
+  const tab = open();
+  card(tab, "b").click();
+  const owner = inPanel(tab, "owner-name");
+  owner.focus();
+  owner.value = "Sam ";
+  owner.blur();
+  await tick();
+  expect(stored(tab).cards.b.owner).toBe("Sam");
+  expect(tab.binding.undo()).toBe(true);
+  expect(stored(tab).cards.b.owner).toBeUndefined();
+  inPanel(tab, "close").click();
+  expect(stored(tab).cards.b.owner).toBeUndefined();
+  settled(tab);
+});
+
+test("Move down keeps focus on Move down when it stays enabled", () => {
+  const cards = {
+    c1: { pos: "1", col: "todo", title: "One" },
+    c2: { pos: "2", col: "todo", title: "Two" },
+    c3: { pos: "3", col: "todo", title: "Three" },
+    c4: { pos: "4", col: "todo", title: "Four" },
+  };
+  const value = seedValue([{ id: "bd", t: "board", attrs: { columns: clone(COLUMNS), cards } }]);
+  const tab = open(value);
+  card(tab, "c2").click();
+  inPanel(tab, "down").focus();
+  inPanel(tab, "down").click();
+  expect(lanes(tab)[0]).toBe("To do: One, Three, Two, Four");
+  expect(document.activeElement.dataset.focus).toBe("down");
+  settled(tab);
+});
+
+test("clicking Move down while the title is dirty commits the title and moves the card", () => {
+  const tab = open();
+  card(tab, "a").click();
+  const title = inPanel(tab, "title");
+  title.focus();
+  title.value = "Renamed";
+  inPanel(tab, "down").click();
+  expect(stored(tab).cards.a.title).toBe("Renamed");
+  expect(lanes(tab)[0]).toBe("To do: Invite flow, Renamed");
+  settled(tab);
+});
+
+test("an owner chip click wins over typed owner text and a later close does not overwrite it", async () => {
+  globalThis.clay = { people: { available: async () => [{ id: "person-sam", name: "Sam" }, { id: "person-lee", name: "Lee" }] } };
+  const tab = open();
+  card(tab, "b").click();
+  await tick();
+  const owner = inPanel(tab, "owner-name");
+  owner.focus();
+  owner.value = "Typed name";
+  panelOf(tab).querySelector('[data-owner="Lee"]').click();
+  expect(stored(tab).cards.b.owner).toBe("Lee");
+  expect(inPanel(tab, "owner-name").value).toBe("Lee");
+  inPanel(tab, "close").click();
+  expect(stored(tab).cards.b.owner).toBe("Lee");
+  settled(tab);
+});
+
+test("Enter during IME composition writes nothing from the new-card input or the panel title", () => {
+  const cardTab = open();
+  control(cardTab.root(), "add:todo").click();
+  const input = control(cardTab.root(), "new:todo");
+  input.value = "Half typed";
+  keyOn(input, "Enter", { isComposing: true });
+  expect(cardTab.updates).toHaveLength(0);
+  expect(control(cardTab.root(), "new:todo")).toBe(input);
+  expect(input.value).toBe("Half typed");
+
+  const panelTab = open();
+  card(panelTab, "a").click();
+  const title = inPanel(panelTab, "title");
+  title.value = "Composed";
+  keyOn(title, "Enter", { isComposing: true });
+  expect(panelTab.updates).toHaveLength(0);
+  expect(stored(panelTab).cards.a.title).toBe("Sample inbox");
 });

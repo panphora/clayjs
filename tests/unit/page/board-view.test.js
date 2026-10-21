@@ -1,6 +1,7 @@
 import { dueLabel, dueState, placeAfter, todayKey } from "../../../src/page/board-view.js";
 import { editor } from "./view-helpers.js";
 import { COLUMNS, CARDS, clone, tick, open, nodeBoard, stored, lanes, control as find, keyOn, deliver, settled } from "./board-helpers.js";
+import { seedValue } from "../../../src/page/ybind/index.js";
 
 const control = (tab, key) => find(tab.root(), key);
 
@@ -241,4 +242,86 @@ test("a card a peer deleted can be restored from this tab", () => {
   deliver(b, a);
   expect(lanes(a)).toEqual(["To do: Sample inbox, Invite flow", "In progress: ", "Done: Pricing page"]);
   expect(a.root().querySelector(".page-board-deleted")).toBeNull();
+});
+
+test("mousedown on board and panel buttons is cancelled but fields keep their press", () => {
+  const press = (node) => {
+    const event = new MouseEvent("mousedown", { bubbles: true, cancelable: true });
+    node.dispatchEvent(event);
+    return event.defaultPrevented;
+  };
+  const tab = open();
+  for (const button of tab.root().querySelectorAll("button")) expect(press(button)).toBe(true);
+  control(tab, "card:a").click();
+  const panel = tab.view.dom.parentElement.querySelector(".page-board-panel");
+  for (const button of panel.querySelectorAll("button")) expect(press(button)).toBe(true);
+  const column = find(panel, "column");
+  expect(press(column)).toBe(false);
+  find(panel, "due").click();
+  const due = find(panel, "due-input");
+  expect(press(due)).toBe(false);
+});
+
+test("typing in one lane and pressing another lane's Add card keeps the typed card and opens the other lane", () => {
+  const tab = open();
+  control(tab, "add:todo").click();
+  const first = control(tab, "new:todo");
+  first.focus();
+  first.value = "Typed";
+  control(tab, "add:doing").click();
+  const made = Object.values(stored(tab).cards).filter((item) => item.title === "Typed");
+  expect(made).toHaveLength(1);
+  expect(made[0].col).toBe("todo");
+  const second = control(tab, "new:doing");
+  expect(second).not.toBeNull();
+  expect(document.activeElement).toBe(second);
+  settled(tab);
+});
+
+test("a read-only editor keeps the typed new-card text on Enter", () => {
+  const tab = open();
+  tab.view.setProps({ editable: () => false });
+  control(tab, "add:todo").click();
+  const input = control(tab, "new:todo");
+  input.value = "Half typed";
+  keyOn(input, "Enter");
+  expect(input.isConnected).toBe(true);
+  expect(input.value).toBe("Half typed");
+  expect(tab.updates).toHaveLength(0);
+});
+
+test("Enter after a peer deletes the column closes the input and focuses Add column", () => {
+  const a = open(), b = open();
+  control(a, "add:todo").click();
+  const input = control(a, "new:todo");
+  input.value = "Typed";
+  b.binding.board.removeColumn("bd", "todo");
+  deliver(b, a);
+  keyOn(input, "Enter");
+  expect(a.root().querySelector(".page-board-new")).toBeNull();
+  expect(document.activeElement.dataset.focus).toBe("add-column");
+  settled(a);
+});
+
+test("a board view only takes its own node when another board is deleted in the same update", () => {
+  const value = seedValue([
+    { id: "p", text: "Before" },
+    { id: "bd", t: "board", attrs: { columns: clone(COLUMNS), cards: clone(CARDS) } },
+    { id: "bd2", t: "board", attrs: { columns: { x: { pos: "1", name: "X" } }, cards: { k: { pos: "1", col: "x", title: "K" } } } },
+    { id: "q", text: "After" },
+  ]);
+  const a = open(value), b = open(value);
+  const second = () => [...a.view.dom.querySelectorAll(".page-board")].find((node) => node.dataset.id === "bd2");
+  find(second(), "add:x").click();
+  const input = find(second(), "new:x");
+  input.value = "Typing in board 2";
+  let from = null, to = null;
+  b.view.state.doc.forEach((node, pos) => { if (node.attrs.id === "bd") { from = pos; to = pos + node.nodeSize; } });
+  b.view.dispatch(b.view.state.tr.delete(from, to));
+  b.binding.board.renameColumn("bd2", "x", "X2");
+  deliver(b, a);
+  expect([...a.view.dom.querySelectorAll(".page-board")].map((node) => node.dataset.id)).toEqual(["bd2"]);
+  expect(input.isConnected).toBe(true);
+  expect(find(second(), "new:x")).toBe(input);
+  expect(input.value).toBe("Typing in board 2");
 });

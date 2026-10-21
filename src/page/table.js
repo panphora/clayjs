@@ -299,8 +299,12 @@ export function pasteTable(view, event) {
   }
   const { from, to, empty, $from, $to } = st.selection;
   if (!empty && $from.index(0) !== $to.index(0)) {
-    view.dispatch(st.tr.deleteSelection());
-    return insertTableNode(view.state, view.dispatch, table);
+    const tr = st.tr.deleteSelection();
+    return insertTableNode(st.apply(tr), (inner) => {
+      for (const step of inner.steps) tr.step(step);
+      tr.setSelection(TextSelection.create(tr.doc, inner.selection.from));
+      view.dispatch(asStep(tr).scrollIntoView());
+    }, table);
   }
   return insertTableNode(st, view.dispatch, table, empty ? null : { from, to });
 }
