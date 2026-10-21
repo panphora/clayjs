@@ -57,6 +57,32 @@ export function tokenIndex(doc, alias = new Map(), visible = null) {
   return out;
 }
 
+export function textTokenRange(doc, from, to) {
+  const left = doc.resolve(from), right = doc.resolve(to);
+  if (left.depth !== 1 || right.depth !== 1 || left.index(0) !== right.index(0) || !left.parent.isTextblock) throw new RangeError("token range must stay inside one text block");
+  const target = left.index(0);
+  let prefix = 0, offset = 0, block = null;
+  doc.forEach((node, at, index) => {
+    if (index < target) prefix += node.isTextblock ? node.content.size + 1 : 1;
+    else if (index === target) { block = node; offset = at; }
+  });
+  const startOffset = from - offset - 1, endOffset = to - offset - 1;
+  const tokens = [];
+  let cursor = 0;
+  block.content.forEach((node) => {
+    const a = Math.max(0, startOffset - cursor), b = Math.min(node.nodeSize, endOffset - cursor);
+    if (a < b) {
+      if (node.isText) {
+        const marks = block.type.name === "code_block" ? [] : node.marks;
+        const mk = marksKey(marks), ma = marksAttrs(marks);
+        for (let i = a; i < b; i++) tokens.push({ k: "c", ch: node.text[i], mk, ma });
+      } else if (node.type.name === "hard_break") tokens.push({ k: "h" });
+    }
+    cursor += node.nodeSize;
+  });
+  return { start: prefix + 1 + startOffset, end: prefix + 1 + endOffset, tokens };
+}
+
 export const sameTok = (a, b) => a.k === b.k && (a.k === "b" ? a.id === b.id && a.t === b.t && sameJson(a.attrs, b.attrs) : a.k === "h" || (a.ch === b.ch && a.mk === b.mk));
 
 

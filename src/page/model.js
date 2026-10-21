@@ -217,13 +217,38 @@ export function identityPlugin() {
   // Documents with nothing to repair. An edit inside textblocks keeps a
   // document that way, so it skips the walk over every block.
   const clean = new WeakSet();
+  const ready = (doc) => {
+    const ids = new Set();
+    let previous = null, valid = true;
+    doc.forEach((node) => {
+      if (!node.attrs.id || ids.has(node.attrs.id) || !isKey(node.attrs.pos) || (previous !== null && previous >= node.attrs.pos)) valid = false;
+      ids.add(node.attrs.id);
+      previous = node.attrs.pos;
+      if (node.type.name !== "table") return;
+      const rows = new Set();
+      let rowPrevious = null;
+      node.forEach((row) => {
+        if (!row.attrs.id || rows.has(row.attrs.id) || !isKey(row.attrs.pos) || (rowPrevious !== null && rowPrevious >= row.attrs.pos)) valid = false;
+        rows.add(row.attrs.id);
+        rowPrevious = row.attrs.pos;
+      });
+    });
+    return valid;
+  };
   return new state.Plugin({
+    state: {
+      init(_config, editor) { if (ready(editor.doc)) clean.add(editor.doc); return null; },
+      apply() { return null; },
+    },
     appendTransaction(transactions, old, next) {
       if (clean.has(old.doc) && transactions.every(insideTextblocks)) {
         clean.add(next.doc);
         return null;
       }
-      if (!transactions.some((tr) => tr.docChanged && !tr.getMeta(REMOTE))) return null;
+      if (!transactions.some((tr) => tr.docChanged && !tr.getMeta(REMOTE))) {
+        if (clean.has(old.doc) && ready(next.doc)) clean.add(next.doc);
+        return null;
+      }
       const tr = next.tr;
       const fix = (node, at, change) => { if (change) tr.setNodeMarkup(at, null, { ...node.attrs, ...change }); };
       // Of two holders of an id, the one with the old block's content keeps it

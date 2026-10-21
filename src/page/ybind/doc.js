@@ -1,11 +1,13 @@
 import { schema } from "../schema.js";
 import { nodeFromBlock } from "../model.js";
 import { attrKeys, defaultOf } from "./layout.js";
+import { resolveBoardFields } from "./board.js";
 
 export const fieldsOf = (pd, b, type) => {
   const m = pd.attrs.get(b.baseId);
   const out = {};
   for (const k of attrKeys(type)) out[k] = m && m.has(k) ? m.get(k) : defaultOf(type, k);
+  if (type.name === "board") Object.assign(out, resolveBoardFields(pd.boardFields, b.baseId));
   return out;
 };
 

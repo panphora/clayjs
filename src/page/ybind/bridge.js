@@ -1,10 +1,11 @@
 import * as Y from "../../vendor/yjs.vendor.js";
-import { REMOTE_META, LOCAL, HISTORY_META, attrKeys } from "./layout.js";
+import { REMOTE_META, LOCAL, HISTORY_META, attrKeys, sameJson } from "./layout.js";
 import { walk, hashText } from "./walk.js";
 import { docOf } from "./doc.js";
 import { localGroup } from "./group.js";
 import { tokenIndex, yBefore } from "./tokens.js";
 import { state as pmState } from "../../vendor/prosemirror.vendor.js";
+import { repairSiblings } from "../model.js";
 
 const yIndexAt = (doc, holes, pos, visible) => yBefore(holes, tokenIndex(doc, new Map(), visible)[pos]);
 
@@ -24,6 +25,16 @@ export function posAtY(doc, holes, tokens, y, visible = null) {
 
 export const shapeOf = (doc) => { const out = []; doc.forEach((b) => out.push([b.type.name, b.attrs.id, JSON.stringify(Object.fromEntries(attrKeys(b.type).map((k) => [k, b.attrs[k]]))), b.isTextblock || b.type.name === "table" ? JSON.stringify(b.content.toJSON()) : null])); return JSON.stringify(out); };
 export const bareShape = (doc) => { const out = []; doc.forEach((b) => out.push([b.type.name, JSON.stringify(Object.fromEntries(attrKeys(b.type).map((k) => [k, b.attrs[k]]))), b.isTextblock || b.type.name === "table" ? JSON.stringify(b.content.toJSON()) : null])); return JSON.stringify(out); };
+export function sameBareShape(a, b) {
+  if (a.childCount !== b.childCount) return false;
+  for (let i = 0; i < a.childCount; i++) {
+    const left = a.child(i), right = b.child(i);
+    if (left.type !== right.type) return false;
+    if (attrKeys(left.type).some((key) => !sameJson(left.attrs[key], right.attrs[key]))) return false;
+    if ((left.isTextblock || left.type.name === "table") && !left.content.eq(right.content)) return false;
+  }
+  return true;
+}
 
 export function docDiff(oldDoc, newDoc) {
   const start = oldDoc.content.findDiffStart(newDoc.content);
@@ -35,18 +46,35 @@ export function docDiff(oldDoc, newDoc) {
 }
 
 
-export function keepViewPos(derived, current) {
-  const pos = new Map();
-  current.forEach((b) => { if (b.attrs.id) pos.set(b.attrs.id, b.attrs.pos); });
+export function keepViewPos(derived, current = null) {
+  const previous = new Map();
+  current?.forEach((block) => { if (block.attrs.id) previous.set(block.attrs.id, block); });
   const blocks = [];
+  derived.forEach((block) => blocks.push(block));
+  const positions = blocks.map((block) => ({ id: block.attrs.id, pos: previous.get(block.attrs.id)?.attrs.pos ?? block.attrs.pos }));
+  const changes = repairSiblings(positions, "b");
   let changed = false;
-  derived.forEach((b) => {
-    const p = pos.get(b.attrs.id);
-    if (!("pos" in b.type.attrs) || p === undefined || p === b.attrs.pos) { blocks.push(b); return; }
+  const placed = blocks.map((block, index) => {
+    const pos = changes[index]?.pos ?? positions[index].pos;
+    let content = block.content;
+    if (block.type.name === "table") {
+      const oldRows = new Map();
+      previous.get(block.attrs.id)?.forEach((row) => { if (row.attrs.id) oldRows.set(row.attrs.id, row.attrs.pos); });
+      const rows = [];
+      block.forEach((row) => rows.push(row));
+      const rowPositions = rows.map((row) => ({ id: row.attrs.id, pos: oldRows.get(row.attrs.id) ?? row.attrs.pos }));
+      const rowChanges = repairSiblings(rowPositions, "r");
+      const placedRows = rows.map((row, i) => {
+        const rowPos = rowChanges[i]?.pos ?? rowPositions[i].pos;
+        return rowPos === row.attrs.pos ? row : row.type.create({ ...row.attrs, pos: rowPos }, row.content, row.marks);
+      });
+      if (placedRows.some((row, i) => row !== rows[i])) content = placedRows;
+    }
+    if (pos === block.attrs.pos && content === block.content) return block;
     changed = true;
-    blocks.push(b.type.create({ ...b.attrs, pos: p }, b.content, b.marks));
+    return block.type.create({ ...block.attrs, pos }, content, block.marks);
   });
-  return changed ? derived.type.create(derived.attrs, blocks) : derived;
+  return changed ? derived.type.create(derived.attrs, placed) : derived;
 }
 
 export function createBridge({ pd, onNotice = () => {}, stats = { groups: 0, mismatch: 0, renders: 0, first: null }, captureTimeout = 500 }) {
@@ -67,11 +95,11 @@ export function createBridge({ pd, onNotice = () => {}, stats = { groups: 0, mis
     return docOf(pd, w);
   };
   let saved = null;
-  const render = (own = false) => {
+  const render = (own = false, fresh = null) => {
     stats.renders++;
     const keep = saved;
     saved = null;
-    const derived = keepViewPos(refresh(), view.state.doc);
+    const derived = keepViewPos(fresh ?? refresh(), view.state.doc);
     const d = docDiff(view.state.doc, derived);
     if (!d) return;
     const tr = view.state.tr.replace(d.start, d.endA, derived.slice(d.start, d.endB)).setMeta(REMOTE_META, true).setMeta("addToHistory", false);
@@ -120,11 +148,11 @@ export function createBridge({ pd, onNotice = () => {}, stats = { groups: 0, mis
       const history = transactions.every((t) => t.getMeta("addToHistory") !== false);
       localGroup(pd, local, w, stats, um, history);
       const derived = refresh();
-      if (bareShape(derived) !== bareShape(view.state.doc)) {
+      if (!sameBareShape(derived, view.state.doc)) {
         stats.mismatch++;
         stats.first ??= { before: bareShape(local[0].before), pm: bareShape(view.state.doc), y: bareShape(derived) };
       }
-      render();
+      render(false, derived);
     },
     restore(key) {
       if (!pd.gone.has(key)) return;

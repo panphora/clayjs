@@ -1,10 +1,11 @@
 import { transform } from "../../vendor/prosemirror.vendor.js";
 import { schema } from "../schema.js";
+import { insideTextblocks } from "../model.js";
 import { LOCAL, HISTORY_META, attrKeys, defaultOf, mintId } from "./layout.js";
-import { tokensOf, tokenIndex, yAfter } from "./tokens.js";
+import { tokensOf, tokenIndex, textTokenRange, yAfter } from "./tokens.js";
 import { CHUNK_CHARS, insertTokens, applyRegion, markRange } from "./writer.js";
 
-const { AddMarkStep, RemoveMarkStep, AttrStep, Mapping } = transform;
+const { AddMarkStep, RemoveMarkStep, AttrStep, ReplaceStep, Mapping } = transform;
 
 const tableRange = (doc, from, to) => {
   const start = doc.resolve(from), end = doc.resolve(to);
@@ -25,8 +26,6 @@ export function localGroup(pd, transactions, w, stats, um = null, history = true
   implicit.sort((a, b) => b.tok - a.tok);
   for (const m of implicit) { m.alias = mintId(pd); alias.set(m.id, m.alias); }
   const holes = alias.size ? w.holes.map((h) => ({ at: h.at + implicit.filter((m) => m.tok < h.at).length, len: h.len })) : w.holes;
-  const ia = tokenIndex(d0, alias, w.visible), ib = tokenIndex(dm, alias, w.visible);
-  const bt = tokensOf(d0, alias, w.visible), at = tokensOf(dm, alias, w.visible);
   const regions = [];
   const markSteps = [];
   steps.forEach((step, i) => {
@@ -49,20 +48,31 @@ export function localGroup(pd, transactions, w, stats, um = null, history = true
     if (last && (r.oa <= last.ob || r.na <= last.nb)) { last.ob = Math.max(last.ob, r.ob); last.nb = Math.max(last.nb, r.nb); }
     else merged.push({ ...r });
   }
-  const span = merged.reduce((n, r) => n + (ib[r.nb] - ib[r.na]), 0);
+  const regional = !implicit.length && !markSteps.length && steps.every((step) => step instanceof ReplaceStep) && transactions.every(insideTextblocks);
+  const ia = regional ? null : tokenIndex(d0, alias, w.visible);
+  const ib = regional ? null : tokenIndex(dm, alias, w.visible);
+  const bt = regional ? [] : tokensOf(d0, alias, w.visible);
+  const at = regional ? [] : tokensOf(dm, alias, w.visible);
+  const pieces = regional ? merged.map((r) => ({ old: textTokenRange(d0, r.oa, r.ob), next: textTokenRange(dm, r.na, r.nb) })) : null;
+  const span = regional ? pieces.reduce((n, p) => n + p.next.end - p.next.start, 0) : merged.reduce((n, r) => n + (ib[r.nb] - ib[r.na]), 0);
   const chunked = span > CHUNK_CHARS;
   const tx = chunked ? (fn) => pd.ydoc.transact((tr) => { tr.meta.set(HISTORY_META, history); fn(); }, LOCAL) : (fn) => fn();
   const ctx = { pd, holes, bt, tx };
   const sig = (toks) => toks.filter((t) => t.k === "b").map((t) => `${t.id}|${t.t}|${JSON.stringify(t.attrs)}`).join("\n");
-  const structural = markSteps.length > 0 || sig(bt) !== sig(at);
+  const structural = !regional && (markSteps.length > 0 || sig(bt) !== sig(at));
   const write = () => {
     for (const m of implicit) {
       insertTokens(pd, yAfter(w.holes, m.tok), [{ k: "b", id: m.alias, t: m.t, attrs: Object.fromEntries(attrKeys(schema.nodes[m.t]).map((kk) => [kk, defaultOf(schema.nodes[m.t], kk)])) }], tx);
     }
     for (let q = merged.length - 1; q >= 0; q--) {
-      const r = merged[q];
-      const ta = ia[r.oa], tb = ia[r.ob];
-      applyRegion(ctx, ta, bt.slice(ta, tb), at.slice(ib[r.na], ib[r.nb]));
+      if (regional) {
+        const { old, next } = pieces[q];
+        applyRegion(ctx, old.start, old.tokens, next.tokens);
+      } else {
+        const r = merged[q];
+        const ta = ia[r.oa], tb = ia[r.ob];
+        applyRegion(ctx, ta, bt.slice(ta, tb), at.slice(ib[r.na], ib[r.nb]));
+      }
     }
     for (const { i, step } of markSteps) {
       const fwd = new Mapping(maps.slice(i + 1));
@@ -84,5 +94,5 @@ export function localGroup(pd, transactions, w, stats, um = null, history = true
     um?.stopCapturing();
   }
   stats.groups++;
-  stats.lastGroup = { chunked, structural, span };
+  stats.lastGroup = { chunked, structural, regional, span };
 }

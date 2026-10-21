@@ -6,6 +6,7 @@ import { ATOM, BREAK, DEFAULTS, blocksOfValues, orderedIds, unitsOf, runsOf, can
 import { createPageDoc, attrKeys, defaultOf, SEED } from "./layout.js";
 import { blocksFromYValue } from "./decode.js";
 import { PART, enc } from "./provider.js";
+import { boardKey } from "./board.js";
 
 export class YMigrationError extends Error {
   constructor(message) {
@@ -85,7 +86,19 @@ export function migrateHybridValues(values) {
       for (const id of ids) {
         const block = blocks[id];
         const { pos, c, m, ...fields } = block;
+        if (block.t === "board") { delete fields.columns; delete fields.cards; }
         pd.attrs.set(id, new Y.Map(Object.entries(copy(fields))));
+        if (block.t === "board") {
+          for (const [columnId, column] of Object.entries(block.columns ?? {})) {
+            pd.boardFields.set(boardKey(id, "column", columnId, "alive"), true);
+            for (const field of ["name", "pos"]) pd.boardFields.set(boardKey(id, "column", columnId, field), column[field] ?? "");
+          }
+          for (const [cardId, card] of Object.entries(block.cards ?? {})) {
+            pd.boardFields.set(boardKey(id, "card", cardId, "alive"), true);
+            for (const field of ["title", "owner", "due"]) if (card[field] !== undefined) pd.boardFields.set(boardKey(id, "card", cardId, field), card[field]);
+            pd.boardFields.set(boardKey(id, "card", cardId, "placement"), { columnId: card.col ?? "", pos: card.pos ?? "" });
+          }
+        }
         pd.flow.insertEmbed(pd.flow.length, { b: id }, {});
         if (!c) continue;
         let offset = 0;

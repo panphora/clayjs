@@ -2,13 +2,19 @@ import * as Y from "../../vendor/yjs.vendor.js";
 import { schema } from "../schema.js";
 import { markKey } from "../inline.js";
 import { ATOM, BREAK, DEFAULTS, blocksOfValues, runsOf } from "../projection.js";
-import { createPageDoc, attrKeys, defaultOf, sameJson } from "./layout.js";
+import { createPageDoc, attrKeys, defaultOf, sameJson, PAGE_ROOTS } from "./layout.js";
+import { resolveBoardFields } from "./board.js";
 import { markName } from "./marks.js";
 import { walk } from "./walk.js";
 import { docFromValue, YDecodeError } from "./provider.js";
 
 const copy = (value) => value && typeof value === "object" ? JSON.parse(JSON.stringify(value)) : value;
 const unsupported = (message) => { throw new YDecodeError("unsupported-content", message); };
+const hasContent = (root) => {
+  if (root._map) for (const item of root._map.values()) if (!item.deleted) return true;
+  for (let item = root._start; item; item = item.right) if (!item.deleted) return true;
+  return false;
+};
 
 function validateFlow(pd) {
   if (pd.flow._map.size) unsupported("The page flow must contain text and block markers");
@@ -37,10 +43,12 @@ function blockOf(pd, block, index) {
   const attrs = pd.attrs.get(block.baseId);
   const out = { t: block.t, pos: String(index + 1).padStart(8, "0") };
   for (const key of attrKeys(type)) {
+    if (block.t === "board" && (key === "columns" || key === "cards")) continue;
     const value = attrs?.has(key) ? attrs.get(key) : defaultOf(type, key);
     if (!sameJson(value, defaultOf(type, key))) out[key] = copy(value);
   }
   if (block.t === "table") out.rows = copy(attrs?.get("rows") ?? {});
+  if (block.t === "board") Object.assign(out, resolveBoardFields(pd.boardFields, block.baseId));
   if (type.isTextblock) {
     let text = "";
     const units = [];
@@ -65,8 +73,10 @@ function blockOf(pd, block, index) {
 export function blocksFromYValue(value) {
   const doc = docFromValue(value, { strict: true });
   try {
+    for (const [name, root] of doc.share) if (!PAGE_ROOTS.includes(name) && hasContent(root)) unsupported(`Unsupported page root: ${name}`);
     const pd = createPageDoc(doc);
     validateFlow(pd);
+    resolveBoardFields(pd.boardFields);
     const visible = walk(pd).visible;
     const reserved = new Set(visible.filter((block) => !block.implicit).map((block) => block.id));
     const used = new Set();
