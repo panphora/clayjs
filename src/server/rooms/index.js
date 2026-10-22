@@ -48,7 +48,7 @@ export { PageConversionError, parsePageConversion, checkPageConversion } from '.
 
 export { checkPageInitial, checkPageWriteAdmission } from './page-write-admission.js';
 
-export { PageFormatError, checkPageWriteFormat } from './page-write-guard.js';
+export { PageFormatError, checkPageWriteFormat, pageLineageLost } from './page-write-guard.js';
 
 export { makePageTransition, pageTransitionState } from './live-page-history.js';
 

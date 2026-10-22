@@ -44,6 +44,7 @@ export function checkPageWriteAdmission({ currentHtml, html, header = null, ifMa
   const before = inspectPage(currentHtml ?? '');
   const after = inspectPage(html ?? '');
   const converted = before.kind === 'yjs' || room?.pageTransition?.format === 'yjs';
+  if (converted && after.kind === 'none' && header == null) return 'ordinary';
   if (converted && after.kind !== 'yjs') throw new PageFormatError();
   if (header !== null && header !== undefined) {
     checkPageConversion({ header, currentHtml, html, ifMatch, room });
