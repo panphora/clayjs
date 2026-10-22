@@ -50,22 +50,19 @@ const spanOf = (html, loc) => {
   return [start, end];
 };
 
-// The stored file and the page tag it held. A lone Yjs page tag with no
-// revisioned article to belong to is still removed, with no state; any other
-// shape comes back unchanged.
+// The stored file and the page tag it held, or the html unchanged with no state
+// when it is not exactly one Yjs page tag beside exactly one revisioned article.
+// A tag with no revisioned article stays in the file: there it is the only copy
+// of the page, and no record could hold it.
 export function splitPage(html) {
   if (typeof html !== 'string' || inspectPage(html).kind !== 'yjs') return { file: html, state: null };
   const { articles, tags, rev } = locate(html);
-  const loc = tags.length === 1 ? tags[0].sourceCodeLocation : null;
-  if (!loc) return { file: html, state: null };
-  const article = articles[0]?.sourceCodeLocation;
-  if (articles.length === 1 && rev) {
-    if (!article || (loc.startOffset < article.endOffset && loc.endOffset > article.startOffset)) return { file: html, state: null };
-    const [start, end] = spanOf(html, loc);
-    return { file: html.slice(0, start) + html.slice(end), state: { v: 1, rev, tag: html.slice(loc.startOffset, loc.endOffset) } };
-  }
+  if (articles.length !== 1 || tags.length !== 1 || !rev) return { file: html, state: null };
+  const article = articles[0].sourceCodeLocation;
+  const loc = tags[0].sourceCodeLocation;
+  if (!article || !loc || (loc.startOffset < article.endOffset && loc.endOffset > article.startOffset)) return { file: html, state: null };
   const [start, end] = spanOf(html, loc);
-  return { file: html.slice(0, start) + html.slice(end), state: null };
+  return { file: html.slice(0, start) + html.slice(end), state: { v: 1, rev, tag: html.slice(loc.startOffset, loc.endOffset) } };
 }
 
 // The document an editor sees: the file with the stored page tag put back

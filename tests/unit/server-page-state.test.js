@@ -111,13 +111,11 @@ test("a CR-only document round trips byte for byte", () => {
   expect(splitPage(composed)).toEqual({ file, state });
 });
 
-test("an unformable page tag is stripped and leaves no state", () => {
+test("a page tag with no revisioned article stays in the file", () => {
   const noArticle = doc("", `  ${pageTag(yValue)}`);
   const noRev = doc("", `  ${pageTag(yValue)}\n  <article class="page" data-page="1"></article>`);
   const twoArticles = doc("", `  ${pageTag(yValue)}\n  ${article()}\n  ${article()}`);
-  expect(splitPage(noArticle)).toEqual({ file: doc("", "").replace("\n\n</body>", "\n</body>"), state: null });
-  expect(splitPage(noRev)).toEqual({ file: doc("", `  <article class="page" data-page="1"></article>`), state: null });
-  expect(splitPage(twoArticles)).toEqual({ file: doc("", `  ${article()}\n  ${article()}`), state: null });
+  for (const html of [noArticle, noRev, twoArticles]) expect(splitPage(html)).toEqual({ file: html, state: null });
 });
 
 test("two page tags leave the document unchanged", () => {
