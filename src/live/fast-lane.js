@@ -24,6 +24,7 @@ export const FRAME_BYTES = 63 * 1024;
 // What a host still on the old 16 KB body cap takes: a multi-op frame it
 // answers 413 is packed again at this size for the rest of the session.
 export const OLD_FRAME_BYTES = 15 * 1024;
+const PAGE_STORE = /^page(\.[0-9]+)?$/;
 const BUFFER_MAX = 512;
 const RETRY_MAX_MS = 8000;
 const REVOKED = new Set([401, 403]);
@@ -78,6 +79,7 @@ export function createFastLane({
   let synced = false;
   let epoch = null;
   let receiptGeneration = null;
+  let pageGeneration = null;
   let provenanceVersion = 0;
   let seq = 0;
   let writer = null;
@@ -201,7 +203,7 @@ export function createFastLane({
         return nextFrame();
       }
       const take = lane.unsent.splice(0, count);
-      const frame = { n: ++lane.n, ops: take.map((entry) => entry.op), entries: take, first: take[0].id, through: take[take.length - 1].id, seq: null, sent: false, receiptGeneration };
+      const frame = { n: ++lane.n, ops: take.map((entry) => entry.op), entries: take, first: take[0].id, through: take[take.length - 1].id, seq: null, sent: false, receiptGeneration, pageGeneration };
       lane.framed = Math.max(lane.framed, frame.through);
       lane.awaiting.push(frame);
       return { name, lane, frame };
@@ -229,7 +231,7 @@ export function createFastLane({
     lastSentAt = now();
     let result;
     try {
-      result = await transport.send(clientId, { name, n: frame.n, ops: frame.ops, epoch: sentEpoch, ...(conn !== undefined && { conn }), ...(frame.receiptGeneration !== null && { receiptGeneration: frame.receiptGeneration }) });
+      result = await transport.send(clientId, { name, n: frame.n, ops: frame.ops, epoch: sentEpoch, ...(conn !== undefined && { conn }), ...(frame.receiptGeneration !== null && { receiptGeneration: frame.receiptGeneration }), ...(frame.pageGeneration !== null && PAGE_STORE.test(name) && { pageGeneration: frame.pageGeneration }) });
     } catch {
       result = null;
     }
@@ -253,6 +255,7 @@ export function createFastLane({
       frame.sent = false;
       frame.seq = null;
       if (frame.epoch !== epoch) frame.receiptGeneration = receiptGeneration;
+      if (frame.epoch !== epoch) frame.pageGeneration = pageGeneration;
       return;
     }
     // Its store left the room meanwhile: its ops stay pending for the save,
@@ -483,6 +486,7 @@ export function createFastLane({
     const fresh = state.epoch !== epoch;
     provenanceVersion = Number.isInteger(state.provenanceVersion) ? state.provenanceVersion : 0;
     receiptGeneration = Number.isSafeInteger(state.receiptGeneration) ? state.receiptGeneration : null;
+    pageGeneration = typeof state.pageTransition?.id === "string" ? state.pageTransition.id : null;
     let joined = false;
     // Every store is read whole here.
     missed = false;
@@ -549,6 +553,7 @@ export function createFastLane({
           frame.sent = false;
           frame.seq = null;
           frame.receiptGeneration = receiptGeneration;
+          frame.pageGeneration = pageGeneration;
         }
         lane.awaiting = resend;
         entry.store.rebase(room.value, { source: "state", dropIds, room: { seq, fresh: true, moves: state.moves?.[name] ?? null, floor: Number.isInteger(room.floor) ? room.floor : null } });
@@ -795,7 +800,7 @@ export function createFastLane({
           const take = pending.splice(0, count);
           const frame = { n: ++lane.n, ops: take.map((e) => e.op), entries: take,
             first: take[0].id, through: take[take.length - 1].id, seq: null,
-            sent: false, refused: true, epoch, client: clientId, receiptGeneration };
+            sent: false, refused: true, epoch, client: clientId, receiptGeneration, pageGeneration };
           lane.awaiting.push(frame);
           lane.framed = frame.through;
         }
