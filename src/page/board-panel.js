@@ -90,10 +90,12 @@ export class CardPanel {
     this.dueInput = null;
     if (!this.dom.isConnected) this.shell.append(this.scrim, this.dom);
     this.shell.classList.add("has-board-panel");
-    this.dom.setAttribute("aria-modal", String(!!this.view.dom.ownerDocument.defaultView.matchMedia?.(NARROW).matches));
+    const sheet = !!this.view.dom.ownerDocument.defaultView.matchMedia?.(NARROW).matches;
+    this.dom.setAttribute("aria-modal", String(sheet));
     this.render(true);
     this.setExpanded(true);
-    this.title.focus();
+    if (sheet) this.focusKey("close");
+    else this.title.focus();
     this.loadPeople();
   }
 

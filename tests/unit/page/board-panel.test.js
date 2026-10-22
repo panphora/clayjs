@@ -54,6 +54,7 @@ test("on a narrow screen the panel is a modal sheet that keeps Tab inside it", (
     const tab = open();
     card(tab, "a").click();
     expect(panelOf(tab).getAttribute("aria-modal")).toBe("true");
+    expect(document.activeElement).toBe(inPanel(tab, "close"));
     const title = inPanel(tab, "title"), last = inPanel(tab, "delete");
     expect(keyOn(title, "Tab", { shiftKey: true })).toBe(false);
     expect(document.activeElement).toBe(last);
