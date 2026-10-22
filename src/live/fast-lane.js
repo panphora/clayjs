@@ -478,7 +478,9 @@ export function createFastLane({
     const fresh = state.epoch !== epoch;
     provenanceVersion = Number.isInteger(state.provenanceVersion) ? state.provenanceVersion : 0;
     receiptGeneration = Number.isSafeInteger(state.receiptGeneration) ? state.receiptGeneration : null;
+    const priorGeneration = pageGeneration;
     pageGeneration = typeof state.pageTransition?.id === "string" ? state.pageTransition.id : null;
+    const replaced = pageGeneration !== priorGeneration;
     let joined = false;
     // Every store is read whole here.
     missed = false;
@@ -501,9 +503,10 @@ export function createFastLane({
         // there are no frames of it to miss. Already out: its value still
         // descends from where it left. A store the room held and has now
         // dropped was replaced by a document without it, which a 404 to this
-        // tab's next frame would also say.
+        // tab's next frame would also say. A replacement always installs a new page
+        // transition; a store dropped for size leaves it, and leaves quietly.
         if (!lane.out) {
-          if (held) tell(name, { phase: "left", code: "no-store" });
+          if (held && replaced) tell(name, { phase: "left", code: "no-store" });
           leaveRoom(name, lane, false);
         }
         // A read the barrier waited for says no room holds this store: the file is its authority.

@@ -37,6 +37,7 @@ function createRoom(initial, marks = {}) {
     seq: room.seq,
     writer: room.writer,
     ...(room.conn !== undefined && { conn: room.conn }),
+    ...(room.pageTransition !== undefined && { pageTransition: room.pageTransition }),
     stores: Object.fromEntries(
       Object.entries(room.stores).map(([name, value]) => [
         name,
@@ -1248,18 +1249,35 @@ test("after an epoch change the read names the new epoch only once this tab appl
   expect(room.reads.at(-1)).toEqual({ epoch: "e2", seq: 1 });
 });
 
-test("a room state that drops a store this tab held says no-store; a store never in the room stays quiet", async () => {
+test("a replacement that drops a store this tab held says no-store; a size drop and a store never in the room stay quiet", async () => {
   const room = createRoom({ game: { score: 0 } });
+  room.pageTransition = { id: "t1" };
   const a = client(room, "a", { score: 0 });
   const left = [];
   a.store.onDelivery((event) => { if (event.phase === "left") left.push(event.code); });
   room.open("a");
   await settle();
   expect(a.game.status.mode).toBe("fast");
+  room.pageTransition = { id: "t2" };
   room.restart({ other: {} });
   await settle();
   expect(left).toEqual(["no-store"]);
   expect(a.game.status.mode).toBe("file");
+
+  const sized = createRoom({ game: { score: 0 } });
+  sized.pageTransition = { id: "t1" };
+  const c = client(sized, "c", { score: 0 });
+  const dropped = [];
+  c.store.onDelivery((event) => { if (event.phase === "left") dropped.push(event.code); });
+  sized.open("c");
+  await settle();
+  expect(c.game.status.mode).toBe("fast");
+  delete sized.stores.game;
+  sized.seq += 1;
+  sized.broadcast("state", sized.state());
+  await settle();
+  expect(dropped).toEqual([]);
+  expect(c.game.status.mode).toBe("file");
 
   const cold = createRoom({ other: {} });
   const b = client(cold, "b", { score: 0 });
