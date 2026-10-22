@@ -42,6 +42,8 @@ export {
 
 export { isHybridPageValue, isYPageValue, inspectPage, pageBaseline } from './page-admission.js';
 
+export { splitPage, composePage } from './page-state.js';
+
 export { PageConversionError, parsePageConversion, checkPageConversion } from './page-conversion.js';
 
 export { checkPageInitial, checkPageWriteAdmission } from './page-write-admission.js';
