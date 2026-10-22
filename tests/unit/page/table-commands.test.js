@@ -2,7 +2,8 @@ import { pageState } from "../../../src/page/editor.js";
 import { state as pmState, history } from "../../../src/vendor/prosemirror.vendor.js";
 import { orderedIds, blockJson } from "../../../src/page/model.js";
 import { REMOTE_META } from "../../../src/page/ybind/layout.js";
-import { insertTable, nextCell, prevCell, cellBelow, addRow, deleteRow, addColumn, deleteColumn, renameColumn, setColumnKind, sortBy } from "../../../src/page/table.js";
+import { insertTable, nextCell, prevCell, cellBelow, addRow, deleteRow, addColumn, deleteColumn, renameColumn, setColumnKind, sortBy, moveColumn } from "../../../src/page/table.js";
+import { placeAt } from "../../../src/page/ybind/board-commands.js";
 
 const { TextSelection } = pmState;
 const initial = { p: { t: "paragraph", pos: "V", c: "" } };
@@ -143,4 +144,30 @@ test("a peer's edit of the sorted column is left for the peer's own tab to clear
   st = select(st, 0, 0);
   st = st.apply(st.tr.insertText("peer").setMeta(REMOTE_META, true).setMeta("addToHistory", false));
   expect(record(st).sort).toEqual({ col, dir: "asc" });
+});
+
+test("placeAt lands inside a tie group and gives the tied items after the slot fresh positions", () => {
+  const pos = { a: "V", b: "V", c: "k" };
+  const { pos: key, rekey } = placeAt(["a", "b", "c"], (id) => pos[id], 1);
+  expect(key > "V" && key < "k").toBe(true);
+  expect(rekey).toHaveLength(1);
+  expect(rekey[0][0]).toBe("b");
+  expect(rekey[0][1] > key && rekey[0][1] < "k").toBe(true);
+  expect(placeAt(["a", "b", "c"], (id) => pos[id], 2)).toEqual({ pos: expect.any(String), rekey: [] });
+  expect(placeAt(["a", "b"], (id) => pos[id], 1).rekey.map(([id, next]) => [id, next > "V"])).toEqual([["b", true]]);
+});
+
+test("a column added or moved between two tied columns lands where it shows", () => {
+  const tied = { t: { t: "table", pos: "V", cols: { a: { pos: "V", name: "A" }, b: { pos: "V", name: "B" }, c: { pos: "k", name: "C" } }, rows: { r: { pos: "V", cells: { a: "1", b: "2", c: "3" } } } } };
+  let st = select(pageState(tied), 0, 0);
+  st = run(st, addColumn(true));
+  const added = record(st);
+  const order = orderedIds(added.cols);
+  expect(order[0]).toBe("a");
+  expect(order[2]).toBe("b");
+  expect(order[3]).toBe("c");
+  expect(new Set(Object.values(added.cols).map((col) => col.pos)).size).toBe(4);
+  let moved = select(pageState(tied), 0, 2);
+  moved = run(moved, moveColumn(-1));
+  expect(orderedIds(record(moved).cols)).toEqual(["a", "c", "b"]);
 });

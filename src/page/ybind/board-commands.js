@@ -30,6 +30,24 @@ export function slotKey(positions, index) {
   return `${positions.reduce((max, pos) => (pos > max ? pos : max), "")}V`;
 }
 
+export function placeAt(ids, posOf, index) {
+  const positions = ids.map(posOf);
+  const lower = index > 0 ? positions[index - 1] : null;
+  let end = index;
+  while (lower !== null && end < positions.length && positions[end] === lower) end++;
+  if (end === index) return { pos: slotKey(positions, index), rekey: [] };
+  const upper = positions.slice(end).find((pos) => pos > lower) ?? null;
+  const keys = [];
+  for (let i = index, prev = lower; i <= end; i++) keys.push(prev = slotKey(upper === null ? [prev] : [prev, upper], 1));
+  return { pos: keys[0], rekey: ids.slice(index, end).map((id, i) => [id, keys[i + 1]]) };
+}
+
+const place = (map, ids, index) => {
+  const { pos, rekey } = placeAt(ids, (id) => map[id].pos, index);
+  for (const [id, next] of rekey) map[id] = { ...map[id], pos: next };
+  return pos;
+};
+
 export function createBoardCommands({ pd, um = null, origins = null, render = () => {} }) {
   const boardAt = (blockId) => {
     if (typeof blockId !== "string") return null;
@@ -68,7 +86,7 @@ export function createBoardCommands({ pd, um = null, origins = null, render = ()
       const ids = orderedIds(board.columns);
       if (badAfter(ids, afterId)) return refuse("missing-destination");
       const id = newId("c");
-      after.columns[id] = { pos: slotKey(ids.map((other) => board.columns[other].pos), indexAfter(ids, afterId)), name };
+      after.columns[id] = { pos: place(after.columns, ids, indexAfter(ids, afterId)), name };
       return commit(blockId, board, after, { status: "created", id });
     }),
     renameColumn: (blockId, columnId, name) => withBoard(blockId, (board, after) => {
@@ -85,7 +103,7 @@ export function createBoardCommands({ pd, um = null, origins = null, render = ()
       const index = indexAfter(ids, afterId);
       const current = orderedIds(board.columns);
       if ([...ids.slice(0, index), columnId, ...ids.slice(index)].every((id, i) => id === current[i])) return { status: "unchanged" };
-      after.columns[columnId].pos = slotKey(ids.map((id) => board.columns[id].pos), index);
+      after.columns[columnId].pos = place(after.columns, ids, index);
       return commit(blockId, board, after, { status: "moved" });
     }),
     removeColumn: (blockId, columnId) => withBoard(blockId, (board, after) => {
@@ -106,7 +124,7 @@ export function createBoardCommands({ pd, um = null, origins = null, render = ()
       const ids = cardsIn(board, columnId);
       if (badAfter(ids, afterId)) return refuse("missing-destination");
       const id = newId("k");
-      after.cards[id] = { pos: slotKey(ids.map((other) => board.cards[other].pos), indexAfter(ids, afterId)), col: columnId, title, ...(owner !== null ? { owner } : {}), ...(due !== null ? { due } : {}) };
+      after.cards[id] = { pos: place(after.cards, ids, indexAfter(ids, afterId)), col: columnId, title, ...(owner !== null ? { owner } : {}), ...(due !== null ? { due } : {}) };
       return commit(blockId, board, after, { status: "created", id });
     }),
     editCard: (blockId, cardId, patch) => withBoard(blockId, (board, after) => {
@@ -133,7 +151,7 @@ export function createBoardCommands({ pd, um = null, origins = null, render = ()
         const current = cardsIn(board, columnId);
         if ([...ids.slice(0, index), cardId, ...ids.slice(index)].every((id, i) => id === current[i])) return { status: "unchanged" };
       }
-      after.cards[cardId] = { ...card, col: columnId, pos: slotKey(ids.map((id) => board.cards[id].pos), index) };
+      after.cards[cardId] = { ...card, col: columnId, pos: place(after.cards, ids, index) };
       return commit(blockId, board, after, { status: "moved" });
     }),
     removeCard: (blockId, cardId) => withBoard(blockId, (board, after) => {

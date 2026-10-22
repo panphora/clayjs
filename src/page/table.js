@@ -1,7 +1,7 @@
 import { state, keymap } from "../vendor/prosemirror.vendor.js";
 import { schema } from "./schema.js";
 import { keyBetween, keysBetween, newId, orderedIds, cellContent } from "./model.js";
-import { slotKey } from "./ybind/board-commands.js";
+import { placeAt } from "./ybind/board-commands.js";
 import { parseDecimal, COLUMN_KINDS } from "./rich/csv.js";
 import { columnKinds, KIND_ICONS, KIND_LABELS } from "./table-kinds.js";
 import { asStep } from "./blocksel.js";
@@ -153,11 +153,18 @@ export const deleteRow = (st, dispatch) => changeTable(st, dispatch, (table, fou
   return { table: copyTable(table, { sort: null }, rows), row: Math.min(found.row, rows.length - 1) };
 });
 
+const placeColumn = (cols, ids, index, id, fields) => {
+  const { pos, rekey } = placeAt(ids, (col) => cols[col]?.pos ?? "", index);
+  const next = { ...cols, [id]: { ...fields, pos } };
+  for (const [col, key] of rekey) next[col] = { ...next[col], pos: key };
+  return next;
+};
+
 export const addColumn = (after = true) => (st, dispatch) => changeTable(st, dispatch, (table, found) => {
   const ids = columns(table);
   const index = found.cell + (after ? 1 : 0);
   const id = newId("c");
-  const cols = { ...table.attrs.cols, [id]: { pos: slotKey(ids.map((col) => table.attrs.cols[col]?.pos ?? ""), index), name: `Column ${ids.length + 1}` } };
+  const cols = placeColumn(table.attrs.cols, ids, index, id, { name: `Column ${ids.length + 1}` });
   const rows = table.content.content.map((row) => {
     const cells = [...row.content.content];
     cells.splice(index, 0, N.table_cell.create({ col: id }));
@@ -193,8 +200,7 @@ export const moveColumn = (delta) => (st, dispatch) => changeTable(st, dispatch,
   const order = [...ids];
   const [id] = order.splice(found.cell, 1);
   order.splice(to, 0, id);
-  const pos = slotKey(order.filter((col) => col !== id).map((col) => table.attrs.cols[col]?.pos ?? ""), to);
-  const cols = { ...table.attrs.cols, [id]: { ...table.attrs.cols[id], pos } };
+  const cols = placeColumn(table.attrs.cols, order.filter((col) => col !== id), to, id, table.attrs.cols[id]);
   const rows = table.content.content.map((row) => {
     const cells = [...row.content.content];
     const [cell] = cells.splice(found.cell, 1);

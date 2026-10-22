@@ -1,3 +1,4 @@
+import { orderedIds } from "../../../../src/page/model.js";
 import * as Y from "../../../../src/vendor/yjs.vendor.js";
 import { createStore } from "../../../../src/live/store.js";
 import { identityPlugin } from "../../../../src/page/model.js";
@@ -88,8 +89,27 @@ test("two tabs moving different cards into the same slot keep both, in the same 
   sync(a, b);
   expect(order(a, "doing")).toEqual(["a", "b"]);
   expect(order(b, "doing")).toEqual(["a", "b"]);
+  expect(boardIn(a).cards.a.pos).toBe(boardIn(a).cards.b.pos);
   expect(a.board.moveCard("bd", "c", { columnId: "doing", afterId: "a" })).toEqual({ status: "moved" });
-  expect(order(a, "doing")).toEqual(["a", "b", "c"]);
+  expect(sorted(a, "doing")).toEqual(["a", "c", "b"]);
+  sync(a, b);
+  expect(sorted(b, "doing")).toEqual(["a", "c", "b"]);
+  expect(new Set(["a", "b", "c"].map((id) => boardIn(a).cards[id].pos)).size).toBe(3);
+  settled(a, b);
+});
+
+const sorted = (tab, columnId) => orderedIds(Object.fromEntries(Object.entries(boardIn(tab).cards).filter(([, card]) => card.col === columnId)));
+
+test("moving a card up past a tied pair lands it between them on the first try", () => {
+  const a = open(), b = open();
+  a.board.moveCard("bd", "a", { columnId: "doing" });
+  b.board.moveCard("bd", "b", { columnId: "doing" });
+  sync(a, b);
+  const last = sorted(a, "doing").at(-1);
+  expect(a.board.moveCard("bd", "c", { columnId: "doing", afterId: last })).toEqual({ status: "moved" });
+  expect(sorted(a, "doing")).toEqual(["a", "b", "c"]);
+  expect(a.board.moveCard("bd", "c", { columnId: "doing", afterId: "a" })).toEqual({ status: "moved" });
+  expect(sorted(a, "doing")).toEqual(["a", "c", "b"]);
   sync(a, b);
   settled(a, b);
 });
