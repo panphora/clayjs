@@ -427,7 +427,7 @@ describe('code block colours in a browser', () => {
   const until = async (fn, ms = 4000) => { const end = Date.now() + ms; while (Date.now() < end) { if (fn()) return true; await settle(50); } return false; };
   const keywordSpans = (id) => [...el(id).querySelectorAll('code span[style]')].filter((s) => s.getAttribute('style').includes('--page-code-token-keyword'));
 
-  it('a block on screen is coloured by Shiki; one far below waits until it is scrolled into view', async () => {
+  it('a block on screen is coloured; one far below waits until it is scrolled into view', async () => {
     const blocks = LONG(80);
     blocks.top = { t: 'code_block', pos: 'A', lang: 'javascript', c: 'const a = 1' };
     blocks.far = { t: 'code_block', pos: 'ZZZ', lang: 'python', c: 'def f():\n  return 1' };

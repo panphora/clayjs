@@ -58,6 +58,12 @@ or carry third-party code, and keep their original licenses.
 - Copyright (c) 2023 Kevin Jahns
 - https://github.com/yjs/yjs, https://github.com/dmonad/lib0
 
+## Highlights from Pierre 0.2.0 (Apache-2.0)
+
+- File: src/vendor/pierre/pierre.vendor.js (bundled by scripts/build-pierre-vendor.mjs)
+- Copyright (c) The Pierre Computer Company
+- https://github.com/pierrecomputer/pierre/tree/main/packages/highlights
+
 ## Cheerio 1.2.0 (MIT)
 
 - Bundled into dist/server/rooms.cjs by scripts/build-server-rooms.mjs, the Node

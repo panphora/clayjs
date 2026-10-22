@@ -5,7 +5,7 @@ import { editor, posOf, select, typeText } from "./view-helpers.js";
 /**
  * Code block colours: a block with a language is highlighted after typing
  * pauses, a plain block never asks for tokens, the picker sets the language as
- * one undo step, and the real Shiki bundle loads and colours JavaScript.
+ * one undo step, and the real Pierre bundle loads and colours JavaScript.
  */
 
 afterEach(() => { document.body.innerHTML = ""; });
@@ -91,11 +91,21 @@ test("the picker sets the language as one undo step, and Plain text clears the c
   expect(view.state.doc.child(0).attrs.lang).toBe("python");
 });
 
-test("the real Shiki bundle loads on demand and colours JavaScript keywords", async () => {
+test("the real Pierre bundle loads on demand and colours JavaScript keywords", async () => {
   const lines = await tokenize("const x = 1 // note", "javascript");
   const byText = Object.fromEntries(lines.flat().map((t) => [t.content.trim(), t.color]));
   expect(byText.const).toBe("var(--page-code-token-keyword)");
   expect(byText["// note"]).toBe("var(--page-code-token-comment)");
+  expect(byText["1"]).toBe("var(--page-code-token-constant)");
+});
+
+test("the real Pierre bundle colours a Python parameter and reports offsets", async () => {
+  const code = "def f(a):\n  return a";
+  const tokens = (await tokenize(code, "python")).flat();
+  expect(tokens.find((t) => t.content.trim() === "def").color).toBe("var(--page-code-token-keyword)");
+  expect(tokens.find((t) => t.content.trim() === "a").color).toBe("var(--page-code-token-parameter)");
+  const ret = tokens.find((t) => t.content.trim() === "return");
+  expect(ret.offset).toBe(code.indexOf("return"));
 });
 
 describe("review round 1", () => {
