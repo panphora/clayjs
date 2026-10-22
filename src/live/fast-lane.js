@@ -115,6 +115,7 @@ export function createFastLane({
   // back (each { n, ops, through, seq, sent, refused, uncertain }), and the
   // newest op id ever put in a frame.
   const lanes = new Map();
+  const abandoned = new Set();
 
   const tell = (name, event) => entries.get(name)?.store.deliver?.({ code: null, n: null, seq: null, through: null, retryAfter: null, client: clientId, ...event });
 
@@ -125,6 +126,13 @@ export function createFastLane({
   }
 
   // The store's ops still to frame: pending, past what was framed.
+  // The first frame that reaches an adoption's last op carries its marker.
+  function markAdopted(lane, frame) {
+    if (!lane.adopted || frame.through < lane.adopted.through) return;
+    frame.adopted = lane.adopted.rev;
+    lane.adopted = null;
+  }
+
   function unframed(name, lane) {
     const store = entries.get(name)?.store;
     if (!store) return [];
@@ -195,6 +203,7 @@ export function createFastLane({
       }
       const take = lane.unsent.splice(0, count);
       const frame = { n: ++lane.n, ops: take.map((entry) => entry.op), entries: take, first: take[0].id, through: take[take.length - 1].id, seq: null, sent: false, receiptGeneration, pageGeneration };
+      markAdopted(lane, frame);
       lane.framed = Math.max(lane.framed, frame.through);
       lane.awaiting.push(frame);
       return { name, lane, frame };
@@ -222,7 +231,7 @@ export function createFastLane({
     lastSentAt = now();
     let result;
     try {
-      result = await transport.send(clientId, { name, n: frame.n, ops: frame.ops, epoch: sentEpoch, ...(conn !== undefined && { conn }), ...(frame.receiptGeneration !== null && { receiptGeneration: frame.receiptGeneration }), ...(frame.pageGeneration !== null && PAGE_STORE.test(name) && { pageGeneration: frame.pageGeneration }) });
+      result = await transport.send(clientId, { name, n: frame.n, ops: frame.ops, epoch: sentEpoch, ...(conn !== undefined && { conn }), ...(frame.receiptGeneration !== null && { receiptGeneration: frame.receiptGeneration }), ...(frame.pageGeneration !== null && PAGE_STORE.test(name) && { pageGeneration: frame.pageGeneration }), ...(frame.adopted && { adopted: frame.adopted }) });
     } catch {
       result = null;
     }
@@ -362,6 +371,7 @@ export function createFastLane({
       frameBytes = OLD_FRAME_BYTES;
       console.warn(`clay.live("${name}"): the host takes smaller updates, so they go in frames of ${frameBytes} bytes`);
       lane.unsent.unshift(...frame.entries);
+      if (frame.adopted) lane.adopted = { rev: frame.adopted, through: frame.through };
       // Unframed again: a new room's state frames them afresh (unframed()).
       lane.framed = frame.first - 1;
       return;
@@ -377,7 +387,7 @@ export function createFastLane({
   function apply(frame) {
     seq = frame.seq;
     const store = entries.get(frame.name)?.store;
-    if (!store) return;
+    if (!store || abandoned.has(frame.name)) return;
     if (!roomNames.has(frame.name)) {
       missed = true;
       return;
@@ -490,9 +500,11 @@ export function createFastLane({
     if ("conn" in state) conn = state.conn;
     const stores = state.stores || {};
     roomNames = new Set(Object.keys(stores));
+    for (const name of abandoned) roomNames.delete(name);
     let skipped = false;
     let readDue = false;
     for (const [name, entry] of entries) {
+      if (abandoned.has(name)) continue;
       const room = stores[name];
       const lane = laneOf(name);
       prune(name, lane);
@@ -760,6 +772,28 @@ export function createFastLane({
       ops.forEach((op, i) => lane.unsent.push({ id: first + i, op }));
       schedule();
     },
+    // The store's ops through `through` merged the file article with revision
+    // rev into the page: the frame that carries them tells the room, so its
+    // checkpoint knows the room holds that edit. A frame already sent leaves it
+    // to the next one.
+    // The store's history is not the room's (its page was rebuilt while this tab was
+    // away): nothing of it is sent again, and the room's frames for it are ignored.
+    abandon(name) {
+      if (abandoned.has(name)) return;
+      abandoned.add(name);
+      roomNames.delete(name);
+      const lane = laneOf(name);
+      lane.awaiting = lane.awaiting.filter((frame) => frame === flying);
+      lane.unsent = [];
+      lane.adopted = null;
+    },
+    adopted(name, rev, through) {
+      if (stopped || !roomNames.has(name)) return;
+      const lane = laneOf(name);
+      const waiting = lane.awaiting.find((frame) => !frame.sent && frame.through >= through);
+      if (waiting) waiting.adopted = rev;
+      else lane.adopted = { rev, through };
+    },
     // The save that held this store ended: frame whatever is still pending past
     // what was framed (an accepted save's ops have left pending). A state it
     // kept from the store, or a value the caller kept (read), is replaced by a
@@ -802,6 +836,7 @@ export function createFastLane({
           const frame = { n: ++lane.n, ops: take.map((e) => e.op), entries: take,
             first: take[0].id, through: take[take.length - 1].id, seq: null,
             sent: false, refused: true, epoch, client: clientId, receiptGeneration, pageGeneration };
+          markAdopted(lane, frame);
           lane.awaiting.push(frame);
           lane.framed = frame.through;
         }

@@ -208,6 +208,7 @@ export function createRooms({ now = Date.now, newEpoch = randomUUID, liveBytes =
   const build = (key, html, nodeId = null) => ({
     key,
     nodeId,
+    fileHash: typeof html === 'string' ? textHash(html) : null,
     epoch: newEpoch(),
     seq: 0,
     stores: seedStores(html),
@@ -280,6 +281,13 @@ export function createRooms({ now = Date.now, newEpoch = randomUUID, liveBytes =
   };
 
   const reconcileFile = (room, key, html, { restored = false } = {}) => {
+    // A tab's word that it merged the file's article holds for that file only:
+    // the next write that changes it, outside or checkpoint, ends it.
+    const seen = textHash(html);
+    if (room.fileHash !== seen) {
+      room.adopted = null;
+      room.fileHash = seen;
+    }
     const heldBefore = heldBy(room);
     let valueChanged = false;
     const landed = [];
@@ -810,6 +818,7 @@ export function createRooms({ now = Date.now, newEpoch = randomUUID, liveBytes =
       room.retiredReceipts?.delete(nKey);
       room.lastSentAt.set(clientId, now());
       room.seen.set(clientId, now());
+      if (PAGE.test(frame.name) && typeof frame.adopted === 'string' && frame.adopted.length <= 64) room.adopted = frame.adopted;
       const writerGone = room.writer && connected && !connected.includes(room.writer);
       if ((!room.writer || writerGone) && (!connected || connected.includes(clientId))) room.writer = clientId;
       return { seq: room.seq, epoch: room.epoch, name: frame.name, ops, writer: room.writer, checkpoint: pressed(store), receiptGeneration: room.receiptGeneration ?? 0, ...(transition && { pageGeneration: transition.id }) };

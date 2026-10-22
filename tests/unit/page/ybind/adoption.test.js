@@ -102,7 +102,7 @@ test.each([
   expect(() => classifyFile(file(handEdit).article, values())).toThrow(YDecodeError);
 });
 
-test("the article wins changed blocks and records edited and deleted peer versions", async () => {
+test("the article's edits merge with peer edits: peer words stay, a block the peer edited survives the article's delete", async () => {
   const source = file((article) => {
     handEdit(article);
     article.querySelector('[data-id="p3"]').remove();
@@ -122,14 +122,14 @@ test("the article wins changed blocks and records edited and deleted peer versio
   const { controller, events } = install(tab, source);
   await controller.idle();
   const after = blocks(tab);
-  expect(after.p1.c).toBe("Revenue fell and costs stayed flat.");
+  expect(after.p1.c).toBe("Revenue fell and costs stayed flat. (peer note)");
   expect(after.p2.c).toBe("Keep me exactly as I am. Kept peer edit.");
-  expect(after.p3).toBeUndefined();
+  expect(after.p3.c).toBe("Delete me from the article. PEER-TYPED");
   expect(after.peer.c).toBe("Peer-created block");
   expect(Object.values(after).find((block) => block.c?.startsWith("Agent paragraph.")).c).toBe("Agent paragraph.");
   expect(events.notices).toHaveLength(1);
-  expect(events.notices[0].displaced.p1.c).toBe("Revenue grew and costs stayed flat. (peer note)");
-  expect(events.notices[0].displaced.p3.c).toBe("Delete me from the article. PEER-TYPED");
+  expect(events.notices[0].displaced).toBeUndefined();
+  expect(events.notices[0].conflicts).toBeUndefined();
   expect([events.holds, events.releases, events.checkpoints]).toEqual([1, 1, 1]);
   expect(tab.binding.stats.mismatch).toBe(0);
   expect(project(blocksFromYValue(tab.store.value))).toEqual(project(after));

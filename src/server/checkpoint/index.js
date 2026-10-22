@@ -4,7 +4,9 @@ import { cloneJson, formatBy, serializeLive, stampOf, textHash, unionRanges } fr
 import { blocksFromYValue } from '../../page/ybind/decode.js';
 import { YDecodeError } from '../../page/ybind/provider.js';
 import { canon, fragmentCleaner, renderBlocks } from '../../page/projection.js';
-import { classifyFile } from '../../page/adopt.js';
+import { classifyFile, readBack } from '../../page/adopt.js';
+import { merge3, mergeJson } from 'hyper-morph';
+import { mergePageModels } from '../../page/merge.js';
 
 const PAGE = /^page(\.[0-9]+)?$/;
 const NAME = /^[A-Za-z0-9_.:-]{1,64}$/;
@@ -26,7 +28,7 @@ export function captureCheckpoint(room, { nodeId, roomKey }) {
     const text = serializeLive(store.value);
     return { name, value: cloneJson(store.value), text, liveAt: stampOf(epoch, seq, text), provenance: provenanceOf(room, store) };
   });
-  return { roomKey, nodeId, epoch, generation, seq, stores };
+  return { roomKey, nodeId, epoch, generation, seq, stores, adopted: room.adopted ?? null };
 }
 
 function inspect(html) {
@@ -103,7 +105,55 @@ function replace(html, edits) {
     out.slice(0, edit.start) + edit.text + out.slice(edit.end), html);
 }
 
-export function renderCheckpoint(currentHtml, capture, { createDocument }) {
+// Whether the room's blocks already carry everything the hand-edited article
+// changed since its tag was written: merging those changes in changes nothing.
+function holdsEdit(found, blocks, doc) {
+  const current = readBack(blocks, doc);
+  const merged = mergePageModels(found.baseItems, current, found.parsed, { doc, merge3, mergeJson });
+  return canon(merged.items) === canon(current);
+}
+
+// Whether a page document (its page tag included) holds an article edited
+// outside the editor since the tag was written, so open tabs must adopt it.
+// A save asks this several times of the same document (before the write, for
+// the recovered copy, for the adoption offer): the last answer is kept.
+let lastAdoption = { html: null, answer: false };
+
+export function needsAdoption(html, { createDocument }) {
+  if (typeof html !== 'string' || typeof createDocument !== 'function') return false;
+  if (lastAdoption.html === html) return lastAdoption.answer;
+  const answer = adoptionNeeded(html, createDocument);
+  lastAdoption = { html, answer };
+  return answer;
+}
+
+function adoptionNeeded(html, createDocument) {
+  const { article: node, tags } = inspect(html);
+  const loc = node?.sourceCodeLocation;
+  if (!loc?.startTag || !loc.endTag) return false;
+  const pageNodes = [...tags].filter(([name]) => PAGE.test(name)).map(([, tag]) => tag);
+  if (!pageNodes.length) return false;
+  const doc = createDocument();
+  try {
+    const values = pageNodes.map((tag) => {
+      const at = tag.sourceCodeLocation;
+      return parseJsonRelaxed(html.slice(at.startTag.endOffset, at.endTag.startOffset));
+    });
+    const article = doc.createElement('article');
+    const revision = attr(node, 'data-rev');
+    if (revision !== undefined) article.setAttribute('data-rev', revision);
+    article.innerHTML = html.slice(loc.startTag.endOffset, loc.endTag.startOffset);
+    return classifyFile(article, values).kind === 'adopt';
+  } catch {
+    return false;
+  } finally {
+    doc.defaultView?.close?.();
+  }
+}
+
+// recovery: render the room's blocks even over an article it has not merged, for
+// a recovered copy of its edits (the file itself keeps the outside edit).
+export function renderCheckpoint(currentHtml, capture, { createDocument, recovery = false }) {
   const placement = placements(currentHtml, capture);
   if (!placement || typeof createDocument !== 'function') return { kind: 'refused', reason: 'invalid-document' };
   const decoded = projection(capture);
@@ -121,7 +171,10 @@ export function renderCheckpoint(currentHtml, capture, { createDocument }) {
       const loc = node.sourceCodeLocation;
       return parseJsonRelaxed(currentHtml.slice(loc.startTag.endOffset, loc.endTag.startOffset));
     });
-    if (classifyFile(article, pageValues).kind === 'adopt') return { kind: 'refused', reason: 'needs-adoption' };
+    const found = classifyFile(article, pageValues);
+    // A tab that merged this article says so on the frame that carried the
+    // merge; otherwise the blocks must show the edit.
+    if (!recovery && found.kind === 'adopt' && capture.adopted !== found.A && !holdsEdit(found, decoded.blocks, doc)) return { kind: 'refused', reason: 'needs-adoption' };
     rendered = renderBlocks(decoded.blocks, { clean: fragmentCleaner(doc) });
   }
   catch (error) {

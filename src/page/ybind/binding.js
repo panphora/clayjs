@@ -3,10 +3,10 @@ import { NET, createPageDoc, walk, docOf } from "./core.js";
 import { createBridge, keepViewPos } from "./bridge.js";
 import { createYProvider, entriesOf, dec } from "./provider.js";
 
-export function createYPageBinding({ store, ydoc = new Y.Doc(), onNotice = () => {}, ownedTokens = [], authorToken = null, setTimer = setTimeout, clearTimer = clearTimeout, compact, captureTimeout = 500, checkpointWithin = () => {}, requestCheckpoint = null, registerUnsavedState = null }) {
+export function createYPageBinding({ store, ydoc = new Y.Doc(), onNotice = () => {}, ownedTokens = [], authorToken = null, setTimer = setTimeout, clearTimer = clearTimeout, compact, captureTimeout = 500, checkpointWithin = () => {}, requestCheckpoint = null, registerUnsavedState = null, onStopped = () => {} }) {
   for (const [, v] of entriesOf(store.value.y)) Y.applyUpdateV2(ydoc, dec(v), NET);
   const pd = createPageDoc(ydoc);
-  const provider = createYProvider({ store, ydoc, setTimer, clearTimer, compact });
+  const provider = createYProvider({ store, ydoc, setTimer, clearTimer, compact, onStopped });
   const stats = { groups: 0, mismatch: 0, renders: 0, first: null };
   const bridge = createBridge({ pd, onNotice, ownedTokens, authorToken, stats, captureTimeout });
   const waiters = new Set();

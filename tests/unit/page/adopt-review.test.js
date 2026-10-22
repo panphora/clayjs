@@ -194,16 +194,17 @@ describe("the adoption controller", () => {
     controller.dispose();
   });
 
-  test("a peer's text that the hand edit replaced is reported as displaced", async () => {
+  test("a peer's words and the hand edit's words in one block are both kept", async () => {
     const current = clone(RECORD.blocks);
     current.a.c = "Hello brave world";
     view = createPageEditor(mount, { blocks: current });
     const notices = [];
     const controller = installAdoption({ view, source: handEdited(), hold: () => {}, release: () => {}, notice: (n) => notices.push(n) });
     await controller.idle();
-    expect(blockMap(view.state.doc).a.c).toBe("Hello world!");
+    expect(blockMap(view.state.doc).a.c).toBe("Hello brave world!");
     expect(notices).toHaveLength(1);
-    expect(notices[0].displaced.a.c).toBe("Hello brave world");
+    expect(notices[0].displaced).toBeUndefined();
+    expect(notices[0].conflicts).toBeUndefined();
     controller.dispose();
   });
 

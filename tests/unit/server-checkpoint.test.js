@@ -8,12 +8,13 @@ import { join } from 'node:path';
 import { JSDOM } from 'jsdom';
 import * as Y from '../../src/vendor/yjs.vendor.js';
 import { createRooms, parseBy, serializeLive } from '../../src/server/rooms/index.js';
-import { captureCheckpoint, isCheckpointCurrent, renderCheckpoint } from '../../src/server/checkpoint/index.js';
+import { captureCheckpoint, isCheckpointCurrent, needsAdoption, renderCheckpoint } from '../../src/server/checkpoint/index.js';
 import { buildServerCheckpoint } from '../../scripts/build-server-checkpoint.mjs';
 import { blocksFromYValue } from '../../src/page/ybind/decode.js';
 import { boardKey } from '../../src/page/ybind/board.js';
 import { createPageDoc } from '../../src/page/ybind/layout.js';
 import { seedValue } from '../../src/page/ybind/seed.js';
+import { classifyFile } from '../../src/page/adopt.js';
 import { docFromValue, enc, yValueOf } from '../../src/page/ybind/provider.js';
 import { chartModel, renderChartSvg } from '../../src/page/rich/chart.js';
 
@@ -205,6 +206,33 @@ test('a hand-edited article refuses a dirty checkpoint until adoption', () => {
   expect(ordinary.html).toContain('"score":1');
 });
 
+test('a room that already holds the hand edit checkpoints it', () => {
+  const { rooms, room, source, capture } = roomOf(seedValue([{ id: 'p', t: 'paragraph', text: 'abc' }]));
+  const saved = renderCheckpoint(source, capture(), { createDocument });
+  expect(saved.kind).toBe('ok');
+  const handEdited = saved.html.replace('<p data-id="p">abc</p>', '<p data-id="p">HAND EDIT</p>');
+  apply(rooms, room, '100', 'game', 1, [{ op: 'add', path: ['score'], n: 1 }]);
+  expect(renderCheckpoint(handEdited, capture(), { createDocument }))
+    .toEqual({ kind: 'refused', reason: 'needs-adoption' });
+  const second = roomOf(seedValue([{ id: 'p', t: 'paragraph', text: 'HAND EDIT' }]));
+  apply(second.rooms, second.room, '100', 'game', 1, [{ op: 'add', path: ['score'], n: 1 }]);
+  const result = renderCheckpoint(handEdited, second.capture(), { createDocument });
+  expect(result.kind).toBe('ok');
+  expect(result.html).toContain('<p data-id="p">HAND EDIT</p>');
+  expect(result.html).toContain('"score":1');
+});
+
+test('needsAdoption tells a hand-edited page from an ordinary one', () => {
+  const { rooms, room, source, capture } = roomOf(seedValue([{ id: 'p', t: 'paragraph', text: 'abc' }]));
+  const saved = renderCheckpoint(source, capture(), { createDocument });
+  expect(saved.kind).toBe('ok');
+  const handEdited = saved.html.replace('<p data-id="p">abc</p>', '<p data-id="p">HAND EDIT</p>');
+  apply(rooms, room, '100', 'game', 1, [{ op: 'add', path: ['score'], n: 1 }]);
+  expect(needsAdoption(handEdited, { createDocument })).toBe(true);
+  expect(needsAdoption(saved.html, { createDocument })).toBe(false);
+  expect(needsAdoption('<!doctype html><p>x</p>', { createDocument })).toBe(false);
+});
+
 test('built CJS and ESM entries load in plain Node without DOM globals', async () => {
   await buildServerCheckpoint();
   const script = `
@@ -213,9 +241,38 @@ test('built CJS and ESM entries load in plain Node without DOM globals', async (
     if (typeof window !== 'undefined' || typeof document !== 'undefined') throw Error('DOM globals present');
     const cjs = require('@panphora/clayjs/server/checkpoint');
     const esm = await import('@panphora/clayjs/server/checkpoint');
-    console.log(JSON.stringify([Object.keys(cjs).sort(), ['captureCheckpoint', 'renderCheckpoint', 'isCheckpointCurrent'].every((name) => typeof esm[name] === 'function')]));
+    console.log(JSON.stringify([Object.keys(cjs).sort(), ['captureCheckpoint', 'renderCheckpoint', 'isCheckpointCurrent', 'needsAdoption'].every((name) => typeof esm[name] === 'function')]));
   `;
   const loaded = JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', script], { cwd: process.cwd(), encoding: 'utf8' }));
-  expect(loaded[0]).toEqual(['captureCheckpoint', 'isCheckpointCurrent', 'renderCheckpoint']);
+  expect(loaded[0]).toEqual(['captureCheckpoint', 'isCheckpointCurrent', 'needsAdoption', 'renderCheckpoint']);
   expect(loaded[1]).toBe(true);
+});
+
+test('a room whose writer merged an edit to the same words it changed checkpoints it once the frame says so', () => {
+  const first = roomOf(seedValue([{ id: 'p', t: 'paragraph', text: 'a b c d' }]));
+  const saved = renderCheckpoint(first.source, first.capture(), { createDocument });
+  expect(saved.kind).toBe('ok');
+  const handEdited = saved.html.replace('<p data-id="p">a b c d</p>', '<p data-id="p">a b d</p>');
+  expect(handEdited).not.toBe(saved.html);
+  const fileDoc = createDocument();
+  fileDoc.documentElement.innerHTML = handEdited.replace(/^<!doctype html>/i, '');
+  const tags = [...fileDoc.querySelectorAll('script[merge="page"]')].map((tag) => JSON.parse(tag.textContent));
+  const found = classifyFile(fileDoc.querySelector('article[data-page]'), tags);
+  expect(found.kind).toBe('adopt');
+
+  const r = roomOf(seedValue([{ id: 'p', t: 'paragraph', text: 'a q d' }]));
+  apply(r.rooms, r.room, '100', 'game', 1, [{ op: 'add', path: ['score'], n: 1 }]);
+  expect(renderCheckpoint(handEdited, r.capture(), { createDocument })).toEqual({ kind: 'refused', reason: 'needs-adoption' });
+  const y = r.room.stores.get('page').value.y;
+  const key = Object.keys(y)[0];
+  const claim = (n, adopted) => r.rooms.apply(r.room, '100', { name: 'page', n, epoch: r.room.epoch, pageGeneration: r.room.pageTransition?.id ?? null, ops: [{ op: 'set', path: ['y', key], value: y[key] }], adopted });
+  expect(claim(1, 'not-this-article').seq).toBeGreaterThan(0);
+  expect(renderCheckpoint(handEdited, r.capture(), { createDocument })).toEqual({ kind: 'refused', reason: 'needs-adoption' });
+  expect(claim(2, found.A).seq).toBeGreaterThan(0);
+  const result = renderCheckpoint(handEdited, r.capture(), { createDocument });
+  expect(result.kind).toBe('ok');
+  expect(result.html).toContain('<p data-id="p">a q d</p>');
+  r.rooms.fileWritten('/test.html', handEdited);
+  expect(r.room.adopted).toBeNull();
+  expect(renderCheckpoint(handEdited, r.capture(), { createDocument })).toEqual({ kind: 'refused', reason: 'needs-adoption' });
 });

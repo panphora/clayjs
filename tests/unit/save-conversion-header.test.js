@@ -6,6 +6,11 @@ import { jest } from "@jest/globals";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { ReadableStream, WritableStream, TransformStream } from "node:stream/web";
+import { MessageChannel, MessagePort, BroadcastChannel } from "node:worker_threads";
+
+// The host parser loads the rooms package, whose bundled HTML parser needs Node globals jsdom does not provide.
+for (const [name, value] of Object.entries({ ReadableStream, WritableStream, TransformStream, MessageChannel, MessagePort, BroadcastChannel })) globalThis[name] ??= value;
 
 // The host grammar is the only definition of a valid `Page-Conversion` value, so
 // every emitted header is parsed by the committed host parser itself. That is the

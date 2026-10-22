@@ -32,6 +32,7 @@ await jest.unstable_mockModule("../../../src/core/save.js", () => ({
   releaseAllSaves: () => {},
   getLastSavedDirty: () => false,
   setLastSavedBaselines: () => {},
+  getLastSavedBytes: () => null,
 }));
 
 await jest.unstable_mockModule("../../../src/live/local-lane.js", () => ({
@@ -114,6 +115,28 @@ test("a hand-edited boot article adopts once and stays adopted after a remount",
   expect(adopted).toHaveLength(1);
   expect(document.querySelectorAll(".page-shell")).toHaveLength(1);
   document.removeEventListener("clay:page-adopted", onAdopted);
+});
+
+test("an outside edit to words the tab also changed offers a download of the tab's copy", async () => {
+  setPage([{ id: "p", t: "paragraph", text: "Hello world" }]);
+  await page.install();
+  const view = page.view;
+  const end = view.state.doc.content.size - 1;
+  view.dispatch(view.state.tr.insertText("!", end));
+  expect(blocksFromYValue(storeOf("page").value).p.c).toBe("Hello world!");
+
+  const value = seedValue([{ id: "p", t: "paragraph", text: "Hello world" }]);
+  const { html, rev } = projection.renderFromTags([JSON.stringify(value)]);
+  const file = new DOMParser().parseFromString(`<!DOCTYPE html><html><head>${tagHtml(value)}</head><body><article data-page="1" data-rev="${rev}">${html}</article></body></html>`, "text/html");
+  file.querySelector('[data-id="p"]').textContent = "Hello friend";
+  document.dispatchEvent(new CustomEvent("clay:sync-applied", { detail: { html: "<!DOCTYPE html>" + file.documentElement.outerHTML } }));
+
+  for (let i = 0; i < 50 && !toasts().some((t) => t.textContent.includes("Some changes you made were replaced")); i++) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  const toast = toasts().find((t) => t.textContent.includes("Some changes you made were replaced"));
+  expect(toast.textContent).toContain("Some changes you made were replaced by a change made outside the editor.");
+  expect(actionLabels(toast)).toEqual(["Download your copy"]);
 });
 
 test("an unsupported host keeps the article untouched and reports blocked", async () => {

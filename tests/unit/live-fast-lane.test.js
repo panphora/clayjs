@@ -1288,3 +1288,41 @@ test("a replacement that drops a store this tab held says no-store; a size drop 
   expect(quiet).toEqual([]);
   expect(b.game.status.mode).toBe("file");
 });
+
+test("the frame carrying an adoption's ops names the article it merged, once", async () => {
+  const room = createRoom({ game: { score: 0 } });
+  const sent = [];
+  const a = client(room, "a", { score: 0 }, { wrap: (post) => (frame) => { sent.push(frame); return post(frame); } });
+  room.open("a");
+  await settle();
+  a.game.add("score", 1);
+  await settle();
+  a.game.add("score", 1);
+  a.lane.adopted("game", "rev-1", a.store.mark);
+  await settle();
+  a.game.add("score", 1);
+  await settle();
+  expect(sent.map((frame) => frame.adopted ?? null)).toEqual([null, "rev-1", null]);
+  expect(room.stores.game.score).toBe(3);
+});
+
+test("a frame the host refuses as too large for its old cap hands its adoption marker to the frame that reaches the same op", async () => {
+  const room = createRoom({ game: {} });
+  const sent = [];
+  const a = client(room, "a", {}, { wrap: (post) => (frame) => {
+    sent.push(frame);
+    if (sent.length === 1) return { status: 413, body: null, retryAfter: 0 };
+    return post(frame);
+  } });
+  room.open("a");
+  await settle();
+  a.game.update((data) => { for (let i = 0; i < 4; i++) data[`part-${i}`] = "x".repeat(10000); });
+  a.lane.adopted("game", "rev-1", a.store.mark);
+  await settle();
+  expect(sent[0].adopted).toBe("rev-1");
+  const retried = sent.slice(1).map((frame) => frame.adopted ?? null);
+  expect(retried.length).toBeGreaterThan(1);
+  expect(retried.at(-1)).toBe("rev-1");
+  expect(retried.slice(0, -1).every((rev) => rev === null)).toBe(true);
+  expect(Object.keys(room.stores.game)).toHaveLength(4);
+});

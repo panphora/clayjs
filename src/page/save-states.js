@@ -62,6 +62,11 @@ function downloadPageCopy() {
   return downloadHtml({ html: withoutPageTag(forSave), name: `${documentName()}.html` });
 }
 
+// A copy of the page captured earlier (captureForSaveAndComparison().forSave), as a download.
+function downloadSnapshot(forSave) {
+  return downloadHtml({ html: withoutPageTag(forSave), name: `${documentName()}.html` });
+}
+
 // The article's own plain text, never the editor's chrome: the capture carries
 // the projected article, and only its text is asked for.
 async function copyPageText() {
@@ -77,4 +82,4 @@ async function copyPageText() {
   }
 }
 
-export { SAVE_STATE_BY_CODE, BLOCKED_TEXT, RETRY_TEXT, saveStateFor, downloadPageCopy, copyPageText };
+export { SAVE_STATE_BY_CODE, BLOCKED_TEXT, RETRY_TEXT, saveStateFor, downloadPageCopy, downloadSnapshot, copyPageText };

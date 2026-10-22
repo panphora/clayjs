@@ -10,11 +10,11 @@ import { seedPageFromArticle } from "../page/ybind/migrate.js";
 import { serializeLive } from "../live/ops.js";
 import { registerUnsavedState } from "../lib/unsaved-state.js";
 import { hostMeta, hostSupports } from "../core/host-meta.js";
-import { savePageForce, setLastSavedBaselines, holdAllSaves, releaseAllSaves } from "../core/save.js";
-import { captureForComparisonAndDirty } from "../core/snapshot.js";
+import { savePageForce, setLastSavedBaselines, holdAllSaves, releaseAllSaves, getLastSavedBytes } from "../core/save.js";
+import { captureForComparisonAndDirty, captureForSaveAndComparison } from "../core/snapshot.js";
 import { storeOf, checkpointWithin, requestCheckpoint, fastLane, pageLaneReady, pageWriterReady } from "./live.js";
 import { HyperMorph } from "../vendor/hyper-morph.vendor.js";
-import { saveStateFor, BLOCKED_TEXT, RETRY_TEXT, downloadPageCopy, copyPageText } from "../page/save-states.js";
+import { saveStateFor, BLOCKED_TEXT, RETRY_TEXT, downloadPageCopy, downloadSnapshot, copyPageText } from "../page/save-states.js";
 import toast, { toastPersistent, dismissPersistent } from "../ui/toast.js";
 import { createRecoverList, focusBlock } from "../page/recover.js";
 import { createToolHost } from "../page/tools.js";
@@ -29,6 +29,8 @@ const RETRY_BOUND_MS = 45000;
 const GENERIC_ERROR = "Couldn't save";
 const GENERIC_OFFLINE = "Offline, not saved";
 const REPLACED_TEXT = "This page was changed outside the editor. Reload to see it.";
+const TOO_LARGE_TEXT = "That change is too large to share, so it was not saved. Reload the page to keep editing.";
+const OVERWRITTEN_TEXT = "Some changes you made were replaced by a change made outside the editor.";
 const REPLACED_HOLD = "The page was changed outside the editor; reload to see it.";
 
 const isPlainObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
@@ -107,11 +109,14 @@ function showSaved(inst) {
 // An incoming document with no page tag whose article is not the one this tab
 // last saved: something outside the editor replaced the page, and this tab's
 // state no longer belongs to the file.
-function pageReplaced(html, savedRev) {
+// On a host that keeps no page data every file comes untagged and is merged
+// instead (adopt-boot.js); only a file with no lone article replaced the page.
+function pageReplaced(html, savedRev, mergeTagless = false) {
   if (typeof html !== "string" || !html) return false;
   let doc;
   try { doc = new DOMParser().parseFromString(html, "text/html"); } catch { return false; }
   const articles = doc.querySelectorAll(ARTICLE_SEL);
+  if (mergeTagless) return articles.length !== 1 && !doc.querySelector(TAG_SEL);
   if (articles.length !== 1 || doc.querySelector(TAG_SEL)) return false;
   return articles[0].getAttribute("data-rev") !== savedRev;
 }
@@ -136,17 +141,35 @@ function stopEditing(inst) {
   holdAllSaves(REPLACED_HOLD);
 }
 
-function showReplaced(inst) {
+// The tab's own page, when the store no longer holds it (another page replaced it, or the
+// room refused it): the saved document with the article rendered from the tab's document.
+function downloadTabCopy(inst) {
+  if (!inst.tabValue) return downloadPageCopy();
+  const { forSave } = captureForSaveAndComparison();
+  const doc = new DOMParser().parseFromString(forSave, "text/html");
+  const articles = doc.querySelectorAll(ARTICLE_SEL);
+  if (articles.length !== 1) return downloadPageCopy();
+  const rendered = renderFromTags([JSON.stringify(inst.tabValue)]);
+  articles[0].innerHTML = rendered.html;
+  if (rendered.rev == null) articles[0].removeAttribute("data-rev");
+  else articles[0].setAttribute("data-rev", rendered.rev);
+  return downloadSnapshot(`<!DOCTYPE html>\n${doc.documentElement.outerHTML}`);
+}
+
+function stopWithNotice(inst, text) {
   if (inst.replaced) return;
   inst.replaced = true;
   stopEditing(inst);
-  toastPersistent(REPLACED_TEXT, "warning", {
+  toastPersistent(text, "warning", {
     actions: [
       { label: "Reload", onClick: () => window.location.reload() },
-      { label: "Download your copy", onClick: downloadPageCopy },
+      { label: "Download your copy", onClick: () => downloadTabCopy(inst) },
     ],
   });
 }
+
+const showReplaced = (inst) => stopWithNotice(inst, REPLACED_TEXT);
+const showTooLarge = (inst) => stopWithNotice(inst, TOO_LARGE_TEXT);
 
 function applySaveState(inst, state, code, message) {
   if (state === "saved") showSaved(inst);
@@ -175,6 +198,7 @@ function listenForSaves(inst) {
   listen(inst, "clay:save-saved", (event) => {
     applySaveState(inst, saveStateFor({ ok: true }), null, event.detail?.msg ?? "");
     inst.savedRev = savedRevOf(inst);
+    inst.adoption?.saved(getLastSavedBytes());
   });
   listen(inst, "clay:live-notice", (event) => {
     if (event.detail?.name !== "page") return;
@@ -292,6 +316,7 @@ async function run(inst, gen, options = {}) {
   // store and would answer this tab's frames with unknown-store. One conditional
   // save of the document with the tag is the page's initial write; a tab that
   // loses that race reloads, which composes the state the winner initialized.
+  inst.mergeTagless = !meta.extensions.includes("live-data");
   let initialSave = false;
   if (seeded && (await hostSupports("live-data"))) {
     if (gen !== generation) return;
@@ -332,6 +357,15 @@ async function run(inst, gen, options = {}) {
   const identity = authorIdentity();
   const binding = createYPageBinding({
     store,
+    onStopped: (reason) => {
+      inst.tabValue = yValueOf(binding.ydoc);
+      if (reason === "lineage") {
+        fastLane()?.abandon?.("page");
+        showReplaced(inst);
+      } else {
+        showTooLarge(inst);
+      }
+    },
     authorToken: identity.token,
     ownedTokens: identity.owned,
     checkpointWithin,
@@ -356,12 +390,24 @@ async function run(inst, gen, options = {}) {
   inst.savedRev = inst.bootRev;
   listen(inst, "clay:sync-applied", (event) => {
     if (inst.replaced) return;
-    if (!pageReplaced(event.detail?.html, inst.savedRev)) return;
+    if (!pageReplaced(event.detail?.html, inst.savedRev, inst.mergeTagless)) return;
     showReplaced(inst);
   });
 
+  // A tool written into the article by hand or by an agent arrives without the
+  // store its state lives in, and without one the tool could not keep its state:
+  // the page gets the empty store an editor-made page starts with.
+  const TOOLS_SEL = 'script[type="application/json"][merge="page.tools"][clay~="live"]';
+  if (!document.querySelector(TOOLS_SEL) && article.querySelector('section[data-type="tool"]')) {
+    const tools = document.createElement("script");
+    tools.setAttribute("type", "application/json");
+    tools.setAttribute("merge", "page.tools");
+    tools.setAttribute("clay", "live");
+    tools.textContent = "{}";
+    document.head.appendChild(tools);
+  }
   let toolsStore = null;
-  if (document.querySelector('script[type="application/json"][merge="page.tools"][clay~="live"]')) {
+  if (document.querySelector(TOOLS_SEL)) {
     try {
       toolsStore = window.clay.live("page.tools");
       await toolsStore.ready;
@@ -410,7 +456,7 @@ async function run(inst, gen, options = {}) {
   // existing Yjs update: a valid nonempty frame that changes nothing) and then
   // waits for the election, so exactly one tab adopts.
   const needsAdoption = classifyFile(source.article, source.tags).kind === "adopt";
-  const ready = !needsAdoption ? Promise.resolve() : (async () => {
+  const awaitWriter = async () => {
     const lane = await pageLaneReady();
     if (!lane) return;
     if (gen !== generation) return;
@@ -426,7 +472,8 @@ async function run(inst, gen, options = {}) {
     let timer;
     await Promise.race([pageWriterReady(), new Promise((resolve) => { timer = setTimeout(resolve, WRITER_WAIT_MS); })]);
     clearTimeout(timer);
-  })();
+  };
+  const ready = needsAdoption ? awaitWriter() : Promise.resolve();
 
   const adoption = installAdoption({
     view,
@@ -437,6 +484,16 @@ async function run(inst, gen, options = {}) {
       return !lane || lane.status.writer === null ? true : lane.isWriter();
     },
     requestCheckpoint: () => checkpointWithin(0),
+    snapshot: () => captureForSaveAndComparison().forSave,
+    mergeTagless: inst.mergeTagless,
+    writerReady: awaitWriter,
+    adopted: (rev) => fastLane()?.adopted?.("page", rev, store.mark),
+    notice: (counts) => {
+      if (!counts.copy) return;
+      toastPersistent(OVERWRITTEN_TEXT, "warning", {
+        actions: [{ label: "Download your copy", onClick: () => downloadSnapshot(counts.copy) }],
+      });
+    },
   });
   inst.adoption = adoption;
 
