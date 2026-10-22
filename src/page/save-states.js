@@ -38,13 +38,28 @@ function saveStateFor({ ok = false, code = null, offline = false } = {}) {
   return SAVE_STATE_BY_CODE[code] ?? "error";
 }
 
+// A copy opens through the article rebuild, so it carries the projected article
+// and no page store: the merge state is the host's, never the file's.
+// The one page tag is removed from the captured text as it was written there; a
+// tag that cannot be found exactly once leaves the capture as it is.
+function withoutPageTag(html) {
+  let doc;
+  try { doc = new DOMParser().parseFromString(html, "text/html"); } catch { return html; }
+  const tags = [...doc.querySelectorAll('script[type="application/json"][merge="page"][clay~="live"]')]
+    .filter((el) => !el.closest("template") && !el.closest("noscript"));
+  if (tags.length !== 1) return html;
+  const outer = tags[0].outerHTML;
+  const at = html.indexOf(outer);
+  if (at < 0 || html.indexOf(outer, at + 1) !== -1) return html;
+  return html.slice(0, at) + html.slice(at + outer.length);
+}
+
 // One complete, openable file: the capture the save would have sent, with the
-// page projection already applied by the live store's snapshot listener. The
-// saved article and the page store travel together, so a person can read the
-// document or hand it back.
+// page projection already applied by the live store's snapshot listener, and
+// without the page editor's merge state, which no saved file or download carries.
 function downloadPageCopy() {
   const { forSave } = captureForSaveAndComparison();
-  return downloadHtml({ html: forSave, name: `${documentName()}.html` });
+  return downloadHtml({ html: withoutPageTag(forSave), name: `${documentName()}.html` });
 }
 
 // The article's own plain text, never the editor's chrome: the capture carries

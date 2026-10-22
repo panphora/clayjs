@@ -746,6 +746,11 @@ export function live(name) {
     if (event.phase === "refused" && event.code === "too-large" && !/^page(\.[0-9]+)?$/.test(name)) document.dispatchEvent(new CustomEvent("clay:live-notice", {
       detail: { name, code: "op-too-large", message: "That change was too large to share, so it was undone." },
     }));
+    // The room was opened from a document with no store of this name, so the
+    // page it holds is not the one this tab is editing.
+    if (event.phase === "left" && event.code === "no-store" && /^page(\.[0-9]+)?$/.test(name)) document.dispatchEvent(new CustomEvent("clay:live-notice", {
+      detail: { name, code: "unknown-store", message: `The room has no "${name}" store, so the page it holds is not the one this tab is editing.` },
+    }));
   });
   store.onRebase((event) => {
     settle(entry);

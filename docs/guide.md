@@ -855,6 +855,8 @@ Two rules for the proxy:
 
 `game.status.mode` is `fast` on the first two lanes and `file` on the third. In view mode a store reads normally, but writes stay in the tab and are never sent or saved.
 
+**The page editor's own store.** A Document's blocks are a live store named `page`, and its merge state is not in the file: hyperclay.com and Hyperclay Local keep it beside the file and hand it back to an editor only while it still belongs to the article (the article's `data-rev` matches), and HTML Clay keeps none, so open tabs share it and a fresh open rebuilds it from the article. Saved files and downloads never carry it, and a page replaced outside the editor (the code editor, an agent, a version restore, another device) shows a reload notice in the page tabs that are open, which stop saving so the old article is not written back over the new one.
+
 **When a room is lost.** A room lives in memory: a server restart, or two minutes with nobody connected, ends it. The next room starts from the last checkpoint, so up to 8 seconds of play can be gone. A change of yours that the old room may already have taken is not sent to the new one, even when its answer was lost: if the old room's last checkpoint lands afterwards, it brings that change back, and sending it again would count it twice. A change that never left the tab is sent as usual. Closing the tab that runs a local room is not a loss: the next tab takes over the room with every move.
 
 **Load the plugin wherever a live tag exists.** A page without `?plugins=live` still leaves live tags out of the merge, so an incoming save does not update them and the next save writes the old text back.
@@ -1520,6 +1522,7 @@ Cross-cutting:
 | Presence | none | none | avatar stack, no API |
 | `by` on frames, editing marker | no | no | yes |
 | Live stores (7.9) | tabs of one browser at full speed | tabs of one browser at full speed; other devices at save speed | every editor at full speed |
+| Page editor merge state (7.9) | none in the file: open tabs share it, a fresh open rebuilds it from the article | kept beside the file | kept beside the file |
 | Wire and ai-edit | yes | yes | ai-edit only, for owners and team editors on a paid plan |
 | Data API write | yes | yes | read only |
 | Uploads | 25 MB, in `~/htmlclay/uploads/` | 25 MB, in the root's `uploads/` | 10, 20 or 100 MB by plan, in the account's `uploads/` |

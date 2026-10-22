@@ -10,7 +10,7 @@ import { seedPageFromArticle } from "../page/ybind/migrate.js";
 import { serializeLive } from "../live/ops.js";
 import { registerUnsavedState } from "../lib/unsaved-state.js";
 import { hostMeta, hostSupports } from "../core/host-meta.js";
-import { savePageForce, setLastSavedBaselines } from "../core/save.js";
+import { savePageForce, setLastSavedBaselines, holdAllSaves, releaseAllSaves } from "../core/save.js";
 import { captureForComparisonAndDirty } from "../core/snapshot.js";
 import { storeOf, checkpointWithin, requestCheckpoint, fastLane, pageLaneReady, pageWriterReady } from "./live.js";
 import { HyperMorph } from "../vendor/hyper-morph.vendor.js";
@@ -28,6 +28,8 @@ const BLOCKED = { state: "blocked", code: "unsupported-host", message: "This hos
 const RETRY_BOUND_MS = 45000;
 const GENERIC_ERROR = "Couldn't save";
 const GENERIC_OFFLINE = "Offline, not saved";
+const REPLACED_TEXT = "This page was changed outside the editor. Reload to see it.";
+const REPLACED_HOLD = "The page was changed outside the editor; reload to see it.";
 
 const isPlainObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 
@@ -102,6 +104,50 @@ function showSaved(inst) {
   dispatchState("saved", null, "");
 }
 
+// An incoming document with no page tag whose article is not the one this tab
+// last saved: something outside the editor replaced the page, and this tab's
+// state no longer belongs to the file.
+function pageReplaced(html, savedRev) {
+  if (typeof html !== "string" || !html) return false;
+  let doc;
+  try { doc = new DOMParser().parseFromString(html, "text/html"); } catch { return false; }
+  const articles = doc.querySelectorAll(ARTICLE_SEL);
+  if (articles.length !== 1 || doc.querySelector(TAG_SEL)) return false;
+  return articles[0].getAttribute("data-rev") !== savedRev;
+}
+
+function savedRevOf(inst) {
+  if (!inst.store) return inst.savedRev;
+  try { return renderFromTags([JSON.stringify(inst.store.value)]).rev; } catch { return inst.savedRev; }
+}
+
+// Nothing of this tab's may reach the file again: the editor is read-only, the
+// binding is detached from the store (no frame, no flush), and every save is
+// held, so the old article cannot be written back over the replacement.
+function stopEditing(inst) {
+  const view = inst.view;
+  if (view) {
+    view.setProps({ editable: () => false });
+    view.setProps({ dispatchTransaction: (tr) => view.updateState(view.state.apply(tr)) });
+  }
+  try { inst.binding?.dispose(); } catch (error) { console.error("clayjs: page plugin binding failed to dispose", error); }
+  if (inst.savesHeld) return;
+  inst.savesHeld = true;
+  holdAllSaves(REPLACED_HOLD);
+}
+
+function showReplaced(inst) {
+  if (inst.replaced) return;
+  inst.replaced = true;
+  stopEditing(inst);
+  toastPersistent(REPLACED_TEXT, "warning", {
+    actions: [
+      { label: "Reload", onClick: () => window.location.reload() },
+      { label: "Download your copy", onClick: downloadPageCopy },
+    ],
+  });
+}
+
 function applySaveState(inst, state, code, message) {
   if (state === "saved") showSaved(inst);
   else if (state === "retrying") armRetry(inst, code, message);
@@ -128,10 +174,15 @@ function listenForSaves(inst) {
   });
   listen(inst, "clay:save-saved", (event) => {
     applySaveState(inst, saveStateFor({ ok: true }), null, event.detail?.msg ?? "");
+    inst.savedRev = savedRevOf(inst);
   });
   listen(inst, "clay:live-notice", (event) => {
     if (event.detail?.name !== "page") return;
     if (event.detail?.code === "op-too-large") return;
+    if (event.detail?.code === "unknown-store") {
+      showReplaced(inst);
+      return;
+    }
     const code = event.detail?.code ?? null;
     applySaveState(inst, saveStateFor({ code }), code, event.detail?.message ?? "");
   });
@@ -169,6 +220,11 @@ function dispose() {
   inst.listeners = [];
   dismissPersistent(RETRY_TEXT);
   dismissPersistent(BLOCKED_TEXT);
+  dismissPersistent(REPLACED_TEXT);
+  if (inst.savesHeld) {
+    inst.savesHeld = false;
+    releaseAllSaves({ replay: false, reason: REPLACED_HOLD });
+  }
   try { inst.adoption?.dispose(); } catch (error) { console.error("clayjs: page plugin adoption failed to dispose", error); }
   try { inst.recover?.destroy(); } catch (error) { console.error("clayjs: page plugin recover list failed to dispose", error); }
   try { inst.view?.destroy(); } catch (error) { console.error("clayjs: page plugin view failed to destroy", error); }
@@ -297,6 +353,12 @@ async function run(inst, gen, options = {}) {
   inst.article = article;
   inst.bootHtml = source.article.innerHTML;
   inst.bootRev = source.article.getAttribute("data-rev");
+  inst.savedRev = inst.bootRev;
+  listen(inst, "clay:sync-applied", (event) => {
+    if (inst.replaced) return;
+    if (!pageReplaced(event.detail?.html, inst.savedRev)) return;
+    showReplaced(inst);
+  });
 
   let toolsStore = null;
   if (document.querySelector('script[type="application/json"][merge="page.tools"][clay~="live"]')) {
@@ -380,6 +442,12 @@ async function run(inst, gen, options = {}) {
 
   await adoption.idle();
   if (gen !== generation) return;
+  // A replacement that landed while the page was still booting keeps the editor
+  // read-only: the notice is already up, and this tab must not edit the old article.
+  if (inst.replaced) {
+    stopEditing(inst);
+    return;
+  }
   view.setProps({ editable: () => true });
 
   // That initial write advanced the saved baselines from a capture taken before
@@ -395,7 +463,7 @@ async function run(inst, gen, options = {}) {
 function install(options = {}) {
   dispose();
   const gen = ++generation;
-  const inst = { gen, article: null, view: null, binding: null, adoption: null, source: null, store: null, toolHost: null, aiTool: null, bootHtml: "", bootRev: null, flush: null, listeners: [], retryTimer: null, retryShown: false };
+  const inst = { gen, article: null, view: null, binding: null, adoption: null, source: null, store: null, toolHost: null, aiTool: null, bootHtml: "", bootRev: null, savedRev: null, replaced: false, savesHeld: false, flush: null, listeners: [], retryTimer: null, retryShown: false };
   active = inst;
   return run(inst, gen, options).catch((error) => {
     console.error("clayjs: page plugin failed to install", error);

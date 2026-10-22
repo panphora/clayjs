@@ -115,7 +115,7 @@ const blobText = (blob) => new Promise((resolve, reject) => {
   reader.readAsText(blob);
 });
 
-test("Download a copy writes one html blob with the projected article and the page store", async () => {
+test("Download a copy writes one html blob with the projected article and no page store", async () => {
   const { store } = setPage([{ id: "p", t: "paragraph", text: "Hello" }]);
   await page.install();
   page.view.dispatch(page.view.state.tr.insertText("!", 6));
@@ -138,9 +138,11 @@ test("Download a copy writes one html blob with the projected article and the pa
     expect(saved.querySelector("article[data-page]").innerHTML).toBe(expected.html);
     expect(saved.querySelector("article[data-page]").getAttribute("data-rev")).toBe(expected.rev);
 
-    const tagValue = JSON.parse(saved.querySelector('script[merge="page"]').textContent);
-    expect(tagValue.y).toEqual(store.value.y);
-    expect(blocksFromYValue(tagValue).p.c).toBe("Hello!");
+    // A copy opens through the article rebuild, so it carries no merge state:
+    // the page editor's state is the host's, never a downloaded file's.
+    expect(saved.querySelector('script[merge="page"]')).toBe(null);
+    expect(html).not.toContain('merge="page"');
+    expect(blocksFromYValue(store.value).p.c).toBe("Hello!");
 
     expect(anchors).toHaveLength(1);
     expect(anchors[0].download).toBe("index.html");
