@@ -146,6 +146,23 @@ test("never-saved stores travel too", async () => {
   expect(a.handle("lobby").toJSON()).toEqual({ chat: ["hi"] });
 });
 
+test("a 200 KB value set in one tab reaches every tab whole", async () => {
+  const a = tab({ game: { value: { blob: null } } });
+  await settle();
+  const b = tab({ game: { value: { blob: null } } });
+  await settle();
+  const blob = "x".repeat(200 * 1024);
+  const changes = [];
+  b.handle("game").on("change", () => changes.push(b.game.toJSON().blob));
+  a.game.set("blob", blob);
+  await settle();
+  expect(a.game.toJSON()).toEqual({ blob });
+  expect(b.game.toJSON()).toEqual({ blob });
+  expect(b.entries.get("game").store.pending).toEqual([]);
+  expect(a.entries.get("game").store.pending).toEqual([]);
+  expect(changes.filter((value) => value === blob)).toHaveLength(1);
+});
+
 test("when the sequencer stops, the next tab takes over the same epoch with the same values and nothing counts twice", async () => {
   const a = tab({ game: { value: { score: 0 } } });
   await settle();

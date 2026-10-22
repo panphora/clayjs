@@ -135,13 +135,54 @@ test("a single op too large for a frame is announced to the user", async () => {
   await flushAsync();
   bridge.streamOpened({ clientId: "tab-1", lane: "live" });
   await flushAsync();
+  const realFetch = global.fetch.getMockImplementation();
+  global.fetch.mockImplementation(async (url, init = {}) => (init.method === "POST"
+    ? { ok: false, status: 413, json: async () => ({ code: "too-large" }), headers: { get: () => null } }
+    : realFetch(url, init)));
   g.set("blob", "x".repeat(FRAME_BYTES + 100));
   await wait(120);
+  global.fetch.mockImplementation(realFetch);
   expect(notices.find((n) => n.code === "op-too-large")).toMatchObject({
     name: "g",
     code: "op-too-large",
     message: "That change was too large to share, so it was undone.",
   });
+});
+
+test("a value larger than a frame is posted whole", async () => {
+  document.body.innerHTML = tag("g", '{"s":0}');
+  const g = live("g");
+  await flushAsync();
+  bridge.streamOpened({ clientId: "tab-1", lane: "live" });
+  await flushAsync();
+  const before = posts("g").length;
+  g.set("blob", "x".repeat(FRAME_BYTES + 100));
+  await wait(120);
+  const sent = posts("g").slice(before);
+  expect(sent).toHaveLength(1);
+  const body = JSON.parse(sent[0].init.body);
+  expect(body.ops).toHaveLength(1);
+  expect(new TextEncoder().encode(JSON.stringify(body)).length).toBeGreaterThan(FRAME_BYTES);
+  expect(notices.find((n) => n.code === "op-too-large")).toBeUndefined();
+});
+
+test("a page store's too-large refusal raises no undo notice", async () => {
+  const before = room;
+  room = { ...room, stores: { page: { value: { blocks: {} }, ephemeral: true, last: 0, landed: 0 } } };
+  document.body.innerHTML = '<script type="application/json" merge="page" clay="live ephemeral">{"blocks":{}}</script>';
+  const p = live("page");
+  await flushAsync();
+  bridge.streamOpened({ clientId: "tab-1", lane: "live" });
+  await flushAsync();
+  const realFetch = global.fetch.getMockImplementation();
+  global.fetch.mockImplementation(async (url, init = {}) => (init.method === "POST"
+    ? { ok: false, status: 413, json: async () => ({ code: "too-large" }), headers: { get: () => null } }
+    : realFetch(url, init)));
+  p.set(["blocks", "b"], "x".repeat(FRAME_BYTES + 100));
+  await wait(120);
+  global.fetch.mockImplementation(realFetch);
+  room = before;
+  expect(notices.find((n) => n.code === "op-too-large")).toBeUndefined();
 });
 
 test("after a room change the writer saves the new room's moves", async () => {

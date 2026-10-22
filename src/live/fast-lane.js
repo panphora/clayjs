@@ -183,24 +183,15 @@ export function createFastLane({
     }
     for (const [name, lane] of lanes) {
       if (!lane.unsent.length || !roomNames.has(name) || held(name)) continue;
-      // Packed by bytes as well as count: the host refuses a body over 64 KB.
+      // Packed by bytes as well as count, so a host still on a 64 KB body cap
+      // takes every frame; one op larger than a frame goes in a frame of its own.
       let size = byteSize({ name, n: lane.n + 1, ops: [], epoch });
       let count = 0;
       while (count < lane.unsent.length && count < MAX_OPS) {
         const more = byteSize(lane.unsent[count].op) + 1;
-        if (size + more > frameBytes) break;
+        if (count && size + more > frameBytes) break;
         size += more;
         count++;
-      }
-      // One op larger than a frame: only that op is undone, and the ops queued
-      // after it go on (nextFrame starts over).
-      if (count === 0) {
-        const [entry] = lane.unsent.splice(0, 1);
-        console.warn(`clay.live("${name}"): one update was larger than ${frameBytes} bytes, so it was undone`);
-        const store = entries.get(name)?.store;
-        tell(name, { phase: "undone", code: "op-too-large", from: entry.id, through: entry.id });
-        store?.rebase(store.authoritative, { source: "state", drop: [entry.id, entry.id], cause: "undone" });
-        return nextFrame();
       }
       const take = lane.unsent.splice(0, count);
       const frame = { n: ++lane.n, ops: take.map((entry) => entry.op), entries: take, first: take[0].id, through: take[take.length - 1].id, seq: null, sent: false, receiptGeneration, pageGeneration };

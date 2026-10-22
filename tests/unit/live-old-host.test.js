@@ -48,6 +48,36 @@ test("one op over 15 KB on its own is refused by the old host and undone", async
 
 });
 
+test("a lone large op answered 413 too-large is undone, not repacked", async () => {
+  const sim = new Sim(1);
+  let handlers, epoch = "e1", seq = 0;
+  const value = { s: 0 };
+  const posts = [];
+  const transport = {
+    start(h) { handlers = h; return () => {}; },
+    async fetchState() { return { epoch, seq, writer: "a", stores: { board: { value: JSON.parse(JSON.stringify(value)), seen: {}, last: seq, landed: 0 } } }; },
+    async send(id, frame) {
+      posts.push(frame.ops.length);
+      return { status: 413, body: { code: "too-large" } };
+    },
+  };
+  const store = createStore({ name: "board", value: { s: 0 } });
+  const deliveries = [];
+  store.onDelivery((event) => deliveries.push(event));
+  const lane = createFastLane({ transport, entries: new Map([["board", { store }]]), now: sim.now, setTimer: sim.setTimer, clearTimer: sim.clearTimer });
+  store.onLocal((ops) => lane.local("board", ops, store.mark));
+  lane.start();
+  sim.at(0, () => handlers.open({ clientId: "a" }));
+  sim.at(100, () => store.handle.set(["big"], "x".repeat(200 * 1024)));
+  await sim.run(5000);
+  lane.stop();
+  expect(posts).toEqual([1]);
+  expect(store.value).toEqual({ s: 0 });
+  expect(store.pending).toEqual([]);
+  expect(deliveries.find((event) => event.phase === "refused")).toMatchObject({ code: "too-large" });
+  expect(deliveries.some((event) => event.phase === "undone")).toBe(false);
+});
+
 // Round 8 review, Astra 2: the room restarts between the 413 and the smaller
 // retry. The repacked ops are unframed again, so the new room's state frames
 // them afresh and all 100 land there.

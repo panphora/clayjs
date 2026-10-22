@@ -422,36 +422,45 @@ test("frames are packed by size, so many small writes go in frames the host take
   expect(a.store.pending).toEqual([]);
 });
 
-test("one update larger than a frame is undone locally", async () => {
+test("one update larger than a frame goes in a frame of its own", async () => {
   const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
   const room = createRoom({ game: { s: 0 } });
   const a = client(room, "a", { s: 0 });
   room.open("a");
   await settle();
-  a.game.set("blob", "x".repeat(FRAME_BYTES));
+  const blob = "x".repeat(FRAME_BYTES);
+  a.game.set("blob", blob);
   await settle();
-  expect(a.game.toJSON()).toEqual({ s: 0 });
+  expect(room.posts).toHaveLength(1);
+  expect(room.posts[0].ops).toHaveLength(1);
+  const size = new TextEncoder().encode(JSON.stringify({ name: room.posts[0].name, n: room.posts[0].n, ops: room.posts[0].ops, epoch: room.posts[0].epoch })).length;
+  expect(size).toBeGreaterThan(FRAME_BYTES);
+  expect(room.stores.game).toEqual({ s: 0, blob });
+  expect(a.game.toJSON()).toEqual({ s: 0, blob });
   expect(a.store.pending).toEqual([]);
-  expect(room.posts).toHaveLength(0);
-  expect(warn).toHaveBeenCalled();
+  expect(warn).not.toHaveBeenCalled();
   warn.mockRestore();
 });
 
-test("an op queued after an oversized one still goes out", async () => {
+test("an op queued after an oversized one goes after it", async () => {
   const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
   const room = createRoom({ game: { s: 0 } });
   const a = client(room, "a", { s: 0 });
   room.open("a");
   await settle();
-  a.game.set("blob", "x".repeat(FRAME_BYTES));
+  const blob = "x".repeat(FRAME_BYTES);
+  a.game.set("blob", blob);
   a.game.add("s", 1);
   await settle();
-  expect(a.game.toJSON()).toEqual({ s: 1 });
-  expect(room.stores.game).toEqual({ s: 1 });
+  expect(a.game.toJSON()).toEqual({ s: 1, blob });
+  expect(room.stores.game).toEqual({ s: 1, blob });
   expect(a.store.pending).toEqual([]);
   expect(a.lane.status.seq).toBe(room.seq);
-  expect(room.posts.length).toBeGreaterThan(0);
-  expect(warn).toHaveBeenCalled();
+  expect(room.posts.map((p) => p.ops.map((op) => [op.op, op.path]))).toEqual([
+    [["set", ["blob"]]],
+    [["add", ["s"]]],
+  ]);
+  expect(warn).not.toHaveBeenCalled();
   warn.mockRestore();
 });
 

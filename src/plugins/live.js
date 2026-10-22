@@ -743,8 +743,8 @@ export function live(name) {
     if (event.code === "receipt-expired") document.dispatchEvent(new CustomEvent("clay:live-notice", {
       detail: { name, code: event.code, ops: event.ops, message: "The room retired an update receipt. Check the saved value before restoring this update." },
     }));
-    if (event.code === "op-too-large") document.dispatchEvent(new CustomEvent("clay:live-notice", {
-      detail: { name, code: event.code, message: "That change was too large to share, so it was undone." },
+    if (event.phase === "refused" && event.code === "too-large" && !/^page(\.[0-9]+)?$/.test(name)) document.dispatchEvent(new CustomEvent("clay:live-notice", {
+      detail: { name, code: "op-too-large", message: "That change was too large to share, so it was undone." },
     }));
   });
   store.onRebase((event) => {

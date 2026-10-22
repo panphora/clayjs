@@ -177,7 +177,7 @@ test("a 422 answer with a code tells refused and rebases with cause refused", as
   warn.mockRestore();
 });
 
-test("a single op over FRAME_BYTES tells undone with op-too-large", async () => {
+test("a single op over FRAME_BYTES is sent alone and lands", async () => {
   const room = createRoom({ game: { s: 0 } });
   const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
   const a = client(room, "a", { s: 0 });
@@ -186,7 +186,10 @@ test("a single op over FRAME_BYTES tells undone with op-too-large", async () => 
   a.events.length = 0;
   a.game.set("blob", "x".repeat(FRAME_BYTES + 100));
   await settle();
-  expect(a.events.find((e) => e.phase === "undone")).toMatchObject({ code: "op-too-large" });
+  expect(a.events.slice(0, 2).map((e) => e.phase)).toEqual(["sent", "landed"]);
+  expect(a.events.some((e) => e.phase === "undone")).toBe(false);
+  expect(room.stores.game.blob).toHaveLength(FRAME_BYTES + 100);
+  expect(a.game.toJSON()).toEqual(room.stores.game);
   warn.mockRestore();
 });
 
