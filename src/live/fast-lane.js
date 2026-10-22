@@ -494,12 +494,18 @@ export function createFastLane({
       const room = stores[name];
       const lane = laneOf(name);
       prune(name, lane);
+      const held = lane.room;
       lane.room = !!room;
       if (!room) {
         // Not in the room (too large, too many stores, or opened after it):
         // there are no frames of it to miss. Already out: its value still
-        // descends from where it left.
-        if (!lane.out) leaveRoom(name, lane, false);
+        // descends from where it left. A store the room held and has now
+        // dropped was replaced by a document without it, which a 404 to this
+        // tab's next frame would also say.
+        if (!lane.out) {
+          if (held) tell(name, { phase: "left", code: "no-store" });
+          leaveRoom(name, lane, false);
+        }
         // A read the barrier waited for says no room holds this store: the file is its authority.
         if (lane.after !== undefined && read >= lane.after) {
           lane.after = undefined;

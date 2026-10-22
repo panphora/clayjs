@@ -1247,3 +1247,26 @@ test("after an epoch change the read names the new epoch only once this tab appl
   await settle();
   expect(room.reads.at(-1)).toEqual({ epoch: "e2", seq: 1 });
 });
+
+test("a room state that drops a store this tab held says no-store; a store never in the room stays quiet", async () => {
+  const room = createRoom({ game: { score: 0 } });
+  const a = client(room, "a", { score: 0 });
+  const left = [];
+  a.store.onDelivery((event) => { if (event.phase === "left") left.push(event.code); });
+  room.open("a");
+  await settle();
+  expect(a.game.status.mode).toBe("fast");
+  room.restart({ other: {} });
+  await settle();
+  expect(left).toEqual(["no-store"]);
+  expect(a.game.status.mode).toBe("file");
+
+  const cold = createRoom({ other: {} });
+  const b = client(cold, "b", { score: 0 });
+  const quiet = [];
+  b.store.onDelivery((event) => { if (event.phase === "left") quiet.push(event.code); });
+  cold.open("b");
+  await settle();
+  expect(quiet).toEqual([]);
+  expect(b.game.status.mode).toBe("file");
+});
