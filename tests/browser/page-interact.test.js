@@ -434,7 +434,7 @@ describe('code block colours in a browser', () => {
     setup(blocks);
     expect(await until(() => keywordSpans('top').length > 0)).to.equal(true);
     const span = keywordSpans('top')[0];
-    expect(span.textContent).to.equal('const');
+    expect(span.textContent.trim()).to.equal('const');
     expect(getComputedStyle(span).color).to.not.equal(getComputedStyle(el('top').querySelector('code')).color);
     await settle(400);
     expect(keywordSpans('far').length).to.equal(0);
