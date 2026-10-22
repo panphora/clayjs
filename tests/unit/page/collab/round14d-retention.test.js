@@ -1,7 +1,8 @@
+import { hostTest } from "./round14-host.js";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-test("400 accepted file saves retain no settled capture records", () => {
+hostTest("400 accepted file saves retain no settled capture records", () => {
   const out = spawnSync(process.execPath, [
     "--import", fileURLToPath(new URL("./env-dom.js", import.meta.url)),
     fileURLToPath(new URL("./round14d-retention.mjs", import.meta.url)),
