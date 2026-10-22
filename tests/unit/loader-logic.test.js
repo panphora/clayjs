@@ -135,6 +135,14 @@ describe("resolveModules", () => {
       .toBeLessThan(plugins.indexOf("plugins/ai-edit.js"));
   });
 
+  test("plugins=page implies live and sync, which load before it", () => {
+    const { plugins } = resolveModules(params({ plugins: "page" }), true);
+    expect(plugins).toContain("sync/live-sync.js");
+    expect(plugins).toContain("plugins/live.js");
+    expect(plugins.indexOf("sync/live-sync.js")).toBeLessThan(plugins.indexOf("plugins/page.js"));
+    expect(plugins.indexOf("plugins/live.js")).toBeLessThan(plugins.indexOf("plugins/page.js"));
+  });
+
   // editOnly, like upload: the comment box is an editing gesture, and no host lists
   // a ready helper to a page that cannot edit. The wire it implies stays, because
   // the wire itself works in view mode.

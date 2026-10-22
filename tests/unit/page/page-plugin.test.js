@@ -382,11 +382,13 @@ test("view mode resolves without the page plugin and never calls its module thun
   const view = resolveModules(params({ plugins: "page" }), false);
   expect(view.plugins).not.toContain("plugins/page.js");
   const spy = jest.spyOn(MODULES, "plugins/page.js");
-  for (const path of view.plugins) MODULES[path]();
+  // live-sync opens its stream on evaluation, so it is the one implied module not run here.
+  for (const path of view.plugins.filter((path) => path !== "sync/live-sync.js")) MODULES[path]();
   expect(spy).not.toHaveBeenCalled();
   spy.mockRestore();
 
   const edit = resolveModules(params({ plugins: "page" }), true);
   expect(edit.plugins).toContain("plugins/live.js");
+  expect(edit.plugins).toContain("sync/live-sync.js");
   expect(edit.plugins).toContain("plugins/page.js");
 });
