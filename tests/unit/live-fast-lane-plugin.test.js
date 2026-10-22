@@ -149,6 +149,26 @@ test("a single op too large for a frame is announced to the user", async () => {
   });
 });
 
+test("a codeless 413 on a lone op raises the too-large notice", async () => {
+  document.body.innerHTML = tag("g", '{"s":0}');
+  const g = live("g");
+  await flushAsync();
+  bridge.streamOpened({ clientId: "tab-1", lane: "live" });
+  await flushAsync();
+  const realFetch = global.fetch.getMockImplementation();
+  global.fetch.mockImplementation(async (url, init = {}) => (init.method === "POST"
+    ? { ok: false, status: 413, json: async () => ({}), headers: { get: () => null } }
+    : realFetch(url, init)));
+  g.set("blob", "x".repeat(FRAME_BYTES + 100));
+  await wait(120);
+  global.fetch.mockImplementation(realFetch);
+  expect(notices.find((n) => n.code === "op-too-large")).toMatchObject({
+    name: "g",
+    code: "op-too-large",
+    message: "That change was too large to share, so it was undone.",
+  });
+});
+
 test("a value larger than a frame is posted whole", async () => {
   document.body.innerHTML = tag("g", '{"s":0}');
   const g = live("g");

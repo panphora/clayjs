@@ -367,7 +367,8 @@ export function createFastLane({
       return;
     }
     const store = entries.get(name)?.store;
-    tell(name, { phase: "refused", code: body?.code ?? "refused", n: frame.n, from: frame.first, through: frame.through, ...(body?.code === "receipt-expired" && { ops: frame.ops }) });
+    const code = body?.code ?? (status === 413 && frame.entries?.length === 1 ? "too-large" : "refused");
+    tell(name, { phase: "refused", code, n: frame.n, from: frame.first, through: frame.through, ...(body?.code === "receipt-expired" && { ops: frame.ops }) });
     console.warn(`clay.live("${name}"): the host refused an update, so it was undone (${reason})`);
     store?.rebase(store.authoritative, { source: "state", drop: frame.first === undefined ? undefined : [frame.first, frame.through], through: frame.first === undefined ? frame.through : undefined, cause: "refused" });
     if (body?.code === "receipt-expired") resync();

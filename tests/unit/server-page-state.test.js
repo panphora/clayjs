@@ -2,7 +2,7 @@
  * @jest-environment node
  */
 import { readFileSync } from "node:fs";
-import { splitPage, composePage } from "../../src/server/rooms/index.js";
+import { splitPage, composePage, pageRev } from "../../src/server/rooms/index.js";
 import { inspectPage } from "../../src/server/rooms/page-admission.js";
 
 const template = readFileSync(new URL("../fixtures/ypage-template.html", import.meta.url), "utf8");
@@ -59,8 +59,6 @@ test("a file that still has its own page tag is left alone", () => {
 test("inputs that are not exactly one Yjs tag beside one revisioned article are unchanged", () => {
   const cases = {
     none: doc("", `  ${article()}`),
-    twoArticles: doc(`  ${pageTag(yValue)}`, `  ${article()}\n  ${article()}`),
-    noRev: doc(`  ${pageTag(yValue)}`, `  <article class="page" data-page="1"></article>`),
     hybrid: doc(`  ${pageTag(`{"blocks":{"b1":{"text":"hi"}}}`)}`, `  ${article()}`),
     tagInsideArticle: doc("", `  <article class="page" data-page="1" data-rev="093360993130d818">${pageTag(yValue)}</article>`),
     tagInTemplate: doc(`  <template>${pageTag(yValue)}</template>`, `  ${article()}`),
@@ -77,4 +75,52 @@ test("an escaped closing script sequence survives split and compose byte for byt
 
   const fromTemplate = splitPage(template);
   expect(fromTemplate.state.tag).toBe(/<script type="application\/json" merge="page"[^>]*>[\s\S]*?<\/script>/.exec(template)[0]);
+});
+
+test("pageRev answers the lone article's revision, and null otherwise", () => {
+  expect(pageRev(doc("", `  ${article()}`))).toBe("093360993130d818");
+  expect(pageRev(template)).toBe(articleRev(template));
+  expect(pageRev(doc("", `  ${pageTag(yValue)}`))).toBeNull();
+  expect(pageRev(doc("", `  ${article()}\n  ${article()}`))).toBeNull();
+  expect(pageRev(doc("", `  <article class="page" data-page="1" data-rev=""></article>`))).toBeNull();
+  expect(pageRev(doc("", `  <article class="page" data-page="1"></article>`))).toBeNull();
+  expect(pageRev(doc("", `  <template>${article()}</template>`))).toBeNull();
+});
+
+const crlf = (html) => html.replace(/\n/g, "\r\n");
+const cr = (html) => html.replace(/\n/g, "\r");
+
+test("a CRLF document round trips byte for byte and composes with CRLF", () => {
+  const html = crlf(doc("", `  ${pageTag(yValue)}\n  ${article()}`));
+  const { file, state } = splitPage(html);
+  expect(state).not.toBeNull();
+  expect(file).not.toContain('merge="page"');
+  const composed = composePage(file, state);
+  expect(composed).toBe(html);
+  expect(composed).toContain(`${state.tag}\r\n  <article`);
+  expect(splitPage(composed)).toEqual({ file, state });
+});
+
+test("a CR-only document round trips byte for byte", () => {
+  const html = cr(doc("", `  ${pageTag(yValue)}\n  ${article()}`));
+  const { file, state } = splitPage(html);
+  expect(state).not.toBeNull();
+  expect(file).not.toContain('merge="page"');
+  const composed = composePage(file, state);
+  expect(composed).toBe(html);
+  expect(splitPage(composed)).toEqual({ file, state });
+});
+
+test("an unformable page tag is stripped and leaves no state", () => {
+  const noArticle = doc("", `  ${pageTag(yValue)}`);
+  const noRev = doc("", `  ${pageTag(yValue)}\n  <article class="page" data-page="1"></article>`);
+  const twoArticles = doc("", `  ${pageTag(yValue)}\n  ${article()}\n  ${article()}`);
+  expect(splitPage(noArticle)).toEqual({ file: doc("", "").replace("\n\n</body>", "\n</body>"), state: null });
+  expect(splitPage(noRev)).toEqual({ file: doc("", `  <article class="page" data-page="1"></article>`), state: null });
+  expect(splitPage(twoArticles)).toEqual({ file: doc("", `  ${article()}\n  ${article()}`), state: null });
+});
+
+test("two page tags leave the document unchanged", () => {
+  const html = doc("", `  ${pageTag(yValue)}\n  ${pageTag(yValue)}\n  ${article()}`);
+  expect(splitPage(html)).toEqual({ file: html, state: null });
 });
