@@ -543,6 +543,7 @@ export class TableView {
     return true;
   }
   stopEvent(event) { return !!event.target.closest?.("thead"); }
+  ignoreMutation(mutation) { return !this.contentDOM.contains(mutation.target); }
 }
 
 const cellViews = new WeakMap();

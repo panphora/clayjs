@@ -36,6 +36,21 @@ test("dragging a column border stores a clamped width as one step and draws a fi
   expect(cols(view).c1.width).toBeUndefined();
 });
 
+test("a live drag survives the editor's mutation observer: the table view is kept and the width lands", async () => {
+  const view = editor([], { blocks: { tbl } });
+  const table = view.dom.querySelector("table");
+  const handle = view.dom.querySelector('th[data-col="c1"] .page-table-resize');
+  pointer("pointerdown", handle, 100);
+  pointer("pointermove", view.dom.ownerDocument, 130);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(view.dom.querySelector("table")).toBe(table);
+  pointer("pointermove", view.dom.ownerDocument, 160);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(view.dom.querySelector('col[data-col="c1"]').style.width).toBe("220px");
+  pointer("pointerup", view.dom.ownerDocument, 160);
+  expect(cols(view).c1.width).toBe(220);
+});
+
 test("the Width menu is the button equivalent: Wider, Narrower, Fit and Reset", () => {
   const view = editor([], { blocks: { tbl } });
   view.dom.querySelector('th[data-col="c2"] button').click();
