@@ -2,7 +2,7 @@
 
 This is the complete reference for building malleable documents with ClayJS: one HTML file that is the whole app, edits itself in place, saves itself back to its host, and merges edits from other tabs, other people and agents. Read it top to bottom once. After that, sections 2 (the skeleton), 9 (architecture) and 13 (checklist and trap index) are the parts to return to.
 
-It is written for a developer or an LLM building full apps with inline editing and inline controls: kanban boards with card detail, block writers, finance trackers, CRMs, flashcards, trackers. It covers the CMS plugin only in passing (section 8.13), because an app whose product is editing should not route editing through a form sidebar.
+It is written for a developer or an LLM building full apps with inline editing and inline controls: kanban boards with card detail, block writers, finance trackers, CRMs, flashcards, trackers. It covers the CMS plugin only in passing (section 8.12), because an app whose product is editing should not route editing through a form sidebar.
 
 Every behavior stated here was read from ClayJS 1.8.2 source or executed. The four example files below are complete, tested apps that this guide quotes. A [test suite](https://github.com/panphora/clayjs/tree/main/tests/unit/guide-examples) boots each one in jsdom with the real loader and checks what it saves, how it merges a peer's edit, and what a viewer receives. Open any of them and view source, or download one and open it in HTML Clay to edit it:
 
@@ -219,7 +219,7 @@ The test suite checks this file opens without becoming dirty, saves the record a
 | `quickcrop` | off | yes | `clay.quickcrop` |
 | `cms` | off | yes | `clay.cms`; implies `quickcrop` and `upload` |
 | `wire` | off | yes | `clay.wire`, the channel to a local agent process |
-| `message` | off | yes | `message-form`: a visitor's contact form to the owner, `clay.message` (8.14) |
+| `message` | off | yes | `message-form`: a visitor's contact form to the owner, `clay.message` (8.13) |
 | `ai-edit` | off | no | select text, ask an agent to rewrite it; implies `wire` |
 | `demo` | off | yes | fakes saving into `localStorage` for public demos |
 | `visitor-drafts` | off | yes | the draft store, `clay.visitorDrafts`, the download prompt, the intro area and the owner chip on a page that opted in (14) |
@@ -247,7 +247,7 @@ Satellites are separate classic script tags. Each publishes a promise on `clay.l
 | `clay-utils.js` | `clay.loaded.utils` | `clay.utils.debounce`, `throttle`, `cookie.get/remove`, `slugify`, `copyToClipboard` | |
 | `clay-internals.js` | `clay.loaded.internals` | `clay.internals`: capture, transforms, raw save | |
 | `clay-data.js` | `clay.loaded.data` | `clay.extractData`, `clay.applyData` | 9.9 |
-| `sap.js` | `clay.loaded.sap` | `Sap`, the reactive attribute layer | 8.12 |
+| `sap.js` | `clay.loaded.sap` | `Sap`, the reactive attribute layer | 8.11 |
 
 Satellites do not wait for `clay.ready` and work without `clay.js` at all, including in view mode and on a static host. Await the promise before using what it adds: `await clay.loaded.ui` before `clay.toast` in code that runs early. Code inside a `clay.ready` callback can usually use `clay.toast?.(...)` safely, since the satellites finish loading at about the same time, but the optional call costs nothing.
 
@@ -261,7 +261,7 @@ You can set configuration before the tag, and the loader merges into it: `window
 
 ### 3.5 Theming ClayJS's own UI
 
-ClayJS draws a few things on your page: dialogs (`clay.ask`, `clay.confirm`, `clay.tell`, `clay.snippet`, `clay.modal`) and the people plugin's name prompt. By default they take your page's font, and on a page with a plain solid background, its background and text colours. Everything else comes from ClayJS's own look, Bevel.
+ClayJS draws a few things on your page: dialogs (`clay.ask`, `clay.confirm`, `clay.tell`, `clay.snippet`, `clay.modal`) and the people plugin's name prompt. By default they take your page's font, and on a page with a plain solid background, its background and text colours. Everything else comes from ClayJS's own built-in look.
 
 To match them to your design, set `window.clayTheme` before the loader tag:
 
@@ -277,8 +277,8 @@ window.clayTheme = {
 
 - **Tokens** set the basics: `font`, `headingFont`, `text`, `mutedText`, `background`, `surface`, `border`, `accent`, `accentText`, `danger`, `dangerText`, `success`, `warning`, `radius`, `shadow`, `overlay`, `spacing`, `buttonHeight`. Each is a CSS value, and `var(--your-variable, fallback)` works. A page can also set a token in CSS as `--clay-ui-<name>` (`--clay-ui-accent-text` for `accentText`). `spacing` is one length, such as `20px`.
 - **Parts** set anything else. Every element ClayJS draws has a stable name, such as `dialog.panel`, `dialog.title`, `button.primary` or `people.choice`, and each takes `base`, `hover`, `active`, `focus` and `disabled` declarations. A part names its surface, so `people.title` overrides `dialog.title` in the name prompt only. The names are in `data-clay-part` on each element, and the full list is in `docs/injected-ui.md`.
-- A value wins in this order: `tokens`, then `--clay-ui-*` properties, then the page's sampled font and colours, then Bevel.
-- `window.clayTheme = false` keeps the exact Bevel look. After loading, `clay.theme(options)` replaces the theme, `clay.theme(false)` and `clay.theme(null)` restore Bevel or the default, and `clay.theme()` returns the current one. A change affects the next dialog, not one already open.
+- A value wins in this order: `tokens`, then `--clay-ui-*` properties, then the page's sampled font and colours, then the built-in look.
+- `window.clayTheme = false` keeps the exact built-in look. After loading, `clay.theme(options)` replaces the theme, `clay.theme(false)` and `clay.theme(null)` restore the built-in look or the default, and `clay.theme()` returns the current one. A change affects the next dialog, not one already open.
 
 Your stylesheet still cannot reach these elements: every declaration is inline and `!important`, so a stray `button { ... }` rule never breaks a prompt. On a phone, dialog buttons stay at least 44px tall whatever the theme asks for.
 
@@ -334,7 +334,7 @@ The family:
 | `option-not:NAME="a"` | some ancestor has `NAME` with a value other than `a`; hidden when no ancestor has `NAME` |
 
 - It matches **any** ancestor, not the nearest. Nested views need different attribute names (`view` on the app, `cardview` on a card).
-- It compares literal strings only. Expressions belong to sap's `show=` (8.12).
+- It compares literal strings only. Expressions belong to sap's `show=` (8.11).
 - `show-when:savestatus="error|offline"` shows a "not saved" warning. `show-when:pageowner="true"` shows owner links.
 - For content only viewers should see, use `hide-when:editmode="true"`: it is visible when `editmode` is absent. `show-when:editmode="false"` is hidden until boot and then appears.
 - The attribute you switch views with is ordinary saved content. Setting `view="list"` on a saved element saves it and syncs it to every collaborator. Section 9.3 covers tab-local views.
@@ -1075,15 +1075,11 @@ For fixed content, such as code samples in a docs page, mark the block `clay="fr
 
 For a notes or journal app where markdown is the format, OverType (`https://cdn.jsdelivr.net/npm/overtype@2.6.1/dist/overtype.min.js`) is a textarea under a styled preview. With `new OverType(el, { persist: true })` the saved file holds only a `<textarea persist>` and its wrapper; everything else is `editor-ui`. Keep one live instance at a time, and normalize OverType's layout state in an `onbeforesave` on the container. A journal built this way keeps entries as `<article data-id>` records, clones its chrome from a `<template>`, and paints the open entry with a runtime stylesheet.
 
-### 8.10 Bevel components
+### 8.10 Attributes from older Hyperclay files
 
-Bevel (`@panphora/bevel`) is a separate component library with a kanban board, an editable data grid, inline edit, upload dropzone and modal, all with state in markup. ClayJS does not load it. Load `bevel.css` and `bevel.js` yourself and register `Bevel.prepareForSave` with `clay.onSnapshot`. It has its own drag and events and is not wired to ClayJS undo or sortable. Use it when a ready-made grid or board is acceptable; build from this guide when the app needs its own shape.
+Older Hyperclay files can carry attributes ClayJS ignores: `movable`, `movable-handle`, `prevent-enter`, `autosize`, `ajax-form`, `ajax-button`, `send-message`, `upgrade`. Replace them with a few lines of code (`prevent-enter`: a keydown handler; `autosize`: CSS `field-sizing: content`; `movable`: pointer events writing `data-x`/`data-y`; `send-message`: the `message` plugin, 8.13). Old saved `<html editmode="false">` and hand-written `option-visibility-styles` style tags are dead weight; ClayJS strips the root attributes on the next save.
 
-### 8.11 Attributes from older Hyperclay files
-
-Older Hyperclay files can carry attributes ClayJS ignores: `movable`, `movable-handle`, `prevent-enter`, `autosize`, `ajax-form`, `ajax-button`, `send-message`, `upgrade`. Replace them with a few lines of code (`prevent-enter`: a keydown handler; `autosize`: CSS `field-sizing: content`; `movable`: pointer events writing `data-x`/`data-y`; `send-message`: the `message` plugin, 8.14). Old saved `<html editmode="false">` and hand-written `option-visibility-styles` style tags are dead weight; ClayJS strips the root attributes on the next save.
-
-### 8.12 sap.js: records, views and totals in markup
+### 8.11 sap.js: records, views and totals in markup
 
 `sap.js` (a satellite, also published standalone as `@panphora/sapjs`) is a reactive attribute layer whose only store is the DOM. Every change runs one pass: it reads the app out of the live page, computes `calc:` fields in dependency order, and writes only the paints that changed. It is the way to build the reactive parts of a malleable document app: totals, filtered and sorted views, a form that adds records, an editor for the selected record.
 
@@ -1120,7 +1116,7 @@ Rules for sapjs in a malleable file:
 - **Hide blueprints in your own CSS** (`[item][template] { display: none }`); sapjs's own rule arrives only with the script. Sapjs also adds `[hidden] { display: none !important }` page-wide.
 - A pass is batched: after a write, call `Sap.refresh()` before reading painted output. Expressions compile with `new Function`, so a Content Security Policy without `unsafe-eval` breaks them.
 
-### 8.13 The CMS, in passing
+### 8.12 The CMS, in passing
 
 `?plugins=cms` turns a page into a content-managed page: a JSON rules tag maps field names to selectors, and an "Edit content" button opens a sidebar form (or edits text in place) that writes straight into the DOM.
 
@@ -1134,7 +1130,7 @@ It fits content sites: landing pages, menus, pricing, FAQs, team pages, where th
 
 ---
 
-### 8.14 message: contact forms
+### 8.13 message: contact forms
 
 `?plugins=message` sends a visitor's form to the document's owner. On hyperclay.com the owner gets it by email and in their messages.
 
@@ -1226,7 +1222,7 @@ Never put per-viewer state on `<html>` or any record element without that: it au
 
 Pick by whether the saved file must show the value:
 
-- **Computed only from the records** (counts, progress badges, totals, a card's face): ordinary saved content. Write it into the record markup, ship the file pre-painted, and recompute on every change; every tab computes the same value, so a merge never fights over it. With sap this is just a paint (8.12). The starter Kanban paints its list counts and card faces this way.
+- **Computed only from the records** (counts, progress badges, totals, a card's face): ordinary saved content. Write it into the record markup, ship the file pre-painted, and recompute on every change; every tab computes the same value, so a merge never fights over it. With sap this is just a paint (8.11). The starter Kanban paints its list counts and card faces this way.
 - **Different per tab** (search results, which entry is open, "overdue" against today's date, OS shortcut labels, names loaded from the people plugin): write it inside a `clay="freeze"` scratchpad (5.2). The element saves and syncs; its contents never do.
 - **Pure UI** (buttons, menus, handles): `editor-ui`, created from a `<template>` (9.2).
 - **Optionally, `no-dirty`** for a computed value the saved file shows: it saves with the next real edit, never counts as an edit itself, and remote wins under sync. Apply the 7.3 workaround. The finance tracker does this.
@@ -1314,7 +1310,7 @@ document.addEventListener("click", (event) => {
 
 ### 9.7 Filters and view switching
 
-- **Filter by hiding** records with a runtime stylesheet (skeleton, kanban), or with sapjs through an `each=` view or a frozen stylesheet (8.12). The finance example still uses sap `show=` plus snapshot normalization, an older pattern: `show=` writes `hidden` into saved records. Never remove records to filter.
+- **Filter by hiding** records with a runtime stylesheet (skeleton, kanban), or with sapjs through an `each=` view or a frozen stylesheet (8.11). The finance example still uses sap `show=` plus snapshot normalization, an older pattern: `show=` writes `hidden` into saved records. Never remove records to filter.
 - **Switch layouts with CSS** over the same records where possible: a list view can be the board with `display: contents` on columns.
 - **Projection views** (a table of all cards, a calendar, a due-today list) render into an `editor-ui` container and rebuild on record mutation, `clay:sync-applied` and `hashchange`. Edits made in a projection write to the record by id.
 
@@ -1322,7 +1318,7 @@ With sapjs, a projection view is an `each=` attribute, and its rows edit the rec
 
 ### 9.8 Computed totals
 
-Plain JavaScript into `editor-ui` (9.4) for a count or two. Sapjs for anything with arithmetic across rows, categories and formats (8.12, and the expense tracker in sapjs guide section 9). Store money as integers or as plain numbers in `value` attributes, never as formatted strings.
+Plain JavaScript into `editor-ui` (9.4) for a count or two. Sapjs for anything with arithmetic across rows, categories and formats (8.11, and the expense tracker in sapjs guide section 9). Store money as integers or as plain numbers in `value` attributes, never as formatted strings.
 
 ### 9.9 Import and export
 
@@ -1458,7 +1454,7 @@ Missing pieces to add on the same model: a table block (`<table>` with `editmode
 - `main#app[sap]` with a summary of `no-dirty` outputs (budgeted, spent, left), a categories table (`items="categories"`, each row a name, a persisted budget input, computed spent and left, a progress bar via `css:used`) and a transactions table (`items="txns"`, each row date, memo, category with a datalist, amount).
 - Category spent: `calc:spent="sum(root.txns.filter(t => t.cat === item.name), 'amount')"`.
 - Search: a `transient` bound input, `calc:match` and `show="item.match"` per row, `hidden` stripped from snapshots.
-- Rows get stable ids from `claimRowIds`, a workaround from before sapjs minted unique ids. A new app writes `data-id=""` on the blueprint and lets `trigger-add` mint ids (8.12).
+- Rows get stable ids from `claimRowIds`, a workaround from before sapjs minted unique ids. A new app writes `data-id=""` on the blueprint and lets `trigger-add` mint ids (8.11).
 - CSV import (edit only) and export (both modes).
 - The 7.3 acknowledge workaround for `no-dirty` totals.
 
@@ -1482,7 +1478,7 @@ One `<section class="slide" data-id data-layout="title|bullets|image|quote">` pe
 
 ### 10.8 Content site
 
-Without the CMS: `editable` regions for copy, upload and quickcrop for images, `sortable` lists for features. With the CMS: a rules tag and `?plugins=cms` (8.13).
+Without the CMS: `editable` regions for copy, upload and quickcrop for images, `sortable` lists for features. With the CMS: a rules tag and `?plugins=cms` (8.12).
 
 ---
 
@@ -1632,7 +1628,7 @@ The saved file is the data. Everyone who can download it can read everything in 
 | The undo plugin takes Cmd+Z in every text field | 8.3 |
 | Undoing an add removes the record even after a peer edited it | 8.3 |
 | Pausing undo across an `await` loses the earlier mutations | 8.3 |
-| Sap reads live control values: undo without re-syncing inputs saves the undone number | 5.3, 8.12 |
+| Sap reads live control values: undo without re-syncing inputs saves the undone number | 5.3, 8.11 |
 | `clay.upload` is not a picker; embed only on `unsupported` | 8.5 |
 | `clay.confirm` rejects with `undefined` on cancel | 8.6 |
 | A live element passed to `clay.modal.html` is deleted | 8.6 |
@@ -1640,11 +1636,11 @@ The saved file is the data. Everyone who can download it can read everything in 
 | `onclone` does not fire for template fragments | 8.7 |
 | `el.nearest` reads a neighbour record's field | 8.7 |
 | `hide()`, `show()`, `css()` write saved inline styles | 8.7 |
-| A file whose painted values do not match sap's state writes at load | 8.12 |
+| A file whose painted values do not match sap's state writes at load | 8.11 |
 | Dialog prompts are HTML: record text in `clay.confirm` runs a collaborator's markup | 8.6 |
 | `editmode:resource type="inert/javascript"` activates as `javascript` and never runs | 4.4 |
-| Sap's template row shows before sap loads | 8.12 |
-| CMS `cms-template` with `hidden` makes every new item invisible | 8.13 |
+| Sap's template row shows before sap loads | 8.11 |
+| CMS `cms-template` with `hidden` makes every new item invisible | 8.12 |
 | Records stored twice drift | 9.1 |
 | `applyData` pairs rows by content and order, not by id | 9.9 |
 | Activity logged from a mutation observer also logs peers and undo | 9.6 |
@@ -1669,11 +1665,11 @@ The owner is a visitor here too. Signed in, they get the same private draft unle
 
 A page that wants draft mode needs all of this. The example in 14.8 carries every item, and its test proves the round trip:
 
-1. An `api` rules tag naming every saved field, with a `cms-template` seed row for every list the rules describe. Hide the seed in your own CSS (`[cms-template] { display: none !important }`), never with `hidden`, which the CMS reads as data (8.13).
+1. An `api` rules tag naming every saved field, with a `cms-template` seed row for every list the rules describe. Hide the seed in your own CSS (`[cms-template] { display: none !important }`), never with `hidden`, which the CMS reads as data (8.12).
 2. `<html visitor-drafts="<site-stem>-v1" autosave>`. The value is the slot: letters, digits, dot, underscore and hyphen, up to 100 characters. It names this app's corner of `localStorage`, so two apps on one origin never mix.
 3. `plugins=visitor-drafts` on the loader tag, plus whatever else the app needs.
 4. `persist` on every control the rules name. A typed value without `persist` is lost at save (5.3), and in draft mode a save is the visitor's own copy.
-5. `data-id` on every record and `data-id=""` on every blueprint. New rows mint their own (`trigger-add` does it, 8.12).
+5. `data-id` on every record and `data-id=""` on every blueprint. New rows mint their own (`trigger-add` does it, 8.11).
 6. `<meta name="application-name" content="...">`. The prompt, the intro and the download name the app from it, falling back to the title before the first `:` or `|`.
 7. A feedback link the visitor can use: a `mailto:` address in the page, not in the plugin.
 8. Optional: a `<template visitor-intro>` (14.6). No template, no intro; the prompt still shows.
@@ -1730,7 +1726,7 @@ The rung is where a free document lives, so the details matter:
 
 ### 14.5 Restoring and redrawing
 
-The restore runs while ClayJS boots, before `clay.ready` resolves, and applies the stored JSON to the live page with `applyData`. sapjs and any code that waits for `clay.ready` therefore see the restored values, not the authored ones, and sapjs re-derives on the mutations the restore makes, so a count or a total painted in markup is right on the first paint after it. Load `clay.js` before `sap.js` for that: sapjs mounts when `clay.ready` resolves, and a page that mounts it first paints the authored values with no later mutation to correct them (8.12).
+The restore runs while ClayJS boots, before `clay.ready` resolves, and applies the stored JSON to the live page with `applyData`. sapjs and any code that waits for `clay.ready` therefore see the restored values, not the authored ones, and sapjs re-derives on the mutations the restore makes, so a count or a total painted in markup is right on the first paint after it. Load `clay.js` before `sap.js` for that: sapjs mounts when `clay.ready` resolves, and a page that mounts it first paints the authored values with no later mutation to correct them (8.11).
 
 Code that drew before `clay.ready` has two ways to hear about the restore: listen for `clay:drafts-restored` on `document`, or call `clay.visitorDrafts.onRestore(fn)`, which runs `fn` at once when the restore already happened. Either way the detail is `{ restored, hadDraft, parked }`.
 
@@ -1770,7 +1766,7 @@ An element inside the template with `[visitor-intro-start]` scrolls to the app, 
 
 ### 14.8 A complete example
 
-[`examples/free-reading-list.html`](https://clayjs.com/examples/free-reading-list.html). Plugins `visitor-drafts,indicator&exclude=richclay`, satellites `clay-options` and `sap.js`. A reading list: a title, an author and a status select per book, one scalar goal for the year, and sapjs counting the books that are read. It is the shortest file that carries every item of the contract, and `tests/unit/guide-examples/free-document.test.js` runs it end to end: edit a title, add a book, check the slot, then load the file again with that storage and check the books and the counts come back. The record is authored in the saved form, so sapjs logs its harmless W03 warning for each `viewmode:` attribute (8.12). The `reading` option of a status select carries no `selected`: it is the first option, which is the default, and the row that is `read` marks it.
+[`examples/free-reading-list.html`](https://clayjs.com/examples/free-reading-list.html). Plugins `visitor-drafts,indicator&exclude=richclay`, satellites `clay-options` and `sap.js`. A reading list: a title, an author and a status select per book, one scalar goal for the year, and sapjs counting the books that are read. It is the shortest file that carries every item of the contract, and `tests/unit/guide-examples/free-document.test.js` runs it end to end: edit a title, add a book, check the slot, then load the file again with that storage and check the books and the counts come back. The record is authored in the saved form, so sapjs logs its harmless W03 warning for each `viewmode:` attribute (8.11). The `reading` option of a status select carries no `selected`: it is the first option, which is the default, and the row that is `read` marks it.
 
 ```html
 <!DOCTYPE html>
