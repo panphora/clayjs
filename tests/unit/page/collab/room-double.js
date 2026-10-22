@@ -7,7 +7,7 @@ import { applyTracked, cloneJson, serializeLive, sizeChange, undoTracked, valida
 import { receiptHas, postReceipt, replaceReceipt, retireReceipt } from "../../../../src/live/provenance.js";
 import { evict, mergeFile } from "./file-merge.js";
 
-export const LIMITS = { opsPerFrame: 128, storeBytes: 1024 * 1024, roomBytes: 2 * 1024 * 1024, logEntries: 4096, logBytes: 256 * 1024, bodyBytes: 64 * 1024, movesBytes: 1024 * 1024, receipts: 4096 };
+export const LIMITS = { opsPerFrame: 128, storeBytes: 4 * 1024 * 1024, roomBytes: 6 * 1024 * 1024, logEntries: 4096, logBytes: 256 * 1024, bodyBytes: 64 * 1024, movesBytes: 1024 * 1024, receipts: 4096 };
 export const RATE = { perSecond: 25, burst: 40 };
 const encoder = new TextEncoder();
 const utf8 = (text) => encoder.encode(text).length;

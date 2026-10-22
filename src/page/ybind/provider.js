@@ -148,7 +148,9 @@ export function createYProvider({ store, ydoc, compact: limits = {}, setTimer = 
     return true;
   }
 
-  const compact = { keys: 32, room: 768 * 1024, ...limits };
+  // A fold briefly holds the old entries and the merged snapshot together, so it
+  // needs room for both under the host's 4 MB store cap, less 256 KB for frames in flight.
+  const compact = { keys: 32, room: 3840 * 1024, ...limits };
   let fold = null;
   let quietUntil = 0;
   const coverCache = new Map();

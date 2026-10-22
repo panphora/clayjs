@@ -39,8 +39,8 @@ const sizeOf = (value) => byteLength(serializeLive(value));
 // counted byte, so the rooms stay near 1 GB at most.
 export const LIVE_LIMITS = Object.freeze({
   opsPerFrame: 128,
-  storeBytes: 1024 * 1024,
-  roomBytes: 2 * 1024 * 1024,
+  storeBytes: 4 * 1024 * 1024,
+  roomBytes: 6 * 1024 * 1024,
   liveBytes: 256 * 1024 * 1024,
   storesPerRoom: 16,
   rooms: 5000,

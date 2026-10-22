@@ -4,8 +4,9 @@ import { createYProvider, docFromValue, entriesOf } from "../../../../src/page/y
 import { seedValue } from "../../../../src/page/ybind/seed.js";
 import { Sim, createRoom } from "../collab/room-double.js";
 
-async function runProbe(characters, count, maxEvents) {
-  const initial = seedValue([{ id: "p", text: "x".repeat(characters) }]);
+async function runProbe(chars, count, maxEvents) {
+  const blocks = Array.isArray(chars) ? chars : [{ id: "p", text: "x".repeat(chars) }];
+  const initial = seedValue(blocks);
   const sim = new Sim();
   const room = createRoom(sim, { page: initial });
   const tabs = [];
@@ -54,4 +55,14 @@ test("three tabs over a larger page never refuse and keep one complete entry", a
   const final = await runProbe(140000, 3, 500);
   expect(final.refusals).toBe(0);
   expect(final.complete).toBe(1);
+}, 240000);
+
+test("a Document with about 1 MB of real text opens in a room without a refusal", async () => {
+  const para = "The quick brown fox jumps over the lazy dog while the team reviews the launch plan and notes risks. ";
+  const blocks = Array.from({ length: Math.round((1024 * 1024) / para.length) }, (_, i) => ({ id: `b${i}`, text: para }));
+  const final = await runProbe(blocks, 2, 4000);
+  expect(final.refusals).toBe(0);
+  expect(final.complete).toBeGreaterThanOrEqual(1);
+  expect(final.bytes).toBeLessThan(4 * 1024 * 1024);
+  expect(final.reloaded).toBe(docFromValue(seedValue(blocks)).getText("flow").toString().length);
 }, 240000);
