@@ -186,3 +186,5 @@ export async function writeYValue(value, { expectedRevision, changes } = {}) {
     return { value: output, updates, ...result };
   } finally { doc.off("updateV2", onUpdate); doc.destroy(); }
 }
+
+export { seedPageFromArticle } from "./migrate.js";
