@@ -1,18 +1,31 @@
 import { load } from 'cheerio';
 import { inspectPage } from './page-admission.js';
+import { recent } from './recent.js';
 
-const inert = (node) => {
+export const inert = (node) => {
   for (let parent = node.parent; parent; parent = parent.parent) if (parent.name === 'template' || parent.name === 'noscript') return true;
   return false;
 };
 
-function locate(html) {
+const span = (node) => {
+  const loc = node.sourceCodeLocation;
+  return loc ? { startOffset: loc.startOffset, endOffset: loc.endOffset } : null;
+};
+
+// Offsets only, never the parsed tree, so the remembered answers stay small.
+const locate = recent(4, (html) => {
   const $ = load(html, { sourceCodeLocationInfo: true });
   const articles = $('article[data-page]').toArray().filter((node) => !inert(node));
   const tags = $('script[merge="page"]').toArray().filter((node) => !inert(node) &&
     ($(node).attr('clay') || '').split(/\s+/).includes('live'));
-  return { articles, tags, rev: articles.length === 1 ? $(articles[0]).attr('data-rev') || null : null };
-}
+  return Object.freeze({
+    articles: articles.length,
+    tags: tags.length,
+    rev: articles.length === 1 ? $(articles[0]).attr('data-rev') || null : null,
+    article: articles.length === 1 ? span(articles[0]) : null,
+    tag: tags.length === 1 ? span(tags[0]) : null,
+  });
+});
 
 export function pageRev(html) {
   if (typeof html !== 'string') return null;
@@ -56,10 +69,8 @@ const spanOf = (html, loc) => {
 // of the page, and no record could hold it.
 export function splitPage(html) {
   if (typeof html !== 'string' || inspectPage(html).kind !== 'yjs') return { file: html, state: null };
-  const { articles, tags, rev } = locate(html);
-  if (articles.length !== 1 || tags.length !== 1 || !rev) return { file: html, state: null };
-  const article = articles[0].sourceCodeLocation;
-  const loc = tags[0].sourceCodeLocation;
+  const { articles, tags, rev, article, tag: loc } = locate(html);
+  if (articles !== 1 || tags !== 1 || !rev) return { file: html, state: null };
   if (!article || !loc || (loc.startOffset < article.endOffset && loc.endOffset > article.startOffset)) return { file: html, state: null };
   const [start, end] = spanOf(html, loc);
   return { file: html.slice(0, start) + html.slice(end), state: { v: 1, rev, tag: html.slice(loc.startOffset, loc.endOffset) } };
@@ -70,9 +81,9 @@ export function splitPage(html) {
 export function composePage(file, state) {
   if (typeof file !== 'string' || !state || state.v !== 1 || typeof state.tag !== 'string' || !state.rev) return file;
   if (inspectPage(file).kind !== 'none') return file;
-  const { articles, rev } = locate(file);
-  if (articles.length !== 1 || rev !== state.rev) return file;
-  const at = articles[0].sourceCodeLocation.startOffset;
+  const { articles, rev, article } = locate(file);
+  if (articles !== 1 || rev !== state.rev || !article) return file;
+  const at = article.startOffset;
   const from = lineStart(file, at);
   const indent = file.slice(from, at);
   const insert = /\S/.test(indent) ? state.tag : `${state.tag}${newlineOf(file, from)}${indent}`;

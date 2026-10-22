@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { parseJsonRelaxed } from 'hyper-morph/json-parse';
 import { cloneJson } from './live-data-ops.js';
 import { liveTags } from './live-data-tags.js';
+import { recent } from './recent.js';
 
 const PAGE = /^page(\.[0-9]+)?$/;
 const PART = /^(.+)\.(\d+)\.(\d+)$/;
@@ -33,7 +34,13 @@ export function isYPageValue(value, { complete = true } = {}) {
   return true;
 }
 
+// Callers get their own copy of the tags, so none can change another's answer.
 export function inspectPage(html) {
+  const answer = inspected(html);
+  return { ...answer, tags: cloneJson(answer.tags) };
+}
+
+const inspected = recent(4, (html) => {
   if (!/merge/i.test(html)) return { kind: 'none', tags: [] };
   const source = liveTags(html, { includeDuplicates: true }).filter((tag) => PAGE.test(tag.name));
   if (!source.length) return { kind: 'none', tags: [] };
@@ -54,7 +61,7 @@ export function inspectPage(html) {
     return { kind: 'yjs', tags };
   }
   return { kind: tags.every(([, value]) => isHybridPageValue(value)) ? 'hybrid' : 'other', tags };
-}
+});
 
 const canon = (value) => (Array.isArray(value) ? `[${value.map(canon).join(',')}]` : value && typeof value === 'object' ? `{${Object.keys(value).sort().map((key) => JSON.stringify(key) + ':' + canon(value[key])).join(',')}}` : JSON.stringify(value ?? null));
 

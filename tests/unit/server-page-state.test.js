@@ -122,3 +122,14 @@ test("two page tags leave the document unchanged", () => {
   const html = doc("", `  ${pageTag(yValue)}\n  ${pageTag(yValue)}\n  ${article()}`);
   expect(splitPage(html)).toEqual({ file: html, state: null });
 });
+
+test("asking twice about one document answers the same, whatever the first caller did with its answer", () => {
+  const html = doc("", `${pageTag(yValue)}\n${article()}`);
+  const first = splitPage(html);
+  first.state.tag = "changed";
+  inspectPage(html).tags[0][1].v = 99;
+  expect(splitPage(html).state.tag).toBe(pageTag(yValue));
+  expect(inspectPage(html).tags[0][1].v).toBe(1);
+  expect(pageRev(html)).toBe("093360993130d818");
+  expect(composePage(splitPage(html).file, splitPage(html).state)).toBe(html);
+});
