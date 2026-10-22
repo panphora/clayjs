@@ -49,6 +49,7 @@ async function load({ writer, delayed, failProvenance = false, neverElects = fal
     holdAllSaves: () => {},
     releaseAllSaves: () => {},
     getLastSavedDirty: () => false,
+    setLastSavedBaselines: () => {},
   }));
 
   await jest.unstable_mockModule("../../../src/live/local-lane.js", () => ({

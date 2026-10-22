@@ -30,6 +30,7 @@ await jest.unstable_mockModule("../../../src/core/save.js", () => ({
   holdAllSaves: () => {},
   releaseAllSaves: () => {},
   getLastSavedDirty: () => false,
+  setLastSavedBaselines: () => {},
 }));
 
 await jest.unstable_mockModule("../../../src/live/local-lane.js", () => ({

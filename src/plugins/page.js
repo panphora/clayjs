@@ -6,8 +6,12 @@ import { blocksFromYValue } from "../page/ybind/decode.js";
 import { createYPageBinding } from "../page/ybind/binding.js";
 import { authorIdentity } from "../page/ybind/author.js";
 import { yValueOf } from "../page/ybind/provider.js";
+import { seedPageFromArticle } from "../page/ybind/migrate.js";
+import { serializeLive } from "../live/ops.js";
 import { registerUnsavedState } from "../lib/unsaved-state.js";
-import { hostMeta } from "../core/host-meta.js";
+import { hostMeta, hostSupports } from "../core/host-meta.js";
+import { savePageForce, setLastSavedBaselines } from "../core/save.js";
+import { captureForComparisonAndDirty } from "../core/snapshot.js";
 import { storeOf, checkpointWithin, requestCheckpoint, fastLane, pageLaneReady, pageWriterReady } from "./live.js";
 import { HyperMorph } from "../vendor/hyper-morph.vendor.js";
 import { saveStateFor, BLOCKED_TEXT, RETRY_TEXT, downloadPageCopy, copyPageText } from "../page/save-states.js";
@@ -181,8 +185,23 @@ function dispose() {
 
 async function run(inst, gen, options = {}) {
   const articles = document.querySelectorAll(ARTICLE_SEL);
-  const tags = document.querySelectorAll(TAG_SEL);
+  let tags = document.querySelectorAll(TAG_SEL);
   if (!articles.length && !tags.length) return abandon(inst);
+  // A page saved without its merge state (HTML Clay, an outside edit, a download)
+  // is booted from its article alone: the seed is deterministic, so every tab
+  // rebuilding the same article holds the same state and their edits merge.
+  const seeded = articles.length === 1 && tags.length === 0;
+  if (seeded) {
+    const saved = readFile(document);
+    if (!saved) return abandon(inst);
+    const tag = document.createElement("script");
+    tag.setAttribute("type", "application/json");
+    tag.setAttribute("merge", "page");
+    tag.setAttribute("clay", "live");
+    tag.textContent = serializeLive(seedPageFromArticle(saved.article));
+    articles[0].before(tag);
+    tags = document.querySelectorAll(TAG_SEL);
+  }
   if (articles.length !== 1 || tags.length !== 1) {
     console.warn(`clayjs: page plugin needs exactly one article[data-page] and one merge="page" live tag; found ${articles.length} article(s) and ${tags.length} tag(s), leaving the page as saved HTML`);
     return abandon(inst);
@@ -211,6 +230,26 @@ async function run(inst, gen, options = {}) {
   if (!meta || !Array.isArray(meta.extensions) || !meta.extensions.includes("page")) {
     showBlocked(inst, BLOCKED.code, BLOCKED.message);
     return;
+  }
+
+  // The room was opened from a document that had no page tag, so it holds no page
+  // store and would answer this tab's frames with unknown-store. One conditional
+  // save of the document with the tag is the page's initial write; a tab that
+  // loses that race reloads, which composes the state the winner initialized.
+  let initialSave = false;
+  if (seeded && (await hostSupports("live-data"))) {
+    if (gen !== generation) return;
+    const result = await savePageForce();
+    if (gen !== generation) return;
+    if (!result?.ok) {
+      if (result?.status === 412) {
+        window.location.reload();
+        return;
+      }
+      showBlocked(inst, result?.code ?? null, result?.msg ?? "");
+      return;
+    }
+    initialSave = true;
   }
 
   let handle;
@@ -342,6 +381,15 @@ async function run(inst, gen, options = {}) {
   await adoption.idle();
   if (gen !== generation) return;
   view.setProps({ editable: () => true });
+
+  // That initial write advanced the saved baselines from a capture taken before
+  // the editor mounted, which is what the load-time settle would otherwise absorb
+  // boot churn into. Install them once more from the booted page, so a tab that
+  // was opened and left alone does not read as unsaved.
+  if (initialSave) {
+    const { forComparison, forDirty } = captureForComparisonAndDirty();
+    setLastSavedBaselines(forComparison, forDirty);
+  }
 }
 
 function install(options = {}) {
