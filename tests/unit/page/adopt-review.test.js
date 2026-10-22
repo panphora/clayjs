@@ -87,7 +87,7 @@ describe("a file nobody touched produces no plan", () => {
 test("a tool fallback is saved as static markup: no scripts, handlers or script URLs", () => {
   const record = { blocks: { tool: { t: "tool", pos: "1", artifact: { fallbackHtml: '<img src="x" onerror="boom()"><script>boom()</script><a href=" javascript:boom()">link</a><p>Kept</p>' } } }, deleted: {} };
   const section = read(fileOf(record)).article.querySelector('[data-id="tool"]');
-  expect(section.querySelector("script")).toBeNull();
+  expect(section.querySelector("script:not([data-tool])")).toBeNull();
   expect(section.querySelector("img").hasAttribute("onerror")).toBe(false);
   expect(section.querySelector("a").hasAttribute("href")).toBe(false);
   expect(section.querySelector("p").textContent).toBe("Kept");

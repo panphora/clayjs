@@ -64,11 +64,13 @@ export function startPageView(doc = document) {
   };
   const toolsIn = async (source) => {
     if (!source.querySelector(`${ARTICLE} ${TOOL}`)) return null;
-    const tag = source.querySelector('script[type="application/json"][merge="page"]');
-    if (!tag) return null;
-    const value = JSON.parse(tag.textContent);
-    const { readYValue } = await import("./ybind/external.js");
-    const { blocks } = await readYValue(value);
+    const blocks = {};
+    for (const root of source.querySelectorAll(`${ARTICLE} ${TOOL}`)) {
+      const data = root.querySelector(':scope > script[type="application/json"][data-tool]');
+      let tool = {};
+      try { tool = data ? JSON.parse(data.textContent) : {}; } catch {}
+      blocks[root.getAttribute("data-id")] = { t: "tool", artifact: tool.artifact ?? null, rev: tool.rev ?? null, state: tool.state ?? {} };
+    }
     const stateTag = source.querySelector('script[type="application/json"][merge="page.tools"]');
     const state = stateTag ? JSON.parse(stateTag.textContent) : {};
     return { blocks, state };

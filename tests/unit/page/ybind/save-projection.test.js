@@ -73,7 +73,7 @@ test("the complete migrated fixture renders the same readable article as its hyb
   expect(converted.rev).toBe(legacy.rev);
   const article = parse(converted.html);
   expect(article.querySelectorAll("tbody td")).toHaveLength(6);
-  expect(article.querySelector('[data-id="tool"]').textContent).toBe("Launch in 9 days");
+  expect(article.querySelector('[data-id="tool"] p').textContent).toBe("Launch in 9 days");
   expect(article.querySelector("strong")).not.toBeNull();
 });
 

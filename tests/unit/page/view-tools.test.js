@@ -38,7 +38,7 @@ test("saved tools mount for readers, stay local, and remount on revision changes
 });
 
 test("decode failure leaves the saved fallback", async () => {
-  const html = page("r1", "First").replace(/"v":1/, '"v":2');
+  const html = page("r1", "First").replace("data-tool>", "data-tool>{");
   document.documentElement.innerHTML = new DOMParser().parseFromString(html, "text/html").documentElement.innerHTML;
   const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
   const stop = startPageView(document);

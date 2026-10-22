@@ -9,7 +9,7 @@
 // Cmd+Z takes the whole adoption back.
 import { model as pmModel, history } from "../vendor/prosemirror.vendor.js";
 import { blockMap, nodeFromBlock, repairSiblings } from "./model.js";
-import { project, canon, UNPROJECTED, revOf, parseModel, renderModel, fragmentCleaner } from "./projection.js";
+import { project, canon, revOf, parseModel, renderModel, fragmentCleaner } from "./projection.js";
 import { blocksFromPageValues } from "./ybind/decode.js";
 
 export const ADOPT = "page-adopt";
@@ -55,7 +55,6 @@ function keyed(list, current, prefix, extra = (x) => x) {
 export function blockFromItem(item, cur) {
   const { id, t, ...fields } = item;
   const out = { t, pos: cur?.pos ?? null };
-  if (cur && cur.t === t) for (const k of UNPROJECTED[t] || []) if (k in cur) out[k] = cur[k];
   Object.assign(out, fields);
   if (t === "table" && !fields.rows.length) fields.rows = [{ id: `r-${id}`, cells: {} }];
   if (t === "table") {
