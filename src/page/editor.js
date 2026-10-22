@@ -119,6 +119,8 @@ ${INDENTS.map((n) => `:where(article[data-page], .page-editor) .page-li[data-ind
 .page-dock, .page-plus { color: var(--page-chrome-ink-rest); background: var(--page-chrome-bg-rest); border: 1px solid var(--page-chrome-line-rest); box-shadow: var(--page-chrome-shadow-rest); border-radius: var(--page-chrome-radius); transition: color var(--page-fade), background-color var(--page-fade), border-color var(--page-fade), box-shadow var(--page-fade); }
 .page-shell.is-moved .page-dock, .page-shell.is-moved .page-plus { color: var(--page-chrome-ink-moved); background: var(--page-chrome-bg-moved); border-color: var(--page-chrome-line-moved); box-shadow: var(--page-chrome-shadow-moved); }
 .page-dock { position: sticky; top: 12px; z-index: 3; display: flex; align-items: center; gap: 2px; width: max-content; margin: 12px auto 0; padding: 3px; }
+/* One formatting bar at a time: the selection bar covers what the fixed bar offers. Hidden, not removed, so the page does not shift under the selection. */
+.page-shell:has(.page-bubble:not([hidden])) .page-dock { visibility: hidden; }
 .page-dock, .page-shell.is-moved .page-dock { background: var(--page-pop-bg); }
 .page-dock + .page-editor { padding-top: max(16px, calc(var(--page-pad-top) - 48px)); }
 .page-tool { display: inline-flex; align-items: center; justify-content: center; min-width: 28px; height: 28px; padding: 0 6px; border: 0; border-radius: 5px; background: none; color: inherit; font: 500 13px/1 var(--page-font); cursor: pointer; }
@@ -220,6 +222,7 @@ ${INDENTS.map((n) => `:where(article[data-page], .page-editor) .page-li[data-ind
 .page-li:hover .page-check-controls, .page-li:focus-within .page-check-controls { opacity: 1; }
 .page-check-popup { display: inline-flex; gap: 4px; padding: 4px; background: var(--page-pop-bg); color: var(--page-pop-ink); border: 1px solid var(--page-pop-line); border-radius: var(--page-pop-radius); box-shadow: var(--page-pop-shadow); }
 .page-check-popup input { font: inherit; color: inherit; background: var(--page-pop-bg); border: 1px solid var(--page-pop-line); }
+.page-check-popup.page-check-owner { display: inline-block; width: min(280px, 80vw); padding: 8px 0; vertical-align: top; }
 .page-scrim { display: none; }
 .page-shell [hidden] { display: none !important; }
 ${TABLE_CSS}

@@ -19,13 +19,13 @@ test("owner list uses available people and accepts typed names", async () => {
   const view = fresh();
   view.dom.querySelector('[data-check="owner"]').click();
   await new Promise((resolve) => setTimeout(resolve, 0));
-  view.dom.querySelector('[role="option"]').click();
+  view.dom.querySelector('[data-check="owner-option"]').click();
   expect(view.state.doc.child(0).attrs.owner).toBe("Maya");
   view.dom.querySelector('[data-check="owner"]').click();
   const input = view.dom.querySelector('input[aria-label="Owner name"]');
   input.value = "Nia";
   input.dispatchEvent(new Event("input", { bubbles: true }));
-  view.dom.querySelector('[data-check="owner-typed"]').click();
+  input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
   expect(view.state.doc.child(0).attrs.owner).toBe("Nia");
   view.dom.querySelector('[data-check="owner"]').click();
   view.dom.querySelector('[data-check="clear-owner"]').click();
