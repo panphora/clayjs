@@ -87,3 +87,27 @@ test("a capture that throws reads as unsaved, and flush reports 'failed'", async
     broken = false;
   }
 }, 20000);
+
+// A scroll lock or an extension that sets an inline style and then resets it leaves
+// `style=""` on <html> and <body>. That renders exactly like no attribute, so it must not
+// hold the close warning up on a page with nothing to lose.
+test("empty style and class attributes left behind are not unsaved changes", async () => {
+  global.fetch = okFetch();
+  await window.clay.save();
+  expect(window.clay.hasUnsavedChanges()).toBe(false);
+
+  document.documentElement.style.overflow = "hidden";
+  document.body.style.overflow = "hidden";
+  expect(window.clay.hasUnsavedChanges()).toBe(true);
+
+  document.documentElement.style.overflow = "";
+  document.body.style.overflow = "";
+  document.getElementById("content").className = "";
+  expect(document.documentElement.getAttribute("style")).toBe("");
+  expect(document.getElementById("content").getAttribute("class")).toBe("");
+  expect(window.clay.hasUnsavedChanges()).toBe(false);
+
+  document.documentElement.removeAttribute("style");
+  document.body.removeAttribute("style");
+  document.getElementById("content").removeAttribute("class");
+});
