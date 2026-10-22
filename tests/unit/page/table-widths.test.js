@@ -69,6 +69,24 @@ test("the Width menu is the button equivalent: Wider, Narrower, Fit and Reset", 
   expect("width" in cols(view).c2).toBe(false);
 });
 
+test("Fit sizes a column to its widest unwrapped cell text, measured outside the editor", () => {
+  const view = editor([], { blocks: { tbl: { ...tbl, rows: { r1: { pos: "1", cells: { c1: "a", c2: "x" } }, r2: { pos: "2", cells: { c1: "a much longer name", c2: "y" } } } } } });
+  const rect = HTMLElement.prototype.getBoundingClientRect;
+  const probes = [];
+  HTMLElement.prototype.getBoundingClientRect = function () {
+    if (this.style.whiteSpace === "pre") probes.push(this.textContent);
+    return this.style.whiteSpace === "pre" ? { width: this.textContent.length * 7, height: 16 } : rect.call(this);
+  };
+  try {
+    view.dom.querySelector('th[data-col="c1"] .page-table-resize').dispatchEvent(new MouseEvent("dblclick", { bubbles: true, cancelable: true }));
+  } finally {
+    HTMLElement.prototype.getBoundingClientRect = rect;
+  }
+  expect(probes).toEqual(["a", "a much longer name"]);
+  expect(cols(view).c1.width).toBe("a much longer name".length * 7 + 24);
+  expect(view.dom.ownerDocument.body.querySelectorAll('span[style*="visibility: hidden"]')).toHaveLength(0);
+});
+
 test("setColumnWidth clamps, refuses junk and skips a no-op", () => {
   const view = editor([], { blocks: { tbl } });
   select(view, 3);

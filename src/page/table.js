@@ -205,6 +205,19 @@ export const moveColumn = (delta) => (st, dispatch) => changeTable(st, dispatch,
 });
 
 export const MIN_WIDTH = 48, MAX_WIDTH = 1200, DEFAULT_WIDTH = 160;
+const FONT = ["fontFamily", "fontSize", "fontWeight", "fontStyle", "letterSpacing"];
+const textWidth = (el) => {
+  const doc = el.ownerDocument;
+  const style = doc.defaultView.getComputedStyle(el);
+  const probe = doc.createElement("span");
+  for (const key of FONT) probe.style[key] = style[key];
+  Object.assign(probe.style, { position: "absolute", visibility: "hidden", whiteSpace: "pre", left: "-9999px", top: "0" });
+  probe.textContent = el.textContent;
+  doc.body.append(probe);
+  const width = probe.getBoundingClientRect().width;
+  probe.remove();
+  return Math.ceil(width);
+};
 const widthOf = (value) => (Number.isFinite(value) && value > 0 ? Math.round(Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, value))) : null);
 
 export const setColumnWidth = (colId, width) => (st, dispatch) => changeTable(st, dispatch, (table) => {
@@ -466,7 +479,7 @@ export class TableView {
   }
   fit(colId) {
     let widest = 0;
-    for (const cell of this.contentDOM.querySelectorAll("td")) if (cell.dataset.col === colId) widest = Math.max(widest, cell.firstElementChild?.scrollWidth ?? cell.scrollWidth);
+    for (const cell of this.contentDOM.querySelectorAll("td")) if (cell.dataset.col === colId) widest = Math.max(widest, textWidth(cell.firstElementChild ?? cell));
     const head = [...this.header.querySelectorAll("th")].find((th) => th.dataset.col === colId)?.querySelector("button");
     widest = Math.max(widest, head?.scrollWidth ?? 0);
     return this.command(setColumnWidth(colId, widest + 24));
