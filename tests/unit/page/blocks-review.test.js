@@ -97,7 +97,7 @@ test("Enter at the end of the last body paragraph makes a new paragraph in the s
   expect(shape(view)).toBe("outer | body<o |  | after");
 });
 
-test("Backspace at the start of a body block after a nested closed toggle moves it out, not into the summary", () => {
+test("Backspace at the start of a body block after a nested closed toggle joins it to that summary, like a root paragraph", () => {
   const view = editor([
     ["o", "toggle", "outer", { open: true }],
     ["t", "toggle", "inner", { open: false, parent: "o" }],
@@ -107,7 +107,7 @@ test("Backspace at the start of a body block after a nested closed toggle moves 
   ]);
   select(view, posOf(view, "b"));
   key(view, "Backspace");
-  expect(shape(view)).toBe("outer | inner<o | hidden<t | body | after");
+  expect(shape(view)).toBe("outer | innerbody<o | hidden<t | after");
 });
 
 test("Backspace at the start of a root paragraph after a closed toggle still joins it to the summary", () => {

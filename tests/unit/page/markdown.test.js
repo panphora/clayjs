@@ -162,14 +162,15 @@ describe("Backspace", () => {
     expect([out.type.name, out.textContent]).toEqual(["paragraph", "## "]);
   });
 
-  test("at the start of a heading it makes a paragraph; inside a toggle body the next Backspace leaves the toggle", () => {
+  test("at the start of a heading it makes a paragraph; inside a toggle body the next Backspace joins it onto the summary", () => {
     const view = editor([["t", "toggle", "T", { open: true }], ["h", "heading", "H", { parent: "t", level: 2 }]]);
     select(view, posOf(view, "h"));
     key(view, "Backspace");
     expect(block(view, "h").type.name).toBe("paragraph");
     expect(block(view, "h").attrs.parent).toBe("t");
     key(view, "Backspace");
-    expect(block(view, "h").attrs.parent).toBeNull();
+    expect(block(view, "h")).toBeNull();
+    expect(block(view, "t").textContent).toBe("TH");
   });
 
   test("at the start of an empty code block it makes a paragraph; a non-empty code block keeps its type", () => {

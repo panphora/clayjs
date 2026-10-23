@@ -556,16 +556,18 @@ export function deleteAtCollapsedEnd(st, dispatch) {
   return true;
 }
 
-// Backspace at the start of a paragraph, heading or code block inside a toggle
-// body moves it out of the toggle, as Shift-Tab does, instead of joining it to
-// the line above. A list item there loses its list format first
-// (backspaceListItem), then leaves on the next Backspace.
+// Backspace at the start of the first paragraph, heading or code block of a
+// toggle body joins it onto the summary line, which the default join cannot
+// do. Later body blocks are left to the default join with the line above.
 export function backspaceBodyBlock(st, dispatch) {
   const { $from, empty } = st.selection;
   if (!empty || $from.depth !== 1 || $from.parentOffset !== 0 || !$from.parent.isTextblock) return false;
   const n = $from.parent;
   if (isList(n) || isToggle(n) || parentOf(n) === null) return false;
-  return outdentBlocks(st, dispatch);
+  const i = $from.index(0);
+  if (st.doc.child(i - 1).attrs.id !== parentOf(n)) return false;
+  if (dispatch) dispatch(joinIntoSummary(st, outline(st.doc), i - 1, i).scrollIntoView());
+  return true;
 }
 
 // ---- open / closed ----------------------------------------------------------

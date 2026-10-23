@@ -1,7 +1,7 @@
 import * as B from "../../../src/page/blocks.js";
 import { make, caret, run, short, rows } from "./blocks-helpers.js";
 import { blockMap } from "../../../src/page/model.js";
-import { history as pmHistory } from "../../../src/vendor/prosemirror.vendor.js";
+import { history as pmHistory, commands } from "../../../src/vendor/prosemirror.vendor.js";
 
 describe("lists", () => {
   test("Enter mid-item splits, new half keeps kind, unchecked", () => {
@@ -120,20 +120,30 @@ describe("toggles", () => {
 describe("Backspace inside a toggle body", () => {
   const body = () => make([["t", "toggle", "T", { open: true }], ["b1", "paragraph", "b1", { parent: "t" }], ["b2", "paragraph", "b2", { parent: "t" }], ["b3", "paragraph", "b3", { parent: "t" }], ["z", "paragraph", "Z"]]);
 
-  test("Backspace at the start of a middle body paragraph moves it out below the toggle", () => {
-    expect(short(run(caret(body(), "b2"), B.backspaceBodyBlock))).toBe("T | b1<t | b3<t | b2 | Z");
+  test("Backspace at the start of a middle body paragraph joins it to the line above, inside the body", () => {
+    expect(short(run(caret(body(), "b2"), commands.joinBackward))).toBe("T | b1b2<t | b3<t | Z");
+    expect(B.backspaceBodyBlock(caret(body(), "b2"), () => {})).toBe(false);
   });
 
-  test("Backspace at the start of the last body paragraph only reparents it", () => {
-    expect(short(run(caret(body(), "b3"), B.backspaceBodyBlock))).toBe("T | b1<t | b2<t | b3 | Z");
+  test("Backspace in an empty middle body paragraph removes it and stays in the body", () => {
+    let s = make([["t", "toggle", "T", { open: true }], ["b1", "paragraph", "b1", { parent: "t" }], ["e", "paragraph", "", { parent: "t" }], ["b3", "paragraph", "b3", { parent: "t" }], ["z", "paragraph", "Z"]]);
+    s = run(caret(s, "e"), commands.chainCommands(B.blockKeys.Backspace, commands.joinBackward));
+    expect(short(s)).toBe("T | b1<t | b3<t | Z");
+    expect(s.selection.$from.parent.attrs.id).toBe("b1");
   });
 
-  test("a body list item loses its list format first, then leaves the toggle", () => {
+  test("Backspace at the start of the first body paragraph joins it onto the summary", () => {
+    const s = run(caret(body(), "b1"), B.backspaceBodyBlock);
+    expect(short(s)).toBe("Tb1 | b2<t | b3<t | Z");
+    expect(s.selection.$from.parentOffset).toBe(1);
+  });
+
+  test("a first body list item loses its list format first, then joins the summary", () => {
     let s = make([["t", "toggle", "T", { open: true }], ["l", "list_item", "L", { parent: "t" }], ["z", "paragraph", "Z"]]);
     s = run(caret(s, "l"), B.blockKeys.Backspace);
     expect(short(s)).toBe("T | L<t | Z");
     s = run(caret(s, "l"), B.blockKeys.Backspace);
-    expect(short(s)).toBe("T | L | Z");
+    expect(short(s)).toBe("TL | Z");
   });
 
   test("a root paragraph is left to the default join", () => {
