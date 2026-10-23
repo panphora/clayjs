@@ -103,9 +103,10 @@ export const PROMPT_CSS = `.hcp {
 }
 .hcp .hcp-dock .hcp-x:hover { color: var(--hcp-ink); background: var(--hcp-face); }
 .hcp-tab__label { display: inline; }
+.hcp-tab__mini { display: none; }
+.hcp[data-hcp-state="mini"] .hcp-tab__mini { display: inline; }
 .hcp[data-hcp-state="mini"] .hcp-tab__label,
 .hcp[data-hcp-state="mini"] .hcp-dock .hcp-x { display: none; }
-.hcp[data-hcp-state="mini"] .hcp-tab { width: 34px; padding: 0; }
 .hcp[data-hcp-state="card"] .hcp-dock { display: none; }
 
 .hcp-card {

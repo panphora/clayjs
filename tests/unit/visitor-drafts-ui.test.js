@@ -153,7 +153,7 @@ test("draft mode mounts one prompt whose link points at this page's download", a
   }
 });
 
-test("closing the notice keeps a download icon, remembers it, and can reopen the card", async () => {
+test("closing the notice keeps a download icon labeled Keep, remembers it, and can reopen the card", async () => {
   const { key, clay } = await bootPage({ slot: "ui-prompt-minimize" });
   const aside = prompt();
   const tab = aside.querySelector("[data-hcp=open]");
@@ -163,6 +163,7 @@ test("closing the notice keeps a download icon, remembers it, and can reopen the
   expect(aside.getAttribute("data-hcp-state")).toBe("mini");
   expect(tab.getAttribute("aria-expanded")).toBe("false");
   expect(document.activeElement).toBe(tab);
+  expect(tab.querySelector(".hcp-tab__mini").textContent).toBe("Keep");
   expect(JSON.parse(localStorage.getItem(key)).prompt.shown).toBe(true);
   expect(clay.getHTML()).not.toContain('id="hcp"');
 
