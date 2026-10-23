@@ -3,6 +3,7 @@ import { state as pmState } from "../../../src/vendor/prosemirror.vendor.js";
 
 import { trackView, editor } from "./view-helpers.js";
 import { ACTION_ITEMS } from "../../../src/page/chrome.js";
+import { STRIP_FROM_SAVE } from "../../../src/lib/region-policy.js";
 const createPageEditor = (...args) => trackView(makePageEditor(...args));
 const { TextSelection } = pmState;
 
@@ -43,7 +44,13 @@ test("a stale editor style saved into the page gets the current CSS in place, an
   expect(styles.length).toBe(1);
   expect(styles[0]).toBe(old);
   expect(styles[0].textContent).toBe(PAGE_EDITOR_CSS);
-  expect(styles[0].getAttribute("clay")).toBe("no-dirty");
+  expect(styles[0].getAttribute("clay")).toBe("no-dirty editor-ui");
+});
+
+test("the editor style stays out of the saved file", () => {
+  createPageEditor(mount());
+  const style = document.querySelector("#page-editor-style");
+  expect(style.matches(STRIP_FROM_SAVE)).toBe(true);
 });
 
 test("an empty record starts as one empty paragraph", () => {

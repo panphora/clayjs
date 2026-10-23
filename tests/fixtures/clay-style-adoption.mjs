@@ -219,7 +219,7 @@ if (scenario === 'refresh-marked') {
   assert.equal(tags.length, 1);
   assert.equal(tags[0].textContent, PAGE_EDITOR_CSS);
   assert.equal(tags[0].dataset.name, 'page-editor-style');
-  assert.equal(tags[0].getAttribute('clay'), 'no-dirty');
+  assert.equal(tags[0].getAttribute('clay'), 'no-dirty editor-ui');
   assertClean();
   window.clay.undo.flush();
   assert.equal(window.clay.undo.canUndo, false);
