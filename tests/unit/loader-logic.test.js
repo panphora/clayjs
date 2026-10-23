@@ -226,3 +226,18 @@ test("live is opt-in, loads in view mode, and brings nothing with it", () => {
   const view = resolveModules(new URLSearchParams("plugins=live"), false);
   expect(view.plugins).toEqual(["plugins/live.js"]);
 });
+
+test("a page with a [sap] root loads the sapjs core, in view mode too, before source", () => {
+  const edit = resolveModules(params(), true, { hasSap: true }).plugins;
+  expect(edit).toEqual(["plugins/richclay.js", "plugins/derive.js", "plugins/source.js"]);
+  expect(resolveModules(params(), false, { hasSap: true }).plugins).toEqual(["plugins/derive.js"]);
+  expect(resolveModules(params(), true).plugins).not.toContain("plugins/derive.js");
+});
+
+test("exclude=derive keeps the core off a page with a [sap] root", () => {
+  expect(resolveModules(params({ exclude: "derive" }), true, { hasSap: true }).plugins).not.toContain("plugins/derive.js");
+});
+
+test("draft mode keeps the core: a visitor's tab paints the totals of its own draft", () => {
+  expect(resolveModules(params(), false, { isDraftMode: true, hasSap: true }).plugins).toContain("plugins/derive.js");
+});

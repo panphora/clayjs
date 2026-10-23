@@ -90,6 +90,15 @@ async function emitStandalone() {
     // Sortable's UMD header reads `module`, which esbuild flags on every build;
     // sortable.js handles both branches, so the warning carries no information.
     logOverride: { 'commonjs-variable-in-esm': 'silent' },
+    // The standalone file already bundles full sapjs, so the derive plugin's
+    // lazy import of the sapjs core resolves to nothing here.
+    plugins: [{
+      name: 'no-sap-core',
+      setup(build) {
+        build.onResolve({ filter: /sap-core\.vendor\.js$/ }, (args) => ({ path: args.path, namespace: 'no-sap-core' }));
+        build.onLoad({ filter: /.*/, namespace: 'no-sap-core' }, () => ({ contents: 'export default null;', loader: 'js' }));
+      },
+    }],
     metafile: true,
     banner: {
       js: `/* clayjs ${pkg.version} standalone build: every clayjs module in one file. https://clayjs.com/offline\n` +
