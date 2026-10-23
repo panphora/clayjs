@@ -136,6 +136,11 @@
 
 ## [Unreleased]
 
+## [1.15.1] - 2026-10-23
+
+### Changed
+- The minimized download tab now shows the label "Keep".
+
 ## [1.15.0] - 2026-10-23
 
 ### Added
