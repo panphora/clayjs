@@ -2,6 +2,17 @@ import { jest } from "@jest/globals";
 
 const BODY = '<p id="a">budget is over</p><div clay="no-save">secret</div>';
 
+// jsdom ships no EventSource; the fake must be installed before importing
+// live-sync.js, whose singleton auto-starts in edit mode.
+class FakeEventSource extends EventTarget {
+  constructor(url) {
+    super();
+    this.url = url;
+    this.readyState = 0;
+  }
+  close() {}
+}
+
 let conflicts;
 let beginApply;
 let completeApply;
@@ -9,6 +20,9 @@ let failApply;
 let snapshot;
 let download;
 let notice;
+let LiveSync;
+let gate;
+let derived;
 
 let blobs = [];
 let anchors = [];
@@ -21,7 +35,16 @@ beforeAll(async () => {
   // The notice's one frame is a requestAnimationFrame; the harness turns it into a
   // timeout so a draw is a thing the test can wait for.
   window.requestAnimationFrame = (cb) => setTimeout(cb, 0);
+  global.EventSource = FakeEventSource;
+  window.EventSource = FakeEventSource;
+  window.scrollTo = () => {};
+  global.fetch = jest.fn(() => Promise.resolve({ ok: false, status: 404, statusText: "404", text: async () => "", json: async () => ({}) }));
   ({ conflicts, beginApply, completeApply, failApply } = await import("../../src/sync/conflicts.js"));
+  const liveSyncModule = await import("../../src/sync/live-sync.js");
+  ({ LiveSync } = liveSyncModule);
+  liveSyncModule.liveSync.stop();
+  gate = await import("../../src/lib/dirty-gate.js");
+  ({ derived } = await import("../../src/lib/derived.js"));
   snapshot = await import("../../src/core/snapshot.js");
   download = await import("../../src/core/conflict-download.js");
   notice = await import("../../src/core/conflict-notice.js");
@@ -101,6 +124,51 @@ test("a save-domain clone is already prepared and is written as it stands", () =
   expect(outside(html).split("budget is over")).toHaveLength(2);
   expect(outside(html)).not.toContain("budget is approved");
   expect(outside(html)).not.toContain("secret");
+});
+
+// A page whose painted output is the engine's, not the author's: the span's text
+// and its data-state both come from the item record. Live sync strips both from
+// every merge input, so the merge sees neither.
+const SAP_PAGE =
+  '<main sap><p id="a">budget is fine</p><p id="item" hidden>accepted</p>' +
+  '<span id="s" text="item.state" attr:data-state="item.state"></span></main>';
+
+function paintFromItem() {
+  const value = document.querySelector("#item")?.textContent ?? "";
+  for (const el of document.querySelectorAll("[sap] [text]")) el.textContent = value;
+  for (const el of document.querySelectorAll("[sap] [attr\\:data-state]")) el.setAttribute("data-state", value);
+}
+
+test("a dirty merge's download is the page with its painted values, which the merge stripped", async () => {
+  const unregister = derived.register(paintFromItem);
+  const sync = new LiveSync();
+  try {
+    document.body.innerHTML = SAP_PAGE;
+    paintFromItem();
+    await Promise.resolve();
+    gate.gateClearIfUnchanged(gate.gateCaptureToken());
+
+    sync.lane = "live";
+    sync._requestFrame = () => null;
+    sync.lastHtml = snapshot.serializeForSync(snapshot.captureSnapshot({ flushUndo: false }));
+    document.querySelector("#a").textContent = "budget is over";
+    await Promise.resolve();
+    expect(gate.pageMaybeDirty()).toBe(true);
+
+    await sync._doApplyUpdate(sync.lastHtml.replace("budget is fine", "budget is approved"), 5, null);
+
+    expect(conflicts.size).toBe(1);
+    const { html } = download.buildRecovery(conflicts.list());
+    const doc = parsed(html);
+    doc.querySelector("#clay-lost-edits").remove();
+    const span = doc.querySelector("#s");
+    expect(span.textContent).toBe("accepted");
+    expect(span.getAttribute("data-state")).toBe("accepted");
+    expect(outside(html)).not.toContain("budget is approved");
+  } finally {
+    sync.stop();
+    unregister();
+  }
 });
 
 test("with two applies the newest page is the document and the older one rides along", () => {

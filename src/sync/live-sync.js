@@ -1757,9 +1757,13 @@ class LiveSync {
         },
       });
     } else {
-      localRoot = emptyScratchpads(captureLocal());
+      const captured = captureLocal();
+      // Download my copy serializes the page as it was, painted values included;
+      // the merge itself needs them stripped.
+      const recoveryRoot = captured.cloneNode(true);
+      localRoot = emptyScratchpads(captured);
       applyId = beginApply({
-        source, seq, etag, root: localRoot,
+        source, seq, etag, root: localRoot, recoveryRoot,
         domain: source === 'disk' ? 'save' : 'sync',
       });
       try {

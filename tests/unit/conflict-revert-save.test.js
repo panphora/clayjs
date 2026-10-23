@@ -48,6 +48,7 @@ let autosaveState;
 let revert;
 let downloadRecovery;
 let notice;
+let derived;
 
 beforeAll(async () => {
   window.clayEditMode = true;
@@ -90,6 +91,7 @@ beforeAll(async () => {
   etag = await import("../../src/core/etag.js");
   autosaveState = await import("../../src/lib/autosave-state.js");
   revert = await import("../../src/sync/conflict-revert.js");
+  ({ derived } = await import("../../src/lib/derived.js"));
   ({ downloadRecovery } = await import("../../src/core/conflict-download.js"));
   notice = await import("../../src/core/conflict-notice.js");
   await etag.seedEtag();
@@ -288,6 +290,38 @@ test("R13 Download then Revert: the copy is built and the payload still restores
   expect([...result.revertedIds].sort()).toEqual([...ids].sort());
   expect(body()).toBe(`<p id="t">One slow fox.</p><div id="a"></div><div id="b"><p id="mp">P</p></div><div id="c"></div><p id="n">n</p><div id="i"><p id="ip">LOCAL</p></div>`);
   expect(conflicts.size).toBe(0);
+});
+
+// The painted output of a [sap] page is the engine's, not the author's: it is
+// stripped from every merge input and repainted after a merge. A revert writes the
+// page, so it has to repaint before the save captures it.
+const painted = (word) =>
+  `<main sap=""><p id="p">One ${word} fox sleeps.</p>` +
+  `<span id="s" attr:data-state="p.text" data-state="One ${word} fox sleeps."></span></main>`;
+
+function paintFromRecord() {
+  const value = document.querySelector("#p")?.textContent ?? "";
+  for (const el of document.querySelectorAll("[sap] [attr\\:data-state]")) el.setAttribute("data-state", value);
+}
+
+test("a revert repaints the derived output before it saves, so the body carries mine, not the frame's", async () => {
+  const unregister = derived.register(paintFromRecord);
+  try {
+    const sync = makeSync();
+    const [id] = await lose(sync, painted("quick"), painted("slow"), painted("fast"));
+    // The merge repainted the record it applied: the span now shows the frame's value.
+    expect(document.querySelector("#s").getAttribute("data-state")).toBe("One fast fox sleeps.");
+
+    const result = await revert.revertConflicts([id]);
+
+    expect(result.revertedIds).toEqual([id]);
+    expect(body()).toBe(painted("slow"));
+    expect(savePosts).toHaveLength(1);
+    expect(savePosts[0]).toContain("One slow fox sleeps.");
+    expect(savePosts[0]).not.toContain("One fast fox sleeps.");
+  } finally {
+    unregister();
+  }
 });
 
 // ---------------------------------------------------------------------------
