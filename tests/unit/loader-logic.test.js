@@ -143,6 +143,17 @@ describe("resolveModules", () => {
     expect(plugins.indexOf("plugins/live.js")).toBeLessThan(plugins.indexOf("plugins/page.js"));
   });
 
+  test("plugins=page implies upload, so its image blocks can store files", () => {
+    const { plugins } = resolveModules(params({ plugins: "page" }), true);
+    expect(plugins).toContain("plugins/upload.js");
+    expect(plugins.indexOf("plugins/upload.js")).toBeLessThan(plugins.indexOf("plugins/page.js"));
+  });
+
+  test("exclude=upload still drops upload from a page", () => {
+    const { plugins } = resolveModules(params({ plugins: "page", exclude: "upload" }), true);
+    expect(plugins).not.toContain("plugins/upload.js");
+  });
+
   // editOnly, like upload: the comment box is an editing gesture, and no host lists
   // a ready helper to a page that cannot edit. The wire it implies stays, because
   // the wire itself works in view mode.

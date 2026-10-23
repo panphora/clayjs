@@ -141,8 +141,11 @@ const PLUGIN_ORDER = ["visitor-drafts", "richclay", "indicator", "sortable", "un
 // It does not bring undo: hyper-undo takes Cmd+Z for the whole window, text fields
 // included, which a page that never asked for it should not get by default.
 // A page's peers reach it through live sync's stream (live/stream-bridge.js), so
-// a Document without sync saves whole files and never sees another tab type.
-const IMPLIES = { cms: ["quickcrop", "upload"], "ai-edit": ["wire"], page: ["live", "sync"] };
+// a Document without sync saves whole files and never sees another tab type. Its
+// image and file blocks send through `clay.upload`: without the plugin every drop
+// ends in "File uploads are not available", while with it a host that stores no
+// files answers `unsupported` and the editor offers to embed the file instead.
+const IMPLIES = { cms: ["quickcrop", "upload"], "ai-edit": ["wire"], page: ["live", "sync", "upload"] };
 
 function parseCsv(params, key, enabled, apply) {
   const raw = params.get(key);
