@@ -136,6 +136,8 @@
 
 ## [Unreleased]
 
+## [1.15.0] - 2026-10-23
+
 ### Added
 - `clay.live(name)` (`?plugins=live`): a `clay="live"` JSON script as an in-memory object for games and other fast-changing state. Writes are ops (`set`, `delete`, `add`, `update`, or plain assignment through `data`), every tab sees them at once, and checkpoints write the value back into the file every 8 seconds and on hide or close. `clay="live ephemeral"` shares a value that is never saved.
 - Fast lane on hosts that advertise `live-data` (hyperclay.com): one room per document orders every change; tabs that join late or miss a change fetch the room's state, and only the room's writer saves checkpoints.
@@ -146,6 +148,24 @@
 - `add-from` / `add-to` attributes: a button that adds a list item from a `<template>` in edit mode, with a fresh `data-id` and its first field focused, no script needed
 - `ephemeral` attribute for per-tab state on saved elements: `ephemeral="selected"` is never saved, synced, undone or counted as a change, and incoming merges leave it alone. `clay.ephemeral.add/remove/toggle/has` edit it, and the Tailwind plugin `@panphora/clayjs/tailwind` adds the `ephemeral-selected:` variant
 - `ephemeral:NAME` markers make an element's own attribute per-tab (`<details ephemeral:open>`); `open` on `<dialog>` is per-tab by default
+- The `derive` plugin loads the sapjs core for a page with a `[sap]` root, in view mode too, so declared values paint and ClayJS treats them as derived. Full sapjs loaded by your own script takes over, and `exclude=derive` opts out.
+- The `page` plugin includes upload, so a Document's image blocks store dropped files. On a host that stores no files the editor offers to embed the file instead, and `exclude=upload` opts out.
+- `styleWithLegacyId()` takes extra region tokens, applied so adopting an old saved copy is never an undo step.
+
+### Changed
+- Painted values (`attr:`, `class:`, `css:`, `text` and `show` output) are saved with the file but are never an edit: comparisons strip them, the dirty, autosave and undo lanes ignore them, and every merge input drops them.
+- A page with a `[sap]` root is clean the moment `clay.ready` resolves, and an edit made while the paint engine boots still counts.
+
+### Fixed
+- Two tabs repainting the same total no longer conflict, and a tab nobody touched no longer turns unsaved.
+- When a repaint leaves the page's painted values different from the file's, one clean, autosaving tab saves the painted page, once per file version in a browser, so several tabs repainting the same disk frame save once.
+- Paint error output (`sap-error`) is never saved, and is stripped from every save and merge capture.
+- A paint rule that throws no longer stops the boot mount phase, and a held boot releases itself after 10 seconds.
+- Download my copy keeps painted values, and Revert to mine repaints before it saves.
+- Backspace inside a toggle body joins the line above instead of leaving the toggle.
+- Delete above a toggle keeps the toggle and merges only a plain paragraph: headings, list items and callouts keep their format.
+- Backspace or Delete at the edge of a code block steps across instead of merging.
+- Saved pages no longer carry the 49 KB page editor stylesheet. It is re-injected on each edit-mode boot, never in view mode, and older files drop it on their next save.
 
 ## [1.10.0] - 2026-10-12
 
