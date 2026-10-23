@@ -10,12 +10,17 @@
 export const BEACON = "sap-error";
 
 const WHEN = /^(show-when|hide-when|option|option-not):/;
-// Identity, form state (persist owns those) and the attributes that declare the
-// record itself are never paint output.
+// Identity and the attributes that declare the record itself are never paint
+// output. Form state is, unless a bind or persist owns it.
 const NEVER = new Set([
-  "id", "data-id", "class", "style", "value", "checked", "selected",
+  "id", "data-id", "class", "style",
   "sap", "scope", "items", "item", "bind", "state", "template", "cms-template", "sap-ignore",
 ]);
+const FORM_STATE = new Set(["value", "checked", "selected"]);
+
+function recordOwnsFormState(el) {
+  return el.hasAttribute("bind") || el.hasAttribute("persist") || !!el.closest("select[bind]");
+}
 
 function inert(el) {
   return el.localName === "template" || el.hasAttribute("template") || el.hasAttribute("cms-template") || el.hasAttribute("sap-ignore");
@@ -51,6 +56,7 @@ export function ownsAttr(el, name) {
   if (!el || el.nodeType !== 1 || !name) return false;
   if (name === BEACON) return !!appOf(el);
   if (NEVER.has(name)) return false;
+  if (FORM_STATE.has(name) && recordOwnsFormState(el)) return false;
   if (name === "hidden") return paintsHidden(el) && !!appOf(el);
   return el.hasAttribute("attr:" + name) && !declares(el, name) && !!appOf(el);
 }
@@ -68,7 +74,7 @@ export function paintsOf(el) {
     }
     else if (n.startsWith("attr:")) {
       const target = n.slice(5);
-      if (target && !NEVER.has(target) && !declares(el, target)) add("attrs", target);
+      if (target && !NEVER.has(target) && !(FORM_STATE.has(target) && recordOwnsFormState(el)) && !declares(el, target)) add("attrs", target);
     } else if (n.startsWith("class:")) add("classes", n.slice(6));
     else if (n.startsWith("css:")) add("vars", "--" + n.slice(4));
   }
