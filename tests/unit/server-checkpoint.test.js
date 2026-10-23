@@ -1,7 +1,7 @@
 /**
  * @jest-environment node
  */
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -10,6 +10,7 @@ import * as Y from '../../src/vendor/yjs.vendor.js';
 import { createRooms, parseBy, serializeLive } from '../../src/server/rooms/index.js';
 import { captureCheckpoint, isCheckpointCurrent, needsAdoption, renderCheckpoint } from '../../src/server/checkpoint/index.js';
 import { buildServerCheckpoint } from '../../scripts/build-server-checkpoint.mjs';
+import { buildServerRooms } from '../../scripts/build-server-rooms.mjs';
 import { blocksFromYValue } from '../../src/page/ybind/decode.js';
 import { boardKey } from '../../src/page/ybind/board.js';
 import { createPageDoc } from '../../src/page/ybind/layout.js';
@@ -246,6 +247,20 @@ test('built CJS and ESM entries load in plain Node without DOM globals', async (
   const loaded = JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', script], { cwd: process.cwd(), encoding: 'utf8' }));
   expect(loaded[0]).toEqual(['captureCheckpoint', 'isCheckpointCurrent', 'needsAdoption', 'renderCheckpoint']);
   expect(loaded[1]).toBe(true);
+});
+
+test('the rooms and checkpoint entries share one Yjs, so loading both warns about nothing', async () => {
+  await buildServerRooms();
+  await buildServerCheckpoint();
+  const script = `
+    require('@panphora/clayjs/server/rooms');
+    require('@panphora/clayjs/server/checkpoint');
+    console.log(JSON.stringify(Object.keys(require.cache).filter((file) => file.includes('dist/server/')).map((file) => file.split('/').pop()).sort()));
+  `;
+  const run = spawnSync(process.execPath, ['-e', script], { cwd: process.cwd(), encoding: 'utf8' });
+  expect(run.status).toBe(0);
+  expect(run.stderr).not.toMatch(/Yjs was already imported/);
+  expect(JSON.parse(run.stdout)).toEqual(['checkpoint.cjs', 'core.cjs', 'rooms.cjs']);
 });
 
 test('a room whose writer merged an edit to the same words it changed checkpoints it once the frame says so', () => {
