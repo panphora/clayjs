@@ -4,5 +4,7 @@ TESTBOX_REPO=clayjs
 # npmrelease runs this box instead of the local suite, and publishes with --ignore-scripts.
 TESTBOX_RELEASE=1
 TESTBOX_SETUP='npm ci --no-audit --no-fund && npx playwright install chromium'
+# `testbox snapshot` bakes this repo's Playwright browsers into the base image.
+TESTBOX_WARM_BROWSERS=chromium
 TESTBOX_COMMAND='npm test && npm run test:conformance && npm run test:standalone'
 TESTBOX_TIMEOUT=45m
