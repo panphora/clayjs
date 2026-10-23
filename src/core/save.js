@@ -21,7 +21,8 @@ import {
   saveFateIsUnknown,
   withKeepalive
 } from "./save-core.js";
-import { captureForComparison, captureForComparisonAndDirty, captureForSaveAndComparison, captureForDirtyCheck } from "./snapshot.js";
+import { captureForComparison, captureForComparisonAndDirty, captureForSaveAndComparison, captureForDirtyCheck, captureSaveClone } from "./snapshot.js";
+import { paintSignature } from "../lib/derived.js";
 import { NO_TRIGGER_AUTOSAVE_SELECTOR } from "../lib/region-policy.js";
 import { seedEtag, lastSeenEtag } from "./etag.js";
 import { gateCaptureToken, gateClearIfUnchanged, pageMaybeDirty } from "../lib/dirty-gate.js";
@@ -37,6 +38,7 @@ import { initUserGesture, markExplicitSave, clearExplicitSave } from "../lib/use
 // Both read across it at call time, never while a module is evaluating, so neither
 // side sees a half-built module.
 import { bytesUnsaved } from "./unsaved-warning.js";
+import { bootPhase } from "./boot-phase.js";
 
 // Keep this library's own root state out of the saved bytes.
 //
@@ -797,6 +799,38 @@ let baselineActive = true;
 let baselineSettledAt = false;
 export function baselineSettled() { return baselineSettledAt; }
 
+// A repaint that leaves the page's painted values different from the file's means
+// the file is stale: an agent wrote a record without painting it. One clean,
+// autosaving tab saves the painted page so the bytes on disk heal. The delay is
+// jittered and the check reruns when it fires, so when several tabs repaint the
+// same frame, the first save reaches the others and they skip.
+const PAINT_HEAL_MIN_MS = 250;
+const PAINT_HEAL_SPREAD_MS = 1250;
+let paintHealTimer = null;
+
+/** The painted values of the page as it would be saved. */
+export function currentPaintSignature() {
+  return paintSignature(captureSaveClone({ flushUndo: false }));
+}
+
+/**
+ * Save the page if its painted values differ from the file's. `fileSignature` is
+ * the file's paintSignature, or a function returning it (or null when unknown)
+ * when the timer fires.
+ */
+export function schedulePaintHeal(fileSignature) {
+  if (!isEditMode) return;
+  clearTimeout(paintHealTimer);
+  paintHealTimer = setTimeout(() => {
+    paintHealTimer = null;
+    const onDisk = typeof fileSignature === 'function' ? fileSignature() : fileSignature;
+    if (onDisk == null || !autosaveActive() || !baselineSettled() || isSaveConflicted() || autosaveIsSuspended()) return;
+    if (captureForDirtyCheck() !== lastSavedDirty) return;
+    if (onDisk === currentPaintSignature()) return;
+    savePageForce();
+  }, PAINT_HEAL_MIN_MS + Math.random() * PAINT_HEAL_SPREAD_MS);
+}
+
 registerStyleAdoption(identity => {
   const strip = styleComparisonStripper(identity);
   lastSavedContents = strip(lastSavedContents);
@@ -825,6 +859,18 @@ registerStyleAdoption(identity => {
 
 const SETTLE_MS = 500;        // Wait for no mutations for this long
 const MAX_SETTLE_MS = 3000;   // Max time to wait before forcing capture
+
+let settleNow = null;
+
+/**
+ * The loader's mount phase calls this once the derive engine has taken its first
+ * pass. The settle runs at once on the painted page, unless a person already
+ * edited or a save already installed a baseline (captureBaseline's guard).
+ */
+export function releaseBootSettle() {
+  bootPhase.holdSettle = false;
+  if (settleNow) settleNow();
+}
 
 function initBaselineCapture() {
   if (!isEditMode) return;
@@ -892,18 +938,25 @@ function initBaselineCapture() {
     baselineSettledAt = true;
     document.dispatchEvent(new CustomEvent('clay:baseline-settled'));
   };
+  settleNow = captureBaseline;
+
+  // While the loader holds the settle for a derive engine's first pass, neither
+  // the quiet timer nor the max timeout may settle; releaseBootSettle does.
+  const settle = () => {
+    if (!bootPhase.holdSettle) captureBaseline();
+  };
 
   // Start settle observer - fires when no mutations for SETTLE_MS.
   // require:'autosave' so churn in no-save / save-* / no-watch regions doesn't
   // keep resetting the settle timer or count toward the baseline.
   unsubscribeMutation = Mutation.onAnyChange(
     { debounce: SETTLE_MS, omitChangeDetails: true, require: 'autosave' },
-    captureBaseline
+    settle
   );
 
   // Max timeout fallback
   setTimeout(() => {
-    if (!settled) captureBaseline();
+    if (!settled) settle();
   }, MAX_SETTLE_MS);
 }
 

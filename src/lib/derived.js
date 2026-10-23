@@ -1,4 +1,4 @@
-import { ownsAttr, paintsOf, stripPaints } from "../vendor/sap-ownership.vendor.js";
+import { ownsAttr, paintsOf, stripPaints, eachPainted } from "../vendor/sap-ownership.vendor.js";
 
 // Values a derive engine (sapjs) paints from the page's records: attr:, class:,
 // css:, text and show output inside a [sap] root. They are saved like any other
@@ -14,6 +14,24 @@ export const ownsDerivedText = (el) => !!el && el.nodeType === 1 && !!paintsOf(e
 
 /** Remove every painted value from a detached tree, in place. Never the live page. */
 export const stripDerived = (root) => stripPaints(root);
+
+/** Every painted value under root, in document order, as one string. */
+export function paintSignature(root) {
+  const parts = [];
+  eachPainted(root, (el, p) => {
+    parts.push(el.localName);
+    for (const n of p.attrs) parts.push(n + "=" + (el.getAttribute(n) ?? "\u0000"));
+    for (const t of p.classes) parts.push("." + t + "=" + el.classList.contains(t));
+    for (const v of p.vars) parts.push(v + "=" + el.style.getPropertyValue(v));
+    if (p.text) parts.push("#" + el.textContent);
+  });
+  return parts.join("\u0001");
+}
+
+/** paintSignature of a document's bytes, such as the file on disk. */
+export function paintSignatureOfHtml(html) {
+  return paintSignature(new DOMParser().parseFromString(html, "text/html"));
+}
 
 function withoutTokens(value, owned, split, join, nameOf) {
   return split(value || "").map((t) => t.trim()).filter((t) => t && !owned.includes(nameOf(t))).sort().join(join);

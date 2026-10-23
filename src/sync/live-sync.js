@@ -62,7 +62,7 @@ import { SyncStream } from './stream.js';
 import { streamOpened, streamClosed, streamEvent, LIVE_EVENTS } from '../live/stream-bridge.js';
 import { conflicts, beginApply, completeApply, failApply } from './conflicts.js';
 import { beginLineageCapture } from './conflict-footprints.js';
-import { isDerivedAttr, ownsDerivedText, stripDerived, repaintDerived } from '../lib/derived.js';
+import { isDerivedAttr, ownsDerivedText, stripDerived, repaintDerived, paintSignatureOfHtml } from '../lib/derived.js';
 
 // What a live-sync merge never reads or touches on any side: editor chrome,
 // content kept out of the save or the snapshot, the contents of frozen regions,
@@ -190,7 +190,7 @@ function pairedBaseline() {
   const { forComparison, forDirty } = captureForComparisonAndDirty({ flushUndo: false });
   return [forComparison, forDirty];
 }
-import { savePageThrottled, setLastSavedBaselines, setUnsavedChanges, getLastSavedBytes, conflictResolvedBySync, isSaveConflicted, baselineSettled } from '../core/save.js';
+import { savePageThrottled, setLastSavedBaselines, setUnsavedChanges, getLastSavedBytes, conflictResolvedBySync, isSaveConflicted, baselineSettled, schedulePaintHeal } from '../core/save.js';
 
 /**
  * The two live-sync wires, and the rule for choosing between them.
@@ -2196,6 +2196,10 @@ class LiveSync {
     // autosave is on, as in the peer lane.
     if (stamped) conflictResolvedBySync(etag);
     this._saveAfterMerge(diverged, typedDuringWait);
+    // A disk frame comes from a writer that may not paint (an agent, the data
+    // API). If the file's painted values still differ from the repainted page
+    // once the timer fires, one tab saves so the bytes on disk heal.
+    schedulePaintHeal(() => (this._diskBase == null ? null : paintSignatureOfHtml(this._diskBase)));
   }
 
   /**
