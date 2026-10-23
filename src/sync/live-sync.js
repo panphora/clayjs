@@ -62,6 +62,7 @@ import { SyncStream } from './stream.js';
 import { streamOpened, streamClosed, streamEvent, LIVE_EVENTS } from '../live/stream-bridge.js';
 import { conflicts, beginApply, completeApply, failApply } from './conflicts.js';
 import { beginLineageCapture } from './conflict-footprints.js';
+import { isDerivedAttr, ownsDerivedText, stripDerived, repaintDerived } from '../lib/derived.js';
 
 // What a live-sync merge never reads or touches on any side: editor chrome,
 // content kept out of the save or the snapshot, the contents of frozen regions,
@@ -78,11 +79,13 @@ const SYNC_IGNORE_SELECTOR = [
 // A frozen element is a scratchpad: the element is part of the document and
 // merges like any other, but its contents belong to this tab. Every merge input
 // has its frozen elements emptied, and hyper-morph's opaque option leaves the
-// live contents alone.
+// live contents alone. Painted output (lib/derived.js) is left out of every
+// input the same way, and the engine repaints it once the merge has applied.
 const FREEZE_SELECTOR = '[clay~="freeze"], [freeze], [save-freeze]';
 
 function emptyScratchpads(root) {
   for (const el of root.querySelectorAll(FREEZE_SELECTOR)) el.replaceChildren();
+  stripDerived(root);
   return root;
 }
 
@@ -1702,9 +1705,9 @@ class LiveSync {
       live: document,
       remote,
       ignore: (el) => el.matches(SYNC_IGNORE_SELECTOR),
-      opaque: (el) => el.matches(FREEZE_SELECTOR),
+      opaque: (el) => el.matches(FREEZE_SELECTOR) || ownsDerivedText(el),
       remoteWins: (el) => el.matches(REMOTE_WINS_SELECTOR),
-      ignoreAttribute: isRootLocalAttr,
+      ignoreAttribute: (el, name, merged) => isRootLocalAttr(el, name, merged) || isDerivedAttr(merged || el, name),
       protectFocusedValue: true,
       keepLiveOnly: source === 'peer',
       scripts: { mergeTags: mergeTagRecognizers },
@@ -1912,6 +1915,7 @@ class LiveSync {
       });
       diverged = report.localDiverged;
       typedDuringWait = typed;
+      repaintDerived();
 
       // Restore viewport. Done after morph so layout has settled.
       window.scrollTo(scrollX, scrollY);
@@ -2114,6 +2118,7 @@ class LiveSync {
       });
       diverged = report.localDiverged;
       typedDuringWait = typed;
+      repaintDerived();
       // The file holds these bytes and this tab has applied them. Dated at the
       // apply, so a save that captured during the await keeps its newer base.
       this._setDiskBase(html, ticket);

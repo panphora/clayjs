@@ -4,6 +4,7 @@ import { initTheme } from "./ui/theme.js";
 import { ephemeral } from "./lib/ephemeral.js";
 import { effect } from "./lib/effect.js";
 import { style } from "./lib/style.js";
+import { derived } from "./lib/derived.js";
 
 function domReady() {
   return new Promise((resolve) => onDomReady(resolve));
@@ -36,7 +37,7 @@ export async function boot(base, params, readyResolve) {
 
   const { isDraftMode } = editMode;
 
-  const plan = resolveModules(params, isEditMode, { isDraftMode });
+  const plan = resolveModules(params, isEditMode, { isDraftMode, hasSap: Boolean(document.querySelector("[sap]")) });
   const loaded = {};
 
   for (const path of plan.core) {
@@ -100,6 +101,7 @@ function assembleCore(loaded, { isDraftMode, isEditMode, isOwner, siteVisibility
   clay.readData = pageData.readData;
   clay.writeData = pageData.writeData;
   clay.ephemeral = ephemeral;
+  clay.derived = derived;
   clay.effect = effect;
   clay.style = style;
 

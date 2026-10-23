@@ -6,6 +6,7 @@
 import { undo } from '../vendor/hyper-undo.vendor.js'
 import { isEditMode } from '../core/is-edit-mode.js'
 import { isTabLocalAttr } from '../lib/root-attrs.js'
+import { isDerivedAttr } from '../lib/derived.js'
 import { PERSIST } from '../lib/attr-aliases.js'
 
 // Tab-local attributes (ephemeral state, route-active, root library state) are
@@ -15,7 +16,7 @@ const withTabLocal = (opts = {}) => {
   const own = opts.ignoreAttribute
   return {
     ...opts,
-    ignoreAttribute: (name, target) => isTabLocalAttr(name, target) || (own ? own(name, target) : false),
+    ignoreAttribute: (name, target) => isTabLocalAttr(name, target) || isDerivedAttr(target, name) || (own ? own(name, target) : false),
   }
 }
 
