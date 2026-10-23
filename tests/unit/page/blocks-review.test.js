@@ -184,3 +184,113 @@ test("Tab stops at indent 8", () => {
 test("two empty pages get different first block ids", () => {
   expect(pageState(null).doc.child(0).attrs.id).not.toBe(pageState(null).doc.child(0).attrs.id);
 });
+
+describe("Delete just above a toggle", () => {
+  const caretAt = (view) => [view.state.selection.$from.parent.attrs.id, view.state.selection.$from.parentOffset];
+
+  test("an open toggle keeps its body; the line's text leads the summary", () => {
+    const view = editor([["p", "paragraph", "P"], ["t", "toggle", "Title", { open: true }], ["b", "paragraph", "body", { parent: "t" }]]);
+    select(view, posOf(view, "p", true));
+    key(view, "Delete");
+    expect(shape(view)).toBe("PTitle | body<t");
+    expect(caretAt(view)).toEqual(["t", 1]);
+    expect(view.state.doc.child(0).attrs.open).toBe(true);
+  });
+
+  test("a closed toggle stays closed with its hidden body", () => {
+    const view = editor([["p", "paragraph", "P"], ["t", "toggle", "Title", { open: false }], ["b", "paragraph", "body", { parent: "t" }], ["z", "paragraph", "Z"]]);
+    select(view, posOf(view, "p", true));
+    key(view, "Delete");
+    expect(shape(view)).toBe("PTitle | body<t | Z");
+    expect(view.state.doc.child(0).attrs.open).toBe(false);
+  });
+
+  test("a nested toggle inside a body keeps its own body", () => {
+    const view = editor([["t", "toggle", "T", { open: true }], ["a", "paragraph", "A", { parent: "t" }], ["n", "toggle", "N", { open: true, parent: "t" }], ["nb", "paragraph", "nb", { parent: "n" }]]);
+    select(view, posOf(view, "a", true));
+    key(view, "Delete");
+    expect(shape(view)).toBe("T | AN<t | nb<n");
+  });
+
+  test("an empty line above a toggle is just removed", () => {
+    const view = editor([["p", "paragraph", ""], ["t", "toggle", "Title", { open: true }], ["b", "paragraph", "body", { parent: "t" }]]);
+    select(view, posOf(view, "p", true));
+    key(view, "Delete");
+    expect(shape(view)).toBe("Title | body<t");
+  });
+});
+
+describe("Backspace and Delete at a code block's edge", () => {
+  const caretAt = (view) => [view.state.selection.$from.parent.attrs.id, view.state.selection.$from.parentOffset];
+
+  test("Backspace at the start of a code block steps to the end of the line above", () => {
+    const view = editor([["a", "paragraph", "A"], ["c", "code_block", "x=1"]]);
+    select(view, posOf(view, "c"));
+    key(view, "Backspace");
+    expect(shape(view)).toBe("A | x=1");
+    expect(caretAt(view)).toEqual(["a", 1]);
+  });
+
+  test("Backspace at the start of a code block removes an empty line above", () => {
+    const view = editor([["a", "paragraph", ""], ["c", "code_block", "x=1"]]);
+    select(view, posOf(view, "c"));
+    key(view, "Backspace");
+    expect(shape(view)).toBe("x=1");
+    expect(caretAt(view)).toEqual(["c", 0]);
+  });
+
+  test("Backspace at the start of a line below a code block steps into the code", () => {
+    const view = editor([["c", "code_block", "x=1"], ["z", "paragraph", "Z"]]);
+    select(view, posOf(view, "z"));
+    key(view, "Backspace");
+    expect(shape(view)).toBe("x=1 | Z");
+    expect(caretAt(view)).toEqual(["c", 3]);
+  });
+
+  test("Backspace in an empty line below a code block removes it", () => {
+    const view = editor([["c", "code_block", "x=1"], ["z", "paragraph", ""]]);
+    select(view, posOf(view, "z"));
+    key(view, "Backspace");
+    expect(shape(view)).toBe("x=1");
+    expect(caretAt(view)).toEqual(["c", 3]);
+  });
+
+  test("a code block that opens a toggle body steps to the summary instead of joining it", () => {
+    const view = editor([["t", "toggle", "T", { open: true }], ["c", "code_block", "x=1", { parent: "t" }]]);
+    select(view, posOf(view, "c"));
+    key(view, "Backspace");
+    expect(shape(view)).toBe("T | x=1<t");
+    expect(caretAt(view)).toEqual(["t", 1]);
+  });
+
+  test("Delete at the end of a code block steps to the line below", () => {
+    const view = editor([["c", "code_block", "x=1"], ["z", "paragraph", "Z"]]);
+    select(view, posOf(view, "c", true));
+    key(view, "Delete");
+    expect(shape(view)).toBe("x=1 | Z");
+    expect(caretAt(view)).toEqual(["z", 0]);
+  });
+
+  test("Delete at the end of a line above a code block steps into the code", () => {
+    const view = editor([["a", "paragraph", "A"], ["c", "code_block", "x=1"]]);
+    select(view, posOf(view, "a", true));
+    key(view, "Delete");
+    expect(shape(view)).toBe("A | x=1");
+    expect(caretAt(view)).toEqual(["c", 0]);
+  });
+
+  test("Delete in an empty line above a code block removes it", () => {
+    const view = editor([["a", "paragraph", ""], ["c", "code_block", "x=1"]]);
+    select(view, posOf(view, "a"));
+    key(view, "Delete");
+    expect(shape(view)).toBe("x=1");
+    expect(caretAt(view)).toEqual(["c", 0]);
+  });
+
+  test("an empty code block still turns into a paragraph on Backspace", () => {
+    const view = editor([["a", "paragraph", "A"], ["c", "code_block", ""]]);
+    select(view, posOf(view, "c"));
+    key(view, "Backspace");
+    expect(view.state.doc.child(1).type.name).toBe("paragraph");
+  });
+});
