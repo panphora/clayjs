@@ -314,9 +314,15 @@ function prepareCloneForSave(clone, { authored = true } = {}) {
     el.remove();
   }
 
-  for (const el of clone.querySelectorAll("[sap-error]")) el.removeAttribute("sap-error");
+  stripDiagnosticBeacons(clone);
 
   return clone;
+}
+
+// sapjs marks an element it cannot run with a sap-error beacon. It describes this
+// tab's engine, never the document, so no save carries it.
+function stripDiagnosticBeacons(clone) {
+  for (const el of clone.querySelectorAll("[sap-error]")) el.removeAttribute("sap-error");
 }
 
 /**
@@ -518,6 +524,7 @@ export function captureForSaveAndComparison({ emitForSync = true, flushUndo = tr
   for (const el of clone.querySelectorAll(STRIP_FROM_SAVE)) {
     el.remove();
   }
+  stripDiagnosticBeacons(clone);
   const forSave = serializeSaveClone(clone);
 
   // Compare clone: strip every autosave-off region, then run hooks
@@ -600,6 +607,7 @@ export function captureForMerge() {
   for (const el of clone.querySelectorAll(STRIP_FROM_SAVE)) {
     el.remove();
   }
+  stripDiagnosticBeacons(clone);
 
   for (const el of compareClone.querySelectorAll(STRIP_FROM_DIRTY_CHECK)) {
     el.remove();

@@ -180,6 +180,9 @@ test("a sap-error beacon is never a paint and never saved", async () => {
   expect(beaconedSave.hasAttribute("sap-error")).toBe(false);
   expect(beaconedSignature).toBe(cleanSignature);
   expect(beaconedSave.outerHTML).toBe(cleanSave.outerHTML);
+  // The bytes a real save and a merge send come from their own captures.
+  expect(snapshot.captureForSaveAndComparison({ emitForSync: false, flushUndo: false }).forSave).not.toContain("sap-error");
+  expect(snapshot.captureForSave({ emitForSync: false })).not.toContain("sap-error");
 
   // A file that still carries a beacon (written by an older clayjs) is not a
   // file whose painted values changed.
