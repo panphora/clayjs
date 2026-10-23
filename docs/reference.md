@@ -51,9 +51,10 @@ conditionally through the URL, in the browser only:
 
 Loadable plugins: `richclay` (default on), `source` (default on), `ai-edit` (brings `wire`),
 `indicator`, `sync`, `live`, `sortable`, `undo`, `cms`, `quickcrop`, `upload`, `people`, `wire`, `demo`,
-`visitor-drafts`. The default-on plugins load in edit mode only. `visitor-drafts` turns the page into a
+`visitor-drafts`, `derive`. The default-on plugins load in edit mode only. `visitor-drafts` turns the page into a
 free document: a visitor who is not the owner gets the editing UI and their work is kept in their own
-browser (guide section 14).
+browser (guide section 14). `derive` (the sapjs core) loads by itself, in view mode too, on any page with
+a `[sap]` root at boot, and stays idle when full sap.js is on the page; `exclude=derive` opts out.
 
 Everything else is a separate library ("satellite") with its own script tag: clay-ui,
 clay-events, clay-options, clay-dom, all.js, clay-utils, clay-internals, clay-data,
@@ -298,6 +299,44 @@ incoming merge on an element the tab already has.
   Never applies to `class`, `id`, `data-id`, `value`, `checked`, `selected` or region
   attributes (`clay`, `no-save`, `freeze` and the rest).
 - `open` on `<dialog>` is tab-only with no marker.
+
+## Derived values (one value, shown in several places)
+
+Store a value once, as the record, and declare every other place it shows as a sapjs paint. ClayJS
+loads the sapjs core for any page with a `[sap]` root and treats what a paint writes as derived.
+
+```html
+<main sap>
+  <tbody items="steps">
+    <tr item class="step" data-id="s1" attr:data-state="item.state">
+      <td><span class="state" bind="state" attr:aria-label="'Status: ' + item.state">accepted</span></td>
+    </tr>
+  </tbody>
+</main>
+<script type="application/json" data-rules-name="api" data-rules-version="1">
+{"steps": [".step", {"id": "@data-id", "state": ".state"}]}
+</script>
+```
+
+- `bind="state"` makes the span's text the record. `attr:NAME`, `class:TOKEN`, `css:NAME`, `text`,
+  `text:fmt` and `show` (plus `show-when:`, `hide-when:`, `option:`, `option-not:`) paint from it.
+- Painted values are saved with the file but are never an edit: comparisons, the dirty check,
+  autosave, undo and live-sync merges leave out the painted attribute, the one class token, the
+  `--NAME` property, a `text` element's children and `hidden` under `show`. The engine repaints
+  right after every merge and at boot, before any baseline. Two tabs that change different records
+  and repaint the same total never conflict.
+- Ownership is read from the element's attributes, never by running an expression. `attr:` never
+  owns `id`, `data-id`, `class`, `style`, `value`, `checked`, `selected`, or a field the same
+  element declares in `state=`.
+- When a repaint leaves the file's painted values stale (an agent wrote the record and not the
+  paint), one clean tab with autosave on saves the painted page.
+- **Agents and `api` rules read and write records, never painted output.** A painted value on disk
+  can lag the record until a tab repaints and saves it.
+- **Never copy a record into a second attribute with a script** (a `MutationObserver` that mirrors
+  text into `data-state`): the copy goes stale in the file and a merge brings it back. Use a paint.
+- The core covers records and paints only. `calc:`, `each`, `detail`, `effect`, `invalid`, the
+  actions (`set:`, `move:`, `sort:`, `trigger-*`, `confirm`) and `Sap(el)` halt with `E50` naming full
+  sap.js; add `<script src="https://clayjs.com/v1/sap.js">` and the markup stays the same.
 
 ## Region reference (the clay attribute)
 
@@ -757,7 +796,8 @@ has landed in that case, so callers must not retry it automatically. Server fail
 with an `Error` carrying `status`, `error`, `message`, and `details`.
 - `sap.js` — reactive templates with the DOM itself as the state: attributes and
   elements are the source of truth, templates re-render when the DOM they depend on
-  changes. No virtual DOM, no store.
+  changes. No virtual DOM, no store. Its core (records and paints) loads by itself as the
+  `derive` plugin; this tag adds the rest and takes the page over (see Derived values).
 - `clay-internals.js` — the pieces clayjs builds itself out of, for code that sits
   inside the save lifecycle (see below).
 

@@ -36,7 +36,7 @@ Every element on an open page belongs to one of three kinds. Decide which before
 |---|---|---|---|---|---|
 | **Record** | The work: card titles, checklist items, amounts, block text, order | Ordinary elements, attributes, text and `persist` control values | yes | yes | yes |
 | **Chrome** | UI for editing: buttons, grips, toolbars, menus, filter boxes, status text | Authored in the file, hidden from viewers with `show-when:editmode="true"`. UI a script fills or changes goes in `clay="editor-ui"` (9.2) | hidden: yes, `editor-ui`: no | hidden: yes, `editor-ui`: no | no |
-| **Derived** | Values computed from the record: counts, progress, totals, outlines | `clay="editor-ui"` (tab only) or `clay="no-dirty"` (saved, remote wins) | only if `no-dirty` | only if `no-dirty` | no |
+| **Derived** | Values computed from the record: counts, progress, totals, outlines, a status pill's colour | sapjs paints (`attr:`, `class:`, `css:`, `text`, `show`, 8.11), `clay="editor-ui"` (tab only) or `clay="no-dirty"` (saved, remote wins) | paints and `no-dirty`: yes | `no-dirty` only; paints are repainted, never merged | no |
 
 Nearly every bug in a malleable file is one of these three leaking into another: chrome a script changes saved into the file, a derived count merged as if someone typed it, a record edited only in a copy that never reaches the DOM.
 
@@ -44,7 +44,7 @@ Nearly every bug in a malleable file is one of these three leaking into another:
 
 1. **The DOM is the record.** Everything durable is an element, an attribute, text, child order, or the value of a control marked `persist`. Never keep the authoritative copy in a JavaScript object.
 2. **Chrome is authored in the file and hidden from viewers with `show-when:editmode="true"`.** This is the default: it needs no script and is in place before ClayJS loads. Use `clay="editor-ui"` only for UI a script fills or changes while the page is open, or that viewers must not receive (9.2).
-3. **Derived values are recomputed, never stored as edits.** Write them into `editor-ui` elements, or into `clay="no-dirty"` elements when the saved file must show them.
+3. **Derived values are recomputed, never stored as edits.** Store the value once, as the record (`bind`), and declare every other place it shows as a sapjs paint: `attr:data-state="item.state"`, `class:done="item.done"`, `text`, `show` (8.11). ClayJS loads the sapjs core for any page with a `[sap]` root and treats painted values as derived. Without sapjs, write derived values into `editor-ui` elements, or into `clay="no-dirty"` elements when the saved file must show them. Never copy a record into a second attribute with a script: the copy goes stale in the file, and a merge brings the stale copy back.
 4. **Every repeated item has a unique `data-id` from birth.** Mint a fresh one on every create and every duplicate. Sync pairs elements by it.
 5. **Per-tab state stays out of the record.** Which card is open, the filter, the current view: URL hash, `localStorage` or memory, painted through `ephemeral` attributes (5.7), a runtime `<style>` or `editor-ui` elements.
 6. **A command writes the record once, in one place,** wrapped in an undo commit. The mutation is what autosave, undo and sync see.
@@ -223,12 +223,14 @@ The test suite checks this file opens without becoming dirty, saves the record a
 | `ai-edit` | off | no | select text, ask an agent to rewrite it; implies `wire` |
 | `demo` | off | yes | fakes saving into `localStorage` for public demos |
 | `visitor-drafts` | off | yes | the draft store, `clay.visitorDrafts`, the download prompt, the intro area and the owner chip on a page that opted in (14) |
+| `derive` | on for any page with a `[sap]` root | yes | the sapjs core: records and paints, treated as derived (8.11) |
 
 - Edit-only plugins never load in view mode, even when named. Their members are absent there: test `clay.isEditMode` or `'save' in clay`, never the presence of `clay.RichClay` alone.
 - `exclude` wins over implications. `exclude=wire` also drops `ai-edit`.
 - Load order is fixed regardless of how you list them.
 - `exclude=richclay` when the app has no rich text. `exclude=source` saves one request and about 48 KB, at the cost of saves reprinting the whole document instead of keeping hand formatting.
 - Nothing implies `undo`, on purpose: it intercepts Cmd+Z in every text field on the page (8.3).
+- `derive` loads by itself when the page has a `[sap]` root at boot, and stays idle when full sapjs is on the page. `exclude=derive` opts out; `plugins=derive` loads it for a page that adds its `[sap]` root later.
 - `visitor-drafts` is inert outside draft mode: named on a page with no `visitor-drafts` slot, no `api` rules tag, or a rules tag this version cannot read (not `data-rules-version="1"`, or not JSON), it loads, warns in the console and draws nothing. Section 14 covers the opt in.
 
 **A good default for apps:** `?plugins=sync,sortable,undo,indicator`, plus `upload` for images or attachments, plus `exclude=richclay` when there is no rich text.
@@ -755,7 +757,7 @@ Rules for `fn`:
 - **Keep it synchronous.** Writes after an `await` land outside the pause and would re-trigger it forever, so an effect whose `fn` returns a promise is stopped with a console error.
 - **Do not call `clay.undo.commit` inside it.** A commit drains the hub's records, so the effect's writes reach autosave and the effect again.
 - **One effect does not see another's writes**, because each runs paused. Draw values that depend on each other in one effect.
-- **A derived value saved in the record** (a count painted in markup, 9.4) is written with the hub paused, so a repaint after a merge leaves the page dirty with no save scheduled. Put saved derived values in `clay="no-dirty"`, or in chrome.
+- **A derived value saved in the record** (a count painted in markup, 9.4) is written with the hub paused, so a repaint after a merge leaves the page dirty with no save scheduled. Put saved derived values in `clay="no-dirty"`, or in chrome, or declare them as sapjs paints, which ClayJS leaves out of every comparison (8.11).
 
 In edit mode each effect warns once in the console when it breaks one of these rules: a write to saved content outside `no-dirty` and `editor-ui`, a `clay.undo.commit` call, an effect created inside it, or more than 50 runs in a second (usually a timer or async callback it started that keeps changing the document). The effect keeps running; the warning names the element or command.
 
@@ -1100,14 +1102,36 @@ Older Hyperclay files can carry attributes ClayJS ignores: `movable`, `movable-h
 
 The vocabulary in one breath: `sap` marks an app root; `items="list"` holds `[item]` records and `[item][template]` (or a shared `<template items="list">`) is the blueprint; `bind` two-way binds a control or a text leaf; `state="data-due data-done:presence"` declares fields stored as attributes; `calc:`, `text:fmt`, `show`, `class:`, `css:`, `attr:` and `effect` paint; `each="expr"` renders a view of any array whose rows edit the records they show; `detail="LIST by KEY"` projects one record into a panel or a `<dialog>`; actions are `trigger-add`, `trigger-remove`, `move:`, `sort:`, `set:` and `confirm=`; `Sap(el)` is a write-through proxy and `Sap.batch(label, fn)` makes one undo step. Done means no `sap ✗` console line and `Sap.status().ok === true`.
 
-How it fits ClayJS: its paints ride the mutation hub, so they never start an autosave or count as unsaved by themselves. It re-derives on `clay:sync-applied`, `clay:sorted`, `clay:route` and undo. Rows of an `each=` view carry `clay="editor-ui"`, so views never save or sync.
+How it fits ClayJS:
+
+- **The core loads by itself.** On any page with a `[sap]` root, ClayJS loads the sapjs core (the `derive` plugin, 3.2). The core covers records (`bind`, `state=`, `items` and `item`) and paints (`text`, `text:fmt`, `show`, `attr:`, `class:`, `css:`, the `show-when:` family). Markup that needs full sapjs (`calc:`, `each`, `detail`, `effect`, `invalid`, the actions, `Sap(el)`) halts with `E50`, which names it. Load `https://clayjs.com/v1/sap.js` for full sapjs; the markup stays the same, and full sapjs takes the page over from the core.
+- **Painted values are derived.** Comparisons, the dirty check, autosave, undo and every merge input leave out what a paint owns: the attribute an `attr:` names, the one class token a `class:` names, the `--` property a `css:` names, the children of a `text` element, and `hidden` under `show`. A paint never makes the page unsaved, and two tabs that change different records while repainting the same total end with the right total and no conflict.
+- **Ownership is read from the markup.** It comes from the element's own attributes, never from evaluating an expression, so it holds the same in the live page, a save clone and a frame from disk. `attr:` never owns `id`, `data-id`, `class`, `style`, `value`, `checked`, `selected`, or a name the same element declares in `state=`: those stay record.
+- **Repainted before anything records a baseline.** The engine mounts in a boot phase, after frozen regions record their markup and visitor drafts restore, and the boot baseline settles on the painted page. After every merge it repaints right away, before the saved, peer and disk baselines and before `clay:sync-applied`.
+- **Painted values are still saved,** so the file shows them without JavaScript. When a repaint leaves the file's painted values different from the page's (an agent wrote a record and left the old paint), one clean tab with autosave on saves the painted page after a short random delay, and other tabs that repainted the same frame see that save and skip theirs.
+- **Agents and `api` rules read and write records, never paints.** Point a rule at the `bind` element or a `state=` attribute (`"state": ".state"`), never at a painted attribute: a painted value on disk can lag the record until a tab repaints and saves it.
+- Rows of an `each=` view carry `clay="editor-ui"`, so views never save or sync.
+
+A status that sets text, colour and a label, with the state stored once:
+
+```html
+<main sap>
+  <table><tbody items="steps">
+    <tr item class="step" data-id="s1" attr:data-state="item.state">
+      <td><span class="state" bind="state" attr:aria-label="'Status: ' + item.state">accepted</span></td>
+    </tr>
+  </tbody></table>
+</main>
+```
+
+`tr[data-state="accepted"] .state { background: var(--ok) }` colours it, and `htmlfile data --write` or the JSON API writes only `.state`.
 
 Rules for sapjs in a malleable file:
 
-- **Store each record once, as an element; derive everything else.** Counts, totals and card faces computed only from records are ordinary saved content: paint them into the record markup and ship the file pre-painted, so the first pass writes nothing (`mount writes 0`). A mismatch logs `W30` and repaints; the painted value goes out with the next real save.
+- **Store each record once, as an element; derive everything else.** Counts, totals and card faces computed only from records are ordinary saved content: paint them into the record markup and ship the file pre-painted, so the first pass writes nothing (`mount writes 0`). A stale painted value repaints at mount; under ClayJS the paint heal saves it, and on other hosts sapjs logs `W30` and the value goes out with the next real save.
 - **Per-tab values go in `clay="freeze"`**: anything from today's date, the locale, the URL hash, the search box or runtime data. Freeze saves an element's contents as they were at load, so put the per-tab values inside the frozen element, or fill it from an `effect`, which re-runs every pass.
 - **Per-tab state is `transient`** (`state="q:transient open:transient"`, and `transient` on the bound search input), or the URL hash through `clay-router.js`.
-- **Filter with an `each=` view, or a frozen stylesheet**, never with `show=` on saved records: `show=` writes `hidden` into the record, and that saves and syncs.
+- **Filter with an `each=` view, or a frozen stylesheet**, never with `show=` on saved records: `show=` paints `hidden`, which ClayJS treats as derived, so it never syncs, but a save still writes the saving tab's filter into the file.
 - **Every `detail=` panel and `<dialog>` sits inside a `clay="freeze"` wrapper.** Its controls are painted with the open record's values; outside freeze they would save a second copy. Not `editor-ui`, which removes the element from the file. sapjs warns `W31` for a dialog without the wrapper.
 - **Give records a `data-id`**, and `data-id=""` on blueprints: `$add` and `trigger-add` mint fresh ids. Live sync pairs elements by it.
 - **`persist` on bound inputs inside records**, so typed values reach the attributes a save captures.
@@ -1222,7 +1246,7 @@ Never put per-viewer state on `<html>` or any record element without that: it au
 
 Pick by whether the saved file must show the value:
 
-- **Computed only from the records** (counts, progress badges, totals, a card's face): ordinary saved content. Write it into the record markup, ship the file pre-painted, and recompute on every change; every tab computes the same value, so a merge never fights over it. With sap this is just a paint (8.11). The starter Kanban paints its list counts and card faces this way.
+- **Computed only from the records** (counts, progress badges, totals, a card's face): ordinary saved content. Write it into the record markup, ship the file pre-painted, and recompute on every change. With sap this is just a paint (8.11), and ClayJS treats it as derived: merges leave it out and the engine repaints it from the merged records, so two tabs that changed different records end with the right value and no conflict. Hand-written derived text in saved content does not get this; give it `no-dirty`. The starter Kanban paints its list counts and card faces this way.
 - **Different per tab** (search results, which entry is open, "overdue" against today's date, OS shortcut labels, names loaded from the people plugin): write it inside a `clay="freeze"` scratchpad (5.2). The element saves and syncs; its contents never do.
 - **Pure UI** (buttons, menus, handles): `editor-ui`, created from a `<template>` (9.2).
 - **Optionally, `no-dirty`** for a computed value the saved file shows: it saves with the next real edit, never counts as an edit itself, and remote wins under sync. Apply the 7.3 workaround. The finance tracker does this.
@@ -1559,7 +1583,7 @@ The saved file is the data. Everyone who can download it can read everything in 
 7. Every control whose value matters has `persist`; no filter or search box does.
 8. All chrome is cloned from a `<template>` into `clay="editor-ui"` after `clay.ready`; nothing in the file is chrome.
 9. Tab-local state is in the hash, `localStorage` or memory, painted through a runtime style; opening, filtering and searching leave `clay.hasUnsavedChanges()` false.
-10. Derived values are in `editor-ui`, or `no-dirty` when the file must show them; every derived write is guarded.
+10. Derived values are sapjs paints, in `editor-ui`, or `no-dirty` when the file must show them; every hand-written derived write is guarded, and no script copies a record into a second attribute.
 11. Commands are wrapped in `clay.undo.commit`; derived views are drawn in `clay.effect`, with no effect warnings in the console.
 12. Views whose record a peer deleted are closed, in the effect or a `clay:sync-applied` handler.
 13. The app script starts with `clay.start`; all listeners are delegated.
@@ -1615,6 +1639,9 @@ The saved file is the data. Everyone who can download it can read everything in 
 | Same-key JSON edits under `merge`: incoming wins, yours goes to the notice | 7.3 |
 | Rewriting the record at boot makes incoming frames hold | 7.4 |
 | Parsed JSON goes stale after a merge | 7.5 |
+| A script that copies a record into a styling attribute goes stale in the file, and a merge brings the stale copy back | 1.3, 8.11 |
+| An `api` rule that reads a painted value can read a stale one until a tab repaints and saves | 8.11 |
+| Full sapjs markup under the sapjs core halts with `E50` | 8.11 |
 | There is no presence API | 7.7 |
 | `data-richclay` card mode deletes images on load | 8.1 |
 | The richclay toolbar is unusable inside `showModal()` and popovers | 8.1 |
