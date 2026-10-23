@@ -556,16 +556,19 @@ export function deleteAtCollapsedEnd(st, dispatch) {
   return true;
 }
 
-// Delete at the end of a line just above a toggle moves the line's text onto
-// the front of the summary, so the toggle keeps its body and open state. The
-// default join would turn the toggle into a paragraph and release its body.
+// Delete at the end of a line just above a toggle. A plain paragraph's text
+// moves onto the front of the summary, so the toggle keeps its body and open
+// state; the default join would turn the toggle into a paragraph and release
+// its body. Any other line (heading, list item, callout) would lose its format
+// in that merge, so the caret steps into the summary instead.
 export function deleteBeforeToggle(st, dispatch) {
   const { $from, empty } = st.selection;
   if (!empty || $from.depth !== 1) return false;
   const n = $from.parent, i = $from.index(0);
   if (!n.isTextblock || n.type.spec.code || isToggle(n) || !n.content.size || $from.parentOffset !== n.content.size) return false;
   if (i + 1 >= st.doc.childCount || !isToggle(st.doc.child(i + 1))) return false;
-  if (dispatch) {
+  if (dispatch && n.type !== N.paragraph) dispatch(st.tr.setSelection(TextSelection.create(st.doc, $from.after() + 1)).scrollIntoView());
+  else if (dispatch) {
     const at = $from.before();
     const tr = st.tr.insert($from.after() + 1, n.content).delete(at, $from.after());
     dispatch(tr.setSelection(TextSelection.create(tr.doc, at + 1 + n.content.size)).scrollIntoView());

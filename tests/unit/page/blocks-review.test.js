@@ -212,6 +212,17 @@ describe("Delete just above a toggle", () => {
     expect(shape(view)).toBe("T | AN<t | nb<n");
   });
 
+  for (const [type, attrs] of [["heading", { level: 2 }], ["list_item", {}], ["callout", {}]]) {
+    test(`a ${type} above a toggle keeps its format: the caret steps into the summary`, () => {
+      const view = editor([["p", type, "P", attrs], ["t", "toggle", "Title", { open: true }], ["b", "paragraph", "body", { parent: "t" }]]);
+      select(view, posOf(view, "p", true));
+      key(view, "Delete");
+      expect(shape(view)).toBe("P | Title | body<t");
+      expect(view.state.doc.child(0).type.name).toBe(type);
+      expect(caretAt(view)).toEqual(["t", 0]);
+    });
+  }
+
   test("an empty line above a toggle is just removed", () => {
     const view = editor([["p", "paragraph", ""], ["t", "toggle", "Title", { open: true }], ["b", "paragraph", "body", { parent: "t" }]]);
     select(view, posOf(view, "p", true));
