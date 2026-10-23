@@ -1,4 +1,5 @@
 import { ownsAttr, paintsOf, stripPaints, eachPainted } from "../vendor/sap-ownership.vendor.js";
+import { bootPhase } from "../core/boot-phase.js";
 
 // Values a derive engine (sapjs) paints from the page's records: attr:, class:,
 // css:, text and show output inside a [sap] root. They are saved like any other
@@ -20,7 +21,7 @@ export function paintSignature(root) {
   const parts = [];
   eachPainted(root, (el, p) => {
     parts.push(el.localName);
-    for (const n of p.attrs) parts.push(n + "=" + (el.getAttribute(n) ?? "\u0000"));
+    for (const n of p.attrs) if (n !== "sap-error") parts.push(n + "=" + (el.getAttribute(n) ?? "\u0000"));
     for (const t of p.classes) parts.push("." + t + "=" + el.classList.contains(t));
     for (const v of p.vars) parts.push(v + "=" + el.style.getPropertyValue(v));
     if (p.text) parts.push("#" + el.textContent);
@@ -71,6 +72,12 @@ export function isDerivedChange(change) {
 
 const engines = new Set();
 let mountedOnce = false;
+
+/** True while a derive engine is registered, or the loader holds boot for one. */
+export function derivedActive() {
+  return engines.size > 0 || bootPhase.holdSettle;
+}
+
 const mountWaiters = [];
 
 /** Run every registered engine's repaint, synchronously. Live sync calls it right after a merge applies. */

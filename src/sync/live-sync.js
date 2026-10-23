@@ -62,7 +62,7 @@ import { SyncStream } from './stream.js';
 import { streamOpened, streamClosed, streamEvent, LIVE_EVENTS } from '../live/stream-bridge.js';
 import { conflicts, beginApply, completeApply, failApply } from './conflicts.js';
 import { beginLineageCapture } from './conflict-footprints.js';
-import { isDerivedAttr, ownsDerivedText, stripDerived, repaintDerived, paintSignatureOfHtml } from '../lib/derived.js';
+import { isDerivedAttr, ownsDerivedText, stripDerived, repaintDerived, paintSignatureOfHtml, derivedActive } from '../lib/derived.js';
 
 // What a live-sync merge never reads or touches on any side: editor chrome,
 // content kept out of the save or the snapshot, the contents of frozen regions,
@@ -85,7 +85,7 @@ const FREEZE_SELECTOR = '[clay~="freeze"], [freeze], [save-freeze]';
 
 function emptyScratchpads(root) {
   for (const el of root.querySelectorAll(FREEZE_SELECTOR)) el.replaceChildren();
-  stripDerived(root);
+  if (derivedActive()) stripDerived(root);
   return root;
 }
 
@@ -1705,9 +1705,9 @@ class LiveSync {
       live: document,
       remote,
       ignore: (el) => el.matches(SYNC_IGNORE_SELECTOR),
-      opaque: (el) => el.matches(FREEZE_SELECTOR) || ownsDerivedText(el),
+      opaque: (el) => el.matches(FREEZE_SELECTOR) || (derivedActive() && ownsDerivedText(el)),
       remoteWins: (el) => el.matches(REMOTE_WINS_SELECTOR),
-      ignoreAttribute: (el, name, merged) => isRootLocalAttr(el, name, merged) || isDerivedAttr(merged || el, name),
+      ignoreAttribute: (el, name, merged) => isRootLocalAttr(el, name, merged) || (derivedActive() && isDerivedAttr(merged || el, name)),
       protectFocusedValue: true,
       keepLiveOnly: source === 'peer',
       scripts: { mergeTags: mergeTagRecognizers },
@@ -2042,6 +2042,7 @@ class LiveSync {
    * local edits.
    */
   async _doApplyExternal(html, seq, etag = null, by = null, fetchOptions = null) {
+    const priorDisk = this._diskBase;
     this._log(`applyExternal - external disk change (seq=${seq})`);
     this.isPaused = true;
 
@@ -2196,10 +2197,13 @@ class LiveSync {
     // autosave is on, as in the peer lane.
     if (stamped) conflictResolvedBySync(etag);
     this._saveAfterMerge(diverged, typedDuringWait);
-    // A disk frame comes from a writer that may not paint (an agent, the data
-    // API). If the file's painted values still differ from the repainted page
-    // once the timer fires, one tab saves so the bytes on disk heal.
-    schedulePaintHeal(() => (this._diskBase == null ? null : paintSignatureOfHtml(this._diskBase)));
+    // A disk frame from a writer that does not paint (an agent, the data API)
+    // changes records and leaves the painted values as they were. If the page's
+    // repainted values differ from them once the timer fires, one tab saves so
+    // the bytes on disk heal. A writer that paints is left alone.
+    if (priorDisk != null && paintSignatureOfHtml(priorDisk) === paintSignatureOfHtml(html)) {
+      schedulePaintHeal(() => (this._diskBase == null ? null : paintSignatureOfHtml(this._diskBase)));
+    }
   }
 
   /**

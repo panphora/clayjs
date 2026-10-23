@@ -164,6 +164,62 @@ test("a stale painted attribute heals on open, reads as clean, and never wins a 
   sync.stop();
 });
 
+test("a sap-error beacon is never a paint and never saved", async () => {
+  const page = (beacon) =>
+    `<main sap${beacon ? ' sap-error="E50"' : ""}><p data-id="p" text="'hi'">hi</p></main>`;
+
+  document.body.innerHTML = page(false);
+  const cleanSignature = save.currentPaintSignature();
+  const cleanSave = snapshot.captureSaveClone({ flushUndo: false });
+
+  document.body.innerHTML = page(true);
+  const beaconedSignature = save.currentPaintSignature();
+  const beaconedSave = snapshot.captureSaveClone({ flushUndo: false });
+
+  expect(beaconedSave.querySelector("[sap-error]")).toBeNull();
+  expect(beaconedSave.hasAttribute("sap-error")).toBe(false);
+  expect(beaconedSignature).toBe(cleanSignature);
+  expect(beaconedSave.outerHTML).toBe(cleanSave.outerHTML);
+
+  // A file that still carries a beacon (written by an older clayjs) is not a
+  // file whose painted values changed.
+  const { paintSignatureOfHtml } = await import("../../src/lib/derived.js");
+  const beaconedFile = paintSignatureOfHtml(`<!DOCTYPE html><html><body>${page(true)}</body></html>`);
+  expect(beaconedFile).not.toContain("sap-error");
+  expect(beaconedFile).toContain("#hi");
+});
+
+test("a page with no derive engine keeps the painted values a disk frame brings", async () => {
+  // A fresh registry with no derive engine in it: the [sap] markup is there, but
+  // nothing can repaint it, so a merge must keep what the frame painted.
+  jest.resetModules();
+  delete window.clay;
+  document.body.innerHTML = `<main sap><table><tbody items="steps"></tbody></table></main>`;
+
+  const freshSnapshot = await import("../../src/core/snapshot.js");
+  const freshDerived = await import("../../src/lib/derived.js");
+  const freshSave = await import("../../src/core/save.js");
+  const liveSyncModule = await import("../../src/sync/live-sync.js");
+  liveSyncModule.liveSync.stop();
+  freshSave.setLastSavedContents(freshSnapshot.captureForComparison());
+  freshSave.setUnsavedChanges(false);
+
+  const frame = `<main sap><table><tbody items="steps">` +
+    `<tr item attr:data-state="item.state" data-state="accepted"><td text="item.state">accepted</td></tr>` +
+    `</tbody></table></main>`;
+
+  const sync = new liveSyncModule.LiveSync();
+  sync.lane = "live";
+  sync._requestFrame = () => null;
+  await sync._doApplyExternal(frame, 5, null);
+
+  expect(freshDerived.derivedActive()).toBe(false);
+  const row = document.querySelector("tr[item]");
+  expect(row.getAttribute("data-state")).toBe("accepted");
+  expect(row.querySelector("td").textContent).toBe("accepted");
+  sync.stop();
+});
+
 test("a frame that differs only in painted output changes nothing", async () => {
   const sync = makeSync();
   await open(rows(1, 1, 2));

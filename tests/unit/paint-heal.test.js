@@ -24,6 +24,16 @@ const STALE_PAGE = PAGE.replace(
 const doc = (page) => `<!DOCTYPE html><html autosave><head></head><body>${page}</body></html>`;
 const STALE_FILE = doc(STALE_PAGE);
 const PAINTED_FILE = STALE_FILE.replace(`data-state="waiting"`, `data-state="accepted"`);
+// The same file with the record text still at the old value: an agent that wrote
+// the record and painted nothing leaves the file's painted value alone.
+const WAITING_FILE = doc(
+  STALE_PAGE.replace(`>accepted</span>`, `>waiting</span>`)
+);
+// A writer that paints: the frame carries a painted value of its own and a record
+// of its own, so the page's repaint and the file's paint are the writer's business.
+const WRITER_FILE = doc(
+  STALE_PAGE.replace(`>accepted</span>`, `>done</span>`).replace(`data-state="waiting"`, `data-state="accepted"`)
+);
 
 class FakeEventSource extends EventTarget {
   constructor(url) {
@@ -39,11 +49,21 @@ let snapshot;
 let derivedLib;
 let Sap;
 let saves;
+let saveStatus;
 
 function mockFetch() {
   return jest.fn(async (url, init = {}) => {
     if (init.method === "POST" && /\/_\/save/.test(String(url))) {
       saves.push(init.body);
+      if (saveStatus === 412) {
+        return {
+          ok: false,
+          status: 412,
+          statusText: "Precondition Failed",
+          headers: new Headers(),
+          text: async () => "",
+        };
+      }
       return {
         ok: true,
         status: 200,
@@ -63,7 +83,7 @@ function mockFetch() {
   });
 }
 
-async function load({ autosave = true, body = PAGE } = {}) {
+async function load({ autosave = true, body = PAGE, draft = false } = {}) {
   jest.resetModules();
   // mutation.js publishes a realm-global hub on window.__clayMutation and every
   // later module instance adopts it, so without this the fresh registry would
@@ -73,7 +93,18 @@ async function load({ autosave = true, body = PAGE } = {}) {
   if (window.__clayMutation?._observer) window.__clayMutation._observer.disconnect();
   delete window.__clayMutation;
   delete window.clay;
-  window.clayEditMode = true;
+  if (draft) {
+    // A visitor's tab: a draft slot and rules, no owner, no save token.
+    delete window.clayEditMode;
+    document.documentElement.setAttribute("visitor-drafts", "heal-draft");
+    document.head.innerHTML =
+      `<script type="application/json" data-rules-name="api" data-rules-version="1">{}</script>`;
+    (await import("../../src/core/draft-mode.js")).noteBootParams(new URLSearchParams("plugins=visitor-drafts"));
+  } else {
+    document.documentElement.removeAttribute("visitor-drafts");
+    document.head.innerHTML = "";
+    window.clayEditMode = true;
+  }
   window.scrollTo = () => {};
   global.EventSource = window.EventSource = FakeEventSource;
   if (autosave) document.documentElement.setAttribute("autosave", "");
@@ -111,6 +142,8 @@ const tick = (ms = 0) => new Promise((resolve) => setTimeout(resolve, ms));
 
 beforeEach(() => {
   saves = [];
+  saveStatus = 200;
+  localStorage.clear();
   jest.spyOn(console, "log").mockImplementation(() => {});
   jest.spyOn(console, "warn").mockImplementation(() => {});
 });
@@ -216,6 +249,94 @@ test("three schedules in a row heal once", async () => {
   expect(saves.length).toBe(1);
 });
 
+test("in draft mode the heal never saves", async () => {
+  jest.useFakeTimers({ doNotFake: ["queueMicrotask", "nextTick"] });
+  await load({ draft: true });
+  // Where a draft save would go, had one been made.
+  const draftSaves = [];
+  const draftMode = await import("../../src/core/draft-mode.js");
+  draftMode.setDraftTransport((html) => draftSaves.push(html));
+
+  save.schedulePaintHeal(staleSignature());
+  jest.advanceTimersByTime(1600);
+  await flush();
+
+  // A visitor's draft is their own work, not a repair of the file on disk.
+  expect(draftSaves).toEqual([]);
+  expect(saves).toEqual([]);
+});
+
+test("a heal tick on a dirty page never flushes the undo batch", async () => {
+  jest.useFakeTimers({ doNotFake: ["queueMicrotask", "nextTick"] });
+  // 250 ms: short enough that autosave's own 1500 ms debounce is still pending.
+  jest.spyOn(Math, "random").mockReturnValue(0);
+  await load();
+
+  document.querySelector(".state").textContent = "edited by hand";
+  await Promise.resolve();
+  expect(snapshot.captureForDirtyCheck()).not.toBe(save.getLastSavedDirty());
+
+  window.clay.undo = { flush: jest.fn() };
+  save.schedulePaintHeal(staleSignature());
+  jest.advanceTimersByTime(300);
+  await flush();
+
+  expect(window.clay.undo.flush).not.toHaveBeenCalled();
+  expect(saves).toEqual([]);
+});
+
+test("a heal save the host refuses stays quiet, and a normal save still conflicts", async () => {
+  // Real timers: the heal is a real 250 ms wait (Math.random pinned to 0).
+  jest.spyOn(Math, "random").mockReturnValue(0);
+  await load();
+  saveStatus = 412;
+  const savedEvents = [];
+  document.addEventListener("clay:save-saved", (e) => savedEvents.push(e));
+
+  save.schedulePaintHeal(staleSignature());
+  await tick(400);
+  await flush();
+
+  expect(saves.length).toBe(1);
+  // The tab was clean: a refusal of its heal is not a conflict to resolve, and
+  // autosave keeps running. The other tab's save reaches it through sync.
+  expect(save.isSaveConflicted()).toBe(false);
+  expect(save.autosaveIsSuspended()).toBe(false);
+  expect(document.documentElement.getAttribute("savestatus")).toBe("saved");
+  // Nothing landed, so nothing announces a save.
+  expect(savedEvents).toEqual([]);
+
+  // A save the person asked for is still a conflict when it is refused.
+  await save.savePageForce();
+  expect(save.isSaveConflicted()).toBe(true);
+});
+
+test("one heal per file version per browser", async () => {
+  jest.useFakeTimers({ doNotFake: ["queueMicrotask", "nextTick"] });
+  // 250 ms per heal, under autosave's own 1500 ms debounce, so a second load in
+  // this test cannot leave the first instance's autosave pending.
+  jest.spyOn(Math, "random").mockReturnValue(0);
+  await load();
+  save.schedulePaintHeal(staleSignature());
+  jest.advanceTimersByTime(400);
+  await flush();
+  expect(saves.length).toBe(1);
+
+  // The same file version opened again: a new module instance, the same browser.
+  await load();
+  save.schedulePaintHeal(staleSignature());
+  jest.advanceTimersByTime(400);
+  await flush();
+  expect(saves.length).toBe(1);
+
+  // A file version this browser has not healed yet is saved again.
+  await load();
+  save.schedulePaintHeal(staleSignature() + "|another");
+  jest.advanceTimersByTime(400);
+  await flush();
+  expect(saves.length).toBe(2);
+});
+
 test("a disk frame that leaves the file stale heals with one save", async () => {
   // Real timers: the disk lane awaits a 0 ms timer inside the apply, and the
   // heal itself is a real 250 ms wait (Math.random pinned to 0).
@@ -226,18 +347,19 @@ test("a disk frame that leaves the file stale heals with one save", async () => 
   const sync = new LiveSync();
   sync.lane = "live";
   sync._requestFrame = () => null;
-  sync._setDiskBase(STALE_FILE, sync._ticket());
+  sync._setDiskBase(WAITING_FILE, sync._ticket());
 
-  // What an agent writing records leaves: the records are unchanged, the paint
-  // is not.
+  // What an agent writing records leaves: the record text moves, the paint does
+  // not.
   await sync._doApplyExternal(STALE_FILE, 11, "disk-1");
   await tick(400);
 
   expect(saves.length).toBe(1);
   expect(saves[0]).toContain('data-state="accepted"');
 
-  // What a writer that paints leaves: nothing left to heal.
-  await sync._doApplyExternal(PAINTED_FILE, 12, "disk-2");
+  // A writer that paints: its frame carries a painted value and a record of its
+  // own, so this tab does not heal over it.
+  await sync._doApplyExternal(WRITER_FILE, 12, "disk-2");
   await tick(400);
 
   expect(saves.length).toBe(1);

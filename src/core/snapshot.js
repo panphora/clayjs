@@ -314,6 +314,8 @@ function prepareCloneForSave(clone, { authored = true } = {}) {
     el.remove();
   }
 
+  for (const el of clone.querySelectorAll("[sap-error]")) el.removeAttribute("sap-error");
+
   return clone;
 }
 

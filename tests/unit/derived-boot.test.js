@@ -138,6 +138,42 @@ test("an edit during the hold survives the release", async () => {
   expect(snapshot.captureForDirtyCheck()).not.toBe(save.getLastSavedDirty());
 });
 
+test("a document transform that throws still mounts the engine and settles the baseline", async () => {
+  await load({ hold: true, body: PAGE });
+  expect(save.baselineSettled()).toBe(false);
+
+  // A transform runs on every save clone, so the file's painted values cannot be
+  // read. The mount phase still mounts and releases: a page whose snapshot hook
+  // throws must not be left with a baseline that never settles.
+  let thrown = false;
+  save.addDocumentTransform(() => {
+    if (thrown) return;
+    thrown = true;
+    throw new Error("transform failed");
+  });
+  const errors = jest.spyOn(console, "error").mockImplementation(() => {});
+  window.Sap = Sap;
+
+  const { mountDerivedEngine } = await import("../../src/loader.js");
+  mountDerivedEngine({ "core/save.js": save });
+
+  expect(errors).toHaveBeenCalled();
+  expect(root().getAttribute("tab")).toBe("a");
+  expect(save.baselineSettled()).toBe(true);
+});
+
+test("a held settle releases itself after ten seconds", async () => {
+  jest.useFakeTimers({ doNotFake: ["queueMicrotask", "nextTick"] });
+  await load({ hold: true, body: PAGE });
+  expect(save.baselineSettled()).toBe(false);
+
+  jest.advanceTimersByTime(3000);
+  expect(save.baselineSettled()).toBe(false);
+
+  jest.advanceTimersByTime(7000);
+  expect(save.baselineSettled()).toBe(true);
+});
+
 test("without the hold the settle still happens on its own", async () => {
   await load({ hold: false, body: PAGE });
   expect(save.baselineSettled()).toBe(false);

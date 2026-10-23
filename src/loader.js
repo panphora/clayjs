@@ -86,9 +86,14 @@ export async function boot(base, params, readyResolve) {
 // visitor drafts were restored (plugins), so the first pass paints the page those
 // produced, and the held boot baseline settles on that painted page. Sap.mount()
 // skips roots already mounted, so sapjs's own later mount at clay.ready is a no-op.
-function mountDerivedEngine(loaded) {
+export function mountDerivedEngine(loaded) {
   const save = loaded["core/save.js"];
-  const fileSignature = save ? save.currentPaintSignature() : null;
+  let fileSignature = null;
+  try {
+    fileSignature = save ? save.currentPaintSignature() : null;
+  } catch (err) {
+    console.error("clayjs: could not read the page's painted values:", err);
+  }
   try {
     if (window.Sap && typeof window.Sap.mount === "function") window.Sap.mount();
   } catch (err) {
