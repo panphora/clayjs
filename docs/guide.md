@@ -1152,6 +1152,10 @@ Rules for sapjs in a malleable file:
 
 It fits content sites: landing pages, menus, pricing, FAQs, team pages, where the layout is fixed and a non-developer changes copy and images. It does not fit apps where editing is the product: its form is a separate surface from the content, new list items clone the first item's attributes (including its state), and rich text inside lists is flattened in the sidebar. A file can use both: the CMS owns the header copy, the app owns `<main>`, and the rules never reach into the app's region. Give every list that can become empty a `cms-template` seed hidden by CSS, not by the `hidden` attribute (which is copied into every new item). Add `sortable` to the plugin list for drag in the sidebar.
 
+The rules tag can declare which editor opens: `data-cms-view="inline"` edits text where it sits and opens small popovers for everything else; no attribute (or `"sidebar"`) opens the form in a side panel. The "Edit content" button opens whichever the page declares.
+
+The CMS also edits how a page looks. A rule ending in `@--name` reads and writes one CSS custom property in an element's `style` attribute, so `"accent": "html@--color-accent"` with `a { color: var(--color-accent) }` in your CSS gives the owner a color picker (any `--color-*` name gets one, any `--font-*` name gets a font list of 40 Google Fonts, and the CMS keeps one `<link data-hcms-fonts>` loading exactly the fonts in use). For a layout choice, put `data-hcms-component:data-layout="variant"` and `data-hcms-options:data-layout="1:cols-1 2:cols-2 3:cols-3"` on a section and key your grid CSS on `[data-layout]`: the owner gets icon tiles, and the choice writes only the attribute. Style fields on `html`, `body` or `:root` gather in a "Page style" group at the top of the form.
+
 ---
 
 ### 8.13 message: contact forms
