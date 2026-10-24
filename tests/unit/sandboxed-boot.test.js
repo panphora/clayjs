@@ -30,12 +30,13 @@ test("cookie.get answers null instead of throwing when the jar is unreadable", a
   expect(() => cookie.remove("isAdminOfCurrentResource")).not.toThrow();
 });
 
-test("a save token turns on edit mode where no cookie can be read", async () => {
+test("a save token grants editing where no cookie can be read, and the tab still opens in view", async () => {
   document.documentElement.setAttribute("savetoken", "tok-123");
 
   const mod = await import("../../src/core/is-edit-mode.js");
 
-  expect(mod.isEditMode).toBe(true);
+  expect(mod.canEdit).toBe(true);
+  expect(mod.mode).toBe("view");
   // Being handed a token is not the same as being the owner: isOwner still
   // answers for the cookie, which here says nothing.
   expect(mod.isOwner).toBe(false);

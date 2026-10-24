@@ -40,7 +40,7 @@ export const toggleEditMode = () =>
 
 function keepModeOnReload() {
   if (!canEdit || isDraftMode) return;
-  addEventListener("pagehide", () => { if (!leaving) writeReceipt({ mode, canEdit: true, internal: false }); });
+  window.addEventListener("pagehide", () => { if (!leaving) writeReceipt({ mode, canEdit: true, internal: false }); });
 }
 
 export function setViewerPageTypeBeforeSave () {

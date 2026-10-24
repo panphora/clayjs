@@ -19,6 +19,9 @@
 
 const ORIGINAL_FETCH = globalThis.fetch;
 
+// Documents open in view mode, which never saves; this one asks to open editing.
+document.documentElement.setAttribute("opens-in", "edit");
+
 afterEach(() => {
   globalThis.fetch = ORIGINAL_FETCH;
   document.documentElement.removeAttribute("savetoken");
