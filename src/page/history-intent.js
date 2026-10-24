@@ -21,13 +21,34 @@ export function continuesGroup(prev, next) {
   return next.direction === prev.direction && (next.direction < 0 ? next.to === prev.from : next.from === prev.from);
 }
 
-export function intentOf(transactions) {
+const DELETES = { deleteContentBackward: -1, deleteContentForward: 1 };
+const pendingDeletes = new WeakMap();
+
+// A native deletion arrives as a DOM change with no handler, so the beforeinput that
+// announced it is held until the end of the task and claimed by the next transaction.
+export function takePendingDelete(view) {
+  const mark = pendingDeletes.get(view) ?? null;
+  pendingDeletes.delete(view);
+  return mark;
+}
+
+export function deletionIntent(tr, mark) {
+  if (!mark || tr.steps.length !== 1) return null;
+  const step = tr.steps[0];
+  if (step.slice?.size !== 0 || step.from === step.to) return null;
+  const $from = tr.before.resolve(step.from), $to = tr.before.resolve(step.to);
+  if (!$from.parent.isTextblock || !$from.sameParent($to)) return null;
+  return { kind: "delete", blockId: $from.depth ? $from.node(1).attrs.id : null, direction: mark.direction, from: step.from, to: step.to, at: mark.at };
+}
+
+export function intentOf(transactions, view = null) {
   if (transactions.length !== 1) return null;
   const tr = transactions[0];
   const marked = tr.getMeta(HISTORY_INTENT);
   if (marked) return marked;
   const composition = tr.getMeta("composition");
-  return composition == null ? null : { kind: "compose", id: composition, at: Date.now() };
+  if (composition != null) return { kind: "compose", id: composition, at: Date.now() };
+  return view ? deletionIntent(transactions[0], takePendingDelete(view)) : null;
 }
 
 export function historyIntentPlugin() {
@@ -39,6 +60,16 @@ export function historyIntentPlugin() {
           kind: "insert", blockId: blockIdAt(st.doc, from), from, end: from + text.length, text, marks: markKey(st), at: Date.now(),
         }));
         return true;
+      },
+      handleDOMEvents: {
+        beforeinput(view, event) {
+          const direction = DELETES[event.inputType];
+          if (!direction) return false;
+          const mark = { direction, at: Date.now() };
+          pendingDeletes.set(view, mark);
+          setTimeout(() => { if (pendingDeletes.get(view) === mark) pendingDeletes.delete(view); }, 0);
+          return false;
+        },
       },
     },
   });

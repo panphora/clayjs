@@ -336,7 +336,7 @@ export function createBridge({ pd, onNotice = () => {}, ownedTokens = [], author
       const history = transactions.every((t) => t.getMeta("addToHistory") !== false);
       const register = registerAuthor;
       registerAuthor = null;
-      const intent = history ? intentOf(local) : null;
+      const intent = history ? intentOf(local, view) : null;
       const join = groupOpen && continuesGroup(lastIntent, intent);
       lastIntent = intent;
       joining = join;

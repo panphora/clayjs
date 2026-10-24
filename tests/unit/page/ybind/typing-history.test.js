@@ -5,7 +5,7 @@ import * as Y from "../../../../src/vendor/yjs.vendor.js";
 import { createStore } from "../../../../src/live/store.js";
 import { schema } from "../../../../src/page/schema.js";
 import { identityPlugin } from "../../../../src/page/model.js";
-import { state as pmState, view as pmView } from "../../../../src/vendor/prosemirror.vendor.js";
+import { state as pmState, view as pmView, commands } from "../../../../src/vendor/prosemirror.vendor.js";
 import { createYPageBinding, seedValue, createPageDoc, docOf, walk, bareShape } from "../../../../src/page/ybind/index.js";
 import { NET } from "../../../../src/page/ybind/layout.js";
 import { historyIntentPlugin } from "../../../../src/page/history-intent.js";
@@ -74,6 +74,24 @@ const type = (tab, chars) => {
     const { from, to } = tab.view.state.selection;
     tab.view.someProp("handleTextInput", (f) => f(tab.view, from, to, ch, () => tab.view.state.tr.insertText(ch, from, to)));
   }
+};
+
+const announce = (tab, inputType) => {
+  const event = new InputEvent("beforeinput", { inputType, bubbles: true, cancelable: true });
+  if (event.inputType !== inputType) Object.defineProperty(event, "inputType", { value: inputType });
+  tab.view.dom.dispatchEvent(event);
+};
+
+const backspace = (tab) => {
+  announce(tab, "deleteContentBackward");
+  const at = tab.view.state.selection.from;
+  tab.view.dispatch(tab.view.state.tr.delete(at - 1, at));
+};
+
+const forwardDelete = (tab) => {
+  announce(tab, "deleteContentForward");
+  const at = tab.view.state.selection.from;
+  tab.view.dispatch(tab.view.state.tr.delete(at, at + 1));
 };
 
 test("typing a sentence undoes by word", () => {
@@ -209,6 +227,69 @@ test("a composition is one undo item", () => {
   expect(text(tab)).toBe("abcxyz");
   expect(tab.binding.undo()).toBe(true);
   expect(text(tab)).toBe("abc");
+  expect(tab.binding.undo()).toBe(false);
+  agree(tab);
+});
+
+test("a run of Backspace undoes as one item", () => {
+  const tab = open(seedValue([{ id: "p", text: "abcdef" }]), typing);
+  caret(tab, 7);
+  for (let i = 0; i < 5; i++) backspace(tab);
+  expect(text(tab)).toBe("a");
+  expect(tab.binding.undo()).toBe(true);
+  expect(text(tab)).toBe("abcdef");
+  expect(tab.binding.undo()).toBe(false);
+  agree(tab);
+});
+
+test("Backspace then forward Delete are two undo items", () => {
+  const tab = open(seedValue([{ id: "p", text: "abcdef" }]), typing);
+  caret(tab, 4);
+  backspace(tab);
+  forwardDelete(tab);
+  expect(text(tab)).toBe("abef");
+  expect(tab.binding.undo()).toBe(true);
+  expect(text(tab)).toBe("abdef");
+  expect(tab.binding.undo()).toBe(true);
+  expect(text(tab)).toBe("abcdef");
+  expect(tab.binding.undo()).toBe(false);
+  agree(tab);
+});
+
+test("a deletion dispatched in a later task is its own undo item", async () => {
+  const tab = open(seedValue([{ id: "p", text: "abcd" }]), typing);
+  caret(tab, 5);
+  backspace(tab);
+  announce(tab, "deleteContentBackward");
+  await new Promise((r) => setTimeout(r, 0));
+  const at = tab.view.state.selection.from;
+  tab.view.dispatch(tab.view.state.tr.delete(at - 1, at));
+  expect(text(tab)).toBe("ab");
+  expect(tab.binding.undo()).toBe(true);
+  expect(text(tab)).toBe("abc");
+  expect(tab.binding.undo()).toBe(true);
+  expect(text(tab)).toBe("abcd");
+  expect(tab.binding.undo()).toBe(false);
+  agree(tab);
+});
+
+test("a Backspace that joins two blocks is its own undo item", () => {
+  const tab = open(seedValue([{ id: "p", text: "abcd" }, { id: "q", text: "ef" }]), typing);
+  caret(tab, 5);
+  backspace(tab);
+  backspace(tab);
+  expect(textOf(tab, "p")).toBe("ab");
+  caret(tab, tab.view.state.doc.child(0).nodeSize + 1);
+  announce(tab, "deleteContentBackward");
+  commands.joinBackward(tab.view.state, tab.view.dispatch);
+  expect(ids(tab)).toEqual(["p"]);
+  expect(textOf(tab, "p")).toBe("abef");
+  expect(tab.binding.undo()).toBe(true);
+  expect(ids(tab)).toEqual(["p", "q"]);
+  expect(textOf(tab, "p")).toBe("ab");
+  expect(textOf(tab, "q")).toBe("ef");
+  expect(tab.binding.undo()).toBe(true);
+  expect(textOf(tab, "p")).toBe("abcd");
   expect(tab.binding.undo()).toBe(false);
   agree(tab);
 });
