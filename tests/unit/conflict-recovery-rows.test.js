@@ -273,7 +273,7 @@ test("a reorder both sides changed keeps the other edit's order, once", async ()
   document.querySelector("#s").insertBefore(document.querySelector("#b"), document.querySelector("#a"));
   await Promise.resolve();
 
-  const remote = frame(sync.lastHtml, [body, '<ul id="s"><li id="a">A</li><li id="c">C</li><li id="b">B</li></ul>']);
+  const remote = frame(sync.lastHtml, [body, '<ul id="s"><li id="c">C</li><li id="b">B</li><li id="a">A</li></ul>']);
   await sync._doApplyUpdate(remote, 5, null);
 
   const records = conflicts.list();

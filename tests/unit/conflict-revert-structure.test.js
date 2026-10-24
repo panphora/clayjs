@@ -194,16 +194,16 @@ test("R6 S4 with remoteNew: participants take the local order in the slots they 
     sync,
     `<div id="s"><p id="a">A</p><p id="b">B</p><p id="c">C</p></div>`,
     `<div id="s"><p id="b">B</p><p id="a">A</p><p id="c">C</p></div>`,
-    `<div id="s"><p id="a">A</p><p id="d">D</p><p id="c">C</p><p id="b">B</p></div>`
+    `<div id="s"><p id="c">C</p><p id="d">D</p><p id="b">B</p><p id="a">A</p></div>`
   );
   expect(detailOf(id)).toBe("both-reordered");
-  const before = ["a", "d", "c", "b"].map(byId);
+  const before = ["c", "d", "b", "a"].map(byId);
 
   const result = await revert.revertConflicts([id]);
 
   expect(result.revertedIds).toEqual([id]);
   expect(body()).toBe(`<div id="s"><p id="b">B</p><p id="d">D</p><p id="a">A</p><p id="c">C</p></div>`);
-  expect(["a", "d", "c", "b"].map(byId)).toEqual(before);
+  expect(["c", "d", "b", "a"].map(byId)).toEqual(before);
   sync.stop();
 });
 
@@ -345,7 +345,7 @@ test("R10 nine operations mixed: each restored id acknowledged once, one save, n
     `<a id="a1" href="/theirs">Go</a>` +
     `<section id="s1"><h2>FAQ</h2><p>New</p></section><p id="n">n</p>` +
     `<div id="m1"></div><div id="m2"></div><div id="m3"><p id="mp">P edited</p></div>` +
-    `<div id="o"><p id="oa">A</p><p id="od">D</p><p id="oc">C</p><p id="ob">B</p></div>` +
+    `<div id="o"><p id="oc">C</p><p id="od">D</p><p id="ob">B</p><p id="oa">A</p></div>` +
     `<div id="d1"></div><div id="d2"><p id="dp">P</p></div>` +
     `<div id="i1"><p id="ip">REMOTE</p></div>` +
     `<div id="i2"><section id="x"></section>REMOTE<section id="y"></section></div>`;
@@ -542,7 +542,7 @@ test("O8 a reorder with fewer than two participants left is blocked, not acknowl
   const [id] = await lose(sync,
     `<div id="s"><p id="a">A</p><p id="b">B</p><p id="c">C</p></div>`,
     `<div id="s"><p id="b">B</p><p id="a">A</p><p id="c">C</p></div>`,
-    `<div id="s"><p id="a">A</p><p id="c">C</p><p id="b">B</p></div>`);
+    `<div id="s"><p id="c">C</p><p id="b">B</p><p id="a">A</p></div>`);
   byId("a").remove();
   byId("b").remove();
   await Promise.resolve();
@@ -631,7 +631,7 @@ test("N5 a reorder and a newer move of one participant out of it: the reorder ke
   const [reorder] = await lose(sync,
     `<div id="s"><p id="a">A</p><p id="b">B</p><p id="c">C</p></div><div id="t"></div><div id="u"></div>`,
     `<div id="s"><p id="b">B</p><p id="a">A</p><p id="c">C</p></div><div id="t"></div><div id="u"></div>`,
-    `<div id="s"><p id="a">A</p><p id="c">C</p><p id="b">B</p></div><div id="t"></div><div id="u"></div>`);
+    `<div id="s"><p id="c">C</p><p id="b">B</p><p id="a">A</p></div><div id="t"></div><div id="u"></div>`);
   sync.lastHtml = captureFrame();
   byId("t").append(byId("b"));
   await Promise.resolve();
@@ -693,7 +693,7 @@ test("C4 NEW6 two absent insertions with different identities at the same clone 
 });
 
 test.each([
-  ["S4 a keyless reorder", `<ul id="u"><li>A</li><li>B</li><li>C</li></ul>`, `<ul id="u"><li>C</li><li>A</li><li>B</li></ul>`, `<ul id="u"><li>B</li><li>C</li><li>A</li></ul>`],
+  ["S4 a keyless reorder", `<ul id="u"><li>A</li><li>B</li><li>C</li></ul>`, `<ul id="u"><li>C</li><li>A</li><li>B</li></ul>`, `<ul id="u"><li>C</li><li>B</li><li>A</li></ul>`],
   ["S6 a keyless insertion", `<ul id="u"><li>A</li></ul>`, `<ul id="u"><li>A</li><li>Local new</li></ul>`, `<ul id="u"><li>A</li><li>Remote new</li></ul>`],
 ])("%s still goes back", async (label, base, local, remote) => {
   const sync = makeSync();
@@ -888,7 +888,7 @@ test("O4 C2 a reorder inside a template's content rolls back with the transactio
   const sync = makeSync();
   const ids = await loseBy(sync, `<template id="tp"><p id="a">A</p><p id="b2">B</p><p id="c">C</p></template>${TRIG_BASE}`,
     () => { const c = byId("tp").content; c.insertBefore(c.getElementById("b2"), c.getElementById("a")); trig(); },
-    `<template id="tp"><p id="a">A</p><p id="c">C</p><p id="b2">B</p></template>${TRIG_REMOTE}`);
+    `<template id="tp"><p id="c">C</p><p id="b2">B</p><p id="a">A</p></template>${TRIG_REMOTE}`);
   expect(ids.map(detailOf).sort()).toEqual(["both-moved", "both-reordered"]);
   const kids = [...byId("tp").content.childNodes];
   await expectUndone(ids);

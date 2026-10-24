@@ -43,6 +43,7 @@ import { NO_DIRTY_SELECTOR, LIVE_SELECTOR } from "../lib/region-policy.js";
 import { EXTENSION_NODE_SELECTOR, EXTENSION_ATTR_PATTERN } from '../lib/extension-noise.js';
 import { isEditMode } from "../core/is-edit-mode.js";
 import { mergeTagRecognizers } from "./merge-tags.js";
+import { attributeMerge } from "./merge-declarations.js";
 import { serializeForSync, captureForComparisonAndDirty, captureSnapshot, originalSnapshotNode, captureForMerge, captureForSaveAndComparison } from '../core/snapshot.js';
 import { mergeIgnoresAttr, mergeVetoesAttr } from '../lib/root-attrs.js';
 import { autosaveActive } from '../lib/autosave-state.js';
@@ -1708,6 +1709,7 @@ class LiveSync {
       opaque: (el) => el.matches(FREEZE_SELECTOR) || (derivedActive() && ownsDerivedText(el)),
       remoteWins: (el) => el.matches(REMOTE_WINS_SELECTOR),
       ignoreAttribute: (el, name, merged) => isRootLocalAttr(el, name, merged) || (derivedActive() && isDerivedAttr(merged || el, name)),
+      attributeMerge,
       protectFocusedValue: true,
       keepLiveOnly: source === 'peer',
       scripts: { mergeTags: mergeTagRecognizers },
