@@ -92,7 +92,7 @@ test("a save token on the root outranks draft mode", async () => {
   const { clay } = await bootPage({ attrs: { savetoken: "t" } });
 
   expect(clay.isDraftMode).toBe(false);
-  expect(clay.isEditMode).toBe(true);
+  expect(clay.isEditMode).toBe(false);
 });
 
 test("a page that does not ask for the plugin keeps today's ladder", async () => {

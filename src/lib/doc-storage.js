@@ -1,8 +1,10 @@
 // Browser storage for one document. Two documents on one origin (every file on a
 // hyperclay.com subdomain) otherwise share every key an app writes.
+export const docKey = (key) => `clay:doc:${location.pathname}:${key}`;
+
 function area(name) {
   const memory = new Map();
-  const prefix = () => `clay:doc:${location.pathname}:`;
+  const prefix = () => docKey("");
   const backend = () => { try { return window[name] || null; } catch { return null; } };
   return {
     get(key) {
