@@ -8,6 +8,7 @@ import { schema } from "./schema.js";
 import { outline, siblingSpan, touchedBlocks, BlockSelection, STEP } from "./blocks.js";
 import { keysBetween, newId, orderedIds, REMOTE } from "./model.js";
 import { announce } from "./announce.js";
+import { rectKey } from "./table-rect-key.js";
 
 const { Selection, TextSelection, NodeSelection, Plugin, PluginKey } = state;
 const N = schema.nodes;
@@ -145,12 +146,27 @@ export function exitToText(st, dispatch) {
   return true;
 }
 
+// The top-level table holding both ends of the selection, as block boundaries.
+const tableAround = ({ $from, $to }) => {
+  if ($from.depth < 2 || $to.depth < 2) return null;
+  const node = $from.node(1);
+  return node.type.name === "table" && $to.node(1) === node ? { from: $from.before(1), to: $from.after(1) } : null;
+};
+
+// Mod-a widens one step at a time: the text of the block or table cell, then the table
+// around a cell, then every block.
 export function selectAllBlocks(st, dispatch) {
-  const { $from, $to } = st.selection;
-  const one = $from.depth === 1 && $from.sameParent($to);
-  const whole = one && $from.parentOffset === 0 && $to.parentOffset === $to.parent.content.size;
-  if (one && !whole && $from.parent.content.size) {
+  const sel = st.selection;
+  const { $from, $to } = sel;
+  const inText = $from.parent.isTextblock && $from.sameParent($to) && !rectKey.getState(st);
+  const whole = inText && $from.parentOffset === 0 && $to.parentOffset === $to.parent.content.size;
+  if (inText && !whole && $from.parent.content.size) {
     if (dispatch) dispatch(st.tr.setSelection(TextSelection.create(st.doc, $from.start(), $from.end())));
+    return true;
+  }
+  const table = tableAround(sel);
+  if (table && !(sel instanceof BlockSelection && sel.from === table.from && sel.to === table.to)) {
+    if (dispatch) dispatch(st.tr.setSelection(new BlockSelection(st.doc.resolve(table.from), st.doc.resolve(table.to))));
     return true;
   }
   if (dispatch) dispatch(st.tr.setSelection(new BlockSelection(st.doc.resolve(0), st.doc.resolve(st.doc.content.size))));

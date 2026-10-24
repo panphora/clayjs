@@ -11,10 +11,11 @@ import { clipboardSerializer } from "./blocks.js";
 import { asStep } from "./blocksel.js";
 import { announce } from "./announce.js";
 import { REMOTE_META } from "./ybind/layout.js";
+import { rectKey } from "./table-rect-key.js";
 
-const { Plugin, PluginKey, TextSelection } = state;
+const { Plugin, TextSelection } = state;
 const N = schema.nodes;
-export const rectKey = new PluginKey("tableRect");
+export { rectKey };
 
 const findTable = (doc, id) => {
   let found = null;
@@ -171,7 +172,7 @@ export function tableSelectPlugin() {
           const step = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] }[event.key];
           if (step) return extend(...step)(st, view.dispatch, view);
         }
-        if (MODIFIERS.has(event.key) || ((event.metaKey || event.ctrlKey) && (event.key === "c" || event.key === "x" || event.key === "v"))) return false;
+        if (MODIFIERS.has(event.key) || ((event.metaKey || event.ctrlKey) && (event.key === "a" || event.key === "c" || event.key === "x" || event.key === "v"))) return false;
         view.dispatch(st.tr.setMeta(rectKey, null));
         return false;
       },
