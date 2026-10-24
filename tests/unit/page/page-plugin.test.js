@@ -401,12 +401,12 @@ test("dispose removes every save-state listener the plugin added", async () => {
   remove.mockRestore();
 });
 
-test("view mode resolves without the page plugin and never calls its module thunk", () => {
+test("view mode resolves without the page plugin and never calls its module thunk", async () => {
   const view = resolveModules(params({ plugins: "page" }), false);
   expect(view.plugins).not.toContain("plugins/page.js");
   const spy = jest.spyOn(MODULES, "plugins/page.js");
   // live-sync opens its stream on evaluation, so it is the one implied module not run here.
-  for (const path of view.plugins.filter((path) => path !== "sync/live-sync.js")) MODULES[path]();
+  await Promise.all(view.plugins.filter((path) => path !== "sync/live-sync.js").map((path) => MODULES[path]()));
   expect(spy).not.toHaveBeenCalled();
   spy.mockRestore();
 
