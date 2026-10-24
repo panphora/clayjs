@@ -132,6 +132,10 @@ describe("spliceMerge", () => {
     ["remote only", fixtureBase, fixtureBase + "?", fixtureBase + "?"],
   ];
 
+  test("two edits one unchanged character apart still merge", () => {
+    expect(spliceMerge("abc", "Abc", "abC")).toBe("AbC");
+  });
+
   for (const [name, local, remote, want] of cases) {
     test(name, () => {
       expect(spliceMerge(fixtureBase, local, remote)).toBe(want);
@@ -240,6 +244,33 @@ test("a frame touching the composed words calls onConflict and keeps the peer's 
   expect(seen.conflict).toBe(composed);
   expect(code().textContent).toBe(peer);
   expect(ta.value).toBe(peer);
+  sync.stop();
+});
+
+test("a composition in a detached record never lands in the next one", async () => {
+  const sync = await cleanTab();
+  const ta = makeTextarea();
+  const seen = { gone: null };
+  const binding = openBinding(ta, { onGone: (typed) => (seen.gone = typed) });
+  ta.focus();
+
+  ta.dispatchEvent(new Event("compositionstart"));
+  const composed = BASE.replace("Walk by the river.", "Walk by the stream.");
+  typeInto(ta, composed);
+  expect(binding.composing()).toBe(true);
+
+  document.querySelector('[data-id="a"]').remove();
+
+  const article = document.createElement("article");
+  article.innerHTML = '<pre><code class="entry-body"></code></pre>';
+  const b = article.querySelector(".entry-body");
+  const bText = BASE.replace("Read a book.", "Read a long book.");
+  b.textContent = bText;
+  binding.open(b, { key: "b", resolve: () => b });
+
+  expect(b.textContent).toBe(bText);
+  expect(binding.current()).toBe(b);
+  expect(seen.gone).toBe(composed);
   sync.stop();
 });
 

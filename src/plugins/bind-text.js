@@ -13,7 +13,7 @@
  */
 
 // Applies two edits to one text when each is one stretch of it (an IME composition always is) and the
-// stretches do not touch; null when they do.
+// stretches do not overlap (two inserts at one point keep both); null when they do.
 export function spliceMerge(base, local, remote) {
   const span = (text) => {
     let pre = 0;
@@ -45,8 +45,7 @@ export function bindText(textarea, { onWrite, onShow, onConflict, onGone } = {})
   const OBSERVE = { characterData: true, childList: true, subtree: true };
   let field = textarea;
   const ta = () => field;
-  let s = null; // { key, code, seen, composing }
-  let resolve = null;
+  let s = null; // { key, code, seen, composing, resolve }
   const observer = new MutationObserver(() => {
     observer.takeRecords();
     if (s && !s.composing && s.code.textContent !== s.seen) reconcile(s.code.textContent);
@@ -78,7 +77,7 @@ export function bindText(textarea, { onWrite, onShow, onConflict, onGone } = {})
     show(merged ?? now);
   }
   function rebind() {
-    const code = resolve ? resolve() : null;
+    const code = s.resolve ? s.resolve() : null;
     if (!code) { onGone?.(ta().value); return false; }
     s.code = code;
     observer.disconnect();
@@ -98,14 +97,14 @@ export function bindText(textarea, { onWrite, onShow, onConflict, onGone } = {})
   }
   function open(textEl, options = {}) {
     const key = options.key;
-    resolve = options.resolve;
     if (s && s.key === key) {
+      s.resolve = options.resolve;
       if ((s.code !== textEl || !s.code.isConnected) && rebind()) input();
       return;
     }
     flush();
     observer.disconnect();
-    s = { key, code: textEl, seen: textEl.textContent, composing: false };
+    s = { key, code: textEl, seen: textEl.textContent, composing: false, resolve: options.resolve };
     observer.observe(textEl, OBSERVE);
     const el = ta();
     el.value = s.seen;
