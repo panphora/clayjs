@@ -11,9 +11,8 @@
 // LAYOUT
 //
 //   public/
-//     index.html docs.html …           the site, from website/, flattened
-//     llms.txt                         docs/reference.md, renamed
-//     complete-guide.html guide.md *.md  the guide and each page's Markdown twin (scripts/site-docs.mjs)
+//     index.html …                     the site, from website/, flattened
+//     index.md visual-guide.md         each page's Markdown twin (scripts/site-docs.mjs)
 //     THIRD-PARTY-NOTICES.md           linked from the site footer
 //     _headers _redirects              from website/
 //     v1/     clay.js clay.standalone.js …  src/**   latest 1.x, what everyone is told to use
@@ -119,7 +118,7 @@ async function emitStandalone() {
 }
 
 // Everything else in "files" is served once, at the site root.
-const RENAMED = new Map([['docs/reference.md', 'llms.txt']]);
+const RENAMED = new Map();
 
 // Rolling prefixes are derived from every version that exists, not from the working
 // tree's own version. The day 2.0.0 ships, /v1/ still has to serve the last 1.x, and
@@ -342,8 +341,8 @@ for (const rel of await walk(WEBSITE)) {
   count += await copyInto(join(WEBSITE, rel), rel);
 }
 
-// The guide page and the Markdown twin of every doc page (scripts/site-docs.mjs).
-const docFiles = await emitDocs({ website: WEBSITE, publicDir: PUBLIC, guideSource: join(ROOT, 'docs/guide.md') });
+// The Markdown twin of every doc page (scripts/site-docs.mjs).
+const docFiles = await emitDocs({ website: WEBSITE, publicDir: PUBLIC });
 count += docFiles.length;
 
 // The caching and CORS rules are appended to website/_headers rather than written
@@ -387,9 +386,8 @@ function servedPaths(rel) {
 }
 
 // The site's own files, named one by one so no rule overlaps a version prefix.
-// The example apps share one rule, and so do the docs sub pages and their Markdown
-// copies: one rule per file would spend most of the 90.
-const siteRules = [...new Set([...siteFiles.filter((f) => f !== '_headers' && f !== '_redirects'), ...docFiles, 'llms.txt', 'THIRD-PARTY-NOTICES.md', 'versions.json']
+// The example apps share one rule: one rule per file would spend most of the 90.
+const siteRules = [...new Set([...siteFiles.filter((f) => f !== '_headers' && f !== '_redirects'), ...docFiles, 'THIRD-PARTY-NOTICES.md', 'versions.json']
   .sort()
   .flatMap((rel) => (rel.startsWith('examples/') ? ['/examples/*'] : rel.startsWith('docs/') ? ['/docs/*'] : servedPaths(rel))))];
 for (const path of siteRules) {
@@ -415,7 +413,7 @@ if (ruleCount > 90) {
 // broken. _headers earns its own check twice over: without it the site serves no
 // Cache-Control and, worse, no Access-Control-Allow-Origin on the module tree,
 // which silently breaks every page loading clay.js from another origin.
-const required = ['_headers', 'index.html', 'llms.txt', 'THIRD-PARTY-NOTICES.md', 'guide.html', 'complete-guide.html', 'guide.md', 'docs.md', 'visual-guide.html', 'docs/offline.html', 'docs/endpoint.md', '_redirects', 'copy-markdown.js', 'examples/skeleton.html'];
+const required = ['_headers', 'index.html', 'THIRD-PARTY-NOTICES.md', 'visual-guide.html', 'visual-guide.md', 'index.md', '_redirects', 'copy-markdown.js', 'examples/skeleton.html'];
 const served = [...[...heads].map(([major, v]) => [`v${major}`, v]), ...pins.map((v) => [v, v])];
 for (const [prefix, version] of served) {
   required.push(`${prefix}/clay.js`, `${prefix}/src/loader.js`, `${prefix}/sap.js`);

@@ -64,7 +64,7 @@ query params on the script URL:
 Edit mode is decided in this order: the `?editmode` param, then a `viewonly` attribute
 on `<html>` (a page that never saves itself), then `window.clayEditMode`,
 then a save token stamped on `<html>` by the host, then the platform's owner cookie. Hosts
-and save tokens are covered in [the reference](https://github.com/panphora/clayjs/blob/main/docs/reference.md) and on
+and save tokens are covered in [the reference](https://clayjs.com/docs/) and on
 [clayjs.com/docs](https://clayjs.com/docs/edit-mode).
 
 ### One file, no network
@@ -125,9 +125,8 @@ adds `extractData` and `applyData` for live page JSON.
 `clay-events`, `clay-dom`, `clay-options` and `all.js` add HTML attributes and DOM helpers rather
 than members on `clay`.
 
-Every member, every attribute, and the endpoint spec: **[docs/reference.md](https://github.com/panphora/clayjs/blob/main/docs/reference.md)**,
-also served at [clayjs.com/llms.txt](https://clayjs.com/llms.txt) and rendered as
-[clayjs.com/docs](https://clayjs.com/docs).
+Every member, every attribute, and the endpoint spec: **[the reference](https://clayjs.com/docs/)**,
+and everything in one file at [clayjs.com/llms-full.txt](https://clayjs.com/llms-full.txt).
 
 ## Regions
 
@@ -173,7 +172,7 @@ is public surface too and ships inside every prefix as its sibling.
 | `conformance/` | the byte-exact gate: real browser, pinned Chromium, goldens from the spec |
 | `tests/` | jest unit suite, fixtures, and a stub save server |
 | `website/` | the source of clayjs.com |
-| `docs/reference.md` | the full reference, served as `/llms.txt` |
+| `docs/guide.md` | the complete guide, generated from hyperclay-docs (do not edit by hand) |
 | `build.js`, `wrangler.jsonc` | assemble and deploy `public/`, which is a gitignored build output |
 
 ## Develop
