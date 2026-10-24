@@ -10,6 +10,7 @@ import { createOriginIndex, installUndoOrigins } from "./origins.js";
 import { reduceRecovery, canonicalRevision, restoreKey, physicalKeyOf, authorKey, RECOVERED_PREFIX, parsePhysicalKey, parseGoneIntents } from "./recovery.js";
 import { moveBlocks } from "./moves.js";
 import { createBoardCommands } from "./board-commands.js";
+import { continuesGroup, intentOf } from "../history-intent.js";
 import { MOVE, BlockSelection } from "../blocks.js";
 
 const yIndexAt = (doc, holes, pos, visible) => yBefore(holes, tokenIndex(doc, new Map(), visible)[pos]);
@@ -207,6 +208,9 @@ export function createBridge({ pd, onNotice = () => {}, ownedTokens = [], author
     return docOf(pd, w);
   };
   let saved = null;
+  let lastIntent = null;
+  let groupOpen = false;
+  let joining = false;
   const render = (own = false, fresh = null) => {
     stats.renders++;
     const keep = saved;
@@ -244,6 +248,7 @@ export function createBridge({ pd, onNotice = () => {}, ownedTokens = [], author
     view.dispatch(tr);
   };
   const onBefore = (t) => {
+    if (groupOpen && !joining && t.origin === LOCAL) { um.stopCapturing(); groupOpen = false; }
     if (!view || t.origin === LOCAL || t.origin === um || saved) return;
     const sel = view.state.selection;
     if (!(sel instanceof pmState.TextSelection)) return;
@@ -259,6 +264,7 @@ export function createBridge({ pd, onNotice = () => {}, ownedTokens = [], author
     saved = { anchor: end(sel.$anchor), head: end(sel.$head) };
   };
   const onAfter = (t) => {
+    if (t.origin !== LOCAL) { lastIntent = null; groupOpen = false; }
     if (!view) { bumpRecovery(); return; }
     if (t.origin === LOCAL) { saved = null; return; }
     render(t.origin === um);
@@ -330,7 +336,16 @@ export function createBridge({ pd, onNotice = () => {}, ownedTokens = [], author
       const history = transactions.every((t) => t.getMeta("addToHistory") !== false);
       const register = registerAuthor;
       registerAuthor = null;
-      localGroup(pd, local, w, stats, um, history, register);
+      const intent = history ? intentOf(local) : null;
+      const join = groupOpen && continuesGroup(lastIntent, intent);
+      lastIntent = intent;
+      joining = join;
+      try {
+        localGroup(pd, local, w, stats, um, history, register, { join, open: intent !== null });
+      } finally {
+        joining = false;
+      }
+      groupOpen = intent !== null;
       const derived = refresh();
       if (!sameBareShape(derived, view.state.doc)) {
         stats.mismatch++;

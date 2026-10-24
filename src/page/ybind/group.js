@@ -23,7 +23,7 @@ const touchesTable = (doc, from, to) => {
   return found;
 };
 
-export function localGroup(pd, transactions, w, stats, um = null, history = true, onFirstWrite = null) {
+export function localGroup(pd, transactions, w, stats, um = null, history = true, onFirstWrite = null, { join = false, open = false } = {}) {
   const first = () => { if (onFirstWrite) { const fn = onFirstWrite; onFirstWrite = null; fn(); } };
   const steps = [], docs = [], maps = [];
   for (const tr of transactions) tr.steps.forEach((s, i) => { steps.push(s); docs.push(tr.docs[i]); maps.push(s.getMap()); });
@@ -109,7 +109,7 @@ export function localGroup(pd, transactions, w, stats, um = null, history = true
       tx(() => markRange(markCtx, from, to, name, val, at));
     }
   };
-  um?.stopCapturing();
+  if (!join) um?.stopCapturing();
   const timeout = um?.captureTimeout;
   if (um) um.captureTimeout = Infinity;
   try {
@@ -117,7 +117,7 @@ export function localGroup(pd, transactions, w, stats, um = null, history = true
     else pd.ydoc.transact((tr) => { tr.meta.set(HISTORY_META, history); first(); write(); }, LOCAL);
   } finally {
     if (um) um.captureTimeout = timeout;
-    um?.stopCapturing();
+    if (!open) um?.stopCapturing();
   }
   stats.groups++;
   stats.lastGroup = { chunked, structural, regional, span };

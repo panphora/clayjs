@@ -30,6 +30,7 @@ import { csvImportPlugin } from "./csv-import.js";
 import { TABLE_CSS } from "./table-style.js";
 import { BOARD_CSS } from "./board-style.js";
 import { styleWithLegacyId } from "../lib/style.js";
+import { historyIntentPlugin } from "./history-intent.js";
 
 const STYLE_ID = "page-editor-style";
 const INDENTS = [1, 2, 3, 4, 5, 6, 7, 8];
@@ -304,6 +305,7 @@ export function pagePlugins({ upload = defaultUpload, highlight, history: useHis
     mediaPlugin({ upload }),
     highlightPlugin(highlight),
     pastePlugin(),
+    historyIntentPlugin(),
     useHistory ? history.history() : null,
     gapcursor.gapCursor(),
   ].filter(Boolean);
