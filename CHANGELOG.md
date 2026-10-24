@@ -136,6 +136,11 @@
 
 ## [Unreleased]
 
+## [1.15.2] - 2026-10-24
+
+### Changed
+- No user-facing changes.
+
 ## [1.15.1] - 2026-10-23
 
 ### Changed
