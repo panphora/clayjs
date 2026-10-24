@@ -276,7 +276,7 @@ describe("page-view, the reader half of page", () => {
   });
 
   test("draft mode drops page, so it gets no reader either", () => {
-    const { plugins } = resolveModules(params({ plugins: "page" }), true, { isDraftMode: true });
+    const { plugins } = resolveModules(params({ plugins: "page" }), false, { isDraftMode: true });
     expect(plugins).not.toContain("plugins/page.js");
     expect(plugins).not.toContain("plugins/page-view.js");
   });
