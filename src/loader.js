@@ -3,6 +3,7 @@ import onDomReady from "./lib/dom-ready.js";
 import { initTheme } from "./ui/theme.js";
 import { ephemeral } from "./lib/ephemeral.js";
 import { storage } from "./lib/doc-storage.js";
+import { trash } from "./lib/trash.js";
 import { effect } from "./lib/effect.js";
 import { style } from "./lib/style.js";
 import { derived } from "./lib/derived.js";
@@ -131,6 +132,7 @@ function assembleCore(loaded, { isDraftMode, isEditMode, isOwner, siteVisibility
   clay.writeData = pageData.writeData;
   clay.ephemeral = ephemeral;
   clay.storage = storage;
+  clay.trash = trash;
   clay.derived = derived;
   clay.effect = effect;
   clay.style = style;

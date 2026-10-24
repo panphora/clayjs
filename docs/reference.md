@@ -186,6 +186,17 @@ itself, with no network.
   that blocks it, a sandboxed frame) falls back to an in-memory map for the life of the
   tab, and `set` returns `false` when it did — keep the value somewhere that outlives the tab
   if that return matters.
+- `clay.trash(el, {at})` — soft delete. A record is in the trash while it carries
+  `data-deleted-at` (an ISO timestamp, `at` or now), so a delete is an attribute change: a
+  peer's edit to the same record made at the same time merges with it, and Undo restores
+  the attribute instead of an old copy. `clay.trash.is(el)`, `clay.trash.restore(el)` and
+  `clay.trash.purge(el)` (removes the record for good). The call returns
+  `{undo: () => clay.trash.restore(el)}`. Events: `clay:trashed`, `clay:restored`, both
+  bubbling from the record. Present in every mode; a write in view mode saves nothing.
+  Leave trashed records out with a rules selector, `article.entry:not([data-deleted-at])`,
+  or keep them and show a `deletedAt` field; a `<noscript>` rule hides them from readers
+  without JavaScript. The undo toast is yours: `clay.toastPersistent(message, type,
+  {actions})` takes the button where clay-ui is loaded.
 - `clay.cms` — the content panel: `clay.cms.open()` (cms plugin).
 - `clay.RichClay` — the rich-text editor class behind `editable` (richclay plugin).
 - `clay.quickcrop(file, opts)` — crop modal: resolves `{blob, dataURL, width, height}`,

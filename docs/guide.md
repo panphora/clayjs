@@ -1374,6 +1374,22 @@ document.addEventListener("click", (event) => {
 - Write activity entries from the command that made the change, never from a mutation observer, which would also log peer changes and undo replays.
 - Bulk inserts (an import of hundreds of rows) cost one mutation record per inserted element. Insert a fragment once rather than row by row, inside one commit or `Sap.batch`.
 
+**Deleting: soft delete is `clay.trash`.** `card.remove()` above deletes for good. A delete a person might want back, or one a peer might be editing at the same moment, is an attribute instead: a record is in the trash while it carries `data-deleted-at`, and the record keeps its place, its id and its content.
+
+```js
+const item = button.closest("article.entry");
+const { undo } = clay.trash(item);          // stamps data-deleted-at, fires clay:trashed
+clay.toastPersistent("Moved to Trash", "info", {
+  actions: [{ label: "Undo", onClick: () => { undo(); clay.toastPersistent("Restored", "info"); } }],
+});
+```
+
+- `clay.trash(el, {at})` stamps the timestamp (`at`, or now), `clay.trash.is(el)` asks, `clay.trash.restore(el)` removes the attribute and fires `clay:restored`, and `clay.trash.purge(el)` removes the record for good. Both events bubble from the record.
+- Because a delete is an attribute change, a peer editing the same record at that moment keeps their edit and the delete merges with it, and Undo restores the attribute instead of an old copy of the record. `card.remove()` has neither.
+- Leave trashed records out with a rules selector, `"article.entry:not([data-deleted-at])"`, or keep them in the list and show a `deletedAt` field (`Date.parse(el.dataset.deletedAt)`) for a Trash view. Never remove records to filter.
+- Readers without JavaScript get the raw file, so hide trashed records there too: `<noscript><style>article.entry[data-deleted-at]{display:none}</style></noscript>`.
+- The undo toast stays yours: `clay.toastPersistent(message, type, {actions})` takes the Undo button where clay-ui is loaded, and an app with its own toast keeps it.
+
 ### 9.7 Filters and view switching
 
 - **Filter by hiding** records with a runtime stylesheet (skeleton, kanban), or with sapjs through an `each=` view or a frozen stylesheet (8.11). The finance example still uses sap `show=` plus snapshot normalization, an older pattern: `show=` writes `hidden` into saved records. Never remove records to filter.
