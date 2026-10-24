@@ -60,6 +60,10 @@ export const PLUGIN_PATHS = {
   // it replaces. `exclude=source` turns it off.
   source:    { path: "plugins/source.js",          editOnly: true,  default: true },
   "visitor-drafts": { path: "plugins/visitor-drafts.js", editOnly: false, default: false },
+  // An editor textarea outside the saved records, bound to one record's text
+  // element. Edit mode only: the page that asks for it is the page whose owner
+  // writes in it.
+  "bind-text": { path: "plugins/bind-text.js",       editOnly: true,  default: false },
   // The sapjs core. Loaded for any page with a [sap] root at boot (resolveModules'
   // hasSap), in view mode too: a reader's tab paints the same totals.
   derive:    { path: "plugins/derive.js",          editOnly: false, default: false },
@@ -112,13 +116,14 @@ export const MODULES = {
   "plugins/ai-edit.js":         () => import("./plugins/ai-edit.js"),
   "plugins/demo.js":            () => import("./plugins/demo.js"),
   "plugins/visitor-drafts.js": () => import("./plugins/visitor-drafts.js"),
+  "plugins/bind-text.js":       () => import("./plugins/bind-text.js"),
   "plugins/source.js":          () => import("./plugins/source.js"),
   "plugins/derive.js":          () => import("./plugins/derive.js"),
 };
 
 // `source` is last on purpose: its install captures a save clone, so it wants every
 // plugin that registers a document transform to have registered it first.
-const PLUGIN_ORDER = ["visitor-drafts", "richclay", "indicator", "sortable", "undo", "quickcrop", "upload", "people", "cms", "sync", "live", "page", "message", "wire", "ai-edit", "demo", "derive", "source"];
+const PLUGIN_ORDER = ["visitor-drafts", "richclay", "indicator", "sortable", "undo", "quickcrop", "upload", "people", "cms", "sync", "live", "page", "message", "wire", "ai-edit", "demo", "derive", "bind-text", "source"];
 
 // A plugin that cannot do its whole job alone. hypercms reads the cropper through
 // a capability lookup (`clay.quickcrop`) and silently uploads the raw file when it

@@ -195,6 +195,8 @@ function attachPluginMember(path, mod, loaded) {
     clay.source = mod.source || mod.default;
   } else if (path === "plugins/visitor-drafts.js") {
     clay.visitorDrafts = mod.visitorDrafts;
+  } else if (path === "plugins/bind-text.js") {
+    clay.bindText = mod.bindText;
   }
 }
 

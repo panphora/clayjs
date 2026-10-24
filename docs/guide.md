@@ -497,7 +497,7 @@ Live sync and undo pair elements across versions by **`data-id`, then `id`**, us
 - **Templates carry no `data-id`.** The command that clones a template assigns one. For a plain "add an item" button, `<button add-from="#item-tpl" add-to="#list">` does the clone, the id and the focus with no script.
 - **Never stamp ids on open.** Opening an old file must not rewrite it. Add an id when an item is created or first changed.
 - **Make ids without `crypto.randomUUID`** unless the file is only ever served over https or localhost: it is missing in insecure contexts. The examples use `prefix + "-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6)`.
-- Ids are also how commands find records: `board.querySelector(\`.card[data-id="${CSS.escape(id)}"]\`)`. Never find a record by position.
+- Ids are also how commands find records: `` board.querySelector(`.card[data-id="${CSS.escape(id)}"]`) ``. Never find a record by position.
 
 ### 5.6 Assets
 
@@ -1084,7 +1084,34 @@ For fixed content, such as code samples in a docs page, mark the block `clay="fr
 
 ### 8.9 OverType: a markdown editor
 
-For a notes or journal app where markdown is the format, OverType (`https://cdn.jsdelivr.net/npm/overtype@2.6.1/dist/overtype.min.js`) is a textarea under a styled preview. With `new OverType(el, { persist: true })` the saved file holds only a `<textarea persist>` and its wrapper; everything else is `editor-ui`. Keep one live instance at a time, and normalize OverType's layout state in an `onbeforesave` on the container. A journal built this way keeps entries as `<article data-id>` records, clones its chrome from a `<template>`, and paints the open entry with a runtime stylesheet.
+For a notes or journal app where markdown is the format, OverType (`https://cdn.jsdelivr.net/npm/overtype@2.6.1/dist/overtype.min.js`) is a textarea under a styled preview. **The textarea is not the record.** Keep each entry's text in a text element of the record, put the editor in a `clay="freeze"` region outside the saved records, and bind it to the open record with `clay.bindText` (`?plugins=bind-text`):
+
+```html
+<article data-id="a"><pre><code class="entry-body"># Morning
+
+Walk by the river.</code></pre></article>
+
+<div id="writer" clay="freeze">
+  <div class="overtype-container"><div class="overtype-wrapper"><textarea class="overtype-input"></textarea></div></div>
+</div>
+```
+
+```js
+const binding = clay.bindText(document.querySelector('#writer textarea'), {
+  onWrite: (code) => { code.closest('article').dataset.updated = Date.now(); },
+  onShow: () => overtype?.updatePreview(),
+  onConflict: (typed) => note('Someone changed the same words while you were typing.', typed),
+  onGone: () => note('This entry was deleted somewhere else.'),
+});
+binding.open(document.querySelector('.entry-body'), {
+  key: 'a',
+  resolve: () => document.querySelector('[data-id="a"] .entry-body'),
+});
+```
+
+Three reasons the record stays text and the textarea stays outside it. A `<textarea>` merges as one value, so two people editing different paragraphs of one textarea collide and one of them loses their words; a text element merges word by word, so both edits land. A library writes attributes onto the element it decorates: OverType stamps its own `id`, `autocomplete`, `spellcheck` and Grammarly attributes onto a textarea, and inside a record those save into the file and report the page dirty at boot. And the file is smaller and readable without JavaScript: an `<article>` holding a `<pre><code>` shows in any browser and to any reader, where a `<textarea persist>` shows nothing until the library runs.
+
+`bindText` returns `{ open, close, flush, current, attach, composing }`. Every `input` is written into the record at once, so a save captures it as that record's text. A change the editor did not make (a peer's merge, a restored draft, a JSON API write) is shown in the textarea with the caret kept. During an IME composition nothing is written or shown, and when it ends both edits apply unless they touch the same stretch of text, where the record keeps the other person's words and `onConflict` gets what was typed. Opening the same `key` after a merge replaced the record's element rebinds without touching the textarea; opening another `key` flushes the open record and shows the new one with the caret at the start. Keep one OverType instance for the life of the tab, normalize OverType's layout state in an `onbeforesave` on the container, and call `binding.attach(textarea)` if a library ever swaps the element. A journal built this way keeps entries as `<article data-id>` records, clones its chrome from a `<template>`, and paints the open entry with a runtime stylesheet.
 
 ### 8.10 Attributes from older Hyperclay files
 
