@@ -145,6 +145,7 @@ function assembleCore(loaded, { isDraftMode, isEditMode, isOwner, siteVisibility
     saveFn.force = save.savePageForce;
     saveFn.overwrite = save.saveOverwritingConflict;
     saveFn.flush = save.flushSave;
+    saveFn.soon = save.savePageSoon;
     clay.save = saveFn;
   }
   // The close warning's own predicate, reachable without a capture. It falls back to

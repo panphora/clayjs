@@ -798,6 +798,27 @@ export function replacePageWith(url) {
 // Throttled version of savePage for auto-save
 const throttledSave = throttle(savePage, 1200);
 
+const SOON_MS = 250;
+const SOON_MAX_MS = 1000;
+let soonTimer = null;
+let soonStarted = 0;
+let soonWaiters = [];
+
+export function savePageSoon() {
+  const now = Date.now();
+  if (soonTimer === null) soonStarted = now;
+  else clearTimeout(soonTimer);
+  return new Promise((resolve) => {
+    soonWaiters.push(resolve);
+    soonTimer = setTimeout(() => {
+      soonTimer = null;
+      const waiters = soonWaiters;
+      soonWaiters = [];
+      savePage().then((result) => waiters.forEach((done) => done(result)));
+    }, Math.max(0, Math.min(SOON_MS, soonStarted + SOON_MAX_MS - now)));
+  });
+}
+
 // Baseline for autosave comparison
 let baselineContents = '';
 // The baseline veto only guards the load-time settle window; captureBaseline
