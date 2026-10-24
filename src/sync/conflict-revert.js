@@ -399,6 +399,7 @@ function planText(rec, apply) {
   const subject = rec.recovery.subject;
   const live = liveOf(subject, apply, subject.nodeType);
   if (!live) return null;
+  const box = live.nodeType === 3 && live.parentNode?.localName === "textarea" ? live.parentNode : live;
   const local = t.local.text.slice(t.local.start, t.local.end);
   if (STRUCTURAL.test(t.merged.text.slice(t.merged.start, t.merged.end)) || local.includes(BREAK)) return null;
   const op = { kind: "text", id: rec.id, ticket: apply.ticket, key: subject.key, fragment: t.local.fragment, encoding: t.encoding, local, ids: new Set(), range: document.createRange() };
@@ -411,12 +412,12 @@ function planText(rec, apply) {
   }
   // A textarea shows its value, which typing moves away from its child text: the
   // spot is found in the value and both are written.
-  if (live.localName === "textarea") {
+  if (box.localName === "textarea") {
     if (op.encoding !== "plain") return null;
-    const span = rebase(t.merged.text, live.value, t.merged.start, t.merged.end);
+    const span = rebase(t.merged.text, box.value, t.merged.start, t.merged.end);
     if (!span) return null;
-    op.range.selectNodeContents(live);
-    return { ...op, root: live, field: live, scope: live, f: { text: live.value }, s: span.s, e: span.e, before: live.value, bs: span.s, be: span.e };
+    op.range.selectNodeContents(box);
+    return { ...op, root: box, field: box, scope: box, f: { text: box.value }, s: span.s, e: span.e, before: box.value, bs: span.s, be: span.e };
   }
   const f = project(live);
   const from = scopeStart(t, live, f);

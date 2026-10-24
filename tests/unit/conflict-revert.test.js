@@ -156,7 +156,7 @@ test("the current projection of every text fixture equals the engine's merged sc
     [`<p id="p">One <b>quick</b> fox</p>`, `<p id="p">One <b>slow</b> fox</p>`, `<p id="p">One <b>fast</b> fox</p>`],
     [`<p id="p">🦊 One <a href="/x">quick</a> fox and quick dog</p>`, `<p id="p">🦊 One <a href="/x">slow</a> fox and slow dog</p>`, `<p id="p">🦊 One <a href="/x">fast</a> fox and fast dog</p>`],
     [`<p id="p">one <img id="i" src="a"> quick <br> two</p>`, `<p id="p">one <img id="i" src="a"> slow <br> two</p>`, `<p id="p">one <img id="i" src="a"> fast <br> two</p>`],
-    [`<textarea id="t">old</textarea>`, `<textarea id="t">mine</textarea>`, `<textarea id="t">theirs</textarea>`],
+    [`<textarea id="t"></textarea>`, `<textarea id="t">mine</textarea>`, `<textarea id="t">theirs</textarea>`],
     [`<template id="t"><p id="p">One quick fox.</p></template>`, `<template id="t"><p id="p">One slow fox.</p></template>`, `<template id="t"><p id="p">One fast fox.</p></template>`],
   ];
   for (const [base, local, remote] of cases) {
@@ -530,8 +530,27 @@ test("R3 style is whole-attribute scope: the local string comes back", async () 
 
 test("T3 a textarea gets its text and its value back", async () => {
   const sync = makeSync();
+  const [id] = await lose(sync, `<textarea id="t"></textarea>`, `<textarea id="t">mine</textarea>`, `<textarea id="t">theirs</textarea>`);
+  expect(textOf(id).encoding).toBe("plain");
+
+  const result = await revert.revertConflicts([id]);
+
+  expect(result.revertedIds).toEqual([id]);
+  const t = document.getElementById("t");
+  expect(t.textContent).toBe("mine");
+  expect(t.value).toBe("mine");
+  sync.stop();
+});
+
+test("T3 a textarea word clash is recorded on its inner text and gets its text and its value back", async () => {
+  const sync = makeSync();
   const [id] = await lose(sync, `<textarea id="t">old</textarea>`, `<textarea id="t">mine</textarea>`, `<textarea id="t">theirs</textarea>`);
   expect(textOf(id).encoding).toBe("plain");
+  expect(conflicts.get(id).recovery.subject.nodeType).toBe(3);
+  const plan = revert.prepareRevert([id]);
+  expect(plan.blocked.size).toBe(0);
+  expect(plan.ops).toHaveLength(1);
+  expect(plan.ops[0].field).toBe(document.getElementById("t"));
 
   const result = await revert.revertConflicts([id]);
 
@@ -1144,11 +1163,30 @@ test("O1 O5 with the undo plugin loaded, a revert that writes a control's live v
 
 test.each([["plain", ""], ["persist", ` persist=""`]])("O2 a textarea typed into after the loss (%s): the clash goes back inside the typed value; the value, the text and the save carry both", async (label, attr) => {
   const sync = makeSync();
-  const [id] = await lose(sync, `<textarea id="t"${attr}>One quick fox</textarea>`, `<textarea id="t"${attr}>One slow fox</textarea>`, `<textarea id="t"${attr}>One fast fox</textarea>`);
+  const [id] = await lose(sync, `<textarea id="t"${attr}></textarea>`, `<textarea id="t"${attr}>One slow fox</textarea>`, `<textarea id="t"${attr}>One fast fox</textarea>`);
   const t = document.getElementById("t");
   t.value = "One fast fox. Typed after the loss.";
   t.dispatchEvent(new Event("input", { bubbles: true }));
   await Promise.resolve();
+
+  const result = await revert.revertConflicts([id]);
+
+  expect(result.revertedIds).toEqual([id]);
+  expect(t.value).toBe("One slow fox. Typed after the loss.");
+  expect(t.textContent).toBe("One slow fox. Typed after the loss.");
+  expect(saveBodies().at(-1)).toContain(`>One slow fox. Typed after the loss.</textarea>`);
+  sync.stop();
+});
+
+test.each([["plain", ""], ["persist", ` persist=""`]])("O2 a textarea word clash inside a value typed into after the loss (%s): the local word goes back in the text and the value", async (label, attr) => {
+  const sync = makeSync();
+  const [id] = await lose(sync, `<textarea id="t"${attr}>One quick fox</textarea>`, `<textarea id="t"${attr}>One slow fox</textarea>`, `<textarea id="t"${attr}>One fast fox</textarea>`);
+  expect(conflicts.get(id).recovery.subject.nodeType).toBe(3);
+  const t = document.getElementById("t");
+  t.value = "One fast fox. Typed after the loss.";
+  t.dispatchEvent(new Event("input", { bubbles: true }));
+  await Promise.resolve();
+  expect(revert.prepareRevert([id]).blocked.size).toBe(0);
 
   const result = await revert.revertConflicts([id]);
 
@@ -1165,7 +1203,7 @@ test.each([
 ])("O3 C3 a textarea whose loss rolls back with the transaction keeps what it showed and whether it follows its text (%s)", async (label, touch, shows, afterText) => {
   const sync = makeSync();
   const page = (word, text) => `${b1(word)}<form id="form"><textarea id="t">${text}</textarea></form>`;
-  const ids = await lose(sync, page("quick", "base"), page(`<i id="x">slow</i>`, "mine"), page("fast", "theirs"));
+  const ids = await lose(sync, page("quick", ""), page(`<i id="x">slow</i>`, "mine"), page("fast", "theirs"));
   expect(ids).toHaveLength(2);
   const t = document.getElementById("t");
   touch(t);
@@ -1178,6 +1216,51 @@ test.each([
   expect(t.value).toBe(shows);
   t.textContent = "later";
   expect(t.value).toBe(afterText);
+  sync.stop();
+});
+
+test.each([
+  ["reset to its text", (t) => t.form.reset(), "theirs", "later"],
+  ["typed into", (t) => { t.value = "theirs, typed"; t.dispatchEvent(new Event("input", { bubbles: true })); }, "theirs, typed", "theirs, typed"],
+])("O3 C3 a textarea word clash whose loss rolls back with the transaction keeps what it showed and whether it follows its text (%s)", async (label, touch, shows, afterText) => {
+  const sync = makeSync();
+  const page = (word, text) => `${b1(word)}<form id="form"><textarea id="t">${text}</textarea></form>`;
+  const ids = await lose(sync, page("quick", "base"), page(`<i id="x">slow</i>`, "mine"), page("fast", "theirs"));
+  expect(ids).toHaveLength(2);
+  const t = document.getElementById("t");
+  touch(t);
+  await Promise.resolve();
+  const html = document.documentElement.outerHTML;
+  const plan = revert.prepareRevert(ids);
+  expect(plan.blocked.size).toBe(0);
+  expect(plan.ops.some((op) => op.field === t)).toBe(true);
+
+  expect(await revert.revertConflicts(ids)).toEqual(blockedAll(ids));
+  expect(document.documentElement.outerHTML).toBe(html);
+  expect(t.value).toBe(shows);
+  t.textContent = "later";
+  expect(t.value).toBe(afterText);
+  sync.stop();
+});
+
+test("a textarea whose two sides change different words merges both and records nothing", async () => {
+  const sync = makeSync();
+  const base = `<textarea id="t">One quick brown fox</textarea>`;
+  const local = `<textarea id="t">One slow brown fox</textarea>`;
+  const remote = `<textarea id="t">One quick red fox</textarea>`;
+  await settle(base);
+  sync.lastHtml = captureFrame();
+  document.body.innerHTML = local;
+  await Promise.resolve();
+  const frame = sync.lastHtml.replace(`<body>${base}</body>`, `<body>${remote}</body>`);
+  expect(frame).not.toBe(sync.lastHtml);
+
+  await sync._doApplyUpdate(frame, 5, null);
+
+  expect(conflicts.size).toBe(0);
+  const t = document.getElementById("t");
+  expect(t.value).toBe("One slow red fox");
+  expect(t.textContent).toBe("One slow red fox");
   sync.stop();
 });
 
