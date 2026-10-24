@@ -227,7 +227,7 @@ test("Enter runs the focused item and closes the list", async () => {
   const goo = gooOf();
 
   click(goo);
-  press(itemButtons()[0], "Enter");
+  press(itemButtons().find((button) => button.dataset.menuId === "copy"), "Enter");
 
   expect(ran).toHaveBeenCalledTimes(1);
   expect(listOf().hidden).toBe(true);
@@ -249,10 +249,10 @@ test("addItem appends items and a duplicate id replaces", async () => {
 
   menu.addItem({ id: "copy", label: "Save a copy" });
   menu.addItem({ id: "share", label: "Share" });
-  expect(labels()).toEqual(["Save a copy", "Share"]);
+  expect(labels()).toEqual(["SEO settings…", "Save a copy", "Share"]);
 
   menu.addItem({ id: "copy", label: "Download" });
-  expect(labels()).toEqual(["Download", "Share"]);
+  expect(labels()).toEqual(["SEO settings…", "Download", "Share"]);
 });
 
 test("a badge shows a dot on claygoo", async () => {

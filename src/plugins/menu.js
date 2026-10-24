@@ -5,8 +5,7 @@ import { canEdit, isDraftMode, mode as startMode } from "../core/is-edit-mode.js
 import onDomReady from "../lib/dom-ready.js";
 import CLAYGOO from "./menu/claygoo.svg.js";
 
-// 04 adds menu/seo.js and flips this. Until then the item would import nothing.
-const SEO_ITEM = false;
+const SEO_ITEM = true;
 const SAVE_FAILED = "Couldn't save, so this page stays in edit mode.";
 const NOTE_MS = 6000;
 const INTRO_GAP = 12;
@@ -385,12 +384,20 @@ function mount() {
   new MutationObserver(watchIntro).observe(doc.body, { childList: true });
   watchIntro();
 
+  const openSeo = () => import("./menu/seo.js").then((m) => m.open());
+
   if (SEO_ITEM) {
     addItem({
       id: "seo",
       label: "SEO settings…",
-      run: () => import("./menu/seo.js").then((m) => m.open()),
+      run: openSeo,
     });
+
+    const storage = window.clay.storage && window.clay.storage.session;
+    if (storage && storage.get("reopen-seo") === true) {
+      storage.remove("reopen-seo");
+      openSeo().catch(() => {});
+    }
   }
 
   window.clay.menu = { addItem, open, close };
