@@ -8,6 +8,7 @@ import { asStep } from "./blocksel.js";
 import { openPageMenu } from "./chrome.js";
 import { insertChartAfterTable } from "./chart.js";
 import { REMOTE_META } from "./ybind/layout.js";
+import { DERIVED } from "./history-intent.js";
 import { gridFromClipboard, tableFromGrid } from "./table-paste.js";
 import { rectTopLeft, selectLine } from "./table-select.js";
 import toast from "../ui/toast.js";
@@ -357,7 +358,7 @@ export function tablePlugin() {
           tr.setNodeMarkup(pos, null, { ...table.attrs, sort: null });
         }
       });
-      return tr.docChanged ? tr : null;
+      return tr.docChanged ? tr.setMeta(DERIVED, true) : null;
     },
   });
 }

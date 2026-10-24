@@ -14,6 +14,7 @@ import { BLOCK_TYPES, MENU_ITEMS, blockTypeOf, turnInto, insertAfter, rankItems,
 import toast from "../ui/toast.js";
 import { insertChartAfterTable } from "./chart.js";
 import { pickCsv } from "./csv-import.js";
+import { HISTORY_INTENT, typingIntent } from "./history-intent.js";
 
 export { BLOCK_TYPES, blockTypeOf, turnInto, insertAfter } from "./items.js";
 
@@ -571,7 +572,7 @@ export function chromePlugin({ onAiTool = null } = {}) {
         const $from = view.state.doc.resolve(from);
         if ($from.depth !== 1 || !$from.parent.isTextblock || $from.parent.type.spec.code) return inserted;
         if ($from.parentOffset > 0 && !/\s/.test(view.state.doc.textBetween(from - 1, from, "", "\n"))) return inserted;
-        if (!inserted) view.dispatch(view.state.tr.insertText("/", from, to));
+        if (!inserted) view.dispatch(view.state.tr.insertText("/", from, to).setMeta(HISTORY_INTENT, typingIntent(view.state, from, to, "/")));
         chrome.openMenu("insert", chrome.plus, from + 1);
         return true;
       },

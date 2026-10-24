@@ -331,7 +331,13 @@ export function createBridge({ pd, onNotice = () => {}, ownedTokens = [], author
       const { state, transactions } = view.state.applyTransaction(tr);
       const local = transactions.filter((t) => t.docChanged && !t.getMeta(REMOTE_META));
       view.updateState(state);
-      if (!local.length) return;
+      if (!local.length) {
+        if (transactions.some((t) => t.selectionSet && !t.getMeta(REMOTE_META))) {
+          lastIntent = null;
+          if (groupOpen) { um.stopCapturing(); groupOpen = false; }
+        }
+        return;
+      }
       w = walk(pd);
       const history = transactions.every((t) => t.getMeta("addToHistory") !== false);
       const register = registerAuthor;

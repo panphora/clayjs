@@ -47,18 +47,21 @@ describe("the slash trigger", () => {
 
   test("right after a letter or digit it stays text", () => {
     const view = open([["p", "paragraph", "and"]]);
-    expect(typeText(view, "/")).toBe(false);
+    typeText(view, "/");
     expect(isOpen(view)).toBe(false);
     expect(view.state.doc.textContent).toBe("and/");
     select(view, posOf(view, "p", true));
     view.dispatch(view.state.tr.insertText("7"));
-    expect(typeText(view, "/")).toBe(false);
+    typeText(view, "/");
+    expect(isOpen(view)).toBe(false);
+    expect(view.state.doc.textContent).toBe("and/7/");
   });
 
   test("in a code block it stays text", () => {
     const view = open([["c", "code_block", "x "]]);
-    expect(typeText(view, "/")).toBe(false);
+    typeText(view, "/");
     expect(isOpen(view)).toBe(false);
+    expect(view.state.doc.textContent).toBe("x /");
   });
 
   test("typing filters the rows with the shared ranking, and Enter retypes an empty line keeping its id", () => {
