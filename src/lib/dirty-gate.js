@@ -51,6 +51,9 @@ function scheduleAnnounce() {
     const dirty = pageMaybeDirty();
     if (dirty === announcedDirty) return;
     announcedDirty = dirty;
+    const root = document.documentElement;
+    if (dirty) root.setAttribute('unsaved', 'true');
+    else root.removeAttribute('unsaved');
     document.dispatchEvent(new CustomEvent(dirty ? 'clay:dirty' : 'clay:clean'));
   });
 }

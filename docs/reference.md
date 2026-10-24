@@ -283,6 +283,14 @@ reachable by direct import but may change in any release.
   `saved`, `error`, `offline`, `conflict`. Removed from every save, like `editmode` and
   `pageowner`, so before clayjs boots none of them is present: key CSS on
   `html:not([editmode="true"])`, not `html[editmode="false"]`.
+- `unsaved` (`<html>`, set by clayjs) — `unsaved="true"` exactly while the dirty gate says
+  the page holds work a save has not written, and absent once a save has accounted for it.
+  It is what a status chip needs that `savestatus` cannot say: `savestatus` reports what the
+  last save did, `unsaved` whether there is anything since, so
+  `html[unsaved="true"]:not([savestatus="error"]):not([savestatus="offline"]) .chip-unsaved { display: inline }`
+  shows unsaved work without hiding a saved document's status CSS. Tab-local like
+  `savestatus`: removed from every save and never carried to or from a peer. Draft mode
+  sets it the same way; `html[draftmode="true"]` is what says nothing is being saved.
 
 ## Ephemeral state
 
@@ -405,9 +413,11 @@ raises the conflict notice. Until it is fixed, acknowledge those records on
   mutations and user input; a script setting a `[persist]` control's value programmatically
   is not observed. One event per state change, so a burst of keystrokes is one `clay:dirty`.
   It fires before autosave does, which is what lets a status row show unsaved state at the
-  moment it appears.
+  moment it appears. The root already carries `unsaved="true"` when the event fires, so a
+  listener can read the state from the DOM or from the event.
 - `clay:clean` — a save (or a merge the loss oracle verified) has accounted for everything
-  the gate saw, so nothing on the page is unwritten.
+  the gate saw, so nothing on the page is unwritten. `unsaved` is gone from the root by the
+  time it fires.
 - `clay:save-conflict` — the host refused a save because the file changed since this tab
   loaded or last saved it (HTTP 412). Autosave pauses and a notice appears; detail
   `{msg, msgType, timestamp, changedBy, afterTimeout, etag}`, where `etag` is the stamp

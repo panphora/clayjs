@@ -26,6 +26,7 @@ const TAB_LOCAL = [
   "editmode",
   "pageowner",
   "draftmode",
+  "unsaved",
 ];
 
 function makeClone() {

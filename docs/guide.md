@@ -654,6 +654,15 @@ html[savestatus="error"] #status::after { content: "Not saved" }
 html[savestatus="conflict"] #status::after { content: "Changed elsewhere" }
 ```
 
+`savestatus` says what the last save did and keeps its five values. Whether there is work since — anything a save has not written — is a second root attribute, `unsaved="true"`, present from the first edit until a save accounts for it. That split is what keeps a saved document's status CSS honest while a chip shows unsaved work:
+
+```css
+.chip-unsaved { display: none }
+html[unsaved="true"]:not([savestatus="error"]):not([savestatus="offline"]) .chip-unsaved { display: inline }
+```
+
+In draft mode nothing is being saved on purpose, and `html[draftmode="true"]` is what says where "saved" went.
+
 Put `#status` in chrome. Or load the `indicator` plugin for a ready-made chip. With `clay-ui.js` loaded, save errors and offline become persistent toasts. Without the `indicator` plugin, clay-ui also toasts "Saved" after every save; with it, set `clay.saveToast = true` to get those toasts too.
 
 Events, all on `document`:

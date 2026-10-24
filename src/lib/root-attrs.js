@@ -94,7 +94,7 @@ export const HOST_TOKEN_ATTRS = [
 ];
 
 // This library's own root state, and this tab's UI truth.
-export const ROOT_LIBRARY_ATTRS = ["savestatus", "editmode", "pageowner", "draftmode"];
+export const ROOT_LIBRARY_ATTRS = ["savestatus", "editmode", "pageowner", "draftmode", "unsaved"];
 
 // Never copied between tabs: not written onto this root by an incoming morph, not
 // sent out on a sync broadcast.
