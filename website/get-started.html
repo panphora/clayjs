@@ -151,6 +151,7 @@
   .ask input:focus { border-color: var(--glaze); }
   .ask input::placeholder { color: var(--ink-faint); }
 </style>
+<script src="https://signal.hyperclay.com/v1.js" defer></script>
 </head>
 <body>
 
@@ -267,7 +268,7 @@
     <p style="margin-top: 26px;">Here is the whole file, if you would rather see it first or type it out yourself.</p>
     <div class="copyrow">
       <span class="lbl">my-list.html · plain, for now</span>
-      <button type="button" class="btn" data-copy="#starter-code" data-copy-name="the my-list.html source" clay="no-save no-watch">Copy</button>
+      <button type="button" class="btn" data-copy="#starter-code" data-copy-name="the my-list.html source" clay="no-save no-watch" data-hv-goal="snippet-copy" data-hv-what="the my-list.html source">Copy</button>
     </div>
     <pre clay="no-save"><code class="language-markup" id="starter-code">&lt;!DOCTYPE html&gt;
 &lt;html lang="en"&gt;
@@ -313,7 +314,7 @@
     <p class="problem">The page doesn't know how to save itself yet.</p>
     <div class="copyrow">
       <span class="lbl">last line inside &lt;body&gt;</span>
-      <button type="button" class="btn" data-copy="#tag-code" data-copy-name="the script tag" clay="no-save no-watch">Copy</button>
+      <button type="button" class="btn" data-copy="#tag-code" data-copy-name="the script tag" clay="no-save no-watch" data-hv-goal="snippet-copy" data-hv-what="the script tag">Copy</button>
     </div>
     <pre><code class="language-markup" id="tag-code">&lt;script src="https://clayjs.com/v1/clay.js"&gt;&lt;/script&gt;</code></pre>
     <p>Open <code>my-list.htmlclay</code> in your text editor and add that line just before <code>&lt;/body&gt;</code>. <strong>Keep the editor open and go straight to Step 4.</strong> It adds three attributes to the same file, and then you reload the tab once and see everything arrive at the same time.</p>
@@ -382,7 +383,7 @@
         <p class="small">Every attribute in place. Paste it over the whole file, save, reload the tab, and run the proof again. It is here to get you unstuck, not to replace Step 4: putting the three attributes in by hand is what makes the next file, the one that is actually yours, easy.</p>
         <div class="copyrow">
           <span class="lbl">my-list.htmlclay · after the four steps</span>
-          <button type="button" class="btn" data-copy="#finished-code" data-copy-name="the finished my-list file" clay="no-save no-watch">Copy</button>
+          <button type="button" class="btn" data-copy="#finished-code" data-copy-name="the finished my-list file" clay="no-save no-watch" data-hv-goal="snippet-copy" data-hv-what="the finished my-list file">Copy</button>
         </div>
         <pre clay="no-save"><code class="language-markup" id="finished-code">&lt;!DOCTYPE html&gt;
 &lt;html lang="en" autosave&gt;
@@ -519,7 +520,7 @@
       <p class="small" style="margin-bottom: 4px;">Type it and the prompt below asks the agent to build it first. Leave it empty if you're bringing a file you already have.</p>
       <div class="copyrow">
         <span class="lbl">for Claude, Cursor, Codex…</span>
-        <button type="button" class="btn" data-copy="#agent-text" data-copy-name="the agent prompt" data-copy-flat>Copy</button>
+        <button type="button" class="btn" data-copy="#agent-text" data-copy-name="the agent prompt" data-copy-flat data-hv-goal="snippet-copy" data-hv-what="the agent prompt">Copy</button>
       </div>
       <p id="agent-text" style="font-family: var(--mono); font-size: 13px; line-height: 1.75; margin: 8px 0 0;">Make this static HTML file malleable with clayjs. Read https://clayjs.com/llms.txt before you start: it is the full clayjs reference, including every plugin and advanced module. Add &lt;script src="https://clayjs.com/v1/clay.js"&gt;&lt;/script&gt; as the last element inside &lt;body&gt;. Add an autosave attribute to the &lt;html&gt; element. Add an editable attribute to each element a person should be able to edit as rich text (headings, paragraphs, note containers), and add a persist attribute to any form control whose value should survive saving. Do not write any save logic or add a save button: clayjs saves the whole document automatically, and the host (the HTML Clay desktop app for .htmlclay files, or hyperclay.com) writes it to disk. If part of the page is UI that should never be written to disk, mark it clay="no-save no-watch". Change nothing else.</p>
     </div>
