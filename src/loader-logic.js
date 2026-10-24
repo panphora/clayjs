@@ -47,6 +47,10 @@ export const PLUGIN_PATHS = {
   upload:    { path: "plugins/upload.js",          editOnly: true,  default: false },
   // Who is editing and who wrote what. Not editOnly: a reader still sees names.
   people:    { path: "plugins/people.js",          editOnly: false, default: false },
+  // An Edit switch and claygoo in the top right, for anyone who can edit. Not
+  // editOnly: an owner who opens a document in view needs the switch that gets
+  // them into edit, and the group draws nothing for a reader who cannot edit.
+  menu:      { path: "plugins/menu.js",            editOnly: false, default: false },
   wire:      { path: "plugins/wire.js",            editOnly: false, default: false },
   // A visitor's contact form to the document's owner. Not editOnly: visitors are
   // who send messages.
@@ -119,6 +123,7 @@ export const MODULES = {
   "plugins/quickcrop.js":       () => import("./plugins/quickcrop.js"),
   "plugins/upload.js":          () => import("./plugins/upload.js"),
   "plugins/people.js":          () => import("./plugins/people.js"),
+  "plugins/menu.js":            () => import("./plugins/menu.js"),
   "plugins/wire.js":            () => import("./plugins/wire.js"),
   "plugins/message.js":         () => import("./plugins/message.js"),
   "plugins/ai-edit.js":         () => import("./plugins/ai-edit.js"),
@@ -131,7 +136,7 @@ export const MODULES = {
 
 // `source` is last on purpose: its install captures a save clone, so it wants every
 // plugin that registers a document transform to have registered it first.
-const PLUGIN_ORDER = ["visitor-drafts", "richclay", "indicator", "sortable", "undo", "unsent", "quickcrop", "upload", "people", "cms", "page-view", "sync", "live", "page", "message", "wire", "ai-edit", "demo", "derive", "bind-text", "source"];
+const PLUGIN_ORDER = ["visitor-drafts", "richclay", "indicator", "sortable", "undo", "unsent", "quickcrop", "upload", "people", "menu", "cms", "page-view", "sync", "live", "page", "message", "wire", "ai-edit", "demo", "derive", "bind-text", "source"];
 
 // A plugin that cannot do its whole job alone. hypercms reads the cropper through
 // a capability lookup (`clay.quickcrop`) and silently uploads the raw file when it
@@ -176,7 +181,7 @@ function parseCsv(params, key, enabled, apply) {
 
 // Each of these talks to the host or writes outside the visitor's own record, so a
 // page that keeps its edits in this browser cannot carry them.
-const DRAFT_DROPS = ["sync", "live", "page", "upload", "quickcrop", "cms", "people", "wire", "ai-edit", "demo", "source"];
+const DRAFT_DROPS = ["sync", "live", "page", "upload", "quickcrop", "cms", "people", "menu", "wire", "ai-edit", "demo", "source"];
 
 // [refetch-on-save] swaps its element for a fresh GET of the same URL after every
 // save, which on a visitor's own draft is a request to the host.
