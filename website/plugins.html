@@ -149,6 +149,11 @@ game.on("change", render);</code></pre>
     </div>
 
     <div class="libcard">
+      <div class="lib-name" id="bind-text">bind-text <span class="tag">plugin &middot; ask by name</span></div>
+      <p>Keeps long text in a record's text element and the editor outside the saved records. <code>clay.bindText(textarea, { onWrite, onShow, onConflict, onGone })</code> binds a textarea in a <code>clay="freeze"</code> region to one record: every keystroke is written into the record, a change from elsewhere shows in the textarea with the caret kept, and an IME composition is held until it ends. Two people editing different paragraphs both keep their words. <a href="/complete-guide#8-9-overtype-a-markdown-editor">The guide's section 8.9</a> shows it with OverType.</p>
+    </div>
+
+    <div class="libcard">
       <div class="lib-name" id="visitor-drafts">visitor-drafts <span class="tag">plugin &middot; ask by name</span></div>
       <p class="lib-prob">&ldquo;I want to give this app away, and let people use it before they download it.&rdquo;</p>
       <p>A free document. A visitor who is not the owner gets the same editing UI the owner gets, and their work is kept as the page's own JSON in their own browser: never a save, a sync or an upload to the host. On every load that JSON is applied over the file you published, so a fix you make still reaches them. The plugin also draws the download prompt, the optional intro area and the owner's chip.</p>
