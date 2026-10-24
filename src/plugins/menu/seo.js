@@ -2,7 +2,7 @@
 // head fields. Everything it draws is `clay="editor-ui"`, so none of it reaches
 // the saved file, a sync frame, the dirty check or undo. Nothing is written until
 // Apply: opening and cancelling change only the sheet.
-import { applyHead, readHead } from "./seo-head.js";
+import { applyHead, FIELDS, readHead } from "./seo-head.js";
 import { hostMeta } from "../../core/host-meta.js";
 
 const STYLE_ID = "clay-seo-style";
@@ -182,6 +182,17 @@ textarea.clay-seo-input { min-height: 64px; resize: vertical; }
   font-size: 12px;
   color: #A63A2B;
 }
+.clay-seo-derived {
+  margin: 4px 0 0;
+  padding: 0;
+  border: 0;
+  font: inherit;
+  font-size: 12px;
+  color: var(--clay-ui-accent, #2F6FEB);
+  background: none;
+  text-decoration: underline;
+  cursor: pointer;
+}
 .clay-seo-conflict {
   margin: 6px 0 0;
   padding: 8px;
@@ -341,6 +352,17 @@ function pageBase() {
   }
 }
 
+function isDocumentPage() {
+  return document.querySelectorAll("article[data-page]").length === 1;
+}
+
+function firstHeadingText() {
+  const article = document.querySelector("article[data-page]");
+  if (!article) return "";
+  const heading = article.querySelector("h1") || article.querySelector("h1, h2, h3, h4, h5, h6");
+  return heading ? text(heading.textContent).trim() : "";
+}
+
 function hostOf(value) {
   const url = parseUrl(text(value).trim());
   return url ? url.hostname : "";
@@ -374,6 +396,7 @@ export function open() {
   const chosen = new Set();
   let closed = false;
   let uploadAvailable = false;
+  let pendingTitleMode = "";
 
   const root = element("div", "clay-seo");
   root.setAttribute("clay", "editor-ui");
@@ -466,6 +489,11 @@ export function open() {
     form.append(section);
   }
 
+  const derivedButton = element("button", "clay-seo-derived", "Use the first heading");
+  derivedButton.type = "button";
+  derivedButton.hidden = true;
+  inputs.get("title").closest(".clay-seo-field").append(derivedButton);
+
   const imageInput = inputs.get("ogImage");
   const uploadButton = element("button", "clay-seo-upload-button", "Upload image");
   uploadButton.type = "button";
@@ -534,6 +562,7 @@ export function open() {
     previewDescription.hidden = !description;
     previewHost.textContent = hostOf(readField("canonical")) || location.host || "";
     cardSize.textContent = image ? "Card size: Summary with a large image" : "Card size: Summary";
+    derivedButton.hidden = !(isDocumentPage() && FIELDS.titleMode.read(document) === "custom");
   }
 
   function changes() {
@@ -589,9 +618,11 @@ export function open() {
 
   function apply() {
     const wanted = changes();
+    const documentPage = isDocumentPage();
+    const marker = documentPage ? pendingTitleMode || ("title" in wanted ? "custom" : "") : "";
     for (const entry of conflicts.values()) entry.row.hidden = true;
     showProblems({});
-    if (!Object.keys(wanted).length) {
+    if (!Object.keys(wanted).length && !marker) {
       close();
       return;
     }
@@ -605,7 +636,7 @@ export function open() {
       showConflicts(found);
       return;
     }
-    run(LABEL, () => applyHead(document, wanted));
+    run(LABEL, () => applyHead(document, marker ? { ...wanted, titleMode: marker } : wanted));
     close();
   }
 
@@ -670,6 +701,16 @@ export function open() {
   }
 
   form.addEventListener("input", refresh);
+
+  inputs.get("title").addEventListener("input", () => {
+    pendingTitleMode = "";
+  });
+
+  derivedButton.addEventListener("click", () => {
+    pendingTitleMode = "derived";
+    inputs.get("title").value = firstHeadingText();
+    refresh();
+  });
 
   uploadButton.addEventListener("click", () => fileInput.click());
 

@@ -43,11 +43,54 @@ describe("FIELDS", () => {
       "ogImageAlt",
       "siteName",
       "twitterSite",
+      "titleMode",
     ]);
     for (const field of Object.values(FIELDS)) {
       expect(typeof field.read).toBe("function");
       expect(typeof field.write).toBe("function");
     }
+  });
+});
+
+describe("titleMode", () => {
+  test("a page without the marker derives its title", () => {
+    expect(FIELDS.titleMode.read(parse())).toBe("derived");
+    expect(FIELDS.titleMode.read(parse('<meta name="clay-seo-title-mode" content="x">'))).toBe("derived");
+  });
+
+  test("custom writes the marker at the end of the head and reads it back", () => {
+    const doc = parse('<title>A title</title>');
+    FIELDS.titleMode.write(doc, "custom");
+    const meta = doc.head.querySelector('meta[name="clay-seo-title-mode"]');
+    expect(meta).not.toBeNull();
+    expect(meta.getAttribute("content")).toBe("custom");
+    expect(doc.head.lastElementChild).toBe(meta);
+    expect(FIELDS.titleMode.read(doc)).toBe("custom");
+    expect(readHead(doc).values.titleMode).toBe("custom");
+  });
+
+  test("custom updates the marker instead of adding a second one", () => {
+    const doc = parse('<meta name="clay-seo-title-mode" content="custom">');
+    const before = doc.head.children.length;
+    FIELDS.titleMode.write(doc, "custom");
+    expect(doc.head.children.length).toBe(before);
+    expect(FIELDS.titleMode.read(doc)).toBe("custom");
+  });
+
+  test("derived removes the marker", () => {
+    const doc = parse('<meta name="clay-seo-title-mode" content="custom"><meta name="description" content="Kept">');
+    const result = applyHead(doc, { titleMode: "derived" });
+    expect(result).toEqual({ normalized: [], errors: {} });
+    expect(doc.head.querySelector('meta[name="clay-seo-title-mode"]')).toBeNull();
+    expect(doc.head.querySelector('meta[name="description"]').getAttribute("content")).toBe("Kept");
+    expect(readHead(doc).values.titleMode).toBe("derived");
+  });
+
+  test("a title change and the marker land in one call", () => {
+    const doc = parse();
+    applyHead(doc, { title: "The person's title", titleMode: "custom" });
+    expect(doc.head.querySelector("title").textContent).toBe("The person's title");
+    expect(FIELDS.titleMode.read(doc)).toBe("custom");
   });
 });
 

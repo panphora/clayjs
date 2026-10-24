@@ -10,6 +10,7 @@ import { applyHead } from "../../src/plugins/menu/seo-head.js";
 const SLOT = "/notes.html";
 const HEAD = '<title>Start title</title><meta name="description" content="Start description">';
 const BODY = '<div id="content">start</div>';
+const DOCUMENT_BODY = '<article data-page><h1>Heading title</h1><p>start</p></article>';
 const REOPEN_KEY = "clay:doc:/notes.html:reopen-seo";
 
 const settle = async () => {
@@ -41,6 +42,7 @@ async function boot({
   extensions = ["upload"],
   robots = null,
   reopen = false,
+  body = BODY,
 } = {}) {
   jest.resetModules();
   sessionStorage.clear();
@@ -53,7 +55,7 @@ async function boot({
   window.history.replaceState({}, "", edit ? `${SLOT}?editmode=true` : SLOT);
   if (reopen) sessionStorage.setItem(REOPEN_KEY, "true");
   document.head.innerHTML = HEAD;
-  document.body.innerHTML = BODY;
+  document.body.innerHTML = body;
   window.fetch = async (input, options = {}) => {
     const method = (options && options.method) || "GET";
     if (method === "HEAD") return response({ headers: { "x-robots-tag": robots } });
@@ -251,4 +253,62 @@ test("the hosted robots note appears when a HEAD of the page says noindex", asyn
 
   const note = [...document.querySelectorAll(".clay-seo-note")].find((el) => !el.hidden && el.textContent.includes("hidden from search engines"));
   expect(note).toBeDefined();
+});
+
+test("a Document's title change writes the marker in the same undo step", async () => {
+  await boot({ body: DOCUMENT_BODY });
+  await openSheet();
+  const entries = window.clay.undo.history.length;
+
+  setValue("title", "The person's title");
+  buttonOf("apply").click();
+  await settle();
+
+  expect(document.querySelector("title").textContent).toBe("The person's title");
+  const marker = document.querySelector('meta[name="clay-seo-title-mode"]');
+  expect(marker).not.toBeNull();
+  expect(marker.getAttribute("content")).toBe("custom");
+  expect(window.clay.undo.history.length).toBe(entries + 1);
+  expect(window.clay.undo.history.at(-1).label).toBe("SEO settings");
+  expect(window.clay.getHTML()).toContain("clay-seo-title-mode");
+});
+
+test("the first-heading link shows only with the marker and Apply takes the title back", async () => {
+  await boot({ body: DOCUMENT_BODY });
+  await openSheet();
+  const link = () => document.querySelector(".clay-seo-derived");
+  expect(link()).not.toBeNull();
+  expect(link().hidden).toBe(true);
+
+  buttonOf("cancel").click();
+  applyHead(document, { title: "The person's title", titleMode: "custom" });
+  await openSheet();
+
+  expect(link().hidden).toBe(false);
+  expect(link().textContent).toBe("Use the first heading");
+  link().click();
+  await settle();
+
+  expect(fieldOf("title").value).toBe("Heading title");
+  expect(document.querySelector("title").textContent).toBe("The person's title");
+
+  buttonOf("apply").click();
+  await settle();
+
+  expect(document.querySelector("title").textContent).toBe("Heading title");
+  expect(document.querySelector('meta[name="clay-seo-title-mode"]')).toBeNull();
+});
+
+test("a page that is not a Document gets no marker and no first-heading link", async () => {
+  await boot();
+  await openSheet();
+
+  expect(document.querySelector(".clay-seo-derived").hidden).toBe(true);
+
+  setValue("title", "The person's title");
+  buttonOf("apply").click();
+  await settle();
+
+  expect(document.querySelector("title").textContent).toBe("The person's title");
+  expect(document.querySelector('meta[name="clay-seo-title-mode"]')).toBeNull();
 });

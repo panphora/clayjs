@@ -166,6 +166,26 @@ const canonicalField = {
   },
 };
 
+const TITLE_MODE = "clay-seo-title-mode";
+
+const titleModeField = {
+  find: (doc) => metas(doc, "name", TITLE_MODE),
+  read(doc) {
+    const el = metas(doc, "name", TITLE_MODE)[0];
+    return el && text(el.getAttribute("content")).trim().toLowerCase() === "custom" ? "custom" : "derived";
+  },
+  write(doc, value) {
+    const els = metas(doc, "name", TITLE_MODE);
+    if (text(value).trim().toLowerCase() !== "custom") {
+      els.forEach(drop);
+      return;
+    }
+    const el = els[0] || createMeta(doc, "name", TITLE_MODE);
+    el.setAttribute("content", "custom");
+    els.slice(1).forEach(drop);
+  },
+};
+
 const SPECS = {
   title: titleField,
   description: metaField("name", "description"),
@@ -179,6 +199,7 @@ const SPECS = {
   ogImageAlt: metaField("property", "og:image:alt"),
   siteName: metaField("property", "og:site_name"),
   twitterSite: metaField("name", "twitter:site"),
+  titleMode: titleModeField,
 };
 
 export const FIELDS = Object.fromEntries(
