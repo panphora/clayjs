@@ -32,6 +32,9 @@ export const PLUGIN_PATHS = {
   // tab still shows the game, and its writes stay in that tab.
   live:      { path: "plugins/live.js",           editOnly: false, default: false },
   page:      { path: "plugins/page.js",           editOnly: true,  default: false },
+  // The reader half of `page`, added by resolveModules for a Document in view mode
+  // and never named in a URL: the reader's article follows each saved file.
+  "page-view": { path: "plugins/page-view.js", editOnly: false, default: false, internal: true },
   sortable:  { path: "plugins/sortable.js",        editOnly: true,  default: false },
   undo:      { path: "plugins/undo.js",            editOnly: true,  default: false },
   unsent:    { path: "plugins/unsent.js",          editOnly: true,  default: false },
@@ -106,6 +109,7 @@ export const MODULES = {
   "sync/live-sync.js":          () => import("./sync/live-sync.js"),
   "plugins/live.js":            () => import("./plugins/live.js"),
   "plugins/page.js":            () => import("./plugins/page.js"),
+  "plugins/page-view.js":       () => import("./plugins/page-view.js"),
   "plugins/sortable.js":        () => import("./plugins/sortable.js"),
   "plugins/undo.js":            () => import("./plugins/undo.js"),
   "plugins/unsent.js":          () => import("./plugins/unsent.js"),
@@ -125,7 +129,7 @@ export const MODULES = {
 
 // `source` is last on purpose: its install captures a save clone, so it wants every
 // plugin that registers a document transform to have registered it first.
-const PLUGIN_ORDER = ["visitor-drafts", "richclay", "indicator", "sortable", "undo", "unsent", "quickcrop", "upload", "people", "cms", "sync", "live", "page", "message", "wire", "ai-edit", "demo", "derive", "bind-text", "source"];
+const PLUGIN_ORDER = ["visitor-drafts", "richclay", "indicator", "sortable", "undo", "unsent", "quickcrop", "upload", "people", "cms", "page-view", "sync", "live", "page", "message", "wire", "ai-edit", "demo", "derive", "bind-text", "source"];
 
 // A plugin that cannot do its whole job alone. hypercms reads the cropper through
 // a capability lookup (`clay.quickcrop`) and silently uploads the raw file when it
@@ -160,7 +164,7 @@ function parseCsv(params, key, enabled, apply) {
   for (const token of raw.split(",")) {
     const name = token.trim();
     if (!name) continue;
-    if (!PLUGIN_PATHS[name]) {
+    if (!PLUGIN_PATHS[name] || PLUGIN_PATHS[name].internal) {
       console.warn(`clayjs: unknown plugin "${name}"`);
       continue;
     }
@@ -208,6 +212,8 @@ export function resolveModules(params, isEditMode, { isDraftMode = false, hasSap
     }
     enabled.add("visitor-drafts");
   }
+
+  if (!isEditMode && enabled.has("page")) enabled.add("page-view");
 
   const plugins = [];
   for (const name of PLUGIN_ORDER) {

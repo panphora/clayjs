@@ -145,7 +145,7 @@ game.on("change", render);</code></pre>
 
     <div class="libcard">
       <div class="lib-name" id="page">page <span class="tag">plugin &middot; ask by name</span></div>
-      <p>The page plugin opens one <code>article[data-page]</code> with one <code>merge="page" clay="live"</code> Yjs store in the page editor. It loads only in edit mode and requires a host that advertises the <code>page</code> extension. Without that extension, the saved article stays readable. <code>clay.page.flush()</code> waits for its edits to reach a checkpoint. It brings <code>live</code>, <code>sync</code> and <code>upload</code> with it: image and file blocks store their files through <code>clay.upload</code>, and on a host that stores no files the editor offers to embed them instead.</p>
+      <p>The page plugin opens one <code>article[data-page]</code> with one <code>merge="page" clay="live"</code> Yjs store in the page editor. It loads only in edit mode and requires a host that advertises the <code>page</code> extension. Without that extension, the saved article stays readable. <code>clay.page.flush()</code> waits for its edits to reach a checkpoint. It brings <code>live</code>, <code>sync</code> and <code>upload</code> with it: image and file blocks store their files through <code>clay.upload</code>, and on a host that stores no files the editor offers to embed them instead. In view mode the loader adds its reader half, <code>page-view</code>, by itself, so a reader's article follows each saved file without a reload; no URL names it.</p>
     </div>
 
     <div class="libcard">

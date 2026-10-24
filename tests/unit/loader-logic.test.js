@@ -252,3 +252,34 @@ test("exclude=derive keeps the core off a page with a [sap] root", () => {
 test("draft mode keeps the core: a visitor's tab paints the totals of its own draft", () => {
   expect(resolveModules(params(), false, { isDraftMode: true, hasSap: true }).plugins).toContain("plugins/derive.js");
 });
+
+describe("page-view, the reader half of page", () => {
+  test("view mode adds it before live sync, so the frame listener exists first", () => {
+    const { plugins } = resolveModules(params({ plugins: "page" }), false);
+    expect(plugins).not.toContain("plugins/page.js");
+    expect(plugins).toContain("plugins/page-view.js");
+    expect(plugins).toContain("sync/live-sync.js");
+    expect(plugins.indexOf("plugins/page-view.js"))
+      .toBeLessThan(plugins.indexOf("sync/live-sync.js"));
+  });
+
+  test("edit mode loads the editor half and no reader", () => {
+    const { plugins } = resolveModules(params({ plugins: "page" }), true);
+    expect(plugins).toContain("plugins/page.js");
+    expect(plugins).not.toContain("plugins/page-view.js");
+  });
+
+  test("draft mode drops page, so it gets no reader either", () => {
+    const { plugins } = resolveModules(params({ plugins: "page" }), true, { isDraftMode: true });
+    expect(plugins).not.toContain("plugins/page.js");
+    expect(plugins).not.toContain("plugins/page-view.js");
+  });
+
+  test("plugins=page-view is unknown: a URL cannot ask for the reader half", () => {
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
+    const { plugins } = resolveModules(params({ plugins: "page-view" }), false);
+    expect(warn).toHaveBeenCalledWith('clayjs: unknown plugin "page-view"');
+    expect(plugins).toEqual([]);
+    warn.mockRestore();
+  });
+});
