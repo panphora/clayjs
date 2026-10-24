@@ -178,6 +178,14 @@ itself, with no network.
   (undo plugin).
 - `clay.ephemeral` — per-tab state on saved elements: `add(el, word)`, `remove`,
   `toggle(el, word, force)`, `has`. See Ephemeral state.
+- `clay.storage.local` and `clay.storage.session` — browser storage for this document
+  only, each `{ get(key), set(key, value), remove(key) }`, storing JSON (values come back
+  as they went in). Keys are `clay:doc:<location.pathname>:<key>`, so two documents on one
+  subdomain never see each other's state. Present in every mode. `session` survives a
+  reload and is copied into a duplicated tab. Storage that throws or is missing (a browser
+  that blocks it, a sandboxed frame) falls back to an in-memory map for the life of the
+  tab, and `set` returns `false` when it did — keep the value somewhere that outlives the tab
+  if that return matters.
 - `clay.cms` — the content panel: `clay.cms.open()` (cms plugin).
 - `clay.RichClay` — the rich-text editor class behind `editable` (richclay plugin).
 - `clay.quickcrop(file, opts)` — crop modal: resolves `{blob, dataURL, width, height}`,

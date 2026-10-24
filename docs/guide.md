@@ -1228,7 +1228,7 @@ Edit-only chrome lives in the same wrapper with `show-when:editmode="true"`, or 
 | State | Where | Why |
 |---|---|---|
 | Which card or entry is open, the filter, search text, current view, sort | URL hash: `#card=c-brief&q=pricing` | per tab, survives reload, shareable, Back closes the card, never saved or synced |
-| Collapsed sections, column widths, density, last opened entry | `localStorage`, keyed by the file's path | per device and viewer; wrap reads and writes in `try/catch` |
+| Collapsed sections, column widths, density, last opened entry | `clay.storage.local.get(key)` / `set(key, value)` / `remove(key)` | per device and viewer, scoped to this file's path; `clay.storage.session` instead lasts one tab |
 | Selection, hover, drag state, open menu | `ephemeral` on the element (5.7), memory, or chrome DOM | transient, never saved or synced |
 | Pointers, lobbies, who is looking at what, shared live but never saved | a never-saved live store (7.9) | every tab sees it at once, the file never holds it |
 | A default view visitors land on, WIP limits, column names, label definitions | attributes on a settings element in the record | genuinely part of the document |
@@ -1254,6 +1254,8 @@ When a view switch must use clay-options on a saved ancestor attribute, normaliz
 ```
 
 Never put per-viewer state on `<html>` or any record element without that: it autosaves, syncs to every collaborator and lands in version history.
+
+`clay.storage` keeps JSON under `clay:doc:<location.pathname>:<key>`, so two documents on one subdomain never share a key. Without it a per-document key is hand-built from the path, and every document's app collides with the next one's. `session` survives a reload and is copied into a duplicated tab, so it cannot keep one tab's state out of the next. When the browser blocks storage, every call still works from memory for the life of the tab and `set` returns `false`: save the value somewhere that outlives the tab if the return is `false`.
 
 ### 9.4 Derived values
 
