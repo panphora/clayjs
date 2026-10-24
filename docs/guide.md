@@ -1336,6 +1336,20 @@ Open on a click that is not on an editable field, a handle, an input or a link. 
 
 When a dialog must aggregate several records, render it into `editor-ui`, write each change back to its record by id, call `clay.markDirty()` per edit if the record is not written immediately, and re-render it on `clay:sync-applied` without disturbing the focused field.
 
+**Half-typed text in a detail field outlives the view.** A comment box or a description being edited sits in chrome (`clay="editor-ui"` or `clay="freeze"`) and carries `unsent="<name>"`. clayjs keeps its value per record (the nearest `[data-id]`) and name in this tab, outside the file: close the detail, take a sync redraw, reload, and the text is back, with the close warning on until it is sent.
+
+```html
+<div class="detail" clay="editor-ui">
+  <textarea class="comment" unsent="comment" placeholder="Add a comment"></textarea>
+  <button data-action="send-comment">Send</button>
+</div>
+```
+
+- The attribute is only a marker in the file: the region is chrome, so no save, sync frame or undo step ever carries the text.
+- The restore runs after the code that rebuilt the detail (a `MutationObserver`, not a microtask), so the view's own `openDetail` can clear and refill the field in the same task. To react to it, listen for `clay:unsent-restored`, which bubbles from the control with `detail: {base, current, stale}`: `stale` is true when the record's saved value changed since the person started typing, so the view can say so instead of silently overwriting.
+- Send and cancel call `clay.unsent.clear(input)`. Typing the text back to what the record already holds, or emptying it, drops it too, so the warning goes without an explicit call.
+- `clay.unsent.size` and `clay.unsent.list()` (`{record, name, base, text}`) say what is kept, and `clay:unsent-changed` fires on `document` with the count.
+
 With sapjs, the record-as-modal pattern works unchanged over `items=` records, and a plain-field editor can be a `detail=` panel or `<dialog>` instead: see [sapjs guide section 7](https://saphtml.com/guide.html).
 
 ### 9.6 Commands

@@ -34,6 +34,7 @@ export const PLUGIN_PATHS = {
   page:      { path: "plugins/page.js",           editOnly: true,  default: false },
   sortable:  { path: "plugins/sortable.js",        editOnly: true,  default: false },
   undo:      { path: "plugins/undo.js",            editOnly: true,  default: false },
+  unsent:    { path: "plugins/unsent.js",          editOnly: true,  default: false },
   cms:       { path: "plugins/cms.js",             editOnly: false, default: false },
   quickcrop: { path: "plugins/quickcrop.js",       editOnly: false, default: false },
   // editOnly, because a file picker only ever appears in edit mode: the cms
@@ -107,6 +108,7 @@ export const MODULES = {
   "plugins/page.js":            () => import("./plugins/page.js"),
   "plugins/sortable.js":        () => import("./plugins/sortable.js"),
   "plugins/undo.js":            () => import("./plugins/undo.js"),
+  "plugins/unsent.js":          () => import("./plugins/unsent.js"),
   "plugins/cms.js":             () => import("./plugins/cms.js"),
   "plugins/quickcrop.js":       () => import("./plugins/quickcrop.js"),
   "plugins/upload.js":          () => import("./plugins/upload.js"),
@@ -123,7 +125,7 @@ export const MODULES = {
 
 // `source` is last on purpose: its install captures a save clone, so it wants every
 // plugin that registers a document transform to have registered it first.
-const PLUGIN_ORDER = ["visitor-drafts", "richclay", "indicator", "sortable", "undo", "quickcrop", "upload", "people", "cms", "sync", "live", "page", "message", "wire", "ai-edit", "demo", "derive", "bind-text", "source"];
+const PLUGIN_ORDER = ["visitor-drafts", "richclay", "indicator", "sortable", "undo", "unsent", "quickcrop", "upload", "people", "cms", "sync", "live", "page", "message", "wire", "ai-edit", "demo", "derive", "bind-text", "source"];
 
 // A plugin that cannot do its whole job alone. hypercms reads the cropper through
 // a capability lookup (`clay.quickcrop`) and silently uploads the raw file when it

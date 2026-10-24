@@ -178,6 +178,11 @@ itself, with no network.
   (undo plugin).
 - `clay.ephemeral` — per-tab state on saved elements: `add(el, word)`, `remove`,
   `toggle(el, word, force)`, `has`. See Ephemeral state.
+- `clay.unsent` — the kept unsent text (unsent plugin): `size`, `list()` (one
+  `{record, name, base, text}` per entry, where `base` is the value the person started
+  from), `clear(el)` (drop the draft for that control's record and name) and
+  `drop(record, name)`. Typing the text back to its base, or emptying it, drops the draft
+  too.
 - `clay.storage.local` and `clay.storage.session` — browser storage for this document
   only, each `{ get(key), set(key, value), remove(key) }`, storing JSON (values come back
   as they went in). Keys are `clay:doc:<location.pathname>:<key>`, so two documents on one
@@ -586,6 +591,15 @@ token variant, `POST /_/save/{token}`, read from `<html savetoken>`.
 - `sortable` — drag-drop reordering; fires `clay:sorted`.
 - `undo` — document-wide undo/redo built on DOM mutations: moves, deletions, and
   attribute changes all reverse cleanly. Respects `clay="no-undo"`.
+- `unsent` — text typed into chrome and not yet sent outlives the view that holds it.
+  An input or textarea inside `clay="editor-ui"` or `clay="freeze"` marked
+  `unsent="<name>"` is kept per record (its nearest `[data-id]` ancestor) and name in
+  this tab, outside the file: reopening the detail, a sync redraw or a reload brings the
+  text back, and the close warning stays on while any of it is kept. Nothing enters the
+  file. Sending or cancelling calls `clay.unsent.clear(input)`. Events:
+  `clay:unsent-restored`, bubbling from the control with
+  `detail: {base, current, stale}` (`stale` says the record's saved value changed since the
+  person started typing), and `clay:unsent-changed` on `document` with `detail: {count}`.
 - `cms` (`?plugins=cms`) — a content sidebar that builds itself from your page. Declare
   content with a rules tag; whoever has edit access sees friendly fields (text, rich
   text, images, lists), not markup:

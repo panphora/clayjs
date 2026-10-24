@@ -165,6 +165,8 @@ function attachPluginMember(path, mod, loaded) {
 
   if (path === "plugins/undo.js") {
     clay.undo = mod.undo || mod.default;
+  } else if (path === "plugins/unsent.js") {
+    clay.unsent = mod.unsent;
   } else if (path === "sync/live-sync.js") {
     clay.morph = mod.morph;
     clay.conflicts = mod.conflicts;
