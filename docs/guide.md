@@ -706,7 +706,9 @@ So collaborators see each other's work a few seconds after each pause. On a page
 | A and B change the same word | B wins; A's version goes to the conflict ledger |
 | Both add class tokens (`done` and `urgent`) | both kept |
 | Both set one attribute (`data-status`) differently | B wins; ledger record |
-| Both reorder a list differently | B's order; ledger record |
+| Both move different items in one list | both moves kept |
+| Both move the same item | B's order; ledger record |
+| Both change an attribute declared with `merge-tokens` or `merge-max` | merged (token set union, or the larger number), no conflict |
 | A edits a card, B reorders the list | B's order with A's edit, no conflict |
 | A edits a card B deleted | the card survives with A's edit |
 | A deleted a card B edited | the card comes back with B's edit; ledger record |
@@ -716,11 +718,26 @@ So collaborators see each other's work a few seconds after each pause. On a page
 
 More engine rules:
 
-- Text merges word by word inside a block, and formatting merges per character. Inline `<style>` text merges word by word. Scripts, textarea text and comments merge as whole values.
+- Text merges word by word inside a block, and formatting merges per character. Inline `<style>` and textarea text merge word by word. Scripts and comments merge as whole values.
 - Matched live nodes are moved, not recreated, so listeners, focus, caret and iframes survive. An element that matches nothing (re-keyed, or changed beyond recognition among similar siblings) is removed and inserted fresh, and listeners attached directly to it are gone. **Use delegated listeners** on `document` or a stable root.
 - A new or changed inline `<script>` in the frame runs once after the merge. Hence `clay.start` (9.10).
 - Window scroll is restored. Inner scroll containers are not, except the focused element's own.
 - The merge runs with the mutation hub, the dirty gate and undo paused: incoming changes never autosave and never enter undo history. `clay.effect` re-runs after it through `clay:sync-applied`, which is how the examples re-render (7.5).
+
+#### Declared attribute merges
+
+A `data-*` attribute that both sides change is normally a conflict: B wins and A's value goes to the ledger. Two kinds of attribute are better merged, and a container declares them for everything inside it:
+
+- `merge-tokens="data-labels"`: the attribute is a space-separated set. Both sides' additions and removals apply.
+- `merge-max="data-next-card"`: the attribute is a number that only grows, such as a counter for the next card number. The larger value wins, with no ledger record.
+
+```html
+<main merge-tokens="data-labels" merge-max="data-next-card" data-next-card="15">
+  <article data-id="c1" data-labels="bug urgent">…</article>
+</main>
+```
+
+Several names go in one attribute, separated by spaces. `data-id` is never merged this way. An attribute nobody declared still conflicts as before. The Kanban starter template uses both: labels as tokens, the card counter as a maximum.
 
 ### 7.3 Regions and JSON under sync
 
