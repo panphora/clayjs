@@ -59,6 +59,7 @@
   },
   "scripts": {
     "test": "node scripts/test-guard.mjs",
+    "measure:load": "node scripts/measure-load.mjs",
     "test:conformance": "UPDATE_GOLDENS=0 web-test-runner --config conformance/wtr.config.mjs",
     "conformance:update": "UPDATE_GOLDENS=1 web-test-runner --config conformance/wtr.config.mjs",
     "build:standalone": "node build.js --standalone",
