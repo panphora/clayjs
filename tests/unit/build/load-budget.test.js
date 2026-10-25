@@ -5,6 +5,7 @@ import { beforeAll, afterAll, expect, test } from "@jest/globals";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { parse } from "parse5";
 import { CORE_WAVES, PLUGIN_PATHS } from "../../../src/loader-logic.js";
 
 const ROOT = new URL("../../../", import.meta.url).pathname;
@@ -24,6 +25,31 @@ function withinAssets(measured, limits) {
   }
 }
 
+// A request from another origin is a request the page really makes and one whose bytes
+// nothing here can size, so the meter counts it and names it. The templates this
+// milestone ships, and every Document, fetch nothing from another origin; the old
+// shipped copies still link Google Fonts (and the Journal's also two CDN scripts), and
+// each one has to still report them, so an empty list cannot mean "not seen".
+const THIRD_PARTY_ALLOWED = new Set(["kanban-hyperclay.html", "journal-hyperclay.html", "kanban-local.html"]);
+
+function withinThirdParty(fixture, measured) {
+  if (THIRD_PARTY_ALLOWED.has(fixture)) expect(measured.thirdParty.length).toBeGreaterThan(0);
+  else expect(measured.thirdParty).toEqual([]);
+}
+
+// The fixture files are the shipped templates, and a stub would satisfy every budget
+// above. Counting what the template itself contains is the check a stub cannot pass.
+const countOf = (html, tag, className) => {
+  let count = 0;
+  const walk = (node) => {
+    const classes = (node.attrs || []).find(({ name }) => name === "class");
+    if (node.tagName === tag && classes && classes.value.split(/\s+/).includes(className)) count++;
+    for (const child of node.childNodes || []) walk(child);
+  };
+  walk(parse(html));
+  return count;
+};
+
 for (const [fixture, modes] of Object.entries(budget)) {
   if (fixture === "built") continue;
   for (const [mode, limits] of Object.entries(modes)) {
@@ -36,9 +62,35 @@ for (const [fixture, modes] of Object.entries(budget)) {
       expect(measured.js.depth).toBeLessThanOrEqual(limits.depth);
       expect(measured.js.brotli).toBeLessThanOrEqual(limits.brotli);
       withinAssets(measured, limits);
+      withinThirdParty(fixture, measured);
     });
   }
 }
+
+// The meter has to see a request from another origin at all: a Google Fonts sheet is
+// one request whose bytes are not this repo's, and it fails the gate for a fixture the
+// plans say fetches nothing from anywhere else.
+test("a Google Fonts link is one third-party request and fails the gate", async () => {
+  const html = "<script src=\"https://clayjs.com/v1/clay.js?plugins=menu\"></script>" +
+    "<link rel=\"stylesheet\" href=\"https://fonts.googleapis.com/css2?family=Inter&display=swap\">";
+  const measured = await measure({ html, mode: "view" });
+
+  expect(measured.thirdParty).toEqual([{
+    url: "https://fonts.googleapis.com/css2?family=Inter&display=swap",
+    origin: "https://fonts.googleapis.com",
+    kind: "stylesheet",
+  }]);
+  expect(measured.css.requests).toBe(1);
+  expect(measured.css.raw).toBe(0);
+  expect(() => withinThirdParty("document.html", measured)).toThrow();
+  expect(() => withinThirdParty("kanban.html", measured)).toThrow();
+  expect(() => withinThirdParty("kanban-local.html", measured)).not.toThrow();
+}, 180000);
+
+test("the Kanban and Journal fixtures are the shipped templates, not stubs", () => {
+  expect(countOf(htmlOf("kanban.html"), "li", "card")).toBeGreaterThan(0);
+  expect(countOf(htmlOf("journal.html"), "article", "entry")).toBeGreaterThan(0);
+});
 
 // What a browser on clayjs.com actually downloads is the chunked release, so that
 // gets its own budgets. Built once for the whole file: the chunk build is the slow
@@ -67,6 +119,7 @@ for (const [fixture, modes] of Object.entries(budget.built)) {
       expect(measured.js.depth).toBeLessThanOrEqual(limits.depth);
       expect(measured.js.brotli).toBeLessThanOrEqual(limits.brotli);
       withinAssets(measured, limits);
+      withinThirdParty(fixture, measured);
     });
   }
 }

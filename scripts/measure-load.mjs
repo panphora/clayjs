@@ -21,6 +21,10 @@ const ROOT = resolve(fileURLToPath(new URL(".", import.meta.url)), "..");
 const CLAY = "https://clayjs.com/v1/";
 const CLAY_ORIGIN = new URL(CLAY).origin;
 const CLAY_SRC_PATH = "/v1/src/";
+const CLAY_FONTS_PATH = "/v1/fonts/";
+// The page's own origin, before anything is fetched from it: a relative URL in a
+// fixture is a request to the fixture, never to a third party.
+const FIXTURE_ORIGIN = "https://fixture.invalid";
 const FIXTURES = join(ROOT, "tests/fixtures/load");
 const CSS_IMPORT = /@import\s+(?:url\(\s*(?:"([^"]+)"|'([^']+)'|([^\s)"']+))\s*\)|"([^"]+)"|'([^']+)')/gi;
 const FONT_URL = /url\(\s*["']?([^"')]+\.(?:woff2?|ttf|otf))["']?\s*\)/gi;
@@ -67,16 +71,19 @@ function parseDocument(html) {
   const document = parse(html);
   const scripts = [];
   const stylesheets = [];
+  const fontPreloads = [];
   let rootAttrs = {};
   let apiRules = null;
   let hasSap = false;
+  let templateSource = null;
 
   const walk = (node) => {
     const attrs = attrsOf(node);
     if (node.tagName === "html") rootAttrs = attrs;
     if (node.tagName && Object.hasOwn(attrs, "sap")) hasSap = true;
+    if (node.tagName === "meta" && (attrs.name || "").toLowerCase() === "hyper-source") templateSource = attrs.content || null;
     if (node.tagName === "script") {
-      if (attrs.src?.startsWith(CLAY)) scripts.push(new URL(attrs.src));
+      if (attrs.src) scripts.push(new URL(attrs.src, FIXTURE_ORIGIN));
       if (!apiRules && (attrs["data-rules-name"] || "").split(/\s+/).includes("api")) {
         apiRules = {
           getAttribute: (name) => attrs[name] ?? null,
@@ -84,15 +91,22 @@ function parseDocument(html) {
         };
       }
     }
-    if (node.tagName === "link" && (attrs.rel || "").split(/\s+/).some((token) => token.toLowerCase() === "stylesheet") && attrs.href) {
+    const rel = (attrs.rel || "").split(/\s+/).map((token) => token.toLowerCase());
+    if (node.tagName === "link" && rel.includes("stylesheet") && attrs.href) {
       stylesheets.push(attrs.href);
+    }
+    // A preloaded font is fetched before the sheet that would name it, so it is a
+    // request of its own: a page whose font nobody counted still pays for it.
+    if (node.tagName === "link" && rel.includes("preload") && (attrs.as || "").toLowerCase() === "font" && attrs.href) {
+      fontPreloads.push(attrs.href);
     }
     for (const child of node.childNodes || []) walk(child);
   };
   walk(document);
 
-  const core = scripts.find((url) => url.pathname === "/v1/clay.js");
-  const names = scripts
+  const clayScripts = scripts.filter(isClayAsset);
+  const core = clayScripts.find((url) => url.pathname === "/v1/clay.js");
+  const names = clayScripts
     .filter((url) => url.pathname !== "/v1/clay.js")
     .map((url) => url.pathname.slice("/v1/".length));
   const draftDocument = {
@@ -104,8 +118,11 @@ function parseDocument(html) {
     bootstrap: Boolean(core),
     params: core?.searchParams ?? new URLSearchParams(),
     names,
+    scripts,
     stylesheets,
+    fontPreloads,
     hasSap,
+    templateSource,
     draftDocument,
   };
 }
@@ -206,9 +223,25 @@ function total(files, root = ROOT) {
   return sum;
 }
 
+// A clayjs.com URL served out of this repo: the release's own assets, so their
+// bytes are readable here rather than guessed.
+function isClayAsset(url) {
+  return url.origin === CLAY_ORIGIN && url.pathname.startsWith("/v1/");
+}
+
 function localCssPath(url) {
-  if (url.origin !== CLAY_ORIGIN || !url.pathname.startsWith(CLAY_SRC_PATH)) return null;
-  return decodeURIComponent(url.pathname.slice("/v1/".length));
+  if (url.origin !== CLAY_ORIGIN) return null;
+  if (url.pathname.startsWith(CLAY_SRC_PATH)) return decodeURIComponent(url.pathname.slice("/v1/".length));
+  // The release's font sheets ship beside the font files, at /v1/fonts/<name>.css.
+  if (url.pathname.startsWith(CLAY_FONTS_PATH)) return `fonts/${decodeURIComponent(url.pathname.slice(CLAY_FONTS_PATH.length))}`;
+  return null;
+}
+
+// A request this repo cannot size: another origin's script, stylesheet or font.
+// It is still a request the page makes, so it is counted as one with no bytes and
+// named here, per origin, for a gate to refuse.
+function isThirdParty(url) {
+  return url.origin !== CLAY_ORIGIN && url.origin !== FIXTURE_ORIGIN;
 }
 
 export function cssImportsOf(css, servedUrl) {
@@ -241,23 +274,42 @@ function localFont(url) {
 }
 
 // Stylesheets, then the fonts they name: a font is fetched one stage after its sheet,
-// and is reported on its own line so the JavaScript ceiling cannot hide it.
+// and is reported on its own line so the JavaScript ceiling cannot hide it. A sheet or
+// a font from another origin is a request too, so it counts against the line and is
+// named in `thirdParty` instead of being sized here.
 async function cssOf(document) {
   const external = [];
   const files = [];
   const fontFiles = new Map();
   const externalFonts = new Map();
+  const thirdParty = new Map();
   const seen = new Set();
   let depth = 0;
-  const queue = document.stylesheets.map((href) => ({ url: new URL(href, "https://fixture.invalid/").href, stage: 1 }));
+  const named = (url, kind) => {
+    if (!thirdParty.has(url.href)) thirdParty.set(url.href, { url: url.href, origin: url.origin, kind });
+  };
+  const queue = [
+    ...document.stylesheets.map((href) => ({ href, stage: 1, kind: "stylesheet" })),
+    ...document.fontPreloads.map((href) => ({ href, stage: 1, kind: "font" })),
+  ];
   while (queue.length) {
-    const { url: href, stage } = queue.shift();
-    if (seen.has(href)) continue;
-    seen.add(href);
-    const url = new URL(href);
+    const { href, stage, kind } = queue.shift();
+    const url = new URL(href, FIXTURE_ORIGIN);
+    if (seen.has(url.href)) continue;
+    seen.add(url.href);
+    if (kind === "font") {
+      const local = localFont(url);
+      if (local) fontFiles.set(url.href, { path: local, stage });
+      else if (isThirdParty(url)) named(url, "font");
+      continue;
+    }
     const path = localCssPath(url);
     if (!path || !existsSync(join(ROOT, path))) {
-      external.push(href);
+      external.push(url.href);
+      if (isThirdParty(url)) {
+        named(url, "stylesheet");
+        depth = Math.max(depth, stage);
+      }
       continue;
     }
     files.push(path);
@@ -266,31 +318,59 @@ async function cssOf(document) {
     const text = compiled ?? readFileSync(join(ROOT, path), "utf8");
     if (!compiled) {
       for (const imported of cssImportsOf(text, url)) {
-        if (imported.path && existsSync(join(ROOT, imported.path))) queue.push({ url: imported.url, stage: stage + 1 });
-        else external.push(imported.url);
+        if (imported.path && existsSync(join(ROOT, imported.path))) queue.push({ href: imported.url, stage: stage + 1, kind: "stylesheet" });
+        else {
+          external.push(imported.url);
+          if (isThirdParty(new URL(imported.url))) named(new URL(imported.url), "stylesheet");
+        }
       }
     }
     for (const found of text.matchAll(FONT_URL)) {
       const font = new URL(found[1], url);
       const local = localFont(font);
       if (local) fontFiles.set(font.href, { path: local, stage: stage + 1 });
-      else if (!found[1].startsWith("data:")) externalFonts.set(font.href, true);
+      else if (!found[1].startsWith("data:")) {
+        externalFonts.set(font.href, true);
+        if (isThirdParty(font)) named(font, "font");
+      }
     }
   }
   const fonts = [...fontFiles.values()];
   const fontDepth = fonts.reduce((most, font) => Math.max(most, font.stage), 0);
+  const cssBytes = total(files);
+  const fontBytes = total(fonts.map((font) => font.path));
+  const count = (kind) => [...thirdParty.values()].filter((entry) => entry.kind === kind).length;
   return {
-    css: { ...total(files), depth, external },
-    fonts: { ...total(fonts.map((font) => font.path)), depth: fontDepth, external: [...externalFonts.keys()] },
+    css: { ...cssBytes, requests: cssBytes.requests + count("stylesheet"), depth, external },
+    fonts: {
+      ...fontBytes,
+      requests: fontBytes.requests + count("font"),
+      depth: fontDepth,
+      external: [...externalFonts.keys()],
+    },
+    thirdParty: [...thirdParty.values()],
   };
+}
+
+// Every script the page fetches from another origin. The bytes are not this repo's to
+// know, but the request is the page's, so it is counted and named.
+function thirdPartyScripts(document) {
+  const found = new Map();
+  for (const url of document.scripts) {
+    if (!isThirdParty(url) || found.has(url.href)) continue;
+    found.set(url.href, { url: url.href, origin: url.origin, kind: "script" });
+  }
+  return [...found.values()];
 }
 
 export async function measure({ html, mode }) {
   const document = parseDocument(html);
-  const { bootstrap, params, names, hasSap } = document;
+  const { bootstrap, params, names, hasSap, templateSource } = document;
   const isDraftMode = mode === "draft";
+  // An owner can edit, and a copy of a starter template upgrades from its own
+  // `hyper-source`: both are requests the page really makes before ready.
   const plan = bootstrap
-    ? resolveModules(params, mode === "edit" || isDraftMode, { isDraftMode, hasSap })
+    ? resolveModules(params, mode === "edit" || isDraftMode, { isDraftMode, hasSap, canEdit: true, templateSource })
     : { core: [], plugins: [] };
   const targets = names.map(satelliteTarget).filter(Boolean);
   const graphEntries = [...(bootstrap ? ["src/loader.js"] : []), ...targets.map((target) => `src/${target}`)];
@@ -335,7 +415,9 @@ export async function measure({ html, mode }) {
   const pathSet = new Set(loaded);
   for (const path of classic) pathSet.add(path);
   const paths = [...pathSet];
+  const thirdParty = thirdPartyScripts(document);
   const js = { ...total(paths), depth, files: paths.map((path) => ({ path, ...sizes(path) })) };
+  js.requests += thirdParty.length;
 
   // Modules that load after the editor takes input stay out of the numbers above.
   const lateLoaded = new Set(loaded);
@@ -345,7 +427,16 @@ export async function measure({ html, mode }) {
   const lazy = new Set();
   for (const file of loaded) for (const dep of dynamicDeps(inputs, file)) if (!loaded.has(dep)) lazy.add(dep);
 
-  return { mode, bootstrap, plugins: plan.plugins, js, ...(await cssOf(document)), lazy: [...lazy].sort() };
+  const assets = await cssOf(document);
+  return {
+    mode,
+    bootstrap,
+    plugins: plan.plugins,
+    js,
+    ...assets,
+    thirdParty: [...thirdParty, ...assets.thirdParty],
+    lazy: [...lazy].sort(),
+  };
 }
 
 // The payload a generated bootstrap inlines: one JSON object, written without
@@ -375,10 +466,10 @@ function payloadOf(code) {
 // src/, because nothing on the wire is.
 export async function measureBuilt({ html, mode, dir }) {
   const document = parseDocument(html);
-  const { bootstrap, params, names, hasSap } = document;
+  const { bootstrap, params, names, hasSap, templateSource } = document;
   const isDraftMode = mode === "draft";
   const plan = bootstrap
-    ? resolveModules(params, mode === "edit" || isDraftMode, { isDraftMode, hasSap })
+    ? resolveModules(params, mode === "edit" || isDraftMode, { isDraftMode, hasSap, canEdit: true, templateSource })
     : { core: [], plugins: [] };
   const manifest = JSON.parse(readFileSync(join(dir, "m/manifest.json"), "utf8"));
   const bootImports = [];
@@ -460,7 +551,9 @@ export async function measureBuilt({ html, mode, dir }) {
     }
     return sum;
   };
+  const thirdParty = thirdPartyScripts(document);
   const js = { ...totals([...loaded]), depth, files: [...loaded].map((path) => ({ path, ...sizes(path, rootOf(path)) })) };
+  js.requests += thirdParty.length;
 
   // Modules that load after the editor takes input stay out of the numbers above.
   const late = new Set(loaded);
@@ -475,7 +568,16 @@ export async function measureBuilt({ html, mode, dir }) {
     }
   }
 
-  return { mode, bootstrap, plugins: plan.plugins, js, ...(await cssOf(document)), lazy: [...lazy].sort() };
+  const assets = await cssOf(document);
+  return {
+    mode,
+    bootstrap,
+    plugins: plan.plugins,
+    js,
+    ...assets,
+    thirdParty: [...thirdParty, ...assets.thirdParty],
+    lazy: [...lazy].sort(),
+  };
 }
 
 function parseArgs(argv) {
@@ -518,6 +620,13 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
       for (const asset of ["js", "css", "fonts"]) {
         const m = r[asset];
         console.log(`${r.file} | ${r.mode} | ${asset} | ${m.requests} | ${kb(m.raw)} | ${kb(m.gzip)} | ${kb(m.brotli)} | ${m.depth}`);
+      }
+      // Another origin's bytes are not this repo's to know: the request is counted, and
+      // named per origin, with no byte figure that could be read as zero.
+      const origins = new Map();
+      for (const entry of r.thirdParty) origins.set(entry.origin, (origins.get(entry.origin) ?? 0) + 1);
+      for (const [origin, requests] of origins) {
+        console.log(`${r.file} | ${r.mode} | third-party ${origin} | ${requests} | ? | ? | ? |`);
       }
     }
   }

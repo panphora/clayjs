@@ -97,6 +97,60 @@ test("a Document's view mode counts no view parts, and neither does a tool-less 
   expect(paths(text)).not.toContain("src/page/tool-data.js");
 });
 
+// The release serves its font sheets from /v1/fonts/, beside the font files, so a page
+// that links one fetches that CSS and the fonts it names: neither is a third party, and
+// neither may land in the external bin the budgets never check.
+test("a /v1/fonts stylesheet link counts the CSS and the font files it names", async () => {
+  const sheet = "https://clayjs.com/v1/fonts/work-sans.css";
+  const measured = await measure({ html: `${clayTag()}<link rel="stylesheet" href="${sheet}">`, mode: "view" });
+
+  expect(measured.css.requests).toBe(1);
+  expect(measured.css.raw).toBe(readFileSync(new URL("../../../fonts/work-sans.css", import.meta.url)).length);
+  expect(measured.css.external).toEqual([]);
+  expect(measured.fonts.requests).toBe(1);
+  expect(measured.fonts.raw).toBe(readFileSync(new URL("../../../fonts/work-sans-latin-wght-normal.woff2", import.meta.url)).length);
+  expect(measured.fonts.external).toEqual([]);
+  expect(measured.thirdParty).toEqual([]);
+});
+
+// A preloaded font is a request before the sheet that names it arrives, so it counts even
+// where it is the same file: one request, not two and not none.
+test("a preloaded clayjs font counts once, and never as a third party", async () => {
+  const font = "https://clayjs.com/v1/fonts/work-sans-latin-wght-normal.woff2";
+  const html = `${clayTag()}<link rel="preload" href="${font}" as="font" type="font/woff2" crossorigin>` +
+    `<link rel="stylesheet" href="https://clayjs.com/v1/fonts/work-sans.css">`;
+  const measured = await measure({ html, mode: "view" });
+
+  expect(measured.fonts.requests).toBe(1);
+  expect(measured.fonts.depth).toBe(1);
+  expect(measured.thirdParty).toEqual([]);
+});
+
+// A blocking CDN script in the head is a request before ready and its bytes are not this
+// repo's: it counts against the JavaScript line and is named, so a fixture that drops the
+// tag changes the number instead of measuring the same.
+test("a third-party script counts against the JavaScript line and is named", async () => {
+  const cdn = "https://cdn.jsdelivr.net/npm/overtype@2.6.1/dist/overtype.min.js";
+  const bare = await measure({ html: clayTag(), mode: "view" });
+  const withCdn = await measure({ html: `${clayTag()}<script src="${cdn}"></script>`, mode: "view" });
+
+  expect(withCdn.js.requests).toBe(bare.js.requests + 1);
+  expect(withCdn.thirdParty).toEqual([{ url: cdn, origin: "https://cdn.jsdelivr.net", kind: "script" }]);
+});
+
+// The owner of a copy made from a starter template loads the upgrade check before ready:
+// its own plugin and the vendor it imports. A reader of a plain Document loads neither.
+test("the owner's shipped copy counts the upgrade plugin and its vendor, a Document counts neither", async () => {
+  const shipped = await measure({ html: fixture("kanban.html"), mode: "view" });
+  const plain = await measure({ html: fixture("document.html"), mode: "view" });
+
+  expect(shipped.plugins).toContain("plugins/upgrade.js");
+  expect(paths(shipped)).toContain("src/plugins/upgrade.js");
+  expect(paths(shipped)).toContain("src/vendor/hyper-html-api-upgrade.vendor.js");
+  expect(plain.plugins).not.toContain("plugins/upgrade.js");
+  expect(paths(plain)).not.toContain("src/plugins/upgrade.js");
+});
+
 test("a Document with a tool counts the host and data modules its part opens first", async () => {
   const value = seedValue([{ id: "t", t: "tool", attrs: { rev: "r1" } }]);
   const html = `<!doctype html><html><head><script type="application/json" merge="page" clay="live">${JSON.stringify(value)}</script></head><body><article data-page="1"></article><script src="https://clayjs.com/v1/clay.js?plugins=page"></script></body></html>`;
