@@ -59,13 +59,15 @@ describe('clay.standalone.js in edit mode', () => {
   it('hands clay.morph a Promise that lands the merge', async () => {
     const clay = win.clay;
     const host = win.document.createElement('div');
+    host.id = 'morph-host';
     host.innerHTML = '<p>a</p>';
     win.document.body.appendChild(host);
-    const result = clay.morph(host, '<p>b</p>');
+    const result = clay.morph(host, '<div id="morph-host"><p>b</p></div>');
     expect(result).to.be.a('promise');
     await result;
-    expect(host.innerHTML).to.equal('<p>b</p>');
-    host.remove();
+    const merged = win.document.getElementById('morph-host');
+    expect(merged.innerHTML).to.equal('<p>b</p>');
+    merged.remove();
   });
 
   it('wires [sortable] from the bundled vendor', () => {
@@ -145,13 +147,15 @@ describe('clay.standalone.js in view mode', () => {
   it('hands clay.morph a Promise that lands the merge', async () => {
     const clay = win.clay;
     const host = win.document.createElement('div');
+    host.id = 'morph-host';
     host.innerHTML = '<p>a</p>';
     win.document.body.appendChild(host);
-    const result = clay.morph(host, '<p>b</p>');
+    const result = clay.morph(host, '<div id="morph-host"><p>b</p></div>');
     expect(result).to.be.a('promise');
     await result;
-    expect(host.innerHTML).to.equal('<p>b</p>');
-    host.remove();
+    const merged = win.document.getElementById('morph-host');
+    expect(merged.innerHTML).to.equal('<p>b</p>');
+    merged.remove();
   });
 });
 
