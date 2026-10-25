@@ -2,6 +2,7 @@
  * @jest-environment node
  */
 import { expect, test } from "@jest/globals";
+import { readFileSync } from "node:fs";
 import { build } from "esbuild";
 import { resolveModules } from "../../../src/loader-logic.js";
 import { ASSETS as OPTIONAL_ASSETS } from "../../../scripts/vendor-optional.mjs";
@@ -152,3 +153,19 @@ for (const [fixture, tag] of Object.entries(FIXTURES)) {
     });
   }
 }
+
+// What the shipped Kanban view page asks for: its own loader tag, not a hand copy
+// of the plugin list. A reader must never fetch the save graph, and parse5 comes in
+// only through save.js's owned-style stripper.
+test("kanban view: the reader graph has no save code or parse5", async () => {
+  const html = readFileSync(new URL("../../../tests/fixtures/load/kanban.html", import.meta.url), "utf8");
+  const tag = html.match(/<script[^>]+src="([^"]*clay\.js[^"]+)"/)[1];
+  const params = new URL(tag).searchParams;
+  const plan = resolveModules(params, false, { isDraftMode: false, hasSap: FIXTURES.kanban.hasSap });
+  const entries = [...plan.core, ...plan.plugins].map((path) => `src/${path}`);
+  const graph = walk(await inputsFor(entries), entries);
+
+  expect(entries).toContain("src/sync/live-sync.js");
+  expect(graph.has("src/core/save.js")).toBe(false);
+  expect(graph.has("src/vendor/parse5.vendor.js")).toBe(false);
+});

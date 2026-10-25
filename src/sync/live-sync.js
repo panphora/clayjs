@@ -45,14 +45,9 @@ import { attributeMerge } from "./merge-declarations.js";
 import { serializeForSync, captureForComparisonAndDirty, captureSnapshot, originalSnapshotNode, captureForMerge, captureForSaveAndComparison } from '../core/snapshot.js';
 import { mergeIgnoresAttr, mergeVetoesAttr } from '../lib/root-attrs.js';
 import { autosaveActive } from '../lib/autosave-state.js';
-import { enableContentEditable } from '../core/admin-contenteditable.js';
-import { enableOnClick } from '../core/admin-onclick.js';
-import { enableAdminInputs } from '../core/admin-inputs.js';
-import { enableAdminResources } from '../core/admin-resources.js';
 import { presence } from './presence.js';
 import { editingMarker } from './editing-marker.js';
 import { hostSupports } from '../core/host-meta.js';
-import { EditingSender } from './editing-sender.js';
 import { servedDocumentEtag } from '../core/host-attrs.js';
 import { recordEtag, seedEtag, lastSeenEtag, conditionalSaves, representedEtag, forgetRepresentedEtag } from '../core/etag.js';
 import { pageMaybeDirty, pauseGate, resumeGate, gateCaptureToken, gateClearIfUnchanged } from '../lib/dirty-gate.js';
@@ -62,6 +57,35 @@ import { streamOpened, streamClosed, streamEvent, LIVE_EVENTS } from '../live/st
 import { conflicts, beginApply, completeApply, failApply } from './conflicts.js';
 import { beginLineageCapture } from './conflict-footprints.js';
 import { isDerivedAttr, ownsDerivedText, stripDerived, repaintDerived, paintSignatureOfHtml, derivedActive } from '../lib/derived.js';
+
+// The edit-only half of live sync (save, admin and editing-sender code) is a
+// separate chunk. Edit mode starts it as live-sync evaluates, so its modules
+// stand where the old static imports left them before the first frame or save,
+// and view mode never fetches it.
+let edit = null;
+let editLoad = null;
+
+function loadEdit() {
+  editLoad ??= new Promise((resolve) => setTimeout(resolve, 0))
+    .then(() => import('./live-sync-edit.js'))
+    .then((loaded) => (edit = loaded))
+    .catch((error) => {
+      editLoad = null;
+      throw error;
+    });
+  return editLoad;
+}
+
+if (isEditMode) loadEdit().catch(() => {});
+
+// save.js returns this from savePageThrottled outside edit mode; a view-mode
+// tab that somehow asks for a merge save gets the same answer without loading it.
+const notInEditModeResult = () => ({
+  msg: 'Not in edit mode',
+  msgType: 'skipped',
+  code: null,
+  etag: null,
+});
 
 // What a live-sync merge never reads or touches on any side: editor chrome,
 // content kept out of the save or the snapshot, the contents of frozen regions,
@@ -179,18 +203,17 @@ function readServedStamp(html) {
  * here; the merge's attribute veto keeps the live root's own.
  */
 function activateIncomingDoc(rootEl) {
-  if (!isEditMode || !rootEl) return;
-  enableContentEditable(rootEl);
-  enableOnClick(rootEl);
-  enableAdminInputs(rootEl);
-  enableAdminResources(rootEl);
+  if (!isEditMode || !rootEl || !edit) return;
+  edit.enableContentEditable(rootEl);
+  edit.enableOnClick(rootEl);
+  edit.enableAdminInputs(rootEl);
+  edit.enableAdminResources(rootEl);
 }
 
 function pairedBaseline() {
   const { forComparison, forDirty } = captureForComparisonAndDirty({ flushUndo: false });
   return [forComparison, forDirty];
 }
-import { savePageThrottled, setLastSavedBaselines, setUnsavedChanges, getLastSavedBytes, conflictResolvedBySync, isSaveConflicted, baselineSettled, schedulePaintHeal } from '../core/save.js';
 
 /**
  * The wires live in wire-profile.js: both halves of one sync pick a single profile
@@ -471,7 +494,7 @@ class LiveSync {
     // bounded, and it does not gate ordinary saves — /_/save is a separate lane that
     // never moved. Snapshots produced during the window are queued, not dropped.
     const gen = ++this._startGen;
-    if (this.lane === 'live' && !baselineSettled()) {
+    if (this.lane === 'live' && !(edit ? edit.baselineSettled() : false)) {
       const applyGen = this._applyGen;
       const morphTicket = this._morphTicket;
       const saveEpoch = this._saveEpoch;
@@ -512,7 +535,10 @@ class LiveSync {
     }
     // Exposed so a caller (and the tests) can await the point where the stream is
     // actually open, rather than counting microtasks behind the discovery request.
-    this._ready = this._resolveProfile().then(() => {
+    this._ready = Promise.all([
+      this.lane === 'live' ? loadEdit() : null,
+      this._resolveProfile(),
+    ]).then(() => {
       if (this.isDestroyed || this._startGen !== gen) return;
       this.connect();
     });
@@ -522,9 +548,12 @@ class LiveSync {
       this.listenForSnapshots();
       hostSupports('presence-editing').then((supported) => {
         if (!supported || this.isDestroyed || this._startGen !== gen || this._editing) return;
-        this._editing = new EditingSender({ send: (path) => this._postEditing(path) });
-        this._editing.start();
-        this._editing.roster(this._lastRoster);
+        return loadEdit().then((mod) => {
+          if (this.isDestroyed || this._startGen !== gen || this._editing) return;
+          this._editing = new mod.EditingSender({ send: (path) => this._postEditing(path) });
+          this._editing.start();
+          this._editing.roster(this._lastRoster);
+        });
       }, () => {});
       this._saveSavedHandler = () => {
         this._saveEpoch++;
@@ -536,7 +565,7 @@ class LiveSync {
         const ticket = this._saveTicket || this._ticket();
         this._saveTicket = 0;
         if (ticket > this._acceptedSaveTicket) this._acceptedSaveTicket = ticket;
-        const bytes = getLastSavedBytes();
+        const bytes = edit ? edit.getLastSavedBytes() : null;
         if (bytes != null) this._setDiskBase(bytes, ticket);
         this._relayCommit();
       };
@@ -552,7 +581,7 @@ class LiveSync {
         queueMicrotask(() => {
           if (this.isDestroyed) return;
           if (refusedBy !== lastSeenEtag()) return;
-          conflictResolvedBySync(refusedBy);
+          edit?.conflictResolvedBySync(refusedBy);
           this._saveAfterMerge(pageMaybeDirty(), false);
         });
       };
@@ -919,8 +948,8 @@ class LiveSync {
       if (etag && html === this.lastHtml) {
         this._log(`Taking the stamp from a peer save of content already applied (seq=${seq})`);
         recordEtag(etag);
-        if (isSaveConflicted()) {
-          conflictResolvedBySync(etag);
+        if (edit && edit.isSaveConflicted()) {
+          edit.conflictResolvedBySync(etag);
           this._saveAfterMerge(pageMaybeDirty(), false);
         }
         return;
@@ -1806,7 +1835,8 @@ class LiveSync {
   _saveAfterMerge(diverged, typedDuringWait) {
     if (!(diverged || typedDuringWait)) return;
     if (!autosaveActive()) return;
-    savePageThrottled();
+    if (edit) edit.savePageThrottled();
+    else notInEditModeResult();
   }
 
   /**
@@ -1820,6 +1850,7 @@ class LiveSync {
    * @returns {Promise<void>}
    */
   async _doApplyUpdate(html, seq, identityMap, etag, by = null) {
+    if (this.lane === 'live' && !edit) await loadEdit();
     this._log('applyUpdate - pausing mutations and morphing');
     this.isPaused = true;
 
@@ -1957,7 +1988,7 @@ class LiveSync {
           emitForSync: false,
           flushUndo: false,
         });
-        setLastSavedBaselines(forComparison, forDirty);
+        edit.setLastSavedBaselines(forComparison, forDirty);
         this._setDiskBase(forSave, this._ticket());
       }
 
@@ -1997,7 +2028,7 @@ class LiveSync {
     // isPaused is lifted so the convergence save's relay reaches peers.
     // Only where autosave is on: a manual-save page must never auto-write, so
     // there the merge stays local, still dirty, until the person saves.
-    if (stamped) conflictResolvedBySync(etag);
+    if (stamped) edit?.conflictResolvedBySync(etag);
     this._saveAfterMerge(diverged, typedDuringWait);
   }
 
@@ -2017,6 +2048,7 @@ class LiveSync {
    * local edits.
    */
   async _doApplyExternal(html, seq, etag = null, by = null, fetchOptions = null) {
+    if (this.lane === 'live' && !edit) await loadEdit();
     const priorDisk = this._diskBase;
     this._log(`applyExternal - external disk change (seq=${seq})`);
     this.isPaused = true;
@@ -2131,8 +2163,8 @@ class LiveSync {
         // beforeunload stays quiet. The dirty re-check matters: typing that
         // arrived during the morph's async wait would otherwise be captured
         // into the baseline and recorded as saved without reaching disk.
-        setLastSavedBaselines(...pairedBaseline());
-        setUnsavedChanges(false);
+        edit.setLastSavedBaselines(...pairedBaseline());
+        edit.setUnsavedChanges(false);
 
         // Cross-lane baseline: the PEER diff base (lastHtml) would otherwise
         // still describe pre-frame state, and a later dirty peer apply would
@@ -2170,14 +2202,14 @@ class LiveSync {
     // (our edits + their bytes). The baseline was left pre-external, so the
     // save sees both as changes and writes the merge back. Only where
     // autosave is on, as in the peer lane.
-    if (stamped) conflictResolvedBySync(etag);
+    if (stamped) edit?.conflictResolvedBySync(etag);
     this._saveAfterMerge(diverged, typedDuringWait);
     // A disk frame from a writer that does not paint (an agent, the data API)
     // changes records and leaves the painted values as they were. If the page's
     // repainted values differ from them once the timer fires, one tab saves so
     // the bytes on disk heal. A writer that paints is left alone.
     if (priorDisk != null && paintSignatureOfHtml(priorDisk) === paintSignatureOfHtml(html)) {
-      schedulePaintHeal(() => (this._diskBase == null ? null : paintSignatureOfHtml(this._diskBase)));
+      if (edit) edit.schedulePaintHeal(() => (this._diskBase == null ? null : paintSignatureOfHtml(this._diskBase)));
     }
   }
 
