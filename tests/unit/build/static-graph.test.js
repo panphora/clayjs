@@ -216,14 +216,18 @@ test("edit mode without upgrade: the replace module is not in the boot graph", a
   expect(graph.has("src/core/save-replace.js")).toBe(false);
 });
 
-test("the upgrade path is what imports the replace module", async () => {
+test("the notice loads the replace module only through the upgrade runner", async () => {
   const entry = "src/plugins/upgrade.js";
   const plan = resolveModules(new URLSearchParams("plugins=upgrade&exclude=richclay"), true, {
     isDraftMode: false,
     hasSap: false,
   });
   expect(plan.plugins).toContain("plugins/upgrade.js");
-  const graph = walk(await inputsFor([entry]), [entry]);
+  const noticeGraph = walk(await inputsFor([entry]), [entry]);
+  expect(noticeGraph.has("src/core/save-replace.js")).toBe(false);
+  expect(noticeGraph.has("src/plugins/upgrade-run.js")).toBe(false);
 
-  expect(graph.has("src/core/save-replace.js")).toBe(true);
+  const runner = "src/plugins/upgrade-run.js";
+  const runnerGraph = walk(await inputsFor([runner]), [runner]);
+  expect(runnerGraph.has("src/core/save-replace.js")).toBe(true);
 });

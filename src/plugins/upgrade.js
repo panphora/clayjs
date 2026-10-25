@@ -9,11 +9,6 @@
 // a visitor, a draft, no network, a failed fetch, a bad digest or an equal version.
 // The 24-hour cache and the dotted-version comparison are hyper-html-api's own.
 import { isNewerVersion } from "../vendor/hyper-html-api-upgrade.vendor.js";
-// The one save the upgrade makes. It is not in the save core, so only the pages
-// that can upgrade download it.
-import { replace } from "../core/save-replace.js";
-
-export { replace };
 
 const CACHE_PREFIX = "hha:upgrade-check:";
 const TTL_MS = 24 * 60 * 60 * 1000;
@@ -194,8 +189,20 @@ export async function start(options = {}) {
   return update;
 }
 
+export async function replace(html, options) {
+  const mod = await import("../core/save-replace.js");
+  return mod.replace(html, options);
+}
+
+function onUpgradeRequested(event) {
+  import("./upgrade-run.js")
+    .then((mod) => mod.start(event.detail))
+    .catch((err) => console.error("clayjs: the upgrade could not start:", err));
+}
+
 const bootClay = typeof window !== "undefined" ? window.clay : null;
 if (bootClay && bootClay.canEdit && !bootClay.isDraftMode) {
+  document.addEventListener("clay:upgrade-requested", onUpgradeRequested);
   const ready = bootClay.ready;
   if (ready && typeof ready.then === "function") ready.then(() => start(), () => {});
   else start();
