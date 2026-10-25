@@ -7,6 +7,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { BOOT_IMPORTS, EDIT_BOOT_IMPORTS } from "../../../src/lib/boot-imports.js";
+import { CORE_WAVES } from "../../../src/loader-logic.js";
 import { emitChunks } from "../../../scripts/build-chunks.mjs";
 
 const root = path.resolve(new URL("../../..", import.meta.url).pathname);
@@ -30,12 +31,57 @@ afterAll(async () => {
 });
 
 test("every loader target and satellite is an entry with a file on disk", async () => {
-  for (const logical of ["loader.js", ...Object.keys(modules), ...Object.values(built.satellites)]) {
-    const file = built.manifest.entries[logical];
-    expect(file).toBeTruthy();
+  // Many logical entries can name one asset: the always-wave core is one file.
+  const files = new Set(["loader.js", ...Object.keys(modules), ...Object.values(built.satellites)]
+    .map((logical) => {
+      const file = built.manifest.entries[logical];
+      expect(file).toBeTruthy();
+      return file;
+    }));
+  expect(files.size).toBeGreaterThan(0);
+  for (const file of files) {
     expect(built.manifest.files[file]).toBeTruthy();
     expect((await readFile(path.join(outdir, file))).length).toBeGreaterThan(0);
   }
+});
+
+test("the always-wave core is one entry whose export keys are its logical paths", async () => {
+  const aggregate = built.manifest.entries["reader-core.js"];
+  expect(aggregate).toBeTruthy();
+  for (const file of CORE_WAVES.always) expect(built.manifest.entries[file]).toBe(aggregate);
+
+  const code = await readFile(path.join(outdir, built.manifest.runtime), "utf8");
+  const runtime = JSON.parse(code.slice("export default ".length).replace(/;\s*$/, ""));
+  expect(runtime.core).toEqual({
+    entry: "reader-core.js",
+    exports: Object.fromEntries(CORE_WAVES.always.map((file) => [file, file])),
+  });
+  expect(runtime.entries["core/edit-mode.js"]).toBe(aggregate);
+});
+
+test("each always-wave module is inside the aggregate graph, not a file of its own", () => {
+  const aggregate = built.manifest.entries["reader-core.js"];
+  const inputs = (file) =>
+    Object.entries(built.metafile.outputs).find(([out]) => path.basename(out) === file)?.[1].inputs ?? {};
+
+  const seen = new Set([aggregate]);
+  const stack = [aggregate];
+  const inlined = new Set();
+  while (stack.length) {
+    const file = stack.pop();
+    for (const input of Object.keys(inputs(file))) inlined.add(input);
+    for (const dep of built.manifest.files[file].imports) {
+      if (seen.has(dep)) continue;
+      seen.add(dep);
+      stack.push(dep);
+    }
+  }
+
+  for (const file of CORE_WAVES.always) {
+    expect(inlined.has(`src/${file}`)).toBe(true);
+    expect(built.manifest.files[aggregate].dynamicImports).not.toContain(built.manifest.entries[file]);
+  }
+  expect(Object.values(built.manifest.entries).filter((file) => file === aggregate)).toHaveLength(CORE_WAVES.always.length + 1);
 });
 
 test("every import target is a listed file on disk", async () => {

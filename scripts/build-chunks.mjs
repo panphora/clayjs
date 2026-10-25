@@ -11,6 +11,8 @@ import { pathToFileURL } from "node:url";
 import { BOOT_IMPORTS, EDIT_BOOT_IMPORTS } from "../src/lib/boot-imports.js";
 
 export const BOOT_PREFIX = ["core/draft-mode.js", "core/is-edit-mode.js", "lib/region-policy.js"];
+// The one build entry that carries the always-wave core (src/reader-core.js).
+const READER_CORE = "reader-core.js";
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 
 export async function satelliteTargets(root) {
@@ -24,12 +26,23 @@ export async function satelliteTargets(root) {
   return out;
 }
 
-export async function emitChunks({ root, outdir }) {
-  const { MODULES } = await import(pathToFileURL(path.join(root, "src/loader-logic.js")).href);
+export async function emitChunks({ root, outdir, plugins = [] }) {
+  const { MODULES, CORE_WAVES } = await import(pathToFileURL(path.join(root, "src/loader-logic.js")).href);
   const { version, name: pkgName } = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
   const satellites = await satelliteTargets(root);
   const bootImports = Object.values(BOOT_IMPORTS).flat();
-  const logical = [...new Set(["loader.js", ...Object.keys(MODULES), ...Object.values(satellites), ...bootImports, ...EDIT_BOOT_IMPORTS])];
+  const coreExports = Object.fromEntries(CORE_WAVES.always.map((file) => [file, file]));
+  // A satellite whose own target is an always-wave module keeps an individual entry
+  // as a compatibility wrapper, so it never evaluates the whole wave early.
+  const satellitesInCore = new Set(Object.values(satellites).filter((file) => coreExports[file]));
+  const logical = [...new Set([
+    "loader.js",
+    READER_CORE,
+    ...Object.keys(MODULES).filter((file) => !coreExports[file] || satellitesInCore.has(file)),
+    ...Object.values(satellites),
+    ...bootImports,
+    ...EDIT_BOOT_IMPORTS,
+  ])];
   await rm(outdir, { recursive: true, force: true });
   const result = await esbuild.build({
     absWorkingDir: root,
@@ -47,6 +60,7 @@ export async function emitChunks({ root, outdir }) {
     metafile: true,
     logLevel: "warning",
     logOverride: { "commonjs-variable-in-esm": "silent" },
+    plugins: [readerCorePlugin(coreExports), ...plugins],
   });
   const rel = (p) => path.relative(outdir, path.resolve(root, p)).split(path.sep).join("/");
   const entries = {};
@@ -63,8 +77,13 @@ export async function emitChunks({ root, outdir }) {
     };
     if (meta.entryPoint) entries[meta.entryPoint.replace(/^src\//, "")] = file;
   }
+  // Every always-wave logical path names the aggregate's one file, so the loader, the
+  // bootstraps and the meter treat five entries as one request.
+  const aggregate = entries[READER_CORE];
+  if (!aggregate) throw new Error(`the manifest has no ${READER_CORE} entry`);
+  for (const file of Object.keys(coreExports)) entries[file] ??= aggregate;
   const imports = Object.fromEntries(Object.entries(files).filter(([f]) => f.endsWith(".js")).map(([f, v]) => [f, v.imports]));
-  const code = `export default ${JSON.stringify({ version, entries, imports, bootImports: BOOT_IMPORTS, editBootImports: EDIT_BOOT_IMPORTS })};\n`;
+  const code = `export default ${JSON.stringify({ version, entries, imports, bootImports: BOOT_IMPORTS, editBootImports: EDIT_BOOT_IMPORTS, core: { entry: READER_CORE, exports: coreExports } })};\n`;
   const runtime = `manifest-${sha256(code).slice(0, 8).toUpperCase()}.js`;
   await writeFile(path.join(outdir, runtime), code);
   files[runtime] = { sha256: sha256(code), bytes: Buffer.byteLength(code), contentType: "text/javascript; charset=utf-8", imports: [], dynamicImports: [] };
@@ -72,6 +91,32 @@ export async function emitChunks({ root, outdir }) {
   const manifest = { schema: 1, package: pkgName, version, build, runtime, entries, files };
   await writeFile(path.join(outdir, "manifest.json"), `${JSON.stringify(manifest, null, 1)}\n`);
   return { manifest, metafile: result.metafile, satellites };
+}
+
+// The loader asks for each always-wave module through MODULES, and every one of
+// those thunks is a dynamic import: esbuild gives each its own chunk, so dropping the
+// entry roots alone would still cost one request per module. In the built graph each
+// of those exact thunks is rewritten to read the namespace src/reader-core.js exports
+// under the same logical path. Source mode keeps the plain thunks: only this build
+// runs the transform, and it asserts one replacement per path.
+function readerCorePlugin(coreExports) {
+  return {
+    name: "reader-core",
+    setup(build) {
+      build.onLoad({ filter: /src[\/\\]loader-logic\.js$/ }, async (args) => {
+        let source = await readFile(args.path, "utf8");
+        for (const [file, key] of Object.entries(coreExports)) {
+          source = replaceOnce(
+            source,
+            `() => import("./${file}")`,
+            `() => import("./${READER_CORE}").then((m) => m.core["${key}"])`,
+            `the ${file} thunk`,
+          );
+        }
+        return { contents: source, loader: "js" };
+      });
+    },
+  };
 }
 
 function replaceOnce(source, needle, replacement, label) {
