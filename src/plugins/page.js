@@ -245,6 +245,7 @@ function dispose() {
   dismissPersistent(RETRY_TEXT);
   dismissPersistent(BLOCKED_TEXT);
   dismissPersistent(REPLACED_TEXT);
+  for (const message of inst.notices?.values() ?? []) dismissPersistent(message);
   if (inst.savesHeld) {
     inst.savesHeld = false;
     releaseAllSaves({ replay: false, reason: REPLACED_HOLD });
@@ -400,11 +401,6 @@ async function run(inst, gen, options = {}) {
   // tools keep state in and the host that mounts them. A document with no tool
   // never waits for either.
   const TOOLS_SEL = 'script[type="application/json"][merge="page.tools"][clay~="live"]';
-  const hasTool = () => {
-    let found = false;
-    binding.doc().forEach((node) => { if (node.type.name === "tool") found = true; });
-    return found;
-  };
   let toolsStore = null;
   let aiTool = null;
   let toolsOpening = null;
@@ -414,7 +410,7 @@ async function run(inst, gen, options = {}) {
       // A tool written into the article by hand or by an agent arrives without the
       // store its state lives in, and without one the tool could not keep its state:
       // the page gets the empty store an editor-made page starts with.
-      if (!document.querySelector(TOOLS_SEL) && hasTool()) {
+      if (!document.querySelector(TOOLS_SEL)) {
         const tools = document.createElement("script");
         tools.setAttribute("type", "application/json");
         tools.setAttribute("merge", "page.tools");
@@ -448,19 +444,47 @@ async function run(inst, gen, options = {}) {
         inst.aiTool = aiTool;
       }
       return toolHost;
-    })();
+    })().catch((error) => {
+      toolsOpening = null;
+      throw error;
+    });
     return toolsOpening;
   };
   article.innerHTML = "";
+  // One notice per feature a person needed and that failed, until Retry succeeds.
+  const notices = new Map();
+  const notifyFailed = (id) => {
+    if (notices.has(id)) return;
+    const message = `The ${id} controls could not load. Reload the page after saving.`;
+    notices.set(id, message);
+    toastPersistent(message, "warning", {
+      actions: [{
+        label: "Retry",
+        onClick: () => {
+          features.ensure(id).then(() => {
+            const open = notices.get(id);
+            if (!open) return;
+            notices.delete(id);
+            dismissPersistent(open);
+          }, () => {});
+        },
+      }],
+    });
+  };
+  inst.notices = notices;
   const features = createFeatureLoader({
     load: (id) => FEATURES[id].load(),
     install: async (id, mod) => {
-      const context = { view: editorView, upload: options.upload, board: binding.board, undo: binding.undo, redo: binding.redo };
+      const context = { view: editorView, upload: options.upload, board: binding.board, undo: binding.undo, redo: binding.redo, revise: aiRequested ? (toolId, rev) => { openAi({ target: { toolId, rev } }); } : null };
       if (id === "tool") {
         context.toolHost = await openTools();
         if (gen !== generation) return null;
       }
       return installPageFeature(context, id, mod);
+    },
+    reportError: (error, id) => {
+      console.error("clayjs: an editor feature failed to load", error);
+      notifyFailed(id);
     },
   });
   // Making or revising a tool opens the store and the host first, so the panel
@@ -492,17 +516,7 @@ async function run(inst, gen, options = {}) {
   const present = [];
   binding.doc().forEach((node) => present.push(node.type.name));
   const featureIds = [...new Set(present.map(featureForType).filter(Boolean))];
-  const noticed = new Set();
-  const featuresReady = Promise.allSettled(featureIds.map((id) => features.ensure(id))).then((results) => {
-    results.forEach((result, i) => {
-      const id = featureIds[i];
-      if (result.status !== "rejected" || noticed.has(id)) return;
-      noticed.add(id);
-      toastPersistent(`The ${id} controls could not load. Reload the page after saving.`, "warning", {
-        actions: [{ label: "Retry", onClick: () => features.ensure(id).catch(() => {}) }],
-      });
-    });
-  });
+  const featuresReady = Promise.allSettled(featureIds.map((id) => features.ensure(id)));
   inst.recover = createRecoverList({
     binding,
     mount: view.dom.closest(".page-shell") ?? article,
@@ -567,6 +581,12 @@ async function run(inst, gen, options = {}) {
   }
   await featuresReady;
   if (gen !== generation) return;
+  // A replacement that landed during the feature wait keeps the editor read-only,
+  // exactly as one that landed before it does.
+  if (inst.replaced) {
+    stopEditing(inst);
+    return;
+  }
   view.setProps({ editable: () => true });
 
   // That initial write advanced the saved baselines from a capture taken before
@@ -582,7 +602,7 @@ async function run(inst, gen, options = {}) {
 function install(options = {}) {
   dispose();
   const gen = ++generation;
-  const inst = { gen, article: null, view: null, binding: null, adoption: null, source: null, store: null, toolHost: null, aiTool: null, bootHtml: "", bootRev: null, savedRev: null, replaced: false, savesHeld: false, flush: null, listeners: [], retryTimer: null, retryShown: false };
+  const inst = { gen, article: null, view: null, binding: null, adoption: null, source: null, store: null, toolHost: null, aiTool: null, bootHtml: "", bootRev: null, savedRev: null, replaced: false, savesHeld: false, flush: null, listeners: [], retryTimer: null, retryShown: false, notices: null };
   active = inst;
   return run(inst, gen, options).catch((error) => {
     console.error("clayjs: page plugin failed to install", error);

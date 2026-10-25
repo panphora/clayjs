@@ -384,3 +384,124 @@ test("the file's page.tools tag is byte-identical after a save with and without 
   expect(loaded).toContain('merge="page.tools"');
   expect(loaded).toContain('{"tally":{"r1":{"count":3}}}');
 });
+
+const toastWith = (text) => [...document.querySelectorAll("[data-clay-toast]")].find((el) => el.textContent.includes(text));
+const until = async (check, timeout = 1500) => {
+  const deadline = Date.now() + timeout;
+  while (!check() && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
+  return check();
+};
+
+test("a failed install recovers through Retry and then renders the tool", async () => {
+  setPage([PARAGRAPH, TOOL]);
+  setTools({ tally: { r1: { count: 3 } } });
+  const realLoad = FEATURES.tool.load;
+  let attempts = 0;
+  FEATURES.tool.load = () => realLoad().then((mod) => ({
+    ...mod,
+    createFeature: (context) => {
+      attempts += 1;
+      if (attempts === 1) throw new Error("install failed");
+      return mod.createFeature(context);
+    },
+  }));
+  try {
+    await page.install();
+    expect(await waitFor(() => toastWith("controls could not load"))).toBe(true);
+    expect(page.view.dom.querySelector(".page-tool-block")).toBe(null);
+    [...toastWith("controls could not load").querySelectorAll("button")].find((button) => button.textContent === "Retry").click();
+    expect(await waitFor(() => page.view.dom.querySelector(".page-tool-block output"))).toBe(true);
+    expect(attempts).toBe(2);
+    expect(page.view.dom.querySelector(".page-tool-block output").textContent).toBe("3");
+    expect(await until(() => toastWith("controls could not load") === undefined)).toBe(true);
+  } finally {
+    FEATURES.tool.load = realLoad;
+  }
+});
+
+test("after a load fails, selection moves and typing make no further load attempts", async () => {
+  setPage([PARAGRAPH, TOOL]);
+  const realLoad = FEATURES.tool.load;
+  let attempts = 0;
+  FEATURES.tool.load = () => { attempts += 1; return Promise.reject(new Error("no network")); };
+  try {
+    await page.install();
+    expect(await waitFor(() => attempts >= 1)).toBe(true);
+    await tick();
+    const view = page.view;
+    for (let i = 0; i < 10; i += 1) view.dispatch(view.state.tr.setSelection(pmState.TextSelection.create(view.state.doc, 1)));
+    for (let i = 0; i < 10; i += 1) view.dispatch(view.state.tr.insertText("x", 1));
+    await tick();
+    expect(attempts).toBe(1);
+    expect(view.state.doc.child(0).textContent).toBe("xxxxxxxxxxHi ");
+  } finally {
+    FEATURES.tool.load = realLoad;
+  }
+});
+
+test("a hosted tool's menu offers Revise when the host advertises tool authoring", async () => {
+  extensions = ["page", "page-tool/1"];
+  setPage([PARAGRAPH, TOOL]);
+  setTools({ tally: { r1: { count: 3 } } });
+  await page.install({ transport: { request: async () => ({}), cancel: () => {} } });
+  const settings = page.view.dom.querySelector('.page-tool-block[data-id="tally"] .page-tool-settings');
+  expect(settings).not.toBe(null);
+  settings.click();
+  const menu = page.view.dom.parentElement.querySelector(".page-menu");
+  expect(menu.hidden).toBe(false);
+  expect(menu.textContent).toContain("Revise\u2026");
+});
+
+test("Keep on a first AI tool in a document with no page.tools tag saves the tool", async () => {
+  extensions = ["page", "page-tool/1"];
+  setPage([PARAGRAPH]);
+  expect(toolsTag()).toBe(null);
+  const transport = {
+    request: async (request) => ({ requestId: request.requestId, artifact: TALLY, state: { count: 2 } }),
+    cancel: () => {},
+  };
+  await page.install({ transport, acceptState: async () => ({ ok: true }) });
+  page.view.dom.parentElement.querySelector(".page-plus").click();
+  const entry = [...page.view.dom.parentElement.querySelectorAll(".page-menu-item")].find((item) => item.textContent.includes("Make a tool with AI"));
+  expect(entry).toBeTruthy();
+  entry.click();
+  expect(await waitFor(() => document.querySelector(".page-ai-panel"))).toBe(true);
+  document.querySelector(".page-ai-panel textarea").value = "make a counter";
+  [...document.querySelectorAll(".page-ai-panel button")].find((button) => button.textContent === "Generate").click();
+  expect(await waitFor(() => [...document.querySelectorAll(".page-ai-panel button")].some((button) => button.textContent === "Keep"))).toBe(true);
+  [...document.querySelectorAll(".page-ai-panel button")].find((button) => button.textContent === "Keep").click();
+  expect(await waitFor(() => page.view.dom.querySelector(".page-tool-block"))).toBe(true);
+  expect(toolsTag()).not.toBe(null);
+  const block = page.view.dom.querySelector(".page-tool-block");
+  const node = page.view.state.doc.child(1);
+  expect(node.attrs.id).toBe(block.dataset.id);
+  expect(storeOf("page.tools").value[node.attrs.id][node.attrs.rev]).toEqual({ count: 2 });
+});
+
+test("a replacement that lands during the boot feature wait leaves the editor read-only", async () => {
+  extensions = ["page", "live-data"];
+  setPage([PARAGRAPH, TOOL]);
+  setTools({ tally: { r1: { count: 3 } } });
+  const realLoad = FEATURES.tool.load;
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  let attempts = 0;
+  FEATURES.tool.load = () => { attempts += 1; return gate.then(() => realLoad()); };
+  let installing = null;
+  try {
+    installing = page.install();
+    expect(await waitFor(() => page.view && attempts === 1)).toBe(true);
+    expect(page.view.editable).toBe(false);
+    await tick();
+    const replacement = '<!doctype html><html><head></head><body><article data-page="1" data-rev="outside"><p data-id="p">Elsewhere</p></article></body></html>';
+    document.dispatchEvent(new CustomEvent("clay:sync-applied", { detail: { html: replacement } }));
+    await tick();
+    release();
+    await installing;
+    expect(page.view.editable).toBe(false);
+  } finally {
+    release();
+    await installing?.catch(() => {});
+    FEATURES.tool.load = realLoad;
+  }
+});

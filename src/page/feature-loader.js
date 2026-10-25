@@ -10,13 +10,17 @@ export function createFeatureLoader({ load, install, reportError = (error) => co
     if (installed.has(id)) return Promise.resolve(installed.get(id));
     let shared = pending.get(id);
     if (!shared) {
-      shared = load(id).then((mod) => {
-        if (disposed) return null;
-        const feature = install(id, mod);
-        installed.set(id, feature);
-        return feature;
-      });
-      shared.catch((error) => { if (!disposed) reportError(error); }).finally(() => pending.delete(id));
+      shared = load(id)
+        .then((mod) => (disposed ? null : Promise.resolve(install(id, mod))))
+        .then((feature) => {
+          if (disposed) {
+            feature?.dispose?.();
+            return feature;
+          }
+          installed.set(id, feature);
+          return feature;
+        });
+      shared.catch((error) => { if (!disposed) reportError(error, id); }).finally(() => pending.delete(id));
       pending.set(id, shared);
     }
     if (!signal) return shared;

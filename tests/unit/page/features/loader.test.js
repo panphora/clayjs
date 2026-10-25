@@ -92,3 +92,47 @@ test("dispose during a pending load makes the result inert and disposes installe
   expect(feature.disposed).toBe(1);
   await expect(loader.ensure("table")).rejects.toThrow("disposed");
 });
+
+test("an async install that rejects once recovers on the next ensure and its feature is disposed once", async () => {
+  let loads = 0;
+  let attempts = 0;
+  let disposals = 0;
+  const feature = { dispose: () => { disposals += 1; } };
+  const loader = createFeatureLoader({
+    load: () => { loads += 1; return Promise.resolve({ createFeature: () => feature }); },
+    install: async (_id, mod) => {
+      attempts += 1;
+      if (attempts === 1) throw new Error("install failed");
+      await tick();
+      return mod.createFeature();
+    },
+    reportError: () => {},
+  });
+  await expect(loader.ensure("tool")).rejects.toThrow("install failed");
+  expect(loader.has("tool")).toBe(false);
+  await expect(loader.ensure("tool")).resolves.toBe(feature);
+  expect(loader.has("tool")).toBe(true);
+  expect(loads).toBe(2);
+  loader.dispose();
+  expect(disposals).toBe(1);
+});
+
+test("an install that resolves after dispose is disposed at once and never installed", async () => {
+  let disposals = 0;
+  const feature = { dispose: () => { disposals += 1; } };
+  const gate = deferred();
+  const loader = createFeatureLoader({
+    load: () => Promise.resolve({}),
+    install: () => gate.promise.then(() => feature),
+    reportError: () => {},
+  });
+  const pendingEnsure = loader.ensure("tool");
+  pendingEnsure.catch(() => {});
+  await tick();
+  loader.dispose();
+  gate.resolve();
+  await pendingEnsure;
+  await tick();
+  expect(loader.has("tool")).toBe(false);
+  expect(disposals).toBe(1);
+});

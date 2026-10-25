@@ -245,23 +245,22 @@ export function installPageFeature({ view, upload, toolHost, board = null, undo 
 function featureWatchPlugin(features) {
   return new state.Plugin({
     view(editorView) {
+      const failed = new Set();
       const walk = () => {
-        let missing = false;
+        for (const id of failed) if (features.has(id)) failed.delete(id);
         editorView.state.doc.forEach((node) => {
           const id = featureForType(node.type.name);
-          if (!id || features.has(id)) return;
-          missing = true;
-          features.ensure(id).catch(() => {});
+          if (!id || features.has(id) || failed.has(id)) return;
+          features.ensure(id).catch(() => { failed.add(id); });
         });
-        return missing;
       };
       let doc = editorView.state.doc;
-      let missing = walk();
+      walk();
       return {
         update() {
-          if (!missing && editorView.state.doc === doc) return;
+          if (editorView.state.doc === doc) return;
           doc = editorView.state.doc;
-          missing = walk();
+          walk();
         },
       };
     },
