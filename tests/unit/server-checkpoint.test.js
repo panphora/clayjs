@@ -63,11 +63,15 @@ test('captures both editors, writes persistent tags and matching article, and su
   }
   const result = render(source, pinned);
   expect(result.kind).toBe('ok');
-  expect(result.html).toContain('<head><title>Keep this title</title></head>');
+  expect(result.html).toContain('<head><title>Untitled</title></head>');
   expect(result.html).toContain('<footer>Keep this footer</footer>');
   expect(result.html).toContain(tag('presence', { viewers: 1 }, true));
   expect(normalized(result.html.match(/<article[^>]*>([\s\S]*?)<\/article>/)[1])).toBe('<p data-id="p">aXc</p>');
   expect(isCheckpointCurrent(result.html, pinned)).toBe(true);
+  const custom = render(source.replace('<head>', '<head><meta name="clay-seo-title-mode" content="custom">'), pinned);
+  expect(custom.kind).toBe('ok');
+  expect(custom.html).toContain('<head><meta name="clay-seo-title-mode" content="custom"><title>Keep this title</title></head>');
+  expect(isCheckpointCurrent(custom.html, pinned)).toBe(true);
   const folder = mkdtempSync(join(tmpdir(), 'clayjs-checkpoint-'));
   const file = join(folder, 'page.html');
   try {
@@ -247,6 +251,26 @@ test('built CJS and ESM entries load in plain Node without DOM globals', async (
   const loaded = JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', script], { cwd: process.cwd(), encoding: 'utf8' }));
   expect(loaded[0]).toEqual(['captureCheckpoint', 'isCheckpointCurrent', 'needsAdoption', 'renderCheckpoint']);
   expect(loaded[1]).toBe(true);
+});
+
+test('the built CJS and ESM entries derive and compare the same title the source does', async () => {
+  await buildServerCheckpoint();
+  const fixture = roomOf(seedValue([{ id: 'h', t: 'heading', text: 'Built & titled', attrs: { level: 1 } }]));
+  const script = `
+    const { createRequire } = await import('node:module');
+    const require = createRequire(import.meta.url);
+    const { JSDOM } = require('jsdom');
+    const createDocument = () => new JSDOM('').window.document;
+    const render = (api, html, capture) => {
+      const result = api.renderCheckpoint(html, capture, { createDocument });
+      return [result.kind, result.html.match(/<title>([^<]*)<\\/title>/)[1], api.isCheckpointCurrent(result.html, capture)];
+    };
+    const cjs = require('@panphora/clayjs/server/checkpoint');
+    const esm = await import('@panphora/clayjs/server/checkpoint');
+    console.log(JSON.stringify([render(cjs, process.argv[1], JSON.parse(process.argv[2])), render(esm, process.argv[1], JSON.parse(process.argv[2]))]));
+  `;
+  const loaded = JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', script, fixture.source, JSON.stringify(fixture.capture())], { encoding: 'utf8' }));
+  expect(loaded).toEqual([['ok', 'Built &amp; titled', true], ['ok', 'Built &amp; titled', true]]);
 });
 
 test('the rooms and checkpoint entries share one Yjs, so loading both warns about nothing', async () => {
