@@ -10,9 +10,10 @@ import { mergePageModels } from "./merge.js";
 import { blockMap } from "./model.js";
 import { parseModel } from "./projection.js";
 import { ARTICLE, pageTags } from "./save-projection.js";
-import { HyperMorph } from "../vendor/hyper-morph.vendor.js";
+import { parseJsonRelaxed } from "../vendor/hyper-morph-json.vendor.js";
+import { mergeEngine } from "../sync/merge-engine.js";
 
-const parseTag = (text) => { try { return HyperMorph.parseJsonRelaxed(text); } catch { return null; } };
+const parseTag = (text) => { try { return parseJsonRelaxed(text); } catch { return null; } };
 
 export function readFile(root) {
   const article = root.querySelector(ARTICLE);
@@ -80,7 +81,8 @@ export function installAdoption({
   }
 
   // The editor merged three-way with what the file changed since base.
-  function land(blocks, current, baseItems, incoming) {
+  async function land(blocks, current, baseItems, incoming) {
+    const { HyperMorph } = await mergeEngine();
     const merged = mergePageModels(baseItems, current, incoming, { doc, merge3: HyperMorph.merge3, mergeJson: HyperMorph.mergeJson });
     const lost = merged.conflicts.filter((k) => k.kind === "text" || k.kind === "field");
     const copy = lost.length ? snapshot() : null;
@@ -108,7 +110,7 @@ export function installAdoption({
       if (waited === "timeout") console.warn("page: gave up waiting for the editor; the hand edit was not adopted");
       if (waited !== "ready" || disposed || !isAdopter()) return null;
       const blocks = blockMap(view.state.doc);
-      const counts = land(blocks, readBack(blocks, doc), found.baseItems, found.parsed);
+      const counts = await land(blocks, readBack(blocks, doc), found.baseItems, found.parsed);
       if (counts) adopted(found.A);
       return counts;
     } finally {
@@ -138,7 +140,7 @@ export function installAdoption({
       const current = readBack(blocks, doc);
       const known = new Map(current.map((item) => [item.id, item]));
       const parse = (article) => parseModel(article, { seed: article.getAttribute("data-rev") ?? "", known });
-      return land(blocks, current, parse(base), parse(file.article));
+      return await land(blocks, current, parse(base), parse(file.article));
     } finally {
       release();
     }

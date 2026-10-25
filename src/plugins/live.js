@@ -15,7 +15,7 @@ import { withKeepalive } from "../core/save-core.js";
 import { isEditMode } from "../core/is-edit-mode.js";
 import { registerUnsavedState } from "../lib/unsaved-state.js";
 import { createCheckpoints } from "../live/checkpoint.js";
-import { HyperMorph } from "../vendor/hyper-morph.vendor.js";
+import { parseJsonRelaxed } from "../vendor/hyper-morph-json.vendor.js";
 import * as hostMeta from "../core/host-meta.js";
 import { createFastLane } from "../live/fast-lane.js";
 import { createSaveHistoryRecovery, RECOVERY_WINDOW_MS } from "../live/save-history.js";
@@ -406,7 +406,7 @@ function sortedKeys(value) {
 
 function canonical(text) {
   try {
-    return JSON.stringify(sortedKeys(HyperMorph.parseJsonRelaxed(text)));
+    return JSON.stringify(sortedKeys(parseJsonRelaxed(text)));
   } catch {
     return null;
   }
@@ -597,7 +597,7 @@ function seedLocalRoom() {
       continue;
     }
     try {
-      const value = HyperMorph.parseJsonRelaxed(tag.element.textContent);
+      const value = parseJsonRelaxed(tag.element.textContent);
       if (value !== null && typeof value === "object") values.set(name, { value, ephemeral: tag.ephemeral });
     } catch {}
   }
@@ -707,7 +707,7 @@ export function serializeLines(value) {
 // already holds (its frames that landed before the value's stamp).
 function hashOfText(text) {
   try {
-    return textHash(serializeLive(HyperMorph.parseJsonRelaxed(text)));
+    return textHash(serializeLive(parseJsonRelaxed(text)));
   } catch {
     return null;
   }
@@ -716,7 +716,7 @@ function hashOfText(text) {
 function receive(entry, text, source, dropIds) {
   let value;
   try {
-    value = HyperMorph.parseJsonRelaxed(text);
+    value = parseJsonRelaxed(text);
   } catch {
     return;
   }
@@ -731,7 +731,7 @@ export function live(name) {
   const text = tag.element.textContent;
   let value;
   try {
-    value = HyperMorph.parseJsonRelaxed(text);
+    value = parseJsonRelaxed(text);
   } catch (err) {
     throw new SyntaxError(`clay.live("${name}"): the tag's JSON does not parse: ${err.message}`);
   }

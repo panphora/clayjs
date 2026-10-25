@@ -15,7 +15,7 @@ import { hostMeta, hostSupports } from "../core/host-meta.js";
 import { savePageForce, setLastSavedBaselines, holdAllSaves, releaseAllSaves, getLastSavedBytes } from "../core/save.js";
 import { captureForComparisonAndDirty, captureForSaveAndComparison } from "../core/snapshot.js";
 import { storeOf, checkpointWithin, requestCheckpoint, fastLane, pageLaneReady, pageWriterReady } from "./live.js";
-import { HyperMorph } from "../vendor/hyper-morph.vendor.js";
+import { parseJsonRelaxed } from "../vendor/hyper-morph-json.vendor.js";
 import { saveStateFor, BLOCKED_TEXT, RETRY_TEXT, downloadPageCopy, downloadSnapshot, copyPageText } from "../page/save-states.js";
 import toast, { toastPersistent, dismissPersistent } from "../ui/toast.js";
 import { createRecoverList, focusBlock } from "../page/recover.js";
@@ -293,7 +293,7 @@ async function run(inst, gen, options = {}) {
   const file = readFile(document);
   if (!file) return abandon(inst);
   let value = null;
-  try { value = HyperMorph.parseJsonRelaxed(tags[0].textContent); } catch (error) { value = null; }
+  try { value = parseJsonRelaxed(tags[0].textContent); } catch (error) { value = null; }
   if (!isPlainObject(value) || value.v !== 1 || !isPlainObject(value.y) || Object.hasOwn(value, "blocks") || Object.hasOwn(value, "deleted")) {
     console.warn("clayjs: page plugin: the page tag is not a strict Yjs page, leaving the page as saved HTML");
     return abandon(inst);

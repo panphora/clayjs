@@ -19,7 +19,7 @@
 // merge itself is logged as a diff so a later file stamped before it keeps it.
 
 import { applyOp, applyTracked, checkOp, cloneJson, undoTracked, validateOp, serializeLive, textHash, diffOps } from "./ops.js";
-import { HyperMorph } from "../vendor/hyper-morph.vendor.js";
+import { parseJsonRelaxed } from "../vendor/hyper-morph-json.vendor.js";
 import { movesSince } from "./moves.js";
 
 const VERSION = 4;
@@ -164,7 +164,7 @@ export function localTransport({ seed, key = "clay-live:" + window.location.path
   function alreadyMerged(m, frame) {
     if (!m?.file) return false;
     if (frame.seq != null && m.file.seq != null) return frame.seq <= m.file.seq;
-    return m.file.hash === textHash(serializeLive(HyperMorph.parseJsonRelaxed(frame.text)));
+    return m.file.hash === textHash(serializeLive(parseJsonRelaxed(frame.text)));
   }
 
   function dropMerged() {
@@ -393,7 +393,7 @@ export function localTransport({ seed, key = "clay-live:" + window.location.path
     if (!m || m.ephemeral) return null;
     let value;
     try {
-      value = cloneJson(HyperMorph.parseJsonRelaxed(text));
+      value = cloneJson(parseJsonRelaxed(text));
     } catch {
       return null;
     }

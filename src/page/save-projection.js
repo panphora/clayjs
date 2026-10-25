@@ -5,7 +5,7 @@
 // never run after this and undo it.
 import "../attrs/save-freeze.js";
 import { addDocumentTransform } from "../core/snapshot.js";
-import { HyperMorph } from "../vendor/hyper-morph.vendor.js";
+import { parseJsonRelaxed } from "../vendor/hyper-morph-json.vendor.js";
 import { fragmentCleaner, project, renderModel, revOf } from "./projection.js";
 import { blocksFromPageValues } from "./ybind/decode.js";
 import { YDecodeError } from "./ybind/provider.js";
@@ -27,7 +27,7 @@ export function renderFromTags(texts) {
   const key = texts.join("\u0000");
   if (memo && memo.key === key) return memo;
   const values = texts.map((text) => {
-    try { return HyperMorph.parseJsonRelaxed(text); }
+    try { return parseJsonRelaxed(text); }
     catch { throw new YDecodeError("invalid-json", "Cannot read the page data as JSON"); }
   });
   const blocks = blocksFromPageValues(values);
