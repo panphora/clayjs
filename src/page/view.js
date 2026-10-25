@@ -41,7 +41,7 @@ export function applySavedArticle(html, doc = document, readerOpen = new Map(), 
   return changed;
 }
 
-function createReader({ doc, article, represented = null, feed = null, documentURL, servedEtag = null, release = () => {} }) {
+function createReader({ doc, article, represented = null, feed = null, documentURL, servedEtag = null, stream: adopted = null, release = () => {} }) {
   const readerOpen = new Map();
   const savedOpen = new Map();
   const mounted = new Map();
@@ -51,7 +51,7 @@ function createReader({ doc, article, represented = null, feed = null, documentU
   let hostLoading = null;
   let mountTurn = 0;
   let stopped = false;
-  let stream = null;
+  let stream = adopted;
   let final = null;
   let receipt = freezeReceipt(represented);
 
@@ -129,6 +129,10 @@ function createReader({ doc, article, represented = null, feed = null, documentU
     if (!item) return keepToolVersion(live, incoming);
     const next = toolInfoOf(incoming);
     return !next.invalid && next.rev === item.rev && next.signature === item.signature;
+  };
+
+  const onStreamStatus = (status) => {
+    if (status?.state && status.state !== "applied") dispatch("clay:reader-status", status);
   };
 
   const paint = (prepared) => {
@@ -226,15 +230,17 @@ function createReader({ doc, article, represented = null, feed = null, documentU
     };
     feed.addEventListener("clay:sync-applied", onFrame);
     listeners.push(["clay:sync-applied", onFrame]);
+  } else if (stream) {
+    // Adopted from the caller's acquisition: this reader takes the stream over
+    // rather than opening a second one, so no save falls between the two.
+    stream.adopt({ onSnapshot: commit, onStatus: onStreamStatus });
   } else {
     stream = createSavedStream({
       documentURL,
       servedEtag,
       represented: receipt,
       onSnapshot: commit,
-      onStatus: (status) => {
-        if (status?.state && status.state !== "applied") dispatch("clay:reader-status", status);
-      },
+      onStatus: onStreamStatus,
     });
     stream.start();
   }
@@ -250,8 +256,10 @@ function createReader({ doc, article, represented = null, feed = null, documentU
  * `feed` starts over the page already on screen and takes its saved files from
  * that event target's `clay:sync-applied` events, for a page whose saved lane
  * somebody else already owns: its first receipt is the first frame it applies.
+ * `stream` adopts a saved transport the caller already opened, so acquisition and
+ * steady state share one connection.
  */
-export function start({ represented = null, documentURL, servedEtag = null, feed = null, doc = document } = {}) {
+export function start({ represented = null, documentURL, servedEtag = null, stream = null, feed = null, doc = document } = {}) {
   if (!feed && (!represented || typeof represented.bytes !== "string" || represented.bytes === "")) {
     throw new TypeError("clayjs: the reader needs the full saved bytes to start");
   }
@@ -262,7 +270,7 @@ export function start({ represented = null, documentURL, servedEtag = null, feed
   if (represented && !prepareSavedArticle(represented.bytes, doc).ok) throw new Error("clayjs: the saved file is not a readable page");
   const release = claim(article, "reader");
   try {
-    return createReader({ doc, article, represented, feed, documentURL, servedEtag, release });
+    return createReader({ doc, article, represented, feed, documentURL, servedEtag, stream, release });
   } catch (error) {
     release();
     throw error;

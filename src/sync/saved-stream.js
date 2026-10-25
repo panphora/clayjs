@@ -25,11 +25,18 @@
  *     a stamp alone never repairs missing bytes, and a notice never moves the receipt;
  *   - a cursor jump without resync is transport bookkeeping only: other lanes consume
  *     numbers, so a gap does not prove a content frame is missing;
+ *   - every host sends a sequence, so that orders the frames: a newer one applies and
+ *     one the receipt already covers is ignored. A stamp confirms identity only when
+ *     both sides carry one;
+ *   - a frame repeating the bytes the article holds moves the receipt and repaints
+ *     nothing;
  *   - after a GET the cursor is a covered replay floor, not an ordering of versions.
- *     Until a frame confirms that body's version, a differing frame refetches instead
- *     of overwriting bytes that may already be newer; a frame that names the body's
- *     own stamp establishes the match and direct application resumes. An unstamped
- *     host stays on the conservative GET path, which may fetch more often;
+ *     The fetched body's version is unconfirmed until a frame names it, and a frame
+ *     naming another stamp refetches rather than overwrite bytes that may be newer. A
+ *     host that stamps neither side is ordered by sequence;
+ *   - a body read while frames were still arriving is discarded in favour of one the
+ *     stream can place, but only twice: a steady writer would otherwise starve the
+ *     reader of every fetched body;
  *   - a bad frame, a refused apply or a failed GET keeps the article and the receipt
  *     and reports a recoverable status; it never pretends the file was acknowledged;
  *   - stop aborts and invalidates every outstanding continuation, and nothing calls
@@ -40,7 +47,7 @@ import { SyncStream } from './stream.js';
 import { resolveWireProfile } from './wire-profile.js';
 
 const LANE = 'saved';
-const MAX_REPAIR_ATTEMPTS = 3;
+const MAX_DISCARDS = 2;
 
 function mintClientId() {
   return Math.random().toString(36).slice(2, 11) + Date.now().toString(36);
@@ -96,7 +103,7 @@ function normalizeReceipt(represented) {
  * @param {?{bytes: string, etag: ?string, seq: ?number}} [options.represented]
  * @param {function({bytes: string, etag: ?string, seq: ?number}): boolean} options.onSnapshot
  * @param {function(Object)} [options.onStatus]
- * @returns {{start: function(): Object, stop: function(), ready: ?Promise, represented: Object}}
+ * @returns {{start: function(): Object, adopt: function(Object): Object, stop: function(), ready: ?Promise, represented: Object}}
  */
 export function createSavedStream({ documentURL, servedEtag = null, represented = null, onSnapshot, onStatus } = {}) {
   if (typeof onSnapshot !== 'function') {
@@ -107,14 +114,17 @@ export function createSavedStream({ documentURL, servedEtag = null, represented 
   const startupCheck = Boolean(stampOf(servedEtag));
 
   let receipt = normalizeReceipt(represented);
-  // The stamp of the last frame applied straight from the stream. A fetched body
-  // carrying this stamp is the version the stream is at, not a newer one.
-  let frameEtag = null;
-  // Whether the receipt's version is known to sit at the stream's position. A GET
-  // body no frame has confirmed leaves this false until one names its stamp.
+  // Whether the receipt's version is known to sit at the stream's position, so a
+  // newer frame applies straight from the stream. An accepted GET body leaves this
+  // false until a frame names its stamp.
   let matched = true;
   let watermark = receipt.seq ?? 0;
   let arrivals = 0;
+  let discards = 0;
+  // Where an acknowledged apply goes: the caller's `onSnapshot`, or the reader that
+  // adopted this stream at acquisition (`adopt`).
+  let sink = onSnapshot;
+  let notify = onStatus;
   let generation = 0;
   let stopped = false;
   let stream = null;
@@ -125,8 +135,8 @@ export function createSavedStream({ documentURL, servedEtag = null, represented 
   const active = (gen) => !stopped && gen === generation;
 
   function report(state, detail = {}) {
-    if (stopped || typeof onStatus !== 'function') return;
-    onStatus({ state, ...detail });
+    if (stopped || typeof notify !== 'function') return;
+    notify({ state, ...detail });
   }
 
   function closeStream() {
@@ -166,7 +176,7 @@ export function createSavedStream({ documentURL, servedEtag = null, represented 
     }
     let applied = false;
     try {
-      applied = onSnapshot(Object.freeze(next)) === true;
+      applied = sink(Object.freeze(next)) === true;
     } catch {
       applied = false;
     }
@@ -193,7 +203,7 @@ export function createSavedStream({ documentURL, servedEtag = null, represented 
 
   function requestRepair(reason) {
     if (stopped) return;
-    pendingRepair = { kind: reason.kind, seq: seqOf(reason.seq), attempt: reason.attempt ?? 0 };
+    pendingRepair = { kind: reason.kind, seq: seqOf(reason.seq) };
     repairPaused = false;
     runRepair();
   }
@@ -208,75 +218,89 @@ export function createSavedStream({ documentURL, servedEtag = null, represented 
     const arrivalsAtStart = arrivals;
     const watermarkAtStart = watermark;
 
-    const settle = (html) => {
+    const settle = (body) => {
       if (repairJob && repairJob.controller === controller) repairJob = null;
       if (!active(gen) || controller.signal.aborted) return;
+      if (body == null) {
+        deferRepair(reason, 'repair-failed');
+        return;
+      }
       if (arrivals !== arrivalsAtStart || watermark !== watermarkAtStart) {
         // Something arrived while this body was read, so it may describe a page
         // this reader has already left. A reason queued by the arrival is newer
         // and owns the next attempt; otherwise ask again from the latest watermark.
-        if (!pendingRepair) {
-          const tried = (reason.attempt ?? 0) + 1;
-          const next = { kind: reason.kind, seq: latestSeq(reason, reason.kind), attempt: tried };
-          if (tried < MAX_REPAIR_ATTEMPTS) pendingRepair = next;
-          else {
-            deferRepair(next, 'repair-superseded');
-            return;
-          }
+        discards += 1;
+        if (discards <= MAX_DISCARDS) {
+          pendingRepair = pendingRepair ?? { kind: reason.kind, seq: latestSeq(reason, reason.kind) };
+          runRepair();
+          return;
         }
-      } else if (html == null) {
-        deferRepair(reason, 'repair-failed');
+        // Twice is as long as a reader waits: under a steady writer every body is
+        // read while a frame lands, so the third is applied, not dropped.
+        acceptBody(body.text, { kind: reason.kind, seq: latestSeq(reason, reason.kind) }, body.etag);
+        runRepair();
         return;
-      } else {
-        acceptBody(html, reason);
       }
+      acceptBody(body.text, reason, body.etag);
       runRepair();
     };
 
     fetch(pageURL, { cache: 'no-store', signal: controller.signal })
-      .then((response) => (response.ok ? response.text() : null))
+      .then((response) =>
+        response.ok
+          ? response.text().then((text) => ({ text, etag: stampOf(response.headers?.get?.('etag')) }))
+          : null
+      )
       .then(settle)
       .catch(() => settle(null));
   }
 
-  function acceptBody(html, reason) {
-    const bodyStamp = readBodyStamp(html);
-    // A missing stamp is null in the receipt, and a discovery stamp is never
-    // attached. Identical bytes already named by a stamp keep that name.
+  function acceptBody(html, reason, responseEtag) {
+    // The response's own stamp names the body when the host sends one, otherwise the
+    // served root attribute does. A discovery stamp is never attached, and identical
+    // bytes already named by a stamp keep that name.
+    const bodyStamp = stampOf(responseEtag) ?? readBodyStamp(html);
     const etag = bodyStamp ?? (html === receipt.bytes ? receipt.etag : null);
     const seq = reason.kind === 'startup' ? receipt.seq : reason.seq ?? receipt.seq;
     if (!accept({ bytes: html, etag, seq })) return;
-    // The body's version is matched only when a frame has already named it. Until
-    // then, a differing frame refetches instead of overwriting newer fetched bytes.
-    matched = bodyStamp !== null && bodyStamp === frameEtag;
+    // This body is the baseline now, but its version stands at the stream's position
+    // only once a frame names it: until then another stamp refetches.
+    matched = false;
+    discards = 0;
     repairPaused = false;
+    report('current', { seq: receipt.seq, etag: receipt.etag });
+  }
+
+  // A frame repeating the bytes on screen: the receipt moves, nothing repaints.
+  function advance(etag, seq) {
+    const next = {
+      bytes: receipt.bytes,
+      etag: etag ?? receipt.etag,
+      seq: seq ?? receipt.seq,
+    };
+    if (next.etag === receipt.etag && next.seq === receipt.seq) return;
+    receipt = Object.freeze(next);
     report('current', { seq: receipt.seq, etag: receipt.etag });
   }
 
   function onFrame(bytes, rawEtag, seq) {
     const etag = stampOf(rawEtag);
+    // An older sequence is a version this reader has already left: it never rewinds.
     if (seq !== null && receipt.seq !== null && seq <= receipt.seq) return;
-    if (bytes === receipt.bytes) {
-      // The same file with a newer stamp is a receipt advance, not a DOM write,
-      // and a frame that names the receipt's own version establishes the match.
-      if (etag !== null) {
-        if (etag !== receipt.etag) accept({ bytes, etag, seq: seq ?? receipt.seq });
-        matched = true;
-      }
-      return;
-    }
-    if (!matched) {
-      if (etag !== null && etag === receipt.etag) {
-        matched = true;
-      } else {
+    // A frame naming the represented stamp places it at the stream's position, so
+    // the frames after it apply straight from the stream again.
+    if (!matched && etag !== null && receipt.etag !== null) {
+      if (etag !== receipt.etag) {
         requestRepair({ kind: 'unmatched', seq });
         return;
       }
-    }
-    if (accept({ bytes, etag, seq })) {
-      frameEtag = etag;
       matched = true;
     }
+    if (bytes === receipt.bytes) {
+      advance(etag, seq);
+      return;
+    }
+    if (accept({ bytes, etag, seq })) matched = true;
   }
 
   function onNotification(data, seq) {
@@ -362,6 +386,13 @@ export function createSavedStream({ documentURL, servedEtag = null, represented 
     get represented() {
       return receipt;
     },
+    // Take this stream over: a reader starting from an acquisition body adopts the
+    // stream that fetched it, so one connection carries the file from then on.
+    adopt({ onSnapshot: nextSink, onStatus: nextNotify } = {}) {
+      if (typeof nextSink === 'function') sink = nextSink;
+      if (typeof nextNotify === 'function') notify = nextNotify;
+      return handle;
+    },
     start() {
       stopped = false;
       const gen = ++generation;
@@ -370,7 +401,7 @@ export function createSavedStream({ documentURL, servedEtag = null, represented 
       pendingRepair = null;
       repairPaused = false;
       arrivals = 0;
-      matched = true;
+      discards = 0;
       watermark = receipt.seq ?? 0;
       handle.ready = resolveWireProfile().then((resolved) => {
         if (!active(gen)) return handle;

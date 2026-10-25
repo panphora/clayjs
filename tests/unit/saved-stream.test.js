@@ -326,7 +326,7 @@ test.each([
   handle.stop();
 });
 
-test("identical bytes with a newer stamp advance the receipt without a second body", async () => {
+test("identical bytes with a newer stamp advance the receipt without repainting", async () => {
   const bytes = served("disk-A", '<p id="v">A</p>');
   const represented = { bytes, etag: null, seq: 3 };
   const { handle, snapshots, source } = await startTransport({ represented });
@@ -334,7 +334,9 @@ test("identical bytes with a newer stamp advance the receipt without a second bo
 
   source.onmessage(frame({ seq: 4, html: bytes, etag: "disk-A" }));
 
-  expect(snapshots).toEqual([{ bytes, etag: "disk-A", seq: 4 }]);
+  // The article already shows these bytes: the receipt moves to the stream's
+  // position and no apply runs.
+  expect(snapshots).toEqual([]);
   expect(handle.represented).toEqual({ bytes, etag: "disk-A", seq: 4 });
 
   handle.stop();

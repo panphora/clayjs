@@ -11,13 +11,14 @@ import { jest } from "@jest/globals";
  *   - a resync or reconnect refetches the served file, and the cursor becomes a
  *     covered replay floor rather than an ordering of saved versions;
  *   - a GET invalidated by something arriving while it was in flight is discarded
- *     and reissued at the latest watermark, at most three immediate attempts, after
- *     which the repair waits for the next reconnect instead of pretending success;
- *   - while a fetched body's version is unconfirmed by any frame, a differing frame
- *     refetches instead of overwriting bytes that may already be newer; a frame that
- *     names the body's own stamp establishes the match and direct application resumes;
- *   - an unstamped legacy host keeps that conservative GET path, which may fetch
- *     more often and never shows an older file;
+ *     and reissued at the latest watermark, but only twice: a steady writer makes
+ *     every read overlap a frame, so the third body is applied instead of dropped;
+ *   - while a fetched body's version is unconfirmed by any frame, a frame carrying
+ *     another stamp refetches instead of overwriting bytes that may already be
+ *     newer; a frame that names the body's own stamp establishes the match and
+ *     direct application resumes;
+ *   - a host that stamps neither the frame nor the response is ordered by the
+ *     stream's sequence alone, so its frames apply directly and never rewind;
  *   - a failed GET advances nothing, so a later valid replay is still applied;
  *   - stop aborts the GET and invalidates its continuation; a restart is a new
  *     generation whose stream never inherits the old one.
@@ -197,7 +198,7 @@ test("a slow repair followed by a frame is discarded and reissued at the latest 
   handle.stop();
 });
 
-test("a repair superseded three times waits for the next reconnect instead of claiming success", async () => {
+test("a repair superseded twice applies the next body instead of discarding it again", async () => {
   const queue = [];
   docSequencer = () => {
     const next = deferredDoc();
@@ -210,24 +211,25 @@ test("a repair superseded three times waits for the next reconnect instead of cl
   await tick();
 
   let seq = 10;
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt = 0; attempt < 2; attempt++) {
     expect(docCalls()).toHaveLength(attempt + 1);
     source.onmessage(frame({ seq: ++seq, html: served(`disk-${seq}`, `<p>${seq}</p>`), etag: `disk-${seq}` }));
     queue.at(-1).release("disk-stale", "<p>stale</p>");
     await settle();
   }
 
+  // Two bodies in a row were discarded because a frame landed while each was read.
+  // A steady writer never lets one arrive over an idle stream, so the third body is
+  // applied at the latest watermark instead of being dropped.
   expect(docCalls()).toHaveLength(3);
-  expect(statuses.at(-1)).toEqual({ state: "recoverable", reason: "repair-superseded", seq });
-  expect(snapshots.map((candidate) => candidate.etag)).toEqual(["disk-11", "disk-12", "disk-13"]);
-
-  // Recovery, not another immediate attempt: the next open runs the pending repair.
-  docSequencer = docResponse("disk-14", "<p>14</p>");
-  source.onopen();
+  source.onmessage(frame({ seq: ++seq, html: served(`disk-${seq}`, `<p>${seq}</p>`), etag: `disk-${seq}` }));
+  queue.at(-1).release("disk-stale", "<p>stale</p>");
   await settle();
 
-  expect(docCalls()).toHaveLength(4);
-  expect(snapshots.at(-1)).toEqual({ bytes: served("disk-14", "<p>14</p>"), etag: "disk-14", seq });
+  expect(docCalls()).toHaveLength(3);
+  expect(snapshots.map((candidate) => candidate.etag)).toEqual(["disk-11", "disk-12", "disk-13", "disk-stale"]);
+  expect(snapshots.at(-1)).toEqual({ bytes: served("disk-stale", "<p>stale</p>"), etag: "disk-stale", seq: 13 });
+  expect(statuses.filter((status) => status.reason === "repair-superseded")).toHaveLength(0);
 
   handle.stop();
 });
@@ -263,7 +265,7 @@ test("a queued replay does not overwrite a newer repair, and a matching stamp re
   handle.stop();
 });
 
-test("an unstamped legacy host keeps the conservative GET path after a repair", async () => {
+test("an unstamped host applies its frames straight from the stream after a repair", async () => {
   metaAnswer = { spec: 1, extensions: ["upload"] };
   const { handle, snapshots, source } = await startTransport({
     servedEtag: null,
@@ -278,13 +280,70 @@ test("an unstamped legacy host keeps the conservative GET path after a repair", 
   await settle();
   expect(snapshots).toHaveLength(2);
 
-  // With no stamp there is nothing that can confirm the fetched version, so a
-  // differing frame refetches rather than trusting itself over the file.
-  source.onmessage(frame({ html: served(null, '<p id="v">D</p>') }));
-  expect(snapshots).toHaveLength(2);
+  // No host stamps a saved frame, so there is no identity to confirm and the
+  // sequence alone orders it: a differing frame applies with no further GET.
+  const newer = served(null, '<p id="v">D</p>');
+  source.onmessage(frame({ seq: 6, html: newer }));
+  expect(snapshots).toHaveLength(3);
+  expect(snapshots.at(-1)).toEqual({ bytes: newer, etag: null, seq: 6 });
   await settle();
-  expect(docCalls()).toHaveLength(2);
-  expect(snapshots.at(-1).etag).toBe(null);
+  expect(docCalls()).toHaveLength(1);
+
+  // The repair body stays the floor: an older sequence never rewinds the article.
+  source.onmessage(frame({ seq: 4, html: served(null, '<p id="v">Z</p>') }));
+  await settle();
+  expect(snapshots).toHaveLength(3);
+  expect(handle.represented.bytes).toBe(newer);
+
+  handle.stop();
+});
+
+test("a steady writer saving every 50 ms is shown while 120 ms GETs keep being superseded", async () => {
+  const disk = { current: served(null, "<p>0</p>") };
+  docSequencer = () =>
+    new Promise((resolve) => {
+      const body = disk.current;
+      setTimeout(() => resolve(response(200, body)), 120);
+    });
+  const { handle, snapshots, statuses, source } = await startTransport({
+    servedEtag: null,
+    represented: { bytes: served(null, "<p>0</p>"), etag: null, seq: 0 },
+  });
+
+  source.dispatchEvent(cursorEvent({ seq: 0, resync: true }));
+
+  const written = [];
+  let seq = 0;
+  const write = () => {
+    seq += 1;
+    disk.current = served(null, `<p>${seq}</p>`);
+    written.push(disk.current);
+    return disk.current;
+  };
+  const writer = setInterval(() => {
+    const bytes = write();
+    source.onmessage(frame({ seq, html: bytes }));
+  }, 50);
+
+  await new Promise((resolve) => setTimeout(resolve, 420));
+  clearInterval(writer);
+
+  // Every save reaches the article, in order, even though each read was invalidated
+  // by a frame that landed while it was in flight.
+  const applied = snapshots.map((candidate) => candidate.bytes);
+  for (const bytes of written) expect(applied).toContain(bytes);
+  expect(snapshots.at(-1).bytes).toBe(written.at(-1));
+  expect(docCalls().length).toBeLessThanOrEqual(3);
+  expect(statuses.filter((status) => status.reason === "repair-superseded")).toHaveLength(0);
+
+  // Once the churn is over the reader is at the stream's position again: the next
+  // save applies straight from the stream, with no GET.
+  const reads = docCalls().length;
+  const last = write();
+  source.onmessage(frame({ seq, html: last }));
+  await settle();
+  expect(handle.represented).toEqual({ bytes: last, etag: null, seq });
+  expect(docCalls()).toHaveLength(reads);
 
   handle.stop();
 });

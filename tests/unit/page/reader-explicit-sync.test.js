@@ -20,6 +20,10 @@ jest.unstable_mockModule("../../../src/sync/saved-stream.js", () => ({
       started: false,
       stopped: false,
       ready: Promise.resolve(null),
+      adopt(callbacks = {}) {
+        Object.assign(options, callbacks);
+        return handle;
+      },
       start() { this.started = true; return this; },
       stop() { this.stopped = true; },
     };

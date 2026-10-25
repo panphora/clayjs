@@ -40,14 +40,16 @@ function acquire() {
       onSnapshot: (candidate) => {
         if (cancelled) return false;
         try {
-          reader = startReader({ represented: candidate, documentURL: window.location.href, servedEtag: servedDocumentEtag });
+          // The reader adopts this same stream: one connection carries the file from
+          // acquisition onward, so a save that lands while the reader starts is not
+          // lost between two streams.
+          reader = startReader({ represented: candidate, documentURL: window.location.href, servedEtag: servedDocumentEtag, stream });
         } catch (error) {
+          // An unreadable body leaves the article on screen untouched and is never
+          // acknowledged; the stream stays open for the next saved file.
           console.warn("clayjs: the reader could not start from the saved file", error);
-          stream.stop();
-          resolve(null);
-          return true;
+          return false;
         }
-        stream.stop();
         acquisition = null;
         resolve(reader);
         return true;
