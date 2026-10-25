@@ -43,7 +43,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { build as esbuild } from 'esbuild';
 import { emitDocs } from './scripts/site-docs.mjs';
-import { emitBootstraps, emitChunks, rollingBootstrap } from './scripts/build-chunks.mjs';
+import { emitBootstraps, emitChunks } from './scripts/build-chunks.mjs';
 import { buildServerRooms } from './scripts/build-server-rooms.mjs';
 import { buildServerCheckpoint } from './scripts/build-server-checkpoint.mjs';
 
@@ -165,13 +165,6 @@ async function copyInto(fromAbs, relPath) {
   return 1;
 }
 
-async function writeInto(text, relPath) {
-  const dest = publicPath(relPath);
-  await mkdir(dirname(dest), { recursive: true });
-  await writeFile(dest, text);
-  return 1;
-}
-
 // The chunk build turns dist/ into more than the single-file bundle: dist/m/ holds
 // the hashed modules and dist/<name>.js a generated bootstrap for every entry that
 // has a target. Tarballs published before the chunk build have neither, which is why
@@ -187,9 +180,10 @@ async function chunkedBootstraps(from) {
   return names;
 }
 
-// A rolling prefix is not that release's own prefix: its chunks live under the
-// pinned prefix, so m/ is skipped and each bootstrap's chunk directory is rewritten
-// to point there. /v1/m/ is deliberately not served.
+// A rolling prefix serves its own copy of that release's chunks, so /v1/ is a
+// self-contained tree: the release gate, the e2e fixture and `htmlfile vendor` copy
+// or serve public/v1/ alone, and a /v1/clay.js cached from the previous release
+// still asks for /v1/m/ with that release's hashed names.
 const CHUNKED = new Set();
 
 // Copy a library payload under one prefix. `from` is the working tree for the
@@ -198,7 +192,6 @@ async function emitLibrary(from, version, prefix = version) {
   let n = 0;
   const generated = await chunkedBootstraps(from);
   if (generated) CHUNKED.add(version);
-  const rolling = prefix !== version;
   for (const [name, sub] of LIBRARY) {
     const abs = join(from, name);
     if (!(await lstat(abs).catch(() => null))) {
@@ -209,18 +202,45 @@ async function emitLibrary(from, version, prefix = version) {
       // dist/ provides these, and LIBRARY copies entries/ first, so the entries/ copy
       // would be overwritten by the generated file a moment later.
       if (name === 'entries/' && generated?.has(rel)) continue;
-      if (rolling && name === 'dist/' && rel.startsWith('m/')) continue;
-      const dest = join(prefix, sub, rel);
-      n += generated?.has(rel) && rolling
-        ? await writeInto(rollingBootstrap(await readFile(join(abs, rel), 'utf8'), version), dest)
-        : await copyInto(join(abs, rel), dest);
+      n += await copyInto(join(abs, rel), join(prefix, sub, rel));
     }
   }
   if (generated) {
     const clay = await readFile(join(PUBLIC, prefix, 'clay.js'), 'utf8');
-    const dir = rolling ? `"dir":"../${version}/m/"` : '"dir":"m/"';
-    if (!clay.includes(dir)) {
+    if (!clay.includes('"dir":"m/"')) {
       throw new Error(`public/${prefix}/clay.js is not the generated bootstrap of ${version}`);
+    }
+  }
+  return n;
+}
+
+// A rolling prefix also carries the previous chunked release's chunks, because a
+// bootstrap cached from that release asks for m/ under the rolling prefix with ITS
+// hashed names, and the clean rebuild has just deleted them. Content-hashed names
+// cannot collide with the current release unless something is wrong, so a repeated
+// name must repeat the bytes too.
+async function addPreviousChunks(prefix, version, published) {
+  const earlier = [...CHUNKED].filter((v) => cmpVersion(v, version) < 0).sort(cmpVersion);
+  const previous = earlier.at(-1);
+  if (!previous) return 0;
+  const from = join(await sourceFor(previous, published), 'dist', 'm');
+  let n = 0;
+  for (const rel of await walk(from)) {
+    const bytes = await readFile(join(from, rel));
+    const existing = await readFile(join(PUBLIC, prefix, 'm', rel)).catch(() => null);
+    // manifest.json is the one fixed name, so the current release already wrote it and
+    // its bytes name the current release. Nothing at runtime reads it; it is for hosts
+    // and tooling, which want the release the prefix itself serves.
+    if (existing && rel === 'manifest.json') continue;
+    if (!existing) {
+      n += await copyInto(join(from, rel), join(prefix, 'm', rel));
+      continue;
+    }
+    if (!existing.equals(bytes)) {
+      throw new Error(
+        `public/${prefix}/m/${rel} is already there with different bytes; ` +
+          `the chunk names are content-hashed, so that means the build is not reproducible`
+      );
     }
   }
   return n;
@@ -372,6 +392,7 @@ const heads = rollingHeads(pins);
 for (const version of pins) count += await emitLibrary(await sourceFor(version, published), version);
 for (const [major, version] of heads) {
   count += await emitLibrary(await sourceFor(version, published), version, `v${major}`);
+  count += await addPreviousChunks(`v${major}`, version, published);
 }
 
 // Root-level entries from "files": everything the library payload did not claim.
@@ -432,9 +453,9 @@ for (const version of pins) {
 // One placeholder rule gives every prefix's module tree its CORS header, rolling and pinned
 // alike, so a release costs one rule instead of two. No site path has a src/ directory.
 blocks.push(`/:prefix/src/*\n  Access-Control-Allow-Origin: *`);
-// The chunked runtime is a second module tree, under the pinned prefix's m/, so it
-// needs the same CORS header. A different header from the cache rules, so nothing
-// joins, and no rule sets the same header twice.
+// The chunked runtime is a second module tree, under every prefix's m/ (pinned and
+// rolling alike), so it needs the same CORS header. A different header from the cache
+// rules, so nothing joins, and no rule sets the same header twice.
 blocks.push(`/:prefix/m/*\n  Access-Control-Allow-Origin: *`);
 // Cloudflare Pages serves an HTML page at its extensionless path and answers the
 // .html spelling with a 307, so a rule naming only the file lands on the redirect
@@ -482,10 +503,10 @@ const served = [...[...heads].map(([major, v]) => [`v${major}`, v]), ...pins.map
 for (const [prefix, version] of served) {
   required.push(`${prefix}/clay.js`, `${prefix}/src/loader.js`, `${prefix}/sap.js`);
   if (cmpVersion(version, STANDALONE_SINCE) >= 0) required.push(`${prefix}/${STANDALONE}`);
-  // The chunks live under their own pinned prefix; a rolling prefix points at them and
-  // serves no m/ of its own. Tarballs published before the chunk build have none, and
-  // their pins still have to rebuild, so the manifest is required only where they exist.
-  if (prefix === version && CHUNKED.has(version)) required.push(`${version}/m/manifest.json`);
+  // The chunks live under the same prefix as the bootstraps that load them, rolling and
+  // pinned alike. Tarballs published before the chunk build have none, and their pins
+  // still have to rebuild, so the manifest is required only where they exist.
+  if (CHUNKED.has(version)) required.push(`${prefix}/m/manifest.json`);
 }
 for (const rel of required) {
   const stat = await lstat(join(PUBLIC, rel)).catch(() => null);

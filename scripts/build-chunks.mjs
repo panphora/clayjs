@@ -180,7 +180,3 @@ export async function emitBootstraps({ root, outdir, manifest, satellites }) {
     await writeFile(path.join(outdir, name), satellite);
   }
 }
-
-export function rollingBootstrap(code, version) {
-  return replaceOnce(code, '"dir":"m/"', `"dir":"../${version}/m/"`, "the bootstrap");
-}

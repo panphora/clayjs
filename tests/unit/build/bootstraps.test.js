@@ -5,7 +5,7 @@ import { afterAll, beforeAll, expect, test } from "@jest/globals";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { BOOT_PREFIX, emitBootstraps, emitChunks, rollingBootstrap } from "../../../scripts/build-chunks.mjs";
+import { BOOT_PREFIX, emitBootstraps, emitChunks } from "../../../scripts/build-chunks.mjs";
 
 const root = path.resolve(new URL("../../..", import.meta.url).pathname);
 
@@ -108,11 +108,3 @@ test("each satellite preloads its own entry and the runtime manifest", async () 
   }
 });
 
-test("rollingBootstrap rewrites the one chunk directory", async () => {
-  const code = await read("clay.js");
-  const rolled = rollingBootstrap(code, "9.9.9");
-  expect(rolled).toContain('"dir":"../9.9.9/m/"');
-  expect(rolled.split('"dir":"m/"').length - 1).toBe(0);
-  expect(() => rollingBootstrap("var a = 1;", "9.9.9")).toThrow();
-  expect(() => rollingBootstrap('"dir":"m/" "dir":"m/"', "9.9.9")).toThrow();
-});
