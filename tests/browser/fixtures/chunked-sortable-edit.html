@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>clayjs chunked sortable edit fixture</title>
+  <script>
+    window.clayEditMode = true;
+    // Probes for the spec: the preload links as clay:ready found them and every
+    // resource path the page had started fetching by then.
+    window.__warnings = [];
+    var warn = console.warn.bind(console);
+    console.warn = function () {
+      window.__warnings.push(Array.prototype.map.call(arguments, String).join(" "));
+      warn.apply(console, arguments);
+    };
+    document.addEventListener("clay:ready", function () {
+      window.preloadsAtReady = Array.prototype.map.call(
+        document.querySelectorAll('link[rel="modulepreload"]'),
+        function (link) { return link.href; }
+      );
+      window.fetchedAtReady = performance.getEntriesByType("resource").map(function (entry) {
+        return new URL(entry.name).pathname;
+      });
+    }, { once: true });
+  </script>
+  <script src="/dist/clay.js?plugins=page,sortable"></script>
+</head>
+<body>
+  <h1 editable>Board</h1>
+
+  <ul sortable>
+    <li>First</li>
+    <li>Second</li>
+  </ul>
+</body>
+</html>

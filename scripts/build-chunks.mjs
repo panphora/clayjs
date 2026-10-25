@@ -8,6 +8,7 @@ import { createHash } from "node:crypto";
 import { readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { BOOT_IMPORTS, EDIT_BOOT_IMPORTS } from "../src/lib/boot-imports.js";
 
 export const BOOT_PREFIX = ["core/draft-mode.js", "core/is-edit-mode.js", "lib/region-policy.js"];
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
@@ -27,7 +28,8 @@ export async function emitChunks({ root, outdir }) {
   const { MODULES } = await import(pathToFileURL(path.join(root, "src/loader-logic.js")).href);
   const { version, name: pkgName } = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
   const satellites = await satelliteTargets(root);
-  const logical = [...new Set(["loader.js", ...Object.keys(MODULES), ...Object.values(satellites)])];
+  const bootImports = Object.values(BOOT_IMPORTS).flat();
+  const logical = [...new Set(["loader.js", ...Object.keys(MODULES), ...Object.values(satellites), ...bootImports, ...EDIT_BOOT_IMPORTS])];
   await rm(outdir, { recursive: true, force: true });
   const result = await esbuild.build({
     absWorkingDir: root,
@@ -62,7 +64,7 @@ export async function emitChunks({ root, outdir }) {
     if (meta.entryPoint) entries[meta.entryPoint.replace(/^src\//, "")] = file;
   }
   const imports = Object.fromEntries(Object.entries(files).filter(([f]) => f.endsWith(".js")).map(([f, v]) => [f, v.imports]));
-  const code = `export default ${JSON.stringify({ version, entries, imports })};\n`;
+  const code = `export default ${JSON.stringify({ version, entries, imports, bootImports: BOOT_IMPORTS, editBootImports: EDIT_BOOT_IMPORTS })};\n`;
   const runtime = `manifest-${sha256(code).slice(0, 8).toUpperCase()}.js`;
   await writeFile(path.join(outdir, runtime), code);
   files[runtime] = { sha256: sha256(code), bytes: Buffer.byteLength(code), contentType: "text/javascript; charset=utf-8", imports: [], dynamicImports: [] };

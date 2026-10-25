@@ -31,9 +31,11 @@ export async function boot(base, params, readyResolve, manifest = null) {
                                                        // would otherwise observe null
 
   const editMode = await MODULES["core/is-edit-mode.js"]();
-  const { isEditMode, isOwner, siteVisibility, canEdit, mode } = editMode;
+  const { isEditMode, isDraftMode, isOwner, siteVisibility, canEdit, mode } = editMode;
 
-  if (isEditMode) import("./core/host-meta.js").then((m) => m.hostMeta()).catch(() => {});
+  // A draft saved by its visitor never reaches the host, and hostMeta() answers
+  // bareHost() for it, so the request would fetch an answer nothing reads.
+  if (isEditMode && !isDraftMode) import("./core/host-meta.js").then((m) => m.hostMeta()).catch(() => {});
 
   // richclay's vendor build detects edit mode via this legacy global; set it
   // before any plugin import so its autoInit sees the right value. Overwrite
@@ -43,12 +45,12 @@ export async function boot(base, params, readyResolve, manifest = null) {
 
   const regionPolicy = await MODULES["lib/region-policy.js"]();
 
-  const { isDraftMode } = editMode;
-
   const hasSap = Boolean(document.querySelector("[sap]"));
+  // derive.js imports the sapjs core only when no sap.js script took the page over.
+  const hasSapJs = Boolean(document.querySelector('script[src*="sap.js"]'));
   bootPhase.holdSettle = hasSap && isEditMode;
   const plan = resolveModules(params, isEditMode, { isDraftMode, hasSap });
-  preloadEntries(manifest, [...plan.core, ...plan.plugins]);
+  preloadEntries(manifest, [...plan.core, ...plan.plugins], { isEditMode, isDraftMode, hasSapJs });
   const loaded = {};
 
   for (const path of plan.core) {

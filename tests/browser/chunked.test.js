@@ -128,6 +128,33 @@ describe('the chunked release in edit mode', () => {
   });
 });
 
+// A plugin's boot-time import is a boot stage of its own unless the plan preloads
+// it: sortable awaits vendor/Sortable.vendor.js inside its ready, and the loader
+// holds clay:ready on that. Every chunk the page fetched before clay:ready has to
+// have had a preload link, or the browser fetched it one stage too late.
+describe('a plugins=sortable edit page', () => {
+  let win;
+
+  before(async () => { win = await open('chunked-sortable-edit.html'); });
+
+  it('fetches no chunk it did not preload', () => {
+    const preloaded = new Set(win.preloadsAtReady.map((href) => new URL(href).pathname));
+    const chunks = win.fetchedAtReady.filter((path) => path.startsWith('/dist/m/'));
+    expect(chunks.length).to.be.above(0);
+
+    expect(chunks.filter((path) => !preloaded.has(path))).to.deep.equal([]);
+  });
+
+  it('preloads the sortable vendor and the host metadata', async () => {
+    const { runtime } = await fetch('/dist/m/manifest.json').then((response) => response.json());
+    const manifest = (await import(`/dist/m/${runtime}`)).default;
+    const preloaded = new Set(win.preloadsAtReady.map((href) => new URL(href).pathname));
+
+    expect(preloaded.has(`/dist/m/${manifest.entries['vendor/Sortable.vendor.js']}`)).to.equal(true);
+    expect(preloaded.has(`/dist/m/${manifest.entries['core/host-meta.js']}`)).to.equal(true);
+  });
+});
+
 // One copy means one save pipeline: internals and core share the same
 // addDocumentTransform registry, so a transform registered through the satellite
 // reaches the bytes clay.getHTML() would write. Two copies of src/core/snapshot.js

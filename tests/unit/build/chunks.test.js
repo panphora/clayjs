@@ -6,6 +6,7 @@ import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { BOOT_IMPORTS, EDIT_BOOT_IMPORTS } from "../../../src/lib/boot-imports.js";
 import { emitChunks } from "../../../scripts/build-chunks.mjs";
 
 const root = path.resolve(new URL("../../..", import.meta.url).pathname);
@@ -81,4 +82,21 @@ test("a second build writes a byte-identical manifest.json", async () => {
   const first = await readFile(path.join(outdir, "manifest.json"));
   const again = await readFile(path.join(second, "manifest.json"));
   expect(again.equals(first)).toBe(true);
+});
+
+test("every boot-time import is its own entry", async () => {
+  for (const logical of [...Object.values(BOOT_IMPORTS).flat(), ...EDIT_BOOT_IMPORTS]) {
+    const file = built.manifest.entries[logical];
+    expect(file).toBeTruthy();
+    expect(built.manifest.files[file]).toBeTruthy();
+    expect((await readFile(path.join(outdir, file))).length).toBeGreaterThan(0);
+  }
+});
+
+test("the runtime manifest names each entry's boot imports and the edit-only ones", async () => {
+  const code = await readFile(path.join(outdir, built.manifest.runtime), "utf8");
+  const runtime = JSON.parse(code.slice("export default ".length).replace(/;\s*$/, ""));
+
+  expect(runtime.bootImports).toEqual(BOOT_IMPORTS);
+  expect(runtime.editBootImports).toEqual(EDIT_BOOT_IMPORTS);
 });

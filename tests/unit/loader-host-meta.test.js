@@ -23,7 +23,14 @@ async function boot(mode, query) {
   jest.resetModules();
   document.documentElement.innerHTML = '<head><title>Document</title></head><body><article class="page" clay="freeze" data-page="1"><p data-id="p1">Hi</p></article></body>';
   window.clay = {};
-  window.clayEditMode = mode === "edit";
+  delete window.clayEditMode;
+  delete window.__hyperclayEditMode;
+  if (mode === "draft") {
+    document.documentElement.setAttribute("visitor-drafts", "slot");
+    document.head.innerHTML += '<script type="application/json" data-rules-name="api" data-rules-version="1">{}</script>';
+  } else {
+    window.clayEditMode = mode === "edit";
+  }
   globalThis.EventSource = class extends EventTarget {
     static CONNECTING = 0;
     static CLOSED = 2;
@@ -50,6 +57,7 @@ async function boot(mode, query) {
 afterEach(() => {
   delete window.clay;
   delete window.clayEditMode;
+  document.documentElement.removeAttribute("visitor-drafts");
 });
 
 test("an edit-mode boot with plugins=page asks the host for its metadata exactly once", async () => {
@@ -66,6 +74,13 @@ test("a view-mode boot does not ask the host for its metadata from the loader", 
 
   expect(window.clay.page).toBeUndefined();
   expect(metaRequests(requests).filter((r) => r.caller.includes("/src/loader.js:"))).toEqual([]);
+});
+
+test("a draft-mode boot sends no host-metadata request", async () => {
+  const { requests } = await boot("draft", "plugins=visitor-drafts");
+
+  expect(window.clay.isDraftMode).toBe(true);
+  expect(metaRequests(requests)).toEqual([]);
 });
 
 test("a view-mode boot with no plugins asks the host nothing", async () => {

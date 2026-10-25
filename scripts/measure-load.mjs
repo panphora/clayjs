@@ -11,6 +11,7 @@ import { build } from "esbuild";
 import { parse } from "parse5";
 import { draftEligible, noteBootParams } from "../src/core/draft-mode.js";
 import { resolveModules } from "../src/loader-logic.js";
+import { BOOT_IMPORTS, EDIT_BOOT_IMPORTS } from "../src/lib/boot-imports.js";
 
 const ROOT = resolve(fileURLToPath(new URL(".", import.meta.url)), "..");
 const CLAY = "https://clayjs.com/v1/";
@@ -18,10 +19,6 @@ const CLAY_ORIGIN = new URL(CLAY).origin;
 const CLAY_SRC_PATH = "/v1/src/";
 const FIXTURES = join(ROOT, "tests/fixtures/load");
 const CSS_IMPORT = /@import\s+(?:url\(\s*(?:"([^"]+)"|'([^']+)'|([^\s)"']+))\s*\)|"([^"]+)"|'([^']+)')/gi;
-const BOOT_IMPORTS = {
-  "src/plugins/sortable.js": ["src/vendor/Sortable.vendor.js"],
-  "src/plugins/derive.js": ["src/vendor/sap-core.vendor.js"],
-};
 
 const attrsOf = (node) => Object.fromEntries((node.attrs || []).map(({ name, value }) => [name, value]));
 const textOf = (node) => (node.childNodes || []).map((child) => child.value ?? textOf(child)).join("");
@@ -231,7 +228,9 @@ export async function measure({ html, mode }) {
     mainDepth += fetched.levels;
     for (const importer of fetched.added) {
       if (importer === "src/plugins/derive.js" && names.includes("sap.js")) continue;
-      for (const target of BOOT_IMPORTS[importer] || []) mainDepth += closure(inputs, target, loaded).levels;
+      for (const target of BOOT_IMPORTS[importer.replace(/^src\//, "")] || []) {
+        mainDepth += closure(inputs, `src/${target}`, loaded).levels;
+      }
     }
   }
 
@@ -294,6 +293,16 @@ export async function measureBuilt({ html, mode, dir }) {
     ? resolveModules(params, mode === "edit" || isDraftMode, { isDraftMode, hasSap })
     : { core: [], plugins: [] };
   const manifest = JSON.parse(readFileSync(join(dir, "m/manifest.json"), "utf8"));
+  const bootImports = [];
+  if (bootstrap) {
+    for (const path of [...plan.core, ...plan.plugins]) {
+      for (const file of BOOT_IMPORTS[path] ?? []) {
+        if (file === "vendor/sap-core.vendor.js" && names.includes("sap.js")) continue;
+        bootImports.push(file);
+      }
+    }
+    if (mode === "edit") bootImports.push(...EDIT_BOOT_IMPORTS);
+  }
   const loaded = new Set();
   const addChunk = (file) => {
     if (!file || loaded.has(`m/${file}`)) return false;
@@ -326,7 +335,7 @@ export async function measureBuilt({ html, mode, dir }) {
     let preload = 0;
     for (const file of payload.preload) if (addChunk(file)) preload++;
     if (preload) mainDepth++;
-    if (addClosure([...plan.core, ...plan.plugins])) mainDepth++;
+    if (addClosure([...plan.core, ...plan.plugins, ...bootImports])) mainDepth++;
   }
 
   let satelliteDepth = 0;
