@@ -110,17 +110,22 @@ export function effect(fn) {
     queueMicrotask(run);
   };
 
+  const undoEvents = ["undo", "redo"];
+  const bindUndo = () => {
+    for (const type of undoEvents) clay.undo?.on?.(type, schedule);
+  };
+
   const offMutation = Mutation.onAnyChange({ debounce: 0, require: "observed" }, schedule);
   document.addEventListener("clay:sync-applied", schedule);
-  clay.undo?.on?.("undo", schedule);
-  clay.undo?.on?.("redo", schedule);
+  document.addEventListener("clay:modechange", bindUndo);
+  bindUndo();
 
   const stop = () => {
     stopped = true;
     offMutation();
     document.removeEventListener("clay:sync-applied", schedule);
-    clay.undo?.off?.("undo", schedule);
-    clay.undo?.off?.("redo", schedule);
+    document.removeEventListener("clay:modechange", bindUndo);
+    for (const type of undoEvents) clay.undo?.off?.(type, schedule);
   };
 
   schedule();

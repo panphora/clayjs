@@ -74,23 +74,102 @@ function restoreControls() {
   })
 }
 
-function init() {
-  if (!isEditMode) return
-  // Defer until the body exists so the default scope (document.body) is valid.
-  if (typeof document === 'undefined') return
-  const start = () => {
-    undo.start(withTabLocal({ bindKeys: true }))
-    undo.on('undo', restoreControls)
-    undo.on('redo', restoreControls)
-  }
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', start)
-  } else {
-    start()
+// One edit session owns the page's DOM history. A session starts its own over the page as
+// it stands, so nothing an earlier session recorded, and nothing a reader painted while the
+// page was in view, is this session's to undo. The durable recovery records belong to the
+// recovery service and outlive every session; nothing here reads, clears or rewrites them.
+let session = null
+
+function ownership() {
+  return { started: false, admitted: false, subscriptions: [] }
+}
+
+const isStale = (context) => {
+  if (!context) return false
+  if (context.signal?.aborted) return true
+  return typeof context.isCurrent === 'function' && !context.isCurrent()
+}
+
+// The default scope is document.body, so a boot that is still parsing waits for the body
+// to exist before the session starts.
+function bodyReady() {
+  if (typeof document === 'undefined') return Promise.resolve()
+  if (document.readyState !== 'loading') return Promise.resolve()
+  return new Promise((resolve) => document.addEventListener('DOMContentLoaded', resolve, { once: true }))
+}
+
+// One edit session over the live page. `enable` starts a fresh history and the control
+// restore that follows it; `quiesce` closes recording so the exit barrier's writes are not
+// entries, keeping the history itself; `resume` is the refused exit; `dispose` detaches
+// exactly the subscriptions this session added and takes the history and its keydown
+// binding back, so a later entry starts from nothing.
+function undoLease(record) {
+  return {
+    enable() {
+      if (record.started) return
+      record.started = true
+      record.admitted = true
+      undo.start(withTabLocal({ bindKeys: true }))
+      for (const type of ['undo', 'redo']) {
+        undo.on(type, restoreControls)
+        record.subscriptions.push({ type, handler: restoreControls })
+      }
+    },
+    quiesce() {
+      if (!record.admitted) return
+      record.admitted = false
+      undo.pause()
+    },
+    resume() {
+      if (record.admitted) return
+      record.admitted = true
+      undo.resume()
+    },
+    dispose() {
+      record.admitted = false
+      if (session === record) session = null
+      if (!record.started) return
+      record.started = false
+      for (const { type, handler } of record.subscriptions.splice(0)) undo.off(type, handler)
+      undo.stop()
+    },
   }
 }
 
-init()
+/**
+ * Undo as a mode participant: the history the commit that enters edit starts, and the one
+ * the exit takes back.
+ *
+ * `prepare` waits for the body the default scope needs, and answers with the session's
+ * lease; that wait can outlive the session that asked for it, so the generation is asked
+ * again once the body exists. `enable` starts the history. `quiesce` stops recording
+ * without losing what the session already holds. `dispose` hands back the subscriptions,
+ * the history and the keydown binding.
+ */
+export function undoParticipant() {
+  return {
+    id: 'clay:undo',
+    order: 350,
+    async prepare(context) {
+      await bodyReady()
+      if (isStale(context)) {
+        throw Object.assign(new Error('clay:undo prepared for a stale generation'), { code: 'stale-document' })
+      }
+      return undoLease(session || (session = ownership()))
+    },
+  }
+}
 
-export { undo, restoreControls }
+// Auto-init when the module is imported; the loader awaits `ready` before resolving clay.ready
+async function init() {
+  if (!isEditMode) return null
+  if (typeof document === 'undefined') return null
+  const lease = await undoParticipant().prepare()
+  lease.enable()
+  return lease
+}
+
+const ready = init()
+
+export { undo, restoreControls, init, ready }
 export default undo
