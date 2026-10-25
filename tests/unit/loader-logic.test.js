@@ -112,10 +112,26 @@ describe("resolveModules", () => {
     expect(plugins).toEqual([
       "plugins/richclay.js",
       "plugins/indicator.js",
-      "plugins/sortable.js",
       "plugins/undo.js",
     ]);
-    expect(late).toEqual(["plugins/source.js"]);
+    expect(late).toEqual(["plugins/sortable.js", "plugins/source.js"]);
+  });
+
+  // Nothing on first paint or on a keystroke waits for Sortable's vendor fetch, so
+  // it loads in the late list in both modes a page can edit in, and not at all in
+  // view mode, where no drag can happen.
+  test("sortable is late in edit and draft mode, and absent in view mode", () => {
+    const edit = resolveModules(params({ plugins: "sortable" }), true);
+    expect(edit.late).toEqual(["plugins/sortable.js", "plugins/source.js"]);
+    expect(edit.plugins).not.toContain("plugins/sortable.js");
+
+    const draft = resolveModules(params({ plugins: "sortable" }), true, { isDraftMode: true });
+    expect(draft.late).toEqual(["plugins/sortable.js"]);
+    expect(draft.plugins).not.toContain("plugins/sortable.js");
+
+    const view = resolveModules(params({ plugins: "sortable" }), false);
+    expect(view.late).not.toContain("plugins/sortable.js");
+    expect(view.plugins).not.toContain("plugins/sortable.js");
   });
 
   test("exclude CSV removes a default-on plugin", () => {
@@ -265,13 +281,13 @@ test("draft mode puts visitor-drafts first and drops every host-facing plugin", 
     { isDraftMode: true }
   );
   expect(plugins[0]).toBe("plugins/visitor-drafts.js");
-  expect(plugins).toContain("plugins/sortable.js");
+  expect(late).toContain("plugins/sortable.js");
   expect(plugins).toContain("plugins/undo.js");
   expect(plugins).toContain("plugins/richclay.js");
   expect(plugins).not.toContain("sync/live-sync.js");
   expect(plugins).not.toContain("plugins/upload.js");
   expect(plugins).not.toContain("plugins/source.js");
-  expect(late).toEqual([]);
+  expect(late).toEqual(["plugins/sortable.js"]);
 });
 
 test("draft mode drops the [refetch-on-save] hook, which GETs the host after every save", () => {

@@ -44,11 +44,12 @@ test("without clay.js, satellites count but the loader does not", async () => {
   expect(measured.js.files.map(({ path }) => path)).toEqual(["entries/sap.js"]);
 });
 
-test("Kanban edit boot includes Sortable", async () => {
+test("Kanban edit boot loads Sortable after ready, not in the boot graph", async () => {
   const measured = await measure({ html: clayTag('"', "sortable"), mode: "edit" });
+  const bare = await measure({ html: clayTag('"', ""), mode: "edit" });
 
-  expect(measured.js.files.map(({ path }) => path)).toContain("src/vendor/Sortable.vendor.js");
-  expect(measured.lazy).not.toContain("src/vendor/Sortable.vendor.js");
+  expect(measured.js.files.map(({ path }) => path)).not.toContain("src/vendor/Sortable.vendor.js");
+  expect(measured.js.late.brotli).toBeGreaterThan(bare.js.late.brotli);
 });
 
 test("a cycle below an entry counts each module once", async () => {

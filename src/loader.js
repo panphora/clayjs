@@ -1,4 +1,4 @@
-import { resolveModules, MODULES } from "./loader-logic.js";
+import { resolveModules, MODULES, PLUGIN_PATHS } from "./loader-logic.js";
 import onDomReady from "./lib/dom-ready.js";
 import { initTheme } from "./ui/theme-config.js";
 import { ephemeral } from "./lib/ephemeral.js";
@@ -11,6 +11,12 @@ import { assets } from "./lib/assets.js";
 import { bootPhase } from "./core/boot-phase.js";
 import { mergeEngine } from "./sync/merge-engine.js";
 import { preloadEntries } from "./lib/preload.js";
+
+// The plugin name a late path announces: the loader's own name-to-path table,
+// read the other way.
+const PLUGIN_NAMES = Object.fromEntries(
+  Object.entries(PLUGIN_PATHS).map(([name, spec]) => [spec.path, name])
+);
 
 function domReady() {
   return new Promise((resolve) => onDomReady(resolve));
@@ -116,6 +122,8 @@ async function loadLate(paths, loaded) {
       const mod = await MODULES[path]();
       loaded[path] = mod;
       attachPluginMember(path, mod, loaded);
+      await mod.ready;
+      document.dispatchEvent(new CustomEvent("clay:plugin-ready", { detail: { plugin: PLUGIN_NAMES[path] } }));
     } catch (err) {
       console.error(`clayjs: plugin "${path}" failed to load, continuing without it:`, err);
     }
