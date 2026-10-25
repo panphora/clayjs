@@ -509,3 +509,10 @@ describe("late plugins start loading on their own", () => {
     delete window.clayEditMode;
   });
 });
+
+test("visitor-drafts loads for visitors keeping drafts and for owners editing, never for a reader", () => {
+  const tag = params({ plugins: "sync,visitor-drafts,menu" });
+  expect(resolveModules(tag, false).plugins).not.toContain("plugins/visitor-drafts.js");
+  expect(resolveModules(tag, true).plugins).toContain("plugins/visitor-drafts.js");
+  expect(resolveModules(params({ plugins: "sync" }), true, { isDraftMode: true }).plugins[0]).toBe("plugins/visitor-drafts.js");
+});

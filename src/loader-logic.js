@@ -67,7 +67,9 @@ export const PLUGIN_PATHS = {
   // verify is sent as the ordinary full serialization, so the floor is the behaviour
   // it replaces. `exclude=source` turns it off.
   source:    { path: "plugins/source.js",          editOnly: true,  default: true },
-  "visitor-drafts": { path: "plugins/visitor-drafts.js", editOnly: false, default: false },
+  // Draft mode counts as edit mode, so this still loads for visitors keeping drafts
+  // and for owners editing; a reader never pays for a drafts UI it cannot use.
+  "visitor-drafts": { path: "plugins/visitor-drafts.js", editOnly: true,  default: false },
   // An editor textarea outside the saved records, bound to one record's text
   // element. Edit mode only: the page that asks for it is the page whose owner
   // writes in it.
