@@ -1,6 +1,6 @@
 import { resolveModules, MODULES } from "./loader-logic.js";
 import onDomReady from "./lib/dom-ready.js";
-import { initTheme } from "./ui/theme.js";
+import { initTheme } from "./ui/theme-config.js";
 import { ephemeral } from "./lib/ephemeral.js";
 import { storage } from "./lib/doc-storage.js";
 import { trash } from "./lib/trash.js";

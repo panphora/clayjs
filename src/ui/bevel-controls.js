@@ -11,6 +11,7 @@
 import { style, make, set } from '../lib/hostile-css.js';
 import { RULES, MEDIA, FONT_SANS, TOKENS } from './bevel.js';
 import { themed, tokenRulesFor, partRules, markParts, floorRules } from './theme-parts.js';
+import { pageScheme } from './page-scheme.js';
 
 export const RUNTIME_ONLY = 'no-save no-watch no-snapshot';
 
@@ -325,13 +326,6 @@ export function bevelInput(tag = 'input', opts = {}) {
   return paintInput(el, opts);
 }
 
-// The scheme a UI root gives its subtree: the page's own when it declares one, so
-// light-dark() matches what the person is looking at, else the reader's preference.
-export function pageScheme() {
-  const s = getComputedStyle(document.documentElement).colorScheme;
-  return s === 'light' || s === 'dark' ? s : 'light dark';
-}
-
 // `hidden` loses to an inline !important display, so showing and hiding a control
 // sets both: the attribute for assistive tech and callers, the declaration for looks.
 export function setShown(el, shown, display = 'block') {
@@ -340,4 +334,4 @@ export function setShown(el, shown, display = 'block') {
   else set(el, 'display', shown ? display : 'none');
 }
 
-export { protectIcon };
+export { pageScheme, protectIcon };

@@ -327,3 +327,20 @@ test("importing the ui entry attaches clay.theme", async () => {
   expect(typeof window.clay.theme).toBe("function");
   expect(window.clay.theme()).toEqual({ auto: true, colorScheme: "page", tokens: {}, parts: {} });
 });
+
+// ui/theme-config.js is the one module the loader imports for theming, and it is the
+// whole of what a reader carries: no surface, no controls, no stylesheet. clay.theme()
+// answers and throws synchronously there, before any of those exist.
+test("configuration answers synchronously before any UI module is imported", async () => {
+  await jest.isolateModulesAsync(async () => {
+    const config = await import("../../src/ui/theme-config.js");
+
+    expect(config.resolveTheme).toBeUndefined();
+    expect(config.theme()).toEqual({ auto: true, colorScheme: "page", tokens: {}, parts: {} });
+    expect(config.theme({ tokens: { accent: "#7356ba" } }).tokens).toEqual({ accent: "#7356ba" });
+    expect(() => config.theme({ tokens: { nope: "x" } })).toThrow(TypeError);
+    expect(config.theme()).toEqual({ colorScheme: "page", auto: true, tokens: { accent: "#7356ba" }, parts: {} });
+    // The same state a surface resolves against, so a split module cannot go stale.
+    expect(config.currentConfig().tokens.accent).toBe("#7356ba");
+  });
+});

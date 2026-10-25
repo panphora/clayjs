@@ -100,6 +100,25 @@ test("the close control rebuilds from its own states, themed and unthemed", () =
   expect(last(plainHover, plain, "background")).toBe(RULES.dialogCloseHover[0].slice("background:".length));
 });
 
+// Theme configuration and the surfaces that paint it are separate modules, so a
+// config change has to reach the very next surface: the first notice opened after
+// clay.theme() takes the new colours, and the one already open keeps its own.
+test("the first notice after a config change takes the new configuration", () => {
+  theme(KANBAN);
+  tell("A").catch(() => {});
+  const opened = dialog();
+  expect(shown(opened, "background")).toEqual(parseColor(KANBAN.tokens.surface));
+
+  theme({ colorScheme: "dark", tokens: { ...KANBAN.tokens, surface: "#101418", text: "#eef1f5" } });
+  themodal.close();
+  tell("B").catch(() => {});
+
+  expect(dialog()).not.toBe(opened);
+  expect(shown(dialog(), "background")).toEqual(parseColor("#101418"));
+  expect(root().style.getPropertyValue("color-scheme")).toBe("dark");
+  expect(shown(opened, "background")).toEqual(parseColor(KANBAN.tokens.surface));
+});
+
 test("a dialog keeps the theme it opened with", () => {
   theme(KANBAN);
   tell("A").catch(() => {});
