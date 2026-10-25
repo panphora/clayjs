@@ -181,69 +181,88 @@ export function applyPreparedArticle(prepared, { article, readerOpen = new Map()
     return null;
   };
 
+  const syncAttributes = (live, incoming, skip = null) => {
+    for (const { name, value } of [...incoming.attributes]) {
+      if (name === skip || live.getAttribute(name) === value) continue;
+      live.setAttribute(name, value);
+      changed = true;
+    }
+    for (const { name } of [...live.attributes]) {
+      if (name === skip || incoming.hasAttribute(name)) continue;
+      live.removeAttribute(name);
+      changed = true;
+    }
+  };
+
+  const reuseNode = (incoming, live, at) => {
+    const same = (candidate) =>
+      candidate && candidate.nodeType === incoming.nodeType && candidate.nodeValue === incoming.nodeValue && !used.has(candidate);
+    const found = same(live.childNodes[at]) ? live.childNodes[at] : [...live.childNodes].find(same);
+    if (!found) return incoming.cloneNode(true);
+    used.add(found);
+    return found;
+  };
+
   const reconcileContainer = (live, incoming) => {
-    for (const child of [...live.childNodes]) if (child.nodeType !== 1) child.remove();
-    let cursor = live.firstElementChild;
-    for (const child of [...incoming.childNodes]) {
+    const ordered = [];
+    const children = [...incoming.childNodes];
+    for (let i = 0; i < children.length; i++) {
+      const child = children[i];
       if (child.nodeType !== 1) {
-        live.insertBefore(child.cloneNode(true), cursor);
+        ordered.push(reuseNode(child, live, i));
         continue;
       }
       const node = pick(child, live);
-      if (node === cursor) {
-        cursor = cursor.nextElementSibling;
+      used.add(node);
+      ordered.push(node);
+    }
+    const kept = new Set(ordered);
+    let walk = live.firstChild;
+    for (const node of ordered) {
+      while (walk && !kept.has(walk)) walk = walk.nextSibling;
+      if (walk === node) {
+        walk = walk.nextSibling;
         continue;
       }
-      live.insertBefore(node, cursor);
-    }
-    while (cursor) {
-      const next = cursor.nextElementSibling;
-      cursor.remove();
+      live.insertBefore(node, walk);
       changed = true;
-      cursor = next;
     }
+    for (const child of [...live.childNodes]) {
+      if (kept.has(child)) continue;
+      child.remove();
+      changed = true;
+    }
+  };
+
+  const freshShell = (incoming) => {
+    changed = true;
+    const node = incoming.cloneNode(false);
+    reconcileContainer(node, incoming);
+    return node;
   };
 
   const reconcileDetails = (live, incoming) => {
     changed = true;
     const id = live.getAttribute("data-id");
     const open = readerOpen.has(id) ? readerOpen.get(id) : incoming.hasAttribute("open");
+    syncAttributes(live, incoming, "open");
     if (live.hasAttribute("open") !== open) live.toggleAttribute("open", open);
     reconcileContainer(live, incoming);
   };
 
   const reconcileItem = (live, incoming) => {
     changed = true;
-    const nested = [...live.children].filter((child) => LISTS.has(child.tagName)).map((child) => {
-      used.add(child);
-      child.remove();
-      return child;
-    });
-    for (const child of [...live.childNodes]) if (!(child.nodeType === 1 && LISTS.has(child.tagName))) child.remove();
-    for (const child of [...incoming.childNodes]) {
-      if (child.nodeType === 1 && LISTS.has(child.tagName)) continue;
-      live.append(child.cloneNode(true));
-    }
-    for (const incomingList of [...incoming.children]) {
-      if (!LISTS.has(incomingList.tagName)) continue;
-      const wanted = retainedIds(incomingList);
-      const match = nested.find((candidate) => candidate.tagName === incomingList.tagName && [...wanted].some((id) => retainedIds(candidate).has(id)));
-      if (match) {
-        live.append(match);
-        reconcileContainer(match, incomingList);
-      } else {
-        live.append(incomingList.cloneNode(true));
-      }
-    }
+    syncAttributes(live, incoming);
+    reconcileContainer(live, incoming);
   };
 
   function pick(incoming, container) {
     const id = incoming.getAttribute("data-id");
     if (id) {
       const live = index.get(id);
-      if (!live || used.has(live)) return fresh(incoming);
+      if (!live || used.has(live) || live === container || live.contains(container)) return fresh(incoming);
       used.add(live);
-      if (isTool(incoming)) return keepTool(live, incoming) ? live : fresh(incoming);
+      if (isTool(live) && isTool(incoming)) return keepTool(live, incoming) ? live : fresh(incoming);
       if (live.tagName !== incoming.tagName) return fresh(incoming);
       if (live.isEqualNode(incoming)) return live;
       if (incoming.tagName === "DETAILS") {
@@ -254,12 +273,18 @@ export function applyPreparedArticle(prepared, { article, readerOpen = new Map()
         reconcileItem(live, incoming);
         return live;
       }
+      if (LISTS.has(incoming.tagName)) {
+        syncAttributes(live, incoming);
+        reconcileContainer(live, incoming);
+        return live;
+      }
       return fresh(incoming);
     }
     if (LISTS.has(incoming.tagName)) {
       const live = matchingUnkeyed(incoming, container);
-      if (!live) return fresh(incoming);
+      if (!live) return freshShell(incoming);
       used.add(live);
+      syncAttributes(live, incoming);
       reconcileContainer(live, incoming);
       return live;
     }
