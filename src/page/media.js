@@ -9,7 +9,8 @@ import { outline } from "./blocks.js";
 import { newId } from "./model.js";
 import { asStep } from "./blocksel.js";
 import { announce } from "./announce.js";
-import { safeHref, safeFileHref } from "./address.js";
+import { safeFileHref } from "./address.js";
+import { mediaViews } from "./media-views.js";
 
 const { Plugin, PluginKey } = state;
 const { Decoration, DecorationSet } = pmView;
@@ -17,7 +18,7 @@ const N = schema.nodes;
 
 export const mediaKey = new PluginKey("page-media");
 export const EMBED_MAX = 1.5 * 1024 * 1024;
-const RETRY = new Set(["timeout", "network", "error", "bad-response"]);
+export const RETRY = new Set(["timeout", "network", "error", "bad-response"]);
 const runtime = new WeakMap();
 
 const boundary = (doc, pos) => {
@@ -183,61 +184,13 @@ export function cancelUpload(view, id) {
   abort?.abort();
 }
 
-function button(doc, act, label, id) {
-  const b = doc.createElement("button");
-  b.type = "button";
-  b.className = "page-upload-btn";
-  b.dataset.act = act;
-  b.dataset.upload = id;
-  b.textContent = label;
-  return b;
-}
-
-function bookmarkDOM(doc, it) {
-  const box = doc.createElement("div");
-  box.className = "page-upload";
-  box.dataset.state = it.state;
-  box.dataset.kind = it.kind;
-  box.contentEditable = "false";
-  box.setAttribute("role", it.state === "uploading" ? "status" : "alert");
-  if (it.preview) {
-    const img = doc.createElement("img");
-    img.className = "page-upload-preview";
-    img.src = it.preview;
-    img.alt = "";
-    box.append(img);
-  }
-  const name = doc.createElement("span");
-  name.className = "page-upload-name";
-  name.textContent = it.name;
-  box.append(name);
-  if (it.state === "uploading") {
-    const bar = doc.createElement("span");
-    bar.className = "page-upload-bar";
-    bar.setAttribute("role", "progressbar");
-    bar.setAttribute("aria-label", `Uploading ${it.name}`);
-    bar.setAttribute("aria-valuemin", "0");
-    bar.setAttribute("aria-valuemax", "100");
-    bar.setAttribute("aria-valuenow", String(it.percent));
-    const fill = doc.createElement("span");
-    fill.style.width = `${it.percent}%`;
-    bar.append(fill);
-    box.append(bar, button(doc, "cancel", "Cancel", it.id));
-    return box;
-  }
-  const msg = doc.createElement("span");
-  msg.className = "page-upload-msg";
-  msg.textContent = it.message;
-  box.append(msg);
-  if (it.state === "embed-choice") box.append(button(doc, "embed", "Keep this image inside the document", it.id));
-  if (RETRY.has(it.code)) box.append(button(doc, "retry", "Retry", it.id));
-  box.append(button(doc, "remove", "Remove", it.id));
-  return box;
-}
-
 const htmlHasText = (html) => html.replace(/<(meta|style|img)\b[^>]*>/gi, "").replace(/<[^>]+>/g, "").trim() !== "";
 
-export function mediaPlugin({ upload }) {
+export function mediaPlugin({ upload, features = null }) {
+  const whenReady = (run) => {
+    if (!features || features.has("media")) { run(); return; }
+    features.ensure("media").then((feature) => { if (feature !== null) run(); }, () => {});
+  };
   return new Plugin({
     key: mediaKey,
     state: mediaState,
@@ -251,13 +204,17 @@ export function mediaPlugin({ upload }) {
       view.dom.parentElement.append(input);
       runtime.set(view, { upload, aborts: new Map(), input });
       input.addEventListener("change", () => {
+        const files = [...(input.files ?? [])];
         const picker = mediaKey.getState(view.state).picker;
         view.dispatch(view.state.tr.setMeta(mediaKey, { picker: null }));
-        if (input.files?.length && picker) {
+        if (files.length && picker) {
           const index = indexOfId(view.state.doc, picker.place.hostId);
           if (!picker.place.hostId || index >= 0) {
-            if (picker.remove) view.dispatch(asStep(view.state.tr.delete(picker.remove.from, picker.remove.to)));
-            insertFiles(view, input.files, index >= 0 ? hostPlace(view.state, index) : picker.place);
+            whenReady(() => {
+              if (picker.remove) view.dispatch(asStep(view.state.tr.delete(picker.remove.from, picker.remove.to)));
+              const at = indexOfId(view.state.doc, picker.place.hostId);
+              insertFiles(view, files, at >= 0 ? hostPlace(view.state, at) : picker.place);
+            });
           }
         }
         input.value = "";
@@ -288,8 +245,9 @@ export function mediaPlugin({ upload }) {
     props: {
       decorations(st) {
         const { items } = mediaKey.getState(st);
-        if (!items.length) return null;
-        return DecorationSet.create(st.doc, items.map((it) => Decoration.widget(boundary(st.doc, it.pos), (view) => bookmarkDOM(view.dom.ownerDocument, it), {
+        const render = mediaViews.bookmark;
+        if (!items.length || !render) return null;
+        return DecorationSet.create(st.doc, items.map((it) => Decoration.widget(boundary(st.doc, it.pos), (view) => render(view.dom.ownerDocument, it), {
           side: -1000 + it.order, key: `${it.id}:${it.state}:${it.percent}`, stopEvent: () => true, ignoreSelection: true,
         })));
       },
@@ -298,7 +256,10 @@ export function mediaPlugin({ upload }) {
         const files = [...(data?.files ?? [])];
         if (!files.length || view.state.selection.$from.parent.type.spec.code) return false;
         if (htmlHasText(data.getData("text/html") || "")) return false;
-        return insertFiles(view, files);
+        const place = hostPlace(view.state, view.state.selection.$head.index(0));
+        event.preventDefault();
+        whenReady(() => insertFiles(view, files, place));
+        return true;
       },
       handleDrop(view, event, _slice, moved) {
         const files = [...(event.dataTransfer?.files ?? [])];
@@ -310,7 +271,9 @@ export function mediaPlugin({ upload }) {
         const r = view.nodeDOM(ents[i].at)?.getBoundingClientRect?.();
         const before = r && event.clientY < r.top + r.height / 2;
         event.preventDefault();
-        return insertFiles(view, files, { at: before ? ents[i].at : ents[ents[i].subEnd].end, parent: ents[i].node.attrs.parent ?? null, replaceId: null });
+        const place = { at: before ? ents[i].at : ents[ents[i].subEnd].end, parent: ents[i].node.attrs.parent ?? null, replaceId: null };
+        whenReady(() => insertFiles(view, files, place));
+        return true;
       },
     },
   });
@@ -324,189 +287,6 @@ export function pickFiles(view, accept, place = hostPlace(view.state, view.state
   rt.input.accept = accept;
   rt.input.click();
   return true;
-}
-
-const MIN_WIDTH = 48;
-
-const ALIGNS = [
-  ["left", "Align left", '<path d="M2.5 3.5h11M2.5 6.5h6M2.5 9.5h11M2.5 12.5h6"/>'],
-  ["center", "Centre", '<path d="M2.5 3.5h11M5 6.5h6M2.5 9.5h11M5 12.5h6"/>'],
-  ["right", "Align right", '<path d="M2.5 3.5h11M7.5 6.5h6M2.5 9.5h11M7.5 12.5h6"/>'],
-];
-
-export class ImageView {
-  constructor(node, view, getPos) {
-    this.node = node;
-    this.view = view;
-    this.getPos = getPos;
-    const doc = view.dom.ownerDocument;
-    this.dom = doc.createElement("figure");
-    this.dom.className = "page-image";
-    this.dom.addEventListener("dragstart", (event) => { event.preventDefault(); event.stopPropagation(); });
-    this.dom.draggable = false;
-    this.frame = doc.createElement("div");
-    this.frame.className = "page-image-frame";
-    this.img = doc.createElement("img");
-    this.img.draggable = false;
-    this.img.addEventListener("error", () => this.dom.toggleAttribute("data-broken", true));
-    this.img.addEventListener("load", () => this.dom.removeAttribute("data-broken"));
-    this.handle = doc.createElement("span");
-    this.handle.className = "page-image-handle";
-    this.handle.setAttribute("aria-hidden", "true");
-    this.handle.addEventListener("pointerdown", (e) => this.resize(e));
-    this.alignBar = doc.createElement("div");
-    this.alignBar.className = "page-image-align";
-    this.alignBar.setAttribute("role", "toolbar");
-    this.alignBar.setAttribute("aria-label", "Image alignment");
-    for (const [value, label, path] of ALIGNS) {
-      const b = doc.createElement("button");
-      b.type = "button";
-      b.dataset.align = value;
-      b.setAttribute("aria-label", label);
-      b.title = label;
-      b.innerHTML = `<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">${path}</svg>`;
-      this.alignBar.append(b);
-    }
-    this.alignBar.addEventListener("mousedown", (e) => e.preventDefault());
-    this.alignBar.addEventListener("click", (e) => {
-      const b = e.target.closest("[data-align]");
-      if (b) this.setAlign(b.dataset.align === "center" ? null : b.dataset.align);
-    });
-    this.frame.append(this.img, this.handle, this.alignBar);
-    this.caption = doc.createElement("figcaption");
-    this.caption.className = "page-image-caption";
-    this.caption.contentEditable = "plaintext-only";
-    this.caption.setAttribute("aria-label", "Caption");
-    this.caption.dataset.placeholder = "Add a caption";
-    this.caption.addEventListener("keydown", (e) => {
-      if (e.isComposing || this.view.composing) return;
-      if (e.key === "Enter") { e.preventDefault(); this.commitCaption(); this.view.focus(); }
-      if (e.key === "Escape") { e.preventDefault(); this.caption.textContent = this.node.attrs.caption; this.view.focus(); }
-    });
-    this.caption.addEventListener("blur", () => this.commitCaption());
-    this.caption.addEventListener("input", () => this.caption.toggleAttribute("data-empty", !this.caption.textContent));
-    this.dom.append(this.frame, this.caption);
-    this.render(node);
-  }
-
-  render(node) {
-    this.node = node;
-    this.dom.dataset.id = node.attrs.id ?? "";
-    if (this.img.getAttribute("src") !== node.attrs.src) this.img.src = node.attrs.src;
-    this.img.alt = node.attrs.alt || "";
-    this.frame.style.width = node.attrs.width ? `${node.attrs.width}px` : "";
-    if (node.attrs.align) this.dom.dataset.align = node.attrs.align;
-    else delete this.dom.dataset.align;
-    for (const b of this.alignBar.children) b.setAttribute("aria-pressed", String((node.attrs.align ?? "center") === b.dataset.align));
-    if (this.dom.ownerDocument.activeElement !== this.caption) this.caption.textContent = node.attrs.caption || "";
-    this.caption.toggleAttribute("data-empty", !node.attrs.caption);
-  }
-
-  update(node) {
-    if (node.type !== this.node.type) return false;
-    this.render(node);
-    return true;
-  }
-
-  setAlign(align) {
-    const pos = this.getPos();
-    if (pos == null || align === (this.node.attrs.align ?? null)) return;
-    this.view.dispatch(asStep(this.view.state.tr.setNodeMarkup(pos, null, { ...this.node.attrs, align })));
-  }
-
-  commitCaption() {
-    const text = this.caption.textContent.replace(/\s+/g, " ").trim();
-    const pos = this.getPos();
-    if (pos == null || text === (this.node.attrs.caption || "")) return;
-    this.view.dispatch(asStep(this.view.state.tr.setNodeMarkup(pos, null, { ...this.node.attrs, caption: text })));
-  }
-
-  resize(event) {
-    event.preventDefault();
-    event.stopPropagation();
-    const col = this.view.dom.getBoundingClientRect().width;
-    const start = this.frame.getBoundingClientRect().width;
-    const rtl = this.dom.ownerDocument.defaultView.getComputedStyle(this.dom).direction === "rtl";
-    const x0 = event.clientX;
-    const target = event.currentTarget;
-    target.setPointerCapture?.(event.pointerId);
-    let width = this.node.attrs.width;
-    const move = (e) => {
-      const dx = (e.clientX - x0) * (rtl ? -1 : 1);
-      width = Math.max(MIN_WIDTH, Math.min(Math.floor(col) || MIN_WIDTH, Math.round(start + dx)));
-      this.frame.style.width = `${width}px`;
-    };
-    const done = (commit) => {
-      target.removeEventListener("pointermove", move);
-      target.removeEventListener("pointerup", up);
-      target.removeEventListener("pointercancel", cancel);
-      const pos = this.getPos();
-      if (commit && pos != null && width !== this.node.attrs.width) this.view.dispatch(asStep(this.view.state.tr.setNodeMarkup(pos, null, { ...this.node.attrs, width })));
-      else this.frame.style.width = this.node.attrs.width ? `${this.node.attrs.width}px` : "";
-    };
-    const up = () => done(true);
-    const cancel = () => done(false);
-    target.addEventListener("pointermove", move);
-    target.addEventListener("pointerup", up);
-    target.addEventListener("pointercancel", cancel);
-  }
-
-  selectNode() { this.dom.classList.add("is-selected"); }
-  deselectNode() { this.dom.classList.remove("is-selected"); }
-  stopEvent(event) { return this.caption.contains(event.target) || this.alignBar.contains(event.target) || event.target.classList?.contains("page-image-handle"); }
-  ignoreMutation() { return true; }
-}
-
-const sizeLabel = (bytes) => {
-  if (bytes == null) return "";
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-};
-
-export class FileView {
-  constructor(node, view) {
-    this.node = node;
-    const doc = view.dom.ownerDocument;
-    this.dom = doc.createElement("div");
-    this.dom.className = "page-file";
-    this.dom.addEventListener("dragstart", (event) => { event.preventDefault(); event.stopPropagation(); });
-    this.link = doc.createElement("a");
-    this.link.className = "page-file-link";
-    this.link.target = "_blank";
-    this.link.rel = "noopener noreferrer";
-    this.icon = doc.createElement("span");
-    this.icon.className = "page-file-icon";
-    this.icon.textContent = "⎘";
-    this.name = doc.createElement("span");
-    this.name.className = "page-file-name";
-    this.meta = doc.createElement("span");
-    this.meta.className = "page-file-meta";
-    this.link.append(this.icon, this.name, this.meta);
-    this.dom.append(this.link);
-    this.render(node);
-  }
-
-  render(node) {
-    this.node = node;
-    this.dom.dataset.id = node.attrs.id ?? "";
-    const href = safeHref(node.attrs.src);
-    if (href) this.link.setAttribute("href", href);
-    else this.link.removeAttribute("href");
-    this.name.textContent = node.attrs.name || "file";
-    this.meta.textContent = sizeLabel(node.attrs.size);
-  }
-
-  update(node) {
-    if (node.type !== this.node.type) return false;
-    this.render(node);
-    return true;
-  }
-
-  selectNode() { this.dom.classList.add("is-selected"); }
-  deselectNode() { this.dom.classList.remove("is-selected"); }
-  stopEvent(event) { return this.link.contains(event.target); }
-  ignoreMutation() { return true; }
 }
 
 const indexOfId = (doc, id) => {

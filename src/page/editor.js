@@ -16,7 +16,7 @@ import { linkPlugin } from "./link.js";
 import { blockSelectionPlugin } from "./blocksel.js";
 import { markdownPlugin, markdownKeys, backspaceToParagraph } from "./markdown.js";
 import { placeholderPlugin } from "./placeholder.js";
-import { mediaPlugin, ImageView, FileView } from "./media.js";
+import { mediaPlugin } from "./media.js";
 import { highlightPlugin, CodeBlockView } from "./highlight.js";
 import { tableKeys, tablePlugin } from "./table.js";
 import { tableSelectPlugin } from "./table-select.js";
@@ -157,40 +157,7 @@ ${INDENTS.map((n) => `:where(article[data-page], .page-editor) .page-li[data-ind
 .page-link-btn { display: inline-grid; place-items: center; min-width: 30px; height: 30px; padding: 0 6px; border: 0; border-radius: 6px; background: none; color: inherit; font: inherit; cursor: pointer; }
 .page-link-btn:hover { background: var(--page-pop-hover); }
 .page-live { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-.page-editor .page-image { margin-inline: 0; }
-.page-image-frame { position: relative; margin: 0 auto; max-width: 100%; }
-.page-image-frame img { display: block; width: 100%; height: auto; border-radius: var(--page-image-radius, 6px); }
-.page-image[data-broken] .page-image-frame { min-height: 80px; background: var(--page-code-bg); border-radius: var(--page-image-radius, 6px); }
-.page-image-handle { position: absolute; top: 50%; inset-inline-end: 6px; width: 6px; height: 36px; margin-top: -18px; border-radius: 3px; background: var(--page-chrome-ink-moved); opacity: 0; cursor: ew-resize; touch-action: none; transition: opacity var(--page-fade); }
-.page-image:hover .page-image-handle, .page-image.is-selected .page-image-handle { opacity: 1; }
-.page-editor .page-image.page-block-selected { background: none; box-shadow: none; }
-.page-editor .page-image.page-block-selected .page-image-frame { box-shadow: 0 0 0 6px var(--page-block-selected, rgba(88, 120, 170, 0.12)); border-radius: var(--page-image-radius, 6px); }
-.page-image[data-align="left"] .page-image-frame { margin-left: 0; margin-right: auto; }
-.page-image[data-align="right"] .page-image-frame { margin-left: auto; margin-right: 0; }
-.page-image[data-align="left"] .page-image-caption { text-align: left; }
-.page-image[data-align="right"] .page-image-caption { text-align: right; }
-.page-image-align { position: absolute; top: 8px; inset-inline-end: 8px; display: none; gap: 1px; padding: 2px; background: var(--page-pop-bg); color: var(--page-pop-ink); border: 1px solid var(--page-pop-line); box-shadow: var(--page-pop-shadow); border-radius: 7px; }
-.page-image.is-selected .page-image-align, .page-image.page-block-selected .page-image-align { display: flex; }
-.page-image-align button { display: grid; place-items: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 5px; background: none; color: inherit; cursor: pointer; }
-.page-image-align button:hover, .page-image-align button[aria-pressed="true"] { background: var(--page-pop-hover); }
-.page-image.is-selected .page-image-frame img { outline: 2px solid var(--page-selection); outline-offset: 2px; }
-.page-image-caption { margin-top: 6px; color: var(--page-ink-soft); font-size: 0.88em; text-align: center; outline: none; }
-.page-image-caption[data-empty]::before { content: attr(data-placeholder); color: var(--page-ink-faint); }
 .ProseMirror-focused .page-placeholder::before { content: attr(data-placeholder); float: left; height: 0; color: var(--page-ink-faint); pointer-events: none; }
-.page-image:not(.is-selected) .page-image-caption[data-empty]:not(:focus) { display: none; }
-.page-file-link { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border: 1px solid var(--page-rule); border-radius: 8px; color: var(--page-ink); text-decoration: none; }
-.page-file-icon { color: var(--page-link, var(--page-accent)); }
-.page-file-name { color: var(--page-link, var(--page-accent)); min-width: 0; overflow-wrap: anywhere; }
-.page-file-meta { margin-inline-start: auto; color: var(--page-ink-faint); font-size: 0.88em; }
-.page-upload { display: flex; align-items: center; gap: 10px; margin: var(--page-block-gap) 0; padding: 8px 12px; border: 1px dashed var(--page-rule); border-radius: 8px; color: var(--page-ink-soft); font-size: 0.88em; }
-.page-upload-preview { width: 40px; height: 40px; object-fit: cover; border-radius: 4px; opacity: 0.6; }
-.page-upload-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.page-upload-bar { flex: 1; height: 2px; border-radius: 1px; background: var(--page-rule); overflow: hidden; }
-.page-upload-bar > span { display: block; height: 100%; background: var(--page-progress, var(--page-ink-soft)); transition: width 200ms; }
-.page-upload[data-state="error"] .page-upload-msg, .page-upload[data-state="embed-choice"] .page-upload-msg { flex: 1; }
-.page-upload[data-state="error"] .page-upload-msg { color: var(--page-danger, #9E3B2F); }
-.page-upload-btn { border: 0; padding: 4px 8px; border-radius: 6px; background: none; color: inherit; font: inherit; cursor: pointer; }
-.page-upload-btn:hover { background: var(--page-pop-hover); }
 .page-csv-error { margin: 8px 0; color: var(--page-danger); font-size: 14px; }
 .page-editor .page-table { max-width: 100%; min-width: 0; border: 1px solid var(--page-rule); border-radius: 8px; }
 .page-editor .page-chart { position: relative; max-width: 100%; min-width: 0; margin-inline: 0; color: var(--page-ink); }
@@ -340,7 +307,7 @@ export function pagePlugins({ upload = defaultUpload, highlight, history: useHis
     checklistPlugin(),
     csvImportPlugin({ upload }),
     collapsePlugin(),
-    mediaPlugin({ upload }),
+    mediaPlugin({ upload, features }),
     highlightPlugin(highlight),
     pastePlugin(),
     historyIntentPlugin(),
@@ -398,8 +365,6 @@ export function createPageEditor(mount, { blocks = null, onChange = null, upload
     attributes: { class: "page-editor" },
     editable: () => editable,
     nodeViews: {
-      image: (node, v, getPos) => new ImageView(node, v, getPos),
-      file: (node, v) => new FileView(node, v),
       code_block: (node, v, getPos) => new CodeBlockView(node, v, getPos),
       chart: (node, v, getPos) => new ChartView(node, v, getPos),
       tool: (node, v, getPos) => new ToolView(node, v, getPos, { host: toolHost, revise: reviseTool }),

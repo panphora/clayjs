@@ -244,7 +244,7 @@ describe("when the upload does not succeed", () => {
 
 describe("paste, drop and the picker", () => {
   const clip = (files, html = "", text = "") => ({ files, getData: (t) => (t === "text/html" ? html : t === "text/plain" ? text : "") });
-  const paste = (view, data) => !!view.someProp("handlePaste", (f) => f(view, { clipboardData: data }, null));
+  const paste = (view, data) => !!view.someProp("handlePaste", (f) => f(view, { clipboardData: data, preventDefault() {} }, null));
 
   test("pasting an image file puts a bookmark in", () => {
     const { view } = page();

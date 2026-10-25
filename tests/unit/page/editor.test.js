@@ -2,6 +2,7 @@ import { createPageEditor as makePageEditor, pageState, PAGE_EDITOR_CSS } from "
 import { state as pmState } from "../../../src/vendor/prosemirror.vendor.js";
 
 import { trackView, editor } from "./view-helpers.js";
+import { MEDIA_CSS } from "../../../src/page/features/media.js";
 import { ACTION_ITEMS } from "../../../src/page/chrome.js";
 import { STRIP_FROM_SAVE } from "../../../src/lib/region-policy.js";
 const createPageEditor = (...args) => trackView(makePageEditor(...args));
@@ -115,7 +116,7 @@ test("F18 destroying a view removes its live region", () => {
 
 test("F23 long filenames can shrink and wrap within the file row", () => {
   const rules = document.createElement("style");
-  const css = PAGE_EDITOR_CSS.match(/\.page-file-name\s*\{[^}]+\}/)?.[0];
+  const css = MEDIA_CSS.match(/\.page-file-name\s*\{[^}]+\}/)?.[0];
   expect(css).toBeTruthy();
   rules.textContent = css;
   document.head.appendChild(rules);
