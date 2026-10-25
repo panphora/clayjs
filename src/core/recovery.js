@@ -43,6 +43,69 @@ function copyPayload(value) {
 }
 
 /**
+ * Is this saved payload exactly the writing that was staged?
+ *
+ * Both sides use the adapter's fixed field order and every field is compared as it
+ * stands, so a body that differs anywhere is different writing. Nothing is trimmed,
+ * normalized or parsed: a save proves it holds these exact bytes or it proves
+ * nothing, and a near match is what would delete the only copy of something.
+ *
+ * @param {*} saved - what the adapter read out of the accepted HTML
+ * @param {*} staged - what the caller staged
+ * @returns {boolean}
+ */
+function payloadsMatch(saved, staged) {
+  if (saved === staged) return true;
+  if (!saved || !staged || typeof saved !== "object" || typeof staged !== "object") return false;
+  if (saved instanceof Uint8Array || staged instanceof Uint8Array) {
+    if (!(saved instanceof Uint8Array) || !(staged instanceof Uint8Array)) return false;
+    if (saved.length !== staged.length) return false;
+    for (let at = 0; at < saved.length; at++) if (saved[at] !== staged[at]) return false;
+    return true;
+  }
+  const left = Object.keys(staged);
+  const right = Object.keys(saved);
+  if (left.length !== right.length) return false;
+  for (let at = 0; at < left.length; at++) {
+    if (left[at] !== right[at]) return false;
+    if (staged[left[at]] !== saved[right[at]]) return false;
+  }
+  return true;
+}
+
+// Every service in this page, so a save can hand its capture to each of them
+// without save.js importing one particular instance. A service with no channel
+// registered has no candidates and answers without touching the HTML.
+const services = new Set();
+
+/**
+ * Pin what one save capture's exact bytes cover, before the request goes out.
+ *
+ * Called by save.js with the capture's own serialized bytes and its id. Nothing is
+ * acknowledged here: only the settled result of this very capture can clear a copy.
+ *
+ * @param {{captureId: *, html: string}} capture
+ */
+export function noteRecoveryCapture({ captureId, html } = {}) {
+  if (!services.size) return;
+  for (const service of services) service.capture(captureId, html);
+}
+
+/**
+ * Report how a capture settled.
+ *
+ * Only a confirmed success acknowledges, and only for the capture whose exact bytes
+ * covered a revision. A skip, a refusal, an error and an unknown outcome release the
+ * capture and clear nothing.
+ *
+ * @param {{captureId: *, ok: boolean, etag: ?string}} settled
+ */
+export function noteRecoverySettled({ captureId, ok = false, etag = null } = {}) {
+  if (!services.size) return;
+  for (const service of services) service.settle(captureId, ok === true, etag);
+}
+
+/**
  * Build one recovery service.
  *
  * The returned object is what the loader publishes as `clay.recovery`. Its own
@@ -68,6 +131,7 @@ export function createRecovery({
 } = {}) {
   const channels = new Map();
   const listeners = new Set();
+  const captures = new Map();
   let prepared = null;
   let identity = null;
   let store = null;
@@ -142,6 +206,71 @@ export function createRecovery({
     return prepared;
   }
 
+  // What this service holds that one capture's exact bytes could cover. The saved
+  // map is read once per channel per capture, and only when this service has a copy
+  // that could be covered at all.
+  function coverageOf(entry, html) {
+    let saved;
+    try {
+      saved = entry.readSaved(html);
+    } catch (_) {
+      return [];
+    }
+    if (!saved || typeof saved.get !== "function") return [];
+    const covered = [];
+    for (const record of entry.held.values()) {
+      if (record.kind !== TEXT) continue;
+      if (!saved.has(record.key)) continue;
+      if (!payloadsMatch(saved.get(record.key), record.payload)) continue;
+      covered.push({ id: record.id, revision: record.revision });
+    }
+    return covered;
+  }
+
+  function capture(captureId, html) {
+    if (captureId == null || typeof html !== "string") return;
+    const covered = new Map();
+    for (const entry of channels.values()) {
+      if (typeof entry.readSaved !== "function" || !entry.held.size) continue;
+      const list = coverageOf(entry, html);
+      if (list.length) covered.set(entry.channel, list);
+    }
+    if (covered.size) captures.set(captureId, covered);
+  }
+
+  async function acknowledgeCovered(entry, covered, etag, captureId) {
+    const opened = await ensurePrepared();
+    if (!opened.ok) return;
+    for (const { id, revision } of covered) {
+      const receipt = await store.acknowledge(id, { revision, etag, captureId });
+      note(receipt);
+      const slot = recordKey(id);
+      const held = entry.held.get(slot);
+      if (held && held.revision <= revision) entry.held.delete(slot);
+    }
+    announce(entry);
+  }
+
+  // A settled save is the only thing that clears anything, and it clears exactly
+  // what its own capture covered. The work joins the channel's write queue, so an
+  // acknowledgement is ordered against every put this service has already queued:
+  // a copy that reaches the database late meets the watermark it was refused by.
+  function settle(captureId, ok, etag) {
+    const covered = captures.get(captureId);
+    if (!covered) return Promise.resolve();
+    captures.delete(captureId);
+    if (!ok) return Promise.resolve();
+    const waits = [];
+    for (const [channel, list] of covered) {
+      const entry = channels.get(channel);
+      if (!entry) continue;
+      const run = () => acknowledgeCovered(entry, list, etag, captureId);
+      entry.writing = entry.writing.then(run, run);
+      waits.push(entry.writing);
+    }
+    return Promise.all(waits).then(() => undefined, () => undefined);
+  }
+
   function schedule(entry) {
     const at = now?.() ?? Date.now();
     if (!entry.burstStart) entry.burstStart = at;
@@ -179,6 +308,7 @@ export function createRecovery({
       updated: at,
     };
     entry.pending.set(slot, record);
+    entry.held.set(slot, { id, kind, key: name, revision, payload: record.payload });
     schedule(entry);
     announce(entry);
     return { id, revision };
@@ -196,7 +326,12 @@ export function createRecovery({
       if (receipt.ok) {
         const slot = recordKey(record.id);
         if (entry.pending.get(slot) === record) entry.pending.delete(slot);
-        if (!receipt.skipped) stored.push({ id: record.id, revision: record.revision });
+        if (receipt.skipped) {
+          const held = entry.held.get(slot);
+          if (held && held.revision === record.revision) entry.held.delete(slot);
+        } else {
+          stored.push({ id: record.id, revision: record.revision });
+        }
       } else {
         failure = failure || receipt.code || "error";
       }
@@ -239,6 +374,8 @@ export function createRecovery({
     const slot = recordKey(id);
     const queued = entry.pending.get(slot);
     if (queued && (revision === undefined || queued.revision === revision)) entry.pending.delete(slot);
+    const held = entry.held.get(slot);
+    if (held && (revision === undefined || held.revision === revision)) entry.held.delete(slot);
     const receipt = await store.remove(id, { revision });
     note(receipt);
     announce(entry);
@@ -257,8 +394,11 @@ export function createRecovery({
     const flushed = flush(entry).catch(() => ({ ok: false, code: "aborted" }));
     entry.listeners.clear();
     channels.delete(entry.channel);
+    if (!channels.size) services.delete(handle);
     return flushed;
   }
+
+  const handle = { capture, settle };
 
   function channelApi(entry) {
     return {
@@ -301,12 +441,14 @@ export function createRecovery({
       describe,
       revision: 0,
       pending: new Map(),
+      held: new Map(),
       timer: null,
       burstStart: 0,
       writing: Promise.resolve(),
       listeners: new Set(),
     };
     channels.set(channel, entry);
+    services.add(handle);
     ensurePrepared();
     return channelApi(entry);
   }

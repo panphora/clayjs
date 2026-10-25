@@ -39,6 +39,7 @@ import { initUserGesture, markExplicitSave, clearExplicitSave } from "../lib/use
 import { bytesUnsaved } from "./unsaved-warning.js";
 import { bootPhase } from "./boot-phase.js";
 import { createAutosaveScheduler } from "../lib/autosave-scheduler.js";
+import { noteRecoveryCapture, noteRecoverySettled } from "./recovery.js";
 
 // Keep this library's own root state out of the saved bytes.
 //
@@ -377,6 +378,19 @@ function skipped_(msg) {
 }
 
 /**
+ * Tell the recovery service how this capture settled.
+ *
+ * One place, so every outcome is reported exactly once: a confirmed success is the
+ * only one that can acknowledge a recovery copy, and it acknowledges only what this
+ * capture's own bytes covered. A skip, a refusal, an error and an unknown outcome
+ * release the capture and leave every copy where it is.
+ */
+function settleRecoveryCapture(captureId, result) {
+  if (captureId == null) return;
+  noteRecoverySettled({ captureId, ok: result.ok === true, etag: result.etag ?? null });
+}
+
+/**
  * Apply one save result to the page's state.
  *
  * A 'skipped' result means the bytes never reached the wire, so the baseline must
@@ -386,6 +400,7 @@ function skipped_(msg) {
  * either.
  */
 function applySaveResult(result, forComparison, forDirty, label, gateToken, forSave = null, captureId = null, quietConflict = false) {
+  settleRecoveryCapture(captureId, result);
   if (result.ok) {
     // Both baselines advance from the SAME pre-request capture, never from the
     // live DOM, so an edit made while the request was on the wire stays unsaved.
@@ -397,7 +412,10 @@ function applySaveResult(result, forComparison, forDirty, label, gateToken, forS
     gateClearIfUnchanged(gateToken);
     // The server's severity rides through untouched: a save can land AND carry a
     // warning, and the UI module is what decides how to render that.
-    setSaveState('saved', result.msg || 'Saved', result.msgType);
+    setSaveState('saved', result.msg || 'Saved', result.msgType, {
+      etag: result.etag ?? null,
+      captureId
+    });
     logBaseline(label, `${lastSavedContents.length} chars`);
     releaseConflictHold();
   } else if (result.msgType === 'conflict') {
@@ -614,6 +632,10 @@ function attemptSaveNow({ kind }, callback = () => {}) {
     }
     const preparedMs = monotonic() - startedAt;
 
+    // The recovery hook sees the accepted capture's exact bytes, before anything is
+    // sent, so a copy can be proved to be in them rather than merely to be nearby.
+    noteRecoveryCapture({ captureId, html: forSave });
+
     if (explicit) {
       // An explicit save asks the DIRTY question: write anything the person would
       // otherwise lose, including an edit inside a batching region that was never
@@ -630,6 +652,7 @@ function attemptSaveNow({ kind }, callback = () => {}) {
         gateClearIfUnchanged(gateToken);
         releaseCaptureArtifact(capture);
         const skipped = skipped_('No changes to save');
+        settleRecoveryCapture(captureId, skipped);
         callback(skipped);
         resolve(skipped);
         settleSoonQueued(skipped);
@@ -662,6 +685,7 @@ function attemptSaveNow({ kind }, callback = () => {}) {
         autosaveScheduler.noteCost(preparedMs);
         releaseCaptureArtifact(capture);
         const skipped = skipped_('No changes to save');
+        settleRecoveryCapture(captureId, skipped);
         callback(skipped);
         resolve(skipped);
         return;
@@ -676,6 +700,7 @@ function attemptSaveNow({ kind }, callback = () => {}) {
         pendingSave = true;
         releaseCaptureArtifact(capture);
         const skipped = skipped_('Save already in progress');
+        settleRecoveryCapture(captureId, skipped);
         callback(skipped);
         resolve(skipped);
         return;
@@ -761,6 +786,8 @@ export function savePageForce(callback = () => {}, { quietConflict = false } = {
       }
       return resolve(result);
     }
+
+    noteRecoveryCapture({ captureId, html: forSave });
 
     setSavingState();
 
