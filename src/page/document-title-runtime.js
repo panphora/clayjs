@@ -21,8 +21,17 @@ export function refreshDocumentTitle(view) {
   if (!view || view.isDestroyed) return null;
   const doc = view.dom?.ownerDocument ?? (typeof document === "undefined" ? null : document);
   if (!doc) return null;
-  const { custom, title } = titleFor(doc, titleItemsOfDoc(view.state.doc));
-  if (custom || titleText(doc) === title) return title;
+  const items = titleItemsOfDoc(view.state.doc);
+  const { custom, title } = titleFor(doc, items);
+  if (custom) return title;
+  const current = titleText(doc);
+  // A document with no title of its own and no root H1 has nothing to derive:
+  // inserting a title the file never had would be a change the person did not
+  // make, and the save projection, which owns the saved title, writes none for
+  // it either. An existing title still follows the model, so deleting the H1
+  // reads Untitled.
+  if (current === "" && !items.length) return title;
+  if (current === title) return title;
   Mutation.pause();
   try { writeTitle(doc, title); }
   finally { Mutation.resume(); }
