@@ -1,4 +1,4 @@
-import { PAGE_EDITOR_CSS } from "../../../src/page/editor.js";
+import { createPageEditor, PAGE_EDITOR_CSS } from "../../../src/page/editor.js";
 
 /**
  * The colours the phase 4 chrome adds must have a light and a dark value, so a
@@ -15,4 +15,17 @@ test.each(["--page-danger", "--page-block-selected"])("%s has a different value 
   const [light, dark, forced] = definitions(name);
   expect(dark).not.toBe(light);
   expect(forced).toBe(dark);
+});
+
+test("a text-only document's editor styles the checklist owner picker", () => {
+  const mount = document.body.appendChild(document.createElement("div"));
+  const view = createPageEditor(mount, { blocks: { c1: { t: "list_item", pos: "V", c: "Task", kind: "check", owner: "Maya" } } });
+  const css = document.getElementById("page-editor-style").textContent;
+  for (const selector of [".page-board-owners", ".page-board-people", ".page-board-person", ".page-board-owner-input", ".page-board-face"]) {
+    expect(css).toContain(selector);
+  }
+  // The board's own styles are not loaded, so the picker is styled by the core alone.
+  expect(document.getElementById("page-feature-board")).toBe(null);
+  view.destroy();
+  mount.remove();
 });

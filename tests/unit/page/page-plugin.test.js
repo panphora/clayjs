@@ -1,7 +1,9 @@
 import { jest } from "@jest/globals";
+import { readFileSync } from "node:fs";
 import { resolveModules, MODULES } from "../../../src/loader-logic.js";
 import { seedValue } from "../../../src/page/ybind/seed.js";
 import { blocksFromYValue } from "../../../src/page/ybind/decode.js";
+import { FEATURES } from "../../../src/page/features/registry.js";
 
 /**
  * The page plugin: installs the real editor over a strict Yjs page store through
@@ -73,6 +75,11 @@ function setPage(blocks) {
 }
 
 const params = (obj = {}) => new URLSearchParams(obj);
+// The documented tally tool: its artifact is a real one, so the block mounts.
+const ARTIFACTS = [...readFileSync(new URL("../../../docs/page-tool.md", import.meta.url), "utf8").matchAll(/```json\n([\s\S]*?)\n```/g)].map((match) => JSON.parse(match[1]));
+const TALLY = ARTIFACTS[1];
+const TOOL_BLOCK = { id: "tally", t: "tool", attrs: { artifact: TALLY, rev: "r1" } };
+const tick = (ms = 10) => new Promise((resolve) => setTimeout(resolve, ms));
 
 afterEach(() => {
   page.dispose();
@@ -399,6 +406,52 @@ test("dispose removes every save-state listener the plugin added", async () => {
     expect(removed).toContain(type);
   }
   remove.mockRestore();
+});
+
+test("a text-only document's saved article gives way to the editor", async () => {
+  setPage([{ id: "p", t: "paragraph", text: "Hello" }]);
+  await page.install();
+  const article = document.querySelector("article[data-page]");
+  expect([...article.children].map((node) => node.className)).toEqual(["page-shell"]);
+  expect(article.querySelector('[data-id="p"]').closest(".page-shell")).not.toBe(null);
+});
+
+test("a saved tool's part starts loading before the room join, and its saved content stays on screen until it is here", async () => {
+  setPage([{ id: "p", t: "paragraph", text: "Hello" }, TOOL_BLOCK]);
+  const saved = () => document.querySelector('article > [data-type="tool"]');
+  expect(saved()).not.toBe(null);
+  expect(saved().textContent.trim()).not.toBe("");
+
+  let joinReady;
+  const join = new Promise((resolve) => { joinReady = resolve; });
+  let partReady;
+  const part = new Promise((resolve) => { partReady = resolve; });
+  const liveNow = window.clay.live;
+  // page.js only reads `ready` off the page handle, so a facade defers the join.
+  window.clay.live = (name) => (name === "page" ? { ready: join.then(() => liveNow(name).ready) } : liveNow(name));
+  const loadPart = FEATURES.tool.load;
+  const loads = [];
+  FEATURES.tool.load = () => { loads.push("tool"); return part.then(() => loadPart()); };
+  try {
+    const installing = page.install();
+    await tick();
+    // The fetch overlaps the join, and the article still shows what the file had.
+    expect(loads).toEqual(["tool"]);
+    expect(saved()).not.toBe(null);
+    expect(saved().textContent.trim()).not.toBe("");
+
+    joinReady();
+    await tick();
+    expect(saved()).not.toBe(null);
+
+    partReady();
+    await installing;
+    expect(page.view.dom.querySelector(".page-tool-block")).not.toBe(null);
+    expect(saved()).toBe(null);
+  } finally {
+    FEATURES.tool.load = loadPart;
+    window.clay.live = liveNow;
+  }
 });
 
 test("view mode resolves without the page plugin and never calls its module thunk", async () => {

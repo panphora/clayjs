@@ -54,6 +54,7 @@ function scrollToHashBlock(view, loc = globalThis.location) {
 }
 
 function abandon(inst) {
+  inst.editorReadyResolve?.();
   if (active === inst) active = null;
 }
 
@@ -237,6 +238,7 @@ function dispose() {
   const inst = active;
   active = null;
   if (!inst) return;
+  inst.editorReadyResolve?.();
   if (inst.retryTimer) {
     clearTimeout(inst.retryTimer);
     inst.retryTimer = null;
@@ -299,8 +301,9 @@ async function run(inst, gen, options = {}) {
     console.warn("clayjs: page plugin: the page tag is not a strict Yjs page, leaving the page as saved HTML");
     return abandon(inst);
   }
+  let bootBlocks = null;
   try {
-    blocksFromYValue(value);
+    bootBlocks = blocksFromYValue(value);
   } catch (error) {
     console.warn("clayjs: page plugin: the page tag is not a valid Yjs page, leaving the page as saved HTML", error);
     return abandon(inst);
@@ -315,89 +318,13 @@ async function run(inst, gen, options = {}) {
     return;
   }
 
-  // The room was opened from a document that had no page tag, so it holds no page
-  // store and would answer this tab's frames with unknown-store. One conditional
-  // save of the document with the tag is the page's initial write; a tab that
-  // loses that race reloads, which composes the state the winner initialized.
-  inst.mergeTagless = !meta.extensions.includes("live-data");
-  let initialSave = false;
-  if (seeded && (await hostSupports("live-data"))) {
-    if (gen !== generation) return;
-    const result = await savePageForce();
-    if (gen !== generation) return;
-    if (!result?.ok) {
-      if (result?.status === 412) {
-        window.location.reload();
-        return;
-      }
-      showBlocked(inst, result?.code ?? null, result?.msg ?? "");
-      return;
-    }
-    initialSave = true;
-  }
-
-  let handle;
-  try {
-    handle = window.clay.live("page");
-  } catch (error) {
-    console.warn("clayjs: page plugin could not open the page store", error);
-    return abandon(inst);
-  }
-  await handle.ready;
-  if (gen !== generation) return;
-  const store = storeOf("page");
-  if (!store) return abandon(inst);
-  inst.store = store;
-
-  let flushFailed = false;
-  let registered = null;
-  const trackFlush = async (call) => {
-    const result = await call();
-    flushFailed = result?.ok === false;
-    registered?.changed();
-    return result;
-  };
-  const identity = authorIdentity();
-  const binding = createYPageBinding({
-    store,
-    onStopped: (reason) => {
-      inst.tabValue = yValueOf(binding.ydoc);
-      if (reason === "lineage") {
-        fastLane()?.abandon?.("page");
-        showReplaced(inst);
-      } else {
-        showTooLarge(inst);
-      }
-    },
-    authorToken: identity.token,
-    ownedTokens: identity.owned,
-    checkpointWithin,
-    requestCheckpoint,
-    registerUnsavedState: (def) => {
-      registered = registerUnsavedState({
-        id: def.id,
-        isPending: () => flushFailed || def.isPending(),
-        flush: () => trackFlush(() => def.flush()),
-      });
-      return registered;
-    },
-  });
-  inst.binding = binding;
-  inst.flush = (options) => trackFlush(() => binding.flush(options));
-  listenForSaves(inst);
-
-  inst.source = source;
-  inst.article = article;
-  inst.bootHtml = source.article.innerHTML;
-  inst.bootRev = source.article.getAttribute("data-rev");
-  inst.savedRev = inst.bootRev;
-  listen(inst, "clay:sync-applied", (event) => {
-    if (inst.replaced) return;
-    if (!pageReplaced(event.detail?.html, inst.savedRev, inst.mergeTagless)) return;
-    showReplaced(inst);
-  });
-
+  let binding = null;
   let editorView = null;
+  let editorReadyResolve = null;
+  // The editor the view parts install onto exists only after the room join, so an
+  // install that starts earlier waits for it; the download overlaps the join meanwhile.
+  const editorReady = new Promise((resolve) => { editorReadyResolve = resolve; });
+  inst.editorReadyResolve = editorReadyResolve;
   // A document with a tool block, at boot or when one arrives, opens the store its
   // tools keep state in and the host that mounts them. A document with no tool
   // never waits for either.
@@ -451,7 +378,6 @@ async function run(inst, gen, options = {}) {
     });
     return toolsOpening;
   };
-  article.innerHTML = "";
   // One notice per feature a person needed and that failed, until Retry succeeds.
   const notices = new Map();
   const notifyFailed = (id) => {
@@ -476,6 +402,8 @@ async function run(inst, gen, options = {}) {
   const features = createFeatureLoader({
     load: (id) => FEATURES[id].load(),
     install: async (id, mod) => {
+      if (!editorView) await editorReady;
+      if (gen !== generation || !editorView) return null;
       const context = { view: editorView, upload: options.upload, board: binding.board, undo: binding.undo, redo: binding.redo, revise: aiRequested ? (toolId, rev) => { openAi({ target: { toolId, rev } }); } : null };
       if (id === "tool") {
         context.toolHost = await openTools();
@@ -497,6 +425,99 @@ async function run(inst, gen, options = {}) {
     aiTool.open({ target, remove: remove ? heldSlashRange(editorView.state) : null });
   };
   const aiRequested = capabilityAdvertised(meta);
+  // The view parts for the block types the saved article already has start loading
+  // here, together with the room join, so the editor shows them and not an empty
+  // section. A failure is reported by the loader, which shows its Retry notice.
+  const savedFeatureIds = [...new Set(Object.values(bootBlocks).map((block) => featureForType(block.t)).filter(Boolean))];
+  const featuresReady = Promise.allSettled(savedFeatureIds.map((id) => features.ensure(id)));
+
+  // The room was opened from a document that had no page tag, so it holds no page
+  // store and would answer this tab's frames with unknown-store. One conditional
+  // save of the document with the tag is the page's initial write; a tab that
+  // loses that race reloads, which composes the state the winner initialized.
+  inst.mergeTagless = !meta.extensions.includes("live-data");
+  let initialSave = false;
+  if (seeded && (await hostSupports("live-data"))) {
+    if (gen !== generation) return;
+    const result = await savePageForce();
+    if (gen !== generation) return;
+    if (!result?.ok) {
+      if (result?.status === 412) {
+        window.location.reload();
+        return;
+      }
+      showBlocked(inst, result?.code ?? null, result?.msg ?? "");
+      return;
+    }
+    initialSave = true;
+  }
+
+  let handle;
+  try {
+    handle = window.clay.live("page");
+  } catch (error) {
+    console.warn("clayjs: page plugin could not open the page store", error);
+    return abandon(inst);
+  }
+  await handle.ready;
+  if (gen !== generation) return;
+  const store = storeOf("page");
+  if (!store) return abandon(inst);
+  inst.store = store;
+
+  let flushFailed = false;
+  let registered = null;
+  const trackFlush = async (call) => {
+    const result = await call();
+    flushFailed = result?.ok === false;
+    registered?.changed();
+    return result;
+  };
+  const identity = authorIdentity();
+  binding = createYPageBinding({
+    store,
+    onStopped: (reason) => {
+      inst.tabValue = yValueOf(binding.ydoc);
+      if (reason === "lineage") {
+        fastLane()?.abandon?.("page");
+        showReplaced(inst);
+      } else {
+        showTooLarge(inst);
+      }
+    },
+    authorToken: identity.token,
+    ownedTokens: identity.owned,
+    checkpointWithin,
+    requestCheckpoint,
+    registerUnsavedState: (def) => {
+      registered = registerUnsavedState({
+        id: def.id,
+        isPending: () => flushFailed || def.isPending(),
+        flush: () => trackFlush(() => def.flush()),
+      });
+      return registered;
+    },
+  });
+  inst.binding = binding;
+  inst.flush = (options) => trackFlush(() => binding.flush(options));
+  listenForSaves(inst);
+
+  inst.source = source;
+  inst.article = article;
+  inst.bootHtml = source.article.innerHTML;
+  inst.bootRev = source.article.getAttribute("data-rev");
+  inst.savedRev = inst.bootRev;
+  listen(inst, "clay:sync-applied", (event) => {
+    if (inst.replaced) return;
+    if (!pageReplaced(event.detail?.html, inst.savedRev, inst.mergeTagless)) return;
+    showReplaced(inst);
+  });
+
+  // A page with blocks whose view parts are still coming keeps its saved article on
+  // screen, and the editor out of sight, until they are here. One with none of those
+  // blocks has nothing to wait for, so its saved article goes now.
+  const savedContent = [...article.childNodes];
+  if (!savedFeatureIds.length) for (const node of savedContent) node.remove();
   const view = createPageEditor(article, {
     doc: binding.doc(),
     dispatch: binding.dispatch,
@@ -511,14 +532,10 @@ async function run(inst, gen, options = {}) {
   });
   editorView = view;
   inst.view = view;
+  if (savedFeatureIds.length) view.dom.closest(".page-shell").style.visibility = "hidden";
   binding.attach(view);
+  editorReadyResolve();
   scrollToHashBlock(view);
-  // The blocks the document already has get their controls during the room join,
-  // so a person never sees a placeholder for blocks that were there at boot.
-  const present = [];
-  binding.doc().forEach((node) => present.push(node.type.name));
-  const featureIds = [...new Set(present.map(featureForType).filter(Boolean))];
-  const featuresReady = Promise.allSettled(featureIds.map((id) => features.ensure(id)));
   inst.recover = createRecoverList({
     binding,
     mount: view.dom.closest(".page-shell") ?? article,
@@ -575,14 +592,23 @@ async function run(inst, gen, options = {}) {
 
   await adoption.idle();
   if (gen !== generation) return;
+  // The blocks the document had at boot have their controls now, so the saved article
+  // gives way to the editor.
+  const showEditor = () => {
+    for (const node of savedContent) node.remove();
+    const shell = view.dom.closest(".page-shell");
+    if (shell) shell.style.visibility = "";
+  };
   // A replacement that landed while the page was still booting keeps the editor
   // read-only: the notice is already up, and this tab must not edit the old article.
   if (inst.replaced) {
+    showEditor();
     stopEditing(inst);
     return;
   }
   await featuresReady;
   if (gen !== generation) return;
+  showEditor();
   // A replacement that landed during the feature wait keeps the editor read-only,
   // exactly as one that landed before it does.
   if (inst.replaced) {
@@ -604,7 +630,7 @@ async function run(inst, gen, options = {}) {
 function install(options = {}) {
   dispose();
   const gen = ++generation;
-  const inst = { gen, article: null, view: null, binding: null, adoption: null, source: null, store: null, toolHost: null, aiTool: null, bootHtml: "", bootRev: null, savedRev: null, replaced: false, savesHeld: false, flush: null, listeners: [], retryTimer: null, retryShown: false, notices: null };
+  const inst = { gen, article: null, view: null, binding: null, adoption: null, source: null, store: null, toolHost: null, aiTool: null, bootHtml: "", bootRev: null, savedRev: null, replaced: false, savesHeld: false, flush: null, listeners: [], retryTimer: null, retryShown: false, notices: null, editorReadyResolve: null };
   active = inst;
   return run(inst, gen, options).catch((error) => {
     console.error("clayjs: page plugin failed to install", error);

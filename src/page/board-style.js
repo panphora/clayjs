@@ -21,7 +21,6 @@ export const BOARD_CSS = `
 .page-board-meta { display: flex; align-items: center; gap: 8px; margin-top: 8px; color: var(--page-ink-soft); font-size: 13px; line-height: 20px; }
 .page-board-owner { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
 .page-board-owner-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.page-board-face { flex: none; display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: var(--page-code-bg); box-shadow: inset 0 0 0 1px var(--page-rule); color: var(--page-ink-soft); font-size: 10.5px; font-weight: 600; line-height: 1; }
 .page-board-due { flex: none; display: inline-flex; align-items: center; gap: 6px; margin-inline-start: auto; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .page-board-due[data-due="today"] { color: var(--page-ink); font-weight: 500; }
 .page-board-due[data-due="overdue"] { color: var(--page-ink); }
@@ -95,14 +94,6 @@ export const BOARD_CSS = `
 .page-board-control .page-board-due + .page-board-due-note { margin-inline-start: auto; }
 .page-board-control .page-board-due-note + .i { margin-inline-start: 0; }
 .page-board-date { border: 1px solid var(--page-pop-line); cursor: text; }
-.page-board-owners { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding-inline: 8px; }
-.page-board-people { display: flex; flex-wrap: wrap; gap: 4px; }
-.page-board-person { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px 0 4px; border: 1px solid var(--page-rule); border-radius: 14px; background: var(--page-pop-bg); color: var(--page-pop-ink); font: inherit; font-size: 13px; cursor: pointer; transition: background-color var(--page-fade), border-color var(--page-fade); }
-.page-board-person.is-none { padding-inline-start: 10px; color: var(--page-pop-muted); }
-.page-board-person:hover { background: var(--page-pop-hover); }
-.page-board-person[aria-pressed="true"] { border-color: var(--page-accent); background: var(--page-selection); color: var(--page-pop-ink); }
-.page-board-owner-input { width: 100%; height: 32px; box-sizing: border-box; padding: 0 8px; border: 1px solid var(--page-pop-line); border-radius: 7px; background: var(--page-pop-bg); color: var(--page-pop-ink); font: inherit; font-size: 14px; }
-.page-board-owner-input::placeholder { color: var(--page-ink-faint); }
 .page-board-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 20px; }
 .page-board-delete { margin-inline-start: auto; border-color: transparent; color: var(--page-pop-muted); }
 .page-board-delete:hover { background: var(--page-pop-hover); color: var(--page-danger); }
@@ -135,12 +126,10 @@ export const BOARD_CSS = `
   .page-board-rename { height: 44px; margin-block: -12px; font-size: 16px; }
   .page-board-panel { border-width: 1px 0 0; }
   .page-board-panel-title { margin-top: -8px; padding-block: 8px; }
-  .page-board-control, .page-board-owner-input { font-size: 16px; }
+  .page-board-control { font-size: 16px; }
   .page-board-label { font-size: 15px; }
-  .page-board-person { height: 44px; border-radius: 22px; }
-  .page-board-owner-input { height: 44px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .page-board-icon, .page-board-card, .page-board-add, .page-board-addcol, .page-board-btn, .page-board-control, .page-board-person { transition: none; }
+  .page-board-icon, .page-board-card, .page-board-add, .page-board-addcol, .page-board-btn, .page-board-control { transition: none; }
 }
 `;

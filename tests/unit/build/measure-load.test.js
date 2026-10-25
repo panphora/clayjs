@@ -2,7 +2,12 @@
  * @jest-environment node
  */
 import { expect, test } from "@jest/globals";
+import { readFileSync } from "node:fs";
 import { cssImportsOf, measure } from "../../../scripts/measure-load.mjs";
+import { seedValue } from "../../../src/page/ybind/seed.js";
+
+const fixture = (name) => readFileSync(new URL(`../../../tests/fixtures/load/${name}`, import.meta.url), "utf8");
+const paths = (measured) => measured.js.files.map(({ path }) => path);
 
 const clayTag = (quote = '"', plugins = "menu") =>
   `<script src=${quote}https://clayjs.com/v1/clay.js?plugins=${plugins}${quote}></script>`;
@@ -68,4 +73,36 @@ test("relative, root-relative and absolute CSS imports resolve to one served fil
     { url: "https://clayjs.com/v1/src/page/themes/content.css", path: "src/page/themes/content.css" },
     { url: "https://clayjs.com/v1/src/page/themes/content.css", path: "src/page/themes/content.css" },
   ]);
+});
+
+test("a Document with a table and a board counts their view parts at boot, a text-only one counts none", async () => {
+  const rich = await measure({ html: fixture("document-rich.html"), mode: "edit" });
+  const text = await measure({ html: fixture("document-text.html"), mode: "edit" });
+
+  expect(paths(rich)).toContain("src/page/features/table.js");
+  expect(paths(rich)).toContain("src/page/features/board.js");
+  expect(rich.lazy).not.toContain("src/page/features/table.js");
+  expect(rich.lazy).not.toContain("src/page/features/board.js");
+  expect(paths(text).filter((path) => path.startsWith("src/page/features/") && path !== "src/page/features/registry.js")).toEqual([]);
+});
+
+test("a Document's view mode counts no view parts, and neither does a tool-less file's tool part", async () => {
+  const view = await measure({ html: fixture("document-rich.html"), mode: "view" });
+  const text = await measure({ html: fixture("document-text.html"), mode: "edit" });
+
+  expect(paths(view)).not.toContain("src/page/features/table.js");
+  expect(paths(text)).not.toContain("src/page/features/tool.js");
+  expect(paths(text)).not.toContain("src/page/tools.js");
+  expect(paths(text)).not.toContain("src/page/tool-data.js");
+});
+
+test("a Document with a tool counts the host and data modules its part opens first", async () => {
+  const value = seedValue([{ id: "t", t: "tool", attrs: { rev: "r1" } }]);
+  const html = `<!doctype html><html><head><script type="application/json" merge="page" clay="live">${JSON.stringify(value)}</script></head><body><article data-page="1"></article><script src="https://clayjs.com/v1/clay.js?plugins=page"></script></body></html>`;
+  const measured = await measure({ html, mode: "edit" });
+
+  expect(paths(measured)).toContain("src/page/features/tool.js");
+  expect(paths(measured)).toContain("src/page/tools.js");
+  expect(paths(measured)).toContain("src/page/tool-data.js");
+  expect(measured.lazy).not.toContain("src/page/tools.js");
 });

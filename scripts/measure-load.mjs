@@ -12,6 +12,9 @@ import { parse } from "parse5";
 import { draftEligible, noteBootParams } from "../src/core/draft-mode.js";
 import { resolveModules } from "../src/loader-logic.js";
 import { BOOT_IMPORTS, EDIT_BOOT_IMPORTS } from "../src/lib/boot-imports.js";
+import { FEATURES, featureForType } from "../src/page/features/registry.js";
+import { blocksFromYValue } from "../src/page/ybind/decode.js";
+import { parseJsonRelaxed } from "../src/vendor/hyper-morph-json.vendor.js";
 
 const ROOT = resolve(fileURLToPath(new URL(".", import.meta.url)), "..");
 const CLAY = "https://clayjs.com/v1/";
@@ -22,6 +25,40 @@ const CSS_IMPORT = /@import\s+(?:url\(\s*(?:"([^"]+)"|'([^']+)'|([^\s)"']+))\s*\
 
 const attrsOf = (node) => Object.fromEntries((node.attrs || []).map(({ name, value }) => [name, value]));
 const textOf = (node) => (node.childNodes || []).map((child) => child.value ?? textOf(child)).join("");
+const PAGE_PLUGIN = "plugins/page.js";
+const PAGE_MERGE = /^page(\.[0-9]+)?$/;
+
+// The block types a page will hold, read the way page.js reads them: the strict Yjs
+// page store when the file has one, otherwise the `data-type`s of the saved article
+// the store is seeded from.
+function pageTypes(html) {
+  const document = parse(html);
+  const saved = [];
+  let stored = null;
+  const walk = (node) => {
+    const attrs = attrsOf(node);
+    if (stored === null && node.tagName === "script" && PAGE_MERGE.test(attrs.merge || "") && (attrs.clay || "").split(/\s+/).includes("live")) {
+      try { stored = Object.values(blocksFromYValue(parseJsonRelaxed(textOf(node)))).map((block) => block.t); } catch { stored = null; }
+    }
+    if (Object.hasOwn(attrs, "data-type")) saved.push(attrs["data-type"]);
+    for (const child of node.childNodes || []) walk(child);
+  };
+  walk(document);
+  return stored ?? saved;
+}
+
+// Every module the page plugin fetches for those types before the editor takes
+// input: each feature's own part, plus what only that feature asks for.
+function pageFeatureModules(html) {
+  const modules = new Set();
+  for (const type of pageTypes(html)) {
+    const id = featureForType(type);
+    if (!id) continue;
+    modules.add(FEATURES[id].module);
+    for (const path of FEATURES[id].boot ?? []) modules.add(path);
+  }
+  return [...modules];
+}
 
 function parseDocument(html) {
   const document = parse(html);
@@ -234,6 +271,12 @@ export async function measure({ html, mode }) {
     }
   }
 
+  // A Document's page plugin loads the view parts for the block types the file already
+  // has before input, so they belong to the boot set. Only where it runs in edit.
+  if (mode === "edit" && plan.plugins.includes(PAGE_PLUGIN)) {
+    for (const file of pageFeatureModules(html)) mainDepth += closure(inputs, `src/${file}`, loaded).levels;
+  }
+
   let satelliteDepth = names.length ? 1 : 0;
   for (const target of targets) {
     const satelliteLoaded = new Set();
@@ -302,6 +345,7 @@ export async function measureBuilt({ html, mode, dir }) {
       }
     }
     if (mode === "edit") bootImports.push(...EDIT_BOOT_IMPORTS);
+    if (mode === "edit" && plan.plugins.includes(PAGE_PLUGIN)) bootImports.push(...pageFeatureModules(html));
   }
   const loaded = new Set();
   const addChunk = (file) => {

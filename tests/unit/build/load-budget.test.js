@@ -59,3 +59,18 @@ for (const [fixture, modes] of Object.entries(budget.built)) {
     });
   }
 }
+
+// The view parts a file's own block types need are fetches before input, so the
+// built edit line has to count them: a budget that leaves them out passes falsely.
+test(`a Document's built edit line counts the view parts its blocks need, and a text-only one counts none`, async () => {
+  const manifest = JSON.parse(readFileSync(join(dir, "m/manifest.json"), "utf8"));
+  const chunkOf = (entry) => `m/${manifest.entries[entry]}`;
+  const rich = await measureBuilt({ html: htmlOf("document-rich.html"), mode: "edit", dir });
+  const text = await measureBuilt({ html: htmlOf("document-text.html"), mode: "edit", dir });
+
+  expect(rich.js.files.map(({ path }) => path)).toContain(chunkOf("page/features/table.js"));
+  expect(rich.js.files.map(({ path }) => path)).toContain(chunkOf("page/features/board.js"));
+  expect(text.js.files.map(({ path }) => path)).not.toContain(chunkOf("page/features/table.js"));
+  expect(text.js.files.map(({ path }) => path)).not.toContain(chunkOf("page/features/board.js"));
+  expect(rich.js.requests - text.js.requests).toBe(2);
+}, 180000);
