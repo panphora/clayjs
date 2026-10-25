@@ -71,6 +71,22 @@ or carry third-party code, and keep their original licenses.
 - Copyright (c) 2022 The Cheerio contributors
 - https://github.com/cheeriojs/cheerio
 
+## OverType 2.6.1 (MIT)
+
+- File: compat/overtype-2.6.1.min.js, the classic build an older Journal loads from
+  https://cdn.jsdelivr.net/npm/overtype@2.6.1/dist/overtype.min.js; license at
+  compat/overtype-LICENSE, bytes pinned in compat/journal-assets.lock.json
+- Copyright (c) OverType contributors
+- https://github.com/panphora/overtype
+
+## highlight.js 11.9.0 (BSD-3-Clause)
+
+- File: compat/highlight-11.9.0.min.js, the classic build an older Journal loads from
+  https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js; license at
+  compat/highlight-LICENSE, bytes pinned in compat/journal-assets.lock.json
+- Copyright (c) 2006 Ivan Sagalaev
+- https://github.com/highlightjs/highlight.js
+
 ## First-party vendored modules
 
 The remaining files in src/vendor/ (hypercms, hyper-morph, hyper-undo, quickcrop,

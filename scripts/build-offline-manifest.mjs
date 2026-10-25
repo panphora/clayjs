@@ -41,7 +41,7 @@ export async function releaseFiles(from, { dist = join(from, "dist"), allowMissi
   }
   // fonts/ is served under every prefix as fonts/, the same files fontSources() copies.
   // Tarballs from before the fonts folder have none, and their pins still rebuild.
-  for (const [name, sub, optional] of [["entries/", ""], ["src/", "src/"], ["fonts/", "fonts/", true]]) {
+  for (const [name, sub, optional] of [["entries/", ""], ["src/", "src/"], ["fonts/", "fonts/", true], ["compat/", "compat/", true]]) {
     const abs = join(from, name);
     if (!(await lstat(abs).catch(() => null))) {
       if (optional) continue;
@@ -110,6 +110,28 @@ const REQUIRED = [
   "fonts/ibm-plex-sans-latin-400-normal.woff2",
 ];
 
+// The exact legacy URLs an old Journal already pins, each to the file that stands in for
+// it. The lock records the bytes the URL answered with, so a compat file that drifted is a
+// build failure rather than a document that boots to the wrong library.
+async function compatAliases(lockFile, files) {
+  const raw = await readFile(lockFile, "utf8").catch(() => null);
+  if (raw === null) return {};
+  const lock = JSON.parse(raw);
+  if (lock.schema !== 1) throw new Error(`${lockFile}: schema is ${JSON.stringify(lock.schema)}, not 1`);
+  const aliases = {};
+  for (const [url, entry] of Object.entries(lock.aliases ?? {})) {
+    if (!/^https:\/\/[^/?#]+\/[^#]*$/.test(url)) throw new Error(`alias ${JSON.stringify(url)} is not an absolute https URL`);
+    const path = entry?.path;
+    assertReleasePath(path);
+    if (!Object.hasOwn(files, path)) throw new Error(`alias ${url} names ${path}, which the release does not carry`);
+    if (files[path].sha256 !== entry.sha256) {
+      throw new Error(`alias ${url} names ${path}, whose bytes are not the ones the lock recorded (${entry.sha256})`);
+    }
+    aliases[url] = path;
+  }
+  return aliases;
+}
+
 export async function buildOfflineManifest({ root, dist }) {
   const manifest = JSON.parse(await readFile(join(dist, "m", "manifest.json"), "utf8"));
   const entries = [...(await releaseFiles(root, { dist })).entries()].sort(([a], [b]) => (a < b ? -1 : 1));
@@ -140,7 +162,7 @@ export async function buildOfflineManifest({ root, dist }) {
     version: manifest.version,
     chunkBuild: manifest.build,
     files,
-    aliases: {},
+    aliases: await compatAliases(join(root, "compat", "journal-assets.lock.json"), files),
     onlineOnly: { ...ONLINE_ONLY },
   };
   await mkdir(dist, { recursive: true });
