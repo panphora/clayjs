@@ -58,6 +58,10 @@ export function upload(file, { requiredAccess, ...rest } = {}) {
   return runUpload(file, { ...rest, requiredAccess });
 }
 
+// The shared row (upload-ui.js) loads on first use, so a document that never uploads
+// never downloads it, and clay.upload(file) keeps working untouched.
+upload.mount = async (task, container) => (await import("./upload-ui.js")).mount(task, container);
+
 // On the same function, so anything holding `clay.upload` has both and every existing
 // `clay.upload(file)` call keeps working untouched.
 upload.start = start;
