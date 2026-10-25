@@ -63,6 +63,22 @@ export function model(src) {
     sourceCodeLocationInfo: true,
     onParseError: (e) => parseErrors.set(e.code, (parseErrors.get(e.code) || 0) + 1),
   });
+  return modelFromParsed(src, doc, parseErrors);
+}
+
+/**
+ * The model for bytes that have already been parsed, by this module or by the verifier.
+ *
+ * The split exists so a verified render costs one parse instead of two: the verifier
+ * parses the bytes with locations to count the errors the render introduced, and that
+ * tree is the model of exactly the bytes it verified. Everything below the parse is
+ * here verbatim; nothing here assumes who called the parser.
+ *
+ * @param {string} src - the bytes the tree was parsed from, which the ranges index
+ * @param {Object} doc - parse5 document, parsed with sourceCodeLocationInfo
+ * @param {Map} parseErrors - that parse's error counts, by code
+ */
+function modelFromParsed(src, doc, parseErrors) {
   const html = doc.childNodes.find((n) => n.nodeName === 'html');
   const outside = doc.childNodes.filter((n) => n !== html).map((n) => n.nodeName === '#documentType'
     ? { kind: 'doctype', name: n.name || '', publicId: n.publicId || '', systemId: n.systemId || '' }
@@ -296,11 +312,20 @@ function outsideOf(doc) {
 
 const UNIT_SEP = '\u0000';
 
+// The two steps pairCaptured exists to skip. Its whole claim is that a structurally
+// identical capture needs neither a signature tree nor an alignment, and a test that
+// only checks the resulting map cannot see the difference: hashing and aligning the same
+// two identical trees produces the same map. Read by tests and by the save meter; the
+// save path itself never reads it.
+export const pairingCounts = { align: 0, hashKey: 0 };
+export function resetPairingCounts() { pairingCounts.align = 0; pairingCounts.hashKey = 0; }
+
 function mix(h, s) {
   for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
   return h >>> 0;
 }
 function hashKey(parts) {
+  pairingCounts.hashKey++;
   let a = 2166136261, b = 5381;
   for (const p of parts) { a = mix(a, p); b = (Math.imul(b, 33) ^ mix(a ^ 0x9e3779b9, p)) >>> 0; }
   return a.toString(36) + '.' + b.toString(36);
@@ -356,6 +381,7 @@ const DP_CELLS = 4096;
  * 4.7 ms, and 32,000 siblings in 15.5 ms.
  */
 export function align(LK, SK) {
+  pairingCounts.align++;
   const pairs = [];
   const LI = LK.map((_, i) => i), SI = SK.map((_, j) => j);
   stage(LI, SI, 0);
@@ -498,6 +524,84 @@ function bind(node, loc, map, keyMap, stats, path, resolve, gen) {
   }
   for (let i = 0; i < L.length; i++) if (!usedL.has(i)) stats.unmatchedLive.push({ path, node: describe(L[i]) });
   for (let j = 0; j < S.length; j++) if (!usedS.has(j)) stats.unmatchedSource.push({ path, node: describeLoc(S[j]) });
+}
+
+/**
+ * Pair a capture against the model built from the bytes that capture verified as.
+ *
+ * The map has to exist either way: it is what says where the live page is in the file.
+ * What this skips is the SEARCH for it. `pair` computes four signature keys per node and
+ * aligns child lists by them, because it is handed a page and a file that may have
+ * diverged arbitrarily. A verified capture has not diverged: the verifier compared the
+ * captured tree against today's bytes, node for node, so the model of those bytes has the
+ * captured tree, in order, with the same children. Walking the two together is the whole
+ * pairing.
+ *
+ * Refusing matters more than succeeding. Anything that differs returns null and the caller
+ * takes `pair`; a walk that guessed instead would pair one tree's locations to another
+ * tree's nodes and print the wrong bytes into the file. There is no partial result here.
+ *
+ * @param {Node} root - the prepared save clone's document element
+ * @param {Object} m - the model of the bytes this clone was verified to render as
+ * @param {Function} [provenance] - clone node -> the identity to key the map by
+ * @returns {?{map: WeakMap, stats: Object}} null when the trees are not the same shape
+ */
+export function pairCaptured(root, m, provenance = (n) => n) {
+  if (!m.root) return null;
+  const found = [];
+  const unresolved = matchCaptured(root, m.root, provenance, found);
+  if (unresolved < 0) return null;
+  const map = new WeakMap();
+  // One token for this pass, set on the model and on every bound loc, exactly as `pair`
+  // does it: render slices a loc only when the two still agree.
+  const gen = {};
+  m.gen = gen;
+  let paired = 0;
+  // A clone node a transform created has no live original and stays unpaired, so it is
+  // printed: the same thing `pair` does with it.
+  for (const [key, loc] of found) if (key) { map.set(key, loc); loc.gen = gen; paired++; }
+  return {
+    map,
+    stats: { paired, unmatchedLive: [], unmatchedSource: [], attrDiffs: [], textDiffs: 0, unresolved },
+  };
+}
+
+/** @returns {number} unresolved nodes below this pair, or -1 when the two differ at all */
+function matchCaptured(node, loc, provenance, found) {
+  if (loc.kind === 'text') {
+    if (node.nodeType !== 3 || node.data !== loc.value) return -1;
+  } else if (loc.kind === 'comment') {
+    if (node.nodeType !== 8 || node.data !== loc.value) return -1;
+  } else {
+    if (node.nodeType !== 1 || node.localName !== loc.tag || node.namespaceURI !== loc.node.namespaceURI) return -1;
+    if (capturedAttrs(node) !== capturedLocAttrs(loc.node)) return -1;
+  }
+  const key = provenance(node);
+  found.push([key, loc]);
+  let unresolved = key ? 0 : 1;
+  if (loc.kind !== 'element') return unresolved;
+  const L = capturedKids(node), S = loc.children;
+  if (L.length !== S.length) return -1;
+  for (let i = 0; i < L.length; i++) {
+    const n = matchCaptured(L[i], S[i], provenance, found);
+    if (n < 0) return -1;
+    unresolved += n;
+  }
+  return unresolved;
+}
+
+const attrKey = (a) => JSON.stringify(a);
+/** Qualified name, namespace and value, sorted: two attribute sets are equal as sets. */
+const capturedAttrs = (el) => Array.from(el.attributes, (a) => attrKey([a.namespaceURI || '', a.name, a.value])).sort().join(UNIT_SEP);
+// parse5 adjusts a foreign attribute in the tree (`xlink:href` is `{ prefix: 'xlink', name: 'href' }`)
+// and keeps the location map keyed by the name as written, so the qualified name is rebuilt here.
+const capturedLocAttrs = (node) => node.attrs.map((a) => attrKey([a.namespace || '', a.prefix ? a.prefix + ':' + a.name : a.name, a.value])).sort().join(UNIT_SEP);
+
+function capturedKids(el) {
+  const list = el.nodeType === 1 && el.tagName === 'TEMPLATE' && el.content ? el.content.childNodes : el.childNodes;
+  const out = [];
+  for (const n of list) if (n.nodeType === 1 || n.nodeType === 3 || n.nodeType === 8) out.push(n);
+  return out;
 }
 
 // =============================================================================
@@ -923,6 +1027,27 @@ function lis(vals) {
 // the right one.
 
 export function verify(rendered, today, liveDocument, clone = null, sourceErrors = null) {
+  return verifyRendered(rendered, today, liveDocument, clone, sourceErrors, false);
+}
+
+/**
+ * verify, keeping the parse it already paid for.
+ *
+ * The parse-error check below is a parse5 parse of the rendered bytes, and it is thrown
+ * away today: an accepted save then parses the accepted bytes a second time to model them.
+ * This returns the same verdict with that tree as `model`, so the save that verified can
+ * be modelled from the tree that verified it. `model` is present only when the verdict is
+ * ok AND the candidate is still this document (checkSource), which is what a caller needs
+ * before the candidate may be adopted; a fallback keeps today's path.
+ *
+ * A renderer must not verify its own output, so this is not a second verifier: it is the
+ * same walk, told to retain what it parsed.
+ */
+export function verifyForSave(rendered, today, liveDocument, clone = null, sourceErrors = null) {
+  return verifyRendered(rendered, today, liveDocument, clone, sourceErrors, true);
+}
+
+function verifyRendered(rendered, today, liveDocument, clone, sourceErrors, retain) {
   const P = new DOMParser();
   const A = P.parseFromString(rendered, 'text/html');
   const outsideA = vOutside(A), outsideLive = vOutside(liveDocument);
@@ -937,14 +1062,20 @@ export function verify(rendered, today, liveDocument, clone = null, sourceErrors
     at = [];
     cloneDiff = vDiff(A.documentElement, clone, 'html', at);
     if (!cloneDiff) {
-      const w = vParseErrors(rendered, sourceErrors);
-      return w ? { ok: false, diff: w } : { ok: true, diff: null, oracle: 'clone' };
+      const w = vParseErrors(rendered, sourceErrors, retain);
+      if (w.diff) return { ok: false, diff: w.diff };
+      return retain ? withCandidate({ ok: true, diff: null, oracle: 'clone' }, w, rendered, liveDocument)
+        : { ok: true, diff: null, oracle: 'clone' };
     }
   }
   const B = P.parseFromString(today, 'text/html');
   const diff = vDiff(A.documentElement, B.documentElement, 'html');
-  const worse = diff ? null : vParseErrors(rendered, sourceErrors);
-  if (!diff) return worse ? { ok: false, diff: worse } : { ok: true, diff: null, oracle: 'today' };
+  const worse = diff ? null : vParseErrors(rendered, sourceErrors, retain);
+  if (!diff) {
+    if (worse.diff) return { ok: false, diff: worse.diff };
+    return retain ? withCandidate({ ok: true, diff: null, oracle: 'today' }, worse, rendered, liveDocument)
+      : { ok: true, diff: null, oracle: 'today' };
+  }
   // `at` is the index path, in the clone, of the node where the render first differs,
   // so a caller can print that element and try again instead of discarding the whole
   // render. It is valid in the clone because every earlier sibling at every level on
@@ -983,15 +1114,32 @@ export function nodeAt(root, at) {
  * represent, such as a duplicated element, change the tree, and the comparison above
  * is what catches those.
  */
-function vParseErrors(rendered, sourceErrors) {
-  if (!sourceErrors) return null;
+function vParseErrors(rendered, sourceErrors, retain) {
+  if (!sourceErrors) return { diff: null };
   const seen = new Map();
-  parse(rendered, { onParseError: (e) => seen.set(e.code, (seen.get(e.code) || 0) + 1) });
+  const doc = parse(rendered, retain
+    ? { sourceCodeLocationInfo: true, onParseError: (e) => seen.set(e.code, (seen.get(e.code) || 0) + 1) }
+    : { onParseError: (e) => seen.set(e.code, (seen.get(e.code) || 0) + 1) });
   for (const [code, n] of seen) {
     const was = sourceErrors.get(code) || 0;
-    if (n > was) return `the render introduced parse errors the source does not have: ${code} ${was} -> ${n}`;
+    if (n > was) return { diff: `the render introduced parse errors the source does not have: ${code} ${was} -> ${n}` };
   }
-  return null;
+  return retain ? { diff: null, doc, parseErrors: seen } : { diff: null };
+}
+
+/**
+ * Attach the model of the bytes just verified, or leave the verdict as it is.
+ *
+ * checkSource first: the tree comparison cannot see anything outside <html>, and a model
+ * that fails it is not this document no matter what the render verified as. A failed check
+ * is not a refusal of the save; the caller keeps the fallback path it has today.
+ */
+function withCandidate(verdict, errors, rendered, liveDocument) {
+  if (!errors.doc) return verdict;
+  const candidate = modelFromParsed(rendered, errors.doc, errors.parseErrors);
+  if (checkSource(candidate, liveDocument)) return verdict;
+  verdict.model = candidate;
+  return verdict;
 }
 function vOutside(doc) {
   const out = [];
