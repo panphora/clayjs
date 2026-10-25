@@ -126,7 +126,10 @@ ${INDENTS.map((n) => `:where(article[data-page], .page-editor) .page-li[data-ind
 .page-tool { display: inline-flex; align-items: center; justify-content: center; min-width: 28px; height: 28px; padding: 0 6px; border: 0; border-radius: 5px; background: none; color: inherit; font: 500 13px/1 var(--page-font); cursor: pointer; }
 .page-tool:hover, .page-tool[aria-pressed="true"] { background: var(--page-pop-hover); }
 .page-tool-turn { gap: 4px; padding: 0 8px; }
+/* The phone's fourth control: everything the narrow bar folds away. */
+.page-tool-more { display: none; }
 .page-tool-sep { width: 1px; height: 16px; margin: 0 3px; background: currentColor; opacity: 0.5; }
+.page-safe-probe { position: fixed; left: 0; bottom: 0; width: 0; height: 0; padding-bottom: env(safe-area-inset-bottom); visibility: hidden; pointer-events: none; }
 .page-plus { position: absolute; z-index: 2; top: calc(var(--page-plus-top, 0px) - var(--page-plus-size) / 2); left: calc(var(--page-plus-left, 0px) - var(--page-plus-size) - 12px); width: var(--page-plus-size); height: var(--page-plus-size); display: grid; place-items: center; padding: 0; cursor: pointer; }
 .page-plus[aria-expanded="true"] { color: var(--page-chrome-ink-moved); background: var(--page-chrome-bg-moved); }
 .page-grip { position: absolute; z-index: 2; top: calc(var(--page-plus-top, 0px) - var(--page-grip-size, var(--page-plus-size)) / 2); left: calc(var(--page-plus-left, 0px) - var(--page-plus-size) - 12px - var(--page-grip-size, var(--page-plus-size)) - 2px); width: var(--page-grip-size, var(--page-plus-size)); height: var(--page-grip-size, var(--page-plus-size)); display: grid; place-items: center; padding: 0; border: 0; border-radius: var(--page-chrome-radius); background: none; color: var(--page-chrome-ink-moved); opacity: 0; cursor: grab; touch-action: none; transition: opacity var(--page-fade); }
@@ -195,13 +198,19 @@ ${INDENTS.map((n) => `:where(article[data-page], .page-editor) .page-li[data-ind
 .page-scrim { display: none; }
 .page-shell [hidden] { display: none !important; }
 @media (max-width: 560px) {
-  .page-dock { display: none; }
+  /* One fixed bar over the visual viewport, with the four controls a phone keeps.
+     The bubble and the desktop-only tools stand down so nothing is doubled. */
+  .page-dock { display: flex; position: fixed; left: 0; top: 8px; width: 204px; min-width: 204px; box-sizing: border-box; align-items: center; justify-content: center; gap: 4px; margin: 0; padding: 8px; z-index: 3; }
+  .page-tool-desk { display: none; }
+  .page-dock .page-tool-more { display: inline-flex; }
+  .page-dock .page-tool { min-width: 44px; height: 44px; }
+  .page-shell:has(.page-bubble:not([hidden])) .page-dock { visibility: visible; }
+  .page-dock + .page-editor { padding-bottom: calc(72px + env(safe-area-inset-bottom)); }
   .page-plus { position: fixed; top: auto; left: 16px; bottom: calc(16px + env(safe-area-inset-bottom)); width: 44px; height: 44px; border-radius: 22px; }
   .page-grip { position: fixed; top: auto; left: 68px; bottom: calc(16px + env(safe-area-inset-bottom)); width: 44px; height: 44px; border-radius: 22px; opacity: 1; color: var(--page-chrome-ink-rest); background: var(--page-chrome-bg-rest); border: 1px solid var(--page-chrome-line-rest); }
-  .page-bubble { position: fixed; left: 0; right: 0; top: auto; bottom: 0; transform: none; justify-content: center; gap: 4px; padding: 6px 16px calc(6px + env(safe-area-inset-bottom)); border-radius: 0; border-width: 1px 0 0; background: var(--page-bar-bg); color: var(--page-bar-ink); }
-  .page-bubble .page-tool { min-width: 44px; height: 44px; }
+  .page-bubble { display: none; }
   .page-scrim { display: block; position: fixed; inset: 0; z-index: 4; background: var(--page-scrim); }
-  .page-menu { position: fixed; left: 0; right: 0; top: auto; bottom: 0; width: auto; max-height: 70vh; z-index: 5; padding: 8px 8px calc(8px + env(safe-area-inset-bottom)); border-radius: var(--page-pop-radius) var(--page-pop-radius) 0 0; border-width: 1px 0 0; }
+  .page-menu { position: fixed; left: 0; top: 0; width: var(--page-pop-width, min(280px, calc(100vw - 16px))); max-height: min(70vh, var(--page-pop-max, 70vh)); overflow-y: auto; transform: translate(var(--page-pop-x, 0px), var(--page-pop-y, 0px)); z-index: 5; }
   .page-menu-item { min-height: 48px; font-size: 16px; }
   .page-link { position: fixed; left: 0; right: 0; top: auto; bottom: 0; max-width: none; padding: 8px 16px calc(8px + env(safe-area-inset-bottom)); border-radius: 0; border-width: 1px 0 0; }
   .page-link-input { min-width: 0; height: 44px; font-size: 16px; }

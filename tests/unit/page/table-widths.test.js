@@ -19,7 +19,9 @@ test("dragging a column border stores a clamped width as one step and draws a fi
   expect(view.dom.querySelectorAll("colgroup col")).toHaveLength(2);
   expect(view.dom.querySelector("table").classList.contains("is-sized")).toBe(false);
   const handle = view.dom.querySelector('th[data-col="c1"] .page-table-resize');
-  expect(handle.getAttribute("aria-label")).toBe("Resize column");
+  expect(handle.getAttribute("aria-label")).toBe("Resize column Name");
+  expect(handle.getAttribute("role")).toBe("separator");
+  expect(handle.getAttribute("aria-orientation")).toBe("vertical");
   pointer("pointerdown", handle, 100);
   pointer("pointermove", view.dom.ownerDocument, 160);
   expect(view.dom.querySelector('col[data-col="c1"]').style.width).toBe("220px");

@@ -40,6 +40,24 @@ const blockStart = (doc, index) => { let at = 0; for (let i = 0; i < index; i++)
 const POPUP_ATTRS = ["aria-haspopup", "aria-controls", "aria-activedescendant"];
 const TARGET_GONE = "That block is no longer available.";
 
+// The part of the window the person can see: the visual viewport when the
+// browser has one, so a keyboard or a pinch does not hide the bar.
+export function phoneViewport(win) {
+  const v = win.visualViewport;
+  return v ? { left: v.offsetLeft, top: v.offsetTop, width: v.width, height: v.height }
+    : { left: 0, top: 0, width: win.innerWidth, height: win.innerHeight };
+}
+
+export function phoneBarBox(v, width, height, safeBottom = 0) {
+  const inset = PHONE_INSET;
+  const w = Math.min(width, Math.max(0, v.width - inset * 2));
+  return {
+    left: v.left + (v.width - w) / 2,
+    top: Math.max(v.top + inset, v.top + v.height - height - safeBottom - inset),
+    width: w,
+  };
+}
+
 export function blockLink(id, loc = globalThis.location) {
   return `${loc.origin}${loc.pathname}${loc.search}#${encodeURIComponent(id)}`;
 }
@@ -91,6 +109,7 @@ const ICONS = {
   bullet: svg('<path d="M6.5 4.5h7M6.5 8h7M6.5 11.5h7"/><path stroke-width="2.4" d="M3 4.5h.01M3 8h.01M3 11.5h.01"/>'),
   ordered: svg('<path d="M7 4.5h6.5M7 8h6.5M7 11.5h6.5M2.5 3.5l1-.5v3M2.5 9.3c.2-.5.6-.8 1.1-.8.6 0 1 .4 1 .9 0 .9-2.1 1.4-2.1 2.6h2.1"/>'),
   check: svg('<rect x="2.5" y="2.5" width="11" height="11" rx="2.5"/><path d="M5.5 8.2l1.8 1.8 3.4-4"/>'),
+  more: svg('<path stroke-width="2.2" d="M3 8h.01M8 8h.01M13 8h.01"/>'),
 };
 const TOOLS = [
   ["strong", "Bold"],
@@ -102,6 +121,11 @@ const TOOLS = [
   ["check", "Checklist"],
   ["code", "Code"],
 ];
+// The four controls a phone toolbar keeps: bold, italic, link and the menu that
+// holds everything else. Wider screens show every tool.
+const PHONE_TOOLS = new Set(["strong", "em", "link"]);
+const MORE_ACTIONS = new Set(["up", "down", "indent", "outdent"]);
+const PHONE_BAR_WIDTH = 204, PHONE_BAR_HEIGHT = 52, PHONE_INSET = 8;
 const LIST_KINDS = new Set(["bullet", "ordered", "check"]);
 const LINE_TYPES = new Set(["paragraph", "heading", "list_item"]);
 
@@ -206,7 +230,7 @@ const el = (tag, cls, attrs = {}) => {
 };
 
 function toolButton(name, label) {
-  const b = el("button", "page-tool", { type: "button", "data-cmd": name, "aria-label": label, title: label });
+  const b = el("button", `page-tool${PHONE_TOOLS.has(name) ? " page-tool-primary" : " page-tool-desk"}`, { type: "button", "data-cmd": name, "aria-label": label, title: label });
   b.innerHTML = ICONS[name];
   return b;
 }
@@ -267,10 +291,14 @@ class Chrome {
     this.win = view.dom.ownerDocument.defaultView ?? globalThis;
     this.frame = null;
     this.destroyed = false;
+    this.probe = null;
+    this.roving = null;
 
     this.dock = el("div", "page-dock", { role: "toolbar", "aria-label": "Formatting" });
-    this.turn = el("button", "page-tool page-tool-turn", { type: "button", "aria-haspopup": "menu" });
-    this.dock.append(this.turn, el("span", "page-tool-sep"), ...TOOLS.map(([n, l]) => toolButton(n, l)));
+    this.turn = el("button", "page-tool page-tool-turn page-tool-desk", { type: "button", "aria-haspopup": "menu" });
+    this.more = el("button", "page-tool page-tool-primary page-tool-more", { type: "button", "aria-label": "More", title: "More", "aria-haspopup": "menu" });
+    this.more.innerHTML = ICONS.more;
+    this.dock.append(this.turn, el("span", "page-tool-sep page-tool-desk"), ...TOOLS.map(([n, l]) => toolButton(n, l)), this.more);
     this.plus = el("button", "page-plus", { type: "button", "aria-label": "Add a block", title: "Add a block" });
     this.plus.innerHTML = ICONS.plus;
     this.grip = el("button", "page-grip", { type: "button", "aria-label": "Block actions", title: "Drag to move, click for actions", "aria-haspopup": "menu" });
@@ -292,6 +320,8 @@ class Chrome {
       });
     }
     this.turn.addEventListener("click", () => this.toggleMenu("turn", this.turn));
+    this.more.addEventListener("click", () => this.toggleMenu("more", this.more));
+    this.dock.addEventListener("keydown", (e) => this.dockKey(e));
     this.plus.addEventListener("click", () => this.fromPlus());
     this.grip.addEventListener("click", (e) => {
       if (e.detail === 0) this.gripAction(this.gutterIndex());
@@ -341,10 +371,60 @@ class Chrome {
     return Math.min(st.doc.resolve(pos).index(0), st.doc.childCount - 1);
   }
 
+  isPhone() {
+    return !!this.win?.matchMedia?.("(max-width: 560px)").matches;
+  }
+
   gutterIndex() {
-    if (this.view.dom.ownerDocument.defaultView.matchMedia?.("(max-width: 560px)").matches) return this.blockIndex();
+    if (this.isPhone()) return this.blockIndex();
     this.settleHover();
     return Math.min(this.hover ?? this.blockIndex(), this.view.state.doc.childCount - 1);
+  }
+
+  // The dock's controls in order; a phone keeps only the four primary ones.
+  dockControls() {
+    const all = [...this.dock.querySelectorAll("button")];
+    return this.isPhone() ? all.filter((b) => b.classList.contains("page-tool-primary")) : all;
+  }
+
+  setRoving(target) {
+    this.roving = target;
+    const roving = new Set(this.dockControls());
+    for (const b of this.dock.querySelectorAll("button")) b.tabIndex = b === target && roving.has(b) ? 0 : -1;
+  }
+
+  // The block selection's own Escape still runs first, and then the keyboard
+  // leaves the writing surface for the toolbar.
+  leaveToToolbar() {
+    queueMicrotask(() => {
+      if (!this.view.isDestroyed) this.focusToolbar();
+    });
+  }
+
+  focusToolbar() {
+    const [first] = this.dockControls();
+    if (!first) return false;
+    this.setRoving(first);
+    first.focus();
+    return true;
+  }
+
+  // Left and Right walk the toolbar; Escape hands the keyboard back to the
+  // editor. Tab is left alone, so it leaves the toolbar.
+  dockKey(event) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      this.view.focus();
+      return;
+    }
+    if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") return;
+    const list = this.dockControls();
+    const at = list.indexOf(event.target);
+    if (at < 0) return;
+    event.preventDefault();
+    const next = list[(at + (event.key === "ArrowRight" ? 1 : -1) + list.length) % list.length];
+    this.setRoving(next);
+    next.focus();
   }
 
   // The blocks a menu's commands act on, by id, so a peer's edit between opening
@@ -367,6 +447,14 @@ class Chrome {
     if (!m || m.slashAt !== null) return this.view.dom;
     const a = m.anchor;
     return a && a !== this.view.dom && (a.tagName === "BUTTON" || a.hasAttribute("tabindex")) ? a : this.view.dom;
+  }
+
+  // A block action from the phone menu acts on the caret's block when nothing
+  // more is selected, as the desktop command does.
+  selectCaretBlock() {
+    const st = this.view.state;
+    if (st.selection instanceof BlockSelection) return;
+    this.view.dispatch(st.tr.setSelection(selectBlocks(st.doc, this.blockIndex())));
   }
 
   gripAction(index) {
@@ -441,9 +529,24 @@ class Chrome {
     } else for (const name of POPUP_ATTRS) this.view.dom.removeAttribute(name);
   }
 
+  // Everything the phone toolbar folds away: the rest of the formatting, and the
+  // block actions the desktop menu carries. The move commands are the same ones.
+  moreItems() {
+    const tools = TOOLS.filter(([name]) => !PHONE_TOOLS.has(name))
+      .map(([name, label]) => ({ key: name, label, icon: ICONS[name], run: (view) => runMark(view, name) }));
+    const actions = ACTION_ITEMS.filter((a) => MORE_ACTIONS.has(a.key)).map((a) => ({ ...a, blocks: true }));
+    return [
+      ...tools,
+      { key: "turn", label: "Turn into", icon: "\u21bb", run: (view, chrome) => chrome.openMenu("turn", chrome.more) },
+      { key: "insert", label: "Insert", icon: "+", run: (view, chrome) => chrome.openMenu("insert", chrome.more, null, null, view.state.doc.child(chrome.blockIndex()).attrs.id) },
+      ...actions,
+    ];
+  }
+
   menuItems(m) {
     if (m.mode === "external") return m.externalItems || [];
     if (m.mode === "actions") return actionsFor(this.view.state);
+    if (m.mode === "more") return this.moreItems();
     const items = m.mode === "turn" ? BLOCK_TYPES : insertItemsFor(this.view.state, this.onAiTool
       ? [...MENU_ITEMS, { key: "ai", label: "Make a tool with AI…", icon: "✦", aliases: ["tool", "generate"], insert: "ai" }]
       : MENU_ITEMS);
@@ -541,7 +644,8 @@ class Chrome {
       for (const id of wanted) retype(tr, this.idIndex(id), item);
       this.view.dispatch(asStep(tr).scrollIntoView());
       this.view.focus();
-    } else if (m.mode === "actions" || m.mode === "external") {
+    } else if (m.mode === "actions" || m.mode === "more" || m.mode === "external") {
+      if (item.blocks) this.selectCaretBlock();
       item.run(this.view, this, index >= 0 ? index : this.blockIndex());
       if (!this.menu && item.focus !== false) this.view.focus();
     } else {
@@ -554,7 +658,11 @@ class Chrome {
   key(event) {
     if (composing(event, this.view)) return false;
     const m = this.menu;
-    if (!m) return false;
+    if (!m) {
+      if (event.key === "Escape" && !event.metaKey && !event.ctrlKey && !event.altKey
+        && this.view.state.selection instanceof BlockSelection) this.leaveToToolbar();
+      return false;
+    }
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       if (m.items.length) {
         m.active = (m.active + (event.key === "ArrowDown" ? 1 : -1) + m.items.length) % m.items.length;
@@ -601,6 +709,27 @@ class Chrome {
     });
   }
 
+  // The safe-area inset the browser reports, read through one hidden probe.
+  safeBottom() {
+    if (!this.probe) {
+      this.probe = el("div", "page-safe-probe");
+      this.shell.append(this.probe);
+    }
+    return parseFloat(this.win.getComputedStyle(this.probe).paddingBottom) || 0;
+  }
+
+  // A menu stays inside the visible viewport, above the bar when there is room.
+  menuBox(bar) {
+    const v = phoneViewport(this.win);
+    const maxHeight = Math.max(0, v.height - PHONE_INSET * 2);
+    const width = Math.min(280, Math.max(0, v.width - PHONE_INSET * 2));
+    const height = Math.min(this.menuEl.offsetHeight || 0, maxHeight);
+    const left = Math.max(v.left + PHONE_INSET, Math.min(bar.left, v.left + v.width - PHONE_INSET - width));
+    let top = bar.top - 6 - height;
+    if (top < v.top + PHONE_INSET) top = Math.min(bar.top + bar.height + 6, v.top + v.height - PHONE_INSET - height);
+    return { left, top, width, maxHeight };
+  }
+
   // Every geometry read the chrome needs, taken in one pass for the frame.
   measureLayout() {
     const view = this.view;
@@ -612,19 +741,32 @@ class Chrome {
     let at = 0;
     for (let k = 0; k < i; k++) at += st.doc.child(k).nodeSize;
     const dom = view.nodeDOM(at);
-    const out = { textLeft: edBox.left - shellBox.left, gutter: null, bubble: null, menu: null };
+    const out = { textLeft: edBox.left - shellBox.left, gutter: null, bubble: null, menu: null, bar: null, desk: false };
     if (dom && dom.getBoundingClientRect) {
       const r = dom.getBoundingClientRect();
       const lineH = parseFloat(getComputedStyle(dom).lineHeight) || r.height;
       out.gutter = { top: r.top - shellBox.top + Math.min(r.height, lineH) / 2, left: r.left - shellBox.left };
     }
+    const phone = this.isPhone();
+    // The fixed toolbar sits inside the visible viewport, so an on-screen keyboard
+    // or a pan cannot carry it off screen.
+    if (phone) {
+      const v = phoneViewport(this.win);
+      const height = this.dock.offsetHeight || PHONE_BAR_HEIGHT;
+      out.bar = { ...phoneBarBox(v, this.dock.offsetWidth || PHONE_BAR_WIDTH, height, this.safeBottom()), height };
+    } else {
+      out.desk = !!this.dock.style.left;
+    }
     const sel = st.selection;
-    if (!this.bubble.hidden) {
+    if (!this.bubble.hidden && !phone) {
       const a = view.coordsAtPos(sel.from), b = view.coordsAtPos(sel.to, -1);
       const mid = (Math.min(a.left, b.left) + Math.max(a.right, b.right)) / 2;
       out.bubble = { x: mid - shellBox.left, y: Math.min(a.top, b.top) - shellBox.top };
     }
-    if (this.menu) {
+    if (this.menu && phone) {
+      const box = this.menuBox(out.bar);
+      out.menu = { x: box.left, y: box.top, width: box.width, maxHeight: box.maxHeight };
+    } else if (this.menu) {
       const m = this.menu;
       let left, top;
       if (m.slashAt !== null) {
@@ -645,6 +787,13 @@ class Chrome {
 
   // The placement style writes, from the frame's measurements alone.
   paintLayout(layout) {
+    if (layout.bar) {
+      this.dock.style.left = `${layout.bar.left}px`;
+      this.dock.style.top = `${layout.bar.top}px`;
+      this.dock.style.width = `${layout.bar.width}px`;
+    } else if (layout.desk) {
+      for (const side of ["left", "top", "width"]) this.dock.style.removeProperty(side);
+    }
     if (layout.gutter) {
       for (const part of [this.plus, this.grip]) {
         part.style.setProperty("--page-plus-top", `${layout.gutter.top}px`);
@@ -659,6 +808,10 @@ class Chrome {
     if (layout.menu) {
       this.menuEl.style.setProperty("--page-pop-x", `${layout.menu.x}px`);
       this.menuEl.style.setProperty("--page-pop-y", `${layout.menu.y}px`);
+      if (layout.menu.width !== undefined) {
+        this.menuEl.style.setProperty("--page-pop-width", `${layout.menu.width}px`);
+        this.menuEl.style.setProperty("--page-pop-max", `${layout.menu.maxHeight}px`);
+      }
     }
   }
 
@@ -677,6 +830,7 @@ class Chrome {
     this.bubble.hidden = !showBubble;
     if (showBubble) for (const b of this.bubble.querySelectorAll("[data-cmd]")) b.setAttribute("aria-pressed", String(toolActive(st, b.dataset.cmd)));
     this.grip.classList.toggle("is-on", st.selection instanceof BlockSelection);
+    if (!this.dockControls().includes(this.roving)) this.setRoving(this.dockControls()[0]);
     this.slashQuery();
     this.scheduleLayout();
   }
@@ -695,7 +849,7 @@ class Chrome {
     this.win.visualViewport?.removeEventListener("resize", this.onResize);
     this.win.visualViewport?.removeEventListener("scroll", this.onResize);
     document.removeEventListener("mousedown", this.onDocDown, true);
-    for (const part of [this.dock, this.plus, this.grip, this.bubble, this.scrim, this.menuEl]) part.remove();
+    for (const part of [this.dock, this.plus, this.grip, this.bubble, this.scrim, this.menuEl, this.probe]) part?.remove();
   }
 }
 

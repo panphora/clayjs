@@ -42,6 +42,8 @@ export class TableView {
     this.node = node;
     this.view = view;
     this.getPos = getPos;
+    this.preview = null;
+    this.focusCol = null;
     const doc = view.dom.ownerDocument;
     this.dom = doc.createElement("div");
     this.dom.className = "page-table";
@@ -94,15 +96,26 @@ export class TableView {
     this.table.classList.toggle("is-sized", sized);
     this.table.style.width = sized ? `${columns(this.node).reduce((sum, id) => sum + (this.node.attrs.cols[id].width ?? DEFAULT_WIDTH), 0)}px` : "";
   }
-  resizer(colId, th) {
+  resizer(colId, th, col, index) {
     const doc = this.dom.ownerDocument;
     const handle = doc.createElement("span");
     handle.className = "page-table-resize";
+    handle.dataset.col = colId;
     handle.setAttribute("role", "separator");
     handle.setAttribute("aria-orientation", "vertical");
-    handle.setAttribute("aria-label", "Resize column");
-    handle.title = "Drag to resize, double-click to fit";
+    handle.setAttribute("aria-label", `Resize column ${col.name || `Column ${index + 1}`}`);
+    handle.setAttribute("aria-valuemin", String(MIN_WIDTH));
+    handle.setAttribute("aria-valuemax", String(MAX_WIDTH));
+    handle.setAttribute("aria-valuenow", String(this.widthOfColumn(colId)));
+    handle.tabIndex = 0;
+    handle.title = "Drag or use the arrow keys to resize, double-click to fit";
     handle.addEventListener("mousedown", (event) => event.preventDefault());
+    handle.addEventListener("focus", () => { this.focusCol = colId; });
+    handle.addEventListener("blur", () => this.commitWidth(colId));
+    handle.addEventListener("keydown", (event) => this.resizeKey(event, colId));
+    handle.addEventListener("keyup", (event) => {
+      if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) this.commitWidth(colId);
+    });
     handle.addEventListener("pointerdown", (event) => {
       event.preventDefault();
       const start = event.clientX;
@@ -126,6 +139,63 @@ export class TableView {
     handle.addEventListener("dblclick", (event) => { event.preventDefault(); this.fit(colId); });
     return handle;
   }
+  widthOfColumn(colId) {
+    return this.node.attrs.cols[colId]?.width ?? DEFAULT_WIDTH;
+  }
+  handleFor(colId) {
+    return [...this.header.querySelectorAll(".page-table-resize")].find((handle) => handle.dataset.col === colId) ?? null;
+  }
+  // The arrow keys, Home, End, Enter and Escape preview a width; the key that
+  // stops repeating, Enter, or leaving the handle commits the one command.
+  resizeKey(event, colId) {
+    const step = event.shiftKey ? 50 : 10;
+    const base = this.preview?.col === colId ? this.preview.width : this.widthOfColumn(colId);
+    let next;
+    if (event.key === "ArrowLeft") next = base - step;
+    else if (event.key === "ArrowRight") next = base + step;
+    else if (event.key === "Home") next = MIN_WIDTH;
+    else if (event.key === "End") next = MAX_WIDTH;
+    else if (event.key === "Enter") { event.preventDefault(); this.commitWidth(colId); return; }
+    else if (event.key === "Escape") { event.preventDefault(); this.cancelWidth(colId); return; }
+    else return;
+    event.preventDefault();
+    this.previewWidth(colId, Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, Math.round(next))));
+  }
+  previewWidth(colId, width) {
+    this.preview = { col: colId, width };
+    const col = [...this.colgroup.children].find((element) => element.dataset.col === colId);
+    if (col) { this.table.classList.add("is-sized"); col.style.width = `${width}px`; }
+    const handle = this.handleFor(colId);
+    if (handle) handle.setAttribute("aria-valuenow", String(width));
+  }
+  cancelWidth(colId) {
+    if (this.preview?.col === colId) this.preview = null;
+    this.widths();
+    this.handleFor(colId)?.setAttribute("aria-valuenow", String(this.widthOfColumn(colId)));
+  }
+  // The table and the column are looked up again here: a peer may have removed
+  // either one while the preview was up, and then there is nothing to commit.
+  commitWidth(colId) {
+    const preview = this.preview;
+    if (!preview || preview.col !== colId) return false;
+    this.preview = null;
+    const pos = this.getPos();
+    const table = pos == null ? null : this.view.state.doc.nodeAt(pos);
+    const col = table?.type === N.table && table.attrs.id === this.node.attrs.id ? table.attrs.cols[colId] : null;
+    if (!col) { this.widths(); return false; }
+    if ((col.width ?? DEFAULT_WIDTH) === preview.width) { this.widths(); return false; }
+    return this.commandInPlace(setColumnWidth(colId, preview.width));
+  }
+  // A keyboard width change leaves the person's model selection where it was,
+  // instead of pulling the caret to the table's first cell.
+  commandInPlace(run) {
+    const view = this.view;
+    const before = view.state.selection;
+    if (!run(view.state, view.dispatch)) return false;
+    if (view.state.selection.eq(before)) return true;
+    view.dispatch(view.state.tr.setSelection(before.constructor.fromJSON(view.state.doc, before.toJSON())));
+    return true;
+  }
   command(run) {
     const pos = this.getPos();
     if (pos == null) return false;
@@ -141,7 +211,7 @@ export class TableView {
     widest = Math.max(widest, head?.scrollWidth ?? 0);
     return this.command(setColumnWidth(colId, widest + 24));
   }
-  render() {
+  render(refocusCol = null) {
     const doc = this.dom.ownerDocument;
     const row = doc.createElement("tr");
     const effective = columnKinds(this.node);
@@ -198,16 +268,19 @@ export class TableView {
         ]);
       });
       control.dataset.kind = kind;
-      th.append(control, this.resizer(colId, th));
+      th.append(control, this.resizer(colId, th, col, index));
       row.append(th);
     }
     this.header.replaceChildren(row);
+    if (refocusCol) this.handleFor(refocusCol)?.focus();
   }
   update(node) {
     if (node.type !== N.table) return false;
+    const focused = this.focusCol && this.dom.contains(this.dom.ownerDocument.activeElement);
     this.node = node;
     this.dom.dataset.id = node.attrs.id ?? "";
-    this.render();
+    this.preview = null;
+    this.render(focused ? this.focusCol : null);
     const effective = columnKinds(node);
     for (const cell of this.contentDOM.querySelectorAll("td[data-col]")) cell.dataset.kind = effective[cell.dataset.col] ?? "text";
     return true;
