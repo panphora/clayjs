@@ -8,7 +8,7 @@
     "edit": { "requests": 168, "depth": 46, "brotli": 582656, "css": { "requests": 2, "depth": 2 } }
   },
   "kanban.html": {
-    "view": { "requests": 88, "depth": 26, "brotli": 269312, "css": { "requests": 0, "depth": 0 } },
+    "view": { "requests": 88, "depth": 26, "brotli": 270336, "css": { "requests": 0, "depth": 0 } },
     "edit": { "requests": 109, "depth": 49, "brotli": 384000, "css": { "requests": 0, "depth": 0 } },
     "draft": { "requests": 90, "depth": 39, "brotli": 310272, "css": { "requests": 0, "depth": 0 } }
   },
@@ -34,7 +34,7 @@
     "journal.html": {
       "view": { "requests": 53, "depth": 3, "brotli": 133120 },
       "edit": { "requests": 72, "depth": 3, "brotli": 207872 },
-      "draft": { "requests": 65, "depth": 3, "brotli": 184320 }
+      "draft": { "requests": 65, "depth": 3, "brotli": 185344 }
     }
   }
 }
