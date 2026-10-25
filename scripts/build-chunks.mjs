@@ -94,7 +94,7 @@ function closureOf(manifest, seeds) {
 function bootstrapSource(payload, tail) {
   return `(function (M) {
   var dir = new URL(M.dir, base + "/").href;
-  var tree = /\/dist$/.test(base) ? base.slice(0, -5) : base;
+  var tree = base.slice(-5) === "/dist" ? base.slice(0, -5) : base;
   M.preload.forEach(function (file) {
     var link = document.createElement("link");
     link.rel = "modulepreload";
