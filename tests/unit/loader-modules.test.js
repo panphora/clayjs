@@ -62,10 +62,15 @@ function code(text) {
 // A computed specifier or import.meta.url is what the bundle cannot carry: esbuild
 // leaves it in place, and the page reaches for the network at that line. The
 // vendored bundles are excluded because they are built elsewhere and cannot be
-// fixed here; the loader and the plugins are ours.
+// fixed here; the loader and the plugins are ours. The one exception imports the
+// document's own `text/hyper-upgrade` module from a blob URL: that code is the
+// author's, never a ClayJS module, so there is nothing for the bundle to carry.
+const DOCUMENT_CODE = new Set(["src/core/upgrade-run.js"]);
+
 test("no module under src/ computes an import specifier or reads import.meta", () => {
   const offenders = [];
   for (const file of sources(join(ROOT, "src"))) {
+    if (DOCUMENT_CODE.has(file.slice(ROOT.length))) continue;
     const text = code(readFileSync(file, "utf8"));
     if (/import\s*\((?!\s*["'])/.test(text) || /import\.meta/.test(text)) {
       offenders.push(file.slice(ROOT.length));
