@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 const { createRooms } = await import(new URL('../../../../../hyperclay/server-lib/live-data-rooms.js', import.meta.url));
-const { saveReceipt } = await import(new URL('../../../../../hyperclay/server-lib/live-provenance.js', import.meta.url));
+const { saveReceipt } = await import(new URL('../../../../src/server/rooms/live-provenance.js', import.meta.url));
 const { createStore } = await import(new URL('../../../../src/live/store.js', import.meta.url));
 const { createFastLane } = await import(new URL('../../../../src/live/fast-lane.js', import.meta.url));
 
