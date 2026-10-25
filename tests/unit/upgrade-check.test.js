@@ -166,7 +166,7 @@ describe("the offer", () => {
     const addItem = jest.fn();
     window.clay.menu = { addItem };
     const update = await findUpdate({ fetchFn: fetcher() });
-    expect(announce(update)).toBe("menu");
+    expect(await announce(update)).toBe("menu");
     expect(addItem).toHaveBeenCalledTimes(1);
     expect(addItem.mock.calls[0][0]).toMatchObject({ id: "upgrade", badge: true });
     expect(addItem.mock.calls[0][0].label).toContain("1.1.0");
@@ -177,17 +177,65 @@ describe("the offer", () => {
     const toastPersistent = jest.fn();
     window.clay.toastPersistent = toastPersistent;
     const update = await findUpdate({ fetchFn: fetcher() });
-    expect(announce(update)).toBe("notice");
+    expect(await announce(update)).toBe("notice");
     const [message, type, options] = toastPersistent.mock.calls[0];
     expect(type).toBe("info");
     expect(message).toMatch(/new version/i);
     expect(options.actions.map((action) => action.label)).toEqual(["Upgrade", "Not now"]);
   });
 
+  // The menu loads after ready, so the check can reach its offer first. When the plan
+  // names the menu, the item waits for `clay:plugin-ready` rather than falling back to
+  // a notice the page would show beside a menu that is about to arrive.
+  test("a planned menu that has not arrived gets the item once it does, and no notice", async () => {
+    page();
+    const addItem = jest.fn();
+    const toastPersistent = jest.fn();
+    window.clay = { canEdit: true, isDraftMode: false, storage, plugins: Object.freeze(["menu"]), toastPersistent };
+    const update = await findUpdate({ fetchFn: fetcher() });
+
+    const offered = announce(update);
+    expect(addItem).not.toHaveBeenCalled();
+    expect(toastPersistent).not.toHaveBeenCalled();
+
+    document.dispatchEvent(new CustomEvent("clay:plugin-ready", { detail: { plugin: "source" } }));
+    expect(await Promise.race([offered, Promise.resolve("waiting")])).toBe("waiting");
+
+    window.clay.menu = { addItem };
+    document.dispatchEvent(new CustomEvent("clay:plugin-ready", { detail: { plugin: "menu" } }));
+
+    expect(await offered).toBe("menu");
+    expect(addItem).toHaveBeenCalledTimes(1);
+    expect(addItem.mock.calls[0][0]).toMatchObject({ id: "upgrade", badge: true });
+    expect(toastPersistent).not.toHaveBeenCalled();
+  });
+
+  test("with no menu in the plan, the notice shows without waiting", async () => {
+    page();
+    const addItem = jest.fn();
+    const toastPersistent = jest.fn();
+    window.clay = { canEdit: true, isDraftMode: false, storage, plugins: Object.freeze([]), toastPersistent };
+    const update = await findUpdate({ fetchFn: fetcher() });
+
+    expect(await announce(update)).toBe("notice");
+    expect(toastPersistent).toHaveBeenCalledTimes(1);
+    expect(addItem).not.toHaveBeenCalled();
+  });
+
+  test("a menu that is already there is used without waiting", async () => {
+    page();
+    const addItem = jest.fn();
+    window.clay = { canEdit: true, isDraftMode: false, storage, plugins: Object.freeze(["menu"]), menu: { addItem } };
+    const update = await findUpdate({ fetchFn: fetcher() });
+
+    expect(await announce(update)).toBe("menu");
+    expect(addItem).toHaveBeenCalledTimes(1);
+  });
+
   test("with neither menu nor toast, nothing is offered", async () => {
     page();
     const update = await findUpdate({ fetchFn: fetcher() });
-    expect(announce(update)).toBeNull();
+    expect(await announce(update)).toBeNull();
   });
 
   test("Upgrade asks for the upgrade itself", async () => {
@@ -195,7 +243,7 @@ describe("the offer", () => {
     const addItem = jest.fn();
     window.clay.menu = { addItem };
     const update = await findUpdate({ fetchFn: fetcher() });
-    announce(update);
+    await announce(update);
     const seen = [];
     document.addEventListener("clay:upgrade-requested", (event) => seen.push(event.detail), { once: true });
     addItem.mock.calls[0][0].run();
@@ -208,7 +256,7 @@ describe("the offer", () => {
     window.clay.toastPersistent = toastPersistent;
     const now = 1_000_000;
     const update = await findUpdate({ fetchFn: fetcher(), now });
-    announce(update);
+    await announce(update);
     const notNow = toastPersistent.mock.calls[0][2].actions[1];
     notNow.onClick();
     expect(storage.local.get("upgrade-dismissed")).toBe("1.1.0");

@@ -5,6 +5,7 @@ import { beforeAll, afterAll, expect, test } from "@jest/globals";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { CORE_WAVES, PLUGIN_PATHS } from "../../../src/loader-logic.js";
 
 const ROOT = new URL("../../../", import.meta.url).pathname;
 const budget = JSON.parse(readFileSync(new URL("../../../scripts/load-budget.json", import.meta.url), "utf8"));
@@ -12,6 +13,16 @@ const { measure, measureBuilt } = await import("../../../scripts/measure-load.mj
 const { emitBootstraps, emitChunks } = await import("../../../scripts/build-chunks.mjs");
 
 const htmlOf = (fixture) => readFileSync(new URL(`../../../tests/fixtures/load/${fixture}`, import.meta.url), "utf8");
+
+// Styles and fonts are counted on their own lines, not folded into the JavaScript
+// number and not left out of it: a ceiling that hides 450 KB of fonts is not a ceiling.
+function withinAssets(measured, limits) {
+  for (const asset of ["css", "fonts"]) {
+    expect(measured[asset].requests).toBeLessThanOrEqual(limits[asset].requests);
+    expect(measured[asset].depth).toBeLessThanOrEqual(limits[asset].depth);
+    if (limits[asset].raw !== undefined) expect(measured[asset].raw).toBeLessThanOrEqual(limits[asset].raw);
+  }
+}
 
 for (const [fixture, modes] of Object.entries(budget)) {
   if (fixture === "built") continue;
@@ -24,8 +35,7 @@ for (const [fixture, modes] of Object.entries(budget)) {
       expect(measured.js.requests).toBeLessThanOrEqual(limits.requests);
       expect(measured.js.depth).toBeLessThanOrEqual(limits.depth);
       expect(measured.js.brotli).toBeLessThanOrEqual(limits.brotli);
-      expect(measured.css.requests).toBeLessThanOrEqual(limits.css.requests);
-      expect(measured.css.depth).toBeLessThanOrEqual(limits.css.depth);
+      withinAssets(measured, limits);
     });
   }
 }
@@ -56,6 +66,7 @@ for (const [fixture, modes] of Object.entries(budget.built)) {
       expect(measured.js.requests).toBeLessThanOrEqual(limits.requests);
       expect(measured.js.depth).toBeLessThanOrEqual(limits.depth);
       expect(measured.js.brotli).toBeLessThanOrEqual(limits.brotli);
+      withinAssets(measured, limits);
     });
   }
 }
@@ -73,4 +84,71 @@ test(`a Document's built edit line counts the view parts its blocks need, and a 
   expect(text.js.files.map(({ path }) => path)).not.toContain(chunkOf("page/features/table.js"));
   expect(text.js.files.map(({ path }) => path)).not.toContain(chunkOf("page/features/board.js"));
   expect(rich.js.requests - text.js.requests).toBe(2);
+}, 180000);
+
+// The milestone's own gate, written as the number it is rather than as whatever the
+// release happens to measure: 45 KiB of Brotli q4 JavaScript in three dependent
+// stages, counting every module the reader activates before it is ready.
+test("the standard Document built view holds the 46,080-byte, three-stage reader ceiling", async () => {
+  expect(budget.built["document.html"].view.brotli).toBe(46080);
+  expect(budget.built["document.html"].view.depth).toBe(3);
+
+  const measured = await measureBuilt({ html: htmlOf("document.html"), mode: "view", dir });
+
+  expect(measured.js.depth).toBe(3);
+  expect(measured.js.brotli).toBeLessThanOrEqual(46080);
+}, 180000);
+
+// Everything the canonical Document fetches before its ready boundary: the loader
+// facade, the always-wave core and the reader. The menu loads after ready, so it is
+// not in that set and is counted on the late line instead. An edit-only module
+// riding along would be paid for by a reader who never opens the editor.
+test("the Document built view counts the facade, the core and the reader before ready, leaves the menu late, and no edit-only module", async () => {
+  const manifest = JSON.parse(readFileSync(join(dir, "m/manifest.json"), "utf8"));
+  const chunkOf = (entry) => `m/${manifest.entries[entry]}`;
+  const measured = await measureBuilt({ html: htmlOf("document.html"), mode: "view", dir });
+  const paths = measured.js.files.map((file) => file.path);
+
+  expect(paths).toContain("clay.js");
+  expect(paths).toContain(`m/${manifest.runtime}`);
+  expect(paths).toContain(chunkOf("reader-core.js"));
+  expect(paths).toContain(chunkOf("plugins/page-view.js"));
+  expect(manifest.entries["plugins/menu.js"]).toBeTruthy();
+  expect(paths).not.toContain(chunkOf("plugins/menu.js"));
+  expect(measured.js.late.requests).toBeGreaterThan(0);
+
+  const editOnly = [
+    ...CORE_WAVES.editOnly,
+    ...Object.values(PLUGIN_PATHS).filter((plugin) => plugin.editOnly).map((plugin) => plugin.path),
+  ];
+  for (const entry of editOnly) expect(paths).not.toContain(chunkOf(entry));
+}, 180000);
+
+// The released bytes are the manifest's bytes: the meter reads the same inventory the
+// release publishes, so the budget cannot drift from what a browser downloads.
+test("the Document built view's requests are the release manifest's files, byte for byte", async () => {
+  const manifest = JSON.parse(readFileSync(join(dir, "m/manifest.json"), "utf8"));
+  const measured = await measureBuilt({ html: htmlOf("document.html"), mode: "view", dir });
+
+  expect(measured.js.requests).toBe(measured.js.files.length);
+  for (const file of measured.js.files) {
+    const listed = file.path.startsWith("m/") ? manifest.files[file.path.slice(2)] : null;
+    if (!listed) {
+      // The classic facade is the generated bootstrap, written beside the manifest.
+      expect(file.path).toBe("clay.js");
+      expect(file.raw).toBe(readFileSync(join(dir, file.path)).length);
+      continue;
+    }
+    expect(listed.bytes).toBe(file.raw);
+  }
+}, 180000);
+
+// M3's comparison, kept visible beside the milestone gate: the source-mode Document
+// view is the depth M3 had to bring under 23 stages, the built one is three.
+test("the Document view stays below M3's 23-stage source limit and is three stages built", async () => {
+  const source = await measure({ html: htmlOf("document.html"), mode: "view" });
+  const built = await measureBuilt({ html: htmlOf("document.html"), mode: "view", dir });
+
+  expect(source.js.depth).toBeLessThan(23);
+  expect(built.js.depth).toBe(3);
 }, 180000);

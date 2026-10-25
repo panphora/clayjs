@@ -171,7 +171,7 @@ const IMPLIES = { cms: ["quickcrop", "upload"], "ai-edit": ["wire"], page: ["liv
 const DISPLACES = { page: ["richclay"] };
 // No first paint or keystroke waits for these. source keeps the file's bytes outside
 // the edited parts stable; a save before it installs is the ordinary full serialization.
-const LATE = new Set(["source", "sortable"]);
+const LATE = new Set(["source", "sortable", "menu"]);
 
 function parseCsv(params, key, enabled, apply) {
   const raw = params.get(key);

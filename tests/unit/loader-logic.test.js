@@ -134,6 +134,19 @@ describe("resolveModules", () => {
     expect(view.plugins).not.toContain("plugins/sortable.js");
   });
 
+  // The menu draws the Edit switch and claygoo, which nothing on first paint reads,
+  // so a Document with `plugins=page,menu` loads it after the reader is ready in
+  // both modes: a reader's first paint and first keystroke do not pay for it.
+  test("menu is late in view and edit, and stays out of the boot list", () => {
+    const view = resolveModules(params({ plugins: "page,menu" }), false);
+    expect(view.plugins).not.toContain("plugins/menu.js");
+    expect(view.late).toEqual(["plugins/menu.js"]);
+
+    const edit = resolveModules(params({ plugins: "page,menu" }), true);
+    expect(edit.plugins).not.toContain("plugins/menu.js");
+    expect(edit.late).toEqual(["plugins/menu.js", "plugins/source.js"]);
+  });
+
   test("exclude CSV removes a default-on plugin", () => {
     const { plugins, late } = resolveModules(params({ exclude: "richclay" }), true);
     expect(plugins).toEqual([]);

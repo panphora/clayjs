@@ -15,6 +15,7 @@ import { BOOT_IMPORTS, EDIT_BOOT_IMPORTS } from "../src/lib/boot-imports.js";
 import { FEATURES, featureForType } from "../src/page/features/registry.js";
 import { blocksFromYValue } from "../src/page/ybind/decode.js";
 import { parseJsonRelaxed } from "../src/vendor/hyper-morph-json.vendor.js";
+import { FONT_SHEETS, compileTheme } from "./build-themes.mjs";
 
 const ROOT = resolve(fileURLToPath(new URL(".", import.meta.url)), "..");
 const CLAY = "https://clayjs.com/v1/";
@@ -22,6 +23,8 @@ const CLAY_ORIGIN = new URL(CLAY).origin;
 const CLAY_SRC_PATH = "/v1/src/";
 const FIXTURES = join(ROOT, "tests/fixtures/load");
 const CSS_IMPORT = /@import\s+(?:url\(\s*(?:"([^"]+)"|'([^']+)'|([^\s)"']+))\s*\)|"([^"]+)"|'([^']+)')/gi;
+const FONT_URL = /url\(\s*["']?([^"')]+\.(?:woff2?|ttf|otf))["']?\s*\)/gi;
+const THEME_PATH = /^src\/page\/themes\/([^/]+)\.css$/;
 
 const attrsOf = (node) => Object.fromEntries((node.attrs || []).map(({ name, value }) => [name, value]));
 const textOf = (node) => (node.childNodes || []).map((child) => child.value ?? textOf(child)).join("");
@@ -216,9 +219,34 @@ export function cssImportsOf(css, servedUrl) {
   });
 }
 
-function cssOf(document) {
+// A theme whose families all have a vendored sheet is served compiled: build.js writes
+// that text at the document's own URL, so a Document's stylesheet is one request that
+// names the release's fonts rather than a chain that reaches Google. A theme the build
+// cannot compile is still the authored chain.
+async function servedTheme(path) {
+  const match = THEME_PATH.exec(path);
+  if (!match) return null;
+  const source = readFileSync(join(ROOT, path), "utf8");
+  const families = [...source.matchAll(/fonts\.googleapis\.com\/css2\?([^"')]+)/g)]
+    .flatMap((found) => new URLSearchParams(found[1]).getAll("family"))
+    .map((value) => value.split(":")[0].toLowerCase());
+  if (!families.length || !families.every((family) => FONT_SHEETS[family])) return null;
+  return compileTheme({ root: ROOT, name: match[1], outPath: path });
+}
+
+function localFont(url) {
+  if (url.origin !== CLAY_ORIGIN || !url.pathname.startsWith("/v1/fonts/")) return null;
+  const path = `fonts/${decodeURIComponent(url.pathname.slice("/v1/fonts/".length))}`;
+  return existsSync(join(ROOT, path)) ? path : null;
+}
+
+// Stylesheets, then the fonts they name: a font is fetched one stage after its sheet,
+// and is reported on its own line so the JavaScript ceiling cannot hide it.
+async function cssOf(document) {
   const external = [];
   const files = [];
+  const fontFiles = new Map();
+  const externalFonts = new Map();
   const seen = new Set();
   let depth = 0;
   const queue = document.stylesheets.map((href) => ({ url: new URL(href, "https://fixture.invalid/").href, stage: 1 }));
@@ -234,12 +262,27 @@ function cssOf(document) {
     }
     files.push(path);
     depth = Math.max(depth, stage);
-    for (const imported of cssImportsOf(readFileSync(join(ROOT, path), "utf8"), url)) {
-      if (imported.path && existsSync(join(ROOT, imported.path))) queue.push({ url: imported.url, stage: stage + 1 });
-      else external.push(imported.url);
+    const compiled = await servedTheme(path);
+    const text = compiled ?? readFileSync(join(ROOT, path), "utf8");
+    if (!compiled) {
+      for (const imported of cssImportsOf(text, url)) {
+        if (imported.path && existsSync(join(ROOT, imported.path))) queue.push({ url: imported.url, stage: stage + 1 });
+        else external.push(imported.url);
+      }
+    }
+    for (const found of text.matchAll(FONT_URL)) {
+      const font = new URL(found[1], url);
+      const local = localFont(font);
+      if (local) fontFiles.set(font.href, { path: local, stage: stage + 1 });
+      else if (!found[1].startsWith("data:")) externalFonts.set(font.href, true);
     }
   }
-  return { ...total(files), depth, external };
+  const fonts = [...fontFiles.values()];
+  const fontDepth = fonts.reduce((most, font) => Math.max(most, font.stage), 0);
+  return {
+    css: { ...total(files), depth, external },
+    fonts: { ...total(fonts.map((font) => font.path)), depth: fontDepth, external: [...externalFonts.keys()] },
+  };
 }
 
 export async function measure({ html, mode }) {
@@ -300,7 +343,7 @@ export async function measure({ html, mode }) {
   const lazy = new Set();
   for (const file of loaded) for (const dep of dynamicDeps(inputs, file)) if (!loaded.has(dep)) lazy.add(dep);
 
-  return { mode, bootstrap, plugins: plan.plugins, js, css: cssOf(document), lazy: [...lazy].sort() };
+  return { mode, bootstrap, plugins: plan.plugins, js, ...(await cssOf(document)), lazy: [...lazy].sort() };
 }
 
 // The payload a generated bootstrap inlines: one JSON object, written without
@@ -430,7 +473,7 @@ export async function measureBuilt({ html, mode, dir }) {
     }
   }
 
-  return { mode, bootstrap, plugins: plan.plugins, js, css: cssOf(document), lazy: [...lazy].sort() };
+  return { mode, bootstrap, plugins: plan.plugins, js, ...(await cssOf(document)), lazy: [...lazy].sort() };
 }
 
 function parseArgs(argv) {
@@ -470,7 +513,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   } else {
     console.log("file | mode | asset | requests | raw | gzip | brotli | depth");
     for (const r of results) {
-      for (const asset of ["js", "css"]) {
+      for (const asset of ["js", "css", "fonts"]) {
         const m = r[asset];
         console.log(`${r.file} | ${r.mode} | ${asset} | ${m.requests} | ${kb(m.raw)} | ${kb(m.gzip)} | ${kb(m.brotli)} | ${m.depth}`);
       }

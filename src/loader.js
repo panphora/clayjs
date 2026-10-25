@@ -76,6 +76,7 @@ export async function boot(base, params, readyResolve, manifest = null) {
 
   assembleCore(loaded, { isDraftMode, isEditMode, isOwner, siteVisibility, canEdit, mode }, regionPolicy); // window.clay MUST be assembled
                                                                // before any plugin import
+  window.clay.plugins = Object.freeze([...plan.plugins, ...plan.late].map((path) => PLUGIN_NAMES[path]));
 
   for (const path of plan.plugins) {
     // A plugin that throws on evaluation degrades to absent. Unguarded, its

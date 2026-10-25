@@ -134,12 +134,35 @@ function dismiss(version) {
   if (storage) storage.set(DISMISSED_KEY, version);
 }
 
-export function announce(update, clay = typeof window !== "undefined" ? window.clay : null) {
+function menuPlanned(clay) {
+  return Boolean(clay && Array.isArray(clay.plugins) && clay.plugins.includes("menu"));
+}
+
+function menuReady(clay) {
+  return Boolean(clay && clay.menu && typeof clay.menu.addItem === "function");
+}
+
+function whenMenuReady(clay) {
+  if (menuReady(clay) || !menuPlanned(clay)) return Promise.resolve();
+  return new Promise((resolve) => {
+    const onReady = (event) => {
+      if (!event.detail || event.detail.plugin !== "menu") return;
+      document.removeEventListener("clay:plugin-ready", onReady);
+      resolve();
+    };
+    document.addEventListener("clay:plugin-ready", onReady);
+  });
+}
+
+export async function announce(update, clay = typeof window !== "undefined" ? window.clay : null) {
   const run = () => document.dispatchEvent(new CustomEvent("clay:upgrade-requested", { detail: update }));
-  if (clay && clay.menu && typeof clay.menu.addItem === "function") {
+  const planned = menuPlanned(clay);
+  await whenMenuReady(clay);
+  if (menuReady(clay)) {
     clay.menu.addItem({ id: "upgrade", label: `Upgrade to version ${update.version}`, badge: true, run });
     return "menu";
   }
+  if (planned) return null;
   if (clay && typeof clay.toastPersistent === "function") {
     clay.toastPersistent(NOTICE, "info", {
       actions: [
@@ -162,7 +185,7 @@ export async function start(options = {}) {
   await Promise.resolve(clay && clay.loaded && clay.loaded.ui).catch(() => {});
   const update = await findUpdate(options).catch(() => null);
   if (!update) return null;
-  announce(update);
+  await announce(update);
   return update;
 }
 
