@@ -1,4 +1,3 @@
-import { createFeatureLoader } from "../page/feature-loader.js";
 import { FEATURES, featureForType } from "../page/features/registry.js";
 import { mergeEngine } from "../sync/merge-engine.js";
 import { serializeLive } from "../live/ops.js";
@@ -47,55 +46,17 @@ function unreadablePage(value) {
 }
 
 // The page's own code reaches ProseMirror and Yjs, so it is a separate download: the
-// plugin chunk evaluates without either vendor, and the room join starts while they
-// arrive. The editor step and the binding step both ask for it, and a page holds one
-// copy. A step that needs it awaits pageCodeReady(); the synchronous paths read
+// plugin chunk evaluates without either vendor, and the room join starts while it
+// arrives. Every step that needs it awaits the one boot-pack import, which carries the
+// page code and the parts they share in one static graph, so a module they share is
+// never linked by two imports at once; the pack starts the editor's own download
+// beside it. A step that needs it awaits pageCodeReady(); the synchronous paths read
 // pageCode, which the boot has awaited before the room's state reaches them.
 let pageCode = null;
 let pageCodeLoading = null;
 function pageCodeReady() {
-  // The first import is the file the page was read from: it brings the projection,
-  // the decoder and both vendors, and the rest ask for what it already holds.
-  pageCodeLoading ??= import("../page/adopt-boot.js").then((adoptBoot) => Promise.all([
-    import("../page/adopt.js"),
-    import("../page/merge.js"),
-    import("../page/projection.js"),
-    import("../page/save-projection.js"),
-    import("../page/ybind/decode.js"),
-    import("../page/ybind/binding.js"),
-    import("../page/ybind/provider.js"),
-    import("../page/ybind/migrate.js"),
-  ]).then(([adopt, merge, projection, saveProjection, decode, binding, provider, migrate]) => {
-    pageCode = {
-      installAdoption: adoptBoot.installAdoption,
-      ADOPTION_TIMEOUT_MS: adoptBoot.ADOPTION_TIMEOUT_MS,
-      classifyFile: adopt.classifyFile,
-      readBack: adopt.readBack,
-      mergePageModels: merge.mergePageModels,
-      canon: projection.canon,
-      renderFromTags: saveProjection.renderFromTags,
-      blocksFromYValue: decode.blocksFromYValue,
-      createYPageBinding: binding.createYPageBinding,
-      yValueOf: provider.yValueOf,
-      seedPageFromArticle: migrate.seedPageFromArticle,
-    };
-    return pageCode;
-  }));
+  pageCodeLoading ??= import("../page/boot-pack.js").then((pack) => (pageCode = pack));
   return pageCodeLoading;
-}
-
-// The recovery list hangs off the mounted view and the title follows its heading, so
-// these arrive with the editor's code rather than beside the room join.
-async function mountCodeReady(code) {
-  const [recover, title] = await Promise.all([
-    import("../page/recover.js"),
-    import("../page/document-title-runtime.js"),
-  ]);
-  return Object.assign(code, {
-    createRecoverList: recover.createRecoverList,
-    focusBlock: recover.focusBlock,
-    observeDocumentTitle: title.observeDocumentTitle,
-  });
 }
 
 // The parts a document asks for, read off the document itself: the state a view holds
@@ -559,8 +520,7 @@ export function createSteps(inst, options) {
     if (chrome && editorView && remove) chrome.holdSlashRange(editorView, remove);
     await features.ensure("tool").catch(() => {});
     if (!isCurrent(inst) || !aiTool || !editorView) return;
-    const mod = chrome ?? await import("../page/chrome.js");
-    aiTool.open({ target, remove: remove ? mod.heldSlashRange(editorView.state) : null });
+    aiTool.open({ target, remove: remove ? chrome.heldSlashRange(editorView.state) : null });
   };
   const aiRequested = () => capabilityAdvertised(meta);
 
@@ -625,22 +585,19 @@ export function createSteps(inst, options) {
     return { ok: true, source };
   }
 
-  // The editor's code, the page's own code and the feature views the saved article
-  // demands are separate downloads, and they start together here beside the room join.
+  // The page's own code, the editor it starts and the feature views the saved article
+  // demands are separate downloads, and the page's own starts here beside the room join.
   // Nothing evaluates the editor until the coordinator calls it; the parts are
   // installed at the mount, so a failed one is the loader's own Retry notice there.
   async function loadEditorAssets(inst, source) {
-    const editorImport = import("../page/editor.js");
-    editorImport.catch(() => null);
     const codeImport = pageCodeReady();
     codeImport.catch(() => null);
-    const chromeImport = import("../page/chrome.js");
-    chromeImport.catch(() => null);
     const read = await source.ready;
     if (!read.ok) return read;
     if (!isCurrent(inst)) return { ok: false, cancelled: true };
+    const code = await codeImport;
     const featureIds = [...new Set(Object.values(source.blocks).map((block) => featureForType(block.t)).filter(Boolean))];
-    features = createFeatureLoader({
+    features = code.createFeatureLoader({
       load: (id) => FEATURES[id].load(),
       install: async (id, mod) => {
         if (!editorView) await editorReady;
@@ -662,12 +619,9 @@ export function createSteps(inst, options) {
     // by that install, which offers the feature's Retry.
     for (const id of featureIds) features.prepare(id).catch(() => null);
     let editor = null;
-    let code = null;
     try {
-      const [editorModule, codeModule, chromeModule] = await Promise.all([editorImport, codeImport, chromeImport]);
-      editor = editorModule;
-      chrome = chromeModule;
-      code = await mountCodeReady(codeModule);
+      editor = await import("../page/editor.js");
+      chrome = { holdSlashRange: code.holdSlashRange, heldSlashRange: code.heldSlashRange };
     } catch (error) {
       // A host that blocked the download keeps the saved article and reads this reason.
       console.error("clayjs: page plugin could not load the editor", error);
@@ -678,9 +632,9 @@ export function createSteps(inst, options) {
   }
 
   async function prepareAuthority(inst, source) {
-    // The page's own code is a download like the editor's: it starts here, beside
-    // authority, and only a page that must rebuild its tag waits for it before the
-    // join. Nothing else on this path touches a vendor.
+    // The page's own code, with the editor it starts and the parts they share, is one
+    // download: it starts here, beside authority, and only a page that must rebuild
+    // its tag waits for it before the join. Nothing else on this path touches a vendor.
     const codePromise = pageCodeReady();
     try { meta = await hostMeta(); } catch (error) { meta = null; }
     if (!isCurrent(inst)) return { ok: false, cancelled: true };
