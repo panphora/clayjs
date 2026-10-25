@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>clayjs chunked view fixture</title>
+  <script>
+    window.clayEditMode = false;
+    // Probes for the spec: the preload links as clay:ready found them (before any
+    // plugin had a chance to add one) and every console.warn the page logged.
+    window.__warnings = [];
+    var warn = console.warn.bind(console);
+    console.warn = function () {
+      window.__warnings.push(Array.prototype.map.call(arguments, String).join(" "));
+      warn.apply(console, arguments);
+    };
+    document.addEventListener("clay:ready", function () {
+      window.preloadsAtReady = Array.prototype.map.call(
+        document.querySelectorAll('link[rel="modulepreload"]'),
+        function (link) { return link.href; }
+      );
+    }, { once: true });
+  </script>
+  <script src="/dist/clay.js?plugins=page"></script>
+</head>
+<body>
+  <h1 editable>Read me</h1>
+
+  <article class="page" clay="freeze" data-page="1">
+    <p data-id="p1">A reader sees this article.</p>
+  </article>
+
+  <nav clay="no-save no-watch">
+    <span>local chrome that must not be saved</span>
+  </nav>
+</body>
+</html>

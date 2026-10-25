@@ -33,6 +33,8 @@ export async function boot(base, params, readyResolve, manifest = null) {
   const editMode = await MODULES["core/is-edit-mode.js"]();
   const { isEditMode, isOwner, siteVisibility, canEdit, mode } = editMode;
 
+  if (isEditMode) import("./core/host-meta.js").then((m) => m.hostMeta()).catch(() => {});
+
   // richclay's vendor build detects edit mode via this legacy global; set it
   // before any plugin import so its autoInit sees the right value. Overwrite
   // even a pre-set value: resolution already consumed it (lowest precedence),
