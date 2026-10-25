@@ -99,9 +99,11 @@ test("clay.js preloads the loader, the runtime manifest and the boot prefix", as
 });
 
 // The supplement is the only conditional request the release makes, and a wrong guess
-// costs hints, never a module: a reader that fetches it used one extra request, and an
-// editor whose page did not look editable preloads what the main manifest knows.
-test("the bootstrap fetches the edit supplement only when the page looks editable", async () => {
+// costs hints, never a module: a page that asks for it early used one extra request, and
+// an editor whose page did not preloads what the main manifest knows. Only an explicit
+// ?editmode=true asks early; an owner's cookie is permission, not an edit request, so an
+// owner opening a document in view downloads no hint index (see mode-hints.test.js).
+test("the bootstrap fetches the edit supplement only for an explicit ?editmode=true", async () => {
   const code = await read("clay.js");
   const at = code.indexOf("function __clayLikelyEdit");
   const end = code.indexOf("\n  }", at) + 4;
@@ -110,14 +112,18 @@ test("the bootstrap fetches the edit supplement only when the page looks editabl
 
   expect(likelyEdit("?plugins=page&editmode=true", "")).toBe(true);
   expect(likelyEdit("?editmode=true", "")).toBe(true);
-  expect(likelyEdit("?plugins=page", "isAdminOfCurrentResource=abc")).toBe(true);
-  expect(likelyEdit("?plugins=page", "other=1; isAdminOfCurrentResource=abc")).toBe(true);
+  expect(likelyEdit("?plugins=page", "isAdminOfCurrentResource=abc")).toBe(false);
+  expect(likelyEdit("?plugins=page", "other=1; isAdminOfCurrentResource=abc")).toBe(false);
   expect(likelyEdit("?plugins=page", "")).toBe(false);
-  expect(likelyEdit("?plugins=page", "isAdminOfCurrentResourceX=1")).toBe(false);
+  expect(likelyEdit("?plugins=page&editmode=false", "isAdminOfCurrentResource=abc")).toBe(false);
   expect(likelyEdit("?editmode=false", "other=1")).toBe(false);
 
-  expect(code.split("import(dir + M.edit)").length - 1).toBe(1);
+  // Two imports of the one supplement: the early one this predicate decides, and the
+  // cached hint fetch a resolved edit, draft or first entry uses.
+  expect(code.split("import(dir + M.edit)").length - 1).toBe(2);
   expect(code).toContain("likelyEdit ? import(dir + M.edit)");
+  expect(code).toContain("function loadEditHints()");
+  expect(code).toContain("loadEditHints: loadEditHints");
 });
 
 test("each satellite preloads its own entry and the runtime manifest", async () => {

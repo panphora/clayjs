@@ -30,6 +30,9 @@ const CSS_IMPORT = /@import\s+(?:url\(\s*(?:"([^"]+)"|'([^']+)'|([^\s)"']+))\s*\
 const FONT_URL = /url\(\s*["']?([^"')]+\.(?:woff2?|ttf|otf))["']?\s*\)/gi;
 const THEME_PATH = /^src\/page\/themes\/([^/]+)\.css$/;
 
+// The cookie a host sets on a document it serves to its owner. The bootstrap predicate
+// may read it, so the meter has to present it to measure that boot.
+const OWNER_COOKIE = "isAdminOfCurrentResource=1";
 const attrsOf = (node) => Object.fromEntries((node.attrs || []).map(({ name, value }) => [name, value]));
 const textOf = (node) => (node.childNodes || []).map((child) => child.value ?? textOf(child)).join("");
 const PAGE_PLUGIN = "plugins/page.js";
@@ -466,10 +469,23 @@ function hintIndex(file) {
   return JSON.parse(existsSync(file) ? readFileSync(file, "utf8").slice("export default ".length).replace(/;\s*$/, "") : "null");
 }
 
+// The bootstrap's own decision, read out of the generated script: whether this page
+// asks for the edit supplement before the plan is resolved. Evaluating the function the
+// release ships is the only way the meter can agree with the boot it is measuring.
+function bootstrapFetchHints(code, { search = "", cookie = "" } = {}) {
+  const at = code.indexOf("function __clayLikelyEdit");
+  if (at < 0) return false;
+  const end = code.indexOf("\n  }", at) + 4;
+  const likelyEdit = new Function(`${code.slice(at, end)}\n  return __clayLikelyEdit;`)();
+  return Boolean(likelyEdit(search, cookie));
+}
+
 // A built release is measured from its own files: the bootstrap, the chunks it
 // preloads and, one stage later, the chunks the boot plan adds. Nothing is read from
-// src/, because nothing on the wire is.
-export async function measureBuilt({ html, mode, dir }) {
+// src/, because nothing on the wire is. `search` and `owner` are the boot context the
+// bootstrap's own decision reads: the meter defaults to an owner at the document's own
+// URL, the boot a starter template's reader actually makes.
+export async function measureBuilt({ html, mode, dir, search = "", owner = true }) {
   const document = parseDocument(html);
   const { bootstrap, params, names, hasSap, templateSource } = document;
   const isDraftMode = mode === "draft";
@@ -488,11 +504,6 @@ export async function measureBuilt({ html, mode, dir }) {
     if (mode === "edit") bootImports.push(...EDIT_BOOT_IMPORTS);
     if (mode === "edit" && plan.plugins.includes(PAGE_PLUGIN)) bootImports.push(...EDITOR_BOOT_IMPORTS, ...pageFeatureModules(html));
   }
-  // A reader downloads the main manifest and only the main manifest. A page that looks
-  // editable fetches the edit supplement beside it, in the same stage, and the plan
-  // resolves against both; without it the hints the main manifest lacks are simply
-  // deferred, never lost.
-  const editMode = mode !== "view";
   let entries = manifest.entries;
   const loaded = new Set();
   const addChunk = (file) => {
@@ -512,18 +523,27 @@ export async function measureBuilt({ html, mode, dir }) {
     }
     return added;
   };
-  const readPayload = (name) => {
+  const readBootstrap = (name) => {
     const file = join(dir, name);
-    return existsSync(file) ? payloadOf(readFileSync(file, "utf8")) : null;
+    const code = existsSync(file) ? readFileSync(file, "utf8") : null;
+    return { code, payload: code ? payloadOf(code) : null };
   };
+  const readPayload = (name) => readBootstrap(name).payload;
 
   let mainDepth = 0;
   if (bootstrap) {
-    const payload = readPayload("clay.js");
+    const { code, payload } = readBootstrap("clay.js");
     if (!payload) throw new Error(`${dir}/clay.js is not a generated bootstrap`);
     loaded.add("clay.js");
     mainDepth = 1;
-    const supplement = editMode && payload.edit ? hintIndex(join(dir, "m", payload.edit)) : null;
+    // A reader downloads the main manifest and only the main manifest. The edit supplement
+    // is fetched beside the manifest when the bootstrap's own predicate says so, and for a
+    // resolved edit or draft by the loader's cached hint fetch; either way it is one
+    // request in the stage beside the plan, and without it the hints the main manifest
+    // lacks are deferred, never lost.
+    const eagerHints = bootstrapFetchHints(code, { search, cookie: owner ? OWNER_COOKIE : "" });
+    const hintsWanted = eagerHints || mode !== "view";
+    const supplement = hintsWanted && payload.edit ? hintIndex(join(dir, "m", payload.edit)) : null;
     if (supplement) {
       loaded.add(`m/${payload.edit}`);
       entries = { ...supplement.entries, ...manifest.entries };

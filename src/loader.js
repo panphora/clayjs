@@ -34,10 +34,11 @@ function templateSource() {
 // stays anyway: /v1/clay.js and /v1/src/loader.js are cached independently, so
 // for a while after a deploy a browser can pair either file with the other's
 // previous release. A call shape that differs between them leaves the page with
-// no clayjs at all. The optional fourth and fifth arguments come only from the
-// chunked bootstrap: the manifest a reader downloads and, on a page that looked
-// editable, the edit supplement beside it. Their absence means no preloading.
-export async function boot(base, params, readyResolve, manifest = null, supplement = null) {
+// no clayjs at all. The optional arguments after the third come only from the chunked
+// bootstrap: the manifest a reader downloads, the edit supplement an explicit
+// ?editmode=true page fetched beside it, and the cached fetch of that supplement for
+// every other resolved edit or draft. Their absence means no preloading.
+export async function boot(base, params, readyResolve, manifest = null, supplement = null, loadEditHints = null) {
   initTheme();
   const draftMode = await MODULES["core/draft-mode.js"]();
   draftMode.noteBootParams(params);
@@ -67,6 +68,14 @@ export async function boot(base, params, readyResolve, manifest = null, suppleme
   bootPhase.holdSettle = hasSap && isEditMode;
   const plan = resolveModules(params, isEditMode, { isDraftMode, hasSap, canEdit, templateSource: templateSource() });
   preloadEntries(mergeManifests(manifest, supplement), [...plan.core, ...plan.plugins], { isEditMode, isDraftMode, hasSapJs });
+  // A resolved initial edit or draft fetches the release's hint index, whether or not
+  // the URL announced it. It lands beside preparation and only ever adds modulepreloads:
+  // a failed fetch defers hints, never an import already mapped.
+  if ((isEditMode || isDraftMode) && !supplement && loadEditHints) {
+    loadEditHints()
+      .then((hints) => preloadEntries(mergeManifests(manifest, hints), [...plan.core, ...plan.plugins], { isEditMode, isDraftMode, hasSapJs }))
+      .catch(() => {});
+  }
   const loaded = {};
   // The reader's transport choice comes from the plan just resolved, never from the
   // URL: when generic sync loaded, it owns the saved lane and the reader follows
