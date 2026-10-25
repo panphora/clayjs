@@ -4,6 +4,7 @@ export const FEATURES = {
   table: { types: ["table"], load: () => import("./table.js") },
   board: { types: ["board"], load: () => import("./board.js") },
   media: { types: ["image", "file"], load: () => import("./media.js") },
+  tool: { types: ["tool"], load: () => import("./tool.js") },
 };
 
 export const featureForType = (type) => Object.keys(FEATURES).find((id) => FEATURES[id].types.includes(type)) ?? null;

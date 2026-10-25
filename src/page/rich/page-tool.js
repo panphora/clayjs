@@ -1,5 +1,6 @@
 import { cloneJson } from "../../live/ops.js";
 import { validateArtifact, validateState } from "./tool-runtime.js";
+export { capabilityAdvertised } from "../tool-capability.js";
 
 const CONTEXT_LIMIT = 16384;
 const bytes = (value) => new TextEncoder().encode(JSON.stringify(value)).length;
@@ -28,10 +29,6 @@ function trimmedContext(context) {
   }
   if (bytes(copy) > CONTEXT_LIMIT) throw new ToolRequestError("context-too-large");
   return copy;
-}
-
-export function capabilityAdvertised(meta) {
-  return Array.isArray(meta?.extensions) && meta.extensions.includes("page-tool/1");
 }
 
 export function createToolClient({ transport, newId }) {

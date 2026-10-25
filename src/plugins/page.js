@@ -19,10 +19,8 @@ import { parseJsonRelaxed } from "../vendor/hyper-morph-json.vendor.js";
 import { saveStateFor, BLOCKED_TEXT, RETRY_TEXT, downloadPageCopy, downloadSnapshot, copyPageText } from "../page/save-states.js";
 import toast, { toastPersistent, dismissPersistent } from "../ui/toast.js";
 import { createRecoverList, focusBlock } from "../page/recover.js";
-import { createToolHost } from "../page/tools.js";
-import { createAiTool } from "../page/ai-tool.js";
-import { tablesFromDoc } from "../page/tool-data.js";
-import { capabilityAdvertised } from "../page/rich/page-tool.js";
+import { capabilityAdvertised } from "../page/tool-capability.js";
+import { toolViews } from "../page/tool-views.js";
 
 const ARTICLE_SEL = "article[data-page]";
 const TAG_SEL = 'script[type="application/json"][merge="page"][clay~="live"]';
@@ -256,6 +254,7 @@ function dispose() {
   try { inst.view?.destroy(); } catch (error) { console.error("clayjs: page plugin view failed to destroy", error); }
   inst.aiTool?.dispose();
   inst.toolHost?.dispose();
+  if (toolViews.host === inst.toolHost) toolViews.host = null;
   if (inst.article) {
     const shell = inst.article.querySelector(".page-shell");
     if (shell) shell.remove();
@@ -396,43 +395,82 @@ async function run(inst, gen, options = {}) {
     showReplaced(inst);
   });
 
-  // A tool written into the article by hand or by an agent arrives without the
-  // store its state lives in, and without one the tool could not keep its state:
-  // the page gets the empty store an editor-made page starts with.
-  const TOOLS_SEL = 'script[type="application/json"][merge="page.tools"][clay~="live"]';
-  if (!document.querySelector(TOOLS_SEL) && article.querySelector('section[data-type="tool"]')) {
-    const tools = document.createElement("script");
-    tools.setAttribute("type", "application/json");
-    tools.setAttribute("merge", "page.tools");
-    tools.setAttribute("clay", "live");
-    tools.textContent = "{}";
-    document.head.appendChild(tools);
-  }
-  let toolsStore = null;
-  if (document.querySelector(TOOLS_SEL)) {
-    try {
-      toolsStore = window.clay.live("page.tools");
-      await toolsStore.ready;
-    } catch (error) {
-      console.warn("clayjs: page plugin could not open the tool store", error);
-    }
-  }
-  if (gen !== generation) return;
   let editorView = null;
-  const toolHost = createToolHost({
-    store: toolsStore, mode: "edit",
-    tables: () => tablesFromDoc(editorView?.state.doc ?? binding.doc()).map(({ id, cols, rows }) => ({ id, cols, rows })),
-  });
-  inst.toolHost = toolHost;
-  const transport = window.clay?.wire?.pageTool ?? options.transport ?? null;
-  if (capabilityAdvertised(meta)) {
-    inst.aiTool = createAiTool({ getView: () => inst.view, store: toolsStore, transport, acceptState: options.acceptState });
-  }
+  // A document with a tool block, at boot or when one arrives, opens the store its
+  // tools keep state in and the host that mounts them. A document with no tool
+  // never waits for either.
+  const TOOLS_SEL = 'script[type="application/json"][merge="page.tools"][clay~="live"]';
+  const hasTool = () => {
+    let found = false;
+    binding.doc().forEach((node) => { if (node.type.name === "tool") found = true; });
+    return found;
+  };
+  let toolsStore = null;
+  let aiTool = null;
+  let toolsOpening = null;
+  const openTools = () => {
+    if (toolsOpening) return toolsOpening;
+    toolsOpening = (async () => {
+      // A tool written into the article by hand or by an agent arrives without the
+      // store its state lives in, and without one the tool could not keep its state:
+      // the page gets the empty store an editor-made page starts with.
+      if (!document.querySelector(TOOLS_SEL) && hasTool()) {
+        const tools = document.createElement("script");
+        tools.setAttribute("type", "application/json");
+        tools.setAttribute("merge", "page.tools");
+        tools.setAttribute("clay", "live");
+        tools.textContent = "{}";
+        document.head.appendChild(tools);
+      }
+      if (document.querySelector(TOOLS_SEL)) {
+        try {
+          toolsStore = window.clay.live("page.tools");
+          await toolsStore.ready;
+        } catch (error) {
+          console.warn("clayjs: page plugin could not open the tool store", error);
+        }
+      }
+      if (gen !== generation) return null;
+      const [{ createToolHost }, { tablesFromDoc }] = await Promise.all([
+        import("../page/tools.js"),
+        import("../page/tool-data.js"),
+      ]);
+      const toolHost = createToolHost({
+        store: toolsStore, mode: "edit",
+        tables: () => tablesFromDoc(editorView?.state.doc ?? binding.doc()).map(({ id, cols, rows }) => ({ id, cols, rows })),
+      });
+      inst.toolHost = toolHost;
+      if (capabilityAdvertised(meta)) {
+        const { createAiTool } = await import("../page/ai-tool.js");
+        if (gen !== generation) return null;
+        const transport = window.clay?.wire?.pageTool ?? options.transport ?? null;
+        aiTool = createAiTool({ getView: () => inst.view, store: toolsStore, transport, acceptState: options.acceptState });
+        inst.aiTool = aiTool;
+      }
+      return toolHost;
+    })();
+    return toolsOpening;
+  };
   article.innerHTML = "";
   const features = createFeatureLoader({
     load: (id) => FEATURES[id].load(),
-    install: (id, mod) => installPageFeature({ view: editorView, upload: options.upload, toolHost, board: binding.board, undo: binding.undo, redo: binding.redo }, id, mod),
+    install: async (id, mod) => {
+      const context = { view: editorView, upload: options.upload, board: binding.board, undo: binding.undo, redo: binding.redo };
+      if (id === "tool") {
+        context.toolHost = await openTools();
+        if (gen !== generation) return null;
+      }
+      return installPageFeature(context, id, mod);
+    },
   });
+  // Making or revising a tool opens the store and the host first, so the panel
+  // keeps what it makes.
+  const openAi = async ({ target = null, remove = null } = {}) => {
+    await features.ensure("tool").catch(() => {});
+    if (gen !== generation || !aiTool) return;
+    aiTool.open({ target, remove });
+  };
+  const aiRequested = capabilityAdvertised(meta);
   const view = createPageEditor(article, {
     doc: binding.doc(),
     dispatch: binding.dispatch,
@@ -441,10 +479,9 @@ async function run(inst, gen, options = {}) {
     redo: binding.redo,
     board: binding.board,
     editable: false,
-    toolHost,
     features,
-    onAiTool: inst.aiTool ? (_view, remove) => inst.aiTool.open({ remove }) : null,
-    reviseTool: inst.aiTool ? (toolId, rev) => inst.aiTool.open({ target: { toolId, rev } }) : null,
+    onAiTool: aiRequested ? (_view, remove) => { openAi({ remove }); } : null,
+    reviseTool: aiRequested ? (toolId, rev) => { openAi({ target: { toolId, rev } }); } : null,
   });
   editorView = view;
   inst.view = view;

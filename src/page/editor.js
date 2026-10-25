@@ -22,14 +22,13 @@ import { tableKeys, tablePlugin } from "./table.js";
 import { tableSelectPlugin } from "./table-select.js";
 import { chartPlugin, ChartView } from "./chart.js";
 import { boardPlugin } from "./board-views.js";
-import { ToolView } from "./tool-view.js";
-import { createToolHost } from "./tools.js";
 import { checklistPlugin, checklistKeys } from "./checklist.js";
 import { csvImportPlugin } from "./csv-import.js";
 import { styleWithLegacyId } from "../lib/style.js";
 import { historyIntentPlugin } from "./history-intent.js";
 import { createFeatureLoader } from "./feature-loader.js";
 import { FEATURES, featureForType } from "./features/registry.js";
+import { toolViews } from "./tool-views.js";
 
 const STYLE_ID = "page-editor-style";
 const INDENTS = [1, 2, 3, 4, 5, 6, 7, 8];
@@ -165,14 +164,6 @@ ${INDENTS.map((n) => `:where(article[data-page], .page-editor) .page-li[data-ind
 .page-chart figcaption { color: var(--page-ink-soft); font-size: 0.88em; text-align: center; }
 .page-chart-settings { display: block; margin: 8px auto 0; padding: 4px 10px; border: 1px solid var(--page-rule); border-radius: 6px; background: var(--page-pop-bg); color: var(--page-ink); font: inherit; cursor: pointer; }
 .page-chart-title-input { display: block; width: min(100%, 24em); box-sizing: border-box; margin: 6px auto; padding: 4px 8px; border: 1px solid var(--page-rule); border-radius: 6px; background: var(--page-pop-bg); color: var(--page-ink); font: inherit; }
-.page-tool-block { position: relative; min-height: 48px; border: 1px solid var(--page-rule); border-radius: 8px; padding: 12px; }
-.page-tool-settings { position: absolute; top: 4px; inset-inline-end: 4px; border: 0; border-radius: 5px; background: var(--page-pop-bg); color: var(--page-ink-soft); font: 12px var(--page-font); padding: 5px 8px; cursor: pointer; opacity: 0; }
-.page-tool-block:hover .page-tool-settings, .page-tool-block:focus-within .page-tool-settings { opacity: 1; }
-.page-ai-panel { position: relative; z-index: 5; width: min(520px, 100%); box-sizing: border-box; margin: 12px auto; padding: 14px; border: 1px solid var(--page-pop-line); border-radius: 10px; background: var(--page-pop-bg); color: var(--page-pop-ink); box-shadow: var(--page-pop-shadow); }
-.page-ai-panel textarea { width: 100%; min-height: 88px; box-sizing: border-box; padding: 8px; border: 1px solid var(--page-pop-line); border-radius: 6px; background: var(--page-pop-bg); color: inherit; font: inherit; resize: vertical; }
-.page-ai-actions { display: flex; gap: 8px; margin-top: 8px; }
-.page-ai-actions button { border: 1px solid var(--page-pop-line); border-radius: 6px; background: var(--page-pop-bg); color: inherit; font: inherit; padding: 5px 10px; cursor: pointer; }
-.page-ai-status, [data-tool-note], [data-tool-error] { color: var(--page-danger); font-size: 0.85em; }
 .page-table-scroll { max-width: 100%; overflow-x: auto; }
 .page-table table { border-collapse: collapse; min-width: max-content; width: 100%; table-layout: auto; }
 .page-table th, .page-table td { min-width: 120px; padding: 6px 10px; border-inline-end: 1px solid var(--page-rule); border-block-end: 1px solid var(--page-rule); text-align: start; white-space: pre-wrap; }
@@ -238,8 +229,8 @@ const defaultUpload = (file, options) => globalThis.clay?.upload?.(file, options
 
 // Adds a view part to a running editor: its CSS and its node views, through
 // setProps, which never recreates plugin views or reorders keymaps.
-export function installPageFeature({ view, upload, toolHost, board = null, undo = null, redo = null }, id, mod) {
-  const feature = mod.createFeature({ view, upload, toolHost, board, undo, redo });
+export function installPageFeature({ view, upload, toolHost, board = null, undo = null, redo = null, revise = null }, id, mod) {
+  const feature = mod.createFeature({ view, upload, toolHost, board, undo, redo, revise });
   const apply = () => {
     if (feature.css) styleWithLegacyId(`page-feature-${id}`, feature.css, `page-feature-${id}`, ["editor-ui"]);
     if (feature.nodeViews) view.setProps({ nodeViews: { ...view.props.nodeViews, ...feature.nodeViews } });
@@ -277,16 +268,23 @@ function featureWatchPlugin(features) {
   });
 }
 
+// Tools follow the tables a document holds; the host arrives with the tool view
+// part on a document that had no tool at boot.
+function toolFollowPlugin(toolHost) {
+  const changed = toolHost ? () => toolHost.tablesChanged() : () => toolViews.host?.tablesChanged?.();
+  return new state.Plugin({
+    view(view) {
+      let previous = view.state.doc;
+      return { update(next) { if (next.state.doc !== previous) { previous = next.state.doc; changed(); } } };
+    },
+  });
+}
+
 export function pagePlugins({ upload = defaultUpload, highlight, history: useHistory = true, undo, redo, onAiTool = null, toolHost = null, features = null } = {}) {
   return [
     announcementPlugin(),
     chromePlugin({ onAiTool }),
-    toolHost && new state.Plugin({
-      view(view) {
-        let previous = view.state.doc;
-        return { update(next) { if (next.state.doc !== previous) { previous = next.state.doc; toolHost.tablesChanged(); } } };
-      },
-    }),
+    toolFollowPlugin(toolHost),
     linkPlugin(),
     tableSelectPlugin(),
     blockSelectionPlugin(),
@@ -343,9 +341,8 @@ function checkboxClick(view, event) {
 // Mounts the editor in `mount`, inside a .page-shell wrapper (the surface a
 // theme styles). `onChange(record)` gets the block record (blockMap) after
 // every transaction that changed the document.
-export function createPageEditor(mount, { blocks = null, onChange = null, upload, highlight, doc: initialDoc, dispatch, history: useHistory = true, undo, redo, editable = true, toolHost: providedToolHost = null, onAiTool = null, reviseTool = null, board = null, features: providedFeatures = null } = {}) {
+export function createPageEditor(mount, { blocks = null, onChange = null, upload, highlight, doc: initialDoc, dispatch, history: useHistory = true, undo, redo, editable = true, toolHost = null, onAiTool = null, reviseTool = null, board = null, features: providedFeatures = null } = {}) {
   const doc = mount.ownerDocument;
-  const toolHost = providedToolHost ?? createToolHost({ mode: "edit" });
   // Editor chrome, injected on every edit-mode boot and kept out of the saved file:
   // the reader theme <link> styles the page for visitors.
   styleWithLegacyId(STYLE_ID, PAGE_EDITOR_CSS, STYLE_ID, ["editor-ui"]);
@@ -358,7 +355,7 @@ export function createPageEditor(mount, { blocks = null, onChange = null, upload
   let view = null;
   const features = providedFeatures ?? createFeatureLoader({
     load: (id) => FEATURES[id].load(),
-    install: (id, mod) => installPageFeature({ view, upload, toolHost, board, undo, redo }, id, mod),
+    install: (id, mod) => installPageFeature({ view, upload, toolHost, board, undo, redo, revise: reviseTool }, id, mod),
   });
   view = new pmView.EditorView(shell, {
     state: pageState(blocks, { upload, highlight, doc: initialDoc, history: useHistory, undo, redo, onAiTool, toolHost, features }),
@@ -367,7 +364,6 @@ export function createPageEditor(mount, { blocks = null, onChange = null, upload
     nodeViews: {
       code_block: (node, v, getPos) => new CodeBlockView(node, v, getPos),
       chart: (node, v, getPos) => new ChartView(node, v, getPos),
-      tool: (node, v, getPos) => new ToolView(node, v, getPos, { host: toolHost, revise: reviseTool }),
     },
     handleDOMEvents: {
       mousedown: checkboxClick,

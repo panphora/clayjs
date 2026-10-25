@@ -1,5 +1,20 @@
-import { schema } from "./schema.js";
-import { openPageMenu } from "./chrome.js";
+// The tool block: its node view and its CSS. Loaded the first time a document
+// has or takes a tool block; it mounts through the host its caller supplies, or
+// through a host it makes for an editor that has none.
+import { openPageMenu } from "../chrome.js";
+import { schema } from "../schema.js";
+import { createToolHost } from "../tools.js";
+import { toolViews } from "../tool-views.js";
+
+export const TOOL_CSS = `
+.page-tool-block { position: relative; min-height: 48px; border: 1px solid var(--page-rule); border-radius: 8px; padding: 12px; }
+.page-tool-settings { position: absolute; top: 4px; inset-inline-end: 4px; border: 0; border-radius: 5px; background: var(--page-pop-bg); color: var(--page-ink-soft); font: 12px var(--page-font); padding: 5px 8px; cursor: pointer; opacity: 0; }
+.page-tool-block:hover .page-tool-settings, .page-tool-block:focus-within .page-tool-settings { opacity: 1; }
+.page-ai-panel { position: relative; z-index: 5; width: min(520px, 100%); box-sizing: border-box; margin: 12px auto; padding: 14px; border: 1px solid var(--page-pop-line); border-radius: 10px; background: var(--page-pop-bg); color: var(--page-pop-ink); box-shadow: var(--page-pop-shadow); }
+.page-ai-panel textarea { width: 100%; min-height: 88px; box-sizing: border-box; padding: 8px; border: 1px solid var(--page-pop-line); border-radius: 6px; background: var(--page-pop-bg); color: inherit; font: inherit; resize: vertical; }
+.page-ai-actions { display: flex; gap: 8px; margin-top: 8px; }
+.page-ai-actions button { border: 1px solid var(--page-pop-line); border-radius: 6px; background: var(--page-pop-bg); color: inherit; font: inherit; padding: 5px 10px; cursor: pointer; }
+.page-ai-status, [data-tool-note], [data-tool-error] { color: var(--page-danger); font-size: 0.85em; }`;
 
 export class ToolView {
   constructor(node, view, getPos, { host, revise = null }) {
@@ -65,4 +80,20 @@ export class ToolView {
   stopEvent(event) { return this.dom.contains(event.target); }
   ignoreMutation() { return true; }
   destroy() { this.instance?.dispose(); this.instance = null; }
+}
+
+export function createFeature({ toolHost = null, revise = null } = {}) {
+  const host = toolHost ?? createToolHost({ mode: "edit" });
+  toolViews.host = host;
+  return {
+    id: "tool",
+    nodeViews: {
+      tool: (node, view, getPos) => new ToolView(node, view, getPos, { host, revise }),
+    },
+    css: TOOL_CSS,
+    dispose() {
+      if (toolViews.host === host) toolViews.host = null;
+      if (!toolHost) host.dispose();
+    },
+  };
 }

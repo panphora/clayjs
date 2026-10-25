@@ -1,7 +1,10 @@
 import { createStore } from "../../../src/live/store.js";
-import { createPageEditor } from "../../../src/page/editor.js";
+import { createPageEditor, installPageFeature } from "../../../src/page/editor.js";
+import * as toolFeature from "../../../src/page/features/tool.js";
 import { createToolHost } from "../../../src/page/tools.js";
 import { history } from "../../../src/vendor/prosemirror.vendor.js";
+
+const toolLoaded = { ensure: () => Promise.resolve(), has: (id) => id === "tool", dispose() {} };
 
 const artifact = (text) => ({ title: text, html: `<output>${text}</output>`, css: "", javascript: "function mount() { globalThis.__mounts++; return () => globalThis.__cleanups++; }", fallbackHtml: `<p>${text} fallback</p>`, summary: text });
 const blocks = { t: { t: "tool", pos: "V", artifact: artifact("One"), rev: "r1", state: {} } };
@@ -13,7 +16,8 @@ beforeEach(() => {
   document.body.innerHTML = '<article data-page="1"></article>';
   live = createStore({ name: "page.tools", value: { t: { r1: {}, r2: {} } } }).handle;
   host = createToolHost({ store: live, mode: "edit" });
-  view = createPageEditor(document.querySelector("article"), { blocks, toolHost: host });
+  view = createPageEditor(document.querySelector("article"), { blocks, toolHost: host, features: toolLoaded });
+  installPageFeature({ view, toolHost: host }, "tool", toolFeature);
   expect(view.dom.querySelector('section[data-type="tool"] output').textContent).toBe("One");
 });
 afterEach(() => { view.destroy(); host.dispose(); });
