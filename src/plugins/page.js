@@ -145,6 +145,55 @@ function showSaved(inst) {
   dispatchState("saved", null, "");
 }
 
+// The first save of a seeded page is the page's only admission: a room opened on a file
+// without the tag holds no page store, so nothing may join until that write landed. It
+// outlives the installation that started it, so a replacement that arrives while it is
+// on the wire waits for its outcome instead of joining, and the tag it writes stays in
+// the document only once the file has it.
+let firstSave = null;
+
+const forgetFirstSave = (entry) => {
+  if (firstSave === entry) firstSave = null;
+};
+
+// A boot that ends before the outcome keeps nothing of the tag it generated: the file
+// has not been written, so the document must not hold a tag that says it has.
+function writeSeedTag(source) {
+  const tag = source.seedTag;
+  const article = source.element;
+  if (tag && !tag.isConnected && article?.isConnected && !document.querySelector(TAG_SEL)) article.before(tag);
+  let request;
+  try {
+    request = savePageForce();
+  } finally {
+    tag?.remove();
+  }
+  return request;
+}
+
+// The tag the first save wrote, back in the document where readSource found the
+// article: one tag, exactly as the file now has it.
+function attachSeedTag(source) {
+  const tag = source.seedTag;
+  if (!tag || tag.isConnected) return;
+  if (document.querySelector(TAG_SEL)) return;
+  const article = source.element;
+  if (article?.isConnected) article.before(tag);
+}
+
+function seededFirstSave(source) {
+  if (firstSave) return firstSave.promise;
+  const entry = { promise: null };
+  try {
+    entry.promise = Promise.resolve(writeSeedTag(source));
+  } catch (error) {
+    return Promise.reject(error);
+  }
+  firstSave = entry;
+  entry.promise.then((result) => { if (!result?.ok) forgetFirstSave(entry); }, () => forgetFirstSave(entry));
+  return entry.promise;
+}
+
 // An incoming document with no page tag whose article is not the one this tab
 // last saved: something outside the editor replaced the page, and this tab's
 // state no longer belongs to the file.
@@ -454,18 +503,21 @@ function createSteps(inst, options) {
     if (!articles.length && !tags.length) return { ok: false, reason: "no-page" };
     // A page saved without its merge state (HTML Clay, an outside edit, a download)
     // is booted from its article alone: the seed is deterministic, so every tab
-    // rebuilding the same article holds the same state and their edits merge.
+    // rebuilding the same article holds the same state and their edits merge. The tag
+    // that states it is built here but reaches the document only for the first save
+    // that writes it, so a boot that ends before that save leaves no tag behind for
+    // the next install to read as a page the file already has.
     const seeded = articles.length === 1 && tags.length === 0;
+    let seedTag = null;
     if (seeded) {
       const saved = readFile(document);
       if (!saved) return { ok: false, reason: "invalid-page-source" };
-      const tag = document.createElement("script");
-      tag.setAttribute("type", "application/json");
-      tag.setAttribute("merge", "page");
-      tag.setAttribute("clay", "live");
-      tag.textContent = serializeLive(seedPageFromArticle(saved.article));
-      articles[0].before(tag);
-      tags = document.querySelectorAll(TAG_SEL);
+      seedTag = document.createElement("script");
+      seedTag.setAttribute("type", "application/json");
+      seedTag.setAttribute("merge", "page");
+      seedTag.setAttribute("clay", "live");
+      seedTag.textContent = serializeLive(seedPageFromArticle(saved.article));
+      tags = [seedTag];
     }
     if (articles.length !== 1 || tags.length !== 1) {
       console.warn(`clayjs: page plugin needs exactly one article[data-page] and one merge="page" live tag; found ${articles.length} article(s) and ${tags.length} tag(s), leaving the page as saved HTML`);
@@ -492,7 +544,7 @@ function createSteps(inst, options) {
       return { ok: false, reason: "invalid-page-json" };
     }
     armLoadingStatus(inst, articles[0]);
-    return { ok: true, source: { article: file.article, tags: [value], element: articles[0], blocks, seeded } };
+    return { ok: true, source: { article: file.article, tags: [value], element: articles[0], blocks, seeded, seedTag } };
   }
 
   // The editor's code and the feature views the saved article demands are separate
@@ -548,9 +600,15 @@ function createSteps(inst, options) {
     // save of the document with the tag is the page's initial write; a tab that
     // loses that race reloads, which composes the state the winner initialized.
     inst.mergeTagless = !meta.extensions.includes("live-data");
-    if (source.seeded && (await hostSupports("live-data"))) {
+    // A host that keeps no page data makes no first save, so the tag the article
+    // rebuilds goes in now, before the article it was read from.
+    if (source.seeded && inst.mergeTagless) attachSeedTag(source);
+    if ((source.seeded || firstSave) && (await hostSupports("live-data"))) {
       if (!isCurrent(inst)) return { ok: false, cancelled: true };
-      const result = await savePageForce();
+      const result = await seededFirstSave(source);
+      // The tag goes back in only for the boot that is still the page's: a replacement
+      // that waited on this save attaches its own, which is the state it joins on.
+      if (result?.ok && isCurrent(inst)) attachSeedTag(source);
       if (!isCurrent(inst)) return { ok: false, cancelled: true };
       if (!result?.ok) {
         if (result?.status === 412) {
@@ -856,7 +914,15 @@ function createSteps(inst, options) {
     return { ok: true };
   }
 
-  return { readSource, loadEditorAssets, prepareAuthority, mountAndAttach, adoptSource, enableInput };
+  // A boot that ends without an editor gives up what its branches acquired: the room's
+  // subscription, its save participant and its listeners. A boot that mounted a view
+  // releases its own through the paths above and keeps the editor on screen.
+  const release = (inst) => {
+    if (inst.view) return;
+    abandonEditor(inst);
+  };
+
+  return { readSource, loadEditorAssets, prepareAuthority, mountAndAttach, adoptSource, enableInput, release };
 }
 
 async function run(inst, options = {}) {

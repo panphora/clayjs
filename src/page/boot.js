@@ -30,7 +30,7 @@ export function createInstall({ gen = 0, isCurrent = () => true, onPhase = null 
 }
 
 export function isCurrent(inst) {
-  return !inst.disposed && inst.isCurrent() !== false;
+  return !inst.disposed && !inst.controller.signal.aborted && inst.isCurrent() !== false;
 }
 
 // One owner: the view this installation mounted, and nothing a later or a cancelled
@@ -96,8 +96,19 @@ export function mark(name, inst) {
   }
 }
 
-function stop(inst, result) {
+// A boot that ends without an editor gives up what its steps acquired on the way
+// there, through the install's own teardown, before it reports where it stopped.
+function release(inst, steps) {
+  try {
+    steps.release?.(inst);
+  } catch (error) {
+    console.error("clayjs: page boot release failed", error);
+  }
+}
+
+function stop(inst, result, steps) {
   if (result.cancelled) return null;
+  release(inst, steps);
   return finishBlocked(inst, result.reason ?? "boot-incomplete");
 }
 
@@ -114,6 +125,35 @@ function branch(promise, inst, reason, name = null) {
       if (result.ok && name && isCurrent(inst)) mark(name, inst);
       return result;
     });
+}
+
+// The wait on the parallel branches: the first one to fail, or the install's abort,
+// answers it at once. A boot blocked by the download that failed must not sit in
+// `joining` on the join that never answered, and a disposed install must not wait for
+// either of them.
+function settleBranches(inst, branches) {
+  return new Promise((resolve) => {
+    const signal = inst.controller.signal;
+    let done = false;
+    const finish = (outcome) => {
+      if (done) return;
+      done = true;
+      resolve(outcome);
+    };
+    if (signal.aborted) return finish({ cancelled: true });
+    signal.addEventListener("abort", () => finish({ cancelled: true }), { once: true });
+    const results = new Array(branches.length);
+    let left = branches.length;
+    branches.forEach((branch, index) => {
+      branch.then((result) => {
+        if (done) return;
+        if (!result.ok) return finish({ result, branch });
+        results[index] = result;
+        left -= 1;
+        if (left === 0) finish({ results });
+      });
+    });
+  });
 }
 
 // One coordinator for the edit boot: read the source, take the assets while
@@ -133,27 +173,36 @@ export async function runBoot(inst, steps) {
   // of the two plus adoption rather than their sum. Neither branch subscribes a
   // resource or touches the page: only the coordinator does, after both are in.
   setPhase(inst, PHASES.joining);
-  const [loaded, admitted] = await Promise.all([
+  const settled = await settleBranches(inst, [
     branch(steps.loadEditorAssets(inst, source), inst, "editor-assets-failed", "document:assets-ready"),
     branch(steps.prepareAuthority(inst, source), inst, "authority-failed", "document:authority-ready"),
   ]);
-  if (!isCurrent(inst)) return null;
-  if (!loaded.ok) return stop(inst, loaded);
-  if (!admitted.ok) return stop(inst, admitted);
+  if (settled.cancelled || !isCurrent(inst)) return null;
+  if (!settled.results) {
+    // The branch still on the wire is not worth waiting for, and it must not go on to
+    // subscribe anything: the abort ends it where its next ownership check is.
+    try {
+      inst.controller.abort();
+    } catch (error) {
+      console.error("clayjs: page boot abort failed", error);
+    }
+    return stop(inst, settled.result, steps);
+  }
+  const [loaded, admitted] = settled.results;
 
   const mounted = steps.mountAndAttach(inst, source, loaded, admitted);
   if (!isCurrent(inst)) return null;
-  if (!mounted.ok) return stop(inst, mounted);
+  if (!mounted.ok) return stop(inst, mounted, steps);
   inst.mounted = mounted.view ?? null;
 
   setPhase(inst, PHASES.adopting);
   const adoption = await steps.adoptSource(inst, source, mounted);
   if (!isCurrent(inst)) return null;
-  if (!adoption.ok) return stop(inst, adoption);
+  if (!adoption.ok) return stop(inst, adoption, steps);
 
   const enabled = await steps.enableInput(inst, mounted);
   if (!isCurrent(inst)) return null;
-  if (!enabled.ok) return stop(inst, enabled);
+  if (!enabled.ok) return stop(inst, enabled, steps);
 
   mark("document:input-ready", inst);
   return setPhase(inst, PHASES.ready);
