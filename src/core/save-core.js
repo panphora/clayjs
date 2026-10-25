@@ -17,7 +17,9 @@ import {
   getPageContents,
   onSnapshot,
   addDocumentTransform,
-  currentCaptureId
+  currentCaptureId,
+  captureArtifact,
+  releaseCaptureArtifact
 } from "./snapshot.js";
 
 // =============================================================================
@@ -100,10 +102,16 @@ export function onSaveAccepted(callback) {
   saveAcceptedHooks.push(callback);
 }
 
-function notifySaveAccepted(html, captureId) {
+function notifySaveAccepted(html, captureId, artifact = null) {
   for (const hook of saveAcceptedHooks) {
     try {
-      hook(html, { captureId: captureId ?? null });
+      // The artifact is the capture's own private model of these bytes, and it is
+      // offered only when it exists: a raw save and a capture without one keep the
+      // shape they had.
+      const accepted = artifact
+        ? { captureId: captureId ?? null, artifact }
+        : { captureId: captureId ?? null };
+      hook(html, accepted);
     } catch (err) {
       console.error('clayjs: onSaveAccepted hook failed:', err);
     }
@@ -819,11 +827,17 @@ async function sendSave(content, { captureId = null, conversionHeader = null, at
 // One private implementation behind every entry point, so the hooks see the same
 // thing whether the bytes came from a bound capture or a raw caller. `captureId`
 // is null for a raw save: it belongs to no capture and can confirm none.
-function runSave(html, captureId, callback, conversion) {
+function runSave(html, captureId, callback, conversion, capture = null) {
   return new Promise((resolve) => {
     const attempts = [];
+    // Read once, before the first request: the artifact belongs to the capture that
+    // produced these bytes, and it is released however this save settles. A timeout
+    // recovered through the host's receipt reaches `accepted` like any other success,
+    // so it adopts the artifact of the request that landed.
+    const artifact = captureArtifact(capture);
     const finished = (result, accepted = false) => {
-      if (accepted) notifySaveAccepted(html, captureId ?? null);
+      if (accepted) notifySaveAccepted(html, captureId ?? null, artifact);
+      releaseCaptureArtifact(capture);
       notifySaveOutcome({
         captureId: captureId ?? null,
         result,
@@ -866,7 +880,7 @@ function runSave(html, captureId, callback, conversion) {
       // is busy by the save that just finished.
       .then(result => {
         saveInProgress = false;
-        if (result.ok) notifySaveAccepted(html, captureId ?? null);
+        if (result.ok) notifySaveAccepted(html, captureId ?? null, artifact);
         finished(result);
       });
   });
@@ -904,8 +918,8 @@ export function saveHtml(html, callback = () => {}) {
  * @param {Object} [options.conversion] - {source:'file', base} or {source:'room', base, epoch}
  * @returns {Promise<Object>}
  */
-export function saveCapturedHtml(html, captureId, callback = () => {}, { conversion } = {}) {
-  return runSave(html, captureId, callback, conversion);
+export function saveCapturedHtml(html, captureId, callback = () => {}, { conversion, capture = null } = {}) {
+  return runSave(html, captureId, callback, conversion, capture);
 }
 
 /**

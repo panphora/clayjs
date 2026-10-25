@@ -21,7 +21,7 @@ import {
   saveFateIsUnknown,
   withKeepalive
 } from "./save-core.js";
-import { captureForComparisonAndDirty, captureForSaveAndComparison, captureForDirtyCheck, captureSaveClone } from "./snapshot.js";
+import { captureForComparisonAndDirty, captureForSaveAndComparison, captureForDirtyCheck, captureSaveClone, releaseCaptureArtifact } from "./snapshot.js";
 import { paintSignature } from "../lib/derived.js";
 import { NO_TRIGGER_AUTOSAVE_SELECTOR } from "../lib/region-policy.js";
 import { seedEtag, lastSeenEtag } from "./etag.js";
@@ -587,10 +587,11 @@ function attemptSave({ kind }, callback = () => {}) {
     // forSave strips non-persisted regions ([no-save]/[save-remove])
     // forComparison additionally strips every autosave-off region
     const startedAt = monotonic();
-    let forSave, forComparison, forDirty, captureId;
+    let capture, forSave, forComparison, forDirty, captureId;
     const gateToken = gateCaptureToken();
     try {
-      ({ forSave, forComparison, forDirty, captureId } = captureForSaveAndComparison({ requestRefresh: true }));
+      capture = captureForSaveAndComparison({ requestRefresh: true, forRequest: true });
+      ({ forSave, forComparison, forDirty, captureId } = capture);
     } catch (err) {
       console.error(`${explicit ? 'savePage' : 'savePageThrottled'}: captureForSaveAndComparison failed`, err);
       if (explicit) {
@@ -623,6 +624,7 @@ function attemptSave({ kind }, callback = () => {}) {
       if (!unsavedChanges) {
         clearExplicitSave();
         gateClearIfUnchanged(gateToken);
+        releaseCaptureArtifact(capture);
         const skipped = skipped_('No changes to save');
         callback(skipped);
         resolve(skipped);
@@ -654,6 +656,7 @@ function attemptSave({ kind }, callback = () => {}) {
         }
         if (clear) gateClearIfUnchanged(gateToken);
         autosaveScheduler.noteCost(preparedMs);
+        releaseCaptureArtifact(capture);
         const skipped = skipped_('No changes to save');
         callback(skipped);
         resolve(skipped);
@@ -667,6 +670,7 @@ function attemptSave({ kind }, callback = () => {}) {
       // and keep these newer bytes queued behind it.
       if (isSaveInProgress()) {
         pendingSave = true;
+        releaseCaptureArtifact(capture);
         const skipped = skipped_('Save already in progress');
         callback(skipped);
         resolve(skipped);
@@ -693,7 +697,7 @@ function attemptSave({ kind }, callback = () => {}) {
       resolve(result);
       settleSoonQueued(result);
       drainPendingSave();
-    });
+    }, { capture });
   });
 }
 
@@ -739,10 +743,11 @@ export function savePageForce(callback = () => {}, { quietConflict = false } = {
       setOfflineStateQuiet();
     }
 
-    let forSave, forComparison, forDirty, captureId;
+    let capture, forSave, forComparison, forDirty, captureId;
     const gateToken = gateCaptureToken();
     try {
-      ({ forSave, forComparison, forDirty, captureId } = captureForSaveAndComparison({ requestRefresh: true }));
+      capture = captureForSaveAndComparison({ requestRefresh: true, forRequest: true });
+      ({ forSave, forComparison, forDirty, captureId } = capture);
     } catch (err) {
       console.error('savePageForce: captureForSaveAndComparison failed', err);
       setSaveState('error', err.message, '', { sent: false, code: err.code ?? null });
@@ -767,7 +772,7 @@ export function savePageForce(callback = () => {}, { quietConflict = false } = {
       }
       resolve(result);
       drainPendingSave();
-    });
+    }, { capture });
   });
 }
 

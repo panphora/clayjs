@@ -74,6 +74,65 @@ export function originalSnapshotNode(cloneNode) {
   return snapshotProvenance.get(cloneNode) || null;
 }
 
+// The private artifact a save renderer may hand back for one capture: the model of
+// the exact bytes it returned, paired with the tree it was given, so an accepted save
+// can adopt it instead of parsing and pairing the accepted bytes again. It is keyed by
+// the capture result object the caller gets, so it lives exactly as long as the save
+// that produced it and there is no registry to grow.
+const captureArtifacts = new WeakMap();
+// The capture being serialized right now. Only a save capture has one; an inspection
+// capture and a direct `captureForSave` have no request behind them to adopt anything.
+let activeCapture = null;
+
+/**
+ * The capture the save renderer is producing bytes for, or null.
+ *
+ * Read by the renderer to find out whose bytes these are, and to attach the artifact
+ * with attachCaptureArtifact. Per call, not global state: it is set for exactly the
+ * synchronous serialization of one save clone.
+ */
+export function currentCaptureContext() {
+  return activeCapture;
+}
+
+/**
+ * Attach the artifact to the capture being serialized.
+ *
+ * Ignored outside a save capture, because an artifact nobody can accept is a parse and
+ * a pairing paid for nothing.
+ */
+export function attachCaptureArtifact(artifact) {
+  if (activeCapture && artifact) activeCapture.artifact = artifact;
+}
+
+/** The artifact this capture's renderer attached, or null. */
+export function captureArtifact(result) {
+  return result ? captureArtifacts.get(result) || null : null;
+}
+
+/** Forget a capture's artifact: it was skipped, refused, or has now settled. */
+export function releaseCaptureArtifact(result) {
+  if (result) captureArtifacts.delete(result);
+}
+
+/**
+ * Does this clone hold an authored save handler, template contents included?
+ *
+ * Those handlers are page JavaScript that can change the clone after the capture, so
+ * the accepted bytes may no longer describe the live page node for node; a pairing
+ * rebuilt by walking the two together would be describing the handler's tree. The
+ * inspection path stays for those pages.
+ */
+function hasAuthoredSaveHandlers(root) {
+  const visit = (el) => {
+    if (el.hasAttribute('onbeforesave') || el.hasAttribute('onbeforesnapshot')) return true;
+    const kids = el.localName === 'template' && el.content ? el.content : el;
+    for (const child of kids.children) if (visit(child)) return true;
+    return false;
+  };
+  return root.nodeType === 1 ? visit(root) : false;
+}
+
 function stripSnapshotRegions(clone) {
   for (const el of clone.querySelectorAll(SNAPSHOT_REMOVE_SELECTOR)) el.remove();
 }
@@ -190,14 +249,18 @@ function serializeClone(clone) {
  * document reprinted; this one is the guarantee that no bug in an optional plugin can
  * cost somebody a save.
  */
-function serializeSaveClone(clone) {
+function serializeSaveClone(clone, context = null) {
   const today = serializeClone(clone);
   if (!saveRenderer) return today;
+  const previous = activeCapture;
+  activeCapture = context;
   try {
     return saveRenderer(clone, today);
   } catch (err) {
     console.error('clayjs: save renderer failed, sending the full serialization', err);
     return today;
+  } finally {
+    activeCapture = previous;
   }
 }
 
@@ -236,7 +299,7 @@ function clonePreventingOnclone(node, deep = true) {
   finally { window.__preventOnclone = prev; }
 }
 
-export function captureSnapshot({ flushUndo = true, authored = true, forSave = false, requestRefresh = false } = {}) {
+export function captureSnapshot({ flushUndo = true, authored = true, forSave = false, requestRefresh = false, context = null } = {}) {
   // Force-close any pending undo idle batch BEFORE cloning the DOM, so the
   // snapshot reflects a clean undo boundary. Without this, a save that fires
   // mid-typing would leave the idle batch open across the save boundary, and
@@ -266,6 +329,11 @@ export function captureSnapshot({ flushUndo = true, authored = true, forSave = f
   restoreAuthoredUrls(clone);
 
   stripSnapshotRegions(clone);
+  // Whether the page authors its own save handlers, read here because this is the
+  // snapshot BEFORE either of them runs: a handler can add the other one, and it is the
+  // page as captured that decides whether the save can be paired without an inspection.
+  if (context) context.authoredHandlers = hasAuthoredSaveHandlers(clone);
+
   // authored: false is for a capture that is not a save and not a frame the page will
   // see. The attributes hold page-author JavaScript, so running them is a side effect
   // the author asked for once per save, not once per capture.
@@ -479,12 +547,22 @@ export function captureForComparisonAndDirty({ flushUndo = true } = {}) {
  *
  * @param {Object} options
  * @param {boolean} options.emitForSync - Whether to emit snapshot-ready event (default: true)
+ * @param {boolean} options.forRequest - These bytes go to a host, so the renderer may
+ *   attach the verified model they came from, for the accepted save to adopt
  * @returns {{ forSave: string, forComparison: string, forDirty: string, captureId: number }}
  */
-export function captureForSaveAndComparison({ emitForSync = true, flushUndo = true, requestRefresh = false } = {}) {
+export function captureForSaveAndComparison({ emitForSync = true, flushUndo = true, requestRefresh = false, forRequest = false } = {}) {
   if (!Number.isSafeInteger(captureCounter + 1)) throw new Error('Save capture identity exhausted');
   const captureId = ++captureCounter;
-  const clone = captureSnapshot({ flushUndo, forSave: emitForSync, requestRefresh });
+  // The context this capture's renderer may attach a private artifact to, and the
+  // record of whether the page has its own save handlers. It never reaches the object
+  // this function returns: that keeps its four public fields.
+  //
+  // Only for a capture whose bytes go to a host. A capture taken for anything else (a
+  // live-sync disk base, a download, an inspection) has no request to adopt it, so it
+  // pays neither the retained parse nor the pairing.
+  const context = forRequest ? { captureId, authoredHandlers: false, artifact: null } : null;
+  const clone = captureSnapshot({ flushUndo, forSave: emitForSync, requestRefresh, context });
 
   // Emit for live-sync before any stripping.
   //
@@ -525,7 +603,7 @@ export function captureForSaveAndComparison({ emitForSync = true, flushUndo = tr
     el.remove();
   }
   stripDiagnosticBeacons(clone);
-  const forSave = serializeSaveClone(clone);
+  const forSave = serializeSaveClone(clone, context);
 
   // Compare clone: strip every autosave-off region, then run hooks
   for (const el of compareClone.querySelectorAll(STRIP_FROM_COMPARISON)) {
@@ -552,7 +630,9 @@ export function captureForSaveAndComparison({ emitForSync = true, flushUndo = tr
     forDirty = serializeForCompare(dirtyClone);
   }
 
-  return { forSave, forComparison, forDirty, captureId };
+  const result = { forSave, forComparison, forDirty, captureId };
+  if (context && context.artifact) captureArtifacts.set(result, context.artifact);
+  return result;
 }
 
 /**

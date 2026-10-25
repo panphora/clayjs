@@ -46,11 +46,15 @@ import {
   locate,
   nodeAt,
   pair,
+  pairCaptured,
   render,
-  verify
+  verify,
+  verifyForSave
 } from '../core/source-map.js';
 import {
+  attachCaptureArtifact,
   captureSaveClone,
+  currentCaptureContext,
   originalSnapshotNode,
   setSaveRenderer
 } from '../core/snapshot.js';
@@ -74,6 +78,10 @@ const state = {
   lastBytes: null,
   timing: { fetch: null, model: null, pair: null, refresh: null },
   refreshes: 0,
+  // How many times the map has been rebuilt from the page since this module
+  // installed. A candidate's map is only valid while this is unchanged: a morph
+  // replaces live nodes, and a disk frame replaces the model.
+  repairs: 0,
   refreshQueued: false,
   pendingBytes: null,
 };
@@ -172,6 +180,15 @@ function install(sourceUrl) {
  * Nothing is counted or announced here. A render is not a save: an autosave that
  * found nothing changed, a refused save and a failed request all rendered. The
  * outcome is recorded, and `adopt` reports it when the host accepts these exact bytes.
+ *
+ * A render that belongs to a save capture also hands that capture a private artifact:
+ * the model of the bytes it just verified, paired with the clone it verified them
+ * against, so the save the host accepts does not parse and pair those same bytes a
+ * second time. It is a candidate, not an answer: `adopt` installs it only if the host
+ * took these exact bytes and nothing has replaced the page's pairing since. A page
+ * with its own [onbeforesave] or [onbeforesnapshot] handlers gets none, because those
+ * handlers can edit the clone after the capture and the inspection path is what
+ * describes the live page there.
  */
 export function renderSave(clone, today, opts = {}) {
   if (!state.installed) return today;
@@ -180,6 +197,8 @@ export function renderSave(clone, today, opts = {}) {
   // have changed the clone, and the map must describe the live page.
   refreshNow();
   state.lastOutcome = null;
+  const capture = currentCaptureContext();
+  const adoptable = !!capture && !capture.authoredHandlers;
   const print = new Set();
   let firstDiff = null;
   for (let round = 0; round <= MAX_PRINT_ROUNDS; round++) {
@@ -189,19 +208,48 @@ export function renderSave(clone, today, opts = {}) {
     } catch (err) {
       return fallback('render threw: ' + (err && err.message ? err.message : err), today);
     }
-    const v = verify(out.text, today, document, clone, state.model.parseErrors);
+    // The verifier's retained parse is a cost, so it is only asked for when there is a
+    // capture that could adopt it.
+    const v = adoptable
+      ? verifyForSave(out.text, today, document, clone, state.model.parseErrors)
+      : verify(out.text, today, document, clone, state.model.parseErrors);
     if (v.ok) {
       state.lastRenderMs = out.ms;
       state.lastBytes = out.text.length;
       state.lastOutcome = print.size
         ? { text: out.text, scope: 'partial', reason: firstDiff, printed: print.size }
         : { text: out.text, scope: null };
+      if (v.model) offerCandidate(v.model, out.text, clone, capture);
       return out.text;
     }
     if (firstDiff === null) firstDiff = v.diff;
     if (!v.at || !widen(clone, nodeAt(clone, v.at), print)) return fallback(firstDiff, today);
   }
   return fallback(firstDiff, today);
+}
+
+/**
+ * Hand this capture the model of the bytes it just verified, or nothing.
+ *
+ * The pairing is the whole point of the artifact: it must describe the live page, so
+ * it is built by walking the verified clone and that model together. Anything that
+ * does not correspond, node for node, leaves the capture without an artifact, and the
+ * accepted save takes the inspection path it takes today.
+ */
+function offerCandidate(m, html, clone, capture) {
+  const paired = pairCaptured(clone, m, originalSnapshotNode);
+  if (!paired) return;
+  attachCaptureArtifact({
+    captureId: capture.captureId,
+    html,
+    source: {
+      model: m,
+      map: paired.map,
+      stats: paired.stats,
+      repairGeneration: state.repairs,
+      outcome: state.lastOutcome,
+    },
+  });
 }
 
 const MAX_PRINT_ROUNDS = 8;
@@ -267,12 +315,44 @@ function partialReprint(reason, printed) {
  *
  * It is also where a save is counted, because it is the one place that knows a save
  * reached the file.
+ *
+ * A capture that rendered its own verified bytes brought a candidate with them, and
+ * when the host took exactly those bytes that candidate IS the file: installing it is
+ * a few assignments instead of a parse of the accepted bytes and a whole-document
+ * re-pair. Everything else — a raw save, a fallback, a candidate whose pairing a morph
+ * has since invalidated, a disk version that arrived while the save was in flight —
+ * takes the guarded repair path, which is the behaviour this replaces.
  */
-function adopt(bytes) {
+function adopt(bytes, accepted) {
   if (!state.installed) return;
-  report(bytes);
+  report(bytes, accepted && accepted.artifact ? accepted.artifact.source.outcome : null);
+  if (adoptCandidate(bytes, accepted)) return;
   state.pendingBytes = bytes;
   scheduleRefresh();
+}
+
+/**
+ * Install a capture's candidate model, if it is this save's and still describes the page.
+ *
+ * Three things have to agree, and each is a different mistake. The bytes: the artifact
+ * is the model of the string that exact render returned, not of a later one. The
+ * capture: `save.js` keeps the artifact with its request, so the ID rules out a
+ * candidate that reached an accepted listener by any other route. The generation: a
+ * morph replaces live nodes and a disk frame replaces the model, so a map built before
+ * one is keyed to a page that is no longer here.
+ */
+function adoptCandidate(bytes, accepted) {
+  const artifact = accepted && accepted.artifact;
+  if (!artifact || !artifact.source) return false;
+  if (artifact.html !== bytes) return false;
+  if (accepted.captureId === null || accepted.captureId === undefined) return false;
+  if (artifact.captureId !== accepted.captureId) return false;
+  if (artifact.source.repairGeneration !== state.repairs) return false;
+  if (state.refreshQueued || state.pendingBytes !== null) return false;
+  state.model = artifact.source.model;
+  state.map = artifact.source.map;
+  state.stats = artifact.source.stats;
+  return true;
 }
 
 /**
@@ -280,10 +360,10 @@ function adopt(bytes) {
  * produced. Bytes this module did not render (a caller of `saveHtml` with its own
  * string, or an older render) are not its save to report.
  */
-function report(bytes) {
-  const outcome = state.lastOutcome;
+function report(bytes, fromCapture = null) {
+  const outcome = state.lastOutcome && state.lastOutcome.text === bytes ? state.lastOutcome : fromCapture;
   if (!outcome || outcome.text !== bytes) return;
-  state.lastOutcome = null;
+  if (state.lastOutcome === outcome) state.lastOutcome = null;
   state.saves++;
   if (outcome.scope === 'full') reprint(outcome.reason);
   else if (outcome.scope === 'partial') partialReprint(outcome.reason, outcome.printed);
@@ -329,6 +409,9 @@ function refreshNow() {
   if (!state.installed) return;
   const bytes = state.pendingBytes;
   state.pendingBytes = null;
+  // Counted even when the re-pair below fails: either way this page is not the page a
+  // candidate captured before it was built against.
+  state.repairs++;
   const t = now();
   // The two halves fail independently, so they are tried independently. A refused
   // re-model used to skip the re-pair with it, and the re-pair is the half that
