@@ -412,11 +412,19 @@ function canonical(text) {
   }
 }
 
+// The writer session a mode lease owns (see liveWriterParticipant). Null until one is
+// prepared, and null again once it is disposed: a page whose loader has not registered
+// a writer keeps the old rule, one lane per edit-mode tab. While a session has closed
+// admission (entry preparing, or an exit draining what this tab still holds) no local
+// op is framed and no checkpoint saves.
+let writerSession = null;
+const writerAdmitted = () => !writerSession || writerSession.admitted;
+
 // Saved stores with changes no accepted save holds yet. Only an edit-mode tab
 // saves. In file mode that is this tab's unconfirmed ops; in fast mode the room
 // says the file does not reach its latest change, and only the writer saves.
 function unsavedLiveChanges() {
-  if (!isEditMode) return false;
+  if (!isEditMode || !writerAdmitted()) return false;
   for (const entry of entries.values()) {
     if (entry.store.ephemeral) continue;
     if (entry.store.handle.status.mode === "fast") {
@@ -437,7 +445,7 @@ function fileMoved() {
 
 const checkpoints = createCheckpoints({
   needsSave: unsavedLiveChanges,
-  blocked: () => !baselineSettled() || isSaveConflicted() || autosaveIsSuspended() || historyPending(),
+  blocked: () => !writerAdmitted() || !baselineSettled() || isSaveConflicted() || autosaveIsSuspended() || historyPending(),
   save: () => savePageForce().finally(fileMoved),
   saveNow: () => withKeepalive(true, () => savePageForce()),
 });
@@ -454,6 +462,113 @@ let local = null;
 // True from pagehide until the page is shown again (a page kept for back and
 // forward): only a closing page's save is reported to the local room at capture.
 let closing = false;
+
+// A listener for the store behind a session: a reader's tag, and the values other
+// tabs saved to it, keep following the file.
+function sessionStores() {
+  return [...entries.values()].filter((entry) => !entry.store.ephemeral);
+}
+
+// What this tab still holds that the page's own bytes cannot carry: ops a store in a
+// room has not had acknowledged. A reader's own change is not one of them.
+function liveWriterPending() {
+  if (!writerSession || writerSession.admitted || !fast || fast.status.stopped) return false;
+  for (const entry of sessionStores()) {
+    if (entry.store.handle.status.mode === "fast" && entry.store.pending.length > 0) return true;
+  }
+  return false;
+}
+
+// Frame what the lane has not sent and wait for the room to take it. This is the one
+// transfer that lets the writer be released: a checkpoint writes the room's value, so
+// an unacknowledged op of this tab has to travel through the room, not the file.
+export async function drainLiveWriter({ timeoutMs = 5000 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  const frame = () => {
+    for (const entry of sessionStores()) {
+      if (entry.store.handle.status.mode !== "fast") continue;
+      if (entry.store.pending.length > 0) fast?.release(entry.store.name);
+    }
+  };
+  frame();
+  while (liveWriterPending()) {
+    if (Date.now() >= deadline) return { ok: false, code: "timeout" };
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    frame();
+  }
+  return { ok: true };
+}
+
+registerUnsavedState({ id: "live:writer", isPending: liveWriterPending, flush: drainLiveWriter });
+
+// The lane a session starts from: the reader's own ops are not this session's edits,
+// and no position a previous session's lane reported is carried into this one.
+function resetWriterSession() {
+  for (const entry of entries.values()) {
+    entry.framesSince = false;
+    const ids = entry.store.pendingEntries().map((item) => item.id);
+    if (ids.length) entry.store.rebase(entry.store.authoritative, { source: "state", dropIds: ids });
+  }
+}
+
+// Give back everything the lane holds: the transport's subscription (its stream
+// handlers and its local channel), the room position, and the request for a lane, so
+// the next session starts a fresh one.
+function releaseWriter() {
+  const lane = fast;
+  fast = null;
+  laneRequested = false;
+  serverLane = null;
+  local = null;
+  provenanceHost = false;
+  lane?.stop();
+}
+
+/**
+ * clay.live as a mode participant: the store's writer, started by the commit that
+ * enters edit and released by the one that leaves it.
+ *
+ * `prepare` closes admission and puts the stores back on the reader's value, so
+ * nothing a reader changed can be uploaded as this person's edit. `enable` starts
+ * the tab's lane. `quiesce` closes admission again and drains the ops the room has
+ * not acknowledged, so a refused exit resumes the very same lane. `dispose` (after the
+ * barrier) stops the lane and forgets its subscription, its room and its send queue.
+ */
+export function liveWriterParticipant() {
+  return {
+    id: "clay:live",
+    order: 200,
+    prepare(context) {
+      const session = { admitted: false };
+      writerSession = session;
+      resetWriterSession();
+      return {
+        enable() {
+          if (writerSession !== session) return;
+          session.admitted = true;
+          ensureLane();
+        },
+        quiesce() {
+          if (writerSession !== session) return;
+          session.admitted = false;
+          return drainLiveWriter();
+        },
+        resume() {
+          if (writerSession !== session) return;
+          session.admitted = true;
+          for (const entry of sessionStores()) {
+            if (entry.store.pending.length > 0) fast?.release(entry.store.name);
+          }
+        },
+        dispose() {
+          if (writerSession !== session) return;
+          writerSession = null;
+          releaseWriter();
+        },
+      };
+    },
+  };
+}
 
 // The page plugin's one-shot gates: the fast lane's setup, and the room's
 // writer election. Both resolve null when this tab has no lane at all.
@@ -606,7 +721,7 @@ function seedLocalRoom() {
 
 function ensureLane() {
   laneGates();
-  if (laneRequested || !isEditMode) return;
+  if (laneRequested || !(writerSession ? writerSession.admitted : isEditMode)) return;
   laneRequested = true;
   hostMeta.hostSupports("live-data").then(
     async (supported) => {
@@ -757,7 +872,7 @@ export function live(name) {
     if (store.handle.status.mode === "file" && ["undone", "refused", "decided"].includes(event.cause)) entry.leftAt = null;
   });
   if (!tag.ephemeral) store.onLocal(() => checkpoints.changed());
-  store.onLocal((ops) => fast?.local(name, ops, store.mark));
+  store.onLocal((ops) => { if (writerAdmitted()) fast?.local(name, ops, store.mark); });
   store.handle.on("change", () => {
     if (!store.ephemeral && store.handle.status.mode === "fast") checkpoints.changed();
   });
@@ -1100,10 +1215,13 @@ document.addEventListener("clay:sync-applied", (event) => receiveFrame(event.det
 // The last chance to save live changes made since the previous checkpoint. A
 // keepalive body is capped near 60 KB; a larger page's save may not finish.
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "hidden") checkpoints.flush();
+  if (document.visibilityState === "hidden" && isEditMode && writerAdmitted()) checkpoints.flush();
 });
 window.addEventListener("pagehide", () => {
   closing = true;
+  // A view, and an edit whose session has closed admission or been released, saves
+  // nothing here: its bytes are the reader's, and the exit's own barrier writes them.
+  if (!isEditMode || !writerAdmitted()) return;
   // A hide save still on the wire is answered after the page is gone too.
   const latest = unsentCaptureId ?? wireCaptureId;
   const pin = checkpoints.flushing && latest !== null ? capturePins.get(latest) : null;
