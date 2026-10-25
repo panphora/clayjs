@@ -256,11 +256,35 @@ Satellites do not wait for `clay.ready` and work without `clay.js` at all, inclu
 
 `clay.standalone.js` bundles the loader, every plugin and every satellite into one 2 MB file for offline use. `plugins=` still decides what runs. With it, remove the satellite tags and always `await clay.loaded.sap` or `.data` before use.
 
+In Hyperclay Local and HTML Clay a document needs no special loading to work offline: keep the ordinary `https://clayjs.com/v1/` tags and the host serves them from the release it bundles. `clay.standalone.js` stays the option for a file opened with no host at all. [Offline in a local host](https://clayjs.com/docs/guide/hosts/#12-4-offline-in-a-local-host) has the route and what a host must do.
+
 ### 3.4 `clay.ready`
 
 `clay.ready` is a promise that resolves with `window.clay` once boot is done and every plugin has loaded. `clay:ready` fires on `document` at the same moment. Before it resolves, members like `clay.save` and `clay.undo` do not exist. Start app code with `clay.start(...)`: it waits for `clay.ready` and runs once per page (9.10).
 
 `clay.plugins` is the frozen list of plugin names in the plan the loader resolved, late plugins included. It says what the page asked for, not what has finished loading.
+
+`clay.ready` says the loader is done, not that a plugin has finished its own startup. The page plugin is the one that keeps going: it exports no `ready`, so `clay.ready` fires while the article's saved content is still what the person sees. `clay.page.ready` is that plugin's boot, and `clay.page.status` is its current result, `{ phase, reason, installId, at }`. Await it before touching `clay.page`:
+
+```js
+clay.start("document-ui", async () => {
+  const boot = await clay.page?.ready;
+  if (boot?.phase !== "ready") return;
+  document.documentElement.setAttribute("document-ready", "true");
+});
+```
+
+Phases are `loading` (the saved article is read and validated), `joining` (the editor's code downloads beside the room join, plus capability, the first save and the page handle), `adopting` (the editor is mounted and the saved article is adopted into the room), then `ready` (input enabled) or a settled `blocked` or `error`. Each boundary is a `performance.mark` carrying `{ detail: { installId } }`:
+
+| Mark | Exact boundary |
+|---|---|
+| `document:boot` | an installation starts, before the source is validated |
+| `document:assets-ready` | the editor's code is in hand |
+| `document:authority-ready` | the capability and first-save gates passed, the page handle is admitted and the binding is created |
+| `document:input-ready` | adoption succeeded and editable was enabled on the current mounted view |
+
+A failed or cancelled installation never emits `document:input-ready`. Blocked readiness still resolves: `clay.page.ready` settles, `clay.page.status.phase` is `blocked` with a `reason`, the saved article stays as the host served it, and no editable page appears. Section 4.6 covers the reasons and what a page can offer instead.
+
 
 You can set configuration before the tag, and the loader merges into it: `window.clay = { saveToast: true }`.
 
@@ -418,6 +442,42 @@ In view mode `window.clay` keeps `ready`, `isEditMode`, `isOwner`, `toggleEditMo
 - With `sync` loaded a viewer rides the saved lane and receives each accepted save, so a published page updates live (7.1).
 - A click inside `[trigger-save]` in view mode dispatches `clay:view-save-attempt`, so you can explain why nothing saved.
 
+### 4.6 When an edit is ready to type in
+
+Edit mode is decided at load, but a `page` document is ready later. `clay.page.ready` resolves when its editor is the thing on the page and accepts typing, and `clay.page.status` holds that boot result, `{ phase, reason, installId, at }`. `clay.ready` does not wait for it: `plugins/page.js` exports no `ready`, so `await clay.ready` can resolve while the saved article is still on screen. Late plugins do wait, so a page that ships with them needs nothing extra.
+
+The boot marks say where it got to, each a `performance.mark` with `{ detail: { installId } }`:
+
+- `document:boot`: an installation starts, before the source is validated.
+- `document:assets-ready`: the editor's code is in hand.
+- `document:authority-ready`: the capability and first-save gates passed, the page handle is admitted and the binding is created. Writer election and the article's feature views are still ahead.
+- `document:input-ready`: adoption succeeded and editable was enabled on the current mounted view. A failed or cancelled installation never emits it.
+
+Blocked readiness settles without producing an editable page, and that is an answer rather than an error: `clay.page.ready` resolves, `clay.page.status.phase` is `blocked`, `reason` names the boundary (`missing-capability`, `first-save-refused`, `first-save-conflict`, `admission-failed`, `editor-assets-failed`, `mount-failed`, `adoption-refused`, `adoption-timeout`, `adoption-error`, `page-replaced`, `view-detached`, `no-page`, `ambiguous-page`, `invalid-page-source`, `invalid-page-json`, `unsupported-page-format`, `missing-page-store`, `boot-incomplete`), and nothing takes a keystroke: the saved article stays as the host served it, or an editor that was already mounted is left read-only because the page was replaced. Design the fallback around the phase, not around a caught exception:
+
+```js
+const boot = await clay.page?.ready;
+if (boot?.phase !== "ready") document.documentElement.setAttribute("read-only", "true");
+```
+
+`clay.page.install()` starts a fresh installation with its own id, disposing the last one, which is how a page retries after a failure without a reload.
+
+### 4.7 The page editor on a phone
+
+At widths up to 560 px the page editor's toolbar keeps four controls: Bold, Italic, Link and More. Each is at least 44 by 44 CSS px, in a 204 px bar with 4 px gaps and 8 px padding, and the selection bubble is hidden so two bars never appear at once.
+
+More holds the rest: Strikethrough, Code, bulleted, numbered and checklist lists, Turn into, Insert, Move up, Move down, Indent and Outdent. Turn into and Insert open the same pickers the desktop uses, and the move and indent actions apply to the caret's block when nothing more is selected.
+
+The bar is placed from the visual viewport, not from the layout viewport: its top and its horizontal bounds come from the visible area, so an on-screen keyboard cannot cover it and panning the visual viewport moves it with the page. The safe-area inset is read once per layout frame. A menu stays inside that same viewport, opens above the bar when there is room, and scrolls internally. Desktop layouts are unchanged.
+
+### 4.8 The keyboard route in the page editor
+
+Escape closes an open menu or the link popover first, and puts focus back on the control that opened it, or the editor.
+
+From a block selection, Escape leaves the writing surface for the first toolbar control while keeping the selection, so the keyboard is never trapped in contenteditable. In the toolbar, Left and Right move between controls and Escape returns to the editor. The toolbar is a single tab stop with a roving tabindex: Tab leaves it forward and Shift-Tab backward. Inside a table, Tab moves across its cells and Shift-Tab back; the editor takes Tab for nothing else.
+
+A table's column resize handle is a focusable vertical separator named for its column, with `aria-valuemin` 48, `aria-valuemax` 1200 and the current width in `aria-valuenow`. Left and Right preview a 10 px change, Shift makes the step 50 px, Home and End preview the minimum and the maximum, Enter commits, and Escape cancels. Repeated keydowns preview, and the keyup that ends the repeat, Enter or leaving the handle commits one command, so a held arrow key is one undo item. Double-click fits the column and pointer dragging is unchanged. A phone keeps the column's Width menu (Wider, Narrower, Fit to content, and Reset width once the column has a width) for the same job.
+
 ---
 
 ## 5. The record
@@ -568,6 +628,14 @@ Use `ephemeral` for state on one element. State that comes from the URL hash and
 
 In edit mode ClayJS saves the whole document to `POST /_/save` on the page's origin (or `/_/save/<savetoken>` on HTML Clay). Cmd+S (Ctrl+S elsewhere) and a click inside any `[trigger-save]` element call `clay.save()` on every edit-mode page, with or without autosave. A close warning appears whenever there are unsaved changes.
 
+#### 6.1.1 The saved title
+
+A page's `<title>` is part of the saved file, and it is derived rather than authored. The save projection reads the captured model and takes the first top-level H1, with whitespace runs collapsed and trimmed; a page with no top-level H1 is `Untitled`. The server checkpoint renderer uses the same function on the same model, so a checkpoint written by a room does not describe different content from the file the client would have saved.
+
+`<meta name="clay-seo-title-mode" content="custom">` in `<head>` is the opt-out: the authored `<title>` is left exactly as it is, and nothing derived rewrites it. The SEO panel's title field writes that marker when you set a custom title, and removing the marker returns the document to a derived title on the next save.
+
+The file's name is not derived from anything. ClayJS never renames a document, and a save writes bytes to the route the host already serves, so the file name, the downloaded name and the path in a local folder are exactly what they were. Title changes are content changes; renaming a file is a host or a person's decision.
+
 ### 6.2 Autosave
 
 `<html autosave>` present at load turns on autosave. Adding or removing it later changes nothing.
@@ -707,15 +775,39 @@ Events, all on `document`:
 | `clay:ready` | boot finished | `{ clay }` |
 | `clay:baseline-settled` | the load-settle baseline was taken | none |
 | `clay:save-saving` | a save has been in flight 500 ms | `{ msg, msgType, timestamp }` (`msgType` is `""`) |
-| `clay:save-saved` | the host accepted | `{ msg, msgType, timestamp }` |
-| `clay:save-error` | refused, or a network failure while online | `{ msg, msgType, timestamp }` (`msgType` is `""` in 1.8.2; the event name is the type) |
-| `clay:save-offline` | failed while the browser is offline | `{ msg, msgType, timestamp }` (`msgType` is `""`) |
-| `clay:save-conflict` | 412 | adds `changedBy`, `afterTimeout`, `etag` |
+| `clay:save-saved` | the host accepted | `{ msg, msgType, timestamp, etag, captureId }` |
+| `clay:save-error` | refused, or a network failure while online | `{ msg, msgType, timestamp, captureId }` (`msgType` is `""` in 1.8.2; the event name is the type) |
+| `clay:save-offline` | failed while the browser is offline | `{ msg, msgType, timestamp, captureId }` (`msgType` is `""`) |
+| `clay:save-conflict` | 412 | adds `changedBy`, `afterTimeout`, `etag`, `captureId` |
 | `clay:save-conflict-resolved` | sync merged the version that caused the 412 | `{ timestamp }` |
 | `clay:dirty`, `clay:clean` | unsaved-work state changed | none |
 | `clay:unsaved-state-changed` | a registered state called `changed()` | `{ pending }` |
 
 `clay:dirty` means "maybe dirty": typing a letter and deleting it leaves it raised until the next check.
+
+`etag` and `captureId` on those events are additive. `clay:save-saved` carries the accepted `etag` (or `null`), and every save result event carries the `captureId` naming the bytes it captured before it was sent.
+
+A save writes the document's own bytes, so an HTML file downloaded from a host links its pictures, it does not contain them: an image you uploaded to the host is fetched from that host's URL when the file is opened, and a copy opened somewhere that URL does not resolve shows a broken picture.
+
+### 6.8 Recovery copies
+
+`clay.recovery` keeps a local copy of writing the host has not accepted. It is not a save, and ClayJS never renders a page from it: after a reload the page compares the copies with the file it actually loaded and asks before using one. A document is covered only for the channels its adapters register, so a page that registers no channel keeps no local copy at all.
+
+What clears a copy is one save's own capture, not the page's later state:
+
+- Before a save is sent, ClayJS hands the recovery service the exact bytes it captured and that capture's id. Each channel's `readSaved` reads those bytes once, and a copy is covered only when the payload it staged is exactly what the capture holds.
+- A save that was skipped, refused, conflicted, errored or ended unknown clears nothing. A confirmed save clears only the revision its bytes covered, so typing during the request stays available.
+- A newer revision from the same tab, and every other tab's copy, survive that. A write that arrives after its save was acknowledged is refused by the stored watermark.
+- **`clay:snapshot-ready` is not this proof.** It fires on a clone taken before `onbeforesave` hooks, document transforms and final serialization, so what it shows can differ from the bytes the host accepts. `captureId` on `clay:save-saved` is the id to compare against.
+
+```js
+document.addEventListener("clay:save-saved", (event) => {
+  if (!event.detail.captureId) return;
+  console.log("this save covered capture", event.detail.captureId, "etag", event.detail.etag);
+});
+```
+
+The store lives in IndexedDB (`clay-recovery`), keeps 32 MiB per document scope and 64 MiB per database on this origin, holds plain text that any script on this origin can read, and reports `durable: false` whenever a write did not complete. It is edit mode only, draft mode included, and a reader never opens it. [Recovery](https://clayjs.com/docs/recovery/) has the receipts, the failure codes and the difference between journaled, acknowledged and checkpointed.
 
 ---
 
@@ -1023,6 +1115,34 @@ Traps:
 - **Paste is an allowlist**: tables, `<hr>`, `<details>`, `<figure>`, iframes and inline styles are reduced to text. A pasted remote image keeps its hotlinked `src`; a pasted `data:` image bloats every save.
 - **Cloning an active region** copies runtime attributes. Strip them with `clay.RichClay.stripElement(clone)` (as in 5.5), or clone from a `<template>`.
 - **`editable` is ignored in view mode**; viewers get plain markup.
+
+#### 8.1.1 The page editor's Markdown shortcuts
+
+`editable` regions and the page editor are different editors, and their Markdown input rules are not the same. The page editor (`plugins/page`) converts these as you type:
+
+| Typed at the start of a block | Becomes |
+|---|---|
+| `# `, `## `, `### ` | heading 1, 2 or 3 |
+| `- `, `* `, `+ ` | bulleted list item |
+| `1. `, `1) ` | numbered list item |
+| `[] `, `[ ] `, `[x] ` | checklist item, unchecked or checked |
+| `> ` | toggle |
+| ` ``` ` | code block, when the whole paragraph is the fence |
+| `---` | divider, when the whole paragraph is the dashes |
+
+| Typed around text | Becomes |
+|---|---|
+| `**bold**`, `__bold__` | bold |
+| `*italic*`, `_italic_` | italic |
+| `` `code` `` | inline code |
+| `~~strike~~` | strikethrough |
+| `[label](address)` | a link, if the address is a safe one |
+
+An opening delimiter needs the start of the line, whitespace or opening punctuation before it, and neither delimiter may be escaped, so `\**this\**` stays literal text. Nothing converts inside inline code, and a shortcut typed during an IME composition converts when the composition ends. The delimiters are deleted and the mark is applied over the body in place, which keeps the marks the text already carried, and a block shortcut retypes the block rather than replacing it, so its `data-id` and its position survive.
+
+**Backspace immediately after a shortcut restores the typed characters**, delimiters included, through the editor's input-rule undo: it is one history step like any other, it does not drop a peer's concurrent edit, and redo applies the shortcut again. Wait a keystroke and the shortcut is simply part of the text and Backspace deletes one character as usual.
+
+None of this loads for a reader: the input rules, the menus and the title adapter are editor code, and a Document's view mode fetches none of them.
 
 ### 8.2 sortable: drag to reorder
 
@@ -1687,6 +1807,7 @@ Cross-cutting:
 | Wire and ai-edit | yes | yes | ai-edit only, for owners and team editors on a paid plan |
 | Data API write | yes | yes | read only |
 | Uploads | 25 MB, in `~/htmlclay/uploads/` | 25 MB, in the root's `uploads/` | 10, 20 or 100 MB by plan, in the account's `uploads/` |
+| Upload access (`document.upload.access`) | `local` | `local` | `document` once the account's uploaded files have been protected, and no field before that |
 | Version history | yes | 60 days, newest 20 | a version per save; a restore does not reach open editors' tabs, so reload after restoring |
 | Max save | 50 MB | 20 MB | 5 MB |
 
@@ -1706,8 +1827,23 @@ The saved file is the data. Everyone who can download it can read everything in 
 
 - To publish a version without private values, make a copy and remove them, or keep private data in a different file with different access.
 - A file you hand out as a template should ship with sample data, not yours.
-- Uploaded assets on hyperclay.com are reachable by URL even for private documents.
+- On hyperclay.com a file uploaded from inside a document is bound to that document, and where the host advertises `document.upload.access` as `document` its bytes follow the document's read permission on every route. A reader without access gets the same 404 as a missing file, and the file is sent `Cache-Control: private, no-store`. Uploads made before that binding existed stay reachable by URL until the account's protection migration has run, and a copy someone already downloaded cannot be taken back.
+- HTML Clay and Hyperclay Local report `local`, which means their own file-serving rules, not a sharing ACL. A file there is as private as the folder on that machine.
 - Password inputs are never persisted; an authored `value` on them is still in the file.
+
+### 12.4 Offline in a local host
+
+Hyperclay Local and HTML Clay each bundle one exact, published ClayJS release, chosen in their `offline-runtime.lock.json`. The whole release ships as its index lists it (`dist/offline-manifest.json` in the npm package: about 550 files, every module, plugin, satellite such as `sap.js` and `clay-router.js`, vendored library, theme sheet and font, plus the exact library builds older Journals load from other CDNs), not only what one document boots with, so a plugin, the merge engine, a drag library or a font that a document uses for the first time offline still loads.
+
+- **The route.** The release is served at `/_/clayjs/<version>/<path>`, so `https://clayjs.com/v1/clay.js` is `/_/clayjs/<version>/clay.js`, with an immutable cache and an `ETag` of the file's sha256. A path the index does not list answers 404 and is never fetched from the network.
+- **Projection on serve.** A served document is rewritten in two places only: the `src` and `href` attributes that are recognized ClayJS runtime URLs (`https://clayjs.com/v1/...`, exact-version URLs of the bundled release, and the few exact library and font URLs the release carries a copy of) become the local address, written with the same spelling the file used for the rest of the URL, and a `<script type="application/json" id="clay-runtime-map">` descriptor records the mapping. Text, code samples, Markdown and every other URL stay byte for byte.
+- **Canonicalization on every write.** Save, data API writes, restore, export and live-sync frames turn those local addresses back into the public `https://clayjs.com/...` URLs and remove the descriptor before anything reaches disk. A saved or downloaded file never contains a `/_/clayjs/` address, so it stays portable to any host. A request with `Clay-Source: 1` receives the canonical bytes unprojected.
+- **Versions.** A rolling `https://clayjs.com/v1/` URL is served from the host's bundled release. A document that pins a release the host does not bundle, or names a runtime file the bundled release lacks, is served with every runtime URL left public: it loads online, is not promised offline, and the response carries a `Clay-Runtime-Unavailable` header that says why. The host never substitutes another release's files into a page.
+- **Older Journals.** Journals made before the release carried their libraries load OverType and highlight.js from other CDNs, and their fonts from Google Fonts. The release maps exactly three of those URLs to copies it ships: `https://cdn.jsdelivr.net/npm/overtype@2.6.1/dist/overtype.min.js` and `https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js` to the same classic builds (the ones that define `window.OverType` and `window.hljs`, with their licenses and pinned hashes in `compat/journal-assets.lock.json`), and the Journal's Google Fonts stylesheet URL to a stylesheet over the bundled IBM Plex files. Each match is the whole URL: another version, a query string, another file or another host stays on the network. So a Journal saved with those URLs edits offline, and a document that names anything else from those CDNs does not.
+- **What stays online.** Pictures and media hosted elsewhere, AI features and collaboration with other people need the network. A picture uploaded into the local folder is a local file and works offline.
+- **Checking a host.** `node scripts/verify-offline-closure.mjs` in the ClayJS repository checks a release's closure, every listed file present with its recorded hash and every module import resolving inside the release, in three modes: `--package-root <dir>` for a built checkout, `--published-root <dir>` for an unpacked release tree and `--base-url <url>` for a running host's `/_/clayjs/<version>/` prefix. With `--base-url`, pass `--index <file>` naming the host's own bundled index; without it the check compares the host against the checkout's index.
+
+Why the whole release and not a boot closure: a sap document loads much of its code late. A Kanban board loaded with `plugins=sortable,people,upload,sync,visitor-drafts,unsent,menu` boots with a few dozen modules, then asks for `derive`, the merge engine, SortableJS on the first drag and the live-sync modules as they are needed, about 116 release paths in all. None of those appear in what the page requests at boot, so a host that served only the boot graph would break on the first drag with the network off. ClayJS's cross-host contract test opens that real board in both local hosts and requests every one of those paths through the host.
 
 ---
 
@@ -1817,6 +1953,7 @@ The saved file is the data. Everyone who can download it can read everything in 
 | A version restore on hyperclay.com does not reach open editors | 12.1 |
 | Hidden is not private | 12.3 |
 | Typed values vanish from a visitor's draft: the control has no `persist` | 14.2 |
+
 ---
 
 ## 14. Free documents for visitors
