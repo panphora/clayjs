@@ -478,6 +478,43 @@ button.tb-value:hover { color: var(--blue); }
 .note button:hover { background: color-mix(in oklab, var(--accent) 16%, transparent); }
 .note .note-close { color: var(--ink-3); }
 
+/* ------------------------------------------------ pictures: an image pasted or dropped into the editor (never saved) */
+.pictures {
+  flex: none;
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 10px 44px 10px 72px;
+}
+.pictures:empty { display: none; }
+:root:not([editmode="true"]) .pictures { display: none !important; }
+.picture-ready {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 16px;
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  background: var(--accent-soft);
+  font-size: 13px; color: var(--ink);
+}
+.picture-ready span { flex: 1; min-width: 0; }
+.picture-ready button { flex: none; padding: 5px 11px; border-radius: 5px; font-size: 12.5px; font-weight: 500; color: var(--accent); white-space: nowrap; }
+.picture-ready button:hover { background: color-mix(in oklab, var(--accent) 16%, transparent); }
+
+.reader a.image { display: inline-block; max-width: 100%; }
+.reader img { max-width: 100%; height: auto; border-radius: 6px; }
+.reader .image-load, .image-strip .image-load {
+  padding: 5px 11px; border-radius: 5px;
+  font-size: 12.5px; font-weight: 500; color: var(--accent); white-space: nowrap;
+}
+.reader .image-load:hover, .image-strip .image-load:hover { background: color-mix(in oklab, var(--accent) 16%, transparent); }
+.image-strip {
+  flex: none;
+  display: flex; flex-wrap: wrap; gap: 8px;
+  padding: 10px 44px 10px 72px;
+}
+.image-strip:empty { display: none; }
+:root:not([editmode="true"]) .image-strip { display: none !important; }
+.image-strip img { height: 64px; width: auto; max-width: 160px; object-fit: cover; border-radius: 6px; display: block; }
+.image-strip .image-ref { font-size: 13px; color: var(--ink-3); font-style: italic; }
+
 .peer-bar {
   flex: none;
   display: flex; align-items: center; gap: 10px;
@@ -699,6 +736,8 @@ button.tb-value:hover { color: var(--blue); }
   .privacy-banner { padding-left: 16px; }
   .tags { padding-left: 16px; }
   .calendar, .otd { padding-left: 16px; }
+  .pictures { padding-left: 44px; padding-right: 16px; }
+  .image-strip { padding-left: 44px; padding-right: 16px; }
   .otd-row { grid-template-columns: 78px minmax(0, 1fr); }
 }
 @media (max-width: 759px) {
@@ -1095,7 +1134,8 @@ const words = text.trim().split(/\s+/).length;
 
   /* ---------------------------------------------------------------- the reader: marked, loading only for reading */
   // The reader: marked, with raw HTML shown as text, links only to http, https, mailto and other entries,
-  // and images as a labeled placeholder until pictures land (M6). Plain text shows until marked arrives.
+  // and images by one policy: this host's file shows, an outside one waits to be asked, anything else is a label.
+  // Plain text shows until marked arrives.
   const Reader = (() => {
     let md = null;
     let shown = { id: null, body: null };
@@ -1117,7 +1157,13 @@ const words = text.trim().split(/\s+/).length;
             const ext = !ok.startsWith('#');
             return `<a href="${esc(ok)}"${title ? ` title="${esc(title)}"` : ''}${ext ? ' target="_blank" rel="noopener noreferrer"' : ''}>${text}</a>`;
           },
-          image: ({ text }) => `<span class="image-ref">${esc(text || 'image')}</span>`,
+          image: ({ href, text }) => {
+            const alt = text || 'image';
+            const p = imagePolicy(href);
+            if (p.kind === 'local') return `<a class="image" href="${esc(p.src)}" target="_blank" rel="noopener noreferrer"><img src="${esc(p.src)}" alt="${esc(alt)}" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>`;
+            if (p.kind === 'external') return `<span class="image-ref image-ask" data-src="${esc(p.src)}" data-alt="${esc(alt)}">${esc(alt)} <button type="button" class="image-load">Show image from ${esc(p.host)}</button></span>`;
+            return `<span class="image-ref">${esc(alt)}</span>`;
+          },
           code: ({ text, lang }) => `<pre><code>${Code.highlight(text, lang) || esc(text)}</code></pre>`,
         },
       });
@@ -1128,6 +1174,7 @@ const words = text.trim().split(/\s+/).length;
       if (!force && id === shown.id && body === shown.body) return;
       const moved = id !== shown.id;
       shown = { id, body };
+      if (a && !md) load().then(() => render(readable(), true), () => {});
       $('#reader').innerHTML = !a ? '' : md ? md.parse(body) : `<pre class="plain">${esc(body)}</pre>`;
       if (moved && a) desk.scrollTop = 0;
       refreshHighlights();
@@ -1143,9 +1190,23 @@ const words = text.trim().split(/\s+/).length;
       return ready;
     }
     const readable = () => { const a = Entries.open(); return a && !isTrashed(a) ? a : null; };
-    function start() { load().then(() => render(readable(), true), () => {}); }
+    function start() { wirePictures($('#reader')); load().then(() => render(readable(), true), () => {}); }
     async function toHTML(text) { await load(); return md.parse(String(text || '')); }
-    return { start, render, toHTML, refresh: () => render(readable(), true) };
+    // The image tokens marked finds in a body: code spans and fences hold none.
+    async function images(text) {
+      await load();
+      const out = [];
+      md.walkTokens(md.lexer(String(text || '')), t => { if (t.type === 'image') out.push({ href: t.href, alt: t.text || 'image' }); });
+      return out;
+    }
+    // The image URLs marked finds in a body, or null until marked has loaded.
+    function imageHrefs(text) {
+      if (!md) return null;
+      const out = [];
+      md.walkTokens(md.lexer(String(text || '')), t => { if (t.type === 'image') out.push(t.href); });
+      return out;
+    }
+    return { start, render, toHTML, images, imageHrefs, ready: load, refresh: () => render(readable(), true) };
   })();
 
   /* ---------------------------------------------------------------- search: every word must appear, "quoted phrases" match exactly */
@@ -1599,7 +1660,7 @@ const words = text.trim().split(/\s+/).length;
           touch(code.closest('article.entry'));
           if (code.textContent.trim()) createdHere.delete(code.closest('article.entry').dataset.id);
         },
-        onShow: () => overtype?.updatePreview(),
+        onShow: () => { overtype?.updatePreview(); Strip.schedule(); },
         onConflict: (typed, context) => {
           Recovery.conflicted(typed, context);
           note('Someone changed the same words while you were typing.', typed);
@@ -1670,7 +1731,472 @@ const words = text.trim().split(/\s+/).length;
       text: () => ta()?.value ?? '',
       reconfigure: (options) => overtype?.reinit(options),
       refresh: () => overtype?.updatePreview(),
+      composing: () => !!binding?.composing?.(),
     };
+  })();
+
+  /* ---------------------------------------------------------------- image references: the one Markdown form the Journal writes,
+     and the pictures a body really holds. */
+  // The address as it goes inside <…>, or null when the Journal will not write it: only http(s), never credentials or control characters.
+  function imageAddress(url) {
+    const text = String(url ?? '');
+    if (/[\u0000-\u001f\u007f]/.test(text)) return null;
+    const raw = text.trim();
+    if (!raw) return null;
+    let parsed;
+    try { parsed = new URL(raw, location.href); } catch { return null; }
+    if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) return null;
+    return raw.replace(/[<>\n\r]/g, c => '%' + c.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0'));
+  }
+  const imageMarkdown = address => `![](<${address}>)`;
+  // How many pictures in a body point at this upload, or null until marked has loaded: only marked's
+  // image tokens count, so code, escapes and plain links never do.
+  function imageCount(body, url) {
+    const hrefs = Reader.imageHrefs(body);
+    if (!hrefs) return null;
+    const address = imageAddress(url);
+    return hrefs.filter(h => h === url || h === address).length;
+  }
+  // A saved body carries a pending picture once it holds more references to that URL than the entry had
+  // when the upload finished (a repeat upload of the same file gets the same address).
+  const carries = (body, payload) => (imageCount(body, payload.url) ?? -1) > (payload.before ?? 0);
+  // The same count for an entry that is in this page, once marked has loaded. No parser, no count.
+  async function countIn(entryId, url) {
+    try { await Reader.ready(); } catch {}
+    const a = Entries.byId(entryId);
+    return imageCount(a ? Entries.body(a) : '', url) ?? 0;
+  }
+  // Where an offset in `before` lands in `after`, or null when the edit covered it.
+  function mapInsertion(before, after, at) {
+    if (before === after) return at;
+    let prefix = 0;
+    while (prefix < before.length && prefix < after.length && before[prefix] === after[prefix]) prefix++;
+    let suffix = 0;
+    while (suffix < before.length - prefix && suffix < after.length - prefix &&
+      before[before.length - 1 - suffix] === after[after.length - 1 - suffix]) suffix++;
+    if (at < prefix) return at;
+    if (at > before.length - suffix) return after.length - (before.length - at);
+    return null;
+  }
+  // Where a picture goes: on its own line after the line the drop landed in, never inside the first line,
+  // which is the entry's heading.
+  function placement(text, at) {
+    let end = text.indexOf('\n', at);
+    if (end === -1) end = text.length;
+    return { at: end, lead: end === 0 ? '' : '\n\n', tail: end < text.length && text[end + 1] !== '\n' ? '\n' : '' };
+  }
+  // Which picture a body may show: this host's own file, an outside picture only once asked, or none.
+  function imagePolicy(url) {
+    const raw = String(url ?? '').trim();
+    if (!raw || /[\u0000-\u001f\u007f]/.test(raw)) return { kind: 'blocked' };
+    let parsed;
+    try { parsed = new URL(raw, location.href); } catch { return { kind: 'blocked' }; }
+    if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) return { kind: 'blocked' };
+    const route = parsed.pathname.startsWith('/_/') && !parsed.pathname.startsWith('/_/uploads/');
+    return parsed.origin === location.origin && !route
+      ? { kind: 'local', src: parsed.href }
+      : { kind: 'external', src: parsed.href, host: parsed.host };
+  }
+  function pictureEl(src, alt) {
+    const a = document.createElement('a');
+    a.className = 'image';
+    a.href = src;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    const img = document.createElement('img');
+    img.alt = alt;
+    img.loading = 'lazy';
+    img.decoding = 'async';
+    img.referrerPolicy = 'no-referrer';
+    img.src = src;
+    a.append(img);
+    return a;
+  }
+  // One listener pair for the reader and the strip: an asked-for outside picture loads; a failed one says so.
+  function wirePictures(root) {
+    root.addEventListener('click', e => {
+      const button = e.target.closest('.image-load');
+      if (!button || !root.contains(button)) return;
+      const ask = button.closest('.image-ask');
+      ask.replaceWith(pictureEl(ask.dataset.src, ask.dataset.alt || ''));
+    });
+    root.addEventListener('error', e => {
+      const img = e.target;
+      if (!(img instanceof HTMLImageElement)) return;
+      const label = document.createElement('span');
+      label.className = 'image-ref image-failed';
+      label.textContent = `Image could not load: ${img.alt || 'image'}`;
+      (img.closest('a.image') || img).replaceWith(label);
+    }, true);
+  }
+
+  /* ---------------------------------------------------------------- uploaded links: a completed upload's address, kept in this browser
+     until a settled save carries its image reference in the entry it went to. It is never image bytes and never the journal. */
+  const Links = (() => {
+    const CHANNEL = 'journal.pending-images';
+    const pending = new Map();
+    const staged = new Map();
+    let channel = null;
+    const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+    function bodyIn(doc, entryId) {
+      const el = [...doc.querySelectorAll('#entries > article.entry:not([cms-template])')].find(a => a.dataset.id === entryId);
+      return el?.querySelector('.entry-body')?.textContent ?? null;
+    }
+    function readSaved(html) {
+      const doc = new DOMParser().parseFromString(html, 'text/html');
+      const out = new Map();
+      for (const [key, payload] of pending) {
+        const body = bodyIn(doc, payload.entryId);
+        if (body !== null && carries(body, payload)) out.set(key, payload);
+      }
+      return out;
+    }
+    const describe = record => ({ label: 'Uploaded picture', text: record?.payload?.url ?? '' });
+    // True only when this browser completed a write of the record.
+    async function keep(payload) {
+      pending.set(payload.key, payload);
+      if (!channel) return false;
+      Reader.ready().catch(() => {});
+      try {
+        staged.set(payload.key, channel.stage({ key: payload.key, payload }));
+        const result = await channel.flush();
+        return !!result?.ok;
+      } catch {
+        return false;
+      }
+    }
+    function drop(key) {
+      pending.delete(key);
+      const receipt = staged.get(key);
+      staged.delete(key);
+      if (channel && receipt) channel.dismiss(receipt.id).catch(() => {});
+    }
+    // Links an earlier page kept. One whose reference the opened file already carries is done;
+    // the rest move under this page, so this page's own saves can clear them, and are offered again.
+    async function start(offerRecovered) {
+      const service = window.clay?.recovery;
+      if (channel || typeof service?.register !== 'function') return;
+      channel = service.register({ channel: CHANNEL, version: 1, readSaved, describe });
+      let result;
+      try { result = await channel.list(); } catch { return; }
+      if (!result?.ok) return;
+      if (result.records.length) { try { await Reader.ready(); } catch {} }
+      for (const record of result.records) {
+        const payload = record.payload;
+        if (!record.supported || !payload?.key || !payload?.taskId || pending.has(payload.key)) continue;
+        const entry = Entries.byId(payload.entryId);
+        const body = entry?.querySelector('.entry-body')?.textContent ?? '';
+        if (entry && carries(body, payload)) {
+          channel.dismiss(record.id, { revision: record.revision }).catch(() => {});
+          continue;
+        }
+        const kept = await keep(payload);
+        if (kept && !same(staged.get(payload.key)?.id, record.id)) {
+          channel.dismiss(record.id, { revision: record.revision }).catch(() => {});
+        }
+        offerRecovered(payload, kept);
+      }
+    }
+    return { start, keep, drop, list: () => channel ? channel.list() : Promise.resolve({ ok: false, records: [] }) };
+  })();
+
+  /* ---------------------------------------------------------------- pictures: an image pasted or dropped into the editor
+     uploads through ClayJS's shared task and belongs to the entry it was dropped on. Only a host that keeps the file
+     private to this document, or a local host, is asked; a saved entry only ever holds a Markdown reference. */
+  const Pictures = (() => {
+    const ACCESS = 'document-or-local';
+    const page = $('#writer');
+    const alive = () => page?.isConnected === true;
+    const newKey = () => window.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+    const queue = [];
+    const live = new Set();
+    let running = false;
+    let tray = null;
+    const imagesOf = list => [...(list || [])].filter(f => f && /^image\//.test(f.type || ''));
+    const drafting = () => document.documentElement.getAttribute('draftmode') === 'true';
+    const supported = () => alive() && !readOnly && !drafting() && typeof window.clay?.upload?.start === 'function';
+    function refuse() {
+      if (drafting()) note('Pictures need a saved document. Your draft keeps text only.');
+      else if (readOnly) note('Pictures can only be added while editing.');
+      else note('This host cannot keep pictures private to this journal, so it stays text only.');
+    }
+    function trayEl() {
+      if (!alive()) return document.createElement('div');
+      if (tray?.isConnected) return tray;
+      tray = document.createElement('div');
+      tray.className = 'pictures';
+      tray.setAttribute('clay', 'editor-ui');
+      $('#writer').after(tray);
+      return tray;
+    }
+    // Inside the editor: claims an event that carries image files, before the outer import
+    // handler sees it, and queues one job per image for the entry that is open right now.
+    function claim(e, files) {
+      if (e.type === 'paste' && e.clipboardData?.getData?.('text/plain')) return false;
+      const images = imagesOf(files);
+      if (!images.length) return false;
+      e.preventDefault();
+      e.stopPropagation();
+      if (!supported()) { refuse(); return true; }
+      const entry = Editor.current();
+      if (!entry) { note('Open an entry to add a picture.'); return true; }
+      createdHere.delete(entry.dataset.id);
+      const ta = $('#writer textarea');
+      const body = Editor.text();
+      const offset = ta && typeof ta.selectionStart === 'number' ? ta.selectionStart : body.length;
+      for (const file of images) {
+        const job = { key: newKey(), file, entryId: entry.dataset.id, body, offset };
+        live.add(job);
+        queue.push(job);
+      }
+      pump();
+      return true;
+    }
+    // Outside the editor, or in reader and draft mode: an image never navigates the page away.
+    function refuseOutside(e) {
+      if (supported() || !imagesOf(e.dataTransfer?.files).length) return false;
+      e.preventDefault();
+      refuse();
+      return true;
+    }
+    async function pump() {
+      if (running) return;
+      running = true;
+      try {
+        while (queue.length) await run(queue.shift());
+      } finally {
+        running = false;
+      }
+    }
+    // One job at a time. The next starts when this attempt settles; a retry the person starts
+    // later from the task's own controls is still seen, once per attempt.
+    function run(job) {
+      return new Promise(resolve => {
+        const task = window.clay.upload.start(job.file, { requiredAccess: ACCESS });
+        job.task = task;
+        const seen = new Set();
+        let settled = false;
+        task.subscribe(snapshot => {
+          if (snapshot.state === 'succeeded' && !seen.has(snapshot.attempt)) {
+            seen.add(snapshot.attempt);
+            const upload = snapshot.result?.uploads?.[0];
+            if (upload && typeof upload.url === 'string' && !job.record) uploaded(job, upload);
+          }
+          if (!settled && snapshot.state !== 'uploading') { settled = true; resolve(); }
+        });
+        Promise.resolve(window.clay.upload.mount(task, trayEl())).catch(() => {});
+      });
+    }
+    const isLive = id => { const a = Entries.byId(id); return !!a && !isTrashed(a); };
+    function editableOpen() {
+      const open = Editor.current();
+      return supported() && open && !isTrashed(open) && !Editor.composing() ? open : null;
+    }
+    // Through the textarea's own input path, so bind-text, the preview, the recovery copy and autosave all run.
+    function insertAt(at, text) {
+      const el = $('#writer textarea');
+      const before = el.value;
+      const [a, b] = [el.selectionStart, el.selectionEnd];
+      el.value = before.slice(0, at) + text + before.slice(at);
+      const shift = n => (n >= at ? n + text.length : n);
+      el.setSelectionRange(shift(a), shift(b));
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      rebase(Editor.current()?.dataset.id, before, el.value, at, text.length);
+    }
+    // Later pictures dropped on the same entry keep their own places after this insertion,
+    // in drop order, instead of becoming ambiguous at the shared anchor.
+    function rebase(entryId, before, after, at, length) {
+      for (const job of live) {
+        if (job.inserted || job.entryId !== entryId || typeof job.offset !== 'number') continue;
+        const mapped = mapInsertion(job.body, before, job.offset);
+        if (mapped === null) continue;
+        job.body = after;
+        job.offset = mapped >= at || !before.slice(mapped, at).includes('\n') ? mapped + length : mapped;
+      }
+    }
+    function finish(job) {
+      job.inserted = true;
+      live.delete(job);
+      job.offerEl?.remove();
+      job.offerEl = null;
+    }
+    function place(at, job) {
+      const p = placement(Editor.text(), at);
+      insertAt(p.at, p.lead + imageMarkdown(job.address) + p.tail);
+    }
+    function tryInsert(job) {
+      const open = editableOpen();
+      if (!open || open.dataset.id !== job.entryId || typeof job.offset !== 'number') return false;
+      const at = mapInsertion(job.body, Editor.text(), job.offset);
+      if (at === null) return false;
+      place(at, job);
+      finish(job);
+      return true;
+    }
+    async function uploaded(job, upload) {
+      job.address = imageAddress(upload.url);
+      if (!job.address || !['document', 'local'].includes(upload.access)) {
+        live.delete(job);
+        offer(job, { refused: true });
+        return;
+      }
+      const before = await countIn(job.entryId, upload.url);
+      job.record = { key: job.key, taskId: job.task.id, entryId: job.entryId, url: upload.url, access: upload.access, before };
+      job.kept = await Links.keep(job.record);
+      if (tryInsert(job)) { if (!job.kept) offer(job, { inserted: true }); } else offer(job);
+    }
+    // Into whichever entry is open, at its cursor, after the record names that entry.
+    async function insertHere(job) {
+      if (job.busy || job.inserted || !live.has(job)) return;
+      const open = editableOpen();
+      if (!open) { note('Open an entry to insert the picture.'); return; }
+      const target = open.dataset.id;
+      job.busy = true;
+      try {
+        if (target !== job.entryId) {
+          job.entryId = target;
+          job.record = { ...job.record, entryId: target, before: await countIn(target, job.record.url) };
+          job.kept = await Links.keep(job.record);
+        }
+        if (job.inserted || !live.has(job)) return;
+        const now = editableOpen();
+        if (!now || now.dataset.id !== target) { offer(job); return; }
+        if (carries(Editor.text(), job.record)) { finish(job); return; }
+        const el = $('#writer textarea');
+        place(el.selectionStart ?? el.value.length, job);
+        finish(job);
+        if (!job.kept) offer(job, { inserted: true });
+      } finally {
+        job.busy = false;
+      }
+    }
+    function button(label, run) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = label;
+      b.addEventListener('click', run);
+      return b;
+    }
+    function offer(job, { refused = false, inserted = false } = {}) {
+      if (!alive()) return;
+      const open = isLive(job.entryId) && Editor.current()?.dataset.id !== job.entryId;
+      const shape = JSON.stringify([refused, inserted, !!job.kept, open]);
+      if (job.offerEl?.isConnected && job.offerEl.dataset.shape === shape) return;
+      job.offerEl?.remove();
+      const el = document.createElement('div');
+      el.className = 'picture-ready';
+      el.setAttribute('clay', 'editor-ui');
+      el.dataset.key = job.record?.key ?? job.key ?? '';
+      el.dataset.shape = shape;
+      const msg = document.createElement('span');
+      const dismiss = () => { el.remove(); job.offerEl = null; };
+      const copy = button('Copy URL', async () => {
+        try { await navigator.clipboard.writeText(job.record.url); copy.textContent = 'Copied'; } catch {}
+      });
+      if (refused) {
+        msg.textContent = 'The picture uploaded, but the host gave an address this journal will not use.';
+        el.append(msg, button('Dismiss', dismiss));
+        job.offerEl = el;
+        trayEl().append(el);
+        return;
+      }
+      if (inserted) {
+        msg.textContent = 'The picture is in the entry, but this browser could not keep its link. Copy it before you reload if the entry has not saved.';
+        el.append(msg, copy, button('Dismiss', dismiss));
+        job.offerEl = el;
+        trayEl().append(el);
+        return;
+      }
+      msg.textContent = job.kept
+        ? 'Image uploaded.'
+        : 'Image uploaded. This browser could not keep its link, so copy it before you reload.';
+      el.append(msg);
+      if (open) {
+        el.append(button('Open entry', () => { openEntry(job.entryId); }));
+      }
+      el.append(button('Insert at cursor', () => { insertHere(job); }));
+      el.append(copy);
+      el.append(button('Discard', () => { Links.drop(job.record.key); live.delete(job); dismiss(); }));
+      job.offerEl = el;
+      trayEl().append(el);
+    }
+    function refreshOffers() {
+      if (!alive()) return;
+      for (const job of live) {
+        if (!job.offerEl || job.busy) continue;
+        const a = Entries.byId(job.entryId);
+        if (a && carries(Entries.body(a), job.record)) { finish(job); continue; }
+        offer(job);
+      }
+    }
+    function recovered(payload, kept) {
+      const job = { entryId: payload.entryId, record: payload, address: imageAddress(payload.url), kept, recovered: true };
+      if (!job.address) return;
+      live.add(job);
+      offer(job);
+    }
+    return { claim, refuseOutside, supported, refreshOffers, start: () => { if (supported()) Links.start(recovered); } };
+  })();
+
+  /* ---------------------------------------------------------------- the picture strip: the open entry's pictures, under the editor.
+     A projection of the body, never saved; marked loads for it only once the body has an image. */
+  const Strip = (() => {
+    let el = null;
+    let timer = null;
+    let shown = '';
+    const drafting = () => document.documentElement.getAttribute('draftmode') === 'true';
+    function host() {
+      if (el?.isConnected) return el;
+      el = document.createElement('div');
+      el.className = 'image-strip';
+      el.setAttribute('clay', 'editor-ui');
+      $('#writer').after(el);
+      wirePictures(el);
+      return el;
+    }
+    function schedule() {
+      clearTimeout(timer);
+      timer = setTimeout(refresh, 300);
+    }
+    function clear() {
+      shown = '';
+      if (el) el.replaceChildren();
+    }
+    async function refresh() {
+      const text = Editor.current() ? Editor.text() : '';
+      if (!text.includes('![')) { clear(); return; }
+      let list;
+      try { list = await Reader.images(text); } catch { return; }
+      if ((Editor.current() ? Editor.text() : '') !== text) return;
+      const key = JSON.stringify([drafting(), list]);
+      if (key === shown) return;
+      shown = key;
+      const items = list.map(({ href, alt }) => {
+        const p = imagePolicy(href);
+        if (p.kind === 'local' && !drafting()) return pictureEl(p.src, alt);
+        if (p.kind === 'external' && !drafting()) {
+          const ask = document.createElement('span');
+          ask.className = 'image-ref image-ask';
+          ask.dataset.src = p.src;
+          ask.dataset.alt = alt;
+          const b = document.createElement('button');
+          b.type = 'button';
+          b.className = 'image-load';
+          b.textContent = `Show image from ${p.host}`;
+          ask.append(alt, ' ', b);
+          return ask;
+        }
+        const label = document.createElement('span');
+        label.className = 'image-ref';
+        label.textContent = alt;
+        return label;
+      });
+      host().replaceChildren(...items);
+    }
+    function start() {
+      $('#writer').addEventListener('input', schedule);
+    }
+    return { start, schedule, refresh };
   })();
 
   // The recovery copy: exactly the text this person typed, kept in this browser and apart from
@@ -2128,6 +2654,8 @@ const words = text.trim().split(/\s+/).length;
     const nextId = a ? a.dataset.id : null;
     if (leftId !== nextId) { clearNote(); desk.scrollTop = 0; Recovery.flush(); }
     if (a) Editor.open(a); else Editor.close();
+    Strip.schedule();
+    Pictures.refreshOffers();
     openDate = a ? a.dataset.date || '' : null;
     showPeerBar(a);
     if (left && left !== a && left.isConnected && createdHere.has(left.dataset.id) && !Entries.body(left).trim()) left.remove();
@@ -2435,6 +2963,7 @@ const words = text.trim().split(/\s+/).length;
     const label = `Trash (${n})`;
     if (trashLabel.textContent !== label) trashLabel.textContent = label;
     if (trashItem.hidden !== !n) trashItem.hidden = !n;
+    Pictures.refreshOffers();
   }
 
   let toastEl = null, toastTimer = 0;
@@ -2977,12 +3506,15 @@ const words = text.trim().split(/\s+/).length;
   $('#importInput').addEventListener('change', e => { importFiles(e.target.files); e.target.value = ''; });
   document.addEventListener('mousedown', e => { if (!e.target.closest('#fileMenu')) setMenu(false); });
   document.addEventListener('keydown', e => { if (e.key === 'Escape') setMenu(false); });
-  app.addEventListener('dragover', e => { if (!readOnly && e.dataTransfer && [...e.dataTransfer.types].includes('Files')) e.preventDefault(); });
+  app.addEventListener('dragover', e => { if (e.dataTransfer && [...e.dataTransfer.types].includes('Files')) e.preventDefault(); });
   app.addEventListener('drop', e => {
+    if (Pictures.refuseOutside(e)) return;
     if (readOnly || !e.dataTransfer || !e.dataTransfer.files.length) return;
     e.preventDefault();
     importFiles(e.dataTransfer.files);
   });
+  $('#writer').addEventListener('paste', e => { Pictures.claim(e, e.clipboardData?.files); });
+  $('#writer').addEventListener('drop', e => { Pictures.claim(e, e.dataTransfer?.files); });
 
   /* ---------------------------------------------------------------- boot */
   window.Journal = {
@@ -3007,6 +3539,7 @@ const words = text.trim().split(/\s+/).length;
     },
     get editor() { return readOnly ? null : $('#writer textarea'); },
     get recovery() { return readOnly ? null : Recovery.surface(); },
+    get pictures() { return readOnly ? null : { list: () => Links.list() }; },
     get readOnly() { return readOnly; },
     get pane() { return currentEntry() ? 'sheet' : 'list'; }
   };
@@ -3044,6 +3577,8 @@ const words = text.trim().split(/\s+/).length;
       }
     }
     if (!readOnly) Recovery.start();
+    if (!readOnly) Pictures.start();
+    if (!readOnly) Strip.start();
     if (readOnly) Reader.start();
     const r = route();
     const autoOpen = () => {
@@ -3075,7 +3610,7 @@ const words = text.trim().split(/\s+/).length;
 
 })();
 </script>
-<script src="https://clayjs.com/v1/clay.js?plugins=sync,visitor-drafts,bind-text,menu&exclude=richclay"></script>
+<script src="https://clayjs.com/v1/clay.js?plugins=sync,visitor-drafts,bind-text,menu,upload&exclude=richclay"></script>
 <script src="https://clayjs.com/v1/sap.js"></script>
 <script src="https://clayjs.com/v1/clay-router.js"></script>
 <script>if (window.Sap && window.Journal) Object.assign(Sap.formats, Journal.formats);</script>

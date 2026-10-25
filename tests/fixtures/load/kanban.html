@@ -145,7 +145,7 @@ h1,h2,h3,h4,p{margin:0}
 .card-open:focus-visible{outline-offset:-3px}
 .cover{display:block;height:28px;margin:-12px -13px 11px;background:var(--solid,#c9d3df)}
 .cover-img{display:block;width:calc(100% + 26px);height:120px;background:var(--img) center/cover;margin:-12px -13px 11px}
-.face-title{display:block;font-size:13px;line-height:1.55;font-weight:500;letter-spacing:-.1px;overflow-wrap:anywhere}
+.face-title{display:block;font-size:13px;line-height:1.55;font-weight:500;letter-spacing:-.1px;overflow-wrap:anywhere;white-space:pre-line}
 .face-chips{display:flex;gap:5px;flex-wrap:wrap;margin-bottom:7px}
 .face-bottom{display:flex;align-items:center;gap:5px;margin-top:10px}
 .face-bottom:empty{display:none}
@@ -210,7 +210,7 @@ h1,h2,h3,h4,p{margin:0}
 #board .card[route-active]>*{display:none}
 #board .card[route-active]>:is(.detail-top,.card-title,.detail-body){display:block}
 #board .card[route-active]>.detail-top{flex-shrink:0}
-#board .card[route-active]>.card-title{flex-shrink:0;margin:0;padding:0 22px 16px 26px;border-bottom:1px solid var(--line);font-size:23px;font-weight:600;line-height:1.3;letter-spacing:-.7px;overflow-wrap:anywhere;outline:none}
+#board .card[route-active]>.card-title{flex-shrink:0;margin:0;padding:0 22px 16px 26px;border-bottom:1px solid var(--line);font-size:23px;font-weight:600;line-height:1.3;letter-spacing:-.7px;overflow-wrap:anywhere;white-space:pre-line;outline:none}
 #board .card[route-active]>.card-title[contenteditable]:focus{box-shadow:inset 0 -2px #b9a4e0}
 #board .card[route-active]>.detail-body{flex:1;min-height:0;display:flex;flex-direction:column}
 #board .card:not([route-active])>:is(.detail-top,.detail-body){display:none}
@@ -366,7 +366,7 @@ h1,h2,h3,h4,p{margin:0}
   .attachment .meta a{display:inline-block;min-height:44px;line-height:44px}
   .attachment small{align-items:center;justify-content:flex-start}
   .add-item input{min-height:44px;font-size:14px}
-  .small-button,.compose button,.row-actions button{min-height:44px}
+  .small-button,.compose button,.row-actions button,.capture-actions button,.capture-preview button{min-height:44px}
   .add-pill{width:44px;min-height:44px}
   .swatch{width:44px;height:44px}
   .dates input[type=date]{min-height:44px}
@@ -927,6 +927,7 @@ Give teams a useful starting point, with less noise and a little more room to th
   }
   function changed() {
     renderCounts();
+    renderEmpty();
     window.clay?.save?.soon?.();
   }
   function repairNumbers() {
@@ -1125,10 +1126,15 @@ Give teams a useful starting point, with less noise and a little more room to th
   const CARD_TITLE_MAX = 300;
   const LIST_TITLE_MAX = 120;
   const BATCH_MAX = 100;
+  const KEPT_TEXT = 'This board is not open for editing, so nothing was added. Your text is kept.';
+  const GONE_TEXT = 'That list is gone. Your text is kept.';
+  const TOP_TEXT = 'The top of the list changed. Your text is kept.';
   let capture = null;
-  let capturePointer = false;
+  let captureFromBlur = false;
 
   const captureListOf = record => (record.startsWith(CAPTURE) ? record.slice(CAPTURE.length) : null);
+  const captureArea = () => capture && $('textarea', capture.form);
+  const captureSlot = sel => capture && $(sel, capture.form);
 
   function resolveCaptureTarget({ listId, beforeId }) {
     const list = Data.list(listId);
@@ -1136,6 +1142,18 @@ Give teams a useful starting point, with less noise and a little more room to th
     const before = beforeId === null ? null : Data.card(beforeId);
     if (!parent || (beforeId !== null && before?.parentElement !== parent)) return null;
     return { list, parent, before };
+  }
+  // A moved or deleted top card re-reads the list's top, so the next attempt is not refused forever.
+  function captureTarget(mine) {
+    const target = resolveCaptureTarget(mine);
+    if (target) return target;
+    const list = Data.list(mine.listId);
+    const parent = list?.querySelector(':scope > ol.cards');
+    if (!parent) return null;
+    const before = $(':scope > .card', parent);
+    capture.beforeId = before ? before.dataset.id : null;
+    if (capture.preview) capture.preview.beforeId = capture.beforeId;
+    return { list, parent, before, stale: true };
   }
 
   // A paste is literal: blank lines are dropped, duplicates stay, and nothing is interpreted.
@@ -1151,10 +1169,8 @@ Give teams a useful starting point, with less noise and a little more room to th
     return '';
   }
 
-  const captureArea = () => capture && $('textarea', capture.form);
-
   function captureMessage(text) {
-    const slot = capture && $('.capture-message', capture.form);
+    const slot = captureSlot('.capture-message');
     if (slot) slot.textContent = text || '';
   }
 
@@ -1162,15 +1178,21 @@ Give teams a useful starting point, with less noise and a little more room to th
     if (!capture) return;
     capture.previewing = false;
     capture.preview = null;
-    const box = $('.capture-preview', capture.form);
+    const box = captureSlot('.capture-preview');
     if (!box) return;
     box.hidden = true;
     $('.capture-titles', box).textContent = '';
   }
 
+  function refuse(text, hide = false) {
+    if (hide) hideCapturePreview();
+    captureMessage(text);
+    if (!captureFromBlur) captureArea().focus();
+    return false;
+  }
+
   function updatePreviewButton() {
-    if (!capture) return;
-    const button = $('[data-act="preview-capture"]', capture.form);
+    const button = captureSlot('[data-act="preview-capture"]');
     if (!button) return;
     const show = capture.kind === 'card' && batchTitles(captureArea().value).length > 1;
     button.hidden = !show;
@@ -1178,25 +1200,14 @@ Give teams a useful starting point, with less noise and a little more room to th
   }
 
   function startCapturePreview() {
-    if (!capture || capture.kind !== 'card') return false;
-    const area = captureArea();
-    const raw = area.value;
+    if (capture?.kind !== 'card') return false;
+    const raw = captureArea().value;
     const titles = batchTitles(raw);
     const problem = batchProblem(titles);
-    if (problem) {
-      hideCapturePreview();
-      captureMessage(problem);
-      area.focus();
-      return false;
-    }
-    const box = $('.capture-preview', capture.form);
+    if (problem) return refuse(problem, true);
+    const box = captureSlot('.capture-preview');
     const listEl = $('.capture-titles', box);
-    listEl.textContent = '';
-    for (const title of titles) {
-      const li = document.createElement('li');
-      li.textContent = title;
-      listEl.append(li);
-    }
+    listEl.innerHTML = titles.map(title => `<li>${esc(title)}</li>`).join('');
     $('[data-act="add-batch"]', box).textContent = `Add ${titles.length} cards`;
     box.hidden = false;
     capture.preview = { raw, titles, listId: capture.listId, beforeId: capture.beforeId };
@@ -1205,61 +1216,66 @@ Give teams a useful starting point, with less noise and a little more room to th
     return true;
   }
 
-  function confirmCaptureBatch() {
-    if (!capture || capture.submitting) return false;
+  function insertCards(titles, target, label) {
+    const batch = titles.map(title => makeCard(title, rid('c'), 0));
+    const fragment = document.createDocumentFragment();
+    for (const card of batch) fragment.append(card);
+    const commit = commitAction(label, () => {
+      for (const card of batch) card.dataset.num = String(Data.nextNumber());
+      target.parent.insertBefore(fragment, target.before);
+      return batch;
+    });
+    return commit ? batch : null;
+  }
+
+  function captureRun(write) {
     const mine = capture;
     const area = captureArea();
-    const preview = mine.preview;
-    if (!preview) return false;
-    if (area.value !== preview.raw) {
-      captureMessage('The text changed. Preview the cards again.');
-      startCapturePreview();
-      area.focus();
-      return false;
-    }
-    if (!editableNow()) {
-      captureMessage('This board is not open for editing, so nothing was added. Your text is kept.');
-      return false;
-    }
-    const titles = batchTitles(preview.raw);
-    const problem = batchProblem(titles);
-    if (problem) {
-      hideCapturePreview();
-      captureMessage(problem);
-      area.focus();
-      return false;
-    }
-    const target = resolveCaptureTarget(preview);
-    if (!target) {
-      hideCapturePreview();
-      captureMessage('That list is gone. Your text is kept.');
-      return false;
-    }
+    const raw = area.value;
     mine.submitting = true;
     try {
-      const batch = titles.map(title => makeCard(title, rid('c'), 0));
-      const fragment = document.createDocumentFragment();
-      for (const card of batch) fragment.append(card);
-      const commit = commitAction('Add N cards', () => {
-        for (const card of batch) card.dataset.num = String(Data.nextNumber());
-        target.parent.insertBefore(fragment, target.before);
-        return batch;
-      });
-      if (!commit) return false;
+      if (!write()) return false;
       hideCapturePreview();
-      if (area.value === preview.raw) {
+      captureMessage('');
+      if (area.value === raw) {
         area.value = '';
         window.clay?.unsent?.clear(area);
       }
-      captureMessage('');
-      if (PHONE.matches && mine.listId) showList(mine.listId);
-      batch[0].scrollIntoView({ block: 'nearest' });
-      captureFilterFeedback(batch);
-      area.focus();
+      if (!captureFromBlur) area.focus();
       return true;
     } finally {
       mine.submitting = false;
     }
+  }
+
+  function confirmCaptureBatch() {
+    if (!capture || capture.submitting) return false;
+    const preview = capture.preview;
+    if (!preview) return false;
+    if (captureArea().value !== preview.raw) {
+      startCapturePreview();
+      captureMessage('The text changed. Preview the cards again.');
+      captureArea().focus();
+      return false;
+    }
+    if (!editableNow()) {
+      captureMessage(KEPT_TEXT);
+      return false;
+    }
+    const titles = batchTitles(preview.raw);
+    const problem = batchProblem(titles);
+    if (problem) return refuse(problem, true);
+    const target = captureTarget(preview);
+    if (!target) return refuse(GONE_TEXT, true);
+    if (target.stale) return refuse(TOP_TEXT);
+    return captureRun(() => {
+      const batch = insertCards(titles, target, `Add ${titles.length} cards`);
+      if (!batch) return false;
+      if (PHONE.matches && capture.listId) showList(capture.listId);
+      batch[0].scrollIntoView({ block: 'nearest' });
+      captureFilterFeedback(batch);
+      return true;
+    });
   }
 
   function captureFilterFeedback(added) {
@@ -1272,11 +1288,13 @@ Give teams a useful starting point, with less noise and a little more room to th
     clearTimeout(toastTimer);
     pendingUndo = null;
     undoHeld = null;
-    const noun = added.length === 1 ? 'card' : 'cards';
-    const message = hidden.length === added.length
-      ? `Added ${added.length} ${noun}, but your filters hide ${added.length === 1 ? 'it' : 'them'}.`
-      : `Added ${added.length} ${noun}. ${hidden.length} ${hidden.length === 1 ? 'is' : 'are'} hidden by your filters.`;
-    el.innerHTML = `<span>${esc(message)}</span><button type="button" data-act="show-capture" data-card="${esc(added[0].dataset.id)}">Show</button>`;
+    const n = added.length;
+    const h = hidden.length;
+    const noun = n === 1 ? 'card' : 'cards';
+    const message = h === n
+      ? `Added ${n} ${noun}, but your filters hide ${n === 1 ? 'it' : 'them'}.`
+      : `Added ${n} ${noun}. ${h} ${h === 1 ? 'is' : 'are'} hidden by your filters.`;
+    el.innerHTML = `<span>${esc(message)}</span><button type="button" data-act="show-capture" data-card="${esc(hidden[0].dataset.id)}">Show</button>`;
     placeToast();
     el.hidden = false;
     toastTimer = setTimeout(() => { el.hidden = true; pendingUndo = null; }, 8000);
@@ -1297,16 +1315,17 @@ Give teams a useful starting point, with less noise and a little more room to th
       flushCaptureBlur();
       closeCapture({ restoreFocus: false });
     }
-    const cards = kind === 'card' && Data.list(listId)?.querySelector(':scope > ol.cards');
-    if (kind === 'card' && !cards) return null;
+    const isList = kind === 'list';
+    const cards = !isList && Data.list(listId)?.querySelector(':scope > ol.cards');
+    if (!isList && !cards) return null;
     const form = part('#capture-form');
     const area = $('textarea', form);
     form.dataset.capture = kind;
-    $('label', form).firstChild.nodeValue = kind === 'list' ? 'List name' : 'Card title';
+    $('label', form).firstChild.nodeValue = isList ? 'List name' : 'Card title';
     area.setAttribute('unsent', kind);
-    form.setAttribute('unsent-key', CAPTURE + (kind === 'list' ? 'board' : listId));
-    $('button[type="submit"]', form).textContent = kind === 'list' ? 'Add list' : 'Add card';
-    if (kind === 'list') board.insertBefore(form, $(':scope > .add-list-tile', board));
+    form.setAttribute('unsent-key', CAPTURE + (isList ? 'board' : listId));
+    $('button[type="submit"]', form).textContent = isList ? 'Add list' : 'Add card';
+    if (isList) board.insertBefore(form, $(':scope > .add-list-tile', board));
     else cards.after(form);
     capture = { form, kind, listId, beforeId, opener: opener || document.activeElement, composing: false, submitting: false, previewing: false, preview: null };
     wireCapture(form);
@@ -1319,12 +1338,17 @@ Give teams a useful starting point, with less noise and a little more room to th
 
   function closeCapture({ restoreFocus = true } = {}) {
     if (!capture) return;
-    const { form, opener } = capture;
+    const { form, opener, kind, listId } = capture;
     capture = null;
     window.visualViewport?.removeEventListener('resize', keepCaptureAboveKeyboard);
     if (form.contains(document.activeElement)) document.activeElement.blur();
     form.remove();
-    if (restoreFocus && opener?.isConnected) opener.focus();
+    if (!restoreFocus) return;
+    if (opener?.isConnected && !opener.closest('[hidden]')) { opener.focus(); return; }
+    const next = kind === 'list'
+      ? $(':scope > .add-list-tile', board) || $('button[data-act="add-list"]')
+      : Data.list(listId)?.querySelector(':scope > .add-card');
+    next?.focus();
   }
 
   function releaseLostCapture() {
@@ -1334,17 +1358,15 @@ Give teams a useful starting point, with less noise and a little more room to th
   }
 
   function wireCapture(form) {
+    const area = $('textarea', form);
     const mine = () => capture && capture.form === form;
-    form.addEventListener('pointerdown', () => {
-      capturePointer = true;
-      setTimeout(() => { capturePointer = false; }, 0);
-    }, true);
+    form.addEventListener('mousedown', e => { if (e.target !== area) e.preventDefault(); });
     form.addEventListener('compositionstart', () => { if (mine()) capture.composing = true; });
     form.addEventListener('compositionend', () => { if (mine()) capture.composing = false; });
     form.addEventListener('keydown', e => {
       if (!mine()) return;
       if (e.isComposing || e.keyCode === 229 || capture.composing) return;
-      if (e.key === 'Enter' && !e.shiftKey) {
+      if (e.target === area && e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         submitCapture();
         return;
@@ -1357,32 +1379,37 @@ Give teams a useful starting point, with less noise and a little more room to th
     form.addEventListener('submit', e => { e.preventDefault(); submitCapture(); });
     form.addEventListener('focusout', e => {
       const next = e.relatedTarget;
-      Promise.resolve().then(() => captureBlurred(form, next));
+      const composing = mine() && capture.composing;
+      Promise.resolve().then(() => captureBlurred(form, next, composing));
     });
-    $('textarea', form).addEventListener('input', () => {
+    area.addEventListener('input', () => {
       if (!mine()) return;
       captureMessage('');
       updatePreviewButton();
-      if (capture.preview && captureArea().value !== capture.preview.raw) hideCapturePreview();
+      if (capture.preview && area.value !== capture.preview.raw) hideCapturePreview();
     });
   }
 
-  function captureBlurred(form, next) {
+  function captureBlurred(form, next, wasComposing) {
     if (!capture || capture.form !== form) return;
-    if (capture.submitting || capture.previewing || capture.composing) return;
+    if (capture.submitting || capture.previewing || capture.composing || wasComposing) return;
     const to = next || document.activeElement;
-    if (to && form.contains(to)) return;
-    if (capturePointer) return;
-    if (!editableNow()) return;
+    if ((to && (form.contains(to) || to === capture.opener)) || !editableNow()) return;
     if (!$('textarea', form).value.trim()) { closeCapture({ restoreFocus: false }); return; }
-    if (submitCapture()) closeCapture({ restoreFocus: false });
+    captureFromBlur = true;
+    try {
+      if (submitCapture()) closeCapture({ restoreFocus: false });
+    } finally {
+      captureFromBlur = false;
+    }
   }
 
   function flushCaptureBlur() {
     if (!capture || !editableNow()) return;
-    if (capture.submitting || capture.composing) return;
+    if (capture.submitting || capture.previewing || capture.composing) return;
     if (!captureArea().value.trim()) return;
-    submitCapture();
+    captureFromBlur = true;
+    try { submitCapture(); } finally { captureFromBlur = false; }
   }
 
   function submitCapture() {
@@ -1392,59 +1419,35 @@ Give teams a useful starting point, with less noise and a little more room to th
     const raw = area.value;
     const title = raw.trim();
     if (!title) { area.focus(); return false; }
-    const max = mine.kind === 'list' ? LIST_TITLE_MAX : CARD_TITLE_MAX;
-    if (title.length > max) {
-      captureMessage(`${mine.kind === 'list' ? 'A list name' : 'A card title'} can be up to ${max} characters.`);
-      area.focus();
-      return false;
-    }
+    const isList = mine.kind === 'list';
+    const max = isList ? LIST_TITLE_MAX : CARD_TITLE_MAX;
+    if (title.length > max) return refuse(`${isList ? 'A list name' : 'A card title'} can be up to ${max} characters.`);
     if (!editableNow()) {
-      captureMessage('This board is not open for editing, so nothing was added. Your text is kept.');
+      captureMessage(KEPT_TEXT);
       return false;
     }
-    mine.submitting = true;
-    try {
-      const added = mine.kind === 'list' ? addCapturedList(title) : addCapturedCard(title);
-      if (!added) return false;
-      hideCapturePreview();
-      captureMessage('');
-      if (area.value === raw) {
-        area.value = '';
-        window.clay?.unsent?.clear(area);
-      }
-      if (mine.kind === 'card') captureFilterFeedback([added]);
-      area.focus();
+    if (isList) return captureRun(() => {
+      const list = makeList(title, rid('l'));
+      if (!commitAction('Add list', () => board.insertBefore(list, mine.form))) return false;
+      showList(list.dataset.id);
+      renderAll();
+      setTimeout(tuneTouch, 450);
+      list.scrollIntoView({ inline: 'end', block: 'nearest' });
       return true;
-    } finally {
-      mine.submitting = false;
-    }
+    });
+    return captureRun(() => {
+      const target = captureTarget(mine);
+      if (!target) return refuse(GONE_TEXT);
+      if (target.stale) return refuse(TOP_TEXT);
+      const batch = insertCards([title], target, 'Add card');
+      if (!batch) return false;
+      if (PHONE.matches) showList(mine.listId);
+      batch[0].scrollIntoView({ block: 'nearest' });
+      captureFilterFeedback(batch);
+      return true;
+    });
   }
 
-  function addCapturedCard(title) {
-    const target = resolveCaptureTarget(capture);
-    if (!target) {
-      captureMessage('That list is gone. Your text is kept.');
-      return false;
-    }
-    const card = makeCard(title, rid('c'), Data.nextNumber());
-    const commit = commitAction('Add card', () => { if (target.before) target.parent.insertBefore(card, target.before); else target.parent.append(card); });
-    if (!commit) return false;
-    if (PHONE.matches) showList(capture.listId);
-    card.scrollIntoView({ block: 'nearest' });
-    return card;
-  }
-
-  function addCapturedList(title) {
-    const list = makeList(title, rid('l'));
-    const stop = capture.kind === 'list' ? capture.form : $(':scope > .add-list-tile', board);
-    const commit = commitAction('Add list', () => board.insertBefore(list, stop));
-    if (!commit) return false;
-    showList(list.dataset.id);
-    renderAll();
-    setTimeout(tuneTouch, 450);
-    list.scrollIntoView({ inline: 'end', block: 'nearest' });
-    return true;
-  }
   async function renameList(list) {
     const title = await prompt1('Rename list', 'List name', Data.listTitle(list), { max: 120 });
     if (!title || !list.isConnected) return;
@@ -1669,6 +1672,10 @@ Give teams a useful starting point, with less noise and a little more room to th
     const input = e.target;
     if (!input.matches?.('[unsent]')) return;
     if (input.matches('.desc-editor')) { detail.editingDesc = true; if (window.Sap) window.Sap.refresh(); }
+    if (input === captureArea()) {
+      updatePreviewButton();
+      input.setSelectionRange?.(input.value.length, input.value.length);
+    }
     syncDraftNote(input);
   });
   // Records this tab is still holding: the open card, the card a peer deleted, the record Undo offers.
@@ -1679,7 +1686,7 @@ Give teams a useful starting point, with less noise and a little more room to th
   // counting in the chip even before it is copied or discarded.
   const recordHere = (record, held) => {
     const listId = captureListOf(record);
-    if (listId !== null) return listId === 'board' || !!Data.list(listId);
+    if (listId !== null) return listId === 'board' || !!Data.list(listId) || held.some(el => heldBy(el, listId));
     const id = recordCard(record);
     return !!board.querySelector(`[data-id="${CSS.escape(id)}"]`) || held.some(el => heldBy(el, id));
   };
@@ -1876,7 +1883,7 @@ Give teams a useful starting point, with less noise and a little more room to th
   board.addEventListener('focusout', e => {
     const t = e.target;
     if (!t.matches?.('.card > .card-title')) return;
-    const value = [...t.childNodes].map(n => n.textContent).join(' ').replace(/\s+/g, ' ').trim();
+    const value = [...t.childNodes].map(n => n.textContent).join(' ').replace(/[^\S\n]+/g, ' ').trim();
     if (value !== t.textContent || t.childElementCount) t.textContent = value;
   });
   board.addEventListener('change', e => {
@@ -2315,7 +2322,7 @@ Give teams a useful starting point, with less noise and a little more room to th
   });
 
   // Dragging changes counts and tabs; the saved DOM already moved.
-  board.addEventListener('clay:sorted', () => { renderCounts(); window.clay?.save?.soon?.(); });
+  board.addEventListener('clay:sorted', () => { renderCounts(); renderEmpty(); window.clay?.save?.soon?.(); });
   // Another tab or a file edit changed the board: redraw everything from the saved data.
   document.addEventListener('clay:sync-applied', () => {
     releaseLostCapture();
