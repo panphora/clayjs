@@ -7,7 +7,7 @@ import * as realEditor from "../../../src/page/editor.js";
 import * as realTablePart from "../../../src/page/features/table.js";
 import { seedValue } from "../../../src/page/ybind/seed.js";
 import { renderFromTags } from "../../../src/page/save-projection.js";
-import { createInstall, runBoot } from "../../../src/page/boot.js";
+import { createInstall, disposeInstall, runBoot } from "../../../src/page/boot.js";
 
 /**
  * The edit boot fetches the editor's code while it prepares authority, so time to
@@ -195,7 +195,7 @@ test("a boot disposed while both branches are out mounts nothing and marks nothi
 
 const cleanups = [];
 const liveCalls = [];
-const MODE = { editor: "ok", tablePart: "ok", tableGate: null };
+const MODE = { editor: "ok", tablePart: "ok", tableGate: null, editorGate: null, editorDone: false };
 
 function expectNoInput(page) {
   expect(markNames()).not.toContain("document:input-ready");
@@ -215,6 +215,7 @@ async function load({
   editor = "ok",
   tablePart = "ok",
   tableGate = null,
+  editorGate = null,
   livePage = "ok",
 } = {}) {
   jest.resetModules();
@@ -226,6 +227,8 @@ async function load({
   MODE.editor = editor;
   MODE.tablePart = tablePart;
   MODE.tableGate = tableGate;
+  MODE.editorGate = editorGate;
+  MODE.editorDone = false;
 
   const value = seedValue(BLOCKS);
   const saves = [];
@@ -287,8 +290,10 @@ async function load({
 
   // The editor and the table part are the two downloads this boot can lose. The
   // factory is the only place a test can hold one, so it reads the mode it was given.
-  await jest.unstable_mockModule("../../../src/page/editor.js", () => {
+  await jest.unstable_mockModule("../../../src/page/editor.js", async () => {
     if (MODE.editor === "throw") throw new Error("the editor's code did not arrive");
+    if (MODE.editorGate) await MODE.editorGate.promise;
+    MODE.editorDone = true;
     return realEditor;
   });
   await jest.unstable_mockModule("../../../src/page/features/table.js", async () => {
@@ -317,8 +322,8 @@ async function load({
   };
   // A state read the room answers with a different epoch is taken whole, the way a
   // rejoin that finds the page rewritten does.
-  const { page } = await import("../../../src/plugins/page.js");
-  return { page, saves, sent, states, roomGate };
+  const { page, createSteps } = await import("../../../src/plugins/page.js");
+  return { page, createSteps, saves, sent, states, roomGate };
 }
 
 afterEach(() => {
@@ -476,5 +481,40 @@ test("an empty page.tools tag on a text document asks the tools store for nothin
     expect(liveCalls).toEqual(["page"]);
   } finally {
     page.dispose();
+  }
+});
+
+// ---- the page's own steps, driven directly ------------------------------------
+
+test("the room join is asked for while the editor's code is still arriving", async () => {
+  const editorGate = deferred();
+  // The plugin starts a boot of its own as it evaluates. An empty document settles that
+  // one before the steps below are built, so the two never share a page.
+  const { page, createSteps } = await load({ html: "", head: "", editorGate });
+  await page.ready;
+  page.dispose();
+  document.head.innerHTML = tagHtml(seedValue(BLOCKS));
+  document.body.innerHTML = articleHtml();
+  liveCalls.length = 0;
+  MODE.editorDone = false;
+  const inst = { ...createInstall({ gen: 1 }), listeners: [] };
+  const boot = runBoot(inst, createSteps(inst, {}));
+  try {
+    // The join is asked for while the editor's code is still on the wire: the tag was
+    // read without it, so the room answers before the editor ever evaluates.
+    expect(await until(() => liveCalls.includes("page"))).toBe(true);
+    expect(MODE.editorDone).toBe(false);
+    expect(inst.phase).toBe("joining");
+    expect(markNames()).not.toContain("document:assets-ready");
+    expect(document.querySelector(".page-editor")).toBe(null);
+    expect(document.querySelectorAll('[contenteditable="true"]')).toHaveLength(0);
+    expect(inst.view ?? null).toBe(null);
+
+    editorGate.resolve();
+    expect(await boot).toMatchObject({ phase: "ready" });
+    expect(MODE.editorDone).toBe(true);
+    expect(document.querySelectorAll('[contenteditable="true"]')).toHaveLength(1);
+  } finally {
+    disposeInstall(inst);
   }
 });

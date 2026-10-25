@@ -1,16 +1,6 @@
 import { createFeatureLoader } from "../page/feature-loader.js";
 import { FEATURES, featureForType } from "../page/features/registry.js";
-import { readFile, installAdoption, ADOPTION_TIMEOUT_MS } from "../page/adopt-boot.js";
-import { classifyFile, readBack } from "../page/adopt.js";
-import { mergePageModels } from "../page/merge.js";
-import { canon } from "../page/projection.js";
 import { mergeEngine } from "../sync/merge-engine.js";
-import { renderFromTags } from "../page/save-projection.js";
-import { blocksFromYValue } from "../page/ybind/decode.js";
-import { createYPageBinding } from "../page/ybind/binding.js";
-import { authorIdentity } from "../page/ybind/author.js";
-import { yValueOf } from "../page/ybind/provider.js";
-import { seedPageFromArticle } from "../page/ybind/migrate.js";
 import { serializeLive } from "../live/ops.js";
 import { registerUnsavedState } from "../lib/unsaved-state.js";
 import { hostMeta, hostSupports } from "../core/host-meta.js";
@@ -20,13 +10,11 @@ import { storeOf, checkpointWithin, requestCheckpoint, fastLane, pageLaneReady, 
 import { parseJsonRelaxed } from "../vendor/hyper-morph-json.vendor.js";
 import { saveStateFor, BLOCKED_TEXT, RETRY_TEXT, downloadPageCopy, downloadSnapshot, copyPageText } from "../page/save-states.js";
 import toast, { toastPersistent, dismissPersistent } from "../ui/toast.js";
-import { createRecoverList, focusBlock } from "../page/recover.js";
 import { claim } from "../page/runtime-owner.js";
-import { observeDocumentTitle } from "../page/document-title-runtime.js";
+import { authorIdentity } from "../page/ybind/author.js";
 import { createInstall, disposeInstall, addDisposer, finishError, isCurrent, ownsView, runBoot } from "../page/boot.js";
 import { capabilityAdvertised } from "../page/tool-capability.js";
 import { toolViews } from "../page/tool-views.js";
-import { holdSlashRange, heldSlashRange } from "../page/chrome.js";
 import { style } from "../lib/hostile-css.js";
 
 const ARTICLE_SEL = "article[data-page]";
@@ -43,6 +31,72 @@ const LOADING_MS = 150;
 const LOADING_TEXT = "Loading the editor\u2026";
 
 const isPlainObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+
+// A tag that is not a page this release reads. It is decided from the JSON alone, so a
+// page that cannot be booted says so without the page's own code.
+function unreadablePage(value) {
+  if (!isPlainObject(value)) {
+    console.warn("clayjs: page plugin: the page tag is not JSON, leaving the page as saved HTML");
+    return "invalid-page-json";
+  }
+  if (value.v !== 1 || !isPlainObject(value.y) || Object.hasOwn(value, "blocks") || Object.hasOwn(value, "deleted")) {
+    console.warn("clayjs: page plugin: the page tag is not a strict Yjs page, leaving the page as saved HTML");
+    return "unsupported-page-format";
+  }
+  return null;
+}
+
+// The page's own code reaches ProseMirror and Yjs, so it is a separate download: the
+// plugin chunk evaluates without either vendor, and the room join starts while they
+// arrive. The editor step and the binding step both ask for it, and a page holds one
+// copy. A step that needs it awaits pageCodeReady(); the synchronous paths read
+// pageCode, which the boot has awaited before the room's state reaches them.
+let pageCode = null;
+let pageCodeLoading = null;
+function pageCodeReady() {
+  // The first import is the file the page was read from: it brings the projection,
+  // the decoder and both vendors, and the rest ask for what it already holds.
+  pageCodeLoading ??= import("../page/adopt-boot.js").then((adoptBoot) => Promise.all([
+    import("../page/adopt.js"),
+    import("../page/merge.js"),
+    import("../page/projection.js"),
+    import("../page/save-projection.js"),
+    import("../page/ybind/decode.js"),
+    import("../page/ybind/binding.js"),
+    import("../page/ybind/provider.js"),
+    import("../page/ybind/migrate.js"),
+  ]).then(([adopt, merge, projection, saveProjection, decode, binding, provider, migrate]) => {
+    pageCode = {
+      installAdoption: adoptBoot.installAdoption,
+      ADOPTION_TIMEOUT_MS: adoptBoot.ADOPTION_TIMEOUT_MS,
+      classifyFile: adopt.classifyFile,
+      readBack: adopt.readBack,
+      mergePageModels: merge.mergePageModels,
+      canon: projection.canon,
+      renderFromTags: saveProjection.renderFromTags,
+      blocksFromYValue: decode.blocksFromYValue,
+      createYPageBinding: binding.createYPageBinding,
+      yValueOf: provider.yValueOf,
+      seedPageFromArticle: migrate.seedPageFromArticle,
+    };
+    return pageCode;
+  }));
+  return pageCodeLoading;
+}
+
+// The recovery list hangs off the mounted view and the title follows its heading, so
+// these arrive with the editor's code rather than beside the room join.
+async function mountCodeReady(code) {
+  const [recover, title] = await Promise.all([
+    import("../page/recover.js"),
+    import("../page/document-title-runtime.js"),
+  ]);
+  return Object.assign(code, {
+    createRecoverList: recover.createRecoverList,
+    focusBlock: recover.focusBlock,
+    observeDocumentTitle: title.observeDocumentTitle,
+  });
+}
 
 // The parts a document asks for, read off the document itself: the state a view holds
 // can have gained a block the saved article never had, from the room or from an
@@ -222,8 +276,8 @@ function pageReplaced(html, savedRev, mergeTagless = false) {
 }
 
 function savedRevOf(inst) {
-  if (!inst.store) return inst.savedRev;
-  try { return renderFromTags([JSON.stringify(inst.store.value)]).rev; } catch { return inst.savedRev; }
+  if (!inst.store || !pageCode) return inst.savedRev;
+  try { return pageCode.renderFromTags([JSON.stringify(inst.store.value)]).rev; } catch { return inst.savedRev; }
 }
 
 // Nothing of this tab's may reach the file again: the editor is read-only, the
@@ -249,7 +303,7 @@ function downloadTabCopy(inst) {
   const doc = new DOMParser().parseFromString(forSave, "text/html");
   const articles = doc.querySelectorAll(ARTICLE_SEL);
   if (articles.length !== 1) return downloadPageCopy();
-  const rendered = renderFromTags([JSON.stringify(inst.tabValue)]);
+  const rendered = pageCode.renderFromTags([JSON.stringify(inst.tabValue)]);
   articles[0].innerHTML = rendered.html;
   if (rendered.rev == null) articles[0].removeAttribute("data-rev");
   else articles[0].setAttribute("data-rev", rendered.rev);
@@ -317,9 +371,9 @@ function restoreArticle(inst) {
   if (!article) return;
   let html = inst.bootHtml;
   let rev = inst.bootRev;
-  if (inst.store) {
+  if (inst.store && pageCode) {
     try {
-      const rendered = renderFromTags([JSON.stringify(inst.store.value)]);
+      const rendered = pageCode.renderFromTags([JSON.stringify(inst.store.value)]);
       html = rendered.html;
       rev = rendered.rev;
     } catch (error) {
@@ -405,7 +459,7 @@ function dispose() {
   restoreArticle(inst);
 }
 
-function createSteps(inst, options) {
+export function createSteps(inst, options) {
   let meta = null;
   let binding = null;
   let editorView = null;
@@ -457,6 +511,7 @@ function createSteps(inst, options) {
         import("../page/tools.js"),
         import("../page/tool-data.js"),
       ]);
+      if (!isCurrent(inst)) return null;
       const toolHost = createToolHost({
         store: toolsStore, mode: "edit",
         tables: () => tablesFromDoc(editorView?.state.doc ?? binding.doc()).map(({ id, cols, rows }) => ({ id, cols, rows })),
@@ -500,6 +555,7 @@ function createSteps(inst, options) {
   // Making or revising a tool opens the store and the host first, so the panel
   // keeps what it makes.
   const openAi = async ({ target = null, remove = null } = {}) => {
+    const { holdSlashRange, heldSlashRange } = await import("../page/chrome.js");
     if (editorView && remove) holdSlashRange(editorView, remove);
     await features.ensure("tool").catch(() => {});
     if (!isCurrent(inst) || !aiTool || !editorView) return;
@@ -508,10 +564,12 @@ function createSteps(inst, options) {
   const aiRequested = () => capabilityAdvertised(meta);
 
   // The article, its page tag and the file they describe, or the reason the page
-  // is not edit mode's to mount.
+  // is not edit mode's to mount. The file it found is captured here, before anything
+  // moves; what the tag decodes to is the page's own code's to say, so it arrives in
+  // source.ready while the room joins, and the join never waits for it.
   function readSource(inst) {
     const articles = document.querySelectorAll(ARTICLE_SEL);
-    let tags = document.querySelectorAll(TAG_SEL);
+    const tags = document.querySelectorAll(TAG_SEL);
     if (!articles.length && !tags.length) return { ok: false, reason: "no-page" };
     // A page saved without its merge state (HTML Clay, an outside edit, a download)
     // is booted from its article alone: the seed is deterministic, so every tab
@@ -520,53 +578,65 @@ function createSteps(inst, options) {
     // that writes it, so a boot that ends before that save leaves no tag behind for
     // the next install to read as a page the file already has.
     const seeded = articles.length === 1 && tags.length === 0;
-    let seedTag = null;
-    if (seeded) {
-      const saved = readFile(document);
-      if (!saved) return { ok: false, reason: "invalid-page-source" };
-      seedTag = document.createElement("script");
-      seedTag.setAttribute("type", "application/json");
-      seedTag.setAttribute("merge", "page");
-      seedTag.setAttribute("clay", "live");
-      seedTag.textContent = serializeLive(seedPageFromArticle(saved.article));
-      tags = [seedTag];
-    }
-    if (articles.length !== 1 || tags.length !== 1) {
+    if (articles.length !== 1 || (!seeded && tags.length !== 1)) {
       console.warn(`clayjs: page plugin needs exactly one article[data-page] and one merge="page" live tag; found ${articles.length} article(s) and ${tags.length} tag(s), leaving the page as saved HTML`);
       return { ok: false, reason: "ambiguous-page" };
     }
-
-    const file = readFile(document);
-    if (!file) return { ok: false, reason: "invalid-page-source" };
+    const element = articles[0];
+    // A tag this tab can read on its own is read here, so a page it cannot boot says so
+    // before the room is opened.
     let value = null;
-    try { value = parseJsonRelaxed(tags[0].textContent); } catch (error) { value = null; }
-    if (!isPlainObject(value)) {
-      console.warn("clayjs: page plugin: the page tag is not JSON, leaving the page as saved HTML");
-      return { ok: false, reason: "invalid-page-json" };
+    if (!seeded) {
+      try { value = parseJsonRelaxed(tags[0].textContent); } catch (error) { value = null; }
+      const unreadable = unreadablePage(value);
+      if (unreadable) return { ok: false, reason: unreadable };
     }
-    if (value.v !== 1 || !isPlainObject(value.y) || Object.hasOwn(value, "blocks") || Object.hasOwn(value, "deleted")) {
-      console.warn("clayjs: page plugin: the page tag is not a strict Yjs page, leaving the page as saved HTML");
-      return { ok: false, reason: "unsupported-page-format" };
-    }
-    let blocks = null;
-    try {
-      blocks = blocksFromYValue(value);
-    } catch (error) {
-      console.warn("clayjs: page plugin: the page tag is not a valid Yjs page, leaving the page as saved HTML", error);
-      return { ok: false, reason: "invalid-page-json" };
-    }
-    armLoadingStatus(inst, articles[0]);
-    return { ok: true, source: { article: file.article, tags: [value], element: articles[0], blocks, seeded, seedTag } };
+    const source = { article: element.cloneNode(true), tags: value ? [value] : null, element, blocks: null, seeded, seedTag: null };
+    source.ready = (async () => {
+      const code = await pageCodeReady();
+      if (!isCurrent(inst)) return { ok: false, cancelled: true };
+      if (seeded) {
+        try {
+          const seedTag = document.createElement("script");
+          seedTag.setAttribute("type", "application/json");
+          seedTag.setAttribute("merge", "page");
+          seedTag.setAttribute("clay", "live");
+          seedTag.textContent = serializeLive(code.seedPageFromArticle(element.cloneNode(true)));
+          source.seedTag = seedTag;
+          value = parseJsonRelaxed(seedTag.textContent);
+        } catch (error) {
+          console.warn("clayjs: page plugin could not rebuild the page it found, leaving the page as saved HTML", error);
+          return { ok: false, reason: "invalid-page-source" };
+        }
+        const unreadable = unreadablePage(value);
+        if (unreadable) return { ok: false, reason: unreadable };
+        source.tags = [value];
+      }
+      try {
+        source.blocks = code.blocksFromYValue(value);
+      } catch (error) {
+        console.warn("clayjs: page plugin: the page tag is not a valid Yjs page, leaving the page as saved HTML", error);
+        return { ok: false, reason: "invalid-page-json" };
+      }
+      return { ok: true };
+    })();
+    armLoadingStatus(inst, element);
+    return { ok: true, source };
   }
 
-  // The editor's code and the feature views the saved article demands are separate
-  // downloads, and they start together here beside the room join. Nothing evaluates
-  // the editor until the coordinator calls it; the parts are installed at the mount,
-  // so a failed one is the loader's own Retry notice there.
+  // The editor's code, the page's own code and the feature views the saved article
+  // demands are separate downloads, and they start together here beside the room join.
+  // Nothing evaluates the editor until the coordinator calls it; the parts are
+  // installed at the mount, so a failed one is the loader's own Retry notice there.
   async function loadEditorAssets(inst, source) {
-    const featureIds = [...new Set(Object.values(source.blocks).map((block) => featureForType(block.t)).filter(Boolean))];
-    let editor = null;
     const editorImport = import("../page/editor.js");
+    editorImport.catch(() => null);
+    const codeImport = pageCodeReady();
+    codeImport.catch(() => null);
+    const read = await source.ready;
+    if (!read.ok) return read;
+    if (!isCurrent(inst)) return { ok: false, cancelled: true };
+    const featureIds = [...new Set(Object.values(source.blocks).map((block) => featureForType(block.t)).filter(Boolean))];
     features = createFeatureLoader({
       load: (id) => FEATURES[id].load(),
       install: async (id, mod) => {
@@ -588,18 +658,26 @@ function createSteps(inst, options) {
     // boot waits for that install before it enables input. A failure here is reported
     // by that install, which offers the feature's Retry.
     for (const id of featureIds) features.prepare(id).catch(() => null);
+    let editor = null;
+    let code = null;
     try {
-      editor = await editorImport;
+      const [editorModule, codeModule] = await Promise.all([editorImport, codeImport]);
+      editor = editorModule;
+      code = await mountCodeReady(codeModule);
     } catch (error) {
       // A host that blocked the download keeps the saved article and reads this reason.
       console.error("clayjs: page plugin could not load the editor", error);
       return { ok: false, reason: "editor-assets-failed" };
     }
     if (!isCurrent(inst)) return { ok: false, cancelled: true };
-    return { ok: true, editor: editor.createPageEditor, refreshView: editor.refreshMountedView, featureIds };
+    return { ok: true, editor: editor.createPageEditor, refreshView: editor.refreshMountedView, featureIds, code };
   }
 
   async function prepareAuthority(inst, source) {
+    // The page's own code is a download like the editor's: it starts here, beside
+    // authority, and only a page that must rebuild its tag waits for it before the
+    // join. Nothing else on this path touches a vendor.
+    const codePromise = pageCodeReady();
     try { meta = await hostMeta(); } catch (error) { meta = null; }
     if (!isCurrent(inst)) return { ok: false, cancelled: true };
     if (!meta || !Array.isArray(meta.extensions) || !meta.extensions.includes("page")) {
@@ -613,8 +691,14 @@ function createSteps(inst, options) {
     // loses that race reloads, which composes the state the winner initialized.
     inst.mergeTagless = !meta.extensions.includes("live-data");
     // A host that keeps no page data makes no first save, so the tag the article
-    // rebuilds goes in now, before the article it was read from.
-    if (source.seeded && inst.mergeTagless) attachSeedTag(source);
+    // rebuilds goes in now, before the article it was read from. A seeded page is the
+    // one boot whose join needs the page's own code, which rebuilds that tag.
+    if (source.seeded) {
+      const read = await source.ready;
+      if (!read.ok) return read;
+      if (!isCurrent(inst)) return { ok: false, cancelled: true };
+      if (inst.mergeTagless) attachSeedTag(source);
+    }
     if ((source.seeded || firstSave) && (await hostSupports("live-data"))) {
       if (!isCurrent(inst)) return { ok: false, cancelled: true };
       const result = await seededFirstSave(source);
@@ -647,6 +731,12 @@ function createSteps(inst, options) {
       return { ok: false, reason: "admission-failed" };
     }
     if (!isCurrent(inst)) return { ok: false, cancelled: true };
+    // A tag the page's own code cannot decode is the boot's reason to stop, and both
+    // branches report the same one, so whichever settles first does not change it.
+    const read = await source.ready;
+    if (!read.ok) return read;
+    const code = await codePromise;
+    if (!isCurrent(inst)) return { ok: false, cancelled: true };
     const store = storeOf("page");
     if (!store) return { ok: false, reason: "missing-page-store" };
     inst.store = store;
@@ -660,10 +750,10 @@ function createSteps(inst, options) {
       return result;
     };
     identity = authorIdentity();
-    binding = createYPageBinding({
+    binding = code.createYPageBinding({
       store,
       onStopped: (reason) => {
-        inst.tabValue = yValueOf(binding.ydoc);
+        inst.tabValue = code.yValueOf(binding.ydoc);
         if (reason === "lineage") {
           fastLane()?.abandon?.("page");
           showReplaced(inst);
@@ -762,14 +852,14 @@ function createSteps(inst, options) {
     // input stays off until they are in.
     featuresReady = Promise.allSettled(loaded.featureIds.map((id) => features.ensure(id)));
     scrollToHashBlock(view);
-    inst.recover = createRecoverList({
+    inst.recover = loaded.code.createRecoverList({
       binding,
       mount: view.dom.closest(".page-shell") ?? article,
       ownTokens: [identity.token, ...identity.owned],
-      onRestored: (id) => focusBlock(view, id),
+      onRestored: (id) => loaded.code.focusBlock(view, id),
       onStale: () => toast("That change was updated. The list now shows the latest version.", "warning"),
     });
-    inst.titleObserver = observeDocumentTitle(view);
+    inst.titleObserver = loaded.code.observeDocumentTitle(view);
     return { ok: true, view, featureIds: loaded.featureIds };
   }
 
@@ -780,15 +870,16 @@ function createSteps(inst, options) {
   // edit too.
   async function roomHoldsArticle(inst, found) {
     try {
+      const code = await pageCodeReady();
       const { HyperMorph } = await mergeEngine();
-      const blocks = blocksFromYValue(inst.store.authoritative);
-      const current = readBack(blocks, document);
-      const merged = mergePageModels(found.baseItems, current, found.parsed, {
+      const blocks = code.blocksFromYValue(inst.store.authoritative);
+      const current = code.readBack(blocks, document);
+      const merged = code.mergePageModels(found.baseItems, current, found.parsed, {
         doc: document,
         merge3: HyperMorph.merge3,
         mergeJson: HyperMorph.mergeJson,
       });
-      return canon(merged.items) === canon(current);
+      return code.canon(merged.items) === code.canon(current);
     } catch {
       return false;
     }
@@ -800,6 +891,7 @@ function createSteps(inst, options) {
   // to wait for. Otherwise the saved article stays up and takes no typing until the
   // writer's adoption arrives, and the wait is bounded like adoption itself.
   async function awaitWriterAdoption(inst, found) {
+    const code = await pageCodeReady();
     if (await roomHoldsArticle(inst, found)) return { ok: true, outcome: "writer-adopts" };
     return new Promise((resolve) => {
       let off = null;
@@ -821,16 +913,17 @@ function createSteps(inst, options) {
       timer = setTimeout(() => {
         console.warn("page: gave up waiting for the writer\u0027s adoption; the hand edit was not adopted");
         finish({ ok: false, reason: "adoption-timeout" });
-      }, ADOPTION_TIMEOUT_MS);
+      }, code.ADOPTION_TIMEOUT_MS);
     });
   }
 
   async function adoptSource(inst, source, mounted) {
+    const code = await pageCodeReady();
     // A hand-edited article is adopted by the room's elected writer only. With a
     // lane but no writer yet, this tab claims the room (a redundant set of an
     // existing Yjs update: a valid nonempty frame that changes nothing) and then
     // waits for the election, so exactly one tab adopts.
-    const found = classifyFile(source.article, source.tags);
+    const found = code.classifyFile(source.article, source.tags);
     const needsAdoption = found.kind === "adopt";
     const awaitWriter = async () => {
       const lane = await pageLaneReady();
@@ -840,7 +933,7 @@ function createSteps(inst, options) {
         const y = inst.store.value.y;
         const keys = Object.keys(y);
         const key = keys.length ? keys[0] : `claim-${binding.ydoc.clientID.toString(36)}`;
-        const value = keys.length ? y[keys[0]] : yValueOf(binding.ydoc).y.seed;
+        const value = keys.length ? y[keys[0]] : code.yValueOf(binding.ydoc).y.seed;
         inst.store.handle.set(["y", key], value);
       }
       // A lane that never reports a writer must not cost the hand edit: give up
@@ -851,7 +944,7 @@ function createSteps(inst, options) {
     };
     const ready = needsAdoption ? awaitWriter() : Promise.resolve();
 
-    const adoption = installAdoption({
+    const adoption = code.installAdoption({
       view: mounted.view,
       source,
       ready,
