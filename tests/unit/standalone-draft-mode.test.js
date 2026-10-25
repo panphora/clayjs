@@ -9,17 +9,23 @@
  * builds it, in the page a free document is.
  */
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import os from "node:os";
 import { join } from "node:path";
 
 const ROOT = new URL("../../", import.meta.url).pathname;
+const DIST = mkdtempSync(join(os.tmpdir(), "clay-draft-mode-"));
 const RULES = '{"title":"#title"}';
 
 let bundle;
 beforeAll(() => {
-  execFileSync("node", ["build.js", "--standalone"], { cwd: ROOT, stdio: "pipe" });
-  bundle = readFileSync(join(ROOT, "dist/clay.standalone.js"), "utf8");
+  execFileSync("node", ["build.js", "--standalone", `--dist=${DIST}`], { cwd: ROOT, stdio: "pipe" });
+  bundle = readFileSync(join(DIST, "clay.standalone.js"), "utf8");
 }, 60000);
+
+afterAll(() => {
+  rmSync(DIST, { recursive: true, force: true });
+});
 
 function bootStandalone({ params }) {
   const root = document.documentElement;

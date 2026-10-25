@@ -46,7 +46,7 @@ const SHEETS = [
 ];
 
 const PACKAGE_FILES = ["build.js", "package.json", "packed-contract.json", "THIRD-PARTY-NOTICES.md"];
-const PACKAGE_DIRS = ["src", "entries", "scripts", "website", "docs", "fonts", "dist"];
+const PACKAGE_DIRS = ["src", "entries", "scripts", "website", "docs", "fonts"];
 
 let site;
 let version;

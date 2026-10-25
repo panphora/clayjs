@@ -134,7 +134,9 @@ const FONTS = [
 // keeps a dynamic import lazy (rollup hoists them) and the loader's evaluation
 // order is load-bearing. `https://*` stays external: the one such import
 // (autosave-debug's diff library) is opt-in debugging, not the library.
-const DIST = resolve(ROOT, 'dist');
+const DIST_OPTION = '--dist=';
+const distOption = process.argv.find((arg) => arg.startsWith(DIST_OPTION));
+const DIST = resolve(ROOT, distOption ? distOption.slice(DIST_OPTION.length) : 'dist');
 const STANDALONE = 'clay.standalone.js';
 // The first release that shipped dist/. Older tarballs have none, and their pins
 // still have to rebuild.
@@ -478,8 +480,8 @@ if (!/^\d+\.\d+\.\d+$/.test(pkg.version)) {
 // single-file build has to exist before the copy below. `--standalone` stops here,
 // for a rebuild of that one file with no site and no registry lookup.
 const standaloneMeta = await emitStandalone();
-await buildServerRooms();
-await buildServerCheckpoint();
+await buildServerRooms(join(DIST, 'server'));
+await buildServerCheckpoint(join(DIST, 'server'));
 for (const file of Object.keys(standaloneMeta.inputs)) {
   if (file.includes('src/server/rooms/') || file.includes('src/server/checkpoint/')) {
     throw new Error(`the standalone build must not include ${file}; server code is a Node entry`);
@@ -488,7 +490,7 @@ for (const file of Object.keys(standaloneMeta.inputs)) {
 // The chunked runtime: one esbuild build of every module the loader can ask for,
 // then a bootstrap per entry that preloads its own plan. dist/ is what the tarball
 // carries and what every version prefix is copied from, so both come from here.
-const chunks = await emitChunks({ root: ROOT, outdir: join(ROOT, 'dist/m') });
+const chunks = await emitChunks({ root: ROOT, outdir: join(DIST, 'm') });
 await emitBootstraps({ root: ROOT, outdir: DIST, manifest: chunks.manifest, satellites: chunks.satellites });
 const fonts = await fontSources();
 const theme = await emitThemeAsset();

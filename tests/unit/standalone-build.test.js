@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { readdirSync, readFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import os from "node:os";
 import { join } from "node:path";
 
 /**
@@ -8,13 +9,18 @@ import { join } from "node:path";
  */
 
 const ROOT = new URL("../../", import.meta.url).pathname;
+const DIST = mkdtempSync(join(os.tmpdir(), "clay-standalone-"));
 const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"));
 
 let bundle;
 beforeAll(() => {
-  execFileSync("node", ["build.js", "--standalone"], { cwd: ROOT, stdio: "pipe" });
-  bundle = readFileSync(join(ROOT, "dist/clay.standalone.js"), "utf8");
+  execFileSync("node", ["build.js", "--standalone", `--dist=${DIST}`], { cwd: ROOT, stdio: "pipe" });
+  bundle = readFileSync(join(DIST, "clay.standalone.js"), "utf8");
 }, 60000);
+
+afterAll(() => {
+  rmSync(DIST, { recursive: true, force: true });
+});
 
 test("names its version on the first line", () => {
   expect(bundle.split("\n")[0]).toContain(`clayjs ${pkg.version} standalone`);
@@ -77,10 +83,10 @@ const BOOTSTRAPS = ["all.js", "clay-dom.js", "clay-events.js", "clay-internals.j
 // page/themes/light-1.css under each prefix (build.js emitThemeAsset), so dist/page is
 // part of the output and the unversioned-URL guard derives from this same listing.
 test("writes exactly the files the unversioned-URL guard pins", () => {
-  expect(readdirSync(join(ROOT, "dist")).sort()).toEqual([...BOOTSTRAPS, "clay.standalone.js", "m", "page", "server"].sort());
+  expect(readdirSync(DIST).sort()).toEqual([...BOOTSTRAPS, "clay.standalone.js", "m", "page", "server"].sort());
   for (const name of BOOTSTRAPS) {
-    expect(readFileSync(join(ROOT, "dist", name), "utf8")).toContain('"dir":"m/"');
+    expect(readFileSync(join(DIST, name), "utf8")).toContain('"dir":"m/"');
   }
-  expect(readdirSync(join(ROOT, "dist/m"))).toContain("manifest.json");
-  expect(readdirSync(join(ROOT, "dist/server")).sort()).toEqual(["checkpoint.cjs", "checkpoint.mjs", "core.cjs", "rooms.cjs", "rooms.mjs"]);
+  expect(readdirSync(join(DIST, "m"))).toContain("manifest.json");
+  expect(readdirSync(join(DIST, "server")).sort()).toEqual(["checkpoint.cjs", "checkpoint.mjs", "core.cjs", "rooms.cjs", "rooms.mjs"]);
 });

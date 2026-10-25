@@ -17,16 +17,16 @@ const ENTRIES = {
 
 let built = null;
 
-export function buildServerCore() {
+export function buildServerCore(outdir = DIST) {
   built ??= (async () => {
-    await mkdir(DIST, { recursive: true });
+    await mkdir(outdir, { recursive: true });
     const result = await esbuild({
       stdin: {
         contents: Object.entries(ENTRIES).map(([name, file]) => `export * as ${name} from ${JSON.stringify(file)};`).join('\n'),
         resolveDir: ROOT,
         sourcefile: 'server-core.js',
       },
-      outfile: join(DIST, CORE),
+      outfile: join(outdir, CORE),
       absWorkingDir: ROOT,
       bundle: true,
       platform: 'node',
@@ -42,11 +42,11 @@ export function buildServerCore() {
 
 // The entry `name` re-exports its half of the core: `<name>.cjs` for require and
 // `<name>.mjs` for import, both the same module instance.
-export async function writeServerEntry(name) {
+export async function writeServerEntry(name, outdir = DIST) {
   const source = await import(pathToFileURL(ENTRIES[name]).href);
   const names = Object.keys(source).filter((key) => key !== 'default').sort();
-  await writeFile(join(DIST, `${name}.cjs`), `module.exports = require('./${CORE}').${name};\n`);
-  await writeFile(join(DIST, `${name}.mjs`),
+  await writeFile(join(outdir, `${name}.cjs`), `module.exports = require('./${CORE}').${name};\n`);
+  await writeFile(join(outdir, `${name}.mjs`),
     `import ${name} from './${name}.cjs';\nexport default ${name};\nexport const {\n${names.map((key) => `  ${key},`).join('\n')}\n} = ${name};\n`);
   return names;
 }
