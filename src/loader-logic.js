@@ -163,6 +163,13 @@ const PLUGIN_ORDER = ["visitor-drafts", "richclay", "indicator", "sortable", "un
 // files answers `unsupported` and the editor offers to embed the file instead.
 const IMPLIES = { cms: ["quickcrop", "upload"], "ai-edit": ["wire"], page: ["live", "sync", "upload"] };
 
+// A Document's editor owns its article's rich text, so richclay (for [editable]) has
+// nothing to do there; plugins=page,richclay still loads it.
+const DISPLACES = { page: ["richclay"] };
+// No first paint or keystroke waits for these. source keeps the file's bytes outside
+// the edited parts stable; a save before it installs is the ordinary full serialization.
+const LATE = new Set(["source"]);
+
 function parseCsv(params, key, enabled, apply) {
   const raw = params.get(key);
   if (!raw) return;
@@ -220,13 +227,17 @@ export function resolveModules(params, isEditMode, { isDraftMode = false, hasSap
 
   if (!isEditMode && enabled.has("page")) enabled.add("page-view");
 
+  for (const [owner, names] of Object.entries(DISPLACES)) {
+    if (enabled.has(owner)) for (const name of names) if (!explicit.has(name)) enabled.delete(name);
+  }
+
   const plugins = [];
+  const late = [];
   for (const name of PLUGIN_ORDER) {
     if (!enabled.has(name)) continue;
     const spec = PLUGIN_PATHS[name];
     if (spec.editOnly && !isEditMode) continue;
-    plugins.push(spec.path);
+    (LATE.has(name) ? late : plugins).push(spec.path);
   }
-
-  return { core, plugins };
+  return { core, plugins, late };
 }

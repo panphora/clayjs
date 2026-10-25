@@ -704,3 +704,49 @@ describe("a queued re-pair pairs against the page, not the clone a save is about
     expect(next).toContain('<p class="x">same</p>');
   });
 });
+
+/**
+ * `source` loads late — after the editor takes input on a Document, right after
+ * clay:ready everywhere else — so its install can land on a document that has
+ * already changed. That window is not a hole: the save it interrupts is the
+ * ordinary full serialization, and the save after it installs still carries the
+ * change, whichever of the two renders it produces.
+ */
+describe("a change before the late plugin installs", () => {
+  const LATE = "<!DOCTYPE html>\n<html>\n  <head><title>Notes</title></head>\n  <body class='page'>\n    <ul id=list>\n      <li data-id='a'>alpha</li>\n      <li data-id='b'>beta</li>\n    </ul>\n  </body>\n</html>";
+
+  let lateSnapshot, lateSource;
+
+  beforeAll(async () => {
+    jest.resetModules();
+    const parsed = new DOMParser().parseFromString(LATE, "text/html");
+    document.replaceChild(document.importNode(parsed.documentElement, true), document.documentElement);
+    window.clayEditMode = true;
+    global.fetch = jest.fn(async () => ({
+      ok: true,
+      status: 200,
+      redirected: false,
+      type: "basic",
+      headers: { get: (name) => (name.toLowerCase() === "content-type" ? "text/html; charset=utf-8" : null) },
+      text: async () => LATE,
+    }));
+    lateSnapshot = await import("../../src/core/snapshot.js");
+  });
+
+  afterAll(() => {
+    lateSnapshot.setSaveRenderer(null);
+  });
+
+  test("the changed DOM is in the saved bytes", async () => {
+    document.querySelector("[data-id='b']").firstChild.data = "beta, edited before the install";
+    ({ source: lateSource } = await import("../../src/plugins/source.js"));
+    await lateSource.ready;
+    expect(lateSource.stats().installed).toBe(true);
+
+    const out = lateSnapshot.captureForSave({ emitForSync: false });
+    const saved = new DOMParser().parseFromString(out, "text/html");
+
+    expect(saved.querySelector("[data-id='b']").textContent).toBe("beta, edited before the install");
+    expect(saved.querySelector("[data-id='a']").textContent).toBe("alpha");
+  });
+});

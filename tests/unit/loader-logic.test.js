@@ -7,20 +7,18 @@ function params(obj = {}) {
 
 describe("resolveModules", () => {
   test("edit mode: default plugins (richclay, source) + full core waves", () => {
-    const { core, plugins } = resolveModules(params(), true);
+    const { core, plugins, late } = resolveModules(params(), true);
     expect(core[0]).toBe("lib/mutation.js");
     expect(core).toContain("core/edit-mode.js");
     expect(core).toContain("core/snapshot.js");
     expect(core).toContain("core/save.js");
     expect(core).toContain("lib/cache-bust.js");
-    expect(plugins).toEqual([
-      "plugins/richclay.js",
-      "plugins/source.js",
-    ]);
+    expect(plugins).toEqual(["plugins/richclay.js"]);
+    expect(late).toEqual(["plugins/source.js"]);
   });
 
   test("view mode: drops editOnly core wave and editOnly plugins, keeps always core", () => {
-    const { core, plugins } = resolveModules(params(), false);
+    const { core, plugins, late } = resolveModules(params(), false);
     expect(core).toEqual([
       "lib/mutation.js",
       "core/edit-mode.js",
@@ -29,6 +27,7 @@ describe("resolveModules", () => {
       "core/page-data.js",
     ]);
     expect(plugins).toEqual([]); // richclay is editOnly, dropped in view mode
+    expect(late).toEqual([]);    // so is source
   });
 
   test("view mode keeps sync + cms (not editOnly) while dropping richclay", () => {
@@ -83,24 +82,24 @@ describe("resolveModules", () => {
   // hypercms looks the cropper up as clay.quickcrop and silently uploads the raw
   // file when it is absent, so cms must pull quickcrop in rather than degrade.
   test("cms implies quickcrop, ahead of cms in load order", () => {
-    const { plugins } = resolveModules(params({ plugins: "cms" }), true);
+    const { plugins, late } = resolveModules(params({ plugins: "cms" }), true);
     expect(plugins).toEqual([
       "plugins/richclay.js",
       "plugins/quickcrop.js",
       "plugins/upload.js",
       "plugins/cms.js",
-      "plugins/source.js",
     ]);
+    expect(late).toEqual(["plugins/source.js"]);
   });
 
   test("excluding quickcrop overrides the implication", () => {
-    const { plugins } = resolveModules(params({ plugins: "cms", exclude: "quickcrop" }), true);
+    const { plugins, late } = resolveModules(params({ plugins: "cms", exclude: "quickcrop" }), true);
     expect(plugins).toEqual([
       "plugins/richclay.js",
       "plugins/upload.js",
       "plugins/cms.js",
-      "plugins/source.js",
     ]);
+    expect(late).toEqual(["plugins/source.js"]);
   });
 
   test("quickcrop loads on its own request, in view mode too", () => {
@@ -109,26 +108,28 @@ describe("resolveModules", () => {
   });
 
   test("plugins CSV adds listed plugins in canonical order", () => {
-    const { plugins } = resolveModules(params({ plugins: "indicator,sortable,undo" }), true);
+    const { plugins, late } = resolveModules(params({ plugins: "indicator,sortable,undo" }), true);
     expect(plugins).toEqual([
       "plugins/richclay.js",
       "plugins/indicator.js",
       "plugins/sortable.js",
       "plugins/undo.js",
-      "plugins/source.js",
     ]);
+    expect(late).toEqual(["plugins/source.js"]);
   });
 
   test("exclude CSV removes a default-on plugin", () => {
-    const { plugins } = resolveModules(params({ exclude: "richclay" }), true);
-    expect(plugins).toEqual(["plugins/source.js"]);
+    const { plugins, late } = resolveModules(params({ exclude: "richclay" }), true);
+    expect(plugins).toEqual([]);
+    expect(late).toEqual(["plugins/source.js"]);
   });
 
   test("exclude=source opts a page out of the source-preserving save", () => {
     // The whole escape hatch for a default-on plugin, and the one a page uses when it
     // does not want the parser downloaded or the extra boot request made.
-    expect(resolveModules(params({ exclude: "source" }), true).plugins)
-      .toEqual(["plugins/richclay.js"]);
+    const { plugins, late } = resolveModules(params({ exclude: "source" }), true);
+    expect(plugins).toEqual(["plugins/richclay.js"]);
+    expect(late).toEqual([]);
   });
 
   // ai-edit is a consumer of clay.wire: it asks `clay.wire.helpers()` whether the
@@ -171,23 +172,22 @@ describe("resolveModules", () => {
   // Excluding the wire takes ai-edit out with it, since the plugin cannot run
   // without it, and nothing ai-edit would have implied comes in.
   test("exclude=wire drops ai-edit and what it implied", () => {
-    expect(resolveModules(params({ plugins: "ai-edit", exclude: "wire" }), true).plugins)
-      .toEqual(["plugins/richclay.js", "plugins/source.js"]);
-    expect(resolveModules(params({ exclude: "wire" }), true).plugins)
-      .toEqual(["plugins/richclay.js", "plugins/source.js"]);
-    expect(resolveModules(params({ exclude: "ai-edit" }), true).plugins)
-      .toEqual(["plugins/richclay.js", "plugins/source.js"]);
+    for (const query of [{ plugins: "ai-edit", exclude: "wire" }, { exclude: "wire" }, { exclude: "ai-edit" }]) {
+      const { plugins, late } = resolveModules(params(query), true);
+      expect(plugins).toEqual(["plugins/richclay.js"]);
+      expect(late).toEqual(["plugins/source.js"]);
+    }
   });
 
   test("unknown plugin name warns and is skipped (plugins param)", () => {
     const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
-    const { plugins } = resolveModules(params({ plugins: "bogus,indicator" }), true);
+    const { plugins, late } = resolveModules(params({ plugins: "bogus,indicator" }), true);
     expect(warn).toHaveBeenCalledWith('clayjs: unknown plugin "bogus"');
     expect(plugins).toEqual([
       "plugins/richclay.js",
       "plugins/indicator.js",
-      "plugins/source.js",
     ]);
+    expect(late).toEqual(["plugins/source.js"]);
     warn.mockRestore();
   });
 
@@ -199,11 +199,12 @@ describe("resolveModules", () => {
   });
 
   test("ai-edit is off unless asked for, and the wire with it", () => {
-    expect(resolveModules(params(), true).plugins).toEqual([
-      "plugins/richclay.js",
-      "plugins/source.js",
-    ]);
-    expect(resolveModules(params(), false).plugins).toEqual([]);
+    const edit = resolveModules(params(), true);
+    expect(edit.plugins).toEqual(["plugins/richclay.js"]);
+    expect(edit.late).toEqual(["plugins/source.js"]);
+    const view = resolveModules(params(), false);
+    expect(view.plugins).toEqual([]);
+    expect(view.late).toEqual([]);
   });
 
   test("ai-edit does not bring undo, which would take Cmd+Z in every text field", () => {
@@ -213,7 +214,7 @@ describe("resolveModules", () => {
 });
 
 test("draft mode puts visitor-drafts first and drops every host-facing plugin", () => {
-  const { plugins } = resolveModules(
+  const { plugins, late } = resolveModules(
     params({ plugins: "sync,upload,sortable,undo,visitor-drafts" }),
     true,
     { isDraftMode: true }
@@ -225,6 +226,7 @@ test("draft mode puts visitor-drafts first and drops every host-facing plugin", 
   expect(plugins).not.toContain("sync/live-sync.js");
   expect(plugins).not.toContain("plugins/upload.js");
   expect(plugins).not.toContain("plugins/source.js");
+  expect(late).toEqual([]);
 });
 
 test("draft mode drops the [refetch-on-save] hook, which GETs the host after every save", () => {
@@ -245,8 +247,9 @@ test("live is opt-in, loads in view mode, and brings nothing with it", () => {
 });
 
 test("a page with a [sap] root loads the sapjs core, in view mode too, before source", () => {
-  const edit = resolveModules(params(), true, { hasSap: true }).plugins;
-  expect(edit).toEqual(["plugins/richclay.js", "plugins/derive.js", "plugins/source.js"]);
+  const { plugins: edit, late } = resolveModules(params(), true, { hasSap: true });
+  expect(edit).toEqual(["plugins/richclay.js", "plugins/derive.js"]);
+  expect(late).toEqual(["plugins/source.js"]);
   expect(resolveModules(params(), false, { hasSap: true }).plugins).toEqual(["plugins/derive.js"]);
   expect(resolveModules(params(), true).plugins).not.toContain("plugins/derive.js");
 });
@@ -287,5 +290,92 @@ describe("page-view, the reader half of page", () => {
     expect(warn).toHaveBeenCalledWith('clayjs: unknown plugin "page-view"');
     expect(plugins).toEqual([]);
     warn.mockRestore();
+  });
+});
+
+// A Document's editor owns its article's rich text, so richclay has nothing to do
+// there; `plugins=page,richclay` still loads it for a page that asks by name. And
+// nothing a first keystroke waits for includes `source`: its install is asynchronous
+// and a save before it lands is the ordinary full serialization.
+describe("a Document's plugin plan", () => {
+  const everywhere = (plan) => [...plan.core, ...plan.plugins, ...plan.late];
+
+  test("plugins=page: no richclay anywhere, source only in late", () => {
+    const plan = resolveModules(params({ plugins: "page" }), true);
+    expect(everywhere(plan)).not.toContain("plugins/richclay.js");
+    expect(plan.plugins).not.toContain("plugins/source.js");
+    expect(plan.late).toEqual(["plugins/source.js"]);
+  });
+
+  test("plugins=page,richclay: asking for it by name defeats the displacement", () => {
+    const plan = resolveModules(params({ plugins: "page,richclay" }), true);
+    expect(plan.plugins).toContain("plugins/richclay.js");
+    expect(plan.late).toEqual(["plugins/source.js"]);
+  });
+
+  test("plugins=page,source: source stays late even when named", () => {
+    const plan = resolveModules(params({ plugins: "page,source" }), true);
+    expect(plan.plugins).not.toContain("plugins/source.js");
+    expect(plan.late).toEqual(["plugins/source.js"]);
+  });
+
+  test("view mode plugins=page: neither richclay nor source", () => {
+    const plan = resolveModules(params({ plugins: "page" }), false);
+    expect(everywhere(plan)).not.toContain("plugins/richclay.js");
+    expect(everywhere(plan)).not.toContain("plugins/source.js");
+  });
+
+  test("plugins=sync in edit mode: richclay as before, source only in late", () => {
+    const plan = resolveModules(params({ plugins: "sync" }), true);
+    expect(plan.plugins).toContain("plugins/richclay.js");
+    expect(plan.plugins).not.toContain("plugins/source.js");
+    expect(plan.late).toEqual(["plugins/source.js"]);
+  });
+
+  test("plugins=sync in view mode: nothing is late", () => {
+    expect(resolveModules(params({ plugins: "sync" }), false).late).toEqual([]);
+  });
+});
+
+describe("late plugins start loading on their own", () => {
+  test("with no page plugin, after clay:ready plus one microtask and no timer", async () => {
+    jest.resetModules();
+    jest.restoreAllMocks();
+    document.documentElement.innerHTML =
+      '<head><title>Notes</title></head><body><article clay="freeze" data-page="1"><p>Hi</p></article></body>';
+    window.clay = {};
+    window.clayEditMode = true;
+    globalThis.fetch = jest.fn(async () => ({
+      ok: true,
+      status: 200,
+      redirected: false,
+      type: "basic",
+      headers: { get: (name) => (name.toLowerCase() === "content-type" ? "text/html; charset=utf-8" : null) },
+      text: async () => '<!DOCTYPE html><html><head><title>Notes</title></head><body><p>Hi</p></body></html>',
+    }));
+
+    const events = [];
+    const { MODULES } = await import("../../src/loader-logic.js");
+    const load = MODULES["plugins/source.js"];
+    MODULES["plugins/source.js"] = () => {
+      events.push("source");
+      return load();
+    };
+    document.addEventListener("clay:ready", () => {
+      events.push("ready");
+      setTimeout(() => events.push("timer"), 0);
+    });
+
+    const { boot } = await import("../../src/loader.js");
+    await boot("https://clayjs.com/v1", new URLSearchParams({ exclude: "richclay" }), () => {});
+
+    expect(events).toEqual(["ready", "source"]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(events).toEqual(["ready", "source", "timer"]);
+    expect(window.clay.source).toBeDefined();
+
+    MODULES["plugins/source.js"] = load;
+    delete window.clay;
+    delete window.clayEditMode;
   });
 });

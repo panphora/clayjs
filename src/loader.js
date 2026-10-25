@@ -89,6 +89,25 @@ export async function boot(base, params, readyResolve, manifest = null) {
   installViewModeNotice(isEditMode);
   readyResolve(window.clay);
   document.dispatchEvent(new CustomEvent("clay:ready", { detail: { clay: window.clay } }));
+  if (plan.late.length) loadLate(plan.late, loaded);
+}
+
+// Plugins no first paint or keystroke waits for. They load after the editor takes input
+// (right away on a page without one), one at a time and in plan order, and a failure
+// degrades to absent as at boot.
+async function loadLate(paths, loaded) {
+  try {
+    await window.clay.page?.ready;
+  } catch {}
+  for (const path of paths) {
+    try {
+      const mod = await MODULES[path]();
+      loaded[path] = mod;
+      attachPluginMember(path, mod, loaded);
+    } catch (err) {
+      console.error(`clayjs: plugin "${path}" failed to load, continuing without it:`, err);
+    }
+  }
 }
 
 // The explicit mount phase for a derive engine (sapjs or its core). It runs after
