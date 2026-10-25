@@ -229,7 +229,12 @@ export function suspendAutosave() {
 export function resumeAutosave() {
   if (autosaveSuspended === 0) return;
   autosaveSuspended--;
-  if (autosaveSuspended > 0 || !autosaveMissed) return;
+  if (autosaveSuspended > 0) return;
+  if (soonDeferred) {
+    soonDeferred = false;
+    soonTimer = setTimeout(fireSoon, 0);
+  }
+  if (!autosaveMissed) return;
   autosaveMissed = false;
   savePageThrottled();
 }
@@ -528,6 +533,12 @@ export function savePage(callback = () => {}) {
       return resolve(skipped);
     }
 
+    // From here this call answers: it either writes, or reports why it did not,
+    // and the soon() callers waiting on the save queued behind the one that was
+    // on the wire when they asked get that answer.
+    const soonQueued = takeSoonQueued();
+    const settleSoonQueued = (result) => soonQueued.forEach((done) => done(result));
+
     // Check if offline - set DOM state immediately for UI feedback
     // but still try the fetch (navigator.onLine can be wrong)
     const wasOffline = !navigator.onLine;
@@ -550,7 +561,9 @@ export function savePage(callback = () => {}) {
       if (typeof callback === 'function') {
         callback(result);
       }
-      return resolve(result);
+      resolve(result);
+      settleSoonQueued(result);
+      return;
     }
 
     // An explicit save asks the DIRTY question: write anything the person would
@@ -568,7 +581,9 @@ export function savePage(callback = () => {}) {
       gateClearIfUnchanged(gateToken);
       const skipped = skipped_('No changes to save');
       callback(skipped);
-      return resolve(skipped);
+      resolve(skipped);
+      settleSoonQueued(skipped);
+      return;
     }
 
     // Start debounced 'saving' state (only shows if save takes >500ms)
@@ -586,6 +601,7 @@ export function savePage(callback = () => {}) {
         callback(result);
       }
       resolve(result);
+      settleSoonQueued(result);
       drainPendingSave();
     });
   });
@@ -803,6 +819,35 @@ const SOON_MAX_MS = 1000;
 let soonTimer = null;
 let soonStarted = 0;
 let soonWaiters = [];
+// Callers whose timer fired while a save was on the wire. Their call queued one
+// behind it, and they wait for THAT save's result: the skipped answer to their
+// own call describes nothing they asked for.
+let soonQueuedWaiters = [];
+// The timer fired while autosave was suspended. The callers keep waiting and
+// resumeAutosave arms the timer again.
+let soonDeferred = false;
+
+const takeSoonQueued = () => {
+  const waiters = soonQueuedWaiters;
+  soonQueuedWaiters = [];
+  return waiters;
+};
+
+function fireSoon() {
+  soonTimer = null;
+  if (autosaveSuspended > 0) {
+    soonDeferred = true;
+    return;
+  }
+  const waiters = soonWaiters;
+  soonWaiters = [];
+  if (isSaveInProgress()) {
+    soonQueuedWaiters.push(...waiters);
+    savePage();
+    return;
+  }
+  savePage().then((result) => waiters.forEach((done) => done(result)));
+}
 
 export function savePageSoon() {
   const now = Date.now();
@@ -810,12 +855,7 @@ export function savePageSoon() {
   else clearTimeout(soonTimer);
   return new Promise((resolve) => {
     soonWaiters.push(resolve);
-    soonTimer = setTimeout(() => {
-      soonTimer = null;
-      const waiters = soonWaiters;
-      soonWaiters = [];
-      savePage().then((result) => waiters.forEach((done) => done(result)));
-    }, Math.max(0, Math.min(SOON_MS, soonStarted + SOON_MAX_MS - now)));
+    soonTimer = setTimeout(fireSoon, Math.max(0, Math.min(SOON_MS, soonStarted + SOON_MAX_MS - now)));
   });
 }
 

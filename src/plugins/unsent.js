@@ -1,5 +1,11 @@
 // Text typed into chrome and not yet sent (a comment box, a description being edited),
 // kept per record and name, outside the file. A redraw or a reload brings it back.
+//
+// The record a field belongs to is named by an `unsent-key` attribute on its nearest
+// such ancestor, and by the nearest `[data-id]` ancestor when there is none: a view
+// with two draft fields under one record names each scope it wants kept apart. The
+// name is the field's own `unsent` attribute. A draft is pending while the field's
+// value differs from the base it started at, an emptied field included.
 import { registerUnsavedState } from "../lib/unsaved-state.js";
 import { storage } from "../lib/doc-storage.js";
 
@@ -9,9 +15,10 @@ const bases = new WeakMap();
 const pending = registerUnsavedState({ id: "unsent", isPending: () => drafts.size > 0 });
 
 const keyOf = (el) => {
-  const record = el.closest("[data-id]");
+  const scope = el.closest("[unsent-key]");
+  const record = (scope && scope.getAttribute("unsent-key")) || el.closest("[data-id]")?.dataset.id;
   const name = el.getAttribute("unsent");
-  return record && name ? `${record.dataset.id}|${name}` : null;
+  return record && name ? `${record}|${name}` : null;
 };
 const split = (key) => { const at = key.indexOf("|"); return [key.slice(0, at), key.slice(at + 1)]; };
 
@@ -31,15 +38,19 @@ document.addEventListener("input", (e) => {
   const key = el && keyOf(el);
   if (!key) return;
   const base = bases.get(el) ?? drafts.get(key)?.base ?? "";
-  if (el.value.trim() === "" || el.value === base) drafts.delete(key);
-  else drafts.set(key, { base, text: el.value });
+  if (el.value === base) {
+    drafts.delete(key);
+    bases.delete(el);
+  } else {
+    drafts.set(key, { base, text: el.value });
+  }
   persist();
 }, true);
 
 function restore(el) {
   const key = keyOf(el);
   const draft = key && drafts.get(key);
-  if (!draft || el.value === draft.text) return;
+  if (!draft) return;
   const current = el.value;
   bases.set(el, draft.base);
   el.value = draft.text;

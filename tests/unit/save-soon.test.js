@@ -108,21 +108,77 @@ test("a call during an in-flight save rides savePage's existing queue", async ()
   expect(requests.length).toBe(1);
 
   edit("second-edit");
-  const second = save.savePageSoon();
+  let secondResult;
+  const second = save.savePageSoon().then((result) => {
+    secondResult = result;
+    return result;
+  });
   jest.advanceTimersByTime(250);
   await flush();
   expect(requests.length).toBe(1);
-  await expect(second).resolves.toMatchObject({ msgType: "skipped", msg: "Save already in progress" });
+  expect(secondResult).toBe(undefined);
 
   requests[0].resolve(okResponse());
   await flush();
   await expect(first).resolves.toMatchObject({ ok: true, msg: "Saved" });
+  expect(secondResult).toBe(undefined);
 
   await flush();
   expect(requests.length).toBe(2);
   expect(requests[1].body).toContain("second-edit");
   requests[1].resolve(okResponse());
   await flush();
+  await expect(second).resolves.toMatchObject({ ok: true, msg: "Saved" });
+});
+
+test("a queued caller receives the queued write's failure", async () => {
+  const requests = [];
+  global.fetch = jest.fn((url, options = {}) => new Promise((resolve) => {
+    requests.push({ body: String(options.body ?? ""), resolve });
+  }));
+
+  edit("first-edit");
+  const first = save.savePageSoon();
+  jest.advanceTimersByTime(250);
+  await flush();
+  expect(requests.length).toBe(1);
+
+  edit("second-edit");
+  const second = save.savePageSoon();
+  jest.advanceTimersByTime(250);
+  await flush();
+  expect(requests.length).toBe(1);
+
+  requests[0].resolve(okResponse());
+  await flush();
+  await expect(first).resolves.toMatchObject({ ok: true, msg: "Saved" });
+  await flush();
+  expect(requests.length).toBe(2);
+  expect(requests[1].body).toContain("second-edit");
+
+  requests[1].resolve(failResponse());
+  await flush();
+  await expect(second).resolves.toMatchObject({ ok: false, msgType: "error" });
+});
+
+test("a suspended autosave holds the soon timer until it resumes", async () => {
+  edit("held-edit");
+  const result = save.savePageSoon();
+  save.suspendAutosave();
+
+  jest.advanceTimersByTime(250);
+  await flush();
+  expect(global.fetch).not.toHaveBeenCalled();
+
+  jest.advanceTimersByTime(2000);
+  await flush();
+  expect(global.fetch).not.toHaveBeenCalled();
+
+  save.resumeAutosave();
+  jest.advanceTimersByTime(0);
+  await flush();
+  expect(global.fetch).toHaveBeenCalledTimes(1);
+  await expect(result).resolves.toMatchObject({ ok: true, msg: "Saved" });
 });
 
 test("a failed save settles every waiter with the failure", async () => {

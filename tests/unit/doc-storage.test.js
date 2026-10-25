@@ -49,6 +49,40 @@ test("a setItem that throws keeps the value readable in this tab and returns fal
   expect(storage.local.get("draft")).toEqual({ text: "kept" });
 });
 
+test("a write that fails to persist wins over the older stored value until a write succeeds", () => {
+  path("/full.html");
+  const storageRef = window.sessionStorage;
+  expect(storage.session.set("draft", "old")).toBe(true);
+  const setItem = jest.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+    throw new DOMException("full", "QuotaExceededError");
+  });
+
+  expect(storage.session.set("draft", "new")).toBe(false);
+  expect(storage.session.get("draft")).toBe("new");
+  expect(JSON.parse(storageRef.getItem("clay:doc:/full.html:draft"))).toBe("old");
+
+  setItem.mockRestore();
+  expect(storage.session.set("draft", "kept")).toBe(true);
+  expect(storage.session.get("draft")).toBe("kept");
+});
+
+test("a removal that fails to persist hides the stored value until a write succeeds", () => {
+  path("/full.html");
+  const storageRef = window.sessionStorage;
+  expect(storage.session.set("panel", "open")).toBe(true);
+  const removeItem = jest.spyOn(Storage.prototype, "removeItem").mockImplementation(() => {
+    throw new DOMException("full", "QuotaExceededError");
+  });
+
+  storage.session.remove("panel");
+  expect(storage.session.get("panel")).toBe(undefined);
+  expect(JSON.parse(storageRef.getItem("clay:doc:/full.html:panel"))).toBe("open");
+
+  removeItem.mockRestore();
+  expect(storage.session.set("panel", "shut")).toBe(true);
+  expect(storage.session.get("panel")).toBe("shut");
+});
+
 test("a sessionStorage that throws falls back to memory for the life of the tab", () => {
   path("/blocked.html");
   const descriptor = Object.getOwnPropertyDescriptor(window, "sessionStorage");

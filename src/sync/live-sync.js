@@ -128,6 +128,7 @@ const authoredAttr = (el) => el.getAttribute('data-id') || el.getAttribute('id')
 function countAuthored(root) {
   const counts = new Map();
   const visit = (el) => {
+    if (el.matches(SYNC_IGNORE_SELECTOR)) return;
     const id = authoredAttr(el);
     if (id) counts.set(id, (counts.get(id) || 0) + 1);
     const kids = el.localName === 'template' && el.content ? el.content.children : el.children;

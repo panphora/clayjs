@@ -21,6 +21,13 @@ const PAGE = `
       <h3>Card two</h3>
       <div class="detail" clay="editor-ui"><textarea class="comment" unsent="comment"></textarea></div>
     </article>
+    <article class="card" data-id="c3">
+      <h3>Card three</h3>
+      <div class="detail" clay="editor-ui">
+        <section unsent-key="c3:k1"><input class="item" unsent="item"></section>
+        <section unsent-key="c3:k2"><input class="item" unsent="item"></section>
+      </div>
+    </article>
   </div>
 `;
 
@@ -101,6 +108,71 @@ test("returning the text to its base drops it and lets the close warning go", ()
   type(input, "the saved description");
   expect(window.clay.unsent.size).toBe(0);
   expect(pendingIds()).not.toContain("unsent");
+});
+
+test("an emptied field over a non-empty base stays a draft", async () => {
+  const input = reopen("c1", "the saved description");
+  type(input, "");
+
+  expect(window.clay.unsent.list()).toEqual([
+    { record: "c1", name: "comment", base: "the saved description", text: "" },
+  ]);
+
+  detailOf("c1").innerHTML = "";
+  await flush();
+  const again = reopen("c1", "the saved description");
+  await flush();
+  expect(again.value).toBe("");
+  expect(window.clay.unsent.size).toBe(1);
+});
+
+test("returning to the base forgets it, so a newer saved value becomes the next base", () => {
+  const input = reopen("c1", "version one");
+  type(input, "version one plus");
+  type(input, "version one");
+  expect(window.clay.unsent.size).toBe(0);
+
+  input.value = "version two";
+  type(input, "version two again");
+  expect(window.clay.unsent.list()).toEqual([
+    { record: "c1", name: "comment", base: "version two", text: "version two again" },
+  ]);
+});
+
+test("a restore into a field already holding the draft's text announces it and can be cleared", async () => {
+  const input = reopen("c1", "v1");
+  type(input, "v2");
+  detailOf("c1").innerHTML = "";
+  await flush();
+
+  const seen = [];
+  document.addEventListener("clay:unsent-restored", (event) => seen.push(event.detail), { once: true });
+  const again = reopen("c1", "v2");
+  await flush();
+  expect(seen).toEqual([{ base: "v1", current: "v2", stale: true }]);
+  expect(window.clay.unsent.list()).toEqual([
+    { record: "c1", name: "comment", base: "v1", text: "v2" },
+  ]);
+
+  window.clay.unsent.clear(again);
+  expect(window.clay.unsent.size).toBe(0);
+
+  detailOf("c1").innerHTML = "";
+  await flush();
+  const third = reopen("c1", "v2");
+  await flush();
+  expect(third.value).toBe("v2");
+});
+
+test("two fields under one data-id keep separate drafts when their unsent-key ancestors differ", () => {
+  const [first, second] = document.querySelectorAll('[data-id="c3"] [unsent="item"]');
+  type(first, "in the first checklist");
+  type(second, "in the second checklist");
+
+  expect(window.clay.unsent.list()).toEqual([
+    { record: "c3:k1", name: "item", base: "", text: "in the first checklist" },
+    { record: "c3:k2", name: "item", base: "", text: "in the second checklist" },
+  ]);
 });
 
 test("clear drops the draft, and the detail comes back empty", async () => {
