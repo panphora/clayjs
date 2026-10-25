@@ -115,6 +115,23 @@ h1,h2,h3,h4,p{margin:0}
 .add-card{grid-column:1/-1;display:flex;gap:8px;align-items:center;width:100%;padding:0 10px;font-size:12px;color:var(--muted);text-align:left}
 .add-card svg{width:15px}
 .add-list-tile{flex:0 0 272px;display:flex;align-items:center;gap:8px;justify-content:center;border:1px dashed #c3cfdc;border-radius:11px;min-height:48px;color:var(--muted);font-size:13px}
+.capture-form{grid-column:1/-1;background:var(--paper);border:1px solid #d5dfea;border-radius:8px;box-shadow:var(--shadow);padding:8px;margin:0 0 6px;display:flex;flex-direction:column;gap:6px}
+.capture-form label{display:block;font-size:11px;color:var(--muted)}
+.capture-form textarea{display:block;width:100%;margin-top:4px;padding:6px 8px;min-height:46px;font:inherit;font-size:13px;color:var(--ink);background:var(--paper);border:1px solid #cbd6e2;border-radius:6px;resize:vertical}
+.capture-actions{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.capture-actions button{font-size:12px;padding:0 10px}
+.capture-actions button[type="submit"]{background:var(--navy);color:#eef3f7}
+.capture-message{font-size:11px;color:var(--muted);margin:0}
+.capture-message:empty{display:none}
+.capture-preview{display:flex;flex-direction:column;gap:6px;border-top:1px solid var(--line);padding-top:6px}
+.capture-preview[hidden]{display:none}
+.capture-titles{margin:0;padding-left:18px;max-height:140px;overflow-y:auto;font-size:12px;color:var(--ink)}
+.capture-titles li{white-space:pre-wrap;overflow-wrap:anywhere}
+.capture-preview button{align-self:flex-start;font-size:12px;padding:0 10px}
+#board>.capture-form{flex:0 0 272px;margin:0}
+.list-empty{grid-column:1/-1;padding:6px 4px;font-size:12px;color:var(--muted);margin:0}
+.list-empty[hidden]{display:none}
+.no-lists{flex:0 0 272px;min-height:48px;display:flex;align-items:center;gap:8px;padding:12px;font-size:13px;color:var(--muted);background:var(--paper);border:1px dashed #c3cfdc;border-radius:11px}
 
 /* cards: the saved data is hidden, the face is drawn */
 .card{position:relative;background:var(--paper);border:1px solid #e1e7ee;border-radius:8px;box-shadow:var(--shadow);margin-bottom:9px;overflow:hidden;transition:border-color 160ms,box-shadow 160ms}
@@ -494,6 +511,21 @@ Give teams a useful starting point, with less noise and a little more room to th
   <button class="icon-button list-menu edit-only" data-act="list-menu" aria-label="List options"><svg aria-hidden="true"><use href="#i-more"/></svg></button>
   <button class="add-card edit-only" data-act="add-card"><svg aria-hidden="true"><use href="#i-plus"/></svg>Add a card</button>
   <button class="add-list-tile edit-only" data-act="add-list"><svg aria-hidden="true"><use href="#i-plus"/></svg>Add another list</button>
+  <form class="capture-form edit-only" id="capture-form">
+    <label>Card title<textarea name="title" unsent="card" rows="2"></textarea></label>
+    <div class="capture-actions">
+      <button type="submit">Add card</button>
+      <button type="button" data-act="preview-capture" hidden>Preview cards</button>
+      <button type="button" data-act="close-capture">Close</button>
+    </div>
+    <div class="capture-preview" hidden>
+      <ol class="capture-titles"></ol>
+      <button type="button" data-act="add-batch">Add cards</button>
+    </div>
+    <p class="capture-message" role="status"></p>
+  </form>
+  <p class="no-lists" role="status"><span></span> <button class="small-button edit-only" data-act="add-list">Add list</button></p>
+  <p class="list-empty" role="status"><span></span> <button class="small-button edit-only" data-act="add-card">Add card</button></p>
 
   <div class="menu" id="menu" role="menu" hidden></div>
   <div class="toast" id="toast" role="status" hidden></div>
@@ -690,6 +722,7 @@ Give teams a useful starting point, with less noise and a little more room to th
     if (!$(':scope > .list-handle', list)) list.prepend(part('.list-handle'));
     if (!$(':scope > .list-menu', list)) ($(':scope > .count', list) || $(':scope > .list-title', list)).after(part('.list-menu'));
     if (!$(':scope > .add-card', list)) list.append(part('.add-card'));
+    if (!$(':scope > .list-empty', list)) list.insertBefore(part('.list-empty'), $(':scope > .add-card', list));
   }
   function decorate() {
     for (const list of Data.lists()) decorateList(list);
@@ -872,6 +905,25 @@ Give teams a useful starting point, with less noise and a little more room to th
   function renderAll() {
     decorate();
     renderCounts();
+    renderEmpty();
+  }
+  function renderEmpty() {
+    const lists = Data.lists();
+    let none = $(':scope > .no-lists', board);
+    if (lists.length) {
+      if (none) none.remove();
+    } else {
+      if (!none) none = part('.no-lists');
+      if (none.parentNode !== board) board.insertBefore(none, $(':scope > .add-list-tile', board));
+      $('span', none).textContent = readOnly ? 'This board has no lists yet.' : 'No lists yet. Add one to start the board.';
+    }
+    for (const list of lists) {
+      const note = $(':scope > .list-empty', list);
+      if (!note) continue;
+      const empty = !$(':scope > ol.cards > .card', list);
+      note.hidden = !empty;
+      if (empty) $('span', note).textContent = readOnly ? 'No cards in this list.' : 'No cards yet.';
+    }
   }
   function changed() {
     renderCounts();
@@ -1025,14 +1077,13 @@ Give teams a useful starting point, with less noise and a little more room to th
   }
 
   /* ---------------------------------------------------------------- board actions */
-  async function addCard(list, top = false) {
-    const title = await prompt1('Add a card', 'Card title', '', { ok: 'Add card', max: 300 });
-    if (!title || !list.isConnected) return;
+  // A card and a list are built detached, so a composer can prepare one before it decides to keep it.
+  function makeCard(title, id, number) {
     const card = document.createElement('li');
     card.className = 'card';
     card.setAttribute('item', '');
-    card.dataset.id = rid('c');
-    card.dataset.num = String(Data.nextNumber());
+    card.dataset.id = id;
+    card.dataset.num = String(number);
     const h3 = document.createElement('h3');
     h3.className = 'card-title';
     h3.setAttribute('editmode:contenteditable', '');
@@ -1046,18 +1097,12 @@ Give teams a useful starting point, with less noise and a little more room to th
     comments.className = 'comments';
     card.append($('#face-blueprint').content.firstElementChild.cloneNode(true));
     card.append(h3, desc, attachments, comments);
-    const ol = $(':scope > .cards', list);
-    if (top) ol.prepend(card); else ol.append(card);
-    changed(card);
-    if (PHONE.matches) showList(list.dataset.id);
-    card.scrollIntoView({ block: 'nearest' });
+    return card;
   }
-  async function addList() {
-    const title = await prompt1('Add a list', 'List name', '', { ok: 'Add list', max: 120 });
-    if (!title) return;
+  function makeList(title, id) {
     const list = document.createElement('section');
     list.className = 'list';
-    list.dataset.id = rid('l');
+    list.dataset.id = id;
     list.dataset.tone = String(Data.lists().length % 6);
     list.setAttribute('item', '');
     const h2 = document.createElement('h2');
@@ -1073,11 +1118,332 @@ Give teams a useful starting point, with less noise and a little more room to th
     count.setAttribute('text', 'item.cards.length');
     count.textContent = '0';
     list.append(h2, count, ol);
-    board.insertBefore(list, $(':scope > .add-list-tile', board));
+    return list;
+  }
+
+  const CAPTURE = 'capture:';
+  const CARD_TITLE_MAX = 300;
+  const LIST_TITLE_MAX = 120;
+  const BATCH_MAX = 100;
+  let capture = null;
+  let capturePointer = false;
+
+  const captureListOf = record => (record.startsWith(CAPTURE) ? record.slice(CAPTURE.length) : null);
+
+  function resolveCaptureTarget({ listId, beforeId }) {
+    const list = Data.list(listId);
+    const parent = list?.querySelector(':scope > ol.cards');
+    const before = beforeId === null ? null : Data.card(beforeId);
+    if (!parent || (beforeId !== null && before?.parentElement !== parent)) return null;
+    return { list, parent, before };
+  }
+
+  // A paste is literal: blank lines are dropped, duplicates stay, and nothing is interpreted.
+  function batchTitles(raw) {
+    return raw.replace(/\r\n?/g, '\n').split('\n')
+      .map(title => title.trim()).filter(Boolean);
+  }
+
+  function batchProblem(titles) {
+    if (!titles.length) return 'Type a card title first.';
+    if (titles.length > BATCH_MAX) return `A batch can add up to ${BATCH_MAX} cards. This text has ${titles.length}.`;
+    if (titles.some(title => title.length > CARD_TITLE_MAX)) return `Each card title can be up to ${CARD_TITLE_MAX} characters.`;
+    return '';
+  }
+
+  const captureArea = () => capture && $('textarea', capture.form);
+
+  function captureMessage(text) {
+    const slot = capture && $('.capture-message', capture.form);
+    if (slot) slot.textContent = text || '';
+  }
+
+  function hideCapturePreview() {
+    if (!capture) return;
+    capture.previewing = false;
+    capture.preview = null;
+    const box = $('.capture-preview', capture.form);
+    if (!box) return;
+    box.hidden = true;
+    $('.capture-titles', box).textContent = '';
+  }
+
+  function updatePreviewButton() {
+    if (!capture) return;
+    const button = $('[data-act="preview-capture"]', capture.form);
+    if (!button) return;
+    const show = capture.kind === 'card' && batchTitles(captureArea().value).length > 1;
+    button.hidden = !show;
+    if (!show && capture.preview) hideCapturePreview();
+  }
+
+  function startCapturePreview() {
+    if (!capture || capture.kind !== 'card') return false;
+    const area = captureArea();
+    const raw = area.value;
+    const titles = batchTitles(raw);
+    const problem = batchProblem(titles);
+    if (problem) {
+      hideCapturePreview();
+      captureMessage(problem);
+      area.focus();
+      return false;
+    }
+    const box = $('.capture-preview', capture.form);
+    const listEl = $('.capture-titles', box);
+    listEl.textContent = '';
+    for (const title of titles) {
+      const li = document.createElement('li');
+      li.textContent = title;
+      listEl.append(li);
+    }
+    $('[data-act="add-batch"]', box).textContent = `Add ${titles.length} cards`;
+    box.hidden = false;
+    capture.preview = { raw, titles, listId: capture.listId, beforeId: capture.beforeId };
+    capture.previewing = true;
+    captureMessage('');
+    return true;
+  }
+
+  function confirmCaptureBatch() {
+    if (!capture || capture.submitting) return false;
+    const mine = capture;
+    const area = captureArea();
+    const preview = mine.preview;
+    if (!preview) return false;
+    if (area.value !== preview.raw) {
+      captureMessage('The text changed. Preview the cards again.');
+      startCapturePreview();
+      area.focus();
+      return false;
+    }
+    if (!editableNow()) {
+      captureMessage('This board is not open for editing, so nothing was added. Your text is kept.');
+      return false;
+    }
+    const titles = batchTitles(preview.raw);
+    const problem = batchProblem(titles);
+    if (problem) {
+      hideCapturePreview();
+      captureMessage(problem);
+      area.focus();
+      return false;
+    }
+    const target = resolveCaptureTarget(preview);
+    if (!target) {
+      hideCapturePreview();
+      captureMessage('That list is gone. Your text is kept.');
+      return false;
+    }
+    mine.submitting = true;
+    try {
+      const batch = titles.map(title => makeCard(title, rid('c'), 0));
+      const fragment = document.createDocumentFragment();
+      for (const card of batch) fragment.append(card);
+      const commit = commitAction('Add N cards', () => {
+        for (const card of batch) card.dataset.num = String(Data.nextNumber());
+        target.parent.insertBefore(fragment, target.before);
+        return batch;
+      });
+      if (!commit) return false;
+      hideCapturePreview();
+      if (area.value === preview.raw) {
+        area.value = '';
+        window.clay?.unsent?.clear(area);
+      }
+      captureMessage('');
+      if (PHONE.matches && mine.listId) showList(mine.listId);
+      batch[0].scrollIntoView({ block: 'nearest' });
+      captureFilterFeedback(batch);
+      area.focus();
+      return true;
+    } finally {
+      mine.submitting = false;
+    }
+  }
+
+  function captureFilterFeedback(added) {
+    if (!added.length || !window.Sap) return;
+    const f = filterOf(window.Sap(app));
+    if (!(f.q || f.labels.size || f.members.size || f.due.size)) return;
+    const hidden = added.filter(card => !matches(card, f));
+    if (!hidden.length) return;
+    const el = $('#toast');
+    clearTimeout(toastTimer);
+    pendingUndo = null;
+    undoHeld = null;
+    const noun = added.length === 1 ? 'card' : 'cards';
+    const message = hidden.length === added.length
+      ? `Added ${added.length} ${noun}, but your filters hide ${added.length === 1 ? 'it' : 'them'}.`
+      : `Added ${added.length} ${noun}. ${hidden.length} ${hidden.length === 1 ? 'is' : 'are'} hidden by your filters.`;
+    el.innerHTML = `<span>${esc(message)}</span><button type="button" data-act="show-capture" data-card="${esc(added[0].dataset.id)}">Show</button>`;
+    placeToast();
+    el.hidden = false;
+    toastTimer = setTimeout(() => { el.hidden = true; pendingUndo = null; }, 8000);
+  }
+
+  function keepCaptureAboveKeyboard() {
+    if (!capture || !capture.form.contains(document.activeElement)) return;
+    capture.form.scrollIntoView({ block: 'nearest' });
+  }
+
+  function openCapture({ kind = 'card', listId = null, beforeId = null, opener = null } = {}) {
+    if (!editableNow()) return null;
+    if (capture) {
+      if (capture.kind === kind && capture.listId === listId && capture.beforeId === beforeId) {
+        captureArea().focus();
+        return capture.form;
+      }
+      flushCaptureBlur();
+      closeCapture({ restoreFocus: false });
+    }
+    const cards = kind === 'card' && Data.list(listId)?.querySelector(':scope > ol.cards');
+    if (kind === 'card' && !cards) return null;
+    const form = part('#capture-form');
+    const area = $('textarea', form);
+    form.dataset.capture = kind;
+    $('label', form).firstChild.nodeValue = kind === 'list' ? 'List name' : 'Card title';
+    area.setAttribute('unsent', kind);
+    form.setAttribute('unsent-key', CAPTURE + (kind === 'list' ? 'board' : listId));
+    $('button[type="submit"]', form).textContent = kind === 'list' ? 'Add list' : 'Add card';
+    if (kind === 'list') board.insertBefore(form, $(':scope > .add-list-tile', board));
+    else cards.after(form);
+    capture = { form, kind, listId, beforeId, opener: opener || document.activeElement, composing: false, submitting: false, previewing: false, preview: null };
+    wireCapture(form);
+    window.visualViewport?.addEventListener('resize', keepCaptureAboveKeyboard);
+    updatePreviewButton();
+    area.focus();
+    area.setSelectionRange?.(area.value.length, area.value.length);
+    return form;
+  }
+
+  function closeCapture({ restoreFocus = true } = {}) {
+    if (!capture) return;
+    const { form, opener } = capture;
+    capture = null;
+    window.visualViewport?.removeEventListener('resize', keepCaptureAboveKeyboard);
+    if (form.contains(document.activeElement)) document.activeElement.blur();
+    form.remove();
+    if (restoreFocus && opener?.isConnected) opener.focus();
+  }
+
+  function releaseLostCapture() {
+    if (!capture || capture.form.isConnected) return;
+    window.visualViewport?.removeEventListener('resize', keepCaptureAboveKeyboard);
+    capture = null;
+  }
+
+  function wireCapture(form) {
+    const mine = () => capture && capture.form === form;
+    form.addEventListener('pointerdown', () => {
+      capturePointer = true;
+      setTimeout(() => { capturePointer = false; }, 0);
+    }, true);
+    form.addEventListener('compositionstart', () => { if (mine()) capture.composing = true; });
+    form.addEventListener('compositionend', () => { if (mine()) capture.composing = false; });
+    form.addEventListener('keydown', e => {
+      if (!mine()) return;
+      if (e.isComposing || e.keyCode === 229 || capture.composing) return;
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        submitCapture();
+        return;
+      }
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      e.stopPropagation();
+      closeCapture();
+    });
+    form.addEventListener('submit', e => { e.preventDefault(); submitCapture(); });
+    form.addEventListener('focusout', e => {
+      const next = e.relatedTarget;
+      Promise.resolve().then(() => captureBlurred(form, next));
+    });
+    $('textarea', form).addEventListener('input', () => {
+      if (!mine()) return;
+      captureMessage('');
+      updatePreviewButton();
+      if (capture.preview && captureArea().value !== capture.preview.raw) hideCapturePreview();
+    });
+  }
+
+  function captureBlurred(form, next) {
+    if (!capture || capture.form !== form) return;
+    if (capture.submitting || capture.previewing || capture.composing) return;
+    const to = next || document.activeElement;
+    if (to && form.contains(to)) return;
+    if (capturePointer) return;
+    if (!editableNow()) return;
+    if (!$('textarea', form).value.trim()) { closeCapture({ restoreFocus: false }); return; }
+    if (submitCapture()) closeCapture({ restoreFocus: false });
+  }
+
+  function flushCaptureBlur() {
+    if (!capture || !editableNow()) return;
+    if (capture.submitting || capture.composing) return;
+    if (!captureArea().value.trim()) return;
+    submitCapture();
+  }
+
+  function submitCapture() {
+    if (!capture || capture.submitting) return false;
+    const mine = capture;
+    const area = captureArea();
+    const raw = area.value;
+    const title = raw.trim();
+    if (!title) { area.focus(); return false; }
+    const max = mine.kind === 'list' ? LIST_TITLE_MAX : CARD_TITLE_MAX;
+    if (title.length > max) {
+      captureMessage(`${mine.kind === 'list' ? 'A list name' : 'A card title'} can be up to ${max} characters.`);
+      area.focus();
+      return false;
+    }
+    if (!editableNow()) {
+      captureMessage('This board is not open for editing, so nothing was added. Your text is kept.');
+      return false;
+    }
+    mine.submitting = true;
+    try {
+      const added = mine.kind === 'list' ? addCapturedList(title) : addCapturedCard(title);
+      if (!added) return false;
+      hideCapturePreview();
+      captureMessage('');
+      if (area.value === raw) {
+        area.value = '';
+        window.clay?.unsent?.clear(area);
+      }
+      if (mine.kind === 'card') captureFilterFeedback([added]);
+      area.focus();
+      return true;
+    } finally {
+      mine.submitting = false;
+    }
+  }
+
+  function addCapturedCard(title) {
+    const target = resolveCaptureTarget(capture);
+    if (!target) {
+      captureMessage('That list is gone. Your text is kept.');
+      return false;
+    }
+    const card = makeCard(title, rid('c'), Data.nextNumber());
+    const commit = commitAction('Add card', () => { if (target.before) target.parent.insertBefore(card, target.before); else target.parent.append(card); });
+    if (!commit) return false;
+    if (PHONE.matches) showList(capture.listId);
+    card.scrollIntoView({ block: 'nearest' });
+    return card;
+  }
+
+  function addCapturedList(title) {
+    const list = makeList(title, rid('l'));
+    const stop = capture.kind === 'list' ? capture.form : $(':scope > .add-list-tile', board);
+    const commit = commitAction('Add list', () => board.insertBefore(list, stop));
+    if (!commit) return false;
     showList(list.dataset.id);
     renderAll();
     setTimeout(tuneTouch, 450);
     list.scrollIntoView({ inline: 'end', block: 'nearest' });
+    return true;
   }
   async function renameList(list) {
     const title = await prompt1('Rename list', 'List name', Data.listTitle(list), { max: 120 });
@@ -1311,11 +1677,17 @@ Give teams a useful starting point, with less noise and a little more room to th
   const recordCard = record => record.split(':')[0];
   // A draft is kept only while its record is still here, so a draft whose card is gone stops
   // counting in the chip even before it is copied or discarded.
+  const recordHere = (record, held) => {
+    const listId = captureListOf(record);
+    if (listId !== null) return listId === 'board' || !!Data.list(listId);
+    const id = recordCard(record);
+    return !!board.querySelector(`[data-id="${CSS.escape(id)}"]`) || held.some(el => heldBy(el, id));
+  };
   function draftsKept() {
     const unsent = window.clay?.unsent;
     if (!unsent || !unsent.size) return 0;
     const held = holding();
-    return unsent.list().filter(d => board.querySelector(`[data-id="${CSS.escape(recordCard(d.record))}"]`) || held.some(el => heldBy(el, recordCard(d.record)))).length;
+    return unsent.list().filter(d => recordHere(d.record, held)).length;
   }
   // A closed card that a peer deleted keeps its drafts in this tab, so say so once, with the text.
   const reportedDrafts = new Set();
@@ -1325,8 +1697,7 @@ Give teams a useful starting point, with less noise and a little more room to th
     const held = holding();
     const lost = unsent.list().filter(d => {
       if (reportedDrafts.has(d.record)) return false;
-      if (held.some(el => heldBy(el, recordCard(d.record)))) return false;
-      return !board.querySelector(`[data-id="${CSS.escape(recordCard(d.record))}"]`);
+      return !recordHere(d.record, held);
     });
     if (!lost.length) return;
     for (const d of lost) reportedDrafts.add(d.record);
@@ -1343,7 +1714,8 @@ Give teams a useful starting point, with less noise and a little more room to th
     clearTimeout(toastTimer);
     pendingUndo = null;
     undoHeld = null;
-    el.innerHTML = `<span>${esc('A card you were writing in was deleted')}</span><button type="button">${esc('Copy text')}</button><button type="button">${esc('Discard')}</button>`;
+    const subject = lost.every(d => captureListOf(d.record) !== null) ? 'A list you were writing in was deleted' : 'A card you were writing in was deleted';
+    el.innerHTML = `<span>${esc(subject)}</span><button type="button">${esc('Copy text')}</button><button type="button">${esc('Discard')}</button>`;
     placeToast();
     el.hidden = false;
     const showText = () => {
@@ -1679,195 +2051,246 @@ Give teams a useful starting point, with less noise and a little more room to th
     return null;
   }
 
-  /* ---------------------------------------------------------------- one click handler for everything */
+  /* ---------------------------------------------------------------- one action table for every click */
+  // Navigation stays usable in view mode; an edit checks the mode when it runs, and again after an await.
+  const editableNow = () => !readOnly && (window.clay?.mode === 'edit' || window.clay?.mode === 'draft');
+  const actions = new Map();
+
+  function registerAction(name, handler, { edit = true } = {}) {
+    actions.set(name, { handler, edit });
+  }
+
+  async function dispatchAction(name, context) {
+    const action = actions.get(name);
+    if (!action || (action.edit && !editableNow())) return;
+    return action.handler(context);
+  }
+
+  // The one place a mutation happens: once, synchronously, and only while the board is editable.
+  function commitAction(label, mutate) {
+    if (!editableNow()) return null;
+    let value;
+    const apply = () => {
+      value = mutate();
+      if (value && typeof value.then === 'function') throw new Error('commitAction takes a synchronous mutation, not a promise');
+    };
+    const receipt = window.clay?.undo?.command ? window.clay.undo.command(label, apply) : (apply(), null);
+    changed();
+    return { value, receipt };
+  }
+
+  registerAction('open-card', ({ el }) => showCard(el.dataset.card), { edit: false });
+  registerAction('close-detail', () => hideCard(), { edit: false });
+  registerAction('toggle-filters', () => toggleFilters(), { edit: false });
+  registerAction('clear-filters', () => { clearFilters(); }, { edit: false });
+  registerAction('tab', () => { board.scrollTop = 0; }, { edit: false });
+  registerAction('undo', () => { const undo = pendingUndo; pendingUndo = null; $('#toast').hidden = true; if (undo) undo(); }, { edit: false });
+  registerAction('show-capture', ({ el }) => {
+    clearTimeout(toastTimer);
+    $('#toast').hidden = true;
+    const card = Data.card(el.dataset.card);
+    if (!card) { toast('That card is no longer on the board.'); return; }
+    const list = Data.listOf(card);
+    if (PHONE.matches && list) showList(list.dataset.id);
+    showCard(card.dataset.id);
+  }, { edit: false });
+
+  registerAction('add-list', ({ el }) => openCapture({ kind: 'list', opener: el }));
+  registerAction('close-capture', () => closeCapture());
+  registerAction('preview-capture', () => startCapturePreview());
+  registerAction('add-batch', () => confirmCaptureBatch());
+  registerAction('rename-board', () => renameBoard());
+  registerAction('change-my-name', () => changeMyName());
+  registerAction('edit-labels', () => editLabels());
+  registerAction('add-card', ({ el, list }) => list && openCapture({ kind: 'card', listId: list.dataset.id, opener: el }));
+  registerAction('list-menu', ({ el, list, event }) => {
+    if (!list) return;
+    event.stopPropagation();
+    if (!$('#menu').hidden && $('#menu').dataset.for === list.dataset.id) return closeMenu();
+    const tones = [0, 1, 2, 3, 4, 5].map((n) => `<button type="button" role="menuitemradio" class="tone-swatch" data-act="menu-tone" data-tone="${n}" aria-label="Color ${n + 1}" aria-checked="${list.dataset.tone === String(n)}"></button>`).join('');
+    return openMenu(el, [['menu-add-top', 'Add card at top', 'plus'], ['menu-rename', 'Rename list', 'edit'], ['menu-delete', 'Delete list', 'trash', 'danger']], `<div class="menu-tones" role="group" aria-label="List color">${tones}</div>`);
+  });
+  registerAction('menu-add-top', ({ list }) => {
+    closeMenu();
+    if (!list) return;
+    const first = $(':scope > ol.cards > .card', list);
+    return openCapture({ kind: 'card', listId: list.dataset.id, beforeId: first ? first.dataset.id : null, opener: $(':scope > .list-menu', list) });
+  });
+  registerAction('menu-rename', ({ list }) => { closeMenu(); if (list) return renameList(list); });
+  registerAction('menu-delete', ({ list }) => { closeMenu(); if (list) return deleteList(list); });
+  registerAction('menu-tone', ({ el, list }) => {
+    closeMenu();
+    if (!list) return;
+    list.dataset.tone = el.dataset.tone;
+    return renderAll();
+  });
+  registerAction('panel', async ({ el, card }) => {
+    if (!card) return;
+    detail.panel = detail.panel === el.dataset.panel ? null : el.dataset.panel;
+    if (detail.panel === 'members') {
+      detail.team = People.ready() ? ((await window.clay.people.available()) || window.clay.people.list()) : [];
+    }
+    if (window.Sap) window.Sap.refresh();
+  });
+  registerAction('add-me', async ({ card }) => {
+    if (!card) return;
+    const me = await window.clay.author(document.createElement('i')).catch(() => null);
+    if (me) { Data.setWords(card, 'data-members', [...words(card.dataset.members), me.id]); changed(card); }
+  });
+  registerAction('set-cover', ({ el, card }) => {
+    if (!card) return;
+    if (el.dataset.color) card.dataset.cover = el.dataset.color; else card.removeAttribute('data-cover');
+    card.removeAttribute('data-cover-image');
+    return changed(card);
+  });
+  registerAction('edit-desc', ({ card }) => {
+    if (!card) return;
+    const editor = $(':scope > .detail-body .desc-editor', card);
+    if (!editor) return;
+    editor.value = Data.desc(card);
+    clearDraftNote(editor);
+    detail.editingDesc = true;
+    if (window.Sap) window.Sap.refresh();
+    editor.focus();
+  });
+  registerAction('cancel-desc', ({ card }) => {
+    if (!card) return;
+    const editor = $(':scope > .detail-body .desc-editor', card);
+    if (editor) { window.clay?.unsent?.clear(editor); clearDraftNote(editor); }
+    detail.editingDesc = false;
+    if (window.Sap) window.Sap.refresh();
+  });
+  registerAction('save-desc', ({ card }) => {
+    if (!card) return;
+    const editor = $(':scope > .detail-body .desc-editor', card);
+    const value = editor.value.replace(/\s+$/, '');
+    window.clay?.unsent?.clear(editor);
+    clearDraftNote(editor);
+    detail.editingDesc = false;
+    if (value) Data.child(card, '.card-desc', () => { const d = document.createElement('div'); d.className = 'card-desc'; return d; }).textContent = value;
+    else { const desc = $(':scope > .card-desc', card); if (desc) desc.textContent = ''; }
+    changed(card);
+    if (window.Sap) window.Sap.refresh();
+  });
+  registerAction('add-checklist', async ({ card }) => {
+    if (!card) return;
+    const name = await prompt1('Add checklist', 'Checklist name', 'Checklist', { ok: 'Add', max: 120 });
+    if (!name || !card.isConnected) return;
+    const section = document.createElement('section');
+    section.className = 'checklist';
+    section.dataset.id = rid('k');
+    const h4 = document.createElement('h4');
+    h4.textContent = name;
+    const ul = document.createElement('ul');
+    ul.className = 'checklist-items';
+    section.append(h4, ul);
+    const after = Data.checklists(card).pop() || $(':scope > .card-desc', card) || $(':scope > .card-title', card);
+    after.after(section);
+    changed(card);
+    if (window.Sap) window.Sap.refresh(); $(`[data-checklist="${CSS.escape(section.dataset.id)}"] .add-item input`, card)?.focus();
+  });
+  registerAction('rename-checklist', async ({ el, card }) => {
+    if (!card) return;
+    const k = checklistAt(el);
+    const name = k && await prompt1('Rename checklist', 'Checklist name', $('h4', k).textContent, { max: 120 });
+    if (name && k.isConnected) { $('h4', k).textContent = name; changed(card); }
+  });
+  registerAction('delete-checklist', async ({ el, card }) => {
+    if (!card) return;
+    const k = checklistAt(el);
+    if (k && await confirmAsk(`Delete “${$('h4', k).textContent}”?`, 'The checklist and its items will be removed.', 'Delete checklist') && k.isConnected) {
+      k.remove();
+      changed(card);
+      toast('Deleted checklist', () => { if (card.isConnected && canRestore(k, card)) { (Data.checklists(card).pop() || $(':scope > .card-title', card)).after(k); changed(card); } });
+    }
+  });
+  registerAction('edit-item', async ({ el, card }) => {
+    if (!card) return;
+    const item = itemAt(el);
+    const text = item && await prompt1('Edit item', 'Item', item.textContent, { max: 300 });
+    if (text && item.isConnected) { item.textContent = text; changed(card); }
+  });
+  registerAction('delete-item', ({ el, card }) => {
+    if (!card) return;
+    const item = itemAt(el);
+    if (item) { item.remove(); changed(card); }
+  });
+  registerAction('assign-item', async ({ el, card }) => {
+    if (!card) return;
+    const item = itemAt(el);
+    if (!item || !People.ready()) return;
+    const team = (await window.clay.people.available()) || window.clay.people.list();
+    const me = People.me();
+    const people = me && !team.some(p => p.id === me.id) ? [me, ...team] : team;
+    const answer = await ask({ title: 'Assign item', fields: [{ label: 'Person', value: item.dataset.member || '', options: [['', 'Nobody'], ...people.map(p => [p.id, p.name])] }], ok: 'Assign' });
+    if (!answer || !item.isConnected) return;
+    const person = people.find(p => p.id === answer[0]);
+    if (person) { window.clay.people.add(person); item.dataset.member = person.id; } else item.removeAttribute('data-member');
+    return changed(card);
+  });
+  registerAction('add-link', async ({ card }) => {
+    if (!card) return;
+    const answer = await ask({ title: 'Add link', fields: [{ label: 'Address', type: 'url', required: true, placeholder: 'https://' }, { label: 'Title (optional)', max: 200 }], ok: 'Add link' });
+    if (!answer || !card.isConnected) return;
+    let url;
+    try { url = new URL(answer[0].trim()); } catch { return toast('That isn’t a web address.'); }
+    if (!/^https?:$/.test(url.protocol)) return toast('Only http and https links can be added.');
+    const ul = Data.child(card, 'ul.attachments', () => { const u = document.createElement('ul'); u.className = 'attachments'; return u; });
+    const li = document.createElement('li');
+    li.dataset.id = rid('a');
+    const a = document.createElement('a');
+    a.setAttribute('href', url.href);
+    a.dataset.kind = 'link';
+    a.textContent = answer[1].trim() || url.hostname;
+    li.append(a);
+    ul.append(li);
+    return changed(card);
+  });
+  registerAction('add-file', () => { $('#file-input').value = ''; $('#file-input').click(); });
+  registerAction('delete-attachment', ({ el, card }) => {
+    if (!card) return;
+    const a = attachmentAt(el);
+    if (!a) return;
+    if (card.dataset.coverImage === a.getAttribute('href')) card.removeAttribute('data-cover-image');
+    a.closest('li').remove();
+    return changed(card);
+  });
+  registerAction('cover-image', ({ el, card }) => {
+    if (!card) return;
+    const a = attachmentAt(el);
+    if (!a) return;
+    const href = a.getAttribute('href');
+    if (card.dataset.coverImage === href) card.removeAttribute('data-cover-image'); else card.dataset.coverImage = href;
+    return changed(card);
+  });
+  async function commentAction({ el, act, card }) {
+    if (!card) return;
+    const m = Data.comments(card).find(x => x.dataset.id === el.closest('[data-comment]')?.dataset.comment);
+    if (!m || m.dataset.by !== People.me()?.id) return;
+    if (act === 'delete-comment') {
+      if (await confirmAsk('Delete comment?', 'This comment will be removed.', 'Delete') && m.isConnected) {
+        m.remove();
+        changed(card);
+      }
+      return;
+    }
+    const text = await prompt1('Edit comment', 'Comment', m.textContent, { multiline: true, max: 4000 });
+    if (text && m.isConnected) { m.textContent = text; m.setAttribute('data-edited', ''); const me = People.me(); if (me && window.clay?.people) window.clay.people.add(me); changed(card); }
+  }
+  registerAction('edit-comment', commentAction);
+  registerAction('delete-comment', commentAction);
+  registerAction('move-card', ({ card }) => card && moveCard(card));
+  registerAction('copy-card', ({ card }) => card && copyCard(card));
+  registerAction('delete-card', ({ card }) => card && deleteCard(card));
+
   document.addEventListener('click', async e => {
     const el = e.target.closest('[data-act]');
     if (!$('#menu').hidden && !e.target.closest('#menu') && !e.target.closest('[data-act="list-menu"]')) closeMenu();
     if (!$('#filters').hidden && !e.target.closest('#filters') && !e.target.closest('#filter-toggle')) toggleFilters(false);
     if (!el) return;
     const act = el.dataset.act;
-    const card = detail.card;
-    const list = el.closest('.list') || (el.closest('#menu') && Data.list($('#menu').dataset.for));
-
-    if (act === 'open-card') return showCard(el.dataset.card);
-    if (act === 'close-detail') return hideCard();
-    if (act === 'toggle-filters') return toggleFilters();
-    if (act === 'clear-filters') { clearFilters(); return; }
-    if (act === 'tab') { board.scrollTop = 0; return; }
-    if (act === 'undo') { const undo = pendingUndo; pendingUndo = null; $('#toast').hidden = true; if (undo) undo(); return; }
-    if (readOnly) return;
-
-    if (act === 'add-list') return addList();
-    if (act === 'rename-board') return renameBoard();
-    if (act === 'change-my-name') return changeMyName();
-    if (act === 'edit-labels') return editLabels();
-    if (act === 'add-card' && list) return addCard(list);
-    if (act === 'list-menu' && list) {
-      e.stopPropagation();
-      if (!$('#menu').hidden && $('#menu').dataset.for === list.dataset.id) return closeMenu();
-      const tones = [0, 1, 2, 3, 4, 5].map((n) => `<button type="button" role="menuitemradio" class="tone-swatch" data-act="menu-tone" data-tone="${n}" aria-label="Color ${n + 1}" aria-checked="${list.dataset.tone === String(n)}"></button>`).join('');
-      return openMenu(el, [['menu-add-top', 'Add card at top', 'plus'], ['menu-rename', 'Rename list', 'edit'], ['menu-delete', 'Delete list', 'trash', 'danger']], `<div class="menu-tones" role="group" aria-label="List color">${tones}</div>`);
-    }
-    if (act.startsWith('menu-')) {
-      closeMenu();
-      if (!list) return;
-      if (act === 'menu-add-top') return addCard(list, true);
-      if (act === 'menu-rename') return renameList(list);
-      if (act === 'menu-delete') return deleteList(list);
-      if (act === 'menu-tone') { list.dataset.tone = el.dataset.tone; return renderAll(); }
-    }
-    if (!card) return;
-
-    if (act === 'panel') {
-      detail.panel = detail.panel === el.dataset.panel ? null : el.dataset.panel;
-      if (detail.panel === 'members') {
-        detail.team = People.ready() ? ((await window.clay.people.available()) || window.clay.people.list()) : [];
-      }
-      if (window.Sap) window.Sap.refresh(); return;
-    }
-    if (act === 'add-me') {
-      const me = await window.clay.author(document.createElement('i')).catch(() => null);
-      if (me) { Data.setWords(card, 'data-members', [...words(card.dataset.members), me.id]); changed(card); }
-      return;
-    }
-    if (act === 'set-cover') {
-      if (el.dataset.color) card.dataset.cover = el.dataset.color; else card.removeAttribute('data-cover');
-      card.removeAttribute('data-cover-image');
-      return changed(card);
-    }
-    if (act === 'edit-desc') {
-      const editor = $(':scope > .detail-body .desc-editor', card);
-      if (!editor) return;
-      editor.value = Data.desc(card);
-      clearDraftNote(editor);
-      detail.editingDesc = true;
-      if (window.Sap) window.Sap.refresh();
-      editor.focus();
-      return;
-    }
-    if (act === 'cancel-desc') {
-      const editor = $(':scope > .detail-body .desc-editor', card);
-      if (editor) { window.clay?.unsent?.clear(editor); clearDraftNote(editor); }
-      detail.editingDesc = false;
-      if (window.Sap) window.Sap.refresh();
-      return;
-    }
-    if (act === 'save-desc') {
-      const editor = $(':scope > .detail-body .desc-editor', card);
-      const value = editor.value.replace(/\s+$/, '');
-      window.clay?.unsent?.clear(editor);
-      clearDraftNote(editor);
-      detail.editingDesc = false;
-      if (value) Data.child(card, '.card-desc', () => { const d = document.createElement('div'); d.className = 'card-desc'; return d; }).textContent = value;
-      else { const desc = $(':scope > .card-desc', card); if (desc) desc.textContent = ''; }
-      changed(card);
-      if (window.Sap) window.Sap.refresh();
-      return;
-    }
-    if (act === 'add-checklist') {
-      const name = await prompt1('Add checklist', 'Checklist name', 'Checklist', { ok: 'Add', max: 120 });
-      if (!name || !card.isConnected) return;
-      const section = document.createElement('section');
-      section.className = 'checklist';
-      section.dataset.id = rid('k');
-      const h4 = document.createElement('h4');
-      h4.textContent = name;
-      const ul = document.createElement('ul');
-      ul.className = 'checklist-items';
-      section.append(h4, ul);
-      const after = Data.checklists(card).pop() || $(':scope > .card-desc', card) || $(':scope > .card-title', card);
-      after.after(section);
-      changed(card);
-      if (window.Sap) window.Sap.refresh(); $(`[data-checklist="${CSS.escape(section.dataset.id)}"] .add-item input`, card)?.focus();
-      return;
-    }
-    if (act === 'rename-checklist') {
-      const k = checklistAt(el);
-      const name = k && await prompt1('Rename checklist', 'Checklist name', $('h4', k).textContent, { max: 120 });
-      if (name && k.isConnected) { $('h4', k).textContent = name; changed(card); }
-      return;
-    }
-    if (act === 'delete-checklist') {
-      const k = checklistAt(el);
-      if (k && await confirmAsk(`Delete “${$('h4', k).textContent}”?`, 'The checklist and its items will be removed.', 'Delete checklist') && k.isConnected) {
-        k.remove();
-        changed(card);
-        toast('Deleted checklist', () => { if (card.isConnected && canRestore(k, card)) { (Data.checklists(card).pop() || $(':scope > .card-title', card)).after(k); changed(card); } });
-      }
-      return;
-    }
-    if (act === 'edit-item') {
-      const item = itemAt(el);
-      const text = item && await prompt1('Edit item', 'Item', item.textContent, { max: 300 });
-      if (text && item.isConnected) { item.textContent = text; changed(card); }
-      return;
-    }
-    if (act === 'delete-item') {
-      const item = itemAt(el);
-      if (item) { item.remove(); changed(card); }
-      return;
-    }
-    if (act === 'assign-item') {
-      const item = itemAt(el);
-      if (!item || !People.ready()) return;
-      const team = (await window.clay.people.available()) || window.clay.people.list();
-      const me = People.me();
-      const people = me && !team.some(p => p.id === me.id) ? [me, ...team] : team;
-      const answer = await ask({ title: 'Assign item', fields: [{ label: 'Person', value: item.dataset.member || '', options: [['', 'Nobody'], ...people.map(p => [p.id, p.name])] }], ok: 'Assign' });
-      if (!answer || !item.isConnected) return;
-      const person = people.find(p => p.id === answer[0]);
-      if (person) { window.clay.people.add(person); item.dataset.member = person.id; } else item.removeAttribute('data-member');
-      return changed(card);
-    }
-    if (act === 'add-link') {
-      const answer = await ask({ title: 'Add link', fields: [{ label: 'Address', type: 'url', required: true, placeholder: 'https://' }, { label: 'Title (optional)', max: 200 }], ok: 'Add link' });
-      if (!answer || !card.isConnected) return;
-      let url;
-      try { url = new URL(answer[0].trim()); } catch { return toast('That isn’t a web address.'); }
-      if (!/^https?:$/.test(url.protocol)) return toast('Only http and https links can be added.');
-      const ul = Data.child(card, 'ul.attachments', () => { const u = document.createElement('ul'); u.className = 'attachments'; return u; });
-      const li = document.createElement('li');
-      li.dataset.id = rid('a');
-      const a = document.createElement('a');
-      a.setAttribute('href', url.href);
-      a.dataset.kind = 'link';
-      a.textContent = answer[1].trim() || url.hostname;
-      li.append(a);
-      ul.append(li);
-      return changed(card);
-    }
-    if (act === 'add-file') { $('#file-input').value = ''; $('#file-input').click(); return; }
-    if (act === 'delete-attachment') {
-      const a = attachmentAt(el);
-      if (!a) return;
-      if (card.dataset.coverImage === a.getAttribute('href')) card.removeAttribute('data-cover-image');
-      a.closest('li').remove();
-      return changed(card);
-    }
-    if (act === 'cover-image') {
-      const a = attachmentAt(el);
-      if (!a) return;
-      const href = a.getAttribute('href');
-      if (card.dataset.coverImage === href) card.removeAttribute('data-cover-image'); else card.dataset.coverImage = href;
-      return changed(card);
-    }
-    if (act === 'edit-comment' || act === 'delete-comment') {
-      const m = Data.comments(card).find(x => x.dataset.id === el.closest('[data-comment]')?.dataset.comment);
-      if (!m || m.dataset.by !== People.me()?.id) return;
-      if (act === 'delete-comment') {
-        if (await confirmAsk('Delete comment?', 'This comment will be removed.', 'Delete') && m.isConnected) {
-          m.remove();
-          changed(card);
-        }
-        return;
-      }
-      const text = await prompt1('Edit comment', 'Comment', m.textContent, { multiline: true, max: 4000 });
-      if (text && m.isConnected) { m.textContent = text; m.setAttribute('data-edited', ''); const me = People.me(); if (me && window.clay?.people) window.clay.people.add(me); changed(card); }
-      return;
-    }
-    if (act === 'move-card') return moveCard(card);
-    if (act === 'copy-card') return copyCard(card);
-    if (act === 'delete-card') return deleteCard(card);
+    const list = el.closest('.list') || (el.closest('#menu') ? Data.list($('#menu').dataset.for) : null);
+    return dispatchAction(act, { el, act, event: e, card: detail.card, list });
   });
   $('#file-input').addEventListener('change', e => {
     const files = [...e.target.files];
@@ -1895,6 +2318,7 @@ Give teams a useful starting point, with less noise and a little more room to th
   board.addEventListener('clay:sorted', () => { renderCounts(); window.clay?.save?.soon?.(); });
   // Another tab or a file edit changed the board: redraw everything from the saved data.
   document.addEventListener('clay:sync-applied', () => {
+    releaseLostCapture();
     renderAll();
     if (!readOnly) { tuneTouch(); setTimeout(tuneTouch, 450); }
     syncDetail();
@@ -1948,7 +2372,7 @@ Give teams a useful starting point, with less noise and a little more room to th
   enterReadMode();
   renderAll();
   window.Kanban = {
-    Data, renderAll, renderMarkdown, rid,
+    Data, renderAll, renderMarkdown, rid, makeCard, makeList,
     open: id => showCard(id), close: () => hideCard(),
     get detail() { return detail; }, get readOnly() { return readOnly; }
   };

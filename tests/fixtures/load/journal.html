@@ -10,7 +10,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="hyper-source" content="https://hyperclay.com/templates/journal/hosted/latest.html">
-<meta name="hyper-version" content="1.0.0">
+<meta name="hyper-version" content="1.1.0">
 <meta name="clay-template" content="journal hosted">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Journal</title>
@@ -147,6 +147,12 @@ svg.i { width: 15px; height: 15px; flex: none; stroke: currentColor; fill: none;
 :root:is([savestatus="error"], [savestatus="conflict"]) .save { color: var(--accent); }
 :root:is([savestatus="error"], [savestatus="conflict"]) .save .dot { background: var(--accent); }
 .save .copy, .save .download-journal { display: none; }
+.recovery { display: inline-flex; align-items: center; gap: 7px; font: 500 11.5px/1 var(--mono); color: var(--ink-3); white-space: nowrap; }
+.recovery[hidden] { display: none; }
+.recovery .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--line-2); }
+.recovery.failed { color: var(--accent); }
+.recovery.failed .dot { background: var(--accent); }
+.recovery .chip-btn { padding: 4px 8px; font-size: 11.5px; }
 :root:is([savestatus="error"], [savestatus="conflict"]) .save .copy { display: inline-flex; }
 :root:is([savestatus="error"], [savestatus="offline"]) .save .download-journal { display: inline-flex; }
 @keyframes pulse { 50% { opacity: .3; } }
@@ -484,6 +490,28 @@ button.tb-value:hover { color: var(--blue); }
 .peer-bar span { flex: 1; min-width: 0; }
 .peer-bar button { flex: none; padding: 5px 11px; border-radius: 5px; font-size: 12.5px; font-weight: 500; color: var(--accent); white-space: nowrap; }
 .peer-bar button:hover, .peer-bar button:focus-visible { background: color-mix(in oklab, var(--accent) 16%, transparent); }
+
+/* ------------------------------------------------ the recovery review: this browser's copies of unsaved text (never saved, never the journal) */
+.recovery-panel {
+  flex: none;
+  display: flex; flex-direction: column; gap: 14px;
+  padding: 16px 20px 20px 72px;
+  border-bottom: 1px solid var(--line-2);
+  background: var(--accent-soft);
+  max-height: 50vh; overflow: auto;
+}
+.recovery-panel[hidden] { display: none; }
+.recovery-row { display: flex; flex-direction: column; gap: 8px; }
+.recovery-what { margin: 0; font-size: 13px; color: var(--ink); }
+.recovery-text {
+  width: 100%; box-sizing: border-box; resize: vertical;
+  padding: 8px 10px; border: 1px solid var(--line-2); border-radius: 6px;
+  background: var(--sheet); color: var(--ink-2);
+  font: 400 13px/1.5 var(--mono); white-space: pre-wrap;
+}
+.recovery-acts { display: flex; flex-wrap: wrap; gap: 4px; }
+.recovery-acts button { padding: 5px 11px; border-radius: 5px; font-size: 12.5px; font-weight: 500; color: var(--accent); white-space: nowrap; }
+.recovery-acts button:hover, .recovery-acts button:focus-visible { background: color-mix(in oklab, var(--accent) 16%, transparent); }
 
 /* ------------------------------------------------ the undo toast: one polite live region, gone in six seconds (never saved) */
 .toast {
@@ -1572,12 +1600,22 @@ const words = text.trim().split(/\s+/).length;
           if (code.textContent.trim()) createdHere.delete(code.closest('article.entry').dataset.id);
         },
         onShow: () => overtype?.updatePreview(),
-        onConflict: (typed) => note('Someone changed the same words while you were typing.', typed),
+        onConflict: (typed, context) => {
+          Recovery.conflicted(typed, context);
+          note('Someone changed the same words while you were typing.', typed);
+        },
         onGone: (typed) => {
           const date = openDate;
           note('This entry was deleted somewhere else.', typed, { label: 'Keep it', run: () => keepNote(typed, date) });
         },
       });
+      // After the binding, so the record already holds this keystroke and its timestamp: what
+      // the recovery copy stages is exactly what a save of this page would write. It reads the
+      // textarea, never the record, so an active composition is captured without ending it.
+      stageOn(ta());
+    }
+    function stageOn(el) {
+      if (el) el.addEventListener('input', () => Recovery.typed());
     }
     function editorOptions() {
       return {
@@ -1614,7 +1652,7 @@ const words = text.trim().split(/\s+/).length;
       [overtype] = new OverType(mount, { ...editorOptions(), toolbarButtons: pickButtons(buttons) });
       document.querySelector('style.overtype-styles')?.setAttribute('clay', 'editor-ui');
       const now = ta();
-      if (now !== el) { now.value = el.value; binding.attach(now); }
+      if (now !== el) { now.value = el.value; binding.attach(now); stageOn(now); }
       if (focused) { now.focus(); now.setSelectionRange(a, b); }
     }
     function open(article) {
@@ -1633,6 +1671,371 @@ const words = text.trim().split(/\s+/).length;
       reconfigure: (options) => overtype?.reinit(options),
       refresh: () => overtype?.updatePreview(),
     };
+  })();
+
+  // The recovery copy: exactly the text this person typed, kept in this browser and apart from
+  // the saved file. It is never rendered as the journal, and nothing here claims a save: a
+  // completed local transaction means this browser kept a copy, and that is all it means.
+  const Recovery = (() => {
+    const CHANNEL = 'journal.entries';
+    const FIELDS = ['id', 'date', 'created', 'updated', 'deletedAt', 'pinned', 'body'];
+    let entries = null;
+    let panelEl = null;
+    let statusEl = null;
+    let labelEl = null;
+    let copyBtn = null;
+    let downloadBtn = null;
+    let copies = 0;
+    let reviewTicket = 0;
+    let unregisterContext = null;
+    const bases = new Map();
+    const transfers = new Map();
+
+    function readEntry(el) {
+      return {
+        id: el.dataset.id || '',
+        date: el.dataset.date || '',
+        created: el.dataset.created || '',
+        updated: el.dataset.updated || '',
+        deletedAt: el.dataset.deletedAt || '',
+        pinned: el.dataset.pinned === 'true' ? 'true' : '',
+        body: el.querySelector('.entry-body')?.textContent ?? ''
+      };
+    }
+
+    function readSaved(html) {
+      const doc = new DOMParser().parseFromString(html, 'text/html');
+      return new Map([...doc.querySelectorAll('#entries > article.entry:not([cms-template])')].map(el => [el.dataset.id, readEntry(el)]));
+    }
+
+    const describe = record => ({ label: record.payload.date || 'Undated entry', text: record.payload.body ?? '' });
+    const keyOf = id => (Array.isArray(id) ? id.join('\u0000') : String(id));
+    const same = (a, b) => !!a && !!b && FIELDS.every(field => (a[field] ?? '') === (b[field] ?? ''));
+
+    function remember(article) {
+      if (!article) return;
+      bases.set(article.dataset.id, readEntry(article));
+    }
+
+    function rememberAll() {
+      for (const article of Entries.all()) remember(article);
+    }
+
+    function stage(id, { body, source = null } = {}) {
+      if (!entries || !id) return null;
+      const article = Entries.byId(id);
+      if (!article) return null;
+      const reading = readEntry(article);
+      const payload = { ...reading, body: body === undefined ? reading.body : body };
+      const lineage = source ? { sourceId: source.id, sourceRevision: source.revision } : null;
+      const staged = entries.stage({
+        key: id,
+        kind: 'text',
+        baseEtag: null,
+        base: bases.get(id) ?? null,
+        payload,
+        lineage
+      });
+      return { ...staged, key: id, payload };
+    }
+
+    function typed() {
+      const open = Editor.current();
+      if (open) stage(open.dataset.id, { body: Editor.text() });
+    }
+
+    function conflicted(text, context = {}) {
+      if (!entries) return;
+      const key = context.key || '';
+      const article = key ? Entries.byId(key) : null;
+      entries.stage({
+        key: key || 'entry',
+        kind: 'conflict',
+        baseEtag: null,
+        lineage: null,
+        payload: {
+          key,
+          date: article ? article.dataset.date || '' : '',
+          base: context.base ?? '',
+          typed: text ?? '',
+          remote: context.remote ?? ''
+        }
+      });
+    }
+
+    function flush() {
+      return entries ? entries.flush() : Promise.resolve({ ok: true, stored: [] });
+    }
+
+    function review(records) {
+      const service = entries;
+      if (!service || readOnly) return Promise.resolve();
+      const board = panel();
+      board.textContent = '';
+      const listed = records ?? null;
+      const ticket = ++reviewTicket;
+      const known = listed ? Promise.resolve({ ok: true, records: listed }) : service.list();
+      // A list read that started earlier may finish later; only the newest review paints.
+      return known.then(result => {
+        if (ticket !== reviewTicket) return;
+        const all = result.ok ? result.records : [];
+        const pendingDest = new Map();
+        for (const record of all) {
+          const link = record.lineage;
+          if (link && link.sourceId != null) pendingDest.set(keyOf(link.sourceId), record);
+        }
+        const rows = [];
+        for (const record of all) {
+          if (record.kind === 'conflict') { rows.push(record); continue; }
+          if (record.kind !== 'text') continue;
+          const article = Entries.byId(record.key);
+          const live = article && !isTrashed(article) ? readEntry(article) : null;
+          if (record.lineage && record.lineage.sourceId != null) {
+            // A copy staged for a new entry is that entry's own unsaved text. Once the entry is
+            // in the journal it is the copy, and only a crash before the entry can save leaves
+            // this as the one place the text still exists.
+            if (live) continue;
+            rows.push(record);
+            continue;
+          }
+          if (pendingDest.has(keyOf(record.id))) continue;
+          if (live && same(live, record.payload)) continue;
+          rows.push(record);
+        }
+        rows.sort((a, b) => (a.updated || 0) - (b.updated || 0));
+        for (const record of rows) board.append(rowFor(record));
+        board.hidden = rows.length === 0;
+        copies = rows.length;
+        paintStatus();
+      });
+    }
+
+    function panel() {
+      if (panelEl) return panelEl;
+      panelEl = document.createElement('section');
+      panelEl.className = 'recovery-panel';
+      panelEl.id = 'recoveryPanel';
+      panelEl.setAttribute('clay', 'editor-ui');
+      panelEl.setAttribute('aria-label', 'Recovered writing');
+      panelEl.hidden = true;
+      $('#writer').before(panelEl);
+      return panelEl;
+    }
+
+    function action(label, run) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = label;
+      button.addEventListener('click', () => { Promise.resolve(run()).catch(() => {}); });
+      return button;
+    }
+
+    function rowFor(record) {
+      const conflict = record.kind === 'conflict';
+      const article = conflict ? null : Entries.byId(record.key);
+      const live = article && !isTrashed(article) ? readEntry(article) : null;
+      const body = conflict ? record.payload.typed : record.payload.body;
+      const label = conflict ? (record.payload.date || 'Undated entry') : describe(record).label;
+
+      const node = document.createElement('article');
+      node.className = 'recovery-row';
+      node.dataset.key = record.key;
+      node.dataset.kind = record.kind;
+
+      const what = document.createElement('p');
+      what.className = 'recovery-what';
+      what.textContent = conflict
+        ? `Text kept from a change that arrived while you were typing ${label}.`
+        : !live
+          ? `Unsaved text for ${label}. That entry is no longer in the journal.`
+          : record.base && !same(record.base, live)
+            ? `Unsaved text for ${label}. The entry changed after this copy was made.`
+            : `Unsaved text for ${label}, not in the saved journal.`;
+      const control = document.createElement('textarea');
+      control.className = 'recovery-text';
+      control.readOnly = true;
+      control.setAttribute('aria-label', `Recovered text for ${label}`);
+      control.rows = Math.max(3, Math.min(10, String(body ?? '').split('\n').length));
+      control.value = body ?? '';
+
+      const acts = document.createElement('div');
+      acts.className = 'recovery-acts';
+
+      const keep = () => {
+        const date = record.payload.date || ymd(new Date());
+        const created = makeEntry(date, nowISO(), body ?? '');
+        store.prepend(created);
+        const staged = stage(created.dataset.id, { body: body ?? '', source: { id: record.id, revision: record.revision } });
+        if (staged) transfers.set(keyOf(record.id), { destId: staged.id, sourceRevision: record.revision });
+        return flush().then(() => { openEntry(created.dataset.id); return review(); });
+      };
+      acts.append(action('Keep as a new entry', keep));
+
+      if (live) {
+        const row = { current: live };
+        acts.append(action('Replace current text', () => {
+          const now = readEntry(article);
+          if (!same(now, row.current)) {
+            row.current = now;
+            what.textContent = `Unsaved text for ${label}. The entry changed while you were reading it, so compare again.`;
+            return Promise.resolve();
+          }
+          const open = Editor.current();
+          if (open === article) Editor.close();
+          article.querySelector('.entry-body').textContent = body ?? '';
+          touch(article);
+          if (open === article) Editor.open(article);
+          const staged = stage(article.dataset.id, { body: body ?? '', source: { id: record.id, revision: record.revision } });
+          if (staged) transfers.set(keyOf(record.id), { destId: staged.id, sourceRevision: record.revision });
+          return flush().then(() => review());
+        }));
+      }
+
+      acts.append(action('Copy', () => copyText(body ?? '')));
+      acts.append(action('Download', () => downloadText(label, body ?? '')));
+      acts.append(action('Discard', () => entries.dismiss(record.id, { revision: record.revision }).then(() => review())));
+
+      node.append(what, control, acts);
+      return node;
+    }
+
+    function copyText(text) {
+      if (!navigator.clipboard || typeof navigator.clipboard.writeText !== 'function') return Promise.resolve(false);
+      return navigator.clipboard.writeText(text).then(() => true, () => false);
+    }
+
+    function downloadText(name, text) {
+      const url = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${name || 'recovered writing'}.md`;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+
+    // Its own status, beside the save chip and never part of it: what this browser kept is not
+    // what the host accepted, and the two must be able to disagree.
+    function statusBar() {
+      if (statusEl) return statusEl;
+      statusEl = document.createElement('span');
+      statusEl.className = 'recovery';
+      statusEl.id = 'recoveryStatus';
+      statusEl.setAttribute('clay', 'editor-ui');
+      statusEl.setAttribute('role', 'status');
+      statusEl.setAttribute('aria-live', 'polite');
+      statusEl.hidden = true;
+      const dot = document.createElement('span');
+      dot.className = 'dot';
+      labelEl = document.createElement('span');
+      labelEl.className = 'label';
+      labelEl.id = 'recoveryLabel';
+      copyBtn = document.createElement('button');
+      copyBtn.type = 'button';
+      copyBtn.id = 'recoveryCopy';
+      copyBtn.className = 'chip-btn';
+      copyBtn.textContent = 'Copy text';
+      copyBtn.hidden = true;
+      downloadBtn = document.createElement('button');
+      downloadBtn.type = 'button';
+      downloadBtn.id = 'recoveryDownload';
+      downloadBtn.className = 'chip-btn';
+      downloadBtn.textContent = 'Download text';
+      downloadBtn.hidden = true;
+      copyBtn.addEventListener('click', () => copyText(Editor.text()));
+      downloadBtn.addEventListener('click', () => downloadText(document.title, Editor.text()));
+      statusEl.append(dot, labelEl, copyBtn, downloadBtn);
+      $('#save').before(statusEl);
+      return statusEl;
+    }
+
+    function paintStatus() {
+      if (!statusEl) return;
+      const snapshot = window.clay.recovery && window.clay.recovery.status ? window.clay.recovery.status() : null;
+      const failed = snapshot ? snapshot.ok === false : false;
+      if (labelEl) {
+        labelEl.textContent = failed
+          ? 'Local copy could not be updated'
+          : copies === 1 ? '1 recovery copy' : `${copies} recovery copies`;
+      }
+      statusEl.hidden = !failed && copies === 0;
+      statusEl.classList.toggle('failed', failed);
+      if (copyBtn) copyBtn.hidden = !failed;
+      if (downloadBtn) downloadBtn.hidden = !failed;
+    }
+
+    function start() {
+      if (readOnly || entries) return;
+      const service = window.clay && window.clay.recovery;
+      if (!service || typeof service.register !== 'function') return;
+      entries = service.register({ channel: CHANNEL, version: 1, readSaved, describe });
+      statusBar();
+      rememberAll();
+      if (typeof entries.subscribe === 'function') entries.subscribe(() => paintStatus());
+      if (typeof service.subscribe === 'function') service.subscribe(() => paintStatus());
+      if (window.clay.conflicts && typeof window.clay.conflicts.registerContext === 'function') {
+        unregisterContext = window.clay.conflicts.registerContext(contextOf);
+      }
+      review();
+    }
+
+    // A conflict names its entry only when the record's own nodes are inside one.
+    function contextOf(record) {
+      const el = record && record.node && typeof record.node.closest === 'function' ? record.node.closest('article.entry') : null;
+      if (!el || !el.dataset.id) return null;
+      return {
+        kind: 'entry',
+        id: el.dataset.id,
+        label: describe({ payload: { date: el.dataset.date || '' } }).label,
+        field: 'body',
+        open: () => openEntry(el.dataset.id)
+      };
+    }
+
+    // A kept-as-new copy is not a save. The source leaves only once a save's own bytes cover
+    // the destination it was staged under, which the service decides and reports by deleting it.
+    function afterSave() {
+      const service = entries;
+      if (!service || !transfers.size) return Promise.resolve();
+      // The acknowledgement joins the channel's own write queue, so flushing first is what
+      // makes this the list after the save, never one taken while it was still in flight.
+      return service.flush().then(() => service.list()).then(result => {
+        if (!result.ok) return null;
+        const present = new Set(result.records.map(record => keyOf(record.id)));
+        const work = [];
+        for (const [sourceKey, transfer] of transfers) {
+          if (present.has(keyOf(transfer.destId))) continue;
+          transfers.delete(sourceKey);
+          const source = result.records.find(record => keyOf(record.id) === sourceKey);
+          if (source) work.push(service.dismiss(source.id, { revision: transfer.sourceRevision }));
+        }
+        return Promise.all(work).then(() => review());
+      }, () => null);
+    }
+
+    function dispose() {
+      if (typeof unregisterContext === 'function') unregisterContext();
+      unregisterContext = null;
+      if (!entries) return Promise.resolve({ ok: true, stored: [] });
+      const flushed = flush();
+      flushed.then(() => { try { entries.dispose(); } catch {} }, () => {});
+      entries = null;
+      return flushed;
+    }
+
+    function surface() {
+      return {
+        channel: CHANNEL,
+        list: () => (entries ? entries.list() : Promise.resolve({ ok: false, code: 'unavailable', records: [] })),
+        flush,
+        review: () => review(),
+        afterSave,
+        panel: () => panelEl,
+        rows: () => (panelEl ? [...panelEl.querySelectorAll('.recovery-row')] : []),
+        status: () => statusEl
+      };
+    }
+
+    return { start, typed, conflicted, flush, review, afterSave, surface, rememberAll, dispose };
   })();
 
   // One line under the sheet for a conflict or a deletion elsewhere, with the text this tab typed. It is
@@ -1723,7 +2126,7 @@ const words = text.trim().split(/\s+/).length;
     const left = Editor.current();
     const leftId = left ? left.dataset.id : null;
     const nextId = a ? a.dataset.id : null;
-    if (leftId !== nextId) { clearNote(); desk.scrollTop = 0; }
+    if (leftId !== nextId) { clearNote(); desk.scrollTop = 0; Recovery.flush(); }
     if (a) Editor.open(a); else Editor.close();
     openDate = a ? a.dataset.date || '' : null;
     showPeerBar(a);
@@ -1936,8 +2339,11 @@ const words = text.trim().split(/\s+/).length;
     if (s && s.today !== now) { s.today = now; s.otdShown = ''; refreshSap(); }
     scheduleMidnight();
   }
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') refreshToday(); });
-  window.addEventListener('pagehide', () => { clearTimeout(midnightTimer); midnightTimer = 0; });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') refreshToday();
+    else Recovery.flush();
+  });
+  window.addEventListener('pagehide', () => { clearTimeout(midnightTimer); midnightTimer = 0; Recovery.dispose(); });
 
   function deleteEntry(id) {
     if (readOnly) return;
@@ -2453,12 +2859,12 @@ const words = text.trim().split(/\s+/).length;
   });
 
   document.addEventListener('clay:route', () => {
-    try { if (window.Sap) Sap.refresh(); } catch {}
     syncEditor();
     saveUI();
   });
   // A merge can replace the open entry's element; the router re-marks the new one, then the editor follows
-  document.addEventListener('clay:sync-applied', () => setTimeout(syncEditor, 0));
+  document.addEventListener('clay:sync-applied', () => setTimeout(() => { syncEditor(); Recovery.rememberAll(); }, 0));
+  document.addEventListener('clay:save-saved', () => { Recovery.afterSave(); });
   app.addEventListener('sap:views-updated', () => { refreshHighlights(); refreshTrash(); });
 
   document.addEventListener('keydown', e => {
@@ -2600,6 +3006,7 @@ const words = text.trim().split(/\s+/).length;
       return { q: $('#q').value.trim(), tag, openId: currentEntry() };
     },
     get editor() { return readOnly ? null : $('#writer textarea'); },
+    get recovery() { return readOnly ? null : Recovery.surface(); },
     get readOnly() { return readOnly; },
     get pane() { return currentEntry() ? 'sheet' : 'list'; }
   };
@@ -2636,6 +3043,7 @@ const words = text.trim().split(/\s+/).length;
         else note('Formatting tools could not load. Your writing still saves.');
       }
     }
+    if (!readOnly) Recovery.start();
     if (readOnly) Reader.start();
     const r = route();
     const autoOpen = () => {
