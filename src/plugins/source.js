@@ -84,9 +84,19 @@ const state = {
   repairs: 0,
   refreshQueued: false,
   pendingBytes: null,
+  refetch: false,
 };
 
 const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
+
+const PROJECTED_MAP_PREFIX = '<script type="application/json" id="clay-runtime-map"';
+
+/**
+ * Bytes a host projected for its own delivery are not the file: the runtime URLs in them
+ * point at the local mirror and may carry a descriptor the file never held. Modelling them
+ * would make this tab's next save copy the projection back into the file.
+ */
+const isProjected = (text) => text.includes(PROJECTED_MAP_PREFIX) || text.includes('/_/clayjs/');
 
 /**
  * The bytes this document was loaded from.
@@ -110,7 +120,7 @@ async function fetchSource(url) {
   const type = (res.headers.get('content-type') || '').toLowerCase();
   if (!type.startsWith('text/html')) throw new Error(`source fetch: content-type ${type || 'missing'}`);
   const text = await res.text();
-  if (text.includes('<script type="application/json" id="clay-runtime-map"')) throw new Error('source fetch: projected response');
+  if (text.includes(PROJECTED_MAP_PREFIX)) throw new Error('source fetch: projected response');
   return text;
 }
 
@@ -387,7 +397,10 @@ function report(bytes, fromCapture = null) {
 function queueRepair(event) {
   if (!state.installed) return;
   const detail = event && event.detail;
-  if (detail && detail.source === 'disk' && typeof detail.html === 'string') state.pendingBytes = detail.html;
+  if (detail && detail.source === 'disk' && typeof detail.html === 'string') {
+    if (isProjected(detail.html)) state.refetch = true;
+    else state.pendingBytes = detail.html;
+  }
   scheduleRefresh();
 }
 
@@ -416,6 +429,8 @@ function refreshNow() {
   if (!state.installed) return;
   const bytes = state.pendingBytes;
   state.pendingBytes = null;
+  const refetch = state.refetch && bytes === null;
+  if (refetch) state.refetch = false;
   // Counted even when the re-pair below fails: either way this page is not the page a
   // candidate captured before it was built against.
   state.repairs++;
@@ -450,6 +465,43 @@ function refreshNow() {
     // any other, so this costs formatting fidelity and nothing else.
     console.warn('clayjs: source map could not re-pair, continuing on the previous map:', err);
   }
+  if (refetch) refetchModel();
+}
+
+/**
+ * Take the model from the file itself, after a disk frame arrived with bytes this host
+ * projected rather than bytes on disk.
+ *
+ * The re-pair has already run against the previous model, which still describes real
+ * bytes, so a fetch that fails or is refused costs nothing: the model stays as it was
+ * and the same warning the refused branch gives says so. Anything that replaced the
+ * model while the fetch was in flight is newer than these bytes and keeps the answer.
+ */
+function refetchModel() {
+  const generation = state.repairs;
+  fetchSource(window.location.href)
+    .then((src) => {
+      const next = model(src);
+      const refused = checkSource(next, document);
+      if (refused) throw new Error(refused);
+      return next;
+    })
+    .then((m) => {
+      if (state.repairs !== generation) return;
+      try {
+        state.repairs++;
+        const { map, stats } = pairAgainstPage(m);
+        state.model = m;
+        state.map = map;
+        state.stats = stats;
+        state.refreshes++;
+      } catch (err) {
+        console.warn('clayjs: source map could not re-pair, continuing on the previous map:', err);
+      }
+    })
+    .catch((err) => {
+      console.warn('clayjs: source map kept the previous model, the accepted bytes did not model:', err);
+    });
 }
 
 function summary() {

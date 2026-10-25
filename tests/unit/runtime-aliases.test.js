@@ -4,7 +4,7 @@
 import { expect, test } from "@jest/globals";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { RUNTIME_ALIASES } from "../../src/core/runtime-aliases.js";
+import { RUNTIME_ALIASES } from "../../src/core/runtime-url.js";
 
 const ROOT = path.resolve(new URL("../..", import.meta.url).pathname);
 const lock = JSON.parse(readFileSync(path.join(ROOT, "compat/journal-assets.lock.json"), "utf8"));

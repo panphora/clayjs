@@ -6,7 +6,7 @@ import { jest } from "@jest/globals";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { projectRuntimeHTML } from "../../src/server/offline-runtime/index.js";
-import { RUNTIME_ALIASES } from "../../src/core/runtime-aliases.js";
+import { RUNTIME_ALIASES } from "../../src/core/runtime-url.js";
 
 const ROOT = path.resolve(new URL("../..", import.meta.url).pathname);
 const FIXTURES = path.join(ROOT, "tests/fixtures/offline-runtime");

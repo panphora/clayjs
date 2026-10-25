@@ -42,7 +42,7 @@ import { NO_DIRTY_SELECTOR, LIVE_SELECTOR } from "../lib/region-policy.js";
 import { EXTENSION_NODE_SELECTOR, EXTENSION_ATTR_PATTERN } from '../lib/extension-noise.js';
 import { isEditMode } from "../core/is-edit-mode.js";
 import { attributeMerge } from "./merge-declarations.js";
-import { serializeForSync, captureForComparisonAndDirty, captureSnapshot, originalSnapshotNode, captureForMerge, captureForSaveAndComparison } from '../core/snapshot.js';
+import { serializeForSync, captureForComparisonAndDirty, canonicalizeReceived, captureSnapshot, originalSnapshotNode, captureForMerge, captureForSaveAndComparison } from '../core/snapshot.js';
 import { mergeIgnoresAttr, mergeVetoesAttr } from '../lib/root-attrs.js';
 import { autosaveActive } from '../lib/autosave-state.js';
 import { presence } from './presence.js';
@@ -119,6 +119,7 @@ function emptyScratchpads(root) {
 function scratchpadsEmptied(input) {
   if (input == null) return input;
   const doc = typeof input === 'string' ? new DOMParser().parseFromString(input, 'text/html') : input;
+  canonicalizeReceived(doc);
   emptyScratchpads(doc);
   return doc;
 }
@@ -1738,6 +1739,7 @@ class LiveSync {
     const syntheticByAuthored = new Map();
     if (isIdMap(identityMap)) {
       remote = new DOMParser().parseFromString(html, 'text/html');
+      canonicalizeReceived(remote);
       const imported = loadedEngine().HyperMorph.importMap(remote.documentElement, identityMap);
       for (const el of remote.querySelectorAll('[data-id], [id]')) {
         const id = authored(el);

@@ -168,6 +168,13 @@ export function setCloneCanonicalizer(canonicalize) {
   cloneCanonicalizer = canonicalize;
 }
 
+// A document parsed from received bytes gets the same canonical URLs a capture has, so a merge
+// compares like with like. A no-op until save-core registers the canonicalizer.
+export function canonicalizeReceived(doc) {
+  cloneCanonicalizer?.(doc);
+  return doc;
+}
+
 /**
  * Register a hook that runs on EVERY snapshot (save AND sync).
  * Use for: syncing form values to the clone.
