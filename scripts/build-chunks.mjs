@@ -71,3 +71,82 @@ export async function emitChunks({ root, outdir }) {
   await writeFile(path.join(outdir, "manifest.json"), `${JSON.stringify(manifest, null, 1)}\n`);
   return { manifest, metafile: result.metafile, satellites };
 }
+
+function replaceOnce(source, needle, replacement, label) {
+  const parts = source.split(needle);
+  if (parts.length !== 2) throw new Error(`${label} must contain ${needle} exactly once, found ${parts.length - 1}`);
+  return parts.join(replacement);
+}
+
+function closureOf(manifest, seeds) {
+  const want = [];
+  const seen = new Set();
+  const add = (file) => {
+    if (!file || seen.has(file)) return;
+    seen.add(file);
+    want.push(file);
+    for (const dep of manifest.files[file]?.imports ?? []) add(dep);
+  };
+  for (const seed of seeds) add(seed);
+  return want;
+}
+
+function bootstrapSource(payload, tail) {
+  return `(function (M) {
+  var dir = new URL(M.dir, base + "/").href;
+  M.preload.forEach(function (file) {
+    var link = document.createElement("link");
+    link.rel = "modulepreload";
+    link.href = dir + file;
+    link.setAttribute("clay", "no-save");
+    document.head.appendChild(link);
+  });
+${tail}
+})(${JSON.stringify(payload)})`;
+}
+
+export async function emitBootstraps({ root, outdir, manifest, satellites }) {
+  const { version } = manifest;
+  const loader = manifest.entries["loader.js"];
+  if (!loader) throw new Error("the manifest has no loader.js entry");
+  const preload = closureOf(manifest, [loader, manifest.runtime, ...BOOT_PREFIX.map((p) => manifest.entries[p])]);
+  const tail = `  return Promise.all([import(dir + M.loader), import(dir + M.manifest)]).then(function (r) {
+    var manifest = r[1].default;
+    manifest.base = dir;
+    window.clay.__chunked = true;
+    return { boot: function (b, p, resolve) { return r[0].boot(b, p, resolve, manifest); } };
+  }, function (err) {
+    console.warn("clayjs: the bundled runtime did not load, loading the module tree instead:", err);
+    return import(base + "/src/loader.js");
+  });`;
+  const clay = await readFile(path.join(root, "entries/clay.js"), "utf8");
+  const code = replaceOnce(
+    clay,
+    'import(base + "/src/loader.js")',
+    bootstrapSource({ version, dir: "m/", loader, manifest: manifest.runtime, preload }, tail),
+    "entries/clay.js",
+  );
+  await writeFile(path.join(outdir, "clay.js"), code);
+  for (const [name, target] of Object.entries(satellites)) {
+    if (name === "clay.js") continue;
+    const entry = manifest.entries[target];
+    if (!entry) throw new Error(`the manifest has no ${target} entry`);
+    const source = await readFile(path.join(root, "entries", name), "utf8");
+    const satelliteTail = `  return import(dir + M.entry).catch(function (err) {
+    if (window.clay && window.clay.__chunked) throw err;
+    console.warn("clayjs: the bundled runtime did not load, loading the module tree instead:", err);
+    return import(base + "/src/${target}");
+  });`;
+    const satellite = replaceOnce(
+      source,
+      `import(base + "/src/${target}")`,
+      bootstrapSource({ version, dir: "m/", entry, preload: closureOf(manifest, [entry]) }, satelliteTail),
+      `entries/${name}`,
+    );
+    await writeFile(path.join(outdir, name), satellite);
+  }
+}
+
+export function rollingBootstrap(code, version) {
+  return replaceOnce(code, '"dir":"m/"', `"dir":"../${version}/m/"`, "the bootstrap");
+}
