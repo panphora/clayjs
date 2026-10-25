@@ -90,6 +90,16 @@ test("without an etag argument it carries the stamp this tab holds", async () =>
   expect(calls.save[0].options.headers["If-Match"]).toBe("seed-1");
 });
 
+test("with no stamp anywhere it refuses as a conflict and sends nothing", async () => {
+  metaBody = { spec: 1, extensions: ["conditional"] };
+  const { replace } = await fresh();
+
+  const result = await replace(HTML);
+
+  expect(result).toEqual({ ok: false, code: "conflict" });
+  expect(calls.save).toHaveLength(0);
+});
+
 test("the returned ETag becomes the tab's stamp", async () => {
   const { replace, etag } = await fresh();
   saveAnswer = { status: 200, body: { msg: "Saved", etag: "stored-2" } };

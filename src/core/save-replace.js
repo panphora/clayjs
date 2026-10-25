@@ -36,7 +36,10 @@ export async function replace(html, { etag } = {}) {
   if (!conditionalSaves()) await seedEtag();
   if (!conditionalSaves()) return { ok: false, code: "unsupported" };
 
+  // With no stamp the write would be unconditional, which is exactly what this lane
+  // promises never to send. A reload gives the tab the stamp it is missing.
   const stamp = given || lastSeenEtag();
+  if (!stamp) return { ok: false, code: "conflict" };
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {

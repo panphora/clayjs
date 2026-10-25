@@ -210,6 +210,20 @@ describe("the offer", () => {
     expect(toastPersistent).not.toHaveBeenCalled();
   });
 
+  test("a planned menu that fails to load falls back to the notice", async () => {
+    page();
+    const toastPersistent = jest.fn();
+    window.clay = { canEdit: true, isDraftMode: false, storage, plugins: Object.freeze(["menu"]), toastPersistent };
+    const update = await findUpdate({ fetchFn: fetcher() });
+
+    const offered = announce(update);
+    expect(await Promise.race([offered, Promise.resolve("waiting")])).toBe("waiting");
+    document.dispatchEvent(new CustomEvent("clay:plugin-failed", { detail: { plugin: "menu" } }));
+
+    expect(await offered).toBe("notice");
+    expect(toastPersistent).toHaveBeenCalledTimes(1);
+  });
+
   test("with no menu in the plan, the notice shows without waiting", async () => {
     page();
     const addItem = jest.fn();

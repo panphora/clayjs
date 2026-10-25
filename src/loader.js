@@ -129,6 +129,7 @@ async function loadLate(paths, loaded) {
       document.dispatchEvent(new CustomEvent("clay:plugin-ready", { detail: { plugin: PLUGIN_NAMES[path] } }));
     } catch (err) {
       console.error(`clayjs: plugin "${path}" failed to load, continuing without it:`, err);
+      document.dispatchEvent(new CustomEvent("clay:plugin-failed", { detail: { plugin: PLUGIN_NAMES[path] } }));
     }
   }
 }
