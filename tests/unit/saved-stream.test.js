@@ -145,6 +145,31 @@ test("a host that does not announce sync gets the legacy wire on the saved lane"
   handle.stop();
 });
 
+test("a file:// page has no stream: no throw, no request, no rejection", async () => {
+  // A page opened from disk names no host to follow, and its `window.location`
+  // cannot even serve as a base for one. That is no stream, not a failure: the
+  // handle stays inert and the reader holds the served article alone.
+  const snapshots = [];
+  const handle = createSavedStream({
+    documentURL: "file:///Users/me/note.html",
+    onSnapshot: (candidate) => {
+      snapshots.push(candidate);
+      return true;
+    },
+  });
+
+  expect(() => handle.start()).not.toThrow();
+  await handle.ready;
+  await settle();
+
+  expect(sources).toHaveLength(0);
+  expect(fetchCalls).toHaveLength(0);
+  expect(snapshots).toHaveLength(0);
+  expect(handle.represented).toEqual({ bytes: null, etag: null, seq: null });
+  expect(() => handle.start()).not.toThrow();
+  expect(() => handle.stop()).not.toThrow();
+});
+
 test.each([
   ["spec", { spec: 1, extensions: ["sync"] }],
   ["legacy", { spec: 1, extensions: ["upload"] }],

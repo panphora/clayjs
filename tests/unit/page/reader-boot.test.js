@@ -324,3 +324,29 @@ test("a first file another version wrote is refused, nothing applies and acquire
   expect(document.querySelector("[data-clay-conflict]").textContent).toContain("This document was upgraded.");
   pageView.stop();
 });
+
+test("page-view starts again after stop(), with one new stream", async () => {
+  const disk = SERVED("two", "Served");
+  const { pageView } = await bootView(async () => ({ ok: true, status: 200, text: async () => disk, headers: { get: () => null } }));
+
+  sources[0].onopen();
+  const first = await pageView.acquired;
+  expect(first).not.toBeNull();
+  expect(document.querySelector('[data-id="p1"]').textContent).toBe("Served");
+  pageView.stop();
+  expect(sources[0].readyState).toBe(2);
+
+  // A later start() is a new session, not the settled promise of the last one.
+  pageView.start();
+  await flush();
+  expect(sources).toHaveLength(2);
+  expect(sources[1].readyState).toBe(0);
+
+  sources[1].onopen();
+  const second = await pageView.acquired;
+  expect(second).not.toBeNull();
+  expect(second).not.toBe(first);
+  expect(second.represented).toMatchObject({ bytes: disk, etag: "disk-two" });
+  expect(sources).toHaveLength(2);
+  pageView.stop();
+});

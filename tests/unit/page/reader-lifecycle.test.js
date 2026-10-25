@@ -169,3 +169,21 @@ test("removal during a pending tool import never mounts it", async () => {
   expect(root.hasAttribute("data-mounted")).toBe(false);
   expect(root.textContent).toContain("fallback");
 });
+
+test("an accepted file records its etag, so a later save is not refused as stale", async () => {
+  const etag = await import("../../../src/core/etag.js");
+  load(FILE('<p data-id="a">A</p>'));
+  const reader = start({ represented: { bytes: FILE('<p data-id="a">A</p>'), etag: "etag-a", seq: 1 } });
+
+  expect(deliver({ bytes: FILE('<p data-id="a">B</p>'), etag: "etag-b", seq: 2 })).toBe(true);
+  // The stamp module is the write path's lazy chunk; the reader records into it
+  // rather than downloading it on first paint.
+  await settle();
+  expect(etag.lastSeenEtag()).toBe("etag-b");
+
+  // A file nobody stamped claims no version: the stamp this page holds stays.
+  expect(deliver({ bytes: FILE('<p data-id="a">C</p>'), etag: null, seq: 3 })).toBe(true);
+  await settle();
+  expect(etag.lastSeenEtag()).toBe("etag-b");
+  reader.stop();
+});

@@ -75,6 +75,23 @@ function readBodyStamp(html) {
 }
 
 const stampOf = (value) => (typeof value === 'string' && value ? value : null);
+
+/**
+ * The page URL every request in this module resolves against, or null when the page
+ * has no host to follow. `file://` and a sandboxed frame have an opaque origin:
+ * `window.location.origin` is the string `"null"` there and `new URL` refuses it as
+ * a base, and a `file:` page URL names no server either way. Opening a stream on
+ * such a page is not a failure to report, it is a request that does not exist.
+ */
+function resolvePageURL(documentURL) {
+  const origin = window.location.origin;
+  // The string `"null"` is what an opaque origin reports, and `new URL` refuses it
+  // as a base before any `file:` page URL is even read.
+  if (typeof origin !== 'string' || origin === '' || origin === 'null') return null;
+  const url = new URL(documentURL || window.location.href, origin);
+  return url.protocol === 'http:' || url.protocol === 'https:' ? url.href : null;
+}
+
 const seqOf = (value) => (Number.isSafeInteger(value) ? value : null);
 
 function normalizeReceipt(represented) {
@@ -110,10 +127,31 @@ export function createSavedStream({ documentURL, servedEtag = null, represented 
     throw new TypeError('createSavedStream: onSnapshot must be a function');
   }
 
-  const pageURL = new URL(documentURL || window.location.href, window.location.origin).href;
+  const pageURL = resolvePageURL(documentURL);
   const startupCheck = Boolean(stampOf(servedEtag));
 
   let receipt = normalizeReceipt(represented);
+  // An opaque origin — `file://`, a sandboxed frame — has no host to stream from, and no
+  // URL to resolve one against: there is no stream, and the reader holds the served
+  // article alone. Returning an inert handle keeps that a no-stream rather than an
+  // exception on the way to one.
+  if (pageURL === null) {
+    const idle = {
+      ready: null,
+      get represented() {
+        return receipt;
+      },
+      adopt() {
+        return idle;
+      },
+      start() {
+        idle.ready = Promise.resolve(idle);
+        return idle;
+      },
+      stop() {},
+    };
+    return idle;
+  }
   // Whether the receipt's version is known to sit at the stream's position, so a
   // newer frame applies straight from the stream. An accepted GET body leaves this
   // false until a frame names its stamp.

@@ -7,8 +7,9 @@ import { jest } from "@jest/globals";
  * sync/saved-stream.js, and that is the only stream on the page. A reader whose
  * tag also names `sync` is a different thing: generic sync already streams the
  * saved lane and applies what it receives, so page-view opens no stream of its
- * own and follows the saved-lane frames that apply reports instead. Nothing is
- * adopted from the live lane, whose frames are previews of unsaved keystrokes.
+ * own and follows the saved-lane frames that apply reports instead. Those frames
+ * are files and carry `source: "disk"` plus `lane: "saved"`; only the live lane
+ * sends previews of unsaved keystrokes, which a reader never takes.
  */
 
 const streams = [];
@@ -46,8 +47,14 @@ const load = (html) => {
   return document.querySelector("article");
 };
 
-const disk = (bytes, etag, seq) =>
-  document.dispatchEvent(new CustomEvent("clay:sync-applied", { detail: { html: bytes, etag, seq, source: "disk" } }));
+// What live-sync names a saved-lane apply: the frame is a file, so it is a disk
+// change, and `lane` says which lane delivered it.
+const saved = (bytes, etag, seq) =>
+  document.dispatchEvent(new CustomEvent("clay:sync-applied", { detail: { html: bytes, etag, seq, source: "disk", lane: "saved" } }));
+
+// A peer frame from the live lane: a preview of keystrokes nobody saved.
+const preview = (bytes, seq) =>
+  document.dispatchEvent(new CustomEvent("clay:sync-applied", { detail: { html: bytes, seq, source: "peer", lane: "live" } }));
 
 beforeEach(() => {
   jest.resetModules();
@@ -57,7 +64,7 @@ beforeEach(() => {
   window.clayEditMode = false;
 });
 
-test("with generic sync the reader opens no stream and follows the lane's disk frames", async () => {
+test("with generic sync the reader opens no stream and shows the lane's saved frames", async () => {
   load(FILE("Boot"));
   const pageView = await import("../../../src/plugins/page-view.js");
   await pageView.start({ sync: true });
@@ -67,22 +74,29 @@ test("with generic sync the reader opens no stream and follows the lane's disk f
   expect(reader.represented).toEqual({ bytes: null, etag: null, seq: null });
 
   const bytes = FILE("Disk", { rev: "r2", title: "Disk title" });
-  disk(bytes, "disk-2", 9);
+  saved(bytes, "disk-2", 9);
 
   expect(document.querySelector('[data-id="p1"]').textContent).toBe("Disk");
   expect(document.title).toBe("Disk title");
   expect(reader.represented).toEqual({ bytes, etag: "disk-2", seq: 9 });
 
-  // A peer frame is a live preview of keystrokes nobody saved: it is not a file,
-  // so it never becomes this reader's receipt.
+  // A saved-lane frame a sync implementation tagged as a peer is still a file: the
+  // lane says so, and the reader takes it.
+  const later = FILE("Later", { rev: "r3", title: "Later title" });
   document.dispatchEvent(new CustomEvent("clay:sync-applied", {
-    detail: { html: FILE("Peer", { rev: "r3" }), source: "peer", seq: 10 },
+    detail: { html: later, etag: "disk-3", source: "peer", lane: "saved", seq: 10 },
   }));
-  expect(document.querySelector('[data-id="p1"]').textContent).toBe("Disk");
-  expect(reader.represented).toEqual({ bytes, etag: "disk-2", seq: 9 });
+  expect(document.querySelector('[data-id="p1"]').textContent).toBe("Later");
+  expect(reader.represented).toEqual({ bytes: later, etag: "disk-3", seq: 10 });
+
+  // A live-lane frame is a preview of keystrokes nobody saved: it is not a file,
+  // so it never becomes this reader's receipt.
+  preview(FILE("Peer", { rev: "r4" }), 11);
+  expect(document.querySelector('[data-id="p1"]').textContent).toBe("Later");
+  expect(reader.represented).toEqual({ bytes: later, etag: "disk-3", seq: 10 });
 
   pageView.stop();
-  expect(reader.represented).toEqual({ bytes, etag: "disk-2", seq: 9 });
+  expect(reader.represented).toEqual({ bytes: later, etag: "disk-3", seq: 10 });
 });
 
 test("without sync the reader owns the saved lane and takes no clay:sync-applied feed", async () => {
@@ -100,7 +114,7 @@ test("without sync the reader owns the saved lane and takes no clay:sync-applied
   const reader = await pageView.acquired;
   expect(reader.represented).toEqual({ bytes, etag: "disk-2", seq: 4 });
 
-  disk(FILE("Elsewhere", { rev: "r3" }), "disk-3", 5);
+  saved(FILE("Elsewhere", { rev: "r3" }), "disk-3", 5);
   expect(document.querySelector('[data-id="p1"]').textContent).toBe("Fetched");
   pageView.stop();
   expect(streams[0].stopped).toBe(true);
@@ -123,7 +137,7 @@ test("the loader passes the plan's sync choice to the reader", async () => {
   expect(streams).toHaveLength(0);
 
   const bytes = FILE("Synced", { rev: "r2" });
-  disk(bytes, "disk-2", 3);
+  saved(bytes, "disk-2", 3);
   expect(document.querySelector('[data-id="p1"]').textContent).toBe("Synced");
 
   const pageView = await import("../../../src/plugins/page-view.js");

@@ -518,3 +518,35 @@ test("dirty tab with no baseline holds the whole disk frame", async () => {
   expect(sync._holdRetryExt).not.toBeNull();
   sync.stop();
 });
+
+test("a saved-lane frame is a file: the applied event says disk and names the lane", async () => {
+  // A view-mode tab follows the saved lane, and the article it holds is
+  // clay="freeze", so the frame's own morph leaves it to the reader beside it.
+  // What the reader needs is the tag: a saved-lane frame is a file, and only the
+  // live lane carries keystrokes nobody saved.
+  document.body.innerHTML =
+    '<article data-page="1" clay="freeze"><p data-id="a">before</p></article>';
+  save.setLastSavedContents(snapshot.captureForComparison());
+  save.setUnsavedChanges(false);
+  await Promise.resolve();
+  gate.gateClearIfUnchanged(gate.gateCaptureToken());
+
+  const sync = new LiveSync();
+  sync.lane = "saved";
+  sync._requestFrame = () => null;
+
+  const applied = [];
+  const onApplied = (event) => applied.push(event.detail);
+  document.addEventListener("clay:sync-applied", onApplied);
+
+  const frame = '<!DOCTYPE html><html><head></head><body><article data-page="1" clay="freeze"><p data-id="a">after</p></article></body></html>';
+  await sync._doApplyUpdate(frame, 4, null, "disk-2");
+
+  document.removeEventListener("clay:sync-applied", onApplied);
+  sync.stop();
+
+  expect(applied).toHaveLength(1);
+  expect(applied[0].source).toBe("disk");
+  expect(applied[0].lane).toBe("saved");
+  expect(applied[0].html).toBe(frame);
+});

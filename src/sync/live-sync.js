@@ -2017,8 +2017,13 @@ class LiveSync {
       // event rather than on the frame's arrival for one reason: a frame that held
       // returns above without reaching here, so nothing can name an author for a
       // change this tab never took. Null on every frame the host did not stamp.
+      //
+      // A frame on the SAVED lane is a file, not a preview: only the live lane
+      // carries keystrokes nobody saved. Tagging both as `peer` made a view-mode
+      // reader, which drops previews, ignore every save on a page that also names
+      // `sync`. `lane` names the lane the frame came from either way.
       document.dispatchEvent(new CustomEvent('clay:sync-applied', {
-        detail: { seq, source: 'peer', by: by || null, html, report, unresolved: this.unresolvedConflicts, conflictIds }
+        detail: { seq, source: this.lane === 'saved' ? 'disk' : 'peer', lane: this.lane, by: by || null, html, report, unresolved: this.unresolvedConflicts, conflictIds }
       }));
     } finally {
       this._log('applyUpdate - morph complete, resuming mutations');

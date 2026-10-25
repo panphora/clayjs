@@ -5,7 +5,7 @@
 // mounted tool. No ProseMirror, no projection code and no merge engine: the saved
 // file is already the rendered form of the writer's model.
 import { createSavedStream } from "../sync/saved-stream.js";
-import { stopForUpgrade, upgradeReplacesDocument } from "../sync/version-guard.js";
+import { stopForUpgrade, upgradeReplaces, upgradeReplacesDocument } from "../sync/version-guard.js";
 import { applyPreparedArticle, keepToolVersion, prepareSavedArticle, toolInfoOf, toolsOf, toolStateOf } from "./reader-patch.js";
 import { claim } from "./runtime-owner.js";
 
@@ -13,6 +13,13 @@ const ARTICLE = "article[data-page]";
 const TOOL = 'section[data-type="tool"][data-id]';
 
 export { applyPreparedArticle, prepareSavedArticle };
+
+// The stamp of the file this reader accepted, recorded where a save reads it. The
+// stamp module is the write path's own lazy chunk: a reader paints without it, and
+// a save loads the one copy both paths then share.
+const rememberStamp = (etag) => {
+  import("../core/etag.js").then(({ recordEtag }) => recordEtag(etag)).catch(() => {});
+};
 
 const freezeReceipt = (value) => Object.freeze({
   bytes: typeof value?.bytes === "string" ? value.bytes : null,
@@ -166,10 +173,11 @@ function createReader({ doc, article, represented = null, feed = null, documentU
     // A file published at another version of this document is not this reader's to
     // show: the stream stops, this file and every later one are refused, and the
     // notice offers a reload. Nothing of it reaches the article.
-    if (upgradeReplacesDocument(prepared.source)) {
+    if (upgradeReplaces(candidate.bytes)) {
       stream?.stop();
       stream = null;
       stopForUpgrade();
+      dispatch("clay:reader-status", { state: "blocked", reason: "upgraded" });
       return false;
     }
     pruneTools(prepared.tools);
@@ -180,6 +188,9 @@ function createReader({ doc, article, represented = null, feed = null, documentU
       return false;
     }
     receipt = freezeReceipt(candidate);
+    // The article now holds the version this file was, so a save this page makes
+    // afterwards has to carry that version's stamp instead of an older one.
+    if (receipt.etag) rememberStamp(receipt.etag);
     mountTools(prepared.tools, prepared.toolState);
     dispatch("clay:reader-status", { state: "applied", etag: receipt.etag, seq: receipt.seq });
     return true;
@@ -233,9 +244,10 @@ function createReader({ doc, article, represented = null, feed = null, documentU
     const onFrame = (event) => {
       const detail = event.detail;
       if (typeof detail?.html !== "string") return;
-      // A peer frame is a live preview of keystrokes nobody saved; a receipt is a
-      // file. An unstamped event names no lane, and is taken as the saved one.
-      if (detail.source && detail.source !== "disk") return;
+      // A live-lane frame is a preview of keystrokes nobody saved; a saved-lane
+      // frame is a file, whatever tag a sync implementation put on it. An event
+      // naming neither is taken as the saved one.
+      if (detail.source && detail.source !== "disk" && detail.lane !== "saved") return;
       commit({ bytes: detail.html, etag: detail.etag ?? null, seq: detail.seq ?? null });
     };
     feed.addEventListener("clay:sync-applied", onFrame);
@@ -245,10 +257,12 @@ function createReader({ doc, article, represented = null, feed = null, documentU
     // rather than opening a second one, so no save falls between the two.
     stream.adopt({ onSnapshot: commit, onStatus: onStreamStatus });
   } else {
+    // No file yet: the article on screen is what this reader holds, and the
+    // transport asks the host for the saved one as soon as it opens.
     stream = createSavedStream({
       documentURL,
       servedEtag,
-      represented: receipt,
+      represented: receipt.bytes ? receipt : null,
       onSnapshot: commit,
       onStatus: onStreamStatus,
     });
@@ -270,8 +284,11 @@ function createReader({ doc, article, represented = null, feed = null, documentU
  * steady state share one connection.
  */
 export function start({ represented = null, documentURL, servedEtag = null, stream = null, feed = null, doc = document } = {}) {
-  if (!feed && (!represented || typeof represented.bytes !== "string" || represented.bytes === "")) {
+  if (represented && (typeof represented.bytes !== "string" || represented.bytes === "")) {
     throw new TypeError("clayjs: the reader needs the full saved bytes to start");
+  }
+  if (!feed && !stream && !represented && !documentURL) {
+    throw new TypeError("clayjs: the reader needs a file, a stream or a page to follow");
   }
   const articles = doc.querySelectorAll(ARTICLE);
   if (articles.length !== 1) throw new Error("clayjs: the reader needs exactly one article[data-page]");
