@@ -1,4 +1,4 @@
-import { isEditMode } from "../core/is-edit-mode.js";
+import { isEditMode, modeState } from "../core/is-edit-mode.js";
 import { saveToken } from "../core/host-attrs.js";
 import { hostMeta, hostSupports } from "../core/host-meta.js";
 
@@ -475,6 +475,76 @@ function releaseSaving(rec) {
   saveLane?.resumeAutosave();
 }
 
+// --- write admission -------------------------------------------------------
+
+// A request that asks for the page's own bytes is an edit-session operation: it flushes
+// the page and holds the save lane around the POST, so it may only start while the
+// session it was sent in still admits writes. The lease below closes that admission
+// while an exit drains and leaves an active save hold — this request's own operation —
+// pending until it settles, so an exit cannot report a clean view over an agent that is
+// still writing the file. A read-only request (`document: "none"`, which is every
+// helper and message workflow) is not gated: it writes nothing here.
+let session = null;
+
+const admits = () => !session || session.admitted;
+
+const fault = (message, code, pending) => Object.assign(new Error(`clay.wire: ${message}`), { code, pending });
+
+// The generation is what makes an await safe to come back from. A helper's identity
+// round trip, the save lane's import and the flush all outlive a switch that started
+// while they were in flight; the record is sent for the session it began in, and a
+// stale one ends as an error rather than handing an agent bytes from a session that
+// has gone.
+function admitsRecord(rec) {
+  if (rec.document !== "edit") return true;
+  if (rec.generation === modeState().generation && admits()) return true;
+  finish(rec, "error", "the page changed mode before this request went out", {
+    errorCode: "stale-document",
+    errorSource: "client",
+  });
+  return false;
+}
+
+/**
+ * The wire as a mode lease.
+ *
+ * Nothing to construct: the channel is lazy and belongs to the page. `quiesce` closes
+ * admission for edit requests and refuses the exit while one is still open, because
+ * that request's save hold is work the barrier cannot flush around — the hold stands
+ * until the request itself settles (a terminal frame, a cancel, or its deadline).
+ * `resume` reopens admission over the same records. `dispose` (after the barrier) only
+ * forgets the session: with none open the page is back to its unnegotiated rule.
+ */
+export function wireParticipant() {
+  return {
+    id: "clay:wire",
+    order: 900,
+    prepare() {
+      const lease = { admitted: false };
+      session = lease;
+      return {
+        enable() {
+          if (session === lease) lease.admitted = true;
+        },
+        quiesce() {
+          if (session !== lease) return;
+          lease.admitted = false;
+          const pending = [...records.values()]
+            .filter((rec) => rec.document === "edit" && (rec.holdsSave || OPEN_STATES.has(rec.state)))
+            .map((rec) => rec.id);
+          if (pending.length) throw fault("a request on this page has not settled", "pending-input", pending);
+        },
+        resume() {
+          if (session === lease) lease.admitted = true;
+        },
+        dispose() {
+          if (session === lease) session = null;
+        },
+      };
+    },
+  };
+}
+
 function once(eventName, timeout) {
   return new Promise((resolve) => {
     let done = false;
@@ -616,6 +686,7 @@ function send(payload, opts = {}) {
     landingTimer: null,
     abort: typeof AbortController === "function" ? new AbortController() : null,
     holdsSave: false,
+    generation: modeState().generation,
     settle: null,
     signal: opts.signal && typeof opts.signal.addEventListener === "function" ? opts.signal : null,
     signalHandler: null,
@@ -649,12 +720,16 @@ function send(payload, opts = {}) {
       }
     }
 
+    if (!admitsRecord(rec)) return;
+
     if (rec.document === "edit") {
       await holdSaving(rec);
       if (rec.state !== "sent") return;
+      if (!admitsRecord(rec)) return;
 
       await flushSave();
       if (rec.state !== "sent") return;
+      if (!admitsRecord(rec)) return;
     }
 
     // Subscribe before posting. A handler can acknowledge in single-digit

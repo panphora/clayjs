@@ -19,7 +19,7 @@
  */
 
 import { hostMeta, hostMetaOutcome } from "../core/host-meta.js";
-import { isEditMode } from "../core/is-edit-mode.js";
+import { isEditMode, modeState } from "../core/is-edit-mode.js";
 
 const editing = () => (window.clay && "isEditMode" in window.clay ? !!window.clay.isEditMode : isEditMode);
 import { colorIndexOf, initialsOf } from "../lib/person-face.js";
@@ -138,6 +138,7 @@ async function refresh(fresh) {
 }
 
 function get(id) {
+  observe();
   const key = String(id ?? "");
   const live = (host.me?.id === key && host.me) || host.members?.find((person) => person.id === key);
   if (live) return record(live);
@@ -147,6 +148,7 @@ function get(id) {
 }
 
 function list() {
+  observe();
   return [...saved().keys()].map(get);
 }
 
@@ -206,6 +208,16 @@ function rename(name) {
   return record(next);
 }
 
+// Same session and still editing: the two facts an await can invalidate.
+const stale = (generation) => generation !== modeState().generation || !editing();
+
+function refuseIfStale(generation) {
+  if (!stale(generation)) return;
+  throw Object.assign(new Error("clay.author: the page left edit mode before your name was recorded"), {
+    code: "stale-document",
+  });
+}
+
 function unavailable() {
   return Object.assign(new Error("Can't reach the host to check who you are. Try again in a moment."), { code: "people-unavailable" });
 }
@@ -218,11 +230,16 @@ function unavailable() {
 export async function author(el, attr = "data-by") {
   if (!window.clay?.isEditMode) throw new Error("clay.author: this page is not in edit mode");
   if (!(el instanceof Element)) throw new TypeError("clay.author: needs an element");
+  // Attribution belongs to the session that asked for it. Asking the host who I am and
+  // asking a person their name both take long enough for the page to leave edit, and a
+  // stamp recorded afterwards would credit a session that has already ended.
+  const generation = modeState().generation;
   // A host that names people can change who you are while the page is open (a sign-out,
   // a rename in the app), so a stamp asks it again first. If it cannot answer now, nothing
   // is stamped: the last answer might name someone who is no longer here.
   if (host.supports) {
     const meta = await hostMeta({ fresh: true });
+    refuseIfStale(generation);
     const fresh = hostMetaOutcome(meta);
     if (fresh === "none") throw Object.assign(new Error("This page lost its connection to the host. Reload it to keep editing."), { code: "people-unavailable" });
     if (fresh !== "ok") throw unavailable();
@@ -230,11 +247,13 @@ export async function author(el, attr = "data-by") {
     if (host.unavailable) throw Object.assign(new Error("The app hosting this file can't name you right now. Check its Profile settings, then try again."), { code: "people-unavailable" });
   } else if (outcome !== "ok" && outcome !== "none") {
     await refresh(outcome === "failed");
+    refuseIfStale(generation);
   }
   if (outcome === "failed") throw unavailable();
   let me = currentMe();
   if (!me) {
     const chosen = await askName();
+    refuseIfStale(generation);
     if (!chosen) return null;
     writeLocal(chosen);
     me = record(chosen);
@@ -390,9 +409,20 @@ function registrySignature() {
   return JSON.stringify([...saved().values()].map(({ id, name }) => [id, name]));
 }
 
+// The observer belongs to the page rather than to one edit session — a reader repaint
+// has to keep the names in it current — so any read starts it and a session that stops
+// takes it down. It is created with the document it watches held once: a test
+// environment can tear that document down while a mutation is still queued, and a
+// callback that reached for the global afterwards would read a page that is gone.
+let watcher = null;
+
 function observe() {
+  const doc = document;
+  if (watcher?.doc === doc) return;
+  watcher?.observer.disconnect();
   lastRegistry = registrySignature();
-  new MutationObserver((records) => {
+  const observer = new MutationObserver((records) => {
+    if (typeof document === "undefined" || document !== doc) return;
     for (const rec of records) {
       const target = rec.target.nodeType === 1 ? rec.target : rec.target.parentElement;
       // A removed clay-people attribute no longer matches the selector, so it is caught by name.
@@ -410,7 +440,14 @@ function observe() {
         return;
       }
     }
-  }).observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ["value", "clay-people"] });
+  });
+  observer.observe(doc.body, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ["value", "clay-people"] });
+  watcher = { doc, observer };
+}
+
+function unobserve() {
+  watcher?.observer.disconnect();
+  watcher = null;
 }
 
 async function init() {
@@ -427,6 +464,42 @@ async function init() {
   });
   const first = refresh(false);
   await Promise.race([first, new Promise((resolve) => setTimeout(resolve, BOOT_WAIT_MS))]);
+}
+
+/**
+ * Attribution as a mode lease.
+ *
+ * Reading names is not editing, so every read keeps the registry observer running and
+ * costs a session nothing. What a session adds is a name that is still being chosen: a
+ * half-answered prompt is input nobody has committed, so `quiesce` refuses the exit
+ * rather than closing it, and `resume` leaves that same prompt on screen. `dispose`
+ * (after the barrier) takes back both the prompt and the observer, and the next read
+ * starts watching again.
+ */
+export function peopleParticipant() {
+  return {
+    id: "clay:people",
+    order: 330,
+    prepare() {
+      return {
+        enable() {
+          observe();
+        },
+        quiesce() {
+          if (!asking) return;
+          throw Object.assign(new Error("clay:people: a name is still being chosen"), {
+            code: "pending-input",
+            pending: ["name"],
+          });
+        },
+        resume() {},
+        dispose() {
+          cancelAsking?.();
+          unobserve();
+        },
+      };
+    },
+  };
 }
 
 export const people = Object.freeze({ get, list, available, add, remove, canRename, rename });
