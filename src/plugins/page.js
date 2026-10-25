@@ -472,6 +472,7 @@ export function createSteps(inst, options) {
   let toolsStore = null;
   let aiTool = null;
   let toolsOpening = null;
+  let chrome = null;
 
   // The view parts install onto the editor, which exists only after the mount; an
   // install that starts before it waits here, and a disposed install releases it.
@@ -555,11 +556,11 @@ export function createSteps(inst, options) {
   // Making or revising a tool opens the store and the host first, so the panel
   // keeps what it makes.
   const openAi = async ({ target = null, remove = null } = {}) => {
-    const { holdSlashRange, heldSlashRange } = await import("../page/chrome.js");
-    if (editorView && remove) holdSlashRange(editorView, remove);
+    if (chrome && editorView && remove) chrome.holdSlashRange(editorView, remove);
     await features.ensure("tool").catch(() => {});
     if (!isCurrent(inst) || !aiTool || !editorView) return;
-    aiTool.open({ target, remove: remove ? heldSlashRange(editorView.state) : null });
+    const mod = chrome ?? await import("../page/chrome.js");
+    aiTool.open({ target, remove: remove ? mod.heldSlashRange(editorView.state) : null });
   };
   const aiRequested = () => capabilityAdvertised(meta);
 
@@ -633,6 +634,8 @@ export function createSteps(inst, options) {
     editorImport.catch(() => null);
     const codeImport = pageCodeReady();
     codeImport.catch(() => null);
+    const chromeImport = import("../page/chrome.js");
+    chromeImport.catch(() => null);
     const read = await source.ready;
     if (!read.ok) return read;
     if (!isCurrent(inst)) return { ok: false, cancelled: true };
@@ -661,8 +664,9 @@ export function createSteps(inst, options) {
     let editor = null;
     let code = null;
     try {
-      const [editorModule, codeModule] = await Promise.all([editorImport, codeImport]);
+      const [editorModule, codeModule, chromeModule] = await Promise.all([editorImport, codeImport, chromeImport]);
       editor = editorModule;
+      chrome = chromeModule;
       code = await mountCodeReady(codeModule);
     } catch (error) {
       // A host that blocked the download keeps the saved article and reads this reason.
@@ -717,6 +721,14 @@ export function createSteps(inst, options) {
       initialSave = true;
     }
 
+    let read = null;
+    let code = null;
+    if (source.seeded) {
+      read = await source.ready;
+      if (!read.ok) return read;
+      code = await codePromise;
+      if (!isCurrent(inst)) return { ok: false, cancelled: true };
+    }
     let handle;
     try {
       handle = window.clay.live("page");
@@ -733,9 +745,9 @@ export function createSteps(inst, options) {
     if (!isCurrent(inst)) return { ok: false, cancelled: true };
     // A tag the page's own code cannot decode is the boot's reason to stop, and both
     // branches report the same one, so whichever settles first does not change it.
-    const read = await source.ready;
+    read ??= await source.ready;
     if (!read.ok) return read;
-    const code = await codePromise;
+    code ??= await codePromise;
     if (!isCurrent(inst)) return { ok: false, cancelled: true };
     const store = storeOf("page");
     if (!store) return { ok: false, reason: "missing-page-store" };
