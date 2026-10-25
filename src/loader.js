@@ -8,6 +8,7 @@ import { effect } from "./lib/effect.js";
 import { style } from "./lib/style.js";
 import { derived } from "./lib/derived.js";
 import { bootPhase } from "./core/boot-phase.js";
+import { mergeEngine } from "./sync/merge-engine.js";
 
 function domReady() {
   return new Promise((resolve) => onDomReady(resolve));
@@ -128,7 +129,6 @@ function assembleCore(loaded, { isDraftMode, isEditMode, isOwner, siteVisibility
   const snapshot = loaded["core/snapshot.js"];
   const save = loaded["core/save.js"];
   const cacheBustMod = loaded["lib/cache-bust.js"];
-  const hyperMorph = loaded["vendor/hyper-morph.vendor.js"];
   const pageData = loaded["core/page-data.js"];
 
   clay.readData = pageData.readData;
@@ -161,7 +161,7 @@ function assembleCore(loaded, { isDraftMode, isEditMode, isOwner, siteVisibility
   if (cacheBustMod) {
     clay.cacheBust = cacheBustMod.default;
   }
-  if (hyperMorph) clay.morph = hyperMorph.morph;
+  clay.morph = (oldEl, newEl, options) => mergeEngine().then(({ morph }) => morph(oldEl, newEl, options));
 }
 
 function attachPluginMember(path, mod, loaded) {

@@ -31,6 +31,7 @@ beforeAll(async () => {
   fakeWire.send.mockImplementation(() => ({ id: "h", done: new Promise(() => {}), cancel: jest.fn() }));
   buildCalls = await captureAsync(async () => {
     await import("../../src/plugins/ai-edit.js");
+    await (await import("../../src/sync/merge-engine.js")).mergeEngine();
     await flush();
   });
 });

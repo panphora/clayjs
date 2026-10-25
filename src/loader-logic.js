@@ -12,7 +12,6 @@ export const CORE_WAVES = {
     "core/page-data.js",
   ],
   editOnly: [
-    "vendor/hyper-morph.vendor.js",
     "core/snapshot.js",
     // Before save.js: it takes the boot baseline as it evaluates, and a snapshot
     // transform registered after that made an untouched page read as unsaved.
@@ -109,7 +108,6 @@ export const MODULES = {
   "attrs/refetch-on-save.js":   () => import("./attrs/refetch-on-save.js"),
   "attrs/add-from.js":          () => import("./attrs/add-from.js"),
   "lib/cache-bust.js":          () => import("./lib/cache-bust.js"),
-  "vendor/hyper-morph.vendor.js": () => import("./vendor/hyper-morph.vendor.js"),
   "plugins/richclay.js":        () => import("./plugins/richclay.js"),
   "plugins/indicator.js":       () => import("./plugins/indicator.js"),
   "sync/live-sync.js":          () => import("./sync/live-sync.js"),

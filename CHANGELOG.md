@@ -136,6 +136,9 @@
 
 ## [Unreleased]
 
+### Changed
+- `clay.morph(oldEl, newEl, options)` returns a Promise in every mode, and the merge engine downloads on the first merge instead of at boot
+
 ## [1.15.2] - 2026-10-24
 
 ### Changed

@@ -41,8 +41,7 @@
  * invisible to the mutation system (its status text changes constantly), absent from
  * every snapshot and from what peers receive.
  */
-import { HyperMorph } from "../vendor/hyper-morph.vendor.js";
-import { mergeTagRecognizers } from "../sync/merge-tags.js";
+import { loadedEngine, mergeEngine } from "../sync/merge-engine.js";
 import Mutation from "../lib/mutation.js";
 import { isEditMode } from "../core/is-edit-mode.js";
 import { holdAllSaves, releaseAllSaves } from "../core/save.js";
@@ -190,6 +189,7 @@ function strippedBodyHTML() {
 // ---------------------------------------------------------------- morphing
 
 function morphTo(el, content, scripts) {
+  const { HyperMorph } = loadedEngine();
   return HyperMorph.morph(el, content, { morphStyle: 'outerHTML', restoreFocus: true, scripts });
 }
 
@@ -201,6 +201,7 @@ function morphTo(el, content, scripts) {
 // against the snapshot the model saw, so data the user changed mid-flight survives
 // the reply. Rewinds must restore the snapshot exactly, so they disable merging.
 function sessionMorph(s, content, { rewind = false } = {}) {
+  const { HyperMorph, mergeTagRecognizers } = loadedEngine();
   // handle:false: a reply's scripts never run, so the preview cannot execute code
   // before Keep, and neither can a rewind.
   const scripts = rewind
@@ -320,6 +321,9 @@ async function sendRequest(el, comment, quote) {
   });
   session.handle = handle;
   const outcome = await handle.done;
+  if (!session || session.handle !== handle) return;
+  // The engine is fetched here, where a reply is applied, not at boot.
+  await mergeEngine();
   if (!session || session.handle !== handle) return;
   if (outcome.state === 'done') onDone(outcome.result || {});
   else if (outcome.state === 'cancelled') onError('HTML Clay stopped this edit.');
@@ -444,7 +448,7 @@ function revertSession() {
   session = null;
   if (!s) return;
   try {
-    if (s.state === 'requesting' || s.state === 'deciding') {
+    if ((s.state === 'requesting' || s.state === 'deciding') && loadedEngine()) {
       sessionMorph(s, s.snapshot, { rewind: true });
     }
   } finally {

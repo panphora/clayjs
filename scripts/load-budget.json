@@ -1,20 +1,20 @@
 {
   "document.html": {
-    "view": { "requests": 86, "depth": 29, "brotli": 401408, "css": { "requests": 2, "depth": 2 } },
-    "edit": { "requests": 175, "depth": 51, "brotli": 835584, "css": { "requests": 2, "depth": 2 } }
+    "view": { "requests": 87, "depth": 29, "brotli": 402432, "css": { "requests": 2, "depth": 2 } },
+    "edit": { "requests": 176, "depth": 50, "brotli": 836608, "css": { "requests": 2, "depth": 2 } }
   },
   "document-rich.html": {
-    "view": { "requests": 86, "depth": 29, "brotli": 401408, "css": { "requests": 2, "depth": 2 } },
-    "edit": { "requests": 175, "depth": 51, "brotli": 835584, "css": { "requests": 2, "depth": 2 } }
+    "view": { "requests": 87, "depth": 29, "brotli": 402432, "css": { "requests": 2, "depth": 2 } },
+    "edit": { "requests": 176, "depth": 50, "brotli": 836608, "css": { "requests": 2, "depth": 2 } }
   },
   "kanban.html": {
-    "view": { "requests": 88, "depth": 27, "brotli": 409600, "css": { "requests": 0, "depth": 0 } },
-    "edit": { "requests": 110, "depth": 52, "brotli": 548864, "css": { "requests": 0, "depth": 0 } },
-    "draft": { "requests": 90, "depth": 41, "brotli": 450560, "css": { "requests": 0, "depth": 0 } }
+    "view": { "requests": 88, "depth": 27, "brotli": 315392, "css": { "requests": 0, "depth": 0 } },
+    "edit": { "requests": 110, "depth": 51, "brotli": 454656, "css": { "requests": 0, "depth": 0 } },
+    "draft": { "requests": 90, "depth": 40, "brotli": 356352, "css": { "requests": 0, "depth": 0 } }
   },
   "journal.html": {
-    "view": { "requests": 86, "depth": 25, "brotli": 401408, "css": { "requests": 0, "depth": 0 } },
-    "edit": { "requests": 105, "depth": 47, "brotli": 519168, "css": { "requests": 0, "depth": 0 } },
-    "draft": { "requests": 88, "depth": 39, "brotli": 433152, "css": { "requests": 0, "depth": 0 } }
+    "view": { "requests": 86, "depth": 25, "brotli": 307200, "css": { "requests": 0, "depth": 0 } },
+    "edit": { "requests": 105, "depth": 46, "brotli": 424960, "css": { "requests": 0, "depth": 0 } },
+    "draft": { "requests": 88, "depth": 38, "brotli": 337920, "css": { "requests": 0, "depth": 0 } }
   }
 }

@@ -35,14 +35,12 @@
  * INTEGRATES WITH: snapshot.js (receives snapshot-ready events)
  */
 
-import { HyperMorph, morph } from "../vendor/hyper-morph.vendor.js";
-
-const { createIdentityStore } = HyperMorph;
+import { createIdentityStore } from "../vendor/hyper-morph-identity.vendor.js";
+import { loadedEngine, mergeEngine } from "./merge-engine.js";
 import Mutation from "../lib/mutation.js";
 import { NO_DIRTY_SELECTOR, LIVE_SELECTOR } from "../lib/region-policy.js";
 import { EXTENSION_NODE_SELECTOR, EXTENSION_ATTR_PATTERN } from '../lib/extension-noise.js';
 import { isEditMode } from "../core/is-edit-mode.js";
-import { mergeTagRecognizers } from "./merge-tags.js";
 import { attributeMerge } from "./merge-declarations.js";
 import { serializeForSync, captureForComparisonAndDirty, captureSnapshot, originalSnapshotNode, captureForMerge, captureForSaveAndComparison } from '../core/snapshot.js';
 import { mergeIgnoresAttr, mergeVetoesAttr } from '../lib/root-attrs.js';
@@ -383,6 +381,7 @@ class LiveSync {
     // retries cannot pile up behind one another.
     this._servedFetchId = 0;
     this._startupRetry = null;
+    this._engineRetry = null;
 
     // Whether each lane is currently holding. A hold is a safe outcome but a
     // silent one: without an event the page simply stops updating and nothing
@@ -665,6 +664,8 @@ class LiveSync {
     // fetch, if any, owns the question.
     clearTimeout(this._startupRetry);
     this._startupRetry = null;
+    clearTimeout(this._engineRetry);
+    this._engineRetry = null;
     this._servedFetchId++;
   }
 
@@ -1466,6 +1467,20 @@ class LiveSync {
     this._rafHandle = null;
     if (this.isDestroyed) return;
 
+    if (!loadedEngine()) {
+      this._morphInFlight = true;
+      try {
+        await mergeEngine();
+      } catch (error) {
+        this._log('Merge engine failed to load', error);
+        this._engineRetry = setTimeout(() => this._scheduleNextFrame(), 2000);
+        return;
+      } finally {
+        this._morphInFlight = false;
+      }
+      if (this.isDestroyed) return;
+    }
+
     const ext = this._pendingExternal;
     const opts = ext?.fetchOptions || null;
     // A startup check and a stamped repair are both version checks: each one
@@ -1658,11 +1673,12 @@ class LiveSync {
    * @param {object} [lane.extra] - extra mergeDocument options (the disk lane's beforeApply)
    */
   async _mergeIncoming(html, identityMap, { base, baseIdentityMap = null, captureLocal, synthetic, source = 'peer', seq = null, etag = null, extra = {} }) {
+    if (!loadedEngine()) await mergeEngine();
     let lineageCapture;
     const mergeDocument = (options) => {
       lineageCapture = beginLineageCapture(conflicts.list());
       try {
-        const pending = HyperMorph.mergeDocument({ ...options, lineage: lineageCapture.lineage });
+        const pending = loadedEngine().HyperMorph.mergeDocument({ ...options, lineage: lineageCapture.lineage });
         lineageCapture.returned();
         return pending;
       } catch (error) {
@@ -1694,7 +1710,7 @@ class LiveSync {
     const syntheticByAuthored = new Map();
     if (isIdMap(identityMap)) {
       remote = new DOMParser().parseFromString(html, 'text/html');
-      const imported = HyperMorph.importMap(remote.documentElement, identityMap);
+      const imported = loadedEngine().HyperMorph.importMap(remote.documentElement, identityMap);
       for (const el of remote.querySelectorAll('[data-id], [id]')) {
         const id = authored(el);
         const synthetic = id && imported.get(el);
@@ -1713,7 +1729,7 @@ class LiveSync {
       attributeMerge,
       protectFocusedValue: true,
       keepLiveOnly: source === 'peer',
-      scripts: { mergeTags: mergeTagRecognizers },
+      scripts: { mergeTags: loadedEngine().mergeTagRecognizers },
       hooks: { beforeAttributeUpdated },
       ...extra,
     };
@@ -2273,5 +2289,6 @@ if (typeof window !== 'undefined') {
 // Export for the clayjs module system. The class itself is exported so
 // tests can create fresh instances without driving the singleton's
 // EventSource/snapshot wiring.
+const morph = (oldEl, newEl, options) => mergeEngine().then(({ morph }) => morph(oldEl, newEl, options));
 export { liveSync, LiveSync, morph, WIRE_PROFILES, conflicts, SYNC_IGNORE_SELECTOR, REMOTE_WINS_SELECTOR };
 export default liveSync;

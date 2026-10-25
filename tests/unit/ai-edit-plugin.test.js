@@ -98,6 +98,9 @@ beforeAll(async () => {
   // No ready ai-edit yet: the plugin's boot has to find nothing and build nothing.
   fakeWire.helpers.mockResolvedValue([{ name: "search", state: "ready" }, { name: "ai-edit", state: "denied" }]);
   ({ aiEdit } = await import("../../src/plugins/ai-edit.js"));
+  // The plugin fetches the merge engine when it applies a reply, so the flush
+  // helpers below stay microtask-sized only once the engine is in.
+  await (await import("../../src/sync/merge-engine.js")).mergeEngine();
   await flush();
 });
 

@@ -54,6 +54,20 @@ describe('clay.standalone.js in edit mode', () => {
     }
   });
 
+  // clay.morph is the engine behind a Promise in every mode now: the merge
+  // engine downloads on first use, so the call cannot be synchronous.
+  it('hands clay.morph a Promise that lands the merge', async () => {
+    const clay = win.clay;
+    const host = win.document.createElement('div');
+    host.innerHTML = '<p>a</p>';
+    win.document.body.appendChild(host);
+    const result = clay.morph(host, '<p>b</p>');
+    expect(result).to.be.a('promise');
+    await result;
+    expect(host.innerHTML).to.equal('<p>b</p>');
+    host.remove();
+  });
+
   it('wires [sortable] from the bundled vendor', () => {
     const list = win.document.querySelector('[sortable]');
     // Sortable stamps its instance on the element under a "Sortable<time>" key.
@@ -126,6 +140,18 @@ describe('clay.standalone.js in view mode', () => {
     expect(clay.getHTML).to.equal(undefined);
     expect(clay.RichClay).to.equal(undefined);
     expect(scripts(win)).to.deep.equal([BUNDLE]);
+  });
+
+  it('hands clay.morph a Promise that lands the merge', async () => {
+    const clay = win.clay;
+    const host = win.document.createElement('div');
+    host.innerHTML = '<p>a</p>';
+    win.document.body.appendChild(host);
+    const result = clay.morph(host, '<p>b</p>');
+    expect(result).to.be.a('promise');
+    await result;
+    expect(host.innerHTML).to.equal('<p>b</p>');
+    host.remove();
   });
 });
 
