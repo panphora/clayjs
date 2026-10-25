@@ -79,9 +79,10 @@ function isDraftEligible(document) {
 }
 
 const sizesByPath = new Map();
-function sizes(path) {
-  if (sizesByPath.has(path)) return sizesByPath.get(path);
-  const buffer = readFileSync(join(ROOT, path));
+function sizes(path, root = ROOT) {
+  const key = join(root, path);
+  if (sizesByPath.has(key)) return sizesByPath.get(key);
+  const buffer = readFileSync(key);
   const value = {
     raw: buffer.length,
     gzip: gzipSync(buffer, { level: 9 }).length,
@@ -89,7 +90,7 @@ function sizes(path) {
     // measured live from clayjs.com on 2026-10-24.
     brotli: brotliCompressSync(buffer, { params: { [constants.BROTLI_PARAM_QUALITY]: 4 } }).length,
   };
-  sizesByPath.set(path, value);
+  sizesByPath.set(key, value);
   return value;
 }
 
@@ -157,10 +158,10 @@ function closure(inputs, entry, loaded) {
   return { added, levels };
 }
 
-function total(files) {
+function total(files, root = ROOT) {
   const sum = { requests: files.length, raw: 0, gzip: 0, brotli: 0 };
   for (const f of files) {
-    const s = sizes(f);
+    const s = sizes(f, root);
     sum.raw += s.raw;
     sum.gzip += s.gzip;
     sum.brotli += s.brotli;
@@ -260,22 +261,143 @@ export async function measure({ html, mode }) {
   return { mode, bootstrap, plugins: plan.plugins, js, css: cssOf(document), lazy: [...lazy].sort() };
 }
 
+// The payload a generated bootstrap inlines: one JSON object, written without
+// newlines, right after the closing `})(` of the wrapper.
+function payloadOf(code) {
+  const at = code.indexOf("})(");
+  if (at < 0) return null;
+  const start = at + 3;
+  let depth = 0;
+  let inString = false;
+  for (let i = start; i < code.length; i++) {
+    const ch = code[i];
+    if (inString) {
+      if (ch === "\\") i++;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === "{") depth++;
+    else if (ch === "}" && --depth === 0) return JSON.parse(code.slice(start, i + 1));
+  }
+  return null;
+}
+
+// A built release is measured from its own files: the bootstrap, the chunks it
+// preloads and, one stage later, the chunks the boot plan adds. Nothing is read from
+// src/, because nothing on the wire is.
+export async function measureBuilt({ html, mode, dir }) {
+  const document = parseDocument(html);
+  const { bootstrap, params, names, hasSap } = document;
+  const isDraftMode = mode === "draft";
+  const plan = bootstrap
+    ? resolveModules(params, mode === "edit" || isDraftMode, { isDraftMode, hasSap })
+    : { core: [], plugins: [] };
+  const manifest = JSON.parse(readFileSync(join(dir, "m/manifest.json"), "utf8"));
+  const loaded = new Set();
+  const addChunk = (file) => {
+    if (!file || loaded.has(`m/${file}`)) return false;
+    loaded.add(`m/${file}`);
+    return true;
+  };
+  const addClosure = (paths, into = loaded) => {
+    let added = 0;
+    const stack = paths.map((p) => manifest.entries[p]).filter(Boolean);
+    while (stack.length) {
+      const file = stack.pop();
+      if (into.has(`m/${file}`)) continue;
+      into.add(`m/${file}`);
+      added++;
+      stack.push(...(manifest.files[file]?.imports ?? []));
+    }
+    return added;
+  };
+  const readPayload = (name) => {
+    const file = join(dir, name);
+    return existsSync(file) ? payloadOf(readFileSync(file, "utf8")) : null;
+  };
+
+  let mainDepth = 0;
+  if (bootstrap) {
+    const payload = readPayload("clay.js");
+    if (!payload) throw new Error(`${dir}/clay.js is not a generated bootstrap`);
+    loaded.add("clay.js");
+    mainDepth = 1;
+    let preload = 0;
+    for (const file of payload.preload) if (addChunk(file)) preload++;
+    if (preload) mainDepth++;
+    if (addClosure([...plan.core, ...plan.plugins])) mainDepth++;
+  }
+
+  let satelliteDepth = 0;
+  for (const name of names) {
+    const payload = readPayload(name);
+    // sap.js and clay-data.js import nothing, so the chunk build emits no bootstrap
+    // for them and the served file is entries/ itself.
+    if (!payload) {
+      loaded.add(`entries/${name}`);
+      satelliteDepth = Math.max(satelliteDepth, 1);
+      continue;
+    }
+    loaded.add(name);
+    let depth = 1;
+    let preload = 0;
+    for (const file of payload.preload) if (addChunk(file)) preload++;
+    if (preload) depth++;
+    if (payload.entry && addChunk(payload.entry)) depth++;
+    satelliteDepth = Math.max(satelliteDepth, depth);
+  }
+
+  const depth = Math.max(mainDepth, satelliteDepth);
+  // A satellite with no chunk build entry is served as entries/ itself, so its bytes
+  // come from the tree like source mode's do.
+  const rootOf = (path) => (path.startsWith("entries/") ? ROOT : dir);
+  const totals = (list) => {
+    const sum = { requests: list.length, raw: 0, gzip: 0, brotli: 0 };
+    for (const path of list) {
+      const s = sizes(path, rootOf(path));
+      sum.raw += s.raw;
+      sum.gzip += s.gzip;
+      sum.brotli += s.brotli;
+    }
+    return sum;
+  };
+  const js = { ...totals([...loaded]), depth, files: [...loaded].map((path) => ({ path, ...sizes(path, rootOf(path)) })) };
+
+  // Modules that load after the editor takes input stay out of the numbers above.
+  const late = new Set(loaded);
+  if (plan.late) addClosure(plan.late, late);
+  js.late = totals([...late].filter((path) => !loaded.has(path)));
+
+  const lazy = new Set();
+  for (const path of loaded) {
+    if (!path.startsWith("m/")) continue;
+    for (const dep of manifest.files[path.slice(2)]?.dynamicImports ?? []) {
+      if (!loaded.has(`m/${dep}`)) lazy.add(`m/${dep}`);
+    }
+  }
+
+  return { mode, bootstrap, plugins: plan.plugins, js, css: cssOf(document), lazy: [...lazy].sort() };
+}
+
 function parseArgs(argv) {
   const files = [];
   let mode = null;
   let json = false;
+  let built = null;
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--mode") mode = argv[++i];
     else if (argv[i] === "--json") json = true;
+    else if (argv[i] === "--built") built = argv[++i];
     else files.push(argv[i]);
   }
-  return { files, mode, json };
+  return { files, mode, json, built };
 }
 
 const kb = (n) => (n / 1024).toFixed(1) + " KB";
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const { files, mode, json } = parseArgs(process.argv.slice(2));
+  const { files, mode, json, built } = parseArgs(process.argv.slice(2));
   const targets = files.length
     ? files
     : readdirSync(FIXTURES).filter((f) => f.endsWith(".html")).sort().map((f) => join(FIXTURES, f));
@@ -283,7 +405,12 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   for (const file of targets) {
     const html = readFileSync(file, "utf8");
     const modes = mode ? [mode] : ["view", "edit", ...(isDraftEligible(parseDocument(html)) ? ["draft"] : [])];
-    for (const m of modes) results.push({ file: relative(ROOT, file), ...(await measure({ html, mode: m })) });
+    for (const m of modes) {
+      results.push({
+        file: relative(ROOT, file),
+        ...(built ? await measureBuilt({ html, mode: m, dir: resolve(built) }) : await measure({ html, mode: m })),
+      });
+    }
   }
   if (json) {
     console.log(JSON.stringify(results, null, 2));

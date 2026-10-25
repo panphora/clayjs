@@ -62,7 +62,16 @@ test("carries the core, every plugin and every satellite", () => {
   expect(bundle.length).toBeLessThan(4_500_000);
 });
 
-test("writes exactly the file the unversioned-URL guard pins", () => {
-  expect(readdirSync(join(ROOT, "dist")).sort()).toEqual(["clay.standalone.js", "server"]);
+// The chunk build adds a generated bootstrap per entry that has a target, plus the
+// chunks they select. Each bootstrap is a serveable URL too, so the unversioned-URL
+// guard pins it the same way.
+const BOOTSTRAPS = ["all.js", "clay-dom.js", "clay-events.js", "clay-internals.js", "clay-options.js", "clay-router.js", "clay-ui.js", "clay-utils.js", "clay.js"];
+
+test("writes exactly the files the unversioned-URL guard pins", () => {
+  expect(readdirSync(join(ROOT, "dist")).sort()).toEqual([...BOOTSTRAPS, "clay.standalone.js", "m", "server"].sort());
+  for (const name of BOOTSTRAPS) {
+    expect(readFileSync(join(ROOT, "dist", name), "utf8")).toContain('"dir":"m/"');
+  }
+  expect(readdirSync(join(ROOT, "dist/m"))).toContain("manifest.json");
   expect(readdirSync(join(ROOT, "dist/server")).sort()).toEqual(["checkpoint.cjs", "checkpoint.mjs", "core.cjs", "rooms.cjs", "rooms.mjs"]);
 });

@@ -43,6 +43,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { build as esbuild } from 'esbuild';
 import { emitDocs } from './scripts/site-docs.mjs';
+import { emitBootstraps, emitChunks, rollingBootstrap } from './scripts/build-chunks.mjs';
 import { buildServerRooms } from './scripts/build-server-rooms.mjs';
 import { buildServerCheckpoint } from './scripts/build-server-checkpoint.mjs';
 
@@ -147,29 +148,80 @@ async function walk(dir, base = dir) {
   return out;
 }
 
-async function copyInto(fromAbs, relPath) {
+function publicPath(relPath) {
   const dest = join(PUBLIC, relPath);
   // Belt and braces on the join above: a path containing .. would otherwise write
   // outside public/.
   if (dest !== PUBLIC && !dest.startsWith(PUBLIC + sep)) {
     throw new Error(`refusing to write outside public/: ${dest}`);
   }
+  return dest;
+}
+
+async function copyInto(fromAbs, relPath) {
+  const dest = publicPath(relPath);
   await mkdir(dirname(dest), { recursive: true });
   await copyFile(fromAbs, dest);
   return 1;
 }
 
+async function writeInto(text, relPath) {
+  const dest = publicPath(relPath);
+  await mkdir(dirname(dest), { recursive: true });
+  await writeFile(dest, text);
+  return 1;
+}
+
+// The chunk build turns dist/ into more than the single-file bundle: dist/m/ holds
+// the hashed modules and dist/<name>.js a generated bootstrap for every entry that
+// has a target. Tarballs published before the chunk build have neither, which is why
+// every use of this is conditional.
+async function chunkedBootstraps(from) {
+  const dist = join(from, 'dist');
+  if (!(await lstat(join(dist, 'm')).catch(() => null))) return null;
+  const names = new Set();
+  for (const name of await readdir(dist)) {
+    if (!(await lstat(join(from, 'entries', name)).catch(() => null))) continue;
+    if ((await readFile(join(dist, name), 'utf8')).includes('"dir":"m/"')) names.add(name);
+  }
+  return names;
+}
+
+// A rolling prefix is not that release's own prefix: its chunks live under the
+// pinned prefix, so m/ is skipped and each bootstrap's chunk directory is rewritten
+// to point there. /v1/m/ is deliberately not served.
+const CHUNKED = new Set();
+
 // Copy a library payload under one prefix. `from` is the working tree for the
 // version being built, or an unpacked tarball for anything already released.
 async function emitLibrary(from, version, prefix = version) {
   let n = 0;
+  const generated = await chunkedBootstraps(from);
+  if (generated) CHUNKED.add(version);
+  const rolling = prefix !== version;
   for (const [name, sub] of LIBRARY) {
     const abs = join(from, name);
     if (!(await lstat(abs).catch(() => null))) {
       if (name === 'dist/' && cmpVersion(version, STANDALONE_SINCE) < 0) continue;
       throw new Error(`${from} has no ${name}`);
     }
-    for (const rel of await walk(abs)) n += await copyInto(join(abs, rel), join(prefix, sub, rel));
+    for (const rel of await walk(abs)) {
+      // dist/ provides these, and LIBRARY copies entries/ first, so the entries/ copy
+      // would be overwritten by the generated file a moment later.
+      if (name === 'entries/' && generated?.has(rel)) continue;
+      if (rolling && name === 'dist/' && rel.startsWith('m/')) continue;
+      const dest = join(prefix, sub, rel);
+      n += generated?.has(rel) && rolling
+        ? await writeInto(rollingBootstrap(await readFile(join(abs, rel), 'utf8'), version), dest)
+        : await copyInto(join(abs, rel), dest);
+    }
+  }
+  if (generated) {
+    const clay = await readFile(join(PUBLIC, prefix, 'clay.js'), 'utf8');
+    const dir = rolling ? `"dir":"../${version}/m/"` : '"dir":"m/"';
+    if (!clay.includes(dir)) {
+      throw new Error(`public/${prefix}/clay.js is not the generated bootstrap of ${version}`);
+    }
   }
   return n;
 }
@@ -286,8 +338,16 @@ for (const file of Object.keys(standaloneMeta.inputs)) {
     throw new Error(`the standalone build must not include ${file}; server code is a Node entry`);
   }
 }
+// The chunked runtime: one esbuild build of every module the loader can ask for,
+// then a bootstrap per entry that preloads its own plan. dist/ is what the tarball
+// carries and what every version prefix is copied from, so both come from here.
+const chunks = await emitChunks({ root: ROOT, outdir: join(ROOT, 'dist/m') });
+await emitBootstraps({ root: ROOT, outdir: DIST, manifest: chunks.manifest, satellites: chunks.satellites });
 if (process.argv.includes('--standalone')) {
-  console.log(`built dist/${STANDALONE} and dist/server/{rooms,checkpoint}.cjs`);
+  console.log(
+    `built dist/${STANDALONE}, dist/server/{rooms,checkpoint}.cjs, ` +
+      `dist/m (${Object.keys(chunks.manifest.files).length} files) and the bootstraps`
+  );
   process.exit(0);
 }
 
@@ -372,6 +432,10 @@ for (const version of pins) {
 // One placeholder rule gives every prefix's module tree its CORS header, rolling and pinned
 // alike, so a release costs one rule instead of two. No site path has a src/ directory.
 blocks.push(`/:prefix/src/*\n  Access-Control-Allow-Origin: *`);
+// The chunked runtime is a second module tree, under the pinned prefix's m/, so it
+// needs the same CORS header. A different header from the cache rules, so nothing
+// joins, and no rule sets the same header twice.
+blocks.push(`/:prefix/m/*\n  Access-Control-Allow-Origin: *`);
 // Cloudflare Pages serves an HTML page at its extensionless path and answers the
 // .html spelling with a 307, so a rule naming only the file lands on the redirect
 // and the page itself carries no Cache-Control at all. Both spellings get the rule,
@@ -418,6 +482,10 @@ const served = [...[...heads].map(([major, v]) => [`v${major}`, v]), ...pins.map
 for (const [prefix, version] of served) {
   required.push(`${prefix}/clay.js`, `${prefix}/src/loader.js`, `${prefix}/sap.js`);
   if (cmpVersion(version, STANDALONE_SINCE) >= 0) required.push(`${prefix}/${STANDALONE}`);
+  // The chunks live under their own pinned prefix; a rolling prefix points at them and
+  // serves no m/ of its own. Tarballs published before the chunk build have none, and
+  // their pins still have to rebuild, so the manifest is required only where they exist.
+  if (prefix === version && CHUNKED.has(version)) required.push(`${version}/m/manifest.json`);
 }
 for (const rel of required) {
   const stat = await lstat(join(PUBLIC, rel)).catch(() => null);
