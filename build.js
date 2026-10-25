@@ -76,6 +76,28 @@ const FONTS = [
     css: 'fonts/work-sans.css',
     license: 'LICENSE',
   },
+  {
+    pkg: '@fontsource/ibm-plex-mono',
+    files: [
+      'files/ibm-plex-mono-latin-300-normal.woff2',
+      'files/ibm-plex-mono-latin-400-normal.woff2',
+      'files/ibm-plex-mono-latin-500-normal.woff2',
+      'files/ibm-plex-mono-latin-600-normal.woff2',
+      'files/ibm-plex-mono-latin-400-italic.woff2',
+    ],
+    css: 'fonts/ibm-plex.css',
+    license: 'LICENSE',
+  },
+  {
+    pkg: '@fontsource/ibm-plex-sans',
+    files: [
+      'files/ibm-plex-sans-latin-400-normal.woff2',
+      'files/ibm-plex-sans-latin-500-normal.woff2',
+      'files/ibm-plex-sans-latin-600-normal.woff2',
+    ],
+    css: 'fonts/ibm-plex.css',
+    license: 'LICENSE',
+  },
 ];
 
 // The single-file build, for pages that must load with no network: src/standalone.js
@@ -183,11 +205,17 @@ async function copyInto(fromAbs, relPath) {
 // LICENSE.
 async function fontSources() {
   const out = [];
+  const sheets = new Set();
   for (const font of FONTS) {
     const dir = join(ROOT, 'node_modules', font.pkg);
     const css = await lstat(join(ROOT, font.css)).catch(() => null);
     if (!css?.isFile()) throw new Error(`${font.css} is missing; the font stylesheet is written by hand`);
-    out.push({ from: join(ROOT, font.css), to: `fonts/${basename(font.css)}` });
+    // One stylesheet can cover more than one package, as ibm-plex.css covers both Plex
+    // faces, so a sheet already named is copied once and listed once.
+    if (!sheets.has(font.css)) {
+      sheets.add(font.css);
+      out.push({ from: join(ROOT, font.css), to: `fonts/${basename(font.css)}` });
+    }
     for (const rel of font.files) {
       const file = await lstat(join(dir, rel)).catch(() => null);
       if (!file?.isFile()) throw new Error(`${font.pkg} has no ${rel}; the copy table names a file the package does not ship`);

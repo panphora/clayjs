@@ -13,13 +13,44 @@ const run = promisify(execFile);
 const ROOT = path.resolve(new URL("../../..", import.meta.url).pathname);
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 
-// One family for now: the Kanban's Work Sans. The copy table in build.js is the
-// source of truth for every family, so this test names the one it ships and reads the
-// package itself for the bytes it expects.
-const FONT_PKG = "@fontsource-variable/work-sans";
-const WOFF2 = "work-sans-latin-wght-normal.woff2";
-const CSS = "work-sans.css";
-const LICENSE = "work-sans-LICENSE";
+// The families the folder ships: the Kanban's Work Sans and the Journal's two IBM Plex
+// packages. The copy table in build.js is the source of truth for every family, so this
+// test names each one it ships and reads the package itself for the bytes it expects.
+const FAMILIES = [
+  {
+    pkg: "@fontsource-variable/work-sans",
+    css: "work-sans.css",
+    woff2: ["work-sans-latin-wght-normal.woff2"],
+    license: "work-sans-LICENSE",
+  },
+  {
+    pkg: "@fontsource/ibm-plex-mono",
+    css: "ibm-plex.css",
+    woff2: [
+      "ibm-plex-mono-latin-300-normal.woff2",
+      "ibm-plex-mono-latin-400-normal.woff2",
+      "ibm-plex-mono-latin-500-normal.woff2",
+      "ibm-plex-mono-latin-600-normal.woff2",
+      "ibm-plex-mono-latin-400-italic.woff2",
+    ],
+    license: "ibm-plex-mono-LICENSE",
+  },
+  {
+    pkg: "@fontsource/ibm-plex-sans",
+    css: "ibm-plex.css",
+    woff2: [
+      "ibm-plex-sans-latin-400-normal.woff2",
+      "ibm-plex-sans-latin-500-normal.woff2",
+      "ibm-plex-sans-latin-600-normal.woff2",
+    ],
+    license: "ibm-plex-sans-LICENSE",
+  },
+];
+
+const WOFF2 = FAMILIES.flatMap((family) => family.woff2);
+const CSS = [...new Set(FAMILIES.map((family) => family.css))];
+const LICENSE = FAMILIES.map((family) => family.license);
+const SHIPPED = [...WOFF2, ...CSS, ...LICENSE].sort();
 
 const PACKAGE_FILES = ["build.js", "package.json", "packed-contract.json", "THIRD-PARTY-NOTICES.md"];
 const PACKAGE_DIRS = ["src", "entries", "scripts", "website", "docs", "fonts"];
@@ -34,7 +65,24 @@ async function build() {
   });
 }
 
-const inPackage = (rel) => path.join(ROOT, "node_modules", FONT_PKG, rel);
+const inPackage = (pkg, rel) => path.join(ROOT, "node_modules", pkg, rel);
+
+// The package's own @font-face blocks, whichever of its stylesheets declares them.
+async function packageCss(pkg) {
+  const dir = path.join(ROOT, "node_modules", pkg);
+  let text = "";
+  for (const name of (await readdir(dir)).filter((name) => name.endsWith(".css")).sort()) {
+    text += await readFile(path.join(dir, name), "utf8");
+  }
+  return text;
+}
+
+const range = (text, file) => {
+  const block = text
+    .split("@font-face")
+    .find((b) => b.includes(`url(./files/${file})`) || b.includes(`url(./${file})`));
+  return block.match(/unicode-range:\s*([^;]+);/)[1].replace(/\s+/g, "");
+};
 
 beforeAll(async () => {
   site = await mkdtemp(path.join(os.tmpdir(), "clay-fonts-"));
@@ -56,16 +104,28 @@ afterAll(async () => {
   await rm(site, { recursive: true, force: true });
 });
 
-test("the pinned prefix carries the package's woff2 bytes, the stylesheet and the license", async () => {
+test("the pinned prefix carries every package's woff2 bytes, the stylesheets and the licenses", async () => {
   const dir = path.join(site, "public", version, "fonts");
-  expect((await readdir(dir)).sort()).toEqual([LICENSE, CSS, WOFF2].sort());
-  expect(sha256(await readFile(path.join(dir, WOFF2)))).toBe(sha256(await readFile(inPackage("files/" + WOFF2))));
-  expect(sha256(await readFile(path.join(dir, CSS)))).toBe(sha256(await readFile(path.join(ROOT, "fonts", CSS))));
-  expect(sha256(await readFile(path.join(dir, LICENSE)))).toBe(sha256(await readFile(inPackage("LICENSE"))));
+  expect((await readdir(dir)).sort()).toEqual(SHIPPED);
+  for (const family of FAMILIES) {
+    for (const file of family.woff2) {
+      expect(sha256(await readFile(path.join(dir, file)))).toBe(
+        sha256(await readFile(inPackage(family.pkg, "files/" + file))),
+      );
+    }
+    expect(sha256(await readFile(path.join(dir, family.license)))).toBe(
+      sha256(await readFile(inPackage(family.pkg, "LICENSE"))),
+    );
+  }
+  for (const file of CSS) {
+    expect(sha256(await readFile(path.join(dir, file)))).toBe(
+      sha256(await readFile(path.join(ROOT, "fonts", file))),
+    );
+  }
 });
 
 test("the rolling prefix serves the same folder, so /v1/fonts/ rolls with /v1/", async () => {
-  for (const name of [WOFF2, CSS, LICENSE]) {
+  for (const name of SHIPPED) {
     expect(sha256(await readFile(path.join(site, "public/v1/fonts", name)))).toBe(
       sha256(await readFile(path.join(site, "public", version, "fonts", name))),
     );
@@ -75,7 +135,7 @@ test("the rolling prefix serves the same folder, so /v1/fonts/ rolls with /v1/",
 test("the release manifest lists every font file with its size and hash", async () => {
   const manifest = JSON.parse(await readFile(path.join(site, "public", version, "m/manifest.json"), "utf8"));
   const assets = [...manifest.assets].sort((a, b) => (a.path < b.path ? -1 : 1));
-  expect(assets.map((a) => a.path)).toEqual([`fonts/${LICENSE}`, `fonts/${WOFF2}`, `fonts/${CSS}`]);
+  expect(assets.map((a) => a.path)).toEqual(SHIPPED.map((name) => `fonts/${name}`));
   for (const asset of assets) {
     const bytes = await readFile(path.join(site, "public", version, asset.path));
     expect(asset.bytes).toBe(bytes.length);
@@ -88,17 +148,25 @@ test("the release manifest lists every font file with its size and hash", async 
   expect(rolling.assets).toEqual(manifest.assets);
 });
 
-test("the stylesheet's file name and unicode-range are the package's own", async () => {
-  const css = await readFile(path.join(ROOT, "fonts", CSS), "utf8");
-  const pkgCss = await readFile(inPackage("index.css"), "utf8");
-  const range = (text, file) => {
-    const block = text.split("@font-face").find((b) => b.includes(`url(./files/${file})`) || b.includes(`url(./${file})`));
-    return block.match(/unicode-range:\s*([^;]+);/)[1].replace(/\s+/g, "");
-  };
-  expect(range(css, WOFF2)).toBe(range(pkgCss, WOFF2));
-  // A relative url() is what lets a local host serve the woff2 from the same folder.
-  expect(css).toContain(`url(./${WOFF2})`);
-  expect(css).not.toMatch(/https?:/);
+test("each stylesheet's file names and unicode-ranges are the packages' own, latin only", async () => {
+  for (const sheet of CSS) {
+    const families = FAMILIES.filter((family) => family.css === sheet);
+    const files = families.flatMap((family) => family.woff2);
+    const css = await readFile(path.join(ROOT, "fonts", sheet), "utf8");
+    // One face per woff2 the copy table names: no extra subset, no weight or style the
+    // Journal does not use.
+    expect(css.match(/@font-face/g)).toHaveLength(files.length);
+    expect(css).toContain("font-display: swap");
+    expect(css).not.toMatch(/https?:/);
+    for (const family of families) {
+      const pkgCss = await packageCss(family.pkg);
+      for (const file of family.woff2) {
+        expect(range(css, file)).toBe(range(pkgCss, file));
+        // A relative url() is what lets a local host serve the woff2 from the same folder.
+        expect(css).toContain(`url(./${file})`);
+      }
+    }
+  }
 });
 
 test("_headers gives the fonts folder CORS and the pinned prefix immutable caching", async () => {
