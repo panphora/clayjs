@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { CORE_WAVES, resolveModules } from "../../../src/loader-logic.js";
+import { mergeManifests } from "../../../src/lib/preload.js";
 
 /**
  * The built release carries the always-wave core as one aggregate. This is the proof
@@ -139,10 +140,13 @@ async function bootCopy(editMode) {
   const manifest = JSON.parse(await readFile(path.join(dir, "m/manifest.json"), "utf8"));
   const base = pathToFileURL(path.join(dir, "m") + path.sep).href;
   const runtime = { ...(await import(new URL(manifest.runtime, base).href)).default, base };
+  // The edit-only paths live in the supplement. boot gets it only when the page looked
+  // editable, but a lookup below reads the two together.
+  const edit = { ...(await import(new URL(manifest.edit, base).href)).default };
   const { boot } = await import(new URL(manifest.entries["loader.js"], base).href);
   let ready = null;
-  await boot("https://clayjs.com/1.0.0", new URLSearchParams("plugins=page"), (clay) => { ready = clay; }, runtime);
-  return { ready, runtime, record: [...recorded] };
+  await boot("https://clayjs.com/1.0.0", new URLSearchParams("plugins=page"), (clay) => { ready = clay; }, runtime, editMode ? edit : null);
+  return { ready, runtime: mergeManifests(runtime, edit), record: [...recorded] };
 }
 
 async function bootSource(editMode) {

@@ -10,7 +10,7 @@ import { derived } from "./lib/derived.js";
 import { assets } from "./lib/assets.js";
 import { bootPhase } from "./core/boot-phase.js";
 import { mergeEngine } from "./sync/merge-engine.js";
-import { preloadEntries } from "./lib/preload.js";
+import { mergeManifests, preloadEntries } from "./lib/preload.js";
 
 // The plugin name a late path announces: the loader's own name-to-path table,
 // read the other way.
@@ -34,9 +34,10 @@ function templateSource() {
 // stays anyway: /v1/clay.js and /v1/src/loader.js are cached independently, so
 // for a while after a deploy a browser can pair either file with the other's
 // previous release. A call shape that differs between them leaves the page with
-// no clayjs at all. The optional fourth argument comes only from the chunked
-// bootstrap; its absence means no preloading.
-export async function boot(base, params, readyResolve, manifest = null) {
+// no clayjs at all. The optional fourth and fifth arguments come only from the
+// chunked bootstrap: the manifest a reader downloads and, on a page that looked
+// editable, the edit supplement beside it. Their absence means no preloading.
+export async function boot(base, params, readyResolve, manifest = null, supplement = null) {
   initTheme();
   const draftMode = await MODULES["core/draft-mode.js"]();
   draftMode.noteBootParams(params);
@@ -65,7 +66,7 @@ export async function boot(base, params, readyResolve, manifest = null) {
   const hasSapJs = Boolean(document.querySelector('script[src*="sap.js"]'));
   bootPhase.holdSettle = hasSap && isEditMode;
   const plan = resolveModules(params, isEditMode, { isDraftMode, hasSap, canEdit, templateSource: templateSource() });
-  preloadEntries(manifest, [...plan.core, ...plan.plugins], { isEditMode, isDraftMode, hasSapJs });
+  preloadEntries(mergeManifests(manifest, supplement), [...plan.core, ...plan.plugins], { isEditMode, isDraftMode, hasSapJs });
   const loaded = {};
   // The reader's transport choice comes from the plan just resolved, never from the
   // URL: when generic sync loaded, it owns the saved lane and the reader follows

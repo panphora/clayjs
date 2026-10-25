@@ -77,7 +77,7 @@ test("each bootstrap names one chunk directory and files the manifest lists", as
     expect(code.split('"dir":"m/"').length - 1).toBe(1);
     const M = embedded(code);
     expect(M.dir).toBe("m/");
-    for (const file of [M.manifest, ...M.preload].filter(Boolean)) {
+    for (const file of [M.manifest, M.edit, ...M.preload].filter(Boolean)) {
       expect(files[file]).toBeTruthy();
       expect(await exists(file)).toBe(true);
     }
@@ -94,7 +94,30 @@ test("clay.js preloads the loader, the runtime manifest and the boot prefix", as
   }
   expect(code).toContain('R.manifest.entries["loader.js"]');
   expect(M.manifest).toBe(built.manifest.runtime);
-  expect(M.version).toBe(built.manifest.version);
+  expect(M.edit).toBe(built.manifest.edit);
+  expect(M.version).toBeUndefined();
+});
+
+// The supplement is the only conditional request the release makes, and a wrong guess
+// costs hints, never a module: a reader that fetches it used one extra request, and an
+// editor whose page did not look editable preloads what the main manifest knows.
+test("the bootstrap fetches the edit supplement only when the page looks editable", async () => {
+  const code = await read("clay.js");
+  const at = code.indexOf("function __clayLikelyEdit");
+  const end = code.indexOf("\n  }", at) + 4;
+  expect(at).toBeGreaterThan(-1);
+  const likelyEdit = new Function(`${code.slice(at, end)}\n  return __clayLikelyEdit;`)();
+
+  expect(likelyEdit("?plugins=page&editmode=true", "")).toBe(true);
+  expect(likelyEdit("?editmode=true", "")).toBe(true);
+  expect(likelyEdit("?plugins=page", "isAdminOfCurrentResource=abc")).toBe(true);
+  expect(likelyEdit("?plugins=page", "other=1; isAdminOfCurrentResource=abc")).toBe(true);
+  expect(likelyEdit("?plugins=page", "")).toBe(false);
+  expect(likelyEdit("?plugins=page", "isAdminOfCurrentResourceX=1")).toBe(false);
+  expect(likelyEdit("?editmode=false", "other=1")).toBe(false);
+
+  expect(code.split("import(dir + M.edit)").length - 1).toBe(1);
+  expect(code).toContain("likelyEdit ? import(dir + M.edit)");
 });
 
 test("each satellite preloads its own entry and the runtime manifest", async () => {

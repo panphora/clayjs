@@ -461,6 +461,11 @@ function payloadOf(code) {
   return null;
 }
 
+// A generated runtime module is `export default {...}` and nothing else.
+function hintIndex(file) {
+  return JSON.parse(existsSync(file) ? readFileSync(file, "utf8").slice("export default ".length).replace(/;\s*$/, "") : "null");
+}
+
 // A built release is measured from its own files: the bootstrap, the chunks it
 // preloads and, one stage later, the chunks the boot plan adds. Nothing is read from
 // src/, because nothing on the wire is.
@@ -483,6 +488,12 @@ export async function measureBuilt({ html, mode, dir }) {
     if (mode === "edit") bootImports.push(...EDIT_BOOT_IMPORTS);
     if (mode === "edit" && plan.plugins.includes(PAGE_PLUGIN)) bootImports.push(...EDITOR_BOOT_IMPORTS, ...pageFeatureModules(html));
   }
+  // A reader downloads the main manifest and only the main manifest. A page that looks
+  // editable fetches the edit supplement beside it, in the same stage, and the plan
+  // resolves against both; without it the hints the main manifest lacks are simply
+  // deferred, never lost.
+  const editMode = mode !== "view";
+  let entries = manifest.entries;
   const loaded = new Set();
   const addChunk = (file) => {
     if (!file || loaded.has(`m/${file}`)) return false;
@@ -491,7 +502,7 @@ export async function measureBuilt({ html, mode, dir }) {
   };
   const addClosure = (paths, into = loaded) => {
     let added = 0;
-    const stack = paths.map((p) => manifest.entries[p]).filter(Boolean);
+    const stack = paths.map((p) => entries[p]).filter(Boolean);
     while (stack.length) {
       const file = stack.pop();
       if (into.has(`m/${file}`)) continue;
@@ -512,6 +523,11 @@ export async function measureBuilt({ html, mode, dir }) {
     if (!payload) throw new Error(`${dir}/clay.js is not a generated bootstrap`);
     loaded.add("clay.js");
     mainDepth = 1;
+    const supplement = editMode && payload.edit ? hintIndex(join(dir, "m", payload.edit)) : null;
+    if (supplement) {
+      loaded.add(`m/${payload.edit}`);
+      entries = { ...supplement.entries, ...manifest.entries };
+    }
     let preload = 0;
     for (const file of payload.preload) if (addChunk(file)) preload++;
     if (preload) mainDepth++;

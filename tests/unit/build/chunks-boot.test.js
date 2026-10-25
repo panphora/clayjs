@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { resolveModules } from "../../../src/loader-logic.js";
+import { mergeManifests } from "../../../src/lib/preload.js";
 
 /**
  * The built loader boots a document. esbuild's code splitting decides what one
@@ -67,23 +68,28 @@ function freshDocument(editMode) {
   stubHost();
 }
 
-async function bootWith(boot, editMode, manifest = null) {
+async function bootWith(boot, editMode, manifest = null, supplement = null) {
   freshDocument(editMode);
   let ready = null;
-  await boot("https://clayjs.com/1.0.0", new URLSearchParams("plugins=page"), (clay) => { ready = clay; }, manifest);
+  await boot("https://clayjs.com/1.0.0", new URLSearchParams("plugins=page"), (clay) => { ready = clay; }, manifest, supplement);
   return { ready, keys: Object.keys(window.clay).sort() };
 }
 
-async function bootBuilt(editMode) {
+// `supplement: false` boots the way a page that did not look editable does: the
+// bootstrap fetched the main manifest and nothing else.
+async function bootBuilt(editMode, { supplement = editMode } = {}) {
   const dir = `${outdir}-boot-${++copies}`;
   dirs.push(dir);
   await cp(outdir, dir, { recursive: true });
   const manifest = JSON.parse(await readFile(path.join(dir, "manifest.json"), "utf8"));
   const base = pathToFileURL(dir + path.sep).href;
   const runtime = { ...(await import(new URL(manifest.runtime, base).href)).default, base };
+  const edit = supplement ? { ...(await import(new URL(manifest.edit, base).href)).default, base } : null;
   const { boot } = await import(new URL(manifest.entries["loader.js"], base).href);
-  return { ...(await bootWith(boot, editMode, runtime)), runtime };
+  return { ...(await bootWith(boot, editMode, runtime, edit)), runtime: mergeManifests(runtime, edit) };
 }
+
+const preloaded = () => [...document.querySelectorAll('link[rel="modulepreload"]')].map((link) => link.href).sort();
 
 function closure(runtime, paths) {
   const want = new Set();
@@ -112,9 +118,31 @@ for (const editMode of [false, true]) {
     expect(Object.keys(window.clay).length).toBeGreaterThan(0);
 
     const plan = resolveModules(new URLSearchParams("plugins=page"), editMode, { isDraftMode: false, hasSap: false });
-    const boot = editMode ? [...runtime.editBootImports, ...runtime.editorBootImports] : [];
-    const hrefs = [...document.querySelectorAll('link[rel="modulepreload"]')].map((link) => link.href).sort();
-    expect(hrefs).toEqual(closure(runtime, [...plan.core, ...plan.plugins, ...boot]));
+    const boot = editMode ? [...runtime.editBootImports, ...(runtime.editorBootImports ?? [])] : [];
+    expect(preloaded()).toEqual(closure(runtime, [...plan.core, ...plan.plugins, ...boot]));
+  }, 60000);
+
+  if (!editMode) continue;
+
+  // A page whose URL and cookies did not say "editable" never fetched the supplement.
+  // boot() preloads what the main manifest knows and loads every module anyway: the
+  // missing hints cost a stage, never a module.
+  test("the built loader boots an edit-mode document with no supplement, and preloads what the main manifest knows", async () => {
+    const full = await bootBuilt(editMode);
+    const fullHrefs = preloaded();
+    const bare = await bootBuilt(editMode, { supplement: false });
+
+    expect(bare.ready).toBe(window.clay);
+    expect(bare.keys).toEqual(full.keys);
+    expect(bare.runtime.editBootImports).toBeUndefined();
+
+    const plan = resolveModules(new URLSearchParams("plugins=page"), editMode, { isDraftMode: false, hasSap: false });
+    const bareHrefs = preloaded();
+    expect(bareHrefs).toEqual(closure(bare.runtime, [...plan.core, ...plan.plugins]));
+    expect(bareHrefs.length).toBeLessThan(fullHrefs.length);
+    // Two boot copies, so the names are compared rather than the directories.
+    const names = (hrefs) => hrefs.map((href) => href.slice(href.lastIndexOf("/") + 1));
+    for (const name of names(bareHrefs)) expect(names(fullHrefs)).toContain(name);
   }, 60000);
 
   test(`the built loader assembles the same ${mode}-mode client as the unbundled loader`, async () => {

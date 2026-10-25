@@ -27,7 +27,7 @@ export async function satelliteTargets(root) {
 }
 
 export async function emitChunks({ root, outdir, plugins = [] }) {
-  const { MODULES, CORE_WAVES } = await import(pathToFileURL(path.join(root, "src/loader-logic.js")).href);
+  const { MODULES, CORE_WAVES, PLUGIN_PATHS } = await import(pathToFileURL(path.join(root, "src/loader-logic.js")).href);
   const { version, name: pkgName } = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
   const satellites = await satelliteTargets(root);
   const bootImports = Object.values(BOOT_IMPORTS).flat();
@@ -83,13 +83,53 @@ export async function emitChunks({ root, outdir, plugins = [] }) {
   const aggregate = entries[READER_CORE];
   if (!aggregate) throw new Error(`the manifest has no ${READER_CORE} entry`);
   for (const file of Object.keys(coreExports)) entries[file] ??= aggregate;
-  const imports = Object.fromEntries(Object.entries(files).filter(([f]) => f.endsWith(".js")).map(([f, v]) => [f, v.imports]));
-  const code = `export default ${JSON.stringify({ version, entries, imports, bootImports: BOOT_IMPORTS, editBootImports: EDIT_BOOT_IMPORTS, editorBootImports: EDITOR_BOOT_IMPORTS, core: { entry: READER_CORE, exports: coreExports } })};\n`;
+  // The paths a view-mode plan can name and a satellite preloads: the always core
+  // wave, both halves of every plugin that is not edit-only (view names the owner half,
+  // a draft the plain one), the boot imports those paths pull in, and every satellite
+  // target, which is its own script tag on a page of any mode. Everything else is
+  // edit-only and goes to the supplement, so a reader never downloads its index.
+  const viewPaths = new Set([
+    "loader.js",
+    READER_CORE,
+    ...CORE_WAVES.always,
+    ...Object.values(PLUGIN_PATHS).filter((s) => !s.editOnly).flatMap((s) => [s.path, s.ownerPath].filter(Boolean)),
+    ...Object.values(satellites),
+  ]);
+  const viewBootImports = Object.fromEntries(Object.entries(BOOT_IMPORTS).filter(([p]) => viewPaths.has(p)));
+  const editBootImports = Object.fromEntries(Object.entries(BOOT_IMPORTS).filter(([p]) => !viewPaths.has(p)));
+  for (const list of Object.values(viewBootImports)) for (const file of list) viewPaths.add(file);
+  // The import closure of a set of entries: every file preloadEntries can reach from
+  // them, one file at a time in the order it meets them.
+  const closureKeys = (paths) => {
+    const seen = new Set();
+    const add = (file) => {
+      if (!file || seen.has(file)) return;
+      seen.add(file);
+      for (const dep of files[file]?.imports ?? []) add(dep);
+    };
+    for (const p of paths) add(entries[p]);
+    return seen;
+  };
+  // An empty import list is the same as no key: preloadEntries reads a missing list as
+  // an empty one. The supplement skips what the main manifest already lists.
+  const importsOf = (want, known = new Set()) => Object.fromEntries(
+    [...want].filter((file) => !known.has(file) && files[file].imports.length).map((file) => [file, files[file].imports]),
+  );
+  const viewEntries = Object.fromEntries(Object.entries(entries).filter(([p]) => viewPaths.has(p)));
+  const editEntries = Object.fromEntries(Object.entries(entries).filter(([p]) => !viewPaths.has(p)));
+  const viewFiles = closureKeys(Object.keys(viewEntries));
+  const viewImports = importsOf(viewFiles);
+  const editImports = importsOf(closureKeys(Object.keys(editEntries)), viewFiles);
+  const code = `export default ${JSON.stringify({ version, entries: viewEntries, imports: viewImports, bootImports: viewBootImports })};\n`;
   const runtime = `manifest-${sha256(code).slice(0, 8).toUpperCase()}.js`;
-  await writeFile(path.join(outdir, runtime), code);
-  files[runtime] = { sha256: sha256(code), bytes: Buffer.byteLength(code), contentType: "text/javascript; charset=utf-8", imports: [], dynamicImports: [] };
+  const editCode = `export default ${JSON.stringify({ entries: editEntries, imports: editImports, bootImports: editBootImports, editBootImports: EDIT_BOOT_IMPORTS, editorBootImports: EDITOR_BOOT_IMPORTS })};\n`;
+  const editRuntime = `manifest-edit-${sha256(editCode).slice(0, 8).toUpperCase()}.js`;
+  for (const [name, body] of [[runtime, code], [editRuntime, editCode]]) {
+    await writeFile(path.join(outdir, name), body);
+    files[name] = { sha256: sha256(body), bytes: Buffer.byteLength(body), contentType: "text/javascript; charset=utf-8", imports: [], dynamicImports: [] };
+  }
   const build = sha256(Object.keys(files).sort().map((f) => `${f} ${files[f].sha256}`).join("\n"));
-  const manifest = { schema: 1, package: pkgName, version, build, runtime, entries, files };
+  const manifest = { schema: 1, package: pkgName, version, build, runtime, edit: editRuntime, entries, files };
   await writeFile(path.join(outdir, "manifest.json"), `${JSON.stringify(manifest, null, 1)}\n`);
   return { manifest, metafile: result.metafile, satellites };
 }
@@ -161,11 +201,22 @@ function bootstrapSource(payload) {
     link.setAttribute("clay", "no-save");
     document.head.appendChild(link);
   });
+  function __clayLikelyEdit(search, cookie) {
+    return new URLSearchParams(search).get("editmode") === "true" || /(?:^|;\\s*)isAdminOfCurrentResource=/.test(cookie);
+  }
+  // A sandboxed document throws on document.cookie; no cookies readable is no cookie.
+  function __clayReadCookie() {
+    try { return document.cookie || ""; } catch (err) { return ""; }
+  }
+  var likelyEdit = __clayLikelyEdit(window.location.search, __clayReadCookie());
   if (!clay.__runtime) {
-    clay.__runtime = import(dir + M.manifest).then(function (r) {
-      var manifest = r.default;
+    clay.__runtime = Promise.all([
+      import(dir + M.manifest),
+      likelyEdit ? import(dir + M.edit).catch(function () { return null; }) : null
+    ]).then(function (r) {
+      var manifest = r[0].default;
       manifest.base = dir;
-      return { chunks: true, dir: dir, manifest: manifest };
+      return { chunks: true, dir: dir, manifest: manifest, edit: r[1] ? r[1].default : null };
     }, function (err) {
       console.warn("clayjs: the bundled runtime did not load, loading the module tree instead:", err);
       return { chunks: false, tree: tree };
@@ -178,7 +229,6 @@ function bootstrapSource(payload) {
 const PRELUDE = "/* clay:chunk-prelude */";
 
 export async function emitBootstraps({ root, outdir, manifest, satellites }) {
-  const { version } = manifest;
   const loader = manifest.entries["loader.js"];
   if (!loader) throw new Error("the manifest has no loader.js entry");
   const preload = closureOf(manifest, [loader, manifest.runtime, ...BOOT_PREFIX.map((p) => manifest.entries[p])]);
@@ -187,7 +237,7 @@ export async function emitBootstraps({ root, outdir, manifest, satellites }) {
     replaceOnce(
       clay,
       PRELUDE,
-      bootstrapSource({ version, dir: "m/", manifest: manifest.runtime, preload }),
+      bootstrapSource({ dir: "m/", manifest: manifest.runtime, edit: manifest.edit, preload }),
       "entries/clay.js",
     ),
     'import(base + "/src/loader.js")',
@@ -195,7 +245,7 @@ export async function emitBootstraps({ root, outdir, manifest, satellites }) {
   if (!R.chunks) return import(__clayChunks.tree + "/src/loader.js");
   window.clay.__chunked = true;
   return import(R.dir + R.manifest.entries["loader.js"]).then(function (m) {
-    return { boot: function (b, p, resolve) { return m.boot(b, p, resolve, R.manifest); } };
+    return { boot: function (b, p, resolve) { return m.boot(b, p, resolve, R.manifest, R.edit); } };
   });
 })`,
     "entries/clay.js",
@@ -207,9 +257,9 @@ export async function emitBootstraps({ root, outdir, manifest, satellites }) {
     if (!entry) throw new Error(`the manifest has no ${target} entry`);
     const source = await readFile(path.join(root, "entries", name), "utf8");
     const prelude = bootstrapSource({
-      version,
       dir: "m/",
       manifest: manifest.runtime,
+      edit: manifest.edit,
       preload: closureOf(manifest, [entry, manifest.runtime]),
     });
     const satellite = replaceOnce(

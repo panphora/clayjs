@@ -1,3 +1,12 @@
+// A reader fetched only the manifest; an editable page also fetched the supplement.
+// Both are hint lists, so a boot holding one still runs and defers the other's hints.
+export function mergeManifests(manifest, supplement) {
+  if (!manifest || !supplement) return manifest;
+  const both = { ...supplement, ...manifest };
+  for (const key of ["entries", "imports", "bootImports"]) both[key] = { ...supplement[key], ...manifest[key] };
+  return both;
+}
+
 // The chunked build's files that a boot plan will import, fetched in parallel before
 // boot() imports them one at a time in its load-bearing order. clay="no-save" keeps
 // the links out of every save and out of live sync's merge.

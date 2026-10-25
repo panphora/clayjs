@@ -7,7 +7,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { BOOT_IMPORTS, EDIT_BOOT_IMPORTS, EDITOR_BOOT_IMPORTS } from "../../../src/lib/boot-imports.js";
-import { CORE_WAVES } from "../../../src/loader-logic.js";
+import { CORE_WAVES, PLUGIN_PATHS } from "../../../src/loader-logic.js";
 import { emitBootstraps, emitChunks } from "../../../scripts/build-chunks.mjs";
 
 const root = path.resolve(new URL("../../..", import.meta.url).pathname);
@@ -17,6 +17,12 @@ let outdir;
 let second;
 let built;
 let modules;
+
+// A generated runtime module is `export default {...}` and nothing else.
+async function runtimeOf(name) {
+  const code = await readFile(path.join(outdir, name), "utf8");
+  return JSON.parse(code.slice("export default ".length).replace(/;\s*$/, ""));
+}
 
 beforeAll(async () => {
   outdir = await mkdtemp(path.join(os.tmpdir(), "clay-chunks-"));
@@ -50,12 +56,8 @@ test("the always-wave core is one entry whose export keys are its logical paths"
   expect(aggregate).toBeTruthy();
   for (const file of CORE_WAVES.always) expect(built.manifest.entries[file]).toBe(aggregate);
 
-  const code = await readFile(path.join(outdir, built.manifest.runtime), "utf8");
-  const runtime = JSON.parse(code.slice("export default ".length).replace(/;\s*$/, ""));
-  expect(runtime.core).toEqual({
-    entry: "reader-core.js",
-    exports: Object.fromEntries(CORE_WAVES.always.map((file) => [file, file])),
-  });
+  const runtime = await runtimeOf(built.manifest.runtime);
+  expect(runtime.core).toBeUndefined();
   expect(runtime.entries["core/edit-mode.js"]).toBe(aggregate);
 });
 
@@ -167,11 +169,50 @@ test("every boot-time import is its own entry", async () => {
 });
 
 test("the runtime manifest names each entry's boot imports and the edit-only ones", async () => {
-  const code = await readFile(path.join(outdir, built.manifest.runtime), "utf8");
-  const runtime = JSON.parse(code.slice("export default ".length).replace(/;\s*$/, ""));
+  const runtime = await runtimeOf(built.manifest.runtime);
+  const supplement = await runtimeOf(built.manifest.edit);
 
-  expect(runtime.bootImports).toEqual(BOOT_IMPORTS);
-  expect(runtime.editBootImports).toEqual(EDIT_BOOT_IMPORTS);
+  expect({ ...supplement.bootImports, ...runtime.bootImports }).toEqual(BOOT_IMPORTS);
+  expect(supplement.editBootImports).toEqual(EDIT_BOOT_IMPORTS);
+  expect(runtime.editBootImports).toBeUndefined();
+});
+
+// A reader downloads the main manifest and nothing else, so every path its plan can
+// name has to preload from it, and so does every import that plan reaches. The paths
+// only an editor asks for live in the supplement the bootstrap fetches when the page
+// looks editable.
+test("the main manifest covers every path a view-mode plan can resolve, the supplement the rest", async () => {
+  const view = await runtimeOf(built.manifest.runtime);
+  const supplement = await runtimeOf(built.manifest.edit);
+
+  const viewPaths = new Set(["loader.js", ...CORE_WAVES.always]);
+  const editPaths = new Set(CORE_WAVES.editOnly);
+  for (const spec of Object.values(PLUGIN_PATHS)) {
+    for (const path of [spec.path, spec.ownerPath].filter(Boolean)) {
+      (spec.editOnly ? editPaths : viewPaths).add(path);
+    }
+  }
+  for (const path of viewPaths) expect(view.entries[path]).toBeTruthy();
+  for (const path of editPaths) expect(view.entries[path] ?? supplement.entries[path]).toBeTruthy();
+
+  // The closure a reader preloads is in the main manifest too: a view boot never
+  // needs a key the supplement holds.
+  const reached = new Set();
+  const add = (file) => {
+    if (!file || reached.has(file)) return;
+    reached.add(file);
+    for (const dep of built.manifest.files[file].imports) add(dep);
+  };
+  for (const path of viewPaths) add(view.entries[path]);
+  for (const file of reached) {
+    const deps = built.manifest.files[file].imports;
+    if (deps.length) expect(view.imports[file]).toEqual(deps);
+  }
+  for (const list of [...Object.values(view.imports), ...Object.values(supplement.imports)]) {
+    expect(list.length).toBeGreaterThan(0);
+  }
+  expect(supplement.version).toBeUndefined();
+  expect(built.manifest.files[built.manifest.edit]).toBeTruthy();
 });
 
 // A budget is held against this manifest and nothing else, so the meter has to read the
