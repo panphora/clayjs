@@ -165,6 +165,9 @@ const PLUGIN_ORDER = ["visitor-drafts", "richclay", "indicator", "sortable", "un
 // ends in "File uploads are not available", while with it a host that stores no
 // files answers `unsupported` and the editor offers to embed the file instead.
 const IMPLIES = { cms: ["quickcrop", "upload"], "ai-edit": ["wire"], page: ["live", "sync", "upload"] };
+// In view mode the editor half does not load and its reader half does, so the reader
+// half is the plugin whose implies flow: a reader keeps following saved files.
+IMPLIES["page-view"] = IMPLIES.page;
 
 // A Document's editor owns its article's rich text, so richclay (for [editable]) has
 // nothing to do there; plugins=page,richclay still loads it.
@@ -214,11 +217,13 @@ export function resolveModules(params, isEditMode, { isDraftMode = false, hasSap
   if (hasSap) enabled.add("derive");
   // ai-edit cannot run without the wire, so excluding the wire excludes it too.
   if (excluded.has("wire")) enabled.delete("ai-edit");
-  // A default-on plugin that this mode drops brings nothing with it. An explicitly
-  // asked for plugin still brings what it implies.
+  if (!isEditMode && !isDraftMode && enabled.has("page")) enabled.add("page-view");
+  // A plugin this mode does not load brings nothing with it, whether a default put
+  // it in the set or the tag named it. A page that wants what an edit-only plugin
+  // implies in view mode names that plugin too.
   for (const name of [...enabled]) {
     if (excluded.has(name)) continue;
-    if (!explicit.has(name) && PLUGIN_PATHS[name].editOnly && !isEditMode) continue;
+    if (PLUGIN_PATHS[name].editOnly && !isEditMode) continue;
     for (const implied of IMPLIES[name] || []) enabled.add(implied);
   }
   for (const name of excluded) enabled.delete(name);
@@ -237,8 +242,6 @@ export function resolveModules(params, isEditMode, { isDraftMode = false, hasSap
       templateSource.startsWith(TEMPLATE_SOURCE_PREFIX)) {
     enabled.add("upgrade");
   }
-
-  if (!isEditMode && enabled.has("page")) enabled.add("page-view");
 
   for (const [owner, names] of Object.entries(DISPLACES)) {
     if (enabled.has(owner)) for (const name of names) if (!explicit.has(name)) enabled.delete(name);

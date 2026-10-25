@@ -13,7 +13,7 @@
   },
   "kanban.html": {
     "view": { "requests": 89, "depth": 26, "brotli": 272384, "css": { "requests": 0, "depth": 0 } },
-    "edit": { "requests": 108, "depth": 48, "brotli": 370688, "css": { "requests": 0, "depth": 0 } },
+    "edit": { "requests": 108, "depth": 48, "brotli": 371712, "css": { "requests": 0, "depth": 0 } },
     "draft": { "requests": 88, "depth": 38, "brotli": 296960, "css": { "requests": 0, "depth": 0 } }
   },
   "journal.html": {

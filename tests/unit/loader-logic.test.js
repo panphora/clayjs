@@ -162,11 +162,33 @@ describe("resolveModules", () => {
   });
 
   // editOnly, like upload: the comment box is an editing gesture, and no host lists
-  // a ready helper to a page that cannot edit. The wire it implies stays, because
-  // the wire itself works in view mode.
-  test("ai-edit is dropped in view mode, leaving the wire it implied", () => {
-    expect(resolveModules(params({ plugins: "ai-edit" }), false).plugins)
-      .toEqual(["plugins/wire.js"]);
+  // a ready helper to a page that cannot edit. A plugin this mode does not load
+  // brings nothing, so the wire it implies stays out too. A page that wants the
+  // wire in view mode names it.
+  test("plugins=ai-edit in view mode has no wire", () => {
+    const { plugins } = resolveModules(params({ plugins: "ai-edit" }), false);
+    expect(plugins).not.toContain("plugins/wire.js");
+    expect(plugins).not.toContain("plugins/ai-edit.js");
+  });
+
+  test("plugins=ai-edit,wire in view mode has the wire", () => {
+    const { plugins } = resolveModules(params({ plugins: "ai-edit,wire" }), false);
+    expect(plugins).toContain("plugins/wire.js");
+    expect(plugins).not.toContain("plugins/ai-edit.js");
+  });
+
+  test("plugins=ai-edit in edit mode has both the wire and ai-edit", () => {
+    const { plugins } = resolveModules(params({ plugins: "ai-edit" }), true);
+    expect(plugins).toContain("plugins/wire.js");
+    expect(plugins).toContain("plugins/ai-edit.js");
+  });
+
+  // upload is editOnly too, so it never reaches the emitted list in view mode; that
+  // page still implies it there is only observable in edit mode, above.
+  test("plugins=page in view mode still brings live and sync", () => {
+    const { plugins } = resolveModules(params({ plugins: "page" }), false);
+    expect(plugins).toContain("plugins/live.js");
+    expect(plugins).toContain("sync/live-sync.js");
   });
 
   // Excluding the wire takes ai-edit out with it, since the plugin cannot run
