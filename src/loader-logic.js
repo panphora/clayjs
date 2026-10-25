@@ -67,9 +67,10 @@ export const PLUGIN_PATHS = {
   // verify is sent as the ordinary full serialization, so the floor is the behaviour
   // it replaces. `exclude=source` turns it off.
   source:    { path: "plugins/source.js",          editOnly: true,  default: true },
-  // Draft mode counts as edit mode, so this still loads for visitors keeping drafts
-  // and for owners editing; a reader never pays for a drafts UI it cannot use.
-  "visitor-drafts": { path: "plugins/visitor-drafts.js", editOnly: true,  default: false },
+  // Only draft mode loads the draft store and its UI. Everyone else, readers and the
+  // owner editing the original, gets the owner module: the chip when it applies and
+  // the inert `clay.visitorDrafts`, without the drafts UI's 24 KB.
+  "visitor-drafts": { path: "plugins/visitor-drafts.js", ownerPath: "plugins/visitor-drafts-owner.js", editOnly: false, default: false },
   // An editor textarea outside the saved records, bound to one record's text
   // element. Edit mode only: the page that asks for it is the page whose owner
   // writes in it.
@@ -131,6 +132,7 @@ export const MODULES = {
   "plugins/ai-edit.js":         () => import("./plugins/ai-edit.js"),
   "plugins/demo.js":            () => import("./plugins/demo.js"),
   "plugins/visitor-drafts.js": () => import("./plugins/visitor-drafts.js"),
+  "plugins/visitor-drafts-owner.js": () => import("./plugins/visitor-drafts-owner.js"),
   "plugins/bind-text.js":       () => import("./plugins/bind-text.js"),
   "plugins/source.js":          () => import("./plugins/source.js"),
   "plugins/derive.js":          () => import("./plugins/derive.js"),
@@ -255,7 +257,7 @@ export function resolveModules(params, isEditMode, { isDraftMode = false, hasSap
     if (!enabled.has(name)) continue;
     const spec = PLUGIN_PATHS[name];
     if (spec.editOnly && !isEditMode) continue;
-    (LATE.has(name) ? late : plugins).push(spec.path);
+    (LATE.has(name) ? late : plugins).push(spec.ownerPath && !isDraftMode ? spec.ownerPath : spec.path);
   }
   return { core, plugins, late };
 }

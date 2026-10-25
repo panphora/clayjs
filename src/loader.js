@@ -15,7 +15,9 @@ import { preloadEntries } from "./lib/preload.js";
 // The plugin name a late path announces: the loader's own name-to-path table,
 // read the other way.
 const PLUGIN_NAMES = Object.fromEntries(
-  Object.entries(PLUGIN_PATHS).map(([name, spec]) => [spec.path, name])
+  Object.entries(PLUGIN_PATHS).flatMap(([name, spec]) =>
+    spec.ownerPath ? [[spec.path, name], [spec.ownerPath, name]] : [[spec.path, name]]
+  )
 );
 
 function domReady() {
@@ -260,7 +262,7 @@ function attachPluginMember(path, mod, loaded) {
     clay.quickcrop = mod.quickcrop || mod.default;
   } else if (path === "plugins/source.js") {
     clay.source = mod.source || mod.default;
-  } else if (path === "plugins/visitor-drafts.js") {
+  } else if (path === "plugins/visitor-drafts.js" || path === "plugins/visitor-drafts-owner.js") {
     clay.visitorDrafts = mod.visitorDrafts;
   } else if (path === "plugins/bind-text.js") {
     clay.bindText = mod.bindText;

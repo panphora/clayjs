@@ -7,8 +7,7 @@ import { rememberSource, downloadUrl } from "./visitor-drafts/source.js";
 import { mountPrompt } from "./visitor-drafts/prompt.js";
 import { mountIntro } from "./visitor-drafts/intro.js";
 import { mountOwnerChip } from "./visitor-drafts/owner-chip.js";
-
-const DOWNLOAD_URL = "/_/download?as=htmlclay";
+import { DOWNLOAD_URL, backToDraft, editOriginal, inertVisitorDrafts } from "./visitor-drafts/inert.js";
 
 let store = null;
 let restoredDetail = null;
@@ -52,37 +51,6 @@ if (isDraftMode && slot && rulesTag) {
 }
 
 export const ready = Promise.resolve();
-
-function editOriginal() {
-  const url = new URL(window.location.href);
-  url.searchParams.set("editmode", "true");
-  window.location.href = url.toString();
-  return true;
-}
-
-function backToDraft() {
-  const url = new URL(window.location.href);
-  url.searchParams.delete("editmode");
-  window.location.href = url.toString();
-  return true;
-}
-
-function inertVisitorDrafts() {
-  return {
-    active: false,
-    slot: null,
-    key: null,
-    hasDraft: () => false,
-    restored: () => null,
-    saveNow: () => false,
-    reset: () => false,
-    onRestore: () => false,
-    editOriginal,
-    backToDraft,
-    downloadUrl: () => DOWNLOAD_URL,
-    source: null,
-  };
-}
 
 export const visitorDrafts = store ? {
   active: true,

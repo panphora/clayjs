@@ -18,6 +18,7 @@ const wanted = [
   ...CORE_WAVES.always,
   ...CORE_WAVES.editOnly,
   ...Object.values(PLUGIN_PATHS).map((spec) => spec.path),
+  ...Object.values(PLUGIN_PATHS).map((spec) => spec.ownerPath).filter(Boolean),
 ];
 
 test("the loader asks for some modules by name", () => {

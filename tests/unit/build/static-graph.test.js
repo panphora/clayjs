@@ -154,6 +154,36 @@ for (const [fixture, tag] of Object.entries(FIXTURES)) {
   }
 }
 
+// An owner editing the original reads the owner chip, not the draft store: the
+// store, its hyper-html-api data engine, the prompt and the intro are a visitor's,
+// and the loader resolves plugins/visitor-drafts-owner.js in edit mode. The draft
+// run below is the control: the same walk finds the store when a visitor keeps one.
+const DRAFT_STORE = ["src/plugins/visitor-drafts/store.js", "src/vendor/hyper-html-api-data.vendor.js"];
+
+for (const fixture of ["kanban", "journal"]) {
+  test(`${fixture} edit: the draft store is not in the boot graph`, async () => {
+    const tag = FIXTURES[fixture];
+    const params = new URLSearchParams(`plugins=${tag.plugins}&exclude=${tag.exclude}`);
+    const plan = resolveModules(params, true, { isDraftMode: false, hasSap: tag.hasSap });
+    const entries = [...plan.core, ...plan.plugins].map((path) => `src/${path}`);
+
+    expect(entries).toContain("src/plugins/visitor-drafts-owner.js");
+    const graph = walk(await inputsFor(entries), entries);
+    expect([...graph].filter((file) => DRAFT_STORE.includes(file))).toEqual([]);
+  });
+}
+
+test("kanban draft: the same walk does find the draft store", async () => {
+  const tag = FIXTURES.kanban;
+  const params = new URLSearchParams(`plugins=${tag.plugins}&exclude=${tag.exclude}`);
+  const plan = resolveModules(params, true, { isDraftMode: true, hasSap: tag.hasSap });
+  const entries = [...plan.core, ...plan.plugins].map((path) => `src/${path}`);
+
+  expect(entries).toContain("src/plugins/visitor-drafts.js");
+  const graph = walk(await inputsFor(entries), entries);
+  expect(graph.has("src/plugins/visitor-drafts/store.js")).toBe(true);
+});
+
 // What the shipped Kanban view page asks for: its own loader tag, not a hand copy
 // of the plugin list. A reader must never fetch the save graph, and parse5 comes in
 // only through save.js's owned-style stripper.
