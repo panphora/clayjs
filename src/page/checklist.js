@@ -1,7 +1,7 @@
 import { state, view as pmView } from "../vendor/prosemirror.vendor.js";
 import { schema } from "./schema.js";
 import { asStep } from "./blocksel.js";
-import { el, cardFace } from "./board-view.js";
+import { el, cardFace } from "./board-face.js";
 
 const { Plugin } = state;
 const { Decoration, DecorationSet } = pmView;

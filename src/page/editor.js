@@ -21,13 +21,11 @@ import { highlightPlugin, CodeBlockView } from "./highlight.js";
 import { tableKeys, tablePlugin } from "./table.js";
 import { tableSelectPlugin } from "./table-select.js";
 import { chartPlugin, ChartView } from "./chart.js";
-import { BoardView } from "./board-view.js";
-import { boardPlugin, cardPanel } from "./board-panel.js";
+import { boardPlugin } from "./board-views.js";
 import { ToolView } from "./tool-view.js";
 import { createToolHost } from "./tools.js";
 import { checklistPlugin, checklistKeys } from "./checklist.js";
 import { csvImportPlugin } from "./csv-import.js";
-import { BOARD_CSS } from "./board-style.js";
 import { styleWithLegacyId } from "../lib/style.js";
 import { historyIntentPlugin } from "./history-intent.js";
 import { createFeatureLoader } from "./feature-loader.js";
@@ -227,7 +225,6 @@ ${INDENTS.map((n) => `:where(article[data-page], .page-editor) .page-li[data-ind
 .page-check-popup.page-check-owner { display: inline-block; width: min(280px, 80vw); padding: 8px 0; vertical-align: top; }
 .page-scrim { display: none; }
 .page-shell [hidden] { display: none !important; }
-${BOARD_CSS}
 @media (max-width: 560px) {
   .page-dock { display: none; }
   .page-plus { position: fixed; top: auto; left: 16px; bottom: calc(16px + env(safe-area-inset-bottom)); width: 44px; height: 44px; border-radius: 22px; }
@@ -274,8 +271,8 @@ const defaultUpload = (file, options) => globalThis.clay?.upload?.(file, options
 
 // Adds a view part to a running editor: its CSS and its node views, through
 // setProps, which never recreates plugin views or reorders keymaps.
-export function installPageFeature({ view, upload, toolHost }, id, mod) {
-  const feature = mod.createFeature({ view, upload, toolHost });
+export function installPageFeature({ view, upload, toolHost, board = null, undo = null, redo = null }, id, mod) {
+  const feature = mod.createFeature({ view, upload, toolHost, board, undo, redo });
   const apply = () => {
     if (feature.css) styleWithLegacyId(`page-feature-${id}`, feature.css, `page-feature-${id}`, ["editor-ui"]);
     if (feature.nodeViews) view.setProps({ nodeViews: { ...view.props.nodeViews, ...feature.nodeViews } });
@@ -394,7 +391,7 @@ export function createPageEditor(mount, { blocks = null, onChange = null, upload
   let view = null;
   const features = providedFeatures ?? createFeatureLoader({
     load: (id) => FEATURES[id].load(),
-    install: (id, mod) => installPageFeature({ view, upload, toolHost }, id, mod),
+    install: (id, mod) => installPageFeature({ view, upload, toolHost, board, undo, redo }, id, mod),
   });
   view = new pmView.EditorView(shell, {
     state: pageState(blocks, { upload, highlight, doc: initialDoc, history: useHistory, undo, redo, onAiTool, toolHost, features }),
@@ -406,7 +403,6 @@ export function createPageEditor(mount, { blocks = null, onChange = null, upload
       code_block: (node, v, getPos) => new CodeBlockView(node, v, getPos),
       chart: (node, v, getPos) => new ChartView(node, v, getPos),
       tool: (node, v, getPos) => new ToolView(node, v, getPos, { host: toolHost, revise: reviseTool }),
-      ...(board ? { board: (node, v, getPos) => new BoardView(node, v, getPos, { commands: board, undo, redo, panel: cardPanel(v) }) } : {}),
     },
     handleDOMEvents: {
       mousedown: checkboxClick,

@@ -1,16 +1,16 @@
-import { state } from "../vendor/prosemirror.vendor.js";
 import { schema } from "./schema.js";
 import { announce } from "./announce.js";
-import { BOARD_ICONS, el, iconButton, boardOf, cardFace, dueLabel, dueState, todayKey, placeAfter } from "./board-view.js";
+import { BOARD_ICONS, iconButton, boardOf, dueLabel, dueState, todayKey, placeAfter } from "./board-view.js";
+import { el, cardFace } from "./board-face.js";
+import { cardPanels } from "./board-views.js";
 
 const NARROW = "(max-width: 1039.98px)";
 const isTyping = (target) => /^(INPUT|TEXTAREA|SELECT)$/.test(target?.tagName ?? "");
-const panels = new WeakMap();
 let count = 0;
 
 export function cardPanel(view) {
-  if (!panels.has(view)) panels.set(view, new CardPanel(view));
-  return panels.get(view);
+  if (!cardPanels.has(view)) cardPanels.set(view, new CardPanel(view));
+  return cardPanels.get(view);
 }
 
 export class CardPanel {
@@ -338,16 +338,4 @@ export class CardPanel {
       items[event.shiftKey ? items.length - 1 : 0].focus();
     }
   }
-}
-
-export function boardPlugin() {
-  return new state.Plugin({
-    view: (view) => ({
-      update: () => panels.get(view)?.sync(),
-      destroy: () => {
-        panels.get(view)?.hide(false, false);
-        panels.delete(view);
-      },
-    }),
-  });
 }

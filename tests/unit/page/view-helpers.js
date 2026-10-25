@@ -1,5 +1,6 @@
 import { createPageEditor, installPageFeature } from "../../../src/page/editor.js";
 import * as tableFeature from "../../../src/page/features/table.js";
+import * as boardFeature from "../../../src/page/features/board.js";
 import { state as pmState } from "../../../src/vendor/prosemirror.vendor.js";
 
 const { TextSelection } = pmState;
@@ -16,10 +17,13 @@ export const blocksOf = (spec) => {
   spec.forEach(([id, t, c, attrs = {}], i) => { out[id] = { t, pos: String.fromCharCode(66 + i), c, ...attrs }; });
   return out;
 };
-const tableLoaded = { ensure: () => Promise.resolve(), has: (id) => id === "table", dispose() {} };
+const loaded = { ensure: () => Promise.resolve(), has: (id) => id === "table" || id === "board", dispose() {} };
 export const editor = (spec, options = {}) => {
-  const view = createPageEditor(document.body.appendChild(document.createElement("div")), { blocks: blocksOf(spec), features: tableLoaded, ...options });
-  if (!options.features) installPageFeature({ view }, "table", tableFeature);
+  const view = createPageEditor(document.body.appendChild(document.createElement("div")), { blocks: blocksOf(spec), features: loaded, ...options });
+  if (!options.features) {
+    installPageFeature({ view }, "table", tableFeature);
+    installPageFeature({ view, board: options.board, undo: options.undo, redo: options.redo }, "board", boardFeature);
+  }
   return trackView(view);
 };
 export const posOf = (view, id, end = false) => {

@@ -2,6 +2,7 @@ import { schema } from "./schema.js";
 import { orderedIds } from "./model.js";
 import { announce } from "./announce.js";
 import { BoardDrag } from "./board-drag.js";
+import { el, cardFace } from "./board-face.js";
 
 const N = schema.nodes;
 const boardViews = new WeakMap();
@@ -23,14 +24,6 @@ export const BOARD_ICONS = {
   pencil: svg('<path d="M10.25 3.25l2.5 2.5-7 7H3.25v-2.5z"/>'),
   restore: svg('<path d="M3.5 8a4.5 4.5 0 1 0 1.32-3.18M3.5 2.75v2.5H6"/>'),
 };
-
-export function el(doc, tag, cls, attrs = {}, text = null) {
-  const node = doc.createElement(tag);
-  if (cls) node.className = cls;
-  for (const [key, value] of Object.entries(attrs)) if (value !== null && value !== undefined && value !== false) node.setAttribute(key, value === true ? "" : String(value));
-  if (text !== null) node.textContent = text;
-  return node;
-}
 
 export function iconButton(doc, cls, icon, label, attrs = {}) {
   const button = el(doc, "button", cls, { type: "button", ...attrs });
@@ -61,7 +54,6 @@ export function dueLabel(due, today = todayKey(), long = false) {
   const sameYear = due.slice(0, 4) === today.slice(0, 4);
   return new Date(`${due}T00:00:00Z`).toLocaleDateString("en-US", { ...(long ? { weekday: "short" } : {}), month: "short", day: "numeric", ...(sameYear ? {} : { year: "numeric" }), timeZone: "UTC" });
 }
-export const initialOf = (name) => ([...String(name).trim()][0] ?? "?").toUpperCase();
 export const placeAfter = (ids, index) => (index >= 2 ? ids[index - 2] : null);
 const countOf = (doc, n) => el(doc, "span", "page-board-count", { "aria-label": `${n} ${n === 1 ? "card" : "cards"}` }, String(n));
 const isTyping = (target) => /^(INPUT|TEXTAREA|SELECT)$/.test(target?.tagName ?? "");
@@ -74,8 +66,6 @@ function dueBadge(doc, due) {
   if (state === "overdue") badge.append(el(doc, "span", "page-board-sr", {}, ", overdue"));
   return badge;
 }
-
-export const cardFace = (doc, name) => el(doc, "span", "page-board-face", { "aria-hidden": "true" }, initialOf(name));
 
 export class BoardView {
   constructor(node, view, getPos, { commands = null, undo = null, redo = null, panel = null } = {}) {

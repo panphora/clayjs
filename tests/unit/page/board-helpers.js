@@ -1,6 +1,7 @@
 import * as Y from "../../../src/vendor/yjs.vendor.js";
 import { createStore } from "../../../src/live/store.js";
-import { createPageEditor } from "../../../src/page/editor.js";
+import { createPageEditor, installPageFeature } from "../../../src/page/editor.js";
+import * as boardFeature from "../../../src/page/features/board.js";
 import { createYPageBinding, seedValue, blocksFromYValue, enc } from "../../../src/page/ybind/index.js";
 import { NET } from "../../../src/page/ybind/layout.js";
 import { ORIGINS_ORIGIN } from "../../../src/page/ybind/origins.js";
@@ -11,6 +12,7 @@ export const clone = (value) => JSON.parse(JSON.stringify(value));
 export const initial = seedValue([{ id: "p", text: "Before" }, { id: "bd", t: "board", attrs: { columns: clone(COLUMNS), cards: clone(CARDS) } }, { id: "q", text: "After" }]);
 export const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
+const boardLoaded = { ensure: () => Promise.resolve(), has: (id) => id === "board", dispose() {} };
 const tabs = [];
 let frame = 0;
 afterEach(() => {
@@ -21,7 +23,8 @@ afterEach(() => {
 export const open = (value = initial) => {
   const store = createStore({ name: "page", value: clone(value) });
   const binding = createYPageBinding({ store, setTimer: () => 1, clearTimer: () => {} });
-  const view = createPageEditor(document.body.appendChild(document.createElement("div")), { doc: binding.doc(), dispatch: binding.dispatch, history: false, undo: binding.undo, redo: binding.redo, board: binding.board });
+  const view = createPageEditor(document.body.appendChild(document.createElement("div")), { doc: binding.doc(), dispatch: binding.dispatch, history: false, undo: binding.undo, redo: binding.redo, board: binding.board, features: boardLoaded });
+  installPageFeature({ view, board: binding.board, undo: binding.undo, redo: binding.redo }, "board", boardFeature);
   binding.attach(view);
   const updates = [];
   binding.ydoc.on("updateV2", (update, origin) => { if (origin !== NET && origin !== ORIGINS_ORIGIN) updates.push(update); });
