@@ -73,7 +73,7 @@ export function assertReleasePath(relPath) {
   }
 }
 
-const CONTENT_TYPES = new Map([
+export const CONTENT_TYPES = new Map([
   [".js", "text/javascript; charset=utf-8"],
   [".mjs", "text/javascript; charset=utf-8"],
   [".cjs", "text/javascript; charset=utf-8"],
