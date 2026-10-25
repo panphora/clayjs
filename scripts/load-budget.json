@@ -1,14 +1,14 @@
 {
   "document.html": {
-    "view": { "requests": 47, "depth": 19, "brotli": 106496, "css": { "requests": 1, "depth": 1 }, "fonts": { "requests": 10, "depth": 2, "raw": 464896 } },
+    "view": { "requests": 47, "depth": 20, "brotli": 106496, "css": { "requests": 1, "depth": 1 }, "fonts": { "requests": 10, "depth": 2, "raw": 464896 } },
     "edit": { "requests": 171, "depth": 48, "brotli": 587776, "css": { "requests": 1, "depth": 1 }, "fonts": { "requests": 10, "depth": 2, "raw": 464896 } }
   },
   "document-rich.html": {
-    "view": { "requests": 47, "depth": 19, "brotli": 106496, "css": { "requests": 1, "depth": 1 }, "fonts": { "requests": 10, "depth": 2, "raw": 464896 } },
+    "view": { "requests": 47, "depth": 20, "brotli": 106496, "css": { "requests": 1, "depth": 1 }, "fonts": { "requests": 10, "depth": 2, "raw": 464896 } },
     "edit": { "requests": 178, "depth": 53, "brotli": 609280, "css": { "requests": 1, "depth": 1 }, "fonts": { "requests": 10, "depth": 2, "raw": 464896 } }
   },
   "document-text.html": {
-    "view": { "requests": 47, "depth": 19, "brotli": 106496, "css": { "requests": 1, "depth": 1 }, "fonts": { "requests": 10, "depth": 2, "raw": 464896 } },
+    "view": { "requests": 47, "depth": 20, "brotli": 106496, "css": { "requests": 1, "depth": 1 }, "fonts": { "requests": 10, "depth": 2, "raw": 464896 } },
     "edit": { "requests": 171, "depth": 48, "brotli": 587776, "css": { "requests": 1, "depth": 1 }, "fonts": { "requests": 10, "depth": 2, "raw": 464896 } }
   },
   "kanban.html": {
@@ -22,11 +22,11 @@
     "draft": { "requests": 81, "depth": 35, "brotli": 216064, "css": { "requests": 1, "depth": 1 }, "fonts": { "requests": 8, "depth": 2 } }
   },
   "journal-hyperclay.html": {
-    "view": { "requests": 69, "depth": 23, "brotli": 202752, "css": { "requests": 1, "depth": 1 }, "fonts": { "requests": 0, "depth": 0 } },
+    "view": { "requests": 69, "depth": 23, "brotli": 203776, "css": { "requests": 1, "depth": 1 }, "fonts": { "requests": 0, "depth": 0 } },
     "edit": { "requests": 95, "depth": 42, "brotli": 326656, "css": { "requests": 1, "depth": 1 }, "fonts": { "requests": 0, "depth": 0 } }
   },
   "kanban-hyperclay.html": {
-    "view": { "requests": 70, "depth": 25, "brotli": 214016, "css": { "requests": 1, "depth": 1 }, "fonts": { "requests": 0, "depth": 0 } },
+    "view": { "requests": 70, "depth": 25, "brotli": 215040, "css": { "requests": 1, "depth": 1 }, "fonts": { "requests": 0, "depth": 0 } },
     "edit": { "requests": 94, "depth": 43, "brotli": 285696, "css": { "requests": 1, "depth": 1 }, "fonts": { "requests": 0, "depth": 0 } },
     "draft": { "requests": 81, "depth": 35, "brotli": 215040, "css": { "requests": 1, "depth": 1 }, "fonts": { "requests": 0, "depth": 0 } }
   },
