@@ -15,6 +15,17 @@ import { loadedEngine, mergeEngine } from "../sync/merge-engine.js";
 
 const parseTag = (text) => { try { return parseJsonRelaxed(text); } catch { return null; } };
 
+// What one adoption attempt did, so a caller can tell a landed adoption from a
+// stopped, refused or failed one. `ok` is true only when the store holds the
+// accepted state afterwards, whether that meant splicing the file in or finding
+// nothing to splice.
+const UNCHANGED = { ok: true, outcome: "unchanged" };
+const STOPPED = { ok: false, outcome: "disposed", reason: "adoption-disposed" };
+const REFUSED = { ok: false, outcome: "refused", reason: "adoption-refused" };
+const TIMED_OUT = { ok: false, outcome: "refused", reason: "adoption-timeout" };
+const FAILED = { ok: false, outcome: "error", reason: "adoption-error" };
+const landed = (counts) => ({ ok: true, outcome: "adopted", counts });
+
 export function readFile(root) {
   const article = root.querySelector(ARTICLE);
   return article ? { article: article.cloneNode(true), tags: pageTags(root).map((el) => parseTag(el.textContent)) } : null;
@@ -103,18 +114,23 @@ export function installAdoption({
     if (mergeTagless && !file.tags.length) return adoptTagless(file);
     const found = classifyFile(file.article, file.tags);
     if (found.kind === "unbased") console.warn("page: the article and its data changed together; kept the data");
-    if (found.kind !== "adopt" || !isAdopter()) return null;
+    if (found.kind !== "adopt") return UNCHANGED;
+    if (!isAdopter()) return REFUSED;
     hold();
     try {
       await mergeEngine();
-      if (disposed || !isAdopter()) return null;
+      if (disposed) return STOPPED;
+      if (!isAdopter()) return REFUSED;
       const waited = await waitForEditor();
       if (waited === "timeout") console.warn("page: gave up waiting for the editor; the hand edit was not adopted");
-      if (waited !== "ready" || disposed || !isAdopter()) return null;
+      if (waited === "disposed" || disposed) return STOPPED;
+      if (waited !== "ready") return TIMED_OUT;
+      if (!isAdopter()) return REFUSED;
       const blocks = blockMap(view.state.doc);
       const counts = land(blocks, readBack(blocks, doc), found.baseItems, found.parsed);
-      if (counts) adopted(found.A);
-      return counts;
+      if (!counts) return UNCHANGED;
+      adopted(found.A);
+      return landed(counts);
     } finally {
       release();
     }
@@ -125,41 +141,58 @@ export function installAdoption({
     const list = (rev && seen.get(rev)) || [];
     const base = list.at(-1) ?? disk;
     // An untouched older copy leaves the page as it is.
-    if (list.slice(0, -1).some((article) => article.innerHTML === file.article.innerHTML)) return null;
+    if (list.slice(0, -1).some((article) => article.innerHTML === file.article.innerHTML)) return UNCHANGED;
     record(file.article);
     disk = file.article;
-    if (!base) return null;
+    if (!base) return UNCHANGED;
     // Only the room's elected writer merges a frame, so it lands once however
     // many tabs see it; and it lands even when the editor never settles, since
     // the next save would otherwise write over the edit.
     hold();
     try {
       await mergeEngine();
-      if (disposed || !isAdopter()) return null;
+      if (disposed) return STOPPED;
+      if (!isAdopter()) return REFUSED;
       await writerReady();
-      if (disposed || !isAdopter()) return null;
+      if (disposed) return STOPPED;
+      if (!isAdopter()) return REFUSED;
       const waited = await waitForEditor();
-      if (waited === "disposed" || disposed || !isAdopter()) return null;
+      if (waited === "disposed" || disposed) return STOPPED;
+      if (!isAdopter()) return REFUSED;
       const blocks = blockMap(view.state.doc);
       const current = readBack(blocks, doc);
       const known = new Map(current.map((item) => [item.id, item]));
       const parse = (article) => parseModel(article, { seed: article.getAttribute("data-rev") ?? "", known });
-      return land(blocks, current, parse(base), parse(file.article));
+      const counts = land(blocks, current, parse(base), parse(file.article));
+      return counts ? landed(counts) : UNCHANGED;
     } finally {
       release();
     }
   }
 
-  function run(file) {
+  // A failed attempt is an outcome, never a resolved success: the coordinator
+  // decides on `ok`, and the outside world keeps its events and quiet queue.
+  async function attempt(file) {
+    try {
+      return await adopt(file);
+    } catch (error) {
+      console.error("page: adoption failed", error);
+      return FAILED;
+    }
+  }
+
+  let bootOutcome = null;
+  function run(file, boot = false) {
     queue = queue
-      .then(() => adopt(file))
-      .then((counts) => {
-        if (!counts) return;
+      .then(() => attempt(file))
+      .then((outcome) => {
+        if (boot) bootOutcome = outcome;
+        if (!outcome.ok || outcome.outcome !== "adopted") return outcome;
         requestCheckpoint();
-        notice(counts);
-        doc.dispatchEvent(new CustomEvent("clay:page-adopted", { detail: counts }));
-      })
-      .catch((error) => console.error("page: adoption failed", error));
+        notice(outcome.counts);
+        doc.dispatchEvent(new CustomEvent("clay:page-adopted", { detail: outcome.counts }));
+        return outcome;
+      });
     return queue;
   }
 
@@ -173,10 +206,15 @@ export function installAdoption({
   }
 
   doc.addEventListener("clay:sync-applied", onFrame);
-  if (source) run(source);
+  if (source) run(source, true);
 
   return {
-    idle: () => queue,
+    // Resolves once everything queued so far has been attempted, with the boot
+    // file's own outcome: landed, unchanged, stopped, refused or failed.
+    idle: async () => {
+      await queue;
+      return bootOutcome;
+    },
     // A save of this tab landed: the file holds what it sent, so that article is
     // the one an outside edit made on the saved file merges against.
     saved(html) {
