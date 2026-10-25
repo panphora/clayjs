@@ -1,7 +1,7 @@
 /**
  * @jest-environment node
  */
-import { beforeAll, afterAll, expect, test } from "@jest/globals";
+import { beforeAll, afterAll, describe, expect, test } from "@jest/globals";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -257,3 +257,102 @@ test("the Document view stays below M3's 23-stage source limit and is three stag
   expect(source.js.depth).toBeLessThan(23);
   expect(built.js.depth).toBe(3);
 }, 180000);
+
+// Recovery is the editor's own business. A reader who never writes must not fetch
+// the driver, the store or any IndexedDB code, and the Journal must never pull a
+// Document's page code into any of its closures. A chunk is what a browser really
+// downloads, so a built check asks the manifest which logical modules landed in the
+// file rather than trusting the chunk's name. Every list is checked to be non-empty
+// first: an empty closure would otherwise satisfy every absence below.
+const JOURNAL_FIXTURES = ["journal.html", "journal-hyperclay.html"];
+
+const entriesUnder = (manifest, prefix) =>
+  Object.entries(manifest.entries).filter(([entry]) => entry.startsWith(prefix));
+
+const codeOfBuilt = (builtDir, path) =>
+  readFileSync(path.startsWith("entries/") ? join(ROOT, path) : join(builtDir, path), "utf8");
+
+describe("recovery stays out of readers", () => {
+  test("no fixture's view closure carries the recovery driver, the store or any IndexedDB code", async () => {
+    const manifest = JSON.parse(readFileSync(join(dir, "m/manifest.json"), "utf8"));
+    const driverChunks = new Set(entriesUnder(manifest, "recovery/").map(([, file]) => `m/${file}`));
+
+    for (const fixture of Object.keys(budget)) {
+      if (fixture === "built") continue;
+      for (const mode of Object.keys(budget[fixture])) {
+        if (mode !== "view") continue;
+        const source = await measure({ html: htmlOf(fixture), mode });
+        const built = await measureBuilt({ html: htmlOf(fixture), mode, dir });
+        const sourcePaths = source.js.files.map(({ path }) => path);
+        const builtPaths = built.js.files.map(({ path }) => path);
+
+        expect(sourcePaths.length).toBeGreaterThan(0);
+        expect(builtPaths.length).toBeGreaterThan(0);
+        expect(sourcePaths.filter((path) => path.startsWith("src/recovery/"))).toEqual([]);
+        expect(builtPaths.filter((path) => driverChunks.has(path))).toEqual([]);
+        expect(sourcePaths.filter((path) => readFileSync(join(ROOT, path), "utf8").includes("indexedDB"))).toEqual([]);
+        expect(builtPaths.filter((path) => codeOfBuilt(dir, path).includes("indexedDB"))).toEqual([]);
+      }
+    }
+  }, 300000);
+
+  // The facade is at ready in the editor, small against the edit budget 04 set, and
+  // the store that opens the database is not: it is deferred to the first use, which
+  // is the whole reason the reader pays nothing for it.
+  test("the Journal editor's recovery facade is at ready, small, and its driver is deferred", async () => {
+    const manifest = JSON.parse(readFileSync(join(dir, "m/manifest.json"), "utf8"));
+    const chunkOf = (entry) => `m/${manifest.entries[entry]}`;
+
+    for (const fixture of JOURNAL_FIXTURES) {
+      const source = await measure({ html: htmlOf(fixture), mode: "edit" });
+      const built = await measureBuilt({ html: htmlOf(fixture), mode: "edit", dir });
+      const sourcePaths = source.js.files.map(({ path }) => path);
+      const builtPaths = built.js.files.map(({ path }) => path);
+      const sourceFacade = source.js.files.find(({ path }) => path === "src/core/recovery.js");
+      const builtFacade = built.js.files.find(({ path }) => path === chunkOf("core/recovery.js"));
+      const editLimits = budget[fixture].edit;
+
+      expect(sourcePaths.length).toBeGreaterThan(0);
+      expect(builtPaths.length).toBeGreaterThan(0);
+      expect(sourcePaths).toContain("src/core/recovery.js");
+      expect(builtPaths).toContain(chunkOf("core/recovery.js"));
+      expect(sourceFacade.brotli).toBeGreaterThan(0);
+      expect(builtFacade.brotli).toBeGreaterThan(0);
+      console.log(`${fixture} edit: the recovery facade is ${sourceFacade.brotli} B Brotli in source, ` +
+        `${builtFacade.brotli} B Brotli built, of the ${editLimits.brotli} B edit budget`);
+      expect(sourceFacade.brotli * 8).toBeLessThanOrEqual(editLimits.brotli);
+
+      for (const entry of ["recovery/store.js", "recovery/conflicts.js"]) {
+        expect(sourcePaths).not.toContain(`src/${entry}`);
+        expect(builtPaths).not.toContain(chunkOf(entry));
+        expect(source.lazy).toContain(`src/${entry}`);
+        expect(built.lazy).toContain(chunkOf(entry));
+      }
+    }
+  }, 300000);
+
+  // The Journal is not a Document: its editor, its view parts and its tables belong
+  // to another template, and a Journal that loaded them would be paying for a page
+  // it does not have. Both the ready set and the deferred one are checked.
+  test("no Journal closure holds a Document page file", async () => {
+    const manifest = JSON.parse(readFileSync(join(dir, "m/manifest.json"), "utf8"));
+    const pageChunks = new Set(entriesUnder(manifest, "page/").map(([, file]) => `m/${file}`));
+
+    expect(pageChunks.size).toBeGreaterThan(0);
+    for (const fixture of JOURNAL_FIXTURES) {
+      for (const mode of Object.keys(budget[fixture])) {
+        const source = await measure({ html: htmlOf(fixture), mode });
+        const built = await measureBuilt({ html: htmlOf(fixture), mode, dir });
+        const sourcePaths = source.js.files.map(({ path }) => path);
+        const builtPaths = built.js.files.map(({ path }) => path);
+
+        expect(sourcePaths.length).toBeGreaterThan(0);
+        expect(builtPaths.length).toBeGreaterThan(0);
+        expect(sourcePaths.filter((path) => path.startsWith("src/page/"))).toEqual([]);
+        expect(builtPaths.filter((path) => pageChunks.has(path))).toEqual([]);
+        expect(source.lazy.filter((path) => path.startsWith("src/page/"))).toEqual([]);
+        expect(built.lazy.filter((path) => pageChunks.has(path))).toEqual([]);
+      }
+    }
+  }, 300000);
+});
