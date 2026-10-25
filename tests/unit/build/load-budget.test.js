@@ -113,8 +113,10 @@ for (const [fixture, modes] of Object.entries(budget.built)) {
 
       expect(measured.bootstrap).toBe(true);
       expect(measured.js.requests).toBeGreaterThan(1);
-      // Bootstrap, its preloads, then the plan: the depth this step is for.
-      expect(measured.js.depth).toBe(3);
+      // Bootstrap, its preloads, then the plan. A Document with table or board blocks
+      // fetches those feature parts once its page tag is decoded, one stage later, so
+      // its row records depth 4; every other row records 3.
+      expect(measured.js.depth).toBe(limits.depth);
       expect(measured.js.requests).toBeLessThanOrEqual(limits.requests);
       expect(measured.js.depth).toBeLessThanOrEqual(limits.depth);
       expect(measured.js.brotli).toBeLessThanOrEqual(limits.brotli);
