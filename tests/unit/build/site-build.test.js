@@ -120,6 +120,19 @@ test("the previous chunked release's chunks stay under public/v1/m/", async () =
   expect(manifest.version).toBe(CURRENT);
 });
 
+test("the current release's prefixes carry its offline index, and every file it names", async () => {
+  for (const prefix of ["v1", CURRENT]) {
+    const index = JSON.parse(await readFile(path.join(site, "public", prefix, "offline-manifest.json"), "utf8"));
+    expect(index.version).toBe(CURRENT);
+    const paths = Object.keys(index.files);
+    expect(paths.length).toBeGreaterThan(100);
+    for (const file of paths) {
+      const stat = await lstat(path.join(site, "public", prefix, file)).catch(() => null);
+      expect({ prefix, file, present: Boolean(stat?.isFile()) }).toEqual({ prefix, file, present: true });
+    }
+  }
+});
+
 test("a same-name different-bytes pair stops the build", async () => {
   const current = (await readdir(path.join(site, `public/${CURRENT}/m`))).find((f) => f.startsWith("c-"));
   expect(current).toBeTruthy();

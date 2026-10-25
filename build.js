@@ -37,7 +37,7 @@
 // reach npm and miss the site. That exact miss is why this script exists.
 
 import { readdir, readFile, mkdir, copyFile, rm, rename, lstat, writeFile } from 'node:fs/promises';
-import { basename, dirname, extname, join, resolve, relative, sep } from 'node:path';
+import { basename, dirname, extname, join, resolve, sep } from 'node:path';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { execFile } from 'node:child_process';
@@ -48,6 +48,7 @@ import { emitBootstraps, emitChunks } from './scripts/build-chunks.mjs';
 import { compileTheme } from './scripts/build-themes.mjs';
 import { buildServerRooms } from './scripts/build-server-rooms.mjs';
 import { buildServerCheckpoint } from './scripts/build-server-checkpoint.mjs';
+import { buildOfflineManifest, releaseFiles, walk } from './scripts/build-offline-manifest.mjs';
 
 const run = promisify(execFile);
 
@@ -193,21 +194,6 @@ function rollingHeads(versions) {
   return best;
 }
 
-// Never follow a symlink out of the tree, and never copy something that is not a
-// regular file. Same rule as malleabledocument's sync-fixtures.mjs, for the same
-// reason: a copier that follows links can write anywhere.
-async function walk(dir, base = dir) {
-  const out = [];
-  for (const entry of await readdir(dir, { withFileTypes: true })) {
-    const abs = join(dir, entry.name);
-    if (entry.isSymbolicLink()) throw new Error(`refusing to copy a symlink: ${abs}`);
-    if (entry.isDirectory()) out.push(...(await walk(abs, base)));
-    else if (entry.isFile()) out.push(relative(base, abs));
-    else throw new Error(`refusing to copy a non-regular file: ${abs}`);
-  }
-  return out;
-}
-
 function publicPath(relPath) {
   const dest = join(PUBLIC, relPath);
   // Belt and braces on the join above: a path containing .. would otherwise write
@@ -317,19 +303,16 @@ async function emitLibrary(from, version, prefix = version) {
   let n = 0;
   const generated = await chunkedBootstraps(from);
   if (generated) CHUNKED.add(version);
-  for (const [name, sub] of LIBRARY) {
-    const abs = join(from, name);
-    if (!(await lstat(abs).catch(() => null))) {
-      if (name === 'dist/' && cmpVersion(version, STANDALONE_SINCE) < 0) continue;
-      throw new Error(`${from} has no ${name}`);
-    }
-    for (const rel of await walk(abs)) {
-      // dist/ provides these, and LIBRARY copies entries/ first, so the entries/ copy
-      // would be overwritten by the generated file a moment later.
-      if (name === 'entries/' && generated?.has(rel)) continue;
-      n += await copyInto(join(abs, rel), join(prefix, sub, rel));
-    }
-  }
+  // The publication mapping lives in scripts/build-offline-manifest.mjs, so the site and
+  // the offline inventory cannot disagree about which file serves which path. A tarball
+  // from before dist/ existed has none, and its pins still have to rebuild.
+  const files = await releaseFiles(from, { allowMissingDist: cmpVersion(version, STANDALONE_SINCE) < 0 });
+  for (const [pub, src] of files) n += await copyInto(join(from, src), join(prefix, pub));
+  // The inventory is the one dist/ file releaseFiles leaves out, because it cannot list
+  // itself; the prefix still serves it at its release root, where a local host reads it.
+  const index = join(from, 'dist', 'offline-manifest.json');
+  if (await lstat(index).catch(() => null)) n += await copyInto(index, join(prefix, 'offline-manifest.json'));
+
   if (generated) {
     const clay = await readFile(join(PUBLIC, prefix, 'clay.js'), 'utf8');
     if (!clay.includes('"dir":"m/"')) {
@@ -495,6 +478,10 @@ await emitAssets([...fonts, theme]);
 // chain, so a tarball built from this tree serves one request like the site does. The
 // chain lives beside it as light-1.source.css.
 await writeFile(join(ROOT, 'src/page/themes', `${COMPILED_THEME}.css`), await compileTheme({ root: ROOT, name: COMPILED_THEME, outPath: `src/page/themes/${COMPILED_THEME}.css` }));
+
+// The inventory, last: it hashes the chunk manifest and everything above it.
+await buildOfflineManifest({ root: ROOT, dist: DIST });
+
 if (process.argv.includes('--standalone')) {
   console.log(
     `built dist/${STANDALONE}, dist/server/{rooms,checkpoint}.cjs, ` +
@@ -532,14 +519,6 @@ for (const version of pins) count += await emitLibrary(await sourceFor(version, 
 for (const [major, version] of heads) {
   count += await emitLibrary(await sourceFor(version, published), version, `v${major}`);
   count += await addPreviousChunks(`v${major}`, version, published);
-}
-
-// The document URL keeps its address and stops being a chain: the same path now holds the
-// compiled sheet, with the font URLs at that path's own depth.
-for (const prefix of treePrefixes) {
-  const rel = `src/page/themes/${COMPILED_THEME}.css`;
-  await writeFile(publicPath(join(prefix, rel)), await compileTheme({ root: ROOT, name: COMPILED_THEME, outPath: rel }));
-  count += 1;
 }
 
 // Fonts come from a pinned npm package rather than the release tarball, so every
