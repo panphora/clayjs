@@ -17,6 +17,12 @@ const current = () => modeState().mode;
 
 const fault = (message, code) => Object.assign(new Error(`clay.modeLifecycle: ${message}`), { code });
 
+// A committed change is announced so the engines that follow the session (Sap's undo
+// pair) rebind once, keyed on `state.generation`.
+function announceMode() {
+  document.dispatchEvent(new Event("clay:modechange"));
+}
+
 function refuse(code, phase = "idle", extra = {}) {
   commitModeFacts({ phase, reason: code });
   return { ok: false, mode: current(), code, ...extra };
@@ -70,6 +76,7 @@ async function enter() {
   }
   leases = prepared;
   commitModeFacts({ mode: isDraftMode ? "draft" : "edit", isEditMode: true, phase: "idle", reason: null });
+  announceMode();
   return { ok: true, mode: current(), changed: before !== current() };
 }
 
@@ -99,6 +106,7 @@ async function leave() {
   leases = [];
   generation++;
   commitModeFacts({ mode: "view", isEditMode: false, phase: "idle", generation, reason: null });
+  announceMode();
   return { ok: true, mode: "view", changed: true };
 }
 
