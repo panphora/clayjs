@@ -9,6 +9,7 @@ import { style } from "./lib/style.js";
 import { derived } from "./lib/derived.js";
 import { bootPhase } from "./core/boot-phase.js";
 import { mergeEngine } from "./sync/merge-engine.js";
+import { preloadEntries } from "./lib/preload.js";
 
 function domReady() {
   return new Promise((resolve) => onDomReady(resolve));
@@ -18,8 +19,9 @@ function domReady() {
 // stays anyway: /v1/clay.js and /v1/src/loader.js are cached independently, so
 // for a while after a deploy a browser can pair either file with the other's
 // previous release. A call shape that differs between them leaves the page with
-// no clayjs at all.
-export async function boot(base, params, readyResolve) {
+// no clayjs at all. The optional fourth argument comes only from the chunked
+// bootstrap; its absence means no preloading.
+export async function boot(base, params, readyResolve, manifest = null) {
   initTheme();
   const draftMode = await MODULES["core/draft-mode.js"]();
   draftMode.noteBootParams(params);
@@ -44,6 +46,7 @@ export async function boot(base, params, readyResolve) {
   const hasSap = Boolean(document.querySelector("[sap]"));
   bootPhase.holdSettle = hasSap && isEditMode;
   const plan = resolveModules(params, isEditMode, { isDraftMode, hasSap });
+  preloadEntries(manifest, [...plan.core, ...plan.plugins]);
   const loaded = {};
 
   for (const path of plan.core) {
