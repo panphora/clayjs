@@ -67,6 +67,10 @@ export async function boot(base, params, readyResolve, manifest = null, suppleme
   const hasSapJs = Boolean(document.querySelector('script[src*="sap.js"]'));
   bootPhase.holdSettle = hasSap && isEditMode;
   const plan = resolveModules(params, isEditMode, { isDraftMode, hasSap, canEdit, templateSource: templateSource() });
+  // Where edits land, resolved once: a visitor draft saves into its draft slot, the
+  // demo plugin into localStorage, and everything else to the host. setMode takes no
+  // destination, and V4 has no draft-to-host transition.
+  if (plan.plugins.includes("plugins/demo.js")) editMode.commitModeFacts({ destination: "demo" });
   preloadEntries(mergeManifests(manifest, supplement), [...plan.core, ...plan.plugins], { isEditMode, isDraftMode, hasSapJs });
   // A resolved initial edit or draft fetches the release's hint index, whether or not
   // the URL announced it. It lands beside preparation and only ever adds modulepreloads:
@@ -86,8 +90,11 @@ export async function boot(base, params, readyResolve, manifest = null, suppleme
     loaded[path] = await MODULES[path](); // sequential: order is load-bearing
   }
 
-  assembleCore(loaded, { isDraftMode, isEditMode, isOwner, siteVisibility, canEdit, mode }, regionPolicy); // window.clay MUST be assembled
+  assembleCore(loaded, { isDraftMode, isOwner, siteVisibility }, regionPolicy); // window.clay MUST be assembled
                                                                // before any plugin import
+  // An explicit initial edit drains the preboot participant queue and enables its
+  // leases before a plugin can take input. A reader returns at the first line.
+  await loaded["core/edit-mode.js"].activateInitialMode();
   window.clay.plugins = Object.freeze([...plan.plugins, ...plan.late].map((path) => PLUGIN_NAMES[path]));
 
   for (const path of plan.plugins) {
@@ -167,7 +174,7 @@ export function mountDerivedEngine(loaded) {
   if (save && fileSignature != null) save.schedulePaintHeal(fileSignature);
 }
 
-function assembleCore(loaded, { isDraftMode, isEditMode, isOwner, siteVisibility, canEdit, mode }, regionPolicy) {
+function assembleCore(loaded, { isDraftMode, isOwner, siteVisibility }, regionPolicy) {
   const clay = window.clay;
 
   const mutation = loaded["lib/mutation.js"];
@@ -176,15 +183,19 @@ function assembleCore(loaded, { isDraftMode, isEditMode, isOwner, siteVisibility
   Object.assign(clay, {
     toggleEditMode: editModeMod.toggleEditMode,
     setMode: editModeMod.setMode,
+    modeLifecycle: editModeMod.modeLifecycle,
     isDraftMode,
-    isEditMode,
-    canEdit,
-    mode,
     isOwner,
     siteVisibility,
     Mutation: mutation.default,
     region: regionPolicy.windowRegionShape,
   });
+
+  // Getters over the live mode facts, never copies: the lifecycle commits a new mode
+  // and these read it back, so `clay.mode` stays a string that cannot go stale.
+  for (const key of ["mode", "isEditMode", "canEdit"]) {
+    Object.defineProperty(clay, key, { get: () => editModeMod[key], enumerable: true, configurable: true });
+  }
 
   clay.assets = assets;
 
