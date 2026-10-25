@@ -76,7 +76,8 @@ test("each chart setting makes one transaction", () => {
 
 test("table changes paint once per frame and the editor SVG matches the saved projection", () => {
   const view = editor([], { blocks: { tbl: table, ch: chart } });
-  expect(paint()).toBe(1);
+  paint();
+  expect(frames).toHaveLength(0);
   const before = view.dom.querySelector(".page-chart svg").outerHTML;
   const at = posOf(view, "tbl") + 3;
   view.dispatch(view.state.tr.insertText("!", at));

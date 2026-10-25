@@ -18,7 +18,7 @@ import { markdownPlugin, markdownKeys, backspaceToParagraph } from "./markdown.j
 import { placeholderPlugin } from "./placeholder.js";
 import { mediaPlugin, ImageView, FileView } from "./media.js";
 import { highlightPlugin, CodeBlockView } from "./highlight.js";
-import { tableKeys, tablePlugin, TableView, TableCellView } from "./table.js";
+import { tableKeys, tablePlugin } from "./table.js";
 import { tableSelectPlugin } from "./table-select.js";
 import { chartPlugin, ChartView } from "./chart.js";
 import { BoardView } from "./board-view.js";
@@ -27,10 +27,11 @@ import { ToolView } from "./tool-view.js";
 import { createToolHost } from "./tools.js";
 import { checklistPlugin, checklistKeys } from "./checklist.js";
 import { csvImportPlugin } from "./csv-import.js";
-import { TABLE_CSS } from "./table-style.js";
 import { BOARD_CSS } from "./board-style.js";
 import { styleWithLegacyId } from "../lib/style.js";
 import { historyIntentPlugin } from "./history-intent.js";
+import { createFeatureLoader } from "./feature-loader.js";
+import { FEATURES, featureForType } from "./features/registry.js";
 
 const STYLE_ID = "page-editor-style";
 const INDENTS = [1, 2, 3, 4, 5, 6, 7, 8];
@@ -226,7 +227,6 @@ ${INDENTS.map((n) => `:where(article[data-page], .page-editor) .page-li[data-ind
 .page-check-popup.page-check-owner { display: inline-block; width: min(280px, 80vw); padding: 8px 0; vertical-align: top; }
 .page-scrim { display: none; }
 .page-shell [hidden] { display: none !important; }
-${TABLE_CSS}
 ${BOARD_CSS}
 @media (max-width: 560px) {
   .page-dock { display: none; }
@@ -272,7 +272,48 @@ const markKeys = {
 
 const defaultUpload = (file, options) => globalThis.clay?.upload?.(file, options) ?? Promise.resolve({ ok: false, code: "unavailable", msg: "File uploads are not available in this editor" });
 
-export function pagePlugins({ upload = defaultUpload, highlight, history: useHistory = true, undo, redo, onAiTool = null, toolHost = null } = {}) {
+// Adds a view part to a running editor: its CSS and its node views, through
+// setProps, which never recreates plugin views or reorders keymaps.
+export function installPageFeature({ view, upload, toolHost }, id, mod) {
+  const feature = mod.createFeature({ view, upload, toolHost });
+  const apply = () => {
+    if (feature.css) styleWithLegacyId(`page-feature-${id}`, feature.css, `page-feature-${id}`, ["editor-ui"]);
+    if (feature.nodeViews) view.setProps({ nodeViews: { ...view.props.nodeViews, ...feature.nodeViews } });
+  };
+  if (view.composing) view.dom.addEventListener("compositionend", apply, { once: true });
+  else apply();
+  return feature;
+}
+
+// Loads the view part for a block type the editor shows but has no view for:
+// the blocks that were there at boot, and any that arrive later.
+function featureWatchPlugin(features) {
+  return new state.Plugin({
+    view(editorView) {
+      const walk = () => {
+        let missing = false;
+        editorView.state.doc.forEach((node) => {
+          const id = featureForType(node.type.name);
+          if (!id || features.has(id)) return;
+          missing = true;
+          features.ensure(id).catch(() => {});
+        });
+        return missing;
+      };
+      let doc = editorView.state.doc;
+      let missing = walk();
+      return {
+        update() {
+          if (!missing && editorView.state.doc === doc) return;
+          doc = editorView.state.doc;
+          missing = walk();
+        },
+      };
+    },
+  });
+}
+
+export function pagePlugins({ upload = defaultUpload, highlight, history: useHistory = true, undo, redo, onAiTool = null, toolHost = null, features = null } = {}) {
   return [
     announcementPlugin(),
     chromePlugin({ onAiTool }),
@@ -308,6 +349,7 @@ export function pagePlugins({ upload = defaultUpload, highlight, history: useHis
     historyIntentPlugin(),
     useHistory ? history.history() : null,
     gapcursor.gapCursor(),
+    features ? featureWatchPlugin(features) : null,
   ].filter(Boolean);
 }
 
@@ -337,7 +379,7 @@ function checkboxClick(view, event) {
 // Mounts the editor in `mount`, inside a .page-shell wrapper (the surface a
 // theme styles). `onChange(record)` gets the block record (blockMap) after
 // every transaction that changed the document.
-export function createPageEditor(mount, { blocks = null, onChange = null, upload, highlight, doc: initialDoc, dispatch, history: useHistory = true, undo, redo, editable = true, toolHost: providedToolHost = null, onAiTool = null, reviseTool = null, board = null } = {}) {
+export function createPageEditor(mount, { blocks = null, onChange = null, upload, highlight, doc: initialDoc, dispatch, history: useHistory = true, undo, redo, editable = true, toolHost: providedToolHost = null, onAiTool = null, reviseTool = null, board = null, features: providedFeatures = null } = {}) {
   const doc = mount.ownerDocument;
   const toolHost = providedToolHost ?? createToolHost({ mode: "edit" });
   // Editor chrome, injected on every edit-mode boot and kept out of the saved file:
@@ -349,18 +391,21 @@ export function createPageEditor(mount, { blocks = null, onChange = null, upload
   shell.setAttribute("sap-ignore", "");
   mount.appendChild(shell);
   let afterStep = false;
-  const view = new pmView.EditorView(shell, {
-    state: pageState(blocks, { upload, highlight, doc: initialDoc, history: useHistory, undo, redo, onAiTool, toolHost }),
+  let view = null;
+  const features = providedFeatures ?? createFeatureLoader({
+    load: (id) => FEATURES[id].load(),
+    install: (id, mod) => installPageFeature({ view, upload, toolHost }, id, mod),
+  });
+  view = new pmView.EditorView(shell, {
+    state: pageState(blocks, { upload, highlight, doc: initialDoc, history: useHistory, undo, redo, onAiTool, toolHost, features }),
     attributes: { class: "page-editor" },
     editable: () => editable,
     nodeViews: {
       image: (node, v, getPos) => new ImageView(node, v, getPos),
       file: (node, v) => new FileView(node, v),
       code_block: (node, v, getPos) => new CodeBlockView(node, v, getPos),
-      table: (node, v, getPos) => new TableView(node, v, getPos),
       chart: (node, v, getPos) => new ChartView(node, v, getPos),
       tool: (node, v, getPos) => new ToolView(node, v, getPos, { host: toolHost, revise: reviseTool }),
-      table_cell: (node, v, getPos) => new TableCellView(node, v, getPos),
       ...(board ? { board: (node, v, getPos) => new BoardView(node, v, getPos, { commands: board, undo, redo, panel: cardPanel(v) }) } : {}),
     },
     handleDOMEvents: {
@@ -384,5 +429,7 @@ export function createPageEditor(mount, { blocks = null, onChange = null, upload
       if (onChange && view.state.doc !== before) onChange(blockMap(view.state.doc));
     },
   });
+  const destroy = view.destroy.bind(view);
+  view.destroy = () => { features.dispose(); destroy(); };
   return view;
 }

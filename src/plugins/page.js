@@ -1,4 +1,6 @@
-import { createPageEditor } from "../page/editor.js";
+import { createPageEditor, installPageFeature } from "../page/editor.js";
+import { createFeatureLoader } from "../page/feature-loader.js";
+import { FEATURES, featureForType } from "../page/features/registry.js";
 import { readFile, installAdoption } from "../page/adopt-boot.js";
 import { classifyFile } from "../page/adopt.js";
 import { renderFromTags } from "../page/save-projection.js";
@@ -427,6 +429,10 @@ async function run(inst, gen, options = {}) {
     inst.aiTool = createAiTool({ getView: () => inst.view, store: toolsStore, transport, acceptState: options.acceptState });
   }
   article.innerHTML = "";
+  const features = createFeatureLoader({
+    load: (id) => FEATURES[id].load(),
+    install: (id, mod) => installPageFeature({ view: editorView, upload: options.upload, toolHost }, id, mod),
+  });
   const view = createPageEditor(article, {
     doc: binding.doc(),
     dispatch: binding.dispatch,
@@ -436,6 +442,7 @@ async function run(inst, gen, options = {}) {
     board: binding.board,
     editable: false,
     toolHost,
+    features,
     onAiTool: inst.aiTool ? (_view, remove) => inst.aiTool.open({ remove }) : null,
     reviseTool: inst.aiTool ? (toolId, rev) => inst.aiTool.open({ target: { toolId, rev } }) : null,
   });
@@ -443,6 +450,22 @@ async function run(inst, gen, options = {}) {
   inst.view = view;
   binding.attach(view);
   scrollToHashBlock(view);
+  // The blocks the document already has get their controls during the room join,
+  // so a person never sees a placeholder for blocks that were there at boot.
+  const present = [];
+  binding.doc().forEach((node) => present.push(node.type.name));
+  const featureIds = [...new Set(present.map(featureForType).filter(Boolean))];
+  const noticed = new Set();
+  const featuresReady = Promise.allSettled(featureIds.map((id) => features.ensure(id))).then((results) => {
+    results.forEach((result, i) => {
+      const id = featureIds[i];
+      if (result.status !== "rejected" || noticed.has(id)) return;
+      noticed.add(id);
+      toastPersistent(`The ${id} controls could not load. Reload the page after saving.`, "warning", {
+        actions: [{ label: "Retry", onClick: () => features.ensure(id).catch(() => {}) }],
+      });
+    });
+  });
   inst.recover = createRecoverList({
     binding,
     mount: view.dom.closest(".page-shell") ?? article,
@@ -505,6 +528,8 @@ async function run(inst, gen, options = {}) {
     stopEditing(inst);
     return;
   }
+  await featuresReady;
+  if (gen !== generation) return;
   view.setProps({ editable: () => true });
 
   // That initial write advanced the saved baselines from a capture taken before
