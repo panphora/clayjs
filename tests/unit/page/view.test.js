@@ -87,10 +87,24 @@ test("the reader code stays small and loads no ProseMirror", async () => {
     splitting: true, outdir: "/reader-out",
     external: ["*hyper-morph.vendor.js"],
   });
-  const [entryPath, entry] = Object.entries(result.metafile.outputs).find(([, output]) => output.entryPoint);
-  const inputs = Object.keys(entry.inputs);
+  // Splitting can move the reader's code out of the entry chunk into a shared one, so
+  // the check covers every chunk the entry imports statically.
+  const outputs = result.metafile.outputs;
+  // Every dynamic import is an entry point too, so the reader is found by its source.
+  const [entryPath] = Object.entries(outputs).find(([, output]) => output.entryPoint?.endsWith("src/page/view.js"));
+  const closure = new Set();
+  const walk = (chunk) => {
+    if (closure.has(chunk)) return;
+    closure.add(chunk);
+    for (const dep of outputs[chunk]?.imports ?? []) if (dep.kind === "import-statement") walk(dep.path);
+  };
+  walk(entryPath);
+  const inputs = [...closure].flatMap((chunk) => Object.keys(outputs[chunk]?.inputs ?? {}));
   expect(inputs.length).toBeGreaterThan(0);
   expect(inputs.some((p) => /prosemirror|page\/(schema|model|inline|blocks|editor|binding|replay|projection)\.js/.test(p))).toBe(false);
-  const file = result.outputFiles.find((output) => output.path.endsWith(entryPath.replace(/^.*\//, "/")));
-  expect(gzipSync(file.contents).length).toBeLessThanOrEqual(15 * 1024);
+  const bytes = [...closure].reduce((sum, chunk) => {
+    const file = result.outputFiles.find((output) => output.path.endsWith(chunk.replace(/^.*\//, "/")));
+    return sum + (file ? gzipSync(file.contents).length : 0);
+  }, 0);
+  expect(bytes).toBeLessThanOrEqual(15 * 1024);
 });
