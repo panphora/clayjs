@@ -268,6 +268,39 @@ test("the notice loads the replace module only through the upgrade runner", asyn
   const runnerGraph = walk(await inputsFor([runner]), [runner]);
   expect(runnerGraph.has("src/core/save-replace.js")).toBe(true);
 });
+// The upgrade check reads the file's `hyper-version` and the published one and compares
+// them; the rules engine that moves a document's data into a new version is a different,
+// larger module, and only the click that runs an upgrade needs it. A page whose owner is
+// offered no upgrade carries the comparison, not the engine: the click lands on
+// `clay:upgrade-requested`, which is where the runner that carries the engine is fetched.
+const UPGRADE_ENGINE = "src/vendor/hyper-html-api-upgrade.vendor.js";
+
+test("kanban view: the upgrade check is in the reader graph and the engine is not", async () => {
+  const html = readFileSync(new URL("../../../tests/fixtures/load/kanban.html", import.meta.url), "utf8");
+  const params = new URL(html.match(/<script[^>]+src="([^"]*clay\.js[^"]+)"/)[1]).searchParams;
+  // The meter counts a template copy for its owner, which is the page that carries the
+  // check: `resolveModules` adds plugins/upgrade.js for exactly this combination.
+  const templateSource = html.match(/<meta name="hyper-source" content="([^"]+)"/)?.[1] ?? null;
+  const plan = resolveModules(params, false, { isDraftMode: false, hasSap: FIXTURES.kanban.hasSap, canEdit: true, templateSource });
+  const entries = [...plan.core, ...plan.plugins].map((path) => `src/${path}`);
+  const inputs = await inputsFor(entries);
+  const graph = walk(inputs, entries);
+
+  expect(entries).toContain("src/plugins/upgrade.js");
+  expect(graph.size).toBeGreaterThanOrEqual(40);
+  expect(graph.has("src/plugins/upgrade.js")).toBe(true);
+  expect(graph.has("src/core/version.js")).toBe(true);
+  expect(graph.has(UPGRADE_ENGINE)).toBe(false);
+
+  // Built, so the engine exists for the click that runs an upgrade to fetch...
+  expect(Object.keys(inputs)).toContain(UPGRADE_ENGINE);
+  expect(dynamicDeps(inputs, "src/plugins/upgrade.js")).toContain("src/plugins/upgrade-run.js");
+  // ...and the runner is what carries it, statically, once that fetch lands.
+  const runner = "src/plugins/upgrade-run.js";
+  const runnerGraph = walk(inputs, [runner]);
+  expect(runnerGraph.has(UPGRADE_ENGINE)).toBe(true);
+});
+
 // The recovery store is a dynamic import from core/recovery.js, and core/recovery.js
 // is edit-only. So a reader never downloads the database code and never opens one,
 // and a visitor's draft — which does carry the edit-only facade, because a draft is

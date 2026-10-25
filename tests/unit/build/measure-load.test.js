@@ -139,14 +139,21 @@ test("a third-party script counts against the JavaScript line and is named", asy
 });
 
 // The owner of a copy made from a starter template loads the upgrade check before ready:
-// its own plugin and the vendor it imports. A reader of a plain Document loads neither.
-test("the owner's shipped copy counts the upgrade plugin and its vendor, a Document counts neither", async () => {
+// its own plugin and the version comparison it imports. The rules engine that upgrades a
+// document is the click's, not the check's, so it is a lazy fetch here. A reader of a
+// plain Document loads none of it.
+test("the owner's shipped copy counts the upgrade check but not its vendor, a Document counts neither", async () => {
   const shipped = await measure({ html: fixture("kanban.html"), mode: "view" });
   const plain = await measure({ html: fixture("document.html"), mode: "view" });
+  const engine = "src/vendor/hyper-html-api-upgrade.vendor.js";
 
   expect(shipped.plugins).toContain("plugins/upgrade.js");
   expect(paths(shipped)).toContain("src/plugins/upgrade.js");
-  expect(paths(shipped)).toContain("src/vendor/hyper-html-api-upgrade.vendor.js");
+  expect(paths(shipped)).toContain("src/core/version.js");
+  expect(paths(shipped)).not.toContain(engine);
+  // The runner the click fetches is what carries the engine, so it stays reachable.
+  expect(shipped.lazy).toContain("src/plugins/upgrade-run.js");
+  expect(shipped.lazy).not.toContain(engine);
   expect(plain.plugins).not.toContain("plugins/upgrade.js");
   expect(paths(plain)).not.toContain("src/plugins/upgrade.js");
 });

@@ -283,3 +283,37 @@ describe("the offer", () => {
     expect((await findUpdate({ fetchFn: later, now: now + TTL_MS + 1 })).version).toBe("1.2.0");
   });
 });
+
+// The check's version comparison is its own module now, so that a page which is offered
+// no upgrade never downloads the rules engine that upgrades a document. It has to answer
+// exactly what the engine's comparison answers, or a page would be offered the wrong
+// version (or none); the offer path itself is the one the tests above walk.
+describe("the version check, without the rules engine", () => {
+  test("isNewerVersion answers what the engine's comparison answers", async () => {
+    const local = await import("../../src/core/version.js");
+    const engine = await import("../../src/vendor/hyper-html-api-upgrade.vendor.js");
+    const cases = [
+      ["1.1.0", "1.0.0"], ["1.0.0", "1.1.0"], ["1.1.0", "1.1.0"], ["1.0.9", "1.1.0"],
+      ["2", "1.9.9"], ["1.0", "1.0.0"], ["1.0.1", "1.0"], ["v1.2.0", "1.1.9"],
+      [" 1.1.0 ", "1.0.0"], ["1.10.0", "1.9.9"], ["", "1.0.0"], ["1.0.0", ""],
+      ["latest", "1.0.0"], ["1.0.0", "latest"], ["1..0", "1.0.0"], ["1.0.0-beta", "1.0.0"],
+    ];
+    for (const [candidate, current] of cases) {
+      expect([candidate, current, local.isNewerVersion(candidate, current)])
+        .toEqual([candidate, current, engine.isNewerVersion(candidate, current)]);
+    }
+  });
+
+  test("an upgrade is still offered, and none for an equal version", async () => {
+    // The dismissed version lives in the document's own storage, which outlives
+    // `localStorage.clear()` in this realm.
+    storage.local.remove("upgrade-dismissed");
+    page();
+    const addItem = jest.fn();
+    window.clay.menu = { addItem };
+    expect((await findUpdate({ fetchFn: fetcher() }))?.version).toBe("1.1.0");
+
+    page({ version: "1.1.0" });
+    expect(await findUpdate({ fetchFn: fetcher() })).toBeNull();
+  });
+});
