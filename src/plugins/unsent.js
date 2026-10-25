@@ -28,12 +28,12 @@ function persist() {
   document.dispatchEvent(new CustomEvent("clay:unsent-changed", { detail: { count: drafts.size } }));
 }
 
-document.addEventListener("beforeinput", (e) => {
+function onBeforeInput(e) {
   const el = e.target.closest?.("[unsent]");
   if (el && !bases.has(el)) bases.set(el, el.value);
-}, true);
+}
 
-document.addEventListener("input", (e) => {
+function onInput(e) {
   const el = e.target.closest?.("[unsent]");
   const key = el && keyOf(el);
   if (!key) return;
@@ -45,7 +45,7 @@ document.addEventListener("input", (e) => {
     drafts.set(key, { base, text: el.value });
   }
   persist();
-}, true);
+}
 
 function restore(el) {
   const key = keyOf(el);
@@ -60,14 +60,62 @@ function restore(el) {
   }));
 }
 
-new MutationObserver((records) => {
+const observer = new MutationObserver((records) => {
   for (const record of records) for (const node of record.addedNodes) {
     if (node.nodeType !== 1) continue;
     if (node.matches("[unsent]")) restore(node);
     for (const el of node.querySelectorAll("[unsent]")) restore(el);
   }
-}).observe(document.body, { childList: true, subtree: true });
-for (const el of document.querySelectorAll("[unsent]")) restore(el);
+});
+
+function restoreAll() {
+  for (const el of document.querySelectorAll("[unsent]")) restore(el);
+}
+
+// The listeners and the observer belong to the page, not to an edit session: a reader
+// repaint while the page is in view has to bring the drafts back too. Installing twice
+// adds nothing, which is what keeps a second entry from recording one keystroke twice.
+let installed = false;
+
+function install() {
+  if (installed) return;
+  installed = true;
+  document.addEventListener("beforeinput", onBeforeInput, true);
+  document.addEventListener("input", onInput, true);
+  observer.observe(document.body, { childList: true, subtree: true });
+}
+
+install();
+restoreAll();
+
+/**
+ * Unsent drafts as a mode participant.
+ *
+ * Nothing here is the session's to lose: a draft is a revision of one control (its base
+ * and its text, per record and name) that the page's bytes cannot show, and the restore
+ * that brings it back runs in view as well. So `enable` installs and restores, and
+ * `quiesce`, `resume` and `dispose` leave every draft, its base and the pending check
+ * exactly where they are — an exit that teardown could acknowledge would report a view
+ * while a person's half-written text still waits outside the file.
+ */
+export function unsentParticipant() {
+  return {
+    id: "clay:unsent",
+    order: 320,
+    prepare() {
+      install();
+      return {
+        enable() {
+          install();
+          restoreAll();
+        },
+        quiesce() {},
+        resume() {},
+        dispose() {},
+      };
+    },
+  };
+}
 
 export const unsent = {
   get size() { return drafts.size; },

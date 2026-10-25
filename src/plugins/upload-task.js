@@ -29,6 +29,7 @@
 
 import { hostMeta, hostMetaOutcome } from "../core/host-meta.js";
 import { saveToken } from "../core/host-attrs.js";
+import { registerUnsavedState } from "../lib/unsaved-state.js";
 
 const UPLOAD_PATH = "/_/upload";
 const UPLOAD_TIMEOUT_MS = 120000;
@@ -68,6 +69,34 @@ export function canRetry(snapshot) {
   if (snapshot.state !== "failed") return false;
   return RETRYABLE_CODES.has(snapshot.result?.code ?? null);
 }
+
+// The tasks this page has started and nobody has disposed. An upload outlives the edit
+// session that started it: the selected file and a stored URL are the person's work, and
+// a teardown that cancelled the request or forgot the result would throw away bytes nobody
+// has inserted yet. Only an upload still on the wire counts as pending work — its fate is
+// unknown, so it is asked to finish before an exit may call the page clean. A result the
+// host already accepted is not pending: inserting it is the caller's next move, not a
+// write anyone is waiting on.
+const tasks = new Set();
+
+const uploading = () => [...tasks].some((task) => task.state === "uploading");
+
+async function flushUploads() {
+  const inFlight = [...tasks].filter((task) => task.state === "uploading").map((task) => task.result);
+  if (!inFlight.length) return { ok: true };
+  await Promise.allSettled(inFlight);
+  return { ok: !uploading() };
+}
+
+const pending = registerUnsavedState({ id: "upload", isPending: uploading, flush: flushUploads });
+
+// New attempts are admitted while no edit session is leaving. The exit closes admission
+// before its barrier, so an upload started after that would be bytes nobody waits for.
+// With no session running (a page that never uses the lifecycle) admission is open, which
+// is what every caller of this module has always had.
+let session = null;
+
+const admitsAttempts = () => session?.admitted !== false;
 
 let taskCount = 0;
 
@@ -126,6 +155,9 @@ export async function runUpload(file, { onProgress, signal, requiredAccess, task
 
   if (!file) return result(false, "No file to upload", "error", "bad-request");
 
+  const cancelled = () => result(false, "Upload cancelled", "error", "aborted");
+  if (!admitsAttempts()) return cancelled();
+
   // A retry asks again rather than reading the memoized answer: the host that was
   // unreachable (or briefly refused) is exactly the thing a second attempt is for.
   let meta;
@@ -134,7 +166,6 @@ export async function runUpload(file, { onProgress, signal, requiredAccess, task
   } catch (_) {
     meta = { extensions: [], document: null };
   }
-  const cancelled = () => result(false, "Upload cancelled", "error", "aborted");
   if (signal?.aborted) return cancelled();
   // A host that should have answered and did not has not said this document cannot
   // upload. It is a network failure, and asking again may well be answered.
@@ -428,10 +459,12 @@ export function start(file, options = {}) {
         state = value.ok ? "succeeded" : value.code === "aborted" ? "cancelled" : "failed";
         publish();
       }
+      pending.changed();
       return value;
     });
 
     publish();
+    pending.changed();
     return current;
   }
 
@@ -462,6 +495,7 @@ export function start(file, options = {}) {
         state = "cancelled";
         outcome = result(false, "Upload cancelled", "error", "aborted");
         publish();
+        pending.changed();
       }
       controller?.abort();
     },
@@ -470,7 +504,9 @@ export function start(file, options = {}) {
       // press share the attempt already running instead of sending the file twice.
       // The same table the Retry button obeys, so the button never offers a retry the
       // task would refuse.
-      if (disposed || !canRetry(readSnapshot())) return current;
+      // A closed session is not a reason to spend the recovery: the task keeps its ending
+      // and its file, and a retry after the next entry asks again.
+      if (disposed || !admitsAttempts() || !canRetry(readSnapshot())) return current;
       return runAttempt();
     },
     dispose() {
@@ -479,11 +515,48 @@ export function start(file, options = {}) {
       controller?.abort();
       listeners.clear();
       held = null;
+      tasks.delete(task);
+      pending.changed();
     }
   };
 
+  tasks.add(task);
   runAttempt();
   return task;
+}
+
+/**
+ * Uploads as a mode participant.
+ *
+ * `prepare` takes the session's admission; `enable` opens it, `quiesce` closes it before
+ * the exit barrier and `resume` reopens it for a refused exit. `dispose` closes it for a
+ * session that has ended and takes nothing else: the tasks started under it keep their
+ * selected files, their stored results and their own endings, because those belong to the
+ * callers that asked for them, not to the mode that was running.
+ */
+export function uploadParticipant() {
+  return {
+    id: "clay:upload",
+    order: 340,
+    prepare() {
+      const lease = { admitted: true };
+      session = lease;
+      return {
+        enable() {
+          if (session === lease) lease.admitted = true;
+        },
+        quiesce() {
+          if (session === lease) lease.admitted = false;
+        },
+        resume() {
+          if (session === lease) lease.admitted = true;
+        },
+        dispose() {
+          if (session === lease) lease.admitted = false;
+        },
+      };
+    },
+  };
 }
 
 const STATUS_CODES = {
