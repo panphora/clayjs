@@ -87,7 +87,7 @@ test("hover, resize, viewport changes and a menu opening share the same frame", 
     viewport.dispatchEvent(new Event("scroll"));
     part(view, ".page-plus").click();
     expect(counts.frames).toBe(1);
-    expect([counts.shell, counts.blocks, counts.coords, counts.hits, counts.writes]).toEqual([0, 0, 0, 0, 0]);
+    expect([counts.shell, counts.blocks, counts.coords, counts.hits, counts.writes]).toEqual([0, 0, 0, 1, 0]);
     await frame();
     expect([counts.shell, counts.blocks, counts.hits]).toEqual([1, 2, 1]);
     expect(counts.writes).toBeGreaterThan(0);

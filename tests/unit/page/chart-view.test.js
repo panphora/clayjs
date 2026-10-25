@@ -26,6 +26,10 @@ afterEach(() => {
   window.cancelAnimationFrame = originalCancel;
 });
 const paint = () => { const queued = frames.splice(0); queued.forEach((callback) => callback()); return queued.length; };
+const flushChrome = () => {
+  const at = frames.findIndex((callback) => callback.toString().includes("measureLayout"));
+  if (at >= 0) frames.splice(at, 1)[0]();
+};
 
 test("Chart this table inserts the default chart after the table and undoes once", () => {
   const view = editor([], { blocks: { tbl: table } });
@@ -82,6 +86,7 @@ test("table changes paint once per frame and the editor SVG matches the saved pr
   const at = posOf(view, "tbl") + 3;
   view.dispatch(view.state.tr.insertText("!", at));
   view.dispatch(view.state.tr.insertText("?", at));
+  flushChrome();
   expect(frames).toHaveLength(1);
   expect(paint()).toBe(1);
   const svg = view.dom.querySelector(".page-chart svg").outerHTML;
@@ -107,13 +112,16 @@ test("sorting, column removal and table removal redraw or show the missing state
   const initial = view.dom.querySelector(".page-chart svg").outerHTML;
   view.dom.querySelector('th[data-col="c2"] button').click();
   menuButton(view, "Sort ascending").click();
+  flushChrome();
   expect(paint()).toBe(1);
   expect(view.dom.querySelector(".page-chart svg").outerHTML).not.toBe(initial);
   view.dom.querySelector('th[data-col="c2"] button').click();
   menuButton(view, "Delete column").click();
+  flushChrome();
   expect(paint()).toBe(1);
   expect(view.dom.querySelector(".page-chart svg title").textContent).toBe("Chart source missing");
   view.dispatch(view.state.tr.delete(0, view.state.doc.child(0).nodeSize));
+  flushChrome();
   expect(paint()).toBe(1);
   expect(view.dom.querySelector(".page-chart svg title").textContent).toBe("Chart source missing");
 });

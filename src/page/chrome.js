@@ -343,6 +343,7 @@ class Chrome {
 
   gutterIndex() {
     if (this.view.dom.ownerDocument.defaultView.matchMedia?.("(max-width: 560px)").matches) return this.blockIndex();
+    this.settleHover();
     return Math.min(this.hover ?? this.blockIndex(), this.view.state.doc.childCount - 1);
   }
 
@@ -395,6 +396,13 @@ class Chrome {
     if (i === this.hover) return;
     this.hover = i;
     this.scheduleLayout();
+  }
+
+  settleHover() {
+    if (!this.pendingHover) return;
+    const { clientY } = this.pendingHover;
+    this.pendingHover = null;
+    this.hoverAt(clientY);
   }
 
   fromPlus() {
@@ -597,11 +605,7 @@ class Chrome {
   measureLayout() {
     const view = this.view;
     const st = view.state;
-    if (this.pendingHover) {
-      const { clientY } = this.pendingHover;
-      this.pendingHover = null;
-      this.hoverAt(clientY);
-    }
+    this.settleHover();
     const shellBox = this.shell.getBoundingClientRect();
     const edBox = view.dom.getBoundingClientRect();
     const i = this.gutterIndex();
