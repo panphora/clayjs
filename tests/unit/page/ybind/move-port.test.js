@@ -5,7 +5,7 @@ import { identityPlugin } from "../../../../src/page/model.js";
 import { state as pmState, view as pmView } from "../../../../src/vendor/prosemirror.vendor.js";
 import { createPageDoc, createBridge, keepViewPos, seedFrom, docOf, walk, authorKey, parseGoneIntents } from "../../../../src/page/ybind/index.js";
 import { NET } from "../../../../src/page/ybind/layout.js";
-import { moveBlock, outdentBlocks, outline, MOVE } from "../../../../src/page/blocks.js";
+import { moveBlock, indentBlocks, outdentBlocks, outline, MOVE } from "../../../../src/page/blocks.js";
 import { moveSpanTo } from "../../../../src/page/drop.js";
 
 const page = (blocks, client = 300) => {
@@ -76,7 +76,7 @@ test("Move down is a delete-and-copy move, keeps the caret, and undoes in one st
   expect(blocks(a)).toEqual([["p", "ALPHA"], ["r", "OMEGA"], ["q", "bravo"]]);
   expect(removals(a)).toBe(1);
   expect(copies(a)).toBe(1);
-  expect(a.stats.moveFallbacks).toBeUndefined();
+  expect(a.stats.moveRefusals).toBeUndefined();
   expect(caret(a)).toEqual({ id: "q", offset: 2 });
   settled(a);
   expect(a.bridge.undo()).toBe(true);
@@ -135,7 +135,7 @@ test("Shift-Tab on a toggle's first child moves it below the toggle through the 
   expect(field(a, "parent")).toEqual([["t", null], ["c2", "t"], ["c1", null], ["r", null]]);
   expect(removals(a)).toBe(1);
   expect(copies(a)).toBe(1);
-  expect(a.stats.moveFallbacks).toBeUndefined();
+  expect(a.stats.moveRefusals).toBeUndefined();
   settled(a);
 });
 
@@ -176,11 +176,154 @@ test("a drop into a closed toggle opens it in the same undo step", () => {
   settled(a);
 });
 
-test("a move the binding refuses falls back to the editor transaction", () => {
+// A refused move must leave every observable alone, so the fixture changes the
+// document's text in the same transaction: a fallback that applied it would turn
+// ALPHA into ALPHA!.
+const stateOf = (tab) => {
+  const { state } = tab.view;
+  return {
+    pm: JSON.stringify(state.doc.toJSON()),
+    yjs: Buffer.from(Y.encodeStateAsUpdateV2(tab.pd.ydoc)).toString("base64"),
+    projected: JSON.stringify(projected(tab)),
+    history: [tab.bridge.um.undoStack.length, tab.bridge.um.redoStack.length],
+    recovery: JSON.stringify(tab.bridge.recoverable),
+    selection: JSON.stringify([state.selection.constructor.name, state.selection.anchor, state.selection.head]),
+  };
+};
+
+const attempt = (tab, move) => {
+  const before = stateOf(tab);
+  let writes = 0;
+  const count = () => { writes++; };
+  tab.pd.ydoc.on("afterTransaction", count);
+  try {
+    tab.view.dispatch(tab.view.state.tr.insertText("!", 6).setMeta(MOVE, move));
+  } finally {
+    tab.pd.ydoc.off("afterTransaction", count);
+  }
+  return { before, after: stateOf(tab), writes };
+};
+
+const REFUSALS = [
+  ["a missing source", { ids: ["nope"], afterId: null, parent: null }],
+  ["a missing destination", { ids: ["q"], afterId: "nope", parent: null }],
+  ["an invalid parent", { ids: ["q"], afterId: null, parent: "p" }],
+  ["a cycle", { ids: ["q"], afterId: "q", parent: null }],
+  ["invalid attrs", { ids: ["q"], afterId: "r", attrs: { q: { indent: 2 } } }],
+];
+
+test.each(REFUSALS)("a move refused for %s consumes its transaction whole", (_label, move) => {
   const a = open(page(PQR));
-  a.view.dispatch(a.view.state.tr.setMeta(MOVE, { ids: ["nope"], afterId: null, parent: null }));
-  expect(a.stats.moveFallbacks).toBe(1);
+  caretIn(a, "p", 5);
+  const { before, after, writes } = attempt(a, move);
+
+  expect(after).toEqual(before);
+  expect(writes).toBe(0);
   expect(blocks(a)).toEqual([["p", "ALPHA"], ["q", "bravo"], ["r", "OMEGA"]]);
+  expect(a.stats.moveRefusals).toBe(1);
+  settled(a);
+});
+
+test("a no-op move is consumed too, and is not counted as a refusal", () => {
+  const a = open(page(PQR));
+  caretIn(a, "p", 5);
+  const { before, after, writes } = attempt(a, { ids: ["q"], afterId: "p", parent: null });
+
+  expect(after).toEqual(before);
+  expect(writes).toBe(0);
+  expect(blocks(a)).toEqual([["p", "ALPHA"], ["q", "bravo"], ["r", "OMEGA"]]);
+  expect(a.stats.moveRefusals).toBeUndefined();
+  settled(a);
+});
+
+test("a stale gesture against a block a peer removed refuses without a fallback", () => {
+  const a = open(page(PQR));
+  const b = open(clone(a.pd, 200));
+  b.pd.origins.set(authorKey(200), "B");
+  let at = null;
+  b.view.state.doc.forEach((node, pos) => { if (node.attrs.id === "r") at = pos; });
+  b.view.dispatch(b.view.state.tr.delete(at, at + b.view.state.doc.nodeAt(at).nodeSize));
+  merge(a.pd, b.pd);
+  settled(a);
+  expect(blocks(a).map(([id]) => id)).toEqual(["p", "q"]);
+
+  const { before, after, writes } = attempt(a, { ids: ["r"], afterId: "p", parent: null });
+  expect(after).toEqual(before);
+  expect(writes).toBe(0);
+  expect(a.stats.moveRefusals).toBe(1);
+  settled(a);
+});
+
+test("Tab on a list item writes its indent through the port, in place and in one undo step", () => {
+  const a = open(page([
+    { id: "l1", t: "list_item", text: "one" },
+    { id: "l2", t: "list_item", text: "two" },
+    { id: "l3", t: "list_item", text: "three" },
+  ]));
+  caretIn(a, "l2", 1);
+  indentBlocks(a.view.state, a.view.dispatch);
+  expect(field(a, "indent")).toEqual([["l1", 0], ["l2", 1], ["l3", 0]]);
+  expect(blocks(a).map(([id]) => id)).toEqual(["l1", "l2", "l3"]);
+  expect(removals(a)).toBe(0);
+  expect(copies(a)).toBe(0);
+  expect(a.stats.moveRefusals).toBeUndefined();
+  settled(a);
+  expect(a.bridge.um.undoStack.length).toBe(1);
+  expect(a.bridge.undo()).toBe(true);
+  expect(field(a, "indent")).toEqual([["l1", 0], ["l2", 0], ["l3", 0]]);
+  settled(a);
+});
+
+test("Tab after a closed toggle adopts the block and opens the toggle in one undo step", () => {
+  const a = open(page([
+    { id: "t", t: "toggle", text: "Group", attrs: { open: false } },
+    { id: "c1", text: "one", attrs: { parent: "t" } },
+    { id: "z", text: "Z" },
+  ]));
+  caretIn(a, "z", 1);
+  indentBlocks(a.view.state, a.view.dispatch);
+  expect(field(a, "parent")).toEqual([["t", null], ["c1", "t"], ["z", "t"]]);
+  expect(field(a, "open")[0]).toEqual(["t", true]);
+  expect(blocks(a).map(([id]) => id)).toEqual(["t", "c1", "z"]);
+  expect(a.stats.moveRefusals).toBeUndefined();
+  settled(a);
+  expect(a.bridge.um.undoStack.length).toBe(1);
+  expect(a.bridge.undo()).toBe(true);
+  expect(field(a, "parent")).toEqual([["t", null], ["c1", "t"], ["z", null]]);
+  settled(a);
+});
+
+test("Shift-Tab on a list item lowers its indent through the port, in place and in one undo step", () => {
+  const a = open(page([
+    { id: "l1", t: "list_item", text: "one" },
+    { id: "l2", t: "list_item", text: "two", attrs: { indent: 1 } },
+    { id: "l3", t: "list_item", text: "three" },
+  ]));
+  caretIn(a, "l2", 1);
+  outdentBlocks(a.view.state, a.view.dispatch);
+  expect(field(a, "indent")).toEqual([["l1", 0], ["l2", 0], ["l3", 0]]);
+  expect(blocks(a).map(([id]) => id)).toEqual(["l1", "l2", "l3"]);
+  expect(a.stats.moveRefusals).toBeUndefined();
+  settled(a);
+  expect(a.bridge.um.undoStack.length).toBe(1);
+  expect(a.bridge.undo()).toBe(true);
+  expect(field(a, "indent")).toEqual([["l1", 0], ["l2", 1], ["l3", 0]]);
+  settled(a);
+});
+
+test("Shift-Tab on a toggle's last child leaves it below the toggle in one undo step", () => {
+  const a = open(page([
+    { id: "t", t: "toggle", text: "Group", attrs: { open: true } },
+    { id: "c1", text: "one", attrs: { parent: "t" } },
+  ]));
+  caretIn(a, "c1", 1);
+  outdentBlocks(a.view.state, a.view.dispatch);
+  expect(field(a, "parent")).toEqual([["t", null], ["c1", null]]);
+  expect(a.stats.moveRefusals).toBeUndefined();
+  settled(a);
+  expect(a.bridge.um.undoStack.length).toBe(1);
+  expect(a.bridge.undo()).toBe(true);
+  expect(field(a, "parent")).toEqual([["t", null], ["c1", "t"]]);
   settled(a);
 });
 

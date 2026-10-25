@@ -1,5 +1,5 @@
 import { history } from "../../../src/vendor/prosemirror.vendor.js";
-import { outline, structureFixes, BlockSelection } from "../../../src/page/blocks.js";
+import { outline, structureFixes, BlockSelection, MOVE } from "../../../src/page/blocks.js";
 import { asStep } from "../../../src/page/blocksel.js";
 import { gapTargets, pickTarget, moveSpanTo, summaryTarget } from "../../../src/page/drop.js";
 import { make, run, short } from "./blocks-helpers.js";
@@ -102,6 +102,23 @@ describe("moveSpanTo", () => {
     const nest = s.apply(moveSpanTo(s, ents, 5, 5, pickTarget(gapTargets(s, ents, 5, 5, 5), 2)));
     expect(short(nest)).toBe("P | T | b1<t | A@0 | A1@1 | B@2 | Z | C | c1<c");
     expect(changedKeys(posMap(s), posMap(nest))).toEqual([]);
+  });
+
+  // A drop that lands where the span already is writes only attributes, so the
+  // transaction has to carry the intent the port validates: the original outline
+  // and the proposed node attributes, never generated positional ids.
+  test("dragging right in place carries an in-place intent with the new indent", () => {
+    const s = FIXTURE();
+    const ents = outline(s.doc);
+    const tr = moveSpanTo(s, ents, 5, 5, pickTarget(gapTargets(s, ents, 5, 5, 5), 2));
+    expect(tr.getMeta(MOVE)).toEqual({ ids: ["b"], afterId: "a1", parent: null, attrs: { b: { indent: 2 } } });
+  });
+
+  test("a drop onto a closed toggle's summary carries the new parent and the opened toggle", () => {
+    const s = make([["c", "toggle", "C"], ["c1", "paragraph", "c1", { parent: "c" }], ["z", "paragraph", "Z"]]);
+    const ents = outline(s.doc);
+    const tr = moveSpanTo(s, ents, 2, 2, summaryTarget(s, ents, 2, 2, 0));
+    expect(tr.getMeta(MOVE)).toEqual({ ids: ["z"], afterId: "c1", parent: "c", attrs: { c: { open: true } } });
   });
 
   test("a list item with its child keeps the child's relative indent", () => {
