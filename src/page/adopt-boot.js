@@ -24,7 +24,13 @@ const STOPPED = { ok: false, outcome: "disposed", reason: "adoption-disposed" };
 const REFUSED = { ok: false, outcome: "refused", reason: "adoption-refused" };
 const TIMED_OUT = { ok: false, outcome: "refused", reason: "adoption-timeout" };
 const FAILED = { ok: false, outcome: "error", reason: "adoption-error" };
+// Another tab holds the room's writer seat: the adoption is that tab's to land,
+// and it reaches this one through the room. Not a refusal, and not a success yet.
+const AWAITED = { ok: true, outcome: "writer-adopts" };
 const landed = (counts) => ({ ok: true, outcome: "adopted", counts });
+
+// The bound on adoption, and on waiting for the elected writer's adoption.
+export const ADOPTION_TIMEOUT_MS = 10_000;
 
 export function readFile(root) {
   const article = root.querySelector(ARTICLE);
@@ -52,7 +58,7 @@ export function installAdoption({
   adopted = () => {},
   hold = suspendAutosave,
   release = resumeAutosave,
-  holdMs = 10_000,
+  holdMs = ADOPTION_TIMEOUT_MS,
   doc = document,
 }) {
   let last = source ? source.article.innerHTML : null;
@@ -115,7 +121,9 @@ export function installAdoption({
     const found = classifyFile(file.article, file.tags);
     if (found.kind === "unbased") console.warn("page: the article and its data changed together; kept the data");
     if (found.kind !== "adopt") return UNCHANGED;
-    if (!isAdopter()) return REFUSED;
+    // Only the room's writer adopts, so another tab's write is this tab's adoption
+    // too: it arrives through the room, and the caller waits for it there.
+    if (!isAdopter()) return AWAITED;
     hold();
     try {
       await mergeEngine();

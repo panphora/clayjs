@@ -12,6 +12,13 @@ import { renderFromTags } from "../../../src/page/save-projection.js";
 
 const clone = (v) => JSON.parse(JSON.stringify(v));
 const flushAsync = async () => { for (let i = 0; i < 30; i++) await Promise.resolve(); };
+const until = async (check, tries = 400) => {
+  for (let i = 0; i < tries; i++) {
+    if (check()) return true;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  return false;
+};
 
 const BLOCKS = [{ id: "p", t: "paragraph", text: "Hello" }];
 
@@ -133,7 +140,9 @@ test("a room whose writer is another tab: no claim is sent and the hand edit is 
   document.addEventListener("clay:page-adopted", onAdopted);
 
   try {
-    await page.ready;
+    // Another tab holds the seat, so this one neither claims nor adopts: it waits in
+    // adopting until that tab's adoption reaches it through the room.
+    expect(await until(() => page.status?.phase === "adopting")).toBe(true);
     await flushAsync();
 
     expect(sent).toEqual([]);

@@ -48,6 +48,7 @@ async function open({
   extensions = ["page"],
   writer = null,
   readerOwns = false,
+  holdFails = false,
 } = {}) {
   jest.resetModules();
   window.clayEditMode = true;
@@ -84,7 +85,7 @@ async function open({
     baselineSettled: () => true,
     isSaveConflicted: () => false,
     autosaveIsSuspended: () => false,
-    suspendAutosave: () => {},
+    suspendAutosave: () => { if (holdFails) throw new Error("autosave hold failed"); },
     resumeAutosave: () => {},
     holdAllSaves: () => {},
     releaseAllSaves: () => {},
@@ -185,18 +186,18 @@ const noInput = (page) => {
   if (page.view) expect(page.view.editable).toBe(false);
 };
 
-test("a refused adoption gives up the binding, its subscriptions and the article claim", async () => {
+test("a failed adoption gives up the binding, its subscriptions and the article claim", async () => {
   const quiet = jest.spyOn(console, "error").mockImplementation(() => {});
   const { page, article, ownerOf, registrations, bindings, frame } = await open({
     edit: handEdit,
-    writer: "other",
+    holdFails: true,
     extensions: ["page", "live-data"],
   });
   try {
     await page.ready;
     await flushAsync();
 
-    expect(page.status).toMatchObject({ phase: "blocked", reason: "adoption-refused" });
+    expect(page.status).toMatchObject({ phase: "blocked", reason: "adoption-error" });
     expect(page.view.isDestroyed).toBe(true);
     expect(article.querySelectorAll(".page-shell")).toHaveLength(0);
     expect(article.textContent.trim()).toBe("Hello");

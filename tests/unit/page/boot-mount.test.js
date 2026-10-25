@@ -305,21 +305,23 @@ test("a slow wait says so quietly after a moment, and a fast one never does", as
   }
 });
 
-test("an adoption that does not land puts the article back from the room's state, not the editor", async () => {
+test("an adoption another tab owns keeps this tab's staged view until the writer lands it", async () => {
   const { page, ownerOf, article } = await open({ edit: handEdit, writer: "other", extensions: ["page", "live-data"] });
   try {
-    await page.ready;
+    // Waiting for the elected writer, not blocked: the staged editor is in the
+    // article over the room's state, and it takes no key.
+    expect(await until(() => page.status?.phase === "adopting")).toBe(true);
     await flushAsync();
 
-    expect(page.status).toMatchObject({ phase: "blocked", reason: "adoption-refused" });
-    // The hand edit was never adopted, so the article is what the room accepted.
-    expect(article.textContent.trim()).toBe("Hello");
-    expect(article.querySelectorAll(".page-shell")).toHaveLength(0);
-    expect(document.querySelectorAll(".page-editor")).toHaveLength(0);
+    expect(page.status).toMatchObject({ phase: "adopting" });
+    expect(page.view.isDestroyed).toBe(false);
+    expect(article.textContent).toContain("Hello");
+    expect(article.textContent).not.toContain("edited by hand");
+    expect(article.querySelectorAll(".page-shell")).toHaveLength(1);
+    expect(document.querySelectorAll(".page-editor")).toHaveLength(1);
     expect(document.querySelectorAll(".page-boot-status")).toHaveLength(0);
-    // The editor that never landed let the article go with it: another runtime,
-    // a reader say, may claim it now.
-    expect(ownerOf(article)).toBe(null);
+    // The view is still this tab's, so the article goes with it if the boot ends.
+    expect(ownerOf(article)).toBe("editor");
     noInput(page);
   } finally {
     page.dispose();

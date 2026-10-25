@@ -1,7 +1,10 @@
 import { createFeatureLoader } from "../page/feature-loader.js";
 import { FEATURES, featureForType } from "../page/features/registry.js";
-import { readFile, installAdoption } from "../page/adopt-boot.js";
-import { classifyFile } from "../page/adopt.js";
+import { readFile, installAdoption, ADOPTION_TIMEOUT_MS } from "../page/adopt-boot.js";
+import { classifyFile, readBack } from "../page/adopt.js";
+import { mergePageModels } from "../page/merge.js";
+import { canon } from "../page/projection.js";
+import { mergeEngine } from "../sync/merge-engine.js";
 import { renderFromTags } from "../page/save-projection.js";
 import { blocksFromYValue } from "../page/ybind/decode.js";
 import { createYPageBinding } from "../page/ybind/binding.js";
@@ -696,12 +699,65 @@ function createSteps(inst, options) {
     return { ok: true, view };
   }
 
+  // Whether the room's page state already carries the hand edit: merging the article's
+  // changes into the room's blocks changes nothing. It is the comparison a checkpoint
+  // makes before it decides the room holds an edit, run against the room's state
+  // instead of the saved tag, so a room a peer changed after the adoption holds the
+  // edit too.
+  async function roomHoldsArticle(inst, found) {
+    try {
+      const { HyperMorph } = await mergeEngine();
+      const blocks = blocksFromYValue(inst.store.authoritative);
+      const current = readBack(blocks, document);
+      const merged = mergePageModels(found.baseItems, current, found.parsed, {
+        doc: document,
+        merge3: HyperMorph.merge3,
+        mergeJson: HyperMorph.mergeJson,
+      });
+      return canon(merged.items) === canon(current);
+    } catch {
+      return false;
+    }
+  }
+
+  // A tab that is not the room's writer does not adopt: the elected writer lands the
+  // hand edit, and it reaches this tab as a page update through the room, which the
+  // store hands to this tab's binding. A room that already holds the edit has nothing
+  // to wait for. Otherwise the saved article stays up and takes no typing until the
+  // writer's adoption arrives, and the wait is bounded like adoption itself.
+  async function awaitWriterAdoption(inst, found) {
+    if (await roomHoldsArticle(inst, found)) return { ok: true, outcome: "writer-adopts" };
+    return new Promise((resolve) => {
+      let off = null;
+      let timer = null;
+      let done = false;
+      const finish = (result) => {
+        if (done) return;
+        done = true;
+        if (timer) clearTimeout(timer);
+        timer = null;
+        off?.();
+        off = null;
+        resolve(result);
+      };
+      addDisposer(inst, () => finish({ ok: false, cancelled: true }));
+      off = inst.store.onRebase((event) => {
+        if (event.source === "remote") finish({ ok: true, outcome: "writer-adopts" });
+      });
+      timer = setTimeout(() => {
+        console.warn("page: gave up waiting for the writer\u0027s adoption; the hand edit was not adopted");
+        finish({ ok: false, reason: "adoption-timeout" });
+      }, ADOPTION_TIMEOUT_MS);
+    });
+  }
+
   async function adoptSource(inst, source, mounted) {
     // A hand-edited article is adopted by the room's elected writer only. With a
     // lane but no writer yet, this tab claims the room (a redundant set of an
     // existing Yjs update: a valid nonempty frame that changes nothing) and then
     // waits for the election, so exactly one tab adopts.
-    const needsAdoption = classifyFile(source.article, source.tags).kind === "adopt";
+    const found = classifyFile(source.article, source.tags);
+    const needsAdoption = found.kind === "adopt";
     const awaitWriter = async () => {
       const lane = await pageLaneReady();
       if (!lane) return;
@@ -743,8 +799,11 @@ function createSteps(inst, options) {
     });
     inst.adoption = adoption;
 
-    const outcome = await adoption.idle();
+    let outcome = await adoption.idle();
     if (!outcome) return { ok: true, outcome: "unchanged" };
+    // Another tab is the room's writer, so this tab's adoption is the one that tab
+    // lands: the wait ends when it reaches this tab, or as the timeout a refusal is.
+    if (outcome.outcome === "writer-adopts") outcome = await awaitWriterAdoption(inst, found);
     // Adoption refused, timed out or failed: the room's state is the page's, not the
     // view this tab built over the saved article, so the editor goes and the article
     // comes back from what the room accepted. A disposed install restores nothing:

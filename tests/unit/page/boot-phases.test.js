@@ -16,6 +16,13 @@ import { renderFromTags } from "../../../src/page/save-projection.js";
 const BLOCKS = [{ id: "p", t: "paragraph", text: "Hello" }];
 const clone = (v) => JSON.parse(JSON.stringify(v));
 const flushAsync = async () => { for (let i = 0; i < 40; i++) await Promise.resolve(); };
+const until = async (check, tries = 400) => {
+  for (let i = 0; i < tries; i++) {
+    if (check()) return true;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  return false;
+};
 
 const tagHtml = (value) => `<script type="application/json" merge="page" clay="live">${JSON.stringify(value)}</script>`;
 const articleHtml = (value = seedValue(BLOCKS)) => {
@@ -354,7 +361,7 @@ test("a room that refuses the join blocks without mounting", async () => {
   }
 });
 
-test("an adoption another tab owns blocks the nonwriter with the editor read-only", async () => {
+test("an adoption another tab owns leaves the nonwriter waiting, not blocked", async () => {
   const { page, sent } = await load({
     edit: handEdit,
     extensions: ["page", "live-data"],
@@ -364,17 +371,21 @@ test("an adoption another tab owns blocks the nonwriter with the editor read-onl
   const onAdopted = (event) => adopted.push(event.detail);
   document.addEventListener("clay:page-adopted", onAdopted);
   try {
-    await page.ready;
+    // The nonwriter is not refused: it stays in adopting, read-only, until the
+    // elected writer's adoption reaches it through the room.
+    expect(await until(() => page.status?.phase === "adopting")).toBe(true);
     await flushAsync();
 
     expect(sent).toEqual([]);
     expect(adopted).toEqual([]);
-    expect(page.status).toMatchObject({ phase: "blocked", reason: "adoption-refused" });
+    expect(page.status).toMatchObject({ phase: "adopting" });
     expect(page.view).toBeTruthy();
+    expect(page.view.isDestroyed).toBe(false);
     expectNoInput(page);
   } finally {
     document.removeEventListener("clay:page-adopted", onAdopted);
     page.dispose();
+    await page.ready;
   }
 });
 
