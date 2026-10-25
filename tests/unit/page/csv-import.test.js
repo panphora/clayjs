@@ -50,7 +50,9 @@ test("pasted CSV file uses the same import path", async () => {
   const event = new Event("paste", { bubbles: true, cancelable: true });
   Object.defineProperty(event, "clipboardData", { value: { files: [file("Name\nAda")], getData: () => "" } });
   view.dom.dispatchEvent(event);
-  await new Promise((resolve) => setTimeout(resolve, 10));
   expect(event.defaultPrevented).toBe(true);
+  for (let waited = 0; waited < 2000 && view.state.doc.child(0).type.name !== "table"; waited += 10) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
   expect(view.state.doc.child(0).type.name).toBe("table");
 });
