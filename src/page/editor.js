@@ -6,7 +6,7 @@
 // `page` cascade layer, so a theme is one plain stylesheet that sets tokens on
 // .page-shell (and adds scoped rules where it needs to); unlayered theme rules
 // always win. Contract: plans/.../default-page/v1/look/THEME-CONTRACT.md
-import { state, view as pmView, keymap, commands, history, gapcursor, inputrules } from "../vendor/prosemirror.vendor.js";
+import { state, view as pmView, model, keymap, commands, history, gapcursor, inputrules } from "../vendor/prosemirror.vendor.js";
 import { schema } from "./schema.js";
 import { identityPlugin, docFromBlocks, blockMap, keyBetween, newId } from "./model.js";
 import { blockKeys, structurePlugin, collapsePlugin, pastePlugin, BlockSelection, STEP } from "./blocks.js";
@@ -227,15 +227,64 @@ const markKeys = {
 
 const defaultUpload = (file, options) => globalThis.clay?.upload?.(file, options) ?? Promise.resolve({ ok: false, code: "unavailable", msg: "File uploads are not available in this editor" });
 
-// Adds a view part to a running editor: its CSS and its node views, through
-// setProps, which never recreates plugin views or reorders keymaps.
+const nodeViewRegistries = new WeakMap();
+
+export const lazyViewsKey = new state.PluginKey("lazyViews");
+
+// Stands in for a view part's node view until its type loads: the schema's own
+// toDOM, and an update that asks to be recreated once the real view exists.
+class PendingView {
+  constructor(node, registry) {
+    this.node = node;
+    this.type = node.type;
+    this.registry = registry;
+    const { dom, contentDOM } = model.DOMSerializer.renderSpec(document, node.type.spec.toDOM(node));
+    this.dom = dom;
+    this.contentDOM = contentDOM ?? null;
+  }
+  update(node) { return node.type === this.type && !this.registry.has(node.type.name); }
+}
+
+// Recreates only the node views of the types that just loaded: one node
+// decoration makes ProseMirror rebuild those nodes and no others.
+export function lazyViewsPlugin() {
+  return new state.Plugin({
+    key: lazyViewsKey,
+    state: {
+      init: () => pmView.DecorationSet.empty,
+      apply(tr) {
+        const meta = tr.getMeta(lazyViewsKey);
+        if (!meta) return pmView.DecorationSet.empty;
+        const decorations = [];
+        tr.doc.forEach((node, offset) => {
+          if (!meta.types.includes(node.type.name)) return;
+          decorations.push(pmView.Decoration.node(offset, offset + node.nodeSize, {}, { lazyView: decorations.length + 1 }));
+        });
+        return pmView.DecorationSet.create(tr.doc, decorations);
+      },
+    },
+    props: { decorations: (state) => lazyViewsKey.getState(state) },
+  });
+}
+
+// Adds a view part to a running editor: its CSS at once, its node views into the
+// editor's registry, and a transaction that recreates only those block types.
 export function installPageFeature({ view, upload, toolHost, board = null, undo = null, redo = null, revise = null }, id, mod) {
   const feature = mod.createFeature({ view, upload, toolHost, board, undo, redo, revise });
+  const registry = nodeViewRegistries.get(view);
   const apply = () => {
     if (feature.css) styleWithLegacyId(`page-feature-${id}`, feature.css, `page-feature-${id}`, ["editor-ui"]);
-    if (feature.nodeViews) view.setProps({ nodeViews: { ...view.props.nodeViews, ...feature.nodeViews } });
+    if (!feature.nodeViews) return;
+    const types = Object.keys(feature.nodeViews);
+    for (const type of types) registry.set(type, feature.nodeViews[type]);
+    view.dispatch(view.state.tr.setMeta(lazyViewsKey, { types }).setMeta("addToHistory", false));
   };
-  if (view.composing) view.dom.addEventListener("compositionend", apply, { once: true });
+  const afterComposition = () => {
+    if (view.isDestroyed) return;
+    if (view.composing) setTimeout(afterComposition, 25);
+    else apply();
+  };
+  if (view.composing) view.dom.addEventListener("compositionend", () => setTimeout(afterComposition, 25), { once: true });
   else apply();
   return feature;
 }
@@ -311,6 +360,7 @@ export function pagePlugins({ upload = defaultUpload, highlight, history: useHis
     historyIntentPlugin(),
     useHistory ? history.history() : null,
     gapcursor.gapCursor(),
+    lazyViewsPlugin(),
     features ? featureWatchPlugin(features) : null,
   ].filter(Boolean);
 }
@@ -357,14 +407,22 @@ export function createPageEditor(mount, { blocks = null, onChange = null, upload
     load: (id) => FEATURES[id].load(),
     install: (id, mod) => installPageFeature({ view, upload, toolHost, board, undo, redo, revise: reviseTool }, id, mod),
   });
+  const nodeViewRegistry = new Map();
+  const nodeViews = {
+    code_block: (node, v, getPos) => new CodeBlockView(node, v, getPos),
+    chart: (node, v, getPos) => new ChartView(node, v, getPos),
+  };
+  for (const feature of Object.values(FEATURES)) for (const type of feature.views ?? feature.types) {
+    nodeViews[type] = (node, v, getPos, decorations, inner) => {
+      const make = nodeViewRegistry.get(node.type.name);
+      return make ? make(node, v, getPos, decorations, inner) : new PendingView(node, nodeViewRegistry);
+    };
+  }
   view = new pmView.EditorView(shell, {
     state: pageState(blocks, { upload, highlight, doc: initialDoc, history: useHistory, undo, redo, onAiTool, toolHost, features }),
     attributes: { class: "page-editor" },
     editable: () => editable,
-    nodeViews: {
-      code_block: (node, v, getPos) => new CodeBlockView(node, v, getPos),
-      chart: (node, v, getPos) => new ChartView(node, v, getPos),
-    },
+    nodeViews,
     handleDOMEvents: {
       mousedown: checkboxClick,
       dragstart(v, event) {
@@ -386,6 +444,7 @@ export function createPageEditor(mount, { blocks = null, onChange = null, upload
       if (onChange && view.state.doc !== before) onChange(blockMap(view.state.doc));
     },
   });
+  nodeViewRegistries.set(view, nodeViewRegistry);
   const destroy = view.destroy.bind(view);
   view.destroy = () => { features.dispose(); destroy(); };
   return view;

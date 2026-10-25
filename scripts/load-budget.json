@@ -20,11 +20,11 @@
   "built": {
     "document.html": {
       "view": { "requests": 55, "depth": 3, "brotli": 206848 },
-      "edit": { "requests": 80, "depth": 3, "brotli": 338944 }
+      "edit": { "requests": 80, "depth": 3, "brotli": 339968 }
     },
     "document-rich.html": {
       "view": { "requests": 55, "depth": 3, "brotli": 206848 },
-      "edit": { "requests": 80, "depth": 3, "brotli": 338944 }
+      "edit": { "requests": 80, "depth": 3, "brotli": 339968 }
     },
     "kanban.html": {
       "view": { "requests": 55, "depth": 3, "brotli": 138240 },

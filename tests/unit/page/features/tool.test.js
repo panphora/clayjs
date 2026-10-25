@@ -184,8 +184,7 @@ test("an install while composing waits for compositionend", async () => {
   await flush();
   expect(view.dom.querySelector(".page-tool-block")).toBe(null);
   view.dom.dispatchEvent(new CompositionEvent("compositionend"));
-  await flush();
-  expect(view.dom.querySelector(".page-tool-block")).toBeTruthy();
+  expect(await waitFor(() => view.dom.querySelector(".page-tool-block"))).toBe(true);
 });
 
 test("selection, the undo stack and the save output are the same before and after the view part installs", async () => {
