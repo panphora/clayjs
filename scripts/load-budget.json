@@ -1,24 +1,24 @@
 {
   "document.html": {
-    "view": { "requests": 88, "depth": 28, "brotli": 360448, "css": { "requests": 2, "depth": 2 } },
-    "edit": { "requests": 168, "depth": 45, "brotli": 577536, "css": { "requests": 2, "depth": 2 } }
+    "view": { "requests": 89, "depth": 28, "brotli": 360448, "css": { "requests": 2, "depth": 2 } },
+    "edit": { "requests": 169, "depth": 45, "brotli": 578560, "css": { "requests": 2, "depth": 2 } }
   },
   "document-rich.html": {
-    "view": { "requests": 88, "depth": 28, "brotli": 360448, "css": { "requests": 2, "depth": 2 } },
-    "edit": { "requests": 175, "depth": 50, "brotli": 599040, "css": { "requests": 2, "depth": 2 } }
+    "view": { "requests": 89, "depth": 28, "brotli": 360448, "css": { "requests": 2, "depth": 2 } },
+    "edit": { "requests": 176, "depth": 50, "brotli": 600064, "css": { "requests": 2, "depth": 2 } }
   },
   "document-text.html": {
-    "view": { "requests": 88, "depth": 28, "brotli": 360448, "css": { "requests": 2, "depth": 2 } },
-    "edit": { "requests": 168, "depth": 45, "brotli": 577536, "css": { "requests": 2, "depth": 2 } }
+    "view": { "requests": 89, "depth": 28, "brotli": 360448, "css": { "requests": 2, "depth": 2 } },
+    "edit": { "requests": 169, "depth": 45, "brotli": 578560, "css": { "requests": 2, "depth": 2 } }
   },
   "kanban.html": {
-    "view": { "requests": 88, "depth": 26, "brotli": 271360, "css": { "requests": 0, "depth": 0 } },
-    "edit": { "requests": 107, "depth": 48, "brotli": 370688, "css": { "requests": 0, "depth": 0 } },
+    "view": { "requests": 89, "depth": 26, "brotli": 272384, "css": { "requests": 0, "depth": 0 } },
+    "edit": { "requests": 108, "depth": 48, "brotli": 370688, "css": { "requests": 0, "depth": 0 } },
     "draft": { "requests": 88, "depth": 38, "brotli": 296960, "css": { "requests": 0, "depth": 0 } }
   },
   "journal.html": {
-    "view": { "requests": 86, "depth": 24, "brotli": 263168, "css": { "requests": 0, "depth": 0 } },
-    "edit": { "requests": 101, "depth": 42, "brotli": 335872, "css": { "requests": 0, "depth": 0 } },
+    "view": { "requests": 87, "depth": 24, "brotli": 264192, "css": { "requests": 0, "depth": 0 } },
+    "edit": { "requests": 102, "depth": 42, "brotli": 336896, "css": { "requests": 0, "depth": 0 } },
     "draft": { "requests": 86, "depth": 36, "brotli": 279552, "css": { "requests": 0, "depth": 0 } }
   },
   "built": {

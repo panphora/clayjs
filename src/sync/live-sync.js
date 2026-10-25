@@ -51,7 +51,7 @@ import { enableAdminInputs } from '../core/admin-inputs.js';
 import { enableAdminResources } from '../core/admin-resources.js';
 import { presence } from './presence.js';
 import { editingMarker } from './editing-marker.js';
-import { hostMeta, hostSupports } from '../core/host-meta.js';
+import { hostSupports } from '../core/host-meta.js';
 import { EditingSender } from './editing-sender.js';
 import { servedDocumentEtag } from '../core/host-attrs.js';
 import { recordEtag, seedEtag, lastSeenEtag, conditionalSaves, representedEtag, forgetRepresentedEtag } from '../core/etag.js';
@@ -193,49 +193,10 @@ function pairedBaseline() {
 import { savePageThrottled, setLastSavedBaselines, setUnsavedChanges, getLastSavedBytes, conflictResolvedBySync, isSaveConflicted, baselineSettled, schedulePaintHeal } from '../core/save.js';
 
 /**
- * The two live-sync wires, and the rule for choosing between them.
- *
- * Spec §10 puts both halves on `/_/sync`. Not every host serves that yet, and the
- * ones that do not cannot be upgraded on our schedule: hyperclay-local ships behind
- * Apple notarization, while this library reaches every document within one 10-minute
- * cache TTL. So the client is the half that has to know both.
- *
- * The choice is DISCOVERED, never guessed. Spec §5 makes `/_/meta` the only way to
- * learn what a host can do, and §10 says a client that has not discovered `sync`
- * never opens either half of the route. Probing is also a bad instrument here: an
- * EventSource reports a 404, an auth refusal and an offline browser through one
- * error path, so a failed connection cannot tell you which address was wrong.
- *
- * One profile is chosen once and used for BOTH directions for the life of the page.
- * Letting send and receive decide independently is exactly the bug this replaces: a
- * client that posted to the spec address while streaming from the legacy one.
- *
- * Both stream addresses carry `client-id`, in the same kebab spelling as the rest of
- * the query. It is the tab's own sender id — the one every outbound frame already
- * carries — so a host that reads it at admission knows this connection by the value
- * its frames arrive under, and can tell two tabs of one cookie-less guest apart. A
- * host that does not read it ignores an unknown parameter.
+ * The wires live in wire-profile.js: both halves of one sync pick a single profile
+ * from `/_/meta`, and the reader's receive-only stream makes the same choice.
  */
-const WIRE_PROFILES = {
-  spec: {
-    name: 'spec',
-    relayPath: '/_/sync',
-    documentHeader: 'Document-URL',
-    snapshotKey: 'snapshot',
-    streamPath: (href, lane, resumeId, clientId) =>
-      `/_/sync?document-url=${encodeURIComponent(href)}&lane=${lane}&resume-id=${resumeId}&client-id=${encodeURIComponent(clientId)}`,
-  },
-  // What every published clayjs speaks, and what hyperclayjs and the inline script in
-  // every Collection dashboard hardcode. Hosts keep these addresses permanently.
-  legacy: {
-    name: 'legacy',
-    relayPath: '/_/live-sync/save',
-    documentHeader: 'Page-URL',
-    snapshotKey: 'html',
-    streamPath: (href, lane, resumeId, clientId) =>
-      `/_/live-sync/stream?page-url=${encodeURIComponent(href)}&lane=${lane}&resume-id=${resumeId}&client-id=${encodeURIComponent(clientId)}`,
-  },
-};
+import { WIRE_PROFILES, resolveWireProfile } from './wire-profile.js';
 
 class LiveSync {
   constructor() {
@@ -707,23 +668,14 @@ class LiveSync {
    */
   _resolveProfile() {
     if (!this._profilePromise) {
-      this._profilePromise = hostMeta()
-        .then((meta) => {
-          const extensions = meta?.extensions || [];
-          const hasSync = extensions.includes('sync');
-          const hasLiveData = extensions.includes('live-data');
-          const hasPresence = extensions.includes('presence');
-          this._sharedData = hasSync && hasLiveData && extensions.includes('sync-worker-data') && !hasPresence;
-          this._sharedSync = hasSync && !hasPresence && (this._sharedData || (extensions.includes('sync-worker') && !hasLiveData));
-          this._liveData = hasLiveData;
-          return hasSync ? WIRE_PROFILES.spec : WIRE_PROFILES.legacy;
-        })
-        .catch(() => WIRE_PROFILES.legacy)
-        .then((profile) => {
-          this._profile = profile;
-          this._log(`Wire profile: ${profile.name}`);
-          return profile;
-        });
+      this._profilePromise = resolveWireProfile().then((resolved) => {
+        this._sharedData = resolved.sharedData;
+        this._sharedSync = resolved.sharedSync;
+        this._liveData = resolved.liveData;
+        this._profile = resolved.profile;
+        this._log(`Wire profile: ${resolved.profile.name}`);
+        return resolved.profile;
+      });
     }
     return this._profilePromise;
   }
