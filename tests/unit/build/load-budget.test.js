@@ -100,6 +100,29 @@ for (const fixture of ["journal.html", "journal-hyperclay.html"]) {
   }, 180000);
 }
 
+// The board ships as three files, the template and the two host copies, and each is
+// walked whole: a budget over a stub would pass while the real file loads anything.
+const KANBAN_FIXTURES = ["kanban.html", "kanban-hyperclay.html", "kanban-local.html"];
+
+for (const fixture of KANBAN_FIXTURES) {
+  test(`${fixture}: every mode walks the whole board`, async () => {
+    for (const mode of ["view", "edit", "draft"]) {
+      const measured = await measure({ html: htmlOf(fixture), mode });
+      const shipped = await measureBuilt({ html: htmlOf(fixture), mode, dir });
+
+      expect(measured.js.requests).toBeGreaterThan(30);
+      expect(shipped.js.requests).toBeGreaterThan(30);
+    }
+  }, 180000);
+
+  test(`${fixture}: the draft loads the visitor's own plugin`, async () => {
+    const measured = await measure({ html: htmlOf(fixture), mode: "draft" });
+
+    expect(measured.js.files.map(({ path }) => path)).toContain("src/plugins/visitor-drafts.js");
+    expect(measured.js.files.map(({ path }) => path)).not.toContain("src/sync/live-sync.js");
+  });
+}
+
 // The view parts a file's own block types need are fetches before input, so the
 // built edit line has to count them: a budget that leaves them out passes falsely.
 test(`a Document's built edit line counts the view parts its blocks need, and a text-only one counts none`, async () => {
