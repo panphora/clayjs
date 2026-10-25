@@ -431,7 +431,7 @@ async function run(inst, gen, options = {}) {
   article.innerHTML = "";
   const features = createFeatureLoader({
     load: (id) => FEATURES[id].load(),
-    install: (id, mod) => installPageFeature({ view: editorView, upload: options.upload, toolHost }, id, mod),
+    install: (id, mod) => installPageFeature({ view: editorView, upload: options.upload, toolHost, board: binding.board, undo: binding.undo, redo: binding.redo }, id, mod),
   });
   const view = createPageEditor(article, {
     doc: binding.doc(),
