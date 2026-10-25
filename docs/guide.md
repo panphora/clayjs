@@ -13,7 +13,7 @@ Every behavior stated here was read from ClayJS 1.8.2 source or executed. The fo
 | [`examples/writer.html`](https://clayjs.com/examples/writer.html) | A block document: rich text blocks, headings, callouts, to-do blocks, dividers, images with upload, a gutter with drag handle and block menu, a slash menu, an outline and a word count. |
 | [`examples/finance.html`](https://clayjs.com/examples/finance.html) | A budget built on sap.js: categories with budgets, transactions, computed totals saved into the file, search, CSV import and export. |
 
-Code in this guide assumes the loader URL `https://clayjs.com/v1/`. Section 3 covers versions. This guide is also served as plain Markdown at [clayjs.com/guide.md](https://clayjs.com/guide.md) for agents, and its ideas are drawn as diagrams in the [visual guide](https://clayjs.com/visual-guide).
+Code in this guide assumes the loader URL `https://clayjs.com/v1/`. Section 3 covers versions. This guide is also served as plain Markdown at [clayjs.com/guide.md](https://clayjs.com/guide.md) for agents, and its ideas are drawn as diagrams in the [visual guide](https://clayjs.com/docs/guide/visual-guide/).
 
 ---
 
