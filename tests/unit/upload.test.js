@@ -214,3 +214,99 @@ test("a network error resolves rather than rejecting", async () => {
   expect(res.ok).toBe(false);
   expect(res.code).toBe("network");
 });
+
+test("a timeout resolves as a timeout, not as the cancel its own abort would report", async () => {
+  const upload = await load();
+  const sent = installXhr();
+  const events = [];
+  document.addEventListener("clay:upload-error", (e) => events.push(e.detail));
+
+  jest.useFakeTimers();
+  try {
+    const promise = upload(file());
+    await firstRequest(sent);
+    jest.advanceTimersByTime(120001);
+    const res = await promise;
+
+    expect([res.ok, res.code, res.msgType]).toEqual([false, "timeout", "unknown"]);
+    // One ending, and it is the real one: the abort the timeout fires must not be
+    // reported as a cancellation a moment later.
+    expect(events).toEqual([{ msg: "Upload timed out", code: "timeout", taskId: "upload-1", attempt: 1 }]);
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
+test("an answer that lands after an abort emits no done and changes nothing", async () => {
+  const upload = await load();
+  const sent = installXhr();
+  const events = [];
+  document.addEventListener("clay:upload-done", () => events.push("done"));
+  document.addEventListener("clay:upload-error", () => events.push("error"));
+
+  const controller = new AbortController();
+  const promise = upload(file(), { signal: controller.signal });
+  const req = await firstRequest(sent);
+  controller.abort();
+  const res = await promise;
+  expect(res.code).toBe("aborted");
+
+  // The response was already on its way when the person cancelled. It is stale, and
+  // a caller that hears "done" here would insert a URL nothing is waiting for.
+  respond(req);
+  for (let i = 0; i < 20; i++) await Promise.resolve();
+  expect(events).toEqual([]);
+});
+
+test("discovery, progress and done carry an additive task id and attempt", async () => {
+  const upload = await load();
+  const sent = installXhr();
+  const details = [];
+  document.addEventListener("clay:upload-start", (e) => details.push(["start", e.detail]));
+  document.addEventListener("clay:upload-progress", (e) => details.push(["progress", e.detail]));
+  document.addEventListener("clay:upload-done", (e) => details.push(["done", e.detail]));
+
+  const promise = upload(file());
+  const req = await firstRequest(sent);
+  req._progress({ lengthComputable: true, loaded: 5, total: 10 });
+  respond(req);
+  await promise;
+
+  // A listener showing one row per upload can tell two of them apart. Old callers read
+  // only `msg`, `code` and `uploads`, so the extra fields cost them nothing.
+  expect(details[0][1]).toEqual({ name: "photo.png", size: 3, taskId: "upload-1", attempt: 1 });
+  expect(details[1][1]).toEqual({ loaded: 5, total: 10, percent: 50, taskId: "upload-1", attempt: 1 });
+  expect(details[2][1].uploads[0].url).toBe("assets-x/a-1.png");
+  expect(details[2][1].taskId).toBe("upload-1");
+});
+
+test("a cancel that arrives while the host is still being asked sends nothing", async () => {
+  const upload = await load();
+  let answer;
+  global.fetch = () => new Promise((resolve) => { answer = resolve; });
+  const sent = installXhr();
+
+  const controller = new AbortController();
+  const promise = upload(file(), { signal: controller.signal });
+  for (let i = 0; i < 10; i++) await Promise.resolve();
+  controller.abort();
+  answer(ok({ spec: 1, extensions: ["upload"], document: { upload: { allowed: true } } }));
+
+  const res = await promise;
+  expect(res.code).toBe("aborted");
+  expect(sent).toHaveLength(0);
+});
+
+test("the plugin function carries the task starter", async () => {
+  const upload = await load();
+  expect(typeof upload.start).toBe("function");
+  // Same callers hold `clay.upload`; nothing new to look up.
+  expect(upload.start).toBe((await import("../../src/plugins/upload-task.js")).start);
+});
+
+test("an unknown requiredAccess is the caller's bug and throws before any request", async () => {
+  const upload = await load();
+  const sent = installXhr();
+  expect(() => upload(file(), { requiredAccess: "private-ish" })).toThrow(/requiredAccess/);
+  expect(sent).toHaveLength(0);
+});
