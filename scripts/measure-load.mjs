@@ -502,7 +502,7 @@ export async function measureBuilt({ html, mode, dir, search = "", owner = true 
       }
     }
     if (mode === "edit") bootImports.push(...EDIT_BOOT_IMPORTS);
-    if (mode === "edit" && plan.plugins.includes(PAGE_PLUGIN)) bootImports.push(...EDITOR_BOOT_IMPORTS, ...pageFeatureModules(html));
+    if (mode === "edit" && plan.plugins.includes(PAGE_PLUGIN)) bootImports.push(...EDITOR_BOOT_IMPORTS);
   }
   let entries = manifest.entries;
   const loaded = new Set();
@@ -552,6 +552,9 @@ export async function measureBuilt({ html, mode, dir, search = "", owner = true 
     for (const file of payload.preload) if (addChunk(file)) preload++;
     if (preload) mainDepth++;
     if (addClosure([...plan.core, ...plan.plugins, ...bootImports])) mainDepth++;
+    // A feature's view part is not one of the chunks a boot preloads: page.js imports it
+    // once it has evaluated, so it is a fetch stage after the preloaded plan.
+    if (mode === "edit" && plan.plugins.includes(PAGE_PLUGIN) && addClosure(pageFeatureModules(html))) mainDepth++;
   }
 
   let satelliteDepth = 0;

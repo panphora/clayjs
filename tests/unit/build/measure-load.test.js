@@ -1,10 +1,15 @@
 /**
  * @jest-environment node
  */
-import { expect, test } from "@jest/globals";
-import { readFileSync } from "node:fs";
-import { cssImportsOf, measure } from "../../../scripts/measure-load.mjs";
+import { afterAll, beforeAll, expect, test } from "@jest/globals";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { cssImportsOf, measure, measureBuilt } from "../../../scripts/measure-load.mjs";
 import { seedValue } from "../../../src/page/ybind/seed.js";
+
+const ROOT = new URL("../../../", import.meta.url).pathname;
+const { emitBootstraps, emitChunks } = await import("../../../scripts/build-chunks.mjs");
 
 const fixture = (name) => readFileSync(new URL(`../../../tests/fixtures/load/${name}`, import.meta.url), "utf8");
 const paths = (measured) => measured.js.files.map(({ path }) => path);
@@ -96,6 +101,35 @@ test("a Document's view mode counts no view parts, and neither does a tool-less 
   expect(paths(text)).not.toContain("src/page/tools.js");
   expect(paths(text)).not.toContain("src/page/tool-data.js");
 });
+
+// The runtime preloads the plan and the editor, never a feature's view part: page.js
+// imports a part once it has evaluated, so that part is a fetch stage after the
+// preloaded plan. Counting it in the preload stage understates how deep a table or
+// board Document goes.
+let built;
+beforeAll(async () => {
+  built = mkdtempSync(join(tmpdir(), "clay-load-preload-"));
+  const chunks = await emitChunks({ root: ROOT, outdir: join(built, "m") });
+  await emitBootstraps({ root: ROOT, outdir: built, manifest: chunks.manifest, satellites: chunks.satellites });
+}, 180000);
+
+afterAll(() => {
+  rmSync(built, { recursive: true, force: true });
+});
+
+test("a Document's built edit line counts a feature's part one fetch stage after the preloaded plan", async () => {
+  const manifest = JSON.parse(readFileSync(join(built, "m/manifest.json"), "utf8"));
+  const chunkOf = (entry) => `m/${manifest.entries[entry]}`;
+  const rich = await measureBuilt({ html: fixture("document-rich.html"), mode: "edit", dir: built });
+  const text = await measureBuilt({ html: fixture("document-text.html"), mode: "edit", dir: built });
+
+  expect(paths(text)).toContain(chunkOf("page/editor.js"));
+  expect(paths(rich)).toContain(chunkOf("page/editor.js"));
+  expect(paths(rich)).toContain(chunkOf("page/features/table.js"));
+  expect(paths(rich)).toContain(chunkOf("page/features/board.js"));
+  expect(rich.js.depth).toBe(text.js.depth + 1);
+  expect(rich.js.requests).toBe(text.js.requests + 2);
+}, 180000);
 
 // The release serves its font sheets from /v1/fonts/, beside the font files, so a page
 // that links one fetches that CSS and the fonts it names: neither is a third party, and
