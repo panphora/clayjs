@@ -12,7 +12,7 @@
 
 import Mutation from "../lib/mutation.js";
 import { isEditMode } from "./is-edit-mode.js";
-import { autosaveScheduler } from "./save.js";
+import { autosaveScheduler, savesAdmitted } from "./save.js";
 import { markUserDriven } from "../lib/user-gesture.js";
 import { resolveRegionPolicy, skipForPolicy } from "../lib/region-policy.js";
 import { PERSIST, AUTOSAVE } from "../lib/attr-aliases.js";
@@ -32,6 +32,7 @@ function initSavePageOnChange() {
     omitChangeDetails: true,
     require: 'autosave'
   }, () => {
+    if (!savesAdmitted()) return;
     autosaveScheduler.noteActivity();
   });
 }
@@ -51,6 +52,7 @@ function initSaveOnPersistInput() {
     if (e.isTrusted && !skipForPolicy(resolveRegionPolicy(e.target), 'dirty')) {
       markUserDriven();
     }
+    if (!savesAdmitted()) return;
     autosaveScheduler.noteActivity();
   }, true);
 }
@@ -72,15 +74,27 @@ function initRecordEditActivity() {
     const field = target.closest('input, textarea, select, [contenteditable]');
     if (!field) return;
     if (skipForPolicy(resolveRegionPolicy(field), 'dirty')) return;
+    if (!savesAdmitted()) return;
     autosaveScheduler.noteActivity();
   };
   document.addEventListener('input', noteActivity, true);
   document.addEventListener('compositionupdate', noteActivity, true);
 }
 
-function init() {
+let installed = false;
+
+/**
+ * Loader-managed initialization, and the import's own: one subscription set per page.
+ *
+ * A live re-entry asks for the autosave this page already has, not a second one, so the
+ * listeners above are installed once and an activity report they make while a save
+ * session has admission closed is dropped rather than arming another timer.
+ */
+function install() {
+  if (installed) return;
   if (!document.documentElement.matches(AUTOSAVE)) return;
   if (!isEditMode) return;
+  installed = true;
   setAutosaveActive(true);
   // initUserGesture moved to save.js's init: gesture provenance belongs to every
   // editable page, not only the ones with <html autosave>.
@@ -93,6 +107,7 @@ function init() {
 // exported from there
 
 // Auto-init when module is imported
-init();
+install();
 
-export default init;
+export { install as init };
+export default install;

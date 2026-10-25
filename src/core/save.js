@@ -25,7 +25,7 @@ import { captureForComparisonAndDirty, captureForSaveAndComparison, captureForDi
 import { paintSignature } from "../lib/derived.js";
 import { NO_TRIGGER_AUTOSAVE_SELECTOR } from "../lib/region-policy.js";
 import { seedEtag, lastSeenEtag } from "./etag.js";
-import { gateCaptureToken, gateClearIfUnchanged, pageMaybeDirty } from "../lib/dirty-gate.js";
+import { gateCaptureToken, gateClearIfUnchanged, gateRevision, pageMaybeDirty } from "../lib/dirty-gate.js";
 import { hasUnsavedState } from "../lib/unsaved-state.js";
 import { autosaveActive } from "../lib/autosave-state.js";
 import { registerStyleAdoption } from "../lib/style-adoption.js";
@@ -248,6 +248,95 @@ export function autosaveIsSuspended() {
 }
 
 // ============================================
+// THE SAVE SESSION
+// ============================================
+//
+// One lifetime per admitted editing session: `start` when the page admits input,
+// `quiesce` while an exit is being decided, `resume` when that exit is refused, `stop`
+// once it is committed. What the session owns is ADMISSION: whether an ordinary save and
+// the automatic lane may write right now.
+//
+// What it does not own is the page's saved bytes. A quiesce is not a reload, so the
+// session never runs the boot settle again, never takes a capture for itself and never
+// writes a baseline: the bytes an exit is reconciled against are the ones the last
+// accepted save (or the served file) left behind, and the next real save carries the
+// snapshot's own capture identity.
+//
+// Work that arrives while admission is closed stays pending and stays visible. A denied
+// save writes nothing, clears no gate token and keeps the explicit-save intent armed, so
+// the page keeps reporting the bytes it still holds; the session also records the dirty
+// gate's revision, so an exit can prove nothing new arrived while it was closed instead
+// of assuming quiet.
+let quiescedSessions = 0;
+let parkedWork = false;
+let parkedAutosave = false;
+
+/** Whether an ordinary save may go out right now. */
+export function savesAdmitted() {
+  return quiescedSessions === 0;
+}
+
+/**
+ * Edited bytes a closed session parked, that no accepted save has covered since. The DOM
+ * still holds them and the host does not, in whatever mode the page is in by then, so the
+ * close warning reads this rather than the committed mode.
+ */
+export function sessionParked() {
+  return parkedWork;
+}
+
+/**
+ * One editing session's admission lifetime.
+ *
+ * `changedWhileClosed` answers the exit's own question — did the page gain work while
+ * admission was closed? — from the gate's revision, which is why a quiesce costs no
+ * capture. `stop` releases the hold without replaying anything: the exit that stops a
+ * session has already accounted for the bytes, and a refused one resumes instead.
+ */
+export function saveSession() {
+  let phase = "idle";
+  let revisionAtQuiesce = 0;
+
+  return {
+    get phase() {
+      return phase;
+    },
+    get open() {
+      return phase === "open";
+    },
+    changedWhileClosed() {
+      return phase === "quiesced" && gateRevision() !== revisionAtQuiesce;
+    },
+    start() {
+      if (phase !== "idle") return;
+      phase = "open";
+    },
+    quiesce() {
+      if (phase !== "open") return;
+      phase = "quiesced";
+      revisionAtQuiesce = gateRevision();
+      quiescedSessions++;
+    },
+    resume() {
+      if (phase !== "quiesced") return;
+      phase = "open";
+      quiescedSessions--;
+      if (quiescedSessions > 0) return;
+      replayParkedAutosave();
+      releaseDeferredSoon();
+    },
+    stop() {
+      if (phase === "stopped") return;
+      const wasQuiesced = phase === "quiesced";
+      phase = "stopped";
+      if (!wasQuiesced) return;
+      quiescedSessions--;
+      if (quiescedSessions === 0) releaseDeferredSoon();
+    },
+  };
+}
+
+// ============================================
 // THE ALL-SAVE HOLD
 // ============================================
 //
@@ -377,6 +466,21 @@ function skipped_(msg) {
   return { ok: false, msg, msgType: 'skipped', code: null, etag: null };
 }
 
+// A save asked for while a session has admission closed. It writes nothing, so nothing
+// about the page's state may move: no capture, no gate token, no baseline. Only work that
+// would be lost is recorded, so a save asked for on a clean page cannot make the close
+// warning fire later for a page that lost nothing.
+function sessionClosed(msg) {
+  if (pageMaybeDirty() || hasUnsavedState()) parkedWork = true;
+  return skipped_(msg);
+}
+
+// The exit's own flush is not an ordinary save: it is the barrier writing the bytes the
+// exit is about to account for, so it runs with this module's permit. Nothing else does —
+// a Cmd+S or a [trigger-save] press while admission is closed stays parked. The
+// transition's generation-bound permit is the controller's identity, not a public flag.
+const SESSION_PERMIT = Symbol('clay:save-session');
+
 /**
  * Tell the recovery service how this capture settled.
  *
@@ -402,6 +506,9 @@ function settleRecoveryCapture(captureId, result) {
 function applySaveResult(result, forComparison, forDirty, label, gateToken, forSave = null, captureId = null, quietConflict = false) {
   settleRecoveryCapture(captureId, result);
   if (result.ok) {
+    // These bytes are on the host now, so nothing a closed session parked is still
+    // waiting for a write.
+    parkedWork = false;
     // Both baselines advance from the SAME pre-request capture, never from the
     // live DOM, so an edit made while the request was on the wire stays unsaved.
     setLastSavedBaselines(forComparison, forDirty);
@@ -541,13 +648,22 @@ function attemptSave(options, callback = () => {}) {
   return adoptionQueue.then(() => attemptSaveNow(options, callback));
 }
 
-function attemptSaveNow({ kind }, callback = () => {}) {
+function attemptSaveNow({ kind, permit = null }, callback = () => {}) {
   const explicit = kind === 'explicit';
 
   return new Promise((resolve) => {
     if (!isEditMode && !window.clay?.testMode) {
       if (explicit) clearExplicitSave();
       const skipped = skipped_('Not in edit mode');
+      callback(skipped);
+      return resolve(skipped);
+    }
+
+    // A session has admission closed: the page is between modes, and neither lane writes
+    // until it decides. An automatic attempt is remembered so `resume` replays it.
+    if (!savesAdmitted() && permit !== SESSION_PERMIT) {
+      if (!explicit) parkedAutosave = true;
+      const skipped = sessionClosed('Save session is quiesced');
       callback(skipped);
       return resolve(skipped);
     }
@@ -744,6 +860,12 @@ export function savePage(callback = () => {}) {
   return attemptSave({ kind: 'explicit' }, callback);
 }
 
+// The exit flush's own entry, inside the session's permit. Not exported: the only caller
+// is the barrier below, which is the one save a closed session must still be able to send.
+function savePagePermitted(callback = () => {}) {
+  return attemptSave({ kind: 'explicit', permit: SESSION_PERMIT }, callback);
+}
+
 /**
  * Force-save the current page (skips dirty check).
  *
@@ -754,6 +876,14 @@ export function savePageForce(callback = () => {}, { quietConflict = false } = {
   return new Promise((resolve) => {
     if (!isEditMode && !window.clay?.testMode) {
       const skipped = skipped_('Not in edit mode');
+      callback(skipped);
+      return resolve(skipped);
+    }
+
+    // A forced save is still an ordinary one for admission: only the exit's own flush
+    // carries the permit.
+    if (!savesAdmitted()) {
+      const skipped = sessionClosed('Save session is quiesced');
       callback(skipped);
       return resolve(skipped);
     }
@@ -892,7 +1022,7 @@ async function flushBytes(keepalive, deadline) {
       if (hasUnsavedState()) throw flushError('This document has unsaved work a save cannot write.', 'blocked');
       return { state: saved ? 'saved' : 'clean', etag: etag ?? lastSeenEtag() };
     }
-    const result = await withKeepalive(keepalive, () => savePage());
+    const result = await withKeepalive(keepalive, () => savePagePermitted());
     // The lane was busy (a drained pending save is on the wire): wait it out next turn.
     if (result.msgType === 'skipped') continue;
     if (!result.ok) throw flushError(result.msg || 'Save failed', result.msgType === 'conflict' || isSaveConflicted() ? 'conflict' : 'failed');
@@ -976,7 +1106,7 @@ const takeSoonQueued = () => {
 
 function fireSoon() {
   soonTimer = null;
-  if (autosaveSuspended > 0) {
+  if (autosaveSuspended > 0 || !savesAdmitted()) {
     soonDeferred = true;
     return;
   }
@@ -998,6 +1128,22 @@ export function savePageSoon() {
     soonWaiters.push(resolve);
     soonTimer = setTimeout(fireSoon, Math.max(0, Math.min(SOON_MS, soonStarted + SOON_MAX_MS - now)));
   });
+}
+
+// The automatic attempt a closed session parked. Replayed when admission comes back, so
+// an edit typed while the page was between modes still reaches disk.
+function replayParkedAutosave() {
+  if (!parkedAutosave) return;
+  parkedAutosave = false;
+  savePageThrottled();
+}
+
+// A soon() timer that fired while admission was closed: the callers are still waiting on
+// a save that has not been attempted, so arm it again in the same way resumeAutosave does.
+function releaseDeferredSoon() {
+  if (!soonDeferred) return;
+  soonDeferred = false;
+  soonTimer = setTimeout(fireSoon, 0);
 }
 
 // Baseline for autosave comparison
@@ -1196,7 +1342,10 @@ export function styleAdoptionsSettled() {
 export function styleAdoptionPending(current) {
   if (!adoptionsQueued) return false;
   if (editedSinceAdoption || hasUnsavedState()) return false;
-  if (isSaveInProgress() || pendingSave || pendingAutosave) return false;
+  // Parked work is work too: a save a closed session refused leaves the baselines
+  // untouched, so without this the adoption window would speak for the page's bytes
+  // while they are still waiting to be written.
+  if (isSaveInProgress() || pendingSave || pendingAutosave || parkedWork) return false;
   if (typeof current !== 'string') return false;
   return current === withoutOwnedStyles(lastSavedDirty, pendingStyles);
 }
@@ -1354,6 +1503,15 @@ export function savePageThrottled(callback = () => {}) {
   if (previewHold > 0) {
     previewAutosaveMissed = true;
     const skipped = skipped_(saveHoldReason());
+    callback(skipped);
+    return Promise.resolve(skipped);
+  }
+
+  // The page is between modes: no automatic attempt is admitted, and the activity that
+  // asked for one is remembered so `resume` replays it instead of losing the edit.
+  if (!savesAdmitted()) {
+    parkedAutosave = true;
+    const skipped = sessionClosed('Save session is quiesced');
     callback(skipped);
     return Promise.resolve(skipped);
   }

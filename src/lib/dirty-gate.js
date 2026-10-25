@@ -186,6 +186,18 @@ export function pageMaybeDirty() {
 }
 
 /**
+ * How many changes this page has recorded, ever.
+ *
+ * Monotonic and never rewound by a save or a clear, so a caller that closed input
+ * admission can record it and later prove that nothing new arrived while it was closed,
+ * instead of assuming quiet. Observation keeps running while admission is closed: what
+ * stops is writing, never the record of work.
+ */
+export function gateRevision() {
+  return changes;
+}
+
+/**
  * Record the gate state at capture time. The save flow takes a token when it
  * clones the DOM and hands it back on success (or on a verified "no changes"),
  * so a clear can never swallow edits made while the save was in flight.

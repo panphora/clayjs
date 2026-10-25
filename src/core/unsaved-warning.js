@@ -18,7 +18,7 @@
 import { isEditMode, isDraftMode } from "./is-edit-mode.js";
 import { draftStoreFailed, flushDraft } from "./draft-mode.js";
 import { captureForDirtyCheck } from "./snapshot.js";
-import { getLastSavedDirty, styleAdoptionPending } from "./save.js";
+import { getLastSavedDirty, sessionParked, styleAdoptionPending } from "./save.js";
 import { logUnloadDiffSync, preloadIfEnabled } from "../lib/autosave-debug.js";
 import { hasUnsavedState } from "../lib/unsaved-state.js";
 
@@ -48,6 +48,10 @@ preloadIfEnabled();
 // The same predicate is exposed as `clay.hasUnsavedChanges`, which a host asks
 // synchronously before deciding whether a save is worth asking for.
 export function hasUnsavedChanges() {
+  // Bytes a save session parked before its exit were never written, and whatever mode the
+  // page reports by then, they are still only here. Asked first, because the mode is a
+  // claim about the page and this is a claim about the host.
+  if (sessionParked()) return true;
   if (!isEditMode) return false;
 
   // Work outside the DOM first: it needs no capture, and a capture that throws
@@ -85,7 +89,7 @@ export function bytesUnsaved() {
 }
 
 window.addEventListener('beforeunload', (event) => {
-  if (!isEditMode) return;
+  if (!isEditMode && !sessionParked()) return;
 
   if (discardPermit) {
     discardPermit = false;
