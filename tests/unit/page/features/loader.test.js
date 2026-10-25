@@ -1,4 +1,10 @@
+import { readFileSync } from "node:fs";
 import { createFeatureLoader } from "../../../../src/page/feature-loader.js";
+import { FEATURES } from "../../../../src/page/features/registry.js";
+import * as tableModule from "../../../../src/page/features/table.js";
+import * as boardModule from "../../../../src/page/features/board.js";
+import * as mediaModule from "../../../../src/page/features/media.js";
+import * as toolModule from "../../../../src/page/features/tool.js";
 
 const deferred = () => {
   let resolve, reject;
@@ -135,4 +141,58 @@ test("an install that resolves after dispose is disposed at once and never insta
   await tick();
   expect(loader.has("tool")).toBe(false);
   expect(disposals).toBe(1);
+});
+
+test("a host-local runtime prefix activates every feature without reaching clayjs.com", async () => {
+  const index = JSON.parse(readFileSync(new URL("../../../../dist/offline-manifest.json", import.meta.url), "utf8"));
+  const prefix = `/_/clayjs/${index.version}/`;
+  const modules = {
+    "src/page/features/table.js": tableModule,
+    "src/page/features/board.js": boardModule,
+    "src/page/features/media.js": mediaModule,
+    "src/page/features/tool.js": toolModule,
+  };
+  const requested = [];
+  const fetches = [];
+  const installs = [];
+
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (input) => {
+    fetches.push(String(input));
+    throw new Error(`clayjs: the offline test refuses ${String(input)}`);
+  };
+  const importUnderPrefix = (url) => {
+    if (!url.startsWith(prefix)) return Promise.reject(new Error(`clayjs: the feature loader left its local prefix: ${url}`));
+    const mod = modules[url.slice(prefix.length)];
+    return mod ? Promise.resolve(mod) : Promise.reject(new Error(`clayjs: ${url} is not in this release`));
+  };
+
+  const loader = createFeatureLoader({
+    load: (id) => {
+      const url = `${prefix}src/${FEATURES[id].module}`;
+      requested.push(url);
+      return importUnderPrefix(url);
+    },
+    install: (id, mod) => { installs.push(id); return mod.createFeature(); },
+  });
+
+  try {
+    const ids = Object.keys(FEATURES).sort();
+    expect(ids).toEqual(["board", "media", "table", "tool"]);
+    for (const id of ids) {
+      expect(await loader.ensure(id)).toBeTruthy();
+      expect(loader.has(id)).toBe(true);
+    }
+    expect(installs).toEqual(ids);
+    expect(requested).toHaveLength(ids.length);
+    for (const url of requested) {
+      expect(url.startsWith(prefix)).toBe(true);
+      expect(url.startsWith("https://clayjs.com/")).toBe(false);
+      expect(Object.hasOwn(index.files, url.slice(prefix.length))).toBe(true);
+    }
+    expect(fetches).toEqual([]);
+  } finally {
+    globalThis.fetch = realFetch;
+    loader.dispose();
+  }
 });

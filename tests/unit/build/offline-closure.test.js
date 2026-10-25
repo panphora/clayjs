@@ -202,3 +202,11 @@ test("the CLI rejects both modes or neither", async () => {
   expect((await cli(["--package-root", site, "--published-root", stage])).code).toBe(2);
   expect((await cli([])).code).toBe(2);
 }, 60000);
+
+test("the CLI takes --base-url with an optional --index and no other mode", async () => {
+  const baseURL = "http://127.0.0.1:1/_/clayjs/1.15.2/";
+  expect((await cli(["--base-url", baseURL, "--package-root", site])).code).toBe(2);
+  expect((await cli(["--base-url", baseURL, "--published-root", stage])).code).toBe(2);
+  expect((await cli(["--index", stage])).code).toBe(2);
+  expect((await cli(["--base-url"])).code).toBe(2);
+}, 60000);

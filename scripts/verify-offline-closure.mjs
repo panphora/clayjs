@@ -63,16 +63,23 @@ function embedded(code) {
   throw new Error("unterminated embedded manifest");
 }
 
-export async function verifyOfflineClosure({ packageRoot, publishedRoot } = {}) {
-  const packageMode = Boolean(packageRoot) && !publishedRoot;
-  const publishedMode = Boolean(publishedRoot) && !packageRoot;
-  if (!packageMode && !publishedMode) {
-    throw new Error("verifyOfflineClosure needs exactly one of packageRoot and publishedRoot");
+const REPO = path.resolve(new URL("..", import.meta.url).pathname);
+
+export async function verifyOfflineClosure({ packageRoot, publishedRoot, baseURL, indexFile } = {}) {
+  const packageMode = Boolean(packageRoot) && !publishedRoot && !baseURL;
+  const publishedMode = Boolean(publishedRoot) && !packageRoot && !baseURL;
+  const baseURLMode = Boolean(baseURL) && !packageRoot && !publishedRoot;
+  if (!packageMode && !publishedMode && !baseURLMode) {
+    throw new Error("verifyOfflineClosure needs exactly one of packageRoot, publishedRoot and baseURL");
   }
-  const indexFile = packageMode
-    ? path.join(packageRoot, "dist", "offline-manifest.json")
-    : path.join(publishedRoot, "offline-manifest.json");
-  const index = JSON.parse(await readFile(indexFile, "utf8"));
+  const manifestFile = indexFile ?? (
+    packageMode
+      ? path.join(packageRoot, "dist", "offline-manifest.json")
+      : publishedMode
+        ? path.join(publishedRoot, "offline-manifest.json")
+        : path.join(REPO, "dist", "offline-manifest.json")
+  );
+  const index = JSON.parse(await readFile(manifestFile, "utf8"));
 
   const problems = [];
   const result = {
@@ -119,15 +126,35 @@ export async function verifyOfflineClosure({ packageRoot, publishedRoot } = {}) 
   for (const pub of listed) {
     if (unsound.has(pub)) continue;
     const entry = files[pub] ?? {};
-    const abs = packageMode ? path.join(packageRoot, String(entry.source)) : path.join(publishedRoot, pub);
     let bytes;
-    try {
-      const stat = await lstat(abs);
-      if (!stat.isFile()) throw new Error(`${abs} is not a regular file`);
-      bytes = await readFile(abs);
-    } catch (err) {
-      problems.push(`${pub}: ${err.message}`);
-      continue;
+    if (baseURLMode) {
+      const target = new URL(pub, baseURL);
+      let response;
+      try {
+        response = await fetch(target);
+      } catch (err) {
+        problems.push(`${pub}: ${err.message}`);
+        continue;
+      }
+      if (response.status !== 200) {
+        problems.push(`${pub}: ${target.href} answers ${response.status}`);
+        continue;
+      }
+      bytes = Buffer.from(await response.arrayBuffer());
+      const served = response.headers.get("content-type");
+      if (served !== entry.type) {
+        problems.push(`${pub}: serves Content-Type ${JSON.stringify(served)}, the index records ${JSON.stringify(entry.type)}`);
+      }
+    } else {
+      const abs = packageMode ? path.join(packageRoot, String(entry.source)) : path.join(publishedRoot, pub);
+      try {
+        const stat = await lstat(abs);
+        if (!stat.isFile()) throw new Error(`${abs} is not a regular file`);
+        bytes = await readFile(abs);
+      } catch (err) {
+        problems.push(`${pub}: ${err.message}`);
+        continue;
+      }
     }
     bytesBy.set(pub, bytes);
     const sha256 = createHash("sha256").update(bytes).digest("hex");
@@ -305,7 +332,14 @@ export async function verifyOfflineClosure({ packageRoot, publishedRoot } = {}) 
   return result;
 }
 
-const USAGE = "usage: node scripts/verify-offline-closure.mjs --package-root <dir> | --published-root <dir>";
+const USAGE = "usage: node scripts/verify-offline-closure.mjs --package-root <dir> | --published-root <dir> | --base-url <url> [--index <file>]";
+
+const OPTIONS = {
+  "--package-root": "packageRoot",
+  "--published-root": "publishedRoot",
+  "--base-url": "baseURL",
+  "--index": "indexFile",
+};
 
 function usage(why) {
   if (why) console.error(`verify-offline-closure: ${why}`);
@@ -318,18 +352,19 @@ async function main() {
   const options = {};
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
-    if (arg === "--package-root" || arg === "--published-root") {
+    if (Object.hasOwn(OPTIONS, arg)) {
       const value = argv[i + 1];
-      if (!value || value.startsWith("--")) usage(`${arg} needs a directory`);
-      options[arg === "--package-root" ? "packageRoot" : "publishedRoot"] = value;
+      if (!value || value.startsWith("--")) usage(`${arg} needs ${arg === "--base-url" ? "a URL" : "a value"}`);
+      options[OPTIONS[arg]] = value;
       i += 1;
     } else {
       usage(`unknown argument ${arg}`);
     }
   }
-  if (Boolean(options.packageRoot) === Boolean(options.publishedRoot)) {
-    usage("give exactly one of --package-root and --published-root");
+  if ([options.packageRoot, options.publishedRoot, options.baseURL].filter(Boolean).length !== 1) {
+    usage("give exactly one of --package-root, --published-root and --base-url");
   }
+  if (options.indexFile && !options.baseURL) usage("--index goes with --base-url");
   let result;
   try {
     result = await verifyOfflineClosure(options);
