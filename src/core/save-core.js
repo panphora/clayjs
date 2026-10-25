@@ -13,6 +13,7 @@ import { consumeUserDriven, consumeExplicitSave, markUserDriven } from "../lib/u
 import { saveToken } from "./host-attrs.js";
 import { lastSeenEtag, conditionalSaves, recordEtag } from "./etag.js";
 import { hostMeta } from "./host-meta.js";
+import "./runtime-url.js";
 import {
   getPageContents,
   onSnapshot,

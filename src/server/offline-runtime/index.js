@@ -78,8 +78,10 @@ function applySplices(html, splices) {
   return out;
 }
 
-function descriptorTag(version, entries) {
-  const json = JSON.stringify({ schema: 1, version, entries }).replace(/</g, "\\u003c");
+function descriptorTag(version, entries, aliases) {
+  const descriptor = { schema: 1, version, entries };
+  if (aliases) descriptor.aliases = aliases;
+  const json = JSON.stringify(descriptor).replace(/</g, "\\u003c");
   return `<script type="application/json" id="${DESCRIPTOR_ID}" clay="no-save no-watch no-snapshot">${json}</script>`;
 }
 
@@ -112,6 +114,7 @@ export function projectRuntimeHTML(html, { releases, selectedVersion, documentUR
   const mappings = [];
   const skipped = [];
   const splices = [];
+  const aliases = {};
   const version = versions.size === 1 ? [...versions][0] : null;
   let insertAt = null;
 
@@ -123,12 +126,14 @@ export function projectRuntimeHTML(html, { releases, selectedVersion, documentUR
     }
     splices.push({ start: node.valueStart, end: node.valueEnd, text: result.localURL });
     mappings.push({ original: node.value, local: result.localURL });
+    if (result.kind === "alias") aliases[node.value] = result.path;
     if (insertAt === null) insertAt = node.startOffset;
   }
 
   if (!mappings.length) return { html, mappings, skipped, unavailable: null };
 
-  splices.push({ start: insertAt, end: insertAt, text: descriptorTag(version, mappings) });
+  const aliasMap = Object.keys(aliases).length ? aliases : null;
+  splices.push({ start: insertAt, end: insertAt, text: descriptorTag(version, mappings, aliasMap) });
   return { html: applySplices(html, splices), mappings, skipped, unavailable: null };
 }
 

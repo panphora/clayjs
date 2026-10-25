@@ -177,6 +177,13 @@ function entriesOf(descriptor) {
   return descriptor.entries.filter((entry) => entry && typeof entry === "object");
 }
 
+function descriptorAliasesOf(descriptor) {
+  if (!descriptor || typeof descriptor !== "object") return null;
+  const aliases = descriptor.aliases;
+  if (!aliases || typeof aliases !== "object") return null;
+  return aliases;
+}
+
 function originalMatchesRelease(original, version, releases) {
   if (!releases) return true;
   const files = filesOf(releases, version);
@@ -195,6 +202,11 @@ export function canonicalizeRuntimeURL(value, { descriptor, releases, documentUR
     const aliases = releases?.[local.version]?.aliases;
     if (aliases && Object.hasOwn(aliases, entry.original) && aliases[entry.original] === local.path &&
         !local.search && !local.hash) return entry.original;
+    const declared = !releases && descriptorAliasesOf(descriptor);
+    if (declared && !local.search && !local.hash && entry.original.startsWith("https://") &&
+        Object.hasOwn(declared, entry.original) && declared[entry.original] === local.path) {
+      return entry.original;
+    }
     const original = parseRuntimeURL(entry.original);
     if (!original) continue;
     if (original.kind !== "rolling" && original.kind !== "exact") continue;

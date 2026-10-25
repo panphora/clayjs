@@ -1,0 +1,202 @@
+/**
+ * @jest-environment jsdom
+ * @jest-environment-options {"url": "http://127.0.0.1:4321/notes/doc.html"}
+ */
+import { jest } from "@jest/globals";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { projectRuntimeHTML } from "../../src/server/offline-runtime/index.js";
+
+const ROOT = path.resolve(new URL("../..", import.meta.url).pathname);
+const FIXTURES = path.join(ROOT, "tests/fixtures/offline-runtime");
+const { selectedVersion, releases } = JSON.parse(readFileSync(path.join(FIXTURES, "releases.json"), "utf8"));
+const documentURL = window.location.href;
+
+const CLAY = "https://clayjs.com/v1/clay.js?plugins=sortable,people,upload,sync,visitor-drafts,unsent,menu&exclude=richclay";
+const SAP = "https://clayjs.com/v1/sap.js";
+const CSS = "https://clayjs.com/v1/src/page/themes/light-1.css";
+const ROUTER = "https://clayjs.com/v1/clay-router.js";
+
+const AUTHORED = "<!doctype html><html><head>" +
+  `<script src="${CLAY}"></script>` +
+  `<script src="${SAP}"></script>` +
+  `<link rel="stylesheet" href="${CSS}">` +
+  `<template><script src="${ROUTER}"></script></template>` +
+  "</head><body><p id=\"text\">hello</p></body></html>";
+
+const project = (html) => projectRuntimeHTML(html, { releases, selectedVersion, documentURL });
+const projection = project(AUTHORED);
+const SERVED = projection.html;
+
+function load(html) {
+  const parsed = new DOMParser().parseFromString(html, "text/html");
+  document.replaceChild(document.importNode(parsed.documentElement, true), document.documentElement);
+}
+
+function runtimeAttributes(html) {
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const values = [];
+  const walk = (root) => {
+    for (const element of root.querySelectorAll("script[src], link[href]")) {
+      values.push(element.getAttribute(element.tagName === "SCRIPT" ? "src" : "href"));
+    }
+    for (const template of root.querySelectorAll("template")) walk(template.content);
+  };
+  walk(doc);
+  return values;
+}
+
+class FakeEventSource extends EventTarget {
+  constructor(url) {
+    super();
+    this.url = url;
+    this.readyState = 0;
+  }
+  close() {}
+}
+
+let snapshot;
+
+beforeAll(async () => {
+  global.EventSource = FakeEventSource;
+  window.EventSource = FakeEventSource;
+  snapshot = await import("../../src/core/snapshot.js");
+  await import("../../src/core/runtime-url.js");
+});
+
+beforeEach(() => {
+  load(SERVED);
+});
+
+afterEach(() => {
+  jest.restoreAllMocks();
+  delete global.fetch;
+});
+
+test("a save writes the authored URLs and no descriptor, and leaves the live DOM local", () => {
+  expect(SERVED).toContain("/_/clayjs/");
+  expect(SERVED).toContain("clay-runtime-map");
+
+  const bytes = snapshot.captureForSave({ emitForSync: false });
+
+  expect(bytes).not.toContain("/_/clayjs/");
+  expect(bytes).not.toContain("clay-runtime-map");
+  expect(bytes).toContain(`src="${CLAY.replace("&", "&amp;")}"`);
+  expect(runtimeAttributes(bytes)).toEqual([CLAY, SAP, CSS, ROUTER]);
+  expect(projection.mappings.map((mapping) => mapping.original)).toEqual([CLAY, SAP, CSS, ROUTER]);
+
+  expect(document.querySelector('script[src="/_/clayjs/1.15.2/clay.js?plugins=sortable,people,upload,sync,visitor-drafts,unsent,menu&exclude=richclay"]')).not.toBeNull();
+  expect(document.querySelector('link[href^="/_/clayjs/"]')).not.toBeNull();
+  expect(document.getElementById("clay-runtime-map")).not.toBeNull();
+});
+
+test("a no-edit dirty check against the baseline is clean", () => {
+  const baseline = snapshot.captureForDirtyCheck();
+  const comparison = snapshot.captureForComparison();
+  for (const bytes of [baseline, comparison]) {
+    expect(bytes).not.toContain("/_/clayjs/");
+    expect(bytes).not.toContain("clay-runtime-map");
+  }
+  expect(snapshot.captureForDirtyCheck()).toBe(baseline);
+  expect(snapshot.captureForComparison()).toBe(comparison);
+});
+
+test("an edit is dirty, the save is canonical, and the saved file reopens to the same page", () => {
+  const baseline = snapshot.captureForDirtyCheck();
+  document.getElementById("text").textContent = "edited";
+  expect(snapshot.captureForDirtyCheck()).not.toBe(baseline);
+
+  const bytes = snapshot.captureForSave({ emitForSync: false });
+  expect(bytes).not.toContain("/_/clayjs/");
+  expect(bytes).not.toContain("clay-runtime-map");
+  expect(runtimeAttributes(bytes)).toEqual([CLAY, SAP, CSS, ROUTER]);
+
+  // The host projects the saved file again when it serves it. Everything the projector
+  // writes comes back local, and the one URL whose query holds an `&` comes back exactly
+  // as the browser wrote it (`&amp;`) because the projector does not splice raw bytes it
+  // did not write; parsed, it is the same URL. The tree is the same tree either way.
+  const reopened = new DOMParser().parseFromString(project(bytes).html, "text/html");
+  const served = new DOMParser().parseFromString(SERVED, "text/html");
+  reopened.querySelector("#clay-runtime-map").remove();
+  served.querySelector("#clay-runtime-map").remove();
+  served.querySelector('script[src*="/clay.js"]').setAttribute("src", CLAY);
+  served.getElementById("text").textContent = "edited";
+  expect(reopened.documentElement.outerHTML).toBe(served.documentElement.outerHTML);
+});
+
+test("an author change to a local URL's query saves the authored rolling prefix with the new query", () => {
+  const live = document.querySelector('script[src*="/clay.js?"]');
+  live.setAttribute("src", "/_/clayjs/1.15.2/clay.js?plugins=page");
+
+  const bytes = snapshot.captureForSave({ emitForSync: false });
+  expect(bytes).not.toContain("/_/clayjs/");
+  expect(runtimeAttributes(bytes)).toContain("https://clayjs.com/v1/clay.js?plugins=page");
+});
+
+test("a local runtime URL with no descriptor saves as the exact public URL", () => {
+  load("<!doctype html><html><head><script src=\"/_/clayjs/1.15.2/clay.js\"></script></head><body><p>x</p></body></html>");
+  expect(document.getElementById("clay-runtime-map")).toBeNull();
+
+  const bytes = snapshot.captureForSave({ emitForSync: false });
+  expect(runtimeAttributes(bytes)).toEqual(["https://clayjs.com/1.15.2/clay.js"]);
+});
+
+test("a spoofed descriptor entry for a foreign host does not restore it", () => {
+  const descriptor = JSON.stringify({
+    schema: 1,
+    version: "1.15.2",
+    entries: [{ original: "https://example.com/1.15.2/clay.js", local: "/_/clayjs/1.15.2/clay.js" }],
+  });
+  load("<!doctype html><html><head>" +
+    `<script type="application/json" id="clay-runtime-map" clay="no-save no-watch no-snapshot">${descriptor}</script>` +
+    "<script src=\"/_/clayjs/1.15.2/clay.js\"></script></head><body><p>x</p></body></html>");
+
+  const bytes = snapshot.captureForSave({ emitForSync: false });
+  expect(bytes).not.toContain("example.com");
+  expect(bytes).not.toContain("clay-runtime-map");
+  expect(runtimeAttributes(bytes)).toEqual(["https://clayjs.com/1.15.2/clay.js"]);
+});
+
+test("a page with no runtime URL captures byte for byte as it did before", () => {
+  load("<!doctype html><html><head><script src=\"https://clayjs.com/v1/clay.js\"></script></head>" +
+    "<body><p id=\"text\">plain</p></body></html>");
+  const expected = "<!DOCTYPE html>" + document.documentElement.outerHTML;
+
+  expect(snapshot.captureForSave({ emitForSync: false })).toBe(expected);
+  expect(snapshot.captureForComparison()).toBe(expected);
+  expect(snapshot.captureForDirtyCheck()).toBe(expected);
+});
+
+test("the live-sync serialization of a capture is canonical", () => {
+  const clone = snapshot.captureSnapshot({ flushUndo: false, authored: false });
+  const html = snapshot.serializeForSync(clone);
+
+  expect(html).not.toContain("/_/clayjs/");
+  expect(html).not.toContain("clay-runtime-map");
+  expect(runtimeAttributes(html)).toEqual([CLAY, SAP, CSS, ROUTER]);
+});
+
+test("the source plugin refuses a projected response and asks for the canonical one", async () => {
+  global.fetch = jest.fn(async () => ({
+    ok: true,
+    status: 200,
+    redirected: false,
+    type: "basic",
+    headers: { get: (name) => (name.toLowerCase() === "content-type" ? "text/html; charset=utf-8" : null) },
+    text: async () => SERVED,
+  }));
+  const info = jest.spyOn(console, "info").mockImplementation(() => {});
+
+  const { source, renderSave } = await import("../../src/plugins/source.js");
+  await source.ready;
+
+  expect(global.fetch).toHaveBeenCalledTimes(1);
+  expect(global.fetch.mock.calls[0][1].headers).toEqual({ "Clay-Source": "1" });
+  const refusals = info.mock.calls.filter(([line]) => String(line).includes("source fetch: projected response"));
+  expect(refusals).toHaveLength(1);
+
+  expect(source.stats().installed).toBe(false);
+  expect(source.text()).toBeNull();
+  const clone = snapshot.captureSaveClone({ flushUndo: false, authored: false });
+  expect(renderSave(clone, "today")).toBe("today");
+});

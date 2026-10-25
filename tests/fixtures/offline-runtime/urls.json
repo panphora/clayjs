@@ -393,6 +393,46 @@
       "fn": "canonicalize",
       "input": "/_/clayjs/1.15.2/%2e%2e/clay.js",
       "expect": "/_/clayjs/1.15.2/%2e%2e/clay.js"
+    },
+    {
+      "name": "descriptor-alias-client",
+      "fn": "canonicalize",
+      "input": "/_/clayjs/1.15.2/compat/lib-1.0.0.min.js",
+      "descriptor": {
+        "schema": 1,
+        "version": "1.15.2",
+        "entries": [
+          {
+            "original": "https://cdn.example.test/lib@1.0.0/lib.min.js",
+            "local": "/_/clayjs/1.15.2/compat/lib-1.0.0.min.js"
+          }
+        ],
+        "aliases": {
+          "https://cdn.example.test/lib@1.0.0/lib.min.js": "compat/lib-1.0.0.min.js"
+        }
+      },
+      "noReleases": true,
+      "expect": "https://cdn.example.test/lib@1.0.0/lib.min.js"
+    },
+    {
+      "name": "descriptor-alias-other-path",
+      "fn": "canonicalize",
+      "input": "/_/clayjs/1.15.2/compat/lib-1.0.0.min.js",
+      "descriptor": {
+        "schema": 1,
+        "version": "1.15.2",
+        "entries": [
+          {
+            "original": "https://cdn.example.test/lib@1.0.0/lib.min.js",
+            "local": "/_/clayjs/1.15.2/compat/lib-1.0.0.min.js"
+          }
+        ],
+        "aliases": {
+          "https://cdn.example.test/lib@1.0.0/lib.min.js": "compat/other.min.js"
+        }
+      },
+      "noReleases": true,
+      "expect": "https://clayjs.com/1.15.2/compat/lib-1.0.0.min.js"
     }
   ]
 }

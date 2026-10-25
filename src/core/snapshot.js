@@ -162,6 +162,12 @@ function runAuthoredHandlers(clone, attr) {
   }
 }
 
+let cloneCanonicalizer = null;
+
+export function setCloneCanonicalizer(canonicalize) {
+  cloneCanonicalizer = canonicalize;
+}
+
 /**
  * Register a hook that runs on EVERY snapshot (save AND sync).
  * Use for: syncing form values to the clone.
@@ -327,6 +333,8 @@ export function captureSnapshot({ flushUndo = true, authored = true, forSave = f
   // the file keeps what the page author wrote. Before onbeforesnapshot, so an
   // authored handler sees the same URLs the file will.
   restoreAuthoredUrls(clone);
+
+  cloneCanonicalizer?.(clone);
 
   stripSnapshotRegions(clone);
   // Whether the page authors its own save handlers, read here because this is the

@@ -188,7 +188,7 @@
       "name": "alias-and-rolling",
       "input": "<!doctype html><html><head><script src=\"https://cdn.example.test/lib@1.0.0/lib.min.js\"></script><script src=\"https://clayjs.com/v1/clay.js?plugins=page\"></script></head><body></body></html>",
       "project": {
-        "html": "<!doctype html><html><head><script type=\"application/json\" id=\"clay-runtime-map\" clay=\"no-save no-watch no-snapshot\">{\"schema\":1,\"version\":\"1.15.2\",\"entries\":[{\"original\":\"https://cdn.example.test/lib@1.0.0/lib.min.js\",\"local\":\"/_/clayjs/1.15.2/compat/lib-1.0.0.min.js\"},{\"original\":\"https://clayjs.com/v1/clay.js?plugins=page\",\"local\":\"/_/clayjs/1.15.2/clay.js?plugins=page\"}]}</script><script src=\"/_/clayjs/1.15.2/compat/lib-1.0.0.min.js\"></script><script src=\"/_/clayjs/1.15.2/clay.js?plugins=page\"></script></head><body></body></html>",
+        "html": "<!doctype html><html><head><script type=\"application/json\" id=\"clay-runtime-map\" clay=\"no-save no-watch no-snapshot\">{\"schema\":1,\"version\":\"1.15.2\",\"entries\":[{\"original\":\"https://cdn.example.test/lib@1.0.0/lib.min.js\",\"local\":\"/_/clayjs/1.15.2/compat/lib-1.0.0.min.js\"},{\"original\":\"https://clayjs.com/v1/clay.js?plugins=page\",\"local\":\"/_/clayjs/1.15.2/clay.js?plugins=page\"}],\"aliases\":{\"https://cdn.example.test/lib@1.0.0/lib.min.js\":\"compat/lib-1.0.0.min.js\"}}</script><script src=\"/_/clayjs/1.15.2/compat/lib-1.0.0.min.js\"></script><script src=\"/_/clayjs/1.15.2/clay.js?plugins=page\"></script></head><body></body></html>",
         "mappings": [
           {
             "original": "https://cdn.example.test/lib@1.0.0/lib.min.js",

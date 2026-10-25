@@ -35,7 +35,7 @@ test("every URL vector matches the resolver exactly", () => {
       ? resolveRuntimeURL(entry.input, options)
       : canonicalizeRuntimeURL(entry.input, {
         descriptor: entry.descriptor ?? null,
-        releases,
+        releases: entry.noReleases ? undefined : releases,
         documentURL,
       });
     expect({ name: entry.name, value: actual }).toEqual({ name: entry.name, value: entry.expect });

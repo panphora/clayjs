@@ -99,12 +99,19 @@ const now = () => (typeof performance !== 'undefined' ? performance.now() : Date
  * shape check in checkSource is the backstop for whatever gets past all three.
  */
 async function fetchSource(url) {
-  const res = await fetch(url, { cache: 'no-store', redirect: 'manual', credentials: 'same-origin' });
+  const res = await fetch(url, {
+    cache: 'no-store',
+    redirect: 'manual',
+    credentials: 'same-origin',
+    headers: { 'Clay-Source': '1' }
+  });
   if (!res.ok) throw new Error(`source fetch: status ${res.status}`);
   if (res.redirected || res.type === 'opaqueredirect') throw new Error('source fetch: redirected');
   const type = (res.headers.get('content-type') || '').toLowerCase();
   if (!type.startsWith('text/html')) throw new Error(`source fetch: content-type ${type || 'missing'}`);
-  return res.text();
+  const text = await res.text();
+  if (text.includes('id="clay-runtime-map"')) throw new Error('source fetch: projected response');
+  return text;
 }
 
 /**
