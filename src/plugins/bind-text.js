@@ -10,6 +10,11 @@
  * is written or shown, and when it ends both edits apply unless they touch the
  * same stretch of text. Nothing here is Journal-specific: OverType, the
  * timestamps and the note arrive as callbacks.
+ *
+ * The binding answers for its own lifecycle too: `flush()` reports whether the
+ * record now holds the text and refuses while a composition is running, `open()`
+ * and `close()` honor that refusal, and `dispose()` only detaches once the exit
+ * barrier has landed.
  */
 
 // Applies two edits to one text when each is one stretch of it (an IME composition always is) and the
@@ -46,10 +51,20 @@ export function bindText(textarea, { onWrite, onShow, onConflict, onGone } = {})
   let field = textarea;
   const ta = () => field;
   let s = null; // { key, code, seen, composing, resolve }
+  let disposed = false;
   const observer = new MutationObserver(() => {
     observer.takeRecords();
     if (s && !s.composing && s.code.textContent !== s.seen) reconcile(s.code.textContent);
   });
+
+  // New durable input is the lifecycle's to admit, not the binding's: while a transition
+  // runs, a keystroke is not new input and is refused. A standalone page has no lifecycle
+  // and always admits.
+  const admitted = () => window.clay?.modeLifecycle?.canWrite?.() !== false;
+
+  // The record holds what the textarea holds. That is the only proof a flush landed: a
+  // callback that staged a conflict or a gone record has not made the text represented.
+  const represented = () => !!(s && s.code.isConnected && s.code.textContent === ta().value);
 
   function write(value) {
     const t = s.code.firstChild;
@@ -77,37 +92,71 @@ export function bindText(textarea, { onWrite, onShow, onConflict, onGone } = {})
     const typed = ta().value;
     const base = s.seen;
     const merged = typed === base ? now : spliceMerge(base, typed, now);
-    if (merged == null) onConflict?.(typed, { key: s.key, base, remote: now });
-    else if (merged !== now) write(merged);
-    show(merged ?? now);
+    if (merged == null) {
+      onConflict?.(typed, { key: s.key, base, remote: now });
+      show(now);
+      return { ok: false, code: "conflict" };
+    }
+    if (merged !== now) write(merged);
+    show(merged);
+    return { ok: true };
   }
+  // A record that cannot be resolved hands its text to `onGone` and is released: there is
+  // nothing left here that a later write could land in, and holding the detached element
+  // would refuse every record switch after it.
   function rebind() {
     const code = s.resolve ? s.resolve() : null;
-    if (!code) { onGone?.(ta().value, { key: s.key, base: s.seen }); return false; }
+    if (!code) {
+      onGone?.(ta().value, { key: s.key, base: s.seen });
+      observer.disconnect();
+      s = null;
+      return false;
+    }
     s.code = code;
     observer.disconnect();
     observer.observe(s.code, OBSERVE);
     return true;
   }
-  function input() {
-    if (!s || s.composing) return;
-    if (!s.code.isConnected && !rebind()) return;
+  // `captured` is the composition this binding already holds: it finishes through its own
+  // operation, so a closed admission does not throw away what the person was typing.
+  function input(captured = false) {
+    if (!s) return { ok: true };
+    if (s.composing) return { ok: false, code: "composition" };
+    if (!captured && !admitted()) return { ok: false, code: "busy" };
+    if (!s.code.isConnected && !rebind()) return { ok: false, code: "gone" };
     const now = s.code.textContent;
     if (now !== s.seen) return reconcile(now);
     const value = ta().value;
     if (value !== s.seen) write(value);
+    return { ok: true };
   }
+  // A composition in progress is not something a flush may end on the person's behalf: it
+  // is refused, and `s.composing` stays exactly as it was. Everything else runs the input
+  // path above, and its answer says whether the record now holds the text.
   function flush() {
-    if (s) { s.composing = false; input(); }
+    if (!s) return { ok: true };
+    if (s.composing) return { ok: false, code: "composition" };
+    const result = input();
+    if (!result.ok) return result;
+    return represented() ? { ok: true } : { ok: false, code: "conflict" };
   }
   function open(textEl, options = {}) {
+    if (disposed) return { ok: false, code: "disposed" };
     const key = options.key;
     if (s && s.key === key) {
       s.resolve = options.resolve;
-      if ((s.code !== textEl || !s.code.isConnected) && rebind()) input();
-      return;
+      if (s.code !== textEl || !s.code.isConnected) {
+        if (!rebind()) return { ok: false, code: "gone" };
+        return input();
+      }
+      return { ok: true };
     }
-    flush();
+    // A refused flush keeps the open record and its observer: nothing was written, so
+    // switching records here would drop the text the refusal was protecting. A record that
+    // was gone has already handed its text over and released itself, so there is nothing
+    // left to protect and the switch goes ahead.
+    const flushed = flush();
+    if (!flushed.ok && s) return flushed;
     observer.disconnect();
     s = { key, code: textEl, seen: textEl.textContent, composing: false, resolve: options.resolve };
     observer.observe(textEl, OBSERVE);
@@ -115,28 +164,45 @@ export function bindText(textarea, { onWrite, onShow, onConflict, onGone } = {})
     el.value = s.seen;
     el.setSelectionRange(0, 0);
     onShow?.();
+    return { ok: true };
   }
   function close() {
-    flush();
+    const flushed = flush();
+    if (!flushed.ok && s) return flushed;
     observer.disconnect();
     s = null;
+    return { ok: true };
+  }
+  // Detaching only. The barrier has already succeeded when a lease disposes the binding, so
+  // this never flushes: a composition still in progress or text the record never took keeps
+  // the listeners where they are, and the caller is told why.
+  function dispose() {
+    if (disposed) return { ok: true };
+    if (s?.composing) return { ok: false, code: "composition" };
+    if (s && !represented()) return { ok: false, code: "pending-input" };
+    disposed = true;
+    observer.disconnect();
+    detach();
+    s = null;
+    return { ok: true };
   }
   function attach(next) {
-    if (!next || next === field) return;
+    if (disposed || !next || next === field) return;
     detach();
     field = next;
     listen();
   }
 
+  function onInput() { input(); }
   function onCompositionStart() { if (s) s.composing = true; }
-  function onCompositionEnd() { if (s) { s.composing = false; input(); } }
+  function onCompositionEnd() { if (s) { s.composing = false; input(true); } }
   function listen() {
-    field.addEventListener("input", input);
+    field.addEventListener("input", onInput);
     field.addEventListener("compositionstart", onCompositionStart);
     field.addEventListener("compositionend", onCompositionEnd);
   }
   function detach() {
-    field.removeEventListener("input", input);
+    field.removeEventListener("input", onInput);
     field.removeEventListener("compositionstart", onCompositionStart);
     field.removeEventListener("compositionend", onCompositionEnd);
   }
@@ -144,7 +210,7 @@ export function bindText(textarea, { onWrite, onShow, onConflict, onGone } = {})
   listen();
 
   return {
-    open, close, flush,
+    open, close, flush, dispose,
     current: () => s && s.code,
     attach,
     composing: () => !!(s && s.composing),

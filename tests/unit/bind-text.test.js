@@ -266,6 +266,11 @@ test("a composition in a detached record never lands in the next one", async () 
   const b = article.querySelector(".entry-body");
   const bText = BASE.replace("Read a book.", "Read a long book.");
   b.textContent = bText;
+  // A composition in progress is not a flush a record switch may force.
+  expect(binding.open(b, { key: "b", resolve: () => b })).toEqual({ ok: false, code: "composition" });
+  expect(binding.current()).not.toBe(b);
+
+  ta.dispatchEvent(new Event("compositionend"));
   binding.open(b, { key: "b", resolve: () => b });
 
   expect(b.textContent).toBe(bText);
@@ -438,6 +443,9 @@ test("onGone also hands over the key and the base it was merging against", async
   article.innerHTML = '<pre><code class="entry-body"></code></pre>';
   const b = article.querySelector(".entry-body");
   b.textContent = "A second entry.";
+  expect(binding.open(b, { key: "b", resolve: () => b })).toEqual({ ok: false, code: "composition" });
+
+  ta.dispatchEvent(new Event("compositionend"));
   binding.open(b, { key: "b", resolve: () => b });
 
   expect(seen.typed).toBe(composed);
