@@ -56,6 +56,20 @@ test("every HTML vector projects, canonicalizes and round-trips exactly", () => 
   }
 });
 
+test("a projection without a descriptor rewrites every runtime URL and inserts nothing", () => {
+  const input = htmlVectors.cases.find((entry) => entry.name === "bare-ampersand-round-trip").input;
+  const project = projectRuntimeHTML(input, { ...options, descriptor: false });
+
+  expect(project.html).toContain('src="/_/clayjs/1.15.2/clay.js?plugins=page&exclude=richclay"');
+  expect(project.html).not.toContain("clay-runtime-map");
+  expect(project.mappings).toEqual([
+    {
+      original: "https://clayjs.com/v1/clay.js?plugins=page&exclude=richclay",
+      local: "/_/clayjs/1.15.2/clay.js?plugins=page&exclude=richclay",
+    },
+  ]);
+});
+
 test("every canonical-only vector canonicalizes exactly", () => {
   for (const entry of htmlVectors.canonicalOnly) {
     const actual = canonicalizeRuntimeHTML(entry.input, { releases, documentURL }).html;

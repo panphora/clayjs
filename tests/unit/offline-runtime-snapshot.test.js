@@ -6,6 +6,7 @@ import { jest } from "@jest/globals";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { projectRuntimeHTML } from "../../src/server/offline-runtime/index.js";
+import { RUNTIME_ALIASES } from "../../src/core/runtime-aliases.js";
 
 const ROOT = path.resolve(new URL("../..", import.meta.url).pathname);
 const FIXTURES = path.join(ROOT, "tests/fixtures/offline-runtime");
@@ -111,15 +112,14 @@ test("an edit is dirty, the save is canonical, and the saved file reopens to the
   expect(bytes).not.toContain("clay-runtime-map");
   expect(runtimeAttributes(bytes)).toEqual([CLAY, SAP, CSS, ROUTER]);
 
-  // The host projects the saved file again when it serves it. Everything the projector
-  // writes comes back local, and the one URL whose query holds an `&` comes back exactly
-  // as the browser wrote it (`&amp;`) because the projector does not splice raw bytes it
-  // did not write; parsed, it is the same URL. The tree is the same tree either way.
+  // The host projects the saved file again when it serves it, so every runtime URL comes back
+  // local, the one whose query holds an `&` included. The tree is the same tree either way.
   const reopened = new DOMParser().parseFromString(project(bytes).html, "text/html");
   const served = new DOMParser().parseFromString(SERVED, "text/html");
+  expect(reopened.querySelector('script[src*="/clay.js"]').getAttribute("src"))
+    .toMatch(/^\/_\/clayjs\/1\.15\.2\/clay\.js\?/);
   reopened.querySelector("#clay-runtime-map").remove();
   served.querySelector("#clay-runtime-map").remove();
-  served.querySelector('script[src*="/clay.js"]').setAttribute("src", CLAY);
   served.getElementById("text").textContent = "edited";
   expect(reopened.documentElement.outerHTML).toBe(served.documentElement.outerHTML);
 });
@@ -155,6 +155,39 @@ test("a spoofed descriptor entry for a foreign host does not restore it", () => 
   expect(bytes).not.toContain("example.com");
   expect(bytes).not.toContain("clay-runtime-map");
   expect(runtimeAttributes(bytes)).toEqual(["https://clayjs.com/1.15.2/clay.js"]);
+});
+
+test("a descriptor that declares a foreign URL as its own alias does not restore it", () => {
+  const descriptor = JSON.stringify({
+    schema: 1,
+    version: "1.15.2",
+    entries: [{ original: "https://example.invalid/runtime.js", local: "/_/clayjs/1.15.2/clay.js" }],
+    aliases: { "https://example.invalid/runtime.js": "clay.js" },
+  });
+  load("<!doctype html><html><head>" +
+    `<script type="application/json" id="clay-runtime-map" clay="no-save no-watch no-snapshot">${descriptor}</script>` +
+    "<script src=\"/_/clayjs/1.15.2/clay.js\"></script></head><body><p>x</p></body></html>");
+
+  const bytes = snapshot.captureForSave({ emitForSync: false });
+  expect(bytes).not.toContain("example.invalid");
+  expect(runtimeAttributes(bytes)).toEqual(["https://clayjs.com/1.15.2/clay.js"]);
+});
+
+test("a descriptor entry naming a release alias saves back to that alias URL", () => {
+  const alias = "https://cdn.jsdelivr.net/npm/overtype@2.6.1/dist/overtype.min.js";
+  const local = `/_/clayjs/1.15.2/${RUNTIME_ALIASES[alias]}`;
+  const descriptor = JSON.stringify({
+    schema: 1,
+    version: "1.15.2",
+    entries: [{ original: alias, local }],
+  });
+  load("<!doctype html><html><head>" +
+    `<script type="application/json" id="clay-runtime-map" clay="no-save no-watch no-snapshot">${descriptor}</script>` +
+    `<script src="${local}"></script></head><body><p>x</p></body></html>`);
+
+  const bytes = snapshot.captureForSave({ emitForSync: false });
+  expect(bytes).not.toContain("/_/clayjs/");
+  expect(runtimeAttributes(bytes)).toEqual([alias]);
 });
 
 test("a page with no runtime URL captures byte for byte as it did before", () => {
