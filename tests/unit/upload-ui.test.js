@@ -247,3 +247,26 @@ test("clay.upload.mount is the shared entry point and loads its UI once", async 
   b.unmount();
   expect(document.querySelectorAll(".clay-upload")).toHaveLength(0);
 });
+
+test("a retry draws progress again, and a cancel clears the stale error from Retry", async () => {
+  const task = new FakeTask({ state: "failed", loaded: 0, total: 100, percent: 0, result: failed("Upload timed out", "timeout") });
+  const { root } = await mount(task);
+
+  const progress = part(root, ".clay-upload__progress");
+  const retry = part(root, ".clay-upload__retry");
+  expect(progress.hidden).toBe(true);
+  expect(retry.hidden).toBe(false);
+  expect(retry.getAttribute("aria-label")).toBe("Retry photo.png: Upload timed out");
+
+  click(retry);
+  expect(task.retryCalls).toBe(1);
+  // The second attempt is drawing over a row that was showing a failure.
+  expect(progress.hidden).toBe(false);
+  expect(part(root, ".clay-upload__cancel").hidden).toBe(false);
+  expect(retry.hidden).toBe(true);
+
+  click(part(root, ".clay-upload__cancel"));
+  expect(root.getAttribute("data-clay-upload-state")).toBe("cancelled");
+  expect(retry.hidden).toBe(false);
+  expect(retry.getAttribute("aria-label")).toBe("Retry photo.png");
+});

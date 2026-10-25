@@ -18,6 +18,8 @@
  * #333 }` — restyles the row without replacing any of its behaviour.
  */
 
+import { canRetry } from "./upload-task.js";
+
 const CSS = `.clay-upload {
   display: flex;
   flex-wrap: wrap;
@@ -110,26 +112,6 @@ const CSS = `.clay-upload {
 }
 @media print { .clay-upload { display: none; } }`;
 
-// Retry is a new attempt of the same bytes, which only makes sense when asking again
-// could plausibly answer differently. A policy refusal (too large, wrong type, not
-// allowed here) is the host's decision about this file, so the row explains it and
-// leaves retry out; `network`, `timeout`, `error` and `bad-response` are the host
-// having no answer or a broken one, and a cancel is a person who may want to go on.
-const RETRYABLE_CODES = new Set(["network", "timeout", "error", "bad-response", "aborted"]);
-
-/**
- * Whether this task's current ending permits a retry.
- *
- * @param {Object} snapshot - a task snapshot
- * @returns {boolean}
- */
-export function canRetry(snapshot) {
-  if (!snapshot) return false;
-  if (snapshot.state === "cancelled") return true;
-  if (snapshot.state !== "failed") return false;
-  return RETRYABLE_CODES.has(snapshot.result?.code ?? null);
-}
-
 function stylesOnce() {
   if (document.getElementById("clay-upload-style")) return;
   const style = document.createElement("style");
@@ -212,6 +194,10 @@ export function mount(task, container) {
     root.setAttribute("data-clay-upload-state", state);
 
     if (uploading) {
+      // A retry draws a row that was showing a failure a moment ago: the progress
+      // element comes back, and the old error must not colour the retry button.
+      progressEl.hidden = false;
+      lastError = null;
       if (percent === null) {
         progressEl.removeAttribute("value");
         progressEl.removeAttribute("max");
@@ -237,6 +223,7 @@ export function mount(task, container) {
         lastError = message;
         announce(message);
       } else if (state === "cancelled") {
+        lastError = null;
         announce("Upload cancelled");
       } else {
         announce(message);

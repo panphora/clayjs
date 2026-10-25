@@ -27,7 +27,7 @@
  * throws before anything starts instead.
  */
 
-import { hostMeta } from "../core/host-meta.js";
+import { hostMeta, hostMetaOutcome } from "../core/host-meta.js";
 import { saveToken } from "../core/host-attrs.js";
 
 const UPLOAD_PATH = "/_/upload";
@@ -45,6 +45,29 @@ const REQUIRED_ACCESS = {
   local: ["local"],
   "document-or-local": ["document", "local"]
 };
+
+// Retry is a new attempt of the same bytes, which only makes sense when asking again
+// could plausibly answer differently. A policy refusal (too large, wrong type, not
+// allowed here) is the host's decision about this file, so the row explains it and
+// leaves retry out; `network`, `timeout`, `error` and `bad-response` are the host
+// having no answer or a broken one, and a cancel is a person who may want to go on.
+export const RETRYABLE_CODES = new Set(["network", "timeout", "error", "bad-response", "aborted"]);
+
+/**
+ * Whether this task's current ending permits a retry.
+ *
+ * The one table `task.retry()` and the row's Retry button both obey, so the button can
+ * never offer an attempt the task would refuse.
+ *
+ * @param {Object} snapshot - a task snapshot
+ * @returns {boolean}
+ */
+export function canRetry(snapshot) {
+  if (!snapshot) return false;
+  if (snapshot.state === "cancelled") return true;
+  if (snapshot.state !== "failed") return false;
+  return RETRYABLE_CODES.has(snapshot.result?.code ?? null);
+}
 
 let taskCount = 0;
 
@@ -103,11 +126,20 @@ export async function runUpload(file, { onProgress, signal, requiredAccess, task
 
   if (!file) return result(false, "No file to upload", "error", "bad-request");
 
+  // A retry asks again rather than reading the memoized answer: the host that was
+  // unreachable (or briefly refused) is exactly the thing a second attempt is for.
   let meta;
   try {
-    meta = await hostMeta();
+    meta = await hostMeta(attempt > 1 ? { fresh: true } : undefined);
   } catch (_) {
     meta = { extensions: [], document: null };
+  }
+  const cancelled = () => result(false, "Upload cancelled", "error", "aborted");
+  if (signal?.aborted) return cancelled();
+  // A host that should have answered and did not has not said this document cannot
+  // upload. It is a network failure, and asking again may well be answered.
+  if (hostMetaOutcome(meta) === "failed") {
+    return result(false, "Couldn't reach the host to upload", "error", "network");
   }
   if (!meta.extensions.includes("upload")) {
     // Not an error. This is a document open from a plain file server, or a bare
@@ -117,12 +149,14 @@ export async function runUpload(file, { onProgress, signal, requiredAccess, task
   // The host stores files, but not for this caller on this document: the spec withholds the
   // document's upload block by omission, and a client that finds none does not upload. Not
   // "unsupported", because embedding instead would route around the host's own decision.
+  if (signal?.aborted) return cancelled();
   if (!meta.document?.upload) {
     return result(false, "You can't add files to this document", "error", "forbidden");
   }
   // Asked for before the bytes leave: a caller that cannot use a publicly readable URL
   // must not spend a person's upload finding out. Read from the host's own metadata and
   // never inferred from the page URL, the plan or the filename.
+  if (signal?.aborted) return cancelled();
   if (wantedAccess) {
     const offered = meta.document.upload.access;
     if (!wantedAccess.includes(offered)) {
@@ -136,13 +170,15 @@ export async function runUpload(file, { onProgress, signal, requiredAccess, task
   // decided locally. `document.upload.allowed` is not read as a veto: it can be
   // stale (a plan upgraded in another tab, a share link granted since load), and
   // the host answers the real reason with its own code on the request itself.
+  if (signal?.aborted) return cancelled();
   const cap = meta.document?.upload?.maxBytes;
   if (typeof cap === "number" && cap > 0 && file.size > cap) {
     return result(false, `That file is larger than this host accepts (${cap} bytes)`, "error", "too-large");
   }
 
-  const answer = await postFile(file, { onProgress, signal, taskId, attempt });
-  return verifyAccess(answer, wantedAccess);
+  // The access check lives inside `postFile`, before it announces success: a downgrade
+  // must never have emitted `clay:upload-done` first.
+  return postFile(file, { onProgress, signal, taskId, attempt, requiredAccess: wantedAccess });
 }
 
 /**
@@ -172,9 +208,11 @@ function verifyAccess(answer, wantedAccess) {
  * @param {AbortSignal} [options.signal]
  * @param {string} [options.taskId]
  * @param {number} [options.attempt]
+ * @param {?string|?string[]} [options.requiredAccess] - a name, or what `checkRequiredAccess` read it into
  * @returns {Promise<{ok: boolean, msg: string, msgType: string, code: ?string, uploads: Array}>}
  */
-export function postFile(file, { onProgress, signal, taskId, attempt } = {}) {
+export function postFile(file, { onProgress, signal, taskId, attempt, requiredAccess } = {}) {
+  const wantedAccess = Array.isArray(requiredAccess) ? requiredAccess : checkRequiredAccess(requiredAccess);
   return new Promise((resolve) => {
     // Additive, on the events only: a listener that shows one row per upload can tell
     // two of them apart, and old callers that read only `msg` never notice the fields.
@@ -263,7 +301,15 @@ export function postFile(file, { onProgress, signal, taskId, attempt } = {}) {
         if (!uploads.length || typeof uploads[0]?.url !== "string") {
           return fail("The host accepted the file but did not say where it put it", "error", "bad-response");
         }
-        return finish(result(true, body.msg ?? "Uploaded", body.msgType || "success", body.code ?? null, uploads), "done", { uploads });
+        // The returned uploads are the host's own claim about what it stored, so the
+        // claim is checked before anything calls this a success: a downgrade keeps the
+        // uploads but announces an error, never a done.
+        const value = verifyAccess(
+          result(true, body.msg ?? "Uploaded", body.msgType || "success", body.code ?? null, uploads),
+          wantedAccess
+        );
+        if (value.ok) return finish(value, "done", { uploads });
+        return finish(value, "error", { msg: value.msg, code: value.code, uploads });
       }
 
       // The host's own code when it sent one, so a caller branches on the reason
@@ -330,6 +376,9 @@ export function start(file, options = {}) {
   let controller = null;
   let current = null;
   let disposed = false;
+  // The attempt a cancel settled by hand. Its own late answer must not replace the
+  // cancelled state the person was already shown.
+  let cancelledAttempt = 0;
   const listeners = new Set();
 
   function readSnapshot() {
@@ -372,7 +421,7 @@ export function start(file, options = {}) {
         }
       }
     }).then((value) => {
-      if (!disposed && mine === attempt) {
+      if (!disposed && mine === attempt && mine !== cancelledAttempt) {
         outcome = value;
         // 100% transmitted is not success: only the host's answer says the bytes were
         // stored, and until it arrives the attempt is still uploading.
@@ -405,12 +454,23 @@ export function start(file, options = {}) {
     // A retry is what asks again.
     cancel() {
       if (disposed) return;
+      // The wait for the host's metadata is part of the attempt, so a cancel during it
+      // settles now rather than when the answer arrives. The request is still aborted,
+      // and whatever it eventually says cannot overwrite this.
+      if (state === "uploading") {
+        cancelledAttempt = attempt;
+        state = "cancelled";
+        outcome = result(false, "Upload cancelled", "error", "aborted");
+        publish();
+      }
       controller?.abort();
     },
     retry() {
       // One attempt at a time, and no resurrecting a success: two calls from one button
       // press share the attempt already running instead of sending the file twice.
-      if (disposed || state === "uploading" || state === "succeeded") return current;
+      // The same table the Retry button obeys, so the button never offers a retry the
+      // task would refuse.
+      if (disposed || !canRetry(readSnapshot())) return current;
       return runAttempt();
     },
     dispose() {

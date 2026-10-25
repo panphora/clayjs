@@ -55,12 +55,12 @@ async function untilRequest(sent, index = 0) {
 
 // Discovery is awaited before anything is sent, so a test that wants to sit between
 // the two holds the answer open instead of racing it.
-function holdDiscovery() {
+function holdDiscovery(block = { allowed: true, access: "document" }) {
   let release;
   global.fetch = () => new Promise((resolve) => {
     release = resolve;
   });
-  return () => release(ok({ spec: 1, extensions: ["upload"], document: { upload: { allowed: true, access: "document" } } }));
+  return () => release(ok({ spec: 1, extensions: ["upload"], document: { upload: block } }));
 }
 
 function respond(req, { status = 200, body = OK_BODY } = {}) {
@@ -373,4 +373,160 @@ test("misuse throws before a task exists", async () => {
   expect(() => start(file(), { requiredAccess: "everyone" })).toThrow(/requiredAccess/);
   installXhr();
   expect(global.XMLHttpRequest).toBeDefined();
+});
+
+function recordEvents(names = ["done", "error", "start"]) {
+  const seen = [];
+  for (const name of names) {
+    document.addEventListener(`clay:upload-${name}`, (event) => seen.push([name, event.detail]));
+  }
+  return seen;
+}
+
+test("a downgrade is an error event before anything calls it a success", async () => {
+  const { start } = await load();
+  const sent = installXhr();
+  const seen = recordEvents();
+
+  const task = start(file(), { requiredAccess: "document-or-local" });
+  respond(await untilRequest(sent), {
+    body: { msg: "Uploaded", uploads: [{ name: "a-1.png", url: "assets-x/a-1.png", access: "public" }] }
+  });
+
+  const res = await task.result;
+  expect(seen.filter(([name]) => name === "done")).toHaveLength(0);
+  const errors = seen.filter(([name]) => name === "error");
+  expect(errors).toHaveLength(1);
+  expect(errors[0][1]).toMatchObject({ code: "privacy-unsupported" });
+  expect(errors[0][1].uploads[0].url).toBe("assets-x/a-1.png");
+  expect([res.ok, res.code]).toEqual([false, "privacy-unsupported"]);
+  expect(res.uploads).toHaveLength(1);
+  expect(task.state).toBe("failed");
+});
+
+test("an upload the host stored with the promised access announces one done", async () => {
+  const { start } = await load();
+  const sent = installXhr();
+  const seen = recordEvents();
+
+  const task = start(file(), { requiredAccess: "document" });
+  respond(await untilRequest(sent));
+
+  const res = await task.result;
+  expect(res.ok).toBe(true);
+  const done = seen.filter(([name]) => name === "done");
+  expect(done).toHaveLength(1);
+  expect(done[0][1].uploads[0].url).toBe("assets-x/a-1.png");
+  expect(seen.filter(([name]) => name === "error")).toHaveLength(0);
+});
+
+test("retry refuses exactly what the row refuses, and sends nothing", async () => {
+  const sent = installXhr();
+
+  const downgraded = await load();
+  const task = downgraded.start(file(), { requiredAccess: "document-or-local" });
+  respond(await untilRequest(sent), {
+    body: { msg: "Uploaded", uploads: [{ name: "a-1.png", url: "assets-x/a-1.png", access: "public" }] }
+  });
+  const refused = await task.result;
+  expect(task.retry()).toBe(task.result);
+  expect(await task.result).toBe(refused);
+
+  const forbidden = await load({ upload: null });
+  const second = forbidden.start(file());
+  const forbiddenResult = await second.result;
+  expect(forbiddenResult.code).toBe("forbidden");
+  expect(second.retry()).toBe(second.result);
+
+  const tooLarge = await load();
+  const third = tooLarge.start(file());
+  respond(await untilRequest(sent, 1), { status: 413, body: { code: "too-large", msg: "Too big" } });
+  expect((await third.result).code).toBe("too-large");
+  expect(third.retry()).toBe(third.result);
+
+  for (let i = 0; i < 20; i++) await Promise.resolve();
+  expect(sent).toHaveLength(2);
+});
+
+test("retry after a timeout does send a second request", async () => {
+  const { start, canRetry } = await load();
+  const sent = installXhr();
+
+  jest.useFakeTimers();
+  try {
+    const task = start(file());
+    await untilRequest(sent);
+    jest.advanceTimersByTime(120001);
+    await task.result;
+    expect(task.state).toBe("failed");
+    expect(canRetry(task.snapshot())).toBe(true);
+
+    const retried = task.retry();
+    await untilRequest(sent, 1);
+    expect(sent).toHaveLength(2);
+    expect(task.attempt).toBe(2);
+    respond(sent[1]);
+    expect(await retried).toMatchObject({ ok: true });
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
+test("a metadata fetch the host never answered is a retryable network failure", async () => {
+  jest.resetModules();
+  global.fetch = jest.fn(async () => { throw new Error("offline"); });
+  const { start, canRetry } = await import("../../src/plugins/upload-task.js");
+  const sent = installXhr();
+
+  const task = start(file());
+  const res = await task.result;
+  expect([res.ok, res.code]).toEqual([false, "network"]);
+  expect(res.msg).toMatch(/Couldn't reach the host/);
+  expect(task.state).toBe("failed");
+  expect(canRetry(task.snapshot())).toBe(true);
+  expect(sent).toHaveLength(0);
+
+  // The host comes back: the retry asks again rather than trusting the failed answer.
+  global.fetch = jest.fn(async () => ok({ spec: 1, extensions: ["upload"], document: { upload: { allowed: true, access: "document" } } }));
+  const retried = task.retry();
+  respond(await untilRequest(sent));
+  expect(await retried).toMatchObject({ ok: true });
+  expect(task.attempt).toBe(2);
+  expect(global.fetch).toHaveBeenCalled();
+});
+
+test("a host that answered without the upload extension is still unsupported, not network", async () => {
+  const { start } = await load({ extensions: [] });
+  installXhr();
+  const task = start(file());
+  const res = await task.result;
+  expect([res.ok, res.code]).toEqual([false, "unsupported"]);
+});
+
+test("a cancel while the metadata is in flight settles at once, before any precheck", async () => {
+  const { start } = await load();
+  const release = holdDiscovery({ allowed: true, access: "document", maxBytes: 1 });
+  const sent = installXhr();
+  const seen = recordEvents();
+
+  const task = start(file("big.png", 4), { requiredAccess: "document" });
+  for (let i = 0; i < 10; i++) await Promise.resolve();
+  task.cancel();
+  // Synchronously cancelled: the row must not sit on "uploading" for the answer.
+  expect(task.state).toBe("cancelled");
+
+  release();
+  const res = await task.result;
+  expect([res.ok, res.code]).toEqual([false, "aborted"]);
+  expect(task.state).toBe("cancelled");
+  expect(sent).toHaveLength(0);
+  expect(seen).toEqual([]);
+
+  // A retry after the cancel starts a fresh attempt at once, and it asks the host again.
+  global.fetch = jest.fn(async () => ok({ spec: 1, extensions: ["upload"], document: { upload: { allowed: true, access: "document" } } }));
+  const retried = task.retry();
+  expect(task.attempt).toBe(2);
+  expect(task.state).toBe("uploading");
+  respond(await untilRequest(sent));
+  expect(await retried).toMatchObject({ ok: true });
 });
