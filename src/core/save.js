@@ -271,9 +271,14 @@ let quiescedSessions = 0;
 let parkedWork = false;
 let parkedAutosave = false;
 
-/** Whether an ordinary save may go out right now. */
-export function savesAdmitted() {
-  return quiescedSessions === 0;
+/**
+ * Whether a save may go out right now.
+ *
+ * An open session admits everything. A closed one admits only the caller that holds a
+ * permit minted for the generation currently owning the page — the exit's own barrier.
+ */
+export function savesAdmitted(permit = null) {
+  return quiescedSessions === 0 || permitHolds(permit);
 }
 
 /**
@@ -476,10 +481,45 @@ function sessionClosed(msg) {
 }
 
 // The exit's own flush is not an ordinary save: it is the barrier writing the bytes the
-// exit is about to account for, so it runs with this module's permit. Nothing else does —
-// a Cmd+S or a [trigger-save] press while admission is closed stays parked. The
-// transition's generation-bound permit is the controller's identity, not a public flag.
-const SESSION_PERMIT = Symbol('clay:save-session');
+// exit is about to account for, so it runs under a permit. Nothing else does — a Cmd+S or
+// a [trigger-save] press while admission is closed stays parked.
+//
+// A permit is an opaque identity bound to ONE mode generation: it is minted by the
+// controller that owns that generation, it stops admitting the moment the next generation
+// commits, and it is revoked when the barrier that owns it finishes. That is what keeps a
+// delayed callback from writing across a switch, and it is why there is no public `force`
+// flag here: nothing a page can call mints one of these.
+const livePermits = new Set();
+let saveGenerationAt = 0;
+
+/** The mode generation ordinary saves are being admitted against. */
+export function saveGeneration() {
+  return saveGenerationAt;
+}
+
+/**
+ * A new generation has committed. Permits minted for the old one stop admitting: an exit
+ * that was flushing generation N must not write once generation N+1 owns the page.
+ */
+export function setSaveGeneration(generation) {
+  if (typeof generation === 'number') saveGenerationAt = generation;
+}
+
+/** Mint a permit for one generation. Opaque, and only this module reads what it means. */
+export function openSavePermit(generation = saveGenerationAt) {
+  const permit = Object.freeze({ generation });
+  livePermits.add(permit);
+  return permit;
+}
+
+/** Revoke a permit: the barrier that owned it is over. Idempotent. */
+export function closeSavePermit(permit) {
+  livePermits.delete(permit);
+}
+
+function permitHolds(permit) {
+  return !!permit && livePermits.has(permit) && permit.generation === saveGenerationAt;
+}
 
 /**
  * Tell the recovery service how this capture settled.
@@ -661,7 +701,7 @@ function attemptSaveNow({ kind, permit = null }, callback = () => {}) {
 
     // A session has admission closed: the page is between modes, and neither lane writes
     // until it decides. An automatic attempt is remembered so `resume` replays it.
-    if (!savesAdmitted() && permit !== SESSION_PERMIT) {
+    if (!savesAdmitted(permit)) {
       if (!explicit) parkedAutosave = true;
       const skipped = sessionClosed('Save session is quiesced');
       callback(skipped);
@@ -860,10 +900,10 @@ export function savePage(callback = () => {}) {
   return attemptSave({ kind: 'explicit' }, callback);
 }
 
-// The exit flush's own entry, inside the session's permit. Not exported: the only caller
-// is the barrier below, which is the one save a closed session must still be able to send.
-function savePagePermitted(callback = () => {}) {
-  return attemptSave({ kind: 'explicit', permit: SESSION_PERMIT }, callback);
+// The exit flush's own entry, inside its permit. Not exported: the only caller is the
+// barrier below, which is the one save a closed session must still be able to send.
+function savePagePermitted(permit, callback = () => {}) {
+  return attemptSave({ kind: 'explicit', permit }, callback);
 }
 
 /**
@@ -989,24 +1029,29 @@ function nextEvent(name, deadline) {
 // host but the page holds work a save cannot write, registered through
 // clay.registerUnsavedState; only a person can resolve that). Never overwrites.
 // `keepalive` is a transport hint honoured under 60 KB of UTF-8.
-export async function flushSave({ keepalive = false, timeoutMs = 15000 } = {}) {
+export async function flushSave({ keepalive = false, timeoutMs = 15000, permit = null } = {}) {
   if (!isEditMode) return { state: 'view', etag: null };
   const deadline = Date.now() + timeoutMs;
+  // A caller with no permit of its own is the plain `clay.save.flush`: it mints one for
+  // the generation that owns the page now, so a flush during a transition is still a
+  // write in this generation and never the next one's.
+  const held = permit || openSavePermit();
   let timer = null;
   const timeout = new Promise((_, reject) => {
     timer = setTimeout(() => reject(flushError('Save timed out.', 'failed')), Math.max(0, timeoutMs));
   });
   try {
-    return await Promise.race([flushBytes(keepalive, deadline), timeout]);
+    return await Promise.race([flushBytes(keepalive, deadline, held), timeout]);
   } catch (err) {
     if (err && typeof err.state === 'string') throw err;
     throw flushError(err?.message || 'Save failed', 'failed');
   } finally {
     clearTimeout(timer);
+    if (!permit) closeSavePermit(held);
   }
 }
 
-async function flushBytes(keepalive, deadline) {
+async function flushBytes(keepalive, deadline, permit) {
   // Load-time module churn is not the person's work: autosave never saves it, and
   // neither does a flush. Wait for the baseline to settle (at most MAX_SETTLE_MS).
   if (!baselineSettled()) await nextEvent('clay:baseline-settled', deadline);
@@ -1022,7 +1067,7 @@ async function flushBytes(keepalive, deadline) {
       if (hasUnsavedState()) throw flushError('This document has unsaved work a save cannot write.', 'blocked');
       return { state: saved ? 'saved' : 'clean', etag: etag ?? lastSeenEtag() };
     }
-    const result = await withKeepalive(keepalive, () => savePagePermitted());
+    const result = await withKeepalive(keepalive, () => savePagePermitted(permit));
     // The lane was busy (a drained pending save is on the wire): wait it out next turn.
     if (result.msgType === 'skipped') continue;
     if (!result.ok) throw flushError(result.msg || 'Save failed', result.msgType === 'conflict' || isSaveConflicted() ? 'conflict' : 'failed');

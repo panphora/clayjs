@@ -348,6 +348,39 @@ function skippedResult(msg) {
   return { ok: false, msg, msgType: 'skipped', code: null, etag: null };
 }
 
+// ============================================
+// THE DOCUMENT-OPERATION SLOT
+// ============================================
+//
+// One slot for the operations that speak for the document as a whole: a mode switch's
+// barrier, an upgrade, and a whole-document replacement. Two of them at once is how a
+// generation gets flushed and then replaced by a later one, so the second asks and is
+// told no instead of interleaving. Kinds are open strings; the slot only cares that it
+// is exclusive, and that the token it hands back is the one that releases it.
+let documentOperation = null;
+
+/**
+ * Take the slot, or learn it is taken.
+ *
+ * @param {string} kind - 'mode' | 'replace' | 'upgrade'
+ * @returns {?Object} an opaque token to release with, or null when an operation holds it
+ */
+export function claimDocumentOperation(kind) {
+  if (documentOperation) return null;
+  documentOperation = { kind };
+  return documentOperation;
+}
+
+/** Release the slot. Only the token that holds it does anything; idempotent. */
+export function releaseDocumentOperation(token) {
+  if (documentOperation === token) documentOperation = null;
+}
+
+/** Which operation holds the document, or null. */
+export function operationKind() {
+  return documentOperation ? documentOperation.kind : null;
+}
+
 // The metadata a caller attaches to a capture was refused here, before anything
 // went out. The host's own grammar is the only definition of valid, so an
 // `invalid-header` here is the same answer a host would have given, without the
@@ -951,14 +984,21 @@ export function saveConversion({ html, captureId, conversion }) {
  */
 export function replacePageWith(url, callback = () => {}) {
   return new Promise((resolve) => {
+    let operation = null;
     const done = (result) => {
+      releaseDocumentOperation(operation);
       if (typeof callback === 'function') callback(result);
       resolve(result);
     };
 
     if (!isEditMode) return done(skippedResult('Not in edit mode'));
+    if (operationKind()) return done(skippedResult('Another document operation is in progress'));
     if (saveInProgress) return done(skippedResult('Save already in progress'));
     if (isDraftMode) return done(false);
+
+    // A replacement writes the whole document, so it holds the slot from the fetch to
+    // the save: a mode switch cannot start its barrier in the middle of one.
+    operation = claimDocumentOperation('replace');
 
     // Resolved against the document's real location, not a <base href> the page
     // may have set.

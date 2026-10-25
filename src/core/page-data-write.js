@@ -149,6 +149,11 @@ export function createPageDataWrite({
   let writeOutcomeUnknown = false;
 
   function assertWriteState(modules, { checkHold = true } = {}) {
+    // A save session with admission closed is a page between modes. Its own exit is the
+    // only write that may go out until it commits or resumes, and page data is not it.
+    if (modules.savesAdmitted && !modules.savesAdmitted()) {
+      throw refusal("ModeTransition", "The page is switching modes. Write page data again when it has settled.");
+    }
     if (writeOutcomeUnknown) {
       throw refusal("DataWriteOutcomeUnknown", "A previous page data write has an unknown outcome. Reload before writing again.");
     }
@@ -216,6 +221,11 @@ export function createPageDataWrite({
       }
       if (modules.hasUnsavedChanges()) {
         throw refusal("UnsavedChanges", "Save or discard the page's unsaved changes before writing data.");
+      }
+      // Rechecked immediately before the POST: a mode switch can close admission while
+      // this write was waiting for the sync and the stamp.
+      if (modules.savesAdmitted && !modules.savesAdmitted()) {
+        throw refusal("ModeTransition", "The page is switching modes. Write page data again when it has settled.");
       }
       if (!connected(getLiveSync())) {
         throw refusal("SyncRequired", "Page data writes require the sync plugin to be connected.");
