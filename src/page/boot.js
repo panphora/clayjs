@@ -33,6 +33,12 @@ export function isCurrent(inst) {
   return !inst.disposed && inst.isCurrent() !== false;
 }
 
+// One owner: the view this installation mounted, and nothing a later or a cancelled
+// installation staged. The final input gate asks this before it accepts a key.
+export function ownsView(inst, mounted) {
+  return isCurrent(inst) && !!mounted?.view && inst.mounted === mounted.view;
+}
+
 export function setPhase(inst, phase, reason = null) {
   if (TERMINAL.has(inst.phase) && inst.result) return inst.result;
   inst.phase = phase;
@@ -64,6 +70,7 @@ export function addDisposer(inst, dispose) {
 export function disposeInstall(inst) {
   if (inst.disposed) return;
   inst.disposed = true;
+  inst.mounted = null;
   try {
     inst.controller.abort();
   } catch (error) {
@@ -137,6 +144,7 @@ export async function runBoot(inst, steps) {
   const mounted = steps.mountAndAttach(inst, source, loaded, admitted);
   if (!isCurrent(inst)) return null;
   if (!mounted.ok) return stop(inst, mounted);
+  inst.mounted = mounted.view ?? null;
 
   setPhase(inst, PHASES.adopting);
   const adoption = await steps.adoptSource(inst, source, mounted);

@@ -19,10 +19,11 @@ import { saveStateFor, BLOCKED_TEXT, RETRY_TEXT, downloadPageCopy, downloadSnaps
 import toast, { toastPersistent, dismissPersistent } from "../ui/toast.js";
 import { createRecoverList, focusBlock } from "../page/recover.js";
 import { claim } from "../page/runtime-owner.js";
-import { createInstall, disposeInstall, addDisposer, finishError, isCurrent, runBoot } from "../page/boot.js";
+import { createInstall, disposeInstall, addDisposer, finishError, isCurrent, ownsView, runBoot } from "../page/boot.js";
 import { capabilityAdvertised } from "../page/tool-capability.js";
 import { toolViews } from "../page/tool-views.js";
 import { holdSlashRange, heldSlashRange } from "../page/chrome.js";
+import { style } from "../lib/hostile-css.js";
 
 const ARTICLE_SEL = "article[data-page]";
 const TAG_SEL = 'script[type="application/json"][merge="page"][clay~="live"]';
@@ -34,8 +35,41 @@ const REPLACED_TEXT = "This page was changed outside the editor. Reload to see i
 const TOO_LARGE_TEXT = "That change is too large to share, so it was not saved. Reload the page to keep editing.";
 const OVERWRITTEN_TEXT = "Some changes you made were replaced by a change made outside the editor.";
 const REPLACED_HOLD = "The page was changed outside the editor; reload to see it.";
+const LOADING_MS = 150;
+const LOADING_TEXT = "Loading the editor\u2026";
 
 const isPlainObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+
+// A wait longer than a moment says so. One quiet line inside the article, drawn as
+// editor UI so it never reaches a snapshot, and gone the moment the boot settles.
+function clearLoadingStatus(inst) {
+  if (inst.statusTimer) {
+    clearTimeout(inst.statusTimer);
+    inst.statusTimer = null;
+  }
+  inst.statusNote?.remove();
+  inst.statusNote = null;
+}
+
+function armLoadingStatus(inst, article) {
+  clearLoadingStatus(inst);
+  inst.statusTimer = setTimeout(() => {
+    inst.statusTimer = null;
+    if (!isCurrent(inst)) return;
+    const note = article.ownerDocument.createElement("div");
+    note.className = "page-boot-status";
+    note.setAttribute("clay", "editor-ui");
+    note.setAttribute("sap-ignore", "");
+    note.setAttribute("role", "status");
+    style(note, [
+      "display:block", "margin:0 0 1em", "font:500 13px/1.6 system-ui, sans-serif",
+      "color:color-mix(in srgb, currentColor 55%, transparent)", "user-select:none",
+    ]);
+    note.textContent = LOADING_TEXT;
+    article.appendChild(note);
+    inst.statusNote = note;
+  }, LOADING_MS);
+}
 
 let generation = 0;
 let active = null;
@@ -229,6 +263,22 @@ function restoreArticle(inst) {
   else article.setAttribute("data-rev", rev);
 }
 
+// Adoption did not land, so this tab must not hold a view of its own making: the
+// mounted editor is destroyed, its shell leaves the article, and the article comes
+// back from the state the room accepted (or the source captured before the mount).
+// The editor's own DOM is never read back into the page.
+function abandonEditor(inst) {
+  const view = inst.view;
+  if (view && !view.isDestroyed && typeof view.destroy === "function") {
+    try { view.destroy(); } catch (error) { console.error("clayjs: page plugin view failed to destroy", error); }
+  }
+  if (inst.view) toolViews.delete(inst.view);
+  const shell = inst.article?.querySelector(".page-shell");
+  if (shell) shell.remove();
+  clearLoadingStatus(inst);
+  restoreArticle(inst);
+}
+
 function dispose() {
   generation += 1;
   const inst = active;
@@ -251,7 +301,10 @@ function dispose() {
   }
   try { inst.adoption?.dispose(); } catch (error) { console.error("clayjs: page plugin adoption failed to dispose", error); }
   try { inst.recover?.destroy(); } catch (error) { console.error("clayjs: page plugin recover list failed to dispose", error); }
-  try { inst.view?.destroy(); } catch (error) { console.error("clayjs: page plugin view failed to destroy", error); }
+  clearLoadingStatus(inst);
+  if (inst.view && !inst.view.isDestroyed) {
+    try { inst.view.destroy(); } catch (error) { console.error("clayjs: page plugin view failed to destroy", error); }
+  }
   inst.aiTool?.dispose();
   inst.toolHost?.dispose();
   if (inst.view) toolViews.delete(inst.view);
@@ -285,6 +338,7 @@ function createSteps(inst, options) {
   const editorReady = new Promise((resolve) => { editorReadyResolve = resolve; });
   inst.editorReadyResolve = editorReadyResolve;
   addDisposer(inst, () => editorReadyResolve?.());
+  addDisposer(inst, () => clearLoadingStatus(inst));
 
   // A document with a tool block, at boot or when one arrives, opens the store its
   // tools keep state in and the host that mounts them. A document with no tool
@@ -412,6 +466,7 @@ function createSteps(inst, options) {
       console.warn("clayjs: page plugin: the page tag is not a valid Yjs page, leaving the page as saved HTML", error);
       return { ok: false, reason: "invalid-page-json" };
     }
+    armLoadingStatus(inst, articles[0]);
     return { ok: true, source: { article: file.article, tags: [value], element: articles[0], blocks, seeded } };
   }
 
@@ -452,7 +507,7 @@ function createSteps(inst, options) {
       return { ok: false, reason: "editor-assets-failed" };
     }
     if (!isCurrent(inst)) return { ok: false, cancelled: true };
-    return { ok: true, editor: editor.createPageEditor, featureIds };
+    return { ok: true, editor: editor.createPageEditor, refreshView: editor.refreshMountedView, featureIds };
   }
 
   async function prepareAuthority(inst, source) {
@@ -555,25 +610,44 @@ function createSteps(inst, options) {
 
     // A page with blocks whose view parts are still coming keeps its saved article on
     // screen, and the editor out of sight, until they are here. One with none of those
-    // blocks has nothing to wait for, so its saved article goes now.
-    savedContent = [...article.childNodes];
+    // blocks has nothing to wait for, so its saved article goes now. Either way it is
+    // this capture, taken before anything changes, that puts the article back.
+    savedContent = [...article.childNodes].filter((node) => node !== inst.statusNote);
     inst.releaseArticle = claim(article, "editor");
-    if (!loaded.featureIds.length) for (const node of savedContent) node.remove();
-    const view = loaded.editor(article, {
-      doc: binding.doc(),
-      dispatch: binding.dispatch,
-      history: false,
-      undo: binding.undo,
-      redo: binding.redo,
-      board: binding.board,
-      editable: false,
-      features,
-      onAiTool: aiRequested() ? (_view, remove) => { openAi({ remove }); } : null,
-      reviseTool: aiRequested() ? (toolId, rev) => { openAi({ target: { toolId, rev } }); } : null,
-    });
+    // The shell is built out of the page, in an element of the same document, so a
+    // creation that fails never leaves half an editor over the saved article.
+    const staging = article.ownerDocument.createElement("div");
+    let view = null;
+    try {
+      view = loaded.editor(staging, {
+        doc: binding.doc(),
+        dispatch: binding.dispatch,
+        history: false,
+        undo: binding.undo,
+        redo: binding.redo,
+        board: binding.board,
+        editable: false,
+        features,
+        onAiTool: aiRequested() ? (_view, remove) => { openAi({ remove }); } : null,
+        reviseTool: aiRequested() ? (toolId, rev) => { openAi({ target: { toolId, rev } }); } : null,
+      });
+    } catch (error) {
+      console.error("clayjs: page plugin could not mount the editor", error);
+      staging.replaceChildren();
+      inst.releaseArticle?.();
+      inst.releaseArticle = null;
+      inst.article = null;
+      return { ok: false, reason: "mount-failed" };
+    }
     editorView = view;
     inst.view = view;
     if (loaded.featureIds.length) view.dom.closest(".page-shell").style.visibility = "hidden";
+    // One synchronous move: the finished shell replaces the saved surface as a
+    // single change, and the article element itself stays where it is.
+    if (!loaded.featureIds.length) for (const node of savedContent) node.remove();
+    const shell = view.dom.closest(".page-shell");
+    if (shell) article.appendChild(shell);
+    loaded.refreshView?.(view);
     binding.attach(view);
     editorReadyResolve();
     // The parts the saved article demands install onto the mounted view now, whether
@@ -640,6 +714,11 @@ function createSteps(inst, options) {
 
     const outcome = await adoption.idle();
     if (!outcome) return { ok: true, outcome: "unchanged" };
+    // Adoption refused, timed out or failed: the room's state is the page's, not the
+    // view this tab built over the saved article, so the editor goes and the article
+    // comes back from what the room accepted. A disposed install restores nothing:
+    // dispose already did.
+    if (!outcome.ok && isCurrent(inst)) abandonEditor(inst);
     return outcome;
   }
 
@@ -660,6 +739,12 @@ function createSteps(inst, options) {
     }
     await featuresReady;
     if (!isCurrent(inst)) return { ok: false, cancelled: true };
+    // The gate: this installation's own view, still in the article it claimed, over
+    // the binding the room accepted. Anything else is not something to type into.
+    const shell = mounted.view.dom.closest(".page-shell");
+    if (!ownsView(inst, mounted) || !shell || !shell.isConnected || mounted.view.isDestroyed) {
+      return { ok: false, reason: "view-detached" };
+    }
     showEditor();
     // A replacement that landed during the feature wait keeps the editor read-only,
     // exactly as one that landed before it does.
@@ -668,6 +753,7 @@ function createSteps(inst, options) {
       return { ok: false, reason: "page-replaced" };
     }
     mounted.view.setProps({ editable: () => true });
+    clearLoadingStatus(inst);
 
     // That initial write advanced the saved baselines from a capture taken before
     // the editor mounted, which is what the load-time settle would otherwise absorb
@@ -691,8 +777,17 @@ function install(options = {}) {
   dispose();
   const gen = ++generation;
   const inst = {
-    ...createInstall({ gen, isCurrent: () => gen === generation, onPhase: options.onPhase }),
-    article: null, view: null, binding: null, adoption: null, source: null, store: null, toolHost: null, aiTool: null, bootHtml: "", bootRev: null, savedRev: null, releaseArticle: null, replaced: false, savesHeld: false, flush: null, listeners: [], retryTimer: null, retryShown: false, notices: null, editorReadyResolve: null,
+    ...createInstall({
+      gen,
+      isCurrent: () => gen === generation,
+      onPhase: (result) => {
+        // A settled boot says so by taking the waiting line away, whatever it settled
+        // as: there is nothing left to wait for.
+        if (result.phase === "ready" || result.phase === "blocked" || result.phase === "error") clearLoadingStatus(inst);
+        options.onPhase?.(result);
+      },
+    }),
+    article: null, view: null, binding: null, adoption: null, source: null, store: null, toolHost: null, aiTool: null, bootHtml: "", bootRev: null, savedRev: null, releaseArticle: null, replaced: false, savesHeld: false, flush: null, listeners: [], retryTimer: null, retryShown: false, statusTimer: null, statusNote: null, notices: null, editorReadyResolve: null,
   };
   active = inst;
   return run(inst, options).catch((error) => {

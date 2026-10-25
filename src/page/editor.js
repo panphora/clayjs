@@ -382,6 +382,15 @@ export function pageState(blocks, options = {}) {
   return state.EditorState.create({ doc, plugins: pagePlugins(options) });
 }
 
+// The shell is built detached and moved into the article once it is complete, so
+// the node views in it measured nothing while it was out of the document. One pass
+// in place gives them a real box: the state is the same object it was, and no node
+// view is rebuilt for it.
+export function refreshMountedView(view) {
+  if (!view || view.isDestroyed) return;
+  view.updateState(view.state);
+}
+
 // Clicking a checklist box (drawn by ::before in the item's start gutter)
 // toggles `checked`.
 function checkboxClick(view, event) {
