@@ -73,7 +73,7 @@ test("an uploading task shows its name, determinate progress and Cancel", async 
   expect(part(root, ".clay-upload__label").textContent).toBe("40%");
   expect(part(root, ".clay-upload__cancel").hidden).toBe(false);
   expect(part(root, ".clay-upload__retry").hidden).toBe(true);
-  expect(part(root, ".clay-upload__dismiss").hidden).toBe(false);
+  expect(part(root, ".clay-upload__dismiss").hidden).toBe(true);
 });
 
 test("an unknown total gives an indeterminate indicator, not a made-up percent", async () => {
@@ -149,11 +149,17 @@ test("Retry stays hidden when the host refused this file rather than failing to 
   }
 });
 
-test("Dismiss unmounts the row and stops listening", async () => {
+test("Dismiss waits until the upload settles, then unmounts the row and stops listening", async () => {
   const task = new FakeTask({ loaded: 5, total: 100, percent: 5 });
   const { root, container, unmount } = await mount(task);
   expect(task.listenerCount).toBe(1);
 
+  click(part(root, ".clay-upload__dismiss"));
+  expect(container.querySelector(".clay-upload")).not.toBeNull();
+  expect(task.listenerCount).toBe(1);
+
+  task.set({ state: "failed", result: { ok: false, msg: "Upload failed", uploads: [] } });
+  expect(part(root, ".clay-upload__dismiss").hidden).toBe(false);
   click(part(root, ".clay-upload__dismiss"));
 
   expect(container.querySelector(".clay-upload")).toBeNull();

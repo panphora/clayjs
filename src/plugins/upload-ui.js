@@ -231,6 +231,8 @@ export function mount(task, container) {
     }
 
     cancelEl.hidden = !uploading;
+    // Dismissing a running upload would hide it while it still finishes and lands; Cancel is the way out then.
+    dismissEl.hidden = uploading;
     retryEl.hidden = !canRetry(snapshot);
     if (!retryEl.hidden) retryEl.setAttribute("aria-label", lastError ? `Retry ${name}: ${lastError}` : `Retry ${name}`);
   }
@@ -249,7 +251,10 @@ export function mount(task, container) {
     retryEl.hidden = true;
     task.retry();
   });
-  dismissEl.addEventListener("click", () => unmount());
+  dismissEl.addEventListener("click", () => {
+    if (dismissEl.hidden) return;
+    unmount();
+  });
 
   const unsubscribe = task.subscribe(draw);
   host.append(root);
