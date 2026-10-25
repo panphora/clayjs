@@ -169,3 +169,31 @@ test("kanban view: the reader graph has no save code or parse5", async () => {
   expect(graph.has("src/core/save.js")).toBe(false);
   expect(graph.has("src/vendor/parse5.vendor.js")).toBe(false);
 });
+
+// The upgrade's save is a conditional POST of a whole document, and only a page that
+// can be upgraded ever makes one. It lives outside the save core so that every edit
+// boot, and every reader, carries none of it; the upgrade plugin is the one module
+// that pulls it in.
+test("edit mode without upgrade: the replace module is not in the boot graph", async () => {
+  const tag = FIXTURES.kanban;
+  const params = new URLSearchParams(`plugins=${tag.plugins}&exclude=${tag.exclude}`);
+  const plan = resolveModules(params, true, { isDraftMode: false, hasSap: tag.hasSap });
+  expect(plan.plugins).not.toContain("plugins/upgrade.js");
+  const entries = [...plan.core, ...plan.plugins].map((path) => `src/${path}`);
+  const graph = walk(await inputsFor(entries), entries);
+
+  expect(graph.has("src/core/save.js")).toBe(true);
+  expect(graph.has("src/core/save-replace.js")).toBe(false);
+});
+
+test("the upgrade path is what imports the replace module", async () => {
+  const entry = "src/plugins/upgrade.js";
+  const plan = resolveModules(new URLSearchParams("plugins=upgrade&exclude=richclay"), true, {
+    isDraftMode: false,
+    hasSap: false,
+  });
+  expect(plan.plugins).toContain("plugins/upgrade.js");
+  const graph = walk(await inputsFor([entry]), [entry]);
+
+  expect(graph.has("src/core/save-replace.js")).toBe(true);
+});

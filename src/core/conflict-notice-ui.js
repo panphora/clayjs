@@ -45,6 +45,7 @@ const seenIds = new Set();
 const freshIds = new Set();
 let refused = null;
 let refusalGeneration = 0;
+let upgraded = null;
 let armed = null;
 let armTimer = null;
 let busy = null;
@@ -74,6 +75,9 @@ const failures = () => ledger()?.list().filter((r) => !r.claimedBy && r.kind ===
 
 // A refused save goes first: saving is blocked until it is answered.
 function mode() {
+  // Nothing else is asked for once the document itself was upgraded: this tab holds
+  // a version the host no longer stores, and the only way out is a reload.
+  if (upgraded) return "upgraded";
   if (refused) return "refused";
   if (losses().length) return "replaced";
   if (failures().length) return "failed";
@@ -191,6 +195,7 @@ function refusedSource() {
 }
 
 function barMessage(m, n) {
+  if (m === "upgraded") return upgraded;
   if (m === "refused") {
     const named = refusedSource();
     if (!named && refused.afterTimeout) {
@@ -203,6 +208,7 @@ function barMessage(m, n) {
 }
 
 function titleOf(m, n) {
+  if (m === "upgraded") return upgraded;
   if (m === "refused") return `This page changed ${refusedSource() || "elsewhere"}`;
   if (m === "failed") return "A sync update did not finish";
   return `Another edit replaced ${plural(n, "change")}`;
@@ -224,7 +230,12 @@ function drawBar(m) {
     bar.setAttribute("role", m === "refused" ? "alert" : "status");
     lastAnnounced = message;
   }
-  bar.append(dot(), bevelText("span", [], message), key(bevelButton("Review", { onClick: openPanel }), "review"));
+  bar.append(dot(), bevelText("span", [], message));
+  if (m === "upgraded") {
+    bar.append(key(bevelButton("Reload", { variant: "primary", onClick: () => window.location.reload() }), "reload"));
+    return bar;
+  }
+  bar.append(key(bevelButton("Review", { onClick: openPanel }), "review"));
   return bar;
 }
 
@@ -286,6 +297,8 @@ function drawPanel(m) {
       warn.append(el("b", ["all:initial", "font:inherit", "font-weight:700", "color:inherit"], "This drops your unsaved edits."), document.createTextNode(" Download your copy first if you might want them. Press again to confirm."));
       panel.append(warn);
     }
+  } else if (m === "upgraded") {
+    panel.append(lede("Its layout and code changed with it, so this page stops here. Reload to see the new version."));
   } else if (m === "failed") {
     panel.append(lede("Part of an update from elsewhere could not be applied, so this page may be missing some of it. Your edits here are safe. Download a copy of the page as you had it, or accept to keep the page as it is."));
   } else {
@@ -293,6 +306,12 @@ function drawPanel(m) {
   }
 
   const actions = el("div", ["all:initial", "display:flex", "flex-wrap:wrap", "gap:8px", "padding:0 16px 14px"]);
+  if (m === "upgraded") {
+    actions.append(action("Reload", "reload", { variant: "primary", onClick: () => window.location.reload(), push: true }));
+    panel.append(actions);
+    renderedIds = [];
+    return panel;
+  }
   const dl = action(downloadFailed ? "Try again" : downloaded ? "Downloaded" : "Download my copy", "download", { onClick: onDownload });
   actions.append(dl);
   if (m === "refused") {
@@ -454,6 +473,7 @@ function ring(target) {
 }
 
 function openPanel() {
+  if (upgraded) return;
   view = "panel";
   pendingFocus = "title";
   render();
@@ -606,6 +626,18 @@ function onLedgerChanged() {
   schedule();
 }
 
+function onUpgraded(e) {
+  upgraded = (e?.detail && e.detail.message) || "This document was upgraded.";
+  toastText = null;
+  clearTimeout(toastTimer);
+  disarm();
+  busy = null;
+  keepFailed = false;
+  armLost = false;
+  view = "bar";
+  schedule();
+}
+
 function onSaveConflict(e) {
   const d = e?.detail || {};
   refused = { generation: ++refusalGeneration, changedBy: d.changedBy, afterTimeout: !!d.afterTimeout, etag: d.etag ?? null };
@@ -691,6 +723,9 @@ function onFocus(e) {
 }
 
 function init() {
+  // Registered before the edit-mode gate: an upgraded reader has nothing to reconcile
+  // and this is still the one notice it can be shown.
+  document.addEventListener("clay:document-upgraded", onUpgraded);
   if (!isEditMode) return;
   document.addEventListener("clay:sync-conflicts-changed", onLedgerChanged);
   // An apply beginning or ending changes only whether Revert may run.
@@ -713,6 +748,7 @@ function init() {
 const HANDLERS = {
   "clay:sync-conflicts-changed": onLedgerChanged,
   "clay:save-conflict": onSaveConflict,
+  "clay:document-upgraded": onUpgraded,
 };
 
 let started = false;
@@ -733,6 +769,7 @@ export function start(trigger) {
 }
 
 export const _test = {
-  state: () => ({ view, listOpen, renderedIds: renderedIds.slice(), refused, armed, busy, ledgerRevision }),
+  state: () => ({ view, listOpen, renderedIds: renderedIds.slice(), refused, armed, busy, ledgerRevision, upgraded }),
   render,
+  resetUpgrade: () => { upgraded = null; },
 };

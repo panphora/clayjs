@@ -184,6 +184,13 @@ function assembleCore(loaded, { isDraftMode, isEditMode, isOwner, siteVisibility
   clay.writeData = pageData.writeData;
   clay.ephemeral = ephemeral;
   clay.storage = storage;
+  // About the document rather than the page, and asked for on use: a reader never
+  // downloads the discovery client for it.
+  clay.host = {
+    get versions() {
+      return import("./core/host-meta.js").then((m) => m.hostVersions());
+    },
+  };
   clay.trash = trash;
   clay.derived = derived;
   clay.effect = effect;
@@ -228,6 +235,9 @@ function attachPluginMember(path, mod, loaded) {
     clay.live = mod.live;
   } else if (path === "plugins/page.js") {
     clay.page = mod.page;
+  } else if (path === "plugins/upgrade.js") {
+    clay.save = clay.save || {};
+    clay.save.replace = mod.replace;
   } else if (path === "plugins/cms.js") {
     clay.cms = mod.cms || mod.default;
   } else if (path === "plugins/upload.js") {

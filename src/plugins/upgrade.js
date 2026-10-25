@@ -9,6 +9,11 @@
 // a visitor, a draft, no network, a failed fetch, a bad digest or an equal version.
 // The 24-hour cache and the dotted-version comparison are hyper-html-api's own.
 import { isNewerVersion } from "../vendor/hyper-html-api-upgrade.vendor.js";
+// The one save the upgrade makes. It is not in the save core, so only the pages
+// that can upgrade download it.
+import { replace } from "../core/save-replace.js";
+
+export { replace };
 
 const CACHE_PREFIX = "hha:upgrade-check:";
 const TTL_MS = 24 * 60 * 60 * 1000;

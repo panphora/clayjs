@@ -101,6 +101,20 @@ export async function hostSupports(name) {
   return meta.extensions.includes(name);
 }
 
+/**
+ * Whether this host keeps a version history a person can go back to.
+ *
+ * The `document` block names it: absent means no history, which is the answer every
+ * host gave before the field existed. Read through discovery like every other
+ * capability, never inferred from the hostname or a probed route.
+ *
+ * @returns {Promise<boolean>}
+ */
+export async function hostVersions() {
+  const meta = await hostMeta();
+  return meta.document?.versions === true;
+}
+
 /** Drop the memoized answer. Tests only. */
 export function resetHostMeta() {
   inFlight = null;

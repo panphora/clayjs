@@ -250,7 +250,7 @@ export function saveFateIsUnknown() {
  * zeroed array is the failure that would do exactly that, silently, so a missing
  * crypto implementation falls back to something random rather than to zeros.
  */
-function mintSaveId() {
+export function mintSaveId() {
   const uuid = window.crypto?.randomUUID?.();
   if (uuid) return uuid;
   if (window.crypto?.getRandomValues) {
@@ -445,7 +445,7 @@ function formatConversionHeader(conversion) {
  * @param {?string} conversionHeader - the `Page-Conversion` value for this logical save, or null
  * @returns {{url: string, options: Object}}
  */
-function buildSaveRequest(content, userDriven, signal, saveId, etag, keepalive = false, conversionHeader = null) {
+export function buildSaveRequest(content, userDriven, signal, saveId, etag, keepalive = false, conversionHeader = null) {
   const token = saveToken();
   const path = token ? `${SAVE_PATH}/${token}` : SAVE_PATH;
   const options = {

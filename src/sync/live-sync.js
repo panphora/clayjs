@@ -56,6 +56,7 @@ import { SyncStream } from './stream.js';
 import { streamOpened, streamClosed, streamEvent, LIVE_EVENTS } from '../live/stream-bridge.js';
 import { conflicts, beginApply, completeApply, failApply } from './conflicts.js';
 import { beginLineageCapture } from './conflict-footprints.js';
+import { upgradeReplaces, stopForUpgrade } from './version-guard.js';
 import { isDerivedAttr, ownsDerivedText, stripDerived, repaintDerived, paintSignatureOfHtml, derivedActive } from '../lib/derived.js';
 
 // The edit-only half of live sync (save, admin and editing-sender code) is a
@@ -2048,6 +2049,13 @@ class LiveSync {
    * local edits.
    */
   async _doApplyExternal(html, seq, etag = null, by = null, fetchOptions = null) {
+    // Another version of the document is not a change to this one: it does not
+    // merge, and after it no later frame is applied either. The guard holds the
+    // saves and asks the notice to offer a reload.
+    if (upgradeReplaces(html)) {
+      await stopForUpgrade();
+      return;
+    }
     if (this.lane === 'live' && !edit) await loadEdit();
     const priorDisk = this._diskBase;
     this._log(`applyExternal - external disk change (seq=${seq})`);

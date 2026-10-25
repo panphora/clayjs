@@ -193,3 +193,40 @@ test("a failed fresh answer keeps the page's last good answer", async () => {
   expect((await bare.hostMeta({ fresh: true })).extensions).toEqual([]);
   expect((await bare.hostMeta()).extensions).toEqual([]);
 });
+
+// The version history question (plan 05, Step 5). `document.versions` is the host
+// saying a person can go back to an earlier version of this document, which is what
+// lets an upgrade be offered without asking for a download first. Absent means no
+// history, because that is the answer every host gave before the field existed.
+describe("document.versions", () => {
+  test("true when the document block says so", async () => {
+    const { hostVersions } = await freshMeta();
+    global.fetch = jest.fn(async () =>
+      ok({ spec: 1, extensions: [], document: { etag: "a1", versions: true } })
+    );
+
+    expect(await hostVersions()).toBe(true);
+  });
+
+  test("false when it says false, and when it says nothing", async () => {
+    for (const document of [{ versions: false }, { etag: "a1" }, undefined]) {
+      const { hostVersions } = await freshMeta();
+      global.fetch = jest.fn(async () => ok({ spec: 1, extensions: [], document }));
+
+      expect(await hostVersions()).toBe(false);
+    }
+  });
+
+  test("only true for a real answer: a bare host and a failed fetch are both false", async () => {
+    for (const impl of [
+      async () => ({ ok: false, status: 404, text: async () => "" }),
+      async () => { throw new TypeError("Failed to fetch"); },
+      async () => ({ ok: true, text: async () => "<html>502</html>" }),
+    ]) {
+      const { hostVersions } = await freshMeta();
+      global.fetch = jest.fn(impl);
+
+      expect(await hostVersions()).toBe(false);
+    }
+  });
+});
