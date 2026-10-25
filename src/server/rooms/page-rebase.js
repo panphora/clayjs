@@ -8,7 +8,7 @@ import { inert, pageRev } from './page-state.js';
 
 // The lone article of html: its element rebuilt in doc, and where its start tag
 // and its contents sit in html.
-function articleOf(html, doc) {
+export function articleOf(html, doc) {
   const $ = load(html, { sourceCodeLocationInfo: true });
   const nodes = $('article[data-page]').toArray().filter((node) => !inert(node));
   if (nodes.length !== 1) return null;

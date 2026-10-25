@@ -58,7 +58,8 @@
     "docs/guide.md",
     "compat/",
     "fonts/",
-    "src/"
+    "src/",
+    "tests/fixtures/offline-runtime/page-lineage.json"
   ],
   "publishConfig": {
     "access": "public"
