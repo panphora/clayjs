@@ -15,6 +15,8 @@ import toast from "../ui/toast.js";
 import { insertChartAfterTable } from "./chart.js";
 import { pickCsv } from "./csv-import.js";
 import { HISTORY_INTENT, typingIntent } from "./history-intent.js";
+import { composing } from "./markdown.js";
+import { announce } from "./announce.js";
 
 export { BLOCK_TYPES, blockTypeOf, turnInto, insertAfter } from "./items.js";
 
@@ -32,6 +34,11 @@ const selectedRoots = (st) => {
 
 const imageId = (view, index) => view.state.doc.child(index).attrs.id;
 const blockStart = (doc, index) => { let at = 0; for (let i = 0; i < index; i++) at += doc.child(i).nodeSize; return at; };
+
+// The editor attributes a menu lends it while it is open. A slash menu puts them
+// back as it found them; every other menu clears them.
+const POPUP_ATTRS = ["aria-haspopup", "aria-controls", "aria-activedescendant"];
+const TARGET_GONE = "That block is no longer available.";
 
 export function blockLink(id, loc = globalThis.location) {
   return `${loc.origin}${loc.pathname}${loc.search}#${encodeURIComponent(id)}`;
@@ -253,6 +260,7 @@ class Chrome {
     this.onAiTool = onAiTool;
     this.shell = view.dom.parentElement;
     this.menu = null;
+    this.priorAria = null;
     this.movedTimer = 0;
     this.hover = null;
 
@@ -330,6 +338,28 @@ class Chrome {
     return Math.min(this.hover ?? this.blockIndex(), this.view.state.doc.childCount - 1);
   }
 
+  // The blocks a menu's commands act on, by id, so a peer's edit between opening
+  // the menu and running the command cannot retarget them.
+  selectionIds() {
+    const st = this.view.state;
+    return blocksIn(st).map((i) => st.doc.child(i).attrs.id);
+  }
+
+  idIndex(id) {
+    let found = -1;
+    this.view.state.doc.forEach((n, _, i) => { if (n.attrs.id === id) found = i; });
+    return found;
+  }
+
+  // Where Escape sends focus: the control that opened the menu when it can hold
+  // focus, otherwise the editor.
+  invoker() {
+    const m = this.menu;
+    if (!m || m.slashAt !== null) return this.view.dom;
+    const a = m.anchor;
+    return a && a !== this.view.dom && (a.tagName === "BUTTON" || a.hasAttribute("tabindex")) ? a : this.view.dom;
+  }
+
   gripAction(index) {
     if (this.menu) this.closeMenu();
     else this.openActions(this.grip, index);
@@ -355,7 +385,8 @@ class Chrome {
 
   fromPlus() {
     this.view.focus();
-    this.openMenu("insert", this.plus, null, this.gutterIndex());
+    const i = this.gutterIndex();
+    this.openMenu("insert", this.plus, null, null, this.view.state.doc.child(i).attrs.id);
   }
 
   toggleMenu(mode, anchor) {
@@ -363,10 +394,13 @@ class Chrome {
     else this.openMenu(mode, anchor);
   }
 
-  openMenu(mode, anchor, slashAt = null, index = null) {
-    this.menu = { mode, anchor, slashAt, index, query: "", active: 0, items: [] };
+  openMenu(mode, anchor, slashAt = null, ids = null, anchorId = null) {
+    this.menu = { mode, anchor, slashAt, anchorId, ids: ids ?? (mode === "insert" ? [] : this.selectionIds()), query: "", active: 0, items: [] };
     anchor.setAttribute("aria-expanded", "true");
-    this.view.dom.setAttribute("aria-haspopup", "menu");
+    if (slashAt !== null) {
+      if (!this.priorAria) this.priorAria = POPUP_ATTRS.map((name) => [name, this.view.dom.getAttribute(name)]);
+      this.view.dom.setAttribute("aria-haspopup", "listbox");
+    } else this.view.dom.setAttribute("aria-haspopup", "menu");
     this.view.dom.setAttribute("aria-controls", this.menuId);
     this.renderMenu();
   }
@@ -376,7 +410,13 @@ class Chrome {
     this.menu = null;
     this.menuEl.hidden = true;
     this.scrim.hidden = true;
-    for (const name of ["aria-haspopup", "aria-controls", "aria-activedescendant"]) this.view.dom.removeAttribute(name);
+    if (this.priorAria) {
+      for (const [name, value] of this.priorAria) {
+        if (value === null) this.view.dom.removeAttribute(name);
+        else this.view.dom.setAttribute(name, value);
+      }
+      this.priorAria = null;
+    } else for (const name of POPUP_ATTRS) this.view.dom.removeAttribute(name);
   }
 
   menuItems(m) {
@@ -388,6 +428,13 @@ class Chrome {
     return rankItems(items, m.query);
   }
 
+  // The types the blocks in the selection are now. A mixed selection has more
+  // than one and so checks no row.
+  currentTypes() {
+    const st = this.view.state;
+    return new Set(blocksIn(st).map((i) => blockTypeOf(st.doc.child(i)).key));
+  }
+
   openActions(anchor = this.plus, at = null) {
     const st = this.view.state;
     const ents = outline(st.doc);
@@ -395,13 +442,18 @@ class Chrome {
     const inside = at !== null && sel instanceof BlockSelection && sel.span(st.doc).lo <= at && at <= sel.span(st.doc).hi;
     const { lo, hi } = at === null || inside ? currentSpan(st, ents) : siblingSpan(ents, at, at);
     this.view.dispatch(st.tr.setSelection(selectBlocks(st.doc, lo, hi, ents)));
-    this.openMenu("actions", anchor, null, lo);
+    const ids = [];
+    for (let i = lo; i <= hi; i++) ids.push(st.doc.child(i).attrs.id);
+    this.openMenu("actions", anchor, null, ids);
   }
 
   renderMenu() {
     const m = this.menu;
     m.items = this.menuItems(m);
     m.active = Math.min(m.active, Math.max(0, m.items.length - 1));
+    const slash = m.slashAt !== null;
+    const current = m.mode === "turn" ? this.currentTypes() : null;
+    this.menuEl.setAttribute("role", slash ? "listbox" : "menu");
     const nodes = [];
     if (m.mode === "turn") {
       const title = el("div", "page-menu-title");
@@ -415,7 +467,9 @@ class Chrome {
     }
     m.items.forEach((b, i) => {
       const active = i === m.active;
-      const row = el("button", `page-menu-item${active ? " is-active" : ""}`, { type: "button", role: typeof b.checked === "boolean" ? "menuitemcheckbox" : "menuitem", tabindex: m.mode === "external" ? "0" : "-1", id: `${this.menuId}-${i}`, "data-index": String(i), "aria-selected": active ? "true" : "false", ...(typeof b.checked === "boolean" ? { "aria-checked": String(b.checked) } : {}) });
+      const checked = current ? current.size === 1 && b.key === [...current][0] : (typeof b.checked === "boolean" ? b.checked : null);
+      const role = m.mode === "turn" ? "menuitemradio" : typeof checked === "boolean" ? "menuitemcheckbox" : slash ? "option" : "menuitem";
+      const row = el("button", `page-menu-item${active ? " is-active" : ""}`, { type: "button", role, tabindex: !slash && active ? "0" : "-1", id: `${this.menuId}-${i}`, "data-index": String(i), ...(role === "menuitemradio" ? {} : { "aria-selected": active ? "true" : "false" }), ...(typeof checked === "boolean" ? { "aria-checked": String(checked) } : {}) });
       const icon = el("span", "page-menu-icon");
       icon.textContent = b.icon || "";
       const label = el("span", "page-menu-label");
@@ -435,12 +489,12 @@ class Chrome {
       nodes.push(row);
     });
     this.menuEl.replaceChildren(...nodes);
-    if (m.items.length) this.view.dom.setAttribute("aria-activedescendant", `${this.menuId}-${m.active}`);
+    if (slash && m.items.length) this.view.dom.setAttribute("aria-activedescendant", `${this.menuId}-${m.active}`);
     else this.view.dom.removeAttribute("aria-activedescendant");
     this.menuEl.hidden = false;
     this.scrim.hidden = false;
     this.place();
-    if (m.mode === "external") this.menuEl.querySelector("button")?.focus();
+    if (!slash) this.menuEl.querySelectorAll("button")[m.active]?.focus();
   }
 
   pick(i) {
@@ -449,34 +503,40 @@ class Chrome {
     if (!item) return;
     const st = this.view.state;
     const remove = m.slashAt !== null && st.selection.head >= m.slashAt ? { from: m.slashAt - 1, to: st.selection.head } : null;
+    // Resolve what the menu chose against the current document: a block a peer
+    // removed cancels the command instead of handing it whatever took its place.
+    const wanted = m.mode === "insert" ? (m.anchorId ? [m.anchorId] : []) : m.ids;
+    const stale = wanted.some((id) => !id || this.idIndex(id) < 0);
+    const index = wanted.length ? this.idIndex(wanted[0]) : -1;
     this.closeMenu();
+    if (stale && m.mode !== "external") {
+      announce(this.view, TARGET_GONE);
+      this.view.focus();
+      return;
+    }
     if (m.mode === "turn") {
-      let tr = null;
-      if (st.selection instanceof BlockSelection) {
-        tr = st.tr;
-        for (const root of selectedRoots(st)) retype(tr, root.i, item);
-      } else tr = turnInto(st, this.blockIndex(), item);
-      if (tr) this.view.dispatch(asStep(tr).scrollIntoView());
+      const tr = st.tr;
+      for (const id of wanted) retype(tr, this.idIndex(id), item);
+      this.view.dispatch(asStep(tr).scrollIntoView());
       this.view.focus();
     } else if (m.mode === "actions" || m.mode === "external") {
-      item.run(this.view, this, m.index);
+      item.run(this.view, this, index >= 0 ? index : this.blockIndex());
       if (!this.menu && item.focus !== false) this.view.focus();
     } else {
       if (item.insert === "ai") this.onAiTool(this.view, remove);
-      else runItem(this.view, item, m.slashAt !== null ? this.blockIndex() : m.index, remove);
+      else runItem(this.view, item, index >= 0 ? index : this.blockIndex(), remove);
     }
   }
 
   // Keys while the menu is open; anything else falls through to the editor.
   key(event) {
-    if (event.isComposing || this.view.composing) return false;
+    if (composing(event, this.view)) return false;
     const m = this.menu;
     if (!m) return false;
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       if (m.items.length) {
         m.active = (m.active + (event.key === "ArrowDown" ? 1 : -1) + m.items.length) % m.items.length;
         this.renderMenu();
-        if (m.mode === "external") this.menuEl.querySelectorAll("button")[m.active]?.focus();
       }
       return true;
     }
@@ -484,7 +544,13 @@ class Chrome {
       if (m.items.length) this.pick(m.active);
       return true;
     }
-    if (event.key === "Escape") { this.closeMenu(); return true; }
+    if (event.key === "Escape") {
+      const target = this.invoker();
+      this.closeMenu();
+      if (target === this.view.dom) this.view.focus();
+      else target?.focus?.();
+      return true;
+    }
     return false;
   }
 
@@ -550,7 +616,11 @@ class Chrome {
 
   update(view, prev) {
     this.view = view;
-    if (this.menu && this.menu.slashAt === null && prev && prev.doc !== view.state.doc) this.closeMenu();
+    if (this.menu && this.menu.slashAt === null && prev && prev.doc !== view.state.doc) {
+      const hadFocus = this.menuEl.contains(document.activeElement);
+      this.closeMenu();
+      if (hadFocus) view.focus();
+    }
     const st = view.state;
     const node = st.doc.child(this.blockIndex());
     this.turn.textContent = `${blockTypeOf(node).label} ▾`;
@@ -602,11 +672,12 @@ export function chromePlugin({ onAiTool = null } = {}) {
         if ($from.depth !== 1 || !$from.parent.isTextblock || $from.parent.type.spec.code) return inserted;
         if ($from.parentOffset > 0 && !/\s/.test(view.state.doc.textBetween(from - 1, from, "", "\n"))) return inserted;
         if (!inserted) view.dispatch(view.state.tr.insertText("/", from, to).setMeta(HISTORY_INTENT, typingIntent(view.state, from, to, "/")));
-        chrome.openMenu("insert", chrome.plus, from + 1);
+        const at = Math.min(view.state.doc.resolve(from).index(0), view.state.doc.childCount - 1);
+        chrome.openMenu("insert", chrome.plus, from + 1, null, view.state.doc.child(at).attrs.id);
         return true;
       },
       handleDOMEvents: {
-        keydown(view, event) { return event.isComposing || view.composing; },
+        keydown(view, event) { return composing(event, view); },
         blur(view) {
           if (chrome) chrome.bubble.hidden = true;
           return false;

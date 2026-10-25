@@ -224,7 +224,7 @@ describe("rows and aria", () => {
     type(view, "/");
     const h1 = rows(view)[1];
     expect(h1.id).toBe(`${menu(view).id}-1`);
-    expect(h1.getAttribute("role")).toBe("menuitem");
+    expect(h1.getAttribute("role")).toBe("option");
     expect(h1.getAttribute("tabindex")).toBe("-1");
     expect(h1.querySelector(".page-menu-hint").textContent).toBe("#");
     key(view, "ArrowDown");
@@ -236,7 +236,8 @@ describe("rows and aria", () => {
   test("aria-activedescendant follows the highlight and goes with the menu, and survives typing", () => {
     const view = open([["e", "paragraph", ""]]);
     type(view, "/");
-    expect(view.dom.getAttribute("aria-haspopup")).toBe("menu");
+    expect(view.dom.getAttribute("aria-haspopup")).toBe("listbox");
+    expect(menu(view).getAttribute("role")).toBe("listbox");
     expect(view.dom.getAttribute("aria-controls")).toBe(menu(view).id);
     expect(view.dom.getAttribute("aria-activedescendant")).toBe(`${menu(view).id}-0`);
     key(view, "ArrowDown");
@@ -296,7 +297,8 @@ describe("the actions menu", () => {
     const view = open(FOLD, "p");
     key(view, "/", { metaKey: true });
     expect(isOpen(view)).toBe(true);
-    expect(view.dom.getAttribute("aria-activedescendant")).toBe(`${menu(view).id}-0`);
+    expect(document.activeElement).toBe(rows(view)[0]);
+    expect(view.dom.hasAttribute("aria-activedescendant")).toBe(false);
   });
 
   test("Move up moves the selected block above its previous sibling and keeps it selected", () => {

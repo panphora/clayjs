@@ -42,9 +42,9 @@ describe("rankItems", () => {
     expect(keys("list")).toEqual(["bullet", "ordered", "check"]);
   });
 
-  test("substrings match and letters in order do not", () => {
+  test("substrings match, and letters in order match as a fuzzy abbreviation", () => {
     expect(keys("llou")).toEqual(["callout"]);
-    expect(keys("hd2")).toEqual([]);
+    expect(keys("hd2")).toEqual(["h2"]);
     expect(keys("zz")).toEqual([]);
   });
 
