@@ -71,6 +71,35 @@ for (const [fixture, modes] of Object.entries(budget.built)) {
   }
 }
 
+// The Journal as it ships: its template and Hyperclay's copy, in every mode each file
+// allows. The walk has to be real for the absence below to mean anything, and OverType,
+// marked and highlight.js have to be reachable but never fetched before ready: a reader
+// who does not edit must not pay for the editor, and a ceiling that folded them in
+// would hide it. They are named in the manifest by their logical path, which is the
+// chunk whose bytes a built page would fetch.
+const VENDORED = ["overtype", "marked", "highlight"].map((name) => `vendor/${name}.vendor.js`);
+
+for (const fixture of ["journal.html", "journal-hyperclay.html"]) {
+  test(`${fixture}: more than 30 requests before ready, and no OverType, marked or highlight.js among them`, async () => {
+    const manifest = JSON.parse(readFileSync(join(dir, "m/manifest.json"), "utf8"));
+    for (const mode of Object.keys(budget[fixture])) {
+      const source = await measure({ html: htmlOf(fixture), mode });
+      const built = await measureBuilt({ html: htmlOf(fixture), mode, dir });
+      const sourcePaths = source.js.files.map((file) => file.path);
+      const builtPaths = built.js.files.map((file) => file.path);
+
+      expect(source.js.requests).toBeGreaterThan(30);
+      expect(built.js.requests).toBeGreaterThan(30);
+      for (const entry of VENDORED) {
+        expect(sourcePaths).not.toContain(`src/${entry}`);
+        expect(builtPaths).not.toContain(`m/${manifest.entries[entry]}`);
+        expect(source.lazy).toContain(`src/${entry}`);
+        expect(built.lazy).toContain(`m/${manifest.entries[entry]}`);
+      }
+    }
+  }, 180000);
+}
+
 // The view parts a file's own block types need are fetches before input, so the
 // built edit line has to count them: a budget that leaves them out passes falsely.
 test(`a Document's built edit line counts the view parts its blocks need, and a text-only one counts none`, async () => {
