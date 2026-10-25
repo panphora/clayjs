@@ -62,16 +62,17 @@ export default function enablePersistentFormInputValues(filterBySelector = PERSI
   // Text-like inputs and textareas serialize on every keystroke; the shared
   // serializer keeps it cursor-safe (value via the dirty flag, textarea via
   // an inert data-value attribute).
-  document.addEventListener('input', (e) => {
+  const onInput = (e) => {
     const el = e.target;
     if ((el.matches(inputSelector) && el.type !== 'checkbox' && el.type !== 'radio') ||
         el.matches(textareaSelector)) {
       serializeControlToAttributes(el);
     }
-  }, true);
+  };
+  document.addEventListener('input', onInput, true);
 
   // Checkboxes, radios, and selects settle on change.
-  document.addEventListener('change', (e) => {
+  const onChange = (e) => {
     const el = e.target;
     if ((el.matches(inputSelector) && (el.type === 'checkbox' || el.type === 'radio')) ||
         el.matches(selectSelector)) {
@@ -88,7 +89,15 @@ export default function enablePersistentFormInputValues(filterBySelector = PERSI
         }
       }
     }
-  }, true);
+  };
+  document.addEventListener('change', onChange, true);
+
+  // The exact subscriptions this call made, so a session that ends can take them back:
+  // the same target, type, handler and capture option it registered.
+  const subscriptions = [
+    { target: document, type: 'input', handler: onInput, options: true },
+    { target: document, type: 'change', handler: onChange, options: true },
+  ];
 
   // --- Snapshot hook: final safety net at serialize time ---
 
@@ -119,12 +128,26 @@ export default function enablePersistentFormInputValues(filterBySelector = PERSI
       }
     }
   });
+
+  return {
+    stop() {
+      for (const { target, type, handler, options } of subscriptions.splice(0)) {
+        target.removeEventListener(type, handler, options);
+      }
+    }
+  };
 }
 
-// Auto-initialize with default selector
-export function init() {
-  enablePersistentFormInputValues(PERSIST);
+let installation = null;
+
+// Loader-managed initialization with the default selector: the loader calls this after
+// importing the module, and the import calls it too, so both roads reach one installation.
+export function install() {
+  if (installation) return installation;
+  installation = enablePersistentFormInputValues(PERSIST);
+  return installation;
 }
 
-// Auto-init when module is imported
-init();
+install();
+
+export { install as init };

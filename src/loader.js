@@ -48,7 +48,7 @@ export async function boot(base, params, readyResolve, manifest = null, suppleme
                                                        // would otherwise observe null
 
   const editMode = await MODULES["core/is-edit-mode.js"]();
-  const { isEditMode, isDraftMode, isOwner, siteVisibility, canEdit, mode } = editMode;
+  const { isEditMode, isDraftMode, isOwner, siteVisibility, canEdit } = editMode;
 
   // A draft saved by its visitor never reaches the host, and hostMeta() answers
   // bareHost() for it, so the request would fetch an answer nothing reads.
@@ -88,6 +88,10 @@ export async function boot(base, params, readyResolve, manifest = null, suppleme
 
   for (const path of plan.core) {
     loaded[path] = await MODULES[path](); // sequential: order is load-bearing
+    // The loader starts what it imports: a target that exports `install` gets it called
+    // here, once, in this order. A module another road reaches (a live switch, a second
+    // entry) then reuses that same installation instead of adding a second one.
+    loaded[path].install?.();
   }
 
   assembleCore(loaded, { isDraftMode, isOwner, siteVisibility }, regionPolicy); // window.clay MUST be assembled
@@ -127,24 +131,36 @@ export async function boot(base, params, readyResolve, manifest = null, suppleme
   installViewModeNotice(isEditMode);
   readyResolve(window.clay);
   document.dispatchEvent(new CustomEvent("clay:ready", { detail: { clay: window.clay } }));
-  if (plan.late.length) loadLate(plan.late, loaded);
+  if (plan.late.length) loadLate(plan.late, loaded, editMode);
 }
+
+// An edit-only plugin belongs to the edit session that resolved it. Once the page has
+// left edit, importing it would start an editor in a view, so the tail drops it instead:
+// the module is not fetched, not attached and not announced. Dropping is not a reload —
+// nothing is re-imported with a cache-busting URL, and a later entry asks the module
+// cache for the same single instance.
+const stale = (path, editMode) => !editMode.isEditMode && PLUGIN_PATHS[PLUGIN_NAMES[path]]?.editOnly;
 
 // Plugins no first paint or keystroke waits for. They load after the editor takes input
 // (right away on a page without one), one at a time and in plan order, and a failure
 // degrades to absent as at boot.
-async function loadLate(paths, loaded) {
+async function loadLate(paths, loaded, editMode) {
   // Held once: a test environment can tear the global down while an import is in flight.
   const doc = document;
   try {
     await window.clay.page?.ready;
   } catch {}
   for (const path of paths) {
+    if (stale(path, editMode)) continue;
     try {
       const mod = await MODULES[path]();
+      // The session can end while the fetch is in flight, so ask again before the module
+      // is given a page to wire itself into.
+      if (stale(path, editMode)) continue;
       loaded[path] = mod;
       attachPluginMember(path, mod, loaded);
       await mod.ready;
+      if (stale(path, editMode)) continue;
       doc.dispatchEvent(new CustomEvent("clay:plugin-ready", { detail: { plugin: PLUGIN_NAMES[path] } }));
     } catch (err) {
       console.error(`clayjs: plugin "${path}" failed to load, continuing without it:`, err);

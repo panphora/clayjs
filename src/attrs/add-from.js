@@ -63,10 +63,27 @@ function onClick(event) {
   addFrom(trigger);
 }
 
-function init() {
-  document.addEventListener("click", onClick);
+// The exact subscription, so a session that ends can take it back by target, type,
+// handler and options rather than by hoping no other click listener exists.
+const CLICK = { target: document, type: "click", handler: onClick, options: false };
+
+let installation = null;
+
+// Loader-managed initialization: the loader calls this after it imports the module, and
+// the import calls it too, so both roads reach one listener. Asking again returns the
+// installation the page already has instead of adding a second click handler that would
+// add each item twice.
+export function install() {
+  if (installation) return installation;
+  CLICK.target.addEventListener(CLICK.type, CLICK.handler, CLICK.options);
+  installation = {
+    stop() {
+      CLICK.target.removeEventListener(CLICK.type, CLICK.handler, CLICK.options);
+    }
+  };
+  return installation;
 }
 
-init();
+install();
 
-export default init;
+export default install;
