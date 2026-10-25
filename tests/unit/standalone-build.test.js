@@ -59,7 +59,13 @@ test("carries the core, every plugin and every satellite", () => {
   expect((bundle.match(/@layer clay-skin\{/g) || []).length).toBeGreaterThanOrEqual(3);
   for (const name of ["richclay", "cms", "quickcrop"]) expect(bundle).toMatch(new RegExp(`installSkin\\d*\\(\\s*"${name}"`));
   expect(bundle.length).toBeGreaterThan(500_000);
-  expect(bundle.length).toBeLessThan(4_500_000);
+  // 4.75 MB. The 4.5 MB ceiling was set at 4.01 MB; what grew it by 534 KB is the
+  // reader's own work, all of it code the single-file build is meant to carry: the
+  // vendored markdown and highlighting tools loaded on demand (OverType 192 KB, marked
+  // 70 KB, highlight.js 35 KB plus 30 KB of grammars and its sheet), the menu and SEO
+  // plugin 49 KB, and the reader's page features and saved stream. The guard is there to
+  // catch something the size of Shiki's grammars (6.3 MB), which 4.75 MB still does.
+  expect(bundle.length).toBeLessThan(4_750_000);
 });
 
 // The chunk build adds a generated bootstrap per entry that has a target, plus the
@@ -67,8 +73,11 @@ test("carries the core, every plugin and every satellite", () => {
 // guard pins it the same way.
 const BOOTSTRAPS = ["all.js", "clay-dom.js", "clay-events.js", "clay-internals.js", "clay-options.js", "clay-router.js", "clay-ui.js", "clay-utils.js", "clay.js"];
 
+// The compiled theme the release serves offline travels with the modules, at
+// page/themes/light-1.css under each prefix (build.js emitThemeAsset), so dist/page is
+// part of the output and the unversioned-URL guard derives from this same listing.
 test("writes exactly the files the unversioned-URL guard pins", () => {
-  expect(readdirSync(join(ROOT, "dist")).sort()).toEqual([...BOOTSTRAPS, "clay.standalone.js", "m", "server"].sort());
+  expect(readdirSync(join(ROOT, "dist")).sort()).toEqual([...BOOTSTRAPS, "clay.standalone.js", "m", "page", "server"].sort());
   for (const name of BOOTSTRAPS) {
     expect(readFileSync(join(ROOT, "dist", name), "utf8")).toContain('"dir":"m/"');
   }

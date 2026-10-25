@@ -42,12 +42,21 @@ function htmlFilesUnder(dir, out = []) {
   return out;
 }
 
+// A document whose <noscript> holds markup cannot be direct-paired here, and refusing is
+// the designed answer rather than a defect: this sweep's live tree is a DOMParser parse,
+// which reads <noscript> with scripting OFF, while the model's parse5 reads it with
+// scripting ON, so the block's children differ by construction (the <noscript> case below
+// pins that refusal). tests/fixtures/load/journal-hyperclay.html is one: the Journal's own
+// saved copy carries a head <noscript> with a <style> in it.
+const noscriptHoldsMarkup = (src) => (src.match(/<noscript\b[\s\S]*?<\/noscript\s*>/gi) || [])
+  .some((block) => block.slice(block.indexOf(">") + 1).includes("<"));
+
 const CORPUS = [
   ...htmlFilesUnder("tests/fixtures"),
   ...htmlFilesUnder("conformance/fixtures"),
   ...htmlFilesUnder("examples"),
   ...htmlFilesUnder("website"),
-].sort();
+].sort().filter((file) => !noscriptHoldsMarkup(readFileSync(join(ROOT, file), "utf8")));
 
 function parse(src) {
   return new DOMParser().parseFromString(src, "text/html");
