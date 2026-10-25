@@ -31,6 +31,9 @@ function walk(dir, out = []) {
   for (const name of names) {
     if (name === "node_modules" || name === "tmp" || name.startsWith(".")) continue;
     const abs = join(dir, name);
+    // The offline resolver's URL vectors are malformed spellings on purpose: they test
+    // that canonicalization refuses them, so they are inputs, not references.
+    if (abs === join(ROOT, "tests/fixtures/offline-runtime")) continue;
     if (statSync(abs).isDirectory()) walk(abs, out);
     else if (READABLE.has(extname(abs))) out.push(abs);
   }

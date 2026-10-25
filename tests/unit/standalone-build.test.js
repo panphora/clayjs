@@ -82,11 +82,12 @@ const BOOTSTRAPS = ["all.js", "clay-dom.js", "clay-events.js", "clay-internals.j
 // The compiled theme the release serves offline travels with the modules, at
 // page/themes/light-1.css under each prefix (build.js emitThemeAsset), so dist/page is
 // part of the output and the unversioned-URL guard derives from this same listing.
+// offline-manifest.json is the release inventory local hosts package from (Document 09).
 test("writes exactly the files the unversioned-URL guard pins", () => {
-  expect(readdirSync(DIST).sort()).toEqual([...BOOTSTRAPS, "clay.standalone.js", "m", "page", "server"].sort());
+  expect(readdirSync(DIST).sort()).toEqual([...BOOTSTRAPS, "clay.standalone.js", "m", "offline-manifest.json", "page", "server"].sort());
   for (const name of BOOTSTRAPS) {
     expect(readFileSync(join(DIST, name), "utf8")).toContain('"dir":"m/"');
   }
   expect(readdirSync(join(DIST, "m"))).toContain("manifest.json");
-  expect(readdirSync(join(DIST, "server")).sort()).toEqual(["checkpoint.cjs", "checkpoint.mjs", "core.cjs", "rooms.cjs", "rooms.mjs"]);
+  expect(readdirSync(join(DIST, "server")).sort()).toEqual(["checkpoint.cjs", "checkpoint.mjs", "core.cjs", "offline-runtime.cjs", "offline-runtime.mjs", "rooms.cjs", "rooms.mjs"]);
 });
