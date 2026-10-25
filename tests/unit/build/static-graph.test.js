@@ -231,3 +231,42 @@ test("the notice loads the replace module only through the upgrade runner", asyn
   const runnerGraph = walk(await inputsFor([runner]), [runner]);
   expect(runnerGraph.has("src/core/save-replace.js")).toBe(true);
 });
+// The recovery store is a dynamic import from core/recovery.js, and core/recovery.js
+// is edit-only. So a reader never downloads the database code and never opens one,
+// and a visitor's draft — which does carry the edit-only facade, because a draft is
+// a tab this person edits — still carries neither the store nor the identity that
+// scopes it. The plans here come from the fixtures' own script tags, so a fixture
+// that starts naming a plugin is measured as it boot.
+const RECOVERY_STORE = /^src\/recovery\//;
+const FIXTURE_HTML = {
+  journal: "tests/fixtures/load/journal.html",
+  document: "tests/fixtures/load/document.html",
+};
+
+function fixtureBoot(file) {
+  const html = readFileSync(new URL(`../../../${file}`, import.meta.url), "utf8");
+  const src = html.match(/<script[^>]+src="([^"]*clay\.js[^"]*)"/);
+  return {
+    params: new URLSearchParams(new URL(src[1]).search),
+    hasSap: /\ssap[\s>=]/.test(html.match(/<html[^>]*>/)[0]),
+  };
+}
+
+for (const [fixture, file] of Object.entries(FIXTURE_HTML)) {
+  for (const { mode, isEditMode, isDraftMode } of MODES) {
+    test(`${fixture} ${mode}: no src/recovery module is in the boot graph`, async () => {
+      const { params, hasSap } = fixtureBoot(file);
+      const plan = resolveModules(params, isEditMode, { isDraftMode, hasSap });
+      const entries = [...plan.core, ...plan.plugins].map((path) => `src/${path}`);
+      const inputs = await inputsFor(entries);
+      const graph = walk(inputs, ["src/loader.js", ...entries]);
+
+      expect([...graph].filter((imported) => RECOVERY_STORE.test(imported))).toEqual([]);
+      // The test-only IndexedDB is a dev dependency the runtime must never reach,
+      // statically or through a dynamic import, and the metafile sees both.
+      expect(Object.keys(inputs).filter((imported) => imported.includes("fake-indexeddb"))).toEqual([]);
+      if (isEditMode) expect(graph.has("src/core/recovery.js")).toBe(true);
+      else expect(graph.has("src/core/recovery.js")).toBe(false);
+    });
+  }
+}

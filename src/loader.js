@@ -220,6 +220,12 @@ function assembleCore(loaded, { isDraftMode, isEditMode, isOwner, siteVisibility
     clay.cacheBust = cacheBustMod.default;
   }
   clay.morph = (oldEl, newEl, options) => mergeEngine().then(({ morph }) => morph(oldEl, newEl, options));
+
+  // Edit mode only, and absent entirely in view mode: a reader has nothing to
+  // recover and must never open the database. The facade is here; the store behind
+  // it arrives when the page's first adapter registers a channel.
+  const recoveryMod = loaded["core/recovery.js"];
+  if (recoveryMod) clay.recovery = recoveryMod.recovery;
 }
 
 function attachPluginMember(path, mod, loaded) {

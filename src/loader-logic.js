@@ -18,6 +18,10 @@ export const CORE_WAVES = {
     "core/persist.js", "core/admin-attrs.js",
     "core/save-core.js", "core/save.js",
     "core/conflict-notice.js",
+    // The recovery facade: a queue and a status, no storage of its own. It imports
+    // the IndexedDB store and the identity only when an adapter registers, which is
+    // why neither is in a plan's static graph.
+    "core/recovery.js",
     "core/unsaved-warning.js", "core/autosave.js",
     "attrs/save-freeze.js", "attrs/onaftersave.js", "attrs/refetch-on-save.js", "attrs/add-from.js",
     "lib/cache-bust.js",
@@ -104,6 +108,7 @@ export const MODULES = {
   "core/save-core.js":          () => import("./core/save-core.js"),
   "core/save.js":               () => import("./core/save.js"),
   "core/conflict-notice.js":     () => import("./core/conflict-notice.js"),
+  "core/recovery.js":           () => import("./core/recovery.js"),
   "core/unsaved-warning.js":    () => import("./core/unsaved-warning.js"),
   "core/persist.js":            () => import("./core/persist.js"),
   "core/admin-attrs.js":        () => import("./core/admin-attrs.js"),
