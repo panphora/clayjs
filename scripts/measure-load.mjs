@@ -11,7 +11,7 @@ import { build } from "esbuild";
 import { parse } from "parse5";
 import { draftEligible, noteBootParams } from "../src/core/draft-mode.js";
 import { resolveModules } from "../src/loader-logic.js";
-import { BOOT_IMPORTS, EDIT_BOOT_IMPORTS } from "../src/lib/boot-imports.js";
+import { BOOT_IMPORTS, EDIT_BOOT_IMPORTS, EDITOR_BOOT_IMPORTS } from "../src/lib/boot-imports.js";
 import { FEATURES, featureForType } from "../src/page/features/registry.js";
 import { blocksFromYValue } from "../src/page/ybind/decode.js";
 import { parseJsonRelaxed } from "../src/vendor/hyper-morph-json.vendor.js";
@@ -314,9 +314,11 @@ export async function measure({ html, mode }) {
     }
   }
 
-  // A Document's page plugin loads the view parts for the block types the file already
-  // has before input, so they belong to the boot set. Only where it runs in edit.
+  // A Document's page plugin loads the editor, and the view parts of the block types
+  // the file already has, before input, so they belong to the boot set. The editor is
+  // a dynamic target, fetched on demand. Only where the page plugin runs in edit.
   if (mode === "edit" && plan.plugins.includes(PAGE_PLUGIN)) {
+    for (const file of EDITOR_BOOT_IMPORTS) mainDepth += closure(inputs, `src/${file}`, loaded).levels;
     for (const file of pageFeatureModules(html)) mainDepth += closure(inputs, `src/${file}`, loaded).levels;
   }
 
@@ -388,7 +390,7 @@ export async function measureBuilt({ html, mode, dir }) {
       }
     }
     if (mode === "edit") bootImports.push(...EDIT_BOOT_IMPORTS);
-    if (mode === "edit" && plan.plugins.includes(PAGE_PLUGIN)) bootImports.push(...pageFeatureModules(html));
+    if (mode === "edit" && plan.plugins.includes(PAGE_PLUGIN)) bootImports.push(...EDITOR_BOOT_IMPORTS, ...pageFeatureModules(html));
   }
   const loaded = new Set();
   const addChunk = (file) => {

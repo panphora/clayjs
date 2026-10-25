@@ -1,4 +1,3 @@
-import { createPageEditor, installPageFeature } from "../page/editor.js";
 import { createFeatureLoader } from "../page/feature-loader.js";
 import { FEATURES, featureForType } from "../page/features/registry.js";
 import { readFile, installAdoption } from "../page/adopt-boot.js";
@@ -20,7 +19,7 @@ import { saveStateFor, BLOCKED_TEXT, RETRY_TEXT, downloadPageCopy, downloadSnaps
 import toast, { toastPersistent, dismissPersistent } from "../ui/toast.js";
 import { createRecoverList, focusBlock } from "../page/recover.js";
 import { claim } from "../page/runtime-owner.js";
-import { createInstall, disposeInstall, addDisposer, finishError, isCurrent, mark, runBoot } from "../page/boot.js";
+import { createInstall, disposeInstall, addDisposer, finishError, isCurrent, runBoot } from "../page/boot.js";
 import { capabilityAdvertised } from "../page/tool-capability.js";
 import { toolViews } from "../page/tool-views.js";
 import { holdSlashRange, heldSlashRange } from "../page/chrome.js";
@@ -281,6 +280,12 @@ function createSteps(inst, options) {
   let aiTool = null;
   let toolsOpening = null;
 
+  // The view parts install onto the editor, which exists only after the mount; an
+  // install that starts before it waits here, and a disposed install releases it.
+  const editorReady = new Promise((resolve) => { editorReadyResolve = resolve; });
+  inst.editorReadyResolve = editorReadyResolve;
+  addDisposer(inst, () => editorReadyResolve?.());
+
   // A document with a tool block, at boot or when one arrives, opens the store its
   // tools keep state in and the host that mounts them. A document with no tool
   // never waits for either.
@@ -410,27 +415,14 @@ function createSteps(inst, options) {
     return { ok: true, source: { article: file.article, tags: [value], element: articles[0], blocks, seeded } };
   }
 
-  // The editor code this step already has, and the feature views the saved
-  // article demands. Their preparations start with the authority work below.
-  function loadEditorAssets(inst, source) {
+  // The editor's code and the feature views the saved article demands are separate
+  // downloads, and they start together here beside the room join. Nothing evaluates
+  // the editor until the coordinator calls it; the parts are installed at the mount,
+  // so a failed one is the loader's own Retry notice there.
+  async function loadEditorAssets(inst, source) {
     const featureIds = [...new Set(Object.values(source.blocks).map((block) => featureForType(block.t)).filter(Boolean))];
-    return { ok: true, editor: createPageEditor, installFeature: installPageFeature, featureIds };
-  }
-
-  async function prepareAuthority(inst, source, loaded) {
-    try { meta = await hostMeta(); } catch (error) { meta = null; }
-    if (!isCurrent(inst)) return { ok: false, cancelled: true };
-    if (!meta || !Array.isArray(meta.extensions) || !meta.extensions.includes("page")) {
-      showBlocked(inst, BLOCKED.code, BLOCKED.message);
-      return { ok: false, reason: "missing-capability" };
-    }
-
-    // The editor the view parts install onto exists only after the room join, so an
-    // install that starts earlier waits for it; the download overlaps the join meanwhile.
-    const editorReady = new Promise((resolve) => { editorReadyResolve = resolve; });
-    inst.editorReadyResolve = editorReadyResolve;
-    addDisposer(inst, () => editorReadyResolve?.());
-
+    let editor = null;
+    const editorImport = import("../page/editor.js");
     features = createFeatureLoader({
       load: (id) => FEATURES[id].load(),
       install: async (id, mod) => {
@@ -441,17 +433,35 @@ function createSteps(inst, options) {
           context.toolHost = await openTools();
           if (!isCurrent(inst)) return null;
         }
-        return loaded.installFeature(context, id, mod);
+        return editor.installPageFeature(context, id, mod);
       },
       reportError: (error, id) => {
         console.error("clayjs: an editor feature failed to load", error);
         notifyFailed(id);
       },
     });
-    // The view parts for the block types the saved article already has start loading
-    // here, together with the room join, so the editor shows them and not an empty
-    // section. A failure is reported by the loader, which shows its Retry notice.
-    featuresReady = Promise.allSettled(loaded.featureIds.map((id) => features.ensure(id)));
+    // The fetch only warms the module: the install waits for the mounted view, and the
+    // boot waits for that install before it enables input. A failure here is reported
+    // by that install, which offers the feature's Retry.
+    for (const id of featureIds) features.prepare(id).catch(() => null);
+    try {
+      editor = await editorImport;
+    } catch (error) {
+      // A host that blocked the download keeps the saved article and reads this reason.
+      console.error("clayjs: page plugin could not load the editor", error);
+      return { ok: false, reason: "editor-assets-failed" };
+    }
+    if (!isCurrent(inst)) return { ok: false, cancelled: true };
+    return { ok: true, editor: editor.createPageEditor, featureIds };
+  }
+
+  async function prepareAuthority(inst, source) {
+    try { meta = await hostMeta(); } catch (error) { meta = null; }
+    if (!isCurrent(inst)) return { ok: false, cancelled: true };
+    if (!meta || !Array.isArray(meta.extensions) || !meta.extensions.includes("page")) {
+      showBlocked(inst, BLOCKED.code, BLOCKED.message);
+      return { ok: false, reason: "missing-capability" };
+    }
 
     // The room was opened from a document that had no page tag, so it holds no page
     // store and would answer this tab's frames with unknown-store. One conditional
@@ -566,6 +576,10 @@ function createSteps(inst, options) {
     if (loaded.featureIds.length) view.dom.closest(".page-shell").style.visibility = "hidden";
     binding.attach(view);
     editorReadyResolve();
+    // The parts the saved article demands install onto the mounted view now, whether
+    // their fetch already landed or is still on the wire; the saved article stays and
+    // input stays off until they are in.
+    featuresReady = Promise.allSettled(loaded.featureIds.map((id) => features.ensure(id)));
     scrollToHashBlock(view);
     inst.recover = createRecoverList({
       binding,
@@ -646,7 +660,6 @@ function createSteps(inst, options) {
     }
     await featuresReady;
     if (!isCurrent(inst)) return { ok: false, cancelled: true };
-    mark("document:assets-ready", inst);
     showEditor();
     // A replacement that landed during the feature wait keeps the editor read-only,
     // exactly as one that landed before it does.

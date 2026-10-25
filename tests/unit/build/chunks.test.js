@@ -6,7 +6,7 @@ import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { BOOT_IMPORTS, EDIT_BOOT_IMPORTS } from "../../../src/lib/boot-imports.js";
+import { BOOT_IMPORTS, EDIT_BOOT_IMPORTS, EDITOR_BOOT_IMPORTS } from "../../../src/lib/boot-imports.js";
 import { CORE_WAVES } from "../../../src/loader-logic.js";
 import { emitBootstraps, emitChunks } from "../../../scripts/build-chunks.mjs";
 
@@ -111,6 +111,33 @@ test("no source module is in two outputs", () => {
     }
   }
   expect(seen.size).toBeGreaterThan(0);
+});
+
+// The editor is a dynamic target of the page plugin, so a Document's edit boot
+// fetches it beside the room join. It must stay one copy: no second bundle graph,
+// one ProseMirror and one Yjs in the plan the preloads and the plugin name.
+test("the Document edit plan reaches the editor's chunk and one copy of ProseMirror and Yjs", async () => {
+  const manifest = built.manifest;
+  const editor = manifest.entries["page/editor.js"];
+  expect(editor).toBeTruthy();
+  expect(EDITOR_BOOT_IMPORTS).toContain("page/editor.js");
+  expect(manifest.files[manifest.entries["plugins/page.js"]].imports).not.toContain(editor);
+  expect(manifest.files[manifest.entries["plugins/page.js"]].dynamicImports).toContain(editor);
+
+  const inputsOf = (file) =>
+    Object.entries(built.metafile.outputs).find(([out]) => path.basename(out) === file)?.[1].inputs ?? {};
+  const files = new Set();
+  const stack = ["plugins/page.js", ...EDITOR_BOOT_IMPORTS].map((logical) => manifest.entries[logical]);
+  while (stack.length) {
+    const file = stack.pop();
+    if (!file || files.has(file)) continue;
+    files.add(file);
+    stack.push(...(manifest.files[file]?.imports ?? []));
+  }
+  const copies = (input) => [...files].filter((file) => Object.keys(inputsOf(file)).includes(input));
+  expect(copies("src/vendor/prosemirror.vendor.js")).toHaveLength(1);
+  expect(copies("src/vendor/yjs.vendor.js")).toHaveLength(1);
+  expect((await readFile(path.join(outdir, editor))).length).toBeGreaterThan(0);
 });
 
 test("the only external import in the metafile is the diff library", () => {

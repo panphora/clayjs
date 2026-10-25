@@ -94,11 +94,25 @@ function stop(inst, result) {
   return finishBlocked(inst, result.reason ?? "boot-incomplete");
 }
 
-// One coordinator for the edit boot, in the file's own serial order: read the
-// source, take the assets, prepare authority, mount, adopt, then enable input.
-// Every step reports an outcome and every await is followed by an ownership
-// check, so a late or cancelled installation can neither mutate the page nor
-// mark it ready.
+// A branch of the parallel boot reports its own failure here, so a rejection in one
+// cannot leave an unhandled rejection or a late continuation mounting the other. The
+// mark it owns is emitted when it settles, which is what proves the two overlapped.
+function branch(promise, inst, reason, name = null) {
+  return Promise.resolve(promise)
+    .then((result) => result ?? { ok: false, reason }, (error) => {
+      console.error(`clayjs: page boot ${reason}`, error);
+      return { ok: false, reason };
+    })
+    .then((result) => {
+      if (result.ok && name && isCurrent(inst)) mark(name, inst);
+      return result;
+    });
+}
+
+// One coordinator for the edit boot: read the source, take the assets while
+// authority is prepared, mount, adopt, then enable input. Every step reports an
+// outcome and every await is followed by an ownership check, so a late or
+// cancelled installation can neither mutate the page nor mark it ready.
 export async function runBoot(inst, steps) {
   mark("document:boot", inst);
   setPhase(inst, PHASES.loading);
@@ -108,15 +122,17 @@ export async function runBoot(inst, steps) {
   if (!read.ok) return finishBlocked(inst, read.reason);
   const source = read.source;
 
-  const loaded = steps.loadEditorAssets(inst, source);
-  if (!isCurrent(inst)) return null;
-  if (!loaded.ok) return finishBlocked(inst, loaded.reason);
-
+  // The editor's code arrives while authority is prepared, so the wait is the longer
+  // of the two plus adoption rather than their sum. Neither branch subscribes a
+  // resource or touches the page: only the coordinator does, after both are in.
   setPhase(inst, PHASES.joining);
-  const admitted = await steps.prepareAuthority(inst, source, loaded);
+  const [loaded, admitted] = await Promise.all([
+    branch(steps.loadEditorAssets(inst, source), inst, "editor-assets-failed", "document:assets-ready"),
+    branch(steps.prepareAuthority(inst, source), inst, "authority-failed", "document:authority-ready"),
+  ]);
   if (!isCurrent(inst)) return null;
+  if (!loaded.ok) return stop(inst, loaded);
   if (!admitted.ok) return stop(inst, admitted);
-  mark("document:authority-ready", inst);
 
   const mounted = steps.mountAndAttach(inst, source, loaded, admitted);
   if (!isCurrent(inst)) return null;

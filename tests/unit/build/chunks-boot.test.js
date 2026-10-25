@@ -112,7 +112,7 @@ for (const editMode of [false, true]) {
     expect(Object.keys(window.clay).length).toBeGreaterThan(0);
 
     const plan = resolveModules(new URLSearchParams("plugins=page"), editMode, { isDraftMode: false, hasSap: false });
-    const boot = editMode ? runtime.editBootImports : [];
+    const boot = editMode ? [...runtime.editBootImports, ...runtime.editorBootImports] : [];
     const hrefs = [...document.querySelectorAll('link[rel="modulepreload"]')].map((link) => link.href).sort();
     expect(hrefs).toEqual(closure(runtime, [...plan.core, ...plan.plugins, ...boot]));
   }, 60000);

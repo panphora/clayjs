@@ -8,7 +8,7 @@ import { createHash } from "node:crypto";
 import { readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { BOOT_IMPORTS, EDIT_BOOT_IMPORTS } from "../src/lib/boot-imports.js";
+import { BOOT_IMPORTS, EDIT_BOOT_IMPORTS, EDITOR_BOOT_IMPORTS } from "../src/lib/boot-imports.js";
 
 export const BOOT_PREFIX = ["core/draft-mode.js", "core/is-edit-mode.js", "lib/region-policy.js"];
 // The one build entry that carries the always-wave core (src/reader-core.js).
@@ -42,6 +42,7 @@ export async function emitChunks({ root, outdir, plugins = [] }) {
     ...Object.values(satellites),
     ...bootImports,
     ...EDIT_BOOT_IMPORTS,
+    ...EDITOR_BOOT_IMPORTS,
   ])];
   await rm(outdir, { recursive: true, force: true });
   const result = await esbuild.build({
@@ -83,7 +84,7 @@ export async function emitChunks({ root, outdir, plugins = [] }) {
   if (!aggregate) throw new Error(`the manifest has no ${READER_CORE} entry`);
   for (const file of Object.keys(coreExports)) entries[file] ??= aggregate;
   const imports = Object.fromEntries(Object.entries(files).filter(([f]) => f.endsWith(".js")).map(([f, v]) => [f, v.imports]));
-  const code = `export default ${JSON.stringify({ version, entries, imports, bootImports: BOOT_IMPORTS, editBootImports: EDIT_BOOT_IMPORTS, core: { entry: READER_CORE, exports: coreExports } })};\n`;
+  const code = `export default ${JSON.stringify({ version, entries, imports, bootImports: BOOT_IMPORTS, editBootImports: EDIT_BOOT_IMPORTS, editorBootImports: EDITOR_BOOT_IMPORTS, core: { entry: READER_CORE, exports: coreExports } })};\n`;
   const runtime = `manifest-${sha256(code).slice(0, 8).toUpperCase()}.js`;
   await writeFile(path.join(outdir, runtime), code);
   files[runtime] = { sha256: sha256(code), bytes: Buffer.byteLength(code), contentType: "text/javascript; charset=utf-8", imports: [], dynamicImports: [] };
