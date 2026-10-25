@@ -44,6 +44,10 @@
       "import": "./dist/server/checkpoint.mjs",
       "require": "./dist/server/checkpoint.cjs"
     },
+    "./offline-runtime": {
+      "import": "./dist/server/offline-runtime.mjs",
+      "require": "./dist/server/offline-runtime.cjs"
+    },
     "./*": "./entries/*"
   },
   "files": [

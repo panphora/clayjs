@@ -14,6 +14,7 @@
     "@panphora/clayjs/clay.standalone.js",
     "@panphora/clayjs/server/rooms",
     "@panphora/clayjs/server/checkpoint",
+    "@panphora/clayjs/offline-runtime",
     "@panphora/clayjs/page/yjs"
   ],
   "members": [
