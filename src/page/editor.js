@@ -10,7 +10,7 @@ import { state, view as pmView, keymap, commands, history, gapcursor, inputrules
 import { schema } from "./schema.js";
 import { identityPlugin, docFromBlocks, blockMap, keyBetween, newId } from "./model.js";
 import { blockKeys, structurePlugin, collapsePlugin, pastePlugin, BlockSelection, STEP } from "./blocks.js";
-import { chromePlugin } from "./chrome.js";
+import { chromePlugin, slashRangePlugin } from "./chrome.js";
 import { announcementPlugin } from "./announce.js";
 import { linkPlugin } from "./link.js";
 import { blockSelectionPlugin } from "./blocksel.js";
@@ -270,9 +270,9 @@ function featureWatchPlugin(features) {
 // Tools follow the tables a document holds; the host arrives with the tool view
 // part on a document that had no tool at boot.
 function toolFollowPlugin(toolHost) {
-  const changed = toolHost ? () => toolHost.tablesChanged() : () => toolViews.host?.tablesChanged?.();
   return new state.Plugin({
     view(view) {
+      const changed = toolHost ? () => toolHost.tablesChanged() : () => toolViews.get(view)?.tablesChanged?.();
       let previous = view.state.doc;
       return { update(next) { if (next.state.doc !== previous) { previous = next.state.doc; changed(); } } };
     },
@@ -283,6 +283,7 @@ export function pagePlugins({ upload = defaultUpload, highlight, history: useHis
   return [
     announcementPlugin(),
     chromePlugin({ onAiTool }),
+    slashRangePlugin(),
     toolFollowPlugin(toolHost),
     linkPlugin(),
     tableSelectPlugin(),

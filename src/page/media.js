@@ -187,14 +187,18 @@ export function cancelUpload(view, id) {
 const htmlHasText = (html) => html.replace(/<(meta|style|img)\b[^>]*>/gi, "").replace(/<[^>]+>/g, "").trim() !== "";
 
 export function mediaPlugin({ upload, features = null }) {
-  const whenReady = (run) => {
-    if (!features || features.has("media")) { run(); return; }
-    features.ensure("media").then((feature) => { if (feature !== null) run(); }, () => {});
+  let editorView = null;
+  // Only the bookmark widget waits for the view part: the upload and its block
+  // are core, and the block draws through the schema until the part arrives.
+  const showBookmark = (view) => {
+    if (!features || features.has("media") || !runtime.has(view)) return;
+    features.ensure("media").catch(() => {});
   };
   return new Plugin({
     key: mediaKey,
     state: mediaState,
     view(view) {
+      editorView = view;
       const doc = view.dom.ownerDocument;
       const input = doc.createElement("input");
       input.type = "file";
@@ -208,13 +212,14 @@ export function mediaPlugin({ upload, features = null }) {
         const picker = mediaKey.getState(view.state).picker;
         view.dispatch(view.state.tr.setMeta(mediaKey, { picker: null }));
         if (files.length && picker) {
+          const { remove } = picker;
+          if (remove && view.state.doc.textBetween(remove.from, remove.to) === remove.text) {
+            view.dispatch(asStep(view.state.tr.delete(remove.from, remove.to)));
+          }
           const index = indexOfId(view.state.doc, picker.place.hostId);
           if (!picker.place.hostId || index >= 0) {
-            whenReady(() => {
-              if (picker.remove) view.dispatch(asStep(view.state.tr.delete(picker.remove.from, picker.remove.to)));
-              const at = indexOfId(view.state.doc, picker.place.hostId);
-              insertFiles(view, files, at >= 0 ? hostPlace(view.state, at) : picker.place);
-            });
+            insertFiles(view, files, index >= 0 ? hostPlace(view.state, index) : picker.place);
+            showBookmark(view);
           }
         }
         input.value = "";
@@ -234,6 +239,7 @@ export function mediaPlugin({ upload, features = null }) {
       return {
         destroy() {
           view.dom.removeEventListener("click", onClick);
+          if (editorView === view) editorView = null;
           const rt = runtime.get(view);
           runtime.delete(view);
           for (const it of mediaKey.getState(view.state).items) if (it.preview) URL.revokeObjectURL?.(it.preview);
@@ -245,7 +251,7 @@ export function mediaPlugin({ upload, features = null }) {
     props: {
       decorations(st) {
         const { items } = mediaKey.getState(st);
-        const render = mediaViews.bookmark;
+        const render = editorView ? mediaViews.get(editorView) : null;
         if (!items.length || !render) return null;
         return DecorationSet.create(st.doc, items.map((it) => Decoration.widget(boundary(st.doc, it.pos), (view) => render(view.dom.ownerDocument, it), {
           side: -1000 + it.order, key: `${it.id}:${it.state}:${it.percent}`, stopEvent: () => true, ignoreSelection: true,
@@ -258,7 +264,8 @@ export function mediaPlugin({ upload, features = null }) {
         if (htmlHasText(data.getData("text/html") || "")) return false;
         const place = hostPlace(view.state, view.state.selection.$head.index(0));
         event.preventDefault();
-        whenReady(() => insertFiles(view, files, place));
+        insertFiles(view, files, place);
+        showBookmark(view);
         return true;
       },
       handleDrop(view, event, _slice, moved) {
@@ -272,7 +279,8 @@ export function mediaPlugin({ upload, features = null }) {
         const before = r && event.clientY < r.top + r.height / 2;
         event.preventDefault();
         const place = { at: before ? ents[i].at : ents[ents[i].subEnd].end, parent: ents[i].node.attrs.parent ?? null, replaceId: null };
-        whenReady(() => insertFiles(view, files, place));
+        insertFiles(view, files, place);
+        showBookmark(view);
         return true;
       },
     },

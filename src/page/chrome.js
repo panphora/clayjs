@@ -209,6 +209,35 @@ let menuCount = 0;
 export const chromeKey = new PluginKey("page-chrome");
 const chromeFor = new WeakMap();
 
+// A range a slash menu chose, held in plugin state so it follows the document
+// while the action it belongs to waits for code to load.
+export const slashRangeKey = new PluginKey("page-slash-range");
+const slashRangeState = {
+  init: () => null,
+  apply(tr, value) {
+    let held = value;
+    if (held && tr.docChanged) {
+      const from = tr.mapping.map(held.from, 1), to = tr.mapping.map(held.to, -1);
+      held = from <= to && tr.doc.textBetween(from, to) === held.text ? { ...held, from, to } : null;
+    }
+    const m = tr.getMeta(slashRangeKey);
+    if (m !== undefined) held = m;
+    return held;
+  },
+};
+
+export const slashRangePlugin = () => new Plugin({ key: slashRangeKey, state: slashRangeState });
+
+export const holdSlashRange = (view, range) => {
+  const text = range ? view.state.doc.textBetween(range.from, range.to) : null;
+  view.dispatch(view.state.tr.setMeta(slashRangeKey, range ? { ...range, text } : null));
+};
+
+export const heldSlashRange = (st) => {
+  const held = slashRangeKey.getState(st);
+  return held ? { from: held.from, to: held.to } : null;
+};
+
 export function openPageMenu(view, anchor, items) {
   const chrome = chromeFor.get(view);
   if (!chrome) return false;

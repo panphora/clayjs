@@ -113,16 +113,14 @@ const paste = (view, data) => {
   return { taken: !!taken, prevented: !!event.defaultPrevented };
 };
 const drop = (view, files) => {
-  const restore = { posAtCoords: view.posAtCoords, nodeDOM: view.nodeDOM };
+  const restore = { posAtCoords: view.posAtCoords };
   view.posAtCoords = () => ({ pos: 1, inside: -1 });
-  view.nodeDOM = () => ({ getBoundingClientRect: () => ({ top: 0, bottom: 20, height: 20, left: 0, right: 100, width: 100 }) });
   const event = { dataTransfer: { files }, clientX: 5, clientY: 2, preventDefault() { event.defaultPrevented = true; } };
   try {
     const taken = view.someProp("handleDrop", (fn) => fn(view, event, null, false));
     return { taken: !!taken, prevented: !!event.defaultPrevented };
   } finally {
     view.posAtCoords = restore.posAtCoords;
-    view.nodeDOM = restore.nodeDOM;
   }
 };
 
@@ -212,6 +210,73 @@ test("the picker copies the chosen files before the view part loads", async () =
   expect(await bytesOf(up.calls[0])).toBe("hello");
 });
 
+test("a pick made before the view part loads keeps text typed during the load and inserts one image", async () => {
+  let releaseLoad, releaseUpload;
+  const loadGate = new Promise((resolve) => { releaseLoad = resolve; });
+  const uploadGate = new Promise((resolve) => { releaseUpload = resolve; });
+  const up = recordingUpload();
+  const { view } = open(
+    { a: { pos: "V", t: "paragraph", c: "Hello world" }, b: { pos: "W", t: "paragraph", c: "" } },
+    { load: () => loadGate.then(() => realLoad("media")), upload: (f) => uploadGate.then(() => up.upload(f)) },
+  );
+  const input = view.dom.parentElement.querySelector(".page-file-input");
+  input.click = () => {};
+  const menu = slash(view);
+  pick(menu, "Image").click();
+  let reads = 0;
+  Object.defineProperty(input, "files", { configurable: true, get: () => (reads++ ? [] : [file("pick.png", "image/png", "picked bytes")]) });
+  input.dispatchEvent(new Event("change"));
+  expect(reads).toBe(1);
+  typeIn(view, 1, "ABC");
+  expect(view.state.doc.child(0).textContent).toBe("ABCHello world");
+  releaseLoad();
+  expect(await waitFor(() => view.dom.querySelector(".page-upload"))).toBe(true);
+  releaseUpload();
+  expect(await waitFor(() => images(view).length === 1)).toBe(true);
+  const texts = [];
+  view.state.doc.forEach((node) => { if (node.type.name === "paragraph") texts.push(node.textContent); });
+  expect(texts[0]).toBe("ABCHello world");
+  expect(texts.filter((text) => text !== "ABCHello world")).toEqual([]);
+  expect(images(view)).toHaveLength(1);
+  expect(images(view)[0].attrs.src).toBe("/uploads/1-pick.png");
+  expect(await bytesOf(up.calls[0])).toBe("picked bytes");
+});
+
+test("a paste made before the view part loads lands after the block it was pasted into", async () => {
+  let releaseLoad, releaseUpload;
+  const loadGate = new Promise((resolve) => { releaseLoad = resolve; });
+  const uploadGate = new Promise((resolve) => { releaseUpload = resolve; });
+  const up = recordingUpload();
+  const { view } = open(
+    { one: { pos: "V", t: "paragraph", c: "One" }, two: { pos: "W", t: "paragraph", c: "Two" } },
+    { load: () => loadGate.then(() => realLoad("media")), upload: (f) => uploadGate.then(() => up.upload(f)) },
+  );
+  view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, view.state.doc.content.size - 3)));
+  const { taken } = paste(view, clip([file("later.png")]));
+  expect(taken).toBe(true);
+  view.dispatch(view.state.tr.insert(0, schema.nodes.paragraph.create({ id: "zero", pos: "9" }, schema.text("Zero"))));
+  releaseLoad();
+  releaseUpload();
+  expect(await waitFor(() => images(view).length === 1)).toBe(true);
+  const blocks = [];
+  view.state.doc.forEach((node) => blocks.push(node.type.name === "paragraph" ? node.textContent : node.type.name));
+  expect(blocks).toEqual(["Zero", "One", "Two", "image"]);
+});
+
+test("destroying one editor keeps another editor\u2019s bookmark drawing", async () => {
+  const never = () => new Promise(() => {});
+  const first = open({ p: PARAGRAPH }, { upload: never });
+  const second = open({ p: PARAGRAPH }, { upload: never });
+  paste(first.view, clip([file("first.png")]));
+  paste(second.view, clip([file("second.png")]));
+  expect(await waitFor(() => first.view.dom.querySelector(".page-upload"))).toBe(true);
+  expect(await waitFor(() => second.view.dom.querySelector(".page-upload"))).toBe(true);
+  second.view.destroy();
+  typeIn(first.view, 1, "x");
+  await flush();
+  expect(first.view.dom.querySelector(".page-upload")).not.toBe(null);
+});
+
 test("an image that arrives from a peer loads the view part", async () => {
   const initial = seedValue([{ id: "p", text: "Hi " }]);
   const a = openTab(JSON.parse(JSON.stringify(initial)));
@@ -240,15 +305,19 @@ test("a failed load leaves the text editable and the image's src intact", async 
   expect(view.state.doc.child(0).textContent).toBe("Hello Hi ");
 });
 
-test("a failed load leaves the pasted file reported once and the text intact", async () => {
-  const { view, reports, calls } = open({ p: PARAGRAPH }, { load: () => Promise.reject(new Error("no network")) });
-  const { taken, prevented } = paste(view, clip([file("lost.png")]));
+test("a rejected load still uploads the pasted file once and inserts the image, reported once", async () => {
+  const up = recordingUpload();
+  const { view, reports, calls } = open({ p: PARAGRAPH }, { load: () => Promise.reject(new Error("no network")), upload: up.upload });
+  const { taken, prevented } = paste(view, clip([file("kept.png", "image/png", "kept bytes")]));
   expect([taken, prevented]).toEqual([true, true]);
-  await flush();
-  await flush();
+  expect(await waitFor(() => images(view).length === 1)).toBe(true);
   expect(calls).toEqual(["media"]);
   expect(reports).toHaveLength(1);
-  expect(media(view)).toHaveLength(0);
+  expect(up.calls.map((f) => f.name)).toEqual(["kept.png"]);
+  expect(await bytesOf(up.calls[0])).toBe("kept bytes");
+  expect(images(view)[0].attrs.src).toBe("/uploads/1-kept.png");
+  expect(view.dom.querySelector("figure.page-image")).toBe(null);
+  expect(view.dom.querySelector('figure[data-type="image"] img')?.getAttribute("src")).toBe("/uploads/1-kept.png");
   expect(view.editable).toBe(true);
   expect(view.state.doc.child(0).textContent).toBe("Hi ");
   typeIn(view, 1, "Hello ");

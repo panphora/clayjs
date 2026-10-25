@@ -82,17 +82,17 @@ export class ToolView {
   destroy() { this.instance?.dispose(); this.instance = null; }
 }
 
-export function createFeature({ toolHost = null, revise = null } = {}) {
+export function createFeature({ toolHost = null, revise = null, view = null } = {}) {
   const host = toolHost ?? createToolHost({ mode: "edit" });
-  toolViews.host = host;
+  if (view) toolViews.set(view, host);
   return {
     id: "tool",
     nodeViews: {
-      tool: (node, view, getPos) => new ToolView(node, view, getPos, { host, revise }),
+      tool: (node, editorView, getPos) => new ToolView(node, editorView, getPos, { host, revise }),
     },
     css: TOOL_CSS,
     dispose() {
-      if (toolViews.host === host) toolViews.host = null;
+      if (view && toolViews.get(view) === host) toolViews.delete(view);
       if (!toolHost) host.dispose();
     },
   };

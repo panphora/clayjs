@@ -1,11 +1,11 @@
 {
   "document.html": {
     "view": { "requests": 88, "depth": 28, "brotli": 358400, "css": { "requests": 2, "depth": 2 } },
-    "edit": { "requests": 168, "depth": 46, "brotli": 582656, "css": { "requests": 2, "depth": 2 } }
+    "edit": { "requests": 168, "depth": 46, "brotli": 583680, "css": { "requests": 2, "depth": 2 } }
   },
   "document-rich.html": {
     "view": { "requests": 88, "depth": 28, "brotli": 358400, "css": { "requests": 2, "depth": 2 } },
-    "edit": { "requests": 168, "depth": 46, "brotli": 582656, "css": { "requests": 2, "depth": 2 } }
+    "edit": { "requests": 168, "depth": 46, "brotli": 583680, "css": { "requests": 2, "depth": 2 } }
   },
   "kanban.html": {
     "view": { "requests": 88, "depth": 26, "brotli": 270336, "css": { "requests": 0, "depth": 0 } },

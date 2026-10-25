@@ -21,6 +21,7 @@ import toast, { toastPersistent, dismissPersistent } from "../ui/toast.js";
 import { createRecoverList, focusBlock } from "../page/recover.js";
 import { capabilityAdvertised } from "../page/tool-capability.js";
 import { toolViews } from "../page/tool-views.js";
+import { holdSlashRange, heldSlashRange } from "../page/chrome.js";
 
 const ARTICLE_SEL = "article[data-page]";
 const TAG_SEL = 'script[type="application/json"][merge="page"][clay~="live"]';
@@ -255,7 +256,7 @@ function dispose() {
   try { inst.view?.destroy(); } catch (error) { console.error("clayjs: page plugin view failed to destroy", error); }
   inst.aiTool?.dispose();
   inst.toolHost?.dispose();
-  if (toolViews.host === inst.toolHost) toolViews.host = null;
+  if (inst.view) toolViews.delete(inst.view);
   if (inst.article) {
     const shell = inst.article.querySelector(".page-shell");
     if (shell) shell.remove();
@@ -490,9 +491,10 @@ async function run(inst, gen, options = {}) {
   // Making or revising a tool opens the store and the host first, so the panel
   // keeps what it makes.
   const openAi = async ({ target = null, remove = null } = {}) => {
+    if (editorView && remove) holdSlashRange(editorView, remove);
     await features.ensure("tool").catch(() => {});
-    if (gen !== generation || !aiTool) return;
-    aiTool.open({ target, remove });
+    if (gen !== generation || !aiTool || !editorView) return;
+    aiTool.open({ target, remove: remove ? heldSlashRange(editorView.state) : null });
   };
   const aiRequested = capabilityAdvertised(meta);
   const view = createPageEditor(article, {

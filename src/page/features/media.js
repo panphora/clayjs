@@ -276,15 +276,15 @@ export class FileView {
   ignoreMutation() { return true; }
 }
 
-export function createFeature() {
-  mediaViews.bookmark = bookmarkDOM;
+export function createFeature({ view = null } = {}) {
+  if (view) mediaViews.set(view, bookmarkDOM);
   return {
     id: "media",
     nodeViews: {
-      image: (node, view, getPos) => new ImageView(node, view, getPos),
-      file: (node, view) => new FileView(node, view),
+      image: (node, editorView, getPos) => new ImageView(node, editorView, getPos),
+      file: (node, editorView) => new FileView(node, editorView),
     },
     css: MEDIA_CSS,
-    dispose() { if (mediaViews.bookmark === bookmarkDOM) mediaViews.bookmark = null; },
+    dispose() { if (view && mediaViews.get(view) === bookmarkDOM) mediaViews.delete(view); },
   };
 }

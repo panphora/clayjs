@@ -10,6 +10,7 @@ import { createPageEditor, installPageFeature } from "../../../../src/page/edito
 import { createFeatureLoader } from "../../../../src/page/feature-loader.js";
 import { FEATURES } from "../../../../src/page/features/registry.js";
 import { createToolHost } from "../../../../src/page/tools.js";
+import { toolViews } from "../../../../src/page/tool-views.js";
 import { createYPageBinding, seedValue, blocksFromYValue, enc } from "../../../../src/page/ybind/index.js";
 
 const { TextSelection } = pmState;
@@ -59,7 +60,7 @@ const openTab = (initial, { load = realLoad, tools = {} } = {}) => {
     binding.dispose();
     binding.ydoc.destroy();
   });
-  return { store, binding, view, calls };
+  return { store, binding, view, calls, host };
 };
 
 const toolBlocks = (view) => {
@@ -154,6 +155,22 @@ test("a failing load leaves the text editable and the tool's attributes intact",
   expect(toolBlocks(view)[0].attrs.rev).toBe("r1");
   typeIn(view, 1, "Hello ");
   expect(view.state.doc.child(0).textContent).toBe("Hello Hi ");
+});
+
+test("destroying one editor keeps another editor\u2019s tool host working", async () => {
+  const first = openTab(seedValue([PARAGRAPH]), { tools: { tally: { r1: { count: 3 } } } });
+  const second = openTab(seedValue([PARAGRAPH]), { tools: { tally: { r1: { count: 3 } } } });
+  addTool(first, "tally");
+  addTool(second, "tally");
+  expect(await waitFor(() => first.view.dom.querySelector(".page-tool-block"))).toBe(true);
+  expect(await waitFor(() => second.view.dom.querySelector(".page-tool-block"))).toBe(true);
+  expect(toolViews.get(first.view)).toBe(first.host);
+  const changed = jest.spyOn(first.host, "tablesChanged");
+  second.view.destroy();
+  expect(toolViews.get(first.view)).toBe(first.host);
+  typeIn(first.view, 1, "x");
+  await tick();
+  expect(changed).toHaveBeenCalled();
 });
 
 test("an install while composing waits for compositionend", async () => {
@@ -476,6 +493,41 @@ test("Keep on a first AI tool in a document with no page.tools tag saves the too
   const node = page.view.state.doc.child(1);
   expect(node.attrs.id).toBe(block.dataset.id);
   expect(storeOf("page.tools").value[node.attrs.id][node.attrs.rev]).toEqual({ count: 2 });
+});
+
+test("text typed before the slash while the tool loads is kept, and only the slash text is removed", async () => {
+  extensions = ["page", "page-tool/1"];
+  setPage([PARAGRAPH]);
+  const transport = {
+    request: async (request) => ({ requestId: request.requestId, artifact: TALLY, state: { count: 2 } }),
+    cancel: () => {},
+  };
+  const realLoad = FEATURES.tool.load;
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  let attempts = 0;
+  FEATURES.tool.load = () => { attempts += 1; return gate.then(() => realLoad()); };
+  try {
+    await page.install({ transport, acceptState: async () => ({ ok: true }) });
+    const view = page.view;
+    const menu = slash(view);
+    [...menu.querySelectorAll(".page-menu-item")].find((item) => item.textContent.includes("Make a tool with AI")).click();
+    expect(attempts).toBe(1);
+    expect(document.querySelector(".page-ai-panel")).toBe(null);
+    view.dispatch(view.state.tr.insertText("AB", 1));
+    release();
+    expect(await waitFor(() => document.querySelector(".page-ai-panel"))).toBe(true);
+    document.querySelector(".page-ai-panel textarea").value = "make a counter";
+    [...document.querySelectorAll(".page-ai-panel button")].find((button) => button.textContent === "Generate").click();
+    expect(await waitFor(() => [...document.querySelectorAll(".page-ai-panel button")].some((button) => button.textContent === "Keep"))).toBe(true);
+    [...document.querySelectorAll(".page-ai-panel button")].find((button) => button.textContent === "Keep").click();
+    expect(await waitFor(() => view.dom.querySelector(".page-tool-block"))).toBe(true);
+    expect(view.state.doc.child(0).textContent).toBe("ABHi ");
+    expect(toolBlocks(view)).toHaveLength(1);
+  } finally {
+    release();
+    FEATURES.tool.load = realLoad;
+  }
 });
 
 test("a replacement that lands during the boot feature wait leaves the editor read-only", async () => {
