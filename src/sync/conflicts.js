@@ -1,8 +1,6 @@
 import { registerUnsavedState } from '../lib/unsaved-state.js';
 import { releaseProtection } from './conflict-footprints.js';
-import { TAB_LOCAL_ROOT_ATTRS } from '../lib/root-attrs.js';
-import { serializeRecoveryClone } from '../core/snapshot.js';
-import { rowOf } from '../core/conflict-presentation.js';
+import { isEditMode } from '../core/is-edit-mode.js';
 
 // What incoming frames won over this tab's unsaved edits, kept for the life of
 // the document until the person decides. Nothing here is read by a save, a
@@ -19,54 +17,34 @@ const pending = new Set();
 const resolvers = new Set();
 let registration = null;
 
-// The recovery half of this module is fetched, not imported: no recovery code is in
-// the boot graph, and a page that never loses anything never downloads it. The copy
-// itself is made synchronously below and queued here, so what has to be preserved is
-// preserved before anything is released; the queue drains the moment the module
-// arrives. Until it does, the live record is the only copy, which is where this
-// started.
-const DURABLE_QUEUE_MAX = 20;
-let durable = null;
-let loadingDurable = false;
-const durableQueue = [];
+// The recording half is edit-only, like live sync's: a reader has nothing unsaved to
+// lose. Edit mode starts the fetch as this file evaluates; a loss that arrives first
+// waits in the queue below.
+const EDIT_QUEUE_MAX = 20;
+let edit = null;
+let editLoad = null;
+const editQueue = [];
 
-function loadDurable() {
-  if (durable || loadingDurable) return;
-  loadingDurable = true;
-  import('../recovery/conflicts.js').then(
+function loadEdit() {
+  editLoad ??= import('./conflicts-edit.js').then(
     (module) => {
-      durable = module;
-      loadingDurable = false;
-      drainDurable();
+      edit = module;
+      while (editQueue.length) edit.keep(editQueue.shift());
     },
     (error) => {
-      loadingDurable = false;
+      editLoad = null;
       console.error('clayjs: the conflict recovery module could not be downloaded; conflicts stay in this tab only', error);
     }
   );
 }
 
-function drainDurable() {
-  if (!durable) {
-    loadDurable();
-    return;
-  }
-  while (durableQueue.length) {
-    const spec = durableQueue.shift();
-    try {
-      durable.recordConflicts(spec);
-    } catch (err) {
-      console.error('clayjs: the conflict could not be stored for a later reload; it is still here', err);
-    }
-  }
-}
+if (isEditMode) loadEdit();
 
 function nextId(prefix = '') {
   return `${nonce}:${prefix}${++counter}`;
 }
 
 function register() {
-  loadDurable();
   registration ||= registerUnsavedState({
     id: 'live-sync-conflicts',
     isPending: () => records.size > 0 || pending.size > 0,
@@ -187,58 +165,17 @@ function foldInsertions(groups) {
   return [...folded.values()];
 }
 
-// The losing text a reload has to keep, as the notice already words it. Everything
-// here is plain text: the row's own name, the sentence that explains it, and the two
-// sides, with the rest of the copy in the stored root.
-function conflictEntry(rec) {
-  let row = null;
-  try {
-    row = rowOf(rec);
-  } catch (_) {}
-  const full = (side) => (!side ? '' : (side.cutBefore ? '\u2026' : '') + side.before + side.hit + side.after + (side.cutAfter ? '\u2026' : ''));
-  return {
-    id: String(rec.id),
-    kind: String(rec.kind ?? ''),
-    key: rec.recovery?.key == null ? '' : String(rec.recovery.key),
-    name: row?.name ? String(row.name) : '',
-    sentence: row?.sentence ? String(row.sentence) : '',
-    yours: full(row?.yours),
-    now: full(row?.now),
-    context: contextFields(rec.context),
-  };
-}
-
-// The pre-apply root as the bytes a save would have written, with the root
-// attributes this response and this tab own removed first: a recovery copy never
-// carries a save token, a file id or this library's own UI state.
-function recoveryHtml(apply) {
-  try {
-    const source = apply.recoveryRoot ?? apply.root;
-    const clone = source?.cloneNode?.(true);
-    if (!clone) return null;
-    for (const name of TAB_LOCAL_ROOT_ATTRS) clone.removeAttribute(name);
-    return serializeRecoveryClone(clone, { prepared: apply.domain === 'save' });
-  } catch (err) {
-    console.error('clayjs: the conflict recovery page could not be serialized; the conflict text is still stored', err);
-    return null;
-  }
-}
-
-// Copy the material before anything is released, and never let the store's failure
-// reach the ledger: a quota or a blocked database leaves the live record exactly
-// where it was. Losing the copy to this queue is bounded, never silent.
+// What the store may keep of a record's context, read now, while the record still
+// knows it: the identity, the label and the field, never the resolver's action, which
+// is a function bound to this page's tree and stays on the live record.
 function keepConflicts(apply, ids) {
-  try {
-    durableQueue.push({
-      apply: { id: apply.id, source: apply.source, domain: apply.domain, seq: apply.seq, etag: apply.etag, ticket: apply.ticket },
-      root: recoveryHtml(apply),
-      conflicts: ids.map((id) => records.get(id)).filter(Boolean).map(conflictEntry),
-    });
-    if (durableQueue.length > DURABLE_QUEUE_MAX) durableQueue.shift();
-    drainDurable();
-  } catch (err) {
-    console.error('clayjs: the conflict could not be stored for a later reload; it is still here', err);
-  }
+  const kept = ids.map((id) => records.get(id)).filter(Boolean);
+  if (!kept.length) return;
+  const spec = { apply, records: kept.map((rec) => ({ rec, context: contextFields(rec.context) })) };
+  if (edit) return edit.keep(spec);
+  editQueue.push(spec);
+  if (editQueue.length > EDIT_QUEUE_MAX) editQueue.shift();
+  loadEdit();
 }
 
 export function completeApply(applyId, conflicts, { ticket }) {
@@ -301,10 +238,10 @@ export const conflicts = {
     }
     if (removedIds.length) {
       changed({ removedIds, reason });
-      import('../recovery/conflicts.js').then(
-        (module) => module.dismissConflicts(removedIds),
+      import('./conflicts-edit.js').then(
+        (module) => module.dismiss(removedIds),
         () => {}
-      ).catch(() => {});
+      );
     }
     return { removedIds, remainingIds: [...records.keys()] };
   },

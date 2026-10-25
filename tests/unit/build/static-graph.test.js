@@ -270,3 +270,37 @@ for (const [fixture, file] of Object.entries(FIXTURE_HTML)) {
     });
   }
 }
+
+// Journal 07 Step 3 records a lost conflict durably: the row as the notice words it,
+// the pre-apply root as bytes, and the store both go to. A reader never records one —
+// it has nothing unsaved for an incoming frame to win over — so none of that is in its
+// graph. `sync/conflicts-edit.js` is the recording half the ledger fetches on the edit
+// path, and `core/conflict-presentation.js` is the row wording it reads.
+const CONFLICT_RECORDING = ["src/sync/conflicts-edit.js", "src/core/conflict-presentation.js"];
+
+for (const fixture of ["kanban.html", "journal.html"]) {
+  test(`${fixture} view: no conflict recording module is in the reader graph`, async () => {
+    const { params, hasSap } = fixtureBoot(`tests/fixtures/load/${fixture}`);
+    const plan = resolveModules(params, false, { isDraftMode: false, hasSap });
+    const entries = [...plan.core, ...plan.plugins].map((path) => `src/${path}`);
+    const graph = walk(await inputsFor(entries), ["src/loader.js", ...entries]);
+
+    // The ledger itself is carried: a reader still sees a conflict it was handed.
+    expect(graph.has("src/sync/conflicts.js")).toBe(true);
+    expect([...graph].filter((file) => CONFLICT_RECORDING.includes(file))).toEqual([]);
+    expect([...graph].filter((file) => RECOVERY_STORE.test(file))).toEqual([]);
+  });
+}
+
+test("an edit boot fetches the conflict recording module, a reader never does", async () => {
+  const tag = FIXTURES.kanban;
+  const params = new URLSearchParams(`plugins=${tag.plugins}&exclude=${tag.exclude}`);
+  const plan = resolveModules(params, true, { isDraftMode: false, hasSap: tag.hasSap });
+  const entries = [...plan.core, ...plan.plugins].map((path) => `src/${path}`);
+  const inputs = await inputsFor(entries);
+  // Built, so the module exists for the edit path to fetch at all...
+  expect(Object.keys(inputs)).toEqual(expect.arrayContaining(CONFLICT_RECORDING));
+  // ...and fetched, not walked: it is a dynamic import, its own chunk.
+  const graph = walk(inputs, entries);
+  expect([...graph].filter((file) => CONFLICT_RECORDING.includes(file))).toEqual([]);
+});
