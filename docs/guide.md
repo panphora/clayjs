@@ -1767,27 +1767,43 @@ Without the CMS: `editable` regions for copy, upload and quickcrop for images, `
 
 ---
 
-## 11. Limits, and what to build instead
+## 11. What ClayJS does not do
 
-ClayJS gives one file per document, whole-document saves, save-gated three-way merging, per-tab undo, and editing components that write plain HTML. It does not give keystroke-level co-editing, operational transforms or CRDTs, cursors, comments, per-row permissions, a formula engine, virtualization, background jobs or cross-file queries. Promise what the file can do.
+ClayJS gives you one file per document that edits and saves itself. Here is what it does not do, so you can promise what the file can do and pick the right tool.
 
-| Competitor | What ClayJS gives | What is missing | Build this instead |
+### 11.1 What changed recently
+
+Two plugins replace the old advice to hand-build a [block writer](https://clayjs.com/docs/guide/recipes/#block-writer) or wait for autosave:
+
+- **The [page editor](https://clayjs.com/docs/plugins/page/)** (`?plugins=page`) is a Notion-like block editor for one `article[data-page]`, backed by Yjs, where typing reaches other people as they type. It includes headings, lists, checklists, toggles, callouts, code, images, files, typed tables, boards, charts from a table, and CSV import.
+- **[Live stores](https://clayjs.com/docs/plugins/live-sync/)** (`clay="live"` and `clay.live()`) move fast-changing state at network speed (25 frames per second) instead of save speed. Use [live data](https://clayjs.com/docs/guide/live-sync/#live-data-clay-live) for games, scores, and shared state.
+
+The old limits apply elsewhere. Ordinary `editable` regions and DOM records have no CRDT and merge at save time. Rich text outside the page editor has no tables, and without `live-data`, the page editor falls back to file saves.
+
+### 11.2 Compared with the tools you know
+
+| What you are comparing to | What ClayJS gives | What is missing | What to build instead |
 |---|---|---|---|
-| **Google Docs** | Rich text with a bubble toolbar, word-level merge at save time, recoverable conflicts, version history from the host, ai-edit | Tables in rich text, comments, suggestion mode, live cursors, keystroke co-editing, pagination, footnotes, .docx export | A block writer ([Block writer](https://clayjs.com/docs/guide/recipes/#block-writer)): table, code, callout and image blocks; comments as `<aside data-id data-anchor>` elements; print CSS for PDF; turn-taking or different-section editing |
-| **Google Sheets** | Persisted inputs, sap formulas over named fields, aggregates, formats, CSV | A1 references, ranges, fill-down, recalculation graph, virtualization, range selection, charts, pivots, 10k-row data | A typed table ([Typed table (a spreadsheet you can be honest about)](https://clayjs.com/docs/guide/recipes/#typed-table-a-spreadsheet-you-can-be-honest-about)) of a few thousand rows, one file per year |
-| **Google Slides** | Slides as sections, sortable, uploads, view mode as the published deck | Free positioning, guides, masters, presenter view in a second window, transitions, PPTX | A flow-layout deck with fixed layouts per slide ([Slides](https://clayjs.com/docs/guide/recipes/#slides)) |
-| **Trello, Linear** | Sortable columns, inline editing, checklists, attachments, undo, sync with per-card identity | Notifications, reminders, assignments, cross-board search, mentions, integrations, boards past a few thousand cards | The kanban ([Kanban with card detail](https://clayjs.com/docs/guide/recipes/#kanban-with-card-detail)) with labels, due dates and a due-soon projection |
-| **Notion** | One rich document per file, blocks, structured pages | A workspace of many pages, databases with relations and rollups, backlinks, workspace search, page permissions | A folder of files, one per page or database, plus an index file; links are `<a href>` |
-| **CRM** | Records, pipeline board, notes, CSV, totals | Email logging, reminders, dedupe, multi-user ownership, per-row permissions, public intake | The follow-up list ([CRM follow-up list](https://clayjs.com/docs/guide/recipes/#crm-follow-up-list)) |
-| **Finance apps** | Rows with amounts, budgets, sap totals, CSV import of bank exports | Bank sync, learned categorization, multi-currency, scheduled transactions, encryption at rest | A monthly or yearly budget file with CSV import ([Finance tracker](https://clayjs.com/docs/guide/recipes/#finance-tracker)) |
-| **Full CMS** | Per-page CMS sidebar, uploads with crop, view mode as the site, a JSON data API | Multi-page collections, shared layouts, drafts and scheduled publishing, roles, media library, i18n | One file per page, a shared stylesheet, the CMS for non-technical editors of each page |
+| **Google Docs** | Keystroke co-editing, tables, code, callouts, and images in the [page editor](https://clayjs.com/docs/plugins/page/); word-level save merge in `editable`; recoverable conflicts; version history; `ai-edit` | Comments, suggestion mode, live cursors, pagination, footnotes, `.docx` export, tables in `editable` rich text | The [page editor](https://clayjs.com/docs/plugins/page/) or a [block writer](https://clayjs.com/docs/guide/recipes/#block-writer); comments as `<aside data-id data-anchor>`; print CSS for PDF |
+| **Google Sheets** | Persisted inputs, sap formulas over named fields, aggregates, formats, CSV, page tables and charts from a table, 10,000-row pages saving in about 400 ms | A1 references, ranges, fill-down, recalculation graph, virtualization, range selection, pivots | A page table and chart, or a [typed table](https://clayjs.com/docs/guide/recipes/#typed-table-a-spreadsheet-you-can-be-honest-about) of a few thousand rows, one file per year |
+| **Google Slides** | Slides as sections, sortable, uploads, view mode as the published deck | Free positioning, guides, masters, presenter view in a second window, transitions, PPTX export | A flow-layout deck with fixed layouts per slide ([slides](https://clayjs.com/docs/guide/recipes/#slides)) |
+| **Trello and Linear** | Page boards where cards have an owner and a due date; sortable columns, inline editing, checklists, attachments, undo, per-card sync | Notifications, reminders, cross-board search, mentions, integrations, boards past a few thousand cards | A page board, or the [kanban with card detail](https://clayjs.com/docs/guide/recipes/#kanban-with-card-detail) with labels, due dates, and a due-soon projection |
+| **Notion** | One document per file in the [page editor](https://clayjs.com/docs/plugins/page/) with real-time co-editing, Markdown shortcuts, derived titles, blocks, tables, CSV import, boards, and charts | A workspace of many pages, databases with relations and rollups, backlinks, sub-pages, workspace search, page permissions | A folder of files, one per page or database, plus an index file; links are `<a href>` |
+| **CRM** | Records, pipeline board, card owners and due dates, notes, CSV, totals, contact forms via `message` | Email logging, reminders, dedupe, per-row permissions | The [CRM follow-up list](https://clayjs.com/docs/guide/recipes/#crm-follow-up-list), computing due rows on open |
+| **Finance apps** | Rows with amounts, budgets, sap totals painted in view mode by `derive`, CSV import of bank exports, charts from a table | Bank sync, learned categorization, multi-currency, scheduled transactions, encryption at rest | A monthly or yearly budget file with CSV import ([finance tracker](https://clayjs.com/docs/guide/recipes/#finance-tracker)) |
+| **Full CMS** | Per-page [CMS](https://clayjs.com/docs/plugins/cms/) sidebar, per-page style group for colors, fonts, and variants, uploads with crop, view mode as the site, JSON data API | Multi-page collections, shared layouts, drafts and scheduled publishing, roles, media library, i18n | A [content site](https://clayjs.com/docs/guide/recipes/#content-site) with one file per page, a shared stylesheet, and the [CMS](https://clayjs.com/docs/plugins/cms/) per page |
 
-Cross-cutting:
+### 11.3 Limits that apply to every document
 
-- **Collaboration latency** is the autosave cadence: a few seconds after each pause. State that has to move faster (games, scores, cursors) goes in a live store ([Live data: `clay="live"`](https://clayjs.com/docs/guide/live-sync/#live-data-clay-live)).
-- **Per-row permissions** do not exist: edit access is per file. Split data with different audiences into different files.
-- **Background work** (reminders, recurring transactions) cannot run in a closed file. Compute "due" when the file is open.
-- **Privacy:** the saved file is the data. Hiding an element with CSS or `show-when` is presentation, not access control ([Privacy](https://clayjs.com/docs/guide/hosts/#privacy)).
+- **No comments.** ClayJS has no comment model (`ai-edit` is an AI prompt, not stored comments). Store comments as `<aside data-id data-anchor>` elements.
+- **No live cursors.** Presence shows who is here in an avatar stack and outlines which block someone is editing. There are no character cursors and no app-facing presence API.
+- **No suggestion mode, pagination, footnotes, or `.docx` and PPTX export.** Edits apply directly without tracked changes, page breaks, footnotes, or Office exporters. Use print CSS for PDF.
+- **Per-file edit access.** There are no per-row permissions. Split data for different audiences into separate files.
+- **No background work in a closed file.** Nothing runs in a closed file, and a live room ends after two minutes with nobody connected. Compute due states on open.
+- **Undo is per tab.** History is capped at 100 steps per tab, is not saved, and never reverts a peer's merged edits.
+
+> [!NOTE]
+> **Privacy: the saved file is the data.** Hiding an element with CSS, `hidden`, or `show-when` is presentation, not access control. See [Privacy](https://clayjs.com/docs/guide/hosts/#privacy).
 
 ---
 
