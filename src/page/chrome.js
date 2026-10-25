@@ -263,6 +263,10 @@ class Chrome {
     this.priorAria = null;
     this.movedTimer = 0;
     this.hover = null;
+    this.pendingHover = null;
+    this.win = view.dom.ownerDocument.defaultView ?? globalThis;
+    this.frame = null;
+    this.destroyed = false;
 
     this.dock = el("div", "page-dock", { role: "toolbar", "aria-label": "Formatting" });
     this.turn = el("button", "page-tool page-tool-turn", { type: "button", "aria-haspopup": "menu" });
@@ -310,10 +314,11 @@ class Chrome {
     this.onKey = () => {
       clearTimeout(this.movedTimer);
       this.shell.classList.remove("is-moved");
+      this.pendingHover = null;
       this.setHover(null);
     };
-    this.onLeave = () => this.setHover(null);
-    this.onResize = () => this.place();
+    this.onLeave = () => { this.pendingHover = null; this.setHover(null); };
+    this.onResize = () => this.scheduleLayout();
     this.onDocDown = (e) => {
       if (!this.menu) return;
       if ([this.menuEl, this.plus, this.grip, this.turn].some((part) => part.contains(e.target))) return;
@@ -323,7 +328,10 @@ class Chrome {
     this.shell.addEventListener("mousemove", this.onMove);
     this.shell.addEventListener("mouseleave", this.onLeave);
     this.shell.addEventListener("keydown", this.onKey);
-    window.addEventListener("resize", this.onResize);
+    this.win.addEventListener("resize", this.onResize);
+    this.win.addEventListener("scroll", this.onResize, true);
+    this.win.visualViewport?.addEventListener("resize", this.onResize);
+    this.win.visualViewport?.addEventListener("scroll", this.onResize);
     this.update(view, null);
   }
 
@@ -367,20 +375,26 @@ class Chrome {
 
   trackHover(event) {
     if (this.menu || this.drag.state || [this.plus, this.grip, this.dock, this.bubble].some((part) => part.contains(event.target))) return;
+    this.pendingHover = { clientY: event.clientY };
+    this.scheduleLayout();
+  }
+
+  // The pointer's block, read once per frame from the newest move.
+  hoverAt(clientY) {
     const view = this.view;
-    const hit = view.posAtCoords({ left: view.dom.getBoundingClientRect().left + 2, top: event.clientY });
+    const hit = view.posAtCoords({ left: view.dom.getBoundingClientRect().left + 2, top: clientY });
     if (!hit) return;
     const doc = view.state.doc;
     const ents = outline(doc);
     let i = Math.min(doc.resolve(hit.inside >= 0 ? hit.inside : hit.pos).index(0), ents.length - 1);
     while (i > 0 && ents[i].hidden) i--;
-    this.setHover(i);
+    this.hover = i;
   }
 
   setHover(i) {
     if (i === this.hover) return;
     this.hover = i;
-    this.place();
+    this.scheduleLayout();
   }
 
   fromPlus() {
@@ -493,7 +507,7 @@ class Chrome {
     else this.view.dom.removeAttribute("aria-activedescendant");
     this.menuEl.hidden = false;
     this.scrim.hidden = false;
-    this.place();
+    this.scheduleLayout();
     if (!slash) this.menuEl.querySelectorAll("button")[m.active]?.focus();
   }
 
@@ -569,31 +583,42 @@ class Chrome {
     this.renderMenu();
   }
 
-  place() {
+  scheduleLayout() {
+    if (this.frame !== null || this.destroyed) return;
+    this.frame = this.win.requestAnimationFrame(() => {
+      this.frame = null;
+      if (this.destroyed) return;
+      const layout = this.measureLayout();
+      this.paintLayout(layout);
+    });
+  }
+
+  // Every geometry read the chrome needs, taken in one pass for the frame.
+  measureLayout() {
     const view = this.view;
     const st = view.state;
+    if (this.pendingHover) {
+      const { clientY } = this.pendingHover;
+      this.pendingHover = null;
+      this.hoverAt(clientY);
+    }
     const shellBox = this.shell.getBoundingClientRect();
     const edBox = view.dom.getBoundingClientRect();
     const i = this.gutterIndex();
     let at = 0;
     for (let k = 0; k < i; k++) at += st.doc.child(k).nodeSize;
     const dom = view.nodeDOM(at);
+    const out = { textLeft: edBox.left - shellBox.left, gutter: null, bubble: null, menu: null };
     if (dom && dom.getBoundingClientRect) {
       const r = dom.getBoundingClientRect();
       const lineH = parseFloat(getComputedStyle(dom).lineHeight) || r.height;
-      for (const part of [this.plus, this.grip]) {
-        part.style.setProperty("--page-plus-top", `${r.top - shellBox.top + Math.min(r.height, lineH) / 2}px`);
-        part.style.setProperty("--page-plus-left", `${r.left - shellBox.left}px`);
-      }
+      out.gutter = { top: r.top - shellBox.top + Math.min(r.height, lineH) / 2, left: r.left - shellBox.left };
     }
-    this.plus.style.setProperty("--page-text-left", `${edBox.left - shellBox.left}px`);
-
     const sel = st.selection;
     if (!this.bubble.hidden) {
       const a = view.coordsAtPos(sel.from), b = view.coordsAtPos(sel.to, -1);
       const mid = (Math.min(a.left, b.left) + Math.max(a.right, b.right)) / 2;
-      this.bubble.style.setProperty("--page-pop-x", `${mid - shellBox.left}px`);
-      this.bubble.style.setProperty("--page-pop-y", `${Math.min(a.top, b.top) - shellBox.top}px`);
+      out.bubble = { x: mid - shellBox.left, y: Math.min(a.top, b.top) - shellBox.top };
     }
     if (this.menu) {
       const m = this.menu;
@@ -603,14 +628,33 @@ class Chrome {
         left = c.left;
         top = c.bottom + 6;
         const height = this.menuEl.offsetHeight;
-        if (top + height > window.innerHeight - 8 && c.top - 6 - height >= 8) top = c.top - 6 - height;
+        if (top + height > this.win.innerHeight - 8 && c.top - 6 - height >= 8) top = c.top - 6 - height;
       } else {
         const r = m.anchor === this.plus ? (dom?.getBoundingClientRect?.() ?? edBox) : m.anchor.getBoundingClientRect();
         left = r.left;
         top = r.bottom + 6;
       }
-      this.menuEl.style.setProperty("--page-pop-x", `${Math.max(8, Math.min(left - shellBox.left, shellBox.width - 280))}px`);
-      this.menuEl.style.setProperty("--page-pop-y", `${top - shellBox.top}px`);
+      out.menu = { x: Math.max(8, Math.min(left - shellBox.left, shellBox.width - 280)), y: top - shellBox.top };
+    }
+    return out;
+  }
+
+  // The placement style writes, from the frame's measurements alone.
+  paintLayout(layout) {
+    if (layout.gutter) {
+      for (const part of [this.plus, this.grip]) {
+        part.style.setProperty("--page-plus-top", `${layout.gutter.top}px`);
+        part.style.setProperty("--page-plus-left", `${layout.gutter.left}px`);
+      }
+    }
+    this.plus.style.setProperty("--page-text-left", `${layout.textLeft}px`);
+    if (layout.bubble) {
+      this.bubble.style.setProperty("--page-pop-x", `${layout.bubble.x}px`);
+      this.bubble.style.setProperty("--page-pop-y", `${layout.bubble.y}px`);
+    }
+    if (layout.menu) {
+      this.menuEl.style.setProperty("--page-pop-x", `${layout.menu.x}px`);
+      this.menuEl.style.setProperty("--page-pop-y", `${layout.menu.y}px`);
     }
   }
 
@@ -630,16 +674,22 @@ class Chrome {
     if (showBubble) for (const b of this.bubble.querySelectorAll("[data-cmd]")) b.setAttribute("aria-pressed", String(toolActive(st, b.dataset.cmd)));
     this.grip.classList.toggle("is-on", st.selection instanceof BlockSelection);
     this.slashQuery();
-    this.place();
+    this.scheduleLayout();
   }
 
   destroy() {
+    this.destroyed = true;
+    if (this.frame !== null) this.win.cancelAnimationFrame(this.frame);
+    this.frame = null;
     clearTimeout(this.movedTimer);
     this.drag.destroy();
     this.shell.removeEventListener("mousemove", this.onMove);
     this.shell.removeEventListener("mouseleave", this.onLeave);
     this.shell.removeEventListener("keydown", this.onKey);
-    window.removeEventListener("resize", this.onResize);
+    this.win.removeEventListener("resize", this.onResize);
+    this.win.removeEventListener("scroll", this.onResize, true);
+    this.win.visualViewport?.removeEventListener("resize", this.onResize);
+    this.win.visualViewport?.removeEventListener("scroll", this.onResize);
     document.removeEventListener("mousedown", this.onDocDown, true);
     for (const part of [this.dock, this.plus, this.grip, this.bubble, this.scrim, this.menuEl]) part.remove();
   }

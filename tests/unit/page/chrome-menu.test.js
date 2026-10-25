@@ -25,6 +25,7 @@ const labels = (view) => rows(view).map((r) => r.querySelector(".page-menu-label
 const type = (view, text) => { for (const ch of text) typeText(view, ch); };
 const backspace = (view) => view.dispatch(view.state.tr.delete(view.state.selection.head - 1, view.state.selection.head));
 const isOpen = (view) => !menu(view).hidden;
+const frame = () => new Promise((done) => window.requestAnimationFrame(() => done()));
 
 describe("the slash trigger", () => {
   test("opens at the start of an empty line, and shows every item", () => {
@@ -258,19 +259,21 @@ describe("rows and aria", () => {
 describe("anchoring", () => {
   const y = (view) => menu(view).style.getPropertyValue("--page-pop-y");
 
-  test("a slash menu sits under the slash", () => {
+  test("a slash menu sits under the slash", async () => {
     const view = open([["e", "paragraph", ""]]);
     view.dom.parentElement.getBoundingClientRect = () => ({ left: 0, top: 0, width: 800, height: 600, right: 800, bottom: 600 });
     type(view, "/");
+    await frame();
     expect(y(view)).toBe("126px");
     expect(menu(view).style.getPropertyValue("--page-pop-x")).toBe("40px");
   });
 
-  test("near the bottom of the viewport it flips above the slash", () => {
+  test("near the bottom of the viewport it flips above the slash", async () => {
     const view = open([["e", "paragraph", ""]]);
     view.coordsAtPos = () => ({ left: 40, right: 48, top: 700, bottom: 716 });
     Object.defineProperty(menu(view), "offsetHeight", { configurable: true, value: 200 });
     type(view, "/");
+    await frame();
     expect(y(view)).toBe("494px");
   });
 });
