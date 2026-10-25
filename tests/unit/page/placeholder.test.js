@@ -35,10 +35,43 @@ describe("the empty-line placeholder", () => {
     expect(set).toBeNull();
   });
 
-  test("leaves an empty heading alone", () => {
+  test("marks the empty first root H1 with the Untitled title placeholder", () => {
     const doc = docOf(heading("a"));
     const set = decorations(EditorState.create({ doc, selection: caret(doc, 1) }));
+    const found = set.find();
+    expect(found).toHaveLength(1);
+    expect(found[0].type.attrs["data-placeholder"]).toBe("Untitled");
+    expect(found[0].type.attrs.class).toBe("page-title-placeholder");
+    expect(found[0].from).toBe(0);
+  });
+
+  test("the title placeholder shows without focus and leaves the caret block's own hint alone", () => {
+    const doc = docOf(heading("h"), paragraph("p"));
+    const set = decorations(EditorState.create({ doc, selection: caret(doc, heading("h").nodeSize + 1) }));
+    const found = set.find();
+    expect(found).toHaveLength(2);
+    expect(found[0].type.attrs["data-placeholder"]).toBe("Untitled");
+    expect(found[1].type.attrs["data-placeholder"]).toBe("Type / for blocks");
+  });
+
+  test("the title placeholder is only on the first root H1, and only when it is empty", () => {
+    const filled = decorations(EditorState.create({ doc: docOf(heading("a", "Alpha")), selection: caret(docOf(heading("a", "Alpha")), 1) }));
+    expect(filled).toBeNull();
+    const later = decorations(EditorState.create({ doc: docOf(paragraph("p"), heading("b")), selection: caret(docOf(paragraph("p"), heading("b")), 1) }));
+    expect(later.find()).toHaveLength(2);
+    expect(later.find()[1].from).toBe(paragraph("p").nodeSize);
+  });
+
+  test("a nested empty H1 is not decorated as the title", () => {
+    const nested = schema.node("heading", { id: "n", level: 1, parent: "t" }, []);
+    const doc = docOf(nested);
+    const set = decorations(EditorState.create({ doc, selection: caret(doc, 1) }));
     expect(set).toBeNull();
+  });
+
+  test("an empty H2 is not a title placeholder", () => {
+    const doc = docOf(schema.node("heading", { id: "h2", level: 2 }, []));
+    expect(decorations(EditorState.create({ doc, selection: caret(doc, 1) }))).toBeNull();
   });
 
   test("decorates only the caret's block, not another empty paragraph", () => {

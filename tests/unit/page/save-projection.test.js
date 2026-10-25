@@ -80,3 +80,73 @@ test("the article and the tag agree after a tombstone", () => {
   const tag = doc.querySelector('script[merge="page"]').textContent;
   expect(article.getAttribute("data-rev")).toBe(projection.renderFromTags([tag]).rev);
 });
+
+test("a captured model's title is projected with it, never the live title", () => {
+  const page = live("page");
+  page.set("blocks.h.c", "Title A");
+  const clone = snapshot.captureSnapshot({ flushUndo: false });
+  page.set("blocks.h.c", "Title B");
+  document.title = "Title B";
+
+  projection.projectInto(clone);
+
+  const article = clone.querySelector("article");
+  expect(article.querySelector('[data-id="h"]').textContent).toBe("Title A");
+  expect(clone.querySelector("head title").textContent).toBe("Title A");
+  expect(clone.querySelectorAll("head title")).toHaveLength(1);
+});
+
+test("an empty first H1 projects the Untitled placeholder as a title, never as article text", () => {
+  const page = live("page");
+  page.set("blocks.h.c", "");
+  const clone = snapshot.captureSnapshot({ flushUndo: false });
+
+  projection.projectInto(clone);
+
+  const article = clone.querySelector("article");
+  expect(article.querySelector('[data-id="h"]').textContent).toBe("");
+  expect(clone.querySelector("head title").textContent).toBe("Untitled");
+});
+
+test("a custom title marker keeps the snapshot's exact title, including an empty one", () => {
+  const page = live("page");
+  page.set("blocks.h.c", "Derived after this");
+  const meta = document.head.appendChild(document.createElement("meta"));
+  meta.setAttribute("name", "clay-seo-title-mode");
+  meta.setAttribute("content", "custom");
+  try {
+    document.title = "Hand written";
+    const clone = snapshot.captureSnapshot({ flushUndo: false });
+    page.set("blocks.h.c", "Later title");
+    projection.projectInto(clone);
+
+    expect(clone.querySelectorAll("head title")).toHaveLength(1);
+    expect(clone.querySelector("head title").textContent).toBe("Hand written");
+
+    document.title = "";
+    const empty = snapshot.captureSnapshot({ flushUndo: false });
+    projection.projectInto(empty);
+    expect(empty.querySelectorAll("head title")).toHaveLength(1);
+    expect(empty.querySelector("head title").textContent).toBe("");
+  } finally {
+    meta.remove();
+    document.title = "";
+  }
+});
+
+test("the editor's Untitled placeholder never reaches the saved bytes", async () => {
+  const { createPageEditor } = await import("../../../src/page/editor.js");
+  const page = live("page");
+  page.set("blocks.h.c", "");
+  const host = document.querySelector("article").appendChild(document.createElement("div"));
+  const view = createPageEditor(host, { blocks: { h: { t: "heading", pos: "A", level: 1, c: "" } }, features: null });
+  try {
+    expect(view.dom.querySelector('[data-placeholder="Untitled"]')).not.toBeNull();
+    const html = saved().documentElement.outerHTML;
+    expect(html).not.toContain("data-placeholder");
+    expect(html).not.toContain("page-title-placeholder");
+  } finally {
+    view.destroy();
+    host.remove();
+  }
+});
