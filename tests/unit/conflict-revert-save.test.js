@@ -93,7 +93,8 @@ beforeAll(async () => {
   revert = await import("../../src/sync/conflict-revert.js");
   ({ derived } = await import("../../src/lib/derived.js"));
   ({ downloadRecovery } = await import("../../src/core/conflict-download.js"));
-  notice = await import("../../src/core/conflict-notice.js");
+  await import("../../src/core/conflict-notice.js");
+  notice = await import("../../src/core/conflict-notice-ui.js");
   await etag.seedEtag();
 });
 

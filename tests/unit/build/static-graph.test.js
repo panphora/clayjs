@@ -100,6 +100,22 @@ for (const { mode, isEditMode, isDraftMode } of MODES) {
   });
 }
 
+// The conflict notice is 6.8 KB Brotli and most edit boots have nothing for it to
+// show: core/conflict-notice.js is a shell that fetches conflict-notice-ui.js on the
+// first event that does. The shell is in every edit plan; the notice it fetches must
+// never be in the walk of one.
+for (const [fixture, tag] of Object.entries(FIXTURES)) {
+  test(`${fixture} edit: the conflict notice is fetched, not in the boot graph`, async () => {
+    const params = new URLSearchParams(`plugins=${tag.plugins}&exclude=${tag.exclude}`);
+    const plan = resolveModules(params, true, { isDraftMode: false, hasSap: tag.hasSap });
+    const entries = [...plan.core, ...plan.plugins].map((path) => `src/${path}`);
+    const graph = walk(await inputsFor(entries), entries);
+
+    expect(entries).toContain("src/core/conflict-notice.js");
+    expect([...graph].filter((file) => file.startsWith("src/core/conflict-notice"))).toEqual(["src/core/conflict-notice.js"]);
+  });
+}
+
 for (const [fixture, tag] of Object.entries(FIXTURES)) {
   for (const { mode, isEditMode, isDraftMode } of MODES) {
     if (tag.modes && !tag.modes.includes(mode)) continue;

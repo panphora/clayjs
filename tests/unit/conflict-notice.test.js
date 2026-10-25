@@ -72,7 +72,10 @@ beforeAll(async () => {
   save = await import("../../src/core/save.js");
   snapshot = await import("../../src/core/snapshot.js");
   ({ reloadAfterDiscard } = await import("../../src/core/unsaved-warning.js"));
-  notice = await import("../../src/core/conflict-notice.js");
+  // The shell every edit boot downloads, and the notice it fetches; the tests drive
+  // events through the shell and read the notice's own state through _test.
+  await import("../../src/core/conflict-notice.js");
+  notice = await import("../../src/core/conflict-notice-ui.js");
 });
 
 beforeEach(async () => {
@@ -143,6 +146,16 @@ async function refuse(changedBy = "another-tab") {
 }
 
 const review = () => buttonSaying(/Review/).click();
+
+// First in the file on purpose: the notice is fetched on the first event that has
+// something for it to show, so this is the run where a refusal is the event that asks
+// for it. It has to come up with its detail, not a notice that missed it.
+test("a refusal that asks for the notice first shows the refusal with its detail", async () => {
+  await refuse("an-agent");
+
+  expect(visible()).toBe(true);
+  expect(shown()).toContain("This page changed by an agent. Your edits here are safe.");
+});
 
 test("the bar arrives a frame after the ledger changes, not with them", async () => {
   expect(visible()).toBe(false);
