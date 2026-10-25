@@ -97,7 +97,10 @@ const adopt = () => {
   assert.equal(window.clay.style('/app.css?v=2#fresh'), oldLink);
   assert.equal(oldLink.getAttribute('href'), '/app.css?v=2#fresh');
 };
-const assertClean = () => {
+// The stripper is a lazy import now, so the strip lands a turn after the write:
+// every reader that compares bytes waits for the queue, and so does this.
+const assertClean = async () => {
+  await save.styleAdoptionsSettled();
   assert.equal(warn(), false);
   assert.equal(snap.captureForDirtyCheck(), save.getLastSavedDirty());
   assert.equal(snap.captureForComparison(), save.getLastSavedContents());
@@ -113,7 +116,7 @@ if (scenario === 'refresh-marked') {
   window.clay.style('/app.css?v=3');
   window.clay.undo.flush();
   assert.equal(window.clay.undo.canUndo, false);
-  assertClean();
+  await assertClean();
   await sleep(1800);
   assert.equal(posts.length, 0);
   assert.equal(gate.gateCaptureToken().gen, generation);
@@ -122,7 +125,7 @@ if (scenario === 'refresh-marked') {
   assert.match(html, /app\.css\?v=3/);
 } else if (scenario === 'late') {
   adopt();
-  assertClean();
+  await assertClean();
   window.clay.undo.flush();
   assert.equal(window.clay.undo.canUndo, false);
   await sleep(1800);
@@ -154,6 +157,7 @@ if (scenario === 'refresh-marked') {
   content.textContent = 'Unsent ordinary edit';
   batch.textContent = 'Unsent batched edit';
   adopt();
+  await save.styleAdoptionsSettled();
   assert.equal(warn(), true);
   assert.match(save.getLastSavedDirty(), /Original/);
   assert.match(save.getLastSavedDirty(), /Batch original/);
@@ -166,7 +170,7 @@ if (scenario === 'refresh-marked') {
   assert.equal(content.textContent, 'Original');
   assert.equal(batch.textContent, 'Batch original');
   assertCurrentSavedStyle(snap.captureForSaveAndComparison({ emitForSync: false }).forSave);
-  assertClean();
+  await assertClean();
   assert.equal(posts.length, 0);
 } else if (scenario.startsWith('flight-')) {
   save.suspendAutosave();
@@ -203,14 +207,14 @@ if (scenario === 'refresh-marked') {
     if (later) {
       assert.equal(gate.pageMaybeDirty(), true);
       assert.doesNotMatch(save.getLastSavedDirty(), /Later unsent|Later batch/);
-    } else assertClean();
+    } else await assertClean();
   }
   holdResponse = false;
   if (!later) {
     save.resumeAutosave();
     await sleep(1800);
     assert.equal(posts.length, 1, 'no follow-up save caused by adoption');
-    assertClean();
+    await assertClean();
   }
 } else if (scenario === 'editor') {
   const { createPageEditor, PAGE_EDITOR_CSS } = await import(`${repo}/src/page/editor.js`);
@@ -220,7 +224,7 @@ if (scenario === 'refresh-marked') {
   assert.equal(tags[0].textContent, PAGE_EDITOR_CSS);
   assert.equal(tags[0].dataset.name, 'page-editor-style');
   assert.equal(tags[0].getAttribute('clay'), 'no-dirty editor-ui');
-  assertClean();
+  await assertClean();
   window.clay.undo.flush();
   assert.equal(window.clay.undo.canUndo, false);
   await sleep(1800);
@@ -230,10 +234,10 @@ if (scenario === 'refresh-marked') {
 } else if (scenario === 'boot-adopt') {
   assert.equal(save.baselineSettled(), false);
   adopt();
-  assertClean();
+  await assertClean();
   content.textContent = 'Rendered during boot';
   await until(() => save.baselineSettled());
-  assertClean();
+  await assertClean();
   assert.match(save.getLastSavedDirty(), /Rendered during boot/);
   assert.equal(posts.length, 0);
 } else if (scenario === 'boot-save-edit') {
@@ -249,7 +253,7 @@ if (scenario === 'refresh-marked') {
   assert.equal(posts.length, 1);
 } else if (scenario === 'sync-install') {
   adopt();
-  assertClean();
+  await assertClean();
   Mutation.pause();
   document.querySelector('style').removeAttribute('clay');
   document.querySelector('style').textContent = '.disk { color: orange; }';
@@ -258,26 +262,27 @@ if (scenario === 'refresh-marked') {
   Mutation.resume();
   const baseline = snap.captureForComparisonAndDirty({ flushUndo: false });
   save.setLastSavedBaselines(baseline.forComparison, baseline.forDirty);
-  assertClean();
+  await assertClean();
   content.textContent = 'Unsent after sync';
   window.clay.style('saved', '.disk { color: blue; }');
   window.clay.style('/app.css?v=3');
+  await save.styleAdoptionsSettled();
   assert.equal(warn(), true);
   assert.match(save.getLastSavedDirty(), /New disk content/);
   assert.doesNotMatch(save.getLastSavedDirty(), /Unsent after sync|color: orange/);
   Mutation.pause();
   content.textContent = 'New disk content';
   Mutation.resume();
-  assertClean();
+  await assertClean();
   Mutation.pause();
   batch.removeAttribute('clay');
   Mutation.resume();
   const val = snap.captureForDirtyCheck();
   save.setLastSavedContents(val);
-  assertClean();
+  await assertClean();
 } else if (scenario === 'policy') {
   adopt();
-  assertClean();
+  await assertClean();
   document.getElementById('ordinary').setAttribute('clay', 'no-dirty');
   await sleep(20);
   assert.equal(warn(), true);

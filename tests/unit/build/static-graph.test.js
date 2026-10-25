@@ -6,16 +6,22 @@ import { build } from "esbuild";
 import { resolveModules } from "../../../src/loader-logic.js";
 
 /**
- * The merge engine is a first-merge download, never a boot one. This walks the
- * static imports of each plan a Kanban or Journal document boots, the way the
- * browser would fetch them, and fails if the engine's vendor or its tag
- * recognizers are in that walk.
+ * The merge engine is a first-merge download and parse5 is a first-owned-style one,
+ * never a boot download. This walks the static imports of each plan a Kanban or
+ * Journal document boots, the way the browser would fetch them, and fails if the
+ * engine's vendor, its tag recognizers, or the parser an owned style needs are in
+ * that walk. The `source` plugin, the other parse5 importer, loads late, after the
+ * editor takes input, so it is not in these plans.
  *
  * The plans come from the loader itself (resolveModules) rather than a hand
  * copy, so a plugin that starts naming the engine shows up here.
  */
 
-const FORBIDDEN = ["src/vendor/hyper-morph.vendor.js", "src/sync/merge-tags.js"];
+const FORBIDDEN = [
+  "src/vendor/hyper-morph.vendor.js",
+  "src/sync/merge-tags.js",
+  "src/vendor/parse5.vendor.js",
+];
 
 const FIXTURES = {
   kanban: { plugins: "sortable,people,upload,sync,visitor-drafts", exclude: "richclay", hasSap: true },
@@ -67,7 +73,7 @@ function walk(inputs, entries) {
 
 for (const [fixture, tag] of Object.entries(FIXTURES)) {
   for (const { mode, isEditMode, isDraftMode } of MODES) {
-    test(`${fixture} ${mode}: no plan statically loads the merge engine`, async () => {
+    test(`${fixture} ${mode}: no plan statically loads the merge engine or parse5`, async () => {
       const params = new URLSearchParams(`plugins=${tag.plugins}&exclude=${tag.exclude}`);
       const plan = resolveModules(params, isEditMode, { isDraftMode, hasSap: tag.hasSap });
       const entries = [...plan.core, ...plan.plugins].map((path) => `src/${path}`);

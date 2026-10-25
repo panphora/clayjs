@@ -29,7 +29,6 @@ import { gateCaptureToken, gateClearIfUnchanged, pageMaybeDirty } from "../lib/d
 import { hasUnsavedState } from "../lib/unsaved-state.js";
 import { autosaveActive } from "../lib/autosave-state.js";
 import { registerStyleAdoption } from "../lib/style-adoption.js";
-import { styleComparisonStripper } from "./style-comparisons.js";
 import { ROOT_LIBRARY_ATTRS, SAVE_TOKEN_ATTRS, LEGACY_SAVE_TOKEN_ATTRS, HOST_RESPONSE_ATTRS } from "../lib/root-attrs.js";
 import { logSaveCheck, logBaseline } from "../lib/autosave-debug.js";
 import { initUserGesture, markExplicitSave, clearExplicitSave } from "../lib/user-gesture.js";
@@ -519,7 +518,12 @@ const monotonic = () => (typeof performance !== 'undefined' && performance.now ?
  * @param {Function} callback - Optional callback for custom handling
  * @returns {Promise<{msg: string, msgType: string}>}
  */
-function attemptSave({ kind }, callback = () => {}) {
+function attemptSave(options, callback = () => {}) {
+  if (!adoptionsQueued) return attemptSaveNow(options, callback);
+  return adoptionQueue.then(() => attemptSaveNow(options, callback));
+}
+
+function attemptSaveNow({ kind }, callback = () => {}) {
   const explicit = kind === 'explicit';
 
   return new Promise((resolve) => {
@@ -979,6 +983,10 @@ let baselineActive = true;
 // from an editmode:resource script) are in the page by now.
 let baselineSettledAt = false;
 export function baselineSettled() { return baselineSettledAt; }
+// True once a person typed or pasted into the page during the boot settle. The
+// settled capture is skipped then, and `bootStyleAdoptionPending` cannot speak for
+// the page's bytes any more.
+let bootUserEdited = false;
 
 // A repaint that leaves the page's painted values different from the file's means
 // the file is stale: an agent wrote a record without painting it. One clean,
@@ -1018,8 +1026,9 @@ export function currentPaintSignature() {
 export function schedulePaintHeal(fileSignature) {
   if (!isEditMode || isDraftMode) return;
   clearTimeout(paintHealTimer);
-  paintHealTimer = setTimeout(() => {
+  paintHealTimer = setTimeout(async () => {
     paintHealTimer = null;
+    if (adoptionsQueued) await adoptionQueue;
     const onDisk = typeof fileSignature === 'function' ? fileSignature() : fileSignature;
     if (onDisk == null || !autosaveActive() || !baselineSettled() || isSaveConflicted() || autosaveIsSuspended()) return;
     if (captureForDirtyCheck({ flushUndo: false }) !== lastSavedDirty) return;
@@ -1030,16 +1039,68 @@ export function schedulePaintHeal(fileSignature) {
   }, PAINT_HEAL_MIN_MS + Math.random() * PAINT_HEAL_SPREAD_MS);
 }
 
-registerStyleAdoption(identity => {
-  const strip = styleComparisonStripper(identity);
-  lastSavedContents = strip(lastSavedContents);
-  lastSavedDirty = strip(lastSavedDirty);
-  baselineContents = strip(baselineContents);
-  for (const comparison of inFlightComparisons) {
-    comparison.forComparison = strip(comparison.forComparison);
-    comparison.forDirty = strip(comparison.forDirty);
+// parse5 is 38.5 KB Brotli, and an owned style is the only reason this module names
+// it, so the stripper loads the first time a script writes one. `clay.style()` stays
+// synchronous: it queues the identity here and the strip runs when the module lands.
+// Every reader that compares bytes awaits the queue first; see
+// `bootStyleAdoptionPending` for the one synchronous reader that cannot.
+let adoptionStripper = null;
+let adoptionLoad = null;
+let adoptionsQueued = 0;
+let adoptionQueue = Promise.resolve();
+
+function loadAdoptionStripper() {
+  adoptionLoad ??= import("./style-comparisons.js").catch(error => {
+    adoptionLoad = null;
+    console.error('style-comparisons failed to load', error);
+    return null;
+  });
+  return adoptionLoad;
+}
+
+async function stripAdoptedStyle(identity) {
+  try {
+    if (!adoptionStripper) adoptionStripper = (await loadAdoptionStripper())?.styleComparisonStripper ?? null;
+    if (!adoptionStripper) return;
+    const strip = adoptionStripper(identity);
+    lastSavedContents = strip(lastSavedContents);
+    lastSavedDirty = strip(lastSavedDirty);
+    baselineContents = strip(baselineContents);
+    for (const comparison of inFlightComparisons) {
+      comparison.forComparison = strip(comparison.forComparison);
+      comparison.forDirty = strip(comparison.forDirty);
+    }
+  } catch (error) {
+    console.error('style adoption failed', error);
+  } finally {
+    adoptionsQueued--;
   }
+}
+
+registerStyleAdoption(identity => {
+  adoptionsQueued++;
+  adoptionQueue = adoptionQueue.then(() => stripAdoptedStyle(identity));
 });
+
+/** Resolves once every style written so far has been stripped from the baselines. */
+export function styleAdoptionsSettled() {
+  return adoptionQueue;
+}
+
+/**
+ * The boot window a style adoption opens. A fresh capture leaves an owned style out
+ * (writing one marks it no-dirty), while the stored baselines still carry it until
+ * the stripper lands, so a synchronous reader in that window reads the page as
+ * dirty. That is never true of a real edit: a keystroke in the boot window, work an
+ * owner registered, or a save on the wire all turn this off, and after the baseline
+ * settles the queue has drained and this is false anyway.
+ */
+export function bootStyleAdoptionPending() {
+  if (!adoptionsQueued || baselineSettledAt) return false;
+  if (bootUserEdited || hasUnsavedState()) return false;
+  if (isSaveInProgress() || pendingSave || pendingAutosave) return false;
+  return true;
+}
 
 // ============================================
 // BASELINE CAPTURE (Settled Signal)
@@ -1075,7 +1136,6 @@ export function releaseBootSettle() {
 function initBaselineCapture() {
   if (!isEditMode) return;
 
-  let userEdited = false;
   let settled = false;
   let unsubscribeMutation = null;
 
@@ -1096,7 +1156,7 @@ function initBaselineCapture() {
                        target.tagName === 'INPUT' ||
                        target.tagName === 'TEXTAREA' ||
                        target.tagName === 'SELECT';
-    if (isEditable) userEdited = true;
+    if (isEditable) bootUserEdited = true;
   };
   userEditEvents.forEach(evt => document.addEventListener(evt, markUserEdited, true));
 
@@ -1112,7 +1172,7 @@ function initBaselineCapture() {
     // Adoption only removes owned styles from comparison state. It does not
     // advance this revision. A save or sync installation does, even when its
     // comparison bytes match, so settle cannot absorb a later unsent edit.
-    if (!userEdited && baselineRevision === immediateRevision) {
+    if (!bootUserEdited && baselineRevision === immediateRevision) {
       // Store stripped version so comparisons are direct (no parsing needed)
       const gateToken = gateCaptureToken();
       const { forComparison: contents, forDirty: contentsDirty } = captureForComparisonAndDirty();
@@ -1123,7 +1183,7 @@ function initBaselineCapture() {
       gateClearIfUnchanged(gateToken);
       logBaseline('settled capture', `${contents.length} chars`);
     } else {
-      logBaseline('settled skipped', userEdited ? 'user edited' : 'save occurred during settle');
+      logBaseline('settled skipped', bootUserEdited ? 'user edited' : 'save occurred during settle');
     }
 
     // The load-time veto has done its job. It exists so setup churn from modules
