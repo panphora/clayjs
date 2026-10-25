@@ -1,22 +1,82 @@
 // What a document downloads from clayjs.com, per mode: requests, bytes as served
-// (raw, gzip, brotli q11, per file) and dependent fetch stages on a cold load. It
+// (raw, gzip, brotli q4, per file) and dependent fetch stages on a cold load. It
 // reads the document's clayjs.com tags and follows the loader's boot order
 // (src/loader.js): the boot prefix, then each core module and plugin, each awaited
 // before the next one starts.
 import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { join, posix, relative, resolve } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { brotliCompressSync, constants, gzipSync } from "node:zlib";
 import { build } from "esbuild";
+import { parse } from "parse5";
+import { draftEligible, noteBootParams } from "../src/core/draft-mode.js";
 import { resolveModules } from "../src/loader-logic.js";
 
 const ROOT = resolve(fileURLToPath(new URL(".", import.meta.url)), "..");
 const CLAY = "https://clayjs.com/v1/";
-const CLAY_SRC = CLAY + "src/";
+const CLAY_ORIGIN = new URL(CLAY).origin;
+const CLAY_SRC_PATH = "/v1/src/";
 const FIXTURES = join(ROOT, "tests/fixtures/load");
-const SCRIPT_TAG = /<script[^>]*\bsrc="(https:\/\/clayjs\.com\/v1\/[^"]+)"/g;
-const LINK_TAG = /<link\b[^>]*>/g;
-const CSS_IMPORT = /@import\s+(?:url\(\s*)?["']([^"']+)["']/g;
+const CSS_IMPORT = /@import\s+(?:url\(\s*(?:"([^"]+)"|'([^']+)'|([^\s)"']+))\s*\)|"([^"]+)"|'([^']+)')/gi;
+const BOOT_IMPORTS = {
+  "src/plugins/sortable.js": ["src/vendor/Sortable.vendor.js"],
+  "src/plugins/derive.js": ["src/vendor/sap-core.vendor.js"],
+};
+
+const attrsOf = (node) => Object.fromEntries((node.attrs || []).map(({ name, value }) => [name, value]));
+const textOf = (node) => (node.childNodes || []).map((child) => child.value ?? textOf(child)).join("");
+
+function parseDocument(html) {
+  const document = parse(html);
+  const scripts = [];
+  const stylesheets = [];
+  let rootAttrs = {};
+  let apiRules = null;
+  let hasSap = false;
+
+  const walk = (node) => {
+    const attrs = attrsOf(node);
+    if (node.tagName === "html") rootAttrs = attrs;
+    if (node.tagName && Object.hasOwn(attrs, "sap")) hasSap = true;
+    if (node.tagName === "script") {
+      if (attrs.src?.startsWith(CLAY)) scripts.push(new URL(attrs.src));
+      if (!apiRules && (attrs["data-rules-name"] || "").split(/\s+/).includes("api")) {
+        apiRules = {
+          getAttribute: (name) => attrs[name] ?? null,
+          textContent: textOf(node),
+        };
+      }
+    }
+    if (node.tagName === "link" && (attrs.rel || "").split(/\s+/).some((token) => token.toLowerCase() === "stylesheet") && attrs.href) {
+      stylesheets.push(attrs.href);
+    }
+    for (const child of node.childNodes || []) walk(child);
+  };
+  walk(document);
+
+  const core = scripts.find((url) => url.pathname === "/v1/clay.js");
+  const names = scripts
+    .filter((url) => url.pathname !== "/v1/clay.js")
+    .map((url) => url.pathname.slice("/v1/".length));
+  const draftDocument = {
+    documentElement: { getAttribute: (name) => rootAttrs[name] ?? null },
+    querySelector: (selector) => selector === 'script[data-rules-name~="api"]' ? apiRules : null,
+  };
+
+  return {
+    bootstrap: Boolean(core),
+    params: core?.searchParams ?? new URLSearchParams(),
+    names,
+    stylesheets,
+    hasSap,
+    draftDocument,
+  };
+}
+
+function isDraftEligible(document) {
+  noteBootParams(document.params);
+  return document.bootstrap && draftEligible(document.draftDocument, { protocol: "https:" });
+}
 
 const sizesByPath = new Map();
 function sizes(path) {
@@ -25,19 +85,12 @@ function sizes(path) {
   const value = {
     raw: buffer.length,
     gzip: gzipSync(buffer, { level: 9 }).length,
-    brotli: brotliCompressSync(buffer, { params: { [constants.BROTLI_PARAM_QUALITY]: 11 } }).length,
+    // Brotli quality 4 matches the 378,784 B served for Document view files
+    // measured live from clayjs.com on 2026-10-24.
+    brotli: brotliCompressSync(buffer, { params: { [constants.BROTLI_PARAM_QUALITY]: 4 } }).length,
   };
   sizesByPath.set(path, value);
   return value;
-}
-
-function satellitesOf(html) {
-  const scripts = [...html.matchAll(SCRIPT_TAG)].map((m) => new URL(m[1]));
-  const core = scripts.find((u) => u.pathname === "/v1/clay.js");
-  return {
-    params: core ? core.searchParams : new URLSearchParams(),
-    names: scripts.filter((u) => u !== core).map((u) => u.pathname.replace("/v1/", "")),
-  };
 }
 
 // A satellite is a classic script whose own tag fetches one module: the single
@@ -51,9 +104,10 @@ function satelliteTarget(name) {
 }
 
 async function readGraph(entryPoints) {
+  if (!entryPoints.length) return {};
   const result = await build({
     absWorkingDir: ROOT,
-    entryPoints: [...new Set(["src/loader.js", ...entryPoints])],
+    entryPoints: [...new Set(entryPoints)],
     bundle: true,
     splitting: true,
     format: "esm",
@@ -78,25 +132,29 @@ function dynamicDeps(inputs, file) {
     .map((im) => im.path);
 }
 
-// graph.mjs's rule: the longest chain of modules this step newly fetches through
-// static imports. Already loaded modules count 0, and a cycle counts once.
+// Breadth-first fetch levels for modules this step newly fetches through static
+// imports. Already loaded modules cost nothing and are not walked.
 function closure(inputs, entry, loaded) {
   const added = [];
-  const depth = new Map();
-  const walk = (file, d) => {
-    if (loaded.has(file)) return 0;
-    if (depth.has(file)) return depth.get(file);
-    if (!inputs[file]) return 0;
-    depth.set(file, d);
-    added.push(file);
-    let max = 1;
-    for (const dep of staticDeps(inputs, file)) max = Math.max(max, 1 + walk(dep, d + 1));
-    depth.set(file, max);
-    return max;
-  };
-  const chain = walk(entry, 0);
+  const visited = new Set();
+  let frontier = [entry];
+  let levels = 0;
+  while (frontier.length) {
+    const next = [];
+    let fetched = false;
+    for (const file of frontier) {
+      if (loaded.has(file) || visited.has(file)) continue;
+      visited.add(file);
+      if (!inputs[file]) continue;
+      added.push(file);
+      fetched = true;
+      next.push(...staticDeps(inputs, file));
+    }
+    if (fetched) levels++;
+    frontier = next;
+  }
   for (const f of added) loaded.add(f);
-  return { added, chain };
+  return { added, levels };
 }
 
 function total(files) {
@@ -110,57 +168,82 @@ function total(files) {
   return sum;
 }
 
-function cssOf(html) {
+function localCssPath(url) {
+  if (url.origin !== CLAY_ORIGIN || !url.pathname.startsWith(CLAY_SRC_PATH)) return null;
+  return decodeURIComponent(url.pathname.slice("/v1/".length));
+}
+
+export function cssImportsOf(css, servedUrl) {
+  return [...css.matchAll(CSS_IMPORT)].map((match) => {
+    const spec = match.slice(1).find(Boolean);
+    const url = new URL(spec, servedUrl);
+    return { url: url.href, path: localCssPath(url) };
+  });
+}
+
+function cssOf(document) {
   const external = [];
   const files = [];
   const seen = new Set();
   let depth = 0;
-  const walk = (path, stage) => {
-    if (seen.has(path)) return;
-    seen.add(path);
+  const queue = document.stylesheets.map((href) => ({ url: new URL(href, "https://fixture.invalid/").href, stage: 1 }));
+  while (queue.length) {
+    const { url: href, stage } = queue.shift();
+    if (seen.has(href)) continue;
+    seen.add(href);
+    const url = new URL(href);
+    const path = localCssPath(url);
+    if (!path || !existsSync(join(ROOT, path))) {
+      external.push(href);
+      continue;
+    }
     files.push(path);
     depth = Math.max(depth, stage);
-    for (const match of readFileSync(join(ROOT, path), "utf8").matchAll(CSS_IMPORT)) {
-      const spec = match[1];
-      if (/^(https?:)?\/\//.test(spec) || spec.startsWith("data:")) {
-        external.push(spec);
-        continue;
-      }
-      const next = posix.normalize(spec.startsWith("/") ? spec.slice(1) : posix.join(posix.dirname(path), spec));
-      if (next.startsWith("src/") && existsSync(join(ROOT, next))) walk(next, stage + 1);
-      else external.push(spec);
+    for (const imported of cssImportsOf(readFileSync(join(ROOT, path), "utf8"), url)) {
+      if (imported.path && existsSync(join(ROOT, imported.path))) queue.push({ url: imported.url, stage: stage + 1 });
+      else external.push(imported.url);
     }
-  };
-  for (const tag of html.matchAll(LINK_TAG)) {
-    if (!/\brel="stylesheet"/.test(tag[0])) continue;
-    const href = tag[0].match(/\bhref="([^"]+)"/);
-    if (!href) continue;
-    if (href[1].startsWith(CLAY_SRC)) walk("src/" + href[1].slice(CLAY_SRC.length).split(/[?#]/)[0], 1);
-    else external.push(href[1]);
   }
   return { ...total(files), depth, external };
 }
 
 export async function measure({ html, mode }) {
-  const { params, names } = satellitesOf(html);
-  const hasSap = /\ssap[\s>=]/.test(html);
-  const plan = resolveModules(params, mode === "edit", { hasSap });
+  const document = parseDocument(html);
+  const { bootstrap, params, names, hasSap } = document;
+  const isDraftMode = mode === "draft";
+  const plan = bootstrap
+    ? resolveModules(params, mode === "edit" || isDraftMode, { isDraftMode, hasSap })
+    : { core: [], plugins: [] };
   const targets = names.map(satelliteTarget).filter(Boolean);
-  const inputs = await readGraph(targets.map((t) => `src/${t}`));
+  const graphEntries = [...(bootstrap ? ["src/loader.js"] : []), ...targets.map((target) => `src/${target}`)];
+  const inputs = await readGraph(graphEntries);
 
-  const steps = [
+  const steps = bootstrap ? [
     "loader.js", "core/draft-mode.js", "core/is-edit-mode.js", "lib/region-policy.js",
     ...plan.core, ...plan.plugins,
-  ].map((step) => `src/${step}`);
+  ].map((step) => `src/${step}`) : [];
 
   const loaded = new Set();
-  let depth = 1; // the classic clay.js entry itself
-  for (const step of steps) depth += closure(inputs, step, loaded).chain;
+  let mainDepth = bootstrap ? 1 : 0;
+  for (const step of steps) {
+    const fetched = closure(inputs, step, loaded);
+    mainDepth += fetched.levels;
+    for (const importer of fetched.added) {
+      if (importer === "src/plugins/derive.js" && names.includes("sap.js")) continue;
+      for (const target of BOOT_IMPORTS[importer] || []) mainDepth += closure(inputs, target, loaded).levels;
+    }
+  }
 
-  // Satellites are fetched in parallel with the main chain: no depth.
-  for (const target of targets) closure(inputs, `src/${target}`, loaded);
+  let satelliteDepth = names.length ? 1 : 0;
+  for (const target of targets) {
+    const satelliteLoaded = new Set();
+    const fetched = closure(inputs, `src/${target}`, satelliteLoaded);
+    satelliteDepth = Math.max(satelliteDepth, 1 + fetched.levels);
+    for (const path of satelliteLoaded) loaded.add(path);
+  }
+  const depth = Math.max(mainDepth, satelliteDepth);
 
-  const classic = ["entries/clay.js", ...names.map((name) => `entries/${name}`)];
+  const classic = [...(bootstrap ? ["entries/clay.js"] : []), ...names.map((name) => `entries/${name}`)];
   const pathSet = new Set(loaded);
   for (const path of classic) pathSet.add(path);
   const paths = [...pathSet];
@@ -174,7 +257,7 @@ export async function measure({ html, mode }) {
   const lazy = new Set();
   for (const file of loaded) for (const dep of dynamicDeps(inputs, file)) if (!loaded.has(dep)) lazy.add(dep);
 
-  return { mode, plugins: plan.plugins, js, css: cssOf(html), lazy: [...lazy].sort() };
+  return { mode, bootstrap, plugins: plan.plugins, js, css: cssOf(document), lazy: [...lazy].sort() };
 }
 
 function parseArgs(argv) {
@@ -196,10 +279,10 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const targets = files.length
     ? files
     : readdirSync(FIXTURES).filter((f) => f.endsWith(".html")).sort().map((f) => join(FIXTURES, f));
-  const modes = mode ? [mode] : ["view", "edit"];
   const results = [];
   for (const file of targets) {
     const html = readFileSync(file, "utf8");
+    const modes = mode ? [mode] : ["view", "edit", ...(isDraftEligible(parseDocument(html)) ? ["draft"] : [])];
     for (const m of modes) results.push({ file: relative(ROOT, file), ...(await measure({ html, mode: m })) });
   }
   if (json) {

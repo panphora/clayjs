@@ -13,7 +13,8 @@ for (const [fixture, modes] of Object.entries(budget)) {
       const html = readFileSync(new URL(`../../../tests/fixtures/load/${fixture}`, import.meta.url), "utf8");
       const measured = await measure({ html, mode });
 
-      expect(measured.js.requests).toBeGreaterThan(0);
+      expect(measured.bootstrap).toBe(true);
+      expect(measured.js.requests).toBeGreaterThan(1);
       expect(measured.js.requests).toBeLessThanOrEqual(limits.requests);
       expect(measured.js.depth).toBeLessThanOrEqual(limits.depth);
       expect(measured.js.brotli).toBeLessThanOrEqual(limits.brotli);
