@@ -44,6 +44,18 @@ const LOADING_TEXT = "Loading the editor\u2026";
 
 const isPlainObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 
+// The parts a document asks for, read off the document itself: the state a view holds
+// can have gained a block the saved article never had, from the room or from an
+// adoption, and input waits for those parts as it does for the saved article's.
+function docFeatureIds(doc) {
+  const ids = new Set();
+  doc.forEach((node) => {
+    const id = featureForType(node.type.name);
+    if (id) ids.add(id);
+  });
+  return [...ids];
+}
+
 // A wait longer than a moment says so. One quiet line inside the article, drawn as
 // editor UI so it never reaches a snapshot, and gone the moment the boot settles.
 function clearLoadingStatus(inst) {
@@ -70,7 +82,7 @@ function armLoadingStatus(inst, article) {
       "color:color-mix(in srgb, currentColor 55%, transparent)", "user-select:none",
     ]);
     note.textContent = LOADING_TEXT;
-    article.appendChild(note);
+    article.prepend(note);
     inst.statusNote = note;
   }, LOADING_MS);
 }
@@ -732,11 +744,15 @@ function createSteps(inst, options) {
     }
     editorView = view;
     inst.view = view;
-    if (loaded.featureIds.length) view.dom.closest(".page-shell").style.visibility = "hidden";
+    const shell = view.dom.closest(".page-shell");
+    // A shell still waiting for its boot takes no input of any kind: a control inside
+    // a non-editable editor would otherwise write before the boot says ready. It is
+    // cleared at the one place input is enabled.
+    if (shell) shell.inert = true;
+    if (loaded.featureIds.length && shell) shell.style.visibility = "hidden";
     // One synchronous move: the finished shell replaces the saved surface as a
     // single change, and the article element itself stays where it is.
     if (!loaded.featureIds.length) for (const node of savedContent) node.remove();
-    const shell = view.dom.closest(".page-shell");
     if (shell) article.appendChild(shell);
     loaded.refreshView?.(view);
     binding.attach(view);
@@ -754,7 +770,7 @@ function createSteps(inst, options) {
       onStale: () => toast("That change was updated. The list now shows the latest version.", "warning"),
     });
     inst.titleObserver = observeDocumentTitle(view);
-    return { ok: true, view };
+    return { ok: true, view, featureIds: loaded.featureIds };
   }
 
   // Whether the room's page state already carries the hand edit: merging the article's
@@ -893,6 +909,15 @@ function createSteps(inst, options) {
     if (!ownsView(inst, mounted) || !shell || !shell.isConnected || mounted.view.isDestroyed) {
       return { ok: false, reason: "view-detached" };
     }
+    // The document the view holds can ask for a part the saved article never did: a
+    // peer put a table in the room, or a hand edit spliced one in during adoption.
+    // Those are the last parts input waits for, before the article gives way.
+    const booted = new Set(mounted.featureIds ?? []);
+    const late = docFeatureIds(mounted.view.state.doc).filter((id) => !booted.has(id));
+    if (late.length) {
+      await Promise.allSettled(late.map((id) => features.ensure(id)));
+      if (!isCurrent(inst)) return { ok: false, cancelled: true };
+    }
     showEditor();
     // A replacement that landed during the feature wait keeps the editor read-only,
     // exactly as one that landed before it does.
@@ -900,6 +925,7 @@ function createSteps(inst, options) {
       stopEditing(inst);
       return { ok: false, reason: "page-replaced" };
     }
+    shell.inert = false;
     mounted.view.setProps({ editable: () => true });
     clearLoadingStatus(inst);
 
