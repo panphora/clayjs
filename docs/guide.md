@@ -188,7 +188,7 @@ The test suite checks this file opens without becoming dirty, saves the record a
 
 ---
 
-## 3. Loading
+## 3. Add ClayJS to a page
 
 ### 3.1 The loader tag
 
