@@ -21,6 +21,7 @@ describe("resolveModules", () => {
     const { core, plugins, late } = resolveModules(params(), false);
     expect(core).toEqual([
       "lib/mutation.js",
+      "core/preserve-authored.js",
       "core/edit-mode.js",
       "core/mode-key.js",
       "core/stale-host-notice.js",

@@ -9,6 +9,8 @@
  */
 
 let snapshot;
+let editable;
+let inputs;
 
 beforeAll(async () => {
   document.body.innerHTML = `
@@ -17,12 +19,13 @@ beforeAll(async () => {
     <button id="set" editmode:onclick inert-onclick="go()">c</button>
     <div id="upper" editmode:contenteditable inert-contenteditable="FALSE">d</div>
     <div id="upper-true" editmode:contenteditable inert-contenteditable="TRUE">e</div>
+    <div id="plain" editmode:contenteditable inert-contenteditable="plaintext-only">f</div>
     <input id="dis" viewmode:disabled disabled="disabled">
     <input id="ro" viewmode:readonly readonly>`;
   snapshot = await import("../../src/core/snapshot.js");
   const onclick = await import("../../src/core/admin-onclick.js");
-  const editable = await import("../../src/core/admin-contenteditable.js");
-  const inputs = await import("../../src/core/admin-inputs.js");
+  editable = await import("../../src/core/admin-contenteditable.js");
+  inputs = await import("../../src/core/admin-inputs.js");
   onclick.disableOnClickBeforeSave();
   editable.disableContentEditableBeforeSave();
   inputs.disableAdminInputsBeforeSave();
@@ -52,4 +55,14 @@ test("disabled and readonly go back with the author's spelling", () => {
   expect(document.getElementById("dis").hasAttribute("disabled")).toBe(false);   // edit mode removed it
   expect(raw()).toContain('disabled="disabled"');
   expect(saved().getElementById("ro").getAttribute("readonly")).toBe("");
+});
+
+test("leaving edit hands the page back the author's spelling, not a canonical one", () => {
+  editable.disableContentEditable();
+  inputs.disableAdminInputs();
+
+  expect(document.getElementById("plain").getAttribute("inert-contenteditable")).toBe("plaintext-only");
+  expect(document.getElementById("upper").getAttribute("inert-contenteditable")).toBe("FALSE");
+  expect(document.getElementById("dis").getAttribute("disabled")).toBe("disabled");
+  expect(document.getElementById("ro").getAttribute("readonly")).toBe("");
 });

@@ -79,3 +79,20 @@ test("the snapshot-ready clone carries no library-injected attributes", () => {
   expect(html).not.toMatch(/data-clay-/);
   expect(html).not.toMatch(/data-freeze/);
 });
+
+// The capture lives in the always wave, so a region that appears later is recorded the
+// moment it is inserted, before its own widget has painted anything into it.
+test("a region inserted after the wave captured keeps the contents it arrived with", async () => {
+  const added = document.createElement("div");
+  added.id = "d";
+  added.setAttribute("clay", "freeze");
+  added.innerHTML = "AUTHORED-D";
+  document.body.append(added);
+
+  await new Promise((r) => setTimeout(r, 0));
+  added.innerHTML = "RUNTIME-D";
+
+  const forSave = captureForSave({ emitForSync: false });
+  expect(forSave).toContain("AUTHORED-D");
+  expect(forSave).not.toContain("RUNTIME-D");
+});
