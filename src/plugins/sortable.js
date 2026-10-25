@@ -26,6 +26,11 @@ import { onSnapshot } from "../core/snapshot.js";
 
 const EDITOR_UI_SELECTOR = capabilitySelector('history');
 
+// The CMS hides one `cms-template` row in every list it fills: it is the seed a new row is
+// cloned from, never a row itself. A drag never picks one up, and a move neither takes one
+// nor lands before one.
+const SEED_SELECTOR = '[cms-template]';
+
 // Sortable marks the picked-up item and its links and images draggable="false" on press, and
 // leaves style="" behind after a drag. Those attributes would be saved into the document, so a
 // mere click would change the file. Record them when an item is chosen and put them back after.
@@ -107,10 +112,80 @@ function restoreRuntimeAttrs(recorded) {
   }
 }
 
+// What one of a container's items is: a list holds its own rows, any other element holds
+// its element children.
+function childSelector(container) {
+  return /^(UL|OL)$/.test(container.tagName) ? 'li' : '*';
+}
+
+function draggableSelector(container) {
+  return `> ${childSelector(container)}:not(${EDITOR_UI_SELECTOR})`;
+}
+
+// The half of eligibility a container can answer about a node it does not hold yet: is
+// this the kind of child it takes, and is it a real row rather than furniture or a seed?
+// makeSortable gives the vendor the same rules through draggableSelector.
+function acceptsItem(container, node) {
+  if (!container || !node || node.nodeType !== 1) return false;
+  if (!node.matches(childSelector(container))) return false;
+  return !node.closest(EDITOR_UI_SELECTOR) && !node.closest(SEED_SELECTOR);
+}
+
+function isItemOf(container, node) {
+  if (!container || !node || node.parentElement !== container) return false;
+  return acceptsItem(container, node);
+}
+
+// The next thing in the container that counts as an item. A seed row or a piece of editor
+// furniture between two rows is not a position, so it is stepped over.
+function nextItem(container, node) {
+  let sibling = node.nextElementSibling;
+  while (sibling && !isItemOf(container, sibling)) sibling = sibling.nextElementSibling;
+  return sibling;
+}
+
+// SortableJS reports a position as the item's element index among its container's
+// children, and the facade keeps that convention so a drag report and a move report read
+// the same way. Nothing in a template's intent should ever depend on these.
+function elementIndex(container, node) {
+  return Array.prototype.indexOf.call(container.children, node);
+}
+
+// The one notification a completed reorder makes. A drag and clay.sortable.move() both
+// reach it exactly once: the source container's author code, then `clay:sorted` with what
+// moved, then the compatibility input event, both dispatched on the source container and
+// bubbling from it.
+function finishMove(result, onSorted) {
+  if (onSorted) {
+    try {
+      const asyncFn = new Function(`return (async function(evt) { ${onSorted} })`)();
+      asyncFn.call(result.from, result);
+    } catch (error) {
+      console.error('Error in onsorted execution:', error);
+    }
+  }
+  // Announce the reorder as a real, self-documenting event carrying what moved.
+  // Reactive libs (e.g. Sap) and author code key off this without us knowing
+  // about them. Fires only in edit mode, since sortable only inits there.
+  result.from.dispatchEvent(new CustomEvent('clay:sorted', {
+    bubbles: true,
+    detail: {
+      item: result.item,
+      from: result.from,
+      to: result.to,
+      oldIndex: result.oldIndex,
+      newIndex: result.newIndex,
+    },
+  }));
+  // DEPRECATED: early versions dispatched a synthetic `input` here so reactive
+  // libs would re-derive. It is semantically off (a container has no value) and
+  // now redundant with clay:sorted and the mutation observers. Kept as a compat shim.
+  result.from.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
 function makeSortable(sortableElem, Sortable, record = loose) {
   let options = {};
-  const childSelector = /^(UL|OL)$/.test(sortableElem.tagName) ? 'li' : '*';
-  options.draggable = `> ${childSelector}:not(${EDITOR_UI_SELECTOR})`;
+  options.draggable = draggableSelector(sortableElem);
 
   // Check if Sortable instance already exists
   if (Sortable.get(sortableElem)) return;
@@ -152,31 +227,7 @@ function makeSortable(sortableElem, Sortable, record = loose) {
     // barrier. The drop it allowed is not a new edit, so nothing of it reaches an author
     // handler, a reactive engine or the file.
     if (!record.admitted) return;
-    if (onsortedCode) {
-      try {
-        const asyncFn = new Function(`return (async function(evt) { ${onsortedCode} })`)();
-        asyncFn.call(sortableElem, evt);
-      } catch (error) {
-        console.error('Error in onsorted execution:', error);
-      }
-    }
-    // Announce the reorder as a real, self-documenting event carrying what moved.
-    // Reactive libs (e.g. Sap) and author code key off this without us knowing
-    // about them. Fires only in edit mode, since sortable only inits there.
-    sortableElem.dispatchEvent(new CustomEvent('clay:sorted', {
-      bubbles: true,
-      detail: {
-        item: evt.item,
-        from: evt.from,
-        to: evt.to,
-        oldIndex: evt.oldIndex,
-        newIndex: evt.newIndex,
-      },
-    }));
-    // DEPRECATED: early versions dispatched a synthetic `input` here so reactive
-    // libs would re-derive. It is semantically off (a container has no value) and
-    // now redundant with clay:sorted and the mutation observers. Kept as a compat shim.
-    sortableElem.dispatchEvent(new Event('input', { bubbles: true }));
+    finishMove({ item: evt.item, from: evt.from, to: evt.to, oldIndex: evt.oldIndex, newIndex: evt.newIndex }, onsortedCode);
   };
 
   // Record on the capture phase, before Sortable's own press handler changes anything, and
@@ -207,6 +258,52 @@ function makeSortable(sortableElem, Sortable, record = loose) {
 
   Sortable.create(sortableElem, options);
   record.instances.add(sortableElem);
+}
+
+// The semantic move: the reorder a drag makes, without dragging, without SortableJS and
+// without waiting for it. Everything is validated before anything moves, and every
+// refusal says why. It does not guess: an anchor that is gone is refused rather than
+// re-targeted at a neighbour, and a request to stay put is not an insertion, an event or
+// a history entry.
+function move(item, toContainer, beforeItem = null) {
+  const refusal = (code) => ({ ok: false, code });
+
+  if (!isEditMode) return refusal('not-editable');
+  // Admission is the session's, exactly as a drag's is: a lease whose exit is already
+  // running has handed the page on, and a move is a new edit.
+  if (session && !session.admitted) return refusal('not-editable');
+
+  const doc = document;
+  if (!item || item.nodeType !== 1 || !item.isConnected || item.ownerDocument !== doc) {
+    return refusal('detached');
+  }
+  const from = item.parentElement;
+  if (!from || !from.isConnected) return refusal('detached');
+  if (!toContainer || toContainer.nodeType !== 1 || !toContainer.isConnected || toContainer.ownerDocument !== doc) {
+    return refusal('detached');
+  }
+  // The item has to be one of its source's own items, and the destination has to be a
+  // declared sortable that would hold it. A subtree cannot be moved into itself.
+  if (!from.hasAttribute('sortable') || !isItemOf(from, item)) return refusal('item');
+  if (!toContainer.hasAttribute('sortable') || !acceptsItem(toContainer, item)) return refusal('item');
+  if (item === toContainer || item.contains(toContainer)) return refusal('item');
+  // Crossing containers needs an equal, named group on both. Within one container there
+  // is nothing to compare, and SortableJS's own ungrouped lists stay single-list too.
+  if (from !== toContainer) {
+    const group = from.getAttribute('sortable');
+    if (!group || group !== toContainer.getAttribute('sortable')) return refusal('group');
+  }
+  // Asked to land before itself, the item is already where the call wants it.
+  if (beforeItem === item) return { ok: true, moved: false };
+  if (beforeItem !== null && !isItemOf(toContainer, beforeItem)) return refusal('anchor');
+  // The position the item already holds is not a move.
+  if (from === toContainer && nextItem(from, item) === beforeItem) return { ok: true, moved: false };
+
+  const oldIndex = elementIndex(from, item);
+  toContainer.insertBefore(item, beforeItem);
+  const result = { item, from, to: toContainer, oldIndex, newIndex: elementIndex(toContainer, item) };
+  finishMove(result, from.getAttribute('onsorted'));
+  return { ok: true, moved: true, ...result };
 }
 
 // Sortable's UMD header picks its target at run time: window.Sortable when no
@@ -335,5 +432,9 @@ async function init() {
 
 const ready = init();
 
-export { init, ready, makeSortable };
+// What the loader publishes on clay.sortable as soon as this module evaluates, so a move
+// control never waits for the vendor the drag editor awaits.
+const sortable = Object.freeze({ move });
+
+export { init, ready, makeSortable, move, sortable };
 export default init;

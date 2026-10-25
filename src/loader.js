@@ -306,6 +306,9 @@ function attachPluginMember(path, mod, loaded) {
     clay.RichClay = mod.RichClay || mod.default;
   } else if (path === "plugins/quickcrop.js") {
     clay.quickcrop = mod.quickcrop || mod.default;
+  } else if (path === "plugins/sortable.js") {
+    // With the module, not with its vendor: a move answers before a drag can start.
+    clay.sortable = mod.sortable;
   } else if (path === "plugins/source.js") {
     clay.source = mod.source || mod.default;
   } else if (path === "plugins/visitor-drafts.js" || path === "plugins/visitor-drafts-owner.js") {
