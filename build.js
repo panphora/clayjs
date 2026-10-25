@@ -37,7 +37,8 @@
 // reach npm and miss the site. That exact miss is why this script exists.
 
 import { readdir, readFile, mkdir, copyFile, rm, rename, lstat, writeFile } from 'node:fs/promises';
-import { dirname, join, resolve, relative, sep } from 'node:path';
+import { basename, dirname, extname, join, resolve, relative, sep } from 'node:path';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -64,6 +65,18 @@ const pkg = JSON.parse(await readFile(join(ROOT, 'package.json'), 'utf8'));
 // same way, so the single-file build sits beside clay.js. src/ keeps its name
 // because clay.js imports it by that literal path.
 const LIBRARY = new Map([['entries/', ''], ['dist/', ''], ['src/', 'src/']]);
+
+// Fonts served from the same prefixes as the library. Each entry names one pinned npm
+// package, the files to copy out of it, the hand-written stylesheet in the repo and
+// the package's license. A second family is one more entry, not more code.
+const FONTS = [
+  {
+    pkg: '@fontsource-variable/work-sans',
+    files: ['files/work-sans-latin-wght-normal.woff2'],
+    css: 'fonts/work-sans.css',
+    license: 'LICENSE',
+  },
+];
 
 // The single-file build, for pages that must load with no network: src/standalone.js
 // and every module reachable from it, in one classic script. Same source as clay.js
@@ -163,6 +176,50 @@ async function copyInto(fromAbs, relPath) {
   await mkdir(dirname(dest), { recursive: true });
   await copyFile(fromAbs, dest);
   return 1;
+}
+
+// Where each font file comes from and where it lands inside a prefix. Licenses keep
+// the package's name in front, because the Journal's two font packages both ship a
+// LICENSE.
+async function fontSources() {
+  const out = [];
+  for (const font of FONTS) {
+    const dir = join(ROOT, 'node_modules', font.pkg);
+    const css = await lstat(join(ROOT, font.css)).catch(() => null);
+    if (!css?.isFile()) throw new Error(`${font.css} is missing; the font stylesheet is written by hand`);
+    out.push({ from: join(ROOT, font.css), to: `fonts/${basename(font.css)}` });
+    for (const rel of font.files) {
+      const file = await lstat(join(dir, rel)).catch(() => null);
+      if (!file?.isFile()) throw new Error(`${font.pkg} has no ${rel}; the copy table names a file the package does not ship`);
+      out.push({ from: join(dir, rel), to: `fonts/${basename(rel)}` });
+    }
+    out.push({ from: join(dir, font.license), to: `fonts/${font.pkg.split('/').pop()}-LICENSE` });
+  }
+  return out;
+}
+
+const CONTENT_TYPES = new Map([['.woff2', 'font/woff2'], ['.css', 'text/css; charset=utf-8']]);
+
+// The release manifest lists the fonts beside the chunks under `assets`, keyed by
+// release-relative path, so a local host serves the folder offline from the same
+// inventory it copies the modules from. A build that copies a font the manifest does
+// not name is exactly the miss this catches.
+async function emitFontAssets(fonts) {
+  const assets = [];
+  for (const { from, to } of fonts) {
+    const bytes = await readFile(from);
+    assets.push({
+      path: to,
+      sha256: createHash('sha256').update(bytes).digest('hex'),
+      bytes: bytes.length,
+      contentType: CONTENT_TYPES.get(extname(to)) ?? 'text/plain; charset=utf-8',
+    });
+  }
+  const manifestPath = join(DIST, 'm', 'manifest.json');
+  const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+  manifest.assets = assets;
+  await writeFile(manifestPath, `${JSON.stringify(manifest, null, 1)}\n`);
+  return assets;
 }
 
 // The chunk build turns dist/ into more than the single-file bundle: dist/m/ holds
@@ -363,6 +420,8 @@ for (const file of Object.keys(standaloneMeta.inputs)) {
 // carries and what every version prefix is copied from, so both come from here.
 const chunks = await emitChunks({ root: ROOT, outdir: join(ROOT, 'dist/m') });
 await emitBootstraps({ root: ROOT, outdir: DIST, manifest: chunks.manifest, satellites: chunks.satellites });
+const fonts = await fontSources();
+const fontAssets = await emitFontAssets(fonts);
 if (process.argv.includes('--standalone')) {
   console.log(
     `built dist/${STANDALONE}, dist/server/{rooms,checkpoint}.cjs, ` +
@@ -393,6 +452,12 @@ for (const version of pins) count += await emitLibrary(await sourceFor(version, 
 for (const [major, version] of heads) {
   count += await emitLibrary(await sourceFor(version, published), version, `v${major}`);
   count += await addPreviousChunks(`v${major}`, version, published);
+}
+
+// Fonts come from a pinned npm package rather than the release tarball, so every
+// prefix can carry them, an older pin included, and /v1/fonts/ rolls with /v1/.
+for (const prefix of new Set([...[...heads.keys()].map((major) => `v${major}`), ...pins])) {
+  for (const { from, to } of fonts) count += await copyInto(from, join(prefix, to));
 }
 
 // Root-level entries from "files": everything the library payload did not claim.
@@ -457,6 +522,9 @@ blocks.push(`/:prefix/src/*\n  Access-Control-Allow-Origin: *`);
 // rolling alike), so it needs the same CORS header. A different header from the cache
 // rules, so nothing joins, and no rule sets the same header twice.
 blocks.push(`/:prefix/m/*\n  Access-Control-Allow-Origin: *`);
+// Fonts load cross-origin from a document on another host, so the folder carries the
+// same header as the module trees.
+blocks.push(`/:prefix/fonts/*\n  Access-Control-Allow-Origin: *`);
 // Cloudflare Pages serves an HTML page at its extensionless path and answers the
 // .html spelling with a 307, so a rule naming only the file lands on the redirect
 // and the page itself carries no Cache-Control at all. Both spellings get the rule,
@@ -507,6 +575,7 @@ for (const [prefix, version] of served) {
   // pinned alike. Tarballs published before the chunk build have none, and their pins
   // still have to rebuild, so the manifest is required only where they exist.
   if (CHUNKED.has(version)) required.push(`${prefix}/m/manifest.json`);
+  for (const asset of fontAssets) required.push(`${prefix}/${asset.path}`);
 }
 for (const rel of required) {
   const stat = await lstat(join(PUBLIC, rel)).catch(() => null);

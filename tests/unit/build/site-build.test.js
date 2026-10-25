@@ -19,7 +19,7 @@ const PREVIOUS = "1.15.0";
 const PREVIOUS_ONLY = "clay-previous-AAAAAAA.js";
 
 const COPIED_FILES = ["build.js", "package.json", "packed-contract.json", "THIRD-PARTY-NOTICES.md"];
-const COPIED_DIRS = ["src", "entries", "scripts", "website", "docs"];
+const COPIED_DIRS = ["src", "entries", "scripts", "website", "docs", "fonts"];
 
 let site;
 
