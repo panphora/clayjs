@@ -94,6 +94,7 @@ function closureOf(manifest, seeds) {
 function bootstrapSource(payload, tail) {
   return `(function (M) {
   var dir = new URL(M.dir, base + "/").href;
+  var tree = /\/dist$/.test(base) ? base.slice(0, -5) : base;
   M.preload.forEach(function (file) {
     var link = document.createElement("link");
     link.rel = "modulepreload";
@@ -117,7 +118,7 @@ export async function emitBootstraps({ root, outdir, manifest, satellites }) {
     return { boot: function (b, p, resolve) { return r[0].boot(b, p, resolve, manifest); } };
   }, function (err) {
     console.warn("clayjs: the bundled runtime did not load, loading the module tree instead:", err);
-    return import(base + "/src/loader.js");
+    return import(tree + "/src/loader.js");
   });`;
   const clay = await readFile(path.join(root, "entries/clay.js"), "utf8");
   const code = replaceOnce(
@@ -135,7 +136,7 @@ export async function emitBootstraps({ root, outdir, manifest, satellites }) {
     const satelliteTail = `  return import(dir + M.entry).catch(function (err) {
     if (window.clay && window.clay.__chunked) throw err;
     console.warn("clayjs: the bundled runtime did not load, loading the module tree instead:", err);
-    return import(base + "/src/${target}");
+    return import(tree + "/src/${target}");
   });`;
     const satellite = replaceOnce(
       source,
