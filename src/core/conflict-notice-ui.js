@@ -1,6 +1,7 @@
 import { isEditMode } from "./is-edit-mode.js";
 import { rowOf } from "./conflict-presentation.js";
-import { downloadRecovery } from "./conflict-download.js";
+import { downloadRecovery, downloadHtml, documentName } from "./conflict-download.js";
+import { pendingConflicts, listConflicts, dismissConflicts } from "../recovery/conflicts.js";
 import { set, make } from "../lib/hostile-css.js";
 import { isSaveConflicted } from "./save.js";
 import { gateCaptureToken } from "../lib/dirty-gate.js";
@@ -64,12 +65,19 @@ let armLost = false;
 let keepAttempt = 0;
 let lastAnnounced = null;
 let panelEl = null;
+let recovered = [];
+let copiedId = null;
+let copiedTimer = null;
 
 let root = null;
 let wellEl = null;
 let keyed = new Map();
 
 const ledger = () => window.clay?.conflicts || null;
+// Conflicts a reload took out of memory. Only the store has them now: a root as the
+// bytes a save would have written, and the losing text as plain fields. There is no
+// live node and no path worth replaying, so nothing here points at the page.
+const storedCount = () => recovered.reduce((sum, record) => sum + record.conflicts.length, 0);
 const losses = () => ledger()?.list().filter((r) => !r.claimedBy && r.kind !== "apply-incomplete") ?? [];
 const failures = () => ledger()?.list().filter((r) => !r.claimedBy && r.kind === "apply-incomplete") ?? [];
 
@@ -81,6 +89,7 @@ function mode() {
   if (refused) return "refused";
   if (losses().length) return "replaced";
   if (failures().length) return "failed";
+  if (recovered.length) return "recovered";
   return null;
 }
 
@@ -204,6 +213,7 @@ function barMessage(m, n) {
     return `This page changed ${named || "elsewhere"}. Your edits here are safe.`;
   }
   if (m === "failed") return "A sync update did not finish. Your edits here are safe.";
+  if (m === "recovered") return `${plural(n, "change")} replaced before this page loaded ${n === 1 ? "is" : "are"} still here.`;
   return `Another edit replaced ${plural(n, "change")}.`;
 }
 
@@ -211,6 +221,7 @@ function titleOf(m, n) {
   if (m === "upgraded") return upgraded;
   if (m === "refused") return `This page changed ${refusedSource() || "elsewhere"}`;
   if (m === "failed") return "A sync update did not finish";
+  if (m === "recovered") return `${plural(n, "change")} kept from before this page loaded`;
   return `Another edit replaced ${plural(n, "change")}`;
 }
 
@@ -222,7 +233,7 @@ function drawToast(text) {
 }
 
 function drawBar(m) {
-  const n = m === "failed" ? failures().length : losses().length;
+  const n = m === "failed" ? failures().length : m === "recovered" ? storedCount() : losses().length;
   const bar = bevelSurface("div", ["display:flex", "flex-wrap:wrap", "align-items:center", "gap:10px 12px", "padding:8px 8px 8px 14px", "width:max-content", "max-width:calc(100vw - 24px)"]);
   // A redraw rebuilds the bar; only a new message is announced again.
   const message = barMessage(m, n);
@@ -254,10 +265,11 @@ function lede(text) {
 function drawPanel(m) {
   const rows = m === "replaced" ? losses() : m === "failed" ? failures() : [];
   const held = m === "refused" ? losses() : rows;
+  const count = m === "recovered" ? storedCount() : rows.length;
   if (seenIds.size) for (const r of rows) if (!seenIds.has(r.id)) freshIds.add(r.id);
   for (const id of [...freshIds]) if (!rows.some((r) => r.id === id)) freshIds.delete(id);
 
-  const title = titleOf(m, rows.length);
+  const title = titleOf(m, count);
   const maxHeight = Math.max(160, (window.visualViewport?.height || window.innerHeight) - 32);
   const panel = bevelSurface("div", ["display:flex", "flex-direction:column", "width:520px", "max-width:calc(100vw - 24px)", `max-height:${maxHeight}px`]);
   panelEl = panel;
@@ -280,6 +292,11 @@ function drawPanel(m) {
   minimizeWrap.append(minimize);
   head.append(minimizeWrap);
   panel.append(head);
+
+  if (m === "recovered") {
+    drawRecovered(panel);
+    return panel;
+  }
 
   if (m === "refused") {
     panel.append(lede("Your edits here are safe and not saved yet; nothing will be overwritten until you choose. Their version is not on this page, so there is no list of edits to compare. Keep yours, which saves over theirs, or accept theirs, which reloads the page and drops your unsaved edits."));
@@ -357,6 +374,51 @@ function drawWell(rows) {
   rows.forEach((r, i) => well.append(buildRow(r, i)));
   wellEl = well;
   return well;
+}
+
+// A stored conflict's name: the app's own label when it registered one, and the
+// generic name the ledger recorded otherwise. Never guessed from today's route.
+function storedName(entry) {
+  const base = entry.context?.label || entry.name || (entry.context?.kind === "entry" ? "Entry" : "Edit");
+  return entry.context?.field ? `${base} \u00b7 ${entry.context.field}` : base;
+}
+
+// Stored text is already plain: no markup, no live node, nothing to parse.
+const storedSide = (text) => ({ before: "", hit: text, after: "", cutBefore: false, cutAfter: false });
+
+function storedRow(entry) {
+  const box = bevelText("div", ["display:block", "padding:8px 12px 10px"]);
+  const where = bevelText("div", ["display:flex", "align-items:center", "gap:8px", "font-size:12.5px", "font-weight:600", `color:${TOKENS["ink-2"]}`, "margin-bottom:4px"]);
+  // No eye: there is no live element to ring, and an old recovery path may name a
+  // place today's page no longer has.
+  where.append(bevelText("span", [], storedName(entry)));
+  box.append(where);
+  if (entry.sentence) box.append(bevelText("div", ["display:block", "font-size:13px", `color:${TOKENS["ink-2"]}`], entry.sentence));
+  if (entry.yours) {
+    const grid = bevelText("div", ["display:grid", "grid-template-columns:44px 1fr", "gap:3px 10px", "align-items:start", `font:12.5px/1.5 ${FONT_MONO}`, ...(entry.sentence ? ["margin-top:4px"] : [])]);
+    grid.append(...valueLine("Yours", storedSide(entry.yours), { mine: true }));
+    if (entry.now) grid.append(...valueLine("Now", storedSide(entry.now), { mine: false }));
+    box.append(grid);
+  }
+  const rowActions = el("div", ["all:initial", "display:flex", "flex-wrap:wrap", "gap:8px", "margin-top:8px"]);
+  rowActions.append(action(copiedId === entry.id ? "Copied" : "Copy", `copy:${entry.id}`, { onClick: () => onCopyStored(entry) }));
+  rowActions.append(action("Dismiss", `dismiss:${entry.id}`, { onClick: () => onDismissStored(entry) }));
+  box.append(rowActions);
+  return box;
+}
+
+// Review for copies a reload left behind. Every action here reads the stored record;
+// none of them touches the tree, and dismissal is the only thing that removes one.
+function drawRecovered(panel) {
+  panel.append(lede("These copies were replaced before this page loaded. The page never puts them back on its own. Copy or download the ones you want; dismiss one when you no longer need it."));
+  const well = bevelWell(["flex:1 1 auto", "margin:0 16px 12px", "min-height:0", "overflow:auto", `background:${TOKENS.sunk}`, `border:1px solid ${TOKENS["line-2"]}`]);
+  for (const record of recovered) for (const entry of record.conflicts) well.append(storedRow(entry));
+  wellEl = well;
+  panel.append(well);
+  const actions = el("div", ["all:initial", "display:flex", "flex-wrap:wrap", "gap:8px", "padding:0 16px 14px"]);
+  if (recovered.some((record) => record.root)) actions.append(action(downloaded ? "Downloaded" : "Download my copy", "download", { onClick: onDownloadRecovered }));
+  panel.append(actions);
+  renderedIds = [];
 }
 
 function valueLine(label, value, { mine }) {
@@ -554,6 +616,87 @@ function onDownload() {
   render();
 }
 
+// Read what the store holds. Nothing is drawn until a transaction has answered, and
+// a failed read leaves whatever was last shown alone.
+async function refreshRecovered() {
+  if (!pendingConflicts()) {
+    if (recovered.length) {
+      recovered = [];
+      schedule();
+    }
+    return;
+  }
+  let listed;
+  try {
+    listed = await listConflicts();
+  } catch (_) {
+    return;
+  }
+  if (listed.ok) {
+    recovered = listed.records;
+    schedule();
+  }
+}
+
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch (_) {}
+  const field = document.createElement("textarea");
+  field.value = text;
+  field.setAttribute("clay", RUNTIME_ONLY);
+  field.style.setProperty("position", "fixed", "important");
+  field.style.setProperty("opacity", "0", "important");
+  document.body?.append(field);
+  field.select();
+  let ok = false;
+  try {
+    ok = document.execCommand?.("copy") === true;
+  } catch (_) {}
+  field.remove();
+  return ok;
+}
+
+// Copying is not acknowledging: the copy stays until the person dismisses it, and the
+// notice stays on screen rather than standing a toast in for itself.
+async function onCopyStored(entry) {
+  const text = `${storedName(entry)}\n\nYours:\n${entry.yours}\n\nNow:\n${entry.now}`;
+  const ok = await copyText(text);
+  if (!ok) {
+    toast("Could not copy. Select the text instead.");
+    return;
+  }
+  copiedId = entry.id;
+  clearTimeout(copiedTimer);
+  copiedTimer = setTimeout(() => { copiedId = null; schedule(); }, 1200);
+  render();
+}
+
+// Download my copy, from the stored root: the page as this tab had it, with the
+// losing text in it. Nothing here acknowledges or releases a record.
+function onDownloadRecovered() {
+  const record = recovered.find((item) => item.root);
+  const ok = record ? downloadHtml({ html: record.root, name: `${documentName()}-my-copy.html` }) : false;
+  downloadFailed = !ok;
+  downloaded = ok;
+  clearTimeout(downloadedTimer);
+  if (ok) downloadedTimer = setTimeout(() => { downloaded = false; schedule(); }, 1200);
+  render();
+}
+
+async function onDismissStored(entry) {
+  let receipt;
+  try {
+    receipt = await dismissConflicts([entry.id]);
+  } catch (_) {
+    receipt = { ok: false };
+  }
+  if (!receipt.ok) toast("That copy could not be dismissed.");
+  await refreshRecovered();
+  schedule();
+}
+
 function disarm() {
   clearTimeout(armTimer);
   armTimer = null;
@@ -619,10 +762,16 @@ export function toast(text) {
   render();
 }
 
+function onStoreChanged() {
+  refreshRecovered();
+  schedule();
+}
+
 function onLedgerChanged() {
   ledgerRevision++;
   if (armed) disarm();
   for (const id of [...blockedRows.keys()]) if (!ledger()?.get(id)) blockedRows.delete(id);
+  refreshRecovered();
   schedule();
 }
 
@@ -738,7 +887,9 @@ function init() {
   document.addEventListener("keydown", onKeydown);
   document.addEventListener("input", onInput, true);
   document.addEventListener("focus", onFocus, true);
+  document.addEventListener("clay:conflict-store-changed", onStoreChanged);
   if (ledger()?.size) schedule();
+  refreshRecovered();
 }
 
 // The shell (conflict-notice.js) asks for this file only when there is something to

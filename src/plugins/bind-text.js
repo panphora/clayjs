@@ -69,16 +69,21 @@ export function bindText(textarea, { onWrite, onShow, onConflict, onGone } = {})
     onShow?.();
   }
   // The record changed while the textarea held text the record had not taken yet.
+  // `base` is the text both sides were editing, read before show() moves `seen`: a
+  // caller staging the losing side needs what the clash was measured against, not
+  // what the textarea holds afterwards. The second argument is additive, so a
+  // caller that only wants the typed string ignores it.
   function reconcile(now) {
     const typed = ta().value;
-    const merged = typed === s.seen ? now : spliceMerge(s.seen, typed, now);
-    if (merged == null) onConflict?.(typed);
+    const base = s.seen;
+    const merged = typed === base ? now : spliceMerge(base, typed, now);
+    if (merged == null) onConflict?.(typed, { key: s.key, base, remote: now });
     else if (merged !== now) write(merged);
     show(merged ?? now);
   }
   function rebind() {
     const code = s.resolve ? s.resolve() : null;
-    if (!code) { onGone?.(ta().value); return false; }
+    if (!code) { onGone?.(ta().value, { key: s.key, base: s.seen }); return false; }
     s.code = code;
     observer.disconnect();
     observer.observe(s.code, OBSERVE);
