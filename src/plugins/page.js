@@ -19,6 +19,7 @@ import { parseJsonRelaxed } from "../vendor/hyper-morph-json.vendor.js";
 import { saveStateFor, BLOCKED_TEXT, RETRY_TEXT, downloadPageCopy, downloadSnapshot, copyPageText } from "../page/save-states.js";
 import toast, { toastPersistent, dismissPersistent } from "../ui/toast.js";
 import { createRecoverList, focusBlock } from "../page/recover.js";
+import { claim } from "../page/runtime-owner.js";
 import { capabilityAdvertised } from "../page/tool-capability.js";
 import { toolViews } from "../page/tool-views.js";
 import { holdSlashRange, heldSlashRange } from "../page/chrome.js";
@@ -266,6 +267,8 @@ function dispose() {
   try { inst.binding?.dispose(); } catch (error) { console.error("clayjs: page plugin binding failed to dispose", error); }
   try { inst.binding?.ydoc?.destroy(); } catch (error) { console.error("clayjs: page plugin document failed to destroy", error); }
   restoreArticle(inst);
+  inst.releaseArticle?.();
+  inst.releaseArticle = null;
 }
 
 async function run(inst, gen, options = {}) {
@@ -517,6 +520,7 @@ async function run(inst, gen, options = {}) {
   // screen, and the editor out of sight, until they are here. One with none of those
   // blocks has nothing to wait for, so its saved article goes now.
   const savedContent = [...article.childNodes];
+  inst.releaseArticle = claim(article, "editor");
   if (!savedFeatureIds.length) for (const node of savedContent) node.remove();
   const view = createPageEditor(article, {
     doc: binding.doc(),
@@ -630,7 +634,7 @@ async function run(inst, gen, options = {}) {
 function install(options = {}) {
   dispose();
   const gen = ++generation;
-  const inst = { gen, article: null, view: null, binding: null, adoption: null, source: null, store: null, toolHost: null, aiTool: null, bootHtml: "", bootRev: null, savedRev: null, replaced: false, savesHeld: false, flush: null, listeners: [], retryTimer: null, retryShown: false, notices: null, editorReadyResolve: null };
+  const inst = { gen, article: null, view: null, binding: null, adoption: null, source: null, store: null, toolHost: null, aiTool: null, bootHtml: "", bootRev: null, savedRev: null, releaseArticle: null, replaced: false, savesHeld: false, flush: null, listeners: [], retryTimer: null, retryShown: false, notices: null, editorReadyResolve: null };
   active = inst;
   return run(inst, gen, options).catch((error) => {
     console.error("clayjs: page plugin failed to install", error);

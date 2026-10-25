@@ -1,136 +1,272 @@
-// View mode: readers see the saved article, and each newer file the host sends
-// on the saved lane (every checkpoint is a save) is morphed into it. Live sync
-// never touches a frozen element's contents, so this is the only writer here.
-// No ProseMirror, no projection code: the writer's save already rendered it.
-// A toggle the reader opened or closed keeps the reader's state across updates.
-import { morph } from "../vendor/hyper-morph.vendor.js";
-import { createToolHost } from "./tools.js";
+// View mode: readers see the saved article, and each newer file the host sends on
+// the saved lane is projected onto it by key. One owner at a time: a reader claims
+// the article before it attaches listeners and gives it back only on stop, so an
+// editor never mounts underneath a live reader and a late frame never lands over a
+// mounted tool. No ProseMirror, no projection code and no merge engine: the saved
+// file is already the rendered form of the writer's model.
+import { createSavedStream } from "../sync/saved-stream.js";
+import { applyPreparedArticle, keepToolVersion, prepareSavedArticle, toolInfoOf, toolsOf, toolStateOf } from "./reader-patch.js";
+import { claim } from "./runtime-owner.js";
 
 const ARTICLE = "article[data-page]";
 const TOOL = 'section[data-type="tool"][data-id]';
 
+export { applyPreparedArticle, prepareSavedArticle };
+
+const freezeReceipt = (value) => Object.freeze({
+  bytes: typeof value?.bytes === "string" ? value.bytes : null,
+  etag: typeof value?.etag === "string" && value.etag ? value.etag : null,
+  seq: Number.isSafeInteger(value?.seq) ? value.seq : null,
+});
+
+// The compatibility entry: apply one saved file to the article already on screen.
+// Newer callers start a reader, which owns the stream and reports its receipt.
 export function applySavedArticle(html, doc = document, readerOpen = new Map(), savedOpen = new Map(), preserveTools = new Set()) {
   const live = doc.querySelector(ARTICLE);
-  if (!live || typeof html !== "string") return false;
-  const incoming = new doc.defaultView.DOMParser().parseFromString(html, "text/html").querySelector(ARTICLE);
-  if (!incoming) return false;
-  for (const details of incoming.querySelectorAll("details[data-id]")) {
-    const id = details.getAttribute("data-id");
-    savedOpen.set(id, details.hasAttribute("open"));
-    if (readerOpen.has(id)) details.toggleAttribute("open", readerOpen.get(id));
+  if (!live) return false;
+  const prepared = prepareSavedArticle(html, doc);
+  if (!prepared.ok) return false;
+  const keepTool = (root, incoming) => preserveTools.has(root.getAttribute("data-id")) || keepToolVersion(root, incoming);
+  const result = applyPreparedArticle(prepared, { article: live, readerOpen, savedOpen, keepTool });
+  let changed = result.changed;
+  if (prepared.rev !== live.getAttribute("data-rev")) {
+    if (prepared.rev === null) live.removeAttribute("data-rev");
+    else live.setAttribute("data-rev", prepared.rev);
+    changed = true;
   }
-  const rev = incoming.getAttribute("data-rev");
-  if (rev && rev === live.getAttribute("data-rev") && incoming.innerHTML === live.innerHTML) return false;
-  const kept = new Map();
-  for (const root of live.querySelectorAll(TOOL)) {
-    const id = root.getAttribute("data-id");
-    if (!preserveTools.has(id)) continue;
-    kept.set(id, root);
-    root.replaceWith(root.cloneNode(false));
+  if (prepared.title && prepared.title !== doc.title) {
+    doc.title = prepared.title;
+    changed = true;
   }
-  // raw: the sync policy ignores everything under [clay~=freeze], which is all of it.
-  // Scripts never run: a tool's fallback is markup, and tools mount from the store.
-  morph(live, incoming.innerHTML, {
-    policy: "raw", morphStyle: "innerHTML", scripts: { handle: false },
-    key: (el) => el.getAttribute("data-id") || null,
-  });
-  for (const root of live.querySelectorAll(TOOL)) {
-    const original = kept.get(root.getAttribute("data-id"));
-    if (original) root.replaceWith(original);
-  }
-  if (rev) live.setAttribute("data-rev", rev);
-  return true;
+  return changed;
 }
 
-// A toggle counts as the reader's own when its state differs from what the
-// last saved article said: clicks, find-in-page and keyboard all fire `toggle`,
-// and a toggle the morph caused matches the saved state.
-export function startPageView(doc = document) {
+function createReader({ doc, article, represented = null, feed = null, documentURL, servedEtag = null, release = () => {} }) {
   const readerOpen = new Map();
   const savedOpen = new Map();
   const mounted = new Map();
   const toolStore = { data: {} };
-  const host = createToolHost({ store: toolStore, mode: "view" });
+  const listeners = [];
+  let host = null;
+  let hostLoading = null;
+  let mountTurn = 0;
   let stopped = false;
-  let sequence = 0;
-  for (const details of doc.querySelectorAll(`${ARTICLE} details[data-id]`)) savedOpen.set(details.getAttribute("data-id"), details.hasAttribute("open"));
+  let stream = null;
+  let final = null;
+  let receipt = freezeReceipt(represented);
+
+  const dispatch = (type, detail) => {
+    const win = doc.defaultView ?? globalThis;
+    doc.dispatchEvent(new win.CustomEvent(type, { detail }));
+  };
+
+  const disposeMounts = () => {
+    for (const item of mounted.values()) {
+      try { item.instance?.dispose?.(); } catch {}
+    }
+    mounted.clear();
+  };
+
+  const hostReady = () => {
+    if (host) return Promise.resolve(host);
+    if (!hostLoading) {
+      hostLoading = import("./tools.js").then(({ createToolHost }) => {
+        if (stopped) return null;
+        host = createToolHost({ store: toolStore, mode: "view" });
+        return host;
+      }).catch((error) => {
+        hostLoading = null;
+        console.warn("clayjs: could not load the reader tool host", error);
+        return null;
+      });
+    }
+    return hostLoading;
+  };
+
+  const pruneTools = (tools) => {
+    for (const [id, item] of mounted) {
+      const next = tools.get(id);
+      if (!next || next.invalid || next.rev !== item.rev || next.signature !== item.signature) {
+        try { item.instance?.dispose?.(); } catch {}
+        mounted.delete(id);
+      }
+    }
+  };
+
+  // Only a document with a tool pays for the tool host. A failed import leaves the
+  // saved fallback markup in place and the saved file still applies.
+  const mountTools = (tools, state) => {
+    const wanted = [];
+    for (const [id, block] of tools) {
+      if (block.invalid) console.warn("clayjs: could not decode saved tools", block.error);
+      else wanted.push([id, block]);
+    }
+    if (!wanted.length) return;
+    toolStore.data = state ?? {};
+    const turn = ++mountTurn;
+    hostReady().then((created) => {
+      if (stopped || !created || turn !== mountTurn) return;
+      for (const [id, block] of wanted) {
+        if (mounted.has(id)) continue;
+        const root = [...article.querySelectorAll(TOOL)].find((el) => el.getAttribute("data-id") === id);
+        if (!root) continue;
+        try {
+          const instance = created.mount(root, {
+            id, artifact: block.artifact, rev: block.rev, seed: block.state ?? {},
+          });
+          mounted.set(id, { rev: block.rev, signature: block.signature, instance });
+        } catch (error) {
+          console.warn(`clayjs: tool ${id} could not mount`, error);
+        }
+      }
+    });
+  };
+
+  // A mounted tool has no data-tool script left to read: the host owns that root
+  // now, so identity comes from the version the mount recorded.
+  const keepTool = (live, incoming) => {
+    const item = mounted.get(live.getAttribute("data-id"));
+    if (!item) return keepToolVersion(live, incoming);
+    const next = toolInfoOf(incoming);
+    return !next.invalid && next.rev === item.rev && next.signature === item.signature;
+  };
+
+  const paint = (prepared) => {
+    applyPreparedArticle(prepared, { article, readerOpen, savedOpen, keepTool });
+    if (prepared.rev === null) article.removeAttribute("data-rev");
+    else article.setAttribute("data-rev", prepared.rev);
+    if (prepared.title) doc.title = prepared.title;
+  };
+
+  // A native apply can throw on markup the parser accepted and the DOM refuses.
+  // The receipt stays at the last accepted file, the article goes back to those
+  // bytes and the reader reports blocked instead of showing a half-applied tree.
+  const restore = (error) => {
+    console.warn("clayjs: the reader could not apply a saved file", error);
+    stream?.stop();
+    stream = null;
+    disposeMounts();
+    const previous = receipt.bytes ? prepareSavedArticle(receipt.bytes, doc) : null;
+    if (previous?.ok) {
+      try { paint(previous); } catch (again) { console.warn("clayjs: the reader could not restore the previous file", again); }
+    }
+    dispatch("clay:reader-status", { state: "blocked" });
+  };
+
+  function commit(candidate) {
+    if (stopped) return false;
+    const prepared = prepareSavedArticle(candidate.bytes, doc);
+    if (!prepared.ok) return false;
+    if (article.querySelector(".page-editor")) return false;
+    pruneTools(prepared.tools);
+    try {
+      paint(prepared);
+    } catch (error) {
+      restore(error);
+      return false;
+    }
+    receipt = freezeReceipt(candidate);
+    mountTools(prepared.tools, prepared.toolState);
+    dispatch("clay:reader-status", { state: "applied", etag: receipt.etag, seq: receipt.seq });
+    return true;
+  }
+
   const onToggle = (event) => {
     const details = event.target;
-    if (details.tagName !== "DETAILS" || !details.closest(ARTICLE)) return;
+    if (details.tagName !== "DETAILS" || !article.contains(details)) return;
     const id = details.getAttribute("data-id");
     if (!id) return;
     if (details.open === savedOpen.get(id)) readerOpen.delete(id);
     else readerOpen.set(id, details.open);
   };
-  const toolsIn = async (source) => {
-    if (!source.querySelector(`${ARTICLE} ${TOOL}`)) return null;
-    const blocks = {};
-    for (const root of source.querySelectorAll(`${ARTICLE} ${TOOL}`)) {
-      const data = root.querySelector(':scope > script[type="application/json"][data-tool]');
-      let tool = {};
-      try { tool = data ? JSON.parse(data.textContent) : {}; } catch {}
-      blocks[root.getAttribute("data-id")] = { t: "tool", artifact: tool.artifact ?? null, rev: tool.rev ?? null, state: tool.state ?? {} };
-    }
-    const stateTag = source.querySelector('script[type="application/json"][merge="page.tools"]');
-    const state = stateTag ? JSON.parse(stateTag.textContent) : {};
-    return { blocks, state };
-  };
-  const syncTools = (decoded) => {
-    toolStore.data = decoded?.state ?? {};
-    const seen = new Set();
-    for (const root of doc.querySelectorAll(`${ARTICLE} ${TOOL}`)) {
-      const id = root.getAttribute("data-id");
-      seen.add(id);
-      const block = decoded?.blocks?.[id];
-      const old = mounted.get(id);
-      if (!block || block.t !== "tool" || !block.artifact || !block.rev) {
-        old?.instance.dispose();
-        mounted.delete(id);
-        continue;
-      }
-      if (old && old.root === root && old.rev === block.rev && JSON.stringify(old.artifact) === JSON.stringify(block.artifact)) continue;
-      old?.instance.dispose();
-      mounted.set(id, { root, rev: block.rev, artifact: block.artifact, instance: host.mount(root, {
-        id, artifact: block.artifact, rev: block.rev, seed: block.state,
-      }) });
-    }
-    for (const [id, old] of mounted) if (!seen.has(id)) { old.instance.dispose(); mounted.delete(id); }
-  };
-  const onFrame = (event) => {
-    const html = event.detail?.html;
-    if (typeof html !== "string") return;
-    const source = new doc.defaultView.DOMParser().parseFromString(html, "text/html");
-    const turn = ++sequence;
-    const incomingIds = new Set([...source.querySelectorAll(`${ARTICLE} ${TOOL}`)].map((el) => el.getAttribute("data-id")));
-    const preserve = new Set([...mounted.keys()].filter((id) => incomingIds.has(id)));
-    for (const [id, old] of mounted) if (!incomingIds.has(id)) { old.instance.dispose(); mounted.delete(id); }
-    applySavedArticle(html, doc, readerOpen, savedOpen, preserve);
-    if (!incomingIds.size) {
-      syncTools(null);
-      return;
-    }
-    toolsIn(source).then((decoded) => {
-      if (stopped || turn !== sequence) return;
-      syncTools(decoded);
-    }).catch((error) => {
-      if (stopped || turn !== sequence) return;
-      console.warn("clayjs: could not decode saved tools", error);
-      applySavedArticle(html, doc, readerOpen, savedOpen);
-      syncTools(null);
-    });
-  };
   doc.addEventListener("toggle", onToggle, true);
-  doc.addEventListener("clay:sync-applied", onFrame);
-  if (doc.querySelector(`${ARTICLE} ${TOOL}`)) {
-    const turn = ++sequence;
-    toolsIn(doc).then((decoded) => { if (!stopped && turn === sequence) syncTools(decoded); })
-      .catch((error) => { if (!stopped) console.warn("clayjs: could not decode saved tools", error); });
+  listeners.push(["toggle", onToggle]);
+
+  if (represented) {
+    const prepared = prepareSavedArticle(represented.bytes, doc);
+    if (!prepared.ok) throw new Error(`clayjs: the saved file is not a readable page (${prepared.reason})`);
+    paint(prepared);
+    mountTools(prepared.tools, prepared.toolState);
+  } else {
+    for (const details of article.querySelectorAll("details[data-id]")) savedOpen.set(details.getAttribute("data-id"), details.hasAttribute("open"));
+    mountTools(toolsOf(article), toolStateOf(doc));
   }
-  return () => {
-    stopped = true;
-    sequence++;
-    host.dispose();
-    doc.removeEventListener("toggle", onToggle, true);
-    doc.removeEventListener("clay:sync-applied", onFrame);
+
+  const reader = {
+    ready: null,
+    get represented() {
+      return receipt;
+    },
+    stop() {
+      if (stopped) return final;
+      stopped = true;
+      mountTurn++;
+      stream?.stop();
+      stream = null;
+      for (const [type, handler] of listeners) doc.removeEventListener(type, handler);
+      listeners.length = 0;
+      disposeMounts();
+      try { host?.dispose(); } catch {}
+      host = null;
+      release();
+      final = Object.freeze({ ...receipt });
+      return final;
+    },
   };
+  reader.ready = Promise.resolve(reader);
+
+  if (feed) {
+    const onFrame = (event) => {
+      const html = event.detail?.html;
+      if (typeof html !== "string") return;
+      commit({ bytes: html, etag: event.detail?.etag ?? null, seq: event.detail?.seq ?? null });
+    };
+    feed.addEventListener("clay:sync-applied", onFrame);
+    listeners.push(["clay:sync-applied", onFrame]);
+  } else {
+    stream = createSavedStream({
+      documentURL,
+      servedEtag,
+      represented: receipt,
+      onSnapshot: commit,
+      onStatus: (status) => {
+        if (status?.state && status.state !== "applied") dispatch("clay:reader-status", status);
+      },
+    });
+    stream.start();
+  }
+  return reader;
 }
+
+/**
+ * Start a reader from the exact bytes one accepted saved file carried. Validation
+ * and the first apply happen before anything is replaced or received, so a caller
+ * that already holds a receipt needs no acquisition GET. `stop()` returns that
+ * receipt, or the last one a complete apply recorded, frozen and idempotent.
+ */
+export function start({ represented, documentURL, servedEtag = null, doc = document } = {}) {
+  if (!represented || typeof represented.bytes !== "string" || represented.bytes === "") {
+    throw new TypeError("clayjs: the reader needs the full saved bytes to start");
+  }
+  const articles = doc.querySelectorAll(ARTICLE);
+  if (articles.length !== 1) throw new Error("clayjs: the reader needs exactly one article[data-page]");
+  const article = articles[0];
+  if (article.querySelector(".page-editor")) throw new Error("clayjs: the reader will not start over a mounted editor");
+  if (!prepareSavedArticle(represented.bytes, doc).ok) throw new Error("clayjs: the saved file is not a readable page");
+  const release = claim(article, "reader");
+  try {
+    return createReader({ doc, article, represented, documentURL, servedEtag, release });
+  } catch (error) {
+    release();
+    throw error;
+  }
+}
+
+// The legacy entry: a reader fed by the generic sync lane's `clay:sync-applied`
+// events. It owns no stream, so its first receipt is the first applied frame.
+export function startPageView(doc = document) {
+  const articles = doc.querySelectorAll(ARTICLE);
+  if (articles.length !== 1) return () => null;
+  return createReader({ doc, article: articles[0], represented: null, feed: doc }).stop;
+}
+

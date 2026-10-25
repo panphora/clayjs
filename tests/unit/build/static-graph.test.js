@@ -116,6 +116,21 @@ for (const [fixture, tag] of Object.entries(FIXTURES)) {
   });
 }
 
+// The reader half of the Document is the only Document code a view-mode page has
+// to download before it can apply a saved file. It projects markup key by key, so
+// neither the merge engine nor its hyper-morph vendor belongs in its graph.
+test("document view: the reader graph has no merge engine or hyper-morph vendor", async () => {
+  const tag = FIXTURES.document;
+  const params = new URLSearchParams(`plugins=${tag.plugins}&exclude=${tag.exclude}`);
+  const plan = resolveModules(params, false, { isDraftMode: false, hasSap: tag.hasSap });
+  expect(plan.plugins).toContain("plugins/page-view.js");
+  const entry = "src/plugins/page-view.js";
+  const graph = walk(await inputsFor([entry]), [entry]);
+
+  expect([...graph].filter((file) => file === "src/sync/merge-engine.js" || /^src\/vendor\/hyper-morph/.test(file))).toEqual([]);
+  expect(graph.has("src/sync/saved-stream.js")).toBe(true);
+});
+
 for (const [fixture, tag] of Object.entries(FIXTURES)) {
   for (const { mode, isEditMode, isDraftMode } of MODES) {
     if (tag.modes && !tag.modes.includes(mode)) continue;
