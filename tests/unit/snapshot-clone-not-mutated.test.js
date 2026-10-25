@@ -104,17 +104,25 @@ describe.each([
   // authored handler, three serializations, and a live-sync broadcast of bytes
   // nobody changed. Counting the event is the only way to see that from outside;
   // a fetch-count assertion passes on the broken build and proves nothing.
+  // beforeEach writes and saves in one task, so the gate hears about that write
+  // only after the save took its token: the first automatic attempt verifies with
+  // one capture and finds nothing to send. From then on the gate is clean, and an
+  // unchanged page costs no capture at all.
   test("an unchanged page skips autosave without capturing a snapshot at all", async () => {
     let captures = 0;
     const count = () => captures++;
     document.addEventListener("clay:snapshot-ready", count);
     global.fetch.mockClear();
 
-    const result = await saveMod.savePageThrottled();
+    const first = await saveMod.savePageThrottled();
+    const afterFirst = captures;
+    const second = await saveMod.savePageThrottled();
 
     document.removeEventListener("clay:snapshot-ready", count);
-    expect(result.msgType).toBe("skipped");
-    expect(captures).toBe(0);
+    expect(first.msgType).toBe("skipped");
+    expect(second.msgType).toBe("skipped");
+    expect(afterFirst).toBeLessThanOrEqual(1);
+    expect(captures).toBe(afterFirst);
     expect(global.fetch).not.toHaveBeenCalled();
   });
 

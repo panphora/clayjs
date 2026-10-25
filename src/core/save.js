@@ -21,7 +21,7 @@ import {
   saveFateIsUnknown,
   withKeepalive
 } from "./save-core.js";
-import { captureForComparison, captureForComparisonAndDirty, captureForSaveAndComparison, captureForDirtyCheck, captureSaveClone } from "./snapshot.js";
+import { captureForComparisonAndDirty, captureForSaveAndComparison, captureForDirtyCheck, captureSaveClone } from "./snapshot.js";
 import { paintSignature } from "../lib/derived.js";
 import { NO_TRIGGER_AUTOSAVE_SELECTOR } from "../lib/region-policy.js";
 import { seedEtag, lastSeenEtag } from "./etag.js";
@@ -39,6 +39,7 @@ import { initUserGesture, markExplicitSave, clearExplicitSave } from "../lib/use
 // side sees a half-built module.
 import { bytesUnsaved } from "./unsaved-warning.js";
 import { bootPhase } from "./boot-phase.js";
+import { createAutosaveScheduler } from "../lib/autosave-scheduler.js";
 
 // Keep this library's own root state out of the saved bytes.
 //
@@ -463,8 +464,11 @@ function drainPendingSave() {
     savePage();
     return;
   }
+  // Through the scheduler, not straight back into the automatic lane: this runs
+  // inside the completed attempt, and a second full capture in the same task is
+  // exactly the work the split into admission-then-capture exists to remove.
   pendingAutosave = false;
-  savePageThrottled();
+  autosaveScheduler.request();
 }
 
 // State accessors for autosave module
@@ -499,26 +503,32 @@ export function setLastSavedContents(val) {
   setLastSavedBaselines(val, val);
 }
 
+const monotonic = () => (typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now());
+
 /**
- * Save the current page with change detection and state management.
+ * One save attempt, explicit or automatic.
  *
- * Returns a Promise that resolves with {msg, msgType} — the same object
- * passed to the callback. Promise never rejects; errors resolve with
- * msgType: 'error', skipped early-returns resolve with msgType: 'skipped'.
+ * Both kinds take the same single combined capture — the save domain, the
+ * autosave comparison domain and the dirty domain all come from one live snapshot
+ * — and differ only in the question they ask of it. An explicit attempt asks the
+ * dirty question, so an edit inside a batching region is written. An automatic one
+ * asks the autosave question under the load-time baseline veto, so neither boot
+ * churn nor batching churn saves on its own.
  *
+ * @param {{kind: 'explicit' | 'automatic'}} options
  * @param {Function} callback - Optional callback for custom handling
  * @returns {Promise<{msg: string, msgType: string}>}
  */
-export function savePage(callback = () => {}) {
+function attemptSave({ kind }, callback = () => {}) {
+  const explicit = kind === 'explicit';
+
   return new Promise((resolve) => {
     if (!isEditMode && !window.clay?.testMode) {
-      clearExplicitSave();
+      if (explicit) clearExplicitSave();
       const skipped = skipped_('Not in edit mode');
       callback(skipped);
       return resolve(skipped);
     }
-
-    if (heldForPreview(callback, resolve)) return;
 
     // A save is already on the wire. Remember that a newer state is waiting rather
     // than dropping it: the in-flight request carries the older bytes, and if no
@@ -526,17 +536,44 @@ export function savePage(callback = () => {}) {
     // reach disk at all.
     // Not cleared here: pendingSave means this request is deferred, not
     // abandoned, and drainPendingSave is what eventually sends it.
-    if (isSaveInProgress()) {
-      pendingSave = true;
-      const skipped = skipped_('Save already in progress');
-      callback(skipped);
-      return resolve(skipped);
+    if (explicit) {
+      if (heldForPreview(callback, resolve)) return;
+      if (isSaveInProgress()) {
+        pendingSave = true;
+        const skipped = skipped_('Save already in progress');
+        callback(skipped);
+        return resolve(skipped);
+      }
+    } else {
+      if (previewHold > 0) {
+        previewAutosaveMissed = true;
+        const skipped = skipped_(saveHoldReason());
+        callback(skipped);
+        return resolve(skipped);
+      }
+      if (isSaveInProgress() && !baselineActive && ownSaveOnWire) {
+        pendingAutosave = true;
+        const skipped = skipped_('Save already in progress');
+        callback(skipped);
+        return resolve(skipped);
+      }
+      // The dirty gate counts every change no save has accounted for, and it is
+      // the cheap half of the old dirtyMatchesLastSave check. When it says clean
+      // there is nothing to compare, so answer like the old comparison did and
+      // take no capture at all: no snapshot hooks, no sync serialization, no
+      // clay:snapshot-ready. While the page is still settling the capture itself
+      // is the veto, so the gate cannot stand in for it yet.
+      if (!baselineActive && !pageMaybeDirty()) {
+        const skipped = skipped_('No changes to save');
+        callback(skipped);
+        return resolve(skipped);
+      }
     }
 
     // From here this call answers: it either writes, or reports why it did not,
     // and the soon() callers waiting on the save queued behind the one that was
     // on the wire when they asked get that answer.
-    const soonQueued = takeSoonQueued();
+    const soonQueued = explicit ? takeSoonQueued() : [];
     const settleSoonQueued = (result) => soonQueued.forEach((done) => done(result));
 
     // Check if offline - set DOM state immediately for UI feedback
@@ -546,18 +583,23 @@ export function savePage(callback = () => {}) {
       setOfflineStateQuiet();
     }
 
-    // Single capture: clone once, get both versions
+    // Single capture: clone once, get all three versions
     // forSave strips non-persisted regions ([no-save]/[save-remove])
     // forComparison additionally strips every autosave-off region
+    const startedAt = monotonic();
     let forSave, forComparison, forDirty, captureId;
     const gateToken = gateCaptureToken();
     try {
       ({ forSave, forComparison, forDirty, captureId } = captureForSaveAndComparison({ requestRefresh: true }));
     } catch (err) {
-      console.error('savePage: captureForSaveAndComparison failed', err);
-      clearExplicitSave();
-      setSaveState('error', err.message, '', { sent: false, code: err.code ?? null });
-      const result = { msg: err.message, msgType: 'error', code: err.code ?? null, etag: null };
+      console.error(`${explicit ? 'savePage' : 'savePageThrottled'}: captureForSaveAndComparison failed`, err);
+      if (explicit) {
+        clearExplicitSave();
+        setSaveState('error', err.message, '', { sent: false, code: err.code ?? null });
+      } else {
+        setSaveState('error', err.message);
+      }
+      const result = { msg: err.message, msgType: 'error', code: explicit ? (err.code ?? null) : null, etag: null };
       if (typeof callback === 'function') {
         callback(result);
       }
@@ -565,25 +607,71 @@ export function savePage(callback = () => {}) {
       settleSoonQueued(result);
       return;
     }
+    const preparedMs = monotonic() - startedAt;
 
-    // An explicit save asks the DIRTY question: write anything the person would
-    // otherwise lose, including an edit inside a batching region that was never
-    // going to autosave itself.
-    unsavedChanges = (forDirty !== lastSavedDirty);
-    logSaveCheck('savePage dirty check', !unsavedChanges);
+    if (explicit) {
+      // An explicit save asks the DIRTY question: write anything the person would
+      // otherwise lose, including an edit inside a batching region that was never
+      // going to autosave itself.
+      unsavedChanges = (forDirty !== lastSavedDirty);
+      logSaveCheck('savePage dirty check', !unsavedChanges);
 
-    // Skip if content hasn't changed. Clearing the explicit intent here is the
-    // whole point of scoping it: pressing Save on a clean page sends nothing, and
-    // leaving "a human asked for this" armed would hand it to the next
-    // background write and hide exactly the clobber the guard watches for.
-    if (!unsavedChanges) {
-      clearExplicitSave();
-      gateClearIfUnchanged(gateToken);
-      const skipped = skipped_('No changes to save');
-      callback(skipped);
-      resolve(skipped);
-      settleSoonQueued(skipped);
-      return;
+      // Skip if content hasn't changed. Clearing the explicit intent here is the
+      // whole point of scoping it: pressing Save on a clean page sends nothing, and
+      // leaving "a human asked for this" armed would hand it to the next
+      // background write and hide exactly the clobber the guard watches for.
+      if (!unsavedChanges) {
+        clearExplicitSave();
+        gateClearIfUnchanged(gateToken);
+        const skipped = skipped_('No changes to save');
+        callback(skipped);
+        resolve(skipped);
+        settleSoonQueued(skipped);
+        return;
+      }
+    } else {
+      // For autosave: while the page is still settling, content must differ from
+      // BOTH the load-time baseline and the last save, so module setup churn cannot
+      // trigger a save. Once settled, the baseline veto is disarmed and only the
+      // last save matters — otherwise undoing back to the page's original state
+      // can never be persisted, because it matches the baseline forever.
+      const differsFromBaseline = !baselineActive || forComparison !== baselineContents;
+      const differsFromLastSave = forComparison !== lastSavedContents;
+
+      logSaveCheck('throttled vs baseline', !differsFromBaseline);
+      logSaveCheck('throttled vs lastSave', !differsFromLastSave);
+
+      if (!(differsFromBaseline && differsFromLastSave)) {
+        // This capture's comparison leaves out batching (no-trigger-autosave)
+        // regions, which the gate counts, so on a page that has one the dirty
+        // domain must match too before the gate is cleared.
+        let clear = false;
+        try {
+          clear = !differsFromLastSave && (!document.querySelector(NO_TRIGGER_AUTOSAVE_SELECTOR)
+            || (pageMaybeDirty() && forDirty === lastSavedDirty));
+        } catch (err) {
+          console.error('savePageThrottled: dirty domain check failed', err);
+        }
+        if (clear) gateClearIfUnchanged(gateToken);
+        autosaveScheduler.noteCost(preparedMs);
+        const skipped = skipped_('No changes to save');
+        callback(skipped);
+        resolve(skipped);
+        return;
+      }
+
+      unsavedChanges = true;
+
+      // A save that is not this lane's own (a raw saveHtml) may still be on the
+      // wire. The capture has already been taken, so answer like the explicit lane
+      // and keep these newer bytes queued behind it.
+      if (isSaveInProgress()) {
+        pendingSave = true;
+        const skipped = skipped_('Save already in progress');
+        callback(skipped);
+        resolve(skipped);
+        return;
+      }
     }
 
     // Start debounced 'saving' state (only shows if save takes >500ms)
@@ -596,7 +684,9 @@ export function savePage(callback = () => {}) {
     saveCapturedHtml(forSave, captureId, (result) => {
       ownSaveOnWire = false;
       inFlightComparisons.delete(comparison);
+      const completedAt = monotonic();
       applySaveResult(result, comparison.forComparison, comparison.forDirty, 'updated after save', gateToken, forSave, captureId);
+      if (!explicit) autosaveScheduler.noteCost(preparedMs + (monotonic() - completedAt));
       if (typeof callback === 'function') {
         callback(result);
       }
@@ -605,6 +695,20 @@ export function savePage(callback = () => {}) {
       drainPendingSave();
     });
   });
+}
+
+/**
+ * Save the current page with change detection and state management.
+ *
+ * Returns a Promise that resolves with {msg, msgType} — the same object
+ * passed to the callback. Promise never rejects; errors resolve with
+ * msgType: 'error', skipped early-returns resolve with msgType: 'skipped'.
+ *
+ * @param {Function} callback - Optional callback for custom handling
+ * @returns {Promise<{msg: string, msgType: string}>}
+ */
+export function savePage(callback = () => {}) {
+  return attemptSave({ kind: 'explicit' }, callback);
 }
 
 /**
@@ -811,8 +915,9 @@ export function replacePageWith(url) {
   });
 }
 
-// Throttled version of savePage for auto-save
-const throttledSave = throttle(savePage, 1200);
+// The automatic lane's own throttle. It is the floor under the scheduler: a call
+// that arrives inside the window rides the trailing attempt instead of capturing.
+const throttledAutomatic = throttle(callback => attemptSave({ kind: 'automatic' }, callback), 1200);
 
 const SOON_MS = 250;
 const SOON_MAX_MS = 1000;
@@ -1108,59 +1213,28 @@ export function savePageThrottled(callback = () => {}) {
     return Promise.resolve(skipped);
   }
 
-  // For autosave: while the page is still settling, content must differ from BOTH
-  // the load-time baseline and the last save, so module setup churn cannot trigger
-  // a save. Once settled, the baseline veto is disarmed and only the last save
-  // matters — otherwise undoing back to the page's original state can never be
-  // persisted, because it matches the baseline forever.
-  // Compare directly - stored versions are already stripped
-  const gateToken = gateCaptureToken();
-  let currentForCompare;
-  let dirtyMatchesLastSave;
-  try {
-    currentForCompare = captureForComparison();
-    // This comparison leaves out batching (no-trigger-autosave) regions, which the
-    // gate counts, so on a page that has one the dirty domain must match too.
-    dirtyMatchesLastSave = () => !document.querySelector(NO_TRIGGER_AUTOSAVE_SELECTOR)
-      || (pageMaybeDirty() && captureForDirtyCheck({ flushUndo: false }) === lastSavedDirty);
-  } catch (err) {
-    console.error('savePageThrottled: captureForComparison failed', err);
-    setSaveState('error', err.message);
-    const result = { msg: err.message, msgType: 'error', code: null, etag: null };
-    callback(result);
-    return Promise.resolve(result);
-  }
-  const differsFromBaseline = !baselineActive || currentForCompare !== baselineContents;
-  const differsFromLastSave = currentForCompare !== lastSavedContents;
-
-  logSaveCheck('throttled vs baseline', !differsFromBaseline);
-  logSaveCheck('throttled vs lastSave', !differsFromLastSave);
-
-  if (!(differsFromBaseline && differsFromLastSave)) {
-    let clear = false;
-    try {
-      clear = !differsFromLastSave && dirtyMatchesLastSave();
-    } catch (err) {
-      console.error('savePageThrottled: captureForDirtyCheck failed', err);
-    }
-    if (clear) gateClearIfUnchanged(gateToken);
-    const skipped = skipped_('No changes to save');
-    callback(skipped);
-    return Promise.resolve(skipped);
-  }
-
-  unsavedChanges = true;
+  // The capture happens inside the attempt, after the throttle admits it: the
+  // page is not copied to answer "is there anything to save?" any more, and an
+  // admitted attempt takes one snapshot for both the decision and the bytes.
   // The throttled promise can reject now that a throwing save no longer strands
   // its callers (see throttle.js), and both autosave call sites are fire-and-forget,
   // with no reach into this module's error path. Catch it here, the one place that
   // owns that path, so every caller keeps the never-rejects contract savePage
   // documents and a throw surfaces as a failed save instead of an unhandled rejection.
-  return throttledSave(callback).catch(err => {
+  return throttledAutomatic(callback).catch(err => {
     const result = { ok: false, msg: err?.message || 'Save failed', msgType: 'error', code: null, etag: null };
     setSaveState('error', result.msg);
     return result;
   });
 }
+
+// The one automatic-save scheduler. Every automatic trigger (a mutation, a
+// [persist] input, a merge that owes a save) only reports activity or intent to
+// it, and it admits the attempt through this module's automatic lane.
+export const autosaveScheduler = createAutosaveScheduler({
+  now: monotonic,
+  run: () => savePageThrottled()
+});
 
 /**
  * Initialize keyboard shortcut for save (CMD/CTRL+S)

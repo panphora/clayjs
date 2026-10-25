@@ -12,7 +12,7 @@
 
 import Mutation from "../lib/mutation.js";
 import { isEditMode } from "./is-edit-mode.js";
-import { savePageThrottled } from "./save.js";
+import { autosaveScheduler } from "./save.js";
 import { markUserDriven } from "../lib/user-gesture.js";
 import { resolveRegionPolicy, skipForPolicy } from "../lib/region-policy.js";
 import { PERSIST, AUTOSAVE } from "../lib/attr-aliases.js";
@@ -20,25 +20,19 @@ import { setAutosaveActive } from "../lib/autosave-state.js";
 
 /**
  * Initialize auto-save on DOM changes
- * Uses debounced mutation observer
+ *
+ * The scheduler owns the quiet period and the maximum wait, so this subscriber
+ * only reports that content changed. No debounce here: the hub's would be a
+ * second timer measuring the same quiet window, and the page must not be copied
+ * to answer a question the scheduler has not yet admitted.
  */
-// A bare debounce resets on every change, so a page with anything that mutates
-// faster than the delay — a clock, a countdown, a polling counter — pushes autosave
-// into the future forever and it never fires, with nothing in the UI saying so.
-// maxWait bounds that: however long the churn lasts, a save happens within
-// AUTOSAVE_MAX_WAIT_MS of the first change it was waiting on. (The settled baseline
-// capture in save.js already solved this for itself with MAX_SETTLE_MS.)
-const AUTOSAVE_DEBOUNCE_MS = 1500;
-const AUTOSAVE_MAX_WAIT_MS = 10000;
-
 function initSavePageOnChange() {
   Mutation.onAnyChange({
-    debounce: AUTOSAVE_DEBOUNCE_MS,
-    maxWait: AUTOSAVE_MAX_WAIT_MS,
+    debounce: 0,
     omitChangeDetails: true,
     require: 'autosave'
   }, () => {
-    savePageThrottled();
+    autosaveScheduler.noteActivity();
   });
 }
 
@@ -46,7 +40,6 @@ function initSavePageOnChange() {
  * Initialize auto-save on input events for [persist] elements
  * Form input values don't trigger DOM mutations, so we listen for input events
  */
-let inputSaveTimer = null;
 function initSaveOnPersistInput() {
   document.addEventListener('input', (e) => {
     if (!e.target.closest(PERSIST)) return;
@@ -58,9 +51,31 @@ function initSaveOnPersistInput() {
     if (e.isTrusted && !skipForPolicy(resolveRegionPolicy(e.target), 'dirty')) {
       markUserDriven();
     }
-    clearTimeout(inputSaveTimer);
-    inputSaveTimer = setTimeout(savePageThrottled, 1500);
+    autosaveScheduler.noteActivity();
   }, true);
+}
+
+/**
+ * Record editable input and composition activity while an automatic save is
+ * pending.
+ *
+ * An active IME changes nothing in the canonical record yet, so a pause between
+ * composition updates would read as quiet and the capture would land mid-word.
+ * This records timing only: it makes no input dirty, so a frozen editor and a
+ * no-save field still save nothing.
+ */
+function initRecordEditActivity() {
+  const noteActivity = (e) => {
+    if (!autosaveScheduler.pending()) return;
+    const target = e.target;
+    if (!target || typeof target.closest !== 'function') return;
+    const field = target.closest('input, textarea, select, [contenteditable]');
+    if (!field) return;
+    if (skipForPolicy(resolveRegionPolicy(field), 'dirty')) return;
+    autosaveScheduler.noteActivity();
+  };
+  document.addEventListener('input', noteActivity, true);
+  document.addEventListener('compositionupdate', noteActivity, true);
 }
 
 function init() {
@@ -71,9 +86,11 @@ function init() {
   // editable page, not only the ones with <html autosave>.
   initSavePageOnChange();
   initSaveOnPersistInput();
+  initRecordEditActivity();
 }
 
-// No window exports - savePageThrottled is exported from save-system
+// No window exports - the scheduler lives in save-system and savePageThrottled is
+// exported from there
 
 // Auto-init when module is imported
 init();
