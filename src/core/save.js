@@ -983,9 +983,8 @@ let baselineActive = true;
 // from an editmode:resource script) are in the page by now.
 let baselineSettledAt = false;
 export function baselineSettled() { return baselineSettledAt; }
-// True once a person typed or pasted into the page during the boot settle. The
-// settled capture is skipped then, and `bootStyleAdoptionPending` cannot speak for
-// the page's bytes any more.
+// True once a person edited the page during the boot settle. The settled capture is
+// skipped then, so the edit is never absorbed into the saved baseline.
 let bootUserEdited = false;
 
 // A repaint that leaves the page's painted values different from the file's means
@@ -1043,11 +1042,17 @@ export function schedulePaintHeal(fileSignature) {
 // it, so the stripper loads the first time a script writes one. `clay.style()` stays
 // synchronous: it queues the identity here and the strip runs when the module lands.
 // Every reader that compares bytes awaits the queue first; see
-// `bootStyleAdoptionPending` for the one synchronous reader that cannot.
+// `styleAdoptionPending` for the one synchronous reader that cannot.
 let adoptionStripper = null;
 let adoptionLoad = null;
 let adoptionsQueued = 0;
 let adoptionQueue = Promise.resolve();
+// A person edited since the oldest adoption now queued. The style write is not one,
+// so the pending window cannot speak for the page's bytes once this is true.
+let editedSinceAdoption = false;
+// The identities whose strip has not landed yet, oldest first, with the exact
+// attribute bytes their saved tag carries.
+const pendingStyles = [];
 
 function loadAdoptionStripper() {
   adoptionLoad ??= import("./style-comparisons.js").catch(error => {
@@ -1074,11 +1079,75 @@ async function stripAdoptedStyle(identity) {
     console.error('style adoption failed', error);
   } finally {
     adoptionsQueued--;
+    pendingStyles.shift();
   }
 }
 
+// The bytes a saved owned tag of this identity carries in the stored baselines. The
+// capture writes attribute values with `&` and `"` escaped and every other character
+// as itself, so the marker is the exact form the serializer wrote.
+const attrValue = value => value.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+
+function styleIdentityMarkers(identity) {
+  if (identity.name !== undefined) {
+    const markers = [`data-name="${attrValue(identity.name)}"`];
+    if (identity.legacyId !== undefined) markers.push(`id="${attrValue(identity.legacyId)}"`);
+    return markers;
+  }
+  // The identity is a base URL, while the file may hold the href relative to the
+  // page, so the path alone counts too.
+  const markers = [attrValue(identity.href)];
+  try {
+    const { pathname } = new URL(identity.href);
+    if (pathname) markers.push(attrValue(pathname));
+  } catch {}
+  return markers;
+}
+
+/** Whether a stored baseline, or a save already in flight, carries the owned tag. */
+function baselineCarriesStyle(markers) {
+  const stored = [lastSavedContents, lastSavedDirty, baselineContents];
+  for (const comparison of inFlightComparisons) stored.push(comparison.forComparison, comparison.forDirty);
+  return stored.some(html => html && markers.some(marker => marker && html.includes(marker)));
+}
+
+// A stored page with the pending owned tags taken out, found by the exact attribute
+// bytes the capture writes and expanded to the element around them. The real strip is
+// parse5's; this only answers "is anything ELSE different", so a span it misses or
+// over-reaches leaves the page reading dirty, never clean.
+function withoutOwnedStyles(html, pending) {
+  const spans = [];
+  for (const { markers, tag } of pending) {
+    for (const marker of markers) {
+      for (let at = html.indexOf(marker); at >= 0; at = html.indexOf(marker, at + marker.length)) {
+        const start = html.lastIndexOf('<', at);
+        if (start < 0 || html.slice(start + 1, start + 1 + tag.length).toLowerCase() !== tag) continue;
+        const close = tag === 'style' ? html.indexOf('</style', at) : at;
+        if (close < 0) continue;
+        const end = html.indexOf('>', close);
+        if (end >= 0) spans.push([start, end + 1]);
+      }
+    }
+  }
+  spans.sort((a, b) => a[0] - b[0]);
+  let out = '';
+  let offset = 0;
+  for (const [from, to] of spans) {
+    if (from < offset) continue;
+    out += html.slice(offset, from);
+    offset = to;
+  }
+  return out + html.slice(offset);
+}
+
 registerStyleAdoption(identity => {
+  const markers = styleIdentityMarkers(identity);
+  // Nothing to strip means nothing to load: a Document whose file has no such tag
+  // never asks for parse5. A false hit only costs the parse, which decides precisely.
+  if (!baselineCarriesStyle(markers)) return;
+  if (!adoptionsQueued) editedSinceAdoption = false;
   adoptionsQueued++;
+  pendingStyles.push({ markers, tag: identity.name !== undefined ? 'style' : 'link' });
   adoptionQueue = adoptionQueue.then(() => stripAdoptedStyle(identity));
 });
 
@@ -1088,18 +1157,21 @@ export function styleAdoptionsSettled() {
 }
 
 /**
- * The boot window a style adoption opens. A fresh capture leaves an owned style out
+ * The window a style adoption opens. A fresh capture leaves an owned style out
  * (writing one marks it no-dirty), while the stored baselines still carry it until
  * the stripper lands, so a synchronous reader in that window reads the page as
- * dirty. That is never true of a real edit: a keystroke in the boot window, work an
- * owner registered, or a save on the wire all turn this off, and after the baseline
- * settles the queue has drained and this is false anyway.
+ * dirty. That is only the adoption's own doing while nothing else differs: an edit
+ * since the adoption was queued, work an owner registered, a save on the wire, or
+ * any other byte `current` (the caller's own capture) carries turn this off. A clean
+ * adoption is clean before and after the baseline settles, so no settle condition
+ * belongs here.
  */
-export function bootStyleAdoptionPending() {
-  if (!adoptionsQueued || baselineSettledAt) return false;
-  if (bootUserEdited || hasUnsavedState()) return false;
+export function styleAdoptionPending(current) {
+  if (!adoptionsQueued) return false;
+  if (editedSinceAdoption || hasUnsavedState()) return false;
   if (isSaveInProgress() || pendingSave || pendingAutosave) return false;
-  return true;
+  if (typeof current !== 'string') return false;
+  return current === withoutOwnedStyles(lastSavedDirty, pendingStyles);
 }
 
 // ============================================
@@ -1148,15 +1220,18 @@ function initBaselineCapture() {
   baselineContents = immediateContents;
   logBaseline('immediate capture', `${immediateContents.length} chars`);
 
-  // Track user edits to avoid overwriting real changes
-  const userEditEvents = ['input', 'change', 'paste'];
+  // Track user edits to avoid overwriting real changes. Every real edit counts,
+  // whatever the target and however the page takes it: the editor handles keys and
+  // clicks itself, a checklist box cancels mousedown, a picker or a menu item is a
+  // click, a drop is neither key nor click. A style write is not an edit (it is
+  // marked no-dirty), so a clean adoption stays clean. These stay attached after the
+  // settle: an adoption queued later opens the same window again.
+  const userEditEvents = ['keydown', 'pointerdown', 'drop', 'input', 'change', 'paste'];
+  const modifierKeys = new Set(['Shift', 'Control', 'Alt', 'Meta']);
   const markUserEdited = (e) => {
-    const target = e.target;
-    const isEditable = target.isContentEditable ||
-                       target.tagName === 'INPUT' ||
-                       target.tagName === 'TEXTAREA' ||
-                       target.tagName === 'SELECT';
-    if (isEditable) bootUserEdited = true;
+    if (e.type === 'keydown' && modifierKeys.has(e.key)) return;
+    editedSinceAdoption = true;
+    if (!settled) bootUserEdited = true;
   };
   userEditEvents.forEach(evt => document.addEventListener(evt, markUserEdited, true));
 
@@ -1167,7 +1242,6 @@ function initBaselineCapture() {
 
     // Cleanup listeners
     if (unsubscribeMutation) unsubscribeMutation();
-    userEditEvents.forEach(evt => document.removeEventListener(evt, markUserEdited, true));
 
     // Adoption only removes owned styles from comparison state. It does not
     // advance this revision. A save or sync installation does, even when its

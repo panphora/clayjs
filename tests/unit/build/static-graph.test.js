@@ -22,18 +22,18 @@ const FORBIDDEN = [
   "src/vendor/hyper-morph.vendor.js",
   "src/sync/merge-tags.js",
   "src/vendor/parse5.vendor.js",
+  "src/core/style-comparisons.js",
 ];
 
 // A Document reads its JSON with the small relaxed parser, so the engine and its
-// tag recognizers are first-use downloads there. parse5 still loads at boot for its
-// owned-style adopter until the Kanban plan moves it too. View mode is left out of
-// the Document fixture: page/view.js morphs a saved article with the engine.
-const ENGINE = ["src/vendor/hyper-morph.vendor.js", "src/sync/merge-tags.js"];
-
+// tag recognizers are first-use downloads there, and so is the parse5 stripper: an
+// owned style queues it only when the file already carries that tag. View mode is
+// left out of the Document fixture: page/view.js morphs a saved article with the
+// engine.
 const FIXTURES = {
   kanban: { plugins: "sortable,people,upload,sync,visitor-drafts", exclude: "richclay", hasSap: true, forbidden: FORBIDDEN, forbiddenLabel: "the merge engine or parse5" },
   journal: { plugins: "sync,visitor-drafts", exclude: "richclay", hasSap: false, forbidden: FORBIDDEN, forbiddenLabel: "the merge engine or parse5" },
-  document: { plugins: "page", exclude: "richclay", hasSap: false, modes: ["edit"], forbidden: ENGINE, forbiddenLabel: "the merge engine" },
+  document: { plugins: "page", exclude: "richclay", hasSap: false, modes: ["edit", "draft"], forbidden: FORBIDDEN, forbiddenLabel: "the merge engine or parse5" },
 };
 
 const MODES = [

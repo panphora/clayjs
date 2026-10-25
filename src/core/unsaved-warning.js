@@ -18,7 +18,7 @@
 import { isEditMode, isDraftMode } from "./is-edit-mode.js";
 import { draftStoreFailed, flushDraft } from "./draft-mode.js";
 import { captureForDirtyCheck } from "./snapshot.js";
-import { getLastSavedDirty, bootStyleAdoptionPending } from "./save.js";
+import { getLastSavedDirty, styleAdoptionPending } from "./save.js";
 import { logUnloadDiffSync, preloadIfEnabled } from "../lib/autosave-debug.js";
 import { hasUnsavedState } from "../lib/unsaved-state.js";
 
@@ -73,10 +73,11 @@ export function bytesUnsaved() {
   if (!isEditMode) return false;
   try {
     const current = captureForDirtyCheck();
-    // A style adoption in the boot window is not work: the page is only waiting for
-    // the stripper that takes its own owned tag out of the stored bytes. The capture
-    // above still runs, so a throw is still an unsaved page.
-    if (bootStyleAdoptionPending()) return false;
+    // A style adoption is not work: the page is only waiting for the stripper that
+    // takes its own owned tag out of the stored bytes. The capture above still runs,
+    // so a throw is still an unsaved page, and any edit since the adoption was
+    // queued turns this off.
+    if (styleAdoptionPending(current)) return false;
     return current !== getLastSavedDirty();
   } catch {
     return true;
