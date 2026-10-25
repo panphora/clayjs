@@ -96,6 +96,13 @@ export function start({ sync = false } = {}) {
   return ready;
 }
 
+// The reader's half of a live switch: the lane keeps its pending files, and the
+// switch is answered with the receipt they will be built from.
+export function prepareHandoff(options) {
+  if (!reader) return Promise.reject(new Error("clayjs: the reader has not started"));
+  return reader.prepareHandoff(options);
+}
+
 export function stop() {
   cancelled = true;
   if (!following) settle?.(null);

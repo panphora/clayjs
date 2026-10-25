@@ -79,6 +79,9 @@ function loadEdit() {
 
 if (isEditMode) loadEdit().catch(() => {});
 
+// The receipt of a lane that has applied no saved file.
+const NO_FILE = Object.freeze({ bytes: null, etag: null, seq: null });
+
 // save.js returns this from savePageThrottled outside edit mode; a view-mode
 // tab that somehow asks for a merge save gets the same answer without loading it.
 const notInEditModeResult = () => ({
@@ -324,6 +327,15 @@ class LiveSync {
     this._morphInFlight = false;
     this._rafHandle = null;
 
+    // The saved file this lane last applied, `{ bytes, etag, seq }`: the receipt a
+    // switch is handed, and the only record of it a same-body frame may move. A
+    // metadata stamp is not a file, so it never advances this one.
+    this._represented = NO_FILE;
+    // A switch owns the queue from prepareHandoff() until it commits or resumes:
+    // frames keep filling their slots and nothing morphs.
+    this._handoff = null;
+    this._handoffHeld = false;
+
     // Disk-sourced external changes (htmlclay watcher content) get their own
     // one-deep slot so a peer frame arriving in the same window can't
     // displace them. Drained in seq order alongside the peer slot.
@@ -481,6 +493,7 @@ class LiveSync {
     this._applyGen++;
     this.lastSeenSeq = 0;
     this._lastExternalSeq = 0;
+    this._represented = NO_FILE;
     this._pendingExternal = null;
     this.resumeId = this.generateResumeId();
 
@@ -646,6 +659,8 @@ class LiveSync {
     this._pendingIdentityMap = null;
     this._pendingBy = null;
     this._pendingExternal = null;
+    this._handoff = null;
+    this._handoffHeld = false;
     clearTimeout(this._holdRetryPeer);
     clearTimeout(this._holdRetryExt);
     this._holdRetryPeer = null;
@@ -939,6 +954,15 @@ class LiveSync {
       // may yet be refused; the stamped frame follows if it lands.
       if (this.lane === 'live' && !etag && conditionalSaves()) {
         this._log(`Dropping an unstamped live frame on a stamping host (seq=${seq})`);
+        return;
+      }
+
+      // A saved frame repeating the file this lane already applied: the receipt moves
+      // onto the new stamp and the page is not touched, because the bytes on screen
+      // ARE these bytes.
+      if (this.lane === 'saved' && html === this._represented.bytes) {
+        this._represented = Object.freeze({ bytes: html, etag: etag || null, seq: seq ?? null });
+        recordEtag(etag);
         return;
       }
 
@@ -1426,12 +1450,34 @@ class LiveSync {
   }
 
   /**
+   * Hand the saved lane's queue to a switch without stopping it: an apply already in
+   * flight finishes, a frame that arrives meanwhile keeps its slot, and a repair the
+   * host asked for stays owed. The protocol itself is a dynamic target, so a page that
+   * never switches modes never fetches it.
+   *
+   * @param {Object} [options] - `{ signal, deadline }`
+   * @returns {Promise<{represented: Object, reconcile: function(): Promise<void>, resume: function(), commit: function(): boolean}>}
+   */
+  prepareHandoff(options = {}) {
+    if (this._handoff) return Promise.resolve(this._handoff);
+    if (this.isDestroyed) return Promise.reject(new Error('LiveSync: stopped'));
+    this._handoffHeld = true;
+    if (this._rafHandle != null) {
+      this._cancelFrame(this._rafHandle);
+      this._rafHandle = null;
+    }
+    return import('./saved-handoff.js')
+      .then(({ engineHandoff }) => engineHandoff(this, options))
+      .then((handoff) => (this._handoff = handoff));
+  }
+
+  /**
    * Schedule the next-frame morph if one isn't already pending. Skipped when
    * a morph is in flight; the morph's post-completion check will reschedule
    * if a newer payload arrived during it.
    */
   _scheduleNextFrame() {
-    if (this.isDestroyed) return;
+    if (this.isDestroyed || this._handoffHeld) return;
     if (this._rafHandle != null) return;
     if (this._morphInFlight) return;
     this._rafHandle = this._requestFrame(() => this._runPending());
@@ -2022,6 +2068,8 @@ class LiveSync {
       // carries keystrokes nobody saved. Tagging both as `peer` made a view-mode
       // reader, which drops previews, ignore every save on a page that also names
       // `sync`. `lane` names the lane the frame came from either way.
+      if (this.lane === 'saved') this._represented = Object.freeze({ bytes: html, etag: etag || null, seq: seq ?? null });
+
       document.dispatchEvent(new CustomEvent('clay:sync-applied', {
         detail: { seq, source: this.lane === 'saved' ? 'disk' : 'peer', lane: this.lane, by: by || null, html, report, unresolved: this.unresolvedConflicts, conflictIds }
       }));

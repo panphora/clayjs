@@ -62,6 +62,8 @@ function createReader({ doc, article, represented = null, feed = null, documentU
   let stream = adopted;
   let final = null;
   let receipt = freezeReceipt(represented);
+  // A switch owns the saved lane from `prepareHandoff` until it commits or resumes.
+  let handoff = null;
 
   const dispatch = (type, detail) => {
     const win = doc.defaultView ?? globalThis;
@@ -140,6 +142,11 @@ function createReader({ doc, article, represented = null, feed = null, documentU
   };
 
   const onStreamStatus = (status) => {
+    // A transport that moved its receipt onto the bytes already on screen names the
+    // stamp this article now holds; the article is not repainted for it.
+    if (status?.state === "current") {
+      receipt = freezeReceipt({ bytes: receipt.bytes, etag: status.etag ?? null, seq: status.seq ?? null });
+    }
     if (status?.state && status.state !== "applied") dispatch("clay:reader-status", status);
   };
 
@@ -196,6 +203,14 @@ function createReader({ doc, article, represented = null, feed = null, documentU
     return true;
   }
 
+  // The successor's base: without a receipt there is nothing to hand over, so the
+  // reader keeps the article and its claim.
+  const retire = () => {
+    if (receipt.bytes === null) return false;
+    reader.stop();
+    return true;
+  };
+
   const onToggle = (event) => {
     const details = event.target;
     if (details.tagName !== "DETAILS" || !article.contains(details)) return;
@@ -205,7 +220,7 @@ function createReader({ doc, article, represented = null, feed = null, documentU
     else readerOpen.set(id, details.open);
   };
   doc.addEventListener("toggle", onToggle, true);
-  listeners.push(["toggle", onToggle]);
+  listeners.push(["toggle", onToggle, true]);
 
   if (represented) {
     const prepared = prepareSavedArticle(represented.bytes, doc);
@@ -222,13 +237,23 @@ function createReader({ doc, article, represented = null, feed = null, documentU
     get represented() {
       return receipt;
     },
+    // Hand this article over to a switch. The lane that owns the queue keeps the
+    // pending files and the repair it owes; nothing here stops a stream.
+    prepareHandoff(options = {}) {
+      if (handoff) return Promise.resolve(handoff);
+      if (stopped) return Promise.reject(new Error("clayjs: the reader is stopped"));
+      handoff = import("../sync/saved-handoff.js")
+        .then(({ readerHandoff }) => readerHandoff({ stream, options, apply: commit, retire }));
+      return handoff;
+    },
     stop() {
       if (stopped) return final;
       stopped = true;
+      handoff = null;
       mountTurn++;
       stream?.stop();
       stream = null;
-      for (const [type, handler] of listeners) doc.removeEventListener(type, handler);
+      for (const [type, handler, options] of listeners) doc.removeEventListener(type, handler, options);
       listeners.length = 0;
       disposeMounts();
       try { host?.dispose(); } catch {}
