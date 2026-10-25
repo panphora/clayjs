@@ -98,10 +98,10 @@ const META = { ok: true, status: 200, json: async () => ({ extensions: [] }), te
  * Boot `plugins=page` in view mode with a stream that records itself but never
  * opens on its own, so each test decides when (or whether) the host answers.
  */
-const bootView = async (fetchImpl, { stamp = null } = {}) => {
+const bootView = async (fetchImpl, { stamp = null, version = null } = {}) => {
   jest.resetModules();
   sources.length = 0;
-  document.documentElement.innerHTML = `<head><title>Reader</title></head><body>${new DOMParser().parseFromString(SERVED("one", "Before"), "text/html").body.innerHTML}</body>`;
+  document.documentElement.innerHTML = `<head>${version ? `<meta name="hyper-version" content="${version}">` : ""}<title>Reader</title></head><body>${new DOMParser().parseFromString(SERVED("one", "Before"), "text/html").body.innerHTML}</body>`;
   // The served response's own stamp lives on <html>, which an innerHTML assignment
   // leaves alone: it is set and cleared here so one test never lends it to another.
   if (stamp) document.documentElement.setAttribute("documentetag", stamp);
@@ -303,5 +303,24 @@ test("an invalid acquisition body leaves the article and the stream open for the
 
   expect(document.querySelector('[data-id="p1"]').textContent).toBe("Valid");
   expect(sources).toHaveLength(1);
+  pageView.stop();
+});
+
+test("a first file another version wrote is refused, nothing applies and acquired settles null", async () => {
+  const upgraded = SERVED("two", "Upgraded").replace("<head>", '<head><meta name="hyper-version" content="2.0.0">');
+  const { pageView, events } = await bootView(
+    async () => ({ ok: true, status: 200, text: async () => upgraded, headers: { get: () => null } }),
+    { version: "1.0.0" }
+  );
+
+  expect(events).toEqual(["clay:ready"]);
+  sources[0].onopen();
+
+  // The file is refused whole: no reader, no article, no version of its own.
+  expect(await pageView.acquired).toBeNull();
+  expect(document.querySelector('[data-id="p1"]').textContent).toBe("Before");
+  expect(document.querySelector('meta[name="hyper-version"]').getAttribute("content")).toBe("1.0.0");
+  await until(() => document.querySelector("[data-clay-conflict]")?.textContent.includes("This document was upgraded."));
+  expect(document.querySelector("[data-clay-conflict]").textContent).toContain("This document was upgraded.");
   pageView.stop();
 });

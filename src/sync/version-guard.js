@@ -34,16 +34,29 @@ export function frameVersion(html) {
   return metaOf(new DOMParser().parseFromString(html, "text/html"), "hyper-version");
 }
 
+// One version is not another. A page that states none can make no such judgement.
+function replacesMine(theirs) {
+  const mine = pageVersion();
+  return Boolean(mine) && Boolean(theirs) && theirs !== mine;
+}
+
 /**
  * Whether this frame must not be applied: it names a version other than this page's,
  * or an earlier frame already said so and nothing this tab holds is trustworthy since.
  */
 export function upgradeReplaces(html) {
   if (stopped) return true;
-  const mine = pageVersion();
-  if (!mine) return false;
-  const theirs = frameVersion(html);
-  return Boolean(theirs) && theirs !== mine;
+  return replacesMine(frameVersion(html));
+}
+
+/**
+ * The same judgement for an incoming document somebody else already parsed: the
+ * reader holds the file's own tree and reads its head from there.
+ */
+export function upgradeReplacesDocument(other) {
+  if (stopped) return true;
+  if (!other || typeof other.querySelector !== "function") return false;
+  return replacesMine(metaOf(other, "hyper-version"));
 }
 
 /**
@@ -61,8 +74,15 @@ export function stopForUpgrade() {
   const hold = isEditMode
     ? import("../core/save.js").then((save) => save.holdAllSaves(UPGRADED_MESSAGE), () => {})
     : Promise.resolve();
-  document.dispatchEvent(new CustomEvent("clay:document-upgraded", { detail: { message: UPGRADED_MESSAGE } }));
-  return hold;
+  // Where the shell (core/conflict-notice.js) is loaded, it is already listening and
+  // fetches the notice for this event. A reader has no shell, so the notice is fetched
+  // here and handed the event it would otherwise never see.
+  const event = new CustomEvent("clay:document-upgraded", { detail: { message: UPGRADED_MESSAGE } });
+  const drawn = isEditMode
+    ? Promise.resolve()
+    : import("../core/conflict-notice-ui.js").then((ui) => ui.start(event), () => {});
+  document.dispatchEvent(event);
+  return Promise.all([hold, drawn]).then(() => {});
 }
 
 export const _test = {

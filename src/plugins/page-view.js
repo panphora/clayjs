@@ -10,6 +10,7 @@
 // applied instead. The loader passes that choice from the plan it resolved, so the
 // reader never reparses the script URL to guess what else is loaded.
 import { createSavedStream } from "../sync/saved-stream.js";
+import { upgradeReplaces, stopForUpgrade } from "../sync/version-guard.js";
 import { servedDocumentEtag } from "../core/host-attrs.js";
 import { start as startReader } from "../page/view.js";
 
@@ -39,6 +40,15 @@ function acquire() {
       servedEtag: servedDocumentEtag,
       onSnapshot: (candidate) => {
         if (cancelled) return false;
+        // A file another version of the document wrote is not this reader's to show.
+        // Nothing is acquired for it: the stream stops, the reader refuses it whole,
+        // and the notice offers a reload. This tab keeps the version it was served.
+        if (upgradeReplaces(candidate.bytes)) {
+          stopForUpgrade();
+          stream.stop();
+          resolve(null);
+          return false;
+        }
         try {
           // The reader adopts this same stream: one connection carries the file from
           // acquisition onward, so a save that lands while the reader starts is not

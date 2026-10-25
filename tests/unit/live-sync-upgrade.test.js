@@ -154,3 +154,51 @@ test("once refused, a later frame is refused too, whatever version it carries", 
   expect(save.savesHeld()).toBe(true);
   sync.stop();
 });
+
+// The peer lane is the other way a newer version reaches a tab: hyperclay relays
+// every /_/save as a live-lane frame, and a peer snapshot arrives on the same
+// slot. Neither merges into a page of another version.
+
+test("a live-lane frame carrying another version is not merged, the meta stays, saves are held and the notice is shown", async () => {
+  const sync = makeSync();
+
+  await sync._doApplyUpdate(
+    diskDoc('<section data-id="b"><p>upgraded layout</p></section>', "2.0.0"),
+    2,
+    null,
+    "E2"
+  );
+
+  expect(document.querySelector('[data-id="b"] p').textContent).toBe("b0");
+  expect(document.documentElement.outerHTML).not.toContain("upgraded layout");
+  expect(document.querySelector('meta[name="hyper-version"]').getAttribute("content")).toBe("1.0.0");
+  expect(save.savesHeld()).toBe(true);
+  expect(save.saveHoldReason()).toBe(versionGuard.UPGRADED_MESSAGE);
+  expect(await until(() => noticeText().includes("This document was upgraded."))).toBe(true);
+  expect(noticeButton("Reload")).toBeTruthy();
+  sync.stop();
+});
+
+test("a peer snapshot after a refusal is refused too", async () => {
+  const sync = makeSync();
+  await sync._doApplyExternal(diskDoc('<section data-id="b"><p>other</p></section>', "2.0.0"), 3, "E3");
+
+  await sync._doApplyUpdate(diskDoc('<section data-id="b"><p>snapshot</p></section>', "2.0.0"), 4, null, "E4");
+
+  expect(document.querySelector('[data-id="b"] p').textContent).toBe("b0");
+  expect(document.documentElement.outerHTML).not.toContain("snapshot");
+  expect(document.querySelector('meta[name="hyper-version"]').getAttribute("content")).toBe("1.0.0");
+  expect(save.savesHeld()).toBe(true);
+  sync.stop();
+});
+
+test("a live-lane frame carrying this page's version still applies", async () => {
+  const sync = makeSync();
+
+  await sync._doApplyUpdate(diskDoc('<section data-id="b"><p>live</p></section>', "1.0.0"), 5, null, "E5");
+
+  expect(document.querySelector('[data-id="b"] p').textContent).toBe("live");
+  expect(save.savesHeld()).toBe(false);
+  expect(noticeText()).not.toContain("upgraded");
+  sync.stop();
+});

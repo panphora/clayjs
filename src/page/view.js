@@ -5,6 +5,7 @@
 // mounted tool. No ProseMirror, no projection code and no merge engine: the saved
 // file is already the rendered form of the writer's model.
 import { createSavedStream } from "../sync/saved-stream.js";
+import { stopForUpgrade, upgradeReplacesDocument } from "../sync/version-guard.js";
 import { applyPreparedArticle, keepToolVersion, prepareSavedArticle, toolInfoOf, toolsOf, toolStateOf } from "./reader-patch.js";
 import { claim } from "./runtime-owner.js";
 
@@ -162,6 +163,15 @@ function createReader({ doc, article, represented = null, feed = null, documentU
     const prepared = prepareSavedArticle(candidate.bytes, doc);
     if (!prepared.ok) return false;
     if (article.querySelector(".page-editor")) return false;
+    // A file published at another version of this document is not this reader's to
+    // show: the stream stops, this file and every later one are refused, and the
+    // notice offers a reload. Nothing of it reaches the article.
+    if (upgradeReplacesDocument(prepared.source)) {
+      stream?.stop();
+      stream = null;
+      stopForUpgrade();
+      return false;
+    }
     pruneTools(prepared.tools);
     try {
       paint(prepared);
@@ -267,7 +277,17 @@ export function start({ represented = null, documentURL, servedEtag = null, stre
   if (articles.length !== 1) throw new Error("clayjs: the reader needs exactly one article[data-page]");
   const article = articles[0];
   if (article.querySelector(".page-editor")) throw new Error("clayjs: the reader will not start over a mounted editor");
-  if (represented && !prepareSavedArticle(represented.bytes, doc).ok) throw new Error("clayjs: the saved file is not a readable page");
+  if (represented) {
+    const prepared = prepareSavedArticle(represented.bytes, doc);
+    if (!prepared.ok) throw new Error("clayjs: the saved file is not a readable page");
+    // The version is read from the file's own head before anything is claimed or
+    // painted: a file another version wrote replaces this page whole, so a reader
+    // showing the old one refuses it and asks for a reload instead.
+    if (upgradeReplacesDocument(prepared.source)) {
+      stopForUpgrade();
+      throw new Error("clayjs: the saved file was published at another version of this document");
+    }
+  }
   const release = claim(article, "reader");
   try {
     return createReader({ doc, article, represented, feed, documentURL, servedEtag, stream, release });

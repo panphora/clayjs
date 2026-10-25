@@ -1851,6 +1851,14 @@ class LiveSync {
    * @returns {Promise<void>}
    */
   async _doApplyUpdate(html, seq, identityMap, etag, by = null) {
+    // Another version of the document is not a change to this one, whichever lane
+    // or slot it arrived on: a peer snapshot merges no more than a saved frame does,
+    // and nothing applies after the first refusal. The guard holds the saves and
+    // asks the notice to offer a reload.
+    if (upgradeReplaces(html)) {
+      await stopForUpgrade();
+      return;
+    }
     if (this.lane === 'live' && !edit) await loadEdit();
     this._log('applyUpdate - pausing mutations and morphing');
     this.isPaused = true;
