@@ -7,7 +7,7 @@ import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { resolveModules } from "../../../src/loader-logic.js";
+import { pathToFileURL } from "node:url";
 import { canonicalizeRuntimeHTML } from "../../../src/server/offline-runtime/index.js";
 import { parse } from "../../../src/vendor/parse5.vendor.js";
 import { verifyOfflineClosure } from "../../../scripts/verify-offline-closure.mjs";
@@ -305,6 +305,15 @@ for (const host of hosts) {
       // first remote change, so no resolveModules answer names it and only a closure that
       // adds it sees it. It loads whether or not the document is in edit mode.
       const MERGE_ENGINE = "sync/merge-engine.js";
+
+      // The board asks for what the host's own release's loader resolves, not this checkout's:
+      // a module added after the vendored release is one that release never requests.
+      // The file has no imports, so the bytes the host serves load on their own from a temp copy.
+      const logic = await fetch(new URL(`${ready.runtime}src/loader-logic.js`, ready.baseURL));
+      expect(logic.status).toBe(200);
+      const logicFile = path.join(await mkdtemp(path.join(os.tmpdir(), "loader-logic-")), "loader-logic.mjs");
+      await writeFile(logicFile, Buffer.from(await logic.arrayBuffer()));
+      const { resolveModules } = await import(pathToFileURL(logicFile).href);
 
       const paths = new Set();
       for (const isEditMode of [true, false]) {
