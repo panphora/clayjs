@@ -165,9 +165,6 @@ const PLUGIN_ORDER = ["visitor-drafts", "richclay", "indicator", "sortable", "un
 // ends in "File uploads are not available", while with it a host that stores no
 // files answers `unsupported` and the editor offers to embed the file instead.
 const IMPLIES = { cms: ["quickcrop", "upload"], "ai-edit": ["wire"], page: ["live", "sync", "upload"] };
-// In view mode the editor half does not load and its reader half does, so the reader
-// half is the plugin whose implies flow: a reader keeps following saved files.
-IMPLIES["page-view"] = IMPLIES.page;
 
 // A Document's editor owns its article's rich text, so richclay (for [editable]) has
 // nothing to do there; plugins=page,richclay still loads it.
@@ -220,7 +217,10 @@ export function resolveModules(params, isEditMode, { isDraftMode = false, hasSap
   if (!isEditMode && !isDraftMode && enabled.has("page")) enabled.add("page-view");
   // A plugin this mode does not load brings nothing with it, whether a default put
   // it in the set or the tag named it. A page that wants what an edit-only plugin
-  // implies in view mode names that plugin too.
+  // implies in view mode names that plugin too. `page` is the case that matters
+  // most: a reader loads its reader half and no generic sync, live data service or
+  // upload, so `plugins=page` in view mode resolves to page-view alone and the
+  // saved transport page-view owns is the only stream.
   for (const name of [...enabled]) {
     if (excluded.has(name)) continue;
     if (PLUGIN_PATHS[name].editOnly && !isEditMode) continue;

@@ -217,9 +217,12 @@ function createReader({ doc, article, represented = null, feed = null, documentU
 
   if (feed) {
     const onFrame = (event) => {
-      const html = event.detail?.html;
-      if (typeof html !== "string") return;
-      commit({ bytes: html, etag: event.detail?.etag ?? null, seq: event.detail?.seq ?? null });
+      const detail = event.detail;
+      if (typeof detail?.html !== "string") return;
+      // A peer frame is a live preview of keystrokes nobody saved; a receipt is a
+      // file. An unstamped event names no lane, and is taken as the saved one.
+      if (detail.source && detail.source !== "disk") return;
+      commit({ bytes: detail.html, etag: detail.etag ?? null, seq: detail.seq ?? null });
     };
     feed.addEventListener("clay:sync-applied", onFrame);
     listeners.push(["clay:sync-applied", onFrame]);
@@ -243,19 +246,23 @@ function createReader({ doc, article, represented = null, feed = null, documentU
  * and the first apply happen before anything is replaced or received, so a caller
  * that already holds a receipt needs no acquisition GET. `stop()` returns that
  * receipt, or the last one a complete apply recorded, frozen and idempotent.
+ *
+ * `feed` starts over the page already on screen and takes its saved files from
+ * that event target's `clay:sync-applied` events, for a page whose saved lane
+ * somebody else already owns: its first receipt is the first frame it applies.
  */
-export function start({ represented, documentURL, servedEtag = null, doc = document } = {}) {
-  if (!represented || typeof represented.bytes !== "string" || represented.bytes === "") {
+export function start({ represented = null, documentURL, servedEtag = null, feed = null, doc = document } = {}) {
+  if (!feed && (!represented || typeof represented.bytes !== "string" || represented.bytes === "")) {
     throw new TypeError("clayjs: the reader needs the full saved bytes to start");
   }
   const articles = doc.querySelectorAll(ARTICLE);
   if (articles.length !== 1) throw new Error("clayjs: the reader needs exactly one article[data-page]");
   const article = articles[0];
   if (article.querySelector(".page-editor")) throw new Error("clayjs: the reader will not start over a mounted editor");
-  if (!prepareSavedArticle(represented.bytes, doc).ok) throw new Error("clayjs: the saved file is not a readable page");
+  if (represented && !prepareSavedArticle(represented.bytes, doc).ok) throw new Error("clayjs: the saved file is not a readable page");
   const release = claim(article, "reader");
   try {
-    return createReader({ doc, article, represented, documentURL, servedEtag, release });
+    return createReader({ doc, article, represented, feed, documentURL, servedEtag, release });
   } catch (error) {
     release();
     throw error;

@@ -59,6 +59,10 @@ export async function boot(base, params, readyResolve, manifest = null) {
   const plan = resolveModules(params, isEditMode, { isDraftMode, hasSap, canEdit, templateSource: templateSource() });
   preloadEntries(manifest, [...plan.core, ...plan.plugins], { isEditMode, isDraftMode, hasSapJs });
   const loaded = {};
+  // The reader's transport choice comes from the plan just resolved, never from the
+  // URL: when generic sync loaded, it owns the saved lane and the reader follows
+  // the frames it applies rather than opening a second stream.
+  const readerOptions = { sync: plan.plugins.includes("sync/live-sync.js") };
 
   for (const path of plan.core) {
     loaded[path] = await MODULES[path](); // sequential: order is load-bearing
@@ -81,6 +85,7 @@ export async function boot(base, params, readyResolve, manifest = null) {
       continue;
     }
     loaded[path] = mod;
+    if (path === "plugins/page-view.js") mod.start(readerOptions);
     attachPluginMember(path, mod, loaded); // immediately, not after the loop: hypercms's ?cms=true
                                      // auto-open runs as a microtask queued during ITS evaluation
                                      // (before boot resumes) and reads clay.RichClay and clay.undo,

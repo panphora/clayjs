@@ -183,12 +183,35 @@ describe("resolveModules", () => {
     expect(plugins).toContain("plugins/ai-edit.js");
   });
 
-  // upload is editOnly too, so it never reaches the emitted list in view mode; that
-  // page still implies it there is only observable in edit mode, above.
-  test("plugins=page in view mode still brings live and sync", () => {
-    const { plugins } = resolveModules(params({ plugins: "page" }), false);
-    expect(plugins).toContain("plugins/live.js");
-    expect(plugins).toContain("sync/live-sync.js");
+  // The editor half is editOnly, so in view mode `page` brings nothing with it:
+  // neither the generic sync, the live data service nor the uploader. A reader is
+  // its reader half alone, on a saved transport of its own.
+  test("plugins=page in view mode brings neither live nor sync", () => {
+    const { plugins, late } = resolveModules(params({ plugins: "page" }), false);
+    expect(plugins).toEqual(["plugins/page-view.js"]);
+    expect(late).toEqual([]);
+  });
+
+  test("plugins=page,sync in view mode keeps the sync the tag asked for", () => {
+    const { plugins } = resolveModules(params({ plugins: "page,sync" }), false);
+    expect(plugins).toEqual(["plugins/page-view.js", "sync/live-sync.js"]);
+  });
+
+  test("plugins=page,live in view mode keeps live and adds no sync", () => {
+    const { plugins } = resolveModules(params({ plugins: "page,live" }), false);
+    expect(plugins).toEqual(["plugins/page-view.js", "plugins/live.js"]);
+  });
+
+  // Excluding either transport leaves the reader its own, since the reader never
+  // asked for them.
+  test("exclude=sync or exclude=live leaves the view-mode reader in place", () => {
+    for (const query of [
+      { plugins: "page,sync", exclude: "sync" },
+      { plugins: "page,live", exclude: "live" },
+      { plugins: "page", exclude: "sync,live,upload" },
+    ]) {
+      expect(resolveModules(params(query), false).plugins).toEqual(["plugins/page-view.js"]);
+    }
   });
 
   // Excluding the wire takes ai-edit out with it, since the plugin cannot run
@@ -285,10 +308,16 @@ test("draft mode keeps the core: a visitor's tab paints the totals of its own dr
 });
 
 describe("page-view, the reader half of page", () => {
-  test("view mode adds it before live sync, so the frame listener exists first", () => {
+  test("view mode adds it, and nothing else page would have implied", () => {
     const { plugins } = resolveModules(params({ plugins: "page" }), false);
     expect(plugins).not.toContain("plugins/page.js");
-    expect(plugins).toContain("plugins/page-view.js");
+    expect(plugins).toEqual(["plugins/page-view.js"]);
+  });
+
+  // An explicitly requested sync still loads, and the reader comes before it so
+  // the feed's listener exists first.
+  test("view mode adds it before an explicitly requested live sync", () => {
+    const { plugins } = resolveModules(params({ plugins: "page,sync" }), false);
     expect(plugins).toContain("sync/live-sync.js");
     expect(plugins.indexOf("plugins/page-view.js"))
       .toBeLessThan(plugins.indexOf("sync/live-sync.js"));
