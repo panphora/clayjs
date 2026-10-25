@@ -13,8 +13,8 @@ import { blockKeys, structurePlugin, collapsePlugin, pastePlugin, BlockSelection
 import { chromePlugin, slashRangePlugin } from "./chrome.js";
 import { announcementPlugin } from "./announce.js";
 import { linkPlugin } from "./link.js";
-import { blockSelectionPlugin } from "./blocksel.js";
-import { markdownPlugin, markdownKeys, backspaceToParagraph } from "./markdown.js";
+import { blockSelectionPlugin, asStep } from "./blocksel.js";
+import { markdownPlugin, markdownKeys, backspaceToParagraph, composing } from "./markdown.js";
 import { placeholderPlugin } from "./placeholder.js";
 import { titlePlugin } from "./document-title-runtime.js";
 import { mediaPlugin } from "./media.js";
@@ -232,8 +232,13 @@ const editKeys = ({ history: useHistory = true, undo, redo } = {}) => ({
   "Mod-i": commands.toggleMark(schema.marks.em),
 });
 
+const restoreShortcut = (st, dispatch, view) => {
+  if (composing(null, view)) return false;
+  return inputrules.undoInputRule(st, dispatch && ((tr) => dispatch(asStep(tr))));
+};
+
 const markKeys = {
-  Backspace: commands.chainCommands(inputrules.undoInputRule, backspaceToParagraph),
+  Backspace: commands.chainCommands(restoreShortcut, backspaceToParagraph),
   "Mod-e": commands.toggleMark(schema.marks.code),
   "Mod-Shift-s": commands.toggleMark(schema.marks.strike),
 };
