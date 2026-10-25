@@ -75,6 +75,8 @@ export const PLUGIN_PATHS = {
   // The sapjs core. Loaded for any page with a [sap] root at boot (resolveModules'
   // hasSap), in view mode too: a reader's tab paints the same totals.
   derive:    { path: "plugins/derive.js",          editOnly: false, default: false },
+  // The update check a starter template copy gets from its own hyper-source meta.
+  upgrade:   { path: "plugins/upgrade.js",         editOnly: false, default: false },
 };
 
 // One literal import per module the loader can ask for, so a bundler can see the
@@ -130,11 +132,12 @@ export const MODULES = {
   "plugins/bind-text.js":       () => import("./plugins/bind-text.js"),
   "plugins/source.js":          () => import("./plugins/source.js"),
   "plugins/derive.js":          () => import("./plugins/derive.js"),
+  "plugins/upgrade.js":         () => import("./plugins/upgrade.js"),
 };
 
 // `source` is last on purpose: its install captures a save clone, so it wants every
 // plugin that registers a document transform to have registered it first.
-const PLUGIN_ORDER = ["visitor-drafts", "richclay", "indicator", "sortable", "undo", "unsent", "quickcrop", "upload", "people", "menu", "cms", "page-view", "sync", "live", "page", "message", "wire", "ai-edit", "demo", "derive", "bind-text", "source"];
+const PLUGIN_ORDER = ["visitor-drafts", "richclay", "indicator", "sortable", "undo", "unsent", "quickcrop", "upload", "people", "menu", "upgrade", "cms", "page-view", "sync", "live", "page", "message", "wire", "ai-edit", "demo", "derive", "bind-text", "source"];
 
 // A plugin that cannot do its whole job alone. hypercms reads the cropper through
 // a capability lookup (`clay.quickcrop`) and silently uploads the raw file when it
@@ -186,13 +189,16 @@ function parseCsv(params, key, enabled, apply) {
 
 // Each of these talks to the host or writes outside the visitor's own record, so a
 // page that keeps its edits in this browser cannot carry them.
-const DRAFT_DROPS = ["sync", "live", "page", "upload", "quickcrop", "cms", "people", "menu", "wire", "ai-edit", "demo", "source"];
+const DRAFT_DROPS = ["sync", "live", "page", "upload", "quickcrop", "cms", "people", "menu", "upgrade", "wire", "ai-edit", "demo", "source"];
 
 // [refetch-on-save] swaps its element for a fresh GET of the same URL after every
 // save, which on a visitor's own draft is a request to the host.
 const DRAFT_DROPS_CORE = ["attrs/refetch-on-save.js"];
 
-export function resolveModules(params, isEditMode, { isDraftMode = false, hasSap = false } = {}) {
+// Only that host's copies auto-add the update check; another source names it.
+const TEMPLATE_SOURCE_PREFIX = "https://hyperclay.com/templates/";
+
+export function resolveModules(params, isEditMode, { isDraftMode = false, hasSap = false, canEdit = false, templateSource = null } = {}) {
   const core = [...CORE_WAVES.always];
   if (isEditMode) core.push(...CORE_WAVES.editOnly);
 
@@ -223,6 +229,13 @@ export function resolveModules(params, isEditMode, { isDraftMode = false, hasSap
       if (at > -1) core.splice(at, 1);
     }
     enabled.add("visitor-drafts");
+  }
+
+  // A copy of a starter template upgrades with no authored tag, so copies shipped
+  // between the metas and this plugin upgrade too.
+  if (!isDraftMode && canEdit && !excluded.has("upgrade") && templateSource &&
+      templateSource.startsWith(TEMPLATE_SOURCE_PREFIX)) {
+    enabled.add("upgrade");
   }
 
   if (!isEditMode && enabled.has("page")) enabled.add("page-view");

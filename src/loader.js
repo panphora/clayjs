@@ -16,6 +16,12 @@ function domReady() {
   return new Promise((resolve) => onDomReady(resolve));
 }
 
+// Where this document came from, when it is a copy of a starter template.
+function templateSource() {
+  const meta = document.querySelector('meta[name="hyper-source"]');
+  return meta ? meta.getAttribute("content") : null;
+}
+
 // `base` has been unused since 1.1.0 (the loader imports through MODULES) and
 // stays anyway: /v1/clay.js and /v1/src/loader.js are cached independently, so
 // for a while after a deploy a browser can pair either file with the other's
@@ -50,7 +56,7 @@ export async function boot(base, params, readyResolve, manifest = null) {
   // derive.js imports the sapjs core only when no sap.js script took the page over.
   const hasSapJs = Boolean(document.querySelector('script[src*="sap.js"]'));
   bootPhase.holdSettle = hasSap && isEditMode;
-  const plan = resolveModules(params, isEditMode, { isDraftMode, hasSap });
+  const plan = resolveModules(params, isEditMode, { isDraftMode, hasSap, canEdit, templateSource: templateSource() });
   preloadEntries(manifest, [...plan.core, ...plan.plugins], { isEditMode, isDraftMode, hasSapJs });
   const loaded = {};
 

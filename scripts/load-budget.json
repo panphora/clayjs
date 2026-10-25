@@ -1,30 +1,30 @@
 {
   "document.html": {
-    "view": { "requests": 88, "depth": 28, "brotli": 359424, "css": { "requests": 2, "depth": 2 } },
+    "view": { "requests": 88, "depth": 28, "brotli": 360448, "css": { "requests": 2, "depth": 2 } },
     "edit": { "requests": 168, "depth": 45, "brotli": 577536, "css": { "requests": 2, "depth": 2 } }
   },
   "document-rich.html": {
-    "view": { "requests": 88, "depth": 28, "brotli": 359424, "css": { "requests": 2, "depth": 2 } },
+    "view": { "requests": 88, "depth": 28, "brotli": 360448, "css": { "requests": 2, "depth": 2 } },
     "edit": { "requests": 175, "depth": 50, "brotli": 599040, "css": { "requests": 2, "depth": 2 } }
   },
   "document-text.html": {
-    "view": { "requests": 88, "depth": 28, "brotli": 359424, "css": { "requests": 2, "depth": 2 } },
+    "view": { "requests": 88, "depth": 28, "brotli": 360448, "css": { "requests": 2, "depth": 2 } },
     "edit": { "requests": 168, "depth": 45, "brotli": 577536, "css": { "requests": 2, "depth": 2 } }
   },
   "kanban.html": {
     "view": { "requests": 88, "depth": 26, "brotli": 271360, "css": { "requests": 0, "depth": 0 } },
-    "edit": { "requests": 107, "depth": 48, "brotli": 369664, "css": { "requests": 0, "depth": 0 } },
-    "draft": { "requests": 88, "depth": 38, "brotli": 295936, "css": { "requests": 0, "depth": 0 } }
+    "edit": { "requests": 107, "depth": 48, "brotli": 370688, "css": { "requests": 0, "depth": 0 } },
+    "draft": { "requests": 88, "depth": 38, "brotli": 296960, "css": { "requests": 0, "depth": 0 } }
   },
   "journal.html": {
     "view": { "requests": 86, "depth": 24, "brotli": 263168, "css": { "requests": 0, "depth": 0 } },
     "edit": { "requests": 101, "depth": 42, "brotli": 335872, "css": { "requests": 0, "depth": 0 } },
-    "draft": { "requests": 86, "depth": 36, "brotli": 278528, "css": { "requests": 0, "depth": 0 } }
+    "draft": { "requests": 86, "depth": 36, "brotli": 279552, "css": { "requests": 0, "depth": 0 } }
   },
   "built": {
     "document.html": {
       "view": { "requests": 55, "depth": 3, "brotli": 207872 },
-      "edit": { "requests": 80, "depth": 3, "brotli": 333824 }
+      "edit": { "requests": 80, "depth": 3, "brotli": 334848 }
     },
     "document-rich.html": {
       "view": { "requests": 55, "depth": 3, "brotli": 207872 },
@@ -32,7 +32,7 @@
     },
     "document-text.html": {
       "view": { "requests": 55, "depth": 3, "brotli": 207872 },
-      "edit": { "requests": 80, "depth": 3, "brotli": 333824 }
+      "edit": { "requests": 80, "depth": 3, "brotli": 334848 }
     },
     "kanban.html": {
       "view": { "requests": 55, "depth": 3, "brotli": 139264 },
@@ -40,7 +40,7 @@
       "draft": { "requests": 66, "depth": 3, "brotli": 192512 }
     },
     "journal.html": {
-      "view": { "requests": 53, "depth": 3, "brotli": 133120 },
+      "view": { "requests": 53, "depth": 3, "brotli": 134144 },
       "edit": { "requests": 71, "depth": 3, "brotli": 198656 },
       "draft": { "requests": 64, "depth": 3, "brotli": 175104 }
     }

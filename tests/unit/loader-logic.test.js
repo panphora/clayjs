@@ -337,6 +337,56 @@ describe("a Document's plugin plan", () => {
   });
 });
 
+// Plan 05 Step 3: a copy of a starter template carries its `hyper-source` meta, so
+// its owner gets the update check with no authored tag, and copies shipped between
+// the metas and this plugin upgrade too. Only the hyperclay template prefix does
+// that; any other source asks for the plugin by name.
+describe("the upgrade check", () => {
+  const copy = "https://hyperclay.com/templates/kanban/owned/latest.html";
+
+  test("an owner's template copy loads it with no authored tag", () => {
+    const { plugins } = resolveModules(params(), false, { canEdit: true, templateSource: copy });
+    expect(plugins).toContain("plugins/upgrade.js");
+  });
+
+  test("it loads in edit mode too", () => {
+    const { plugins } = resolveModules(params(), true, { canEdit: true, templateSource: copy });
+    expect(plugins).toContain("plugins/upgrade.js");
+  });
+
+  test("a reader of the same copy gets nothing", () => {
+    const { plugins } = resolveModules(params(), false, { canEdit: false, templateSource: copy });
+    expect(plugins).not.toContain("plugins/upgrade.js");
+  });
+
+  test("a draft gets nothing: the source would replace the wrong document", () => {
+    const { plugins } = resolveModules(params(), true, { canEdit: true, isDraftMode: true, templateSource: copy });
+    expect(plugins).not.toContain("plugins/upgrade.js");
+  });
+
+  test("another host's source is not a template copy", () => {
+    const { plugins } = resolveModules(params(), false, {
+      canEdit: true,
+      templateSource: "https://example.com/templates/kanban/owned/latest.html",
+    });
+    expect(plugins).not.toContain("plugins/upgrade.js");
+  });
+
+  test("a copy with no source, made before the metas, gets nothing", () => {
+    expect(resolveModules(params(), false, { canEdit: true }).plugins).not.toContain("plugins/upgrade.js");
+  });
+
+  test("exclude=upgrade turns it off", () => {
+    const { plugins } = resolveModules(params({ exclude: "upgrade" }), false, { canEdit: true, templateSource: copy });
+    expect(plugins).not.toContain("plugins/upgrade.js");
+  });
+
+  test("plugins=upgrade loads it for any source", () => {
+    expect(resolveModules(params({ plugins: "upgrade" }), false).plugins).toContain("plugins/upgrade.js");
+    expect(resolveModules(params({ plugins: "upgrade" }), true).plugins).toContain("plugins/upgrade.js");
+  });
+});
+
 describe("late plugins start loading on their own", () => {
   test("with no page plugin, after clay:ready plus one microtask and no timer", async () => {
     jest.resetModules();
