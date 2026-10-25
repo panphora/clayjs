@@ -222,7 +222,7 @@ The test suite checks this file opens without becoming dirty, saves the record a
 | `message` | off | yes | `message-form`: a visitor's contact form to the owner, `clay.message` (8.13) |
 | `ai-edit` | off | no | select text, ask an agent to rewrite it; implies `wire` |
 | `demo` | off | yes | fakes saving into `localStorage` for public demos |
-| `visitor-drafts` | off | yes | the draft store, `clay.visitorDrafts`, the download prompt, the intro area and the owner chip on a page that opted in (14) |
+| `visitor-drafts` | off | yes | `clay.visitorDrafts`; in draft mode the draft store, the download prompt and the intro area; outside it only the owner chip, fetched when the owner edits (14) |
 | `derive` | on for any page with a `[sap]` root | yes | the sapjs core: records and paints, treated as derived (8.11) |
 
 - Edit-only plugins never load in view mode, even when named. Their members are absent there: test `clay.isEditMode` or `'save' in clay`, never the presence of `clay.RichClay` alone.
@@ -230,8 +230,9 @@ The test suite checks this file opens without becoming dirty, saves the record a
 - Load order is fixed regardless of how you list them.
 - `exclude=richclay` when the app has no rich text. `exclude=source` saves one request and about 48 KB, at the cost of saves reprinting the whole document instead of keeping hand formatting.
 - Nothing implies `undo`, on purpose: it intercepts Cmd+Z in every text field on the page (8.3).
+- `page` in view mode loads its reader half and nothing it implies: a Document on `plugins=page` resolves to `page-view`, with no live data service, no generic `sync` and no `upload`. Name `sync` as well (`plugins=page,sync`) when the reader should take its saved files from sync's lane instead of its own.
 - `derive` loads by itself when the page has a `[sap]` root at boot, and stays idle when full sapjs is on the page. `exclude=derive` opts out; `plugins=derive` loads it for a page that adds its `[sap]` root later.
-- `visitor-drafts` is inert outside draft mode: named on a page with no `visitor-drafts` slot, no `api` rules tag, or a rules tag this version cannot read (not `data-rules-version="1"`, or not JSON), it loads, warns in the console and draws nothing. Section 14 covers the opt in.
+- `visitor-drafts` loads its draft store only in draft mode. A reader or an owner editing the original gets a small module that publishes an inert `clay.visitorDrafts` and, for the owner, the owner chip. Named on a page with no `visitor-drafts` slot, no `api` rules tag, or a rules tag this version cannot read (not `data-rules-version="1"`, or not JSON), it warns in the console and draws nothing. Section 14 covers the opt in.
 
 **A good default for apps:** `?plugins=sync,sortable,undo,indicator`, plus `upload` for images or attachments, plus `exclude=richclay` when there is no rich text.
 
@@ -259,6 +260,8 @@ Satellites do not wait for `clay.ready` and work without `clay.js` at all, inclu
 
 `clay.ready` is a promise that resolves with `window.clay` once boot is done and every plugin has loaded. `clay:ready` fires on `document` at the same moment. Before it resolves, members like `clay.save` and `clay.undo` do not exist. Start app code with `clay.start(...)`: it waits for `clay.ready` and runs once per page (9.10).
 
+`clay.plugins` is the frozen list of plugin names in the plan the loader resolved, late plugins included. It says what the page asked for, not what has finished loading.
+
 You can set configuration before the tag, and the loader merges into it: `window.clay = { saveToast: true }`.
 
 ### 3.5 Theming ClayJS's own UI
@@ -283,6 +286,38 @@ window.clayTheme = {
 - `window.clayTheme = false` keeps the exact built-in look. After loading, `clay.theme(options)` replaces the theme, `clay.theme(false)` and `clay.theme(null)` restore the built-in look or the default, and `clay.theme()` returns the current one. A change affects the next dialog, not one already open.
 
 Your stylesheet still cannot reach these elements: every declaration is inline and `!important`, so a stray `button { ... }` rule never breaks a prompt. On a phone, dialog buttons stay at least 44px tall whatever the theme asks for.
+
+### 3.6 Plugins that load late
+
+`source`, `sortable` and `menu` load after `clay:ready`, one at a time, in the order the plan resolves them. Nothing on first paint or on the first keystroke waits for them, and a late plugin that fails to load is logged and left absent, like any other.
+
+Each late plugin fires `clay:plugin-ready` on `document` once its own `ready` settles, with `detail.plugin` naming it. That event is where a page tunes something the plugin built for itself: the Kanban waits for `sortable` and then sets the drag delay its cards need on a phone.
+
+```js
+document.addEventListener("clay:plugin-ready", (event) => {
+  if (event.detail.plugin !== "sortable") return;
+  for (const list of document.querySelectorAll("ol.cards")) {
+    const sortable = window.Sortable?.get?.(list);
+    sortable?.option("delay", 220);
+    sortable?.option("delayOnTouchOnly", true);
+  }
+});
+```
+
+Do not read `window.Sortable` in a `clay.ready` callback: the plugin may not have arrived. `clay.plugins` tells you it is coming; `clay:plugin-ready` tells you it is here.
+
+### 3.7 Libraries on demand
+
+`clay.assets.load(name)` resolves a library from the same release that served `clay.js`, the first time a page asks for it: no vendor URL in the document, and a copy served by another host, or opened from disk, still finds it. The names are `overtype`, `marked` and `highlight`, plus one grammar per `highlight/<language>` for `bash`, `css`, `javascript`, `json`, `python` and `xml`. `clay.assets.names()` lists them.
+
+```js
+const { Marked } = await clay.assets.load("marked");
+const { default: hljs } = await clay.assets.load("highlight");
+const { default: javascript } = await clay.assets.load("highlight/javascript");
+hljs.registerLanguage("javascript", javascript);
+```
+
+`overtype` resolves the vendored OverType editor with its toolbar buttons, `marked` the `Marked` class, and `highlight` the core with no grammar of its own, so a page registers only the grammars it uses. One load per name: a second call before the first settles shares it, a failed one is forgotten and can be tried again, and an unknown name rejects with `clay.assets: no asset named "<name>"`. The [`window.clay` reference](https://clayjs.com/docs/api/) lists what each name resolves to.
 
 ---
 
@@ -696,6 +731,23 @@ Events, all on `document`:
 - Outside edits to the file on disk (an agent, a text editor, a version restore on desktop hosts) arrive as `disk` frames and merge the same way.
 
 So collaborators see each other's work a few seconds after each pause. On a page without autosave they see nothing until someone saves, and overlapping work only meets at save time. **Every collaborative file uses `autosave`.**
+
+#### The reader's lane
+
+A Document in view mode loads its reader (`page-view`), not the editor, and the reader has no write half. It sees saved files and nothing else:
+
+- **Saved, not live.** It follows a receive-only transport of its own (`src/sync/saved-stream.js`): a startup GET once the stream opens, then the saved lane's frames, then a refetch and repair after a reconnect or a gap. It never POSTs, never sends a live relay and needs no write credentials.
+- **One receipt.** The reader holds the bytes on screen, their ETag and the sequence they cover, as one `{ bytes, etag, seq }`. A duplicate or older frame is dropped without moving it, a stamp alone never repairs missing bytes, and a refused or failed read keeps both the article and the receipt that were already there.
+- **Keyed replacement.** An accepted file replaces only the blocks whose saved form changed (`src/page/reader-patch.js`). An unchanged block keeps its node, so an open toggle, a mounted tool and find-in-page survive.
+- **Explicit `sync` keeps one owner.** On `plugins=page,sync` in view mode the saved lane already has an owner: the reader opens no stream of its own and takes the files that lane applied (`clay:sync-applied` with `source: "disk"`). Neither case adopts a peer's unsaved preview as a saved file.
+
+#### A frame from another template version
+
+A document copied from a starter template carries `<meta name="hyper-version" content="1.1.0">`, and `hyper-source` beside it, so an upgrade can find it. An upgrade replaces layout, code and data together, so a saved file that names a **different** version is not a change to this one: the frame is refused whole, never merged and never applied, because morphing it in would interleave two templates.
+
+Once a frame is refused, this tab's DOM is a version the host no longer stores, so its next save would write that version back over the upgrade: the tab holds every save from then on, and every later frame is dropped too. The notice says **This document was upgraded.** with one action, **Reload**, and `clay:document-upgraded` fires on `document` with `{ message }`.
+
+Only a page that states its own version can make this judgement, and only a frame that states one can disagree, so a document without the meta behaves exactly as it did before. Holding the saves is edit mode's lane, so a reader with nothing to write downloads none of it for the hold.
 
 ### 7.2 What a merge does
 
