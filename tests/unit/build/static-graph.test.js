@@ -200,6 +200,43 @@ test("kanban view: the reader graph has no save code or parse5", async () => {
   expect(graph.has("src/vendor/parse5.vendor.js")).toBe(false);
 });
 
+// The dialog, the avatars and the editing markers are UI a reader may never be shown:
+// a lone reader opens no name prompt and draws nobody, so the Bevel subset they paint
+// with is fetched at first use and is not in the reader's walk. The edges below say
+// the modules still exist to be fetched, and are dynamic.
+const FIRST_USE_UI = [
+  "src/ui/bevel-dialog.js",
+  "src/ui/bevel-controls.js",
+  "src/ui/bevel.js",
+  "src/ui/theme-parts.js",
+];
+
+const dynamicDeps = (inputs, file) =>
+  (inputs[file]?.imports || []).filter((im) => im.kind === "dynamic-import").map((im) => im.path);
+
+test("kanban view: the dialog, presence and markers paint from a first-use download", async () => {
+  const html = readFileSync(new URL("../../../tests/fixtures/load/kanban.html", import.meta.url), "utf8");
+  const params = new URL(html.match(/<script[^>]+src="([^"]*clay\.js[^"]+)"/)[1]).searchParams;
+  const plan = resolveModules(params, false, { isDraftMode: false, hasSap: FIXTURES.kanban.hasSap });
+  const entries = [...plan.core, ...plan.plugins].map((path) => `src/${path}`);
+  const inputs = await inputsFor(entries);
+  const graph = walk(inputs, entries);
+
+  expect(entries).toContain("src/plugins/people.js");
+  expect(graph.has("src/sync/presence.js")).toBe(true);
+  expect(graph.has("src/sync/editing-marker.js")).toBe(true);
+  expect([...graph].filter((file) => FIRST_USE_UI.includes(file))).toEqual([]);
+
+  // Built, so each first use has something to fetch when it happens...
+  expect(Object.keys(inputs)).toEqual(expect.arrayContaining(FIRST_USE_UI));
+  expect(dynamicDeps(inputs, "src/plugins/people.js")).toEqual(expect.arrayContaining([
+    "src/ui/bevel-dialog.js", "src/ui/bevel-controls.js", "src/ui/theme.js",
+  ]));
+  for (const file of ["src/sync/presence.js", "src/sync/editing-marker.js"]) {
+    expect(dynamicDeps(inputs, file)).toEqual(expect.arrayContaining(["src/ui/bevel-controls.js", "src/ui/bevel.js"]));
+  }
+});
+
 // The upgrade's save is a conditional POST of a whole document, and only a page that
 // can be upgraded ever makes one. It lives outside the save core so that every edit
 // boot, and every reader, carries none of it; the upgrade plugin is the one module
