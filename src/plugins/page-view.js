@@ -19,8 +19,14 @@ let settle = null;
 let cancelled = false;
 
 // The promise the loader holds clay:ready for: it settles once the reader has
-// applied its first saved file, or with null when there is nothing to read.
+// started its saved transport, or null with no single article, so clay:ready
+// never waits on the network and fires even if the stream never opens.
 export let ready = null;
+
+// The first saved file's outcome: the started reader, or null on a blocked or
+// recoverable status. The stream keeps running after that null, so a later
+// accepted file still starts one. Await this, not `ready`, for the file.
+export let acquired = null;
 
 const oneArticle = () => document.querySelectorAll("article[data-page]").length === 1;
 
@@ -46,9 +52,12 @@ function acquire() {
         resolve(reader);
         return true;
       },
+      // A blocked or recoverable first read settles acquired with no reader. The
+      // stream keeps running, so a later accepted file still starts one, and
+      // `ready` has already settled without waiting for either.
       onStatus: (status) => {
-        if (cancelled || status?.state !== "blocked") return;
-        resolve(null);
+        if (cancelled) return;
+        if (status?.state === "blocked" || status?.state === "recoverable") resolve(null);
       },
     });
     acquisition = stream;
@@ -77,7 +86,11 @@ function followSync() {
 export function start({ sync = false } = {}) {
   if (ready) return ready;
   cancelled = false;
-  ready = sync ? followSync() : acquire();
+  acquired = sync ? followSync() : acquire();
+  // With generic sync the reader starts before this returns, so both promises
+  // settle together; otherwise only the transport starts here and the first
+  // file arrives later, from the stream.
+  ready = sync ? acquired : Promise.resolve(null);
   return ready;
 }
 

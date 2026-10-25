@@ -59,7 +59,7 @@ test("with generic sync the reader opens no stream and follows the lane's disk f
   await pageView.start({ sync: true });
 
   expect(streams).toHaveLength(0);
-  const reader = await pageView.ready;
+  const reader = await pageView.acquired;
   expect(reader.represented).toEqual({ bytes: null, etag: null, seq: null });
 
   const bytes = FILE("Disk", { rev: "r2", title: "Disk title" });
@@ -93,7 +93,7 @@ test("without sync the reader owns the saved lane and takes no clay:sync-applied
   streams[0].options.onSnapshot({ bytes, etag: "disk-2", seq: 4 });
 
   expect(document.querySelector('[data-id="p1"]').textContent).toBe("Fetched");
-  const reader = await pageView.ready;
+  const reader = await pageView.acquired;
   expect(reader.represented).toEqual({ bytes, etag: "disk-2", seq: 4 });
 
   disk(FILE("Elsewhere", { rev: "r3" }), "disk-3", 5);
@@ -123,7 +123,7 @@ test("the loader passes the plan's sync choice to the reader", async () => {
   expect(document.querySelector('[data-id="p1"]').textContent).toBe("Synced");
 
   const pageView = await import("../../../src/plugins/page-view.js");
-  const reader = await pageView.ready;
+  const reader = await pageView.acquired;
   expect(reader.represented).toEqual({ bytes, etag: "disk-2", seq: 3 });
   pageView.stop();
 });
