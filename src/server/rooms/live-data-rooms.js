@@ -422,9 +422,9 @@ export function createRooms({ now = Date.now, newEpoch = randomUUID, liveBytes =
       return reservePageTarget(key, nodeId, room, html, { source, base, epoch, names, format: 'yjs' });
     },
 
-    reservePageInitial(key, { nodeId, currentHtml, html, ifMatch }) {
+    reservePageInitial(key, { nodeId, currentHtml, html, ifMatch, pageWrite = null, createDocument }) {
       const room = pageSource(key, nodeId);
-      checkPageInitial({ currentHtml, html, ifMatch, room });
+      checkPageInitial({ currentHtml, html, ifMatch, room, pageWrite, createDocument });
       return reservePageTarget(key, nodeId, room, html, { source: 'initial', names: [], format: 'yjs' });
     },
 

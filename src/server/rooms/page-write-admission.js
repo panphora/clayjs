@@ -4,6 +4,7 @@ import { inspectPage } from './page-admission.js';
 import { checkPageConversion, PageConversionError } from './page-conversion.js';
 import { PageFormatError } from './page-write-guard.js';
 import { ifMatchSatisfied } from './spec-wire.js';
+import { checkInitialLineage, checkOrdinaryLineage } from './page-lineage.js';
 
 const PAGE = /^page(\.[0-9]+)?$/;
 const record = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -33,14 +34,15 @@ function checkInitialCondition(ifMatch, currentHtml) {
     !ifMatchSatisfied(ifMatch, currentHtml)) refuse('file-changed');
 }
 
-export function checkPageInitial({ currentHtml, html, ifMatch, room = null }) {
+export function checkPageInitial({ currentHtml, html, ifMatch, room = null, pageWrite = null, createDocument }) {
   if (typeof currentHtml !== 'string' || inspectPage(currentHtml).kind !== 'none') refuse('invalid-source');
   if (typeof html !== 'string' || inspectPage(html).kind !== 'yjs') refuse('invalid-capture');
   checkInitialRoom(room);
   checkInitialCondition(ifMatch, currentHtml);
+  checkInitialLineage({ currentHtml, html, pageWrite, createDocument });
 }
 
-export function checkPageWriteAdmission({ currentHtml, html, header = null, ifMatch, room = null }) {
+export function checkPageWriteAdmission({ currentHtml, html, header = null, ifMatch, room = null, pageWrite = null, createDocument }) {
   const before = inspectPage(currentHtml ?? '');
   const after = inspectPage(html ?? '');
   const converted = before.kind === 'yjs' || room?.pageTransition?.format === 'yjs';
@@ -50,7 +52,10 @@ export function checkPageWriteAdmission({ currentHtml, html, header = null, ifMa
     checkPageConversion({ header, currentHtml, html, ifMatch, room });
     return 'conversion';
   }
-  if (converted) return 'ordinary';
+  if (converted) {
+    checkOrdinaryLineage({ currentHtml, html, room });
+    return 'ordinary';
+  }
   if (after.kind !== 'yjs') {
     if (after.kind === 'invalid' && claimsYPage(html ?? '') && !claimsYPage(currentHtml ?? '')) refuse('invalid-capture');
     return 'ordinary';
@@ -59,5 +64,6 @@ export function checkPageWriteAdmission({ currentHtml, html, header = null, ifMa
   if (before.kind !== 'none' || typeof currentHtml !== 'string') refuse('invalid-source');
   checkInitialRoom(room);
   checkInitialCondition(ifMatch, currentHtml);
+  checkInitialLineage({ currentHtml, html, pageWrite, createDocument });
   return 'initial';
 }

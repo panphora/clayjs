@@ -199,7 +199,7 @@ const writes = [
   { name: "conversion-over-tagged", current: TAGGED, body: CONVERTED, ifMatchOf: "current", pageWrite: null, expect: { js: "seed-lineage", htmlclay: "ordinary" } },
   { name: "identical-tag", current: TAGGED, body: TAGGED, ifMatchOf: "current", pageWrite: null, expect: { js: "ordinary", htmlclay: "ordinary" } },
   { name: "outside-edit-drops-tag", current: TAGGED, body: T2, ifMatchOf: "current", pageWrite: null, expect: { js: "ordinary", htmlclay: "ordinary" } },
-  { name: "new-site-from-template", current: "", body: CONVERTED, ifMatchOf: null, pageWrite: null, expect: { js: "initial", htmlclay: "initial" } },
+  { name: "new-site-from-template", current: "", body: CONVERTED, ifMatchOf: "current", pageWrite: null, expect: { js: "initial", htmlclay: "initial" } },
   { name: "empty-seed-only-v1", current: E, body: withTag(E, seedOf(E)), ifMatchOf: "current", pageWrite: "v1", expect: { js: "nothing-to-write", htmlclay: "nothing-to-write" } },
   { name: "empty-first-edit", current: E, body: editBody(E, appendParagraph(seedE)), ifMatchOf: "current", pageWrite: "v1", expect: { js: "initial", htmlclay: "ordinary" } },
   { name: "large-first-edit", current: L, body: editBody(L, edited(seedL, 1001, dropFirst)), ifMatchOf: "current", pageWrite: "v1", expect: { js: "initial", htmlclay: "ordinary" } },

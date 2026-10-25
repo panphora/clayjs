@@ -27,6 +27,8 @@ const locate = recent(4, (html) => {
   });
 });
 
+export const pageArticles = (html) => locate(html).articles;
+
 export function pageRev(html) {
   if (typeof html !== 'string') return null;
   return locate(html).rev;
