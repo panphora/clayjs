@@ -13,10 +13,11 @@ const DEFAULT_TYPE = "text/plain; charset=utf-8";
 
 const typeOf = (pub) => CONTENT_TYPES.get(path.posix.extname(pub).toLowerCase()) ?? DEFAULT_TYPE;
 
-// The three non-literal dynamic imports the generated bootstraps use, by their exact
+// The non-literal dynamic imports the generated bootstraps use, by their exact
 // source text: each one's target comes from the chunk manifest the bootstrap embeds.
 const NONLITERAL = {
   "import(dir + M.manifest)": "a bootstrap loads the chunk manifest it embeds the name of",
+  "import(dir + M.edit)": "a bootstrap loads the edit supplement of the manifest it embeds the name of",
   "import(R.dir + file)": "a bootstrap imports a chunk the manifest names",
   'import(R.dir + R.manifest.entries["loader.js"])': "clay.js imports the loader chunk the manifest names",
 };
@@ -237,7 +238,7 @@ export async function verifyOfflineClosure({ packageRoot, publishedRoot } = {}) 
       continue;
     }
     if (!payload) continue;
-    const targets = [payload.manifest, ...(payload.preload ?? [])];
+    const targets = [payload.manifest, ...(payload.edit ? [payload.edit] : []), ...(payload.preload ?? [])];
     for (const target of targets) {
       if (!listed.has(`m/${target}`)) problems.push(`${pub}: embeds m/${target}, which the release does not list`);
     }
