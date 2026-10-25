@@ -52,11 +52,12 @@ let site;
 let version;
 let publicDir;
 let manifest;
+const extras = [];
 
-async function build() {
+async function build(dir = site) {
   return run(process.execPath, ["build.js"], {
-    cwd: site,
-    env: { ...process.env, PATH: `${path.join(site, "bin")}:${process.env.PATH}` },
+    cwd: dir,
+    env: { ...process.env, PATH: `${path.join(dir, "bin")}:${process.env.PATH}` },
   });
 }
 
@@ -107,7 +108,7 @@ beforeAll(async () => {
 }, 300000);
 
 afterAll(async () => {
-  await rm(site, { recursive: true, force: true });
+  for (const dir of [site, ...extras]) await rm(dir, { recursive: true, force: true });
 });
 
 test("the document URL serves one compiled sheet: no @import and no external font", async () => {
@@ -167,7 +168,7 @@ test("every face is its pinned package's file, range and weight", async () => {
 
 test("content.css and the Light 1 rules are compiled in their existing order", async () => {
   const css = await readFile(path.join(publicDir, DOCUMENT_URL), "utf8");
-  const source = await readFile(path.join(ROOT, "src/page/themes/light-1.css"), "utf8");
+  const source = await readFile(path.join(ROOT, "src/page/themes/light-1.source.css"), "utf8");
   const content = await readFile(path.join(ROOT, "src/page/themes/content.css"), "utf8");
   const rules = source.slice(source.indexOf(":where(article[data-page], .page-shell) {"));
 
@@ -211,3 +212,57 @@ test("the npm package carries the fonts, their licenses and the compiled theme",
     expect(files).toContain(name);
   }
 }, 120000);
+
+test("every font the release manifest lists is inside the npm package", async () => {
+  const { stdout } = await run("npm", ["pack", "--dry-run", "--json", "--ignore-scripts"], { cwd: site });
+  const files = JSON.parse(stdout)[0].files.map((file) => file.path);
+  const fontAssets = manifest.assets.map((asset) => asset.path).filter((name) => name.startsWith("fonts/"));
+  expect(fontAssets.length).toBeGreaterThan(0);
+  for (const name of fontAssets) expect(files).toContain(name);
+}, 120000);
+
+// Publishing is the case the tree build cannot prove: once the registry lists this version
+// every prefix is copied from the tarball, and the compiled sheet and the fonts have to be
+// inside it. The npm stub reports this version as published and hands the build the tarball
+// this tree would publish.
+test("a published version serves the compiled theme and its fonts from the tarball", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "clay-theme-published-"));
+  extras.push(dir);
+  for (const name of PACKAGE_FILES) await cp(path.join(ROOT, name), path.join(dir, name));
+  for (const name of PACKAGE_DIRS) await cp(path.join(ROOT, name), path.join(dir, name), { recursive: true });
+  await symlink(path.join(ROOT, "node_modules"), path.join(dir, "node_modules"), "dir");
+  await mkdir(path.join(dir, "bin"));
+
+  await run(process.execPath, ["build.js", "--standalone"], { cwd: dir });
+  const filename = JSON.parse((await run("npm", ["pack", "--json", "--ignore-scripts"], { cwd: dir })).stdout)[0].filename;
+  const tarball = path.join(dir, filename);
+  await writeFile(path.join(dir, "bin", "npm"), `#!/bin/sh
+if [ "$1" = "view" ]; then echo '[${JSON.stringify(version)}]'; exit 0; fi
+if [ "$1" = "pack" ]; then
+  dest="."
+  prev=""
+  for arg in "$@"; do
+    if [ "$prev" = "--pack-destination" ]; then dest="$arg"; fi
+    prev="$arg"
+  done
+  cp '${tarball}' "$dest/${filename}"
+  echo '[{"filename":"${filename}"}]'
+  exit 0
+fi
+exit 1
+`);
+  await chmod(path.join(dir, "bin", "npm"), 0o755);
+
+  await build(dir);
+  for (const prefix of ["v1", version]) {
+    const css = await readFile(path.join(dir, "public", prefix, DOCUMENT_URL), "utf8");
+    expect(css).toContain("@font-face");
+    expect(css).not.toContain("@import");
+    expect(css).not.toMatch(/fonts\.(googleapis|gstatic)\.com/);
+    expect(urlsOf(css).filter((url) => /^(https?:)?\/\//.test(url))).toEqual([]);
+    for (const url of urlsOf(css)) {
+      const built = path.resolve(path.dirname(path.join(dir, "public", prefix, DOCUMENT_URL)), url);
+      expect(sha256(await readFile(built))).toBe(sha256(await readFile(path.join(ROOT, "fonts", path.basename(url)))));
+    }
+  }
+}, 300000);

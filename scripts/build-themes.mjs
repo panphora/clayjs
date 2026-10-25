@@ -19,7 +19,7 @@ export async function compileTheme({ root, name, outPath }) {
   // Font URLs are relative to the stylesheet that names them, and the same theme is
   // served at more than one path, so the depth comes from `outPath`, not a constant.
   const dir = path.dirname(outPath);
-  const source = await readFile(path.join(root, "src/page/themes", `${name}.css`), "utf8");
+  const source = await readFile(path.join(root, "src/page/themes", `${name}.source.css`), "utf8");
   const rel = (file) => path.relative(dir, `fonts/${file}`).split(path.sep).join("/");
 
   let out = "";

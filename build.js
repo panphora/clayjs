@@ -67,63 +67,59 @@ const pkg = JSON.parse(await readFile(join(ROOT, 'package.json'), 'utf8'));
 // because clay.js imports it by that literal path.
 const LIBRARY = new Map([['entries/', ''], ['dist/', ''], ['src/', 'src/']]);
 
-// Fonts served from the same prefixes as the library. Each entry names one pinned npm
-// package, the files to copy out of it, the hand-written stylesheet in the repo and
-// the package's license. A second family is one more entry, not more code.
+// Fonts served from the same prefixes as the library. Every file is committed under
+// fonts/, beside its hand-written stylesheet, so a fresh clone builds every prefix with
+// no network and the tarball carries the same bytes the site serves. Each entry names
+// the files to copy, the stylesheet and the license.
 const FONTS = [
   {
-    pkg: '@fontsource-variable/work-sans',
-    files: ['files/work-sans-latin-wght-normal.woff2'],
+    files: ['work-sans-latin-wght-normal.woff2'],
     css: 'fonts/work-sans.css',
-    license: 'LICENSE',
+    license: 'work-sans-LICENSE',
   },
   {
-    pkg: '@fontsource/ibm-plex-mono',
     files: [
-      'files/ibm-plex-mono-latin-300-normal.woff2',
-      'files/ibm-plex-mono-latin-400-normal.woff2',
-      'files/ibm-plex-mono-latin-500-normal.woff2',
-      'files/ibm-plex-mono-latin-600-normal.woff2',
-      'files/ibm-plex-mono-latin-400-italic.woff2',
+      'ibm-plex-mono-latin-300-normal.woff2',
+      'ibm-plex-mono-latin-400-normal.woff2',
+      'ibm-plex-mono-latin-500-normal.woff2',
+      'ibm-plex-mono-latin-600-normal.woff2',
+      'ibm-plex-mono-latin-400-italic.woff2',
     ],
     css: 'fonts/ibm-plex.css',
-    license: 'LICENSE',
+    license: 'ibm-plex-mono-LICENSE',
   },
   {
-    pkg: '@fontsource/ibm-plex-sans',
     files: [
-      'files/ibm-plex-sans-latin-400-normal.woff2',
-      'files/ibm-plex-sans-latin-500-normal.woff2',
-      'files/ibm-plex-sans-latin-600-normal.woff2',
+      'ibm-plex-sans-latin-400-normal.woff2',
+      'ibm-plex-sans-latin-500-normal.woff2',
+      'ibm-plex-sans-latin-600-normal.woff2',
     ],
     css: 'fonts/ibm-plex.css',
-    license: 'LICENSE',
+    license: 'ibm-plex-sans-LICENSE',
   },
   // The Document's Light 1 theme. Every subset the Google Fonts CSS listed, not latin
   // alone, so a Cyrillic or Greek document keeps its own glyphs instead of falling back.
   {
-    pkg: '@fontsource-variable/inter',
     files: [
-      'files/inter-cyrillic-ext-wght-normal.woff2',
-      'files/inter-cyrillic-wght-normal.woff2',
-      'files/inter-greek-ext-wght-normal.woff2',
-      'files/inter-greek-wght-normal.woff2',
-      'files/inter-vietnamese-wght-normal.woff2',
-      'files/inter-latin-ext-wght-normal.woff2',
-      'files/inter-latin-wght-normal.woff2',
+      'inter-cyrillic-ext-wght-normal.woff2',
+      'inter-cyrillic-wght-normal.woff2',
+      'inter-greek-ext-wght-normal.woff2',
+      'inter-greek-wght-normal.woff2',
+      'inter-vietnamese-wght-normal.woff2',
+      'inter-latin-ext-wght-normal.woff2',
+      'inter-latin-wght-normal.woff2',
     ],
     css: 'fonts/inter.css',
-    license: 'LICENSE',
+    license: 'inter-LICENSE',
   },
   {
-    pkg: '@fontsource-variable/newsreader',
     files: [
-      'files/newsreader-vietnamese-opsz-normal.woff2',
-      'files/newsreader-latin-ext-opsz-normal.woff2',
-      'files/newsreader-latin-opsz-normal.woff2',
+      'newsreader-vietnamese-opsz-normal.woff2',
+      'newsreader-latin-ext-opsz-normal.woff2',
+      'newsreader-latin-opsz-normal.woff2',
     ],
     css: 'fonts/newsreader.css',
-    license: 'LICENSE',
+    license: 'newsreader-LICENSE',
   },
 ];
 
@@ -235,8 +231,8 @@ async function copyInto(fromAbs, relPath) {
 async function fontSources() {
   const out = [];
   const sheets = new Set();
+  const dir = join(ROOT, 'fonts');
   for (const font of FONTS) {
-    const dir = join(ROOT, 'node_modules', font.pkg);
     const css = await lstat(join(ROOT, font.css)).catch(() => null);
     if (!css?.isFile()) throw new Error(`${font.css} is missing; the font stylesheet is written by hand`);
     // One stylesheet can cover more than one package, as ibm-plex.css covers both Plex
@@ -247,10 +243,10 @@ async function fontSources() {
     }
     for (const rel of font.files) {
       const file = await lstat(join(dir, rel)).catch(() => null);
-      if (!file?.isFile()) throw new Error(`${font.pkg} has no ${rel}; the copy table names a file the package does not ship`);
+      if (!file?.isFile()) throw new Error(`${font.css} has no ${rel}; the copy table names a file the repo does not ship`);
       out.push({ from: join(dir, rel), to: `fonts/${basename(rel)}` });
     }
-    out.push({ from: join(dir, font.license), to: `fonts/${font.pkg.split('/').pop()}-LICENSE` });
+    out.push({ from: join(dir, font.license), to: `fonts/${basename(font.license)}` });
   }
   return out;
 }
@@ -495,6 +491,10 @@ await emitBootstraps({ root: ROOT, outdir: DIST, manifest: chunks.manifest, sate
 const fonts = await fontSources();
 const theme = await emitThemeAsset();
 await emitAssets([...fonts, theme]);
+// The package's own served path carries the compiled bytes too, not the authoring
+// chain, so a tarball built from this tree serves one request like the site does. The
+// chain lives beside it as light-1.source.css.
+await writeFile(join(ROOT, 'src/page/themes', `${COMPILED_THEME}.css`), await compileTheme({ root: ROOT, name: COMPILED_THEME, outPath: `src/page/themes/${COMPILED_THEME}.css` }));
 if (process.argv.includes('--standalone')) {
   console.log(
     `built dist/${STANDALONE}, dist/server/{rooms,checkpoint}.cjs, ` +

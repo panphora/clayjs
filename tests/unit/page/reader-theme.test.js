@@ -4,7 +4,7 @@ import { PAGE_EDITOR_CSS } from '../../../src/page/editor.js';
 
 const themeNames = ['light-1', 'light-2', 'light-3', 'light-4'];
 const content = readFileSync(new URL('../../../src/page/themes/content.css', import.meta.url), 'utf8');
-const theme = (name) => readFileSync(new URL(`../../../src/page/themes/${name}.css`, import.meta.url), 'utf8');
+const theme = (name) => readFileSync(new URL(`../../../src/page/themes/${name === 'light-1' ? 'light-1.source' : name}.css`, import.meta.url), 'utf8');
 const withoutImports = (css) => css.replace(/^@import .*;\s*$/gm, '');
 const withoutLayer = (css) => css.replace(/^\s*@layer page \{\s*/, '').replace(/\}\s*$/, '');
 const oldEditorCss = PAGE_EDITOR_CSS
