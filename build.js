@@ -45,6 +45,7 @@ import { promisify } from 'node:util';
 import { build as esbuild } from 'esbuild';
 import { emitDocs } from './scripts/site-docs.mjs';
 import { emitBootstraps, emitChunks } from './scripts/build-chunks.mjs';
+import { compileTheme } from './scripts/build-themes.mjs';
 import { buildServerRooms } from './scripts/build-server-rooms.mjs';
 import { buildServerCheckpoint } from './scripts/build-server-checkpoint.mjs';
 
@@ -96,6 +97,32 @@ const FONTS = [
       'files/ibm-plex-sans-latin-600-normal.woff2',
     ],
     css: 'fonts/ibm-plex.css',
+    license: 'LICENSE',
+  },
+  // The Document's Light 1 theme. Every subset the Google Fonts CSS listed, not latin
+  // alone, so a Cyrillic or Greek document keeps its own glyphs instead of falling back.
+  {
+    pkg: '@fontsource-variable/inter',
+    files: [
+      'files/inter-cyrillic-ext-wght-normal.woff2',
+      'files/inter-cyrillic-wght-normal.woff2',
+      'files/inter-greek-ext-wght-normal.woff2',
+      'files/inter-greek-wght-normal.woff2',
+      'files/inter-vietnamese-wght-normal.woff2',
+      'files/inter-latin-ext-wght-normal.woff2',
+      'files/inter-latin-wght-normal.woff2',
+    ],
+    css: 'fonts/inter.css',
+    license: 'LICENSE',
+  },
+  {
+    pkg: '@fontsource-variable/newsreader',
+    files: [
+      'files/newsreader-vietnamese-opsz-normal.woff2',
+      'files/newsreader-latin-ext-opsz-normal.woff2',
+      'files/newsreader-latin-opsz-normal.woff2',
+    ],
+    css: 'fonts/newsreader.css',
     license: 'LICENSE',
   },
 ];
@@ -226,15 +253,30 @@ async function fontSources() {
   return out;
 }
 
+// The Document's Light 1 theme, authored as an @import chain in src/page/themes and served
+// compiled. The chain stays in the repo (scripts/build-themes.mjs) and a saved document
+// keeps the URL it already names, so the fixed path is the source of truth here.
+const COMPILED_THEME = 'light-1';
+const THEME_ASSET = `page/themes/${COMPILED_THEME}.css`;
+
+// Where the compiled theme is served besides the document URL: one style asset in the
+// release, so a local host reproduces the page's appearance offline from the manifest.
+async function emitThemeAsset() {
+  const from = join(DIST, THEME_ASSET);
+  await mkdir(dirname(from), { recursive: true });
+  await writeFile(from, await compileTheme({ root: ROOT, name: COMPILED_THEME, outPath: THEME_ASSET }));
+  return { from, to: THEME_ASSET };
+}
+
 const CONTENT_TYPES = new Map([['.woff2', 'font/woff2'], ['.css', 'text/css; charset=utf-8']]);
 
-// The release manifest lists the fonts beside the chunks under `assets`, keyed by
-// release-relative path, so a local host serves the folder offline from the same
-// inventory it copies the modules from. A build that copies a font the manifest does
-// not name is exactly the miss this catches.
-async function emitFontAssets(fonts) {
+// The release manifest lists the fonts and the compiled theme beside the chunks under
+// `assets`, keyed by release-relative path, so a local host serves the folder offline from
+// the same inventory it copies the modules from. A build that copies an asset the manifest
+// does not name is exactly the miss this catches.
+async function emitAssets(sources) {
   const assets = [];
-  for (const { from, to } of fonts) {
+  for (const { from, to } of sources) {
     const bytes = await readFile(from);
     assets.push({
       path: to,
@@ -449,7 +491,8 @@ for (const file of Object.keys(standaloneMeta.inputs)) {
 const chunks = await emitChunks({ root: ROOT, outdir: join(ROOT, 'dist/m') });
 await emitBootstraps({ root: ROOT, outdir: DIST, manifest: chunks.manifest, satellites: chunks.satellites });
 const fonts = await fontSources();
-const fontAssets = await emitFontAssets(fonts);
+const theme = await emitThemeAsset();
+await emitAssets([...fonts, theme]);
 if (process.argv.includes('--standalone')) {
   console.log(
     `built dist/${STANDALONE}, dist/server/{rooms,checkpoint}.cjs, ` +
@@ -475,11 +518,26 @@ for (const name of LIBRARY.keys()) {
 const published = new Set(await publishedPins());
 const pins = [...new Set([pkg.version, ...published])].sort(cmpVersion);
 const heads = rollingHeads(pins);
+// Prefixes served from the working tree rather than an unpacked tarball. Only they carry
+// this build's compiled theme: a published prefix keeps the bytes it was published with.
+const fromTree = (version) => !published.has(version);
+const treePrefixes = new Set([
+  ...pins.filter(fromTree),
+  ...[...heads].filter(([, version]) => fromTree(version)).map(([major]) => `v${major}`),
+]);
 
 for (const version of pins) count += await emitLibrary(await sourceFor(version, published), version);
 for (const [major, version] of heads) {
   count += await emitLibrary(await sourceFor(version, published), version, `v${major}`);
   count += await addPreviousChunks(`v${major}`, version, published);
+}
+
+// The document URL keeps its address and stops being a chain: the same path now holds the
+// compiled sheet, with the font URLs at that path's own depth.
+for (const prefix of treePrefixes) {
+  const rel = `src/page/themes/${COMPILED_THEME}.css`;
+  await writeFile(publicPath(join(prefix, rel)), await compileTheme({ root: ROOT, name: COMPILED_THEME, outPath: rel }));
+  count += 1;
 }
 
 // Fonts come from a pinned npm package rather than the release tarball, so every
@@ -488,8 +546,10 @@ for (const prefix of new Set([...[...heads.keys()].map((major) => `v${major}`), 
   for (const { from, to } of fonts) count += await copyInto(from, join(prefix, to));
 }
 
-// Root-level entries from "files": everything the library payload did not claim.
-for (const name of (pkg.files || []).filter((n) => !LIBRARY.has(n))) {
+// Root-level entries from "files": everything the library payload did not claim. fonts/ is
+// the one exception: the release carries it under every prefix, and a copy at the site root
+// would serve the same woff2 at a second URL.
+for (const name of (pkg.files || []).filter((n) => !LIBRARY.has(n) && n !== 'fonts/')) {
   const abs = resolve(ROOT, name);
   const stat = await lstat(abs).catch(() => null);
   if (!stat) throw new Error(`package.json "files" lists ${name}, which does not exist`);
@@ -603,7 +663,10 @@ for (const [prefix, version] of served) {
   // pinned alike. Tarballs published before the chunk build have none, and their pins
   // still have to rebuild, so the manifest is required only where they exist.
   if (CHUNKED.has(version)) required.push(`${prefix}/m/manifest.json`);
-  for (const asset of fontAssets) required.push(`${prefix}/${asset.path}`);
+  for (const asset of fonts) required.push(`${prefix}/${asset.to}`);
+  if (treePrefixes.has(prefix)) {
+    required.push(`${prefix}/${THEME_ASSET}`, `${prefix}/src/page/themes/${COMPILED_THEME}.css`);
+  }
 }
 for (const rel of required) {
   const stat = await lstat(join(PUBLIC, rel)).catch(() => null);

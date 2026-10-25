@@ -13,9 +13,10 @@ const run = promisify(execFile);
 const ROOT = path.resolve(new URL("../../..", import.meta.url).pathname);
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 
-// The families the folder ships: the Kanban's Work Sans and the Journal's two IBM Plex
-// packages. The copy table in build.js is the source of truth for every family, so this
-// test names each one it ships and reads the package itself for the bytes it expects.
+// The families the folder ships: the Kanban's Work Sans, the Journal's two IBM Plex
+// packages and the Document's Light 1 pair. The copy table in build.js is the source of
+// truth for every family, so this test names each one it ships and reads the package
+// itself for the bytes it expects.
 const FAMILIES = [
   {
     pkg: "@fontsource-variable/work-sans",
@@ -44,6 +45,30 @@ const FAMILIES = [
       "ibm-plex-sans-latin-600-normal.woff2",
     ],
     license: "ibm-plex-sans-LICENSE",
+  },
+  {
+    pkg: "@fontsource-variable/inter",
+    css: "inter.css",
+    woff2: [
+      "inter-cyrillic-ext-wght-normal.woff2",
+      "inter-cyrillic-wght-normal.woff2",
+      "inter-greek-ext-wght-normal.woff2",
+      "inter-greek-wght-normal.woff2",
+      "inter-vietnamese-wght-normal.woff2",
+      "inter-latin-ext-wght-normal.woff2",
+      "inter-latin-wght-normal.woff2",
+    ],
+    license: "inter-LICENSE",
+  },
+  {
+    pkg: "@fontsource-variable/newsreader",
+    css: "newsreader.css",
+    woff2: [
+      "newsreader-vietnamese-opsz-normal.woff2",
+      "newsreader-latin-ext-opsz-normal.woff2",
+      "newsreader-latin-opsz-normal.woff2",
+    ],
+    license: "newsreader-LICENSE",
   },
 ];
 
@@ -134,7 +159,8 @@ test("the rolling prefix serves the same folder, so /v1/fonts/ rolls with /v1/",
 
 test("the release manifest lists every font file with its size and hash", async () => {
   const manifest = JSON.parse(await readFile(path.join(site, "public", version, "m/manifest.json"), "utf8"));
-  const assets = [...manifest.assets].sort((a, b) => (a.path < b.path ? -1 : 1));
+  // The manifest also carries the compiled page theme; that is reader-theme-assets's subject.
+  const assets = manifest.assets.filter((asset) => asset.path.startsWith("fonts/")).sort((a, b) => (a.path < b.path ? -1 : 1));
   expect(assets.map((a) => a.path)).toEqual(SHIPPED.map((name) => `fonts/${name}`));
   for (const asset of assets) {
     const bytes = await readFile(path.join(site, "public", version, asset.path));
@@ -148,7 +174,7 @@ test("the release manifest lists every font file with its size and hash", async 
   expect(rolling.assets).toEqual(manifest.assets);
 });
 
-test("each stylesheet's file names and unicode-ranges are the packages' own, latin only", async () => {
+test("each stylesheet's file names and unicode-ranges are the packages' own", async () => {
   for (const sheet of CSS) {
     const families = FAMILIES.filter((family) => family.css === sheet);
     const files = families.flatMap((family) => family.woff2);
