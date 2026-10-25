@@ -2,7 +2,8 @@
  * @jest-environment node
  */
 import { expect, test } from "@jest/globals";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { createRequire } from "node:module";
 import path from "node:path";
 import {
@@ -13,6 +14,7 @@ import {
   canonicalizeRuntimeHTML,
   projectRuntimeHTML,
 } from "../../src/server/offline-runtime/index.js";
+import { buildServerOfflineRuntime } from "../../scripts/build-server-offline-runtime.mjs";
 
 const ROOT = path.resolve(new URL("../..", import.meta.url).pathname);
 const FIXTURES = path.join(ROOT, "tests/fixtures/offline-runtime");
@@ -77,9 +79,12 @@ test("the pure resolver imports nothing and touches no DOM", () => {
   expect(/\bwindow\b/.test(source)).toBe(false);
 });
 
-test("the built CommonJS entry exports both HTML functions", () => {
+// Built here rather than read from dist/, so the test never depends on a build another test ran.
+test("the built CommonJS entry exports both HTML functions", async () => {
+  const outdir = mkdtempSync(path.join(tmpdir(), "clay-offline-runtime-"));
+  await buildServerOfflineRuntime(outdir);
   const require = createRequire(import.meta.url);
-  const built = require(path.join(ROOT, "dist/server/offline-runtime.cjs"));
+  const built = require(path.join(outdir, "offline-runtime.cjs"));
   expect(typeof built.projectRuntimeHTML).toBe("function");
   expect(typeof built.canonicalizeRuntimeHTML).toBe("function");
 });

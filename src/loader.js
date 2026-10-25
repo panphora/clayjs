@@ -134,6 +134,8 @@ export async function boot(base, params, readyResolve, manifest = null, suppleme
 // (right away on a page without one), one at a time and in plan order, and a failure
 // degrades to absent as at boot.
 async function loadLate(paths, loaded) {
+  // Held once: a test environment can tear the global down while an import is in flight.
+  const doc = document;
   try {
     await window.clay.page?.ready;
   } catch {}
@@ -143,10 +145,10 @@ async function loadLate(paths, loaded) {
       loaded[path] = mod;
       attachPluginMember(path, mod, loaded);
       await mod.ready;
-      document.dispatchEvent(new CustomEvent("clay:plugin-ready", { detail: { plugin: PLUGIN_NAMES[path] } }));
+      doc.dispatchEvent(new CustomEvent("clay:plugin-ready", { detail: { plugin: PLUGIN_NAMES[path] } }));
     } catch (err) {
       console.error(`clayjs: plugin "${path}" failed to load, continuing without it:`, err);
-      document.dispatchEvent(new CustomEvent("clay:plugin-failed", { detail: { plugin: PLUGIN_NAMES[path] } }));
+      doc.dispatchEvent(new CustomEvent("clay:plugin-failed", { detail: { plugin: PLUGIN_NAMES[path] } }));
     }
   }
 }
