@@ -11,7 +11,7 @@ import { blockMap } from "./model.js";
 import { parseModel } from "./projection.js";
 import { ARTICLE, pageTags } from "./save-projection.js";
 import { parseJsonRelaxed } from "../vendor/hyper-morph-json.vendor.js";
-import { mergeEngine } from "../sync/merge-engine.js";
+import { loadedEngine, mergeEngine } from "../sync/merge-engine.js";
 
 const parseTag = (text) => { try { return parseJsonRelaxed(text); } catch { return null; } };
 
@@ -81,8 +81,8 @@ export function installAdoption({
   }
 
   // The editor merged three-way with what the file changed since base.
-  async function land(blocks, current, baseItems, incoming) {
-    const { HyperMorph } = await mergeEngine();
+  function land(blocks, current, baseItems, incoming) {
+    const { HyperMorph } = loadedEngine();
     const merged = mergePageModels(baseItems, current, incoming, { doc, merge3: HyperMorph.merge3, mergeJson: HyperMorph.mergeJson });
     const lost = merged.conflicts.filter((k) => k.kind === "text" || k.kind === "field");
     const copy = lost.length ? snapshot() : null;
@@ -106,11 +106,13 @@ export function installAdoption({
     if (found.kind !== "adopt" || !isAdopter()) return null;
     hold();
     try {
+      await mergeEngine();
+      if (disposed || !isAdopter()) return null;
       const waited = await waitForEditor();
       if (waited === "timeout") console.warn("page: gave up waiting for the editor; the hand edit was not adopted");
       if (waited !== "ready" || disposed || !isAdopter()) return null;
       const blocks = blockMap(view.state.doc);
-      const counts = await land(blocks, readBack(blocks, doc), found.baseItems, found.parsed);
+      const counts = land(blocks, readBack(blocks, doc), found.baseItems, found.parsed);
       if (counts) adopted(found.A);
       return counts;
     } finally {
@@ -132,6 +134,8 @@ export function installAdoption({
     // the next save would otherwise write over the edit.
     hold();
     try {
+      await mergeEngine();
+      if (disposed || !isAdopter()) return null;
       await writerReady();
       if (disposed || !isAdopter()) return null;
       const waited = await waitForEditor();
@@ -140,7 +144,7 @@ export function installAdoption({
       const current = readBack(blocks, doc);
       const known = new Map(current.map((item) => [item.id, item]));
       const parse = (article) => parseModel(article, { seed: article.getAttribute("data-rev") ?? "", known });
-      return await land(blocks, current, parse(base), parse(file.article));
+      return land(blocks, current, parse(base), parse(file.article));
     } finally {
       release();
     }
