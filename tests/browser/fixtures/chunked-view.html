@@ -6,7 +6,8 @@
   <script>
     window.clayEditMode = false;
     // Probes for the spec: the preload links as clay:ready found them (before any
-    // plugin had a chance to add one) and every console.warn the page logged.
+    // plugin had a chance to add one), the resource paths the page had started
+    // fetching by then, and every console.warn the page logged.
     window.__warnings = [];
     var warn = console.warn.bind(console);
     console.warn = function () {
@@ -18,6 +19,9 @@
         document.querySelectorAll('link[rel="modulepreload"]'),
         function (link) { return link.href; }
       );
+      window.fetchedAtReady = performance.getEntriesByType("resource").map(function (entry) {
+        return new URL(entry.name).pathname;
+      });
     }, { once: true });
   </script>
   <script src="/dist/clay.js?plugins=page"></script>

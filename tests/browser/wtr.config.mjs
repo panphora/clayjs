@@ -103,6 +103,23 @@ const mixedFiles = {
   },
 };
 
+// A cached satellite from an earlier deploy: the built clay-internals.js with its
+// runtime manifest renamed to one this release does not have. It sits beside
+// clay.js, so the module tree its fallback reaches is the repository's own /src/.
+const STALE = '/dist/clay-internals.stale.js';
+const STALE_MANIFEST = 'manifest-0000000PREVIOUS.js';
+
+const staleSatellite = {
+  name: 'stale-satellite',
+  serve(context) {
+    if (context.path !== STALE) return undefined;
+    const file = path.join(ROOT, 'dist/clay-internals.js');
+    if (!existsSync(file)) return undefined;
+    const source = readFileSync(file, 'utf8');
+    return { body: source.replace(/"manifest":"[^"]+"/, `"manifest":"${STALE_MANIFEST}"`), type: 'js' };
+  },
+};
+
 // The single-file build in a real browser. The repository root is served, so the
 // fixtures reach /dist/ (built first by `npm run test:standalone`) and /entries/.
 // Same pinned Chromium as the conformance suite; the byte comparison between the
@@ -112,6 +129,6 @@ export default {
   files: 'tests/browser/**/*.test.js',
   browsers: [playwrightLauncher({ product: 'chromium' })],
   testFramework: { config: { timeout: '20000' } },
-  plugins: [chunkRoutes, mixedReleases, mixedFiles],
+  plugins: [chunkRoutes, mixedReleases, mixedFiles, staleSatellite],
   reporters: [summaryReporter(), defaultReporter()],
 };

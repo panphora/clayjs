@@ -3,23 +3,48 @@
 <head>
   <meta charset="utf-8">
   <title>clayjs chunked fixture: clay.js runs before the satellite</title>
+  <meta name="application-name" content="Document">
+  <style>body { margin: 0 }</style>
   <script>
     window.clayEditMode = true;
     // Probes for the spec: every console.warn the page logged, so a test can count
-    // how many times a bootstrap chose the module tree.
+    // how many times a bootstrap chose the module tree, and the preload links and
+    // resource paths as clay:ready found them.
     window.__warnings = [];
     var warn = console.warn.bind(console);
     console.warn = function () {
       window.__warnings.push(Array.prototype.map.call(arguments, String).join(" "));
       warn.apply(console, arguments);
     };
+    // The host's capability document, answered before either script runs: the page
+    // plugin mounts the editor only when the host advertises "page".
+    var nativeFetch = window.fetch.bind(window);
+    window.fetch = function (input, init) {
+      var url = new URL(typeof input === "string" ? input : input.url, location.href);
+      if (url.pathname === "/_/meta") {
+        return Promise.resolve(new Response(JSON.stringify({ spec: 1, extensions: ["page"], document: null }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }));
+      }
+      return nativeFetch(input, init);
+    };
+    document.addEventListener("clay:ready", function () {
+      window.preloadsAtReady = Array.prototype.map.call(
+        document.querySelectorAll('link[rel="modulepreload"]'),
+        function (link) { return link.href; }
+      );
+      window.fetchedAtReady = performance.getEntriesByType("resource").map(function (entry) {
+        return new URL(entry.name).pathname;
+      });
+    }, { once: true });
   </script>
-  <script src="/dist/clay.js"></script>
+  <script src="/dist/clay.js?plugins=page"></script>
   <script src="/dist/clay-internals.js"></script>
 </head>
 <body>
-  <article class="page" clay="freeze" data-page="1">
-    <p data-id="p1">A reader sees this article.</p>
-  </article>
+  <script type="application/json" merge="page" clay="live">{"v":1,"g":0,"y":{"seed":"AAACQQMEAQAIQgALJwAoAQUAJwAoAIUkHGF0dHJzdGl0bGVsZXZlbHRmbG93YXR0cnNwMXRFAQEEBQIBBwEAAAEBAQACQQACQQEBBwB9AXcHaGVhZGluZ3YBAWJ3BXRpdGxldwlwYXJhZ3JhcGh2AQFidwJwMQA="}}</script>
+  <article class="page" clay="freeze" data-page="1" data-rev="093360993130d818"><h1 data-id="title"></h1>
+<p data-id="p1"></p></article>
 </body>
 </html>

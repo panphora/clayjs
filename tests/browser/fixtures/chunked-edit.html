@@ -2,30 +2,51 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>clayjs chunked edit fixture</title>
+  <title>clayjs chunked fixture: a Document article in the real editor</title>
+  <meta name="application-name" content="Document">
+  <style>body { margin: 0 }</style>
   <script>
     window.clayEditMode = true;
     // Probes for the spec: the preload links as clay:ready found them (before any
-    // plugin had a chance to add one) and every console.warn the page logged.
+    // plugin had a chance to add one), the resource paths the page had started
+    // fetching by then, and every console.warn the page logged.
     window.__warnings = [];
     var warn = console.warn.bind(console);
     console.warn = function () {
       window.__warnings.push(Array.prototype.map.call(arguments, String).join(" "));
       warn.apply(console, arguments);
     };
+    // The host's capability document. The page plugin mounts the editor only when
+    // the host advertises "page", and /_/meta is the only place it asks, so the
+    // fixture answers discovery itself before clay.js runs. Everything else goes
+    // to the real network.
+    var nativeFetch = window.fetch.bind(window);
+    window.fetch = function (input, init) {
+      var url = new URL(typeof input === "string" ? input : input.url, location.href);
+      if (url.pathname === "/_/meta") {
+        return Promise.resolve(new Response(JSON.stringify({ spec: 1, extensions: ["page"], document: null }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }));
+      }
+      return nativeFetch(input, init);
+    };
     document.addEventListener("clay:ready", function () {
       window.preloadsAtReady = Array.prototype.map.call(
         document.querySelectorAll('link[rel="modulepreload"]'),
         function (link) { return link.href; }
       );
+      window.fetchedAtReady = performance.getEntriesByType("resource").map(function (entry) {
+        return new URL(entry.name).pathname;
+      });
     }, { once: true });
   </script>
   <script src="/dist/clay.js?plugins=page"></script>
 </head>
 <body>
-  <h1 editable>Edit me</h1>
-
-  <p contenteditable>Type here.</p>
+  <script type="application/json" merge="page" clay="live">{"v":1,"g":0,"y":{"seed":"AAACQQMEAQAIQgALJwAoAQUAJwAoAIUkHGF0dHJzdGl0bGVsZXZlbHRmbG93YXR0cnNwMXRFAQEEBQIBBwEAAAEBAQACQQACQQEBBwB9AXcHaGVhZGluZ3YBAWJ3BXRpdGxldwlwYXJhZ3JhcGh2AQFidwJwMQA="}}</script>
+  <article class="page" clay="freeze" data-page="1" data-rev="093360993130d818"><h1 data-id="title"></h1>
+<p data-id="p1"></p></article>
 
   <nav clay="no-save no-watch">
     <span>local chrome that must not be saved</span>
