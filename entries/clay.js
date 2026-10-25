@@ -68,6 +68,8 @@
   if (url.pathname.slice(0, url.pathname.lastIndexOf("/")).slice(-8) === "/entries") {
     base = base.slice(0, -8);
   }
+
+  /* clay:chunk-prelude */
   import(base + "/src/loader.js")
     .then(function (m) { return m.boot(base, url.searchParams, clay.__readyResolve); })
     .catch(function (err) {

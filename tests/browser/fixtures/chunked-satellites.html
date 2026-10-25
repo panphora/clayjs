@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>clayjs chunked fixture: three scripts share one release</title>
+  <script>
+    window.clayEditMode = false;
+    window.__warnings = [];
+    var warn = console.warn.bind(console);
+    console.warn = function () {
+      window.__warnings.push(Array.prototype.map.call(arguments, String).join(" "));
+      warn.apply(console, arguments);
+    };
+    // The preload links as they stand at DOM ready, before any satellite's own
+    // dynamic import has started, and again as clay:ready finds them.
+    function links() {
+      return Array.prototype.map.call(
+        document.querySelectorAll('link[rel="modulepreload"]'),
+        function (link) { return link.href; }
+      );
+    }
+    document.addEventListener("DOMContentLoaded", function () {
+      window.preloadsAtDomReady = links();
+    }, { once: true });
+    document.addEventListener("clay:ready", function () {
+      window.preloadsAtReady = links();
+    }, { once: true });
+  </script>
+  <script src="/dist/clay.js?plugins=page"></script>
+  <script src="/dist/clay-dom.js"></script>
+  <script src="/dist/clay-events.js"></script>
+</head>
+<body>
+  <article class="page" clay="freeze" data-page="1">
+    <p data-id="p1">A reader sees this article.</p>
+  </article>
+  <ul>
+    <li onrender>rendered once</li>
+  </ul>
+</body>
+</html>

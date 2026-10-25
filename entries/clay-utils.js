@@ -17,6 +17,8 @@
     base = base.slice(0, -8);
   }
 
+  /* clay:chunk-prelude */
+
   clay.loaded.utils = import(base + "/src/utils/index.js")
     .catch(function (err) { console.error("clay-utils failed to load:", err); throw err; });
   // Mark handled: see clay-ui.js.

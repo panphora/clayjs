@@ -17,6 +17,8 @@
     base = base.slice(0, -8);
   }
 
+  /* clay:chunk-prelude */
+
   // Subscribes to the mutation hub (observes document.body); wait for DOM ready.
   function domReady() {
     return new Promise(function (r) {

@@ -17,6 +17,8 @@
     base = base.slice(0, -8);
   }
 
+  /* clay:chunk-prelude */
+
   // Mirror the hash onto <html> now, before the module loads, so a saved
   // show-when:route-* rule is right at first paint. The module re-applies.
   try {

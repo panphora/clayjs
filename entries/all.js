@@ -17,6 +17,8 @@
     base = base.slice(0, -8);
   }
 
+  /* clay:chunk-prelude */
+
   clay.loaded.all = import(base + "/src/dom/all.js")
     .then(function (m) {
       var All = m.default;

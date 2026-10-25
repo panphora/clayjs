@@ -17,6 +17,8 @@
     base = base.slice(0, -8);
   }
 
+  /* clay:chunk-prelude */
+
   // No DOM gate: nothing here touches document.body at import time, unlike clay-ui.
   clay.loaded.internals = import(base + "/src/internals/index.js")
     .catch(function (err) { console.error("clay-internals failed to load:", err); throw err; });

@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>clayjs chunked fixture: clay.js and the satellite from two releases</title>
+  <script>
+    window.clayEditMode = true;
+    window.__warnings = [];
+    var warn = console.warn.bind(console);
+    console.warn = function () {
+      window.__warnings.push(Array.prototype.map.call(arguments, String).join(" "));
+      warn.apply(console, arguments);
+    };
+  </script>
+  <!-- The two releases are built into scratch directories and served at these two
+       paths by the mixed-release plugin in wtr.config.mjs. -->
+  <script src="/mixed-a/clay.js"></script>
+  <script src="/mixed-b/clay-internals.js"></script>
+</head>
+<body>
+  <article class="page" clay="freeze" data-page="1">
+    <p data-id="p1">A reader sees this article.</p>
+  </article>
+</body>
+</html>

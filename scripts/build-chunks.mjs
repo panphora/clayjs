@@ -91,40 +91,65 @@ function closureOf(manifest, seeds) {
   return want;
 }
 
-function bootstrapSource(payload, tail) {
-  return `(function (M) {
+// The one statement every entry's `/* clay:chunk-prelude */` marker becomes. The
+// first bootstrap to run chooses, once, between this release's chunks and the module
+// tree beside them, and records the choice on window.clay; every later bootstrap
+// imports its own entry from that same choice, so a page never runs two copies of a
+// module (two save pipelines, two transform registries).
+function bootstrapSource(payload) {
+  return `var __clayChunks = (function (M) {
+  var clay = window.clay = window.clay || {};
   var dir = new URL(M.dir, base + "/").href;
   var tree = base.slice(-5) === "/dist" ? base.slice(0, -5) : base;
+  var have = {};
+  document.head.querySelectorAll('link[rel="modulepreload"]').forEach(function (link) { have[link.href] = true; });
   M.preload.forEach(function (file) {
+    var href = dir + file;
+    if (have[href]) return;
+    have[href] = true;
     var link = document.createElement("link");
     link.rel = "modulepreload";
-    link.href = dir + file;
+    link.href = href;
     link.setAttribute("clay", "no-save");
     document.head.appendChild(link);
   });
-${tail}
+  if (!clay.__runtime) {
+    clay.__runtime = import(dir + M.manifest).then(function (r) {
+      var manifest = r.default;
+      manifest.base = dir;
+      return { chunks: true, dir: dir, manifest: manifest };
+    }, function (err) {
+      console.warn("clayjs: the bundled runtime did not load, loading the module tree instead:", err);
+      return { chunks: false, tree: tree };
+    });
+  }
+  return { tree: tree, runtime: clay.__runtime };
 })(${JSON.stringify(payload)})`;
 }
+
+const PRELUDE = "/* clay:chunk-prelude */";
 
 export async function emitBootstraps({ root, outdir, manifest, satellites }) {
   const { version } = manifest;
   const loader = manifest.entries["loader.js"];
   if (!loader) throw new Error("the manifest has no loader.js entry");
   const preload = closureOf(manifest, [loader, manifest.runtime, ...BOOT_PREFIX.map((p) => manifest.entries[p])]);
-  const tail = `  return Promise.all([import(dir + M.loader), import(dir + M.manifest)]).then(function (r) {
-    var manifest = r[1].default;
-    manifest.base = dir;
-    window.clay.__chunked = true;
-    return { boot: function (b, p, resolve) { return r[0].boot(b, p, resolve, manifest); } };
-  }, function (err) {
-    console.warn("clayjs: the bundled runtime did not load, loading the module tree instead:", err);
-    return import(tree + "/src/loader.js");
-  });`;
   const clay = await readFile(path.join(root, "entries/clay.js"), "utf8");
   const code = replaceOnce(
-    clay,
+    replaceOnce(
+      clay,
+      PRELUDE,
+      bootstrapSource({ version, dir: "m/", manifest: manifest.runtime, preload }),
+      "entries/clay.js",
+    ),
     'import(base + "/src/loader.js")',
-    bootstrapSource({ version, dir: "m/", loader, manifest: manifest.runtime, preload }, tail),
+    `__clayChunks.runtime.then(function (R) {
+  if (!R.chunks) return import(__clayChunks.tree + "/src/loader.js");
+  window.clay.__chunked = true;
+  return import(R.dir + R.manifest.entries["loader.js"]).then(function (m) {
+    return { boot: function (b, p, resolve) { return m.boot(b, p, resolve, R.manifest); } };
+  });
+})`,
     "entries/clay.js",
   );
   await writeFile(path.join(outdir, "clay.js"), code);
@@ -133,15 +158,21 @@ export async function emitBootstraps({ root, outdir, manifest, satellites }) {
     const entry = manifest.entries[target];
     if (!entry) throw new Error(`the manifest has no ${target} entry`);
     const source = await readFile(path.join(root, "entries", name), "utf8");
-    const satelliteTail = `  return import(dir + M.entry).catch(function (err) {
-    if (window.clay && window.clay.__chunked) throw err;
-    console.warn("clayjs: the bundled runtime did not load, loading the module tree instead:", err);
-    return import(tree + "/src/${target}");
-  });`;
+    const prelude = bootstrapSource({
+      version,
+      dir: "m/",
+      manifest: manifest.runtime,
+      preload: closureOf(manifest, [entry, manifest.runtime]),
+    });
     const satellite = replaceOnce(
-      source,
+      replaceOnce(source, PRELUDE, prelude, `entries/${name}`),
       `import(base + "/src/${target}")`,
-      bootstrapSource({ version, dir: "m/", entry, preload: closureOf(manifest, [entry]) }, satelliteTail),
+      `__clayChunks.runtime.then(function (R) {
+  if (!R.chunks) return import(__clayChunks.tree + "/src/${target}");
+  var file = R.manifest.entries["${target}"];
+  if (!file) throw new Error("clayjs: release " + R.manifest.version + " has no ${target}");
+  return import(R.dir + file);
+})`,
       `entries/${name}`,
     );
     await writeFile(path.join(outdir, name), satellite);

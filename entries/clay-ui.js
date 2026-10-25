@@ -17,6 +17,8 @@
     base = base.slice(0, -8);
   }
 
+  /* clay:chunk-prelude */
+
   // Toasts and dialogs append to document.body, so `loaded.ui` must not resolve
   // before the DOM is ready (same gate as clay-events).
   function domReady() {

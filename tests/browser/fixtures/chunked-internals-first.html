@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>clayjs chunked fixture: the satellite runs before clay.js</title>
+  <script>
+    window.clayEditMode = true;
+    // Probes for the spec: every console.warn the page logged, so a test can count
+    // how many times a bootstrap chose the module tree.
+    window.__warnings = [];
+    var warn = console.warn.bind(console);
+    console.warn = function () {
+      window.__warnings.push(Array.prototype.map.call(arguments, String).join(" "));
+      warn.apply(console, arguments);
+    };
+  </script>
+  <script src="/dist/clay-internals.js"></script>
+  <script src="/dist/clay.js"></script>
+</head>
+<body>
+  <article class="page" clay="freeze" data-page="1">
+    <p data-id="p1">A reader sees this article.</p>
+  </article>
+</body>
+</html>

@@ -5,7 +5,6 @@ import { afterAll, beforeAll, expect, test } from "@jest/globals";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import vm from "node:vm";
 import { BOOT_PREFIX, emitBootstraps, emitChunks, rollingBootstrap } from "../../../scripts/build-chunks.mjs";
 
 const root = path.resolve(new URL("../../..", import.meta.url).pathname);
@@ -46,7 +45,27 @@ test("clay.js and each generated satellite parse as classic scripts", async () =
   expect(Object.keys(built.satellites)).toContain("all.js");
   for (const name of names) {
     const code = await read(name);
-    expect(() => new vm.Script(code)).not.toThrow();
+    expect(() => new Function(code)).not.toThrow();
+  }
+});
+
+test("each bootstrap carries the shared runtime prelude exactly once", async () => {
+  for (const name of ["clay.js", ...Object.keys(built.satellites)]) {
+    const code = await read(name);
+    expect(code.split("/* clay:chunk-prelude */").length - 1).toBe(0);
+    expect(code.split("var __clayChunks = ").length - 1).toBe(1);
+    expect(code.split("if (!clay.__runtime)").length - 1).toBe(1);
+  }
+});
+
+test("no bootstrap imports from src/ outside the module-tree branch", async () => {
+  for (const name of ["clay.js", ...Object.keys(built.satellites)]) {
+    const code = await read(name);
+    const src = code.split("\n").filter((line) => line.includes("import(") && line.includes("/src/"));
+    expect(src.length).toBe(1);
+    expect(src[0]).toContain('if (!R.chunks) return import(__clayChunks.tree + "/src/');
+    expect(code.split('import(__clayChunks.tree + "/src/').length - 1).toBe(1);
+    expect(code).not.toContain('import(base + "/src/');
   }
 });
 
@@ -57,7 +76,8 @@ test("each bootstrap names one chunk directory and files the manifest lists", as
     const code = await read(name);
     expect(code.split('"dir":"m/"').length - 1).toBe(1);
     const M = embedded(code);
-    for (const file of [M.loader ?? M.entry, M.manifest, ...M.preload].filter(Boolean)) {
+    expect(M.dir).toBe("m/");
+    for (const file of [M.manifest, ...M.preload].filter(Boolean)) {
       expect(files[file]).toBeTruthy();
       expect(await exists(file)).toBe(true);
     }
@@ -65,14 +85,27 @@ test("each bootstrap names one chunk directory and files the manifest lists", as
 });
 
 test("clay.js preloads the loader, the runtime manifest and the boot prefix", async () => {
-  const M = embedded(await read("clay.js"));
+  const code = await read("clay.js");
+  const M = embedded(code);
   expect(M.preload).toContain(built.manifest.entries["loader.js"]);
   expect(M.preload).toContain(built.manifest.runtime);
   for (const prefix of BOOT_PREFIX) {
     expect(M.preload).toContain(built.manifest.entries[prefix]);
   }
-  expect(M.loader).toBe(built.manifest.entries["loader.js"]);
+  expect(code).toContain('R.manifest.entries["loader.js"]');
   expect(M.manifest).toBe(built.manifest.runtime);
+  expect(M.version).toBe(built.manifest.version);
+});
+
+test("each satellite preloads its own entry and the runtime manifest", async () => {
+  for (const [name, target] of Object.entries(built.satellites)) {
+    if (name === "clay.js") continue;
+    const code = await read(name);
+    const M = embedded(code);
+    expect(M.preload[0]).toBe(built.manifest.entries[target]);
+    expect(M.preload).toContain(built.manifest.runtime);
+    expect(code).toContain(`R.manifest.entries["${target}"]`);
+  }
 });
 
 test("rollingBootstrap rewrites the one chunk directory", async () => {

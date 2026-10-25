@@ -17,6 +17,8 @@
     base = base.slice(0, -8);
   }
 
+  /* clay:chunk-prelude */
+
   // The mutation-backed attrs subscribe to a hub that observes document.body, so
   // wait for DOM ready before importing (same gate as clay.js).
   function domReady() {

@@ -17,6 +17,8 @@
     base = base.slice(0, -8);
   }
 
+  /* clay:chunk-prelude */
+
   clay.loaded.dom = import(base + "/src/dom/dom-helpers.js")
     .catch(function (err) { console.error("clay-dom failed to load:", err); throw err; });
   // Mark handled: see clay-ui.js.
