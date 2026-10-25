@@ -317,7 +317,9 @@ test("an adoption that does not land puts the article back from the room's state
     expect(article.querySelectorAll(".page-shell")).toHaveLength(0);
     expect(document.querySelectorAll(".page-editor")).toHaveLength(0);
     expect(document.querySelectorAll(".page-boot-status")).toHaveLength(0);
-    expect(ownerOf(article)).toBe("editor");
+    // The editor that never landed let the article go with it: another runtime,
+    // a reader say, may claim it now.
+    expect(ownerOf(article)).toBe(null);
     noInput(page);
   } finally {
     page.dispose();

@@ -74,6 +74,9 @@ function armLoadingStatus(inst, article) {
 
 let generation = 0;
 let active = null;
+// A boot that ends in error says so after the installation it ended is gone, so the
+// result outlives the dispose that releases what that boot started.
+let ended = null;
 
 // Shorter than installAdoption's 10 s hold, so an unelected room still adopts.
 export const WRITER_WAIT_MS = 8_000;
@@ -264,21 +267,49 @@ function restoreArticle(inst) {
   else article.setAttribute("data-rev", rev);
 }
 
+// What a mounted editor installs besides its view: the document listeners that
+// follow saves and replacements, the room's subscription to it, its unsaved
+// participant, the recovery list, the tool views and this install's claim on the
+// article. A boot that ends without an editor releases the same resources here, so
+// nothing stays wired to a view that is gone.
+function releaseMounted(inst) {
+  for (const [type, handler] of inst.listeners) document.removeEventListener(type, handler);
+  inst.listeners = [];
+  try { inst.adoption?.dispose(); } catch (error) { console.error("clayjs: page plugin adoption failed to dispose", error); }
+  inst.adoption = null;
+  try { inst.recover?.destroy(); } catch (error) { console.error("clayjs: page plugin recover list failed to dispose", error); }
+  inst.recover = null;
+  inst.aiTool?.dispose();
+  inst.aiTool = null;
+  inst.toolHost?.dispose();
+  inst.toolHost = null;
+  if (inst.view) toolViews.delete(inst.view);
+  if (inst.article) {
+    const shell = inst.article.querySelector(".page-shell");
+    if (shell) shell.remove();
+  }
+  try { inst.binding?.dispose(); } catch (error) { console.error("clayjs: page plugin binding failed to dispose", error); }
+  try { inst.binding?.ydoc?.destroy(); } catch (error) { console.error("clayjs: page plugin document failed to destroy", error); }
+  inst.binding = null;
+  inst.flush = null;
+  inst.releaseArticle?.();
+  inst.releaseArticle = null;
+}
+
 // Adoption did not land, so this tab must not hold a view of its own making: the
-// mounted editor is destroyed, its shell leaves the article, and the article comes
-// back from the state the room accepted (or the source captured before the mount).
-// The editor's own DOM is never read back into the page.
+// mounted editor and everything it subscribed are released, its shell leaves the
+// article, and the article comes back from the state the room accepted (or the
+// source captured before the mount). The editor's own DOM is never read back into
+// the page.
 function abandonEditor(inst) {
   const view = inst.view;
   if (view && !view.isDestroyed && typeof view.destroy === "function") {
     try { view.destroy(); } catch (error) { console.error("clayjs: page plugin view failed to destroy", error); }
   }
-  if (inst.view) toolViews.delete(inst.view);
-  const shell = inst.article?.querySelector(".page-shell");
-  if (shell) shell.remove();
   inst.titleObserver?.dispose();
   inst.titleObserver = null;
   clearLoadingStatus(inst);
+  releaseMounted(inst);
   restoreArticle(inst);
 }
 
@@ -292,8 +323,6 @@ function dispose() {
     clearTimeout(inst.retryTimer);
     inst.retryTimer = null;
   }
-  for (const [type, handler] of inst.listeners) document.removeEventListener(type, handler);
-  inst.listeners = [];
   dismissPersistent(RETRY_TEXT);
   dismissPersistent(BLOCKED_TEXT);
   dismissPersistent(REPLACED_TEXT);
@@ -302,26 +331,14 @@ function dispose() {
     inst.savesHeld = false;
     releaseAllSaves({ replay: false, reason: REPLACED_HOLD });
   }
-  try { inst.adoption?.dispose(); } catch (error) { console.error("clayjs: page plugin adoption failed to dispose", error); }
-  try { inst.recover?.destroy(); } catch (error) { console.error("clayjs: page plugin recover list failed to dispose", error); }
   inst.titleObserver?.dispose();
   inst.titleObserver = null;
   clearLoadingStatus(inst);
   if (inst.view && !inst.view.isDestroyed) {
     try { inst.view.destroy(); } catch (error) { console.error("clayjs: page plugin view failed to destroy", error); }
   }
-  inst.aiTool?.dispose();
-  inst.toolHost?.dispose();
-  if (inst.view) toolViews.delete(inst.view);
-  if (inst.article) {
-    const shell = inst.article.querySelector(".page-shell");
-    if (shell) shell.remove();
-  }
-  try { inst.binding?.dispose(); } catch (error) { console.error("clayjs: page plugin binding failed to dispose", error); }
-  try { inst.binding?.ydoc?.destroy(); } catch (error) { console.error("clayjs: page plugin document failed to destroy", error); }
+  releaseMounted(inst);
   restoreArticle(inst);
-  inst.releaseArticle?.();
-  inst.releaseArticle = null;
 }
 
 function createSteps(inst, options) {
@@ -602,6 +619,15 @@ function createSteps(inst, options) {
 
   function mountAndAttach(inst, source, loaded) {
     const article = source.element;
+    // The claim comes before this install records the article as its own to
+    // restore: a claim another runtime holds is refused, and neither the owner's
+    // article nor this install's restoration ownership may change.
+    try {
+      inst.releaseArticle = claim(article, "editor");
+    } catch (error) {
+      console.error("clayjs: page plugin could not claim the article", error);
+      return { ok: false, reason: "article-owned" };
+    }
     inst.source = source;
     inst.article = article;
     inst.bootHtml = source.article.innerHTML;
@@ -618,7 +644,6 @@ function createSteps(inst, options) {
     // blocks has nothing to wait for, so its saved article goes now. Either way it is
     // this capture, taken before anything changes, that puts the article back.
     savedContent = [...article.childNodes].filter((node) => node !== inst.statusNote);
-    inst.releaseArticle = claim(article, "editor");
     // The shell is built out of the page, in an element of the same document, so a
     // creation that fails never leaves half an editor over the saved article.
     const staging = article.ownerDocument.createElement("div");
@@ -781,6 +806,7 @@ async function run(inst, options = {}) {
 
 function install(options = {}) {
   dispose();
+  ended = null;
   const gen = ++generation;
   const inst = {
     ...createInstall({
@@ -798,8 +824,9 @@ function install(options = {}) {
   active = inst;
   return run(inst, options).catch((error) => {
     console.error("clayjs: page plugin failed to install", error);
-    finishError(inst, "boot-failed");
+    ended = finishError(inst, "boot-failed");
     if (active === inst) dispose();
+    return ended;
   });
 }
 
@@ -807,7 +834,7 @@ export const page = {
   ready: null,
   install,
   get status() {
-    return active?.result ?? null;
+    return active?.result ?? ended;
   },
   flush(options = {}) {
     const inst = active;
