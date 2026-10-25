@@ -136,6 +136,9 @@
 
 ## [Unreleased]
 
+### Added
+- `clay.assets.load(name)` loads OverType 2.6.1, marked 18.0.14 and highlight.js 11.9.0 (its core plus one file per language) from the document's own ClayJS release, so a document asks for a library by name and the host that serves ClayJS serves it too, offline included; none of them is in a page's boot graph
+
 ### Changed
 - `clay.morph(oldEl, newEl, options)` returns a Promise in every mode, and the merge engine downloads on the first merge instead of at boot
 

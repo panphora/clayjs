@@ -7,6 +7,7 @@ import { trash } from "./lib/trash.js";
 import { effect } from "./lib/effect.js";
 import { style } from "./lib/style.js";
 import { derived } from "./lib/derived.js";
+import { assets } from "./lib/assets.js";
 import { bootPhase } from "./core/boot-phase.js";
 import { mergeEngine } from "./sync/merge-engine.js";
 import { preloadEntries } from "./lib/preload.js";
@@ -151,6 +152,8 @@ function assembleCore(loaded, { isDraftMode, isEditMode, isOwner, siteVisibility
     Mutation: mutation.default,
     region: regionPolicy.windowRegionShape,
   });
+
+  clay.assets = assets;
 
   const snapshot = loaded["core/snapshot.js"];
   const save = loaded["core/save.js"];

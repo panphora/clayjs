@@ -77,7 +77,9 @@
     "build:bevel": "node scripts/build-bevel-subset.mjs",
     "check:bevel": "node scripts/build-bevel-subset.mjs --check",
     "build:skins": "node scripts/build-vendor-skins.mjs",
-    "check:skins": "node scripts/build-vendor-skins.mjs --check"
+    "check:skins": "node scripts/build-vendor-skins.mjs --check",
+    "vendor:optional": "node scripts/vendor-optional.mjs",
+    "check:vendor-optional": "node scripts/vendor-optional.mjs --check"
   },
   "devDependencies": {
     "@esm-bundle/chai": "^4.3.4-fix.0",
@@ -87,12 +89,14 @@
     "@web/test-runner-playwright": "^0.11.1",
     "cheerio": "1.2.0",
     "esbuild": "^0.28.2",
+    "highlight.js": "11.9.0",
     "hyper-morph": "1.6.3",
     "jest": "^29.7.0",
     "jest-environment-jsdom": "^29.7.0",
     "jsdom": "^20.0.3",
     "lib0": "0.2.119",
-    "marked": "^18.0.14",
+    "marked": "18.0.14",
+    "overtype": "2.6.1",
     "parse5": "^7.3.0",
     "playwright": "1.62.1",
     "postcss": "^8.5.28",

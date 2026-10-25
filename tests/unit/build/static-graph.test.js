@@ -4,6 +4,7 @@
 import { expect, test } from "@jest/globals";
 import { build } from "esbuild";
 import { resolveModules } from "../../../src/loader-logic.js";
+import { ASSETS as OPTIONAL_ASSETS } from "../../../scripts/vendor-optional.mjs";
 
 /**
  * The merge engine is a first-merge download and parse5 is a first-owned-style one,
@@ -76,6 +77,27 @@ function walk(inputs, entries) {
     frontier = next;
   }
   return seen;
+}
+
+// OverType, marked and highlight.js are asked for by name at the moment a page needs
+// them (clay.assets), so the plain-text reader paints before any of them arrives. The
+// Journal is the fixture for all three. `src/lib/assets.js` is in the walk, so a static
+// import of a library would show up here.
+const VENDORED_OPTIONAL = OPTIONAL_ASSETS.map((asset) => `src/vendor/${asset.file}`);
+
+for (const { mode, isEditMode, isDraftMode } of MODES) {
+  test(`journal ${mode}: no optional library is in the boot graph`, async () => {
+    const tag = FIXTURES.journal;
+    const params = new URLSearchParams(`plugins=${tag.plugins}&exclude=${tag.exclude}`);
+    const plan = resolveModules(params, isEditMode, { isDraftMode, hasSap: tag.hasSap });
+    const entries = [...plan.core, ...plan.plugins].map((path) => `src/${path}`);
+    // Seeded with the loader itself: it is the entry a page boots, and the module
+    // that publishes clay.assets.
+    const graph = walk(await inputsFor(entries), ["src/loader.js", ...entries]);
+
+    expect(graph.has("src/lib/assets.js")).toBe(true);
+    expect([...graph].filter((file) => VENDORED_OPTIONAL.includes(file))).toEqual([]);
+  });
 }
 
 for (const [fixture, tag] of Object.entries(FIXTURES)) {
