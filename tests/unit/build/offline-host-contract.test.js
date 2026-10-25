@@ -3,10 +3,13 @@
  */
 import { afterAll, beforeAll, describe, expect, test } from "@jest/globals";
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { resolveModules } from "../../../src/loader-logic.js";
 import { canonicalizeRuntimeHTML } from "../../../src/server/offline-runtime/index.js";
+import { parse } from "../../../src/vendor/parse5.vendor.js";
 import { verifyOfflineClosure } from "../../../scripts/verify-offline-closure.mjs";
 
 const ROOT = path.resolve(new URL("../../..", import.meta.url).pathname);
@@ -15,12 +18,21 @@ const READY_TIMEOUT = 120000;
 const CASE_TIMEOUT = 120000;
 
 const NAMES = ["htmlclay", "hyperclay-local"];
-const CASES = 3;
+const CASES = 6;
 
 const configured = process.env.CLAY_OFFLINE_HOSTS ? JSON.parse(process.env.CLAY_OFFLINE_HOSTS) : null;
-const suite = configured ? describe : describe.skip;
+const KANBAN = process.env.CLAY_KANBAN_TEMPLATE ? path.resolve(process.env.CLAY_KANBAN_TEMPLATE) : null;
+const hosts = configured && KANBAN ? configured : [];
+const suite = hosts.length ? describe : describe.skip;
 if (!configured) {
   console.info("offline-host-contract: CLAY_OFFLINE_HOSTS is unset, skipping the cross-host closure contract");
+}
+if (configured && !KANBAN) {
+  test("CLAY_KANBAN_TEMPLATE names the real Kanban template", () => {
+    throw new Error(
+      "offline-host-contract: CLAY_OFFLINE_HOSTS is set, so CLAY_KANBAN_TEMPLATE must name starter-templates/templates/01-kanban/kanban.html",
+    );
+  });
 }
 
 const executed = new Map();
@@ -32,6 +44,69 @@ const count = (name) => executed.set(name, (executed.get(name) ?? 0) + 1);
 const RESPONSE_ATTR = /\s+(?:documentetag|savetoken|htmlclaytoken|documentid|htmlclayid)="[^"]*"/g;
 const stripResponseMetadata = (html) => html.replace(RESPONSE_ATTR, "");
 const LOCAL_URL = /(?:src|href)="([^"]*\/_\/clayjs\/[^"]*)"/g;
+const DESCRIPTOR = /<script[^>]*id="clay-runtime-map"[^>]*>([\s\S]*?)<\/script>/;
+const CLAY_SCRIPT = /<script src="(https:\/\/clayjs\.com\/[^"]*\/clay\.js\?[^"]*)"/;
+const PUBLIC_URL = /^https:\/\/clayjs\.com\//;
+
+// A release chunk names its imports as relative module specifiers; the browser fetches
+// each one through the host, so the test follows them from the served bytes.
+const IMPORT_SPEC = /(?:from|import)\s*\(?\s*"(\.[^"]*)"/g;
+
+function elementsOf(html) {
+  const found = [];
+  const walk = (node) => {
+    if (node.tagName) found.push(node);
+    for (const child of node.childNodes ?? []) walk(child);
+    if (node.content) walk(node.content);
+  };
+  walk(parse(html, { sourceCodeLocationInfo: true }));
+  return found;
+}
+
+const attrOf = (node, name) => node.attrs?.find((attr) => attr.name === name)?.value;
+
+// The URLs a host rewrites: src on a script, href on a link, when the disk bytes name
+// the public runtime.
+function runtimeURLsOnDisk(html) {
+  const urls = [];
+  for (const node of elementsOf(html)) {
+    const value = node.tagName === "script" ? attrOf(node, "src") : node.tagName === "link" ? attrOf(node, "href") : null;
+    if (value && PUBLIC_URL.test(value)) urls.push(value);
+  }
+  return urls;
+}
+
+// Every card is an <li class="card" data-id>; its outer HTML is the bytes a save must
+// leave alone.
+function cardsOf(html) {
+  const cards = [];
+  for (const node of elementsOf(html)) {
+    if (node.tagName !== "li") continue;
+    if (!/\bcard\b/.test(attrOf(node, "class") ?? "")) continue;
+    const id = attrOf(node, "data-id");
+    if (!id) continue;
+    const location = node.sourceCodeLocation;
+    cards.push({ id, outer: html.slice(location.startOffset, location.endOffset) });
+  }
+  return cards;
+}
+
+// resolveModules answers the loader's own module ids ("plugins/derive.js"). The release
+// lists each of those under src/, and, where the chunked build split one out, a chunk
+// named after it under m/ ("m/plugins/derive-<HASH>.js"). Modules the build folds into a
+// shared chunk (the reader core) have only the src/ path. The chunk hash belongs to the
+// build the host vendored, so the names are matched against the host's own index.
+function releasePathsOf(name, files) {
+  const paths = [];
+  if (Object.hasOwn(files, `src/${name}`)) paths.push(`src/${name}`);
+  const prefix = `m/${name.replace(/\.js$/, "")}-`;
+  for (const file of Object.keys(files)) {
+    if (file.startsWith(prefix) && file.endsWith(".js")) paths.push(file);
+  }
+  return paths;
+}
+
+const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 
 function startFixture(host, root) {
   const child = spawn(host.command[0], [...host.command.slice(1), "--root", root], {
@@ -83,7 +158,7 @@ if (configured) {
   });
 }
 
-for (const host of configured ?? []) {
+for (const host of hosts) {
   suite(host.name, () => {
     let root;
     let child;
@@ -92,15 +167,18 @@ for (const host of configured ?? []) {
     let localIndex;
     let board;
     let doc;
+    let template;
 
     beforeAll(async () => {
       const kanban = JSON.parse(await readFile(FIXTURES, "utf8")).cases.find((entry) => entry.name === "kanban-head");
       board = kanban.input;
       doc = "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<title>Notes</title>\n</head>\n<body>\n<p>Notes</p>\n</body>\n</html>\n";
+      template = await readFile(KANBAN, "utf8");
       root = await mkdtemp(path.join(os.tmpdir(), `clay-host-${host.name}-`));
       await mkdir(path.join(root, "notes/2026"), { recursive: true });
       await writeFile(path.join(root, "board.html"), board);
       await writeFile(path.join(root, "notes/2026/doc.html"), doc);
+      await writeFile(path.join(root, "kanban.html"), template);
       index = JSON.parse(await readFile(host.index, "utf8"));
       localIndex = JSON.parse(await readFile(path.join(ROOT, "dist/offline-manifest.json"), "utf8"));
       const started = startFixture(host, root);
@@ -178,6 +256,148 @@ for (const host of configured ?? []) {
       expect(disk).not.toContain("/_/clayjs/");
       expect(disk).not.toContain("clay-runtime-map");
       expect(disk).not.toContain("documentetag");
+    }, CASE_TIMEOUT);
+
+    test("the real Kanban board's runtime URLs are projected onto the host and every other byte is the disk's", async () => {
+      count(host.name);
+      const documentURL = ready.documents["kanban.html"].url;
+      const response = await fetch(documentURL);
+      expect(response.status).toBe(200);
+      const served = await response.text();
+
+      const descriptor = JSON.parse(DESCRIPTOR.exec(served)[1]);
+      const diskURLs = runtimeURLsOnDisk(template);
+      expect(diskURLs.length).toBeGreaterThanOrEqual(5);
+      expect(diskURLs).toContain("https://clayjs.com/v1/fonts/work-sans-latin-wght-normal.woff2");
+      expect(diskURLs).toContain("https://clayjs.com/v1/sap.js");
+      expect(diskURLs).toContain("https://clayjs.com/v1/clay-router.js");
+
+      for (const url of diskURLs) {
+        const mapping = descriptor.entries.find((entry) => entry.original === url);
+        expect({ url, projected: Boolean(mapping) }).toEqual({ url, projected: true });
+        expect({ url, underRuntime: mapping.local.startsWith(ready.runtime) }).toEqual({ url, underRuntime: true });
+        const target = await fetch(new URL(mapping.local, ready.baseURL));
+        expect({ local: mapping.local, status: target.status }).toEqual({ local: mapping.local, status: 200 });
+        const publicPath = mapping.local.slice(ready.runtime.length).replace(/[?#][\s\S]*$/, "");
+        expect({ local: mapping.local, sha256: sha256(Buffer.from(await target.arrayBuffer())) })
+          .toEqual({ local: mapping.local, sha256: index.files[publicPath].sha256 });
+      }
+
+      // The figma link is author content and the rest of the document is text: undo only
+      // the projection and the response-scoped root attributes and the disk bytes return.
+      expect(served).toContain('href="https://www.figma.com/"');
+      const canonical = canonicalizeRuntimeHTML(served, {
+        releases: { [index.version]: { version: index.version, files: index.files, aliases: index.aliases } },
+        documentURL,
+      });
+      expect(canonical.descriptorRemoved).toBe(true);
+      expect(canonical.changed).toBe(diskURLs.length);
+      expect(stripResponseMetadata(canonical.html)).toBe(stripResponseMetadata(template));
+    }, CASE_TIMEOUT);
+
+    test("every module the board's plugin query resolves to, late ones included, is in the host's index and served", async () => {
+      count(host.name);
+      const query = CLAY_SCRIPT.exec(template)[1].replace(/^https:\/\/clayjs\.com\/v1\//, "");
+      expect(query).toBe("clay.js?plugins=sortable,people,upload,sync,visitor-drafts,unsent,menu&exclude=richclay");
+      const params = new URLSearchParams(query.slice(query.indexOf("?") + 1));
+
+      // src/loader.js:12 imports the merge engine for clay.morph and only calls it on the
+      // first remote change, so no resolveModules answer names it and only a closure that
+      // adds it sees it. It loads whether or not the document is in edit mode.
+      const MERGE_ENGINE = "sync/merge-engine.js";
+
+      const paths = new Set();
+      for (const isEditMode of [true, false]) {
+        const resolved = resolveModules(params, isEditMode, { hasSap: true });
+        for (const name of [...resolved.core, ...resolved.plugins, ...resolved.late, MERGE_ENGINE]) {
+          const releasePaths = releasePathsOf(name, index.files);
+          expect({ name, listed: releasePaths.length > 0 }).toEqual({ name, listed: true });
+          for (const releasePath of releasePaths) paths.add(releasePath);
+        }
+      }
+      expect(paths.size).toBeGreaterThan(0);
+
+      // A chunk's own imports are the next late load: the sortable plugin's chunk names
+      // the vendored SortableJS bundle this way, and live sync's names the merge engine's.
+      const pending = [...paths].filter((releasePath) => releasePath.startsWith("m/"));
+      const followed = new Set();
+      while (pending.length) {
+        const chunk = pending.pop();
+        if (followed.has(chunk)) continue;
+        followed.add(chunk);
+        const target = await fetch(new URL(ready.runtime + chunk, ready.baseURL));
+        expect({ chunk, status: target.status }).toEqual({ chunk, status: 200 });
+        const text = await target.text();
+        for (const match of text.matchAll(IMPORT_SPEC)) {
+          const next = path.posix.normalize(path.posix.join(path.posix.dirname(chunk), match[1]));
+          if (!Object.hasOwn(index.files, next) || paths.has(next)) continue;
+          paths.add(next);
+          pending.push(next);
+        }
+      }
+
+      for (const releasePath of paths) {
+        expect({ releasePath, inIndex: Object.hasOwn(index.files, releasePath) }).toEqual({ releasePath, inIndex: true });
+        const target = await fetch(new URL(ready.runtime + releasePath, ready.baseURL));
+        expect({ releasePath, status: target.status }).toEqual({ releasePath, status: 200 });
+      }
+
+      const named = (pattern) => [...paths].filter((releasePath) => pattern.test(releasePath));
+      const derive = named(/\/plugins\/derive-/);
+      const mergeEngine = named(/\/sync\/merge-engine(-|\.js$)/);
+      const sortableChunk = named(/\/vendor\/Sortable\.vendor-/);
+      const sortablePlugin = named(/\/plugins\/sortable\.js$/);
+      const sync = named(/\/sync\//);
+      expect({ derive: derive.length > 0, mergeEngine: mergeEngine.length > 0 }).toEqual({ derive: true, mergeEngine: true });
+      expect({ sortableChunk: sortableChunk.length > 0, sortablePlugin: sortablePlugin.length > 0 })
+        .toEqual({ sortableChunk: true, sortablePlugin: true });
+      expect({ sync: sync.length > 1 }).toEqual({ sync: true });
+      console.info(
+        `offline-host-contract: ${host.name} serves ${paths.size} release paths for the board's query ` +
+          `(derive ${derive.join(",")}, merge engine ${mergeEngine.join(",")}, sortable ${[...sortableChunk, ...sortablePlugin].join(",")}, ` +
+          `sync ${sync.join(",")})`,
+      );
+    }, CASE_TIMEOUT);
+
+    test("a save of the projected board writes public URLs, keeps the change, and leaves every other card's bytes alone", async () => {
+      count(host.name);
+      const documentURL = ready.documents["kanban.html"].url;
+      const first = await (await fetch(documentURL)).text();
+      const etag = /documentetag="([^"]*)"/.exec(first)?.[1];
+      expect(typeof etag).toBe("string");
+
+      const before = '<h3 class="card-title" editmode:contenteditable inert-contenteditable="plaintext-only">Referral program for early users</h3>';
+      const after = '<h3 class="card-title" editmode:contenteditable inert-contenteditable="plaintext-only">Referral program for late adopters</h3>';
+      expect(first).toContain(before);
+      const edited = first.replace(before, after);
+      expect(edited).not.toBe(first);
+
+      const save = ready.documents["kanban.html"].save;
+      const saved = await fetch(save.url, {
+        method: save.method,
+        headers: { ...save.headers, "If-Match": etag },
+        body: edited,
+      });
+      expect(saved.status).toBe(200);
+
+      const disk = await readFile(path.join(root, "kanban.html"), "utf8");
+      expect(disk).toContain("Referral program for late adopters");
+      expect(disk).toContain("https://clayjs.com/v1/clay.js?plugins=sortable,people,upload,sync,visitor-drafts,unsent,menu&exclude=richclay");
+      expect(disk).toContain("https://clayjs.com/v1/fonts/work-sans.css");
+      expect(disk).not.toContain("/_/clayjs/");
+      expect(disk).not.toContain("clay-runtime-map");
+      expect(disk).not.toContain("documentetag");
+
+      const reopened = await (await fetch(documentURL)).text();
+      const mapped = (html) => JSON.parse(DESCRIPTOR.exec(html)[1]).entries.map((entry) => entry.local);
+      expect(mapped(reopened)).toEqual(mapped(first));
+
+      const originalCards = cardsOf(template);
+      const savedCards = cardsOf(disk);
+      expect(originalCards.length).toBeGreaterThan(10);
+      expect(savedCards.map((card) => card.id)).toEqual(originalCards.map((card) => card.id));
+      const changed = savedCards.filter((card, index) => card.outer !== originalCards[index].outer);
+      expect(changed.map((card) => card.id)).toEqual(["c-k3v9q2"]);
     }, CASE_TIMEOUT);
   });
 }
