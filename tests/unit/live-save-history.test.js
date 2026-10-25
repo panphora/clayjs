@@ -84,6 +84,7 @@ let historyEcho = true;
 let saveFixture = null;
 let saveEcho = true;
 let historyGate = null;
+let postGate = null;
 let readAnswer = null;
 let room = null;
 let epochCount = 0;
@@ -141,9 +142,11 @@ global.fetch = jest.fn(async (url, init = {}) => {
     if (saveGate) await saveGate;
     if (saveFixture) {
       const echo = saveEcho ? { saveId: headers["Save-ID"], requestHash: await sha256Hex(init.body) } : null;
+      call.answeredAt = Date.now();
       return recorded(saveFixture, echo);
     }
     const answerFor = await saveAnswer(calls.saves.length, init);
+    call.answeredAt = Date.now();
     return answer(answerFor.status ?? 200, answerFor.body === undefined ? { msg: "Saved" } : answerFor.body, answerFor.headers ?? {});
   }
   if (target.pathname === "/_/sync/data") {
@@ -154,6 +157,7 @@ global.fetch = jest.fn(async (url, init = {}) => {
     }
     const frame = JSON.parse(init.body);
     calls.posts.push({ at: Date.now(), frame });
+    if (postGate) await postGate;
     const entry = room?.stores?.[frame.name];
     if (entry) {
       entry.value = applyOps(clone(entry.value), frame.ops);
@@ -183,7 +187,7 @@ const bridge = await import("../../src/live/stream-bridge.js");
 const snapshot = await import("../../src/core/snapshot.js");
 const { saveCapturedHtml } = await import("../../src/core/save-core.js");
 const { savePageForce } = await import("../../src/core/save.js");
-const { sha256Hex } = await import("../../src/live/save-history.js");
+const { sha256Hex, RECOVERY_WINDOW_MS, RECOVERY_ROUNDS_MS } = await import("../../src/live/save-history.js");
 
 // ---------------------------------------------------------------------------
 // Harness
@@ -279,6 +283,16 @@ const untilTaken = async () => {
   return refusal();
 };
 
+const untilNotice = async (code) => {
+  for (let i = 0; i < 100 && !notices.some((notice) => notice.code === code); i += 1) await wait(10);
+  return notices.filter((notice) => notice.code === code).length;
+};
+
+const until = async (check, ms = 5000) => {
+  const deadline = Date.now() + ms;
+  while (!check() && Date.now() < deadline) await wait(10);
+};
+
 // Hold the next room read open until the test releases it.
 const gateRead = (state = null) => {
   let release = null;
@@ -307,6 +321,7 @@ beforeEach(() => {
   saveFixture = null;
   saveEcho = true;
   historyGate = null;
+  postGate = null;
   readAnswer = null;
   room = null;
 });
@@ -409,8 +424,8 @@ test("a counter saved once after a lost response, a later writer and a room rest
   // A later writer's file is what the room restarted with, before any answer.
   newRoom({ g: roomStore({ s: 0 }), [name]: roomStore({ n: 1 }) });
   const readsBefore = calls.reads.length;
-  const settledAt = Date.now();
   const result = await lostAnswer(save);
+  const settledAt = calls.saves.at(-1).answeredAt;
   expect(result.ok).toBe(false);
   expect(result.msgType).toBe("error");
   expect(result.saveOutcome).toBeNull();
@@ -447,8 +462,8 @@ test("a counter saved once after a lost response, a later writer and a room rest
   expect(calls.queries).toHaveLength(1);
   expect(calls.reads.length - readsBefore).toBe(1);
   expect(posted(name)).toHaveLength(0);
-  // The first round is due at 0 ms, and the one fresh read follows the proof.
-  expect(calls.queries[0].at - settledAt).toBeLessThan(40);
+  // The first round is due at 0 ms, before round 1, and the one fresh read follows the proof.
+  expect(calls.queries[0].at - settledAt).toBeLessThan(RECOVERY_ROUNDS_MS[1] / SCALE);
   expect(calls.reads.at(-1).at).toBeGreaterThanOrEqual(calls.queries[0].at);
   console.log("counter case (ms after settlement):", JSON.stringify({
     saves: calls.saves.length,
@@ -477,8 +492,8 @@ test("a list insert saved once after a lost response", async () => {
   const save = await sendCapture();
   newRoom({ g: roomStore({ s: 0 }), [name]: roomStore({ a: ["a"] }) });
   const readsBefore = calls.reads.length;
-  const settledAt = Date.now();
   const result = await lostAnswer(save);
+  const settledAt = calls.saves.at(-1).answeredAt;
   expect(result.ok).toBe(false);
   expect(await untilQuery(1)).toBe(1);
   expect(calls.historyAnswers[0].case).toBe("applied");
@@ -495,7 +510,7 @@ test("a list insert saved once after a lost response", async () => {
   expect(calls.queries).toHaveLength(1);
   expect(calls.reads.length - readsBefore).toBe(1);
   expect(posted(name)).toHaveLength(0);
-  expect(calls.queries[0].at - settledAt).toBeLessThan(40);
+  expect(calls.queries[0].at - settledAt).toBeLessThan(RECOVERY_ROUNDS_MS[1] / SCALE);
   expect(calls.reads.at(-1).at).toBeGreaterThanOrEqual(calls.queries[0].at);
   console.log("list case (ms after settlement):", JSON.stringify({
     saves: calls.saves.length,
@@ -715,6 +730,8 @@ test("a newer unsent capture while another is on the wire is not the one that se
   const second = snapshot.captureForSaveAndComparison({ flushUndo: false });
   expect(second.captureId).not.toBe(save.capture.captureId);
 
+  let openPost;
+  postGate = new Promise((resolve) => { openPost = resolve; });
   const result = await lostAnswer(save);
   expect(result.ok).toBe(false);
   expect(await untilQuery(1)).toBe(1);
@@ -727,6 +744,10 @@ test("a newer unsent capture while another is on the wire is not the one that se
   expect(pendingIds(name)).toEqual([2]);
   expect(s.toJSON()).toEqual({ n: 1, m: 1 });
   expect(calls.saves).toHaveLength(1);
+  postGate = null;
+  openPost();
+  await untilPosted(name, 1);
+  expect(posted(name)[0].frame.ops).toEqual([{ op: "add", path: ["m"], n: 1 }]);
 });
 
 test("both IDs of one logical save are asked about, and either positive settles once", async () => {
@@ -866,24 +887,25 @@ test("unknown answers run the whole six-query window and then the existing uncer
       ? { status: 412, body: { msg: "conflict", code: "conflict", saveId: init.headers["Save-ID"], etag: "peer-1" } }
       : { status: 502, body: null };
   historyFixture = FIXTURES.unknown;
-  const settledAt = Date.now();
   const result = await save.answer();
   expect(result.ok).toBe(false);
   const ids = calls.saves.map((call) => call.headers["Save-ID"]);
   expect(ids).toHaveLength(2);
 
-  await wait(350);
-  const times = calls.queries.map((query) => query.at - settledAt);
+  // Round 0 runs as the last answer lands; later rounds are timed from it.
+  await until(() => calls.queries.length >= 6);
+  await wait(150);
+  expect(calls.queries[0].at - calls.saves.at(-1).answeredAt).toBeLessThan(RECOVERY_ROUNDS_MS[1] / SCALE);
+  const times = calls.queries.map((query) => query.at - calls.queries[0].at);
   expect(calls.queries).toHaveLength(6);
   expect(new Set(calls.historyAnswers.map((answer) => answer.case))).toEqual(new Set(["unknown"]));
   expect(calls.queries.map((query) => query.saveId)).toEqual([ids[0], ids[1], ids[0], ids[1], ids[0], ids[1]]);
-  expect(times[0]).toBeLessThan(40);
   expect(times[2]).toBeGreaterThanOrEqual(70);
   expect(times[2]).toBeLessThan(170);
   expect(times[4]).toBeGreaterThanOrEqual(240);
   expect(times[4]).toBeLessThan(400);
   expect(Math.max(...times)).toBeLessThan(450);
-  console.log("six-query window (ms after settlement):", times.join(", "));
+  console.log("six-query window (ms from the first lookup):", times.join(", "));
 
   await wait(200);
   expect(calls.queries).toHaveLength(6);
@@ -981,11 +1003,13 @@ test("a refused fresh read keeps the barrier, reports it once, and a later read 
   expect(refusal()).toBe("save-history-refresh-required");
   expect(s.status.mode).toBe("file");
 
-  await wait(400);
+  await untilNotice("save-history-refresh-required");
   expect(notices.filter((notice) => notice.code === "save-history-refresh-required")).toHaveLength(1);
   expect(notices.filter((notice) => notice.code === "save-uncertain")).toEqual([]);
 
   // The room answers again: the read clears the barrier, and only newer edits go.
+  let openPost;
+  postGate = new Promise((resolve) => { openPost = resolve; });
   readAnswer = null;
   s.add("m", 1);
   expect(refusal()).toBe("save-history-refresh-required");
@@ -994,7 +1018,9 @@ test("a refused fresh read keeps the barrier, reports it once, and a later read 
   expect(s.status.mode).toBe("fast");
   expect(pendingIds(name)).toEqual([2]);
   expect(s.toJSON()).toEqual({ n: 1, m: 1 });
-  await wait(150);
+  postGate = null;
+  openPost();
+  await untilPosted(name, 1);
   expect(posted(name)).toHaveLength(1);
   expect(calls.saves).toHaveLength(1);
 });
@@ -1089,7 +1115,6 @@ test("a lane that stops mid-lookup gives nothing up early and does not restart t
     count === 1
       ? { status: 412, body: { msg: "conflict", code: "conflict", saveId: init.headers["Save-ID"], etag: "peer-1" } }
       : { status: 502, body: null };
-  const settledAt = Date.now();
   const result = await save.answer();
   expect(result.ok).toBe(false);
   await untilQuery(1);
@@ -1100,12 +1125,12 @@ test("a lane that stops mid-lookup gives nothing up early and does not restart t
   expect(pendingIds(name)).toEqual([1]);
   expect(notices).toEqual([]);
 
-  await wait(560);
-  const times = calls.queries.map((query) => query.at - settledAt);
+  await until(() => pendingIds(name).length === 0 && notices.some((notice) => notice.code === "save-uncertain"));
+  const times = calls.queries.map((query) => query.at);
   expect(calls.queries).toHaveLength(6);
-  expect(Math.max(...times)).toBeLessThan(450);
+  expect(Math.max(...times) - times[0]).toBeLessThan(RECOVERY_WINDOW_MS / SCALE);
   expect(pendingIds(name)).toEqual([]);
   expect(posted(name)).toEqual([]);
   expect(notices.filter((notice) => notice.code === "save-uncertain")).toHaveLength(1);
-  console.log("stopped-lane window (ms after settlement):", times.join(", "));
+  console.log("stopped-lane window (ms from the first lookup):", times.map((at) => at - times[0]).join(", "));
 });
