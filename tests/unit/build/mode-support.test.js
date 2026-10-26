@@ -26,12 +26,10 @@ const UNSUPPORTED = {
   // Core paths whose session belongs to a later step.
   // Plugins: every one stays on the guarded reload until its own step lands.
   "sync/live-sync.js": "the stream auto-starts on the saved lane; 17b-5",
-  "plugins/live.js": "the writer session survives a re-entry; 17b-6b",
   "plugins/page.js": "install() runs at import; 17b-7b",
   "plugins/page-view.js": "the reader the transition will own; 17b-7a",
   "plugins/cms.js": "the vendor auto-opens at import; 17b-9",
   "plugins/quickcrop.js": "reached through cms and unreviewed; 17b-9",
-  "plugins/people.js": "one init() holds the reader and the editing half; 17b-6b",
   "plugins/menu.js": "a persistent UI service nobody has reviewed yet",
   "plugins/wire.js": "no admission lease yet; 17b-9",
   "plugins/message.js": "unreviewed",
@@ -39,7 +37,6 @@ const UNSUPPORTED = {
   "plugins/demo.js": "its own destination, not a host edit session",
   "plugins/source.js": "the accepted-byte service, unreviewed",
   "plugins/visitor-drafts.js": "the draft plan keeps its own startup",
-  "plugins/visitor-drafts-owner.js": "the chip follows the committed mode in 17b-6b",
   "plugins/bind-text.js": "its bindings belong to the application's own participant",
   "plugins/derive.js": "paints from the Sap boot hooks; a later step",
   "plugins/upgrade.js": "runs under the document-operation slot; a later step",

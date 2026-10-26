@@ -522,6 +522,11 @@ function releaseWriter() {
   serverLane = null;
   local = null;
   provenanceHost = false;
+  // The gates went with the lane: a second entry must not read this released one as ready.
+  laneReady = null;
+  writerReady = null;
+  settleLane = null;
+  settleWriter = null;
   lane?.stop();
 }
 
@@ -539,37 +544,50 @@ export function liveWriterParticipant() {
   return {
     id: "clay:live",
     order: 200,
-    prepare(context) {
+    prepare(context = {}) {
+      // An adoption is the session this tab's edit boot started: the exit takes that one
+      // back, and the entry asks for no second lane.
+      if (context.initial === true) {
+        if (!writerSession) writerSession = { admitted: true };
+        return writerLease(writerSession, { adopted: true });
+      }
+      freshLaneGates();
       const session = { admitted: false };
       writerSession = session;
       resetWriterSession();
-      return {
-        enable() {
-          if (writerSession !== session) return;
-          session.admitted = true;
-          ensureLane();
-        },
-        quiesce() {
-          if (writerSession !== session) return;
-          session.admitted = false;
-          return drainLiveWriter();
-        },
-        resume() {
-          if (writerSession !== session) return;
-          session.admitted = true;
-          for (const entry of sessionStores()) {
-            if (entry.store.pending.length > 0) fast?.release(entry.store.name);
-          }
-        },
-        dispose() {
-          if (writerSession !== session) return;
-          writerSession = null;
-          releaseWriter();
-        },
-      };
+      return writerLease(session);
     },
   };
 }
+
+function writerLease(session, { adopted = false } = {}) {
+  return {
+    enable() {
+      if (adopted || writerSession !== session) return;
+      session.admitted = true;
+      ensureLane();
+    },
+    quiesce() {
+      if (writerSession !== session) return;
+      session.admitted = false;
+      return drainLiveWriter();
+    },
+    resume() {
+      if (writerSession !== session) return;
+      session.admitted = true;
+      for (const entry of sessionStores()) {
+        if (entry.store.pending.length > 0) fast?.release(entry.store.name);
+      }
+    },
+    dispose() {
+      if (writerSession !== session) return;
+      writerSession = null;
+      releaseWriter();
+    },
+  };
+}
+
+export { liveWriterParticipant as modeParticipant };
 
 // The page plugin's one-shot gates: the fast lane's setup, and the room's
 // writer election. Both resolve null when this tab has no lane at all.
@@ -578,11 +596,15 @@ let writerReady = null;
 let settleLane = null;
 let settleWriter = null;
 
+// A fresh pair for a new session: the page plugin awaits these, and the ones a released
+// session settled answer for a lane that no longer exists.
+function freshLaneGates() {
+  laneReady = new Promise((resolve) => { settleLane = resolve; });
+  writerReady = new Promise((resolve) => { settleWriter = resolve; });
+}
+
 function laneGates() {
-  if (!laneReady) {
-    laneReady = new Promise((resolve) => { settleLane = resolve; });
-    writerReady = new Promise((resolve) => { settleWriter = resolve; });
-  }
+  if (!laneReady) freshLaneGates();
   return { laneReady, writerReady };
 }
 

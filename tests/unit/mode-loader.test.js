@@ -140,7 +140,7 @@ test("a requested edit module with no support row is unsupported, never assumed 
   expect(supportFor("core/save.js")).toBe("export");
   expect(supportFor("core/etag.js")).toBe("neutral");
   expect(supportFor("plugins/sortable.js")).toBe("export");
-  expect(supportFor("plugins/people.js")).toBeNull();
+  expect(supportFor("plugins/menu.js")).toBeNull();
   expect(supportFor("core/conflict-notice.js")).toBe("export");
   expect(unsupportedPaths({ edit: { core: [], plugins: inventory, late: [] }, view: { plugins: [], late: [] } })).toEqual(
     inventory.filter((path) => supportFor(path) === null)

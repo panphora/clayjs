@@ -450,20 +450,61 @@ function unobserve() {
   watcher = null;
 }
 
+// The editing half: the host answer that names me and the two listeners that keep it
+// current, added once for the boot and a lease alike. Each checks the mode when it fires,
+// so a session that has ended asks the host nothing.
+let session = null;
+
+function startEditing() {
+  if (!editing()) return Promise.resolve(null);
+  if (!session) {
+    const listeners = new AbortController();
+    const { signal } = listeners;
+    window.addEventListener("storage", (event) => {
+      if (event.key !== STORE || !editing()) return;
+      local = undefined;
+      emit();
+    }, { signal });
+    document.addEventListener("visibilitychange", () => {
+      if (!editing()) return;
+      if (document.visibilityState === "visible" && outcome !== "none") refresh(true);
+    }, { signal });
+    session = { listeners, first: refresh(false) };
+  }
+  return Promise.race([session.first, new Promise((resolve) => setTimeout(resolve, BOOT_WAIT_MS))]);
+}
+
+function stopEditing() {
+  session?.listeners.abort();
+  session = null;
+}
+
 async function init() {
   observe();
   // A reader is nobody and picks nobody, so a read-only page never asks the host.
-  if (!editing()) return;
-  window.addEventListener("storage", (event) => {
-    if (event.key !== STORE) return;
-    local = undefined;
-    emit();
-  });
-  document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible" && outcome !== "none") refresh(true);
-  });
-  const first = refresh(false);
-  await Promise.race([first, new Promise((resolve) => setTimeout(resolve, BOOT_WAIT_MS))]);
+  await startEditing();
+}
+
+function peopleLease() {
+  return {
+    enable() {
+      observe();
+      startEditing();
+    },
+    quiesce() {
+      if (!asking) return;
+      throw Object.assign(new Error("clay:people: a name is still being chosen"), {
+        code: "pending-input",
+        pending: ["name"],
+      });
+    },
+    resume() {},
+    dispose() {
+      cancelAsking?.();
+      unobserve();
+      stopEditing();
+    },
+  };
 }
 
 /**
@@ -480,27 +521,17 @@ export function peopleParticipant() {
   return {
     id: "clay:people",
     order: 330,
-    prepare() {
-      return {
-        enable() {
-          observe();
-        },
-        quiesce() {
-          if (!asking) return;
-          throw Object.assign(new Error("clay:people: a name is still being chosen"), {
-            code: "pending-input",
-            pending: ["name"],
-          });
-        },
-        resume() {},
-        dispose() {
-          cancelAsking?.();
-          unobserve();
-        },
-      };
+    prepare(context = {}) {
+      const lease = peopleLease();
+      // An adoption is the session this module's own import already started: the exit
+      // takes it back, and the commit starts nothing a second time.
+      if (context.initial !== true) return lease;
+      return { ...lease, enable() {} };
     },
   };
 }
+
+export { peopleParticipant as modeParticipant };
 
 export const people = Object.freeze({ get, list, available, add, remove, canRename, rename });
 

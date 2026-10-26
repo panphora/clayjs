@@ -184,12 +184,12 @@ test("an undeclared document keeps the guarded reload", async () => {
 
 test("a declared document whose edit plan asks for a module with no support row keeps the guarded reload", async () => {
   const log = [];
-  // People has no support row yet, so the document cannot be started and taken back
+  // Menu has no support row yet, so the document cannot be started and taken back
   // without a reload.
   const clay = await bootPage({
     owner: true,
     declared: true,
-    params: "plugins=people&exclude=richclay,source",
+    params: "plugins=menu&exclude=richclay,source",
     queue: [participant("template:board", log)],
   });
 

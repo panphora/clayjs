@@ -46,6 +46,9 @@ export const MODULE_SUPPORT = {
   "plugins/undo.js": "export",
   "plugins/unsent.js": "export",
   "plugins/upload.js": "export",
+  "plugins/people.js": "export",
+  "plugins/live.js": "export",
+  "plugins/visitor-drafts-owner.js": "export",
 };
 
 export const supportFor = (path) =>

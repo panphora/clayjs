@@ -207,6 +207,82 @@ async function leaveEdit() {
   window.clay.isEditMode = false;
 }
 
+// The two cases below count host requests, and a page keeps the listeners of every people
+// module it has ever evaluated, so they come first in this section: a case that leaves a
+// session open would answer these dispatches too.
+test("the editing half starts on a managed prepare and enable, and a disposed session asks the host for nothing", async () => {
+  const mod = await load({ meta: withPeople({ me: A, members: [A] }), editMode: false });
+  // A reader is nobody and asks the host nothing.
+  expect(global.fetch).not.toHaveBeenCalled();
+  expect(mod.currentMe()).toBeNull();
+
+  const lease = mod.peopleParticipant().prepare({ generation: 1, isCurrent: () => true });
+  // Preparing builds the lease; the commit that enables it is what starts the editing half.
+  expect(global.fetch).not.toHaveBeenCalled();
+  window.clay.isEditMode = true;
+  lease.enable();
+  await tick();
+  expect(global.fetch).toHaveBeenCalledTimes(1);
+  expect(mod.currentMe()).toMatchObject({ id: A.id });
+
+  // While the session is open the page keeps following the host.
+  document.dispatchEvent(new Event("visibilitychange"));
+  await tick();
+  expect(global.fetch).toHaveBeenCalledTimes(2);
+
+  lease.dispose();
+  window.clay.isEditMode = false;
+  global.fetch.mockClear();
+  window.dispatchEvent(new Event("storage"));
+  document.dispatchEvent(new Event("visibilitychange"));
+  await tick();
+  // The ended session asks nothing: no identity round trip, no name prompt.
+  expect(global.fetch).not.toHaveBeenCalled();
+  expect(mod.currentMe()).toBeNull();
+});
+
+test("adoption counts one observer, not two, and starts no second editing half", async () => {
+  const observed = [];
+  const disconnected = [];
+  const realObserve = MutationObserver.prototype.observe;
+  const realDisconnect = MutationObserver.prototype.disconnect;
+  MutationObserver.prototype.observe = function (...args) {
+    observed.push(args[0]);
+    return realObserve.apply(this, args);
+  };
+  MutationObserver.prototype.disconnect = function () {
+    disconnected.push(this);
+    return realDisconnect.call(this);
+  };
+
+  try {
+    // The explicit edit boot: the module's own import already holds the editing half.
+    const mod = await load({ meta: withPeople({ me: A, members: [A] }) });
+    expect(observed).toHaveLength(1);
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+
+    const lease = mod.peopleParticipant().prepare({ initial: true, generation: 1 });
+    lease.enable();
+    await tick();
+
+    // The session the import started, adopted rather than started beside it.
+    expect(observed).toHaveLength(1);
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(mod.currentMe()).toMatchObject({ id: A.id });
+
+    lease.dispose();
+    expect(disconnected).toHaveLength(1);
+
+    const after = global.fetch.mock.calls.length;
+    document.dispatchEvent(new Event("visibilitychange"));
+    await tick();
+    expect(global.fetch).toHaveBeenCalledTimes(after);
+  } finally {
+    MutationObserver.prototype.observe = realObserve;
+    MutationObserver.prototype.disconnect = realDisconnect;
+  }
+});
+
 test("a host answer that arrives after the page left edit stamps nothing", async () => {
   const answer = { ok: true, status: 200, text: async () => JSON.stringify(withPeople({ me: A, members: [A] })) };
   let answered = null;
@@ -289,6 +365,7 @@ test("the lease refuses an exit over an unanswered name prompt, and dispose take
 });
 
 test("a stopped session stops watching the registry, and the next read starts it again", async () => {
+
   const observed = [];
   const disconnected = [];
   const realObserve = MutationObserver.prototype.observe;

@@ -59,7 +59,7 @@ global.fetch = jest.fn(async (url, init = {}) => {
   return { ok: true, status: 200, json: async () => ({ seq: room.seq + 1, epoch: room.epoch }), headers: { get: () => null } };
 });
 
-const { live, storeOf, fastLane, receiveFrame, drainLiveWriter, liveWriterParticipant } =
+const { live, storeOf, fastLane, receiveFrame, drainLiveWriter, liveWriterParticipant, pageWriterReady } =
   await import("../../src/plugins/live.js");
 const bridge = await import("../../src/live/stream-bridge.js");
 const facts = await import("../../src/core/is-edit-mode.js");
@@ -281,4 +281,65 @@ test("a released writer does not stop the reader: the page still follows a peer'
   // The reader keeps the file's text and writes the store's value into the next save.
   expect(domText("g")).toBe('{"s":0}');
   expect(storeOf("g").pending).toEqual([]);
+});
+
+test("the initial edit's writer is adopted, not started again, and the exit releases its lane", async () => {
+  // A store of this test's own: an entry a previous case opened would not open again.
+  document.body.innerHTML = tag("adopted", '{"s":0}');
+  // The page booted in edit, so the plugin's own import started this tab's lane.
+  facts.commitModeFacts({ mode: "edit", isEditMode: true, phase: "idle" });
+  const g = live("adopted");
+  await wait(20);
+  await flushAsync();
+  // The import's own session already asked for the lane.
+  const bootLane = fastLane();
+  expect(bootLane).not.toBeNull();
+
+  // An edit this session already holds is not the reader's, and adopting the session
+  // must not drop it the way a fresh session drops what it did not make.
+  g.add("s", 1);
+  expect(storeOf("adopted").pending).toHaveLength(1);
+
+  const before = requests.length;
+  const lease = liveWriterParticipant().prepare({ initial: true, generation: 1 });
+  lease.enable();
+  await wait(60);
+  await flushAsync();
+  // The session the boot already has: no second lane request, and the same lane.
+  expect(requests.length).toBe(before);
+  expect(fastLane()).toBe(bootLane);
+  expect(storeOf("adopted").pending).toHaveLength(1);
+
+  await expect(lease.quiesce()).resolves.toEqual({ ok: true });
+  lease.dispose();
+  // The exit stops the lane the boot started.
+  expect(fastLane()).toBeNull();
+  expect(storeOf("adopted").handle.status.mode).toBe("file");
+});
+
+test("a second session's writer gate is a new promise, not the first session's resolved one", async () => {
+  document.body.innerHTML = tag("g", '{"s":0}');
+  live("g");
+  const first = liveWriterParticipant().prepare({ generation: 1 });
+  first.enable();
+  await join();
+  const firstGate = pageWriterReady();
+  const firstLane = await firstGate;
+  expect(firstLane).toBe(fastLane());
+
+  await expect(first.quiesce()).resolves.toEqual({ ok: true });
+  first.dispose();
+  expect(fastLane()).toBeNull();
+
+  const second = liveWriterParticipant().prepare({ generation: 2 });
+  const secondGate = pageWriterReady();
+  // The released session's gate answered for a lane that no longer exists.
+  expect(secondGate).not.toBe(firstGate);
+  second.enable();
+  await join({ value: { s: 0 } });
+  const secondLane = await secondGate;
+  expect(secondLane).not.toBeNull();
+  expect(secondLane).not.toBe(firstLane);
+  expect(secondLane).toBe(fastLane());
+  second.dispose();
 });
