@@ -153,7 +153,7 @@
       "posts": 0,
       "eventSources": 1,
       "listeners": {
-        "window": 10,
+        "window": 11,
         "document": 96,
         "Element": 41
       },
@@ -199,6 +199,7 @@
         "theme",
         "toggleEditMode",
         "trash",
+        "undo",
         "unsent",
         "upload",
         "visitorDrafts",
@@ -206,6 +207,7 @@
       ],
       "plugins": [
         "visitor-drafts",
+        "undo",
         "unsent",
         "upload",
         "people",
@@ -245,6 +247,7 @@
         "plugins/people.js": 1,
         "plugins/sortable.js": 1,
         "plugins/source.js": 1,
+        "plugins/undo.js": 1,
         "plugins/unsent.js": 1,
         "plugins/upgrade.js": 1,
         "plugins/upload.js": 1,
