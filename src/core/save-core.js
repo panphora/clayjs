@@ -13,6 +13,7 @@ import { consumeUserDriven, consumeExplicitSave, markUserDriven } from "../lib/u
 import { saveToken } from "./host-attrs.js";
 import { lastSeenEtag, conditionalSaves, recordEtag } from "./etag.js";
 import { hostMeta } from "./host-meta.js";
+import { saveSize, storedFile, knownSaveLimit, saveLimit, announceSaveSize } from "./save-size.js";
 import "./runtime-url.js";
 import {
   getPageContents,
@@ -348,6 +349,16 @@ function skippedResult(msg) {
   return { ok: false, msg, msgType: 'skipped', code: null, etag: null };
 }
 
+// A body the host will not store, refused here instead of on the wire. It is an
+// ordinary error result with one more fact on it, because the caller's answer to
+// "too large" is the same answer it gives any failed save: keep the writing, do not
+// mark it saved, and let the person shrink or download it.
+function tooLargeResult(size) {
+  const err = new Error(`This document is ${size.bytes} bytes; this host saves at most ${size.maxBytes}`);
+  err.code = 'save-too-large';
+  return { ...errorResult(err), sent: false, size };
+}
+
 // ============================================
 // THE DOCUMENT-OPERATION SLOT
 // ============================================
@@ -637,7 +648,11 @@ function sendOnce(content, saveId, etag, { captureId = null, conversionHeader = 
       }
       if (!res.ok) {
         const error = new Error(data.msg || data.error || `HTTP ${res.status}: ${res.statusText}`);
-        error.code = data.code ?? null;
+        // A 413 is the host refusing these bytes for their size, whatever it called
+        // the refusal: the one code a caller can act on is the same one the local
+        // guard gives. No limit is invented from it — a refusal is not an
+        // announcement, and the measurement the caller sees is this attempt's own.
+        error.code = res.status === 413 ? 'save-too-large' : (data.code ?? null);
         error.status = res.status;
         // Spec §6: a conflict may name what moved the document. Only the host can
         // know, and it often cannot, so this rides through as-is and the notice
@@ -907,6 +922,20 @@ function runSave(html, captureId, callback, conversion, capture = null) {
       return;
     }
 
+    // The one measurement every entry point shares: the exact string about to be
+    // handed to the backend, once per attempt, whichever lane asked. Not a second
+    // capture — these are the bytes 05b already took — and not `outerHTML`, which is
+    // a different string. The limit is whatever discovery last said; unknown refuses
+    // nothing, so a host that advertises no ceiling, or has not answered yet, gets the
+    // save and stays the authority on it.
+    saveLimit();
+    const size = saveSize(storedFile(html), knownSaveLimit());
+    announceSaveSize(size);
+    if (size.state === 'over') {
+      saveInProgress = false;
+      return finished(tooLargeResult(size));
+    }
+
     sendSave(html, { captureId, conversionHeader: formatted.header, attempts })
       .then(successResult, errorResult)
       // Clear the flag BEFORE handing the result back, so a caller that queues a
@@ -914,6 +943,10 @@ function runSave(html, captureId, callback, conversion, capture = null) {
       // is busy by the save that just finished.
       .then(result => {
         saveInProgress = false;
+        // A host's 413 is the same refusal the guard above makes, so it carries the
+        // same measurement. Its own answer about the size wins over nothing: the bytes
+        // are this attempt's, and the limit is still only what discovery advertised.
+        if (result.code === 'save-too-large' && !result.size) result.size = size;
         if (result.ok) notifySaveAccepted(html, captureId ?? null, artifact);
         finished(result);
       });

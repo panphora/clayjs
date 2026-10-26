@@ -301,6 +301,11 @@ function attachEditCore(loaded) {
     saveFn.overwrite = save.saveOverwritingConflict;
     saveFn.flush = save.flushSave;
     saveFn.soon = save.savePageSoon;
+    // What the host says it will store, and a measurement of candidate bytes. Both
+    // are asked for on use: a reader has neither, and a page that never asks pays
+    // nothing.
+    saveFn.limits = save.saveLimits;
+    saveFn.inspect = save.inspectSaveSize;
     // An upgrade-capable reader's temporary save object hands its `replace` to the function.
     if (clay.save !== saveFn && typeof clay.save?.replace === "function") saveFn.replace = clay.save.replace;
     if (clay.save !== saveFn) clay.save = saveFn;

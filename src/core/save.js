@@ -22,6 +22,7 @@ import {
   withKeepalive
 } from "./save-core.js";
 import { captureForComparisonAndDirty, captureForSaveAndComparison, captureForDirtyCheck, captureSaveClone, releaseCaptureArtifact } from "./snapshot.js";
+import { saveLimit, saveLimits, inspectSaveSize } from "./save-size.js";
 import { paintSignature } from "../lib/derived.js";
 import { NO_TRIGGER_AUTOSAVE_SELECTOR } from "../lib/region-policy.js";
 import { seedEtag, learnConditionalSaves, lastSeenEtag, recordEtag } from "./etag.js";
@@ -792,6 +793,11 @@ function drainPendingSave() {
   pendingAutosave = false;
   autosaveScheduler.request();
 }
+
+// The host's advertised save ceiling, and a measurement of bytes that are not this
+// page's document. Neither sends anything; `inspect` also captures nothing and
+// claims nothing, because an import preview asks about candidate bytes.
+export { saveLimits, inspectSaveSize };
 
 // State accessors for autosave module
 export function getUnsavedChanges() { return unsavedChanges; }
@@ -1817,6 +1823,11 @@ export function init() {
   // it can never arrive in time for that save, and from the second save onward the
   // first save's own response has already supplied one.
   seedEtag();
+
+  // The same discovery document states the host's save ceiling. Asked here for the
+  // same reason and the same way: joined to the memoized answer, never awaited, so
+  // the limit is known long before the first save and no save ever waits on it.
+  saveLimit();
 
   // Every editable page, not just autosave pages. A manual-save page makes
   // exactly the saves a person asked for, and used to report all of them as
