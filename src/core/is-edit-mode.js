@@ -80,6 +80,22 @@ const keptCanEdit =
   !(isViewOnlyDocument && query.editmode !== "true");
 let canEdit = hostCanEdit || keptCanEdit;
 
+// The host's own answer to "may this caller save here", once it has given one. It only
+// ever takes away what the hints granted, and gives back only what it took.
+let hostDenied = false;
+export const editDeniedByHost = () => hostDenied;
+export function noteHostWritable(writable) {
+  if (writable === false) {
+    if (canEdit) {
+      hostDenied = true;
+      canEdit = false;
+    }
+  } else if (hostDenied) {
+    hostDenied = false;
+    canEdit = true;
+  }
+}
+
 // Does this tab start editing? Only when something explicit asks for it.
 const startsEditing = receipt
   ? receipt.mode === "edit"

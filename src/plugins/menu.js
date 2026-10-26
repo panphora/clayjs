@@ -7,6 +7,7 @@ import CLAYGOO from "./menu/claygoo.svg.js";
 
 const SEO_ITEM = true;
 const SAVE_FAILED = "Couldn't save, so this page stays in edit mode.";
+const PERMISSION_DENIED = "You don't have permission to edit this document.";
 const NOTE_MS = 6000;
 const INTRO_GAP = 12;
 
@@ -291,7 +292,11 @@ function mount() {
     edit.disabled = false;
     if (result && result.ok === false) {
       edit.setAttribute("aria-checked", previous);
-      showNote(result.code === "save-failed" ? SAVE_FAILED : result.message || SAVE_FAILED);
+      showNote(
+        result.code === "permission-denied" ? PERMISSION_DENIED
+          : result.code === "save-failed" ? SAVE_FAILED
+            : result.message || SAVE_FAILED,
+      );
     } else {
       setChecked();
     }

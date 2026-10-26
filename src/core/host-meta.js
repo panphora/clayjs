@@ -14,7 +14,7 @@
  */
 
 import { saveToken } from "./host-attrs.js";
-import { isDraftMode } from "./is-edit-mode.js";
+import { isDraftMode, noteHostWritable } from "./is-edit-mode.js";
 
 const META_PATH = "/_/meta";
 const META_TIMEOUT_MS = 6000;
@@ -85,6 +85,23 @@ export function hostMeta({ fresh = false } = {}) {
     });
   }
   return refreshing;
+}
+
+let acceptedWritable = null;
+
+export const hostWritable = () => acceptedWritable;
+
+// A permission answer counts only when discovery itself answered ("ok") and only for the
+// document that asked: a reply that lands after a route change, or a failed refresh,
+// leaves the last accepted answer standing.
+export async function checkHostPermission({ fresh = false } = {}) {
+  const asked = location.pathname;
+  const meta = await hostMeta({ fresh });
+  if (location.pathname !== asked || hostMetaOutcome(meta) !== "ok") return acceptedWritable;
+  const writable = meta.document?.writable;
+  acceptedWritable = typeof writable === "boolean" ? writable : null;
+  noteHostWritable(acceptedWritable);
+  return acceptedWritable;
 }
 
 /**

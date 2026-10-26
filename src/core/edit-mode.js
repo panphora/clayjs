@@ -1,7 +1,7 @@
 // Edit mode system - combines the editmode toggle with page type setting.
 // Loads in BOTH view and edit mode: setMode must exist in view mode
 // (it's the way IN), and setPageTypeOnPageLoad marks <html> in either mode.
-import { canEdit, isDraftMode, isEditMode, isOwner, mode, modeState, registerModeParticipant } from "./is-edit-mode.js";
+import { canEdit, editDeniedByHost, isDraftMode, isEditMode, isOwner, mode, modeState, registerModeParticipant } from "./is-edit-mode.js";
 import { writeReceipt } from "./mode-receipt.js";
 import onDomReady from "../lib/dom-ready.js";
 
@@ -50,10 +50,34 @@ export async function activateInitialMode() {
   }
 }
 
+// An entry waits on the host's permission answer before anything starts, so it is held
+// here: a second ask for edit joins it, and the opposing ask is busy, as the controller
+// answers once it owns the transition.
+let entry = null;
+
 export async function setMode(next) {
   if (next !== "edit" && next !== "view") throw new TypeError(`clay.setMode: unknown mode "${next}"`);
+  if (entry) return next === "edit" ? entry : { ok: false, mode, code: "busy" };
   if (next === mode && !controller) return { ok: true, mode, changed: false };
-  if (isDraftMode || !canEdit) return { ok: false, mode, code: "not-allowed" };
+  if (isDraftMode || (!canEdit && !editDeniedByHost())) return { ok: false, mode, code: "not-allowed" };
+  if (next === "edit" && mode !== "edit") {
+    entry = enterEdit();
+    try {
+      return await entry;
+    } finally {
+      entry = null;
+    }
+  }
+  return switchTo(next);
+}
+
+async function enterEdit() {
+  const { checkHostPermission } = await import("./host-meta.js");
+  if ((await checkHostPermission({ fresh: true })) === false) return { ok: false, mode, code: "permission-denied" };
+  return switchTo("edit");
+}
+
+async function switchTo(next) {
   if (liveSwitch) {
     // A fetch that fails keeps the old way in: the guarded reload below.
     const loaded = await fetchController();

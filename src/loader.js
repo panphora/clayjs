@@ -75,7 +75,7 @@ export async function boot(base, params, readyResolve, manifest = null, suppleme
 
   // A draft saved by its visitor never reaches the host, and hostMeta() answers
   // bareHost() for it, so the request would fetch an answer nothing reads.
-  if (isEditMode && !isDraftMode) import("./core/host-meta.js").then((m) => m.hostMeta()).catch(() => {});
+  if (isEditMode && !isDraftMode) import("./core/host-meta.js").then((m) => m.checkHostPermission()).catch(() => {});
 
   // richclay's vendor build detects edit mode via this legacy global; set it
   // before any plugin import so its autoInit sees the right value. Overwrite
