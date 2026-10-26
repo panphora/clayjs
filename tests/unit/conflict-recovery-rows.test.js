@@ -333,9 +333,13 @@ test("the notice counts clashes, not the raw reports behind them", async () => {
   window.requestAnimationFrame = (cb) => setTimeout(cb, 0);
   window.clay = { conflicts };
   await import("../../src/core/conflict-notice.js");
-  await tick();
-
-  const bar = document.querySelector("[data-clay-conflict]");
+  // The notice is fetched lazily and draws on its own first frame, so wait for the bar
+  // it puts up rather than for one tick of this file's clock.
+  let bar = null;
+  for (const started = Date.now(); !bar && Date.now() - started < 2000;) {
+    await tick();
+    bar = document.querySelector("[data-clay-conflict]");
+  }
   expect(bar).not.toBeNull();
   expect(bar.textContent).toContain("Another edit replaced 1 change.");
   sync.stop();

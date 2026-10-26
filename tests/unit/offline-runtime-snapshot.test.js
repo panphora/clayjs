@@ -72,6 +72,7 @@ beforeEach(() => {
 afterEach(() => {
   jest.restoreAllMocks();
   delete global.fetch;
+  delete window.clayEditMode;
 });
 
 test("a save writes the authored URLs and no descriptor, and leaves the live DOM local", () => {
@@ -210,6 +211,9 @@ test("the live-sync serialization of a capture is canonical", () => {
 });
 
 test("the source plugin refuses a projected response and asks for the canonical one", async () => {
+  // The install at evaluation belongs to an explicit edit boot (V4 step 17b-7c: the
+  // module reads the committed mode when it evaluates), so this page is one.
+  window.clayEditMode = true;
   global.fetch = jest.fn(async () => ({
     ok: true,
     status: 200,

@@ -202,9 +202,10 @@ async function enter(handle = null) {
         if (!context.isCurrent()) throw fault(`"${participant.id}" became ready for a stale generation`, "stale-document");
       }
       // A live entry's baseline is the page as it stands: no reader has a receipt to take
-      // it from, so one capture settles both baselines and the dirty gate's token. A boot
-      // that already starts in edit settled its own when it read the file.
-      if (handle) {
+      // it from, so one capture settles both baselines and the dirty gate's token. It is
+      // taken for an entry with a reader and for one that came from view; only a boot that
+      // already starts in edit keeps the baseline it settled when it read the file.
+      if (handle || !editBefore) {
         const baseline = save.adoptEntryBaseline({ represented: context.represented });
         if (baseline && baseline.ok === false) {
           throw Object.assign(fault("the page moved since the last session", baseline.code || "pending-input"), baseline);
