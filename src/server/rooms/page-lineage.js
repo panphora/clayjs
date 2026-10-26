@@ -1,20 +1,31 @@
+import { load } from 'cheerio';
 import * as Y from '../../vendor/yjs.vendor.js';
 import { docFromValue } from '../../page/ybind/provider.js';
 import { seedLineage, seedOnly, sharesLineage } from '../../page/ybind/lineage.js';
 import { inspectPage } from './page-admission.js';
 import { PageConversionError } from './page-conversion.js';
-import { articleOf } from './page-rebase.js';
-import { pageArticles, splitPage } from './page-state.js';
+import { pageArticles, splitPage, inert } from './page-state.js';
 
 const refuse = (reason) => { throw new PageConversionError(reason); };
 const lineages = new Map();
+
+function storedArticle(html, doc) {
+  const $ = load(html);
+  const nodes = $('article[data-page]').toArray().filter((node) => !inert(node));
+  if (nodes.length !== 1) return null;
+  const article = doc.createElement('article');
+  for (const [name, value] of Object.entries(nodes[0].attribs)) article.setAttribute(name, value);
+  article.innerHTML = $(nodes[0]).html();
+  return article;
+}
 
 function storedLineage(html, createDocument) {
   if (typeof html !== 'string' || pageArticles(html) !== 1) return null;
   if (lineages.has(html)) return lineages.get(html);
   if (typeof createDocument !== 'function') throw new TypeError('A first write over a page document needs createDocument');
-  const found = articleOf(html, createDocument());
-  const lineage = found ? seedLineage(found.article) : null;
+  const article = storedArticle(html, createDocument());
+  if (!article) refuse('seed-lineage');
+  const lineage = seedLineage(article);
   lineages.set(html, lineage);
   if (lineages.size > 4) lineages.delete(lineages.keys().next().value);
   return lineage;

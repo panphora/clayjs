@@ -506,7 +506,7 @@ for (const host of hosts) {
       });
       const staleBody = await stale.text();
       console.info(`offline-host-contract: ${host.name} answered ${stale.status} to the stale ETag ${etag1}: ${staleBody}`);
-      expect({ status: stale.status, refused: stale.status !== 200 }).toEqual({ status: stale.status, refused: true });
+      expect({ status: stale.status }).toEqual({ status: 412 });
       expect(await readFile(diskPath)).toEqual(diskBeforeStale);
 
       const disk = await readFile(diskPath, "utf8");

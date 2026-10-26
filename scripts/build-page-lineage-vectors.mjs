@@ -106,6 +106,8 @@ const T2 = replaceOnce(
   '<h1 data-id="title"></h1>',
   '<h1 data-id="title">An outside edit</h1>',
 );
+// The stale seed's page as the HTML parser closes it: the same file without the article's end tag.
+const T2_IMPLICIT = replaceOnce(T2, "</article>", "");
 const E = withInner(T, "\n");
 const L = withInner(T, longPage);
 const TAGGED = editBody(T, edited(seedOf(T), 1001, retitle));
@@ -188,6 +190,7 @@ const writes = [
   { name: "delete-only", current: T, body: editBody(T, deleteOnlyValue), ifMatchOf: "current", pageWrite: "v1", expect: { js: "initial", htmlclay: "ordinary" } },
   { name: "net-zero-edit", current: T, body: netZeroBody, ifMatchOf: "current", pageWrite: "v1", expect: { js: "initial", htmlclay: null } },
   { name: "stale-seed-edit", current: T2, body: firstEditBody, ifMatchOf: "current", pageWrite: "v1", expect: { js: "seed-lineage", htmlclay: "ordinary" } },
+  { name: "stale-seed-implicit-close", current: T2_IMPLICIT, body: firstEditBody, ifMatchOf: "current", pageWrite: "v1", expect: { js: "seed-lineage", htmlclay: "ordinary" } },
   { name: "stale-seed-only", current: T2, body: withTag(T, seedOf(T)), ifMatchOf: "current", pageWrite: "v1", expect: { js: "seed-lineage", htmlclay: "ordinary" } },
   { name: "stale-stamp", current: T2, body: firstEditBody, ifMatchOf: "T", pageWrite: "v1", expect: { js: "412", htmlclay: "412" } },
   { name: "conversion-as-first-write", current: T, body: CONVERTED, ifMatchOf: "current", pageWrite: null, expect: { js: "seed-lineage", htmlclay: "ordinary" } },
