@@ -5,7 +5,7 @@
       "eventSources": 1,
       "listeners": {
         "window": 8,
-        "document": 54,
+        "document": 56,
         "Element": 29
       },
       "observers": 2,
@@ -96,7 +96,7 @@
       "eventSources": 1,
       "listeners": {
         "window": 3,
-        "document": 11,
+        "document": 13,
         "Element": 4
       },
       "observers": 1,
@@ -154,7 +154,7 @@
       "eventSources": 1,
       "listeners": {
         "window": 11,
-        "document": 96,
+        "document": 98,
         "Element": 41
       },
       "observers": 3,
@@ -260,7 +260,7 @@
       "eventSources": 1,
       "listeners": {
         "window": 3,
-        "document": 24,
+        "document": 26,
         "Element": 4
       },
       "observers": 2,
@@ -334,7 +334,7 @@
       "eventSources": 1,
       "listeners": {
         "window": 9,
-        "document": 63,
+        "document": 65,
         "Element": 6
       },
       "observers": 1,
@@ -429,7 +429,7 @@
       "eventSources": 1,
       "listeners": {
         "window": 3,
-        "document": 24,
+        "document": 26,
         "Element": 4
       },
       "observers": 1,
