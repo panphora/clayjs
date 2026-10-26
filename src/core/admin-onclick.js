@@ -1,6 +1,7 @@
 import { isEditMode, isOwner } from "./is-edit-mode.js";
 import onDomReady from "../lib/dom-ready.js";
 import { addDocumentTransform } from "./snapshot.js";
+import { restoreAuthoredOrder } from "./preserve-authored.js";
 
 export const SELECTOR = '[editmode\\:onclick]';
 
@@ -46,6 +47,7 @@ export function disableOnClick() {
       el.setAttribute("inert-onclick", val);
       el.removeAttribute("onclick");
     }
+    restoreAuthoredOrder(el);
   });
 }
 

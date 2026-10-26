@@ -472,12 +472,17 @@ test("a live import in view starts nothing, and the commit that enters edit buil
     expect(chromeCount()).toBe(0);
     expect(panel()).toBeNull();
 
-    // The commit that enters edit is what builds it, once. The facts are the ones this
-    // instance reads, so the commit goes through them rather than through the global.
-    (await import("../../src/core/is-edit-mode.js")).commitModeFacts({ mode: "edit", isEditMode: true, generation: 1 });
+    // The controller's order: prepare asks the host while the committed mode is still
+    // view, the boundary commits edit, and only then does the lease enable. Preparation
+    // alone therefore draws nothing, and the commit is what builds the composer.
     const lease = participant().prepare({ generation: 1, isCurrent: () => true });
     await lease.ready;
     expect(fakeWire.helpers).toHaveBeenCalledTimes(1);
+    expect(panel()).toBeNull();
+
+    (await import("../../src/core/is-edit-mode.js")).commitModeFacts({ mode: "edit", isEditMode: true, generation: 1 });
+    lease.enable();
+    await flush();
     expect(panel()).not.toBeNull();
 
     lease.dispose();

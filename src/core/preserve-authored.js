@@ -10,7 +10,7 @@ import { ROUTE_ACTIVE_ATTR } from "../lib/root-attrs.js";
 import { stripEphemeral } from "../lib/ephemeral.js";
 
 export const CONTROLLED_SELECTOR =
-  '[editmode\\:contenteditable], [viewmode\\:disabled], [viewmode\\:readonly]';
+  '[editmode\\:contenteditable], [editmode\\:onclick], [viewmode\\:disabled], [viewmode\\:readonly]';
 
 const authored = new WeakMap();
 const originals = new WeakMap();

@@ -1135,17 +1135,23 @@ function wireInteractions() {
 
 // ---------------------------------------------------------------- boot
 
-async function init() {
-  if (!isEditMode || panel) return;  // an owner/editor feature, built once
-  const token = ++chromeToken; // an exit during the lookup retires this build
+async function loadHelper() {
+  const token = ++chromeToken;
   helperState = await helperStateNow();
-  if (token !== chromeToken) return;
-  // No ai-edit helper on this host: stay dormant. A concurrent open() that got here
-  // first may also have built the chrome already.
+  return token === chromeToken;
+}
+
+function build() {
   if (!helperState || panel) return;
   listeners = new AbortController();
   buildChrome();
   wireInteractions();
+}
+
+async function init() {
+  if (!isEditMode || panel) return;  // an owner/editor feature, built once
+  if (!(await loadHelper())) return;
+  build();
 }
 
 // A target the composer can be opened on: a connected content element of this
@@ -1228,11 +1234,12 @@ function teardown() {
 /**
  * ai-edit as a mode lease.
  *
- * Preparing this lease is what `clay.aiEdit.init()` already does: ask the host whether
- * it lists a ready helper, then build the chrome, inert until somebody opens it. What a
- * session adds is everything still unresolved — a request on the wire, a preview waiting
- * for Keep or Revert, a comment typed and not sent — so `quiesce` refuses the exit and
- * `resume` leaves that same preview, comment and selection timer exactly as they were.
+ * Preparing this lease asks the host whether it lists a ready helper, which is safe while
+ * the committed mode is still view; the commit that enters edit builds the chrome, inert
+ * until somebody opens it, exactly as `clay.aiEdit.init()` does. What a session adds is
+ * everything still unresolved — a request on the wire, a preview waiting for Keep or
+ * Revert, a comment typed and not sent — so `quiesce` refuses the exit and `resume`
+ * leaves that same preview, comment and selection timer exactly as they were.
  * `dispose` (after the barrier) stops every editor-only handler and takes the chrome
  * down, so a save or selection event in view draws nothing. `initial: true` adopts the
  * chrome the boot's own import built, and asks the host nothing a second time.
@@ -1242,9 +1249,12 @@ export function aiEditParticipant() {
     id: "clay:ai-edit",
     order: 950, // after the wire (900): this request is sent through it
     prepare(context = {}) {
+      const initial = context.initial === true;
       return {
-        ready: context.initial === true ? boot : init(),
-        enable() {}, // preparation built the chrome; there is nothing to switch on
+        ready: initial ? boot : loadHelper(),
+        enable() {
+          if (!initial) build();
+        },
         quiesce() {
           const unsent = (panel && !panel.hidden && textarea.value.trim() !== '') ||
             [...drafted].some((el) => el.isConnected);

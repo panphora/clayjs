@@ -105,7 +105,10 @@ const lifecycle = {
 
 export function commitModeFacts(next) {
   if (next.mode !== undefined) mode = next.mode;
-  if (next.isEditMode !== undefined) isEditMode = next.isEditMode;
+  if (next.isEditMode !== undefined) {
+    isEditMode = next.isEditMode;
+    if (typeof window !== "undefined") window.__hyperclayEditMode = isEditMode;
+  }
   if (next.canEdit !== undefined) canEdit = next.canEdit;
   for (const key in lifecycle) if (next[key] !== undefined) lifecycle[key] = next[key];
 }

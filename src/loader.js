@@ -171,7 +171,7 @@ export async function boot(base, params, readyResolve, manifest = null, suppleme
 
   if (hasSap) mountDerivedEngine(loaded);
 
-  installViewModeNotice(isEditMode);
+  installViewModeNotice(editMode);
   readyResolve(window.clay);
   document.dispatchEvent(new CustomEvent("clay:ready", { detail: { clay: window.clay } }));
   if (plan.late.length) loadLate(plan.late, editMode).then(settleLate, settleLate);
@@ -369,10 +369,11 @@ function attachPluginMember(path, mod, namespaces = loaded) {
   }
 }
 
-function installViewModeNotice(isEditMode) {
-  if (isEditMode) return;
+function installViewModeNotice(editMode) {
+  if (editMode.isEditMode) return;
   document.addEventListener("click", (event) => {
     if (!event.target.closest?.("[trigger-save]")) return;
+    if (editMode.isEditMode) return;
     console.info("clayjs: you're not the owner of this page; changes stay local");
     document.dispatchEvent(new CustomEvent("clay:view-save-attempt"));
   });
