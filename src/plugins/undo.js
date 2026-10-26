@@ -17,11 +17,14 @@ import { gateMarkDirty } from '../lib/dirty-gate.js'
 // writes them is not an edit. The shared mutation hub already drops tab-local
 // attributes for the main instance; a scope made with create() runs its own
 // observer, so it is told too.
+// The page's own maintenance attributes, kept outside history by name (a card number a
+// repair rewrites, for example): saved like any attribute, never an edit to undo.
+const pageIgnored = new Set()
 const withTabLocal = (opts = {}) => {
   const own = opts.ignoreAttribute
   return {
     ...opts,
-    ignoreAttribute: (name, target, host) => isTabLocalAttr(name, target) || isDerivedAttr(target, name, host) || isRuntimeAttribute(name, target) || (own ? own(name, target, host) : false),
+    ignoreAttribute: (name, target, host) => pageIgnored.has(name) || isTabLocalAttr(name, target) || isDerivedAttr(target, name, host) || isRuntimeAttribute(name, target) || (own ? own(name, target, host) : false),
     isProtected: opts.isProtected || keepsOwnHistory,
     ignoreNode: opts.ignoreNode || isGestureItem,
   }
@@ -191,6 +194,13 @@ const withRecovery = (call, fallback) => (...args) =>
 // An app's kept copy is announced like a refused step's, so the review notice shows it
 // in this session instead of only after a reload.
 const keepApp = withRecovery('keep', { ok: false, code: 'unavailable' })
+undo.ignoreAttribute = (name) => {
+  const key = String(name || '')
+  if (!key) return () => {}
+  pageIgnored.add(key)
+  return () => { pageIgnored.delete(key) }
+}
+
 undo.keep = async (spec) => {
   const written = await keepApp(spec)
   if (written?.ok === true) {

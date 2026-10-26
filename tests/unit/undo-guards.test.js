@@ -199,6 +199,25 @@ describe("removed subtrees", () => {
     expect(refusals).toHaveLength(0);
     document.getElementById("app").remove();
   });
+
+  test("an attribute the page keeps outside history, repaired on a restored card, does not refuse its redo", async () => {
+    document.body.insertAdjacentHTML("beforeend", '<main id="board"><ol><li id="num-card" data-num="4">Card</li></ol></main>');
+    await enter();
+    undo.setRecording("commands");
+    const off = undo.ignoreAttribute("data-num");
+    const card = document.getElementById("num-card");
+
+    undo.command("Delete card", () => card.remove());
+    expect(undo.undo()).toMatchObject({ ok: true, direction: "undo" });
+    // A numbering repair outside history gives the restored card a new number.
+    card.setAttribute("data-num", "7");
+
+    expect(undo.redo()).toMatchObject({ ok: true, direction: "redo" });
+    expect(document.getElementById("num-card")).toBeNull();
+    expect(refusals).toHaveLength(0);
+    off();
+    document.getElementById("board").remove();
+  });
 });
 
 describe("added subtrees", () => {
