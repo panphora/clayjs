@@ -32,7 +32,7 @@
   },
   "kanban-local.html": {
     "view": { "requests": 63, "depth": 21, "brotli": 189440, "css": { "requests": 1, "depth": 1 }, "fonts": { "requests": 0, "depth": 0 } },
-    "edit": { "requests": 98, "depth": 47, "brotli": 372736, "css": { "requests": 1, "depth": 1 }, "fonts": { "requests": 0, "depth": 0 } },
+    "edit": { "requests": 98, "depth": 47, "brotli": 373760, "css": { "requests": 1, "depth": 1 }, "fonts": { "requests": 0, "depth": 0 } },
     "draft": { "requests": 91, "depth": 40, "brotli": 300032, "css": { "requests": 1, "depth": 1 }, "fonts": { "requests": 0, "depth": 0 } }
   },
   "built": {
