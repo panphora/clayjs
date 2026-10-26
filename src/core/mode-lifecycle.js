@@ -299,30 +299,16 @@ async function enter(handle = null) {
   return { ok: true, mode: current(), changed: before !== current() };
 }
 
-// The wait for the boot late tail, bounded by the same deadline as every other transition.
-const withinDeadline = async (pending) => {
-  if (!pending) return true;
-  let timer = null;
-  const deadline = new Promise((resolve) => {
-    timer = setTimeout(() => resolve(false), DEADLINE_MS);
-  });
-  try {
-    return await Promise.race([Promise.resolve(pending).then(() => true, () => true), deadline]);
-  } finally {
-    clearTimeout(timer);
-  }
-};
-
 // The sessions this tab's explicit initial edit already started, taken as leases over what
 // the imports did rather than started again: a lease that starts nothing, quiesces and
 // disposes the running session. A path that cannot be adopted leaves the caller its flush
 // and reload.
 async function adoptInitial(handle) {
   if (!handle) return [];
-  // The boot late tail may still be importing. Waiting inside the deadline keeps its
-  // sessions adoptable; one that lands after this exit stays cached and starts nothing,
-  // because the module reads the committed mode when it evaluates.
-  await withinDeadline(handle.late);
+  // Only what is loaded now: the boot late tail may still be importing, and an exit waits
+  // for no import. A module that lands after this point starts nothing, because it reads
+  // the committed mode (or the `leaving` phase) when it evaluates, and it registers for
+  // the next entry.
   const participants = [];
   for (const path of editPlanPaths(handle)) {
     const support = supportFor(path);

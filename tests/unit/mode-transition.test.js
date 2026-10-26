@@ -660,10 +660,10 @@ test("clay:plugin-ready fires once per plugin across three cycles", async () => 
   }
 });
 
-test("an exit whose boot late tail outlasts its deadline gives the tab back in edit", async () => {
-  // The drag editor is imported by the boot's own late tail, and the exit cannot wait for
-  // it past its own deadline: held that long, the exit fails as `timeout` and the page
-  // keeps the session it booted into rather than sitting in `leaving` forever.
+test("an initial edit exits without waiting for its boot late tail, and what lands after starts nothing", async () => {
+  // The drag editor is imported by the boot's own late tail, held open across the exit: the
+  // exit adopts what is loaded now, commits view inside its deadline, and the import that
+  // lands afterwards reads the committed mode, starts nothing and is not announced.
   let release;
   const held = new Promise((resolve) => {
     release = resolve;
@@ -688,33 +688,64 @@ test("an exit whose boot late tail outlasts its deadline gives the tab back in e
     expect(clay.mode).toBe("edit");
     expect(seen.evaluated).toBe(false);
 
-    jest.useFakeTimers({ doNotFake: ["setImmediate", "queueMicrotask", "nextTick"] });
-    let exiting;
-    try {
-      exiting = clay.setMode("view");
-      for (let i = 0; i < 200 && clay.modeLifecycle.state.phase !== "leaving"; i++) await turn();
-      await jest.advanceTimersByTimeAsync(15000);
-      await expect(exiting).resolves.toMatchObject({ ok: false, mode: "edit", code: "timeout" });
-    } finally {
-      jest.useRealTimers();
-    }
-
-    // The deadline, not the import, ended the wait: the tab is back in edit and nothing of
-    // the plugin has been attached.
-    expect(clay.mode).toBe("edit");
+    // No clock is advanced: the exit commits for real, well inside its deadline.
+    const startedAt = Date.now();
+    await expect(clay.setMode("view")).resolves.toEqual({ ok: true, mode: "view", changed: true });
+    expect(Date.now() - startedAt).toBeLessThan(5000);
+    expect(clay.mode).toBe("view");
     expect(clay.modeLifecycle.state.phase).toBe("idle");
-    expect(clay.sortable).toBeUndefined();
+
     release();
+    expect(await until(() => seen.evaluated)).toBe(true);
     await flush();
 
-    // It lands in edit, so it belongs there: it starts its editor.
-    expect(seen.evaluated).toBe(true);
-    expect(seen.inEdit).toBe(true);
-    expect(seen.session).toBe(1);
+    // It lands in view, so it belongs to no session: no editor, no clay member, no event.
+    expect(seen.inEdit).toBe(false);
+    expect(seen.session).toBe(0);
+    expect(document.getElementById("board").hasAttribute("data-session")).toBe(false);
+    expect(clay.sortable).toBeUndefined();
+    expect([...ready]).not.toContain("sortable");
   } finally {
     release();
     ready.stop();
   }
+});
+
+test("an initial-edit exit imports no edit-only module", async () => {
+  // The plan importer reaches a module only through the loader's own thunk table, so a spy
+  // on the edit plan's own paths is what an exit asks for. A plugin the edit plan names and
+  // the boot could not load is not in the view plan, so the exit never asks for it.
+  jest.unstable_mockModule("../../src/plugins/indicator.js", () => {
+    throw new Error("the indicator plugin is not on this network");
+  });
+  const params = "plugins=undo,indicator&exclude=richclay,source";
+  const clay = await bootPage({ edit: true, owner: true, declared: true, params });
+  expect(clay.mode).toBe("edit");
+
+  const { MODULES, resolveModules } = await import("../../src/loader-logic.js");
+  const editPlan = resolveModules(new URLSearchParams(params), true, {});
+  const viewPlan = resolveModules(new URLSearchParams(params), false, {});
+  const paths = (plan) => [...plan.core, ...plan.plugins, ...plan.late];
+  const editOnly = [...new Set(paths(editPlan))].filter((path) => !paths(viewPlan).includes(path));
+  expect(editOnly).toContain("plugins/indicator.js");
+
+  const asked = [];
+  const thunks = {};
+  for (const path of editOnly) {
+    thunks[path] = MODULES[path];
+    MODULES[path] = () => {
+      asked.push(path);
+      return thunks[path]();
+    };
+  }
+  try {
+    await expect(clay.setMode("view")).resolves.toEqual({ ok: true, mode: "view", changed: true });
+  } finally {
+    for (const path of Object.keys(thunks)) MODULES[path] = thunks[path];
+  }
+
+  expect(clay.mode).toBe("view");
+  expect(asked).toEqual([]);
 });
 
 test("a switch module that fails to load keeps the guarded reload and leaves no unhandled rejection", async () => {

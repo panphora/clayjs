@@ -129,7 +129,10 @@ export async function boot(base, params, readyResolve, manifest = null, suppleme
     const editing = resolveModules(params, true, { isDraftMode, hasSap, canEdit, templateSource: templateSource() });
     loaded["core/edit-mode.js"].noteLiveSwitch({
       edit: editing,
-      view: plan,
+      // The plan a view boot would have resolved, not the edit plan this boot resolved: an
+      // exit imports it and starts its reader, and an edit-only module belongs to the
+      // session being left.
+      view: resolveModules(params, false, { isDraftMode, hasSap, canEdit, templateSource: templateSource() }),
       loaded,
       modules: MODULES,
       attach: attachPluginMember,
