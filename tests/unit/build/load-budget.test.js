@@ -30,7 +30,7 @@ function withinAssets(measured, limits) {
 // milestone ships, and every Document, fetch nothing from another origin; the old
 // shipped copies still link Google Fonts (and the Journal's also two CDN scripts), and
 // each one has to still report them, so an empty list cannot mean "not seen".
-const THIRD_PARTY_ALLOWED = new Set(["kanban-hyperclay.html", "journal-hyperclay.html", "kanban-local.html"]);
+const THIRD_PARTY_ALLOWED = new Set(["kanban-hyperclay.html", "kanban-local.html"]);
 
 function withinThirdParty(fixture, measured) {
   if (THIRD_PARTY_ALLOWED.has(fixture)) expect(measured.thirdParty.length).toBeGreaterThan(0);

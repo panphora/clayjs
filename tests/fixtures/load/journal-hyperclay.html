@@ -10,16 +10,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="hyper-source" content="https://hyperclay.com/templates/journal/owned/latest.html">
-<meta name="hyper-version" content="1.1.0">
+<meta name="hyper-version" content="1.2.0">
 <meta name="clay-template" content="journal owned">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Journal</title>
 <meta name="application-name" content="Journal">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,300;0,400;0,500;0,600;1,400;1,500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/overtype@2.6.1/dist/overtype.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<link rel="preload" href="https://clayjs.com/v1/fonts/ibm-plex-mono-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="https://clayjs.com/v1/fonts/ibm-plex.css">
 <style>
 :root {
   color-scheme: light dark;
@@ -150,6 +147,12 @@ svg.i { width: 15px; height: 15px; flex: none; stroke: currentColor; fill: none;
 :root:is([savestatus="error"], [savestatus="conflict"]) .save { color: var(--accent); }
 :root:is([savestatus="error"], [savestatus="conflict"]) .save .dot { background: var(--accent); }
 .save .copy, .save .download-journal { display: none; }
+.recovery { display: inline-flex; align-items: center; gap: 7px; font: 500 11.5px/1 var(--mono); color: var(--ink-3); white-space: nowrap; }
+.recovery[hidden] { display: none; }
+.recovery .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--line-2); }
+.recovery.failed { color: var(--accent); }
+.recovery.failed .dot { background: var(--accent); }
+.recovery .chip-btn { padding: 4px 8px; font-size: 11.5px; }
 :root:is([savestatus="error"], [savestatus="conflict"]) .save .copy { display: inline-flex; }
 :root:is([savestatus="error"], [savestatus="offline"]) .save .download-journal { display: inline-flex; }
 @keyframes pulse { 50% { opacity: .3; } }
@@ -475,6 +478,43 @@ button.tb-value:hover { color: var(--blue); }
 .note button:hover { background: color-mix(in oklab, var(--accent) 16%, transparent); }
 .note .note-close { color: var(--ink-3); }
 
+/* ------------------------------------------------ pictures: an image pasted or dropped into the editor (never saved) */
+.pictures {
+  flex: none;
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 10px 44px 10px 72px;
+}
+.pictures:empty { display: none; }
+:root:not([editmode="true"]) .pictures { display: none !important; }
+.picture-ready {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 16px;
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  background: var(--accent-soft);
+  font-size: 13px; color: var(--ink);
+}
+.picture-ready span { flex: 1; min-width: 0; }
+.picture-ready button { flex: none; padding: 5px 11px; border-radius: 5px; font-size: 12.5px; font-weight: 500; color: var(--accent); white-space: nowrap; }
+.picture-ready button:hover { background: color-mix(in oklab, var(--accent) 16%, transparent); }
+
+.reader a.image { display: inline-block; max-width: 100%; }
+.reader img { max-width: 100%; height: auto; border-radius: 6px; }
+.reader .image-load, .image-strip .image-load {
+  padding: 5px 11px; border-radius: 5px;
+  font-size: 12.5px; font-weight: 500; color: var(--accent); white-space: nowrap;
+}
+.reader .image-load:hover, .image-strip .image-load:hover { background: color-mix(in oklab, var(--accent) 16%, transparent); }
+.image-strip {
+  flex: none;
+  display: flex; flex-wrap: wrap; gap: 8px;
+  padding: 10px 44px 10px 72px;
+}
+.image-strip:empty { display: none; }
+:root:not([editmode="true"]) .image-strip { display: none !important; }
+.image-strip img { height: 64px; width: auto; max-width: 160px; object-fit: cover; border-radius: 6px; display: block; }
+.image-strip .image-ref { font-size: 13px; color: var(--ink-3); font-style: italic; }
+
 .peer-bar {
   flex: none;
   display: flex; align-items: center; gap: 10px;
@@ -487,6 +527,28 @@ button.tb-value:hover { color: var(--blue); }
 .peer-bar span { flex: 1; min-width: 0; }
 .peer-bar button { flex: none; padding: 5px 11px; border-radius: 5px; font-size: 12.5px; font-weight: 500; color: var(--accent); white-space: nowrap; }
 .peer-bar button:hover, .peer-bar button:focus-visible { background: color-mix(in oklab, var(--accent) 16%, transparent); }
+
+/* ------------------------------------------------ the recovery review: this browser's copies of unsaved text (never saved, never the journal) */
+.recovery-panel {
+  flex: none;
+  display: flex; flex-direction: column; gap: 14px;
+  padding: 16px 20px 20px 72px;
+  border-bottom: 1px solid var(--line-2);
+  background: var(--accent-soft);
+  max-height: 50vh; overflow: auto;
+}
+.recovery-panel[hidden] { display: none; }
+.recovery-row { display: flex; flex-direction: column; gap: 8px; }
+.recovery-what { margin: 0; font-size: 13px; color: var(--ink); }
+.recovery-text {
+  width: 100%; box-sizing: border-box; resize: vertical;
+  padding: 8px 10px; border: 1px solid var(--line-2); border-radius: 6px;
+  background: var(--sheet); color: var(--ink-2);
+  font: 400 13px/1.5 var(--mono); white-space: pre-wrap;
+}
+.recovery-acts { display: flex; flex-wrap: wrap; gap: 4px; }
+.recovery-acts button { padding: 5px 11px; border-radius: 5px; font-size: 12.5px; font-weight: 500; color: var(--accent); white-space: nowrap; }
+.recovery-acts button:hover, .recovery-acts button:focus-visible { background: color-mix(in oklab, var(--accent) 16%, transparent); }
 
 /* ------------------------------------------------ the undo toast: one polite live region, gone in six seconds (never saved) */
 .toast {
@@ -579,13 +641,13 @@ button.tb-value:hover { color: var(--blue); }
   overflow-wrap: anywhere;
 }
 .reader > :first-child { margin-top: 0; }
-.reader :is(p, ul, ol, pre, blockquote, h1, h2, h3, h4, h5, h6) { margin: 0 0 28px; }
+.reader :is(p, ul, ol, pre, blockquote, h1, h2, h3, h4, h5, h6, table) { margin: 0 0 28px; }
 .reader :is(h1, h2, h3, h4, h5, h6) { font: 600 16px/28px var(--mono); color: var(--ink); }
 .reader h1 { font-size: 18px; }
 .reader :is(ul, ol) { padding-left: 24px; }
-.reader ul.tasks { list-style: none; padding-left: 0; }
-.reader li.task input { margin: 0 10px 0 0; vertical-align: -1px; accent-color: var(--accent); }
-.reader li.task.done { color: var(--ink-3); text-decoration: line-through; }
+.reader ul:has(> li > input[type="checkbox"]) { list-style: none; padding-left: 0; }
+.reader li > input[type="checkbox"] { margin: 0 10px 0 0; vertical-align: -1px; accent-color: var(--accent); }
+.reader li:has(> input[type="checkbox"]:checked) { color: var(--ink-3); text-decoration: line-through; }
 .reader a { color: var(--blue); text-decoration: none; }
 .reader a:hover { text-decoration: underline; }
 .reader code { font: inherit; background: var(--fp-code-bg); padding: 0 3px; border-radius: 2px; }
@@ -598,6 +660,11 @@ button.tb-value:hover { color: var(--blue); }
 .reader pre code :is(.hljs-comment, .hljs-quote, .hljs-meta, .hljs-punctuation) { color: var(--ink-3); }
 .reader blockquote { margin-left: 0; padding-left: 16px; border-left: 2px solid var(--line-2); color: var(--ink-2); font-style: italic; }
 .reader hr { border: 0; border-top: 1px dashed var(--line-2); margin: 13px 0 14px; }
+.reader table { border-collapse: collapse; font: inherit; }
+.reader :is(th, td) { border: 1px solid var(--line-2); padding: 4px 10px; text-align: left; }
+.reader th { font-weight: 600; }
+.reader .image-ref { color: var(--ink-3); font-style: italic; }
+.reader pre.plain { background: none; margin: 0; padding: 0; white-space: pre-wrap; overflow-x: visible; font-family: var(--mono); }
 
 /* ------------------------------------------------ privacy banner (owner, public site) */
 .privacy-banner {
@@ -669,6 +736,8 @@ button.tb-value:hover { color: var(--blue); }
   .privacy-banner { padding-left: 16px; }
   .tags { padding-left: 16px; }
   .calendar, .otd { padding-left: 16px; }
+  .pictures { padding-left: 44px; padding-right: 16px; }
+  .image-strip { padding-left: 44px; padding-right: 16px; }
   .otd-row { grid-template-columns: 78px minmax(0, 1fr); }
 }
 @media (max-width: 759px) {
@@ -950,15 +1019,30 @@ const words = text.trim().split(/\s+/).length;
       return prefix + line + '</span>'.repeat(open.length);
     }).join('\n');
   }
-  function highlightCode(code, lang) {
-    if (!window.hljs) return '';
-    try {
-      const html = lang && hljs.getLanguage(lang)
-        ? hljs.highlight(code, { language: lang, ignoreIllegals: true }).value
-        : hljs.highlightAuto(code).value;
-      return balanceLines(html);
-    } catch { return ''; }
-  }
+
+  // Code highlighting, one language at a time: highlight.js's core and a fence's language load the first
+  // time an open entry has a fence in that language. No language, or one not listed, stays plain.
+  const Code = (() => {
+    const LANGS = { js: 'javascript', javascript: 'javascript', mjs: 'javascript', cjs: 'javascript', json: 'json', css: 'css', html: 'xml', xml: 'xml', svg: 'xml', sh: 'bash', bash: 'bash', shell: 'bash', zsh: 'bash', py: 'python', python: 'python' };
+    let hljs = null;
+    const asked = new Set();
+    function want(name) {
+      if (asked.has(name)) return;
+      asked.add(name);
+      Promise.all([window.clay.assets.load('highlight'), window.clay.assets.load(`highlight/${name}`)]).then(([core, language]) => {
+        hljs = core.default;
+        hljs.registerLanguage(name, language.default);
+        if (readOnly) Reader.refresh(); else Editor.refresh();
+      }, () => {});
+    }
+    function highlight(code, lang) {
+      const name = LANGS[String(lang || '').trim().split(/\s+/)[0].toLowerCase()];
+      if (!name || !window.clay?.assets) return '';
+      if (!hljs?.getLanguage(name)) { want(name); return ''; }
+      try { return balanceLines(hljs.highlight(code, { language: name, ignoreIllegals: true }).value); } catch { return ''; }
+    }
+    return { highlight };
+  })();
 
   const THEME = {
     name: 'journal',
@@ -987,7 +1071,8 @@ const words = text.trim().split(/\s+/).length;
       const code = a.querySelector('.entry-body');
       return code ? code.textContent : '';
     },
-    sortKey: a => `${a.dataset.date || ''}|${a.dataset.created || ''}`
+    sortKey: a => `${a.dataset.date || ''}|${a.dataset.created || ''}`,
+    open: () => store.querySelector(':scope > .entry[route-active]')
   };
   const pad = n => String(n).padStart(2, '0');
   const ymd = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -1047,72 +1132,82 @@ const words = text.trim().split(/\s+/).length;
     }).filter(l => l.trim()).join('  ·  ').replace(/\s+/g, ' ').trim();
   }
 
-  /* ---------------------------------------------------------------- markdown for the reading view: the subset an entry uses, escaped first */
-  function mdEmphasis(s) {
-    return s
-      .replace(/(^|[^\w*])\*\*(?=\S)(.+?)\*\*(?![\w*])/g, '$1<strong>$2</strong>')
-      .replace(/(^|[^\w_])__(?=\S)(.+?)__(?![\w_])/g, '$1<strong>$2</strong>')
-      .replace(/(^|[^\w*])\*(?=\S)(.+?)\*(?!\w)/g, '$1<em>$2</em>')
-      .replace(/(^|[^\w_])_(?=\S)(.+?)_(?!\w)/g, '$1<em>$2</em>')
-      .replace(/~~(.+?)~~/g, '<del>$1</del>');
-  }
-  // Code spans and links are cut out first, so emphasis never reaches a URL or code.
-  function mdInline(s) {
-    return s.split(/(`[^`]+`|\[[^\]]+\]\((?:https?:|mailto:)[^\s)]+\))/).map((part, i) => {
-      if (i % 2 === 0) return mdEmphasis(esc(part));
-      if (part[0] === '`') return `<code>${esc(part.slice(1, -1))}</code>`;
-      const link = part.match(/^\[([^\]]+)\]\((.+)\)$/);
-      return `<a href="${esc(link[2])}" target="_blank" rel="noopener noreferrer">${mdEmphasis(esc(link[1]))}</a>`;
-    }).join('');
-  }
-  function renderMarkdown(md) {
-    const out = [];
-    const lines = md.replace(/\r\n?/g, '\n').split('\n');
-    let para = [], list = null, quote = [];
-    const flushPara = () => { if (para.length) out.push(`<p>${para.map(mdInline).join('<br>')}</p>`); para = []; };
-    const flushList = () => { if (list) out.push(`<${list.tag}${list.tasks ? ' class="tasks"' : ''}>${list.items.join('')}</${list.tag}>`); list = null; };
-    const flushQuote = () => { if (quote.length) out.push(`<blockquote>${renderMarkdown(quote.join('\n'))}</blockquote>`); quote = []; };
-    const flush = () => { flushPara(); flushList(); flushQuote(); };
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      const fence = line.match(/^\s*```\s*([\w+-]*)/);
-      if (fence) {
-        flush();
-        const code = [];
-        while (++i < lines.length && !/^\s*```\s*$/.test(lines[i])) code.push(lines[i]);
-        const body = code.join('\n');
-        out.push(`<pre><code>${highlightCode(body, fence[1]) || esc(body)}</code></pre>`);
-        continue;
-      }
-      if (!line.trim()) { flush(); continue; }
-      const q = line.match(/^\s*>\s?(.*)$/);
-      if (q) { flushPara(); flushList(); quote.push(q[1]); continue; }
-      flushQuote();
-      const h = line.match(/^\s*(#{1,6})\s+(.*)$/);
-      if (h) { flush(); out.push(`<h${h[1].length}>${mdInline(h[2])}</h${h[1].length}>`); continue; }
-      if (/^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(line)) { flush(); out.push('<hr>'); continue; }
-      const li = line.match(/^\s*([-*+]|\d+[.)])\s+(.*)$/);
-      if (li) {
-        flushPara();
-        const tag = /\d/.test(li[1]) ? 'ol' : 'ul';
-        if (!list || list.tag !== tag) { flushList(); list = { tag, items: [], tasks: false }; }
-        const task = li[2].match(/^\[([ xX])\]\s+(.*)$/);
-        if (task) {
-          const done = task[1] !== ' ';
-          list.tasks = true;
-          list.items.push(`<li class="task${done ? ' done' : ''}"><input type="checkbox" disabled${done ? ' checked' : ''}>${mdInline(task[2])}</li>`);
-        } else {
-          list.items.push(`<li>${mdInline(li[2])}</li>`);
-        }
-        continue;
-      }
-      if (list && /^\s/.test(line)) { list.items[list.items.length - 1] = list.items[list.items.length - 1].replace(/<\/li>$/, ` ${mdInline(line.trim())}</li>`); continue; }
-      flushList();
-      para.push(line.trim());
+  /* ---------------------------------------------------------------- the reader: marked, loading only for reading */
+  // The reader: marked, with raw HTML shown as text, links only to http, https, mailto and other entries,
+  // and images by one policy: this host's file shows, an outside one waits to be asked, anything else is a label.
+  // Plain text shows until marked arrives.
+  const Reader = (() => {
+    let md = null;
+    let shown = { id: null, body: null };
+    const safeHref = (href) => {
+      const h = String(href || '').trim();
+      if (/^#entry=[\w-]+$/.test(h)) return h;
+      if (/[\u0000-\u001f\u007f]/.test(h)) return null;
+      try { return ['http:', 'https:', 'mailto:'].includes(new URL(h).protocol) ? h : null; } catch { return null; }
+    };
+    function setup({ Marked }) {
+      md = new Marked({ gfm: true, breaks: false });
+      md.use({
+        renderer: {
+          html: ({ text }) => esc(text),
+          link({ href, title, tokens }) {
+            const text = this.parser.parseInline(tokens);
+            const ok = safeHref(href);
+            if (!ok) return text;
+            const ext = !ok.startsWith('#');
+            return `<a href="${esc(ok)}"${title ? ` title="${esc(title)}"` : ''}${ext ? ' target="_blank" rel="noopener noreferrer"' : ''}>${text}</a>`;
+          },
+          image: ({ href, text }) => {
+            const alt = text || 'image';
+            const p = imagePolicy(href);
+            if (p.kind === 'local') return `<a class="image" href="${esc(p.src)}" target="_blank" rel="noopener noreferrer"><img src="${esc(p.src)}" alt="${esc(alt)}" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>`;
+            if (p.kind === 'external') return `<span class="image-ref image-ask" data-src="${esc(p.src)}" data-alt="${esc(alt)}">${esc(alt)} <button type="button" class="image-load">Show image from ${esc(p.host)}</button></span>`;
+            return `<span class="image-ref">${esc(alt)}</span>`;
+          },
+          code: ({ text, lang }) => `<pre><code>${Code.highlight(text, lang) || esc(text)}</code></pre>`,
+        },
+      });
     }
-    flush();
-    return out.join('');
-  }
+    function render(a, force = false) {
+      const id = a ? a.dataset.id : null;
+      const body = a ? Entries.body(a) : '';
+      if (!force && id === shown.id && body === shown.body) return;
+      const moved = id !== shown.id;
+      shown = { id, body };
+      if (a && !md) load().then(() => render(readable(), true), () => {});
+      $('#reader').innerHTML = !a ? '' : md ? md.parse(body) : `<pre class="plain">${esc(body)}</pre>`;
+      if (moved && a) desk.scrollTop = 0;
+      refreshHighlights();
+    }
+    let ready = null;
+    function load() {
+      if (!ready) {
+        ready = window.clay?.assets
+          ? window.clay.assets.load('marked').then(setup)
+          : Promise.reject(new Error('This ClayJS cannot load the reader.'));
+        ready.catch(() => { ready = null; });
+      }
+      return ready;
+    }
+    const readable = () => { const a = Entries.open(); return a && !isTrashed(a) ? a : null; };
+    function start() { wirePictures($('#reader')); load().then(() => render(readable(), true), () => {}); }
+    async function toHTML(text) { await load(); return md.parse(String(text || '')); }
+    // The image tokens marked finds in a body: code spans and fences hold none.
+    async function images(text) {
+      await load();
+      const out = [];
+      md.walkTokens(md.lexer(String(text || '')), t => { if (t.type === 'image') out.push({ href: t.href, alt: t.text || 'image' }); });
+      return out;
+    }
+    // The image URLs marked finds in a body, or null until marked has loaded.
+    function imageHrefs(text) {
+      if (!md) return null;
+      const out = [];
+      md.walkTokens(md.lexer(String(text || '')), t => { if (t.type === 'image') out.push(t.href); });
+      return out;
+    }
+    return { start, render, toHTML, images, imageHrefs, ready: load, refresh: () => render(readable(), true) };
+  })();
 
   /* ---------------------------------------------------------------- search: every word must appear, "quoted phrases" match exactly */
   function parseQuery(q) {
@@ -1552,21 +1647,74 @@ const words = text.trim().split(/\s+/).length;
     const ta = () => mount.querySelector('textarea');
     let binding = null;
     let overtype = null;
-    function start(options) {
+    const padding = () => (PHONE.matches ? `${LINE}px 16px ${LINE * 2}px 44px` : `${LINE}px 44px ${LINE * 2}px 72px`);
+    function start() {
       mount.innerHTML = '<div class="overtype-container" data-theme="journal"><div class="overtype-wrapper"><textarea class="overtype-input" autocomplete="off" spellcheck="true" placeholder="Start writing. The first line becomes the heading."></textarea></div></div>';
+      Object.assign(ta().style, {
+        fontFamily: FONT, fontSize: '16px', lineHeight: '1.75', padding: padding(),
+        display: 'block', width: '100%', border: '0', outline: 'none', resize: 'none',
+        background: 'transparent', color: 'var(--ink)', caretColor: 'var(--accent)',
+      });
       binding = window.clay.bindText(ta(), {
         onWrite: (code) => {
           touch(code.closest('article.entry'));
           if (code.textContent.trim()) createdHere.delete(code.closest('article.entry').dataset.id);
         },
-        onShow: () => overtype?.updatePreview(),
-        onConflict: (typed) => note('Someone changed the same words while you were typing.', typed),
+        onShow: () => { overtype?.updatePreview(); Strip.schedule(); },
+        onConflict: (typed, context) => {
+          Recovery.conflicted(typed, context);
+          note('Someone changed the same words while you were typing.', typed);
+        },
         onGone: (typed) => {
           const date = openDate;
           note('This entry was deleted somewhere else.', typed, { label: 'Keep it', run: () => keepNote(typed, date) });
         },
       });
-      [overtype] = new OverType(mount, options);
+      // After the binding, so the record already holds this keystroke and its timestamp: what
+      // the recovery copy stages is exactly what a save of this page would write. It reads the
+      // textarea, never the record, so an active composition is captured without ending it.
+      stageOn(ta());
+    }
+    function stageOn(el) {
+      if (el) el.addEventListener('input', () => Recovery.typed());
+    }
+    function editorOptions() {
+      return {
+        persist: true,
+        toolbar: true,
+        codeHighlighter: Code.highlight,
+        autoResize: true,
+        minHeight: `${LINE}px`,
+        fontFamily: FONT,
+        fontSize: '16px',
+        lineHeight: 1.75,
+        padding: padding(),
+        spellcheck: true,
+        smartLists: true,
+        clickToToggleTasks: true,
+        placeholder: 'Start writing. The first line becomes the heading.',
+      };
+    }
+    function pickButtons(buttons) {
+      if (!buttons) return undefined;
+      const pick = ['bold', 'italic', 'code', 'separator', 'link', 'separator', 'bulletList', 'orderedList', 'taskList', 'separator', 'quote'];
+      const out = pick.map(n => buttons[n]).filter(Boolean);
+      return out.length ? out : undefined;
+    }
+    function enhance({ default: OverType, toolbarButtons: buttons }) {
+      if (binding?.composing()) {
+        mount.addEventListener('compositionend', () => enhance({ default: OverType, toolbarButtons: buttons }), { once: true });
+        return;
+      }
+      const el = ta();
+      const focused = document.activeElement === el;
+      const [a, b] = [el.selectionStart, el.selectionEnd];
+      OverType.setTheme(THEME);
+      [overtype] = new OverType(mount, { ...editorOptions(), toolbarButtons: pickButtons(buttons) });
+      document.querySelector('style.overtype-styles')?.setAttribute('clay', 'editor-ui');
+      const now = ta();
+      if (now !== el) { now.value = el.value; binding.attach(now); stageOn(now); }
+      if (focused) { now.focus(); now.setSelectionRange(a, b); }
     }
     function open(article) {
       const id = article.dataset.id;
@@ -1576,13 +1724,858 @@ const words = text.trim().split(/\s+/).length;
       });
     }
     return {
-      start, open,
+      start, open, enhance,
       close: () => binding?.close(),
       current: () => binding?.current()?.closest('article.entry') ?? null,
       focus: () => ta()?.focus(),
       text: () => ta()?.value ?? '',
       reconfigure: (options) => overtype?.reinit(options),
+      refresh: () => overtype?.updatePreview(),
+      composing: () => !!binding?.composing?.(),
     };
+  })();
+
+  /* ---------------------------------------------------------------- image references: the one Markdown form the Journal writes,
+     and the pictures a body really holds. */
+  // The address as it goes inside <…>, or null when the Journal will not write it: only http(s), never credentials or control characters.
+  function imageAddress(url) {
+    const text = String(url ?? '');
+    if (/[\u0000-\u001f\u007f]/.test(text)) return null;
+    const raw = text.trim();
+    if (!raw) return null;
+    let parsed;
+    try { parsed = new URL(raw, location.href); } catch { return null; }
+    if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) return null;
+    return raw.replace(/[<>\n\r]/g, c => '%' + c.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0'));
+  }
+  const imageMarkdown = address => `![](<${address}>)`;
+  // How many pictures in a body point at this upload, or null until marked has loaded: only marked's
+  // image tokens count, so code, escapes and plain links never do.
+  function imageCount(body, url) {
+    const hrefs = Reader.imageHrefs(body);
+    if (!hrefs) return null;
+    const address = imageAddress(url);
+    return hrefs.filter(h => h === url || h === address).length;
+  }
+  // A saved body carries a pending picture once it holds more references to that URL than the entry had
+  // when the upload finished (a repeat upload of the same file gets the same address).
+  const carries = (body, payload) => (imageCount(body, payload.url) ?? -1) > (payload.before ?? 0);
+  // The same count for an entry that is in this page, once marked has loaded. No parser, no count.
+  async function countIn(entryId, url) {
+    try { await Reader.ready(); } catch {}
+    const a = Entries.byId(entryId);
+    return imageCount(a ? Entries.body(a) : '', url) ?? 0;
+  }
+  // Where an offset in `before` lands in `after`, or null when the edit covered it.
+  function mapInsertion(before, after, at) {
+    if (before === after) return at;
+    let prefix = 0;
+    while (prefix < before.length && prefix < after.length && before[prefix] === after[prefix]) prefix++;
+    let suffix = 0;
+    while (suffix < before.length - prefix && suffix < after.length - prefix &&
+      before[before.length - 1 - suffix] === after[after.length - 1 - suffix]) suffix++;
+    if (at < prefix) return at;
+    if (at > before.length - suffix) return after.length - (before.length - at);
+    return null;
+  }
+  // Where a picture goes: on its own line after the line the drop landed in, never inside the first line,
+  // which is the entry's heading.
+  function placement(text, at) {
+    let end = text.indexOf('\n', at);
+    if (end === -1) end = text.length;
+    return { at: end, lead: end === 0 ? '' : '\n\n', tail: end < text.length && text[end + 1] !== '\n' ? '\n' : '' };
+  }
+  // Which picture a body may show: this host's own file, an outside picture only once asked, or none.
+  function imagePolicy(url) {
+    const raw = String(url ?? '').trim();
+    if (!raw || /[\u0000-\u001f\u007f]/.test(raw)) return { kind: 'blocked' };
+    let parsed;
+    try { parsed = new URL(raw, location.href); } catch { return { kind: 'blocked' }; }
+    if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) return { kind: 'blocked' };
+    const route = parsed.pathname.startsWith('/_/') && !parsed.pathname.startsWith('/_/uploads/');
+    return parsed.origin === location.origin && !route
+      ? { kind: 'local', src: parsed.href }
+      : { kind: 'external', src: parsed.href, host: parsed.host };
+  }
+  function pictureEl(src, alt) {
+    const a = document.createElement('a');
+    a.className = 'image';
+    a.href = src;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    const img = document.createElement('img');
+    img.alt = alt;
+    img.loading = 'lazy';
+    img.decoding = 'async';
+    img.referrerPolicy = 'no-referrer';
+    img.src = src;
+    a.append(img);
+    return a;
+  }
+  // One listener pair for the reader and the strip: an asked-for outside picture loads; a failed one says so.
+  function wirePictures(root) {
+    root.addEventListener('click', e => {
+      const button = e.target.closest('.image-load');
+      if (!button || !root.contains(button)) return;
+      const ask = button.closest('.image-ask');
+      ask.replaceWith(pictureEl(ask.dataset.src, ask.dataset.alt || ''));
+    });
+    root.addEventListener('error', e => {
+      const img = e.target;
+      if (!(img instanceof HTMLImageElement)) return;
+      const label = document.createElement('span');
+      label.className = 'image-ref image-failed';
+      label.textContent = `Image could not load: ${img.alt || 'image'}`;
+      (img.closest('a.image') || img).replaceWith(label);
+    }, true);
+  }
+
+  /* ---------------------------------------------------------------- uploaded links: a completed upload's address, kept in this browser
+     until a settled save carries its image reference in the entry it went to. It is never image bytes and never the journal. */
+  const Links = (() => {
+    const CHANNEL = 'journal.pending-images';
+    const pending = new Map();
+    const staged = new Map();
+    let channel = null;
+    const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+    function bodyIn(doc, entryId) {
+      const el = [...doc.querySelectorAll('#entries > article.entry:not([cms-template])')].find(a => a.dataset.id === entryId);
+      return el?.querySelector('.entry-body')?.textContent ?? null;
+    }
+    function readSaved(html) {
+      const doc = new DOMParser().parseFromString(html, 'text/html');
+      const out = new Map();
+      for (const [key, payload] of pending) {
+        const body = bodyIn(doc, payload.entryId);
+        if (body !== null && carries(body, payload)) out.set(key, payload);
+      }
+      return out;
+    }
+    const describe = record => ({ label: 'Uploaded picture', text: record?.payload?.url ?? '' });
+    // True only when this browser completed a write of the record.
+    async function keep(payload) {
+      pending.set(payload.key, payload);
+      if (!channel) return false;
+      Reader.ready().catch(() => {});
+      try {
+        staged.set(payload.key, channel.stage({ key: payload.key, payload }));
+        const result = await channel.flush();
+        return !!result?.ok;
+      } catch {
+        return false;
+      }
+    }
+    function drop(key) {
+      pending.delete(key);
+      const receipt = staged.get(key);
+      staged.delete(key);
+      if (channel && receipt) channel.dismiss(receipt.id).catch(() => {});
+    }
+    // Links an earlier page kept. One whose reference the opened file already carries is done;
+    // the rest move under this page, so this page's own saves can clear them, and are offered again.
+    async function start(offerRecovered) {
+      const service = window.clay?.recovery;
+      if (channel || typeof service?.register !== 'function') return;
+      channel = service.register({ channel: CHANNEL, version: 1, readSaved, describe });
+      let result;
+      try { result = await channel.list(); } catch { return; }
+      if (!result?.ok) return;
+      if (result.records.length) { try { await Reader.ready(); } catch {} }
+      for (const record of result.records) {
+        const payload = record.payload;
+        if (!record.supported || !payload?.key || !payload?.taskId || pending.has(payload.key)) continue;
+        const entry = Entries.byId(payload.entryId);
+        const body = entry?.querySelector('.entry-body')?.textContent ?? '';
+        if (entry && carries(body, payload)) {
+          channel.dismiss(record.id, { revision: record.revision }).catch(() => {});
+          continue;
+        }
+        const kept = await keep(payload);
+        if (kept && !same(staged.get(payload.key)?.id, record.id)) {
+          channel.dismiss(record.id, { revision: record.revision }).catch(() => {});
+        }
+        offerRecovered(payload, kept);
+      }
+    }
+    return { start, keep, drop, list: () => channel ? channel.list() : Promise.resolve({ ok: false, records: [] }) };
+  })();
+
+  /* ---------------------------------------------------------------- pictures: an image pasted or dropped into the editor
+     uploads through ClayJS's shared task and belongs to the entry it was dropped on. Only a host that keeps the file
+     private to this document, or a local host, is asked; a saved entry only ever holds a Markdown reference. */
+  const Pictures = (() => {
+    const ACCESS = 'document-or-local';
+    const page = $('#writer');
+    const alive = () => page?.isConnected === true;
+    const newKey = () => window.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+    const queue = [];
+    const live = new Set();
+    let running = false;
+    let tray = null;
+    const imagesOf = list => [...(list || [])].filter(f => f && /^image\//.test(f.type || ''));
+    const drafting = () => document.documentElement.getAttribute('draftmode') === 'true';
+    const supported = () => alive() && !readOnly && !drafting() && typeof window.clay?.upload?.start === 'function';
+    function refuse() {
+      if (drafting()) note('Pictures need a saved document. Your draft keeps text only.');
+      else if (readOnly) note('Pictures can only be added while editing.');
+      else note('This host cannot keep pictures private to this journal, so it stays text only.');
+    }
+    function trayEl() {
+      if (!alive()) return document.createElement('div');
+      if (tray?.isConnected) return tray;
+      tray = document.createElement('div');
+      tray.className = 'pictures';
+      tray.setAttribute('clay', 'editor-ui');
+      $('#writer').after(tray);
+      return tray;
+    }
+    // Inside the editor: claims an event that carries image files, before the outer import
+    // handler sees it, and queues one job per image for the entry that is open right now.
+    function claim(e, files) {
+      if (e.type === 'paste' && e.clipboardData?.getData?.('text/plain')) return false;
+      const images = imagesOf(files);
+      if (!images.length) return false;
+      e.preventDefault();
+      e.stopPropagation();
+      if (!supported()) { refuse(); return true; }
+      const entry = Editor.current();
+      if (!entry) { note('Open an entry to add a picture.'); return true; }
+      createdHere.delete(entry.dataset.id);
+      const ta = $('#writer textarea');
+      const body = Editor.text();
+      const offset = ta && typeof ta.selectionStart === 'number' ? ta.selectionStart : body.length;
+      for (const file of images) {
+        const job = { key: newKey(), file, entryId: entry.dataset.id, body, offset };
+        live.add(job);
+        queue.push(job);
+      }
+      pump();
+      return true;
+    }
+    // Outside the editor, or in reader and draft mode: an image never navigates the page away.
+    function refuseOutside(e) {
+      if (supported() || !imagesOf(e.dataTransfer?.files).length) return false;
+      e.preventDefault();
+      refuse();
+      return true;
+    }
+    async function pump() {
+      if (running) return;
+      running = true;
+      try {
+        while (queue.length) await run(queue.shift());
+      } finally {
+        running = false;
+      }
+    }
+    // One job at a time. The next starts when this attempt settles; a retry the person starts
+    // later from the task's own controls is still seen, once per attempt.
+    function run(job) {
+      return new Promise(resolve => {
+        const task = window.clay.upload.start(job.file, { requiredAccess: ACCESS });
+        job.task = task;
+        const seen = new Set();
+        let settled = false;
+        task.subscribe(snapshot => {
+          if (snapshot.state === 'succeeded' && !seen.has(snapshot.attempt)) {
+            seen.add(snapshot.attempt);
+            const upload = snapshot.result?.uploads?.[0];
+            if (upload && typeof upload.url === 'string' && !job.record) uploaded(job, upload);
+          }
+          if (!settled && snapshot.state !== 'uploading') { settled = true; resolve(); }
+        });
+        Promise.resolve(window.clay.upload.mount(task, trayEl())).catch(() => {});
+      });
+    }
+    const isLive = id => { const a = Entries.byId(id); return !!a && !isTrashed(a); };
+    function editableOpen() {
+      const open = Editor.current();
+      return supported() && open && !isTrashed(open) && !Editor.composing() ? open : null;
+    }
+    // Through the textarea's own input path, so bind-text, the preview, the recovery copy and autosave all run.
+    function insertAt(at, text) {
+      const el = $('#writer textarea');
+      const before = el.value;
+      const [a, b] = [el.selectionStart, el.selectionEnd];
+      el.value = before.slice(0, at) + text + before.slice(at);
+      const shift = n => (n >= at ? n + text.length : n);
+      el.setSelectionRange(shift(a), shift(b));
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      rebase(Editor.current()?.dataset.id, before, el.value, at, text.length);
+    }
+    // Later pictures dropped on the same entry keep their own places after this insertion,
+    // in drop order, instead of becoming ambiguous at the shared anchor.
+    function rebase(entryId, before, after, at, length) {
+      for (const job of live) {
+        if (job.inserted || job.entryId !== entryId || typeof job.offset !== 'number') continue;
+        const mapped = mapInsertion(job.body, before, job.offset);
+        if (mapped === null) continue;
+        job.body = after;
+        job.offset = mapped >= at || !before.slice(mapped, at).includes('\n') ? mapped + length : mapped;
+      }
+    }
+    function finish(job) {
+      job.inserted = true;
+      live.delete(job);
+      job.offerEl?.remove();
+      job.offerEl = null;
+    }
+    function place(at, job) {
+      const p = placement(Editor.text(), at);
+      insertAt(p.at, p.lead + imageMarkdown(job.address) + p.tail);
+    }
+    function tryInsert(job) {
+      const open = editableOpen();
+      if (!open || open.dataset.id !== job.entryId || typeof job.offset !== 'number') return false;
+      const at = mapInsertion(job.body, Editor.text(), job.offset);
+      if (at === null) return false;
+      place(at, job);
+      finish(job);
+      return true;
+    }
+    async function uploaded(job, upload) {
+      job.address = imageAddress(upload.url);
+      if (!job.address || !['document', 'local'].includes(upload.access)) {
+        live.delete(job);
+        offer(job, { refused: true });
+        return;
+      }
+      const before = await countIn(job.entryId, upload.url);
+      job.record = { key: job.key, taskId: job.task.id, entryId: job.entryId, url: upload.url, access: upload.access, before };
+      job.kept = await Links.keep(job.record);
+      if (tryInsert(job)) { if (!job.kept) offer(job, { inserted: true }); } else offer(job);
+    }
+    // Into whichever entry is open, at its cursor, after the record names that entry.
+    async function insertHere(job) {
+      if (job.busy || job.inserted || !live.has(job)) return;
+      const open = editableOpen();
+      if (!open) { note('Open an entry to insert the picture.'); return; }
+      const target = open.dataset.id;
+      job.busy = true;
+      try {
+        if (target !== job.entryId) {
+          job.entryId = target;
+          job.record = { ...job.record, entryId: target, before: await countIn(target, job.record.url) };
+          job.kept = await Links.keep(job.record);
+        }
+        if (job.inserted || !live.has(job)) return;
+        const now = editableOpen();
+        if (!now || now.dataset.id !== target) { offer(job); return; }
+        if (carries(Editor.text(), job.record)) { finish(job); return; }
+        const el = $('#writer textarea');
+        place(el.selectionStart ?? el.value.length, job);
+        finish(job);
+        if (!job.kept) offer(job, { inserted: true });
+      } finally {
+        job.busy = false;
+      }
+    }
+    function button(label, run) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = label;
+      b.addEventListener('click', run);
+      return b;
+    }
+    function offer(job, { refused = false, inserted = false } = {}) {
+      if (!alive()) return;
+      const open = isLive(job.entryId) && Editor.current()?.dataset.id !== job.entryId;
+      const shape = JSON.stringify([refused, inserted, !!job.kept, open]);
+      if (job.offerEl?.isConnected && job.offerEl.dataset.shape === shape) return;
+      job.offerEl?.remove();
+      const el = document.createElement('div');
+      el.className = 'picture-ready';
+      el.setAttribute('clay', 'editor-ui');
+      el.dataset.key = job.record?.key ?? job.key ?? '';
+      el.dataset.shape = shape;
+      const msg = document.createElement('span');
+      const dismiss = () => { el.remove(); job.offerEl = null; };
+      const copy = button('Copy URL', async () => {
+        try { await navigator.clipboard.writeText(job.record.url); copy.textContent = 'Copied'; } catch {}
+      });
+      if (refused) {
+        msg.textContent = 'The picture uploaded, but the host gave an address this journal will not use.';
+        el.append(msg, button('Dismiss', dismiss));
+        job.offerEl = el;
+        trayEl().append(el);
+        return;
+      }
+      if (inserted) {
+        msg.textContent = 'The picture is in the entry, but this browser could not keep its link. Copy it before you reload if the entry has not saved.';
+        el.append(msg, copy, button('Dismiss', dismiss));
+        job.offerEl = el;
+        trayEl().append(el);
+        return;
+      }
+      msg.textContent = job.kept
+        ? 'Image uploaded.'
+        : 'Image uploaded. This browser could not keep its link, so copy it before you reload.';
+      el.append(msg);
+      if (open) {
+        el.append(button('Open entry', () => { openEntry(job.entryId); }));
+      }
+      el.append(button('Insert at cursor', () => { insertHere(job); }));
+      el.append(copy);
+      el.append(button('Discard', () => { Links.drop(job.record.key); live.delete(job); dismiss(); }));
+      job.offerEl = el;
+      trayEl().append(el);
+    }
+    function refreshOffers() {
+      if (!alive()) return;
+      for (const job of live) {
+        if (!job.offerEl || job.busy) continue;
+        const a = Entries.byId(job.entryId);
+        if (a && carries(Entries.body(a), job.record)) { finish(job); continue; }
+        offer(job);
+      }
+    }
+    function recovered(payload, kept) {
+      const job = { entryId: payload.entryId, record: payload, address: imageAddress(payload.url), kept, recovered: true };
+      if (!job.address) return;
+      live.add(job);
+      offer(job);
+    }
+    return { claim, refuseOutside, supported, refreshOffers, start: () => { if (supported()) Links.start(recovered); } };
+  })();
+
+  /* ---------------------------------------------------------------- the picture strip: the open entry's pictures, under the editor.
+     A projection of the body, never saved; marked loads for it only once the body has an image. */
+  const Strip = (() => {
+    let el = null;
+    let timer = null;
+    let shown = '';
+    const drafting = () => document.documentElement.getAttribute('draftmode') === 'true';
+    function host() {
+      if (el?.isConnected) return el;
+      el = document.createElement('div');
+      el.className = 'image-strip';
+      el.setAttribute('clay', 'editor-ui');
+      $('#writer').after(el);
+      wirePictures(el);
+      return el;
+    }
+    function schedule() {
+      clearTimeout(timer);
+      timer = setTimeout(refresh, 300);
+    }
+    function clear() {
+      shown = '';
+      if (el) el.replaceChildren();
+    }
+    async function refresh() {
+      const text = Editor.current() ? Editor.text() : '';
+      if (!text.includes('![')) { clear(); return; }
+      let list;
+      try { list = await Reader.images(text); } catch { return; }
+      if ((Editor.current() ? Editor.text() : '') !== text) return;
+      const key = JSON.stringify([drafting(), list]);
+      if (key === shown) return;
+      shown = key;
+      const items = list.map(({ href, alt }) => {
+        const p = imagePolicy(href);
+        if (p.kind === 'local' && !drafting()) return pictureEl(p.src, alt);
+        if (p.kind === 'external' && !drafting()) {
+          const ask = document.createElement('span');
+          ask.className = 'image-ref image-ask';
+          ask.dataset.src = p.src;
+          ask.dataset.alt = alt;
+          const b = document.createElement('button');
+          b.type = 'button';
+          b.className = 'image-load';
+          b.textContent = `Show image from ${p.host}`;
+          ask.append(alt, ' ', b);
+          return ask;
+        }
+        const label = document.createElement('span');
+        label.className = 'image-ref';
+        label.textContent = alt;
+        return label;
+      });
+      host().replaceChildren(...items);
+    }
+    function start() {
+      $('#writer').addEventListener('input', schedule);
+    }
+    return { start, schedule, refresh };
+  })();
+
+  // The recovery copy: exactly the text this person typed, kept in this browser and apart from
+  // the saved file. It is never rendered as the journal, and nothing here claims a save: a
+  // completed local transaction means this browser kept a copy, and that is all it means.
+  const Recovery = (() => {
+    const CHANNEL = 'journal.entries';
+    const FIELDS = ['id', 'date', 'created', 'updated', 'deletedAt', 'pinned', 'body'];
+    let entries = null;
+    let panelEl = null;
+    let statusEl = null;
+    let labelEl = null;
+    let copyBtn = null;
+    let downloadBtn = null;
+    let copies = 0;
+    let reviewTicket = 0;
+    let unregisterContext = null;
+    const bases = new Map();
+    const transfers = new Map();
+
+    function readEntry(el) {
+      return {
+        id: el.dataset.id || '',
+        date: el.dataset.date || '',
+        created: el.dataset.created || '',
+        updated: el.dataset.updated || '',
+        deletedAt: el.dataset.deletedAt || '',
+        pinned: el.dataset.pinned === 'true' ? 'true' : '',
+        body: el.querySelector('.entry-body')?.textContent ?? ''
+      };
+    }
+
+    function readSaved(html) {
+      const doc = new DOMParser().parseFromString(html, 'text/html');
+      return new Map([...doc.querySelectorAll('#entries > article.entry:not([cms-template])')].map(el => [el.dataset.id, readEntry(el)]));
+    }
+
+    const describe = record => ({ label: record.payload.date || 'Undated entry', text: record.payload.body ?? '' });
+    const keyOf = id => (Array.isArray(id) ? id.join('\u0000') : String(id));
+    const same = (a, b) => !!a && !!b && FIELDS.every(field => (a[field] ?? '') === (b[field] ?? ''));
+
+    function remember(article) {
+      if (!article) return;
+      bases.set(article.dataset.id, readEntry(article));
+    }
+
+    function rememberAll() {
+      for (const article of Entries.all()) remember(article);
+    }
+
+    function stage(id, { body, source = null } = {}) {
+      if (!entries || !id) return null;
+      const article = Entries.byId(id);
+      if (!article) return null;
+      const reading = readEntry(article);
+      const payload = { ...reading, body: body === undefined ? reading.body : body };
+      const lineage = source ? { sourceId: source.id, sourceRevision: source.revision } : null;
+      const staged = entries.stage({
+        key: id,
+        kind: 'text',
+        baseEtag: null,
+        base: bases.get(id) ?? null,
+        payload,
+        lineage
+      });
+      return { ...staged, key: id, payload };
+    }
+
+    function typed() {
+      const open = Editor.current();
+      if (open) stage(open.dataset.id, { body: Editor.text() });
+    }
+
+    function conflicted(text, context = {}) {
+      if (!entries) return;
+      const key = context.key || '';
+      const article = key ? Entries.byId(key) : null;
+      entries.stage({
+        key: key || 'entry',
+        kind: 'conflict',
+        baseEtag: null,
+        lineage: null,
+        payload: {
+          key,
+          date: article ? article.dataset.date || '' : '',
+          base: context.base ?? '',
+          typed: text ?? '',
+          remote: context.remote ?? ''
+        }
+      });
+    }
+
+    function flush() {
+      return entries ? entries.flush() : Promise.resolve({ ok: true, stored: [] });
+    }
+
+    function review(records) {
+      const service = entries;
+      if (!service || readOnly) return Promise.resolve();
+      const board = panel();
+      board.textContent = '';
+      const listed = records ?? null;
+      const ticket = ++reviewTicket;
+      const known = listed ? Promise.resolve({ ok: true, records: listed }) : service.list();
+      // A list read that started earlier may finish later; only the newest review paints.
+      return known.then(result => {
+        if (ticket !== reviewTicket) return;
+        const all = result.ok ? result.records : [];
+        const pendingDest = new Map();
+        for (const record of all) {
+          const link = record.lineage;
+          if (link && link.sourceId != null) pendingDest.set(keyOf(link.sourceId), record);
+        }
+        const rows = [];
+        for (const record of all) {
+          if (record.kind === 'conflict') { rows.push(record); continue; }
+          if (record.kind !== 'text') continue;
+          const article = Entries.byId(record.key);
+          const live = article && !isTrashed(article) ? readEntry(article) : null;
+          if (record.lineage && record.lineage.sourceId != null) {
+            // A copy staged for a new entry is that entry's own unsaved text. Once the entry is
+            // in the journal it is the copy, and only a crash before the entry can save leaves
+            // this as the one place the text still exists.
+            if (live) continue;
+            rows.push(record);
+            continue;
+          }
+          if (pendingDest.has(keyOf(record.id))) continue;
+          if (live && same(live, record.payload)) continue;
+          rows.push(record);
+        }
+        rows.sort((a, b) => (a.updated || 0) - (b.updated || 0));
+        for (const record of rows) board.append(rowFor(record));
+        board.hidden = rows.length === 0;
+        copies = rows.length;
+        paintStatus();
+      });
+    }
+
+    function panel() {
+      if (panelEl) return panelEl;
+      panelEl = document.createElement('section');
+      panelEl.className = 'recovery-panel';
+      panelEl.id = 'recoveryPanel';
+      panelEl.setAttribute('clay', 'editor-ui');
+      panelEl.setAttribute('aria-label', 'Recovered writing');
+      panelEl.hidden = true;
+      $('#writer').before(panelEl);
+      return panelEl;
+    }
+
+    function action(label, run) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = label;
+      button.addEventListener('click', () => { Promise.resolve(run()).catch(() => {}); });
+      return button;
+    }
+
+    function rowFor(record) {
+      const conflict = record.kind === 'conflict';
+      const article = conflict ? null : Entries.byId(record.key);
+      const live = article && !isTrashed(article) ? readEntry(article) : null;
+      const body = conflict ? record.payload.typed : record.payload.body;
+      const label = conflict ? (record.payload.date || 'Undated entry') : describe(record).label;
+
+      const node = document.createElement('article');
+      node.className = 'recovery-row';
+      node.dataset.key = record.key;
+      node.dataset.kind = record.kind;
+
+      const what = document.createElement('p');
+      what.className = 'recovery-what';
+      what.textContent = conflict
+        ? `Text kept from a change that arrived while you were typing ${label}.`
+        : !live
+          ? `Unsaved text for ${label}. That entry is no longer in the journal.`
+          : record.base && !same(record.base, live)
+            ? `Unsaved text for ${label}. The entry changed after this copy was made.`
+            : `Unsaved text for ${label}, not in the saved journal.`;
+      const control = document.createElement('textarea');
+      control.className = 'recovery-text';
+      control.readOnly = true;
+      control.setAttribute('aria-label', `Recovered text for ${label}`);
+      control.rows = Math.max(3, Math.min(10, String(body ?? '').split('\n').length));
+      control.value = body ?? '';
+
+      const acts = document.createElement('div');
+      acts.className = 'recovery-acts';
+
+      const keep = () => {
+        const date = record.payload.date || ymd(new Date());
+        const created = makeEntry(date, nowISO(), body ?? '');
+        store.prepend(created);
+        const staged = stage(created.dataset.id, { body: body ?? '', source: { id: record.id, revision: record.revision } });
+        if (staged) transfers.set(keyOf(record.id), { destId: staged.id, sourceRevision: record.revision });
+        return flush().then(() => { openEntry(created.dataset.id); return review(); });
+      };
+      acts.append(action('Keep as a new entry', keep));
+
+      if (live) {
+        const row = { current: live };
+        acts.append(action('Replace current text', () => {
+          const now = readEntry(article);
+          if (!same(now, row.current)) {
+            row.current = now;
+            what.textContent = `Unsaved text for ${label}. The entry changed while you were reading it, so compare again.`;
+            return Promise.resolve();
+          }
+          const open = Editor.current();
+          if (open === article) Editor.close();
+          article.querySelector('.entry-body').textContent = body ?? '';
+          touch(article);
+          if (open === article) Editor.open(article);
+          const staged = stage(article.dataset.id, { body: body ?? '', source: { id: record.id, revision: record.revision } });
+          if (staged) transfers.set(keyOf(record.id), { destId: staged.id, sourceRevision: record.revision });
+          return flush().then(() => review());
+        }));
+      }
+
+      acts.append(action('Copy', () => copyText(body ?? '')));
+      acts.append(action('Download', () => downloadText(label, body ?? '')));
+      acts.append(action('Discard', () => entries.dismiss(record.id, { revision: record.revision }).then(() => review())));
+
+      node.append(what, control, acts);
+      return node;
+    }
+
+    function copyText(text) {
+      if (!navigator.clipboard || typeof navigator.clipboard.writeText !== 'function') return Promise.resolve(false);
+      return navigator.clipboard.writeText(text).then(() => true, () => false);
+    }
+
+    function downloadText(name, text) {
+      const url = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${name || 'recovered writing'}.md`;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+
+    // Its own status, beside the save chip and never part of it: what this browser kept is not
+    // what the host accepted, and the two must be able to disagree.
+    function statusBar() {
+      if (statusEl) return statusEl;
+      statusEl = document.createElement('span');
+      statusEl.className = 'recovery';
+      statusEl.id = 'recoveryStatus';
+      statusEl.setAttribute('clay', 'editor-ui');
+      statusEl.setAttribute('role', 'status');
+      statusEl.setAttribute('aria-live', 'polite');
+      statusEl.hidden = true;
+      const dot = document.createElement('span');
+      dot.className = 'dot';
+      labelEl = document.createElement('span');
+      labelEl.className = 'label';
+      labelEl.id = 'recoveryLabel';
+      copyBtn = document.createElement('button');
+      copyBtn.type = 'button';
+      copyBtn.id = 'recoveryCopy';
+      copyBtn.className = 'chip-btn';
+      copyBtn.textContent = 'Copy text';
+      copyBtn.hidden = true;
+      downloadBtn = document.createElement('button');
+      downloadBtn.type = 'button';
+      downloadBtn.id = 'recoveryDownload';
+      downloadBtn.className = 'chip-btn';
+      downloadBtn.textContent = 'Download text';
+      downloadBtn.hidden = true;
+      copyBtn.addEventListener('click', () => copyText(Editor.text()));
+      downloadBtn.addEventListener('click', () => downloadText(document.title, Editor.text()));
+      statusEl.append(dot, labelEl, copyBtn, downloadBtn);
+      $('#save').before(statusEl);
+      return statusEl;
+    }
+
+    function paintStatus() {
+      if (!statusEl) return;
+      const snapshot = window.clay.recovery && window.clay.recovery.status ? window.clay.recovery.status() : null;
+      const failed = snapshot ? snapshot.ok === false : false;
+      if (labelEl) {
+        labelEl.textContent = failed
+          ? 'Local copy could not be updated'
+          : copies === 1 ? '1 recovery copy' : `${copies} recovery copies`;
+      }
+      statusEl.hidden = !failed && copies === 0;
+      statusEl.classList.toggle('failed', failed);
+      if (copyBtn) copyBtn.hidden = !failed;
+      if (downloadBtn) downloadBtn.hidden = !failed;
+    }
+
+    function start() {
+      if (readOnly || entries) return;
+      const service = window.clay && window.clay.recovery;
+      if (!service || typeof service.register !== 'function') return;
+      entries = service.register({ channel: CHANNEL, version: 1, readSaved, describe });
+      statusBar();
+      rememberAll();
+      if (typeof entries.subscribe === 'function') entries.subscribe(() => paintStatus());
+      if (typeof service.subscribe === 'function') service.subscribe(() => paintStatus());
+      if (window.clay.conflicts && typeof window.clay.conflicts.registerContext === 'function') {
+        unregisterContext = window.clay.conflicts.registerContext(contextOf);
+      }
+      review();
+    }
+
+    // A conflict names its entry only when the record's own nodes are inside one. A refused
+    // undo has no node of its own: it names the entry by id, or by the element that id finds.
+    function contextOf(record) {
+      const el = entryOf(record);
+      if (!el || !el.dataset.id) return null;
+      return {
+        kind: 'entry',
+        id: el.dataset.id,
+        label: describe({ payload: { date: el.dataset.date || '' } }).label,
+        field: 'body',
+        open: () => openEntry(el.dataset.id)
+      };
+    }
+
+    function entryOf(record) {
+      if (!record) return null;
+      const node = record.node;
+      if (node && typeof node.closest === 'function') return node.closest('article.entry');
+      const element = record.element;
+      if (element && typeof element.closest === 'function') {
+        const own = element.closest('article.entry');
+        if (own) return own;
+      }
+      if (record.id == null || record.id === '') return null;
+      return Entries.byId(String(record.id));
+    }
+
+    // A kept-as-new copy is not a save. The source leaves only once a save's own bytes cover
+    // the destination it was staged under, which the service decides and reports by deleting it.
+    function afterSave() {
+      const service = entries;
+      if (!service || !transfers.size) return Promise.resolve();
+      // The acknowledgement joins the channel's own write queue, so flushing first is what
+      // makes this the list after the save, never one taken while it was still in flight.
+      return service.flush().then(() => service.list()).then(result => {
+        if (!result.ok) return null;
+        const present = new Set(result.records.map(record => keyOf(record.id)));
+        const work = [];
+        for (const [sourceKey, transfer] of transfers) {
+          if (present.has(keyOf(transfer.destId))) continue;
+          transfers.delete(sourceKey);
+          const source = result.records.find(record => keyOf(record.id) === sourceKey);
+          if (source) work.push(service.dismiss(source.id, { revision: transfer.sourceRevision }));
+        }
+        return Promise.all(work).then(() => review());
+      }, () => null);
+    }
+
+    function dispose() {
+      if (typeof unregisterContext === 'function') unregisterContext();
+      unregisterContext = null;
+      if (!entries) return Promise.resolve({ ok: true, stored: [] });
+      const flushed = flush();
+      flushed.then(() => { try { entries.dispose(); } catch {} }, () => {});
+      entries = null;
+      return flushed;
+    }
+
+    function surface() {
+      return {
+        channel: CHANNEL,
+        list: () => (entries ? entries.list() : Promise.resolve({ ok: false, code: 'unavailable', records: [] })),
+        flush,
+        review: () => review(),
+        afterSave,
+        panel: () => panelEl,
+        rows: () => (panelEl ? [...panelEl.querySelectorAll('.recovery-row')] : []),
+        status: () => statusEl
+      };
+    }
+
+    return { start, typed, conflicted, flush, review, afterSave, surface, rememberAll, dispose };
   })();
 
   // One line under the sheet for a conflict or a deletion elsewhere, with the text this tab typed. It is
@@ -1669,12 +2662,14 @@ const words = text.trim().split(/\s+/).length;
   function syncEditor() {
     if (!booted) return;
     const a = store.querySelector(':scope > .entry[route-active]');
-    if (readOnly) { renderReader(a && !isTrashed(a) ? a : null); refreshHighlights(); return; }
+    if (readOnly) { Reader.render(a && !isTrashed(a) ? a : null); refreshHighlights(); return; }
     const left = Editor.current();
     const leftId = left ? left.dataset.id : null;
     const nextId = a ? a.dataset.id : null;
-    if (leftId !== nextId) { clearNote(); desk.scrollTop = 0; }
+    if (leftId !== nextId) { clearNote(); desk.scrollTop = 0; Recovery.flush(); }
     if (a) Editor.open(a); else Editor.close();
+    Strip.schedule();
+    Pictures.refreshOffers();
     openDate = a ? a.dataset.date || '' : null;
     showPeerBar(a);
     if (left && left !== a && left.isConnected && createdHere.has(left.dataset.id) && !Entries.body(left).trim()) left.remove();
@@ -1691,23 +2686,10 @@ const words = text.trim().split(/\s+/).length;
     pendingFocus = null;
   }
 
-  function renderReader(a) {
-    $('#reader').innerHTML = a ? renderMarkdown(Entries.body(a)) : '';
-    if (a) desk.scrollTop = 0;
-  }
-
   // The editor's padding is fixed when it opens, so crossing the phone breakpoint reconfigures it
   PHONE.addEventListener('change', () => {
     Editor.reconfigure({ padding: PHONE.matches ? `${LINE}px 16px ${LINE * 2}px 44px` : `${LINE}px 44px ${LINE * 2}px 72px` });
   });
-
-  function toolbarButtons() {
-    const tb = window.toolbarButtons || OverType.toolbarButtons;
-    if (!tb) return undefined;
-    const pick = ['bold', 'italic', 'code', 'separator', 'link', 'separator', 'bulletList', 'orderedList', 'taskList', 'separator', 'quote'];
-    const out = pick.map(n => tb[n]).filter(Boolean);
-    return out.length ? out : undefined;
-  }
 
   // Web fonts can arrive after an entry opened and re-wrap its lines; OverType re-measures on input and resize only
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => Editor.reconfigure({}));
@@ -1899,8 +2881,11 @@ const words = text.trim().split(/\s+/).length;
     if (s && s.today !== now) { s.today = now; s.otdShown = ''; refreshSap(); }
     scheduleMidnight();
   }
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') refreshToday(); });
-  window.addEventListener('pagehide', () => { clearTimeout(midnightTimer); midnightTimer = 0; });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') refreshToday();
+    else Recovery.flush();
+  });
+  window.addEventListener('pagehide', () => { clearTimeout(midnightTimer); midnightTimer = 0; Recovery.dispose(); });
 
   function deleteEntry(id) {
     if (readOnly) return;
@@ -1992,6 +2977,7 @@ const words = text.trim().split(/\s+/).length;
     const label = `Trash (${n})`;
     if (trashLabel.textContent !== label) trashLabel.textContent = label;
     if (trashItem.hidden !== !n) trashItem.hidden = !n;
+    Pictures.refreshOffers();
   }
 
   let toastEl = null, toastTimer = 0;
@@ -2416,12 +3402,12 @@ const words = text.trim().split(/\s+/).length;
   });
 
   document.addEventListener('clay:route', () => {
-    try { if (window.Sap) Sap.refresh(); } catch {}
     syncEditor();
     saveUI();
   });
   // A merge can replace the open entry's element; the router re-marks the new one, then the editor follows
-  document.addEventListener('clay:sync-applied', () => setTimeout(syncEditor, 0));
+  document.addEventListener('clay:sync-applied', () => setTimeout(() => { syncEditor(); Recovery.rememberAll(); }, 0));
+  document.addEventListener('clay:save-saved', () => { Recovery.afterSave(); });
   app.addEventListener('sap:views-updated', () => { refreshHighlights(); refreshTrash(); });
 
   document.addEventListener('keydown', e => {
@@ -2534,12 +3520,15 @@ const words = text.trim().split(/\s+/).length;
   $('#importInput').addEventListener('change', e => { importFiles(e.target.files); e.target.value = ''; });
   document.addEventListener('mousedown', e => { if (!e.target.closest('#fileMenu')) setMenu(false); });
   document.addEventListener('keydown', e => { if (e.key === 'Escape') setMenu(false); });
-  app.addEventListener('dragover', e => { if (!readOnly && e.dataTransfer && [...e.dataTransfer.types].includes('Files')) e.preventDefault(); });
+  app.addEventListener('dragover', e => { if (e.dataTransfer && [...e.dataTransfer.types].includes('Files')) e.preventDefault(); });
   app.addEventListener('drop', e => {
+    if (Pictures.refuseOutside(e)) return;
     if (readOnly || !e.dataTransfer || !e.dataTransfer.files.length) return;
     e.preventDefault();
     importFiles(e.dataTransfer.files);
   });
+  $('#writer').addEventListener('paste', e => { Pictures.claim(e, e.clipboardData?.files); });
+  $('#writer').addEventListener('drop', e => { Pictures.claim(e, e.dataTransfer?.files); });
 
   /* ---------------------------------------------------------------- boot */
   window.Journal = {
@@ -2548,7 +3537,7 @@ const words = text.trim().split(/\s+/).length;
     summary,
     orderOf,
     daysOf,
-    renderMarkdown,
+    renderMarkdown: Reader.toHTML,
     tagsOf,
     exportMarkdown,
     importMarkdown,
@@ -2563,6 +3552,8 @@ const words = text.trim().split(/\s+/).length;
       return { q: $('#q').value.trim(), tag, openId: currentEntry() };
     },
     get editor() { return readOnly ? null : $('#writer textarea'); },
+    get recovery() { return readOnly ? null : Recovery.surface(); },
+    get pictures() { return readOnly ? null : { list: () => Links.list() }; },
     get readOnly() { return readOnly; },
     get pane() { return currentEntry() ? 'sheet' : 'list'; }
   };
@@ -2585,10 +3576,6 @@ const words = text.trim().split(/\s+/).length;
       try { localStorage.setItem(PRIVACY_KEY, '1'); } catch {}
     });
     if (editable) {
-      if (typeof OverType === 'undefined') {
-        document.body.insertAdjacentHTML('afterbegin', '<div clay="no-save no-watch" style="position:fixed;inset:auto 0 0 0;padding:10px;text-align:center;background:var(--accent-soft);color:var(--accent);z-index:99">The editor could not load (no network?). Your entries are safe in this file.</div>');
-        return;
-      }
       if (typeof window.clay.bindText !== 'function') {
         readOnly = true;
         const style = document.createElement('style');
@@ -2597,27 +3584,16 @@ const words = text.trim().split(/\s+/).length;
         document.head.append(style);
         note('This journal needs a newer ClayJS to edit.');
       } else {
-        OverType.setTheme(THEME);
-        const otStyles = document.querySelector('style.overtype-styles');
-        if (otStyles) otStyles.setAttribute('clay', 'editor-ui');
-        Editor.start({
-          persist: true,
-          toolbar: true,
-          toolbarButtons: toolbarButtons(),
-          codeHighlighter: highlightCode,
-          autoResize: true,
-          minHeight: `${LINE}px`,
-          fontFamily: FONT,
-          fontSize: '16px',
-          lineHeight: 1.75,
-          padding: PHONE.matches ? `${LINE}px 16px ${LINE * 2}px 44px` : `${LINE}px 44px ${LINE * 2}px 72px`,
-          spellcheck: true,
-          smartLists: true,
-          clickToToggleTasks: true,
-          placeholder: 'Start writing. The first line becomes the heading.'
-        });
+        Editor.start();
+        const assets = window.clay.assets;
+        if (assets) assets.load('overtype').then(Editor.enhance, () => note('Formatting tools could not load. Your writing still saves.'));
+        else note('Formatting tools could not load. Your writing still saves.');
       }
     }
+    if (!readOnly) Recovery.start();
+    if (!readOnly) Pictures.start();
+    if (!readOnly) Strip.start();
+    if (readOnly) Reader.start();
     const r = route();
     const autoOpen = () => {
       const asked = r && r.get().entry;
@@ -2648,7 +3624,7 @@ const words = text.trim().split(/\s+/).length;
 
 })();
 </script>
-<script src="https://clayjs.com/v1/clay.js?plugins=sync,bind-text,menu"></script>
+<script src="https://clayjs.com/v1/clay.js?plugins=sync,bind-text,menu,upload&exclude=richclay"></script>
 <script src="https://clayjs.com/v1/sap.js"></script>
 <script src="https://clayjs.com/v1/clay-router.js"></script>
 <script>if (window.Sap && window.Journal) Object.assign(Sap.formats, Journal.formats);</script>
