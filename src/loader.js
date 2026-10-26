@@ -20,6 +20,29 @@ const PLUGIN_NAMES = Object.fromEntries(
   )
 );
 
+// Every namespace this page imported, boot's plan and a live entry's alike: one record,
+// so an entry skips what boot has and the edit members find their modules.
+const loaded = {};
+
+// clay:plugin-ready fires at most once per plugin per page: boot's late tail and a live
+// entry can both reach the same module.
+const announced = new Set();
+
+function announce(path) {
+  if (announced.has(path)) return;
+  announced.add(path);
+  document.dispatchEvent(new CustomEvent("clay:plugin-ready", { detail: { plugin: PLUGIN_NAMES[path] } }));
+}
+
+// A live entry's hint fetch: the bootstrap's cached one, preloading the plan the entry will
+// import. It lives here, beside the helper, because one more static edge into the reader's
+// graph is one more chunk of every reader's closure.
+const editHints = (loadEditHints, manifest, plan, hasSapJs) => () =>
+  loadEditHints().then((hints) => {
+    preloadEntries(mergeManifests(manifest, hints), [...plan.core, ...plan.plugins, ...plan.late], { isEditMode: true, hasSapJs });
+    return hints;
+  });
+
 function domReady() {
   return new Promise((resolve) => onDomReady(resolve));
 }
@@ -80,7 +103,10 @@ export async function boot(base, params, readyResolve, manifest = null, suppleme
       .then((hints) => preloadEntries(mergeManifests(manifest, hints), [...plan.core, ...plan.plugins], { isEditMode, isDraftMode, hasSapJs }))
       .catch(() => {});
   }
-  const loaded = {};
+  // Not awaited by boot: an entry that overlaps the tail waits on this rather than
+  // import the same paths a second time.
+  let settleLate;
+  const lateDone = new Promise((resolve) => { settleLate = resolve; });
   // The reader's transport choice comes from the plan just resolved, never from the
   // URL: when generic sync loaded, it owns the saved lane and the reader follows
   // the frames it applies rather than opening a second stream.
@@ -94,14 +120,24 @@ export async function boot(base, params, readyResolve, manifest = null, suppleme
     loaded[path].install?.();
   }
 
-  assembleCore(loaded, { isDraftMode, isOwner, siteVisibility }, regionPolicy); // window.clay MUST be assembled
-                                                               // before any plugin import
+  assembleCore(loaded, { isDraftMode, isOwner, siteVisibility }, regionPolicy);
+  attachEditCore(loaded); // window.clay MUST be assembled before any plugin import
   // A document that signs the live-switch contract hands its boot to the mode dispatcher.
   // Nothing is fetched for it here: the decision and the controller behind it wait for the
   // first switch, so this costs a reader with a declaration no more than one attribute.
   if (document.documentElement.getAttribute("clay-mode-switch") === "live") {
     const editing = resolveModules(params, true, { isDraftMode, hasSap, canEdit, templateSource: templateSource() });
-    loaded["core/edit-mode.js"].noteLiveSwitch({ edit: editing, view: plan });
+    loaded["core/edit-mode.js"].noteLiveSwitch({
+      edit: editing,
+      view: plan,
+      loaded,
+      modules: MODULES,
+      attach: attachPluginMember,
+      attachEditCore,
+      announce,
+      loadEditHints: loadEditHints ? editHints(loadEditHints, manifest, editing, hasSapJs) : null,
+      late: lateDone,
+    });
   }
   // An explicit initial edit drains the preboot participant queue and enables its
   // leases before a plugin can take input. A reader returns at the first line.
@@ -138,7 +174,8 @@ export async function boot(base, params, readyResolve, manifest = null, suppleme
   installViewModeNotice(isEditMode);
   readyResolve(window.clay);
   document.dispatchEvent(new CustomEvent("clay:ready", { detail: { clay: window.clay } }));
-  if (plan.late.length) loadLate(plan.late, loaded, editMode);
+  if (plan.late.length) loadLate(plan.late, editMode).then(settleLate, settleLate);
+  else settleLate();
 }
 
 // An edit-only plugin belongs to the edit session that resolved it. Once the page has
@@ -151,9 +188,7 @@ const stale = (path, editMode) => !editMode.isEditMode && PLUGIN_PATHS[PLUGIN_NA
 // Plugins no first paint or keystroke waits for. They load after the editor takes input
 // (right away on a page without one), one at a time and in plan order, and a failure
 // degrades to absent as at boot.
-async function loadLate(paths, loaded, editMode) {
-  // Held once: a test environment can tear the global down while an import is in flight.
-  const doc = document;
+async function loadLate(paths, editMode) {
   try {
     await window.clay.page?.ready;
   } catch {}
@@ -168,10 +203,10 @@ async function loadLate(paths, loaded, editMode) {
       attachPluginMember(path, mod, loaded);
       await mod.ready;
       if (stale(path, editMode)) continue;
-      doc.dispatchEvent(new CustomEvent("clay:plugin-ready", { detail: { plugin: PLUGIN_NAMES[path] } }));
+      announce(path);
     } catch (err) {
       console.error(`clayjs: plugin "${path}" failed to load, continuing without it:`, err);
-      doc.dispatchEvent(new CustomEvent("clay:plugin-failed", { detail: { plugin: PLUGIN_NAMES[path] } }));
+      document.dispatchEvent(new CustomEvent("clay:plugin-failed", { detail: { plugin: PLUGIN_NAMES[path] } }));
     }
   }
 }
@@ -224,9 +259,6 @@ function assembleCore(loaded, { isDraftMode, isOwner, siteVisibility }, regionPo
 
   clay.assets = assets;
 
-  const snapshot = loaded["core/snapshot.js"];
-  const save = loaded["core/save.js"];
-  const cacheBustMod = loaded["lib/cache-bust.js"];
   const pageData = loaded["core/page-data.js"];
 
   clay.readData = pageData.readData;
@@ -244,38 +276,50 @@ function assembleCore(loaded, { isDraftMode, isOwner, siteVisibility }, regionPo
   clay.derived = derived;
   clay.effect = effect;
   clay.style = style;
+  clay.morph = (oldEl, newEl, options) => mergeEngine().then(({ morph }) => morph(oldEl, newEl, options));
+}
 
+// The edit half of the assembly: boot runs it right after the always half, and a live entry
+// runs it once its edit core has landed. It adds what those modules offer and replaces
+// nothing already there, so a member a reader attached first survives.
+function attachEditCore(loaded) {
+  const clay = window.clay;
+
+  const save = loaded["core/save.js"];
   if (save) {
     const saveFn = save.savePage || save.default;
     saveFn.force = save.savePageForce;
     saveFn.overwrite = save.saveOverwritingConflict;
     saveFn.flush = save.flushSave;
     saveFn.soon = save.savePageSoon;
-    clay.save = saveFn;
+    // An upgrade-capable reader's temporary save object hands its `replace` to the function.
+    if (clay.save !== saveFn && typeof clay.save?.replace === "function") saveFn.replace = clay.save.replace;
+    if (clay.save !== saveFn) clay.save = saveFn;
   }
   // The close warning's own predicate, reachable without a capture. It falls back to
   // false rather than to absent: the module is edit-only, and a document that cannot
   // save has nothing unsaved. Older clayjs has no such member, and that is the answer
   // a host feature-detects.
-  clay.hasUnsavedChanges = loaded["core/unsaved-warning.js"]?.hasUnsavedChanges ?? (() => false);
+  clay.hasUnsavedChanges =
+    loaded["core/unsaved-warning.js"]?.hasUnsavedChanges ?? clay.hasUnsavedChanges ?? (() => false);
+  const snapshot = loaded["core/snapshot.js"];
   if (snapshot) {
-    clay.getHTML = snapshot.getPageContents;
-    clay.addDocumentTransform = snapshot.addDocumentTransform;
-    clay.onSnapshot = snapshot.onSnapshot;
+    if (!clay.getHTML) clay.getHTML = snapshot.getPageContents;
+    if (!clay.addDocumentTransform) clay.addDocumentTransform = snapshot.addDocumentTransform;
+    if (!clay.onSnapshot) clay.onSnapshot = snapshot.onSnapshot;
   }
-  if (cacheBustMod) {
+  const cacheBustMod = loaded["lib/cache-bust.js"];
+  if (cacheBustMod && !clay.cacheBust) {
     clay.cacheBust = cacheBustMod.default;
   }
-  clay.morph = (oldEl, newEl, options) => mergeEngine().then(({ morph }) => morph(oldEl, newEl, options));
-
   // Edit mode only, and absent entirely in view mode: a reader has nothing to
   // recover and must never open the database. The facade is here; the store behind
   // it arrives when the page's first adapter registers a channel.
   const recoveryMod = loaded["core/recovery.js"];
-  if (recoveryMod) clay.recovery = recoveryMod.recovery;
+  if (recoveryMod && !clay.recovery) clay.recovery = recoveryMod.recovery;
 }
 
-function attachPluginMember(path, mod, loaded) {
+function attachPluginMember(path, mod, namespaces = loaded) {
   const clay = window.clay;
 
   if (path === "plugins/undo.js") {
@@ -285,7 +329,7 @@ function attachPluginMember(path, mod, loaded) {
   } else if (path === "sync/live-sync.js") {
     clay.morph = mod.morph;
     clay.conflicts = mod.conflicts;
-    loaded["core/page-data.js"].setPageDataLiveSync(mod.liveSync);
+    namespaces["core/page-data.js"].setPageDataLiveSync(mod.liveSync);
   } else if (path === "plugins/live.js") {
     clay.live = mod.live;
   } else if (path === "plugins/page.js") {

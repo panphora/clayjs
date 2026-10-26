@@ -69,3 +69,95 @@ export function openResources() {
   resourcesQueued = true;
   registerModeParticipant(resourcesParticipant());
 }
+
+// The abort an entry reports when its own deadline or a newer generation cancelled it:
+// named as the platform names a cancelled import, so a caller can tell it apart from a
+// module that failed.
+const cancelled = () =>
+  Object.assign(new Error("clay.modeLifecycle: the import was cancelled"), { name: "AbortError", code: "aborted" });
+
+/**
+ * Import an edit plan's missing modules through the loader's own record and import cache.
+ *
+ * One path at a time, core then plugins then the late tail, in plan order: the same order
+ * boot imports them in, for the same reasons. A path boot already loaded is skipped, so
+ * nothing evaluates twice; a path in flight is awaited, so boot's late tail and an entry
+ * that overlap share one import; and a rejected thunk is dropped from the cache so the
+ * next attempt calls it again. It attaches the edit members once the core has landed and
+ * each plugin's member as that plugin lands, exactly as boot does, and it announces
+ * nothing: the plugin-ready events belong to a committed entry, not to an import.
+ *
+ * @param {object} handle - the loader's handle: `{loaded, modules, attach, attachEditCore, loadEditHints, late}`
+ * @param {{core?: string[], plugins?: string[], late?: string[]}} plan
+ * @param {{signal?: AbortSignal}} [options]
+ * @returns {Promise<string[]>} the plugin paths this call newly loaded
+ */
+export async function importPlan(handle, plan, { signal } = {}) {
+  const inflight = (handle.inflight ||= new Map());
+  const newlyLoaded = [];
+
+  const stop = () => { if (signal?.aborted) throw cancelled(); };
+
+  // The loader's own hint fetch, which preloads what it returns against this plan. A failed
+  // fetch defers hints, never an import already mapped.
+  const hints = handle.loadEditHints?.();
+  if (hints) {
+    try {
+      await hints;
+    } catch {}
+  }
+
+  const importPath = (path) => {
+    if (!inflight.has(path)) {
+      const promise = Promise.resolve()
+        .then(() => handle.modules[path]())
+        .catch((err) => {
+          inflight.delete(path);
+          throw err;
+        });
+      inflight.set(path, promise);
+    }
+    return inflight.get(path);
+  };
+
+  for (const path of plan.core ?? []) {
+    if (handle.loaded[path]) continue;
+    stop();
+    const mod = await importPath(path);
+    handle.loaded[path] = mod;
+    mod.install?.();
+  }
+  // Once, after the core wave: the members those modules offer, added to the facade
+  // boot assembled rather than replacing it.
+  handle.attachEditCore(handle.loaded);
+
+  for (const path of plan.plugins ?? []) {
+    if (handle.loaded[path]) continue;
+    stop();
+    const mod = await importPath(path);
+    handle.loaded[path] = mod;
+    handle.attach(path, mod);
+    newlyLoaded.push(path);
+  }
+
+  const late = (plan.late ?? []).filter((path) => !handle.loaded[path]);
+  if (late.length) {
+    // Boot's tail may be importing these same paths right now, and it records them in the
+    // same table a moment after each import resolves. Waiting for it costs nothing an
+    // entry was not already waiting for, and it is what keeps one import per path.
+    stop();
+    try {
+      await handle.late;
+    } catch {}
+    for (const path of late) {
+      if (handle.loaded[path]) continue;
+      stop();
+      const mod = await importPath(path);
+      handle.loaded[path] = mod;
+      handle.attach(path, mod);
+      newlyLoaded.push(path);
+    }
+  }
+
+  return newlyLoaded;
+}
