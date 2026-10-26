@@ -1,6 +1,6 @@
 import { isEditMode } from "./is-edit-mode.js";
-import { rowOf } from "./conflict-presentation.js";
-import { downloadRecovery, downloadHtml, documentName } from "./conflict-download.js";
+import { rowOf, plain } from "./conflict-presentation.js";
+import { downloadRecovery, downloadStored } from "./conflict-download.js";
 import { pendingConflicts, listConflicts, dismissConflicts } from "../recovery/conflicts.js";
 import { set, make } from "../lib/hostile-css.js";
 import { isSaveConflicted } from "./save.js";
@@ -66,6 +66,8 @@ let keepAttempt = 0;
 let lastAnnounced = null;
 let panelEl = null;
 let recovered = [];
+let recoveredUndo = [];
+let actionFailed = false;
 let copiedId = null;
 let copiedTimer = null;
 
@@ -77,7 +79,14 @@ const ledger = () => window.clay?.conflicts || null;
 // Conflicts a reload took out of memory. Only the store has them now: a root as the
 // bytes a save would have written, and the losing text as plain fields. There is no
 // live node and no path worth replaying, so nothing here points at the page.
-const storedCount = () => recovered.reduce((sum, record) => sum + record.conflicts.length, 0);
+const storedCount = () => recovered.reduce((sum, record) => sum + record.conflicts.length, 0) + recoveredUndo.length;
+// Keep what a refused undo or redo would have written, and what the page kept itself,
+// are on the undo plugin's own channel. The panel asks the plugin, never the recovery
+// module, so a boot with nothing kept downloads no recovery code beyond this notice.
+const undoApi = () => {
+  const api = window.clay?.undo;
+  return api && typeof api.kept === "function" ? api : null;
+};
 const losses = () => ledger()?.list().filter((r) => !r.claimedBy && r.kind !== "apply-incomplete") ?? [];
 const failures = () => ledger()?.list().filter((r) => !r.claimedBy && r.kind === "apply-incomplete") ?? [];
 
@@ -89,7 +98,7 @@ function mode() {
   if (refused) return "refused";
   if (losses().length) return "replaced";
   if (failures().length) return "failed";
-  if (recovered.length) return "recovered";
+  if (recovered.length || recoveredUndo.length) return "recovered";
   return null;
 }
 
@@ -383,6 +392,98 @@ function storedName(entry) {
   return entry.context?.field ? `${base} \u00b7 ${entry.context.field}` : base;
 }
 
+// Why a refused step was not applied, in one phrase per code the engine reports.
+const UNDO_REASONS = {
+  "content-changed": "the page changed there",
+  "structure-changed": "the structure changed there",
+  "target-detached": "that part of the page is gone",
+  "duplicate-id": "another part of the page now has the same id",
+  "protected": "that region keeps its own history",
+  "unsupported": "this kind of step cannot be put back",
+};
+
+const undoReason = (code) => UNDO_REASONS[code] || "the page changed there";
+
+// The text a refused step would have written, and the spot it would have written it
+// into. A text or value step holds both endpoints, so the one for this direction is
+// the one a replay would write; an add or a remove holds the markup of its nodes.
+function writtenBy(steps, direction) {
+  const list = Array.isArray(steps) ? steps : [];
+  for (const step of list) {
+    if (!step || (step.kind !== "text" && step.kind !== "value")) continue;
+    const wrote = direction === "redo" ? step.after : step.before;
+    if (typeof wrote === "string" && wrote) return { text: wrote, id: step.target?.id ?? null };
+  }
+  for (const step of list) {
+    if (!step || (step.kind !== "add" && step.kind !== "remove")) continue;
+    const node = Array.isArray(step.nodes) ? step.nodes.find((item) => typeof item?.html === "string" && item.html) : null;
+    if (node) return { text: plain(node.html).replace(/\s+/g, " ").trim(), id: step.parent?.id ?? null };
+  }
+  for (const step of list) {
+    if (!step) continue;
+    const wrote = direction === "redo" ? step.after : step.before;
+    if (typeof wrote === "string" && wrote) return { text: wrote, id: step.target?.id ?? null };
+  }
+  return { text: "", id: null };
+}
+
+// The page as it reads there today, when the spot an old step names is still on it.
+function liveText(id) {
+  if (id == null || typeof document === "undefined") return "";
+  const escaped = window.CSS?.escape ? window.CSS.escape(String(id)) : String(id).replace(/["\\]/g, "\\$&");
+  let node = null;
+  try {
+    node = document.querySelector(`[data-id="${escaped}"]`);
+  } catch (_) {
+    return "";
+  }
+  if (!node) return "";
+  const field = node.matches?.("input, textarea, select") ? node.value : null;
+  const text = typeof field === "string" ? field : node.textContent ?? "";
+  return text.replace(/\s+/g, " ").trim();
+}
+
+// One kept undo record as a row. A refused step says what was not applied and quotes
+// both sides; a copy the app kept shows its own name and text. Neither points at a
+// live node: an old step's target may be gone, and only its own id survived.
+function undoRow(record) {
+  const payload = record?.payload && typeof record.payload === "object" ? record.payload : {};
+  const key = String(record?.key ?? "");
+  const base = { id: record?.id, revision: record?.revision, record, kind: record?.kind ?? "conflict" };
+  if (key.startsWith("app:")) {
+    return {
+      ...base,
+      name: typeof payload.label === "string" && payload.label ? payload.label : key.slice(4),
+      sentence: "",
+      yours: typeof payload.text === "string" ? payload.text : "",
+      now: "",
+    };
+  }
+  const direction = payload.direction === "redo" ? "redo" : "undo";
+  const contexts = Array.isArray(payload.context) ? payload.context : [];
+  const named = contexts.find((item) => typeof item?.label === "string" && item.label) ?? null;
+  const name = named?.label || (typeof payload.label === "string" && payload.label) || "Edit";
+  const wrote = writtenBy(payload.steps, direction);
+  return {
+    ...base,
+    name,
+    sentence: `The ${direction} of "${name}" was not applied because ${undoReason(payload.code)}.`,
+    yours: wrote.text,
+    now: wrote.id == null ? "" : liveText(wrote.id),
+  };
+}
+
+// The page's own buttons for one kept record, asked of the undo plugin on every draw.
+function undoActionsOf(entry) {
+  const api = undoApi();
+  if (!entry.record || typeof api?.reviewActionsFor !== "function") return [];
+  try {
+    return (api.reviewActionsFor(entry.record) || []).filter((item) => item && typeof item.run === "function" && item.label);
+  } catch (_) {
+    return [];
+  }
+}
+
 // Stored text is already plain: no markup, no live node, nothing to parse.
 const storedSide = (text) => ({ before: "", hit: text, after: "", cutBefore: false, cutAfter: false });
 
@@ -401,6 +502,7 @@ function storedRow(entry) {
     box.append(grid);
   }
   const rowActions = el("div", ["all:initial", "display:flex", "flex-wrap:wrap", "gap:8px", "margin-top:8px"]);
+  undoActionsOf(entry).forEach((item, at) => rowActions.append(action(item.label, `run:${entry.id}:${at}`, { onClick: () => onUndoAction(entry, item) })));
   rowActions.append(action(copiedId === entry.id ? "Copied" : "Copy", `copy:${entry.id}`, { onClick: () => onCopyStored(entry) }));
   rowActions.append(action("Dismiss", `dismiss:${entry.id}`, { onClick: () => onDismissStored(entry) }));
   box.append(rowActions);
@@ -410,13 +512,17 @@ function storedRow(entry) {
 // Review for copies a reload left behind. Every action here reads the stored record;
 // none of them touches the tree, and dismissal is the only thing that removes one.
 function drawRecovered(panel) {
-  panel.append(lede("These copies were replaced before this page loaded. The page never puts them back on its own. Copy or download the ones you want; dismiss one when you no longer need it."));
+  panel.append(lede(recovered.length
+    ? "These copies were replaced before this page loaded. The page never puts them back on its own. Copy or download the ones you want; dismiss one when you no longer need it."
+    : "These copies were kept because an undo could not be put back or the page set them aside. The page never puts them back on its own. Copy or download the ones you want; dismiss one when you no longer need it."));
+  if (actionFailed) panel.append(lede("That action did not run. The copy is still here."));
   const well = bevelWell(["flex:1 1 auto", "margin:0 16px 12px", "min-height:0", "overflow:auto", `background:${TOKENS.sunk}`, `border:1px solid ${TOKENS["line-2"]}`]);
   for (const record of recovered) for (const entry of record.conflicts) well.append(storedRow(entry));
+  for (const entry of recoveredUndo) well.append(storedRow(entry));
   wellEl = well;
   panel.append(well);
   const actions = el("div", ["all:initial", "display:flex", "flex-wrap:wrap", "gap:8px", "padding:0 16px 14px"]);
-  if (recovered.some((record) => record.root)) actions.append(action(downloaded ? "Downloaded" : "Download my copy", "download", { onClick: onDownloadRecovered }));
+  if (recovered.some((record) => record.root) || recoveredUndo.length) actions.append(action(downloaded ? "Downloaded" : "Download my copy", "download", { onClick: onDownloadRecovered }));
   panel.append(actions);
   renderedIds = [];
 }
@@ -619,23 +725,45 @@ function onDownload() {
 // Read what the store holds. Nothing is drawn until a transaction has answered, and
 // a failed read leaves whatever was last shown alone.
 async function refreshRecovered() {
-  if (!pendingConflicts()) {
-    if (recovered.length) {
-      recovered = [];
-      schedule();
+  let listed = null;
+  if (pendingConflicts()) {
+    try {
+      listed = await listConflicts();
+    } catch (_) {
+      listed = null;
     }
-    return;
   }
-  let listed;
-  try {
-    listed = await listConflicts();
-  } catch (_) {
-    return;
+  const api = undoApi();
+  let keptUndo = null;
+  if (api) {
+    try {
+      keptUndo = await api.kept();
+    } catch (_) {
+      keptUndo = null;
+    }
   }
-  if (listed.ok) {
+  let moved = false;
+  if (listed?.ok) {
     recovered = listed.records;
-    schedule();
+    moved = true;
+  } else if (!pendingConflicts() && recovered.length) {
+    recovered = [];
+    moved = true;
   }
+  if (keptUndo?.ok) {
+    const rows = (Array.isArray(keptUndo.records) ? keptUndo.records : [])
+      .filter((record) => record && record.supported !== false)
+      .map(undoRow);
+    const same = rows.length === recoveredUndo.length
+      && rows.every((row, at) => row.id === recoveredUndo[at].id && row.revision === recoveredUndo[at].revision);
+    if (!same) moved = true;
+    recoveredUndo = rows;
+  } else if (keptUndo && recoveredUndo.length) {
+    // The store answered and holds nothing for us now.
+    recoveredUndo = [];
+    moved = true;
+  }
+  if (moved) schedule();
 }
 
 async function copyText(text) {
@@ -661,7 +789,7 @@ async function copyText(text) {
 // Copying is not acknowledging: the copy stays until the person dismisses it, and the
 // notice stays on screen rather than standing a toast in for itself.
 async function onCopyStored(entry) {
-  const text = `${storedName(entry)}\n\nYours:\n${entry.yours}\n\nNow:\n${entry.now}`;
+  const text = entry.record ? entry.yours : `${storedName(entry)}\n\nYours:\n${entry.yours}\n\nNow:\n${entry.now}`;
   const ok = await copyText(text);
   if (!ok) {
     toast("Could not copy. Select the text instead.");
@@ -677,7 +805,12 @@ async function onCopyStored(entry) {
 // losing text in it. Nothing here acknowledges or releases a record.
 function onDownloadRecovered() {
   const record = recovered.find((item) => item.root);
-  const ok = record ? downloadHtml({ html: record.root, name: `${documentName()}-my-copy.html` }) : false;
+  const edits = [];
+  for (const item of recovered) {
+    for (const entry of item.conflicts) edits.push({ id: entry.id, kind: entry.kind, name: storedName(entry), yours: entry.yours, now: entry.now, sentence: entry.sentence });
+  }
+  for (const entry of recoveredUndo) edits.push({ id: entry.id, kind: entry.kind, name: entry.name, yours: entry.yours, now: entry.now, sentence: entry.sentence });
+  const ok = downloadStored({ html: record?.root ?? null, edits });
   downloadFailed = !ok;
   downloaded = ok;
   clearTimeout(downloadedTimer);
@@ -688,12 +821,45 @@ function onDownloadRecovered() {
 async function onDismissStored(entry) {
   let receipt;
   try {
-    receipt = await dismissConflicts([entry.id]);
+    receipt = entry.record
+      ? await undoApi()?.dismissKept(entry.id, { revision: entry.revision })
+      : await dismissConflicts([entry.id]);
+    receipt ||= { ok: false };
   } catch (_) {
     receipt = { ok: false };
   }
   if (!receipt.ok) toast("That copy could not be dismissed.");
   await refreshRecovered();
+  schedule();
+}
+
+// An action the page offers for one kept record: Keep as new, on a later step. It may
+// be async, and it answers whether the copy was dealt with. Only a run that says both
+// ok and dismiss takes the row away, and only at the revision the row was drawn at: a
+// throw or a refusal leaves the copy where it is and says so above the list.
+async function onUndoAction(entry, item) {
+  actionFailed = false;
+  let result = null;
+  try {
+    result = await item.run(entry.record);
+  } catch (_) {
+    result = null;
+  }
+  if (result?.ok === true && result?.dismiss === true) {
+    await onDismissStored(entry);
+    return;
+  }
+  actionFailed = true;
+  await refreshRecovered();
+  schedule();
+}
+
+// A refusal this tab just kept is reviewable the moment the store has it: the same
+// bar and Review a stored conflict gets, so no new chrome and no new entry point.
+function onUndoKept(e) {
+  if (e?.detail?.ok !== true) return;
+  actionFailed = false;
+  refreshRecovered();
   schedule();
 }
 
@@ -890,6 +1056,7 @@ function init() {
   document.addEventListener("input", onInput, { capture: true, signal });
   document.addEventListener("focus", onFocus, { capture: true, signal });
   document.addEventListener("clay:conflict-store-changed", onStoreChanged, { signal });
+  document.addEventListener("clay:undo-kept", onUndoKept, { signal });
   if (ledger()?.size) schedule();
   refreshRecovered();
 }
@@ -902,6 +1069,7 @@ const HANDLERS = {
   "clay:sync-conflicts-changed": onLedgerChanged,
   "clay:save-conflict": onSaveConflict,
   "clay:document-upgraded": onUpgraded,
+  "clay:undo-kept": onUndoKept,
 };
 
 let started = false;
@@ -964,6 +1132,8 @@ export function stop() {
   armedAt = 0;
   armLost = false;
   recovered = [];
+  recoveredUndo = [];
+  actionFailed = false;
   frameQueued = false;
   checkRefusal = false;
   pendingFocus = null;

@@ -41,6 +41,7 @@ function arm() {
   document.addEventListener("clay:sync-conflicts-changed", onLedgerChanged, { signal });
   document.addEventListener("clay:save-conflict", onSaveConflict, { signal });
   document.addEventListener("clay:document-upgraded", onUpgraded, { signal });
+  document.addEventListener("clay:undo-kept", onUndoKept, { signal });
 }
 
 function disarm() {
@@ -63,14 +64,27 @@ function onUpgraded(e) {
   load(e);
 }
 
+// A refused step this tab kept is offered the way a replaced edit is: the bar with
+// Review, and the panel behind it lists the copy. A keep the store refused stays in
+// memory, so the notice is not raised for it.
+function onUndoKept(e) {
+  if (e?.detail?.ok !== true) return;
+  load(e);
+}
+
 // A conflict this tab held before a reload lives in the recovery store, not in the
 // ledger. That store keeps one small count key for exactly this question: it is read
 // here, and the module behind it is fetched only when the count says something is
-// stored, so a boot with nothing stored downloads no recovery code.
+// stored, so a boot with nothing stored downloads no recovery code. A kept undo step
+// keeps its own count the same way, and the notice it asks for reads both.
 const HINT_KEY = "conflicts";
+const UNDO_HINT_KEY = "undo";
+
+const hinted = (name) => storage.local.get(name)?.count > 0;
 
 function keptFromEarlier() {
-  if (!(storage.local.get(HINT_KEY)?.count > 0)) return;
+  if (hinted(UNDO_HINT_KEY)) load(null);
+  if (!hinted(HINT_KEY)) return;
   import("../recovery/conflicts.js").then(
     (module) => {
       if (!loading && module.pendingConflicts() > 0) load(null);

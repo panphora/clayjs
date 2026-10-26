@@ -16,12 +16,35 @@
  */
 
 import { representedEtag } from '../core/etag.js';
+import { storage } from '../lib/doc-storage.js';
 import { plainCopy, storedContext } from './conflicts.js';
 
 export const UNDO_CHANNEL = 'clay.undo';
 export const UNDO_VERSION = 1;
 export const UNDO_KIND = 'conflict';
 export const UNDO_TEXT = 'text';
+
+// The same cheap read the conflicts channel keeps for the notice's shell: one small
+// count in this document's own storage, so the next edit session learns that copies
+// are waiting without opening the database. It is written here, on stage and on
+// dismissal, and never read from the reader path, which loads neither module.
+const HINT_KEY = 'undo';
+
+/**
+ * How many copies this document's store is holding for review, without opening the
+ * database. Zero means a boot has nothing to show.
+ *
+ * @returns {number}
+ */
+export function pendingUndo() {
+  const stored = storage.local.get(HINT_KEY);
+  return Number.isFinite(stored?.count) && stored.count > 0 ? stored.count : 0;
+}
+
+function noteHint(count) {
+  if (count > 0) storage.local.set(HINT_KEY, { count, at: Date.now() });
+  else storage.local.remove(HINT_KEY);
+}
 
 function recoveryService() {
   const clay = globalThis.window?.clay ?? globalThis.clay;
@@ -157,7 +180,10 @@ export async function keepRefusal(engine, receipt) {
     return { ok: false, code: 'error' };
   }
   const written = await ch.flush();
-  if (written?.ok) await supersede(ch, key, staged.id);
+  if (written?.ok) {
+    await supersede(ch, key, staged.id);
+    await kept();
+  }
   return written?.ok ? written : { ok: false, code: written?.code || 'error' };
 }
 
@@ -181,7 +207,9 @@ export async function keep({ key, label = null, context = null, payload = null }
     console.error('clayjs: the app\'s recovery copy could not be kept; it is still in this tab only', err);
     return { ok: false, code: 'error' };
   }
-  return ch.flush();
+  const written = await ch.flush();
+  if (written?.ok) await kept();
+  return written;
 }
 
 /**
@@ -190,10 +218,12 @@ export async function keep({ key, label = null, context = null, payload = null }
  *
  * @returns {Promise<{ok: boolean, code?: string, records: Object[], status?: Object}>}
  */
-export function kept() {
+export async function kept() {
   const ch = channel();
-  if (!ch) return Promise.resolve({ ok: true, records: [] });
-  return ch.list();
+  if (!ch) return { ok: true, records: [] };
+  const listed = await ch.list();
+  if (listed?.ok) noteHint(Array.isArray(listed.records) ? listed.records.length : 0);
+  return listed;
 }
 
 /**
@@ -204,8 +234,14 @@ export function kept() {
  * @param {{revision?: number}} [options]
  * @returns {Promise<{ok: boolean, code?: string}>}
  */
-export function dismissKept(id, { revision } = {}) {
+export async function dismissKept(id, { revision } = {}) {
   const ch = channel();
-  if (!ch) return Promise.resolve({ ok: false, code: 'unavailable' });
-  return ch.dismiss(id, { revision });
+  if (!ch) return { ok: false, code: 'unavailable' };
+  const receipt = await ch.dismiss(id, { revision });
+  if (receipt?.ok) {
+    try {
+      await kept();
+    } catch (_) {}
+  }
+  return receipt;
 }

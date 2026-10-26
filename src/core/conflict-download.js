@@ -89,6 +89,28 @@ export function downloadHtml({ html, name }) {
   }
 }
 
+// The review panel's own copy: the page a reload kept, when there is one, with every
+// stored row it drew listed beside it as JSON. The rows are already plain, so nothing
+// here reads the ledger the tab no longer has.
+export function downloadStored({ html = null, edits = [] } = {}) {
+  try {
+    const page = typeof html === "string" ? html : captureRecoveryPage();
+    const data = {
+      format: "clay-lost-edits",
+      version: 1,
+      savedAt: new Date().toISOString(),
+      page: location.href,
+      refused: false,
+      edits: Array.isArray(edits) ? edits : [],
+      earlierPages: [],
+    };
+    return downloadHtml({ html: embed(page, data), name: `${documentName()}-my-copy-${stamp()}.html` });
+  } catch (err) {
+    console.error("clayjs: could not build the download", err);
+    return false;
+  }
+}
+
 export function downloadRecovery(records, { refused = false } = {}) {
   try {
     const { html, name } = buildRecovery(records, { refused });

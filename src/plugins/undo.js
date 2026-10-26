@@ -149,6 +149,35 @@ undo.keep = withRecovery('keep', { ok: false, code: 'unavailable' })
 undo.kept = withRecovery('kept', { ok: false, code: 'unavailable', records: [] })
 undo.dismissKept = withRecovery('dismissKept', { ok: false, code: 'unavailable' })
 
+// The page's own actions on a kept copy. A provider is asked about every record the
+// review panel draws, and each action it returns becomes a button on that row, so a
+// template offers Keep as new without the panel knowing what a card is. A provider
+// that throws costs its own buttons only, never the row or the copy.
+const reviewProviders = new Set()
+
+undo.reviewActions = (fn) => {
+  if (typeof fn !== 'function') return () => {}
+  reviewProviders.add(fn)
+  return () => { reviewProviders.delete(fn) }
+}
+
+undo.reviewActionsFor = (record) => {
+  const actions = []
+  for (const fn of reviewProviders) {
+    let offered
+    try {
+      offered = fn(record)
+    } catch (error) {
+      console.error('clayjs: a review action could not describe itself; the copy stays reviewable', error)
+      continue
+    }
+    for (const item of Array.isArray(offered) ? offered : []) {
+      if (item && typeof item.run === 'function' && item.label) actions.push(item)
+    }
+  }
+  return actions
+}
+
 // One event for whatever presents the history (Undo and Redo buttons, a refusal banner):
 // after every entry, replay, refusal, dismissal and clear, and when a session starts or
 // ends. `undo` and `redo` are the entries the next press would replay, with `refused`
