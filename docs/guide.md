@@ -1,6 +1,6 @@
 # Building malleable documents with ClayJS
 
-This is the complete reference for building malleable documents with ClayJS: one HTML file that is the whole app, edits itself in place, saves itself back to its host, and merges edits from other tabs, other people and agents. Read it top to bottom once. After that, [The skeleton file](https://clayjs.com/docs/guide/skeleton/), [App architecture](https://clayjs.com/docs/guide/architecture/) and [Checklist and trap index](https://clayjs.com/docs/guide/checklist/) are the parts to return to.
+This is the complete reference for building malleable documents with ClayJS: one HTML file that is the whole app, edits itself in place, saves itself back to its host, and merges edits from other tabs, other people and agents. Read it top to bottom once. After that, [A document, line by line](https://clayjs.com/docs/guide/walkthrough/), [Structuring an app](https://clayjs.com/docs/guide/architecture/) and [Pre-ship checklist](https://clayjs.com/docs/guide/checklist/) are the parts to return to.
 
 It is written for a developer or an LLM building full apps with inline editing and inline controls: kanban boards with card detail, block writers, finance trackers, CRMs, flashcards, trackers. It covers the CMS plugin only in passing ([The CMS, in passing](https://clayjs.com/docs/guide/components/#the-cms-in-passing)), because an app whose product is editing should not route editing through a form sidebar.
 
@@ -17,54 +17,7 @@ Code in this guide assumes the loader URL `https://clayjs.com/v1/`. [Add ClayJS 
 
 ---
 
-## 1. The model
-
-### 1.1 Two forms of one file
-
-A malleable document exists in two forms.
-
-- **The saved file** is the bytes on the host. A visitor downloads exactly these bytes. They must be correct and complete with no JavaScript running: the content, its order, the state of every checkbox, the totals if the reader needs them.
-- **The open page** is the live DOM in one browser tab. It holds the saved content plus everything the tab adds at runtime: editing toolbars, a filter box, an open dialog, selection, computed badges, drag ghosts.
-
-A save turns the open page back into the saved file. ClayJS does this by cloning the whole document, removing everything marked as runtime-only, applying a few transforms, serializing, and posting the full HTML to the host (`POST /_/save`). There is no partial save and no separate data store. **The document is the database.**
-
-### 1.2 Three kinds of DOM
-
-Every element on an open page belongs to one of three kinds. Decide which before you write it.
-
-| Kind | What it is | Where it lives | Saved | Sent to peers | Edited by people |
-|---|---|---|---|---|---|
-| **Record** | The work: card titles, checklist items, amounts, block text, order | Ordinary elements, attributes, text and `persist` control values | yes | yes | yes |
-| **Chrome** | UI for editing: buttons, grips, toolbars, menus, filter boxes, status text | Authored in the file, hidden from viewers with `show-when:editmode="true"`. UI a script fills or changes goes in `clay="editor-ui"` ([Chrome](https://clayjs.com/docs/guide/architecture/#chrome)) | hidden: yes, `editor-ui`: no | hidden: yes, `editor-ui`: no | no |
-| **Derived** | Values computed from the record: counts, progress, totals, outlines, a status pill's colour | sapjs paints (`attr:`, `class:`, `css:`, `text`, `show`, [sap.js: records, views and totals in markup](https://clayjs.com/docs/guide/components/#sap-js-records-views-and-totals-in-markup)), `clay="editor-ui"` (tab only) or `clay="no-dirty"` (saved, remote wins) | paints and `no-dirty`: yes | `no-dirty` only; paints are repainted, never merged | no |
-
-Nearly every bug in a malleable file is one of these three leaking into another: chrome a script changes saved into the file, a derived count merged as if someone typed it, a record edited only in a copy that never reaches the DOM.
-
-### 1.3 The rules
-
-1. **The DOM is the record.** Everything durable is an element, an attribute, text, child order, or the value of a control marked `persist`. Never keep the authoritative copy in a JavaScript object.
-2. **Chrome is authored in the file and hidden from viewers with `show-when:editmode="true"`.** This is the default: it needs no script and is in place before ClayJS loads. Use `clay="editor-ui"` only for UI a script fills or changes while the page is open, or that viewers must not receive ([Chrome](https://clayjs.com/docs/guide/architecture/#chrome)).
-3. **Derived values are recomputed, never stored as edits.** Store the value once, as the record (`bind`), and declare every other place it shows as a sapjs paint: `attr:data-state="item.state"`, `class:done="item.done"`, `text`, `show` ([sap.js: records, views and totals in markup](https://clayjs.com/docs/guide/components/#sap-js-records-views-and-totals-in-markup)). ClayJS loads the sapjs core for any page with a `[sap]` root and treats painted values as derived. Without sapjs, write derived values into `editor-ui` elements, or into `clay="no-dirty"` elements when the saved file must show them. Never copy a record into a second attribute with a script: the copy goes stale in the file, and a merge brings the stale copy back.
-4. **Every repeated item has a unique `data-id` from birth.** Mint a fresh one on every create and every duplicate. Sync pairs elements by it.
-5. **Per-tab state stays out of the record.** Which card is open, the filter, the current view: URL hash, `localStorage` or memory, painted through `ephemeral` attributes ([Ephemeral state: per-tab state on saved elements](https://clayjs.com/docs/guide/record/#ephemeral-state-per-tab-state-on-saved-elements)), a runtime `<style>` or `editor-ui` elements.
-6. **A command writes the record once, in one place,** wrapped in an undo commit. The mutation is what autosave, undo and sync see.
-7. **Adopt the file as it is on load.** Never rewrite the record at boot: it makes the page dirty, it can fall outside the save baseline, and it races peers.
-8. **Reconcile after changes you did not make.** A peer's frame, an agent's disk edit and an undo replay change the DOM under you. Rebuild derived and chrome state on `clay:sync-applied` and on undo and redo.
-
-### 1.4 What the host does
-
-ClayJS runs in the page. A **host** serves the file and accepts saves. The client never decides who may write: it sends the save, and the host accepts or refuses it. Hosts that run ClayJS pages today:
-
-- **HTML Clay**, the desktop app that makes `.htmlclay` files open and save like documents. Single user, local disk.
-- **Hyperclay Local**, the desktop sync client. Local folder, device sync to hyperclay.com.
-- **hyperclay.com**, hosted files with accounts, teams, share links, presence and version history.
-- **Any server** that implements `POST /_/save` (and optionally `/_/meta`, `/_/sync`, `/_/upload`). A plain static server or a file opened from disk can view the file but not save it.
-
-[Hosts, assets and privacy](https://clayjs.com/docs/guide/hosts/) covers what each host adds.
-
----
-
-## 2. The skeleton file
+## A document, line by line
 
 Start every app from [`examples/skeleton.html`](https://clayjs.com/examples/skeleton.html). It is short enough to read in full, and every later section refers back to its parts. It is a reading list: sortable rows, a checkbox and a title per row, an Add button, a summary line and a filter.
 
@@ -188,9 +141,56 @@ The test suite checks this file opens without becoming dirty, saves the record a
 
 ---
 
-## 3. Add ClayJS to a page
+## 1. The model
 
-### 3.1 The loader tag
+### 1.1 Two forms of one file
+
+A malleable document exists in two forms.
+
+- **The saved file** is the bytes on the host. A visitor downloads exactly these bytes. They must be correct and complete with no JavaScript running: the content, its order, the state of every checkbox, the totals if the reader needs them.
+- **The open page** is the live DOM in one browser tab. It holds the saved content plus everything the tab adds at runtime: editing toolbars, a filter box, an open dialog, selection, computed badges, drag ghosts.
+
+A save turns the open page back into the saved file. ClayJS does this by cloning the whole document, removing everything marked as runtime-only, applying a few transforms, serializing, and posting the full HTML to the host (`POST /_/save`). There is no partial save and no separate data store. **The document is the database.**
+
+### 1.2 Three kinds of DOM
+
+Every element on an open page belongs to one of three kinds. Decide which before you write it.
+
+| Kind | What it is | Where it lives | Saved | Sent to peers | Edited by people |
+|---|---|---|---|---|---|
+| **Record** | The work: card titles, checklist items, amounts, block text, order | Ordinary elements, attributes, text and `persist` control values | yes | yes | yes |
+| **Chrome** | UI for editing: buttons, grips, toolbars, menus, filter boxes, status text | Authored in the file, hidden from viewers with `show-when:editmode="true"`. UI a script fills or changes goes in `clay="editor-ui"` ([Chrome](https://clayjs.com/docs/guide/architecture/#chrome)) | hidden: yes, `editor-ui`: no | hidden: yes, `editor-ui`: no | no |
+| **Derived** | Values computed from the record: counts, progress, totals, outlines, a status pill's colour | sapjs paints (`attr:`, `class:`, `css:`, `text`, `show`, [sap.js: records, views and totals in markup](https://clayjs.com/docs/guide/components/#sap-js-records-views-and-totals-in-markup)), `clay="editor-ui"` (tab only) or `clay="no-dirty"` (saved, remote wins) | paints and `no-dirty`: yes | `no-dirty` only; paints are repainted, never merged | no |
+
+Nearly every bug in a malleable file is one of these three leaking into another: chrome a script changes saved into the file, a derived count merged as if someone typed it, a record edited only in a copy that never reaches the DOM.
+
+### 1.3 The rules
+
+1. **The DOM is the record.** Everything durable is an element, an attribute, text, child order, or the value of a control marked `persist`. Never keep the authoritative copy in a JavaScript object.
+2. **Chrome is authored in the file and hidden from viewers with `show-when:editmode="true"`.** This is the default: it needs no script and is in place before ClayJS loads. Use `clay="editor-ui"` only for UI a script fills or changes while the page is open, or that viewers must not receive ([Chrome](https://clayjs.com/docs/guide/architecture/#chrome)).
+3. **Derived values are recomputed, never stored as edits.** Store the value once, as the record (`bind`), and declare every other place it shows as a sapjs paint: `attr:data-state="item.state"`, `class:done="item.done"`, `text`, `show` ([sap.js: records, views and totals in markup](https://clayjs.com/docs/guide/components/#sap-js-records-views-and-totals-in-markup)). ClayJS loads the sapjs core for any page with a `[sap]` root and treats painted values as derived. Without sapjs, write derived values into `editor-ui` elements, or into `clay="no-dirty"` elements when the saved file must show them. Never copy a record into a second attribute with a script: the copy goes stale in the file, and a merge brings the stale copy back.
+4. **Every repeated item has a unique `data-id` from birth.** Mint a fresh one on every create and every duplicate. Sync pairs elements by it.
+5. **Per-tab state stays out of the record.** Which card is open, the filter, the current view: URL hash, `localStorage` or memory, painted through `ephemeral` attributes ([Ephemeral state: per-tab state on saved elements](https://clayjs.com/docs/guide/record/#ephemeral-state-per-tab-state-on-saved-elements)), a runtime `<style>` or `editor-ui` elements.
+6. **A command writes the record once, in one place,** wrapped in an undo commit. The mutation is what autosave, undo and sync see.
+7. **Adopt the file as it is on load.** Never rewrite the record at boot: it makes the page dirty, it can fall outside the save baseline, and it races peers.
+8. **Reconcile after changes you did not make.** A peer's frame, an agent's disk edit and an undo replay change the DOM under you. Rebuild derived and chrome state on `clay:sync-applied` and on undo and redo.
+
+### 1.4 What the host does
+
+ClayJS runs in the page. A **host** serves the file and accepts saves. The client never decides who may write: it sends the save, and the host accepts or refuses it. Hosts that run ClayJS pages today:
+
+- **HTML Clay**, the desktop app that makes `.htmlclay` files open and save like documents. Single user, local disk.
+- **Hyperclay Local**, the desktop sync client. Local folder, device sync to hyperclay.com.
+- **hyperclay.com**, hosted files with accounts, teams, share links, presence and version history.
+- **Any server** that implements `POST /_/save` (and optionally `/_/meta`, `/_/sync`, `/_/upload`). A plain static server or a file opened from disk can view the file but not save it.
+
+[Hosts, assets and privacy](https://clayjs.com/docs/guide/hosts/) covers what each host adds.
+
+---
+
+## 2. Add ClayJS to a page
+
+### 2.1 The loader tag
 
 ```html
 <script src="https://clayjs.com/v1/clay.js?plugins=sync,sortable,undo,indicator&exclude=richclay"></script>
@@ -204,7 +204,7 @@ The test suite checks this file opens without becoming dirty, saves the record a
 
 `plugins=` and `exclude=` are comma lists. Only the first of each parameter counts. Unknown names warn and are ignored.
 
-### 3.2 Plugins
+### 2.2 Plugins
 
 | Plugin | Default | Loads in view mode | Adds |
 |---|---|---|---|
@@ -236,7 +236,7 @@ The test suite checks this file opens without becoming dirty, saves the record a
 
 **A good default for apps:** `?plugins=sync,sortable,undo,indicator`, plus `upload` for images or attachments, plus `exclude=richclay` when there is no rich text.
 
-### 3.3 Satellites
+### 2.3 Satellites
 
 Satellites are separate classic script tags. Each publishes a promise on `clay.loaded`.
 
@@ -258,7 +258,7 @@ Satellites do not wait for `clay.ready` and work without `clay.js` at all, inclu
 
 In Hyperclay Local and HTML Clay a document needs no special loading to work offline: keep the ordinary `https://clayjs.com/v1/` tags and the host serves them from the release it bundles. `clay.standalone.js` stays the option for a file opened with no host at all. [Offline in a local host](https://clayjs.com/docs/guide/hosts/#offline-in-a-local-host) has the route and what a host must do.
 
-### 3.4 `clay.ready`
+### 2.4 `clay.ready`
 
 `clay.ready` is a promise that resolves with `window.clay` once boot is done and every plugin has loaded. `clay:ready` fires on `document` at the same moment. Before it resolves, members like `clay.save` and `clay.undo` do not exist. Start app code with `clay.start(...)`: it waits for `clay.ready` and runs once per page ([Starting the app once](https://clayjs.com/docs/guide/architecture/#starting-the-app-once)).
 
@@ -288,7 +288,7 @@ A failed or cancelled installation never emits `document:input-ready`. Blocked r
 
 You can set configuration before the tag, and the loader merges into it: `window.clay = { saveToast: true }`.
 
-### 3.5 Theming ClayJS's own UI
+### 2.5 Theming ClayJS's own UI
 
 ClayJS draws a few things on your page: dialogs (`clay.ask`, `clay.confirm`, `clay.tell`, `clay.snippet`, `clay.modal`) and the people plugin's name prompt. By default they take your page's font, and on a page with a plain solid background, its background and text colours. Everything else comes from ClayJS's own built-in look.
 
@@ -311,7 +311,7 @@ window.clayTheme = {
 
 Your stylesheet still cannot reach these elements: every declaration is inline and `!important`, so a stray `button { ... }` rule never breaks a prompt. On a phone, dialog buttons stay at least 44px tall whatever the theme asks for.
 
-### 3.6 Plugins that load late
+### 2.6 Plugins that load late
 
 `source`, `sortable` and `menu` load after `clay:ready`, one at a time, in the order the plan resolves them. Nothing on first paint or on the first keystroke waits for them, and a late plugin that fails to load is logged and left absent, like any other.
 
@@ -330,7 +330,7 @@ document.addEventListener("clay:plugin-ready", (event) => {
 
 Do not read `window.Sortable` in a `clay.ready` callback: the plugin may not have arrived. `clay.plugins` tells you it is coming; `clay:plugin-ready` tells you it is here.
 
-### 3.7 Libraries on demand
+### 2.7 Libraries on demand
 
 `clay.assets.load(name)` resolves a library from the same release that served `clay.js`, the first time a page asks for it: no vendor URL in the document, and a copy served by another host, or opened from disk, still finds it. The names are `overtype`, `marked` and `highlight`, plus one grammar per `highlight/<language>` for `bash`, `css`, `javascript`, `json`, `python` and `xml`. `clay.assets.names()` lists them.
 
@@ -345,9 +345,9 @@ hljs.registerLanguage("javascript", javascript);
 
 ---
 
-## 4. Edit mode and view mode
+## 3. Edit mode and view mode
 
-### 4.1 How the mode is decided
+### 3.1 How the mode is decided
 
 `clay.isEditMode` is decided once at load, by the first of these that applies:
 
@@ -364,13 +364,13 @@ Edit mode only asks for the editing UI. On a host that has not authorized this p
 
 `clay.toggleEditMode()` flips `?editmode=` and reloads.
 
-### 4.2 The root attributes
+### 3.2 The root attributes
 
 At load ClayJS sets `editmode="true|false"` and `pageowner="true|false"` on `<html>`, in both modes. In edit mode it also sets `savestatus` (`saving`, `saved`, `error`, `offline`, `conflict`) once the page has settled. **All three are removed from every save,** as are the host's `savetoken` and `documentetag`. The saved file's `<html>` carries none of them.
 
 Consequence: before ClayJS runs, `editmode` is **absent**, not `"false"`. CSS keyed on `html[editmode="false"]` shows edit chrome to visitors until boot. Key on `html:not([editmode="true"])` instead.
 
-### 4.3 Showing and hiding edit controls: clay-options
+### 3.3 Showing and hiding edit controls: clay-options
 
 Load `clay-options.js` and mark edit-only controls with `show-when:editmode="true"`:
 
@@ -400,7 +400,7 @@ The family:
 - For content only viewers should see, use `hide-when:editmode="true"`: it is visible when `editmode` is absent. `show-when:editmode="false"` is hidden until boot and then appears.
 - The attribute you switch views with is ordinary saved content. Setting `view="list"` on a saved element saves it and syncs it to every collaborator. [Per-tab state](https://clayjs.com/docs/guide/architecture/#per-tab-state) covers tab-local views.
 
-### 4.4 Mode attributes: one file for editors and viewers
+### 3.4 Mode attributes: one file for editors and viewers
 
 Four attributes make an element behave differently by mode. A **save transform** writes the inert form into the file, and **edit mode** activates it on load. View mode never loads the code, so a viewer sees exactly what the file holds.
 
@@ -432,7 +432,7 @@ There is no general `editmode:<anything>`; these four are all.
 
 `contenteditable="plaintext-only"` is the right value for titles, labels and cells: no formatting, no pasted markup. Make Enter blur instead of inserting a line break, as in the skeleton's keydown handler. Use `editable` ([richclay: rich text (`editable`)](https://clayjs.com/docs/guide/components/#richclay-rich-text-editable)) only where rich text is the point.
 
-### 4.5 What a viewer gets
+### 3.5 What a viewer gets
 
 In view mode `window.clay` keeps `ready`, `isEditMode`, `isOwner`, `toggleEditMode`, `Mutation`, `region`, `readData`, `writeData` and `hasUnsavedChanges` (always `false`), plus whatever view-mode plugins and satellites add (`clay.conflicts` and `clay.morph` with `sync`, `clay.cms`, `clay.quickcrop`, `clay.toast` and the rest). There is no `save`, `getHTML`, `addDocumentTransform`, `onSnapshot`, `undo`, `RichClay`, `upload`, and no `markDirty` unless `sync` is loaded (it is harmless there).
 
@@ -442,7 +442,7 @@ In view mode `window.clay` keeps `ready`, `isEditMode`, `isOwner`, `toggleEditMo
 - With `sync` loaded a viewer rides the saved lane and receives each accepted save, so a published page updates live ([What sync is](https://clayjs.com/docs/guide/live-sync/#what-sync-is)).
 - A click inside `[trigger-save]` in view mode dispatches `clay:view-save-attempt`, so you can explain why nothing saved.
 
-### 4.6 When an edit is ready to type in
+### 3.6 When an edit is ready to type in
 
 Edit mode is decided at load, but a `page` document is ready later. `clay.page.ready` resolves when its editor is the thing on the page and accepts typing, and `clay.page.status` holds that boot result, `{ phase, reason, installId, at }`. `clay.ready` does not wait for it: `plugins/page.js` exports no `ready`, so `await clay.ready` can resolve while the saved article is still on screen. Late plugins do wait, so a page that ships with them needs nothing extra.
 
@@ -462,7 +462,7 @@ if (boot?.phase !== "ready") document.documentElement.setAttribute("read-only", 
 
 `clay.page.install()` starts a fresh installation with its own id, disposing the last one, which is how a page retries after a failure without a reload.
 
-### 4.7 The page editor on a phone
+### 3.7 The page editor on a phone
 
 At widths up to 560 px the page editor's toolbar keeps four controls: Bold, Italic, Link and More. Each is at least 44 by 44 CSS px, in a 204 px bar with 4 px gaps and 8 px padding, and the selection bubble is hidden so two bars never appear at once.
 
@@ -470,7 +470,7 @@ More holds the rest: Strikethrough, Code, bulleted, numbered and checklist lists
 
 The bar is placed from the visual viewport, not from the layout viewport: its top and its horizontal bounds come from the visible area, so an on-screen keyboard cannot cover it and panning the visual viewport moves it with the page. The safe-area inset is read once per layout frame. A menu stays inside that same viewport, opens above the bar when there is room, and scrolls internally. Desktop layouts are unchanged.
 
-### 4.8 The keyboard route in the page editor
+### 3.8 The keyboard route in the page editor
 
 Escape closes an open menu or the link popover first, and puts focus back on the control that opened it, or the editor.
 
@@ -480,9 +480,9 @@ A table's column resize handle is a focusable vertical separator named for its c
 
 ---
 
-## 5. The record
+## 4. What gets saved
 
-### 5.1 What a save writes
+### 4.1 What a save writes
 
 A save writes the current document with these changes:
 
@@ -501,7 +501,7 @@ Everything else on the page is written as it is. That includes things builders f
 
 Never saved: JavaScript objects, `localStorage`, canvas pixels, scroll position, focus, selection, shadow DOM content (only the host element's light DOM and attributes), iframe content, the live value of a control without `persist`, and password, hidden and file input values even with `persist`.
 
-### 5.2 Regions: the `clay` attribute
+### 4.2 Regions: the `clay` attribute
 
 `clay="token token"` on an element applies to it and all its descendants. The bare attribute form (`<div no-save>`) means the same.
 
@@ -532,7 +532,7 @@ Traps in this table:
 - An `editor-ui` root disappears from the saved file, so it cannot be authored in the file. Create it at runtime from a `<template>`, every load. That includes elements inside the `<template>`: mark the blueprint `editor-ui` and the first save empties the template, so the next load has no chrome to clone. Leave the blueprint unmarked and set `clay="editor-ui"` on each clone as you insert it.
 - Mark a region by setting the attribute on creation, or with `clay.region.addRegionToken(el, "editor-ui")`.
 
-### 5.3 `persist`: form controls
+### 4.3 `persist`: form controls
 
 A control's typed value is a property, not an attribute, and serialization only sees attributes. Without `persist`, a typed value is lost on save: the file keeps the authored `value`. Put `persist` on every `<input>`, `<textarea>` and `<select>` whose value is record.
 
@@ -552,7 +552,7 @@ A control's typed value is a property, not an attribute, and serialization only 
 
 **After undo, redo or a merge, ClayJS puts each control's display back in step with its attributes.** A control the user has touched shows its live property, not its attribute, so a merge and the undo plugin copy `checked`, `value` and `selected` back onto the property (undo does this for `persist` controls outside `no-undo` regions). A merge leaves the focused text field alone; undo, which the user asked for, restores it too.
 
-### 5.4 Where to keep data that is not visible text
+### 4.4 Where to keep data that is not visible text
 
 In order of preference:
 
@@ -574,7 +574,7 @@ In order of preference:
 4. **A live JSON script (`clay="live"`)** for state that changes faster than a save: game boards, scores, cursors ([Live data: `clay="live"`](https://clayjs.com/docs/guide/live-sync/#live-data-clay-live)).
 5. **`<template>` content: never for mutable data.** It is saved, but edits there never trigger autosave.
 
-### 5.5 Identity
+### 4.5 Identity
 
 Live sync and undo pair elements across versions by **`data-id`, then `id`**, used only when the value is unique on its side and the tag names match. Without an id, elements pair by content, which works for distinct text and fails for identical new items.
 
@@ -594,11 +594,11 @@ Live sync and undo pair elements across versions by **`data-id`, then `id`**, us
 - **Make ids without `crypto.randomUUID`** unless the file is only ever served over https or localhost: it is missing in insecure contexts. The examples use `prefix + "-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6)`.
 - Ids are also how commands find records: `` board.querySelector(`.card[data-id="${CSS.escape(id)}"]`) ``. Never find a record by position.
 
-### 5.6 Assets
+### 4.6 Assets
 
 An image's durable form is its `src`. Upload the file and write the returned URL ([upload and quickcrop](https://clayjs.com/docs/guide/components/#upload-and-quickcrop)). Where the host cannot store files, embed a `data:` URL, which works anywhere but makes every save carry the bytes. Keep embedded images small. Every host returns a host path such as `/_/uploads/assets-<name>/photo-ab12.png`, which keeps working on that host when the document is renamed or moved. A document opened straight from disk shows those images broken; Export as zip takes a document with its files.
 
-### 5.7 Ephemeral state: per-tab state on saved elements
+### 4.7 Ephemeral state: per-tab state on saved elements
 
 A selected card, a row being dragged, an open section: state that belongs to this tab but sits on a saved element. A class or attribute toggled for it is an edit like any other: it marks the page unsaved, starts an autosave, adds an undo step, reaches every peer and lands in the file. Mark it ephemeral instead:
 
@@ -622,13 +622,13 @@ Use `ephemeral` for state on one element. State that comes from the URL hash and
 
 ---
 
-## 6. Saving
+## 5. Saving
 
-### 6.1 Edit mode and the save path
+### 5.1 Edit mode and the save path
 
 In edit mode ClayJS saves the whole document to `POST /_/save` on the page's origin (or `/_/save/<savetoken>` on HTML Clay). Cmd+S (Ctrl+S elsewhere) and a click inside any `[trigger-save]` element call `clay.save()` on every edit-mode page, with or without autosave. A close warning appears whenever there are unsaved changes.
 
-#### 6.1.1 The saved title
+#### 5.1.1 The saved title
 
 A page's `<title>` is part of the saved file, and it is derived rather than authored. The save projection reads the captured model and takes the first top-level H1, with whitespace runs collapsed and trimmed; a page with no top-level H1 is `Untitled`. The server checkpoint renderer uses the same function on the same model, so a checkpoint written by a room does not describe different content from the file the client would have saved.
 
@@ -636,7 +636,7 @@ A page's `<title>` is part of the saved file, and it is derived rather than auth
 
 The file's name is not derived from anything. ClayJS never renames a document, and a save writes bytes to the route the host already serves, so the file name, the downloaded name and the path in a local folder are exactly what they were. Title changes are content changes; renaming a file is a host or a person's decision.
 
-### 6.2 Autosave
+### 5.2 Autosave
 
 `<html autosave>` present at load turns on autosave. Adding or removing it later changes nothing.
 
@@ -656,7 +656,7 @@ The file's name is not derived from anything. ClayJS never renames a document, a
 - Do not seed defaults, migrate a schema, or stamp ids at startup. Author defaults in the file.
 - If an app truly must write at startup, write after `clay:baseline-settled` (or once `<html savestatus>` exists), or follow the write with `await clay.save.force()`.
 
-### 6.3 Manual-save pages and batching
+### 5.3 Manual-save pages and batching
 
 For a long-form writer where each autosave is unwelcome, omit `autosave`. Cmd+S, `[trigger-save]` and the close warning still work. Save when the tab hides:
 
@@ -674,7 +674,7 @@ To batch saves inside an autosaving page, wrap the heavy region in `clay="no-tri
 
 `clay.Mutation.pause()` and `resume()` hide DOM mutations from the mutation hub's listeners (autosave's mutation trigger among them) for the duration, but the next save still writes them. They do not pause input: `input` and `change` events on controls, including synthetic ones, still mark the page dirty and start autosave. Pair them in `try/finally`; an unbalanced pause silences mutation-driven autosave for the rest of the session.
 
-### 6.4 The save API
+### 5.4 The save API
 
 `clay.save()` returns `Promise<{ ok, msg, msgType, code, etag }>` and never rejects. One exception to that shape in 1.8.2: when capturing the page fails (a registered hook threw, [Hooks](https://clayjs.com/docs/guide/saving/#hooks)) the result has no `ok` field at all, only `msgType: "error"`.
 
@@ -697,7 +697,7 @@ To batch saves inside an autosaving page, wrap the heavy region in `clay="no-tri
 - `clay.registerUnsavedState({ id, isPending })` registers work held outside the DOM (a form not yet applied) so the close warning and `flush` respect it. Call the returned `changed()` when it changes and `dispose()` when done.
 - `clay.markDirty()` tells the dirty gate about an edit no mutation shows, for an editor whose surface is `editor-ui` and which writes the record itself.
 
-### 6.5 Conflicts on save (412)
+### 5.5 Conflicts on save (412)
 
 On hosts that announce `conditional` (all three hosts in [What the host does](https://clayjs.com/docs/guide/model/#what-the-host-does)), every save carries `If-Match` with the version the tab last saw. If the file changed elsewhere and live sync has not merged that change yet, the host answers 412 and writes nothing.
 
@@ -707,7 +707,7 @@ On hosts that announce `conditional` (all three hosts in [What the host does](ht
 - The first save after load can go out without `If-Match` on a slow host, because version discovery is not awaited. It is last-write-wins.
 - If you hide the built-in notice, you must still offer overwrite and reload.
 
-### 6.6 Hooks
+### 5.6 Hooks
 
 Hooks shape the saved bytes without touching the live page. They run on a clone.
 
@@ -747,7 +747,7 @@ clay.onSnapshot?.((root) => {
 
 Only strip `draggable="false"` if your own markup never authors it.
 
-### 6.7 Save status
+### 5.7 Save status
 
 Style from the root attribute, with no JavaScript:
 
@@ -789,7 +789,7 @@ Events, all on `document`:
 
 A save writes the document's own bytes, so an HTML file downloaded from a host links its pictures, it does not contain them: an image you uploaded to the host is fetched from that host's URL when the file is opened, and a copy opened somewhere that URL does not resolve shows a broken picture.
 
-### 6.8 Recovery copies
+### 5.8 Recovery copies
 
 `clay.recovery` keeps a local copy of writing the host has not accepted. It is not a save, and ClayJS never renders a page from it: after a reload the page compares the copies with the file it actually loaded and asks before using one. A document is covered only for the channels its adapters register, so a page that registers no channel keeps no local copy at all.
 
@@ -811,9 +811,9 @@ The store lives in IndexedDB (`clay-recovery`), keeps 32 MiB per document scope 
 
 ---
 
-## 7. Live sync and collaboration
+## 6. Live sync and collaboration
 
-### 7.1 What sync is
+### 6.1 What sync is
 
 `?plugins=sync` keeps every open copy of the file converging. It is a **save-gated, whole-document, three-way DOM merge**, not keystroke streaming.
 
@@ -841,7 +841,7 @@ Once a frame is refused, this tab's DOM is a version the host no longer stores, 
 
 Only a page that states its own version can make this judgement, and only a frame that states one can disagree, so a document without the meta behaves exactly as it did before. Holding the saves is edit mode's lane, so a reader with nothing to write downloads none of it for the hold.
 
-### 7.2 What a merge does
+### 6.2 What a merge does
 
 | Situation (this tab A unsaved, incoming B) | Result |
 |---|---|
@@ -883,7 +883,7 @@ A `data-*` attribute that both sides change is normally a conflict: B wins and A
 
 Several names go in one attribute, separated by spaces. `data-id` is never merged this way. An attribute nobody declared still conflicts as before. The Kanban starter template uses both: labels as tokens, the card counter as a maximum.
 
-### 7.3 Regions and JSON under sync
+### 6.3 Regions and JSON under sync
 
 - `editor-ui`, `no-save`, `no-snapshot`: **ignored on every side.** Your copy is never touched, and the incoming copy is never read.
 - `freeze`: **the element merges, its contents never do.** A frozen element pairs, moves, is inserted and removed with its record, and its attributes merge. Your copy's contents are never touched, the incoming contents are never read, and a frozen element new to this tab arrives empty.
@@ -904,13 +904,13 @@ document.addEventListener("clay:sync-applied", () => {
 
 **JSON.** A JSON script without `merge` is one value: two writers changing it means one whole blob goes to the ledger. With `merge="name"` it merges per key: objects per key, arrays of objects by an `id` field, arrays of primitives by value, and lists without an id (grids, boards, repeated values) position by position when both sides kept the same length. `merge-key="taskId"` names another id field for every list, and `merge-key="players:uid, items:sku"` names one per list path (no spaces inside an entry). **A key both sides changed takes the incoming value**, and the lost value goes to the ledger like any other replaced edit: the notice shows a row such as `game → players → alice → x`, with yours and now. Revert cannot put a JSON value back; Download keeps your copy. Use per-entry keys (`notes: { "n-1": ..., "n-2": ... }`) so two people adding entries never touch the same key. For data several people change at once, use a live store ([Live data: `clay="live"`](https://clayjs.com/docs/guide/live-sync/#live-data-clay-live)) instead. When a merge mixes both sides, the text is rewritten in the incoming text's style (one line stays one line, indented stays indented) with `<` written as `\u003c`.
 
-### 7.4 Focus, typing and long-running editors
+### 6.4 Focus, typing and long-running editors
 
 - The focused `<input>` or `<textarea>` keeps its value through a merge. Checkbox, radio and select state are not protected.
 - A caret in contenteditable text follows its characters through the merge.
 - A dirty tab that has no merge base (because the record was rewritten at boot) **holds** incoming frames and fires `clay:sync-held` until it saves. Another reason not to touch the record at boot.
 
-### 7.5 Reconciling in app code
+### 6.5 Reconciling in app code
 
 Draw everything derived from the record inside `clay.effect(fn)`. It runs `fn` on the next microtask, then again after every change the mutation hub observes (local edits, drags, undo and redo) and after every merge, batched to one run per microtask. Changes inside `editor-ui` or `no-watch` regions, ephemeral attributes and live properties with no attribute change do not re-run it. `fn` runs with the hub paused, so its own writes never re-trigger it, start an autosave or enter undo history. It returns a function that stops it.
 
@@ -945,7 +945,7 @@ document.addEventListener("clay:sync-applied", (event) => {
 
 `detail` on `clay:sync-applied`: `{ seq, source: "peer" | "disk", by, report, conflictIds, unresolved }`, plus `etag` and `html` for disk frames. `by` is `{ id, name }` on hyperclay.com peer frames and `null` elsewhere. `report.applied`, `report.conflicts` and `report.localDiverged` describe the merge.
 
-### 7.6 The conflict ledger and notice
+### 6.6 The conflict ledger and notice
 
 Losses (where this tab's work was replaced) enter `clay.conflicts`:
 
@@ -955,11 +955,11 @@ Losses (where this tab's work was replaced) enter `clay.conflicts`:
 
 The built-in notice reads "Another edit replaced N changes" and offers **Revert to mine**, **Accept theirs**, **Download my copy** and a list of the edits. Revert puts the selected losses back as an ordinary local edit, then saves.
 
-### 7.7 Presence
+### 6.7 Presence
 
 hyperclay.com shows a fixed avatar stack (initials in hollow squares, a "+N viewing" count) when two or more people have the file open. **There is no API**: no event, no roster, no cursor or section data. An app cannot build its own "who is here" or "X is editing this card" from it; share that through a never-saved live store instead ([Live data: `clay="live"`](https://clayjs.com/docs/guide/live-sync/#live-data-clay-live)). HTML Clay and Hyperclay Local have no presence.
 
-### 7.8 Agents
+### 6.8 Agents
 
 An agent edits a malleable file the way a person in another tab does.
 
@@ -968,7 +968,7 @@ An agent edits a malleable file the way a person in another tab does.
 - **`ai-edit`** (`?plugins=ai-edit`): select text, press Cmd+J, describe the change. The rewrite is previewed in place; Keep saves it, Revert discards it. Available where the host offers the `ai-edit` helper: HTML Clay, Hyperclay Local, and hyperclay.com (for the owner and team editors on a paid plan, billed to the document's AI credits).
 - **The data API**: a host that announces `data-read`/`data-write` serves `/_/api/<file>`, a JSON read and write face over the file defined by a rules tag ([Import and export](https://clayjs.com/docs/guide/architecture/#import-and-export)). `clay.readData()` and `clay.writeData()` call it from the page; `writeData` is for agents and other processes, and refuses while the page has unsaved edits.
 
-### 7.9 Live data: `clay="live"`
+### 6.9 Live data: `clay="live"`
 
 Everything above moves at save speed: a peer sees your change after your next save. A live store is for state that changes faster than that, such as a game board, a score, a cursor or a timer. It is one JSON script that ClayJS holds as an object in memory. Page code changes it through ops, every tab of the document sees each change at once, and the value is written back into the file at checkpoints.
 
@@ -1054,9 +1054,9 @@ Wins are counters, so they use `add`: `game.add(["wins", winner], 1)`.
 
 ---
 
-## 8. Editing components
+## 7. Editing components
 
-### 8.1 richclay: rich text (`editable`)
+### 7.1 richclay: rich text (`editable`)
 
 `editable` on an element makes it a rich text editor in edit mode (Squire underneath, DOMPurify on paste). It is the default plugin.
 
@@ -1116,7 +1116,7 @@ Traps:
 - **Cloning an active region** copies runtime attributes. Strip them with `clay.RichClay.stripElement(clone)` (as in [Identity](https://clayjs.com/docs/guide/record/#identity)), or clone from a `<template>`.
 - **`editable` is ignored in view mode**; viewers get plain markup.
 
-#### 8.1.1 The page editor's Markdown shortcuts
+#### 7.1.1 The page editor's Markdown shortcuts
 
 `editable` regions and the page editor are different editors, and their Markdown input rules are not the same. The page editor (`plugins/page`) converts these as you type:
 
@@ -1144,7 +1144,7 @@ An opening delimiter needs the start of the line, whitespace or opening punctuat
 
 None of this loads for a reader: the input rules, the menus and the title adapter are editor code, and a Document's view mode fetches none of them.
 
-### 8.2 sortable: drag to reorder
+### 7.2 sortable: drag to reorder
 
 ```html
 <div class="columns" sortable="columns">
@@ -1176,7 +1176,7 @@ Traps:
 - A peer frame arriving mid-drag merges under the drag. Rare at autosave cadence, but possible.
 - Write durable side effects of a move in a `clay:sorted` handler (the kanban logs "Moved to Doing" into the card's activity). If a record attribute must match its container (`data-status`), set it there too.
 
-### 8.3 undo: whole-page undo
+### 7.3 undo: whole-page undo
 
 `?plugins=undo` gives `clay.undo`: Cmd+Z, Cmd+Shift+Z and Cmd+Y over DOM mutations, restoring the same live nodes.
 
@@ -1198,11 +1198,11 @@ Traps:
 - History is per tab, capped at 100, and not saved.
 - Undoing a delete re-inserts the original node even if a peer re-created an equivalent; dedupe by `data-id` on `clay:sync-applied` if that matters.
 
-### 8.4 Plain contenteditable
+### 7.4 Plain contenteditable
 
 For titles, labels, list items and table cells, use `editmode:contenteditable` with `plaintext-only` ([Mode attributes: one file for editors and viewers](https://clayjs.com/docs/guide/edit-mode/#mode-attributes-one-file-for-editors-and-viewers)). No toolbar, no Squire, no formatting, cheap at any count. Handle Enter yourself (blur, or create the next item as the writer's to-do list does).
 
-### 8.5 upload and quickcrop
+### 7.5 upload and quickcrop
 
 `clay.upload(file, { onProgress, signal })` posts a file you supply to the host and never rejects. **It is not a file picker** and inserts nothing. Supply the `File` from an `<input type="file">`, a drop or a paste, and write the URL yourself.
 
@@ -1233,7 +1233,7 @@ async function imageSource(file) {
 
 The file picker for an image block lives in chrome: `<input type="file" accept="image/*" hidden>` inside the `editor-ui` wrapper, clicked by your menu.
 
-### 8.6 clay-ui: toasts and dialogs
+### 7.6 clay-ui: toasts and dialogs
 
 - `clay.toast(message, type)` with `success`, `error`, `warning`, `info`. The message is text, never markup. No handle to dismiss early.
 - `clay.toastPersistent(message, type)` stays until closed.
@@ -1246,7 +1246,7 @@ The file picker for an image block lives in chrome: `<input type="file" accept="
 
 ClayJS's own UI (notice, indicator, dialogs, toasts) is drawn with inline, reset styles, so page CSS cannot restyle it.
 
-### 8.7 clay-events, clay-dom and All
+### 7.7 clay-events, clay-dom and All
 
 Useful pieces, each with a trap:
 
@@ -1262,7 +1262,7 @@ Useful pieces, each with a trap:
 
 Plain delegated `addEventListener` handlers on `document`, as in the examples, avoid every one of these traps and are the default.
 
-### 8.8 Libraries that rewrite content: highlighting, math, diagrams
+### 7.8 Libraries that rewrite content: highlighting, math, diagrams
 
 Prism, highlight.js, KaTeX and Mermaid replace source text with generated markup when they run. In edit mode that goes wrong two ways:
 
@@ -1271,7 +1271,7 @@ Prism, highlight.js, KaTeX and Mermaid replace source text with generated markup
 
 For fixed content, such as code samples in a docs page, mark the block `clay="freeze"`: sync never touches its contents. For content people or agents edit, keep the plain source as the record and render the decorated version into a `clay="editor-ui"` mount, and redraw it on load and on `clay:sync-applied` ([Reconciling in app code](https://clayjs.com/docs/guide/live-sync/#reconciling-in-app-code)).
 
-### 8.9 OverType: a markdown editor
+### 7.9 OverType: a markdown editor
 
 For a notes or journal app where markdown is the format, OverType (`https://cdn.jsdelivr.net/npm/overtype@2.6.1/dist/overtype.min.js`) is a textarea under a styled preview. **The textarea is not the record.** Keep each entry's text in a text element of the record, put the editor in a `clay="freeze"` region outside the saved records, and bind it to the open record with `clay.bindText` (`?plugins=bind-text`):
 
@@ -1302,11 +1302,11 @@ Three reasons the record stays text and the textarea stays outside it. A `<texta
 
 `bindText` returns `{ open, close, flush, current, attach, composing }`. Every `input` is written into the record at once, so a save captures it as that record's text. A change the editor did not make (a peer's merge, a restored draft, a JSON API write) is shown in the textarea with the caret kept. During an IME composition nothing is written or shown, and when it ends both edits apply unless they touch the same stretch of text, where the record keeps the other person's words and `onConflict` gets what was typed. Opening the same `key` after a merge replaced the record's element rebinds without touching the textarea; opening another `key` flushes the open record and shows the new one with the caret at the start. Keep one OverType instance for the life of the tab, normalize OverType's layout state in an `onbeforesave` on the container, and call `binding.attach(textarea)` if a library ever swaps the element. A journal built this way keeps entries as `<article data-id>` records, clones its chrome from a `<template>`, and paints the open entry with a runtime stylesheet.
 
-### 8.10 Attributes from older Hyperclay files
+### 7.10 Attributes from older Hyperclay files
 
 Older Hyperclay files can carry attributes ClayJS ignores: `movable`, `movable-handle`, `prevent-enter`, `autosize`, `ajax-form`, `ajax-button`, `send-message`, `upgrade`. Replace them with a few lines of code (`prevent-enter`: a keydown handler; `autosize`: CSS `field-sizing: content`; `movable`: pointer events writing `data-x`/`data-y`; `send-message`: the `message` plugin, [message: contact forms](https://clayjs.com/docs/guide/components/#message-contact-forms)). Old saved `<html editmode="false">` and hand-written `option-visibility-styles` style tags are dead weight; ClayJS strips the root attributes on the next save.
 
-### 8.11 sap.js: records, views and totals in markup
+### 7.11 sap.js: records, views and totals in markup
 
 `sap.js` (a satellite, also published standalone as `@panphora/sapjs`) is a reactive attribute layer whose only store is the DOM. Every change runs one pass: it reads the app out of the live page, computes `calc:` fields in dependency order, and writes only the paints that changed. It is the way to build the reactive parts of a malleable document app: totals, filtered and sorted views, a form that adds records, an editor for the selected record.
 
@@ -1365,7 +1365,7 @@ Rules for sapjs in a malleable file:
 - **Hide blueprints in your own CSS** (`[item][template] { display: none }`); sapjs's own rule arrives only with the script. Sapjs also adds `[hidden] { display: none !important }` page-wide.
 - A pass is batched: after a write, call `Sap.refresh()` before reading painted output. Expressions compile with `new Function`, so a Content Security Policy without `unsafe-eval` breaks them.
 
-### 8.12 The CMS, in passing
+### 7.12 The CMS, in passing
 
 `?plugins=cms` turns a page into a content-managed page: a JSON rules tag maps field names to selectors, and an "Edit content" button opens a sidebar form (or edits text in place) that writes straight into the DOM.
 
@@ -1383,7 +1383,7 @@ The CMS also edits how a page looks. A rule ending in `@--name` reads and writes
 
 ---
 
-### 8.13 message: contact forms
+### 7.13 message: contact forms
 
 `?plugins=message` sends a visitor's form to the document's owner. On hyperclay.com the owner gets it by email and in their messages.
 
@@ -1402,9 +1402,9 @@ The CMS also edits how a page looks. A rule ending in `@--name` reads and writes
 - Field names are what the owner reads (`**email**: ...`). Do not name a field `formToken` or `formSignals`.
 - A submit handler of your own that calls `preventDefault()` keeps the form to itself; the plugin leaves it alone.
 
-## 9. App architecture
+## 8. Structuring an app
 
-### 9.1 The record container
+### 8.1 The record container
 
 One container in the saved document holds every record, with `data-id` per record and fields as attributes, text or persist controls. Shape it by the primary editing dimension:
 
@@ -1414,7 +1414,7 @@ One container in the saved document holds every record, with `data-id` per recor
 
 Never store a record twice. A JSON mirror of DOM records, or a rendered copy beside a model, drifts the first time a merge or a hand edit touches one of them.
 
-### 9.2 Chrome
+### 8.2 Chrome
 
 Author chrome in the file and hide it from viewers with `show-when:editmode="true"` ([Showing and hiding edit controls: clay-options](https://clayjs.com/docs/guide/edit-mode/#showing-and-hiding-edit-controls-clay-options)). It needs no script, it is in place before ClayJS loads, and viewers never see it. The file carries its markup, which is harmless as long as nothing changes it.
 
@@ -1439,7 +1439,7 @@ Chrome may sit inside the record container (the kanban puts its filter in the bo
 
 Edit-only chrome lives in the same wrapper with `show-when:editmode="true"`, or is not built at all in view mode (`if (clay.isEditMode) …`).
 
-### 9.3 Per-tab state
+### 8.3 Per-tab state
 
 | State | Where | Why |
 |---|---|---|
@@ -1473,7 +1473,7 @@ Never put per-viewer state on `<html>` or any record element without that: it au
 
 `clay.storage` keeps JSON under `clay:doc:<location.pathname>:<key>`, so two documents on one subdomain never share a key. Without it a per-document key is hand-built from the path, and every document's app collides with the next one's. `session` survives a reload and is copied into a duplicated tab, so it cannot keep one tab's state out of the next. When the browser blocks storage, every call still works from memory for the life of the tab and `set` returns `false`: save the value somewhere that outlives the tab if the return is `false`.
 
-### 9.4 Derived values
+### 8.4 Derived values
 
 Pick by whether the saved file must show the value:
 
@@ -1493,7 +1493,7 @@ Recompute inside `clay.effect(render)`, which covers record mutations, merges, u
 
 With sapjs, every derived value here is a paint. sapjs recomputes on record mutations and `clay:sync-applied` by itself, and on hash changes only through `clay-router.js` (`clay:route`); an app with its own hash format keeps a `hashchange` listener that calls `Sap.refresh()`. See [sapjs guide section 6](https://saphtml.com/guide.html).
 
-### 9.5 Detail views: the record is the modal
+### 8.5 Detail views: the record is the modal
 
 Keep a record's detail fields **inside the record element**, hidden on the card face by CSS, and show the record itself as an overlay with the runtime stylesheet from 9.3.
 
@@ -1541,7 +1541,7 @@ When a dialog must aggregate several records, render it into `editor-ui`, write 
 
 With sapjs, the record-as-modal pattern works unchanged over `items=` records, and a plain-field editor can be a `detail=` panel or `<dialog>` instead: see [sapjs guide section 7](https://saphtml.com/guide.html).
 
-### 9.6 Commands
+### 8.6 Commands
 
 A command is a function that changes the record once:
 
@@ -1593,7 +1593,7 @@ clay.toastPersistent("Moved to Trash", "info", {
 - Readers without JavaScript get the raw file, so hide trashed records there too: `<noscript><style>article.entry[data-deleted-at]{display:none}</style></noscript>`.
 - The undo toast stays yours: `clay.toastPersistent(message, type, {actions})` takes the Undo button where clay-ui is loaded, and an app with its own toast keeps it.
 
-### 9.7 Filters and view switching
+### 8.7 Filters and view switching
 
 - **Filter by hiding** records with a runtime stylesheet (skeleton, kanban), or with sapjs through an `each=` view or a frozen stylesheet ([sap.js: records, views and totals in markup](https://clayjs.com/docs/guide/components/#sap-js-records-views-and-totals-in-markup)). The finance example still uses sap `show=` plus snapshot normalization, an older pattern: `show=` writes `hidden` into saved records. Never remove records to filter.
 - **Switch layouts with CSS** over the same records where possible: a list view can be the board with `display: contents` on columns.
@@ -1601,11 +1601,11 @@ clay.toastPersistent("Moved to Trash", "info", {
 
 With sapjs, a projection view is an `each=` attribute, and its rows edit the records they show by themselves: see [sapjs guide section 5](https://saphtml.com/guide.html).
 
-### 9.8 Computed totals
+### 8.8 Computed totals
 
 Plain JavaScript into `editor-ui` ([Derived values](https://clayjs.com/docs/guide/architecture/#derived-values)) for a count or two. Sapjs for anything with arithmetic across rows, categories and formats ([sap.js: records, views and totals in markup](https://clayjs.com/docs/guide/components/#sap-js-records-views-and-totals-in-markup), and the expense tracker in sapjs guide section 9). Store money as integers or as plain numbers in `value` attributes, never as formatted strings.
 
-### 9.9 Import and export
+### 8.9 Import and export
 
 Export reads the record, import writes it, and both buttons live in chrome. The finance tracker's export:
 
@@ -1642,7 +1642,7 @@ Sap.batch("Import CSV", () => {
 
 A rules tag with `data-rules-name="api"` gives agents and the host's data API the same shape your export uses.
 
-### 9.10 Starting the app once
+### 8.10 Starting the app once
 
 A live-sync merge can re-insert an inline script, which runs it again: every listener doubles and every chrome element appears twice. Start the app with `clay.start`. It runs its function once per page, after `clay.ready`, and a repeat call does nothing:
 
@@ -1654,7 +1654,7 @@ clay.start(() => {
 
 A page with more than one app script names each one so they do not share a slot: `clay.start("board", fn)`.
 
-### 9.11 Size
+### 8.11 Size
 
 Every save captures and serializes the whole document, every change check captures it again, and every peer merges the whole document per accepted save. Measured in jsdom and scaled to a browser (estimates):
 
@@ -1667,7 +1667,7 @@ Every save captures and serializes the whole document, every change check captur
 
 Up to about 1,000 records feels instant. From 1,000 to 3,000 there is a visible hitch at each save. Past about 3,000 records or 1.5 MB, autosave stalls typing and peers lag. Hosts cap a save at 5 MB (hyperclay.com), 20 MB (Hyperclay Local) and 50 MB (HTML Clay). Design for archiving: one file per year, a hidden archive section that can move to another file, or one file per project.
 
-### 9.12 Styles a script writes
+### 8.12 Styles a script writes
 
 Use `clay.style` when a script owns CSS that should stay in the saved document. The saved style paints the next load before the script runs. When the script runs, it refreshes that same tag with its current CSS:
 
@@ -1691,9 +1691,105 @@ Use `clay="editor-ui"` instead for CSS that viewers must not receive or that rep
 
 ---
 
-## 10. Recipes
+## 9. Hosts, assets and privacy
 
-### 10.1 Kanban with card detail
+### 9.1 What each host gives
+
+| | HTML Clay | Hyperclay Local | hyperclay.com |
+|---|---|---|---|
+| Who edits | the local user | the local user; teammates through device sync | owner, team editors, edit-link holders |
+| Live sync | tabs on this machine | tabs, plus other devices through the sync engine | every editor and viewer |
+| Outside disk edits reach open tabs | yes (agents, text editors) | yes | no disk except through device sync |
+| Presence | none | none | avatar stack, no API |
+| `by` on frames, editing marker | no | no | yes |
+| Live stores ([Live data: `clay="live"`](https://clayjs.com/docs/guide/live-sync/#live-data-clay-live)) | tabs of one browser at full speed | tabs of one browser at full speed; other devices at save speed | every editor at full speed |
+| Page editor merge state ([Live data: `clay="live"`](https://clayjs.com/docs/guide/live-sync/#live-data-clay-live)) | none in the file: open tabs share it, a fresh open rebuilds it from the article | kept beside the file | kept beside the file |
+| Wire and ai-edit | yes | yes | ai-edit only, for owners and team editors on a paid plan |
+| Data API write | yes | yes | read only |
+| Uploads | 25 MB, in `~/htmlclay/uploads/` | 25 MB, in the root's `uploads/` | 10, 20 or 100 MB by plan, in the account's `uploads/` |
+| Upload access (`document.upload.access`) | `local` | `local` | `document` once the account's uploaded files have been protected, and no field before that |
+| Version history | yes | 60 days, newest 20 | a version per save; a restore does not reach open editors' tabs, so reload after restoring |
+| Max save | 50 MB | 20 MB | 5 MB |
+
+A plain static server or a file opened from disk can show the file in view mode but cannot save it. Use the `demo` plugin for a public demo that saves into each visitor's browser.
+
+On hyperclay.com every tab holds its own sync connection. Over HTTP/1.1 a browser allows six connections per origin, so a seventh tab of the same site can stall.
+
+### 9.2 Getting started on each
+
+- **HTML Clay:** save the file as `name.htmlclay` and open it with HTML Clay 1.9.0 or newer. The extension changes nothing about the content; it is ordinary HTML.
+- **Hyperclay Local:** put the file in the synced folder and open it from the app.
+- **hyperclay.com:** create a site and paste the file, or upload it.
+
+### 9.3 Privacy
+
+The saved file is the data. Everyone who can download it can read everything in it: hidden elements, `data-*` attributes, JSON scripts, CSS-hidden sections and everything the owner typed. `show-when:editmode`, `hidden` and `display: none` are presentation.
+
+- To publish a version without private values, make a copy and remove them, or keep private data in a different file with different access.
+- A file you hand out as a template should ship with sample data, not yours.
+- On hyperclay.com a file uploaded from inside a document is bound to that document, and where the host advertises `document.upload.access` as `document` its bytes follow the document's read permission on every route. A reader without access gets the same 404 as a missing file, and the file is sent `Cache-Control: private, no-store`. Uploads made before that binding existed stay reachable by URL until the account's protection migration has run, and a copy someone already downloaded cannot be taken back.
+- HTML Clay and Hyperclay Local report `local`, which means their own file-serving rules, not a sharing ACL. A file there is as private as the folder on that machine.
+- Password inputs are never persisted; an authored `value` on them is still in the file.
+
+### 9.4 Offline in a local host
+
+Hyperclay Local and HTML Clay each bundle one exact, published ClayJS release, chosen in their `offline-runtime.lock.json`. The whole release ships as its index lists it (`dist/offline-manifest.json` in the npm package: about 550 files, every module, plugin, satellite such as `sap.js` and `clay-router.js`, vendored library, theme sheet and font, plus the exact library builds older Journals load from other CDNs), not only what one document boots with, so a plugin, the merge engine, a drag library or a font that a document uses for the first time offline still loads.
+
+- **The route.** The release is served at `/_/clayjs/<version>/<path>`, so `https://clayjs.com/v1/clay.js` is `/_/clayjs/<version>/clay.js`, with an immutable cache and an `ETag` of the file's sha256. A path the index does not list answers 404 and is never fetched from the network.
+- **Projection on serve.** A served document is rewritten in two places only: the `src` and `href` attributes that are recognized ClayJS runtime URLs (`https://clayjs.com/v1/...`, exact-version URLs of the bundled release, and the few exact library and font URLs the release carries a copy of) become the local address, written with the same spelling the file used for the rest of the URL, and a `<script type="application/json" id="clay-runtime-map">` descriptor records the mapping. Text, code samples, Markdown and every other URL stay byte for byte.
+- **Canonicalization on every write.** Save, data API writes, restore, export and live-sync frames turn those local addresses back into the public `https://clayjs.com/...` URLs and remove the descriptor before anything reaches disk. A saved or downloaded file never contains a `/_/clayjs/` address, so it stays portable to any host. A request with `Clay-Source: 1` receives the canonical bytes unprojected.
+- **Versions.** A rolling `https://clayjs.com/v1/` URL is served from the host's bundled release. A document that pins a release the host does not bundle, or names a runtime file the bundled release lacks, is served with every runtime URL left public: it loads online, is not promised offline, and the response carries a `Clay-Runtime-Unavailable` header that says why. The host never substitutes another release's files into a page.
+- **Older Journals.** Journals made before the release carried their libraries load OverType and highlight.js from other CDNs, and their fonts from Google Fonts. The release maps exactly three of those URLs to copies it ships: `https://cdn.jsdelivr.net/npm/overtype@2.6.1/dist/overtype.min.js` and `https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js` to the same classic builds (the ones that define `window.OverType` and `window.hljs`, with their licenses and pinned hashes in `compat/journal-assets.lock.json`), and the Journal's Google Fonts stylesheet URL to a stylesheet over the bundled IBM Plex files. Each match is the whole URL: another version, a query string, another file or another host stays on the network. So a Journal saved with those URLs edits offline, and a document that names anything else from those CDNs does not.
+- **What stays online.** Pictures and media hosted elsewhere, AI features and collaboration with other people need the network. A picture uploaded into the local folder is a local file and works offline.
+- **Checking a host.** `node scripts/verify-offline-closure.mjs` in the ClayJS repository checks a release's closure, every listed file present with its recorded hash and every module import resolving inside the release, in three modes: `--package-root <dir>` for a built checkout, `--published-root <dir>` for an unpacked release tree and `--base-url <url>` for a running host's `/_/clayjs/<version>/` prefix. With `--base-url`, pass `--index <file>` naming the host's own bundled index; without it the check compares the host against the checkout's index.
+
+Why the whole release and not a boot closure: a sap document loads much of its code late. A Kanban board loaded with `plugins=sortable,people,upload,sync,visitor-drafts,unsent,menu` boots with a few dozen modules, then asks for `derive`, the merge engine, SortableJS on the first drag and the live-sync modules as they are needed, about 116 release paths in all. None of those appear in what the page requests at boot, so a host that served only the boot graph would break on the first drag with the network off. ClayJS's cross-host contract test opens that real board in both local hosts and requests every one of those paths through the host.
+
+---
+
+## 10. What ClayJS does not do
+
+ClayJS gives you one file per document that edits and saves itself. Here is what it does not do, so you can promise what the file can do and pick the right tool.
+
+### 10.1 What changed recently
+
+Two plugins replace the old advice to hand-build a [block writer](https://clayjs.com/docs/guide/recipes/#block-writer) or wait for autosave:
+
+- **The [page editor](https://clayjs.com/docs/plugins/page/)** (`?plugins=page`) is a Notion-like block editor for one `article[data-page]`, backed by Yjs, where typing reaches other people as they type. It includes headings, lists, checklists, toggles, callouts, code, images, files, typed tables, boards, charts from a table, and CSV import.
+- **[Live stores](https://clayjs.com/docs/plugins/live-sync/)** (`clay="live"` and `clay.live()`) move fast-changing state at network speed (25 frames per second) instead of save speed. Use [live data](https://clayjs.com/docs/guide/live-sync/#live-data-clay-live) for games, scores, and shared state.
+
+The old limits apply elsewhere. Ordinary `editable` regions and DOM records have no CRDT and merge at save time. Rich text outside the page editor has no tables, and without `live-data`, the page editor falls back to file saves.
+
+### 10.2 Compared with the tools you know
+
+| What you are comparing to | What ClayJS gives | What is missing | What to build instead |
+|---|---|---|---|
+| **Google Docs** | Keystroke co-editing, tables, code, callouts, and images in the [page editor](https://clayjs.com/docs/plugins/page/); word-level save merge in `editable`; recoverable conflicts; version history; `ai-edit` | Comments, suggestion mode, live cursors, pagination, footnotes, `.docx` export, tables in `editable` rich text | The [page editor](https://clayjs.com/docs/plugins/page/) or a [block writer](https://clayjs.com/docs/guide/recipes/#block-writer); comments as `<aside data-id data-anchor>`; print CSS for PDF |
+| **Google Sheets** | Persisted inputs, sap formulas over named fields, aggregates, formats, CSV, page tables and charts from a table, 10,000-row pages saving in about 400 ms | A1 references, ranges, fill-down, recalculation graph, virtualization, range selection, pivots | A page table and chart, or a [typed table](https://clayjs.com/docs/guide/recipes/#typed-table-a-spreadsheet-you-can-be-honest-about) of a few thousand rows, one file per year |
+| **Google Slides** | Slides as sections, sortable, uploads, view mode as the published deck | Free positioning, guides, masters, presenter view in a second window, transitions, PPTX export | A flow-layout deck with fixed layouts per slide ([slides](https://clayjs.com/docs/guide/recipes/#slides)) |
+| **Trello and Linear** | Page boards where cards have an owner and a due date; sortable columns, inline editing, checklists, attachments, undo, per-card sync | Notifications, reminders, cross-board search, mentions, integrations, boards past a few thousand cards | A page board, or the [kanban with card detail](https://clayjs.com/docs/guide/recipes/#kanban-with-card-detail) with labels, due dates, and a due-soon projection |
+| **Notion** | One document per file in the [page editor](https://clayjs.com/docs/plugins/page/) with real-time co-editing, Markdown shortcuts, derived titles, blocks, tables, CSV import, boards, and charts | A workspace of many pages, databases with relations and rollups, backlinks, sub-pages, workspace search, page permissions | A folder of files, one per page or database, plus an index file; links are `<a href>` |
+| **CRM** | Records, pipeline board, card owners and due dates, notes, CSV, totals, contact forms via `message` | Email logging, reminders, dedupe, per-row permissions | The [CRM follow-up list](https://clayjs.com/docs/guide/recipes/#crm-follow-up-list), computing due rows on open |
+| **Finance apps** | Rows with amounts, budgets, sap totals painted in view mode by `derive`, CSV import of bank exports, charts from a table | Bank sync, learned categorization, multi-currency, scheduled transactions, encryption at rest | A monthly or yearly budget file with CSV import ([finance tracker](https://clayjs.com/docs/guide/recipes/#finance-tracker)) |
+| **Full CMS** | Per-page [CMS](https://clayjs.com/docs/plugins/cms/) sidebar, per-page style group for colors, fonts, and variants, uploads with crop, view mode as the site, JSON data API | Multi-page collections, shared layouts, drafts and scheduled publishing, roles, media library, i18n | A [content site](https://clayjs.com/docs/guide/recipes/#content-site) with one file per page, a shared stylesheet, and the [CMS](https://clayjs.com/docs/plugins/cms/) per page |
+
+### 10.3 Limits that apply to every document
+
+- **No comments.** ClayJS has no comment model (`ai-edit` is an AI prompt, not stored comments). Store comments as `<aside data-id data-anchor>` elements.
+- **No live cursors.** Presence shows who is here in an avatar stack and outlines which block someone is editing. There are no character cursors and no app-facing presence API.
+- **No suggestion mode, pagination, footnotes, or `.docx` and PPTX export.** Edits apply directly without tracked changes, page breaks, footnotes, or Office exporters. Use print CSS for PDF.
+- **Per-file edit access.** There are no per-row permissions. Split data for different audiences into separate files.
+- **No background work in a closed file.** Nothing runs in a closed file, and a live room ends after two minutes with nobody connected. Compute due states on open.
+- **Undo is per tab.** History is capped at 100 steps per tab, is not saved, and never reverts a peer's merged edits.
+
+> [!NOTE]
+> **Privacy: the saved file is the data.** Hiding an element with CSS, `hidden`, or `show-when` is presentation, not access control. See [Privacy](https://clayjs.com/docs/guide/hosts/#privacy).
+
+---
+
+## 11. Recipes
+
+### 11.1 Kanban with card detail
 
 [`examples/kanban.html`](https://clayjs.com/examples/kanban.html). Plugins `sync,sortable,undo,indicator`, satellites `clay-options` and `clay-ui`.
 
@@ -1708,7 +1804,7 @@ Extend with labels (a settings element listing `<li data-label="bug" data-color=
 
 With sapjs, the counts and progress badges become paints, the filters an `each=` view or a frozen stylesheet, and checklists nested `items=` lists with a shared blueprint: sapjs guide section [Chrome](https://clayjs.com/docs/guide/architecture/#chrome) builds a smaller version as a complete, tested app.
 
-### 10.2 Block writer
+### 11.2 Block writer
 
 [`examples/writer.html`](https://clayjs.com/examples/writer.html). Plugins `sync,sortable,undo,upload,indicator`, satellite `clay-ui`.
 
@@ -1732,7 +1828,7 @@ This model gives drag, block menus, non-rich blocks and per-block Squire undo (w
 
 Missing pieces to add on the same model: a table block (`<table>` with `editmode:contenteditable` cells and your own Tab and add-row code), a code block (`<pre><code editmode:contenteditable>` with a copy button in chrome), a toggle (`<details>`, noting `open` saves), anchor ids on headings (assign `id` from text on blur, not on load).
 
-### 10.3 Finance tracker
+### 11.3 Finance tracker
 
 [`examples/finance.html`](https://clayjs.com/examples/finance.html). Plugins `sync,undo,indicator&exclude=richclay`, satellites `clay-options`, `clay-ui`, `sap.js`.
 
@@ -1745,125 +1841,227 @@ Missing pieces to add on the same model: a table block (`<table>` with `editmode
 
 The authored file already shows every computed value, so sap mounts without changing the record and a reader without JavaScript sees correct totals.
 
-### 10.4 CRM follow-up list
+### 11.4 CRM follow-up list
 
 Table-first. `<tr data-id data-stage="lead" data-next="2026-10-14">` rows with `editmode:contenteditable` name and company cells, a persisted `<select>` for stage, a persisted `<input type="date">` for the next contact, and an `editable` notes cell or a hidden notes element shown in the record-as-modal detail. Projections into `editor-ui`: "due today" (rows whose `data-next` is today or earlier) and a pipeline board (columns by stage, each card a link to the row's detail). Totals by stage with sap if deals carry amounts. `mailto:` links for contact. CSV import merges by email or id. Single owner.
 
-### 10.5 Flashcards
+### 11.5 Flashcards
 
 Decks as `<section data-id>` records, cards as `<article data-id data-due data-interval data-ease>` with `editmode:contenteditable` front and back. Study mode is tab-local: the hash holds the deck and the current card, a runtime stylesheet shows one card and hides the back until revealed. Grading writes the new `data-due`, `data-interval` and `data-ease` on the card (an SM-2 style schedule), inside one undo commit. The "due today" count is an `editor-ui` projection.
 
-### 10.6 Typed table (a spreadsheet you can be honest about)
+### 11.6 Typed table (a spreadsheet you can be honest about)
 
 A fixed schema of named columns, rows as `<tr item data-id>` in a sap `items` list, inputs bound and persisted per cell, computed columns with `calc:`, totals with `sum`, filters by hiding, CSV in and out. Tab between cells with a keydown handler on the table. A few hundred to two thousand rows per file.
 
-### 10.7 Slides
+### 11.7 Slides
 
 One `<section class="slide" data-id data-layout="title|bullets|image|quote">` per slide in a 16:9 box, `editable` text, `sortable` to reorder, images through upload. Present mode is tab-local (hash `#present=3`): fullscreen, `scroll-snap`, arrow keys, speaker notes in an `<aside>` hidden while presenting. PDF through `@page { size: 16in 9in }` and the browser's print.
 
-### 10.8 Content site
+### 11.8 Content site
 
 Without the CMS: `editable` regions for copy, upload and quickcrop for images, `sortable` lists for features. With the CMS: a rules tag and `?plugins=cms` ([The CMS, in passing](https://clayjs.com/docs/guide/components/#the-cms-in-passing)).
 
 ---
 
-## 11. What ClayJS does not do
+## 12. Free documents for visitors
 
-ClayJS gives you one file per document that edits and saves itself. Here is what it does not do, so you can promise what the file can do and pick the right tool.
+A **free document** is a published app anyone can use and keep. The visitor gets the same editing UI the owner gets, their work is kept in their own browser, and the download hands them a file with that work in it. Nothing a visitor does reaches the host.
 
-### 11.1 What changed recently
+### 12.1 What a visitor gets
 
-Two plugins replace the old advice to hand-build a [block writer](https://clayjs.com/docs/guide/recipes/#block-writer) or wait for autosave:
+On a page that opts in ([The contract](https://clayjs.com/docs/guide/free-documents/#the-contract)), a visitor who is not the owner is in **draft mode**. Every edit-only module loads, so `editable`, `persist`, undo, sortable and the rest behave as they do for the owner, and the autosave pipeline still runs. The save lane is swapped: instead of sending the document to the host, ClayJS extracts the page's `api` JSON out of the bytes a real save would write and stores `{ "v": 1, "savedAt": "2026-10-15T00:00:00.000Z", "data": { ... } }` under `localStorage["clay:visitor-drafts:<slot>"]`. The next load applies that JSON over the file the host served, so an owner's later fix reaches a returning visitor while the visitor's own work stays. The host is never told: no save, no sync, no upload, and no `/_/meta` discovery. Two tabs on the same page share that record: a save takes what only the other tab changed, and when both changed the same thing, this tab's version is saved and the other tab's record is kept under `clay:visitor-drafts:<slot>:conflict`.
 
-- **The [page editor](https://clayjs.com/docs/plugins/page/)** (`?plugins=page`) is a Notion-like block editor for one `article[data-page]`, backed by Yjs, where typing reaches other people as they type. It includes headings, lists, checklists, toggles, callouts, code, images, files, typed tables, boards, charts from a table, and CSV import.
-- **[Live stores](https://clayjs.com/docs/plugins/live-sync/)** (`clay="live"` and `clay.live()`) move fast-changing state at network speed (25 frames per second) instead of save speed. Use [live data](https://clayjs.com/docs/guide/live-sync/#live-data-clay-live) for games, scores, and shared state.
+The owner is a visitor here too. Signed in, they get the same private draft unless the URL carries `?editmode=true`, which edits the original file and shows every visitor the change. Two things always edit the file itself: a document opened from `file:`, where draft mode never applies, and HTML Clay, which stamps a save token on the response. Hyperclay Local is not one of them. It serves the folder over `http:` and injects no save token, so its owner is in draft mode like anyone else and adds `?editmode=true` to edit the file ([The mode ladder](https://clayjs.com/docs/guide/free-documents/#the-mode-ladder)).
 
-The old limits apply elsewhere. Ordinary `editable` regions and DOM records have no CRDT and merge at save time. Rich text outside the page editor has no tables, and without `live-data`, the page editor falls back to file saves.
+### 12.2 The contract
 
-### 11.2 Compared with the tools you know
+A page that wants draft mode needs all of this. The example in [A complete example](https://clayjs.com/docs/guide/free-documents/#a-complete-example) carries every item, and its test proves the round trip:
 
-| What you are comparing to | What ClayJS gives | What is missing | What to build instead |
-|---|---|---|---|
-| **Google Docs** | Keystroke co-editing, tables, code, callouts, and images in the [page editor](https://clayjs.com/docs/plugins/page/); word-level save merge in `editable`; recoverable conflicts; version history; `ai-edit` | Comments, suggestion mode, live cursors, pagination, footnotes, `.docx` export, tables in `editable` rich text | The [page editor](https://clayjs.com/docs/plugins/page/) or a [block writer](https://clayjs.com/docs/guide/recipes/#block-writer); comments as `<aside data-id data-anchor>`; print CSS for PDF |
-| **Google Sheets** | Persisted inputs, sap formulas over named fields, aggregates, formats, CSV, page tables and charts from a table, 10,000-row pages saving in about 400 ms | A1 references, ranges, fill-down, recalculation graph, virtualization, range selection, pivots | A page table and chart, or a [typed table](https://clayjs.com/docs/guide/recipes/#typed-table-a-spreadsheet-you-can-be-honest-about) of a few thousand rows, one file per year |
-| **Google Slides** | Slides as sections, sortable, uploads, view mode as the published deck | Free positioning, guides, masters, presenter view in a second window, transitions, PPTX export | A flow-layout deck with fixed layouts per slide ([slides](https://clayjs.com/docs/guide/recipes/#slides)) |
-| **Trello and Linear** | Page boards where cards have an owner and a due date; sortable columns, inline editing, checklists, attachments, undo, per-card sync | Notifications, reminders, cross-board search, mentions, integrations, boards past a few thousand cards | A page board, or the [kanban with card detail](https://clayjs.com/docs/guide/recipes/#kanban-with-card-detail) with labels, due dates, and a due-soon projection |
-| **Notion** | One document per file in the [page editor](https://clayjs.com/docs/plugins/page/) with real-time co-editing, Markdown shortcuts, derived titles, blocks, tables, CSV import, boards, and charts | A workspace of many pages, databases with relations and rollups, backlinks, sub-pages, workspace search, page permissions | A folder of files, one per page or database, plus an index file; links are `<a href>` |
-| **CRM** | Records, pipeline board, card owners and due dates, notes, CSV, totals, contact forms via `message` | Email logging, reminders, dedupe, per-row permissions | The [CRM follow-up list](https://clayjs.com/docs/guide/recipes/#crm-follow-up-list), computing due rows on open |
-| **Finance apps** | Rows with amounts, budgets, sap totals painted in view mode by `derive`, CSV import of bank exports, charts from a table | Bank sync, learned categorization, multi-currency, scheduled transactions, encryption at rest | A monthly or yearly budget file with CSV import ([finance tracker](https://clayjs.com/docs/guide/recipes/#finance-tracker)) |
-| **Full CMS** | Per-page [CMS](https://clayjs.com/docs/plugins/cms/) sidebar, per-page style group for colors, fonts, and variants, uploads with crop, view mode as the site, JSON data API | Multi-page collections, shared layouts, drafts and scheduled publishing, roles, media library, i18n | A [content site](https://clayjs.com/docs/guide/recipes/#content-site) with one file per page, a shared stylesheet, and the [CMS](https://clayjs.com/docs/plugins/cms/) per page |
+1. An `api` rules tag naming every saved field, with a `cms-template` seed row for every list the rules describe. Hide the seed in your own CSS (`[cms-template] { display: none !important }`), never with `hidden`, which the CMS reads as data ([The CMS, in passing](https://clayjs.com/docs/guide/components/#the-cms-in-passing)).
+2. `<html visitor-drafts="<site-stem>-v1" autosave>`. The value is the slot: letters, digits, dot, underscore and hyphen, up to 100 characters. It names this app's corner of `localStorage`, so two apps on one origin never mix.
+3. `plugins=visitor-drafts` on the loader tag, plus whatever else the app needs.
+4. `persist` on every control the rules name. A typed value without `persist` is lost at save ([`persist`: form controls](https://clayjs.com/docs/guide/record/#persist-form-controls)), and in draft mode a save is the visitor's own copy.
+5. `data-id` on every record and `data-id=""` on every blueprint. New rows mint their own (`trigger-add` does it, [sap.js: records, views and totals in markup](https://clayjs.com/docs/guide/components/#sap-js-records-views-and-totals-in-markup)).
+6. `<meta name="application-name" content="...">`. The prompt, the intro and the download name the app from it, falling back to the title before the first `:` or `|`.
+7. A feedback link the visitor can use: a `mailto:` address in the page, not in the plugin.
+8. Optional: a `<template visitor-intro>` ([The download prompt and the intro area](https://clayjs.com/docs/guide/free-documents/#the-download-prompt-and-the-intro-area)). No template, no intro; the prompt still shows.
+9. A round trip test in your own repo: write a draft, load the page again with that storage, and check that the values and the computed counts come back.
 
-### 11.3 Limits that apply to every document
+Bump the slot (`-v2`) only when an old draft cannot fit the new rules. A draft that no longer fits is parked, not thrown away ([Restoring and redrawing](https://clayjs.com/docs/guide/free-documents/#restoring-and-redrawing)).
 
-- **No comments.** ClayJS has no comment model (`ai-edit` is an AI prompt, not stored comments). Store comments as `<aside data-id data-anchor>` elements.
-- **No live cursors.** Presence shows who is here in an avatar stack and outlines which block someone is editing. There are no character cursors and no app-facing presence API.
-- **No suggestion mode, pagination, footnotes, or `.docx` and PPTX export.** Edits apply directly without tracked changes, page breaks, footnotes, or Office exporters. Use print CSS for PDF.
-- **Per-file edit access.** There are no per-row permissions. Split data for different audiences into separate files.
-- **No background work in a closed file.** Nothing runs in a closed file, and a live room ends after two minutes with nobody connected. Compute due states on open.
-- **Undo is per tab.** History is capped at 100 steps per tab, is not saved, and never reverts a peer's merged edits.
+### 12.3 The mode ladder
 
-> [!NOTE]
-> **Privacy: the saved file is the data.** Hiding an element with CSS, `hidden`, or `show-when` is presentation, not access control. See [Privacy](https://clayjs.com/docs/guide/hosts/#privacy).
+[How the mode is decided](https://clayjs.com/docs/guide/edit-mode/#how-the-mode-is-decided)'s list decides the mode. Draft mode is a rung in it, between a save token and the owner cookie:
+
+1. `?editmode=true` or `?editmode=false` in the URL. Only the literal `true` means edit.
+2. `<html viewonly>` in the file, or a response carrying only the pre-1.9.0 token `htmlclaytoken`.
+3. `window.clayEditMode`, set by a script before boot.
+4. A `savetoken` attribute the host put on `<html>`.
+5. **Draft mode**, on a page that opted in ([The contract](https://clayjs.com/docs/guide/free-documents/#the-contract)).
+6. The `isAdminOfCurrentResource` cookie (hyperclay.com, Hyperclay Local).
+
+The rung is where a free document lives, so the details matter:
+
+- `?editmode=false` is view mode, and nothing below it changes that.
+- `?editmode=true` edits the original **only with the owner cookie**, and only on a page that draft mode would otherwise claim. A query parameter on its own never grants writes to the host: an anonymous visitor with `?editmode=true` stays in draft mode.
+- The owner cookie alone is not enough either. The signed in owner gets the same draft as everyone else until they open the page with `?editmode=true`, and the owner chip ([The download prompt and the intro area](https://clayjs.com/docs/guide/free-documents/#the-download-prompt-and-the-intro-area)) is their way there.
+- `viewonly`, a stale token, `window.clayEditMode` or a `savetoken` the host stamped on `<html>` all turn draft mode off. The first two leave it in view mode; the last two switch the load to edit mode against the host, which still decides who may write ([How the mode is decided](https://clayjs.com/docs/guide/edit-mode/#how-the-mode-is-decided)). On a `viewonly` document or one with a stale token, `?editmode=true` is not draft mode either: it is the same edit mode as before, saving to a host that refuses the write.
+- Draft mode needs all four of the plugin name in `plugins=`, a valid slot, an `http:` or `https:` page and an `api` rules tag. That tag also has to carry `data-rules-version="1"` and hold JSON that parses; a newer version or unreadable JSON leaves the page out of draft mode with one console warning naming the problem. On `file:` it never applies, which is exactly why the download is a real file.
+- `<html draftmode="true">` says which mode this load is in, beside `editmode` and `pageowner` ([The root attributes](https://clayjs.com/docs/guide/edit-mode/#the-root-attributes)), and is removed from every save.
+
+### 12.4 What runs in draft mode
+
+`clay.isDraftMode` is true, and everything else follows from it:
+
+- **The plugins that talk to the host are dropped**, even when the page names them: `sync`, `live`, `upload`, `quickcrop`, `cms`, `people`, `wire`, `ai-edit`, `demo` and `source`. `clay.upload`, `clay.cms`, `clay.conflicts` and `clay.source` are absent, and code that guards them (`clay.upload?.(...)`) behaves as it does for a viewer. The `[refetch-on-save]` attribute is dropped too, since it would fetch its element from the host again after every save.
+- **The save lane is the browser.** `clay.save()` and autosave both run, `savestatus` moves as usual, and the save answers `msgType: "success"` with `msg: "Saved in this browser"`. A storage failure answers the 507 path with `code: "draft-storage"` and fires `clay:drafts-store-failed`; the next good write clears it.
+- **No request reaches the host.** The download link goes to the host's download page, which holds the email sign-up. The prompt's own stylesheet is a Google Fonts link.
+- **`clay.readData()` and `clay.writeData()` refuse.** Both reject with `code: "DataUnavailableInDraft"`: the saved file belongs to the owner, and this visitor's work is in their browser, so there is nothing for them to read or write there. A page that calls them in draft mode gets that refusal instead of a request ([Import and export](https://clayjs.com/docs/guide/architecture/#import-and-export)).
+- **`clay.visitorDrafts`** is the plugin's whole surface:
+
+| Member | What it is |
+|---|---|
+| `active` | `true` when the plugin found a slot and the rules tag, `false` otherwise |
+| `slot` | the slot from `<html visitor-drafts="...">` |
+| `key` | the `localStorage` key, `clay:visitor-drafts:<slot>` |
+| `hasDraft()` | is there a stored draft for this slot |
+| `restored()` | `{ restored, hadDraft, parked }` for this load, or `null` when the plugin is not active |
+| `saveNow()` | write the page to the slot now; `true` when it landed, `false` when it did not |
+| `reset()` | delete this slot and reload the page; nothing outside draft mode |
+| `onRestore(fn)` | call `fn(detail)` at once when the restore already ran, otherwise on `clay:drafts-restored` |
+| `editOriginal()` | navigate to this page with `?editmode=true` |
+| `backToDraft()` | navigate back with `editmode` removed |
+| `downloadUrl()` | the download link the prompt is using, with `src` |
+| `source` | the `?src=` this slot remembers, or `null` ([The download prompt and the intro area](https://clayjs.com/docs/guide/free-documents/#the-download-prompt-and-the-intro-area)) |
+
+- **Three events** on `document`: `clay:drafts-restored` with `{ restored, hadDraft, parked }`, `clay:drafts-saved` with `{ data }`, and `clay:drafts-store-failed` with `{ error }`.
+
+### 12.5 Restoring and redrawing
+
+The restore runs while ClayJS boots, before `clay.ready` resolves, and applies the stored JSON to the live page with `applyData`. sapjs and any code that waits for `clay.ready` therefore see the restored values, not the authored ones, and sapjs re-derives on the mutations the restore makes, so a count or a total painted in markup is right on the first paint after it. Load `clay.js` before `sap.js` for that: sapjs mounts when `clay.ready` resolves, and a page that mounts it first paints the authored values with no later mutation to correct them ([sap.js: records, views and totals in markup](https://clayjs.com/docs/guide/components/#sap-js-records-views-and-totals-in-markup)).
+
+Code that drew before `clay.ready` has two ways to hear about the restore: listen for `clay:drafts-restored` on `document`, or call `clay.visitorDrafts.onRestore(fn)`, which runs `fn` at once when the restore already happened. Either way the detail is `{ restored, hadDraft, parked }`.
+
+A draft that no longer fits the page is never overwritten. When the stored JSON is not `{ v, data }` (garbage, a bare array, a missing `data`), the raw value is moved to `localStorage["clay:visitor-drafts:<slot>:unreadable:<ISO timestamp>"]`, the slot is cleared, and the page loads as authored with `parked: true` in the detail. When the write is refused only for keys the rules do not know, those keys are dropped and the rest is applied, so adding a field to the rules never costs a visitor their work.
+
+### 12.6 The download prompt and the intro area
+
+Both are runtime chrome: `clay="editor-ui"` and `sap-ignore`, built by the plugin on every load. Neither is in the file, neither is saved or synced, and neither is read by sapjs.
+
+Both remember themselves per slot in `localStorage["clay:visitor-drafts:<slot>:ui"]`, as `{ "v": 1, "prompt": { "shown": ..., "dismissed": ..., "uses": ..., "downloaded": ... }, "intro": { "done": null | "closed" | "scrolled" }, "src": ... }`. Clearing that key shows the intro and the prompt again.
+
+**The intro** is authored per app as a `<template visitor-intro>`. The template holds the author's whole strip: its markup and any `<style>` it needs. The plugin clones it into a section at the very top of the page body, before the app's own content, and adds a quiet close (`x`) in the corner. The intro leaves for good when the visitor closes it or scrolls it past the top of the viewport; the ui memory records `"closed"` or `"scrolled"` as the reason.
+
+```html
+<template visitor-intro>
+  <p>One paragraph on what the app does and who it is for.</p>
+</template>
+```
+
+When there is a release video, add it as the first element of the template, and no `<video>` before then:
+
+```html
+<video src="/_/uploads/assets/kanban/release.mp4" poster="/_/uploads/assets/kanban/release-poster.jpg" controls playsinline preload="metadata"></video>
+```
+
+An element inside the template with `[visitor-intro-start]` scrolls to the app, and one with `[visitor-intro-dismiss]` closes the intro the same way the `x` does. A deep link (a URL with a `#...`) skips the intro so a shared link opens where it points, a draft skips it too, and `?intro=1` forces it.
+
+**The prompt** needs nothing from the app but its name: a small tab at the bottom right ("This app is free to keep") that opens into a card holding the download link and "Don't show again", with a minimize button in its corner. The tab's X and the card's minimize button leave a small "Keep" button with the download icon that reopens the download card. That choice survives reload. It opens itself once after the visitor has touched three fields. "Don't show again" stops those reminders for that slot but keeps the icon, including for previously dismissed notices. A storage failure opens it in its error state, and the next good save clears it. In that error state the download link does not go to the host, whose download page would read the stored copy that just failed to be written: the plugin builds the file from the live page in the browser instead, named after the page file with `.htmlclay` at the end.
+
+**The download link** is `/_/download<path>?as=htmlclay`, with the page's path (`/_/download?as=htmlclay` for `/`) and `&src=<src>` when this slot has one. `clay.visitorDrafts.downloadUrl()` returns it. **`?src=` is first touch**: the first valid value the page sees for this slot is kept and rides into the download link and every signup. Valid values match `/^[a-z0-9][a-z0-9-]{0,39}$/`.
+
+**The owner chip** shows only to the signed in owner, at the bottom left: it says whether this load is their private draft ("Edit the original") or the original ("Back to my draft") and switches with `clay.visitorDrafts.editOriginal()` and `backToDraft()`.
+
+### 12.7 Migrating an app's own storage
+
+**Not supported yet:** the plugin reads no migration hook, so an app that kept its earlier data under its own `localStorage` key has to move those values into the page from its own code, on the first load after the switch.
+
+### 12.8 A complete example
+
+[`examples/free-reading-list.html`](https://clayjs.com/examples/free-reading-list.html). Plugins `visitor-drafts,indicator&exclude=richclay`, satellites `clay-options` and `sap.js`. A reading list: a title, an author and a status select per book, one scalar goal for the year, and sapjs counting the books that are read. It is the shortest file that carries every item of the contract, and `tests/unit/guide-examples/free-document.test.js` runs it end to end: edit a title, add a book, check the slot, then load the file again with that storage and check the books and the counts come back. The record is authored in the saved form, so sapjs logs its harmless W03 warning for each `viewmode:` attribute ([sap.js: records, views and totals in markup](https://clayjs.com/docs/guide/components/#sap-js-records-views-and-totals-in-markup)). The `reading` option of a status select carries no `selected`: it is the first option, which is the default, and the row that is `read` marks it.
+
+```html
+<!DOCTYPE html>
+<html lang="en" visitor-drafts="reading-list-v1" autosave>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="application-name" content="Reading list">
+<title>Reading list</title>
+<script type="application/json" data-rules-name="api" data-rules-version="1">
+{
+  "goal": "#goal@value",
+  "books": ["#books > li[item]:not([cms-template])", {
+    "id": "@data-id",
+    "title": ".title",
+    "author": ".author",
+    "status": "select@value"
+  }]
+}
+</script>
+<style>
+  html:not([editmode="true"]) [show-when\:editmode="true"] { display: none }
+  [cms-template] { display: none !important }
+  :root { color-scheme: light dark; --bg: #f3f0e8; --ink: #26241f; --muted: #706b61; --line: #dbd5c8; --accent: #3d6f72 }
+  @media (prefers-color-scheme: dark) { :root { --bg: #1c1e21; --ink: #e9e5dd; --muted: #a39e94; --line: #3b4046; --accent: #82b6b8 } }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.5 system-ui, sans-serif }
+  main { max-width: 640px; margin: 0 auto; padding: 32px 20px 64px }
+  h1 { margin: 0 0 8px; font-size: 26px }
+  .count { color: var(--muted) }
+  .count output { font-variant-numeric: tabular-nums; color: var(--ink) }
+  #books { list-style: none; padding: 0; margin: 20px 0 8px }
+  #books > li { display: flex; gap: 8px; align-items: baseline; padding: 6px 0; border-bottom: 1px solid var(--line) }
+  #books .title { flex: 1 1 auto; font-weight: 500 }
+  #books .author { color: var(--muted); font-size: 14px }
+  button { font: inherit; color: inherit; background: none; border: 1px solid var(--line); border-radius: 6px; padding: 2px 10px; cursor: pointer }
+  input[type="number"] { font: inherit; color: inherit; background: transparent; border: 1px solid var(--line); border-radius: 4px; padding: 2px 6px; width: 5em; text-align: right }
+  select { font: inherit; color: inherit; background: transparent; border: 1px solid var(--line); border-radius: 4px; padding: 2px 4px }
+  .feedback { margin-top: 28px; font-size: 14px; color: var(--muted) }
+  [contenteditable]:focus { outline: 2px solid var(--accent); border-radius: 3px }
+</style>
+</head>
+<body>
+<main id="app" sap>
+  <h1 editmode:contenteditable inert-contenteditable="plaintext-only">Reading list</h1>
+
+  <p class="count">Books read: <output clay="no-dirty" calc:read="state.books.filter(b => b.status === 'read').length" text="state.read">1</output> of <output clay="no-dirty" calc:total="state.books.length" text="state.total">2</output></p>
+
+  <p><label for="goal">Books to read this year</label> <input id="goal" type="number" min="0" step="1" bind="goal" persist viewmode:readonly readonly value="24"></p>
+
+  <ul id="books" items="books">
+    <li item cms-template data-id=""><span class="title"></span><span class="author"></span><select bind="status" persist><option>reading</option><option>read</option></select></li>
+    <li item data-id="b-mmm"><span class="title" editmode:contenteditable inert-contenteditable="plaintext-only">The Mythical Man-Month</span> <span class="author" editmode:contenteditable inert-contenteditable="plaintext-only">Fred Brooks</span> <select bind="status" persist viewmode:disabled disabled><option>reading</option><option selected>read</option></select> <button type="button" show-when:editmode="true" trigger-remove aria-label="Remove book">×</button></li>
+    <li item data-id="b-sicp"><span class="title" editmode:contenteditable inert-contenteditable="plaintext-only">Structure and Interpretation of Computer Programs</span> <span class="author" editmode:contenteditable inert-contenteditable="plaintext-only">Abelson and Sussman</span> <select bind="status" persist viewmode:disabled disabled><option>reading</option><option>read</option></select> <button type="button" show-when:editmode="true" trigger-remove aria-label="Remove book">×</button></li>
+  </ul>
+
+  <p><button type="button" show-when:editmode="true" trigger-add="books">+ Add book</button></p>
+
+  <p class="feedback"><a href="mailto:hello@clayjs.com?subject=Reading%20list">Tell me what this app is missing</a></p>
+
+  <template items="books">
+    <li item data-id="">
+      <span class="title" editmode:contenteditable contenteditable="plaintext-only"></span>
+      <span class="author" editmode:contenteditable contenteditable="plaintext-only"></span>
+      <select bind="status" persist><option>reading</option><option>read</option></select>
+      <button type="button" show-when:editmode="true" trigger-remove aria-label="Remove book">×</button>
+    </li>
+  </template>
+</main>
+
+<template visitor-intro>
+  <p>A reading list that lives in your browser. Add books, set the ones you have read, and keep a goal for the year. Nothing leaves this machine unless you download the file.</p>
+</template>
+
+<script src="https://clayjs.com/v1/clay.js?plugins=visitor-drafts,indicator&exclude=richclay"></script>
+<script src="https://clayjs.com/v1/clay-options.js"></script>
+<script src="https://clayjs.com/v1/sap.js"></script>
+</body>
+</html>
+```
 
 ---
 
-## 12. Hosts, assets and privacy
-
-### 12.1 What each host gives
-
-| | HTML Clay | Hyperclay Local | hyperclay.com |
-|---|---|---|---|
-| Who edits | the local user | the local user; teammates through device sync | owner, team editors, edit-link holders |
-| Live sync | tabs on this machine | tabs, plus other devices through the sync engine | every editor and viewer |
-| Outside disk edits reach open tabs | yes (agents, text editors) | yes | no disk except through device sync |
-| Presence | none | none | avatar stack, no API |
-| `by` on frames, editing marker | no | no | yes |
-| Live stores ([Live data: `clay="live"`](https://clayjs.com/docs/guide/live-sync/#live-data-clay-live)) | tabs of one browser at full speed | tabs of one browser at full speed; other devices at save speed | every editor at full speed |
-| Page editor merge state ([Live data: `clay="live"`](https://clayjs.com/docs/guide/live-sync/#live-data-clay-live)) | none in the file: open tabs share it, a fresh open rebuilds it from the article | kept beside the file | kept beside the file |
-| Wire and ai-edit | yes | yes | ai-edit only, for owners and team editors on a paid plan |
-| Data API write | yes | yes | read only |
-| Uploads | 25 MB, in `~/htmlclay/uploads/` | 25 MB, in the root's `uploads/` | 10, 20 or 100 MB by plan, in the account's `uploads/` |
-| Upload access (`document.upload.access`) | `local` | `local` | `document` once the account's uploaded files have been protected, and no field before that |
-| Version history | yes | 60 days, newest 20 | a version per save; a restore does not reach open editors' tabs, so reload after restoring |
-| Max save | 50 MB | 20 MB | 5 MB |
-
-A plain static server or a file opened from disk can show the file in view mode but cannot save it. Use the `demo` plugin for a public demo that saves into each visitor's browser.
-
-On hyperclay.com every tab holds its own sync connection. Over HTTP/1.1 a browser allows six connections per origin, so a seventh tab of the same site can stall.
-
-### 12.2 Getting started on each
-
-- **HTML Clay:** save the file as `name.htmlclay` and open it with HTML Clay 1.9.0 or newer. The extension changes nothing about the content; it is ordinary HTML.
-- **Hyperclay Local:** put the file in the synced folder and open it from the app.
-- **hyperclay.com:** create a site and paste the file, or upload it.
-
-### 12.3 Privacy
-
-The saved file is the data. Everyone who can download it can read everything in it: hidden elements, `data-*` attributes, JSON scripts, CSS-hidden sections and everything the owner typed. `show-when:editmode`, `hidden` and `display: none` are presentation.
-
-- To publish a version without private values, make a copy and remove them, or keep private data in a different file with different access.
-- A file you hand out as a template should ship with sample data, not yours.
-- On hyperclay.com a file uploaded from inside a document is bound to that document, and where the host advertises `document.upload.access` as `document` its bytes follow the document's read permission on every route. A reader without access gets the same 404 as a missing file, and the file is sent `Cache-Control: private, no-store`. Uploads made before that binding existed stay reachable by URL until the account's protection migration has run, and a copy someone already downloaded cannot be taken back.
-- HTML Clay and Hyperclay Local report `local`, which means their own file-serving rules, not a sharing ACL. A file there is as private as the folder on that machine.
-- Password inputs are never persisted; an authored `value` on them is still in the file.
-
-### 12.4 Offline in a local host
-
-Hyperclay Local and HTML Clay each bundle one exact, published ClayJS release, chosen in their `offline-runtime.lock.json`. The whole release ships as its index lists it (`dist/offline-manifest.json` in the npm package: about 550 files, every module, plugin, satellite such as `sap.js` and `clay-router.js`, vendored library, theme sheet and font, plus the exact library builds older Journals load from other CDNs), not only what one document boots with, so a plugin, the merge engine, a drag library or a font that a document uses for the first time offline still loads.
-
-- **The route.** The release is served at `/_/clayjs/<version>/<path>`, so `https://clayjs.com/v1/clay.js` is `/_/clayjs/<version>/clay.js`, with an immutable cache and an `ETag` of the file's sha256. A path the index does not list answers 404 and is never fetched from the network.
-- **Projection on serve.** A served document is rewritten in two places only: the `src` and `href` attributes that are recognized ClayJS runtime URLs (`https://clayjs.com/v1/...`, exact-version URLs of the bundled release, and the few exact library and font URLs the release carries a copy of) become the local address, written with the same spelling the file used for the rest of the URL, and a `<script type="application/json" id="clay-runtime-map">` descriptor records the mapping. Text, code samples, Markdown and every other URL stay byte for byte.
-- **Canonicalization on every write.** Save, data API writes, restore, export and live-sync frames turn those local addresses back into the public `https://clayjs.com/...` URLs and remove the descriptor before anything reaches disk. A saved or downloaded file never contains a `/_/clayjs/` address, so it stays portable to any host. A request with `Clay-Source: 1` receives the canonical bytes unprojected.
-- **Versions.** A rolling `https://clayjs.com/v1/` URL is served from the host's bundled release. A document that pins a release the host does not bundle, or names a runtime file the bundled release lacks, is served with every runtime URL left public: it loads online, is not promised offline, and the response carries a `Clay-Runtime-Unavailable` header that says why. The host never substitutes another release's files into a page.
-- **Older Journals.** Journals made before the release carried their libraries load OverType and highlight.js from other CDNs, and their fonts from Google Fonts. The release maps exactly three of those URLs to copies it ships: `https://cdn.jsdelivr.net/npm/overtype@2.6.1/dist/overtype.min.js` and `https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js` to the same classic builds (the ones that define `window.OverType` and `window.hljs`, with their licenses and pinned hashes in `compat/journal-assets.lock.json`), and the Journal's Google Fonts stylesheet URL to a stylesheet over the bundled IBM Plex files. Each match is the whole URL: another version, a query string, another file or another host stays on the network. So a Journal saved with those URLs edits offline, and a document that names anything else from those CDNs does not.
-- **What stays online.** Pictures and media hosted elsewhere, AI features and collaboration with other people need the network. A picture uploaded into the local folder is a local file and works offline.
-- **Checking a host.** `node scripts/verify-offline-closure.mjs` in the ClayJS repository checks a release's closure, every listed file present with its recorded hash and every module import resolving inside the release, in three modes: `--package-root <dir>` for a built checkout, `--published-root <dir>` for an unpacked release tree and `--base-url <url>` for a running host's `/_/clayjs/<version>/` prefix. With `--base-url`, pass `--index <file>` naming the host's own bundled index; without it the check compares the host against the checkout's index.
-
-Why the whole release and not a boot closure: a sap document loads much of its code late. A Kanban board loaded with `plugins=sortable,people,upload,sync,visitor-drafts,unsent,menu` boots with a few dozen modules, then asks for `derive`, the merge engine, SortableJS on the first drag and the live-sync modules as they are needed, about 116 release paths in all. None of those appear in what the page requests at boot, so a host that served only the boot graph would break on the first drag with the network off. ClayJS's cross-host contract test opens that real board in both local hosts and requests every one of those paths through the host.
-
----
-
-## 13. Checklist and trap index
+## 13. Pre-ship checklist
 
 ### 13.1 Before you ship a file
 
@@ -1969,201 +2167,3 @@ Why the whole release and not a boot closure: a sap document loads much of its c
 | A version restore on hyperclay.com does not reach open editors | [What each host gives](https://clayjs.com/docs/guide/hosts/#what-each-host-gives) |
 | Hidden is not private | [Privacy](https://clayjs.com/docs/guide/hosts/#privacy) |
 | Typed values vanish from a visitor's draft: the control has no `persist` | [The contract](https://clayjs.com/docs/guide/free-documents/#the-contract) |
-
----
-
-## 14. Free documents for visitors
-
-A **free document** is a published app anyone can use and keep. The visitor gets the same editing UI the owner gets, their work is kept in their own browser, and the download hands them a file with that work in it. Nothing a visitor does reaches the host.
-
-### 14.1 What a visitor gets
-
-On a page that opts in ([The contract](https://clayjs.com/docs/guide/free-documents/#the-contract)), a visitor who is not the owner is in **draft mode**. Every edit-only module loads, so `editable`, `persist`, undo, sortable and the rest behave as they do for the owner, and the autosave pipeline still runs. The save lane is swapped: instead of sending the document to the host, ClayJS extracts the page's `api` JSON out of the bytes a real save would write and stores `{ "v": 1, "savedAt": "2026-10-15T00:00:00.000Z", "data": { ... } }` under `localStorage["clay:visitor-drafts:<slot>"]`. The next load applies that JSON over the file the host served, so an owner's later fix reaches a returning visitor while the visitor's own work stays. The host is never told: no save, no sync, no upload, and no `/_/meta` discovery. Two tabs on the same page share that record: a save takes what only the other tab changed, and when both changed the same thing, this tab's version is saved and the other tab's record is kept under `clay:visitor-drafts:<slot>:conflict`.
-
-The owner is a visitor here too. Signed in, they get the same private draft unless the URL carries `?editmode=true`, which edits the original file and shows every visitor the change. Two things always edit the file itself: a document opened from `file:`, where draft mode never applies, and HTML Clay, which stamps a save token on the response. Hyperclay Local is not one of them. It serves the folder over `http:` and injects no save token, so its owner is in draft mode like anyone else and adds `?editmode=true` to edit the file ([The mode ladder](https://clayjs.com/docs/guide/free-documents/#the-mode-ladder)).
-
-### 14.2 The contract
-
-A page that wants draft mode needs all of this. The example in [A complete example](https://clayjs.com/docs/guide/free-documents/#a-complete-example) carries every item, and its test proves the round trip:
-
-1. An `api` rules tag naming every saved field, with a `cms-template` seed row for every list the rules describe. Hide the seed in your own CSS (`[cms-template] { display: none !important }`), never with `hidden`, which the CMS reads as data ([The CMS, in passing](https://clayjs.com/docs/guide/components/#the-cms-in-passing)).
-2. `<html visitor-drafts="<site-stem>-v1" autosave>`. The value is the slot: letters, digits, dot, underscore and hyphen, up to 100 characters. It names this app's corner of `localStorage`, so two apps on one origin never mix.
-3. `plugins=visitor-drafts` on the loader tag, plus whatever else the app needs.
-4. `persist` on every control the rules name. A typed value without `persist` is lost at save ([`persist`: form controls](https://clayjs.com/docs/guide/record/#persist-form-controls)), and in draft mode a save is the visitor's own copy.
-5. `data-id` on every record and `data-id=""` on every blueprint. New rows mint their own (`trigger-add` does it, [sap.js: records, views and totals in markup](https://clayjs.com/docs/guide/components/#sap-js-records-views-and-totals-in-markup)).
-6. `<meta name="application-name" content="...">`. The prompt, the intro and the download name the app from it, falling back to the title before the first `:` or `|`.
-7. A feedback link the visitor can use: a `mailto:` address in the page, not in the plugin.
-8. Optional: a `<template visitor-intro>` ([The download prompt and the intro area](https://clayjs.com/docs/guide/free-documents/#the-download-prompt-and-the-intro-area)). No template, no intro; the prompt still shows.
-9. A round trip test in your own repo: write a draft, load the page again with that storage, and check that the values and the computed counts come back.
-
-Bump the slot (`-v2`) only when an old draft cannot fit the new rules. A draft that no longer fits is parked, not thrown away ([Restoring and redrawing](https://clayjs.com/docs/guide/free-documents/#restoring-and-redrawing)).
-
-### 14.3 The mode ladder
-
-[How the mode is decided](https://clayjs.com/docs/guide/edit-mode/#how-the-mode-is-decided)'s list decides the mode. Draft mode is a rung in it, between a save token and the owner cookie:
-
-1. `?editmode=true` or `?editmode=false` in the URL. Only the literal `true` means edit.
-2. `<html viewonly>` in the file, or a response carrying only the pre-1.9.0 token `htmlclaytoken`.
-3. `window.clayEditMode`, set by a script before boot.
-4. A `savetoken` attribute the host put on `<html>`.
-5. **Draft mode**, on a page that opted in ([The contract](https://clayjs.com/docs/guide/free-documents/#the-contract)).
-6. The `isAdminOfCurrentResource` cookie (hyperclay.com, Hyperclay Local).
-
-The rung is where a free document lives, so the details matter:
-
-- `?editmode=false` is view mode, and nothing below it changes that.
-- `?editmode=true` edits the original **only with the owner cookie**, and only on a page that draft mode would otherwise claim. A query parameter on its own never grants writes to the host: an anonymous visitor with `?editmode=true` stays in draft mode.
-- The owner cookie alone is not enough either. The signed in owner gets the same draft as everyone else until they open the page with `?editmode=true`, and the owner chip ([The download prompt and the intro area](https://clayjs.com/docs/guide/free-documents/#the-download-prompt-and-the-intro-area)) is their way there.
-- `viewonly`, a stale token, `window.clayEditMode` or a `savetoken` the host stamped on `<html>` all turn draft mode off. The first two leave it in view mode; the last two switch the load to edit mode against the host, which still decides who may write ([How the mode is decided](https://clayjs.com/docs/guide/edit-mode/#how-the-mode-is-decided)). On a `viewonly` document or one with a stale token, `?editmode=true` is not draft mode either: it is the same edit mode as before, saving to a host that refuses the write.
-- Draft mode needs all four of the plugin name in `plugins=`, a valid slot, an `http:` or `https:` page and an `api` rules tag. That tag also has to carry `data-rules-version="1"` and hold JSON that parses; a newer version or unreadable JSON leaves the page out of draft mode with one console warning naming the problem. On `file:` it never applies, which is exactly why the download is a real file.
-- `<html draftmode="true">` says which mode this load is in, beside `editmode` and `pageowner` ([The root attributes](https://clayjs.com/docs/guide/edit-mode/#the-root-attributes)), and is removed from every save.
-
-### 14.4 What runs in draft mode
-
-`clay.isDraftMode` is true, and everything else follows from it:
-
-- **The plugins that talk to the host are dropped**, even when the page names them: `sync`, `live`, `upload`, `quickcrop`, `cms`, `people`, `wire`, `ai-edit`, `demo` and `source`. `clay.upload`, `clay.cms`, `clay.conflicts` and `clay.source` are absent, and code that guards them (`clay.upload?.(...)`) behaves as it does for a viewer. The `[refetch-on-save]` attribute is dropped too, since it would fetch its element from the host again after every save.
-- **The save lane is the browser.** `clay.save()` and autosave both run, `savestatus` moves as usual, and the save answers `msgType: "success"` with `msg: "Saved in this browser"`. A storage failure answers the 507 path with `code: "draft-storage"` and fires `clay:drafts-store-failed`; the next good write clears it.
-- **No request reaches the host.** The download link goes to the host's download page, which holds the email sign-up. The prompt's own stylesheet is a Google Fonts link.
-- **`clay.readData()` and `clay.writeData()` refuse.** Both reject with `code: "DataUnavailableInDraft"`: the saved file belongs to the owner, and this visitor's work is in their browser, so there is nothing for them to read or write there. A page that calls them in draft mode gets that refusal instead of a request ([Import and export](https://clayjs.com/docs/guide/architecture/#import-and-export)).
-- **`clay.visitorDrafts`** is the plugin's whole surface:
-
-| Member | What it is |
-|---|---|
-| `active` | `true` when the plugin found a slot and the rules tag, `false` otherwise |
-| `slot` | the slot from `<html visitor-drafts="...">` |
-| `key` | the `localStorage` key, `clay:visitor-drafts:<slot>` |
-| `hasDraft()` | is there a stored draft for this slot |
-| `restored()` | `{ restored, hadDraft, parked }` for this load, or `null` when the plugin is not active |
-| `saveNow()` | write the page to the slot now; `true` when it landed, `false` when it did not |
-| `reset()` | delete this slot and reload the page; nothing outside draft mode |
-| `onRestore(fn)` | call `fn(detail)` at once when the restore already ran, otherwise on `clay:drafts-restored` |
-| `editOriginal()` | navigate to this page with `?editmode=true` |
-| `backToDraft()` | navigate back with `editmode` removed |
-| `downloadUrl()` | the download link the prompt is using, with `src` |
-| `source` | the `?src=` this slot remembers, or `null` ([The download prompt and the intro area](https://clayjs.com/docs/guide/free-documents/#the-download-prompt-and-the-intro-area)) |
-
-- **Three events** on `document`: `clay:drafts-restored` with `{ restored, hadDraft, parked }`, `clay:drafts-saved` with `{ data }`, and `clay:drafts-store-failed` with `{ error }`.
-
-### 14.5 Restoring and redrawing
-
-The restore runs while ClayJS boots, before `clay.ready` resolves, and applies the stored JSON to the live page with `applyData`. sapjs and any code that waits for `clay.ready` therefore see the restored values, not the authored ones, and sapjs re-derives on the mutations the restore makes, so a count or a total painted in markup is right on the first paint after it. Load `clay.js` before `sap.js` for that: sapjs mounts when `clay.ready` resolves, and a page that mounts it first paints the authored values with no later mutation to correct them ([sap.js: records, views and totals in markup](https://clayjs.com/docs/guide/components/#sap-js-records-views-and-totals-in-markup)).
-
-Code that drew before `clay.ready` has two ways to hear about the restore: listen for `clay:drafts-restored` on `document`, or call `clay.visitorDrafts.onRestore(fn)`, which runs `fn` at once when the restore already happened. Either way the detail is `{ restored, hadDraft, parked }`.
-
-A draft that no longer fits the page is never overwritten. When the stored JSON is not `{ v, data }` (garbage, a bare array, a missing `data`), the raw value is moved to `localStorage["clay:visitor-drafts:<slot>:unreadable:<ISO timestamp>"]`, the slot is cleared, and the page loads as authored with `parked: true` in the detail. When the write is refused only for keys the rules do not know, those keys are dropped and the rest is applied, so adding a field to the rules never costs a visitor their work.
-
-### 14.6 The download prompt and the intro area
-
-Both are runtime chrome: `clay="editor-ui"` and `sap-ignore`, built by the plugin on every load. Neither is in the file, neither is saved or synced, and neither is read by sapjs.
-
-Both remember themselves per slot in `localStorage["clay:visitor-drafts:<slot>:ui"]`, as `{ "v": 1, "prompt": { "shown": ..., "dismissed": ..., "uses": ..., "downloaded": ... }, "intro": { "done": null | "closed" | "scrolled" }, "src": ... }`. Clearing that key shows the intro and the prompt again.
-
-**The intro** is authored per app as a `<template visitor-intro>`. The template holds the author's whole strip: its markup and any `<style>` it needs. The plugin clones it into a section at the very top of the page body, before the app's own content, and adds a quiet close (`x`) in the corner. The intro leaves for good when the visitor closes it or scrolls it past the top of the viewport; the ui memory records `"closed"` or `"scrolled"` as the reason.
-
-```html
-<template visitor-intro>
-  <p>One paragraph on what the app does and who it is for.</p>
-</template>
-```
-
-When there is a release video, add it as the first element of the template, and no `<video>` before then:
-
-```html
-<video src="/_/uploads/assets/kanban/release.mp4" poster="/_/uploads/assets/kanban/release-poster.jpg" controls playsinline preload="metadata"></video>
-```
-
-An element inside the template with `[visitor-intro-start]` scrolls to the app, and one with `[visitor-intro-dismiss]` closes the intro the same way the `x` does. A deep link (a URL with a `#...`) skips the intro so a shared link opens where it points, a draft skips it too, and `?intro=1` forces it.
-
-**The prompt** needs nothing from the app but its name: a small tab at the bottom right ("This app is free to keep") that opens into a card holding the download link and "Don't show again", with a minimize button in its corner. The tab's X and the card's minimize button leave a small "Keep" button with the download icon that reopens the download card. That choice survives reload. It opens itself once after the visitor has touched three fields. "Don't show again" stops those reminders for that slot but keeps the icon, including for previously dismissed notices. A storage failure opens it in its error state, and the next good save clears it. In that error state the download link does not go to the host, whose download page would read the stored copy that just failed to be written: the plugin builds the file from the live page in the browser instead, named after the page file with `.htmlclay` at the end.
-
-**The download link** is `/_/download<path>?as=htmlclay`, with the page's path (`/_/download?as=htmlclay` for `/`) and `&src=<src>` when this slot has one. `clay.visitorDrafts.downloadUrl()` returns it. **`?src=` is first touch**: the first valid value the page sees for this slot is kept and rides into the download link and every signup. Valid values match `/^[a-z0-9][a-z0-9-]{0,39}$/`.
-
-**The owner chip** shows only to the signed in owner, at the bottom left: it says whether this load is their private draft ("Edit the original") or the original ("Back to my draft") and switches with `clay.visitorDrafts.editOriginal()` and `backToDraft()`.
-
-### 14.7 Migrating an app's own storage
-
-**Not supported yet:** the plugin reads no migration hook, so an app that kept its earlier data under its own `localStorage` key has to move those values into the page from its own code, on the first load after the switch.
-
-### 14.8 A complete example
-
-[`examples/free-reading-list.html`](https://clayjs.com/examples/free-reading-list.html). Plugins `visitor-drafts,indicator&exclude=richclay`, satellites `clay-options` and `sap.js`. A reading list: a title, an author and a status select per book, one scalar goal for the year, and sapjs counting the books that are read. It is the shortest file that carries every item of the contract, and `tests/unit/guide-examples/free-document.test.js` runs it end to end: edit a title, add a book, check the slot, then load the file again with that storage and check the books and the counts come back. The record is authored in the saved form, so sapjs logs its harmless W03 warning for each `viewmode:` attribute ([sap.js: records, views and totals in markup](https://clayjs.com/docs/guide/components/#sap-js-records-views-and-totals-in-markup)). The `reading` option of a status select carries no `selected`: it is the first option, which is the default, and the row that is `read` marks it.
-
-```html
-<!DOCTYPE html>
-<html lang="en" visitor-drafts="reading-list-v1" autosave>
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="application-name" content="Reading list">
-<title>Reading list</title>
-<script type="application/json" data-rules-name="api" data-rules-version="1">
-{
-  "goal": "#goal@value",
-  "books": ["#books > li[item]:not([cms-template])", {
-    "id": "@data-id",
-    "title": ".title",
-    "author": ".author",
-    "status": "select@value"
-  }]
-}
-</script>
-<style>
-  html:not([editmode="true"]) [show-when\:editmode="true"] { display: none }
-  [cms-template] { display: none !important }
-  :root { color-scheme: light dark; --bg: #f3f0e8; --ink: #26241f; --muted: #706b61; --line: #dbd5c8; --accent: #3d6f72 }
-  @media (prefers-color-scheme: dark) { :root { --bg: #1c1e21; --ink: #e9e5dd; --muted: #a39e94; --line: #3b4046; --accent: #82b6b8 } }
-  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.5 system-ui, sans-serif }
-  main { max-width: 640px; margin: 0 auto; padding: 32px 20px 64px }
-  h1 { margin: 0 0 8px; font-size: 26px }
-  .count { color: var(--muted) }
-  .count output { font-variant-numeric: tabular-nums; color: var(--ink) }
-  #books { list-style: none; padding: 0; margin: 20px 0 8px }
-  #books > li { display: flex; gap: 8px; align-items: baseline; padding: 6px 0; border-bottom: 1px solid var(--line) }
-  #books .title { flex: 1 1 auto; font-weight: 500 }
-  #books .author { color: var(--muted); font-size: 14px }
-  button { font: inherit; color: inherit; background: none; border: 1px solid var(--line); border-radius: 6px; padding: 2px 10px; cursor: pointer }
-  input[type="number"] { font: inherit; color: inherit; background: transparent; border: 1px solid var(--line); border-radius: 4px; padding: 2px 6px; width: 5em; text-align: right }
-  select { font: inherit; color: inherit; background: transparent; border: 1px solid var(--line); border-radius: 4px; padding: 2px 4px }
-  .feedback { margin-top: 28px; font-size: 14px; color: var(--muted) }
-  [contenteditable]:focus { outline: 2px solid var(--accent); border-radius: 3px }
-</style>
-</head>
-<body>
-<main id="app" sap>
-  <h1 editmode:contenteditable inert-contenteditable="plaintext-only">Reading list</h1>
-
-  <p class="count">Books read: <output clay="no-dirty" calc:read="state.books.filter(b => b.status === 'read').length" text="state.read">1</output> of <output clay="no-dirty" calc:total="state.books.length" text="state.total">2</output></p>
-
-  <p><label for="goal">Books to read this year</label> <input id="goal" type="number" min="0" step="1" bind="goal" persist viewmode:readonly readonly value="24"></p>
-
-  <ul id="books" items="books">
-    <li item cms-template data-id=""><span class="title"></span><span class="author"></span><select bind="status" persist><option>reading</option><option>read</option></select></li>
-    <li item data-id="b-mmm"><span class="title" editmode:contenteditable inert-contenteditable="plaintext-only">The Mythical Man-Month</span> <span class="author" editmode:contenteditable inert-contenteditable="plaintext-only">Fred Brooks</span> <select bind="status" persist viewmode:disabled disabled><option>reading</option><option selected>read</option></select> <button type="button" show-when:editmode="true" trigger-remove aria-label="Remove book">×</button></li>
-    <li item data-id="b-sicp"><span class="title" editmode:contenteditable inert-contenteditable="plaintext-only">Structure and Interpretation of Computer Programs</span> <span class="author" editmode:contenteditable inert-contenteditable="plaintext-only">Abelson and Sussman</span> <select bind="status" persist viewmode:disabled disabled><option>reading</option><option>read</option></select> <button type="button" show-when:editmode="true" trigger-remove aria-label="Remove book">×</button></li>
-  </ul>
-
-  <p><button type="button" show-when:editmode="true" trigger-add="books">+ Add book</button></p>
-
-  <p class="feedback"><a href="mailto:hello@clayjs.com?subject=Reading%20list">Tell me what this app is missing</a></p>
-
-  <template items="books">
-    <li item data-id="">
-      <span class="title" editmode:contenteditable contenteditable="plaintext-only"></span>
-      <span class="author" editmode:contenteditable contenteditable="plaintext-only"></span>
-      <select bind="status" persist><option>reading</option><option>read</option></select>
-      <button type="button" show-when:editmode="true" trigger-remove aria-label="Remove book">×</button>
-    </li>
-  </template>
-</main>
-
-<template visitor-intro>
-  <p>A reading list that lives in your browser. Add books, set the ones you have read, and keep a goal for the year. Nothing leaves this machine unless you download the file.</p>
-</template>
-
-<script src="https://clayjs.com/v1/clay.js?plugins=visitor-drafts,indicator&exclude=richclay"></script>
-<script src="https://clayjs.com/v1/clay-options.js"></script>
-<script src="https://clayjs.com/v1/sap.js"></script>
-</body>
-</html>
-```
