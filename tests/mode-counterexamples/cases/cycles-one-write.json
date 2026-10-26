@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "cycles-one-write",
+  "fixture": "persist-host",
+  "boot": { "mode": "view", "live": true, "destination": "host" },
+  "steps": [
+    { "op": "cycles", "count": 1 },
+    { "op": "enter" },
+    { "op": "input", "target": "title", "value": "Written" },
+    { "op": "leave" }
+  ],
+  "requires": ["cycles", "input-admitted", "save-request-sent"],
+  "expect": { "mode": "view", "writes": 1 }
+}

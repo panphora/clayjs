@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "id": "cycles-no-growth",
+  "fixture": "persist-host",
+  "boot": { "mode": "view", "live": true, "destination": "host" },
+  "steps": [{ "op": "cycles", "count": 100 }],
+  "requires": ["transition", "cycles"],
+  "expect": { "mode": "view", "writes": 0 },
+  "control": "cycles-one-write"
+}

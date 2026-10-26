@@ -15,7 +15,6 @@
  * fake channel, the way `tests/unit/live-local-lane.test.js` builds its tabs.
  */
 
-import { jest } from "@jest/globals";
 import * as Y from "../../src/vendor/yjs.vendor.js";
 import { createStore } from "../../src/live/store.js";
 import { createFastLane } from "../../src/live/fast-lane.js";
@@ -30,11 +29,21 @@ const PAGE = {
   path: "/notes.html",
 };
 
+const UNSENT_PAGE = {
+  params: "exclude=richclay,source&plugins=unsent",
+  body:
+    '<article data-id="note"><h1 id="title">Untitled</h1><div id="content">start</div>' +
+    '<input id="draft" unsent="description" value=""></article>',
+  path: "/notes.html",
+};
+
 export const FIXTURES = {
   // A live-declared document that boots in view and saves into the host.
   "persist-host": { page: PAGE, lanes: false },
   // The same page, plus tab B over a shared local channel.
   "lane-peer": { page: PAGE, lanes: true },
+  // The same page with the unsent-draft plugin and a field outside the save domain.
+  "unsent-host": { page: UNSENT_PAGE, lanes: false },
 };
 
 export const META_PATH = "/_/meta";
@@ -96,17 +105,21 @@ export function createHost(record) {
     return result;
   };
 
+  // Every write the host accepts is stamped with a fresh etag, so the stamp a case reads
+  // back is the one that names the bytes this host just stored.
+  let stored = 1;
   const saveAnswer = (result) => {
     if (result === "unknown") {
       record("save-outcome-unknown", {});
       throw abortError("the save answer never arrived");
     }
     if (result === "rejected") {
-      record("save-response", { status: 500 });
+      record("save-response", { status: 500, etag: null });
       return jsonResponse(500, { msg: "the host refused the save" });
     }
-    record("save-response", { status: 200 });
-    return jsonResponse(200, { msg: "Saved", etag: "etag-1" }, { etag: "etag-1" });
+    const etag = `etag-${++stored}`;
+    record("save-response", { status: 200, etag });
+    return jsonResponse(200, { msg: "Saved", etag }, { etag });
   };
 
   const metaAnswer = (result) => {
@@ -114,7 +127,7 @@ export function createHost(record) {
     if (result === "rejected") return jsonResponse(500, { msg: "no discovery" });
     return jsonResponse(200, {
       spec: 1,
-      extensions: [],
+      extensions: ["conditional"],
       document: { writable: true, path: window.location.pathname, etag: "etag-1" },
     });
   };
@@ -128,32 +141,116 @@ export function createHost(record) {
     return "accepted";
   };
 
+  // The account of every request that actually left: what it carried and what came back.
+  // The oracle pairs a response's stamp with the bytes it stored from these, never from
+  // the page's own bookkeeping.
+  const calls = [];
+  const send = (call) => {
+    calls.push(call);
+    return call;
+  };
+
   const fetchFn = async (input, options = {}) => {
     const method = String(options.method || "GET").toUpperCase();
     const url = new URL(String(input), window.location.href);
+    const headers = options.headers ?? {};
     if (method === "POST") {
-      posts.push(String(options.body ?? ""));
+      const body = String(options.body ?? "");
+      posts.push(body);
+      const call = send({
+        kind: "save",
+        method,
+        path: url.pathname,
+        body,
+        ifMatch: headers["If-Match"] ?? null,
+        status: null,
+        etag: null,
+      });
       record("save-request-sent", { path: url.pathname });
-      return saveAnswer(await parkSave());
+      const result = await parkSave();
+      const answer = saveAnswer(result);
+      call.status = answer.status;
+      call.etag = answer.headers.get("etag");
+      return answer;
     }
     if (url.pathname === META_PATH) {
       record("metadata-request", { path: url.pathname });
       if (!held("metadata")) return notFound();
-      return metaAnswer((await wait("metadata")) ?? "accepted");
+      const answer = metaAnswer((await wait("metadata")) ?? "accepted");
+      send({ kind: "metadata", method, path: url.pathname, body: null, ifMatch: null, status: answer.status, etag: null });
+      return answer;
     }
     return notFound();
   };
 
-  return { fetch: fetchFn, posts, hold, release, held, wait };
+  return { fetch: fetchFn, posts, calls, hold, release, held, wait };
+}
+
+/**
+ * The page's own listeners and editors, counted as they stand.
+ *
+ * The handlers are wrapped, not the code: a registration that was removed, or one whose
+ * signal aborted, is not living, and an editor is the editor root the page mounted. A
+ * case reads the counts at cycle boundaries and compares them; nothing here is the
+ * driver's idea of what should be alive.
+ */
+export function createResourceCounter() {
+  const registrations = [];
+  const restorers = [];
+  for (const where of ["document", "window"]) {
+    const owner = where === "document" ? document : window;
+    const add = owner.addEventListener;
+    const remove = owner.removeEventListener;
+    owner.addEventListener = function (type, handler, options) {
+      const registration = { where, type, handler, ended: false };
+      registrations.push(registration);
+      options?.signal?.addEventListener?.("abort", () => {
+        registration.ended = true;
+      });
+      return add.call(this, type, handler, options);
+    };
+    owner.removeEventListener = function (type, handler, options) {
+      for (let index = registrations.length - 1; index >= 0; index--) {
+        const registration = registrations[index];
+        if (registration.where === where && registration.type === type && registration.handler === handler) {
+          registration.ended = true;
+          break;
+        }
+      }
+      return remove.call(this, type, handler, options);
+    };
+    restorers.push(() => {
+      owner.addEventListener = add;
+      owner.removeEventListener = remove;
+    });
+  }
+
+  const snapshot = () => {
+    const live = { documentListeners: 0, windowListeners: 0, editors: 0 };
+    for (const registration of registrations) {
+      if (registration.ended) continue;
+      if (registration.where === "document") live.documentListeners++;
+      else live.windowListeners++;
+    }
+    live.editors = document.querySelectorAll(".ProseMirror").length;
+    return live;
+  };
+
+  return {
+    snapshot,
+    stop() {
+      for (const restore of restorers.reverse()) restore();
+    },
+  };
 }
 
 /**
  * Boot the named fixture's page through the real loader. Real timers are in force here:
  * a case installs its fake clock after the page is up.
  */
-export async function bootPage(fixture, { mode, host }) {
+export async function bootPage(fixture, { mode, host, resetModules }) {
   const { params, body, path } = FIXTURES[fixture].page;
-  jest.resetModules();
+  resetModules();
   delete window.clayEditMode;
   delete window.__hyperclayEditMode;
   document.cookie = "isAdminOfCurrentResource=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/";
@@ -168,9 +265,15 @@ export async function bootPage(fixture, { mode, host }) {
   document.body.innerHTML = body;
   window.clay = {};
   globalThis.fetch = window.fetch = host.fetch;
-  const { boot } = await import("../../src/loader.js");
-  await new Promise((resolve) => boot(null, new URLSearchParams(params), resolve));
-  return window.clay;
+  const resources = createResourceCounter();
+  try {
+    const { boot } = await import("../../src/loader.js");
+    await new Promise((resolve) => boot(null, new URLSearchParams(params), resolve));
+  } catch (error) {
+    resources.stop();
+    throw error;
+  }
+  return { clay: window.clay, resources };
 }
 
 function fakeLocks() {

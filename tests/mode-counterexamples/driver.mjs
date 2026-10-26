@@ -14,8 +14,28 @@
  * of something never held, a requirement the run never reached) is invalid, never passed.
  */
 
-import { jest } from "@jest/globals";
 import { FIXTURES, createHost, bootPage, createLanePair } from "./fixtures.mjs";
+
+// The clock and the module registry are the host's, not the case's: under Jest the test
+// environment lends its own, and the check command lends a deterministic clock of its own
+// so a corpus run does not need the test runner.
+let harness = null;
+
+export function setHarness(next) {
+  harness = next;
+}
+
+async function hostHarness() {
+  if (harness) return harness;
+  const { jest } = await import("@jest/globals");
+  harness = {
+    resetModules: () => jest.resetModules(),
+    startClock: () => jest.useFakeTimers({ doNotFake: ["setImmediate", "queueMicrotask", "nextTick"] }),
+    stopClock: () => jest.useRealTimers(),
+    advance: (ms) => jest.advanceTimersByTimeAsync(ms),
+  };
+  return harness;
+}
 
 const BOUNDARIES = new Set(["save.capture", "save.request", "save.response", "chunk.import", "metadata"]);
 // save.capture is observed, not held: the snapshot is taken by the code that decides to
@@ -25,13 +45,15 @@ const HOLDABLE = new Set(["save.request", "save.response", "chunk.import", "meta
 const SAVE_RESULTS = ["accepted", "rejected", "unknown"];
 const CHUNK_RESULTS = ["loaded", "failed"];
 
-const CASE_KEYS = new Set(["schema", "id", "fixture", "boot", "steps", "requires", "expect"]);
+const CASE_KEYS = new Set(["schema", "id", "fixture", "boot", "steps", "requires", "expect", "control", "knownFailing"]);
 const BOOT_KEYS = new Set(["mode", "live", "destination"]);
 const STEP_KEYS = {
   enter: [],
   leave: ["await"],
   input: ["target", "value"],
+  unsent: ["field", "value"],
   compose: ["phase", "target", "value"],
+  cycles: ["count"],
   hold: ["boundary"],
   release: ["boundary", "result"],
   settle: ["ms"],
@@ -96,6 +118,13 @@ export function validateCase(json) {
     validateSteps(json, errors, fail);
   }
 
+  if (json.control !== undefined && (typeof json.control !== "string" || !SLUG.test(json.control))) {
+    fail("bad-control", "control", "control names the positive-control case by its id");
+  }
+  if (json.knownFailing !== undefined && (typeof json.knownFailing !== "string" || !json.knownFailing)) {
+    fail("bad-known-failing", "knownFailing", "knownFailing is one line saying what fails");
+  }
+
   if (json.requires !== undefined) {
     if (!Array.isArray(json.requires) || json.requires.some((entry) => typeof entry !== "string" || !entry)) {
       fail("bad-requires", "requires", "requires is a list of trace events");
@@ -148,6 +177,17 @@ function validateSteps(json, errors, fail) {
       case "input": {
         if (typeof step.target !== "string" || !step.target) fail("bad-step-field", `${at}.target`, "target is an element id");
         if (typeof step.value !== "string") fail("bad-step-field", `${at}.value`, "value is a string");
+        break;
+      }
+      case "unsent": {
+        if (typeof step.field !== "string" || !step.field) fail("bad-step-field", `${at}.field`, "field names the unsent field");
+        if (typeof step.value !== "string") fail("bad-step-field", `${at}.value`, "value is a string");
+        break;
+      }
+      case "cycles": {
+        if (!Number.isSafeInteger(step.count) || step.count < 1) {
+          fail("bad-step-field", `${at}.count`, "count is how many enter/leave cycles to run");
+        }
         break;
       }
       case "compose": {
@@ -233,6 +273,8 @@ function boundaryOf(step, at, fail) {
 const readValue = (element) =>
   element && element.matches?.("input, textarea") ? element.value : element?.textContent ?? null;
 
+const unsentField = (field) => document.querySelector(`[unsent="${field}"]`);
+
 // The input op edits the page the way a person does: the value reaches the element and
 // the element says it changed. Whether it got there is read back, never assumed.
 function applyInput(element, value) {
@@ -275,7 +317,11 @@ export async function runCase(json) {
   const cleanups = [];
 
   try {
-    const clay = await bootPage(json.fixture, { mode: json.boot.mode, host });
+    const host_ = await hostHarness();
+    const booted = await bootPage(json.fixture, { mode: json.boot.mode, host, resetModules: host_.resetModules });
+    const clay = booted.clay;
+    const resources = booted.resources;
+    cleanups.push(() => resources.stop());
 
     // The entry imports its edit plan through this map, so a case holds an import here.
     const { MODULES } = await import("../../src/loader-logic.js");
@@ -300,8 +346,8 @@ export async function runCase(json) {
       };
     }
 
-    jest.useFakeTimers({ doNotFake: ["setImmediate", "queueMicrotask", "nextTick"] });
-    cleanups.push(() => jest.useRealTimers());
+    host_.startClock();
+    cleanups.push(() => host_.stopClock());
 
     const onModeChange = () => record("modechange", { mode: clay.mode });
     const onSnapshot = (event) => record("snapshot-ready", { forSave: event.detail?.forSave === true });
@@ -329,10 +375,10 @@ export async function runCase(json) {
 
     const flush = async (turns = 12) => {
       for (let i = 0; i < turns; i++) await new Promise((resolve) => process.nextTick(resolve));
-      await jest.advanceTimersByTimeAsync(0);
+      await host_.advance(0);
     };
     const settle = async (ms) => {
-      await jest.advanceTimersByTimeAsync(ms);
+      await host_.advance(ms);
       await flush();
     };
 
@@ -356,13 +402,19 @@ export async function runCase(json) {
           // A held import parks the entry, so the transition is started and watched
           // rather than awaited: awaiting it would be the case waiting on itself.
           const flight = clay.setMode("edit").catch((error) => ({ ok: false, code: error?.message ?? "threw" }));
-          flight.then((answer) => record("transition", { op: "enter", ok: answer?.ok === true, mode: answer?.mode ?? null, code: answer?.code ?? null }));
+          flight.then((answer) => {
+            record("transition", { op: "enter", ok: answer?.ok === true, mode: answer?.mode ?? null, code: answer?.code ?? null, pending: answer?.pending ?? null });
+            if (answer?.ok === false) record("transition-refused", { op: "enter", code: answer?.code ?? null, pending: answer?.pending ?? null });
+          });
           await flush();
           break;
         }
         case "leave": {
           const flight = clay.setMode("view").catch((error) => ({ ok: false, code: error?.message ?? "threw" }));
-          flight.then((answer) => record("transition", { op: "leave", ok: answer?.ok === true, mode: answer?.mode ?? null, code: answer?.code ?? null }));
+          flight.then((answer) => {
+            record("transition", { op: "leave", ok: answer?.ok === true, mode: answer?.mode ?? null, code: answer?.code ?? null, pending: answer?.pending ?? null });
+            if (answer?.ok === false) record("transition-refused", { op: "leave", code: answer?.code ?? null, pending: answer?.pending ?? null });
+          });
           if (step.await === false) await flush();
           else {
             await flight;
@@ -373,6 +425,13 @@ export async function runCase(json) {
         case "input": {
           const admitted = applyInput(document.getElementById(step.target), step.value);
           record(admitted ? "input-admitted" : "input-refused", { target: step.target, value: step.value });
+          break;
+        }
+        case "unsent": {
+          const target = unsentField(step.field);
+          if (target) target.dispatchEvent(new Event("beforeinput", { bubbles: true }));
+          const admitted = applyInput(target, step.value);
+          record(admitted ? "input-admitted" : "input-refused", { target: step.field, value: step.value, via: "unsent" });
           break;
         }
         case "compose": {
@@ -393,6 +452,24 @@ export async function runCase(json) {
             value: step.value,
             composing: step.phase === "update",
           });
+          break;
+        }
+        case "cycles": {
+          for (let cycle = 1; cycle <= step.count; cycle++) {
+            const enterAnswer = await clay.setMode("edit").catch((error) => ({ ok: false, code: error?.message ?? "threw" }));
+            record("transition", { op: "enter", ok: enterAnswer?.ok === true, mode: enterAnswer?.mode ?? null, code: enterAnswer?.code ?? null, pending: enterAnswer?.pending ?? null });
+            if (enterAnswer?.ok === false) record("transition-refused", { op: "enter", code: enterAnswer?.code ?? null, pending: enterAnswer?.pending ?? null });
+            await flush();
+            const leaveAnswer = await clay.setMode("view").catch((error) => ({ ok: false, code: error?.message ?? "threw" }));
+            record("transition", { op: "leave", ok: leaveAnswer?.ok === true, mode: leaveAnswer?.mode ?? null, code: leaveAnswer?.code ?? null, pending: leaveAnswer?.pending ?? null });
+            if (leaveAnswer?.ok === false) record("transition-refused", { op: "leave", code: leaveAnswer?.code ?? null, pending: leaveAnswer?.pending ?? null });
+            await flush();
+            observe();
+            // Both ends of the pair: the first cycle leaves the page as an entry should and
+            // the last leaves it as the hundredth should, and the two readings compare.
+            if (cycle === 1 || cycle === step.count) record("resources", { cycle, ...resources.snapshot() });
+          }
+          record("cycles", { count: step.count });
           break;
         }
         case "hold": {
@@ -432,6 +509,18 @@ export async function runCase(json) {
       mode: clay.mode,
       writes: host.posts.length,
       phase: clay.modeLifecycle.state.phase,
+      canWrite: clay.modeLifecycle?.canWrite?.() === true,
+      // What the page held when the schedule ended, read off the DOM itself: the oracle
+      // never takes the driver's word for what a save contained or where a value went.
+      inputHtml: fixture.page.body,
+      pageHtml: document.body.innerHTML,
+      documentHtml: document.documentElement.outerHTML,
+      fields: [...document.querySelectorAll("[id], [unsent]")].map((element) => ({
+        id: element.id || null,
+        unsent: element.getAttribute("unsent"),
+        value: readValue(element),
+      })),
+      calls: host.calls.map((call) => ({ ...call })),
       tabs: lanes
         ? { a: { ydoc: lanes.a.ydoc, text: lanes.a.text() }, b: { ydoc: lanes.b.ydoc, text: lanes.b.text() } }
         : null,

@@ -1,0 +1,9 @@
+{
+  "schema": 1,
+  "id": "enter-leave-one-write",
+  "fixture": "persist-host",
+  "boot": { "mode": "view", "live": true, "destination": "host" },
+  "steps": [{ "op": "enter" }, { "op": "input", "target": "title", "value": "Written" }, { "op": "leave" }],
+  "requires": ["input-admitted", "save-request-sent"],
+  "expect": { "mode": "view", "writes": 1 }
+}
