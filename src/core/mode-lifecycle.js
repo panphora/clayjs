@@ -296,7 +296,8 @@ async function enter(handle = null) {
   // and the leases that follow start on that file.
   reader?.commit();
   commitModeFacts({ mode: isDraftMode ? "draft" : "edit", isEditMode: true });
-  dropEditmodeParam();
+  // A boot's own entry keeps the parameter: it is how an owner's reload stays in edit.
+  if (handle) dropEditmodeParam();
   setRootEditMode(true);
   save?.setSaveGeneration(context.generation);
   try {

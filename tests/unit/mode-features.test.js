@@ -170,3 +170,15 @@ test("a clean cycle gives an [editmode:onclick] control back the attribute order
   expect(btn.getAttribute("inert-onclick")).toBe("run()");
   expect(order()).toEqual(["id", "inert-onclick", "editmode:onclick"]);
 });
+
+test("a boot that the URL put in edit keeps its editmode parameter, so a reload stays in edit", async () => {
+  const clay = await bootPage({
+    url: "/notes.html?editmode=true&keep=1#frag",
+    params: "exclude=source",
+    body: '<main><div id="region" editable><h2>Team plan</h2><p>$12 per seat.</p></div></main>',
+  });
+  await flush();
+  expect(clay.mode).toBe("edit");
+  expect(window.location.search).toBe("?editmode=true&keep=1");
+  expect(window.location.hash).toBe("#frag");
+});
