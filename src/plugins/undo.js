@@ -188,7 +188,16 @@ const withRecovery = (call, fallback) => (...args) =>
     () => fallback
   )
 
-undo.keep = withRecovery('keep', { ok: false, code: 'unavailable' })
+// An app's kept copy is announced like a refused step's, so the review notice shows it
+// in this session instead of only after a reload.
+const keepApp = withRecovery('keep', { ok: false, code: 'unavailable' })
+undo.keep = async (spec) => {
+  const written = await keepApp(spec)
+  if (written?.ok === true) {
+    document.dispatchEvent(new CustomEvent('clay:undo-kept', { detail: { ok: true, key: spec?.key == null ? null : `app:${spec.key}` } }))
+  }
+  return written
+}
 undo.kept = withRecovery('kept', { ok: false, code: 'unavailable', records: [] })
 undo.dismissKept = withRecovery('dismissKept', { ok: false, code: 'unavailable' })
 

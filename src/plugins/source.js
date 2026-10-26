@@ -67,7 +67,7 @@ import {
   setSaveRenderer
 } from '../core/snapshot.js';
 import { onSaveAccepted } from '../core/save-core.js';
-import { modeState } from '../core/is-edit-mode.js';
+import { startsAtImport } from '../core/is-edit-mode.js';
 import { lastSeenEtag } from '../core/etag.js';
 
 const state = {
@@ -699,6 +699,6 @@ onSaveAccepted(adopt);
 document.addEventListener('clay:sync-applied', queueRepair);
 
 // The install belongs to an explicit edit boot. A live entry's prepare installs its own.
-if (modeState().mode === 'edit') source.ready = install(window.location.href);
+if (startsAtImport()) source.ready = install(window.location.href);
 
 export default source;

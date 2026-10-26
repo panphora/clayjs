@@ -441,3 +441,16 @@ test("a reload lists the kept step on the next edit session, and a view boot ope
   expect(stored.key).toMatch(/^refused:/);
   expect(storage.local.get("undo")?.count).toBe(1);
 });
+
+test("an app's kept copy is announced at once, which is what opens the review notice in this session", async () => {
+  const seen = [];
+  const listen = (e) => seen.push(e.detail);
+  document.addEventListener("clay:undo-kept", listen);
+  try {
+    const written = await undo.keep({ key: "note", label: "Unsent note", payload: { text: "kept now" } });
+    expect(written.ok).toBe(true);
+    expect(seen).toEqual([{ ok: true, key: "app:note" }]);
+  } finally {
+    document.removeEventListener("clay:undo-kept", listen);
+  }
+});
