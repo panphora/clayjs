@@ -1,0 +1,25 @@
+{
+  "name": "supplementary",
+  "record": {
+    "t": "paragraph",
+    "pos": "6",
+    "c": "I 😀𠮷 é",
+    "m": [
+      [2, ""],
+      [2, "x[\"underline\",{}]"],
+      [2, "bx[\"text_color\",{\"color\":\"purple\"}]"],
+      [3, "u"]
+    ]
+  },
+  "expected": {
+    "t": "paragraph",
+    "pos": "6",
+    "c": "I 😀𠮷 é",
+    "m": [
+      [2, ""],
+      [2, "x[\"underline\",{}]"],
+      [2, "bx[\"text_color\",{\"color\":\"purple\"}]"],
+      [3, "u"]
+    ]
+  }
+}

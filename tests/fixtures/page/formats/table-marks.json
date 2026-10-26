@@ -1,0 +1,127 @@
+{
+  "name": "table-marks",
+  "record": {
+    "t": "table",
+    "pos": "5",
+    "cols": {
+      "c1": {
+        "pos": "1",
+        "name": "week",
+        "kind": "text"
+      },
+      "c2": {
+        "pos": "2",
+        "name": "signups",
+        "kind": "number"
+      }
+    },
+    "rows": {
+      "r1": {
+        "pos": "1",
+        "cells": {
+          "c1": "Sep 14",
+          "c2": {
+            "c": "180",
+            "m": [
+              [3, "bx[\"underline\",{}]"]
+            ]
+          }
+        }
+      },
+      "r2": {
+        "pos": "2",
+        "cells": {
+          "c1": {
+            "c": "Sep 21",
+            "m": [
+              [3, ""],
+              [3, "x[\"text_color\",{\"color\":\"blue\"}]"]
+            ]
+          },
+          "c2": {
+            "c": "a￼",
+            "m": [
+              [1, "x[\"highlight\",{\"color\":\"green\"}]"],
+              [1, "@{\"type\":\"hard_break\"}"]
+            ]
+          }
+        }
+      },
+      "r3": {
+        "pos": "3",
+        "cells": {
+          "c1": {
+            "c": "🚦 網",
+            "m": [
+              [2, "x[\"underline\",{}]"],
+              [2, ""]
+            ]
+          },
+          "c2": ""
+        }
+      }
+    }
+  },
+  "expected": {
+    "t": "table",
+    "pos": "5",
+    "cols": {
+      "c1": {
+        "pos": "1",
+        "name": "week",
+        "kind": "text"
+      },
+      "c2": {
+        "pos": "2",
+        "name": "signups",
+        "kind": "number"
+      }
+    },
+    "rows": {
+      "r1": {
+        "pos": "1",
+        "cells": {
+          "c1": "Sep 14",
+          "c2": {
+            "c": "180",
+            "m": [
+              [3, "bx[\"underline\",{}]"]
+            ]
+          }
+        }
+      },
+      "r2": {
+        "pos": "2",
+        "cells": {
+          "c1": {
+            "c": "Sep 21",
+            "m": [
+              [3, ""],
+              [3, "x[\"text_color\",{\"color\":\"blue\"}]"]
+            ]
+          },
+          "c2": {
+            "c": "a￼",
+            "m": [
+              [1, "x[\"highlight\",{\"color\":\"green\"}]"],
+              [1, "@{\"type\":\"hard_break\"}"]
+            ]
+          }
+        }
+      },
+      "r3": {
+        "pos": "3",
+        "cells": {
+          "c1": {
+            "c": "🚦 網",
+            "m": [
+              [2, "x[\"underline\",{}]"],
+              [2, ""]
+            ]
+          },
+          "c2": ""
+        }
+      }
+    }
+  }
+}

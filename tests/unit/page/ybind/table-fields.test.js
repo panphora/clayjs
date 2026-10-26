@@ -80,7 +80,7 @@ test.each([
   ["a numeric cell", JSON.stringify(["t", "cell", "r1", "c1"]), 5],
   ["a cell without marks", JSON.stringify(["t", "cell", "r1", "c1"]), { c: "x" }],
   ["runs that miss the text", JSON.stringify(["t", "cell", "r1", "c1"]), { c: "abc", m: [[2, "b"]] }],
-  ["an unknown mark code", JSON.stringify(["t", "cell", "r1", "c1"]), { c: "ab", m: [[2, "z"]] }],
+  ["a malformed mark descriptor", JSON.stringify(["t", "cell", "r1", "c1"]), { c: "ab", m: [[2, 'x["~bad",{}]']] }],
   ["a break on plain text", JSON.stringify(["t", "cell", "r1", "c1"]), { c: "ab", m: [[1, ""], [1, BREAK]] }],
   ["an empty entity id", JSON.stringify(["t", "row", "", "pos"]), "1"],
   ["a reserved table id", JSON.stringify(["__proto__", "row", "r1", "pos"]), "1"],
@@ -94,6 +94,7 @@ test.each([
 test("a cell holds plain text or the page's inline encoding", () => {
   expect(validCell("plain")).toBe(true);
   expect(validCell({ c: "bold", m: [[4, "b"]] })).toBe(true);
+  expect(validCell({ c: "ab", m: [[2, "z"]] })).toBe(true);
   expect(validCell({ c: "link", m: [[4, 'a["https://x.test"]']] })).toBe(true);
   expect(validCell({ c: `a${ATOM}b`, m: [[1, ""], [1, BREAK], [1, "i"]] })).toBe(true);
   expect(validCell({ c: "ab", m: ["b", "b"] })).toBe(false);

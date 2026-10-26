@@ -1,0 +1,64 @@
+{
+  "name": "canceled-yjs",
+  "fields": {
+    "underline": true,
+    "underline!": true,
+    "text_color~p1-m0": {
+      "color": "red"
+    },
+    "highlight!": false,
+    "highlight~p1-m1": {
+      "color": "yellow"
+    },
+    "clay_opaque_code~p1-m2": {
+      "tokens": ["u", "z[\"value\"]"]
+    }
+  },
+  "expected": [
+    {
+      "name": "highlight",
+      "attrs": {
+        "color": "yellow"
+      }
+    },
+    {
+      "name": "text_color",
+      "attrs": {
+        "color": "red"
+      }
+    },
+    {
+      "tokens": ["u", "z[\"value\"]"]
+    }
+  ],
+  "positive": {
+    "fields": {
+      "underline": true,
+      "text_color~p1-m0": {
+        "color": "red"
+      },
+      "clay_opaque_code~p1-m2": {
+        "tokens": [
+          "u"
+        ]
+      }
+    },
+    "expected": [
+      {
+        "name": "text_color",
+        "attrs": {
+          "color": "red"
+        }
+      },
+      {
+        "name": "underline",
+        "attrs": {}
+      },
+      {
+        "tokens": [
+          "u"
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,135 @@
+{
+  "name": "malformed",
+  "cases": [
+    {
+      "why": "a named mark with no attrs at all",
+      "bad": "x[\"underline\"]",
+      "good": "x[\"underline\",{}]"
+    },
+    {
+      "why": "a named mark with three fields",
+      "bad": "x[\"underline\",{},1]",
+      "good": "x[\"underline\",{}]"
+    },
+    {
+      "why": "attrs that are not an object",
+      "bad": "x[\"underline\",[]]",
+      "good": "x[\"underline\",{}]"
+    },
+    {
+      "why": "a name with a Yjs operation separator",
+      "bad": "x[\"under~line\",{}]",
+      "good": "x[\"under-line\",{}]"
+    },
+    {
+      "why": "a name with a Yjs cancellation separator",
+      "bad": "x[\"under!line\",{}]",
+      "good": "x[\"under_line\",{}]"
+    },
+    {
+      "why": "a name that starts with a digit",
+      "bad": "x[\"1underline\",{}]",
+      "good": "x[\"_underline\",{}]"
+    },
+    {
+      "why": "a name longer than 64 characters",
+      "bad": "x[\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",{}]",
+      "good": "x[\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",{}]"
+    },
+    {
+      "why": "the reserved Yjs name",
+      "bad": "x[\"clay_opaque_code\",{\"tokens\":[\"u\"]}]",
+      "good": "x[\"clay_code\",{\"tokens\":[\"u\"]}]"
+    },
+    {
+      "why": "an unterminated attrs array",
+      "bad": "a[\"https://x.test\"",
+      "good": "a[\"https://x.test\"]"
+    },
+    {
+      "why": "a key that does not start with a code",
+      "bad": "[\"value\"]",
+      "good": "z[\"value\"]"
+    },
+    {
+      "why": "an empty token between codes",
+      "bad": "b u",
+      "good": "bu"
+    },
+    {
+      "why": "a second copy of one descriptor",
+      "bad": "x[\"underline\",{}]x[\"underline\",{}]",
+      "good": "x[\"underline\",{}]x[\"underlined\",{}]"
+    },
+    {
+      "why": "a second copy of one compact token",
+      "bad": "uu",
+      "good": "bu"
+    },
+    {
+      "why": "JSON nested deeper than 32 levels",
+      "bad": "x[\"deep\",{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}]",
+      "good": "x[\"deep\",{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}]"
+    },
+    {
+      "why": "opaque entries that are not a list",
+      "badEntries": {
+        "name": "x"
+      },
+      "goodEntries": [
+        {
+          "name": "x",
+          "attrs": {}
+        }
+      ]
+    },
+    {
+      "why": "an entry with only a name",
+      "badEntries": [
+        {
+          "name": "x"
+        }
+      ],
+      "goodEntries": [
+        {
+          "name": "x",
+          "attrs": {}
+        }
+      ]
+    },
+    {
+      "why": "an entry whose token is a named descriptor",
+      "badEntries": [
+        {
+          "tokens": [
+            "x[\"a\",{}]"
+          ]
+        }
+      ],
+      "goodEntries": [
+        {
+          "tokens": [
+            "u"
+          ]
+        }
+      ]
+    },
+    {
+      "why": "an entry with a token that will not parse",
+      "badEntries": [
+        {
+          "tokens": [
+            "z["
+          ]
+        }
+      ],
+      "goodEntries": [
+        {
+          "tokens": [
+            "z[\"v\"]"
+          ]
+        }
+      ]
+    }
+  ]
+}

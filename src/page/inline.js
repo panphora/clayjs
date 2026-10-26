@@ -12,7 +12,11 @@
 // "@" and the node's JSON. No mark key starts with "@", so a U+FFFC typed as
 // text stays text. Private-use characters typed as text need nothing here:
 // encodeForMerge (replay.js) gives each one a code of its own.
+// A mark this schema has no type for keeps its token or named descriptor
+// instead of throwing (format-codec.js): the unit's key is written back exactly
+// as it was read.
 import { model } from "../vendor/prosemirror.vendor.js";
+import { descriptors, entriesOf, isOpaque, keyOf, opaqueMark } from "./format-codec.js";
 
 export const ATOM = "￼";
 export const CODES = { strong: "b", em: "i", strike: "s", code: "c", link: "a" };
@@ -21,6 +25,10 @@ const NAMES = Object.fromEntries(Object.entries(CODES).map(([name, code]) => [co
 export function markKey(marks) {
   let key = "";
   for (const mark of marks) {
+    if (isOpaque(mark)) {
+      key += keyOf(mark.attrs.entries);
+      continue;
+    }
     const code = CODES[mark.type.name];
     if (!code) throw new TypeError(`page: the mark ${mark.type.name} has no key code`);
     key += code;
@@ -28,21 +36,6 @@ export function markKey(marks) {
     if (names.length) key += JSON.stringify(names.map((name) => mark.attrs[name]));
   }
   return key;
-}
-
-// The end of the JSON array that starts at s[i].
-function arrayEnd(s, i) {
-  let depth = 0, str = false;
-  for (; i < s.length; i++) {
-    const ch = s[i];
-    if (str) {
-      if (ch === "\\") i++;
-      else if (ch === '"') str = false;
-    } else if (ch === '"') str = true;
-    else if (ch === "[") depth++;
-    else if (ch === "]" && --depth === 0) return i + 1;
-  }
-  throw new SyntaxError(`page: unterminated attrs in mark key ${s}`);
 }
 
 const parsed = new WeakMap();
@@ -54,19 +47,19 @@ export function marksOf(schema, key) {
   let marks = cache.get(key);
   if (marks) return marks;
   marks = [];
-  for (let i = 0; i < key.length;) {
-    const type = schema.marks[NAMES[key[i]]];
-    if (!type) throw new TypeError(`page: unknown mark code ${key[i]} in ${key}`);
-    i++;
-    let attrs = null;
-    if (key[i] === "[") {
-      const end = arrayEnd(key, i);
-      const values = JSON.parse(key.slice(i, end));
-      attrs = Object.fromEntries(Object.keys(type.attrs).map((name, j) => [name, values[j]]));
-      i = end;
+  const opaque = [];
+  for (const desc of descriptors(key)) {
+    const name = desc.code === undefined ? null : NAMES[desc.code];
+    if (!name) {
+      opaque.push(desc);
+      continue;
     }
+    const type = schema.marks[name];
+    if (!type) throw new TypeError(`page: unknown mark code ${desc.code} in ${key}`);
+    const attrs = desc.attrs ? Object.fromEntries(Object.keys(type.attrs).map((field, j) => [field, desc.attrs[j]])) : null;
     marks = type.create(attrs).addToSet(marks);
   }
+  if (opaque.length) marks = opaqueMark(entriesOf(opaque)).addToSet(marks);
   cache.set(key, marks);
   return marks;
 }

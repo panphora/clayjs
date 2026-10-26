@@ -1,0 +1,27 @@
+{
+  "name": "two-unknown-marks",
+  "record": {
+    "t": "paragraph",
+    "pos": "1",
+    "c": "We kept it, colored now",
+    "m": [
+      [3, ""],
+      [4, "bx[\"underline\",{}]"],
+      [5, ""],
+      [7, "x[\"highlight\",{\"color\":\"yellow\"}]x[\"text_color\",{\"color\":\"red\"}]"],
+      [4, ""]
+    ]
+  },
+  "expected": {
+    "t": "paragraph",
+    "pos": "1",
+    "c": "We kept it, colored now",
+    "m": [
+      [3, ""],
+      [4, "bx[\"underline\",{}]"],
+      [5, ""],
+      [7, "x[\"highlight\",{\"color\":\"yellow\"}]x[\"text_color\",{\"color\":\"red\"}]"],
+      [4, ""]
+    ]
+  }
+}
