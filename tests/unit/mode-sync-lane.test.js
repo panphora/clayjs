@@ -2,6 +2,7 @@
  * @jest-environment jsdom
  */
 import { jest } from "@jest/globals";
+import { bootFixture } from "./helpers/mode-harness.js";
 
 /**
  * The one sync module a reader and an editor both load, as a lane that changes with
@@ -298,4 +299,213 @@ test("adoption of an initial edit's live lane starts nothing new", async () => {
 
   lease.dispose();
   expect(openStreams()).toHaveLength(0);
+});
+
+// ---------------------------------------------------------------------------
+// The controller's half, on a declared document: the loader handle a view boot
+// leaves behind, the saved lane it already follows, and the transaction that takes
+// that one lane over instead of opening a second stream.
+// ---------------------------------------------------------------------------
+
+const SYNC_PAGE = "document-sync.html";
+
+const doc = (word) =>
+  `<!DOCTYPE html><html><head><title>Sync</title></head><body><main data-id="main"><h1 data-id="title">Sync</h1><p data-id="p1">${word}</p></main></body></html>`;
+
+const shown = () => document.querySelector('[data-id="p1"]')?.textContent ?? null;
+
+// The stream a frame arrives on: the saved lane the reader opened, or the live lane the
+// entry opened in its place. One frame per call, in the order the host sends them.
+const deliver = (source, html, seq, etag) => source.onmessage({ data: JSON.stringify({ html, seq, etag, sender: "peer" }) });
+
+// Every EventSource the cycles open, with how many stand open at once. A switch that
+// opened a second stream beside the one it already had would show up here as a peak.
+let opened = [];
+let standing = 0;
+let peak = 0;
+
+class CountedEventSource extends EventTarget {
+  constructor(url) {
+    super();
+    this.url = url;
+    this.readyState = 0;
+    this.closed = false;
+    opened.push(this);
+    standing++;
+    peak = Math.max(peak, standing);
+  }
+  close() {
+    if (!this.closed) standing--;
+    this.closed = true;
+    this.readyState = 2;
+  }
+}
+
+// A view boot of the declared fixture: generic sync follows the saved lane, and the host
+// answers its first frame. `booted` is the stream that boot opened, which the entry takes
+// over; the cycle's own streams are counted from here on.
+async function syncPage() {
+  const boot = await bootFixture(SYNC_PAGE, { mode: "view", settle: 30 });
+  const sync = (await import("../../src/sync/live-sync.js")).liveSync;
+  const booted = sync.sse?._source ?? null;
+  opened = [];
+  standing = 0;
+  peak = 0;
+  if (booted && booted.readyState !== 2) {
+    // The boot's own stream counts too: a switch that opened a second one beside it would
+    // peak at two. Its class is the harness's, so its close is counted here by hand.
+    standing = 1;
+    peak = 1;
+    const close = booted.close.bind(booted);
+    booted.close = () => {
+      if (booted.readyState !== 2) standing--;
+      booted.closed = true;
+      return close();
+    };
+  }
+  globalThis.EventSource = window.EventSource = CountedEventSource;
+  return { boot, sync, booted };
+}
+
+const openNow = (booted) => [booted, ...opened].filter((source) => source && source.readyState !== 2);
+
+async function firstFile(sync, booted, { word = "disk1", seq = 5, etag = "E1" } = {}) {
+  const bytes = doc(word);
+  deliver(booted, bytes, seq, etag);
+  expect(await until(() => sync._represented.bytes !== null)).toBe(true);
+  expect(shown()).toBe(word);
+  return { bytes, etag, seq };
+}
+
+test("a declared sync document switches 20 times with one stream open at any moment", async () => {
+  const { boot, sync, booted } = await syncPage();
+  try {
+    await firstFile(sync, booted);
+
+    for (let cycle = 0; cycle < 20; cycle++) {
+      const entered = await window.clay.setMode("edit");
+      expect({ cycle, entered }).toEqual({ cycle, entered: { ok: true, mode: "edit", changed: true } });
+      expect({ cycle, lane: sync.lane }).toEqual({ cycle, lane: "live" });
+      expect(await until(() => openNow(booted).length === 1)).toBe(true);
+      expect({ cycle, open: openNow(booted).length }).toEqual({ cycle, open: 1 });
+      expect(openNow(booted)[0].url).toContain("lane=live");
+
+      const left = await window.clay.setMode("view");
+      expect({ cycle, left }).toEqual({ cycle, left: { ok: true, mode: "view", changed: true } });
+      expect({ cycle, lane: sync.lane }).toEqual({ cycle, lane: "saved" });
+      expect(await until(() => openNow(booted).length === 1)).toBe(true);
+      expect({ cycle, open: openNow(booted).length }).toEqual({ cycle, open: 1 });
+      expect(openNow(booted)[0].url).toContain("lane=saved");
+    }
+
+    // Two streams were never open at once, across every cycle.
+    expect(peak).toBeLessThanOrEqual(1);
+  } finally {
+    boot.stop();
+  }
+});
+
+test("an immediate re-entry after an exit commits on the receipt the exit handed back, with no new frame", async () => {
+  const { boot, sync, booted } = await syncPage();
+  try {
+    const file = await firstFile(sync, booted);
+    await window.clay.setMode("edit");
+    await window.clay.setMode("view");
+
+    // The exit starts the saved lane from the file the session was built from, so it has
+    // a receipt before the host says anything.
+    expect(sync._represented).toEqual(file);
+
+    const entered = await window.clay.setMode("edit");
+    expect(entered).toEqual({ ok: true, mode: "edit", changed: true });
+    expect(sync.lane).toBe("live");
+    expect(shown()).toBe("disk1");
+  } finally {
+    boot.stop();
+  }
+});
+
+test("a frame that arrives while the entry imports is reconciled before the baseline", async () => {
+  const { boot, sync, booted } = await syncPage();
+  const logic = await import("../../src/loader-logic.js");
+  const save = await import("../../src/core/save.js");
+  const thunk = logic.MODULES["core/save.js"];
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  try {
+    await firstFile(sync, booted);
+    // One edit-core import is held, so the entry is inside importPlan when the host sends
+    // its next file: the reader holds it, and the session is built from it.
+    logic.MODULES["core/save.js"] = (...args) => gate.then(() => thunk(...args));
+
+    const entry = window.clay.setMode("edit");
+    expect(await until(() => sync._handoffHeld)).toBe(true);
+    deliver(booted, doc("disk2"), 6, "E2");
+    release();
+
+    expect(await entry).toEqual({ ok: true, mode: "edit", changed: true });
+    expect(shown()).toBe("disk2");
+    expect(save.getLastSavedContents()).toContain("disk2");
+  } finally {
+    logic.MODULES["core/save.js"] = thunk;
+    release();
+    boot.stop();
+  }
+});
+
+test("a file newer than the represented one, applied after reconcile, refuses stale-document and leaves the saved lane running", async () => {
+  const { boot, sync, booted } = await syncPage();
+  try {
+    await firstFile(sync, booted);
+
+    // A participant prepared after the reader reconciled asks the lane for one more file:
+    // it applies, and the session was built from the older one.
+    window.clay.modeLifecycle.register({
+      id: "test:newer-file",
+      order: 900,
+      async prepare() {
+        deliver(booted, doc("disk9"), 9, "E9");
+        await sync._runPending();
+        return null;
+      },
+    });
+
+    const refused = await window.clay.setMode("edit");
+    expect(refused).toMatchObject({ ok: false, mode: "view", code: "stale-document" });
+
+    // The article went back to the reader with the file it now holds, and the lane it
+    // never stopped still delivers.
+    expect(sync.lane).toBe("saved");
+    expect(shown()).toBe("disk9");
+    expect(openNow(booted)).toHaveLength(1);
+    deliver(sync.sse._source, doc("later"), 10, "E10");
+    expect(await until(() => shown() === "later")).toBe(true);
+    expect(shown()).toBe("later");
+  } finally {
+    boot.stop();
+  }
+});
+
+test("the first frame after an exit leaves the page as the session left it", async () => {
+  const { boot, sync, booted } = await syncPage();
+  try {
+    const file = await firstFile(sync, booted);
+    await window.clay.setMode("edit");
+    await window.clay.setMode("view");
+    expect(shown()).toBe("disk1");
+    // The lane this exit started holds the file the session left, so the host's re-send
+    // is its own bytes and nothing has to be applied for it.
+    expect(sync._represented).toEqual(file);
+
+    // The host re-sends that file: the lane moves its stamp and paints
+    // nothing, and the page is not dirty afterwards.
+    deliver(sync.sse._source, file.bytes, 8, "E8");
+    await sleep(50);
+    expect(shown()).toBe("disk1");
+    expect(window.clay.hasUnsavedChanges()).toBe(false);
+  } finally {
+    boot.stop();
+  }
 });

@@ -27,6 +27,9 @@ let inFlight = null;
 // A tab that booted in edit started its sessions at evaluation; the first exit adopts them
 // instead of preparing its own.
 let initialSession = false;
+// The file the session was built from. An exit that saved nothing hands it back to the
+// reader, so a second entry has a receipt without waiting for a frame.
+let entryReceipt = null;
 
 // One deadline covers the whole transition: every import a participant prepares from,
 // the preparation itself, and the commit.
@@ -55,6 +58,17 @@ function disposeInReverse(list) {
       lease.dispose?.();
     } catch {}
   }
+}
+
+// A refused entry gives the article back to the reader it took it from: the leases are
+// already disposed in reverse, so the claim and then the queue return to their owner.
+function giveBack(reader) {
+  try {
+    reader?.reclaimArticle?.();
+  } catch {}
+  try {
+    reader?.resume?.();
+  } catch {}
 }
 
 function setRootEditMode(on) {
@@ -113,6 +127,19 @@ export function forgetParticipant(id) {
 
 noteParticipantForget(forgetParticipant);
 
+// A reader that now represents a different file than the session was built from: the seq
+// decides it when both name one, and a different stamp is a different file when it cannot.
+// Absorbing such a file into the baseline would make a change nobody showed the person
+// read as saved, so the entry refuses instead.
+function superseded(held, represented) {
+  if (!held || held.bytes === null) return false;
+  const before = represented ?? {};
+  if (typeof held.seq === "number" && typeof before.seq === "number" && held.seq !== before.seq) {
+    return held.seq > before.seq;
+  }
+  return (held.etag ?? null) !== (before.etag ?? null);
+}
+
 async function enter(handle = null) {
   const before = current();
   const editBefore = isEditMode;
@@ -137,6 +164,9 @@ async function enter(handle = null) {
   const prepared = [];
   const fresh = [];
   let save = null;
+  // The reader a declared document already runs: it hands over the file this session is
+  // built from, and it is the only owner of the saved lane until the commit.
+  let reader = null;
   // Whether any participant has been asked for a lease. Before that, a document this
   // release cannot start still has its guarded reload; after it, a failure is a refusal.
   let started = false;
@@ -149,7 +179,16 @@ async function enter(handle = null) {
       // what its lease starts at the commit.
       if (handle) {
         const plan = await import("./mode-switch.js");
+        // Before anything is imported: the reader is asked for the file it represents,
+        // and a reader without one leaves the caller its guarded reload.
+        reader = await plan.prepareReader(handle, context);
         fresh.push(...(await plan.importPlan(handle, handle.edit, { signal: controller.signal })));
+        // A file that arrived while the plan imported is applied before the baseline is
+        // taken, so the session starts on what the article actually shows.
+        await reader?.reconcile();
+        context.represented = reader ? reader.represented : null;
+        context.reader = reader;
+        entryReceipt = context.represented;
       }
       // Inside the deadline, because the generation commits in the boundary below.
       save = handle?.loaded?.["core/save.js"] ?? (await import("./save.js"));
@@ -169,6 +208,11 @@ async function enter(handle = null) {
         const baseline = save.adoptEntryBaseline({ represented: context.represented });
         if (baseline && baseline.ok === false) {
           throw Object.assign(fault("the page moved since the last session", baseline.code || "pending-input"), baseline);
+        }
+        // One more look, because a frame can land while the roster prepares: the session
+        // is built from the file the reader represents, not from a newer one.
+        if (superseded(reader?.represented, context.represented)) {
+          throw fault("the reader holds a newer file than the session was built from", "stale-document");
         }
       }
       return true;
@@ -196,15 +240,20 @@ async function enter(handle = null) {
     // and the page goes back to an idle view. Once a lease exists, replacing the page
     // under it is worse than saying no.
     if (!started) {
+      // A reader that was already holding the lane gives it back, so the page the guarded
+      // reload replaces is not the only owner left.
+      giveBack(reader);
       commitModeFacts({ phase: "idle", reason: null });
       return null;
     }
+    giveBack(reader);
     return refuse(err?.code || "load-failed", "blocked", { message: err?.message });
   }
   clearTimeout(timer);
   if (!ready) {
     // The entry is over; its continuation still holds a lease that has not resolved.
     preparation.catch(() => {});
+    giveBack(reader);
     return refuse("timeout");
   }
 
@@ -212,6 +261,9 @@ async function enter(handle = null) {
   // the phase still says `entering` (so `canWrite()` is false), the root attribute and the
   // save generation follow, the leases enable, and only then does the phase go `idle` and
   // the one announcement out. An `enable` therefore sees the committed edit facts.
+  // The reader retires first: its lane and the file it represents are this session's now,
+  // and the leases that follow start on that file.
+  reader?.commit();
   commitModeFacts({ mode: isDraftMode ? "draft" : "edit", isEditMode: true });
   setRootEditMode(true);
   save?.setSaveGeneration(context.generation);
@@ -294,10 +346,50 @@ async function adoptInitial(handle) {
   return adopted;
 }
 
+// The bytes and stamp of this session's last accepted save, or null for a session that
+// never saved: the receipt the restarted reader starts from.
+async function acceptedReceipt(handle) {
+  const save = handle?.loaded?.["core/save.js"] ?? (await import("./save.js").catch(() => null));
+  return save?.acceptedReceipt?.() ?? null;
+}
+
+// The deadline every wait of one exit shares, taken before its first await so nothing it
+// waits on can outlive the transition. Advancing time once is enough to reach all of them.
+function startDeadline() {
+  let timer = null;
+  const expired = new Promise((resolve) => {
+    timer = setTimeout(() => resolve(true), DEADLINE_MS);
+  });
+  return { expired, clear: () => clearTimeout(timer) };
+}
+
+// The view plan's missing modules, imported before anything is quiesced: an explicit
+// Document edit never loaded its reader, and the same failure here refuses with nothing
+// stopped. A live entry has them all, so this imports nothing. The import shares the
+// boot's late tail, which an exit does not wait for forever: what the view needs is its
+// reader, and a module still in flight stays cached and evaluates in view when it lands.
+async function importViewPlan(handle, expired) {
+  if (!handle) return;
+  const plan = await import("./mode-switch.js");
+  const importing = plan.importPlan(handle, handle.view);
+  importing.catch(() => {});
+  const answer = await Promise.race([importing.then(() => null, (err) => err), expired]);
+  if (answer && answer !== true) throw answer;
+}
+
 // Exit. Nothing here is a public flush: the barrier is the one write an exit may make, and
 // it runs under the document-operation slot this transition takes and holds, so a
 // replacement cannot start between the quiesce and the bytes.
 async function leave(handle = null) {
+  const deadline = startDeadline();
+  try {
+    return await leaveWithin(handle, deadline);
+  } finally {
+    deadline.clear();
+  }
+}
+
+async function leaveWithin(handle, deadline) {
   const initial = initialSession;
   initialSession = false;
   commitModeFacts({ phase: "leaving" });
@@ -312,6 +404,11 @@ async function leave(handle = null) {
     }
     held = [...adopted, ...held];
     leases = held;
+  }
+  try {
+    await importViewPlan(handle, deadline.expired);
+  } catch (err) {
+    return refuse(err?.code || "load-failed", "idle", { message: err?.message });
   }
   const quiesced = [];
   let operation = null;
@@ -341,6 +438,14 @@ async function leave(handle = null) {
   }
   disposeInReverse(held);
   leases = [];
+  // The reader comes back on the file this session last saved, or on the one it was built
+  // from when it saved nothing: a second entry commits without waiting for a frame.
+  const accepted = (await acceptedReceipt(handle)) ?? entryReceipt;
+  entryReceipt = null;
+  if (handle) {
+    const plan = await import("./mode-switch.js").catch(() => null);
+    plan?.startReader(handle, accepted);
+  }
   generation++;
   setRootEditMode(false);
   commitModeFacts({ mode: "view", isEditMode: false, phase: "idle", generation, reason: null });

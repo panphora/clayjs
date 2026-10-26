@@ -76,6 +76,97 @@ export function openResources() {
 const cancelled = () =>
   Object.assign(new Error("clay.modeLifecycle: the import was cancelled"), { name: "AbortError", code: "aborted" });
 
+// One deadline covers the whole transition, so the reader's half of it is bounded by the
+// same number the controller uses for everything else.
+const DEADLINE_MS = 15000;
+
+const fault = (message, code) => Object.assign(new Error(`clayjs: ${message}`), { code });
+
+// The promise, or the entry's cancellation, whichever settles first: an acquisition that
+// never answers is a reload, not a session built on nothing.
+const within = (promise, signal) =>
+  new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(cancelled());
+    const abort = () => reject(cancelled());
+    signal?.addEventListener?.("abort", abort);
+    Promise.resolve(promise).then(
+      (value) => {
+        signal?.removeEventListener?.("abort", abort);
+        resolve(value);
+      },
+      (err) => {
+        signal?.removeEventListener?.("abort", abort);
+        reject(err);
+      }
+    );
+  });
+
+// A handoff answers with the file it was built from, never with a promise of one: a
+// reader that represents no bytes has nothing a session can be built on.
+const noFile = (handoff) => !handoff?.represented || handoff.represented.bytes === null;
+
+// The instance inside a `sync/live-sync.js` namespace: the module exports the singleton
+// under its own name and as the default, and both name the same object.
+const syncLane = (mod) => (mod && (mod.liveSync ?? mod.default ?? mod)) || null;
+
+/**
+ * Ask the reader a declared document already runs for its half of the switch: the file
+ * it represents, the queue it is holding, and the calls that apply, give back and retire
+ * them.
+ *
+ * The page-view reader answers first, because a Document's reader owns the article; a
+ * generic-sync document's saved lane answers next. A document with neither has no reader
+ * and needs no handoff. A reader that represents no file throws `not-acquired`, which is
+ * the reload: nothing has been prepared yet, so the page can still be replaced.
+ *
+ * @param {object} handle - the loader's handle: `{loaded, modules, attach, ...}`
+ * @param {{signal?: AbortSignal}} [context] - the entry's context
+ * @returns {Promise<?object>}
+ */
+export async function prepareReader(handle, context = {}) {
+  const signal = context.signal;
+  const options = { signal, deadline: DEADLINE_MS };
+  const pageView = handle?.loaded?.["plugins/page-view.js"];
+  if (pageView?.ready) {
+    await within(pageView.acquired, signal);
+    const handoff = await pageView.prepareHandoff(options);
+    if (noFile(handoff)) throw fault("the reader has no file to hand over", "not-acquired");
+    return handoff;
+  }
+  const lane = syncLane(handle?.loaded?.["sync/live-sync.js"]);
+  if (lane && !lane.isDestroyed && lane.lane === "saved") {
+    const handoff = await lane.prepareHandoff(options);
+    if (noFile(handoff)) throw fault("the reader has no file to hand over", "not-acquired");
+    return handoff;
+  }
+  return null;
+}
+
+/**
+ * Start the reader a view holds, from the file the session left: the page-view reader
+ * paints that receipt at once and asks the host for nothing, and the saved lane starts
+ * with it, so a second entry has a file without waiting for a frame. `accepted` null
+ * starts the reader as a view boot does.
+ *
+ * @param {object} handle - the loader's handle
+ * @param {?{bytes: string, etag: ?string, seq: ?number}} accepted - the receipt to start from
+ */
+export function startReader(handle, accepted = null) {
+  const pageView = handle?.loaded?.["plugins/page-view.js"];
+  if (pageView) {
+    // The plan this page booted, not what an entry imported: a Document's edit plan
+    // carries generic sync as well, and the reader is restarted as the one it was.
+    const sync = Array.isArray(handle.view?.plugins)
+      ? handle.view.plugins.includes("sync/live-sync.js")
+      : Boolean(handle.loaded["sync/live-sync.js"]);
+    const start = pageView.restart ?? pageView.start;
+    return start({ sync, represented: accepted });
+  }
+  const lane = syncLane(handle?.loaded?.["sync/live-sync.js"]);
+  if (lane) return lane.start(lane.currentFile, { lane: "saved", represented: accepted });
+  return undefined;
+}
+
 /**
  * Import an edit plan's missing modules through the loader's own record and import cache.
  *

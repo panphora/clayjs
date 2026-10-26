@@ -103,6 +103,14 @@ export function start({ sync = false, represented = null } = {}) {
   return ready;
 }
 
+// Start the reader again after a switch retired the one this page booted: `start` keeps
+// the promise its own boot returns, so the reader an exit replaces has to be taken down
+// first. The receipt it is handed is painted at once, so no fetch is made for it.
+export function restart(options = {}) {
+  stop();
+  return start(options);
+}
+
 // The reader's half of a live switch: the lane keeps its pending files, and the
 // switch is answered with the receipt they will be built from.
 export function prepareHandoff(options) {

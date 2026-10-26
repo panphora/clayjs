@@ -88,6 +88,9 @@ let ownerOf;
 let resetHostMeta;
 let LiveSync;
 let liveSync;
+let pageView;
+let facts;
+let lifecycle;
 
 beforeAll(async () => {
   global.EventSource = FakeEventSource;
@@ -105,6 +108,9 @@ beforeAll(async () => {
   ({ resetHostMeta } = await import("../../src/core/host-meta.js"));
   ({ LiveSync, liveSync } = await import("../../src/sync/live-sync.js"));
   liveSync.stop();
+  pageView = await import("../../src/plugins/page-view.js");
+  facts = await import("../../src/core/is-edit-mode.js");
+  lifecycle = await import("../../src/core/mode-lifecycle.js");
 });
 
 beforeEach(() => {
@@ -117,6 +123,10 @@ beforeEach(() => {
 
 afterEach(() => {
   liveSync.stop();
+  pageView?.stop();
+  // The roster outlives a session by design: a participant this file queued for one test
+  // is taken back here, so the next session starts from the same roster.
+  for (const id of ["test:page", "test:page-fails"]) lifecycle?.forgetParticipant(id);
 });
 
 // The reader's own transport, started on an accepted file, and the host's end of it,
@@ -514,4 +524,111 @@ test("a commit after a yield paints nothing and releases no claim it does not ho
   expect(reader.stop()).toEqual({ bytes, etag: "E1", seq: 1 });
   expect(ownerOf(article)).toBe("editor");
   release();
+});
+
+// ---------------------------------------------------------------------------
+// The controller's half on a Document: the page-view reader owns the article, and the
+// Page gives that claim up for the session and takes it back when the session is refused.
+// ---------------------------------------------------------------------------
+
+// The loader handle a view boot of a Document leaves: the reader is loaded and running,
+// nothing of the edit plan is, and the only thing an exit has to import is already here.
+const viewHandle = () => ({
+  loaded: { "plugins/page-view.js": pageView },
+  edit: { core: [], plugins: [], late: [] },
+  view: { plugins: ["plugins/page-view.js"], late: [] },
+  modules: {},
+  attach() {},
+  attachEditCore() {},
+  loadEditHints: null,
+  late: Promise.resolve(),
+  announce() {},
+});
+
+// A view boot's reader, started from the file it represents: exactly what a reader that
+// has already read its lane hands a switch.
+async function documentPage() {
+  facts.commitModeFacts({ mode: "view", isEditMode: false, phase: "idle", canEdit: true, reason: null });
+  load(served(null, ARTICLE("served")));
+  const bytes = FILE('\u003cp data-id="a"\u003eA\u003c/p\u003e');
+  pageView.restart({ represented: { bytes, etag: "E1", seq: 1 } });
+  const receipt = await pageView.acquired;
+  return { bytes, receipt };
+}
+
+test("an entry gives the Page the reader\u0027s file, and the reader\u0027s article goes with it", async () => {
+  const { bytes, receipt } = await documentPage();
+  const article = document.querySelector("article[data-page]");
+  const seen = {};
+  facts.registerModeParticipant({
+    id: "test:page",
+    order: 400,
+    prepare(context) {
+      seen.represented = context.represented;
+      seen.reader = context.reader;
+      seen.yielded = context.reader?.yieldArticle();
+      return null;
+    },
+  });
+
+  const result = await lifecycle.requestMode("edit", viewHandle());
+
+  expect(result).toEqual({ ok: true, mode: "edit", changed: true });
+  // The session is built from the file the reader represents, not from the served page.
+  expect(seen.represented).toEqual(receipt);
+  expect(seen.represented.bytes).toBe(bytes);
+  expect(seen.reader).not.toBe(null);
+  // The Page mounts only over an article nobody else claims.
+  expect(seen.yielded).toBe(true);
+  expect(ownerOf(article)).toBe(null);
+});
+
+test("a Page that throws after the yield leaves the reader holding the article again, and painting", async () => {
+  await documentPage();
+  const article = document.querySelector("article[data-page]");
+  facts.registerModeParticipant({
+    id: "test:page-fails",
+    order: 400,
+    prepare(context) {
+      context.reader?.yieldArticle();
+      article.querySelector('[data-id="a"]').textContent = "half-mounted editor";
+      throw Object.assign(new Error("the editor could not mount"), { code: "blocked-mount" });
+    },
+  });
+
+  const result = await lifecycle.requestMode("edit", viewHandle());
+
+  expect(result).toMatchObject({ ok: false, mode: "view", code: "blocked-mount" });
+  // The article is the reader\u0027s again, painted from the file it still represents, so the
+  // editor an entry would mount cannot take it.
+  expect(text()).toBe("A");
+  expect(ownerOf(article)).toBe("reader");
+  expect(() => claim(article, "editor")).toThrow(/already has a reader runtime/);
+});
+
+test("an exit starts the page-view reader from the accepted receipt and fetches nothing", async () => {
+  const { bytes, receipt } = await documentPage();
+  const article = document.querySelector("article[data-page]");
+  facts.registerModeParticipant({
+    id: "test:page",
+    order: 400,
+    prepare(context) {
+      context.reader?.yieldArticle();
+      return null;
+    },
+  });
+
+  expect(await lifecycle.requestMode("edit", viewHandle())).toEqual({ ok: true, mode: "edit", changed: true });
+  const before = fetchCalls.length;
+
+  expect(await lifecycle.requestMode("view", viewHandle())).toEqual({ ok: true, mode: "view", changed: true });
+
+  // The reader this exit starts paints the file the session left, so it asks the host for
+  // nothing: no acquisition GET, and the article is the reader\u0027s again.
+  expect(await pageView.acquired).toEqual(receipt);
+  expect(text()).toBe("A");
+  expect(sources.filter((source) => !source.closed)).toHaveLength(1);
+  expect(ownerOf(article)).toBe("reader");
+  expect(fetchCalls.length).toBe(before);
+  expect(bytes).toBe(receipt.bytes);
 });

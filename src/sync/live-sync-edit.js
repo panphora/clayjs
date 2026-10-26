@@ -32,6 +32,7 @@ export function syncParticipant(sync) {
       // Adoption: the explicit initial edit started this lane as the module
       // evaluated, so the lease covers it and starts nothing new.
       if (context?.initial) return { quiesce, dispose };
+      let started = false;
       return {
         quiesce,
         // The commit: the lane a reader was following stops, and the same stream
@@ -40,8 +41,14 @@ export function syncParticipant(sync) {
           const file = sync.currentFile;
           sync.stop();
           sync.start(file, { lane: "live" });
+          started = true;
         },
-        dispose,
+        // A refused entry disposes what it prepared as well, and until the commit this
+        // lane was the reader's: stopping it would take the saved lane the switch gives
+        // back with it.
+        dispose: () => {
+          if (started) sync.stop();
+        },
       };
     },
   };
