@@ -180,6 +180,25 @@ test("persist controls are not restored after a refusal and are after a success"
   expect(field().value).toBe("attr");
 });
 
+describe("removed subtrees", () => {
+  test("a deleted card inside an app redoes after its painted attribute is repainted", async () => {
+    document.body.insertAdjacentHTML("beforeend", '<main id="app" sap><ul id="lists"><li id="gone" attr:data-count="n" data-count="2">List<b attr:data-count="n" data-count="1">Card</b></li></ul></main>');
+    await enter();
+    undo.setRecording("commands");
+    const list = document.getElementById("gone");
+
+    undo.command("Delete list", () => list.remove());
+    expect(undo.undo()).toMatchObject({ ok: true, direction: "undo" });
+    // The app repaints the restored list, as sapjs does after a merge or a refresh.
+    list.setAttribute("data-count", "3");
+
+    expect(undo.redo()).toMatchObject({ ok: true, direction: "redo" });
+    expect(document.getElementById("gone")).toBeNull();
+    expect(refusals).toHaveLength(0);
+    document.getElementById("app").remove();
+  });
+});
+
 describe("added subtrees", () => {
   let resolveRegionPolicy;
   beforeAll(async () => {

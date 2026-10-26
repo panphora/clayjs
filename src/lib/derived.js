@@ -9,7 +9,9 @@ import { bootPhase } from "../core/boot-phase.js";
 // from its own attributes, so the same answer holds for the live page, a
 // snapshot clone and a parsed frame. No expression is evaluated here.
 
-export const isDerivedAttr = (el, name) => ownsAttr(el, name);
+// `host` is the element a just-removed subtree belongs under (the undo engine passes
+// it), so a detached card is read as painted the way it was while attached.
+export const isDerivedAttr = (el, name, host = null) => ownsAttr(el, name, host);
 
 export const ownsDerivedText = (el) => !!el && el.nodeType === 1 && !!paintsOf(el)?.text;
 

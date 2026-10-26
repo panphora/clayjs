@@ -20,7 +20,7 @@ const withTabLocal = (opts = {}) => {
   const own = opts.ignoreAttribute
   return {
     ...opts,
-    ignoreAttribute: (name, target) => isTabLocalAttr(name, target) || isDerivedAttr(target, name) || isRuntimeAttribute(name, target) || (own ? own(name, target) : false),
+    ignoreAttribute: (name, target, host) => isTabLocalAttr(name, target) || isDerivedAttr(target, name, host) || isRuntimeAttribute(name, target) || (own ? own(name, target, host) : false),
     isProtected: opts.isProtected || keepsOwnHistory,
     ignoreNode: opts.ignoreNode || isGestureItem,
   }

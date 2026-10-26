@@ -27,13 +27,17 @@ function inert(el) {
 }
 
 // The [sap] root an element is painted under, or null when it sits outside every
-// app or inside a subtree the engine never reads.
-export function appOf(el) {
+// app or inside a subtree the engine never reads. A subtree just removed from the
+// page has no ancestors left to ask; `host`, the element it was removed from,
+// continues the walk, so the answer matches the one it had while attached.
+export function appOf(el, host = null) {
+  let top = null;
   for (let cur = el; cur && cur.nodeType === 1; cur = cur.parentElement) {
     if (inert(cur)) return null;
     if (cur.hasAttribute("sap")) return cur;
+    top = cur;
   }
-  return null;
+  return host && top && !top.isConnected ? appOf(host) : null;
 }
 
 function declares(el, name) {
@@ -52,13 +56,13 @@ function paintsHidden(el) {
 }
 
 // True when a sapjs paint writes attribute `name` on `el`.
-export function ownsAttr(el, name) {
+export function ownsAttr(el, name, host = null) {
   if (!el || el.nodeType !== 1 || !name) return false;
-  if (name === BEACON) return !!appOf(el);
+  if (name === BEACON) return !!appOf(el, host);
   if (NEVER.has(name)) return false;
   if (FORM_STATE.has(name) && recordOwnsFormState(el)) return false;
-  if (name === "hidden") return paintsHidden(el) && !!appOf(el);
-  return el.hasAttribute("attr:" + name) && !declares(el, name) && !!appOf(el);
+  if (name === "hidden") return paintsHidden(el) && !!appOf(el, host);
+  return el.hasAttribute("attr:" + name) && !declares(el, name) && !!appOf(el, host);
 }
 
 // Everything a paint writes on `el`: whole attributes, class tokens, --custom
