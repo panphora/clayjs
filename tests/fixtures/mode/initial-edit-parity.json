@@ -5,7 +5,7 @@
       "eventSources": 1,
       "listeners": {
         "window": 8,
-        "document": 53,
+        "document": 54,
         "Element": 29
       },
       "observers": 2,
@@ -154,7 +154,7 @@
       "eventSources": 1,
       "listeners": {
         "window": 10,
-        "document": 95,
+        "document": 96,
         "Element": 41
       },
       "observers": 3,
@@ -331,7 +331,7 @@
       "eventSources": 1,
       "listeners": {
         "window": 9,
-        "document": 62,
+        "document": 63,
         "Element": 6
       },
       "observers": 1,
