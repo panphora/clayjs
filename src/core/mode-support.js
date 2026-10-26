@@ -52,6 +52,19 @@ export const MODULE_SUPPORT = {
   "plugins/live.js": "export",
   "plugins/page.js": "export",
   "plugins/visitor-drafts-owner.js": "export",
+  // A view boot already loaded these three, and each reads the mode at event time.
+  "plugins/menu.js": "neutral",
+  "plugins/upgrade.js": "neutral",
+  "plugins/derive.js": "neutral",
+  // A binding has no import-time work, and its disposal belongs to the application's own
+  // participant.
+  "plugins/bind-text.js": "neutral",
+  // The view plan's reader, owned by the transition rather than a lease: the controller
+  // prepares no lease for a `"reader"` row.
+  "plugins/page-view.js": "reader",
+  // The source map fetches, pairs and installs a save renderer, so it is a session: the
+  // lease installs on a live entry and clears the renderer when the page goes back to view.
+  "plugins/source.js": "export",
   // Generic sync: the module a reader and an editor both load, and the one whose
   // session starts regardless of mode. Its participant is in the edit chunk.
   "sync/live-sync.js": (mod) => mod.liveSync.editParticipant(),

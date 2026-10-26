@@ -29,6 +29,14 @@
  * would trade a guaranteed delay on every page for a better outcome on the rare save
  * that lands in the first few hundred milliseconds.
  *
+ * AS A MODE LEASE
+ *
+ * A live entry imports this module while the committed mode is still view, where it
+ * fetches nothing and installs no renderer: the fetch belongs to an explicit edit boot
+ * or to the lease's own prepare. The lease pairs during prepare and installs the renderer
+ * at the commit; `quiesce` keeps it, because the exit's barrier save still renders through
+ * it, and `dispose` is where it goes, so nothing is left rendering or re-pairing in view.
+ *
  * WHEN IT DOES NOTHING
  *
  * Any of these leaves the save pipeline untouched, and each says so once in the
@@ -59,10 +67,15 @@ import {
   setSaveRenderer
 } from '../core/snapshot.js';
 import { onSaveAccepted } from '../core/save-core.js';
+import { modeState } from '../core/is-edit-mode.js';
 
 const state = {
   installed: false,
   refused: null,
+  // How many sessions have been uninstalled. An install applies nothing when the session
+  // that asked for it has ended in the meantime, so a late answer cannot put a renderer
+  // or a map back into view.
+  session: 0,
   model: null,
   map: null,
   stats: null,
@@ -188,10 +201,13 @@ function staleVersion(m) {
   return `source refused: the fetch answered version ${stamp} while this page holds ${held}`;
 }
 
-function install(sourceUrl, attempt = 0) {
+function install(sourceUrl, attempt = 0, render = true) {
+  const session = state.session;
   const t0 = now();
   const generation = state.adoptions;
+  state.refused = null;
   return fetchSource(sourceUrl).then((src) => {
+    if (session !== state.session) return null;
     const t1 = now();
     const m = model(src);
     const refused = checkSource(m, document);
@@ -202,7 +218,7 @@ function install(sourceUrl, attempt = 0) {
     // its way. Those bytes are the file now, so ask again rather than adopt an older
     // answer; a page that will not hold still is refused instead of retried forever.
     if (state.adoptions !== generation) {
-      if (attempt < SUPERSEDED_RETRIES) return install(sourceUrl, attempt + 1);
+      if (attempt < SUPERSEDED_RETRIES) return install(sourceUrl, attempt + 1, render);
       throw new Error('source refused: a save replaced the file while the fetch was in flight');
     }
     const t2 = now();
@@ -214,11 +230,12 @@ function install(sourceUrl, attempt = 0) {
     state.stats = stats;
     state.timing = { fetch: t1 - t0, model: t2 - t1, pair: t3 - t2, refresh: null };
     state.installed = true;
-    setSaveRenderer(renderSave);
+    if (render) setSaveRenderer(renderSave);
     return summary();
   }).catch((err) => {
     // Not an error the page can do anything about, and not a failure of the save:
     // saves go out exactly as they would without this plugin. Said once.
+    if (session !== state.session) return null;
     state.refused = String(err && err.message ? err.message : err);
     console.info(`clayjs: source map off (${state.refused}); saves use the full serialization`);
     return null;
@@ -611,8 +628,65 @@ export const source = {
     : null); },
 };
 
+/**
+ * Take an install back: the renderer, a scheduled refresh, and the installed state that
+ * lets the hook and the listener do anything. The map and the model stay, so `text()` and
+ * `locate()` keep answering about the last file this module modelled while a view is
+ * reading it.
+ */
+function uninstall() {
+  state.session++;
+  state.installed = false;
+  state.refreshQueued = false;
+  state.pendingBytes = null;
+  state.refetch = false;
+  setSaveRenderer(null);
+}
+
+/**
+ * The source map as a mode lease.
+ *
+ * `prepare` starts the fetch, the model and the pairing, and its `ready` settles when
+ * they have; a document this module refuses is the same logged, non-fatal outcome as at
+ * boot, and the lease still resolves. `enable` puts the renderer on the save path, which
+ * is the only thing that belongs to the commit. `quiesce` keeps it for the exit's barrier
+ * save, `resume` has nothing to reopen, and `dispose` takes it back.
+ *
+ * `initial: true` is the install this tab's explicit edit boot already started: the lease
+ * adopts it, fetches nothing again and pairs nothing again.
+ */
+export function sourceParticipant() {
+  return {
+    id: 'clay:source',
+    // After the save session (10), whose saves this renderer answers, and before the
+    // page (400), whose editor takes the article the pairing is taken over.
+    order: 30,
+    prepare(context = {}) {
+      if (context.initial === true) {
+        return { enable() {}, quiesce() {}, resume() {}, dispose: uninstall };
+      }
+      return {
+        ready: install(window.location.href, 0, false),
+        enable() {
+          if (!state.installed) return;
+          setSaveRenderer(renderSave);
+        },
+        quiesce() {},
+        resume() {},
+        dispose: uninstall,
+      };
+    },
+  };
+}
+
+export { sourceParticipant as modeParticipant };
+
+// Registered once for the page's lifetime; both bodies return while no session is
+// installed, so a view that imports this module never re-pairs or adopts anything.
 onSaveAccepted(adopt);
 document.addEventListener('clay:sync-applied', queueRepair);
-source.ready = install(window.location.href);
+
+// The install belongs to an explicit edit boot. A live entry's prepare installs its own.
+if (modeState().mode === 'edit') source.ready = install(window.location.href);
 
 export default source;

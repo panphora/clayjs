@@ -12,7 +12,7 @@ import { MODULE_SUPPORT, supportFor } from "../../../src/core/mode-support.js";
  * this file fails when a new module or plugin arrives with no lifecycle decision, so the
  * decision has to be made on purpose rather than by omission. The plan half proves the
  * check reads the resolution itself, implications, defaults, Sap roots and template
- * metadata included, and that the three templates are still kept on the guarded reload.
+ * metadata included, and that the three templates resolve to nothing unsupported.
  */
 
 // The paths with no support row, each with the reason it has none yet. A path the loader
@@ -24,20 +24,14 @@ const UNSUPPORTED = {
   "core/draft-mode.js": "the boot params and the draft fact, read before the plan",
   "lib/region-policy.js": "the one policy both roads read, read before the plan",
   // Core paths whose session belongs to a later step.
-  // Plugins: every one stays on the guarded reload until its own step lands.
-  "plugins/page-view.js": "the reader the transition will own; 17b-7a",
+  // Plugins still on the guarded reload until their own step lands.
   "plugins/cms.js": "the vendor auto-opens at import; 17b-9",
   "plugins/quickcrop.js": "reached through cms and unreviewed; 17b-9",
-  "plugins/menu.js": "a persistent UI service nobody has reviewed yet",
   "plugins/wire.js": "no admission lease yet; 17b-9",
   "plugins/message.js": "unreviewed",
   "plugins/ai-edit.js": "init() returns early in view, so it cannot prepare live; 17b-9",
   "plugins/demo.js": "its own destination, not a host edit session",
-  "plugins/source.js": "the accepted-byte service, unreviewed",
   "plugins/visitor-drafts.js": "the draft plan keeps its own startup",
-  "plugins/bind-text.js": "its bindings belong to the application's own participant",
-  "plugins/derive.js": "paints from the Sap boot hooks; a later step",
-  "plugins/upgrade.js": "runs under the document-operation slot; a later step",
 };
 
 const KINDS = ["neutral", "export", "reader"];
@@ -144,17 +138,18 @@ function readFixture(name) {
 }
 
 test.each(["document.html", "kanban.html", "journal.html"])(
-  "the %s plans are still unsupported, and the test says what blocks them",
+  "the %s plans resolve to nothing unsupported",
   async (name) => {
     const fixture = readFixture(name);
     const options = { hasSap: fixture.hasSap, canEdit: true, templateSource: fixture.templateSource };
     const edit = resolveModules(fixture.params, true, options);
     const view = resolveModules(fixture.params, false, options);
 
-    const { unsupportedPaths } = await import("../../../src/core/mode-switch.js");
+    const { unsupportedPaths, liveAllowed } = await import("../../../src/core/mode-switch.js");
     const blocked = unsupportedPaths({ edit, view });
 
-    console.log(`mode-support: ${name} is blocked by ${blocked.join(", ")}`);
-    expect(blocked.length).toBeGreaterThan(0);
+    console.log(`mode-support: ${name} is blocked by ${blocked.join(", ") || "nothing"}`);
+    expect(blocked).toEqual([]);
+    expect(liveAllowed({ edit, view })).toBe(true);
   }
 );
