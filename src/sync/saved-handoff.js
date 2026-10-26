@@ -21,13 +21,20 @@ const newer = (staged, candidate) =>
  * moves the acknowledged sink here, so nothing is applied and the receipt still moves
  * only onto bytes a sink took. `stop` is never called before commit.
  *
+ * `yieldArticle` gives the article up to a switch that mounts over it and
+ * `reclaimArticle` takes it back when that switch is refused; both are the reader's
+ * own, so the queue and the receipt never move while the article is not its.
+ *
  * @param {Object} lane
  * @param {Object} lane.stream - the transport this reader opened
  * @param {function(Object): boolean} lane.apply - apply one file to the article
  * @param {function(): boolean} lane.retire - give up the article and its claim
+ * @param {function(): boolean} lane.yieldArticle - release the article, keep the queue
+ * @param {function(): boolean} lane.reclaimArticle - take the article back and repaint
  */
-function streamHandoff({ stream, apply, retire }) {
+function streamHandoff({ stream, apply, retire, yieldArticle = () => false, reclaimArticle = () => false }) {
   let staged = null;
+  let yielded = false;
   stream.adopt({
     onSnapshot: (candidate) => {
       staged = newer(staged, candidate);
@@ -43,6 +50,16 @@ function streamHandoff({ stream, apply, retire }) {
     get represented() {
       return stream.represented;
     },
+    yieldArticle() {
+      if (yielded || !yieldArticle()) return false;
+      yielded = true;
+      return true;
+    },
+    reclaimArticle() {
+      if (!yielded || !reclaimArticle()) return false;
+      yielded = false;
+      return true;
+    },
     reconcile() {
       const candidate = take();
       if (candidate && !apply(candidate)) return Promise.reject(fail("the switch could not apply the saved file", "load-failed"));
@@ -55,9 +72,14 @@ function streamHandoff({ stream, apply, retire }) {
     },
     commit() {
       // Whatever the old owner was never shown goes on screen first: the receipt a
-      // successor is built from and the article it replaces must name one file.
-      const candidate = take();
-      if (candidate && !apply(candidate)) return false;
+      // successor is built from and the article it replaces must name one file. An
+      // article already yielded belongs to the switch: it reconciled the queue and
+      // refused anything newer before asking for this commit, so nothing staged is
+      // its to paint, and the read-only half only stops the stream and retires.
+      if (!yielded) {
+        const candidate = take();
+        if (candidate && !apply(candidate)) return false;
+      }
       if (stream.represented.bytes === null) return false;
       stream.stop();
       return retire();
@@ -73,15 +95,19 @@ function streamHandoff({ stream, apply, retire }) {
  * @param {Object} reader.options - `{ signal, deadline }` for the lane
  * @param {function(Object): boolean} reader.apply - apply one file to the article
  * @param {function(): boolean} reader.retire - give up the article and its claim
+ * @param {function(): boolean} reader.yieldArticle - release the article, keep the queue
+ * @param {function(): boolean} reader.reclaimArticle - take the article back and repaint
  * @returns {Promise<Object>}
  */
-export async function readerHandoff({ stream, options, apply, retire }) {
-  if (stream) return streamHandoff({ stream, apply, retire });
+export async function readerHandoff({ stream, options, apply, retire, yieldArticle = () => false, reclaimArticle = () => false }) {
+  if (stream) return streamHandoff({ stream, apply, retire, yieldArticle, reclaimArticle });
   const lane = await import("./live-sync.js").then(({ liveSync }) => liveSync.prepareHandoff(options));
   return {
     get represented() {
       return lane.represented;
     },
+    yieldArticle,
+    reclaimArticle,
     reconcile: () => lane.reconcile(),
     resume: () => lane.resume(),
     commit: () => lane.commit() && retire(),

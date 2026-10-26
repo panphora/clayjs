@@ -414,3 +414,104 @@ test("one owner, one stream and no extra listeners across 100 entries and exits"
   expect(removed.every(([, handler, options], at) => handler === added[at][1] && options === true)).toBe(true);
   expect(text()).toBe("A");
 });
+
+// A tool whose mount leaves a mark on its own root, so a test can see a mount come
+// back after it was disposed.
+const toolArtifact = {
+  title: "Live",
+  html: '<p data-live-tool="html">live</p>',
+  css: "",
+  javascript: "function mount(tool) { tool.root.setAttribute('data-live-tool', 'on'); return () => tool.root.removeAttribute('data-live-tool'); }",
+  fallbackHtml: '<p data-live-tool="fallback">fallback</p>',
+  summary: "Live",
+};
+
+const TOOL = `<section data-type="tool" data-id="tool-1" data-rev="r1"><script type="application/json" data-tool>${JSON.stringify({ artifact: toolArtifact, rev: "r1", state: {} })}</script>${toolArtifact.fallbackHtml}</section>`;
+
+test("a yielded reader gives the claim up and keeps the files the lane delivers", async () => {
+  const { reader, source, bytes } = await openReader();
+  const article = document.querySelector("article[data-page]");
+  const handoff = await reader.prepareHandoff({});
+
+  expect(handoff.yieldArticle()).toBe(true);
+  expect(ownerOf(article)).toBe(null);
+  // Only because the claim is gone can the switch take the article it mounts over.
+  const release = claim(article, "editor");
+  expect(ownerOf(article)).toBe("editor");
+  release();
+
+  // A file arriving while the switch is up is kept, not painted, and no receipt
+  // moves onto bytes the article never took.
+  const newer = FILE('<p data-id="a">B</p>');
+  source.onmessage(frame({ seq: 2, html: newer, etag: "E2" }));
+  expect(text()).toBe("A");
+  expect(reader.represented).toEqual({ bytes, etag: "E1", seq: 1 });
+  expect(handoff.yieldArticle()).toBe(false);
+
+  reader.stop();
+});
+
+test("reclaim repaints the receipt, re-claims, and resume applies the file held meanwhile", async () => {
+  const bytes = FILE(`${TOOL}<details data-id="d1"><summary>More</summary><p data-id="d2">inside</p></details><p data-id="a">A</p>`);
+  load(served(null, ARTICLE("served")));
+  const reader = startReader({ represented: { bytes, etag: "E1", seq: 1 }, documentURL: "/index.html" });
+  const article = document.querySelector("article[data-page]");
+  expect(await until(() => sources.length > 0)).toBe(true);
+  expect(await until(() => article.querySelector('[data-live-tool="on"]'))).toBe(true);
+  const source = sources.at(-1);
+
+  // The reader opens a toggle the file says is closed: that state is the reader's,
+  // not the file's, and it survives what the switch does to the article.
+  const details = article.querySelector('details[data-id="d1"]');
+  details.open = true;
+  details.dispatchEvent(new Event("toggle"));
+
+  const handoff = await reader.prepareHandoff({});
+  expect(handoff.yieldArticle()).toBe(true);
+  expect(article.querySelector('[data-live-tool="on"]')).toBe(null);
+  expect(ownerOf(article)).toBe(null);
+
+  // The switch's editor replaces what it finds, and a newer file arrives meanwhile.
+  article.innerHTML = '<p data-id="a">editor</p>';
+  const newer = FILE('<p data-id="a">Z</p>');
+  source.onmessage(frame({ seq: 3, html: newer, etag: "E3" }));
+  expect(text()).toBe("editor");
+
+  // Refused: the article comes back exactly as the receipt the reader holds says.
+  expect(handoff.reclaimArticle()).toBe(true);
+  expect(text()).toBe("A");
+  expect(article.querySelector('details[data-id="d1"]').open).toBe(true);
+  expect(await until(() => article.querySelector('[data-live-tool="on"]'))).toBe(true);
+  expect(ownerOf(article)).toBe("reader");
+  expect(() => claim(article, "editor")).toThrow(/already has a reader runtime/);
+  expect(reader.represented).toEqual({ bytes, etag: "E1", seq: 1 });
+  expect(handoff.reclaimArticle()).toBe(false);
+
+  handoff.resume();
+  expect(text()).toBe("Z");
+  expect(reader.represented).toEqual({ bytes: newer, etag: "E3", seq: 3 });
+  reader.stop();
+});
+
+test("a commit after a yield paints nothing and releases no claim it does not hold", async () => {
+  const { reader, source, bytes } = await openReader();
+  const article = document.querySelector("article[data-page]");
+  const handoff = await reader.prepareHandoff({});
+
+  handoff.yieldArticle();
+  const release = claim(article, "editor");
+  article.querySelector('[data-id="a"]').textContent = "editor wrote this";
+
+  const newer = FILE('<p data-id="a">B</p>');
+  source.onmessage(frame({ seq: 2, html: newer, etag: "E2" }));
+
+  expect(handoff.commit()).toBe(true);
+  // The switch reconciled and refused the file itself: nothing staged is painted
+  // over the article it owns, and retiring the reader leaves that claim alone.
+  expect(text()).toBe("editor wrote this");
+  expect(ownerOf(article)).toBe("editor");
+  expect(sources.at(-1).closed).toBe(true);
+  expect(reader.stop()).toEqual({ bytes, etag: "E1", seq: 1 });
+  expect(ownerOf(article)).toBe("editor");
+  release();
+});

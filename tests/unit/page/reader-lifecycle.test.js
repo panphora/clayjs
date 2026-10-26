@@ -187,3 +187,25 @@ test("an accepted file records its etag, so a later save is not refused as stale
   expect(etag.lastSeenEtag()).toBe("etag-b");
   reader.stop();
 });
+
+test("page-view starts from a represented receipt, paints it and asks the host for nothing", async () => {
+  load(FILE('<p data-id="a">Served</p>'));
+  const fetchSpy = jest.fn(() => Promise.resolve({ ok: true, status: 200, text: async () => "", headers: { get: () => null } }));
+  globalThis.fetch = window.fetch = fetchSpy;
+  const bytes = FILE('<p data-id="a">Accepted</p>', { rev: "r2", title: "Accepted" });
+
+  const pageView = await import("../../../src/plugins/page-view.js");
+  pageView.start({ represented: { bytes, etag: "etag-a", seq: 4 } });
+
+  expect(document.querySelector('[data-id="a"]').textContent).toBe("Accepted");
+  expect(document.title).toBe("Accepted");
+  expect(streams).toHaveLength(1);
+  expect(streams[0].options.represented).toEqual({ bytes, etag: "etag-a", seq: 4 });
+  expect(streams[0].options.documentURL).toBeUndefined();
+  expect(await pageView.acquired).toEqual({ bytes, etag: "etag-a", seq: 4 });
+  await settle();
+  expect(fetchSpy).not.toHaveBeenCalled();
+
+  pageView.stop();
+  expect(streams[0].stopped).toBe(true);
+});

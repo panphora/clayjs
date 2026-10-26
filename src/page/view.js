@@ -49,7 +49,7 @@ export function applySavedArticle(html, doc = document, readerOpen = new Map(), 
   return changed;
 }
 
-function createReader({ doc, article, represented = null, feed = null, documentURL, servedEtag = null, stream: adopted = null, release = () => {} }) {
+function createReader({ doc, article, represented = null, feed = null, documentURL, servedEtag = null, stream: adopted = null, release: held = () => {} }) {
   const readerOpen = new Map();
   const savedOpen = new Map();
   const mounted = new Map();
@@ -64,6 +64,10 @@ function createReader({ doc, article, represented = null, feed = null, documentU
   let receipt = freezeReceipt(represented);
   // A switch owns the saved lane from `prepareHandoff` until it commits or resumes.
   let handoff = null;
+  let release = held;
+  // A switch that mounts an editor over this article takes the claim for the time it
+  // is up: the reader keeps the lane and the files still queued, and paints nothing.
+  let yielded = false;
 
   const dispatch = (type, detail) => {
     const win = doc.defaultView ?? globalThis;
@@ -173,7 +177,7 @@ function createReader({ doc, article, represented = null, feed = null, documentU
   };
 
   function commit(candidate) {
-    if (stopped) return false;
+    if (stopped || yielded) return false;
     const prepared = prepareSavedArticle(candidate.bytes, doc);
     if (!prepared.ok) return false;
     if (article.querySelector(".page-editor")) return false;
@@ -237,13 +241,41 @@ function createReader({ doc, article, represented = null, feed = null, documentU
     get represented() {
       return receipt;
     },
+    // Give the article up to a switch that mounts over it: the mounted tools go, the
+    // claim goes, and nothing is painted until `reclaimArticle` takes it back. The
+    // stream and the files it queued stay held, so no save falls between the two.
+    yieldArticle() {
+      if (stopped || yielded) return false;
+      mountTurn++;
+      disposeMounts();
+      yielded = true;
+      release();
+      return true;
+    },
+    // The article back, exactly as the receipt this reader holds says: a switch that
+    // fails gives it up unchanged, and a refused entry costs no frame.
+    reclaimArticle() {
+      if (stopped || !yielded) return false;
+      release = claim(article, "reader");
+      yielded = false;
+      if (receipt.bytes !== null) {
+        const prepared = prepareSavedArticle(receipt.bytes, doc);
+        if (prepared.ok) {
+          paint(prepared);
+          mountTools(prepared.tools, prepared.toolState);
+        }
+      }
+      return true;
+    },
     // Hand this article over to a switch. The lane that owns the queue keeps the
     // pending files and the repair it owes; nothing here stops a stream.
     prepareHandoff(options = {}) {
       if (handoff) return Promise.resolve(handoff);
       if (stopped) return Promise.reject(new Error("clayjs: the reader is stopped"));
       handoff = import("../sync/saved-handoff.js")
-        .then(({ readerHandoff }) => readerHandoff({ stream, options, apply: commit, retire }));
+        .then(({ readerHandoff }) => readerHandoff({
+          stream, options, apply: commit, retire, yieldArticle: reader.yieldArticle, reclaimArticle: reader.reclaimArticle,
+        }));
       return handoff;
     },
     stop() {
@@ -258,7 +290,9 @@ function createReader({ doc, article, represented = null, feed = null, documentU
       disposeMounts();
       try { host?.dispose(); } catch {}
       host = null;
-      release();
+      if (!yielded) release();
+      yielded = false;
+      release = () => false;
       final = Object.freeze({ ...receipt });
       return final;
     },

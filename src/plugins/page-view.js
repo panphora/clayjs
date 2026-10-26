@@ -53,15 +53,20 @@ function silence() {
 
 // The reader opens the saved transport and mounts the served article's tools at
 // once, so the article works before any file arrives; the first accepted file
-// commits into that same reader.
-function acquire() {
+// commits into that same reader. A caller that already holds the receipt a switch
+// accepted passes it here: the article is painted from those bytes at once, with
+// no acquisition request, so an exit shows the file it left on.
+function acquire(represented = null) {
   if (!oneArticle()) return Promise.resolve(null);
   try {
-    reader = startReader({ documentURL: window.location.href, servedEtag: servedDocumentEtag });
+    reader = represented
+      ? startReader({ represented })
+      : startReader({ documentURL: window.location.href, servedEtag: servedDocumentEtag });
   } catch (error) {
     console.warn("clayjs: the reader could not start over the served article", error);
     return Promise.resolve(null);
   }
+  if (represented) return Promise.resolve(reader.represented);
   return new Promise((resolve) => { settle = resolve; });
 }
 
@@ -81,14 +86,16 @@ function followSync() {
 /**
  * Start the reader for the page in front of it. `sync` reports whether the plan
  * the loader resolved carries generic sync, and therefore whether the saved lane
- * already has an owner.
+ * already has an owner. `represented` is the receipt a switch accepted: with it
+ * the reader paints that file at once and asks the host for nothing, which is how
+ * an exit restarts the reader without waiting for a frame.
  */
-export function start({ sync = false } = {}) {
+export function start({ sync = false, represented = null } = {}) {
   if (ready) return ready;
   cancelled = false;
   following = sync;
   listen();
-  acquired = sync ? followSync() : acquire();
+  acquired = sync ? followSync() : acquire(represented);
   // With generic sync the reader starts before this returns, so both promises
   // settle together; otherwise only the transport starts here and the first
   // file arrives later, from the stream.
