@@ -125,6 +125,18 @@ export function requestMode(target) {
   return promise;
 }
 
+// The public transaction for a document that signed the live-switch contract: the plan it
+// resolved for an editor is checked first, and a document this release cannot start and
+// take back answers `null` so its caller keeps the guarded reload.
+export async function switchMode(target, plan) {
+  // A decision this release cannot fetch leaves the caller its guarded reload, and the
+  // failed import is not kept: the next ask asks again.
+  const decision = await import("./mode-switch.js").catch(() => null);
+  if (!decision || !decision.liveAllowed(plan)) return null;
+  if (target === "edit") decision.openResources();
+  return requestMode(target);
+}
+
 // The explicit initial edit: this tab already starts in edit or draft, so nothing
 // switches. The preboot queue is drained, prepared and enabled before input instead.
 export async function activateInitial() {

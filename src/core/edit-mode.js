@@ -21,6 +21,17 @@ export const modeLifecycle = {
 // a participant exists — and a rejected fetch is retried on the next ask.
 let controller = null;
 
+// A live switch is a contract the document signs, not a hint. The loader records this
+// document's boot here only when `<html clay-mode-switch="live">` asked for one; the
+// decision behind it -- adapters, authored resources, participants -- and the controller
+// that runs the transaction are a dynamic target, fetched by the first switch and never
+// by the declaration itself.
+let liveSwitch = null;
+
+export const noteLiveSwitch = (boot) => {
+  liveSwitch = boot;
+};
+
 export async function activateInitialMode() {
   if (!isEditMode) return;
   try {
@@ -35,6 +46,13 @@ export async function setMode(next) {
   if (next !== "edit" && next !== "view") throw new TypeError(`clay.setMode: unknown mode "${next}"`);
   if (next === mode) return { ok: true, mode, changed: false };
   if (isDraftMode || !canEdit) return { ok: false, mode, code: "not-allowed" };
+  if (liveSwitch) {
+    // A fetch that fails keeps the old way in: the guarded reload below, and the failed
+    // import is cleared so the next ask asks again.
+    controller ||= await import("./mode-lifecycle.js").catch(() => null);
+    const live = controller && (await controller.switchMode(next, liveSwitch));
+    if (live) return live;
+  }
   if (mode === "edit") {
     let result;
     try {
