@@ -65,7 +65,8 @@ test("an edit-mode boot with plugins=page asks the host for its metadata exactly
 
   const meta = metaRequests(requests);
   expect(meta.length).toBe(1);
-  expect(meta[0].caller).toContain("/src/loader.js:");
+  // The boot asks once: the loader, or the host-permission check it runs first.
+  expect(meta[0].caller).toMatch(/\/src\/(loader|core\/host-permission)\.js:/);
   expect(window.clay.page).toBeDefined();
 });
 
