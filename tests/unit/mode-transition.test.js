@@ -367,6 +367,356 @@ test("a registered pending source refuses the exit, and the clean page it become
   }
 });
 
+// ---------------------------------------------------------------------------
+// 17b-4c: a declared document with no reader switches live with real saves.
+// ---------------------------------------------------------------------------
+
+const SORTABLE_PARAMS = "plugins=sortable,undo&exclude=richclay,source";
+const BOARD = '<ul sortable id="board"><li>a</li><li>b</li></ul>';
+
+// One turn of the real event loop, for work jest's fake timers must not hold: a dynamic
+// import resolves on one. The real timer is captured before any test installs the fake one.
+const realSetTimeout = globalThis.setTimeout;
+const turn = () => new Promise((resolve) => realSetTimeout(resolve, 0));
+
+// Every listener, observer and Sortable instance the page is running right now. The
+// transition owns those: an entry starts one session's worth and an exit hands all of it
+// back, so the counts are how a case says "one session" without reading the code.
+//
+// A listener is keyed by its target, type, handler and capture flag rather than counted
+// as a running total, because a vendor that hands back a subscription it never took would
+// otherwise read as a removal.
+function resourceCounter() {
+  const target = EventTarget.prototype;
+  const add = target.addEventListener;
+  const remove = target.removeEventListener;
+  const observe = MutationObserver.prototype.observe;
+  const disconnect = MutationObserver.prototype.disconnect;
+  const ids = new WeakMap();
+  let next = 0;
+  const idOf = (value) => {
+    if (!ids.has(value)) ids.set(value, ++next);
+    return ids.get(value);
+  };
+  const live = new Set();
+  const keyOf = (context, type, handler, options) => {
+    if (!handler || (typeof handler !== "object" && typeof handler !== "function")) return null;
+    if (!context || (typeof context !== "object" && typeof context !== "function")) return null;
+    // jsdom's selector engine arms a `:hover` matcher on every document it is first used
+    // on, including the throwaway ones a snapshot parse makes. Those are not the page's.
+    if (context.nodeType === 9 && context !== document) return null;
+    const capture = typeof options === "boolean" ? options : Boolean(options?.capture);
+    return `${idOf(context)}|${type}|${idOf(handler)}|${capture}`;
+  };
+  const observers = new Set();
+  target.addEventListener = function (type, handler, options) {
+    const key = keyOf(this, type, handler, options);
+    if (key) live.add(key);
+    return add.call(this, type, handler, options);
+  };
+  target.removeEventListener = function (type, handler, options) {
+    const key = keyOf(this, type, handler, options);
+    if (key) live.delete(key);
+    return remove.call(this, type, handler, options);
+  };
+  MutationObserver.prototype.observe = function (...args) {
+    observers.add(this);
+    return observe.apply(this, args);
+  };
+  MutationObserver.prototype.disconnect = function (...args) {
+    observers.delete(this);
+    return disconnect.apply(this, args);
+  };
+  return {
+    snapshot: () => ({
+      listeners: live.size,
+      observers: observers.size,
+      instances: [...document.querySelectorAll("[sortable]")].filter((el) => window.Sortable?.get?.(el)).length,
+    }),
+    stop() {
+      target.addEventListener = add;
+      target.removeEventListener = remove;
+      MutationObserver.prototype.observe = observe;
+      MutationObserver.prototype.disconnect = disconnect;
+    },
+  };
+}
+
+// The plugin announcements of one page, in order.
+function pluginReadyLog() {
+  const seen = [];
+  const onReady = (event) => seen.push(event.detail?.plugin);
+  document.addEventListener("clay:plugin-ready", onReady);
+  seen.stop = () => document.removeEventListener("clay:plugin-ready", onReady);
+  return seen;
+}
+
+test("a view-boot entry imports the edit core and gives the page a save", async () => {
+  const clay = await bootPage({ owner: true, declared: true });
+  expect(clay.mode).toBe("view");
+  expect(clay.save).toBeUndefined();
+  expect(clay.getHTML).toBeUndefined();
+
+  const { MODULES } = await import("../../src/loader-logic.js");
+  const imported = [];
+  const thunks = {};
+  for (const path of ["core/persist.js", "core/save.js", "core/autosave.js"]) {
+    thunks[path] = MODULES[path];
+    MODULES[path] = () => {
+      imported.push(path);
+      return thunks[path]();
+    };
+  }
+  try {
+    await expect(clay.setMode("edit")).resolves.toEqual({ ok: true, mode: "edit", changed: true });
+  } finally {
+    for (const path of Object.keys(thunks)) MODULES[path] = thunks[path];
+  }
+
+  // The edit core arrived on the way in, in the plan's own order.
+  expect(imported).toEqual(["core/persist.js", "core/save.js", "core/autosave.js"]);
+  expect(typeof clay.save).toBe("function");
+  expect(typeof clay.hasUnsavedChanges).toBe("function");
+  expect(typeof clay.getHTML).toBe("function");
+  expect(clay.mode).toBe("edit");
+  expect(clay.modeLifecycle.canWrite()).toBe(true);
+
+  // The entry adopted the page as its baseline: a clean page is clean, and the exit's
+  // barrier has something to compare it with.
+  const save = await import("../../src/core/save.js");
+  const { bytesUnsaved } = await import("../../src/core/unsaved-warning.js");
+  expect(save.baselineSettled()).toBe(true);
+  expect(bytesUnsaved()).toBe(false);
+});
+
+test("a view-boot session saves one real edit once, and the exit writes nothing more", async () => {
+  const clay = await bootPage({ owner: true, declared: true, params: SORTABLE_PARAMS, resources: BOARD });
+  await expect(clay.setMode("edit")).resolves.toEqual({ ok: true, mode: "edit", changed: true });
+
+  posts = [];
+  document.getElementById("content").textContent = "typed in a live session";
+  await flush();
+  const answer = await clay.save();
+  await flush();
+
+  expect(answer).toBeTruthy();
+  expect(posts).toHaveLength(1);
+  expect(posts[0]).toContain("typed in a live session");
+
+  // A committed exit after the write is the barrier alone: the page is clean, so nothing
+  // else reaches the host.
+  const written = posts.length;
+  await expect(clay.setMode("view")).resolves.toEqual({ ok: true, mode: "view", changed: true });
+  await flush();
+  expect(posts).toHaveLength(written);
+});
+
+test("a rejected edit-core import reloads once, and the next ask retries the same thunk", async () => {
+  const clay = await bootPage({ owner: true, declared: true });
+  const { MODULES } = await import("../../src/loader-logic.js");
+  const thunk = MODULES["core/save.js"];
+  let calls = 0;
+  MODULES["core/save.js"] = () => {
+    calls++;
+    return calls === 1 ? Promise.reject(new Error("the save module is not on this network")) : thunk();
+  };
+
+  try {
+    await withFakeLocation(async (fake) => {
+      // Nothing was prepared, so nothing changed: the guarded reload the document had
+      // before it declared live switching.
+      await expect(clay.setMode("edit")).resolves.toEqual({ ok: true, mode: "edit", changed: true, reloading: true });
+      expect(fake.reload).toHaveBeenCalledTimes(1);
+      expect(calls).toBe(1);
+      expect(clay.mode).toBe("view");
+      expect(clay.modeLifecycle.state).toMatchObject({ phase: "idle", reason: null });
+
+      // The failed import was not kept: the same thunk is asked again, and this time the
+      // page switches without a reload.
+      await expect(clay.setMode("edit")).resolves.toEqual({ ok: true, mode: "edit", changed: true });
+      expect(calls).toBe(2);
+      expect(fake.reload).toHaveBeenCalledTimes(1);
+      expect(clay.modeLifecycle.canWrite()).toBe(true);
+    });
+  } finally {
+    MODULES["core/save.js"] = thunk;
+  }
+
+  expect(clay.mode).toBe("edit");
+});
+
+test("an import held past the deadline refuses in view without a reload", async () => {
+  const clay = await bootPage({ owner: true, declared: true });
+  const { MODULES } = await import("../../src/loader-logic.js");
+  const thunk = MODULES["core/snapshot.js"];
+  let release;
+  const held = new Promise((resolve) => {
+    release = resolve;
+  });
+  MODULES["core/snapshot.js"] = async () => {
+    await held;
+    return thunk();
+  };
+
+  jest.useFakeTimers({ doNotFake: ["setImmediate", "queueMicrotask", "nextTick"] });
+  try {
+    await withFakeLocation(async (fake) => {
+      const entering = clay.setMode("edit");
+      for (let i = 0; i < 200 && clay.modeLifecycle.state.phase !== "entering"; i++) await turn();
+      await jest.advanceTimersByTimeAsync(15000);
+
+      // A slow or offline network is a try-again answer, never a reload.
+      await expect(entering).resolves.toEqual({ ok: false, mode: "view", code: "timeout" });
+      expect(fake.reload).not.toHaveBeenCalled();
+      expect(clay.mode).toBe("view");
+      expect(clay.modeLifecycle.canWrite()).toBe(false);
+    });
+  } finally {
+    jest.useRealTimers();
+    release();
+  }
+
+  await flush();
+  MODULES["core/snapshot.js"] = thunk;
+  expect(clay.mode).toBe("view");
+});
+
+test("an explicit initial edit exits by adoption and the page re-enters live", async () => {
+  const counter = resourceCounter();
+  const ready = pluginReadyLog();
+  try {
+    const clay = await bootPage({ edit: true, owner: true, declared: true, params: SORTABLE_PARAMS, resources: BOARD });
+    // The boot's own late tail starts the drag editor; nothing has adopted it yet.
+    expect(await until(() => counter.snapshot().instances === 1)).toBe(true);
+    const editing = counter.snapshot();
+    posts = [];
+
+    await expect(clay.setMode("view")).resolves.toEqual({ ok: true, mode: "view", changed: true });
+    const view = counter.snapshot();
+    // The sessions the import started are taken back: no instance, fewer listeners, and
+    // the clean page wrote nothing on the way out.
+    expect(view.instances).toBe(0);
+    expect(view.listeners).toBeLessThan(editing.listeners);
+    expect(posts).toEqual([]);
+    expect(clay.modeLifecycle.canWrite()).toBe(false);
+
+    // The next way in is a live entry: the controller prepares and enables one session,
+    // and it starts what the boot started.
+    await expect(clay.setMode("edit")).resolves.toEqual({ ok: true, mode: "edit", changed: true });
+    const liveEntry = counter.snapshot();
+    expect(liveEntry.instances).toBe(1);
+    expect(clay.modeLifecycle.canWrite()).toBe(true);
+
+    await expect(clay.setMode("view")).resolves.toEqual({ ok: true, mode: "view", changed: true });
+    const secondView = counter.snapshot();
+    expect(secondView.instances).toBe(0);
+    expect(secondView.listeners).toBeLessThan(liveEntry.listeners);
+  } finally {
+    ready.stop();
+    counter.stop();
+  }
+});
+
+test("three enter and exit cycles hold one session's listeners, observers and instances", async () => {
+  const counter = resourceCounter();
+  try {
+    const clay = await bootPage({ owner: true, declared: true, params: SORTABLE_PARAMS, resources: BOARD });
+    const editing = [];
+    const viewing = [];
+
+    for (let cycle = 0; cycle < 3; cycle++) {
+      await expect(clay.setMode("edit")).resolves.toEqual({ ok: true, mode: "edit", changed: true });
+      editing.push(counter.snapshot());
+      await expect(clay.setMode("view")).resolves.toEqual({ ok: true, mode: "view", changed: true });
+      viewing.push(counter.snapshot());
+    }
+
+    // Every session is the same size, and every exit lands on the same view.
+    expect(editing.map((counts) => counts.instances)).toEqual([1, 1, 1]);
+    expect(new Set(editing.map((counts) => JSON.stringify(counts))).size).toBe(1);
+    expect(new Set(viewing.map((counts) => JSON.stringify(counts))).size).toBe(1);
+    // A clean switch is never a write.
+    expect(posts).toEqual([]);
+  } finally {
+    counter.stop();
+  }
+});
+
+test("clay:plugin-ready fires once per plugin across three cycles", async () => {
+  const ready = pluginReadyLog();
+  try {
+    const clay = await bootPage({ owner: true, declared: true, params: SORTABLE_PARAMS, resources: BOARD });
+
+    for (let cycle = 0; cycle < 3; cycle++) {
+      await expect(clay.setMode("edit")).resolves.toEqual({ ok: true, mode: "edit", changed: true });
+      await expect(clay.setMode("view")).resolves.toEqual({ ok: true, mode: "view", changed: true });
+    }
+
+    // Both plugins arrived on the first entry and were announced after its commit; the
+    // later entries loaded nothing and announced nothing.
+    expect([...ready].sort()).toEqual(["sortable", "undo"]);
+  } finally {
+    ready.stop();
+  }
+});
+
+test("a late module that lands after an initial edit's exit starts nothing and is not announced", async () => {
+  // The drag editor is imported by the boot's own late tail, and the exit cannot wait for
+  // it forever. Held past that wait, the page exits; when the import lands it evaluates in
+  // view, so it starts no editor and is announced to nobody.
+  let release;
+  const held = new Promise((resolve) => {
+    release = resolve;
+  });
+  const seen = { evaluated: false, inEdit: null, session: 0 };
+  jest.unstable_mockModule("../../src/plugins/sortable.js", async () => {
+    await held;
+    // The committed mode, read the way every edit-only module reads it at evaluation.
+    seen.evaluated = true;
+    seen.inEdit = window.clay?.mode === "edit";
+    const board = document.getElementById("board");
+    if (seen.inEdit && board) {
+      seen.session++;
+      board.setAttribute("data-session", "1");
+    }
+    return { ready: Promise.resolve(null), sortable: {}, makeSortable() {}, move() {} };
+  });
+
+  const ready = pluginReadyLog();
+  const clay = await bootPage({ edit: true, owner: true, declared: true, params: SORTABLE_PARAMS, resources: BOARD });
+  try {
+    expect(clay.mode).toBe("edit");
+    expect(seen.evaluated).toBe(false);
+
+    jest.useFakeTimers({ doNotFake: ["setImmediate", "queueMicrotask", "nextTick"] });
+    let exiting;
+    try {
+      exiting = clay.setMode("view");
+      for (let i = 0; i < 200 && clay.modeLifecycle.state.phase !== "leaving"; i++) await turn();
+      await jest.advanceTimersByTimeAsync(15000);
+      await expect(exiting).resolves.toEqual({ ok: true, mode: "view", changed: true });
+    } finally {
+      jest.useRealTimers();
+    }
+
+    // The exit did not wait for the import: the page is in view and nothing of the
+    // plugin has been attached.
+    expect(clay.mode).toBe("view");
+    expect(clay.sortable).toBeUndefined();
+    release();
+    await flush();
+
+    expect(seen.evaluated).toBe(true);
+    expect(seen.inEdit).toBe(false);
+    expect(seen.session).toBe(0);
+    expect([...document.querySelectorAll("[sortable]")].filter((el) => window.Sortable?.get?.(el))).toEqual([]);
+    expect([...ready]).toEqual([]);
+  } finally {
+    release();
+    ready.stop();
+  }
+});
+
 test("a switch module that fails to load keeps the guarded reload and leaves no unhandled rejection", async () => {
   const rejections = [];
   const onRejection = (reason) => rejections.push(reason);
@@ -394,3 +744,4 @@ test("a switch module that fails to load keeps the guarded reload and leaves no 
     process.off("unhandledRejection", onRejection);
   }
 });
+
