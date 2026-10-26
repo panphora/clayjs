@@ -27,7 +27,7 @@ globalThis.document = window.document;
 for (const key of Object.getOwnPropertyNames(window)) {
   if (!(key in globalThis)) Object.defineProperty(globalThis, key, { value: window[key], configurable: true });
 }
-for (const key of ['Event', 'EventTarget', 'CustomEvent', 'navigator']) {
+for (const key of ['Event', 'EventTarget', 'CustomEvent', 'AbortController', 'AbortSignal', 'navigator']) {
   Object.defineProperty(globalThis, key, { value: window[key], configurable: true });
 }
 window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
