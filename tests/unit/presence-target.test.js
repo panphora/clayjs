@@ -1,6 +1,6 @@
 import { describe, expect, test } from "@jest/globals";
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, resolve, sep } from "node:path";
+import { dirname, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -328,7 +328,7 @@ describe("the module stays pure", () => {
     expect(files).toContain(resolve(ROOT, "src/sync/presence-target.js"));
     expect(files).toContain(resolve(ROOT, "src/sync/editing-path.js"));
     for (const file of files) {
-      const path = file.split(sep).join("/");
+      const path = relative(ROOT, file).split(sep).join("/");
       for (const rule of FORBIDDEN) expect(`${rule.name}: ${rule.test(path)}`).toBe(`${rule.name}: false`);
     }
   });
