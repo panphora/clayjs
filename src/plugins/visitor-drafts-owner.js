@@ -26,6 +26,7 @@ function mountChip() {
           mounted = chip;
           return chip;
         }
+        chip?.liftOff?.();
         chip?.remove();
         return null;
       })
@@ -36,6 +37,7 @@ function mountChip() {
 
 function unmountChip() {
   sessions += 1;
+  mounted?.liftOff?.();
   mounted?.remove();
   mounted = null;
   document.getElementById("clay-owner-vars")?.remove();

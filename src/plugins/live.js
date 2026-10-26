@@ -926,6 +926,12 @@ export function stageStore(name, { value, represented = null, signal = null } = 
     dispose() {
       if (entry.staged && entries.get(name) === entry) entries.delete(name);
     },
+    // The session that staged this store is over, whether or not its first write was
+    // accepted: the room keeps the value, and the next session stages its own from the
+    // bytes it represents.
+    close() {
+      if (entries.get(name) === entry) entries.delete(name);
+    },
   };
 }
 

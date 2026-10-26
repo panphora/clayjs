@@ -32,7 +32,7 @@ let emitBootstraps;
 const SEARCH = "?plugins=page";
 const CEILING = 46080;
 
-const declared = (html) => html.replace('<html lang="en">', '<html lang="en" clay-mode-switch="live">');
+const declared = (html) => html.replace(/<html\b([^>]*)>/, '<html$1 clay-mode-switch="live">');
 const upgraded = (html) => html.replace('<meta charset="utf-8">', '<meta charset="utf-8">\n<meta name="hyper-source" content="https://hyperclay.com/templates/document.html">');
 const PARTICIPANT =
   '<script>window.clay = window.clay || {}; (window.clay.modeParticipants = window.clay.modeParticipants || []).push({ id: "template:document", order: 1000, prepare: function () { return { enable: function () {}, quiesce: function () {}, resume: function () {}, dispose: function () {} }; } });</script>';
@@ -77,9 +77,15 @@ const brotliOf = async (files) => {
   return total;
 };
 
-async function viewOf(html) {
-  return measureBuilt({ html, mode: "view", dir: outdir, search: SEARCH, owner: true });
+async function viewOf(html, search = SEARCH) {
+  return measureBuilt({ html, mode: "view", dir: outdir, search, owner: true });
 }
+
+// The three template fixtures, by their own loader tags: each boots the plan its file names.
+const TEMPLATES = ["document.html", "kanban.html", "journal.html"];
+const fixtureOf = (name) => readFileSync(path.join(root, `tests/fixtures/load/${name}`), "utf8");
+const searchOf = (html) => new URL(html.match(/<script[^>]+src="([^"]*clay\.js[^"]+)"/)[1], "https://clayjs.com/").search;
+const rows = JSON.parse(readFileSync(path.join(root, "scripts/load-budget.json"), "utf8")).built;
 
 beforeAll(async () => {
   ({ measureBuilt } = await import("../../scripts/measure-load.mjs"));
@@ -170,4 +176,49 @@ test("the first entry fetches the switch and the controller once, and a repeat e
   // Every later entry asks for modules the page already holds, so it requests nothing.
   const repeat = closureOf([switchChunk, controllerChunk], new Set([...ready, ...first]));
   expect(repeat).toEqual([]);
+});
+
+// The declaration costs a template reader nothing: each fixture boots to its own recorded
+// row, in requests, in depth and within its recorded bytes.
+test("each template reader measures its recorded row with the declaration", async () => {
+  for (const name of TEMPLATES) {
+    const row = rows[name].view;
+    const live = await viewOf(declared(fixtureOf(name)), searchOf(fixtureOf(name)));
+
+    expect({ name, requests: live.js.requests <= row.requests }).toEqual({ name, requests: true });
+    expect({ name, depth: live.js.depth }).toEqual({ name, depth: row.depth });
+    expect({ name, withinBytes: live.js.brotli <= row.brotli }).toEqual({ name, withinBytes: true });
+  }
+});
+
+// The first entry's own requests, per template, as the modules they carry: the decision
+// and the controller with the chunk they share with the reader counted once. The chunk
+// build names a chunk by its content, so the recorded list is the modules, which do not
+// move. A repeat entry asks for none of them again.
+const FIRST_ENTRY = {
+  "document.html": ["core/mode-lifecycle.js", "core/mode-switch.js"],
+  "kanban.html": ["core/mode-lifecycle.js", "core/mode-switch.js"],
+  "journal.html": ["core/mode-lifecycle.js", "core/mode-switch.js"],
+};
+
+// The modules a chunk list carries, by the names the two manifests give them.
+function modulesOf(chunks) {
+  const byChunk = new Map();
+  for (const [path, chunk] of Object.entries({ ...manifest.entries, ...supplement.entries })) {
+    byChunk.set(chunk, [...(byChunk.get(chunk) ?? []), path]);
+  }
+  return chunks.flatMap((chunk) => byChunk.get(chunk) ?? []).sort();
+}
+
+test("the first entry fetches the recorded modules per template, and a repeat entry fetches nothing", async () => {
+  const switchChunk = supplement.entries["core/mode-switch.js"];
+  const controllerChunk = supplement.entries["core/mode-lifecycle.js"];
+
+  for (const name of TEMPLATES) {
+    const ready = new Set(paths(await viewOf(declared(fixtureOf(name)), searchOf(fixtureOf(name)))));
+    const first = closureOf([switchChunk, controllerChunk], ready);
+
+    expect({ name, modules: modulesOf(first) }).toEqual({ name, modules: FIRST_ENTRY[name] });
+    expect(closureOf([switchChunk, controllerChunk], new Set([...ready, ...first]))).toEqual([]);
+  }
 });

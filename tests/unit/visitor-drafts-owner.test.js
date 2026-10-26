@@ -57,6 +57,38 @@ function ownerChip() {
   return document.querySelector(".clay-owner");
 }
 
+// Every listener a page installs on the window and the document, so a teardown can be
+// asked whether it took them back.
+function watchListeners() {
+  const registrations = [];
+  const restore = [window, document].map((target) => {
+    const add = target.addEventListener;
+    const remove = target.removeEventListener;
+    target.addEventListener = function (type, handler, options) {
+      registrations.push({ target, type, handler, removed: false });
+      return add.call(this, type, handler, options);
+    };
+    target.removeEventListener = function (type, handler, options) {
+      for (let i = registrations.length - 1; i >= 0; i--) {
+        const registration = registrations[i];
+        if (registration.target === target && registration.type === type && registration.handler === handler && !registration.removed) {
+          registration.removed = true;
+          break;
+        }
+      }
+      return remove.call(this, type, handler, options);
+    };
+    return () => {
+      target.addEventListener = add;
+      target.removeEventListener = remove;
+    };
+  });
+  return {
+    live: () => registrations.filter((registration) => !registration.removed).length,
+    restore: () => restore.forEach((undo) => undo()),
+  };
+}
+
 afterEach(() => {
   jest.restoreAllMocks();
   clearCookies();
@@ -109,4 +141,25 @@ test("clay.visitorDrafts is the same inert member a non-draft page has always ha
   expect(clay.visitorDrafts.downloadUrl()).toBe("/_/download?as=htmlclay");
   expect(clay.visitorDrafts.source).toBe(null);
   expect(clay.plugins).toContain("visitor-drafts");
+});
+
+test("a session that ends takes the chip's own listeners with it", async () => {
+  const listeners = watchListeners();
+  try {
+    await bootPage({ slot: "owner-chip-6", owner: true });
+    expect(ownerChip()).not.toBeNull();
+    const mounted = listeners.live();
+
+    const { draftsOwnerParticipant } = await import("../../src/plugins/visitor-drafts-owner.js");
+    const lease = draftsOwnerParticipant().prepare({ initial: false });
+    lease.enable();
+    expect(ownerChip()).not.toBeNull();
+    lease.dispose();
+
+    expect(ownerChip()).toBeNull();
+    // The lift's six listeners on the window and the document leave with the chip.
+    expect({ removed: mounted - listeners.live() }).toEqual({ removed: 6 });
+  } finally {
+    listeners.restore();
+  }
 });

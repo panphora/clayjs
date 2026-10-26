@@ -73,7 +73,7 @@ function notFound() {
 
 // A native EventSource would open a socket to the host; this one only records that the
 // page asked for a stream and answers the shape its callers read (`readyState`, close).
-function stubEventSource(counts) {
+function stubEventSource(counts, streams) {
   return class StubEventSource {
     static CONNECTING = 0;
     static OPEN = 1;
@@ -81,6 +81,9 @@ function stubEventSource(counts) {
 
     constructor(url) {
       counts.eventSources++;
+      streams.instances.push(this);
+      streams.standing++;
+      streams.peak = Math.max(streams.peak, streams.standing);
       this.url = url;
       this.readyState = 0;
       this.onopen = null;
@@ -93,12 +96,13 @@ function stubEventSource(counts) {
     dispatchEvent() { return true; }
 
     close() {
+      if (this.readyState !== 2) streams.standing--;
       this.readyState = 2;
     }
   };
 }
 
-export async function bootFixture(name, { mode = "edit", settle = 20 } = {}) {
+export async function bootFixture(name, { mode = "edit", settle = 20, declare = false, params = null } = {}) {
   const fixture = readFixture(name);
   jest.resetModules();
 
@@ -117,6 +121,7 @@ export async function bootFixture(name, { mode = "edit", settle = 20 } = {}) {
   const root = document.documentElement;
   for (const attribute of Array.from(root.attributes)) root.removeAttribute(attribute.name);
   for (const [key, value] of Object.entries(fixture.root)) root.setAttribute(key, value);
+  if (declare) root.setAttribute("clay-mode-switch", "live");
   document.head.innerHTML = fixture.head;
   document.body.innerHTML = fixture.body;
 
@@ -133,9 +138,11 @@ export async function bootFixture(name, { mode = "edit", settle = 20 } = {}) {
 
   // The host: a POST is a save, every GET is a 404, and no stream is opened.
   const realFetch = globalThis.fetch;
+  const posted = [];
   globalThis.fetch = window.fetch = jest.fn(async (url, options = {}) => {
     if ((options.method || "GET").toUpperCase() === "POST") {
       counts.posts++;
+      posted.push(String(url));
       return okResponse();
     }
     return notFound();
@@ -145,12 +152,34 @@ export async function bootFixture(name, { mode = "edit", settle = 20 } = {}) {
   });
 
   const realEventSource = globalThis.EventSource;
-  globalThis.EventSource = window.EventSource = stubEventSource(counts);
+  const streams = { standing: 0, peak: 0, instances: [] };
+  globalThis.EventSource = window.EventSource = stubEventSource(counts, streams);
   restore.push(() => {
     globalThis.EventSource = window.EventSource = realEventSource;
   });
 
-  // Listeners, net, by target type.
+  // Listeners, by target type, read as the ones that can still fire: an explicit remove,
+  // an aborted `{signal}` and an element that has left the document each end one. A page
+  // that builds and discards a subtree therefore reads the same as one that never did.
+  const registrations = [];
+  const nearing = (target, type, handler) => {
+    for (let i = registrations.length - 1; i >= 0; i--) {
+      const registration = registrations[i];
+      if (registration.target === target && registration.type === type && registration.handler === handler) {
+        registration.ended = true;
+        return;
+      }
+    }
+  };
+  const countListeners = () => {
+    const live = { window: 0, document: 0, Element: 0 };
+    for (const registration of registrations) {
+      if (registration.ended) continue;
+      if (registration.where === "Element" && registration.target?.isConnected === false) continue;
+      live[registration.where]++;
+    }
+    return live;
+  };
   const added = [];
   for (const [type, target] of LISTENER_TARGETS) {
     const owner = target();
@@ -159,12 +188,14 @@ export async function bootFixture(name, { mode = "edit", settle = 20 } = {}) {
     const add = owner.addEventListener;
     const remove = owner.removeEventListener;
     const trackedAdd = function (event, handler, options) {
-      counts.listeners[type]++;
+      const registration = { target: this, where: type, type: event, handler, ended: false };
+      registrations.push(registration);
+      options?.signal?.addEventListener?.("abort", () => { registration.ended = true; });
       added.push(() => remove.call(this, event, handler, options));
       return add.call(this, event, handler, options);
     };
     const trackedRemove = function (event, handler, options) {
-      counts.listeners[type]--;
+      nearing(this, event, handler);
       return remove.call(this, event, handler, options);
     };
     owner.addEventListener = trackedAdd;
@@ -229,6 +260,7 @@ export async function bootFixture(name, { mode = "edit", settle = 20 } = {}) {
     globalThis.clearTimeout = realClearTimeout;
   });
 
+  const search = params === null ? fixture.params : params;
   const logic = await import("../../../src/loader-logic.js");
   const { MODULES, resolveModules } = logic;
   const thunks = {};
@@ -283,7 +315,7 @@ export async function bootFixture(name, { mode = "edit", settle = 20 } = {}) {
   try {
     ({ boot } = await import("../../../src/loader.js"));
     await new Promise((resolve, reject) => {
-      boot(null, new URLSearchParams(fixture.params), resolve).catch(reject);
+      boot(null, new URLSearchParams(search), resolve).catch(reject);
     });
 
     // The late tail is the loader's last stage and it is not awaited by boot: wait for
@@ -291,7 +323,7 @@ export async function bootFixture(name, { mode = "edit", settle = 20 } = {}) {
     const facts = await import("../../../src/core/is-edit-mode.js");
     const hasSap = Boolean(document.querySelector("[sap]"));
     const sourceMeta = document.querySelector('meta[name="hyper-source"]');
-    plan = resolveModules(new URLSearchParams(fixture.params), facts.isEditMode, {
+    plan = resolveModules(new URLSearchParams(search), facts.isEditMode, {
       isDraftMode: facts.isDraftMode,
       hasSap,
       canEdit: facts.canEdit,
@@ -313,7 +345,7 @@ export async function bootFixture(name, { mode = "edit", settle = 20 } = {}) {
   const counters = () => ({
     posts: counts.posts,
     eventSources: counts.eventSources,
-    listeners: { ...counts.listeners },
+    listeners: countListeners(),
     observers: counts.observers,
     intervals: counts.intervals,
     clayKeys: Object.keys(window.clay || {}).sort(),
@@ -321,12 +353,22 @@ export async function bootFixture(name, { mode = "edit", settle = 20 } = {}) {
     moduleCalls: sortedObject(counts.moduleCalls),
   });
 
+  // The streams standing open right now and the most that ever stood at once while this
+  // boot ran: a switch that opened a second one beside the reader's would raise the peak.
+  const eventSources = () => ({ open: streams.standing, peak: streams.peak, all: [...streams.instances] });
+
+  // Where each POST went: a page may write its file and its live data, and they are two
+  // different writes.
+  const sent = () => [...posted];
+
   return {
     name,
     mode,
     plan,
     arrivals,
     counters,
+    eventSources,
+    sent,
     clay: window.clay,
     stop,
   };

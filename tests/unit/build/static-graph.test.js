@@ -200,6 +200,35 @@ test("kanban view: the reader graph has no save code or parse5", async () => {
   expect(graph.has("src/vendor/parse5.vendor.js")).toBe(false);
 });
 
+// A reader must never fetch the switch: the declaration is one attribute read, and the
+// decision, the controller, the support table and every edit half behind them are dynamic
+// targets fetched by the first switch. The three templates' own loader tags are the plans,
+// so a plan that starts naming one of them shows up here.
+const SWITCH_ONLY = [
+  "src/core/mode-switch.js",
+  "src/core/mode-support.js",
+  "src/core/mode-lifecycle.js",
+  "src/sync/live-sync-edit.js",
+  "src/core/save.js",
+  "src/plugins/page.js",
+];
+
+for (const [name, fixture] of [["document.html", "document"], ["kanban.html", "kanban"], ["journal.html", "journal"]]) {
+  test(`${name} view: the reader graph has no mode switch and no edit half`, async () => {
+    const html = readFileSync(new URL(`../../../tests/fixtures/load/${name}`, import.meta.url), "utf8");
+    const tag = html.match(/<script[^>]+src="([^"]*clay\.js[^"]+)"/)[1];
+    const plan = resolveModules(new URL(tag, "https://clayjs.com/").searchParams, false, {
+      isDraftMode: false,
+      hasSap: FIXTURES[fixture].hasSap,
+    });
+    const entries = [...plan.core, ...plan.plugins].map((path) => `src/${path}`);
+    const graph = walk(await inputsFor(entries), ["src/loader.js", ...entries]);
+
+    expect(graph.size).toBeGreaterThanOrEqual(40);
+    expect([...graph].filter((file) => SWITCH_ONLY.includes(file))).toEqual([]);
+  });
+}
+
 // The dialog, the avatars and the editing markers are UI a reader may never be shown:
 // a lone reader opens no name prompt and draws nobody, so the Bevel subset they paint
 // with is fetched at first use and is not in the reader's walk. The edges below say

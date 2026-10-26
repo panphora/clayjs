@@ -373,7 +373,7 @@ function releaseMounted(inst) {
   }
   try { inst.binding?.dispose(); } catch (error) { console.error("clayjs: page plugin binding failed to dispose", error); }
   try { inst.binding?.ydoc?.destroy(); } catch (error) { console.error("clayjs: page plugin document failed to destroy", error); }
-  try { inst.staged?.dispose(); } catch (error) { console.error("clayjs: page plugin staged store failed to dispose", error); }
+  try { inst.staged?.close(); } catch (error) { console.error("clayjs: page plugin staged store failed to close", error); }
   inst.staged = null;
   inst.binding = null;
   inst.flush = null;

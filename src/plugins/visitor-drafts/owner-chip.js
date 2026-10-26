@@ -173,6 +173,9 @@ export function mountOwnerChip() {
   document.addEventListener("pointerup", lift, true);
   window.addEventListener("hashchange", lift);
   lift();
+  // Whoever removes the chip takes its listeners back with it: a chip mounted and unmounted
+  // once per mode session would otherwise leave six behind each time.
+  chip.liftOff = liftOff;
 
   return chip;
 }
