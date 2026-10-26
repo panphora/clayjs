@@ -103,7 +103,51 @@ const refuse = ({ entryId, label, direction, code }) => {
   document.dispatchEvent(new CustomEvent('clay:undo-refused', {
     detail: { ok: false, code, entryId, label, direction },
   }))
+  keepRefused({ ok: false, code, entryId, label, direction })
 }
+
+// A refused step is kept as recovery before a reload can take it away: the refusal is
+// announced synchronously above and the copy is made behind it, so a store that will
+// not answer can never hold up the receipt. The module is fetched on the first refusal
+// or the first app keep; no reader and no boot pays for it, and nothing it writes is a
+// save.
+let recoveryLoad = null
+
+function loadRecovery() {
+  recoveryLoad ??= import('../recovery/undo.js').catch((error) => {
+    recoveryLoad = null
+    console.error('clayjs: the undo recovery module could not be downloaded; a refused step stays in this tab only', error)
+    return null
+  })
+  return recoveryLoad
+}
+
+async function keepRefused(receipt) {
+  let written = { ok: false, code: 'unavailable' }
+  try {
+    const module = await loadRecovery()
+    if (module) written = await module.keepRefusal(undo, receipt)
+  } catch (_) {
+    written = { ok: false, code: 'error' }
+  }
+  const detail = written?.ok === true
+    ? { ok: true, entryId: receipt.entryId, direction: receipt.direction }
+    : { ok: false, code: written?.code || 'error', entryId: receipt.entryId, direction: receipt.direction }
+  document.dispatchEvent(new CustomEvent('clay:undo-kept', { detail }))
+}
+
+// The page's own records on the same channel and in the same store: `keep` stages one,
+// `kept` is what a later session can review, and `dismissKept` is the explicit,
+// revision-checked way one leaves. All three fetch the recovery module on demand.
+const withRecovery = (call, fallback) => (...args) =>
+  loadRecovery().then(
+    (module) => (module ? module[call](...args) : fallback),
+    () => fallback
+  )
+
+undo.keep = withRecovery('keep', { ok: false, code: 'unavailable' })
+undo.kept = withRecovery('kept', { ok: false, code: 'unavailable', records: [] })
+undo.dismissKept = withRecovery('dismissKept', { ok: false, code: 'unavailable' })
 
 // One event for whatever presents the history (Undo and Redo buttons, a refusal banner):
 // after every entry, replay, refusal, dismissal and clear, and when a session starts or

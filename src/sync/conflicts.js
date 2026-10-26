@@ -274,6 +274,7 @@ export const conflicts = {
     };
   },
   registerContext,
+  contextFor,
 
   recoveryOf(id) {
     const rec = records.get(id);
