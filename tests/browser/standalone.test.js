@@ -30,6 +30,14 @@ function scripts(win) {
     .map((u) => u.pathname);
 }
 
+// The source plugin is one of the late plugins: the loader imports it after
+// clay.ready, so a test that reads it waits for it to appear.
+async function late(win, name, ms = 8000) {
+  const end = Date.now() + ms;
+  while (Date.now() < end && !win.clay[name]) await new Promise((r) => setTimeout(r, 25));
+  return win.clay[name];
+}
+
 function foreign(win) {
   return win.performance.getEntriesByType('resource')
     .map((e) => new URL(e.name))
@@ -175,7 +183,9 @@ describe('the standalone build and clay.js', () => {
       // standalone is one request and wins, entries fetches ten satellite tags and
       // loses, and the comparison is between a source-preserving save and a printed
       // one. Waiting also makes this the stronger claim: both builds preserve source.
-      await win.clay.source.ready;
+      const source = await late(win, 'source');
+      expect(source, 'clay.source installed').to.exist;
+      await source.ready;
     }
     const strip = (html) => html.replace(/[ \t]*<script src="[^"]*"><\/script>\n?/g, '');
     expect(strip(standalone.clay.getHTML())).to.equal(strip(entries.clay.getHTML()));

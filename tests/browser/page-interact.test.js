@@ -335,6 +335,7 @@ describe('Backspace and Delete with a selection', () => {
     c: { t: 'paragraph', pos: 'X', c: 'Third line' },
   });
   const text = () => { const r = []; view.state.doc.forEach((n) => r.push(n.textContent)); return r; };
+  const until = async (fn, ms = 4000) => { const end = Date.now() + ms; while (Date.now() < end) { if (fn()) return true; await settle(50); } return false; };
 
   for (const key of ['Backspace', 'Delete']) {
     it(`${key} deletes a text selection made with the mouse`, async () => {
@@ -413,6 +414,7 @@ describe('Backspace and Delete with a selection', () => {
 
     it(`${key} deletes a clicked image`, async () => {
       setup({ a: { t: 'paragraph', pos: 'V', c: 'Above' }, i: { t: 'image', pos: 'W', src: 'data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==', width: 200 }, c: { t: 'paragraph', pos: 'X', c: 'Below' } });
+      expect(await until(() => mount.querySelector('.page-image-frame')), 'image view loaded').to.equal(true);
       await move(...center(mount.querySelector('.page-image-frame')));
       await sendMouse({ type: 'down' });
       await sendMouse({ type: 'up' });

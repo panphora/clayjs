@@ -202,7 +202,7 @@ describe('page chrome in a browser', () => {
     expect(view.state.doc.child(0).attrs.checked).to.equal(true);
   });
 
-  it('at a 390px viewport nothing scrolls sideways, and the plus opens the menu as a bottom sheet with 44px rows', async () => {
+  it('at a 390px viewport nothing scrolls sideways, and the plus opens the menu as a popover above the toolbar with 44px rows', async () => {
     await setViewport({ width: 390, height: 800 });
     try {
       setup();
@@ -214,10 +214,14 @@ describe('page chrome in a browser', () => {
       const menu = mount.querySelector('.page-menu');
       expect(menu.hidden).to.equal(false);
       const r = menu.getBoundingClientRect();
-      expect(Math.round(r.bottom)).to.equal(800);
-      expect(Math.round(r.width)).to.equal(390);
+      const bar = mount.querySelector('.page-dock').getBoundingClientRect();
+      expect(r.top).to.be.at.least(0);
+      expect(r.left).to.be.at.least(0);
+      expect(r.right).to.be.at.most(390);
+      expect(r.bottom).to.be.at.most(800);
+      expect(r.bottom).to.be.at.most(bar.top);
+      expect(document.documentElement.scrollWidth).to.be.at.most(390);
       for (const row of menu.querySelectorAll('.page-menu-item')) expect(row.getBoundingClientRect().height).to.be.at.least(44);
-      expect(getComputedStyle(mount.querySelector('.page-dock')).display).to.equal('none');
     } finally {
       await setViewport({ width: 800, height: 600 });
     }

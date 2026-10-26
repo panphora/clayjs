@@ -27,6 +27,14 @@ const FIXTURE = '/tests/browser/fixtures/source-edit.html';
 let win;
 let served;
 
+// The source plugin is one of the late plugins: the loader imports it after
+// clay.ready, so a test that reads it waits for it to appear.
+async function late(target, name, ms = 8000) {
+  const end = Date.now() + ms;
+  while (Date.now() < end && !target.clay[name]) await new Promise((r) => setTimeout(r, 25));
+  return target.clay[name];
+}
+
 async function open(url) {
   const iframe = document.createElement('iframe');
   iframe.src = url;
@@ -36,7 +44,9 @@ async function open(url) {
     document.body.appendChild(iframe);
   });
   await iframe.contentWindow.clay.ready;
-  await iframe.contentWindow.clay.source.ready;
+  const source = await late(iframe.contentWindow, 'source');
+  expect(source, 'clay.source installed').to.exist;
+  await source.ready;
   return iframe.contentWindow;
 }
 

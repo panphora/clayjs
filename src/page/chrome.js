@@ -663,6 +663,13 @@ class Chrome {
         && this.view.state.selection instanceof BlockSelection) this.leaveToToolbar();
       return false;
     }
+    if ((event.key === "Backspace" || event.key === "Delete") && m.mode === "actions"
+      && this.view.state.selection instanceof BlockSelection) {
+      this.closeMenu();
+      this.view.focus();
+      deleteBlocks(this.view.state, this.view.dispatch);
+      return true;
+    }
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       if (m.items.length) {
         m.active = (m.active + (event.key === "ArrowDown" ? 1 : -1) + m.items.length) % m.items.length;
