@@ -231,46 +231,48 @@ The test suite checks that this file opens clean, saves only the record and neve
 
 ## 1. The model
 
-### 1.1 Two forms of one file
+### 1.1 Saved file and open page
 
-A malleable document exists in two forms.
+A malleable document exists in two forms: the saved file and the open page.
 
-- **The saved file** is the bytes on the host. A visitor downloads exactly these bytes. They must be correct and complete with no JavaScript running: the content, its order, the state of every checkbox, the totals if the reader needs them.
-- **The open page** is the live DOM in one browser tab. It holds the saved content plus everything the tab adds at runtime: editing toolbars, a filter box, an open dialog, selection, computed badges, drag ghosts.
+- **The saved file** is the bytes on the host. A visitor downloads these exact bytes. They must be correct and complete with no JavaScript running: the content, its order, the state of every checkbox, and any totals the reader needs.
+- **The open page** is the live DOM in one browser tab. It holds the saved content plus everything the tab adds at runtime: editing toolbars, a filter box, an open dialog, selection, computed badges, and drag ghosts.
 
-A save turns the open page back into the saved file. ClayJS does this by cloning the whole document, removing everything marked as runtime-only, applying a few transforms, serializing, and posting the full HTML to the host (`POST /_/save`). There is no partial save and no separate data store. **The document is the database.**
+A save turns the open page back into the saved file. ClayJS clones the whole document, removes everything marked as runtime-only, applies a few transforms, serializes the full HTML, and posts it to the host (`POST /_/save`). There is no partial save and no separate data store. **The document is the database.**
 
-### 1.2 Three kinds of DOM
+### 1.2 Record, chrome and derived DOM
 
-Every element on an open page belongs to one of three kinds. Decide which before you write it.
+Every element on an open page is record, chrome, or derived DOM. Decide which before you write it.
 
 | Kind | What it is | Where it lives | Saved | Sent to peers | Edited by people |
 |---|---|---|---|---|---|
-| **Record** | The work: card titles, checklist items, amounts, block text, order | Ordinary elements, attributes, text and `persist` control values | yes | yes | yes |
+| **Record** | The work: card titles, checklist items, amounts, block text, order | Ordinary elements, attributes, text, and `persist` control values | yes | yes | yes |
 | **Chrome** | UI for editing: buttons, grips, toolbars, menus, filter boxes, status text | Authored in the file, hidden from viewers with `show-when:editmode="true"`. UI a script fills or changes goes in `clay="editor-ui"` ([Chrome](https://clayjs.com/docs/guide/architecture/#chrome)) | hidden: yes, `editor-ui`: no | hidden: yes, `editor-ui`: no | no |
-| **Derived** | Values computed from the record: counts, progress, totals, outlines, a status pill's colour | sapjs paints (`attr:`, `class:`, `css:`, `text`, `show`, [sap.js: records, views and totals in markup](https://clayjs.com/docs/guide/components/#sap-js-records-views-and-totals-in-markup)), `clay="editor-ui"` (tab only) or `clay="no-dirty"` (saved, remote wins) | paints and `no-dirty`: yes | `no-dirty` only; paints are repainted, never merged | no |
+| **Derived** | Values computed from the record: counts, progress, totals, outlines, a status pill's colour | sapjs paints (`attr:`, `class:`, `css:`, `text`, `show`, [sap.js: records, views and totals in markup](https://clayjs.com/docs/guide/components/#sap-js-records-views-and-totals-in-markup)), `clay="editor-ui"` (tab only), or `clay="no-dirty"` (saved, remote wins) | paints and `no-dirty`: yes | `no-dirty` only; paints are repainted, never merged | no |
 
-Nearly every bug in a malleable file is one of these three leaking into another: chrome a script changes saved into the file, a derived count merged as if someone typed it, a record edited only in a copy that never reaches the DOM.
+Nearly every bug in a malleable file happens when one kind leaks into another: chrome that a script changes gets saved into the file, a derived count gets merged as if someone typed it, or a record is edited only in a copy that never reaches the DOM.
 
-### 1.3 The rules
+### 1.3 Rules for DOM state
+
+Follow these rules to keep record, chrome, and derived state separate.
 
 1. **The DOM is the record.** Everything durable is an element, an attribute, text, child order, or the value of a control marked `persist`. Never keep the authoritative copy in a JavaScript object.
-2. **Chrome is authored in the file and hidden from viewers with `show-when:editmode="true"`.** This is the default: it needs no script and is in place before ClayJS loads. Use `clay="editor-ui"` only for UI a script fills or changes while the page is open, or that viewers must not receive ([Chrome](https://clayjs.com/docs/guide/architecture/#chrome)).
-3. **Derived values are recomputed, never stored as edits.** Store the value once, as the record (`bind`), and declare every other place it shows as a sapjs paint: `attr:data-state="item.state"`, `class:done="item.done"`, `text`, `show` ([sap.js: records, views and totals in markup](https://clayjs.com/docs/guide/components/#sap-js-records-views-and-totals-in-markup)). ClayJS loads the sapjs core for any page with a `[sap]` root and treats painted values as derived. Without sapjs, write derived values into `editor-ui` elements, or into `clay="no-dirty"` elements when the saved file must show them. Never copy a record into a second attribute with a script: the copy goes stale in the file, and a merge brings the stale copy back.
+2. **Chrome is authored in the file and hidden from viewers with `show-when:editmode="true"`.** This default needs no script and is in place before ClayJS loads. Use `clay="editor-ui"` only for UI a script fills or changes while the page is open, or that viewers must not receive ([Chrome](https://clayjs.com/docs/guide/architecture/#chrome)).
+3. **Derived values are recomputed, never stored as edits.** Store the value once as the record (`bind`), and declare every other place it shows as a sapjs paint: `attr:data-state="item.state"`, `class:done="item.done"`, `text`, `show` ([sap.js: records, views and totals in markup](https://clayjs.com/docs/guide/components/#sap-js-records-views-and-totals-in-markup)). ClayJS loads the sapjs core for any page with a `[sap]` root and treats painted values as derived. Without sapjs, write derived values into `editor-ui` elements, or into `clay="no-dirty"` elements when the saved file must show them. Never copy a record into a second attribute with a script. The copy goes stale in the file, and a merge brings the stale copy back.
 4. **Every repeated item has a unique `data-id` from birth.** Mint a fresh one on every create and every duplicate. Sync pairs elements by it.
-5. **Per-tab state stays out of the record.** Which card is open, the filter, the current view: URL hash, `localStorage` or memory, painted through `ephemeral` attributes ([Ephemeral state: per-tab state on saved elements](https://clayjs.com/docs/guide/record/#ephemeral-state-per-tab-state-on-saved-elements)), a runtime `<style>` or `editor-ui` elements.
-6. **A command writes the record once, in one place,** wrapped in an undo commit. The mutation is what autosave, undo and sync see.
-7. **Adopt the file as it is on load.** Never rewrite the record at boot: it makes the page dirty, it can fall outside the save baseline, and it races peers.
-8. **Reconcile after changes you did not make.** A peer's frame, an agent's disk edit and an undo replay change the DOM under you. Rebuild derived and chrome state on `clay:sync-applied` and on undo and redo.
+5. **Per-tab state stays out of the record.** Keep which card is open, the filter, and the current view in the URL hash, `localStorage`, or memory. Paint them through `ephemeral` attributes ([Ephemeral state: per-tab state on saved elements](https://clayjs.com/docs/guide/record/#ephemeral-state-per-tab-state-on-saved-elements)), a runtime `<style>`, or `editor-ui` elements.
+6. **A command writes the record once, in one place, wrapped in an undo commit.** The mutation is what autosave, undo, and sync see.
+7. **Adopt the file as it is on load.** Never rewrite the record at boot. Doing so makes the page dirty, can fall outside the save baseline, and races peers.
+8. **Reconcile after changes you did not make.** A peer's frame, an agent's disk edit, and an undo replay change the DOM under you. Rebuild derived and chrome state on `clay:sync-applied` and on undo and redo.
 
 ### 1.4 What the host does
 
-ClayJS runs in the page. A **host** serves the file and accepts saves. The client never decides who may write: it sends the save, and the host accepts or refuses it. Hosts that run ClayJS pages today:
+ClayJS runs in the page, while a **host** serves the file and accepts saves. The client never decides who may write: it sends the save, and the host accepts or refuses it. Hosts that run ClayJS pages today:
 
 - **HTML Clay**, the desktop app that makes `.htmlclay` files open and save like documents. Single user, local disk.
 - **Hyperclay Local**, the desktop sync client. Local folder, device sync to hyperclay.com.
-- **hyperclay.com**, hosted files with accounts, teams, share links, presence and version history.
-- **Any server** that implements `POST /_/save` (and optionally `/_/meta`, `/_/sync`, `/_/upload`). A plain static server or a file opened from disk can view the file but not save it.
+- **hyperclay.com**, hosted files with accounts, teams, share links, presence, and version history.
+- **Any server** that implements `POST /_/save` (and optionally `/_/meta`, `/_/sync`, `/_/upload`). A plain static server or a file opened from disk can view the file but cannot save it.
 
 [Hosts, assets and privacy](https://clayjs.com/docs/guide/hosts/) covers what each host adds.
 
@@ -2218,7 +2220,7 @@ An element inside the template with `[visitor-intro-start]` scrolls to the app, 
 | Same-key JSON edits under `merge`: incoming wins, yours goes to the notice | [Regions and JSON under sync](https://clayjs.com/docs/guide/live-sync/#regions-and-json-under-sync) |
 | Rewriting the record at boot makes incoming frames hold | [Focus, typing and long-running editors](https://clayjs.com/docs/guide/live-sync/#focus-typing-and-long-running-editors) |
 | Parsed JSON goes stale after a merge | [Reconciling in app code](https://clayjs.com/docs/guide/live-sync/#reconciling-in-app-code) |
-| A script that copies a record into a styling attribute goes stale in the file, and a merge brings the stale copy back | [The rules](https://clayjs.com/docs/guide/model/#the-rules), [sap.js: records, views and totals in markup](https://clayjs.com/docs/guide/components/#sap-js-records-views-and-totals-in-markup) |
+| A script that copies a record into a styling attribute goes stale in the file, and a merge brings the stale copy back | [Rules for DOM state](https://clayjs.com/docs/guide/model/#rules-for-dom-state), [sap.js: records, views and totals in markup](https://clayjs.com/docs/guide/components/#sap-js-records-views-and-totals-in-markup) |
 | An `api` rule that reads a painted value can read a stale one until a tab repaints and saves | [sap.js: records, views and totals in markup](https://clayjs.com/docs/guide/components/#sap-js-records-views-and-totals-in-markup) |
 | Full sapjs markup under the sapjs core halts with `E50` | [sap.js: records, views and totals in markup](https://clayjs.com/docs/guide/components/#sap-js-records-views-and-totals-in-markup) |
 | There is no presence API | [Presence](https://clayjs.com/docs/guide/live-sync/#presence) |
