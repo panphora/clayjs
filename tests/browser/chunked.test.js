@@ -214,7 +214,9 @@ describe('a plugins=sortable edit page', () => {
 
     await until(() => win.clay.sortable, 'the late sortable plugin');
     expect(win.fetchedAtReady).not.to.contain(`/dist/m/${vendor}`);
-    expect(fetched(win)).to.contain(`/dist/m/${vendor}`);
+    // clay.sortable is published with the module; the vendor lands with mod.ready, a
+    // round trip later on a slow host, so wait for the request instead of reading once.
+    await until(() => fetched(win).includes(`/dist/m/${vendor}`), 'the late sortable vendor');
   });
 });
 
