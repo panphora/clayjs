@@ -52,8 +52,7 @@ import { pageMaybeDirty, pauseGate, resumeGate, gateCaptureToken, gateClearIfUnc
 import { gestureSeen } from '../lib/user-gesture.js';
 import { SyncStream } from './stream.js';
 import { streamOpened, streamClosed, streamEvent, LIVE_EVENTS } from '../live/stream-bridge.js';
-import { conflicts, beginApply, completeApply, failApply } from './conflicts.js';
-import { beginLineageCapture } from './conflict-footprints.js';
+import { conflicts, conflictLedger, loadConflicts } from './conflicts-facade.js';
 import { upgradeReplaces, stopForUpgrade } from './version-guard.js';
 import { isDerivedAttr, ownsDerivedText, stripDerived, repaintDerived, paintSignatureOfHtml, derivedActive } from '../lib/derived.js';
 
@@ -81,6 +80,11 @@ function loadEdit() {
 const entering = modeState().phase === "entering";
 
 if (isEditMode && !entering) loadEdit().catch(() => {});
+
+// The conflict ledger is what a merge writes to, so an editor starts its download as
+// this file evaluates rather than at the first merge: nothing on the edit path pays
+// for it twice. A reader starts it with its first merged frame (or with the live lane).
+if (isEditMode) loadConflicts().catch(() => {});
 
 // Who else is on the document, and the block somebody else is editing: both are
 // a download of their own. A reader alone on a page draws neither, so they
@@ -576,6 +580,9 @@ class LiveSync {
     // below: a base taken before a module built its DOM makes the first dirty merge
     // see both sides add that DOM, and keep it twice.
     if (this.lane === 'live') this._seedBases();
+    // The live lane merges from its first frame, and every merge there reads the
+    // ledger, so the download starts with the lane instead of delaying a frame.
+    if (this.lane === 'live') loadConflicts().catch(() => {});
 
     console.log(`[LiveSync] Starting for: ${this.currentFile} (lane=${this.lane})`);
     // One discovery request stands between here and the stream. It is memoized and
@@ -1797,6 +1804,11 @@ class LiveSync {
    */
   async _mergeIncoming(html, identityMap, { base, baseIdentityMap = null, captureLocal, synthetic, source = 'peer', seq = null, etag = null, extra = {} }) {
     if (!loadedEngine()) await mergeEngine();
+    // The first merge is what a reader downloads the ledger for: this frame is the
+    // one that may produce a conflict, and nothing before it could have. A ledger
+    // already in hand is read synchronously, so a tab that has merged once begins
+    // its next apply in the caller's own tick, as it always did.
+    const { beginApply, completeApply, failApply, beginLineageCapture } = conflictLedger() || await loadConflicts();
     let lineageCapture;
     const mergeDocument = (options) => {
       lineageCapture = beginLineageCapture(conflicts.list());

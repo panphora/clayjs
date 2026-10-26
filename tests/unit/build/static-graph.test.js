@@ -396,8 +396,15 @@ for (const fixture of ["kanban.html", "journal.html"]) {
     const entries = [...plan.core, ...plan.plugins].map((path) => `src/${path}`);
     const graph = walk(await inputsFor(entries), ["src/loader.js", ...entries]);
 
-    // The ledger itself is carried: a reader still sees a conflict it was handed.
-    expect(graph.has("src/sync/conflicts.js")).toBe(true);
+    // The ledger is a first-merge download: the facade a reader boots with answers
+    // empty until then, so neither it nor its footprints are in the walk, and both
+    // are built for the merge to fetch.
+    expect(graph.has("src/sync/conflicts-facade.js")).toBe(true);
+    expect(graph.has("src/sync/conflicts.js")).toBe(false);
+    expect(graph.has("src/sync/conflict-footprints.js")).toBe(false);
+    expect(Object.keys(await inputsFor(entries))).toEqual(
+      expect.arrayContaining(["src/sync/conflicts.js", "src/sync/conflict-footprints.js"])
+    );
     expect([...graph].filter((file) => CONFLICT_RECORDING.includes(file))).toEqual([]);
     expect([...graph].filter((file) => RECOVERY_STORE.test(file))).toEqual([]);
   });
