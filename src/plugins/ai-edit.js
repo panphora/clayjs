@@ -80,7 +80,10 @@ let barMode = null;  // "working", "ready", "saving" or "error"
 let barLifecycle = null;
 let barCloseTimer = null;
 let panelPointerDown = false; // the last pointerdown began in the panel: its click is not a page click
-const drafts = new WeakMap();  // compose text a target keeps while the panel is shut
+let drafts = new WeakMap();  // compose text a target keeps while the panel is shut
+// A WeakMap cannot be read back, and an exit has to know whether anything typed here is
+// still unsent, so the targets that hold a draft are counted beside it.
+const drafted = new Set();
 let anchorEl = null;    // element the panel is currently anchored to
 let chipTarget = null;  // unit the hover chip currently points at
 let chipHideTimer = null;
@@ -91,6 +94,23 @@ let selectionTimer = null;
 let anchorRange = null;  // the selection the open panel was raised for
 let returnFocus = null;  // where focus goes back to when the panel closes
 let helperState = null;  // "ready" or "unavailable"
+let listeners = null;    // the AbortController every handler one session added listens on
+let observers = [];      // the page observers that session opened
+let styleEl = null;      // the one stylesheet the chrome needed
+
+function dropDraft(el) {
+  drafts.delete(el);
+  drafted.delete(el);
+}
+
+function keepDraft(el, text) {
+  if (!text) {
+    dropDraft(el);
+    return;
+  }
+  drafts.set(el, text);
+  drafted.add(el);
+}
 
 const HIGHLIGHT = 'clay-ai-edit';
 const OFF_MESSAGE = 'AI editing is turned off. Turn it on from the app’s menu.';
@@ -301,7 +321,7 @@ async function sendRequest(el, comment, quote) {
   }
   // The sent comment is this target's draft until the reply is ready: Error, Stop, a
   // refused reply, a morph failure and a host cancellation all leave it in place.
-  drafts.set(el, comment);
+  keepDraft(el, comment);
   closePanelForSend();
   session.paused = true;
   pauseObservers();
@@ -421,7 +441,7 @@ function onDone(payload) {
     return;
   }
   positionChrome();
-  drafts.delete(session.el); // delivered: the comment is no longer this target's draft
+  dropDraft(session.el); // delivered: the comment is no longer this target's draft
   showBar('ready');
   setBarStatus(readyText(warnings, payload.model), warnings.length ? 'warn' : '');
 }
@@ -511,15 +531,16 @@ function marked(el, name, value) {
 }
 
 function buildChrome() {
-  const style = document.createElement('style');
-  style.setAttribute('clay', RUNTIME_ONLY);
-  style.textContent = `
+  const { signal } = listeners;
+  styleEl = document.createElement('style');
+  styleEl.setAttribute('clay', RUNTIME_ONLY);
+  styleEl.textContent = `
     [editmode\\:contenteditable][contenteditable]:focus {
       outline: 1px solid #4a4a6a; outline-offset: 4px; border-radius: 2px;
     }
     ::highlight(clay-ai-edit) { background-color: ${TOKENS['brass-soft']} !important; }
   `;
-  document.head.appendChild(style);
+  document.head.appendChild(styleEl);
 
   const scheme = `color-scheme:${pageScheme()}`;
 
@@ -645,24 +666,28 @@ function buildChrome() {
     openPanel(document.body, quoteFromSelection(document.body));
   });
 
-  window.addEventListener('scroll', () => { positionChrome(); hideChip(); }, { passive: true });
-  window.addEventListener('resize', () => { placeBubble(); if (panel && !panel.hidden) fitTextarea(); positionChrome(); }, { passive: true });
+  window.addEventListener('scroll', () => { positionChrome(); hideChip(); }, { passive: true, signal });
+  window.addEventListener('resize', () => { placeBubble(); if (panel && !panel.hidden) fitTextarea(); positionChrome(); }, { passive: true, signal });
   // The CMS toggle can arrive after this chrome, and a docked sidebar slides it left.
   const replace = () => { placeBubble(); positionChrome(); };
-  document.addEventListener('hcms:open', () => { replace(); setTimeout(replace, 350); });
-  document.addEventListener('hcms:close', () => { replace(); setTimeout(replace, 350); });
-  new MutationObserver((records) => {
+  document.addEventListener('hcms:open', () => { replace(); setTimeout(replace, 350); }, { signal });
+  document.addEventListener('hcms:close', () => { replace(); setTimeout(replace, 350); }, { signal });
+  const cmsToggle = new MutationObserver((records) => {
     syncBubble();
     const touched = (nodes) => [...nodes].some((n) => n.nodeType === 1 && n.hasAttribute('data-hcms-toggle-host'));
     if (records.some((r) => touched(r.addedNodes) || touched(r.removedNodes))) replace();
-  }).observe(document.body, { childList: true });
+  });
+  cmsToggle.observe(document.body, { childList: true });
+  observers.push(cmsToggle);
 
   // A target removed from the page ends its edit, so the save hold and the paused
   // observers never outlive it. A running bar is no exception: it is torn down with
   // the target it was describing.
-  new MutationObserver(() => {
+  const targetGone = new MutationObserver(() => {
     if (anchorEl && !anchorEl.isConnected) abandonTarget();
-  }).observe(document.body, { childList: true, subtree: true });
+  });
+  targetGone.observe(document.body, { childList: true, subtree: true });
+  observers.push(targetGone);
 }
 
 // The panel's height changes as the box grows and the status line fills, so it is
@@ -713,6 +738,7 @@ function applyHelperState() {
 // The host's toggle can change while the page is open, so each opening asks again.
 function refreshHelperState() {
   helperStateNow().then((state) => {
+    if (!panel) return; // the session this asked for has ended
     helperState = state || 'unavailable';
     if (!panel.hidden && !session) applyHelperState();
     else syncBubble();
@@ -943,8 +969,7 @@ function openPanel(el, quote) {
 // panel is opened on that target again.
 function storeDraft() {
   if (!anchorEl) return;
-  if (textarea.value) drafts.set(anchorEl, textarea.value);
-  else drafts.delete(anchorEl);
+  keepDraft(anchorEl, textarea.value);
 }
 
 function closePanel() {
@@ -1027,6 +1052,7 @@ function escapeIsMine(event) {
 }
 
 function wireInteractions() {
+  const { signal } = listeners;
   // Clicks: text units are contenteditable (caret) and figures keep their own
   // interactivity, so neither is intercepted, and nothing here prevents the click from
   // landing. Any click on the page away from ClayJS chrome closes the box, a click
@@ -1037,7 +1063,7 @@ function wireInteractions() {
   // box and ends on the page is still the box's, not a click away from it.
   document.addEventListener('pointerdown', (event) => {
     panelPointerDown = panel.contains(event.target);
-  }, { capture: true });
+  }, { capture: true, signal });
 
   document.addEventListener('click', (event) => {
     const startedInPanel = panelPointerDown;
@@ -1054,7 +1080,7 @@ function wireInteractions() {
     } else if (!panel.hidden) {
       closePanel();
     }
-  });
+  }, { signal });
 
   // Hover chip: follows the unit under the cursor while no panel is open.
   let lastMove = 0;
@@ -1068,7 +1094,7 @@ function wireInteractions() {
     const unit = unitFrom(event.target);
     if (unit) showChipFor(unit);
     else scheduleChipHide();
-  });
+  }, { signal });
 
   document.addEventListener('keydown', (event) => {
     if (isShortcut(event)) {
@@ -1098,12 +1124,12 @@ function wireInteractions() {
     if (barMode === 'error') { closeBar(); return; }
     if (barMode) return;
     if (!panel.hidden) closePanel();
-  });
+  }, { signal });
 
   document.addEventListener('selectionchange', () => {
     clearTimeout(selectionTimer);
     selectionTimer = setTimeout(showChipForSelection, 150);
-  });
+  }, { signal });
 }
 
 // ---------------------------------------------------------------- boot
@@ -1114,6 +1140,7 @@ async function init() {
   // No ai-edit helper on this host: stay dormant. A concurrent open() that got here
   // first may also have built the chrome already.
   if (!helperState || panel) return;
+  listeners = new AbortController();
   buildChrome();
   wireInteractions();
 }
@@ -1145,9 +1172,94 @@ async function open(el, { prompt } = {}) {
     textarea.focus();
     return true;
   }
-  if (typeof prompt === 'string' && !drafts.has(el)) drafts.set(el, prompt);
+  if (typeof prompt === 'string' && !drafts.has(el)) keepDraft(el, prompt);
   openPanel(el, null);
   return true;
+}
+
+/**
+ * A committed exit: the chrome, every handler this session added and every page
+ * observer go. What the person typed is a draft, and an exit that could not represent it
+ * never gets here, so nothing unsent is thrown away by this.
+ */
+function teardown() {
+  const s = session;
+  session = null;
+  try {
+    s?.handle?.cancel();
+    if (s) {
+      if (s.paused) resumeObservers();
+      if (s.held) releaseAllSaves();
+    }
+  } catch {}
+  clearTimeout(selectionTimer);
+  selectionTimer = null;
+  clearTimeout(chipHideTimer);
+  chipHideTimer = null;
+  clearTimeout(barCloseTimer);
+  barCloseTimer = null;
+  clearHighlight();
+  listeners?.abort();
+  listeners = null;
+  for (const observer of observers) observer.disconnect();
+  observers = [];
+  for (const node of [styleEl, ring, panel, bar, chip, docBubble]) node?.remove();
+  styleEl = ring = panel = textarea = statusEl = pointer = bar = barStatus = null;
+  barStop = barKeep = barRevert = barClose = chip = docBubble = null;
+  buttons = {};
+  barMode = null;
+  barLifecycle = null;
+  anchorEl = null;
+  anchorRange = null;
+  returnFocus = null;
+  pendingSelection = undefined;
+  chipTarget = null;
+  chipSelection = undefined;
+  panelPointerDown = false;
+  helperState = null;
+  drafts = new WeakMap();
+  drafted.clear();
+}
+
+/**
+ * ai-edit as a mode lease.
+ *
+ * Preparing this lease is what `clay.aiEdit.init()` already does: ask the host whether
+ * it lists a ready helper, then build the chrome, inert until somebody opens it. What a
+ * session adds is everything still unresolved — a request on the wire, a preview waiting
+ * for Keep or Revert, a comment typed and not sent — so `quiesce` refuses the exit and
+ * `resume` leaves that same preview, comment and selection timer exactly as they were.
+ * `dispose` (after the barrier) stops every editor-only handler and takes the chrome
+ * down, so a save or selection event in view draws nothing.
+ */
+export function aiEditParticipant() {
+  return {
+    id: "clay:ai-edit",
+    order: 950, // after the wire (900): this request is sent through it
+    prepare() {
+      return {
+        ready: init(),
+        enable() {}, // preparation built the chrome; there is nothing to switch on
+        quiesce() {
+          const unsent = (panel && !panel.hidden && textarea.value.trim() !== '') ||
+            [...drafted].some((el) => el.isConnected);
+          const pending = [];
+          if (session) pending.push(session.id);
+          if (barMode === 'saving') pending.push('save');
+          if (unsent) pending.push('prompt');
+          if (!pending.length) return;
+          throw Object.assign(new Error('clay.aiEdit: an edit here is still unresolved'), {
+            code: 'pending-input',
+            pending,
+          });
+        },
+        resume() {},
+        dispose() {
+          teardown();
+        },
+      };
+    },
+  };
 }
 
 onDomReady(() => { init().catch(() => {}); });

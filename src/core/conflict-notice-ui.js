@@ -872,22 +872,24 @@ function onFocus(e) {
 }
 
 function init() {
+  listeners = new AbortController();
+  const { signal } = listeners;
   // Registered before the edit-mode gate: an upgraded reader has nothing to reconcile
   // and this is still the one notice it can be shown.
-  document.addEventListener("clay:document-upgraded", onUpgraded);
+  document.addEventListener("clay:document-upgraded", onUpgraded, { signal });
   if (!isEditMode) return;
-  document.addEventListener("clay:sync-conflicts-changed", onLedgerChanged);
+  document.addEventListener("clay:sync-conflicts-changed", onLedgerChanged, { signal });
   // An apply beginning or ending changes only whether Revert may run.
-  document.addEventListener("clay:unsaved-state-changed", schedule);
-  document.addEventListener("clay:save-conflict", onSaveConflict);
-  document.addEventListener("clay:save-saved", onSaveSettled);
-  document.addEventListener("clay:save-conflict-resolved", onSaveSettled);
-  document.addEventListener("clay:sync-applied", onSyncApplied);
-  document.addEventListener("clay:save-conflict-released", onConflictReleased);
-  document.addEventListener("keydown", onKeydown);
-  document.addEventListener("input", onInput, true);
-  document.addEventListener("focus", onFocus, true);
-  document.addEventListener("clay:conflict-store-changed", onStoreChanged);
+  document.addEventListener("clay:unsaved-state-changed", schedule, { signal });
+  document.addEventListener("clay:save-conflict", onSaveConflict, { signal });
+  document.addEventListener("clay:save-saved", onSaveSettled, { signal });
+  document.addEventListener("clay:save-conflict-resolved", onSaveSettled, { signal });
+  document.addEventListener("clay:sync-applied", onSyncApplied, { signal });
+  document.addEventListener("clay:save-conflict-released", onConflictReleased, { signal });
+  document.addEventListener("keydown", onKeydown, { signal });
+  document.addEventListener("input", onInput, { capture: true, signal });
+  document.addEventListener("focus", onFocus, { capture: true, signal });
+  document.addEventListener("clay:conflict-store-changed", onStoreChanged, { signal });
   if (ledger()?.size) schedule();
   refreshRecovered();
 }
@@ -903,6 +905,7 @@ const HANDLERS = {
 };
 
 let started = false;
+let listeners = null;
 
 export function start(trigger) {
   if (!started) {
@@ -917,6 +920,57 @@ export function start(trigger) {
     checkRefusal = true;
     schedule();
   }
+}
+
+// A committed exit takes the notice with it: every handler above, every timer it owns
+// and the node it drew. Nothing here acknowledges a record or releases a refusal — an
+// exit that still held one never got this far — and a later `start()` builds the notice
+// again from whatever the ledger and the store hold then.
+export function stop() {
+  if (!started) return;
+  started = false;
+  listeners?.abort();
+  listeners = null;
+  disarm();
+  clearTimeout(toastTimer);
+  toastTimer = null;
+  clearTimeout(downloadedTimer);
+  downloadedTimer = null;
+  clearTimeout(copiedTimer);
+  copiedTimer = null;
+  clearTimeout(ringTimer);
+  ringTimer = null;
+  dropRing();
+  window.visualViewport?.removeEventListener("resize", place);
+  window.visualViewport?.removeEventListener("scroll", place);
+  root?.remove();
+  root = null;
+  keyed = new Map();
+  wellEl = null;
+  panelEl = null;
+  view = "hidden";
+  listOpen = false;
+  renderedIds = [];
+  seenIds.clear();
+  freshIds.clear();
+  blockedRows.clear();
+  toastText = null;
+  refused = null;
+  upgraded = null;
+  busy = null;
+  keepFailed = false;
+  keepAttempt++;
+  armed = null;
+  armedAt = 0;
+  armLost = false;
+  recovered = [];
+  frameQueued = false;
+  checkRefusal = false;
+  pendingFocus = null;
+  lastAnnounced = null;
+  downloaded = false;
+  downloadFailed = false;
+  copiedId = null;
 }
 
 export const _test = {

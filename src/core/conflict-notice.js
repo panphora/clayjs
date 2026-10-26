@@ -1,5 +1,6 @@
 import onDomReady from "../lib/dom-ready.js";
 import { isEditMode } from "./is-edit-mode.js";
+import { isSaveConflicted } from "./save.js";
 import { storage } from "../lib/doc-storage.js";
 
 // The notice itself lives in conflict-notice-ui.js and is 6.8 KB Brotli: most edit
@@ -12,15 +13,18 @@ import { storage } from "../lib/doc-storage.js";
 const ledger = () => window.clay?.conflicts || null;
 
 let loading = false;
+let notice = null;    // the notice module, once it has been fetched
+let listeners = null; // the armed handlers, all of them on one controller
 
 function load(trigger) {
   if (loading) return;
   loading = true;
-  document.removeEventListener("clay:sync-conflicts-changed", onLedgerChanged);
-  document.removeEventListener("clay:save-conflict", onSaveConflict);
-  document.removeEventListener("clay:document-upgraded", onUpgraded);
+  disarm();
   import("./conflict-notice-ui.js").then(
-    (ui) => ui.start(trigger),
+    (module) => {
+      notice = module;
+      module.start(trigger);
+    },
     (error) => {
       console.error("clayjs: the conflict notice could not be downloaded; it will try again on the next conflict", error);
       loading = false;
@@ -29,10 +33,19 @@ function load(trigger) {
   );
 }
 
+// Arming twice is arming once, so a boot, an event that arrived while the notice was
+// being fetched and a mode lease can all ask for the same handlers.
 function arm() {
-  document.addEventListener("clay:sync-conflicts-changed", onLedgerChanged);
-  document.addEventListener("clay:save-conflict", onSaveConflict);
-  document.addEventListener("clay:document-upgraded", onUpgraded);
+  listeners ||= new AbortController();
+  const { signal } = listeners;
+  document.addEventListener("clay:sync-conflicts-changed", onLedgerChanged, { signal });
+  document.addEventListener("clay:save-conflict", onSaveConflict, { signal });
+  document.addEventListener("clay:document-upgraded", onUpgraded, { signal });
+}
+
+function disarm() {
+  listeners?.abort();
+  listeners = null;
 }
 
 function onLedgerChanged(e) {
@@ -64,6 +77,56 @@ function keptFromEarlier() {
     },
     () => {}
   );
+}
+
+// A conflict still unresolved when the page leaves edit would go with the session:
+// saving is blocked until it is answered, and the answer needs the editor. A save the
+// host refused is one of those, and so is a loss the ledger is still holding for this
+// tab. A change the recovery store kept from an earlier session is a copy this page can
+// still hand back, not input it is holding, so it never stands in the way.
+function unresolved() {
+  const held = (ledger()?.list?.() ?? []).filter((record) => !record.claimedBy).map((record) => record.id);
+  if (held.length) return held;
+  return isSaveConflicted() ? ["save"] : [];
+}
+
+/**
+ * The lazy notice as a mode lease.
+ *
+ * The shell and the notice it fetches are editor-only: they exist to answer a conflict,
+ * and the answer needs the editing lane. `quiesce` refuses an exit over a conflict that
+ * is still unresolved and leaves the notice standing exactly as it is, which is what a
+ * refusal has to keep showing; `resume` has nothing to reopen. `dispose` (after the
+ * barrier) takes back the shell's handlers and stops the notice, so a later frame in
+ * view draws nothing.
+ */
+export function conflictNoticeParticipant() {
+  return {
+    id: "clay:conflict-notice",
+    order: 960, // last: it reads the save lane's refusal and every peer's losses
+    prepare() {
+      return {
+        enable() {
+          if (!notice && !loading) arm();
+        },
+        quiesce() {
+          const pending = unresolved();
+          if (!pending.length) return;
+          throw Object.assign(new Error("clay.conflict-notice: a conflict here is still unresolved"), {
+            code: "conflict",
+            pending,
+          });
+        },
+        resume() {},
+        dispose() {
+          disarm();
+          loading = false;
+          notice?.stop?.();
+          notice = null;
+        },
+      };
+    },
+  };
 }
 
 onDomReady(() => {

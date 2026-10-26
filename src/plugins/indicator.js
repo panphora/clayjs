@@ -79,13 +79,60 @@ function show(state) {
   if (!STICKY.has(state)) hideTimer = setTimeout(() => { set(node, "opacity", "0"); }, 2200);
 }
 
+let listeners = null;
+
+// Arming is idempotent: the plugin's own boot and a mode lease both ask for the same
+// listeners, and one exit must be able to take all of them back.
+function arm() {
+  saveFeedback.chip = true;
+  listeners ||= new AbortController();
+  const { signal } = listeners;
+  for (const state of Object.keys(LABELS)) {
+    document.addEventListener("clay:save-" + state, () => show(state), { signal });
+  }
+  document.addEventListener("clay:page-save-state", (event) => show(event.detail?.state), { signal });
+}
+
+function disarm() {
+  listeners?.abort();
+  listeners = null;
+  clearTimeout(hideTimer);
+  hideTimer = null;
+  el?.remove();
+  el = null;
+}
+
 function init() {
   if (!isEditMode) return;
-  saveFeedback.chip = true;
-  for (const state of Object.keys(LABELS)) {
-    document.addEventListener("clay:save-" + state, () => show(state));
-  }
-  document.addEventListener("clay:page-save-state", (event) => show(event.detail?.state));
+  arm();
+}
+
+/**
+ * The save chip as a mode lease.
+ *
+ * The chip owns no input: it reports a save somebody else is making, so an exit never
+ * waits on it. `quiesce` leaves the chip and its fade timer exactly as they were, which
+ * is what a refusal has to keep showing; `resume` has nothing to reopen. `dispose`
+ * (after the barrier) takes the chip, its listeners and its timer down, so a save event
+ * in view draws nothing.
+ */
+export function indicatorParticipant() {
+  return {
+    id: "clay:indicator",
+    order: 700,
+    prepare() {
+      return {
+        enable() {
+          arm();
+        },
+        quiesce() {},
+        resume() {},
+        dispose() {
+          disarm();
+        },
+      };
+    },
+  };
 }
 
 onDomReady(init);
