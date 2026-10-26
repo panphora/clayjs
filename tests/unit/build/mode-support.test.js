@@ -25,7 +25,6 @@ const UNSUPPORTED = {
   "lib/region-policy.js": "the one policy both roads read, read before the plan",
   // Core paths whose session belongs to a later step.
   // Plugins: every one stays on the guarded reload until its own step lands.
-  "sync/live-sync.js": "the stream auto-starts on the saved lane; 17b-5",
   "plugins/page.js": "install() runs at import; 17b-7b",
   "plugins/page-view.js": "the reader the transition will own; 17b-7a",
   "plugins/cms.js": "the vendor auto-opens at import; 17b-9",
@@ -43,6 +42,10 @@ const UNSUPPORTED = {
 };
 
 const KINDS = ["neutral", "export", "reader"];
+
+// A row is one of those three, or a function of the module namespace that answers the
+// participant for a reader-loaded module whose participant lives in its edit chunk.
+const isRow = (kind) => KINDS.includes(kind) || typeof kind === "function";
 
 const inventory = () => [
   ...new Set([
@@ -67,9 +70,9 @@ test("every module the loader can resolve has a support row or a reasoned refusa
   // A refusal names a path the loader can actually resolve.
   expect(Object.keys(UNSUPPORTED).filter((path) => !paths.includes(path))).toEqual([]);
 
-  // Every row says one of the three things the decision understands.
+  // Every row says one of the things the decision understands.
   for (const [path, kind] of Object.entries(MODULE_SUPPORT)) {
-    expect({ path, kind: KINDS.includes(kind) }).toEqual({ path, kind: true });
+    expect({ path, kind: isRow(kind) }).toEqual({ path, kind: true });
   }
 
   // And an absent path is unsupported, never assumed supported.
@@ -83,6 +86,14 @@ test("every export row's module exports a function modeParticipant", async () =>
     const mod = await MODULES[path]();
     expect({ path, participant: typeof mod.modeParticipant }).toEqual({ path, participant: "function" });
   }
+});
+
+test("a row may be a function of the module, for a participant in an edit chunk", () => {
+  // Generic sync is loaded by a reader, but its participant is edit-only code: the row
+  // answers a promise of the participant from the module's own edit chunk, so a reader
+  // never fetches it.
+  const row = supportFor("sync/live-sync.js");
+  expect(typeof row).toBe("function");
 });
 
 test("an empty resolution is supported, and an absent path in it is not", async () => {

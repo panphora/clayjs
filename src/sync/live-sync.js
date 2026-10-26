@@ -40,7 +40,7 @@ import { loadedEngine, mergeEngine } from "./merge-engine.js";
 import Mutation from "../lib/mutation.js";
 import { NO_DIRTY_SELECTOR, LIVE_SELECTOR } from "../lib/region-policy.js";
 import { EXTENSION_NODE_SELECTOR, EXTENSION_ATTR_PATTERN } from '../lib/extension-noise.js';
-import { isEditMode } from "../core/is-edit-mode.js";
+import { isEditMode, modeState } from "../core/is-edit-mode.js";
 import { attributeMerge } from "./merge-declarations.js";
 import { serializeForSync, captureForComparisonAndDirty, canonicalizeReceived, captureSnapshot, originalSnapshotNode, captureForMerge, captureForSaveAndComparison } from '../core/snapshot.js';
 import { mergeIgnoresAttr, mergeVetoesAttr } from '../lib/root-attrs.js';
@@ -77,7 +77,12 @@ function loadEdit() {
   return editLoad;
 }
 
-if (isEditMode) loadEdit().catch(() => {});
+// `entering` means an entry is importing this module: the controller starts the
+// lane once the mode is committed, so this evaluation starts nothing and loads
+// nothing. An explicit initial edit, and a reader's saved lane, are untouched.
+const entering = modeState().phase === "entering";
+
+if (isEditMode && !entering) loadEdit().catch(() => {});
 
 // The receipt of a lane that has applied no saved file.
 const NO_FILE = Object.freeze({ bytes: null, etag: null, seq: null });
@@ -207,8 +212,8 @@ function readServedStamp(html) {
  * mid-edit. Root attributes (editmode, savestatus, tokens) need no reversal
  * here; the merge's attribute veto keeps the live root's own.
  */
-function activateIncomingDoc(rootEl) {
-  if (!isEditMode || !rootEl || !edit) return;
+function activateIncomingDoc(rootEl, lane) {
+  if (lane !== 'live' || !rootEl || !edit) return;
   edit.enableContentEditable(rootEl);
   edit.enableOnClick(rootEl);
   edit.enableAdminInputs(rootEl);
@@ -293,8 +298,13 @@ class LiveSync {
 
     // Lane on the shared per-file SSE channel. Edit mode: 'live' (owner-gated,
     // pre-strip peer snapshots + notifications). View mode: 'saved' (receive-
-    // only post-strip on-disk HTML). Overridable per-instance for tests.
-    this.lane = isEditMode ? 'live' : 'saved';
+    // only post-strip on-disk HTML). This is only the lane a page starts with:
+    // start() reads the committed mode, so one instance serves a reader's saved
+    // lane and, after an entry, the live lane.
+    this._lane = isEditMode ? 'live' : 'saved';
+    // A lane chosen by hand (a test, or a live switch handing one over) is never
+    // re-derived; otherwise every start() reads the committed mode.
+    this._laneChosen = false;
 
     // Store handler reference for cleanup
     this._snapshotHandler = null;
@@ -458,11 +468,26 @@ class LiveSync {
     this._setDiskBase(captureForSaveAndComparison({ emitForSync: false }).forSave, this._ticket());
   }
 
+  get lane() {
+    return this._lane;
+  }
+
+  set lane(value) {
+    this._lane = value;
+    this._laneChosen = true;
+  }
+
   /**
    * Start the LiveSync system
    * Can be called after stop() to restart with a new file
+   *
+   * The lane is read here, from the committed mode, unless the caller names one:
+   * the same instance rides a reader's saved lane, becomes the live lane at an
+   * entry, and comes back to the saved lane at an exit. `represented` is the
+   * `{bytes, etag, seq}` receipt a switch hands over, so a restarted saved lane
+   * has one before any frame arrives and a frame repeating it changes nothing.
    */
-  start(file = null) {
+  start(file = null, { lane, represented } = {}) {
     // Reset destroyed flag to allow restart after stop()
     this.isDestroyed = false;
 
@@ -477,6 +502,9 @@ class LiveSync {
       console.warn('[LiveSync] No file detected');
       return;
     }
+
+    const committed = modeState().mode === 'edit' ? 'live' : 'saved';
+    this._lane = lane || (this._laneChosen ? this._lane : committed);
 
     // Reset state for new connection. Resetting lastSeenSeq is a new baseline,
     // so mint a fresh resume id — this stream must not resume the previous one.
@@ -494,7 +522,9 @@ class LiveSync {
     this._applyGen++;
     this.lastSeenSeq = 0;
     this._lastExternalSeq = 0;
-    this._represented = NO_FILE;
+    this._represented = represented
+      ? Object.freeze({ bytes: represented.bytes ?? null, etag: represented.etag ?? null, seq: represented.seq ?? null })
+      : NO_FILE;
     this._pendingExternal = null;
     this.resumeId = this.generateResumeId();
 
@@ -2193,7 +2223,7 @@ class LiveSync {
         source: 'disk',
         seq,
         etag,
-        extra: { beforeApply: (doc) => activateIncomingDoc(doc.documentElement) },
+        extra: { beforeApply: (doc) => activateIncomingDoc(doc.documentElement, this.lane) },
       });
       diverged = report.localDiverged;
       typedDuringWait = typed;
@@ -2327,13 +2357,22 @@ class LiveSync {
     this.isDestroyed = true;
     console.log('[LiveSync] Stopped');
   }
+
+  /**
+   * The lifecycle participant for this module: the lease a live switch prepares,
+   * enables at the commit and disposes at the exit. Its body is in the edit-only
+   * chunk, so a reader never loads it.
+   */
+  editParticipant() {
+    return loadEdit().then((mod) => mod.syncParticipant(this));
+  }
 }
 
 // Singleton instance
 const liveSync = new LiveSync();
 
 // Auto-initialize when DOM is ready
-if (typeof window !== 'undefined') {
+if (typeof window !== 'undefined' && !entering) {
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => liveSync.start());
   } else {

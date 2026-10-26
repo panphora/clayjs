@@ -25,7 +25,7 @@ let edit = null;
 let editLoad = null;
 const editQueue = [];
 
-function loadEdit() {
+export function loadEdit() {
   editLoad ??= import('./conflicts-edit.js').then(
     (module) => {
       edit = module;

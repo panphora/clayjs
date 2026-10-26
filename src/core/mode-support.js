@@ -11,6 +11,8 @@
 //              admission, so a live entry can import it and leave it alone
 //   "export"   the module's namespace exports `modeParticipant`, prepared as a lease
 //   "reader"   the view plan's reader, owned by the transition rather than a lease
+//   function   a reader-loaded module whose participant lives in its edit chunk:
+//              `(mod) => Promise<participant>`, so the reader never loads it
 export const MODULE_SUPPORT = {
   // The always wave: state mirrors, a key handler and the facades both modes read.
   "lib/mutation.js": "neutral",
@@ -49,6 +51,9 @@ export const MODULE_SUPPORT = {
   "plugins/people.js": "export",
   "plugins/live.js": "export",
   "plugins/visitor-drafts-owner.js": "export",
+  // Generic sync: the module a reader and an editor both load, and the one whose
+  // session starts regardless of mode. Its participant is in the edit chunk.
+  "sync/live-sync.js": (mod) => mod.liveSync.editParticipant(),
 };
 
 export const supportFor = (path) =>

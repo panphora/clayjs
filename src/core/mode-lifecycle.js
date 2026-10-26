@@ -69,15 +69,17 @@ const editPlanPaths = (handle) => [
 ];
 
 // The built-ins a session starts: one participant per loaded edit-plan path whose support
-// row exports one, in plan order. A path the plan names but the entry could not load
-// contributes nothing, and a neutral row never does.
+// row exports one (or is a function of the namespace that answers one, for a module whose
+// participant lives in its edit chunk), in plan order. A path the plan names but the entry
+// could not load contributes nothing, and a neutral row never does.
 function builtinParticipants(handle) {
   const found = [];
   for (const path of editPlanPaths(handle)) {
-    if (supportFor(path) !== "export") continue;
+    const support = supportFor(path);
+    if (support !== "export" && typeof support !== "function") continue;
     const mod = handle.loaded?.[path];
     if (!mod) continue;
-    found.push(mod.modeParticipant?.());
+    found.push(typeof support === "function" ? support(mod) : mod.modeParticipant?.());
   }
   return found;
 }
@@ -96,7 +98,7 @@ async function collectRoster(handle) {
     seen.add(participant.id);
     roster.push(participant);
   };
-  if (handle) for (const participant of builtinParticipants(handle)) add(participant);
+  if (handle) for (const participant of builtinParticipants(handle)) add(await participant);
   for (const entry of takeModeParticipants()) add(await entry);
   return [...roster].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
 }
@@ -260,11 +262,12 @@ async function adoptInitial(handle) {
   await withinDeadline(handle.late);
   const participants = [];
   for (const path of editPlanPaths(handle)) {
-    if (supportFor(path) !== "export") continue;
+    const support = supportFor(path);
+    if (support !== "export" && typeof support !== "function") continue;
     const mod = handle.loaded?.[path];
     // Not loaded: it started nothing, so there is nothing to hand back.
     if (!mod) continue;
-    const participant = mod.modeParticipant?.();
+    const participant = await (typeof support === "function" ? support(mod) : mod.modeParticipant?.());
     if (typeof participant?.id !== "string" || typeof participant.prepare !== "function") return null;
     participants.push(participant);
   }
