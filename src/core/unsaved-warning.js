@@ -19,7 +19,7 @@ import { isEditMode, isDraftMode } from "./is-edit-mode.js";
 import { draftStoreFailed, flushDraft } from "./draft-mode.js";
 import { captureForDirtyCheck } from "./snapshot.js";
 import { getLastSavedDirty, sessionParked, styleAdoptionPending } from "./save.js";
-import { logUnloadDiffSync, preloadIfEnabled } from "../lib/autosave-debug.js";
+import { logUnloadDiffSync, preloadIfEnabled } from "../lib/autosave-debug-gate.js";
 import { hasUnsavedState } from "../lib/unsaved-state.js";
 
 // One beforeunload let through, for the reload a person confirmed with two presses

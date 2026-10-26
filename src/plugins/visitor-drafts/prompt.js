@@ -1,4 +1,3 @@
-import { PROMPT_CSS } from "./prompt-style.js";
 import { announceBottomUi, bottomBarHeight } from "./bottom-ui.js";
 
 const FONT_HREF = "https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500&family=IBM+Plex+Sans:wght@400;500;600&family=Newsreader:opsz,wght@6..72,500&display=swap";
@@ -24,8 +23,9 @@ const ASIDE = `<aside class="hcp" id="hcp" hidden aria-label="Download this app"
   </div>
 </aside>`;
 
-export function mountPrompt({ memory, appName, link }) {
+export async function mountPrompt({ memory, appName, link }) {
   if (!document.getElementById("hcp-style")) {
+    const { PROMPT_CSS } = await import("./prompt-style.js");
     document.head.insertAdjacentHTML("beforeend", `<link rel="stylesheet" clay="editor-ui" href="${FONT_HREF}">\n<style clay="editor-ui" id="hcp-style">${PROMPT_CSS}</style>`);
   }
   if (!document.getElementById("hcp")) document.body.insertAdjacentHTML("beforeend", ASIDE);

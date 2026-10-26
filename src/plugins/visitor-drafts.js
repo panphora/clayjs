@@ -6,13 +6,23 @@ import { createUiMemory } from "./visitor-drafts/ui-memory.js";
 import { rememberSource, downloadUrl } from "./visitor-drafts/source.js";
 import { mountPrompt } from "./visitor-drafts/prompt.js";
 import { mountIntro } from "./visitor-drafts/intro.js";
-import { mountOwnerChip } from "./visitor-drafts/owner-chip.js";
 import { DOWNLOAD_URL, backToDraft, editOriginal, inertVisitorDrafts } from "./visitor-drafts/inert.js";
 
 let store = null;
 let restoredDetail = null;
 let downloadLink = DOWNLOAD_URL;
 let source = null;
+let ready = Promise.resolve();
+
+// The chip is a convenience: a failed import leaves the draft working without it.
+function mountChip() {
+  return import("./visitor-drafts/owner-chip.js")
+    .then((m) => m.mountOwnerChip())
+    .catch((error) => {
+      console.warn("visitor-drafts: the owner chip did not load", error);
+      return null;
+    });
+}
 
 const slot = draftSlot();
 const rulesTag = document.querySelector('script[data-rules-name~="api"]');
@@ -29,11 +39,12 @@ if (isDraftMode && slot && rulesTag) {
   const appName = document.querySelector('meta[name="application-name"]')?.content?.trim() || document.title.split(/:|\s\|\s/)[0].trim() || "This app";
   const template = document.querySelector("template[visitor-intro]");
   const start = () => {
-    const prompt = mountPrompt({ memory, appName, link: downloadLink });
-    mountIntro({ memory, template, appName, hadDraft: result.hadDraft });
-    if (isOwner) mountOwnerChip();
-    document.addEventListener("clay:drafts-store-failed", () => prompt.showError());
-    document.addEventListener("clay:drafts-saved", () => prompt.clearError());
+    ready = mountPrompt({ memory, appName, link: downloadLink }).then((prompt) => {
+      mountIntro({ memory, template, appName, hadDraft: result.hadDraft });
+      document.addEventListener("clay:drafts-store-failed", () => prompt.showError());
+      document.addEventListener("clay:drafts-saved", () => prompt.clearError());
+      return (isOwner ? mountChip() : Promise.resolve(null)).then(() => prompt);
+    });
   };
   document.readyState === "loading" ? document.addEventListener("DOMContentLoaded", start, { once: true }) : start();
   setDraftFlush(() => store.flush());
@@ -47,10 +58,10 @@ if (isDraftMode && slot && rulesTag) {
   if (!rulesTag) missing.push('a <script data-rules-name~="api"> rules tag');
   console.warn(`visitor-drafts: this page keeps no draft (missing ${missing.join(" and ")})`);
 } else if (isOwner && isEditMode && !hasSaveToken()) {
-  mountOwnerChip();
+  ready = mountChip();
 }
 
-export const ready = Promise.resolve();
+export { ready };
 
 export const visitorDrafts = store ? {
   active: true,

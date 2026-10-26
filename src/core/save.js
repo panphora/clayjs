@@ -30,7 +30,7 @@ import { hasUnsavedState } from "../lib/unsaved-state.js";
 import { autosaveActive } from "../lib/autosave-state.js";
 import { registerStyleAdoption } from "../lib/style-adoption.js";
 import { ROOT_LIBRARY_ATTRS, SAVE_TOKEN_ATTRS, LEGACY_SAVE_TOKEN_ATTRS, HOST_RESPONSE_ATTRS } from "../lib/root-attrs.js";
-import { logSaveCheck, logBaseline } from "../lib/autosave-debug.js";
+import { logSaveCheck, logBaseline } from "../lib/autosave-debug-gate.js";
 import { initUserGesture, markExplicitSave, clearExplicitSave } from "../lib/user-gesture.js";
 // A deliberate import cycle: unsaved-warning reads this module's saved baseline, and
 // flush asks the SAME bytes question the close warning asks, through `bytesUnsaved`.
