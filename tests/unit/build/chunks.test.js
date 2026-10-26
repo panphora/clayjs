@@ -8,7 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import { BOOT_IMPORTS, EDIT_BOOT_IMPORTS, EDITOR_BOOT_IMPORTS } from "../../../src/lib/boot-imports.js";
 import { CORE_WAVES, PLUGIN_PATHS } from "../../../src/loader-logic.js";
-import { emitBootstraps, emitChunks } from "../../../scripts/build-chunks.mjs";
+import { EDIT_DYNAMIC_IMPORTS, emitBootstraps, emitChunks } from "../../../scripts/build-chunks.mjs";
 
 const root = path.resolve(new URL("../../..", import.meta.url).pathname);
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
@@ -173,7 +173,9 @@ test("the runtime manifest names each entry's boot imports and the edit-only one
   const supplement = await runtimeOf(built.manifest.edit);
 
   expect({ ...supplement.bootImports, ...runtime.bootImports }).toEqual(BOOT_IMPORTS);
-  expect(supplement.editBootImports).toEqual(EDIT_BOOT_IMPORTS);
+  // The supplement carries the boot imports an edit boot fetches, the dynamic ones
+  // included: a view manifest names none of them.
+  expect(supplement.editBootImports).toEqual([...EDIT_BOOT_IMPORTS, ...EDIT_DYNAMIC_IMPORTS]);
   expect(runtime.editBootImports).toBeUndefined();
 });
 

@@ -11,6 +11,12 @@ import { pathToFileURL } from "node:url";
 import { BOOT_IMPORTS, EDIT_BOOT_IMPORTS, EDITOR_BOOT_IMPORTS } from "../src/lib/boot-imports.js";
 
 export const BOOT_PREFIX = ["core/draft-mode.js", "core/is-edit-mode.js", "lib/region-policy.js"];
+// Chunks an edit boot fetches through a dynamic import, which no static closure sees:
+// live sync and conflicts each start their edit half as they evaluate, and edit-mode
+// fetches the mode lifecycle when the initial edit activates. They are listed in the
+// supplement's edit boot imports, so the loader preloads them with the rest of its plan,
+// and only a page that fetched the supplement ever sees the list.
+export const EDIT_DYNAMIC_IMPORTS = ["sync/live-sync-edit.js", "sync/conflicts-edit.js", "core/mode-lifecycle.js"];
 // The one build entry that carries the always-wave core (src/reader-core.js).
 const READER_CORE = "reader-core.js";
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
@@ -122,7 +128,7 @@ export async function emitChunks({ root, outdir, plugins = [] }) {
   const editImports = importsOf(closureKeys(Object.keys(editEntries)), viewFiles);
   const code = `export default ${JSON.stringify({ version, entries: viewEntries, imports: viewImports, bootImports: viewBootImports })};\n`;
   const runtime = `manifest-${sha256(code).slice(0, 8).toUpperCase()}.js`;
-  const editCode = `export default ${JSON.stringify({ entries: editEntries, imports: editImports, bootImports: editBootImports, editBootImports: EDIT_BOOT_IMPORTS, editorBootImports: EDITOR_BOOT_IMPORTS })};\n`;
+  const editCode = `export default ${JSON.stringify({ entries: editEntries, imports: editImports, bootImports: editBootImports, editBootImports: [...EDIT_BOOT_IMPORTS, ...EDIT_DYNAMIC_IMPORTS], editorBootImports: EDITOR_BOOT_IMPORTS })};\n`;
   const editRuntime = `manifest-edit-${sha256(editCode).slice(0, 8).toUpperCase()}.js`;
   for (const [name, body] of [[runtime, code], [editRuntime, editCode]]) {
     await writeFile(path.join(outdir, name), body);
@@ -191,6 +197,18 @@ function bootstrapSource(payload) {
   var tree = base.slice(-5) === "/dist" ? base.slice(0, -5) : base;
   var have = {};
   document.head.querySelectorAll('link[rel="modulepreload"]').forEach(function (link) { have[link.href] = true; });
+  // Only an explicit ?editmode=true asks for the supplement, or the window.clayEditMode
+  // global a standalone page sets before this script; the owner cookie is not an edit
+  // request, because an owner who opens a document in view resolves to view.
+  function __clayLikelyEdit(search) {
+    var asked = new URLSearchParams(search).get("editmode");
+    if (asked) return asked === "true";
+    if (typeof clayEditMode !== "undefined") return Boolean(clayEditMode);
+    return typeof __hyperclayEditMode !== "undefined" && Boolean(__hyperclayEditMode);
+  }
+  var likelyEdit = __clayLikelyEdit(window.location.search);
+  // The supplement an edit page is about to import, preloaded like the manifest.
+  if (likelyEdit) M.preload.push(M.edit);
   M.preload.forEach(function (file) {
     var href = dir + file;
     if (have[href]) return;
@@ -201,12 +219,6 @@ function bootstrapSource(payload) {
     link.setAttribute("clay", "no-save");
     document.head.appendChild(link);
   });
-  // Only an explicit ?editmode=true asks for the supplement: the owner cookie is not
-  // an edit request, because an owner who opens a document in view resolves to view.
-  function __clayLikelyEdit(search) {
-    return new URLSearchParams(search).get("editmode") === "true";
-  }
-  var likelyEdit = __clayLikelyEdit(window.location.search);
   if (!clay.__runtime) {
     clay.__runtime = Promise.all([
       import(dir + M.manifest),

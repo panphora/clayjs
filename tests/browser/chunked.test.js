@@ -52,15 +52,30 @@ async function planClosure(isEditMode) {
   return [...want];
 }
 
+// The payload the bootstrap's IIFE is called with, read as the object it is:
+// `(function (M) { ... })({...})`. A line sniff would break on any key the payload
+// gains or loses.
+function bootstrapPayload(source) {
+  const start = source.indexOf('})({');
+  expect(start).to.be.above(-1);
+  let depth = 0;
+  for (let i = start + 3; i < source.length; i++) {
+    if (source[i] === '{') depth++;
+    else if (source[i] === '}' && --depth === 0) return JSON.parse(source.slice(start + 3, i + 1));
+  }
+  throw new Error('the bootstrap payload is unterminated');
+}
+
 // The chunk files the bootstrap preloads itself before it awaits the runtime
 // manifest: the loader, the manifest and the boot prefix. They are boot stage 2,
 // earlier than the loader's own plan, so a check that starts at the plan misses
 // them and would pass with the bootstrap's own preloads deleted.
 async function bootstrapPreloads() {
   const source = await fetch('/dist/clay.js').then((response) => response.text());
-  const line = source.split('\n').find((text) => text.startsWith('})({"version"'));
-  expect(line).to.be.a('string');
-  const payload = JSON.parse(line.slice(3, -1));
+  const payload = bootstrapPayload(source);
+  expect(payload.preload).to.be.an('array');
+  // No reader's payload names the supplement: only the edit decision adds its link.
+  expect(payload.preload).not.to.contain(payload.edit);
   return payload.preload.map((file) => `/dist/m/${file}`);
 }
 
@@ -163,10 +178,9 @@ describe('the chunked release in edit mode', () => {
   });
 });
 
-// A plugin's boot-time import is a boot stage of its own unless the plan preloads
-// it: sortable awaits vendor/Sortable.vendor.js inside its ready, and the loader
-// holds clay:ready on that. Every chunk the page fetched before clay:ready has to
-// have had a preload link, or the browser fetched it one stage too late.
+// An edit page's boot fetches the supplement and the chunks its own modules reach
+// before clay:ready. Every one of them has to have had a preload link, or the browser
+// fetched it one stage too late. sortable itself is late now: it arrives after ready.
 describe('a plugins=sortable edit page', () => {
   let win;
 
@@ -180,13 +194,27 @@ describe('a plugins=sortable edit page', () => {
     expect(chunks.filter((path) => !preloaded.has(path))).to.deep.equal([]);
   });
 
-  it('preloads the sortable vendor and the host metadata', async () => {
-    const { runtime } = await fetch('/dist/m/manifest.json').then((response) => response.json());
+  // sortable is late and edit-only, so its vendor chunk and the host metadata live in
+  // the edit supplement: the metadata is an edit boot import the bootstrap preloads,
+  // and the vendor arrives with the plugin after clay:ready, not before it.
+  it('loads the late sortable vendor after ready and preloads the host metadata', async () => {
+    const { runtime, edit } = await fetch('/dist/m/manifest.json').then((response) => response.json());
     const manifest = (await import(`/dist/m/${runtime}`)).default;
-    const preloaded = new Set(win.preloadsAtReady.map((href) => new URL(href).pathname));
+    const supplement = (await import(`/dist/m/${edit}`)).default;
+    const vendor = supplement.entries['vendor/Sortable.vendor.js'];
+    const hostMeta = supplement.entries['core/host-meta.js'];
 
-    expect(preloaded.has(`/dist/m/${manifest.entries['vendor/Sortable.vendor.js']}`)).to.equal(true);
-    expect(preloaded.has(`/dist/m/${manifest.entries['core/host-meta.js']}`)).to.equal(true);
+    expect(manifest.entries['vendor/Sortable.vendor.js']).to.equal(undefined);
+    expect(manifest.entries['core/host-meta.js']).to.equal(undefined);
+    expect(vendor).to.be.a('string');
+    expect(hostMeta).to.be.a('string');
+
+    const preloaded = new Set(win.preloadsAtReady.map((href) => new URL(href).pathname));
+    expect(preloaded.has(`/dist/m/${hostMeta}`)).to.equal(true);
+
+    await until(() => win.clay.sortable, 'the late sortable plugin');
+    expect(win.fetchedAtReady).not.to.contain(`/dist/m/${vendor}`);
+    expect(fetched(win)).to.contain(`/dist/m/${vendor}`);
   });
 });
 
@@ -199,6 +227,17 @@ function expectOneCopy(win) {
   expect(win.clay.internals.addDocumentTransform).to.equal(win.clay.addDocumentTransform);
   win.clay.internals.addDocumentTransform((clone) => clone.setAttribute('data-internals-transform', '1'));
   expect(win.clay.getHTML()).to.contain('data-internals-transform="1"');
+}
+
+// A poll with a deadline: a late plugin arrives after clay:ready, so there is no
+// promise on clay.loaded to await and no event to catch if it already fired.
+async function until(value, what) {
+  for (let attempt = 0; attempt < 250; attempt++) {
+    const got = value();
+    if (got) return got;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error(`timed out waiting for ${what}`);
 }
 
 const bootedFromTree = (win) =>

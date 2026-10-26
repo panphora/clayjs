@@ -5,7 +5,8 @@ import { afterAll, beforeAll, expect, test } from "@jest/globals";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { BOOT_PREFIX, emitBootstraps, emitChunks } from "../../../scripts/build-chunks.mjs";
+import { BOOT_PREFIX, EDIT_DYNAMIC_IMPORTS, emitBootstraps, emitChunks } from "../../../scripts/build-chunks.mjs";
+import { EDIT_BOOT_IMPORTS } from "../../../src/lib/boot-imports.js";
 
 const root = path.resolve(new URL("../../..", import.meta.url).pathname);
 
@@ -98,12 +99,40 @@ test("clay.js preloads the loader, the runtime manifest and the boot prefix", as
   expect(M.version).toBeUndefined();
 });
 
+// An edit boot fetches more before ready than the loader's plan names: the supplement
+// itself, and the chunks the edit halves of live sync and conflicts and the mode
+// lifecycle reach with a dynamic import. The bootstrap preloads the supplement beside
+// the runtime manifest, and the supplement lists the rest as edit boot imports, so a
+// reader downloads none of it.
+test("clay.js preloads the supplement on an edit page, and the supplement names the rest", async () => {
+  const code = await read("clay.js");
+  const M = embedded(code);
+  const supplement = JSON.parse(
+    (await readFile(path.join(chunkdir, built.manifest.edit), "utf8")).slice("export default ".length).replace(/;\s*$/, "")
+  );
+
+  // No reader's payload holds the supplement: only the edit decision adds its link,
+  // and it does so before the import that would fetch it.
+  expect(M.preload).not.toContain(M.edit);
+  const added = code.indexOf("if (likelyEdit) M.preload.push(M.edit);");
+  expect(added).toBeGreaterThan(-1);
+  expect(added).toBeLessThan(code.indexOf("likelyEdit ? import(dir + M.edit)"));
+
+  expect(EDIT_DYNAMIC_IMPORTS.length).toBeGreaterThan(0);
+  for (const path of [...EDIT_BOOT_IMPORTS, ...EDIT_DYNAMIC_IMPORTS]) {
+    expect(supplement.editBootImports).toContain(path);
+    expect(supplement.entries[path]).toBeTruthy();
+  }
+});
+
 // The supplement is the only conditional request the release makes, and a wrong guess
 // costs hints, never a module: a page that asks for it early used one extra request, and
-// an editor whose page did not preloads what the main manifest knows. Only an explicit
-// ?editmode=true asks early; an owner's cookie is permission, not an edit request, so an
-// owner opening a document in view downloads no hint index (see mode-hints.test.js).
-test("the bootstrap fetches the edit supplement only for an explicit ?editmode=true", async () => {
+// an editor whose page did not preloads what the main manifest knows. An explicit
+// ?editmode=true asks early, and so does a page that opts into edit through the
+// window.clayEditMode global its own file set; an owner's cookie is permission, not an
+// edit request, so an owner opening a document in view downloads no hint index (see
+// mode-hints.test.js).
+test("the bootstrap fetches the edit supplement for an explicit ?editmode=true or an opt-in global", async () => {
   const code = await read("clay.js");
   const at = code.indexOf("function __clayLikelyEdit");
   const end = code.indexOf("\n  }", at) + 4;
@@ -117,6 +146,17 @@ test("the bootstrap fetches the edit supplement only for an explicit ?editmode=t
   expect(likelyEdit("?plugins=page", "")).toBe(false);
   expect(likelyEdit("?plugins=page&editmode=false", "isAdminOfCurrentResource=abc")).toBe(false);
   expect(likelyEdit("?editmode=false", "other=1")).toBe(false);
+
+  // A standalone page that sets the global before the script is editable by its own
+  // say-so, and the URL still wins over the global.
+  globalThis.clayEditMode = true;
+  try {
+    expect(likelyEdit("?plugins=page")).toBe(true);
+    expect(likelyEdit("?plugins=page&editmode=false")).toBe(false);
+  } finally {
+    delete globalThis.clayEditMode;
+  }
+  expect(likelyEdit("?plugins=page")).toBe(false);
 
   // Two imports of the one supplement: the early one this predicate decides, and the
   // cached hint fetch a resolved edit, draft or first entry uses.
