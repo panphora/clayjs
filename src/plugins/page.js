@@ -14,6 +14,7 @@ import { claim } from "../page/runtime-owner.js";
 import { authorIdentity } from "../page/ybind/author.js";
 import { createInstall, disposeInstall, addDisposer, finishError, isCurrent, ownsView, runBoot, activateInput } from "../page/boot.js";
 import { capabilityAdvertised } from "../page/tool-capability.js";
+import { isEditMode } from "../core/is-edit-mode.js";
 import { toolViews } from "../page/tool-views.js";
 import { style } from "../lib/hostile-css.js";
 
@@ -554,22 +555,31 @@ export function createSteps(inst, options) {
       return { ok: false, reason: "ambiguous-page" };
     }
     const element = articles[0];
+    // The file the reader represented is the page this session edits: its tag and the
+    // article the seed is built from come off those bytes once, so a tag another tab
+    // changed and a reader's own local state cannot reach what is staged. The live
+    // article stays the node the editor mounts over.
+    const represented = typeof inst.context?.represented?.bytes === "string"
+      ? new DOMParser().parseFromString(inst.context.represented.bytes, "text/html")
+      : null;
+    const seedNode = represented?.querySelector(ARTICLE_SEL) ?? element;
+    const tagNode = represented ? represented.querySelector(TAG_SEL) : tags[0];
     // A tag this tab can read on its own is read here, so a page it cannot boot says so
     // before the room is opened.
     let value = null;
     if (!seeded) {
-      try { value = parseJsonRelaxed(tags[0].textContent); } catch (error) { value = null; }
+      try { value = parseJsonRelaxed(tagNode?.textContent); } catch (error) { value = null; }
       const unreadable = unreadablePage(value);
       if (unreadable) return { ok: false, reason: unreadable };
     }
-    const source = { article: element.cloneNode(true), tags: value ? [value] : null, element, blocks: null, seeded, seedValue: null };
+    const source = { article: seedNode.cloneNode(true), tags: value ? [value] : null, element, blocks: null, seeded, seedValue: null };
     source.ready = (async () => {
       const code = await pageCodeReady();
       if (!isCurrent(inst)) return { ok: false, cancelled: true };
       if (seeded) {
         // The seed stays a value in memory: no tag and no write until someone edits.
         try {
-          value = source.seedValue = code.seedPageFromArticle(element.cloneNode(true));
+          value = source.seedValue = code.seedPageFromArticle(source.article.cloneNode(true));
         } catch (error) {
           console.warn("clayjs: page plugin could not rebuild the page it found, leaving the page as saved HTML", error);
           return { ok: false, reason: "invalid-page-source" };
@@ -741,6 +751,9 @@ export function createSteps(inst, options) {
 
   function mountAndAttach(inst, source, loaded) {
     const article = source.element;
+    // The reader that showed this article gives its claim up here and keeps its queue,
+    // so a preparation that fails after this point hands the article back.
+    inst.context?.reader?.yieldArticle?.();
     // The claim comes before this install records the article as its own to
     // restore: a claim another runtime holds is refused, and neither the owner's
     // article nor this install's restoration ownership may change.
@@ -1091,33 +1104,24 @@ function endSession(inst) {
   restoreArticle(inst);
 }
 
-// What the coordinator holds between the commit that enters edit and the one that
-// leaves it: preparation is `ready`, the commit is `enable`, a refused exit is
-// `quiesce` then `resume`, and the committed exit is `dispose`.
-export function preparePageSession(context = null, options = {}) {
-  holdAllSaves(SESSION_HOLD);
-  const { inst, boot } = begin(options, { activate: false, context });
-  inst.sessionHeld = true;
-  const releaseHold = () => {
-    if (!inst.sessionHeld) return;
-    inst.sessionHeld = false;
-    releaseAllSaves({ replay: false, reason: SESSION_HOLD });
-  };
-  const ready = boot.then((result) => {
-    if (!result?.deferred) {
-      throw Object.assign(new Error("clayjs: the page session could not prepare"), { code: result?.reason ?? "load-failed" });
-    }
-    return undefined;
-  });
-  // A preparation the coordinator never holds, and never disposes either, must not
-  // keep the page's saves closed: it gives its hold back as it fails.
-  ready.catch(() => { releaseHold(); });
+// The save hold a managed session takes between its preparation and its commit: given
+// back once, by the enable that commits it or by the preparation that fails.
+function releaseSessionHold(inst) {
+  if (!inst.sessionHeld) return;
+  inst.sessionHeld = false;
+  releaseAllSaves({ replay: false, reason: SESSION_HOLD });
+}
+
+// What both roads hold between the commit that enters edit and the one that leaves it:
+// a refused exit is `quiesce` then `resume`, and the committed exit is `dispose`. Only a
+// session preparation holds takes a save hold to give back; an adopted one took none.
+function sessionLease(inst, { held = true } = {}) {
   return {
-    ready,
     // Synchronous after preparation: it opens admission, input and the lane's writes,
-    // and nothing it does can fail.
+    // and nothing it does can fail. An adopted session is already open.
     enable() {
-      releaseHold();
+      if (!held) return;
+      releaseSessionHold(inst);
       activateInput(inst);
     },
     quiesce() {
@@ -1135,7 +1139,7 @@ export function preparePageSession(context = null, options = {}) {
       }
     },
     resume() {
-      releaseHold();
+      releaseSessionHold(inst);
       if (inst.autosaveSuspended) {
         inst.autosaveSuspended = false;
         resumeAutosave();
@@ -1143,7 +1147,7 @@ export function preparePageSession(context = null, options = {}) {
       inst.steps?.resumeInput?.(inst);
     },
     dispose() {
-      releaseHold();
+      releaseSessionHold(inst);
       if (inst.autosaveSuspended) {
         inst.autosaveSuspended = false;
         resumeAutosave();
@@ -1151,6 +1155,33 @@ export function preparePageSession(context = null, options = {}) {
       endSession(inst);
     },
   };
+}
+
+// What the coordinator holds between the commit that enters edit and the one that
+// leaves it: preparation is `ready`, the commit is `enable`, a refused exit is
+// `quiesce` then `resume`, and the committed exit is `dispose`.
+export function preparePageSession(context = null, options = {}) {
+  holdAllSaves(SESSION_HOLD);
+  const { inst, boot } = begin(options, { activate: false, context });
+  inst.sessionHeld = true;
+  const lease = sessionLease(inst, { held: true });
+  // The facade reads a session as the boot that is staging it, so it settles at the
+  // staging or at the blocked outcome, and never rejects.
+  page.ready = boot.then(() => page.status);
+  const ready = boot.then((result) => {
+    if (!result?.deferred) {
+      throw Object.assign(new Error("clayjs: the page session could not prepare"), { code: result?.reason ?? "load-failed" });
+    }
+    return undefined;
+  });
+  // A preparation the coordinator never holds, and never disposes either, must not
+  // keep the page's saves closed: it gives its hold back as it fails, and a reader that
+  // yielded the article takes it back before the failure reaches the coordinator.
+  ready.catch(() => {
+    releaseSessionHold(inst);
+    try { context?.reader?.reclaimArticle?.(); } catch (error) { console.error("clayjs: the reader could not take the article back", error); }
+  });
+  return { ready, ...lease };
 }
 
 /**
@@ -1162,12 +1193,22 @@ export function preparePageSession(context = null, options = {}) {
 export function pageParticipant(options = {}) {
   return {
     id: "clay:page",
-    order: 100,
-    prepare(context) {
+    // After live (200) and upload (340): the page builds its stores over the admission
+    // those two already opened.
+    order: 400,
+    prepare(context = {}) {
+      // An adoption is the session this tab's edit boot started: the exit takes that one
+      // back, and the entry starts none.
+      if (context.initial === true) {
+        if (!active) return { enable() {}, quiesce() {}, resume() {}, dispose() {} };
+        return sessionLease(active, { held: false });
+      }
       return preparePageSession(context, options);
     },
   };
 }
+
+export { pageParticipant as modeParticipant };
 
 export const page = {
   ready: null,
@@ -1186,6 +1227,8 @@ export const page = {
   },
 };
 
-page.ready = install();
+// A live entry imports this module while the committed mode is still view: the install
+// belongs to the explicit edit boot alone, and a managed session starts its own.
+page.ready = isEditMode ? install() : null;
 
 export default page;

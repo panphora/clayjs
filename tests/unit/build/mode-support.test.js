@@ -25,7 +25,6 @@ const UNSUPPORTED = {
   "lib/region-policy.js": "the one policy both roads read, read before the plan",
   // Core paths whose session belongs to a later step.
   // Plugins: every one stays on the guarded reload until its own step lands.
-  "plugins/page.js": "install() runs at import; 17b-7b",
   "plugins/page-view.js": "the reader the transition will own; 17b-7a",
   "plugins/cms.js": "the vendor auto-opens at import; 17b-9",
   "plugins/quickcrop.js": "reached through cms and unreviewed; 17b-9",

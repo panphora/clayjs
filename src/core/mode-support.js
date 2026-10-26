@@ -50,6 +50,7 @@ export const MODULE_SUPPORT = {
   "plugins/upload.js": "export",
   "plugins/people.js": "export",
   "plugins/live.js": "export",
+  "plugins/page.js": "export",
   "plugins/visitor-drafts-owner.js": "export",
   // Generic sync: the module a reader and an editor both load, and the one whose
   // session starts regardless of mode. Its participant is in the edit chunk.
