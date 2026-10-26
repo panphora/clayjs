@@ -251,3 +251,45 @@ describe("added subtrees", () => {
     expect(document.getElementById("added")).toBeNull();
   });
 });
+
+describe("clay:undo-change", () => {
+  const changes = [];
+  const onChange = (event) => changes.push(event.detail);
+  const summary = (detail) => ({
+    canUndo: detail.canUndo,
+    canRedo: detail.canRedo,
+    undo: detail.undo?.label ?? null,
+    redo: detail.redo?.label ?? null,
+    refused: detail.redo?.refused?.code ?? detail.undo?.refused?.code ?? null,
+  });
+
+  beforeEach(() => {
+    changes.length = 0;
+    document.addEventListener("clay:undo-change", onChange);
+  });
+  afterEach(() => document.removeEventListener("clay:undo-change", onChange));
+
+  test("names the entries the next Undo and Redo would replay, through a refusal and its dismissal", async () => {
+    await enter();
+    undo.setRecording("commands");
+    expect(summary(changes.at(-1))).toEqual({ canUndo: false, canRedo: false, undo: null, redo: null, refused: null });
+
+    undo.command("Rename", () => setText(text(), "renamed"));
+    expect(summary(changes.at(-1))).toMatchObject({ canUndo: true, undo: "Rename" });
+
+    undo.undo();
+    expect(summary(changes.at(-1))).toEqual({ canUndo: false, canRedo: true, undo: null, redo: "Rename", refused: null });
+
+    peerWrite(() => setText(text(), "peer"));
+    const refused = undo.redo();
+    expect(refused.ok).toBe(false);
+    expect(summary(changes.at(-1))).toMatchObject({ canRedo: true, redo: "Rename", refused: refused.code });
+
+    undo.discard(refused.entryId);
+    expect(summary(changes.at(-1))).toEqual({ canUndo: false, canRedo: false, undo: null, redo: null, refused: null });
+    expect(text().textContent).toBe("peer");
+
+    leases.pop().dispose();
+    expect(summary(changes.at(-1))).toEqual({ canUndo: false, canRedo: false, undo: null, redo: null, refused: null });
+  });
+});

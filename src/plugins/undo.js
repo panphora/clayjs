@@ -105,6 +105,23 @@ const refuse = ({ entryId, label, direction, code }) => {
   }))
 }
 
+// One event for whatever presents the history (Undo and Redo buttons, a refusal banner):
+// after every entry, replay, refusal, dismissal and clear, and when a session starts or
+// ends. `undo` and `redo` are the entries the next press would replay, with `refused`
+// set on the one that was just refused.
+const HISTORY_EVENTS = ['commit', 'undo', 'redo', 'refused', 'discard', 'clear']
+const announceChange = () => {
+  const live = !!session?.started
+  document.dispatchEvent(new CustomEvent('clay:undo-change', {
+    detail: {
+      canUndo: live && undo.canUndo,
+      canRedo: live && undo.canRedo,
+      undo: (live && undo.history.at(-1)) || null,
+      redo: (live && undo.future?.[0]) || null,
+    },
+  }))
+}
+
 // One edit session owns the page's DOM history. A session starts its own over the page as
 // it stands, so nothing an earlier session recorded, and nothing a reader painted while the
 // page was in view, is this session's to undo. The durable recovery records belong to the
@@ -147,6 +164,11 @@ function undoLease(record) {
       }
       undo.on('refused', refuse)
       record.subscriptions.push({ type: 'refused', handler: refuse })
+      for (const type of HISTORY_EVENTS) {
+        undo.on(type, announceChange)
+        record.subscriptions.push({ type, handler: announceChange })
+      }
+      announceChange()
     },
     quiesce() {
       if (!record.admitted) return
@@ -165,6 +187,7 @@ function undoLease(record) {
       record.started = false
       for (const { type, handler } of record.subscriptions.splice(0)) undo.off(type, handler)
       undo.stop()
+      announceChange()
     },
   }
 }
