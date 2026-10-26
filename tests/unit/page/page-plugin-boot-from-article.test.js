@@ -4,7 +4,7 @@
  */
 import { jest } from "@jest/globals";
 import { seedValue } from "../../../src/page/ybind/seed.js";
-import { renderFromTags } from "../../../src/page/save-projection.js";
+import { projectInto, renderFromTags } from "../../../src/page/save-projection.js";
 import { seedPageFromArticle } from "../../../src/page/ybind/migrate.js";
 import { serializeLive } from "../../../src/live/ops.js";
 
@@ -28,6 +28,32 @@ const flushAsync = async () => { for (let i = 0; i < 40; i++) await Promise.reso
 const pageHtml = (value = seedValue(BLOCKS)) => {
   const { html, rev } = renderFromTags([JSON.stringify(value)]);
   return `<article data-page="1" data-rev="${rev}">${html}</article>`;
+};
+
+const TABLE = {
+  id: "tbl",
+  t: "table",
+  attrs: {
+    cols: { c1: { pos: "1", name: "Name", kind: "text" }, c2: { pos: "2", name: "Rate", kind: "number" } },
+    rows: { r1: { pos: "1", cells: { c1: "A", c2: "1" } }, r2: { pos: "2", cells: { c1: "", c2: "2" } } },
+  },
+};
+// A table the store holds with no columns: the projection writes a header row with
+// no cells and an empty body, and a boot from that article must still mount.
+const BLANK_TABLE = { id: "blank", t: "table", attrs: { cols: {}, rows: {} } };
+
+// The article a save writes: the page tags projected onto the article by the real
+// save transform, with the tag then dropped so the file carries none.
+const savedArticle = (value = seedValue([...BLOCKS, TABLE, BLANK_TABLE])) => {
+  const doc = new DOMParser().parseFromString('<article data-page="1"></article>', "text/html");
+  const tag = doc.createElement("script");
+  tag.setAttribute("type", "application/json");
+  tag.setAttribute("merge", "page");
+  tag.setAttribute("clay", "live");
+  tag.textContent = JSON.stringify(value);
+  doc.body.append(tag);
+  projectInto(doc);
+  return doc.querySelector("article[data-page]").outerHTML;
 };
 
 const articleOf = (html) => new DOMParser().parseFromString(html, "text/html").querySelector("article[data-page]");
@@ -152,6 +178,20 @@ test("a page with one article and no tag boots from its article, holding its see
   expect(pageTag()).toBe(null);
   expect(serializeLive(storeOf("page").value)).toBe(expected);
   expect(page.view.dom.textContent).toContain("Hello");
+});
+
+test("a tagless page whose article holds a table boots with its rows and cells", async () => {
+  const html = savedArticle();
+  const { page } = await load({ html });
+
+  await page.ready;
+
+  expect(page.view).toBeTruthy();
+  const table = page.view.dom.querySelector('[data-id="tbl"] table');
+  expect(table).toBeTruthy();
+  expect(table.querySelectorAll("tbody tr")).toHaveLength(2);
+  expect(table.querySelectorAll("tbody tr:first-child td")).toHaveLength(2);
+  expect(table.textContent).toContain("A");
 });
 
 test("two boots of the same file carry identical tag text into a save", async () => {

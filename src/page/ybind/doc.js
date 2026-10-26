@@ -44,7 +44,7 @@ export function docOf(pd, w) {
   }
   const nodes = blocks.map(({ b, type, fields }) => {
     const attrs = { id: b.id, pos: null, ...fields };
-    if (type.name === "table" && Object.keys(attrs.rows ?? {}).length) return nodeFromBlock(schema, b.id, { t: "table", ...attrs });
+    if (type.name === "table" && Object.keys(attrs.rows ?? {}).length && Object.keys(attrs.cols ?? {}).length) return nodeFromBlock(schema, b.id, { t: "table", ...attrs });
     if (!type.isTextblock) return type.create(attrs);
     const content = [];
     for (const r of b.runs) {

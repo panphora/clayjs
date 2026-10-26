@@ -56,7 +56,7 @@ export function blockFromItem(item, cur) {
   const { id, t, ...fields } = item;
   const out = { t, pos: cur?.pos ?? null };
   Object.assign(out, fields);
-  if (t === "table" && !fields.rows.length) fields.rows = [{ id: `r-${id}`, cells: {} }];
+  if (t === "table" && !fields.rows.length && fields.cols.length) fields.rows = [{ id: `r-${id}`, cells: {} }];
   if (t === "table") {
     out.cols = keyed(fields.cols, cur?.cols, "c", ({ id: _i, ...c }) => c);
     out.rows = keyed(fields.rows, cur?.rows, "r", ({ id: _i, cells, pos }) => ({ pos, cells }));
