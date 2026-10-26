@@ -150,11 +150,13 @@ const localMutation = {
   // Records the browser queued before this pause describe changes made outside
   // it. Left in the queue, resume() would drain them as paused-time records and
   // only non-pausable callbacks would see them, so autosave missed a change made
-  // just before a pause. Deliver them on a microtask, as the observer would have.
+  // just before a pause. Deliver them NOW, before the depth rises and before the
+  // pause is bridged to undo: a deferred delivery arrived while the raw lane was
+  // paused, and undo's paused sink drops what it sees then.
   _deliverBeforePause() {
     if (!this._observer) return;
     const records = this._observer.takeRecords();
-    if (records.length) queueMicrotask(() => this._onRecords(records));
+    if (records.length) this._onRecords(records);
   },
 
   /**

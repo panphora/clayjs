@@ -114,6 +114,10 @@ test("a frame carrying no version applies as it does today", async () => {
 
 test("a page that states no version takes every frame, whatever it carries", async () => {
   document.head.innerHTML = "";
+  // Setup, not an edit: settle it the way beforeEach settles the page, so the frame
+  // meets a clean page.
+  await Promise.resolve();
+  gate.gateClearIfUnchanged(gate.gateCaptureToken());
   const sync = makeSync();
 
   await sync._doApplyExternal(diskDoc('<section data-id="b"><p>2.0</p></section>', "2.0.0"), 1, "E1");
