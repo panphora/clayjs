@@ -507,7 +507,7 @@ export function requestMode(target, handle = null) {
   if (target !== "edit" && target !== "view") throw new TypeError(`clay.modeLifecycle: unknown mode "${target}"`);
   if (inFlight) return inFlight.target === target ? inFlight.promise : { ok: false, mode: current(), code: "busy" };
   if (target === current()) return { ok: true, mode: current(), changed: false };
-  if (!canEdit || isDraftMode) return { ok: false, mode: current(), code: "not-allowed" };
+  if (isDraftMode || (target === "edit" && !canEdit)) return { ok: false, mode: current(), code: "not-allowed" };
   const promise = (target === "edit" ? enter(handle) : leave(handle)).finally(() => {
     inFlight = null;
   });

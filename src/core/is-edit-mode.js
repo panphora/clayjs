@@ -78,22 +78,19 @@ const hostCanEdit = query.editmode
 const keptCanEdit =
   receipt?.canEdit === true && forcedEditMode !== false && !servedStaleToken() &&
   !(isViewOnlyDocument && query.editmode !== "true");
-let canEdit = hostCanEdit || keptCanEdit;
+const hintCanEdit = hostCanEdit || keptCanEdit;
+// What the document or the URL itself rules out; a host's yes never overrides these.
+const authoredRestriction = isDraftMode || servedStaleToken() || forcedEditMode === false ||
+  query.editmode === "false" || (isViewOnlyDocument && query.editmode !== "true");
+let canEdit = hintCanEdit;
 
-// The host's own answer to "may this caller save here", once it has given one. It only
-// ever takes away what the hints granted, and gives back only what it took.
-let hostDenied = false;
-export const editDeniedByHost = () => hostDenied;
+// The host's own answer to "may this caller save here": false takes edit away, true grants
+// it unless the document rules it out, and no answer leaves the hints in charge.
 export function noteHostWritable(writable) {
-  if (writable === false) {
-    if (canEdit) {
-      hostDenied = true;
-      canEdit = false;
-    }
-  } else if (hostDenied) {
-    hostDenied = false;
-    canEdit = true;
-  }
+  const next = writable === false ? false : writable === true ? hintCanEdit || !authoredRestriction : hintCanEdit;
+  if (next === canEdit) return;
+  canEdit = next;
+  if (typeof document !== "undefined") document.dispatchEvent(new Event("clay:capabilitychange"));
 }
 
 // Does this tab start editing? Only when something explicit asks for it.

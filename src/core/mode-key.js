@@ -84,6 +84,7 @@ function styles() {
 }
 
 function onKey(e) {
+  if (!(canEdit || mode === "edit")) return;
   if (!(mac ? e.metaKey : e.ctrlKey) || !e.shiftKey || e.altKey || e.code !== "KeyE" || e.isComposing) return;
   e.preventDefault();
   setMode(mode === "edit" ? "view" : "edit").then((r) => {
@@ -105,10 +106,10 @@ function showNote() {
   document.body.append(note);
 }
 
-if (canEdit && !isDraftMode) {
+if (!isDraftMode) {
   document.addEventListener("keydown", onKey);
   onDomReady(() => {
-    if (mode !== "view" || document.querySelector("[clay-mode-toggle]")) return;
+    if (!canEdit || mode !== "view" || document.querySelector("[clay-mode-toggle]")) return;
     queueMicrotask(() => {
       if (window.clay?.menu) return;
       const store = window.clay?.storage?.local;

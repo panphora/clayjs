@@ -1,7 +1,7 @@
 // The menu plugin: an Edit switch and claygoo in the top right, for anyone who can
 // edit. Everything it draws is `clay="editor-ui"`, so none of it reaches the saved
 // file, a sync frame, the dirty check or undo.
-import { canEdit, isDraftMode, mode as startMode } from "../core/is-edit-mode.js";
+import { canEdit, isDraftMode, isEditMode, mode as startMode } from "../core/is-edit-mode.js";
 import onDomReady from "../lib/dom-ready.js";
 import CLAYGOO from "./menu/claygoo.svg.js";
 
@@ -413,4 +413,17 @@ function mount() {
   window.clay.menu = { addItem, open, close };
 }
 
-if (canEdit && !isDraftMode) onDomReady(mount);
+let mounted = false;
+
+const shouldMount = () => (canEdit || isEditMode) && !isDraftMode;
+
+function mountOnce() {
+  if (mounted || !shouldMount()) return;
+  mounted = true;
+  mount();
+}
+
+if (!isDraftMode) {
+  onDomReady(mountOnce);
+  document.addEventListener("clay:capabilitychange", mountOnce);
+}

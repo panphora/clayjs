@@ -14,7 +14,7 @@
  */
 
 import { saveToken } from "./host-attrs.js";
-import { isDraftMode, noteHostWritable } from "./is-edit-mode.js";
+import { isDraftMode } from "./is-edit-mode.js";
 
 const META_PATH = "/_/meta";
 const META_TIMEOUT_MS = 6000;
@@ -27,8 +27,14 @@ const META_TIMEOUT_MS = 6000;
 // a host that failed to say who you are has not said you are nobody.
 const outcomes = new WeakMap();
 
-function settle(outcome, meta = bareHost()) {
+// The path each answer was fetched for, captured when that fetch started. A document block
+// describes one document, and a reply that lands after a route change answers for the one
+// that asked.
+const paths = new WeakMap();
+
+function settle(outcome, meta = bareHost(), asked = null) {
   outcomes.set(meta, outcome);
+  if (asked !== null) paths.set(meta, asked);
   return meta;
 }
 
@@ -40,6 +46,16 @@ function settle(outcome, meta = bareHost()) {
  */
 export function hostMetaOutcome(meta) {
   return outcomes.get(meta) ?? "none";
+}
+
+/**
+ * The path the fetch behind `meta` started on, or undefined when there is none.
+ *
+ * @param {Object} meta - an answer from hostMeta()
+ * @returns {string|undefined}
+ */
+export function hostMetaPath(meta) {
+  return paths.get(meta);
 }
 
 // The bare-core-host answer, which is also every failure's answer.
@@ -85,23 +101,6 @@ export function hostMeta({ fresh = false } = {}) {
     });
   }
   return refreshing;
-}
-
-let acceptedWritable = null;
-
-export const hostWritable = () => acceptedWritable;
-
-// A permission answer counts only when discovery itself answered ("ok") and only for the
-// document that asked: a reply that lands after a route change, or a failed refresh,
-// leaves the last accepted answer standing.
-export async function checkHostPermission({ fresh = false } = {}) {
-  const asked = location.pathname;
-  const meta = await hostMeta({ fresh });
-  if (location.pathname !== asked || hostMetaOutcome(meta) !== "ok") return acceptedWritable;
-  const writable = meta.document?.writable;
-  acceptedWritable = typeof writable === "boolean" ? writable : null;
-  noteHostWritable(acceptedWritable);
-  return acceptedWritable;
 }
 
 /**
@@ -214,8 +213,9 @@ export async function querySaveOutcome({ saveId, requestHash, signal } = {}) {
 }
 
 async function fetchMeta() {
+  const asked = location.pathname;
   // A file opened from disk has no host to ask, and fetch would only throw.
-  if (!/^https?:$/.test(window.location.protocol)) return settle("none");
+  if (!/^https?:$/.test(window.location.protocol)) return settle("none", bareHost(), asked);
 
   const token = saveToken();
   // A host that mints tokens answers discovery per token, because on a sandboxed
@@ -242,25 +242,25 @@ async function fetchMeta() {
       redirect: "manual",
       signal: controller.signal
     });
-    if (!res.ok) return settle(res.status >= 500 ? "failed" : "none");
+    if (!res.ok) return settle(res.status >= 500 ? "failed" : "none", bareHost(), asked);
     const text = await res.text();
-    if (!text) return settle("none");
+    if (!text) return settle("none", bareHost(), asked);
 
     let body;
     try {
       body = JSON.parse(text);
     } catch (_) {
-      return settle("none");
+      return settle("none", bareHost(), asked);
     }
-    if (!body || typeof body !== "object" || typeof body.spec !== "number") return settle("none");
+    if (!body || typeof body !== "object" || typeof body.spec !== "number") return settle("none", bareHost(), asked);
 
     return settle("ok", {
       spec: body.spec,
       extensions: Array.isArray(body.extensions) ? body.extensions : [],
       document: body.document && typeof body.document === "object" ? body.document : null
-    });
+    }, asked);
   } catch (_) {
-    return settle("failed");
+    return settle("failed", bareHost(), asked);
   } finally {
     clearTimeout(timeoutId);
   }

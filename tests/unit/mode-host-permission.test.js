@@ -39,6 +39,27 @@ const okMeta = (document) => response({ body: JSON.stringify({ spec: 1, extensio
 let metaAnswer;
 let held;
 let fetchCalls;
+let metaAsked;
+
+const realAdd = EventTarget.prototype.addEventListener;
+const realRemove = EventTarget.prototype.removeEventListener;
+const registered = [];
+EventTarget.prototype.addEventListener = function (type, fn, options) {
+  registered.push([this, type, fn, options]);
+  return realAdd.call(this, type, fn, options);
+};
+
+function dropListeners() {
+  for (const [target, type, fn, options] of registered.splice(0)) realRemove.call(target, type, fn, options);
+}
+
+const MAC = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+
+function press() {
+  const init = { key: "E", code: "KeyE", shiftKey: true, bubbles: true, cancelable: true };
+  if (MAC) init.metaKey = true; else init.ctrlKey = true;
+  document.dispatchEvent(new KeyboardEvent("keydown", init));
+}
 
 function clearRoot() {
   const root = document.documentElement;
@@ -51,7 +72,8 @@ function defer() {
   return { promise, resolve };
 }
 
-async function boot({ edit = false, url = SLOT, opensIn = null, cookie = true, fake = null, plugins = "menu" } = {}) {
+async function boot({ edit = false, url = SLOT, opensIn = null, cookie = true, fake = null, plugins = "menu", declared = false, viewonly = false } = {}) {
+  dropListeners();
   jest.resetModules();
   sessionStorage.clear();
   localStorage.clear();
@@ -61,6 +83,8 @@ async function boot({ edit = false, url = SLOT, opensIn = null, cookie = true, f
   if (cookie) document.cookie = "isAdminOfCurrentResource=true; path=/";
   clearRoot();
   if (opensIn) document.documentElement.setAttribute("opens-in", opensIn);
+  if (declared) document.documentElement.setAttribute("clay-mode-switch", "live");
+  if (viewonly) document.documentElement.setAttribute("viewonly", "");
   if (fake) {
     const target = new URL(url, fake.origin);
     fake.href = target.href;
@@ -71,9 +95,10 @@ async function boot({ edit = false, url = SLOT, opensIn = null, cookie = true, f
   }
   document.head.innerHTML = "";
   document.body.innerHTML = BODY;
-  window.fetch = async (input) => {
+  window.fetch = async (input, options = {}) => {
     const target = String(input);
     fetchCalls.push(target);
+    if (target.includes("/_/meta")) metaAsked.push(options.headers?.["Document-URL"]);
     if (!target.includes("/_/meta")) return response({ ok: false, status: 404 });
     if (held) return held.promise;
     return metaAnswer;
@@ -106,6 +131,7 @@ beforeEach(() => {
   metaAnswer = okMeta({ writable: true });
   held = null;
   fetchCalls = [];
+  metaAsked = [];
 });
 
 test("writable:false overrides a stale owner cookie and refuses the switch", async () => {
@@ -132,7 +158,7 @@ test("writable:false overrides a stale owner cookie and refuses the switch", asy
 test("writable:true permits entry but never enters edit by itself", async () => {
   metaAnswer = okMeta({ writable: true });
   await boot();
-  const { checkHostPermission } = await import("../../src/core/host-meta.js");
+  const { checkHostPermission } = await import("../../src/core/host-permission.js");
 
   await withFakeLocation(async (fake) => {
     await expect(checkHostPermission()).resolves.toBe(true);
@@ -179,23 +205,20 @@ test.each([
 test("a failed refresh keeps the last accepted answer", async () => {
   metaAnswer = okMeta({ writable: false });
   await boot();
+  const { checkHostPermission } = await import("../../src/core/host-permission.js");
 
   await withFakeLocation(async (fake) => {
-    await expect(window.clay.setMode("edit")).resolves.toEqual({
-      ok: false,
-      mode: "view",
-      code: "permission-denied",
-    });
+    await expect(checkHostPermission({ fresh: true })).resolves.toBe(false);
+    expect(window.clay.canEdit).toBe(false);
 
     metaAnswer = response({ ok: false, status: 503 });
-    await expect(window.clay.setMode("edit")).resolves.toEqual({
-      ok: false,
-      mode: "view",
-      code: "permission-denied",
-    });
+    await expect(checkHostPermission({ fresh: true })).resolves.toBe(false);
     expect(window.clay.canEdit).toBe(false);
 
     metaAnswer = okMeta({ writable: true });
+    await expect(checkHostPermission({ fresh: true })).resolves.toBe(true);
+    expect(window.clay.canEdit).toBe(true);
+
     await expect(window.clay.setMode("edit")).resolves.toEqual({
       ok: true,
       mode: "edit",
@@ -242,7 +265,7 @@ test("permission lost while editing keeps the editor and the typed text", async 
 
 test("an answer that lands after the page moved on is ignored", async () => {
   await boot();
-  const { checkHostPermission } = await import("../../src/core/host-meta.js");
+  const { checkHostPermission } = await import("../../src/core/host-permission.js");
   const facts = await import("../../src/core/is-edit-mode.js");
 
   await expect(checkHostPermission({ fresh: true })).resolves.toBe(true);
@@ -273,4 +296,198 @@ test("a switch the host refuses reverts the switch and says why", async () => {
   expect(document.querySelector(".clay-menu-note").textContent).toBe(
     "You don't have permission to edit this document.",
   );
+});
+
+test("a live-declared editor leaves after a denial", async () => {
+  metaAnswer = okMeta({ writable: false });
+  await withFakeLocation(async (fake) => {
+    await boot({ opensIn: "edit", declared: true, fake });
+    expect(window.clay.mode).toBe("edit");
+    expect(window.clay.canEdit).toBe(false);
+
+    const save = await import("../../src/core/save.js");
+    if (!save.baselineSettled()) save.adoptEntryBaseline();
+
+    await expect(window.clay.setMode("view")).resolves.toEqual({
+      ok: true,
+      mode: "view",
+      changed: true,
+    });
+    expect(window.clay.mode).toBe("view");
+    expect(fake.reload).not.toHaveBeenCalled();
+  });
+});
+
+test("a live-declared editor with a pending source still refuses the exit after a denial", async () => {
+  metaAnswer = okMeta({ writable: false });
+  await withFakeLocation(async (fake) => {
+    await boot({ opensIn: "edit", declared: true, fake });
+    expect(window.clay.canEdit).toBe(false);
+
+    const save = await import("../../src/core/save.js");
+    if (!save.baselineSettled()) save.adoptEntryBaseline();
+
+    const unsaved = await import("../../src/lib/unsaved-state.js");
+    const composer = unsaved.registerUnsavedState({ id: "composer", isPending: () => true });
+    try {
+      await expect(window.clay.setMode("view")).resolves.toMatchObject({
+        ok: false,
+        mode: "edit",
+        code: "pending-input",
+        pending: ["composer"],
+      });
+      expect(window.clay.mode).toBe("edit");
+      expect(fake.reload).not.toHaveBeenCalled();
+    } finally {
+      composer.dispose();
+    }
+  });
+});
+
+test("the menu recovers from a denial that lands during an edit boot", async () => {
+  metaAnswer = okMeta({ writable: false });
+  await withFakeLocation(async (fake) => {
+    await boot({ opensIn: "edit", fake });
+    expect(window.clay.canEdit).toBe(false);
+    expect(document.querySelector(".clay-menu")).not.toBeNull();
+
+    const save = await import("../../src/core/save.js");
+    if (!save.baselineSettled()) save.adoptEntryBaseline();
+
+    press();
+    await settle();
+    expect(fake.reload).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(sessionStorage.getItem(RECEIPT()))).toMatchObject({
+      mode: "view",
+      canEdit: false,
+      internal: true,
+    });
+  });
+});
+
+test("canedit tracks the permission answer", async () => {
+  held = defer();
+  await boot({ opensIn: "edit" });
+  expect(document.documentElement.getAttribute("canedit")).toBe("true");
+
+  held.resolve(okMeta({ writable: false }));
+  await settle();
+  held = null;
+
+  expect(document.documentElement.getAttribute("canedit")).toBeNull();
+});
+
+test("a host true without hints grants Edit without entering it", async () => {
+  metaAnswer = okMeta({ writable: true });
+  await boot({ cookie: false });
+  expect(window.clay.canEdit).toBe(false);
+  expect(document.querySelector(".clay-menu")).toBeNull();
+
+  const events = [];
+  document.addEventListener("clay:capabilitychange", () => events.push(1));
+  const { checkHostPermission } = await import("../../src/core/host-permission.js");
+
+  await withFakeLocation(async (fake) => {
+    await expect(checkHostPermission({ fresh: true })).resolves.toBe(true);
+    expect(fake.reload).not.toHaveBeenCalled();
+  });
+
+  expect(events.length).toBe(1);
+  expect(window.clay.canEdit).toBe(true);
+  expect(window.clay.mode).toBe("view");
+  expect(document.querySelector(".clay-menu")).not.toBeNull();
+});
+
+test("a host true never grants Edit over an authored viewonly document", async () => {
+  metaAnswer = okMeta({ writable: true });
+  await boot({ cookie: false, viewonly: true });
+  const { checkHostPermission } = await import("../../src/core/host-permission.js");
+
+  await expect(checkHostPermission({ fresh: true })).resolves.toBe(true);
+  expect(window.clay.canEdit).toBe(false);
+  expect(window.clay.mode).toBe("view");
+});
+
+test("a 404 after a denial hands edit back to the hints", async () => {
+  metaAnswer = okMeta({ writable: false });
+  await boot();
+  const { checkHostPermission } = await import("../../src/core/host-permission.js");
+
+  await expect(checkHostPermission({ fresh: true })).resolves.toBe(false);
+  expect(window.clay.canEdit).toBe(false);
+
+  metaAnswer = response({ ok: false, status: 404 });
+  await expect(checkHostPermission({ fresh: true })).resolves.toBeNull();
+  expect(window.clay.canEdit).toBe(true);
+});
+
+test("a 503 after a denial keeps it", async () => {
+  metaAnswer = okMeta({ writable: false });
+  await boot();
+  const { checkHostPermission } = await import("../../src/core/host-permission.js");
+
+  await expect(checkHostPermission({ fresh: true })).resolves.toBe(false);
+  expect(window.clay.canEdit).toBe(false);
+
+  metaAnswer = response({ ok: false, status: 503 });
+  await expect(checkHostPermission({ fresh: true })).resolves.toBe(false);
+  expect(window.clay.canEdit).toBe(false);
+});
+
+test("an ok answer with no document block after a denial keeps it", async () => {
+  metaAnswer = okMeta({ writable: false });
+  await boot();
+  const { checkHostPermission } = await import("../../src/core/host-permission.js");
+
+  await expect(checkHostPermission({ fresh: true })).resolves.toBe(false);
+  expect(window.clay.canEdit).toBe(false);
+
+  metaAnswer = response({ body: JSON.stringify({ spec: 1, extensions: [] }) });
+  await expect(checkHostPermission({ fresh: true })).resolves.toBe(false);
+  expect(window.clay.canEdit).toBe(false);
+});
+
+test("a request started for another document is not accepted for this one", async () => {
+  metaAnswer = okMeta({ writable: true });
+  await boot();
+  expect(window.clay.canEdit).toBe(true);
+  const { checkHostPermission } = await import("../../src/core/host-permission.js");
+  await expect(checkHostPermission()).resolves.toBe(true);
+  metaAsked.length = 0;
+
+  held = defer();
+  const first = checkHostPermission({ fresh: true });
+  await settle();
+  window.history.pushState({}, "", "/other.html");
+  const second = checkHostPermission({ fresh: true });
+  await settle();
+
+  metaAnswer = okMeta({ writable: true });
+  held.resolve(okMeta({ writable: false }));
+  held = null;
+  await settle();
+
+  await expect(first).resolves.toBe(true);
+  await expect(second).resolves.toBe(true);
+  expect(window.clay.canEdit).toBe(true);
+  expect(metaAsked.length).toBe(2);
+  expect(metaAsked[0].endsWith("/notes.html")).toBe(true);
+  expect(metaAsked[1].endsWith("/other.html")).toBe(true);
+});
+
+test("the pagehide receipt after a denial records canEdit false", async () => {
+  held = defer();
+  await boot({ opensIn: "edit" });
+  expect(document.documentElement.getAttribute("canedit")).toBe("true");
+
+  held.resolve(okMeta({ writable: false }));
+  await settle();
+  held = null;
+
+  window.dispatchEvent(new Event("pagehide"));
+  expect(JSON.parse(sessionStorage.getItem(RECEIPT()))).toMatchObject({
+    mode: "edit",
+    canEdit: false,
+    internal: false,
+  });
 });

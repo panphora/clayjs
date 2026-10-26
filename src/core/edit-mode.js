@@ -1,7 +1,7 @@
 // Edit mode system - combines the editmode toggle with page type setting.
 // Loads in BOTH view and edit mode: setMode must exist in view mode
 // (it's the way IN), and setPageTypeOnPageLoad marks <html> in either mode.
-import { canEdit, editDeniedByHost, isDraftMode, isEditMode, isOwner, mode, modeState, registerModeParticipant } from "./is-edit-mode.js";
+import { canEdit, isDraftMode, isEditMode, isOwner, mode, modeState, registerModeParticipant } from "./is-edit-mode.js";
 import { writeReceipt } from "./mode-receipt.js";
 import onDomReady from "../lib/dom-ready.js";
 
@@ -59,7 +59,7 @@ export async function setMode(next) {
   if (next !== "edit" && next !== "view") throw new TypeError(`clay.setMode: unknown mode "${next}"`);
   if (entry) return next === "edit" ? entry : { ok: false, mode, code: "busy" };
   if (next === mode && !controller) return { ok: true, mode, changed: false };
-  if (isDraftMode || (!canEdit && !editDeniedByHost())) return { ok: false, mode, code: "not-allowed" };
+  if (isDraftMode || (!canEdit && !(next === "view" && mode === "edit"))) return { ok: false, mode, code: "not-allowed" };
   // In a workspace frame the shell owns the frame, so a mode change is its reload, not
   // ours: hand it over before anything local starts. Only a shell that does not take part
   // ("host-unsupported") leaves the switch to this document.
@@ -89,7 +89,7 @@ export async function setMode(next) {
 }
 
 async function enterEdit() {
-  const { checkHostPermission } = await import("./host-meta.js");
+  const { checkHostPermission } = await import("./host-permission.js");
   if ((await checkHostPermission({ fresh: true })) === false) return { ok: false, mode, code: "permission-denied" };
   return switchTo("edit");
 }
@@ -114,7 +114,7 @@ async function switchTo(next) {
     }
   }
   leaving = true;
-  writeReceipt({ mode: next, canEdit: true, internal: true });
+  writeReceipt({ mode: next, canEdit, internal: true });
   location.reload();
   return { ok: true, mode: next, changed: true, reloading: true };
 }
@@ -130,18 +130,23 @@ export const toggleEditMode = () =>
 
 function keepModeOnReload() {
   if (!canEdit || isDraftMode) return;
-  window.addEventListener("pagehide", () => { if (!leaving) writeReceipt({ mode, canEdit: true, internal: false }); });
+  window.addEventListener("pagehide", () => { if (!leaving) writeReceipt({ mode, canEdit, internal: false }); });
+}
+
+function markCanEdit() {
+  if (canEdit) {
+    document.documentElement.setAttribute("canedit", "true");
+  } else {
+    document.documentElement.removeAttribute("canedit");
+  }
 }
 
 export function setPageTypeOnPageLoad () {
   onDomReady(() => {
     document.documentElement.setAttribute("editmode", isEditMode ? "true" : "false");
     document.documentElement.setAttribute("pageowner", isOwner ? "true" : "false");
-    if (canEdit) {
-      document.documentElement.setAttribute("canedit", "true");
-    } else {
-      document.documentElement.removeAttribute("canedit");
-    }
+    markCanEdit();
+    document.addEventListener("clay:capabilitychange", markCanEdit);
     if (isDraftMode) {
       document.documentElement.setAttribute("draftmode", "true");
     } else {
