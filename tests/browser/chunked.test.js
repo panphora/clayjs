@@ -197,15 +197,15 @@ describe('a plugins=sortable edit page', () => {
   // sortable is late and edit-only, so its vendor chunk and the host metadata live in
   // the edit supplement: the metadata is an edit boot import the bootstrap preloads,
   // and the vendor arrives with the plugin after clay:ready, not before it.
-  it('loads the late sortable vendor after ready and preloads the host metadata', async () => {
+  it('loads the late sortable vendor after ready and preloads the host permission check', async () => {
     const { runtime, edit } = await fetch('/dist/m/manifest.json').then((response) => response.json());
     const manifest = (await import(`/dist/m/${runtime}`)).default;
     const supplement = (await import(`/dist/m/${edit}`)).default;
     const vendor = supplement.entries['vendor/Sortable.vendor.js'];
-    const hostMeta = supplement.entries['core/host-meta.js'];
+    const hostMeta = supplement.entries['core/host-permission.js'];
 
     expect(manifest.entries['vendor/Sortable.vendor.js']).to.equal(undefined);
-    expect(manifest.entries['core/host-meta.js']).to.equal(undefined);
+    expect(manifest.entries['core/host-permission.js']).to.equal(undefined);
     expect(vendor).to.be.a('string');
     expect(hostMeta).to.be.a('string');
 

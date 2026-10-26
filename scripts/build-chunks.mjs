@@ -16,7 +16,7 @@ export const BOOT_PREFIX = ["core/draft-mode.js", "core/is-edit-mode.js", "lib/r
 // fetches the mode lifecycle when the initial edit activates. They are listed in the
 // supplement's edit boot imports, so the loader preloads them with the rest of its plan,
 // and only a page that fetched the supplement ever sees the list.
-export const EDIT_DYNAMIC_IMPORTS = ["sync/live-sync-edit.js", "sync/conflicts-edit.js", "core/mode-lifecycle.js"];
+export const EDIT_DYNAMIC_IMPORTS = ["sync/live-sync-edit.js", "sync/conflicts-edit.js", "sync/conflicts.js", "sync/conflict-footprints.js", "core/mode-lifecycle.js"];
 // The one build entry that carries the always-wave core (src/reader-core.js).
 const READER_CORE = "reader-core.js";
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
