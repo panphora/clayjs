@@ -31,11 +31,10 @@ let controller = null;
 
 const fetchController = () => (controller ||= import("./mode-lifecycle.js").catch(() => (controller = null)));
 
-// A live switch is a contract the document signs, not a hint. The loader records this
-// document's boot here only when `<html clay-mode-switch="live">` asked for one; the
-// decision behind it -- adapters, authored resources, participants -- and the controller
-// that runs the transaction are a dynamic target, fetched by the first switch and never
-// by the declaration itself.
+// A live switch is a contract the document signs, not a hint. The loader records both
+// resolved plans here only when `<html clay-mode-switch="live">` asked for one; the
+// decision behind it and the controller that runs the transaction are a dynamic target,
+// fetched by the first switch and never by the declaration itself.
 let liveSwitch = null;
 
 export const noteLiveSwitch = (boot) => {

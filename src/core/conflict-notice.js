@@ -138,3 +138,5 @@ onDomReady(() => {
     keptFromEarlier();
   }
 });
+
+export { conflictNoticeParticipant as modeParticipant };

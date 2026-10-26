@@ -101,7 +101,7 @@ export async function boot(base, params, readyResolve, manifest = null, suppleme
   // first switch, so this costs a reader with a declaration no more than one attribute.
   if (document.documentElement.getAttribute("clay-mode-switch") === "live") {
     const editing = resolveModules(params, true, { isDraftMode, hasSap, canEdit, templateSource: templateSource() });
-    loaded["core/edit-mode.js"].noteLiveSwitch([...editing.plugins, ...editing.late]);
+    loaded["core/edit-mode.js"].noteLiveSwitch({ edit: editing, view: plan });
   }
   // An explicit initial edit drains the preboot participant queue and enables its
   // leases before a plugin can take input. A reader returns at the first line.

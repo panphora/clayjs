@@ -125,9 +125,10 @@ test("the late tail drops the edit-only plugins once the page has left edit", as
   expect(window.clay.source).toBeUndefined();
 });
 
-test("a requested edit module with no adapter is unsupported, never assumed supported", async () => {
-  const { ADAPTERS, supports, unsupported } = await import("../../src/core/mode-resources.js");
-  const { CORE_WAVES, PLUGIN_PATHS, MODULES } = await import("../../src/loader-logic.js");
+test("a requested edit module with no support row is unsupported, never assumed supported", async () => {
+  const { unsupportedPaths } = await import("../../src/core/mode-switch.js");
+  const { CORE_WAVES, PLUGIN_PATHS } = await import("../../src/loader-logic.js");
+  const { supportFor } = await import("../../src/core/mode-support.js");
 
   const inventory = [
     ...CORE_WAVES.always,
@@ -135,30 +136,29 @@ test("a requested edit module with no adapter is unsupported, never assumed supp
     ...Object.values(PLUGIN_PATHS).flatMap((spec) => [spec.path, spec.ownerPath]).filter(Boolean),
   ];
 
-  // Every adapter names a path the loader can actually resolve.
-  for (const path of ADAPTERS) {
-    expect(inventory).toContain(path);
-    expect(typeof MODULES[path]).toBe("function");
-  }
-
-  expect(supports("core/admin-attrs.js")).toBe(true);
-  expect(supports("plugins/sortable.js")).toBe(false);
-  expect(unsupported(inventory)).toEqual(
-    inventory.filter((path) => !supports(path))
+  expect(supportFor("core/admin-attrs.js")).toBe("export");
+  expect(supportFor("core/save.js")).toBe("export");
+  expect(supportFor("core/etag.js")).toBe("neutral");
+  expect(supportFor("plugins/sortable.js")).toBeNull();
+  expect(supportFor("core/conflict-notice.js")).toBe("export");
+  expect(unsupportedPaths({ edit: { core: [], plugins: inventory, late: [] }, view: { plugins: [], late: [] } })).toEqual(
+    inventory.filter((path) => supportFor(path) === null)
   );
-  expect(unsupported(inventory)).toContain("core/save.js");
+  expect(unsupportedPaths({ edit: { core: [], plugins: ["core/save.js"], late: [] } })).toEqual([]);
 });
 
 test("a served editmode:resource script takes the reload path, a style does not", async () => {
-  const { requiresReload, resourceSupport } = await import("../../src/core/mode-resources.js");
+  const { resourceSupport } = await import("../../src/core/mode-resources.js");
+  const { liveAllowed } = await import("../../src/core/mode-switch.js");
+  const plan = { edit: { core: [], plugins: [], late: [] }, view: { plugins: [], late: [] } };
 
   document.body.innerHTML = '<script editmode:resource>window.ran = 1</script>';
   expect(resourceSupport().reversible).toBe(false);
-  expect(requiresReload([])).toBe(true);
+  expect(liveAllowed(plan)).toBe(false);
 
   document.body.innerHTML = '<style id="s" editmode:resource>.x{color:red}</style><link id="l" editmode:resource rel="stylesheet" href="/x.css">';
   expect(resourceSupport().reversible).toBe(true);
-  expect(requiresReload([])).toBe(false);
+  expect(liveAllowed(plan)).toBe(true);
 });
 
 test("the resource adapter refuses a script document and flips a reversible one back", async () => {
