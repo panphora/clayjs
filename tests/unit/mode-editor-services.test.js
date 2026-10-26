@@ -317,6 +317,7 @@ test("the notice's adoption takes the shell the boot armed, and arms nothing aga
     boot = conflictNoticeParticipant().prepare({ generation: 1, isCurrent: () => true });
     expect(countArmed(() => boot.enable())).toEqual([
       "clay:sync-conflicts-changed", "clay:save-conflict", "clay:document-upgraded",
+      "clay:undo-kept",
     ]);
 
     // Adoption is a lease over that shell, not a second arming.
@@ -340,6 +341,7 @@ test("the notice's adoption takes the shell the boot armed, and arms nothing aga
     const live = conflictNoticeParticipant().prepare({ generation: 2, isCurrent: () => true });
     expect(countArmed(() => live.enable())).toEqual([
       "clay:sync-conflicts-changed", "clay:save-conflict", "clay:document-upgraded",
+      "clay:undo-kept",
     ]);
     document.dispatchEvent(new CustomEvent("clay:sync-conflicts-changed"));
     await frames();
