@@ -6,6 +6,12 @@
  * recipient, from that recipient's own access; nothing here asks for a name and
  * nothing here can widen what arrived.
  *
+ * The roster itself is not here: it lives in `presence-store.js`, which is what
+ * `clay.presence` hands to a page and what a caret adapter reads. This module is
+ * the chrome a reader sees — the squares, the count and the tip — and the visual
+ * library behind it stays a first-use download, so a reader who draws nothing
+ * still has a roster and still fetches none of it.
+ *
  * THE RULE THIS FILE EXISTS TO GET RIGHT.
  *
  * captureForSaveAndComparison() clones the document, hands that clone to peers
@@ -39,6 +45,7 @@
 import { hostSupports } from '../core/host-meta.js';
 import { make, set } from '../lib/hostile-css.js';
 import { initialsOf, personColor } from '../lib/person-face.js';
+import { presence as store } from './presence-store.js';
 
 // Two initials at 11px need about 15px of the square, so the overlap has to
 // leave that much clear or the neighbouring square eats the second letter.
@@ -88,25 +95,13 @@ function runtimeRoot(el) {
 }
 
 /**
- * Read the roster frame defensively. Everything here arrived over a wire, and a
- * frame this function cannot understand must draw nothing rather than draw a
- * guess: `[object Object]` in a square is worse than an empty corner.
+ * What this module draws from a snapshot. The store keeps the rest — the target
+ * each person holds and their sessions — because none of it is chrome: a frame that
+ * only moved somebody's caret must leave every square where it is.
  */
-function normalize(data) {
-  const list = data && Array.isArray(data.people) ? data.people : [];
-  const people = [];
-  for (const person of list) {
-    if (!person || typeof person.id !== 'string' || !person.id) continue;
-    const name = typeof person.name === 'string' && person.name.trim() ? person.name.trim() : 'Someone';
-    people.push({
-      id: person.id,
-      name,
-      you: person.you === true,
-    });
-  }
-  const count = data && data.anonymous;
-  const anonymous = typeof count === 'number' && Number.isFinite(count) && count > 0 ? Math.floor(count) : 0;
-  return { people, anonymous };
+function faces(snapshot) {
+  const people = snapshot.people.map((person) => ({ id: person.id, name: person.name, you: person.you }));
+  return { people, anonymous: snapshot.anonymous };
 }
 
 class Presence {
@@ -122,10 +117,21 @@ class Presence {
   /**
    * Does this host run presence at all? Asked once, of /_/meta, and never
    * inferred from a frame arriving: the answer decides whether the chrome is
-   * built, so a host that says nothing draws nothing forever.
+   * built, so a host that says nothing draws nothing forever. The two awareness
+   * capabilities travel with it, because the store publishes them in the same
+   * snapshot and a page reads them before it publishes a target.
    */
   supported() {
-    if (!this._gate) this._gate = hostSupports('presence').then((ok) => ok === true, () => false);
+    if (!this._gate) {
+      this._gate = Promise.all([
+        hostSupports('presence'),
+        hostSupports('record-awareness-v1'),
+        hostSupports('page-awareness-v1'),
+      ]).then(([supported, recordAwareness, pageAwareness]) => {
+        store.setCapabilities({ supported, recordAwareness, pageAwareness });
+        return supported === true;
+      }, () => false);
+    }
     return this._gate;
   }
 
@@ -138,7 +144,7 @@ class Presence {
    * @returns {Promise<void>}
    */
   async update(data) {
-    const next = normalize(data);
+    const next = faces(store.receive(data));
     const same = this.root && JSON.stringify(next) === JSON.stringify(this.roster);
     this.roster = next;
     if (!(await this.supported())) return;
@@ -151,6 +157,7 @@ class Presence {
 
   /** The stream went away, so the roster is no longer true about anything. */
   clear() {
+    store.clear();
     this.roster = { people: [], anonymous: 0 };
     if (!this.root) return;
     this.root.remove();

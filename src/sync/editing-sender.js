@@ -1,11 +1,17 @@
 import { blockOf, pathOf } from './editing-path.js';
+import { presence } from './presence-store.js';
 
 const INTERVAL_MS = 250;
 const RETRY_MS = 2000;
 const EVENTS = ['focusin', 'focusout', 'selectionchange', 'clay:sync-applied', 'clay:workspace-background', 'clay:workspace-foreground'];
 
+// The default is the facade: a page that publishes a target does not post it
+// itself, and an owner that attached a transport is the only thing that does. A
+// caller with its own wire (live-sync, today) passes one in and keeps it.
+const publish = (target) => presence.setTarget(target);
+
 export class EditingSender {
-  constructor({ send, now = () => Date.now() }) {
+  constructor({ send = publish, now = () => Date.now() }) {
     this.send = send;
     this.now = now;
     this.others = false;
