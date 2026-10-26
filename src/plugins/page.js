@@ -948,6 +948,9 @@ function mergeRepresentedPage(store, value) {
         const key = keys.length ? keys[0] : `claim-${binding.ydoc.clientID.toString(36)}`;
         const value = keys.length ? y[keys[0]] : code.yValueOf(binding.ydoc).y.seed;
         inst.store.handle.set(["y", key], value);
+        // The session is not admitted until the commit, so its ops stay in the tab: the
+        // claim alone is framed now, before adoption writes anything, or no election runs.
+        lane.release("page");
       }
       // A lane that never reports a writer must not cost the hand edit: give up
       // before adoption's own bound, and adopt as the file-mode tab would.
