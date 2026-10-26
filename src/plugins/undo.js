@@ -74,6 +74,19 @@ function restoreControls() {
   })
 }
 
+// The engine emits its receipt only after a whole replay applied, so a refused
+// undo or redo never reaches the control restore.
+const afterReplay = (receipt) => {
+  if (receipt?.ok) restoreControls()
+}
+
+// A refusal is announced for whoever presents it: the engine's receipt, once.
+const refuse = ({ entryId, label, direction, code }) => {
+  document.dispatchEvent(new CustomEvent('clay:undo-refused', {
+    detail: { ok: false, code, entryId, label, direction },
+  }))
+}
+
 // One edit session owns the page's DOM history. A session starts its own over the page as
 // it stands, so nothing an earlier session recorded, and nothing a reader painted while the
 // page was in view, is this session's to undo. The durable recovery records belong to the
@@ -111,9 +124,11 @@ function undoLease(record) {
       record.admitted = true
       undo.start(withTabLocal({ bindKeys: true }))
       for (const type of ['undo', 'redo']) {
-        undo.on(type, restoreControls)
-        record.subscriptions.push({ type, handler: restoreControls })
+        undo.on(type, afterReplay)
+        record.subscriptions.push({ type, handler: afterReplay })
       }
+      undo.on('refused', refuse)
+      record.subscriptions.push({ type: 'refused', handler: refuse })
     },
     quiesce() {
       if (!record.admitted) return
