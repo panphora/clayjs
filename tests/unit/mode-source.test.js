@@ -121,6 +121,37 @@ test("dispose clears the renderer, and a sync frame in view schedules no refresh
   expect(source.stats().refreshes).toBe(refreshes);
 });
 
+test("an entry installs after the file advanced past the version this page was served at", async () => {
+  const { snapshot, source, modeParticipant } = await load("view");
+  // The page was served at one version and another tab has saved since: the reader hands
+  // over the newer file, and the fetch answers with the stamp that file names itself by.
+  // The version on the served <html> is not the one this session represents, so it must
+  // not refuse the file the person is about to edit.
+  document.documentElement.setAttribute("documentetag", "v1");
+  const advanced = SRC.replace("<html>", '<html documentetag="v2">');
+  global.fetch = jest.fn(async () => ({
+    ok: true,
+    status: 200,
+    redirected: false,
+    type: "basic",
+    headers: { get: (name) => (name.toLowerCase() === "content-type" ? "text/html; charset=utf-8" : null) },
+    text: async () => advanced,
+  }));
+
+  const lease = modeParticipant().prepare({ initial: false, represented: { bytes: advanced, etag: "v2", seq: 2 } });
+  await lease.ready;
+  const stats = source.stats();
+  expect(stats.refused).toBeNull();
+  expect(stats.installed).toBe(true);
+
+  lease.enable();
+  document.querySelector("[data-id='b']").firstChild.data = "beta, edited";
+  const out = snapshot.captureForSave({ emitForSync: false });
+  expect(out).toContain("<li data-id='a'>alpha</li>");
+  expect(out).toContain("beta, edited");
+  lease.dispose();
+});
+
 test("a second entry installs again, one fetch per session", async () => {
   const { snapshot, source, modeParticipant } = await load("view");
 

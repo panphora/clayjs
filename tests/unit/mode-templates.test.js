@@ -310,13 +310,15 @@ for (const name of TEMPLATES) {
   });
 
   if (name === "document.html") {
-    // Another tab's file: the same page, with the paragraph this tab never saw and without
-    // the page tag, so the article in it is what the seed is rebuilt from.
+    // Another tab's file: the same page, with the paragraph this tab never saw, and the page
+    // tag that save wrote beside it.
     const otherTabFile = (bytes) => {
       const file = new DOMParser().parseFromString(bytes, "text/html");
-      for (const tag of file.querySelectorAll('script[merge="page"]')) tag.remove();
       const paragraph = file.querySelector('article[data-page] [data-id="p1"]');
       if (paragraph) paragraph.textContent = "from another tab";
+      const article = file.querySelector("article[data-page]");
+      const tag = file.querySelector('script[merge="page"]');
+      if (tag && article) tag.textContent = JSON.stringify(seedPageFromArticle(article.cloneNode(true)));
       return `<!DOCTYPE html>\n${file.documentElement.outerHTML}`;
     };
 

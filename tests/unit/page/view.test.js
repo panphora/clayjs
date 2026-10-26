@@ -80,6 +80,21 @@ test("a toggle the reader opened stays open across an update", async () => {
   stop();
 });
 
+test("a saved file's page tag replaces the live tag, and a file without one removes it", () => {
+  const base = blocksOfValues([RECORD]);
+  const tagged = (tag) => fileOf(base).replace("<body>", `<body><script type="application/json" merge="page" clay="live">${tag}</script>`);
+  document.documentElement.innerHTML = new DOMParser().parseFromString(fileOf(base), "text/html").documentElement.innerHTML;
+  const first = JSON.stringify({ v: 1, y: { seed: "one" } });
+  const second = JSON.stringify({ v: 1, y: { seed: "two" } });
+  document.head.insertAdjacentHTML("beforeend", `<script type="application/json" merge="page" clay="live">${first}</script>`);
+
+  expect(view.applySavedArticle(tagged(second), document)).toBe(true);
+  expect(document.querySelector('script[type="application/json"][merge="page"]').textContent).toBe(second);
+
+  expect(view.applySavedArticle(fileOf(base), document)).toBe(true);
+  expect(document.querySelector('script[type="application/json"][merge="page"]')).toBe(null);
+});
+
 test("the reader code stays small and loads no ProseMirror", async () => {
   const result = await build({
     entryPoints: [new URL("../../../src/page/view.js", import.meta.url).pathname],

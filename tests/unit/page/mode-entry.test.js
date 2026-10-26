@@ -362,16 +362,16 @@ test("a details the reader opened locally does not change the staged page", asyn
   }
 });
 
-test("a page tag another tab changed is read from the receipt, not the DOM", async () => {
+test("a page tag another tab changed is replaced by the receipt's tag", async () => {
   // Another tab saved this page at a version of the format this tab cannot read. The
-  // reader paints the file it represented onto the article and leaves the served tag
-  // alone, so the DOM on screen still states the newer page.
+  // reader paints the file it represented onto the article and its tag, so the page a
+  // session opens from the DOM is the one the reader holds.
   const served = '<script type="application/json" merge="page" clay="live">{"v":2,"y":{}}</script>';
   const harness = await load({ html: articleHtml(), head: served });
   const bytes = FILE(articleHtml(), { head: tagHtml(BLOCKS) });
   const reader = await harness.openReader(bytes);
   const handoff = await reader.prepareHandoff({});
-  expect(document.querySelector(TAG_SEL).textContent).toContain('"v":2');
+  expect(document.querySelector(TAG_SEL).textContent).toBe(JSON.stringify(seedValue(BLOCKS)));
 
   const lease = harness.pageParticipant().prepare(context({ represented: handoff.represented, reader: handoff }));
   try {
@@ -385,6 +385,119 @@ test("a page tag another tab changed is read from the receipt, not the DOM", asy
     lease.enable();
     expect(inputReady()).toHaveLength(1);
     expect(harness.page.view.editable).toBe(true);
+  } finally {
+    lease.dispose();
+  }
+});
+
+// The page another tab has since saved: the same two blocks, newer text.
+const OTHER = [
+  { id: "h", t: "heading", text: "Other V2" },
+  { id: "p", t: "paragraph", text: "Newer V2" },
+];
+
+test("the first entry after another tab saved mounts that file and stages its page", async () => {
+  // This tab loaded the page at one version; another tab saved over it while this one was
+  // in view, and the reader is handed that newer file. The reader keeps the live tag at
+  // that file, so the page the session opens is the newer one and the person's next save
+  // extends it instead of printing the older version back over it.
+  const harness = await load({ head: tagHtml() });
+  const bytes = FILE(articleHtml(OTHER), { head: tagHtml(OTHER) });
+  const reader = await harness.openReader(bytes, { etag: "stamp-2", seq: 2 });
+  const handoff = await reader.prepareHandoff({});
+  expect(document.querySelector(TAG_SEL).textContent).toBe(JSON.stringify(seedValue(OTHER)));
+
+  const lease = harness.pageParticipant().prepare(context({ represented: handoff.represented, reader: handoff }));
+  try {
+    await lease.ready;
+    expect(harness.storeOf("page").value).toEqual(seedValue(OTHER));
+    expect(article().textContent).toContain("Newer V2");
+    expect(article().textContent).not.toContain("Hello");
+    lease.enable();
+    expect(article().textContent).toContain("Newer V2");
+    expect(harness.saves).toHaveLength(0);
+  } finally {
+    lease.dispose();
+  }
+});
+
+test("an edit, a view and another tab's save: the next entry mounts that save", async () => {
+  const harness = await load({ head: tagHtml() });
+  const reader = await harness.openReader(FILE(articleHtml(), { head: tagHtml() }), { etag: "stamp-1", seq: 1 });
+  const first = await reader.prepareHandoff({});
+  const one = harness.pageParticipant().prepare(context({ represented: first.represented, reader: first }));
+  await one.ready;
+  one.enable();
+  one.dispose();
+  await tick();
+  expect(harness.saves).toHaveLength(0);
+  expect(harness.storeOf("page")).toBe(null);
+
+  // The reader keeps the file through the exit; another tab saves over it while this one
+  // is in view, so the file the next entry is handed is that save.
+  reader.stop();
+  const newer = await harness.openReader(FILE(articleHtml(OTHER), { head: tagHtml(OTHER) }), { etag: "stamp-2", seq: 2 });
+  const second = await newer.prepareHandoff({});
+  const two = harness.pageParticipant().prepare(context({ represented: second.represented, reader: newer }));
+  try {
+    await two.ready;
+    expect(harness.storeOf("page").value).toEqual(seedValue(OTHER));
+    expect(article().textContent).toContain("Newer V2");
+    expect(harness.saves).toHaveLength(0);
+  } finally {
+    two.dispose();
+  }
+});
+
+test("a store the app opened itself survives the session's release", async () => {
+  const harness = await load({ head: tagHtml() });
+  const app = window.clay.live("page");
+  const reader = await harness.openReader(FILE(articleHtml(), { head: tagHtml() }));
+  const handoff = await reader.prepareHandoff({});
+  const lease = harness.pageParticipant().prepare(context({ represented: handoff.represented, reader: handoff }));
+  try {
+    await lease.ready;
+  } finally {
+    lease.dispose();
+  }
+  await tick();
+  expect(harness.storeOf("page")).toBeTruthy();
+  expect(window.clay.live("page")).toBe(app);
+});
+
+test("a represented file without the page tag seeds from its article", async () => {
+  // The served page states its page in a tag; the file the reader holds states it in the
+  // article alone, because the edit that wrote it left no tag behind. The file is the page
+  // this session edits, so its article is what the seed is rebuilt from.
+  const harness = await load({ head: tagHtml() });
+  const bytes = FILE(articleHtml(OTHER));
+  const reader = await harness.openReader(bytes, { etag: "stamp-2", seq: 2 });
+  const handoff = await reader.prepareHandoff({});
+
+  const lease = harness.pageParticipant().prepare(context({ represented: handoff.represented, reader: handoff }));
+  try {
+    await lease.ready;
+    expect(harness.storeOf("page").value).toEqual(seedPageFromArticle(articleOf(bytes)));
+    expect(article().textContent).toContain("Newer V2");
+  } finally {
+    lease.dispose();
+  }
+});
+
+test("a represented file that states a page tag stages that tag's page", async () => {
+  // The served page has no tag; the file the reader holds gained one, and a tag is the
+  // page, so the reader adds it and that is what this session edits.
+  const harness = await load();
+  const bytes = FILE(articleHtml(OTHER), { head: tagHtml(OTHER) });
+  const reader = await harness.openReader(bytes, { etag: "stamp-2", seq: 2 });
+  const handoff = await reader.prepareHandoff({});
+  expect(document.querySelector(TAG_SEL).textContent).toBe(JSON.stringify(seedValue(OTHER)));
+
+  const lease = harness.pageParticipant().prepare(context({ represented: handoff.represented, reader: handoff }));
+  try {
+    await lease.ready;
+    expect(harness.storeOf("page").value).toEqual(seedValue(OTHER));
+    expect(article().textContent).toContain("Newer V2");
   } finally {
     lease.dispose();
   }

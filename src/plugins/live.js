@@ -1338,6 +1338,14 @@ export function storeOf(name) {
   return entries.get(name)?.store || null;
 }
 
+// A caller that opened a store itself is done with it: the next entry reads the tag the
+// reader now states. Only the store that caller opened is closed; one the app opened
+// first, or a staged store, stays.
+export function closeStore(name, store) {
+  const entry = entries.get(name);
+  if (entry && entry.store === store && !entry.staged) entries.delete(name);
+}
+
 export function openStores() {
   return [...entries.values()].map((entry) => entry.store);
 }

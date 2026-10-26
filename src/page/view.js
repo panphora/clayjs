@@ -11,6 +11,7 @@ import { claim } from "./runtime-owner.js";
 
 const ARTICLE = "article[data-page]";
 const TOOL = 'section[data-type="tool"][data-id]';
+const PAGE_TAG = 'script[type="application/json"][merge="page"]';
 
 export { applyPreparedArticle, prepareSavedArticle };
 
@@ -26,6 +27,28 @@ const freezeReceipt = (value) => Object.freeze({
   etag: typeof value?.etag === "string" && value.etag ? value.etag : null,
   seq: Number.isSafeInteger(value?.seq) ? value.seq : null,
 });
+
+// The tag a live entry opens its page store from is the one on screen, so a reader
+// keeps it at the file it represents: a saved file that states a page tag replaces the
+// live tag, and one that states none removes it.
+const applySavedTag = (prepared, doc) => {
+  const saved = prepared.source.querySelector(PAGE_TAG);
+  const live = doc.querySelector(PAGE_TAG);
+  if (!saved) {
+    if (!live) return false;
+    live.remove();
+    return true;
+  }
+  if (live) {
+    if (live.textContent === saved.textContent) return false;
+    live.textContent = saved.textContent;
+    return true;
+  }
+  const article = doc.querySelector(ARTICLE);
+  if (!article?.parentNode) return false;
+  article.parentNode.insertBefore(doc.importNode(saved, true), article);
+  return true;
+};
 
 // The compatibility entry: apply one saved file to the article already on screen.
 // Newer callers start a reader, which owns the stream and reports its receipt.
@@ -46,6 +69,7 @@ export function applySavedArticle(html, doc = document, readerOpen = new Map(), 
     doc.title = prepared.title;
     changed = true;
   }
+  if (applySavedTag(prepared, doc)) changed = true;
   return changed;
 }
 
@@ -159,6 +183,7 @@ function createReader({ doc, article, represented = null, feed = null, documentU
     if (prepared.rev === null) article.removeAttribute("data-rev");
     else article.setAttribute("data-rev", prepared.rev);
     if (prepared.title) doc.title = prepared.title;
+    applySavedTag(prepared, doc);
   };
 
   // A native apply can throw on markup the parser accepted and the DOM refuses.

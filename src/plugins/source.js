@@ -68,6 +68,7 @@ import {
 } from '../core/snapshot.js';
 import { onSaveAccepted } from '../core/save-core.js';
 import { modeState } from '../core/is-edit-mode.js';
+import { lastSeenEtag } from '../core/etag.js';
 
 const state = {
   installed: false,
@@ -185,7 +186,18 @@ function stampedVersion(m) {
   return attr && attr.value ? attr.value : null;
 }
 
-const heldVersion = () => document.documentElement.getAttribute('documentetag') || null;
+/**
+ * The version this session represents: the file the reader handed it, else the version this
+ * tab last saw, else — for an explicit edit boot, which has no reader — the version the
+ * document was served with.
+ */
+function heldVersion(context) {
+  const represented = context && context.represented && context.represented.etag;
+  if (represented) return represented;
+  const seen = lastSeenEtag();
+  if (seen) return seen;
+  return context === null ? document.documentElement.getAttribute('documentetag') || null : null;
+}
 
 /**
  * A fetch is an answer about the file as it was when the host read it, and a boot fetch
@@ -194,14 +206,14 @@ const heldVersion = () => document.documentElement.getAttribute('documentetag') 
  * never received, and the next save would print its older bytes back over them. The
  * stamp and the model go together, so neither is taken from a late answer.
  */
-function staleVersion(m) {
+function staleVersion(m, context) {
   const stamp = stampedVersion(m);
-  const held = heldVersion();
+  const held = heldVersion(context);
   if (!stamp || !held || stamp === held) return null;
   return `source refused: the fetch answered version ${stamp} while this page holds ${held}`;
 }
 
-function install(sourceUrl, attempt = 0, render = true) {
+function install(sourceUrl, context = null, attempt = 0, render = true) {
   const session = state.session;
   const t0 = now();
   const generation = state.adoptions;
@@ -212,13 +224,13 @@ function install(sourceUrl, attempt = 0, render = true) {
     const m = model(src);
     const refused = checkSource(m, document);
     if (refused) throw new Error(`source refused: ${refused}`);
-    const stale = staleVersion(m);
+    const stale = staleVersion(m, context);
     if (stale) throw new Error(stale);
     // A save was accepted, or a disk frame carried newer bytes, while this answer was on
     // its way. Those bytes are the file now, so ask again rather than adopt an older
     // answer; a page that will not hold still is refused instead of retried forever.
     if (state.adoptions !== generation) {
-      if (attempt < SUPERSEDED_RETRIES) return install(sourceUrl, attempt + 1, render);
+      if (attempt < SUPERSEDED_RETRIES) return install(sourceUrl, context, attempt + 1, render);
       throw new Error('source refused: a save replaced the file while the fetch was in flight');
     }
     const t2 = now();
@@ -666,7 +678,7 @@ export function sourceParticipant() {
         return { enable() {}, quiesce() {}, resume() {}, dispose: uninstall };
       }
       return {
-        ready: install(window.location.href, 0, false),
+        ready: install(window.location.href, context, 0, false),
         enable() {
           if (!state.installed) return;
           setSaveRenderer(renderSave);

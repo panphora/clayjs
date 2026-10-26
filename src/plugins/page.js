@@ -6,7 +6,7 @@ import { savePageForce, holdAllSaves, releaseAllSaves, suspendAutosave, resumeAu
 import { setSaveHeader } from "../core/save-core.js";
 import { lastSeenEtag, representedEtag, recordEtag } from "../core/etag.js";
 import { captureForSaveAndComparison } from "../core/snapshot.js";
-import { storeOf, stageStore, checkpointWithin, requestCheckpoint, fastLane, pageLaneReady, pageWriterReady } from "./live.js";
+import { storeOf, stageStore, closeStore, checkpointWithin, requestCheckpoint, fastLane, pageLaneReady, pageWriterReady } from "./live.js";
 import { parseJsonRelaxed } from "../vendor/hyper-morph-json.vendor.js";
 import { saveStateFor, BLOCKED_TEXT, RETRY_TEXT, downloadPageCopy, downloadSnapshot, copyPageText } from "../page/save-states.js";
 import toast, { toastPersistent, dismissPersistent } from "../ui/toast.js";
@@ -375,6 +375,10 @@ function releaseMounted(inst) {
   try { inst.binding?.ydoc?.destroy(); } catch (error) { console.error("clayjs: page plugin document failed to destroy", error); }
   try { inst.staged?.close(); } catch (error) { console.error("clayjs: page plugin staged store failed to close", error); }
   inst.staged = null;
+  if (inst.pageStore) {
+    try { closeStore("page", inst.pageStore); } catch (error) { console.error("clayjs: page plugin store failed to close", error); }
+    inst.pageStore = null;
+  }
   inst.binding = null;
   inst.flush = null;
   inst.releaseArticle?.();
@@ -540,8 +544,14 @@ export function createSteps(inst, options) {
   // moves; what the tag decodes to is the page's own code's to say, so it arrives in
   // source.ready while the room joins, and the join never waits for it.
   function readSource(inst) {
-    const articles = document.querySelectorAll(ARTICLE_SEL);
-    const tags = document.querySelectorAll(TAG_SEL);
+    const liveArticles = document.querySelectorAll(ARTICLE_SEL);
+    // The file the reader represents, when there is one, states the page this session
+    // edits; the live DOM is only the page an explicit edit boot found.
+    const represented = typeof inst.context?.represented?.bytes === "string"
+      ? new DOMParser().parseFromString(inst.context.represented.bytes, "text/html")
+      : null;
+    const articles = represented ? represented.querySelectorAll(ARTICLE_SEL) : liveArticles;
+    const tags = represented ? represented.querySelectorAll(TAG_SEL) : document.querySelectorAll(TAG_SEL);
     if (!articles.length && !tags.length) return { ok: false, reason: "no-page" };
     // A page saved without its merge state (HTML Clay, an outside edit, a download)
     // is booted from its article alone: the seed is deterministic, so every tab
@@ -554,16 +564,14 @@ export function createSteps(inst, options) {
       console.warn(`clayjs: page plugin needs exactly one article[data-page] and one merge="page" live tag; found ${articles.length} article(s) and ${tags.length} tag(s), leaving the page as saved HTML`);
       return { ok: false, reason: "ambiguous-page" };
     }
-    const element = articles[0];
+    const element = liveArticles[0];
+    if (!element) return { ok: false, reason: "no-page" };
     // The file the reader represented is the page this session edits: its tag and the
     // article the seed is built from come off those bytes once, so a tag another tab
     // changed and a reader's own local state cannot reach what is staged. The live
     // article stays the node the editor mounts over.
-    const represented = typeof inst.context?.represented?.bytes === "string"
-      ? new DOMParser().parseFromString(inst.context.represented.bytes, "text/html")
-      : null;
-    const seedNode = represented?.querySelector(ARTICLE_SEL) ?? element;
-    const tagNode = represented ? represented.querySelector(TAG_SEL) : tags[0];
+    const seedNode = articles[0];
+    const tagNode = tags[0];
     // A tag this tab can read on its own is read here, so a page it cannot boot says so
     // before the room is opened.
     let value = null;
@@ -687,7 +695,9 @@ export function createSteps(inst, options) {
         inst.staged = staged;
         handle = staged.handle;
       } else {
+        const opened = storeOf("page") === null;
         handle = window.clay.live("page");
+        if (opened) inst.pageStore = storeOf("page");
       }
     } catch (error) {
       console.warn("clayjs: page plugin could not open the page store", error);
@@ -1063,7 +1073,7 @@ function begin(options = {}, { activate = true, context = null } = {}) {
         options.onPhase?.(result);
       },
     }),
-    article: null, view: null, binding: null, adoption: null, source: null, store: null, toolHost: null, aiTool: null, bootHtml: "", bootRev: null, savedRev: null, staged: null, releaseArticle: null, replaced: false, savesHeld: false, flush: null, listeners: [], retryTimer: null, retryShown: false, statusTimer: null, statusNote: null, notices: null, editorReadyResolve: null, context, inputOpen: false, sessionHeld: false, autosaveSuspended: false, staleRetry: false,
+    article: null, view: null, binding: null, adoption: null, source: null, store: null, toolHost: null, aiTool: null, bootHtml: "", bootRev: null, savedRev: null, staged: null, pageStore: null, releaseArticle: null, replaced: false, savesHeld: false, flush: null, listeners: [], retryTimer: null, retryShown: false, statusTimer: null, statusNote: null, notices: null, editorReadyResolve: null, context, inputOpen: false, sessionHeld: false, autosaveSuspended: false, staleRetry: false,
   };
   active = inst;
   const boot = run(inst, options, { activate }).catch((error) => {
