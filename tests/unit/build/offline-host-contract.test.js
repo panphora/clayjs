@@ -2,7 +2,7 @@
  * @jest-environment node
  */
 import { afterAll, beforeAll, describe, expect, test } from "@jest/globals";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -18,7 +18,7 @@ const READY_TIMEOUT = 120000;
 const CASE_TIMEOUT = 120000;
 
 const NAMES = ["htmlclay", "hyperclay-local"];
-const CASES = 6;
+const CASES = 8;
 
 const configured = process.env.CLAY_OFFLINE_HOSTS ? JSON.parse(process.env.CLAY_OFFLINE_HOSTS) : null;
 const KANBAN = process.env.CLAY_KANBAN_TEMPLATE ? path.resolve(process.env.CLAY_KANBAN_TEMPLATE) : null;
@@ -167,6 +167,7 @@ for (const host of hosts) {
     let localIndex;
     let board;
     let doc;
+    let page;
     let template;
 
     beforeAll(async () => {
@@ -174,11 +175,13 @@ for (const host of hosts) {
       board = kanban.input;
       doc = "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<title>Notes</title>\n</head>\n<body>\n<p>Notes</p>\n</body>\n</html>\n";
       template = await readFile(KANBAN, "utf8");
+      page = await readFile(path.join(ROOT, "tests/fixtures/load/document.html"), "utf8");
       root = await mkdtemp(path.join(os.tmpdir(), `clay-host-${host.name}-`));
       await mkdir(path.join(root, "notes/2026"), { recursive: true });
       await writeFile(path.join(root, "board.html"), board);
       await writeFile(path.join(root, "notes/2026/doc.html"), doc);
       await writeFile(path.join(root, "kanban.html"), template);
+      await writeFile(path.join(root, "page.html"), page);
       index = JSON.parse(await readFile(host.index, "utf8"));
       localIndex = JSON.parse(await readFile(path.join(ROOT, "dist/offline-manifest.json"), "utf8"));
       const started = startFixture(host, root);
@@ -407,6 +410,112 @@ for (const host of hosts) {
       expect(savedCards.map((card) => card.id)).toEqual(originalCards.map((card) => card.id));
       const changed = savedCards.filter((card, index) => card.outer !== originalCards[index].outer);
       expect(changed.map((card) => card.id)).toEqual(["c-k3v9q2"]);
+    }, CASE_TIMEOUT);
+
+    test("the Page document\u0027s first switch to edit loads only release files the host serves, read with the host\u0027s own load plan", async () => {
+      count(host.name);
+      const query = CLAY_SCRIPT.exec(page)[1].replace(/^https:\/\/clayjs\.com\/v1\/clay\.js\?/, "");
+      expect(query).toBe("plugins=page,menu");
+
+      const tempDir = await mkdtemp(path.join(os.tmpdir(), `edit-set-${host.name}-`));
+      try {
+        const manifestResponse = await fetch(new URL(`${ready.runtime}m/manifest.json`, ready.baseURL));
+        expect({ manifest: "m/manifest.json", status: manifestResponse.status }).toEqual({ manifest: "m/manifest.json", status: 200 });
+        const manifest = JSON.parse(await manifestResponse.text());
+        for (const releasePath of ["src/loader-logic.js", "src/lib/boot-imports.js", "src/page/features/registry.js", "m/manifest.json", `m/${manifest.edit}`]) {
+          const response = await fetch(new URL(ready.runtime + releasePath, ready.baseURL));
+          expect({ releasePath, status: response.status }).toEqual({ releasePath, status: 200 });
+          const target = path.join(tempDir, releasePath);
+          await mkdir(path.dirname(target), { recursive: true });
+          await writeFile(target, Buffer.from(await response.arrayBuffer()));
+        }
+
+        const script = path.join(ROOT, "tests/fixtures/offline-runtime/edit-set.mjs");
+        const plan = JSON.parse(execFileSync(process.execPath, ["--no-warnings", script, tempDir, query], { encoding: "utf8" }));
+        expect(plan.missing).toEqual([]);
+        expect(plan.files.length).toBeGreaterThan(50);
+
+        for (const file of plan.files) {
+          expect({ file, inIndex: Object.hasOwn(index.files, file) }).toEqual({ file, inIndex: true });
+          const response = await fetch(new URL(ready.runtime + file, ready.baseURL));
+          expect({ file, status: response.status }).toEqual({ file, status: 200 });
+          expect({ file, sha256: sha256(Buffer.from(await response.arrayBuffer())) })
+            .toEqual({ file, sha256: index.files[file]?.sha256 });
+        }
+
+        const { entries } = JSON.parse(await readFile(path.join(tempDir, "m/manifest.json"), "utf8"));
+        expect(plan.files).toContain(`m/${entries["page/editor.js"]}`);
+        expect(plan.files).toContain(`m/${entries["core/mode-lifecycle.js"]}`);
+        console.info(
+          `offline-host-contract: ${host.name} loads ${plan.files.length} release files for the Page document\u0027s ` +
+            `first edit boot (${query})`,
+        );
+      } finally {
+        await rm(tempDir, { recursive: true, force: true });
+      }
+    }, CASE_TIMEOUT);
+
+    test("after a first edit, a save and a reopen, a second change saves with the new ETag and the stale one is refused", async () => {
+      count(host.name);
+      const documentURL = ready.documents["page.html"].url;
+      const first = await (await fetch(documentURL)).text();
+      const etag1 = /documentetag="([^"]*)"/.exec(first)?.[1];
+      expect(typeof etag1).toBe("string");
+
+      const before = '<h1 data-id="title"></h1>';
+      const after = '<h1 data-id="title">First note</h1>';
+      expect(page.split(before).length - 1).toBe(1);
+      expect(first.split(before).length - 1).toBe(1);
+      const edited = first.replace(before, after);
+      expect(edited).not.toBe(first);
+
+      const save = ready.documents["page.html"].save;
+      const saved = await fetch(save.url, {
+        method: save.method,
+        headers: { ...save.headers, "If-Match": etag1 },
+        body: edited,
+      });
+      expect({ status: saved.status, body: await saved.text() }).toEqual({ status: 200, body: expect.any(String) });
+
+      const reopened = await (await fetch(documentURL)).text();
+      expect(reopened).toContain(ready.runtime);
+      expect(reopened).toContain('id="clay-runtime-map"');
+      expect(reopened).toContain("First note");
+      const etag2 = /documentetag="([^"]*)"/.exec(reopened)?.[1];
+      expect(typeof etag2).toBe("string");
+      expect(etag2).not.toBe(etag1);
+
+      const second = '<p data-id="p1"></p>';
+      const secondAfter = '<p data-id="p1">Second note</p>';
+      expect(reopened.split(second).length - 1).toBe(1);
+      const editedAgain = reopened.replace(second, secondAfter);
+      expect(editedAgain).not.toBe(reopened);
+      const savedAgain = await fetch(save.url, {
+        method: save.method,
+        headers: { ...save.headers, "If-Match": etag2 },
+        body: editedAgain,
+      });
+      expect({ status: savedAgain.status, body: await savedAgain.text() }).toEqual({ status: 200, body: expect.any(String) });
+
+      const diskPath = path.join(root, "page.html");
+      const diskBeforeStale = await readFile(diskPath);
+      const stale = await fetch(save.url, {
+        method: save.method,
+        headers: { ...save.headers, "If-Match": etag1 },
+        body: reopened,
+      });
+      const staleBody = await stale.text();
+      console.info(`offline-host-contract: ${host.name} answered ${stale.status} to the stale ETag ${etag1}: ${staleBody}`);
+      expect({ status: stale.status, refused: stale.status !== 200 }).toEqual({ status: stale.status, refused: true });
+      expect(await readFile(diskPath)).toEqual(diskBeforeStale);
+
+      const disk = await readFile(diskPath, "utf8");
+      expect(disk).toContain("First note");
+      expect(disk).toContain("Second note");
+      expect(disk).not.toContain("/_/clayjs/");
+      expect(disk).not.toContain("clay-runtime-map");
+      expect(disk).not.toContain("documentetag");
+      expect(disk).toContain("https://clayjs.com/v1/clay.js?plugins=page,menu");
     }, CASE_TIMEOUT);
   });
 }
