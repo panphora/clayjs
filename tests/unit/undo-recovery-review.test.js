@@ -300,6 +300,35 @@ test("an app action that says ok and dismiss takes the row away", async () => {
   expect(undo.reviewActionsFor(record)).toEqual([]);
 });
 
+test("an action activated twice while it runs runs once", async () => {
+  await undo.keep({ key: "note", label: "Unsent note", payload: { text: "kept by the app" } });
+
+  let release;
+  const gate = new Promise((resolve) => { release = resolve });
+  const runs = [];
+  undo.reviewActions(() => [
+    { label: "Keep as new", run: async () => { runs.push("run"); await gate; return { ok: false }; } },
+  ]);
+
+  await openNotice();
+  await review();
+  const button = buttonSaying(/^Keep as new$/);
+
+  button.click();
+  expect(runs).toHaveLength(1);
+  expect(button.disabled).toBe(true);
+  expect(button.getAttribute("aria-busy")).toBe("true");
+  // A second activation while the run is pending is ignored, whatever the DOM does
+  // with a disabled button.
+  button.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+  expect(runs).toHaveLength(1);
+
+  release();
+  expect(await until(() => panelText().includes("That action did not run."))).toBe(true);
+  expect(runs).toHaveLength(1);
+  expect(await records()).toHaveLength(1);
+});
+
 test("an action that throws leaves the row and says so", async () => {
   await undo.keep({ key: "note", label: "Unsent note", payload: { text: "kept by the app" } });
 

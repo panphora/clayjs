@@ -134,6 +134,10 @@ async function supersede(ch, key, id) {
   }
 }
 
+// The whole stage, flush and supersede of one refusal, one call at a time: two refusals
+// in the same tick would otherwise each delete the other's record as the older copy.
+let keeping = Promise.resolve();
+
 /**
  * Keep what a refused undo or redo would have restored, before anything in this tab
  * can be lost to a reload.
@@ -147,7 +151,13 @@ async function supersede(ch, key, id) {
  * @param {{entryId: string, direction: string, code?: string}} receipt
  * @returns {Promise<{ok: boolean, code?: string}>}
  */
-export async function keepRefusal(engine, receipt) {
+export function keepRefusal(engine, receipt) {
+  const run = keeping.then(() => keepRefusalNow(engine, receipt));
+  keeping = run.catch(() => {});
+  return run;
+}
+
+async function keepRefusalNow(engine, receipt) {
   const ch = channel();
   if (!ch) return { ok: false, code: 'unavailable' };
   let described = null;

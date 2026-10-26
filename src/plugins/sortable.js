@@ -249,6 +249,7 @@ function makeSortable(sortableElem, Sortable, record = loose) {
   let recorded = null;
   let press = null;
   let restoring = null;
+  let started = false;
   let ends = [];
   // A press that ends without a drop (a click, a cancel) still has to hand the
   // gesture's exclusion back: the drop itself releases it once its entry is recorded.
@@ -271,7 +272,15 @@ function makeSortable(sortableElem, Sortable, record = loose) {
     if (pending) later(record, () => restoreRuntimeAttrs(pending));
   };
   const settleSoon = () => {
-    holdMove(press);
+    // Only the press that became a drag holds: a click has nothing to keep out of
+    // history, and its own handler's writes are the next entry.
+    if (started) {
+      holdMove(press);
+    } else {
+      releaseMove(press);
+      press = null;
+    }
+    started = false;
     restoreSoon();
     later(record, endPress);
   };
@@ -281,11 +290,17 @@ function makeSortable(sortableElem, Sortable, record = loose) {
     if (!item || recorded) return;
     recorded = recordRuntimeAttrs(item);
     press = beginMove(item);
+    started = false;
     record.presses.add(recorded);
     pressed.add(recorded);
     ends = ENDS.map(type => track(record, document, type, settleSoon, true));
   }, true);
   options.onUnchoose = restoreSoon;
+  // The one signal a click never makes: Sortable says the press became a drag, so this
+  // press is the one that may hold the engine. A click's own writes are history's.
+  options.onStart = () => {
+    started = true;
+  };
 
   Sortable.create(sortableElem, options);
   record.instances.add(sortableElem);

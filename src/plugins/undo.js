@@ -41,6 +41,16 @@ function keepsOwnHistory(node) {
 const createScope = undo.create.bind(undo)
 undo.create = (opts) => createScope(withTabLocal(opts))
 
+// The recording mode is the page's choice, and a session starts a new scope over the
+// page as it stands: remember it here, so an exit and a re-entry come back in the mode
+// the page picked instead of the default one.
+let recording = null
+const setRecording = undo.setRecording.bind(undo)
+undo.setRecording = (mode) => {
+  recording = mode ?? null
+  return setRecording(mode)
+}
+
 // A commit inside clay.effect drains the paused hub's records, so the effect's
 // own writes reach autosave and re-trigger it. Warn once; the commit still runs.
 const commit = undo.commit.bind(undo)
@@ -230,7 +240,7 @@ function undoLease(record) {
       if (record.started) return
       record.started = true
       record.admitted = true
-      undo.start(withTabLocal({ bindKeys: true }))
+      undo.start(withTabLocal({ bindKeys: true, ...(recording ? { recording } : {}) }))
       for (const type of ['undo', 'redo']) {
         undo.on(type, afterReplay)
         record.subscriptions.push({ type, handler: afterReplay })

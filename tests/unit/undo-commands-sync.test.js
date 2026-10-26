@@ -52,6 +52,8 @@ afterAll(() => {
 });
 
 beforeEach(async () => {
+  // A new page starts in the default mode; a mode a case picked is that page's own.
+  undo.setRecording("automatic");
   document.body.innerHTML = FIXTURE;
   await settle();
 });
@@ -79,6 +81,35 @@ test("in commands mode an unbracketed write makes no history and a clay.undo.com
 
   expect(undo.undo().ok).toBe(true);
   expect(article().textContent).toBe("unbracketed");
+});
+
+test("commands mode survives a live exit and re-entry", async () => {
+  const first = await enter();
+  window.clay.undo.setRecording("commands");
+
+  setText(article(), "unbracketed 1");
+  await settle();
+  undo.flush();
+  expect(labels()).toEqual([]);
+  expect(undo.history).toHaveLength(0);
+
+  // Exit takes the session and its history back; entering again starts a new scope
+  // over the page as it stands.
+  first.dispose();
+  await settle();
+  await enter();
+
+  setText(article(), "unbracketed 2");
+  await settle();
+  undo.flush();
+  expect(labels()).toEqual([]);
+  expect(undo.history).toHaveLength(0);
+
+  const receipt = window.clay.undo.command("Type", () => setText(article(), "commanded"));
+  expect(receipt).toEqual({ id: expect.any(String), label: "Type" });
+  await settle();
+  undo.flush();
+  expect(labels()).toEqual(["Type"]);
 });
 
 test("a command run while the hub holds a sync pause records one local entry, and it undoes and redoes after the apply resolves", async () => {

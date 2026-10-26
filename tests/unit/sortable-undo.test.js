@@ -77,6 +77,9 @@ const drag = async (item, to, before = null, { during = null, cancel = false } =
   item.setAttribute("draggable", "false");
   item.setAttribute("style", "opacity: 0.4;");
   await settle();
+  // The vendor's start: the press has moved past its threshold, so this is a drag and
+  // not a click. A click never reaches it.
+  window.Sortable.get(from).options.onStart({ item, from, to: from, oldIndex });
   if (during) during();
   if (cancel) {
     item.dispatchEvent(new window.Event("pointercancel", { bubbles: true }));
@@ -114,6 +117,8 @@ afterAll(() => {
 });
 
 beforeEach(() => {
+  // A new page starts in the default mode; a mode a case picked is that page's own.
+  undo.setRecording("automatic");
   document.body.innerHTML = FIXTURE;
   window.notified = [];
   unavailable.length = 0;

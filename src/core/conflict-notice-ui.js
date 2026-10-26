@@ -502,7 +502,10 @@ function storedRow(entry) {
     box.append(grid);
   }
   const rowActions = el("div", ["all:initial", "display:flex", "flex-wrap:wrap", "gap:8px", "margin-top:8px"]);
-  undoActionsOf(entry).forEach((item, at) => rowActions.append(action(item.label, `run:${entry.id}:${at}`, { onClick: () => onUndoAction(entry, item) })));
+  undoActionsOf(entry).forEach((item, at) => {
+    const rowAction = action(item.label, `run:${entry.id}:${at}`, { onClick: () => onUndoAction(entry, item, rowAction) });
+    rowActions.append(rowAction);
+  });
   rowActions.append(action(copiedId === entry.id ? "Copied" : "Copy", `copy:${entry.id}`, { onClick: () => onCopyStored(entry) }));
   rowActions.append(action("Dismiss", `dismiss:${entry.id}`, { onClick: () => onDismissStored(entry) }));
   box.append(rowActions);
@@ -833,25 +836,45 @@ async function onDismissStored(entry) {
   schedule();
 }
 
+// One activation per row action: while its run is pending the button is disabled and
+// busy, and further activations are ignored, so the page's own action cannot apply
+// twice at once. The button is the one that was drawn with this row; a redraw during
+// the run leaves it detached and there is nothing to hand back.
+const runningActions = new Set();
+
 // An action the page offers for one kept record: Keep as new, on a later step. It may
 // be async, and it answers whether the copy was dealt with. Only a run that says both
 // ok and dismiss takes the row away, and only at the revision the row was drawn at: a
 // throw or a refusal leaves the copy where it is and says so above the list.
-async function onUndoAction(entry, item) {
+async function onUndoAction(entry, item, button = null) {
+  if (runningActions.has(item)) return;
+  runningActions.add(item);
+  if (button) {
+    button.disabled = true;
+    button.setAttribute("aria-busy", "true");
+  }
   actionFailed = false;
-  let result = null;
   try {
-    result = await item.run(entry.record);
-  } catch (_) {
-    result = null;
+    let result = null;
+    try {
+      result = await item.run(entry.record);
+    } catch (_) {
+      result = null;
+    }
+    if (result?.ok === true && result?.dismiss === true) {
+      await onDismissStored(entry);
+      return;
+    }
+    actionFailed = result?.ok !== true;
+    await refreshRecovered();
+    schedule();
+  } finally {
+    runningActions.delete(item);
+    if (button && button.isConnected) {
+      button.disabled = false;
+      button.removeAttribute("aria-busy");
+    }
   }
-  if (result?.ok === true && result?.dismiss === true) {
-    await onDismissStored(entry);
-    return;
-  }
-  actionFailed = result?.ok !== true;
-  await refreshRecovered();
-  schedule();
 }
 
 // A refusal this tab just kept is reviewable the moment the store has it: the same

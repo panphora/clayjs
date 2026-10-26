@@ -69,6 +69,8 @@ beforeAll(async () => {
 
 beforeEach(() => {
   refusals.length = 0;
+  // A new page starts in the default mode; a mode a case picked is that page's own.
+  undo.setRecording("automatic");
   window.clay = {};
   document.documentElement.removeAttribute("route-tab");
   document.body.innerHTML = FIXTURE;

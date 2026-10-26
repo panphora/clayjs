@@ -244,6 +244,30 @@ test("refusing the same step twice keeps one record", async () => {
   expect(listed[0].key).toBe(`refused:${receipt.entryId}:undo`);
 });
 
+test("two rapid refusals keep one recovery copy", async () => {
+  await edit("typed");
+  peerWrite(() => setText(text(), "peer"));
+  await settle();
+  undo.flush();
+
+  const first = undo.undo();
+  const second = undo.undo();
+  expect(first.ok).toBe(false);
+  expect(second.ok).toBe(false);
+  expect(first.code).toBe("content-changed");
+  expect(second.code).toBe("content-changed");
+
+  expect(await until(() => kept.length === 2)).toBe(true);
+  expect(kept).toEqual([
+    { ok: true, entryId: first.entryId, direction: "undo" },
+    { ok: true, entryId: second.entryId, direction: "undo" },
+  ]);
+
+  const listed = await records();
+  expect(listed).toHaveLength(1);
+  expect(listed[0].key).toBe(`refused:${first.entryId}:undo`);
+});
+
 test("a store that refuses the write keeps the durable copy and the in-memory one", async () => {
   let failures = 0;
   const flaky = guardedFactory(factory, () => (failures-- > 0 ? new DOMException("full", "QuotaExceededError") : null));
