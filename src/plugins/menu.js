@@ -4,10 +4,9 @@
 import { canEdit, isDraftMode, isEditMode, mode as startMode } from "../core/is-edit-mode.js";
 import onDomReady from "../lib/dom-ready.js";
 import CLAYGOO from "./menu/claygoo.svg.js";
+import { modeRefusalText } from "../core/mode-refusal.js";
 
 const SEO_ITEM = true;
-const SAVE_FAILED = "Couldn't save, so this page stays in edit mode.";
-const PERMISSION_DENIED = "You don't have permission to edit this document.";
 const NOTE_MS = 6000;
 const INTRO_GAP = 12;
 
@@ -292,11 +291,8 @@ function mount() {
     edit.disabled = false;
     if (result && result.ok === false) {
       edit.setAttribute("aria-checked", previous);
-      showNote(
-        result.code === "permission-denied" ? PERMISSION_DENIED
-          : result.code === "save-failed" ? SAVE_FAILED
-            : result.message || SAVE_FAILED,
-      );
+      const text = modeRefusalText(result);
+      if (text) showNote(text);
     } else {
       setChecked();
     }

@@ -6,6 +6,7 @@ import { applyHead, FIELDS, readHead } from "./seo-head.js";
 import { hostMeta } from "../../core/host-meta.js";
 import { documentTitle } from "../../page/document-title.js";
 import { registerUnsavedState } from "../../lib/unsaved-state.js";
+import { modeRefusalText } from "../../core/mode-refusal.js";
 
 const STYLE_ID = "clay-seo-style";
 const REOPEN_KEY = "reopen-seo";
@@ -813,6 +814,8 @@ export function open() {
     const reloading = !!result && result.ok !== false && !!result.reloading;
     if (reloading) return;
     if (storage) storage.remove(REOPEN_KEY);
+    const refusal = modeRefusalText(result);
+    if (refusal) window.clay?.toast?.(refusal, "error");
     if (result && result.ok !== false) layout();
   });
 

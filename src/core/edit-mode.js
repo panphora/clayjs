@@ -50,19 +50,29 @@ export async function activateInitialMode() {
   }
 }
 
-// An entry waits on the host's permission answer before anything starts, so it is held
-// here: a second ask for edit joins it, and the opposing ask is busy, as the controller
-// answers once it owns the transition.
-let entry = null;
+// One mode request at a time, whoever ends up handling it (the workspace shell, the live
+// controller or a reload): asking for the same mode joins it, and asking for the other one
+// is busy until it settles.
+let pending = null;
 
 export async function setMode(next) {
   if (next !== "edit" && next !== "view") throw new TypeError(`clay.setMode: unknown mode "${next}"`);
-  if (entry) return next === "edit" ? entry : { ok: false, mode, code: "busy" };
+  if (pending) return pending.target === next ? pending.promise : { ok: false, mode, code: "busy" };
   if (next === mode && !controller) return { ok: true, mode, changed: false };
-  if (isDraftMode || (!canEdit && !(next === "view" && mode === "edit"))) return { ok: false, mode, code: "not-allowed" };
-  // In a workspace frame the shell owns the frame, so a mode change is its reload, not
-  // ours: hand it over before anything local starts. Only a shell that does not take part
-  // ("host-unsupported") leaves the switch to this document.
+  if (isDraftMode) return { ok: false, mode, code: "not-allowed" };
+  const promise = request(next);
+  pending = { target: next, promise };
+  try {
+    return await promise;
+  } finally {
+    if (pending?.promise === promise) pending = null;
+  }
+}
+
+async function request(next) {
+  // In a workspace frame the shell owns the frame and decides permission, so a mode change
+  // is its reload, not ours: hand it over before anything local starts. Only a shell that
+  // does not take part ("host-unsupported") leaves the switch to this document.
   const host = typeof window !== "undefined" ? window.clay?._requestHostMode : undefined;
   if (typeof host === "function" && next !== mode) {
     let answer;
@@ -77,20 +87,19 @@ export async function setMode(next) {
       return { ok: true, mode: next, changed: true, reloading: true };
     }
   }
-  if (next === "edit" && mode !== "edit") {
-    entry = enterEdit();
-    try {
-      return await entry;
-    } finally {
-      entry = null;
-    }
-  }
+  if (next === "edit" && mode !== "edit") return enterEdit();
+  if (!canEdit && !(next === "view" && mode === "edit")) return { ok: false, mode, code: "not-allowed" };
   return switchTo(next);
 }
 
 async function enterEdit() {
+  const asked = location.pathname;
   const { checkHostPermission } = await import("./host-permission.js");
-  if ((await checkHostPermission({ fresh: true })) === false) return { ok: false, mode, code: "permission-denied" };
+  const writable = await checkHostPermission({ fresh: true });
+  // The page moved to another document while the host answered: this request was for the old one.
+  if (location.pathname !== asked) return { ok: false, mode, code: "cancelled" };
+  if (writable === false) return { ok: false, mode, code: "permission-denied" };
+  if (!canEdit) return { ok: false, mode, code: "not-allowed" };
   return switchTo("edit");
 }
 

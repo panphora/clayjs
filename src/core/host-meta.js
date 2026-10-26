@@ -32,9 +32,15 @@ const outcomes = new WeakMap();
 // that asked.
 const paths = new WeakMap();
 
-function settle(outcome, meta = bareHost(), asked = null) {
+// Which fetch produced each answer, counted from 1 in the order the fetches started. An
+// answer that lands late is still older than one that started later.
+const orders = new WeakMap();
+let fetches = 0;
+
+function settle(outcome, meta = bareHost(), asked = null, order = null) {
   outcomes.set(meta, outcome);
   if (asked !== null) paths.set(meta, asked);
+  if (order !== null) orders.set(meta, order);
   return meta;
 }
 
@@ -56,6 +62,16 @@ export function hostMetaOutcome(meta) {
  */
 export function hostMetaPath(meta) {
   return paths.get(meta);
+}
+
+/**
+ * Which fetch produced `meta`, counting from 1 in the order the fetches started, or 0 when none did.
+ *
+ * @param {Object} meta - an answer from hostMeta()
+ * @returns {number}
+ */
+export function hostMetaOrder(meta) {
+  return orders.get(meta) ?? 0;
 }
 
 // The bare-core-host answer, which is also every failure's answer.
@@ -214,8 +230,9 @@ export async function querySaveOutcome({ saveId, requestHash, signal } = {}) {
 
 async function fetchMeta() {
   const asked = location.pathname;
+  const order = ++fetches;
   // A file opened from disk has no host to ask, and fetch would only throw.
-  if (!/^https?:$/.test(window.location.protocol)) return settle("none", bareHost(), asked);
+  if (!/^https?:$/.test(window.location.protocol)) return settle("none", bareHost(), asked, order);
 
   const token = saveToken();
   // A host that mints tokens answers discovery per token, because on a sandboxed
@@ -242,25 +259,25 @@ async function fetchMeta() {
       redirect: "manual",
       signal: controller.signal
     });
-    if (!res.ok) return settle(res.status >= 500 ? "failed" : "none", bareHost(), asked);
+    if (!res.ok) return settle(res.status >= 500 ? "failed" : "none", bareHost(), asked, order);
     const text = await res.text();
-    if (!text) return settle("none", bareHost(), asked);
+    if (!text) return settle("none", bareHost(), asked, order);
 
     let body;
     try {
       body = JSON.parse(text);
     } catch (_) {
-      return settle("none", bareHost(), asked);
+      return settle("none", bareHost(), asked, order);
     }
-    if (!body || typeof body !== "object" || typeof body.spec !== "number") return settle("none", bareHost(), asked);
+    if (!body || typeof body !== "object" || typeof body.spec !== "number") return settle("none", bareHost(), asked, order);
 
     return settle("ok", {
       spec: body.spec,
       extensions: Array.isArray(body.extensions) ? body.extensions : [],
       document: body.document && typeof body.document === "object" ? body.document : null
-    }, asked);
+    }, asked, order);
   } catch (_) {
-    return settle("failed", bareHost(), asked);
+    return settle("failed", bareHost(), asked, order);
   } finally {
     clearTimeout(timeoutId);
   }

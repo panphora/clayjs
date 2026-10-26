@@ -88,7 +88,11 @@ function onKey(e) {
   if (!(mac ? e.metaKey : e.ctrlKey) || !e.shiftKey || e.altKey || e.code !== "KeyE" || e.isComposing) return;
   e.preventDefault();
   setMode(mode === "edit" ? "view" : "edit").then((r) => {
-    if (!r.ok && r.code === "save-failed") window.clay?.toast?.("Couldn't save, so this page stays in edit mode.", "error");
+    if (r.ok) return;
+    import("./mode-refusal.js").then(({ modeRefusalText }) => {
+      const text = modeRefusalText(r);
+      if (text) window.clay?.toast?.(text, "error");
+    });
   });
 }
 

@@ -205,20 +205,23 @@ test.each([
 test("a failed refresh keeps the last accepted answer", async () => {
   metaAnswer = okMeta({ writable: false });
   await boot();
-  const { checkHostPermission } = await import("../../src/core/host-permission.js");
 
   await withFakeLocation(async (fake) => {
-    await expect(checkHostPermission({ fresh: true })).resolves.toBe(false);
-    expect(window.clay.canEdit).toBe(false);
+    await expect(window.clay.setMode("edit")).resolves.toEqual({
+      ok: false,
+      mode: "view",
+      code: "permission-denied",
+    });
 
     metaAnswer = response({ ok: false, status: 503 });
-    await expect(checkHostPermission({ fresh: true })).resolves.toBe(false);
+    await expect(window.clay.setMode("edit")).resolves.toEqual({
+      ok: false,
+      mode: "view",
+      code: "permission-denied",
+    });
     expect(window.clay.canEdit).toBe(false);
 
     metaAnswer = okMeta({ writable: true });
-    await expect(checkHostPermission({ fresh: true })).resolves.toBe(true);
-    expect(window.clay.canEdit).toBe(true);
-
     await expect(window.clay.setMode("edit")).resolves.toEqual({
       ok: true,
       mode: "edit",
@@ -232,7 +235,7 @@ test("a failed refresh keeps the last accepted answer", async () => {
 });
 
 test("permission lost while editing keeps the editor and the typed text", async () => {
-  metaAnswer = okMeta({ writable: false });
+  metaAnswer = okMeta({ writable: true });
 
   await withFakeLocation(async (fake) => {
     await boot({ edit: true, opensIn: "edit", fake });
@@ -241,16 +244,30 @@ test("permission lost while editing keeps the editor and the typed text", async 
     content.textContent = "typed words";
     content.dispatchEvent(new Event("input", { bubbles: true }));
 
-    expect(fetchCalls.some((target) => target.includes("/_/meta"))).toBe(true);
+    expect(window.clay.mode).toBe("edit");
+    expect(window.clay.canEdit).toBe(true);
+
+    const { checkHostPermission } = await import("../../src/core/host-permission.js");
+    metaAnswer = okMeta({ writable: false });
+    await expect(checkHostPermission({ fresh: true })).resolves.toBe(false);
+
     expect(window.clay.mode).toBe("edit");
     expect(window.clay.isEditMode).toBe(true);
     expect(window.clay.canEdit).toBe(false);
     expect(fake.reload).not.toHaveBeenCalled();
+    expect(content.isConnected).toBe(true);
+    expect(content.textContent).toBe("typed words");
+
+    await expect(window.clay.setMode("edit")).resolves.toEqual({
+      ok: false,
+      mode: "edit",
+      code: "not-allowed",
+    });
+    expect(content.isConnected).toBe(true);
     expect(content.textContent).toBe("typed words");
 
     const flush = jest.fn(async () => ({ state: "saved" }));
     window.clay.save = { flush };
-
     await expect(window.clay.setMode("view")).resolves.toEqual({
       ok: true,
       mode: "view",
@@ -490,4 +507,40 @@ test("the pagehide receipt after a denial records canEdit false", async () => {
     canEdit: false,
     internal: false,
   });
+});
+
+test("an older answer landing after a newer one never overwrites it", async () => {
+  held = defer();
+  const bootFetch = held;
+  await boot({ opensIn: "edit" });
+  held = null;
+  metaAnswer = okMeta({ writable: true });
+  const { checkHostPermission } = await import("../../src/core/host-permission.js");
+
+  await expect(checkHostPermission({ fresh: true })).resolves.toBe(true);
+  expect(window.clay.canEdit).toBe(true);
+
+  bootFetch.resolve(okMeta({ writable: false }));
+  await settle();
+
+  expect(window.clay.canEdit).toBe(true);
+  expect(document.documentElement.getAttribute("canedit")).toBe("true");
+});
+
+test("a newer denial is not undone by an older grant", async () => {
+  held = defer();
+  const bootFetch = held;
+  await boot({ opensIn: "edit" });
+  held = null;
+  metaAnswer = okMeta({ writable: false });
+  const { checkHostPermission } = await import("../../src/core/host-permission.js");
+
+  await expect(checkHostPermission({ fresh: true })).resolves.toBe(false);
+  expect(window.clay.canEdit).toBe(false);
+
+  bootFetch.resolve(okMeta({ writable: true }));
+  await settle();
+
+  expect(window.clay.canEdit).toBe(false);
+  expect(document.documentElement.getAttribute("canedit")).toBeNull();
 });

@@ -53,7 +53,7 @@ function clearRoot() {
   for (const name of Array.from(root.attributes, (attribute) => attribute.name)) root.removeAttribute(name);
 }
 
-async function prepare({ url = SLOT, cookie = false, token = false, draft = false, hook = null } = {}) {
+async function prepare({ url = SLOT, cookie = false, token = false, draft = false, viewonly = false, hook = null } = {}) {
   dropListeners();
   jest.resetModules();
   sessionStorage.clear();
@@ -66,6 +66,7 @@ async function prepare({ url = SLOT, cookie = false, token = false, draft = fals
   clearRoot();
   if (token) document.documentElement.setAttribute("savetoken", "tok-123");
   if (draft) document.documentElement.setAttribute("visitor-drafts", "draft-slot-1");
+  if (viewonly) document.documentElement.setAttribute("viewonly", "");
   document.head.innerHTML = draft ? RULES : "";
   document.body.innerHTML = '<div id="content">start</div>';
   window.fetch = async () => response({ ok: false, status: 404 });
@@ -109,6 +110,40 @@ function withFakeLocation(run) {
 }
 
 const accept = () => jest.fn(async (mode) => ({ ok: true, mode, changed: true, reloading: true }));
+
+const okMeta = (document) => response({ body: JSON.stringify({ spec: 1, extensions: [], document }) });
+
+function hold() {
+  let resolve;
+  const promise = new Promise((done) => { resolve = done; });
+  return { promise, resolve };
+}
+
+async function bootEditor({ hook = null, live = false, writable = true } = {}) {
+  dropListeners();
+  jest.resetModules();
+  sessionStorage.clear();
+  localStorage.clear();
+  delete window.clayEditMode;
+  delete window.__hyperclayEditMode;
+  document.cookie = "isAdminOfCurrentResource=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/";
+  document.cookie = "isAdminOfCurrentResource=true; path=/";
+  clearRoot();
+  window.history.replaceState({}, "", `${SLOT}?editmode=true`);
+  if (live) document.documentElement.setAttribute("clay-mode-switch", "live");
+  document.head.innerHTML = "";
+  document.body.innerHTML = MENU_BODY;
+  window.fetch = async (input) =>
+    String(input).includes("/_/meta")
+      ? okMeta({ writable })
+      : response({ ok: false, status: 404 });
+  window.clay = {};
+  if (hook) window.clay._requestHostMode = hook;
+  const params = new URLSearchParams("plugins=menu&exclude=richclay,source");
+  const { boot } = await import("../../src/loader.js");
+  await new Promise((resolve) => boot(null, params, resolve));
+  await settle();
+}
 
 async function bootMenu({ hook, edit = false, cookie = true } = {}) {
   dropListeners();
@@ -192,24 +227,29 @@ test("the menu switch delegates too", async () => {
   expect(sessionStorage.getItem(RECEIPT_KEY())).toBeNull();
 });
 
-test("a delegated success writes no receipt and announces nothing", async () => {
+test("a live-declared editor hands the exit to the shell and never leaves the page", async () => {
   const hook = accept();
-  await prepare({ cookie: true, hook });
+  await bootEditor({ hook, live: true });
   const editMode = await import("../../src/core/edit-mode.js");
+  expect(editMode.mode).toBe("edit");
+
   const announced = jest.fn();
   document.addEventListener("clay:modechange", announced);
 
   await withFakeLocation(async (fake) => {
-    await expect(editMode.setMode("edit")).resolves.toEqual({
+    await expect(editMode.setMode("view")).resolves.toEqual({
       ok: true,
-      mode: "edit",
+      mode: "view",
       changed: true,
       reloading: true,
     });
+    await settle();
     window.dispatchEvent(new Event("pagehide"));
 
-    expect(fake.reload).not.toHaveBeenCalled();
+    expect(hook).toHaveBeenCalledWith("view");
     expect(announced).not.toHaveBeenCalled();
+    expect(editMode.modeLifecycle.state.phase).toBe("idle");
+    expect(fake.reload).not.toHaveBeenCalled();
   });
 
   expect(sessionStorage.getItem(RECEIPT_KEY())).toBeNull();
@@ -291,36 +331,282 @@ test("in draft mode the hook is never called", async () => {
   expect(sessionStorage.getItem(RECEIPT_KEY())).toBeNull();
 });
 
-test("without permission the hook is never called", async () => {
+test("with no hint the shell is asked first and its success is the answer", async () => {
   const hook = accept();
   await prepare({ hook });
   const editMode = await import("../../src/core/edit-mode.js");
+  expect(editMode.canEdit).toBe(false);
 
-  await expect(editMode.setMode("edit")).resolves.toEqual({ ok: false, mode: "view", code: "not-allowed" });
-  expect(hook).not.toHaveBeenCalled();
-  expect(sessionStorage.getItem(RECEIPT_KEY())).toBeNull();
-});
-
-test("clay.save.flush stays callable while a delegated request is pending", async () => {
-  let release;
-  const held = new Promise((resolve) => { release = resolve; });
-  const hook = jest.fn(() => held);
-  await prepare({ cookie: true, hook });
-  const editMode = await import("../../src/core/edit-mode.js");
-  const flush = jest.fn(async () => ({ state: "saved" }));
-  window.clay.save = { flush };
-
-  await withFakeLocation(async () => {
-    const pending = editMode.setMode("edit");
-    await settle();
-
-    await expect(window.clay.save.flush()).resolves.toEqual({ state: "saved" });
-    expect(flush).toHaveBeenCalledTimes(1);
-    expect(editMode.modeLifecycle.state.phase).toBe("idle");
-
-    release({ ok: true, mode: "edit", changed: true, reloading: true });
-    await expect(pending).resolves.toEqual({ ok: true, mode: "edit", changed: true, reloading: true });
+  await withFakeLocation(async (fake) => {
+    await expect(editMode.setMode("edit")).resolves.toEqual({
+      ok: true,
+      mode: "edit",
+      changed: true,
+      reloading: true,
+    });
+    expect(hook).toHaveBeenCalledWith("edit");
+    expect(fake.reload).not.toHaveBeenCalled();
   });
 
   expect(sessionStorage.getItem(RECEIPT_KEY())).toBeNull();
+});
+
+test("the real save flush writes pending text while a delegated exit waits", async () => {
+  const held = hold();
+  const hook = jest.fn(() => held.promise);
+  await bootEditor({ hook });
+  const editMode = await import("../../src/core/edit-mode.js");
+  const save = await import("../../src/core/save.js");
+  save.releaseBootSettle();
+  expect(save.baselineSettled()).toBe(true);
+
+  const posts = [];
+  window.fetch = jest.fn(async (input, options = {}) => {
+    if (options.method === "POST") {
+      posts.push(String(options.body));
+      return response({ body: JSON.stringify({ msg: "Saved" }) });
+    }
+    if (String(input).includes("/_/meta")) return okMeta({ writable: true });
+    return response({ ok: false, status: 404 });
+  });
+
+  const content = document.querySelector("#content");
+  content.textContent = "pending user text";
+  content.dispatchEvent(new Event("input", { bubbles: true }));
+
+  const pending = editMode.setMode("view");
+  const transition = await import("../../src/core/mode-transition.js");
+  expect(transition.operationKind()).toBeNull();
+  expect(editMode.modeLifecycle.state.phase).toBe("idle");
+
+  await expect(window.clay.save.flush({ timeoutMs: 3000 })).resolves.toMatchObject({ state: "saved" });
+  expect(posts.some((body) => body.includes("pending user text"))).toBe(true);
+  expect(editMode.modeLifecycle.state.phase).toBe("idle");
+
+  held.resolve({ ok: false, reason: "host-timeout" });
+  await expect(pending).resolves.toMatchObject({ ok: false, mode: "edit", code: "host-timeout" });
+});
+
+test("a pending delegated edit makes the opposing request busy and asks the shell once", async () => {
+  const held = hold();
+  const hook = jest.fn(() => held.promise);
+  await prepare({ cookie: true, hook });
+  const editMode = await import("../../src/core/edit-mode.js");
+
+  const pending = editMode.setMode("edit");
+  await settle();
+
+  await expect(editMode.setMode("view")).resolves.toEqual({ ok: false, mode: "view", code: "busy" });
+  expect(hook).toHaveBeenCalledTimes(1);
+
+  held.resolve({ ok: true, mode: "edit", changed: true, reloading: true });
+  await expect(pending).resolves.toEqual({ ok: true, mode: "edit", changed: true, reloading: true });
+  expect(hook).toHaveBeenCalledTimes(1);
+});
+
+test("two edit calls that both fall back on host-unsupported share one fetch and one reload", async () => {
+  const hook = jest.fn(async () => ({ ok: false, mode: "edit", changed: false, reason: "host-unsupported" }));
+  await prepare({ cookie: true, hook });
+  const editMode = await import("../../src/core/edit-mode.js");
+  const fetches = jest.fn(async () => response({ ok: false, status: 404 }));
+  window.fetch = fetches;
+
+  await withFakeLocation(async (fake) => {
+    const first = editMode.setMode("edit");
+    const second = editMode.setMode("edit");
+    const [a, b] = await Promise.all([first, second]);
+
+    expect(a).toEqual({ ok: true, mode: "edit", changed: true, reloading: true });
+    expect(b).toEqual(a);
+    expect(hook).toHaveBeenCalledTimes(1);
+    expect(fetches).toHaveBeenCalledTimes(1);
+    expect(fake.reload).toHaveBeenCalledTimes(1);
+  });
+});
+
+test("two local edit calls share one fetch and one reload, and the opposing ask is busy", async () => {
+  await prepare({ cookie: true });
+  const editMode = await import("../../src/core/edit-mode.js");
+  const held = hold();
+  const fetches = jest.fn(async () => held.promise);
+  window.fetch = fetches;
+
+  await withFakeLocation(async (fake) => {
+    const first = editMode.setMode("edit");
+    const second = editMode.setMode("edit");
+    await settle();
+
+    await expect(editMode.setMode("view")).resolves.toEqual({ ok: false, mode: "view", code: "busy" });
+
+    held.resolve(okMeta({ writable: true }));
+    await expect(first).resolves.toEqual({ ok: true, mode: "edit", changed: true, reloading: true });
+    await expect(second).resolves.toEqual({ ok: true, mode: "edit", changed: true, reloading: true });
+    expect(fetches).toHaveBeenCalledTimes(1);
+    expect(fake.reload).toHaveBeenCalledTimes(1);
+  });
+});
+
+test("an entry whose page moved to another document cancels and reloads nothing", async () => {
+  await prepare({ cookie: true });
+  const editMode = await import("../../src/core/edit-mode.js");
+  const held = hold();
+  window.fetch = async () => held.promise;
+
+  await withFakeLocation(async (fake) => {
+    const entering = editMode.setMode("edit");
+    await settle();
+
+    fake.pathname = "/other.html";
+    fake.href = "http://localhost/other.html";
+    held.resolve(okMeta({ writable: true }));
+
+    await expect(entering).resolves.toEqual({ ok: false, mode: "view", code: "cancelled" });
+    expect(fake.reload).not.toHaveBeenCalled();
+  });
+
+  expect(sessionStorage.getItem(RECEIPT_KEY())).toBeNull();
+  expect(sessionStorage.getItem("clay:doc:/other.html:mode-receipt")).toBeNull();
+});
+
+test("with no hint and no shell the host's own answer enters edit", async () => {
+  await prepare();
+  const editMode = await import("../../src/core/edit-mode.js");
+  expect(editMode.canEdit).toBe(false);
+  window.fetch = async (input) =>
+    String(input).includes("/_/meta")
+      ? okMeta({ writable: true })
+      : response({ ok: false, status: 404 });
+
+  await withFakeLocation(async (fake) => {
+    await expect(editMode.setMode("edit")).resolves.toEqual({
+      ok: true,
+      mode: "edit",
+      changed: true,
+      reloading: true,
+    });
+    expect(fake.reload).toHaveBeenCalledTimes(1);
+  });
+
+  expect(JSON.parse(sessionStorage.getItem(RECEIPT_KEY()))).toMatchObject({
+    mode: "edit",
+    canEdit: true,
+    internal: true,
+  });
+});
+
+test("a viewonly document refuses entry even when the host answers true", async () => {
+  await prepare({ viewonly: true });
+  const editMode = await import("../../src/core/edit-mode.js");
+  window.fetch = async (input) =>
+    String(input).includes("/_/meta")
+      ? okMeta({ writable: true })
+      : response({ ok: false, status: 404 });
+
+  await withFakeLocation(async (fake) => {
+    await expect(editMode.setMode("edit")).resolves.toEqual({ ok: false, mode: "view", code: "not-allowed" });
+    expect(fake.reload).not.toHaveBeenCalled();
+  });
+
+  expect(sessionStorage.getItem(RECEIPT_KEY())).toBeNull();
+});
+
+test("the shortcut toasts what a workspace timeout means", async () => {
+  const hook = jest.fn(async () => ({ ok: false, reason: "host-timeout" }));
+  await prepare({ cookie: true, hook });
+  const toast = jest.fn();
+
+  await withFakeLocation(async (fake) => {
+    await load();
+    window.clay.toast = toast;
+    press();
+    await settle();
+
+    expect(toast).toHaveBeenCalledWith("The workspace didn't answer, so this page stays as it was.", "error");
+    expect(fake.reload).not.toHaveBeenCalled();
+  });
+});
+
+test("a menu refusal says what the shell said instead of blaming the save", async () => {
+  const hook = jest.fn(async () => ({ ok: false, reason: "host-timeout" }));
+  await bootMenu({ hook });
+
+  await withFakeLocation(async (fake) => {
+    document.querySelector(".clay-menu-edit").click();
+    await settle();
+
+    const note = document.querySelector(".clay-menu-note");
+    expect(note.hidden).toBe(false);
+    expect(note.textContent).toBe("The workspace didn't answer, so this page stays as it was.");
+    expect(note.textContent).not.toBe("Couldn't save, so this page stays in edit mode.");
+    expect(fake.reload).not.toHaveBeenCalled();
+  });
+});
+
+test("a menu refusal with an unknown code falls back to a general message", async () => {
+  const hook = jest.fn(async () => ({ ok: false, reason: "host-refused" }));
+  await bootMenu({ hook });
+
+  await withFakeLocation(async () => {
+    document.querySelector(".clay-menu-edit").click();
+    await settle();
+
+    expect(document.querySelector(".clay-menu-note").textContent).toBe("Couldn't switch modes.");
+  });
+});
+
+test("a busy or cancelled refusal says nothing", async () => {
+  const busy = jest.fn(async () => ({ ok: false, reason: "busy" }));
+  await bootMenu({ hook: busy });
+
+  await withFakeLocation(async (fake) => {
+    document.querySelector(".clay-menu-edit").click();
+    await settle();
+
+    const note = document.querySelector(".clay-menu-note");
+    expect(note.hidden).toBe(true);
+    expect(note.textContent).toBe("");
+    expect(fake.reload).not.toHaveBeenCalled();
+  });
+
+  await prepare({ cookie: true });
+  const toast = jest.fn();
+  const held = hold();
+  window.fetch = async () => held.promise;
+
+  await withFakeLocation(async (fake) => {
+    await load();
+    window.clay.toast = toast;
+    press();
+    await settle();
+
+    fake.pathname = "/other.html";
+    fake.href = "http://localhost/other.html";
+    held.resolve(okMeta({ writable: true }));
+    await settle();
+
+    expect(toast).not.toHaveBeenCalled();
+    expect(fake.reload).not.toHaveBeenCalled();
+  });
+});
+
+test("the SEO sheet's Edit toasts the permission refusal", async () => {
+  const hook = jest.fn(async () => ({ ok: false, reason: "permission-denied" }));
+  await bootMenu({ hook, edit: false });
+  const toast = jest.fn();
+  window.clay.toast = toast;
+
+  document.querySelector(".clay-menu-goo").click();
+  await settle();
+  const item = [...document.querySelectorAll('[role="menuitem"]')].find((button) => button.dataset.menuId === "seo");
+  expect(item).toBeDefined();
+  item.click();
+  await settle();
+
+  await withFakeLocation(async (fake) => {
+    document.querySelector(".clay-seo-edit").click();
+    await settle();
+
+    expect(toast).toHaveBeenCalledWith("You don't have permission to edit this document.", "error");
+    expect(fake.reload).not.toHaveBeenCalled();
+  });
 });
