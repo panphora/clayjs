@@ -799,13 +799,28 @@ export function captureBodyForSync() {
 }
 
 /**
- * Get page contents for change detection.
- * Does NOT emit snapshot-ready event (safe for comparison).
+ * The bytes a save would send, without saving anything.
  *
- * Returns full HTML via snapshot pipeline.
+ * Emits no snapshot-ready event (safe for comparison), and with no options it is
+ * exactly `captureForSave({ emitForSync: false })`.
+ *
+ * `transform(root)` edits the detached clone and nothing else, and runs before
+ * prepareCloneForSave so the authored hooks, the transforms and the [no-save] strip
+ * still have their say. It must be synchronous: a preview that finished later would
+ * describe a page that has moved on, so a thenable is refused rather than awaited.
+ * There is no global registration, so no other save ever sees these edits, and the
+ * renderer runs without a capture context, so nothing can adopt these bytes as a model.
  */
-export function getPageContents() {
-  return captureForSave({ emitForSync: false });
+export function getPageContents({ transform = null, flushUndo = true } = {}) {
+  if (!transform && flushUndo) return captureForSave({ emitForSync: false });
+  const clone = captureSnapshot({ flushUndo });
+  if (transform) {
+    const pending = transform(clone);
+    if (pending && typeof pending.then === 'function') {
+      throw new TypeError('getHTML: the transform must be synchronous');
+    }
+  }
+  return serializeSaveClone(prepareCloneForSave(clone));
 }
 
 /**

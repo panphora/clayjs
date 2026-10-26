@@ -112,6 +112,34 @@ describe("the renderer sits on the save path, and only there", () => {
     expect(err).toHaveBeenCalled();
   });
 
+  // `clay.getHTML({ transform })` is the save path with the page left alone: the same
+  // renderer, the same prepared clone, and nothing behind the render that could adopt
+  // these bytes as the file. Its transform is the only writer, and it writes to the clone.
+  test("getHTML with a transform reaches the renderer, with no capture to adopt", () => {
+    let seen = null;
+    snapshot.setSaveRenderer((clone, today) => {
+      seen = { clone, today, context: snapshot.currentCaptureContext() };
+      return "RENDERED";
+    });
+
+    const out = snapshot.getPageContents({
+      transform: (root) => {
+        root.querySelector("[data-id='a']").remove();
+        const li = root.ownerDocument.createElement("li");
+        li.setAttribute("data-id", "c");
+        li.textContent = "gamma";
+        root.querySelector("#list").appendChild(li);
+      },
+    });
+
+    expect(out).toBe("RENDERED");
+    expect(seen.context).toBeNull();                       // no save to attach a model to
+    expect(seen.today).toContain("gamma");
+    expect(seen.today).not.toContain("alpha");
+    expect(seen.clone.ownerDocument).not.toBe(document);    // the page is untouched
+    expect(document.querySelector("[data-id='a']")).not.toBeNull();
+  });
+
   test("captureSaveClone returns the save-domain tree without emitting a sync frame", () => {
     const listener = jest.fn();
     document.addEventListener("clay:snapshot-ready", listener);
