@@ -403,3 +403,79 @@ test("an edit boot fetches the conflict recording module, a reader never does", 
   const graph = walk(inputs, entries);
   expect([...graph].filter((file) => CONFLICT_RECORDING.includes(file))).toEqual([]);
 });
+
+// Kanban 08 puts the undo plugin in both host tags, and it stays edit-only: the
+// recorder has to be ready before the first editable action, and a reader never
+// writes. The fixtures' own tags are the plans, but their recorded rows predate the
+// plugin, so the plan is asked the question the canonical template's tag asks. The
+// engine, the plugin, the driver that keeps a refused step and the notice's UI are
+// all named: a reader that loaded any of them would be paying for an editor.
+const UNDO_ONLY = [
+  "src/vendor/hyper-undo.vendor.js",
+  "src/plugins/undo.js",
+  "src/recovery/undo.js",
+  "src/core/conflict-notice-ui.js",
+];
+
+const withUndo = (params) => {
+  const plugins = params.get("plugins").split(",").filter(Boolean);
+  if (!plugins.includes("undo")) params.set("plugins", [...plugins, "undo"].join(","));
+  return params;
+};
+
+// The database is opened by the recovery store, one dynamic import from the facade.
+// A module that names it at all in a reader's walk is a reader opening a database.
+const mentionsDatabase = (files) =>
+  files.filter((file) => readFileSync(new URL(`../../../${file}`, import.meta.url), "utf8").includes("indexedDB"));
+
+for (const fixture of ["kanban.html", "journal.html"]) {
+  test(`${fixture} view: the reader graph carries no undo, projection, recovery driver or notice UI`, async () => {
+    const { params, hasSap } = fixtureBoot(`tests/fixtures/load/${fixture}`);
+    withUndo(params);
+    const plan = resolveModules(params, false, { isDraftMode: false, hasSap });
+    const entries = [...plan.core, ...plan.plugins].map((path) => `src/${path}`);
+    const graph = walk(await inputsFor(entries), ["src/loader.js", ...entries]);
+
+    expect(entries).not.toContain("src/plugins/undo.js");
+    expect(graph.size).toBeGreaterThanOrEqual(40);
+    expect([...graph].filter((file) => UNDO_ONLY.includes(file) || RECOVERY_STORE.test(file))).toEqual([]);
+    expect(mentionsDatabase([...graph])).toEqual([]);
+
+    // The same tag in edit does carry the recorder, so the absence above is the
+    // reader's and not the tag's.
+    const edit = resolveModules(params, true, { isDraftMode: false, hasSap });
+    expect(edit.plugins).toContain("plugins/undo.js");
+  });
+}
+
+// A refused step's durable copy is Journal 07's recovery service, and the module that
+// stages it is fetched by the first refusal or keep: `plugins/undo.js` names it in one
+// dynamic import and nothing imports it statically. An edit or draft boot therefore
+// holds the recorder and not the driver, and opens no database until one is needed.
+test("kanban edit and draft: the undo driver is one dynamic import of the undo plugin, never a ready module", async () => {
+  const { params, hasSap } = fixtureBoot("tests/fixtures/load/kanban.html");
+  withUndo(params);
+
+  for (const [mode, isDraftMode] of [["edit", false], ["draft", true]]) {
+    const plan = resolveModules(params, true, { isDraftMode, hasSap });
+    const entries = [...plan.core, ...plan.plugins].map((path) => `src/${path}`);
+    expect(entries).toContain("src/plugins/undo.js");
+    const inputs = await inputsFor(entries);
+
+    // Built, so the driver exists for that first refusal to fetch at all...
+    expect(Object.keys(inputs)).toContain("src/recovery/undo.js");
+    expect(dynamicDeps(inputs, "src/plugins/undo.js")).toContain("src/recovery/undo.js");
+    const importers = Object.entries(inputs)
+      .filter(([, input]) => (input.imports || []).some((imported) => imported.path === "src/recovery/undo.js"))
+      .map(([file]) => file);
+    expect(importers).toEqual(["src/plugins/undo.js"]);
+
+    // ...and fetched, not walked, in either mode.
+    const graph = walk(inputs, ["src/loader.js", ...entries]);
+    expect(graph.size).toBeGreaterThanOrEqual(40);
+    expect(graph.has("src/recovery/undo.js")).toBe(false);
+    expect([...graph].filter((file) => RECOVERY_STORE.test(file))).toEqual([]);
+    // The facade takes a factory as an injected option; it never opens one itself.
+    expect(mentionsDatabase([...graph])).toEqual(["src/core/recovery.js"]);
+  }
+});
