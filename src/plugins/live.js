@@ -22,6 +22,7 @@ import { createSaveHistoryRecovery, RECOVERY_WINDOW_MS } from "../live/save-hist
 import { serverTransport } from "../live/server-lane.js";
 import { localTransport, localLaneSupported } from "../live/local-lane.js";
 import { captureYValue } from "../page/ybind/parts.js";
+import { lastSeenEtag, recordEtag } from "../core/etag.js";
 
 const NAME = /^[A-Za-z0-9_.:-]{1,64}$/;
 const entries = new Map();
@@ -838,21 +839,9 @@ function receive(entry, text, source, dropIds) {
   if (entry.store.rebase(value, { source, ...(dropIds?.length && { dropIds }) })) entry.framesSince = true;
 }
 
-export function live(name) {
-  const existing = entries.get(name);
-  if (existing) return existing.store.handle;
-  const tag = liveTags().get(name);
-  if (!tag) throw new Error(`clay.live: this page has no <script type="application/json" merge="${name}" clay="live"> tag`);
-  const text = tag.element.textContent;
-  let value;
-  try {
-    value = parseJsonRelaxed(text);
-  } catch (err) {
-    throw new SyntaxError(`clay.live("${name}"): the tag's JSON does not parse: ${err.message}`);
-  }
-  const store = createStore({ name, value, ephemeral: tag.ephemeral });
-  const layout = tag.element.getAttribute("live-format") === "lines" ? "lines" : text.includes("\n") ? "pretty" : "line";
-  const entry = { store, layout, framesSince: false, last: 0, landed: 0, leftAt: lineageOf(tag.element), captureOps: new Map(), withheld: false, reading: false, timer: null, recovery: null, historicalRefreshPending: false, refreshTimer: null };
+// One open store and what the plugin follows about it. A staged store has no lane.
+function openEntry(name, store, { layout = "line", leftAt = null, staged = null } = {}) {
+  const entry = { store, layout, framesSince: false, last: 0, landed: 0, leftAt, captureOps: new Map(), withheld: false, reading: false, timer: null, recovery: null, historicalRefreshPending: false, refreshTimer: null, staged };
   entries.set(name, entry);
   store.onDelivery((event) => {
     if (event.code === "receipt-expired") document.dispatchEvent(new CustomEvent("clay:live-notice", {
@@ -871,14 +860,71 @@ export function live(name) {
     settle(entry);
     if (store.handle.status.mode === "file" && ["undone", "refused", "decided"].includes(event.cause)) entry.leftAt = null;
   });
-  if (!tag.ephemeral) store.onLocal(() => checkpoints.changed());
-  store.onLocal((ops) => { if (writerAdmitted()) fast?.local(name, ops, store.mark); });
+  if (!store.ephemeral) store.onLocal(() => checkpoints.changed());
+  store.onLocal((ops) => { if (!entry.staged && writerAdmitted()) fast?.local(name, ops, store.mark); });
   store.handle.on("change", () => {
     if (!store.ephemeral && store.handle.status.mode === "fast") checkpoints.changed();
   });
-  fast?.storeOpened(name);
+  if (!staged) {
+    fast?.storeOpened(name);
+    ensureLane();
+  }
+  return entry;
+}
+
+export function live(name) {
+  const existing = entries.get(name);
+  if (existing) return existing.store.handle;
+  const tag = liveTags().get(name);
+  if (!tag) throw new Error(`clay.live: this page has no <script type="application/json" merge="${name}" clay="live"> tag`);
+  const text = tag.element.textContent;
+  let value;
+  try {
+    value = parseJsonRelaxed(text);
+  } catch (err) {
+    throw new SyntaxError(`clay.live("${name}"): the tag's JSON does not parse: ${err.message}`);
+  }
+  const store = createStore({ name, value, ephemeral: tag.ephemeral });
+  const layout = tag.element.getAttribute("live-format") === "lines" ? "lines" : text.includes("\n") ? "pretty" : "line";
+  const entry = openEntry(name, store, { layout, leftAt: lineageOf(tag.element) });
+  return entry.store.handle;
+}
+
+// A page whose file carries no state of its own yet: the seed in memory, no tag in
+// the document, no request, until its first genuine op is written by the ordinary
+// save. Only an accepted write opens its room.
+export function stageStore(name, { value, represented = null, signal = null } = {}) {
+  const existing = entries.get(name);
+  if (existing && !existing.staged) throw new Error(`clay.live("${name}"): the store is open in a room`);
+  const entry = existing ?? openEntry(name, createStore({ name, value, ephemeral: false }), { staged: { represented, signal } });
+  return {
+    handle: entry.store.handle,
+    isPending: () => !!entry.staged && entry.store.pending.length > 0,
+    flush: (options = {}) => flushStaged(entry, options),
+    dispose() {
+      if (entry.staged && entries.get(name) === entry) entries.delete(name);
+    },
+  };
+}
+
+// The first write, through the save this tab would make anyway.
+async function flushStaged(entry, { timeoutMs = 10_000 } = {}) {
+  const staged = entry.staged;
+  if (!staged || !entry.store.pending.length) return { ok: true };
+  if (staged.conflict) return { ok: false, code: staged.conflict };
+  const at = staged.represented?.etag || null;
+  const held = lastSeenEtag();
+  if (at && held && at !== held) return { ok: false, code: "stale-document" };
+  if (at && !held) recordEtag(at);
+  const result = await requestCheckpoint({ timeoutMs });
+  return result.ok ? { ok: true } : { ok: false, code: staged.conflict ?? result.code ?? null };
+}
+
+function activateStaged(entry) {
+  if (!entry.staged) return;
+  entry.staged = null;
+  fast?.storeOpened(entry.store.name);
   ensureLane();
-  return store.handle;
 }
 
 // Every capture carries each saved store's current value. A never-saved store
@@ -888,7 +934,18 @@ onSnapshot((clone, { forSave, requestRefresh }) => {
   const tags = liveTags(clone, { warn: false });
   for (const entry of entries.values()) {
     if (entry.store.ephemeral) continue;
-    const tag = tags.get(entry.store.name);
+    let tag = tags.get(entry.store.name);
+    // A staged store reaches the file here, where the boot would have put its tag.
+    if (!tag && entry.staged) {
+      const article = clone.querySelector("article[data-page]");
+      if (!article) continue;
+      const element = article.ownerDocument.createElement("script");
+      element.setAttribute("type", "application/json");
+      element.setAttribute("merge", entry.store.name);
+      element.setAttribute("clay", "live");
+      article.parentNode.insertBefore(element, article);
+      tag = { name: entry.store.name, ephemeral: false, element };
+    }
     if (!tag) continue;
     // A recovering store's own operations are not written again while the answer
     // about them is still open, and not before the value the file holds now has
@@ -1051,6 +1108,7 @@ function confirmPin(html, pin) {
     } else {
       entry.store.confirm(saved.mark);
       entry.leftAt = saved.lineage && tag.element.getAttribute("live-by") === saved.by ? saved.lineage : { disk: true };
+      activateStaged(entry);
     }
     settle(entry);
   }
@@ -1107,6 +1165,17 @@ onSaveOutcome(({ captureId, result, attempts, sent }) => {
   if (result?.ok) return;
   const pin = capturePins.get(captureId);
   if (!pin) return;
+  const stagedEntry = [...pin.keys()].map((name) => entries.get(name)).find((entry) => entry?.staged);
+  // Nothing was written: the staged store is clean and nothing follows.
+  if (stagedEntry && result.code === "page-nothing-to-write") {
+    stagedEntry.store.confirm(stagedEntry.store.mark);
+    dropCapture(captureId);
+    releaseBody();
+    settle(stagedEntry);
+    return;
+  }
+  // This tab's value does not descend from the stored document: never send it again.
+  if (stagedEntry && result.code === "page-lineage-stale") stagedEntry.staged.conflict = "conflict";
   dropCapture(captureId);
   const landed = mayHaveLanded(result, sent);
   const plan = landed ? historyPlan(captureId) : null;
@@ -1203,6 +1272,8 @@ export function receiveFrame(html, seq = null) {
       else if (pageTag.getAttribute("live-by") !== by) pageTag.setAttribute("live-by", by);
     }
     if (entry && !entry.store.ephemeral) {
+      // An old seed is never merged into a newer article before its first write.
+      if (entry.staged) continue;
       if (entry.store.handle.status.mode === "file") receive(entry, text, "remote", dropIds);
       continue;
     }

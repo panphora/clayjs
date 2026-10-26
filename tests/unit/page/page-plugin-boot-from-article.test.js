@@ -138,7 +138,7 @@ afterEach(() => {
   document.documentElement.removeAttribute("documentetag");
 });
 
-test("a page with one article and no tag boots from its article and gains the tag before it", async () => {
+test("a page with one article and no tag boots from its article, holding its seed and no tag", async () => {
   const html = pageHtml();
   const expected = expectedTagText(html);
   const { page, storeOf } = await load({ html });
@@ -147,25 +147,24 @@ test("a page with one article and no tag boots from its article and gains the ta
 
   expect(page.view).toBeTruthy();
   expect(page.view.editable).toBe(true);
-  const tag = pageTag();
-  expect(tag).toBeTruthy();
-  expect(tag.getAttribute("clay")).toBe("live");
-  expect(tag.textContent).toBe(expected);
-  expect(tag.nextElementSibling).toBe(document.querySelector("article[data-page]"));
-  // The rebuilt state is the article's own: the editor shows the saved blocks.
-  expect(storeOf("page").value.v).toBe(1);
+  // The seed is a value in memory: the document gains no tag, so no boot can read
+  // one back as a page the file already has.
+  expect(pageTag()).toBe(null);
+  expect(serializeLive(storeOf("page").value)).toBe(expected);
   expect(page.view.dom.textContent).toContain("Hello");
 });
 
-test("two boots of the same file write identical tag text", async () => {
+test("two boots of the same file carry identical tag text into a save", async () => {
   const html = pageHtml();
-  const first = await load({ html });
-  await first.page.ready;
-  const firstText = pageTag().textContent;
-
-  const second = await load({ html });
-  await second.page.ready;
-  const secondText = pageTag().textContent;
+  const captured = async () => {
+    const boot = await load({ html });
+    await boot.page.ready;
+    const snapshot = await import("../../../src/core/snapshot.js");
+    const { forSave } = snapshot.captureForSaveAndComparison({ flushUndo: false, emitForSync: false });
+    return new DOMParser().parseFromString(forSave, "text/html").querySelector(TAG_SEL).textContent;
+  };
+  const firstText = await captured();
+  const secondText = await captured();
 
   expect(firstText).toBe(secondText);
   expect(firstText).toBe(expectedTagText(html));
@@ -180,76 +179,28 @@ test("an untouched page booted from its article does not read as unsaved", async
   await page.ready;
   await settle(save);
 
-  expect(pageTag()).toBeTruthy();
-  // The tag the plugin added is in no comparison domain, so it cannot be the
-  // reason a page reads dirty.
+  expect(pageTag()).toBe(null);
+  // The staged store is in no comparison domain, so it cannot be the reason a page
+  // reads dirty.
   expect(snapshot.captureForDirtyCheck()).not.toContain('merge="page"');
   expect(warning.hasUnsavedChanges()).toBe(false);
 });
 
-test("a live-data host gets one conditional save with the tag before the page store opens", async () => {
+test("a live-data host makes no write when the page is opened, and no room is joined", async () => {
   const html = pageHtml();
-  const { page, order, saves } = await load({ html, liveData: true });
-  const warning = await import("../../../src/core/unsaved-warning.js");
+  const { page, order, saves, sent, room } = await load({ html, liveData: true });
   const save = await import("../../../src/core/save.js");
 
   await page.ready;
   await flushAsync();
   await settle(save);
-  expect(warning.hasUnsavedChanges()).toBe(false);
 
   expect(page.view).toBeTruthy();
-  expect(saves).toHaveLength(1);
-  expect(saves[0].headers["If-Match"]).toBe("stamp-1");
-  expect(order.indexOf("save")).toBeGreaterThanOrEqual(0);
-  expect(order.indexOf("save")).toBeLessThan(order.indexOf("live:page"));
-  const saved = new DOMParser().parseFromString(saves[0].body, "text/html");
-  const tag = saved.querySelector(TAG_SEL);
-  expect(tag).toBeTruthy();
-  expect(tag.textContent).toBe(expectedTagText(html));
-  expect(tag.nextElementSibling).toBe(saved.querySelector("article[data-page]"));
-});
-
-test("a 412 on the initial write reloads once to compose the tab that won", async () => {
-  const reload = jest.fn();
-  const realLocation = window.location;
-  Object.defineProperty(window, "location", { value: { ...realLocation, reload }, configurable: true });
-  try {
-    const { page, saves } = await load({
-      liveData: true,
-      answer: () => ({ status: 412, body: { msg: "This document changed since you last loaded it.", code: "conflict" } }),
-    });
-
-    await page.ready;
-    await flushAsync();
-
-    expect(saves).toHaveLength(1);
-    expect(reload).toHaveBeenCalledTimes(1);
-    expect(page.view).toBe(null);
-  } finally {
-    Object.defineProperty(window, "location", { value: realLocation, configurable: true });
-  }
-});
-
-test("any other refusal of the initial write shows the blocked notice and stops", async () => {
-  const { page, saves } = await load({
-    liveData: true,
-    answer: () => ({ status: 409, body: { msg: "This document is not accepting that write.", code: "save-id-reused" } }),
-  });
-  const states = [];
-  const onState = (event) => states.push(event.detail);
-
-  try {
-    document.addEventListener("clay:page-save-state", onState);
-    await page.ready;
-    await flushAsync();
-
-    expect(saves).toHaveLength(1);
-    expect(page.view).toBe(null);
-    expect(states.at(-1)).toEqual({ state: "blocked", code: "save-id-reused", message: "This document is not accepting that write." });
-  } finally {
-    document.removeEventListener("clay:page-save-state", onState);
-  }
+  expect(saves).toHaveLength(0);
+  expect(sent).toHaveLength(0);
+  expect(room.writer).toBe(null);
+  expect(order).not.toContain("live:page");
+  expect(pageTag()).toBe(null);
 });
 
 test("two articles and no tag are still abandoned, with no tag inserted", async () => {

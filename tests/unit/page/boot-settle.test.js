@@ -250,61 +250,26 @@ test("a blocked boot releases the room the other branch had already taken", asyn
   }
 });
 
-test("a replacement install waits for the pending first save of a seeded page instead of joining", async () => {
-  const quiet = jest.spyOn(console, "error").mockImplementation(() => {});
-  const saveGate = deferred();
-  const { page, saves, liveCalls } = await open({ head: "", extensions: ["page", "live-data"], saveGate });
+test("a replacement install of a seeded page stages its own store and leaves no tag behind", async () => {
+  const { page, saves, liveCalls } = await open({ head: "", extensions: ["page", "live-data"] });
   try {
-    expect(await until(() => saves.length === 1)).toBe(true);
-    // The tag the seed generated is not in the document while the save is on the wire.
-    expect(seedTags()).toHaveLength(0);
-
-    const next = page.install();
-    await flushAsync();
+    await page.ready;
+    expect(saves).toEqual([]);
     expect(liveCalls).toEqual([]);
-    expect(saves).toHaveLength(1);
+    expect(seedTags()).toHaveLength(0);
+    expect(document.querySelectorAll(".page-shell")).toHaveLength(1);
 
-    saveGate.resolve({ ok: true, msgType: "success" });
-    const result = await next;
+    const result = await page.install();
     await flushAsync();
 
+    // The replacement reads a tagless page again and stages its own seed: nothing is
+    // written, no room is joined, and one editor owns the article.
     expect(result).toMatchObject({ phase: "ready", reason: null });
-    expect(saves).toHaveLength(1);
-    expect(liveCalls).toEqual(["page"]);
-    // One tag, the one the first save wrote, where readSource found the article.
-    expect(seedTags()).toHaveLength(1);
-    expect(seedTags()[0].nextElementSibling).toBe(document.querySelector("article[data-page]"));
+    expect(saves).toEqual([]);
+    expect(liveCalls).toEqual([]);
+    expect(seedTags()).toHaveLength(0);
+    expect(document.querySelectorAll(".page-shell")).toHaveLength(1);
   } finally {
     page.dispose();
-    quiet.mockRestore();
-  }
-});
-
-test("a seeded boot cancelled before its first save leaves no tag, so the next install gates on that save", async () => {
-  const quiet = jest.spyOn(console, "error").mockImplementation(() => {});
-  const saveGate = deferred();
-  const { page, saves, liveCalls, states } = await open({ head: "", extensions: ["page", "live-data"], saveGate });
-  try {
-    expect(await until(() => saves.length === 1)).toBe(true);
-    page.dispose();
-    expect(seedTags()).toHaveLength(0);
-
-    // The replacement reads a tagless page again, so it waits for the save that is
-    // still on the wire rather than joining a room the file was never written to.
-    const next = page.install();
-    await flushAsync();
-    expect(liveCalls).toEqual([]);
-
-    saveGate.resolve({ ok: false, status: 409, code: "save-refused", msg: "This document is not accepting that write." });
-    const result = await next;
-    await flushAsync();
-
-    expect(result).toMatchObject({ phase: "blocked", reason: "first-save-refused" });
-    expect(liveCalls).toEqual([]);
-    expect(states.at(-1)).toMatchObject({ state: "blocked", code: "save-refused" });
-    expect(seedTags()).toHaveLength(0);
-  } finally {
-    page.dispose();
-    quiet.mockRestore();
   }
 });

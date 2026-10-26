@@ -353,51 +353,22 @@ test("while the room is still joining, the saved article stays and nothing is ed
   }
 });
 
-test("a seeded document opens the room only after its forced first save lands", async () => {
-  const saveGate = deferred();
-  const { page, saves } = await load({ head: "", extensions: ["page", "live-data"], saveGate });
+test("a seeded document stages its seed in memory and opens no room", async () => {
+  const { page, saves, sent } = await load({ head: "", extensions: ["page", "live-data"] });
   try {
-    expect(await until(() => saves.length === 1 && markNames().includes("document:assets-ready"))).toBe(true);
-    expect(liveCalls).toEqual([]);
-    expect(page.status).toMatchObject({ phase: "joining" });
-    expect(document.querySelector('article[data-page] [data-id="p"]')).toBeTruthy();
-    expectNoInput(page);
-
-    saveGate.resolve({ ok: true, msgType: "success" });
     await page.ready;
-    // The join is the boundary: it starts only once the save has been answered, and
-    // the answer here is a bare success, so this fake has no saved lineage to share.
-    expect(liveCalls).toEqual(["page"]);
+
+    // Nothing of the boot writes: the seed is a value this tab holds, the article
+    // stays on screen until the editor replaces it, and no room is joined.
+    expect(saves).toEqual([]);
+    expect(sent).toEqual([]);
+    expect(liveCalls).toEqual([]);
     expect(markNames()).toContain("document:authority-ready");
+    expect(markNames()).toContain("document:input-ready");
+    expect(document.querySelectorAll('script[merge="page"]')).toHaveLength(0);
+    expect(page.view.editable).toBe(true);
   } finally {
     page.dispose();
-  }
-});
-
-test("a 412 on the seeded document's first save reloads and never opens the room", async () => {
-  const reload = jest.fn();
-  const realLocation = window.location;
-  Object.defineProperty(window, "location", { value: { ...realLocation, reload }, configurable: true });
-  const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
-  try {
-    const { page, saves } = await load({
-      head: "",
-      extensions: ["page", "live-data"],
-      saveAnswer: () => ({ ok: false, status: 412, code: "conflict", msg: "This document changed since you last loaded it." }),
-    });
-    await page.ready;
-    await flushAsync();
-
-    expect(saves).toHaveLength(1);
-    expect(reload).toHaveBeenCalledTimes(1);
-    expect(liveCalls).toEqual([]);
-    expect(page.status).toMatchObject({ phase: "blocked", reason: "first-save-conflict" });
-    expect(document.querySelector('article[data-page] [data-id="p"]')).toBeTruthy();
-    expectNoInput(page);
-    page.dispose();
-  } finally {
-    warn.mockRestore();
-    Object.defineProperty(window, "location", { value: realLocation, configurable: true });
   }
 });
 

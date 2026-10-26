@@ -1,11 +1,12 @@
 import { FEATURES, featureForType } from "../page/features/registry.js";
 import { mergeEngine } from "../sync/merge-engine.js";
-import { serializeLive } from "../live/ops.js";
 import { registerUnsavedState } from "../lib/unsaved-state.js";
-import { hostMeta, hostSupports } from "../core/host-meta.js";
-import { savePageForce, setLastSavedBaselines, holdAllSaves, releaseAllSaves, getLastSavedBytes } from "../core/save.js";
-import { captureForComparisonAndDirty, captureForSaveAndComparison } from "../core/snapshot.js";
-import { storeOf, checkpointWithin, requestCheckpoint, fastLane, pageLaneReady, pageWriterReady } from "./live.js";
+import { hostMeta } from "../core/host-meta.js";
+import { holdAllSaves, releaseAllSaves, getLastSavedBytes } from "../core/save.js";
+import { setSaveHeader } from "../core/save-core.js";
+import { lastSeenEtag, representedEtag } from "../core/etag.js";
+import { captureForSaveAndComparison } from "../core/snapshot.js";
+import { storeOf, stageStore, checkpointWithin, requestCheckpoint, fastLane, pageLaneReady, pageWriterReady } from "./live.js";
 import { parseJsonRelaxed } from "../vendor/hyper-morph-json.vendor.js";
 import { saveStateFor, BLOCKED_TEXT, RETRY_TEXT, downloadPageCopy, downloadSnapshot, copyPageText } from "../page/save-states.js";
 import toast, { toastPersistent, dismissPersistent } from "../ui/toast.js";
@@ -172,55 +173,6 @@ function showSaved(inst) {
   dispatchState("saved", null, "");
 }
 
-// The first save of a seeded page is the page's only admission: a room opened on a file
-// without the tag holds no page store, so nothing may join until that write landed. It
-// outlives the installation that started it, so a replacement that arrives while it is
-// on the wire waits for its outcome instead of joining, and the tag it writes stays in
-// the document only once the file has it.
-let firstSave = null;
-
-const forgetFirstSave = (entry) => {
-  if (firstSave === entry) firstSave = null;
-};
-
-// A boot that ends before the outcome keeps nothing of the tag it generated: the file
-// has not been written, so the document must not hold a tag that says it has.
-function writeSeedTag(source) {
-  const tag = source.seedTag;
-  const article = source.element;
-  if (tag && !tag.isConnected && article?.isConnected && !document.querySelector(TAG_SEL)) article.before(tag);
-  let request;
-  try {
-    request = savePageForce();
-  } finally {
-    tag?.remove();
-  }
-  return request;
-}
-
-// The tag the first save wrote, back in the document where readSource found the
-// article: one tag, exactly as the file now has it.
-function attachSeedTag(source) {
-  const tag = source.seedTag;
-  if (!tag || tag.isConnected) return;
-  if (document.querySelector(TAG_SEL)) return;
-  const article = source.element;
-  if (article?.isConnected) article.before(tag);
-}
-
-function seededFirstSave(source) {
-  if (firstSave) return firstSave.promise;
-  const entry = { promise: null };
-  try {
-    entry.promise = Promise.resolve(writeSeedTag(source));
-  } catch (error) {
-    return Promise.reject(error);
-  }
-  firstSave = entry;
-  entry.promise.then((result) => { if (!result?.ok) forgetFirstSave(entry); }, () => forgetFirstSave(entry));
-  return entry.promise;
-}
-
 // An incoming document with no page tag whose article is not the one this tab
 // last saved: something outside the editor replaced the page, and this tab's
 // state no longer belongs to the file.
@@ -300,6 +252,8 @@ function listen(inst, type, handler) {
 function listenForSaves(inst) {
   listen(inst, "clay:save-error", (event) => {
     const code = event.detail?.code ?? null;
+    // The host holds exactly what this tab would have written: nothing to report.
+    if (code === "page-nothing-to-write") return;
     applySaveState(inst, saveStateFor({ code }), code, event.detail?.msg ?? "");
   });
   listen(inst, "clay:save-offline", (event) => {
@@ -369,6 +323,8 @@ function releaseMounted(inst) {
   }
   try { inst.binding?.dispose(); } catch (error) { console.error("clayjs: page plugin binding failed to dispose", error); }
   try { inst.binding?.ydoc?.destroy(); } catch (error) { console.error("clayjs: page plugin document failed to destroy", error); }
+  try { inst.staged?.dispose(); } catch (error) { console.error("clayjs: page plugin staged store failed to dispose", error); }
+  inst.staged = null;
   inst.binding = null;
   inst.flush = null;
   inst.releaseArticle?.();
@@ -396,6 +352,7 @@ function dispose() {
   generation += 1;
   const inst = active;
   active = null;
+  setSaveHeader("Page-Write", null);
   if (!inst) return;
   disposeInstall(inst);
   if (inst.retryTimer) {
@@ -429,7 +386,6 @@ export function createSteps(inst, options) {
   let features = null;
   let featuresReady = null;
   let savedContent = [];
-  let initialSave = false;
   let toolsStore = null;
   let aiTool = null;
   let toolsOpening = null;
@@ -552,19 +508,14 @@ export function createSteps(inst, options) {
       const unreadable = unreadablePage(value);
       if (unreadable) return { ok: false, reason: unreadable };
     }
-    const source = { article: element.cloneNode(true), tags: value ? [value] : null, element, blocks: null, seeded, seedTag: null };
+    const source = { article: element.cloneNode(true), tags: value ? [value] : null, element, blocks: null, seeded, seedValue: null };
     source.ready = (async () => {
       const code = await pageCodeReady();
       if (!isCurrent(inst)) return { ok: false, cancelled: true };
       if (seeded) {
+        // The seed stays a value in memory: no tag and no write until someone edits.
         try {
-          const seedTag = document.createElement("script");
-          seedTag.setAttribute("type", "application/json");
-          seedTag.setAttribute("merge", "page");
-          seedTag.setAttribute("clay", "live");
-          seedTag.textContent = serializeLive(code.seedPageFromArticle(element.cloneNode(true)));
-          source.seedTag = seedTag;
-          value = parseJsonRelaxed(seedTag.textContent);
+          value = source.seedValue = code.seedPageFromArticle(element.cloneNode(true));
         } catch (error) {
           console.warn("clayjs: page plugin could not rebuild the page it found, leaving the page as saved HTML", error);
           return { ok: false, reason: "invalid-page-source" };
@@ -643,38 +594,13 @@ export function createSteps(inst, options) {
       return { ok: false, reason: "missing-capability" };
     }
 
-    // The room was opened from a document that had no page tag, so it holds no page
-    // store and would answer this tab's frames with unknown-store. One conditional
-    // save of the document with the tag is the page's initial write; a tab that
-    // loses that race reloads, which composes the state the winner initialized.
+    // A host that keeps no page data keeps its files untagged, and every one of them
+    // is merged by the boot instead of being read as a replacement.
     inst.mergeTagless = !meta.extensions.includes("live-data");
-    // A host that keeps no page data makes no first save, so the tag the article
-    // rebuilds goes in now, before the article it was read from. A seeded page is the
-    // one boot whose join needs the page's own code, which rebuilds that tag.
-    if (source.seeded) {
-      const read = await source.ready;
-      if (!read.ok) return read;
-      if (!isCurrent(inst)) return { ok: false, cancelled: true };
-      if (inst.mergeTagless) attachSeedTag(source);
-    }
-    if ((source.seeded || firstSave) && (await hostSupports("live-data"))) {
-      if (!isCurrent(inst)) return { ok: false, cancelled: true };
-      const result = await seededFirstSave(source);
-      // The tag goes back in only for the boot that is still the page's: a replacement
-      // that waited on this save attaches its own, which is the state it joins on.
-      if (result?.ok && isCurrent(inst)) attachSeedTag(source);
-      if (!isCurrent(inst)) return { ok: false, cancelled: true };
-      if (!result?.ok) {
-        if (result?.status === 412) {
-          window.location.reload();
-          return { ok: false, reason: "first-save-conflict" };
-        }
-        showBlocked(inst, result?.code ?? null, result?.msg ?? "");
-        return { ok: false, reason: "first-save-refused" };
-      }
-      initialSave = true;
-    }
-
+    // The one declaration that lets a host answer a seed-only body with nothing-to-write.
+    setSaveHeader("Page-Write", "v1");
+    // A seeded page is the one boot whose join needs the page code, which rebuilds
+    // the seed the article states.
     let read = null;
     let code = null;
     if (source.seeded) {
@@ -683,9 +609,21 @@ export function createSteps(inst, options) {
       code = await codePromise;
       if (!isCurrent(inst)) return { ok: false, cancelled: true };
     }
+    // A tagless document has no page store for a room to hold, so its own is staged:
+    // the seed in memory and no write until a person edits. A tagged document opens
+    // the state the file already has.
     let handle;
     try {
-      handle = window.clay.live("page");
+      if (source.seeded) {
+        const staged = stageStore("page", {
+          value: source.seedValue,
+          represented: { bytes: source.article.outerHTML, etag: representedEtag() ?? lastSeenEtag() },
+        });
+        inst.staged = staged;
+        handle = staged.handle;
+      } else {
+        handle = window.clay.live("page");
+      }
     } catch (error) {
       console.warn("clayjs: page plugin could not open the page store", error);
       return { ok: false, reason: "missing-page-store" };
@@ -988,14 +926,6 @@ export function createSteps(inst, options) {
     mounted.view.setProps({ editable: () => true });
     clearLoadingStatus(inst);
 
-    // That initial write advanced the saved baselines from a capture taken before
-    // the editor mounted, which is what the load-time settle would otherwise absorb
-    // boot churn into. Install them once more from the booted page, so a tab that
-    // was opened and left alone does not read as unsaved.
-    if (initialSave) {
-      const { forComparison, forDirty } = captureForComparisonAndDirty();
-      setLastSavedBaselines(forComparison, forDirty);
-    }
     return { ok: true };
   }
 
@@ -1029,7 +959,7 @@ function install(options = {}) {
         options.onPhase?.(result);
       },
     }),
-    article: null, view: null, binding: null, adoption: null, source: null, store: null, toolHost: null, aiTool: null, bootHtml: "", bootRev: null, savedRev: null, releaseArticle: null, replaced: false, savesHeld: false, flush: null, listeners: [], retryTimer: null, retryShown: false, statusTimer: null, statusNote: null, notices: null, editorReadyResolve: null,
+    article: null, view: null, binding: null, adoption: null, source: null, store: null, toolHost: null, aiTool: null, bootHtml: "", bootRev: null, savedRev: null, staged: null, releaseArticle: null, replaced: false, savesHeld: false, flush: null, listeners: [], retryTimer: null, retryShown: false, statusTimer: null, statusNote: null, notices: null, editorReadyResolve: null,
   };
   active = inst;
   return run(inst, options).catch((error) => {

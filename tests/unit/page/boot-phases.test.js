@@ -284,48 +284,22 @@ test("a host without the page capability blocks and reports it", async () => {
   }
 });
 
-test("a refused first save blocks without opening the room or the editor", async () => {
-  const { page, saves, sent, states } = await load({
-    head: "",
-    extensions: ["page", "live-data"],
-    saveAnswer: () => ({ ok: false, status: 409, code: "save-id-reused", msg: "This document is not accepting that write." }),
-  });
+test("a tagless page on a live-data host writes nothing at boot and opens no room", async () => {
+  const { page, saves, sent, states } = await load({ head: "", extensions: ["page", "live-data"] });
   try {
     await page.ready;
     await flushAsync();
 
-    expect(saves).toHaveLength(1);
+    // The seed is staged in memory: no write, no frame, no room, and the editor is
+    // the thing that is ready, not a page waiting for its first save.
+    expect(saves).toEqual([]);
     expect(sent).toEqual([]);
-    expect(page.status).toMatchObject({ phase: "blocked", reason: "first-save-refused" });
-    expect(states.at(-1)).toEqual({ state: "blocked", code: "save-id-reused", message: "This document is not accepting that write." });
-    expectNoInput(page);
+    expect(page.status).toMatchObject({ phase: "ready", reason: null });
+    expect(page.view.editable).toBe(true);
+    expect(document.querySelectorAll('script[merge="page"]')).toHaveLength(0);
+    expect(states).toEqual([]);
   } finally {
     page.dispose();
-  }
-});
-
-test("a 412 on the first save reloads once and blocks", async () => {
-  const reload = jest.fn();
-  const realLocation = window.location;
-  Object.defineProperty(window, "location", { value: { ...realLocation, reload }, configurable: true });
-  try {
-    const { page, saves, sent } = await load({
-      head: "",
-      extensions: ["page", "live-data"],
-      saveAnswer: () => ({ ok: false, status: 412, code: "conflict", msg: "This document changed since you last loaded it." }),
-    });
-    await page.ready;
-    await flushAsync();
-
-    expect(saves).toHaveLength(1);
-    expect(sent).toEqual([]);
-    expect(reload).toHaveBeenCalledTimes(1);
-    expect(page.status).toMatchObject({ phase: "blocked", reason: "first-save-conflict" });
-    expect(page.view).toBe(null);
-    expectNoInput(page);
-    page.dispose();
-  } finally {
-    Object.defineProperty(window, "location", { value: realLocation, configurable: true });
   }
 });
 
