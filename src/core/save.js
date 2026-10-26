@@ -24,8 +24,8 @@ import {
 import { captureForComparisonAndDirty, captureForSaveAndComparison, captureForDirtyCheck, captureSaveClone, releaseCaptureArtifact } from "./snapshot.js";
 import { paintSignature } from "../lib/derived.js";
 import { NO_TRIGGER_AUTOSAVE_SELECTOR } from "../lib/region-policy.js";
-import { seedEtag, lastSeenEtag } from "./etag.js";
-import { gateCaptureToken, gateClearIfUnchanged, gateRevision, pageMaybeDirty } from "../lib/dirty-gate.js";
+import { seedEtag, lastSeenEtag, recordEtag } from "./etag.js";
+import { startDirtyGate, gateCaptureToken, gateClearIfUnchanged, gateRevision, pageMaybeDirty } from "../lib/dirty-gate.js";
 import { hasUnsavedState } from "../lib/unsaved-state.js";
 import { autosaveActive } from "../lib/autosave-state.js";
 import { registerStyleAdoption } from "../lib/style-adoption.js";
@@ -342,6 +342,103 @@ export function saveSession() {
 }
 
 // ============================================
+// THE MODE PARTICIPANT
+// ============================================
+//
+// A live entry imports this module while the page is still in view, so the installs the
+// boot road performs at evaluation are inert there. The participant is how an entry asks
+// for them: `prepare` builds the session, `enable` performs the installs once per page,
+// and `adoptEntryBaseline` takes the entry's baseline from the represented file.
+
+// Page-lifetime: a second entry starts its session and installs nothing again.
+let servicesInstalled = false;
+// The last accepted save, as the receipt an exit hands the next reader.
+let acceptedSave = null;
+// The version the kept baselines were taken at. A second entry can then tell the person's
+// work from what the file delivered.
+let baselineEtag = null;
+let baselineKept = false;
+
+/** The bytes and stamp of this tab's last accepted save, or null if it has not saved. */
+export function acceptedReceipt() {
+  return acceptedSave ? { ...acceptedSave } : null;
+}
+
+/**
+ * Adopt the represented file as this session's baseline, after every document transform
+ * is installed. One capture, both baselines, the settled mark and its event: the boot
+ * settle's job without a second settle over the reader's DOM.
+ *
+ * A second entry keeps the first one's baseline, taken at a version of the file. If the
+ * reader still represents that version and the page has moved since, the difference is
+ * work this tab holds that the file never delivered; absorbing it would make that work
+ * read as saved, so it is refused and nothing moves.
+ */
+export function adoptEntryBaseline({ represented } = {}) {
+  const token = gateCaptureToken();
+  const { forComparison, forDirty } = captureForComparisonAndDirty();
+  const etag = typeof represented?.etag === "string" && represented.etag ? represented.etag : null;
+
+  if (baselineKept && etag !== null && etag === baselineEtag &&
+      (forComparison !== lastSavedContents || forDirty !== lastSavedDirty)) {
+    return { ok: false, code: "pending-input" };
+  }
+
+  setLastSavedBaselines(forComparison, forDirty);
+  baselineContents = forComparison;
+  baselineActive = false;
+  baselineSettledAt = true;
+  baselineEtag = etag;
+  baselineKept = true;
+  gateClearIfUnchanged(token);
+  document.documentElement.setAttribute('savestatus', 'saved');
+  document.dispatchEvent(new CustomEvent('clay:baseline-settled'));
+  return { ok: true };
+}
+
+/**
+ * The save system as a mode participant: a fresh session plus the page's installs on a
+ * live entry, and, on adoption, a session in phase `open` over what the import already
+ * installed and nothing new.
+ */
+export function modeParticipant() {
+  return {
+    id: "clay:save",
+    order: 10,
+    prepare(context = {}) {
+      const session = saveSession();
+      if (context.initial === true) session.start();
+      return {
+        enable() {
+          if (context.initial === true) return;
+          installOnce(context);
+          session.start();
+        },
+        quiesce: () => session.quiesce(),
+        resume: () => session.resume(),
+        dispose: () => session.stop(),
+      };
+    },
+  };
+}
+
+// What `init` installed for a boot in edit. The baseline is not among it: `adoptEntryBaseline`
+// settles that from the represented file, and the boot settle would settle over the reader's DOM.
+function installOnce(context) {
+  if (servicesInstalled) return;
+  servicesInstalled = true;
+  startDirtyGate();
+  initUserGesture();
+  initSaveKeyboardShortcut();
+  initHyperclaySaveButton();
+  // The version this entry adopted is the stamp the next save's If-Match carries; a page
+  // that arrived without one asks the host, as a boot does.
+  const etag = context?.represented?.etag;
+  if (typeof etag === "string" && etag) recordEtag(etag);
+  else seedEtag();
+}
+
+// ============================================
 // THE ALL-SAVE HOLD
 // ============================================
 //
@@ -553,6 +650,11 @@ function applySaveResult(result, forComparison, forDirty, label, gateToken, forS
     // live DOM, so an edit made while the request was on the wire stays unsaved.
     setLastSavedBaselines(forComparison, forDirty);
     lastSavedBytes = forSave;
+    // The receipt a mode exit hands the next reader, and the version the baselines above
+    // were taken at: both describe the bytes the host just accepted.
+    acceptedSave = { bytes: forSave, etag: lastSeenEtag() };
+    baselineEtag = acceptedSave.etag;
+    baselineKept = true;
     unsavedChanges = false;
     // Generation-checked: clears the scoped-sync dirty gate only if nothing
     // changed while this save was on the wire.

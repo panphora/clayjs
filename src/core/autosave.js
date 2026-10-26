@@ -111,3 +111,24 @@ install();
 
 export { install as init };
 export default install;
+
+/**
+ * Auto-save as a mode participant.
+ *
+ * A live entry imports this module in view, where `install` above is inert, so the
+ * participant is how the entry asks for it once the mode has committed. Nothing here
+ * belongs to a session: the scheduler already parks an attempt a closed save session
+ * refuses (`savePageThrottled`) and replays it on `resume`, and every attempt checks the
+ * mode, so quiesce and dispose have nothing to undo. `initial: true` adopts the edit this
+ * tab booted into, where the import's own `install` already ran: the lease starts nothing.
+ */
+export function modeParticipant() {
+  return {
+    id: "clay:autosave",
+    order: 20,
+    prepare(context = {}) {
+      if (context.initial === true) return { enable() {}, quiesce() {}, resume() {}, dispose() {} };
+      return { enable: install, quiesce() {}, resume() {}, dispose() {} };
+    },
+  };
+}
