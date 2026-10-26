@@ -142,6 +142,24 @@ test("a drag is one entry in automatic mode, and its vendor writes are not anoth
   expect(seen).toHaveLength(1);
 });
 
+test("a long drag whose item the vendor moves during dragover is still one entry in automatic mode", async () => {
+  await enter();
+
+  await drag(el("a2"), el("b"), el("b1"), {
+    during: () => {
+      el("b").insertBefore(el("a2"), el("b2"));
+      el("a").appendChild(el("a2"));
+      el("b").appendChild(el("a2"));
+    },
+  });
+  await settle();
+  undo.flush();
+
+  expect(labels()).toEqual(["To do"]);
+  expect(undo.undo()).toMatchObject({ ok: true });
+  expect(ids(el("a"))).toEqual(["a1", "a2", "a3", "a4"]);
+});
+
 test("a drag is one entry in commands mode, and undo puts the card back and redo moves it again", async () => {
   await enter({ recording: "commands" });
 

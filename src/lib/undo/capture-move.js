@@ -54,6 +54,14 @@ export function isRuntimeAttribute(name, target) {
   return false
 }
 
+// The item a gesture holds: the vendor moves it many times during dragover or
+// touchmove, and none of those moves is an edit; the one semantic move is recorded
+// at the end.
+export function isGestureItem(node) {
+  for (const start of open) if (start.item === node) return true
+  return false
+}
+
 // The engine's own exclusion bracket, opened before the gesture's final writes and
 // closed right after its one entry: those writes reach neither the idle batch nor a
 // command's capture. Reference-counted by the engine, so a release that arrives twice

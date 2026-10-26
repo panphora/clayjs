@@ -8,7 +8,7 @@ import { isEditMode } from '../core/is-edit-mode.js'
 import { isTabLocalAttr } from '../lib/root-attrs.js'
 import { isDerivedAttr } from '../lib/derived.js'
 import { PERSIST } from '../lib/attr-aliases.js'
-import { isRuntimeAttribute } from '../lib/undo/capture-move.js'
+import { isGestureItem, isRuntimeAttribute } from '../lib/undo/capture-move.js'
 
 // Tab-local attributes (ephemeral state, route-active, root library state) are
 // never undone, and neither is what a drag's vendor writes on the item it holds:
@@ -22,6 +22,7 @@ const withTabLocal = (opts = {}) => {
     ...opts,
     ignoreAttribute: (name, target) => isTabLocalAttr(name, target) || isDerivedAttr(target, name) || isRuntimeAttribute(name, target) || (own ? own(name, target) : false),
     isProtected: opts.isProtected || keepsOwnHistory,
+    ignoreNode: opts.ignoreNode || isGestureItem,
   }
 }
 
