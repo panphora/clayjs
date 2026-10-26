@@ -448,6 +448,29 @@ for (const fixture of ["kanban.html", "journal.html"]) {
   });
 }
 
+// Kanban 07's move API lives in the sortable plugin, which is edit-only and late: a
+// reader who cannot move anything must not fetch the plugin, and the fixture's own tag
+// is the plan, so a tag that starts naming it shows up here. The same tag in edit
+// carries the plugin, so the absence below is the reader's and not the tag's.
+const SORTABLE_ONLY = /^src\/(plugins\/sortable[^/]*\.js|vendor\/Sortable\.vendor\.js)$/;
+
+test("kanban.html view: the reader graph carries no sortable plugin or drag vendor", async () => {
+  const { params, hasSap } = fixtureBoot("tests/fixtures/load/kanban.html");
+  withUndo(params);
+  const plan = resolveModules(params, false, { isDraftMode: false, hasSap });
+  const entries = [...plan.core, ...plan.plugins].map((path) => `src/${path}`);
+  const graph = walk(await inputsFor(entries), ["src/loader.js", ...entries]);
+
+  expect(entries).not.toContain("src/plugins/sortable.js");
+  expect(graph.size).toBeGreaterThanOrEqual(40);
+  expect([...graph].filter((file) => SORTABLE_ONLY.test(file))).toEqual([]);
+
+  // Sortable is one of the late plugins, so the same tag in edit names it after ready.
+  const edit = resolveModules(params, true, { isDraftMode: false, hasSap });
+  expect(edit.late).toContain("plugins/sortable.js");
+  expect(plan.late).not.toContain("plugins/sortable.js");
+});
+
 // A refused step's durable copy is Journal 07's recovery service, and the module that
 // stages it is fetched by the first refusal or keep: `plugins/undo.js` names it in one
 // dynamic import and nothing imports it statically. An edit or draft boot therefore
