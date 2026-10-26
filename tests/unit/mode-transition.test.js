@@ -189,7 +189,7 @@ test("a declared document whose edit plan asks for a module with no support row 
   const clay = await bootPage({
     owner: true,
     declared: true,
-    params: "plugins=wire&exclude=richclay,source",
+    params: "plugins=quickcrop&exclude=richclay,source",
     queue: [participant("template:board", log)],
   });
 

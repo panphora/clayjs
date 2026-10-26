@@ -265,7 +265,7 @@ test("a move after the session quiesced is refused, and lands again after resume
 // branches with.
 test("the loader attaches the facade to clay.sortable when the module loads", () => {
   const source = readFileSync(join(repoRoot, "src", "loader.js"), "utf8");
-  const found = source.match(/^function attachPluginMember\(path, mod, loaded\) \{[\s\S]*?\n\}$/m);
+  const found = source.match(/^function attachPluginMember\(path, mod, [^)]*\) \{[\s\S]*?\n\}$/m);
   expect(found).not.toBeNull();
   const attachPluginMember = new Function(`${found[0]}\nreturn attachPluginMember;`)();
 
