@@ -5,6 +5,7 @@
 import { applyHead, FIELDS, readHead } from "./seo-head.js";
 import { hostMeta } from "../../core/host-meta.js";
 import { documentTitle } from "../../page/document-title.js";
+import { registerUnsavedState } from "../../lib/unsaved-state.js";
 
 const STYLE_ID = "clay-seo-style";
 const REOPEN_KEY = "reopen-seo";
@@ -434,6 +435,15 @@ export function open() {
   let uploadAvailable = false;
   let pendingTitleMode = "";
 
+  // Fields typed and not applied are work this page holds that its saved bytes cannot
+  // show. The registry is the edit boot's own, so the sheet is pending whether or not
+  // the page asked for the optional `unsent` plugin, and a refused exit leaves every
+  // value on screen rather than closing over them.
+  const pending = registerUnsavedState({
+    id: "seo",
+    isPending: () => !closed && Object.keys(changes()).length > 0,
+  });
+
   const root = element("div", "clay-seo");
   root.setAttribute("clay", "editor-ui");
   root.setAttribute("role", "dialog");
@@ -695,9 +705,17 @@ export function open() {
     applyUploadVisibility();
   }
 
+  // A live entry commits edit without this page going anywhere, so the sheet's own
+  // read-only layout has to follow the mode rather than the mode it opened in.
+  function followMode() {
+    if (!closed) layout();
+  }
+
   function close() {
     if (closed) return;
     closed = true;
+    pending.dispose();
+    document.removeEventListener("clay:modechange", followMode);
     root.remove();
     if (restoreTo && restoreTo.isConnected && typeof restoreTo.focus === "function") restoreTo.focus();
   }
@@ -736,7 +754,10 @@ export function open() {
     );
   }
 
-  form.addEventListener("input", refresh);
+  form.addEventListener("input", () => {
+    refresh();
+    pending.changed();
+  });
 
   inputs.get("title").addEventListener("input", () => {
     pendingTitleMode = "";
@@ -778,6 +799,9 @@ export function open() {
     const clay = window.clay;
     if (!clay || typeof clay.setMode !== "function") return;
     const storage = clay.storage && clay.storage.session;
+    // The flag is the reload path's receipt: the page comes back in edit and this sheet
+    // comes back with it. A live entry never leaves the page, so the sheet is still here
+    // and the flag would outlive the reason it was set.
     if (storage) storage.set(REOPEN_KEY, true);
     let result;
     try {
@@ -785,9 +809,11 @@ export function open() {
     } catch {
       result = null;
     }
-    if (!result || result.ok === false || !result.reloading) {
-      if (storage) storage.remove(REOPEN_KEY);
-    }
+    if (closed) return;
+    const reloading = !!result && result.ok !== false && !!result.reloading;
+    if (reloading) return;
+    if (storage) storage.remove(REOPEN_KEY);
+    if (result && result.ok !== false) layout();
   });
 
   root.addEventListener("keydown", (event) => {
@@ -810,6 +836,7 @@ export function open() {
     }
   });
 
+  document.addEventListener("clay:modechange", followMode);
   document.body.append(root);
   refresh();
   layout();

@@ -85,7 +85,15 @@ const state = {
   refreshQueued: false,
   pendingBytes: null,
   refetch: false,
+  // How many times newer file bytes have replaced the model: an accepted save, a disk
+  // frame, or a newer fetch. A fetch answers about the file at the moment the host read
+  // it, so this is what tells a late answer that something newer already landed.
+  adoptions: 0,
 };
+
+// How many times a boot fetch asks again after a save or a disk frame overtook it before
+// it gives up and leaves saves on the full serialization.
+const SUPERSEDED_RETRIES = 2;
 
 const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
@@ -150,13 +158,53 @@ function pairAgainstPage(m) {
   return pair(clone, m, originalSnapshotNode);
 }
 
-function install(sourceUrl) {
+/**
+ * The version a set of bytes names for itself, or null when nothing stamped it.
+ *
+ * A host writes `documentetag` on the root of the bytes it stored, so a fetch answers
+ * with the version it read, which is not necessarily the one this page was built from.
+ */
+function stampedVersion(m) {
+  const html = m.doc && m.doc.childNodes.find((node) => node.nodeName === 'html');
+  const attr = html && Array.isArray(html.attrs)
+    ? html.attrs.find((attribute) => attribute.name === 'documentetag')
+    : null;
+  return attr && attr.value ? attr.value : null;
+}
+
+const heldVersion = () => document.documentElement.getAttribute('documentetag') || null;
+
+/**
+ * A fetch is an answer about the file as it was when the host read it, and a boot fetch
+ * can come back after the file has moved on. Bytes that name a version this page does
+ * not hold are that newer file: adopting them would pair this page against content it
+ * never received, and the next save would print its older bytes back over them. The
+ * stamp and the model go together, so neither is taken from a late answer.
+ */
+function staleVersion(m) {
+  const stamp = stampedVersion(m);
+  const held = heldVersion();
+  if (!stamp || !held || stamp === held) return null;
+  return `source refused: the fetch answered version ${stamp} while this page holds ${held}`;
+}
+
+function install(sourceUrl, attempt = 0) {
   const t0 = now();
+  const generation = state.adoptions;
   return fetchSource(sourceUrl).then((src) => {
     const t1 = now();
     const m = model(src);
     const refused = checkSource(m, document);
     if (refused) throw new Error(`source refused: ${refused}`);
+    const stale = staleVersion(m);
+    if (stale) throw new Error(stale);
+    // A save was accepted, or a disk frame carried newer bytes, while this answer was on
+    // its way. Those bytes are the file now, so ask again rather than adopt an older
+    // answer; a page that will not hold still is refused instead of retried forever.
+    if (state.adoptions !== generation) {
+      if (attempt < SUPERSEDED_RETRIES) return install(sourceUrl, attempt + 1);
+      throw new Error('source refused: a save replaced the file while the fetch was in flight');
+    }
     const t2 = now();
     const { map, stats } = pairAgainstPage(m);
     const t3 = now();
@@ -341,6 +389,7 @@ function partialReprint(reason, printed) {
  * takes the guarded repair path, which is the behaviour this replaces.
  */
 function adopt(bytes, accepted) {
+  state.adoptions++;
   if (!state.installed) return;
   report(bytes, accepted && accepted.artifact ? accepted.artifact.source.outcome : null);
   if (adoptCandidate(bytes, accepted)) return;
@@ -395,8 +444,14 @@ function report(bytes, fromCapture = null) {
  * earlier if a save, `text()` or `locate()` needs it first.
  */
 function queueRepair(event) {
-  if (!state.installed) return;
   const detail = event && event.detail;
+  if (detail && detail.source === 'disk' && typeof detail.html === 'string') {
+    // Newer bytes than anything already in flight, adopted or not: a fetch that started
+    // before this frame cannot answer for the file the frame describes, so the boot
+    // fetch asks again rather than installing the version it asked about.
+    state.adoptions++;
+  }
+  if (!state.installed) return;
   if (detail && detail.source === 'disk' && typeof detail.html === 'string') {
     if (isProjected(detail.html)) state.refetch = true;
     else state.pendingBytes = detail.html;
@@ -479,6 +534,7 @@ function refreshNow() {
  */
 function refetchModel() {
   const generation = state.repairs;
+  const adoption = state.adoptions;
   fetchSource(window.location.href)
     .then((src) => {
       const next = model(src);
@@ -487,9 +543,12 @@ function refetchModel() {
       return next;
     })
     .then((m) => {
-      if (state.repairs !== generation) return;
+      // A save landed, or a newer fetch answered, while this one was in flight: its bytes
+      // describe a file this page has already moved past.
+      if (state.repairs !== generation || state.adoptions !== adoption) return;
       try {
         state.repairs++;
+        state.adoptions++;
         const { map, stats } = pairAgainstPage(m);
         state.model = m;
         state.map = map;

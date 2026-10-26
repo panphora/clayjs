@@ -1,11 +1,13 @@
 import { replace as replaceDocument } from "./save-replace.js";
 import { lastSeenEtag } from "./etag.js";
+import { claimDocumentOperation, releaseDocumentOperation } from "./save-core.js";
 import { isNewerVersion } from "./version.js";
 import { upgrade, readMeta } from "../vendor/hyper-html-api-upgrade.vendor.js";
 
 const MANIFEST_FAILED = "The new version could not be downloaded. Nothing was changed.";
 const SAVE_FAILED = "The upgrade could not be saved. Nothing was changed.";
 const CONFLICT = "This document changed somewhere else. Reload and try again.";
+const BUSY = "Something else is changing this document. Nothing was changed.";
 
 async function digestOf(bytes) {
   const subtle = globalThis.crypto && globalThis.crypto.subtle;
@@ -219,6 +221,21 @@ export async function apply(update, {
 } = {}) {
   const pageClay = clay || {};
   if (pageClay.isDraftMode) return { ok: false, code: "draft" };
+
+  // An upgrade flushes this generation and then replaces it with another, so it speaks
+  // for the whole document while it runs: a mode switch cannot start its barrier in the
+  // middle of one, and two upgrades cannot interleave their flushes and writes.
+  const operation = claimDocumentOperation("upgrade");
+  if (!operation) return { ok: false, code: "busy", message: BUSY };
+  try {
+    return await applyUnderSlot(update, { doc, loc, fetchFn, clay, reload, replace, etag });
+  } finally {
+    releaseDocumentOperation(operation);
+  }
+}
+
+async function applyUnderSlot(update, { doc, loc, fetchFn, clay, reload, replace, etag }) {
+  const pageClay = clay || {};
 
   if (pageClay.isEditMode && pageClay.save && typeof pageClay.save.flush === "function") {
     let flushed;

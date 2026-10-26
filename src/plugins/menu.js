@@ -266,6 +266,11 @@ function mount() {
   }
   setChecked();
 
+  // The switch shows the mode that was committed, not the one a click asked for: a
+  // change can land from the keyboard, from another plugin's lease or from a live entry
+  // this menu did not start, and each commit is announced once on the document.
+  document.addEventListener("clay:modechange", setChecked);
+
   edit.addEventListener("click", async () => {
     if (busy) return;
     const previous = edit.getAttribute("aria-checked");
