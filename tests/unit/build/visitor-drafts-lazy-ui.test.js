@@ -9,8 +9,8 @@ import { resolveModules } from "../../../src/loader-logic.js";
 /**
  * A visitor's draft boot carries the prompt, and the prompt carries its own
  * stylesheet: the owner chip belongs to an owner, the prompt's CSS to the prompt,
- * and the autosave debug logger to a person who switched it on. None of the three
- * is in the walk a draft boot starts, so a visitor downloads none of them before
+ * the intro to a page that has one, and the autosave debug logger to a person who
+ * switched it on. None of them is in the walk a draft boot starts, so a visitor downloads none of them before
  * ready; each is a dynamic import of the module that needs it, which is why the
  * built chunks below exist at all.
  *
@@ -22,6 +22,7 @@ const LAZY = [
   "src/plugins/visitor-drafts/owner-chip.js",
   "src/plugins/visitor-drafts/prompt-style.js",
   "src/lib/autosave-debug.js",
+  "src/plugins/visitor-drafts/intro.js",
 ];
 
 // The modules that fetch each chunk, and only when it is needed: the owner chip is
@@ -38,6 +39,10 @@ const FETCHED_BY = {
   "src/lib/autosave-debug.js": {
     importer: "src/lib/autosave-debug-gate.js",
     importers: ["src/lib/autosave-debug-gate.js"],
+  },
+  "src/plugins/visitor-drafts/intro.js": {
+    importer: "src/plugins/visitor-drafts.js",
+    importers: ["src/plugins/visitor-drafts.js"],
   },
 };
 
@@ -94,14 +99,14 @@ function fixtureBoot(file) {
 }
 
 for (const { mode, isEditMode, isDraftMode } of MODES) {
-  test(`kanban ${mode}: no owner chip, prompt stylesheet or autosave debug logger is in the boot graph`, async () => {
+  test(`kanban ${mode}: no owner chip, prompt stylesheet, intro or autosave debug logger is in the boot graph`, async () => {
     const { params, hasSap } = fixtureBoot("tests/fixtures/load/kanban.html");
     const plan = resolveModules(params, isEditMode, { isDraftMode, hasSap });
     const entries = [...plan.core, ...plan.plugins].map((path) => `src/${path}`);
     const inputs = await inputsFor(entries);
     const graph = walk(inputs, ["src/loader.js", ...entries]);
 
-    // The draft is the boot that would carry all three, and it carries the plugin
+    // The draft is the boot that would carry all of them, and it carries the plugin
     // that fetches them, so the absence below is the laziness and not an unbuilt file.
     if (isDraftMode) expect(entries).toContain("src/plugins/visitor-drafts.js");
     // The gate stands where the logger stood: in the save path an edit or draft boots.
@@ -125,7 +130,7 @@ for (const { mode, isEditMode, isDraftMode } of MODES) {
   });
 }
 
-test("a journal draft boot carries the prompt plugin and none of the three chunks", async () => {
+test("a journal draft boot carries the prompt plugin and none of the lazy chunks", async () => {
   const { params, hasSap } = fixtureBoot("tests/fixtures/load/journal.html");
   const plan = resolveModules(params, true, { isDraftMode: true, hasSap });
   const entries = [...plan.core, ...plan.plugins].map((path) => `src/${path}`);
@@ -133,4 +138,17 @@ test("a journal draft boot carries the prompt plugin and none of the three chunk
 
   expect(entries).toContain("src/plugins/visitor-drafts.js");
   expect([...graph].filter((file) => LAZY.includes(file))).toEqual([]);
+});
+
+// A save into this browser answers 200, 503 or 507, never the host's 412 the notice
+// exists for, so a draft boot leaves it out and an edit boot keeps it.
+test("the conflict notice is in an edit boot and not in a draft boot", async () => {
+  const { params, hasSap } = fixtureBoot("tests/fixtures/load/journal.html");
+  const edit = resolveModules(params, true, { isDraftMode: false, hasSap });
+  const draft = resolveModules(params, true, { isDraftMode: true, hasSap });
+  expect(edit.core).toContain("core/conflict-notice.js");
+  expect(draft.core).not.toContain("core/conflict-notice.js");
+  const entries = [...draft.core, ...draft.plugins].map((path) => `src/${path}`);
+  const graph = walk(await inputsFor(entries), ["src/loader.js", ...entries]);
+  expect(graph.has("src/core/conflict-notice.js")).toBe(false);
 });

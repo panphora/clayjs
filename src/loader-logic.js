@@ -207,8 +207,9 @@ function parseCsv(params, key, enabled, apply) {
 const DRAFT_DROPS = ["sync", "live", "page", "upload", "quickcrop", "cms", "people", "menu", "upgrade", "wire", "ai-edit", "demo", "source"];
 
 // [refetch-on-save] swaps its element for a fresh GET of the same URL after every
-// save, which on a visitor's own draft is a request to the host.
-const DRAFT_DROPS_CORE = ["attrs/refetch-on-save.js"];
+// save, which on a visitor's own draft is a request to the host. The conflict notice
+// answers a host's 412, which a save into this browser never returns.
+const DRAFT_DROPS_CORE = ["attrs/refetch-on-save.js", "core/conflict-notice.js"];
 
 // Only that host's copies auto-add the update check; another source names it.
 const TEMPLATE_SOURCE_PREFIX = "https://hyperclay.com/templates/";

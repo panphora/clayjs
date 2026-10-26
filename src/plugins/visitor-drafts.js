@@ -5,7 +5,6 @@ import { createStore, safeStorage } from "./visitor-drafts/store.js";
 import { createUiMemory } from "./visitor-drafts/ui-memory.js";
 import { rememberSource, downloadUrl } from "./visitor-drafts/source.js";
 import { mountPrompt } from "./visitor-drafts/prompt.js";
-import { mountIntro } from "./visitor-drafts/intro.js";
 import { DOWNLOAD_URL, backToDraft, editOriginal, inertVisitorDrafts } from "./visitor-drafts/inert.js";
 
 let store = null;
@@ -20,6 +19,18 @@ function mountChip() {
     .then((m) => m.mountOwnerChip())
     .catch((error) => {
       console.warn("visitor-drafts: the owner chip did not load", error);
+      return null;
+    });
+}
+
+// Most visitors never see the intro (no template, a draft already kept, or dismissed),
+// so it is fetched only for a page that has one; a failed import costs only the intro.
+function mountIntroLate(options) {
+  if (!options.template) return Promise.resolve(null);
+  return import("./visitor-drafts/intro.js")
+    .then((m) => m.mountIntro(options))
+    .catch((error) => {
+      console.warn("visitor-drafts: the intro did not load", error);
       return null;
     });
 }
@@ -39,8 +50,7 @@ if (isDraftMode && slot && rulesTag) {
   const appName = document.querySelector('meta[name="application-name"]')?.content?.trim() || document.title.split(/:|\s\|\s/)[0].trim() || "This app";
   const template = document.querySelector("template[visitor-intro]");
   const start = () => {
-    ready = mountPrompt({ memory, appName, link: downloadLink }).then((prompt) => {
-      mountIntro({ memory, template, appName, hadDraft: result.hadDraft });
+    ready = mountPrompt({ memory, appName, link: downloadLink }).then((prompt) => mountIntroLate({ memory, template, appName, hadDraft: result.hadDraft }).then(() => prompt)).then((prompt) => {
       document.addEventListener("clay:drafts-store-failed", () => prompt.showError());
       document.addEventListener("clay:drafts-saved", () => prompt.clearError());
       return (isOwner ? mountChip() : Promise.resolve(null)).then(() => prompt);
