@@ -6,7 +6,14 @@
 // may fetch and build inert UI; `enable` is synchronous once every preparation has
 // succeeded; `quiesce` stops admission without losing buffers, so a refused exit can
 // `resume` the very same lease; and `dispose` runs only after a committed exit.
-import { canEdit, isDraftMode, commitModeFacts, modeState, takeModeParticipants } from "./is-edit-mode.js";
+import {
+  canEdit,
+  isDraftMode,
+  commitModeFacts,
+  modeState,
+  noteParticipantForget,
+  takeModeParticipants,
+} from "./is-edit-mode.js";
 
 let generation = 0;
 let leases = [];
@@ -43,6 +50,16 @@ async function rosterOf() {
   }
   return [...roster].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
 }
+
+// A registration this page took back while idle in view leaves the roster too, so the next
+// entry never prepares a participant nobody wants. Loaded, the controller is the only
+// owner of the roster; the registry calls this and never fetches the controller for it.
+export function forgetParticipant(id) {
+  const index = roster.findIndex((participant) => participant.id === id);
+  if (index !== -1) roster.splice(index, 1);
+}
+
+noteParticipantForget(forgetParticipant);
 
 async function enter() {
   const before = current();

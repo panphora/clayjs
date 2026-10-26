@@ -7,8 +7,17 @@ import onDomReady from "../lib/dom-ready.js";
 
 let leaving = false;
 
+// The public registration. The built-ins own the `clay:` prefix (`clay:resources` and
+// every module participant), so an application may not take an id from that space.
+const register = (participant) => {
+  if (typeof participant?.id === "string" && participant.id.startsWith("clay:")) {
+    throw new TypeError(`clay.modeLifecycle: the id "${participant.id}" is reserved`);
+  }
+  return registerModeParticipant(participant);
+};
+
 export const modeLifecycle = {
-  register: registerModeParticipant,
+  register,
   canWrite: () => modeState().phase === "idle" && isEditMode,
   get state() {
     return Object.freeze(modeState());

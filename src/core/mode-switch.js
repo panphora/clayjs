@@ -8,17 +8,25 @@
 //
 // The controller reaches this module, and only the controller: a reader pays for the
 // declaration and nothing else.
-import { registerModeParticipant } from "./is-edit-mode.js";
+import { peekModeParticipants, registerModeParticipant } from "./is-edit-mode.js";
 import { requiresReload, resourcesParticipant } from "./mode-resources.js";
 
 let resourcesQueued = false;
 
 // A participant queued before boot may be a promise; the controller awaits that one
-// itself. Anything else has to have the shape a lease is prepared from.
-const participantsReady = () =>
-  (window.clay?.modeParticipants ?? []).every(
-    (entry) => typeof entry?.then === "function" || (typeof entry?.id === "string" && typeof entry?.prepare === "function")
-  );
+// itself. Anything else has to have the shape a lease is prepared from, and its id has to
+// be unique across the queue. Validating never drains: a malformed queue is left as it is.
+const participantsReady = () => {
+  const ids = new Set();
+  for (const entry of peekModeParticipants()) {
+    if (typeof entry?.then === "function") continue;
+    const id = entry?.id;
+    if (typeof id !== "string" || typeof entry?.prepare !== "function") return false;
+    if (ids.has(id)) return false;
+    ids.add(id);
+  }
+  return true;
+};
 
 /**
  * May this document switch live, through the plan it resolved for an editor?

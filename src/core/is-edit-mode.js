@@ -112,11 +112,22 @@ export function commitModeFacts(next) {
 
 export const modeState = () => ({ mode, ...lifecycle });
 
-// The lifecycle's registration queue: the same array an application pushed onto
-// window.clay before boot, so a preboot push lands here. Registering never imports the
-// controller, which takes the queue when it starts.
-const queue = (typeof window !== "undefined" && window.clay && window.clay.modeParticipants) || [];
+// The one registration queue, on `window.clay`: the API, a preboot push and a later raw
+// push all land in the array the controller drains. Non-enumerable, because it is a
+// handoff and not a member of the facade a page boots with.
+const queue = (() => {
+  if (typeof window === "undefined" || !window.clay) return [];
+  if (window.clay.modeParticipants) return window.clay.modeParticipants;
+  Object.defineProperty(window.clay, "modeParticipants", { value: [], writable: true, configurable: true });
+  return window.clay.modeParticipants;
+})();
 const registered = new Set();
+
+// The readiness check reads the queue without draining it. A registration taken back also
+// leaves the controller's roster, but only when the controller is already loaded.
+let forgetFromRoster = () => {};
+export const noteParticipantForget = (fn) => (forgetFromRoster = fn);
+export const peekModeParticipants = () => queue.slice();
 
 const refuse = (message) => {
   throw new TypeError(`clay.modeLifecycle: ${message}`);
@@ -138,12 +149,17 @@ export function registerModeParticipant(participant) {
   refuseUnlessIdleInView();
   registered.add(id);
   queue.push(participant);
+  // `live`, not `registered`: a drain clears that set while the roster keeps the
+  // participant, so an unregister after the first drain still has to reach the roster.
+  let live = true;
   return () => {
-    if (!registered.has(id)) return;
+    if (!live) return;
     refuseUnlessIdleInView();
+    live = false;
     registered.delete(id);
     const index = queue.indexOf(participant);
     if (index !== -1) queue.splice(index, 1);
+    forgetFromRoster(id);
   };
 }
 
