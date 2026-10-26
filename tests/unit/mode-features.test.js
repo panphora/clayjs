@@ -126,6 +126,34 @@ test("a live entry makes RichClay's regions editable, and the exit hands them ba
   expect(region.getAttribute("contenteditable")).toBeNull();
 });
 
+test("a live entry on a URL that asked for view leaves no editmode parameter behind", async () => {
+  // The parameter was how a person asked for a mode in the URL, and the committed mode is
+  // the answer: RichClay reads the parameter ahead of the facts, so a live entry under
+  // `?editmode=false` left its regions read-only until the URL said otherwise (Opus 9).
+  const clay = await bootPage({
+    url: "/notes.html?editmode=false&keep=1#frag",
+    params: "exclude=source",
+    body: '<main><div id="region" editable><h2>Team plan</h2><p>$12 per seat.</p></div></main>',
+  });
+  const region = document.getElementById("region");
+  expect(clay.mode).toBe("view");
+  expect(region.getAttribute("contenteditable")).toBeNull();
+
+  await expect(clay.setMode("edit")).resolves.toEqual({ ok: true, mode: "edit", changed: true });
+  await flush();
+  expect(region.getAttribute("contenteditable")).toBe("true");
+  // Every other parameter and the hash stay; only the answered request goes.
+  expect(window.location.pathname).toBe("/notes.html");
+  expect(window.location.search).toBe("?keep=1");
+  expect(window.location.hash).toBe("#frag");
+
+  await expect(clay.setMode("view")).resolves.toEqual({ ok: true, mode: "view", changed: true });
+  await flush();
+  expect(region.getAttribute("contenteditable")).toBeNull();
+  expect(window.location.search).toBe("?keep=1");
+  expect(window.location.hash).toBe("#frag");
+});
+
 test("a clean cycle gives an [editmode:onclick] control back the attribute order the file served", async () => {
   const clay = await bootPage({
     body: '<div id="content"><button id="btn" inert-onclick="run()" editmode:onclick>Save</button></div>',

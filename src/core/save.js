@@ -429,6 +429,22 @@ export function adoptEntryBaseline({ represented } = {}) {
   return { ok: true };
 }
 
+// The host's conditional-save capability is learned from discovery, which is a request
+// of its own, and the commit that enters edit cannot wait for it. The session keeps the
+// promise and the save path waits on it, so the first save after a live entry still
+// carries If-Match instead of going out unconditional because the answer was in flight.
+let capabilityKnown = Promise.resolve(false);
+let capabilityPending = false;
+const learnCapability = () => {
+  capabilityPending = true;
+  return learnConditionalSaves()
+    .catch(() => false)
+    .then((supported) => {
+      capabilityPending = false;
+      return supported;
+    });
+};
+
 /**
  * The save system as a mode participant: a fresh session plus the page's installs on a
  * live entry, and, on adoption, a session in phase `open` over what the import already
@@ -445,7 +461,7 @@ export function modeParticipant() {
         enable() {
           // Every session learns the capability and records the stamp it represents:
           // a live entry included, and a re-entry after the stamp advanced in view.
-          learnConditionalSaves();
+          capabilityKnown = learnCapability();
           const etag = context.represented?.etag;
           if (typeof etag === "string" && etag) recordEtag(etag);
           if (context.initial === true) return;
@@ -821,6 +837,9 @@ const monotonic = () => (typeof performance !== 'undefined' && performance.now ?
  * @returns {Promise<{msg: string, msgType: string}>}
  */
 function attemptSave(options, callback = () => {}) {
+  // The first save of a session still learning the host's conditional-save capability
+  // waits for that answer, so it carries If-Match when the host honours one.
+  if (capabilityPending) return capabilityKnown.then(() => attemptSave(options, callback));
   if (!adoptionsQueued) return attemptSaveNow(options, callback);
   return adoptionQueue.then(() => attemptSaveNow(options, callback));
 }
@@ -1050,6 +1069,7 @@ function savePagePermitted(permit, callback = () => {}) {
  * @returns {Promise<{msg: string, msgType: string}>}
  */
 export function savePageForce(callback = () => {}, { quietConflict = false } = {}) {
+  if (capabilityPending) return capabilityKnown.then(() => savePageForce(callback, { quietConflict }));
   return new Promise((resolve) => {
     if (!isEditMode && !window.clay?.testMode) {
       const skipped = skipped_('Not in edit mode');

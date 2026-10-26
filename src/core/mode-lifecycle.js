@@ -81,6 +81,21 @@ function setRootEditMode(on) {
   document.documentElement.setAttribute("editmode", on ? "true" : "false");
 }
 
+// The committed mode owns the mode now: a URL that asked for edit is a request this
+// switch has already answered, and a vendor that reads the parameter before the facts
+// (RichClay) would hold the page at the old mode after a live entry. The parameter goes
+// at the commit that changed the mode, and every other parameter and the hash stay.
+function dropEditmodeParam() {
+  try {
+    const url = new URL(window.location.href);
+    if (!url.searchParams.has("editmode")) return;
+    url.searchParams.delete("editmode");
+    window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+  } catch (error) {
+    console.warn("clayjs: the URL could not be rewritten after the mode switch", error);
+  }
+}
+
 // The modules an edit plan resolves, in the order the plan names them.
 const editPlanPaths = (handle) => [
   ...(handle?.edit?.core ?? []),
@@ -281,6 +296,7 @@ async function enter(handle = null) {
   // and the leases that follow start on that file.
   reader?.commit();
   commitModeFacts({ mode: isDraftMode ? "draft" : "edit", isEditMode: true });
+  dropEditmodeParam();
   setRootEditMode(true);
   save?.setSaveGeneration(context.generation);
   try {
@@ -479,6 +495,7 @@ async function leaveWithin(handle, deadline) {
   generation++;
   setRootEditMode(false);
   commitModeFacts({ mode: "view", isEditMode: false, phase: "idle", generation, reason: null });
+  dropEditmodeParam();
   announceMode();
   return { ok: true, mode: "view", changed: true };
 }

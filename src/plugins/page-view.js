@@ -71,11 +71,13 @@ function acquire(represented = null) {
 }
 
 // Generic sync owns the saved lane here, so the reader takes its frames from that
-// lane's accepted disk applies and keeps no stream of its own.
-function followSync() {
+// lane's accepted disk applies and keeps no stream of its own. A receipt the caller
+// already holds is painted at once, so the tag on screen is the file's even before a
+// frame arrives.
+function followSync(represented = null) {
   if (!oneArticle()) return Promise.resolve(null);
   try {
-    reader = startReader({ feed: document, documentURL: window.location.href });
+    reader = startReader({ feed: document, represented, documentURL: window.location.href });
   } catch (error) {
     console.warn("clayjs: the reader could not start over the page sync projects", error);
     return Promise.resolve(null);
@@ -95,7 +97,7 @@ export function start({ sync = false, represented = null } = {}) {
   cancelled = false;
   following = sync;
   listen();
-  acquired = sync ? followSync() : acquire(represented);
+  acquired = sync ? followSync(represented) : acquire(represented);
   // With generic sync the reader starts before this returns, so both promises
   // settle together; otherwise only the transport starts here and the first
   // file arrives later, from the stream.

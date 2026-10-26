@@ -47,6 +47,22 @@ const articleHtml = (blocks = BLOCKS) => {
 };
 const tagHtml = (blocks = BLOCKS) => `<script type="application/json" merge="page" clay="live">${JSON.stringify(seedValue(blocks))}</script>`;
 const articleOf = (html) => new DOMParser().parseFromString(html, "text/html").querySelector(ARTICLE_SEL);
+// A page tag stating a value this module built, rather than one a seed wrote.
+const tagValueHtml = (value) => `<script type="application/json" merge="page" clay="live">${JSON.stringify(value)}</script>`;
+
+// The page a peer saved from the page this tab holds: the same blocks plus one edit, so
+// the value it states descends from the tag the tab was served.
+async function descendantValue(blocks, edit) {
+  const { createStore } = await import("../../../src/live/store.js");
+  const { createYPageBinding, LOCAL, yValueOf } = await import("../../../src/page/ybind/index.js");
+  const store = createStore({ name: "page", value: seedValue(blocks) });
+  const binding = createYPageBinding({ store });
+  binding.ydoc.transact(() => binding.pd.flow.insert(binding.pd.flow.length, edit), LOCAL);
+  const value = yValueOf(binding.ydoc);
+  binding.dispose();
+  binding.ydoc.destroy();
+  return value;
+}
 
 // The saved file a reader is handed: a whole document, its article and, when the host
 // stores page data, the tag that states it.
@@ -463,6 +479,64 @@ test("a store the app opened itself survives the session's release", async () =>
   await tick();
   expect(harness.storeOf("page")).toBeTruthy();
   expect(window.clay.live("page")).toBe(app);
+});
+
+test("a store the app opened itself is brought to the newer represented file", async () => {
+  // The application opened the page store at boot, so this session reuses it rather than
+  // opening one, and the store still holds the page it was opened from. The file the
+  // reader holds moved on since; a page store's value is a set of Yjs updates, so the
+  // file's value becomes the store's and the editor mounts the page the file states
+  // instead of the older one the store was opened with (Astra 3).
+  const advanced = [
+    { id: "h", t: "heading", text: "New heading" },
+    { id: "p", t: "paragraph", text: "New peer writing" },
+  ];
+  const harness = await load({ head: tagHtml() });
+  const app = window.clay.live("page");
+  const bytes = FILE(articleHtml(advanced), { head: tagHtml(advanced) });
+  const reader = await harness.openReader(bytes, { etag: "stamp-2", seq: 2 });
+  const handoff = await reader.prepareHandoff({});
+  expect(article().textContent).toContain("New peer writing");
+
+  const lease = harness.pageParticipant().prepare(context({ represented: handoff.represented, reader: handoff }));
+  try {
+    await lease.ready;
+    // The very store the app holds, now at the file's page.
+    expect(window.clay.live("page")).toBe(app);
+    expect(blocksFromYValue(harness.storeOf("page").value).p.c)
+      .toEqual(blocksFromYValue(seedValue(advanced)).p.c);
+    lease.enable();
+    expect(harness.page.view).toBeTruthy();
+    expect(article().textContent).toContain("New peer writing");
+    expect(article().textContent).not.toContain("Hello");
+    expect(harness.saves).toHaveLength(0);
+  } finally {
+    lease.dispose();
+  }
+});
+
+test("a store the app opened itself takes up a newer file that descends from it", async () => {
+  // The same app-opened store, and a file another tab saved from this very page: its tag
+  // carries the store's own history plus the peer's edit, so the file's updates merge into
+  // the store before anything mounts, and the editor shows what the file states.
+  const harness = await load({ head: tagHtml() });
+  const app = window.clay.live("page");
+  const newer = await descendantValue(BLOCKS, " there");
+  const bytes = FILE(articleHtml(), { head: tagValueHtml(newer) });
+  const reader = await harness.openReader(bytes, { etag: "stamp-2", seq: 2 });
+  const handoff = await reader.prepareHandoff({});
+
+  const lease = harness.pageParticipant().prepare(context({ represented: handoff.represented, reader: handoff }));
+  try {
+    await lease.ready;
+    expect(window.clay.live("page")).toBe(app);
+    lease.enable();
+    expect(harness.page.view).toBeTruthy();
+    expect(article().textContent).toContain("Hello there");
+    expect(harness.saves).toHaveLength(0);
+  } finally {
+    lease.dispose();
+  }
 });
 
 test("a represented file without the page tag seeds from its article", async () => {

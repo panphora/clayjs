@@ -7,6 +7,7 @@ import { setSaveHeader } from "../core/save-core.js";
 import { lastSeenEtag, representedEtag, recordEtag } from "../core/etag.js";
 import { captureForSaveAndComparison } from "../core/snapshot.js";
 import { storeOf, stageStore, closeStore, checkpointWithin, requestCheckpoint, fastLane, pageLaneReady, pageWriterReady } from "./live.js";
+import { serializeLive } from "../live/ops.js";
 import { parseJsonRelaxed } from "../vendor/hyper-morph-json.vendor.js";
 import { saveStateFor, BLOCKED_TEXT, RETRY_TEXT, downloadPageCopy, downloadSnapshot, copyPageText } from "../page/save-states.js";
 import toast, { toastPersistent, dismissPersistent } from "../ui/toast.js";
@@ -608,6 +609,23 @@ export function createSteps(inst, options) {
     return { ok: true, source };
   }
 
+// The page store the session mounts, brought to the file the reader holds. A page store's
+// value is a set of Yjs updates and this tab's own unsaved ops are updates of their own, so
+// installing the file's value as the store's own leaves the unconfirmed work replayed over
+// the page the file states; the binding that mounts next applies both sets in one Y
+// document, which is the merge. False when the store cannot take the value, and the entry
+// refuses rather than mounting a page the file does not state.
+function mergeRepresentedPage(store, value) {
+  if (unreadablePage(value)) return false;
+  if (serializeLive(store.authoritative) === serializeLive(value)) return true;
+  try {
+    return store.rebase(value, { source: "state" });
+  } catch (error) {
+    console.warn("clayjs: page plugin could not reconcile the open page store with the saved file", error);
+    return false;
+  }
+}
+
   // The page's own code, the editor it starts and the feature views the saved article
   // demands are separate downloads, and the page's own starts here beside the room join.
   // Nothing evaluates the editor until the coordinator calls it; the parts are
@@ -686,6 +704,9 @@ export function createSteps(inst, options) {
     // the seed in memory and no write until a person edits. A tagged document opens
     // the state the file already has.
     let handle;
+    // Whether this session's own value is the store's: only a store the application
+    // opened itself keeps a page of its own.
+    let ownsStore = true;
     try {
       if (source.seeded) {
         const staged = stageStore("page", {
@@ -696,6 +717,7 @@ export function createSteps(inst, options) {
         handle = staged.handle;
       } else {
         const opened = storeOf("page") === null;
+        ownsStore = opened;
         handle = window.clay.live("page");
         if (opened) inst.pageStore = storeOf("page");
       }
@@ -714,6 +736,13 @@ export function createSteps(inst, options) {
     // branches report the same one, so whichever settles first does not change it.
     read ??= await source.ready;
     if (!read.ok) return read;
+    // A store the application opened itself keeps the page it was opened from, and the
+    // file the reader holds is the page this session edits: the store is brought to that
+    // file before anything mounts on it, and a store that cannot take it refuses the
+    // entry rather than mounting a page the file does not state.
+    if (!ownsStore && !mergeRepresentedPage(storeOf("page"), source.tags?.[0])) {
+      return { ok: false, reason: "stale-store" };
+    }
     code ??= await codePromise;
     if (!isCurrent(inst)) return { ok: false, cancelled: true };
     const store = storeOf("page");
