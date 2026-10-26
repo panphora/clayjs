@@ -22,6 +22,17 @@ jest.setTimeout(120000);
  *   - an entry timeout disposes the prepared participants before the article goes
  *     back, so the reader reclaims it and the editor and its save hold are gone
  *     (Opus 8, Astra 4).
+ *
+ * The same road out of edit, bounded (V4 gate fix 5):
+ *
+ *   - an initial edit exit whose adoption fails keeps the boot's sessions, so the next
+ *     exit adopts them and hands them back instead of committing view over a live
+ *     editor (Opus 2);
+ *   - a `quiesce` that never settles, and a pending-source flush that never does,
+ *     fail the exit with `timeout` inside the deadline and leave the tab in edit
+ *     rather than stuck in `leaving` (Astra 6);
+ *   - an element added after an initial edit boot gets its `editmode:` behaviour
+ *     (Argon 6A).
  */
 
 const SRC = "../../src/";
@@ -276,6 +287,194 @@ test("an entry timeout releases the prepared Page before it returns view", async
     release();
     timerSpy?.mockRestore();
     pageView.stop();
+    boot.stop();
+  }
+});
+
+test("an initial edit exit whose adoption fails keeps its sessions, and the next exit commits view", async () => {
+  const boot = await bootFixture("document.html", {
+    mode: "edit",
+    declare: true,
+    params: "plugins=cms&exclude=richclay,source,quickcrop",
+  });
+  const { cms } = await import(`${SRC}vendor/hypercms.vendor.js`);
+  const editable = await import(`${SRC}core/admin-contenteditable.js`);
+  const { registerUnsavedState } = await import(`${SRC}lib/unsaved-state.js`);
+  try {
+    const clay = boot.clay;
+    // A control the boot's own page-load sweep turned on: the exit is what hands it back.
+    const control = document.createElement("div");
+    control.setAttribute("editmode:contenteditable", "");
+    control.setAttribute("inert-contenteditable", "plaintext-only");
+    document.body.appendChild(control);
+    editable.enableContentEditable();
+    expect(control.getAttribute("contenteditable")).toBe("plaintext-only");
+
+    // The CMS this tab opened holds a session no exit can take back, so the controller
+    // answers the caller with its guarded reload instead of a live exit.
+    const rules = document.createElement("script");
+    rules.setAttribute("data-rules-name", "cms");
+    rules.setAttribute("data-rules-version", "1");
+    rules.setAttribute("type", "application/json");
+    rules.textContent = JSON.stringify({ title: "h1" });
+    document.head.appendChild(rules);
+    expect(cms.open()).toMatchObject({ ok: true });
+    expect(cms.isOpen).toBe(true);
+
+    // Work a save cannot write, so the reload road's own flush refuses too.
+    const pending = registerUnsavedState({ id: "probe:composer", isPending: () => true });
+
+    const first = await clay.setMode("view");
+    await flush();
+    expect(first).toMatchObject({ ok: false, mode: "edit", code: "save-failed", state: "blocked" });
+    expect(clay.mode).toBe("edit");
+    expect(cms.isOpen).toBe(true);
+    expect(control.getAttribute("contenteditable")).toBe("plaintext-only");
+
+    // The person closes the CMS and finishes: the next exit has the boot to adopt again.
+    pending.dispose();
+    expect(cms.close()).toMatchObject({ ok: true });
+
+    const second = await clay.setMode("view");
+    await flush();
+    expect(second).toEqual({ ok: true, mode: "view", changed: true });
+    expect(clay.mode).toBe("view");
+    expect(clay.modeLifecycle.state.phase).toBe("idle");
+    expect(document.documentElement.getAttribute("editmode")).toBe("false");
+    // The boot's own sessions were handed back, not left running in view.
+    expect(control.hasAttribute("contenteditable")).toBe(false);
+    expect(control.getAttribute("inert-contenteditable")).toBe("plaintext-only");
+  } finally {
+    boot.stop();
+  }
+});
+
+test("an exit whose quiesce never settles fails with timeout inside the deadline", async () => {
+  const boot = await bootFixture("document.html", { mode: "view", declare: true });
+  const pageView = await import(`${SRC}plugins/page-view.js`);
+  const realSetTimeout = globalThis.setTimeout;
+  let timerSpy;
+  let armed = false;
+  const deadlines = [];
+  let reached = false;
+  let resumed = false;
+  try {
+    await routeHost();
+    const source = openStream(boot);
+    frameFrom(source, `<!DOCTYPE html>\n${document.documentElement.outerHTML}`, 1);
+    await pageView.acquired;
+
+    boot.clay.modeLifecycle.register({
+      id: "probe:stuck-quiesce",
+      order: 900,
+      prepare() {
+        return {
+          enable() {},
+          quiesce() {
+            reached = true;
+            return new Promise(() => {});
+          },
+          resume() {
+            resumed = true;
+          },
+          dispose() {},
+        };
+      },
+    });
+    timerSpy = jest.spyOn(globalThis, "setTimeout").mockImplementation((fn, delay, ...args) => {
+      if (armed && delay >= 1000) deadlines.push(fn);
+      return realSetTimeout(fn, delay, ...args);
+    });
+
+    expect((await boot.clay.setMode("edit")).ok).toBe(true);
+    armed = true;
+    const exit = boot.clay.setMode("view");
+    expect(await until(() => reached)).toBe(true);
+    await flush();
+    // The one deadline this exit took at its start is all it is waiting on.
+    expect(deadlines.length).toBe(1);
+    deadlines[0]();
+
+    const answer = await exit;
+    expect(answer).toMatchObject({ ok: false, mode: "edit", code: "timeout" });
+    expect(boot.clay.mode).toBe("edit");
+    expect(boot.clay.modeLifecycle.state.phase).toBe("idle");
+    expect(resumed).toBe(true);
+  } finally {
+    timerSpy?.mockRestore();
+    pageView.stop();
+    boot.stop();
+  }
+});
+
+test("an exit whose pending-source flush never settles fails with timeout inside the deadline", async () => {
+  const boot = await bootFixture("document.html", { mode: "view", declare: true });
+  const pageView = await import(`${SRC}plugins/page-view.js`);
+  const { registerUnsavedState } = await import(`${SRC}lib/unsaved-state.js`);
+  const realSetTimeout = globalThis.setTimeout;
+  let timerSpy;
+  let armed = false;
+  const deadlines = [];
+  let reached = false;
+  let pending = null;
+  try {
+    await routeHost();
+    const source = openStream(boot);
+    frameFrom(source, `<!DOCTYPE html>\n${document.documentElement.outerHTML}`, 1);
+    await pageView.acquired;
+    expect((await boot.clay.setMode("edit")).ok).toBe(true);
+
+    // A queued upload that never finishes: the barrier asks it to flush and waits.
+    pending = registerUnsavedState({
+      id: "probe:upload",
+      isPending: () => true,
+      flush() {
+        reached = true;
+        return new Promise(() => {});
+      },
+    });
+    timerSpy = jest.spyOn(globalThis, "setTimeout").mockImplementation((fn, delay, ...args) => {
+      if (armed && delay >= 1000) deadlines.push(fn);
+      return realSetTimeout(fn, delay, ...args);
+    });
+
+    armed = true;
+    const exit = boot.clay.setMode("view");
+    expect(await until(() => reached)).toBe(true);
+    // The barrier's own wait and the exit's deadline, and nothing without an end.
+    expect(deadlines.length).toBeGreaterThan(0);
+    for (const fire of [...deadlines]) fire();
+
+    const answer = await exit;
+    expect(answer).toMatchObject({ ok: false, mode: "edit", code: "timeout" });
+    expect(boot.clay.mode).toBe("edit");
+    expect(boot.clay.modeLifecycle.state.phase).toBe("idle");
+    expect(boot.clay.modeLifecycle.canWrite()).toBe(true);
+  } finally {
+    pending?.dispose();
+    timerSpy?.mockRestore();
+    pageView.stop();
+    boot.stop();
+  }
+});
+
+test("an element added after an initial edit boot gets its editmode behaviour", async () => {
+  // A boot stops the observers it started but leaves the realm-global hub in place, so a
+  // later page in this file would subscribe to a hub nobody observes any more.
+  delete window.__clayMutation;
+  const boot = await bootFixture("document.html", { mode: "edit", declare: true });
+  try {
+    const card = document.createElement("div");
+    card.id = "late-card";
+    card.setAttribute("editmode:contenteditable", "");
+    card.setAttribute("inert-contenteditable", "plaintext-only");
+    document.body.appendChild(card);
+    await flush();
+
+    expect(card.getAttribute("contenteditable")).toBe("plaintext-only");
+    expect(card.hasAttribute("inert-contenteditable")).toBe(false);
+    expect(boot.clay.mode).toBe("edit");
+  } finally {
     boot.stop();
   }
 });

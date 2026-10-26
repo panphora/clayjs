@@ -4,6 +4,7 @@ import { init as initInputs, enableAdminInputs, disableAdminInputs, SELECTOR_DIS
 import { init as initOnClick, enableOnClick, disableOnClick, SELECTOR as ONCLICK } from './admin-onclick.js';
 import { init as initResources, enableAdminResources, disableAdminResources, SELECTOR as RESOURCES } from './admin-resources.js';
 import Mutation from '../lib/mutation.js';
+import { isEditMode } from './is-edit-mode.js';
 
 // Every control this family activates, in one selector: what a node added mid-session is
 // matched against, and what the lease enables.
@@ -12,6 +13,41 @@ const SELECTOR = [CONTENTEDITABLE, SELECTOR_DISABLED, SELECTOR_READONLY, ONCLICK
 const ENABLE = [enableContentEditable, enableAdminInputs, enableOnClick, enableAdminResources];
 
 let installation = null;
+// The one add-element subscription this page runs, and whether it admits new controls.
+// A live entry installs it at its enable and removes it at its dispose; a tab that booted
+// in edit has no lease to do either, so its installation starts it and the adopted
+// session's dispose is what takes it away.
+let watching = null;
+let admission = false;
+
+const activate = (node) => {
+  const scope = node.parentNode || node;
+  for (const enable of ENABLE) enable(scope);
+};
+
+// One shared function, one install, however many times a session asks for it: a control
+// that arrives after the sweep — add-from's clone, a node a live frame morphed in — is
+// activated as it lands, and nothing after the subscription is removed.
+function watch() {
+  admission = true;
+  if (watching) return;
+  watching = Mutation.onAddElement({
+    selectorFilter: SELECTOR,
+    require: 'observed',
+    pausable: false,
+    debounce: 0,
+  }, (changes) => {
+    if (!admission) return;
+    changes.forEach(({ element }) => activate(element));
+  });
+}
+
+function unwatch() {
+  admission = false;
+  if (!watching) return;
+  watching();
+  watching = null;
+}
 
 // Loader-managed initialization. The loader calls this after it imports the module, in
 // its own wave order; the import calls it too, so a page reaches the same installation by
@@ -25,6 +61,9 @@ export function install() {
   initOnClick();
   initResources();
   installation = { selector: SELECTOR };
+  // A tab that boots in edit: the boot's own page-load helpers turned the served controls
+  // on and there is no lease yet to watch for the ones that arrive afterwards.
+  if (isEditMode) watch();
   return installation;
 }
 
@@ -36,27 +75,10 @@ install();
 // stops admitting new ones; `resume` is the refused exit; `dispose` hands every control
 // back the form the file served and removes this session's subscription, and nothing else.
 export function controlsLease(root = document) {
-  let admission = false;
-  let stop = null;
-
-  const activate = (node) => {
-    const scope = node.parentNode || node;
-    for (const enable of ENABLE) enable(scope);
-  };
-
   return {
     enable() {
-      admission = true;
       for (const enable of ENABLE) enable(root);
-      stop = Mutation.onAddElement({
-        selectorFilter: SELECTOR,
-        require: 'observed',
-        pausable: false,
-        debounce: 0,
-      }, (changes) => {
-        if (!admission) return;
-        changes.forEach(({ element }) => activate(element));
-      });
+      watch();
     },
     quiesce() {
       admission = false;
@@ -65,11 +87,7 @@ export function controlsLease(root = document) {
       admission = true;
     },
     dispose() {
-      admission = false;
-      if (stop) {
-        stop();
-        stop = null;
-      }
+      unwatch();
       disableContentEditable();
       disableAdminInputs();
       disableOnClick();
@@ -82,12 +100,13 @@ export function controlsLease(root = document) {
  * The controls as a mode participant.
  *
  * The installation above is page-lifetime and turns no control on: it puts the
- * save-time restore in front of each authored form, and nothing more. A session is the
- * lease below.
+ * save-time restore in front of each authored form, and in a tab that booted in edit it
+ * starts the one watcher. A session is the lease below.
  *
  * `initial: true` adopts the edit this tab booted into, where the boot's own
- * `enable...OnPageLoad` helpers already turned the served controls on: it starts no
- * watcher and installs nothing, and its dispose is what hands the controls back.
+ * `enable...OnPageLoad` helpers already turned the served controls on: its enable asks
+ * for the same one watcher the installation already started, and its dispose is what
+ * hands the controls back.
  */
 export function modeParticipant() {
   return {
@@ -97,7 +116,7 @@ export function modeParticipant() {
       const lease = controlsLease();
       if (context.initial !== true) return lease;
       return {
-        enable() {},
+        enable: () => watch(),
         quiesce: () => lease.quiesce(),
         resume: () => lease.resume(),
         dispose: () => lease.dispose(),

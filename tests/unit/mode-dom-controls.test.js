@@ -67,6 +67,9 @@ afterEach(() => {
 });
 
 test("a lease activates the served controls, and dispose hands the served bytes back", async () => {
+  // The served form, read before the watcher this page installed can answer for it: a
+  // control that arrives after the boot is activated as it lands.
+  document.body.innerHTML = FIXTURE;
   const before = servable();
   const lease = adminAttrs.controlsLease();
 
@@ -232,7 +235,7 @@ test("the controls participant prepares the session lease a live entry enables",
   holder.remove();
 });
 
-test("initial adoption starts no watcher, and its dispose hands the served controls back", async () => {
+test("initial adoption watches for controls added after it, and its dispose hands the served controls back", async () => {
   // What an explicit initial edit's own on-page-load helpers did before the adoption.
   editable.enableContentEditable();
   inputs.enableAdminInputs();
@@ -243,15 +246,19 @@ test("initial adoption starts no watcher, and its dispose hands the served contr
 
   const holder = document.createElement("div");
   document.body.append(holder);
-  holder.innerHTML = '<div id="unwatched" editmode:contenteditable inert-contenteditable="">unwatched</div>';
+  holder.innerHTML = '<div id="watched" editmode:contenteditable inert-contenteditable="">watched</div>';
   await flush();
-  expect(document.getElementById("unwatched").hasAttribute("contenteditable")).toBe(false);
+  expect(document.getElementById("watched").getAttribute("contenteditable")).toBe("");
 
   adopted.dispose();
   const title = document.getElementById("title");
   expect(title.hasAttribute("contenteditable")).toBe(false);
   expect(title.getAttribute("inert-contenteditable")).toBe("plaintext-only");
   expect(document.getElementById("due").getAttribute("disabled")).toBe("disabled");
+
+  holder.insertAdjacentHTML("beforeend", '<div id="unwatched" editmode:contenteditable inert-contenteditable="">unwatched</div>');
+  await flush();
+  expect(document.getElementById("unwatched").hasAttribute("contenteditable")).toBe(false);
   holder.remove();
 });
 

@@ -660,10 +660,10 @@ test("clay:plugin-ready fires once per plugin across three cycles", async () => 
   }
 });
 
-test("a late module that lands after an initial edit's exit starts nothing and is not announced", async () => {
+test("an exit whose boot late tail outlasts its deadline gives the tab back in edit", async () => {
   // The drag editor is imported by the boot's own late tail, and the exit cannot wait for
-  // it forever. Held past that wait, the page exits; when the import lands it evaluates in
-  // view, so it starts no editor and is announced to nobody.
+  // it past its own deadline: held that long, the exit fails as `timeout` and the page
+  // keeps the session it booted into rather than sitting in `leaving` forever.
   let release;
   const held = new Promise((resolve) => {
     release = resolve;
@@ -694,23 +694,23 @@ test("a late module that lands after an initial edit's exit starts nothing and i
       exiting = clay.setMode("view");
       for (let i = 0; i < 200 && clay.modeLifecycle.state.phase !== "leaving"; i++) await turn();
       await jest.advanceTimersByTimeAsync(15000);
-      await expect(exiting).resolves.toEqual({ ok: true, mode: "view", changed: true });
+      await expect(exiting).resolves.toMatchObject({ ok: false, mode: "edit", code: "timeout" });
     } finally {
       jest.useRealTimers();
     }
 
-    // The exit did not wait for the import: the page is in view and nothing of the
-    // plugin has been attached.
-    expect(clay.mode).toBe("view");
+    // The deadline, not the import, ended the wait: the tab is back in edit and nothing of
+    // the plugin has been attached.
+    expect(clay.mode).toBe("edit");
+    expect(clay.modeLifecycle.state.phase).toBe("idle");
     expect(clay.sortable).toBeUndefined();
     release();
     await flush();
 
+    // It lands in edit, so it belongs there: it starts its editor.
     expect(seen.evaluated).toBe(true);
-    expect(seen.inEdit).toBe(false);
-    expect(seen.session).toBe(0);
-    expect([...document.querySelectorAll("[sortable]")].filter((el) => window.Sortable?.get?.(el))).toEqual([]);
-    expect([...ready]).toEqual([]);
+    expect(seen.inEdit).toBe(true);
+    expect(seen.session).toBe(1);
   } finally {
     release();
     ready.stop();

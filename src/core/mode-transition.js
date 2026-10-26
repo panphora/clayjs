@@ -19,11 +19,26 @@ import { flushUnsaved, pendingIds } from "../lib/unsaved-state.js";
 import { bytesUnsaved } from "./unsaved-warning.js";
 
 const DEADLINE_MS = 15000;
+const EXPIRED = Symbol("the barrier deadline passed");
 // Two passes at most: the first writes, and a second only covers input that arrived
 // while the first request was on the wire. Anything still unsaved after that refuses.
 const MAX_PASSES = 2;
 
 const refusal = (code, extra = {}) => ({ ok: false, code, ...extra });
+
+// One wait of the barrier, bounded by its own deadline: a source whose flush never
+// settles is the deadline's business, not an exit that never returns.
+async function bounded(pending, deadline) {
+  let timer = null;
+  const expired = new Promise((resolve) => {
+    timer = setTimeout(() => resolve(EXPIRED), Math.max(0, deadline - Date.now()));
+  });
+  try {
+    return await Promise.race([Promise.resolve(pending), expired]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 export { claimDocumentOperation as claimOperation, releaseDocumentOperation as releaseOperation, operationKind };
 
@@ -40,7 +55,8 @@ export { claimDocumentOperation as claimOperation, releaseDocumentOperation as r
  * @param {Object} [options]
  * @param {number} [options.generation] - the mode generation this exit is leaving
  * @param {boolean} [options.keepalive]
- * @param {number} [options.timeoutMs]
+ * @param {number} [options.timeoutMs] - the whole barrier, the pending-source flush
+ *   included, so a source that never settles refuses as `timeout`
  * @param {Object} [options.operation] - the slot its caller already holds; claimed here when absent
  * @returns {Promise<{ok: boolean, code?: string, state?: string, etag?: ?string, pending?: string[]}>}
  */
@@ -57,7 +73,8 @@ export async function runSaveBarrier({ generation = saveGeneration(), keepalive 
       // Work that finishes on its own — a checkpoint, a queued upload — is asked to. A
       // composer waiting on its person has no flush and stays pending: that is a refusal,
       // never a blur or a submit on their behalf.
-      const sources = await flushUnsaved();
+      const sources = await bounded(flushUnsaved(), deadline);
+      if (sources === EXPIRED) return refusal("timeout");
       if (!sources.ok) return refusal("pending-input", { pending: sources.pending });
       if (sources.pending.length) return refusal("pending-input", { pending: sources.pending });
 

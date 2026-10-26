@@ -365,14 +365,19 @@ async function acceptedReceipt(handle) {
   return save?.acceptedReceipt?.(generation) ?? null;
 }
 
+// What the deadline answers with, so a wait can tell it apart from its own result.
+const EXPIRED = Symbol("the exit deadline passed");
+
 // The deadline every wait of one exit shares, taken before its first await so nothing it
-// waits on can outlive the transition. Advancing time once is enough to reach all of them.
+// waits on can outlive the transition. One promise, so reaching it once is enough to
+// release all of them.
 function startDeadline() {
   let timer = null;
+  const at = Date.now() + DEADLINE_MS;
   const expired = new Promise((resolve) => {
-    timer = setTimeout(() => resolve(true), DEADLINE_MS);
+    timer = setTimeout(() => resolve(EXPIRED), DEADLINE_MS);
   });
-  return { expired, clear: () => clearTimeout(timer) };
+  return { expired, remaining: () => Math.max(0, at - Date.now()), clear: () => clearTimeout(timer) };
 }
 
 // The view plan's missing modules, imported before anything is quiesced: an explicit
@@ -386,7 +391,7 @@ async function importViewPlan(handle, expired) {
   const importing = plan.importPlan(handle, handle.view);
   importing.catch(() => {});
   const answer = await Promise.race([importing.then(() => null, (err) => err), expired]);
-  if (answer && answer !== true) throw answer;
+  if (answer && answer !== EXPIRED) throw answer;
 }
 
 // Exit. Nothing here is a public flush: the barrier is the one write an exit may make, and
@@ -402,13 +407,16 @@ async function leave(handle = null) {
 }
 
 async function leaveWithin(handle, deadline) {
+  // The boot's own sessions stay this exit's until it commits view: a refusal leaves the
+  // tab in edit exactly as it was, and the next exit tries again with the same ones.
   const initial = initialSession;
-  initialSession = false;
   commitModeFacts({ phase: "leaving" });
   const transition = await import("./mode-transition.js").catch(() => null);
   if (!transition) return refuse("load-failed");
   let held = leases;
-  if (initial) {
+  // Adopting the boot's sessions is the first exit's work, and only while nothing has
+  // been adopted yet: a refused exit keeps what it adopted to quiesce and dispose next.
+  if (initial && !held.length) {
     const adopted = await adoptInitial(handle);
     if (!adopted) {
       commitModeFacts({ phase: "idle", reason: null });
@@ -429,13 +437,18 @@ async function leaveWithin(handle, deadline) {
     if (!operation) throw fault("another document operation is in progress", "busy");
     for (const lease of [...held].reverse()) {
       quiesced.push(lease);
-      const answer = await lease.quiesce?.();
+      // A quiesce that never settles is the deadline's business: past it the exit fails
+      // and every lease it already asked resumes, so the tab stays in edit rather than
+      // stuck in `leaving`.
+      const answer = await Promise.race([Promise.resolve(lease.quiesce?.()), deadline.expired]);
+      if (answer === EXPIRED) throw fault("the exit deadline passed while a lease quiesced", "timeout");
       // A refusal is a refusal whether it was thrown or answered.
       if (answer && answer.ok === false) {
         throw Object.assign(fault("a lease refused the exit", answer.code || "pending-input"), answer);
       }
     }
-    const barrier = await transition.runSaveBarrier({ operation });
+    // The barrier writes under the time this exit has left, not a fresh 15 s.
+    const barrier = await transition.runSaveBarrier({ operation, timeoutMs: deadline.remaining() });
     if (!barrier.ok) throw Object.assign(fault("the exit barrier refused", barrier.code || "save-failed"), barrier);
   } catch (err) {
     for (const lease of [...quiesced].reverse()) {
@@ -450,6 +463,7 @@ async function leaveWithin(handle, deadline) {
   }
   disposeInReverse(held);
   leases = [];
+  initialSession = false;
   // The reader comes back on the file this session last saved, or on the one it was built
   // from when it saved nothing: a second entry commits without waiting for a frame.
   const accepted = (await acceptedReceipt(handle)) ?? entryReceipt;
