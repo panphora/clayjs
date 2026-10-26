@@ -129,5 +129,12 @@ export async function inspectSaveSize(html) {
  * @param {{bytes: number, maxBytes: ?number, state: string}} size
  */
 export function announceSaveSize(size) {
-  document.dispatchEvent(new CustomEvent('clay:save-size', { detail: size }));
+  const event = new CustomEvent('clay:save-size', { detail: size });
+  document.dispatchEvent(event);
+  // The notice is fetched only by a measurement near or over the ceiling, so most edit
+  // boots never download it; once loaded it listens for itself, and this replay of the
+  // event that fetched it only redraws in place.
+  if (size.state === 'near' || size.state === 'over') {
+    import('./save-size-notice.js').then((notice) => notice.start(event), () => {});
+  }
 }
