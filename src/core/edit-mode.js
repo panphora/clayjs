@@ -60,6 +60,23 @@ export async function setMode(next) {
   if (entry) return next === "edit" ? entry : { ok: false, mode, code: "busy" };
   if (next === mode && !controller) return { ok: true, mode, changed: false };
   if (isDraftMode || (!canEdit && !editDeniedByHost())) return { ok: false, mode, code: "not-allowed" };
+  // In a workspace frame the shell owns the frame, so a mode change is its reload, not
+  // ours: hand it over before anything local starts. Only a shell that does not take part
+  // ("host-unsupported") leaves the switch to this document.
+  const host = typeof window !== "undefined" ? window.clay?._requestHostMode : undefined;
+  if (typeof host === "function" && next !== mode) {
+    let answer;
+    try {
+      answer = await host(next);
+    } catch {
+      return { ok: false, mode, code: "host-failed" };
+    }
+    if (answer?.reason !== "host-unsupported") {
+      if (!answer?.ok) return { ok: false, mode, code: answer?.reason || "host-refused" };
+      leaving = true;
+      return { ok: true, mode: next, changed: true, reloading: true };
+    }
+  }
   if (next === "edit" && mode !== "edit") {
     entry = enterEdit();
     try {
