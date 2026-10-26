@@ -50,6 +50,11 @@ function streamHandoff({ stream, apply, retire, yieldArticle = () => false, recl
     get represented() {
       return stream.represented;
     },
+    // The newest file this reader holds: a snapshot the transport took while the
+    // switch prepared is a file the session was not built from.
+    get held() {
+      return staged ?? stream.represented;
+    },
     yieldArticle() {
       if (yielded || !yieldArticle()) return false;
       yielded = true;
@@ -106,6 +111,9 @@ export async function readerHandoff({ stream, options, apply, retire, yieldArtic
     get represented() {
       return lane.represented;
     },
+    get held() {
+      return lane.held;
+    },
     yieldArticle,
     reclaimArticle,
     reconcile: () => lane.reconcile(),
@@ -141,6 +149,27 @@ export async function engineHandoff(lane, { signal, deadline = 15000 } = {}) {
   return {
     get represented() {
       return lane._represented;
+    },
+    // The newest file the lane holds, queued or applied: a frame the engine took
+    // while the switch prepared is newer than the one on the page, and a session
+    // built from the older one must refuse rather than stop the lane over it.
+    get held() {
+      let newest = lane._represented;
+      if (lane._pendingHtml != null) {
+        newest = newer(newest, {
+          bytes: lane._pendingHtml,
+          etag: lane._pendingEtag ?? null,
+          seq: lane._pendingSeq ?? null,
+        });
+      }
+      if (lane._pendingExternal) {
+        newest = newer(newest, {
+          bytes: lane._pendingExternal.html,
+          etag: lane._pendingExternal.etag ?? null,
+          seq: lane._pendingExternal.seq ?? null,
+        });
+      }
+      return newest;
     },
     async reconcile() {
       if (!lane._handoff || lane.isDestroyed) return;

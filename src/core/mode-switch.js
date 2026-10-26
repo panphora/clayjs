@@ -145,22 +145,27 @@ export async function prepareReader(handle, context = {}) {
 /**
  * Start the reader a view holds, from the file the session left: the page-view reader
  * paints that receipt at once and asks the host for nothing, and the saved lane starts
- * with it, so a second entry has a file without waiting for a frame. `accepted` null
- * starts the reader as a view boot does.
+ * with it, so a second entry has a file without waiting for a frame. Every reader the page
+ * ran before the entry starts again, so a page-view reader that follows generic sync's
+ * saved lane gets that lane back too. `accepted` null starts the reader as a view boot does.
  *
  * @param {object} handle - the loader's handle
  * @param {?{bytes: string, etag: ?string, seq: ?number}} accepted - the receipt to start from
  */
 export function startReader(handle, accepted = null) {
   const pageView = handle?.loaded?.["plugins/page-view.js"];
+  // The plan this page booted, not what an entry imported: a Document's edit plan
+  // carries generic sync as well, and the reader is restarted as the one it was.
+  const sync = Array.isArray(handle?.view?.plugins)
+    ? handle.view.plugins.includes("sync/live-sync.js")
+    : Boolean(handle?.loaded?.["sync/live-sync.js"]);
   if (pageView) {
-    // The plan this page booted, not what an entry imported: a Document's edit plan
-    // carries generic sync as well, and the reader is restarted as the one it was.
-    const sync = Array.isArray(handle.view?.plugins)
-      ? handle.view.plugins.includes("sync/live-sync.js")
-      : Boolean(handle.loaded["sync/live-sync.js"]);
     const start = pageView.restart ?? pageView.start;
-    return start({ sync, represented: accepted });
+    start({ sync, represented: accepted });
+    // Every reader the page ran before the entry comes back, not the first one found:
+    // with `plugins=page,sync` the page-view reader follows generic sync's saved lane,
+    // so that lane is restarted too and the article keeps following other tabs.
+    if (!sync) return undefined;
   }
   const lane = syncLane(handle?.loaded?.["sync/live-sync.js"]);
   if (lane) return lane.start(lane.currentFile, { lane: "saved", represented: accepted });

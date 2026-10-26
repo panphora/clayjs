@@ -211,8 +211,9 @@ async function enter(handle = null) {
           throw Object.assign(fault("the page moved since the last session", baseline.code || "pending-input"), baseline);
         }
         // One more look, because a frame can land while the roster prepares: the session
-        // is built from the file the reader represents, not from a newer one.
-        if (superseded(reader?.represented, context.represented)) {
+        // is built from the newest file the reader holds, queued or applied, not from an
+        // older one it still shows.
+        if (superseded(reader?.held ?? reader?.represented, context.represented)) {
           throw fault("the reader holds a newer file than the session was built from", "stale-document");
         }
       }
@@ -254,6 +255,10 @@ async function enter(handle = null) {
   if (!ready) {
     // The entry is over; its continuation still holds a lease that has not resolved.
     preparation.catch(() => {});
+    // Everything already prepared is a claim on the article and a save hold: it goes
+    // before the article is given back, so the reader takes it and the view updates.
+    // Whatever the continuation prepares after this is disposed by its own catch.
+    disposeInReverse(prepared.splice(0));
     giveBack(reader);
     return refuse("timeout");
   }
@@ -272,11 +277,16 @@ async function enter(handle = null) {
     for (const lease of prepared) lease.enable();
   } catch (err) {
     // The blocked fault: the facts and the root attribute go back, everything prepared is
-    // taken back in reverse, and the page keeps the reason.
+    // taken back in reverse, and the page keeps the reason. The reader this entry retired
+    // is restarted from the file it handed over, so the view keeps receiving files.
     commitModeFacts({ mode: before, isEditMode: editBefore });
     setRootEditMode(false);
     disposeInReverse(prepared);
     controller.abort();
+    if (handle) {
+      const plan = await import("./mode-switch.js").catch(() => null);
+      plan?.startReader(handle, entryReceipt);
+    }
     return refuse(err?.code || "load-failed", "blocked", { message: err?.message });
   }
   leases = prepared;
