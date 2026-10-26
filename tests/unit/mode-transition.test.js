@@ -182,14 +182,14 @@ test("an undeclared document keeps the guarded reload", async () => {
   expect(JSON.parse(receipt())).toMatchObject({ mode: "edit", internal: true });
 });
 
-test("a declared document whose edit plan asks for a module with no adapter keeps the guarded reload", async () => {
+test("a declared document whose edit plan asks for a module with no support row keeps the guarded reload", async () => {
   const log = [];
-  // Sortable is a real lease, but this release has no adapter registered for its path,
-  // so the document cannot be started and taken back without a reload.
+  // People has no support row yet, so the document cannot be started and taken back
+  // without a reload.
   const clay = await bootPage({
     owner: true,
     declared: true,
-    params: "plugins=sortable&exclude=richclay,source",
+    params: "plugins=people&exclude=richclay,source",
     queue: [participant("template:board", log)],
   });
 
