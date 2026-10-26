@@ -4,7 +4,6 @@
 import { canEdit, isDraftMode, isEditMode, isOwner, mode, modeState, registerModeParticipant } from "./is-edit-mode.js";
 import { writeReceipt } from "./mode-receipt.js";
 import onDomReady from "../lib/dom-ready.js";
-import { addDocumentTransform } from "./snapshot.js";
 
 let leaving = false;
 
@@ -84,13 +83,6 @@ function keepModeOnReload() {
   window.addEventListener("pagehide", () => { if (!leaving) writeReceipt({ mode, canEdit: true, internal: false }); });
 }
 
-export function setViewerPageTypeBeforeSave () {
-  addDocumentTransform(docElem => {
-    docElem.setAttribute("editmode", "false");
-    docElem.setAttribute("pageowner", "false");
-  });
-}
-
 export function setPageTypeOnPageLoad () {
   onDomReady(() => {
     document.documentElement.setAttribute("editmode", isEditMode ? "true" : "false");
@@ -109,7 +101,6 @@ export function setPageTypeOnPageLoad () {
 }
 
 function init() {
-  setViewerPageTypeBeforeSave();
   setPageTypeOnPageLoad();
   keepModeOnReload();
 }
