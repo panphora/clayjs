@@ -26,6 +26,8 @@ export function createInstall({ gen = 0, isCurrent = () => true, onPhase = null 
     controller: new AbortController(),
     disposers: [],
     disposed: false,
+    steps: null,
+    deferred: null,
   };
 }
 
@@ -160,7 +162,7 @@ function settleBranches(inst, branches) {
 // authority is prepared, mount, adopt, then enable input. Every step reports an
 // outcome and every await is followed by an ownership check, so a late or
 // cancelled installation can neither mutate the page nor mark it ready.
-export async function runBoot(inst, steps) {
+export async function runBoot(inst, steps, { activate = true } = {}) {
   mark("document:boot", inst);
   setPhase(inst, PHASES.loading);
 
@@ -200,10 +202,36 @@ export async function runBoot(inst, steps) {
   if (!isCurrent(inst)) return null;
   if (!adoption.ok) return stop(inst, adoption, steps);
 
+  // A session that has not committed yet stages the editor and leaves input and every
+  // write closed: the checks input waits for run now, so the commit that opens it has
+  // nothing left to wait on or fail.
+  if (!activate) {
+    if (steps.prepareInput) {
+      const prepared = await steps.prepareInput(inst, mounted);
+      if (!isCurrent(inst)) return null;
+      if (!prepared.ok) return stop(inst, prepared, steps);
+    }
+    inst.deferred = mounted;
+    return { phase: inst.phase, view: mounted.view, deferred: true };
+  }
+
   const enabled = await steps.enableInput(inst, mounted);
   if (!isCurrent(inst)) return null;
   if (!enabled.ok) return stop(inst, enabled, steps);
 
+  mark("document:input-ready", inst);
+  return setPhase(inst, PHASES.ready);
+}
+
+// The commit that enters edit opens the input the preparation held back. Every check
+// it needs passed for this very mount, so it is synchronous: it changes activation
+// only, never durable data.
+export function activateInput(inst) {
+  const mounted = inst.deferred;
+  inst.deferred = null;
+  if (!mounted || !isCurrent(inst)) return inst.result ?? null;
+  const opened = inst.steps?.openInput?.(inst, mounted);
+  if (!opened?.ok) return finishBlocked(inst, opened?.reason ?? "input-refused");
   mark("document:input-ready", inst);
   return setPhase(inst, PHASES.ready);
 }

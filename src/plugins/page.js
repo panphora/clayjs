@@ -2,9 +2,9 @@ import { FEATURES, featureForType } from "../page/features/registry.js";
 import { mergeEngine } from "../sync/merge-engine.js";
 import { registerUnsavedState } from "../lib/unsaved-state.js";
 import { hostMeta } from "../core/host-meta.js";
-import { holdAllSaves, releaseAllSaves, getLastSavedBytes } from "../core/save.js";
+import { savePageForce, holdAllSaves, releaseAllSaves, suspendAutosave, resumeAutosave, getLastSavedBytes } from "../core/save.js";
 import { setSaveHeader } from "../core/save-core.js";
-import { lastSeenEtag, representedEtag } from "../core/etag.js";
+import { lastSeenEtag, representedEtag, recordEtag } from "../core/etag.js";
 import { captureForSaveAndComparison } from "../core/snapshot.js";
 import { storeOf, stageStore, checkpointWithin, requestCheckpoint, fastLane, pageLaneReady, pageWriterReady } from "./live.js";
 import { parseJsonRelaxed } from "../vendor/hyper-morph-json.vendor.js";
@@ -12,7 +12,7 @@ import { saveStateFor, BLOCKED_TEXT, RETRY_TEXT, downloadPageCopy, downloadSnaps
 import toast, { toastPersistent, dismissPersistent } from "../ui/toast.js";
 import { claim } from "../page/runtime-owner.js";
 import { authorIdentity } from "../page/ybind/author.js";
-import { createInstall, disposeInstall, addDisposer, finishError, isCurrent, ownsView, runBoot } from "../page/boot.js";
+import { createInstall, disposeInstall, addDisposer, finishError, isCurrent, ownsView, runBoot, activateInput } from "../page/boot.js";
 import { capabilityAdvertised } from "../page/tool-capability.js";
 import { toolViews } from "../page/tool-views.js";
 import { style } from "../lib/hostile-css.js";
@@ -29,6 +29,10 @@ const OVERWRITTEN_TEXT = "Some changes you made were replaced by a change made o
 const REPLACED_HOLD = "The page was changed outside the editor; reload to see it.";
 const LOADING_MS = 150;
 const LOADING_TEXT = "Loading the editor\u2026";
+// The hold a managed session keeps between preparation and its commit: no save, no
+// checkpoint and no live frame of this tab's reaches the file while the mode is still
+// view. Released without replay, because a save missed here belongs to no session.
+const SESSION_HOLD = "the page session has not committed yet";
 
 const isPlainObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 
@@ -264,6 +268,9 @@ function listenForSaves(inst) {
     const code = event.detail?.code ?? null;
     applySaveState(inst, saveStateFor({ code }), code, event.detail?.msg ?? "");
   });
+  const onRefusedFirstWrite = (event) => { retryFirstWrite(inst, event); };
+  listen(inst, "clay:save-conflict", onRefusedFirstWrite);
+  listen(inst, "clay:save-error", onRefusedFirstWrite);
   listen(inst, "clay:save-saved", (event) => {
     applySaveState(inst, saveStateFor({ ok: true }), null, event.detail?.msg ?? "");
     inst.savedRev = savedRevOf(inst);
@@ -279,6 +286,48 @@ function listenForSaves(inst) {
     const code = event.detail?.code ?? null;
     applySaveState(inst, saveStateFor({ code }), code, event.detail?.message ?? "");
   });
+}
+
+// The page the host stores now, read once: the article a first write is offered to
+// again, and the version it is offered against.
+async function readStoredArticle() {
+  const response = await fetch(new URL(globalThis.location.href).href, { cache: "no-store" });
+  if (!response?.ok) return null;
+  const html = await response.text();
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const article = doc.querySelector(ARTICLE_SEL);
+  if (!article) return null;
+  return { article, etag: response.headers?.get?.("etag") || null };
+}
+
+// A refused first write: the stored document has moved on, or it does not descend
+// from the seed this tab staged. The stored document is read once, the seed is rebuilt
+// from its article, this tab's own pending edit replays over it, and the write goes
+// out once more against the version just read. A second refusal keeps the text in the
+// tab and shows the conflict, exactly as a lone refusal does.
+async function retryFirstWrite(inst, event) {
+  const staged = inst.staged;
+  if (!staged || inst.staleRetry || inst.replaced) return;
+  const refusal = event?.detail?.code ?? null;
+  if (refusal !== "page-lineage-stale" && refusal !== "conflict") return;
+  if (!inst.store || !staged.isPending()) return;
+  inst.staleRetry = true;
+  try {
+    const found = await readStoredArticle();
+    if (!found || !isCurrent(inst)) return;
+    const page = await pageCodeReady();
+    if (!isCurrent(inst)) return;
+    const seed = page.seedPageFromArticle(found.article.cloneNode(true));
+    // This tab's next write is conditional on the version it has just read.
+    const at = found.etag ?? event?.detail?.etag ?? null;
+    if (at) recordEtag(at);
+    // The tab's own edit replays over the seed the stored article states; an op the
+    // stored article cannot hold is dropped by the store, never written over it.
+    inst.store.rebase(seed, { source: "state" });
+    await savePageForce();
+  } catch (error) {
+    console.warn("clayjs: page plugin could not offer the refused first write again", error);
+  }
 }
 
 function restoreArticle(inst) {
@@ -370,6 +419,10 @@ function dispose() {
   inst.titleObserver?.dispose();
   inst.titleObserver = null;
   clearLoadingStatus(inst);
+  // A session torn down from here rather than by its own lease gives back the holds
+  // it took, so nothing it closed stays closed.
+  if (inst.sessionHeld) releaseAllSaves({ replay: false, reason: SESSION_HOLD });
+  if (inst.autosaveSuspended) resumeAutosave();
   if (inst.view && !inst.view.isDestroyed) {
     try { inst.view.destroy(); } catch (error) { console.error("clayjs: page plugin view failed to destroy", error); }
   }
@@ -390,6 +443,7 @@ export function createSteps(inst, options) {
   let aiTool = null;
   let toolsOpening = null;
   let chrome = null;
+  let setEditorActive = null;
 
   // The view parts install onto the editor, which exists only after the mount; an
   // install that starts before it waits here, and a disposed install releases it.
@@ -572,6 +626,7 @@ export function createSteps(inst, options) {
     let editor = null;
     try {
       editor = await import("../page/editor.js");
+      setEditorActive = editor.setEditorActive;
       chrome = { holdSlashRange: code.holdSlashRange, heldSlashRange: code.heldSlashRange };
     } catch (error) {
       // A host that blocked the download keeps the saved article and reads this reason.
@@ -617,7 +672,7 @@ export function createSteps(inst, options) {
       if (source.seeded) {
         const staged = stageStore("page", {
           value: source.seedValue,
-          represented: { bytes: source.article.outerHTML, etag: representedEtag() ?? lastSeenEtag() },
+          represented: options.represented ?? { bytes: source.article.outerHTML, etag: representedEtag() ?? lastSeenEtag() },
         });
         inst.staged = staged;
         handle = staged.handle;
@@ -883,21 +938,13 @@ export function createSteps(inst, options) {
     return outcome;
   }
 
-  async function enableInput(inst, mounted) {
-    // The blocks the document had at boot have their controls now, so the saved article
-    // gives way to the editor.
-    const showEditor = () => {
-      for (const node of savedContent) node.remove();
-      const shell = mounted.view.dom.closest(".page-shell");
-      if (shell) shell.style.visibility = "";
-    };
+  // Everything input waits for, checked without turning anything on: the parts the
+  // saved article demands, any part the document gained while the page booted, and this
+  // installation's own view still in the article it claimed.
+  async function prepareInput(inst, mounted) {
     // A replacement that landed while the page was still booting keeps the editor
     // read-only: the notice is already up, and this tab must not edit the old article.
-    if (inst.replaced) {
-      showEditor();
-      stopEditing(inst);
-      return { ok: false, reason: "page-replaced" };
-    }
+    if (inst.replaced) return { ok: false, reason: "page-replaced" };
     await featuresReady;
     if (!isCurrent(inst)) return { ok: false, cancelled: true };
     // The gate: this installation's own view, still in the article it claimed, over
@@ -915,18 +962,57 @@ export function createSteps(inst, options) {
       await Promise.allSettled(late.map((id) => features.ensure(id)));
       if (!isCurrent(inst)) return { ok: false, cancelled: true };
     }
-    showEditor();
+    return { ok: true };
+  }
+
+  // The one place the saved article gives way to the editor, and the only place input
+  // opens. It changes activation only, and only after preparation already passed, so
+  // the commit that enters edit cannot fail here.
+  function openInput(inst, mounted) {
+    const shell = mounted.view.dom.closest(".page-shell");
+    const showEditor = () => {
+      for (const node of savedContent) node.remove();
+      if (shell) shell.style.visibility = "";
+    };
     // A replacement that landed during the feature wait keeps the editor read-only,
     // exactly as one that landed before it does.
     if (inst.replaced) {
+      showEditor();
       stopEditing(inst);
       return { ok: false, reason: "page-replaced" };
     }
+    if (inst.inputOpen) return { ok: true };
+    if (!ownsView(inst, mounted) || !shell || !shell.isConnected || mounted.view.isDestroyed) {
+      return { ok: false, reason: "view-detached" };
+    }
+    showEditor();
     shell.inert = false;
-    mounted.view.setProps({ editable: () => true });
+    setEditorActive?.(mounted.view, true);
+    inst.inputOpen = true;
     clearLoadingStatus(inst);
-
     return { ok: true };
+  }
+
+  // A refused or unfinished exit closes admission again without touching a buffer, so
+  // a `resume` puts the very same session back.
+  function closeInput(inst) {
+    if (!inst.inputOpen) return false;
+    setEditorActive?.(inst.view, false);
+    return true;
+  }
+
+  function resumeInput(inst) {
+    if (!inst.inputOpen) return false;
+    setEditorActive?.(inst.view, true);
+    return true;
+  }
+
+  // The legacy boot: preparation and the commit are one, because there is no
+  // coordinator to wait for.
+  async function enableInput(inst, mounted) {
+    const prepared = await prepareInput(inst, mounted);
+    if (!prepared.ok) return prepared;
+    return openInput(inst, mounted);
   }
 
   // A boot that ends without an editor gives up what its branches acquired: the room's
@@ -937,21 +1023,26 @@ export function createSteps(inst, options) {
     abandonEditor(inst);
   };
 
-  return { readSource, loadEditorAssets, prepareAuthority, mountAndAttach, adoptSource, enableInput, release };
+  const steps = { readSource, loadEditorAssets, prepareAuthority, mountAndAttach, adoptSource, prepareInput, openInput, closeInput, resumeInput, enableInput, release };
+  inst.steps = steps;
+  return steps;
 }
 
-async function run(inst, options = {}) {
-  return runBoot(inst, createSteps(inst, options));
+async function run(inst, options = {}, { activate = true } = {}) {
+  return runBoot(inst, createSteps(inst, options), { activate });
 }
 
-function install(options = {}) {
+// One installation, and the boot it runs. A managed session is the same installation
+// with its commit left to the coordinator: `activate: false` stops the boot where the
+// editor is staged and still takes no input.
+function begin(options = {}, { activate = true, context = null } = {}) {
   dispose();
   ended = null;
   const gen = ++generation;
   const inst = {
     ...createInstall({
       gen,
-      isCurrent: () => gen === generation,
+      isCurrent: () => gen === generation && (context?.isCurrent?.() ?? true),
       onPhase: (result) => {
         // A settled boot says so by taking the waiting line away, whatever it settled
         // as: there is nothing left to wait for.
@@ -959,15 +1050,123 @@ function install(options = {}) {
         options.onPhase?.(result);
       },
     }),
-    article: null, view: null, binding: null, adoption: null, source: null, store: null, toolHost: null, aiTool: null, bootHtml: "", bootRev: null, savedRev: null, staged: null, releaseArticle: null, replaced: false, savesHeld: false, flush: null, listeners: [], retryTimer: null, retryShown: false, statusTimer: null, statusNote: null, notices: null, editorReadyResolve: null,
+    article: null, view: null, binding: null, adoption: null, source: null, store: null, toolHost: null, aiTool: null, bootHtml: "", bootRev: null, savedRev: null, staged: null, releaseArticle: null, replaced: false, savesHeld: false, flush: null, listeners: [], retryTimer: null, retryShown: false, statusTimer: null, statusNote: null, notices: null, editorReadyResolve: null, context, inputOpen: false, sessionHeld: false, autosaveSuspended: false, staleRetry: false,
   };
   active = inst;
-  return run(inst, options).catch((error) => {
+  const boot = run(inst, options, { activate }).catch((error) => {
     console.error("clayjs: page plugin failed to install", error);
     ended = finishError(inst, "boot-failed");
     if (active === inst) dispose();
     return ended;
   });
+  return { inst, boot };
+}
+
+function install(options = {}) {
+  return begin(options).boot;
+}
+
+// What a session's own end gives back, whether or not the coordinator still calls the
+// page: its view, its listeners, its binding and its staged store go, and the article
+// comes back from the page the host accepted rather than from the editor's own DOM.
+function endSession(inst) {
+  if (active === inst) {
+    active = null;
+    generation += 1;
+  }
+  setSaveHeader("Page-Write", null);
+  disposeInstall(inst);
+  if (inst.retryTimer) {
+    clearTimeout(inst.retryTimer);
+    inst.retryTimer = null;
+  }
+  inst.titleObserver?.dispose();
+  inst.titleObserver = null;
+  clearLoadingStatus(inst);
+  if (inst.view && !inst.view.isDestroyed) {
+    try { inst.view.destroy(); } catch (error) { console.error("clayjs: page plugin view failed to destroy", error); }
+  }
+  inst.view = null;
+  releaseMounted(inst);
+  restoreArticle(inst);
+}
+
+// What the coordinator holds between the commit that enters edit and the one that
+// leaves it: preparation is `ready`, the commit is `enable`, a refused exit is
+// `quiesce` then `resume`, and the committed exit is `dispose`.
+export function preparePageSession(context = null, options = {}) {
+  holdAllSaves(SESSION_HOLD);
+  const { inst, boot } = begin(options, { activate: false, context });
+  inst.sessionHeld = true;
+  const releaseHold = () => {
+    if (!inst.sessionHeld) return;
+    inst.sessionHeld = false;
+    releaseAllSaves({ replay: false, reason: SESSION_HOLD });
+  };
+  const ready = boot.then((result) => {
+    if (!result?.deferred) {
+      throw Object.assign(new Error("clayjs: the page session could not prepare"), { code: result?.reason ?? "load-failed" });
+    }
+    return undefined;
+  });
+  // A preparation the coordinator never holds, and never disposes either, must not
+  // keep the page's saves closed: it gives its hold back as it fails.
+  ready.catch(() => { releaseHold(); });
+  return {
+    ready,
+    // Synchronous after preparation: it opens admission, input and the lane's writes,
+    // and nothing it does can fail.
+    enable() {
+      releaseHold();
+      activateInput(inst);
+    },
+    quiesce() {
+      // A composition in flight is not this session's to cut: the exit is refused, and
+      // the text stays where the person is typing it.
+      if (inst.view?.composing) {
+        throw Object.assign(new Error("clayjs: a composition is still in progress"), { code: "composition" });
+      }
+      inst.steps?.closeInput?.(inst);
+      // Scheduled autosaves stop here; the buffers, the selection and the exit's own
+      // flush stay exactly as they were.
+      if (!inst.autosaveSuspended) {
+        inst.autosaveSuspended = true;
+        suspendAutosave();
+      }
+    },
+    resume() {
+      releaseHold();
+      if (inst.autosaveSuspended) {
+        inst.autosaveSuspended = false;
+        resumeAutosave();
+      }
+      inst.steps?.resumeInput?.(inst);
+    },
+    dispose() {
+      releaseHold();
+      if (inst.autosaveSuspended) {
+        inst.autosaveSuspended = false;
+        resumeAutosave();
+      }
+      endSession(inst);
+    },
+  };
+}
+
+/**
+ * The page as a mode participant: the editor the commit that enters edit opens, over
+ * the page the host already stores, and the one the exit takes back. `prepare` stages
+ * the article, the room and the editor without taking input or writing; the commit
+ * enables the same session.
+ */
+export function pageParticipant(options = {}) {
+  return {
+    id: "clay:page",
+    order: 100,
+    prepare(context) {
+      return preparePageSession(context, options);
+    },
+  };
 }
 
 export const page = {

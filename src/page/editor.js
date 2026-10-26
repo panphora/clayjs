@@ -408,6 +408,15 @@ export function refreshMountedView(view) {
   view.updateState(view.state);
 }
 
+// Admission on a mounted editor, in one place: the commit that enters edit opens it,
+// and the exit that holds the session closed shuts it without touching a buffer.
+export function setEditorActive(view, active) {
+  if (!view || view.isDestroyed) return false;
+  const open = active === true;
+  view.setProps({ editable: () => open });
+  return open;
+}
+
 // Clicking a checklist box (drawn by ::before in the item's start gutter)
 // toggles `checked`.
 function checkboxClick(view, event) {
