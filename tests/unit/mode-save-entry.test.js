@@ -220,17 +220,37 @@ test("a second entry installs no second listener and saves its own edit", async 
   expect(posts[posts.length - 1]).toContain("second entry edit");
 }, 20000);
 
-test("a re-entry at the same version refuses a page that drifted while stopped", async () => {
+test("a re-entry at the same version takes the page a view script moved", async () => {
   const second = openLeases[openLeases.length - 1];
+  const accepted = save.acceptedReceipt();
+  exit(second);
+
+  // The change a view-time script makes between sessions: a clock, a counter, a reader's
+  // own repaint. The DOM moves, the file does not, and this tab holds no work of its own.
+  document.getElementById("content").textContent = "written by a view script";
+  await flush();
+
+  const adopted = await enter({ etag: accepted.etag });
+  expect(adopted.adoption).toEqual({ ok: true });
+  // The page as it now stands is the baseline, so the page's own write is not work the
+  // person has to resolve.
+  expect(save.getLastSavedContents()).toBe(snapshot.captureForComparison());
+  expect(warning.hasUnsavedChanges()).toBe(false);
+}, 20000);
+
+test("a re-entry at the same version refuses work its session never saved", async () => {
+  const third = openLeases[openLeases.length - 1];
   const accepted = save.acceptedReceipt();
   const keptContents = save.getLastSavedContents();
   const keptDirty = save.getLastSavedDirty();
-  exit(second);
 
-  // The change a released page-level listener or a late transform can make in view: the
-  // DOM moves, the file does not.
-  document.getElementById("content").textContent = "changed while in view";
+  // An edit made while admission is closed, and a session that ends without writing it:
+  // the bytes are this tab's and the host has never seen them.
+  third.autosaveLease.quiesce();
+  third.saveLease.quiesce();
+  document.getElementById("content").textContent = "edited and never saved";
   await flush();
+  exit(third);
 
   const refused = await enter({ etag: accepted.etag });
   expect(refused.adoption).toEqual({ ok: false, code: "pending-input" });

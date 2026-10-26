@@ -183,7 +183,12 @@ export async function boot(base, params, readyResolve, manifest = null, suppleme
 // the module is not fetched, not attached and not announced. Dropping is not a reload —
 // nothing is re-imported with a cache-busting URL, and a later entry asks the module
 // cache for the same single instance.
-const stale = (path, editMode) => !editMode.isEditMode && PLUGIN_PATHS[PLUGIN_NAMES[path]]?.editOnly;
+//
+// A transition in flight counts as left: until it commits, `isEditMode` still reads the
+// mode being left, and a module that evaluated then would start an unadopted session.
+const stale = (path, editMode) =>
+  PLUGIN_PATHS[PLUGIN_NAMES[path]]?.editOnly &&
+  (!editMode.isEditMode || editMode.modeState().phase !== "idle");
 
 // Plugins no first paint or keystroke waits for. They load after the editor takes input
 // (right away on a page without one), one at a time and in plan order, and a failure

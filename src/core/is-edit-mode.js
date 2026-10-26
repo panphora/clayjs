@@ -140,6 +140,15 @@ const refuseUnlessIdleInView = () => {
   if (lifecycle.phase !== "idle" || isEditMode) refuse("the page is not idle in view");
 };
 
+// A blocked page is a view with a reason: the transition that refused is over and the page
+// is not idle only so the refusal can be read. A participant that arrives then is recorded
+// for the next entry, which is the answer the block already gave, so it is not a second
+// refusal on top of it.
+const refuseUnlessAnEntryCanTakeIt = () => {
+  if (lifecycle.phase === "blocked" && !isEditMode) return;
+  refuseUnlessIdleInView();
+};
+
 export function takeModeParticipants() {
   registered.clear();
   return queue.splice(0);
@@ -149,7 +158,7 @@ export function registerModeParticipant(participant) {
   const id = participant && participant.id;
   if (typeof id !== "string" || !id || typeof participant.prepare !== "function") refuse("a participant needs an id and a prepare()");
   if (registered.has(id)) refuse(`duplicate participant id "${id}"`);
-  refuseUnlessIdleInView();
+  refuseUnlessAnEntryCanTakeIt();
   registered.add(id);
   queue.push(participant);
   // `live`, not `registered`: a drain clears that set while the roster keeps the
@@ -157,7 +166,7 @@ export function registerModeParticipant(participant) {
   let live = true;
   return () => {
     if (!live) return;
-    refuseUnlessIdleInView();
+    refuseUnlessAnEntryCanTakeIt();
     live = false;
     registered.delete(id);
     const index = queue.indexOf(participant);

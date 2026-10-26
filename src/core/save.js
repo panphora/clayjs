@@ -270,6 +270,11 @@ export function autosaveIsSuspended() {
 let quiescedSessions = 0;
 let parkedWork = false;
 let parkedAutosave = false;
+// Whether the page still held bytes no save had written when its session stopped. A
+// view-time write is not that: an entry takes the page as it stands. Work an editing
+// session left unsaved is the person's, and absorbing it into a baseline would make it
+// read as saved, so the next entry refuses instead.
+let unsavedAtStop = false;
 
 /**
  * Whether a save may go out right now.
@@ -288,6 +293,20 @@ export function savesAdmitted(permit = null) {
  */
 export function sessionParked() {
   return parkedWork;
+}
+
+// The bytes a stopping session leaves behind, that no save has written: parked work is
+// work even when the page has been put back since, and a capture that throws counts as
+// work, because "nothing is unsaved" is the one answer that can lose something.
+function heldWork() {
+  if (parkedWork) return true;
+  try {
+    const current = captureForDirtyCheck({ flushUndo: false });
+    if (styleAdoptionPending(current)) return false;
+    return current !== lastSavedDirty;
+  } catch {
+    return true;
+  }
 }
 
 /**
@@ -333,6 +352,9 @@ export function saveSession() {
     stop() {
       if (phase === "stopped") return;
       const wasQuiesced = phase === "quiesced";
+      // A session that ran and is now over answers for the bytes it leaves behind, so an
+      // entry after it can tell the person's work from what a script did in view.
+      if ((wasQuiesced || phase === "open") && heldWork()) unsavedAtStop = true;
       phase = "stopped";
       if (!wasQuiesced) return;
       quiescedSessions--;
@@ -377,21 +399,24 @@ export function acceptedReceipt(generation = saveGenerationAt) {
  * is installed. One capture, both baselines, the settled mark and its event: the boot
  * settle's job without a second settle over the reader's DOM.
  *
- * A second entry keeps the first one's baseline, taken at a version of the file. If the
- * reader still represents that version and the page has moved since, the difference is
- * work this tab holds that the file never delivered; absorbing it would make that work
- * read as saved, so it is refused and nothing moves.
+ * A second entry keeps the first one's baseline, taken at a version of the file. A page
+ * that moved while it was in view is taken as it now stands: a clock, a counter or a
+ * reader's own repaint is the page's doing, not the person's, and refusing it would block
+ * every entry for as long as that write stays. What is refused is the one case that is
+ * the person's: the reader still represents the version this tab's baseline was taken at,
+ * and the session it ran left work no save wrote.
  */
 export function adoptEntryBaseline({ represented } = {}) {
   const token = gateCaptureToken();
   const { forComparison, forDirty } = captureForComparisonAndDirty();
   const etag = typeof represented?.etag === "string" && represented.etag ? represented.etag : null;
 
-  if (baselineKept && etag !== null && etag === baselineEtag &&
+  if (baselineKept && etag !== null && etag === baselineEtag && unsavedAtStop &&
       (forComparison !== lastSavedContents || forDirty !== lastSavedDirty)) {
     return { ok: false, code: "pending-input" };
   }
 
+  unsavedAtStop = false;
   setLastSavedBaselines(forComparison, forDirty);
   baselineContents = forComparison;
   baselineActive = false;
@@ -663,6 +688,8 @@ function applySaveResult(result, forComparison, forDirty, label, gateToken, forS
     acceptedSave = { bytes: forSave, etag: lastSeenEtag(), generation: saveGenerationAt };
     baselineEtag = acceptedSave.etag;
     baselineKept = true;
+    // These bytes are on the host now, so nothing an earlier session left is still only here.
+    unsavedAtStop = false;
     unsavedChanges = false;
     // Generation-checked: clears the scoped-sync dirty gate only if nothing
     // changed while this save was on the wire.
