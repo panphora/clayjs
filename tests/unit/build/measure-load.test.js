@@ -2,9 +2,11 @@
  * @jest-environment node
  */
 import { afterAll, beforeAll, expect, test } from "@jest/globals";
+import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { DOCUMENT_LOAD_BUDGET } from "../../../scripts/document-load-budget.mjs";
 import { cssImportsOf, measure, measureBuilt } from "../../../scripts/measure-load.mjs";
 import { seedValue } from "../../../src/page/ybind/seed.js";
 
@@ -201,3 +203,137 @@ test("a Document with a tool counts the host and data modules its part opens fir
   expect(paths(measured)).toContain("src/page/tool-data.js");
   expect(measured.lazy).not.toContain("src/page/tools.js");
 });
+
+// The meter's own command line. A bare --built used to fall back to the source meter and
+// print the same table twice; the flag now either names a build directory or fails.
+const SCRIPT = new URL("../../../scripts/measure-load.mjs", import.meta.url).pathname;
+const runMeter = (...args) => spawnSync(process.execPath, [SCRIPT, ...args], { encoding: "utf8" });
+
+test("a bare --built, or --built before another flag, exits nonzero with usage", () => {
+  for (const args of [["--built"], ["--built", "--json"]]) {
+    const run = runMeter(...args);
+
+    expect(run.status).not.toBe(0);
+    expect(run.stderr).toMatch(/--built needs the directory a build wrote/);
+    expect(run.stderr).toMatch(/usage: node scripts\/measure-load\.mjs/);
+    expect(run.stdout).toBe("");
+  }
+}, 120000);
+
+test("a missing build manifest fails, from the command line and as a call", async () => {
+  const empty = mkdtempSync(join(tmpdir(), "clay-no-build-"));
+  try {
+    const run = runMeter("--built", empty, "tests/fixtures/load/document.html");
+
+    expect(run.status).not.toBe(0);
+    expect(run.stderr).toMatch(/no build manifest/);
+    await expect(measureBuilt({ html: fixture("document.html"), mode: "view", dir: empty })).rejects.toThrow();
+  } finally {
+    rmSync(empty, { recursive: true, force: true });
+  }
+}, 120000);
+
+test("a missing fixture fails instead of measuring the rest", () => {
+  const run = runMeter("--built", built, "tests/fixtures/load/no-such-document.html");
+
+  expect(run.status).not.toBe(0);
+  expect(run.stderr).toMatch(/no fixture at /);
+});
+
+// The report says which build it measured: the artifact's own directory, the manifest
+// identity this build wrote, the fixture and the mode. Nothing in it comes from src/.
+test("a valid --built directory is measured from the built graph, pinned to that build", async () => {
+  const run = runMeter("--json", "--mode", "view", "--built", built, "tests/fixtures/load/document.html");
+
+  expect(run.status).toBe(0);
+  const [row] = JSON.parse(run.stdout);
+  const direct = await measureBuilt({ html: fixture("document.html"), mode: "view", dir: built });
+  const manifest = JSON.parse(readFileSync(join(built, "m/manifest.json"), "utf8"));
+  const paths = row.js.files.map((file) => file.path);
+
+  expect(row.file).toBe("tests/fixtures/load/document.html");
+  expect(row.mode).toBe("view");
+  expect(row.artifact).toBe(resolve(built));
+  expect(row.manifest).toEqual({
+    schema: manifest.schema,
+    package: manifest.package,
+    version: manifest.version,
+    build: manifest.build,
+    runtime: manifest.runtime,
+    edit: manifest.edit,
+  });
+  expect(paths).toContain("clay.js");
+  expect(paths.some((path) => path.startsWith("m/"))).toBe(true);
+  expect(paths.filter((path) => path.startsWith("src/"))).toEqual([]);
+  expect(row.js).toEqual(direct.js);
+  expect(row.phases).toEqual(direct.phases);
+}, 180000);
+
+const PHASES = ["viewReady", "editReady", "late", "firstSave", "firstAdoption", "firstUse"];
+
+test("every built phase the page reaches is nonzero, and no asset is counted in two phases", async () => {
+  const view = await measureBuilt({ html: fixture("document-text.html"), mode: "view", dir: built });
+  const edit = await measureBuilt({ html: fixture("document-text.html"), mode: "edit", dir: built });
+
+  for (const key of ["viewReady", "late", "firstSave", "firstAdoption", "firstUse"]) {
+    expect(view.phases[key].requests).toBeGreaterThan(0);
+    expect(view.phases[key].brotli).toBeGreaterThan(0);
+  }
+  // A reader never enters editing, so the editor's own increment is not a reader's phase.
+  expect(view.phases.editReady.requests).toBe(0);
+  for (const key of PHASES) {
+    expect(edit.phases[key].requests).toBeGreaterThan(0);
+    expect(edit.phases[key].brotli).toBeGreaterThan(0);
+  }
+
+  const counted = PHASES.flatMap((key) => edit.phases[key].files.map((file) => file.path));
+  expect(new Set(counted).size).toBe(counted.length);
+  expect(edit.phases.viewReady.files.length + edit.phases.editReady.files.length).toBe(edit.js.files.length);
+  expect(edit.phases.late.requests).toBe(edit.js.late.requests);
+  // What view ready already paid is the editor's increment's to leave alone.
+  const viewReady = new Set(edit.phases.viewReady.files.map((file) => file.path));
+  expect(edit.phases.editReady.files.filter((file) => viewReady.has(file.path))).toEqual([]);
+  expect(view.phases.viewReady.requests + view.phases.editReady.requests).toBe(view.js.files.length);
+  expect(view.phases.viewReady.requests).toBe(view.js.files.length);
+}, 180000);
+
+// A phase report that cannot say what a chunk is would hide the one thing this step is
+// about: parse5 loads with the source plugin, and the merge engine is the reader's.
+test("parse5 and the merge engine are recognized by name in the phase they load", async () => {
+  const edit = await measureBuilt({ html: fixture("document-text.html"), mode: "edit", dir: built });
+
+  expect(edit.phases.viewReady.modules).toContain("sync/merge-engine.js");
+  expect(edit.phases.late.modules).toContain("core/source-map.js");
+  expect(edit.phases.late.modules).toContain("plugins/source.js");
+  expect(edit.phases.late.modules).toContain("vendor/parse5.vendor.js");
+  expect(edit.phases.firstAdoption.modules).toContain("vendor/hyper-morph.vendor.js");
+  for (const key of ["viewReady", "editReady", "firstSave", "firstUse"]) {
+    expect(edit.phases[key].modules).not.toContain("vendor/parse5.vendor.js");
+    expect(edit.phases[key].modules).not.toContain("core/source-map.js");
+  }
+  expect(edit.phases.viewReady.modules).not.toContain("vendor/hyper-morph.vendor.js");
+}, 180000);
+
+// Today's Document baseline, against the ceilings the tests and the meter share: never
+// raised here, and a fixture the ceiling does not cover is reported rather than excused.
+test("the Document baseline is reported against the checked-in load ceilings", async () => {
+  const view = await measureBuilt({ html: fixture("document-text.html"), mode: "view", dir: built });
+  const text = await measureBuilt({ html: fixture("document-text.html"), mode: "edit", dir: built });
+  const rich = await measureBuilt({ html: fixture("document-rich.html"), mode: "edit", dir: built });
+
+  expect(view.js.brotli).toBeLessThanOrEqual(DOCUMENT_LOAD_BUDGET.readerBrotli);
+  expect(view.js.depth).toBeLessThanOrEqual(DOCUMENT_LOAD_BUDGET.maxBuiltDepth);
+  expect(text.js.brotli).toBeLessThanOrEqual(DOCUMENT_LOAD_BUDGET.textEditorBrotli);
+  expect(text.js.depth).toBeLessThanOrEqual(DOCUMENT_LOAD_BUDGET.maxBuiltDepth);
+  expect(text.budget.line).toBe("textEditorBrotli");
+  expect(text.budget.stretchReached).toBe(text.js.brotli <= DOCUMENT_LOAD_BUDGET.textEditorStretchBrotli);
+  expect(rich.budget.within).toBe(rich.js.brotli <= DOCUMENT_LOAD_BUDGET.textEditorBrotli);
+  expect(rich.budget.depthWithin).toBe(rich.js.depth <= DOCUMENT_LOAD_BUDGET.maxBuiltDepth);
+  console.log(`document-text.html built view is ${view.js.brotli} B Brotli in ${view.js.requests} requests at depth ${view.js.depth}, ` +
+    `of the ${DOCUMENT_LOAD_BUDGET.readerBrotli} B reader ceiling`);
+  console.log(`document-text.html built edit is ${text.js.brotli} B Brotli at depth ${text.js.depth}, ` +
+    `of the ${DOCUMENT_LOAD_BUDGET.textEditorBrotli} B edit ceiling and the ${DOCUMENT_LOAD_BUDGET.textEditorStretchBrotli} B stretch ` +
+    `(${text.budget.stretchReached ? "reached" : "not reached"})`);
+  console.log(`document-rich.html built edit is ${rich.js.brotli} B Brotli at depth ${rich.js.depth}: ` +
+    `${rich.js.brotli - DOCUMENT_LOAD_BUDGET.textEditorBrotli} B over the edit ceiling, depth over by ${rich.js.depth - DOCUMENT_LOAD_BUDGET.maxBuiltDepth}`);
+}, 180000);

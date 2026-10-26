@@ -3,7 +3,8 @@
 // reads the document's clayjs.com tags and follows the loader's boot order
 // (src/loader.js): the boot prefix, then each core module and plugin, each awaited
 // before the next one starts.
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { brotliCompressSync, constants, gzipSync } from "node:zlib";
@@ -16,6 +17,7 @@ import { FEATURES, featureForType } from "../src/page/features/registry.js";
 import { blocksFromYValue } from "../src/page/ybind/decode.js";
 import { parseJsonRelaxed } from "../src/vendor/hyper-morph-json.vendor.js";
 import { FONT_SHEETS, compileTheme } from "./build-themes.mjs";
+import { DOCUMENT_LOAD_BUDGET } from "./document-load-budget.mjs";
 
 const ROOT = resolve(fileURLToPath(new URL(".", import.meta.url)), "..");
 const CLAY = "https://clayjs.com/v1/";
@@ -481,11 +483,49 @@ function bootstrapFetchHints(code, { search = "", cookie = "" } = {}) {
   return Boolean(likelyEdit(search, cookie));
 }
 
+// Every module a built file serves, for a build made from this source tree. The
+// artifact stays the only source of bytes: a file is named only where this tree's build
+// produced the same path with the same sha256 the artifact's own manifest lists, so a
+// stale or hand-made directory is measured unnamed rather than misnamed.
+const namesByDir = new Map();
+async function chunkModulesOf(dir, manifest) {
+  const key = resolve(dir);
+  if (namesByDir.has(key)) return namesByDir.get(key);
+  const modules = new Map();
+  let outdir = null;
+  try {
+    const { emitChunks } = await import("./build-chunks.mjs");
+    outdir = mkdtempSync(join(tmpdir(), "clay-measure-names-"));
+    const built = await emitChunks({ root: ROOT, outdir: join(outdir, "m") });
+    for (const [out, meta] of Object.entries(built.metafile.outputs)) {
+      const file = relative(join(outdir, "m"), resolve(ROOT, out)).split("\\").join("/");
+      const fresh = built.manifest.files[file];
+      const measured = manifest.files[file];
+      if (!fresh || !measured || measured.sha256 !== fresh.sha256) continue;
+      modules.set(file, Object.keys(meta.inputs ?? {}).map((path) => path.replace(/^src\//, "")));
+    }
+  } catch {
+    modules.clear();
+  } finally {
+    if (outdir) rmSync(outdir, { recursive: true, force: true });
+  }
+  namesByDir.set(key, modules);
+  return modules;
+}
+
+// The save path, the merge engine's own code and the block features are what a later
+// phase can be named after: a module one of them fetches is bytes that trigger pays.
+const SAVE_ASSET = /^(core\/save|core\/autosave|core\/page-data-write|core\/source-map|core\/snapshot|core\/persist|core\/style-comparisons|core\/admin-attrs|attrs\/(add-from|onaftersave|refetch-on-save|save-freeze)|lib\/cache-bust|vendor\/parse5)/;
+const ADOPT_ASSET = /^(sync\/|vendor\/hyper-morph|vendor\/hyper-html-api-upgrade|page\/adopt)/;
+const FIRST_USE = "firstUse";
+
 // A built release is measured from its own files: the bootstrap, the chunks it
 // preloads and, one stage later, the chunks the boot plan adds. Nothing is read from
 // src/, because nothing on the wire is. `search` and `owner` are the boot context the
 // bootstrap's own decision reads: the meter defaults to an owner at the document's own
-// URL, the boot a starter template's reader actually makes.
+// URL, the boot a starter template's reader actually makes. A file is counted once, in
+// the phase that first pays it: view ready, the editor's increment, the work the page
+// starts by itself, then the first save, first merge and first feature use.
 export async function measureBuilt({ html, mode, dir, search = "", owner = true }) {
   const document = parseDocument(html);
   const { bootstrap, params, names, hasSap, templateSource } = document;
@@ -493,37 +533,61 @@ export async function measureBuilt({ html, mode, dir, search = "", owner = true 
   const plan = bootstrap
     ? resolveModules(params, mode === "edit" || isDraftMode, { isDraftMode, hasSap, canEdit: true, templateSource })
     : { core: [], plugins: [] };
+  // What a reader of the same document reaches before ready: an edit page fetches it
+  // too, and a byte counted there is not counted again in the editor's increment.
+  const viewPlan = bootstrap
+    ? resolveModules(params, false, { isDraftMode: false, hasSap, canEdit: true, templateSource })
+    : { core: [], plugins: [] };
   const manifest = JSON.parse(readFileSync(join(dir, "m/manifest.json"), "utf8"));
-  const bootImports = [];
-  if (bootstrap) {
-    for (const path of [...plan.core, ...plan.plugins]) {
+  const chunkModules = await chunkModulesOf(dir, manifest);
+  const bootImportsOf = (target) => {
+    const list = [];
+    for (const path of [...target.core, ...target.plugins]) {
       for (const file of BOOT_IMPORTS[path] ?? []) {
         if (file === "vendor/sap-core.vendor.js" && names.includes("sap.js")) continue;
-        bootImports.push(file);
+        list.push(file);
       }
     }
-    if (mode === "edit") bootImports.push(...EDIT_BOOT_IMPORTS);
-    if (mode === "edit" && plan.plugins.includes(PAGE_PLUGIN)) bootImports.push(...EDITOR_BOOT_IMPORTS);
-  }
-  let entries = manifest.entries;
-  const loaded = new Set();
-  const addChunk = (file) => {
-    if (!file || loaded.has(`m/${file}`)) return false;
-    loaded.add(`m/${file}`);
+    return list;
+  };
+  const editBootImports = mode === "edit"
+    ? [...EDIT_BOOT_IMPORTS, ...(plan.plugins.includes(PAGE_PLUGIN) ? EDITOR_BOOT_IMPORTS : [])]
+    : [];
+
+  const seen = new Set();
+  const boot = [];
+  const push = (path, into) => {
+    if (!path || seen.has(path)) return false;
+    seen.add(path);
+    into.push(path);
     return true;
   };
-  const addClosure = (paths, into = loaded) => {
+  let entries = manifest.entries;
+  const addClosure = (paths, into) => {
     let added = 0;
     const stack = paths.map((p) => entries[p]).filter(Boolean);
     while (stack.length) {
       const file = stack.pop();
-      if (into.has(`m/${file}`)) continue;
-      into.add(`m/${file}`);
+      if (!push(`m/${file}`, into)) continue;
       added++;
       stack.push(...(manifest.files[file]?.imports ?? []));
     }
     return added;
   };
+  // The view-mode reach of the same document, on its own seen set: a reader's part that
+  // the editor replaced (page-view for page) is the reader's alone, and a chunk this
+  // boot never fetches belongs to no phase of it.
+  const viewReach = new Set();
+  const reach = (chunks) => {
+    const stack = [...chunks];
+    while (stack.length) {
+      const file = stack.pop();
+      if (!file || viewReach.has(`m/${file}`)) continue;
+      viewReach.add(`m/${file}`);
+      stack.push(...(manifest.files[file]?.imports ?? []));
+    }
+  };
+  const reachPaths = (paths) => reach(paths.map((p) => entries[p]).filter(Boolean));
   const readBootstrap = (name) => {
     const file = join(dir, name);
     const code = existsSync(file) ? readFileSync(file, "utf8") : null;
@@ -535,7 +599,8 @@ export async function measureBuilt({ html, mode, dir, search = "", owner = true 
   if (bootstrap) {
     const { code, payload } = readBootstrap("clay.js");
     if (!payload) throw new Error(`${dir}/clay.js is not a generated bootstrap`);
-    loaded.add("clay.js");
+    push("clay.js", boot);
+    viewReach.add("clay.js");
     mainDepth = 1;
     // A reader downloads the main manifest and only the main manifest. The edit supplement
     // is fetched beside the manifest when the bootstrap's own predicate says so, and for a
@@ -546,16 +611,25 @@ export async function measureBuilt({ html, mode, dir, search = "", owner = true 
     const hintsWanted = eagerHints || mode !== "view";
     const supplement = hintsWanted && payload.edit ? hintIndex(join(dir, "m", payload.edit)) : null;
     if (supplement) {
-      loaded.add(`m/${payload.edit}`);
+      push(`m/${payload.edit}`, boot);
+      if (mode === "view") viewReach.add(`m/${payload.edit}`);
       entries = { ...supplement.entries, ...manifest.entries };
     }
     let preload = 0;
-    for (const file of payload.preload) if (addChunk(file)) preload++;
+    for (const file of payload.preload) if (push(`m/${file}`, boot)) preload++;
     if (preload) mainDepth++;
-    if (addClosure([...plan.core, ...plan.plugins, ...bootImports])) mainDepth++;
+    // The bootstrap's own preload is the reader's, in every mode: the loader, its
+    // runtime index and the always-wave core a satellite would otherwise repeat.
+    reach(payload.preload);
+    reachPaths([...viewPlan.core, ...viewPlan.plugins, ...bootImportsOf(viewPlan)]);
+    // The plan this boot resolves: an edit page asks for page, never for page-view.
+    const bootPaths = mode === "view"
+      ? [...viewPlan.core, ...viewPlan.plugins, ...bootImportsOf(viewPlan)]
+      : [...plan.core, ...plan.plugins, ...editBootImports];
+    if (addClosure(bootPaths, boot)) mainDepth++;
     // A feature's view part is not one of the chunks a boot preloads: page.js imports it
     // once it has evaluated, so it is a fetch stage after the preloaded plan.
-    if (mode === "edit" && plan.plugins.includes(PAGE_PLUGIN) && addClosure(pageFeatureModules(html))) mainDepth++;
+    if (mode === "edit" && plan.plugins.includes(PAGE_PLUGIN) && addClosure(pageFeatureModules(html), boot)) mainDepth++;
   }
 
   let satelliteDepth = 0;
@@ -564,18 +638,35 @@ export async function measureBuilt({ html, mode, dir, search = "", owner = true 
     // sap.js and clay-data.js import nothing, so the chunk build emits no bootstrap
     // for them and the served file is entries/ itself.
     if (!payload) {
-      loaded.add(`entries/${name}`);
+      push(`entries/${name}`, boot);
+      viewReach.add(`entries/${name}`);
       satelliteDepth = Math.max(satelliteDepth, 1);
       continue;
     }
-    loaded.add(name);
+    push(name, boot);
+    viewReach.add(name);
     let depth = 1;
     let preload = 0;
-    for (const file of payload.preload) if (addChunk(file)) preload++;
+    for (const file of payload.preload) {
+      if (push(`m/${file}`, boot)) preload++;
+      viewReach.add(`m/${file}`);
+    }
     if (preload) depth++;
-    if (payload.entry && addChunk(payload.entry)) depth++;
+    if (payload.entry) {
+      if (push(`m/${payload.entry}`, boot)) depth++;
+      viewReach.add(`m/${payload.entry}`);
+    }
     satelliteDepth = Math.max(satelliteDepth, depth);
   }
+
+  const phases = {
+    viewReady: boot.filter((path) => viewReach.has(path)),
+    editReady: boot.filter((path) => !viewReach.has(path)),
+    late: [],
+    firstSave: [],
+    firstAdoption: [],
+    firstUse: [],
+  };
 
   const depth = Math.max(mainDepth, satelliteDepth);
   // A satellite with no chunk build entry is served as entries/ itself, so its bytes
@@ -592,23 +683,78 @@ export async function measureBuilt({ html, mode, dir, search = "", owner = true 
     return sum;
   };
   const thirdParty = thirdPartyScripts(document);
-  const js = { ...totals([...loaded]), depth, files: [...loaded].map((path) => ({ path, ...sizes(path, rootOf(path)) })) };
+  // What the page holds when the person can act: the reader's boot plus the editor's own.
+  const loaded = [...boot];
+  const js = { ...totals(loaded), depth, files: loaded.map((path) => ({ path, ...sizes(path, rootOf(path)) })) };
   js.requests += thirdParty.length;
 
   // Modules that load after the editor takes input stay out of the numbers above.
-  const late = new Set(loaded);
-  if (plan.late) addClosure(plan.late, late);
-  js.late = totals([...late].filter((path) => !loaded.has(path)));
+  if (plan.late) addClosure(plan.late, phases.late);
 
   const lazy = new Set();
+  const loadedSet = new Set(loaded);
   for (const path of loaded) {
     if (!path.startsWith("m/")) continue;
     for (const dep of manifest.files[path.slice(2)]?.dynamicImports ?? []) {
-      if (!loaded.has(`m/${dep}`)) lazy.add(`m/${dep}`);
+      if (!loadedSet.has(`m/${dep}`)) lazy.add(`m/${dep}`);
     }
   }
 
+  // The triggers a page reaches without a request: an incoming merge, a save, a feature
+  // the boot did not carry. Each is measured once, after everything the page already
+  // held, and a chunk a later trigger fetches inherits that trigger's phase.
+  const modulesOf = (path) => (path.startsWith("m/") ? chunkModules.get(path.slice(2)) ?? [] : []);
+  const triggerOf = (target, from) => {
+    for (const [phase, pattern] of [["firstSave", SAVE_ASSET], ["firstAdoption", ADOPT_ASSET]]) {
+      if (modulesOf(target).some((name) => pattern.test(name))) return phase;
+    }
+    for (const [phase, pattern] of [["firstSave", SAVE_ASSET], ["firstAdoption", ADOPT_ASSET]]) {
+      if (modulesOf(from).some((name) => pattern.test(name))) return phase;
+    }
+    return FIRST_USE;
+  };
+  const dynamicsOf = (path) => (path.startsWith("m/") ? manifest.files[path.slice(2)]?.dynamicImports ?? [] : []);
+  const queue = [];
+  for (const path of loaded) {
+    for (const dep of dynamicsOf(path)) queue.push({ target: `m/${dep}`, from: path, key: triggerOf(`m/${dep}`, path) });
+  }
+  for (const path of phases.late) {
+    for (const dep of dynamicsOf(path)) queue.push({ target: `m/${dep}`, from: path, key: "late" });
+  }
+  // Automatic late work first, then the save, then the merge, then a feature: a chunk
+  // two triggers share is paid once, by the trigger that comes first in this order.
+  const TRIGGER_ORDER = ["late", "firstSave", "firstAdoption", FIRST_USE];
+  queue.sort((a, b) => TRIGGER_ORDER.indexOf(a.key) - TRIGGER_ORDER.indexOf(b.key));
+  while (queue.length) {
+    const { target, from, key } = queue.shift();
+    const stack = [target.slice(2)];
+    const added = [];
+    while (stack.length) {
+      const file = stack.pop();
+      if (!push(`m/${file}`, phases[key])) continue;
+      added.push(`m/${file}`);
+      stack.push(...(manifest.files[file]?.imports ?? []));
+    }
+    for (const path of added) {
+      for (const dep of dynamicsOf(path)) queue.push({ target: `m/${dep}`, from: path, key });
+    }
+  }
+
+  // The automatic late work is measured with what the late plugins themselves start:
+  // an idle page pays for that too, so the late line cannot leave it out.
+  js.late = totals(phases.late);
+
+  const phaseReport = {};
+  for (const [key, list] of Object.entries(phases)) {
+    phaseReport[key] = {
+      ...totals(list),
+      files: list.map((path) => ({ path, ...sizes(path, rootOf(path)) })),
+      modules: [...new Set(list.flatMap(modulesOf))].sort(),
+    };
+  }
+
   const assets = await cssOf(document);
+  const ceiling = mode === "view" ? DOCUMENT_LOAD_BUDGET.readerBrotli : DOCUMENT_LOAD_BUDGET.textEditorBrotli;
   return {
     mode,
     bootstrap,
@@ -618,7 +764,47 @@ export async function measureBuilt({ html, mode, dir, search = "", owner = true 
     ...assets,
     thirdParty: [...thirdParty, ...assets.thirdParty],
     lazy: [...lazy].sort(),
+    artifact: resolve(dir),
+    manifest: {
+      schema: manifest.schema,
+      package: manifest.package,
+      version: manifest.version,
+      build: manifest.build,
+      runtime: manifest.runtime,
+      edit: manifest.edit,
+    },
+    phases: phaseReport,
+    budget: {
+      line: mode === "view" ? "readerBrotli" : "textEditorBrotli",
+      limit: ceiling,
+      measured: js.brotli,
+      within: js.brotli <= ceiling,
+      stretchLimit: DOCUMENT_LOAD_BUDGET.textEditorStretchBrotli,
+      stretchReached: mode === "view" ? null : js.brotli <= DOCUMENT_LOAD_BUDGET.textEditorStretchBrotli,
+      depthLimit: DOCUMENT_LOAD_BUDGET.maxBuiltDepth,
+      depthWithin: depth <= DOCUMENT_LOAD_BUDGET.maxBuiltDepth,
+    },
   };
+}
+
+const PHASE_ROWS = [
+  ["viewReady", "phase view ready"],
+  ["editReady", "phase edit ready"],
+  ["late", "phase automatic late"],
+  ["firstSave", "phase first save"],
+  ["firstAdoption", "phase first adoption"],
+  ["firstUse", "phase first use"],
+];
+
+function usage(message) {
+  console.error(`measure-load: ${message}`);
+  console.error("usage: node scripts/measure-load.mjs [--mode view|edit|draft] [--json] [--built <build directory>] [fixture ...]");
+  process.exit(2);
+}
+
+function fail(message) {
+  console.error(`measure-load: ${message}`);
+  process.exit(1);
 }
 
 function parseArgs(argv) {
@@ -627,10 +813,18 @@ function parseArgs(argv) {
   let json = false;
   let built = null;
   for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === "--mode") mode = argv[++i];
-    else if (argv[i] === "--json") json = true;
-    else if (argv[i] === "--built") built = argv[++i];
-    else files.push(argv[i]);
+    if (argv[i] === "--mode") {
+      const value = argv[++i];
+      if (!value || value.startsWith("--")) usage("--mode needs view, edit or draft");
+      if (!["view", "edit", "draft"].includes(value)) usage(`--mode ${value} is not view, edit or draft`);
+      mode = value;
+    } else if (argv[i] === "--json") json = true;
+    else if (argv[i] === "--built") {
+      // A bare --built used to measure source and print it as built: no directory, no report.
+      const value = argv[++i];
+      if (!value || value.startsWith("--")) usage("--built needs the directory a build wrote");
+      built = value;
+    } else files.push(argv[i]);
   }
   return { files, mode, json, built };
 }
@@ -639,9 +833,14 @@ const kb = (n) => (n / 1024).toFixed(1) + " KB";
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const { files, mode, json, built } = parseArgs(process.argv.slice(2));
+  const dir = built ? resolve(built) : null;
+  if (dir && !existsSync(join(dir, "m", "manifest.json"))) fail(`no build manifest at ${join(dir, "m", "manifest.json")}`);
   const targets = files.length
     ? files
     : readdirSync(FIXTURES).filter((f) => f.endsWith(".html")).sort().map((f) => join(FIXTURES, f));
+  for (const file of targets) {
+    if (!existsSync(file)) fail(`no fixture at ${resolve(file)}`);
+  }
   const results = [];
   for (const file of targets) {
     const html = readFileSync(file, "utf8");
@@ -649,7 +848,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     for (const m of modes) {
       results.push({
         file: relative(ROOT, file),
-        ...(built ? await measureBuilt({ html, mode: m, dir: resolve(built) }) : await measure({ html, mode: m })),
+        ...(dir ? await measureBuilt({ html, mode: m, dir }) : await measure({ html, mode: m })),
       });
     }
   }
@@ -661,6 +860,18 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
       for (const asset of ["js", "css", "fonts"]) {
         const m = r[asset];
         console.log(`${r.file} | ${r.mode} | ${asset} | ${m.requests} | ${kb(m.raw)} | ${kb(m.gzip)} | ${kb(m.brotli)} | ${m.depth}`);
+      }
+      // The artifact this row was measured from, its build identity, then each phase.
+      if (r.phases) {
+        console.log(`${r.file} | ${r.mode} | built ${r.artifact} | build ${r.manifest.build} | ${r.manifest.package} ${r.manifest.version}`);
+        for (const [key, label] of PHASE_ROWS) {
+          const phase = r.phases[key];
+          console.log(`${r.file} | ${r.mode} | ${label} | ${phase.requests} | ${kb(phase.raw)} | ${kb(phase.gzip)} | ${kb(phase.brotli)} |`);
+        }
+        console.log(`${r.file} | ${r.mode} | budget ${r.budget.line} | ${r.budget.measured} | ${r.budget.limit} | ${r.budget.within ? "within" : "over"}`);
+        if (r.budget.stretchReached !== null) {
+          console.log(`${r.file} | ${r.mode} | stretch ${r.budget.stretchLimit} | ${r.budget.measured} | ${r.budget.stretchReached ? "reached" : "not reached"}`);
+        }
       }
       // Another origin's bytes are not this repo's to know: the request is counted, and
       // named per origin, with no byte figure that could be read as zero.
