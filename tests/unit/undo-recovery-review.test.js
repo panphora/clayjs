@@ -331,6 +331,26 @@ test("an action that answers ok:false leaves the row too", async () => {
   expect(await records()).toHaveLength(1);
 });
 
+test("an action that clears its own copy answers ok without dismiss, and the panel says nothing failed", async () => {
+  await undo.keep({ key: "note", label: "Unsent note", payload: { text: "kept by the app" } });
+  await undo.keep({ key: "other", label: "Other note", payload: { text: "still here" } });
+
+  undo.reviewActions((record) => record.key === "app:note" ? [
+    { label: "Keep as new", run: async () => {
+      await undo.dismissKept(record.id, { revision: record.revision });
+      return { ok: true, dismiss: false };
+    } },
+  ] : []);
+
+  await openNotice();
+  await review();
+  buttonSaying(/^Keep as new$/).click();
+
+  expect(await until(async () => (await records()).length === 1 && !rowSaying("Unsent note"))).toBe(true);
+  expect(rowSaying("Other note")).not.toBeNull();
+  expect(panelText()).not.toContain("That action did not run.");
+});
+
 test("a kept refusal offers review the moment it is kept", async () => {
   // The shell, as the loader arms it on an edit boot with nothing stored yet.
   await openShell();

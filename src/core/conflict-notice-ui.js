@@ -849,7 +849,7 @@ async function onUndoAction(entry, item) {
     await onDismissStored(entry);
     return;
   }
-  actionFailed = true;
+  actionFailed = result?.ok !== true;
   await refreshRecovered();
   schedule();
 }
