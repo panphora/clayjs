@@ -386,6 +386,14 @@ class Chrome {
     return this.isPhone() ? all.filter((b) => b.classList.contains("page-tool-primary")) : all;
   }
 
+  // Every transaction asks whether the roving control is still usable: one style read for
+  // that control, not one for every button in the dock.
+  inRoving(control) {
+    if (!control || !this.dock.contains(control)) return false;
+    if (this.isPhone() && !control.classList.contains("page-tool-primary")) return false;
+    return this.rendered(control);
+  }
+
   rendered(control) {
     if (control.hidden) return false;
     const style = this.win?.getComputedStyle?.(control);
@@ -846,7 +854,7 @@ class Chrome {
     this.bubble.hidden = !showBubble;
     if (showBubble) for (const b of this.bubble.querySelectorAll("[data-cmd]")) b.setAttribute("aria-pressed", String(toolActive(st, b.dataset.cmd)));
     this.grip.classList.toggle("is-on", st.selection instanceof BlockSelection);
-    if (!this.dockControls().includes(this.roving)) this.setRoving(this.dockControls()[0]);
+    if (!this.inRoving(this.roving)) this.setRoving(this.dockControls()[0]);
     this.slashQuery();
     this.scheduleLayout();
   }
