@@ -514,13 +514,17 @@ function admitsRecord(rec) {
  * until the request itself settles (a terminal frame, a cancel, or its deadline).
  * `resume` reopens admission over the same records. `dispose` (after the barrier) only
  * forgets the session: with none open the page is back to its unnegotiated rule.
+ *
+ * `initial: true` adopts the boot's rule instead of starting one: an explicit edit boot
+ * negotiated no session, so the adopted lease is admitted from the start and enable has
+ * nothing left to open.
  */
 export function wireParticipant() {
   return {
     id: "clay:wire",
     order: 900,
-    prepare() {
-      const lease = { admitted: false };
+    prepare(context = {}) {
+      const lease = { admitted: context.initial === true };
       session = lease;
       return {
         enable() {
@@ -878,6 +882,8 @@ async function helpers() {
     )
     .map(({ name, state }) => ({ name, state }));
 }
+
+export { wireParticipant as modeParticipant };
 
 export const wire = { send, cancel, get, list, isBusy, on, helpers };
 

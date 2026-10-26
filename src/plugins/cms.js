@@ -61,6 +61,21 @@ function cmsLease(source) {
   };
 }
 
+// The boot this tab made, adopted instead of prepared. A page that opened the CMS itself
+// (`?cms=true`) holds a session the source hands no lease out for, so it cannot be
+// quiesced or torn down through the adapter and the caller keeps its reload instead;
+// a boot that opened nothing has nothing to hand back, and this lease starts nothing.
+function adopt() {
+  if (hypercms.isOpen) throw fault("the CMS this boot opened cannot be taken back", "unsupported-plugin");
+  const lease = cmsLease(hypercms.prepareModeLease({}));
+  return {
+    enable() {},
+    quiesce: () => lease.quiesce(),
+    resume: () => lease.resume(),
+    dispose: () => lease.dispose(),
+  };
+}
+
 /**
  * The CMS as a mode participant: the session the commit that enters edit opens, and the
  * one the exit destroys.
@@ -76,12 +91,15 @@ export function cmsParticipant(options = {}) {
   return {
     id: "clay:cms",
     order: 1000,
-    async prepare(context) {
+    async prepare(context = {}) {
       if (typeof hypercms.prepareModeLease !== "function") {
         throw fault("this vendor build has no quiescable session", "unsupported-plugin");
       }
       if (isStale(context)) throw fault("prepared for a stale generation", "stale-document");
+      if (context.initial === true) return adopt();
       return cmsLease(hypercms.prepareModeLease(options));
     },
   };
 }
+
+export { cmsParticipant as modeParticipant };

@@ -384,3 +384,107 @@ test("an unresolved current conflict refuses the exit and stays on screen throug
   ledger.size = 0;
   ledger.list = () => [];
 });
+
+// --- ai-edit on a live entry ---------------------------------------------------
+
+test("an explicit edit boot is adopted, not built twice, and its dispose takes the composer down", async () => {
+  jest.resetModules();
+  window.clayEditMode = true;
+  fakeWire.helpers.mockClear();
+
+  try {
+    // The boot this tab made at import: one question to the host, one composer.
+    const { aiEditParticipant: participant } = await import("../../src/plugins/ai-edit.js");
+    await flush();
+    await frames();
+    expect(fakeWire.helpers).toHaveBeenCalledTimes(1);
+    expect(panel()).not.toBeNull();
+
+    // Adoption hands back the chrome that boot built, and asks the host nothing again.
+    const adopted = await participant().prepare({ generation: 1, initial: true });
+    await adopted.ready;
+    await flush();
+    expect(fakeWire.helpers).toHaveBeenCalledTimes(1);
+    expect(panel()).not.toBeNull();
+
+    adopted.dispose();
+    expect(chromeCount()).toBe(0);
+
+    // Nothing the boot added opens in the view that follows.
+    clickSection(mountPage());
+    expect(panel()).toBeNull();
+    await flush();
+  } finally {
+    window.clayEditMode = true;
+    fakeWire.helpers.mockResolvedValue([{ name: "ai-edit", state: "ready" }]);
+    jest.resetModules();
+  }
+});
+
+test("a helper answer that lands after the exit draws nothing in view", async () => {
+  jest.resetModules();
+  window.clayEditMode = true;
+  let answer = null;
+  fakeWire.helpers.mockImplementation(() => new Promise((resolve) => {
+    answer = () => resolve([{ name: "ai-edit", state: "ready" }]);
+  }));
+
+  try {
+    // The boot's question is still out when the page leaves edit.
+    const { aiEditParticipant: participant } = await import("../../src/plugins/ai-edit.js");
+    await flush();
+    expect(answer).not.toBeNull();
+
+    const adopted = await participant().prepare({ generation: 1, initial: true });
+    adopted.dispose();
+
+    window.clayEditMode = false;
+    answer();
+    await flush();
+    await frames();
+
+    // The answer belongs to the session that ended: it builds no composer in the view.
+    expect(chromeCount()).toBe(0);
+    expect(panel()).toBeNull();
+  } finally {
+    window.clayEditMode = true;
+    fakeWire.helpers.mockResolvedValue([{ name: "ai-edit", state: "ready" }]);
+    jest.resetModules();
+  }
+});
+
+test("a live import in view starts nothing, and the commit that enters edit builds the composer", async () => {
+  jest.resetModules();
+  window.clayEditMode = false;
+  fakeWire.helpers.mockClear();
+
+  try {
+    const { aiEditParticipant: participant } = await import("../../src/plugins/ai-edit.js");
+    await flush();
+    await frames();
+
+    // Imported in view: no question to the host, no chrome, and no way in.
+    const section = mountPage();
+    clickSection(section);
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "j", ctrlKey: true }));
+    await flush();
+    expect(fakeWire.helpers).not.toHaveBeenCalled();
+    expect(chromeCount()).toBe(0);
+    expect(panel()).toBeNull();
+
+    // The commit that enters edit is what builds it, once. The facts are the ones this
+    // instance reads, so the commit goes through them rather than through the global.
+    (await import("../../src/core/is-edit-mode.js")).commitModeFacts({ mode: "edit", isEditMode: true, generation: 1 });
+    const lease = participant().prepare({ generation: 1, isCurrent: () => true });
+    await lease.ready;
+    expect(fakeWire.helpers).toHaveBeenCalledTimes(1);
+    expect(panel()).not.toBeNull();
+
+    lease.dispose();
+    expect(chromeCount()).toBe(0);
+  } finally {
+    window.clayEditMode = true;
+    fakeWire.helpers.mockResolvedValue([{ name: "ai-edit", state: "ready" }]);
+    jest.resetModules();
+  }
+});

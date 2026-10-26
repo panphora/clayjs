@@ -24,12 +24,9 @@ const UNSUPPORTED = {
   "core/draft-mode.js": "the boot params and the draft fact, read before the plan",
   "lib/region-policy.js": "the one policy both roads read, read before the plan",
   // Core paths whose session belongs to a later step.
-  // Plugins still on the guarded reload until their own step lands.
-  "plugins/cms.js": "the vendor auto-opens at import; 17b-9",
-  "plugins/quickcrop.js": "reached through cms and unreviewed; 17b-9",
-  "plugins/wire.js": "no admission lease yet; 17b-9",
+  // Plugins still on the guarded reload until somebody reviews their lifecycle.
+  "plugins/quickcrop.js": "reached through cms and unreviewed",
   "plugins/message.js": "unreviewed",
-  "plugins/ai-edit.js": "init() returns early in view, so it cannot prepare live; 17b-9",
   "plugins/demo.js": "its own destination, not a host edit session",
   "plugins/visitor-drafts.js": "the draft plan keeps its own startup",
 };
@@ -109,7 +106,8 @@ test("a plugin an implication pulls in is checked like a named one", async () =>
 
   const { unsupportedPaths } = await import("../../../src/core/mode-switch.js");
   const blocked = unsupportedPaths({ edit, view: { plugins: [], late: [] } });
-  expect(blocked).toEqual(expect.arrayContaining(["plugins/cms.js", "plugins/quickcrop.js"]));
+  // The one it brought with it is the one without a row: an implication is not a way in.
+  expect(blocked).toEqual(["plugins/quickcrop.js"]);
 });
 
 test("a Sap root and template metadata are part of the resolution too", () => {

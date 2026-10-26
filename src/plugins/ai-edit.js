@@ -97,6 +97,7 @@ let helperState = null;  // "ready" or "unavailable"
 let listeners = null;    // the AbortController every handler one session added listens on
 let observers = [];      // the page observers that session opened
 let styleEl = null;      // the one stylesheet the chrome needed
+let chromeToken = 0;     // the latest init(); a teardown retires the one before it
 
 function dropDraft(el) {
   drafts.delete(el);
@@ -1136,7 +1137,9 @@ function wireInteractions() {
 
 async function init() {
   if (!isEditMode || panel) return;  // an owner/editor feature, built once
+  const token = ++chromeToken; // an exit during the lookup retires this build
   helperState = await helperStateNow();
+  if (token !== chromeToken) return;
   // No ai-edit helper on this host: stay dormant. A concurrent open() that got here
   // first may also have built the chrome already.
   if (!helperState || panel) return;
@@ -1183,6 +1186,7 @@ async function open(el, { prompt } = {}) {
  * never gets here, so nothing unsent is thrown away by this.
  */
 function teardown() {
+  chromeToken++;
   const s = session;
   session = null;
   try {
@@ -1230,15 +1234,16 @@ function teardown() {
  * for Keep or Revert, a comment typed and not sent — so `quiesce` refuses the exit and
  * `resume` leaves that same preview, comment and selection timer exactly as they were.
  * `dispose` (after the barrier) stops every editor-only handler and takes the chrome
- * down, so a save or selection event in view draws nothing.
+ * down, so a save or selection event in view draws nothing. `initial: true` adopts the
+ * chrome the boot's own import built, and asks the host nothing a second time.
  */
 export function aiEditParticipant() {
   return {
     id: "clay:ai-edit",
     order: 950, // after the wire (900): this request is sent through it
-    prepare() {
+    prepare(context = {}) {
       return {
-        ready: init(),
+        ready: context.initial === true ? boot : init(),
         enable() {}, // preparation built the chrome; there is nothing to switch on
         quiesce() {
           const unsent = (panel && !panel.hidden && textarea.value.trim() !== '') ||
@@ -1262,6 +1267,10 @@ export function aiEditParticipant() {
   };
 }
 
-onDomReady(() => { init().catch(() => {}); });
+// The boot's own answer, which an explicit edit boot's exit adopts rather than re-asking.
+let boot = null;
+onDomReady(() => { boot = init().then(() => {}, () => {}); });
+
+export { aiEditParticipant as modeParticipant };
 
 export const aiEdit = { init, open };

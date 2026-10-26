@@ -178,6 +178,58 @@ test("an active save hold stays pending until its own request settles", async ()
   }
 });
 
+test("an adopted boot keeps its unnegotiated rule, refuses the exit over a request it holds, and dispose gives the page back", async () => {
+  // The explicit edit boot negotiated no session, so adoption starts nothing: no stream,
+  // no request, and admission open exactly as the import left it.
+  const adopted = wireParticipant().prepare({ initial: true, generation: 1 });
+  expect(sockets).toHaveLength(0);
+  expect(calls).toHaveLength(0);
+
+  // The controller never enables an adopted lease. A request the boot's session started
+  // still goes out, and is still what the exit has to wait for.
+  const held = wire.send({ area: "intro" }, { id: "adopted-held" });
+  await tick();
+  expect(laneCalls("wire")).toHaveLength(1);
+  expect(throwOf(() => adopted.quiesce())).toMatchObject({ code: "pending-input", pending: ["adopted-held"] });
+
+  adopted.resume();
+  wire.cancel("adopted-held");
+  await tick();
+  expect(adopted.quiesce()).toBeUndefined();
+
+  // Dispose forgets the session, so the page is back to the rule it booted with.
+  adopted.dispose();
+  await tick();
+  const after = laneCalls("wire").length;
+  wire.send({ area: "footer" }, { id: "after-adoption" });
+  await tick();
+  expect(laneCalls("wire")).toHaveLength(after + 1);
+  await expect(held.done).resolves.toMatchObject({ state: "cancelled" });
+});
+
+test("a second session admits its own requests once, and the one before it left nothing behind", async () => {
+  const first = wireParticipant().prepare({ generation: 1, isCurrent: () => true });
+  first.enable();
+  wire.send({ area: "one" }, { id: "first-session" });
+  await tick();
+  expect(laneCalls("wire").map(({ body }) => body.id)).toEqual(["first-session"]);
+  wire.cancel("first-session");
+  await tick();
+  first.quiesce();
+  first.dispose();
+
+  const second = wireParticipant().prepare({ generation: 2, isCurrent: () => true });
+  second.enable();
+  wire.send({ area: "two" }, { id: "second-session" });
+  await tick();
+  const posted = () => laneCalls("wire").filter(({ body }) => body.type !== "wire/cancel");
+  expect(posted().map(({ body }) => body.id)).toEqual(["first-session", "second-session"]);
+  second.dispose();
+
+  // One request per session: the ended session admits nothing for the one that follows.
+  expect(posted()).toHaveLength(2);
+});
+
 // --- people --------------------------------------------------------------------
 
 const dialog = () => document.querySelector("[data-clay-modal]");
@@ -409,5 +461,52 @@ test("a stopped session stops watching the registry, and the next read starts it
   } finally {
     MutationObserver.prototype.observe = realObserve;
     MutationObserver.prototype.disconnect = realDisconnect;
+  }
+});
+
+// --- a live entry --------------------------------------------------------------
+
+test("a live import in view starts nothing at all", async () => {
+  // The road a live entry takes: the module is imported while the committed mode is
+  // still view, so the channel is expected to have done nothing by the time the
+  // controller asks it for a lease.
+  window.clayEditMode = false;
+  jest.resetModules();
+
+  const adds = [];
+  const realAdd = document.addEventListener;
+  document.addEventListener = function (type, ...rest) {
+    adds.push(type);
+    return realAdd.call(this, type, ...rest);
+  };
+  const realFetch = global.fetch;
+  const fetches = [];
+  global.fetch = jest.fn((...args) => {
+    fetches.push(args);
+    return Promise.resolve({ ok: true, status: 200, json: async () => ({ delivered: 1 }), text: async () => "{}" });
+  });
+  const realEventSource = global.EventSource;
+  const streams = [];
+  global.EventSource = function (...args) {
+    streams.push(args);
+  };
+
+  try {
+    const mod = await import("../../src/plugins/wire.js");
+    const ownFacts = await import("../../src/core/is-edit-mode.js");
+    await tick();
+
+    expect(ownFacts.modeState().mode).toBe("view");
+    expect(adds).toEqual([]);
+    expect(fetches).toEqual([]);
+    expect(streams).toEqual([]);
+    expect(mod.wire.list()).toEqual([]);
+    expect(mod.wire.isBusy()).toBe(false);
+  } finally {
+    document.addEventListener = realAdd;
+    global.fetch = realFetch;
+    global.EventSource = realEventSource;
+    window.clayEditMode = true;
+    jest.resetModules();
   }
 });

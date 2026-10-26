@@ -23,6 +23,7 @@
  *
  * The modules are the real ones, driven in the order a boot and a switch drive them.
  */
+import { jest } from "@jest/globals";
 import { cms } from "../../src/vendor/hypercms.vendor.js";
 import { cmsParticipant } from "../../src/plugins/cms.js";
 
@@ -178,4 +179,67 @@ test("a second entry mounts a fresh session over the page", async () => {
   expect(shell()).not.toBeNull();
   cms.api.setValue("title", "Second session");
   expect(title().textContent).toBe("Second session");
+});
+
+test("adoption of a boot that opened no CMS starts nothing, and its dispose leaves nothing behind", async () => {
+  mountRules();
+
+  // An explicit edit boot whose page never opened the CMS has no session to hand back.
+  const lease = await enter({ initial: true });
+  expect(cms.isOpen).toBe(false);
+  expect(shell()).toBeNull();
+
+  // The controller never enables an adopted lease; if it did, nothing would start.
+  lease.enable();
+  expect(cms.isOpen).toBe(false);
+  expect(shell()).toBeNull();
+
+  expect(lease.quiesce()).toEqual({ ok: true });
+  lease.resume();
+  lease.dispose();
+  expect(cms.isOpen).toBe(false);
+  expect(shell()).toBeNull();
+
+  // The next entry is the one that mounts, and its dispose is the one that takes it down.
+  const live = await enter();
+  live.enable();
+  expect(shell()).not.toBeNull();
+  live.dispose();
+  expect(shell()).toBeNull();
+});
+
+test("a boot that opened the CMS itself keeps its reload, and nothing is torn down under it", async () => {
+  mountRules();
+  expect(cms.open({ pageRoot: document.body }).ok).toBe(true);
+  expect(cms.isOpen).toBe(true);
+
+  // The session the page opened is not one the source hands out a lease for, so the
+  // adapter refuses it here, before anything is quiesced or disposed.
+  await expect(enter({ initial: true })).rejects.toMatchObject({ code: "unsupported-plugin" });
+
+  expect(cms.isOpen).toBe(true);
+  expect(shell()).not.toBeNull();
+
+  cms.close();
+  expect(cms.isOpen).toBe(false);
+});
+
+test("a live import in view opens nothing, and the page's own events do not either", async () => {
+  jest.resetModules();
+  mountRules();
+
+  try {
+    const mod = await import("../../src/plugins/cms.js");
+    // The vendor's own auto-open is behind write admission, and nothing here opens a
+    // session on its own.
+    expect(mod.cms.isOpen).toBe(false);
+    expect(shell()).toBeNull();
+
+    document.dispatchEvent(new Event("clay:sync-applied"));
+    await Promise.resolve();
+    expect(shell()).toBeNull();
+    expect(typeof mod.modeParticipant).toBe("function");
+  } finally {
+    jest.resetModules();
+  }
 });

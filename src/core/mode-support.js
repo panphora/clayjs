@@ -68,6 +68,14 @@ export const MODULE_SUPPORT = {
   // Generic sync: the module a reader and an editor both load, and the one whose
   // session starts regardless of mode. Its participant is in the edit chunk.
   "sync/live-sync.js": (mod) => mod.liveSync.editParticipant(),
+  // The channel to a local process: its lease holds admission for the edit requests it
+  // sends, so a live entry opens it at the commit and an exit closes it again.
+  "plugins/wire.js": "export",
+  // The AI composer: the lease builds the chrome on a live entry and takes it down again.
+  "plugins/ai-edit.js": "export",
+  // The CMS: the source owns the session, so the lease that opens it is the one that
+  // closes it.
+  "plugins/cms.js": "export",
 };
 
 export const supportFor = (path) =>
