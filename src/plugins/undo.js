@@ -8,15 +8,19 @@ import { isEditMode } from '../core/is-edit-mode.js'
 import { isTabLocalAttr } from '../lib/root-attrs.js'
 import { isDerivedAttr } from '../lib/derived.js'
 import { PERSIST } from '../lib/attr-aliases.js'
+import { isRuntimeAttribute } from '../lib/undo/capture-move.js'
 
 // Tab-local attributes (ephemeral state, route-active, root library state) are
-// never undone. The shared mutation hub already drops them for the main
-// instance; a scope made with create() runs its own observer, so it is told too.
+// never undone, and neither is what a drag's vendor writes on the item it holds:
+// `draggable` and `style` are the gesture's own bookkeeping, and a click that
+// writes them is not an edit. The shared mutation hub already drops tab-local
+// attributes for the main instance; a scope made with create() runs its own
+// observer, so it is told too.
 const withTabLocal = (opts = {}) => {
   const own = opts.ignoreAttribute
   return {
     ...opts,
-    ignoreAttribute: (name, target) => isTabLocalAttr(name, target) || isDerivedAttr(target, name) || (own ? own(name, target) : false),
+    ignoreAttribute: (name, target) => isTabLocalAttr(name, target) || isDerivedAttr(target, name) || isRuntimeAttribute(name, target) || (own ? own(name, target) : false),
     isProtected: opts.isProtected || keepsOwnHistory,
   }
 }

@@ -23,6 +23,7 @@ import { isEditMode } from "../core/is-edit-mode.js";
 import Mutation from "../lib/mutation.js";
 import { capabilitySelector } from "../lib/region-capabilities.js";
 import { onSnapshot } from "../core/snapshot.js";
+import { beginMove, holdMove, releaseMove, releaseAllMoves, recordMove } from "../lib/undo/capture-move.js";
 
 const EDITOR_UI_SELECTOR = capabilitySelector('history');
 
@@ -227,32 +228,62 @@ function makeSortable(sortableElem, Sortable, record = loose) {
     // barrier. The drop it allowed is not a new edit, so nothing of it reaches an author
     // handler, a reactive engine or the file.
     if (!record.admitted) return;
-    finishMove({ item: evt.item, from: evt.from, to: evt.to, oldIndex: evt.oldIndex, newIndex: evt.newIndex }, onsortedCode);
+    const result = { item: evt.item, from: evt.from, to: evt.to, oldIndex: evt.oldIndex, newIndex: evt.newIndex };
+    const start = press;
+    press = null;
+    // The runtime attributes go back before the move is recorded, so the entry holds
+    // the move and nothing of what the vendor wrote around it.
+    if (restoring) {
+      restoreRuntimeAttrs(restoring);
+      restoring = null;
+    }
+    if (start) {
+      recordMove(start, result);
+      releaseMove(start);
+    }
+    finishMove(result, onsortedCode);
   };
 
   // Record on the capture phase, before Sortable's own press handler changes anything, and
   // restore once the press ends: a plain click never fires Sortable's unchoose.
   let recorded = null;
+  let press = null;
+  let restoring = null;
   let ends = [];
+  // A press that ends without a drop (a click, a cancel) still has to hand the
+  // gesture's exclusion back: the drop itself releases it once its entry is recorded.
+  const endPress = () => {
+    const start = press;
+    press = null;
+    restoring = null;
+    releaseMove(start);
+  };
   const restoreSoon = () => {
     const pending = recorded;
     recorded = null;
     if (pending) {
       record.presses.delete(pending);
       pressed.delete(pending);
+      restoring = pending;
     }
     ends.forEach(entry => untrack(record, entry));
     ends = [];
     if (pending) later(record, () => restoreRuntimeAttrs(pending));
+  };
+  const settleSoon = () => {
+    holdMove(press);
+    restoreSoon();
+    later(record, endPress);
   };
   track(record, sortableElem, 'pointerdown', (event) => {
     let item = event.target instanceof Element ? event.target : null;
     while (item && item.parentElement !== sortableElem) item = item.parentElement;
     if (!item || recorded) return;
     recorded = recordRuntimeAttrs(item);
+    press = beginMove(item);
     record.presses.add(recorded);
     pressed.add(recorded);
-    ends = ENDS.map(type => track(record, document, type, restoreSoon, true));
+    ends = ENDS.map(type => track(record, document, type, settleSoon, true));
   }, true);
   options.onUnchoose = restoreSoon;
 
@@ -300,8 +331,16 @@ function move(item, toContainer, beforeItem = null) {
   if (from === toContainer && nextItem(from, item) === beforeItem) return { ok: true, moved: false };
 
   const oldIndex = elementIndex(from, item);
-  toContainer.insertBefore(item, beforeItem);
-  const result = { item, from, to: toContainer, oldIndex, newIndex: elementIndex(toContainer, item) };
+  const start = beginMove(item);
+  holdMove(start);
+  let result;
+  try {
+    toContainer.insertBefore(item, beforeItem);
+    result = { item, from, to: toContainer, oldIndex, newIndex: elementIndex(toContainer, item) };
+    recordMove(start, result);
+  } finally {
+    releaseMove(start);
+  }
   finishMove(result, from.getAttribute('onsorted'));
   return { ok: true, moved: true, ...result };
 }
@@ -385,6 +424,7 @@ function sortableLease(record) {
       record.timers.clear();
       for (const recording of record.presses) pressed.delete(recording);
       record.presses.clear();
+      releaseAllMoves();
       for (const el of record.instances) record.Sortable?.get?.(el)?.destroy?.();
       record.instances.clear();
       if (session === record) session = null;
