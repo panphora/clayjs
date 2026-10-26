@@ -19,11 +19,20 @@ Code in this guide assumes the loader URL `https://clayjs.com/v1/`. [Add ClayJS 
 
 ## A document, line by line
 
-Start every app from [`examples/skeleton.html`](https://clayjs.com/examples/skeleton.html). It is short enough to read in full, and every later section refers back to its parts. It is a reading list: sortable rows, a checkbox and a title per row, an Add button, a summary line and a filter.
+Start every app from [`examples/skeleton.html`](https://clayjs.com/examples/skeleton.html). It is a reading list with sortable rows, a checkbox and a title per row, an Add button, a summary line and a filter.
+
+#### The html element and autosave
 
 ```html
 <!DOCTYPE html>
 <html lang="en" autosave>
+```
+
+`autosave` turns on autosave for edit mode. Autosave is decided at boot. ([Autosave](https://clayjs.com/docs/guide/saving/#autosave))
+
+#### Hiding edit controls before ClayJS runs
+
+```html
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -32,36 +41,108 @@ Start every app from [`examples/skeleton.html`](https://clayjs.com/examples/skel
   html:not([editmode="true"]) [show-when\:editmode="true"] { display: none }
   /* app styles */
 </style>
+```
+
+The fallback CSS rule hides `show-when:editmode="true"` controls before ClayJS runs. Without it, a viewer of a never-saved file sees the edit buttons for a moment, or for good with JavaScript off. ([Showing and hiding edit controls: clay-options](https://clayjs.com/docs/guide/edit-mode/#showing-and-hiding-edit-controls-clay-options))
+
+```html
 </head>
 <body>
+```
+
+#### The record
+
+```html
 <main id="app">
+```
+
+`<main id="app">` is the record, the part of the page that ClayJS saves. ([Identity](https://clayjs.com/docs/guide/record/#identity))
+
+```html
   <h1 editmode:contenteditable inert-contenteditable="plaintext-only">Reading list</h1>
+```
+
+`editmode:contenteditable` makes the text editable in edit mode. The file is written in its saved form with `inert-contenteditable`, so a viewer gets inert text from the very first open. ([Mode attributes: one file for editors and viewers](https://clayjs.com/docs/guide/edit-mode/#mode-attributes-one-file-for-editors-and-viewers))
+
+```html
   <ul id="items" sortable="items">
     <li data-id="r-mmm"><span class="grip" sortable-handle show-when:editmode="true" aria-label="Drag">⠿</span><input type="checkbox" persist viewmode:disabled disabled checked> <span class="title" editmode:contenteditable inert-contenteditable="plaintext-only">The Mythical Man-Month</span><button type="button" data-action="remove" show-when:editmode="true" aria-label="Remove">×</button></li>
+```
+
+Each row has a `data-id`, its text is `editmode:contenteditable`, and its checkbox is `persist viewmode:disabled`. The saved file includes `disabled` so a viewer gets disabled checkboxes from the first open. ([Mode attributes: one file for editors and viewers](https://clayjs.com/docs/guide/edit-mode/#mode-attributes-one-file-for-editors-and-viewers))
+
+```html
     <li data-id="r-sicp"><span class="grip" sortable-handle show-when:editmode="true" aria-label="Drag">⠿</span><input type="checkbox" persist viewmode:disabled disabled> <span class="title" editmode:contenteditable inert-contenteditable="plaintext-only">Structure and Interpretation of Computer Programs</span><button type="button" data-action="remove" show-when:editmode="true" aria-label="Remove">×</button></li>
   </ul>
   <button type="button" data-action="add" show-when:editmode="true">+ Add book</button>
 </main>
 
+```
+
+#### Templates for new rows
+
+```html
 <template id="item-tpl">
   <li><span class="grip" sortable-handle show-when:editmode="true" aria-label="Drag">⠿</span><input type="checkbox" persist viewmode:disabled> <span class="title" editmode:contenteditable contenteditable="plaintext-only"></span><button type="button" data-action="remove" show-when:editmode="true" aria-label="Remove">×</button></li>
+```
+
+Templates are blueprints. `item-tpl` holds a new row in its active form (`contenteditable="plaintext-only"`, no `disabled`), because a clone is inserted while the owner is editing and the mode transform never touches template content. ([Mode attributes: one file for editors and viewers](https://clayjs.com/docs/guide/edit-mode/#mode-attributes-one-file-for-editors-and-viewers))
+
+```html
 </template>
 
+```
+
+#### Editor-only controls
+
+```html
 <template id="chrome-tpl">
   <p id="summary"></p>
   <input type="search" id="filter" placeholder="Filter" aria-label="Filter">
   <style id="view-state"></style>
+```
+
+`chrome-tpl` holds the summary, the filter and the `#view-state` style outside the record, so the filter stays out of the saved file. ([Per-tab state](https://clayjs.com/docs/guide/architecture/#per-tab-state))
+
+```html
 </template>
 
+```
+
+#### Loading ClayJS
+
+```html
 <script src="https://clayjs.com/v1/clay.js?plugins=sync,sortable,undo,indicator&exclude=richclay"></script>
 <script src="https://clayjs.com/v1/clay-options.js"></script>
 <script src="https://clayjs.com/v1/clay-ui.js"></script>
+```
+
+The script tags load core with `sync,sortable,undo,indicator`, `exclude=richclay` because this app has no rich text, and then the `clay-options` and `clay-ui` satellites. ([Add ClayJS to a page](https://clayjs.com/docs/guide/loading/))
+
+#### Starting the app
+
+```html
 <script>
 clay.start(() => {
   const items = document.getElementById("items");
+```
+
+`clay.start` runs the app code once, after boot. A live-sync merge can re-insert the script, and the repeat call does nothing. ([Starting the app once](https://clayjs.com/docs/guide/architecture/#starting-the-app-once))
+
+```html
   const newId = (prefix) => prefix + "-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+```
+
+`newId` makes ids from a timestamp and random suffix. `crypto.randomUUID` exists only in secure contexts, so it fails on a file served over plain http from another machine. ([Identity](https://clayjs.com/docs/guide/record/#identity))
+
+```html
   const command = (label, fn) => (clay.undo ? clay.undo.commit(label, fn) : fn());
 
+```
+
+`command` wraps every record write in an undo step when the undo plugin is loaded. ([undo: whole-page undo](https://clayjs.com/docs/guide/components/#undo-whole-page-undo))
+
+```html
   clay.onSnapshot?.((root) => {
     for (const el of root.querySelectorAll(".sortable-chosen, .sortable-ghost, .sortable-drag")) {
       el.classList.remove("sortable-chosen", "sortable-ghost", "sortable-drag");
@@ -70,6 +151,11 @@ clay.start(() => {
     for (const el of root.querySelectorAll('[draggable="false"]')) el.removeAttribute("draggable");
     for (const el of root.querySelectorAll('[style=""]')) el.removeAttribute("style");
   });
+```
+
+The `onSnapshot` hook strips Sortable's drag residue (`draggable="false"`, empty `style`, drag classes) from every snapshot, so a drag never writes it into the file. ([Hooks](https://clayjs.com/docs/guide/saving/#hooks))
+
+```html
   const setText = (el, text) => { if (el.textContent !== text) el.textContent = text; };
 
   const chrome = document.createElement("div");
@@ -83,6 +169,13 @@ clay.start(() => {
     render();
   });
 
+```
+
+`chrome-tpl` is cloned once into a `clay="editor-ui"` wrapper. Because the summary, the filter and `#view-state` live there, none of them is saved, synced or undone. ([Regions: the `clay` attribute](https://clayjs.com/docs/guide/record/#regions-the-clay-attribute))
+
+#### Keeping derived text in step
+
+```html
   function render() {
     const rows = [...items.querySelectorAll(":scope > li")];
     const done = rows.filter((li) => li.querySelector("input").hasAttribute("checked")).length;
@@ -92,6 +185,11 @@ clay.start(() => {
     setText(chrome.querySelector("#view-state"), hidden.map((li) => `#items > [data-id="${CSS.escape(li.dataset.id)}"]{display:none}`).join("\n"));
   }
 
+```
+
+`render` derives the summary and the filter style from the record. It writes only when text changes, because writing the same text is still a mutation. ([Derived values](https://clayjs.com/docs/guide/architecture/#derived-values))
+
+```html
   document.addEventListener("click", (event) => {
     const button = event.target.closest("[data-action]");
     if (!button || !clay.isEditMode) return;
@@ -116,28 +214,18 @@ clay.start(() => {
 
   window.addEventListener("hashchange", () => { filter.value = new URLSearchParams(location.hash.slice(1)).get("q") || ""; render(); });
   clay.effect(render);
+```
+
+`clay.effect(render)` runs `render` now and again after any change to the document: local typing, a drag, a merge, undo or redo. `render` writes only into the chrome, and an effect's own writes never re-trigger it. ([Reconciling in app code](https://clayjs.com/docs/guide/live-sync/#reconciling-in-app-code))
+
+```html
 });
 </script>
 </body>
 </html>
 ```
 
-What each part does, and the section that explains it:
-
-- **`<html autosave>`** turns on autosave for edit mode. Autosave is decided at boot ([Autosave](https://clayjs.com/docs/guide/saving/#autosave)).
-- **The fallback CSS rule** hides `show-when:editmode="true"` controls before ClayJS runs. Without it a viewer of a never-saved file sees the edit buttons for a moment, or for good with JavaScript off ([Showing and hiding edit controls: clay-options](https://clayjs.com/docs/guide/edit-mode/#showing-and-hiding-edit-controls-clay-options)).
-- **The record** is `<main id="app">`. Each row has a `data-id`, its text is `editmode:contenteditable`, and its checkbox is `persist viewmode:disabled`. The file is written in its **saved form** (`inert-contenteditable`, `disabled`), so a viewer gets inert text from the very first open ([Mode attributes: one file for editors and viewers](https://clayjs.com/docs/guide/edit-mode/#mode-attributes-one-file-for-editors-and-viewers)).
-- **The templates** are blueprints. `item-tpl` holds a new row in its **active form** (`contenteditable="plaintext-only"`, no `disabled`), because a clone is inserted while the owner is editing and the mode transform never touches template content ([Mode attributes: one file for editors and viewers](https://clayjs.com/docs/guide/edit-mode/#mode-attributes-one-file-for-editors-and-viewers)).
-- **`chrome-tpl`** is cloned once into a `clay="editor-ui"` wrapper. The summary, the filter and the `#view-state` style live there, so none of them is saved, synced or undone ([Regions: the `clay` attribute](https://clayjs.com/docs/guide/record/#regions-the-clay-attribute), [Per-tab state](https://clayjs.com/docs/guide/architecture/#per-tab-state)).
-- **The script tags**: core with `sync,sortable,undo,indicator`, `exclude=richclay` because this app has no rich text, then the `clay-options` and `clay-ui` satellites ([Add ClayJS to a page](https://clayjs.com/docs/guide/loading/)).
-- **`clay.start`** runs the app code once, after boot. A live-sync merge can re-insert the script, and the repeat call does nothing ([Starting the app once](https://clayjs.com/docs/guide/architecture/#starting-the-app-once)).
-- **`newId`** makes ids from a timestamp and random suffix. `crypto.randomUUID` exists only in secure contexts, so it fails on a file served over plain http from another machine ([Identity](https://clayjs.com/docs/guide/record/#identity)).
-- **`command`** wraps every record write in an undo step when the undo plugin is loaded ([undo: whole-page undo](https://clayjs.com/docs/guide/components/#undo-whole-page-undo)).
-- **The `onSnapshot` hook** strips Sortable's drag residue (`draggable="false"`, empty `style`, drag classes) from every snapshot, so a drag never writes it into the file ([Hooks](https://clayjs.com/docs/guide/saving/#hooks)).
-- **`render`** derives the summary and the filter style from the record. It writes only when text changes, because writing the same text is still a mutation ([Derived values](https://clayjs.com/docs/guide/architecture/#derived-values)).
-- **`clay.effect(render)`** runs `render` now and again after any change to the document: local typing, a drag, a merge, undo or redo. `render` writes only into the chrome, and an effect's own writes never re-trigger it ([Reconciling in app code](https://clayjs.com/docs/guide/live-sync/#reconciling-in-app-code)).
-
-The test suite checks this file opens without becoming dirty, saves the record and no chrome, keeps the filter out of the file, keeps undo and the screen in step, mints unique ids, merges a peer's edit beside an unsaved local edit, and gives a viewer inert text and disabled checkboxes.
+The test suite checks that this file opens clean, saves only the record and never the filter or chrome, keeps undo and the screen in step, mints unique ids, merges peer edits beside unsaved local edits, and gives viewers inert text and disabled checkboxes.
 
 ---
 
