@@ -17,7 +17,20 @@ const withTabLocal = (opts = {}) => {
   return {
     ...opts,
     ignoreAttribute: (name, target) => isTabLocalAttr(name, target) || isDerivedAttr(target, name) || (own ? own(name, target) : false),
+    isProtected: opts.isProtected || keepsOwnHistory,
   }
+}
+
+// Saved content that undo does not record (a richclay region, a no-undo block) has a
+// history undo cannot restore, so a parent's undo or redo must not erase it. Chrome
+// that is never saved (editor-ui) loses nothing and is not protected.
+function keepsOwnHistory(node) {
+  const policy = window.clay?.region?.resolveRegionPolicy
+  if (!policy || node.nodeType !== 1) return false
+  const own = policy(node)
+  if (own.undoable !== false || own.persist === 'none') return false
+  const parent = node.parentElement
+  return !parent || policy(parent).undoable !== false
 }
 
 const createScope = undo.create.bind(undo)

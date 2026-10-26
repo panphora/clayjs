@@ -179,3 +179,56 @@ test("persist controls are not restored after a refusal and are after a success"
   expect(undo.undo().ok).toBe(true);
   expect(field().value).toBe("attr");
 });
+
+describe("added subtrees", () => {
+  let resolveRegionPolicy;
+  beforeAll(async () => {
+    ({ resolveRegionPolicy } = await import("../../src/lib/region-policy.js"));
+  });
+
+  const addCard = async (inner) => {
+    const added = document.createElement("article");
+    added.id = "added";
+    added.setAttribute("sap", "");
+    added.innerHTML = inner;
+    document.body.appendChild(added);
+    await settle();
+    undo.flush();
+    return added;
+  };
+
+  test("a derived attribute changed on an added card does not refuse undoing the add", async () => {
+    await enter();
+    await addCard('<span id="n" attr:count="1">1</span>');
+
+    document.getElementById("n").setAttribute("count", "2");
+    await settle();
+    undo.flush();
+
+    expect(undo.undo()).toMatchObject({ ok: true, direction: "undo" });
+    expect(document.getElementById("added")).toBeNull();
+    expect(refusals).toHaveLength(0);
+  });
+
+  test("saved content with its own history inside an added card refuses undoing the add", async () => {
+    window.clay = { region: { resolveRegionPolicy } };
+    await enter();
+    await addCard('<div id="own" clay="no-undo"><p>kept</p></div>');
+
+    const receipt = undo.undo();
+
+    expect(receipt).toMatchObject({ ok: false, code: "protected", direction: "undo" });
+    expect(refusals).toEqual([receipt]);
+    expect(document.getElementById("own").textContent).toBe("kept");
+    expect(undo.history).toHaveLength(1);
+  });
+
+  test("editor chrome inside an added card is not protected", async () => {
+    window.clay = { region: { resolveRegionPolicy } };
+    await enter();
+    await addCard('<div clay="editor-ui">chrome</div><p>body</p>');
+
+    expect(undo.undo()).toMatchObject({ ok: true });
+    expect(document.getElementById("added")).toBeNull();
+  });
+});
