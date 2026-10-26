@@ -2,6 +2,8 @@
  * @jest-environment jsdom
  */
 
+import { jest } from "@jest/globals";
+
 /**
  * RichClay as a mode lease.
  *
@@ -183,6 +185,81 @@ test("a peer frame reattaches the editors the merge stripped, and after the exit
   document.dispatchEvent(new Event("clay:sync-applied"));
   expect(region.getAttribute("contenteditable")).toBeNull();
   expect(active()).toHaveLength(0);
+});
+
+test("an explicit edit boot's session is adopted, and its dispose takes every editor with it", async () => {
+  // The import road: this tab booted in edit, so the module's own init() mounted the page's
+  // regions and started the session's watcher before any mode lease existed.
+  jest.resetModules();
+  window.clayEditMode = true;
+  let booted;
+  let adopted;
+  let live;
+  try {
+    booted = await import("../../src/plugins/richclay.js");
+    await booted.ready;
+
+    expect(mounted()).toHaveLength(2);
+    // A re-evaluated module runs vendor-skin's own once-per-instance subscription too; the
+    // session's is the one the lease enabled.
+    const added = forType(additions, "clay:sync-applied", document);
+    const armed = added.length;
+    expect(armed).toBeGreaterThan(0);
+    const subscription = added[armed - 1];
+
+    // Adoption is the same session: no second editor on any region, no second subscription.
+    adopted = await booted.modeParticipant().prepare({ generation: 1, isCurrent: () => true, initial: true });
+    adopted.enable();
+    expect(mounted()).toHaveLength(2);
+    expect(forType(additions, "clay:sync-applied", document)).toHaveLength(armed);
+
+    adopted.dispose();
+
+    expect(mounted()).toHaveLength(0);
+    expect(active()).toHaveLength(0);
+    const removed = forType(removals, "clay:sync-applied", document);
+    expect(removed).toHaveLength(1);
+    expect(removed[0].handler).toBe(subscription.handler);
+
+    // A live entry after that exit mounts one fresh set, and its own dispose takes it back.
+    live = await booted.richclayParticipant().prepare({ generation: 2, isCurrent: () => true });
+    live.enable();
+    expect(mounted()).toHaveLength(2);
+    expect(forType(additions, "clay:sync-applied", document)).toHaveLength(armed + 1);
+
+    live.dispose();
+    expect(mounted()).toHaveLength(0);
+    expect(active()).toHaveLength(0);
+    expect(forType(removals, "clay:sync-applied", document)).toHaveLength(2);
+  } finally {
+    live?.dispose();
+    adopted?.dispose();
+    (await booted?.ready)?.dispose?.();
+    delete window.clayEditMode;
+    jest.resetModules();
+  }
+});
+
+test("an adoption on a boot that started nothing mounts nothing", async () => {
+  // A view boot: init() answered null, so there is no session to adopt and the lease must
+  // not fall back to preparing one.
+  jest.resetModules();
+  try {
+    const view = await import("../../src/plugins/richclay.js");
+    expect(await view.ready).toBeNull();
+    const before = forType(additions, "clay:sync-applied", document).length;
+
+    const adopted = await view.modeParticipant().prepare({ generation: 1, isCurrent: () => true, initial: true });
+    adopted.enable();
+
+    expect(mounted()).toHaveLength(0);
+    expect(forType(additions, "clay:sync-applied", document)).toHaveLength(before);
+
+    adopted.dispose();
+    expect(mounted()).toHaveLength(0);
+  } finally {
+    jest.resetModules();
+  }
 });
 
 test("prepare answers for a stale generation before it mounts anything", async () => {

@@ -85,7 +85,8 @@ let listeners = null;
 // listeners, and one exit must be able to take all of them back.
 function arm() {
   saveFeedback.chip = true;
-  listeners ||= new AbortController();
+  if (listeners) return;
+  listeners = new AbortController();
   const { signal } = listeners;
   for (const state of Object.keys(LABELS)) {
     document.addEventListener("clay:save-" + state, () => show(state), { signal });
@@ -112,17 +113,19 @@ function init() {
  *
  * The chip owns no input: it reports a save somebody else is making, so an exit never
  * waits on it. `quiesce` leaves the chip and its fade timer exactly as they were, which
- * is what a refusal has to keep showing; `resume` has nothing to reopen. `dispose`
- * (after the barrier) takes the chip, its listeners and its timer down, so a save event
- * in view draws nothing.
+ * is what a refusal has to keep showing; `resume` has nothing to reopen. `initial: true`
+ * adopts the chip the boot already armed and arms nothing again. `dispose` (after the
+ * barrier) takes the chip, its listeners and its timer down, so a save event in view
+ * draws nothing.
  */
 export function indicatorParticipant() {
   return {
     id: "clay:indicator",
     order: 700,
-    prepare() {
+    prepare(context = {}) {
       return {
         enable() {
+          if (context.initial === true) return;
           arm();
         },
         quiesce() {},
@@ -134,5 +137,7 @@ export function indicatorParticipant() {
     },
   };
 }
+
+export { indicatorParticipant as modeParticipant };
 
 onDomReady(init);

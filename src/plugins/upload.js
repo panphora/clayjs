@@ -37,7 +37,7 @@
  * upload. `upload-task.js` holds both.
  */
 
-import { checkRequiredAccess, runUpload, start } from "./upload-task.js";
+import { checkRequiredAccess, runUpload, start, uploadParticipant } from "./upload-task.js";
 
 /**
  * Store one file on the host.
@@ -65,5 +65,8 @@ upload.mount = async (task, container) => (await import("./upload-ui.js")).mount
 // On the same function, so anything holding `clay.upload` has both and every existing
 // `clay.upload(file)` call keeps working untouched.
 upload.start = start;
+
+// The factory lives with the transport it gates, and this is the path a plan resolves.
+export { uploadParticipant as modeParticipant };
 
 export default upload;

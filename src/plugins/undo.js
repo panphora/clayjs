@@ -183,7 +183,8 @@ export function undoParticipant() {
   return {
     id: 'clay:undo',
     order: 350,
-    async prepare(context) {
+    async prepare(context = {}) {
+      if (context.initial === true) return adopt()
       await bodyReady()
       if (isStale(context)) {
         throw Object.assign(new Error('clay:undo prepared for a stale generation'), { code: 'stale-document' })
@@ -191,6 +192,13 @@ export function undoParticipant() {
       return undoLease(session || (session = ownership()))
     },
   }
+}
+
+// The boot this tab already made, adopted instead of prepared: it is the history `init`
+// below started, or, on a boot that started none, nothing to hand back.
+async function adopt() {
+  const lease = await ready
+  return { enable() {}, quiesce: () => lease?.quiesce(), resume: () => lease?.resume(), dispose: () => lease?.dispose() }
 }
 
 // Auto-init when the module is imported; the loader awaits `ready` before resolving clay.ready
@@ -205,4 +213,5 @@ async function init() {
 const ready = init()
 
 export { undo, restoreControls, init, ready }
+export { undoParticipant as modeParticipant }
 export default undo

@@ -25,18 +25,12 @@ const UNSUPPORTED = {
   "lib/region-policy.js": "the one policy both roads read, read before the plan",
   // Core paths whose session belongs to a later step.
   // Plugins: every one stays on the guarded reload until its own step lands.
-  "plugins/richclay.js": "the vendor auto-watch starts at import; its lease lands in 17b-6a",
-  "plugins/indicator.js": "arm() is not idempotent yet; 17b-6a",
   "sync/live-sync.js": "the stream auto-starts on the saved lane; 17b-5",
   "plugins/live.js": "the writer session survives a re-entry; 17b-6b",
   "plugins/page.js": "install() runs at import; 17b-7b",
   "plugins/page-view.js": "the reader the transition will own; 17b-7a",
-  "plugins/sortable.js": "the vendor fetch and its instances belong to the boot; 17b-6a",
-  "plugins/undo.js": "history starts at import; 17b-6a",
-  "plugins/unsent.js": "restoreAll runs at import; 17b-6a",
   "plugins/cms.js": "the vendor auto-opens at import; 17b-9",
   "plugins/quickcrop.js": "reached through cms and unreviewed; 17b-9",
-  "plugins/upload.js": "prepares admitted rather than closed; 17b-6a",
   "plugins/people.js": "one init() holds the reader and the editing half; 17b-6b",
   "plugins/menu.js": "a persistent UI service nobody has reviewed yet",
   "plugins/wire.js": "no admission lease yet; 17b-9",
@@ -114,7 +108,7 @@ test("a plugin an implication pulls in is checked like a named one", async () =>
 
   const { unsupportedPaths } = await import("../../../src/core/mode-switch.js");
   const blocked = unsupportedPaths({ edit, view: { plugins: [], late: [] } });
-  expect(blocked).toEqual(expect.arrayContaining(["plugins/cms.js", "plugins/quickcrop.js", "plugins/upload.js"]));
+  expect(blocked).toEqual(expect.arrayContaining(["plugins/cms.js", "plugins/quickcrop.js"]));
 });
 
 test("a Sap root and template metadata are part of the resolution too", () => {

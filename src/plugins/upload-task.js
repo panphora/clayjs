@@ -528,18 +528,20 @@ export function start(file, options = {}) {
 /**
  * Uploads as a mode participant.
  *
- * `prepare` takes the session's admission; `enable` opens it, `quiesce` closes it before
- * the exit barrier and `resume` reopens it for a refused exit. `dispose` closes it for a
- * session that has ended and takes nothing else: the tasks started under it keep their
- * selected files, their stored results and their own endings, because those belong to the
- * callers that asked for them, not to the mode that was running.
+ * `prepare` takes the session's admission, closed until the commit; `enable` opens it,
+ * `quiesce` closes it before the exit barrier and `resume` reopens it for a refused exit.
+ * Adoption (`initial`) is a lease over a session that is already open, because an explicit
+ * edit boot admits uploads from its first keystroke. `dispose` closes it for a session that
+ * has ended and takes nothing else: the tasks started under it keep their selected files,
+ * their stored results and their own endings, because those belong to the callers that
+ * asked for them, not to the mode that was running.
  */
 export function uploadParticipant() {
   return {
     id: "clay:upload",
     order: 340,
-    prepare() {
-      const lease = { admitted: true };
+    prepare(context = {}) {
+      const lease = { admitted: context.initial === true };
       session = lease;
       return {
         enable() {

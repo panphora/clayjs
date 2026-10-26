@@ -2,6 +2,8 @@
  * @jest-environment jsdom
  */
 
+import { jest } from "@jest/globals";
+
 /**
  * Sortable as a mode lease.
  *
@@ -186,6 +188,70 @@ test("dispose removes the listeners a press started, and the restore it schedule
   lease.dispose();
   await wait(20);
   expect(item.getAttribute("style")).toBe("color: blue;");
+});
+
+test("an explicit edit boot\u0027s session is adopted, and its dispose leaves the next entry nothing", async () => {
+  // The import road: this tab booted in edit, so the module\u0027s own init() enabled a session
+  // before any mode lease existed.
+  jest.resetModules();
+  window.clayEditMode = true;
+  try {
+    const booted = await import("../../src/plugins/sortable.js");
+    await booted.ready;
+
+    const list = listOf();
+    const instance = window.Sortable.get(list);
+    expect(instance).toBeTruthy();
+    const added = captured(additions, "pointerdown", list);
+    expect(added).toHaveLength(1);
+
+    // Adoption is the same session, not a second editor in front of the same list.
+    const adopted = await booted.modeParticipant().prepare({ generation: 1, isCurrent: () => true, initial: true });
+    adopted.enable();
+    expect(window.Sortable.get(list)).toBe(instance);
+    expect(captured(additions, "pointerdown", list)).toHaveLength(1);
+
+    adopted.dispose();
+
+    expect(window.Sortable.get(list)).toBeNull();
+    const removed = captured(removals, "pointerdown", list);
+    expect(removed).toHaveLength(1);
+    expect(removed[0].handler).toBe(added[0].handler);
+
+    // A live entry after that exit starts one fresh session, and its own dispose takes it back.
+    const live = await booted.sortableParticipant().prepare({ generation: 2, isCurrent: () => true });
+    live.enable();
+    expect(window.Sortable.get(list)).toBeTruthy();
+    expect(captured(additions, "pointerdown", list)).toHaveLength(2);
+
+    live.dispose();
+    expect(window.Sortable.get(list)).toBeNull();
+    expect(captured(removals, "pointerdown", list)).toHaveLength(2);
+  } finally {
+    delete window.clayEditMode;
+    jest.resetModules();
+  }
+});
+
+test("an adoption on a boot that started nothing starts nothing", async () => {
+  // A view boot: init() answered null, so there is no session to adopt and the lease must
+  // not fall back to preparing one.
+  jest.resetModules();
+  try {
+    const view = await import("../../src/plugins/sortable.js");
+    expect(await view.ready).toBeNull();
+
+    const adopted = await view.modeParticipant().prepare({ generation: 1, isCurrent: () => true, initial: true });
+    adopted.enable();
+
+    expect(window.Sortable?.get?.(listOf()) ?? null).toBeNull();
+    expect(captured(additions, "pointerdown", listOf())).toHaveLength(0);
+
+    adopted.dispose();
+    expect(window.Sortable?.get?.(listOf()) ?? null).toBeNull();
+  } finally {
+    jest.resetModules();
+  }
 });
 
 test("the vendor load is checked against the generation that asked for it", async () => {

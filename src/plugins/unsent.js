@@ -102,7 +102,12 @@ export function unsentParticipant() {
   return {
     id: "clay:unsent",
     order: 320,
-    prepare() {
+    prepare(context = {}) {
+      // Adoption asks for a lease over the boot's session, and this module has none to
+      // hand back: it installs once at import and keeps every draft.
+      if (context.initial === true) {
+        return { enable() {}, quiesce() {}, resume() {}, dispose() {} };
+      }
       install();
       return {
         enable() {
@@ -116,6 +121,8 @@ export function unsentParticipant() {
     },
   };
 }
+
+export { unsentParticipant as modeParticipant };
 
 export const unsent = {
   get size() { return drafts.size; },

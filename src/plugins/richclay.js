@@ -96,7 +96,8 @@ export function richclayParticipant(root = document) {
   return {
     id: "clay:richclay",
     order: 310,
-    async prepare(context) {
+    async prepare(context = {}) {
+      if (context.initial === true) return adopt();
       if (typeof RichClay.watch !== "function" || typeof RichClay.stripElement !== "function") {
         throw fault("this vendor build has no watchable lifecycle", "unsupported-plugin");
       }
@@ -106,6 +107,13 @@ export function richclayParticipant(root = document) {
       return richclayLease(session || (session = ownership(root)));
     },
   };
+}
+
+// The boot this tab already made, adopted instead of prepared: it is the session `init`
+// below enabled, or, on a boot that started none, nothing to hand back.
+async function adopt() {
+  const lease = await ready;
+  return { enable() {}, quiesce: () => lease?.quiesce(), resume: () => lease?.resume(), dispose: () => lease?.dispose() };
 }
 
 // Auto-init when the module is imported; the loader awaits `ready` before resolving clay.ready
@@ -119,4 +127,5 @@ async function init() {
 const ready = init();
 
 export { RichClay, init, ready };
+export { richclayParticipant as modeParticipant };
 export default RichClay;

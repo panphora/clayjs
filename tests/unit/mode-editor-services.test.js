@@ -220,6 +220,55 @@ test("the save chip owns no input, and dispose takes its chip, timer and handler
   expect(chip()).toBeNull();
 });
 
+test("a second arm adds no listener, and adoption takes the chip the boot already armed", () => {
+  const adds = [];
+  const real = document.addEventListener;
+  document.addEventListener = function (type, handler, options) {
+    adds.push({ target: this, type, handler, options });
+    return real.call(this, type, handler, options);
+  };
+  let armed;
+  let adopted;
+  let boot;
+  try {
+    // The boot this tab made at import: one listener per save state plus the page state.
+    boot = indicatorParticipant().prepare({ generation: 1, isCurrent: () => true });
+    boot.enable();
+    armed = adds.length;
+    expect(adds.map((entry) => entry.type)).toEqual([
+      "clay:save-saving", "clay:save-saved", "clay:save-error",
+      "clay:save-offline", "clay:save-retrying", "clay:save-blocked",
+      "clay:page-save-state",
+    ]);
+    expect(adds.every((entry) => entry.target === document)).toBe(true);
+
+    // A second arm over the armed chip adds no closure.
+    const again = indicatorParticipant().prepare({ generation: 1, isCurrent: () => true });
+    again.enable();
+    expect(adds).toHaveLength(armed);
+
+    // Adoption is a lease over the armed chip, not a second arming.
+    adopted = indicatorParticipant().prepare({ generation: 1, isCurrent: () => true, initial: true });
+    adopted.enable();
+    expect(adds).toHaveLength(armed);
+
+    document.dispatchEvent(new CustomEvent("clay:save-saving"));
+    expect(chip().textContent).toBe("Saving\u2026");
+
+    adopted.dispose();
+
+    expect(chip()).toBeNull();
+    document.dispatchEvent(new CustomEvent("clay:save-saving"));
+    expect(chip()).toBeNull();
+    again.dispose();
+    boot.dispose();
+  } finally {
+    adopted?.dispose();
+    boot?.dispose();
+    document.addEventListener = real;
+  }
+});
+
 // --- conflict notice ----------------------------------------------------------
 
 test("a copy the recovery store kept does not refuse an exit, and dispose stops the notice", async () => {
@@ -242,6 +291,69 @@ test("a copy the recovery store kept does not refuse an exit, and dispose stops 
   document.dispatchEvent(new CustomEvent("clay:sync-conflicts-changed"));
   await frames();
   expect(noticeRoot()).toBeNull();
+});
+
+test("the notice's adoption takes the shell the boot armed, and arms nothing again", async () => {
+  const loss = { id: "lost-2", kind: "text", label: "Edit", yours: "mine", now: "theirs" };
+  const adds = [];
+  const real = document.addEventListener;
+  document.addEventListener = function (type, handler, options) {
+    adds.push({ target: this, type, handler, options });
+    return real.call(this, type, handler, options);
+  };
+  let boot;
+  let adopted;
+  try {
+    ledger.size = 1;
+    ledger.list = () => [loss];
+
+    const countArmed = (enable) => {
+      const before = adds.length;
+      enable();
+      return adds.slice(before).map((entry) => entry.type);
+    };
+
+    // The boot this tab made at import: the shell's three handlers.
+    boot = conflictNoticeParticipant().prepare({ generation: 1, isCurrent: () => true });
+    expect(countArmed(() => boot.enable())).toEqual([
+      "clay:sync-conflicts-changed", "clay:save-conflict", "clay:document-upgraded",
+    ]);
+
+    // Adoption is a lease over that shell, not a second arming.
+    adopted = conflictNoticeParticipant().prepare({ generation: 1, isCurrent: () => true, initial: true });
+    expect(countArmed(() => adopted.enable())).toEqual([]);
+
+    // The same shell answers: one conflict, one notice.
+    document.dispatchEvent(new CustomEvent("clay:sync-conflicts-changed"));
+    await frames();
+    expect(noticeRoot()).not.toBeNull();
+    expect(noticeRoot().textContent).toContain("Another edit");
+
+    adopted.dispose();
+    expect(noticeRoot()).toBeNull();
+
+    document.dispatchEvent(new CustomEvent("clay:sync-conflicts-changed"));
+    await frames();
+    expect(noticeRoot()).toBeNull();
+
+    // A live entry after that exit arms one fresh shell, and its own dispose takes it down.
+    const live = conflictNoticeParticipant().prepare({ generation: 2, isCurrent: () => true });
+    expect(countArmed(() => live.enable())).toEqual([
+      "clay:sync-conflicts-changed", "clay:save-conflict", "clay:document-upgraded",
+    ]);
+    document.dispatchEvent(new CustomEvent("clay:sync-conflicts-changed"));
+    await frames();
+    expect(noticeRoot()).not.toBeNull();
+
+    live.dispose();
+    expect(noticeRoot()).toBeNull();
+  } finally {
+    adopted?.dispose();
+    boot?.dispose();
+    document.addEventListener = real;
+    ledger.size = 0;
+    ledger.list = () => [];
+  }
 });
 
 test("an unresolved current conflict refuses the exit and stays on screen through it", async () => {

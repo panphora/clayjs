@@ -451,7 +451,8 @@ export function sortableParticipant(root = document) {
   return {
     id: "clay:sortable",
     order: 300,
-    async prepare(context) {
+    async prepare(context = {}) {
+      if (context.initial === true) return adopt();
       const Sortable = await loadVendor();
       if (isStale(context)) {
         throw Object.assign(new Error("clay:sortable prepared for a stale generation"), { code: "stale-document" });
@@ -460,6 +461,13 @@ export function sortableParticipant(root = document) {
       return sortableLease(session || (session = ownership(Sortable, root)));
     },
   };
+}
+
+// The boot this tab already made, adopted instead of prepared: it is the session `init`
+// below enabled, or, on a boot that started none, nothing to hand back.
+async function adopt() {
+  const lease = await ready;
+  return { enable() {}, quiesce: () => lease?.quiesce(), resume: () => lease?.resume(), dispose: () => lease?.dispose() };
 }
 
 // Auto-init when module is imported; the loader awaits `ready` before resolving clay.ready
@@ -477,4 +485,5 @@ const ready = init();
 const sortable = Object.freeze({ move });
 
 export { init, ready, makeSortable, move, sortable };
+export { sortableParticipant as modeParticipant };
 export default init;

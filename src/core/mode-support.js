@@ -40,6 +40,12 @@ export const MODULE_SUPPORT = {
   "core/conflict-notice.js": "export",
   "core/autosave.js": "export",
   "core/admin-attrs.js": "export",
+  "plugins/indicator.js": "export",
+  "plugins/richclay.js": "export",
+  "plugins/sortable.js": "export",
+  "plugins/undo.js": "export",
+  "plugins/unsent.js": "export",
+  "plugins/upload.js": "export",
 };
 
 export const supportFor = (path) =>

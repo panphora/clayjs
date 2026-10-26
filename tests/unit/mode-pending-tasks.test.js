@@ -90,12 +90,17 @@ const realRemove = EventTarget.prototype.removeEventListener;
 
 let unsent;
 let upload;
+let uploadPlan;
 let unsaved;
 let storage;
 // The plugin installs its listeners once, at import, and keeps them for the page's life:
 // a second import would install a second set, so the modules are loaded once here and
 // every case drives them the way a boot and a switch drive the same page.
 let installedInputs = 0;
+
+// The listeners the module installs once, for the page rather than for a session.
+const addedToDocument = (upTo) =>
+  additions.slice(0, upTo).filter((entry) => entry.target === document && entry.options === true);
 
 const enterUnsent = () => {
   const lease = unsent.unsentParticipant().prepare();
@@ -122,6 +127,7 @@ beforeAll(async () => {
   unsaved = await import("../../src/lib/unsaved-state.js");
   unsent = await import("../../src/plugins/unsent.js");
   upload = await import("../../src/plugins/upload-task.js");
+  uploadPlan = await import("../../src/plugins/upload.js");
   storage = (await import("../../src/lib/doc-storage.js")).storage;
   installedInputs = additions.filter((entry) => entry.target === document && entry.type === "input" && entry.options === true).length;
 });
@@ -306,6 +312,94 @@ test("a quiesced session sends nothing new and leaves the request already on the
 
   lease.dispose();
   const after = upload.start(file("fourth.png"));
+  expect(await after.result).toMatchObject({ ok: false, code: "aborted" });
+  expect(sent).toHaveLength(2);
+});
+
+test("unsent's adoption starts nothing: no restore, no listener, and every draft stays", async () => {
+  // The import road: this tab booted in edit with one draft already kept in this tab, and
+  // the module installed the page's one listener set and restored it.
+  const control = controlOf("c1");
+  storage.session.set("unsent", { "c1|comment": { base: "", text: "kept from earlier" } });
+
+  jest.resetModules();
+  window.clayEditMode = true;
+  let booted;
+  let adopted;
+  let lease;
+  try {
+    booted = await import("../../src/plugins/unsent.js");
+    const installed = additions.length;
+    expect(addedToDocument(installed).map((entry) => entry.type)).toEqual(["beforeinput", "input"]);
+    expect(control.value).toBe("kept from earlier");
+
+    // What the person has since typed away is theirs: an adoption restores nothing, because
+    // it adopts no session at all.
+    control.value = "";
+
+    adopted = booted.modeParticipant().prepare({ generation: 1, isCurrent: () => true, initial: true });
+    adopted.enable();
+    expect(control.value).toBe("");
+    expect(additions).toHaveLength(installed);
+    expect(removals).toEqual([]);
+    expect(booted.unsent.list()).toEqual([{ record: "c1", name: "comment", base: "", text: "kept from earlier" }]);
+
+    adopted.dispose();
+    expect(control.value).toBe("");
+    expect(removals).toEqual([]);
+    expect(booted.unsent.list()).toEqual([{ record: "c1", name: "comment", base: "", text: "kept from earlier" }]);
+
+    // A live entry reuses that one installation, restores the draft a repaint took away, and
+    // its own dispose leaves the draft pending.
+    const detail = document.querySelector('[data-id="c1"] .detail');
+    detail.innerHTML = '<input class="comment" unsent="comment">';
+    const painted = detail.querySelector("[unsent]");
+    await settle();
+    expect(painted.value).toBe("kept from earlier");
+
+    lease = booted.unsentParticipant().prepare({ generation: 2, isCurrent: () => true });
+    lease.enable();
+    expect(additions).toHaveLength(installed);
+
+    lease.dispose();
+    expect(booted.unsent.list()).toEqual([{ record: "c1", name: "comment", base: "", text: "kept from earlier" }]);
+  } finally {
+    lease?.dispose();
+    adopted?.dispose();
+    delete window.clayEditMode;
+    jest.resetModules();
+  }
+});
+
+test("upload's managed preparation admits nothing until the commit, and adoption takes the open session", async () => {
+  const sent = installXhr();
+
+  // The plan path re-exports the factory the transport holds.
+  expect(uploadPlan.modeParticipant).toBe(upload.uploadParticipant);
+
+  const managed = upload.uploadParticipant().prepare({ generation: 1, isCurrent: () => true });
+  const held = upload.start(file("before-commit.png"));
+  expect(await held.result).toMatchObject({ ok: false, code: "aborted" });
+  expect(sent).toHaveLength(0);
+  expect(held.file.name).toBe("before-commit.png");
+
+  managed.enable();
+  const admitted = upload.start(file("after-commit.png"));
+  respond(await untilRequest(sent));
+  expect(await admitted.result).toMatchObject({ ok: true });
+  expect(sent).toHaveLength(1);
+  managed.dispose();
+
+  // An explicit edit boot admits uploads from its first keystroke, so adoption is a lease
+  // over a session that is already open.
+  const adopted = uploadPlan.modeParticipant().prepare({ generation: 2, isCurrent: () => true, initial: true });
+  const running = upload.start(file("booted.png"));
+  respond(await untilRequest(sent, 1));
+  expect(await running.result).toMatchObject({ ok: true });
+  expect(sent).toHaveLength(2);
+
+  adopted.dispose();
+  const after = upload.start(file("after-exit.png"));
   expect(await after.result).toMatchObject({ ok: false, code: "aborted" });
   expect(sent).toHaveLength(2);
 });

@@ -96,17 +96,19 @@ function unresolved() {
  * The shell and the notice it fetches are editor-only: they exist to answer a conflict,
  * and the answer needs the editing lane. `quiesce` refuses an exit over a conflict that
  * is still unresolved and leaves the notice standing exactly as it is, which is what a
- * refusal has to keep showing; `resume` has nothing to reopen. `dispose` (after the
- * barrier) takes back the shell's handlers and stops the notice, so a later frame in
+ * refusal has to keep showing; `resume` has nothing to reopen. `initial: true` adopts the
+ * shell and the notice the boot already armed, and arms nothing again. `dispose` (after
+ * the barrier) takes back the shell's handlers and stops the notice, so a later frame in
  * view draws nothing.
  */
 export function conflictNoticeParticipant() {
   return {
     id: "clay:conflict-notice",
     order: 960, // last: it reads the save lane's refusal and every peer's losses
-    prepare() {
+    prepare(context = {}) {
       return {
         enable() {
+          if (context.initial === true) return;
           if (!notice && !loading) arm();
         },
         quiesce() {
