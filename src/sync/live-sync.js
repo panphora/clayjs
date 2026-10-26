@@ -504,6 +504,7 @@ class LiveSync {
     }
 
     const committed = modeState().mode === 'edit' ? 'live' : 'saved';
+    const wasLive = this.lane === 'live';
     this._lane = lane || (this._laneChosen ? this._lane : committed);
 
     // Reset state for new connection. Resetting lastSeenSeq is a new baseline,
@@ -525,6 +526,10 @@ class LiveSync {
     this._represented = represented
       ? Object.freeze({ bytes: represented.bytes ?? null, etag: represented.etag ?? null, seq: represented.seq ?? null })
       : NO_FILE;
+    // A saved lane a live session just gave back, holding no receipt, is the one case
+    // that has to fetch the served file for itself: an initial-edit exit that saved
+    // nothing still leaves a reader that can show and hand over a file.
+    this._acquireEmptySaved = wasLive && this.lane === 'saved' && this._represented.bytes === null;
     this._pendingExternal = null;
     this.resumeId = this.generateResumeId();
 
@@ -839,6 +844,15 @@ class LiveSync {
       // check, and the page keeps its pre-1.9.0 startup behavior.
       startupCheck: Boolean(servedDocumentEtag),
     });
+
+    // A saved reader that a live session handed back with no bytes has nothing to
+    // show and nothing to hand the next entry. Ask the host for the served file once,
+    // as a view boot does, so an initial-edit exit that saved nothing still leaves a
+    // receipt.
+    if (this._acquireEmptySaved) {
+      this._acquireEmptySaved = false;
+      this._fetchServedDocument(undefined, { repair: true });
+    }
 
     this.sse.onopen = () => {
       console.log('[LiveSync] Connected');
@@ -2276,6 +2290,8 @@ class LiveSync {
         this._setPeerBase(serializeForSync(clone), this.identity.exportMap(clone, originalSnapshotNode), ticket);
         this._applyGen++;
       }
+
+      if (this.lane === 'saved') this._represented = Object.freeze({ bytes: html, etag: etag || null, seq: seq ?? null });
 
       document.dispatchEvent(new CustomEvent('clay:sync-applied', {
         detail: {

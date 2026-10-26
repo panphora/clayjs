@@ -103,6 +103,25 @@ export function forgetEtag() {
   recordEtag(null);
 }
 
+// Only a real answer (spec is a number) says what the host supports: a refresh
+// that failed comes back as a bare host with no extensions, and must not switch
+// conditional saves off for the rest of the page's life.
+function adoptHostExtensions(meta) {
+  if (typeof meta.spec === "number") conditional = meta.extensions.includes("conditional");
+}
+
+/**
+ * Learn from discovery whether this host offers conditional saves. The stamp is
+ * left alone: a session that only wants the capability must not move the version
+ * it is about to save against.
+ *
+ * @returns {Promise<boolean>}
+ */
+export async function learnConditionalSaves() {
+  adoptHostExtensions(await hostMeta());
+  return conditional;
+}
+
 /**
  * Learn from discovery whether this host offers conditional saves, and what the
  * document's current stamp is.
@@ -124,10 +143,7 @@ export function forgetEtag() {
 export async function seedEtag({ fresh = false, clearIfMissing = fresh } = {}) {
   const at = generation;
   const meta = await hostMeta({ fresh });
-  // Only a real answer (spec is a number) says what the host supports: a refresh
-  // that failed comes back as a bare host with no extensions, and must not switch
-  // conditional saves off for the rest of the page's life.
-  if (typeof meta.spec === "number") conditional = meta.extensions.includes("conditional");
+  adoptHostExtensions(meta);
 
   if (generation !== at) return lastSeen;
 

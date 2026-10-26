@@ -348,10 +348,11 @@ async function adoptInitial(handle) {
 }
 
 // The bytes and stamp of this session's last accepted save, or null for a session that
-// never saved: the receipt the restarted reader starts from.
+// never saved: the receipt the restarted reader starts from. `generation` is this
+// session's, so a save an older session made is never handed to the next reader.
 async function acceptedReceipt(handle) {
   const save = handle?.loaded?.["core/save.js"] ?? (await import("./save.js").catch(() => null));
-  return save?.acceptedReceipt?.() ?? null;
+  return save?.acceptedReceipt?.(generation) ?? null;
 }
 
 // The deadline every wait of one exit shares, taken before its first await so nothing it

@@ -24,7 +24,7 @@ import {
 import { captureForComparisonAndDirty, captureForSaveAndComparison, captureForDirtyCheck, captureSaveClone, releaseCaptureArtifact } from "./snapshot.js";
 import { paintSignature } from "../lib/derived.js";
 import { NO_TRIGGER_AUTOSAVE_SELECTOR } from "../lib/region-policy.js";
-import { seedEtag, lastSeenEtag, recordEtag } from "./etag.js";
+import { seedEtag, learnConditionalSaves, lastSeenEtag, recordEtag } from "./etag.js";
 import { startDirtyGate, gateCaptureToken, gateClearIfUnchanged, gateRevision, pageMaybeDirty } from "../lib/dirty-gate.js";
 import { hasUnsavedState } from "../lib/unsaved-state.js";
 import { autosaveActive } from "../lib/autosave-state.js";
@@ -359,9 +359,17 @@ let acceptedSave = null;
 let baselineEtag = null;
 let baselineKept = false;
 
-/** The bytes and stamp of this tab's last accepted save, or null if it has not saved. */
-export function acceptedReceipt() {
-  return acceptedSave ? { ...acceptedSave } : null;
+/**
+ * The bytes and stamp of this session's last accepted save, or null when it made none.
+ *
+ * A save belongs to the session it was made in: an exit hands the next reader its
+ * own save, never an older session's, or a clean session would hand back a file
+ * another tab has since replaced.
+ */
+export function acceptedReceipt(generation = saveGenerationAt) {
+  if (!acceptedSave || acceptedSave.generation !== generation) return null;
+  const { bytes, etag } = acceptedSave;
+  return { bytes, etag };
 }
 
 /**
@@ -410,8 +418,13 @@ export function modeParticipant() {
       if (context.initial === true) session.start();
       return {
         enable() {
+          // Every session learns the capability and records the stamp it represents:
+          // a live entry included, and a re-entry after the stamp advanced in view.
+          learnConditionalSaves();
+          const etag = context.represented?.etag;
+          if (typeof etag === "string" && etag) recordEtag(etag);
           if (context.initial === true) return;
-          installOnce(context);
+          installOnce();
           session.start();
         },
         quiesce: () => session.quiesce(),
@@ -424,18 +437,13 @@ export function modeParticipant() {
 
 // What `init` installed for a boot in edit. The baseline is not among it: `adoptEntryBaseline`
 // settles that from the represented file, and the boot settle would settle over the reader's DOM.
-function installOnce(context) {
+function installOnce() {
   if (servicesInstalled) return;
   servicesInstalled = true;
   startDirtyGate();
   initUserGesture();
   initSaveKeyboardShortcut();
   initHyperclaySaveButton();
-  // The version this entry adopted is the stamp the next save's If-Match carries; a page
-  // that arrived without one asks the host, as a boot does.
-  const etag = context?.represented?.etag;
-  if (typeof etag === "string" && etag) recordEtag(etag);
-  else seedEtag();
 }
 
 // ============================================
@@ -652,7 +660,7 @@ function applySaveResult(result, forComparison, forDirty, label, gateToken, forS
     lastSavedBytes = forSave;
     // The receipt a mode exit hands the next reader, and the version the baselines above
     // were taken at: both describe the bytes the host just accepted.
-    acceptedSave = { bytes: forSave, etag: lastSeenEtag() };
+    acceptedSave = { bytes: forSave, etag: lastSeenEtag(), generation: saveGenerationAt };
     baselineEtag = acceptedSave.etag;
     baselineKept = true;
     unsavedChanges = false;
