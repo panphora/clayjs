@@ -478,3 +478,36 @@ test("an element added after an initial edit boot gets its editmode behaviour", 
     boot.stop();
   }
 });
+
+test("an empty saved lane acquires a stamped served file, so the next entry goes live", async () => {
+  // The host stamps every response, so the file the lane acquires names the very version this
+  // tab already represents. It is still the file that lane has to hold: without it the reader
+  // hands the next entry nothing and that entry falls back to a reload.
+  const boot = await bootFixture("document-sync.html", { mode: "edit", declare: true, root: { documentetag: "v1" } });
+  const { liveSync: sync } = await import(`${SRC}sync/live-sync.js`);
+  const realFetch = globalThis.fetch;
+  try {
+    const clay = boot.clay;
+    globalThis.fetch = window.fetch = async (url, options = {}) => {
+      const method = (options.method || "GET").toUpperCase();
+      const path = new URL(String(url), window.location.origin).pathname;
+      if (method === "GET" && !path.startsWith("/_/meta")) {
+        const body = `<!DOCTYPE html>\n${document.documentElement.outerHTML}`;
+        return { ok: true, status: 200, headers: { get: () => null }, text: async () => body };
+      }
+      return realFetch(url, options);
+    };
+
+    expect((await clay.setMode("view")).ok).toBe(true);
+    await sync._ready;
+    expect(await until(() => typeof sync._represented.bytes === "string", 5000)).toBe(true);
+    expect(sync._represented.etag).toBe("v1");
+
+    const answer = await clay.setMode("edit");
+    expect(answer).toEqual({ ok: true, mode: "edit", changed: true });
+  } finally {
+    globalThis.fetch = window.fetch = realFetch;
+    sync.stop();
+    boot.stop();
+  }
+});

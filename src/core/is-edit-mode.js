@@ -115,6 +115,13 @@ export function commitModeFacts(next) {
 
 export const modeState = () => ({ mode, ...lifecycle });
 
+// A module that starts a session when it evaluates belongs to the session that was idle when
+// it landed: during any transition the committed mode is still the one being left, so a late
+// import would start an editor no exit holds a lease over.
+export function startsAtImport() {
+  return isEditMode && modeState().phase === "idle";
+}
+
 // The one registration queue, on `window.clay`: the API, a preboot push and a later raw
 // push all land in the array the controller drains. Non-enumerable, because it is a
 // handoff and not a member of the facade a page boots with.

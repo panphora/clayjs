@@ -19,7 +19,7 @@
    instead of from the previous session's leftovers.
 
 */
-import { isEditMode } from "../core/is-edit-mode.js";
+import { isEditMode, startsAtImport } from "../core/is-edit-mode.js";
 import Mutation from "../lib/mutation.js";
 import { capabilitySelector } from "../lib/region-capabilities.js";
 import { onSnapshot } from "../core/snapshot.js";
@@ -487,7 +487,7 @@ async function adopt() {
 
 // Auto-init when module is imported; the loader awaits `ready` before resolving clay.ready
 async function init() {
-  if (!isEditMode) return null;
+  if (!startsAtImport()) return null;
   const lease = await sortableParticipant().prepare();
   lease.enable();
   return lease;

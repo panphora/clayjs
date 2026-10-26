@@ -4,7 +4,7 @@
 // flag.
 
 import { undo } from '../vendor/hyper-undo.vendor.js'
-import { isEditMode } from '../core/is-edit-mode.js'
+import { isEditMode, startsAtImport } from '../core/is-edit-mode.js'
 import { isTabLocalAttr } from '../lib/root-attrs.js'
 import { isDerivedAttr } from '../lib/derived.js'
 import { PERSIST } from '../lib/attr-aliases.js'
@@ -309,7 +309,7 @@ async function adopt() {
 
 // Auto-init when the module is imported; the loader awaits `ready` before resolving clay.ready
 async function init() {
-  if (!isEditMode) return null
+  if (!startsAtImport()) return null
   if (typeof document === 'undefined') return null
   const lease = await undoParticipant().prepare()
   lease.enable()

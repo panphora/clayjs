@@ -422,3 +422,74 @@ test("a held entry past the deadline refuses timeout and disposes the lease that
     jest.useRealTimers();
   }
 });
+
+test("an exit whose adoption never settles fails with timeout, and the next exit reuses it", async () => {
+  const realSetTimeout = globalThis.setTimeout;
+  // A tab that boots in edit: its sessions started at evaluation and its first exit adopts them.
+  const clay = await bootPage({ edit: true, owner: true });
+  const lifecycle = await lifecycleOf();
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  let preparations = 0;
+  const log = [];
+  // The boot's own drag editor: the path is loaded, so the exit adopts it instead of
+  // preparing a second one, and its preparation is the boot this page already made.
+  const handle = {
+    edit: { core: [], plugins: ["plugins/sortable.js"], late: [] },
+    view: { core: [], plugins: [], late: [] },
+    modules: {},
+    attach() {},
+    attachEditCore() {},
+    loaded: {
+      "plugins/sortable.js": {
+        modeParticipant: () => ({
+          id: "clay:sortable",
+          order: 300,
+          prepare: () => {
+            preparations++;
+            return gate;
+          },
+        }),
+      },
+    },
+  };
+  const deadlines = [];
+  const timerSpy = jest.spyOn(globalThis, "setTimeout").mockImplementation((fn, delay, ...args) => {
+    if (delay === 15000) deadlines.push(fn);
+    return realSetTimeout(fn, delay, ...args);
+  });
+  try {
+    expect(clay.mode).toBe("edit");
+    expect(clay.modeLifecycle.state).toMatchObject({ phase: "idle" });
+
+    const refused = lifecycle.requestMode("view", handle);
+    for (let i = 0; i < 200 && preparations === 0; i++) await new Promise((resolve) => realSetTimeout(resolve, 1));
+    expect(preparations).toBe(1);
+    expect(clay.modeLifecycle.state).toMatchObject({ phase: "leaving" });
+
+    // One deadline this exit took at its start, and it bounds the adoption too.
+    expect(deadlines.length).toBe(1);
+    deadlines[0]();
+
+    await expect(refused).resolves.toEqual({ ok: false, mode: "edit", code: "timeout" });
+    expect(clay.mode).toBe("edit");
+    expect(clay.modeLifecycle.state).toMatchObject({ phase: "idle", reason: "timeout" });
+    expect(clay.modeLifecycle.canWrite()).toBe(true);
+
+    // The adoption the deadline interrupted is the next exit's, not a second preparation.
+    release({
+      enable() {},
+      quiesce: async () => log.push("quiesce"),
+      resume: () => log.push("resume"),
+      dispose: () => log.push("dispose"),
+    });
+    await expect(lifecycle.requestMode("view", handle)).resolves.toEqual({ ok: true, mode: "view", changed: true });
+    expect(preparations).toBe(1);
+    expect(clay.mode).toBe("view");
+    expect(log).toEqual(["quiesce", "dispose"]);
+  } finally {
+    timerSpy.mockRestore();
+  }
+});

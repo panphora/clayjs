@@ -188,10 +188,11 @@ export async function boot(base, params, readyResolve, manifest = null, suppleme
 // cache for the same single instance.
 //
 // A transition in flight counts as left: until it commits, `isEditMode` still reads the
-// mode being left, and a module that evaluated then would start an unadopted session.
+// mode being left, and a module that evaluated then would start an unadopted session. The
+// modules ask the same question themselves (`startsAtImport`), so an import already in
+// flight when the exit began starts nothing either.
 const stale = (path, editMode) =>
-  PLUGIN_PATHS[PLUGIN_NAMES[path]]?.editOnly &&
-  (!editMode.isEditMode || editMode.modeState().phase !== "idle");
+  PLUGIN_PATHS[PLUGIN_NAMES[path]]?.editOnly && !editMode.startsAtImport();
 
 // Plugins no first paint or keystroke waits for. They load after the editor takes input
 // (right away on a page without one), one at a time and in plan order, and a failure

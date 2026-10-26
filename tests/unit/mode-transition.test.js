@@ -86,6 +86,7 @@ async function bootPage({
   declared = false,
   resources = "",
   queue = null,
+  beforeBoot = null,
 } = {}) {
   jest.resetModules();
   installRouter();
@@ -103,6 +104,7 @@ async function bootPage({
   document.head.innerHTML = draft ? API_TAG : "";
   document.body.innerHTML = `${resources}<div id="content">start</div>`;
   window.clay = queue ? { modeParticipants: queue } : {};
+  if (beforeBoot) await beforeBoot();
   const { boot } = await import("../../src/loader.js");
   await new Promise((resolve) => boot(null, new URLSearchParams(params), resolve));
   // The page's accepted baseline settles a quiet moment after boot; comparing an edit
@@ -617,6 +619,94 @@ test("an explicit initial edit exits by adoption and the page re-enters live", a
   }
 });
 
+test("an initial edit exit adopts the boot's sessions past a preboot participant", async () => {
+  // The queue's lease is already in the controller's hands when the exit starts, which is
+  // not the same thing as the boot's own sessions having been adopted: the drag editor the
+  // import started is still running, and the exit is what hands it back.
+  const counter = resourceCounter();
+  const log = [];
+  const queue = [participant("app:panel", log, { order: 2000 })];
+  try {
+    const clay = await bootPage({ edit: true, owner: true, declared: true, params: SORTABLE_PARAMS, resources: BOARD, queue });
+    expect(await until(() => counter.snapshot().instances === 1)).toBe(true);
+    expect(log).toContain("app:panel:prepare");
+    log.length = 0;
+
+    await expect(clay.setMode("view")).resolves.toEqual({ ok: true, mode: "view", changed: true });
+
+    // Both sessions went back: the drag editor the boot started and the app's own.
+    expect(counter.snapshot().instances).toBe(0);
+    expect(log).toContain("app:panel:dispose");
+    expect(clay.modeLifecycle.canWrite()).toBe(false);
+  } finally {
+    counter.stop();
+  }
+});
+
+test("a late edit-only module already importing when the exit starts begins no editor", async () => {
+  // The boot's late tail asked for the drag editor, and the chunk is still on the wire when
+  // the exit begins. It lands mid-exit, while `isEditMode` still reads the mode being left,
+  // and it must start nothing: no editor survives into view and nothing attaches it.
+  const counter = resourceCounter();
+  let releaseChunk;
+  const chunk = new Promise((resolve) => {
+    releaseChunk = resolve;
+  });
+  const seen = { requested: false };
+  const beforeBoot = async () => {
+    const { MODULES } = await import("../../src/loader-logic.js");
+    const real = MODULES["plugins/sortable.js"];
+    MODULES["plugins/sortable.js"] = () => {
+      seen.requested = true;
+      return chunk.then(() => real());
+    };
+  };
+  let flushing = false;
+  let pending = true;
+  let releaseFlush;
+  const flushGate = new Promise((resolve) => {
+    releaseFlush = resolve;
+  });
+  try {
+    const clay = await bootPage({ edit: true, owner: true, declared: true, params: SORTABLE_PARAMS, resources: BOARD, beforeBoot });
+    expect(await until(() => seen.requested)).toBe(true);
+    expect(counter.snapshot().instances).toBe(0);
+
+    const { registerUnsavedState } = await import("../../src/lib/unsaved-state.js");
+    const source = registerUnsavedState({
+      id: "probe:gate",
+      isPending: () => pending,
+      flush: () => {
+        flushing = true;
+        return flushGate;
+      },
+    });
+    try {
+      const exit = clay.setMode("view");
+      expect(await until(() => flushing)).toBe(true);
+      expect(clay.modeLifecycle.state.phase).toBe("leaving");
+
+      // The chunk lands here: the exit is still running and edit is still the committed mode.
+      releaseChunk();
+      const sortable = await import("../../src/plugins/sortable.js");
+      await sortable.ready;
+
+      pending = false;
+      releaseFlush({ ok: true });
+      await expect(exit).resolves.toEqual({ ok: true, mode: "view", changed: true });
+
+      expect(document.getElementById("board")).toBeTruthy();
+      expect(window.Sortable?.get?.(document.getElementById("board")) ?? null).toBeNull();
+      expect(counter.snapshot().instances).toBe(0);
+      expect(clay.sortable).toBeUndefined();
+    } finally {
+      source.dispose();
+    }
+  } finally {
+    counter.stop();
+  }
+});
+
 test("three enter and exit cycles hold one session's listeners, observers and instances", async () => {
   const counter = resourceCounter();
   try {
@@ -775,4 +865,3 @@ test("a switch module that fails to load keeps the guarded reload and leaves no 
     process.off("unhandledRejection", onRejection);
   }
 });
-

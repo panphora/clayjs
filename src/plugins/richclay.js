@@ -4,7 +4,7 @@
 import { installSkin } from "../ui/vendor-skin.js";
 import { CSS, ROOTS } from "../ui/skins/richclay.js";
 import { RichClay } from "../vendor/richclay.vendor.js";
-import { isEditMode } from "../core/is-edit-mode.js";
+import { startsAtImport } from "../core/is-edit-mode.js";
 
 installSkin("richclay", CSS, { roots: ROOTS });
 
@@ -118,7 +118,7 @@ async function adopt() {
 
 // Auto-init when the module is imported; the loader awaits `ready` before resolving clay.ready
 async function init() {
-  if (!isEditMode) return null;
+  if (!startsAtImport()) return null;
   const lease = await richclayParticipant().prepare();
   lease.enable();
   return lease;

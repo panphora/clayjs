@@ -102,7 +102,7 @@ function stubEventSource(counts, streams) {
   };
 }
 
-export async function bootFixture(name, { mode = "edit", settle = 20, declare = false, params = null } = {}) {
+export async function bootFixture(name, { mode = "edit", settle = 20, declare = false, params = null, root: extraRoot = null } = {}) {
   const fixture = readFixture(name);
   jest.resetModules();
 
@@ -120,7 +120,7 @@ export async function bootFixture(name, { mode = "edit", settle = 20, declare = 
   // the mode this boot measures.
   const root = document.documentElement;
   for (const attribute of Array.from(root.attributes)) root.removeAttribute(attribute.name);
-  for (const [key, value] of Object.entries(fixture.root)) root.setAttribute(key, value);
+  for (const [key, value] of Object.entries({ ...fixture.root, ...extraRoot })) root.setAttribute(key, value);
   if (declare) root.setAttribute("clay-mode-switch", "live");
   document.head.innerHTML = fixture.head;
   document.body.innerHTML = fixture.body;

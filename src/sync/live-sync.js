@@ -1373,7 +1373,14 @@ class LiveSync {
             // server could not replay, so it keeps its unstamped fallback.
             if (!repair) return;
           } else if (stamp === representedEtag()) {
-            // The file this tab was served, and nothing to do about it.
+            // The file this tab was served, and nothing to do about it. The exception is
+            // the saved lane's acquisition: a reader a live session handed back with no
+            // bytes has nothing to show and nothing to hand the next entry, and these
+            // bytes ARE the file it starts from, so the receipt moves even though the DOM
+            // is already showing them.
+            if (repair && this.lane === 'saved') {
+              this._represented = Object.freeze({ bytes: html, etag: stamp, seq: seq ?? null });
+            }
             return;
           }
         } else if (typeof seq === 'number' && seq < this._lastExternalSeq) {

@@ -27,6 +27,12 @@ let inFlight = null;
 // A tab that booted in edit started its sessions at evaluation; the first exit adopts them
 // instead of preparing its own.
 let initialSession = false;
+// Whether this boot's sessions have been adopted. `leases` already holds whatever the entry
+// prepared, a preboot participant included, so it says nothing about the boot's own.
+let adoptedInitial = false;
+// The adoption in flight, kept across a refused exit: a participant whose preparation
+// outlives the deadline answers the next exit instead of being asked twice.
+let adopting = null;
 // The file the session was built from. An exit that saved nothing hands it back to the
 // reader, so a second entry has a receipt without waiting for a frame.
 let entryReceipt = null;
@@ -159,7 +165,11 @@ async function enter(handle = null) {
   commitModeFacts({ phase: "entering", generation: context.generation, reason: null });
   // A tab that booted in edit is already running the sessions an entry would prepare, so
   // its exit adopts them rather than starting a second set.
-  if (!handle) initialSession = true;
+  if (!handle) {
+    initialSession = true;
+    adoptedInitial = false;
+    adopting = null;
+  }
 
   const prepared = [];
   const fresh = [];
@@ -402,12 +412,18 @@ async function leaveWithin(handle, deadline) {
   let held = leases;
   // Adopting the boot's sessions is the first exit's work, and only while nothing has
   // been adopted yet: a refused exit keeps what it adopted to quiesce and dispose next.
-  if (initial && !held.length) {
-    const adopted = await adoptInitial(handle);
+  if (initial && !adoptedInitial) {
+    adopting ??= adoptInitial(handle);
+    // An adoption is a preparation like any other, so the deadline bounds it too: a
+    // participant that awaits a boot that never settles cannot hold the exit open.
+    const adopted = await Promise.race([adopting, deadline.expired]);
+    if (adopted === EXPIRED) return refuse("timeout");
     if (!adopted) {
+      adopting = null;
       commitModeFacts({ phase: "idle", reason: null });
       return null;
     }
+    adoptedInitial = true;
     held = [...adopted, ...held];
     leases = held;
   }
@@ -450,6 +466,8 @@ async function leaveWithin(handle, deadline) {
   disposeInReverse(held);
   leases = [];
   initialSession = false;
+  adoptedInitial = false;
+  adopting = null;
   // The reader comes back on the file this session last saved, or on the one it was built
   // from when it saved nothing: a second entry commits without waiting for a frame.
   const accepted = (await acceptedReceipt(handle)) ?? entryReceipt;
