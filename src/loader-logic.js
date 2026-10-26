@@ -185,7 +185,8 @@ const IMPLIES = { cms: ["quickcrop", "upload"], "ai-edit": ["wire"], page: ["liv
 const DISPLACES = { page: ["richclay"] };
 // No first paint or keystroke waits for these. source keeps the file's bytes outside
 // the edited parts stable; a save before it installs is the ordinary full serialization.
-const LATE = new Set(["source", "sortable", "menu"]);
+// upgrade only asks the host for a newer version once `clay.ready` resolves.
+const LATE = new Set(["source", "sortable", "menu", "upgrade"]);
 
 function parseCsv(params, key, enabled, apply) {
   const raw = params.get(key);

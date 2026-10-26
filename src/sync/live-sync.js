@@ -45,8 +45,6 @@ import { attributeMerge } from "./merge-declarations.js";
 import { serializeForSync, captureForComparisonAndDirty, canonicalizeReceived, captureSnapshot, originalSnapshotNode, captureForMerge, captureForSaveAndComparison } from '../core/snapshot.js';
 import { mergeIgnoresAttr, mergeVetoesAttr } from '../lib/root-attrs.js';
 import { autosaveActive } from '../lib/autosave-state.js';
-import { presence } from './presence.js';
-import { editingMarker } from './editing-marker.js';
 import { hostSupports } from '../core/host-meta.js';
 import { servedDocumentEtag } from '../core/host-attrs.js';
 import { recordEtag, seedEtag, lastSeenEtag, conditionalSaves, representedEtag, forgetRepresentedEtag } from '../core/etag.js';
@@ -83,6 +81,46 @@ function loadEdit() {
 const entering = modeState().phase === "entering";
 
 if (isEditMode && !entering) loadEdit().catch(() => {});
+
+// Who else is on the document, and the block somebody else is editing: both are
+// a download of their own. A reader alone on a page draws neither, so they
+// arrive with the first roster frame; a frame that lands while the download is
+// in flight waits in order, and anything read before it is the empty state a
+// bare constructor gives.
+let roster = null;
+let rosterLoad = null;
+let rosterQueue = [];
+
+function applyRoster(data) {
+  roster.presence.update(data);
+  roster.editingMarker.update(data);
+}
+
+function loadRoster() {
+  rosterLoad ??= Promise.all([import('./presence.js'), import('./editing-marker.js')])
+    .then(([presenceMod, markerMod]) => {
+      roster = { presence: presenceMod.presence, editingMarker: markerMod.editingMarker };
+      const queued = rosterQueue;
+      rosterQueue = [];
+      for (const data of queued) applyRoster(data);
+      return roster;
+    })
+    .catch((error) => {
+      rosterLoad = null;
+      throw error;
+    });
+  return rosterLoad;
+}
+
+// A download that failed keeps the queue, so the next frame asks again.
+function takeRosterFrame(data) {
+  if (roster) {
+    applyRoster(data);
+    return;
+  }
+  rosterQueue.push(data);
+  loadRoster().catch(() => {});
+}
 
 // The receipt of a lane that has applied no saved file.
 const NO_FILE = Object.freeze({ bytes: null, etag: null, seq: null });
@@ -651,9 +689,14 @@ class LiveSync {
     streamClosed();
 
     // Nothing feeds the roster once the stream is gone, so leaving the stack up
-    // would show a list of people who may all have left.
-    presence.clear();
-    editingMarker.clear();
+    // would show a list of people who may all have left. A roster that never
+    // loaded has drawn nothing, and its queued frames are dropped with the
+    // stream that fed them.
+    rosterQueue = [];
+    if (roster) {
+      roster.presence.clear();
+      roster.editingMarker.clear();
+    }
 
     if (this._editing) {
       this._editing.stop();
@@ -931,8 +974,7 @@ class LiveSync {
       } catch {
         return;
       }
-      presence.update(data);
-      editingMarker.update(data);
+      takeRosterFrame(data);
       this._lastRoster = data;
       if (this._editing) this._editing.roster(data);
     });

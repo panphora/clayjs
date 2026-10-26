@@ -211,11 +211,11 @@
         "unsent",
         "upload",
         "people",
-        "upgrade",
         "sync",
         "derive",
         "sortable",
         "menu",
+        "upgrade",
         "source"
       ],
       "moduleCalls": {
@@ -304,10 +304,10 @@
       "plugins": [
         "visitor-drafts",
         "people",
-        "upgrade",
         "sync",
         "derive",
-        "menu"
+        "menu",
+        "upgrade"
       ],
       "moduleCalls": {
         "core/draft-mode.js": 1,
@@ -383,11 +383,11 @@
       "plugins": [
         "visitor-drafts",
         "upload",
-        "upgrade",
         "sync",
         "derive",
         "bind-text",
         "menu",
+        "upgrade",
         "source"
       ],
       "moduleCalls": {
@@ -469,10 +469,10 @@
       ],
       "plugins": [
         "visitor-drafts",
-        "upgrade",
         "sync",
         "derive",
-        "menu"
+        "menu",
+        "upgrade"
       ],
       "moduleCalls": {
         "core/draft-mode.js": 1,

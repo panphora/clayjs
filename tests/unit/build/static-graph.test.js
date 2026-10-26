@@ -243,7 +243,7 @@ const FIRST_USE_UI = [
 const dynamicDeps = (inputs, file) =>
   (inputs[file]?.imports || []).filter((im) => im.kind === "dynamic-import").map((im) => im.path);
 
-test("kanban view: the dialog, presence and markers paint from a first-use download", async () => {
+test("kanban view: the dialog paints from a first-use download and presence from the first roster frame", async () => {
   const html = readFileSync(new URL("../../../tests/fixtures/load/kanban.html", import.meta.url), "utf8");
   const params = new URL(html.match(/<script[^>]+src="([^"]*clay\.js[^"]+)"/)[1]).searchParams;
   const plan = resolveModules(params, false, { isDraftMode: false, hasSap: FIXTURES.kanban.hasSap });
@@ -252,8 +252,13 @@ test("kanban view: the dialog, presence and markers paint from a first-use downl
   const graph = walk(inputs, entries);
 
   expect(entries).toContain("src/plugins/people.js");
-  expect(graph.has("src/sync/presence.js")).toBe(true);
-  expect(graph.has("src/sync/editing-marker.js")).toBe(true);
+  // A lone reader draws nobody, so live-sync fetches both on its first `presence`
+  // frame and a reader's boot walk carries neither.
+  expect(graph.has("src/sync/presence.js")).toBe(false);
+  expect(graph.has("src/sync/editing-marker.js")).toBe(false);
+  expect(dynamicDeps(inputs, "src/sync/live-sync.js")).toEqual(expect.arrayContaining([
+    "src/sync/presence.js", "src/sync/editing-marker.js",
+  ]));
   expect([...graph].filter((file) => FIRST_USE_UI.includes(file))).toEqual([]);
 
   // Built, so each first use has something to fetch when it happens...
@@ -288,7 +293,7 @@ test("the notice loads the replace module only through the upgrade runner", asyn
     isDraftMode: false,
     hasSap: false,
   });
-  expect(plan.plugins).toContain("plugins/upgrade.js");
+  expect([...plan.plugins, ...plan.late]).toContain("plugins/upgrade.js");
   const noticeGraph = walk(await inputsFor([entry]), [entry]);
   expect(noticeGraph.has("src/core/save-replace.js")).toBe(false);
   expect(noticeGraph.has("src/plugins/upgrade-run.js")).toBe(false);
@@ -304,22 +309,29 @@ test("the notice loads the replace module only through the upgrade runner", asyn
 // `clay:upgrade-requested`, which is where the runner that carries the engine is fetched.
 const UPGRADE_ENGINE = "src/vendor/hyper-html-api-upgrade.vendor.js";
 
-test("kanban view: the upgrade check is in the reader graph and the engine is not", async () => {
+test("kanban view: the upgrade check loads after ready and the engine never does", async () => {
   const html = readFileSync(new URL("../../../tests/fixtures/load/kanban.html", import.meta.url), "utf8");
   const params = new URL(html.match(/<script[^>]+src="([^"]*clay\.js[^"]+)"/)[1]).searchParams;
   // The meter counts a template copy for its owner, which is the page that carries the
-  // check: `resolveModules` adds plugins/upgrade.js for exactly this combination.
+  // check: `resolveModules` adds plugins/upgrade.js for exactly this combination, and
+  // puts it on the late line, after ready.
   const templateSource = html.match(/<meta name="hyper-source" content="([^"]+)"/)?.[1] ?? null;
   const plan = resolveModules(params, false, { isDraftMode: false, hasSap: FIXTURES.kanban.hasSap, canEdit: true, templateSource });
   const entries = [...plan.core, ...plan.plugins].map((path) => `src/${path}`);
-  const inputs = await inputsFor(entries);
+  const late = plan.late.map((path) => `src/${path}`);
+  const inputs = await inputsFor([...entries, ...late]);
   const graph = walk(inputs, entries);
 
-  expect(entries).toContain("src/plugins/upgrade.js");
+  expect(late).toContain("src/plugins/upgrade.js");
   expect(graph.size).toBeGreaterThanOrEqual(40);
-  expect(graph.has("src/plugins/upgrade.js")).toBe(true);
-  expect(graph.has("src/core/version.js")).toBe(true);
-  expect(graph.has(UPGRADE_ENGINE)).toBe(false);
+  expect(graph.has("src/plugins/upgrade.js")).toBe(false);
+
+  // The check, and the comparison it reads, arrive with the late list and carry no
+  // engine of their own.
+  const lateGraph = walk(inputs, late);
+  expect(lateGraph.has("src/plugins/upgrade.js")).toBe(true);
+  expect(lateGraph.has("src/core/version.js")).toBe(true);
+  expect(lateGraph.has(UPGRADE_ENGINE)).toBe(false);
 
   // Built, so the engine exists for the click that runs an upgrade to fetch...
   expect(Object.keys(inputs)).toContain(UPGRADE_ENGINE);

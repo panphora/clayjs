@@ -113,7 +113,8 @@ test("a plugin an implication pulls in is checked like a named one", async () =>
 test("a Sap root and template metadata are part of the resolution too", () => {
   const params = new URLSearchParams("exclude=richclay");
   const edit = resolveModules(params, true, { canEdit: true, hasSap: true, templateSource: "https://hyperclay.com/templates/kanban/hosted/latest.html" });
-  expect(edit.plugins).toEqual(expect.arrayContaining(["plugins/derive.js", "plugins/upgrade.js"]));
+  expect(edit.plugins).toContain("plugins/derive.js");
+  expect(edit.late).toContain("plugins/upgrade.js");
 });
 
 const FIXTURE_DIR = new URL("../../fixtures/load/", import.meta.url);
