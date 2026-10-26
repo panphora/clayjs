@@ -569,12 +569,21 @@ export function liveWriterParticipant() {
   };
 }
 
+function releaseHeld() {
+  for (const entry of sessionStores()) {
+    if (entry.store.pending.length > 0) fast?.release(entry.store.name);
+  }
+}
+
 function writerLease(session, { adopted = false } = {}) {
   return {
     enable() {
       if (adopted || writerSession !== session) return;
       session.admitted = true;
       ensureLane();
+      // A lane opened at preparation may already hold ops the page made before the
+      // commit (an adoption's), which onLocal kept back while admission was closed.
+      releaseHeld();
     },
     quiesce() {
       if (writerSession !== session) return;
@@ -584,9 +593,7 @@ function writerLease(session, { adopted = false } = {}) {
     resume() {
       if (writerSession !== session) return;
       session.admitted = true;
-      for (const entry of sessionStores()) {
-        if (entry.store.pending.length > 0) fast?.release(entry.store.name);
-      }
+      releaseHeld();
     },
     dispose() {
       if (writerSession !== session) return;
