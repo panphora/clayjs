@@ -65,13 +65,14 @@ test("carries the core, every plugin and every satellite", () => {
   expect((bundle.match(/@layer clay-skin\{/g) || []).length).toBeGreaterThanOrEqual(3);
   for (const name of ["richclay", "cms", "quickcrop"]) expect(bundle).toMatch(new RegExp(`installSkin\\d*\\(\\s*"${name}"`));
   expect(bundle.length).toBeGreaterThan(500_000);
-  // 4.75 MB. The 4.5 MB ceiling was set at 4.01 MB; what grew it by 534 KB is the
-  // reader's own work, all of it code the single-file build is meant to carry: the
-  // vendored markdown and highlighting tools loaded on demand (OverType 192 KB, marked
-  // 70 KB, highlight.js 35 KB plus 30 KB of grammars and its sheet), the menu and SEO
-  // plugin 49 KB, and the reader's page features and saved stream. The guard is there to
-  // catch something the size of Shiki's grammars (6.3 MB), which 4.75 MB still does.
-  expect(bundle.length).toBeLessThan(4_750_000);
+  // 5 MB. The ceiling was 4.75 MB; what went past it is code the single-file build has
+  // to carry because a page cannot fetch it later: the view-first mode lifecycle, the
+  // leases and the staged boot pack. The rest is the reader's own work: the vendored
+  // markdown and highlighting tools loaded on demand (OverType 192 KB, marked 70 KB,
+  // highlight.js 35 KB plus 30 KB of grammars and its sheet), the menu and SEO plugin
+  // 49 KB, and the reader's page features and saved stream. The guard is there to catch
+  // something the size of Shiki's grammars (6.3 MB), which 5 MB still does.
+  expect(bundle.length).toBeLessThan(5_000_000);
 });
 
 // The chunk build adds a generated bootstrap per entry that has a target, plus the

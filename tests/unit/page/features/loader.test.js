@@ -1,10 +1,19 @@
-import { readFileSync } from "node:fs";
+/**
+ * @jest-environment node
+ */
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { buildOfflineManifest } from "../../../../scripts/build-offline-manifest.mjs";
+import { emitChunks } from "../../../../scripts/build-chunks.mjs";
 import { createFeatureLoader } from "../../../../src/page/feature-loader.js";
 import { FEATURES } from "../../../../src/page/features/registry.js";
 import * as tableModule from "../../../../src/page/features/table.js";
 import * as boardModule from "../../../../src/page/features/board.js";
 import * as mediaModule from "../../../../src/page/features/media.js";
 import * as toolModule from "../../../../src/page/features/tool.js";
+
+const ROOT = new URL("../../../../", import.meta.url).pathname;
 
 const deferred = () => {
   let resolve, reject;
@@ -144,7 +153,10 @@ test("an install that resolves after dispose is disposed at once and never insta
 });
 
 test("a host-local runtime prefix activates every feature without reaching clayjs.com", async () => {
-  const index = JSON.parse(readFileSync(new URL("../../../../dist/offline-manifest.json", import.meta.url), "utf8"));
+  // Built here rather than read from dist/, so the test never depends on a build another test ran.
+  const dist = mkdtempSync(join(tmpdir(), "clay-features-manifest-"));
+  await emitChunks({ root: ROOT, outdir: join(dist, "m") });
+  const index = await buildOfflineManifest({ root: ROOT, dist });
   const prefix = `/_/clayjs/${index.version}/`;
   const modules = {
     "src/page/features/table.js": tableModule,
@@ -194,5 +206,6 @@ test("a host-local runtime prefix activates every feature without reaching clayj
   } finally {
     globalThis.fetch = realFetch;
     loader.dispose();
+    rmSync(dist, { recursive: true, force: true });
   }
 });

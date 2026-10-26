@@ -33,7 +33,15 @@ const ASSETS = [
 ];
 
 // The Journal and its legacy fixture live in the starter-templates checkout. A lane
-// worktree keeps that checkout somewhere else, so STARTER_TEMPLATES names it first.
+// worktree keeps that checkout somewhere else, so STARTER_TEMPLATES names it first. With
+// no checkout at all, this repo's own copies stand in: journal.html is byte-identical
+// (scripts/refresh-load-fixtures.mjs keeps it so), and tests/fixtures/legacy holds a
+// byte copy of the frozen old Journal that still names the legacy CDN scripts and fonts.
+const FIXTURES = {
+  "templates/00-journal/journal.html": "tests/fixtures/load/journal.html",
+  "templates/00-journal/tests/fixtures/field-pad-old-script.html": "tests/fixtures/legacy/field-pad-old-script.html",
+};
+
 function starter(rel) {
   const dirs = [
     process.env.STARTER_TEMPLATES,
@@ -44,6 +52,8 @@ function starter(rel) {
     const file = path.join(dir, rel);
     if (existsSync(file)) return file;
   }
+  const fixture = FIXTURES[rel];
+  if (fixture && existsSync(path.join(ROOT, fixture))) return path.join(ROOT, fixture);
   throw new Error(`no starter-templates checkout carries ${rel}; set STARTER_TEMPLATES`);
 }
 
