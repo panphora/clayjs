@@ -12,6 +12,7 @@ import { claim } from "./runtime-owner.js";
 const ARTICLE = "article[data-page]";
 const TOOL = 'section[data-type="tool"][data-id]';
 const PAGE_TAG = 'script[type="application/json"][merge="page"]';
+const LINEAGE = ["live-at", "live-by"];
 
 export { applyPreparedArticle, prepareSavedArticle };
 
@@ -40,8 +41,18 @@ const applySavedTag = (prepared, doc) => {
     return true;
   }
   if (live) {
-    if (live.textContent === saved.textContent) return false;
-    live.textContent = saved.textContent;
+    // The stamp and the provenance the file carries travel with the text the file states:
+    // a tag whose lineage was left behind is a tag the next live entry reads as one it
+    // cannot place, and the room the save was made in goes with it.
+    const lineage = LINEAGE.map((name) => saved.getAttribute(name));
+    const same = live.textContent === saved.textContent &&
+      LINEAGE.every((name, i) => live.getAttribute(name) === lineage[i]);
+    if (same) return false;
+    if (live.textContent !== saved.textContent) live.textContent = saved.textContent;
+    LINEAGE.forEach((name, i) => {
+      if (lineage[i] === null) live.removeAttribute(name);
+      else live.setAttribute(name, lineage[i]);
+    });
     return true;
   }
   const article = doc.querySelector(ARTICLE);

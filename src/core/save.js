@@ -403,16 +403,21 @@ export function acceptedReceipt(generation = saveGenerationAt) {
  * that moved while it was in view is taken as it now stands: a clock, a counter or a
  * reader's own repaint is the page's doing, not the person's, and refusing it would block
  * every entry for as long as that write stays. What is refused is the one case that is
- * the person's: the reader still represents the version this tab's baseline was taken at,
- * and the session it ran left work no save wrote.
+ * the person's: the session it ran left work no save wrote, and nothing says the file
+ * moved — which a stamp the host never answered and a baseline this page never kept both
+ * leave open.
  */
 export function adoptEntryBaseline({ represented } = {}) {
   const token = gateCaptureToken();
   const { forComparison, forDirty } = captureForComparisonAndDirty();
   const etag = typeof represented?.etag === "string" && represented.etag ? represented.etag : null;
 
-  if (baselineKept && etag !== null && etag === baselineEtag && unsavedAtStop &&
-      (forComparison !== lastSavedContents || forDirty !== lastSavedDirty)) {
+  // Work a session left unsaved is the person's. A version the file has moved past is
+  // the page's own doing, and refusing it would block every entry for as long as that
+  // write stays; a stamp that is missing, or a baseline this page never kept, cannot say
+  // the file did not move, so those are refused exactly as the stamped path refuses them.
+  const moved = baselineKept && etag !== null && etag !== baselineEtag;
+  if (!moved && unsavedAtStop && (forComparison !== lastSavedContents || forDirty !== lastSavedDirty)) {
     return { ok: false, code: "pending-input" };
   }
 

@@ -552,9 +552,14 @@ export function liveWriterParticipant() {
         return writerLease(writerSession, { adopted: true });
       }
       freshLaneGates();
-      const session = { admitted: false };
+      // The lane's transport opens with the preparation, not with the commit: the page
+      // (order 400) waits on the room while it prepares, and it prepares before any
+      // enable runs. Admission is still the commit's, so what a person does is what
+      // reaches the room.
+      const session = { admitted: false, wantsLane: true };
       writerSession = session;
       resetWriterSession();
+      ensureLane();
       return writerLease(session);
     },
   };
@@ -744,7 +749,7 @@ function seedLocalRoom() {
 
 function ensureLane() {
   laneGates();
-  if (laneRequested || !(writerSession ? writerSession.admitted : isEditMode)) return;
+  if (laneRequested || !(writerSession ? writerSession.admitted || writerSession.wantsLane : isEditMode)) return;
   laneRequested = true;
   hostMeta.hostSupports("live-data").then(
     async (supported) => {

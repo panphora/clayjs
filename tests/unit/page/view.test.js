@@ -1,6 +1,8 @@
 import { gzipSync } from "node:zlib";
 import { RECORD } from "./fixtures/all-kinds.js";
 import { blocksOfValues, project, renderModel, revOf } from "../../../src/page/projection.js";
+import { serializeLive, stampOf, parseStamp, textHash } from "../../../src/live/ops.js";
+import { formatBy } from "../../../src/live/provenance.js";
 
 const fileOf = (blocks) => {
   const model = project(blocks);
@@ -93,6 +95,40 @@ test("a saved file's page tag replaces the live tag, and a file without one remo
 
   expect(view.applySavedArticle(fileOf(base), document)).toBe(true);
   expect(document.querySelector('script[type="application/json"][merge="page"]')).toBe(null);
+});
+
+test("a saved tag keeps the room lineage it carries", () => {
+  const base = blocksOfValues([RECORD]);
+  const tagged = (tag, { at = null, by = null } = {}) =>
+    fileOf(base).replace(
+      "<body>",
+      `<body><script type="application/json" merge="page" clay="live"${at ? ` live-at="${at}"` : ""}${by ? ` live-by="${by}"` : ""}>${tag}</script>`
+    );
+  const first = JSON.stringify({ v: 1, y: { seed: "one" } });
+  const second = JSON.stringify({ v: 1, y: { seed: "two" } });
+  const firstAt = stampOf("ep1", 1, serializeLive(JSON.parse(first)));
+  const secondAt = stampOf("ep1", 2, serializeLive(JSON.parse(second)));
+  const secondBy = formatBy({ v: 2, frames: [["tab-1", [[1, 2]]]], ancestors: [], capture: ["tab-1", 3] });
+  expect(secondBy).toBeTruthy();
+
+  document.documentElement.innerHTML = new DOMParser().parseFromString(fileOf(base), "text/html").documentElement.innerHTML;
+  document.head.insertAdjacentHTML("beforeend", `<script type="application/json" merge="page" clay="live" live-at="${firstAt}">${first}</script>`);
+
+  // The file a peer saved: newer text, and the room position it was saved at.
+  expect(view.applySavedArticle(tagged(second, { at: secondAt, by: secondBy }), document)).toBe(true);
+  const liveTag = document.querySelector('script[type="application/json"][merge="page"]');
+  expect(liveTag.textContent).toBe(second);
+  // The tag states the saved lineage, so the next live entry reads the room it carries
+  // instead of finding a stamp that does not match its text and dropping it.
+  expect(liveTag.getAttribute("live-at")).toBe(secondAt);
+  expect(liveTag.getAttribute("live-by")).toBe(secondBy);
+  expect(parseStamp(liveTag.getAttribute("live-at")).hash).toBe(textHash(serializeLive(JSON.parse(liveTag.textContent))));
+
+  // A saved file whose tag carries no lineage leaves none behind.
+  expect(view.applySavedArticle(tagged(first), document)).toBe(true);
+  expect(liveTag.textContent).toBe(first);
+  expect(liveTag.getAttribute("live-at")).toBe(null);
+  expect(liveTag.getAttribute("live-by")).toBe(null);
 });
 
 test("the reader code stays small and loads no ProseMirror", async () => {

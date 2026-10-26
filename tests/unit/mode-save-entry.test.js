@@ -298,3 +298,21 @@ test("initial adoption takes a lease over the open session and installs nothing"
   saveLease.dispose();
   autosaveLease.dispose();
 }, 20000);
+
+test("an unstamped session that stopped with work unsaved is never taken as saved", async () => {
+  // A host that answers no ETag, and a session that ends without writing what the person
+  // typed: nothing but the session's own record says the page holds work no save wrote.
+  const session = save.saveSession();
+  session.start();
+  document.getElementById("content").textContent = "typed and never saved";
+  await flush();
+  session.stop();
+
+  const keptContents = save.getLastSavedContents();
+  const keptDirty = save.getLastSavedDirty();
+  const refused = save.adoptEntryBaseline({ represented: { bytes: null, etag: null } });
+  expect(refused).toEqual({ ok: false, code: "pending-input" });
+  expect(save.getLastSavedContents()).toBe(keptContents);
+  expect(save.getLastSavedDirty()).toBe(keptDirty);
+  expect(warning.bytesUnsaved()).toBe(true);
+}, 20000);

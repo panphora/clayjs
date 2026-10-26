@@ -202,7 +202,7 @@ async function load({
     };
   });
 
-  const { live, storeOf } = await import("../../../src/plugins/live.js");
+  const { live, storeOf, liveWriterParticipant } = await import("../../../src/plugins/live.js");
   window.clay = { live: (name) => live(name) };
   const pageModule = await import("../../../src/plugins/page.js");
   const { claim, ownerOf } = await import("../../../src/page/runtime-owner.js");
@@ -218,6 +218,7 @@ async function load({
   return {
     ...pageModule,
     storeOf,
+    liveWriterParticipant,
     claim,
     ownerOf,
     saves,
@@ -573,6 +574,41 @@ test("a represented file that states a page tag stages that tag's page", async (
     expect(harness.storeOf("page").value).toEqual(seedValue(OTHER));
     expect(article().textContent).toContain("Newer V2");
   } finally {
+    lease.dispose();
+  }
+});
+
+test("a hand-edited article is adopted on entry, not left waiting on the lane", async () => {
+  // The file the host serves has a hand edit in the article while its page tag still
+  // states the seed, so this entry has to adopt. The lane is live (200) and the page is
+  // 400, so the page prepares after the lane\u0027s own preparation: what its adoption waits
+  // on has to be something the lane settles without the commit that enables it.
+  const handEdited = "Edited by hand";
+  const harness = await load({ head: tagHtml() });
+  const bytes = `<!doctype html><html><head><title>Notes</title>${tagHtml()}</head><body>${articleHtml().replace("Hello", handEdited)}</body></html>`;
+  const reader = await harness.openReader(bytes, { etag: "stamp-2", seq: 2 });
+  const handoff = await reader.prepareHandoff({});
+  expect(article().textContent).toContain(handEdited);
+
+  const liveParticipant = harness.liveWriterParticipant();
+  expect(liveParticipant.order).toBeLessThan(harness.pageParticipant().order);
+  const liveLease = liveParticipant.prepare(context({ represented: handoff.represented, reader: handoff }));
+  const lease = harness.pageParticipant().prepare(context({ represented: handoff.represented, reader: handoff }));
+  try {
+    const settled = await Promise.race([
+      lease.ready.then(() => "ready", (error) => error?.code ?? "failed"),
+      sleep(4000).then(() => "waiting"),
+    ]);
+    expect(settled).toBe("ready");
+    // The hand edit is in the page the session stages, so the client is the adopter.
+    expect(blocksFromYValue(harness.storeOf("page").value).p.c).toBe(handEdited);
+    expect(harness.page.view.editable).toBe(false);
+    liveLease.enable();
+    lease.enable();
+    expect(harness.page.view.editable).toBe(true);
+    expect(article().textContent).toContain(handEdited);
+  } finally {
+    liveLease.dispose();
     lease.dispose();
   }
 });
