@@ -59,12 +59,13 @@ function installRouter() {
 
 // A participant whose lease records every call, so a case can say what the controller
 // did to it and in what order.
-function participant(id, log, { order = 1000, lease = {} } = {}) {
+function participant(id, log, { order = 1000, lease = {}, prepare = null } = {}) {
   return {
     id,
     order,
-    prepare: async () => {
+    prepare: async (context) => {
       log.push(`${id}:prepare`);
+      if (prepare) await prepare(context);
       return {
         enable: () => log.push(`${id}:enable`),
         quiesce: async () => log.push(`${id}:quiesce`),
@@ -131,6 +132,15 @@ function withFakeLocation(run) {
 
 const receipt = () => sessionStorage.getItem(`clay:doc:${location.pathname}:mode-receipt`);
 
+// A live entry starts on a page whose save module was imported in view, where the boot
+// settle declines to run. The entry's own adoption is a later step; a case that exits
+// settles the page's accepted baseline here, so the exit's barrier has something to
+// compare the page against.
+const settleEntry = async () => {
+  const save = await import("../../src/core/save.js");
+  if (!save.baselineSettled()) save.adoptEntryBaseline();
+};
+
 test("a declared document enters edit and leaves it without a reload", async () => {
   const log = [];
   const clay = await bootPage({ owner: true, declared: true, queue: [participant("template:board", log)] });
@@ -140,6 +150,7 @@ test("a declared document enters edit and leaves it without a reload", async () 
     expect(fake.reload).not.toHaveBeenCalled();
     expect(clay.mode).toBe("edit");
     expect(clay.modeLifecycle.canWrite()).toBe(true);
+    await settleEntry();
 
     await expect(clay.setMode("view")).resolves.toEqual({ ok: true, mode: "view", changed: true });
     expect(fake.reload).not.toHaveBeenCalled();
@@ -211,6 +222,7 @@ test("a declared document's authored resources are the first lease of the sessio
   await clay.setMode("edit");
   expect(live().hasAttribute("type")).toBe(false);
 
+  await settleEntry();
   await clay.setMode("view");
   // Back to the spelling the file was served with, so a reader pays for nothing.
   expect(live().getAttribute("type")).toBe("inert/");
@@ -297,6 +309,62 @@ test("an explicit initial edit prepares the same session a live first entry does
 
   // Same participants, same order, same single enable after every prepare.
   expect(initial).toEqual(firstSession);
+});
+
+test("a call for the target being entered joins it, and the opposing one is busy even while view is still committed", async () => {
+  const log = [];
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  const clay = await bootPage({
+    owner: true,
+    declared: true,
+    queue: [participant("template:board", log, { prepare: () => gate })],
+  });
+
+  const entering = clay.setMode("edit");
+  const joining = clay.setMode("edit");
+  // The entry has not committed: the page is still in view. That is exactly why this ask
+  // must not be answered as a no-op — the transition would then run twice.
+  expect(clay.mode).toBe("view");
+  await expect(clay.setMode("view")).resolves.toEqual({ ok: false, mode: "view", code: "busy" });
+  expect(clay.mode).toBe("view");
+  expect(clay.modeLifecycle.canWrite()).toBe(false);
+
+  release();
+  await expect(entering).resolves.toEqual({ ok: true, mode: "edit", changed: true });
+  await expect(joining).resolves.toEqual({ ok: true, mode: "edit", changed: true });
+  // One transition, one lease, prepared and enabled once.
+  expect(log).toEqual(["template:board:prepare", "template:board:enable"]);
+  expect(clay.mode).toBe("edit");
+});
+
+test("a registered pending source refuses the exit, and the clean page it becomes exits", async () => {
+  const log = [];
+  const clay = await bootPage({ owner: true, declared: true, queue: [participant("template:board", log)] });
+  await expect(clay.setMode("edit")).resolves.toEqual({ ok: true, mode: "edit", changed: true });
+  await settleEntry();
+
+  const unsaved = await import("../../src/lib/unsaved-state.js");
+  // A composer has no flush: it waits for its person, so the barrier refuses rather than
+  // writing the page without it.
+  const composer = unsaved.registerUnsavedState({ id: "composer", isPending: () => true });
+
+  try {
+    await expect(clay.setMode("view")).resolves.toMatchObject({ ok: false, mode: "edit", code: "pending-input", pending: ["composer"] });
+    expect(clay.mode).toBe("edit");
+    expect(clay.modeLifecycle.canWrite()).toBe(true);
+    expect(clay.modeLifecycle.state).toMatchObject({ phase: "idle", reason: "pending-input" });
+    expect(log).toEqual(["template:board:prepare", "template:board:enable", "template:board:quiesce", "template:board:resume"]);
+
+    // The positive control: with the composer resolved, the same page exits.
+    composer.dispose();
+    await expect(clay.setMode("view")).resolves.toEqual({ ok: true, mode: "view", changed: true });
+    expect(clay.mode).toBe("view");
+  } finally {
+    composer.dispose();
+  }
 });
 
 test("a switch module that fails to load keeps the guarded reload and leaves no unhandled rejection", async () => {

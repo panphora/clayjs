@@ -149,10 +149,13 @@ test("duplicate ids fail the readiness check", async () => {
 test("unregister after a drain keeps that participant out of the next entry", async () => {
   const log = [];
   const clay = await bootPage({ owner: true });
-  window.clay.save = { flush: async () => ({ state: "saved" }) };
   const unregister = clay.modeLifecycle.register(participant("template:board", log));
 
   await expect(clay.setMode("edit")).resolves.toEqual({ ok: true, mode: "edit", changed: true });
+  // The exit runs the save barrier, which needs an accepted state to compare the page
+  // with: this page booted in view, where the boot settle declines to run.
+  const save = await import("../../src/core/save.js");
+  if (!save.baselineSettled()) save.adoptEntryBaseline();
   await expect(clay.setMode("view")).resolves.toEqual({ ok: true, mode: "view", changed: true });
   expect(log).toEqual(["template:board:prepare", "template:board:enable", "template:board:quiesce", "template:board:dispose"]);
 

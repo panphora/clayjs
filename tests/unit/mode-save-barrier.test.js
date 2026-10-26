@@ -377,3 +377,30 @@ test("a simultaneous whole-document replacement and a barrier exclude each other
   holdGets = false;
   expect(await transition.runSaveBarrier()).toMatchObject({ ok: true });
 });
+
+test("a barrier run under a token its caller owns does not claim a second slot", async () => {
+  await acceptedBaseline("owned token base");
+  await edit("the exit's own edit under an owned token");
+
+  // The mode controller takes the document-operation slot for the whole exit and hands
+  // the barrier that same token. If the barrier claimed its own, every exit would answer
+  // busy to itself.
+  const owned = core.claimDocumentOperation("mode");
+  expect(owned).toBeTruthy();
+  try {
+    expect(await transition.runSaveBarrier({ operation: owned })).toMatchObject({ ok: true, state: "saved" });
+    expect(posts.length).toBe(1);
+    expect(posts[0]).toContain("the exit's own edit under an owned token");
+    // The slot is still the caller's: another operation is refused until it lets go.
+    expect(core.operationKind()).toBe("mode");
+    expect(core.claimDocumentOperation("upgrade")).toBeNull();
+  } finally {
+    core.releaseDocumentOperation(owned);
+  }
+  expect(core.operationKind()).toBeNull();
+
+  // The standalone call still claims its own slot and releases it.
+  await edit("written by a standalone barrier");
+  expect(await transition.runSaveBarrier()).toMatchObject({ ok: true, state: "saved" });
+  expect(core.operationKind()).toBeNull();
+});

@@ -7,7 +7,9 @@
 // only when the host has accepted bytes that include everything the page still holds.
 //
 // It also takes the document-operation slot, because a flush is only meaningful if
-// nothing else replaces the document while it runs.
+// nothing else replaces the document while it runs. A caller that already owns that slot
+// (the mode controller's exit) hands its token in, so the barrier does not queue behind
+// its own claim: a standalone call still claims one and releases it.
 //
 // This module is a dynamic target reached from the mode controller: a reader never
 // fetches it.
@@ -39,11 +41,12 @@ export { claimDocumentOperation as claimOperation, releaseDocumentOperation as r
  * @param {number} [options.generation] - the mode generation this exit is leaving
  * @param {boolean} [options.keepalive]
  * @param {number} [options.timeoutMs]
+ * @param {Object} [options.operation] - the slot its caller already holds; claimed here when absent
  * @returns {Promise<{ok: boolean, code?: string, state?: string, etag?: ?string, pending?: string[]}>}
  */
-export async function runSaveBarrier({ generation = saveGeneration(), keepalive = false, timeoutMs = DEADLINE_MS } = {}) {
-  const operation = claimDocumentOperation("mode");
-  if (!operation) return refusal("busy");
+export async function runSaveBarrier({ generation = saveGeneration(), keepalive = false, timeoutMs = DEADLINE_MS, operation = null } = {}) {
+  const claimed = operation ? null : claimDocumentOperation("mode");
+  if (!operation && !claimed) return refusal("busy");
   const deadline = Date.now() + timeoutMs;
   const permit = openSavePermit(generation);
   try {
@@ -87,6 +90,6 @@ export async function runSaveBarrier({ generation = saveGeneration(), keepalive 
     }
   } finally {
     closeSavePermit(permit);
-    releaseDocumentOperation(operation);
+    if (claimed) releaseDocumentOperation(claimed);
   }
 }

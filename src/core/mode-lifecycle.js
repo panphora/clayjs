@@ -6,9 +6,13 @@
 // may fetch and build inert UI; `enable` is synchronous once every preparation has
 // succeeded; `quiesce` stops admission without losing buffers, so a refused exit can
 // `resume` the very same lease; and `dispose` runs only after a committed exit.
+//
+// The save generation and the exit's barrier are imported when a transition needs them,
+// never at the top: this module's own graph stays what it was.
 import {
   canEdit,
   isDraftMode,
+  isEditMode,
   commitModeFacts,
   modeState,
   noteParticipantForget,
@@ -19,6 +23,10 @@ let generation = 0;
 let leases = [];
 let roster = [];
 let inFlight = null;
+
+// One deadline covers the whole transition: every import a participant prepares from,
+// the preparation itself, and the commit.
+const DEADLINE_MS = 15000;
 
 const current = () => modeState().mode;
 
@@ -33,6 +41,20 @@ function announceMode() {
 function refuse(code, phase = "idle", extra = {}) {
   commitModeFacts({ phase, reason: code });
   return { ok: false, mode: current(), code, ...extra };
+}
+
+// A lease handed nothing back has nothing to take back. Reverse order is the exit's, so a
+// lease enabled last is disposed first.
+function disposeInReverse(list) {
+  for (const lease of [...list].reverse()) {
+    try {
+      lease.dispose?.();
+    } catch {}
+  }
+}
+
+function setRootEditMode(on) {
+  document.documentElement.setAttribute("editmode", on ? "true" : "false");
 }
 
 // Participants may be queued as promises. Their ids have to stay unique across every
@@ -63,73 +85,134 @@ noteParticipantForget(forgetParticipant);
 
 async function enter() {
   const before = current();
+  const editBefore = isEditMode;
   const controller = new AbortController();
   const context = {
     generation: ++generation,
     destination: modeState().destination,
     signal: controller.signal,
-    isCurrent: () => context.generation === generation,
+    // Abandonment is cancellation as well as a newer generation: a lease that resolves
+    // after the deadline belongs to no session and must not be kept.
+    isCurrent: () => context.generation === generation && !controller.signal.aborted,
   };
   commitModeFacts({ phase: "entering", generation: context.generation, reason: null });
+
   const prepared = [];
-  try {
-    for (const participant of await rosterOf()) {
-      const lease = await participant.prepare(context);
-      if (!lease) continue;
-      prepared.push(lease);
-      if (!context.isCurrent()) throw fault(`"${participant.id}" prepared for a stale generation`, "stale-document");
-      if (lease.ready) await lease.ready;
-      if (!context.isCurrent()) throw fault(`"${participant.id}" became ready for a stale generation`, "stale-document");
+  let save = null;
+  // Preparation answers only for itself: whatever it builds after the deadline is
+  // disposed by the continuation that notices the abandonment, never here.
+  const preparation = (async () => {
+    try {
+      // Inside the deadline, because the generation commits in the boundary below.
+      save = await import("./save.js");
+      for (const participant of await rosterOf()) {
+        const lease = await participant.prepare(context);
+        if (!lease) continue;
+        prepared.push(lease);
+        if (!context.isCurrent()) throw fault(`"${participant.id}" prepared for a stale generation`, "stale-document");
+        if (lease.ready) await lease.ready;
+        if (!context.isCurrent()) throw fault(`"${participant.id}" became ready for a stale generation`, "stale-document");
+      }
+      return true;
+    } catch (err) {
+      disposeInReverse(prepared);
+      throw err;
     }
+  })();
+
+  let timer = null;
+  const deadline = new Promise((resolve) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      resolve(false);
+    }, DEADLINE_MS);
+  });
+
+  let ready;
+  try {
+    ready = await Promise.race([preparation, deadline]);
+  } catch (err) {
+    clearTimeout(timer);
+    controller.abort();
+    return refuse(err?.code || "load-failed", "blocked", { message: err?.message });
+  }
+  clearTimeout(timer);
+  if (!ready) {
+    // The entry is over; its continuation still holds a lease that has not resolved.
+    preparation.catch(() => {});
+    return refuse("timeout");
+  }
+
+  // One synchronous boundary, no await between these steps: the mode facts commit while
+  // the phase still says `entering` (so `canWrite()` is false), the root attribute and the
+  // save generation follow, the leases enable, and only then does the phase go `idle` and
+  // the one announcement out. An `enable` therefore sees the committed edit facts.
+  commitModeFacts({ mode: isDraftMode ? "draft" : "edit", isEditMode: true });
+  setRootEditMode(true);
+  save?.setSaveGeneration(context.generation);
+  try {
     for (const lease of prepared) lease.enable();
   } catch (err) {
-    for (const lease of prepared.reverse()) {
-      try {
-        lease.dispose();
-      } catch {}
-    }
+    // The blocked fault: the facts and the root attribute go back, everything prepared is
+    // taken back in reverse, and the page keeps the reason.
+    commitModeFacts({ mode: before, isEditMode: editBefore });
+    setRootEditMode(false);
+    disposeInReverse(prepared);
     controller.abort();
     return refuse(err?.code || "load-failed", "blocked", { message: err?.message });
   }
   leases = prepared;
-  commitModeFacts({ mode: isDraftMode ? "draft" : "edit", isEditMode: true, phase: "idle", reason: null });
+  commitModeFacts({ phase: "idle", reason: null });
   announceMode();
   return { ok: true, mode: current(), changed: before !== current() };
 }
 
+// Exit. Nothing here is a public flush: the barrier is the one write an exit may make, and
+// it runs under the document-operation slot this transition takes and holds, so a
+// replacement cannot start between the quiesce and the bytes.
 async function leave() {
   const held = leases;
   commitModeFacts({ phase: "leaving" });
+  const transition = await import("./mode-transition.js").catch(() => null);
+  if (!transition) return refuse("load-failed");
+  const quiesced = [];
+  let operation = null;
   try {
-    for (const lease of [...held].reverse()) await lease.quiesce?.();
-    const result = await window.clay?.save?.flush?.();
-    if (result && result.state && result.state !== "saved" && result.state !== "clean") {
-      throw fault(`save state "${result.state}"`, "save-failed");
+    operation = transition.claimOperation("mode");
+    if (!operation) throw fault("another document operation is in progress", "busy");
+    for (const lease of [...held].reverse()) {
+      quiesced.push(lease);
+      const answer = await lease.quiesce?.();
+      // A refusal is a refusal whether it was thrown or answered.
+      if (answer && answer.ok === false) {
+        throw Object.assign(fault("a lease refused the exit", answer.code || "pending-input"), answer);
+      }
     }
+    const barrier = await transition.runSaveBarrier({ operation });
+    if (!barrier.ok) throw Object.assign(fault("the exit barrier refused", barrier.code || "save-failed"), barrier);
   } catch (err) {
-    for (const lease of held) {
+    for (const lease of [...quiesced].reverse()) {
       try {
         lease.resume?.();
       } catch {}
     }
     commitModeFacts({ phase: "idle", reason: err?.code || "save-failed" });
-    return { ok: false, mode: current(), code: err?.code || "save-failed", state: err?.state };
+    return { ok: false, mode: current(), code: err?.code || "save-failed", state: err?.state, pending: err?.pending };
+  } finally {
+    if (operation) transition.releaseOperation(operation);
   }
-  for (const lease of [...held].reverse()) {
-    try {
-      lease.dispose?.();
-    } catch {}
-  }
+  disposeInReverse(held);
   leases = [];
   generation++;
+  setRootEditMode(false);
   commitModeFacts({ mode: "view", isEditMode: false, phase: "idle", generation, reason: null });
   announceMode();
   return { ok: true, mode: "view", changed: true };
 }
 
 // The switch. Joining the transition already running for the same target answers with
-// that same promise; asking for the other one while it runs answers busy, and leaves
-// the running transition untouched.
+// that same promise; asking for the other one while it runs answers busy — including for
+// the mode still committed — and leaves the running transition untouched.
 export function requestMode(target) {
   if (target !== "edit" && target !== "view") throw new TypeError(`clay.modeLifecycle: unknown mode "${target}"`);
   if (inFlight) return inFlight.target === target ? inFlight.promise : { ok: false, mode: current(), code: "busy" };
@@ -150,6 +233,9 @@ export async function switchMode(target, plan) {
   // failed import is not kept: the next ask asks again.
   const decision = await import("./mode-switch.js").catch(() => null);
   if (!decision || !decision.liveAllowed(plan)) return null;
+  // A transition already running answers for itself: it joins or refuses, and this call
+  // touches nothing on the way there.
+  if (inFlight || target === current()) return requestMode(target);
   if (target === "edit") decision.openResources();
   return requestMode(target);
 }

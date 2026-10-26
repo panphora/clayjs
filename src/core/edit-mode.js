@@ -29,6 +29,8 @@ export const modeLifecycle = {
 // a participant exists — and a rejected fetch is retried on the next ask.
 let controller = null;
 
+const fetchController = () => (controller ||= import("./mode-lifecycle.js").catch(() => (controller = null)));
+
 // A live switch is a contract the document signs, not a hint. The loader records this
 // document's boot here only when `<html clay-mode-switch="live">` asked for one; the
 // decision behind it -- adapters, authored resources, participants -- and the controller
@@ -43,8 +45,7 @@ export const noteLiveSwitch = (boot) => {
 export async function activateInitialMode() {
   if (!isEditMode) return;
   try {
-    controller ||= await import("./mode-lifecycle.js");
-    await controller.activateInitial();
+    await (await fetchController()).activateInitial();
   } catch (err) {
     console.error("clayjs: the mode lifecycle failed to start:", err);
   }
@@ -52,15 +53,15 @@ export async function activateInitialMode() {
 
 export async function setMode(next) {
   if (next !== "edit" && next !== "view") throw new TypeError(`clay.setMode: unknown mode "${next}"`);
-  if (next === mode) return { ok: true, mode, changed: false };
+  if (next === mode && !controller) return { ok: true, mode, changed: false };
   if (isDraftMode || !canEdit) return { ok: false, mode, code: "not-allowed" };
   if (liveSwitch) {
-    // A fetch that fails keeps the old way in: the guarded reload below, and the failed
-    // import is cleared so the next ask asks again.
-    controller ||= await import("./mode-lifecycle.js").catch(() => null);
-    const live = controller && (await controller.switchMode(next, liveSwitch));
+    // A fetch that fails keeps the old way in: the guarded reload below.
+    const loaded = await fetchController();
+    const live = loaded && (await loaded.switchMode(next, liveSwitch));
     if (live) return live;
   }
+  if (next === mode) return { ok: true, mode, changed: false };
   if (mode === "edit") {
     let result;
     try {
