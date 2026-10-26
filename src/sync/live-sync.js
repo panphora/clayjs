@@ -1374,11 +1374,12 @@ class LiveSync {
             if (!repair) return;
           } else if (stamp === representedEtag()) {
             // The file this tab was served, and nothing to do about it. The exception is
-            // the saved lane's acquisition: a reader a live session handed back with no
-            // bytes has nothing to show and nothing to hand the next entry, and these
-            // bytes ARE the file it starts from, so the receipt moves even though the DOM
-            // is already showing them.
-            if (repair && this.lane === 'saved') {
+            // a saved-lane reader with no bytes: it has nothing to show and nothing to
+            // hand the next entry, and these bytes ARE the file it starts from, so the
+            // receipt moves even though the DOM is already showing them. That is the
+            // saved lane's acquisition, and it is also the startup check of a page booted
+            // in view, which is the same no-bytes reader asking which file it represents.
+            if ((repair || startup) && this.lane === 'saved') {
               this._represented = Object.freeze({ bytes: html, etag: stamp, seq: seq ?? null });
             }
             return;

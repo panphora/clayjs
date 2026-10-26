@@ -1252,6 +1252,57 @@ test("a queued repair a newer GET superseded is asked again instead of applying"
   }
 });
 
+test("the startup check of a saved-lane reader records the bytes it represents", async () => {
+  const body = '<p id="startup-value">From the file</p>';
+  await boot(body);
+  clearGate();
+  installFetch();
+  // The page was served stamped, and the file still holds what it was served.
+  metaAnswer = diskMeta(BOOT);
+  docResponder = () => doc(BOOT, body);
+
+  const { sync, sse } = await started("saved");
+  try {
+    // A reader booted in view has no bytes of its own: it has nothing to show and
+    // nothing to hand the next entry.
+    expect(sync._represented.bytes).toBeNull();
+
+    sse.onopen();
+    await tick();
+    await sync._runPending();
+
+    // The check answered "nothing to do", and the same answer says which file this
+    // reader is showing, so the receipt moves even though the DOM already has it.
+    expect(sync._pendingExternal).toBeNull();
+    expect(sync._represented.etag).toBe(BOOT);
+    expect(sync._represented.bytes).toBe(served(BOOT, body));
+    expect(document.querySelector("#startup-value").textContent).toBe("From the file");
+  } finally {
+    sync.stop();
+  }
+});
+
+test("the startup check of a live-lane reader leaves its receipt alone", async () => {
+  const body = '<p id="startup-value">From the file</p>';
+  await boot(body);
+  clearGate();
+  installFetch();
+  metaAnswer = diskMeta(BOOT);
+  docResponder = () => doc(BOOT, body);
+
+  const { sync, sse } = await started("live");
+  try {
+    sse.onopen();
+    await tick();
+    await sync._runPending();
+
+    expect(sync._pendingExternal).toBeNull();
+    expect(sync._represented).toMatchObject({ bytes: null, etag: null, seq: null });
+  } finally {
+    sync.stop();
+  }
+});
+
 test("an explicit repair whose body names the version the tab holds is a no-op", async () => {
   await boot('<div id="app"><p id="static">From the file</p></div>');
   const rendered = renderAtRuntime("app", "rendered", "Rendered by a script at load");

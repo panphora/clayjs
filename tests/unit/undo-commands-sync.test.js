@@ -203,6 +203,38 @@ test("writes made by the paused apply itself never become an undoable local entr
   expect(article().textContent).toBe("from apply");
 });
 
+test("a command made while the gate is paused still advances its capture token, so the page stays unsaved", async () => {
+  const gate = await import("../../src/lib/dirty-gate.js");
+  await enter();
+  window.clay.undo.setRecording("commands");
+
+  const token = gate.gateCaptureToken();
+  gate.pauseGate();
+  try {
+    // The apply's own writes are not edits, but anything authored under the same
+    // pause is: neither gate feed sees it, so the mark is the only record of it.
+    expect(undo.command("Local edit", () => setText(note(), "local note")).label).toBe("Local edit");
+    expect(gate.gateCaptureToken().gen).not.toBe(token.gen);
+    expect(gate.pageMaybeDirty()).toBe(true);
+  } finally {
+    gate.resumeGate();
+  }
+});
+
+test("undo and redo advance the gate's capture token", async () => {
+  const gate = await import("../../src/lib/dirty-gate.js");
+  await enter();
+  window.clay.undo.setRecording("commands");
+
+  undo.command("Local edit", () => setText(note(), "local note"));
+  const before = gate.gateCaptureToken();
+  expect(undo.undo().ok).toBe(true);
+  const afterUndo = gate.gateCaptureToken();
+  expect(afterUndo.gen).not.toBe(before.gen);
+  expect(undo.redo().ok).toBe(true);
+  expect(gate.gateCaptureToken().gen).not.toBe(afterUndo.gen);
+});
+
 test("a successful undo schedules no automatic extra history item", async () => {
   await enter();
 

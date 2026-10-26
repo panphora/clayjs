@@ -9,6 +9,7 @@ import { isTabLocalAttr } from '../lib/root-attrs.js'
 import { isDerivedAttr } from '../lib/derived.js'
 import { PERSIST } from '../lib/attr-aliases.js'
 import { isGestureItem, isRuntimeAttribute } from '../lib/undo/capture-move.js'
+import { gateMarkDirty } from '../lib/dirty-gate.js'
 
 // Tab-local attributes (ephemeral state, route-active, root library state) are
 // never undone, and neither is what a drag's vendor writes on the item it holds:
@@ -51,6 +52,35 @@ undo.setRecording = (mode) => {
   return setRecording(mode)
 }
 
+// An authored history action is a user edit, and it writes the DOM while a sync
+// frame's apply may hold both the mutation hub and the gate paused: neither feed
+// records it then, and the apply would take the write into its saved baseline.
+// So every commit, command, undo and redo that changed the document marks the
+// page dirty at the gate's own entry point, whose count is what the capture token
+// is compared against — an explicit mark advances it even while the gate is paused.
+const lastEntryId = () => undo.history.at(-1)?.id ?? null
+
+const command = undo.command.bind(undo)
+undo.command = (label, fn) => {
+  const receipt = command(label, fn)
+  if (receipt) gateMarkDirty()
+  return receipt
+}
+
+const undoStep = undo.undo.bind(undo)
+undo.undo = (opts) => {
+  const receipt = undoStep(opts)
+  if (receipt?.ok) gateMarkDirty()
+  return receipt
+}
+
+const redoStep = undo.redo.bind(undo)
+undo.redo = (opts) => {
+  const receipt = redoStep(opts)
+  if (receipt?.ok) gateMarkDirty()
+  return receipt
+}
+
 // A commit inside clay.effect drains the paused hub's records, so the effect's
 // own writes reach autosave and re-trigger it. Warn once; the commit still runs.
 const commit = undo.commit.bind(undo)
@@ -60,7 +90,10 @@ undo.commit = (label, fn) => {
     warnedEffectCommit = true
     console.warn(`clay.effect: undo.commit("${label}") was called inside an effect. Run commands from event handlers, not from an effect.`)
   }
-  return commit(label, fn)
+  const before = lastEntryId()
+  const receipt = commit(label, fn)
+  if (receipt || lastEntryId() !== before) gateMarkDirty()
+  return receipt
 }
 
 // Undo and redo restore attributes. A control the user has touched shows its
