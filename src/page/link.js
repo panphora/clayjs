@@ -79,6 +79,7 @@ class LinkPopover {
     this.edit.addEventListener("click", () => this.openEdit());
     this.remove.addEventListener("click", () => this.apply(""));
     this.input.addEventListener("keydown", (e) => {
+      if (e.isComposing || e.keyCode === 229) return;
       if (e.key === "Enter") { e.preventDefault(); this.apply(this.input.value); }
       else if (e.key === "Escape") { e.preventDefault(); this.close(); }
     });

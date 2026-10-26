@@ -745,7 +745,11 @@ class Chrome {
     const v = phoneViewport(this.win);
     const maxHeight = Math.max(0, v.height - PHONE_INSET * 2);
     const width = Math.min(280, Math.max(0, v.width - PHONE_INSET * 2));
-    const height = Math.min(this.menuEl.offsetHeight || 0, maxHeight);
+    const applied = this.menuEl.style.getPropertyValue("--page-pop-max");
+    this.menuEl.style.removeProperty("--page-pop-max");
+    const natural = this.menuEl.offsetHeight || 0;
+    if (applied) this.menuEl.style.setProperty("--page-pop-max", applied);
+    const height = Math.min(natural, maxHeight);
     const left = Math.max(v.left + PHONE_INSET, Math.min(bar.left, v.left + v.width - PHONE_INSET - width));
     let top = bar.top - 6 - height;
     if (top < v.top + PHONE_INSET) top = Math.min(bar.top + bar.height + 6, v.top + v.height - PHONE_INSET - height);

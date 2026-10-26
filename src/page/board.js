@@ -20,10 +20,10 @@ export function makeBoard(names = BOARD_COLUMNS) {
 // The board takes the place of an empty line, otherwise it goes after the
 // line's whole subtree at the line's own level. An empty paragraph follows it
 // and holds the caret, so typing goes on below the board.
-export function insertBoardNode(st, dispatch, board = makeBoard(), remove = null) {
+export function insertBoardNode(st, dispatch, board = makeBoard(), remove = null, index = null) {
   const tr = st.tr;
   if (remove) tr.delete(remove.from, remove.to);
-  const index = tr.doc.resolve(tr.mapping.map(st.selection.head)).index(0);
+  index ??= tr.doc.resolve(tr.mapping.map(st.selection.head)).index(0);
   const ents = outline(tr.doc);
   const line = tr.doc.child(index);
   const empty = line.isTextblock && line.content.size === 0;

@@ -43,7 +43,7 @@
  */
 import { loadedEngine, mergeEngine } from "../sync/merge-engine.js";
 import Mutation from "../lib/mutation.js";
-import { isEditMode } from "../core/is-edit-mode.js";
+import { startsAtImport } from "../core/is-edit-mode.js";
 import { holdAllSaves, releaseAllSaves } from "../core/save.js";
 import { STRIP_FROM_SAVE, SNAPSHOT_REMOVE_SELECTOR } from "../lib/region-policy.js";
 import { enableContentEditable } from "../core/admin-contenteditable.js";
@@ -1149,7 +1149,7 @@ function build() {
 }
 
 async function init() {
-  if (!isEditMode || panel) return;  // an owner/editor feature, built once
+  if (!startsAtImport() || panel) return;  // an owner/editor feature, built once
   if (!(await loadHelper())) return;
   build();
 }

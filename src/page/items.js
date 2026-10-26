@@ -159,8 +159,8 @@ export function runItem(view, item, index, remove = null) {
   const st = view.state;
   if (item.insert === "image" || item.insert === "file") return pickFiles(view, item.insert === "image" ? "image/*" : "", hostPlace(st, index), remove);
   if (item.insert === "csv") return pickCsv(view, remove);
-  if (item.insert === "table") return insertTableNode(st, view.dispatch, makeTable(), remove);
-  if (item.insert === "board") return insertBoardNode(st, view.dispatch, makeBoard(), remove);
+  if (item.insert === "table") return insertTableNode(st, view.dispatch, makeTable(), remove, null, index);
+  if (item.insert === "board") return insertBoardNode(st, view.dispatch, makeBoard(), remove, index);
   if (item.insert === "chart") return chartFromSlash(view, index, remove);
   let tr = st.tr;
   if (remove) tr.delete(remove.from, remove.to);

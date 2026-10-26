@@ -154,7 +154,10 @@ export class BlockDrag {
     if (!s || event.pointerId !== s.pointer) return;
     if (!s.active) {
       this.stop();
-      if (event.type === "pointerup") this.onClick(s.index);
+      if (event.type === "pointerup") {
+        const ents = outline(this.view.state.doc), span = resolveSpan(ents, s.span);
+        if (span) this.onClick(span.lo);
+      }
       return;
     }
     this.track();

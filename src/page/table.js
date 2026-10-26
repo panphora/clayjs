@@ -60,8 +60,8 @@ function changeTable(st, dispatch, change) {
   return true;
 }
 
-export function insertTableNode(st, dispatch, table, remove = null, attachment = null) {
-  const index = remove ? st.doc.resolve(remove.from).index(0) : st.selection.$head.index(0);
+export function insertTableNode(st, dispatch, table, remove = null, attachment = null, index = null) {
+  index ??= remove ? st.doc.resolve(remove.from).index(0) : st.selection.$head.index(0);
   const current = st.doc.child(index);
   let at = 0;
   for (let i = 0; i < index; i++) at += st.doc.child(i).nodeSize;

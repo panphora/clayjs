@@ -1,4 +1,4 @@
-import { isEditMode } from "../core/is-edit-mode.js";
+import { startsAtImport } from "../core/is-edit-mode.js";
 import onDomReady from "../lib/dom-ready.js";
 import { set, style } from "../lib/hostile-css.js";
 import { bevelSurface, pageScheme } from "../ui/bevel-controls.js";
@@ -104,7 +104,7 @@ function disarm() {
 }
 
 function init() {
-  if (!isEditMode) return;
+  if (!startsAtImport()) return;
   arm();
 }
 

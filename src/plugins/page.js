@@ -15,7 +15,7 @@ import { claim } from "../page/runtime-owner.js";
 import { authorIdentity } from "../page/ybind/author.js";
 import { createInstall, disposeInstall, addDisposer, finishError, isCurrent, ownsView, runBoot, activateInput } from "../page/boot.js";
 import { capabilityAdvertised } from "../page/tool-capability.js";
-import { isEditMode } from "../core/is-edit-mode.js";
+import { startsAtImport } from "../core/is-edit-mode.js";
 import { toolViews } from "../page/tool-views.js";
 import { style } from "../lib/hostile-css.js";
 
@@ -1273,6 +1273,6 @@ export const page = {
 
 // A live entry imports this module while the committed mode is still view: the install
 // belongs to the explicit edit boot alone, and a managed session starts its own.
-page.ready = isEditMode ? install() : null;
+page.ready = startsAtImport() ? install() : null;
 
 export default page;
