@@ -1,4 +1,4 @@
-import { editor } from "./view-helpers.js";
+import { editor, posOf, select } from "./view-helpers.js";
 import { blockJson } from "../../../src/page/model.js";
 import { history } from "../../../src/vendor/prosemirror.vendor.js";
 import { deleteColumn, selectTableCell, setColumnWidth, MIN_WIDTH, MAX_WIDTH } from "../../../src/page/table.js";
@@ -180,4 +180,49 @@ test("a width set from the keyboard joins the pointer's width, not a second form
   press(el, "keyup", "End");
   expect(view.dom.querySelector("table").classList.contains("is-sized")).toBe(true);
   expect(view.dom.querySelector("table").style.width).toBe(`${MAX_WIDTH + 160}px`);
+});
+
+const tableView = (view, index) => [...view.dom.querySelectorAll(".page-table")][index];
+const handleIn = (view, index, id = "c1") => tableView(view, index).querySelector(`th[data-col="${id}"] .page-table-resize`);
+const widthIn = (view, index, id = "c1") => tableView(view, index).querySelector(`col[data-col="${id}"]`).style.width;
+const colsAt = (view, index) => blockJson(view.state.doc.child(index)).cols;
+
+// Two tables made by duplicating one share their column IDs, so a column ID
+// alone does not say which table a separator belongs to.
+const twin = () => editor([], { blocks: { ta: { ...tbl, pos: "B" }, tb: { ...tbl, pos: "C" } } });
+
+test("a keyboard resize writes the handle's table, not the table holding the caret", () => {
+  const view = twin();
+  selectTableCell(view, 0, 0, 0);
+  const el = handleIn(view, 1);
+  el.focus();
+  press(el, "keydown", "ArrowRight");
+  expect(widthIn(view, 1)).toBe("170px");
+  press(el, "keyup", "ArrowRight");
+  expect(colsAt(view, 0).c1.width).toBeUndefined();
+  expect(colsAt(view, 1).c1.width).toBe(170);
+});
+
+test("a keyboard resize works with the caret in a paragraph, not only inside a table", () => {
+  const view = editor([], { blocks: { p: { t: "paragraph", pos: "B", c: "P" }, tbl } });
+  select(view, posOf(view, "p"));
+  const el = handle(view);
+  el.focus();
+  press(el, "keydown", "ArrowRight");
+  press(el, "keyup", "ArrowRight");
+  expect(colsAt(view, 1).c1.width).toBe(170);
+});
+
+test("an edit to the table during an arrow key keeps the preview, and the keyup commits it", () => {
+  const view = open();
+  const el = handle(view);
+  el.focus();
+  press(el, "keydown", "ArrowRight");
+  selectTableCell(view, 0, 0, 1);
+  view.dispatch(view.state.tr.insertText("!"));
+  expect(view.state.doc.child(0).textContent).toBe("a!x");
+  expect(colWidth(view, "c1")).toBe("170px");
+  expect(cols(view).c1.width).toBeUndefined();
+  press(handle(view), "keyup", "ArrowRight");
+  expect(cols(view).c1.width).toBe(170);
 });

@@ -381,10 +381,15 @@ class Chrome {
     return Math.min(this.hover ?? this.blockIndex(), this.view.state.doc.childCount - 1);
   }
 
-  // The dock's controls in order; a phone keeps only the four primary ones.
   dockControls() {
-    const all = [...this.dock.querySelectorAll("button")];
+    const all = [...this.dock.querySelectorAll("button")].filter((b) => this.rendered(b));
     return this.isPhone() ? all.filter((b) => b.classList.contains("page-tool-primary")) : all;
+  }
+
+  rendered(control) {
+    if (control.hidden) return false;
+    const style = this.win?.getComputedStyle?.(control);
+    return !style || style.display !== "none";
   }
 
   setRoving(target) {
@@ -800,8 +805,10 @@ class Chrome {
       this.dock.style.left = `${layout.bar.left}px`;
       this.dock.style.top = `${layout.bar.top}px`;
       this.dock.style.width = `${layout.bar.width}px`;
-    } else if (layout.desk) {
-      for (const side of ["left", "top", "width"]) this.dock.style.removeProperty(side);
+      this.grip.style.setProperty("--page-grip-lift", `${layout.bar.height}px`);
+    } else {
+      if (layout.desk) for (const side of ["left", "top", "width"]) this.dock.style.removeProperty(side);
+      this.grip.style.removeProperty("--page-grip-lift");
     }
     if (layout.gutter) {
       for (const part of [this.plus, this.grip]) {

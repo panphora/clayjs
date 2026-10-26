@@ -272,3 +272,26 @@ describe("the phone's Move buttons take the validated page-move port", () => {
     expect(ids(tab)).toEqual(["q", "p", "r"]);
   });
 });
+
+test("the block grip sits above the bar instead of under it at 320, 360 and 390 px", async () => {
+  const gap = 16, size = 44, left = 68;
+  const screens = [[320, 568], [360, 640], [390, 844]];
+  for (const [width, height] of screens) {
+    await withPhone(async () => {
+      const view = editor([["a", "paragraph", "A"]]);
+      await frame();
+      const bar = { left: parseFloat(dock(view).style.left), top: parseFloat(dock(view).style.top), width: parseFloat(dock(view).style.width), height: 52 };
+      const grip = view.dom.parentElement.querySelector(".page-grip");
+      const lift = parseFloat(grip.style.getPropertyValue("--page-grip-lift")) || 0;
+      expect(lift).toBe(bar.height);
+      const box = { left, top: height - gap - lift - size, width: size, height: size };
+      const overlap = box.left < bar.left + bar.width && bar.left < box.left + box.width
+        && box.top < bar.top + bar.height && bar.top < box.top + box.height;
+      expect({ width, overlap }).toEqual({ width, overlap: false });
+    }, { offsetLeft: 0, offsetTop: 0, width, height });
+  }
+});
+
+test("the phone stylesheet lifts the grip by the bar's height and keeps the safe-area inset", () => {
+  expect(phoneCss()).toContain(".page-grip { position: fixed; top: auto; left: 68px; bottom: calc(16px + var(--page-grip-lift, 0px) + env(safe-area-inset-bottom));");
+});

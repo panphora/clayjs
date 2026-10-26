@@ -5,6 +5,7 @@ import { parseCsv, tableFromCsv, CsvError } from "./rich/csv.js";
 import { TABLE_IMPORT_LIMIT, insertTableNode } from "./table.js";
 import { safeFileHref } from "./address.js";
 import { asStep } from "./blocksel.js";
+import { holdSlashRange, heldSlashRange } from "./chrome.js";
 
 const { Plugin } = state;
 const inputs = new WeakMap();
@@ -108,7 +109,9 @@ export async function importCsv(view, file, { upload, remove = null, table = nul
     }
     if (view.isDestroyed) return false;
     if (table) return placeImported(view, result.node, table, attachment);
-    const inserted = insertTableNode(view.state, view.dispatch, result.node, remove, attachment);
+    const held = remove ? heldSlashRange(view.state) : null;
+    if (remove && !held) placeAfterBlock(view, remove.block);
+    const inserted = insertTableNode(view.state, view.dispatch, result.node, held, attachment);
     return inserted;
   } catch (cause) {
     if (cause instanceof CsvError) error(view, `Couldn't read this CSV: unclosed quote on line ${cause.line}.`);
@@ -120,9 +123,21 @@ export async function importCsv(view, file, { upload, remove = null, table = nul
 export function pickCsv(view, remove = null, table = null) {
   const input = inputs.get(view);
   if (!input) return false;
-  input._remove = remove;
+  if (remove) holdSlashRange(view, remove);
+  input._remove = remove ? { ...remove, block: blockIdAt(view.state.doc, remove.from) } : null;
   input._table = table;
   input.click();
+  return true;
+}
+
+const blockIdAt = (doc, pos) => doc.child(doc.resolve(Math.max(0, Math.min(pos, doc.content.size))).index(0)).attrs.id;
+
+function placeAfterBlock(view, id) {
+  const st = view.state;
+  let at = null;
+  st.doc.forEach((node, offset) => { if (at === null && node.attrs.id === id) at = offset; });
+  if (at === null) return false;
+  view.dispatch(st.tr.setSelection(state.TextSelection.near(st.doc.resolve(at))));
   return true;
 }
 

@@ -61,7 +61,7 @@ function changeTable(st, dispatch, change) {
 }
 
 export function insertTableNode(st, dispatch, table, remove = null, attachment = null) {
-  const index = st.selection.$head.index(0);
+  const index = remove ? st.doc.resolve(remove.from).index(0) : st.selection.$head.index(0);
   const current = st.doc.child(index);
   let at = 0;
   for (let i = 0; i < index; i++) at += st.doc.child(i).nodeSize;

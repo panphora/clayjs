@@ -8,6 +8,7 @@ import { insertChartAfterTable } from "../chart.js";
 import { selectLine } from "../table-select.js";
 import { TABLE_CSS } from "../table-style.js";
 import { cellViews } from "../table-views.js";
+import { asStep } from "../blocksel.js";
 
 const N = schema.nodes;
 
@@ -162,7 +163,8 @@ export class TableView {
     this.previewWidth(colId, Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, Math.round(next))));
   }
   previewWidth(colId, width) {
-    this.preview = { col: colId, width };
+    const base = this.preview?.col === colId ? this.preview.base : this.widthOfColumn(colId);
+    this.preview = { col: colId, width, base };
     const col = [...this.colgroup.children].find((element) => element.dataset.col === colId);
     if (col) { this.table.classList.add("is-sized"); col.style.width = `${width}px`; }
     const handle = this.handleFor(colId);
@@ -184,16 +186,8 @@ export class TableView {
     const col = table?.type === N.table && table.attrs.id === this.node.attrs.id ? table.attrs.cols[colId] : null;
     if (!col) { this.widths(); return false; }
     if ((col.width ?? DEFAULT_WIDTH) === preview.width) { this.widths(); return false; }
-    return this.commandInPlace(setColumnWidth(colId, preview.width));
-  }
-  // A keyboard width change leaves the person's model selection where it was,
-  // instead of pulling the caret to the table's first cell.
-  commandInPlace(run) {
-    const view = this.view;
-    const before = view.state.selection;
-    if (!run(view.state, view.dispatch)) return false;
-    if (view.state.selection.eq(before)) return true;
-    view.dispatch(view.state.tr.setSelection(before.constructor.fromJSON(view.state.doc, before.toJSON())));
+    const cols = { ...table.attrs.cols, [colId]: { ...col, width: preview.width } };
+    this.view.dispatch(asStep(this.view.state.tr.setNodeMarkup(pos, null, { ...table.attrs, cols })));
     return true;
   }
   command(run) {
@@ -277,10 +271,14 @@ export class TableView {
   update(node) {
     if (node.type !== N.table) return false;
     const focused = this.focusCol && this.dom.contains(this.dom.ownerDocument.activeElement);
+    const preview = this.preview;
     this.node = node;
     this.dom.dataset.id = node.attrs.id ?? "";
     this.preview = null;
     this.render(focused ? this.focusCol : null);
+    if (preview && node.attrs.cols[preview.col] && (node.attrs.cols[preview.col].width ?? DEFAULT_WIDTH) === preview.base) {
+      this.previewWidth(preview.col, preview.width);
+    }
     const effective = columnKinds(node);
     for (const cell of this.contentDOM.querySelectorAll("td[data-col]")) cell.dataset.kind = effective[cell.dataset.col] ?? "text";
     return true;

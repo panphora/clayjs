@@ -1,4 +1,5 @@
 import { BlockSelection } from "../../../src/page/blocks.js";
+import { PAGE_EDITOR_CSS } from "../../../src/page/editor.js";
 import { editor, key, keyOn, posOf, select } from "./view-helpers.js";
 
 /**
@@ -98,4 +99,24 @@ test("a phone walks only its four controls and skips the desktop-only ones", () 
     keyOn(list[3], "ArrowRight");
     expect(document.activeElement).toBe(list[0]);
   });
+});
+
+test("a phone-only control the desktop stylesheet hides is never the toolbar\u0027s tab stop", () => {
+  const rule = PAGE_EDITOR_CSS.match(/\.page-tool-more \{[^}]*\}/)[0];
+  const css = document.createElement("style");
+  css.textContent = rule;
+  document.head.append(css);
+  try {
+    const view = editor(DOC);
+    const list = controls(view);
+    const code = list.find((b) => b.dataset.cmd === "code");
+    code.focus();
+    keyOn(code, "ArrowRight");
+    const stops = controls(view).filter((b) => b.tabIndex === 0);
+    expect(stops).toEqual([list[0]]);
+    expect(stops.every((b) => getComputedStyle(b).display !== "none")).toBe(true);
+    expect(document.activeElement).toBe(list[0]);
+  } finally {
+    css.remove();
+  }
 });

@@ -1,10 +1,11 @@
-import { editor } from "./view-helpers.js";
+import { editor, key, posOf, select, typeText } from "./view-helpers.js";
 import { importCsv } from "../../../src/page/csv-import.js";
 import { state as pmState, history } from "../../../src/vendor/prosemirror.vendor.js";
 import { blockJson, orderedIds } from "../../../src/page/model.js";
 
 const file = (body) => new File([body], "values.csv", { type: "text/csv" });
 const fresh = (options = {}) => editor([["p", "paragraph", ""]], options);
+const type = (view, text) => { for (const ch of text) typeText(view, ch); };
 afterEach(() => { delete globalThis.clay; });
 
 test("CSV import keeps strings, infers kinds and is one undo step", async () => {
@@ -55,4 +56,47 @@ test("pasted CSV file uses the same import path", async () => {
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   expect(view.state.doc.child(0).type.name).toBe("table");
+});
+
+test("a slash import that arrives after an edit keeps the person\u0027s text and lands under the slash\u0027s block", async () => {
+  const view = editor([["a", "paragraph", "Peer paragraph text"], ["b", "paragraph", "Mine "]]);
+  view.coordsAtPos = () => ({ left: 40, right: 48, top: 100, bottom: 120 });
+  select(view, posOf(view, "b", true));
+  type(view, "/csv");
+  const menu = view.dom.parentElement.querySelector(".page-menu");
+  expect(menu.hidden).toBe(false);
+  key(view, "Enter");
+  expect(menu.hidden).toBe(true);
+  expect(view.state.doc.child(1).textContent).toBe("Mine /csv");
+  // An edit before the file arrives moves every position the slash range held.
+  view.dispatch(view.state.tr.insertText("12345", 1));
+  const input = view.dom.parentElement.querySelector(".page-csv-input");
+  Object.defineProperty(input, "files", { value: [file("Name\nAda")], configurable: true });
+  input.dispatchEvent(new Event("change"));
+  for (let waited = 0; waited < 2000 && view.state.doc.childCount < 3; waited += 10) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  expect(view.state.doc.child(0).textContent).toBe("12345Peer paragraph text");
+  expect(view.state.doc.child(1).textContent).toBe("Mine ");
+  expect(view.state.doc.child(2).type.name).toBe("table");
+});
+
+test("a slash import whose range no longer holds its text inserts after that block and removes nothing", async () => {
+  const view = editor([["a", "paragraph", "Peer paragraph text"], ["b", "paragraph", "Mine "]]);
+  view.coordsAtPos = () => ({ left: 40, right: 48, top: 100, bottom: 120 });
+  select(view, posOf(view, "b", true));
+  type(view, "/csv");
+  const from = view.state.selection.head - 4;
+  key(view, "Enter");
+  view.dispatch(view.state.tr.insertText("x", from + 2));
+  expect(view.state.doc.child(1).textContent).toBe("Mine /cxsv");
+  const input = view.dom.parentElement.querySelector(".page-csv-input");
+  Object.defineProperty(input, "files", { value: [file("Name\nAda")], configurable: true });
+  input.dispatchEvent(new Event("change"));
+  for (let waited = 0; waited < 2000 && view.state.doc.childCount < 3; waited += 10) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  expect(view.state.doc.child(0).textContent).toBe("Peer paragraph text");
+  expect(view.state.doc.child(1).textContent).toBe("Mine /cxsv");
+  expect(view.state.doc.child(2).type.name).toBe("table");
 });
