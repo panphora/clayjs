@@ -739,8 +739,10 @@ function mergeRepresentedPage(store, value) {
     // A store the application opened itself keeps the page it was opened from, and the
     // file the reader holds is the page this session edits: the store is brought to that
     // file before anything mounts on it, and a store that cannot take it refuses the
-    // entry rather than mounting a page the file does not state.
-    if (!ownsStore && !mergeRepresentedPage(storeOf("page"), source.tags?.[0])) {
+    // entry rather than mounting a page the file does not state. A store that has joined
+    // a room is the exception: the room is newer than any file, and its value stands.
+    const inRoom = storeOf("page")?.handle?.status?.mode === "fast";
+    if (!ownsStore && !inRoom && !mergeRepresentedPage(storeOf("page"), source.tags?.[0])) {
       return { ok: false, reason: "stale-store" };
     }
     code ??= await codePromise;
