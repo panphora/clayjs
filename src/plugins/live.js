@@ -455,6 +455,9 @@ const checkpoints = createCheckpoints({
 // clay.live() call in an edit-mode tab.
 let fast = null;
 let laneRequested = false;
+// Bumped by every request and every release, so an answer that arrives after its
+// session was released starts nothing.
+let laneRequest = 0;
 let serverLane = null;
 // The host merges exact save provenance (live-by v2); without it a save that
 // needs provenance is refused rather than risk applying an edit twice.
@@ -519,6 +522,7 @@ function releaseWriter() {
   const lane = fast;
   fast = null;
   laneRequested = false;
+  laneRequest++;
   serverLane = null;
   local = null;
   provenanceHost = false;
@@ -751,9 +755,11 @@ function ensureLane() {
   laneGates();
   if (laneRequested || !(writerSession ? writerSession.admitted || writerSession.wantsLane : isEditMode)) return;
   laneRequested = true;
+  const request = ++laneRequest;
   hostMeta.hostSupports("live-data").then(
     async (supported) => {
       const provenance = supported && (await hostMeta.hostSupports("live-provenance"));
+      if (request !== laneRequest) return;
       serverLane = supported;
       provenanceHost = provenance;
       if (supported) {

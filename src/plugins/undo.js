@@ -70,19 +70,8 @@ undo.command = (label, fn) => {
   return receipt
 }
 
-const undoStep = undo.undo.bind(undo)
-undo.undo = (opts) => {
-  const receipt = undoStep(opts)
-  if (receipt?.ok) gateMarkDirty()
-  return receipt
-}
-
-const redoStep = undo.redo.bind(undo)
-undo.redo = (opts) => {
-  const receipt = redoStep(opts)
-  if (receipt?.ok) gateMarkDirty()
-  return receipt
-}
+// Undo and redo mark it in afterReplay, which the engine calls on every path that
+// replays a step: the facade and the keyboard shortcut bound to the engine itself.
 
 // A commit inside clay.effect drains the paused hub's records, so the effect's
 // own writes reach autosave and re-trigger it. Warn once; the commit still runs.
@@ -141,7 +130,9 @@ function restoreControls() {
 // The engine emits its receipt only after a whole replay applied, so a refused
 // undo or redo never reaches the control restore.
 const afterReplay = (receipt) => {
-  if (receipt?.ok) restoreControls()
+  if (!receipt?.ok) return
+  gateMarkDirty()
+  restoreControls()
 }
 
 // A refusal is announced for whoever presents it: the engine's receipt, once.
