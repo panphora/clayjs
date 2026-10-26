@@ -355,12 +355,15 @@ export function indentBlocks(st, dispatch) {
   if (dispatch) {
     const { hi } = siblingSpan(ents, a, b);
     const tr = st.tr, from = parentOf(first.node), to = ents[s].node.attrs.id;
+    const adopted = [];
     for (let k = a; k <= hi; k++) {
-      if (parentOf(ents[k].node) === from) tr.setNodeMarkup(ents[k].at, null, { ...ents[k].node.attrs, parent: to });
+      if (parentOf(ents[k].node) !== from) continue;
+      tr.setNodeMarkup(ents[k].at, null, { ...ents[k].node.attrs, parent: to });
+      adopted.push(ents[k].node.attrs.id);
     }
     if (!ents[s].node.attrs.open) tr.setNodeMarkup(ents[s].at, null, { ...ents[s].node.attrs, open: true });
     const intent = moveIntent(ents, a, hi, ents[a].at, (e) => (e.i >= a && e.i <= hi && parentOf(e.node) === from ? { parent: to } : null));
-    tr.setMeta(MOVE, { ...intent, attrs: ents[s].node.attrs.open ? intent.attrs : { ...intent.attrs, [to]: { open: true } } });
+    tr.setMeta(MOVE, { ...intent, ids: adopted, attrs: ents[s].node.attrs.open ? intent.attrs : { ...intent.attrs, [to]: { open: true } } });
     dispatch(tr);
   }
   return true;
@@ -493,7 +496,13 @@ export function exitToggleOnEmpty(st, dispatch) {
   const i = $from.index(0);
   const ti = ents.findIndex((x) => x.node.attrs.id === t);
   if (ti < 0 || ents[ti].subEnd !== i) return false;
-  if (dispatch) dispatch(st.tr.setNodeMarkup(ents[i].at, null, { ...$from.parent.attrs, parent: parentOf(ents[ti].node) }));
+  if (dispatch) {
+    const id = ents[i].node.attrs.id, to = parentOf(ents[ti].node);
+    const prev = i > 0 ? ents[i - 1].node : null;
+    const tr = st.tr.setNodeMarkup(ents[i].at, null, { ...$from.parent.attrs, parent: to });
+    tr.setMeta(MOVE, { ids: [id], afterId: prev ? prev.attrs.id : null, parent: parentOf(prev ?? ents[i].node), attrs: { [id]: { parent: to } } });
+    dispatch(tr);
+  }
   return true;
 }
 

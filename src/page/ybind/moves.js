@@ -59,6 +59,7 @@ const MAX_INDENT = 8;
 const ATTR_RULES = {
   indent: (value, block) => block.t === "list_item" && Number.isInteger(value) && value >= 0 && value <= MAX_INDENT,
   open: (value, block) => block.t === "toggle" && typeof value === "boolean",
+  parent: (value, block, byId) => value === null || (typeof value === "string" && byId.get(value)?.t === "toggle" && !inSubtree(byId, value, block.id)),
 };
 
 const attrChanges = (args, byId) => {
@@ -69,7 +70,7 @@ const attrChanges = (args, byId) => {
     const block = byId.get(id);
     if (!block || !fields || typeof fields !== "object" || Array.isArray(fields)) return null;
     for (const [field, value] of Object.entries(fields)) {
-      if (!ATTR_RULES[field] || !ATTR_RULES[field](value, block)) return null;
+      if (!ATTR_RULES[field] || !ATTR_RULES[field](value, block, byId)) return null;
       out.push({ id, field, value });
     }
   }
@@ -126,6 +127,7 @@ export function moveBlocks({ pd, view, um, origins, render }, args = {}) {
   for (const id of ids) if (!byId.has(id)) return refuse("missing-source");
   const changes = attrChanges(args, byId);
   if (!changes) return refuse("invalid-attrs");
+  const parentChanges = changes.filter((change) => change.field === "parent");
 
   const roots = new Set(ids.filter((id) => !ids.some((other) => other !== id && isAncestor(byId, other, id))));
   const selected = list.filter((block) => ids.some((root) => inSubtree(byId, block.id, root)));
@@ -174,14 +176,33 @@ export function moveBlocks({ pd, view, um, origins, render }, args = {}) {
   const movedIds = selected.map((block) => block.id);
   if (sameOrder && !movedRoots.length && !changes.length) return { status: "unchanged" };
 
+  const caret = (() => {
+    const sel = view?.state.selection;
+    if (!(sel instanceof pmState.TextSelection)) return null;
+    const at = (pos) => { const $pos = view.state.doc.resolve(pos); return $pos.depth ? { id: $pos.node(1).attrs.id, offset: $pos.parentOffset } : null; };
+    const anchor = at(sel.anchor), head = at(sel.head);
+    return anchor && head && (selectedSet.has(anchor.id) || selectedSet.has(head.id)) ? { anchor, head } : null;
+  })();
+  const restoreCaret = () => {
+    if (!caret || !view) return;
+    const place = ({ id, offset }) => {
+      let found = null;
+      view.state.doc.forEach((node, pos) => { if (found === null && node.attrs.id === id) found = pos + 1 + Math.min(offset, node.content.size); });
+      return found;
+    };
+    const anchor = place(caret.anchor), head = place(caret.head);
+    if (anchor !== null && head !== null) view.dispatch(view.state.tr.setSelection(pmState.TextSelection.create(view.state.doc, anchor, head)).setMeta(REMOTE_META, true).setMeta("addToHistory", false));
+  };
   if (sameOrder) {
     um?.stopCapturing();
     pd.ydoc.transact(() => {
-      for (const block of movedRoots) setParent(pd, segments.get(block.id), block.id, parent);
-      for (const change of changes) setAttr(pd, segments.get(change.id), change.id, change.field, change.value);
+      if (parentChanges.length) for (const change of parentChanges) setParent(pd, segments.get(change.id), change.id, change.value);
+      else for (const block of movedRoots) setParent(pd, segments.get(block.id), block.id, parent);
+      for (const change of changes) if (change.field !== "parent") setAttr(pd, segments.get(change.id), change.id, change.field, change.value);
     }, LOCAL);
     um?.stopCapturing();
     render();
+    restoreCaret();
     return { status: "moved", ids: movedIds };
   }
 
@@ -216,13 +237,6 @@ export function moveBlocks({ pd, view, um, origins, render }, args = {}) {
     const baseline = intents.restores.find((restore) => restore.key === winner?.key)?.baseline ?? { type: seg.t, attrs: seg.fields ?? {} };
     promotions.set(seg.sourceKey, { covers: removalsOf.map((removal) => removal.key), baseline: JSON.parse(JSON.stringify(baseline)) });
   }
-  const caret = (() => {
-    const sel = view?.state.selection;
-    if (!(sel instanceof pmState.TextSelection)) return null;
-    const at = (pos) => { const $pos = view.state.doc.resolve(pos); return $pos.depth ? { id: $pos.node(1).attrs.id, offset: $pos.parentOffset } : null; };
-    const anchor = at(sel.anchor), head = at(sel.head);
-    return anchor && head && (selectedSet.has(anchor.id) || selectedSet.has(head.id)) ? { anchor, head } : null;
-  })();
   if (!removals.length) throw new Error("The selected blocks have no live physical markers to retire");
 
   um?.stopCapturing();
@@ -270,19 +284,12 @@ export function moveBlocks({ pd, view, um, origins, render }, args = {}) {
       pd.gone.set(copyActiveKey(physicalKeyOf(dest[0])), true);
     }
     if (spans.length) origins.recordSpans(spans);
-    for (const block of movedRoots) setParent(pd, segments.get(block.id), block.id, parent);
-    for (const change of changes) setAttr(pd, segments.get(change.id), change.id, change.field, change.value);
+    if (parentChanges.length) for (const change of parentChanges) setParent(pd, segments.get(change.id), change.id, change.value);
+    else for (const block of movedRoots) setParent(pd, segments.get(block.id), block.id, parent);
+    for (const change of changes) if (change.field !== "parent") setAttr(pd, segments.get(change.id), change.id, change.field, change.value);
   }, LOCAL);
   um?.stopCapturing();
   render();
-  if (caret && view) {
-    const place = ({ id, offset }) => {
-      let found = null;
-      view.state.doc.forEach((node, pos) => { if (found === null && node.attrs.id === id) found = pos + 1 + Math.min(offset, node.content.size); });
-      return found;
-    };
-    const anchor = place(caret.anchor), head = place(caret.head);
-    if (anchor !== null && head !== null) view.dispatch(view.state.tr.setSelection(pmState.TextSelection.create(view.state.doc, anchor, head)).setMeta(REMOTE_META, true).setMeta("addToHistory", false));
-  }
+  restoreCaret();
   return { status: "moved", ids: movedIds };
 }

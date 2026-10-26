@@ -451,10 +451,12 @@ class Chrome {
 
   // A block action from the phone menu acts on the caret's block when nothing
   // more is selected, as the desktop command does.
-  selectCaretBlock() {
+  selectCaretBlock(ids = null) {
     const st = this.view.state;
     if (st.selection instanceof BlockSelection) return;
-    this.view.dispatch(st.tr.setSelection(selectBlocks(st.doc, this.blockIndex())));
+    const found = (ids ?? []).map((id) => this.idIndex(id)).filter((i) => i >= 0);
+    const first = found.length ? found[0] : this.blockIndex();
+    this.view.dispatch(st.tr.setSelection(selectBlocks(st.doc, first, found.length ? found[found.length - 1] : first)));
   }
 
   gripAction(index) {
@@ -645,7 +647,7 @@ class Chrome {
       this.view.dispatch(asStep(tr).scrollIntoView());
       this.view.focus();
     } else if (m.mode === "actions" || m.mode === "more" || m.mode === "external") {
-      if (item.blocks) this.selectCaretBlock();
+      if (item.blocks) this.selectCaretBlock(wanted);
       item.run(this.view, this, index >= 0 ? index : this.blockIndex());
       if (!this.menu && item.focus !== false) this.view.focus();
     } else {
