@@ -257,7 +257,7 @@
       "eventSources": 1,
       "listeners": {
         "window": 3,
-        "document": 23,
+        "document": 24,
         "Element": 4
       },
       "observers": 2,
@@ -426,7 +426,7 @@
       "eventSources": 1,
       "listeners": {
         "window": 3,
-        "document": 23,
+        "document": 24,
         "Element": 4
       },
       "observers": 1,

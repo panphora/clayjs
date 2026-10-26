@@ -1,6 +1,9 @@
 let enablePersistentFormInputValues;
 
 beforeAll(async () => {
+  // Persisted controls settle in the mode that saves them: `persist` mirrors an input
+  // into its attributes in edit and writes nothing on a reader's page.
+  window.clayEditMode = true;
   ({ default: enablePersistentFormInputValues } = await import("../../src/core/persist.js"));
   enablePersistentFormInputValues();
 });

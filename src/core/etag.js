@@ -184,11 +184,13 @@ document.addEventListener("clay:sync-applied", (event) => {
 // Edit mode goes further: the stamp it SAVES with has to move too, and the host is the
 // only source for the value, so it forgets the one it holds and asks again with the
 // overwrite flags. A view-mode tab never saves, so its save stamp can stay where it is.
-if (isEditMode) {
-  document.addEventListener("clay:sync-applied", (event) => {
-    if (event.detail?.source !== "disk") return;
-    if (typeof event.detail.etag === "string" && event.detail.etag) return;
-    forgetEtag();
-    seedEtag({ fresh: true });
-  });
-}
+// The mode is read when the frame arrives rather than when the listener is installed: a
+// live entry imports this module in view, and this listener has to move the stamp once
+// the edit session it belongs to has committed.
+document.addEventListener("clay:sync-applied", (event) => {
+  if (!isEditMode) return;
+  if (event.detail?.source !== "disk") return;
+  if (typeof event.detail.etag === "string" && event.detail.etag) return;
+  forgetEtag();
+  seedEtag({ fresh: true });
+});

@@ -56,9 +56,15 @@ export function addFrom(trigger) {
   return item;
 }
 
+// New input is the lifecycle's to admit, not this handler's: after an exit the page is
+// the reader's again, and a click there must add nothing. A standalone page has no
+// lifecycle and always admits.
+const admitted = () => window.clay?.modeLifecycle?.canWrite?.() !== false;
+
 function onClick(event) {
   const trigger = event.target.closest?.("[add-from]");
   if (!trigger) return;
+  if (!admitted()) return;
   event.preventDefault();
   addFrom(trigger);
 }

@@ -1715,6 +1715,9 @@ export function initSaveKeyboardShortcut() {
     let isMac = window.navigator.platform.match("Mac");
     let metaKeyPressed = isMac ? event.metaKey : event.ctrlKey;
     if (metaKeyPressed && event.keyCode == 83) {
+      // The listener outlives its session, so the mode is read now: after an exit the
+      // page is the reader's and the browser's own Save has to work.
+      if (!isEditMode) return;
       event.preventDefault();
       // isTrusted, so a script calling dispatchEvent cannot manufacture human
       // provenance for a write the person never asked for.

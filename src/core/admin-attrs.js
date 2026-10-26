@@ -78,5 +78,33 @@ export function controlsLease(root = document) {
   };
 }
 
+/**
+ * The controls as a mode participant.
+ *
+ * The installation above is page-lifetime and turns no control on: it puts the
+ * save-time restore in front of each authored form, and nothing more. A session is the
+ * lease below.
+ *
+ * `initial: true` adopts the edit this tab booted into, where the boot's own
+ * `enable...OnPageLoad` helpers already turned the served controls on: it starts no
+ * watcher and installs nothing, and its dispose is what hands the controls back.
+ */
+export function modeParticipant() {
+  return {
+    id: 'clay:controls',
+    order: 110,
+    prepare(context = {}) {
+      const lease = controlsLease();
+      if (context.initial !== true) return lease;
+      return {
+        enable() {},
+        quiesce: () => lease.quiesce(),
+        resume: () => lease.resume(),
+        dispose: () => lease.dispose(),
+      };
+    },
+  };
+}
+
 export { install as init };
 export default install;

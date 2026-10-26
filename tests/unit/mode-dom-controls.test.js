@@ -37,6 +37,8 @@ const FIXTURE = `
 let adminAttrs;
 let addFrom;
 let persist;
+let editable;
+let inputs;
 
 const servable = () => document.body.innerHTML;
 
@@ -50,6 +52,8 @@ beforeAll(async () => {
   await import("../../src/core/preserve-authored.js");
   await import("../../src/core/snapshot.js");
   adminAttrs = await import("../../src/core/admin-attrs.js");
+  editable = await import("../../src/core/admin-contenteditable.js");
+  inputs = await import("../../src/core/admin-inputs.js");
   addFrom = await import("../../src/attrs/add-from.js");
   persist = await import("../../src/core/persist.js");
 });
@@ -196,6 +200,59 @@ test("a persist subscription removes the exact listeners and capture option it a
   subscription.stop();
   expect(removed.mock.calls).toEqual(listeners);
   expect(removed.mock.calls.every(([, , options]) => options === true)).toBe(true);
+});
+
+test("the controls participant prepares the session lease a live entry enables", async () => {
+  const participant = adminAttrs.modeParticipant();
+  expect(participant.id).toBe("clay:controls");
+  expect(participant.order).toBe(110);
+
+  const before = document.getElementById("doc").outerHTML;
+  const lease = participant.prepare({ initial: false, destination: "host" });
+  lease.enable();
+
+  expect(document.getElementById("title").getAttribute("contenteditable")).toBe("plaintext-only");
+  expect(document.getElementById("due").hasAttribute("disabled")).toBe(false);
+
+  const holder = document.createElement("div");
+  document.body.append(holder);
+
+  lease.quiesce();
+  holder.innerHTML = '<div id="held" editmode:contenteditable inert-contenteditable="">held</div>';
+  await flush();
+  expect(document.getElementById("held").hasAttribute("contenteditable")).toBe(false);
+
+  lease.resume();
+  holder.insertAdjacentHTML("beforeend", '<div id="after" editmode:contenteditable inert-contenteditable="">after</div>');
+  await flush();
+  expect(document.getElementById("after").getAttribute("contenteditable")).toBe("");
+
+  lease.dispose();
+  expect(document.getElementById("doc").outerHTML).toBe(before);
+  holder.remove();
+});
+
+test("initial adoption starts no watcher, and its dispose hands the served controls back", async () => {
+  // What an explicit initial edit's own on-page-load helpers did before the adoption.
+  editable.enableContentEditable();
+  inputs.enableAdminInputs();
+  expect(document.getElementById("title").getAttribute("contenteditable")).toBe("plaintext-only");
+
+  const adopted = adminAttrs.modeParticipant().prepare({ initial: true, destination: "host" });
+  adopted.enable();
+
+  const holder = document.createElement("div");
+  document.body.append(holder);
+  holder.innerHTML = '<div id="unwatched" editmode:contenteditable inert-contenteditable="">unwatched</div>';
+  await flush();
+  expect(document.getElementById("unwatched").hasAttribute("contenteditable")).toBe(false);
+
+  adopted.dispose();
+  const title = document.getElementById("title");
+  expect(title.hasAttribute("contenteditable")).toBe(false);
+  expect(title.getAttribute("inert-contenteditable")).toBe("plaintext-only");
+  expect(document.getElementById("due").getAttribute("disabled")).toBe("disabled");
+  holder.remove();
 });
 
 // Last in the file: stopping the installation is what the test proves, so no later test

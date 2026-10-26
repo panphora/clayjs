@@ -1,4 +1,5 @@
 import { onSnapshot } from './snapshot.js';
+import { isEditMode } from './is-edit-mode.js';
 import { serializeControlToAttributes, finalizeControlForSave } from '../vendor/control-serialize.vendor.js';
 import { PERSIST } from '../lib/attr-aliases.js';
 
@@ -63,6 +64,9 @@ export default function enablePersistentFormInputValues(filterBySelector = PERSI
   // serializer keeps it cursor-safe (value via the dirty flag, textarea via
   // an inert data-value attribute).
   const onInput = (e) => {
+    // Mirrors the committed mode, so a reader's page is never written to: an input in
+    // view is the reader's own, and typing there must not change the served bytes.
+    if (!isEditMode) return;
     const el = e.target;
     if ((el.matches(inputSelector) && el.type !== 'checkbox' && el.type !== 'radio') ||
         el.matches(textareaSelector)) {
@@ -73,6 +77,7 @@ export default function enablePersistentFormInputValues(filterBySelector = PERSI
 
   // Checkboxes, radios, and selects settle on change.
   const onChange = (e) => {
+    if (!isEditMode) return;
     const el = e.target;
     if ((el.matches(inputSelector) && (el.type === 'checkbox' || el.type === 'radio')) ||
         el.matches(selectSelector)) {

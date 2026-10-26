@@ -17,7 +17,6 @@
  */
 
 import { onSnapshot, addDocumentTransform } from "../core/snapshot.js";
-import { isEditMode } from "../core/is-edit-mode.js";
 import { FREEZE_SELECTOR } from "../lib/region-policy.js";
 import { captureAll, frozenOriginal } from "../core/preserve-authored.js";
 
@@ -70,8 +69,7 @@ function freezePrepare(clone) {
 }
 
 function init() {
-  log('init, isEditMode:', isEditMode);
-  if (!isEditMode) return;
+  log('init');
 
   // The always wave's preservation foundation already recorded every region, in view
   // mode and before any paint; this only covers a boot that skipped that wave.
