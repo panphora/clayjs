@@ -18,3 +18,7 @@
 /my-list.html
   Content-Disposition: attachment; filename="my-list.html"
   X-Robots-Tag: noindex
+
+/my-list.htmlclay
+  Content-Disposition: attachment; filename="my-list.htmlclay"
+  X-Robots-Tag: noindex
