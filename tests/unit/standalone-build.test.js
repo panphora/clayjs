@@ -65,14 +65,16 @@ test("carries the core, every plugin and every satellite", () => {
   expect((bundle.match(/@layer clay-skin\{/g) || []).length).toBeGreaterThanOrEqual(3);
   for (const name of ["richclay", "cms", "quickcrop"]) expect(bundle).toMatch(new RegExp(`installSkin\\d*\\(\\s*"${name}"`));
   expect(bundle.length).toBeGreaterThan(500_000);
-  // 5 MB. The ceiling was 4.75 MB; what went past it is code the single-file build has
+  // 5.5 MB. It was 5 MB until the page formats work: the tolerant format codec, the
+  // format floor, the recovery proof and remote carets are code a single file must carry
+  // because it cannot fetch them later. Before that the ceiling was 4.75 MB; what went past it is code the single-file build has
   // to carry because a page cannot fetch it later: the view-first mode lifecycle, the
   // leases and the staged boot pack. The rest is the reader's own work: the vendored
   // markdown and highlighting tools loaded on demand (OverType 192 KB, marked 70 KB,
   // highlight.js 35 KB plus 30 KB of grammars and its sheet), the menu and SEO plugin
   // 49 KB, and the reader's page features and saved stream. The guard is there to catch
-  // something the size of Shiki's grammars (6.3 MB), which 5 MB still does.
-  expect(bundle.length).toBeLessThan(5_000_000);
+  // something the size of Shiki's grammars (6.3 MB), which 5.5 MB still does.
+  expect(bundle.length).toBeLessThan(5_500_000);
 });
 
 // The chunk build adds a generated bootstrap per entry that has a target, plus the
