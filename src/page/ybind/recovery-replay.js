@@ -207,7 +207,7 @@ export function replayJournals({ records = [], current, into } = {}) {
       parts = admitCapsule({ capsule: entry.capsule, batches: entry.batches, current });
     } catch (error) {
       if (error?.code === "nothing-owned") continue;
-      review.push({ capsule: entry.capsule, code: error?.code ?? "invalid-capsule", message: error?.message ?? "This journal cannot be replayed" });
+      review.push({ capsule: entry.capsule, batches: entry.batches, code: error?.code ?? "invalid-capsule", message: error?.message ?? "This journal cannot be replayed" });
       continue;
     }
     applyCapsule(into, parts);
@@ -315,6 +315,7 @@ export function pageChannel(service) {
 export function createPageJournal({ channel, key, context, base = null, onChange = () => {} }) {
   const records = new Map();
   const waiting = [];
+  const awaiting = [];
   const inflight = new Set();
   const bytesOfBase = bytesOf(base) ?? new Uint8Array(0);
   let resolved = null;
@@ -336,6 +337,26 @@ export function createPageJournal({ channel, key, context, base = null, onChange
     dependency: (bytes) => { if (episode) send(bytes, "dependency"); },
     records: () => [...records.values()],
     names,
+    // The next record this journal commits, or null when the store refuses one or the
+    // session closes: the destination a copy names is only real once it is on this device.
+    next: () => new Promise((resolve) => { awaiting.push(resolve); }),
+    // Does the work this journal holds carry exactly this block's text? The episode's own
+    // base is here, so the answer needs no store and no page.
+    covers: (blockId, text) => {
+      const owned = [...records.values()].map((record) => record.update).filter((update) => update && update.byteLength);
+      const capsule = {
+        kind: "binary",
+        version: 1,
+        id: "journal",
+        revision: 0,
+        payload: {
+          base: bytesOfBase,
+          dependencies: new Uint8Array(0),
+          owned: owned.length ? Y.mergeUpdatesV2(owned) : new Uint8Array(0),
+        },
+      };
+      return coversText([capsule], blockId, text);
+    },
     pending: () => inflight.size + (failure ? 1 : 0),
     get failure() { return failure; },
     retire,
@@ -348,6 +369,7 @@ export function createPageJournal({ channel, key, context, base = null, onChange
     close: () => {
       closed = true;
       waiting.length = 0;
+      settle(null);
     },
   };
 
@@ -366,6 +388,10 @@ export function createPageJournal({ channel, key, context, base = null, onChange
       for (const run of waiting.splice(0)) run(resolved);
       return resolved;
     });
+
+  function settle(value) {
+    for (const resolve of awaiting.splice(0)) resolve(value);
+  }
 
   function retire(list) {
     for (const item of list || []) records.delete(journalKey(item?.id));
@@ -402,6 +428,7 @@ export function createPageJournal({ channel, key, context, base = null, onChange
       answer = channel.append({ key, context, update: bytes, origin, base: first ? bytesOfBase : null });
     } catch (_) {
       failure = "error";
+      settle(null);
       journal.onChange();
       return;
     }
@@ -412,6 +439,7 @@ export function createPageJournal({ channel, key, context, base = null, onChange
         inflight.delete(token);
         if (!receipt || receipt.ok !== true) {
           failure = receipt?.code ?? "error";
+          settle(null);
           journal.onChange();
           return;
         }
@@ -422,11 +450,13 @@ export function createPageJournal({ channel, key, context, base = null, onChange
           batchBytes += bytes.byteLength;
         }
         journal.onChange();
+        settle({ id: receipt.id, revision: receipt.revision });
         if (batches >= COMPACT_BATCHES || batchBytes >= COMPACT_BYTES) compact();
       },
       () => {
         inflight.delete(token);
         failure = "error";
+        settle(null);
         journal.onChange();
       },
     );
@@ -485,4 +515,340 @@ export async function replayInto({ journal, state, into } = {}) {
   const listed = await journal.channel.list();
   if (!listed?.ok) return { replayed: [], review: [] };
   return replayJournals({ records: listed.records, current: { context, state }, into });
+}
+
+const posOf = (block) => (typeof block?.pos === "string" ? block.pos : "");
+const idsInOrder = (blocks) =>
+  Object.keys(blocks).sort((a, b) => {
+    const left = posOf(blocks[a]);
+    const right = posOf(blocks[b]);
+    if (left !== right) return left < right ? -1 : 1;
+    return a < b ? -1 : a > b ? 1 : 0;
+  });
+
+// The text of one block, cells included: what a person reads in a review, and what an
+// insert-as-text offers back.
+function blockText(block) {
+  if (typeof block?.c === "string") return block.c;
+  if (!block?.rows) return "";
+  const parts = [];
+  for (const row of Object.values(block.rows)) {
+    for (const cell of Object.values(row?.cells ?? {})) {
+      const text = typeof cell === "string" ? cell : typeof cell?.c === "string" ? cell.c : "";
+      if (text) parts.push(text);
+    }
+  }
+  return parts.join(" ");
+}
+
+/**
+ * The page a set of records reconstructs, block by block.
+ *
+ * Records arrive in the store's shape — capsules with their batches — or as the updates
+ * a live journal holds, and both read back as one page: they share a lineage, and Yjs
+ * merges them by operation identity.
+ *
+ * @param {Array<Object>} [records]
+ * @returns {?Object} the block model, by block id, or null when it cannot be decoded
+ */
+function pageOf(records = []) {
+  const doc = new Y.Doc();
+  try {
+    for (const entry of capsulesOf(records)) {
+      let parts;
+      try {
+        parts = accumulateCapsule(entry);
+      } catch (_) {
+        continue;
+      }
+      for (const bytes of [parts.base, parts.dependencies, parts.owned]) if (bytes.length) Y.applyUpdateV2(doc, bytes, NET);
+    }
+    for (const record of records || []) {
+      const update = bytesOf(record?.update);
+      if (update && update.length) Y.applyUpdateV2(doc, update, NET);
+    }
+    return blocksFromYValue({ v: 1, g: 0, y: { seed: toBase64(Y.encodeStateAsUpdateV2(doc)) } });
+  } catch (_) {
+    return null;
+  } finally {
+    doc.destroy();
+  }
+}
+
+/**
+ * The readable page a capsule reconstructs: one line per block, in the page's own order.
+ *
+ * A capsule that cannot be decoded at all reads as no text rather than as an error: a
+ * review still says what it can, and nothing here decides whether it may be replayed.
+ *
+ * @param {{capsule: Object, batches?: Array<Object>}} options
+ * @returns {string}
+ */
+export function reconstructText({ capsule, batches = [] } = {}) {
+  let blocks;
+  try {
+    blocks = reconstructPage({ capsule, batches });
+  } catch (_) {
+    return "";
+  }
+  const lines = [];
+  for (const id of idsInOrder(blocks)) {
+    const text = blockText(blocks[id]);
+    if (text) lines.push(text);
+  }
+  return lines.join("\n");
+}
+
+/**
+ * The review rows a page draws for the journals it may not replay.
+ *
+ * Each row keeps the capsule it came from, so the person can read it, download it or
+ * copy its content, and nothing in a row is applied to the page.
+ *
+ * @param {Array<{capsule: Object, batches?: Array<Object>, code: string, message: string}>} [review]
+ * @returns {Array<Object>}
+ */
+export function describeReview(review = []) {
+  return (review || []).map((entry) => ({
+    id: entry?.capsule?.id,
+    revision: entry?.capsule?.revision ?? 0,
+    code: entry?.code ?? "invalid-capsule",
+    message: entry?.message ?? "This journal cannot be replayed",
+    text: reconstructText({ capsule: entry?.capsule, batches: entry?.batches ?? [] }),
+    capsule: entry?.capsule ?? null,
+    batches: entry?.batches ?? [],
+  }));
+}
+
+/**
+ * Whether a capsule's own blocks reconstruct to exactly this text.
+ *
+ * Composition end asks this before retiring a shadow: an update the journal holds is a
+ * transaction, and only a transaction carrying the same visible text means the typing
+ * reached the document.
+ *
+ * @param {Array<Object>} records - the journal's records
+ * @param {?string} blockId
+ * @param {string} text
+ * @returns {boolean}
+ */
+export function coversText(records = [], blockId = null, text = "") {
+  const id = blockId == null ? "" : String(blockId);
+  const want = typeof text === "string" ? text : "";
+  if (!id || !want) return false;
+  const blocks = pageOf(records);
+  return Boolean(blocks && blocks[id] && blockText(blocks[id]) === want);
+}
+
+/** The channel that records where a reviewed capsule was copied to: one name, one version. */
+export const COPY_CHANNEL = "page.copy";
+export const COPY_VERSION = 1;
+
+// One channel per service, registered the first time something is actually copied.
+const copyChannels = new WeakMap();
+
+/**
+ * The copy-marker channel of one recovery service.
+ *
+ * @param {Object} service - `clay.recovery`
+ * @returns {?Object} the channel api
+ */
+export function pageCopyChannel(service) {
+  if (!service) return null;
+  const existing = copyChannels.get(service);
+  if (existing) return existing;
+  const channel = service.register({ channel: COPY_CHANNEL, version: COPY_VERSION });
+  copyChannels.set(service, channel);
+  return channel;
+}
+
+const copyKey = (source) => `copy:${source?.key ?? ""}:${identityKey(source?.id)}`;
+
+/**
+ * The transfer marker naming one capsule's copy, if this store has one.
+ *
+ * @param {{records?: Array<Object>, source: {key: string, id: *}}} options
+ * @returns {?{record: Object, source: Object, destination: Object}}
+ */
+export function markerFor({ records = [], source = null } = {}) {
+  if (!source || source.id === undefined) return null;
+  for (const record of records || []) {
+    const payload = record?.payload;
+    if (!payload?.source || !payload?.destination) continue;
+    if (payload.source.key !== source.key) continue;
+    if (identityKey(payload.source.id) !== identityKey(source.id)) continue;
+    return { record, source: payload.source, destination: payload.destination };
+  }
+  return null;
+}
+
+/**
+ * What one marker says about the copy it names.
+ *
+ * "copied" while the destination record is still in the journal: the copy is on this
+ * device and nothing has proved it saved. "covered" once the destination is gone from
+ * the journal, which only a checkpoint (or a dismissed destination) can do.
+ *
+ * @param {{marker: ?Object, records?: Array<Object>}} options
+ * @returns {string} "open", "copied" or "covered"
+ */
+export function copyState({ marker = null, records = [] } = {}) {
+  if (!marker?.destination) return "open";
+  const id = marker.destination.id;
+  const kept = (records || []).some((record) => record && identityKey(record.id) === identityKey(id));
+  return kept ? "copied" : "covered";
+}
+
+/**
+ * Insert a reviewed capsule's content as a copy, with fresh block ids.
+ *
+ * The content goes in through `insert`, which is the page's own document command and
+ * names the destination record it committed; nothing of the capsule's Yjs operations is
+ * merged into this page, so a changed lineage is never merged blindly. The source
+ * capsule is not retired here: it survives until a checkpoint covers the destination,
+ * and the marker written last says where that destination is. A copy already on this
+ * device is never made twice, and a refused or failed insert leaves the source exactly
+ * where it was.
+ *
+ * @param {Object} options
+ * @param {Object} options.channel - the `page.yjs` channel api
+ * @param {Object} options.copies - the copy-marker channel api
+ * @param {{key: string, id: *, revision: number}} options.source
+ * @param {Function} options.insert - () => Promise<{key: string, id: *, revision: number}>
+ * @returns {Promise<{ok: boolean, code?: string, destination?: Object, marker?: Object}>}
+ */
+export async function recoverAsCopy({ channel, copies, source, insert } = {}) {
+  if (!channel || !copies || !source || typeof insert !== "function") return { ok: false, code: "unavailable" };
+  let list;
+  let marks;
+  try {
+    [list, marks] = await Promise.all([channel.list(), copies.list()]);
+  } catch (_) {
+    return { ok: false, code: "unavailable" };
+  }
+  const marker = markerFor({ records: marks?.ok ? marks.records : [], source });
+  if (marker) {
+    const state = copyState({ marker, records: list?.ok ? list.records : [] });
+    if (state === "copied") return { ok: false, code: "already-copied", marker };
+    if (state === "covered") return { ok: false, code: "covered", marker };
+  }
+  let destination;
+  try {
+    destination = await insert();
+  } catch (_) {
+    return { ok: false, code: "insert-failed" };
+  }
+  if (!destination || destination.revision === undefined || destination.id === undefined) return { ok: false, code: "insert-failed" };
+  copies.stage({
+    key: copyKey(source),
+    kind: "text",
+    payload: {
+      source: { key: source.key ?? "", id: source.id, revision: source.revision ?? 0 },
+      destination: { key: destination.key ?? "", id: destination.id, revision: destination.revision },
+    },
+  });
+  const written = await copies.flush();
+  if (!written?.ok) return { ok: false, code: written?.code || "error", destination };
+  return { ok: true, destination };
+}
+
+/** The channel a composition's visible text is kept on while it is not a transaction. */
+export const IME_CHANNEL = "page.ime";
+export const IME_VERSION = 1;
+
+const IME_PREFIX = "composing:";
+
+const imeChannels = new WeakMap();
+
+/**
+ * The composition-shadow channel of one recovery service.
+ *
+ * @param {Object} service - `clay.recovery`
+ * @returns {?Object} the channel api
+ */
+export function pageImeChannel(service) {
+  if (!service) return null;
+  const existing = imeChannels.get(service);
+  if (existing) return existing;
+  const channel = service.register({ channel: IME_CHANNEL, version: IME_VERSION });
+  imeChannels.set(service, channel);
+  return channel;
+}
+
+/**
+ * The shadow one composing block's visible text is kept under.
+ *
+ * Composition is never forced into a transaction: while it is active the block's text is
+ * staged on a text channel, so a crash offers it as text. Composition end retires the
+ * shadow only when a journaled update carries the same text — `covered`, or answered
+ * from the records given — and anything else is kept and offered, because that typing
+ * never reached the document.
+ *
+ * @param {{channel: ?Object, key: string}} options
+ * @returns {?Object}
+ */
+export function openImeShadow({ channel = null, key = "" } = {}) {
+  if (!channel) return null;
+
+  async function drop(blockId) {
+    let listed;
+    try {
+      listed = await channel.list();
+    } catch (_) {
+      return 0;
+    }
+    if (!listed?.ok) return 0;
+    let retired = 0;
+    for (const record of listed.records) {
+      if (record?.payload?.blockId !== blockId) continue;
+      try {
+        const receipt = await channel.dismiss(record.id, { revision: record.revision });
+        if (receipt?.ok) retired += 1;
+      } catch (_) {}
+    }
+    return retired;
+  }
+
+  return {
+    key,
+    channel,
+    keep({ blockId = null, text = "" } = {}) {
+      const id = blockId == null ? "" : String(blockId);
+      const value = typeof text === "string" ? text : "";
+      if (!id || !value) return null;
+      return channel.stage({ key: `${IME_PREFIX}${id}`, kind: "text", payload: { blockId: id, text: value } });
+    },
+    async clear({ blockId = null, text = "", covered = null, records = [] } = {}) {
+      const id = blockId == null ? "" : String(blockId);
+      if (!id) return { ok: false, code: "invalid" };
+      const carried = typeof covered === "boolean" ? covered : coversText(records, id, text);
+      if (!carried) return { ok: false, code: "not-covered" };
+      const retired = await drop(id);
+      return retired ? { ok: true, retired } : { ok: false, code: "not-covered" };
+    },
+    async list() {
+      return channel.list();
+    },
+    dispose() {
+      return channel.flush();
+    },
+  };
+}
+
+/**
+ * The composition shadows a page's store holds as reviewable text.
+ *
+ * @param {Array<Object>} [records] - the composition channel's records
+ * @returns {Array<{id: *, revision: number, blockId: string, text: string}>}
+ */
+export function imeEntries(records = []) {
+  const out = [];
+  for (const record of records || []) {
+    if (!record || record.supported === false) continue;
+    const payload = record.payload;
+    if (!payload || typeof payload.text !== "string" || !payload.text) continue;
+    if (typeof payload.blockId !== "string" || !payload.blockId) continue;
+    out.push({ id: record.id, revision: record.revision, blockId: payload.blockId, text: payload.text });
+  }
+  return out;
 }
