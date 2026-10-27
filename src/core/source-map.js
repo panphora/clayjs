@@ -21,6 +21,11 @@
  *   verify(out, today)    reparse and compare trees before anything is sent
  *   adopt(bytes)          re-model and re-pair against what the host accepted
  *
+ * EVERY EXPENSIVE WALK IS A GENERATOR. `modelSteps`, `pairCapturedSteps`, `vDiffSteps`,
+ * `vParseErrorsSteps` and the verifier built from them yield between whole units of work,
+ * and the synchronous functions are `drain` of those generators (`src/lib/slice.js`). One
+ * walk, so a sliced run and a one-shot run cannot disagree about what this module says.
+ *
  * THE FLOOR IS TODAY'S BEHAVIOUR. Anything that does not verify is sent as the full
  * serialization instead, and counted. A fetch that does not return this document, a
  * source whose shape outside <html> disagrees with the live document, a render that
@@ -37,13 +42,17 @@
  *   of this code wrote `by <a>Ana</a> <a>Bo</a>` back as `AnaBo` with a green check.
  */
 
-import { parse } from '../vendor/parse5.vendor.js';
+import { parseSteps } from '../source/parse-steps.js';
+import { drain } from '../lib/slice.js';
 
 const RAW_TEXT = new Set(['script', 'style', 'xmp', 'iframe', 'noembed', 'noframes', 'plaintext', 'noscript']);
 const RCDATA = new Set(['textarea', 'title']);
 const textContext = (tag) => (RAW_TEXT.has(tag) ? 'raw' : RCDATA.has(tag) ? 'rcdata' : 'normal');
 const VOID = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr']);
 const XHTML = 'http://www.w3.org/1999/xhtml';
+// Nodes one walk compares between two yields. It only decides where a sliced walk may
+// pause; the walk itself is the same walk at any value.
+const YIELD_EVERY = 1500;
 
 const escText = (s) => s.replace(/&/g, '&amp;').replace(/ /g, '&nbsp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 const escAttr = (s) => s.replace(/&/g, '&amp;').replace(/ /g, '&nbsp;').replace(/"/g, '&quot;');
@@ -53,16 +62,21 @@ const escAttr = (s) => s.replace(/&/g, '&amp;').replace(/ /g, '&nbsp;').replace
 // =============================================================================
 
 export function model(src) {
-  // The error counts come out of the SAME parse, so they cost nothing here. They are
-  // the only evidence of input a parser throws away, which a tree comparison cannot
-  // see by construction: a duplicate attribute is discarded during parsing, so a render
-  // that wrote one twice reparsed to exactly the right tree. That is how the same
-  // `xmlns:xlink` was added to a file on every save with the verifier green each time.
-  const parseErrors = new Map();
-  const doc = parse(src, {
-    sourceCodeLocationInfo: true,
-    onParseError: (e) => parseErrors.set(e.code, (parseErrors.get(e.code) || 0) + 1),
-  });
+  return drain(modelSteps(src));
+}
+
+/**
+ * The same model, parsed in slices so a large document does not hold the thread for the
+ * whole parse.
+ *
+ * The error counts come out of the SAME parse, so they cost nothing here. They are the
+ * only evidence of input a parser throws away, which a tree comparison cannot see by
+ * construction: a duplicate attribute is discarded during parsing, so a render that wrote
+ * one twice reparsed to exactly the right tree. That is how the same `xmlns:xlink` was
+ * added to a file on every save with the verifier green each time.
+ */
+export function* modelSteps(src) {
+  const { document: doc, errors: parseErrors } = yield* parseSteps(src, { sourceCodeLocationInfo: true });
   return modelFromParsed(src, doc, parseErrors);
 }
 
@@ -547,9 +561,14 @@ function bind(node, loc, map, keyMap, stats, path, resolve, gen) {
  * @returns {?{map: WeakMap, stats: Object}} null when the trees are not the same shape
  */
 export function pairCaptured(root, m, provenance = (n) => n) {
+  return drain(pairCapturedSteps(root, m, provenance));
+}
+
+/** The same pairing walk, `yield`ing every `YIELD_EVERY` nodes compared. */
+export function* pairCapturedSteps(root, m, provenance = (n) => n) {
   if (!m.root) return null;
   const found = [];
-  const unresolved = matchCaptured(root, m.root, provenance, found);
+  const unresolved = yield* matchCapturedSteps(root, m.root, provenance, found, { n: 0 });
   if (unresolved < 0) return null;
   const map = new WeakMap();
   // One token for this pass, set on the model and on every bound loc, exactly as `pair`
@@ -567,7 +586,8 @@ export function pairCaptured(root, m, provenance = (n) => n) {
 }
 
 /** @returns {number} unresolved nodes below this pair, or -1 when the two differ at all */
-function matchCaptured(node, loc, provenance, found) {
+function* matchCapturedSteps(node, loc, provenance, found, compared) {
+  if (++compared.n % YIELD_EVERY === 0) yield;
   if (loc.kind === 'text') {
     if (node.nodeType !== 3 || node.data !== loc.value) return -1;
   } else if (loc.kind === 'comment') {
@@ -583,7 +603,7 @@ function matchCaptured(node, loc, provenance, found) {
   const L = capturedKids(node), S = loc.children;
   if (L.length !== S.length) return -1;
   for (let i = 0; i < L.length; i++) {
-    const n = matchCaptured(L[i], S[i], provenance, found);
+    const n = yield* matchCapturedSteps(L[i], S[i], provenance, found, compared);
     if (n < 0) return -1;
     unresolved += n;
   }
@@ -1027,7 +1047,7 @@ function lis(vals) {
 // the right one.
 
 export function verify(rendered, today, liveDocument, clone = null, sourceErrors = null) {
-  return verifyRendered(rendered, today, liveDocument, clone, sourceErrors, false);
+  return drain(verifyRenderedSteps(rendered, today, liveDocument, clone, sourceErrors, false));
 }
 
 /**
@@ -1044,10 +1064,14 @@ export function verify(rendered, today, liveDocument, clone = null, sourceErrors
  * same walk, told to retain what it parsed.
  */
 export function verifyForSave(rendered, today, liveDocument, clone = null, sourceErrors = null) {
-  return verifyRendered(rendered, today, liveDocument, clone, sourceErrors, true);
+  return drain(verifyForSaveSteps(rendered, today, liveDocument, clone, sourceErrors));
 }
 
-function verifyRendered(rendered, today, liveDocument, clone, sourceErrors, retain) {
+export function* verifyForSaveSteps(rendered, today, liveDocument, clone = null, sourceErrors = null) {
+  return yield* verifyRenderedSteps(rendered, today, liveDocument, clone, sourceErrors, true);
+}
+
+export function* verifyRenderedSteps(rendered, today, liveDocument, clone, sourceErrors, retain) {
   const P = new DOMParser();
   const A = P.parseFromString(rendered, 'text/html');
   const outsideA = vOutside(A), outsideLive = vOutside(liveDocument);
@@ -1060,17 +1084,17 @@ function verifyRendered(rendered, today, liveDocument, clone, sourceErrors, reta
   let cloneDiff = null;
   if (clone) {
     at = [];
-    cloneDiff = vDiff(A.documentElement, clone, 'html', at);
+    cloneDiff = yield* vDiffSteps(A.documentElement, clone, 'html', at);
     if (!cloneDiff) {
-      const w = vParseErrors(rendered, sourceErrors, retain);
+      const w = yield* vParseErrorsSteps(rendered, sourceErrors, retain);
       if (w.diff) return { ok: false, diff: w.diff };
       return retain ? withCandidate({ ok: true, diff: null, oracle: 'clone' }, w, rendered, liveDocument)
         : { ok: true, diff: null, oracle: 'clone' };
     }
   }
   const B = P.parseFromString(today, 'text/html');
-  const diff = vDiff(A.documentElement, B.documentElement, 'html');
-  const worse = diff ? null : vParseErrors(rendered, sourceErrors, retain);
+  const diff = yield* vDiffSteps(A.documentElement, B.documentElement, 'html');
+  const worse = diff ? null : yield* vParseErrorsSteps(rendered, sourceErrors, retain);
   if (!diff) {
     if (worse.diff) return { ok: false, diff: worse.diff };
     return retain ? withCandidate({ ok: true, diff: null, oracle: 'today' }, worse, rendered, liveDocument)
@@ -1114,12 +1138,9 @@ export function nodeAt(root, at) {
  * represent, such as a duplicated element, change the tree, and the comparison above
  * is what catches those.
  */
-function vParseErrors(rendered, sourceErrors, retain) {
+export function* vParseErrorsSteps(rendered, sourceErrors, retain) {
   if (!sourceErrors) return { diff: null };
-  const seen = new Map();
-  const doc = parse(rendered, retain
-    ? { sourceCodeLocationInfo: true, onParseError: (e) => seen.set(e.code, (seen.get(e.code) || 0) + 1) }
-    : { onParseError: (e) => seen.set(e.code, (seen.get(e.code) || 0) + 1) });
+  const { document: doc, errors: seen } = yield* parseSteps(rendered, retain ? { sourceCodeLocationInfo: true } : {});
   for (const [code, n] of seen) {
     const was = sourceErrors.get(code) || 0;
     if (n > was) return { diff: `the render introduced parse errors the source does not have: ${code} ${was} -> ${n}` };
@@ -1164,7 +1185,7 @@ function vOutside(doc) {
  * still changes the tree its markup parses to. Recursion terminates because each step
  * compares strictly less markup than the one above it.
  */
-function vNoscript(a, b, path) {
+function* vNoscriptSteps(a, b, path, compared) {
   const P = new DOMParser();
   // Read each side the way it was parsed, which verify fixes, not the node. `a` is always
   // the render reparsed by DOMParser, with scripting off, so its <noscript> text is TEXT,
@@ -1177,7 +1198,7 @@ function vNoscript(a, b, path) {
     const kids = Array.from(el.childNodes);
     return kids.length && kids.every((n) => n.nodeType === 3) ? kids.map((n) => n.data).join('') : el.innerHTML;
   };
-  return vDiff(P.parseFromString(a.innerHTML, 'text/html').body, P.parseFromString(raw(b), 'text/html').body, path + '>#noscript');
+  return yield* vDiffSteps(P.parseFromString(a.innerHTML, 'text/html').body, P.parseFromString(raw(b), 'text/html').body, path + '>#noscript', [], compared);
 }
 function vKids(el) {
   const list = el.localName === 'template' && el.content ? el.content.childNodes : el.childNodes;
@@ -1197,17 +1218,18 @@ function sameAttrsInOrder(a, b) {
   }
   return true;
 }
-function vDiff(a, b, path, at = []) {
+export function* vDiffSteps(a, b, path, at = [], compared = { n: 0 }) {
+  if (++compared.n % YIELD_EVERY === 0) yield;
   if (a.nodeType !== b.nodeType) return path + ': node type ' + a.nodeType + ' vs ' + b.nodeType;
   if (a.nodeType === 3 || a.nodeType === 8) return a.data === b.data ? null : path + ': text ' + JSON.stringify(a.data.slice(0, 60)) + ' vs ' + JSON.stringify(b.data.slice(0, 60));
   if (a.localName !== b.localName || a.namespaceURI !== b.namespaceURI) return path + ': tag ' + a.localName + ' vs ' + b.localName;
   if (!sameAttrsInOrder(a, b) && vAttrs(a) !== vAttrs(b)) return path + ': attrs ' + vAttrs(a) + ' vs ' + vAttrs(b);
-  if (a.localName === 'noscript' && a.namespaceURI === XHTML) return vNoscript(a, b, path);
+  if (a.localName === 'noscript' && a.namespaceURI === XHTML) return yield* vNoscriptSteps(a, b, path, compared);
   const ka = vKids(a), kb = vKids(b);
   if (ka.length !== kb.length) return path + ': ' + ka.length + ' vs ' + kb.length + ' children';
   for (let i = 0; i < ka.length; i++) {
     at.push(i);
-    const d = vDiff(ka[i], kb[i], path + '>' + (ka[i].localName || '#') + '[' + i + ']', at);
+    const d = yield* vDiffSteps(ka[i], kb[i], path + '>' + (ka[i].localName || '#') + '[' + i + ']', at, compared);
     if (d) return d;
     at.pop();
   }

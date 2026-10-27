@@ -27,7 +27,7 @@ import { bootFixture } from "./helpers/mode-harness.js";
 const requests = [];
 jest.unstable_mockModule("../../src/vendor/parse5.vendor.js", () => {
   requests.push("parse5");
-  return { parse: parse5Vendor.parse };
+  return { parse: parse5Vendor.parse, Parser: parse5Vendor.Parser };
 });
 
 const tick = (ms = 0) => new Promise((resolve) => setTimeout(resolve, ms));
