@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "id": "bare-contenteditable-gains-inert",
+  "fixture": "persist-host",
+  "boot": {
+    "mode": "view",
+    "live": true,
+    "destination": "host"
+  },
+  "page": {
+    "body": "<article><h1 id=\"title\">Untitled</h1><div id=\"content\" editmode:contenteditable=\"\" class=\"c\">start</div></article>"
+  },
+  "steps": [
+    {
+      "op": "cycles",
+      "count": 2
+    },
+    {
+      "op": "settle"
+    }
+  ],
+  "requires": [
+    "transition",
+    "cycles"
+  ],
+  "expect": {
+    "mode": "view",
+    "writes": 0,
+    "canonical": true
+  }
+}

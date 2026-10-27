@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "id": "entry-write-boolean-order",
+  "fixture": "persist-host",
+  "boot": {
+    "mode": "view",
+    "live": true,
+    "destination": "host"
+  },
+  "page": {
+    "body": "<article><h1 id=\"title\">Untitled</h1><input id=\"locked\" viewmode:disabled=\"\" disabled=\"\" value=\"v\"></article>"
+  },
+  "steps": [
+    {
+      "op": "cycles",
+      "count": 3
+    },
+    {
+      "op": "settle"
+    }
+  ],
+  "requires": [
+    "transition",
+    "cycles"
+  ],
+  "expect": {
+    "mode": "view",
+    "writes": 0,
+    "canonical": true
+  }
+}

@@ -1,0 +1,51 @@
+{
+  "schema": 1,
+  "id": "ime-late-commit-after-view",
+  "fixture": "persist-host",
+  "boot": {
+    "mode": "view",
+    "live": true,
+    "destination": "host"
+  },
+  "steps": [
+    {
+      "op": "enter"
+    },
+    {
+      "op": "compose",
+      "phase": "start",
+      "target": "title"
+    },
+    {
+      "op": "compose",
+      "phase": "update",
+      "target": "title",
+      "value": "\u306b\u307b"
+    },
+    {
+      "op": "leave",
+      "await": false
+    },
+    {
+      "op": "settle",
+      "ms": 300
+    },
+    {
+      "op": "compose",
+      "phase": "end",
+      "target": "title",
+      "value": "\u65e5\u672c"
+    },
+    {
+      "op": "settle",
+      "ms": 300
+    },
+    {
+      "op": "leave"
+    }
+  ],
+  "requires": [
+    "compose-start"
+  ],
+  "expect": {}
+}

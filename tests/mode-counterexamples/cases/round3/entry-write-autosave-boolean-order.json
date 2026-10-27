@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "id": "entry-write-autosave-boolean-order",
+  "fixture": "persist-host",
+  "boot": {
+    "mode": "view",
+    "live": true,
+    "destination": "host"
+  },
+  "page": {
+    "body": "<article><h1 id=\"title\">Untitled</h1><input id=\"locked\" viewmode:disabled=\"\" disabled=\"\" value=\"v\"></article>",
+    "attrs": {
+      "autosave": ""
+    }
+  },
+  "steps": [
+    {
+      "op": "enter"
+    },
+    {
+      "op": "settle",
+      "ms": 5000
+    }
+  ],
+  "requires": [
+    "transition"
+  ],
+  "expect": {
+    "mode": "edit",
+    "writes": 0
+  }
+}

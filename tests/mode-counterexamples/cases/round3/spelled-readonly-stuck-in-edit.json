@@ -1,0 +1,33 @@
+{
+  "schema": 1,
+  "id": "spelled-readonly-stuck-in-edit",
+  "fixture": "persist-host",
+  "boot": {
+    "mode": "view",
+    "live": true,
+    "destination": "host"
+  },
+  "page": {
+    "body": "<article><h1 id=\"title\">Untitled</h1><textarea id=\"ro\" viewmode:readonly=\"\" readonly=\"readonly\">r</textarea></article>"
+  },
+  "steps": [
+    {
+      "op": "enter"
+    },
+    {
+      "op": "input",
+      "target": "title",
+      "value": "Edited"
+    },
+    {
+      "op": "leave"
+    }
+  ],
+  "requires": [
+    "input-admitted"
+  ],
+  "expect": {
+    "mode": "view",
+    "writes": 1
+  }
+}

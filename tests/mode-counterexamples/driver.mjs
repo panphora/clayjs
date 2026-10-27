@@ -45,7 +45,7 @@ const HOLDABLE = new Set(["save.request", "save.response", "chunk.import", "meta
 const SAVE_RESULTS = ["accepted", "rejected", "unknown"];
 const CHUNK_RESULTS = ["loaded", "failed"];
 
-const CASE_KEYS = new Set(["schema", "id", "fixture", "boot", "steps", "requires", "expect", "control", "knownFailing", "reducedFrom"]);
+const CASE_KEYS = new Set(["schema", "id", "fixture", "boot", "steps", "requires", "expect", "control", "knownFailing", "reducedFrom", "page", "host"]);
 const BOOT_KEYS = new Set(["mode", "live", "destination"]);
 const STEP_KEYS = {
   enter: [],
@@ -59,6 +59,8 @@ const STEP_KEYS = {
   settle: ["ms"],
   peer: ["tab", "action"],
   reload: [],
+  click: ["target"],
+  storage: ["mode"],
 };
 const PEER_KEYS = new Set(["value"]);
 
@@ -73,6 +75,26 @@ const MODES = new Set(["view", "edit", "draft"]);
 const LEAVE_SETTLE_MS = 600;
 
 const baseOf = (boundary) => boundary.slice(0, boundary.indexOf(":") === -1 ? boundary.length : boundary.indexOf(":"));
+
+/**
+ * The fixture a case runs, with the case's own overrides applied.
+ *
+ * A case may replace the page's fields (`page`) or the host's (`host`), and a host asked
+ * to serve the page serves the page's own bytes as `text/html`.
+ *
+ * @param {object} json
+ */
+export function specOf(json) {
+  const base = FIXTURES[json.fixture];
+  if (!json.page && !json.host) return base;
+  const page = json.page ? { ...base.page, ...json.page } : base.page;
+  let host = json.host ? { ...(base.host ?? {}), ...json.host } : base.host;
+  if (host && host.served === "page") {
+    const doc = `<!DOCTYPE html><html><head>${page.head ?? ""}</head><body>${page.body}</body></html>`;
+    host = { ...host, served: { path: page.path, html: doc, etag: "etag-1", contentType: "text/html; charset=utf-8" } };
+  }
+  return { ...base, page, host };
+}
 
 const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 
@@ -194,6 +216,14 @@ function validateSteps(json, errors, fail) {
       case "unsent": {
         if (typeof step.field !== "string" || !step.field) fail("bad-step-field", `${at}.field`, "field names the unsent field");
         if (typeof step.value !== "string") fail("bad-step-field", `${at}.value`, "value is a string");
+        break;
+      }
+      case "click": {
+        if (typeof step.target !== "string" || !step.target) fail("bad-step-field", `${at}.target`, "target is a selector");
+        break;
+      }
+      case "storage": {
+        if (!["ok", "full", "off"].includes(step.mode)) fail("bad-step-field", `${at}.mode`, "mode is ok, full or off");
         break;
       }
       case "cycles": {
@@ -350,13 +380,13 @@ export async function runCase(json) {
     trace.push({ seq: ++seq, tab, kind, detail });
   };
 
-  const fixture = FIXTURES[json.fixture];
+  const fixture = specOf(json);
   const host = createHost(record, fixture.host ?? {});
   const cleanups = [];
 
   try {
     const host_ = await hostHarness();
-    let booted = await bootPage(json.fixture, { mode: json.boot.mode, host, resetModules: host_.resetModules });
+    let booted = await bootPage(fixture, { mode: json.boot.mode, host, resetModules: host_.resetModules });
     let clay = booted.clay;
     cleanups.push(() => booted.resources.stop());
 
@@ -440,6 +470,14 @@ export async function runCase(json) {
     }
     if (errors.length) return { status: "invalid", trace, result: { errors } };
 
+    // A schedule can reach a page the case did not describe: an entry answered by a
+    // reload is answered by a document a browser would replace, so nothing this driver
+    // could type into it would be the page the case asked for. The precondition is the
+    // case's, so a run that violates one is invalid, never failed.
+    const violations = [];
+    let reloading = false;
+    const precondition = (index, message) => violations.push({ code: "precondition", path: `steps[${index}]`, message });
+
     const lanes = fixture.lanes
       ? await createLanePair({ settle })
       : fixture.peer
@@ -455,8 +493,9 @@ export async function runCase(json) {
           // rather than awaited: awaiting it would be the case waiting on itself.
           const flight = clay.setMode("edit").catch((error) => ({ ok: false, code: error?.message ?? "threw" }));
           flight.then((answer) => {
-            record("transition", { op: "enter", ok: answer?.ok === true, mode: answer?.mode ?? null, code: answer?.code ?? null, pending: answer?.pending ?? null });
+            record("transition", { op: "enter", ok: answer?.ok === true, mode: answer?.mode ?? null, code: answer?.code ?? null, pending: answer?.pending ?? null, reloading: answer?.reloading ?? null, changed: answer?.changed ?? null });
             if (answer?.ok === false) record("transition-refused", { op: "enter", code: answer?.code ?? null, pending: answer?.pending ?? null });
+            if (answer?.reloading === true) reloading = true;
           });
           await flush();
           break;
@@ -473,11 +512,19 @@ export async function runCase(json) {
           break;
         }
         case "input": {
+          if (reloading) {
+            precondition(index, "the entry was answered by a reload, so this page is no longer the one the case described");
+            break;
+          }
           const admitted = applyInput(elementFor(step.target), step.value);
           record(admitted ? "input-admitted" : "input-refused", { target: step.target, value: step.value });
           break;
         }
         case "unsent": {
+          if (reloading) {
+            precondition(index, "the entry was answered by a reload, so this page is no longer the one the case described");
+            break;
+          }
           const target = unsentField(step.field);
           if (target) target.dispatchEvent(new Event("beforeinput", { bubbles: true }));
           const admitted = applyInput(target, step.value);
@@ -485,23 +532,36 @@ export async function runCase(json) {
           break;
         }
         case "compose": {
+          if (reloading) {
+            precondition(index, "the entry was answered by a reload, so this page is no longer the one the case described");
+            break;
+          }
+          // An end commits a composition into the page that was being edited: after the
+          // page left edit there is no such page, and a browser has already committed on
+          // blur, so a schedule that ends one there is not describing a person.
+          if (step.phase === "end" && clay.mode !== "edit") {
+            precondition(index, `a composition cannot end in "${clay.mode}": the page left edit before it did`);
+            break;
+          }
           const target = elementFor(step.target);
           if (!target) {
             record("input-refused", { target: step.target, value: step.value ?? null });
             break;
           }
+          // A field with a registry of its own is named by that registry, not by the id or
+          // the selector the case reached it with.
+          const unsent = target.getAttribute?.("unsent") ?? null;
+          const name = unsent ?? step.target;
           if (step.phase === "start") {
             target.dispatchEvent(new Event("compositionstart", { bubbles: true }));
-            record("compose-start", { target: step.target });
+            record("compose-start", { target: name });
             break;
           }
           const admitted = applyInput(target, step.value);
           if (step.phase === "end") target.dispatchEvent(new Event("compositionend", { bubbles: true }));
-          record(admitted ? "input-admitted" : "input-refused", {
-            target: step.target,
-            value: step.value,
-            composing: step.phase === "update",
-          });
+          const detail = { target: name, value: step.value, composing: step.phase === "update" };
+          if (unsent) detail.via = "unsent";
+          record(admitted ? "input-admitted" : "input-refused", detail);
           break;
         }
         case "cycles": {
@@ -509,6 +569,7 @@ export async function runCase(json) {
             const enterAnswer = await clay.setMode("edit").catch((error) => ({ ok: false, code: error?.message ?? "threw" }));
             record("transition", { op: "enter", ok: enterAnswer?.ok === true, mode: enterAnswer?.mode ?? null, code: enterAnswer?.code ?? null, pending: enterAnswer?.pending ?? null });
             if (enterAnswer?.ok === false) record("transition-refused", { op: "enter", code: enterAnswer?.code ?? null, pending: enterAnswer?.pending ?? null });
+            if (enterAnswer?.reloading === true) reloading = true;
             await flush();
             const leaveAnswer = await clay.setMode("view").catch((error) => ({ ok: false, code: error?.message ?? "threw" }));
             record("transition", { op: "leave", ok: leaveAnswer?.ok === true, mode: leaveAnswer?.mode ?? null, code: leaveAnswer?.code ?? null, pending: leaveAnswer?.pending ?? null });
@@ -520,6 +581,21 @@ export async function runCase(json) {
             if (cycle === 1 || cycle === step.count) record("resources", { cycle, ...booted.resources.snapshot() });
           }
           record("cycles", { count: step.count });
+          break;
+        }
+        case "click": {
+          const target = elementFor(step.target);
+          if (!target) {
+            record("click-refused", { target: step.target });
+            break;
+          }
+          target.click();
+          record("click", { target: step.target });
+          break;
+        }
+        case "storage": {
+          if (window.__storageSwitch) window.__storageSwitch.mode = step.mode;
+          record("storage", { mode: step.mode });
           break;
         }
         case "hold": {
@@ -547,7 +623,7 @@ export async function runCase(json) {
           }
           await host_.stopClock();
           booted.resources.stop();
-          booted = await bootPage(json.fixture, {
+          booted = await bootPage(fixture, {
             mode: json.boot.mode,
             host,
             resetModules: host_.resetModules,
@@ -596,6 +672,19 @@ export async function runCase(json) {
         unsent: element.getAttribute("unsent"),
         value: readValue(element),
       })),
+      // The element each step named, resolved the way the ops resolved it: a target that
+      // is a selector has no id to look up, so what it reached is recorded here.
+      targets: [...new Set(json.steps.map((step) => step.target).filter((target) => typeof target === "string"))].map((target) => {
+        const element = elementFor(target);
+        return {
+          target,
+          id: element?.id || null,
+          unsent: element?.getAttribute?.("unsent") ?? null,
+          value: readValue(element),
+        };
+      }),
+      // The page's own answer to the question a person asks before closing it.
+      unsaved: clay.hasUnsavedChanges?.() === true,
       // The visitor's own store, as the run left it: a draft page's saves go there and
       // never to a host, so the oracle reads this rather than an accepted save's body.
       draft: (() => {
@@ -616,6 +705,11 @@ export async function runCase(json) {
         : null,
       errors: [],
     };
+
+    if (violations.length) {
+      result.errors = violations;
+      return { status: "invalid", trace, result };
+    }
 
     const unmet = (json.requires ?? []).filter((requirement) => !reached(trace, requirement));
     if (unmet.length) {

@@ -1,0 +1,51 @@
+{
+  "schema": 1,
+  "id": "ime-unsent-compose-target",
+  "fixture": "unsent-host",
+  "boot": {
+    "mode": "view",
+    "live": true,
+    "destination": "host"
+  },
+  "steps": [
+    {
+      "op": "enter"
+    },
+    {
+      "op": "compose",
+      "phase": "start",
+      "target": "draft"
+    },
+    {
+      "op": "compose",
+      "phase": "update",
+      "target": "draft",
+      "value": "\u306b\u307b"
+    },
+    {
+      "op": "leave",
+      "await": false
+    },
+    {
+      "op": "settle",
+      "ms": 300
+    },
+    {
+      "op": "compose",
+      "phase": "end",
+      "target": "draft",
+      "value": "\u65e5\u672c"
+    },
+    {
+      "op": "settle",
+      "ms": 300
+    },
+    {
+      "op": "leave"
+    }
+  ],
+  "requires": [
+    "compose-start"
+  ],
+  "expect": {}
+}

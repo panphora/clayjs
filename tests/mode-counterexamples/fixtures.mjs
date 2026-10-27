@@ -94,6 +94,43 @@ const DRAFT_PAGE = {
   attrs: { "visitor-drafts": "draft-slot-1", autosave: "" },
 };
 
+// A page whose controlled attributes are hand-authored in the order a document may hold
+// them: the switch's own attribute first and the browser's spelling after it.
+const CONTROLLED_PAGE = {
+  params: "exclude=richclay,source",
+  body:
+    '<article data-kind="note">' +
+    '<h1 id="title" editmode:contenteditable>Untitled</h1>' +
+    '<div id="content" editmode:contenteditable inert-contenteditable="plaintext-only">start</div>' +
+    '<input id="locked" viewmode:disabled disabled="disabled" value="v">' +
+    '<textarea id="ro" viewmode:readonly readonly="">r</textarea>' +
+    '<button id="act" editmode:onclick inert-onclick="window.__acted=(window.__acted||0)+1">Act</button>' +
+    '<style editmode:resource type="inert/text/css">.x{color:red}</style>' +
+    '</article>',
+  path: "/notes.html",
+};
+
+const SEO_HEAD = '<title>Notes</title><meta name="description" content="About notes"><link rel="canonical" href="https://example.com/notes.html">';
+
+// The SEO sheet over a page whose head it edits, and the same page with the unsent plugin,
+// which gives the sheet's inputs a registry of their own.
+const SEO_PAGE = {
+  params: "plugins=menu&exclude=richclay,source",
+  head: SEO_HEAD,
+  body: '<article><h1 id="title">Untitled</h1><div id="content">start</div></article>',
+  path: "/notes.html",
+};
+
+const SEO_UNSENT_PAGE = { ...SEO_PAGE, params: "plugins=menu,unsent&exclude=richclay,source" };
+
+// A page the host serves as its own bytes, so the entry can install a source map over it.
+const SOURCE_PAGE = {
+  params: "exclude=richclay",
+  head: '<title>Notes</title>',
+  body: '<article data-kind="note"><h1 id="title">Untitled</h1>\n<div id="content">start</div>\n<p id="extra">extra text</p></article>',
+  path: "/notes.html",
+};
+
 export const FIXTURES = {
   // A live-declared document that boots in view and saves into the host.
   "persist-host": { page: PAGE, lanes: false },
@@ -110,6 +147,19 @@ export const FIXTURES = {
   "draft-host": { page: DRAFT_PAGE, lanes: false, owner: false, storage: "failing" },
   // The same draft page with a store that keeps what it is given: the success path.
   "draft-keeps": { page: DRAFT_PAGE, lanes: false, owner: false },
+  // The same draft page with a store a case can turn from keeping into throwing and back.
+  "draft-switch": { page: DRAFT_PAGE, lanes: false, owner: false, storage: "switchable" },
+  // Hand-authored controlled attributes, in the positions a document may put them.
+  "attrs-host": { page: CONTROLLED_PAGE, lanes: false },
+  // The SEO sheet over a head it edits, and the same with the unsent plugin.
+  "seo-host": { page: SEO_PAGE, lanes: false, host: { answerMeta: true } },
+  "seo-unsent-host": { page: SEO_UNSENT_PAGE, lanes: false, host: { answerMeta: true } },
+  // A host that serves the page its own bytes, so the source map installs over them.
+  "source-served": {
+    page: SOURCE_PAGE,
+    lanes: false,
+    host: { served: { path: SOURCE_PAGE.path, html: servedDocument(SOURCE_PAGE), etag: "etag-1", contentType: "text/html; charset=utf-8" } },
+  },
   // The page editor: plugins=page over a tag and an article, on a host that advertises
   // the `page` extension and serves the document it saved.
   "page-host": {
@@ -313,7 +363,7 @@ export function createHost(record, { extensions = ["conditional"], answerMeta = 
     }
     if (served && method === "GET" && url.pathname === served.path) {
       if (servedHtml === null) return notFound();
-      const answer = jsonResponse(200, servedHtml, { etag: served.etag });
+      const answer = jsonResponse(200, servedHtml, served.contentType ? { etag: served.etag, "content-type": served.contentType } : { etag: served.etag });
       send({ kind: "document", method, path: url.pathname, body: null, ifMatch: null, status: answer.status, etag: served.etag });
       return answer;
     }
@@ -395,7 +445,7 @@ export function createResourceCounter() {
  * a case installs its fake clock after the page is up.
  */
 export async function bootPage(fixture, { mode, host, resetModules, served = null }) {
-  const spec = FIXTURES[fixture];
+  const spec = typeof fixture === "string" ? FIXTURES[fixture] : fixture;
   // A reload is served the bytes the host last accepted, so the page boots from those
   // rather than from the fixture's authored copy.
   const page = served === null ? spec.page : (() => {
@@ -425,6 +475,29 @@ export async function bootPage(fixture, { mode, host, resetModules, served = nul
     const failing = { getItem: () => null, setItem: () => { throw new Error("QuotaExceededError"); }, removeItem: () => {}, clear: () => {} };
     for (const owner of [window, globalThis]) {
       Object.defineProperty(owner, "localStorage", { configurable: true, writable: true, value: failing });
+    }
+  }
+  if (spec.storage === "switchable") {
+    const real = window.localStorage;
+    const flag = { mode: "ok" };
+    window.__storageSwitch = flag;
+    const stub = {
+      getItem: (key) => (flag.mode === "off" ? null : real.getItem(key)),
+      setItem: (key, value) => {
+        if (flag.mode !== "ok") throw new Error("QuotaExceededError");
+        real.setItem(key, value);
+      },
+      removeItem: (key) => {
+        if (flag.mode === "ok") real.removeItem(key);
+      },
+      clear: () => real.clear(),
+      key: (index) => real.key(index),
+      get length() {
+        return real.length;
+      },
+    };
+    for (const owner of [window, globalThis]) {
+      Object.defineProperty(owner, "localStorage", { configurable: true, writable: true, value: stub });
     }
   }
   const root = document.documentElement;

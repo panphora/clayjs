@@ -18,6 +18,8 @@
 
 const PROPERTIES = [
   "conservation",
+  "liveness",
+  "enter-refused",
   "zero-implicit-writes",
   "positive-control",
   "bytes-etag-pairing",
@@ -39,11 +41,13 @@ const accepted = (run) => saves(run).filter((call) => call.status === 200);
 
 const admittedOf = (run) => (run?.trace ?? []).filter((event) => event.kind === "input-admitted").map((event) => event.detail);
 
-// Whether HTML the host accepted still carries this exact value: as text somewhere, or as
-// a control's own value.
+// Whether HTML the host accepted still carries this exact value: as text somewhere in the
+// body or the head, or as a control's own value. The head is where a page's title and
+// description live, and a sheet that edits them saves them there.
 function carries(html, value) {
   const parsed = parseHtml(html);
   if ((parsed.body?.textContent ?? "").includes(value)) return true;
+  if ((parsed.head?.textContent ?? "").includes(value)) return true;
   return [...parsed.querySelectorAll("input, textarea")].some(
     (element) => element.getAttribute("value") === value || element.textContent === value,
   );
@@ -66,10 +70,50 @@ function lastDraftWord(run) {
   return words.length ? words[words.length - 1].kind : null;
 }
 
+// The element a target was left holding: an id, a field with a registry of its own, or --
+// where the page's own editor owns the element and it has no id -- the selector the step
+// reached it with.
 function fieldFor(result, entry) {
   const fields = result?.fields ?? [];
-  if (entry.via === "unsent") return fields.find((field) => field.unsent === entry.target) ?? null;
-  return fields.find((field) => field.id === entry.target && field.unsent === null) ?? null;
+  const targets = result?.targets ?? [];
+  if (entry.via === "unsent") {
+    return fields.find((field) => field.unsent === entry.target) ?? targets.find((field) => field.unsent === entry.target) ?? null;
+  }
+  return (
+    fields.find((field) => field.id === entry.target && field.unsent === null) ??
+    targets.find((field) => field.target === entry.target && field.unsent === null) ??
+    null
+  );
+}
+
+// A control that throws away what the person typed there, by design: the sheet it belongs
+// to is named by the control's own class, and a click on it discards every value the
+// person had put in that sheet before the click. What they closed away is not owed to
+// them, and no save may be asked to carry it.
+const DISCARD_CONTROLS = new Map([[".clay-seo-x", ".clay-seo"]]);
+
+// A click on a sheet's own apply control writes what the sheet holds into the page, head
+// and all. The value is then in the document itself, so it is not waiting for a save to
+// take it anywhere -- as long as the page really carries it.
+const APPLY_CONTROLS = new Map([[".clay-seo-apply", ".clay-seo"]]);
+
+function committed(run, entry) {
+  if (!carries(run.result?.documentHtml, entry.value)) return false;
+  return (run.trace ?? []).some((event) => {
+    if (event.kind !== "click" || event.seq < entry.seq) return false;
+    const sheet = APPLY_CONTROLS.get(event.detail.target);
+    return sheet !== undefined && String(entry.target).startsWith(sheet);
+  });
+}
+
+function discarded(run, entry) {
+  return (run.trace ?? []).some((event) => {
+    if (event.kind !== "click") return false;
+    const sheet = DISCARD_CONTROLS.get(event.detail.target);
+    if (!sheet) return false;
+    if (event.seq < entry.seq) return false;
+    return String(entry.target).startsWith(sheet);
+  });
 }
 
 function lastRefusal(run) {
@@ -81,12 +125,13 @@ function lastRefusal(run) {
 // that has to survive, and the text it replaced is not owed to anyone.
 function standingAdmissions(run) {
   const standing = new Map();
-  for (const entry of admittedOf(run)) standing.set(`${entry.via ?? "input"}:${entry.target}`, entry);
+  const events = (run?.trace ?? []).filter((event) => event.kind === "input-admitted");
+  for (const event of events) standing.set(`${event.detail.via ?? "input"}:${event.detail.target}`, { ...event.detail, seq: event.seq });
   return [...standing.values()];
 }
 
 function conservation(run, fail) {
-  const admitted = standingAdmissions(run);
+  const admitted = standingAdmissions(run).filter((entry) => !discarded(run, entry));
   if (!admitted.length) return;
 
   // A draft page's save is a write into the visitor's own store and never a request to a
@@ -106,7 +151,9 @@ function conservation(run, fail) {
   }
 
   const last = accepted(run).at(-1) ?? null;
-  const outstanding = admitted.filter((entry) => !last || !carries(last.body, entry.value));
+  const outstanding = admitted
+    .filter((entry) => !last || !carries(last.body, entry.value))
+    .filter((entry) => !committed(run, entry));
   if (!outstanding.length) return;
 
   const refusal = lastRefusal(run);
@@ -138,6 +185,43 @@ function conservation(run, fail) {
     } else if (name && !pending.includes(name)) {
       fail("conservation", `the refusal's pending ${JSON.stringify(pending)} does not name "${name}" for "${entry.value}"`);
     }
+  }
+}
+
+// O7, liveness: an exit with nothing left to do must commit. A `save-failed` refusal is
+// the machinery giving up on a save, so it is only a person's own work being in the way
+// when something is still owed: the host's last accepted save does not carry it, or the
+// page's own answer says it is unsaved. Where every value the person left standing is
+// already in that save and the refusal names no pending source, the exit is refused for
+// work that does not exist.
+function liveness(run, fail) {
+  const refusals = (run.trace ?? []).filter(
+    (event) => event.kind === "transition-refused" && event.detail.op === "leave" && event.detail.code === "save-failed",
+  );
+  if (!refusals.length) return;
+  const refusal = refusals[refusals.length - 1].detail;
+  const pending = Array.isArray(refusal.pending) ? refusal.pending : [];
+  if (pending.length) return;
+  const admitted = standingAdmissions(run).filter((entry) => !discarded(run, entry));
+  const last = accepted(run).at(-1) ?? null;
+  const owed = admitted.filter((entry) => !last || !carries(last.body, entry.value)).filter((entry) => !committed(run, entry));
+  if (owed.length) return;
+  fail(
+    "liveness",
+    `the exit was refused "${refusal.code}" with no pending source and nothing owed: the host's last accepted save carries every value the person left, and the page says unsaved=${run.result?.unsaved === true}`,
+  );
+}
+
+// O8, an entry the switch refuses. An entry is the person asking to edit, and a refused
+// one is a page they can no longer edit: the case has to be about that refusal, so it says
+// so in `expect.refuse` (the codes it expects) or the refusal fails the run.
+function enterRefused(json, run, fail) {
+  const expected = Array.isArray(json.expect?.refuse) ? json.expect.refuse : [];
+  for (const event of run.trace ?? []) {
+    if (event.kind !== "transition-refused" || event.detail.op !== "enter") continue;
+    const code = event.detail.code ?? "unknown";
+    if (expected.includes(code)) continue;
+    fail("enter-refused", `the entry was refused "${code}" with pending ${JSON.stringify(event.detail.pending ?? null)} where the case expects no refusal`);
   }
 }
 
@@ -250,7 +334,14 @@ function noGrowth(run, fail) {
  */
 export function judge({ case: json, run, control = null } = {}) {
   if (!run) return { status: "invalid", failures: [{ property: "run", detail: "the driver produced no run" }] };
-  if (run.status === "invalid") return { status: "invalid", failures: [] };
+  // An invalid run is not a verdict, but why it could not be run is still evidence: the
+  // driver's own reasons travel with it.
+  if (run.status === "invalid") {
+    return {
+      status: "invalid",
+      failures: (run.result?.errors ?? []).map((error) => ({ property: "run", detail: `${error.path ?? "case"}: ${error.message ?? error.code ?? "the run did not match the case"}` })),
+    };
+  }
 
   const failures = [];
   const fail = (property, detail) => failures.push({ property, detail });
@@ -259,6 +350,8 @@ export function judge({ case: json, run, control = null } = {}) {
     fail("driver-expect", `${error.path ?? "case"}: ${error.message ?? error.code ?? "the run did not match the case"}`);
   }
   conservation(run, fail);
+  liveness(run, fail);
+  enterRefused(json, run, fail);
   zeroImplicitWrites(json, run, fail);
   positiveControl(json, run, control, fail);
   etagPairing(run, fail);

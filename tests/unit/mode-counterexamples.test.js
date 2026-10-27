@@ -3,6 +3,9 @@
  */
 
 import { readdirSync, readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
 import { runCase } from "../mode-counterexamples/driver.mjs";
 import { judge } from "../mode-counterexamples/oracle.mjs";
 
@@ -16,6 +19,7 @@ import { judge } from "../mode-counterexamples/oracle.mjs";
  * silently.
  */
 
+const ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const DIR = new URL("../mode-counterexamples/cases/", import.meta.url);
 
 function loadCases() {
@@ -88,3 +92,113 @@ test("a positive control with its input removed fails the pair", async () => {
   expect(verdict.status).toBe("failed");
   expect(verdict.failures.map((failure) => failure.property)).toContain("positive-control");
 });
+
+// Round 3's own corpus: the schedules that found the controlled-attribute defects and the
+// nine cases the report classed as oracle bugs or driver limitations. It lives in a
+// subfolder so the corpus above is read exactly as it was, and it is judged the way a
+// round is: one process per case, because a page's lifetime state is the process it runs
+// in and a case that leaves edit never hands it back.
+const ROUND3 = new URL("../mode-counterexamples/cases/round3/", import.meta.url);
+const ROUND3_DIR = fileURLToPath(ROUND3);
+const CLI = path.join(ROOT, "scripts/mode-counterexamples.mjs");
+
+function round3Files() {
+  return readdirSync(ROUND3)
+    .filter((name) => name.endsWith(".json"))
+    .sort();
+}
+
+function round3Verdict(name) {
+  const child = spawnSync(process.execPath, [CLI, "check", "--cases", ROUND3_DIR, "--case-file", path.join(ROUND3_DIR, name), "--json"], {
+    encoding: "utf8",
+    env: { ...process.env, NODE_OPTIONS: [process.env.NODE_OPTIONS, "--experimental-vm-modules"].filter(Boolean).join(" ") },
+  });
+  const line = String(child.stdout ?? "")
+    .split("\n")
+    .reverse()
+    .find((candidate) => candidate.trim().startsWith("["));
+  expect(line).toBeDefined();
+  return JSON.parse(line)[0];
+}
+
+const propertiesOf = (outcome) => (outcome.failures ?? []).map((failure) => failure.property);
+
+// The two product defects round 3 proved, both fixed since: the entry that wrote with
+// nothing typed and locked the page out, and the spelled boolean that left a saved page
+// dirty. Each now passes.
+const DEFECTS = [
+  "entry-write-boolean-order",
+  "entry-write-inert-contenteditable-order",
+  "entry-write-inert-onclick-order",
+  "entry-write-source-mapped",
+  "entry-write-autosave-boolean-order",
+  "entry-lockout-boolean-order",
+  "entry-lockout-autosave",
+  "spelled-boolean-stuck-in-edit",
+  "spelled-readonly-stuck-in-edit",
+  "spelled-boolean-stuck-source-mapped",
+  "spelled-boolean-retry-stays-stuck",
+];
+
+// What the report holds the harness, not the library, to account for: the saved head and
+// selector fields the oracle could not see, the inputs a person discarded, and the
+// composition into an unsent field. None of them may fail now.
+const SETTLED = [
+  "seo-apply-head-conservation",
+  "seo-close-discard-conservation",
+  "seo-pending-selector-target",
+  "seo-unsent-apply-reopen",
+  "seo-unsent-close-reopen",
+  "ime-unsent-compose-target",
+];
+// The two the driver cannot describe a person doing, which must now say so instead of
+// failing on what it typed into a page that was not there.
+const LIMITATIONS = ["ime-late-commit-after-view", "late-source-chunk-failed"];
+// Open: a page whose journal cannot write leaves edit without the text typed just before.
+const OPEN = ["page-pending-selector-target"];
+
+test("round 3\u0027s corpus is the round\u0027s own, in its own folder", () => {
+  const files = round3Files();
+  expect(files.length).toBe(21);
+  const ids = files.map((name) => JSON.parse(readFileSync(new URL(name, ROUND3), "utf8")).id);
+  for (const id of [...DEFECTS, ...SETTLED, ...LIMITATIONS, ...OPEN]) expect(ids).toContain(id);
+  // The corpus the checks read above is unchanged by the subfolder.
+  expect(readdirSync(DIR).filter((name) => name.endsWith(".json")).length).toBe(cases.length);
+});
+
+test("round 3\u0027s defect candidates pass now that both defects are fixed", () => {
+  const lines = [];
+  const failing = [];
+  for (const id of DEFECTS) {
+    const outcome = round3Verdict(`${id}.json`);
+    lines.push(`${id}: ${outcome.status} ${JSON.stringify(propertiesOf(outcome))}`);
+    if (outcome.status !== "passed") failing.push(id);
+  }
+  console.log(lines.join("\n"));
+  expect(failing).toEqual([]);
+}, 300000);
+
+test("the open page case still fails on conservation until its fix lands", () => {
+  for (const id of OPEN) {
+    const outcome = round3Verdict(`${id}.json`);
+    expect(outcome.status).toBe("failed");
+    expect(propertiesOf(outcome)).toContain("conservation");
+  }
+}, 300000);
+
+test("round 3\u0027s oracle bugs and driver limitations no longer fail", () => {
+  const lines = [];
+  const wrong = [];
+  for (const id of SETTLED) {
+    const outcome = round3Verdict(`${id}.json`);
+    lines.push(`${id}: ${outcome.status} ${(outcome.failures ?? []).map((failure) => failure.detail).join("; ")}`);
+    if (outcome.status !== "passed") wrong.push(id);
+  }
+  for (const id of LIMITATIONS) {
+    const outcome = round3Verdict(`${id}.json`);
+    lines.push(`${id}: ${outcome.status} ${(outcome.failures ?? []).map((failure) => failure.detail).join("; ")}`);
+    if (outcome.status !== "invalid" || !(outcome.failures ?? []).length) wrong.push(id);
+  }
+  console.log(lines.join("\n"));
+  expect(wrong).toEqual([]);
+}, 300000);

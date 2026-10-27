@@ -1,0 +1,39 @@
+{
+  "schema": 1,
+  "id": "entry-lockout-boolean-order",
+  "fixture": "persist-host",
+  "boot": {
+    "mode": "view",
+    "live": true,
+    "destination": "host"
+  },
+  "page": {
+    "body": "<article><h1 id=\"title\">Untitled</h1><input id=\"locked\" viewmode:disabled=\"\" disabled=\"\" value=\"v\"></article>"
+  },
+  "steps": [
+    {
+      "op": "enter"
+    },
+    {
+      "op": "leave"
+    },
+    {
+      "op": "enter"
+    },
+    {
+      "op": "input",
+      "target": "title",
+      "value": "Second session"
+    },
+    {
+      "op": "leave"
+    }
+  ],
+  "requires": [
+    "transition"
+  ],
+  "expect": {
+    "mode": "view",
+    "writes": 1
+  }
+}

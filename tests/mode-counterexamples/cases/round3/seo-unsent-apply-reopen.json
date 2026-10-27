@@ -1,0 +1,55 @@
+{
+  "schema": 1,
+  "id": "seo-unsent-apply-reopen",
+  "fixture": "seo-unsent-host",
+  "boot": {
+    "mode": "view",
+    "live": true,
+    "destination": "host"
+  },
+  "steps": [
+    {
+      "op": "settle",
+      "ms": 100
+    },
+    {
+      "op": "enter"
+    },
+    {
+      "op": "settle"
+    },
+    {
+      "op": "click",
+      "target": "[data-menu-id=\"seo\"]"
+    },
+    {
+      "op": "settle",
+      "ms": 300
+    },
+    {
+      "op": "input",
+      "target": ".clay-seo-input[data-key=\"title\"]",
+      "value": "Applied one"
+    },
+    {
+      "op": "click",
+      "target": ".clay-seo-apply"
+    },
+    {
+      "op": "settle",
+      "ms": 2000
+    },
+    {
+      "op": "click",
+      "target": "[data-menu-id=\"seo\"]"
+    },
+    {
+      "op": "settle",
+      "ms": 300
+    }
+  ],
+  "requires": [
+    "click"
+  ],
+  "expect": {}
+}

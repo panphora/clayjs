@@ -1,0 +1,46 @@
+{
+  "schema": 1,
+  "id": "seo-apply-head-conservation",
+  "fixture": "seo-host",
+  "boot": {
+    "mode": "view",
+    "live": true,
+    "destination": "host"
+  },
+  "steps": [
+    {
+      "op": "settle",
+      "ms": 100
+    },
+    {
+      "op": "enter"
+    },
+    {
+      "op": "settle"
+    },
+    {
+      "op": "click",
+      "target": "[data-menu-id=\"seo\"]"
+    },
+    {
+      "op": "settle",
+      "ms": 300
+    },
+    {
+      "op": "input",
+      "target": ".clay-seo-input[data-key=\"title\"]",
+      "value": "Applied title"
+    },
+    {
+      "op": "click",
+      "target": ".clay-seo-apply"
+    },
+    {
+      "op": "leave"
+    }
+  ],
+  "requires": [
+    "click"
+  ],
+  "expect": {}
+}

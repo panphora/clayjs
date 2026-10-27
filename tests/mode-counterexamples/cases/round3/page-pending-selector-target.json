@@ -1,0 +1,33 @@
+{
+  "schema": 1,
+  "id": "page-pending-selector-target",
+  "fixture": "page-host",
+  "boot": {
+    "mode": "edit",
+    "live": true,
+    "destination": "host"
+  },
+  "steps": [
+    {
+      "op": "settle",
+      "ms": 200
+    },
+    {
+      "op": "input",
+      "target": ".ProseMirror",
+      "value": "First edit"
+    },
+    {
+      "op": "leave",
+      "await": false
+    },
+    {
+      "op": "settle",
+      "ms": 20000
+    }
+  ],
+  "requires": [
+    "input-admitted"
+  ],
+  "expect": {}
+}
