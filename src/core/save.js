@@ -19,7 +19,8 @@ import {
   addDocumentTransform,
   isSaveInProgress,
   saveFateIsUnknown,
-  withKeepalive
+  withKeepalive,
+  setExitSave
 } from "./save-core.js";
 import { captureForComparisonAndDirty, captureForSaveAndComparison, captureForDirtyCheck, captureSaveClone, releaseCaptureArtifact } from "./snapshot.js";
 import { saveLimit, saveLimits, inspectSaveSize } from "./save-size.js";
@@ -1115,11 +1116,14 @@ function savePagePermitted(permit, callback = () => {}) {
 /**
  * Force-save the current page (skips dirty check).
  *
+ * `permit` is the exit's own save permit: the one write a closed session still admits.
+ * Internal to the exit flush, which no page can reach.
+ *
  * @param {Function} callback - Optional callback for custom handling
  * @returns {Promise<{msg: string, msgType: string}>}
  */
-export function savePageForce(callback = () => {}, { quietConflict = false, pageFormatFloor = 0 } = {}) {
-  if (capabilityPending) return capabilityKnown.then(() => savePageForce(callback, { quietConflict, pageFormatFloor }));
+export function savePageForce(callback = () => {}, { quietConflict = false, pageFormatFloor = 0, permit = null } = {}) {
+  if (capabilityPending) return capabilityKnown.then(() => savePageForce(callback, { quietConflict, pageFormatFloor, permit }));
   return new Promise((resolve) => {
     if (!isEditMode && !window.clay?.testMode) {
       const skipped = skipped_('Not in edit mode');
@@ -1128,8 +1132,9 @@ export function savePageForce(callback = () => {}, { quietConflict = false, page
     }
 
     // A forced save is still an ordinary one for admission: only the exit's own flush
-    // carries the permit.
-    if (!savesAdmitted()) {
+    // carries the permit. A revoked permit is refused even where admission has reopened,
+    // so a continuation the exit already gave up on cannot write later input.
+    if (!savesAdmitted(permit) || (permit && !permitHolds(permit))) {
       const skipped = sessionClosed('Save session is quiesced');
       callback(skipped);
       return resolve(skipped);
@@ -1154,7 +1159,7 @@ export function savePageForce(callback = () => {}, { quietConflict = false, page
     }
 
     const prepare = window.clay?.source?.ensureForSave?.();
-    if (prepare) return prepare.then(() => resolve(savePageForce(callback, { quietConflict, pageFormatFloor })));
+    if (prepare) return prepare.then(() => resolve(savePageForce(callback, { quietConflict, pageFormatFloor, permit })));
 
     const wasOffline = !navigator.onLine;
     if (wasOffline) {
@@ -1195,6 +1200,11 @@ export function savePageForce(callback = () => {}, { quietConflict = false, page
     }, { capture, pageFormatFloor });
   });
 }
+
+// The exit's own checkpoint, through the slot save-core holds for it: a page exit has
+// to save this tab's own input while admission is closed, and only a save minted here
+// can do it. Set at load, read only by the live plugin's exit flush.
+setExitSave((permit) => savePageForce(() => {}, { permit }));
 
 // Resolve on the next save that settles, or reject once the deadline has passed.
 // Every settled state is one, not just success: a save that failed is an answer about

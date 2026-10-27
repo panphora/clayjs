@@ -93,6 +93,7 @@ async function open({ edit = null, blocks = BLOCKS, roomEdits = null, extensions
   }));
 
   await jest.unstable_mockModule("../../../src/core/save.js", () => ({
+    savesAdmitted: () => true,
     savePageForce: async () => ({ ok: true, msgType: "success" }),
     savePage: async () => ({ ok: true, msgType: "success" }),
     savePageThrottled: () => {},

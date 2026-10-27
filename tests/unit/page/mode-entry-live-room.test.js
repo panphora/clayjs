@@ -302,3 +302,75 @@ test("in a live room with no writer yet, an adopting entry frames its claim at p
 }, 16000);
 
 
+
+// An editable session in the room, the way the commit that enters edit leaves it: the
+// page staged over the represented file, both leases open, nothing written yet.
+async function openEditInRoom(harness) {
+  const reader = await harness.openReader(FILE(articleHtml()));
+  const handoff = await reader.prepareHandoff({});
+  const liveLease = harness.liveWriterParticipant().prepare(context({ represented: handoff.represented, reader: handoff }));
+  const lease = harness.pageParticipant().prepare(context({ represented: handoff.represented, reader: handoff }));
+  await lease.ready;
+  const facts = await import("../../../src/core/is-edit-mode.js");
+  const save = await import("../../../src/core/save.js");
+  facts.commitModeFacts({ mode: "edit", isEditMode: true });
+  save.adoptEntryBaseline({ represented: handoff.represented });
+  liveLease.enable();
+  lease.enable();
+  return { lease, liveLease, facts };
+}
+
+test("a tab holding nothing of its own leaves the live room without a save or a relay request", async () => {
+  // The room's writer election and the file's checkpoint are not this leave's business:
+  // a tab that typed nothing owes the file nothing, so the exit writes nothing at all.
+  const harness = await load({
+    head: tagHtml(),
+    roomStores: { page: { value: seedValue(BLOCKS), ephemeral: false, last: 0, landed: 0 } },
+  });
+  // Another tab is the room's writer: the leave is still this tab's own conditional
+  // save of its own input, not a background writer-election write.
+  harness.room.writer = "peer-tab";
+  const session = await openEditInRoom(harness);
+  try {
+    const transition = await import("../../../src/core/mode-transition.js");
+    session.lease.quiesce();
+    const result = await transition.runSaveBarrier({ timeoutMs: 8000 });
+    expect(result.ok).toBe(true);
+    expect(harness.saves).toHaveLength(0);
+    expect(harness.storeOf("page").pending).toEqual([]);
+  } finally {
+    session.lease.dispose();
+    session.liveLease.dispose();
+    session.facts.commitModeFacts({ mode: "view", isEditMode: false });
+  }
+}, 20000);
+
+
+test("own typing while another tab is the writer never leaves as a clean unsaved page", async () => {
+  // The leave is an explicit conditional save of this tab's own work, so the writer
+  // election does not decide it: what it may not do is leave in view with the typing
+  // only here. This room never answers the lane, so the checkpoint cannot be taken and
+  // the exit has to refuse.
+  const harness = await load({
+    head: tagHtml(),
+    roomStores: { page: { value: seedValue(BLOCKS), ephemeral: false, last: 0, landed: 0 } },
+  });
+  harness.room.writer = "peer-tab";
+  const session = await openEditInRoom(harness);
+  try {
+    const view = harness.page.view;
+    view.dispatch(view.state.tr.insertText(" there", view.state.doc.content.size - 1));
+
+    const transition = await import("../../../src/core/mode-transition.js");
+    session.lease.quiesce();
+    const result = await transition.runSaveBarrier({ timeoutMs: 800 });
+    expect(result.ok).toBe(false);
+    expect(view.state.doc.textContent).toContain("Hello there");
+    expect(result.ok && harness.saves.length === 0).toBe(false);
+  } finally {
+    session.lease.dispose();
+    session.liveLease.dispose();
+    session.facts.commitModeFacts({ mode: "view", isEditMode: false });
+    await flush();
+  }
+}, 20000);

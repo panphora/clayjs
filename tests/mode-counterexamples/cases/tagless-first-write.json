@@ -10,6 +10,5 @@
     { "op": "settle", "ms": 200 }
   ],
   "requires": ["input-admitted", "save-request-sent"],
-  "expect": { "mode": "view", "writes": 1 },
-  "knownFailing": "invalid: a tagless page's first write follows typing in the page editor, and the driver has no op that types into a ProseMirror document"
+  "expect": { "mode": "view" }
 }

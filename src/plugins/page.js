@@ -6,7 +6,7 @@ import { savePageForce, holdAllSaves, releaseAllSaves, suspendAutosave, resumeAu
 import { setSaveHeader, onSaveAccepted } from "../core/save-core.js";
 import { lastSeenEtag, representedEtag, recordEtag } from "../core/etag.js";
 import { captureForSaveAndComparison } from "../core/snapshot.js";
-import { storeOf, stageStore, closeStore, checkpointWithin, requestCheckpoint, fastLane, pageLaneReady, pageWriterReady, registerPageCheckpoints } from "./live.js";
+import { storeOf, stageStore, closeStore, checkpointWithin, requestCheckpoint, requestExitCheckpoint, fastLane, pageLaneReady, pageWriterReady, registerPageCheckpoints } from "./live.js";
 import { serializeLive } from "../live/ops.js";
 import { parseJsonRelaxed } from "../vendor/hyper-morph-json.vendor.js";
 import { saveStateFor, pageStateFor, BLOCKED_TEXT, RETRY_TEXT, downloadPageCopy, downloadSnapshot, copyPageText } from "../page/save-states.js";
@@ -939,6 +939,7 @@ function mergeRepresentedPage(store, value) {
       ownedTokens: identity.owned,
       checkpointWithin,
       requestCheckpoint,
+      requestExitCheckpoint: (options) => requestExitCheckpoint({ name: store.name, ...options }),
       journal,
       // An exit holds admission closed, which is the only time this tab's own input
       // still owing the file holds the leave: outside one, the binding reports what it

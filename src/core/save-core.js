@@ -1063,3 +1063,17 @@ export function replacePageWith(url, callback = () => {}) {
       });
   });
 }
+
+// The exit's own page checkpoint, published by save.js and read by the live plugin's
+// exit flush. It lives here because save.js is mocked by name in most page suites,
+// while this module is not: the slot lets an exit save a page without either module
+// importing the other's internals.
+let exitSaveFn = null;
+
+export function setExitSave(fn) {
+  exitSaveFn = fn;
+}
+
+export function exitSave() {
+  return exitSaveFn;
+}

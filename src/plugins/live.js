@@ -9,7 +9,7 @@ import { contains, parseBy, frameSet, descendants, unionRanges, formatBy } from 
 import { createStore } from "../live/store.js";
 import { serializeLive, stampOf, parseStamp, textHash } from "../live/ops.js";
 import { capturePageState, onSnapshot } from "../core/snapshot.js";
-import { onSaveAccepted, onSaveAttempt, onSaveOutcome, isSaveInProgress } from "../core/save-core.js";
+import { onSaveAccepted, onSaveAttempt, onSaveOutcome, isSaveInProgress, saveFateIsUnknown, exitSave } from "../core/save-core.js";
 import { savePageForce, baselineSettled, isSaveConflicted, autosaveIsSuspended } from "../core/save.js";
 import { withKeepalive } from "../core/save-core.js";
 import { isEditMode } from "../core/is-edit-mode.js";
@@ -1425,6 +1425,54 @@ export function fastLane() {
 // writer saves, so in other tabs this changes nothing.
 export function checkpointWithin(ms) {
   checkpoints.within(ms);
+}
+
+// The exit's own checkpoint: this tab's page input, saved once, under the permit the
+// exit minted and inside its deadline. It is not the background checkpoint: no timer is
+// armed and writer election is untouched, because a leave is an explicit save of this
+// tab's work, like the force save behind Cmd+S.
+//
+// One attempt per exit. A caller whose page input is still unconfirmed gets the answer
+// that names it, never a second write: an expired exit must not send anything later.
+export async function requestExitCheckpoint({ name, needsSave, permit, deadline, signal = null, keepalive = false }) {
+  const over = () => signal?.aborted || Date.now() >= deadline;
+  // Abortable, and it clears its own timer, so nothing is left waiting after the exit.
+  const pause = () => new Promise((resolve) => {
+    const done = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", done);
+      resolve();
+    };
+    const timer = setTimeout(done, 5);
+    signal?.addEventListener("abort", done, { once: true });
+  });
+  const failed = (code) => ({ ok: false, code });
+  for (;;) {
+    if (over()) return failed("timeout");
+    if (!needsSave()) return { ok: true };
+    if (isSaveConflicted()) return failed("conflict");
+    if (saveFateIsUnknown() || historyPending()) return failed("save-unknown");
+    const entry = entries.get(name);
+    if (!entry) return failed("disposed");
+    if (!baselineSettled() || isSaveInProgress()) {
+      await pause();
+      continue;
+    }
+    // A fast capture holds the room's value, so this tab's own ops have to reach the
+    // room before the capture is taken.
+    if (entry.store.handle.status.mode === "fast" && entry.store.pending.length) {
+      fast?.release(name);
+      await pause();
+      continue;
+    }
+    if (over()) return failed("timeout");
+    const save = exitSave();
+    if (!save) return failed("checkpoint-failed");
+    const result = await withKeepalive(keepalive, () => save(permit));
+    if (over()) return failed("timeout");
+    if (!result?.ok) return failed(result?.code ?? "checkpoint-failed");
+    return needsSave() ? failed("page-not-checkpointed") : { ok: true };
+  }
 }
 
 // Resolves { ok: true } once the file holds every live change this tab knows

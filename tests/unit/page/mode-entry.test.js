@@ -126,6 +126,10 @@ async function load({
   const sources = [];
   const handlersRef = { h: null };
   const room = { epoch: "e1", seq: 0, writer: null, stores: clone(roomStores) };
+  // A save the host does not answer yet, so a case can put one on the wire and decide
+  // when, or whether, it is answered.
+  const holds = [];
+  const releaseHeld = () => { for (const resume of holds.splice(0)) resume(); };
 
   await jest.unstable_mockModule("../../../src/core/host-meta.js", () => ({
     hostMeta: async () => ({ spec: 1, extensions, document: {} }),
@@ -184,8 +188,10 @@ async function load({
     if ((options?.method ?? "GET") !== "POST") {
       return { ok: false, status: 404, statusText: "Not Found", headers: { get: () => null }, text: async () => "" };
     }
-    const reply = answer(saves.length);
+    const reply = await answer(saves.length);
+    if (reply?.throw) throw reply.throw;
     saves.push({ url: String(url), options, headers: options?.headers ?? {}, body: String(options?.body ?? "") });
+    if (reply?.hold) await new Promise((resolve) => holds.push(resolve));
     const status = reply.status ?? 200;
     const headers = reply.headers ?? {};
     return {
@@ -226,6 +232,7 @@ async function load({
     room,
     sources,
     openReader,
+    releaseHeld,
   };
 }
 
@@ -671,4 +678,251 @@ test("the exit of an explicit edit boot adopts its install and ends the editor",
   // The accepted page is what the exit leaves: the article the save wrote.
   expect(article().textContent).toContain("Hello there");
   expect(harness.ownerOf(article())).toBe(null);
+});
+
+// An editable session over the represented file, the way the commit that enters edit
+// leaves it: the editor open over the page, the entry baseline adopted, no write yet.
+async function openEdit(harness) {
+  const facts = await import("../../../src/core/is-edit-mode.js");
+  const { adoptEntryBaseline } = await import("../../../src/core/save.js");
+  const reader = await harness.openReader(FILE(articleHtml()));
+  const handoff = await reader.prepareHandoff({});
+  const lease = harness.pageParticipant().prepare(context({ represented: handoff.represented, reader: handoff }));
+  await lease.ready;
+  facts.commitModeFacts({ mode: "edit", isEditMode: true });
+  adoptEntryBaseline({ represented: handoff.represented });
+  lease.enable();
+  return { lease, facts };
+}
+
+// The exit: input closes, then the barrier runs under its own permit.
+async function leave(lease, timeoutMs = 8000) {
+  lease.quiesce();
+  const transition = await import("../../../src/core/mode-transition.js");
+  return transition.runSaveBarrier({ timeoutMs });
+}
+
+test("the exit saves this tab's own typing under its permit and leaves", async () => {
+  const harness = await load();
+  const { lease, facts } = await openEdit(harness);
+  try {
+    const view = harness.page.view;
+    view.dispatch(view.state.tr.insertText(" there", view.state.doc.content.size - 1));
+    expect(harness.storeOf("page").pending.length).toBeGreaterThan(0);
+
+    const result = await leave(lease);
+    expect(result.ok).toBe(true);
+    // One page checkpoint, and it carries the typing: the file-mode store's own pending
+    // ops are in the capture that produced these bytes.
+    expect(harness.saves).toHaveLength(1);
+    expect(harness.saves[0].body).toContain("Hello there");
+    expect(harness.storeOf("page").pending).toEqual([]);
+    const unsaved = await import("../../../src/lib/unsaved-state.js");
+    expect(unsaved.pendingIds()).toEqual([]);
+  } finally {
+    lease.dispose();
+    facts.commitModeFacts({ mode: "view", isEditMode: false });
+  }
+});
+
+test("a leave with nothing of this tab's own writes nothing", async () => {
+  const harness = await load();
+  const { lease, facts } = await openEdit(harness);
+  try {
+    const result = await leave(lease);
+    expect(result.ok).toBe(true);
+    expect(harness.saves).toHaveLength(0);
+    expect(harness.sent).toHaveLength(0);
+  } finally {
+    lease.dispose();
+    facts.commitModeFacts({ mode: "view", isEditMode: false });
+  }
+});
+
+test("a refused exit checkpoint names the page, keeps the text and sends nothing later", async () => {
+  const harness = await load({ answer: () => ({ status: 403, body: { msg: "Forbidden" } }) });
+  const { lease, facts } = await openEdit(harness);
+  try {
+    const view = harness.page.view;
+    view.dispatch(view.state.tr.insertText(" there", view.state.doc.content.size - 1));
+
+    const result = await leave(lease);
+    expect(result.ok).toBe(false);
+    expect(result.pending).toContain("page:live");
+    // The text is still this tab's: nothing was acknowledged and nothing was dropped.
+    expect(harness.storeOf("page").pending.length).toBeGreaterThan(0);
+    expect(harness.page.view).toBeTruthy();
+
+    // No restart of the save after the refusal, and none on the next turn of the clock.
+    const after = harness.saves.length;
+    await sleep(200);
+    expect(harness.saves).toHaveLength(after);
+    expect(harness.page.view.state.doc.textContent).toContain("Hello there");
+  } finally {
+    lease.dispose();
+    facts.commitModeFacts({ mode: "view", isEditMode: false });
+  }
+});
+
+test("a 412 refuses the leave as a conflict and keeps the text", async () => {
+  const harness = await load({ answer: () => ({ status: 412, body: { msg: "Changed" } }) });
+  const { lease, facts } = await openEdit(harness);
+  try {
+    const view = harness.page.view;
+    view.dispatch(view.state.tr.insertText(" there", view.state.doc.content.size - 1));
+
+    const result = await leave(lease);
+    expect(result.ok).toBe(false);
+    expect(result.code).toBe("conflict");
+    expect(harness.saves).toHaveLength(1);
+    expect(harness.page.view.state.doc.textContent).toContain("Hello there");
+    expect(harness.storeOf("page").pending.length).toBeGreaterThan(0);
+  } finally {
+    lease.dispose();
+    facts.commitModeFacts({ mode: "view", isEditMode: false });
+  }
+});
+
+test("a lost answer refuses the leave and keeps the text", async () => {
+  const harness = await load({ answer: () => ({ throw: new Error("the network went away") }) });
+  const { lease, facts } = await openEdit(harness);
+  try {
+    const view = harness.page.view;
+    view.dispatch(view.state.tr.insertText(" there", view.state.doc.content.size - 1));
+
+    const result = await leave(lease);
+    expect(result.ok).toBe(false);
+    expect(result.pending).toContain("page:live");
+    expect(harness.page.view.state.doc.textContent).toContain("Hello there");
+    // Not clean: the page still owes the file the typing.
+    const unsaved = await import("../../../src/lib/unsaved-state.js");
+    expect(unsaved.pendingIds()).toContain("page:live");
+  } finally {
+    lease.dispose();
+    facts.commitModeFacts({ mode: "view", isEditMode: false });
+  }
+});
+
+test("an exit checkpoint still in flight is refused within the deadline and sends nothing later", async () => {
+  const harness = await load({ answer: () => ({ status: 200, body: { msg: "Saved", etag: "stamp-2" }, hold: true }) });
+  const { lease, facts } = await openEdit(harness);
+  try {
+    const view = harness.page.view;
+    view.dispatch(view.state.tr.insertText(" there", view.state.doc.content.size - 1));
+
+    const began = Date.now();
+    const result = await leave(lease, 400);
+    expect(result.ok).toBe(false);
+    expect(result.code).toBe("timeout");
+    expect(Date.now() - began).toBeLessThan(1500);
+    expect(harness.saves).toHaveLength(1);
+
+    // The answer arrives after the exit gave up: no second request follows it.
+    harness.releaseHeld();
+    await sleep(150);
+    expect(harness.saves).toHaveLength(1);
+    expect(harness.page.view.state.doc.textContent).toContain("Hello there");
+  } finally {
+    lease.dispose();
+    facts.commitModeFacts({ mode: "view", isEditMode: false });
+  }
+});
+
+test("a continuation the exit already expired on never sends later input", async () => {
+  const harness = await load();
+  const { lease, facts } = await openEdit(harness);
+  // The source map's own preparation, held open: one promise, so a continuation that
+  // asks a second time gets the same answer.
+  let prepared;
+  const gate = new Promise((resolve) => { prepared = resolve; });
+  window.clay.source = { ensureForSave: () => gate };
+  try {
+    const view = harness.page.view;
+    view.dispatch(view.state.tr.insertText(" there", view.state.doc.content.size - 1));
+
+    const result = await leave(lease, 300);
+    expect(result.ok).toBe(false);
+    expect(result.code).toBe("timeout");
+    expect(harness.saves).toHaveLength(0);
+
+    // The exit is over, the session is back and the source finishes preparing afterwards:
+    // the permit it would have saved under is revoked, so nothing is sent.
+    lease.resume();
+    prepared();
+    await tick(20);
+    expect(harness.saves).toHaveLength(0);
+    expect(harness.page.view.state.doc.textContent).toContain("Hello there");
+  } finally {
+    delete window.clay.source;
+    lease.dispose();
+    facts.commitModeFacts({ mode: "view", isEditMode: false });
+  }
+});
+
+test("after a refusal the retry saves the same obligation", async () => {
+  const harness = await load({ answer: (n) => (n === 0 ? { status: 403, body: { msg: "Forbidden" } } : { status: 200, body: { msg: "Saved", etag: "stamp-2" } }) });
+  const { lease, facts } = await openEdit(harness);
+  try {
+    const view = harness.page.view;
+    view.dispatch(view.state.tr.insertText(" there", view.state.doc.content.size - 1));
+
+    const refused = await leave(lease);
+    expect(refused.ok).toBe(false);
+    expect(harness.saves).toHaveLength(1);
+
+    lease.resume();
+    const retried = await leave(lease);
+    expect(retried.ok).toBe(true);
+    expect(harness.saves).toHaveLength(2);
+    expect(harness.saves[1].body).toContain("Hello there");
+    expect(harness.storeOf("page").pending).toEqual([]);
+  } finally {
+    lease.dispose();
+    facts.commitModeFacts({ mode: "view", isEditMode: false });
+  }
+});
+
+test("after an accepted exit a second clean session writes nothing", async () => {
+  const harness = await load();
+  const first = await openEdit(harness);
+  try {
+    const view = harness.page.view;
+    view.dispatch(view.state.tr.insertText(" there", view.state.doc.content.size - 1));
+    const result = await leave(first.lease);
+    expect(result.ok).toBe(true);
+  } finally {
+    first.lease.dispose();
+    first.facts.commitModeFacts({ mode: "view", isEditMode: false });
+  }
+  const written = harness.saves.length;
+  expect(written).toBe(1);
+
+  const second = await openEdit(harness);
+  try {
+    const result = await leave(second.lease);
+    expect(result.ok).toBe(true);
+    expect(harness.saves).toHaveLength(written);
+  } finally {
+    second.lease.dispose();
+    second.facts.commitModeFacts({ mode: "view", isEditMode: false });
+  }
+});
+
+test("a force save whose exit permit was revoked writes nothing", async () => {
+  // Admission is open here: the only thing that refuses this save is the permit its
+  // caller was given and that the exit has since given back. Without that check an
+  // expired exit's continuation writes new input into a page it no longer owns.
+  const harness = await load();
+  const facts = await import("../../../src/core/is-edit-mode.js");
+  const save = await import("../../../src/core/save.js");
+  facts.commitModeFacts({ mode: "edit", isEditMode: true });
+  try {
+    const permit = save.openSavePermit();
+    save.closeSavePermit(permit);
+    const result = await save.savePageForce(() => {}, { permit });
+    expect(result.msgType).toBe("skipped");
+    expect(harness.saves).toHaveLength(0);
+  } finally {
+    facts.commitModeFacts({ mode: "view", isEditMode: false });
+  }
 });

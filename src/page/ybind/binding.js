@@ -4,7 +4,7 @@ import { createBridge, keepViewPos } from "./bridge.js";
 import { createYProvider, entriesOf, dec } from "./provider.js";
 import { createPageFileDebt } from "./file-debt.js";
 
-export function createYPageBinding({ store, ydoc = new Y.Doc(), onNotice = () => {}, ownedTokens = [], authorToken = null, setTimer = setTimeout, clearTimer = clearTimeout, compact, captureTimeout = 500, checkpointWithin = () => {}, requestCheckpoint = null, registerUnsavedState = null, onStopped = () => {}, journal = null, exitClosed = () => false }) {
+export function createYPageBinding({ store, ydoc = new Y.Doc(), onNotice = () => {}, ownedTokens = [], authorToken = null, setTimer = setTimeout, clearTimer = clearTimeout, compact, captureTimeout = 500, checkpointWithin = () => {}, requestCheckpoint = null, requestExitCheckpoint = null, registerUnsavedState = null, onStopped = () => {}, journal = null, exitClosed = () => false }) {
   for (const [, v] of entriesOf(store.value.y)) Y.applyUpdateV2(ydoc, dec(v), NET);
   const pd = createPageDoc(ydoc);
   // The journal is installed before the provider, because the provider is what sees an
@@ -57,8 +57,76 @@ export function createYPageBinding({ store, ydoc = new Y.Doc(), onNotice = () =>
   // a write in flight, a write the store refused, or a room that has not confirmed.
   if (pageJournal) pageJournal.onChange = changed;
 
-  function flush({ timeoutMs = 10_000 } = {}) {
+  // Everything the file or the room still owes: this tab's own input, a store op no
+  // answer has covered, a reconcile, a journal write still in flight.
+  const exitPending = () =>
+    debt.pending() || store.pending.length > 0 || provider.reconcilePending ||
+    Boolean(pageJournal && pageJournal.pending() > (pageJournal.failure ? 1 : 0));
+
+  // The exit's own flush, under the permit the barrier minted.
+  //
+  // A fast store's capture holds the room's value, so this tab's ops travel through the
+  // room first; a file store's capture holds its pending ops as they stand, so the
+  // checkpoint goes while they are still pending and their acceptance is what confirms
+  // them. The checkpoint is asked for only when this tab owes the file input: a tab
+  // holding nothing of its own leaves without making the room's writer save for it.
+  function flushExit({ permit, deadline, keepalive, signal, timeoutMs }) {
+    const end = Math.min(deadline ?? Infinity, Date.now() + timeoutMs);
+    const over = () => signal?.aborted || Date.now() >= end;
+    return new Promise((resolve) => {
+      let done = false, timer = null, wake = null;
+      const waiter = {
+        check() { wake?.(); },
+        finish(result) {
+          if (done) return;
+          done = true;
+          waiters.delete(waiter);
+          clearTimer(timer);
+          signal?.removeEventListener("abort", aborted);
+          resolve(result);
+        },
+      };
+      const aborted = () => waiter.finish({ ok: false, code: "timeout" });
+      const wait = (ms) => new Promise((woken) => {
+        const wakeNow = () => {
+          clearTimer(timer);
+          wake = null;
+          woken();
+        };
+        timer = setTimer(wakeNow, ms);
+        wake = wakeNow;
+      });
+      const run = async () => {
+        provider.settle();
+        if (debt.pending() && requestExitCheckpoint) {
+          const result = await requestExitCheckpoint({
+            permit,
+            deadline: end,
+            signal,
+            keepalive,
+            needsSave: () => debt.pending(),
+          });
+          if (done) return;
+          if (!result?.ok) {
+            waiter.finish(result?.ok === false ? result : { ok: false, code: "checkpoint-failed" });
+            return;
+          }
+        }
+        while (!done) {
+          if (!exitPending()) { waiter.finish({ ok: true }); return; }
+          if (over()) { waiter.finish({ ok: false, code: "timeout" }); return; }
+          await wait(50);
+        }
+      };
+      waiters.add(waiter);
+      signal?.addEventListener("abort", aborted, { once: true });
+      run().catch((error) => waiter.finish({ ok: false, code: "flush-failed", message: error?.message || String(error) }));
+    });
+  }
+
+  function flush({ permit = null, deadline: exitDeadline = null, keepalive = false, signal = null, timeoutMs = 10_000 } = {}) {
     if (disposed) return Promise.resolve({ ok: false, code: "disposed" });
+    if (permit) return flushExit({ permit, deadline: exitDeadline, keepalive, signal, timeoutMs });
     return new Promise((resolve) => {
       const deadline = Date.now() + timeoutMs;
       let done = false, checking = false, checkpointing = false, timer = null;

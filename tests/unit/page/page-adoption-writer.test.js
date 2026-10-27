@@ -45,6 +45,7 @@ async function load({ writer, delayed, failProvenance = false, neverElects = fal
   }));
 
   await jest.unstable_mockModule("../../../src/core/save.js", () => ({
+    savesAdmitted: () => true,
     savePageForce: async () => ({ ok: true, msgType: "success" }),
     savePage: async () => ({ ok: true, msgType: "success" }),
     savePageThrottled: () => {},
