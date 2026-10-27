@@ -5,6 +5,7 @@
 import { state } from "../vendor/prosemirror.vendor.js";
 import { schema } from "./schema.js";
 import { isKey, keyBetween, newId } from "./model.js";
+import { isOpaque, opaqueMark } from "./format-codec.js";
 import { outline, subtreeRange } from "./blocks.js";
 import { asStep } from "./blocksel.js";
 import { pickFiles, hostPlace } from "./media.js";
@@ -67,8 +68,29 @@ export function retype(tr, index, item) {
   return tr.setBlockType(at + 1, at + node.nodeSize - 1, N[item.type], { ...keep, ...(item.attrs || {}) });
 }
 
+// A command this runtime cannot carry out on the content it was given: the
+// document and the clipboard keep what they hold.
+export const REFUSED = Object.freeze({ status: "refused", code: "unsupported-format" });
+
+const opaqueType = opaqueMark([]).type;
+const holdsOpaque = (node) => {
+  let found = false;
+  node.forEach((child) => { if (!found && child.marks.some(isOpaque)) found = true; });
+  return found;
+};
+
+// A block that is not a textblock cannot be turned into anything, and one this
+// runtime cannot rewrite, or whose opaque marks the target type would erase, is
+// refused rather than converted into something that lost them.
+export function canTurnInto(node, item) {
+  if (!node.isTextblock || node.type === N.opaque_block) return false;
+  return !holdsOpaque(node) || N[item.type].allowsMarkType(opaqueType);
+}
+
 export function turnInto(st, index, item) {
-  return st.doc.child(index).isTextblock ? retype(st.tr, index, item) : null;
+  const node = st.doc.child(index);
+  if (!node.isTextblock) return null;
+  return canTurnInto(node, item) ? retype(st.tr, index, item) : REFUSED;
 }
 
 // A new empty paragraph after the block at `index` and its subtree, at the
@@ -165,6 +187,7 @@ export function runItem(view, item, index, remove = null) {
   let tr = st.tr;
   if (remove) tr.delete(remove.from, remove.to);
   const node = tr.doc.child(index);
+  if (node.isTextblock && node.content.size === 0 && !canTurnInto(node, item)) return REFUSED;
   if (item.insert === "divider") tr = insertDivider(st, index, tr);
   else if (node.isTextblock && node.content.size === 0) tr = retype(tr, index, item);
   else {

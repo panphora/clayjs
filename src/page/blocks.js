@@ -6,6 +6,9 @@ import { model, state, view as pmView, commands, history } from "../vendor/prose
 import { schema } from "./schema.js";
 import { REMOTE, newId } from "./model.js";
 import { safeHref, safeSrc } from "./link.js";
+import { flatten, runsOf, unflatten, unitsOf } from "./inline.js";
+import { OPAQUE_MARK, opaqueMark } from "./format-codec.js";
+import { DEFAULTS, MARKS, OPAQUE, envelopeAttrs, envelopeRecord, marksAttrs, marksEntries } from "./projection.js";
 
 const alignOf = (a) => (a === "left" || a === "right" ? a : null);
 
@@ -1045,8 +1048,41 @@ export function flattenPastedHTML(html, doc = globalThis.document) {
 const numberAttr = (value, min = 0) => value !== null && value !== "" && Number.isInteger(+value) && +value >= min ? +value : null;
 const parentAttr = (dom) => dom.getAttribute("data-page-parent") || null;
 
+// A copied opaque mark is not one of the schema's marks, so the rules of the
+// clipboard parser resolve mark names through a view of the schema that holds
+// the internal one; every node a parse builds is the schema's own.
+const opaqueType = opaqueMark([]).type;
+const parseSchema = Object.create(schema, { marks: { value: { ...schema.marks, [OPAQUE_MARK]: opaqueType } } });
+
+// The record of a pasted block envelope, or null when it is not one this
+// runtime may keep: a malformed, oversized or hostile envelope, one naming a
+// known block type, or one with no type of its own. A pasted element with no
+// usable record is plain text, never a record this runtime made up.
+const pastedRecord = (dom) => {
+  let record;
+  try { record = envelopeRecord(dom); } catch { return null; }
+  if (!record || typeof record.t !== "string" || record.t === "opaque_block" || Object.hasOwn(DEFAULTS, record.t)) return null;
+  return record;
+};
+const pastedOpaque = (dom) => {
+  const record = pastedRecord(dom);
+  if (!record) return false;
+  return { raw: record, parent: parentAttr(dom) };
+};
+const pastedOpaqueContent = (dom) => {
+  const record = pastedRecord(dom);
+  if (!record || typeof record.c !== "string" || !record.c) return model.Fragment.empty;
+  const units = unitsOf(record.m, record.c.length);
+  return model.Fragment.from(unflatten(schema, record.c, units, schema.nodes.opaque_block));
+};
+const pastedOpaqueMarks = (dom) => {
+  try { return { entries: marksEntries(dom.getAttribute(MARKS)) }; } catch { return false; }
+};
+
 // The clipboard parser: the schema has toDOM only, so paste gets its own rules.
-export const clipboardParser = new model.DOMParser(schema, [
+export const clipboardParser = new model.DOMParser(parseSchema, [
+  { tag: `div[${OPAQUE}]`, node: "opaque_block", getAttrs: pastedOpaque, getContent: pastedOpaqueContent },
+  { tag: `span[${MARKS}]`, mark: OPAQUE_MARK, getAttrs: pastedOpaqueMarks },
   { tag: "div[data-page-li]", node: "list_item", getAttrs: (d) => ({ kind: d.getAttribute("data-kind") || "bullet", indent: +d.getAttribute("data-indent") || 0, checked: d.getAttribute("data-checked") === "true", parent: parentAttr(d) }) },
   { tag: "div.page-li", node: "list_item", getAttrs: (d) => ({ kind: d.getAttribute("data-kind") || "bullet", indent: +d.getAttribute("data-indent") || 0, checked: d.getAttribute("data-checked") === "true", parent: parentAttr(d) }) },
   { tag: "div[data-page-toggle]", node: "toggle", getAttrs: (d) => ({ id: d.getAttribute("data-page-toggle"), open: d.getAttribute("data-open") === "true", parent: parentAttr(d) }) },
@@ -1136,7 +1172,24 @@ class ClipboardSerializer extends model.DOMSerializer {
   }
 }
 const base = model.DOMSerializer.fromSchema(schema);
-export const clipboardSerializer = new ClipboardSerializer(base.nodes, base.marks);
+
+// A copied block this runtime has no schema for keeps its record in the
+// projection's block envelope, with its own text as the readable fallback, and
+// a copied opaque mark keeps its descriptors in the marks envelope. The record
+// is the one the saved article keeps: its own type, every field it carried, and
+// its text with its marks.
+const opaqueRecord = (node) => {
+  const { t, ...rest } = node.attrs.raw ?? {};
+  const { c, m } = flatten(node.content);
+  if (!c) return { t, ...rest };
+  return { t, ...rest, c, ...(m.some(Boolean) ? { m: runsOf(m) } : {}) };
+};
+const opaqueNode = (node) => ["div", { "data-type": "newer-format", ...envelopeAttrs(opaqueRecord(node)) }, 0];
+const opaqueMarks = (mark) => ["span", marksAttrs(mark.attrs.entries), 0];
+const clipboardNodes = { ...base.nodes, opaque_block: opaqueNode };
+const clipboardMarks = { ...base.marks, [OPAQUE_MARK]: opaqueMarks };
+
+export const clipboardSerializer = new ClipboardSerializer(clipboardNodes, clipboardMarks);
 
 // Several blocks pasted into a closed toggle's summary join its body, so the
 // toggle opens first instead of hiding what was just pasted.

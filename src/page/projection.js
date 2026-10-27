@@ -110,8 +110,17 @@ function entriesOfEnvelope(text) {
   catch (error) { throw error instanceof SyntaxError ? error : new SyntaxError(error.message); }
 }
 
+// The entries of a marks envelope as it arrived, validated by the same reader
+// the article uses.
+export const marksEntries = (text) => entriesOfEnvelope(text);
+
 const envelopeOf = (value) => ` ${OPAQUE}="${ENVELOPE}" ${VALUE}="${escAttr(b64url(canon(value)))}"`;
 const marksEnvelope = (entries) => (entries.length ? ` ${MARKS}="${escAttr(b64url(JSON.stringify(entries)))}"` : "");
+
+// The same two envelopes as attribute maps, for the internal rich clipboard,
+// which writes them onto its own elements instead of an article line.
+export const envelopeAttrs = (record) => ({ [OPAQUE]: ENVELOPE, [VALUE]: b64url(canon(record)) });
+export const marksAttrs = (entries) => ({ [MARKS]: b64url(JSON.stringify(normalizeEntries(entries))) });
 
 // ---- marks ------------------------------------------------------------------
 
@@ -597,6 +606,10 @@ const envelopeAt = (el) => {
   if (text === null) throw new SyntaxError("page: a block envelope holds no value");
   return recordOf(text);
 };
+
+// The record a block envelope carries, validated; null when the element carries
+// no envelope at all.
+export const envelopeRecord = (el) => envelopeAt(el);
 
 // The extras a known element's envelope adds to it.
 const extrasAt = (el) => {
