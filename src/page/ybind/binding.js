@@ -2,14 +2,21 @@ import * as Y from "../../vendor/yjs.vendor.js";
 import { NET, createPageDoc, walk, docOf } from "./core.js";
 import { createBridge, keepViewPos } from "./bridge.js";
 import { createYProvider, entriesOf, dec } from "./provider.js";
+import { createPageFileDebt } from "./file-debt.js";
 
-export function createYPageBinding({ store, ydoc = new Y.Doc(), onNotice = () => {}, ownedTokens = [], authorToken = null, setTimer = setTimeout, clearTimer = clearTimeout, compact, captureTimeout = 500, checkpointWithin = () => {}, requestCheckpoint = null, registerUnsavedState = null, onStopped = () => {}, journal = null }) {
+export function createYPageBinding({ store, ydoc = new Y.Doc(), onNotice = () => {}, ownedTokens = [], authorToken = null, setTimer = setTimeout, clearTimer = clearTimeout, compact, captureTimeout = 500, checkpointWithin = () => {}, requestCheckpoint = null, registerUnsavedState = null, onStopped = () => {}, journal = null, exitClosed = () => false }) {
   for (const [, v] of entriesOf(store.value.y)) Y.applyUpdateV2(ydoc, dec(v), NET);
   const pd = createPageDoc(ydoc);
   // The journal is installed before the provider, because the provider is what sees an
   // update: nothing can reach the document without passing it first. Its own code lives
   // with the recovery channel and is only loaded when a page has one to journal into.
   const pageJournal = journal || null;
+  // The input this tab owes the file, recorded before the provider because the provider is
+  // what sees an update. The notification it fires through is attached once the binding's
+  // own registration exists, so an update that arrives while this function is still
+  // building cannot reach an uninitialized name.
+  let notifyDebt = () => {};
+  const debt = createPageFileDebt({ changed: () => notifyDebt() });
   const provider = createYProvider({
     store,
     ydoc,
@@ -17,6 +24,7 @@ export function createYPageBinding({ store, ydoc = new Y.Doc(), onNotice = () =>
     clearTimer,
     compact,
     onStopped,
+    onLocalUpdate: debt.local,
     journal: { local: (u) => pageJournal?.local(u), dependency: (u) => pageJournal?.dependency(u) },
   });
   const stats = { groups: 0, mismatch: 0, renders: 0, first: null };
@@ -26,7 +34,7 @@ export function createYPageBinding({ store, ydoc = new Y.Doc(), onNotice = () =>
   let checksQueued = false;
   const unsaved = registerUnsavedState?.({
     id: "page:live",
-    isPending: () => store.pending.length > 0 || provider.reconcilePending || Boolean(pageJournal && !pageJournal.failure && pageJournal.pending()),
+    isPending: () => (exitClosed() && debt.pending()) || store.pending.length > 0 || provider.reconcilePending || Boolean(pageJournal && pageJournal.pending() > (pageJournal.failure ? 1 : 0)),
     flush,
   });
   const changed = () => {
@@ -38,6 +46,7 @@ export function createYPageBinding({ store, ydoc = new Y.Doc(), onNotice = () =>
       if (!disposed) for (const waiter of [...waiters]) waiter.check();
     });
   };
+  notifyDebt = changed;
   const offLocal = store.onLocal(() => { checkpointWithin(1500); changed(); });
   const offRebase = store.onRebase(changed);
   const offConfirm = store.onConfirm(() => {
@@ -96,6 +105,8 @@ export function createYPageBinding({ store, ydoc = new Y.Doc(), onNotice = () =>
   return {
     ydoc, pd, provider, bridge, stats, flush, awareness,
     get journal() { return pageJournal; },
+    filePending: () => debt.pending(),
+    acceptFile: (state) => debt.accepted(state),
     doc: () => keepViewPos(docOf(pd, walk(pd))),
     attach: (view) => bridge.attach(view),
     dispatch: (tr) => bridge.dispatch(tr),

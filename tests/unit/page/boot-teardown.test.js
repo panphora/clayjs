@@ -92,6 +92,7 @@ async function open({
     getLastSavedDirty: () => false,
     setLastSavedBaselines: () => {},
     getLastSavedBytes: () => null,
+    savesAdmitted: () => true,
   }));
 
   // Every save participant this boot registers, and whether it was taken away

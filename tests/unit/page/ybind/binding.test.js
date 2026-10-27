@@ -4,7 +4,8 @@ import { schema } from "../../../../src/page/schema.js";
 import { identityPlugin } from "../../../../src/page/model.js";
 import { state as pmState, view as pmView, model as pmModel, commands } from "../../../../src/vendor/prosemirror.vendor.js";
 import { toBase64 } from "../../../../src/vendor/yjs.vendor.js";
-import { createYPageBinding, seedValue, blocksFromYValue, removeKey, canonicalRevision, LOCAL } from "../../../../src/page/ybind/index.js";
+import { createYPageBinding, seedValue, blocksFromYValue, removeKey, canonicalRevision, LOCAL, enc } from "../../../../src/page/ybind/index.js";
+import * as Y from "../../../../src/vendor/yjs.vendor.js";
 
 const { EditorState, TextSelection } = pmState;
 const open = (blocks, extra = {}) => {
@@ -129,4 +130,16 @@ test("a peer removal exposes the block through the shared recovery list and Rest
   expect(binding.restore(record.source, record.revision)).toEqual({ status: "restored", id: `recovered:${key}` });
   expect(texts(view)).toEqual(["hello", "world"]);
   expect(binding.recoverable).toEqual([]);
+});
+
+test("a binding owes the file the input it authored, and accepted state settles it", () => {
+  const { binding, store, pd } = open([{ id: "p", text: "hello" }]);
+  expect(binding.filePending()).toBe(false);
+  pd.flow.insert(pd.flow.length, "!");
+  expect(binding.filePending()).toBe(true);
+  const accepted = { v: 1, g: store.value.g, y: { seed: enc(Y.encodeStateAsUpdateV2(binding.ydoc)) } };
+  expect(binding.acceptFile({ v: 1, g: store.value.g, y: {} })).toBe(false);
+  expect(binding.filePending()).toBe(true);
+  expect(binding.acceptFile(accepted)).toBe(true);
+  expect(binding.filePending()).toBe(false);
 });

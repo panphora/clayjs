@@ -84,7 +84,7 @@ const utf8Bytes = (text) => (encoder ? encoder.encode(text).length : text.length
 const sameDeletes = (a, b) => Y.equalDeleteSets(Y.createDeleteSetFromStructStore(a.store), Y.createDeleteSetFromStructStore(b.store));
 const svEqual = (a, b) => { if (a.size !== b.size) return false; for (const [c, n] of a) if (b.get(c) !== n) return false; return true; };
 
-export function createYProvider({ store, ydoc, compact: limits = {}, setTimer = setTimeout, clearTimer = clearTimeout, onStopped = () => {}, stats = { applied: 0, offered: 0, compactions: 0 }, journal = null }) {
+export function createYProvider({ store, ydoc, compact: limits = {}, setTimer = setTimeout, clearTimer = clearTimeout, onStopped = () => {}, stats = { applied: 0, offered: 0, compactions: 0 }, journal = null, onLocalUpdate = () => {} }) {
   const initial = entriesOf(store.value.y);
   const known = new Set();
   // Set when this tab's page can no longer reach the room: "lineage" when the room holds
@@ -123,6 +123,7 @@ export function createYProvider({ store, ydoc, compact: limits = {}, setTimer = 
   // Ahead of the stop guards, and of the room's own delivery: work this tab can no longer
   // offer, and work a refused offer took back, is still work a crash must not lose.
   const onUpdate = (u, origin) => {
+    if (origin !== NET && origin !== ORIGINS_ORIGIN) onLocalUpdate(u);
     if (origin !== NET && origin !== ORIGINS_ORIGIN && origin !== RECOVERY_ORIGIN) journal?.local(u);
     if (stopped || origin === NET || origin === ORIGINS_ORIGIN) return;
     put(nextKey("u"), u);

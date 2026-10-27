@@ -14,7 +14,7 @@ export { installAdoption, ADOPTION_TIMEOUT_MS } from "./adopt-boot.js";
 export { classifyFile, readBack } from "./adopt.js";
 export { mergePageModels } from "./merge.js";
 export { canon } from "./projection.js";
-export { renderFromTags } from "./save-projection.js";
+export { renderFromTags, acceptedPageState } from "./save-projection.js";
 export { blocksFromYValue } from "./ybind/decode.js";
 export { createYPageBinding } from "./ybind/binding.js";
 export { yValueOf } from "./ybind/provider.js";

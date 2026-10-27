@@ -92,4 +92,28 @@ export function articleOfPageState(state) {
   return renderFromTags([typeof state === "string" ? state : JSON.stringify(state)]).html;
 }
 
+/**
+ * The page state a save the host accepted carries, or null.
+ *
+ * A request body is not a capture: whoever answers it may have been a host that rewrote the
+ * bytes, an older save answering after this tab typed again, or something that is not a page
+ * at all. So the state has to be there, has to decode, and has to be the one the accepted
+ * article projects — otherwise these bytes prove nothing about the input this tab holds.
+ *
+ * @param {string} html - the exact body the host accepted
+ * @returns {?Object}
+ */
+export function acceptedPageState(html) {
+  if (typeof html !== "string") return null;
+  try {
+    const root = new DOMParser().parseFromString(html, "text/html");
+    const state = pageStateOfClone(root);
+    const article = root.querySelector(ARTICLE);
+    if (!state || !article) return null;
+    return article.innerHTML === articleOfPageState(state) ? state : null;
+  } catch {
+    return null;
+  }
+}
+
 addDocumentTransform(projectInto);

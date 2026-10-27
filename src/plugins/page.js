@@ -2,8 +2,8 @@ import { FEATURES, featureForNode, featureForType } from "../page/features/regis
 import { mergeEngine } from "../sync/merge-engine.js";
 import { registerUnsavedState } from "../lib/unsaved-state.js";
 import { hostMeta } from "../core/host-meta.js";
-import { savePageForce, holdAllSaves, releaseAllSaves, suspendAutosave, resumeAutosave, getLastSavedBytes } from "../core/save.js";
-import { setSaveHeader } from "../core/save-core.js";
+import { savePageForce, holdAllSaves, releaseAllSaves, suspendAutosave, resumeAutosave, getLastSavedBytes, savesAdmitted } from "../core/save.js";
+import { setSaveHeader, onSaveAccepted } from "../core/save-core.js";
 import { lastSeenEtag, representedEtag, recordEtag } from "../core/etag.js";
 import { captureForSaveAndComparison } from "../core/snapshot.js";
 import { storeOf, stageStore, closeStore, checkpointWithin, requestCheckpoint, fastLane, pageLaneReady, pageWriterReady, registerPageCheckpoints } from "./live.js";
@@ -940,6 +940,10 @@ function mergeRepresentedPage(store, value) {
       checkpointWithin,
       requestCheckpoint,
       journal,
+      // An exit holds admission closed, which is the only time this tab's own input
+      // still owing the file holds the leave: outside one, the binding reports what it
+      // always reported.
+      exitClosed: () => !savesAdmitted(),
       registerUnsavedState: (def) => {
         registered = registerUnsavedState({
           id: def.id,
@@ -1452,6 +1456,16 @@ export const page = {
     return active?.view ?? null;
   },
 };
+
+// The page's accepted bytes are the only thing that clears what this tab owes the file,
+// and one module-level observer is enough: the hook API has no unsubscribe, so a binding
+// registers none of its own and the current session's binding answers each save.
+onSaveAccepted((html) => {
+  const binding = active?.binding;
+  if (!binding?.filePending()) return;
+  const state = pageCode?.acceptedPageState(html);
+  if (state) binding.acceptFile(state);
+});
 
 // A live entry imports this module while the committed mode is still view: the install
 // belongs to the explicit edit boot alone, and a managed session starts its own.

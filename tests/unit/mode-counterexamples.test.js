@@ -154,7 +154,9 @@ const SETTLED = [
 // The two the driver cannot describe a person doing, which must now say so instead of
 // failing on what it typed into a page that was not there.
 const LIMITATIONS = ["ime-late-commit-after-view", "late-source-chunk-failed"];
-// Open: a page whose journal cannot write leaves edit without the text typed just before.
+// The page whose text the exit used to drop before: its binding now knows the input it owes
+// the file, so the leave is refused in the page's own name and the text stays in edit. It
+// still waits for the checkpoint that lands it.
 const OPEN = ["page-pending-selector-target"];
 
 test("round 3\u0027s corpus is the round\u0027s own, in its own folder", () => {
@@ -178,11 +180,11 @@ test("round 3\u0027s defect candidates pass now that both defects are fixed", ()
   expect(failing).toEqual([]);
 }, 300000);
 
-test("the open page case still fails on conservation until its fix lands", () => {
+test("the open page case ends in a refusal that names page:live", () => {
   for (const id of OPEN) {
     const outcome = round3Verdict(`${id}.json`);
-    expect(outcome.status).toBe("failed");
-    expect(propertiesOf(outcome)).toContain("conservation");
+    expect(outcome.status).toBe("passed");
+    expect(propertiesOf(outcome)).toEqual([]);
   }
 }, 300000);
 
