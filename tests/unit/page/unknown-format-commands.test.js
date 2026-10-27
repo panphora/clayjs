@@ -298,6 +298,102 @@ test("cut over an opaque block is refused and leaves the document and Yjs untouc
   expect(attrsOf(pd, "q")).toEqual(before.qAttrs);
 });
 
+// ---- the page chrome refuses where the commands do --------------------------
+
+const CANNOT = "This block holds content from a newer version, so it can't be converted here.";
+const COORDS = { left: 40, right: 48, top: 100, bottom: 120 };
+const pinned = (view) => { view.coordsAtPos = () => COORDS; return view; };
+const part = (view, sel) => view.dom.parentElement.querySelector(sel);
+const row = (view, label) => [...part(view, ".page-menu").querySelectorAll(".page-menu-item")]
+  .find((r) => r.querySelector(".page-menu-label").textContent === label);
+const notice = (view) => part(view, ".page-live").textContent;
+const wholeLine = (view, id) => {
+  const { node, pos } = find(view.state.doc, id);
+  select(view, pos + 1, pos + 1 + node.content.size);
+};
+
+test("the block menu's Turn into refuses an opaque block and changes nothing", () => {
+  const { tab } = room();
+  const view = pinned(tab.view);
+  const pd = tab.binding.pd;
+  selectBlocksIn(view, 1);
+  const before = { doc: view.state.doc, q: runsOf(pd, "q"), a: runsOf(pd, "a"), qAttrs: attrsOf(pd, "q") };
+  const counter = updates(tab);
+  part(view, ".page-tool-turn").click();
+  row(view, "Heading 1").click();
+  expect(view.state.doc.eq(before.doc)).toBe(true);
+  expect(counter.n).toBe(0);
+  expect(types(view.state.doc)).toEqual(["paragraph", "opaque_block", "paragraph"]);
+  expect(runsOf(pd, "q")).toEqual(before.q);
+  expect(runsOf(pd, "a")).toEqual(before.a);
+  expect(attrsOf(pd, "q")).toEqual(before.qAttrs);
+  expect(notice(view)).toBe(CANNOT);
+  expect(part(view, ".page-menu").hidden).toBe(true);
+});
+
+test("a list button over a selection holding an opaque block refuses and changes nothing", () => {
+  const { tab } = room();
+  const view = pinned(tab.view);
+  const pd = tab.binding.pd;
+  selectBlocksIn(view, 0, 1);
+  const before = { doc: view.state.doc, q: runsOf(pd, "q"), qAttrs: attrsOf(pd, "q") };
+  const counter = updates(tab);
+  part(view, '.page-dock [data-cmd="bullet"]').click();
+  expect(view.state.doc.eq(before.doc)).toBe(true);
+  expect(counter.n).toBe(0);
+  expect(types(view.state.doc)).toEqual(["paragraph", "opaque_block", "paragraph"]);
+  expect(runsOf(pd, "q")).toEqual(before.q);
+  expect(attrsOf(pd, "q")).toEqual(before.qAttrs);
+  expect(notice(view)).toBe(CANNOT);
+});
+
+test("the code button over a paragraph with an unknown mark refuses and changes nothing", () => {
+  const { tab } = room();
+  const view = pinned(tab.view);
+  const pd = tab.binding.pd;
+  wholeLine(view, "a");
+  const before = { doc: view.state.doc, a: runsOf(pd, "a") };
+  const counter = updates(tab);
+  part(view, '.page-dock [data-cmd="code"]').click();
+  expect(view.state.doc.eq(before.doc)).toBe(true);
+  expect(counter.n).toBe(0);
+  expect(types(view.state.doc)).toEqual(["paragraph", "opaque_block", "paragraph"]);
+  expect(runsOf(pd, "a")).toEqual(before.a);
+  expect(notice(view)).toBe(CANNOT);
+});
+
+test("the same chrome actions still convert ordinary blocks, and a marked line into a list", () => {
+  const { tab } = room();
+  const view = pinned(tab.view);
+  const pd = tab.binding.pd;
+  const counter = updates(tab);
+
+  selectBlocksIn(view, 2);
+  part(view, ".page-tool-turn").click();
+  row(view, "Heading 1").click();
+  expect(types(view.state.doc)).toEqual(["paragraph", "opaque_block", "heading"]);
+
+  selectBlocksIn(view, 2);
+  part(view, '.page-dock [data-cmd="bullet"]').click();
+  expect(types(view.state.doc)).toEqual(["paragraph", "opaque_block", "list_item"]);
+  expect(view.state.doc.child(2).attrs.kind).toBe("bullet");
+
+  wholeLine(view, "b");
+  part(view, '.page-dock [data-cmd="code"]').click();
+  expect(types(view.state.doc)).toEqual(["paragraph", "opaque_block", "code_block"]);
+  expect(view.state.doc.child(2).textContent).toBe("after");
+  expect(counter.n).toBeGreaterThan(0);
+  expect(notice(view)).not.toBe(CANNOT);
+
+  selectBlocksIn(view, 0);
+  part(view, '.page-dock [data-cmd="bullet"]').click();
+  expect(types(view.state.doc)).toEqual(["list_item", "opaque_block", "code_block"]);
+  expect(runsOf(pd, "a")).toEqual([
+    { text: "befo", attributes: { "underline~p1": true } },
+    { text: "re", attributes: { "clay_opaque_code~p2": { tokens: ["u"] } } },
+  ]);
+});
+
 // ---- known commands over unknown content ------------------------------------
 
 test("text typed inside, before and after an unknown mark keeps the descriptor on exactly its units", () => {

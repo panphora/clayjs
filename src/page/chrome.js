@@ -11,7 +11,7 @@ import { currentSpan, selectBlocks, duplicateBlocks, deleteBlocks, asStep, typeI
 import { openAltEditor, setImageAttrs } from "./media.js";
 import { BlockDrag } from "./drag.js";
 import { openLinkEditor } from "./link.js";
-import { BLOCK_TYPES, MENU_ITEMS, blockTypeOf, turnInto, insertAfter, rankItems, runItem, retype, insertItemsFor } from "./items.js";
+import { BLOCK_TYPES, MENU_ITEMS, blockTypeOf, turnInto, insertAfter, rankItems, runItem, retype, canTurnInto, insertItemsFor } from "./items.js";
 import toast from "../ui/toast-lazy.js";
 import { insertChartAfterTable } from "./chart.js";
 import { pickCsv } from "./csv-import.js";
@@ -40,6 +40,7 @@ const blockStart = (doc, index) => { let at = 0; for (let i = 0; i < index; i++)
 // back as it found them; every other menu clears them.
 const POPUP_ATTRS = ["aria-haspopup", "aria-controls", "aria-activedescendant"];
 const TARGET_GONE = "That block is no longer available.";
+const CANNOT_CONVERT = "This block holds content from a newer version, so it can't be converted here.";
 
 // The part of the window the person can see: the visual viewport when the
 // browser has one, so a keyboard or a pinch does not hide the bar.
@@ -206,8 +207,13 @@ function runList(view, kind) {
   const st = view.state;
   const off = listActive(st, kind);
   const item = BLOCK_TYPES.find((b) => b.key === (off ? "text" : kind));
+  const idx = listable(st).filter((i) => off || !isKind(st.doc.child(i), kind));
+  if (idx.some((i) => !canTurnInto(st.doc.child(i), item))) {
+    announce(view, CANNOT_CONVERT);
+    return;
+  }
   const tr = st.tr;
-  for (const i of listable(st)) if (off || !isKind(tr.doc.child(i), kind)) retype(tr, i, item);
+  for (const i of idx) retype(tr, i, item);
   if (tr.docChanged) view.dispatch(asStep(tr));
 }
 
@@ -218,6 +224,7 @@ function runMark(view, name) {
   const lines = name === "code" && !code ? wholeLines(st) : null;
   if (LIST_KINDS.has(name)) runList(view, name);
   else if (code) view.dispatch(asStep(codeLinesTr(st, code)).scrollIntoView());
+  else if (lines && lines.some((i) => !canTurnInto(st.doc.child(i), BLOCK_TYPES.find((b) => b.key === "code")))) announce(view, CANNOT_CONVERT);
   else if (lines) view.dispatch(asStep(codeBlockTr(st, lines)).scrollIntoView());
   else commands.toggleMark(M[name])(st, view.dispatch);
   view.focus();
@@ -656,6 +663,11 @@ class Chrome {
       return;
     }
     if (m.mode === "turn") {
+      if (wanted.some((id) => !canTurnInto(st.doc.child(this.idIndex(id)), item))) {
+        announce(this.view, CANNOT_CONVERT);
+        this.view.focus();
+        return;
+      }
       const tr = st.tr;
       for (const id of wanted) retype(tr, this.idIndex(id), item);
       this.view.dispatch(asStep(tr).scrollIntoView());
