@@ -22,16 +22,22 @@
  * `selftest` plants one defect per scratch copy of the runtime and names the cases that
  * feel each, so the corpus' sensitivity is proved rather than assumed.
  *
- * The other subcommands belong to later steps and say so.
+ * `sweep` is the hunt: it draws fresh schedules from one seed over the fixtures and
+ * boundaries the driver supports, weighted towards the shapes the corpus has not caught a
+ * defect in yet, and keeps every schedule the oracle fails as a case file shrunk by the
+ * same `shrink` the corpus uses. The same seed draws the same schedules byte for byte.
+ *
+ * `fence` belongs to a later step and says so.
  */
 
 import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import os from "node:os";
 import path from "node:path";
 import { validateCase } from "../tests/mode-counterexamples/driver.mjs";
+import { FIXTURES } from "../tests/mode-counterexamples/fixtures.mjs";
 
 const SELF = fileURLToPath(import.meta.url);
 // The platform's own timer, taken before a page's clock replaces the global: a drain
@@ -39,7 +45,7 @@ const SELF = fileURLToPath(import.meta.url);
 // case's clock, and an import that needs a real turn would look like a hang.
 const realTimeout = setTimeout;
 const COMMANDS = new Set(["check", "shrink", "prove", "selftest", "sweep", "fence"]);
-const NOT_YET = new Set(["sweep", "fence"]);
+const NOT_YET = new Set(["fence"]);
 const ROOT = path.dirname(path.dirname(SELF));
 const CORPUS = path.join(ROOT, "tests/mode-counterexamples/cases");
 
@@ -84,6 +90,20 @@ function childEnv(runtime) {
   return env;
 }
 
+// The verdict a child writes as its last JSON line. A child that wrote none produced no
+// verdict, which is its own answer: never a pass.
+function verdictOf(output) {
+  const line = String(output ?? "")
+    .split("\n")
+    .reverse()
+    .find((candidate) => candidate.trim().startsWith("["));
+  try {
+    return line ? JSON.parse(line)[0] ?? null : null;
+  } catch {
+    return null;
+  }
+}
+
 // One case, one process: the jsdom document, the deterministic clock and the module
 // registry a boot needs belong to the child, and so does the runtime root it reads ClayJS
 // from. `cases` stays the corpus the case came from, so a control it names is still found.
@@ -92,15 +112,7 @@ function runCaseProcess({ cases, file, runtime = null }) {
     encoding: "utf8",
     env: childEnv(runtime),
   });
-  const output = String(child.stdout ?? "");
-  const line = output.split("\n").reverse().find((candidate) => candidate.trim().startsWith("["));
-  let outcome = null;
-  try {
-    outcome = line ? JSON.parse(line)[0] ?? null : null;
-  } catch {
-    outcome = null;
-  }
-  return { outcome, child };
+  return { outcome: verdictOf(child.stdout), child };
 }
 
 const propertyNames = (outcome) => [...new Set((outcome?.failures ?? []).map((failure) => failure.property))].sort();
@@ -495,6 +507,290 @@ async function selftest(flags) {
   }
 }
 
+// The fixtures a sweep draws from. `page-host` is left out on purpose: its editor owns the
+// page, and an `input` step cannot type into it, so every schedule over it would be invalid
+// rather than a hunt. `draft-host` boots in draft mode, which is a shape of its own.
+const SWEEP_FIXTURES = [
+  "persist-host",
+  "persist-host",
+  "persist-host",
+  "freeze-host",
+  "freeze-host",
+  "lane-peer",
+  "lane-peer",
+  "unsent-host",
+  "unsent-host",
+  "draft-host",
+];
+const SWEEP_DRAFT = "draft-host";
+const SWEEP_TARGETS = ["title", "content"];
+const SWEEP_VALUES = ["Kept text", "Late edit", "Fresh words", "Second pass"];
+// The two shapes a host page is hunted in: an edit typed while the exit's write is held,
+// and a generation change while a write is on the wire. Most of the weight is here because
+// these are the shapes the corpus does not feel yet.
+const SWEEP_HOST_FAMILIES = [
+  "late-edit",
+  "late-edit",
+  "late-edit",
+  "late-edit",
+  "generation-change",
+  "generation-change",
+  "generation-change",
+];
+
+// One integer seed, one stream of draws: a generator, so a seed is a promise the same
+// schedules come back and a finding can be reproduced from the seed alone.
+function sweepStream(seed) {
+  const low = seed >>> 0;
+  const high = Math.floor(seed / 4294967296) >>> 0;
+  let state = (low ^ Math.imul(high, 0x9e3779b9) ^ 0x85ebca6b) >>> 0;
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let word = state;
+    word = Math.imul(word ^ (word >>> 15), word | 1);
+    word ^= word + Math.imul(word ^ (word >>> 7), word | 61);
+    return ((word ^ (word >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+const drawn = (roll, list) => list[Math.min(list.length - 1, Math.floor(roll() * list.length))];
+
+function sweepSchedule(roll, tag, index, fixtures) {
+  const id = (family) => `sweep-${tag}-${String(index).padStart(4, "0")}-${family}`;
+  const fixture = drawn(roll, fixtures);
+  const target = drawn(roll, SWEEP_TARGETS);
+  const first = drawn(roll, SWEEP_VALUES);
+  const second = drawn(roll, SWEEP_VALUES.filter((value) => value !== first));
+  // Every schedule boots in view and enters edit as a step: an edit-mode boot spends a
+  // real timer's worth of time before the case's own clock owns the page.
+  const boot = { mode: "view", live: true, destination: "host" };
+  const enter = [{ op: "enter" }];
+
+  if (fixture === SWEEP_DRAFT) {
+    return {
+      schema: 1,
+      id: id("draft-boot"),
+      fixture,
+      boot,
+      steps: [
+        { op: "settle", ms: 200 },
+        { op: "input", target, value: first },
+        { op: "settle", ms: 2000 },
+        ...(roll() < 0.5
+          ? [
+              { op: "leave", await: false },
+              { op: "settle", ms: 200 },
+            ]
+          : []),
+      ],
+      requires: ["input-admitted"],
+    };
+  }
+
+  const boundary = drawn(roll, ["save.request", "save.response"]);
+  const result = drawn(roll, ["accepted", "accepted", "rejected", "unknown"]);
+  const family = drawn(roll, SWEEP_HOST_FAMILIES);
+
+  if (family === "generation-change") {
+    return {
+      schema: 1,
+      id: id("generation-change"),
+      fixture,
+      boot,
+      steps: [
+        ...enter,
+        { op: "input", target, value: first },
+        { op: "hold", boundary },
+        { op: "leave", await: false },
+        ...(roll() < 0.5 ? [{ op: "input", target, value: second }] : []),
+        { op: "release", boundary, result },
+        { op: "settle" },
+        { op: "enter" },
+        { op: "input", target, value: second },
+        { op: "leave" },
+      ],
+      requires: ["input-admitted", "save-request-sent"],
+    };
+  }
+  return {
+    schema: 1,
+    id: id("late-edit"),
+    fixture,
+    boot,
+    steps: [
+      ...enter,
+      { op: "input", target, value: first },
+      { op: "hold", boundary },
+      { op: "leave", await: false },
+      { op: "input", target, value: second },
+      { op: "release", boundary, result },
+    ],
+    requires: ["input-admitted", "save-request-sent"],
+  };
+}
+
+// The draw is only a hunt if the driver would accept what it drew: a schedule the grammar
+// refuses is a bug in this generator, and it is refused here rather than run as an invalid.
+function sweepSchedules(seed, count, fixtures) {
+  const roll = sweepStream(seed);
+  const tag = `${seed < 0 ? "sn" : "s"}${Math.abs(seed)}`;
+  const schedules = [];
+  for (let index = 0; index < count; index++) {
+    const json = sweepSchedule(roll, tag, index + 1, fixtures);
+    const verdict = validateCase(json);
+    if (!verdict.ok) {
+      fail(`sweep: drew an invalid schedule ${json.id}: ${verdict.errors.map((error) => `${error.path}: ${error.message}`).join("; ")}`);
+    }
+    schedules.push(json);
+  }
+  return schedules;
+}
+
+// Work that belongs to its own process, a few processes at a time: each schedule boots its
+// own page, and each shrink runs its own cases, so the pool is the only thing shared and
+// results come back in the order they were drawn. A child that hangs is killed rather than
+// allowed to hold a round open.
+function sweepChild(args, runtime, timeoutMs = 300000) {
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, [SELF, ...args], { env: childEnv(runtime) });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    const timer = setTimeout(() => child.kill("SIGKILL"), timeoutMs);
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      resolve({ code, stdout, stderr });
+    });
+    child.on("error", (error) => {
+      clearTimeout(timer);
+      resolve({ code: null, stdout, stderr: `${stderr}${error.message}\n` });
+    });
+  });
+}
+
+async function pooled(items, limit, worker) {
+  const results = new Array(items.length).fill(null);
+  let next = 0;
+  const run = async () => {
+    for (;;) {
+      const index = next++;
+      if (index >= items.length) return;
+      results[index] = await worker(items[index], index);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, run));
+  return results;
+}
+
+// The sweep: schedules from one seed, and every failing one kept. A schedule that never
+// reached its preconditions is invalid, which is not a pass; a sweep where nothing reached
+// them found nothing and says so with a nonzero exit. Everything that failed is written as
+// the case the sweep drew and as the case `shrink` reduces it to, so a round leaves evidence
+// a person can re-run from the seed alone.
+async function sweep(flags) {
+  const seed = Number(flags.seed);
+  if (!/^-?\d+$/.test(String(flags.seed ?? "")) || !Number.isSafeInteger(seed)) {
+    fail("sweep: name the seed, as --seed <integer>");
+  }
+  const count = Number(flags.schedules);
+  if (!/^\d+$/.test(String(flags.schedules ?? "")) || !Number.isSafeInteger(count) || count < 1) {
+    fail("sweep: name how many schedules to draw, as --schedules <integer>");
+  }
+  let fixtures = SWEEP_FIXTURES;
+  if (flags.fixtures !== undefined) {
+    const named = String(flags.fixtures)
+      .split(",")
+      .map((name) => name.trim())
+      .filter(Boolean);
+    const unknown = named.filter((name) => !Object.hasOwn(FIXTURES, name));
+    if (!named.length || unknown.length) {
+      fail(`sweep: unknown fixture ${unknown.join(", ") || "(none named)"}, as --fixtures <names>`);
+    }
+    fixtures = named;
+  }
+
+  const runtime = path.resolve(process.env.CLAY_COUNTEREXAMPLE_RUNTIME || ROOT);
+  const tag = `${seed < 0 ? "sn" : "s"}${Math.abs(seed)}`;
+  const out = typeof flags.out === "string" ? path.resolve(flags.out) : path.join(os.tmpdir(), "clay-sweep", tag);
+  const casesDir = path.join(out, "cases");
+  mkdirSync(casesDir, { recursive: true });
+
+  const schedules = sweepSchedules(seed, count, fixtures);
+  writeFileSync(path.join(out, "schedules.json"), `${JSON.stringify({ seed, schedules }, null, 2)}\n`);
+  console.log(`sweep: seed ${seed}, ${count} schedules drawn from ${fixtures.join(", ")}`);
+  console.log(`sweep: wrote ${path.join(out, "schedules.json")}`);
+  console.log(`sweep: runtime ${runtime}`);
+
+  const entries = schedules.map((json) => {
+    const file = path.join(casesDir, `${json.id}.json`);
+    writeFileSync(file, `${JSON.stringify(json, null, 2)}\n`);
+    return { json, file };
+  });
+
+  const limit = Math.max(1, Math.min(8, os.availableParallelism?.() ?? os.cpus().length));
+  const verdicts = await pooled(entries, limit, async (entry) => {
+    const child = await sweepChild(["check", "--cases", CORPUS, "--case-file", entry.file, "--json"], runtime);
+    return verdictOf(child.stdout);
+  });
+
+  const counts = { passed: 0, failed: 0, invalid: 0 };
+  const byProperty = new Map();
+  const failures = [];
+  for (const [index, entry] of entries.entries()) {
+    const outcome = verdicts[index];
+    const status = outcome?.status ?? "invalid";
+    counts[status] = (counts[status] ?? 0) + 1;
+    if (status !== "failed") {
+      // A schedule that passed, or never reached its preconditions, is not evidence: the
+      // file would be a case that says nothing, so it leaves the output directory.
+      rmSync(entry.file, { force: true });
+      continue;
+    }
+    for (const property of propertyNames(outcome)) byProperty.set(property, (byProperty.get(property) ?? 0) + 1);
+    failures.push({ ...entry, outcome });
+  }
+
+  const shrunk = await pooled(failures, limit, async (entry) => {
+    const reduced = path.join(casesDir, `${entry.json.id}-reduced.json`);
+    const child = await sweepChild(["shrink", "--case", entry.file, "--out", reduced], runtime);
+    const lastLine = String(child.stderr ?? "").trim().split("\n").slice(-1)[0];
+    return { reduced, ok: child.code === 0, detail: lastLine };
+  });
+
+  const written = failures.map((entry, index) => {
+    const detail = entry.outcome.failures.map((failure) => `${failure.property}: ${failure.detail}`).join("; ") || "no property";
+    console.log(`${entry.json.id.padEnd(44)} failed  ${detail}`);
+    const shrunkHere = shrunk[index];
+    if (!shrunkHere.ok) console.log(`sweep: ${entry.json.id}: shrink failed, keeping the schedule as drawn (${shrunkHere.detail})`);
+    return shrunkHere.ok ? shrunkHere.reduced : entry.file;
+  });
+
+  const valid = counts.passed + counts.failed;
+  const properties = [...byProperty]
+    .sort((left, right) => right[1] - left[1] || (left[0] < right[0] ? -1 : 1))
+    .map(([property, total]) => `${property} ${total}`);
+
+  console.log("");
+  console.log(`sweep: ${valid} valid, ${counts.invalid} invalid, ${counts.passed} passed, ${counts.failed} failed`);
+  if (properties.length) console.log(`sweep: failed by property: ${properties.join(", ")}`);
+  for (const file of written) console.log(`sweep: wrote ${file}`);
+  console.log(`sweep: ${written.length} failing schedule(s) in ${casesDir}`);
+  if (!valid) {
+    console.log(`sweep: no schedule reached its preconditions: 0 valid of ${count}; an invalid schedule is never a pass`);
+    process.exitCode = 1;
+    return;
+  }
+  if (counts.failed) {
+    console.log(`sweep: ${counts.failed} failing schedule(s) from seed ${seed}: ${failures.map((entry) => entry.json.id).join(", ")}`);
+    process.exitCode = 1;
+  }
+}
+
 const { command, flags } = parseArgs(process.argv.slice(2));
 if (!COMMANDS.has(command)) {
   fail(
@@ -504,7 +800,8 @@ if (!COMMANDS.has(command)) {
       "  shrink --case <json> --out <json>   reduce a failing case to its smallest schedule",
       "  prove --case <json> --before <dir> --after <dir> [--reduced <json>] [--out <json>]",
       "  selftest --scratch <dir> [--cases <dir>]   plant six defects in scratch runtime copies and say which cases catch each",
-      "  sweep, fence   not yet (later steps)",
+      "  sweep --seed <integer> --schedules <integer> [--out <dir>] [--fixtures <names>]   draw fresh schedules and keep every failure",
+      "  fence   not yet (a later step)",
     ].join("\n"),
     2,
   );
@@ -516,5 +813,6 @@ if (NOT_YET.has(command)) {
 if (command === "shrink") await shrink(flags);
 else if (command === "prove") await prove(flags);
 else if (command === "selftest") await selftest(flags);
+else if (command === "sweep") await sweep(flags);
 else if (flags.json) await runOne(flags);
 else await check(flags);

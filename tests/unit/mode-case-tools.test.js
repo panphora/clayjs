@@ -17,6 +17,10 @@ import path from "node:path";
  * carries one planted defect written here as a literal find and replace, and the case is
  * one that passes today: so a proof of "fails before, passes after" is a real proof and
  * the checkout's own `src/` is never edited.
+ *
+ * `sweep` is the hunt those tools serve: fresh schedules from a seed, run against the
+ * runtime named, with every failure kept as the case `shrink` makes of it. A sweep is
+ * deterministic, so the seed a round reports is the seed that reproduces its findings.
  */
 
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
@@ -29,6 +33,10 @@ const CASE = path.join(CASES, "bytes-etag-pairing.json");
 // planting and the verdict for those. The three it cannot feel yet are named below.
 const SUBSET = ["canonical-freeze", "cycles-no-growth", "cycles-one-write", "enter-leave-one-write"];
 const UNFELT = ["drop-generation-checks", "rebaseline-current-dom", "route-draft-to-host"];
+const REBASELINE = "rebaseline-current-dom";
+// The fixtures a sweep draws from when a seed must stay cheap: a host page boots in well
+// under a second, while a draft page and an edit-mode boot each spend a real timer.
+const SWEPT = "persist-host,freeze-host,lane-peer,unsent-host";
 const PROPERTY = "bytes-etag-pairing";
 const PLANTED = {
   file: "src/core/save-core.js",
@@ -39,6 +47,7 @@ const PLANTED = {
 let scratch = null;
 let before = null;
 let after = null;
+let rebaseline = null;
 let reducedFile = null;
 
 function run(args, runtime = null) {
@@ -61,13 +70,21 @@ function plantedSource() {
   return source;
 }
 
-beforeAll(() => {
+beforeAll(async () => {
   scratch = mkdtempSync(path.join(os.tmpdir(), "clay-case-tools-"));
   before = path.join(scratch, "before");
   after = path.join(scratch, "after");
-  for (const copy of [before, after]) cpSync(path.join(ROOT, "src"), path.join(copy, "src"), { recursive: true });
+  rebaseline = path.join(scratch, "rebaseline");
+  for (const copy of [before, after, rebaseline]) cpSync(path.join(ROOT, "src"), path.join(copy, "src"), { recursive: true });
   const target = path.join(before, PLANTED.file);
   writeFileSync(target, plantedSource().replace(PLANTED.find, PLANTED.replace));
+  // The one planted defect a sweep is proved against: a save that advances the baseline
+  // from the live DOM, so an edit typed while the write was on the wire reads as saved.
+  const { MUTATIONS } = await import("../mode-counterexamples/mutations.mjs");
+  const mutation = MUTATIONS.find((entry) => entry.id === REBASELINE);
+  const source = readFileSync(path.join(rebaseline, mutation.file), "utf8");
+  expect(source.split(mutation.find).length - 1).toBe(1);
+  writeFileSync(path.join(rebaseline, mutation.file), source.replace(mutation.find, mutation.replace));
 }, 180000);
 
 afterAll(() => {
@@ -176,3 +193,78 @@ test("selftest plants each defect in a scratch runtime copy and says which cases
   expect(readdirSync(runtime).sort()).toEqual(MUTATIONS.map((mutation) => mutation.id).sort());
   expect(readFileSync(path.join(ROOT, "src/core/save.js"), "utf8")).toBe(untouched);
 }, 600000);
+
+test("a sweep draws the same schedules, byte for byte, from the same seed", async () => {
+  const { validateCase } = await import("../mode-counterexamples/driver.mjs");
+  const args = ["sweep", "--seed", "20261025", "--schedules", "4", "--fixtures", "persist-host"];
+  const first = path.join(scratch, "sweep-a");
+  const second = path.join(scratch, "sweep-b");
+
+  const one = run([...args, "--out", first]);
+  const two = run([...args, "--out", second]);
+  expect(one.status).toBe(two.status);
+  expect(String(one.stdout)).toContain("4 valid");
+
+  const drawnOne = readFileSync(path.join(first, "schedules.json"), "utf8");
+  const drawnTwo = readFileSync(path.join(second, "schedules.json"), "utf8");
+  expect(drawnOne).toBe(drawnTwo);
+
+  const { seed, schedules } = JSON.parse(drawnOne);
+  expect(seed).toBe(20261025);
+  expect(schedules).toHaveLength(4);
+  expect(new Set(schedules.map((entry) => entry.id)).size).toBe(4);
+  for (const schedule of schedules) expect(`${schedule.id}:${validateCase(schedule).ok}`).toBe(`${schedule.id}:true`);
+}, 180000);
+
+test("a sweep where no schedule reaches its preconditions fails instead of passing", () => {
+  const out = path.join(scratch, "sweep-zero");
+  const result = run(["sweep", "--seed", "4242", "--schedules", "3", "--fixtures", "page-host", "--out", out]);
+
+  expect(result.status).toBe(1);
+  expect(String(result.stdout)).toContain("0 valid, 3 invalid");
+  expect(String(result.stdout)).toContain("no schedule reached its preconditions");
+  expect(readdirSync(path.join(out, "cases"))).toEqual([]);
+}, 180000);
+
+test("a sweep over a planted defect finds it, shrinks it and names it", () => {
+  const out = path.join(scratch, "sweep-rebaseline");
+  const result = run(["sweep", "--seed", "7", "--schedules", "8", "--fixtures", SWEPT, "--out", out], rebaseline);
+  const stdout = String(result.stdout ?? "");
+
+  expect(result.status).toBe(1);
+  expect(stdout).toMatch(/sweep: 8 valid, 0 invalid, \d+ passed, [1-9]\d* failed/);
+  expect(stdout).toContain("failed by property: conservation");
+
+  const cases = path.join(out, "cases");
+  const written = readdirSync(cases);
+  const reduced = written.filter((name) => name.endsWith("-reduced.json"));
+  const drawn = written.filter((name) => !name.endsWith("-reduced.json"));
+  expect(reduced.length).toBeGreaterThan(0);
+  expect(drawn.length).toBe(reduced.length);
+
+  // A reduction is only evidence if it still fails the same way.
+  for (const name of reduced) {
+    const file = path.join(cases, name);
+    const json = JSON.parse(readFileSync(file, "utf8"));
+    expect(json.reducedFrom).toBeTruthy();
+    expect(json.requires.length).toBeGreaterThan(0);
+    expect(stdout).toContain(json.reducedFrom);
+    expect(stdout).toContain(file);
+
+    const planted = outcomeOf(run(["check", "--cases", CASES, "--case-file", file, "--json"], rebaseline));
+    expect(planted.status).toBe("failed");
+    expect(planted.failures.map((failure) => failure.property)).toEqual(["conservation"]);
+  }
+
+  // The defect the sweep felt is the planted one: the schedule it drew fails over the
+  // planted defect and passes over the clean runtime. A reduction is a smaller schedule
+  // that fails the same property on the planted runtime, which `shrink` keeps even when
+  // the smaller schedule has a reason of its own to fail on the clean one.
+  let felt = 0;
+  for (const name of drawn) {
+    const file = path.join(cases, name);
+    const clean = outcomeOf(run(["check", "--cases", CASES, "--case-file", file, "--json"], after));
+    if (clean.status === "passed") felt++;
+  }
+  expect(felt).toBeGreaterThan(0);
+}, 180000);
