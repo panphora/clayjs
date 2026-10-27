@@ -446,8 +446,12 @@ let recoveryModules = null;
 
 function pageRecovery() {
   if (!recoveryModules) {
-    recoveryModules = Promise.all([import("../page/ybind/recovery-replay.js"), import("../page/checkpoint-proof.js")])
-      .then(([replay, proof]) => ({ replay, proof }))
+    recoveryModules = Promise.all([
+      import("../page/ybind/recovery-replay.js"),
+      import("../page/checkpoint-proof.js"),
+      import("../page/recovery-ui.js"),
+    ])
+      .then(([replay, proof, ui]) => ({ replay, proof, ui }))
       .catch((error) => {
         console.warn("clayjs: page journal could not load", error);
         return null;
@@ -487,7 +491,31 @@ async function replayJournal(inst) {
   // edit would be, and it is not one more journal and not one giant undo step.
   if (outcome.replayed.length) inst.binding.provider.settle();
   if (outcome.review.length) inst.recoveryReview = outcome.review;
+  installRecoveryReview(inst, modules.ui)?.update({ rows: modules.replay.describeReview(outcome.review) });
   return outcome;
+}
+
+// The review of what this page may not replay, drawn in the editor's own chrome once per
+// session, with the composition shadow that keeps typing which never became a
+// transaction: one object, alive exactly as long as the session that mounted it.
+function installRecoveryReview(inst, ui) {
+  if (inst.recoveryPanel) return inst.recoveryPanel;
+  const view = inst.view;
+  const mount = view?.dom.closest(".page-shell") ?? inst.article;
+  if (!mount) return null;
+  const review = ui.createRecoveryReview({
+    mount,
+    getView: () => (inst.view && !inst.view.isDestroyed ? inst.view : null),
+    getJournal: () => inst.binding?.journal ?? null,
+    isCurrent: () => isCurrent(inst) && inst.inputOpen && !!inst.view && !inst.view.isDestroyed,
+  });
+  const detach = review.watch(view?.dom ?? null);
+  addDisposer(inst, () => {
+    detach();
+    review.destroy();
+  });
+  inst.recoveryPanel = review;
+  return review;
 }
 
 // One accepted save retires the records a proof covers, and no others.
