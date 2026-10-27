@@ -48,6 +48,7 @@ async function bootPage({
   ui = null,
   draft = null,
   body = "",
+  beforeBoot = null,
 } = {}) {
   jest.resetModules();
   delete window.clayEditMode;
@@ -63,6 +64,7 @@ async function bootPage({
   window.fetch = fetchMock;
   global.fetch = fetchMock;
   const { boot } = await import("../../src/loader.js");
+  if (beforeBoot) beforeBoot();
   await new Promise((resolve) => boot(null, new URLSearchParams(params), resolve));
   return { clay: window.clay, fetchMock, key: keyFor(slot) };
 }
@@ -423,6 +425,31 @@ test("the intro stands aside for a returning visitor, a draft and a deep link, a
   }
 
   await bootPage({ slot: "ui-intro-forced", template: INTRO, url: "/notes.html?intro=1", ui: { v: 1, intro: { done: "closed" } } });
+  expect(intro()).not.toBeNull();
+});
+
+test("the intro stands aside for the hash the page was served with, not for one the page writes", async () => {
+  await bootPage({
+    slot: "ui-intro-served-hash",
+    template: INTRO,
+    url: "/notes.html#card=c1",
+    beforeBoot: () => window.history.replaceState({}, "", "/notes.html"),
+  });
+  expect(intro()).toBeNull();
+
+  await bootPage({
+    slot: "ui-intro-written-hash",
+    template: INTRO,
+    beforeBoot: () => window.history.replaceState({}, "", "/notes.html#entry=welcm1"),
+  });
+  expect(intro()).not.toBeNull();
+
+  await bootPage({
+    slot: "ui-intro-written-hash-forced",
+    template: INTRO,
+    url: "/notes.html?intro=1",
+    beforeBoot: () => window.history.replaceState({}, "", "/notes.html?intro=1#entry=welcm1"),
+  });
   expect(intro()).not.toBeNull();
 });
 

@@ -1,5 +1,6 @@
 import { INTRO_CSS } from "./intro-style.js";
 import { announceBottomUi } from "./bottom-ui.js";
+import { bootPhase } from "../../core/boot-phase.js";
 
 export const COPY = {
   close: "Hide this introduction",
@@ -45,7 +46,7 @@ export function mountIntro({ memory, template, appName, hadDraft }) {
   if (!template || !template.content.textContent.trim() && !template.content.querySelector("img, svg, video, canvas")) return null;
   if (!forced()) {
     if (memory.get().intro.done || hadDraft) return null;
-    if (window.location.hash) return null;
+    if (bootPhase.servedHash) return null;
     if (window.matchMedia && window.matchMedia("print").matches) return null;
   }
   return mount({ memory, template, appName });
