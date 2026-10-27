@@ -177,6 +177,10 @@ export function createSavedStream({ documentURL, servedEtag = null, represented 
   let presenceStore = null;
   let presenceLease = null;
   let presenceLoad = null;
+  // The corner the roster is drawn in, downloaded beside the store on the same first
+  // frame. It is the chrome alone: the block marks an editor draws are edit-only and
+  // a reader never imports them.
+  let presenceRoster = null;
   const presenceQueue = [];
 
   const active = (gen) => !stopped && gen === generation;
@@ -188,29 +192,34 @@ export function createSavedStream({ documentURL, servedEtag = null, represented 
 
   function leavePresence() {
     presenceQueue.length = 0;
+    // A roster a newer owner has taken over is that owner's to clear: giving this
+    // lease back must not remove the squares it is drawing.
+    if (presenceRoster && (!presenceLease || presenceLease.active)) presenceRoster.clear();
     if (presenceLease) {
       presenceLease.detach();
       presenceLease = null;
     }
     presenceStore = null;
+    presenceRoster = null;
     presenceLoad = null;
   }
 
   // A frame that lands while the download is in flight waits in order, and a
   // download that failed keeps the queue so the next frame asks again.
   function takePresence(data) {
-    if (presenceStore) {
-      presenceStore.receive(data);
+    if (presenceRoster) {
+      presenceRoster.update(data);
       return;
     }
     presenceQueue.push(data);
     if (presenceLoad) return;
-    presenceLoad = import('./presence-store.js')
-      .then(({ presence }) => {
-        presenceStore = presence;
-        presenceLease = presence.attachTransport({ send: () => Promise.resolve(false) });
-        for (const frame of presenceQueue.splice(0)) presence.receive(frame);
-        return presence;
+    presenceLoad = Promise.all([import('./presence-store.js'), import('./presence.js')])
+      .then(([storeMod, rosterMod]) => {
+        presenceStore = storeMod.presence;
+        presenceRoster = rosterMod.presence;
+        presenceLease = presenceStore.attachTransport({ send: () => Promise.resolve(false) });
+        for (const frame of presenceQueue.splice(0)) presenceRoster.update(frame);
+        return presenceRoster;
       })
       .catch(() => {
         presenceLoad = null;

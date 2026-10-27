@@ -4,6 +4,20 @@
 import { jest } from "@jest/globals";
 
 /**
+ * The roster chrome a reader draws is a first-use download of its own, counted here
+ * so a boot that receives no frame can be shown to fetch none of it. The real
+ * singleton is handed back once it is asked for, so the squares below are the ones
+ * a person sees.
+ */
+const realRoster = await import("../../src/sync/presence.js");
+const rosterLoads = { count: 0 };
+
+jest.unstable_mockModule("../../src/sync/presence.js", () => {
+  rosterLoads.count += 1;
+  return realRoster;
+});
+
+/**
  * A reader's presence over the stream it already follows (Document 10 Step 5).
  *
  * A reader has one connection and no write half. The roster arrives as a named
@@ -41,6 +55,19 @@ const settle = async () => {
 const response = (status, text) => ({ ok: status < 400, status, text: async () => text });
 
 const presenceEvent = (data) => new MessageEvent("presence", { data: JSON.stringify(data) });
+
+const ADA = { id: "p_ada", name: "Ada Lovelace", you: false };
+const GRACE = { id: "p_grace", name: "Grace Hopper", you: true };
+
+const stack = () => document.querySelector("[data-clay-presence]");
+const avatars = () => [...document.querySelectorAll("[data-clay-presence-avatar]")];
+const chip = () => document.querySelector("[data-clay-presence-count]");
+const tip = () => document.querySelector("[data-clay-presence-tip]");
+
+async function until(check, ms = 2000) {
+  const deadline = Date.now() + ms;
+  while (!check() && Date.now() < deadline) await tick();
+}
 const frame = (data) => ({ data: JSON.stringify(data) });
 
 const posts = () => fetchCalls.filter((call) => call.init.method === "POST");
@@ -66,6 +93,8 @@ beforeEach(() => {
   presence.clear();
   presence.explicit = false;
   presence.owner?.detach();
+  realRoster.presence.clear();
+  document.body.innerHTML = "";
   global.fetch = jest.fn((url, init = {}) => {
     fetchCalls.push({ url: String(url), init });
     if (String(url).includes("/_/meta")) return Promise.resolve(response(200, JSON.stringify(metaAnswer)));
@@ -96,6 +125,39 @@ async function startReader() {
   await settle();
   return { handle, snapshots, statuses, source };
 }
+
+// =============================================================================
+// The roster chrome is a first-use download (Document 10 Step 7a)
+// =============================================================================
+//
+// These two run before any other boot in this file: the chrome module is counted as
+// it is imported, and the registry answers a second request from its cache.
+
+test("a reader that receives no frame never downloads the roster chrome", async () => {
+  const { handle } = await startReader();
+  await settle();
+
+  expect(rosterLoads.count).toBe(0);
+  expect(stack()).toBeNull();
+  expect(document.body.children).toHaveLength(0);
+
+  handle.stop();
+});
+
+test("the roster chrome arrives once, with the first frame", async () => {
+  const { source } = await startReader();
+  expect(rosterLoads.count).toBe(0);
+
+  source.dispatchEvent(presenceEvent({ people: [ADA, GRACE], anonymous: 0 }));
+  await until(() => avatars().length === 2);
+  expect(avatars()).toHaveLength(2);
+  expect(rosterLoads.count).toBe(1);
+
+  // A frame after the download draws into the chrome that is already there.
+  source.dispatchEvent(presenceEvent({ people: [ADA], anonymous: 1 }));
+  await until(() => avatars().length === 1);
+  expect(rosterLoads.count).toBe(1);
+});
 
 test("a reader takes the roster from the stream it already follows", async () => {
   const { source } = await startReader();
@@ -192,5 +254,57 @@ test("a stopped reader takes its roster with it, and a newer owner keeps its own
   expect(presence.getSnapshot().people).toHaveLength(1);
 
   editor.detach();
+  expect(presence.getSnapshot().people).toEqual([]);
+});
+
+// =============================================================================
+// The roster a reader is shown (Document 10 Step 7a)
+// =============================================================================
+
+test("a reader draws the same roster an editor sees, from the frame it already follows", async () => {
+  const { source } = await startReader();
+
+  source.dispatchEvent(presenceEvent({ people: [ADA, GRACE], anonymous: 1 }));
+  await until(() => avatars().length === 2);
+
+  // The roster's own chrome, built where the store said who is there.
+  expect(stack()).not.toBeNull();
+  expect(stack().style.display).toBe("flex");
+  expect(avatars().map((el) => el.textContent)).toEqual(["AL", "GH"]);
+  expect(chip().textContent).toBe("+1 viewing");
+
+  // A name reaches the page as text, and only while a pointer is on the square.
+  avatars()[0].dispatchEvent(new MouseEvent("mouseenter"));
+  expect(tip().textContent).toBe(ADA.name);
+
+  // The chrome alone: a reader draws no caret marker and opens no second stream.
+  expect(document.querySelector("[data-clay-editing]")).toBeNull();
+  expect(sources).toHaveLength(1);
+});
+
+test("a second roster frame updates what the reader is shown", async () => {
+  const { source } = await startReader();
+
+  source.dispatchEvent(presenceEvent({ people: [ADA, GRACE], anonymous: 0 }));
+  await until(() => avatars().length === 2);
+
+  source.dispatchEvent(presenceEvent({ people: [ADA], anonymous: 2 }));
+  await until(() => avatars().length === 1);
+
+  expect(avatars().map((el) => el.textContent)).toEqual(["AL"]);
+  expect(chip().textContent).toBe("+2 viewing");
+});
+
+test("closing the stream clears the roster a reader draws", async () => {
+  const { handle, source } = await startReader();
+
+  source.dispatchEvent(presenceEvent({ people: [ADA, GRACE], anonymous: 0 }));
+  await until(() => avatars().length === 2);
+
+  handle.stop();
+  await settle();
+
+  // Nothing stands in the corner saying who is here once nobody is listening.
+  expect(stack()).toBeNull();
   expect(presence.getSnapshot().people).toEqual([]);
 });
