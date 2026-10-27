@@ -111,6 +111,8 @@ function runCaseProcess({ cases, file, runtime = null }) {
   const child = spawnSync(process.execPath, [SELF, "check", "--cases", cases, "--case-file", file, "--json"], {
     encoding: "utf8",
     env: childEnv(runtime),
+    timeout: 180000,
+    killSignal: "SIGKILL",
   });
   return { outcome: verdictOf(child.stdout), child };
 }
@@ -827,3 +829,6 @@ else if (command === "selftest") await selftest(flags);
 else if (command === "sweep") await sweep(flags);
 else if (flags.json) await runOne(flags);
 else await check(flags);
+
+// A page handle left parked on the case clock must not keep the child alive after its verdict.
+process.stdout.write("", () => process.exit(process.exitCode ?? 0));

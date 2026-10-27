@@ -112,6 +112,8 @@ function round3Verdict(name) {
   const child = spawnSync(process.execPath, [CLI, "check", "--cases", ROUND3_DIR, "--case-file", path.join(ROUND3_DIR, name), "--json"], {
     encoding: "utf8",
     env: { ...process.env, NODE_OPTIONS: [process.env.NODE_OPTIONS, "--experimental-vm-modules"].filter(Boolean).join(" ") },
+    timeout: 180000,
+    killSignal: "SIGKILL",
   });
   const line = String(child.stdout ?? "")
     .split("\n")
