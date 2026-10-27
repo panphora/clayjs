@@ -3,6 +3,8 @@ export * from "./tokens.js";
 export * from "./writer.js";
 export * from "./group.js";
 export * from "./bridge.js";
+export * from "./positions.js";
+export * from "./awareness.js";
 export * from "./seed.js";
 export * from "./origins.js";
 export * from "./recovery.js";

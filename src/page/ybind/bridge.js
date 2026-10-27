@@ -3,7 +3,8 @@ import { REMOTE_META, LOCAL, HISTORY_META, attrKeys, sameJson, parseKey, mintOp 
 import { walk, hashText } from "./walk.js";
 import { docOf } from "./doc.js";
 import { localGroup } from "./group.js";
-import { tokenIndex, yBefore, yAfter } from "./tokens.js";
+import { yBefore, yAfter } from "./tokens.js";
+import { yIndexAt, posAtY, cellPoint, cellAt } from "./positions.js";
 import { state as pmState } from "../../vendor/prosemirror.vendor.js";
 import { repairSiblings } from "../model.js";
 import { createOriginIndex, installUndoOrigins } from "./origins.js";
@@ -12,22 +13,6 @@ import { moveBlocks } from "./moves.js";
 import { createBoardCommands } from "./board-commands.js";
 import { continuesGroup, intentOf } from "../history-intent.js";
 import { MOVE, BlockSelection } from "../blocks.js";
-
-const yIndexAt = (doc, holes, pos, visible) => yBefore(holes, tokenIndex(doc, new Map(), visible)[pos]);
-
-export function posAtY(doc, holes, tokens, y, visible = null) {
-  let lo = 0, hi = tokens;
-  while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (yBefore(holes, mid) <= y) lo = mid; else hi = mid - 1; }
-  const idx = tokenIndex(doc, new Map(), visible);
-  let first = -1;
-  for (let p = 0; p < idx.length; p++) {
-    if (idx[p] < lo) continue;
-    if (idx[p] > lo) break;
-    if (first < 0) first = p;
-    if (doc.resolve(p).parent.inlineContent) return p;
-  }
-  return first < 0 ? doc.content.size : first;
-}
 
 export const shapeOf = (doc) => { const out = []; doc.forEach((b) => out.push([b.type.name, b.attrs.id, JSON.stringify(Object.fromEntries(attrKeys(b.type).map((k) => [k, b.attrs[k]]))), b.isTextblock || b.type.name === "table" ? JSON.stringify(b.content.toJSON()) : null])); return JSON.stringify(out); };
 export const bareShape = (doc) => { const out = []; doc.forEach((b) => out.push([b.type.name, JSON.stringify(Object.fromEntries(attrKeys(b.type).map((k) => [k, b.attrs[k]]))), b.isTextblock || b.type.name === "table" ? JSON.stringify(b.content.toJSON()) : null])); return JSON.stringify(out); };
@@ -78,27 +63,6 @@ export function docDiff(oldDoc, newDoc) {
   }
   return { start, endA, endB };
 }
-
-const cellPoint = (doc, pos) => {
-  const $pos = doc.resolve(pos);
-  if ($pos.depth !== 3 || $pos.parent.type.name !== "table_cell") return null;
-  return { table: $pos.node(1).attrs.id, row: $pos.node(2).attrs.id, col: $pos.parent.attrs.col, offset: $pos.parentOffset };
-};
-
-const cellAt = (doc, point) => {
-  let found = null;
-  doc.forEach((table, at) => {
-    if (found !== null || table.type.name !== "table" || table.attrs.id !== point.table) return;
-    table.forEach((row, rowAt) => {
-      if (found !== null || row.attrs.id !== point.row) return;
-      row.forEach((cell, cellAt) => {
-        if (found === null && cell.attrs.col === point.col) found = at + 2 + rowAt + cellAt + 1 + Math.min(point.offset, cell.content.size);
-      });
-    });
-  });
-  return found;
-};
-
 
 export function keepViewPos(derived, current = null) {
   const previous = new Map();

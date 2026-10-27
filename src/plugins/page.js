@@ -365,6 +365,8 @@ function releaseMounted(inst) {
   inst.recover = null;
   inst.aiTool?.dispose();
   inst.aiTool = null;
+  inst.awareness?.dispose();
+  inst.awareness = null;
   inst.toolHost?.dispose();
   inst.toolHost = null;
   if (inst.view) toolViews.delete(inst.view);
@@ -790,7 +792,20 @@ function mergeRepresentedPage(store, value) {
     return { ok: true, store, handle };
   }
 
-  function mountAndAttach(inst, source, loaded) {
+// Other people's carets arrive on their own: the decorations load only where a
+// host offers page awareness, after the editor is mounted, so neither a reader nor
+// an editor on a host without presence pays for them.
+function installAwareness(inst, view) {
+  import("../page/awareness.js").then(async (mod) => {
+    if (inst.view !== view) return;
+    const handle = await mod.installPageAwareness({ binding: inst.binding, view });
+    if (!handle) return;
+    if (inst.view !== view || view.isDestroyed) { handle.dispose(); return; }
+    inst.awareness = handle;
+  }).catch((error) => console.error("clayjs: page plugin remote carets failed to load", error));
+}
+
+function mountAndAttach(inst, source, loaded) {
     const article = source.element;
     // The reader that showed this article gives its claim up here and keeps its queue,
     // so a preparation that fails after this point hands the article back.
@@ -859,6 +874,7 @@ function mergeRepresentedPage(store, value) {
     if (shell) article.appendChild(shell);
     loaded.refreshView?.(view);
     binding.attach(view);
+    installAwareness(inst, view);
     editorReadyResolve();
     // The parts the saved article demands install onto the mounted view now, whether
     // their fetch already landed or is still on the wire; the saved article stays and

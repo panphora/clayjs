@@ -63,8 +63,16 @@ export function createYPageBinding({ store, ydoc = new Y.Doc(), onNotice = () =>
     });
   }
 
+  // What the page's awareness UI asks of the mapping: the document, and the bridge's
+  // current walk, which is the winning-copy view a remote position is read in and a
+  // local one is written from. The UI never reaches into the bridge itself.
+  const awareness = {
+    generation: () => (Number.isSafeInteger(store.value?.g) && store.value.g >= 0 ? store.value.g : 0),
+    map: () => ({ pd, w: bridge.walk }),
+  };
+
   return {
-    ydoc, pd, provider, bridge, stats, flush,
+    ydoc, pd, provider, bridge, stats, flush, awareness,
     doc: () => keepViewPos(docOf(pd, walk(pd))),
     attach: (view) => bridge.attach(view),
     dispatch: (tr) => bridge.dispatch(tr),
