@@ -50,15 +50,17 @@
 
 import {
   model,
+  modelSteps,
   checkSource,
   locate,
   nodeAt,
   pair,
-  pairCaptured,
+  pairCapturedSteps,
   render,
-  verify,
-  verifyForSave
+  verifyForSaveSteps,
+  verifyRenderedSteps
 } from '../core/source-map.js';
+import { drain } from '../lib/slice.js';
 import {
   attachCaptureArtifact,
   captureSaveClone,
@@ -292,12 +294,28 @@ function install(sourceUrl, context = null, attempt = 0, render = true, latest =
  * describes the live page there.
  */
 export function renderSave(clone, today, opts = {}) {
+  return drain(renderSaveSteps(clone, today, opts));
+}
+
+/**
+ * The same render, sliced: exactly one generator, so a save can run its verification
+ * across tasks without a second copy of this logic. Every assignment to the session
+ * happens after the last yield of its phase, so a slice that is aborted leaves the
+ * session as it was found and the next save renders from the same state.
+ *
+ * The generation the render started from is recorded, because a morph or an accepted
+ * save can re-pair the map while the verifier is yielding. A render whose bytes were
+ * laid out against a map that has since been rebuilt describes a page that is no longer
+ * here, so it is refused like any other render that cannot be trusted: today's bytes.
+ */
+export function* renderSaveSteps(clone, today, opts = {}) {
   if (!state.installed) return today;
   // A refresh still waiting for idle time runs now, so this save never renders from a
   // map a morph made stale. It pairs against the page, not this clone: onbeforesave may
   // have changed the clone, and the map must describe the live page.
-  refreshNow();
-  state.lastOutcome = null;
+  yield* refreshNowSteps();
+  const session = state.session;
+  const generation = state.repairs;
   const capture = currentCaptureContext();
   const adoptable = !!capture && !capture.authoredHandlers;
   const print = new Set();
@@ -312,21 +330,38 @@ export function renderSave(clone, today, opts = {}) {
     // The verifier's retained parse is a cost, so it is only asked for when there is a
     // capture that could adopt it.
     const v = adoptable
-      ? verifyForSave(out.text, today, document, clone, state.model.parseErrors)
-      : verify(out.text, today, document, clone, state.model.parseErrors);
+      ? yield* verifyForSaveSteps(out.text, today, document, clone, state.model.parseErrors)
+      : yield* verifyRenderedSteps(out.text, today, document, clone, state.model.parseErrors, false);
     if (v.ok) {
-      state.lastRenderMs = out.ms;
-      state.lastBytes = out.text.length;
-      state.lastOutcome = print.size
+      const stale = renderSuperseded(session, generation);
+      if (stale) return fallback(stale, today);
+      const outcome = print.size
         ? { text: out.text, scope: 'partial', reason: firstDiff, printed: print.size }
         : { text: out.text, scope: null };
-      if (v.model) offerCandidate(v.model, out.text, clone, capture);
+      const paired = v.model ? yield* pairCapturedSteps(clone, v.model, originalSnapshotNode) : null;
+      const late = renderSuperseded(session, generation);
+      if (late) return fallback(late, today);
+      state.lastRenderMs = out.ms;
+      state.lastBytes = out.text.length;
+      state.lastOutcome = outcome;
+      if (v.model) offerCandidate(v.model, out.text, capture, paired);
       return out.text;
     }
     if (firstDiff === null) firstDiff = v.diff;
     if (!v.at || !widen(clone, nodeAt(clone, v.at), print)) return fallback(firstDiff, today);
   }
   return fallback(firstDiff, today);
+}
+
+/**
+ * Why a render this generator laid out can no longer be trusted, or null. Only a yield
+ * can make this answer yes: a drained render never leaves this task.
+ */
+function renderSuperseded(session, generation) {
+  if (state.session !== session) return 'render refused: the session ended while this render ran';
+  if (!state.installed) return 'render refused: the source map was uninstalled while this render ran';
+  if (state.repairs !== generation) return 'render refused: the map was re-paired while this render ran';
+  return null;
 }
 
 /**
@@ -337,8 +372,7 @@ export function renderSave(clone, today, opts = {}) {
  * does not correspond, node for node, leaves the capture without an artifact, and the
  * accepted save takes the inspection path it takes today.
  */
-function offerCandidate(m, html, clone, capture) {
-  const paired = pairCaptured(clone, m, originalSnapshotNode);
+function offerCandidate(m, html, capture, paired) {
   if (!paired) return;
   attachCaptureArtifact({
     captureId: capture.captureId,
@@ -515,16 +549,27 @@ function scheduleRefresh() {
  * idle callback of a refresh that `text()` or `locate()` already ran harmless.
  */
 function refreshNow() {
+  drain(refreshNowSteps());
+}
+
+/**
+ * The same refresh, sliced: modelling yields, and nothing the session holds is written
+ * until the last yield is behind it.
+ *
+ * An aborted slice must leave the queued refresh queued, with its bytes, so the work is
+ * simply done again — nothing is half-adopted, and no counter is charged twice. That is
+ * why the queue is read into locals and committed at the end, and why a newer model,
+ * adoption or session arriving during a yield abandons this attempt rather than
+ * overwriting it: the newer one left its own refresh queued.
+ */
+export function* refreshNowSteps() {
   if (!state.refreshQueued) return;
-  state.refreshQueued = false;
-  if (!state.installed) return;
+  if (!state.installed) { state.refreshQueued = false; return; }
+  const session = state.session;
+  const repairs = state.repairs;
+  const adoptions = state.adoptions;
   const bytes = state.pendingBytes;
-  state.pendingBytes = null;
   const refetch = state.refetch && bytes === null;
-  if (refetch) state.refetch = false;
-  // Counted even when the re-pair below fails: either way this page is not the page a
-  // candidate captured before it was built against.
-  state.repairs++;
   const t = now();
   // The two halves fail independently, so they are tried independently. A refused
   // re-model used to skip the re-pair with it, and the re-pair is the half that
@@ -535,7 +580,7 @@ function refreshNow() {
   let m = state.model;
   if (bytes !== null) {
     try {
-      const next = model(bytes);
+      const next = yield* modelSteps(bytes);
       const refused = checkSource(next, document);
       if (refused) throw new Error(refused);
       m = next;
@@ -543,20 +588,37 @@ function refreshNow() {
       console.warn('clayjs: source map kept the previous model, the accepted bytes did not model:', err);
     }
   }
+  yield;
+  if (!superseded(session, repairs, adoptions)) return;
+  let paired = null;
   try {
-    const { map, stats } = pairAgainstPage(m);
-    state.model = m;
-    state.map = map;
-    state.stats = stats;
-    state.refreshes++;
-    state.timing.refresh = now() - t;
+    paired = pairAgainstPage(m);
   } catch (err) {
     // The map is now stale rather than wrong: it still describes the pairing as of
     // the last successful refresh. Renders off a stale map verify or fall back like
     // any other, so this costs formatting fidelity and nothing else.
     console.warn('clayjs: source map could not re-pair, continuing on the previous map:', err);
   }
+  state.refreshQueued = false;
+  state.pendingBytes = null;
+  if (refetch) state.refetch = false;
+  // Counted even when the re-pair above failed: either way this page is not the page a
+  // candidate captured before it was built against.
+  state.repairs++;
+  if (paired) {
+    state.model = m;
+    state.map = paired.map;
+    state.stats = paired.stats;
+    state.refreshes++;
+    state.timing.refresh = now() - t;
+  }
   if (refetch) refetchModel();
+}
+
+/** Whether something newer than the refresh this generator started arrived while it yielded. */
+function superseded(session, repairs, adoptions) {
+  return state.session === session && state.installed
+    && state.repairs === repairs && state.adoptions === adoptions;
 }
 
 /**

@@ -255,3 +255,222 @@ describe("an abort at the Nth yield leaves no partial state", () => {
     expect(drain(vDiffSteps(left, right, "html"))).toBe(null);
   });
 });
+
+/**
+ * Every field of the session a caller can observe, except the clocks that measure it and
+ * the two counters that only ever go up: those are compared as increments.
+ */
+const sessionShape = (stats) => {
+  const { timing, lastRenderMs, refreshes, ...rest } = stats;
+  return rest;
+};
+
+/** The same, with the render's own clock kept: an aborted render must not move it either. */
+const sessionState = (stats) => {
+  const { timing, ...rest } = stats;
+  return rest;
+};
+
+/**
+ * A live document seeded from `html`, with the session installed around it. The fetch
+ * answers with the document's own serialization, so the model and the map describe the
+ * page and every render below verifies.
+ */
+async function installSession(html) {
+  jest.resetModules();
+  const parsed = new DOMParser().parseFromString(html, "text/html");
+  document.replaceChild(document.importNode(parsed.documentElement, true), document.documentElement);
+  window.clayEditMode = true;
+  const today = "<!DOCTYPE html>" + document.documentElement.outerHTML;
+  global.fetch = jest.fn(async () => ({
+    ok: true,
+    status: 200,
+    redirected: false,
+    type: "basic",
+    headers: { get: (name) => (name.toLowerCase() === "content-type" ? "text/html; charset=utf-8" : null) },
+    text: async () => today,
+  }));
+  const snapshot = await import("../../src/core/snapshot.js");
+  const session = await import("../../src/source/session.js");
+  await session.start({ context: null, latest: () => null });
+  return { session, snapshot, today };
+}
+
+const saveClone = (snapshot) => snapshot.captureSaveClone({ flushUndo: false, authored: false });
+
+let comparedSessions = 0;
+let comparedSessionYields = 0;
+
+/**
+ * The SESSION's two step forms, over the same corpus: `renderSaveSteps` and
+ * `refreshNowSteps`, drained and sliced, against the synchronous functions they are the
+ * drain of. There is no second implementation to compare against here — the
+ * synchronous function IS `drain` of the generator — so what these tests are for is
+ * the other half of the claim: slicing changes nothing. A yield that lands between two
+ * fields of a save's session state would hand back a different session, and that is
+ * exactly what a sliced run and an aborted run would show.
+ */
+describe("the whole source corpus: the session's render and refresh step forms equal the synchronous ones", () => {
+  beforeEach(() => { jest.useFakeTimers(); });
+
+  afterEach(() => { jest.useRealTimers(); });
+
+  test.each(CORPUS)("%s", async (file) => {
+    const src = readFileSync(join(ROOT, file), "utf8");
+    const { session, snapshot, today } = await installSession(src);
+    expect(session.installed()).toBe(true);
+
+    // The render: one save, three ways. The bytes are the whole assertion of the render
+    // (a fallback hands back today's), and the session it leaves behind is the other.
+    const expected = session.renderSave(saveClone(snapshot), today);
+    const afterSync = sessionShape(session.stats());
+    const refreshes = session.stats().refreshes;
+    expect(typeof expected).toBe("string");
+
+    expect(drain(session.renderSaveSteps(saveClone(snapshot), today))).toBe(expected);
+    expect(sessionShape(session.stats())).toEqual(afterSync);
+
+    let yields = 0;
+    const slicedValue = await runSliced(session.renderSaveSteps(saveClone(snapshot), today), {
+      budgetMs: 0,
+      yieldTask: async () => { yields++; await Promise.resolve(); },
+    });
+    comparedSessionYields += yields;
+    expect(slicedValue).toBe(expected);
+    expect(sessionShape(session.stats())).toEqual(afterSync);
+    // A render refreshes nothing: no refresh was queued, so none of the three ran one.
+    expect(session.stats().refreshes).toBe(refreshes);
+
+    // The refresh: a save was accepted, so the next save is measured from those bytes.
+    // The first refresh runs drained and fixes the state all three have to land on; the
+    // sliced one and the synchronous one are asked to land on exactly it.
+    const accepted = today.replace("<html", '<html data-refreshed="1"');
+    const refreshBase = session.stats().refreshes;
+    session.adoptAccepted(accepted, null);
+    drain(session.refreshNowSteps());
+    const expectedRefresh = sessionShape(session.stats());
+    expect(session.stats().refreshes).toBe(refreshBase + 1);
+    expect(session.text()).toBe(accepted);
+
+    session.adoptAccepted(accepted, null);
+    let refreshYields = 0;
+    await runSliced(session.refreshNowSteps(), {
+      budgetMs: 0,
+      yieldTask: async () => { refreshYields++; await Promise.resolve(); },
+    });
+    comparedSessionYields += refreshYields;
+    expect(sessionShape(session.stats())).toEqual(expectedRefresh);
+    expect(session.stats().refreshes).toBe(refreshBase + 2);
+    expect(session.text()).toBe(accepted);
+
+    session.adoptAccepted(accepted, null);
+    session.stats();
+    expect(sessionShape(session.stats())).toEqual(expectedRefresh);
+    expect(session.stats().refreshes).toBe(refreshBase + 3);
+    expect(session.text()).toBe(accepted);
+
+    comparedSessions++;
+  });
+
+  test("the sweep compared real sessions and real yields", () => {
+    expect(comparedSessions).toBe(CORPUS.length);
+    expect(comparedSessionYields).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * Aborting the session's step forms.
+ *
+ * `renderSave` and `refreshNow` touch session state, and the step forms exist so the same
+ * work can be spread over tasks. That is only safe if a slice that stops in the middle
+ * leaves the session exactly as it found it: an aborted render must not have recorded an
+ * outcome or a byte count, and an aborted refresh must not have taken the queued bytes,
+ * charged a repair, or left half a model behind. The refresh is aborted twice for that
+ * reason: a queued refresh that survives an abort is handed to the second attempt
+ * unchanged, so the second attempt must offer the same yields, and the state it finally
+ * lands in must be the state the unaborted one did.
+ */
+describe("aborting the session's step forms leaves the session as it was", () => {
+  const src = bigDocument();
+  const N = [1, 2, 3, 5];
+  let session, snapshot, today, expected;
+
+  beforeAll(async () => {
+    ({ session, snapshot, today } = await installSession(src));
+    expect(session.installed()).toBe(true);
+    expected = session.renderSave(saveClone(snapshot), today);
+  });
+
+  beforeEach(() => { jest.useFakeTimers(); });
+
+  afterEach(() => { jest.useRealTimers(); });
+
+  // A session that has never rendered, so every field a save writes is untouched and a
+  // slice that wrote one before its yield cannot pass by writing the value that was
+  // already there.
+  test.each(N)("renderSaveSteps at yield %i", async (n) => {
+    const target = await installSession(src);
+    expect(target.session.installed()).toBe(true);
+    const before = sessionState(target.session.stats());
+    expect(before.lastBytes).toBeNull();
+    expect(before.lastRenderMs).toBeNull();
+    const { result, yields } = await abortAt(
+      target.session.renderSaveSteps(saveClone(target.snapshot), target.today), n);
+    expect(result).toEqual({ aborted: true });
+    expect(yields).toBe(n);
+    expect(sessionState(target.session.stats())).toEqual(before);
+    expect(target.session.renderSave(saveClone(target.snapshot), target.today)).toBe(expected);
+  });
+
+  test.each(N)("refreshNowSteps at yield %i", async (n) => {
+    const bytes = today.replace("<html", '<html data-refreshed="aborted"');
+    session.adoptAccepted(bytes, null);
+    drain(session.refreshNowSteps());
+    const expectedRefresh = sessionShape(session.stats());
+    const refreshBase = session.stats().refreshes;
+    expect(session.text()).toBe(bytes);
+
+    session.adoptAccepted(bytes, null);
+    const first = await abortAt(session.refreshNowSteps(), n);
+    expect(first.result).toEqual({ aborted: true });
+    expect(first.yields).toBe(n);
+    const second = await abortAt(session.refreshNowSteps(), n);
+    expect(second.result).toEqual({ aborted: true });
+    expect(second.yields).toBe(n);
+    session.stats();
+    expect(sessionShape(session.stats())).toEqual(expectedRefresh);
+    expect(session.stats().refreshes).toBe(refreshBase + 1);
+    expect(session.text()).toBe(bytes);
+  });
+
+  // The yields of a re-model are all in its parse, so the fixed points above all stop
+  // inside it. The last yield comes after the model is built and before the re-pair is
+  // committed, which is the assignment an abort would otherwise keep.
+  test("refreshNowSteps at its last yield", async () => {
+    const target = await installSession(src);
+    const bytes = target.today.replace("<html", '<html data-refreshed="aborted"');
+    const refreshBase = target.session.stats().refreshes;
+    target.session.adoptAccepted(bytes, null);
+    let total = 0;
+    await runSliced(target.session.refreshNowSteps(), {
+      budgetMs: 0,
+      yieldTask: async () => { total++; await Promise.resolve(); },
+    });
+    expect(total).toBeGreaterThan(1);
+    const expected = sessionShape(target.session.stats());
+    expect(target.session.stats().refreshes).toBe(refreshBase + 1);
+    expect(target.session.text()).toBe(bytes);
+
+    target.session.adoptAccepted(bytes, null);
+    const first = await abortAt(target.session.refreshNowSteps(), total);
+    expect(first.result).toEqual({ aborted: true });
+    expect(first.yields).toBe(total);
+    const second = await abortAt(target.session.refreshNowSteps(), total);
+    expect(second.result).toEqual({ aborted: true });
+    expect(second.yields).toBe(total);
+    target.session.stats();
+    expect(sessionShape(target.session.stats())).toEqual(expected);
+    expect(target.session.stats().refreshes).toBe(refreshBase + 2);
+    expect(target.session.text()).toBe(bytes);
+  });
+});
