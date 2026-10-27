@@ -42,4 +42,5 @@ export const COMMAND_FEATURES = {
   titleCover: { module: "page/features/title-cover.js", load: () => import("./title-cover.js") },
   exportHtml: { module: "page/features/export-html.js", load: () => import("./export-html.js") },
   importMarkdown: { module: "page/features/import-markdown.js", load: () => import("./import-markdown.js") },
+  exportMarkdown: { module: "page/features/export-markdown.js", load: () => import("./export-markdown.js") },
 };
