@@ -642,9 +642,14 @@ export function captureForComparisonAndDirty({ flushUndo = true } = {}) {
  * @param {boolean} options.emitForSync - Whether to emit snapshot-ready event (default: true)
  * @param {boolean} options.forRequest - These bytes go to a host, so the renderer may
  *   attach the verified model they came from, for the accepted save to adopt
+ * @param {?{name: string, content: string}} options.pageFormatMarker - The document format
+ *   these bytes must declare, as the attributes of the marker element. It goes into the
+ *   save clone after the comparison domains are read and before the renderer verifies, so
+ *   the bytes verified are the bytes sent; the comparison baselines stay marker-free,
+ *   exactly as they do on the one-task path
  * @returns {{ captureId: number, steps: function(): Generator, drop: function(): void }}
  */
-export function beginSaveCapture({ emitForSync = true, flushUndo = true, requestRefresh = false, forRequest = false } = {}) {
+export function beginSaveCapture({ emitForSync = true, flushUndo = true, requestRefresh = false, forRequest = false, pageFormatMarker = null } = {}) {
   if (!Number.isSafeInteger(captureCounter + 1)) throw new Error('Save capture identity exhausted');
   const captureId = ++captureCounter;
   // The context this capture's renderer may attach a private artifact to, and the
@@ -719,6 +724,7 @@ export function beginSaveCapture({ emitForSync = true, flushUndo = true, request
   const pin = {
     captureId,
     context,
+    pageFormatMarker,
     clone,
     compareClone,
     dirtyClone,
@@ -741,6 +747,28 @@ export function beginSaveCapture({ emitForSync = true, flushUndo = true, request
   });
 }
 
+/**
+ * Declare the document format these bytes carry, in the save clone only.
+ *
+ * The same marker `withPageFormatFloor` puts in the final string, applied to the tree the
+ * renderer verifies so a prepared save cannot verify one document and send another. A
+ * clone already at that floor is left exactly as it is, because the string transform
+ * leaves such a document unchanged too.
+ */
+function setFormatMarker(clone, marker) {
+  const head = clone.querySelector('head');
+  if (!head) return;
+  const existing = clone.querySelector(`meta[name="${marker.name}"]`);
+  if (existing) {
+    if (existing.getAttribute('content') !== marker.content) existing.setAttribute('content', marker.content);
+    return;
+  }
+  const meta = clone.ownerDocument.createElement('meta');
+  meta.setAttribute('name', marker.name);
+  meta.setAttribute('content', marker.content);
+  head.appendChild(meta);
+}
+
 /** The resumable half of a save capture: three serializations, then the renderer. */
 function* saveSteps(pin) {
   const { captureId } = pin;
@@ -755,6 +783,7 @@ function* saveSteps(pin) {
   yield;
   const forDirty = pin.dirtyClone ? serializeForCompare(pin.dirtyClone) : forComparison;
   yield;
+  if (pin.pageFormatMarker) setFormatMarker(pin.clone, pin.pageFormatMarker);
   const forSave = yield* rendererSteps(pin.clone, today, pin);
   const result = { forSave, forComparison, forDirty, captureId };
   if (pin.context && pin.context.artifact) captureArtifacts.set(result, pin.context.artifact);

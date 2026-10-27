@@ -15,6 +15,10 @@ import { lastSeenEtag, conditionalSaves, recordEtag } from "./etag.js";
 import { hostMeta } from "./host-meta.js";
 import { saveSize, storedFile, knownSaveLimit, saveLimit, announceSaveSize } from "./save-size.js";
 import { PAGE_FORMAT, PAGE_FORMAT_HEADER, knownPageFormatFloor, withPageFormatFloor } from "./page-format.js";
+
+// Re-exported for the save lane: it reads the floor and writes the marker these bytes
+// carry, without a second import of the format module.
+export { PAGE_FORMAT_META, knownPageFormatFloor } from "./page-format.js";
 import "./runtime-url.js";
 import {
   getPageContents,
@@ -30,6 +34,10 @@ import {
 // =============================================================================
 
 let saveInProgress = false;
+// Who holds the lane while a save prepares. A capture that will send later takes the lane
+// before its first await, so no second save can start work on the page it is reading; the
+// token is what lets that same save enter `runSave` while its own claim still stands.
+let laneHolder = null;
 const SAVE_PATH = '/_/save';
 const SAVE_TIMEOUT_MS = 12000;
 // The browser caps a keepalive body (Chromium refuses one over 64 KB), and it counts
@@ -90,6 +98,40 @@ export async function withKeepalive(keepalive, run) {
  */
 export function isSaveInProgress() {
   return saveInProgress;
+}
+
+/**
+ * Take the save lane for a capture that will prepare before it can send.
+ *
+ * Runs in the caller's own task, before its first await, so a second save asked for while
+ * the first is preparing records intent instead of capturing the page again. The token
+ * comes back opaque: only the holder can enter `runSave` with it, and only the holder
+ * (or `runSave` settling that request) gives the lane back.
+ *
+ * @returns {?Object} the owner token, or null when a save already holds the lane
+ */
+export function reserveSaveLane() {
+  if (saveInProgress) return null;
+  saveInProgress = true;
+  laneHolder = { reserved: true };
+  return laneHolder;
+}
+
+/**
+ * Give the lane back after a preparation that took it. Idempotent, and harmless once the
+ * save it was reserved for has settled the lane itself.
+ *
+ * @param {Object} owner - the token `reserveSaveLane` returned
+ */
+export function releaseSaveLane(owner) {
+  if (!owner || laneHolder !== owner) return;
+  laneHolder = null;
+  saveInProgress = false;
+}
+
+/** Whether the next save rides a keepalive hint, which an unload flush cannot wait on. */
+export function keepaliveHeld() {
+  return nextSaveKeepalive;
 }
 
 /**
@@ -885,7 +927,7 @@ async function sendSave(content, { captureId = null, conversionHeader = null, at
 // `pageFormatFloor` is internal: one save may carry a floor this tab has not
 // noted yet, which is how the format gate's activation writes the marker. It
 // raises these bytes only, never what the tab knows the document at.
-function runSave(html, captureId, callback, conversion, capture = null, pageFormatFloor = 0) {
+function runSave(html, captureId, callback, conversion, capture = null, pageFormatFloor = 0, lane = null) {
   // A capture taken before the floor rose cannot drop the marker by omitting it:
   // the bytes that go out carry the floor this tab last saw. At floor 0 this is
   // the string itself, unchanged.
@@ -897,6 +939,10 @@ function runSave(html, captureId, callback, conversion, capture = null, pageForm
     // recovered through the host's receipt reaches `accepted` like any other success,
     // so it adopts the artifact of the request that landed.
     const artifact = captureArtifact(capture);
+    // A prepared save already holds the lane: `saveInProgress` is this call's own claim,
+    // and its preparation gives it back once this save's bookkeeping is done.
+    const holdsLane = () => lane !== null && laneHolder === lane;
+    const releaseOwnLane = () => { if (!holdsLane()) saveInProgress = false; };
     const finished = (result, accepted = false) => {
       if (accepted) notifySaveAccepted(html, captureId ?? null, artifact);
       releaseCaptureArtifact(capture);
@@ -913,7 +959,7 @@ function runSave(html, captureId, callback, conversion, capture = null, pageForm
     if (!isEditMode && !window.clay?.testMode) {
       return finished(skippedResult('Not in edit mode'));
     }
-    if (saveInProgress) {
+    if (saveInProgress && !holdsLane()) {
       return finished(skippedResult('Save already in progress'));
     }
 
@@ -929,7 +975,7 @@ function runSave(html, captureId, callback, conversion, capture = null, pageForm
     // Test mode: skip network request, return mock success
     if (window.clay?.testMode) {
       setTimeout(() => {
-        saveInProgress = false;
+        releaseOwnLane();
         finished(successResult({ msg: 'Test mode: save skipped' }));
       }, 0);
       return;
@@ -945,7 +991,7 @@ function runSave(html, captureId, callback, conversion, capture = null, pageForm
     const size = saveSize(storedFile(html), knownSaveLimit());
     announceSaveSize(size);
     if (size.state === 'over') {
-      saveInProgress = false;
+      releaseOwnLane();
       return finished(tooLargeResult(size));
     }
 
@@ -955,7 +1001,7 @@ function runSave(html, captureId, callback, conversion, capture = null, pageForm
       // follow-up save can start it immediately rather than being told the lane
       // is busy by the save that just finished.
       .then(result => {
-        saveInProgress = false;
+        releaseOwnLane();
         // A host's 413 is the same refusal the guard above makes, so it carries the
         // same measurement. Its own answer about the size wins over nothing: the bytes
         // are this attempt's, and the limit is still only what discovery advertised.
@@ -998,8 +1044,8 @@ export function saveHtml(html, callback = () => {}) {
  * @param {Object} [options.conversion] - {source:'file', base} or {source:'room', base, epoch}
  * @returns {Promise<Object>}
  */
-export function saveCapturedHtml(html, captureId, callback = () => {}, { conversion, capture = null, pageFormatFloor } = {}) {
-  return runSave(html, captureId, callback, conversion, capture, pageFormatFloor);
+export function saveCapturedHtml(html, captureId, callback = () => {}, { conversion, capture = null, pageFormatFloor, lane = null } = {}) {
+  return runSave(html, captureId, callback, conversion, capture, pageFormatFloor, lane);
 }
 
 /**

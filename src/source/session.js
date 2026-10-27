@@ -726,6 +726,15 @@ export function stats() {
 
 export const installed = () => state.installed;
 
+/**
+ * How many times the map has been rebuilt since this session installed.
+ *
+ * A render is refused when this changes while it runs, and a save that prepares across
+ * tasks is invalidated by the same change: its bytes were laid out against a pairing that
+ * no longer describes the page.
+ */
+export const repairGeneration = () => state.repairs;
+
 /** The facade's dispose: take the install back, and invalidate whatever was still loading. */
 export function release() {
   uninstall();

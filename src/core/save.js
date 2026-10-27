@@ -20,9 +20,14 @@ import {
   isSaveInProgress,
   saveFateIsUnknown,
   withKeepalive,
-  setExitSave
+  setExitSave,
+  reserveSaveLane,
+  releaseSaveLane,
+  keepaliveHeld,
+  knownPageFormatFloor,
+  PAGE_FORMAT_META
 } from "./save-core.js";
-import { captureForComparisonAndDirty, captureForSaveAndComparison, captureForDirtyCheck, captureSaveClone, releaseCaptureArtifact } from "./snapshot.js";
+import { beginSaveCapture, captureForComparisonAndDirty, captureForSaveAndComparison, captureForDirtyCheck, captureSaveClone, releaseCaptureArtifact } from "./snapshot.js";
 import { saveLimit, saveLimits, inspectSaveSize } from "./save-size.js";
 import { paintSignature } from "../lib/derived.js";
 import { NO_TRIGGER_AUTOSAVE_SELECTOR } from "../lib/region-policy.js";
@@ -41,7 +46,7 @@ import { initUserGesture, markExplicitSave, clearExplicitSave } from "../lib/use
 import { bytesUnsaved } from "./unsaved-warning.js";
 import { bootPhase } from "./boot-phase.js";
 import { createAutosaveScheduler } from "../lib/autosave-scheduler.js";
-import { noteRecoveryCapture, noteRecoverySettled } from "./recovery.js";
+import { beginRecoveryCapture, finishRecoveryCapture, noteRecoveryCapture, noteRecoverySettled } from "./recovery.js";
 
 // Keep this library's own root state out of the saved bytes.
 //
@@ -857,6 +862,316 @@ export function setLastSavedContents(val) {
 
 const monotonic = () => (typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now());
 
+// A document whose last save was at least this big prepares its next one across tasks.
+// Verifying a file that size is seconds of uninterrupted work, and every keystroke behind
+// it waits; below the threshold the one-task capture is cheaper than the scheduling.
+export const SLICED_SAVE_MIN_BYTES = 300 * 1024;
+// The main-thread time one preparation slice may spend before handing the page back.
+const SLICED_SAVE_BUDGET_MS = 4;
+// What a save answers when the page changed underneath its preparation. A skip, because
+// nothing was sent: the bytes are still here, and the next save starts over.
+const SAVE_PREPARE_CANCELLED = 'Save cancelled: the page changed while it prepared';
+
+// The save preparing across tasks right now, for a flush to wait on: it has taken the lane
+// and sent nothing, so its own events have not fired yet.
+let preparing = null;
+// The lazily loaded driver for the steps. Null until something asks, so a page whose
+// documents are small never loads it, and false-keyed off for good if it cannot load.
+let prepDriver = null;
+let prepLoading = null;
+let prepFailed = false;
+
+function loadPreparer() {
+  if (!prepLoading) {
+    prepLoading = import('./save-prepare.js').then(
+      (mod) => { prepDriver = mod; return mod; },
+      (err) => {
+        prepFailed = true;
+        console.info('clayjs: sliced save off (' + (err && err.message ? err.message : err) + '); saves prepare in one task');
+        return null;
+      }
+    );
+  }
+  return prepLoading;
+}
+
+// The size of the bytes the last save wrote. A document that has never saved is as big as
+// its first capture, which is not known before taking it, so it prepares in one task once
+// and slices from then on.
+const lastSavedSize = () => (typeof lastSavedBytes === 'string' ? lastSavedBytes.length : 0);
+
+// Whether this save prepares across tasks instead of in the caller's.
+//
+// A hidden tab has no typing to protect and timers there are throttled: it keeps the
+// one-task path. A keepalive save belongs to a page that is going away and cannot wait for
+// a task boundary, so the unload flush keeps it too.
+function preparesSliced() {
+  if (prepFailed) return false;
+  if (document.hidden) return false;
+  if (keepaliveHeld()) return false;
+  return lastSavedSize() >= SLICED_SAVE_MIN_BYTES;
+}
+
+// The source session's own count of map rebuilds. A save laid out against a pairing that
+// has been rebuilt describes a page that is no longer here.
+function sourceRepairGeneration() {
+  const source = window.clay?.source;
+  return source && typeof source.repairGeneration === 'number' ? source.repairGeneration : 0;
+}
+
+// Why a preparing job must not be sent any more, or null when it may go out.
+//
+// Ordinary typing is deliberately NOT one of these: the capture is a checkpoint, and
+// saving it later is the point. Only an invalidation cancels: the session, the mode, the
+// host's permission, a newer write to this document, a morph, a rebuilt source map, or a
+// document format that rose while the job prepared.
+function prepareInvalidation(ctx, epoch, morph) {
+  if (morph) return 'morph';
+  if (saveGenerationAt !== epoch.generation || !isEditMode) return 'mode';
+  if (!savesAdmitted(ctx.permit)) return 'session';
+  if (refusesSave()) return 'refused';
+  if (baselineRevision !== epoch.baselines) return 'newer save';
+  if (sourceRepairGeneration() !== epoch.repair) return 'repair';
+  if (Math.max(knownPageFormatFloor(), ctx.pageFormatFloor) > epoch.floor) return 'floor';
+  return null;
+}
+
+/**
+ * Everything one capture decides, for both save paths.
+ *
+ * The same bytes, the same refusals and the same receipts either way: a capture taken in
+ * one task and a capture prepared across tasks differ only in when their verification
+ * ran, never in what is asked of the result. `noteRecovery` is how the async path records
+ * coverage from its pinned candidates; `release` gives back whatever the capture holds
+ * when nothing is sent.
+ */
+async function settleCaptured({
+  explicit,
+  forced = false,
+  forSave,
+  forComparison,
+  forDirty,
+  captureId,
+  gateToken,
+  costMs,
+  pageFormatFloor = 0,
+  quietConflict = false,
+  laneHeld = false,
+  lane = null,
+  capture,
+  noteRecovery,
+  release,
+  callback,
+}) {
+  noteRecovery();
+
+  if (explicit && !forced) {
+    // An explicit save asks the DIRTY question: write anything the person would
+    // otherwise lose, including an edit inside a batching region that was never
+    // going to autosave itself.
+    unsavedChanges = (forDirty !== lastSavedDirty);
+    logSaveCheck('savePage dirty check', !unsavedChanges);
+
+    // Skip if content hasn't changed. Clearing the explicit intent here is the
+    // whole point of scoping it: pressing Save on a clean page sends nothing, and
+    // leaving "a human asked for this" armed would hand it to the next
+    // background write and hide exactly the clobber the guard watches for.
+    if (!unsavedChanges) {
+      clearExplicitSave();
+      gateClearIfUnchanged(gateToken);
+      release();
+      const skipped = skipped_('No changes to save');
+      settleRecoveryCapture(captureId, skipped);
+      if (typeof callback === 'function') callback(skipped);
+      return { result: skipped, dispatched: false };
+    }
+  } else if (!explicit) {
+    // For autosave: while the page is still settling, content must differ from
+    // BOTH the load-time baseline and the last save, so module setup churn cannot
+    // trigger a save. Once settled, the baseline veto is disarmed and only the
+    // last save matters — otherwise undoing back to the page's original state
+    // can never be persisted, because it matches the baseline forever.
+    const differsFromBaseline = !baselineActive || forComparison !== baselineContents;
+    const differsFromLastSave = forComparison !== lastSavedContents;
+
+    logSaveCheck('throttled vs baseline', !differsFromBaseline);
+    logSaveCheck('throttled vs lastSave', !differsFromLastSave);
+
+    if (!(differsFromBaseline && differsFromLastSave)) {
+      // This capture's comparison leaves out batching (no-trigger-autosave)
+      // regions, which the gate counts, so on a page that has one the dirty
+      // domain must match too before the gate is cleared.
+      let clear = false;
+      try {
+        clear = !differsFromLastSave && (!document.querySelector(NO_TRIGGER_AUTOSAVE_SELECTOR)
+          || (pageMaybeDirty() && forDirty === lastSavedDirty));
+      } catch (err) {
+        console.error('savePageThrottled: dirty domain check failed', err);
+      }
+      if (clear) gateClearIfUnchanged(gateToken);
+      autosaveScheduler.noteCost(costMs);
+      release();
+      const skipped = skipped_('No changes to save');
+      settleRecoveryCapture(captureId, skipped);
+      if (typeof callback === 'function') callback(skipped);
+      return { result: skipped, dispatched: false };
+    }
+
+    unsavedChanges = true;
+
+    // A save that is not this lane's own (a raw saveHtml) may still be on the
+    // wire. The capture has already been taken, so answer like the explicit lane
+    // and keep these newer bytes queued behind it. A prepared save holds the lane
+    // itself, so it can never be looking at somebody else's request here.
+    if (!laneHeld && isSaveInProgress()) {
+      pendingSave = true;
+      release();
+      const skipped = skipped_('Save already in progress');
+      settleRecoveryCapture(captureId, skipped);
+      if (typeof callback === 'function') callback(skipped);
+      return { result: skipped, dispatched: false };
+    }
+  }
+
+  // Start debounced 'saving' state (only shows if save takes >500ms)
+  setSavingState();
+
+  // Use the captured save path with our pre-captured content (avoids double capture)
+  const comparison = { forComparison, forDirty };
+  inFlightComparisons.add(comparison);
+  ownSaveOnWire = true;
+  return new Promise((resolve) => {
+    saveCapturedHtml(forSave, captureId, (result) => {
+      ownSaveOnWire = false;
+      inFlightComparisons.delete(comparison);
+      const completedAt = monotonic();
+      applySaveResult(result, comparison.forComparison, comparison.forDirty, forced ? 'updated after force save' : 'updated after save', gateToken, forSave, captureId, quietConflict);
+      if (!explicit) autosaveScheduler.noteCost(costMs + (monotonic() - completedAt));
+      if (typeof callback === 'function') callback(result);
+      resolve({ result, dispatched: true });
+    }, { capture, pageFormatFloor, lane });
+  });
+}
+
+/**
+ * Prepare one capture across tasks and send it, or answer like a skip.
+ *
+ * The lane was reserved before this function's first await, so nothing else can start a
+ * save on the page this capture read. Every outcome gives it back: a send hands it to
+ * `runSave`, which settles it with the bookkeeping, and a cancellation gives it back here.
+ */
+async function runSlicedSave(ctx, lane) {
+  // A morph replaces the page under a job that is only half verified. What it applied may
+  // be a disk frame or a peer's edit, so these bytes describe a page that is gone.
+  const applied = { over: false };
+  const onApplied = () => { applied.over = true; };
+  document.addEventListener('clay:sync-applied', onApplied);
+  try {
+    for (let round = 0; round < 2; round++) {
+      const gateToken = gateCaptureToken();
+      const epoch = {
+        generation: saveGenerationAt,
+        baselines: baselineRevision,
+        repair: sourceRepairGeneration(),
+        floor: Math.max(knownPageFormatFloor(), ctx.pageFormatFloor),
+      };
+      const job = beginSaveCapture({
+        requestRefresh: true,
+        forRequest: true,
+        pageFormatMarker: epoch.floor ? { name: PAGE_FORMAT_META, content: String(epoch.floor) } : null,
+      });
+      // The copies this capture could cover are the ones held right now: reading them
+      // after the preparation would both miss A's coverage and claim a newer copy's.
+      beginRecoveryCapture(job.captureId);
+      let why = null;
+      const signal = {
+        get aborted() {
+          const reason = prepareInvalidation(ctx, epoch, applied.over);
+          if (reason) why = reason;
+          return !!reason;
+        },
+      };
+      let prepared;
+      try {
+        prepared = await prepDriver.runPreparedSteps(job.steps(), { budgetMs: SLICED_SAVE_BUDGET_MS, signal });
+      } catch (err) {
+        console.error(`${ctx.explicit ? 'savePage' : 'savePageThrottled'}: preparing the save failed`, err);
+        job.drop();
+        const result = { msg: err && err.message ? err.message : 'Save failed', msgType: 'error', code: err?.code ?? null, etag: null };
+        setSaveState('error', result.msg, '', { sent: false, code: result.code });
+        settleRecoveryCapture(job.captureId, result);
+        if (typeof ctx.callback === 'function') ctx.callback(result);
+        return { result, dispatched: false };
+      }
+
+      const late = prepared.aborted ? why : prepareInvalidation(ctx, epoch, applied.over);
+      if (!late) {
+        const captured = prepared.result;
+        return await settleCaptured({
+          explicit: ctx.explicit,
+          forced: ctx.forced,
+          forSave: captured.forSave,
+          forComparison: captured.forComparison,
+          forDirty: captured.forDirty,
+          captureId: captured.captureId,
+          gateToken,
+          costMs: prepared.activeMs,
+          pageFormatFloor: ctx.pageFormatFloor,
+          quietConflict: ctx.quietConflict,
+          laneHeld: true,
+          lane,
+          capture: captured,
+          noteRecovery: () => finishRecoveryCapture(captured.captureId, captured.forSave),
+          release: () => job.drop(),
+          callback: ctx.callback,
+        });
+      }
+
+      // Nothing is sent from a capture that cannot be trusted: the clones and the
+      // candidate go, and the waiters hear the skip contract's answer.
+      job.drop();
+      const skipped = skipped_(SAVE_PREPARE_CANCELLED);
+      settleRecoveryCapture(job.captureId, skipped);
+      // The document format rose under a job already prepared: its marker and its
+      // verification both predate the floor, so the capture is taken again at the new one.
+      if (late === 'floor' && round === 0) continue;
+      if (typeof ctx.callback === 'function') ctx.callback(skipped);
+      return { result: skipped, dispatched: false };
+    }
+    const skipped = skipped_(SAVE_PREPARE_CANCELLED);
+    if (typeof ctx.callback === 'function') ctx.callback(skipped);
+    return { result: skipped, dispatched: false };
+  } finally {
+    document.removeEventListener('clay:sync-applied', onApplied);
+    releaseSaveLane(lane);
+  }
+}
+
+/**
+ * Start a prepared save, or answer false so the caller takes the one-task path.
+ *
+ * The lane is reserved and the capture is begun in THIS task, before anything awaits.
+ */
+function startSlicedSave(ctx) {
+  const lane = reserveSaveLane();
+  if (!lane) return false;
+  const task = runSlicedSave(ctx, lane).catch((err) => {
+    console.error('save: preparing the save failed', err);
+    const result = { msg: err && err.message ? err.message : 'Save failed', msgType: 'error', code: err?.code ?? null, etag: null };
+    setSaveState('error', result.msg, '', { sent: false, code: result.code });
+    if (typeof ctx.callback === 'function') ctx.callback(result);
+    return { result, dispatched: false };
+  });
+  preparing = task;
+  task.then((outcome) => {
+    if (preparing === task) preparing = null;
+    ctx.resolve(outcome.result);
+    ctx.settleSoonQueued(outcome.result);
+    if (outcome.dispatched) drainPendingSave();
+  });
+  return true;
+}
+
 /**
  * One save attempt, explicit or automatic.
  *
@@ -938,6 +1253,15 @@ function attemptSaveNow({ kind, permit = null }, callback = () => {}) {
         callback(skipped);
         return resolve(skipped);
       }
+      // A save preparing across tasks holds the lane and has sent nothing yet. This
+      // records intent and nothing more: capturing the page again for it would be the
+      // second full snapshot this split exists to prevent.
+      if (preparing) {
+        pendingAutosave = true;
+        const skipped = skipped_('Save already in progress');
+        callback(skipped);
+        return resolve(skipped);
+      }
       // The dirty gate counts every change no save has accounted for, and it is
       // the cheap half of the old dirtyMatchesLastSave check. When it says clean
       // there is nothing to compare, so answer like the old comparison did and
@@ -966,6 +1290,25 @@ function attemptSaveNow({ kind, permit = null }, callback = () => {}) {
     const wasOffline = !navigator.onLine;
     if (wasOffline) {
       setOfflineStateQuiet();
+    }
+
+    // A document this big prepares its save across tasks, so typing is never blocked for
+    // the whole verification. The claim and the capture are both taken in this task.
+    if (preparesSliced()) {
+      if (!prepDriver) {
+        loadPreparer().then(() => resolve(attemptSaveNow({ kind, permit }, callback)));
+        return;
+      }
+      if (startSlicedSave({
+        explicit,
+        forced: false,
+        permit,
+        pageFormatFloor: 0,
+        quietConflict: false,
+        settleSoonQueued,
+        callback,
+        resolve,
+      })) return;
     }
 
     // Single capture: clone once, get all three versions
@@ -997,99 +1340,23 @@ function attemptSaveNow({ kind, permit = null }, callback = () => {}) {
 
     // The recovery hook sees the accepted capture's exact bytes, before anything is
     // sent, so a copy can be proved to be in them rather than merely to be nearby.
-    noteRecoveryCapture({ captureId, html: forSave });
-
-    if (explicit) {
-      // An explicit save asks the DIRTY question: write anything the person would
-      // otherwise lose, including an edit inside a batching region that was never
-      // going to autosave itself.
-      unsavedChanges = (forDirty !== lastSavedDirty);
-      logSaveCheck('savePage dirty check', !unsavedChanges);
-
-      // Skip if content hasn't changed. Clearing the explicit intent here is the
-      // whole point of scoping it: pressing Save on a clean page sends nothing, and
-      // leaving "a human asked for this" armed would hand it to the next
-      // background write and hide exactly the clobber the guard watches for.
-      if (!unsavedChanges) {
-        clearExplicitSave();
-        gateClearIfUnchanged(gateToken);
-        releaseCaptureArtifact(capture);
-        const skipped = skipped_('No changes to save');
-        settleRecoveryCapture(captureId, skipped);
-        callback(skipped);
-        resolve(skipped);
-        settleSoonQueued(skipped);
-        return;
-      }
-    } else {
-      // For autosave: while the page is still settling, content must differ from
-      // BOTH the load-time baseline and the last save, so module setup churn cannot
-      // trigger a save. Once settled, the baseline veto is disarmed and only the
-      // last save matters — otherwise undoing back to the page's original state
-      // can never be persisted, because it matches the baseline forever.
-      const differsFromBaseline = !baselineActive || forComparison !== baselineContents;
-      const differsFromLastSave = forComparison !== lastSavedContents;
-
-      logSaveCheck('throttled vs baseline', !differsFromBaseline);
-      logSaveCheck('throttled vs lastSave', !differsFromLastSave);
-
-      if (!(differsFromBaseline && differsFromLastSave)) {
-        // This capture's comparison leaves out batching (no-trigger-autosave)
-        // regions, which the gate counts, so on a page that has one the dirty
-        // domain must match too before the gate is cleared.
-        let clear = false;
-        try {
-          clear = !differsFromLastSave && (!document.querySelector(NO_TRIGGER_AUTOSAVE_SELECTOR)
-            || (pageMaybeDirty() && forDirty === lastSavedDirty));
-        } catch (err) {
-          console.error('savePageThrottled: dirty domain check failed', err);
-        }
-        if (clear) gateClearIfUnchanged(gateToken);
-        autosaveScheduler.noteCost(preparedMs);
-        releaseCaptureArtifact(capture);
-        const skipped = skipped_('No changes to save');
-        settleRecoveryCapture(captureId, skipped);
-        callback(skipped);
-        resolve(skipped);
-        return;
-      }
-
-      unsavedChanges = true;
-
-      // A save that is not this lane's own (a raw saveHtml) may still be on the
-      // wire. The capture has already been taken, so answer like the explicit lane
-      // and keep these newer bytes queued behind it.
-      if (isSaveInProgress()) {
-        pendingSave = true;
-        releaseCaptureArtifact(capture);
-        const skipped = skipped_('Save already in progress');
-        settleRecoveryCapture(captureId, skipped);
-        callback(skipped);
-        resolve(skipped);
-        return;
-      }
-    }
-
-    // Start debounced 'saving' state (only shows if save takes >500ms)
-    setSavingState();
-
-    // Use the captured save path with our pre-captured content (avoids double capture)
-    const comparison = { forComparison, forDirty };
-    inFlightComparisons.add(comparison);
-    ownSaveOnWire = true;
-    saveCapturedHtml(forSave, captureId, (result) => {
-      ownSaveOnWire = false;
-      inFlightComparisons.delete(comparison);
-      const completedAt = monotonic();
-      applySaveResult(result, comparison.forComparison, comparison.forDirty, 'updated after save', gateToken, forSave, captureId);
-      if (!explicit) autosaveScheduler.noteCost(preparedMs + (monotonic() - completedAt));
-      if (typeof callback === 'function') {
-        callback(result);
-      }
-      resolve(result);
-      settleSoonQueued(result);
-      drainPendingSave();
-    }, { capture });
+    settleCaptured({
+      explicit,
+      forSave,
+      forComparison,
+      forDirty,
+      captureId,
+      gateToken,
+      costMs: preparedMs,
+      capture,
+      noteRecovery: () => noteRecoveryCapture({ captureId, html: forSave }),
+      release: () => releaseCaptureArtifact(capture),
+      callback,
+    }).then((outcome) => {
+      resolve(outcome.result);
+      settleSoonQueued(outcome.result);
+      if (outcome.dispatched) drainPendingSave();
+    });
   });
 }
 
@@ -1166,6 +1433,25 @@ export function savePageForce(callback = () => {}, { quietConflict = false, page
       setOfflineStateQuiet();
     }
 
+    // A forced save prepares like an ordinary one when the document is this big; it only
+    // skips the dirty question, which `forced` says here.
+    if (preparesSliced()) {
+      if (!prepDriver) {
+        loadPreparer().then(() => resolve(savePageForce(callback, { quietConflict, pageFormatFloor })));
+        return;
+      }
+      if (startSlicedSave({
+        explicit: true,
+        forced: true,
+        permit: null,
+        pageFormatFloor,
+        quietConflict,
+        settleSoonQueued: () => {},
+        callback,
+        resolve,
+      })) return;
+    }
+
     let capture, forSave, forComparison, forDirty, captureId;
     const gateToken = gateCaptureToken();
     try {
@@ -1181,23 +1467,25 @@ export function savePageForce(callback = () => {}, { quietConflict = false, page
       return resolve(result);
     }
 
-    noteRecoveryCapture({ captureId, html: forSave });
-
-    setSavingState();
-
-    const comparison = { forComparison, forDirty };
-    inFlightComparisons.add(comparison);
-    ownSaveOnWire = true;
-    saveCapturedHtml(forSave, captureId, (result) => {
-      ownSaveOnWire = false;
-      inFlightComparisons.delete(comparison);
-      applySaveResult(result, comparison.forComparison, comparison.forDirty, 'updated after force save', gateToken, forSave, captureId, quietConflict);
-      if (typeof callback === 'function') {
-        callback(result);
-      }
-      resolve(result);
-      drainPendingSave();
-    }, { capture, pageFormatFloor });
+    settleCaptured({
+      explicit: true,
+      forced: true,
+      forSave,
+      forComparison,
+      forDirty,
+      captureId,
+      gateToken,
+      costMs: 0,
+      pageFormatFloor,
+      quietConflict,
+      capture,
+      noteRecovery: () => noteRecoveryCapture({ captureId, html: forSave }),
+      release: () => releaseCaptureArtifact(capture),
+      callback,
+    }).then((outcome) => {
+      resolve(outcome.result);
+      if (outcome.dispatched) drainPendingSave();
+    });
   });
 }
 
@@ -1291,6 +1579,13 @@ async function flushBytes(keepalive, deadline, permit, run = { over: false }) {
   let saved = false;
   let etag = null;
   for (let attempt = 0; attempt < 4; attempt++) {
+    // A save still preparing holds the lane and has sent nothing, so it has fired none of
+    // the events below: the flush waits for it rather than reading the page in the middle
+    // of a capture it cannot see.
+    if (preparing) {
+      await preparing;
+      if (run.over) return null;
+    }
     if (isSaveInProgress()) {
       await settled(deadline);
       if (run.over) return null;

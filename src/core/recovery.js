@@ -113,6 +113,34 @@ export function noteRecoveryCapture({ captureId, html } = {}) {
 }
 
 /**
+ * Freeze what every service holds at this capture's boundary.
+ *
+ * A save that prepares across tasks cannot read the services after it, so the copies that
+ * could be covered are pinned here, synchronously, in the task the snapshot was taken in.
+ * `finishRecoveryCapture` then judges exactly those against the bytes the save verifies:
+ * a copy written after this capture is neither covered by it nor acknowledged by it.
+ *
+ * @param {*} captureId
+ */
+export function beginRecoveryCapture(captureId) {
+  if (!services.size || captureId == null) return;
+  for (const service of services) service.pinCapture(captureId);
+}
+
+/**
+ * Record what this capture's final bytes cover, among the copies pinned at its boundary.
+ *
+ * Called with the verified bytes, before anything is sent. Nothing is acknowledged here.
+ *
+ * @param {*} captureId
+ * @param {string} html
+ */
+export function finishRecoveryCapture(captureId, html) {
+  if (!services.size || captureId == null) return;
+  for (const service of services) service.coverCapture(captureId, html);
+}
+
+/**
  * Report how a capture settled.
  *
  * Only a confirmed success acknowledges, and only for the capture whose exact bytes
@@ -153,6 +181,9 @@ export function createRecovery({
   const channels = new Map();
   const listeners = new Set();
   const captures = new Map();
+  // What each preparing capture found held at its boundary, before it could read the
+  // final bytes. Cleared however the capture settles.
+  const pinned = new Map();
   let prepared = null;
   let identity = null;
   let store = null;
@@ -248,6 +279,56 @@ export function createRecovery({
     return covered;
   }
 
+  // The copies a capture taken now could cover, without reading its bytes: they do not
+  // exist yet, and by the time they do a newer copy may have replaced one of these.
+  function pinCapture(captureId) {
+    const list = [];
+    for (const entry of channels.values()) {
+      if (typeof entry.readSaved !== 'function' || !entry.held.size) continue;
+      for (const record of entry.held.values()) {
+        if (record.kind !== TEXT) continue;
+        list.push({
+          channel: entry.channel,
+          key: record.key,
+          id: record.id,
+          revision: record.revision,
+          payload: record.payload,
+        });
+      }
+    }
+    if (list.length) pinned.set(captureId, list);
+  }
+
+  // The same coverage question `capture` asks, over the copies pinned at the capture and
+  // the bytes the save finally holds. The saved map is read once per channel, and only
+  // for a channel that had something it could cover.
+  function coverCapture(captureId, html) {
+    const list = pinned.get(captureId);
+    pinned.delete(captureId);
+    if (!list || typeof html !== 'string') return;
+    const saved = new Map();
+    const covered = new Map();
+    for (const candidate of list) {
+      if (!saved.has(candidate.channel)) {
+        const entry = channels.get(candidate.channel);
+        let read = null;
+        try {
+          read = typeof entry?.readSaved === 'function' ? entry.readSaved(html) : null;
+        } catch (_) {
+          read = null;
+        }
+        saved.set(candidate.channel, read && typeof read.get === 'function' ? read : null);
+      }
+      const read = saved.get(candidate.channel);
+      if (!read || !read.has(candidate.key)) continue;
+      if (!payloadsMatch(read.get(candidate.key), candidate.payload)) continue;
+      const coveredHere = covered.get(candidate.channel) ?? [];
+      coveredHere.push({ id: candidate.id, revision: candidate.revision });
+      covered.set(candidate.channel, coveredHere);
+    }
+    if (covered.size) captures.set(captureId, covered);
+  }
+
   function capture(captureId, html) {
     if (captureId == null || typeof html !== "string") return;
     const covered = new Map();
@@ -277,6 +358,7 @@ export function createRecovery({
   // acknowledgement is ordered against every put this service has already queued:
   // a copy that reaches the database late meets the watermark it was refused by.
   function settle(captureId, ok, etag) {
+    pinned.delete(captureId);
     const covered = captures.get(captureId);
     if (!covered) return Promise.resolve();
     captures.delete(captureId);
@@ -684,7 +766,7 @@ export function createRecovery({
     return flushed;
   }
 
-  const handle = { capture, settle };
+  const handle = { capture, settle, pinCapture, coverCapture };
 
   function channelApi(entry) {
     return {

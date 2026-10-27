@@ -33,7 +33,7 @@ const viaChannel = () => new Promise((resolve) => {
   channel.port2.postMessage(null);
 });
 
-const defaultYieldTask = () => {
+export const defaultYieldTask = () => {
   const scheduler = globalThis.scheduler;
   return scheduler?.yield ? scheduler.yield() : viaChannel();
 };

@@ -191,6 +191,14 @@ export const source = {
   unpaired: () => (session ? session.unpaired() : null),
   /** The save pipeline's own ask: a promise to wait for before its capture, or null. */
   ensureForSave,
+  /**
+   * How many times this session's map has been rebuilt, or 0 before it installs. A save
+   * preparing across tasks stops when this moves under it: its bytes were laid out
+   * against a pairing that no longer describes the page.
+   */
+  get repairGeneration() {
+    return session ? session.repairGeneration() : 0;
+  },
 };
 
 /**
