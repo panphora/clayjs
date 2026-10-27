@@ -1,5 +1,5 @@
 import { onStream } from "./stream-bridge.js";
-import { PAGE_FORMAT, PAGE_FORMAT_HEADER } from "../page/format-level.js";
+import { PAGE_FORMAT, PAGE_FORMAT_HEADER } from "../core/page-format.js";
 
 // The host side of clay.live's fast lane on a host that advertises `live-data`:
 // one POST per frame of ops, one GET for the room's whole state. Both name the

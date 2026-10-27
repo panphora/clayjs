@@ -14,7 +14,7 @@ import { saveToken } from "./host-attrs.js";
 import { lastSeenEtag, conditionalSaves, recordEtag } from "./etag.js";
 import { hostMeta } from "./host-meta.js";
 import { saveSize, storedFile, knownSaveLimit, saveLimit, announceSaveSize } from "./save-size.js";
-import { PAGE_FORMAT, PAGE_FORMAT_HEADER, knownPageFormatFloor, withPageFormatFloor } from "../page/format-level.js";
+import { PAGE_FORMAT, PAGE_FORMAT_HEADER, knownPageFormatFloor, withPageFormatFloor } from "./page-format.js";
 import "./runtime-url.js";
 import {
   getPageContents,
