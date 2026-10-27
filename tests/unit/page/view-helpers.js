@@ -1,6 +1,7 @@
 import { createPageEditor, installPageFeature } from "../../../src/page/editor.js";
 import * as tableFeature from "../../../src/page/features/table.js";
 import * as boardFeature from "../../../src/page/features/board.js";
+import * as chartFeature from "../../../src/page/features/chart.js";
 import * as mediaFeature from "../../../src/page/features/media.js";
 import * as codeFeature from "../../../src/page/features/code.js";
 import { state as pmState } from "../../../src/vendor/prosemirror.vendor.js";
@@ -19,12 +20,13 @@ export const blocksOf = (spec) => {
   spec.forEach(([id, t, c, attrs = {}], i) => { out[id] = { t, pos: String.fromCharCode(66 + i), c, ...attrs }; });
   return out;
 };
-const loaded = { ensure: () => Promise.resolve(), has: (id) => id === "table" || id === "board" || id === "media", dispose() {} };
+const loaded = { ensure: () => Promise.resolve(), has: (id) => id === "table" || id === "board" || id === "chart" || id === "media", dispose() {} };
 export const editor = (spec, options = {}) => {
   const view = createPageEditor(document.body.appendChild(document.createElement("div")), { blocks: blocksOf(spec), features: loaded, ...options });
   if (!options.features) {
     installPageFeature({ view }, "table", tableFeature);
     installPageFeature({ view, board: options.board, undo: options.undo, redo: options.redo }, "board", boardFeature);
+    installPageFeature({ view }, "chart", chartFeature);
     installPageFeature({ view }, "media", mediaFeature);
     installPageFeature({ view, highlight: options.highlight }, "code", codeFeature);
   }

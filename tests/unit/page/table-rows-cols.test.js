@@ -75,7 +75,7 @@ test("moves at the edge refuse", () => {
   expect(moveRow(1)(view.state)).toBe(true);
 });
 
-test("the table's block menu has Chart this table and Import CSV, other blocks do not", () => {
+test("the table's block menu has Chart this table and Import CSV, other blocks do not", async () => {
   const view = editor([["p", "paragraph", "Intro"]], { blocks: { p: { t: "paragraph", pos: "A", c: "Intro" }, tbl } });
   view.dispatch(view.state.tr.setSelection(selectBlocks(view.state.doc, 0)));
   key(view, "/", { ctrlKey: true });
@@ -85,6 +85,7 @@ test("the table's block menu has Chart this table and Import CSV, other blocks d
   key(view, "/", { ctrlKey: true });
   expect(labels(view).slice(-2)).toEqual(["Chart this table", "Import CSV…"]);
   item(view, "Chart this table").click();
+  await new Promise((resolve) => setTimeout(resolve, 0));
   expect(view.state.doc.child(2).type.name).toBe("chart");
   expect(view.state.doc.child(2).attrs.source).toBe("tbl");
 });

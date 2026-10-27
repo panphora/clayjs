@@ -22,8 +22,7 @@ import { mediaPlugin } from "./media.js";
 import { highlightSlot } from "./highlight-slot.js";
 import { tableKeys, tablePlugin } from "./table.js";
 import { tableSelectPlugin } from "./table-select.js";
-import { chartPlugin, ChartView } from "./chart.js";
-import { boardPlugin } from "./board-views.js";
+import { viewFeatures, viewHookPlugin } from "./view-hooks.js";
 import { checklistPlugin, checklistKeys } from "./checklist.js";
 import { csvImportPlugin } from "./csv-import.js";
 import { styleWithLegacyId } from "../lib/style.js";
@@ -535,8 +534,7 @@ export function pagePlugins({ upload = defaultUpload, highlight, history: useHis
     structurePlugin(),
     identityPlugin(),
     tablePlugin(),
-    chartPlugin(),
-    boardPlugin(),
+    viewHookPlugin(),
     checklistPlugin(),
     csvImportPlugin({ upload }),
     collapsePlugin(),
@@ -623,9 +621,7 @@ export function createPageEditor(mount, { blocks = null, onChange = null, upload
     context: (editorView) => ({ view: editorView, upload }),
   });
   const nodeViewRegistry = new Map();
-  const nodeViews = {
-    chart: (node, v, getPos) => new ChartView(node, v, getPos),
-  };
+  const nodeViews = {};
   for (const feature of Object.values(FEATURES)) for (const type of feature.views ?? feature.types) {
     nodeViews[type] = (node, v, getPos, decorations, inner) => {
       const make = nodeViewRegistry.get(node.type.name);
@@ -659,6 +655,7 @@ export function createPageEditor(mount, { blocks = null, onChange = null, upload
     },
   });
   nodeViewRegistries.set(view, nodeViewRegistry);
+  viewFeatures.set(view, features);
   commandHost.attach(view);
   commandHosts.set(view, commandHost);
   const destroy = view.destroy.bind(view);

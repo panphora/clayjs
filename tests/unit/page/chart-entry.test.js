@@ -12,6 +12,7 @@ const item = (view, label) => [...menu(view).querySelectorAll(".page-menu-item")
 const COORDS = { left: 40, right: 48, top: 100, bottom: 120 };
 const slash = (view, query) => { view.coordsAtPos = () => COORDS; for (const ch of `/${query}`) typeText(view, ch); };
 const types = (view) => { const out = []; view.state.doc.forEach((node) => out.push(node.type.name)); return out; };
+const settled = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 test("/chart is listed only when the page has a table", () => {
   const plain = editor([["p", "paragraph", ""]]);
@@ -24,11 +25,12 @@ test("/chart is listed only when the page has a table", () => {
   expect(labels(view)[0]).toBe("Chart");
 });
 
-test("/chart with one table turns the empty line into a bar chart of that table, as one undo step", () => {
+test("/chart with one table turns the empty line into a bar chart of that table, as one undo step", async () => {
   const view = editor([], { blocks: { tbl: table, p: { t: "paragraph", pos: "Z", c: "" } } });
   select(view, posOf(view, "p"));
   slash(view, "chart");
   item(view, "Chart").click();
+  await settled();
   expect(types(view)).toEqual(["table", "chart"]);
   const attrs = view.state.doc.child(1).attrs;
   expect(attrs).toMatchObject({ source: "tbl", kind: "bar", x: "c1", series: ["c2"], pos: "Z" });
@@ -39,15 +41,17 @@ test("/chart with one table turns the empty line into a bar chart of that table,
   expect(view.state.doc.child(1).attrs.id).toBe("p");
 });
 
-test("/chart with several tables asks which one, by their columns", () => {
+test("/chart with several tables asks which one, by their columns", async () => {
   const second = { ...table, pos: "X", cols: { k1: { pos: "1", name: "Month" }, k2: { pos: "2", name: "Revenue", kind: "number" } }, rows: { s1: { pos: "1", cells: { k1: "Jan", k2: "4" } } } };
   const view = editor([], { blocks: { tbl: table, two: second, p: { t: "paragraph", pos: "Z", c: "" } } });
   expect(chartTables(view.state.doc).map(tableLabel)).toEqual(["Week, Activation %, Note", "Month, Revenue"]);
   select(view, posOf(view, "p"));
   slash(view, "chart");
   item(view, "Chart").click();
+  await settled();
   expect(labels(view)).toEqual(["Table 1", "Table 2"]);
   item(view, "Table 2").click();
+  await settled();
   expect(types(view)).toEqual(["table", "table", "chart"]);
   expect(view.state.doc.child(2).attrs).toMatchObject({ source: "two", x: "k1", series: ["k2"] });
 });

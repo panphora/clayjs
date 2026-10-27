@@ -4,7 +4,7 @@ import { DEFAULT_WIDTH, MAX_WIDTH, MIN_WIDTH, addColumn, addRow, deleteColumn, d
 import { COLUMN_KINDS } from "../rich/csv.js";
 import { KIND_ICONS, KIND_LABELS, columnKinds } from "../table-kinds.js";
 import { openPageMenu } from "../chrome.js";
-import { insertChartAfterTable } from "../chart.js";
+import { loadChartPart } from "../items.js";
 import { selectLine } from "../table-select.js";
 import { TABLE_CSS } from "../table-style.js";
 import { cellViews } from "../table-views.js";
@@ -252,7 +252,7 @@ export class TableView {
             { label: "Fit to content", icon: "↔", run: () => this.fit(colId) },
             ...(col.width ? [{ label: "Reset width", icon: "×", run: () => this.command(setColumnWidth(colId, null)) }] : []),
           ]) },
-          { label: "Chart this table", icon: "📊", run: () => insertChartAfterTable(this.view, this.getPos()) },
+          { label: "Chart this table", icon: "📊", run: () => { const at = this.getPos(); return loadChartPart(this.view).then(({ insertChartAfterTable }) => insertChartAfterTable(this.view, at)); } },
           { label: "Insert column left", icon: "+", run: run(addColumn(false)) },
           { label: "Insert column right", icon: "+", run: run(addColumn(true)) },
           ...(index > 0 ? [{ label: "Move left", icon: "←", run: run(moveColumn(-1)) }] : []),

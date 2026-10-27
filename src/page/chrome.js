@@ -11,9 +11,8 @@ import { currentSpan, selectBlocks, duplicateBlocks, deleteBlocks, asStep, typeI
 import { openAltEditor, setImageAttrs } from "./media.js";
 import { BlockDrag } from "./drag.js";
 import { openLinkEditor } from "./link.js";
-import { BLOCK_TYPES, MENU_ITEMS, blockTypeOf, turnInto, insertAfter, rankItems, runItem, retype, canTurnInto, insertItemsFor } from "./items.js";
+import { BLOCK_TYPES, MENU_ITEMS, blockTypeOf, turnInto, insertAfter, rankItems, runItem, retype, canTurnInto, insertItemsFor, loadChartPart } from "./items.js";
 import toast from "../ui/toast-lazy.js";
-import { insertChartAfterTable } from "./chart.js";
 import { pickCsv } from "./csv-import.js";
 import { HISTORY_INTENT, typingIntent } from "./history-intent.js";
 import { composing } from "./markdown.js";
@@ -86,7 +85,7 @@ export const ACTION_ITEMS = [
   { key: "small", label: "Small", icon: "▫", only: "image", run: (view, chrome, index) => setImageAttrs(view, imageId(view, index), { width: 240 }) },
   { key: "medium", label: "Medium", icon: "◻", only: "image", run: (view, chrome, index) => setImageAttrs(view, imageId(view, index), { width: 480 }) },
   { key: "full", label: "Full width", icon: "⬜", only: "image", run: (view, chrome, index) => setImageAttrs(view, imageId(view, index), { width: null }) },
-  { key: "chart", label: "Chart this table", icon: "📊", only: "table", run: (view, chrome, index) => insertChartAfterTable(view, blockStart(view.state.doc, index)) },
+  { key: "chart", label: "Chart this table", icon: "📊", only: "table", run: (view, chrome, index) => { const at = blockStart(view.state.doc, index); return loadChartPart(view).then(({ insertChartAfterTable }) => insertChartAfterTable(view, at)); } },
   { key: "csv", label: "Import CSV…", icon: "⇧", only: "table", focus: false, run: (view, chrome, index) => pickCsv(view, null, view.state.doc.child(index).attrs.id) },
 ];
 

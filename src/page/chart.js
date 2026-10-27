@@ -1,6 +1,6 @@
-import { state } from "../vendor/prosemirror.vendor.js";
 import { schema } from "./schema.js";
 import { blockJson, keyBetween, newId, orderedIds } from "./model.js";
+import { chartTables } from "./chart-tables.js";
 import { chartModel, renderChartSvg } from "./rich/chart.js";
 import { openPageMenu } from "./chrome.js";
 import { project } from "./projection.js";
@@ -50,11 +50,7 @@ export function insertChartAfterTable(view, tablePos) {
   return true;
 }
 
-export function chartTables(doc) {
-  const tables = [];
-  doc.forEach((node) => { if (node.type === schema.nodes.table && orderedIds(node.attrs.cols).length) tables.push(node); });
-  return tables;
-}
+export { chartTables };
 
 // /chart: an empty line becomes the chart, otherwise it goes below the line.
 // One table is charted at once; several open a picker named by their columns.
@@ -213,8 +209,8 @@ export class ChartView {
   }
 }
 
-export function chartPlugin() {
-  return new state.Plugin({
-    view: () => ({ update(view) { for (const chart of views.get(view) ?? []) chart.refresh(); } }),
-  });
+// The hook the chart view part registers for its editor view: every change can
+// have moved a chart's source table.
+export function refreshCharts(view) {
+  for (const chart of views.get(view) ?? []) chart.refresh();
 }

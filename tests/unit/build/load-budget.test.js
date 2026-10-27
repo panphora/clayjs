@@ -188,9 +188,11 @@ test(`a Document's built edit line counts the view parts its blocks need, and a 
 
   expect(rich.js.files.map(({ path }) => path)).toContain(chunkOf("page/features/table.js"));
   expect(rich.js.files.map(({ path }) => path)).toContain(chunkOf("page/features/board.js"));
+  expect(rich.js.files.map(({ path }) => path)).toContain(chunkOf("page/features/chart.js"));
   expect(text.js.files.map(({ path }) => path)).not.toContain(chunkOf("page/features/table.js"));
   expect(text.js.files.map(({ path }) => path)).not.toContain(chunkOf("page/features/board.js"));
-  expect(rich.js.requests - text.js.requests).toBe(2);
+  expect(text.js.files.map(({ path }) => path)).not.toContain(chunkOf("page/features/chart.js"));
+  expect(rich.js.requests - text.js.requests).toBe(4);
 }, 180000);
 
 // The milestone's own gate, written as the number it is rather than as whatever the

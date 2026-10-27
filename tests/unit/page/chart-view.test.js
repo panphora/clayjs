@@ -26,15 +26,17 @@ afterEach(() => {
   window.cancelAnimationFrame = originalCancel;
 });
 const paint = () => { const queued = frames.splice(0); queued.forEach((callback) => callback()); return queued.length; };
+const settled = () => new Promise((resolve) => setTimeout(resolve, 0));
 const flushChrome = () => {
   const at = frames.findIndex((callback) => callback.toString().includes("measureLayout"));
   if (at >= 0) frames.splice(at, 1)[0]();
 };
 
-test("Chart this table inserts the default chart after the table and undoes once", () => {
+test("Chart this table inserts the default chart after the table and undoes once", async () => {
   const view = editor([], { blocks: { tbl: table } });
   view.dom.querySelector('th[data-col="c1"] button').click();
   menuButton(view, "Chart this table").click();
+  await settled();
   expect(view.state.doc.childCount).toBe(2);
   const attrs = view.state.doc.child(1).attrs;
   expect(attrs).toMatchObject({ source: "tbl", kind: "bar", x: "c1", series: ["c2"], title: "" });

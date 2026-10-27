@@ -12,7 +12,8 @@ import { pickFiles, hostPlace } from "./media.js";
 import { makeTable, insertTableNode } from "./table.js";
 import { pickCsv } from "./csv-import.js";
 import { makeBoard, insertBoardNode } from "./board.js";
-import { chartFromSlash, chartTables } from "./chart.js";
+import { chartTables } from "./chart-tables.js";
+import { viewFeatures } from "./view-hooks.js";
 
 const { TextSelection } = state;
 const N = schema.nodes;
@@ -41,6 +42,10 @@ export const INSERT_ITEMS = [
 ];
 
 export const CHART_ITEM = { key: "chart", label: "Chart", description: "A bar or line chart from a table", icon: "📊", aliases: ["graph", "plot", "bar", "line"], insert: "chart" };
+
+// The chart module and its view part load together, before the block draws: a
+// document that never takes a chart never fetches either.
+export const loadChartPart = (view) => (viewFeatures.get(view)?.ensure("chart") ?? Promise.resolve()).catch(() => {}).then(() => import("./chart.js"));
 
 export const MENU_ITEMS = [...BLOCK_TYPES, ...INSERT_ITEMS];
 
@@ -190,7 +195,7 @@ function insertItem(view, item, index, remove = null) {
   if (item.insert === "csv") return pickCsv(view, remove);
   if (item.insert === "table") return insertTableNode(st, view.dispatch, makeTable(), remove, null, index);
   if (item.insert === "board") return insertBoardNode(st, view.dispatch, makeBoard(), remove, index);
-  if (item.insert === "chart") return chartFromSlash(view, index, remove);
+  if (item.insert === "chart") return loadChartPart(view).then(({ chartFromSlash }) => chartFromSlash(view, index, remove));
   let tr = st.tr;
   if (remove) tr.delete(remove.from, remove.to);
   const node = tr.doc.child(index);
