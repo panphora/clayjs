@@ -18,7 +18,6 @@
 // where in the log it starts, the moves after that go back on top, and the
 // merge itself is logged as a diff so a later file stamped before it keeps it.
 
-import { localChannel } from "./local-channel.js";
 import { applyOp, applyTracked, checkOp, cloneJson, undoTracked, validateOp, serializeLive, textHash, diffOps } from "./ops.js";
 import { parseJsonRelaxed } from "../vendor/hyper-morph-json.vendor.js";
 import { movesSince } from "./moves.js";
@@ -67,13 +66,10 @@ function randomId() {
  * @param {() => Map<string, {value: any, ephemeral: boolean}>} options.seed -
  *   what this tab holds for each live tag, used for stores the room does not have yet
  * @param {string} [options.key]
- * @param {object} [options.channel] - the document's channel, when a presence
- *   service in this tab already owns one: the two share it rather than open a second
  */
-export function localTransport({ seed, key = "clay-live:" + window.location.pathname, channel: shared = null }) {
+export function localTransport({ seed, key = "clay-live:" + window.location.pathname }) {
   const clientId = randomId();
   let channel = null;
-  let unsubscribe = null;
   let handlers = null;
   let room = null;
   let stopped = false;
@@ -105,7 +101,7 @@ export function localTransport({ seed, key = "clay-live:" + window.location.path
   let mirror = { epoch: null, seq: 0, sequencer: null, closedBy: null, stale: false, seen: new Map(), stores: new Map() };
 
   function post(message) {
-    channel?.post(message);
+    channel?.postMessage({ v: VERSION, ...message });
   }
 
   // Over either cap the oldest entries go, and a file older than them can no
@@ -567,8 +563,8 @@ export function localTransport({ seed, key = "clay-live:" + window.location.path
     clientId,
     start(next) {
       handlers = next;
-      channel = shared ?? localChannel(key);
-      unsubscribe = channel.subscribe("durable", (data) => onMessage({ data }));
+      channel = new BroadcastChannel(key);
+      channel.onmessage = onMessage;
       window.addEventListener("pagehide", onPageHide);
       window.addEventListener("pageshow", onPageShow);
       requestLock();
@@ -580,8 +576,7 @@ export function localTransport({ seed, key = "clay-live:" + window.location.path
         window.removeEventListener("pagehide", onPageHide);
         window.removeEventListener("pageshow", onPageShow);
         for (const resolve of waiting.values()) resolve(null);
-        unsubscribe?.();
-        unsubscribe = null;
+        channel?.close();
         channel = null;
       };
     },
