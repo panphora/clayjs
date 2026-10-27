@@ -240,7 +240,12 @@ test("the result opens through production conversion unchanged", () => {
   expect(strong).toEqual(["strong", "a bold value"]);
   const table = [...Array(doc.childCount).keys()].map((i) => doc.child(i)).find((node) => node.type.name === "table");
   expect(table.attrs.cols[Object.keys(table.attrs.cols)[0]].name).toBe("Column one");
-  expect(table.child(1).child(1).textContent).toBe("a bold value");
+  expect(table.child(0).child(1).textContent).toBe("a bold value");
+  const names = Object.values(table.attrs.cols).map((col) => col.name);
+  for (let i = 0; i < table.childCount; i++) {
+    const row = table.child(i);
+    expect([...Array(row.childCount).keys()].map((j) => row.child(j).textContent)).not.toEqual(names);
+  }
 });
 
 test("the byte, depth and block limits each refuse with a named reason", () => {

@@ -212,7 +212,8 @@ export function importMarkdownTokens(tokens) {
           const colIds = header.map(() => fresh("c"));
           const colPos = keysBetween(null, null, header.length);
           const cols = Object.fromEntries(colIds.map((id, i) => [id, { pos: colPos[i], name: cell(header[i]?.tokens).c }]));
-          const rows = [header, ...(token.rows ?? [])];
+          // The header line is the column names, drawn as <thead>; the body holds the data rows.
+          const rows = token.rows?.length ? token.rows : [[]];
           const rowPos = keysBetween(null, null, rows.length);
           const values = rows.map((row) => Object.fromEntries(colIds.map((id, i) => {
             const part = cell(row?.[i]?.tokens);
