@@ -394,13 +394,16 @@ export async function runCase(json) {
     const onModeChange = () => record("modechange", { mode: clay.mode });
     const onSnapshot = (event) => record("snapshot-ready", { forSave: event.detail?.forSave === true });
     const onDraftFailed = (event) => record("draft-store-failed", { message: event.detail?.error?.message ?? null });
+    const onDraftSaved = (event) => record("draft-saved", { unchanged: event.detail?.unchanged === true });
     document.addEventListener("clay:modechange", onModeChange);
     document.addEventListener("clay:snapshot-ready", onSnapshot);
     document.addEventListener("clay:drafts-store-failed", onDraftFailed);
+    document.addEventListener("clay:drafts-saved", onDraftSaved);
     cleanups.push(() => {
       document.removeEventListener("clay:modechange", onModeChange);
       document.removeEventListener("clay:snapshot-ready", onSnapshot);
       document.removeEventListener("clay:drafts-store-failed", onDraftFailed);
+      document.removeEventListener("clay:drafts-saved", onDraftSaved);
     });
 
     let phase = clay.modeLifecycle.state.phase;
@@ -593,6 +596,17 @@ export async function runCase(json) {
         unsent: element.getAttribute("unsent"),
         value: readValue(element),
       })),
+      // The visitor's own store, as the run left it: a draft page's saves go there and
+      // never to a host, so the oracle reads this rather than an accepted save's body.
+      draft: (() => {
+        const drafts = clay.visitorDrafts;
+        if (!drafts || drafts.active !== true) return null;
+        let raw = null;
+        try { raw = window.localStorage.getItem(drafts.key); } catch { raw = null; }
+        let data = null;
+        try { data = raw == null ? null : JSON.parse(raw).data ?? null; } catch { data = null; }
+        return { key: drafts.key, raw, data };
+      })(),
       calls: host.calls.map((call) => ({ ...call })),
       tabs: lanes
         ? {

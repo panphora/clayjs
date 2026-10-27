@@ -49,6 +49,23 @@ function carries(html, value) {
   );
 }
 
+// A draft page's save is a write into the visitor's own store and never a request to a
+// host, so a value is conserved there when that store kept it — and a host save from a
+// draft page is itself the violation, since a visitor has no host to write to.
+const draftOf = (run) => run?.result?.draft ?? null;
+
+const draftCarries = (run, value) => {
+  const draft = draftOf(run);
+  return draft?.data != null && JSON.stringify(draft.data).includes(value);
+};
+
+// The visitor store's own last word: a write it kept, or a refusal it announced. Only the
+// last one speaks for the values the run left behind.
+function lastDraftWord(run) {
+  const words = (run?.trace ?? []).filter((event) => event.kind === "draft-saved" || event.kind === "draft-store-failed");
+  return words.length ? words[words.length - 1].kind : null;
+}
+
 function fieldFor(result, entry) {
   const fields = result?.fields ?? [];
   if (entry.via === "unsent") return fields.find((field) => field.unsent === entry.target) ?? null;
@@ -71,6 +88,23 @@ function standingAdmissions(run) {
 function conservation(run, fail) {
   const admitted = standingAdmissions(run);
   if (!admitted.length) return;
+
+  // A draft page's save is a write into the visitor's own store and never a request to a
+  // host, so a host save from one is the violation itself, and a value is conserved when
+  // that store kept it.
+  if (draftOf(run)) {
+    const hostSaves = saves(run).length;
+    if (hostSaves) {
+      fail("conservation", `a draft page sent ${hostSaves} save request(s) to a host, and a visitor's work belongs in their own store`);
+      return;
+    }
+    const lost = admitted.filter((entry) => !draftCarries(run, entry.value));
+    if (!lost.length) return;
+    if (lastDraftWord(run) === "draft-store-failed") return;
+    fail("conservation", `"${lost[0].value}" is in no draft write and the draft store announced no failure`);
+    return;
+  }
+
   const last = accepted(run).at(-1) ?? null;
   const outstanding = admitted.filter((entry) => !last || !carries(last.body, entry.value));
   if (!outstanding.length) return;

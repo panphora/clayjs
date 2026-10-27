@@ -117,9 +117,19 @@ function runCaseProcess({ cases, file, runtime = null }) {
 
 const propertyNames = (outcome) => [...new Set((outcome?.failures ?? []).map((failure) => failure.property))].sort();
 
-const sameProperties = (outcome, names) => {
+// A failure's shape is its message with the run's own words taken out: the values a case
+// types and the numbers it counts are what a reduction may change, so a reduction is only
+// the same failure when the words around them still read the same.
+const messageShape = (failure) => (failure.detail ?? "").replace(/"[^"]*"/g, '""').replace(/\d+/g, "0");
+
+const failureShapes = (outcome) => (outcome?.failures ?? []).map(messageShape);
+
+const sameProperties = (outcome, names, shapes = null) => {
   const seen = propertyNames(outcome);
-  return seen.length === names.length && seen.every((name, index) => name === names[index]);
+  if (seen.length !== names.length || !seen.every((name, index) => name === names[index])) return false;
+  if (!shapes) return true;
+  const now = failureShapes(outcome);
+  return now.length === shapes.length && now.every((shape, index) => shape === shapes[index]);
 };
 
 // The page the driver drives, outside Jest: one document, a clock a case can advance, and
@@ -330,6 +340,7 @@ async function shrink(flags) {
     fail(`shrink: ${original.id} is ${first.outcome.status}, and only a failed case can be shrunk`);
   }
   const properties = propertyNames(first.outcome);
+  const shapes = failureShapes(first.outcome);
 
   const scratch = mkdtempSync(path.join(os.tmpdir(), "clay-shrink-"));
   const candidateFile = path.join(scratch, "candidate.json");
@@ -341,7 +352,7 @@ async function shrink(flags) {
     writeFileSync(candidateFile, JSON.stringify(json));
     runs++;
     const { outcome } = runCaseProcess({ cases, file: candidateFile, runtime });
-    if (!outcome || outcome.status !== "failed" || !sameProperties(outcome, properties)) return null;
+    if (!outcome || outcome.status !== "failed" || !sameProperties(outcome, properties, shapes)) return null;
     return next;
   };
 

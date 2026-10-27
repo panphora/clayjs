@@ -124,6 +124,43 @@ test("shrink keeps the preconditions and the failure while cutting steps", () =>
   expect(outcome.failures.map((failure) => failure.property)).toEqual([PROPERTY]);
 }, 180000);
 
+test("shrink rejects a reduction that fails the same property with different words", () => {
+  const cases = path.join(scratch, "shape-cases");
+  mkdirSync(cases, { recursive: true });
+  const original = {
+    schema: 1,
+    id: "shape-edit",
+    fixture: "persist-host",
+    boot: { mode: "view", live: true, destination: "host" },
+    steps: [
+      { op: "enter" },
+      { op: "input", target: "title", value: "Late edit" },
+    ],
+    requires: ["input-admitted"],
+  };
+  const file = path.join(cases, "shape-edit.json");
+  writeFileSync(file, JSON.stringify(original));
+  const smallerFile = path.join(scratch, "shape-view.json");
+  writeFileSync(smallerFile, JSON.stringify({ ...original, id: "shape-view", steps: [original.steps[1]] }));
+
+  // One step smaller, the same property and a different failure: the run ends in view rather
+  // than edit, so the words the oracle says it with are not the words of this failure.
+  const whole = outcomeOf(run(["check", "--cases", cases, "--case-file", file, "--json"]));
+  const smaller = outcomeOf(run(["check", "--cases", cases, "--case-file", smallerFile, "--json"]));
+  expect(whole.status).toBe("failed");
+  expect(smaller.status).toBe("failed");
+  expect(smaller.failures.map((failure) => failure.property)).toEqual(whole.failures.map((failure) => failure.property));
+  expect(smaller.failures[0].detail).not.toBe(whole.failures[0].detail);
+
+  const reducedPath = path.join(scratch, "shape-reduced.json");
+  const result = run(["shrink", "--case", file, "--out", reducedPath]);
+  expect(result.status).toBe(0);
+
+  const reduced = JSON.parse(readFileSync(reducedPath, "utf8"));
+  expect(reduced.id).toBe("shape-edit-reduced");
+  expect(reduced.steps).toEqual(original.steps);
+}, 180000);
+
 test("prove passes when the fix flips the case and names two runtimes", () => {
   const proofFile = path.join(scratch, "proof.json");
   const result = run(["prove", "--case", CASE, "--before", before, "--after", after, "--reduced", reducedFile, "--out", proofFile]);

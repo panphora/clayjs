@@ -10,6 +10,5 @@
     { "op": "leave" }
   ],
   "requires": ["draft-store-failed", "input-admitted"],
-  "expect": { "mode": "draft", "writes": 0 },
-  "knownFailing": "conservation: the draft write is refused with draft-storage, but the run's only refusal is the draft-mode transition (\"not-allowed\"), which names no pending source for \"Draft text\""
+  "expect": { "mode": "draft", "writes": 0 }
 }

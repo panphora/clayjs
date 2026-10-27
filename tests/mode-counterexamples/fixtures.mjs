@@ -88,7 +88,7 @@ const servedDocument = (page) => `<!DOCTYPE html><html><head>${page.head ?? ""}<
 // tag, and no owner cookie, so it boots in draft mode.
 const DRAFT_PAGE = {
   params: "plugins=visitor-drafts&exclude=richclay,source",
-  head: '<script data-rules-name="api" data-rules-version="1" type="application/json">{"title":"h1"}</script>',
+  head: '<script data-rules-name="api" data-rules-version="1" type="application/json">{"title":"h1","content":"#content"}</script>',
   body: '<article><h1 id="title">Untitled</h1><div id="content">start</div></article>',
   path: "/notes.html",
   attrs: { "visitor-drafts": "draft-slot-1", autosave: "" },
@@ -108,6 +108,8 @@ export const FIXTURES = {
   // The draft page as an ordinary visitor gets it, except that its localStorage keeps
   // nothing: every draft write throws, the way a full or turned-off store does.
   "draft-host": { page: DRAFT_PAGE, lanes: false, owner: false, storage: "failing" },
+  // The same draft page with a store that keeps what it is given: the success path.
+  "draft-keeps": { page: DRAFT_PAGE, lanes: false, owner: false },
   // The page editor: plugins=page over a tag and an article, on a host that advertises
   // the `page` extension and serves the document it saved.
   "page-host": {

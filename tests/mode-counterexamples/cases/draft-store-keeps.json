@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "draft-store-keeps",
+  "fixture": "draft-keeps",
+  "boot": { "mode": "view", "live": true, "destination": "host" },
+  "steps": [
+    { "op": "settle", "ms": 200 },
+    { "op": "input", "target": "content", "value": "Kept draft" },
+    { "op": "settle", "ms": 2000 },
+    { "op": "leave" }
+  ],
+  "requires": ["draft-saved", "input-admitted"],
+  "expect": { "mode": "draft", "writes": 0 }
+}
