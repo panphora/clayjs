@@ -12,6 +12,7 @@ import { chartModel, renderChartSvg } from "./rich/chart.js";
 import { cellText } from "./rich/cell.js";
 import { bounded, descriptors, entriesOf, keyOf, normalizeEntries } from "./format-codec.js";
 import { nativeAttrs } from "./format-native.js";
+import { TOC_LABEL, tocHtml } from "./toc.js";
 
 export const ATOM = "￼";
 export const BREAK = '@{"type":"hard_break"}';
@@ -48,6 +49,7 @@ export const DEFAULTS = {
   code_block: { parent: null, lang: "" },
   toggle: { parent: null, open: false, level: null },
   divider: { parent: null },
+  toc: { parent: null, maxLevel: null },
   image: { parent: null, src: "", alt: "", caption: "", width: null, align: null },
   file: { parent: null, src: "", name: "", size: null, mime: null },
   table: { parent: null, cols: {}, sort: null },
@@ -578,6 +580,7 @@ export function renderModel(model, { fallbackOf = () => "", clean = RAW } = {}) 
       continue;
     }
     if (item.t === "tool") { add(`<section${attr("data-id", item.id)} data-type="tool">${toolData(item)}${clean.fallback(fallbackOf(item.id))}</section>`); continue; }
+    if (item.t === "toc") { add(tocHtml(item, model)); continue; }
     add(renderLeaf(item, clean, tables));
   }
   closeLists();
@@ -724,6 +727,10 @@ export function parseArticle(article) {
       return push(el, "code_block", parent, { ...omitDefaults("code_block", { ...P, lang: el.getAttribute("data-lang") || "" }), c: (code || el).textContent });
     }
     if (tag === "HR") return push(el, "divider", parent, omitDefaults("divider", P));
+    if (tag === "NAV" && el.getAttribute("aria-label") === TOC_LABEL) {
+      const maxLevel = +(el.getAttribute("data-max-level") ?? 0);
+      return push(el, "toc", parent, omitDefaults("toc", { ...P, maxLevel: maxLevel >= 1 && maxLevel <= 6 ? maxLevel : null }));
+    }
     if (tag === "UL" || tag === "OL") return list(el, parent, 0);
     if (tag === "DETAILS") {
       const summary = el.querySelector(":scope > summary");

@@ -106,8 +106,8 @@ describe("dividers", () => {
 });
 
 describe("the menu list", () => {
-  test("lists the fourteen block types, then Divider, Image, File, Table, Import CSV and Board", () => {
-    expect(I.MENU_ITEMS.map((i) => i.key)).toEqual(["text", "h1", "h2", "h3", "bullet", "ordered", "check", "toggle", "toggle-h1", "toggle-h2", "toggle-h3", "callout", "quote", "code", "divider", "image", "file", "table", "csv", "board"]);
+  test("lists the fourteen block types, then Divider, Table of contents, Image, File, Table, Import CSV and Board", () => {
+    expect(I.MENU_ITEMS.map((i) => i.key)).toEqual(["text", "h1", "h2", "h3", "bullet", "ordered", "check", "toggle", "toggle-h1", "toggle-h2", "toggle-h3", "callout", "quote", "code", "divider", "toc", "image", "file", "table", "csv", "board"]);
   });
 
   test("picture, photo and attachment find Image and File through aliases", () => {

@@ -23,11 +23,12 @@ export const M13_CASES = [
   },
   {
     name: "a table of contents block",
-    // A block type this runtime has no schema for: its record rides in the article's inert
-    // envelope and its readable fallback is all a reader that cannot draw it shows.
+    // A block type R has no schema for: its record rides in the article's inert envelope
+    // and its readable fallback is all a reader that cannot draw it shows. R stores the
+    // text field its own projection writes for a block it cannot draw.
     keeps: ["t"],
     blocks: {
-      t: { t: "toc", pos: "00000002", c: "", maxLevel: 3 },
+      t: { t: "toc", pos: "00000002", maxLevel: 3 },
       z: neighbour(),
     },
   },

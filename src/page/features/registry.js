@@ -9,6 +9,7 @@ export const FEATURES = {
   chart: { types: ["chart"], views: ["chart"], module: "page/features/chart.js", load: () => import("./chart.js") },
   checklist: { types: [], views: [], match: (node) => node.type.name === "list_item" && node.attrs.kind === "check", module: "page/features/checklist.js", load: () => import("./checklist.js") },
   code: { types: ["code_block"], module: "page/features/code.js", load: () => import("./code.js") },
+  toc: { types: ["toc"], module: "page/features/toc.js", load: () => import("./toc.js") },
   media: { types: ["image", "file"], module: "page/features/media.js", load: () => import("./media.js") },
   tool: { types: ["tool"], module: "page/features/tool.js", boot: ["page/tools.js", "page/tool-data.js"], load: () => import("./tool.js") },
 };

@@ -37,7 +37,9 @@ const asStep = (dispatch) => dispatch && ((tr) => dispatch(history.closeHistory(
 //   hidden    some toggle above it is closed
 //   subEnd    index of the last block of its subtree (itself when it has none)
 // A subtree is always contiguous, so it is the range [ents[i].at, ents[subEnd].end].
-export function outline(doc) {
+// `reveal` is a set of toggle ids a link opened for this reader only: a revealed
+// toggle reads as open here, and its saved `open` is untouched.
+export function outline(doc, reveal = null) {
   const ents = [];
   const toggleAt = new Map();
   let run = [];
@@ -53,8 +55,9 @@ export function outline(doc) {
       if (run.length) up = run[run.length - 1];
       run.push(i);
     } else run = [];
-    const hidden = t >= 0 && (ents[t].hidden || !ents[t].node.attrs.open);
-    ents.push({ node, at, end: at + node.nodeSize, i, up, depth: t >= 0 ? ents[t].depth + 1 : 0, hidden, subEnd: i });
+    const open = isToggle(node) && (node.attrs.open || !!reveal?.has(node.attrs.id));
+    const hidden = t >= 0 && (ents[t].hidden || !ents[t].open);
+    ents.push({ node, at, end: at + node.nodeSize, i, up, depth: t >= 0 ? ents[t].depth + 1 : 0, hidden, open, subEnd: i });
     if (isToggle(node) && node.attrs.id) toggleAt.set(node.attrs.id, i);
   });
   for (let j = ents.length - 1; j >= 0; j--) {
@@ -643,9 +646,22 @@ export function backspaceBodyBlock(st, dispatch) {
 
 // ---- open / closed ----------------------------------------------------------
 
+// A reveal is edit-mode state, never a document attribute: the toggle ids a followed link
+// opened live in the collapse plugin's own state, so nothing is saved, no undo step is
+// made and no peer is told.
+export const REVEAL = "page-reveal";
+
+export function revealToggles(tr, ids) {
+  return ids.length ? tr.setMeta(REVEAL, { add: ids }) : tr;
+}
+
+// A toggle the person opens or closes themselves drops any reveal a link left on it:
+// the override never outlives the decision it saved them.
 export function setOpen(st, ti, open, ents = outline(st.doc)) {
   const e = ents[ti];
-  return st.tr.setNodeMarkup(e.at, null, { ...e.node.attrs, open }).setMeta("addToHistory", false);
+  return st.tr.setNodeMarkup(e.at, null, { ...e.node.attrs, open })
+    .setMeta("addToHistory", false)
+    .setMeta(REVEAL, { clear: [e.node.attrs.id] });
 }
 
 export function toggleOpenAtSelection(st, dispatch) {
@@ -662,7 +678,7 @@ export function toggleOpenAtSelection(st, dispatch) {
 export function hiddenRanges(ents) {
   const out = [];
   for (const e of ents) {
-    if (!isToggle(e.node) || e.hidden || e.node.attrs.open || e.subEnd === e.i) continue;
+    if (!isToggle(e.node) || e.hidden || e.open || e.subEnd === e.i) continue;
     out.push({ line: e.at + 1, sumEnd: e.end - 1, from: e.end, to: ents[e.subEnd].end });
   }
   return out;
@@ -759,9 +775,11 @@ export function sameStructure(a, b) {
   return true;
 }
 
-function collapseState(doc) {
-  const ents = outline(doc);
-  return { decos: decorationsFor(doc, ents), ranges: hiddenRanges(ents) };
+const NO_REVEAL = new Set();
+
+function collapseState(doc, reveal = NO_REVEAL) {
+  const ents = outline(doc, reveal);
+  return { decos: decorationsFor(doc, ents), ranges: hiddenRanges(ents), reveal };
 }
 
 export function decorationsFor(doc, ents = outline(doc)) {
@@ -773,21 +791,21 @@ export function decorationsFor(doc, ents = outline(doc)) {
     if (e.hidden) { attrs.class = "page-hidden"; attrs["aria-hidden"] = "true"; }
     if (e.depth) attrs.style = `--page-depth:${e.depth}`;
     if (markers.has(e.i)) attrs["data-marker"] = markers.get(e.i);
-    if (isToggle(e.node)) attrs["aria-expanded"] = e.node.attrs.open ? "true" : "false";
+    if (isToggle(e.node)) attrs["aria-expanded"] = e.open ? "true" : "false";
     if (Object.keys(attrs).length) decos.push(Decoration.node(e.at, e.end, attrs));
     if (isToggle(e.node) && !e.hidden) {
-      decos.push(Decoration.widget(e.at + 1, () => disclosure(e.node), { side: -1, ignoreSelection: true, key: `t:${e.node.attrs.id}:${e.node.attrs.open}` }));
+      decos.push(Decoration.widget(e.at + 1, () => disclosure(e.node, e.open), { side: -1, ignoreSelection: true, key: `t:${e.node.attrs.id}:${e.open}` }));
     }
   }
   return DecorationSet.create(doc, decos);
 }
 
-function disclosure(node) {
+function disclosure(node, open = node.attrs.open) {
   const b = document.createElement("button");
   b.type = "button";
   b.className = "page-toggle-button";
   b.contentEditable = "false";
-  b.setAttribute("aria-label", node.attrs.open ? "Collapse" : "Expand");
+  b.setAttribute("aria-label", open ? "Collapse" : "Expand");
   b.setAttribute("data-toggle", node.attrs.id || "");
   return b;
 }
@@ -799,10 +817,18 @@ export function collapsePlugin() {
     state: {
       init: (_, s) => collapseState(s.doc),
       apply(tr, value, old, s) {
+        const meta = tr.getMeta(REVEAL);
+        if (meta) {
+          const reveal = new Set(value.reveal);
+          for (const id of meta.add ?? []) reveal.add(id);
+          for (const id of meta.clear ?? []) reveal.delete(id);
+          return collapseState(s.doc, reveal);
+        }
         if (!tr.docChanged) return value;
-        if (!sameStructure(old.doc, s.doc)) return collapseState(s.doc);
+        if (!sameStructure(old.doc, s.doc)) return collapseState(s.doc, value.reveal);
         const m = tr.mapping;
         return {
+          ...value,
           decos: value.decos.map(m, s.doc),
           ranges: value.ranges.map((r) => ({ line: m.map(r.line, -1), sumEnd: m.map(r.sumEnd), from: m.map(r.from), to: m.map(r.to, -1) })),
         };

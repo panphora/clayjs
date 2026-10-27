@@ -38,6 +38,7 @@ export const BLOCK_TYPES = [
 
 export const INSERT_ITEMS = [
   { key: "divider", label: "Divider", description: "A line between sections", icon: "—", hint: "---", aliases: ["hr", "line", "separator", "rule"], insert: "divider" },
+  { key: "toc", label: "Table of contents", description: "Links to this page's headings", icon: "≡", aliases: ["toc", "contents", "outline", "index"], insert: "toc" },
   { key: "image", label: "Image", description: "Upload or paste a picture", icon: "▣", aliases: ["img", "picture", "photo"], insert: "image" },
   { key: "file", label: "File", description: "Attach any file", icon: "⎘", aliases: ["upload", "attachment", "pdf"], insert: "file" },
   { key: "table", label: "Table", description: "Rows and columns, paste from a spreadsheet", icon: "▦", aliases: ["grid", "spreadsheet"], insert: "table" },
@@ -183,6 +184,35 @@ export function insertDivider(st, index, tr = st.tr) {
   return tr.setSelection(TextSelection.create(tr.doc, to + 2));
 }
 
+// The empty paragraph at `index` becomes a table of contents that keeps its id, pos and
+// parent, followed by a new empty paragraph holding the caret.
+export function replaceWithToc(tr, index) {
+  const at = startOf(tr.doc, index);
+  const node = tr.doc.child(index);
+  const next = tr.doc.maybeChild(index + 1);
+  const { id, pos, parent } = node.attrs;
+  tr.replaceWith(at, at + node.nodeSize, [
+    N.toc.create({ id, pos, parent, maxLevel: 3 }),
+    N.paragraph.create({ id: newId(), pos: keyAfter(pos, next ? next.attrs.pos : null), parent }),
+  ]);
+  return tr.setSelection(TextSelection.create(tr.doc, at + 2));
+}
+
+// Insert a table of contents for the block at `index`: in place of an empty paragraph,
+// otherwise after the block's whole subtree at the block's own level.
+export function insertToc(st, index, tr = st.tr) {
+  const node = tr.doc.child(index);
+  if (node.type === N.paragraph && node.content.size === 0) return replaceWithToc(tr, index);
+  const ents = outline(tr.doc), end = ents[index].subEnd;
+  const to = ents[end].end, next = ents[end + 1]?.node.attrs.pos ?? null;
+  const pos = keyAfter(ents[end].node.attrs.pos, next), parent = node.attrs.parent ?? null;
+  tr.insert(to, [
+    N.toc.create({ id: newId(), pos, parent, maxLevel: 3 }),
+    N.paragraph.create({ id: newId(), pos: keyAfter(pos, next), parent }),
+  ]);
+  return tr.setSelection(TextSelection.create(tr.doc, to + 2));
+}
+
 // The skipped letters between a query and a candidate it can be read out of,
 // or Infinity when it cannot. Only queries of 2 to 32 letters count, so a single
 // letter never drags in half the menu.
@@ -236,6 +266,25 @@ function writeItem(view, item, index, remove) {
   return true;
 }
 
+// A table of contents is a block only a newer page format reads, so its first write asks
+// the format gate; the block the pick was made on is found again after it answers, so one
+// a peer moved away refuses instead of handing the toc its place.
+export function runTocItem(view, index, remove = null) {
+  const st = view.state;
+  const id = st.doc.maybeChild(index)?.attrs.id ?? null;
+  const del = remove && { ...remove, text: st.doc.textBetween(remove.from, remove.to) };
+  return runFormatted(view, () => {
+    const now = view.state;
+    const at = id === null ? -1 : indexOfId(now.doc, id);
+    if (at < 0 || (del && now.doc.textBetween(del.from, del.to) !== del.text)) return stale;
+    let tr = del ? now.tr.delete(del.from, del.to) : now.tr;
+    tr = insertToc(now, indexOfId(tr.doc, id), tr);
+    view.dispatch(asStep(tr).scrollIntoView());
+    view.focus();
+    return { ok: true };
+  });
+}
+
 // What a pick does in the insert menu for the block at `index`. A divider and
 // the file pickers have their own placement; a block type retypes an empty line
 // and otherwise goes into a new block below the line's whole subtree. A block
@@ -249,6 +298,7 @@ export function runItem(view, item, index, remove = null) {
   if (item.insert === "table") return insertTableNode(st, view.dispatch, makeTable(), remove, null, index);
   if (item.insert === "board") return insertBoardNode(st, view.dispatch, makeBoard(), remove, index);
   if (item.insert === "chart") return loadChartPart(view).then(({ chartFromSlash }) => chartFromSlash(view, index, remove));
+  if (item.insert === "toc") return runTocItem(view, index, remove);
   if (!isToggleHeading(item)) {
     return item.type === "quote" ? runFormatted(view, () => writeItem(view, item, index, remove)) : writeItem(view, item, index, remove);
   }

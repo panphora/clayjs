@@ -83,6 +83,14 @@ export const schema = new model.Schema({
       attrs: block,
       toDOM: (n) => ["hr", ref(n)],
     },
+    // A table of contents holds no headings: its entries are derived from the document
+    // whenever it is drawn, so a rename, a move or a deletion needs no repair here.
+    toc: {
+      group: "block",
+      atom: true,
+      attrs: { ...block, maxLevel: { default: null } },
+      toDOM: (n) => ["div", ref(n, { class: "page-toc", "data-type": "toc", ...(n.attrs.maxLevel ? { "data-max-level": String(n.attrs.maxLevel) } : {}) })],
+    },
     image: {
       group: "block",
       atom: true,

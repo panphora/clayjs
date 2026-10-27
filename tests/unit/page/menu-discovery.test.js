@@ -16,7 +16,7 @@ test("an exact alias wins outright", () => {
 });
 
 test("a label prefix keeps registry order", () => {
-  expect(keys("hea")).toEqual(["h1", "h2", "h3", "toggle-h1", "toggle-h2", "toggle-h3"]);
+  expect(keys("hea")).toEqual(["h1", "h2", "h3", "toggle-h1", "toggle-h2", "toggle-h3", "toc"]);
   expect(keys("t").slice(0, 2)).toEqual(["text", "toggle"]);
 });
 
@@ -36,7 +36,7 @@ test("equal fuzzy costs keep registry order", () => {
 });
 
 test("a lower fuzzy cost comes before a higher one", () => {
-  expect(keys("ct")).toEqual(["image", "quote", "callout", "check", "file", "csv"]);
+  expect(keys("ct")).toEqual(["image", "quote", "toc", "callout", "check", "file", "csv"]);
 });
 
 test("every exact rank keeps its priority over a cheaper fuzzy match", () => {

@@ -170,10 +170,10 @@ test("the mention case keeps its id and its label in one record, not two", () =>
   expect(reopened.get("a").c).toBe("Ada Lovelace wrote this");
 });
 
-test("the toc case is a block this runtime cannot draw, and its whole record comes back", () => {
+test("the toc case is the block this runtime draws from its own record, and its whole record comes back", () => {
   const { records, formatCase } = fromCase("a table of contents block");
   const toc = records[formatCase.keeps[0]];
-  expect(toc).toEqual({ t: "toc", pos: "00000002", c: "", maxLevel: 3 });
+  expect(toc).toEqual({ t: "toc", pos: "00000002", maxLevel: 3 });
   const model = project(records);
   const item = byId(model).get("t");
   expect(item.t).toBe("toc");

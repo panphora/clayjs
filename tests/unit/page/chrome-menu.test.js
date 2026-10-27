@@ -32,7 +32,7 @@ describe("the slash trigger", () => {
     const view = open([["e", "paragraph", ""]]);
     expect(typeText(view, "/")).toBe(true);
     expect(isOpen(view)).toBe(true);
-    expect(labels(view)).toEqual(["Text", "Heading 1", "Heading 2", "Heading 3", "Bulleted list", "Numbered list", "Checklist", "Toggle", "Toggle heading 1", "Toggle heading 2", "Toggle heading 3", "Callout", "Quote", "Code", "Divider", "Image", "File", "Table", "Import CSV…", "Board"]);
+    expect(labels(view)).toEqual(["Text", "Heading 1", "Heading 2", "Heading 3", "Bulleted list", "Numbered list", "Checklist", "Toggle", "Toggle heading 1", "Toggle heading 2", "Toggle heading 3", "Callout", "Quote", "Code", "Divider", "Table of contents", "Image", "File", "Table", "Import CSV…", "Board"]);
   });
 
   test("opens after a space in the middle of a line, and at the start of a line that has text", () => {
@@ -124,7 +124,7 @@ describe("no match", () => {
     expect(isOpen(view)).toBe(true);
     backspace(view);
     backspace(view);
-    expect(rows(view).length).toBe(20);
+    expect(rows(view).length).toBe(21);
   });
 
   test("a space after a query with no match ends the session", () => {
