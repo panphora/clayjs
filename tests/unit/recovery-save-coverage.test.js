@@ -73,6 +73,7 @@ let opened;
 let calls;
 let respond;
 let rewriteForSave = false;
+let pageMaybeDirty;
 let marker = 0;
 
 // A host whose answer the test decides, including one that arrives seconds after
@@ -190,6 +191,7 @@ beforeAll(async () => {
   ({ createRecovery } = await import("../../src/core/recovery.js"));
   ({ createStore } = await import("../../src/recovery/store.js"));
   ({ addDocumentTransform } = await import("../../src/core/snapshot.js"));
+  ({ pageMaybeDirty } = await import("../../src/lib/dirty-gate.js"));
   saveMod = await import("../../src/core/save.js");
   addDocumentTransform((clone) => {
     if (!rewriteForSave) return;
@@ -538,4 +540,95 @@ test("a page with no recovery channel does no recovery work", async () => {
 
   expect(result.ok).toBe(true);
   expect(parses).toBe(0);
+});
+
+// ------------------------------------------------------------ continuous typing
+//
+// The adaptive cadence can wait longer than today's ten seconds, and the shorter
+// saves it replaces were the ones that used to acknowledge a copy. So the bound is
+// this: everything typed after a capture stays in the journal and the page stays
+// unsaved until a capture whose bytes cover it is accepted.
+
+const unsaved = () => document.documentElement.getAttribute("unsaved");
+
+test("text typed after a capture stays journalled and unsaved until it is covered", async () => {
+  await useRecovery();
+  await staged("e1");
+  expect((await entries.flush()).ok).toBe(true);
+  expect(await records()).toHaveLength(1);
+
+  // Capture A, and hold it on the wire while B is typed.
+  let answer;
+  respond = () => new Promise((resolve) => { answer = resolve; });
+  const saving = saveMod.savePage();
+  await tick();
+  expect(calls.save).toHaveLength(1);
+  expect(calls.save[0].options.body).toContain(">A<");
+
+  setBody("e1", "B");
+  await staged("e1");
+  await entries.flush();
+
+  // The host accepts A. Its bytes carry A, and only A.
+  answer({ body: { msg: "Saved", etag: "stored-2" } });
+  expect((await saving).ok).toBe(true);
+  await entries.flush();
+  await tick();
+
+  const kept = await records();
+  expect(kept).toHaveLength(1);
+  expect(kept[0].payload.body).toBe("B");
+  expect(kept[0].payload).toEqual(liveEntry("e1"));
+  expect(saveMod.getLastSavedContents()).not.toContain(">B<");
+  expect(pageMaybeDirty()).toBe(true);
+  expect(unsaved()).toBe("true");
+
+  // A capture that covers B is what closes it: the copy retires and the page is
+  // clean again.
+  respond = () => ({ body: { msg: "Saved", etag: "stored-3" } });
+  expect((await saveMod.savePage()).ok).toBe(true);
+  await entries.flush();
+  await tick();
+
+  expect(await records()).toEqual([]);
+  expect(saveMod.getLastSavedContents()).toContain(">B<");
+  expect(unsaved()).toBe(null);
+});
+
+test("a quota failure keeps the durable copy and the warning", async () => {
+  let fail = false;
+  const database = guardedFactory(factory, () => (fail ? new DOMException("full", "QuotaExceededError") : null));
+  await useRecovery({ database });
+
+  await staged("e1");
+  expect((await entries.flush()).ok).toBe(true);
+
+  // B's write fails. What is durable is still A, and the page still warns.
+  const lastSaved = saveMod.getLastSavedContents();
+  const sent = calls.save.length;
+  fail = true;
+  setBody("e1", "B");
+  await staged("e1");
+  expect(await entries.flush()).toEqual({ ok: false, code: "quota" });
+  await tick();
+
+  const durable = await records();
+  expect(durable).toHaveLength(1);
+  expect(durable[0].payload.body).toBe("A");
+  expect(saveMod.getLastSavedContents()).toBe(lastSaved);
+  expect(pageMaybeDirty()).toBe(true);
+  expect(unsaved()).toBe("true");
+
+  // The failure is not a save: nothing went out, and nothing was acknowledged.
+  expect(calls.save).toHaveLength(sent);
+
+  // Once storage takes writes again, a capture covering B is what clears it.
+  fail = false;
+  const result = await saveMod.savePage();
+  expect(result.ok).toBe(true);
+  expect(calls.save[calls.save.length - 1].options.body).toContain(">B<");
+  await entries.flush();
+  await tick();
+
+  expect(await records()).toEqual([]);
 });

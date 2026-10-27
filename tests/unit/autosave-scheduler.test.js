@@ -99,6 +99,44 @@ describe("the automatic-save cadence", () => {
     expect(runs).toEqual([START + CONTINUOUS_MS]);
   });
 
+  test("continuous changes wait out the cost the last save measured", async () => {
+    const time = fakeTime();
+    const runs = [];
+    const gate = deferred();
+    const scheduler = createAutosaveScheduler({
+      now: time.now,
+      setTimer: time.setTimer,
+      clearTimer: time.clearTimer,
+      run: () => {
+        runs.push(time.now());
+        return gate.promise;
+      }
+    });
+
+    // The first burst is admitted by the quiet period; the attempt it admits does
+    // three seconds of synchronous work.
+    scheduler.noteActivity();
+    await time.advance(IDLE_MS);
+    expect(runs).toHaveLength(1);
+    await time.advance(3000);
+    scheduler.noteCost(3000);
+    gate.resolve();
+    await time.advance(0);
+    expect(scheduler.running()).toBe(false);
+
+    const finishedAt = START + IDLE_MS + 3000;
+    const continuousAt = finishedAt + 4 * 3000;
+
+    // No pause long enough to flush: the ten-second healthy checkpoint is replaced
+    // by the twelve seconds this save earned.
+    while (time.now() < continuousAt) {
+      await time.advance(400);
+      if (time.now() < continuousAt) scheduler.noteActivity();
+    }
+
+    expect(runs).toEqual([START + IDLE_MS, continuousAt]);
+  });
+
   test("two trigger types coalesce onto one admitted attempt", async () => {
     const time = fakeTime();
     const runs = [];
@@ -174,15 +212,31 @@ describe("the automatic-save cadence", () => {
     expect(runs[1]).toBe(finishedAt + IDLE_MS);
   });
 
-  test("adaptive spacing is off, so a costly save does not move the cooldown", () => {
-    expect(ADAPTIVE_SPACING).toBe(false);
-    expect(COST_MULTIPLIER).toBe(0);
+  test("adaptive spacing multiplies the cooldown a costly save earned", () => {
+    expect(ADAPTIVE_SPACING).toBe(true);
+    expect(COST_MULTIPLIER).toBe(4);
 
     const common = { firstDirtyAt: 0, lastActivityAt: 0, finishedAt: 5000 };
     expect(nextAutoAt({ ...common, costMs: 0 })).toBe(6500);
-    expect(nextAutoAt({ ...common, costMs: 9000 })).toBe(6500);
-    expect(nextAutoAt({ ...common, costMs: 9000 })).toBe(nextAutoAt({ ...common, costMs: 0 }));
+    // A real quiet period still flushes 1,500 ms after the last change, whatever
+    // that save cost.
+    expect(nextAutoAt({ ...common, costMs: 3000 })).toBe(6500);
     expect(nextAutoAt(common)).toBeGreaterThanOrEqual(common.finishedAt + MIN_GAP_MS);
+
+    // Under continuous typing the same cost replaces the ten-second checkpoint with
+    // the twelve seconds that save's own 3,000 ms of work earned.
+    expect(nextAutoAt({ firstDirtyAt: 0, lastActivityAt: 16000, finishedAt: 5000, costMs: 3000 }))
+      .toBe(5000 + 4 * 3000);
+  });
+
+  // 4 x 20,000 ms would be 80,000 ms of cooldown. The plan's ceiling is thirty.
+  test("the cost cooldown stops at MAX_COOLDOWN_MS", () => {
+    const finishedAt = 60000;
+    const typing = { firstDirtyAt: finishedAt + 2500, lastActivityAt: finishedAt + 29500, finishedAt };
+
+    expect(nextAutoAt({ ...typing, costMs: 20000 })).toBe(finishedAt + MAX_COOLDOWN_MS);
+    // Just under the ceiling, the measured cost is still what sets the interval.
+    expect(nextAutoAt({ ...typing, costMs: 6000 })).toBe(finishedAt + 6000 * 4);
   });
 
   test("the cooldown is capped and never shorter than the gap", () => {
@@ -323,6 +377,27 @@ describe("an admitted automatic save", () => {
     expect(result.msgType).toBe("skipped");
     expect(result.msg).toBe("No changes to save");
     expect(posts.length).toBe(seenPosts);
+  }, 20000);
+
+  // The cost estimate is this page's own work: the capture, the render, the
+  // verifier's parse and the adoption of what the host accepted. Waiting for the
+  // host is not this page's work, so a slow answer must not buy a longer cooldown
+  // (four times two seconds would be eight seconds of one).
+  test("a two-second network delay does not raise the cost estimate", async () => {
+    await establish("slow-network-base");
+    const seenPosts = posts.length;
+
+    document.getElementById("c").textContent = "slow-network-edit";
+    await sleep(0);
+    latency = 2000;
+    const startedAt = performance.now();
+    const result = await save.savePageThrottled();
+    latency = 0;
+
+    expect(result.ok).toBe(true);
+    expect(performance.now() - startedAt).toBeGreaterThanOrEqual(2000);
+    expect(posts.length).toBe(seenPosts + 1);
+    expect(save.autosaveScheduler.costEstimate()).toBeLessThan(1000);
   }, 20000);
 
   // The dirty gate is the cheap half of the old dirtyMatchesLastSave check, and

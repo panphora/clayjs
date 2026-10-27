@@ -16,10 +16,9 @@ export const MAX_COOLDOWN_MS = 30000;
 
 // Adaptive spacing: make the gap after a save at least COST_MULTIPLIER times that
 // save's synchronous cost, so a three-second save earns twelve seconds of quiet
-// rather than spending the quiet window doing the next capture. Off for now, and
-// the multiplier is zero while it is off, which makes the cooldown term exactly
-// MIN_GAP_MS and keeps today's 1,500 / 10,000 ms cadence.
-export const ADAPTIVE_SPACING = false;
+// rather than spending the quiet window doing the next capture. On now that local
+// recovery keeps every keystroke the longer gap could leave unsent.
+export const ADAPTIVE_SPACING = true;
 export const COST_MULTIPLIER = ADAPTIVE_SPACING ? 4 : 0;
 
 // "No such time yet": before the first activity or the first completed save the
