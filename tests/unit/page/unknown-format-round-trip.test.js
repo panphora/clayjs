@@ -4,7 +4,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { state as pmState, history } from "../../../src/vendor/prosemirror.vendor.js";
+import { state as pmState, view as pmView, history } from "../../../src/vendor/prosemirror.vendor.js";
 import { HyperMorph } from "../../../src/vendor/hyper-morph.vendor.js";
 import { schema } from "../../../src/page/schema.js";
 import { blockMap, docFromBlocks, identityPlugin, nodeFromBlock } from "../../../src/page/model.js";
@@ -20,6 +20,9 @@ import { createPageDoc } from "../../../src/page/ybind/layout.js";
 import { blocksFromYValue } from "../../../src/page/ybind/decode.js";
 import { yValueOf } from "../../../src/page/ybind/provider.js";
 import { mergePageModels } from "../../../src/page/merge.js";
+import { createStore } from "../../../src/live/store.js";
+import { createYPageBinding } from "../../../src/page/ybind/index.js";
+import { seedPageFromArticle } from "../../../src/page/ybind/migrate.js";
 
 /**
  * A record holding content from a newer format keeps it through the saved
@@ -257,6 +260,68 @@ test("HTML-like attribute values and prototype-shaped keys stay inert data", () 
   expect([...rendered.querySelectorAll("*")].every((el) => [...el.attributes].every((a) => !/^on/i.test(a.name)))).toBe(true);
   expect(rendered.querySelector('[data-id="p"]').textContent).toBe("text");
   expect(canon(parseModel(rendered)[0])).toBe(canon(back));
+});
+
+// A newer peer's record as the projection writes it: an unfamiliar block with an
+// attribute and text, a known paragraph carrying an unfamiliar named mark, a
+// compact token and an attribute this runtime has no schema field for.
+const WIDGET = {
+  t: "future_widget",
+  pos: "00000002",
+  c: "Widget text",
+  m: [[11, 'x["text_color",{"color":"red"}]']],
+  theme: { bg: "red" },
+  level: 3,
+};
+const MARKED_TEXT = {
+  t: "paragraph",
+  pos: "00000001",
+  c: "hover here",
+  m: [[5, 'x["underline",{}]'], [5, 'y["kept"]']],
+  due: "2026-11-01",
+  meta: { by: "Ada" },
+};
+const NEIGHBOUR = { t: "paragraph", pos: "00000003", c: "Neighbour line" };
+const SAVED = { blocks: { a: MARKED_TEXT, w: WIDGET, z: NEIGHBOUR }, deleted: {} };
+
+test("a saved file with newer content reopens through the seed and takes a neighbour edit", () => {
+  const records = blocksOfValues([SAVED]);
+  const newer = project(records);
+  const file = articleOf(renderModel(newer, { clean }), revOf(newer));
+  const value = seedPageFromArticle(file);
+  const seeded = blocksFromYValue(value);
+  expect(canon(seeded)).toBe(canon(records));
+  expect(revOf(project(seeded))).toBe(revOf(newer));
+  expect(canon(byId(project(seeded)).get("w"))).toBe(canon(byId(newer).get("w")));
+  expect(canon(byId(project(seeded)).get("a"))).toBe(canon(byId(newer).get("a")));
+
+  const store = createStore({ name: "page", value: JSON.parse(JSON.stringify(value)) });
+  const binding = createYPageBinding({ store, captureTimeout: 0 });
+  const mount = document.body.appendChild(document.createElement("div"));
+  const view = new pmView.EditorView(mount, {
+    state: pmState.EditorState.create({ doc: binding.doc(), plugins: [identityPlugin()] }),
+    dispatchTransaction: (tr) => binding.dispatch(tr),
+  });
+  binding.attach(view);
+  try {
+    expect(types(view.state.doc)).toEqual(["paragraph", "opaque_block", "paragraph"]);
+    const neighbour = find(view.state.doc, "z");
+    view.dispatch(view.state.tr.insertText("!", neighbour.pos + 1 + neighbour.node.textContent.length));
+    expect(find(view.state.doc, "z").node.textContent).toBe("Neighbour line!");
+
+    const saved = project(blocksFromYValue(yValueOf(binding.ydoc)));
+    const savedHtml = renderModel(saved, { clean });
+    const final = parseModel(articleOf(savedHtml, revOf(saved)));
+    expect(revOf(final)).toBe(revOf(saved));
+    expect(canon(final)).toBe(canon(saved));
+    for (const id of ["a", "w"]) expect(canon(byId(final).get(id))).toBe(canon(byId(newer).get(id)));
+    expect(byId(final).get("z").c).toBe("Neighbour line!");
+  } finally {
+    view.destroy();
+    binding.dispose();
+    binding.ydoc.destroy();
+    mount.remove();
+  }
 });
 
 test("a live room's newer content reaches the saved file and comes back as the same records", () => {

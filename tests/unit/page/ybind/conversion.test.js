@@ -78,7 +78,7 @@ test.each([
   ["duplicate name", [["page", source()], ["page", source()]]],
   ["unrelated store", [["counter", source()]]],
   ["non-numeric suffix", [["page.other", source()]]],
-  ["unsupported block", [["page", { blocks: { p: { t: "unknown", pos: "A" } } }]]],
+  ["empty block type", [["page", { blocks: { p: { t: "", pos: "A" } } }]]],
   ["non-JSON value", [["page", { blocks: { p: { t: "paragraph", pos: "A", c: undefined } } }]]],
   ["non-finite number", [["page", { blocks: { p: { t: "paragraph", pos: "A", c: Infinity } } }]]],
 ])("refuses %s without returning a conversion", async (label, tags) => {

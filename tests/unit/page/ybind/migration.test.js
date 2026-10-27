@@ -124,9 +124,10 @@ test("accepts empty pages and the existing null-as-empty text convention", () =>
 test.each([
   ["missing source", []],
   ["already converted value", [{ v: 1, g: 0, y: {} }]],
-  ["unknown block", [{ blocks: { p: { t: "future_widget", c: "text" } } }]],
-  ["unknown field", [{ blocks: { p: { t: "paragraph", c: "text", future: { keep: true } } } }]],
-  ["unknown mark", [{ blocks: { p: { t: "paragraph", c: "x", m: [[1, "z"]] } } }]],
+  ["empty block type", [{ blocks: { p: { t: "", c: "text" } } }]],
+  ["the internal opaque block type", [{ blocks: { p: { t: "opaque_block", c: "text" } } }]],
+  ["malformed mark key", [{ blocks: { p: { t: "paragraph", c: "x", m: [[1, 'x["bad"]']] } } }]],
+  ["malformed mark key on an unfamiliar block", [{ blocks: { p: { t: "future_widget", c: "x", m: [[1, 'x["bad"]']] } } }]],
   ["incomplete marks", [{ blocks: { p: { t: "paragraph", c: "text", m: [[1, "b"]] } } }]],
   ["unknown atom", [{ blocks: { p: { t: "paragraph", c: "\uFFFC", m: [[1, '@{"type":"future_atom"}']] } } }]],
   ["marks on code", [{ blocks: { p: { t: "code_block", c: "text", m: [[4, "b"]] } } }]],
@@ -137,6 +138,20 @@ test.each([
   const before = JSON.stringify(values);
   expect(() => migrateHybridValues(values)).toThrow(YMigrationError);
   expect(JSON.stringify(values)).toBe(before);
+});
+
+test("keeps an unfamiliar block, mark and attribute as the records they stand for", () => {
+  const blocks = {
+    a: { t: "paragraph", c: "hover here", m: [[5, 'x["underline",{}]'], [5, 'y["kept"]']], due: "2026-11-01" },
+    w: { t: "future_widget", c: "Widget text", m: [[11, 'x["text_color",{"color":"red"}]']], theme: { bg: "red" } },
+    z: { t: "paragraph", c: "plain" },
+  };
+  const value = migrateHybridValues([{ blocks }]);
+  expect(blocksFromYValue(value)).toEqual({
+    a: { t: "paragraph", pos: "00000001", c: "hover here", m: [[5, 'x["underline",{}]'], [5, 'y["kept"]']], due: "2026-11-01" },
+    w: { t: "future_widget", pos: "00000002", c: "Widget text", m: [[11, 'x["text_color",{"color":"red"}]']], theme: { bg: "red" } },
+    z: { t: "paragraph", pos: "00000003", c: "plain" },
+  });
 });
 
 test("refuses text that the Yjs encoding cannot preserve", () => {

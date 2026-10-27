@@ -1,10 +1,11 @@
 import * as Y from "../../vendor/yjs.vendor.js";
 import { schema } from "../schema.js";
 import { nodeFromBlock } from "../model.js";
-import { flatten, marksOf } from "../inline.js";
+import { flatten, markKey, marksOf } from "../inline.js";
 import { ATOM, BREAK, DEFAULTS, blocksOfValues, orderedIds, unitsOf, runsOf, canon, hash64, parseModel } from "../projection.js";
 import { blockFromItem } from "../adopt.js";
 import { createPageDoc, attrKeys, defaultOf, SEED } from "./layout.js";
+import { marksFields } from "./marks.js";
 import { blocksFromYValue } from "./decode.js";
 import { PART, enc } from "./provider.js";
 import { boardKey } from "./board.js";
@@ -34,13 +35,54 @@ function sourceBlocks(values) {
   return blocksOfValues(values);
 }
 
+// A mark key as the record keeps it: the codec validates every descriptor, and the
+// known codes and the opaque ones come back in the order the binding writes them.
+const canonicalKey = (key, id) => {
+  let marks;
+  try { marks = marksOf(schema, key); } catch { return fail(`Invalid mark key on block: ${id}`); }
+  return markKey([...marks].sort((a, b) => a.type.rank - b.type.rank));
+};
+
+const markUnits = (block, id) => {
+  const units = unitsOf(block.m, block.c.length);
+  if (!units) fail(`Invalid mark runs on block: ${id}`);
+  for (let i = 0; i < units.length; i++) {
+    const key = units[i];
+    if (typeof key !== "string") fail(`Invalid mark key on block: ${id}`);
+    if (key.startsWith("@") && (key !== BREAK || block.c[i] !== ATOM)) fail(`Unsupported inline atom on block: ${id}`);
+    if (block.t === "code_block" && key) fail(`Unsupported formatting in code block: ${id}`);
+    if (!key.startsWith("@")) units[i] = canonicalKey(key, id);
+  }
+  return units;
+};
+
+// A block type this runtime has no schema for keeps the record it stands for: its
+// own type, its text and marks and every other field a newer peer wrote on it.
+function opaqueRecord(id, block, pos) {
+  const out = { t: block.t, pos };
+  for (const key of Object.keys(block)) {
+    if (key === "t" || key === "pos" || key === "c" || key === "m") continue;
+    out[key] = copy(block[key]);
+  }
+  if (block.c != null && typeof block.c !== "string") fail(`Invalid text on block: ${id}`);
+  out.c = block.c ?? "";
+  if (typeof block.c === "string" && block.m != null) {
+    const units = markUnits(block, id);
+    if (units.some(Boolean)) out.m = runsOf(units);
+  } else if (block.m != null) fail(`Mark runs require flat text on block: ${id}`);
+  return out;
+}
+
 function normalizeBlock(id, block, index) {
-  if (!Object.hasOwn(DEFAULTS, block.t)) fail(`Unsupported hybrid block type: ${block.t}`);
+  const known = Object.hasOwn(DEFAULTS, block.t);
+  if (!known && (typeof block.t !== "string" || !block.t || block.t === "opaque_block")) fail(`Unsupported hybrid block type: ${block.t}`);
+  const pos = String(index + 1).padStart(8, "0");
+  if (!known) return opaqueRecord(id, block, pos);
   const type = schema.nodes[block.t];
   const fields = attrKeys(type);
   const allowed = new Set(["t", "pos", "c", "m", ...fields, ...(block.t === "table" ? ["rows"] : [])]);
-  for (const key of Object.keys(block)) if (!allowed.has(key)) fail(`Unsupported field on block ${id}: ${key}`);
-  const out = { t: block.t, pos: String(index + 1).padStart(8, "0") };
+  const out = { t: block.t, pos };
+  for (const key of Object.keys(block)) if (!allowed.has(key)) out[key] = copy(block[key]);
   for (const key of fields) {
     const value = block[key] === undefined ? defaultOf(type, key) : block[key];
     if (canon(value) !== canon(defaultOf(type, key))) out[key] = copy(value);
@@ -56,14 +98,7 @@ function normalizeBlock(id, block, index) {
   }
   if (block.c != null && typeof block.c !== "string" && !Array.isArray(block.c)) fail(`Invalid text on block: ${id}`);
   if (typeof block.c === "string" && block.m != null) {
-    const units = unitsOf(block.m, block.c.length);
-    if (!units) fail(`Invalid mark runs on block: ${id}`);
-    for (let i = 0; i < units.length; i++) {
-      const key = units[i];
-      if (typeof key !== "string") fail(`Invalid mark key on block: ${id}`);
-      if (key.startsWith("@") && (key !== BREAK || block.c[i] !== ATOM)) fail(`Unsupported inline atom on block: ${id}`);
-      if (block.t === "code_block" && key) fail(`Unsupported formatting in code block: ${id}`);
-    }
+    markUnits(block, id);
   } else if (block.m != null) fail(`Mark runs require flat text on block: ${id}`);
   const node = nodeFromBlock(schema, id, block);
   node.check();
@@ -107,7 +142,7 @@ export function buildPageValue(values, clientID) {
           if (key === BREAK) {
             for (let i = 0; i < length; i++) pd.flow.insertEmbed(pd.flow.length, { br: 1 }, {});
           } else {
-            const attrs = Object.fromEntries(marksOf(schema, key).map((mark) => [`${mark.type.name}~${clientID}-m${(op++).toString(36)}`, Object.keys(mark.attrs).length ? copy(mark.attrs) : true]));
+            const attrs = Object.fromEntries(Object.entries(marksFields(marksOf(schema, key))).map(([name, value]) => [`${name}~${clientID}-m${(op++).toString(36)}`, value && typeof value === "object" ? copy(value) : value]));
             pd.flow.insert(pd.flow.length, c.slice(offset, offset + length), attrs);
           }
           offset += length;
