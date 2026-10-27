@@ -138,17 +138,8 @@ function quoteShortcut(plugin, view, from, to, text) {
   if ($from.depth !== 1 || node.type !== N.paragraph || $from.parentOffset !== 1 || node.textContent !== '"') return false;
   if (!view.editable || typeof view.runFormatCommand !== "function") return false;
   const plain = () => { if (!view.isDestroyed) view.dispatch(st.tr.insertText(" ", from, to)); };
-  const convert = () => {
-    if (view.isDestroyed) return false;
-    const now = view.state;
-    const at = $from.before(1);
-    const current = now.doc.nodeAt(at);
-    if (!current || current.type !== N.paragraph || current.textContent !== '"') return plain();
-    const tr = now.tr.delete(at + 1, at + 2).setNodeMarkup(at, N.quote, current.attrs);
-    view.dispatch(asStep(tr.setMeta(plugin, { transform: tr, from, to, text })));
-    return true;
-  };
-  view.runFormatCommand(convert).then((result) => { if (result?.status !== "applied") plain(); }, plain);
+  const at = $from.before(1);
+  import("./format-native-commands.js").then(({ quoteFromSpace }) => quoteFromSpace(plugin, view, { at, from, to }, plain), plain);
   return true;
 }
 

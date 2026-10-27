@@ -13,7 +13,6 @@ import { makeTable, insertTableNode } from "./table.js";
 import { pickCsv } from "./csv-import.js";
 import { makeBoard, insertBoardNode } from "./board.js";
 import { chartFromSlash, chartTables } from "./chart.js";
-import { runFormat } from "./format-native.js";
 
 const { TextSelection } = state;
 const N = schema.nodes;
@@ -182,7 +181,7 @@ export function rankItems(items, query) {
 // type from a later format asks the format gate before it writes anything.
 export function runItem(view, item, index, remove = null) {
   if (item.type !== "quote") return insertItem(view, item, index, remove);
-  return runFormat(view, () => insertItem(view, item, index, remove));
+  return import("./format-native-commands.js").then(({ runFormat }) => runFormat(view, () => insertItem(view, item, index, remove)));
 }
 
 function insertItem(view, item, index, remove = null) {

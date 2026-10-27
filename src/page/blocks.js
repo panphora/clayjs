@@ -8,9 +8,8 @@ import { REMOTE, newId } from "./model.js";
 import { safeHref, safeSrc } from "./link.js";
 import { flatten, runsOf, unflatten, unitsOf } from "./inline.js";
 import { OPAQUE_MARK, opaqueMark } from "./format-codec.js";
-import { NATIVE_NAMES, nativeAttrs, runFormat } from "./format-native.js";
+import { NATIVE_NAMES, nativeAttrs } from "./format-native.js";
 import { DEFAULTS, MARKS, OPAQUE, envelopeAttrs, envelopeRecord, marksAttrs, marksEntries } from "./projection.js";
-import { announce } from "./announce.js";
 
 const alignOf = (a) => (a === "left" || a === "right" ? a : null);
 
@@ -1229,18 +1228,7 @@ function pasteFormat(view, event, slice) {
     if (!view.isDestroyed && text) view.dispatch(view.state.tr.insertText(text, from, to));
     return false;
   };
-  const place = () => {
-    if (view.isDestroyed) return false;
-    const st = view.state;
-    if (st.selection.from !== from || st.selection.to !== to) return false;
-    view.dispatch(st.tr.replaceSelection(slice).scrollIntoView());
-    return true;
-  };
-  runFormat(view, place).then((result) => {
-    if (result?.status === "applied") return;
-    if (!view.isDestroyed) announce(view, result?.message ?? "That format isn\u2019t available here.");
-    plain();
-  }, plain);
+  import("./format-native-commands.js").then(({ pasteFormats }) => pasteFormats(view, slice, from, to), plain);
   return true;
 }
 

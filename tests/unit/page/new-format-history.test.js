@@ -1,7 +1,7 @@
 globalThis.ClipboardEvent ??= class ClipboardEvent extends Event {};
 
 import { flatten } from "../../../src/page/inline.js";
-import { formatMark } from "../../../src/page/format-native.js";
+import { formatMark } from "../../../src/page/format-native-commands.js";
 import { editor, posOf, select, key, typeText } from "./view-helpers.js";
 
 /**

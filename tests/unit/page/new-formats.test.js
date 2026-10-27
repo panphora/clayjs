@@ -2,7 +2,8 @@ globalThis.ClipboardEvent ??= class ClipboardEvent extends Event {};
 
 import { schema } from "../../../src/page/schema.js";
 import { flatten } from "../../../src/page/inline.js";
-import { PALETTE, formatMark } from "../../../src/page/format-native.js";
+import { PALETTE } from "../../../src/page/format-native.js";
+import { formatMark } from "../../../src/page/format-native-commands.js";
 import { renderModel, parseModel, revOf } from "../../../src/page/projection.js";
 import { editor, posOf, select, key, typeText } from "./view-helpers.js";
 
@@ -122,6 +123,7 @@ test("text color takes only the fixed palette and reset takes it off again", asy
   pinned(view);
   part(view, ".page-tool-more").click();
   row(view, "Text color").click();
+  await settle();
   expect([...part(view, ".page-menu").querySelectorAll(".page-menu-label")].map((x) => x.textContent))
     .toEqual([...PALETTE.map((color) => `Text: ${color[0].toUpperCase()}${color.slice(1)}`), "Automatic"]);
   row(view, "Text: Red").click();

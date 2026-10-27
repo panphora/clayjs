@@ -15,7 +15,7 @@ import { announcementPlugin, announce } from "./announce.js";
 import { linkPlugin } from "./link.js";
 import { blockSelectionPlugin, asStep } from "./blocksel.js";
 import { markdownPlugin, markdownKeys, backspaceToParagraph, composing } from "./markdown.js";
-import { PALETTE, formatMark, markable } from "./format-native.js";
+import { markable } from "./format-native.js";
 import { placeholderPlugin } from "./placeholder.js";
 import { titlePlugin } from "./document-title-runtime.js";
 import { mediaPlugin } from "./media.js";
@@ -114,7 +114,6 @@ export const PAGE_EDITOR_CSS = `
 /* The four floor-1 formats. A quote is set apart by its own inset and ink, with
    no left-border accent; the palette's keys are fixed tokens, in both themes. */
 :where(article[data-page], .page-editor) blockquote { padding-inline-start: var(--page-indent); color: var(--page-ink-soft); }
-${PALETTE.map((color) => `:where(article[data-page], .page-editor) span[data-color="${color}"] { color: var(--page-color-${color}); }\n:where(article[data-page], .page-editor) mark[data-color="${color}"] { color: inherit; background: var(--page-mark-bg-${color}); }`).join("\n")}
 :where(article[data-page], .page-editor) hr { border: 0; border-top: 1px solid var(--page-rule); margin-block: 1.2em; }
 :where(article[data-page], .page-editor) .page-hidden { display: none; }
 :where(article[data-page], .page-editor) .page-li { position: relative; --li-indent: 0; padding-inline-start: calc((var(--li-indent) + 1) * var(--page-indent)); }
@@ -252,9 +251,11 @@ const insertHardBreak = (st, dispatch) => {
 // gate, so a refused activation leaves the document exactly as it was.
 const underlineShortcut = (st, dispatch, view) => {
   if (!dispatch || !view?.editable || !markable(st, schema.marks.underline)) return false;
-  formatMark(view, "underline").then((result) => {
-    if (result?.status !== "applied" && !view.isDestroyed) announce(view, result?.message ?? "That format isn\u2019t available here.");
-  });
+  import("./format-native-commands.js")
+    .then(({ formatMark }) => formatMark(view, "underline"), () => null)
+    .then((result) => {
+      if (result?.status !== "applied" && !view.isDestroyed) announce(view, result?.message ?? "That format isn\u2019t available here.");
+    });
   return true;
 };
 
