@@ -10,12 +10,25 @@
 // pos-keyed maps. parse(render(blocks)) equals project(blocks) for every kind.
 import { chartModel, renderChartSvg } from "./rich/chart.js";
 import { cellText } from "./rich/cell.js";
+import { bounded, descriptors, entriesOf, keyOf, normalizeEntries } from "./format-codec.js";
 
 export const ATOM = "￼";
 export const BREAK = '@{"type":"hard_break"}';
 const CODES = ["b", "i", "s", "c", "a"];
 const TAGS = { b: "strong", i: "em", s: "s", c: "code" };
 const NEST = ["a", "b", "i", "s", "c"];
+const KNOWN = new Set(CODES);
+
+// A block or an inline span the runtime has no schema for rides in an inert
+// semantic envelope: canonical JSON, base64url, in one attribute. The block
+// envelope holds the block record, the marks envelope the descriptors of one
+// run, and the visible text stays the readable fallback.
+export const OPAQUE = "data-clay-page-opaque";
+export const VALUE = "data-clay-page-value";
+export const MARKS = "data-clay-page-marks";
+const ENVELOPE = "1";
+const STRUCTURAL = new Set(["id", "t", "parent", "c", "m"]);
+const knownType = (t) => Object.hasOwn(DEFAULTS, t);
 
 // Mirrors schema.js attrs minus id and pos (a test pins the two together).
 export const DEFAULTS = {
@@ -48,6 +61,58 @@ export function orderedIds(map) {
   });
 }
 
+// ---- envelopes --------------------------------------------------------------
+
+const b64url = (text) => {
+  let bin = "";
+  for (const byte of new TextEncoder().encode(text)) bin += String.fromCharCode(byte);
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+};
+
+const fromB64url = (text) => {
+  const bin = atob(String(text).replace(/-/g, "+").replace(/_/g, "/"));
+  return new TextDecoder().decode(Uint8Array.from(bin, (ch) => ch.charCodeAt(0)));
+};
+
+// A key any object would take as its prototype rather than as data.
+const hostile = (value) => {
+  if (value === null || typeof value !== "object") return false;
+  if (Array.isArray(value)) return value.some(hostile);
+  return Object.keys(value).some((key) => key === "__proto__" || hostile(value[key]));
+};
+
+// One envelope's JSON, under the codec's budget: deeper or larger refuses the
+// whole source rather than cutting the envelope short.
+function decodeJson(text) {
+  let value;
+  try { value = JSON.parse(fromB64url(text)); }
+  catch { throw new SyntaxError("page: an envelope is not readable canonical JSON"); }
+  try { bounded(value); }
+  catch (error) { throw new SyntaxError(error.message); }
+  if (hostile(value)) throw new SyntaxError("page: an envelope holds a prototype key");
+  return value;
+}
+
+// A block envelope: a record, whose own type and structural fields are kept
+// apart from it.
+function recordOf(text) {
+  const value = decodeJson(text);
+  if (value === null || typeof value !== "object" || Array.isArray(value)) throw new SyntaxError("page: a block envelope is not a record");
+  if ("id" in value || "pos" in value) throw new SyntaxError("page: a block envelope holds a structural field");
+  if ("t" in value && (typeof value.t !== "string" || !value.t)) throw new SyntaxError("page: a block envelope names no type");
+  return value;
+}
+
+// A marks envelope: the descriptors of one run, validated and put back in the
+// codec's canonical order however they arrived.
+function entriesOfEnvelope(text) {
+  try { return normalizeEntries(decodeJson(text)); }
+  catch (error) { throw error instanceof SyntaxError ? error : new SyntaxError(error.message); }
+}
+
+const envelopeOf = (value) => ` ${OPAQUE}="${ENVELOPE}" ${VALUE}="${escAttr(b64url(canon(value)))}"`;
+const marksEnvelope = (entries) => (entries.length ? ` ${MARKS}="${escAttr(b64url(JSON.stringify(entries)))}"` : "");
+
 // ---- marks ------------------------------------------------------------------
 
 // inline.js unitsOf: runs [[n, key]] or per-unit keys -> one key per unit, or null.
@@ -72,27 +137,28 @@ export function runsOf(units) {
   return out;
 }
 
-// A mark key as { b: true, a: ["href"] ... }; null for an atom key.
+// A mark key as { marks: { b: true, a: ["href"] ... }, entries: [...] }, the
+// entries being the descriptors of every mark this runtime has no code for, in
+// the codec's canonical order.
 function marksOfKey(key) {
-  const out = {};
-  if (!key || key[0] === "@") return out;
-  for (let i = 0; i < key.length;) {
-    const code = key[i++];
-    if (key[i] === "[") {
-      let depth = 0, str = false, j = i;
-      for (; j < key.length; j++) {
-        const ch = key[j];
-        if (str) { if (ch === "\\") j++; else if (ch === '"') str = false; }
-        else if (ch === '"') str = true;
-        else if (ch === "[") depth++;
-        else if (ch === "]" && --depth === 0) { j++; break; }
-      }
-      out[code] = JSON.parse(key.slice(i, j));
-      i = j;
-    } else out[code] = true;
+  const marks = {};
+  if (!key || key[0] === "@") return { marks, entries: [] };
+  const opaque = [];
+  for (const desc of descriptors(key)) {
+    if (desc.name === undefined && KNOWN.has(desc.code)) marks[desc.code] = desc.attrs ?? true;
+    else opaque.push(desc);
   }
-  return out;
+  return { marks, entries: opaque.length ? entriesOf(opaque) : [] };
 }
+
+// One unit's key, as the record keeps it: the codes this runtime knows, then
+// every descriptor it keeps for a newer runtime.
+const unitKey = (key, text, i) => {
+  if (!key) return "";
+  if (key[0] === "@") return key === BREAK && text[i] === ATOM ? key : "";
+  const { marks, entries } = marksOfKey(key);
+  return keyOfMarks(safeMarks(marks), entries);
+};
 
 // A link to a script URL is never kept: it would run on the page's origin when a
 // reader clicks it in the saved article.
@@ -102,14 +168,14 @@ const safeMarks = (marks) => {
   return marks;
 };
 
-function keyOfMarks(marks) {
+function keyOfMarks(marks, entries = []) {
   let key = "";
   for (const code of CODES) {
     if (!marks[code]) continue;
     key += code;
     if (Array.isArray(marks[code])) key += JSON.stringify(marks[code]);
   }
-  return key;
+  return entries.length ? key + keyOf(entries) : key;
 }
 
 // ---- text normalization -----------------------------------------------------
@@ -175,7 +241,7 @@ function layout(blocks) {
   let prev = null;
   for (const id of orderedIds(blocks)) {
     const b = blocks[id];
-    const t = DEFAULTS[b.t] ? b.t : null;
+    const t = typeof b.t === "string" && b.t ? b.t : null;
     let parent = b.parent ?? null;
     if (parent !== null) {
       const at = stack.lastIndexOf(parent);
@@ -207,7 +273,7 @@ const columnWidth = (value) => (typeof value === "number" && Number.isFinite(val
 function cellModel(value) {
   if (value === null || typeof value !== "object" || typeof value.c !== "string") return normalizeText(cellText(value), null).c;
   const raw = unitsOf(value.m, value.c.length);
-  const units = raw && raw.map((k, i) => (!k ? "" : k[0] === "@" ? (k === BREAK && value.c[i] === ATOM ? k : "") : keyOfMarks(safeMarks(marksOfKey(k)))));
+  const units = raw && raw.map((k, i) => unitKey(k, value.c, i));
   if (!units) return normalizeText(cellText(value), null).c;
   const n = normalizeText(value.c, units);
   const fields = textFields(n.c, n.units);
@@ -240,10 +306,44 @@ function projectBoard(b) {
   };
 }
 
+// The record a block envelope carries: its own type first, then every field the
+// runtime keeps for the block, extras included.
+const recordOfItem = (item) => {
+  const { t, parent: _p, id: _i, ...fields } = item;
+  return { t, ...fields };
+};
+
+// The fields of a known block the runtime has no schema attribute for. They are
+// merged back only when serialized, inside the inert payload.
+const extrasOfItem = (item) => {
+  const out = {};
+  for (const [k, v] of Object.entries(item)) if (!STRUCTURAL.has(k) && !(knownType(item.t) && Object.hasOwn(DEFAULTS[item.t], k))) out[k] = v;
+  return Object.keys(out).length ? envelopeOf(out) : "";
+};
+
+const extrasOfBlock = (t, b) => {
+  const out = {};
+  for (const [k, v] of Object.entries(b)) if (!STRUCTURAL.has(k) && k !== "pos" && !Object.hasOwn(DEFAULTS[t], k)) out[k] = v;
+  return out;
+};
+
 function projectOne({ id, b, t, parent, indent }) {
   if (!t) return { id, t: "preserved", html: "" };
-  const { t: _t, pos, c, m, rows, cols, columns, cards, parent: _p, indent: _i, ...attrs } = b;
-  for (const k of Object.keys(attrs)) if (!(k in DEFAULTS[t])) delete attrs[k];
+  if (!knownType(t)) {
+    const { t: _t, id: _id, pos: _pos, parent: _p, ...rest } = b;
+    // The text and its marks are kept as they stand, but marks in the older
+    // per-unit form come back as runs, so one record has one revision whichever
+    // form it was written in.
+    if (typeof rest.c === "string" && rest.m !== undefined) {
+      const units = unitsOf(rest.m, rest.c.length);
+      if (units && units.some(Boolean)) rest.m = runsOf(units);
+      else delete rest.m;
+    }
+    return { id, t, ...(parent ? { parent } : {}), ...rest };
+  }
+  const { t: _t, id: _id, pos, c, m, rows, cols, columns, cards, parent: _p, indent: _i, ...attrs } = b;
+  const extras = extrasOfBlock(t, attrs);
+  for (const k of Object.keys(extras)) delete attrs[k];
   const fields = { ...attrs, parent };
   if (t === "list_item") fields.indent = indent;
   if (t === "heading") fields.level = clampLevel(attrs.level ?? 2);
@@ -253,13 +353,13 @@ function projectOne({ id, b, t, parent, indent }) {
   if (t === "chart" && typeof fields.title === "string") fields.title = normalizeText(fields.title, null).c;
   if (t === "table") Object.assign(fields, projectTable(b));
   else if (t === "board") Object.assign(fields, projectBoard(b));
-  const item = { id, t, ...omitDefaults(t, fields) };
+  const item = { id, t, ...omitDefaults(t, fields), ...extras };
   if (t === "table") { item.cols = fields.cols; item.rows = fields.rows; }
   if (t === "board") { item.columns = fields.columns; item.cards = fields.cards; }
   if (TEXT.has(t)) {
     const text = typeof c === "string" ? c : "";
     const raw = unitsOf(m, text.length);
-    const units = raw && raw.map((k, i) => (!k ? "" : k[0] === "@" ? (text[i] === ATOM ? k : "") : keyOfMarks(safeMarks(marksOfKey(k)))));
+    const units = raw && raw.map((k, i) => unitKey(k, text, i));
     if (t === "code_block") Object.assign(item, { c: text.replace(/\r\n?/g, "\n") });
     else {
       const n = normalizeText(text, units);
@@ -301,7 +401,7 @@ const escText = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>
 const escAttr = (s) => escText(String(s)).replace(/"/g, "&quot;");
 const attr = (name, value) => (value === null || value === undefined ? "" : ` ${name}="${escAttr(value)}"`);
 
-export function renderInline(c, m) {
+export function renderInline(c, m, marksEnvelopes = true) {
   const units = unitsOf(m, c.length) || [];
   let html = "";
   const open = [];
@@ -316,12 +416,13 @@ export function renderInline(c, m) {
     }
     let j = i + 1;
     while (j < c.length && (units[j] || "") === key && !(c[j] === ATOM && key[0] === "@")) j++;
-    const marks = marksOfKey(key);
+    const { marks, entries } = marksOfKey(key);
     const want = NEST.filter((code) => marks[code]).map((code) => ({ code, sig: code + JSON.stringify(marks[code]), tag: code === "a" ? "a" : TAGS[code], href: code === "a" ? marks.a[0] : null }));
+    if (entries.length && marksEnvelopes) want.push({ sig: `marks${canon(entries)}`, tag: "span", entries });
     let keep = 0;
     while (keep < open.length && keep < want.length && open[keep].sig === want[keep].sig) keep++;
     closeTo(keep);
-    for (const w of want.slice(keep)) { html += w.tag === "a" ? `<a${attr("href", w.href)}>` : `<${w.tag}>`; open.push(w); }
+    for (const w of want.slice(keep)) { html += w.entries ? `<span${marksEnvelope(w.entries)}>` : w.tag === "a" ? `<a${attr("href", w.href)}>` : `<${w.tag}>`; open.push(w); }
     html += escText(c.slice(i, j));
     i = j;
   }
@@ -338,26 +439,28 @@ const dataAttrs = (obj) => Object.entries(obj).map(([k, v]) => attr(`data-${k}`,
 
 function renderLeaf(item, clean, tables) {
   const id = attr("data-id", item.id);
+  if (!knownType(item.t)) return `<div${id}${envelopeOf(recordOfItem(item))}>${renderInline(item.c ?? "", item.m, false)}</div>`;
+  const at = id + extrasOfItem(item);
   switch (item.t) {
-    case "paragraph": return `<p${id}>${inlineOf(item)}</p>`;
-    case "heading": { const h = `h${item.level ?? 2}`; return `<${h}${id}>${inlineOf(item)}</${h}>`; }
-    case "callout": return `<aside${id} class="page-callout">${inlineOf(item)}</aside>`;
-    case "code_block": return `<pre${id}${attr("data-lang", item.lang || null)}><code>${escText(item.c ?? "")}</code></pre>`;
-    case "divider": return `<hr${id}>`;
-    case "image": return `<figure${id} data-type="image"${attr("data-align", item.align ?? null)}><img${attr("src", item.src ?? "")}${attr("alt", item.alt ?? "")}${attr("width", item.width ?? null)}>${item.caption ? `<figcaption>${escText(item.caption)}</figcaption>` : ""}</figure>`;
+    case "paragraph": return `<p${at}>${inlineOf(item)}</p>`;
+    case "heading": { const h = `h${item.level ?? 2}`; return `<${h}${at}>${inlineOf(item)}</${h}>`; }
+    case "callout": return `<aside${at} class="page-callout">${inlineOf(item)}</aside>`;
+    case "code_block": return `<pre${at}${attr("data-lang", item.lang || null)}><code>${escText(item.c ?? "")}</code></pre>`;
+    case "divider": return `<hr${at}>`;
+    case "image": return `<figure${at} data-type="image"${attr("data-align", item.align ?? null)}><img${attr("src", item.src ?? "")}${attr("alt", item.alt ?? "")}${attr("width", item.width ?? null)}>${item.caption ? `<figcaption>${escText(item.caption)}</figcaption>` : ""}</figure>`;
     case "file": {
       const href = /^(https?:\/\/|\/(?!\/))/i.test(item.src ?? "") ? item.src : null;
-      return `<div${id} data-type="file"${attr("data-src", item.src ?? "")}${attr("data-name", item.name ?? "")}${attr("data-size", item.size ?? null)}${attr("data-mime", item.mime ?? null)}><a${attr("href", href)} rel="noopener noreferrer">${escText(item.name || "file")}</a></div>`;
+      return `<div${at} data-type="file"${attr("data-src", item.src ?? "")}${attr("data-name", item.name ?? "")}${attr("data-size", item.size ?? null)}${attr("data-mime", item.mime ?? null)}><a${attr("href", href)} rel="noopener noreferrer">${escText(item.name || "file")}</a></div>`;
     }
     case "table": {
       const head = item.cols.map((c) => `<th${attr("data-col", c.id)}${attr("data-kind", c.kind ?? null)}${attr("data-width", c.width ?? null)}${attr("style", c.width ? `width:${c.width}px` : null)}>${escText(c.name)}</th>`).join("");
       const body = item.rows.map((r) => `<tr${attr("data-id", r.id)}>${item.cols.map((c) => `<td>${cellHtml(r.cells[c.id])}</td>`).join("")}</tr>`).join("\n");
-      return `<table${id}${attr("data-sort", item.sort != null ? JSON.stringify(item.sort) : null)}>\n<thead><tr>${head}</tr></thead>\n<tbody>\n${body}\n</tbody>\n</table>`;
+      return `<table${at}${attr("data-sort", item.sort != null ? JSON.stringify(item.sort) : null)}>\n<thead><tr>${head}</tr></thead>\n<tbody>\n${body}\n</tbody>\n</table>`;
     }
     case "chart": {
       const data = dataAttrs({ source: item.source ?? null, kind: item.kind ?? null, x: item.x ?? null, series: item.series ? JSON.stringify(item.series) : null, highlight: item.highlight ?? null });
       const chart = chartModel({ id: item.id, type: item.kind ?? "line", x: item.x, series: item.series ?? [], title: item.title ?? "", highlight: item.highlight }, tables.get(item.source));
-      return `<figure${id} data-type="chart"${data}>${renderChartSvg(chart, { width: 640, height: 320 })}<figcaption>${escText(item.title ?? "")}</figcaption></figure>`;
+      return `<figure${at} data-type="chart"${data}>${renderChartSvg(chart, { width: 640, height: 320 })}<figcaption>${escText(item.title ?? "")}</figcaption></figure>`;
     }
     case "board": {
       const cols = [...item.columns.map((c) => ({ ...c, known: true })), ...[...new Set(item.cards.map((k) => k.col))].filter((col) => !item.columns.some((c) => c.id === col)).map((col) => ({ id: col, known: false }))];
@@ -365,16 +468,16 @@ function renderLeaf(item, clean, tables) {
         const cards = item.cards.filter((k) => k.col === col.id).map((k) => `<li${attr("data-id", k.id)}${attr("data-owner", k.owner ?? null)}${attr("data-due", k.due ?? null)}>${escText(k.title)}</li>`).join("");
         return `<div${attr("data-col", col.id)}${col.known ? "" : " data-missing"}>${col.known ? `<h4>${escText(col.name)}</h4>` : ""}<ul>${cards}</ul></div>`;
       });
-      return `<section${id} data-type="board">\n${parts.join("\n")}\n</section>`;
+      return `<section${at} data-type="board">\n${parts.join("\n")}\n</section>`;
     }
-    case "tool": return `<section${id} data-type="tool">${toolData(item)}</section>`;
-    case "preserved": return preservedHtml(item, clean);
+    case "tool": return `<section${at} data-type="tool">${toolData(item)}</section>`;
+    case "preserved": return preservedHtml(item, clean, at);
     default: return "";
   }
 }
 
 // Markup the schema has no node for, kept as authored inside a marked wrapper.
-const preservedHtml = (item, clean) => `<div${attr("data-id", item.id)} data-type="preserved">${clean.preserved(item.html || "")}</div>`;
+const preservedHtml = (item, clean, id = attr("data-id", item.id)) => `<div${id} data-type="preserved">${clean.preserved(item.html || "")}</div>`;
 
 const RAW = { preserved: (html) => html, fallback: (html) => html };
 
@@ -423,11 +526,11 @@ export function renderModel(model, { fallbackOf = () => "", clean = RAW } = {}) 
       }
       if (lists.length < d + 1) { add(`<${tag}>`); lists.push(tag); }
       const box = item.kind === "check" ? `<input type="checkbox" disabled${item.checked ? " checked" : ""}>` : "";
-      add(`<li${attr("data-id", item.id)}${attr("data-owner", item.owner ?? null)}${attr("data-due", item.due ?? null)}>${box}${inlineOf(item)}`);
+      add(`<li${attr("data-id", item.id)}${attr("data-owner", item.owner ?? null)}${attr("data-due", item.due ?? null)}${extrasOfItem(item)}>${box}${inlineOf(item)}`);
       continue;
     }
     if (item.t === "toggle") {
-      add(`<details${attr("data-id", item.id)}${item.open ? " open" : ""}><summary>${inlineOf(item)}</summary>`);
+      add(`<details${attr("data-id", item.id)}${extrasOfItem(item)}${item.open ? " open" : ""}><summary>${inlineOf(item)}</summary>`);
       stack.push(item.id);
       continue;
     }
@@ -453,12 +556,12 @@ const INLINE_TAGS = new Set(["A", "ABBR", "B", "BDI", "BDO", "BR", "CITE", "CODE
 function inlineOfEl(el, skip = () => false) {
   let c = "";
   const units = [];
-  const walk = (node, marks) => {
+  const walk = (node, marks, entries) => {
     for (const child of node.childNodes) {
       if (skip(child)) continue;
       if (child.nodeType === 3) {
         c += child.data;
-        const key = keyOfMarks(safeMarks({ ...marks }));
+        const key = keyOfMarks(safeMarks({ ...marks }), entries);
         for (let i = 0; i < child.data.length; i++) units.push(key);
         continue;
       }
@@ -467,19 +570,39 @@ function inlineOfEl(el, skip = () => false) {
       if (tag === "br") { c += ATOM; units.push(BREAK); continue; }
       if (tag === "span" && child.hasAttribute("data-atom")) { c += ATOM; units.push(child.getAttribute("data-atom")); continue; }
       const next = { ...marks };
+      if (tag === "span" && child.hasAttribute(MARKS)) {
+        walk(child, next, normalizeEntries([...entries, ...entriesOfEnvelope(child.getAttribute(MARKS))]));
+        continue;
+      }
       if (tag === "strong" || tag === "b") next.b = true;
       else if (tag === "em" || tag === "i") next.i = true;
       else if (tag === "s" || tag === "del" || tag === "strike") next.s = true;
       else if (tag === "code") next.c = true;
       else if (tag === "a" && child.hasAttribute("href")) next.a = [child.getAttribute("href")];
-      walk(child, next);
+      walk(child, next, entries);
     }
   };
-  walk(el, {});
+  walk(el, {}, []);
   return normalizeText(c, units);
 }
 
 const text = (el) => normalizeText(el ? el.textContent : "", null).c;
+
+// The block envelope an element carries, or null. A malformed, oversized or
+// hostile one refuses the whole article: it never falls back to plain text.
+const envelopeAt = (el) => {
+  if (!el.hasAttribute(OPAQUE)) return null;
+  if (el.getAttribute(OPAQUE) !== ENVELOPE) throw new SyntaxError(`page: unknown envelope version ${el.getAttribute(OPAQUE)}`);
+  const text = el.getAttribute(VALUE);
+  if (text === null) throw new SyntaxError("page: a block envelope holds no value");
+  return recordOf(text);
+};
+
+// The extras a known element's envelope adds to it.
+const extrasAt = (el) => {
+  const value = envelopeAt(el);
+  return value && typeof value.t !== "string" ? value : null;
+};
 
 export function parseArticle(article) {
   const items = [];
@@ -506,7 +629,10 @@ export function parseArticle(article) {
     flushLoose();
   };
   const idOf = (el) => el.getAttribute("data-id") || null;
-  const push = (el, t, parent, fields) => items.push({ id: idOf(el), t, parent, ...fields });
+  const push = (el, t, parent, fields) => {
+    const extra = extrasAt(el);
+    items.push({ id: idOf(el), t, parent, ...(extra ? { ...extra, ...fields } : fields) });
+  };
   const list = (el, parent, depth) => {
     for (const li of el.children) {
       if (li.tagName !== "LI") continue;
@@ -515,13 +641,20 @@ export function parseArticle(article) {
       const n = inlineOfEl(li, (child) => child === box || nested.includes(child));
       const kind = box ? "check" : el.tagName === "OL" ? "ordered" : "bullet";
       const fields = { parent, kind, indent: depth, checked: !!(box && box.hasAttribute("checked")), owner: li.getAttribute("data-owner"), due: li.getAttribute("data-due") };
-      items.push({ id: idOf(li), t: "list_item", ...omitDefaults("list_item", fields), ...textFields(n.c, n.units) });
+      items.push({ id: idOf(li), t: "list_item", ...omitDefaults("list_item", fields), ...(extrasAt(li) ?? {}), ...textFields(n.c, n.units) });
       for (const sub of nested) list(sub, parent, depth + 1);
     }
   };
   const blockOf = (el, parent) => {
     const tag = el.tagName;
     const P = { parent };
+    const record = envelopeAt(el);
+    if (record && typeof record.t === "string") {
+      if (knownType(record.t) || record.t === "opaque_block") throw new SyntaxError(`page: an envelope names the known block type ${record.t}`);
+      const { t, ...fields } = record;
+      items.push({ id: idOf(el), t, parent, ...fields });
+      return;
+    }
     const onlyImage = tag === "P" && el.children.length === 1 && el.children[0].tagName === "IMG" && !el.textContent.trim();
     if (tag === "P" && !onlyImage) return push(el, "paragraph", parent, { ...omitDefaults("paragraph", P), ...tf(el) });
     if (/^H[1-6]$/.test(tag)) return push(el, "heading", parent, { ...omitDefaults("heading", { ...P, level: +tag[1] }), ...tf(el) });

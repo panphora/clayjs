@@ -3,7 +3,7 @@ import { parseJsonRelaxed } from 'hyper-morph/json-parse';
 import { cloneJson, formatBy, serializeLive, stampOf, textHash, unionRanges } from '../rooms/index.js';
 import { blocksFromYValue } from '../../page/ybind/decode.js';
 import { YDecodeError } from '../../page/ybind/provider.js';
-import { canon, fragmentCleaner, renderBlocks } from '../../page/projection.js';
+import { MARKS, OPAQUE, canon, fragmentCleaner, renderBlocks } from '../../page/projection.js';
 import { classifyFile, readBack } from '../../page/adopt.js';
 import { merge3, mergeJson } from 'hyper-morph';
 import { mergePageModels } from '../../page/merge.js';
@@ -203,6 +203,11 @@ function adoptionNeeded(html, createDocument) {
   }
 }
 
+// An article that carries a semantic envelope holds content this renderer cannot
+// project from the room's blocks. Rewriting it would drop that content, so the
+// checkpoint refuses instead, leaving the file as it stands.
+const holdsEnvelope = (html) => html.includes(`${OPAQUE}="`) || html.includes(`${MARKS}="`);
+
 // recovery: render the room's blocks even over an article it has not merged, for
 // a recovered copy of its edits (the file itself keeps the outside edit).
 export function renderCheckpoint(currentHtml, capture, { createDocument, recovery = false }) {
@@ -227,7 +232,9 @@ export function renderCheckpoint(currentHtml, capture, { createDocument, recover
     // A tab that merged this article says so on the frame that carried the
     // merge; otherwise the blocks must show the edit.
     if (!recovery && found.kind === 'adopt' && capture.adopted !== found.A && !holdsEdit(found, decoded.blocks, doc)) return { kind: 'refused', reason: 'needs-adoption' };
+    const current = currentHtml.slice(articleLoc.startTag.endOffset, articleLoc.endTag.startOffset);
     rendered = renderBlocks(decoded.blocks, { clean: fragmentCleaner(doc) });
+    if (current !== rendered.html && holdsEnvelope(current)) return { kind: 'refused', reason: 'unknown-page-content' };
   }
   catch (error) {
     if (error instanceof YDecodeError || error instanceof SyntaxError) return { kind: 'refused', reason: 'invalid-document' };

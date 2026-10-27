@@ -9,7 +9,8 @@
 // Cmd+Z takes the whole adoption back.
 import { model as pmModel, history } from "../vendor/prosemirror.vendor.js";
 import { blockMap, nodeFromBlock, repairSiblings } from "./model.js";
-import { project, canon, revOf, parseModel, renderModel, fragmentCleaner } from "./projection.js";
+import { DEFAULTS, project, canon, revOf, parseModel, renderModel, fragmentCleaner, unitsOf } from "./projection.js";
+import { unflatten } from "./inline.js";
 import { blocksFromPageValues } from "./ybind/decode.js";
 
 export const ADOPT = "page-adopt";
@@ -74,6 +75,23 @@ export function blockFromItem(item, cur) {
 
 // ---- the transaction ---------------------------------------------------------
 
+// A block type this runtime has no schema for keeps its whole record in the
+// inert node, and its text for mapping.
+const opaqueNode = (schema, id, block) => {
+  const { t, pos, c, m, ...raw } = block;
+  const content = typeof c === "string" && c ? unflatten(schema, c, unitsOf(m, c.length), schema.nodes.opaque_block) : null;
+  return schema.nodes.opaque_block.create({ id, pos, raw: { t, ...raw } }, content);
+};
+
+// The editor’s blocks as the article and the record state them: an opaque node
+// stands for the record it carries, never for a block type of its own.
+const recordsOf = (blocks) => Object.fromEntries(Object.entries(blocks).map(([id, b]) => {
+  if (b.t !== "opaque_block") return [id, b];
+  const { t: _t, raw, ...rest } = b;
+  const { t, ...fields } = raw ?? {};
+  return [id, { t: t ?? "paragraph", pos: b.pos, ...fields, ...rest }];
+}));
+
 function find(doc, id) {
   let found = null;
   doc.forEach((node, pos) => { if (!found && node.attrs.id === id) found = { node, pos }; });
@@ -119,7 +137,7 @@ export function adoptionTransaction(state, plan) {
   if (!plan) return null;
   const schema = state.schema;
   const doc = state.doc;
-  const current = blockMap(doc);
+  const current = recordsOf(blockMap(doc));
   const tr = state.tr;
   const projected = new Map(project(current).map((item) => [item.id, item]));
   const displaced = {};
@@ -127,7 +145,10 @@ export function adoptionTransaction(state, plan) {
     const was = plan.base.get(id), now = projected.get(id);
     if (was && now && !same(body(was), body(now))) displaced[id] = current[id];
   }
-  const nodeOf = (id, item) => nodeFromBlock(schema, id, blockFromItem(item, current[id]));
+  const nodeOf = (id, item) => {
+    const block = blockFromItem(item, current[id]);
+    return Object.hasOwn(DEFAULTS, item.t) ? nodeFromBlock(schema, id, block) : opaqueNode(schema, id, block);
+  };
 
   // Adopting into a page that had no blocks: the editor's empty placeholder line
   // goes, after the article's blocks are in (an empty doc would get a new one).
