@@ -6,4 +6,6 @@ const later = (name) => (...args) => { load().then((m) => (name ? m[name] : m.de
 
 export default later(null);
 export const toastPersistent = later("toastPersistent");
-export const dismissPersistent = later("dismissPersistent");
+// Dismissing a toast nobody showed does nothing, so it never fetches the stack: a page
+// that tears down without having shown one keeps it unloaded.
+export const dismissPersistent = (...args) => { if (loading) later("dismissPersistent")(...args); };
