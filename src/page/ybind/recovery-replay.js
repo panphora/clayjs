@@ -245,21 +245,27 @@ export async function pageJournalContext({ authority, generation = null, base = 
  * host with no people support gives its document to whoever holds it, so the document's
  * own host identity is the principal there.
  *
+ * `scope` records how the document was named. A host that gives the document an identity
+ * of its own is `"host"`; a host that gives it none, a local file among them, is `"path"`,
+ * and then the exact pathname is the whole of what this page's identity is.
+ *
  * @param {Object} [options]
  * @param {?Object} [options.meta] - the host's discovery answer
  * @param {?Location} [options.location]
  * @param {?Element} [options.root]
- * @returns {?{host: string, documentId: string, principalId: string}}
+ * @returns {?{host: string, documentId: string, principalId: string, scope: "host"|"path"}}
  */
 export function pageAuthority({ meta = null, location: where = globalThis.location, root = globalThis.document?.documentElement } = {}) {
   const host = where?.origin ?? "";
   if (!host) return null;
-  const documentId = hostIdentityOf(root)?.identity ?? pathIdentityOf(where?.pathname ?? "/").identity;
+  const hostIdentity = hostIdentityOf(root);
+  const scope = hostIdentity ? "host" : "path";
+  const documentId = hostIdentity?.identity ?? pathIdentityOf(where?.pathname ?? "/").identity;
   if (!documentId) return null;
   const people = meta?.document?.people;
   const principalId = people && typeof people === "object" ? people.me?.id ?? null : documentId;
   if (!principalId) return null;
-  return { host, documentId, principalId };
+  return { host, documentId, principalId, scope };
 }
 
 const journalKey = (id) => (typeof id === "string" ? id : JSON.stringify(id));

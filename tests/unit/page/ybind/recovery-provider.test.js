@@ -424,6 +424,7 @@ test("the authority is pinned from host metadata, never from a guess", () => {
     host: "https://host.test",
     documentId: "/doc",
     principalId: "/doc",
+    scope: "path",
   });
   expect(
     pageAuthority({
@@ -431,7 +432,7 @@ test("the authority is pinned from host metadata, never from a guess", () => {
       location: { origin: "https://host.test", pathname: "/doc" },
       root: null,
     }),
-  ).toEqual({ host: "https://host.test", documentId: "/doc", principalId: "person-1" });
+  ).toEqual({ host: "https://host.test", documentId: "/doc", principalId: "person-1", scope: "path" });
   // A host that names people but cannot say who this is has no principal: no journal.
   expect(
     pageAuthority({ meta: { document: { people: { me: null } } }, location: { origin: "https://host.test", pathname: "/doc" }, root: null }),
@@ -462,7 +463,7 @@ test("the page opens its journal from the host answer, once per service", async 
   expect(journal.channel).toBe(again.channel);
   expect(journal.key).toBe("https://host.test:/doc");
   const context = await journal.context();
-  expect(context.authority).toEqual({ host: "https://host.test", documentId: "/doc", principalId: "person-1" });
+  expect(context.authority).toEqual({ host: "https://host.test", documentId: "/doc", principalId: "person-1", scope: "path" });
   expect(context.lineage.generation).toBe(await canonicalDigest(base));
   expect(context.lineage.baseDigest).toBe(await canonicalDigest(base));
 });

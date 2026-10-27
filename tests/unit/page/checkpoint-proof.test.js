@@ -24,6 +24,8 @@ import {
 Object.defineProperty(globalThis, "crypto", { value: webcrypto, configurable: true, writable: true });
 
 const AUTHORITY = { host: "fixture.test", documentId: "0b7f3d0e-2a55-4f77-9c31-8a1c0b9a1e42", principalId: "person-1" };
+const HOST_AUTHORITY = { ...AUTHORITY, scope: "host" };
+const PATH_AUTHORITY = { host: "http://localhost:8788", documentId: "/doc.html", principalId: "/doc.html", scope: "path" };
 const GENERATION = "3f".repeat(16);
 const CONTEXT = { authority: AUTHORITY, lineage: { generation: GENERATION } };
 const ACCEPTED = { authority: AUTHORITY, lineage: { generation: GENERATION } };
@@ -76,7 +78,7 @@ const adapter = (over = {}) => async (url, init) => {
   const status = over.status ?? 200;
   const body = {
     version: over.version ?? 1,
-    documentId: over.documentId ?? AUTHORITY.documentId,
+    documentId: "documentId" in over ? over.documentId : AUTHORITY.documentId,
     generation: over.generation ?? GENERATION,
     etag: over.etag ?? ETAG,
     stateHash: over.stateHash ?? await digestOf(state),
@@ -212,6 +214,53 @@ test("an epoch reset or a lost permission cannot reuse a proof", async () => {
   const proven = await refetchedProof({ read: answer, capture: "capture-4", records: [record("added", 1, added)], accepted: relogged, article: ARTICLE_B, etag: ETAG });
   expect(proven.ok).toBe(true);
   expect(proven.covered).toEqual([]);
+});
+
+test("a host that names no document is answered by a page pinned to its path", async () => {
+  const accepted = { authority: PATH_AUTHORITY, lineage: { generation: GENERATION } };
+  const context = { authority: PATH_AUTHORITY, lineage: { generation: GENERATION } };
+  const records = [record("added", 1, added, context), record("removed", 2, removed, context)];
+
+  const answer = await readPageState({ href: HREF, etag: ETAG, fetch: adapter({ documentId: null }) });
+  expect(answer).toMatchObject({ ok: true, documentId: null });
+  const proven = await refetchedProof({ read: answer, capture: "capture-5", records, accepted, article: ARTICLE_B, etag: ETAG });
+  expect(proven.ok).toBe(true);
+  expect(proven.covered).toEqual([{ id: "added", revision: 1 }, { id: "removed", revision: 2 }]);
+
+  // And that proof retires the records through the channel, which is the point of it.
+  const pageChannel = channel();
+  pageChannel.add("added", 1);
+  pageChannel.add("removed", 2);
+  const retired = await checkpointAccepted({
+    channel: pageChannel,
+    records,
+    capture: "capture-6",
+    accepted,
+    article: ARTICLE_B,
+    etag: ETAG,
+    href: HREF,
+    fetch: adapter({ documentId: null }),
+  });
+  expect(retired).toMatchObject({ ok: true });
+  expect(retired.retired).toEqual([{ id: "added", revision: 1 }, { id: "removed", revision: 2 }]);
+  expect(pageChannel.held.size).toBe(0);
+});
+
+test("a null document identity is not accepted by a host-scoped page", async () => {
+  const accepted = { authority: HOST_AUTHORITY, lineage: { generation: GENERATION } };
+  const answer = await readPageState({ href: HREF, etag: ETAG, fetch: adapter({ documentId: null }) });
+  expect(await verifyPageState(answer, { accepted, article: ARTICLE_B, etag: ETAG })).toMatchObject({ ok: false, code: "foreign-document" });
+});
+
+test("a path-pinned page still refuses another document's id", async () => {
+  const accepted = { authority: PATH_AUTHORITY, lineage: { generation: GENERATION } };
+  const answer = await readPageState({ href: HREF, etag: ETAG, fetch: adapter({ documentId: "8c1e0d5a-40f2-4b3c-9f88-0d1f6d3b7a11" }) });
+  expect(await verifyPageState(answer, { accepted, article: ARTICLE_B, etag: ETAG })).toMatchObject({ ok: false, code: "foreign-document" });
+});
+
+test("an authority stored without a scope keeps the strict comparison", async () => {
+  const answer = await readPageState({ href: HREF, etag: ETAG, fetch: adapter({ documentId: null }) });
+  expect(await verifyPageState(answer, { accepted: ACCEPTED, article: ARTICLE_B, etag: ETAG })).toMatchObject({ ok: false, code: "foreign-document" });
 });
 
 test("a valid but unrelated page state is refused", async () => {

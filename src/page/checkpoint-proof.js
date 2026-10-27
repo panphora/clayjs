@@ -140,6 +140,10 @@ export async function readPageState({ href, etag, fetch: doFetch = globalThis.fe
  * document, another generation, another version of the same document or another article
  * is refused rather than used, and the receipt names the pair the host persisted.
  *
+ * A host that gives the document no identity of its own answers null, and a page pinned
+ * by path accepts that answer as its own: there is no id it could have answered instead.
+ * Every other mismatch is still another document.
+ *
  * @param {Object} read - an answer from readPageState()
  * @param {Object} options
  * @param {{authority: Object, lineage: Object}} options.accepted
@@ -149,7 +153,9 @@ export async function readPageState({ href, etag, fetch: doFetch = globalThis.fe
  */
 export async function verifyPageState(read, { accepted, article, etag } = {}) {
   if (!read || read.ok !== true) return refused(read?.code ?? "unavailable", read?.message ?? "The page state was not read");
-  if (idKey(read.documentId) !== idKey(accepted?.authority?.documentId)) return refused("foreign-document", "The page state belongs to another document");
+  const authority = accepted?.authority;
+  const byPath = authority?.scope === "path" && read.documentId == null;
+  if (!byPath && idKey(read.documentId) !== idKey(authority?.documentId)) return refused("foreign-document", "The page state belongs to another document");
   if (typeof accepted?.lineage?.generation !== "string" || read.generation !== accepted.lineage.generation) return refused("foreign-generation", "The page state belongs to another generation");
   if (read.etag !== etag) return refused("etag-mismatch", "The page state belongs to another version of this document");
   let stateBytes, state;
