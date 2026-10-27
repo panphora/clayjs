@@ -75,6 +75,8 @@ export function docFromValue(value, { strict = false } = {}) {
   }
 }
 
+const encoder = typeof TextEncoder === "function" ? new TextEncoder() : null;
+const utf8Bytes = (text) => (encoder ? encoder.encode(text).length : text.length * 2);
 const sameDeletes = (a, b) => Y.equalDeleteSets(Y.createDeleteSetFromStructStore(a.store), Y.createDeleteSetFromStructStore(b.store));
 const svEqual = (a, b) => { if (a.size !== b.size) return false; for (const [c, n] of a) if (b.get(c) !== n) return false; return true; };
 
@@ -95,6 +97,9 @@ export function createYProvider({ store, ydoc, compact: limits = {}, setTimer = 
   const me = ydoc.clientID.toString(36);
   const nextKey = (p) => `${p}${me}-${(counter++).toString(36)}`;
   let timer = null;
+  const generation = store.value.g;
+  // Keys this tab wrote itself: the updates and offers the room has not confirmed yet.
+  const own = new Set();
 
   const partsOf = (key, s) => {
     if (s.length <= PART) return [[key, s]];
@@ -104,6 +109,7 @@ export function createYProvider({ store, ydoc, compact: limits = {}, setTimer = 
   const put = (key, bytes) => {
     canCompact = true;
     known.add(key);
+    own.add(key);
     const parts = partsOf(key, enc(bytes));
     store.handle.update((data) => { for (const [k, v] of parts) data.y[k] = v; });
   };
@@ -163,20 +169,70 @@ export function createYProvider({ store, ydoc, compact: limits = {}, setTimer = 
   const compact = { keys: 32, room: 3840 * 1024, ...limits };
   let fold = null;
   let quietUntil = 0;
+  const COVER_MAX = 256;
   const coverCache = new Map();
   const drop = (keys) => store.handle.update((data) => { for (const k of keys) delete data.y[k]; });
   const keysOf = (auth, bases) => Object.keys(auth).filter((k) => bases.has(baseOf(k)));
+  // A key is retired only while what this tab shows under it is still what the proof was
+  // made over: a late write under the same key keeps its own entry.
+  const retire = (auth, keys) => { const visible = store.value.y ?? {}; drop(keys.filter((k) => k in visible && visible[k] === auth[k])); };
 
+  // `known` and the coverage memo keep live references only: the authoritative entries,
+  // this tab's own unconfirmed writes and the fold in progress. Pruned after a rebase, a
+  // fold and a refusal. A key that is forgotten can be decoded again; Yjs is idempotent.
+  function prune() {
+    const auth = store.authoritative.y ?? {};
+    const visible = store.value.y ?? {};
+    for (const k of own) if (!(k in visible)) own.delete(k);
+    const held = fold ? [...fold.parts.map(([k]) => k), ...fold.inputs.keys()] : [];
+    const retained = new Set([...Object.keys(auth), ...own, ...held]);
+    for (const key of known) if (!retained.has(key)) known.delete(key);
+    const values = new Map(entriesOf(auth));
+    for (const [key, proof] of coverCache) if (!retained.has(key) || values.get(key) !== proof.value) coverCache.delete(key);
+  }
+
+  // Whether a fold's merged bytes already carry this input: merging it in again changes
+  // neither an insertion nor a deletion. Equal state vectors say nothing about deletes.
+  function coveredBy(key, value, foldKey, base) {
+    let proof = coverCache.get(key);
+    if (proof && proof.value !== value) { coverCache.delete(key); proof = null; }
+    if (!proof) {
+      if (coverCache.size >= COVER_MAX) coverCache.delete(coverCache.keys().next().value);
+      proof = { value, folds: new Map() };
+      coverCache.set(key, proof);
+    }
+    if (!proof.folds.has(foldKey)) proof.folds.set(foldKey, sameBytes(Y.mergeUpdatesV2([base, dec(value)]), base));
+    return proof.folds.get(foldKey);
+  }
+
+  // An input the authority no longer has was retired already; one it holds differently
+  // was rewritten after the fold was built, and the fold no longer speaks for it.
+  const stillHeld = (auth, active) => { for (const [k, v] of active.held) if (auth[k] !== undefined && auth[k] !== v) return false; return true; };
+  const coversInputs = (active) => {
+    const base = dec(active.merged);
+    for (const [k, v] of active.inputs) if (v !== null && !coveredBy(k, v, active.key, base)) return false;
+    return true;
+  };
+
+  // Inputs retire only once the authority holds every proposed part with the identical
+  // value, still holds each input as it was captured, and the fold covers every one of
+  // them. Anything less keeps the originals; pending confirmation keeps them too.
   function finishFold(auth) {
-    if (fold.parts.every((k) => k in auth)) {
-      drop(keysOf(auth, fold.inputs));
+    const active = fold;
+    const whole = captureYValue({ v: 1, y: auth }).y;
+    const arrived = active.parts.filter(([k, v]) => auth[k] === v && whole[k] === v);
+    if (arrived.length !== active.parts.length) {
+      if (store.pending.length) return false;
       fold = null;
+      if (arrived.length) retire(auth, arrived.map(([k]) => k));
+      quietUntil = entriesOf(auth).length + compact.keys;
+      prune();
       return true;
     }
-    if (store.pending.length) return false;
-    drop(fold.parts.filter((k) => k in auth));
-    quietUntil = entriesOf(auth).length + compact.keys;
+    if (store.pending.length || !stillHeld(auth, active) || !coversInputs(active)) return false;
     fold = null;
+    retire(auth, keysOf(auth, active.inputs));
+    prune();
     return true;
   }
 
@@ -185,11 +241,7 @@ export function createYProvider({ store, ydoc, compact: limits = {}, setTimer = 
     const val = new Map(entries);
     const norm = new Map(folds);
     const normal = (k) => { const v = norm.get(k); if (typeof v === "string") norm.set(k, Y.mergeUpdatesV2([dec(v)])); return norm.get(k); };
-    const covered = (k, v, mk) => {
-      const c = `${k}|${mk}`;
-      if (!coverCache.has(c)) { const b = normal(mk); coverCache.set(c, sameBytes(Y.mergeUpdatesV2([b, dec(v)]), b)); }
-      return coverCache.get(c);
-    };
+    const covered = (k, v, mk) => coveredBy(k, v, mk, normal(mk));
     const gone = new Set();
     for (const [k, v] of entries) {
       if (!crowded && k[0] !== "m") continue;
@@ -201,31 +253,36 @@ export function createYProvider({ store, ydoc, compact: limits = {}, setTimer = 
       }
     }
     if (!gone.size) return false;
-    drop(keysOf(auth, gone));
+    retire(auth, keysOf(auth, gone));
     return true;
   }
 
   function maybeCompact() {
-    if (!canCompact) return false;
+    if (stopped || !canCompact || store.value.g !== generation) return false;
     const auth = store.authoritative.y;
     if (fold) return finishFold(auth);
     const entries = entriesOf(auth);
     const crowded = entries.length > Math.max(compact.keys, quietUntil);
     if (!crowded && entries.filter(([k]) => k[0] === "m").length < 2) return false;
-    if (dropCovered(auth, entries, crowded)) return true;
+    if (dropCovered(auth, entries, crowded)) { prune(); return true; }
     if (!crowded) return false;
     const merged = enc(Y.mergeUpdatesV2(entries.map(([, v]) => dec(v))));
-    const used = Object.values(auth).reduce((n, v) => n + v.length, 0);
-    if (used + merged.length > compact.room) {
+    const key = nextKey("m");
+    const parts = partsOf(key, merged);
+    const candidate = { ...store.value, y: { ...store.value.y } };
+    for (const [k, v] of parts) candidate.y[k] = v;
+    if (utf8Bytes(JSON.stringify(candidate)) > compact.room) {
       quietUntil = entries.length + compact.keys;
       return false;
     }
-    const key = nextKey("m");
-    known.add(key);
-    const parts = partsOf(key, merged);
     const captured = captureYValue({ v: 1, y: auth }).y;
     const incompleteFolds = Object.keys(auth).filter((k) => !(k in captured)).map(baseOf).filter((k) => k[0] === "m");
-    fold = { key, parts: parts.map(([k]) => k), inputs: new Set([...entries.map(([k]) => k), ...incompleteFolds]) };
+    const inputs = new Map(entries);
+    for (const k of incompleteFolds) inputs.set(k, null);
+    const held = new Map();
+    for (const k of keysOf(auth, inputs)) if (inputs.get(baseOf(k)) !== null) held.set(k, captured[k] ?? auth[k]);
+    fold = { key, parts, merged, inputs, held };
+    known.add(key);
     store.handle.update((data) => { for (const [k, v] of parts) data.y[k] = v; });
     stats.compactions++;
     return true;
@@ -264,6 +321,7 @@ export function createYProvider({ store, ydoc, compact: limits = {}, setTimer = 
     } else {
       for (const [k, v] of entriesOf(ev.next.y ?? {})) applyKey(k, v);
     }
+    prune();
     schedule(ev.source !== "remote" || !ops, ev.source !== "remote");
   });
 
@@ -272,14 +330,18 @@ export function createYProvider({ store, ydoc, compact: limits = {}, setTimer = 
   // the refused one, so they are all taken back, with the parts of updates the room does not
   // hold whole, and the room's page stays one a checkpoint can render.
   const offDelivery = store.onDelivery((event) => {
-    if (event.phase !== "refused" || event.code !== "too-large" || stopped) return;
+    if (event.phase !== "refused") return;
+    if (event.code !== "too-large" || stopped) { prune(); return; }
     stop("too-large");
     const auth = store.authoritative.y ?? {};
     const whole = captureYValue({ v: 1, y: auth }).y;
     const unconfirmed = Object.keys(store.value.y ?? {}).filter((k) => !(k in auth));
     const partial = Object.keys(auth).filter((k) => PART_KEY.test(k) && !(k in whole) && baseOf(k).slice(1).startsWith(`${me}-`));
     if (unconfirmed.length || partial.length) drop([...unconfirmed, ...partial]);
+    prune();
   });
 
-  return { known, stats, settle, reconcile, get reconcilePending() { return reconcilePending; }, get stopped() { return stopped; }, compact: maybeCompact, dispose() { off(); offDelivery(); ydoc.off("updateV2", onUpdate); if (timer) clearTimer(timer); } };
+  return { known, stats, settle, reconcile, get reconcilePending() { return reconcilePending; }, get stopped() { return stopped; },
+    // Test-only snapshot of the counters and cache sizes; no mutable set leaves the provider.
+    _diagnostics: () => ({ known: known.size, cover: coverCache.size, fold: fold ? fold.parts.length : 0, generation }), compact: maybeCompact, dispose() { off(); offDelivery(); ydoc.off("updateV2", onUpdate); if (timer) clearTimer(timer); } };
 }
