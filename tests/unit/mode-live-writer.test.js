@@ -177,6 +177,7 @@ test("quiesce drains the ops the room has not acknowledged, and refuse on an ans
   const g = live("g");
   const lease = liveWriterParticipant().prepare({ generation: 1 });
   lease.enable();
+  await wait(0);
   // The room's file reaches position 1 of 2: this tab, its writer, has a checkpoint due.
   await join({ last: 2, landed: 1 });
   facts.commitModeFacts({ mode: "edit", isEditMode: true, phase: "idle" });

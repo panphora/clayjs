@@ -386,6 +386,7 @@ test("a proof before the first epoch arms the barrier, and only the read that fo
   document.body.innerHTML = tag("g", '{"s":0}') + tag(name, '{"n":0}');
   const s = live(name);
   await flushAsync();
+  await wait(0);
   expect(fastLane().status.epoch).toBeNull();
   s.add("n", 1);
   const save = await sendCapture();

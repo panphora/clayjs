@@ -17,12 +17,12 @@ import { registerUnsavedState } from "../lib/unsaved-state.js";
 import { createCheckpoints } from "../live/checkpoint.js";
 import { parseJsonRelaxed } from "../vendor/hyper-morph-json.vendor.js";
 import * as hostMeta from "../core/host-meta.js";
-import { createFastLane } from "../live/fast-lane.js";
 import { createSaveHistoryRecovery, RECOVERY_WINDOW_MS } from "../live/save-history.js";
 import { serverTransport } from "../live/server-lane.js";
-import { localTransport, localLaneSupported } from "../live/local-lane.js";
 import { captureYValue } from "../page/ybind/parts.js";
 import { lastSeenEtag, recordEtag } from "../core/etag.js";
+
+const lanes = () => Promise.all([import("../live/fast-lane.js"), import("../live/local-lane.js")]).then(([f, l]) => ({ createFastLane: f.createFastLane, localTransport: l.localTransport, localLaneSupported: l.localLaneSupported }));
 
 const NAME = /^[A-Za-z0-9_.:-]{1,64}$/;
 const entries = new Map();
@@ -769,13 +769,20 @@ function ensureLane() {
       if (request !== laneRequest) return;
       serverLane = supported;
       provenanceHost = provenance;
+      const lane = await lanes().catch(() => null);
+      if (request !== laneRequest) return;
+      if (!lane) {
+        settleLane?.(null);
+        settleWriter?.(null);
+        return;
+      }
       if (supported) {
-        fast = createFastLane(laneOptions(serverTransport()));
-      } else if (localLaneSupported()) {
+        fast = lane.createFastLane(laneOptions(serverTransport()));
+      } else if (lane.localLaneSupported()) {
         // The document's own floor picks the channel scope: a floor-1 document
         // never shares the lane a tab that cannot read it is on.
-        local = localTransport({ seed: seedLocalRoom, floor: document.querySelector('meta[name="clay-page-format"]')?.getAttribute("content") });
-        fast = createFastLane(laneOptions(local));
+        local = lane.localTransport({ seed: seedLocalRoom, floor: document.querySelector('meta[name="clay-page-format"]')?.getAttribute("content") });
+        fast = lane.createFastLane(laneOptions(local));
       } else {
         settleLane?.(null);
         settleWriter?.(null);

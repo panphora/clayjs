@@ -86,6 +86,7 @@ test("the lane opens every live tag on the page, not only the one code asked for
   document.body.innerHTML = tag("g", '{"s":0}') + tag("other", '{"t":0}');
   live("g");
   await flushAsync();
+  await wait(0);
   expect(storeOf("other")).not.toBeNull();
 });
 
