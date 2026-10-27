@@ -86,6 +86,78 @@ export function codeFor(error) {
   return "error";
 }
 
+/**
+ * Are these two plain values the same?
+ *
+ * Contexts are compared inside a transaction, never by reference: the caller builds
+ * a fresh object for every operation, and the stored one came back through a
+ * structured clone. Binary parts are compared byte for byte.
+ *
+ * @param {*} left
+ * @param {*} right
+ * @returns {boolean}
+ */
+function sameValue(left, right) {
+  if (left === right) return true;
+  if (left instanceof ArrayBuffer) left = new Uint8Array(left);
+  if (right instanceof ArrayBuffer) right = new Uint8Array(right);
+  if (left instanceof Uint8Array || right instanceof Uint8Array) {
+    if (!(left instanceof Uint8Array) || !(right instanceof Uint8Array)) return false;
+    if (left.length !== right.length) return false;
+    for (let at = 0; at < left.length; at++) if (left[at] !== right[at]) return false;
+    return true;
+  }
+  if (!left || !right || typeof left !== "object" || typeof right !== "object") return false;
+  if (Array.isArray(left) !== Array.isArray(right)) return false;
+  const keys = Object.keys(left);
+  if (keys.length !== Object.keys(right).length) return false;
+  return keys.every((field) => Object.prototype.hasOwnProperty.call(right, field) && sameValue(left[field], right[field]));
+}
+
+/**
+ * Has this writer already retired (checkpointed or compacted) this revision?
+ *
+ * @param {?Array<Array<number>>} ranges
+ * @param {number} revision
+ * @returns {boolean}
+ */
+function isRetired(ranges, revision) {
+  if (!Array.isArray(ranges) || typeof revision !== "number") return false;
+  for (const range of ranges) {
+    if (Array.isArray(range) && revision >= range[0] && revision <= range[1]) return true;
+  }
+  return false;
+}
+
+/**
+ * Add one retired revision to a writer's ranges.
+ *
+ * A page that journals for an hour retires thousands of revisions, and the entry has
+ * to stay small for as long as the writer lives, so neighbouring revisions become a
+ * range instead of a list. Nothing is ever dropped by age: the writer is still alive
+ * and a queued write for any of these revisions must still be refused.
+ *
+ * @param {?Array<Array<number>>} ranges
+ * @param {number} revision
+ * @returns {Array<Array<number>>}
+ */
+function retireRange(ranges, revision) {
+  const sorted = (Array.isArray(ranges) ? ranges : []).map((range) => [range[0], range[1]]);
+  sorted.push([revision, revision]);
+  sorted.sort((a, b) => a[0] - b[0]);
+  const merged = [];
+  for (const range of sorted) {
+    const last = merged[merged.length - 1];
+    if (last && range[0] <= last[1] + 1) last[1] = Math.max(last[1], range[1]);
+    else merged.push([range[0], range[1]]);
+  }
+  return merged;
+}
+
+function slotKey(slot) {
+  return JSON.stringify(slot);
+}
+
 function request(req) {
   return new Promise((resolve, reject) => {
     req.onsuccess = () => resolve(req.result);
@@ -269,6 +341,7 @@ export function createStore({
         resolve({ ok: false, code: codeFor(err) });
         return;
       }
+      const wasUsage = { ...usage };
       let settled = false;
       let failure = null;
       let result = null;
@@ -283,11 +356,19 @@ export function createStore({
           tx.abort();
         } catch (_) {}
       };
-      tx.oncomplete = () => finish(failure ? { ok: false, code: failure } : { ok: true, result });
+      // A transaction that did not commit rolled every byte back, so the in-memory
+      // totals have to roll back with it: the next budget check reads them.
+      tx.oncomplete = () => {
+        if (failure) Object.assign(usage, wasUsage);
+        finish(failure ? { ok: false, code: failure } : { ok: true, result });
+      };
       tx.onerror = () => {
         if (!failure) failure = codeFor(tx.error);
       };
-      tx.onabort = () => finish({ ok: false, code: failure || codeFor(tx.error) || "aborted" });
+      tx.onabort = () => {
+        Object.assign(usage, wasUsage);
+        finish({ ok: false, code: failure || codeFor(tx.error) || "aborted" });
+      };
       const ctx = {
         tx,
         records: tx.objectStore(RECORDS),
@@ -451,6 +532,250 @@ export function createStore({
           dbBytes: Math.max(0, totals.dbBytes - existing.bytes),
         });
         return { ok: true, acknowledged: ackRevision, deleted: true };
+      });
+      return outcome.ok ? outcome.result : { ok: false, code: outcome.code };
+    },
+
+    /**
+     * Append one batch record, creating its writer's capsule on the first append.
+     *
+     * Everything that could go wrong is decided inside the one transaction: the
+     * capsule's channel, version and context, the writer's retired revisions, the
+     * record's own revision and the budget. A revision an accepted checkpoint or a
+     * compaction already retired is skipped, so a write that was queued while the
+     * browser was busy cannot put back what was proved durable and then deleted.
+     *
+     * @param {Object} record - one `binary-batch` record
+     * @param {?Object} capsule - the capsule to create when the writer has none yet
+     * @returns {Promise<{ok: boolean, code?: string, id?: *, revision?: number, skipped?: boolean}>}
+     */
+    async appendBinary(record, capsule = null) {
+      if (!record || record.id === undefined || typeof record.revision !== "number") return { ok: false, code: "invalid" };
+      const opened = await open();
+      if (!opened.ok) return { ok: false, code: opened.code };
+      const prepared = { ...record, kind: "binary-batch", scope: [...scope], slot: keyOf(record.id) };
+      prepared.bytes = recordBytes(prepared);
+      const capsuleSlot = keyOf(record.capsuleId);
+      const outcome = await runWrite(async (ctx) => {
+        const head = await request(ctx.records.get(capsuleSlot));
+        if (head) {
+          if (!sameScope(head.scope) || head.kind !== "binary" || head.channel !== prepared.channel) {
+            return { ok: false, code: "channel-mismatch" };
+          }
+          if (head.version !== prepared.version) return { ok: false, code: "unknown-version" };
+          if (!sameValue(head.context, prepared.context)) return { ok: false, code: "context-mismatch" };
+        }
+        const mark = await request(ctx.watermarks.get(capsuleSlot));
+        if (isRetired(mark?.retired, prepared.revision)) {
+          return { ok: true, skipped: true, id: prepared.id, revision: prepared.revision };
+        }
+        const there = await request(ctx.records.get(prepared.slot));
+        if (there && sameScope(there.scope) && there.revision >= prepared.revision) {
+          return { ok: true, skipped: true, id: prepared.id, revision: prepared.revision };
+        }
+        let fresh = null;
+        if (!head) {
+          if (!capsule) return { ok: false, code: "missing" };
+          fresh = { ...capsule, kind: "binary", scope: [...scope], slot: capsuleSlot };
+          fresh.bytes = recordBytes(fresh);
+        }
+        const totals = await readUsageTotals(ctx.meta, ctx.records);
+        const delta = prepared.bytes + (fresh?.bytes ?? 0) - (there?.bytes ?? 0);
+        if (totals.scopeBytes + delta > maxScopeBytes || totals.dbBytes + delta > maxDbBytes) {
+          return { ok: false, code: "over-budget" };
+        }
+        if (fresh) await request(ctx.records.put(fresh));
+        await request(ctx.records.put(prepared));
+        await writeUsageTotals(ctx.meta, { scopeBytes: totals.scopeBytes + delta, dbBytes: totals.dbBytes + delta });
+        return { ok: true, id: prepared.id, revision: prepared.revision };
+      });
+      return outcome.ok ? outcome.result : { ok: false, code: outcome.code };
+    },
+
+    /**
+     * Record that a room accepted this writer's work, and change nothing else.
+     *
+     * An acknowledgement is metadata: the bytes stay exactly where they are and no
+     * revision is retired. Only a checkpoint does that. A record the caller observed
+     * at another revision, or one that is already gone, is left alone.
+     *
+     * @param {{channel: string, version: number, records: Array<{id: *, revision: number}>, authority?: *, epoch?: *, sequence?: *}} options
+     * @returns {Promise<{ok: boolean, code?: string, acknowledged?: number}>}
+     */
+    async acknowledgeBinary({ channel, version, writerId, records: targets = [], authority = null, epoch = null, sequence = null } = {}) {
+      if (!Array.isArray(targets) || !targets.length) return { ok: true, acknowledged: 0 };
+      const opened = await open();
+      if (!opened.ok) return { ok: false, code: opened.code };
+      const outcome = await runWrite(async (ctx) => {
+        const capsules = new Map();
+        for (const target of targets) {
+          if (!target || target.id === undefined || typeof target.revision !== "number") continue;
+          const slot = keyOf(target.id);
+          const existing = await request(ctx.records.get(slot));
+          if (!existing || !sameScope(existing.scope)) continue;
+          if (existing.channel !== channel || existing.version !== version) continue;
+          if (existing.writerId !== writerId) continue;
+          if (existing.revision !== target.revision) continue;
+          let capsule = existing;
+          let capsuleSlot = slot;
+          if (existing.kind !== "binary") {
+            capsuleSlot = keyOf(existing.capsuleId);
+            capsule = await request(ctx.records.get(capsuleSlot));
+            if (!capsule || !sameScope(capsule.scope)) continue;
+            if (capsule.channel !== channel || capsule.version !== version) continue;
+          }
+          capsules.set(slotKey(capsuleSlot), { capsuleSlot, capsule });
+        }
+        if (!capsules.size) return { ok: true, acknowledged: 0 };
+        const acknowledged = { authority, epoch, sequence };
+        const totals = await readUsageTotals(ctx.meta, ctx.records);
+        let delta = 0;
+        for (const { capsuleSlot, capsule } of capsules.values()) {
+          const updated = { ...capsule, acknowledged };
+          updated.bytes = recordBytes(updated);
+          delta += updated.bytes - capsule.bytes;
+          await request(ctx.records.put(updated));
+          const mark = await request(ctx.watermarks.get(capsuleSlot));
+          await request(
+            ctx.watermarks.put({
+              ...(mark || {}),
+              key: capsuleSlot,
+              kind: "binary",
+              retired: mark?.retired ?? [],
+              acknowledged,
+              updated: now(),
+            })
+          );
+        }
+        await writeUsageTotals(ctx.meta, { scopeBytes: Math.max(0, totals.scopeBytes + delta), dbBytes: Math.max(0, totals.dbBytes + delta) });
+        return { ok: true, acknowledged: capsules.size };
+      });
+      return outcome.ok ? outcome.result : { ok: false, code: outcome.code };
+    },
+
+    /**
+     * Delete records a proof covers, and retire their revisions in the same commit.
+     *
+     * The watermark has to land with the deletion: a queued append for a covered
+     * revision can still arrive afterwards, and it must be refused after the copy is
+     * gone. Every revision is re-read here, so a record that changed after the proof
+     * was checked stays. Nothing is deleted by channel, writer or age.
+     *
+     * @param {{channel: string, version: number, records: Array<{id: *, revision: number}>}} options
+     * @returns {Promise<{ok: boolean, code?: string, retired?: Array<{id: *, revision: number}>}>}
+     */
+    async checkpointBinary({ channel, version, writerId, records: targets = [] } = {}) {
+      if (!Array.isArray(targets) || !targets.length) return { ok: true, retired: [] };
+      const opened = await open();
+      if (!opened.ok) return { ok: false, code: opened.code };
+      const outcome = await runWrite(async (ctx) => {
+        const doomed = [];
+        const marks = new Map();
+        let bytes = 0;
+        for (const target of targets) {
+          if (!target || target.id === undefined || typeof target.revision !== "number") continue;
+          const slot = keyOf(target.id);
+          const existing = await request(ctx.records.get(slot));
+          if (!existing || !sameScope(existing.scope)) continue;
+          if (existing.channel !== channel || existing.version !== version) continue;
+          if (existing.writerId !== writerId) continue;
+          if (existing.revision !== target.revision) continue;
+          doomed.push({ slot, existing });
+          bytes += existing.bytes;
+          const markSlot = existing.kind === "binary" ? slot : keyOf(existing.capsuleId);
+          const at = slotKey(markSlot);
+          if (!marks.has(at)) {
+            marks.set(at, { markSlot, ranges: (await request(ctx.watermarks.get(markSlot)))?.retired ?? [] });
+          }
+          marks.get(at).ranges = retireRange(marks.get(at).ranges, existing.revision);
+        }
+        if (!doomed.length) return { ok: true, retired: [] };
+        const totals = await readUsageTotals(ctx.meta, ctx.records);
+        for (const { slot } of doomed) await request(ctx.records.delete(slot));
+        for (const { markSlot, ranges } of marks.values()) {
+          const mark = await request(ctx.watermarks.get(markSlot));
+          await request(
+            ctx.watermarks.put({
+              ...(mark || {}),
+              key: markSlot,
+              kind: "binary",
+              retired: ranges,
+              acknowledged: mark?.acknowledged ?? null,
+              updated: now(),
+            })
+          );
+        }
+        await writeUsageTotals(ctx.meta, {
+          scopeBytes: Math.max(0, totals.scopeBytes - bytes),
+          dbBytes: Math.max(0, totals.dbBytes - bytes),
+        });
+        return { ok: true, retired: doomed.map(({ existing }) => ({ id: existing.id, revision: existing.revision })) };
+      });
+      return outcome.ok ? outcome.result : { ok: false, code: outcome.code };
+    },
+
+    /**
+     * Swap merged batches into their capsule, if the head is still the one that was read.
+     *
+     * The merge happened outside this transaction; this is only the swap. Every input
+     * is re-read at the exact revision the caller observed and the capsule is checked
+     * against the revision it had, so a compaction that lost a race changes nothing
+     * and can be retried from the new head. Inputs are deleted only after a successful
+     * comparison, a replacement that does not fit keeps every original, and the input
+     * revisions are retired in this same commit.
+     *
+     * @param {{capsuleId: *, expectedRevision: number, replacement: Object, inputs?: Array<{id: *, revision: number}>}} options
+     * @returns {Promise<{ok: boolean, code?: string, retired?: Array, revision?: number}>}
+     */
+    async compactBinary({ channel, version, capsuleId, expectedRevision, replacement = null, inputs = [] } = {}) {
+      if (!replacement || typeof replacement.revision !== "number") return { ok: false, code: "invalid" };
+      const opened = await open();
+      if (!opened.ok) return { ok: false, code: opened.code };
+      const capsuleSlot = keyOf(capsuleId);
+      const outcome = await runWrite(async (ctx) => {
+        const capsule = await request(ctx.records.get(capsuleSlot));
+        if (!capsule || !sameScope(capsule.scope) || capsule.kind !== "binary") return { ok: false, code: "missing" };
+        if (capsule.channel !== channel) return { ok: false, code: "channel-mismatch" };
+        if (capsule.version !== version) return { ok: false, code: "unknown-version" };
+        if (capsule.revision !== expectedRevision) return { ok: false, code: "stale" };
+        if (replacement.revision <= capsule.revision) return { ok: false, code: "invalid" };
+        const doomed = [];
+        for (const input of inputs) {
+          if (!input || input.id === undefined || typeof input.revision !== "number") return { ok: false, code: "stale" };
+          const slot = keyOf(input.id);
+          const existing = await request(ctx.records.get(slot));
+          if (!existing || !sameScope(existing.scope)) return { ok: false, code: "stale" };
+          if (existing.kind !== "binary-batch" || existing.channel !== capsule.channel || existing.version !== capsule.version) {
+            return { ok: false, code: "stale" };
+          }
+          if (!sameValue(existing.capsuleId, capsule.id) || existing.revision !== input.revision) return { ok: false, code: "stale" };
+          doomed.push({ slot, existing });
+        }
+        const updated = { ...capsule, revision: replacement.revision, payload: replacement.payload, updated: replacement.updated };
+        updated.bytes = recordBytes(updated);
+        let delta = updated.bytes - capsule.bytes;
+        for (const { existing } of doomed) delta -= existing.bytes;
+        const totals = await readUsageTotals(ctx.meta, ctx.records);
+        if (totals.scopeBytes + delta > maxScopeBytes || totals.dbBytes + delta > maxDbBytes) {
+          return { ok: false, code: "over-budget" };
+        }
+        for (const { slot } of doomed) await request(ctx.records.delete(slot));
+        await request(ctx.records.put(updated));
+        const mark = await request(ctx.watermarks.get(capsuleSlot));
+        let retired = mark?.retired ?? [];
+        for (const { existing } of doomed) retired = retireRange(retired, existing.revision);
+        await request(
+          ctx.watermarks.put({
+            ...(mark || {}),
+            key: capsuleSlot,
+            kind: "binary",
+            retired,
+            acknowledged: mark?.acknowledged ?? capsule.acknowledged ?? null,
+            updated: now(),
+          })
+        );
+        await writeUsageTotals(ctx.meta, { scopeBytes: totals.scopeBytes + delta, dbBytes: totals.dbBytes + delta });
+        return { ok: true, retired: doomed.map(({ existing }) => ({ id: existing.id, revision: existing.revision })), revision: updated.revision };
       });
       return outcome.ok ? outcome.result : { ok: false, code: outcome.code };
     },

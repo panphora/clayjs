@@ -26,6 +26,16 @@ const MAX_INTERVAL_MS = 5000;
 
 const TEXT = "text";
 
+// Compaction thresholds: 64 batch records or 1 MiB of batch bytes, whichever comes
+// first, merged into the writer's capsule. A merge is never in the typing path.
+const COMPACT_BATCHES = 64;
+const COMPACT_BYTES = 1024 * 1024;
+
+// How much uncommitted work one channel holds in memory when the database refuses a
+// write. Refusing a further append is loud and visible; dropping an older one is not.
+const MAX_QUEUED_BATCHES = 256;
+const MAX_QUEUED_BYTES = 1024 * 1024;
+
 function pageWriterId() {
   const minted = globalThis.crypto?.randomUUID?.();
   if (minted) return minted;
@@ -34,6 +44,17 @@ function pageWriterId() {
 
 function recordKey(id) {
   return Array.isArray(id) ? id.join("\u0000") : String(id);
+}
+
+function sameId(left, right) {
+  if (Array.isArray(left) && Array.isArray(right)) {
+    return left.length === right.length && left.every((part, at) => part === right[at]);
+  }
+  return left === right;
+}
+
+function mintedId(revision) {
+  return globalThis.crypto?.randomUUID?.() ?? `rec-${revision}-${Math.random().toString(36).slice(2)}`;
 }
 
 function copyPayload(value) {
@@ -341,14 +362,279 @@ export function createRecovery({
     return failure ? { ok: false, code: failure } : { ok: true, stored };
   }
 
+  // --- the binary channel -------------------------------------------------------
+  //
+  // A page channel journals Yjs updates as bytes: one immutable capsule per writer
+  // and key carrying the episode's base, its received dependencies and its owned
+  // local work, plus one small batch per append. Nothing here knows what the bytes
+  // mean; the merge and the checkpoint proof come from the registration.
+
+  function binaryOf(entry, key) {
+    return [entry.channel, key, writerId];
+  }
+
+  function capsuleFor(entry, capsuleId, context, at, base) {
+    return {
+      id: capsuleId,
+      kind: "binary",
+      channel: entry.channel,
+      version: entry.version,
+      writerId,
+      revision: 0,
+      context,
+      payload: {
+        base: base ?? new Uint8Array(0),
+        dependencies: new Uint8Array(0),
+        owned: new Uint8Array(0),
+      },
+      acknowledged: null,
+      created: at,
+      updated: at,
+    };
+  }
+
+  function queueBatch(entry, record, capsule) {
+    if (entry.batchQueue.size >= MAX_QUEUED_BATCHES) return false;
+    if (entry.queuedBytes + record.payload.byteLength > MAX_QUEUED_BYTES) return false;
+    entry.batchQueue.set(recordKey(record.id), { record, capsule });
+    entry.queuedBytes += record.payload.byteLength;
+    return true;
+  }
+
+  async function writeBatchQueue(entry) {
+    if (!entry.batchQueue.size) return { ok: true };
+    const opened = await ensurePrepared();
+    if (!opened.ok) return { ok: false, code: opened.code };
+    const stored = [];
+    let failure = null;
+    for (const [slot, item] of [...entry.batchQueue.entries()]) {
+      const receipt = await store.appendBinary(item.record, item.capsule);
+      if (!receipt.ok) {
+        failure = failure || receipt.code || "error";
+        continue;
+      }
+      entry.batchQueue.delete(slot);
+      entry.queuedBytes = Math.max(0, entry.queuedBytes - item.record.payload.byteLength);
+      if (receipt.skipped) continue;
+      entry.batches += 1;
+      entry.batchBytes += item.record.payload.byteLength;
+      stored.push({ id: item.record.id, revision: item.record.revision });
+    }
+    note(failure ? { ok: false, code: failure } : { ok: true });
+    announce(entry);
+    return failure ? { ok: false, code: failure } : { ok: true, stored };
+  }
+
+  /**
+   * Journal one binary update, and resolve only once it is on disk.
+   *
+   * The id, the revision and the bytes are fixed before the first await, so a caller
+   * that reuses its buffer cannot change what was handed over, and a write that fails
+   * keeps exactly those bytes for the next attempt. Failure is reported, never thrown:
+   * the caller still holds the live document and has to say it is not durable.
+   */
+  async function append(entry, { key, context = null, update, origin = "local", base = null } = {}) {
+    const name = key == null ? "" : String(key);
+    if (!name) throw new TypeError("clay.recovery.append needs a key");
+    if (!(update instanceof Uint8Array) && !(update instanceof ArrayBuffer)) {
+      throw new TypeError("clay.recovery.append needs binary bytes");
+    }
+    const at = now?.() ?? Date.now();
+    const revision = ++entry.revision;
+    const capsuleId = binaryOf(entry, name);
+    const record = {
+      id: mintedId(revision),
+      kind: "binary-batch",
+      channel: entry.channel,
+      version: entry.version,
+      writerId,
+      revision,
+      capsuleId,
+      origin: origin === "dependency" ? "dependency" : "local",
+      context,
+      payload: copyPayload(update),
+      updated: at,
+    };
+    const capsule = capsuleFor(entry, capsuleId, context, at, base == null ? null : copyPayload(base));
+    const opened = await ensurePrepared();
+    if (!opened.ok) {
+      if (!queueBatch(entry, record, capsule)) return { ok: false, code: "over-budget" };
+      return { ok: false, code: opened.code };
+    }
+    const receipt = await store.appendBinary(record, capsule);
+    note(receipt);
+    announce(entry);
+    if (!receipt.ok) {
+      if (!queueBatch(entry, record, capsule)) return { ok: false, code: receipt.code };
+      return { ok: false, code: receipt.code };
+    }
+    entry.batches += 1;
+    entry.batchBytes += record.payload.byteLength;
+    if (receipt.skipped) return { ok: true, id: record.id, revision, skipped: true };
+    planCompaction(entry);
+    return { ok: true, id: record.id, revision };
+  }
+
+  /**
+   * Record that a room accepted the writer's work: metadata only, no bytes moved.
+   */
+  async function markAcknowledged(entry, { records = [], authority = null, epoch = null, sequence = null } = {}) {
+    const observed = (records || []).filter((record) => record && record.id !== undefined && typeof record.revision === "number");
+    if (!observed.length) return { ok: true, acknowledged: 0 };
+    const opened = await ensurePrepared();
+    if (!opened.ok) return { ok: false, code: opened.code };
+    const receipt = await store.acknowledgeBinary({
+      channel: entry.channel,
+      version: entry.version,
+      writerId,
+      records: observed,
+      authority,
+      epoch,
+      sequence,
+    });
+    note(receipt);
+    announce(entry);
+    return receipt.ok ? { ok: true, acknowledged: receipt.acknowledged } : { ok: false, code: receipt.code };
+  }
+
+  /**
+   * Retire records a proof covers.
+   *
+   * The validator runs here, before any transaction is opened and never inside one,
+   * and may only narrow the caller's own list: an id and revision the caller did not
+   * observe can never be retired, whoever returns it. Without a validator nothing is
+   * retired, because nothing has been proved.
+   */
+  async function checkpoint(entry, { records = [], proof = null } = {}) {
+    const observed = (records || []).filter((record) => record && record.id !== undefined && typeof record.revision === "number");
+    if (!observed.length) return { ok: true, retired: [] };
+    if (typeof entry.validateCheckpoint !== "function") return { ok: true, retired: [] };
+    let answer;
+    try {
+      answer = await entry.validateCheckpoint(proof, observed.map(({ id, revision }) => ({ id, revision })));
+    } catch (_) {
+      return { ok: false, code: "invalid", retired: [] };
+    }
+    if (!Array.isArray(answer)) return { ok: false, code: "invalid", retired: [] };
+    const covered = observed.filter((record) =>
+      answer.some((item) => item && item.revision === record.revision && sameId(item.id, record.id))
+    );
+    if (!covered.length) return { ok: true, retired: [] };
+    const opened = await ensurePrepared();
+    if (!opened.ok) return { ok: false, code: opened.code, retired: [] };
+    const receipt = await store.checkpointBinary({
+      channel: entry.channel,
+      version: entry.version,
+      writerId,
+      records: covered,
+    });
+    note(receipt);
+    announce(entry);
+    return receipt.ok ? { ok: true, retired: receipt.retired } : { ok: false, code: receipt.code, retired: [] };
+  }
+
+  function withBytes(value) {
+    return value && typeof value.byteLength === "number" && value.byteLength > 0 ? value : null;
+  }
+
+  /**
+   * Merge the observed batches into their capsule, outside any transaction, then swap.
+   *
+   * A swap that lost the head re-reads everything and tries again, so a compaction
+   * that raced an append or another compaction never deletes input it did not merge.
+   */
+  async function swapBatches(entry, observed) {
+    for (let tries = 0; tries < 3; tries++) {
+      let capsuleId = null;
+      const inputs = [];
+      for (const { id, revision } of observed) {
+        const read = await store.get(id);
+        if (!read.ok || !read.record) continue;
+        const record = read.record;
+        if (record.revision !== revision || record.kind !== "binary-batch" || !record.capsuleId) continue;
+        if (!capsuleId) capsuleId = record.capsuleId;
+        if (!sameId(capsuleId, record.capsuleId)) continue;
+        inputs.push(record);
+      }
+      if (!capsuleId || !inputs.length) return { ok: true, retired: [] };
+      const head = await store.get(capsuleId);
+      if (!head.ok || !head.record) return { ok: false, code: "missing" };
+      const capsule = head.record;
+      const owned = [withBytes(capsule.payload?.owned), ...inputs.filter((record) => record.origin !== "dependency").map((record) => withBytes(record.payload))].filter(Boolean);
+      const dependencies = [
+        withBytes(capsule.payload?.dependencies),
+        ...inputs.filter((record) => record.origin === "dependency").map((record) => withBytes(record.payload)),
+      ].filter(Boolean);
+      const mergedOwned = owned.length ? copyPayload(await entry.merge(owned)) : new Uint8Array(0);
+      const mergedDependencies = dependencies.length ? copyPayload(await entry.merge(dependencies)) : new Uint8Array(0);
+      const revision = Math.max(entry.revision, capsule.revision) + 1;
+      entry.revision = revision;
+      const swapped = await store.compactBinary({
+        channel: entry.channel,
+        version: entry.version,
+        capsuleId,
+        expectedRevision: capsule.revision,
+        replacement: {
+          revision,
+          updated: now?.() ?? Date.now(),
+          payload: {
+            base: capsule.payload?.base ?? new Uint8Array(0),
+            dependencies: mergedDependencies,
+            owned: mergedOwned,
+          },
+        },
+        inputs: inputs.map((record) => ({ id: record.id, revision: record.revision })),
+      });
+      if (swapped.ok) {
+        entry.batches = 0;
+        entry.batchBytes = 0;
+        return { ok: true, retired: swapped.retired, revision: swapped.revision };
+      }
+      if (swapped.code !== "stale") return { ok: false, code: swapped.code };
+    }
+    return { ok: false, code: "stale" };
+  }
+
+  async function compact(entry, { records = [] } = {}) {
+    if (typeof entry.merge !== "function") return { ok: false, code: "invalid", retired: [] };
+    const observed = (records || []).filter((record) => record && record.id !== undefined && typeof record.revision === "number");
+    if (!observed.length) return { ok: true, retired: [] };
+    const opened = await ensurePrepared();
+    if (!opened.ok) return { ok: false, code: opened.code, retired: [] };
+    const receipt = await swapBatches(entry, observed);
+    note(receipt);
+    announce(entry);
+    return receipt.ok ? { ok: true, retired: receipt.retired } : { ok: false, code: receipt.code, retired: [] };
+  }
+
+  function planCompaction(entry) {
+    if (typeof entry.merge !== "function" || entry.compaction) return;
+    if (entry.batches < COMPACT_BATCHES && entry.batchBytes < COMPACT_BYTES) return;
+    entry.compaction = (async () => {
+      const listed = await store.list();
+      if (!listed.ok) return;
+      const mine = listed.records.filter(
+        (record) => record.channel === entry.channel && record.kind === "binary-batch" && record.writerId === writerId
+      );
+      if (!mine.length) return;
+      await compact(entry, { records: mine.map(({ id, revision }) => ({ id, revision })) });
+    })()
+      .catch(() => {})
+      .finally(() => {
+        entry.compaction = null;
+      });
+  }
+
   function flush(entry) {
     if (entry.timer) clearTimeout(entry.timer);
     entry.timer = null;
     entry.burstStart = 0;
-    entry.writing = entry.writing.then(
-      () => writePending(entry),
-      () => writePending(entry)
-    );
+    const run = async () => {
+      const queued = await writeBatchQueue(entry);
+      if (!queued.ok) return queued;
+      return writePending(entry);
+    };
+    entry.writing = entry.writing.then(run, run);
     return entry.writing;
   }
 
@@ -408,6 +694,10 @@ export function createRecovery({
       flush: () => flush(entry),
       list: () => list(entry),
       dismiss: (id, options) => dismiss(entry, id, options),
+      append: (spec) => append(entry, spec),
+      markAcknowledged: (spec) => markAcknowledged(entry, spec),
+      checkpoint: (spec) => checkpoint(entry, spec),
+      compact: (spec) => compact(entry, spec),
       subscribe: (fn) => subscribe(entry, fn),
       dispose: () => dispose(entry),
     };
@@ -426,9 +716,18 @@ export function createRecovery({
    * @param {number} [spec.version]
    * @param {Function} [spec.readSaved] - (html) => Map<key, payload>
    * @param {Function} [spec.describe] - (record) => {label, text}
+   * @param {Function} [spec.validateCheckpoint] - (proof, records) => the subset a proof covers
+   * @param {Function} [spec.merge] - (Uint8Array[]) => Uint8Array, the channel's own merge
    * @returns {Object}
    */
-  function register({ channel, version = 1, readSaved = null, describe = null } = {}) {
+  function register({
+    channel,
+    version = 1,
+    readSaved = null,
+    describe = null,
+    validateCheckpoint = null,
+    merge = null,
+  } = {}) {
     if (!channel || typeof channel !== "string") throw new TypeError("clay.recovery.register needs a channel name");
     const existing = channels.get(channel);
     if (existing) {
@@ -439,9 +738,16 @@ export function createRecovery({
       version,
       readSaved,
       describe,
+      validateCheckpoint,
+      merge,
       revision: 0,
       pending: new Map(),
       held: new Map(),
+      batchQueue: new Map(),
+      queuedBytes: 0,
+      batches: 0,
+      batchBytes: 0,
+      compaction: null,
       timer: null,
       burstStart: 0,
       writing: Promise.resolve(),
