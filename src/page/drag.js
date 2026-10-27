@@ -5,6 +5,8 @@ import { gapTargets, summaryTarget, pickTarget, moveSpanTo } from "./drop.js";
 import { announce } from "./announce.js";
 
 const SLOP = 4;
+const HOLD = 250;
+const HOLD_SLOP = 8;
 const EDGE = 56;
 const MAX_SPEED = 18;
 
@@ -70,6 +72,9 @@ export class BlockDrag {
         this.cancel();
       }
     };
+    this.onOther = (e) => { if (this.state && e.pointerId !== this.state.pointer) this.cancel(); };
+    this.onBlur = () => this.cancel();
+    this.onScroll = () => { if (this.state && !this.state.active) this.stop(); };
     grip.addEventListener("pointerdown", (e) => this.start(e));
   }
 
@@ -82,14 +87,31 @@ export class BlockDrag {
     this.state = {
       index, span: captureSpan(ents, lo, hi), touch: event.pointerType === "touch",
       pointer: event.pointerId, x0: event.clientX, y0: event.clientY, x: event.clientX, y: event.clientY,
-      active: false, raf: 0, gap: undefined, targets: [], target: null,
+      hold: 0, active: false, raf: 0, gap: undefined, targets: [], target: null,
     };
     this.grip.setPointerCapture?.(event.pointerId);
     this.grip.addEventListener("pointermove", this.onMove);
     this.grip.addEventListener("pointerup", this.onUp);
     this.grip.addEventListener("pointercancel", this.onCancel);
     this.grip.addEventListener("lostpointercapture", this.onCancel);
+    if (this.state.touch) {
+      const s = this.state;
+      s.hold = setTimeout(() => this.held(s), HOLD);
+      window.addEventListener("pointerdown", this.onOther, true);
+      window.addEventListener("blur", this.onBlur);
+      window.addEventListener("scroll", this.onScroll, true);
+    }
     event.preventDefault();
+  }
+
+  // A touch keeps still for a quarter second before it drags: the press the mouse
+  // starts on its first move only reaches the same place once a scroll would have
+  // begun, so the hold tells the two apart. A tap before then is the menu.
+  held(s) {
+    if (this.state !== s || s.active) return;
+    s.hold = 0;
+    if (Math.hypot(s.x - s.x0, s.y - s.y0) > HOLD_SLOP || !this.view.editable) return this.stop();
+    this.begin();
   }
 
   move(event) {
@@ -97,9 +119,11 @@ export class BlockDrag {
     if (!s || event.pointerId !== s.pointer) return;
     s.x = event.clientX;
     s.y = event.clientY;
+    if (s.touch && !this.view.editable) return s.active ? this.cancel() : this.stop();
     if (!s.active) {
-      if (Math.hypot(s.x - s.x0, s.y - s.y0) <= SLOP) return;
-      if (s.touch) return this.stop();
+      const reach = Math.hypot(s.x - s.x0, s.y - s.y0);
+      if (s.touch) { if (reach > HOLD_SLOP) this.stop(); return; }
+      if (reach <= SLOP) return;
       this.begin();
     }
     this.track();
@@ -167,6 +191,7 @@ export class BlockDrag {
     const step = () => {
       const s = this.state;
       if (!s?.active) return;
+      if (s.touch && !this.view.editable) return this.cancel();
       const sc = this.scroller;
       const box = sc === sc.ownerDocument.scrollingElement ? { top: 0, bottom: window.innerHeight } : sc.getBoundingClientRect();
       let v = 0;
@@ -204,6 +229,7 @@ export class BlockDrag {
       && (ents[lo].node.type.name !== "list_item" || target.indent === ents[lo].node.attrs.indent);
     if (same) return;
     this.view.dispatch(asStep(moveSpanTo(st, ents, lo, hi, target)).scrollIntoView());
+    if (this.view.state.doc === st.doc) return announce(this.view, "Move cancelled");
     const n = hi - lo + 1;
     announce(this.view, `Moved ${n} ${n === 1 ? "block" : "blocks"}`);
     this.view.focus();
@@ -218,12 +244,16 @@ export class BlockDrag {
     const s = this.state;
     if (!s) return;
     this.state = null;
+    clearTimeout(s.hold);
     cancelAnimationFrame(s.raf);
     this.grip.removeEventListener("pointermove", this.onMove);
     this.grip.removeEventListener("pointerup", this.onUp);
     this.grip.removeEventListener("pointercancel", this.onCancel);
     this.grip.removeEventListener("lostpointercapture", this.onCancel);
     this.grip.releasePointerCapture?.(s.pointer);
+    window.removeEventListener("pointerdown", this.onOther, true);
+    window.removeEventListener("blur", this.onBlur);
+    window.removeEventListener("scroll", this.onScroll, true);
     window.removeEventListener("keydown", this.onKey, true);
     this.shell.classList.remove("is-dragging");
     delete this.shell.dataset.drop;
