@@ -17,6 +17,7 @@ import { blocksFromYValue } from "../../../src/page/ybind/decode.js";
 import { yValueOf } from "../../../src/page/ybind/provider.js";
 import { seedPageFromArticle } from "../../../src/page/ybind/migrate.js";
 import { NEIGHBOUR } from "../../fixtures/page/formats/m13-cases.mjs";
+import { runFormatted } from "../../../src/page/format-command.js";
 
 /**
  * Date mentions: the Date action offers Today and Tomorrow, and choosing one writes that
@@ -45,6 +46,8 @@ const localOf = (at) => `${at.getFullYear()}-${String(at.getMonth() + 1).padStar
 function open(blocks = BLOCKS()) {
   const mount = document.body.appendChild(document.createElement("div"));
   const view = createPageEditor(mount, { blocks });
+  // No gate is loaded on this page, so a mention asks this one and writes when it says yes.
+  view.runFormatCommand = async (apply) => ({ status: "applied", floor: 1, result: await apply({}) });
   cleanups.push(() => { if (!view.isDestroyed) view.destroy(); mount.remove(); });
   return view;
 }
@@ -283,4 +286,71 @@ test("view, edit, view leaves no picker and no listener behind", async () => {
   expect(record(view, "a").c).toMatch(/^Hello \d{4}-\d{2}-\d{2} $/);
   expect(view.dom.hasAttribute("aria-activedescendant")).toBe(false);
   expect(schema.marks.date.spec.excludes).toBe("mention date link");
+});
+
+// The gate awaits, so a date asks it before it writes and writes only when it says yes.
+const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+test("a gate that refuses writes no date, marks nothing and leaves no undo entry", async () => {
+  const view = open();
+  const asked = [];
+  view.runFormatCommand = async () => { asked.push(true); return { status: "upgrade-required", code: "page-format-upgrade-required" }; };
+  caret(view, endOf(view, "a"));
+  expect(await start(view)).toEqual({ ok: true, picker: true });
+  const before = view.state.doc;
+  options()[0].click();
+  await settle();
+
+  expect(asked).toHaveLength(1);
+  expect(record(view, "a").c).toBe("Hello ");
+  expect(record(view, "a").m).toBeUndefined();
+  // Nothing was dispatched at all, so history has no entry for a date that was refused.
+  expect(view.state.doc).toBe(before);
+  history.undoNoScroll(view.state, view.dispatch);
+  expect(record(view, "a").c).toBe("Hello ");
+  expect(record(view, "a").m).toBeUndefined();
+
+  // The answer is the gate's own refusal, so a caller reads the code rather than a date.
+  expect(await runFormatted(view, () => { throw new Error("a refused command writes nothing"); }))
+    .toEqual({ ok: false, code: "page-format-upgrade-required", retry: false });
+});
+
+test("the gate is asked once per date, and the written day is its answer", async () => {
+  const view = open();
+  const asked = [];
+  view.runFormatCommand = async (apply) => { asked.push(apply); return { status: "applied", floor: 1, result: await apply({}) }; };
+  caret(view, endOf(view, "a"));
+  expect(await start(view)).toEqual({ ok: true, picker: true });
+  options()[0].click();
+  await settle();
+
+  expect(asked).toHaveLength(1);
+  const date = written(view, "a");
+  expect(isISODate(date)).toBe(true);
+  expect(record(view, "a").c).toBe(`Hello ${date} `);
+  expect(runsOf(record(view, "a").m)).toEqual([[6, ""], [10, DATE_KEY(date)], [1, ""]]);
+});
+
+test("a caret that moves while the gate is pending refuses with stale-target", async () => {
+  const view = open();
+  const answers = [];
+  let release = null;
+  view.runFormatCommand = async (apply) => {
+    await new Promise((resolve) => { release = resolve; });
+    const result = await apply({});
+    answers.push(result);
+    return { status: "applied", floor: 1, result };
+  };
+  caret(view, endOf(view, "a"));
+  expect(await start(view)).toEqual({ ok: true, picker: true });
+  options()[0].click();
+  expect(release).not.toBeNull();
+  caret(view, endOf(view, "z"));
+  release();
+  await settle();
+
+  expect(answers).toEqual([{ ok: false, code: "stale-target" }]);
+  expect(record(view, "a").c).toBe("Hello ");
+  expect(record(view, "a").m).toBeUndefined();
+  expect(record(view, "z").c).toBe("Neighbour line");
 });

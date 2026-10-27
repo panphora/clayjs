@@ -9,6 +9,7 @@ import { schema } from "../schema.js";
 import { asStep } from "../blocksel.js";
 import { composing } from "../markdown.js";
 import { createMentionPicker } from "../mention-picker.js";
+import { runFormatted } from "../format-command.js";
 
 const pad = (n) => String(n).padStart(2, "0");
 
@@ -103,7 +104,7 @@ export function createFeature({ view = null } = {}) {
     return { ok: true, date: label };
   }
 
-  function choose(index) {
+  async function choose(index) {
     const s = session;
     if (!s) return { ok: false, code: "not-editing" };
     const entry = s.picker.personAt(index);
@@ -115,7 +116,14 @@ export function createFeature({ view = null } = {}) {
       return { ok: false, code: "invalid-date" };
     }
     close();
-    return insertDateMention(at, entry.date);
+    // The gate awaits, so the caret is read again here: one that moved, a selection that is
+    // no longer a caret or a block that refuses marks means the target no longer holds, and
+    // the date is not written anywhere.
+    return runFormatted(view, () => {
+      const now = bookmark(s);
+      if (now === null) return { ok: false, code: "stale-target" };
+      return insertDateMention(now, entry.date);
+    });
   }
 
   function key(event) {

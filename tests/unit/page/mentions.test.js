@@ -15,6 +15,7 @@ import { blocksFromYValue } from "../../../src/page/ybind/decode.js";
 import { yValueOf } from "../../../src/page/ybind/provider.js";
 import { seedPageFromArticle } from "../../../src/page/ybind/migrate.js";
 import { caseOf, NEIGHBOUR } from "../../fixtures/page/formats/m13-cases.mjs";
+import { runFormatted } from "../../../src/page/format-command.js";
 
 /**
  * Person mentions: @ opens the people picker and choosing one writes that person's name as
@@ -56,6 +57,8 @@ function people({ saved = [ADA, GRACE], allowed = [ADA, GRACE], fail = false } =
 function open(blocks = BLOCKS()) {
   const mount = document.body.appendChild(document.createElement("div"));
   const view = createPageEditor(mount, { blocks });
+  // No gate is loaded on this page, so a mention asks this one and writes when it says yes.
+  view.runFormatCommand = async (apply) => ({ status: "applied", floor: 1, result: await apply({}) });
   cleanups.push(() => { if (!view.isDestroyed) view.destroy(); mount.remove(); });
   return view;
 }
@@ -418,6 +421,74 @@ test("the Mention action types the @ it needs and opens the same picker", async 
   expect(record(view, "a").c).toBe("Hello Grace Hopper ");
   expect(await runPageCommand(view, "mentions", {})).toEqual({ ok: true, picker: true });
   expect(record(view, "a").c).toBe("Hello Grace Hopper @");
+});
+
+// The gate awaits, so a mention asks it before it writes and writes only when it says yes.
+const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+test("a gate that refuses writes nothing, marks nothing and leaves no undo entry", async () => {
+  people();
+  const view = open();
+  const asked = [];
+  view.runFormatCommand = async () => { asked.push(true); return { status: "upgrade-required", code: "page-format-upgrade-required" }; };
+  type(view, endOf(view, "a"));
+  await waitFor(() => options().length === 2);
+  const before = view.state.doc;
+  options()[0].click();
+  await settle();
+
+  expect(asked).toHaveLength(1);
+  expect(record(view, "a").c).toBe("Hello @");
+  expect(record(view, "a").m).toBeUndefined();
+  // Nothing was dispatched at all, so history has no entry for a mention that was refused.
+  expect(view.state.doc).toBe(before);
+  history.undoNoScroll(view.state, view.dispatch);
+  expect(record(view, "a").c).toBe("Hello ");
+  expect(record(view, "a").m).toBeUndefined();
+
+  // The answer is the gate's own refusal, so a caller reads the code rather than a mention.
+  expect(await runFormatted(view, () => { throw new Error("a refused command writes nothing"); }))
+    .toEqual({ ok: false, code: "page-format-upgrade-required", retry: false });
+});
+
+test("the gate is asked once per mention, and the written name is its answer", async () => {
+  people();
+  const view = open();
+  const asked = [];
+  view.runFormatCommand = async (apply) => { asked.push(apply); return { status: "applied", floor: 1, result: await apply({}) }; };
+  type(view, endOf(view, "a"));
+  await waitFor(() => options().length === 2);
+  options()[0].click();
+  await settle();
+
+  expect(asked).toHaveLength(1);
+  expect(record(view, "a").c).toBe("Hello Ada Lovelace ");
+  expect(markOf(view, "a", 1)).toEqual([["mention", "ada-lovelace"]]);
+});
+
+test("a caret that moves while the gate is pending refuses with stale-target", async () => {
+  people();
+  const view = open();
+  const answers = [];
+  let release = null;
+  view.runFormatCommand = async (apply) => {
+    await new Promise((resolve) => { release = resolve; });
+    const result = await apply({});
+    answers.push(result);
+    return { status: "applied", floor: 1, result };
+  };
+  type(view, endOf(view, "a"));
+  await waitFor(() => options().length === 2);
+  options()[0].click();
+  expect(release).not.toBeNull();
+  caret(view, endOf(view, "z"));
+  release();
+  await settle();
+
+  expect(answers).toEqual([{ ok: false, code: "stale-target" }]);
+  expect(record(view, "a").c).toBe("Hello @");
+  expect(record(view, "a").m).toBeUndefined();
+  expect(record(view, "z").c).toBe("Neighbour line");
 });
 
 // The article a page saves, from the projection's own bytes.

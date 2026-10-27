@@ -8,6 +8,7 @@ import { schema } from "../schema.js";
 import { asStep } from "../blocksel.js";
 import { composing } from "../markdown.js";
 import { createMentionPicker, filterPeople, peopleFrom } from "../mention-picker.js";
+import { runFormatted } from "../format-command.js";
 
 // clay.people's own id grammar (plugins/people.js): a mention keeps an id the registry made.
 const ID = /^[A-Za-z0-9_-]{8,64}$/;
@@ -79,7 +80,7 @@ export function createFeature({ view = null } = {}) {
     draw(s);
   }
 
-  function choose(index) {
+  async function choose(index) {
     const s = session;
     if (!s) return { ok: false, code: "not-editing" };
     const person = s.picker.personAt(index);
@@ -90,16 +91,23 @@ export function createFeature({ view = null } = {}) {
       return { ok: false, code: person ? "stale-target" : "no-person" };
     }
     const label = String(person.name).trim();
-    // One transaction: the revalidated query becomes the name and its mark, then one
-    // unmarked space so typing at the edge of a mention stays plain text.
-    const tr = view.state.tr.insertText(label, s.from, at.head);
-    tr.addMark(s.from, s.from + label.length, schema.marks.mention.create({ id: person.id }));
-    tr.insertText(" ", s.from + label.length);
-    tr.setSelection(state.TextSelection.create(tr.doc, s.from + label.length + 1));
     close();
-    view.dispatch(asStep(tr));
-    view.focus();
-    return { ok: true, id: person.id, label };
+    // The gate awaits, so the bookmark is read again here: a caret that moved, a query that
+    // changed or a block that went away means the target no longer holds and nothing is
+    // written.
+    return runFormatted(view, () => {
+      const now = bookmark(s);
+      if (!now || now.query !== s.query) return { ok: false, code: "stale-target" };
+      // One transaction: the revalidated query becomes the name and its mark, then one
+      // unmarked space so typing at the edge of a mention stays plain text.
+      const tr = view.state.tr.insertText(label, s.from, now.head);
+      tr.addMark(s.from, s.from + label.length, schema.marks.mention.create({ id: person.id }));
+      tr.insertText(" ", s.from + label.length);
+      tr.setSelection(state.TextSelection.create(tr.doc, s.from + label.length + 1));
+      view.dispatch(asStep(tr));
+      view.focus();
+      return { ok: true, id: person.id, label };
+    });
   }
 
   function key(event) {
