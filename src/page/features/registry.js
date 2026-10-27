@@ -40,4 +40,5 @@ export const COMMAND_FEATURES = {
   emoji: { module: "page/features/emoji.js", load: () => import("./emoji.js") },
   titleIcon: { module: "page/features/title-icon.js", load: () => import("./title-icon.js") },
   titleCover: { module: "page/features/title-cover.js", load: () => import("./title-cover.js") },
+  exportHtml: { module: "page/features/export-html.js", load: () => import("./export-html.js") },
 };
