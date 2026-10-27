@@ -41,6 +41,7 @@ export {
 } from './live-provenance.js';
 
 export { isHybridPageValue, isYPageValue, inspectPage, pageBaseline, captureFormat, checkPageFormatAdmission } from './page-admission.js';
+export { PAGE_FORMAT, PAGE_FORMAT_HEADER, PAGE_FORMAT_EXTENSION, PAGE_FORMAT_UPGRADE, formatCapability, pageFormatFloor, withPageFormatFloor } from '../../core/page-format.js';
 
 export { splitPage, composePage, pageRev } from './page-state.js';
 
