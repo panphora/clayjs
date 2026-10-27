@@ -174,5 +174,15 @@ export const schema = new model.Schema({
       inclusive: false,
       toDOM: (m) => ["a", { href: safeHref(m.attrs.href) }, 0],
     },
+    // A person mention is ordinary text with this mark over it: the name is the label
+    // and `id` is the people registry's reference. It links nowhere and notifies nobody.
+    // The date mark joins its excludes with the step that gives this schema one: a name
+    // no mark type answers refuses the whole schema.
+    mention: {
+      attrs: { id: {} },
+      inclusive: false,
+      excludes: "mention link",
+      toDOM: (m) => ["span", { "data-page-mention": m.attrs.id }, 0],
+    },
   },
 });

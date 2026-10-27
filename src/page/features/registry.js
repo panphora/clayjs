@@ -20,4 +20,6 @@ export const featureForType = (type) => Object.keys(FEATURES).find((id) => FEATU
 // and the offline manifest carries them, and `module` is the part on the wire (the load
 // meter counts it). A row lands with the step that gives it a module: a literal import of
 // a file this tree does not have yet would stop the chunk build.
-export const COMMAND_FEATURES = {};
+export const COMMAND_FEATURES = {
+  mentions: { module: "page/features/mentions.js", load: () => import("./mentions.js") },
+};

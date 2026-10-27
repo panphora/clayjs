@@ -76,8 +76,13 @@ test("an href with quotes, brackets and backslashes round-trips", () => {
   expect(marksOf(schema, key).map((mk) => [mk.type.name, mk.attrs.href ?? null])).toEqual([["strong", null], ["link", href]]);
 });
 
-test("every mark in the schema has a key code, and code blocks drop marks", () => {
-  for (const name of Object.keys(schema.marks)) expect(CODES[name]).toMatch(/^[a-z]$/);
+test("every mark in the schema has a key code or a named descriptor, and code blocks drop marks", () => {
+  for (const name of Object.keys(schema.marks)) {
+    // A mark the old letters do not cover travels as x[name, attrs], never as a new one.
+    if (CODES[name]) expect(CODES[name]).toMatch(/^[a-z]$/);
+    else expect(name).toMatch(/^[A-Za-z_][A-Za-z0-9_-]{0,63}$/);
+  }
+  expect(CODES.mention).toBeUndefined();
   expect(new Set(Object.values(CODES)).size).toBe(Object.keys(CODES).length);
   const nodes = unflatten(schema, "x()", ["c", "c", "c"], schema.nodes.code_block);
   expect(nodes[0].marks).toEqual([]);

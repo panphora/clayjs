@@ -447,10 +447,19 @@ const commandHosts = new WeakMap();
 // A command asks for its module with the state it was asked in, so the host has to hear
 // about every transaction: one that moves the document revision or the selection refuses
 // a command whose module is still arriving rather than running it where the person has
-// since left.
+// since left. It also holds the one typed key a command owns: `@` asks for the mention
+// picker, and the host types the character itself so the command is handed the bookmark it
+// belongs to, with everything else about that picker left to the module that arrives for
+// it. It is asked before the plugin that records ordinary typing, since it types it.
 function commandWatchPlugin(host) {
   return new state.Plugin({
     view: () => ({ update: (editorView, prevState) => host.observe(editorView.state, prevState) }),
+    props: { handleTextInput(v, from, to, text) {
+      if (text !== "@" || v.composing || !Object.hasOwn(COMMAND_FEATURES, "mentions")) return false;
+      v.dispatch(v.state.tr.insertText("@", from, to));
+      host.run("mentions", { from, to: from + 1 });
+      return true;
+    } },
   });
 }
 
@@ -479,6 +488,7 @@ export function pagePlugins({ upload = defaultUpload, highlight, history: useHis
   return [
     announcementPlugin(),
     chromePlugin({ onAiTool }),
+    commandHost ? commandWatchPlugin(commandHost) : null,
     slashRangePlugin(),
     toolFollowPlugin(toolHost),
     linkPlugin(),
@@ -510,7 +520,6 @@ export function pagePlugins({ upload = defaultUpload, highlight, history: useHis
     gapcursor.gapCursor(),
     lazyViewsPlugin(),
     features ? featureWatchPlugin(features) : null,
-    commandHost ? commandWatchPlugin(commandHost) : null,
   ].filter(Boolean);
 }
 

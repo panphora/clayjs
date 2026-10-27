@@ -14,9 +14,11 @@
 // encodeForMerge (replay.js) gives each one a code of its own.
 // A mark this schema has no type for keeps its token or named descriptor
 // instead of throwing (format-codec.js): the unit's key is written back exactly
-// as it was read.
+// as it was read. A mark of this schema with no compact code of its own is
+// written as a named descriptor too, x[name, attrs], so a new mark never takes a
+// letter an older writer already reads.
 import { model } from "../vendor/prosemirror.vendor.js";
-import { descriptors, entriesOf, isOpaque, keyOf, opaqueMark } from "./format-codec.js";
+import { descriptors, entriesOf, isOpaque, keyOf, NAMED_CODE, opaqueMark } from "./format-codec.js";
 
 export const ATOM = "￼";
 export const CODES = { strong: "b", em: "i", strike: "s", code: "c", link: "a" };
@@ -30,7 +32,10 @@ export function markKey(marks) {
       continue;
     }
     const code = CODES[mark.type.name];
-    if (!code) throw new TypeError(`page: the mark ${mark.type.name} has no key code`);
+    if (!code) {
+      key += NAMED_CODE + JSON.stringify([mark.type.name, mark.attrs]);
+      continue;
+    }
     key += code;
     const names = Object.keys(mark.type.attrs);
     if (names.length) key += JSON.stringify(names.map((name) => mark.attrs[name]));
@@ -49,15 +54,23 @@ export function marksOf(schema, key) {
   marks = [];
   const opaque = [];
   for (const desc of descriptors(key)) {
+    // A named descriptor this schema does have a type for is that mark, not an opaque
+    // entry: the named grammar is how a mark without a compact letter travels. One
+    // carrying an attribute the type does not declare stays opaque, so nothing is lost.
+    const type = desc.name !== undefined ? schema.marks[desc.name] : null;
+    if (type && Object.keys(desc.attrs).every((field) => Object.hasOwn(type.attrs, field))) {
+      marks = type.create(desc.attrs).addToSet(marks);
+      continue;
+    }
     const name = desc.code === undefined ? null : NAMES[desc.code];
     if (!name) {
       opaque.push(desc);
       continue;
     }
-    const type = schema.marks[name];
-    if (!type) throw new TypeError(`page: unknown mark code ${desc.code} in ${key}`);
-    const attrs = desc.attrs ? Object.fromEntries(Object.keys(type.attrs).map((field, j) => [field, desc.attrs[j]])) : null;
-    marks = type.create(attrs).addToSet(marks);
+    const coded = schema.marks[name];
+    if (!coded) throw new TypeError(`page: unknown mark code ${desc.code} in ${key}`);
+    const attrs = desc.attrs ? Object.fromEntries(Object.keys(coded.attrs).map((field, j) => [field, desc.attrs[j]])) : null;
+    marks = coded.create(attrs).addToSet(marks);
   }
   if (opaque.length) marks = opaqueMark(entriesOf(opaque)).addToSet(marks);
   cache.set(key, marks);
