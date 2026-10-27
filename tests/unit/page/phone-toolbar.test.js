@@ -151,7 +151,7 @@ test("the More menu carries the rest of the formatting and the block actions", (
     dock(view).querySelector(".page-tool-more").click();
     expect(rows(view).map((r) => r.querySelector(".page-menu-label").textContent)).toEqual([
       "Strikethrough", "Bulleted list", "Numbered list", "Checklist", "Code",
-      "Turn into", "Insert", "Move up", "Move down", "Indent", "Outdent",
+      "Underline", "Text color", "Highlight", "Turn into", "Insert", "Move up", "Move down", "Indent", "Outdent",
     ]);
     row(view, "Move down").click();
     expect(shape(view)).toBe("B | A");

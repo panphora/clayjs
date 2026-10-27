@@ -36,7 +36,7 @@ test("equal fuzzy costs keep registry order", () => {
 });
 
 test("a lower fuzzy cost comes before a higher one", () => {
-  expect(keys("ct")).toEqual(["image", "callout", "check", "file", "csv"]);
+  expect(keys("ct")).toEqual(["image", "quote", "callout", "check", "file", "csv"]);
 });
 
 test("every exact rank keeps its priority over a cheaper fuzzy match", () => {
