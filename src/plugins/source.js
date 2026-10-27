@@ -1,671 +1,209 @@
 /**
- * source.js — wire the source map into the save pipeline.
+ * source.js — the facade over the source map.
  *
  * On by default in edit mode; `exclude=source` turns it off. The mechanism lives in
- * core/source-map.js; this file is the
- * lifecycle around it: fetch the bytes this document was loaded from, pair them to
- * the page, render the save through them, verify, and re-pair when the file moves
- * under us.
+ * core/source-map.js and the session around it in source/session.js, and neither is
+ * imported here: this file is the synchronous API a page reads (`clay.source`), the mode
+ * lease, and the one demand that loads the rest.
  *
- * FOUR MOMENTS
+ * ON DEMAND
  *
- *   boot          fetch the source, model it, refuse anything that is not this
- *                 document, and pair it against a save clone.
- *   save          render; verify; send the render if it verifies and today's full
- *                 serialization if it does not, counting the second case.
- *   accepted      re-model against the bytes the host took, so the next save is
- *                 measured from what is on disk rather than from what was there at
- *                 boot.
- *   sync-applied  re-pair, because a morph replaces live nodes and the map is keyed
- *                 by node identity.
+ * The parser is 48 KB of parse5 plus the source map, and a page pays for it only when it
+ * can change something. `prepare` installs a light lease and fetches nothing, `enable`
+ * admits demand, and demand is exactly two things: a save that needs a byte-preserving
+ * render, which asks `ensureForSave` from the save pipeline after its cheap gate, and
+ * code in edit mode reading `clay.source.ready`. A clean autosave, a reader and a page
+ * that never saves never load it, and an idle tail that fires after edit ready loads
+ * nothing either.
  *
- * The accepted-save re-model is deferred and coalesced, so it never sits between a save
- * landing and the page hearing about it. A sync frame's re-pair shares that idle refresh,
- * so a burst of frames costs one walk, and a save, `text()` or `locate()` that comes
- * before it runs it first, so none of them work from a map the morph made stale.
+ * Before the session installs, `text()`, `locate()` and `stats()` answer the unavailable
+ * values they always did, with `installed: false`. What the facade keeps in the meantime
+ * is the newest bytes this page knows the file holds — the reader's receipt for the
+ * session, an accepted save, a disk frame — so the install starts from the file rather
+ * than asking the host for a copy it has just written, and a newer receipt supersedes an
+ * older one.
  *
- * NOTHING HERE BLOCKS BOOT. The install is async and the loader does not wait for
- * it, because a save before it finishes is a save exactly as it is today. Waiting
- * would trade a guaranteed delay on every page for a better outcome on the rare save
- * that lands in the first few hundred milliseconds.
+ * LIFECYCLE
  *
- * AS A MODE LEASE
- *
- * A live entry imports this module while the committed mode is still view, where it
- * fetches nothing and installs no renderer: the fetch belongs to an explicit edit boot
- * or to the lease's own prepare. The lease pairs during prepare and installs the renderer
- * at the commit; `quiesce` keeps it, because the exit's barrier save still renders through
- * it, and `dispose` is where it goes, so nothing is left rendering or re-pairing in view.
- *
- * WHEN IT DOES NOTHING
- *
- * Any of these leaves the save pipeline untouched, and each says so once in the
- * console rather than repeatedly at save time:
- *
- *   the source fetch fails, redirects, or is not text/html
- *   the fetched bytes disagree with the live document outside <html>
- *   the render throws
- *   the render does not verify
+ * `prepare` installs the light lease, `enable` admits demand, `quiesce` keeps the
+ * renderer for the exit's barrier save, and `dispose` takes it back and invalidates any
+ * load still in flight: an answer that arrives after the session ended installs nothing.
+ * A load that fails is the same logged, non-fatal outcome as before — saves go out exactly
+ * as they would without this plugin — and `clay.source.ready` asks again.
  */
 
-import {
-  model,
-  checkSource,
-  locate,
-  nodeAt,
-  pair,
-  pairCaptured,
-  render,
-  verify,
-  verifyForSave
-} from '../core/source-map.js';
-import {
-  attachCaptureArtifact,
-  captureSaveClone,
-  currentCaptureContext,
-  originalSnapshotNode,
-  setSaveRenderer
-} from '../core/snapshot.js';
 import { onSaveAccepted } from '../core/save-core.js';
 import { startsAtImport } from '../core/is-edit-mode.js';
-import { lastSeenEtag } from '../core/etag.js';
 
-const state = {
+// Today's answer before the session installs: the same fields `stats()` returns, with
+// `installed: false` and nothing counted.
+const UNAVAILABLE = {
   installed: false,
   refused: null,
-  // How many sessions have been uninstalled. An install applies nothing when the session
-  // that asked for it has ended in the meantime, so a late answer cannot put a renderer
-  // or a map back into view.
-  session: 0,
-  model: null,
-  map: null,
-  stats: null,
+  sourceBytes: null,
+  paired: 0,
+  unresolved: 0,
+  unmatchedLive: 0,
+  unmatchedSource: 0,
+  attrDiffs: 0,
   saves: 0,
   reprints: 0,
   lastReprint: null,
   partialReprints: 0,
   lastPartialReprint: null,
-  // What the last render produced, so the save the host accepts can be counted and
-  // announced as what it was. Cleared once reported.
-  lastOutcome: null,
   lastRenderMs: null,
   lastBytes: null,
-  timing: { fetch: null, model: null, pair: null, refresh: null },
   refreshes: 0,
-  // How many times the map has been rebuilt from the page since this module
-  // installed. A candidate's map is only valid while this is unchanged: a morph
-  // replaces live nodes, and a disk frame replaces the model.
-  repairs: 0,
-  refreshQueued: false,
-  pendingBytes: null,
-  refetch: false,
-  // How many times newer file bytes have replaced the model: an accepted save, a disk
-  // frame, or a newer fetch. A fetch answers about the file at the moment the host read
-  // it, so this is what tells a late answer that something newer already landed.
-  adoptions: 0,
+  timing: { fetch: null, model: null, pair: null, refresh: null },
 };
 
-// How many times a boot fetch asks again after a save or a disk frame overtook it before
-// it gives up and leaves saves on the full serialization.
-const SUPERSEDED_RETRIES = 2;
+// The loaded session. Null until something demands it.
+let session = null;
+// The mode entry that prepared this session, as the install needs it: what the reader
+// said this tab represents.
+let context = null;
+// The newest bytes this page knows the file holds, and the version that came with them.
+let receipt = null;
+// Whether demand is admitted: an edit boot's own session, or a lease that was enabled.
+let admitted = startsAtImport();
+// How many sessions have ended. A load that resolves for an older one installs nothing,
+// so a late answer cannot put a renderer or a map back into a view.
+let epoch = 0;
+// The install this session asked for, so two saves in the same breath share it.
+let installing = null;
+// Whether this session's one install attempt has already answered. A save waits for an
+// attempt that is still running and never for one that is done: a refusal and a failed
+// load are both answers, and the next save goes out as it would without the plugin.
+// `clay.source.ready` is the way to ask again, and it retries.
+let answered = false;
 
-const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
-
-const PROJECTED_MAP_PREFIX = '<script type="application/json" id="clay-runtime-map"';
-
-/**
- * Bytes a host projected for its own delivery are not the file: the runtime URLs in them
- * point at the local mirror and may carry a descriptor the file never held. Modelling them
- * would make this tab's next save copy the projection back into the file.
- */
-const isProjected = (text) => text.includes(PROJECTED_MAP_PREFIX) || text.includes('/_/clayjs/');
-
-/**
- * The bytes this document was loaded from.
- *
- * Every guard here is about one failure: writing somebody else's page into this
- * file. `redirect: 'manual'` and the `redirected` check catch a host that answers a
- * logged-out request with a login page at another URL; the content-type check
- * catches one that answers with JSON or an error page; `cache: 'no-store'` keeps a
- * stale cached copy of an older version of this document out of the model. The
- * shape check in checkSource is the backstop for whatever gets past all three.
- */
-async function fetchSource(url) {
-  const res = await fetch(url, {
-    cache: 'no-store',
-    redirect: 'manual',
-    credentials: 'same-origin',
-    headers: { 'Clay-Source': '1' }
+let loading = null;
+function loadSession() {
+  loading ??= import("../source/session.js").catch((error) => {
+    loading = null;
+    throw error;
   });
-  if (!res.ok) throw new Error(`source fetch: status ${res.status}`);
-  if (res.redirected || res.type === 'opaqueredirect') throw new Error('source fetch: redirected');
-  const type = (res.headers.get('content-type') || '').toLowerCase();
-  if (!type.startsWith('text/html')) throw new Error(`source fetch: content-type ${type || 'missing'}`);
-  const text = await res.text();
-  if (text.includes(PROJECTED_MAP_PREFIX)) throw new Error('source fetch: projected response');
-  return text;
+  return loading;
+}
+
+/** Keep these bytes as what this page believes the file holds. A newer one wins. */
+function retain(bytes, etag, seq) {
+  if (typeof bytes !== 'string') return;
+  receipt = Object.freeze({ bytes, etag: etag ?? null, seq: seq ?? null });
 }
 
 /**
- * Pair the model against the page.
+ * Start the one install this session needs, or hand back the one already running.
  *
- * Over a SAVE CLONE, not the live DOM. The clone is in the file's own domain: edit
- * mode deactivated back to the inert attribute forms, [no-save] regions gone, every
- * document transform run. Pairing the live DOM instead would compare
- * `contenteditable="true"` against the file's `inert-contenteditable="true"` and lose
- * the two strongest signature tiers on every activated element and every ancestor of
- * one. The map is keyed through snapshot provenance to the LIVE node, because the
- * clone is rebuilt on every save and its nodes are new objects each time.
- *
- * This capture is an INSPECTION, not a save, and it happens at boot and again on every
- * incoming live-sync frame. So it takes neither of the two things a save capture does
- * on its way past: it does not close the undo batch, which at boot and mid-typing
- * would split the user's undo history at a point they did not make, and it does not
- * run the page's own [onbeforesave] and [onbeforesnapshot] handlers, which are author
- * JavaScript that can do anything and are meant to run once per save. The cost is that
- * a page using those handlers pairs against a tree slightly behind the one it will
- * save, which costs some formatting fidelity on the nodes a handler touches and
- * nothing else, because the render is verified either way.
+ * The session module is imported here and nowhere else, so a page that never demands the
+ * parser never evaluates source-map.js. A failed import clears the memo: the fallback is
+ * today's save, and the next demand asks again.
  */
-function pairAgainstPage(m) {
-  const clone = captureSaveClone({ flushUndo: false, authored: false });
-  return pair(clone, m, originalSnapshotNode);
-}
-
-/**
- * The version a set of bytes names for itself, or null when nothing stamped it.
- *
- * A host writes `documentetag` on the root of the bytes it stored, so a fetch answers
- * with the version it read, which is not necessarily the one this page was built from.
- */
-function stampedVersion(m) {
-  const html = m.doc && m.doc.childNodes.find((node) => node.nodeName === 'html');
-  const attr = html && Array.isArray(html.attrs)
-    ? html.attrs.find((attribute) => attribute.name === 'documentetag')
-    : null;
-  return attr && attr.value ? attr.value : null;
-}
-
-/**
- * The version this session represents: the file the reader handed it, else the version this
- * tab last saw, else — for an explicit edit boot, which has no reader — the version the
- * document was served with.
- */
-function heldVersion(context) {
-  const represented = context && context.represented && context.represented.etag;
-  if (represented) return represented;
-  const seen = lastSeenEtag();
-  if (seen) return seen;
-  return context === null ? document.documentElement.getAttribute('documentetag') || null : null;
-}
-
-/**
- * A fetch is an answer about the file as it was when the host read it, and a boot fetch
- * can come back after the file has moved on. Bytes that name a version this page does
- * not hold are that newer file: adopting them would pair this page against content it
- * never received, and the next save would print its older bytes back over them. The
- * stamp and the model go together, so neither is taken from a late answer.
- */
-function staleVersion(m, context) {
-  const stamp = stampedVersion(m);
-  const held = heldVersion(context);
-  if (!stamp || !held || stamp === held) return null;
-  return `source refused: the fetch answered version ${stamp} while this page holds ${held}`;
-}
-
-function install(sourceUrl, context = null, attempt = 0, render = true) {
-  const session = state.session;
-  const t0 = now();
-  const generation = state.adoptions;
-  state.refused = null;
-  return fetchSource(sourceUrl).then((src) => {
-    if (session !== state.session) return null;
-    const t1 = now();
-    const m = model(src);
-    const refused = checkSource(m, document);
-    if (refused) throw new Error(`source refused: ${refused}`);
-    const stale = staleVersion(m, context);
-    if (stale) throw new Error(stale);
-    // A save was accepted, or a disk frame carried newer bytes, while this answer was on
-    // its way. Those bytes are the file now, so ask again rather than adopt an older
-    // answer; a page that will not hold still is refused instead of retried forever.
-    if (state.adoptions !== generation) {
-      if (attempt < SUPERSEDED_RETRIES) return install(sourceUrl, context, attempt + 1, render);
-      throw new Error('source refused: a save replaced the file while the fetch was in flight');
+function installOnce() {
+  if (installing) return installing;
+  const mine = epoch;
+  const entry = context;
+  installing = loadSession().then((mod) => {
+    session = mod;
+    if (mine !== epoch) {
+      installing = null;
+      return null;
     }
-    const t2 = now();
-    const { map, stats } = pairAgainstPage(m);
-    const t3 = now();
-
-    state.model = m;
-    state.map = map;
-    state.stats = stats;
-    state.timing = { fetch: t1 - t0, model: t2 - t1, pair: t3 - t2, refresh: null };
-    state.installed = true;
-    if (render) setSaveRenderer(renderSave);
-    return summary();
-  }).catch((err) => {
-    // Not an error the page can do anything about, and not a failure of the save:
-    // saves go out exactly as they would without this plugin. Said once.
-    if (session !== state.session) return null;
-    state.refused = String(err && err.message ? err.message : err);
-    console.info(`clayjs: source map off (${state.refused}); saves use the full serialization`);
+    return mod.start({ context: entry, latest: () => receipt });
+  }).catch((error) => {
+    installing = null;
+    console.info('clayjs: source map off (' + (error && error.message ? error.message : error) + '); saves use the full serialization');
     return null;
+  }).then((value) => {
+    if (mine === epoch) answered = true;
+    return value;
   });
+  return installing;
 }
 
 /**
- * Render one save, or hand back today's bytes.
+ * The save pipeline's question: may this save be rendered through the source map?
  *
- * Exported so a test can drive the whole path, including the fallback, without a
- * server: `renderSave(clone, today, { breakText: true })` makes every text node
- * reprint, which changes the bytes while leaving the tree identical, and the verifier
- * must still pass it — a tree comparison is the right answer there, and reading that
- * pass as "the verifier is blind" is a mistake this project has already made once.
- * `{ corrupt: 'drop-first-text' }` is the one that must be REJECTED: it changes the
- * tree, which is exactly what the verifier is for.
- *
- * A render that does not verify is not thrown away whole. verify says where it first
- * differs; that element is printed in full and the render tried again, widening to the
- * parent while it still fails. Everything outside the printed elements is still the
- * author's bytes. Only when the widening reaches <html>, or the failure has no node to
- * point at (the prologue, a parse-error count), is today's full serialization sent.
- *
- * Nothing is counted or announced here. A render is not a save: an autosave that
- * found nothing changed, a refused save and a failed request all rendered. The
- * outcome is recorded, and `adopt` reports it when the host accepts these exact bytes.
- *
- * A render that belongs to a save capture also hands that capture a private artifact:
- * the model of the bytes it just verified, paired with the clone it verified them
- * against, so the save the host accepts does not parse and pair those same bytes a
- * second time. It is a candidate, not an answer: `adopt` installs it only if the host
- * took these exact bytes and nothing has replaced the page's pairing since. A page
- * with its own [onbeforesave] or [onbeforesnapshot] handlers gets none, because those
- * handlers can edit the clone after the capture and the inspection path is what
- * describes the live page there.
+ * Called — through `clay.source.ensureForSave`, so a page that excluded this plugin asks
+ * nothing — after the cheap gate that says a save may happen and before the one capture.
+ * null means there is nothing to wait for: no session for this page, demand not admitted,
+ * or this session's attempt has already answered. The save then goes out exactly as it
+ * would without this plugin.
  */
-export function renderSave(clone, today, opts = {}) {
-  if (!state.installed) return today;
-  // A refresh still waiting for idle time runs now, so this save never renders from a
-  // map a morph made stale. It pairs against the page, not this clone: onbeforesave may
-  // have changed the clone, and the map must describe the live page.
-  refreshNow();
-  state.lastOutcome = null;
-  const capture = currentCaptureContext();
-  const adoptable = !!capture && !capture.authoredHandlers;
-  const print = new Set();
-  let firstDiff = null;
-  for (let round = 0; round <= MAX_PRINT_ROUNDS; round++) {
-    let out;
-    try {
-      out = render(clone, state.map, state.model, originalSnapshotNode, { ...opts, print });
-    } catch (err) {
-      return fallback('render threw: ' + (err && err.message ? err.message : err), today);
-    }
-    // The verifier's retained parse is a cost, so it is only asked for when there is a
-    // capture that could adopt it.
-    const v = adoptable
-      ? verifyForSave(out.text, today, document, clone, state.model.parseErrors)
-      : verify(out.text, today, document, clone, state.model.parseErrors);
-    if (v.ok) {
-      state.lastRenderMs = out.ms;
-      state.lastBytes = out.text.length;
-      state.lastOutcome = print.size
-        ? { text: out.text, scope: 'partial', reason: firstDiff, printed: print.size }
-        : { text: out.text, scope: null };
-      if (v.model) offerCandidate(v.model, out.text, clone, capture);
-      return out.text;
-    }
-    if (firstDiff === null) firstDiff = v.diff;
-    if (!v.at || !widen(clone, nodeAt(clone, v.at), print)) return fallback(firstDiff, today);
-  }
-  return fallback(firstDiff, today);
+function ensureForSave() {
+  if (!admitted || answered) return null;
+  return installOnce();
 }
 
-/**
- * Hand this capture the model of the bytes it just verified, or nothing.
- *
- * The pairing is the whole point of the artifact: it must describe the live page, so
- * it is built by walking the verified clone and that model together. Anything that
- * does not correspond, node for node, leaves the capture without an artifact, and the
- * accepted save takes the inspection path it takes today.
- */
-function offerCandidate(m, html, clone, capture) {
-  const paired = pairCaptured(clone, m, originalSnapshotNode);
-  if (!paired) return;
-  attachCaptureArtifact({
-    captureId: capture.captureId,
-    html,
-    source: {
-      model: m,
-      map: paired.map,
-      stats: paired.stats,
-      repairGeneration: state.repairs,
-      outcome: state.lastOutcome,
-    },
-  });
+/** Take an install back: the renderer, a queued refresh, and any load still in flight. */
+function end() {
+  epoch++;
+  admitted = false;
+  answered = false;
+  installing = null;
+  context = null;
+  if (session) session.release();
 }
 
-const MAX_PRINT_ROUNDS = 8;
+// An accepted save before the install is the file: the retained receipt becomes these
+// bytes, and the session's superseded answer is what makes a newer one win.
+onSaveAccepted((bytes, accepted) => {
+  retain(bytes, receipt ? receipt.etag : null, receipt ? receipt.seq : null);
+  if (session && !session.installed()) session.adoptAccepted(bytes, accepted);
+});
 
-/**
- * Add the next element to print: the one holding `node`, or, when that is already
- * inside a printed element, that element's parent. false when the only element left is
- * the root, which is the full serialization by another name.
- */
-function widen(clone, node, print) {
-  let el = node && node.nodeType === 1 ? node : node && node.parentNode;
-  for (let a = el; a && a !== clone; a = a.parentNode) {
-    if (print.has(a)) { print.delete(a); el = a.parentNode; break; }
-  }
-  if (!el || el.nodeType !== 1 || el === clone) return false;
-  print.add(el);
-  return true;
-}
-
-/** Send today's full serialization, and remember that this render was a fallback. */
-function fallback(reason, today) {
-  state.lastOutcome = { text: today, scope: 'full', reason };
-  return today;
-}
-
-/**
- * The fallback, and the alarm.
- *
- * Reported for a save the host accepted. The bytes that went out were today's, so the
- * floor of this whole mechanism is the behaviour it replaces. The event and the
- * counter are how a reprint gets fixed
- * in the renderer or in the page, which is the only place it should ever be fixed: a
- * verifier loosened to make this counter look better would pass exactly the writes it
- * exists to stop.
- */
-function reprint(reason) {
-  state.reprints++;
-  state.lastReprint = reason;
-  console.warn('clayjs: source map did not verify, saving the full serialization instead:', reason);
-  document.dispatchEvent(new CustomEvent('clay:save-reprinted', { detail: { reason, scope: 'full' } }));
-}
-
-/**
- * Part of the document was printed rather than copied. Counted apart from a full
- * reprint because they are different news: this one kept the author's bytes everywhere
- * else, and its rate says how often the renderer and the page disagree about one
- * element, which is where the next renderer fix is.
- */
-function partialReprint(reason, printed) {
-  state.partialReprints++;
-  state.lastPartialReprint = reason;
-  console.info(`clayjs: source map printed ${printed} element(s) in full to match the page:`, reason);
-  document.dispatchEvent(new CustomEvent('clay:save-reprinted', { detail: { reason, scope: 'partial', printed } }));
-}
-
-/**
- * The host took these bytes, so this is what the file holds now.
- *
- * Deferred, like the re-pair below and for the same reason: re-modelling walks the
- * whole document, and doing it inline would put that walk between the save landing
- * and the page being told about it. Only the most recent accepted bytes matter, so a
- * burst of saves costs one refresh.
- *
- * It is also where a save is counted, because it is the one place that knows a save
- * reached the file.
- *
- * A capture that rendered its own verified bytes brought a candidate with them, and
- * when the host took exactly those bytes that candidate IS the file: installing it is
- * a few assignments instead of a parse of the accepted bytes and a whole-document
- * re-pair. Everything else — a raw save, a fallback, a candidate whose pairing a morph
- * has since invalidated, a disk version that arrived while the save was in flight —
- * takes the guarded repair path, which is the behaviour this replaces.
- */
-function adopt(bytes, accepted) {
-  state.adoptions++;
-  if (!state.installed) return;
-  report(bytes, accepted && accepted.artifact ? accepted.artifact.source.outcome : null);
-  if (adoptCandidate(bytes, accepted)) return;
-  state.pendingBytes = bytes;
-  scheduleRefresh();
-}
-
-/**
- * Install a capture's candidate model, if it is this save's and still describes the page.
- *
- * Three things have to agree, and each is a different mistake. The bytes: the artifact
- * is the model of the string that exact render returned, not of a later one. The
- * capture: `save.js` keeps the artifact with its request, so the ID rules out a
- * candidate that reached an accepted listener by any other route. The generation: a
- * morph replaces live nodes and a disk frame replaces the model, so a map built before
- * one is keyed to a page that is no longer here.
- */
-function adoptCandidate(bytes, accepted) {
-  const artifact = accepted && accepted.artifact;
-  if (!artifact || !artifact.source) return false;
-  if (artifact.html !== bytes) return false;
-  if (accepted.captureId === null || accepted.captureId === undefined) return false;
-  if (artifact.captureId !== accepted.captureId) return false;
-  if (artifact.source.repairGeneration !== state.repairs) return false;
-  if (state.refreshQueued || state.pendingBytes !== null) return false;
-  state.model = artifact.source.model;
-  state.map = artifact.source.map;
-  state.stats = artifact.source.stats;
-  return true;
-}
-
-/**
- * Count and announce an accepted save, if these are the bytes the last render
- * produced. Bytes this module did not render (a caller of `saveHtml` with its own
- * string, or an older render) are not its save to report.
- */
-function report(bytes, fromCapture = null) {
-  const outcome = state.lastOutcome && state.lastOutcome.text === bytes ? state.lastOutcome : fromCapture;
-  if (!outcome || outcome.text !== bytes) return;
-  if (state.lastOutcome === outcome) state.lastOutcome = null;
-  state.saves++;
-  if (outcome.scope === 'full') reprint(outcome.reason);
-  else if (outcome.scope === 'partial') partialReprint(outcome.reason, outcome.printed);
-}
-
-/**
- * A morph replaced live nodes, so the map is keyed by objects that are no longer in
- * the page, and it has to be re-paired either way. A DISK frame also carries the bytes
- * now on disk, written by somebody else: those become the model, the same as bytes this
- * tab saved, or the next save would copy the old formatting back over theirs. A peer
- * frame changed nothing on disk, so the model stays. The re-pair runs in idle time, or
- * earlier if a save, `text()` or `locate()` needs it first.
- */
-function queueRepair(event) {
+// A disk frame is somebody else writing the file. Before the install it replaces the
+// receipt the same way; after it, the session's own listener re-models from it.
+document.addEventListener('clay:sync-applied', (event) => {
   const detail = event && event.detail;
-  if (detail && detail.source === 'disk' && typeof detail.html === 'string') {
-    // Newer bytes than anything already in flight, adopted or not: a fetch that started
-    // before this frame cannot answer for the file the frame describes, so the boot
-    // fetch asks again rather than installing the version it asked about.
-    state.adoptions++;
-  }
-  if (!state.installed) return;
-  if (detail && detail.source === 'disk' && typeof detail.html === 'string') {
-    if (isProjected(detail.html)) state.refetch = true;
-    else state.pendingBytes = detail.html;
-  }
-  scheduleRefresh();
-}
+  if (!detail || detail.source !== 'disk' || typeof detail.html !== 'string') return;
+  retain(detail.html, detail.etag, detail.seq);
+  if (session && !session.installed()) session.adoptAccepted(detail.html, null);
+});
 
-/**
- * Re-model if a save was accepted, re-pair either way, once, off the critical path.
- *
- * Coalescing is what makes this safe as well as cheap. Saves are serialized, so the
- * most recent accepted bytes are the file; a refresh that skipped an intermediate
- * save would still land on the right answer, and one that ran them out of order could
- * not.
- */
-function scheduleRefresh() {
-  if (state.refreshQueued) return;
-  state.refreshQueued = true;
-  if (typeof requestIdleCallback === 'function') requestIdleCallback(refreshNow, { timeout: 2000 });
-  else setTimeout(refreshNow, 0);
-}
-
-/**
- * Run a queued refresh now. A no-op when none is queued, which is also what makes the
- * idle callback of a refresh that `text()` or `locate()` already ran harmless.
- */
-function refreshNow() {
-  if (!state.refreshQueued) return;
-  state.refreshQueued = false;
-  if (!state.installed) return;
-  const bytes = state.pendingBytes;
-  state.pendingBytes = null;
-  const refetch = state.refetch && bytes === null;
-  if (refetch) state.refetch = false;
-  // Counted even when the re-pair below fails: either way this page is not the page a
-  // candidate captured before it was built against.
-  state.repairs++;
-  const t = now();
-  // The two halves fail independently, so they are tried independently. A refused
-  // re-model used to skip the re-pair with it, and the re-pair is the half that
-  // cannot be skipped: a morph replaced live nodes, so the old map is keyed by
-  // objects no longer in the page, and every save after that reprints the whole
-  // document until something else queues a refresh. The previous model still
-  // describes real bytes, so re-pairing against it is the right answer.
-  let m = state.model;
-  if (bytes !== null) {
-    try {
-      const next = model(bytes);
-      const refused = checkSource(next, document);
-      if (refused) throw new Error(refused);
-      m = next;
-    } catch (err) {
-      console.warn('clayjs: source map kept the previous model, the accepted bytes did not model:', err);
-    }
-  }
-  try {
-    const { map, stats } = pairAgainstPage(m);
-    state.model = m;
-    state.map = map;
-    state.stats = stats;
-    state.refreshes++;
-    state.timing.refresh = now() - t;
-  } catch (err) {
-    // The map is now stale rather than wrong: it still describes the pairing as of
-    // the last successful refresh. Renders off a stale map verify or fall back like
-    // any other, so this costs formatting fidelity and nothing else.
-    console.warn('clayjs: source map could not re-pair, continuing on the previous map:', err);
-  }
-  if (refetch) refetchModel();
-}
-
-/**
- * Take the model from the file itself, after a disk frame arrived with bytes this host
- * projected rather than bytes on disk.
- *
- * The re-pair has already run against the previous model, which still describes real
- * bytes, so a fetch that fails or is refused costs nothing: the model stays as it was
- * and the same warning the refused branch gives says so. Anything that replaced the
- * model while the fetch was in flight is newer than these bytes and keeps the answer.
- */
-function refetchModel() {
-  const generation = state.repairs;
-  const adoption = state.adoptions;
-  fetchSource(window.location.href)
-    .then((src) => {
-      const next = model(src);
-      const refused = checkSource(next, document);
-      if (refused) throw new Error(refused);
-      return next;
-    })
-    .then((m) => {
-      // A save landed, or a newer fetch answered, while this one was in flight: its bytes
-      // describe a file this page has already moved past.
-      if (state.repairs !== generation || state.adoptions !== adoption) return;
-      try {
-        state.repairs++;
-        state.adoptions++;
-        const { map, stats } = pairAgainstPage(m);
-        state.model = m;
-        state.map = map;
-        state.stats = stats;
-        state.refreshes++;
-      } catch (err) {
-        console.warn('clayjs: source map could not re-pair, continuing on the previous map:', err);
-      }
-    })
-    .catch((err) => {
-      console.warn('clayjs: source map kept the previous model, the accepted bytes did not model:', err);
-    });
-}
-
-function summary() {
-  const s = state.stats;
-  return {
-    installed: state.installed,
-    refused: state.refused,
-    sourceBytes: state.model ? state.model.src.length : null,
-    paired: s ? s.paired : 0,
-    unresolved: s ? s.unresolved : 0,
-    unmatchedLive: s ? s.unmatchedLive.length : 0,
-    unmatchedSource: s ? s.unmatchedSource.length : 0,
-    attrDiffs: s ? s.attrDiffs.length : 0,
-    saves: state.saves,
-    reprints: state.reprints,
-    lastReprint: state.lastReprint,
-    partialReprints: state.partialReprints,
-    lastPartialReprint: state.lastPartialReprint,
-    lastRenderMs: state.lastRenderMs,
-    lastBytes: state.lastBytes,
-    refreshes: state.refreshes,
-    timing: state.timing,
-  };
+/** Render one save through the loaded session, or hand back today's bytes. */
+export function renderSave(clone, today, opts = {}) {
+  return session ? session.renderSave(clone, today, opts) : today;
 }
 
 export const source = {
-  ready: null,
-  stats: () => { refreshNow(); return summary(); },
-  /** The bytes this module believes are on disk right now. A refresh still queued from a save or a disk frame runs first, so this is never the file before that. */
-  text: () => { refreshNow(); return state.model ? state.model.src : null; },
+  /**
+   * The install, in edit mode: reading this is the second thing that demands the parser.
+   * Null where there is nothing to install, which is what a view and a page without the
+   * plugin have always answered.
+   */
+  get ready() {
+    if (!admitted) return null;
+    return installOnce();
+  },
+  stats: () => (session ? session.stats() : { ...UNAVAILABLE }),
+  /** The bytes this module believes are on disk right now. */
+  text: () => (session ? session.text() : null),
   /**
    * Where a live element is in those bytes: `{ from, to, line, column }`, or null.
    *
-   * Offsets and `column` are UTF-16 code units into `text()`, not bytes. Slice `text()` with them
-   * and the answer is exact; hand them to something that counts bytes and it is wrong on any
-   * document with non-ASCII content, which is the kind of mistake that shows up months later in
-   * one customer's file.
-   *
-   * null whenever this module cannot answer, which includes the whole document when the plugin
-   * never installed or refused it. `stats().installed` and `stats().refused` say which, and an
-   * agent that cannot tell "this element is new" from "this document has no map" will eventually
-   * write into a file it was never modelling.
+   * Offsets and `column` are UTF-16 code units into `text()`, not bytes. null whenever this
+   * module cannot answer, which includes the whole document before the session installed.
+   * `stats().installed` and `stats().refused` say which.
    */
-  locate: (node) => { refreshNow(); return state.installed && node ? locate(node, state.map, state.model) : null; },
+  locate: (node) => (session ? session.locateLive(node) : null),
   /** What did not pair, for working out why a document reprints more than it should. */
-  unpaired: () => { refreshNow(); return (state.stats
-    ? { live: state.stats.unmatchedLive.slice(0, 50), source: state.stats.unmatchedSource.slice(0, 50) }
-    : null); },
+  unpaired: () => (session ? session.unpaired() : null),
+  /** The save pipeline's own ask: a promise to wait for before its capture, or null. */
+  ensureForSave,
 };
-
-/**
- * Take an install back: the renderer, a scheduled refresh, and the installed state that
- * lets the hook and the listener do anything. The map and the model stay, so `text()` and
- * `locate()` keep answering about the last file this module modelled while a view is
- * reading it.
- */
-function uninstall() {
-  state.session++;
-  state.installed = false;
-  state.refreshQueued = false;
-  state.pendingBytes = null;
-  state.refetch = false;
-  setSaveRenderer(null);
-}
 
 /**
  * The source map as a mode lease.
  *
- * `prepare` starts the fetch, the model and the pairing, and its `ready` settles when
- * they have; a document this module refuses is the same logged, non-fatal outcome as at
- * boot, and the lease still resolves. `enable` puts the renderer on the save path, which
- * is the only thing that belongs to the commit. `quiesce` keeps it for the exit's barrier
- * save, `resume` has nothing to reopen, and `dispose` takes it back.
+ * `prepare` records the file this session represents and installs the light lease; it
+ * fetches nothing and pairs nothing. `enable` admits demand, which is the only thing that
+ * belongs to the commit. `quiesce` keeps the renderer for the exit's barrier save,
+ * `resume` admits demand again after a refused exit, and `dispose` takes the session back
+ * and invalidates whatever was still loading.
  *
- * `initial: true` is the install this tab's explicit edit boot already started: the lease
- * adopts it, fetches nothing again and pairs nothing again.
+ * `initial: true` is this tab's own edit boot, whose session is this one: the lease adopts
+ * it, and the boot's demand installed — or did not — exactly as it would have.
  */
 export function sourceParticipant() {
   return {
@@ -673,32 +211,30 @@ export function sourceParticipant() {
     // After the save session (10), whose saves this renderer answers, and before the
     // page (400), whose editor takes the article the pairing is taken over.
     order: 30,
-    prepare(context = {}) {
-      if (context.initial === true) {
-        return { enable() {}, quiesce() {}, resume() {}, dispose: uninstall };
+    prepare(entry = {}) {
+      const represented = entry && entry.represented;
+      if (represented) {
+        context = { represented };
+        retain(represented.bytes, represented.etag, represented.seq);
       }
+      if (entry && entry.initial === true) {
+        admitted = true;
+        return { enable() {}, quiesce() {}, resume() {}, dispose: end };
+      }
+      const mine = ++epoch;
+      admitted = false;
+      answered = false;
+      installing = null;
       return {
-        ready: install(window.location.href, context, 0, false),
-        enable() {
-          if (!state.installed) return;
-          setSaveRenderer(renderSave);
-        },
+        enable() { if (mine === epoch) admitted = true; },
         quiesce() {},
-        resume() {},
-        dispose: uninstall,
+        resume() { if (mine === epoch) admitted = true; },
+        dispose() { if (mine === epoch) end(); },
       };
     },
   };
 }
 
 export { sourceParticipant as modeParticipant };
-
-// Registered once for the page's lifetime; both bodies return while no session is
-// installed, so a view that imports this module never re-pairs or adopts anything.
-onSaveAccepted(adopt);
-document.addEventListener('clay:sync-applied', queueRepair);
-
-// The install belongs to an explicit edit boot. A live entry's prepare installs its own.
-if (startsAtImport()) source.ready = install(window.location.href);
 
 export default source;

@@ -915,6 +915,10 @@ function attemptSaveNow({ kind, permit = null }, callback = () => {}) {
       }
     }
 
+    // The source map asks a save to wait here: after the gates, before the capture.
+    const prepare = window.clay?.source?.ensureForSave?.();
+    if (prepare) return prepare.then(() => resolve(attemptSaveNow({ kind, permit }, callback)));
+
     // From here this call answers: it either writes, or reports why it did not,
     // and the soon() callers waiting on the save queued behind the one that was
     // on the wire when they asked get that answer.
@@ -1104,6 +1108,9 @@ export function savePageForce(callback = () => {}, { quietConflict = false } = {
       callback(skipped);
       return resolve(skipped);
     }
+
+    const prepare = window.clay?.source?.ensureForSave?.();
+    if (prepare) return prepare.then(() => resolve(savePageForce(callback, { quietConflict })));
 
     const wasOffline = !navigator.onLine;
     if (wasOffline) {

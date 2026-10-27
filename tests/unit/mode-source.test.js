@@ -70,17 +70,23 @@ test("importing in view fetches nothing and installs no renderer", async () => {
   expect(snapshot.captureForSave({ emitForSync: false })).toBe(FULL());
 });
 
-test("a fresh prepare and enable put the renderer on the save path", async () => {
+test("a fresh prepare and enable admit demand, and the renderer arrives with it", async () => {
   const { snapshot, source, modeParticipant } = await load("view");
 
   const lease = modeParticipant().prepare({ initial: false });
-  await lease.ready;
-  expect(global.fetch).toHaveBeenCalledTimes(1);
-  expect(source.stats().installed).toBe(true);
-  // Prepared, not committed: the save path is still the full serialization.
+  // Prepared, not demanded: the parser is a save's cost, not an entry's, so the lease
+  // starts nothing and the save path is still the full serialization.
+  expect(global.fetch).not.toHaveBeenCalled();
+  expect(source.stats().installed).toBe(false);
   expect(snapshot.captureForSave({ emitForSync: false })).toBe(FULL());
 
   lease.enable();
+  expect(global.fetch).not.toHaveBeenCalled();
+  // The commit admitted demand; reading the session is what asks for it.
+  await source.ready;
+  expect(global.fetch).toHaveBeenCalledTimes(1);
+  expect(source.stats().installed).toBe(true);
+
   document.querySelector("[data-id='b']").firstChild.data = "beta, edited";
   const out = snapshot.captureForSave({ emitForSync: false });
   expect(out).toContain("<li data-id='a'>alpha</li>");
@@ -89,11 +95,11 @@ test("a fresh prepare and enable put the renderer on the save path", async () =>
 });
 
 test("quiesce keeps the renderer the exit's barrier save renders through", async () => {
-  const { snapshot, modeParticipant } = await load("view");
+  const { snapshot, source, modeParticipant } = await load("view");
 
   const lease = modeParticipant().prepare({ initial: false });
-  await lease.ready;
   lease.enable();
+  await source.ready;
   lease.quiesce();
 
   document.querySelector("[data-id='b']").firstChild.data = "beta, edited";
@@ -139,7 +145,8 @@ test("an entry installs after the file advanced past the version this page was s
   }));
 
   const lease = modeParticipant().prepare({ initial: false, represented: { bytes: advanced, etag: "v2", seq: 2 } });
-  await lease.ready;
+  lease.enable();
+  await source.ready;
   const stats = source.stats();
   expect(stats.refused).toBeNull();
   expect(stats.installed).toBe(true);
@@ -156,16 +163,16 @@ test("a second entry installs again, one fetch per session", async () => {
   const { snapshot, source, modeParticipant } = await load("view");
 
   const first = modeParticipant().prepare({ initial: false });
-  await first.ready;
   first.enable();
+  await source.ready;
   first.dispose();
 
   const second = modeParticipant().prepare({ initial: false });
-  await second.ready;
+  second.enable();
+  await source.ready;
   expect(global.fetch).toHaveBeenCalledTimes(2);
   expect(source.stats().installed).toBe(true);
 
-  second.enable();
   document.querySelector("[data-id='b']").firstChild.data = "beta, edited";
   expect(snapshot.captureForSave({ emitForSync: false })).toContain("<li data-id='a'>alpha</li>");
   second.dispose();

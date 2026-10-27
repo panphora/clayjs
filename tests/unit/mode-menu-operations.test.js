@@ -364,8 +364,10 @@ describe("a late source fetch adopts nothing that is already out of date", () =>
     await plugin.source.ready;
     await settle();
 
-    // The older answer was not adopted: the plugin asked again and took the newer file.
-    expect(calls.length).toBe(2);
+    // The older answer was not adopted. The frame arrived before anything asked, so the
+    // bytes this page holds are the file and the install never asks the host for a copy
+    // it has: no request, and the newer file is what the plugin models.
+    expect(calls.length).toBe(0);
     expect(plugin.source.text()).toBe(PEER_SRC);
     expect(plugin.source.text()).not.toBe(BOOT_SRC);
     expect(plugin.source.stats().installed).toBe(true);
