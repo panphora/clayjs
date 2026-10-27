@@ -78,5 +78,10 @@ export const MODULE_SUPPORT = {
   "plugins/cms.js": "export",
 };
 
+export const PAGE_FEATURE_SUPPORT = {
+  "page/ybind/recovery.js": { owner: "plugins/page.js", lifecycle: "child" },
+  "page/recovery-ui.js": { owner: "plugins/page.js", lifecycle: "child" },
+};
+
 export const supportFor = (path) =>
   Object.prototype.hasOwnProperty.call(MODULE_SUPPORT, path) ? MODULE_SUPPORT[path] : null;

@@ -20,6 +20,7 @@ import { sameAuthority, hostIdentityOf, pathIdentityOf } from "../../recovery/id
 import { sameLineage, sharesAncestry, lineageOf } from "./lineage.js";
 import { canonicalPageBytes, containsUpdate, digestHex, validatePageCheckpoint } from "./recovery-proof.js";
 import { RECOVERY_ORIGIN } from "./provider.js";
+import { registerUnsavedState } from "../../lib/unsaved-state.js";
 
 /** The channel this adapter journals and replays: one name, one version, everywhere. */
 export const PAGE_CHANNEL = "page.yjs";
@@ -500,6 +501,90 @@ export function openPageJournal({ meta = null, service = null, base = null, onCh
     base,
     onChange,
   });
+}
+
+/**
+ * Where this tab's typing lives, and the wait that lets an exit leave edit.
+ *
+ * The answer is only ever as strong as the evidence behind it: a write whose transaction
+ * has not committed is Pending, committed records are Stored, a room's confirmation makes
+ * them Shared, and only a checkpoint that covers them makes the page Saved. The same
+ * handle is the exit's barrier for the journal: every append already handed over commits,
+ * and the store's own writes are down, before it answers. A journal that cannot write at
+ * all holds nothing and says so once, as Unavailable, so a person is never stranded in
+ * edit by a device that has stopped taking bytes.
+ *
+ * @param {Object} options
+ * @param {Object} options.journal - this session's page journal
+ * @param {?Object} [options.store] - the live page store, for its confirmations
+ * @param {Function} [options.reduce] - the precedence reducer, (facts) => state or null
+ * @param {Function} [options.onState] - (state) for every state the facts change to
+ * @param {Function} [options.onUnavailable] - (code) when the journal cannot write
+ * @returns {{checkpoint: Function, state: Function, dispose: Function}}
+ */
+export function watchJournal({ journal, store = null, reduce = () => null, onState = () => {}, onUnavailable = () => {} } = {}) {
+  if (!journal) return { checkpoint() {}, state: () => null, dispose() {} };
+  const seen = { acknowledged: false, checkpointed: false };
+  let last = null;
+  const state = () => {
+    const failure = journal.failure ?? null;
+    const records = journal.records().length;
+    return reduce({
+      unavailable: Boolean(failure),
+      pending: failure ? 0 : journal.pending(),
+      journaled: seen.acknowledged ? 0 : records,
+      acknowledged: seen.acknowledged ? records : 0,
+      checkpointed: seen.checkpointed && !records,
+    });
+  };
+  const publish = () => {
+    const next = state();
+    if (!next || next === last) return last;
+    last = next;
+    if (next === "unavailable") onUnavailable(journal.failure);
+    else onState(next);
+    return next;
+  };
+  // The binding owns this callback and hears every append and refusal through it.
+  const inner = journal.onChange;
+  journal.onChange = () => { inner?.(); publish(); };
+  // Work handed over now is work no room has seen and no checkpoint covers.
+  const offLocal = store?.onLocal?.(() => {
+    seen.acknowledged = false;
+    seen.checkpointed = false;
+    publish();
+  });
+  const offConfirm = store?.onConfirm?.(() => {
+    seen.acknowledged = true;
+    publish();
+  });
+  const blocked = () => Boolean(journal.failure);
+  const source = registerUnsavedState({
+    id: "page:journal",
+    isPending: () => !blocked() && journal.pending() > 0,
+    flush: async () => {
+      if (blocked()) return { ok: true };
+      while (!blocked() && journal.pending() > 0) {
+        if (!(await journal.next())) break;
+      }
+      await Promise.resolve(journal.channel?.flush?.()).catch(() => null);
+      return { ok: blocked() || journal.pending() === 0 };
+    },
+  });
+  publish();
+  return {
+    checkpoint() {
+      seen.checkpointed = true;
+      publish();
+    },
+    state,
+    dispose() {
+      journal.onChange = inner;
+      offLocal?.();
+      offConfirm?.();
+      source.dispose();
+    },
+  };
 }
 
 /**

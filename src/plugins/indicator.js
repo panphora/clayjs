@@ -18,13 +18,18 @@ const LABELS = {
   offline: "Offline, not saved",
   retrying: "Saving…",
   blocked: "Can't save here",
+  pending: "Saving on this device",
+  journaled: "Stored on this device",
+  acknowledged: "Shared, not yet saved",
+  checkpointed: "Saved",
+  unavailable: "Can't store changes: download a copy",
 };
 
-// States that stay on screen instead of fading: a save still in flight, one that
-// keeps trying, and one the host will not take without a person's help.
-const STICKY = new Set(["saving", "retrying", "blocked"]);
+// States that stay on screen instead of fading: a save still in flight, one that keeps
+// trying, one the host will not take without help, and where the journal says the work is.
+const STICKY = new Set(["saving", "retrying", "blocked", "pending", "journaled", "acknowledged", "unavailable"]);
 
-const ALARMING = new Set(["error", "offline", "blocked"]);
+const ALARMING = new Set(["error", "offline", "blocked", "unavailable"]);
 
 const REST = [`background:${TOKENS.surface}`, `color:${TOKENS.ink}`, `border-color:${TOKENS["line-2"]}`];
 const ALARM = [

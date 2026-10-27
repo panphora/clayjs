@@ -29,6 +29,14 @@ const SAVE_STATE_BY_CODE = Object.freeze({
   "receipt-expired": "blocked",
 });
 
+// Where a person's typing lives, never a stronger claim than the evidence behind it.
+const pageStateFor = ({ unavailable, pending, journaled, acknowledged, checkpointed } = {}) =>
+  unavailable ? "unavailable"
+    : pending > 0 ? "pending"
+      : journaled > 0 ? "journaled"
+        : acknowledged > 0 ? "acknowledged"
+          : checkpointed ? "checkpointed" : null;
+
 const BLOCKED_TEXT = "Can't save here. Your edits are still in this tab.";
 const RETRY_TEXT = "Still trying to save. Your edits are safe in this tab.";
 
@@ -82,4 +90,4 @@ async function copyPageText() {
   }
 }
 
-export { SAVE_STATE_BY_CODE, BLOCKED_TEXT, RETRY_TEXT, saveStateFor, downloadPageCopy, downloadSnapshot, copyPageText };
+export { SAVE_STATE_BY_CODE, BLOCKED_TEXT, RETRY_TEXT, pageStateFor, saveStateFor, downloadPageCopy, downloadSnapshot, copyPageText };

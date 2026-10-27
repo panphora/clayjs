@@ -9,7 +9,7 @@ import { captureForSaveAndComparison } from "../core/snapshot.js";
 import { storeOf, stageStore, closeStore, checkpointWithin, requestCheckpoint, fastLane, pageLaneReady, pageWriterReady, registerPageCheckpoints } from "./live.js";
 import { serializeLive } from "../live/ops.js";
 import { parseJsonRelaxed } from "../vendor/hyper-morph-json.vendor.js";
-import { saveStateFor, BLOCKED_TEXT, RETRY_TEXT, downloadPageCopy, downloadSnapshot, copyPageText } from "../page/save-states.js";
+import { saveStateFor, pageStateFor, BLOCKED_TEXT, RETRY_TEXT, downloadPageCopy, downloadSnapshot, copyPageText } from "../page/save-states.js";
 import toast, { toastPersistent, dismissPersistent } from "../ui/toast-lazy.js";
 import { claim } from "../page/runtime-owner.js";
 import { authorIdentity } from "../page/ybind/author.js";
@@ -22,6 +22,7 @@ import { style } from "../lib/hostile-css.js";
 const ARTICLE_SEL = "article[data-page]";
 const TAG_SEL = 'script[type="application/json"][merge="page"][clay~="live"]';
 const BLOCKED = { state: "blocked", code: "unsupported-host", message: "This host does not support page editing" };
+const STORE_TEXT = "Changes cannot be stored on this device. Download a copy to keep them.";
 const RETRY_BOUND_MS = 45000;
 const GENERIC_ERROR = "Couldn't save";
 const GENERIC_OFFLINE = "Offline, not saved";
@@ -129,7 +130,7 @@ function scrollToHashBlock(view, loc = globalThis.location) {
   globalThis.requestAnimationFrame?.(() => view.nodeDOM(found)?.scrollIntoView?.({ block: "start" }));
 }
 
-function dispatchState(state, code, message) {
+function dispatchState(state, code = null, message = "") {
   document.dispatchEvent(new CustomEvent("clay:page-save-state", { detail: { state, code, message } }));
 }
 
@@ -160,11 +161,11 @@ function armRetry(inst, code, message) {
   }, RETRY_BOUND_MS);
 }
 
-function showBlocked(inst, code, message) {
+function showBlocked(inst, code, message, state = "blocked") {
   clearRetry(inst);
   dismissGeneric();
-  dispatchState("blocked", code, message);
-  toastPersistent(BLOCKED_TEXT, "error", {
+  dispatchState(state, code, message);
+  toastPersistent(state === "unavailable" ? STORE_TEXT : BLOCKED_TEXT, "error", {
     detail: message,
     actions: [
       { label: "Download a copy", onClick: downloadPageCopy },
@@ -176,6 +177,7 @@ function showBlocked(inst, code, message) {
 function showSaved(inst) {
   clearRetry(inst);
   dismissPersistent(BLOCKED_TEXT);
+  dismissPersistent(STORE_TEXT);
   dispatchState("saved", null, "");
 }
 
@@ -419,6 +421,7 @@ function dispose() {
   }
   dismissPersistent(RETRY_TEXT);
   dismissPersistent(BLOCKED_TEXT);
+  dismissPersistent(STORE_TEXT);
   dismissPersistent(REPLACED_TEXT);
   for (const message of inst.notices?.values() ?? []) dismissPersistent(message);
   if (inst.savesHeld) {
@@ -489,6 +492,7 @@ async function replayJournal(inst) {
   const outcome = await modules.replay.replayInto({ journal, state: inst.store.value, into: inst.binding.ydoc });
   // The recovered page is this tab's page now: it is offered to the room exactly as an
   // edit would be, and it is not one more journal and not one giant undo step.
+  installJournalStatus(inst, modules);
   if (outcome.replayed.length) inst.binding.provider.settle();
   if (outcome.review.length) inst.recoveryReview = outcome.review;
   installRecoveryReview(inst, modules.ui)?.update({ rows: modules.replay.describeReview(outcome.review) });
@@ -540,7 +544,23 @@ function installCheckpointProof(inst) {
       href: await hostPageStateHref(),
     });
     if (answer.ok) journal.retire(answer.retired);
+    if (answer.ok) inst.pageStatus?.checkpoint();
   });
+}
+
+// Both live in the journal's module, which a page without a journal never loads.
+function installJournalStatus(inst, modules) {
+  const journal = inst.binding?.journal;
+  if (!journal || inst.pageStatus) return inst.pageStatus ?? null;
+  inst.pageStatus = modules.replay.watchJournal({
+    journal,
+    store: inst.store,
+    reduce: pageStateFor,
+    onState: (state) => dispatchState(state),
+    onUnavailable: (code) => showBlocked(inst, code, "", "unavailable"),
+  });
+  addDisposer(inst, () => inst.pageStatus?.dispose());
+  return inst.pageStatus;
 }
 
 export function createSteps(inst, options) {
