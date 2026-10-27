@@ -1,4 +1,4 @@
-import toast, { toastPersistent, dismissPersistent } from "../ui/toast.js";
+import toast, { toastPersistent, dismissPersistent } from "../ui/toast-lazy.js";
 import { state as pmState } from "../vendor/prosemirror.vendor.js";
 
 export const NOTICE_TEXT = "Some text you typed was kept aside when its block moved or was removed.";

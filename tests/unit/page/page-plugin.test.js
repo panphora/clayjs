@@ -305,6 +305,14 @@ test("dispose removes the adopted sync listener, the shell and the unsaved sourc
 const chip = () => document.querySelector("[data-clay-indicator]");
 const toasts = () => [...document.querySelectorAll("[data-clay-toast]")];
 const actionLabels = (el) => [...el.querySelectorAll("button")].map((b) => b.textContent).filter(Boolean);
+// The toast stack arrives on the first toast, so a toast is waited for rather than
+// assumed to be in the same tick.
+const flush = async () => {
+  for (let i = 0; i < 50; i++) await Promise.resolve();
+};
+const untilToasts = async () => {
+  for (let i = 0; i < 50 && toasts().length === 0; i++) await tick(0);
+};
 
 test("a known code shows the blocked chip and toast, a retrying save waits out its bound and clears on saved", async () => {
   setPage([{ id: "p", t: "paragraph", text: "Hello" }]);
@@ -319,6 +327,7 @@ test("a known code shows the blocked chip and toast, a retrying save waits out i
 
     expect(chip().textContent).toBe("Can't save here");
     expect(states.at(-1)).toEqual({ state: "blocked", code: "too-large", message: "This page is too large to save" });
+    await untilToasts();
     const blocked = toasts().at(-1);
     expect(blocked.textContent).toContain("Can't save here. Your edits are still in this tab.");
     expect(blocked.textContent).toContain("This page is too large to save");
@@ -349,9 +358,11 @@ test("a known code shows the blocked chip and toast, a retrying save waits out i
     jest.advanceTimersByTime(34999);
     expect(toasts()).toEqual([]);
     jest.advanceTimersByTime(1);
+    await flush();
     expect(toasts().at(-1).textContent).toContain("Still trying to save. Your edits are safe in this tab.");
 
     document.dispatchEvent(new CustomEvent("clay:save-saved"));
+    await flush();
     jest.advanceTimersByTime(500);
     expect(toasts()).toEqual([]);
     expect(states.at(-1).state).toBe("saved");

@@ -10,7 +10,7 @@ import { storeOf, stageStore, closeStore, checkpointWithin, requestCheckpoint, f
 import { serializeLive } from "../live/ops.js";
 import { parseJsonRelaxed } from "../vendor/hyper-morph-json.vendor.js";
 import { saveStateFor, BLOCKED_TEXT, RETRY_TEXT, downloadPageCopy, downloadSnapshot, copyPageText } from "../page/save-states.js";
-import toast, { toastPersistent, dismissPersistent } from "../ui/toast.js";
+import toast, { toastPersistent, dismissPersistent } from "../ui/toast-lazy.js";
 import { claim } from "../page/runtime-owner.js";
 import { authorIdentity } from "../page/ybind/author.js";
 import { createInstall, disposeInstall, addDisposer, finishError, isCurrent, ownsView, runBoot, activateInput } from "../page/boot.js";

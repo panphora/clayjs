@@ -11,7 +11,7 @@ import { openAltEditor, setImageAttrs } from "./media.js";
 import { BlockDrag } from "./drag.js";
 import { openLinkEditor } from "./link.js";
 import { BLOCK_TYPES, MENU_ITEMS, blockTypeOf, turnInto, insertAfter, rankItems, runItem, retype, insertItemsFor } from "./items.js";
-import toast from "../ui/toast.js";
+import toast from "../ui/toast-lazy.js";
 import { insertChartAfterTable } from "./chart.js";
 import { pickCsv } from "./csv-import.js";
 import { HISTORY_INTENT, typingIntent } from "./history-intent.js";

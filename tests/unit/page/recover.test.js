@@ -92,7 +92,16 @@ test("Escape closes the panel and returns focus to the button", () => {
   expect(document.activeElement).toBe(button);
 });
 
-test("a personal notice shows one toast; Review opens the record and Dismiss dismisses every notice", () => {
+// The toast stack arrives on the first toast, so the toast below is waited for
+// rather than assumed to be there in the same tick.
+const flush = async () => {
+  for (let i = 0; i < 50; i++) await Promise.resolve();
+};
+const untilToasts = async (count) => {
+  for (let i = 0; i < 50 && toasts().length !== count; i++) await flush();
+};
+
+test("a personal notice shows one toast; Review opens the record and Dismiss dismisses every notice", async () => {
   jest.useFakeTimers();
   const binding = fakeBinding();
   const { panel } = mountList({ binding });
@@ -100,6 +109,7 @@ test("a personal notice shows one toast; Review opens the record and Dismiss dis
   const notices = [{ kind: "recovered-change", source: "2.9", revision: "rev-2.9" }, { kind: "recovered-change", source: "1.4", revision: "rev-1.4" }];
   binding.push({ recoverable: recs, notices });
   binding.push({ recoverable: recs, notices });
+  await untilToasts(1);
   expect(toasts()).toHaveLength(1);
   buttonIn(toasts()[0], "Review").click();
   expect(panel.hidden).toBe(false);
@@ -108,6 +118,7 @@ test("a personal notice shows one toast; Review opens the record and Dismiss dis
   buttonIn(toasts()[0], "Dismiss").click();
   expect(binding.dismiss.mock.calls).toEqual([["2.9", "rev-2.9"], ["1.4", "rev-1.4"]]);
   binding.push({ recoverable: recs, notices: [] });
+  await flush();
   jest.advanceTimersByTime(600);
   expect(toasts()).toHaveLength(0);
 });

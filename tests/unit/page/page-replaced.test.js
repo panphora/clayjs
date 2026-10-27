@@ -58,6 +58,9 @@ const replaceText = (view, id, from, to, text) => {
 const toastText = () => document.querySelector("[data-clay-toast]")?.textContent ?? "";
 const toastActions = () => [...(document.querySelector("[data-clay-toast]")?.querySelectorAll("button") ?? [])]
   .filter((b) => b.textContent).map((b) => b.textContent);
+// The toast stack arrives on the first toast, so a notice is waited for rather than
+// assumed to be in the same tick.
+const waitForToast = (fragment = "") => until(() => toastText().includes(fragment));
 
 const syncFromDisk = async (html) => {
   let adopted = 0;
@@ -169,6 +172,7 @@ test("with rooms (live-data), a tagless incoming document with a new article rev
     detail: { source: "peer", html: docOf("", pageHtml(seedValue([{ id: "p", t: "paragraph", text: "Replaced" }]))) },
   }));
 
+  await waitForToast(REPLACED_TEXT);
   expect(toastText()).toContain(REPLACED_TEXT);
   expect(toastActions()).toEqual(["Reload", "Download your copy"]);
   expect(page.view.editable).toBe(false);
@@ -229,6 +233,7 @@ test("an incoming document that carries another page's tag is a replacement", as
     detail: { source: "peer", html: docOf(tagHtml(other), pageHtml(other)) },
   }));
   await flushAsync();
+  await waitForToast("Download your copy");
   expect(toastText()).toContain("Download your copy");
   expect(page.view.editable).toBe(false);
 });
@@ -240,6 +245,7 @@ test("an unknown-store refusal of the page store's frames shows the notice", asy
   await page.ready;
   storeOf("page").deliver({ phase: "left", code: "no-store", n: 1 });
 
+  await waitForToast(REPLACED_TEXT);
   expect(toastText()).toContain(REPLACED_TEXT);
   expect(toastActions()).toEqual(["Reload", "Download your copy"]);
   expect(page.view.editable).toBe(false);
@@ -448,6 +454,7 @@ test("a tab stopped by another page's history downloads its own edits", async ()
   storeOf("page").rebase(buildPageValue([{ blocks: otherBlocks }], seedClientId(otherBlocks)), { source: "state" });
   await flushAsync();
   expect(page.view.editable).toBe(false);
+  await waitForToast("Download your copy");
   const text = await readDownload(() => toastButton("Download your copy").click());
   expect(text).toContain("UNIQUE UNSAVED");
   expect(text).not.toContain("Replacement article");
@@ -463,6 +470,7 @@ test("a page update refused as too large stops the tab with a notice and keeps t
   storeOf("page").deliver({ phase: "refused", code: "too-large" });
   await flushAsync();
   expect(page.view.editable).toBe(false);
+  await waitForToast("That change is too large to share, so it was not saved.");
   expect(toastText()).toContain("That change is too large to share, so it was not saved.");
   const text = await readDownload(() => toastButton("Download your copy").click());
   expect(text).toContain("BIG EDIT");

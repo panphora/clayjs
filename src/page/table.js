@@ -10,7 +10,7 @@ import { DERIVED } from "./history-intent.js";
 import { gridFromClipboard, tableFromGrid } from "./table-paste.js";
 import { rectTopLeft } from "./table-select.js";
 import { cellViews } from "./table-views.js";
-import toast from "../ui/toast.js";
+import toast from "../ui/toast-lazy.js";
 
 const { Plugin, TextSelection } = state;
 const N = schema.nodes;
