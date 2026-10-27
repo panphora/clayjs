@@ -52,9 +52,9 @@ export function hasUnsavedState() {
 // Ask every pending source that can finish on its own (a checkpoint, a queued
 // upload) to do so, and wait. Sources without a flush (an open composition)
 // stay pending; they are listed in the answer, never waited on.
-export async function flushUnsaved() {
+export async function flushUnsaved(context = {}) {
   const flushes = [...sources.values()].filter((s) => typeof s.flush === 'function' && isPending(s));
-  const results = await Promise.all(flushes.map((s) => Promise.resolve().then(s.flush).catch(() => ({ ok: false }))));
+  const results = await Promise.all(flushes.map((s) => Promise.resolve().then(() => s.flush(context)).catch(() => ({ ok: false }))));
   return { ok: results.every((r) => r?.ok !== false), pending: pendingIds() };
 }
 

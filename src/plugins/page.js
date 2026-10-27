@@ -948,7 +948,7 @@ function mergeRepresentedPage(store, value) {
         registered = registerUnsavedState({
           id: def.id,
           isPending: () => flushFailed || def.isPending(),
-          flush: () => trackFlush(() => def.flush()),
+          flush: (options) => trackFlush(() => def.flush(options)),
         });
         return registered;
       },

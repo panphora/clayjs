@@ -65,17 +65,30 @@ export async function runSaveBarrier({ generation = saveGeneration(), keepalive 
   if (!operation && !claimed) return refusal("busy");
   const deadline = Date.now() + timeoutMs;
   const permit = openSavePermit(generation);
+  const abort = new AbortController();
   try {
     for (let pass = 0; ; pass++) {
       if (generation !== saveGeneration()) return refusal("stale-document");
       if (Date.now() >= deadline) return refusal("timeout");
 
-      // Work that finishes on its own — a checkpoint, a queued upload — is asked to. A
-      // composer waiting on its person has no flush and stays pending: that is a refusal,
-      // never a blur or a submit on their behalf.
-      const sources = await bounded(flushUnsaved(), deadline);
-      if (sources === EXPIRED) return refusal("timeout");
-      if (!sources.ok) return refusal("pending-input", { pending: sources.pending });
+      // Work that finishes on its own — a checkpoint, a queued upload — is asked to, under
+      // this exit's own permit and inside its own deadline: the save such a source needs is
+      // the one write a closed session still admits. A composer waiting on its person has no
+      // flush and stays pending: that is a refusal, never a blur or a submit on their behalf.
+      const context = {
+        permit,
+        deadline,
+        keepalive,
+        signal: abort.signal,
+        timeoutMs: Math.max(0, deadline - Date.now()),
+      };
+      const sources = await bounded(flushUnsaved(context), deadline);
+      if (sources === EXPIRED) return refusal("timeout", { pending: pendingIds() });
+      if (!sources.ok) {
+        if (isSaveConflicted()) return refusal("conflict", { pending: sources.pending });
+        if (saveFateIsUnknown()) return refusal("save-unknown", { pending: sources.pending });
+        return refusal("pending-input", { pending: sources.pending });
+      }
       if (sources.pending.length) return refusal("pending-input", { pending: sources.pending });
 
       // Neither a conflict nor an unresolved fate is a failure a retry fixes.
@@ -106,6 +119,7 @@ export async function runSaveBarrier({ generation = saveGeneration(), keepalive 
       return { ok: true, state: result.state, etag: result.etag ?? null };
     }
   } finally {
+    abort.abort();
     closeSavePermit(permit);
     if (claimed) releaseDocumentOperation(claimed);
   }

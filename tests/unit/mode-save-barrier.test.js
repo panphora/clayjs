@@ -404,3 +404,125 @@ test("a barrier run under a token its caller owns does not claim a second slot",
   expect(await transition.runSaveBarrier()).toMatchObject({ ok: true, state: "saved" });
   expect(core.operationKind()).toBeNull();
 });
+
+test("a pending source's flush receives the exit's own permit, deadline and signal", async () => {
+  await acceptedBaseline("exit context base");
+  const session = track(save.saveSession());
+  session.start();
+  await edit("written under the exit's permit");
+  session.quiesce();
+  expect(save.savesAdmitted()).toBe(false);
+
+  let seen = null;
+  let admittedDuringFlush = null;
+  let abortedDuringFlush = null;
+  let pending = true;
+  register({
+    id: "page:live",
+    isPending: () => pending,
+    flush: async (context) => {
+      seen = context;
+      admittedDuringFlush = save.savesAdmitted(context.permit);
+      abortedDuringFlush = context.signal.aborted;
+      pending = false;
+      return { ok: true };
+    },
+  });
+
+  const started = Date.now();
+  const result = await transition.runSaveBarrier({ timeoutMs: 2000 });
+  expect(result).toMatchObject({ ok: true, state: "saved" });
+  expect(posts.length).toBe(1);
+  expect(posts[0]).toContain("written under the exit's permit");
+
+  // The source flushed under the exit's own permit: a closed session admits it, and the
+  // same permit is revoked when the barrier answers.
+  expect(seen).toBeTruthy();
+  expect(admittedDuringFlush).toBe(true);
+  expect(save.savesAdmitted(seen.permit)).toBe(false);
+  // The deadline is the barrier's own absolute one, not a fresh budget for the source.
+  expect(seen.deadline - started).toBeGreaterThanOrEqual(2000);
+  expect(seen.deadline - started).toBeLessThan(2100);
+  expect(seen.timeoutMs).toBeGreaterThan(0);
+  expect(seen.timeoutMs).toBeLessThanOrEqual(2000);
+  expect(seen.keepalive).toBe(false);
+  expect(abortedDuringFlush).toBe(false);
+  expect(seen.signal.aborted).toBe(true);
+});
+
+test("a source that outlives the deadline is a timeout, and its work is stopped", async () => {
+  await acceptedBaseline("outlived deadline base");
+  let signal = null;
+  let finish = null;
+  register({
+    id: "page:live",
+    isPending: () => true,
+    flush: (context) => {
+      signal = context.signal;
+      return new Promise((resolve) => {
+        finish = resolve;
+      });
+    },
+  });
+  await edit("held by a source that never settles");
+
+  const result = await transition.runSaveBarrier({ timeoutMs: 60 });
+  expect(result).toMatchObject({ ok: false, code: "timeout", pending: ["page:live"] });
+  expect(posts.length).toBe(0);
+
+  // The barrier stopped waiting and stopped the work with it: the signal the source was
+  // handed is aborted, so nothing it does late can start a write of its own.
+  expect(signal.aborted).toBe(true);
+  expect(finish).toBeTruthy();
+  finish({ ok: true });
+  await flush();
+  expect(posts.length).toBe(0);
+});
+
+test("a source that fails beside a conflict keeps the conflict refusal", async () => {
+  await acceptedBaseline("source conflict base");
+  register({
+    id: "page:live",
+    isPending: () => true,
+    flush: async () => {
+      holdPosts = true;
+      const saving = save.savePage();
+      expect(await until(() => held.length === 1)).toBe(true);
+      held[0].resolve(okResponse({ msg: "This document changed since you last loaded it.", code: "conflict" }, 412));
+      await saving;
+      return { ok: false, code: "conflict" };
+    },
+  });
+  await edit("refused beside a conflicted source");
+
+  const result = await transition.runSaveBarrier({ timeoutMs: 2000 });
+  expect(result).toMatchObject({ ok: false, code: "conflict", pending: ["page:live"] });
+  expect(save.isSaveConflicted()).toBe(true);
+  expect(posts.length).toBe(1);
+});
+
+test("a source that fails beside an unknown fate keeps the save-unknown refusal", async () => {
+  jest.spyOn(console, "error").mockImplementation(() => {});
+  await acceptedBaseline("source unknown base");
+  register({
+    id: "page:live",
+    isPending: () => true,
+    flush: async () => {
+      holdPosts = true;
+      const saving = save.savePage();
+      expect(await until(() => held.length === 1)).toBe(true);
+      held[0].reject(Object.assign(new Error("The operation was aborted."), { name: "AbortError" }));
+      await saving;
+      return { ok: false, code: "save-unknown" };
+    },
+  });
+  await edit("a source whose save may have landed");
+
+  try {
+    const result = await transition.runSaveBarrier({ timeoutMs: 2000 });
+    expect(result).toMatchObject({ ok: false, code: "save-unknown", pending: ["page:live"] });
+    expect(core.saveFateIsUnknown()).toBe(true);
+  } finally {
+    console.error.mockRestore();
+  }
+});
