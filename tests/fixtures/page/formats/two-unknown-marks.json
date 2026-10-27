@@ -6,9 +6,9 @@
     "c": "We kept it, colored now",
     "m": [
       [3, ""],
-      [4, "bx[\"underline\",{}]"],
+      [4, "bx[\"sparkle\",{}]"],
       [5, ""],
-      [7, "x[\"highlight\",{\"color\":\"yellow\"}]x[\"text_color\",{\"color\":\"red\"}]"],
+      [7, "x[\"glow\",{\"color\":\"red\"}]x[\"shimmer\",{\"color\":\"yellow\"}]"],
       [4, ""]
     ]
   },
@@ -18,9 +18,9 @@
     "c": "We kept it, colored now",
     "m": [
       [3, ""],
-      [4, "bx[\"underline\",{}]"],
+      [4, "bx[\"sparkle\",{}]"],
       [5, ""],
-      [7, "x[\"highlight\",{\"color\":\"yellow\"}]x[\"text_color\",{\"color\":\"red\"}]"],
+      [7, "x[\"glow\",{\"color\":\"red\"}]x[\"shimmer\",{\"color\":\"yellow\"}]"],
       [4, ""]
     ]
   }

@@ -29,7 +29,7 @@ test("every mark in the schema has its old compact code, and the opaque mark is 
   expect(OPAQUE_MARK).toBe("opaque_marks");
   expect(OPAQUE_CODE).toBe("clay_opaque_code");
   expect(NAMED_CODE).toBe("x");
-  expect(NAME.test("text_color")).toBe(true);
+  expect(NAME.test("glow")).toBe(true);
   expect(NAME.test("text~color")).toBe(false);
 });
 
@@ -56,21 +56,21 @@ test("an unfamiliar compact token is kept with its exact text", () => {
 });
 
 test("the named x grammar: name and attrs, kept verbatim and in one order", () => {
-  expect(descriptors('x["text_color",{"color":"red"}]')).toEqual([{ name: "text_color", attrs: { color: "red" } }]);
-  expect(descriptors('bx["underline",{}]')).toEqual([
+  expect(descriptors('x["glow",{"color":"red"}]')).toEqual([{ name: "glow", attrs: { color: "red" } }]);
+  expect(descriptors('bx["sparkle",{}]')).toEqual([
     { code: "b", attrs: null, token: "b" },
-    { name: "underline", attrs: {} },
+    { name: "sparkle", attrs: {} },
   ]);
-  const odd = 'x["text_color",{"color":"red","fallback":"#e00"}]x["highlight",{"color":"yellow"}]u';
-  const canonical = 'x["highlight",{"color":"yellow"}]x["text_color",{"color":"red","fallback":"#e00"}]u';
+  const odd = 'x["glow",{"color":"red","fallback":"#e00"}]x["shimmer",{"color":"yellow"}]u';
+  const canonical = 'x["glow",{"color":"red","fallback":"#e00"}]x["shimmer",{"color":"yellow"}]u';
   expect(markKey(marksOf(schema, odd))).toBe(canonical);
   expect(markKey(marksOf(schema, canonical))).toBe(canonical);
   expect(marksOf(schema, odd)[0].attrs.entries).toEqual([
-    { name: "highlight", attrs: { color: "yellow" } },
-    { name: "text_color", attrs: { color: "red", fallback: "#e00" } },
+    { name: "glow", attrs: { color: "red", fallback: "#e00" } },
+    { name: "shimmer", attrs: { color: "yellow" } },
     { tokens: ["u"] },
   ]);
-  expect(keyOf([{ name: "underline", attrs: {} }])).toBe('x["underline",{}]');
+  expect(keyOf([{ name: "sparkle", attrs: {} }])).toBe('x["sparkle",{}]');
   expect(keyOf([{ tokens: ["u", 'z["value"]'] }])).toBe('uz["value"]');
 });
 
@@ -94,8 +94,8 @@ test("unknown attrs come back with their values untouched", () => {
   expect(round(record)).toEqual(expected);
   const entries = marksOf(schema, 'x["annotation",{"thread":"t-1","notes":["keep","these"]}]')[0].attrs.entries;
   expect(entries).toEqual([{ name: "annotation", attrs: { thread: "t-1", notes: ["keep", "these"] } }]);
-  const unicode = marksOf(schema, `x["text_color",${JSON.stringify({ label: "網目 🚦" })}]`)[0].attrs.entries;
-  expect(unicode).toEqual([{ name: "text_color", attrs: { label: "網目 🚦" } }]);
+  const unicode = marksOf(schema, `x["glow",${JSON.stringify({ label: "網目 🚦" })}]`)[0].attrs.entries;
+  expect(unicode).toEqual([{ name: "glow", attrs: { label: "網目 🚦" } }]);
 });
 
 test("a table cell keeps marks it does not know, rich and bare", () => {
@@ -105,7 +105,7 @@ test("a table cell keeps marks it does not know, rich and bare", () => {
   const value = record.rows.r2.cells.c2;
   const content = cellContent(schema, value);
   expect(content.map((node) => node.type.name)).toEqual(["text", "hard_break"]);
-  expect(marksOf(schema, "x[\"highlight\",{\"color\":\"green\"}]")[0].type.name).toBe(OPAQUE_MARK);
+  expect(marksOf(schema, "x[\"shimmer\",{\"color\":\"green\"}]")[0].type.name).toBe(OPAQUE_MARK);
   expect(content[0].marks.map((mark) => mark.type.name)).toEqual([OPAQUE_MARK]);
   expect(cellValue(schema.nodes.table_cell.create({ col: "c2" }, content))).toEqual(value);
   expect(cellText(value)).toBe("a\n");
@@ -118,8 +118,8 @@ test("supplementary characters keep one key per UTF-16 unit and their pairs whol
   expect(round(record)).toEqual(expected);
   const units = unpackMarks(record);
   expect(units.m).toHaveLength(units.c.length);
-  expect(units.m.slice(2, 4)).toEqual(['x["underline",{}]', 'x["underline",{}]']);
-  expect(units.m.slice(4, 6)).toEqual(['bx["text_color",{"color":"purple"}]', 'bx["text_color",{"color":"purple"}]']);
+  expect(units.m.slice(2, 4)).toEqual(['x["sparkle",{}]', 'x["sparkle",{}]']);
+  expect(units.m.slice(4, 6)).toEqual(['bx["glow",{"color":"purple"}]', 'bx["glow",{"color":"purple"}]']);
   const nodes = unflatten(schema, units.c, units.m);
   expect(nodes.map((node) => node.text)).toEqual(["I ", "😀", "𠮷", " e\u0301"]);
   expect(nodes[1].marks).toHaveLength(1);
@@ -129,14 +129,14 @@ test("supplementary characters keep one key per UTF-16 unit and their pairs whol
 test("an unknown block keeps its record and its inline values, and still refuses a node", () => {
   const { record, expected } = fixture("unknown-block");
   expect(record).toEqual(expected);
-  expect(record.t).toBe("quote");
+  expect(record.t).toBe("callout_future");
   expect(record.c).toBe("Read this too");
   for (const [length, key] of record.m) {
     expect(length).toBeGreaterThan(0);
     expect(keyOf(entriesOf(descriptors(keysTo(key))))).toBe(key);
   }
-  expect(markKey(marksOf(schema, 'x["underline",{}]'))).toBe('x["underline",{}]');
-  expect(() => nodeFromBlock(schema, "b-x", record)).toThrow("page: unknown block type quote");
+  expect(markKey(marksOf(schema, 'x["sparkle",{}]'))).toBe('x["sparkle",{}]');
+  expect(() => nodeFromBlock(schema, "b-x", record)).toThrow("page: unknown block type callout_future");
   expect(record).toEqual(expected);
 });
 
@@ -144,11 +144,11 @@ test("canceled Yjs marks drop exactly as ybind reads them", () => {
   const { fields, expected, positive } = fixture("canceled-yjs");
   expect(entriesOfYjs(fields)).toEqual(expected);
   expect(entriesOfYjs(positive.fields)).toEqual(positive.expected);
-  expect(yjsFields(expected)).toEqual({ highlight: { color: "yellow" }, text_color: { color: "red" }, [OPAQUE_CODE]: { tokens: ["u", 'z["value"]'] } });
+  expect(yjsFields(expected)).toEqual({ shimmer: { color: "yellow" }, glow: { color: "red" }, [OPAQUE_CODE]: { tokens: ["u", 'z["value"]'] } });
   expect(entriesOfYjs(yjsFields(expected))).toEqual(expected);
-  expect(entriesOfYjs({ "text_color~p-m0": null, "underline": true })).toEqual([{ name: "underline", attrs: {} }]);
+  expect(entriesOfYjs({ "glow~p-m0": null, "sparkle": true })).toEqual([{ name: "sparkle", attrs: {} }]);
   expect(() => entriesOfYjs({ [OPAQUE_CODE]: true })).toThrow(`page: ${OPAQUE_CODE} is not { tokens: [...] }`);
-  expect(() => entriesOfYjs({ "text_color~p-m0": { color: "red" }, [OPAQUE_CODE]: { tokens: ['x["a",{}]'] } })).toThrow("malformed mark token");
+  expect(() => entriesOfYjs({ "glow~p-m0": { color: "red" }, [OPAQUE_CODE]: { tokens: ['x["a",{}]'] } })).toThrow("malformed mark token");
 });
 
 const refuses = (run) => {
@@ -189,13 +189,13 @@ test("the descriptor JSON budget is bounded, never truncated", () => {
 });
 
 test("entries read back from a mark are validated and normalized alike", () => {
-  const mark = opaqueMark([{ tokens: ["u", 'z["v"]'] }, { name: "underline", attrs: {} }]);
+  const mark = opaqueMark([{ tokens: ["u", 'z["v"]'] }, { name: "sparkle", attrs: {} }]);
   expect(mark.type.name).toBe(OPAQUE_MARK);
   expect(mark.type.spec.inclusive).toBe(false);
   expect(mark.type.spec.excludes).toBe("");
-  expect(mark.attrs.entries).toEqual([{ name: "underline", attrs: {} }, { tokens: ["u", 'z["v"]'] }]);
-  expect(markKey([mark])).toBe('x["underline",{}]uz["v"]');
-  expect(markKey([schema.marks.strong.create(), mark])).toBe('bx["underline",{}]uz["v"]');
+  expect(mark.attrs.entries).toEqual([{ name: "sparkle", attrs: {} }, { tokens: ["u", 'z["v"]'] }]);
+  expect(markKey([mark])).toBe('x["sparkle",{}]uz["v"]');
+  expect(markKey([schema.marks.strong.create(), mark])).toBe('bx["sparkle",{}]uz["v"]');
   expect(normalizeEntries(mark.attrs.entries)).toEqual(mark.attrs.entries);
   expect(markKey([opaqueMark([{ tokens: ["u"] }])])).toBe("u");
   expect(() => opaqueMark([{ name: "u", attrs: [] }])).toThrow("page: an opaque entry is not { name, attrs }");

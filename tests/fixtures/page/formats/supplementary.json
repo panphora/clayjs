@@ -6,8 +6,8 @@
     "c": "I 😀𠮷 é",
     "m": [
       [2, ""],
-      [2, "x[\"underline\",{}]"],
-      [2, "bx[\"text_color\",{\"color\":\"purple\"}]"],
+      [2, "x[\"sparkle\",{}]"],
+      [2, "bx[\"glow\",{\"color\":\"purple\"}]"],
       [3, "u"]
     ]
   },
@@ -17,8 +17,8 @@
     "c": "I 😀𠮷 é",
     "m": [
       [2, ""],
-      [2, "x[\"underline\",{}]"],
-      [2, "bx[\"text_color\",{\"color\":\"purple\"}]"],
+      [2, "x[\"sparkle\",{}]"],
+      [2, "bx[\"glow\",{\"color\":\"purple\"}]"],
       [3, "u"]
     ]
   }

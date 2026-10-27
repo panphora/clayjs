@@ -460,6 +460,31 @@ export function createSteps(inst, options) {
   addDisposer(inst, () => editorReadyResolve?.());
   addDisposer(inst, () => clearLoadingStatus(inst));
 
+  // The format gate, fetched when a newer-format command first asks for it: neither
+  // the gate nor its host adapter is on the editor's ready path. One gate per session,
+  // built against this editor installation, and disposed with the editor.
+  let formatGate = null;
+  let formatGateLoading = null;
+  inst.loadFormatGate = () => {
+    if (formatGate) return Promise.resolve(formatGate);
+    formatGateLoading ??= Promise.all([import("../page/format-gate.js"), import("../page/format-host.js")])
+      .then(([{ createFormatGate }, { createFormatHost }]) => {
+        const host = createFormatHost();
+        formatGate = createFormatGate({
+          host,
+          supported: host.supported,
+          installed: () => identity?.token ?? null,
+          revision: () => null,
+        });
+        return formatGate;
+      })
+      .catch((error) => {
+        formatGateLoading = null;
+        throw error;
+      });
+    return formatGateLoading;
+  };
+
   // A document with a tool block, at boot or when one arrives, opens the store its
   // tools keep state in and the host that mounts them. A document with no tool
   // never waits for either.
@@ -851,6 +876,7 @@ function mountAndAttach(inst, source, loaded) {
         features,
         onAiTool: aiRequested() ? (_view, remove) => { openAi({ remove }); } : null,
         reviseTool: aiRequested() ? (toolId, rev) => { openAi({ target: { toolId, rev } }); } : null,
+        formatGate: inst.loadFormatGate,
       });
     } catch (error) {
       console.error("clayjs: page plugin could not mount the editor", error);
@@ -1123,7 +1149,7 @@ function begin(options = {}, { activate = true, context = null } = {}) {
         options.onPhase?.(result);
       },
     }),
-    article: null, view: null, binding: null, adoption: null, source: null, store: null, toolHost: null, aiTool: null, bootHtml: "", bootRev: null, savedRev: null, staged: null, pageStore: null, releaseArticle: null, replaced: false, savesHeld: false, flush: null, listeners: [], retryTimer: null, retryShown: false, statusTimer: null, statusNote: null, notices: null, editorReadyResolve: null, context, inputOpen: false, sessionHeld: false, autosaveSuspended: false, staleRetry: false,
+    article: null, view: null, binding: null, adoption: null, source: null, store: null, toolHost: null, aiTool: null, bootHtml: "", bootRev: null, savedRev: null, staged: null, pageStore: null, releaseArticle: null, replaced: false, savesHeld: false, flush: null, loadFormatGate: null, listeners: [], retryTimer: null, retryShown: false, statusTimer: null, statusNote: null, notices: null, editorReadyResolve: null, context, inputOpen: false, sessionHeld: false, autosaveSuspended: false, staleRetry: false,
   };
   active = inst;
   const boot = run(inst, options, { activate }).catch((error) => {

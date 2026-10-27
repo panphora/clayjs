@@ -106,7 +106,7 @@ test("an unfamiliar block keeps its whole record in an inert envelope, and its t
   expect(el.tagName).toBe("DIV");
   expect(el.getAttribute(OPAQUE)).toBe("1");
   expect(el.textContent).toBe(QUOTE.c);
-  expect(envelopeIn(el)).toEqual({ t: "quote", c: QUOTE.c, m: QUOTE.m, unknown: QUOTE.unknown });
+  expect(envelopeIn(el)).toEqual({ t: "callout_future", c: QUOTE.c, m: QUOTE.m, unknown: QUOTE.unknown });
   expect(el.getAttribute("data-type")).toBeNull();
 });
 
@@ -124,7 +124,7 @@ test("unfamiliar marks keep their descriptors in the envelope, and the known tex
   expect(spans.map((span) => span.textContent)).toEqual(["one", " two"]);
   const entriesOf = (span) => JSON.parse(b64decode(span.getAttribute(MARKS)));
   expect(entriesOf(spans[0])).toEqual([
-    { name: "text_color", attrs: { color: "red", fallback: "#e00", meta: { by: "Ada", at: "2026-10-24T10:00:00Z", depth: [1, 2, { x: true }] }, label: "網目 🚦" } },
+    { name: "glow", attrs: { color: "red", fallback: "#e00", meta: { by: "Ada", at: "2026-10-24T10:00:00Z", depth: [1, 2, { x: true }] }, label: "網目 🚦" } },
   ]);
   expect(entriesOf(spans[1])).toEqual([
     { name: "annotation", attrs: { thread: "t-1", notes: ["keep", "these"] } },
@@ -164,13 +164,13 @@ test("a file stripped of its page tags is adopted, edited and saved keeping ever
 
   expect(types(next.doc)).toEqual(["paragraph", "opaque_block", "paragraph", "paragraph"]);
   expect(find(next.doc, "z").node.textContent).toBe("Nothing unfamiliar here, edited by hand");
-  expect(find(next.doc, "q").node.attrs.raw).toEqual({ t: "quote", unknown: QUOTE.unknown });
+  expect(find(next.doc, "q").node.attrs.raw).toEqual({ t: "callout_future", unknown: QUOTE.unknown });
   expect(find(next.doc, "q").node.textContent).toBe(QUOTE.c);
 
   const neighbour = find(next.doc, "z");
   const typed = next.apply(next.tr.insertText("!", neighbour.pos + 1 + neighbour.node.textContent.length));
   expect(find(typed.doc, "z").node.textContent).toBe("Nothing unfamiliar here, edited by hand!");
-  expect(find(typed.doc, "q").node.attrs.raw).toEqual({ t: "quote", unknown: QUOTE.unknown });
+  expect(find(typed.doc, "q").node.attrs.raw).toEqual({ t: "callout_future", unknown: QUOTE.unknown });
 
   const saved = project(savedBlocks(typed.doc));
   const savedHtml = renderModel(saved, { clean });
@@ -194,7 +194,7 @@ test("a newer peer's record reaches the editor through the article's envelope", 
   expect([...plan.edited.keys()]).toEqual(["q"]);
   const before = stateOf({ a: MARKED, q: QUOTE, p: EXTRA, z: PLAIN });
   const next = before.apply(adoptionTransaction(before, plan));
-  expect(find(next.doc, "q").node.attrs.raw).toEqual({ t: "quote", unknown: changed.unknown });
+  expect(find(next.doc, "q").node.attrs.raw).toEqual({ t: "callout_future", unknown: changed.unknown });
   expect(canon(byId(project(savedBlocks(next.doc))).get("q"))).toBe(canon(byId(project({ q: changed })).get("q")));
 });
 
@@ -212,11 +212,11 @@ test("a malformed or inconsistent envelope refuses the article instead of a plai
   const refusals = [
     ["not base64url JSON", `${OPAQUE}="1" ${VALUE}="!!"`],
     ["no value at all", `${OPAQUE}="1"`],
-    ["an unknown version", `${OPAQUE}="2" ${VALUE}="${b64encode('{"t":"quote"}')}"`],
+    ["an unknown version", `${OPAQUE}="2" ${VALUE}="${b64encode('{"t":"callout_future"}')}"`],
     ["a record naming a known block type", envelopeOf({ t: "paragraph", c: "x" })],
     ["a record naming the internal node", envelopeOf({ t: "opaque_block" })],
-    ["a record with a structural position", envelopeOf({ t: "quote", pos: "1" })],
-    ["a record with a structural id", envelopeOf({ t: "quote", id: "q" })],
+    ["a record with a structural position", envelopeOf({ t: "callout_future", pos: "1" })],
+    ["a record with a structural id", envelopeOf({ t: "callout_future", id: "q" })],
     ["a type that is not a name", envelopeOf({ t: 5 })],
     ["not a record", `${OPAQUE}="1" ${VALUE}="${b64encode("[1,2]")}"`],
   ];
@@ -227,8 +227,8 @@ test("a malformed or inconsistent envelope refuses the article instead of a plai
   }
   const badMarks = articleOf(`<p data-id="p"><span ${MARKS}="${b64encode('{"name":"x"}')}">text</span></p>`);
   expect(() => parseModel(badMarks)).toThrow(SyntaxError);
-  const good = parseModel(articleOf(`<div data-id="q" ${envelopeOf({ t: "quote", c: "text" })}>text</div>`));
-  expect(good).toEqual([{ id: "q", t: "quote", c: "text" }]);
+  const good = parseModel(articleOf(`<div data-id="q" ${envelopeOf({ t: "callout_future", c: "text" })}>text</div>`));
+  expect(good).toEqual([{ id: "q", t: "callout_future", c: "text" }]);
   const goodMarks = parseModel(articleOf(`<p data-id="p"><span ${MARKS}="${b64encode('[{"tokens":["u"]}]')}">text</span></p>`));
   expect(goodMarks[0].m).toEqual([[4, "u"]]);
 });
@@ -237,10 +237,10 @@ test("the envelope budget refuses a deeper or larger record rather than truncati
   const deep = (n) => (n ? { a: deep(n - 1) } : {});
   const keys = (n) => Object.fromEntries(Array.from({ length: n }, (_, i) => [`k${i}`, i]));
   const parsed = (record) => parseModel(articleOf(`<div data-id="q" ${envelopeOf(record)}>text</div>`));
-  expect(() => parsed({ t: "quote", c: "text", extra: deep(40) })).toThrow(SyntaxError);
-  expect(() => parsed({ t: "quote", c: "text", extra: keys(10001) })).toThrow(SyntaxError);
-  expect(parsed({ t: "quote", c: "text", extra: deep(8) })).toHaveLength(1);
-  expect(parsed({ t: "quote", c: "text", extra: keys(50) })).toHaveLength(1);
+  expect(() => parsed({ t: "callout_future", c: "text", extra: deep(40) })).toThrow(SyntaxError);
+  expect(() => parsed({ t: "callout_future", c: "text", extra: keys(10001) })).toThrow(SyntaxError);
+  expect(parsed({ t: "callout_future", c: "text", extra: deep(8) })).toHaveLength(1);
+  expect(parsed({ t: "callout_future", c: "text", extra: keys(50) })).toHaveLength(1);
 });
 
 test("HTML-like attribute values and prototype-shaped keys stay inert data", () => {
@@ -269,7 +269,7 @@ const WIDGET = {
   t: "future_widget",
   pos: "00000002",
   c: "Widget text",
-  m: [[11, 'x["text_color",{"color":"red"}]']],
+  m: [[11, 'x["glow",{"color":"red"}]']],
   theme: { bg: "red" },
   level: 3,
 };
@@ -277,7 +277,7 @@ const MARKED_TEXT = {
   t: "paragraph",
   pos: "00000001",
   c: "hover here",
-  m: [[5, 'x["underline",{}]'], [5, 'y["kept"]']],
+  m: [[5, 'x["sparkle",{}]'], [5, 'y["kept"]']],
   due: "2026-11-01",
   meta: { by: "Ada" },
 };
@@ -330,7 +330,7 @@ test("a live room's newer content reaches the saved file and comes back as the s
   doc.transact(() => {
     pd.attrs.set("p", new Y.Map([["t", "paragraph"]]));
     pd.flow.insertEmbed(0, { b: "p" }, {});
-    pd.flow.insert(1, "before", { "underline~upstream": { color: "red" } });
+    pd.flow.insert(1, "before", { "sparkle~upstream": { color: "red" } });
     pd.attrs.set("q", new Y.Map([["t", "future_widget"], ["theme", { bg: "red" }]]));
     pd.flow.insertEmbed(pd.flow.length, { b: "q" }, {});
     pd.flow.insert(pd.flow.length, "later", { "clay_opaque_code~upstream": { tokens: ["u"] } });

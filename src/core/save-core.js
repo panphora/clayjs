@@ -881,11 +881,15 @@ async function sendSave(content, { captureId = null, conversionHeader = null, at
 // One private implementation behind every entry point, so the hooks see the same
 // thing whether the bytes came from a bound capture or a raw caller. `captureId`
 // is null for a raw save: it belongs to no capture and can confirm none.
-function runSave(html, captureId, callback, conversion, capture = null) {
+//
+// `pageFormatFloor` is internal: one save may carry a floor this tab has not
+// noted yet, which is how the format gate's activation writes the marker. It
+// raises these bytes only, never what the tab knows the document at.
+function runSave(html, captureId, callback, conversion, capture = null, pageFormatFloor = 0) {
   // A capture taken before the floor rose cannot drop the marker by omitting it:
   // the bytes that go out carry the floor this tab last saw. At floor 0 this is
   // the string itself, unchanged.
-  html = withPageFormatFloor(html, knownPageFormatFloor());
+  html = withPageFormatFloor(html, Math.max(knownPageFormatFloor(), pageFormatFloor));
   return new Promise((resolve) => {
     const attempts = [];
     // Read once, before the first request: the artifact belongs to the capture that
@@ -994,8 +998,8 @@ export function saveHtml(html, callback = () => {}) {
  * @param {Object} [options.conversion] - {source:'file', base} or {source:'room', base, epoch}
  * @returns {Promise<Object>}
  */
-export function saveCapturedHtml(html, captureId, callback = () => {}, { conversion, capture = null } = {}) {
-  return runSave(html, captureId, callback, conversion, capture);
+export function saveCapturedHtml(html, captureId, callback = () => {}, { conversion, capture = null, pageFormatFloor } = {}) {
+  return runSave(html, captureId, callback, conversion, capture, pageFormatFloor);
 }
 
 /**

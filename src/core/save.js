@@ -1083,8 +1083,8 @@ function savePagePermitted(permit, callback = () => {}) {
  * @param {Function} callback - Optional callback for custom handling
  * @returns {Promise<{msg: string, msgType: string}>}
  */
-export function savePageForce(callback = () => {}, { quietConflict = false } = {}) {
-  if (capabilityPending) return capabilityKnown.then(() => savePageForce(callback, { quietConflict }));
+export function savePageForce(callback = () => {}, { quietConflict = false, pageFormatFloor = 0 } = {}) {
+  if (capabilityPending) return capabilityKnown.then(() => savePageForce(callback, { quietConflict, pageFormatFloor }));
   return new Promise((resolve) => {
     if (!isEditMode && !window.clay?.testMode) {
       const skipped = skipped_('Not in edit mode');
@@ -1110,7 +1110,7 @@ export function savePageForce(callback = () => {}, { quietConflict = false } = {
     }
 
     const prepare = window.clay?.source?.ensureForSave?.();
-    if (prepare) return prepare.then(() => resolve(savePageForce(callback, { quietConflict })));
+    if (prepare) return prepare.then(() => resolve(savePageForce(callback, { quietConflict, pageFormatFloor })));
 
     const wasOffline = !navigator.onLine;
     if (wasOffline) {
@@ -1148,7 +1148,7 @@ export function savePageForce(callback = () => {}, { quietConflict = false } = {
       }
       resolve(result);
       drainPendingSave();
-    }, { capture });
+    }, { capture, pageFormatFloor });
   });
 }
 

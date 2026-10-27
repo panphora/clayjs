@@ -563,7 +563,7 @@ function checkboxClick(view, event) {
 // Mounts the editor in `mount`, inside a .page-shell wrapper (the surface a
 // theme styles). `onChange(record)` gets the block record (blockMap) after
 // every transaction that changed the document.
-export function createPageEditor(mount, { blocks = null, onChange = null, upload, highlight, doc: initialDoc, dispatch, history: useHistory = true, undo, redo, editable = true, toolHost = null, onAiTool = null, reviseTool = null, board = null, features: providedFeatures = null } = {}) {
+export function createPageEditor(mount, { blocks = null, onChange = null, upload, highlight, doc: initialDoc, dispatch, history: useHistory = true, undo, redo, editable = true, toolHost = null, onAiTool = null, reviseTool = null, board = null, features: providedFeatures = null, formatGate = null } = {}) {
   const doc = mount.ownerDocument;
   // Editor chrome, injected on every edit-mode boot and kept out of the saved file:
   // the reader theme <link> styles the page for visitors.
@@ -625,6 +625,37 @@ export function createPageEditor(mount, { blocks = null, onChange = null, upload
   commandHost.attach(view);
   commandHosts.set(view, commandHost);
   const destroy = view.destroy.bind(view);
-  view.destroy = () => { commandHost.dispose(); features.dispose(); destroy(); };
+  // A new-format command asks the format gate, which the page plugin hands over as a
+  // loader of its own: neither the gate nor its host adapter is on the editor's ready
+  // path, so a reader who never uses a newer format never fetches them. The gate is
+  // created once, on the first command, and belongs to this view.
+  let gateHeld = null;
+  let disposed = false;
+  const heldGate = () => {
+    if (!gateHeld) {
+      gateHeld = Promise.resolve().then(() => formatGate()).catch((error) => {
+        gateHeld = null;
+        throw error;
+      });
+    }
+    return gateHeld;
+  };
+  view.runFormatCommand = async (apply) => {
+    if (disposed) return { status: "disposed", retry: false };
+    if (!formatGate) return { status: "unsupported-host", code: "page-format-unsupported", retry: false };
+    const gate = await heldGate();
+    if (disposed) {
+      gate.dispose?.();
+      return { status: "disposed", retry: false };
+    }
+    return gate.run({ apply });
+  };
+  view.destroy = () => {
+    disposed = true;
+    if (gateHeld) gateHeld.then((gate) => gate?.dispose?.(), () => {});
+    commandHost.dispose();
+    features.dispose();
+    destroy();
+  };
   return view;
 }

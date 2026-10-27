@@ -3,18 +3,18 @@
   "cases": [
     {
       "why": "a named mark with no attrs at all",
-      "bad": "x[\"underline\"]",
-      "good": "x[\"underline\",{}]"
+      "bad": "x[\"sparkle\"]",
+      "good": "x[\"sparkle\",{}]"
     },
     {
       "why": "a named mark with three fields",
-      "bad": "x[\"underline\",{},1]",
-      "good": "x[\"underline\",{}]"
+      "bad": "x[\"sparkle\",{},1]",
+      "good": "x[\"sparkle\",{}]"
     },
     {
       "why": "attrs that are not an object",
-      "bad": "x[\"underline\",[]]",
-      "good": "x[\"underline\",{}]"
+      "bad": "x[\"sparkle\",[]]",
+      "good": "x[\"sparkle\",{}]"
     },
     {
       "why": "a name with a Yjs operation separator",
@@ -28,8 +28,8 @@
     },
     {
       "why": "a name that starts with a digit",
-      "bad": "x[\"1underline\",{}]",
-      "good": "x[\"_underline\",{}]"
+      "bad": "x[\"1sparkle\",{}]",
+      "good": "x[\"_sparkle\",{}]"
     },
     {
       "why": "a name longer than 64 characters",
@@ -58,8 +58,8 @@
     },
     {
       "why": "a second copy of one descriptor",
-      "bad": "x[\"underline\",{}]x[\"underline\",{}]",
-      "good": "x[\"underline\",{}]x[\"underlined\",{}]"
+      "bad": "x[\"sparkle\",{}]x[\"sparkle\",{}]",
+      "good": "x[\"sparkle\",{}]x[\"underlined\",{}]"
     },
     {
       "why": "a second copy of one compact token",

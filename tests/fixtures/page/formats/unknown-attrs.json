@@ -5,7 +5,7 @@
     "pos": "3",
     "c": "one two",
     "m": [
-      [3, "x[\"text_color\",{\"color\":\"red\",\"fallback\":\"#e00\",\"meta\":{\"by\":\"Ada\",\"at\":\"2026-10-24T10:00:00Z\",\"depth\":[1,2,{\"x\":true}]},\"label\":\"網目 🚦\"}]"],
+      [3, "x[\"glow\",{\"color\":\"red\",\"fallback\":\"#e00\",\"meta\":{\"by\":\"Ada\",\"at\":\"2026-10-24T10:00:00Z\",\"depth\":[1,2,{\"x\":true}]},\"label\":\"網目 🚦\"}]"],
       [4, "x[\"annotation\",{\"thread\":\"t-1\",\"notes\":[\"keep\",\"these\"]}]y[\"kept\"]"]
     ]
   },
@@ -14,7 +14,7 @@
     "pos": "3",
     "c": "one two",
     "m": [
-      [3, "x[\"text_color\",{\"color\":\"red\",\"fallback\":\"#e00\",\"meta\":{\"by\":\"Ada\",\"at\":\"2026-10-24T10:00:00Z\",\"depth\":[1,2,{\"x\":true}]},\"label\":\"網目 🚦\"}]"],
+      [3, "x[\"glow\",{\"color\":\"red\",\"fallback\":\"#e00\",\"meta\":{\"by\":\"Ada\",\"at\":\"2026-10-24T10:00:00Z\",\"depth\":[1,2,{\"x\":true}]},\"label\":\"網目 🚦\"}]"],
       [4, "x[\"annotation\",{\"thread\":\"t-1\",\"notes\":[\"keep\",\"these\"]}]y[\"kept\"]"]
     ]
   }
