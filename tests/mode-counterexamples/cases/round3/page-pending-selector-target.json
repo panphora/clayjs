@@ -29,5 +29,17 @@
   "requires": [
     "input-admitted"
   ],
-  "expect": {}
+  "expect": {
+    "mode": "view",
+    "saves": [
+      {
+        "path": "/_/save",
+        "contains": "First edit"
+      },
+      {
+        "path": "/_/live-sync/save",
+        "relayOf": 0
+      }
+    ]
+  }
 }

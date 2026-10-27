@@ -150,20 +150,16 @@ const SETTLED = [
   "seo-unsent-apply-reopen",
   "seo-unsent-close-reopen",
   "ime-unsent-compose-target",
+  "page-pending-selector-target",
 ];
 // The two the driver cannot describe a person doing, which must now say so instead of
 // failing on what it typed into a page that was not there.
 const LIMITATIONS = ["ime-late-commit-after-view", "late-source-chunk-failed"];
-// The page whose text the exit used to drop before: its binding now knows the input it owes
-// the file, so the leave is refused in the page's own name and the text stays in edit. It
-// still waits for the checkpoint that lands it.
-const OPEN = ["page-pending-selector-target"];
-
 test("round 3\u0027s corpus is the round\u0027s own, in its own folder", () => {
   const files = round3Files();
   expect(files.length).toBe(21);
   const ids = files.map((name) => JSON.parse(readFileSync(new URL(name, ROUND3), "utf8")).id);
-  for (const id of [...DEFECTS, ...SETTLED, ...LIMITATIONS, ...OPEN]) expect(ids).toContain(id);
+  for (const id of [...DEFECTS, ...SETTLED, ...LIMITATIONS]) expect(ids).toContain(id);
   // The corpus the checks read above is unchanged by the subfolder.
   expect(readdirSync(DIR).filter((name) => name.endsWith(".json")).length).toBe(cases.length);
 });
@@ -178,14 +174,6 @@ test("round 3\u0027s defect candidates pass now that both defects are fixed", ()
   }
   console.log(lines.join("\n"));
   expect(failing).toEqual([]);
-}, 300000);
-
-test("the open page case ends in a refusal that names page:live", () => {
-  for (const id of OPEN) {
-    const outcome = round3Verdict(`${id}.json`);
-    expect(outcome.status).toBe("passed");
-    expect(propertiesOf(outcome)).toEqual([]);
-  }
 }, 300000);
 
 test("round 3\u0027s oracle bugs and driver limitations no longer fail", () => {

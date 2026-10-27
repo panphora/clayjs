@@ -175,6 +175,34 @@ export function validateCase(json) {
       if (json.expect.canonical !== undefined && typeof json.expect.canonical !== "boolean") {
         fail("bad-expect", "expect.canonical", "expect.canonical asks for the served article back byte for byte");
       }
+      if (json.expect.saves !== undefined) {
+        if (!Array.isArray(json.expect.saves)) {
+          fail("bad-expect", "expect.saves", "expect.saves lists the requests the run must send");
+        } else {
+          json.expect.saves.forEach((entry, index) => {
+            const at = `expect.saves[${index}]`;
+            if (!isObject(entry)) {
+              fail("bad-expect", at, "an expected request is an object");
+              return;
+            }
+            for (const key of Object.keys(entry)) {
+              if (!["path", "contains", "relayOf"].includes(key)) fail("unknown-key", `${at}.${key}`, `an expected request has no "${key}"`);
+            }
+            if (typeof entry.path !== "string" || !entry.path.startsWith("/")) {
+              fail("bad-expect", `${at}.path`, "path is the request path, starting with /");
+            }
+            if (entry.contains !== undefined && (typeof entry.contains !== "string" || !entry.contains)) {
+              fail("bad-expect", `${at}.contains`, "contains is the text the request body carries");
+            }
+            if (entry.relayOf !== undefined && (!Number.isSafeInteger(entry.relayOf) || entry.relayOf < 0)) {
+              fail("bad-expect", `${at}.relayOf`, "relayOf is the index of the save whose bytes and stamp the relay must repeat");
+            }
+            if (entry.contains === undefined && entry.relayOf === undefined) {
+              fail("bad-expect", at, "an expected request says what its body contains or which save it relays");
+            }
+          });
+        }
+      }
     }
   }
 
@@ -351,6 +379,50 @@ function applyInput(element, value) {
   else element.textContent = value;
   element.dispatchEvent(new Event("input", { bubbles: true }));
   return readValue(element) === value;
+}
+
+// Every request a case names, judged from the host's own account: an accepted request to
+// the path whose body carries the text, and a relay whose html and etag are exactly the
+// bytes and stamp of the save it repeats.
+function judgeSaves(expected, result, fail) {
+  const saves = result.calls.filter((call) => call.kind === "save");
+  const accepted = saves.filter((call) => call.status === 200);
+  expected.forEach((want, index) => {
+    const at = `expect.saves[${index}]`;
+    const candidates = accepted.filter((call) => call.path === want.path);
+    if (!candidates.length) {
+      fail(at, `the run sent no accepted request to "${want.path}"`);
+      return;
+    }
+    if (want.contains !== undefined && !candidates.some((call) => call.body.includes(want.contains))) {
+      fail(at, `no accepted request to "${want.path}" carried "${want.contains}"`);
+      return;
+    }
+    if (want.relayOf === undefined) return;
+    const source = saves[want.relayOf];
+    if (!source) {
+      fail(at, `the run sent no save at index ${want.relayOf} for "${want.path}" to relay`);
+      return;
+    }
+    const relay = candidates[0];
+    let parsed = null;
+    try {
+      parsed = JSON.parse(relay.body);
+    } catch {
+      parsed = null;
+    }
+    if (!isObject(parsed)) {
+      fail(at, `the request to "${want.path}" carries no JSON body to relay save ${want.relayOf}`);
+      return;
+    }
+    if (parsed.html !== source.body) {
+      fail(at, `the relay to "${want.path}" carries html that is not the bytes save ${want.relayOf} sent`);
+      return;
+    }
+    if (parsed.etag !== source.etag) {
+      fail(at, `the relay to "${want.path}" carries etag ${JSON.stringify(parsed.etag)}, not the stamp ${JSON.stringify(source.etag)} save ${want.relayOf}'s response named`);
+    }
+  });
 }
 
 function reached(trace, requirement) {
@@ -727,6 +799,11 @@ export async function runCase(json) {
     }
     if (expected.writes !== undefined && expected.writes !== result.writes) {
       result.errors.push({ code: "expect-writes", path: "expect.writes", message: `the run sent ${result.writes} save requests, not ${expected.writes}` });
+    }
+    if (Array.isArray(expected.saves)) {
+      judgeSaves(expected.saves, result, (path, message) => {
+        result.errors.push({ code: "expect-saves", path, message });
+      });
     }
 
     return { status: result.errors.length ? "failed" : "passed", trace, result };

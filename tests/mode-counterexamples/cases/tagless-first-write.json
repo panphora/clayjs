@@ -10,5 +10,11 @@
     { "op": "settle", "ms": 200 }
   ],
   "requires": ["input-admitted", "save-request-sent"],
-  "expect": { "mode": "view" }
+  "expect": {
+    "mode": "view",
+    "saves": [
+      { "path": "/_/save", "contains": "First edit" },
+      { "path": "/_/live-sync/save", "relayOf": 0 }
+    ]
+  }
 }
