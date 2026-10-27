@@ -14,7 +14,7 @@
  * state and the receipt arrive in the proof itself.
  */
 
-import { encodeStateAsUpdateV2, mergeUpdatesV2 } from "../../vendor/yjs.vendor.js";
+import { Doc, applyUpdateV2, encodeStateAsUpdateV2, equalSnapshots, snapshot } from "../../vendor/yjs.vendor.js";
 import { docFromValue } from "./provider.js";
 
 export class PageProofError extends Error {
@@ -40,7 +40,10 @@ const copyState = (state) => ({ v: state.v, g: state.g, y: { ...(state.y ?? {}) 
 export const equalBytes = (a, b) => a.length === b.length && a.every((value, index) => value === b[index]);
 
 /**
- * Whether merging `update` into `checkpoint` adds nothing: no insertion, no deletion.
+ * Whether applying `update` on top of `checkpoint` adds nothing: no insertion, no
+ * deletion. Compared by structure (state vector and delete set), since merged bytes are
+ * not stable across merge orders. An update whose dependencies the checkpoint lacks is
+ * not contained: Yjs would hold it pending rather than refuse it.
  *
  * @param {Uint8Array} checkpoint - canonical or merged Yjs V2 update bytes
  * @param {Uint8Array} update - the bytes to look for
@@ -48,9 +51,17 @@ export const equalBytes = (a, b) => a.length === b.length && a.every((value, ind
  * @returns {boolean}
  */
 export function containsUpdate(checkpoint, update, Yjs = null) {
-  const merge = Yjs?.mergeUpdatesV2 ?? mergeUpdatesV2;
-  const canonical = merge([checkpoint]);
-  return equalBytes(canonical, merge([canonical, update]));
+  const Y = Yjs ?? { Doc, applyUpdateV2, snapshot, equalSnapshots };
+  const doc = new Y.Doc({ gc: false });
+  try {
+    Y.applyUpdateV2(doc, checkpoint);
+    const before = Y.snapshot(doc);
+    Y.applyUpdateV2(doc, update);
+    if (doc.store.pendingStructs || doc.store.pendingDs) return false;
+    return Y.equalSnapshots(before, Y.snapshot(doc));
+  } finally {
+    doc.destroy();
+  }
 }
 
 export async function digestHex(bytes) {

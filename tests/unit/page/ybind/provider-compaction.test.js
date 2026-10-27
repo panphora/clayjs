@@ -109,6 +109,31 @@ test("an altered fold part never retires the originals", () => {
   expect(store.value.y[part]).toBe(altered.y[part]);
 });
 
+test("a fold whose inputs were rewritten is abandoned once its parts arrive", () => {
+  const { store, ydoc, provider } = start();
+  for (let i = 0; i < 40; i++) ydoc.getText("flow").insert(i, "x");
+  const inputs = clone(store.value.y);
+  echo(store);
+  expect(provider.stats.compactions).toBe(1);
+  const [part] = keysUnder(store.value, "m");
+  const partValue = store.value.y[part];
+  const keys = Object.keys(inputs).filter((k) => k[0] === "u");
+  const rewritten = enc(Y.mergeUpdatesV2([Y.fromBase64(inputs[keys[0]]), Y.fromBase64(inputs[keys[1]])]));
+
+  confirm(store, { v: 1, g: 0, y: { ...clone(inputs), [keys[0]]: rewritten, [part]: partValue } });
+
+  expect(store.value.y[keys[0]]).toBe(rewritten);
+  expect(keysUnder(store.value, "u").length).toBe(40);
+  expect(keysUnder(store.value, "m")).toEqual([]);
+  expect(textOf(store.value)).toBe("x".repeat(40));
+
+  for (let i = 40; i < 80; i++) ydoc.getText("flow").insert(i, "x");
+  echo(store);
+  expect(provider.stats.compactions).toBe(2);
+  expect(keysUnder(store.value, "m").length).toBe(1);
+  expect(textOf(store.value)).toBe("x".repeat(80));
+});
+
 test("an edit made during a fold survives it", () => {
   const { store, ydoc, provider } = start();
   for (let i = 0; i < 40; i++) ydoc.getText("flow").insert(i, "x");

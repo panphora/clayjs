@@ -241,7 +241,15 @@ export function createYProvider({ store, ydoc, compact: limits = {}, setTimer = 
       prune();
       return true;
     }
-    if (store.pending.length || !stillHeld(auth, active) || !coversInputs(active)) return false;
+    if (store.pending.length) return false;
+    if (!stillHeld(auth, active) || !coversInputs(active)) {
+      // A fold that can never speak for its inputs is re-planned, never held.
+      fold = null;
+      if (arrived.length) retire(auth, arrived.map(([k]) => k));
+      quietUntil = entriesOf(auth).length + compact.keys;
+      prune();
+      return true;
+    }
     fold = null;
     retire(auth, keysOf(auth, active.inputs));
     prune();

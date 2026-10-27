@@ -97,6 +97,71 @@ test("an insertion is covered and the deletion that follows it is not", async ()
   expect(await validatePageCheckpoint(older, [{ id: "typed", revision: 1 }, { id: "removed", revision: 2 }])).toEqual([{ id: "typed", revision: 1 }]);
 });
 
+// Coverage is a question about structure: which insertions and which deletions the
+// checkpoint already holds. Merged bytes are not stable across merge orders, so the same
+// contained update can be a different length depending on how it was merged.
+test("a contained update is one the checkpoint already holds, whatever its bytes", () => {
+  const doc = page(5);
+  const updates = [];
+  doc.on("updateV2", (u) => updates.push(u));
+  const text = doc.getText("flow");
+  text.insert(0, "hello");
+  text.insert(5, " world");
+  text.delete(0, 2);
+  text.format(0, 3, { bold: true });
+  const whole = Y.encodeStateAsUpdateV2(doc);
+
+  expect(containsUpdate(whole, whole, Y)).toBe(true);
+  expect(containsUpdate(whole, Y.mergeUpdatesV2(updates), Y)).toBe(true);
+
+  const inserted = page(5);
+  inserted.getText("flow").insert(0, "hello world");
+  const added = page(6);
+  added.getText("flow").insert(0, "!");
+  expect(containsUpdate(Y.encodeStateAsUpdateV2(inserted), Y.encodeStateAsUpdateV2(added), Y)).toBe(false);
+
+  const removed = page(7);
+  Y.applyUpdateV2(removed, whole);
+  removed.getText("flow").delete(0, 2);
+  expect(containsUpdate(whole, Y.diffUpdateV2(Y.encodeStateAsUpdateV2(removed), whole), Y)).toBe(false);
+
+  const base = page(8);
+  base.getText("flow").insert(0, "ab");
+  const peer = page(9);
+  Y.applyUpdateV2(peer, Y.encodeStateAsUpdateV2(base));
+  let dependent = null;
+  peer.on("updateV2", (u) => { dependent = u; });
+  peer.getText("flow").insert(2, "c");
+  expect(containsUpdate(whole, dependent, Y)).toBe(false);
+});
+
+// The same work merged in two different orders, with the same insertions and deletions and
+// different bytes: only a structural comparison says the shorter one is covered.
+test("a contained update merged in two different orders is contained", () => {
+  const mine = page(5);
+  const peer = page(9);
+  const updates = [];
+  mine.on("updateV2", (u) => updates.push(u));
+  peer.on("updateV2", (u) => updates.push(u));
+  for (let i = 0; i < 20; i++) {
+    mine.getText("flow").insert(i, "x");
+    if (i % 5 !== 4) continue;
+    Y.applyUpdateV2(peer, Y.encodeStateAsUpdateV2(mine));
+    peer.getText("flow").insert(0, "B");
+    Y.applyUpdateV2(mine, Y.encodeStateAsUpdateV2(peer));
+  }
+  peer.getText("flow").delete(0, 5);
+  Y.applyUpdateV2(mine, Y.encodeStateAsUpdateV2(peer));
+  const whole = Y.encodeStateAsUpdateV2(mine);
+  const forward = Y.mergeUpdatesV2(updates);
+  const backward = Y.mergeUpdatesV2([...updates].reverse());
+
+  expect(equalBytes(forward, backward)).toBe(false);
+  expect(equalBytes(forward, whole)).toBe(false);
+  expect(containsUpdate(whole, forward, Y)).toBe(true);
+  expect(containsUpdate(whole, backward, Y)).toBe(true);
+});
+
 test("a received dependency is what lets a local insert be replayed", () => {
   const baseDoc = page(3);
   baseDoc.getText("flow").insert(0, "ab");
