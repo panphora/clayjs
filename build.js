@@ -12,7 +12,7 @@
 //
 //   public/
 //     index.html …                     the site, from website/, flattened
-//     index.md visual-guide.md         each page's Markdown twin (scripts/site-docs.mjs)
+//     index.md                        homepage Markdown twin (scripts/site-docs.mjs)
 //     THIRD-PARTY-NOTICES.md           linked from the site footer
 //     _headers _redirects              from website/
 //     v1/     clay.js clay.standalone.js …  src/**   latest 1.x, what everyone is told to use
@@ -638,7 +638,7 @@ if (ruleCount > 90) {
 // broken. _headers earns its own check twice over: without it the site serves no
 // Cache-Control and, worse, no Access-Control-Allow-Origin on the module tree,
 // which silently breaks every page loading clay.js from another origin.
-const required = ['_headers', 'index.html', 'THIRD-PARTY-NOTICES.md', 'visual-guide.html', 'visual-guide.md', 'index.md', '_redirects', 'copy-markdown.js', 'examples/skeleton.html'];
+const required = ['_headers', 'index.html', 'THIRD-PARTY-NOTICES.md', 'index.md', '_redirects', 'copy-markdown.js', 'examples/skeleton.html'];
 const served = [...[...heads].map(([major, v]) => [`v${major}`, v]), ...pins.map((v) => [v, v])];
 for (const [prefix, version] of served) {
   required.push(`${prefix}/clay.js`, `${prefix}/src/loader.js`, `${prefix}/sap.js`);

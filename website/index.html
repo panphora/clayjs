@@ -43,9 +43,9 @@
   <aside class="rail" aria-label="Page outline">
     <div class="rail-title">Outline</div>
     <a href="#concept">The idea</a>
-    <a href="#save">1 · Make it save</a>
-    <a href="#feedback">2 · Know it saved</a>
-    <a href="#document">3 · Make it a document</a>
+    <a href="#save">Make it save</a>
+    <a href="#feedback">Know it saved</a>
+    <a href="#document">Make it a document</a>
     <a href="#next-problems">What you'll hit next</a>
     <a href="#regions">What gets saved</a>
     <a href="#configure">Get your script tag</a>
@@ -83,14 +83,14 @@
 &lt;/html&gt;</code></pre>
     <p>That's a complete app. Type into the heading, hit Save, refresh: your words are still there. The file saved itself.</p>
     <p style="margin-top: 18px;">
-      <a class="btn primary" href="#save" style="text-decoration: none; display: inline-block;">Start the tutorial</a>
+      <a class="btn primary" href="/docs/guide/quick-start/" style="text-decoration: none; display: inline-block;">Get started</a>
       <a class="btn ghost" href="#configure" style="text-decoration: none; display: inline-block; margin-left: 6px;">Get your script tag</a>
     </p>
   </section>
 
   <!-- ================= CONCEPT ================= -->
   <section id="concept">
-    <p style="font-size: 19px;">A malleable document is an HTML file that can save itself. There is no database and no build step. The page you're looking at <em>is</em> the data. When you save, clayjs snapshots the page's HTML, cleans it up, and POSTs it back to the server it came from, which writes it to disk. Next load, the file opens exactly the way you left it.</p>
+    <p>Try the interactive demos, then follow the guide to build your own HTML file that edits and saves itself: <a href="/docs/guide/quick-start/">Get started</a>.</p>
   </section>
 
   <!-- ================= QUOTE: KAMI ================= -->
@@ -102,40 +102,14 @@
 
   <!-- ================= STEP 1: SAVE ================= -->
   <section id="save">
-    <h2 class="eyebrow">Step 1 · Make it save</h2>
-    <p class="problem">You changed the page, and a refresh throws it away.</p>
-    <p>Add the script tag, then call <code>clay.save()</code> whenever you want to persist the page. Wire it to a button, a keystroke, or your own logic:</p>
-    <pre><code class="language-markup">&lt;script src="https://clayjs.com/v1/clay.js"&gt;&lt;/script&gt;
-&lt;button onclick="clay.save()"&gt;Save&lt;/button&gt;
-
-&lt;script type="module"&gt;
-  // or from your own code, with the server's answer:
-  await clay.ready;
-  const { msg, msgType } = await clay.save();
-&lt;/script&gt;</code></pre>
-    <h3>What actually happens</h3>
-    <p>clayjs POSTs the file's own HTML as plain text to <code>/_/save</code> on the server it was loaded from, identifies the document with the <code>Document-URL</code> header, includes same-origin cookies, and treats the HTTP status as authoritative. A 2xx response accepts the save and normally includes JSON such as <code>{ "msg": "Saved" }</code>; any non-2xx refuses or fails it, even when a proxy returns HTML instead of JSON. That's the whole core protocol. Anything that implements that one endpoint can host malleable files:</p>
-    <table>
-      <tr><th>Server</th><th>What it is</th></tr>
-      <tr><td><strong><a href="https://hyperclay.com">hyperclay.com</a></strong></td><td>Hosted platform: accounts, versions, sharing</td></tr>
-      <tr><td><strong><a href="https://hyperclaylocal.com/">Hyperclay Local</a></strong></td><td>Desktop app that serves a folder on your machine</td></tr>
-      <tr><td><strong><a href="https://htmlclay.com/">HTML Clay</a></strong></td><td>Desktop app: double-click a .htmlclay file and it just saves</td></tr>
-      <tr><td><strong>Your own</strong></td><td>About 20 lines of Express. <a href="/docs/endpoint/">Endpoint spec</a>. On your own server you also arm <a href="/docs/edit-mode/">edit mode</a> yourself, with one line before the script tag.</td></tr>
-    </table>
+    <h2 class="section-title">Make it save</h2>
+    <p>Keep your edits in the HTML file itself. ClayJS sends the document to its host, which writes the updated file. Choose when to save, or turn on autosave. <a href="/docs/guide/saving/">See how saving works</a>.</p>
   </section>
 
   <!-- ================= STEP 2: FEEDBACK ================= -->
   <section id="feedback">
-    <h2 class="eyebrow">Step 2 · Know it saved</h2>
-    <p class="problem">You hit save. Did it work?</p>
-    <p>clayjs never draws its own interface. Instead it keeps a <code>savestatus</code> attribute on <code>&lt;html&gt;</code> up to date (<code>saving</code>, <code>saved</code>, <code>error</code>, <code>offline</code>), and you decide what that looks like. Paste this CSS and you have a status chip, no JavaScript needed:</p>
-    <pre><code class="language-css">html[savestatus] body::after {
-  position: fixed; right: 16px; bottom: 16px;
-  padding: 4px 12px; border-radius: 99px; font: 13px system-ui;
-}
-html[savestatus="saving"] body::after { content: "Saving…"; background: #eee; }
-html[savestatus="saved"]  body::after { content: "Saved"; background: #dcefe0; color: #2f5d3a; }
-html[savestatus="error"]  body::after { content: "Couldn't save"; background: #f6e3de; color: #a04f38; }</code></pre>
+    <h2 class="section-title">Know it saved</h2>
+    <p>Show when a save is in progress, when it succeeds, and when something needs attention. Use ClayJS save status to build feedback that fits your page. <a href="/docs/guide/saving/#save-status">See save status and events</a>.</p>
     <div class="sheet live" id="chip-sheet">
       <span class="filename">notes.html</span>
       <span class="realbadge">saved in your browser</span>
@@ -144,55 +118,23 @@ html[savestatus="error"]  body::after { content: "Couldn't save"; background: #f
       <button type="button" class="btn" id="chip-fail">Save (server down)</button>
       <span class="chip" role="status" clay="no-save no-watch no-snapshot"></span>
     </div>
-    <p class="small">The chip is yours: restyle it, move it, delete it. One caveat: generated content is decoration, so a screen reader never announces it. If the save state matters to everyone, put a real element on the page and write it from the events instead, which is what the demo chips above do:</p>
-    <pre><code class="language-markup">&lt;span id="status" role="status" clay="no-save no-watch no-snapshot"&gt;&lt;/span&gt;
-&lt;script&gt;
-  status.textContent = "";
-  document.addEventListener("clay:save-saved", () =&gt; status.textContent = "Saved");
-  document.addEventListener("clay:save-error", () =&gt; status.textContent = "Couldn't save");
-&lt;/script&gt;</code></pre>
-    <p class="small">The <code>clay="no-save no-watch no-snapshot"</code> is the important part: this element is written <em>after</em> the save baseline is taken, so without it every successful save would leave the page looking unsaved again.</p>
-    <p><strong>Don't want to touch CSS?</strong> Check <em>“a built-in save indicator”</em> in the <a href="#configure">configurator</a> and clayjs ships a small ready-made one.</p>
-    <details class="fold" onbeforesnapshot="this.removeAttribute('open')">
-      <summary><span class="prob">Roll your own</span><span class="sol">events + promise</span></summary>
-      <div class="fold-body">
-        <p>Every save fires events on <code>document</code> and returns a promise, so any UI you already have can listen in:</p>
-        <pre><code class="language-javascript">document.addEventListener("clay:save-saved", () =&gt; myToast("Saved"));
-document.addEventListener("clay:save-error", e =&gt; myToast(e.detail.msg));
-
-// or handle it inline:
-const { msg, msgType } = await clay.save();</code></pre>
-        <p class="small">Events: <code>clay:save-saving</code>, <code>clay:save-saved</code>, <code>clay:save-error</code>, <code>clay:save-offline</code>. Each carries <code>detail.msg</code>.</p>
-      </div>
-    </details>
-    <details class="fold" onbeforesnapshot="this.removeAttribute('open')">
-      <summary><span class="prob">When it fails</span><span class="sol">error + offline</span></summary>
-      <div class="fold-body">
-        <p><code>savestatus="error"</code> means the server answered with a problem; the message is in the event's <code>detail.msg</code>. <code>savestatus="offline"</code> means the request couldn't get out at all. And if someone closes the tab with unsaved changes, clayjs warns them first.</p>
-      </div>
-    </details>
   </section>
 
   <!-- ================= STEP 3: DOCUMENT ================= -->
   <section id="document">
-    <h2 class="eyebrow">Step 3 · Make it a document</h2>
-    <p class="problem">A page you can't type into isn't a document.</p>
-    <p>Put <code>editable</code> on anything: it becomes rich text you can type into, with bold, italics, lists, and links. Form controls need one attribute, <code>persist</code>, which writes their current value into the HTML itself so it survives the save:</p>
-    <pre><code class="language-markup">&lt;p editable&gt;Meeting notes for Tuesday…&lt;/p&gt;
-&lt;input name="title" persist&gt;
-&lt;textarea name="draft" persist&gt;&lt;/textarea&gt;</code></pre>
+    <h2 class="section-title">Make it a document</h2>
+    <p>Type directly into a heading, format a note, or fill in a form. ClayJS can save the text and field values as part of the document. <a href="/docs/guide/quick-start/">Build your first editable file</a>.</p>
     <div class="sheet live" id="doc-sheet">
       <span class="filename">meeting.html</span>
       <span class="realbadge">saved in your browser</span>
-      <p editable spellcheck="false" style="margin-bottom: 10px;">Meeting notes for Tuesday…</p>
-      <input id="doc-input" name="title" persist placeholder="title" style="font: 15px var(--serif); padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; margin-bottom: 14px; width: 60%; background: #fff;">
+      <p editable="" spellcheck="false" style="margin-bottom: 10px;">Meeting notes for Tuesday…</p>
+      <input id="doc-input" name="title" persist="" placeholder="title" style="font: 15px var(--serif); padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; margin-bottom: 14px; width: 60%; background: #fff;">
       <div>
-        <button type="button" class="btn primary" id="doc-save" trigger-save>Save</button>
+        <button type="button" class="btn primary" id="doc-save" trigger-save="">Save</button>
         <button type="button" class="btn" id="doc-reload" title="Reloads the page; the file comes back from its last save">Reload file</button>
       </div>
       <span class="chip" role="status" clay="no-save no-watch no-snapshot"></span>
     </div>
-    <p class="small">Edit both, save, then reload: everything survives. Reload <em>without</em> saving and your changes are gone.</p>
   </section>
 
   <!-- ================= NEXT PROBLEMS ================= -->
@@ -261,20 +203,7 @@ const { msg, msgType } = await clay.save();</code></pre>
   <!-- ================= REGIONS ================= -->
   <section id="regions">
     <h2 class="section-title">Control what gets saved</h2>
-    <p class="problem">Some parts of the page shouldn't be part of the document.</p>
-    <p>A search box, a connection badge, a ticking clock: they live on the page but they aren't content. One attribute, <code>clay</code>, tells clayjs how any element takes part in saving:</p>
-    <pre><code class="language-markup">&lt;nav clay="no-save no-watch"&gt; …toolbar, never written to disk… &lt;/nav&gt;
-&lt;span clay="freeze"&gt;12:04:33&lt;/span&gt;  &lt;!-- saved as authored, ticking ignored --&gt;
-&lt;div clay="no-watch"&gt; …a third-party widget that churns the DOM… &lt;/div&gt;</code></pre>
-    <div class="recipes">
-      <span class="r-title">Recipes</span>
-      UI chrome (toolbars, badges) <span class="arrow">→</span> clay="no-save no-watch"<br>
-      Live or computed text (clocks) <span class="arrow">→</span> clay="freeze"<br>
-      Third-party embeds <span class="arrow">→</span> clay="no-watch"<br>
-      Heavy editors, batch the saves <span class="arrow">→</span> clay="no-trigger-autosave"<br>
-      Self-rendering UI (filter bars) <span class="arrow">→</span> clay="no-dirty"
-    </div>
-    <p class="small">Seven keywords total: <code>no-save</code>, <code>no-snapshot</code>, <code>no-trigger-autosave</code>, <code>no-dirty</code>, <code>no-watch</code>, <code>no-undo</code>, <code>freeze</code>. Full reference on the <a href="/docs/regions/">advanced page</a>.</p>
+    <p>Keep temporary controls and status displays out of the saved document while preserving your content. Regions let you choose how each part of the page participates in saving. <a href="/docs/regions/">Explore regions</a>.</p>
   </section>
 
   <!-- ================= CONFIGURATOR ================= -->

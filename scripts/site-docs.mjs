@@ -1,10 +1,10 @@
 // The Markdown face of clayjs.com.
 //
-// Every doc page gets a Markdown twin at the same path with .md (/visual-guide -> /visual-guide.md),
+// The homepage gets a Markdown twin at /index.md,
 // advertised by <link rel="alternate" type="text/markdown"> and copied by the
 // "Copy as Markdown" button that /copy-markdown.js puts on the page. The twins are
-// generated from the built HTML, never written by hand, so an agent reading /visual-guide.md
-// reads what a person sees on /visual-guide.
+// generated from the built HTML, never written by hand. Documentation pages and their
+// Markdown twins are built by hyperclay-docs.
 
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
@@ -16,7 +16,7 @@ const SITE = 'https://clayjs.com';
 
 // Pages with a Markdown twin and the copy button. my-list is a live app, not a doc,
 // and the examples are apps whose source is the point.
-export const DOC_PAGES = ['index', 'visual-guide'];
+export const DOC_PAGES = ['index'];
 
 export function pageToMarkdown(html, url) {
   const doc = new JSDOM(html).window.document;
