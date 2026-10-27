@@ -151,6 +151,9 @@ const SETTLED = [
   "seo-unsent-close-reopen",
   "ime-unsent-compose-target",
   "page-pending-selector-target",
+  // A bare editmode:contenteditable takes its inert form in view, the form the file saves
+  // (canonicalContentEditable), so the live page matches the saved bytes, not the served ones.
+  "bare-contenteditable-gains-inert",
 ];
 // The two the driver cannot describe a person doing, which must now say so instead of
 // failing on what it typed into a page that was not there.

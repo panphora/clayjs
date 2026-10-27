@@ -25,7 +25,6 @@
   ],
   "expect": {
     "mode": "view",
-    "writes": 0,
-    "canonical": true
+    "writes": 0
   }
 }
