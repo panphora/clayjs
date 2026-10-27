@@ -122,7 +122,7 @@ test("a deliberately invalid envelope is refused and the source file is left as 
   const value = seedValue([{ id: "p", text: "before" }]);
   const cases = [
     ["not base64url JSON", `<div data-id="q" ${OPAQUE}="1" ${VALUE}="!!">text</div>`],
-    ["a record naming a known block type", `<div data-id="q" ${envelopeOf({ t: "paragraph", c: "x" })}>text</div>`],
+    ["a malformed record naming a known block type", `<div data-id="q" ${envelopeOf({ t: "toc", c: "x" })}>text</div>`],
     ["a record with a structural position", `<div data-id="q" ${envelopeOf({ t: "quote", pos: "1" })}>text</div>`],
     ["JSON deeper than the budget", `<div data-id="q" ${envelopeOf({ t: "quote", extra: JSON.parse('{"a":'.repeat(40) + "1" + "}".repeat(40)) })}>text</div>`],
     ["entries that are not a marks envelope", `<p data-id="p"><span ${MARKS}="${b64encode('{"name":"x"}')}">before</span></p>`],

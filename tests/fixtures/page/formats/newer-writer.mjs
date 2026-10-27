@@ -2,8 +2,8 @@
  * The fixture newer writer: content from a format release after R, written and
  * read only through the generic extension contract.
  *
- * R is the tolerance release, so it has no native mention mark, no table of
- * contents block and no title icon. A later writer does. This module is that
+ * R is the tolerance release, so it has no native mention mark, no
+ * future_block block and no title icon. A later writer does. This module is that
  * later writer's own copy of the format: it declares the records, writes them
  * through the runtime's public projection, and reads them back out of whatever
  * article an R runtime produced. It is a fixture, not production code, and it
@@ -14,7 +14,7 @@
 export const NEWER_FORMAT = Object.freeze({
   floor: 1,
   marks: ["mention"],
-  blocks: ["toc"],
+  blocks: ["future_block"],
   fields: ["maxLevel", "pageIcon", "pageCoverSrc", "pageCoverAlt", "pageCoverX", "pageCoverY"],
 });
 

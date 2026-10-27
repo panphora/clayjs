@@ -408,7 +408,7 @@ async function scenarioOffline(rt, input) {
     must(!/clay="live"/.test(withoutTags), "a live page tag survived the reader's view");
     must(/data-rev="/.test(withoutTags), "the reader lost the article");
     const items = parseArticle(rt, articleInside(withoutTags), rev);
-    const opaque = items.find((item) => item.t === "toc");
+    const opaque = items.find((item) => item.t === "future_block");
     must(opaque, "the reader lost the block it cannot draw");
     const text = opaque.c ?? "";
     must(text.length > 0, "the block the reader cannot draw has no readable fallback");
@@ -422,7 +422,7 @@ async function scenarioOffline(rt, input) {
       .map((match) => JSON.parse(Buffer.from(match[1], "base64url").toString("utf8")));
     must(records.length > 0, "the article has no envelope");
     output.envelopes = Object.fromEntries(records.map((record) => [record.t, record]));
-    const record = output.envelopes.toc;
+    const record = output.envelopes.future_block;
     must(record, "no envelope carries the block the reader cannot draw");
     must(record.maxLevel === 3 && (record.c ?? null) === output.fallback, "the envelope did not carry the whole record");
     return canon(record);

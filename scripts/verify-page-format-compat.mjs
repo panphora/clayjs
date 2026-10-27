@@ -352,8 +352,8 @@ function offlineReader(newer) {
     return offline.output.fallback;
   });
   cell("offline-reader", current, "the inert envelope carries the whole record", () => {
-    const record = offline.output.envelopes.toc;
-    must(record && record.t === "toc" && record.maxLevel === 3, "the envelope lost the record");
+    const record = offline.output.envelopes.future_block;
+    must(record && record.t === "future_block" && record.maxLevel === 3, "the envelope lost the record");
     return canon(record);
   });
   cell("offline-reader", current, "commands that would rewrite the block are refused", () => {

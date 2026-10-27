@@ -14,6 +14,7 @@ import * as chartModule from "../../../../src/page/features/chart.js";
 import * as checklistModule from "../../../../src/page/features/checklist.js";
 import * as codeModule from "../../../../src/page/features/code.js";
 import * as mediaModule from "../../../../src/page/features/media.js";
+import * as tocModule from "../../../../src/page/features/toc.js";
 import * as toolModule from "../../../../src/page/features/tool.js";
 
 const ROOT = new URL("../../../../", import.meta.url).pathname;
@@ -168,6 +169,7 @@ test("a host-local runtime prefix activates every feature without reaching clayj
     "src/page/features/checklist.js": checklistModule,
     "src/page/features/code.js": codeModule,
     "src/page/features/media.js": mediaModule,
+    "src/page/features/toc.js": tocModule,
     "src/page/features/tool.js": toolModule,
   };
   const requested = [];
@@ -196,7 +198,7 @@ test("a host-local runtime prefix activates every feature without reaching clayj
 
   try {
     const ids = Object.keys(FEATURES).sort();
-    expect(ids).toEqual(["board", "chart", "checklist", "code", "media", "table", "tool"]);
+    expect(ids).toEqual(["board", "chart", "checklist", "code", "media", "table", "toc", "tool"]);
     for (const id of ids) {
       expect(await loader.ensure(id)).toBeTruthy();
       expect(loader.has(id)).toBe(true);

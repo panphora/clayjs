@@ -20,7 +20,7 @@ test("a search of three or more letters also matches words in the descriptions, 
   expect(keys("picture")).toEqual(["image"]);
   expect(keys("tasks")).toEqual(["check"]);
   expect(keys("heading").slice(0, 3)).toEqual(["h1", "h2", "h3"]);
-  expect(keys("table")).toEqual(["table", "csv"]);
+  expect(keys("table")).toEqual(["table", "toc", "csv"]);
 });
 
 test("one and two letter searches ignore descriptions", () => {

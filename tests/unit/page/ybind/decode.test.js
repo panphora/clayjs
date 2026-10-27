@@ -80,6 +80,7 @@ test("covers file blocks, every supported top-level type, and UTF-16 mark length
   record.blocks.download = { t: "file", pos: "U", src: "/file.txt", name: "file.txt", size: 123, mime: "text/plain" };
   record.blocks.unicode = { t: "paragraph", pos: "V", c: "😀\uFFFC", m: [[2, "s"], [1, ""]] };
   record.blocks.quoted = { t: "quote", pos: "W", c: "quoted" };
+  record.blocks.contents = { t: "toc", pos: "X", maxLevel: 3 };
   const { value, expected } = fixture(record);
   const actual = blocksFromYValue(value);
   expect(new Set(Object.values(actual).map((block) => block.t))).toEqual(new Set(Object.keys(DEFAULTS)));

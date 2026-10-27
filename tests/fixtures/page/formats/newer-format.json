@@ -14,7 +14,7 @@
         [11, ""]
       ]
     },
-    "t": { "t": "toc", "pos": "00000002", "c": "Contents", "maxLevel": 3 },
+    "t": { "t": "future_block", "pos": "00000002", "c": "Contents", "maxLevel": 3 },
     "h": {
       "t": "heading",
       "pos": "00000000",
