@@ -11,6 +11,5 @@
     { "op": "settle" }
   ],
   "requires": ["save-response", "reload", "transition"],
-  "expect": { "mode": "view", "writes": 1 },
-  "knownFailing": "invalid: the driver boots a page once and has no reload op, so the same accepted bytes are never served to a second boot"
+  "expect": { "mode": "view", "writes": 1 }
 }

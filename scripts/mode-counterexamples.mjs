@@ -69,10 +69,12 @@ async function browserEnvironment() {
   });
   const { window } = dom;
   // jsdom's own scheduling calls back into the global, so the few globals it needs to
-  // reach are kept as Node's: taking its `queueMicrotask` would make it call itself.
+  // reach are kept as Node's: taking its timers would make it call itself, and the case's
+  // clock owns them from installClock on anyway.
   const kept = { queueMicrotask: globalThis.queueMicrotask, setImmediate: globalThis.setImmediate };
+  const SKIP = new Set(["globalThis", "queueMicrotask", "setTimeout", "clearTimeout", "setInterval", "clearInterval"]);
   for (const key of Object.getOwnPropertyNames(window)) {
-    if (key === "globalThis" || key === "queueMicrotask") continue;
+    if (SKIP.has(key)) continue;
     try {
       Object.defineProperty(globalThis, key, { configurable: true, writable: true, value: window[key] });
     } catch {}
@@ -88,6 +90,8 @@ function installClock(window) {
   let sequence = 0;
   let now = 0;
   const timers = new Map();
+  const real = {};
+  let installed = false;
   // A page that builds its editor imports modules while the case is running, and an
   // import only lands on a real turn of the event loop: the drain takes both, so a boot
   // that downloads is not mistaken for one that hung.
@@ -130,12 +134,36 @@ function installClock(window) {
     clearInterval: (id) => cancel(id),
     advance,
   };
-  for (const owner of [globalThis, window]) {
-    owner.setTimeout = api.setTimeout;
-    owner.clearTimeout = api.clearTimeout;
-    owner.setInterval = api.setInterval;
-    owner.clearInterval = api.clearInterval;
-  }
+  // The page boots on the platform's own timers, as it does under Jest: the clock is
+  // installed when the driver starts the case, after the boot it lent real time. The
+  // page reads wall time too — the autosave scheduler decides when it may save by
+  // comparing performance.now() with the moment it noted the edit — so the clock moves
+  // the wall clocks along with the timers, as Jest's fake timers do.
+  const realNow = Date.now;
+  const realPerformanceNow = [globalThis, window]
+    .map((owner) => [owner.performance, owner.performance?.now])
+    .filter(([, now]) => typeof now === "function");
+  api.install = () => {
+    for (const owner of [globalThis, window]) {
+      for (const name of ["setTimeout", "clearTimeout", "setInterval", "clearInterval"]) {
+        if (!installed) real[name] ??= owner[name];
+        owner[name] = api[name];
+      }
+    }
+    Date.now = () => now;
+    for (const [performance] of realPerformanceNow) performance.now = () => now;
+    installed = true;
+  };
+  api.stop = () => {
+    for (const owner of [globalThis, window]) {
+      for (const name of ["setTimeout", "clearTimeout", "setInterval", "clearInterval"]) {
+        if (real[name]) owner[name] = real[name];
+      }
+    }
+    Date.now = realNow;
+    for (const [performance, performanceNow] of realPerformanceNow) performance.now = performanceNow;
+    installed = false;
+  };
   return api;
 }
 
@@ -155,8 +183,8 @@ async function runOne(flags) {
   const { runCase } = await import("../tests/mode-counterexamples/driver.mjs");
   setHarness({
     resetModules: () => {},
-    startClock: () => {},
-    stopClock: () => {},
+    startClock: () => clock.install(),
+    stopClock: () => clock.stop(),
     advance: (ms) => clock.advance(ms),
   });
 

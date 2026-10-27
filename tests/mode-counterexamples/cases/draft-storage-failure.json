@@ -1,14 +1,15 @@
 {
   "schema": 1,
   "id": "draft-storage-failure",
-  "fixture": "persist-host",
+  "fixture": "draft-host",
   "boot": { "mode": "view", "live": true, "destination": "host" },
   "steps": [
-    { "op": "enter" },
-    { "op": "unsent", "field": "description", "value": "Draft text" },
+    { "op": "settle", "ms": 200 },
+    { "op": "input", "target": "title", "value": "Draft text" },
+    { "op": "settle", "ms": 2000 },
     { "op": "leave" }
   ],
   "requires": ["draft-store-failed", "input-admitted"],
-  "expect": { "mode": "edit", "writes": 0 },
-  "knownFailing": "invalid: draft mode needs the visitor-drafts plugin, a visitor-drafts slot on the root and no owner cookie, and the harness boots an owner page, so no visitor draft is ever stored"
+  "expect": { "mode": "draft", "writes": 0 },
+  "knownFailing": "conservation: the draft write is refused with draft-storage, but the run's only refusal is the draft-mode transition (\"not-allowed\"), which names no pending source for \"Draft text\""
 }

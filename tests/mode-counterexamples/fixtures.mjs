@@ -64,6 +64,19 @@ const PAGE_HOST = {
   path: "/notes.html",
 };
 
+// What a host answers its own page's GET with: the document it saved, head and body.
+const servedDocument = (page) => `<!DOCTYPE html><html><head>${page.head ?? ""}</head><body>${page.body}</body></html>`;
+
+// A visitor's draft page: the plugin asked for, the root slot it writes into, a rules
+// tag, and no owner cookie, so it boots in draft mode.
+const DRAFT_PAGE = {
+  params: "plugins=visitor-drafts&exclude=richclay,source",
+  head: '<script data-rules-name="api" data-rules-version="1" type="application/json">{"title":"h1"}</script>',
+  body: '<article><h1 id="title">Untitled</h1><div id="content">start</div></article>',
+  path: "/notes.html",
+  attrs: { "visitor-drafts": "draft-slot-1", autosave: "" },
+};
+
 export const FIXTURES = {
   // A live-declared document that boots in view and saves into the host.
   "persist-host": { page: PAGE, lanes: false },
@@ -75,9 +88,22 @@ export const FIXTURES = {
   "source-host": { page: { ...PAGE, params: "exclude=richclay" }, lanes: false },
   // The same page, with authored attributes and a frozen region of its own.
   "freeze-host": { page: FREEZE_PAGE, lanes: false },
+  // The draft page as an ordinary visitor gets it, except that its localStorage keeps
+  // nothing: every draft write throws, the way a full or turned-off store does.
+  "draft-host": { page: DRAFT_PAGE, lanes: false, owner: false, storage: "failing" },
   // The page editor: plugins=page over a tag and an article, on a host that advertises
-  // the `page` extension.
-  "page-host": { page: PAGE_HOST, lanes: false, pageHost: true, host: { extensions: ["page"], answerMeta: true } },
+  // the `page` extension and serves the document it saved.
+  "page-host": {
+    page: PAGE_HOST,
+    lanes: false,
+    peer: true,
+    pageHost: true,
+    host: {
+      extensions: ["page"],
+      answerMeta: true,
+      served: { path: PAGE_HOST.path, html: servedDocument(PAGE_HOST), etag: "etag-1" },
+    },
+  },
 };
 
 export const META_PATH = "/_/meta";
@@ -112,9 +138,29 @@ class StubEventSource {
     this.onopen = null;
     this.onerror = null;
     this.onmessage = null;
+    this.listeners = new Map();
+    // A host's stream opens on connect; without this the reader never runs its
+    // startup check and `plugins/page-view.js` never settles `acquired`.
+    setTimeout(() => {
+      if (this.readyState === 2) return;
+      this.readyState = 1;
+      this.onopen?.();
+      this.emit("open");
+    }, 0);
   }
-  addEventListener() {}
-  removeEventListener() {}
+  emit(type, event = {}) {
+    for (const listener of this.listeners.get(type) ?? []) listener(event);
+  }
+  addEventListener(type, listener) {
+    if (!this.listeners.has(type)) this.listeners.set(type, []);
+    this.listeners.get(type).push(listener);
+  }
+  removeEventListener(type, listener) {
+    const listeners = this.listeners.get(type);
+    if (!listeners) return;
+    const at = listeners.indexOf(listener);
+    if (at !== -1) listeners.splice(at, 1);
+  }
   dispatchEvent() {
     return true;
   }
@@ -135,9 +181,12 @@ function abortError(message) {
  *
  * @param {(kind: string, detail: object) => void} record
  */
-export function createHost(record, { extensions = ["conditional"], answerMeta = false } = {}) {
+export function createHost(record, { extensions = ["conditional"], answerMeta = false, served = null } = {}) {
   const posts = [];
   const holds = new Map();
+  // The document this host serves: the one it was given, replaced by every body it
+  // accepts, so a second boot is served what the first one left.
+  let servedHtml = served ? served.html : null;
 
   const hold = (boundary) => {
     let resolve;
@@ -228,6 +277,7 @@ export function createHost(record, { extensions = ["conditional"], answerMeta = 
       const answer = saveAnswer(result);
       call.status = answer.status;
       call.etag = answer.headers.get("etag");
+      if (served && call.status === 200) servedHtml = body;
       return answer;
     }
     if (url.pathname === META_PATH) {
@@ -242,10 +292,16 @@ export function createHost(record, { extensions = ["conditional"], answerMeta = 
       send({ kind: "metadata", method, path: url.pathname, body: null, ifMatch: null, status: answer.status, etag: null });
       return answer;
     }
+    if (served && method === "GET" && url.pathname === served.path) {
+      if (servedHtml === null) return notFound();
+      const answer = jsonResponse(200, servedHtml, { etag: served.etag });
+      send({ kind: "document", method, path: url.pathname, body: null, ifMatch: null, status: answer.status, etag: served.etag });
+      return answer;
+    }
     return notFound();
   };
 
-  return { fetch: fetchFn, posts, calls, hold, release, held, wait };
+  return { fetch: fetchFn, posts, calls, hold, release, held, wait, servedDocument: () => servedHtml };
 }
 
 /**
@@ -319,9 +375,16 @@ export function createResourceCounter() {
  * Boot the named fixture's page through the real loader. Real timers are in force here:
  * a case installs its fake clock after the page is up.
  */
-export async function bootPage(fixture, { mode, host, resetModules }) {
-  const { params, body, path, head = "" } = FIXTURES[fixture].page;
-  const pageHost = FIXTURES[fixture].pageHost === true;
+export async function bootPage(fixture, { mode, host, resetModules, served = null }) {
+  const spec = FIXTURES[fixture];
+  // A reload is served the bytes the host last accepted, so the page boots from those
+  // rather than from the fixture's authored copy.
+  const page = served === null ? spec.page : (() => {
+    const parsed = new DOMParser().parseFromString(served, "text/html");
+    return { ...spec.page, head: parsed.head.innerHTML, body: parsed.body.innerHTML };
+  })();
+  const { params, body, path, head = "", attrs = {} } = page;
+  const pageHost = spec.pageHost === true;
   const realEventSource = globalThis.EventSource;
   const channel = pageHost ? installChannelPair() : null;
   if (pageHost) globalThis.EventSource = window.EventSource = StubEventSource;
@@ -329,13 +392,26 @@ export async function bootPage(fixture, { mode, host, resetModules }) {
   delete window.clayEditMode;
   delete window.__hyperclayEditMode;
   document.cookie = "isAdminOfCurrentResource=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/";
-  document.cookie = "isAdminOfCurrentResource=true; path=/";
+  if (spec.owner !== false) document.cookie = "isAdminOfCurrentResource=true; path=/";
   window.history.replaceState({}, "", mode === "edit" ? `${path}?editmode=true` : path);
   localStorage.clear();
   sessionStorage.clear();
+  const realStorage = [window, globalThis].map((owner) => [owner, Object.getOwnPropertyDescriptor(owner, "localStorage")]);
+  const restoreStorage = () => {
+    for (const [owner, descriptor] of realStorage) {
+      if (descriptor) Object.defineProperty(owner, "localStorage", descriptor);
+    }
+  };
+  if (spec.storage === "failing") {
+    const failing = { getItem: () => null, setItem: () => { throw new Error("QuotaExceededError"); }, removeItem: () => {}, clear: () => {} };
+    for (const owner of [window, globalThis]) {
+      Object.defineProperty(owner, "localStorage", { configurable: true, writable: true, value: failing });
+    }
+  }
   const root = document.documentElement;
   for (const attribute of Array.from(root.attributes)) root.removeAttribute(attribute.name);
   root.setAttribute("clay-mode-switch", "live");
+  for (const [name, value] of Object.entries(attrs)) root.setAttribute(name, value);
   document.head.innerHTML = head;
   document.body.innerHTML = body;
   window.clay = {};
@@ -344,9 +420,14 @@ export async function bootPage(fixture, { mode, host, resetModules }) {
   try {
     const { boot } = await import("../../src/loader.js");
     await new Promise((resolve) => boot(null, new URLSearchParams(params), resolve));
+    // The lane's lock callback waits CLOSE_WAIT_MS on a real timer before it starts the
+    // room, and that timer is already ticking when the page is up: a case's fake clock
+    // would never fire it, so the wait happens here, on the real one.
+    if (pageHost) await new Promise((resolve) => setTimeout(resolve, 600));
   } catch (error) {
     resources.stop();
     channel?.stop();
+    restoreStorage();
     if (pageHost) globalThis.EventSource = window.EventSource = realEventSource;
     throw error;
   }
@@ -358,6 +439,7 @@ export async function bootPage(fixture, { mode, host, resetModules }) {
       stop() {
         resources.stop();
         channel?.stop();
+        restoreStorage();
         if (pageHost) globalThis.EventSource = window.EventSource = realEventSource;
       },
     },
@@ -428,9 +510,13 @@ export function installChannelPair() {
 /**
  * Tab A and tab B: two real lane participants over one fake channel, each with its own
  * store, lane and Yjs document. Tab B's edits reach tab A the way another tab's do.
+ *
+ * A `peer` pair is the second tab alone, over the channel (and the page seed) of a page
+ * that booted its own lane: tab B's frames reach the page under test instead of a tab
+ * this harness built.
  */
-export async function createLanePair({ settle = async () => {}, channel = installChannelPair() } = {}) {
-  const initial = seedValue(LANE_BLOCKS);
+export async function createLanePair({ settle = async () => {}, channel = installChannelPair(), seed = null, peer = false } = {}) {
+  const initial = seed ?? seedValue(LANE_BLOCKS);
 
   const tab = (client) => {
     const store = createStore({ name: "page", value: JSON.parse(JSON.stringify(initial)) });
@@ -455,7 +541,7 @@ export async function createLanePair({ settle = async () => {}, channel = instal
     };
   };
 
-  const a = tab(11);
+  const a = peer ? null : tab(11);
   await settle(50);
   const b = tab(12);
   await settle(50);
@@ -463,16 +549,14 @@ export async function createLanePair({ settle = async () => {}, channel = instal
     a,
     b,
     stop() {
-      for (const entry of [a, b]) {
+      for (const entry of [a, b].filter(Boolean)) {
         try {
           entry.provider.dispose();
           entry.lane.stop();
           entry.ydoc.destroy();
         } catch {}
       }
-      globalThis.BroadcastChannel = window.BroadcastChannel = realChannel;
-      if (realLocks) Object.defineProperty(navigator, "locks", realLocks);
-      else delete navigator.locks;
+      channel.stop();
     },
   };
 }

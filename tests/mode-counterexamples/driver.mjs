@@ -58,6 +58,7 @@ const STEP_KEYS = {
   release: ["boundary", "result"],
   settle: ["ms"],
   peer: ["tab", "action"],
+  reload: [],
 };
 const PEER_KEYS = new Set(["value"]);
 
@@ -65,6 +66,11 @@ const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const CHUNK_PATH = /^(?:core|lib|attrs|plugins|sync)\/[a-z0-9./-]+\.js$/;
 const CHUNK_PREFIX = "chunk.import:";
 const PEER_SETTLE_MS = 3000;
+// The modes a run can end in: view and edit on a host page, draft on a visitor's.
+const MODES = new Set(["view", "edit", "draft"]);
+// The baseline's quiet window is SETTLE_MS = 500 in src/core/save.js: an exit that waits
+// for `clay:baseline-settled` cannot commit until that much of the case's clock passed.
+const LEAVE_SETTLE_MS = 600;
 
 const baseOf = (boundary) => boundary.slice(0, boundary.indexOf(":") === -1 ? boundary.length : boundary.indexOf(":"));
 
@@ -135,8 +141,8 @@ export function validateCase(json) {
     if (!isObject(json.expect)) {
       fail("bad-expect", "expect", "expect is an object");
     } else {
-      if (json.expect.mode !== undefined && json.expect.mode !== "view" && json.expect.mode !== "edit") {
-        fail("bad-expect", "expect.mode", "expect.mode is \"view\" or \"edit\"");
+      if (json.expect.mode !== undefined && !MODES.has(json.expect.mode)) {
+        fail("bad-expect", "expect.mode", `expect.mode is ${[...MODES].map((mode) => `"${mode}"`).join(", ")}`);
       }
       if (json.expect.writes !== undefined && !Number.isSafeInteger(json.expect.writes)) {
         fail("bad-expect", "expect.writes", "expect.writes counts save requests");
@@ -209,9 +215,18 @@ function validateSteps(json, errors, fail) {
         }
         break;
       }
+      case "reload": {
+        const spec = FIXTURES[json.fixture];
+        if (spec?.lanes === true || spec?.peer === true) {
+          fail("unsupported-reload", at, "a reload tears the page down, so a fixture with a lane peer cannot survive it");
+        }
+        break;
+      }
       case "peer": {
         if (step.tab !== "B") fail("bad-step-field", `${at}.tab`, "the peer is tab \"B\"");
-        if (json.fixture !== "lane-peer") fail("unknown-tab", `${at}.tab`, "this fixture has no second tab");
+        if (json.fixture !== "lane-peer" && FIXTURES[json.fixture]?.peer !== true) {
+          fail("unknown-tab", `${at}.tab`, "this fixture has no second tab");
+        }
         if (!isObject(step.action)) {
           fail("bad-step-field", `${at}.action`, "action is an edit");
         } else {
@@ -282,6 +297,19 @@ const unsentField = (field) => document.querySelector(`[unsent="${field}"]`);
 // no id of its own — the selector that reaches it.
 const elementFor = (target) => document.getElementById(target) ?? document.querySelector(target);
 
+// The page under test's own live store, as the value a peer's frames land in and the
+// article it projects onto.
+const pageStore = (clay) => (typeof clay?.live === "function" ? clay.live("page") : null);
+
+const pageSeed = (clay) => pageStore(clay)?.data ?? null;
+
+// Whether the page under test took a peer's value: in its own store, or in the article
+// its editor projected there.
+const pageHolds = (clay, value) => {
+  const data = pageStore(clay)?.data;
+  return String(data ? JSON.stringify(data) : "").includes(value) || String(document.body.innerHTML).includes(value);
+};
+
 // The input op edits the page the way a person does: the value reaches the element and
 // the element says it changed. Whether it got there is read back, never assumed.
 function applyInput(element, value) {
@@ -325,44 +353,51 @@ export async function runCase(json) {
 
   try {
     const host_ = await hostHarness();
-    const booted = await bootPage(json.fixture, { mode: json.boot.mode, host, resetModules: host_.resetModules });
-    const clay = booted.clay;
-    const resources = booted.resources;
-    cleanups.push(() => resources.stop());
+    let booted = await bootPage(json.fixture, { mode: json.boot.mode, host, resetModules: host_.resetModules });
+    let clay = booted.clay;
+    cleanups.push(() => booted.resources.stop());
 
     // The entry imports its edit plan through this map, so a case holds an import here.
-    const { MODULES } = await import("../../src/loader-logic.js");
-    for (const path of Object.keys(MODULES)) {
-      const original = MODULES[path];
-      cleanups.push(() => {
-        MODULES[path] = original;
-      });
-      MODULES[path] = async () => {
-        const boundary = `${CHUNK_PREFIX}${path}`;
-        record("chunk-import-start", { path });
-        if (host.held(boundary)) {
-          const result = await host.wait(boundary);
-          if (result === "failed") {
-            record("chunk-import-done", { path, result: "failed" });
-            throw new Error(`the case failed the import of ${path}`);
+    // A reload imports the map again after a module reset, so its holds are re-applied.
+    let MODULES = null;
+    const holdChunks = async () => {
+      MODULES = (await import("../../src/loader-logic.js")).MODULES;
+      for (const path of Object.keys(MODULES)) {
+        const original = MODULES[path];
+        cleanups.push(() => {
+          MODULES[path] = original;
+        });
+        MODULES[path] = async () => {
+          const boundary = `${CHUNK_PREFIX}${path}`;
+          record("chunk-import-start", { path });
+          if (host.held(boundary)) {
+            const result = await host.wait(boundary);
+            if (result === "failed") {
+              record("chunk-import-done", { path, result: "failed" });
+              throw new Error(`the case failed the import of ${path}`);
+            }
           }
-        }
-        const module = await original();
-        record("chunk-import-done", { path, result: "loaded" });
-        return module;
-      };
-    }
+          const module = await original();
+          record("chunk-import-done", { path, result: "loaded" });
+          return module;
+        };
+      }
+    };
+    await holdChunks();
 
     host_.startClock();
     cleanups.push(() => host_.stopClock());
 
     const onModeChange = () => record("modechange", { mode: clay.mode });
     const onSnapshot = (event) => record("snapshot-ready", { forSave: event.detail?.forSave === true });
+    const onDraftFailed = (event) => record("draft-store-failed", { message: event.detail?.error?.message ?? null });
     document.addEventListener("clay:modechange", onModeChange);
     document.addEventListener("clay:snapshot-ready", onSnapshot);
+    document.addEventListener("clay:drafts-store-failed", onDraftFailed);
     cleanups.push(() => {
       document.removeEventListener("clay:modechange", onModeChange);
       document.removeEventListener("clay:snapshot-ready", onSnapshot);
+      document.removeEventListener("clay:drafts-store-failed", onDraftFailed);
     });
 
     let phase = clay.modeLifecycle.state.phase;
@@ -399,7 +434,11 @@ export async function runCase(json) {
     }
     if (errors.length) return { status: "invalid", trace, result: { errors } };
 
-    const lanes = fixture.lanes ? await createLanePair({ settle }) : null;
+    const lanes = fixture.lanes
+      ? await createLanePair({ settle })
+      : fixture.peer
+        ? await createLanePair({ settle, channel: booted.channel, seed: pageSeed(clay), peer: true })
+        : null;
     if (lanes) cleanups.push(() => lanes.stop());
 
     for (const [index, step] of json.steps.entries()) {
@@ -422,11 +461,9 @@ export async function runCase(json) {
             record("transition", { op: "leave", ok: answer?.ok === true, mode: answer?.mode ?? null, code: answer?.code ?? null, pending: answer?.pending ?? null });
             if (answer?.ok === false) record("transition-refused", { op: "leave", code: answer?.code ?? null, pending: answer?.pending ?? null });
           });
-          if (step.await === false) await flush();
-          else {
-            await flight;
-            await flush();
-          }
+          await settle(LEAVE_SETTLE_MS);
+          if (step.await !== false) await flight;
+          await flush();
           break;
         }
         case "input": {
@@ -474,7 +511,7 @@ export async function runCase(json) {
             observe();
             // Both ends of the pair: the first cycle leaves the page as an entry should and
             // the last leaves it as the hundredth should, and the two readings compare.
-            if (cycle === 1 || cycle === step.count) record("resources", { cycle, ...resources.snapshot() });
+            if (cycle === 1 || cycle === step.count) record("resources", { cycle, ...booted.resources.snapshot() });
           }
           record("cycles", { count: step.count });
           break;
@@ -493,13 +530,39 @@ export async function runCase(json) {
           await settle(step.ms ?? 50);
           break;
         }
+        case "reload": {
+          // The bytes the host last accepted are the file a reload is served: this boot is
+          // torn down, and the next one reads what the host kept. The boot runs on the
+          // platform's own timers again, as the first one did.
+          const accepted = host.calls.filter((call) => call.kind === "save" && call.status === 200).at(-1) ?? null;
+          if (!accepted || typeof accepted.body !== "string" || accepted.body === "") {
+            record("reload-refused", { reason: "the host accepted no bytes to serve" });
+            break;
+          }
+          await host_.stopClock();
+          booted.resources.stop();
+          booted = await bootPage(json.fixture, {
+            mode: json.boot.mode,
+            host,
+            resetModules: host_.resetModules,
+            served: accepted.body,
+          });
+          clay = booted.clay;
+          await holdChunks();
+          await host_.startClock();
+          phase = clay.modeLifecycle.state.phase;
+          mode = clay.mode;
+          record("reload", { bytes: accepted.body.length, etag: accepted.etag ?? null });
+          break;
+        }
         case "peer": {
           lanes.b.flow.insert(lanes.b.flow.length, step.action.value);
           record("peer-edit", { value: step.action.value }, "B");
           // The lane's own idle window: a frame is sent and ordered on its clock, not
           // on the case's.
           await settle(PEER_SETTLE_MS);
-          record("peer-applied", { applied: lanes.a.text().includes(step.action.value) }, "A");
+          const seen = lanes.a ? lanes.a.text().includes(step.action.value) : pageHolds(clay, step.action.value);
+          record("peer-applied", { applied: seen }, "A");
           break;
         }
         default:
@@ -529,7 +592,10 @@ export async function runCase(json) {
       })),
       calls: host.calls.map((call) => ({ ...call })),
       tabs: lanes
-        ? { a: { ydoc: lanes.a.ydoc, text: lanes.a.text() }, b: { ydoc: lanes.b.ydoc, text: lanes.b.text() } }
+        ? {
+            a: lanes.a ? { ydoc: lanes.a.ydoc, text: lanes.a.text() } : null,
+            b: { ydoc: lanes.b.ydoc, text: lanes.b.text() },
+          }
         : null,
       errors: [],
     };
