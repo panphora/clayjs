@@ -446,11 +446,15 @@ function createCommandHost({ load = () => Promise.reject(new Error("page: this e
     }
   }
 
-  function leave() {
+  function quiesce() {
     if (!active) return;
     active = false;
     for (const waiter of waiters) waiter.controller.abort({ ok: false, code: "not-editing" });
     waiters.clear();
+  }
+
+  function leave() {
+    quiesce();
     loader?.dispose();
     loader = null;
   }
@@ -460,6 +464,7 @@ function createCommandHost({ load = () => Promise.reject(new Error("page: this e
     observe,
     run,
     enter() { if (!disposed) active = true; },
+    quiesce,
     leave,
     dispose() {
       leave();
@@ -565,14 +570,16 @@ export function refreshMountedView(view) {
 
 // Admission on a mounted editor, in one place: the commit that enters edit opens it,
 // and the exit that holds the session closed shuts it without touching a buffer.
-export function setEditorActive(view, active) {
+export function setEditorActive(view, active, { quiesce = false } = {}) {
   if (!view || view.isDestroyed) return false;
   const open = active === true;
   view.setProps({ editable: () => open });
   // A refused exit closes admission without destroying the view, so the commands are told
-  // here: the exit disposes what they installed, and the next entry installs fresh.
+  // here: a quiesce keeps what they installed and their pending registrations for the
+  // resume, and only a committed exit disposes them.
   const host = commandHosts.get(view);
   if (open) host?.enter();
+  else if (quiesce) host?.quiesce();
   else host?.leave();
   return open;
 }

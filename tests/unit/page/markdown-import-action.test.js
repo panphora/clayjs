@@ -3,9 +3,10 @@
  * @jest-environment-options {"url": "https://example.com/notes.html"}
  */
 import { readFileSync } from "node:fs";
+import { jest } from "@jest/globals";
 import { history, model, state } from "../../../src/vendor/prosemirror.vendor.js";
 import * as markdownImport from "../../../src/page/features/import-markdown.js";
-import { runPageCommand } from "../../../src/page/editor.js";
+import { runPageCommand, setEditorActive } from "../../../src/page/editor.js";
 import { blockMap } from "../../../src/page/model.js";
 import { MAX_BYTES } from "../../../src/page/import-markdown.js";
 import { pendingIds, flushUnsaved } from "../../../src/lib/unsaved-state.js";
@@ -203,6 +204,86 @@ test("an unsent preview refuses the mode exit by name", async () => {
   await insert();
   expect(pendingIds()).toEqual([]);
   expect(await flushUnsaved()).toEqual({ ok: true, pending: [] });
+});
+
+// The same admission the page session's lease asks for: an explicit entry over a queued
+// participant that opens input, quiesces it, resumes it and only disposes on a commit.
+// The controller, the barrier, the unsaved-state registry and the command host are real.
+let sessions = 0;
+async function enterWithPageLease(view) {
+  document.cookie = "isAdminOfCurrentResource=true; path=/";
+  delete window.clayEditMode;
+  delete window.__hyperclayEditMode;
+  localStorage.clear();
+  sessionStorage.clear();
+  document.head.innerHTML = "";
+  const realFetch = globalThis.fetch;
+  const fetch = jest.fn(async () => ({ ok: false, status: 404, statusText: "Not Found", headers: { get: () => null }, json: async () => ({}), text: async () => "" }));
+  globalThis.fetch = window.fetch = fetch;
+  window.clay = {};
+  const editMode = await import("../../../src/core/edit-mode.js");
+  editMode.noteLiveSwitch({ loaded: {}, modules: {}, edit: { core: [], plugins: [], late: [] }, view: { plugins: [], late: [] }, attachEditCore() {}, attach() {} });
+  window.clay.setMode = editMode.setMode;
+  const unregister = editMode.modeLifecycle.register({
+    id: `test:page-session-${++sessions}`,
+    prepare: () => ({
+      enable: () => setEditorActive(view, true),
+      quiesce: () => setEditorActive(view, false, { quiesce: true }),
+      resume: () => setEditorActive(view, true),
+      dispose: () => view.destroy(),
+    }),
+  });
+  expect(await window.clay.setMode("edit")).toMatchObject({ ok: true, mode: "edit" });
+  return {
+    setMode: window.clay.setMode,
+    done: () => {
+      try { unregister(); } catch {}
+      globalThis.fetch = window.fetch = realFetch;
+      delete window.clay;
+    },
+  };
+}
+
+test("an unsent preview refuses clay.setMode(\"view\") by name", async () => {
+  const view = editor(PAGE());
+  const session = await enterWithPageLease(view);
+  try {
+    select(view, posOf(view, "b") + 2);
+    await importFile(view, "notes.md", "# Heading");
+    expect(panel()).not.toBeNull();
+
+    const answer = await session.setMode("view");
+
+    expect(answer).toMatchObject({ ok: false, code: "pending-input" });
+    expect(answer.pending).toEqual(["markdown-import-preview"]);
+    expect(panel()).not.toBeNull();
+    await insert("cancel");
+    expect(await session.setMode("view")).toMatchObject({ ok: true, mode: "view" });
+  } finally {
+    session.done();
+  }
+});
+
+test("a refused exit keeps the preview", async () => {
+  const view = editor(PAGE());
+  const session = await enterWithPageLease(view);
+  try {
+    select(view, posOf(view, "b") + 1);
+    await importFile(view, "notes.md", "Text *kept*\n\nSecond block");
+    expect(panel().querySelector(".page-import-summary").textContent).toBe("2 blocks");
+
+    const answer = await session.setMode("view");
+
+    expect(answer).toMatchObject({ ok: false, code: "pending-input" });
+    expect(answer.pending).toEqual(["markdown-import-preview"]);
+    expect(panel()).not.toBeNull();
+    expect(pendingIds()).toEqual(["markdown-import-preview"]);
+    expect(panel().querySelector(".page-import-summary").textContent).toBe("2 blocks");
+    await insert("cancel");
+    expect(await session.setMode("view")).toMatchObject({ ok: true, mode: "view" });
+  } finally {
+    session.done();
+  }
 });
 
 test("a file over the limit is refused before anything is read or parsed", async () => {

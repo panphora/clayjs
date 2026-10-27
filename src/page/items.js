@@ -54,7 +54,7 @@ export const CHART_ITEM = { key: "chart", label: "Chart", description: "A bar or
 
 // The chart module and its view part load together, before the block draws: a
 // document that never takes a chart never fetches either.
-export const loadChartPart = (view) => (viewFeatures.get(view)?.ensure("chart") ?? Promise.resolve()).catch(() => {}).then(() => import("./chart.js"));
+export const loadChartPart = (view) => (viewFeatures.get(view)?.ensure("chart") ?? Promise.resolve()).catch(() => {}).then(() => (view.isDestroyed ? null : import("./chart.js")));
 
 export const MENU_ITEMS = [...BLOCK_TYPES, ...INSERT_ITEMS];
 
@@ -139,7 +139,7 @@ export function turnBlocks(view, item, ids) {
   if (isToggleHeading(item)) return runFormatted(view, write);
   // A block type from a later format, like the turn into a quote, asks the gate
   // before it writes, and a refusal is a notice rather than a change.
-  if (item.type === "quote") return import("./format-native-commands.js").then((menu) => menu.gateTurn(view, write));
+  if (item.type === "quote") return import("./format-native-commands.js").then((menu) => (view.isDestroyed ? false : menu.gateTurn(view, write)));
   return write();
 }
 
@@ -293,7 +293,7 @@ export function runTocItem(view, index, remove = null) {
 // somebody picks the row: importing it here keeps this module plain data, which the block
 // menus, the Markdown rules and the editor all share, while the command still loads only on
 // first use. `id` is the row it has in COMMAND_FEATURES.
-export const runMenuCommand = (view, id, args) => import("./editor.js").then(({ runPageCommand }) => runPageCommand(view, id, args));
+export const runMenuCommand = (view, id, args) => import("./editor.js").then(({ runPageCommand }) => (view.isDestroyed ? { ok: false, code: "not-editing" } : runPageCommand(view, id, args)));
 
 // A row whose work is an optional command: the typed query goes with the pick, and the
 // command is asked for by its id.
@@ -314,7 +314,7 @@ export function runItem(view, item, index, remove = null) {
   if (item.insert === "csv") return pickCsv(view, remove);
   if (item.insert === "table") return insertTableNode(st, view.dispatch, makeTable(), remove, null, index);
   if (item.insert === "board") return insertBoardNode(st, view.dispatch, makeBoard(), remove, index);
-  if (item.insert === "chart") return loadChartPart(view).then(({ chartFromSlash }) => chartFromSlash(view, index, remove));
+  if (item.insert === "chart") return loadChartPart(view).then((part) => (part && !view.isDestroyed ? part.chartFromSlash(view, index, remove) : false));
   if (item.insert === "toc") return runTocItem(view, index, remove);
   if (item.command) return runCommandItem(view, item.command, remove);
   if (!isToggleHeading(item)) {

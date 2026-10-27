@@ -1244,7 +1244,7 @@ function mountAndAttach(inst, source, loaded) {
   // a `resume` puts the very same session back.
   function closeInput(inst) {
     if (!inst.inputOpen) return false;
-    setEditorActive?.(inst.view, false);
+    setEditorActive?.(inst.view, false, { quiesce: true });
     return true;
   }
 

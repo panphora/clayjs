@@ -1,7 +1,9 @@
+import { jest } from "@jest/globals";
 import { editor, posOf, select, typeText } from "./view-helpers.js";
 import { RECORD } from "./fixtures/all-kinds.js";
 import { history } from "../../../src/vendor/prosemirror.vendor.js";
 import { chartFromSlash, chartTables, tableLabel } from "../../../src/page/chart.js";
+import { CHART_ITEM, runItem } from "../../../src/page/items.js";
 
 afterEach(() => { document.body.innerHTML = ""; });
 
@@ -63,4 +65,66 @@ test("a chart picked on a line with text goes below it, and no table refuses", (
   expect(view.state.doc.child(1).textContent).toBe("Notes");
   const empty = editor([["p", "paragraph", ""]]);
   expect(chartFromSlash(empty, 0)).toBe(false);
+});
+
+const deferred = () => {
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  return { gate, release };
+};
+
+const heldChart = () => {
+  const { gate, release } = deferred();
+  return { features: { ensure: () => gate, has: () => false, dispose() {} }, release };
+};
+
+const dispatchedBy = (view) => {
+  const seen = [];
+  const real = view.dispatch.bind(view);
+  view.dispatch = (tr) => { seen.push(tr); return real(tr); };
+  return seen;
+};
+
+const withNoHost = async (run) => {
+  const real = globalThis.fetch;
+  const fetch = jest.fn(async () => { throw new Error("the test has no host"); });
+  globalThis.fetch = window.fetch = fetch;
+  try {
+    await run(fetch);
+  } finally {
+    globalThis.fetch = window.fetch = real;
+  }
+};
+
+test("a chart chosen while its module loads does nothing once the session ended", async () => {
+  await withNoHost(async (fetch) => {
+    const { features, release } = heldChart();
+    const view = editor([], { blocks: { tbl: table, p: { t: "paragraph", pos: "Z", c: "" } }, features });
+    const dispatched = dispatchedBy(view);
+    const action = runItem(view, CHART_ITEM, 1);
+    view.destroy();
+    release();
+    await expect(action).resolves.toBe(false);
+    expect(dispatched).toEqual([]);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+});
+
+test("a chart chosen before its module loads leaves a second session untouched", async () => {
+  await withNoHost(async (fetch) => {
+    const { features, release } = heldChart();
+    const view = editor([], { blocks: { tbl: table, p: { t: "paragraph", pos: "Z", c: "" } }, features });
+    const dispatched = dispatchedBy(view);
+    const action = runItem(view, CHART_ITEM, 1);
+    const second = editor([], { blocks: { tbl: table, p: { t: "paragraph", pos: "Z", c: "" } } });
+    const secondDoc = second.state.doc;
+    const secondDispatched = dispatchedBy(second);
+    view.destroy();
+    release();
+    await expect(action).resolves.toBe(false);
+    expect(dispatched).toEqual([]);
+    expect(secondDispatched).toEqual([]);
+    expect(second.state.doc).toBe(secondDoc);
+    expect(fetch).not.toHaveBeenCalled();
+  });
 });
