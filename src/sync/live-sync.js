@@ -290,6 +290,21 @@ function pairedBaseline() {
  */
 import { WIRE_PROFILES, resolveWireProfile } from './wire-profile.js';
 
+// Above this the relay body is a Blob built from parts, so the snapshot is never joined
+// into one more full-size string on the main thread. The save body's own threshold (5h).
+const RELAY_BODY_BLOB_MIN_BYTES = 1024 * 1024;
+
+/**
+ * The body of one relay POST: the bytes `JSON.stringify` of this object has always
+ * produced, from parts when the snapshot is large. An absent value still leaves its key
+ * out, exactly as before.
+ */
+function relayBody(profile, html, sender, identityMap, etag) {
+  const rest = { sender, identityMap, ...(etag ? { etag } : {}) };
+  if (html.length < RELAY_BODY_BLOB_MIN_BYTES) return JSON.stringify({ [profile.snapshotKey]: html, ...rest });
+  return new Blob([`{${JSON.stringify(profile.snapshotKey)}:`, JSON.stringify(html), `,${JSON.stringify(rest).slice(1)}`], { type: 'application/json' });
+}
+
 class LiveSync {
   constructor() {
     this.sse = null;
@@ -1274,12 +1289,7 @@ class LiveSync {
         [profile.documentHeader]: window.location.href,
         [PAGE_FORMAT_HEADER]: String(PAGE_FORMAT),
       },
-      body: JSON.stringify({
-        [profile.snapshotKey]: html,
-        sender: this.clientId,
-        identityMap: identityMap,
-        ...(etag ? { etag } : {})
-      })
+      body: relayBody(profile, html, this.clientId, identityMap, etag)
     }).then(response => {
       if (!response.ok) {
         console.warn('[LiveSync] Save returned status:', response.status);

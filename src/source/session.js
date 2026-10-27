@@ -28,7 +28,9 @@
  *
  * NOTHING HERE BLOCKS BOOT. The install is async and the loader does not wait for
  * it. Only the save that asked for it waits, and a save after a failed install is the
- * ordinary full serialization rather than an error.
+ * ordinary full serialization rather than an error. For a large document that wait is
+ * itself sliced: the model is parsed across tasks, and so is a queued repair, on the same
+ * driver and the same threshold the save's own preparation uses.
  *
  * ON DEMAND
  *
@@ -60,7 +62,7 @@ import {
   verifyForSaveSteps,
   verifyRenderedSteps
 } from '../core/source-map.js';
-import { drain } from '../lib/slice.js';
+import { drain, runSliced } from '../lib/slice.js';
 import {
   attachCaptureArtifact,
   captureSaveClone,
@@ -68,7 +70,8 @@ import {
   originalSnapshotNode,
   setSaveRenderer
 } from '../core/snapshot.js';
-import { onSaveAccepted } from '../core/save-core.js';
+import { keepaliveHeld, onSaveAccepted } from '../core/save-core.js';
+import { SLICED_SAVE_MIN_BYTES } from '../core/save.js';
 import { lastSeenEtag } from '../core/etag.js';
 
 const state = {
@@ -111,6 +114,28 @@ const state = {
 const SUPERSEDED_RETRIES = 2;
 
 const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
+
+// The main-thread time one slice of an install or a repair may spend before handing the
+// page back. The same budget the save's own preparation takes.
+const SLICED_STEP_BUDGET_MS = 4;
+
+// What an install's steps answer when a save or a disk frame replaced the file while they
+// ran: no answer at all, and the caller asks again.
+const SUPERSEDED = Object.freeze({ superseded: true });
+
+/**
+ * Whether a walk over bytes this big runs across tasks instead of in one.
+ *
+ * The threshold and both exceptions are the save's (core/save.js): below
+ * `SLICED_SAVE_MIN_BYTES` the one-task walk is cheaper than the scheduling, a hidden tab
+ * has no typing to protect and its timers are throttled, and a keepalive save belongs to
+ * a page that is going away and cannot wait for a task boundary.
+ */
+function slicesWalk(bytes) {
+  if (document.hidden) return false;
+  if (keepaliveHeld()) return false;
+  return bytes >= SLICED_SAVE_MIN_BYTES;
+}
 
 const PROJECTED_MAP_PREFIX = '<script type="application/json" id="clay-runtime-map"';
 
@@ -214,7 +239,7 @@ function staleVersion(m, context) {
   return `source refused: the fetch answered version ${stamp} while this page holds ${held}`;
 }
 
-function install(sourceUrl, context = null, attempt = 0, render = true, latest = null) {
+async function install(sourceUrl, context = null, attempt = 0, render = true, latest = null) {
   const session = state.session;
   const t0 = now();
   const generation = state.adoptions;
@@ -227,40 +252,73 @@ function install(sourceUrl, context = null, attempt = 0, render = true, latest =
   const receiptBytes = receipt && typeof receipt.bytes === 'string' && !isProjected(receipt.bytes)
     ? receipt.bytes
     : null;
-  return (receiptBytes !== null ? Promise.resolve(receiptBytes) : fetchSource(sourceUrl)).then((src) => {
+  try {
+    const src = receiptBytes !== null ? receiptBytes : await fetchSource(sourceUrl);
     if (session !== state.session) return null;
     const t1 = now();
-    const m = model(src);
-    const refused = checkSource(m, document);
-    if (refused) throw new Error(`source refused: ${refused}`);
-    const stale = staleVersion(m, context);
-    if (stale) throw new Error(stale);
+    const answer = await runInstallSteps({ src, context, render, session, generation, t0, t1 });
+    if (answer !== SUPERSEDED) return answer;
     // A save was accepted, or a disk frame carried newer bytes, while this answer was on
     // its way. Those bytes are the file now, so ask again rather than adopt an older
     // answer; a page that will not hold still is refused instead of retried forever.
-    if (state.adoptions !== generation) {
-      if (attempt < SUPERSEDED_RETRIES) return install(sourceUrl, context, attempt + 1, render, latest);
-      throw new Error('source refused: a save replaced the file while the fetch was in flight');
-    }
-    const t2 = now();
-    const { map, stats } = pairAgainstPage(m);
-    const t3 = now();
-
-    state.model = m;
-    state.map = map;
-    state.stats = stats;
-    state.timing = { fetch: t1 - t0, model: t2 - t1, pair: t3 - t2, refresh: null };
-    state.installed = true;
-    if (render) setSaveRenderer(renderSave, { steps: renderSaveSteps });
-    return summary();
-  }).catch((err) => {
+    if (attempt < SUPERSEDED_RETRIES) return install(sourceUrl, context, attempt + 1, render, latest);
+    throw new Error('source refused: a save replaced the file while the fetch was in flight');
+  } catch (err) {
     // Not an error the page can do anything about, and not a failure of the save:
     // saves go out exactly as they would without this plugin. Said once.
     if (session !== state.session) return null;
     state.refused = String(err && err.message ? err.message : err);
     console.info(`clayjs: source map off (${state.refused}); saves use the full serialization`);
     return null;
-  });
+  }
+}
+
+/**
+ * Model and pair the bytes an install fetched, as steps.
+ *
+ * `drain` is the install this module always had and `runSliced` is the same walk across
+ * tasks, so a large document's first use hands the page back while its model is parsed.
+ * The pairing has no step form (`pair` walks the live page and the file together in one
+ * pass), so it is the one part of a large install that still runs in a single task.
+ *
+ * Nothing is written to the session until the last yield is behind it, and an install
+ * whose page moved underneath it answers `SUPERSEDED` or null rather than installing a
+ * model of bytes the file no longer holds.
+ */
+function* installSteps(job) {
+  const m = yield* modelSteps(job.src);
+  const refused = checkSource(m, document);
+  if (refused) throw new Error(`source refused: ${refused}`);
+  const stale = staleVersion(m, job.context);
+  if (stale) throw new Error(stale);
+  if (state.adoptions !== job.generation) return SUPERSEDED;
+  const t2 = now();
+  yield;
+  if (state.session !== job.session) return null;
+  if (state.adoptions !== job.generation) return SUPERSEDED;
+  const { map, stats } = pairAgainstPage(m);
+  const t3 = now();
+
+  state.model = m;
+  state.map = map;
+  state.stats = stats;
+  state.timing = { fetch: job.t1 - job.t0, model: t2 - job.t1, pair: t3 - t2, refresh: null };
+  state.installed = true;
+  if (job.render) setSaveRenderer(renderSave, { steps: renderSaveSteps });
+  return summary();
+}
+
+/**
+ * Run one install's steps in this task or across tasks, by the document's size.
+ *
+ * A session that ends while the walk yields aborts it, so a late answer installs nothing,
+ * which is the rule the fetch half already followed.
+ */
+async function runInstallSteps(job) {
+  if (!slicesWalk(job.src.length)) return drain(installSteps(job));
+  const signal = { get aborted() { return state.session !== job.session; } };
+  const answer = await runSliced(installSteps(job), { budgetMs: SLICED_STEP_BUDGET_MS, signal });
+  return answer && answer.aborted === true ? null : answer;
 }
 
 /**
@@ -540,13 +598,53 @@ function queueRepair(event) {
 function scheduleRefresh() {
   if (state.refreshQueued) return;
   state.refreshQueued = true;
-  if (typeof requestIdleCallback === 'function') requestIdleCallback(refreshNow, { timeout: 2000 });
-  else setTimeout(refreshNow, 0);
+  if (typeof requestIdleCallback === 'function') requestIdleCallback(refreshSoon, { timeout: 2000 });
+  else setTimeout(refreshSoon, 0);
 }
 
 /**
- * Run a queued refresh now. A no-op when none is queued, which is also what makes the
- * idle callback of a refresh that `text()` or `locate()` already ran harmless.
+ * The queued refresh, run the way this document's size allows: in the caller's task for a
+ * small one, across tasks for a large one, so a repair nobody is waiting for does not hold
+ * the page for its whole duration.
+ */
+function refreshSoon() {
+  if (!slicesWalk(refreshBytes())) { refreshNow(); return; }
+  runSlicedRefresh();
+}
+
+/**
+ * How big the bytes a queued refresh is about to model are: the accepted save's or a disk
+ * frame's when there are any, else the model this session already holds.
+ */
+function refreshBytes() {
+  if (typeof state.pendingBytes === 'string') return state.pendingBytes.length;
+  return state.model ? state.model.src.length : 0;
+}
+
+/**
+ * A refresh across tasks, and the one thing a sliced walk needs that a drained one does
+ * not: a walk that stopped because something newer arrived left the queue in place, and
+ * that newer answer's `scheduleRefresh` had nothing to do because the flag was still set.
+ * So the same work is asked for again here. A session that ended drops it instead.
+ */
+async function runSlicedRefresh() {
+  const session = state.session;
+  const signal = { get aborted() { return state.session !== session; } };
+  try {
+    await runSliced(refreshNowSteps(), { budgetMs: SLICED_STEP_BUDGET_MS, signal });
+  } catch (err) {
+    console.warn('clayjs: source map could not run the queued repair:', err);
+  }
+  if (!state.refreshQueued || !state.installed || state.session !== session) return;
+  state.refreshQueued = false;
+  scheduleRefresh();
+}
+
+/**
+ * Run a queued refresh now, in this task. A no-op when none is queued, which is also what
+ * makes the idle callback of a refresh that `text()` or `locate()` already ran harmless.
+ * Everything that reads the session synchronously comes through here: it must answer in
+ * the caller's task, so it drains the same steps the idle refresh may resume across tasks.
  */
 function refreshNow() {
   drain(refreshNowSteps());
