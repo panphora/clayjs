@@ -251,7 +251,7 @@ function install(sourceUrl, context = null, attempt = 0, render = true, latest =
     state.stats = stats;
     state.timing = { fetch: t1 - t0, model: t2 - t1, pair: t3 - t2, refresh: null };
     state.installed = true;
-    if (render) setSaveRenderer(renderSave);
+    if (render) setSaveRenderer(renderSave, { steps: renderSaveSteps });
     return summary();
   }).catch((err) => {
     // Not an error the page can do anything about, and not a failure of the save:

@@ -58,6 +58,7 @@ const snapshotProvenance = new WeakMap();
 // because many things want a turn; serializing the document is one decision, so a
 // second renderer would be two answers to "what bytes does this save send".
 let saveRenderer = null;
+let saveRendererSteps = null;
 
 // The capture identity for save captures. A refused save that may retry reads it
 // before sending and again before each retry: a capture newer than the one those
@@ -237,10 +238,16 @@ export function onSnapshot(callback) {
  * strings are only ever compared against each other, so they gain nothing from
  * source fidelity and would pay a full render on every keystroke's dirty check.
  *
+ * `steps` is the same render as a generator, for a save that verifies across tasks; a
+ * renderer without one is called synchronously at that point.
+ *
  * @param {?Function} renderer - (clone, today) => string, or null to restore outerHTML
+ * @param {Object} [options]
+ * @param {?Function} [options.steps] - (clone, today) => generator
  */
-export function setSaveRenderer(renderer) {
+export function setSaveRenderer(renderer, { steps = null } = {}) {
   saveRenderer = renderer;
+  saveRendererSteps = steps;
 }
 
 const XHTML_NS = 'http://www.w3.org/1999/xhtml';
@@ -296,22 +303,40 @@ function serializeClone(clone) {
  * cost somebody a save.
  */
 function serializeSaveClone(clone, context = null) {
-  if (context && capturePageStateReader) {
-    let state = null;
-    try { state = capturePageStateReader(clone); } catch (_) {}
-    if (state) capturePageStates.set(context.captureId, state);
-  }
-  const today = serializeClone(clone);
-  if (!saveRenderer) return today;
+  const pin = { clone, context, renderer: saveRenderer, rendererSteps: saveRendererSteps, pageStateReader: capturePageStateReader };
+  return drainSteps(saveSteps(pin)).forSave;
+}
+
+/** Run a generator to completion in this task and return its value. */
+function drainSteps(gen) {
+  let step = gen.next();
+  while (!step.done) step = gen.next();
+  return step.value;
+}
+
+/**
+ * The renderer as a generator, with `activeCapture` set around each resume and restored
+ * before every yield: this capture is never the active one while this task is not
+ * running it.
+ */
+function* rendererSteps(clone, today, pin) {
+  if (!pin.renderer) return today;
   const previous = activeCapture;
-  activeCapture = context;
-  try {
-    return saveRenderer(clone, today);
-  } catch (err) {
-    console.error('clayjs: save renderer failed, sending the full serialization', err);
-    return today;
-  } finally {
-    activeCapture = previous;
+  let gen = null;
+  for (;;) {
+    let step;
+    activeCapture = pin.context;
+    try {
+      gen ||= pin.rendererSteps ? pin.rendererSteps(clone, today) : false;
+      step = gen ? gen.next() : { done: true, value: pin.renderer(clone, today) };
+    } catch (err) {
+      console.error('clayjs: save renderer failed, sending the full serialization', err);
+      return today;
+    } finally {
+      activeCapture = previous;
+    }
+    if (step.done) return step.value;
+    yield;
   }
 }
 
@@ -607,23 +632,24 @@ export function captureForComparisonAndDirty({ flushUndo = true } = {}) {
 }
 
 /**
- * Single-capture function for both saving and comparison.
- *
- * Clones the DOM once, then clones that clone for comparison.
- * More efficient than calling captureForSave() and captureForComparison() separately.
+ * Begin one save capture: in one synchronous call, everything that must see the live
+ * page (the snapshot, its hooks, snapshot-ready, the authored handlers, the comparison
+ * clones and every transform over all three), then a job whose remaining work is
+ * `job.steps()`. The job holds every value that work reads, so a page edited between two
+ * steps cannot change the answer; `job.drop()` releases what it captured.
  *
  * @param {Object} options
  * @param {boolean} options.emitForSync - Whether to emit snapshot-ready event (default: true)
  * @param {boolean} options.forRequest - These bytes go to a host, so the renderer may
  *   attach the verified model they came from, for the accepted save to adopt
- * @returns {{ forSave: string, forComparison: string, forDirty: string, captureId: number }}
+ * @returns {{ captureId: number, steps: function(): Generator, drop: function(): void }}
  */
-export function captureForSaveAndComparison({ emitForSync = true, flushUndo = true, requestRefresh = false, forRequest = false } = {}) {
+export function beginSaveCapture({ emitForSync = true, flushUndo = true, requestRefresh = false, forRequest = false } = {}) {
   if (!Number.isSafeInteger(captureCounter + 1)) throw new Error('Save capture identity exhausted');
   const captureId = ++captureCounter;
   // The context this capture's renderer may attach a private artifact to, and the
   // record of whether the page has its own save handlers. It never reaches the object
-  // this function returns: that keeps its four public fields.
+  // the capture returns: that keeps its four public fields.
   //
   // Only for a capture whose bytes go to a host. A capture taken for anything else (a
   // live-sync disk base, a download, an inspection) has no request to adopt it, so it
@@ -633,11 +659,9 @@ export function captureForSaveAndComparison({ emitForSync = true, flushUndo = tr
 
   // Emit for live-sync before any stripping.
   //
-  // A listener gets the very clone this function goes on to serialize into
-  // forSave, forComparison and forDirty — that sharing is the point, it saves a
-  // second full DOM clone per save. So a listener may READ it and must not write
-  // to it: anything it changes lands in the saved bytes and in both baselines,
-  // and a baseline the dirty check cannot reproduce warns on close forever.
+  // A listener gets the very clone this capture goes on to serialize into forSave,
+  // forComparison and forDirty — that sharing is the point, it saves a second full DOM
+  // clone per save. So a listener may READ it and must not write to it.
   if (emitForSync) {
     document.dispatchEvent(new CustomEvent('clay:snapshot-ready', {
       detail: { documentElement: clone, forSave: true, captureId }
@@ -651,11 +675,8 @@ export function captureForSaveAndComparison({ emitForSync = true, flushUndo = tr
   const compareClone = clonePreventingOnclone(clone);
   carryProvenance(clone, compareClone);
 
-  // The dirty domain differs from the autosave domain only inside
-  // no-trigger-autosave regions, so a document without one pays nothing: the two
-  // strip sets remove exactly the same nodes and one string serves both. The
-  // predicate reads the captured clone after authored handlers have run, and
-  // covers all three spellings via the policy's own selector.
+  // The dirty domain differs from the autosave domain only inside no-trigger-autosave
+  // regions, so a document without one pays nothing: one string serves both.
   const dirtyClone = clone.querySelector(NO_TRIGGER_AUTOSAVE_SELECTOR)
     ? clonePreventingOnclone(clone)
     : null;
@@ -672,7 +693,6 @@ export function captureForSaveAndComparison({ emitForSync = true, flushUndo = tr
     el.remove();
   }
   stripDiagnosticBeacons(clone);
-  const forSave = serializeSaveClone(clone, context);
 
   // Compare clone: strip every autosave-off region, then run hooks
   for (const el of compareClone.querySelectorAll(STRIP_FROM_COMPARISON)) {
@@ -683,10 +703,8 @@ export function captureForSaveAndComparison({ emitForSync = true, flushUndo = tr
     hook(compareClone);
   }
   stripSnapshotRegions(compareClone);
-  const forComparison = serializeForCompare(compareClone);
 
   // Dirty clone: same shape as the compare clone, one selector weaker.
-  let forDirty = forComparison;
   if (dirtyClone) {
     for (const el of dirtyClone.querySelectorAll(STRIP_FROM_DIRTY_CHECK)) {
       el.remove();
@@ -696,12 +714,77 @@ export function captureForSaveAndComparison({ emitForSync = true, flushUndo = tr
       hook(dirtyClone);
     }
     stripSnapshotRegions(dirtyClone);
-    forDirty = serializeForCompare(dirtyClone);
   }
 
+  const pin = {
+    captureId,
+    context,
+    clone,
+    compareClone,
+    dirtyClone,
+    renderer: saveRenderer,
+    rendererSteps: saveRendererSteps,
+    pageStateReader: capturePageStateReader,
+    result: null,
+  };
+
+  return Object.freeze({
+    captureId,
+    steps: () => saveSteps(pin),
+    drop() {
+      releaseCaptureArtifact(pin.result);
+      capturePageStates.delete(captureId);
+      if (context) context.artifact = null;
+      pin.clone = pin.compareClone = pin.dirtyClone = null;
+      pin.result = null;
+    },
+  });
+}
+
+/** The resumable half of a save capture: three serializations, then the renderer. */
+function* saveSteps(pin) {
+  const { captureId } = pin;
+  if (pin.context && pin.pageStateReader) {
+    let state = null;
+    try { state = pin.pageStateReader(pin.clone); } catch (_) {}
+    if (state) capturePageStates.set(captureId, state);
+  }
+  const today = serializeClone(pin.clone);
+  yield;
+  const forComparison = pin.compareClone ? serializeForCompare(pin.compareClone) : null;
+  yield;
+  const forDirty = pin.dirtyClone ? serializeForCompare(pin.dirtyClone) : forComparison;
+  yield;
+  const forSave = yield* rendererSteps(pin.clone, today, pin);
   const result = { forSave, forComparison, forDirty, captureId };
-  if (context && context.artifact) captureArtifacts.set(result, context.artifact);
+  if (pin.context && pin.context.artifact) captureArtifacts.set(result, pin.context.artifact);
+  pin.result = result;
   return result;
+}
+
+/**
+ * Single-capture function for both saving and comparison.
+ *
+ * Clones the DOM once, then clones that clone for comparison.
+ * More efficient than calling captureForSave() and captureForComparison() separately.
+ *
+ * The drained form of beginSaveCapture: one task, the same bytes, and the same release
+ * on the way out.
+ *
+ * @param {Object} options
+ * @param {boolean} options.emitForSync - Whether to emit snapshot-ready event (default: true)
+ * @param {boolean} options.forRequest - These bytes go to a host, so the renderer may
+ *   attach the verified model they came from, for the accepted save to adopt
+ * @returns {{ forSave: string, forComparison: string, forDirty: string, captureId: number }}
+ */
+export function captureForSaveAndComparison(opts = {}) {
+  const job = beginSaveCapture(opts);
+  try {
+    return drainSteps(job.steps());
+  } catch (err) {
+    job.drop();
+    throw err;
+  }
 }
 
 /**
