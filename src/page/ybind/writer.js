@@ -8,10 +8,23 @@ import { resolveTableFields, tableSeed, writeTable } from "./table.js";
 import { resolveBoardFields, writeBoard } from "./board.js";
 import { createOriginIndex } from "./origins.js";
 
+const FIELD = (value) => (value === true ? {} : value);
+const sameValue = (a, b) => sameJson(FIELD(a), FIELD(b));
+
 export function setAttrs(pd, id, t, attrs) {
   let m = pd.attrs.get(id);
   if (!m) { m = new Y.Map(); pd.attrs.set(id, m); }
   const type = schema.nodes[t];
+  // A block type this runtime has no schema for keeps its original record: no
+  // known field list to normalize it against, and never a paragraph in its place.
+  if (!type) {
+    if (m.get("t") !== t) m.set("t", t);
+    for (const [k, v] of Object.entries(attrs ?? {})) {
+      if (k === "t" || k === "pos") continue;
+      if (!sameJson(m.has(k) ? m.get(k) : undefined, v)) m.set(k, v);
+    }
+    return;
+  }
   const table = t === "table" && m.get("t") === "table" && !recoveredSource(id);
   const board = t === "board" && !recoveredSource(id);
   const before = table ? resolveTableFields(pd.tableFields, id, tableSeed(pd, id)) : board ? resolveBoardFields(pd.boardFields, id) : null;
@@ -46,6 +59,31 @@ export function liveKeys(ctx) {
   return out;
 }
 
+// The live keys this runtime has no schema mark for, including the reserved
+// compact-code bridge. A command never cancels them: they stay byte for byte
+// until something that understands them rewrites them.
+export function opaqueKeys(ctx) {
+  const cancelled = new Set();
+  for (const [k, v] of ctx) if (isCancel(k) && v) cancelled.add(k.split("!")[0]);
+  const out = [];
+  for (const [k, v] of ctx) if (!isCancel(k) && v !== null && v !== undefined && !cancelled.has(k) && !schema.marks[markName(k)]) out.push([k, v]);
+  return out;
+}
+
+// The attributes an inserted unit carries over from its neighbours: every known
+// key as before, and an opaque key only when the editor's mark set still names
+// it, so text at a span boundary does not inherit a format nobody can read.
+export function baseAttributes(ctx, want = {}) {
+  const out = {};
+  let opaque = false;
+  for (const [k, v] of ctx) if (isCancel(k) || schema.marks[markName(k)]) out[k] = v;
+  for (const [k, v] of opaqueKeys(ctx)) {
+    opaque = true;
+    if (want[markName(k)] !== undefined) out[k] = v;
+  }
+  return { attrs: out, opaque };
+}
+
 export function runAttributes(pd, ctx, want) {
   const rid = mintOp(pd);
   const changes = {};
@@ -54,12 +92,17 @@ export function runAttributes(pd, ctx, want) {
   for (const [k, v] of have) {
     const n = markName(k);
     const w = want[n];
-    if (w !== undefined && sameJson(w === true ? true : w, v)) kept.add(n);
+    if (w !== undefined && sameValue(w, v)) kept.add(n);
     else changes[`${k}!${rid}`] = true;
   }
+  for (const [k, v] of opaqueKeys(ctx)) {
+    const n = markName(k);
+    if (want[n] !== undefined && sameValue(want[n], v)) kept.add(n);
+  }
   for (const [n, w] of Object.entries(want)) if (!kept.has(n)) changes[`${n}~${mintOp(pd)}`] = w;
-  if (!Object.keys(changes).length) return undefined;
-  return { ...Object.fromEntries(ctx), ...changes };
+  const base = baseAttributes(ctx, want);
+  if (!Object.keys(changes).length && !base.opaque) return undefined;
+  return { ...base.attrs, ...changes };
 }
 
 export const CHUNK_CHARS = 2000;
@@ -119,7 +162,7 @@ function insertChunk(pd, yIdx, toks, fences = null) {
     i += run.length;
     run = "";
   };
-  const embed = (e) => { const attrs = Object.fromEntries(ctxAt(pd, i)); beforeFence(pd, i, fences, () => pd.flow.insertEmbed(i, e, attrs)); i += 1; };
+  const embed = (e) => { const attrs = baseAttributes(ctxAt(pd, i)).attrs; beforeFence(pd, i, fences, () => pd.flow.insertEmbed(i, e, attrs)); i += 1; };
   for (const t of toks) {
     if (t.k === "c") { if (runMk !== null && t.mk !== runMk) flush(); runMk = t.mk; runMa = t.ma; run += t.ch; }
     else if (t.k === "h") { flush(); runMk = null; embed({ br: 1 }); }
@@ -249,6 +292,7 @@ export function applyRegion(ctx, ta, oldToks, newToks, oldSurvives = null) {
     else insertTokens(pd, map.toPhysical(e.at, "before"), e.i.toks, ctx.tx, ctx.fences);
   }
   for (const [ob, nb] of attrs) ctx.tx(() => {
+    if (!schema.nodes[nb.t]) return;
     const source = ctx.recovered.get(ob.id);
     if (source) {
       if (ob.t !== nb.t) pd.gone.set(attrKey(source, "t"), nb.t);

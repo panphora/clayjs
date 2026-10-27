@@ -144,14 +144,21 @@ function walkFlow(pd, index) {
     const root = recoveredRoot(sourceKey, removalsBySource.get(sourceKey) ?? [], intents);
     const id = `recovered:${sourceKey}`;
     const t = root ? root.type : "paragraph";
-    cur = { kind: "b", id, baseId: id, brk: { client: it.id.client, clock: it.id.clock }, implicit: false, runs: [], len: 1, atom: !schema.nodes[t]?.isTextblock, recovered: true, restored: !moved, sourceKey, t, fields: root ? root.attrs : null };
+    const opaque = !Object.hasOwn(schema.nodes, t);
+    cur = { kind: "b", id, baseId: id, brk: { client: it.id.client, clock: it.id.clock }, implicit: false, runs: [], len: 1, atom: !opaque && !schema.nodes[t]?.isTextblock, opaque, recovered: true, restored: !moved, sourceKey, t, fields: root ? root.attrs : null };
     segs.push(cur);
     prevId = id;
   };
   const open = (id, brk, implicit) => {
     cur = { kind: "b", id, baseId: id, brk, implicit, runs: [], len: implicit ? 0 : 1, atom: false, items: !implicit && (markerCount.get(id) ?? 0) > 1 ? [] : null };
-    if (!implicit) { cur.t = typeOf(id); cur.atom = !schema.nodes[cur.t]?.isTextblock; }
-    else cur.t = "paragraph";
+    if (!implicit) {
+      cur.t = typeOf(id);
+      // A type this runtime has no schema for still owns the text and marks up to
+      // the next block marker: it is not an atom whose following text becomes an
+      // implicit paragraph, and it is never rewritten as one.
+      cur.opaque = !Object.hasOwn(schema.nodes, cur.t);
+      cur.atom = !cur.opaque && !schema.nodes[cur.t]?.isTextblock;
+    } else cur.t = "paragraph";
     segs.push(cur);
     prevId = id;
   };

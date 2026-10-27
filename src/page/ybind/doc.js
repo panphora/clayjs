@@ -14,8 +14,24 @@ export const fieldsOf = (pd, b, type) => {
   return out;
 };
 
+const copy = (value) => (value === undefined ? value : JSON.parse(JSON.stringify(value)));
+
+// Every attribute a block record holds, known or not, without the structural
+// position: the record an opaque block keeps and writes back unchanged.
+const rawOf = (pd, b) => {
+  const out = {};
+  const m = pd.attrs.get(b.baseId);
+  if (m) m.forEach((value, key) => { if (key !== "pos") out[key] = copy(value); });
+  out.t = b.t;
+  return out;
+};
+
 export function docOf(pd, w) {
   const blocks = w.visible.map((b) => {
+    if (b.opaque) {
+      const fields = b.recovered ? { ...copy(b.fields ?? {}) } : rawOf(pd, b);
+      return { b, type: schema.nodes.opaque_block, fields, opaque: true };
+    }
     const type = schema.nodes[b.t] ?? schema.nodes.paragraph;
     return { b, type, fields: { ...(b.fields ?? fieldsOf(pd, b, type)) } };
   });
@@ -42,7 +58,16 @@ export function docOf(pd, w) {
     });
     byId.get(lowest).fields.parent = null;
   }
-  const nodes = blocks.map(({ b, type, fields }) => {
+  const nodes = blocks.map(({ b, type, fields, opaque }) => {
+    if (opaque) {
+      const content = [];
+      for (const r of b.runs) {
+        if (r.hole) continue;
+        if (r.br) content.push(schema.nodes.hard_break.create());
+        else content.push(schema.text(r.text, r.marks));
+      }
+      return type.create({ id: b.id, pos: null, raw: fields }, content);
+    }
     const attrs = { id: b.id, pos: null, ...fields };
     if (type.name === "table" && Object.keys(attrs.rows ?? {}).length && Object.keys(attrs.cols ?? {}).length) return nodeFromBlock(schema, b.id, { t: "table", ...attrs });
     if (!type.isTextblock) return type.create(attrs);

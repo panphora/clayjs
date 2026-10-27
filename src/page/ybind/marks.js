@@ -1,8 +1,20 @@
 import { schema } from "../schema.js";
+import { entriesOfYjs, isOpaque, opaqueMark, yjsFields } from "../format-codec.js";
 
 export const markName = (k) => k.split("!")[0].split("~")[0];
 export const isCancel = (k) => k.includes("!");
 export const marksAttrs = (marks) => { const o = {}; for (const m of marks) o[m.type.name] = m.attrs && Object.keys(m.attrs).length ? { ...m.attrs } : true; return o; };
+// The Yjs fields a set of editor marks stands for. An opaque mark is not a live
+// key of its own: its named descriptors go under their own names and its compact
+// tokens under the reserved one.
+export const marksFields = (marks) => {
+  const o = {};
+  for (const m of marks) {
+    if (isOpaque(m)) { for (const [key, value] of Object.entries(yjsFields(m.attrs.entries))) o[key] = JSON.parse(JSON.stringify(value)); continue; }
+    o[m.type.name] = m.attrs && Object.keys(m.attrs).length ? { ...m.attrs } : true;
+  }
+  return o;
+};
 export const marksKey = (marks) => marks.map((m) => m.type.name + (m.attrs && Object.keys(m.attrs).length ? JSON.stringify(m.attrs) : "")).sort().join("|");
 export function marksFromAttributes(a, blockType) {
   if (blockType === "code_block") return [];
@@ -14,5 +26,13 @@ export function marksFromAttributes(a, blockType) {
     if (v === null || v === undefined || isCancel(k) || cancelled.has(k)) continue;
     best.set(markName(k), v);
   }
-  return [...best].filter(([n]) => schema.marks[n]).map(([n, v]) => schema.marks[n].create(v === true ? null : v));
+  const marks = [];
+  const unknown = {};
+  for (const [n, v] of best) {
+    if (schema.marks[n]) marks.push(schema.marks[n].create(v === true ? null : v));
+    else unknown[n] = v;
+  }
+  const opaque = entriesOfYjs(unknown);
+  if (opaque.length) marks.push(opaqueMark(opaque));
+  return marks;
 }

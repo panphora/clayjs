@@ -38,7 +38,7 @@ const KINDS = ["paragraph", "heading", "list_item", "toggle", "callout", "code_b
 test("DEFAULTS mirror the schema", () => {
   const schemaDefaults = {};
   for (const [name, type] of Object.entries(schema.nodes)) {
-    if (!type.spec.group?.includes("block")) continue;
+    if (!type.spec.group?.includes("block") || name === "opaque_block") continue;
     schemaDefaults[name] = Object.fromEntries(Object.entries(type.spec.attrs || {}).filter(([k]) => k !== "id" && k !== "pos").map(([k, v]) => [k, v.default]));
   }
   expect(canon(schemaDefaults)).toBe(canon(DEFAULTS));

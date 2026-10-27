@@ -119,6 +119,9 @@ export function moveBlocks({ pd, view, um, origins, render }, args = {}) {
   const hasParent = args?.parent !== undefined;
 
   const current = walk(pd, origins);
+  // An opaque block is an operation this runtime must refuse before writing: it
+  // has no turn-into, it cannot be carried, and its record is never rewritten.
+  const protectedIds = new Set(current.visible.filter((seg) => seg.opaque).map((seg) => seg.id));
   const list = visibleBlocks(pd, current, view);
   const byId = new Map(list.map((block) => [block.id, block]));
   const order = list.map((block) => block.id);
@@ -132,6 +135,7 @@ export function moveBlocks({ pd, view, um, origins, render }, args = {}) {
   const roots = new Set(ids.filter((id) => !ids.some((other) => other !== id && isAncestor(byId, other, id))));
   const selected = list.filter((block) => ids.some((root) => inSubtree(byId, block.id, root)));
   const selectedSet = new Set(selected.map((block) => block.id));
+  if (selected.some((block) => protectedIds.has(block.id)) || changes.some((change) => protectedIds.has(change.id))) return refuse("unsupported-format");
 
   const segments = new Map(current.visible.map((seg) => [seg.id, seg]));
   for (const block of selected) {

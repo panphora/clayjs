@@ -42,6 +42,22 @@ export function sameBareShape(a, b) {
   return true;
 }
 
+const opaqueRanges = (doc) => {
+  const out = [];
+  doc.forEach((node, pos) => { if (node.type.name === "opaque_block") out.push([pos, pos + node.nodeSize]); });
+  return out;
+};
+
+// A command that would rewrite an opaque block, or cut through it, is refused
+// before the view or the document changes. A command that merely touches its
+// neighbours keeps working.
+const touchesOpaque = (step, ranges) => {
+  const from = typeof step.from === "number" ? step.from : typeof step.pos === "number" ? step.pos : null;
+  if (from === null) return false;
+  const to = typeof step.to === "number" ? step.to : from + 1;
+  return ranges.some(([start, end]) => from < end && to > start);
+};
+
 const tableSpan = (doc, pos) => {
   const $pos = doc.resolve(pos);
   return $pos.depth && $pos.node(1).type.name === "table" ? [$pos.before(1), $pos.after(1)] : null;
@@ -327,10 +343,9 @@ export function createBridge({ pd, onNotice = () => {}, ownedTokens = [], author
     },
     dispatch(tr) {
       const move = tr.getMeta(MOVE);
-      if (move) {
-        portMove(tr, move);
-        return;
-      }
+      if (move) return portMove(tr, move);
+      const ranges = opaqueRanges(view.state.doc);
+      if (ranges.length && tr.steps.some((step) => touchesOpaque(step, ranges))) return { status: "refused", code: "unsupported-format" };
       const { state, transactions } = view.state.applyTransaction(tr);
       const local = transactions.filter((t) => t.docChanged && !t.getMeta(REMOTE_META));
       view.updateState(state);

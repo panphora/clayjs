@@ -141,6 +141,20 @@ export const schema = new model.Schema({
       attrs: { ...block, html: { default: "" } },
       toDOM: (n) => ["div", ref(n, { "data-type": "preserved" })],
     },
+    // A block type a newer peer wrote and this runtime has no schema for. It keeps
+    // the original record in raw and its inline content for mapping, and it shows
+    // an inert fallback: no content DOM to edit, no command that rewrites it.
+    opaque_block: {
+      group: "block",
+      content: "inline*",
+      atom: true,
+      isolating: true,
+      selectable: true,
+      attrs: { ...block, raw: { default: null } },
+      toDOM: (n) => ["div", ref(n, { "data-type": "newer-format", "data-format": String(n.attrs.raw?.t ?? ""), contenteditable: "false" }),
+        ["span", { class: "page-newer-format" }, `Newer format: ${String(n.attrs.raw?.t ?? "")}`],
+        ["span", { class: "page-newer-format-text" }, n.textContent]],
+    },
 
     text: { group: "inline" },
     hard_break: {

@@ -6,6 +6,7 @@ import { LOCAL, HISTORY_META, attrKeys, defaultOf, mintId, mintOp } from "./layo
 import { tokensOf, tokenIndex, textTokenRange, projectionOf, yAfter, sameTok } from "./tokens.js";
 import { CHUNK_CHARS, insertTokens, applyRegion, markRange } from "./writer.js";
 import { walk } from "./walk.js";
+import { isOpaque, yjsFields } from "../format-codec.js";
 
 const { AddMarkStep, RemoveMarkStep, AttrStep, ReplaceStep, Mapping } = transform;
 
@@ -106,6 +107,14 @@ export function localGroup(pd, transactions, w, stats, um = null, history = true
       if (to <= from) continue;
       const name = step.mark.type.name;
       const val = step instanceof AddMarkStep ? (step.mark.attrs && Object.keys(step.mark.attrs).length ? { ...step.mark.attrs } : true) : null;
+      // An opaque mark is not a live key: adding it writes each descriptor it
+      // carries, and removing it erases nothing the command cannot understand.
+      if (isOpaque(step.mark)) {
+        if (val === null) continue;
+        const fields = yjsFields(step.mark.attrs.entries);
+        tx(() => { for (const [key, value] of Object.entries(fields)) markRange(markCtx, from, to, key, value, at); });
+        continue;
+      }
       tx(() => markRange(markCtx, from, to, name, val, at));
     }
   };

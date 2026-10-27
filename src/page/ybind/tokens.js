@@ -1,6 +1,6 @@
 import { attrKeys, sameJson } from "./layout.js";
 import { blockJson } from "../model.js";
-import { marksKey, marksAttrs } from "./marks.js";
+import { marksKey, marksFields } from "./marks.js";
 import { createProjectionMap } from "./projection-map.js";
 
 export const implicitFlags = (doc, visible) => {
@@ -19,7 +19,16 @@ export const implicitFlags = (doc, visible) => {
   });
   return out;
 };
-const pickAttrs = (node) => { const o = {}; for (const k of attrKeys(node.type)) o[k] = node.attrs[k]; if (node.type.name === "table") o.rows = blockJson(node).rows; return o; };
+const opaqueOf = (node) => node.attrs.raw ?? null;
+const pickAttrs = (node) => {
+  const raw = opaqueOf(node);
+  if (raw) { const o = { ...raw }; delete o.t; delete o.pos; return o; }
+  const o = {};
+  for (const k of attrKeys(node.type)) o[k] = node.attrs[k];
+  if (node.type.name === "table") o.rows = blockJson(node).rows;
+  return o;
+};
+const typeOfNode = (node) => opaqueOf(node)?.t ?? node.type.name;
 
 export function tokensOf(doc, alias = new Map(), visible = null) {
   const toks = [];
@@ -27,9 +36,9 @@ export function tokensOf(doc, alias = new Map(), visible = null) {
   doc.forEach((block, _o, index) => {
     const implicit = flags[index] && !alias.has(block.attrs.id);
     const brk = visible ? visible[index]?.brk ?? null : null;
-    if (!implicit) toks.push({ k: "b", id: flags[index] && alias.has(block.attrs.id) ? alias.get(block.attrs.id) : block.attrs.id, t: block.type.name, attrs: pickAttrs(block), brk });
+    if (!implicit) toks.push({ k: "b", id: flags[index] && alias.has(block.attrs.id) ? alias.get(block.attrs.id) : block.attrs.id, t: typeOfNode(block), attrs: pickAttrs(block), brk });
     if (block.isTextblock) block.content.forEach((n) => {
-      if (n.isText) { const ms = block.type.name === "code_block" ? [] : n.marks; const mk = marksKey(ms), ma = marksAttrs(ms); for (let i = 0; i < n.text.length; i++) toks.push({ k: "c", ch: n.text[i], mk, ma }); }
+      if (n.isText) { const ms = typeOfNode(block) === "code_block" ? [] : n.marks; const mk = marksKey(ms), ma = marksFields(ms); for (let i = 0; i < n.text.length; i++) toks.push({ k: "c", ch: n.text[i], mk, ma }); }
       else if (n.type.name === "hard_break") toks.push({ k: "h" });
     });
   });
@@ -74,8 +83,8 @@ export function textTokenRange(doc, from, to) {
     const a = Math.max(0, startOffset - cursor), b = Math.min(node.nodeSize, endOffset - cursor);
     if (a < b) {
       if (node.isText) {
-        const marks = block.type.name === "code_block" ? [] : node.marks;
-        const mk = marksKey(marks), ma = marksAttrs(marks);
+        const marks = typeOfNode(block) === "code_block" ? [] : node.marks;
+        const mk = marksKey(marks), ma = marksFields(marks);
         for (let i = a; i < b; i++) tokens.push({ k: "c", ch: node.text[i], mk, ma });
       } else if (node.type.name === "hard_break") tokens.push({ k: "h" });
     }
