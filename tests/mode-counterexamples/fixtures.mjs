@@ -15,13 +15,30 @@
  * fake channel, the way `tests/unit/live-local-lane.test.js` builds its tabs.
  */
 
-import * as Y from "../../src/vendor/yjs.vendor.js";
-import { createStore } from "../../src/live/store.js";
-import { createFastLane } from "../../src/live/fast-lane.js";
-import { localTransport } from "../../src/live/local-lane.js";
-import { createYProvider, dec } from "../../src/page/ybind/provider.js";
-import { NET } from "../../src/page/ybind/layout.js";
-import { seedValue } from "../../src/page/ybind/seed.js";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const REPO_ROOT = fileURLToPath(new URL("../../", import.meta.url));
+
+/**
+ * Where the harness reads ClayJS runtime source from.
+ *
+ * A counterexample is only evidence if it can be run against a runtime that is not the
+ * checkout: `CLAY_COUNTEREXAMPLE_RUNTIME` names a directory laid out like the repo root,
+ * and every runtime import the harness makes resolves here. Unset, the runtime is the
+ * repo the harness lives in.
+ *
+ * @param {string} rel - a path relative to the runtime root, such as "src/loader.js"
+ * @returns {string} an absolute path
+ */
+export function runtimePath(rel) {
+  const root = process.env.CLAY_COUNTEREXAMPLE_RUNTIME || REPO_ROOT;
+  return path.resolve(root, rel);
+}
+
+// A runtime file as the module registry sees it: two copies are two modules, so a case
+// run against a copy really loads the copy.
+export const runtimeImport = (rel) => import(runtimePath(rel));
 
 const PAGE = {
   params: "exclude=richclay,source",
@@ -418,7 +435,7 @@ export async function bootPage(fixture, { mode, host, resetModules, served = nul
   globalThis.fetch = window.fetch = host.fetch;
   const resources = createResourceCounter();
   try {
-    const { boot } = await import("../../src/loader.js");
+    const { boot } = await runtimeImport("src/loader.js");
     await new Promise((resolve) => boot(null, new URLSearchParams(params), resolve));
     // The lane's lock callback waits CLOSE_WAIT_MS on a real timer before it starts the
     // room, and that timer is already ticking when the page is up: a case's fake clock
@@ -515,7 +532,20 @@ export function installChannelPair() {
  * that booted its own lane: tab B's frames reach the page under test instead of a tab
  * this harness built.
  */
+const LANE_SOURCES = [
+  "src/vendor/yjs.vendor.js",
+  "src/live/store.js",
+  "src/live/fast-lane.js",
+  "src/live/local-lane.js",
+  "src/page/ybind/provider.js",
+  "src/page/ybind/layout.js",
+  "src/page/ybind/seed.js",
+];
+
 export async function createLanePair({ settle = async () => {}, channel = installChannelPair(), seed = null, peer = false } = {}) {
+  const laneModules = [];
+  for (const rel of LANE_SOURCES) laneModules.push(await runtimeImport(rel));
+  const [Y, { createStore }, { createFastLane }, { localTransport }, { createYProvider, dec }, { NET }, { seedValue }] = laneModules;
   const initial = seed ?? seedValue(LANE_BLOCKS);
 
   const tab = (client) => {

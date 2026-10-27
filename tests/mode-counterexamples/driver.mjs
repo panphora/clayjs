@@ -14,7 +14,7 @@
  * of something never held, a requirement the run never reached) is invalid, never passed.
  */
 
-import { FIXTURES, createHost, bootPage, createLanePair } from "./fixtures.mjs";
+import { FIXTURES, createHost, bootPage, createLanePair, runtimeImport } from "./fixtures.mjs";
 
 // The clock and the module registry are the host's, not the case's: under Jest the test
 // environment lends its own, and the check command lends a deterministic clock of its own
@@ -45,7 +45,7 @@ const HOLDABLE = new Set(["save.request", "save.response", "chunk.import", "meta
 const SAVE_RESULTS = ["accepted", "rejected", "unknown"];
 const CHUNK_RESULTS = ["loaded", "failed"];
 
-const CASE_KEYS = new Set(["schema", "id", "fixture", "boot", "steps", "requires", "expect", "control", "knownFailing"]);
+const CASE_KEYS = new Set(["schema", "id", "fixture", "boot", "steps", "requires", "expect", "control", "knownFailing", "reducedFrom"]);
 const BOOT_KEYS = new Set(["mode", "live", "destination"]);
 const STEP_KEYS = {
   enter: [],
@@ -129,6 +129,9 @@ export function validateCase(json) {
   }
   if (json.knownFailing !== undefined && (typeof json.knownFailing !== "string" || !json.knownFailing)) {
     fail("bad-known-failing", "knownFailing", "knownFailing is one line saying what fails");
+  }
+  if (json.reducedFrom !== undefined && (typeof json.reducedFrom !== "string" || !SLUG.test(json.reducedFrom))) {
+    fail("bad-reduced-from", "reducedFrom", "reducedFrom names the case a shrink was made from");
   }
 
   if (json.requires !== undefined) {
@@ -361,7 +364,7 @@ export async function runCase(json) {
     // A reload imports the map again after a module reset, so its holds are re-applied.
     let MODULES = null;
     const holdChunks = async () => {
-      MODULES = (await import("../../src/loader-logic.js")).MODULES;
+      MODULES = (await runtimeImport("src/loader-logic.js")).MODULES;
       for (const path of Object.keys(MODULES)) {
         const original = MODULES[path];
         cleanups.push(() => {
