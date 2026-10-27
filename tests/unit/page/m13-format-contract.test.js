@@ -10,6 +10,9 @@ import { blocksFromYValue } from "../../../src/page/ybind/decode.js";
 import { yValueOf } from "../../../src/page/ybind/provider.js";
 import { seedPageFromArticle } from "../../../src/page/ybind/migrate.js";
 import { M13_CASES, NEIGHBOUR, caseOf } from "../../fixtures/page/formats/m13-cases.mjs";
+import { PAGE_FORMAT, PAGE_FORMAT_EXTENSION, PAGE_FORMAT_META, PAGE_FORMAT_UPGRADE, pageFormatFloor } from "../../../src/page/format-level.js";
+import { createFormatGate } from "../../../src/page/format-gate.js";
+import { captureFormat, checkPageFormatAdmission } from "../../../src/server/rooms/index.js";
 
 /**
  * The R half of an M13 cohort row. R is the writer that shipped before any floor-1 format:
@@ -19,10 +22,11 @@ import { M13_CASES, NEIGHBOUR, caseOf } from "../../fixtures/page/formats/m13-ca
  * label with its mention id, the toc block's record, the heading's icon and cover — beside
  * the new text.
  *
- * The other half of the row is not here: a writer older than R is refused once floor 1
- * activates, floor-0 text stays writable and an offline host lacks the capability until it
- * is upgraded. All three need the shared format gate and the host's capability, which do
- * not exist in this tree yet (Document 11 Step 5).
+ * The other half of the row is here as well, driven through the room's admission helper
+ * and the format gate: once the document's floor is 1 every case's capture is refused to a
+ * writer with no floor-1 capability, before anything is written; floor-0 text stays
+ * writable by every writer; and a host that does not advertise `page-format-v1` keeps the
+ * new-format command off until it does.
  */
 
 const clean = fragmentCleaner(document);
@@ -92,6 +96,51 @@ const seedValueOf = (blocks) => {
 // file is opened; everything else in its record is the content this contract is about.
 const withoutPos = ({ pos, ...rest }) => rest;
 
+const marker = (floor) => `<meta name="${PAGE_FORMAT_META}" content="${floor}">`;
+const pageTag = (value) => `<script type="application/json" merge="page" clay="live">${JSON.stringify(value).replace(/</g, "\\u003c")}</script>`;
+const fileOf = (inner, rev, value, floor = 0) =>
+  `<!doctype html>\n<html>\n<head>${floor ? marker(floor) : ""}<title>t</title></head>\n<body>\n<article data-page="1" data-rev="${rev}">\n${inner}\n</article>${pageTag(value)}\n</body>\n</html>`;
+
+// A saved page file: the article this writer renders from the records, and the page value
+// the editor would capture from it.
+const fileFor = (records, floor = 0, keep = null) => {
+  const kept = keep ? { [keep]: records[keep] } : records;
+  const model = project(kept);
+  const rev = revOf(model);
+  const inner = renderModel(model, { clean });
+  return { html: fileOf(inner, rev, seedPageFromArticle(articleOf(inner, rev)), floor), inner, rev, model };
+};
+
+const refusal = (fn) => {
+  try {
+    fn();
+  } catch (error) {
+    return error;
+  }
+  return null;
+};
+
+// A host that owns the canonical floor, as the gate's adapter seam states it.
+const gateHost = () => {
+  const calls = { activate: 0 };
+  const state = { floor: 0, admitted: [PAGE_FORMAT] };
+  return {
+    calls,
+    state,
+    async read() {
+      return { floor: state.floor };
+    },
+    async capabilities() {
+      return state.admitted;
+    },
+    async activate({ floor }) {
+      calls.activate += 1;
+      state.floor = Math.max(state.floor, floor);
+      return { accepted: true, receipt: { accepted: true } };
+    },
+  };
+};
+
 test.each(M13_CASES.map((entry) => entry.name))(
   "R's %s is checkpointed by this writer and survives a neighbouring edit",
   (name) => {
@@ -143,3 +192,64 @@ test("the title case keeps a heading a heading and its icon and cover beside it"
   expect(item.pageCoverSrc).toBe("/cover.jpg");
   expect(item.pageCoverY).toBe(0.25);
 });
+
+test.each(M13_CASES.map((entry) => entry.name))(
+  "a writer below the floor is refused the content of %s before any mutation once the document is floor 1",
+  (name) => {
+    const { records } = fromCase(name);
+    const capture = fileFor(records);
+    // The capture needs floor 1, which is why the document rose.
+    expect(captureFormat(capture.html)).toBe(1);
+    const stored = fileFor(records, 1).html;
+    expect(pageFormatFloor(stored)).toBe(1);
+
+    const thrown = refusal(() => checkPageFormatAdmission({ currentHtml: stored, html: capture.html, capability: 0, admitted: [1] }));
+    expect(thrown).not.toBeNull();
+    expect(thrown.code).toBe(PAGE_FORMAT_UPGRADE);
+    expect(thrown.minimum).toBe(1);
+    expect(thrown.statusCode).toBe(409);
+    // The pre-R writer's capture is untouched: no marker was added and no floor moved.
+    expect(capture.html).toBe(fileFor(records).html);
+    expect(pageFormatFloor(capture.html)).toBe(0);
+    expect(pageFormatFloor(stored)).toBe(1);
+  },
+);
+
+test.each(M13_CASES.map((entry) => entry.name))(
+  "floor-0 text stays writable by every writer in the %s row",
+  (name) => {
+    const { records } = fromCase(name);
+    const plain = fileFor(records, 0, NEIGHBOUR.id);
+    expect(captureFormat(plain.html)).toBe(0);
+
+    for (const capability of [0, 1, undefined]) {
+      const decision = checkPageFormatAdmission({ currentHtml: plain.html, html: plain.html, capability, admitted: [0, 1] });
+      expect(decision).toMatchObject({ ok: true, activate: false, floor: 0 });
+      // Floor-0 text gains no marker on its way out.
+      expect(decision.html).toBe(plain.html);
+    }
+  },
+);
+
+test.each(M13_CASES.map((entry) => entry.name))(
+  "a host that does not advertise page-format-v1 keeps the new-format command of the %s row off until it does",
+  async (name) => {
+    const adapter = gateHost();
+    let advertised = false;
+    const gate = createFormatGate({ host: adapter, supported: () => advertised });
+    const applied = [];
+    const refused = await gate.run({ apply: () => applied.push(name) });
+    expect(refused).toMatchObject({ status: "unsupported-host", code: "page-format-unsupported" });
+    expect(refused.extension).toBe(PAGE_FORMAT_EXTENSION);
+    expect(applied).toEqual([]);
+    expect(adapter.calls.activate).toBe(0);
+    expect(adapter.state.floor).toBe(0);
+
+    advertised = true;
+    const once = await gate.run({ apply: () => applied.push(name) });
+    expect(once.status).toBe("applied");
+    expect(applied).toEqual([name]);
+    expect(adapter.state.floor).toBe(PAGE_FORMAT);
+    expect(gate.floor).toBe(PAGE_FORMAT);
+  },
+);
