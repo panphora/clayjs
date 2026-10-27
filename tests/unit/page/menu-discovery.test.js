@@ -16,7 +16,7 @@ test("an exact alias wins outright", () => {
 });
 
 test("a label prefix keeps registry order", () => {
-  expect(keys("hea")).toEqual(["h1", "h2", "h3"]);
+  expect(keys("hea")).toEqual(["h1", "h2", "h3", "toggle-h1", "toggle-h2", "toggle-h3"]);
   expect(keys("t").slice(0, 2)).toEqual(["text", "toggle"]);
 });
 
@@ -26,8 +26,8 @@ test("a substring still matches", () => {
 });
 
 test("a fuzzy abbreviation is found after the exact ranks", () => {
-  expect(keys("hd2")).toEqual(["h2"]);
-  expect(keys("tgl")).toEqual(["toggle"]);
+  expect(keys("hd2")).toEqual(["h2", "toggle-h2"]);
+  expect(keys("tgl")).toEqual(["toggle", "toggle-h1", "toggle-h2", "toggle-h3"]);
 });
 
 test("equal fuzzy costs keep registry order", () => {

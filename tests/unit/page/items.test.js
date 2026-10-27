@@ -23,8 +23,9 @@ describe("rankItems", () => {
     expect(I.MENU_ITEMS.length).toBe(I.BLOCK_TYPES.length + I.INSERT_ITEMS.length);
   });
 
-  test("h lists the headings first, then the divider through its hr alias", () => {
-    expect(keys("h").slice(0, 4)).toEqual(["h1", "h2", "h3", "divider"]);
+  test("h lists the headings first, then the toggle headings, then the divider through its hr alias", () => {
+    expect(keys("h").slice(0, 6)).toEqual(["h1", "h2", "h3", "toggle-h1", "toggle-h2", "toggle-h3"]);
+    expect(keys("h")[6]).toBe("divider");
   });
 
   test("an exact alias or hint comes first", () => {
@@ -44,7 +45,7 @@ describe("rankItems", () => {
 
   test("substrings match, and letters in order match as a fuzzy abbreviation", () => {
     expect(keys("llou")).toEqual(["callout"]);
-    expect(keys("hd2")).toEqual(["h2"]);
+    expect(keys("hd2")).toEqual(["h2", "toggle-h2"]);
     expect(keys("zz")).toEqual([]);
   });
 
@@ -105,8 +106,8 @@ describe("dividers", () => {
 });
 
 describe("the menu list", () => {
-  test("lists the eleven block types, then Divider, Image, File, Table, Import CSV and Board", () => {
-    expect(I.MENU_ITEMS.map((i) => i.key)).toEqual(["text", "h1", "h2", "h3", "bullet", "ordered", "check", "toggle", "callout", "quote", "code", "divider", "image", "file", "table", "csv", "board"]);
+  test("lists the fourteen block types, then Divider, Image, File, Table, Import CSV and Board", () => {
+    expect(I.MENU_ITEMS.map((i) => i.key)).toEqual(["text", "h1", "h2", "h3", "bullet", "ordered", "check", "toggle", "toggle-h1", "toggle-h2", "toggle-h3", "callout", "quote", "code", "divider", "image", "file", "table", "csv", "board"]);
   });
 
   test("picture, photo and attachment find Image and File through aliases", () => {

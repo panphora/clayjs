@@ -74,8 +74,8 @@ export const schema = new model.Schema({
     toggle: {
       group: "block",
       content: "inline*",
-      attrs: { ...block, open: { default: false } },
-      toDOM: (n) => ["div", ref(n, { class: "page-toggle", "data-open": n.attrs.open ? "true" : "false" }), 0],
+      attrs: { ...block, open: { default: false }, level: { default: null } },
+      toDOM: (n) => ["div", ref(n, { class: "page-toggle", "data-open": n.attrs.open ? "true" : "false", ...(n.attrs.level ? { "data-level": String(n.attrs.level) } : {}) }), 0],
     },
     divider: {
       group: "block",

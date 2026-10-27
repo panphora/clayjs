@@ -14,6 +14,7 @@ import { pickCsv } from "./csv-import.js";
 import { makeBoard, insertBoardNode } from "./board.js";
 import { chartTables } from "./chart-tables.js";
 import { viewFeatures } from "./view-hooks.js";
+import { runFormatted } from "./format-command.js";
 
 const { TextSelection } = state;
 const N = schema.nodes;
@@ -27,6 +28,9 @@ export const BLOCK_TYPES = [
   { key: "ordered", label: "Numbered list", description: "A list with numbers", icon: "1.", type: "list_item", attrs: { kind: "ordered" }, hint: "1.", aliases: ["ol", "num", "numbered", "ordered"] },
   { key: "check", label: "Checklist", description: "Tasks to tick off", icon: "☐", type: "list_item", attrs: { kind: "check" }, hint: "[]", aliases: ["todo", "to-do", "task", "check", "checkbox"] },
   { key: "toggle", label: "Toggle", description: "Hide details under a line", icon: "▸", type: "toggle", attrs: { open: true }, hint: ">", aliases: ["collapse", "details", "fold"] },
+  { key: "toggle-h1", label: "Toggle heading 1", description: "Collapsible heading", icon: "H1", type: "toggle", attrs: { open: true, level: 1 }, aliases: ["toggle heading"] },
+  { key: "toggle-h2", label: "Toggle heading 2", description: "Collapsible heading", icon: "H2", type: "toggle", attrs: { open: true, level: 2 }, aliases: ["toggle heading"] },
+  { key: "toggle-h3", label: "Toggle heading 3", description: "Collapsible heading", icon: "H3", type: "toggle", attrs: { open: true, level: 3 }, aliases: ["toggle heading"] },
   { key: "callout", label: "Callout", description: "Make a note stand out", icon: "!", type: "callout", aliases: ["note", "aside", "info"] },
   { key: "quote", label: "Quote", description: "Set text apart as a quotation", icon: "\u201c", type: "quote", hint: "\"", aliases: ["blockquote", "quotation", "cite"] },
   { key: "code", label: "Code", description: "Code with highlighting", icon: "</>", type: "code_block", hint: "```", aliases: ["pre", "snippet"] },
@@ -55,7 +59,8 @@ export const insertItemsFor = (st, items = MENU_ITEMS) => (chartTables(st.doc).l
 export function blockTypeOf(node) {
   const t = node.type.name;
   return BLOCK_TYPES.find((b) => b.type === t && (!b.attrs
-    || (t === "heading" ? b.attrs.level === node.attrs.level : t === "list_item" ? b.attrs.kind === node.attrs.kind : true))) ?? BLOCK_TYPES[0];
+    || (t === "heading" || t === "toggle" ? (b.attrs.level ?? null) === (node.attrs.level ?? null)
+      : t === "list_item" ? b.attrs.kind === node.attrs.kind : true))) ?? BLOCK_TYPES[0];
 }
 
 const startOf = (doc, index) => {
@@ -97,6 +102,40 @@ export function turnInto(st, index, item) {
   const node = st.doc.child(index);
   if (!node.isTextblock) return null;
   return canTurnInto(node, item) ? retype(st.tr, index, item) : REFUSED;
+}
+
+// A toggle heading writes a `level` only a newer page format reads, so its first
+// write asks the format gate.
+export const isToggleHeading = (item) => item.type === "toggle" && item.attrs?.level != null;
+
+const indexOfId = (doc, id) => {
+  let found = -1;
+  doc.forEach((n, _, i) => { if (n.attrs.id === id) found = i; });
+  return found;
+};
+const stale = { ok: false, code: "stale-target" };
+
+// Turn every block named by `ids` into `item`. A block type from a later format,
+// a quote or a toggle heading, asks the format gate first; after it answers the
+// blocks are found again by id: one a peer moved away refuses instead of handing
+// the type to whatever took its place.
+export function turnBlocks(view, item, ids) {
+  const at = () => ids.map((id) => indexOfId(view.state.doc, id));
+  const write = () => {
+    const found = at();
+    if (found.includes(-1)) return stale;
+    if (found.some((i) => !canTurnInto(view.state.doc.child(i), item))) return REFUSED;
+    const tr = view.state.tr;
+    for (const i of found) retype(tr, i, item);
+    view.dispatch(asStep(tr).scrollIntoView());
+    view.focus();
+    return { ok: true };
+  };
+  if (isToggleHeading(item)) return runFormatted(view, write);
+  // A block type from a later format, like the turn into a quote, asks the gate
+  // before it writes, and a refusal is a notice rather than a change.
+  if (item.type === "quote") return import("./format-native-commands.js").then((menu) => menu.gateTurn(view, write));
+  return write();
 }
 
 // A new empty paragraph after the block at `index` and its subtree, at the
@@ -180,22 +219,8 @@ export function rankItems(items, query) {
   return items.map((it, order) => ({ it, order, rank: rank(it) })).filter((x) => x.rank).sort((a, b) => a.rank[0] - b.rank[0] || a.rank[1] - b.rank[1] || a.order - b.order).map((x) => x.it);
 }
 
-// What a pick does in the insert menu for the block at `index`. A divider and
-// the file pickers have their own placement; a block type retypes an empty line
-// and otherwise goes into a new block below the line's whole subtree. A block
-// type from a later format asks the format gate before it writes anything.
-export function runItem(view, item, index, remove = null) {
-  if (item.type !== "quote") return insertItem(view, item, index, remove);
-  return import("./format-native-commands.js").then(({ runFormat }) => runFormat(view, () => insertItem(view, item, index, remove)));
-}
-
-function insertItem(view, item, index, remove = null) {
+function writeItem(view, item, index, remove) {
   const st = view.state;
-  if (item.insert === "image" || item.insert === "file") return pickFiles(view, item.insert === "image" ? "image/*" : "", hostPlace(st, index), remove);
-  if (item.insert === "csv") return pickCsv(view, remove);
-  if (item.insert === "table") return insertTableNode(st, view.dispatch, makeTable(), remove, null, index);
-  if (item.insert === "board") return insertBoardNode(st, view.dispatch, makeBoard(), remove, index);
-  if (item.insert === "chart") return loadChartPart(view).then(({ chartFromSlash }) => chartFromSlash(view, index, remove));
   let tr = st.tr;
   if (remove) tr.delete(remove.from, remove.to);
   const node = tr.doc.child(index);
@@ -209,4 +234,31 @@ function insertItem(view, item, index, remove = null) {
   view.dispatch(asStep(tr).scrollIntoView());
   view.focus();
   return true;
+}
+
+// What a pick does in the insert menu for the block at `index`. A divider and
+// the file pickers have their own placement; a block type retypes an empty line
+// and otherwise goes into a new block below the line's whole subtree. A block
+// type from a later format asks the format gate before it writes anything, and
+// a toggle heading is found again after it answers: the block and the typed
+// query that moved or changed refuse as a stale target.
+export function runItem(view, item, index, remove = null) {
+  const st = view.state;
+  if (item.insert === "image" || item.insert === "file") return pickFiles(view, item.insert === "image" ? "image/*" : "", hostPlace(st, index), remove);
+  if (item.insert === "csv") return pickCsv(view, remove);
+  if (item.insert === "table") return insertTableNode(st, view.dispatch, makeTable(), remove, null, index);
+  if (item.insert === "board") return insertBoardNode(st, view.dispatch, makeBoard(), remove, index);
+  if (item.insert === "chart") return loadChartPart(view).then(({ chartFromSlash }) => chartFromSlash(view, index, remove));
+  if (!isToggleHeading(item)) {
+    return item.type === "quote" ? runFormatted(view, () => writeItem(view, item, index, remove)) : writeItem(view, item, index, remove);
+  }
+  const id = st.doc.maybeChild(index)?.attrs.id ?? null;
+  const del = remove && { ...remove, text: st.doc.textBetween(remove.from, remove.to) };
+  return runFormatted(view, () => {
+    const now = view.state;
+    const at = id === null ? -1 : indexOfId(now.doc, id);
+    // The typed query is found again too: a line that changed underneath refuses.
+    if (at < 0 || (del && now.doc.textBetween(del.from, del.to) !== del.text)) return stale;
+    return writeItem(view, item, at, del);
+  });
 }

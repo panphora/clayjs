@@ -46,7 +46,7 @@ export const DEFAULTS = {
   callout: { parent: null },
   quote: { parent: null },
   code_block: { parent: null, lang: "" },
-  toggle: { parent: null, open: false },
+  toggle: { parent: null, open: false, level: null },
   divider: { parent: null },
   image: { parent: null, src: "", alt: "", caption: "", width: null, align: null },
   file: { parent: null, src: "", name: "", size: null, mime: null },
@@ -372,6 +372,7 @@ function projectOne({ id, b, t, parent, indent }) {
   const fields = { ...attrs, parent };
   if (t === "list_item") fields.indent = indent;
   if (t === "heading") fields.level = clampLevel(attrs.level ?? 2);
+  if (t === "toggle") fields.level = toggleLevel(attrs.level);
   if (t === "image" && fields.width != null) fields.width = widthOf(String(fields.width));
   if (t === "image") fields.align = alignOf(fields.align);
   if (t === "image" && typeof fields.caption === "string") fields.caption = normalizeText(fields.caption, null).c;
@@ -395,6 +396,8 @@ function projectOne({ id, b, t, parent, indent }) {
 }
 
 const clampLevel = (l) => Math.min(6, Math.max(1, Number.isInteger(l) ? l : 2));
+// A toggle heading is level 1 to 3; anything else is a plain toggle.
+export const toggleLevel = (l) => (l === 1 || l === 2 || l === 3 ? l : null);
 const widthOf = (s) => (/^\d+$/.test(s) ? Number(s) : s);
 export const alignOf = (a) => (a === "left" || a === "right" ? a : null);
 
@@ -569,7 +572,8 @@ export function renderModel(model, { fallbackOf = () => "", clean = RAW } = {}) 
       continue;
     }
     if (item.t === "toggle") {
-      add(`<details${attr("data-id", item.id)}${extrasOfItem(item)}${item.open ? " open" : ""}><summary>${inlineOf(item)}</summary>`);
+      const h = toggleLevel(item.level);
+      add(`<details${attr("data-id", item.id)}${extrasOfItem(item)}${item.open ? " open" : ""}>${h ? `<summary><h${h}>${inlineOf(item)}</h${h}></summary>` : `<summary>${inlineOf(item)}</summary>`}`);
       stack.push(item.id);
       continue;
     }
@@ -723,8 +727,9 @@ export function parseArticle(article) {
     if (tag === "UL" || tag === "OL") return list(el, parent, 0);
     if (tag === "DETAILS") {
       const summary = el.querySelector(":scope > summary");
+      const head = summary?.querySelector(":scope > h1, :scope > h2, :scope > h3");
       const at = items.length;
-      push(el, "toggle", parent, { ...omitDefaults("toggle", { ...P, open: el.hasAttribute("open") }), ...tf(summary) });
+      push(el, "toggle", parent, { ...omitDefaults("toggle", { ...P, open: el.hasAttribute("open"), level: head ? Number(head.tagName[1]) : null }), ...tf(summary) });
       const body = el.ownerDocument.createElement("div");
       for (const n of [...el.childNodes]) if (n !== summary) body.appendChild(n.cloneNode(true));
       walk(body, { ref: at });

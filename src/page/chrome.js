@@ -10,7 +10,7 @@ import { outlineOf } from "./outline-cache.js";
 import { currentSpan, selectBlocks, duplicateBlocks, deleteBlocks, asStep, typeIntoBlocks } from "./blocksel.js";
 import { BlockDrag } from "./drag.js";
 import { openLinkEditor } from "./link.js";
-import { BLOCK_TYPES, MENU_ITEMS, blockTypeOf, turnInto, insertAfter, rankItems, runItem, retype, canTurnInto, insertItemsFor, loadChartPart } from "./items.js";
+import { BLOCK_TYPES, MENU_ITEMS, blockTypeOf, turnBlocks, turnInto, insertAfter, rankItems, runItem, retype, canTurnInto, insertItemsFor, loadChartPart } from "./items.js";
 import toast from "../ui/toast-lazy.js";
 import { pickCsv } from "./csv-import.js";
 import { HISTORY_INTENT, typingIntent } from "./history-intent.js";
@@ -674,21 +674,7 @@ class Chrome {
         this.view.focus();
         return;
       }
-      const turn = () => {
-        const tr = this.view.state.tr;
-        for (const id of wanted) {
-          const at = this.idIndex(id);
-          if (at >= 0) retype(tr, at, item);
-        }
-        if (tr.docChanged) this.view.dispatch(asStep(tr).scrollIntoView());
-        return true;
-      };
-      // A block type from a later format asks the gate before it writes.
-      if (item.type === "quote") {
-        const view = this.view;
-        import("./format-native-commands.js").then((menu) => menu.gateTurn(view, turn));
-      } else turn();
-      this.view.focus();
+      turnBlocks(this.view, item, wanted);
     } else if (m.mode === "actions" || m.mode === "more" || m.mode === "external") {
       if (item.blocks) this.selectCaretBlock(wanted);
       item.run(this.view, this, index >= 0 ? index : this.blockIndex());

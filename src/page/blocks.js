@@ -9,7 +9,7 @@ import { safeHref, safeSrc } from "./link.js";
 import { flatten, runsOf, unflatten, unitsOf } from "./inline.js";
 import { OPAQUE_MARK, opaqueMark } from "./format-codec.js";
 import { NATIVE_NAMES, nativeAttrs } from "./format-native.js";
-import { DEFAULTS, MARKS, OPAQUE, envelopeAttrs, envelopeRecord, marksAttrs, marksEntries } from "./projection.js";
+import { DEFAULTS, MARKS, OPAQUE, envelopeAttrs, envelopeRecord, marksAttrs, marksEntries, toggleLevel } from "./projection.js";
 
 const alignOf = (a) => (a === "left" || a === "right" ? a : null);
 
@@ -1002,7 +1002,12 @@ export function flattenPastedHTML(html, doc = globalThis.document) {
         t.setAttribute("data-page-toggle", k);
         if (child.hasAttribute("open")) t.setAttribute("data-open", "true");
         if (parentKey) t.setAttribute("data-page-parent", parentKey);
-        if (summary) t.append(...summary.childNodes);
+        // A toggle heading saves as a heading in its summary: keep the level, paste its text.
+        const head = summary?.querySelector(":scope > h1, :scope > h2, :scope > h3");
+        if (head) {
+          t.setAttribute("data-level", head.tagName[1]);
+          t.append(...head.childNodes);
+        } else if (summary) t.append(...summary.childNodes);
         target.appendChild(t);
         for (const c of [...child.childNodes]) if (c !== summary) { const box = doc.createElement("div"); box.appendChild(c); walk(box, k, target); }
         continue;
@@ -1086,8 +1091,8 @@ export const clipboardParser = new model.DOMParser(parseSchema, [
   { tag: `span[${MARKS}]`, mark: OPAQUE_MARK, getAttrs: pastedOpaqueMarks },
   { tag: "div[data-page-li]", node: "list_item", getAttrs: (d) => ({ kind: d.getAttribute("data-kind") || "bullet", indent: +d.getAttribute("data-indent") || 0, checked: d.getAttribute("data-checked") === "true", parent: parentAttr(d) }) },
   { tag: "div.page-li", node: "list_item", getAttrs: (d) => ({ kind: d.getAttribute("data-kind") || "bullet", indent: +d.getAttribute("data-indent") || 0, checked: d.getAttribute("data-checked") === "true", parent: parentAttr(d) }) },
-  { tag: "div[data-page-toggle]", node: "toggle", getAttrs: (d) => ({ id: d.getAttribute("data-page-toggle"), open: d.getAttribute("data-open") === "true", parent: parentAttr(d) }) },
-  { tag: "div.page-toggle", node: "toggle", getAttrs: (d) => ({ id: d.getAttribute("data-id"), open: d.getAttribute("data-open") === "true", parent: null }) },
+  { tag: "div[data-page-toggle]", node: "toggle", getAttrs: (d) => ({ id: d.getAttribute("data-page-toggle"), open: d.getAttribute("data-open") === "true", parent: parentAttr(d), level: toggleLevel(Number(d.getAttribute("data-level"))) }) },
+  { tag: "div.page-toggle", node: "toggle", getAttrs: (d) => ({ id: d.getAttribute("data-id"), open: d.getAttribute("data-open") === "true", parent: null, level: toggleLevel(Number(d.getAttribute("data-level"))) }) },
   { tag: "h1", node: "heading", getAttrs: (d) => ({ level: 1, parent: parentAttr(d) }) },
   { tag: "h2", node: "heading", getAttrs: (d) => ({ level: 2, parent: parentAttr(d) }) },
   { tag: "h3", node: "heading", getAttrs: (d) => ({ level: 3, parent: parentAttr(d) }) },

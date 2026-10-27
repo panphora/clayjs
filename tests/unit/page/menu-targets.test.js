@@ -59,7 +59,7 @@ describe("the current type", () => {
     const view = open([["a", "paragraph", "A"], ["h", "heading", "H", { level: 2 }], ["z", "paragraph", "Z"]], "a");
     view.dispatch(view.state.tr.setSelection(selectBlocks(view.state.doc, 0, 1)));
     part(view, ".page-tool-turn").click();
-    expect(labels(view).length).toBe(11);
+    expect(labels(view).length).toBe(14);
     expect(checked(view)).toEqual([]);
     expect(rows(view).every((r) => r.getAttribute("aria-checked") === "false")).toBe(true);
   });
