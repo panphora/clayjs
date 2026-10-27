@@ -438,6 +438,14 @@ hljs.registerLanguage("javascript", javascript);
 
 `overtype` resolves the vendored OverType editor with its toolbar buttons. `marked` resolves the `Marked` class. `highlight` resolves the core with no grammar of its own, so a page registers only the grammars it uses. Each name loads once: a second call before the first settles shares it, a failed one is forgotten and can be tried again, and an unknown name rejects with `clay.assets: no asset named "<name>"`. The [`window.clay` reference](https://clayjs.com/docs/api/) lists what each name resolves to.
 
+### 2.8 Editor commands load on first use
+
+The page editor's optional commands are separate modules under `src/page/features/`, listed in `COMMAND_FEATURES` with one literal import each: `mentions`, `dates`, `emoji`, `titleIcon`, `titleCover`, `exportHtml`, `importMarkdown` and `exportMarkdown`. The build splits each into its own files, and the editor fetches one the first time a person invokes that command. A plain document that never uses them fetches none: opening a page, reading it and typing in it asks for no picker, no parser and no exporter. The emoji list arrives with the first picker that needs it (`page/emoji-data.js`), and `marked` arrives with the first Markdown import.
+
+An installed command shares the page lease's disposal. Leaving edit, or a refused exit that closes admission, disposes what the commands installed and aborts whatever was still arriving, and the next entry installs fresh against the module the browser already holds. A command asked for while its module is still on the way runs only if the edit is still open, the document revision has not moved and the selection is where it was; otherwise it refuses with `stale-target` and writes nothing. A failed fetch is reported and asked for again on the next request.
+
+The load report and the offline manifest both carry them. `node scripts/measure-load.mjs` counts what a command fetches in its `firstUse` phase, printed as the `phase first use` row, so the editor's ready bytes never include a module nobody asked for, and `dist/offline-manifest.json` lists their files, so a host that serves a release offline still loads one on first use.
+
 ---
 
 ## 3. Edit mode and view mode
@@ -920,6 +928,7 @@ Live sync and undo pair elements across versions by **`data-id`, then `id`**, us
 - **Leave `data-id` off templates.** The command that clones a template assigns one. For a plain "add an item" button, `<button add-from="#item-tpl" add-to="#list">` handles the clone, the id, and the focus with no script.
 - **Never stamp ids on open.** Opening an old file must not rewrite it. Add an id when an item is created or first changed.
 - **Make ids without `crypto.randomUUID`** unless the file is only ever served over https or localhost, because it is missing in insecure contexts. The examples use `prefix + "-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6)`.
+- **A `data-id` is also what presence names.** A record target `{ kind: "record", id }` carries it, so a stable id is what lets a peer's badge find the row again after a reload or a merge ([Presence](https://clayjs.com/docs/guide/live-sync/#presence)).
 - **Use ids to find records in commands:** `` board.querySelector(`.card[data-id="${CSS.escape(id)}"]`) ``. Never find a record by position.
 
 ### 4.6 Assets
@@ -1369,6 +1378,22 @@ The bounds come from `src/sync/presence-target.js`:
 
 An invalid target is refused, never repaired. Updates are coalesced to one every 250 ms, a stable target renews every 5 seconds, and it expires 15 seconds after the host receives it.
 
+**A record target from a focused control.** Publish a target only while the control that writes the record has focus, and publish `null` the moment it stops: on blur, when the open record changes, when the page is hidden, when the record goes to Trash, and when the tab leaves edit mode or enters draft mode. After a blur, check again on the next microtask, so focus moving inside the same control does not flash `null`. A record with one writing control sends the fieldless shape, `{ kind: "record", id }`, where `id` is the record's `data-id`. A target never carries a title, text or date. The Journal template does this in `RecordPresence` (`templates/00-journal/journal.html`):
+
+```js
+function reconcile() {
+  const id = capable && clay.isEditMode && !clay.isDraftMode && !document.hidden && writerHasFocus()
+    ? openEntryId() : null;
+  if (id === sentId) return;
+  sentId = id;
+  clay.presence.setTarget(id ? { kind: "record", id } : null);
+}
+```
+
+`capable` is the snapshot's `recordAwareness`, so a host without `record-awareness-v1` is sent nothing. Renewal and expiry belong to ClayJS: a page sets a target once and keeps no timer of its own.
+
+**Showing who is on a record.** Build a map from record id to people out of each snapshot. Skip `you: true`, keep only targets with `kind: "record"` whose id is a live record on this page, and count a person once however many tabs they have. Write names with `textContent`. A slot a script creates carries `clay="no-save no-watch no-snapshot"`. A slot inside a repeated row's `<template>` carries only `clay="no-save no-watch"`: a save removes `no-snapshot` nodes from template content too, which would delete the slot from the file, and the rows sapjs renders from the template are marked `editor-ui`, which already keeps them out of snapshots. Repaint only when the names change, so a renewal announces nothing. A badge is advisory: it never blocks editing and never reaches a record.
+
 **Hosts.** The client picks exactly one transport from `/_/meta` (`connect` in `presence-store.js`):
 
 - hyperclay.com relays presence through the host. The target goes to `POST /_/presence`, and the roster comes back as a named `presence` event on the document's stream, with one person per account and one session per tab.
@@ -1383,7 +1408,29 @@ Each part needs its own extension: `presence` for the roster, `presence-editing`
 
 Presence is not for app data. For state that must be shared and is not presence, use a live store ([Live data: `clay="live"`](https://clayjs.com/docs/guide/live-sync/#live-data-clay-live)).
 
-### 6.8 Agents
+### 6.8 The page format floor
+
+A document records the lowest page format a writer must understand, in document metadata outside the page value:
+
+```html
+<meta name="clay-page-format" content="1">
+```
+
+No marker means floor 0, and a floor only ever rises: a later save cannot remove the marker or lower it. The value is protocol capability, not permission. The host still applies every access check it applied before, and the marker cannot be used to discover a private document.
+
+**Every page write declares its capability.** A save and a live write carry `X-Clay-Page-Format: 1`, the format the runtime knows rather than the format this document uses, so even an ordinary document's save declares it.
+
+**A host refuses a write below the floor.** Nothing is mutated. The answer is HTTP `409` with a body carrying the code `page-format-upgrade-required`, the same string as its `reason` on the save lanes, and `minimum`, the floor the document requires. That covers the ordinary save, the live data lanes, a checkpoint, a version restore and the relay, on all three hosts, and a refused live request ends that tab's stream so it receives no newer content. The stored file, its version history and its page state stay as they were, and the refused tab keeps its own unsaved work.
+
+**A writer raises the floor on its first new format, through one real save.** The gate reads the floor the document already has, asks the host, and adds the marker to an otherwise equivalent capture. Activation is idempotent. It is refused while any admitted live page editor declares a capability below the floor it would set, and that check happens under the host's per-document write lock, so an editor that registers between the check and the save is refused rather than missed. A refused activation leaves ordinary writing available and every unsaved store as it was, and says **This document uses a newer page format; update the editor in the other tabs to keep writing**. The command that asked applies only if the same editor installation and document revision still exist once activation succeeds; otherwise the answer is retryable and the content is untouched.
+
+**A host announces `page-format-v1` only when it can hold the floor**, meaning its enforcement and its tolerant checkpoint renderer are installed. On a host that does not announce it, a new format command is refused as `page-format-unsupported` and writes nothing.
+
+**Who reads what.** ClayJS 1.16.0 and later keep floor 1 content, so those tabs are the cohort that can stay open while a floor 1 document is written. The published 1.15.x tabs cannot be changed: once a document's floor rises they are refused writes with `page-format-upgrade-required` instead of saving a version that would drop the new content, and their own unsaved work stays in the tab. A floor 0 document keeps working on all of them.
+
+Opening a document that is already at floor 1 asks for nothing: only a command that writes a newer format raises a floor, and a document that never uses one never records one.
+
+### 6.9 Agents
 
 An agent edits a malleable file the way a person in another tab does:
 
@@ -1392,7 +1439,7 @@ An agent edits a malleable file the way a person in another tab does:
 - **`ai-edit`** (`?plugins=ai-edit`): select text, press Cmd+J, and describe the change. The rewrite is previewed in place; Keep saves it, Revert discards it. Available where the host offers the `ai-edit` helper: HTML Clay, Hyperclay Local, and hyperclay.com (for the owner and team editors on a paid plan, billed to the document's AI credits).
 - **The data API**: a host that announces `data-read`/`data-write` serves `/_/api/<file>`, a JSON read and write interface over the file defined by a rules tag ([Import and export](https://clayjs.com/docs/guide/architecture/#import-and-export)). `clay.readData()` and `clay.writeData()` call it from the page; `writeData` is for agents and other processes, and refuses while the page has unsaved edits.
 
-### 6.9 Live data: `clay="live"`
+### 6.10 Live data: `clay="live"`
 
 Everything above moves at save speed: a peer sees your change after your next save. A live store is for state that changes faster than that, such as a game board, a score, a cursor, or a timer. It is one JSON script that ClayJS holds as an object in memory. Page code changes it through ops, every tab of the document sees each change at once, and ClayJS writes the value back into the file at checkpoints.
 
