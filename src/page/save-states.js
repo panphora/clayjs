@@ -1,5 +1,5 @@
 import { captureForSaveAndComparison } from "../core/snapshot.js";
-import { downloadHtml, documentName } from "../core/conflict-download.js";
+import { downloadHtml, documentName } from "../core/download.js";
 
 // One plain state per save refusal code, so the indicator, the toast and the
 // page plugin all read the same answer. `saved` is the only happy one; every
