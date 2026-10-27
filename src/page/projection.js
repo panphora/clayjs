@@ -531,6 +531,9 @@ const titleHtml = (item) => `<header${attr("data-id", item.id)} data-page-headin
 const toolData = (item) => item.artifact || item.rev || (item.state && Object.keys(item.state).length)
   ? `<script type="application/json" data-tool>${canon({ artifact: item.artifact ?? null, rev: item.rev ?? null, state: item.state ?? {} }).replace(/</g, "\\u003c")}</script>`
   : "";
+// A header names its column for every cell under it: the table id and the column
+// id together, so a copied column keeps a name no other table shares.
+const headerId = (tableId, colId) => `${tableId}-${colId}`;
 const cellHtml = (cell) => (typeof cell === "string" ? escText(cell) : cell && typeof cell === "object" ? renderInline(String(cell.c ?? ""), cell.m) : "");
 const dataAttrs = (obj) => Object.entries(obj).map(([k, v]) => attr(`data-${k}`, v)).join("");
 
@@ -551,9 +554,12 @@ function renderLeaf(item, clean, tables) {
       return `<div${at} data-type="file"${attr("data-src", item.src ?? "")}${attr("data-name", item.name ?? "")}${attr("data-size", item.size ?? null)}${attr("data-mime", item.mime ?? null)}><a${attr("href", href)} rel="noopener noreferrer">${escText(item.name || "file")}</a></div>`;
     }
     case "table": {
-      const head = item.cols.map((c) => `<th${attr("data-col", c.id)}${attr("data-kind", c.kind ?? null)}${attr("data-width", c.width ?? null)}${attr("style", c.width ? `width:${c.width}px` : null)}>${escText(c.name)}</th>`).join("");
-      const body = item.rows.map((r) => `<tr${attr("data-id", r.id)}>${item.cols.map((c) => `<td>${cellHtml(r.cells[c.id])}</td>`).join("")}</tr>`).join("\n");
-      return `<table${at}${attr("data-sort", item.sort != null ? JSON.stringify(item.sort) : null)}>\n<thead><tr>${head}</tr></thead>\n<tbody>\n${body}\n</tbody>\n</table>`;
+      const head = item.cols.map((c) => {
+        const sorted = item.sort?.col === c.id ? (item.sort.dir === "desc" ? "descending" : "ascending") : null;
+        return `<th${attr("data-col", c.id)}${attr("id", headerId(item.id, c.id))}${attr("data-kind", c.kind ?? null)}${attr("data-width", c.width ?? null)}${attr("style", c.width ? `width:${c.width}px` : null)} scope="col"${attr("aria-sort", sorted)}>${escText(c.name)}</th>`;
+      }).join("");
+      const body = item.rows.map((r) => `<tr${attr("data-id", r.id)}>${item.cols.map((c) => `<td${attr("headers", headerId(item.id, c.id))}>${cellHtml(r.cells[c.id])}</td>`).join("")}</tr>`).join("\n");
+      return `<table${at} aria-label="Table"${attr("data-sort", item.sort != null ? JSON.stringify(item.sort) : null)}>\n<thead><tr>${head}</tr></thead>\n<tbody>\n${body}\n</tbody>\n</table>`;
     }
     case "chart": {
       const data = dataAttrs({ source: item.source ?? null, kind: item.kind ?? null, x: item.x ?? null, series: item.series ? JSON.stringify(item.series) : null, highlight: item.highlight ?? null });

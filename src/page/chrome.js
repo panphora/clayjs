@@ -280,12 +280,25 @@ export const heldSlashRange = (st) => {
   return held ? { from: held.from, to: held.to } : null;
 };
 
-export function openPageMenu(view, anchor, items) {
+export function openPageMenu(view, anchor, items, { persist = false } = {}) {
   const chrome = chromeFor.get(view);
   if (!chrome) return false;
   chrome.openMenu("external", anchor);
   chrome.menu.externalItems = items;
+  chrome.menu.persist = persist;
   chrome.renderMenu();
+  return true;
+}
+
+// A menu whose rows name their targets by id outlives a render of the control that
+// opened it: the control that takes the old one's place keeps the popup open.
+export function reanchorPageMenu(view, from, to) {
+  const chrome = chromeFor.get(view);
+  const menu = chrome?.menu;
+  if (!menu || menu.anchor !== from || !to || to === from) return false;
+  menu.anchor = to;
+  to.setAttribute("aria-expanded", "true");
+  view.dom.setAttribute("aria-controls", chrome.menuId);
   return true;
 }
 
@@ -470,7 +483,7 @@ class Chrome {
     const m = this.menu;
     if (!m || m.slashAt !== null) return this.view.dom;
     const a = m.anchor;
-    return a && a !== this.view.dom && (a.tagName === "BUTTON" || a.hasAttribute("tabindex")) ? a : this.view.dom;
+    return a && a !== this.view.dom && a.isConnected && (a.tagName === "BUTTON" || a.hasAttribute("tabindex")) ? a : this.view.dom;
   }
 
   // A block action from the phone menu acts on the caret's block when nothing
@@ -531,7 +544,7 @@ class Chrome {
   }
 
   openMenu(mode, anchor, slashAt = null, ids = null, anchorId = null) {
-    this.menu = { mode, anchor, slashAt, anchorId, ids: ids ?? (mode === "insert" ? [] : this.selectionIds()), query: "", active: 0, items: [] };
+    this.menu = { mode, anchor, slashAt, anchorId, ids: ids ?? (mode === "insert" ? [] : this.selectionIds()), query: "", active: 0, items: [], persist: false };
     anchor.setAttribute("aria-expanded", "true");
     if (slashAt !== null) {
       if (!this.priorAria) this.priorAria = POPUP_ATTRS.map((name) => [name, this.view.dom.getAttribute(name)]);
@@ -712,6 +725,10 @@ class Chrome {
       if (m.items.length) this.pick(m.active);
       return true;
     }
+    if (event.key === "Tab" && m.slashAt === null) {
+      this.closeMenu();
+      return false;
+    }
     if (event.key === "Escape") {
       const target = this.invoker();
       this.closeMenu();
@@ -862,9 +879,14 @@ class Chrome {
   update(view, prev) {
     this.view = view;
     if (this.menu && this.menu.slashAt === null && prev && prev.doc !== view.state.doc) {
-      const hadFocus = this.menuEl.contains(document.activeElement);
-      this.closeMenu();
-      if (hadFocus) view.focus();
+      // A menu whose rows resolve their targets by id, from a control the page keeps,
+      // is still the right menu after a peer's edit.
+      if (this.menu.persist && this.menu.anchor?.isConnected) this.scheduleLayout();
+      else {
+        const hadFocus = this.menuEl.contains(document.activeElement);
+        this.closeMenu();
+        if (hadFocus) view.focus();
+      }
     }
     const st = view.state;
     const node = st.doc.child(this.blockIndex());

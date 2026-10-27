@@ -108,8 +108,9 @@ test("the saved article carries the width and reads it back; junk widths are dro
   const [item] = project({ tbl: sized });
   expect(item.cols).toEqual([{ id: "c1", name: "Name", width: 240 }, { id: "c2", name: "Owner" }]);
   const html = renderModel([item]);
-  expect(html).toContain('<th data-col="c1" data-width="240" style="width:240px">Name</th>');
-  expect(html).toContain('<th data-col="c2">Owner</th>');
+  expect(html).toContain('<th data-col="c1" id="tbl-c1" data-width="240" style="width:240px" scope="col">Name</th>');
+  expect(html).toContain('<th data-col="c2" id="tbl-c2" scope="col">Owner</th>');
+  expect(html).toContain('<td headers="tbl-c1">');
   const article = document.createElement("article");
   article.innerHTML = html;
   expect(parseModel(article)).toEqual([item]);

@@ -33,10 +33,10 @@ test("the article shows marked cells with their marks and parses back to the sam
     { id: "r2", cells: { c1: { c: `Sep${ATOM}28`, m: [[3, ""], [1, BREAK], [2, ""]] }, c2: "41" } },
   ]);
   const html = renderModel([item]);
-  expect(html).toContain("<td><strong>Sep</strong> &lt;21&gt;</td>");
-  expect(html).toContain("<td><em>58</em></td>");
-  expect(html).toContain("<td>Sep<br>28</td>");
-  expect(html).toContain("<td>41</td>");
+  expect(html).toContain('<td headers="tbl-c1"><strong>Sep</strong> &lt;21&gt;</td>');
+  expect(html).toContain('<td headers="tbl-c2"><em>58</em></td>');
+  expect(html).toContain('<td headers="tbl-c1">Sep<br>28</td>');
+  expect(html).toContain('<td headers="tbl-c2">41</td>');
   expect(html).not.toContain("[object Object]");
   const article = document.createElement("article");
   article.innerHTML = html;

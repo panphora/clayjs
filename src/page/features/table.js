@@ -3,16 +3,58 @@ import { orderedIds } from "../model.js";
 import { DEFAULT_WIDTH, MAX_WIDTH, MIN_WIDTH, addColumn, addRow, deleteColumn, deleteRow, moveColumn, moveRow, renameColumn, selectTableCell, setCellText, setColumnKind, setColumnWidth, sortBy } from "../table.js";
 import { COLUMN_KINDS } from "../rich/csv.js";
 import { KIND_ICONS, KIND_LABELS, columnKinds } from "../table-kinds.js";
-import { openPageMenu } from "../chrome.js";
+import { openPageMenu, reanchorPageMenu } from "../chrome.js";
 import { loadChartPart } from "../items.js";
 import { selectLine } from "../table-select.js";
 import { TABLE_CSS } from "../table-style.js";
 import { cellViews } from "../table-views.js";
 import { asStep } from "../blocksel.js";
+import { announce } from "../announce.js";
 
 const N = schema.nodes;
 
 const columns = (table) => orderedIds(table.attrs.cols);
+
+const UNAVAILABLE = "That part of the table is no longer available.";
+const ACTIONS_CSS = `
+.page-editor .page-table-actions { position: absolute; z-index: 2; bottom: 100%; inset-inline-start: 0; height: 18px; padding: 0 8px; border: 0; border-radius: 6px 6px 0 0; background: var(--page-chrome-bg-rest); color: var(--page-chrome-ink-rest); font: inherit; font-size: 0.75rem; line-height: 1; cursor: pointer; opacity: 0; transition: opacity 120ms; }
+.page-editor .page-table:hover > .page-table-actions, .page-editor .page-table-actions:focus-visible { opacity: 1; }
+.page-editor .page-table-actions:hover { background: var(--page-chrome-bg-moved); color: var(--page-ink-soft); }
+@media (max-width: 560px) {
+  .page-editor .page-table-actions { position: static; display: block; width: 100%; height: 44px; border-radius: 0; opacity: 1; border-block-end: 1px solid var(--page-rule); }
+}
+`;
+
+const headerId = (tableId, colId) => `${tableId}-${colId}`;
+const columnLabel = (col, index) => col.name || `Column ${index + 1}`;
+const rowLabel = (row, index) => (row.childCount ? row.child(0).textContent.trim() : "") || `Row ${index + 1}`;
+
+const tableById = (doc, id) => {
+  let found = null;
+  doc.forEach((node, offset) => { if (!found && node.type === N.table && node.attrs.id === id) found = { table: node, pos: offset }; });
+  return found;
+};
+const rowIndexOf = (table, rowId) => (rowId == null ? 0 : [...table.content.content].findIndex((row) => row.attrs.id === rowId));
+const colIndexOf = (table, colId) => (colId == null ? 0 : columns(table).indexOf(colId));
+
+// A table command names its table, row and column when it is offered and finds them
+// again here, so a peer's edit between the two can never hand it another one.
+const selectOn = (view, target, kind) => {
+  const found = tableById(view.state.doc, target.tableId);
+  if (!found) return false;
+  const index = kind === "row" ? rowIndexOf(found.table, target.rowId) : colIndexOf(found.table, target.colId);
+  return index < 0 ? false : selectLine(view, found.pos, kind, index);
+};
+const runOn = (view, target, command) => {
+  const found = tableById(view.state.doc, target.tableId);
+  if (!found) return false;
+  const row = rowIndexOf(found.table, target.rowId);
+  const col = colIndexOf(found.table, target.colId);
+  if (row < 0 || col < 0) return false;
+  selectTableCell(view, found.pos, row, col);
+  if (command(view.state, null) !== true) return false;
+  return command(view.state, view.dispatch);
+};
 
 const FONT = ["fontFamily", "fontSize", "fontWeight", "fontStyle", "letterSpacing"];
 const textWidth = (el) => {
@@ -44,7 +86,9 @@ export class TableView {
     this.view = view;
     this.getPos = getPos;
     this.preview = null;
-    this.focusCol = null;
+    this.renaming = null;
+    this.menuAnchor = null;
+    this.destroyed = false;
     const doc = view.dom.ownerDocument;
     this.dom = doc.createElement("div");
     this.dom.className = "page-table";
@@ -54,6 +98,7 @@ export class TableView {
     const scroll = doc.createElement("div");
     scroll.className = "page-table-scroll";
     const table = doc.createElement("table");
+    table.setAttribute("aria-label", "Table");
     this.table = table;
     this.colgroup = doc.createElement("colgroup");
     this.header = doc.createElement("thead");
@@ -69,12 +114,168 @@ export class TableView {
     addColumnButton.className = "page-table-add-col";
     addColumnButton.setAttribute("aria-label", "Add a column");
     addColumnButton.title = "Add a column";
-    for (const control of [addRowButton, addColumnButton]) {
+    const actions = doc.createElement("button");
+    actions.type = "button";
+    actions.className = "page-table-actions";
+    actions.textContent = "Table actions";
+    actions.dataset.control = "actions";
+    actions.setAttribute("aria-haspopup", "menu");
+    actions.setAttribute("aria-expanded", "false");
+    actions.setAttribute("aria-label", "Table actions");
+    actions.title = "Insert, delete, move, sort, rename and size rows and columns";
+    this.actionsButton = actions;
+    actions.addEventListener("click", (event) => {
+      event.preventDefault();
+      this.menuAnchor = actions;
+      this.openActions();
+    });
+    actions.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      this.menuAnchor = actions;
+      this.openActions();
+    });
+    for (const control of [addRowButton, addColumnButton, actions]) {
       control.contentEditable = "false";
       control.addEventListener("mousedown", (event) => event.preventDefault());
     }
-    this.dom.append(scroll, addRowButton, addColumnButton);
+    this.dom.append(scroll, addRowButton, addColumnButton, actions);
     this.render();
+  }
+  // The control a focus descriptor names, or null when it is gone.
+  control(focus) {
+    if (!focus || (focus.tableId && focus.tableId !== this.node.attrs.id)) return null;
+    const all = [...this.dom.querySelectorAll(`[data-control="${focus.control}"]`)];
+    return all.find((el) => (focus.colId == null || el.dataset.col === focus.colId)
+      && (focus.rowId == null || el.dataset.row === focus.rowId)) ?? null;
+  }
+  controls(control) {
+    return [...this.dom.querySelectorAll(`[data-control="${control}"]`)].filter((el) => !el.hidden && !el.closest("[hidden]"));
+  }
+  // Focus stays on the same control; when a peer removed it, the control that took
+  // its place in the column or row, and otherwise the table's own exit.
+  focusControl(focus) {
+    if (!focus || (focus.tableId && focus.tableId !== this.node.attrs.id)) return null;
+    const exact = this.control(focus);
+    const peers = exact ? [] : this.controls(focus.control);
+    const near = peers.length ? peers[Math.min(focus.index ?? 0, peers.length - 1)] : null;
+    const target = exact ?? near ?? this.actionsButton;
+    target?.focus?.();
+    return target;
+  }
+  describe(element) {
+    if (!element || !this.dom.contains(element)) return null;
+    const control = element.dataset?.control;
+    if (!control) return null;
+    return {
+      tableId: this.node.attrs.id,
+      rowId: element.dataset.row ?? null,
+      colId: element.dataset.col ?? null,
+      control,
+      index: this.controls(control).indexOf(element),
+    };
+  }
+  // Cell views are updated after this one, so a row control a peer removed only
+  // finds its replacement once the whole render is done.
+  afterUpdate(focus) {
+    queueMicrotask(() => {
+      if (this.destroyed || this.view.isDestroyed) return;
+      const active = this.dom.ownerDocument.activeElement;
+      if (active && this.dom.contains(active)) return;
+      this.focusControl(focus);
+    });
+  }
+  act(target, command, said) {
+    const done = runOn(this.view, target, command);
+    announce(this.view, done ? said : UNAVAILABLE);
+    return done;
+  }
+  // What a menu opened now acts on: the caret's cell of this table, by id.
+  cellTarget(table = this.node) {
+    const pos = this.getPos();
+    const { $head } = this.view.state.selection;
+    let row = 0, cell = 0;
+    for (let depth = $head.depth; depth > 0; depth--) {
+      if ($head.node(depth).type !== N.table) continue;
+      if (pos != null && $head.before(depth) === pos) {
+        row = depth < $head.depth ? $head.index(depth) : 0;
+        cell = depth + 1 < $head.depth ? $head.index(depth + 1) : 0;
+      }
+      break;
+    }
+    const rows = [...table.content.content];
+    return { tableId: table.attrs.id, rowId: rows[row]?.attrs.id ?? null, colId: columns(table)[cell] ?? null };
+  }
+  openActions() {
+    const target = this.cellTarget();
+    const table = tableById(this.view.state.doc, target.tableId)?.table;
+    if (!table) return false;
+    return this.actions(table, target);
+  }
+  actions(table, target) {
+    const ids = columns(table);
+    const index = Math.max(0, colIndexOf(table, target.colId));
+    const row = Math.max(0, rowIndexOf(table, target.rowId));
+    const col = table.attrs.cols[ids[index]] ?? {};
+    const sort = table.attrs.sort;
+    const at = (command, said) => () => this.act(target, command, said);
+    const width = this.widthOfColumn(ids[index]);
+    return openPageMenu(this.view, this.actionsButton, [
+      { label: "Insert row above", icon: "+", run: at(addRow(false), "Row inserted") },
+      { label: "Insert row below", icon: "+", run: at(addRow(true), "Row inserted") },
+      ...(row > 0 ? [{ label: "Move row up", icon: "↑", run: at(moveRow(-1), "Row moved") }] : []),
+      ...(row < table.childCount - 1 ? [{ label: "Move row down", icon: "↓", run: at(moveRow(1), "Row moved") }] : []),
+      { label: "Delete row", icon: "×", run: at(deleteRow, "Row deleted") },
+      { label: "Insert column left", icon: "+", run: at(addColumn(false), "Column inserted") },
+      { label: "Insert column right", icon: "+", run: at(addColumn(true), "Column inserted") },
+      ...(index > 0 ? [{ label: "Move column left", icon: "←", run: at(moveColumn(-1), "Column moved") }] : []),
+      ...(index < ids.length - 1 ? [{ label: "Move column right", icon: "→", run: at(moveColumn(1), "Column moved") }] : []),
+      ...(ids.length > 1 ? [{ label: "Delete column", icon: "×", run: at(deleteColumn, "Column deleted") }] : []),
+      { label: "Sort ascending", icon: "↑", checked: sort?.col === ids[index] && sort.dir === "asc", run: at(sortBy(ids[index], "asc"), "Sorted ascending") },
+      { label: "Sort descending", icon: "↓", checked: sort?.col === ids[index] && sort.dir === "desc", run: at(sortBy(ids[index], "desc"), "Sorted descending") },
+      { label: "Rename column", focus: false, run: () => this.beginRename(ids[index]) },
+      { label: "Column width ▸", icon: "↔", hint: col.width ? `${col.width}px` : "Auto", focus: false, run: () => openPageMenu(this.view, this.actionsButton, [
+        { label: "Wider", icon: "+", run: at(setColumnWidth(ids[index], width + 40), "Column width changed") },
+        { label: "Narrower", icon: "−", run: at(setColumnWidth(ids[index], width - 40), "Column width changed") },
+        { label: "Fit to content", icon: "↔", run: () => this.fit(ids[index]) },
+        ...(col.width ? [{ label: "Reset width", icon: "×", run: at(setColumnWidth(ids[index], null), "Column width reset") }] : []),
+      ]) },
+    ], { persist: true });
+  }
+  // The name field for a column. A peer's edit does not take it away while it has
+  // the focus, and a cancelled one writes nothing.
+  beginRename(colId) {
+    const control = this.control({ control: "column", colId });
+    const col = this.node.attrs.cols[colId];
+    if (!control || !col) return false;
+    const doc = this.dom.ownerDocument;
+    const tableId = this.node.attrs.id;
+    const input = doc.createElement("input");
+    input.type = "text";
+    input.className = "page-table-rename";
+    input.dataset.control = "rename";
+    input.dataset.col = colId;
+    input.value = col.name ?? "";
+    input.setAttribute("aria-label", "Column name");
+    const finish = (save) => {
+      if (this.renaming !== input) return;
+      this.renaming = null;
+      const value = input.value.trim();
+      if (save && value) this.act({ tableId, colId }, renameColumn(colId, value), "Column renamed");
+      if (input.isConnected) input.replaceWith(control);
+      this.focusControl({ tableId, control: "column", colId });
+    };
+    input.addEventListener("keydown", (event) => {
+      if (event.isComposing || event.keyCode === 229) return;
+      if (event.key === "Enter") { event.preventDefault(); finish(true); }
+      if (event.key === "Escape") { event.preventDefault(); finish(false); }
+      event.stopPropagation();
+    });
+    this.renaming = input;
+    control.replaceWith(input);
+    input.focus();
+    input.select();
+    return true;
   }
   append(what) {
     const pos = this.getPos();
@@ -101,17 +302,17 @@ export class TableView {
     const doc = this.dom.ownerDocument;
     const handle = doc.createElement("span");
     handle.className = "page-table-resize";
+    handle.dataset.control = "resize";
     handle.dataset.col = colId;
     handle.setAttribute("role", "separator");
     handle.setAttribute("aria-orientation", "vertical");
-    handle.setAttribute("aria-label", `Resize column ${col.name || `Column ${index + 1}`}`);
+    handle.setAttribute("aria-label", `Resize column ${columnLabel(col, index)}`);
     handle.setAttribute("aria-valuemin", String(MIN_WIDTH));
     handle.setAttribute("aria-valuemax", String(MAX_WIDTH));
     handle.setAttribute("aria-valuenow", String(this.widthOfColumn(colId)));
     handle.tabIndex = 0;
     handle.title = "Drag or use the arrow keys to resize, double-click to fit";
     handle.addEventListener("mousedown", (event) => event.preventDefault());
-    handle.addEventListener("focus", () => { this.focusCol = colId; });
     handle.addEventListener("blur", () => this.commitWidth(colId));
     handle.addEventListener("keydown", (event) => this.resizeKey(event, colId));
     handle.addEventListener("keyup", (event) => {
@@ -131,7 +332,7 @@ export class TableView {
       const up = () => {
         doc.removeEventListener("pointermove", move);
         doc.removeEventListener("pointerup", up);
-        if (width !== from) this.command(setColumnWidth(colId, width));
+        if (width !== from) this.command(colId, setColumnWidth(colId, width));
         else this.widths();
       };
       doc.addEventListener("pointermove", move);
@@ -190,11 +391,8 @@ export class TableView {
     this.view.dispatch(asStep(this.view.state.tr.setNodeMarkup(pos, null, { ...table.attrs, cols })));
     return true;
   }
-  command(run) {
-    const pos = this.getPos();
-    if (pos == null) return false;
-    selectTableCell(this.view, pos, 0, 0);
-    const done = run(this.view.state, this.view.dispatch);
+  command(colId, command) {
+    const done = runOn(this.view, { tableId: this.node.attrs.id, colId }, command);
     this.view.focus();
     return done;
   }
@@ -203,88 +401,100 @@ export class TableView {
     for (const cell of this.contentDOM.querySelectorAll("td")) if (cell.dataset.col === colId) widest = Math.max(widest, textWidth(cell.firstElementChild ?? cell));
     const head = [...this.header.querySelectorAll("th")].find((th) => th.dataset.col === colId)?.querySelector("button");
     widest = Math.max(widest, head?.scrollWidth ?? 0);
-    return this.command(setColumnWidth(colId, widest + 24));
+    return this.command(colId, setColumnWidth(colId, widest + 24));
   }
-  render(refocusCol = null) {
+  render(focus = null) {
     const doc = this.dom.ownerDocument;
     const row = doc.createElement("tr");
     const effective = columnKinds(this.node);
+    const tableId = this.node.attrs.id;
     this.widths();
     for (const [index, colId] of columns(this.node).entries()) {
       const col = this.node.attrs.cols[colId];
       const kind = effective[colId];
+      const name = columnLabel(col, index);
       const th = doc.createElement("th");
       th.dataset.col = colId;
       th.dataset.kind = kind;
+      th.setAttribute("scope", "col");
+      th.id = headerId(tableId, colId);
       if (this.node.attrs.sort?.col === colId) th.setAttribute("aria-sort", this.node.attrs.sort.dir === "asc" ? "ascending" : "descending");
-      const control = button(doc, col.name || `Column ${index + 1}`, (event) => {
+      const control = doc.createElement("button");
+      control.type = "button";
+      control.className = "page-table-col-menu";
+      control.textContent = name;
+      control.dataset.control = "column";
+      control.dataset.col = colId;
+      control.dataset.kind = kind;
+      control.setAttribute("aria-haspopup", "menu");
+      control.setAttribute("aria-expanded", "false");
+      control.setAttribute("aria-label", `${name} column actions`);
+      control.addEventListener("click", (event) => {
         event.preventDefault();
-        const run = (command) => () => { selectTableCell(this.view, this.getPos(), 0, index); command(this.view.state, this.view.dispatch); this.view.focus(); };
-        const rename = () => {
-          const input = doc.createElement("input");
-          input.type = "text";
-          input.value = col.name;
-          input.setAttribute("aria-label", "Column name");
-          const finish = (save) => {
-            if (save && input.value.trim()) run(renameColumn(colId, input.value))();
-            else if (input.isConnected) { input.replaceWith(control); control.focus(); }
-          };
-          input.addEventListener("keydown", (e) => {
-            if (e.key === "Enter") { e.preventDefault(); finish(true); }
-            if (e.key === "Escape") { e.preventDefault(); finish(false); }
-            e.stopPropagation();
-          });
-          control.replaceWith(input);
-          input.focus();
-          input.select();
-        };
+        this.menuAnchor = control;
+        const target = { tableId, colId };
+        const run = (command, said) => () => this.act(target, command, said);
         openPageMenu(this.view, control, [
-          { label: "Rename", run: rename, focus: false },
+          { label: "Rename", run: () => this.beginRename(colId), focus: false },
           { label: "Kind ▸", icon: KIND_ICONS[kind], hint: col.kind ? KIND_LABELS[kind] : `Auto: ${KIND_LABELS[kind]}`, run: () => openPageMenu(this.view, control, [
-            { label: "Auto", icon: col.kind ? "" : KIND_ICONS[kind], hint: col.kind ? "" : KIND_LABELS[kind], checked: !col.kind, run: run(setColumnKind(colId, "auto")) },
-            ...COLUMN_KINDS.map((option) => ({ label: KIND_LABELS[option], icon: KIND_ICONS[option], checked: col.kind === option, run: run(setColumnKind(colId, option)) })),
+            { label: "Auto", icon: col.kind ? "" : KIND_ICONS[kind], hint: col.kind ? "" : KIND_LABELS[kind], checked: !col.kind, run: run(setColumnKind(colId, "auto"), `Kind ${KIND_LABELS[kind]}`) },
+            ...COLUMN_KINDS.map((option) => ({ label: KIND_LABELS[option], icon: KIND_ICONS[option], checked: col.kind === option, run: run(setColumnKind(colId, option), `Kind ${KIND_LABELS[option]}`) })),
           ]), focus: false },
-          { label: "Sort ascending", icon: "↑", run: run(sortBy(colId, "asc")) },
-          { label: "Sort descending", icon: "↓", run: run(sortBy(colId, "desc")) },
+          { label: "Sort ascending", icon: "↑", run: run(sortBy(colId, "asc"), "Sorted ascending") },
+          { label: "Sort descending", icon: "↓", run: run(sortBy(colId, "desc"), "Sorted descending") },
           { label: "Width ▸", icon: "↔", hint: col.width ? `${col.width}px` : "Auto", focus: false, run: () => openPageMenu(this.view, control, [
-            { label: "Wider", icon: "+", run: () => this.command(setColumnWidth(colId, (col.width ?? (th.getBoundingClientRect().width || DEFAULT_WIDTH)) + 40)) },
-            { label: "Narrower", icon: "−", run: () => this.command(setColumnWidth(colId, (col.width ?? (th.getBoundingClientRect().width || DEFAULT_WIDTH)) - 40)) },
+            { label: "Wider", icon: "+", run: run(setColumnWidth(colId, this.widthOfColumn(colId) + 40), "Column width changed") },
+            { label: "Narrower", icon: "−", run: run(setColumnWidth(colId, this.widthOfColumn(colId) - 40), "Column width changed") },
             { label: "Fit to content", icon: "↔", run: () => this.fit(colId) },
-            ...(col.width ? [{ label: "Reset width", icon: "×", run: () => this.command(setColumnWidth(colId, null)) }] : []),
+            ...(col.width ? [{ label: "Reset width", icon: "×", run: run(setColumnWidth(colId, null), "Column width reset") }] : []),
           ]) },
           { label: "Chart this table", icon: "📊", run: () => { const at = this.getPos(); return loadChartPart(this.view).then(({ insertChartAfterTable }) => insertChartAfterTable(this.view, at)); } },
-          { label: "Insert column left", icon: "+", run: run(addColumn(false)) },
-          { label: "Insert column right", icon: "+", run: run(addColumn(true)) },
-          ...(index > 0 ? [{ label: "Move left", icon: "←", run: run(moveColumn(-1)) }] : []),
-          ...(index < columns(this.node).length - 1 ? [{ label: "Move right", icon: "→", run: run(moveColumn(1)) }] : []),
-          { label: "Select column", icon: "▦", run: () => selectLine(this.view, this.getPos(), "col", index) },
-          { label: "Delete column", icon: "×", run: run(deleteColumn) },
-        ]);
+          { label: "Insert column left", icon: "+", run: run(addColumn(false), "Column inserted") },
+          { label: "Insert column right", icon: "+", run: run(addColumn(true), "Column inserted") },
+          ...(index > 0 ? [{ label: "Move left", icon: "←", run: run(moveColumn(-1), "Column moved") }] : []),
+          ...(index < columns(this.node).length - 1 ? [{ label: "Move right", icon: "→", run: run(moveColumn(1), "Column moved") }] : []),
+          { label: "Select column", icon: "▦", run: () => selectOn(this.view, target, "col") },
+          { label: "Delete column", icon: "×", run: run(deleteColumn, "Column deleted") },
+        ], { persist: true });
       });
-      control.dataset.kind = kind;
       th.append(control, this.resizer(colId, th, col, index));
       row.append(th);
     }
+    const opened = this.menuAnchor;
     this.header.replaceChildren(row);
-    if (refocusCol) this.handleFor(refocusCol)?.focus();
+    if (opened) {
+      const next = this.control({ tableId, control: opened.dataset.control, colId: opened.dataset.col ?? null, rowId: opened.dataset.row ?? null });
+      this.menuAnchor = next && next !== opened && reanchorPageMenu(this.view, opened, next) ? next : null;
+    }
+    if (focus) this.focusControl(focus);
   }
   update(node) {
     if (node.type !== N.table) return false;
-    const focused = this.focusCol && this.dom.contains(this.dom.ownerDocument.activeElement);
+    const focused = this.describe(this.dom.ownerDocument.activeElement);
     const preview = this.preview;
+    const renaming = this.renaming?.isConnected && focused?.control === "rename";
     this.node = node;
     this.dom.dataset.id = node.attrs.id ?? "";
     this.preview = null;
-    this.render(focused ? this.focusCol : null);
+    // A peer's edit does not take the name being typed out of the field.
+    if (renaming) this.widths();
+    else this.render(focused);
     if (preview && node.attrs.cols[preview.col] && (node.attrs.cols[preview.col].width ?? DEFAULT_WIDTH) === preview.base) {
       this.previewWidth(preview.col, preview.width);
     }
     const effective = columnKinds(node);
     for (const cell of this.contentDOM.querySelectorAll("td[data-col]")) cell.dataset.kind = effective[cell.dataset.col] ?? "text";
+    if (focused && !renaming) this.afterUpdate(focused);
     return true;
   }
-  stopEvent(event) { return !!event.target.closest?.("thead"); }
+  stopEvent(event) { return !!event.target.closest?.("thead, .page-table-actions"); }
   ignoreMutation(mutation) { return !this.contentDOM.contains(mutation.target); }
+  destroy() {
+    this.destroyed = true;
+    this.renaming = null;
+    this.menuAnchor = null;
+    this.preview = null;
+  }
 }
 
 
@@ -304,33 +514,58 @@ export class TableCellView {
     menu.type = "button";
     menu.className = "page-table-row-menu";
     menu.textContent = "Row actions";
+    menu.dataset.control = "row";
+    menu.setAttribute("aria-haspopup", "menu");
+    menu.setAttribute("aria-expanded", "false");
     menu.setAttribute("aria-label", "Row actions");
     menu.contentEditable = "false";
     menu.addEventListener("click", () => {
-      const $cell = this.view.state.doc.resolve(this.getPos());
-      const tablePos = $cell.before(1);
-      const row = $cell.index(1);
-      const run = (command) => () => { selectTableCell(this.view, tablePos, row, 0); command(this.view.state, this.view.dispatch); this.view.focus(); };
-      const count = $cell.node(1).childCount;
+      const target = this.target();
+      if (!target) return;
+      const found = tableById(this.view.state.doc, target.tableId);
+      if (!found) return;
+      const at = (command, said) => () => {
+        const done = runOn(this.view, target, command);
+        announce(this.view, done ? said : UNAVAILABLE);
+        return done;
+      };
+      const row = Math.max(0, rowIndexOf(found.table, target.rowId));
+      const count = found.table.childCount;
       openPageMenu(this.view, menu, [
-        { label: "Insert above", icon: "+", run: run(addRow(false)) },
-        { label: "Insert below", icon: "+", run: run(addRow(true)) },
-        ...(row > 0 ? [{ label: "Move up", icon: "↑", run: run(moveRow(-1)) }] : []),
-        ...(row < count - 1 ? [{ label: "Move down", icon: "↓", run: run(moveRow(1)) }] : []),
-        { label: "Select row", icon: "▦", run: () => selectLine(this.view, tablePos, "row", row) },
-        { label: "Delete row", icon: "×", run: run(deleteRow) },
-      ]);
+        { label: "Insert above", icon: "+", run: at(addRow(false), "Row inserted") },
+        { label: "Insert below", icon: "+", run: at(addRow(true), "Row inserted") },
+        ...(row > 0 ? [{ label: "Move up", icon: "↑", run: at(moveRow(-1), "Row moved") }] : []),
+        ...(row < count - 1 ? [{ label: "Move down", icon: "↓", run: at(moveRow(1), "Row moved") }] : []),
+        { label: "Select row", icon: "▦", run: () => selectOn(this.view, target, "row") },
+        { label: "Delete row", icon: "×", run: at(deleteRow, "Row deleted") },
+      ], { persist: true });
     });
     this.menu = menu;
     this.dom.append(menu);
     this.update(node);
+  }
+  // The row and column this cell names when its menu opens; both are looked up
+  // again by id when a row of the menu runs.
+  target() {
+    const pos = this.getPos();
+    const $cell = pos == null ? null : this.view.state.doc.resolve(pos);
+    const table = $cell?.node(1);
+    if (!table || table.type !== N.table) return null;
+    return { tableId: table.attrs.id, rowId: $cell.node(2).attrs.id ?? null, colId: this.node.attrs.col ?? null };
   }
   update(node) {
     if (node.type !== N.table_cell) return false;
     this.node = node;
     const $cell = this.view.state.doc.resolve(this.getPos());
     const table = $cell.node(1);
+    const row = $cell.node(2);
+    const index = $cell.index(1);
+    this.dom.dataset.col = node.attrs.col;
+    this.dom.setAttribute("headers", headerId(table.attrs.id, node.attrs.col));
     this.dom.dataset.kind = columnKinds(table)[node.attrs.col] ?? "text";
+    this.menu.dataset.col = node.attrs.col;
+    this.menu.dataset.row = row.attrs.id ?? "";
+    this.menu.setAttribute("aria-label", `Row actions: ${rowLabel(row, index)}`);
     this.menu.hidden = $cell.index(2) !== 0;
     if (this.dom.dataset.kind !== "date") this.closeDate();
     return true;
@@ -377,7 +612,7 @@ export function createFeature() {
       table: (node, view, getPos) => new TableView(node, view, getPos),
       table_cell: (node, view, getPos) => new TableCellView(node, view, getPos),
     },
-    css: TABLE_CSS,
+    css: TABLE_CSS + ACTIONS_CSS,
     dispose() {},
   };
 }

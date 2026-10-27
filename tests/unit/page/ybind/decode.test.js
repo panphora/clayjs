@@ -145,8 +145,8 @@ test("resolves table fields over the seed in the editor, the decoder and the art
   expect(node.child(1).attrs.id).toBe("r3");
   expect(node.attrs.cols.c3.name).toBe("Notes");
   const html = renderModel(project({ tbl: table }));
-  expect(html).toContain("<td><strong>invite</strong> &lt;first&gt; now</td>");
-  expect(html).toContain("<th data-col=\"c3\">Notes</th>");
+  expect(html).toContain("<td headers=\"tbl-c3\"><strong>invite</strong> &lt;first&gt; now</td>");
+  expect(html).toContain("<th data-col=\"c3\" id=\"tbl-c3\" scope=\"col\">Notes</th>");
   expect(html).not.toContain("[object Object]");
 });
 
