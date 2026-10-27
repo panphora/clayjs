@@ -26,7 +26,7 @@ export function createYPageBinding({ store, ydoc = new Y.Doc(), onNotice = () =>
   let checksQueued = false;
   const unsaved = registerUnsavedState?.({
     id: "page:live",
-    isPending: () => store.pending.length > 0 || provider.reconcilePending || Boolean(pageJournal?.pending()),
+    isPending: () => store.pending.length > 0 || provider.reconcilePending || Boolean(pageJournal && !pageJournal.failure && pageJournal.pending()),
     flush,
   });
   const changed = () => {

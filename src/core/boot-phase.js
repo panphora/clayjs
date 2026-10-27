@@ -4,4 +4,4 @@
 // mountDerivedEngine). Every other page, and any test that imports save.js
 // directly, never sets the hold.
 // servedHash: the fragment the page was served with, read at this module's evaluation.
-export const bootPhase = { holdSettle: false, servedHash: window.location.hash };
+export const bootPhase = { holdSettle: false, servedHash: typeof window === "undefined" ? "" : window.location.hash };

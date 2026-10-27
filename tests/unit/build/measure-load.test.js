@@ -129,8 +129,9 @@ test("a Document's built edit line counts a feature's part one fetch stage after
   expect(paths(rich)).toContain(chunkOf("page/editor.js"));
   expect(paths(rich)).toContain(chunkOf("page/features/table.js"));
   expect(paths(rich)).toContain(chunkOf("page/features/board.js"));
+  expect(paths(rich)).toContain(chunkOf("page/features/chart.js"));
   expect(rich.js.depth).toBe(text.js.depth + 1);
-  expect(rich.js.requests).toBe(text.js.requests + 2);
+  expect(rich.js.requests).toBe(text.js.requests + 4);
 }, 180000);
 
 // The release serves its font sheets from /v1/fonts/, beside the font files, so a page
