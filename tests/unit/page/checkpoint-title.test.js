@@ -175,7 +175,7 @@ test('a room-only heading update changes the title of a file written before it',
   expect(isCheckpointCurrent(repaired.html, later)).toBe(true);
 });
 
-test('a document with no root H1 derives Untitled', () => {
+test('a document with no root H1 keeps the title its author wrote, and an Untitled one stays Untitled', () => {
   const { source, capture, render } = roomOf(seedValue([
     { id: 'h', t: 'heading', text: 'Sub head', attrs: { level: 2 } },
     { id: 'p', t: 'paragraph', text: 'text' },
@@ -183,6 +183,10 @@ test('a document with no root H1 derives Untitled', () => {
   const pinned = capture();
   const result = render(source, pinned);
   expect(result.kind).toBe('ok');
-  expect(titleOf(result.html)).toBe('Untitled');
+  expect(titleOf(result.html)).toBe(titleOf(source));
   expect(isCheckpointCurrent(result.html, pinned)).toBe(true);
+  const blank = render(source.replace(/<title>[^<]*<\/title>/, '<title>Untitled</title>'), pinned);
+  expect(blank.kind).toBe('ok');
+  expect(titleOf(blank.html)).toBe('Untitled');
+  expect(isCheckpointCurrent(blank.html, pinned)).toBe(true);
 });
