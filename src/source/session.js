@@ -71,7 +71,7 @@ import {
   setSaveRenderer
 } from '../core/snapshot.js';
 import { keepaliveHeld, onSaveAccepted } from '../core/save-core.js';
-import { SLICED_SAVE_MIN_BYTES } from '../core/save.js';
+import { SLICED_SAVE_MIN_BYTES } from '../core/save-slices.js';
 import { lastSeenEtag } from '../core/etag.js';
 
 const state = {
@@ -126,7 +126,7 @@ const SUPERSEDED = Object.freeze({ superseded: true });
 /**
  * Whether a walk over bytes this big runs across tasks instead of in one.
  *
- * The threshold and both exceptions are the save's (core/save.js): below
+ * The threshold and both exceptions are the save's (core/save-slices.js): below
  * `SLICED_SAVE_MIN_BYTES` the one-task walk is cheaper than the scheduling, a hidden tab
  * has no typing to protect and its timers are throttled, and a keepalive save belongs to
  * a page that is going away and cannot wait for a task boundary.

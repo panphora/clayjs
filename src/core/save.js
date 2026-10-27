@@ -29,6 +29,7 @@ import {
 } from "./save-core.js";
 import { captureForComparisonAndDirty, captureForSaveAndComparison, captureForDirtyCheck, captureSaveClone, releaseCaptureArtifact } from "./snapshot.js";
 import { saveLimit, saveLimits, inspectSaveSize } from "./save-size.js";
+import { SLICED_SAVE_MIN_BYTES } from "./save-slices.js";
 import { paintSignature } from "../lib/derived.js";
 import { NO_TRIGGER_AUTOSAVE_SELECTOR } from "../lib/region-policy.js";
 import { seedEtag, learnConditionalSaves, lastSeenEtag, recordEtag } from "./etag.js";
@@ -862,10 +863,9 @@ export function setLastSavedContents(val) {
 
 const monotonic = () => (typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now());
 
-// A document whose last save was at least this big prepares its next one across tasks.
-// Verifying a file that size is seconds of uninterrupted work, and every keystroke behind
-// it waits; below the threshold the one-task capture is cheaper than the scheduling.
-export const SLICED_SAVE_MIN_BYTES = 300 * 1024;
+// The size at which a document's work hands the page back, shared with the source map's
+// own install and repair. Re-exported so this module keeps answering for the save side.
+export { SLICED_SAVE_MIN_BYTES };
 // The main-thread time one preparation slice may spend before handing the page back.
 const SLICED_SAVE_BUDGET_MS = 4;
 // What a save answers when the page changed underneath its preparation. A skip, because
@@ -1049,6 +1049,11 @@ async function settleCaptured({
       if (!explicit) autosaveScheduler.noteCost(costMs + (monotonic() - completedAt));
       if (typeof callback === 'function') callback(result);
       resolve({ result, dispatched: true });
+      // The save that queued behind this one goes out from here, in this request's own
+      // task, which is where it has always gone out: a flush's own call then finds the
+      // lane busy and waits that request out, which is what its 'clean' answer describes.
+      // A prepared save holds the lane itself, so its caller does the draining instead.
+      if (!laneHeld) drainPendingSave();
     }, { capture, pageFormatFloor, lane });
   });
 }
@@ -1355,7 +1360,6 @@ function attemptSaveNow({ kind, permit = null }, callback = () => {}) {
     }).then((outcome) => {
       resolve(outcome.result);
       settleSoonQueued(outcome.result);
-      if (outcome.dispatched) drainPendingSave();
     });
   });
 }
@@ -1484,7 +1488,6 @@ export function savePageForce(callback = () => {}, { quietConflict = false, page
       callback,
     }).then((outcome) => {
       resolve(outcome.result);
-      if (outcome.dispatched) drainPendingSave();
     });
   });
 }
