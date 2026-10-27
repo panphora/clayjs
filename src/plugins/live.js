@@ -969,6 +969,8 @@ async function flushStaged(entry, { timeoutMs = 10_000 } = {}) {
 function activateStaged(entry) {
   if (!entry.staged) return;
   entry.staged = null;
+  // Its file had no tag and the live page never gets one: every later capture builds it.
+  entry.tagless = true;
   fast?.storeOpened(entry.store.name);
   ensureLane();
 }
@@ -981,8 +983,9 @@ onSnapshot((clone, { forSave, requestRefresh }) => {
   for (const entry of entries.values()) {
     if (entry.store.ephemeral) continue;
     let tag = tags.get(entry.store.name);
-    // A staged store reaches the file here, where the boot would have put its tag.
-    if (!tag && entry.staged) {
+    // A staged store reaches the file here, where the boot would have put its tag, and
+    // so does one that started that way, on every save after its first.
+    if (!tag && (entry.staged || entry.tagless)) {
       const article = clone.querySelector("article[data-page]");
       if (!article) continue;
       const element = article.ownerDocument.createElement("script");
