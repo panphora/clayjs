@@ -206,7 +206,7 @@ export function createSavedStream({ documentURL, servedEtag = null, represented 
 
   // A frame that lands while the download is in flight waits in order, and a
   // download that failed keeps the queue so the next frame asks again.
-  function takePresence(data) {
+  function takePresence(data, gen) {
     if (presenceRoster) {
       presenceRoster.update(data);
       return;
@@ -215,6 +215,9 @@ export function createSavedStream({ documentURL, servedEtag = null, represented 
     if (presenceLoad) return;
     presenceLoad = Promise.all([import('./presence-store.js'), import('./presence.js')])
       .then(([storeMod, rosterMod]) => {
+        // The download outlived the reader that asked for it: a stop (or a newer start)
+        // took the stream away, so this load attaches no lease and draws no roster.
+        if (!active(gen)) return null;
         presenceStore = storeMod.presence;
         presenceRoster = rosterMod.presence;
         presenceLease = presenceStore.attachTransport({ send: () => Promise.resolve(false) });
@@ -523,7 +526,7 @@ export function createSavedStream({ documentURL, servedEtag = null, represented 
           } catch {
             return;
           }
-          if (data && typeof data === 'object' && !Array.isArray(data)) takePresence(data);
+          if (data && typeof data === 'object' && !Array.isArray(data)) takePresence(data, gen);
         });
         return handle;
       });

@@ -39,7 +39,7 @@ afterEach(() => {
 const pump = () => {
   while (frames.length) frames.shift()();
 };
-const tab = (initial = seed(), { epoch = EPOCH, capabilities = true } = {}) => {
+const tab = (initial = seed(), { epoch = EPOCH, capabilities = true, focused = true } = {}) => {
   const store = createStore({ name: "page", value: initial });
   const binding = createYPageBinding({ store });
   const editor = new view.EditorView(document.body.appendChild(document.createElement("div")), {
@@ -61,6 +61,7 @@ const tab = (initial = seed(), { epoch = EPOCH, capabilities = true } = {}) => {
   });
   const one = { store, binding, view: editor, presence, awareness, initial, composing };
   opened.push(one);
+  if (focused) editor.dom.dispatchEvent(new Event("focus"));
   return one;
 };
 const posOf = (one, id, offset = 0) => {
@@ -257,6 +258,17 @@ test("leaving the editor, pagehide and disposal clear the caret this tab publish
   expect(carets(a)).toHaveLength(0);
 });
 
+test("install publishes no target until the editor is focused", () => {
+  const a = tab(seed(), { focused: false });
+  expect(a.presence.target).toBeNull();
+  caretIn(a, "q", 2);
+  expect(a.presence.target).toBeNull();
+  a.view.dom.dispatchEvent(new Event("focus"));
+  expect(a.presence.target).not.toBeNull();
+  a.view.dom.dispatchEvent(new Event("blur"));
+  expect(a.presence.target).toBeNull();
+});
+
 test("a disposed editor draws nothing and publishes nobody", () => {
   const a = tab(), b = tab();
   caretIn(a, "q", 2);
@@ -318,6 +330,7 @@ test("install decides from what the host announced, and the scope is the epoch",
   expect(handle).not.toBeNull();
   expect(handle.epoch).toBe("id:doc-9");
   expect(one.presence.getSnapshot().pageAwareness).toBe(true);
+  one.view.dom.dispatchEvent(new Event("focus"));
   caretIn(one, "q", 1);
   expect(one.presence.target).toMatchObject({ kind: "page", epoch: "id:doc-9" });
   expect(await installPageAwareness({ binding: one.binding, view: one.view, store: one.presence, meta: { spec: 1, extensions: ["presence"], document: null } })).toBeNull();

@@ -177,6 +177,7 @@ export const FIXTURES = {
 
 export const META_PATH = "/_/meta";
 export const SAVE_PATH = "/_/save";
+export const PRESENCE_PATH = "/_/presence";
 export const LANE_KEY = `clay-live:${PAGE.path}`;
 const LANE_BLOCKS = [
   { id: "p", text: "hello" },
@@ -200,7 +201,7 @@ function jsonResponse(status, body, headers = {}) {
   return {
     ok: status < 400,
     status,
-    statusText: status === 200 ? "OK" : status === 500 ? "Internal Server Error" : "Not Found",
+    statusText: status === 200 ? "OK" : status === 204 ? "No Content" : status === 500 ? "Internal Server Error" : "Not Found",
     headers: { get: (name) => headers[String(name).toLowerCase()] ?? null },
     text: async () => (typeof body === "string" ? body : JSON.stringify(body)),
   };
@@ -342,6 +343,22 @@ export function createHost(record, { extensions = ["conditional"], answerMeta = 
     const method = String(options.method || "GET").toUpperCase();
     const url = new URL(String(input), window.location.href);
     const headers = options.headers ?? {};
+    // Presence is a request to the host but never a write to the document: it is
+    // answered and recorded on its own, so no case sees it as a save, no body it
+    // carries becomes the served file, and it is stamped with no etag.
+    if (method === "POST" && url.pathname === PRESENCE_PATH) {
+      const body = await bodyText(options.body);
+      send({
+        kind: "presence",
+        method,
+        path: url.pathname,
+        body,
+        ifMatch: headers["If-Match"] ?? null,
+        status: 204,
+        etag: null,
+      });
+      return jsonResponse(204, "");
+    }
     if (method === "POST") {
       const body = await bodyText(options.body);
       posts.push(body);

@@ -104,7 +104,9 @@ export function createPageAwareness({ binding, view, store = presenceStore, epoc
   styleWithLegacyId(STYLE_ID, STYLE_CSS, STYLE_ID, ["editor-ui"]);
   const doc = view.dom.ownerDocument;
   let disposed = false;
-  let focused = true;
+  // Focus is a fact about the document, not a guess: an editor mounted in a background
+  // tab is not focused, and publishing a target for it would claim a caret nobody holds.
+  let focused = typeof view.hasFocus === "function" ? view.hasFocus() === true : view.dom.contains(doc.activeElement);
   let pending = null;
   const isComposing = () => (composing ? composing() === true : view.composing === true);
 
