@@ -5,6 +5,7 @@ import { project, parseModel, renderModel, fragmentCleaner } from '../../page/pr
 import { blocksFromPageValues } from '../../page/ybind/decode.js';
 import { mergePageModels } from '../../page/merge.js';
 import { inert, pageRev } from './page-state.js';
+import { pageFormatFloor, withPageFormatFloor } from '../../page/format-level.js';
 
 // The lone article of html: its element rebuilt in doc, and where its start tag
 // and its contents sit in html.
@@ -66,7 +67,10 @@ export function rebasePage({ storedHtml, state, incomingHtml, baseHtml, createDo
   const inner = `\n${renderModel(merged.items, { fallbackOf, clean: fragmentCleaner(doc) })}\n`;
   const [innerStart, innerEnd] = incoming.inner;
   const open = stampOpen(incomingHtml, incoming.startTag, state.rev);
-  const html = incomingHtml.slice(0, incoming.startTag.startOffset) + open + inner + incomingHtml.slice(innerEnd);
+  const body = incomingHtml.slice(0, incoming.startTag.startOffset) + open + inner + incomingHtml.slice(innerEnd);
+  // The floor is canonical metadata outside the article, and it only rises: a
+  // writer that rebased from a version before activation cannot lower it.
+  const html = withPageFormatFloor(body, Math.max(pageFormatFloor(storedHtml), pageFormatFloor(incomingHtml)));
   return { html, conflicts: merged.conflicts };
 }
 
@@ -96,13 +100,15 @@ export function closestBase(candidates, incomingHtml, createDocument) {
 }
 
 // The page document with its article stamped with rev: a version restored as an
-// edit carries the stored rev, so open tabs merge it onto the page they have.
-export function stampPageRev(html, rev) {
+// edit carries the stored rev, so open tabs merge it onto the page they have. A
+// restore is a trusted internal write, so it declares the floor it restores at
+// and the restored document cannot lose an established marker on the way.
+export function stampPageRev(html, rev, floor = 0) {
   if (typeof html !== 'string' || !rev) return null;
   const $ = load(html, { sourceCodeLocationInfo: true });
   const nodes = $('article[data-page]').toArray().filter((node) => !inert(node));
   const loc = nodes.length === 1 ? nodes[0].sourceCodeLocation?.startTag : null;
   if (!loc) return null;
   const stamped = stampOpen(html, loc, rev);
-  return html.slice(0, loc.startOffset) + stamped + html.slice(loc.endOffset);
+  return withPageFormatFloor(html.slice(0, loc.startOffset) + stamped + html.slice(loc.endOffset), floor);
 }

@@ -1,8 +1,11 @@
 import { onStream } from "./stream-bridge.js";
+import { PAGE_FORMAT, PAGE_FORMAT_HEADER } from "../page/format-level.js";
 
 // The host side of clay.live's fast lane on a host that advertises `live-data`:
 // one POST per frame of ops, one GET for the room's whole state. Both name the
-// document with Document-URL, as the sync relay and presence do.
+// document with Document-URL, as the sync relay and presence do, and both declare
+// the page format this client writes: registration, operation and checkpoint are
+// page-writing paths, so each one carries the capability the floor decides on.
 
 const DATA_PATH = "/_/sync/data";
 
@@ -21,7 +24,7 @@ export async function relayData(clientId, frame) {
     const response = await fetch(url.href, {
       method: "POST",
       credentials: "same-origin",
-      headers: { "Content-Type": "application/json", "Document-URL": window.location.href },
+      headers: { "Content-Type": "application/json", "Document-URL": window.location.href, [PAGE_FORMAT_HEADER]: String(PAGE_FORMAT) },
       body: JSON.stringify(frame),
     });
     let body = null;
@@ -47,7 +50,7 @@ export async function fetchLiveState(clientId, since = null, { signal } = {}) {
     const response = await fetch(url.href, {
       credentials: "same-origin",
       cache: "no-store",
-      headers: { "Document-URL": window.location.href },
+      headers: { "Document-URL": window.location.href, [PAGE_FORMAT_HEADER]: String(PAGE_FORMAT) },
       signal,
     });
     if (!response.ok) {

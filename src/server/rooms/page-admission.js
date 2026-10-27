@@ -3,6 +3,9 @@ import { parseJsonRelaxed } from 'hyper-morph/json-parse';
 import { cloneJson } from './live-data-ops.js';
 import { liveTags } from './live-data-tags.js';
 import { recent } from './recent.js';
+import { project } from '../../page/projection.js';
+import { blocksFromPageValues } from '../../page/ybind/decode.js';
+import { pageFormatDecision, pageFormatFloor, pageFormatRefusal, requiredPageFormat, withPageFormatFloor } from '../../page/format-level.js';
 
 const PAGE = /^page(\.[0-9]+)?$/;
 const PART = /^(.+)\.(\d+)\.(\d+)$/;
@@ -76,4 +79,34 @@ export function pageBaseline(tags) {
     return [tag[0], value];
   });
   return createHash('sha256').update(canon(source), 'utf8').digest('hex');
+}
+
+// The floor a prospective page value needs: 1 when the model the capture would
+// store holds a newer runtime's mark, block or field, 0 when it holds only what
+// the frozen floor-0 registry knows. Invalid content refuses here rather than
+// answering with a level, so a malformed capture cannot buy admission.
+export function captureFormat(html) {
+  const answer = inspectPage(html ?? '');
+  if (answer.kind !== 'yjs') return 0;
+  return requiredPageFormat(project(blocksFromPageValues([answer.tags[0][1]])));
+}
+
+// The floor decision for one page write, taken before anything is mutated.
+// `floor` is the document's established floor, `required` what the captured
+// content needs (its own marker included) and `capability` what the writer
+// declares in X-Clay-Page-Format. `admitted` lists the capabilities of the page
+// editors the room has admitted, so a floor rise is refused while an editor that
+// could not read the result is connected. On success the returned body carries
+// the marker the room must persist, so a stale save that omitted it cannot lower
+// the floor.
+export function checkPageFormatAdmission({ currentHtml, html, capability = 0, admitted = [] }) {
+  const established = pageFormatFloor(currentHtml ?? '');
+  const decision = pageFormatDecision({
+    floor: established,
+    required: Math.max(captureFormat(html), pageFormatFloor(html ?? '')),
+    capability,
+    admitted,
+  });
+  if (!decision.ok) throw pageFormatRefusal(decision.minimum);
+  return { ...decision, html: withPageFormatFloor(html, decision.floor) };
 }

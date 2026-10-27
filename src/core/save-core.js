@@ -14,6 +14,7 @@ import { saveToken } from "./host-attrs.js";
 import { lastSeenEtag, conditionalSaves, recordEtag } from "./etag.js";
 import { hostMeta } from "./host-meta.js";
 import { saveSize, storedFile, knownSaveLimit, saveLimit, announceSaveSize } from "./save-size.js";
+import { PAGE_FORMAT, PAGE_FORMAT_HEADER, knownPageFormatFloor, withPageFormatFloor } from "../page/format-level.js";
 import "./runtime-url.js";
 import {
   getPageContents,
@@ -510,7 +511,11 @@ export function buildSaveRequest(content, userDriven, signal, saveId, etag, keep
       // gating it on discovery would mean holding the save until an async lookup
       // resolved. Nothing is inferred from the header being accepted: only a host
       // that ANSWERS with the id has said anything.
-      'Save-ID': saveId
+      'Save-ID': saveId,
+      // The page format this client writes. R understands floor 1 and says so on
+      // every page save; a host reads it as protocol capability, never as
+      // authorization, and refuses a lower one before mutation.
+      [PAGE_FORMAT_HEADER]: String(PAGE_FORMAT)
     },
     body: content
   };
@@ -877,6 +882,10 @@ async function sendSave(content, { captureId = null, conversionHeader = null, at
 // thing whether the bytes came from a bound capture or a raw caller. `captureId`
 // is null for a raw save: it belongs to no capture and can confirm none.
 function runSave(html, captureId, callback, conversion, capture = null) {
+  // A capture taken before the floor rose cannot drop the marker by omitting it:
+  // the bytes that go out carry the floor this tab last saw. At floor 0 this is
+  // the string itself, unchanged.
+  html = withPageFormatFloor(html, knownPageFormatFloor());
   return new Promise((resolve) => {
     const attempts = [];
     // Read once, before the first request: the artifact belongs to the capture that

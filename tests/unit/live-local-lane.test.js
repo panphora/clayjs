@@ -933,3 +933,154 @@ test("Opus 7: a first read, and a read from another epoch, carry the epoch's mov
   await settle();
   expect((await other).moves.game.map((move) => move.seq)).toEqual([1]);
 });
+
+// The format floor's scope: a floor-1 document shares neither channel nor room
+// with a tab that cannot read it. The move happens only once an accepted receipt
+// covers the pending work, keeps every store, and an interrupted move leaves the
+// tab where it was rather than abandoning its pending operations.
+const FORMAT_KEY = "clay-live:/game.html:page-format:1";
+
+// A lock per channel name, as the platform's Web Locks are: a scope change takes
+// a different name, so it is not queued behind the room this tab just left.
+function namedLocks() {
+  const waiting = new Map();
+  const held = new Set();
+  const grant = (name) => {
+    if (held.has(name)) return;
+    const queue = waiting.get(name);
+    if (!queue?.length) return;
+    held.add(name);
+    const { callback, resolve } = queue.shift();
+    Promise.resolve(callback({ name })).then((result) => {
+      held.delete(name);
+      resolve(result);
+      grant(name);
+    });
+  };
+  return {
+    request(name, callback) {
+      return new Promise((resolve) => {
+        const queue = waiting.get(name) ?? [];
+        queue.push({ callback, resolve });
+        waiting.set(name, queue);
+        grant(name);
+      });
+    },
+  };
+}
+
+function scopedLocks() {
+  Object.defineProperty(navigator, "locks", { configurable: true, value: namedLocks() });
+}
+
+function tabAt(tags, { key = KEY, floor = 0 } = {}) {
+  const entries = new Map();
+  for (const [name, { value, ephemeral = false }] of Object.entries(tags)) {
+    entries.set(name, { store: createStore({ name, value, ephemeral }) });
+  }
+  const seed = () => {
+    const values = new Map();
+    for (const [name, entry] of entries) {
+      values.set(name, { value: entry.store.authoritative, ephemeral: entry.store.ephemeral, text: JSON.stringify(tags[name].value) });
+    }
+    return values;
+  };
+  const transport = localTransport({ seed, key, floor });
+  const lane = createFastLane({ transport, entries });
+  for (const [name, entry] of entries) entry.store.onLocal((ops) => lane.local(name, ops, entry.store.mark));
+  lane.start();
+  const handle = (name) => entries.get(name).store.handle;
+  const t = { transport, lane, entries, handle, game: handle("game"), channel: channels.at(-1) };
+  tabs.push(t);
+  return t;
+}
+
+test("the lane's scope follows the document's floor", async () => {
+  scopedLocks();
+  const { localLaneKey, FORMAT_SCOPE } = await import("../../src/live/local-lane.js");
+  expect(FORMAT_SCOPE).toBe("page-format:1");
+  expect(localLaneKey(0, "/game.html")).toBe("clay-live:/game.html");
+  expect(localLaneKey(1, "/game.html")).toBe("clay-live:/game.html:page-format:1");
+  expect(localLaneKey(2, "/game.html")).toBe("clay-live:/game.html:page-format:1");
+  const floorZero = tabAt({ game: { value: { score: 0 } } });
+  const floorOne = tabAt({ game: { value: { score: 0 } } }, { key: KEY, floor: 1 });
+  await settle();
+  expect(floorZero.transport.scope).toBe(KEY);
+  expect(floorOne.transport.scope).toBe(FORMAT_KEY);
+  expect(floorOne.transport.floor).toBe(1);
+  // Two scopes, two rooms: a floor-0 tab never sees a floor-1 tab's moves.
+  floorOne.game.add("score", 5);
+  await settle();
+  expect(floorOne.game.toJSON()).toEqual({ score: 5 });
+  expect(floorZero.game.toJSON()).toEqual({ score: 0 });
+});
+
+test("a scope change needs a covering receipt, keeps every store and is idempotent", async () => {
+  scopedLocks();
+  const tags = { game: { value: { score: 0 } }, lobby: { value: { chat: ["hi"] }, ephemeral: true } };
+  const a = tabAt(tags);
+  await settle();
+  const old = tabAt(tags);
+  await settle();
+  a.game.add("score", 2);
+  await settle();
+
+  const uncovered = a.transport.switchScope(1, { covered: false });
+  expect(uncovered).toMatchObject({ status: "refused", code: "uncovered", floor: 0 });
+  expect(a.transport.scope).toBe(KEY);
+  expect(a.game.toJSON()).toEqual({ score: 2 });
+
+  const switched = a.transport.switchScope(1, { covered: true });
+  expect(switched).toMatchObject({ status: "switched", floor: 1, scope: FORMAT_KEY });
+  await settle();
+  // Every store came across, not only the page's, and the ephemeral one too.
+  expect(a.game.toJSON()).toEqual({ score: 2 });
+  expect(a.handle("lobby").toJSON()).toEqual({ chat: ["hi"] });
+  expect(a.transport.scope).toBe(FORMAT_KEY);
+  expect(a.transport.floor).toBe(1);
+  expect(a.transport.isSequencer).toBe(true);
+
+  // The old scope's tab is still there and sees nothing of the new room.
+  a.game.add("score", 1);
+  await settle();
+  expect(a.game.toJSON()).toEqual({ score: 3 });
+  expect(old.game.toJSON()).toEqual({ score: 2 });
+
+  expect(a.transport.switchScope(1, { covered: true })).toMatchObject({ status: "already", floor: 1 });
+
+  // A tab opening on the new scope joins this room from its seed and converges.
+  const b = tabAt(tags, { key: KEY, floor: 1 });
+  await settle();
+  expect(b.game.toJSON()).toEqual({ score: 3 });
+  b.game.add("score", 1);
+  await settle();
+  expect(a.game.toJSON()).toEqual({ score: 4 });
+  expect(b.game.toJSON()).toEqual({ score: 4 });
+});
+
+test("an interrupted scope change leaves the tab on floor 0 with its pending work, and a retry moves it", async () => {
+  scopedLocks();
+  const tags = { game: { value: { score: 0 } } };
+  const a = tabAt(tags);
+  await settle();
+  // A switch with no receipt covering it moves nothing and abandons nothing.
+  expect(a.transport.switchScope(1)).toMatchObject({ status: "refused", code: "uncovered" });
+  a.game.add("score", 1);
+  await settle();
+  expect(a.game.toJSON()).toEqual({ score: 1 });
+  expect(a.entries.get("game").store.pending).toEqual([]);
+
+  // The retry, now covered by an accepted receipt, lands every store in the new
+  // scope and the tab is its sequencer.
+  expect(a.transport.switchScope(1, { covered: true })).toMatchObject({ status: "switched", floor: 1 });
+  await settle();
+  expect(a.transport.scope).toBe(FORMAT_KEY);
+  expect(a.transport.isSequencer).toBe(true);
+  expect(a.game.toJSON()).toEqual({ score: 1 });
+
+  // A lane that has stopped refuses a move rather than pretending it happened.
+  const c = tabAt({ game: { value: { score: 0 } } });
+  await settle();
+  c.lane.stop();
+  expect(c.transport.switchScope(1, { covered: true })).toMatchObject({ status: "refused", code: "lane-stopped", floor: 0 });
+});

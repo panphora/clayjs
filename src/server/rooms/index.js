@@ -40,7 +40,7 @@ export {
   postReceipt,
 } from './live-provenance.js';
 
-export { isHybridPageValue, isYPageValue, inspectPage, pageBaseline } from './page-admission.js';
+export { isHybridPageValue, isYPageValue, inspectPage, pageBaseline, captureFormat, checkPageFormatAdmission } from './page-admission.js';
 
 export { splitPage, composePage, pageRev } from './page-state.js';
 

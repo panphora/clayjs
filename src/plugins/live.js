@@ -772,7 +772,9 @@ function ensureLane() {
       if (supported) {
         fast = createFastLane(laneOptions(serverTransport()));
       } else if (localLaneSupported()) {
-        local = localTransport({ seed: seedLocalRoom });
+        // The document's own floor picks the channel scope: a floor-1 document
+        // never shares the lane a tab that cannot read it is on.
+        local = localTransport({ seed: seedLocalRoom, floor: document.querySelector('meta[name="clay-page-format"]')?.getAttribute("content") });
         fast = createFastLane(laneOptions(local));
       } else {
         settleLane?.(null);

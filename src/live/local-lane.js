@@ -53,6 +53,16 @@ function applyAll(value, ops) {
 
 const encoder = new TextEncoder();
 
+// Floor 1 moves the durable lane to its own channel scope: a tab that cannot read
+// floor 1 never receives future-format updates, and its writes are refused by the
+// host floor. The message protocol inside the scope is unchanged.
+export const FORMAT_SCOPE = "page-format:1";
+
+export function localLaneKey(floor = 0, path = window.location.pathname) {
+  const base = "clay-live:" + path;
+  return floor >= 1 ? `${base}:${FORMAT_SCOPE}` : base;
+}
+
 export function localLaneSupported() {
   return typeof BroadcastChannel === "function" && typeof navigator !== "undefined" && typeof navigator.locks?.request === "function";
 }
@@ -70,8 +80,11 @@ function randomId() {
  * @param {object} [options.channel] - the document's channel, when a presence
  *   service in this tab already owns one: the two share it rather than open a second
  */
-export function localTransport({ seed, key = "clay-live:" + window.location.pathname, channel: shared = null }) {
+// `key` is the room's channel without a floor suffix; `floor` scopes it.
+export function localTransport({ seed, key = "clay-live:" + window.location.pathname, channel: shared = null, floor = 0 }) {
   const clientId = randomId();
+  let scopeFloor = floor >= 1 ? 1 : 0;
+  let laneKey = scopeFloor ? `${key}:${FORMAT_SCOPE}` : key;
   let channel = null;
   let unsubscribe = null;
   let handlers = null;
@@ -323,7 +336,7 @@ export function localTransport({ seed, key = "clay-live:" + window.location.path
     if (lockRequested || stopped) return;
     lockRequested = true;
     navigator.locks
-      .request(key, async () => {
+      .request(laneKey, async () => {
         if (stopped) return undefined;
         const ordered = await closedFor(mirror.sequencer);
         if (stopped) return undefined;
@@ -563,11 +576,44 @@ export function localTransport({ seed, key = "clay-live:" + window.location.path
     handlers.open({ clientId, lane: "live" });
   }
 
+  // The floor rose and an accepted receipt covers the pending work: close this
+  // scope's room (its closed state carries every store and the position the
+  // receipt covers), then join the new one. An interrupted switch leaves this tab
+  // where it was, on floor 0's scope, with every store and its pending work
+  // intact; the caller retries it from the receipt.
+  function switchScope(next, { covered = false } = {}) {
+    const want = next >= 1 ? 1 : 0;
+    const held = { floor: scopeFloor, scope: laneKey };
+    if (want <= scopeFloor) return { status: "already", ...held };
+    if (stopped || !channel) return { status: "refused", code: "lane-stopped", ...held };
+    if (shared) return { status: "refused", code: "shared-channel", ...held };
+    if (!covered) return { status: "refused", code: "uncovered", ...held };
+    closeRoom();
+    unsubscribe?.();
+    laneKey = want ? `${key}:${FORMAT_SCOPE}` : key;
+    scopeFloor = want;
+    channel = localChannel(laneKey);
+    unsubscribe = channel.subscribe("durable", (data) => onMessage({ data }));
+    mirror.sequencer = mirror.closedBy = null;
+    lockRequested = false;
+    requestLock();
+    handlers.close();
+    handlers.open({ clientId, lane: "live" });
+    return { status: "switched", floor: scopeFloor, scope: laneKey };
+  }
+
   return {
     clientId,
+    get scope() {
+      return laneKey;
+    },
+    get floor() {
+      return scopeFloor;
+    },
+    switchScope,
     start(next) {
       handlers = next;
-      channel = shared ?? localChannel(key);
+      channel = shared ?? localChannel(laneKey);
       unsubscribe = channel.subscribe("durable", (data) => onMessage({ data }));
       window.addEventListener("pagehide", onPageHide);
       window.addEventListener("pageshow", onPageShow);

@@ -134,6 +134,22 @@ export async function hostSupports(name) {
 }
 
 /**
+ * The page format this host enforces: 1 when it announced `page-format-v1`,
+ * otherwise 0.
+ *
+ * A host announces that extension only once its floor enforcement and tolerant
+ * checkpoint renderer are installed, so a host that cannot hold the floor keeps
+ * the newer writers off. The answer comes from the memoized discovery: one
+ * answer serves every asker under a loaded document.
+ *
+ * @returns {Promise<number>}
+ */
+export async function hostPageFormat() {
+  const meta = await hostMeta();
+  return meta.extensions.includes("page-format-v1") ? 1 : 0;
+}
+
+/**
  * Whether this host keeps a version history a person can go back to.
  *
  * The `document` block names it: absent means no history, which is the answer every
