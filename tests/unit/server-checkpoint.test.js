@@ -63,7 +63,8 @@ test('captures both editors, writes persistent tags and matching article, and su
   }
   const result = render(source, pinned);
   expect(result.kind).toBe('ok');
-  expect(result.html).toContain('<head><title>Untitled</title></head>');
+  // No root H1 behind it: the author's own title is kept, never replaced by Untitled.
+  expect(result.html).toContain('<head><title>Keep this title</title></head>');
   expect(result.html).toContain('<footer>Keep this footer</footer>');
   expect(result.html).toContain(tag('presence', { viewers: 1 }, true));
   expect(normalized(result.html.match(/<article[^>]*>([\s\S]*?)<\/article>/)[1])).toBe('<p data-id="p">aXc</p>');

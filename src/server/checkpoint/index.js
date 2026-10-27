@@ -256,7 +256,7 @@ export function renderCheckpoint(currentHtml, capture, { createDocument, recover
   edits.push({ start: articleLoc.startTag.startOffset, end: articleLoc.startTag.endOffset, text: articleStart.slice(0, -1) + rev + '>' });
   edits.push({ start: articleLoc.startTag.endOffset, end: articleLoc.endTag.startOffset, text: rendered.html });
   if (!customTitleOf(placement.titleModes)) {
-    const edit = titleEdit(placement, documentTitle(rendered.model));
+    const edit = titleEdit(placement, documentTitle(rendered.model, { currentTitle: titleTextOf(placement.title), keepWithoutHeading: true }));
     if (edit) edits.push(edit);
   }
   return { kind: 'ok', html: replace(currentHtml, edits), revision: rendered.rev };
@@ -271,7 +271,7 @@ export function isCheckpointCurrent(currentHtml, capture) {
   const articleLoc = placement.article.sourceCodeLocation;
   if (attr(placement.article, 'data-rev') !== rendered.rev ||
     currentHtml.slice(articleLoc.startTag.endOffset, articleLoc.endTag.startOffset) !== rendered.html) return false;
-  if (!customTitleOf(placement.titleModes) && titleTextOf(placement.title) !== documentTitle(rendered.model)) return false;
+  if (!customTitleOf(placement.titleModes) && titleTextOf(placement.title) !== documentTitle(rendered.model, { currentTitle: titleTextOf(placement.title), keepWithoutHeading: true })) return false;
   return capture.stores.every((store) => {
     const node = placement.tags.get(store.name);
     const loc = node.sourceCodeLocation;

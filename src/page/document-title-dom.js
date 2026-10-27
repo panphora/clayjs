@@ -15,6 +15,18 @@ export function customTitle(root) {
   return false;
 }
 
+// Mark this document's title as its author's own, the way the SEO editor's custom
+// title does. Returns whether it wrote the marker.
+export function markCustomTitle(root) {
+  const head = headOf(root);
+  if (!head || customTitle(root)) return false;
+  const meta = head.ownerDocument.createElement("meta");
+  meta.setAttribute("name", TITLE_MODE);
+  meta.setAttribute("content", "custom");
+  head.insertBefore(meta, head.querySelector("title") ?? head.firstChild);
+  return true;
+}
+
 export function titleText(root) {
   return headOf(root)?.querySelector("title")?.textContent ?? "";
 }

@@ -1,6 +1,7 @@
 import { state } from "../vendor/prosemirror.vendor.js";
 import Mutation from "../lib/mutation.js";
-import { titleFor, titleText, writeTitle } from "./document-title-dom.js";
+import { UNTITLED } from "./document-title.js";
+import { customTitle, markCustomTitle, titleFor, titleText, writeTitle } from "./document-title-dom.js";
 
 const ATOM = "\uFFFC";
 
@@ -38,6 +39,18 @@ export function refreshDocumentTitle(view) {
   return title;
 }
 
+// A file written before titles followed the first H1 can carry a title its author
+// typed with no H1 behind it. The first time an editor opens such a file, that title
+// becomes the author's own (the SEO custom marker), so deriving never replaces it;
+// a file that has an H1 keeps following it, and deleting that H1 later reads Untitled.
+export function adoptAuthoredTitle(view) {
+  const doc = view?.dom?.ownerDocument ?? null;
+  if (!doc || customTitle(doc) || titleItemsOfDoc(view.state.doc).length || [ "", UNTITLED ].includes(titleText(doc).trim())) return false;
+  Mutation.pause();
+  try { return markCustomTitle(doc); }
+  finally { Mutation.resume(); }
+}
+
 export function titlePlugin() {
   return new state.Plugin({
     view(editorView) {
@@ -46,6 +59,7 @@ export function titlePlugin() {
         doc = editorView.state.doc;
         refreshDocumentTitle(editorView);
       };
+      adoptAuthoredTitle(editorView);
       refresh();
       return {
         update(next) {

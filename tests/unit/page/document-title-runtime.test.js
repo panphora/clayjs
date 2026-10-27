@@ -96,6 +96,31 @@ describe("the runtime title", () => {
     expect(document.title).toBe("Untitled");
   });
 
+  // A file from before titles followed the first H1: its author typed a title and
+  // has no H1. Opening it in an editor must not turn that title into Untitled.
+  test("a title its author wrote with no H1 behind it is kept, as the author's own", () => {
+    writeTitle(document, "Field notes");
+    open(seedValue([{ id: "p", t: "paragraph", text: "Body text" }]));
+    expect(document.title).toBe("Field notes");
+    expect(document.head.querySelector('meta[name="clay-seo-title-mode"]')?.getAttribute("content")).toBe("custom");
+  });
+
+  test("a file with an H1 is not marked, and a file with no title gains none", () => {
+    writeTitle(document, "Old title");
+    open();
+    expect(document.title).toBe("First title");
+    expect(document.head.querySelector('meta[name="clay-seo-title-mode"]')).toBeNull();
+    document.head.innerHTML = "";
+    open(seedValue([{ id: "p", t: "paragraph", text: "Body text" }]));
+    expect(document.head.querySelector('meta[name="clay-seo-title-mode"]')).toBeNull();
+    expect(document.head.querySelector("title")).toBeNull();    document.head.innerHTML = "";
+    writeTitle(document, "Untitled");
+    const blank = open(seedValue([{ id: "p", t: "paragraph", text: "Body text" }]));
+    expect(document.head.querySelector('meta[name="clay-seo-title-mode"]')).toBeNull();
+    blank.view.dispatch(blank.view.state.tr.insert(0, blank.view.state.schema.nodes.heading.create({ level: 1, id: "n" }, blank.view.state.schema.text("Now titled"))));
+    expect(document.title).toBe("Now titled");
+  });
+
   test("moving the second root H1 first changes the title", () => {
     const tab = open(seedValue([
       { id: "a", t: "heading", text: "First title", attrs: { level: 1 } },
