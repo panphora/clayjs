@@ -1441,13 +1441,13 @@ export function savePageForce(callback = () => {}, { quietConflict = false, page
     // skips the dirty question, which `forced` says here.
     if (preparesSliced()) {
       if (!prepDriver) {
-        loadPreparer().then(() => resolve(savePageForce(callback, { quietConflict, pageFormatFloor })));
+        loadPreparer().then(() => resolve(savePageForce(callback, { quietConflict, pageFormatFloor, permit })));
         return;
       }
       if (startSlicedSave({
         explicit: true,
         forced: true,
-        permit: null,
+        permit,
         pageFormatFloor,
         quietConflict,
         settleSoonQueued: () => {},

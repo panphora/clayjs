@@ -116,16 +116,36 @@ function discarded(run, entry) {
   });
 }
 
+// The accepted saves the host had already made at a given moment of the trace. An accepted
+// write is answered by a `save-response` stamped with the etag the call records, so that
+// event says when its bytes landed: a save answered after the moment was not there yet.
+function acceptedBefore(run, seq) {
+  const answered = new Map();
+  for (const event of run.trace ?? []) {
+    if (event.kind === "save-response" && event.detail.status === 200 && event.detail.etag) {
+      answered.set(event.detail.etag, event.seq);
+    }
+  }
+  return accepted(run).filter((call) => {
+    const at = answered.get(call.etag);
+    return at !== undefined && at < seq;
+  });
+}
+
 function lastRefusal(run) {
   const refusals = (run?.trace ?? []).filter((event) => event.kind === "transition-refused");
   return refusals.length ? refusals[refusals.length - 1].detail : null;
 }
 
 // The value each target was left holding: a later edit to the same field is the value
-// that has to survive, and the text it replaced is not owed to anyone.
-function standingAdmissions(run) {
+// that has to survive, and the text it replaced is not owed to anyone. A `before` moment
+// asks the same question as of that point in the trace, so an edit made afterwards is not
+// yet standing there.
+function standingAdmissions(run, before = null) {
   const standing = new Map();
-  const events = (run?.trace ?? []).filter((event) => event.kind === "input-admitted");
+  const events = (run?.trace ?? []).filter(
+    (event) => event.kind === "input-admitted" && (before === null || event.seq < before),
+  );
   for (const event of events) standing.set(`${event.detail.via ?? "input"}:${event.detail.target}`, { ...event.detail, seq: event.seq });
   return [...standing.values()];
 }
@@ -195,21 +215,23 @@ function conservation(run, fail) {
 // already in that save and the refusal names no pending source, the exit is refused for
 // work that does not exist.
 function liveness(run, fail) {
-  const refusals = (run.trace ?? []).filter(
-    (event) => event.kind === "transition-refused" && event.detail.op === "leave" && event.detail.code === "save-failed",
-  );
-  if (!refusals.length) return;
-  const refusal = refusals[refusals.length - 1].detail;
-  const pending = Array.isArray(refusal.pending) ? refusal.pending : [];
-  if (pending.length) return;
-  const admitted = standingAdmissions(run).filter((entry) => !discarded(run, entry));
-  const last = accepted(run).at(-1) ?? null;
-  const owed = admitted.filter((entry) => !last || !carries(last.body, entry.value)).filter((entry) => !committed(run, entry));
-  if (owed.length) return;
-  fail(
-    "liveness",
-    `the exit was refused "${refusal.code}" with no pending source and nothing owed: the host's last accepted save carries every value the person left, and the page says unsaved=${run.result?.unsaved === true}`,
-  );
+  // Each refusal is judged as of its own moment: the saves the host had accepted by then
+  // and the values standing at then. A save or an admission that arrives afterwards cannot
+  // make a refusal that was wrong when it was made look owed.
+  for (const event of run.trace ?? []) {
+    if (event.kind !== "transition-refused" || event.detail.op !== "leave" || event.detail.code !== "save-failed") continue;
+    const refusal = event.detail;
+    const pending = Array.isArray(refusal.pending) ? refusal.pending : [];
+    if (pending.length) continue;
+    const admitted = standingAdmissions(run, event.seq).filter((entry) => !discarded(run, entry));
+    const last = acceptedBefore(run, event.seq).at(-1) ?? null;
+    const owed = admitted.filter((entry) => !last || !carries(last.body, entry.value)).filter((entry) => !committed(run, entry));
+    if (owed.length) continue;
+    fail(
+      "liveness",
+      `the exit was refused "${refusal.code}" with no pending source and nothing owed: the host's last accepted save carries every value the person left, and the page says unsaved=${run.result?.unsaved === true}`,
+    );
+  }
 }
 
 // O8, an entry the switch refuses. An entry is the person asking to edit, and a refused

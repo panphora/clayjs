@@ -1,0 +1,56 @@
+{
+  "schema": 1,
+  "id": "sweep-s20261105-0008-generation-change",
+  "fixture": "unsent-host",
+  "boot": {
+    "mode": "view",
+    "live": true,
+    "destination": "host"
+  },
+  "steps": [
+    {
+      "op": "enter"
+    },
+    {
+      "op": "input",
+      "target": "title",
+      "value": "Late edit"
+    },
+    {
+      "op": "hold",
+      "boundary": "save.request"
+    },
+    {
+      "op": "leave",
+      "await": false
+    },
+    {
+      "op": "input",
+      "target": "title",
+      "value": "Fresh words"
+    },
+    {
+      "op": "release",
+      "boundary": "save.request",
+      "result": "rejected"
+    },
+    {
+      "op": "settle"
+    },
+    {
+      "op": "enter"
+    },
+    {
+      "op": "input",
+      "target": "title",
+      "value": "Fresh words"
+    },
+    {
+      "op": "leave"
+    }
+  ],
+  "requires": [
+    "input-admitted",
+    "save-request-sent"
+  ]
+}
