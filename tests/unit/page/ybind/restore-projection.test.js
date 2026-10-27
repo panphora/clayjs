@@ -211,7 +211,7 @@ test("raw marks and baseline type and attrs survive strict encoded reload", () =
   const w = walk(pd);
   const root = w.visible.find((s) => s.id === `recovered:${q}`);
   expect(root.t).toBe("heading");
-  expect(root.fields).toEqual({ parent: "p", level: 3 });
+  expect(root.fields).toEqual({ parent: "p", level: 3, pageIcon: null });
   expect(root.runs[0].marks.map((m) => m.type.name)).toEqual(["strong"]);
 
   const reloaded = clone(pd, 77);
@@ -272,7 +272,7 @@ test("the baseline supplies a field and the flat override changes type", () => {
 
   const root = walk(pd).visible.find((s) => s.id === `recovered:${q}`);
   expect(root.t).toBe("heading");
-  expect(root.fields).toEqual({ parent: "p", level: 3 });
+  expect(root.fields).toEqual({ parent: "p", level: 3, pageIcon: null });
   const record = reduceRecovery(pd).sources.get(q);
   expect(record.overrides).toEqual({ level: 3, parent: "p", src: "x.png", t: "heading" });
   expect(record.type).toBe("heading");
@@ -455,7 +455,7 @@ test("a moved recovered copy carries the recovered block while the retired Resto
     expect(physicalKeyOf(roots[0].brk)).toBe(M);
     expect(segText(roots[0])).toBe("bravo");
     expect(roots[0].t).toBe("heading");
-    expect(roots[0].fields).toEqual({ parent: null, level: 2 });
+    expect(roots[0].fields).toEqual({ parent: null, level: 2, pageIcon: null });
     expect(visible(w)).toEqual([["p", "ALPHA"], ["r", "OMEGA"], [blockId, "bravo"]]);
     expect(w.visible.some((s) => segText(s).includes("Y"))).toBe(false);
     physical(reloaded, w);
@@ -472,7 +472,7 @@ test("a moved recovered copy carries the recovered block while the retired Resto
     expect(record.source).toBe(R);
     expect(record.blockId).toBe(blockId);
     expect(record.type).toBe("heading");
-    expect(record.attrs).toEqual({ parent: null, level: 2 });
+    expect(record.attrs).toEqual({ parent: null, level: 2, pageIcon: null });
     expect(record.recoverable).toBe(true);
     expect(record.removals.map((removal) => [removal.operationId, removal.end ?? null])).toEqual([["move-2", rr]]);
     expect(record.blocks.flatMap((block) => block.runs).filter((run) => run.displaced).map((run) => [run.text, run.author])).toEqual([["Y", "token-200"]]);

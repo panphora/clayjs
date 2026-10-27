@@ -41,7 +41,7 @@ const knownType = (t) => Object.hasOwn(DEFAULTS, t);
 // Mirrors schema.js attrs minus id and pos (a test pins the two together).
 export const DEFAULTS = {
   paragraph: { parent: null },
-  heading: { parent: null, level: 2 },
+  heading: { parent: null, level: 2, pageIcon: null },
   list_item: { parent: null, kind: "bullet", indent: 0, checked: false, owner: null, due: null },
   callout: { parent: null },
   quote: { parent: null },
@@ -524,6 +524,7 @@ export function renderInline(c, m, marksEnvelopes = true) {
 }
 
 const inlineOf = (item) => renderInline(item.c ?? "", item.m);
+const iconHtml = (item) => `<header${attr("data-id", item.id)} data-page-heading="1"${extrasOfItem(item)}><span data-page-icon aria-hidden="true">${escText(item.pageIcon)}</span><h1>${inlineOf(item)}</h1></header>`;
 const toolData = (item) => item.artifact || item.rev || (item.state && Object.keys(item.state).length)
   ? `<script type="application/json" data-tool>${canon({ artifact: item.artifact ?? null, rev: item.rev ?? null, state: item.state ?? {} }).replace(/</g, "\\u003c")}</script>`
   : "";
@@ -602,6 +603,7 @@ export function fragmentCleaner(doc) {
 export function renderModel(model, { fallbackOf = () => "", clean = RAW } = {}) {
   const lines = [];
   const tables = new Map(model.filter((item) => item.t === "table").map((item) => [item.id, item]));
+  const title = model.find(tocTitle) ?? null;
   const stack = [null];
   const lists = [];
   const add = (s) => { if (lists.length) lines[lines.length - 1] += s; else lines.push(s); };
@@ -631,6 +633,7 @@ export function renderModel(model, { fallbackOf = () => "", clean = RAW } = {}) 
     }
     if (item.t === "tool") { add(`<section${attr("data-id", item.id)} data-type="tool">${toolData(item)}${clean.fallback(fallbackOf(item.id))}</section>`); continue; }
     if (item.t === "toc") { add(tocHtml(item, model)); continue; }
+    if (item === title && item.pageIcon) { add(iconHtml(item)); continue; }
     add(renderLeaf(item, clean, tables));
   }
   closeLists();
@@ -774,6 +777,10 @@ export function parseArticle(article) {
     const onlyImage = tag === "P" && el.children.length === 1 && el.children[0].tagName === "IMG" && !el.textContent.trim();
     if (tag === "P" && !onlyImage) return push(el, "paragraph", parent, { ...omitDefaults("paragraph", P), ...tf(el) });
     if (/^H[1-6]$/.test(tag)) return push(el, "heading", parent, { ...omitDefaults("heading", { ...P, level: +tag[1] }), ...tf(el) });
+    if (tag === "HEADER" && el.getAttribute("data-page-heading") === ENVELOPE) {
+      const icon = el.querySelector(":scope > [data-page-icon]");
+      return push(el, "heading", parent, { ...omitDefaults("heading", { ...P, level: 1, pageIcon: icon ? icon.textContent : null }), ...tf(el.querySelector(":scope > h1")) });
+    }
     if (tag === "ASIDE") return push(el, "callout", parent, { ...omitDefaults("callout", P), ...tf(el) });
     if (tag === "BLOCKQUOTE") return push(el, "quote", parent, { ...omitDefaults("quote", P), ...tf(el) });
     if (tag === "PRE") {

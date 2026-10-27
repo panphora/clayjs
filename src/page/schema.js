@@ -29,7 +29,7 @@ export const schema = new model.Schema({
       group: "block",
       content: "inline*",
       defining: true,
-      attrs: { ...block, level: { default: 2 } },
+      attrs: { ...block, level: { default: 2 }, pageIcon: { default: null } },
       toDOM: (n) => [`h${n.attrs.level}`, ref(n), 0],
     },
     list_item: {

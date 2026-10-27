@@ -26,7 +26,7 @@ test("layout", () => {
   const a = mintId(pd), b = mintId(pd);
   expect(a).not.toBe(b);
   expect(a.startsWith("b")).toBe(true);
-  expect(attrKeys(schema.nodes.heading)).toEqual(["parent", "level"]);
+  expect(attrKeys(schema.nodes.heading)).toEqual(["parent", "level", "pageIcon"]);
 });
 
 test("two blocks", () => {
