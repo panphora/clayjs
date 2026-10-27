@@ -136,11 +136,28 @@
 
 ## [Unreleased]
 
+## [1.17.0] - 2026-10-27
+
 ### Added
-- `clay.assets.load(name)` loads OverType 2.6.1, marked 18.0.14 and highlight.js 11.9.0 (its core plus one file per language) from the document's own ClayJS release, so a document asks for a library by name and the host that serves ClayJS serves it too, offline included; none of them is in a page's boot graph
+- `clay.assets.load(name)` loads OverType 2.6.1, marked 18.0.14 and highlight.js 11.9.0 (its core plus one file per language) from the document's own ClayJS release, so a document asks for a library by name and the host that serves ClayJS serves it too, offline included; none of them is in a page's boot graph.
+- Typing `@` opens a picker of people from `clay.people`, and the person you choose is written into the text as a person mention.
+- Date mentions write the date as ISO text with a date mark, read back as a `<time>` element, and a Today entry fills in today's date.
+- An emoji picker offers 140 curated emoji, loads the first time you open it, and writes plain Unicode characters.
+- The reader draws the shared presence roster, loading it with the first presence frame and clearing it when its stream closes.
 
 ### Changed
-- `clay.morph(oldEl, newEl, options)` returns a Promise in every mode, and the merge engine downloads on the first merge instead of at boot
+- `clay.morph(oldEl, newEl, options)` returns a Promise in every mode, and the merge engine downloads on the first merge instead of at boot.
+- Underline, text color, highlight, quote, person mentions and date mentions go through the format gate before they are written, which raises the document's format first and refuses with the gate's code when the format does not allow it.
+- Autosave spacing now adapts to how long a save takes, up to 30 seconds between saves.
+- The editor loads chart and board code only for documents that have one, about 1.4 KB less at editor ready.
+- The Underline, Text color, Highlight and Quote commands and their palette menu load on first use, about 771 bytes less at editor ready.
+- The editor no longer loads its conflict copy builders at boot, about 3.9 KB less when a document opens for editing.
+- In the light-1 theme, quotes are drawn without a left border.
+
+### Fixed
+- A page whose author wrote a title but no heading keeps that title when the editor opens it and on the server checkpoint, while an Untitled page still takes its title from the first heading.
+- Typing done after a recovery capture is kept until a save covers it.
+- The visitor intro now stands aside only for a hash the page was served with, not one the page writes when it boots.
 
 ## [1.15.2] - 2026-10-24
 
