@@ -14,6 +14,10 @@
 
 import { defaultYieldTask, runSliced } from "../lib/slice.js";
 
+// The job itself is in the same lazily loaded graph: a save that prepares across tasks
+// takes its capture here, so the generator it resumes is never on the ready path.
+export { beginSaveCapture } from "./save-job.js";
+
 const monotonic = () => (globalThis.performance ? globalThis.performance.now() : Date.now());
 
 /**

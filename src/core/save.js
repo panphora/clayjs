@@ -27,7 +27,7 @@ import {
   knownPageFormatFloor,
   PAGE_FORMAT_META
 } from "./save-core.js";
-import { beginSaveCapture, captureForComparisonAndDirty, captureForSaveAndComparison, captureForDirtyCheck, captureSaveClone, releaseCaptureArtifact } from "./snapshot.js";
+import { captureForComparisonAndDirty, captureForSaveAndComparison, captureForDirtyCheck, captureSaveClone, releaseCaptureArtifact } from "./snapshot.js";
 import { saveLimit, saveLimits, inspectSaveSize } from "./save-size.js";
 import { paintSignature } from "../lib/derived.js";
 import { NO_TRIGGER_AUTOSAVE_SELECTOR } from "../lib/region-policy.js";
@@ -1075,7 +1075,7 @@ async function runSlicedSave(ctx, lane) {
         repair: sourceRepairGeneration(),
         floor: Math.max(knownPageFormatFloor(), ctx.pageFormatFloor),
       };
-      const job = beginSaveCapture({
+      const job = prepDriver.beginSaveCapture({
         requestRefresh: true,
         forRequest: true,
         pageFormatMarker: epoch.floor ? { name: PAGE_FORMAT_META, content: String(epoch.floor) } : null,

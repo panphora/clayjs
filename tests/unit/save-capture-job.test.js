@@ -19,7 +19,6 @@ import { jest } from "@jest/globals";
 import {
   addDocumentTransform,
   attachCaptureArtifact,
-  beginSaveCapture,
   captureArtifact,
   captureForSaveAndComparison,
   capturePageState,
@@ -27,6 +26,7 @@ import {
   setCapturePageState,
   setSaveRenderer,
 } from "../../src/core/snapshot.js";
+import { beginSaveCapture } from "../../src/core/save-job.js";
 import { drain, runSliced } from "../../src/lib/slice.js";
 
 jest.setTimeout(180000);

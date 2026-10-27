@@ -262,7 +262,7 @@ const XHTML_NS = 'http://www.w3.org/1999/xhtml';
  * reads as literal text, and every later save escaped it again. The text is swapped for
  * a marker only while serializing, so the clone holds the same nodes when this returns.
  */
-function serializeClone(clone) {
+export function serializeClone(clone) {
   const blocks = [];
   const collect = (node) => {
     for (const child of node.childNodes) {
@@ -294,6 +294,23 @@ function serializeClone(clone) {
 }
 
 /**
+ * Run one resume of a save renderer with `context` as the capture being serialized.
+ *
+ * The capture is never the active one while the task that is not running it looks: a
+ * renderer that verifies across tasks is resumed once per task, and each resume is its
+ * own call in here.
+ */
+export function runSaveRenderer(context, resume) {
+  const previous = activeCapture;
+  activeCapture = context;
+  try {
+    return resume();
+  } finally {
+    activeCapture = previous;
+  }
+}
+
+/**
  * The bytes a save sends: the prepared clone, through the save renderer if one is
  * installed.
  *
@@ -303,40 +320,18 @@ function serializeClone(clone) {
  * cost somebody a save.
  */
 function serializeSaveClone(clone, context = null) {
-  const pin = { clone, context, renderer: saveRenderer, rendererSteps: saveRendererSteps, pageStateReader: capturePageStateReader };
-  return drainSteps(saveSteps(pin)).forSave;
-}
-
-/** Run a generator to completion in this task and return its value. */
-function drainSteps(gen) {
-  let step = gen.next();
-  while (!step.done) step = gen.next();
-  return step.value;
-}
-
-/**
- * The renderer as a generator, with `activeCapture` set around each resume and restored
- * before every yield: this capture is never the active one while this task is not
- * running it.
- */
-function* rendererSteps(clone, today, pin) {
-  if (!pin.renderer) return today;
-  const previous = activeCapture;
-  let gen = null;
-  for (;;) {
-    let step;
-    activeCapture = pin.context;
-    try {
-      gen ||= pin.rendererSteps ? pin.rendererSteps(clone, today) : false;
-      step = gen ? gen.next() : { done: true, value: pin.renderer(clone, today) };
-    } catch (err) {
-      console.error('clayjs: save renderer failed, sending the full serialization', err);
-      return today;
-    } finally {
-      activeCapture = previous;
-    }
-    if (step.done) return step.value;
-    yield;
+  if (context && capturePageStateReader) {
+    let state = null;
+    try { state = capturePageStateReader(clone); } catch (_) {}
+    if (state) capturePageStates.set(context.captureId, state);
+  }
+  const today = serializeClone(clone);
+  if (!saveRenderer) return today;
+  try {
+    return runSaveRenderer(context, () => saveRenderer(clone, today));
+  } catch (err) {
+    console.error('clayjs: save renderer failed, sending the full serialization', err);
+    return today;
   }
 }
 
@@ -511,7 +506,7 @@ export function captureSaveClone({ flushUndo = true, authored = true } = {}) {
 // check must not read that as an edit the person would lose on close.
 const EMPTY_INERT_ATTRS = ['style', 'class'];
 
-function serializeForCompare(clone) {
+export function serializeForCompare(clone) {
   stripDerived(clone);
   for (const name of EMPTY_INERT_ATTRS) {
     if (clone.getAttribute(name) === '') clone.removeAttribute(name);
@@ -632,11 +627,14 @@ export function captureForComparisonAndDirty({ flushUndo = true } = {}) {
 }
 
 /**
- * Begin one save capture: in one synchronous call, everything that must see the live
- * page (the snapshot, its hooks, snapshot-ready, the authored handlers, the comparison
- * clones and every transform over all three), then a job whose remaining work is
- * `job.steps()`. The job holds every value that work reads, so a page edited between two
- * steps cannot change the answer; `job.drop()` releases what it captured.
+ * Take one save capture's looking at the live page: in one synchronous call, everything
+ * that must see it (the snapshot, its hooks, snapshot-ready, the authored handlers, the
+ * comparison clones and every transform over all three).
+ *
+ * What comes back is the pin the rest of the capture reads: every value that work needs,
+ * so a page edited afterwards cannot change the answer. It is the one place the strip and
+ * transform rules live, for both the one-task capture and a job that finishes across
+ * tasks — core/save-job.js, which only a save that prepares across tasks loads.
  *
  * @param {Object} options
  * @param {boolean} options.emitForSync - Whether to emit snapshot-ready event (default: true)
@@ -647,9 +645,9 @@ export function captureForComparisonAndDirty({ flushUndo = true } = {}) {
  *   save clone after the comparison domains are read and before the renderer verifies, so
  *   the bytes verified are the bytes sent; the comparison baselines stay marker-free,
  *   exactly as they do on the one-task path
- * @returns {{ captureId: number, steps: function(): Generator, drop: function(): void }}
+ * @returns {Object} the pin `job.steps()` and the one-task capture both read
  */
-export function beginSaveCapture({ emitForSync = true, flushUndo = true, requestRefresh = false, forRequest = false, pageFormatMarker = null } = {}) {
+export function prepareSaveCapture({ emitForSync = true, flushUndo = true, requestRefresh = false, forRequest = false, pageFormatMarker = null } = {}) {
   if (!Number.isSafeInteger(captureCounter + 1)) throw new Error('Save capture identity exhausted');
   const captureId = ++captureCounter;
   // The context this capture's renderer may attach a private artifact to, and the
@@ -721,7 +719,7 @@ export function beginSaveCapture({ emitForSync = true, flushUndo = true, request
     stripSnapshotRegions(dirtyClone);
   }
 
-  const pin = {
+  return {
     captureId,
     context,
     pageFormatMarker,
@@ -733,62 +731,41 @@ export function beginSaveCapture({ emitForSync = true, flushUndo = true, request
     pageStateReader: capturePageStateReader,
     result: null,
   };
-
-  return Object.freeze({
-    captureId,
-    steps: () => saveSteps(pin),
-    drop() {
-      releaseCaptureArtifact(pin.result);
-      capturePageStates.delete(captureId);
-      if (context) context.artifact = null;
-      pin.clone = pin.compareClone = pin.dirtyClone = null;
-      pin.result = null;
-    },
-  });
 }
 
 /**
- * Declare the document format these bytes carry, in the save clone only.
+ * Copy the page state this capture's bytes carry, before anything edits the clone.
  *
- * The same marker `withPageFormatFloor` puts in the final string, applied to the tree the
- * renderer verifies so a prepared save cannot verify one document and send another. A
- * clone already at that floor is left exactly as it is, because the string transform
- * leaves such a document unchanged too.
+ * A capture taken for a request records the exact value its page tag carried, so the save
+ * the host accepts reads the state these bytes describe rather than the store's value at
+ * the moment the host answered.
  */
-function setFormatMarker(clone, marker) {
-  const head = clone.querySelector('head');
-  if (!head) return;
-  const existing = clone.querySelector(`meta[name="${marker.name}"]`);
-  if (existing) {
-    if (existing.getAttribute('content') !== marker.content) existing.setAttribute('content', marker.content);
-    return;
-  }
-  const meta = clone.ownerDocument.createElement('meta');
-  meta.setAttribute('name', marker.name);
-  meta.setAttribute('content', marker.content);
-  head.appendChild(meta);
+export function readCapturePageState(pin) {
+  if (!pin.context || !pin.pageStateReader) return;
+  let state = null;
+  try { state = pin.pageStateReader(pin.clone); } catch (_) {}
+  if (state) capturePageStates.set(pin.captureId, state);
 }
 
-/** The resumable half of a save capture: three serializations, then the renderer. */
-function* saveSteps(pin) {
-  const { captureId } = pin;
-  if (pin.context && pin.pageStateReader) {
-    let state = null;
-    try { state = pin.pageStateReader(pin.clone); } catch (_) {}
-    if (state) capturePageStates.set(captureId, state);
-  }
-  const today = serializeClone(pin.clone);
-  yield;
-  const forComparison = pin.compareClone ? serializeForCompare(pin.compareClone) : null;
-  yield;
-  const forDirty = pin.dirtyClone ? serializeForCompare(pin.dirtyClone) : forComparison;
-  yield;
-  if (pin.pageFormatMarker) setFormatMarker(pin.clone, pin.pageFormatMarker);
-  const forSave = yield* rendererSteps(pin.clone, today, pin);
-  const result = { forSave, forComparison, forDirty, captureId };
+/**
+ * Finish a save capture: the result object, and the artifact its renderer attached.
+ *
+ * @returns {{ forSave: string, forComparison: string, forDirty: string, captureId: number }}
+ */
+export function completeSaveCapture(pin, { forSave, forComparison, forDirty }) {
+  const result = { forSave, forComparison, forDirty, captureId: pin.captureId };
   if (pin.context && pin.context.artifact) captureArtifacts.set(result, pin.context.artifact);
   pin.result = result;
   return result;
+}
+
+/** Give back everything a capture holds. Idempotent. */
+export function releaseSaveCapture(pin) {
+  releaseCaptureArtifact(pin.result);
+  capturePageStates.delete(pin.captureId);
+  if (pin.context) pin.context.artifact = null;
+  pin.clone = pin.compareClone = pin.dirtyClone = null;
+  pin.result = null;
 }
 
 /**
@@ -797,8 +774,9 @@ function* saveSteps(pin) {
  * Clones the DOM once, then clones that clone for comparison.
  * More efficient than calling captureForSave() and captureForComparison() separately.
  *
- * The drained form of beginSaveCapture: one task, the same bytes, and the same release
- * on the way out.
+ * The one-task form of a save capture: the same preparation, the same bytes and the same
+ * release as a job drained in the caller's own task, written out rather than resumed so
+ * nothing a page with small documents never uses has to be loaded to save it.
  *
  * @param {Object} options
  * @param {boolean} options.emitForSync - Whether to emit snapshot-ready event (default: true)
@@ -807,11 +785,16 @@ function* saveSteps(pin) {
  * @returns {{ forSave: string, forComparison: string, forDirty: string, captureId: number }}
  */
 export function captureForSaveAndComparison(opts = {}) {
-  const job = beginSaveCapture(opts);
+  const pin = prepareSaveCapture(opts);
   try {
-    return drainSteps(job.steps());
+    readCapturePageState(pin);
+    const today = serializeClone(pin.clone);
+    const forComparison = pin.compareClone ? serializeForCompare(pin.compareClone) : null;
+    const forDirty = pin.dirtyClone ? serializeForCompare(pin.dirtyClone) : forComparison;
+    const forSave = pin.renderer ? runSaveRenderer(pin.context, () => pin.renderer(pin.clone, today)) : today;
+    return completeSaveCapture(pin, { forSave, forComparison, forDirty });
   } catch (err) {
-    job.drop();
+    releaseSaveCapture(pin);
     throw err;
   }
 }
