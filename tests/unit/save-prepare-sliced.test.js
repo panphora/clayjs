@@ -52,6 +52,14 @@ const drainMicrotasks = async (turns = 60) => { for (let i = 0; i < turns; i++) 
 const setText = (text) => { document.getElementById("c").textContent = text; };
 const lastPost = () => posts[posts.length - 1] ?? "";
 
+const waitFor = async (check, timeoutMs = 5000) => {
+  const deadline = Date.now() + timeoutMs;
+  while (!check()) {
+    if (Date.now() > deadline) throw new Error("timed out waiting for the condition");
+    await sleep(10);
+  }
+};
+
 function okJson(body) {
   return { ok: true, status: 200, statusText: "OK", headers: { get: () => null }, text: async () => JSON.stringify(body), json: async () => body };
 }
@@ -227,6 +235,101 @@ test("a morph during the preparation cancels the job", async () => {
 
   expect(result.msgType).toBe("skipped");
   expect(result.msg).toMatch(/cancelled/);
+  expect(posts.length).toBe(sentBefore);
+});
+
+function holdSlices() {
+  const previous = globalThis.scheduler;
+  const held = [];
+  const gate = {
+    held,
+    released: false,
+    release() {
+      gate.released = true;
+      held.splice(0).forEach((resolve) => resolve());
+    },
+    restore() {
+      if (previous === undefined) delete globalThis.scheduler;
+      else globalThis.scheduler = previous;
+    },
+  };
+  globalThis.scheduler = {
+    yield: () => (gate.released ? Promise.resolve() : new Promise((resolve) => { held.push(resolve); })),
+  };
+  return gate;
+}
+
+test("a cancelled sliced save sends the save queued behind it", async () => {
+  const gate = holdSlices();
+  try {
+    setText("cancelled-A");
+    const sentBefore = posts.length;
+
+    const saving = save.savePage();
+    expect(gate.held.length).toBeGreaterThan(0);
+
+    setText("queued-B");
+    const second = save.savePage();
+    expect(await second).toMatchObject({ msgType: "skipped", msg: "Save already in progress" });
+
+    document.dispatchEvent(new CustomEvent("clay:sync-applied", { detail: { source: "disk", seq: 2 } }));
+    gate.release();
+
+    const result = await saving;
+    expect(result.msgType).toBe("skipped");
+    expect(result.msg).toMatch(/cancelled/);
+
+    await waitFor(() => posts.length > sentBefore);
+    expect(posts.length).toBe(sentBefore + 1);
+    expect(lastPost()).toContain("queued-B");
+  } finally {
+    gate.restore();
+  }
+});
+
+test("a cancelled sliced save settles the save.soon() waiter queued behind it", async () => {
+  const gate = holdSlices();
+  try {
+    setText("soon-A");
+    const sentBefore = posts.length;
+
+    const saving = save.savePage();
+    expect(gate.held.length).toBeGreaterThan(0);
+
+    let answered = false;
+    const soon = save.savePageSoon().then((value) => { answered = true; return value; });
+    await sleep(300);
+    expect(answered).toBe(false);
+
+    setText("soon-B");
+    document.dispatchEvent(new CustomEvent("clay:sync-applied", { detail: { source: "disk", seq: 3 } }));
+    gate.release();
+
+    const result = await saving;
+    expect(result.msgType).toBe("skipped");
+    expect(result.msg).toMatch(/cancelled/);
+
+    const answer = await soon;
+    expect(answer.ok).toBe(true);
+    await waitFor(() => posts.length > sentBefore);
+    expect(posts.length).toBe(sentBefore + 1);
+    expect(lastPost()).toContain("soon-B");
+  } finally {
+    gate.restore();
+  }
+});
+
+test("a cancellation with nothing queued sends nothing", async () => {
+  setText("nothing-queued");
+  const sentBefore = posts.length;
+
+  const saving = save.savePage();
+  document.dispatchEvent(new CustomEvent("clay:sync-applied", { detail: { source: "disk", seq: 4 } }));
+  const result = await saving;
+
+  expect(result.msgType).toBe("skipped");
+  expect(result.msg).toMatch(/cancelled/);
+  await sleep(50);
   expect(posts.length).toBe(sentBefore);
 });
 

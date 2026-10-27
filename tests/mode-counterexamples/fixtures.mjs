@@ -183,6 +183,19 @@ const LANE_BLOCKS = [
   { id: "q", text: "world" },
 ];
 
+async function bodyText(value) {
+  if (typeof Blob !== "undefined" && value instanceof Blob) {
+    if (typeof value.arrayBuffer === "function") return new TextDecoder().decode(await value.arrayBuffer());
+    return await new Promise((resolve, reject) => {
+      const reader = new (globalThis.FileReader ?? window.FileReader)();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsText(value);
+    });
+  }
+  return String(value ?? "");
+}
+
 function jsonResponse(status, body, headers = {}) {
   return {
     ok: status < 400,
@@ -330,7 +343,7 @@ export function createHost(record, { extensions = ["conditional"], answerMeta = 
     const url = new URL(String(input), window.location.href);
     const headers = options.headers ?? {};
     if (method === "POST") {
-      const body = String(options.body ?? "");
+      const body = await bodyText(options.body);
       posts.push(body);
       const call = send({
         kind: "save",

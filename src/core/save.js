@@ -1172,7 +1172,7 @@ function startSlicedSave(ctx) {
     if (preparing === task) preparing = null;
     ctx.resolve(outcome.result);
     ctx.settleSoonQueued(outcome.result);
-    if (outcome.dispatched) drainPendingSave();
+    if (outcome.dispatched || pendingSave || soonQueuedWaiters.length) drainPendingSave();
   });
   return true;
 }
