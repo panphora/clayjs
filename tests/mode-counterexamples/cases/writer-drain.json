@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "id": "writer-drain",
+  "fixture": "page-host",
+  "boot": { "mode": "edit", "live": true, "destination": "host" },
+  "steps": [
+    { "op": "settle", "ms": 200 },
+    { "op": "peer", "tab": "B", "action": { "value": "PEER" } },
+    { "op": "leave", "await": false },
+    { "op": "settle", "ms": 200 }
+  ],
+  "requires": ["peer-edit", "transition"],
+  "expect": { "mode": "view", "writes": 0 },
+  "knownFailing": "invalid: this fixture has no peer tab, and a page edit boot's exit never completes in this harness, so a peer write mid-flight at a leave is never reached"
+}

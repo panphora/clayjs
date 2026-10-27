@@ -23,6 +23,7 @@ const PROPERTIES = [
   "bytes-etag-pairing",
   "no-writer-after-view",
   "no-growth",
+  "canonical-attributes",
 ];
 
 // A refusal that names no source is one whose work has no registry: a save whose fate is
@@ -158,6 +159,26 @@ function etagPairing(run, fail) {
   }
 }
 
+// A cycle that touched nothing must hand back the page it was given: the authored
+// attributes and the frozen regions are the document's own bytes, and the oracle compares
+// the article the run ended on with the one the fixture served, not a projection of it.
+function canonicalAttributes(json, run, fail) {
+  if (json.expect?.canonical !== true) return;
+  const before = run?.result?.inputHtml;
+  const after = run?.result?.pageHtml;
+  if (typeof before !== "string" || typeof after !== "string") {
+    fail("canonical-attributes", "the run left no page to compare with the one the fixture served");
+    return;
+  }
+  if (before === after) return;
+  let at = 0;
+  while (at < before.length && at < after.length && before[at] === after[at]) at++;
+  fail(
+    "canonical-attributes",
+    `the page the run ended on differs from the served article at byte ${at}: served ${JSON.stringify(before.slice(at, at + 40))}, left ${JSON.stringify(after.slice(at, at + 40))}`,
+  );
+}
+
 function noWriterAfterView(run, fail) {
   const committed = (run.trace ?? []).filter(
     (event) => event.kind === "transition" && event.detail.op === "leave" && event.detail.ok === true,
@@ -209,6 +230,7 @@ export function judge({ case: json, run, control = null } = {}) {
   etagPairing(run, fail);
   noWriterAfterView(run, fail);
   noGrowth(run, fail);
+  canonicalAttributes(json, run, fail);
 
   return { status: failures.length ? "failed" : "passed", failures };
 }

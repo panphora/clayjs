@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "id": "tagless-first-write",
+  "fixture": "page-host",
+  "boot": { "mode": "edit", "live": true, "destination": "host" },
+  "steps": [
+    { "op": "settle", "ms": 200 },
+    { "op": "input", "target": ".ProseMirror", "value": "First edit" },
+    { "op": "leave", "await": false },
+    { "op": "settle", "ms": 200 }
+  ],
+  "requires": ["input-admitted", "save-request-sent"],
+  "expect": { "mode": "view", "writes": 1 },
+  "knownFailing": "invalid: a tagless page's first write follows typing in the page editor, and the driver has no op that types into a ProseMirror document"
+}

@@ -20,6 +20,10 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 const SELF = fileURLToPath(import.meta.url);
+// The platform's own timer, taken before a page's clock replaces the global: a drain
+// that only turned microtasks would starve whatever the page scheduled outside the
+// case's clock, and an import that needs a real turn would look like a hang.
+const realTimeout = setTimeout;
 const COMMANDS = new Set(["check", "shrink", "prove", "selftest", "sweep", "fence"]);
 const NOT_YET = new Set(["shrink", "prove", "selftest", "sweep", "fence"]);
 
@@ -84,8 +88,14 @@ function installClock(window) {
   let sequence = 0;
   let now = 0;
   const timers = new Map();
+  // A page that builds its editor imports modules while the case is running, and an
+  // import only lands on a real turn of the event loop: the drain takes both, so a boot
+  // that downloads is not mistaken for one that hung.
   const drain = async (turns = 12) => {
-    for (let index = 0; index < turns; index++) await new Promise((resolve) => process.nextTick(resolve));
+    for (let index = 0; index < turns; index++) {
+      await new Promise((resolve) => process.nextTick(resolve));
+      if (index % 2 === 1) await new Promise((resolve) => realTimeout(resolve, 0));
+    }
   };
   const schedule = (callback, delay, args, every) => {
     const id = ++sequence;

@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "id": "late-source",
+  "fixture": "source-host",
+  "boot": { "mode": "view", "live": true, "destination": "host" },
+  "steps": [
+    { "op": "hold", "boundary": "chunk.import:plugins/source.js" },
+    { "op": "enter" },
+    { "op": "settle" },
+    { "op": "release", "boundary": "chunk.import:plugins/source.js", "result": "loaded" },
+    { "op": "settle" },
+    { "op": "input", "target": "title", "value": "Kept text" },
+    { "op": "leave" }
+  ],
+  "requires": ["chunk-import-done:plugins/source.js", "input-admitted", "save-request-sent"],
+  "expect": { "mode": "view", "writes": 1 }
+}

@@ -29,11 +29,38 @@ const PAGE = {
   path: "/notes.html",
 };
 
+// A document whose authored attributes and `clay="freeze"` region are its own: entering
+// and leaving edit must hand back these exact bytes.
+const FREEZE_PAGE = {
+  params: "exclude=richclay,source",
+  body:
+    '<article data-kind="note" data-authored="kept" class="note">' +
+    '<h1 id="title">Untitled</h1>' +
+    '<div id="content">start</div>' +
+    '<section clay="freeze" data-locked="yes"><p>Authored &amp; frozen</p><figure data-attr="1">' +
+    '<img src="/a.png" alt="a"><figcaption>Caption</figcaption></figure></section>' +
+    "</article>",
+  path: "/notes.html",
+};
+
 const UNSENT_PAGE = {
   params: "exclude=richclay,source&plugins=unsent",
   body:
     '<article data-id="note"><h1 id="title">Untitled</h1><div id="content">start</div>' +
     '<input id="draft" unsent="description" value=""></article>',
+  path: "/notes.html",
+};
+
+const PAGE_HOST_HEAD =
+  '<script type="application/json" merge="page" clay="live">{"v":1,"g":0,"y":{"seed":"AAACQQMEAQAIQgALJwAoAQUAJwAoAIUkHGF0dHJzdGl0bGVsZXZlbHRmbG93YXR0cnNwMXRFAQEEBQIBBwEAAAEBAQACQQACQQEBBwB9AXcHaGVhZGluZ3YBAWJ3BXRpdGxldwlwYXJhZ3JhcGh2AQFidwJwMQA="}}</script>' +
+  '<script type="application/json" merge="page.tools" clay="live">{}</script>';
+
+const PAGE_HOST = {
+  params: "plugins=page",
+  head: PAGE_HOST_HEAD,
+  body:
+    '<article class="page" clay="freeze" data-page="1" data-rev="093360993130d818">' +
+    '<h1 data-id="title"></h1>\n<p data-id="p1"></p></article>',
   path: "/notes.html",
 };
 
@@ -44,6 +71,13 @@ export const FIXTURES = {
   "lane-peer": { page: PAGE, lanes: true },
   // The same page with the unsent-draft plugin and a field outside the save domain.
   "unsent-host": { page: UNSENT_PAGE, lanes: false },
+  // A page whose entry loads the source plugin, so a case can hold that chunk.
+  "source-host": { page: { ...PAGE, params: "exclude=richclay" }, lanes: false },
+  // The same page, with authored attributes and a frozen region of its own.
+  "freeze-host": { page: FREEZE_PAGE, lanes: false },
+  // The page editor: plugins=page over a tag and an article, on a host that advertises
+  // the `page` extension.
+  "page-host": { page: PAGE_HOST, lanes: false, pageHost: true, host: { extensions: ["page"], answerMeta: true } },
 };
 
 export const META_PATH = "/_/meta";
@@ -66,6 +100,29 @@ function jsonResponse(status, body, headers = {}) {
 
 const notFound = () => jsonResponse(404, "");
 
+// A host's own stream: the page sync opens one and this one never leaves the process,
+// so the article is the file the host served and no frame arrives unasked.
+class StubEventSource {
+  static CONNECTING = 0;
+  static OPEN = 1;
+  static CLOSED = 2;
+  constructor(url) {
+    this.url = url;
+    this.readyState = 0;
+    this.onopen = null;
+    this.onerror = null;
+    this.onmessage = null;
+  }
+  addEventListener() {}
+  removeEventListener() {}
+  dispatchEvent() {
+    return true;
+  }
+  close() {
+    this.readyState = 2;
+  }
+}
+
 function abortError(message) {
   const error = new Error(message);
   error.name = "AbortError";
@@ -78,7 +135,7 @@ function abortError(message) {
  *
  * @param {(kind: string, detail: object) => void} record
  */
-export function createHost(record) {
+export function createHost(record, { extensions = ["conditional"], answerMeta = false } = {}) {
   const posts = [];
   const holds = new Map();
 
@@ -127,7 +184,7 @@ export function createHost(record) {
     if (result === "rejected") return jsonResponse(500, { msg: "no discovery" });
     return jsonResponse(200, {
       spec: 1,
-      extensions: ["conditional"],
+      extensions,
       document: { writable: true, path: window.location.pathname, etag: "etag-1" },
     });
   };
@@ -175,7 +232,12 @@ export function createHost(record) {
     }
     if (url.pathname === META_PATH) {
       record("metadata-request", { path: url.pathname });
-      if (!held("metadata")) return notFound();
+      if (!held("metadata")) {
+        if (!answerMeta) return notFound();
+        const answer = metaAnswer("accepted");
+        send({ kind: "metadata", method, path: url.pathname, body: null, ifMatch: null, status: answer.status, etag: null });
+        return answer;
+      }
       const answer = metaAnswer((await wait("metadata")) ?? "accepted");
       send({ kind: "metadata", method, path: url.pathname, body: null, ifMatch: null, status: answer.status, etag: null });
       return answer;
@@ -202,7 +264,7 @@ export function createResourceCounter() {
     const add = owner.addEventListener;
     const remove = owner.removeEventListener;
     owner.addEventListener = function (type, handler, options) {
-      const registration = { where, type, handler, ended: false };
+      const registration = { where, type, handler, options, owner, remove, ended: false };
       registrations.push(registration);
       options?.signal?.addEventListener?.("abort", () => {
         registration.ended = true;
@@ -238,7 +300,16 @@ export function createResourceCounter() {
 
   return {
     snapshot,
+    // The boot this counter watched is over: what it registered on the document and the
+    // window goes with it, so the next case's page is not answered by the last one's code.
     stop() {
+      for (const registration of registrations.reverse()) {
+        if (registration.ended) continue;
+        registration.ended = true;
+        try {
+          registration.remove.call(registration.owner, registration.type, registration.handler, registration.options);
+        } catch {}
+      }
       for (const restore of restorers.reverse()) restore();
     },
   };
@@ -249,7 +320,11 @@ export function createResourceCounter() {
  * a case installs its fake clock after the page is up.
  */
 export async function bootPage(fixture, { mode, host, resetModules }) {
-  const { params, body, path } = FIXTURES[fixture].page;
+  const { params, body, path, head = "" } = FIXTURES[fixture].page;
+  const pageHost = FIXTURES[fixture].pageHost === true;
+  const realEventSource = globalThis.EventSource;
+  const channel = pageHost ? installChannelPair() : null;
+  if (pageHost) globalThis.EventSource = window.EventSource = StubEventSource;
   resetModules();
   delete window.clayEditMode;
   delete window.__hyperclayEditMode;
@@ -261,7 +336,7 @@ export async function bootPage(fixture, { mode, host, resetModules }) {
   const root = document.documentElement;
   for (const attribute of Array.from(root.attributes)) root.removeAttribute(attribute.name);
   root.setAttribute("clay-mode-switch", "live");
-  document.head.innerHTML = "";
+  document.head.innerHTML = head;
   document.body.innerHTML = body;
   window.clay = {};
   globalThis.fetch = window.fetch = host.fetch;
@@ -271,9 +346,22 @@ export async function bootPage(fixture, { mode, host, resetModules }) {
     await new Promise((resolve) => boot(null, new URLSearchParams(params), resolve));
   } catch (error) {
     resources.stop();
+    channel?.stop();
+    if (pageHost) globalThis.EventSource = window.EventSource = realEventSource;
     throw error;
   }
-  return { clay: window.clay, resources };
+  return {
+    clay: window.clay,
+    channel,
+    resources: {
+      snapshot: resources.snapshot,
+      stop() {
+        resources.stop();
+        channel?.stop();
+        if (pageHost) globalThis.EventSource = window.EventSource = realEventSource;
+      },
+    },
+  };
 }
 
 function fakeLocks() {
@@ -299,10 +387,11 @@ function fakeLocks() {
 }
 
 /**
- * Tab A and tab B: two real lane participants over one fake channel, each with its own
- * store, lane and Yjs document. Tab B's edits reach tab A the way another tab's do.
+ * One fake channel and one fake lock over the whole document: the participants a case
+ * builds meet on it, and a page that boots its own lane (the page editor does) joins the
+ * same one, so a peer's frames reach the page under test.
  */
-export async function createLanePair({ settle = async () => {} } = {}) {
+export function installChannelPair() {
   const channels = [];
   class FakeChannel {
     constructor(name) {
@@ -326,7 +415,21 @@ export async function createLanePair({ settle = async () => {} } = {}) {
   globalThis.BroadcastChannel = window.BroadcastChannel = FakeChannel;
   const realLocks = Object.getOwnPropertyDescriptor(navigator, "locks");
   Object.defineProperty(navigator, "locks", { configurable: true, value: fakeLocks() });
+  return {
+    channels,
+    stop() {
+      globalThis.BroadcastChannel = window.BroadcastChannel = realChannel;
+      if (realLocks) Object.defineProperty(navigator, "locks", realLocks);
+      else delete navigator.locks;
+    },
+  };
+}
 
+/**
+ * Tab A and tab B: two real lane participants over one fake channel, each with its own
+ * store, lane and Yjs document. Tab B's edits reach tab A the way another tab's do.
+ */
+export async function createLanePair({ settle = async () => {}, channel = installChannelPair() } = {}) {
   const initial = seedValue(LANE_BLOCKS);
 
   const tab = (client) => {

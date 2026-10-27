@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "superseded-frame",
+  "fixture": "lane-peer",
+  "boot": { "mode": "view", "live": true, "destination": "host" },
+  "steps": [
+    { "op": "peer", "tab": "B", "action": { "value": "NEWER" } },
+    { "op": "peer", "tab": "B", "action": { "value": "OLDER" } },
+    { "op": "settle" }
+  ],
+  "requires": ["peer-edit", "frame-superseded"],
+  "expect": { "mode": "view", "writes": 0 },
+  "knownFailing": "invalid: no frame reaches the booted page's own lane, so a peer frame older than an accepted one is never delivered to it"
+}

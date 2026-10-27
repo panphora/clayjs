@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "id": "canonical-freeze",
+  "fixture": "freeze-host",
+  "boot": { "mode": "view", "live": true, "destination": "host" },
+  "steps": [
+    { "op": "enter" },
+    { "op": "settle" },
+    { "op": "leave" },
+    { "op": "settle" }
+  ],
+  "requires": ["modechange", "transition"],
+  "expect": { "mode": "view", "writes": 0, "canonical": true },
+  "control": "enter-leave-one-write"
+}

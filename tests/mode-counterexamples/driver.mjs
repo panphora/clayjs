@@ -141,6 +141,9 @@ export function validateCase(json) {
       if (json.expect.writes !== undefined && !Number.isSafeInteger(json.expect.writes)) {
         fail("bad-expect", "expect.writes", "expect.writes counts save requests");
       }
+      if (json.expect.canonical !== undefined && typeof json.expect.canonical !== "boolean") {
+        fail("bad-expect", "expect.canonical", "expect.canonical asks for the served article back byte for byte");
+      }
     }
   }
 
@@ -275,6 +278,10 @@ const readValue = (element) =>
 
 const unsentField = (field) => document.querySelector(`[unsent="${field}"]`);
 
+// A target is an element id, or — where a page's own editor owns the element and it has
+// no id of its own — the selector that reaches it.
+const elementFor = (target) => document.getElementById(target) ?? document.querySelector(target);
+
 // The input op edits the page the way a person does: the value reaches the element and
 // the element says it changed. Whether it got there is read back, never assumed.
 function applyInput(element, value) {
@@ -312,8 +319,8 @@ export async function runCase(json) {
     trace.push({ seq: ++seq, tab, kind, detail });
   };
 
-  const host = createHost(record);
   const fixture = FIXTURES[json.fixture];
+  const host = createHost(record, fixture.host ?? {});
   const cleanups = [];
 
   try {
@@ -423,7 +430,7 @@ export async function runCase(json) {
           break;
         }
         case "input": {
-          const admitted = applyInput(document.getElementById(step.target), step.value);
+          const admitted = applyInput(elementFor(step.target), step.value);
           record(admitted ? "input-admitted" : "input-refused", { target: step.target, value: step.value });
           break;
         }
@@ -435,7 +442,7 @@ export async function runCase(json) {
           break;
         }
         case "compose": {
-          const target = document.getElementById(step.target);
+          const target = elementFor(step.target);
           if (!target) {
             record("input-refused", { target: step.target, value: step.value ?? null });
             break;
