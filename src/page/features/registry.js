@@ -22,4 +22,5 @@ export const featureForType = (type) => Object.keys(FEATURES).find((id) => FEATU
 // a file this tree does not have yet would stop the chunk build.
 export const COMMAND_FEATURES = {
   mentions: { module: "page/features/mentions.js", load: () => import("./mentions.js") },
+  dates: { module: "page/features/dates.js", load: () => import("./dates.js") },
 };

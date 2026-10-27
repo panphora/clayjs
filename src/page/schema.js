@@ -176,13 +176,19 @@ export const schema = new model.Schema({
     },
     // A person mention is ordinary text with this mark over it: the name is the label
     // and `id` is the people registry's reference. It links nowhere and notifies nobody.
-    // The date mark joins its excludes with the step that gives this schema one: a name
-    // no mark type answers refuses the whole schema.
     mention: {
       attrs: { id: {} },
       inclusive: false,
-      excludes: "mention link",
+      excludes: "mention date link",
       toDOM: (m) => ["span", { "data-page-mention": m.attrs.id }, 0],
+    },
+    // A date mention is the calendar date as ordinary ISO text with this mark over it:
+    // `date` is YYYY-MM-DD, and no time, zone, reminder or relative word is stored.
+    date: {
+      attrs: { date: {} },
+      inclusive: false,
+      excludes: "mention date link",
+      toDOM: (m) => ["time", { datetime: m.attrs.date, "data-page-date": "" }, 0],
     },
   },
 });

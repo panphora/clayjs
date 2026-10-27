@@ -25,13 +25,15 @@ export const filterPeople = (people, query) => {
   return people.filter((person) => String(person.name ?? "").toLowerCase().includes(q));
 };
 
-export function createMentionPicker({ document: doc = globalThis.document, onPick = () => {} } = {}) {
+// The shell takes the words a command shows, so a date command reuses the same listbox:
+// same placement, same rows, same keyboard, and its own name for what it lists.
+export function createMentionPicker({ document: doc = globalThis.document, onPick = () => {}, label = "Mention a person", empty = EMPTY } = {}) {
   const id = `page-mentions-${++count}`;
   const el = doc.createElement("div");
   el.className = `page-menu ${PICKER}`;
   el.id = id;
   el.setAttribute("role", "listbox");
-  el.setAttribute("aria-label", "Mention a person");
+  el.setAttribute("aria-label", label);
   el.hidden = true;
   let people = [];
   let active = 0;
@@ -40,7 +42,7 @@ export function createMentionPicker({ document: doc = globalThis.document, onPic
     if (!people.length) {
       const none = doc.createElement("div");
       none.className = "page-menu-title";
-      none.textContent = EMPTY;
+      none.textContent = empty;
       el.replaceChildren(none);
       return;
     }

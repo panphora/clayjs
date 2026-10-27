@@ -29,6 +29,10 @@ export const MARKS = "data-clay-page-marks";
 // A person mention's span states its id plainly beside the envelope that carries it:
 // the label is the text, and a reader without the editor shows a name, never a link.
 export const MENTION = "data-page-mention";
+// A date mention reads as a `time` element: the text is the ISO date and `datetime`
+// repeats it, so a reader without the editor shows the day and no zone or reminder.
+export const DATE = "data-page-date";
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const ENVELOPE = "1";
 const STRUCTURAL = new Set(["id", "t", "parent", "c", "m"]);
 const knownType = (t) => Object.hasOwn(DEFAULTS, t);
@@ -431,11 +435,17 @@ export function renderInline(c, m, marksEnvelopes = true) {
     const { marks, entries } = marksOfKey(key);
     const want = NEST.filter((code) => marks[code]).map((code) => ({ code, sig: code + JSON.stringify(marks[code]), tag: code === "a" ? "a" : TAGS[code], href: code === "a" ? marks.a[0] : null }));
     const mention = entries.find((entry) => entry.name === "mention");
-    if (entries.length && marksEnvelopes) want.push({ sig: `marks${canon(entries)}`, tag: "span", entries, mention: mention?.attrs.id });
+    const date = entries.find((entry) => entry.name === "date");
+    const day = date && DAY.test(String(date.attrs.date)) ? String(date.attrs.date) : null;
+    if (entries.length && marksEnvelopes) want.push({ sig: `marks${canon(entries)}`, tag: day ? "time" : "span", entries, mention: mention?.attrs.id, day });
     let keep = 0;
     while (keep < open.length && keep < want.length && open[keep].sig === want[keep].sig) keep++;
     closeTo(keep);
-    for (const w of want.slice(keep)) { html += w.entries ? `<span${marksEnvelope(w.entries)}${attr(MENTION, w.mention)}>` : w.tag === "a" ? `<a${attr("href", w.href)}>` : `<${w.tag}>`; open.push(w); }
+    for (const w of want.slice(keep)) {
+      if (w.entries) html += w.day ? `<time${attr("datetime", w.day)}${attr(DATE, "")}${marksEnvelope(w.entries)}>` : `<span${marksEnvelope(w.entries)}${attr(MENTION, w.mention)}>`;
+      else html += w.tag === "a" ? `<a${attr("href", w.href)}>` : `<${w.tag}>`;
+      open.push(w);
+    }
     html += escText(c.slice(i, j));
     i = j;
   }
@@ -583,7 +593,7 @@ function inlineOfEl(el, skip = () => false) {
       if (tag === "br") { c += ATOM; units.push(BREAK); continue; }
       if (tag === "span" && child.hasAttribute("data-atom")) { c += ATOM; units.push(child.getAttribute("data-atom")); continue; }
       const next = { ...marks };
-      if (tag === "span" && child.hasAttribute(MARKS)) {
+      if ((tag === "span" || tag === "time") && child.hasAttribute(MARKS)) {
         walk(child, next, normalizeEntries([...entries, ...entriesOfEnvelope(child.getAttribute(MARKS))]));
         continue;
       }
