@@ -27,12 +27,16 @@ export function marksFromAttributes(a, blockType) {
     best.set(markName(k), v);
   }
   const marks = [];
-  const unknown = {};
+  let unknown = null;
   for (const [n, v] of best) {
     if (schema.marks[n]) marks.push(schema.marks[n].create(v === true ? null : v));
-    else unknown[n] = v;
+    else (unknown ??= {})[n] = v;
   }
-  const opaque = entriesOfYjs(unknown);
-  if (opaque.length) marks.push(opaqueMark(opaque));
+  // The walk asks this of every text run on every keystroke, and almost none carry a
+  // mark from a newer version, so the codec runs only when one is there.
+  if (unknown) {
+    const opaque = entriesOfYjs(unknown);
+    if (opaque.length) marks.push(opaqueMark(opaque));
+  }
   return marks;
 }
