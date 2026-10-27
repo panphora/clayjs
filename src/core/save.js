@@ -1211,30 +1211,36 @@ export async function flushSave({ keepalive = false, timeoutMs = 15000, permit =
   // the generation that owns the page now, so a flush during a transition is still a
   // write in this generation and never the next one's.
   const held = permit || openSavePermit();
+  const run = { over: false };
   let timer = null;
   const timeout = new Promise((_, reject) => {
     timer = setTimeout(() => reject(flushError('Save timed out.', 'failed')), Math.max(0, timeoutMs));
   });
   try {
-    return await Promise.race([flushBytes(keepalive, deadline, held), timeout]);
+    return await Promise.race([flushBytes(keepalive, deadline, held, run), timeout]);
   } catch (err) {
     if (err && typeof err.state === 'string') throw err;
     throw flushError(err?.message || 'Save failed', 'failed');
   } finally {
+    run.over = true;
     clearTimeout(timer);
     if (!permit) closeSavePermit(held);
   }
 }
 
-async function flushBytes(keepalive, deadline, permit) {
+async function flushBytes(keepalive, deadline, permit, run = { over: false }) {
   // Load-time module churn is not the person's work: autosave never saves it, and
   // neither does a flush. Wait for the baseline to settle (at most MAX_SETTLE_MS).
   if (!baselineSettled()) await nextEvent('clay:baseline-settled', deadline);
+  if (run.over) return null;
 
   let saved = false;
   let etag = null;
   for (let attempt = 0; attempt < 4; attempt++) {
-    if (isSaveInProgress()) await settled(deadline);
+    if (isSaveInProgress()) {
+      await settled(deadline);
+      if (run.over) return null;
+    }
     if (isSaveConflicted()) throw flushError('This document has a conflict to resolve.', 'conflict');
     const token = gateCaptureToken();
     if (!bytesUnsaved()) {
@@ -1242,6 +1248,7 @@ async function flushBytes(keepalive, deadline, permit) {
       if (hasUnsavedState()) throw flushError('This document has unsaved work a save cannot write.', 'blocked');
       return { state: saved ? 'saved' : 'clean', etag: etag ?? lastSeenEtag() };
     }
+    if (run.over) return null;
     const result = await withKeepalive(keepalive, () => savePagePermitted(permit));
     // The lane was busy (a drained pending save is on the wire): wait it out next turn.
     if (result.msgType === 'skipped') continue;

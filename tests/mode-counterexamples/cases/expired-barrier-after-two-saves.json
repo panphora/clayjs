@@ -1,0 +1,74 @@
+{
+  "schema": 1,
+  "id": "expired-barrier-after-two-saves",
+  "fixture": "persist-host",
+  "boot": {
+    "mode": "view",
+    "live": true,
+    "destination": "host"
+  },
+  "steps": [
+    {
+      "op": "enter"
+    },
+    {
+      "op": "input",
+      "target": "title",
+      "value": "Capture one"
+    },
+    {
+      "op": "hold",
+      "boundary": "save.response"
+    },
+    {
+      "op": "leave",
+      "await": false
+    },
+    {
+      "op": "settle",
+      "ms": 6000
+    },
+    {
+      "op": "input",
+      "target": "title",
+      "value": "Capture two"
+    },
+    {
+      "op": "hold",
+      "boundary": "save.request"
+    },
+    {
+      "op": "release",
+      "boundary": "save.response",
+      "result": "accepted"
+    },
+    {
+      "op": "settle",
+      "ms": 10000
+    },
+    {
+      "op": "input",
+      "target": "title",
+      "value": "After barrier timeout"
+    },
+    {
+      "op": "release",
+      "boundary": "save.request",
+      "result": "accepted"
+    },
+    {
+      "op": "settle",
+      "ms": 50
+    }
+  ],
+  "requires": [
+    "input-admitted",
+    "save-request-sent",
+    "save-response",
+    "transition-refused"
+  ],
+  "expect": {
+    "mode": "edit",
+    "writes": 2
+  }
+}
