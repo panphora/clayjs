@@ -19,10 +19,13 @@
  * `CLAY_COUNTEREXAMPLE_RUNTIME` names another directory laid out like it, so the same
  * corpus can be run against a fault and against the fix.
  *
+ * `selftest` plants one defect per scratch copy of the runtime and names the cases that
+ * feel each, so the corpus' sensitivity is proved rather than assumed.
+ *
  * The other subcommands belong to later steps and say so.
  */
 
-import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
@@ -36,7 +39,9 @@ const SELF = fileURLToPath(import.meta.url);
 // case's clock, and an import that needs a real turn would look like a hang.
 const realTimeout = setTimeout;
 const COMMANDS = new Set(["check", "shrink", "prove", "selftest", "sweep", "fence"]);
-const NOT_YET = new Set(["selftest", "sweep", "fence"]);
+const NOT_YET = new Set(["sweep", "fence"]);
+const ROOT = path.dirname(path.dirname(SELF));
+const CORPUS = path.join(ROOT, "tests/mode-counterexamples/cases");
 
 function parseArgs(argv) {
   const [command = "", ...rest] = argv;
@@ -434,6 +439,62 @@ async function prove(flags) {
   console.log(`prove: wrote ${out}`);
 }
 
+// The sensitivity check: six defects, each planted in a runtime copy of its own, run
+// against the permanent corpus. A defect that no case feels is a gap in the corpus and is
+// named, never smoothed over: the checkout's `src/` is untouched, and the copies are made
+// under `--scratch` so the run leaves the evidence behind.
+async function selftest(flags) {
+  if (typeof flags.scratch !== "string") fail("selftest: name the scratch directory, as --scratch <dir>");
+  const { MUTATIONS } = await import("../tests/mode-counterexamples/mutations.mjs");
+  const cases = typeof flags.cases === "string" ? flags.cases : CORPUS;
+  const entries = readCases(cases);
+  const scratch = path.resolve(flags.scratch);
+  const runtime = path.resolve(process.env.CLAY_COUNTEREXAMPLE_RUNTIME || ROOT);
+
+  // What every case is with no defect planted: only a case that passes here can catch
+  // anything, and a corpus that passes nothing would call every defect caught.
+  const known = new Map();
+  for (const entry of entries) {
+    const { outcome } = runCaseProcess({ cases, file: entry.file, runtime });
+    known.set(outcome?.id ?? entry.name.replace(/\.json$/, ""), outcome?.status ?? "no-verdict");
+  }
+  const watched = [...known].filter(([, status]) => status === "passed").map(([id]) => id);
+  if (!watched.length) fail("selftest: no case passes on the clean runtime, so no defect could be told from a broken corpus");
+
+  const gaps = [];
+  let caught = 0;
+  for (const mutation of MUTATIONS) {
+    const dir = path.join(scratch, mutation.id);
+    rmSync(dir, { recursive: true, force: true });
+    mkdirSync(dir, { recursive: true });
+    cpSync(path.join(runtime, "src"), path.join(dir, "src"), { recursive: true });
+    const target = path.join(dir, mutation.file);
+    const source = readFileSync(target, "utf8");
+    const seen = source.split(mutation.find).length - 1;
+    if (seen !== 1) fail(`selftest: ${mutation.id}: its find matches ${seen} times in ${mutation.file}, not exactly once`);
+    writeFileSync(target, source.replace(mutation.find, mutation.replace));
+
+    const felt = [];
+    for (const entry of entries) {
+      const { outcome } = runCaseProcess({ cases, file: entry.file, runtime: dir });
+      const id = outcome?.id ?? entry.name.replace(/\.json$/, "");
+      if (!watched.includes(id)) continue;
+      const status = outcome?.status ?? "no-verdict";
+      if (status !== "passed") felt.push(`${id} ${status}`);
+    }
+    if (felt.length) caught++;
+    else gaps.push(mutation.id);
+    console.log(`${mutation.id.padEnd(32)} ${felt.length ? `caught by ${felt.join(", ")}` : "NOT CAUGHT"}`);
+  }
+
+  console.log("");
+  console.log(`${MUTATIONS.length} mutations: ${caught} caught, ${gaps.length} not caught`);
+  if (gaps.length) {
+    console.log(`selftest: the corpus does not feel ${gaps.join(", ")}`);
+    process.exitCode = 1;
+  }
+}
+
 const { command, flags } = parseArgs(process.argv.slice(2));
 if (!COMMANDS.has(command)) {
   fail(
@@ -442,7 +503,8 @@ if (!COMMANDS.has(command)) {
       "  check --cases <dir>   run every case and judge it",
       "  shrink --case <json> --out <json>   reduce a failing case to its smallest schedule",
       "  prove --case <json> --before <dir> --after <dir> [--reduced <json>] [--out <json>]",
-      "  selftest, sweep, fence   not yet (later steps)",
+      "  selftest --scratch <dir> [--cases <dir>]   plant six defects in scratch runtime copies and say which cases catch each",
+      "  sweep, fence   not yet (later steps)",
     ].join("\n"),
     2,
   );
@@ -453,5 +515,6 @@ if (NOT_YET.has(command)) {
 }
 if (command === "shrink") await shrink(flags);
 else if (command === "prove") await prove(flags);
+else if (command === "selftest") await selftest(flags);
 else if (flags.json) await runOne(flags);
 else await check(flags);

@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import os from "node:os";
@@ -23,6 +23,12 @@ const ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const CLI = path.join(ROOT, "scripts/mode-counterexamples.mjs");
 const CASES = path.join(ROOT, "tests/mode-counterexamples/cases");
 const CASE = path.join(CASES, "bytes-etag-pairing.json");
+// The cases a selftest of the whole corpus takes six minutes to reach. These four carry
+// all three defects the corpus can feel — a write the exit never made, a view announced
+// before the save was accepted and a listener a cycle keeps — so one minute proves the
+// planting and the verdict for those. The three it cannot feel yet are named below.
+const SUBSET = ["canonical-freeze", "cycles-no-growth", "cycles-one-write", "enter-leave-one-write"];
+const UNFELT = ["drop-generation-checks", "rebaseline-current-dom", "route-draft-to-host"];
 const PROPERTY = "bytes-etag-pairing";
 const PLANTED = {
   file: "src/core/save-core.js",
@@ -129,3 +135,44 @@ test("shrink refuses a case that does not fail", () => {
   expect(result.status).not.toBe(0);
   expect(String(result.stderr)).toContain("passed");
 });
+
+test("every sensitivity mutation names code that occurs exactly once in the checkout", async () => {
+  const { MUTATIONS } = await import("../mode-counterexamples/mutations.mjs");
+  expect(MUTATIONS.map((mutation) => mutation.id)).toEqual([
+    "skip-flush",
+    "drop-generation-checks",
+    "rebaseline-current-dom",
+    "route-draft-to-host",
+    "announce-view-before-acceptance",
+    "leak-one-listener",
+  ]);
+  for (const mutation of MUTATIONS) {
+    const source = readFileSync(path.join(ROOT, mutation.file), "utf8");
+    expect(`${mutation.id}:${source.split(mutation.find).length - 1}`).toBe(`${mutation.id}:1`);
+    expect(mutation.why.startsWith(`${mutation.file}:`)).toBe(true);
+  }
+});
+
+test("selftest plants each defect in a scratch runtime copy and says which cases feel it", async () => {
+  const { MUTATIONS } = await import("../mode-counterexamples/mutations.mjs");
+  const cases = path.join(scratch, "selftest-cases");
+  const runtime = path.join(scratch, "selftest");
+  mkdirSync(cases, { recursive: true });
+  for (const name of SUBSET) copyFileSync(path.join(CASES, `${name}.json`), path.join(cases, `${name}.json`));
+  const untouched = readFileSync(path.join(ROOT, "src/core/save.js"), "utf8");
+
+  const result = run(["selftest", "--scratch", runtime, "--cases", cases]);
+  const output = String(result.stdout ?? "");
+  const lineFor = (id) => output.split("\n").find((line) => line.startsWith(id)) ?? "";
+
+  for (const mutation of MUTATIONS) expect(lineFor(mutation.id)).not.toBe("");
+  for (const id of UNFELT) expect(lineFor(id)).toContain("NOT CAUGHT");
+  for (const mutation of MUTATIONS.filter((entry) => !UNFELT.includes(entry.id))) {
+    expect(lineFor(mutation.id)).toMatch(/ caught by \S+ (failed|invalid)/);
+  }
+  expect(output).toContain(`6 mutations: ${MUTATIONS.length - UNFELT.length} caught, ${UNFELT.length} not caught`);
+  expect(output).toContain(`selftest: the corpus does not feel ${UNFELT.join(", ")}`);
+  expect(result.status).toBe(1);
+  expect(readdirSync(runtime).sort()).toEqual(MUTATIONS.map((mutation) => mutation.id).sort());
+  expect(readFileSync(path.join(ROOT, "src/core/save.js"), "utf8")).toBe(untouched);
+}, 600000);
