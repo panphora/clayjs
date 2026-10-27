@@ -5,7 +5,8 @@ import { JSDOM } from "jsdom";
 import * as Y from "../../../src/vendor/yjs.vendor.js";
 import { createRooms, serializeLive } from "../../../src/server/rooms/index.js";
 import { captureCheckpoint, isCheckpointCurrent, renderCheckpoint } from "../../../src/server/checkpoint/index.js";
-import { MARKS, OPAQUE, VALUE } from "../../../src/page/projection.js";
+import { MARKS, OPAQUE, VALUE, canon, parseModel, project, revOf } from "../../../src/page/projection.js";
+import { blocksFromYValue } from "../../../src/page/ybind/decode.js";
 import { seedValue } from "../../../src/page/ybind/seed.js";
 import { docFromValue, enc } from "../../../src/page/ybind/provider.js";
 
@@ -46,6 +47,16 @@ const editPage = (rooms, room, client, n, change) => {
   expect(result.seq).toBeGreaterThan(0);
 };
 
+const editDoc = (rooms, room, client, n, change) => {
+  const doc = docFromValue(room.stores.get("page").value, { strict: true });
+  doc.clientID = Number(client);
+  change(doc);
+  const update = enc(Y.encodeStateAsUpdateV2(doc));
+  doc.destroy();
+  const result = rooms.apply(room, client, { name: "page", n, ops: [{ op: "set", path: ["y", `edit-${client}-${n}`], value: update }], epoch: room.epoch, pageGeneration: room.pageTransition?.id ?? null });
+  expect(result.seq).toBeGreaterThan(0);
+};
+
 test("the checkpoint replaces an article that moved on, and leaves a current one alone", () => {
   const { rooms, room, capture, render } = roomOf(seedValue([{ id: "p", text: "before" }]));
   const pinned = capture();
@@ -79,6 +90,32 @@ test("an article carrying a newer format's record is never projected away", () =
   const plain = roomOf(value);
   expect(plain.render().kind).toBe("ok");
   expect(articleInside(plain.render().html)).toBe('<p data-id="p">before</p>');
+});
+
+test("a room holding newer content checkpoints into envelopes, and re-adopting them reproduces the records", () => {
+  const { rooms, room, capture, render } = roomOf(seedValue([{ id: "p", text: "before" }]));
+  editDoc(rooms, room, "100", 1, (doc) => {
+    doc.getText("flow").format(1, 3, { "underline~future": { color: "red" } });
+    doc.getMap("attrs").set("q", new Y.Map([["t", "future_widget"], ["theme", { bg: "red" }]]));
+    doc.getText("flow").insertEmbed(doc.getText("flow").length, { b: "q" }, {});
+    doc.getText("flow").insert(doc.getText("flow").length, "later", { "clay_opaque_code~future": { tokens: ["u"] } });
+  });
+  const pinned = capture();
+  const decoded = blocksFromYValue(room.stores.get("page").value);
+  expect(decoded.q).toEqual({ t: "future_widget", pos: "00000002", theme: { bg: "red" }, c: "later", m: [[5, "u"]] });
+  const written = render(undefined, pinned);
+  expect(written.kind).toBe("ok");
+  const article = articleInside(written.html);
+  expect(article).toContain(`${OPAQUE}="1"`);
+  expect(article).toContain(`${MARKS}="`);
+  expect(isCheckpointCurrent(written.html, pinned)).toBe(true);
+
+  const doc = new JSDOM(`<article data-page>${article}</article>`).window.document;
+  const adopted = parseModel(doc.querySelector("article"));
+  const expected = project(decoded);
+  expect(canon(adopted)).toBe(canon(expected));
+  expect(revOf(adopted)).toBe(revOf(expected));
+  expect(adopted.find((item) => item.id === "q")).toEqual({ id: "q", t: "future_widget", theme: { bg: "red" }, c: "later", m: [[5, "u"]] });
 });
 
 test("a deliberately invalid envelope is refused and the source file is left as it stands", () => {

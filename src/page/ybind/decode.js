@@ -6,6 +6,7 @@ import { createPageDoc, attrKeys, defaultOf, sameJson, PAGE_ROOTS } from "./layo
 import { resolveBoardFields } from "./board.js";
 import { resolveTableFields } from "./table.js";
 import { markName } from "./marks.js";
+import { entriesOfYjs } from "../format-codec.js";
 import { walk } from "./walk.js";
 import { docFromValue, YDecodeError } from "./provider.js";
 import { parseGoneIntents, parsePhysicalKey, RecoveryError } from "./recovery.js";
@@ -25,6 +26,13 @@ const isPlain = (value) => value !== null && typeof value === "object" && !Array
 const originId = (client, clock) => `${client}.${clock}`;
 const boundaryIdentity = (record) => JSON.stringify([record.blockId, record.kind, record.recoveryOf ?? null]);
 
+// A mark name this runtime has no schema for is kept when the codec reads it as a
+// valid descriptor, a named mark or the reserved compact-token bridge, and refused
+// when it is malformed.
+const keptMark = (key, value) => {
+  try { entriesOfYjs({ [markName(key)]: value }); return true; } catch { return false; }
+};
+
 function validateFlow(pd) {
   if (pd.flow._map.size) unsupported("The page flow must contain text and block markers");
   for (let it = pd.flow._start; it; it = it.right) {
@@ -32,7 +40,7 @@ function validateFlow(pd) {
     const c = it.content;
     if (c instanceof Y.ContentString) continue;
     if (c instanceof Y.ContentFormat) {
-      if (c.value !== null && !Object.hasOwn(schema.marks, markName(c.key))) unsupported(`Unsupported page mark: ${c.key}`);
+      if (c.value !== null && !Object.hasOwn(schema.marks, markName(c.key)) && !keptMark(c.key, c.value)) unsupported(`Unsupported page mark: ${c.key}`);
       continue;
     }
     if (c instanceof Y.ContentEmbed) {
@@ -132,8 +140,45 @@ function validateOrigins(pd) {
   }
 }
 
+// The text a block's runs carry, as one record states it: characters and the mark
+// key of each, a hard break as an atom.
+function textOf(block) {
+  let text = "";
+  const units = [];
+  for (const run of block.runs) {
+    if (run.hole) continue;
+    if (run.br) {
+      if (block.t === "code_block") unsupported("A code block cannot contain a hard-break atom");
+      text += ATOM;
+      units.push(BREAK);
+    } else {
+      text += run.text;
+      const key = markKey([...run.marks].sort((a, b) => a.type.rank - b.type.rank));
+      for (let i = 0; i < run.text.length; i++) units.push(key);
+    }
+  }
+  const out = { c: text };
+  if (units.some(Boolean)) out.m = runsOf(units);
+  return out;
+}
+
+// The attributes a block's Y attribute map, or a recovered root, states for it.
+const attributeFields = (block, attrs) => (block.fields ? Object.entries(block.fields) : attrs ? attrs.entries() : []);
+
+// A block type this runtime has no schema for keeps the record it stands for: its
+// own type, its text and marks and every attribute a newer peer wrote on it.
+function opaqueBlockOf(pd, block, index) {
+  const attrs = pd.attrs.get(block.baseId);
+  const out = { t: block.t, pos: String(index + 1).padStart(8, "0") };
+  for (const [key, value] of attributeFields(block, attrs)) if (key !== "t" && key !== "pos") out[key] = copy(value);
+  return Object.assign(out, textOf(block));
+}
+
 function blockOf(pd, block, index) {
-  if (!Object.hasOwn(DEFAULTS, block.t)) unsupported(`Unsupported page block type: ${block.t}`);
+  if (!Object.hasOwn(DEFAULTS, block.t)) {
+    if (typeof block.t !== "string" || !block.t || block.t === "opaque_block") unsupported(`Unsupported page block type: ${block.t}`);
+    return opaqueBlockOf(pd, block, index);
+  }
   const type = schema.nodes[block.t];
   const attrs = pd.attrs.get(block.baseId);
   const table = block.t === "table" && !block.fields ? resolveTableFields(pd.tableFields, block.baseId, { cols: attrs?.get("cols"), rows: attrs?.get("rows") }) : null;
@@ -145,24 +190,12 @@ function blockOf(pd, block, index) {
   }
   if (block.t === "table") out.rows = copy((block.fields ? block.fields.rows : table.rows) ?? {});
   if (block.t === "board") Object.assign(out, block.fields ? { columns: copy(block.fields.columns ?? {}), cards: copy(block.fields.cards ?? {}) } : resolveBoardFields(pd.boardFields, block.baseId));
-  if (type.isTextblock) {
-    let text = "";
-    const units = [];
-    for (const run of block.runs) {
-      if (run.hole) continue;
-      if (run.br) {
-        if (block.t === "code_block") unsupported("A code block cannot contain a hard-break atom");
-        text += ATOM;
-        units.push(BREAK);
-      } else {
-        text += run.text;
-        const key = markKey([...run.marks].sort((a, b) => a.type.rank - b.type.rank));
-        for (let i = 0; i < run.text.length; i++) units.push(key);
-      }
-    }
-    out.c = text;
-    if (units.some(Boolean)) out.m = runsOf(units);
+  const known = new Set(attrKeys(type));
+  for (const [key, value] of attributeFields(block, attrs)) {
+    if (key === "t" || key === "pos" || known.has(key) || Object.hasOwn(out, key)) continue;
+    out[key] = copy(value);
   }
+  if (type.isTextblock) Object.assign(out, textOf(block));
   return out;
 }
 

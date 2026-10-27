@@ -230,20 +230,33 @@ test("accepts complete multipart captures and propagates strict loading failures
   expect(() => blocksFromYValue({ v: 2, y: {} })).toThrow(expect.objectContaining({ code: "invalid-value" }));
 });
 
-test("honors mark cancellations and omits attributes no longer used by the block type", () => {
+test("honors mark cancellations and keeps attributes the block type has no schema for", () => {
   const { pd } = fixture({ blocks: { p: { t: "paragraph", pos: "1", c: "bold", m: [[4, "b"]] } } });
   pd.flow.format(1, 4, { "strong~fixture!cancel": true });
   pd.attrs.get("p").set("level", 4);
   pd.attrs.get("p").set("parent", null);
-  expect(blocksFromYValue(yValueOf(pd.ydoc)).p).toEqual({ t: "paragraph", pos: "00000001", c: "bold" });
+  expect(blocksFromYValue(yValueOf(pd.ydoc)).p).toEqual({ t: "paragraph", pos: "00000001", level: 4, c: "bold" });
+});
+
+test("keeps a newer peer's block type, marks and attributes as the records they are", () => {
+  const { pd } = fixture({ blocks: { p: { t: "paragraph", pos: "1", c: "text" }, k: { t: "paragraph", pos: "2", c: "note" } } });
+  pd.attrs.get("p").set("t", "future_widget");
+  pd.attrs.get("p").set("theme", { bg: "red", tags: ["a"] });
+  pd.flow.format(1, 2, { "underline~future": { color: "red" } });
+  pd.flow.format(6, 2, { "annotation~future": { thread: "t-1" }, "clay_opaque_code~future": { tokens: ["u"] } });
+  pd.attrs.get("k").set("due", "2026-11-01");
+  expect(blocksFromYValue(yValueOf(pd.ydoc))).toEqual({
+    p: { t: "future_widget", pos: "00000001", theme: { bg: "red", tags: ["a"] }, c: "text", m: [[2, "x[\"underline\",{\"color\":\"red\"}]"], [2, ""]] },
+    k: { t: "paragraph", pos: "00000002", due: "2026-11-01", c: "note", m: [[2, "x[\"annotation\",{\"thread\":\"t-1\"}]u"], [2, ""]] },
+  });
 });
 
 test.each([
-  ["block type", (pd) => pd.attrs.get("p").set("t", "future_widget")],
-  ["mark", (pd) => pd.flow.format(1, 1, { "future_mark~x": true })],
   ["atom", (pd) => pd.flow.insertEmbed(2, { future_atom: 1 })],
   ["block attributes", (pd) => pd.attrs.set("p", { t: "paragraph" })],
   ["code hard break", (pd) => { pd.attrs.get("p").set("t", "code_block"); pd.flow.insertEmbed(2, { br: 1 }); }],
+  ["mark key", (pd) => pd.flow.format(1, 1, { "future/mark~x": true })],
+  ["mark token", (pd) => pd.flow.format(1, 1, { "clay_opaque_code~x": { tokens: ["u~"] } })],
 ])("refuses an unsupported %s instead of returning partial block data", (_, change) => {
   const { pd } = fixture({ blocks: { p: { t: "paragraph", pos: "1", c: "text" } } });
   change(pd);
@@ -253,7 +266,7 @@ test.each([
 test("destroys temporary documents on success and on content failure", () => {
   const { value } = fixture();
   const bad = track(docFromValue(value, { strict: true }));
-  bad.getMap("attrs").get("p1").set("t", "future_widget");
+  bad.getMap("attrs").set("p1", { t: "paragraph" });
   const badValue = yValueOf(bad);
   const destroy = jest.spyOn(Y.Doc.prototype, "destroy");
   try {

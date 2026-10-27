@@ -148,13 +148,16 @@ test('refuses incomplete page parts until the missing frame arrives', () => {
   expect(render(source, capture()).kind).toBe('ok');
 });
 
-test('refuses unknown page content and table projection', () => {
+test('checkpoints unknown page content into its envelope and refuses table projection', () => {
   const unknown = seedValue([{ id: 'p', t: 'paragraph', text: 'text' }]);
   const doc = docFromValue(unknown, { strict: true });
   createPageDoc(doc).attrs.get('p').set('t', 'future_block');
   const bad = yValueOf(doc);
   doc.destroy();
-  expect(roomOf(bad).render()).toEqual({ kind: 'refused', reason: 'unknown-page-content' });
+  const kept = roomOf(bad).render();
+  expect(kept.kind).toBe('ok');
+  expect(kept.html).toContain('<div data-id="p" data-clay-page-opaque="1"');
+  expect(kept.html).toContain('>text</div>');
   const table = seedValue([{ id: 't', t: 'table' }]);
   expect(roomOf(table).render()).toEqual({ kind: 'refused', reason: 'unsupported-projection' });
 });

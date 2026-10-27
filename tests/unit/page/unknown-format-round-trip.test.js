@@ -15,6 +15,10 @@ import {
   parseModel, project, renderModel, revOf, unitsOf,
 } from "../../../src/page/projection.js";
 import { adoptionTransaction, classifyFile, planAdoption } from "../../../src/page/adopt.js";
+import * as Y from "../../../src/vendor/yjs.vendor.js";
+import { createPageDoc } from "../../../src/page/ybind/layout.js";
+import { blocksFromYValue } from "../../../src/page/ybind/decode.js";
+import { yValueOf } from "../../../src/page/ybind/provider.js";
 import { mergePageModels } from "../../../src/page/merge.js";
 
 /**
@@ -253,4 +257,25 @@ test("HTML-like attribute values and prototype-shaped keys stay inert data", () 
   expect([...rendered.querySelectorAll("*")].every((el) => [...el.attributes].every((a) => !/^on/i.test(a.name)))).toBe(true);
   expect(rendered.querySelector('[data-id="p"]').textContent).toBe("text");
   expect(canon(parseModel(rendered)[0])).toBe(canon(back));
+});
+
+test("a live room's newer content reaches the saved file and comes back as the same records", () => {
+  const doc = new Y.Doc();
+  const pd = createPageDoc(doc);
+  doc.transact(() => {
+    pd.attrs.set("p", new Y.Map([["t", "paragraph"]]));
+    pd.flow.insertEmbed(0, { b: "p" }, {});
+    pd.flow.insert(1, "before", { "underline~upstream": { color: "red" } });
+    pd.attrs.set("q", new Y.Map([["t", "future_widget"], ["theme", { bg: "red" }]]));
+    pd.flow.insertEmbed(pd.flow.length, { b: "q" }, {});
+    pd.flow.insert(pd.flow.length, "later", { "clay_opaque_code~upstream": { tokens: ["u"] } });
+  });
+  const live = blocksFromYValue(yValueOf(doc));
+  doc.destroy();
+  expect(live.q).toEqual({ t: "future_widget", pos: "00000002", theme: { bg: "red" }, c: "later", m: [[5, "u"]] });
+  const projected = project(live);
+  const saved = parseModel(articleOf(renderModel(projected, { clean })));
+  expect(canon(saved)).toBe(canon(projected));
+  expect(revOf(saved)).toBe(revOf(projected));
+  expect(canon(project(savedBlocks(stateOf(live).doc)))).toBe(canon(projected));
 });
