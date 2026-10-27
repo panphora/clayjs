@@ -43,6 +43,18 @@ const SAVE_TIMEOUT_MS = 12000;
 // The browser caps a keepalive body (Chromium refuses one over 64 KB), and it counts
 // BYTES: the hint is only attached to a save whose UTF-8 encoding fits well inside that.
 const KEEPALIVE_MAX_BODY = 60000;
+// Above this, a save body travels as a Blob instead of a string, so the document is
+// encoded once here rather than again inside fetch, and a retry of the same attempt
+// reuses that Blob. Counted in UTF-16 units, which are never more than the UTF-8 bytes
+// they encode to, so a body under the threshold by this measure is under it in bytes.
+const SAVE_BLOB_MIN_BYTES = 1024 * 1024;
+// The media type the string body has always arrived with, written out explicitly
+// because a Blob's own type never reaches the wire as a request header. text/plain is
+// CORS-safelisted, so this is still the same un-preflighted request.
+const SAVE_BODY_TYPE = 'text/plain;charset=UTF-8';
+// The one body a Blob was last built for, kept so the retry of a large save sends the
+// bytes it already encoded instead of encoding the document a second time.
+let lastBodyBlob = null;
 // Set by `withKeepalive`, read once by the next `sendOnce`: the hint belongs to one
 // request, not to the save pipeline.
 let nextSaveKeepalive = false;
@@ -524,6 +536,10 @@ function formatConversionHeader(conversion) {
  * carrying the document alongside an unstripped snapshot; the snapshot's home is
  * the §10 relay, which the live-sync plugin already posts it to.
  *
+ * Above `SAVE_BLOB_MIN_BYTES` the body is a Blob wrapping that same one string, with the
+ * same media type written out explicitly: a different container for identical bytes,
+ * which is what keeps the encoding off the main thread's critical path.
+ *
  * @param {string} content - HTML to save
  * @param {boolean} userDriven - Whether a human gesture is behind this save
  * @param {AbortSignal} signal
@@ -559,10 +575,14 @@ export function buildSaveRequest(content, userDriven, signal, saveId, etag, keep
       // authorization, and refuses a lower one before mutation.
       [PAGE_FORMAT_HEADER]: String(PAGE_FORMAT)
     },
-    body: content
+    body: bodyForSave(content)
   };
 
   for (const [name, value] of extraSaveHeaders) options.headers[name] = value;
+
+  // Set after the process-global headers so the type describing THESE bytes is the one
+  // that goes out, the same rule the conversion header below follows.
+  if (typeof options.body !== 'string') options.headers['Content-Type'] = SAVE_BODY_TYPE;
 
   // The conversion request belongs to ONE logical save, and goes on every attempt
   // of it. Set after the process-global headers so the capture-bound value is the
@@ -571,9 +591,32 @@ export function buildSaveRequest(content, userDriven, signal, saveId, etag, keep
 
   if (etag) options.headers['If-Match'] = etag;
 
-  if (keepalive && new Blob([content]).size < KEEPALIVE_MAX_BODY) options.keepalive = true;
+  // The length test comes first because it is a floor on the byte count: a body too
+  // long by this measure is too big in bytes too, and never has to be encoded to find
+  // out. A keepalive body is always under 64 KB, so it never reaches the Blob path.
+  if (keepalive && content.length < KEEPALIVE_MAX_BODY && new Blob([content]).size < KEEPALIVE_MAX_BODY) options.keepalive = true;
 
   return { url: resolveSaveUrl(path), options };
+}
+
+/**
+ * The body of one save: the string itself, or, above `SAVE_BLOB_MIN_BYTES`, a Blob
+ * wrapping that one string with no further joining.
+ *
+ * The point is where the encoding happens. A string body is encoded to UTF-8 inside
+ * `fetch`, synchronously and on the main thread; at 11 MB that is the visible stall.
+ * A Blob carries the same bytes with the same media type, and building it once here
+ * means the retry of the same attempt sends the very Blob it already built.
+ *
+ * @param {string} content - HTML to save
+ * @returns {string|Blob}
+ */
+function bodyForSave(content) {
+  if (content.length < SAVE_BLOB_MIN_BYTES) return content;
+  if (lastBodyBlob && lastBodyBlob.content === content) return lastBodyBlob.blob;
+  const blob = new Blob([content], { type: SAVE_BODY_TYPE });
+  lastBodyBlob = { content, blob };
+  return blob;
 }
 
 /**
