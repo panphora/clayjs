@@ -36,6 +36,7 @@
  */
 
 import { createIdentityStore } from "../vendor/hyper-morph-identity.vendor.js";
+import { pageRelay } from "./page-relay.js";
 import { loadedEngine, mergeEngine } from "./merge-engine.js";
 import Mutation from "../lib/mutation.js";
 import { NO_DIRTY_SELECTOR, LIVE_SELECTOR } from "../lib/region-policy.js";
@@ -662,7 +663,7 @@ class LiveSync {
       // one sender behind it: the generic marker publishes through the store, so a
       // page target and a caret path never talk over each other.
       loadPresence().then((store) => this._startPresence(store, gen), () => {});
-      this._saveSavedHandler = () => {
+      this._saveSavedHandler = (event) => {
         this._saveEpoch++;
         // The file now holds what this save wrote: the disk lane's new base,
         // dated at the save's capture, which is when the document held these
@@ -674,7 +675,7 @@ class LiveSync {
         if (ticket > this._acceptedSaveTicket) this._acceptedSaveTicket = ticket;
         const bytes = edit ? edit.getLastSavedBytes() : null;
         if (bytes != null) this._setDiskBase(bytes, ticket);
-        this._relayCommit();
+        this._relayCommit(event?.detail?.captureId, bytes);
       };
       document.addEventListener('clay:save-saved', this._saveSavedHandler);
       // A 412 can arrive after this tab already merged the version that beat it:
@@ -1142,7 +1143,12 @@ class LiveSync {
       // The save that follows this capture stores these bytes, so this is the
       // content its stamp will describe. Held for _relayCommit, and overwritten
       // by the next capture, so it always names the save currently in flight.
-      this._savedSnapshot = { html, identityMap, ticket: this._saveTicket };
+      this._savedSnapshot = {
+        html,
+        identityMap,
+        ticket: this._saveTicket,
+        captureId: event.detail.captureId ?? null,
+      };
     };
 
     document.addEventListener('clay:snapshot-ready', this._snapshotHandler);
@@ -1190,37 +1196,66 @@ class LiveSync {
    * peers only ever see versions the host accepted, each descending from the one
    * before. A host that returns no stamp still gets the relay, without one.
    */
-  _relayCommit() {
+  _relayCommit(captureId = null, acceptedHtml = null) {
     if (this.isDestroyed) return;
     const etag = lastSeenEtag();
+
+    const held = this._savedSnapshot;
+    // A capture taken after this save's own is somebody else's content: relay it
+    // under its own save's stamp, never this one's. The legacy null-id shape keeps
+    // matching, so a fixture that names no capture on either side still relays.
+    if (held && (held.captureId ?? null) !== (captureId ?? null)) {
+      this._log('Skipping send - snapshot belongs to a different capture');
+      return;
+    }
 
     // The content this save stored, captured with it. Consumed rather than left
     // behind, so a save-saved with no capture of its own can never reuse an
     // older save's bytes under a newer stamp.
-    const pending = this._savedSnapshot;
+    const pending = held;
     this._savedSnapshot = null;
 
     // No captured snapshot means nothing here knows which bytes this save
     // stored, and §10 is explicit that a stamp must never travel on its own.
     if (!pending || typeof pending.html !== 'string') return;
 
+    // The capture is taken before the document transforms run, and the page
+    // projection is one of them: a page's relay has to carry what the file now
+    // holds, not the editor DOM the capture saw. Everything outside the page's
+    // own elements stays the captured sync domain, `no-save` regions included.
+    let payload = pending;
+    if (typeof acceptedHtml === 'string') {
+      try {
+        payload = pageRelay(pending, acceptedHtml, this.identity);
+      } catch (err) {
+        // Stale page bytes are worse than no relay: the save stays accepted, and
+        // peers get the next one.
+        this._log(`Skipping send - page relay failed: ${err && err.message}`);
+        return;
+      }
+      if (!payload) {
+        this._log('Skipping send - accepted capture has no page article');
+        return;
+      }
+    }
+
     // Skip only an unstamped repeat, judged against the base as it stood. A
     // landed save is news even when its bytes equal the last relay: "Keep mine"
     // can restore exactly those bytes after the peers moved on, and they must
     // hear it.
-    const repeat = !etag && pending.html === this.lastHtml;
+    const repeat = !etag && payload.html === this.lastHtml;
 
     // The host accepted these bytes, so every later accepted save descends from
     // them: they are the peer lane's base from this moment, not once the relay
     // returns. A frame whose morph ran after this capture installs its own,
     // newer base when its resources settle, and the ticket keeps it there.
-    this._setPeerBase(pending.html, pending.identityMap, pending.ticket);
+    this._setPeerBase(payload.html, payload.identityMap, payload.ticket);
 
     if (repeat) {
       this._log('Skipping send - HTML unchanged');
       return;
     }
-    this._enqueueSend(pending.html, pending.identityMap, etag || null);
+    this._enqueueSend(payload.html, payload.identityMap, etag || null);
   }
 
   _postUpdate(html, identityMap, etag = null, attempt = 0) {
