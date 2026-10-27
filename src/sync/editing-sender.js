@@ -5,10 +5,11 @@ const INTERVAL_MS = 250;
 const RETRY_MS = 2000;
 const EVENTS = ['focusin', 'focusout', 'selectionchange', 'clay:sync-applied', 'clay:workspace-background', 'clay:workspace-foreground'];
 
-// The default is the facade: a page that publishes a target does not post it
-// itself, and an owner that attached a transport is the only thing that does. A
-// caller with its own wire (live-sync, today) passes one in and keeps it.
-const publish = (target) => presence.setTarget(target);
+// The default is the facade's generic half: a page that publishes a target does
+// not post it itself, and an owner that attached a transport is the only thing that
+// does. The marker stands aside while an explicit page target owns the session, so
+// one document never has two senders talking at once.
+const publish = (target) => presence.setGeneric(target);
 
 export class EditingSender {
   constructor({ send = publish, now = () => Date.now() }) {

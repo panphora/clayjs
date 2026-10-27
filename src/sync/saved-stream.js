@@ -169,6 +169,15 @@ export function createSavedStream({ documentURL, servedEtag = null, represented 
   let repairJob = null;
   let pendingRepair = null;
   let repairPaused = false;
+  // The roster this reader draws arrives as a named `presence` frame on this same
+  // stream — there is no second connection — and the store behind it is a first-use
+  // download, so a host that names nobody costs a reader nothing. A reader has no
+  // write half, so the lease it takes cannot publish at all: its send refuses, and no
+  // request leaves for a target a page tried to set in view mode.
+  let presenceStore = null;
+  let presenceLease = null;
+  let presenceLoad = null;
+  const presenceQueue = [];
 
   const active = (gen) => !stopped && gen === generation;
 
@@ -177,7 +186,40 @@ export function createSavedStream({ documentURL, servedEtag = null, represented 
     notify({ state, ...detail });
   }
 
+  function leavePresence() {
+    presenceQueue.length = 0;
+    if (presenceLease) {
+      presenceLease.detach();
+      presenceLease = null;
+    }
+    presenceStore = null;
+    presenceLoad = null;
+  }
+
+  // A frame that lands while the download is in flight waits in order, and a
+  // download that failed keeps the queue so the next frame asks again.
+  function takePresence(data) {
+    if (presenceStore) {
+      presenceStore.receive(data);
+      return;
+    }
+    presenceQueue.push(data);
+    if (presenceLoad) return;
+    presenceLoad = import('./presence-store.js')
+      .then(({ presence }) => {
+        presenceStore = presence;
+        presenceLease = presence.attachTransport({ send: () => Promise.resolve(false) });
+        for (const frame of presenceQueue.splice(0)) presence.receive(frame);
+        return presence;
+      })
+      .catch(() => {
+        presenceLoad = null;
+        return null;
+      });
+  }
+
   function closeStream() {
+    leavePresence();
     if (!stream) return;
     const closing = stream;
     stream = null;
@@ -461,6 +503,19 @@ export function createSavedStream({ documentURL, servedEtag = null, represented 
         opened.onerror = () => { if (active(gen)) report('reconnecting'); };
         opened.onmessage = (event) => onMessage(event.data, gen);
         opened.addEventListener('cursor', (event) => onCursor(event.data, gen));
+        // Named, so it never reaches `onmessage` and never looks like the saved file
+        // it is not: who is present and the file a reader holds are separate
+        // questions, and a roster frame moves no receipt and no resume cursor.
+        opened.addEventListener('presence', (event) => {
+          if (!active(gen)) return;
+          let data;
+          try {
+            data = JSON.parse(event.data);
+          } catch {
+            return;
+          }
+          if (data && typeof data === 'object' && !Array.isArray(data)) takePresence(data);
+        });
         return handle;
       });
       return handle;

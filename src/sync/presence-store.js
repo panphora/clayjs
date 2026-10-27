@@ -12,6 +12,7 @@
  * snapshot never contains the private session token, connection ids or socket data.
  */
 
+import { hostMeta } from '../core/host-meta.js';
 import {
   COALESCE_MS,
   RENEW_MS,
@@ -50,6 +51,10 @@ export class PresenceStore {
     this.target = null;
     this.heldKey = '';
     this.owner = null;
+    // Whether the target this tab holds belongs to an explicit owner (a page) or to
+    // the generic editing path. One of them speaks at a time.
+    this.explicit = false;
+    this.connecting = null;
     this.n = 0;
     this.sentKey = null;
     this.timer = null;
@@ -161,22 +166,66 @@ export class PresenceStore {
    * one already held is coalesced to one request every 250 ms, and a clear bypasses
    * the wait. Returns false for a target this client will not publish.
    *
+   * A target set here belongs to an explicit owner — the page — and that owner
+   * keeps the tab's one session until it releases it: the generic editing path is
+   * silenced meanwhile, so a caret marker can never overwrite a page selection. A
+   * clear keeps the ownership, so `setTarget(null)` publishes nobody anywhere
+   * rather than falling back to a positional marker.
+   *
    * @param {null|string|{kind: string}} target
    * @returns {boolean}
    */
   setTarget(target) {
     const result = validateTarget(target === undefined ? null : target);
     if (!result.ok) return false;
-    const key = targetKey(result.target);
+    this.explicit = true;
+    return this.hold(result.target);
+  }
+
+  /**
+   * Publish the generic positional marker of the editing path. Ignored while an
+   * explicit owner holds the tab's target, and returns false when it is: the page
+   * speaks for this tab until its teardown releases the target.
+   *
+   * @param {null|string} value
+   * @returns {boolean}
+   */
+  setGeneric(value) {
+    if (this.explicit) return false;
+    const result = validateTarget(value === undefined ? null : value);
+    if (!result.ok) return false;
+    return this.hold(result.target);
+  }
+
+  /**
+   * The owner release, for a page's teardown: the explicit target is gone with the
+   * thing that set it, so this clears it and lets the generic editing path speak
+   * again. Internal to the store's owners — page code clears one selection with
+   * `setTarget(null)` and gives the whole target up with this.
+   *
+   * @returns {boolean}
+   */
+  releaseTarget() {
+    if (!this.explicit) return false;
+    this.explicit = false;
+    return this.hold(null);
+  }
+
+  /**
+   * Reconcile the target this tab holds with a target that arrived from its owner,
+   * without touching who owns it.
+   */
+  hold(target) {
+    const key = targetKey(target);
     if (key === this.heldKey) {
       // The target did not move, but a stream that went away took its request with
       // it: a target sent before a reconnect is sent again.
       if (this.owner && this.sentKey !== key) this.schedule(COALESCE_MS);
       return true;
     }
-    this.target = result.target;
+    this.target = target;
     this.heldKey = key;
-    if (result.target === null) {
+    if (target === null) {
       this.cancel();
       this.flush();
       return true;
@@ -211,6 +260,7 @@ export class PresenceStore {
         store.cancel();
         store.target = null;
         store.heldKey = '';
+        store.explicit = false;
         store.clear();
       },
     };
@@ -223,6 +273,57 @@ export class PresenceStore {
     // again rather than assumed delivered.
     if (this.target !== null) this.flush();
     return lease;
+  }
+
+  /**
+   * Attach this document's one presence transport, chosen from what the host said
+   * about itself and never from receiving an event: the relay it accepts targets
+   * on, or the same-browser channel its awareness block names. Exactly one — a
+   * broadcast host is never probed at the relay, and a relay host never opens a
+   * channel — and a host that names neither gets no transport at all.
+   *
+   * @param {{send?: ?function(Object): any}} [options] - the relay's send, when
+   *   this tab may publish at all. A reader passes none.
+   * @returns {Promise<?{active: boolean, detach: function(): void}>}
+   */
+  connect({ send = null } = {}) {
+    if (this.connecting) return this.connecting;
+    this.connecting = hostMeta()
+      .then((meta) => {
+        const extensions = Array.isArray(meta?.extensions) ? meta.extensions : [];
+        const awareness = meta?.document && typeof meta.document === 'object' ? meta.document.awareness : null;
+        if (
+          awareness && awareness.transport === 'broadcast' &&
+          (extensions.includes('page-awareness-v1') || extensions.includes('record-awareness-v1'))
+        ) {
+          const scope = typeof awareness.scope === 'string' && awareness.scope ? awareness.scope : null;
+          return import('./local-presence.js')
+            .then(({ localPresence }) => localPresence({ scope, store: this }).start() ?? null);
+        }
+        if (typeof send === 'function' && extensions.includes('presence-editing')) {
+          return this.attachTransport({ send });
+        }
+        return null;
+      })
+      .finally(() => {
+        this.connecting = null;
+      });
+    return this.connecting;
+  }
+
+  /**
+   * The stream reconnected. The host issues a session per connection, so the token
+   * this tab held, the order it was sending in and the target it believed delivered
+   * are all spent: a page target waits for the new session to name itself, and the
+   * generic marker goes again on its own schedule.
+   */
+  reconnect() {
+    this.session = null;
+    this.n = 0;
+    this.sentKey = null;
+    this.cancel();
+    if (!this.owner || this.target === null) return;
+    this.flush();
   }
 
   emit() {

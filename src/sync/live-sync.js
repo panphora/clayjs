@@ -74,6 +74,21 @@ function loadEdit() {
   return editLoad;
 }
 
+// The presence store is a first-use download for a reader too, so only the live lane
+// asks for it: a view-mode tab names it nowhere and fetches none of it.
+let presenceStore = null;
+let presenceLoad = null;
+
+function loadPresence() {
+  presenceLoad ??= import('./presence-store.js')
+    .then((mod) => (presenceStore = mod.presence))
+    .catch((error) => {
+      presenceLoad = null;
+      throw error;
+    });
+  return presenceLoad;
+}
+
 // `entering` means an entry is importing this module: the controller starts the
 // lane once the mode is committed, so this evaluation starts nothing and loads
 // nothing. An explicit initial edit, and a reader's saved lane, are untouched.
@@ -330,6 +345,7 @@ class LiveSync {
     this._sharedSync = false;
     this._liveData = false;
     this._editing = null;
+    this._presenceLease = null;
     this._ready = null;
     // Bumped by every start(), so a discovery that resolves after a stop/restart
     // cannot open a stream for the run that has already been torn down.
@@ -641,15 +657,10 @@ class LiveSync {
     // snapshot listener would never fire — skip registering it.
     if (this.lane === 'live') {
       this.listenForSnapshots();
-      hostSupports('presence-editing').then((supported) => {
-        if (!supported || this.isDestroyed || this._startGen !== gen || this._editing) return;
-        return loadEdit().then((mod) => {
-          if (this.isDestroyed || this._startGen !== gen || this._editing) return;
-          this._editing = new mod.EditingSender({ send: (path) => this._postEditing(path) });
-          this._editing.start();
-          this._editing.roster(this._lastRoster);
-        });
-      }, () => {});
+      // One presence transport per document, chosen from the host's own answer, and
+      // one sender behind it: the generic marker publishes through the store, so a
+      // page target and a caret path never talk over each other.
+      loadPresence().then((store) => this._startPresence(store, gen), () => {});
       this._saveSavedHandler = () => {
         this._saveEpoch++;
         // The file now holds what this save wrote: the disk lane's new base,
@@ -708,6 +719,11 @@ class LiveSync {
     if (this._editing) {
       this._editing.stop();
       this._editing = null;
+    }
+    // Only this run's lease: a successor that already attached keeps its roster.
+    if (this._presenceLease) {
+      this._presenceLease.detach();
+      this._presenceLease = null;
     }
     this._lastRoster = null;
 
@@ -907,6 +923,9 @@ class LiveSync {
     this.sse.onopen = () => {
       console.log('[LiveSync] Connected');
       if (this._editing) this._editing.reconnected();
+      // A reconnect is a new connection: the host issues it a new presence session,
+      // and nothing this tab sent under the old one may stand.
+      if (presenceStore) presenceStore.reconnect();
       if (this.onConnect) this.onConnect();
     };
 
@@ -1257,13 +1276,45 @@ class LiveSync {
     });
   }
 
-  _postEditing(path) {
+  /**
+   * Take this run's presence transport and, behind its own capability, the generic
+   * editing marker that publishes through it. `gen` is the start() this belongs to,
+   * so a discovery that answers after a stop attaches nothing.
+   */
+  _startPresence(store, gen) {
+    if (this.isDestroyed || this._startGen !== gen || this._presenceLease) return null;
+    return store.connect({ send: (body) => this._postPresence(body) })
+      .then((transport) => {
+        if (this.isDestroyed || this._startGen !== gen) {
+          transport?.detach();
+          return null;
+        }
+        this._presenceLease = transport || null;
+        return hostSupports('presence-editing');
+      }, () => false)
+      .then((supported) => {
+        if (!supported || this.isDestroyed || this._startGen !== gen || this._editing) return;
+        return loadEdit().then((mod) => {
+          if (this.isDestroyed || this._startGen !== gen || this._editing) return;
+          this._editing = new mod.EditingSender({});
+          this._editing.start();
+          this._editing.roster(this._lastRoster);
+        });
+      });
+  }
+
+  /**
+   * The relay's half of a transport: one request carrying the body the store built.
+   * A page target arrives in the extended envelope, a legacy path exactly as it
+   * always has, and the host decides by the same connection ownership either way.
+   */
+  _postPresence(body) {
     const url = new URL('/_/presence', window.location.origin);
     url.searchParams.set('client-id', this.clientId);
     return fetch(url.href, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Document-URL': window.location.href },
-      body: JSON.stringify({ editing: path }),
+      body: JSON.stringify(body),
     }).then((response) => response.ok, () => false);
   }
 

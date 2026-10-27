@@ -8,6 +8,7 @@
  * save, admin or editing-sender graph behind it.
  */
 import { loadEdit as loadConflictsEdit } from "./conflicts.js";
+import { presence } from "./presence-store.js";
 
 export { savePageThrottled, setLastSavedBaselines, setUnsavedChanges, getLastSavedBytes, conflictResolvedBySync, isSaveConflicted, baselineSettled, schedulePaintHeal } from "../core/save.js";
 export { enableContentEditable } from "../core/admin-contenteditable.js";
@@ -21,8 +22,15 @@ export { EditingSender } from "./editing-sender.js";
 // an entry stops, and the live lane it starts is what an exit disposes. The exit's
 // saved lane is the controller's to restart, not this lease's.
 export function syncParticipant(sync) {
-  const quiesce = () =>
-    sync.lane === "live" && sync._morphInFlight ? { ok: false, code: "pending-input" } : { ok: true };
+  // The outgoing target goes before the editor is taken down, so a caret this tab
+  // published cannot outlive the session that published it. A page target is
+  // released with the ownership it came with; the generic marker is cleared
+  // outright. Neither falls back to a positional marker: the exit publishes nobody.
+  const quiesce = () => {
+    presence.setGeneric(null);
+    presence.releaseTarget();
+    return sync.lane === "live" && sync._morphInFlight ? { ok: false, code: "pending-input" } : { ok: true };
+  };
   const dispose = () => sync.stop();
   return {
     id: "clay:sync",
