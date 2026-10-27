@@ -105,6 +105,37 @@ export function attachCaptureArtifact(artifact) {
   if (activeCapture && artifact) activeCapture.artifact = artifact;
 }
 
+// The page state of one save capture: the exact value its page tag carried when its
+// bytes were serialized, copied so the edits that follow the capture can never reach it.
+// Keyed by the capture id every accepted event carries, and dropped when the capture
+// settles, so an accepted save reads the state it was captured from rather than the
+// store's value at the moment the host answered.
+let capturePageStateReader = null;
+const capturePageStates = new Map();
+
+/**
+ * Register the reader that finds a page state in a final save clone.
+ *
+ * A page's own code registers it (page/save-projection.js), so a document without a
+ * page pays one null check per capture and nothing else. Read from the clone rather
+ * than from a store because that tag is what the file receives, after every transform
+ * and every authored save handler has run.
+ */
+export function setCapturePageState(reader) {
+  capturePageStateReader = reader;
+}
+
+/**
+ * The page state pinned to one capture, or null.
+ *
+ * @param {?number} captureId
+ * @returns {?Object}
+ */
+export function capturePageState(captureId) {
+  if (captureId === null || captureId === undefined) return null;
+  return capturePageStates.get(captureId) ?? null;
+}
+
 /** The artifact this capture's renderer attached, or null. */
 export function captureArtifact(result) {
   return result ? captureArtifacts.get(result) || null : null;
@@ -112,7 +143,9 @@ export function captureArtifact(result) {
 
 /** Forget a capture's artifact: it was skipped, refused, or has now settled. */
 export function releaseCaptureArtifact(result) {
-  if (result) captureArtifacts.delete(result);
+  if (!result) return;
+  captureArtifacts.delete(result);
+  capturePageStates.delete(result.captureId);
 }
 
 /**
@@ -263,6 +296,11 @@ function serializeClone(clone) {
  * cost somebody a save.
  */
 function serializeSaveClone(clone, context = null) {
+  if (context && capturePageStateReader) {
+    let state = null;
+    try { state = capturePageStateReader(clone); } catch (_) {}
+    if (state) capturePageStates.set(context.captureId, state);
+  }
   const today = serializeClone(clone);
   if (!saveRenderer) return today;
   const previous = activeCapture;

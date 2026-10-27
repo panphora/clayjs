@@ -8,7 +8,7 @@
 import { contains, parseBy, frameSet, descendants, unionRanges, formatBy } from "../live/provenance.js";
 import { createStore } from "../live/store.js";
 import { serializeLive, stampOf, parseStamp, textHash } from "../live/ops.js";
-import { onSnapshot } from "../core/snapshot.js";
+import { capturePageState, onSnapshot } from "../core/snapshot.js";
 import { onSaveAccepted, onSaveAttempt, onSaveOutcome, isSaveInProgress } from "../core/save-core.js";
 import { savePageForce, baselineSettled, isSaveConflicted, autosaveIsSuspended } from "../core/save.js";
 import { withKeepalive } from "../core/save-core.js";
@@ -1235,11 +1235,47 @@ onSaveOutcome(({ captureId, result, attempts, sent }) => {
   if (plan) startHistoryRecovery(plan, { result, attempts, startedAt: Date.now() });
 });
 
+// The recovery integration's turn at an accepted save, when one journals this page.
+// Registered by page code once it holds a `page.yjs` channel, so a page that journals
+// nothing loads neither the proof builder nor the conditional client, and pays one null
+// check per save.
+let pageCheckpoints = null;
+
+/**
+ * Hand every accepted save to a page checkpoint integration, or null to stop.
+ *
+ * The integration builds the proof from the capture's pinned page state and the bytes
+ * the host took; nothing here decides what is covered. Its answer is not awaited: a save
+ * that succeeded is saved whether or not a journal can be retired, and a failure there
+ * must never reach the save's own outcome.
+ *
+ * @param {?Function} install - ({capture, state, article, etag}) => unknown
+ */
+export function registerPageCheckpoints(install) {
+  pageCheckpoints = install;
+}
+
+function offerCheckpoint(captureId, html) {
+  if (!pageCheckpoints) return;
+  // Read synchronously, before this capture is released: the value is the one its page
+  // tag carried, and the edits that followed it are not in these bytes.
+  const state = capturePageState(captureId);
+  if (!state) return;
+  let article = null;
+  try { article = parseHtml(html).querySelector("article[data-page]")?.innerHTML ?? null; }
+  catch (_) { article = null; }
+  const etag = lastSeenEtag();
+  Promise.resolve()
+    .then(() => pageCheckpoints({ capture: String(captureId), state, article, etag }))
+    .catch(() => {});
+}
+
 // An accepted body confirms the ops of the capture that sent it, and only those.
 // A null context (a raw save) cannot consume a captured pin.
 function handleAccepted(html, context) {
   const captureId = context?.captureId;
   if (captureId === null || captureId === undefined) return;
+  offerCheckpoint(captureId, html);
   const pin = capturePins.get(captureId);
   if (!pin) return;
   dropCapture(captureId);

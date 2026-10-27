@@ -150,6 +150,24 @@ export async function hostPageFormat() {
 }
 
 /**
+ * Where this host serves the page state of one accepted version, or null.
+ *
+ * Two things have to be true: the host announced `page-recovery-v1` by name, and its
+ * document block named the resource as `pageState.href`. A host that has the resource
+ * but has not announced the extension is still launching it, and a client that inferred
+ * either one from the other would retire journaled work against a pair nobody promised.
+ * Absent, empty or not a string is null, which means no conditional read and no proof
+ * from one: the records stay.
+ *
+ * @returns {Promise<?string>}
+ */
+export async function hostPageStateHref() {
+  const meta = await hostMeta();
+  if (!meta.extensions.includes("page-recovery-v1")) return null;
+  return meta.document?.pageState?.href || null;
+}
+
+/**
  * Whether this host keeps a version history a person can go back to.
  *
  * The `document` block names it: absent means no history, which is the answer every

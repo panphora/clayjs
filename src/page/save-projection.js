@@ -53,4 +53,43 @@ export function projectInto(clone) {
   if (!customTitle(clone)) writeTitle(clone, title);
 }
 
+/**
+ * The page state a final save clone carries, or null.
+ *
+ * One page tag is one page state: a Yjs page never has two, a tag holding plain block
+ * data is a page's own content rather than one, and a tag that does not parse is not one
+ * either. The value is copied, because the store keeps writing to its own after the
+ * capture and a checkpoint must prove the bytes this capture sent.
+ *
+ * Registered with core/snapshot only by the recovery integration, so a page that
+ * journals nothing never reads it.
+ *
+ * @param {HTMLElement} root - the save clone, after every transform
+ * @returns {?Object}
+ */
+export function pageStateOfClone(root) {
+  const tags = pageTags(root);
+  if (tags.length !== 1) return null;
+  let value;
+  try { value = parseJsonRelaxed(tags[0].textContent); }
+  catch { return null; }
+  const { v, g, y } = value ?? {};
+  if (v !== 1 || !y || typeof y !== "object" || Array.isArray(y)) return null;
+  return { v, g, y: { ...y } };
+}
+
+/**
+ * The canonical article one page state projects to.
+ *
+ * The same projection the save writes into the capture's article, run over the state a
+ * capture pinned or a host handed back. A state whose projection is not the article
+ * that was accepted is not a proof of those bytes, whichever transform changed it.
+ *
+ * @param {Object|string} state - a page value, or the page tag text holding one
+ * @returns {string}
+ */
+export function articleOfPageState(state) {
+  return renderFromTags([typeof state === "string" ? state : JSON.stringify(state)]).html;
+}
+
 addDocumentTransform(projectInto);
