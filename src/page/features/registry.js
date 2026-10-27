@@ -23,4 +23,5 @@ export const featureForType = (type) => Object.keys(FEATURES).find((id) => FEATU
 export const COMMAND_FEATURES = {
   mentions: { module: "page/features/mentions.js", load: () => import("./mentions.js") },
   dates: { module: "page/features/dates.js", load: () => import("./dates.js") },
+  emoji: { module: "page/features/emoji.js", load: () => import("./emoji.js") },
 };
