@@ -10,7 +10,7 @@ import { outlineOf } from "./outline-cache.js";
 import { currentSpan, selectBlocks, duplicateBlocks, deleteBlocks, asStep, typeIntoBlocks } from "./blocksel.js";
 import { BlockDrag } from "./drag.js";
 import { openLinkEditor } from "./link.js";
-import { BLOCK_TYPES, MENU_ITEMS, blockTypeOf, turnBlocks, turnInto, insertAfter, rankItems, runItem, retype, canTurnInto, insertItemsFor, loadChartPart } from "./items.js";
+import { BLOCK_TYPES, MENU_ITEMS, blockTypeOf, turnBlocks, turnInto, insertAfter, rankItems, runItem, retype, canTurnInto, insertItemsFor, loadChartPart, runMenuCommand } from "./items.js";
 import toast from "../ui/toast-lazy.js";
 import { pickCsv } from "./csv-import.js";
 import { HISTORY_INTENT, typingIntent } from "./history-intent.js";
@@ -582,6 +582,9 @@ class Chrome {
       { key: "turn", label: "Turn into", icon: "\u21bb", run: (view, chrome) => chrome.openMenu("turn", chrome.more) },
       { key: "insert", label: "Insert", icon: "+", run: (view, chrome) => chrome.openMenu("insert", chrome.more, null, null, view.state.doc.child(chrome.blockIndex()).attrs.id) },
       ...actions,
+      { key: "titleIcon", label: "Add icon", icon: "\u263A", run: (view) => runMenuCommand(view, "titleIcon") },
+      { key: "titleCover", label: "Add cover", icon: "\u25A4", run: (view) => runMenuCommand(view, "titleCover") },
+      { key: "exportHtml", label: "Export reading copy", icon: "\u21E9", run: (view) => runMenuCommand(view, "exportHtml") },
     ];
   }
 

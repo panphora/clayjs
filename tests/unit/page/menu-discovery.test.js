@@ -32,7 +32,7 @@ test("a fuzzy abbreviation is found after the exact ranks", () => {
 
 test("equal fuzzy costs keep registry order", () => {
   expect(keys("blst")).toEqual(["bullet", "ordered"]);
-  expect(keys("cl")).toEqual(["toggle", "callout", "board", "check"]);
+  expect(keys("cl")).toEqual(["toggle", "callout", "board", "date", "check"]);
 });
 
 test("a lower fuzzy cost comes before a higher one", () => {

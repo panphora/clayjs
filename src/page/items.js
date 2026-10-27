@@ -44,6 +44,9 @@ export const INSERT_ITEMS = [
   { key: "table", label: "Table", description: "Rows and columns, paste from a spreadsheet", icon: "▦", aliases: ["grid", "spreadsheet"], insert: "table" },
   { key: "csv", label: "Import CSV…", description: "Turn a CSV file into a table", icon: "⇧", aliases: ["comma separated", "import"], insert: "csv" },
   { key: "board", label: "Board", description: "Cards in columns, like a kanban", icon: "▥", aliases: ["kanban", "cards", "columns", "status"], insert: "board" },
+  { key: "mention", label: "Mention", description: "Name someone on the page", icon: "@", aliases: ["person", "people", "assign"], command: "mentions" },
+  { key: "date", label: "Date", description: "Today, tomorrow or a calendar day", icon: "▧", aliases: ["calendar", "today", "tomorrow", "due"], command: "dates" },
+  { key: "emoji", label: "Emoji", description: "Insert one glyph", icon: "☺", aliases: ["smiley", "glyph", "symbol"], command: "emoji" },
 ];
 
 export const CHART_ITEM = { key: "chart", label: "Chart", description: "A bar or line chart from a table", icon: "📊", aliases: ["graph", "plot", "bar", "line"], insert: "chart" };
@@ -285,6 +288,19 @@ export function runTocItem(view, index, remove = null) {
   });
 }
 
+// The menus ask for an optional command through the editor's own entry point, at the moment
+// somebody picks the row: importing it here keeps this module plain data, which the block
+// menus, the Markdown rules and the editor all share, while the command still loads only on
+// first use. `id` is the row it has in COMMAND_FEATURES.
+export const runMenuCommand = (view, id, args) => import("./editor.js").then(({ runPageCommand }) => runPageCommand(view, id, args));
+
+// A row whose work is an optional command: the typed query goes with the pick, and the
+// command is asked for by its id.
+function runCommandItem(view, id, remove) {
+  if (remove) view.dispatch(view.state.tr.delete(remove.from, remove.to));
+  return runMenuCommand(view, id, {});
+}
+
 // What a pick does in the insert menu for the block at `index`. A divider and
 // the file pickers have their own placement; a block type retypes an empty line
 // and otherwise goes into a new block below the line's whole subtree. A block
@@ -299,6 +315,7 @@ export function runItem(view, item, index, remove = null) {
   if (item.insert === "board") return insertBoardNode(st, view.dispatch, makeBoard(), remove, index);
   if (item.insert === "chart") return loadChartPart(view).then(({ chartFromSlash }) => chartFromSlash(view, index, remove));
   if (item.insert === "toc") return runTocItem(view, index, remove);
+  if (item.command) return runCommandItem(view, item.command, remove);
   if (!isToggleHeading(item)) {
     return item.type === "quote" ? runFormatted(view, () => writeItem(view, item, index, remove)) : writeItem(view, item, index, remove);
   }

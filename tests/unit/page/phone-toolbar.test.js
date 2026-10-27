@@ -152,6 +152,7 @@ test("the More menu carries the rest of the formatting and the block actions", (
     expect(rows(view).map((r) => r.querySelector(".page-menu-label").textContent)).toEqual([
       "Strikethrough", "Bulleted list", "Numbered list", "Checklist", "Code",
       "Underline", "Text color", "Highlight", "Turn into", "Insert", "Move up", "Move down", "Indent", "Outdent",
+      "Add icon", "Add cover", "Export reading copy",
     ]);
     row(view, "Move down").click();
     expect(shape(view)).toBe("B | A");
