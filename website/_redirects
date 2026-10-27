@@ -13,6 +13,9 @@
 /complete-guide /docs/guide/ 301
 /complete-guide.html /docs/guide/ 301
 /complete-guide.md /guide.md 301
+/visual-guide /docs/guide/visual-guide/ 301
+/visual-guide.html /docs/guide/visual-guide/ 301
+/visual-guide.md /docs/guide/visual-guide.md 301
 /docs.html /docs/ 301
 /docs.md /docs/index.md 301
 /offline /docs/offline/ 301
