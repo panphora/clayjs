@@ -1,6 +1,6 @@
 import { isEditMode, isOwner } from "./is-edit-mode.js";
 import onDomReady from "../lib/dom-ready.js";
-import { addDocumentTransform } from "./snapshot.js";
+import { addDocumentTransform, originalSnapshotNode } from "./snapshot.js";
 import { restoreAuthoredOrder } from "./preserve-authored.js";
 
 export const SELECTOR = '[editmode\\:onclick]';
@@ -16,6 +16,7 @@ export function disableOnClickBeforeSave () {
       if (originalValue === null) return;
       resource.setAttribute("inert-onclick", originalValue);
       resource.removeAttribute("onclick");
+      restoreAuthoredOrder(resource, originalSnapshotNode(resource) ?? resource);
     });
   });
 }

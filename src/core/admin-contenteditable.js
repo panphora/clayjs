@@ -1,13 +1,16 @@
 import { isEditMode, isOwner } from "./is-edit-mode.js";
 import onDomReady from "../lib/dom-ready.js";
-import { addDocumentTransform } from "./snapshot.js";
+import { addDocumentTransform, originalSnapshotNode } from "./snapshot.js";
 import { authoredAttr, canonicalContentEditable, captureAuthored, restoreAuthoredOrder } from "./preserve-authored.js";
 
 export const SELECTOR = '[editmode\\:contenteditable]';
 
 export function disableContentEditableBeforeSave () {
   addDocumentTransform(docElem => {
-    docElem.querySelectorAll(SELECTOR).forEach(canonicalContentEditable);
+    docElem.querySelectorAll(SELECTOR).forEach(el => {
+      canonicalContentEditable(el);
+      restoreAuthoredOrder(el, originalSnapshotNode(el) ?? el);
+    });
   });
 }
 

@@ -37,10 +37,10 @@ export function authoredAttr(el, name) {
 // An attribute that was removed and written again lands at the end of the list, and
 // attribute order is what a saved file compares: an untouched page would come back
 // with `disabled` moved. Rebuilding the list in the recorded order is the only way to
-// hand the file back exactly what it served. Runs only when something actually moved,
-// and only on the way out of edit.
-export function restoreAuthoredOrder(el) {
-  const seen = authored.get(el);
+// hand the file back exactly what it served. Runs only when something actually moved, on
+// the way out of edit and on the save clone, whose record belongs to its live original.
+export function restoreAuthoredOrder(el, from = el) {
+  const seen = authored.get(from);
   if (!seen) return;
   const current = el.getAttributeNames();
   const desired = [

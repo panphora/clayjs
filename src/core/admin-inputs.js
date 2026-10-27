@@ -16,6 +16,7 @@ export function disableAdminInputsBeforeSave() {
         const live = originalSnapshotNode(input);
         const spelled = live ? authoredAttr(live, name) : null;
         input.setAttribute(name, spelled === null ? '' : spelled);
+        restoreAuthoredOrder(input, live ?? input);
       });
     }
   });
