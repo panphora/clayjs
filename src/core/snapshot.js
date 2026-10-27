@@ -350,6 +350,19 @@ function clonePreventingOnclone(node, deep = true) {
   finally { window.__preventOnclone = prev; }
 }
 
+// A clone OF the save clone (the comparison and dirty trees) is not the page, so the
+// view recorded no provenance for it: a transform that asks originalSnapshotNode would
+// get null there and answer differently than on the save clone it came from. The two
+// trees are isomorphic when this runs, so a lockstep walk registers each clone node
+// against the original its save-clone twin maps to.
+function carryProvenance(saveNode, cloneNode) {
+  const live = snapshotProvenance.get(saveNode);
+  if (live) snapshotProvenance.set(cloneNode, live);
+  const saveKids = saveNode.children;
+  const cloneKids = cloneNode.children;
+  for (let i = 0; i < saveKids.length; i++) carryProvenance(saveKids[i], cloneKids[i]);
+}
+
 export function captureSnapshot({ flushUndo = true, authored = true, forSave = false, requestRefresh = false, context = null } = {}) {
   // Force-close any pending undo idle batch BEFORE cloning the DOM, so the
   // snapshot reflects a clean undo boundary. Without this, a save that fires
@@ -565,6 +578,7 @@ export function captureForComparisonAndDirty({ flushUndo = true } = {}) {
   const dirtyClone = clone.querySelector(NO_TRIGGER_AUTOSAVE_SELECTOR)
     ? clonePreventingOnclone(clone)
     : null;
+  if (dirtyClone) carryProvenance(clone, dirtyClone);
 
   for (const el of clone.querySelectorAll(STRIP_FROM_COMPARISON)) {
     el.remove();
@@ -635,6 +649,7 @@ export function captureForSaveAndComparison({ emitForSync = true, flushUndo = tr
 
   // Clone for comparison before stripping (cheaper than cloning live DOM)
   const compareClone = clonePreventingOnclone(clone);
+  carryProvenance(clone, compareClone);
 
   // The dirty domain differs from the autosave domain only inside
   // no-trigger-autosave regions, so a document without one pays nothing: the two
@@ -644,6 +659,7 @@ export function captureForSaveAndComparison({ emitForSync = true, flushUndo = tr
   const dirtyClone = clone.querySelector(NO_TRIGGER_AUTOSAVE_SELECTOR)
     ? clonePreventingOnclone(clone)
     : null;
+  if (dirtyClone) carryProvenance(clone, dirtyClone);
 
   // Save clone: run hooks (freeze restore lives here), THEN strip [no-save]/[save-remove]
   // LAST (snapshot-algorithm step 7) so freeze-restored [no-save] content can't leak to disk.
