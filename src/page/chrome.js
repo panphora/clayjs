@@ -5,7 +5,8 @@
 // --page-* tokens in editor.js (contract: default-page/v1/look/THEME-CONTRACT.md).
 import { state, commands } from "../vendor/prosemirror.vendor.js";
 import { schema } from "./schema.js";
-import { BlockSelection, outline, siblingSpan, moveBlock, indentBlocks, outdentBlocks } from "./blocks.js";
+import { BlockSelection, siblingSpan, moveBlock, indentBlocks, outdentBlocks } from "./blocks.js";
+import { outlineOf } from "./outline-cache.js";
 import { currentSpan, selectBlocks, duplicateBlocks, deleteBlocks, asStep, typeIntoBlocks } from "./blocksel.js";
 import { openAltEditor, setImageAttrs } from "./media.js";
 import { BlockDrag } from "./drag.js";
@@ -27,7 +28,7 @@ const N = schema.nodes;
 const MOD = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+";
 
 const selectedRoots = (st) => {
-  const ents = outline(st.doc);
+  const ents = outlineOf(st.doc);
   const { lo, hi } = st.selection.span(st.doc);
   return ents.slice(lo, hi + 1).filter((e) => e.up === ents[lo].up);
 };
@@ -489,7 +490,7 @@ class Chrome {
     const hit = view.posAtCoords({ left: view.dom.getBoundingClientRect().left + 2, top: clientY });
     if (!hit) return;
     const doc = view.state.doc;
-    const ents = outline(doc);
+    const ents = outlineOf(doc);
     let i = Math.min(doc.resolve(hit.inside >= 0 ? hit.inside : hit.pos).index(0), ents.length - 1);
     while (i > 0 && ents[i].hidden) i--;
     this.hover = i;
@@ -577,7 +578,7 @@ class Chrome {
 
   openActions(anchor = this.plus, at = null) {
     const st = this.view.state;
-    const ents = outline(st.doc);
+    const ents = outlineOf(st.doc);
     const sel = st.selection;
     const inside = at !== null && sel instanceof BlockSelection && sel.span(st.doc).lo <= at && at <= sel.span(st.doc).hi;
     const { lo, hi } = at === null || inside ? currentSpan(st, ents) : siblingSpan(ents, at, at);

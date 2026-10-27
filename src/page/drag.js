@@ -1,4 +1,5 @@
-import { outline, siblingSpan, BlockSelection, captureSpan, resolveSpan } from "./blocks.js";
+import { siblingSpan, BlockSelection, captureSpan, resolveSpan } from "./blocks.js";
+import { outlineOf } from "./outline-cache.js";
 import { selectBlocks, asStep } from "./blocksel.js";
 import { gapTargets, summaryTarget, pickTarget, moveSpanTo } from "./drop.js";
 import { announce } from "./announce.js";
@@ -13,6 +14,37 @@ export function scrollParent(el) {
     if ((o === "auto" || o === "scroll") && n.scrollHeight > n.clientHeight) return n;
   }
   return el.ownerDocument.scrollingElement;
+}
+
+// The blocks a pointer can land on, in vertical order: one list per outline, so
+// every frame of a drag searches it instead of walking the document.
+const visibles = new WeakMap();
+
+function visibleOf(ents, view) {
+  let list = visibles.get(ents);
+  if (!list) {
+    list = [];
+    for (const e of ents) {
+      if (e.hidden) continue;
+      const dom = view.nodeDOM(e.at);
+      if (dom?.getBoundingClientRect) list.push({ i: e.i, dom });
+    }
+    visibles.set(ents, list);
+  }
+  return list;
+}
+
+// The first visible entry whose vertical midpoint is below y, or -1 when the
+// pointer is past every block.
+function firstBelow(list, y) {
+  let lo = 0, hi = list.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    const r = list[mid].dom.getBoundingClientRect();
+    if (y < r.top + r.height / 2) hi = mid;
+    else lo = mid + 1;
+  }
+  return lo < list.length ? lo : -1;
 }
 
 export class BlockDrag {
@@ -43,7 +75,7 @@ export class BlockDrag {
 
   start(event) {
     if (event.button !== 0 || this.state) return;
-    const st = this.view.state, ents = outline(st.doc), sel = st.selection;
+    const st = this.view.state, ents = outlineOf(st.doc), sel = st.selection;
     const index = Math.min(this.index(), ents.length - 1);
     const inSel = sel instanceof BlockSelection && ents[index].at >= sel.from && ents[index].end <= sel.to;
     const { lo, hi } = inSel ? sel.span(st.doc) : siblingSpan(ents, index, index);
@@ -76,7 +108,7 @@ export class BlockDrag {
   begin() {
     const s = this.state;
     if (!s || s.active) return;
-    const st = this.view.state, ents = outline(st.doc);
+    const st = this.view.state, ents = outlineOf(st.doc);
     const span = resolveSpan(ents, s.span);
     if (!span) return this.cancel();
     s.active = true;
@@ -95,19 +127,19 @@ export class BlockDrag {
   track() {
     const s = this.state, view = this.view, st = view.state;
     if (!s) return;
-    const ents = outline(st.doc), span = resolveSpan(ents, s.span);
+    const ents = outlineOf(st.doc), span = resolveSpan(ents, s.span);
     if (!span) return this.cancel();
     const { lo, hi } = span;
+    const visible = visibleOf(ents, view);
+    const k = firstBelow(visible, s.y);
     let next = -1, line = null, over = null;
-    for (const e of ents) {
-      if (e.hidden) continue;
-      const dom = view.nodeDOM(e.at);
-      if (!dom?.getBoundingClientRect) continue;
-      const r = dom.getBoundingClientRect();
-      if (s.y >= r.top + r.height / 4 && s.y <= r.bottom - r.height / 4) over = { i: e.i, bottom: r.bottom };
-      if (s.y < r.top + r.height / 2) { next = e.i; line = r.top - 2; break; }
+    const stop = k < 0 ? visible.length : k + 1;
+    for (let j = Math.max(0, stop - 2); j < stop; j++) {
+      const r = visible[j].dom.getBoundingClientRect();
+      if (s.y >= r.top + r.height / 4 && s.y <= r.bottom - r.height / 4) over = { i: visible[j].i, bottom: r.bottom };
       line = r.bottom + 2;
     }
+    if (k >= 0) { next = visible[k].i; line = visible[k].dom.getBoundingClientRect().top - 2; }
     const inside = lo < 0 ? null : over && summaryTarget(st, ents, lo, hi, over.i);
     const key = inside ? `summary:${over.i}` : next;
     if (key !== s.gap || st.doc !== s.doc) {
@@ -155,7 +187,7 @@ export class BlockDrag {
     if (!s.active) {
       this.stop();
       if (event.type === "pointerup") {
-        const ents = outline(this.view.state.doc), span = resolveSpan(ents, s.span);
+        const ents = outlineOf(this.view.state.doc), span = resolveSpan(ents, s.span);
         if (span) this.onClick(span.lo);
       }
       return;
@@ -163,7 +195,7 @@ export class BlockDrag {
     this.track();
     if (this.state !== s) return;
     const target = s.target;
-    const st = this.view.state, ents = outline(st.doc);
+    const st = this.view.state, ents = outlineOf(st.doc);
     const span = resolveSpan(ents, s.span);
     this.stop();
     if (!target || !span) return;
