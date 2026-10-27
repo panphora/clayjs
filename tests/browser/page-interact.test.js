@@ -459,6 +459,7 @@ describe('code block colours in a browser', () => {
 
   it('the language picker colours a plain block', async () => {
     setup({ c: { t: 'code_block', pos: 'V', c: 'SELECT 1 FROM t' } });
+    expect(await until(() => el('c').querySelector('select.page-code-lang'))).to.equal(true);
     const picker = el('c').querySelector('select.page-code-lang');
     picker.value = 'sql';
     picker.dispatchEvent(new Event('change'));
