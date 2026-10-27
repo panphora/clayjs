@@ -34,10 +34,20 @@
  * does not match, when the version list is empty, when a cohort reports no
  * positive or no negative case, and on any failed cell. It never edits the cache.
  *
- * `--phase features` belongs to Step 9: it runs R and F against each other from
- * `--tolerance-lock`, the published R artifact's own tarball and digest. That
- * artifact cannot exist before R is published, so asking for it here fails
- * instead of passing a gate it never ran.
+ * `--phase features` is Step 9's completed-release gate. `--tolerance-lock` names
+ * the published R artifact: the gate hashes the cached tarball against the
+ * registry's sha512 and sha1 and the extracted tree against its recorded digest,
+ * then loads exactly that package beside this tree and runs both directions of
+ * Step 9's matrix with real R code and real F code — simultaneous known and
+ * unknown formatting, a deletion and its Undo, a neighbouring block edited beside
+ * the quote, a save and reopen without live tags, the server checkpoint, the
+ * offline host bundle, a stale pre-R save refused before mutation, and the
+ * same-browser lane's floor transition. A digest mismatch, a missing tarball or
+ * a cell no cohort ran fails the gate.
+ *
+ * The features phase also runs Step 7's rows, with this tree on the near side,
+ * so one command proves the whole release: the published legacy releases, the
+ * tolerance release and this one.
  */
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -50,6 +60,13 @@ const FIXTURES = path.join(ROOT, "tests/fixtures/page/formats");
 const WORKER = path.join(FIXTURES, "worker.mjs");
 const LOCK = path.join(FIXTURES, "legacy-lock.json");
 const ROWS = ["floor-zero", "floor-refusal", "newer-preserve", "offline-reader", "invalid-content"];
+const FEATURE_ROWS = [
+  "mixed-format", "delete-undo", "quote-neighbour", "tagless-reopen",
+  "checkpoint", "offline-bundle", "stale-save", "channel",
+];
+// Every row of Step 9's matrix has to be run by both cohorts: an artifact that
+// never loaded, and a flow a cohort quietly skipped, are both a failed gate.
+const FEATURE_CELLS = Object.fromEntries(FEATURE_ROWS.map((row) => [row, ["R", "F"]]));
 
 function parseArgs(argv) {
   const flags = {};
@@ -78,8 +95,10 @@ const cache = path.resolve(ROOT, flags["legacy-cache"] ?? ".version-cache");
 const currentRoot = path.resolve(ROOT, flags.current ?? ".");
 const versions = String(flags.legacy ?? "").split(",").map((value) => value.trim()).filter(Boolean);
 if (!versions.length) fail("--legacy needs a nonempty, comma-separated list of published versions", 2);
-if (phase === "features") {
-  fail("--phase features is Document 11 Step 9's R/F matrix and needs the published R artifact in --tolerance-lock; it is not implemented before R exists", 2);
+if (new Set(versions).size !== versions.length) fail("--legacy lists the same version twice", 2);
+const toleranceLock = flags["tolerance-lock"] ? path.resolve(ROOT, flags["tolerance-lock"]) : null;
+if (phase === "features" && !toleranceLock) {
+  fail("--phase features is Document 11 Step 9's R/F matrix and needs --tolerance-lock <file>", 2);
 }
 
 const lock = JSON.parse(readFileSync(LOCK, "utf8"));
@@ -146,7 +165,59 @@ function verifyPackage(version) {
 }
 
 const packages = versions.map(verifyPackage);
-if (new Set(versions).size !== versions.length) fail("--legacy lists the same version twice", 2);
+
+// Step 9's artifact: the published tolerance release, loaded exactly as the
+// registry holds it. Both recorded tarball digests are checked against the cached
+// tarball and the extracted tree against its own digest, so a corrupted lock
+// entry, an edited cache or a substitute build fails the gate instead of passing
+// it. A tarball the cache does not hold cannot be checked at all, so it fails too.
+function verifyTolerance(file) {
+  if (!existsSync(file)) fail(`the tolerance lock ${display(file)} does not exist`);
+  let lock;
+  try {
+    lock = JSON.parse(readFileSync(file, "utf8"));
+  } catch (error) {
+    fail(`the tolerance lock ${display(file)} is not JSON: ${error.message}`, 2);
+  }
+  const version = String(lock.version ?? "");
+  if (!version) fail(`the tolerance lock ${display(file)} records no version`, 2);
+  if (typeof lock.package !== "string" || !lock.package) fail(`the tolerance lock ${display(file)} records no package name`, 2);
+  if (!/^sha512-[A-Za-z0-9+/]+=*$/.test(String(lock.integrity ?? ""))) fail(`the tolerance lock ${display(file)} records no tarball integrity`, 2);
+  if (!/^[0-9a-f]{40}$/.test(String(lock.shasum ?? ""))) fail(`the tolerance lock ${display(file)} records no tarball shasum`, 2);
+  if (!lock.extracted || !/^[0-9a-f]{128}$/.test(String(lock.extracted.sha512 ?? ""))) {
+    fail(`the tolerance lock ${display(file)} records no extracted digest`, 2);
+  }
+
+  const dir = path.join(cache, version);
+  if (!existsSync(dir)) fail(`@panphora/clayjs@${version} is unavailable: ${display(dir)} does not exist`);
+  const pkg = JSON.parse(readFileSync(path.join(dir, "package.json"), "utf8"));
+  if (pkg.name !== lock.package || pkg.version !== version) {
+    fail(`@panphora/clayjs@${version} is unavailable: ${display(dir)} holds ${pkg.name}@${pkg.version}`);
+  }
+  const tarball = tarballIn(cache, version);
+  if (!tarball) {
+    fail(`@panphora/clayjs@${version} cannot be verified: ${display(cache)} holds no tarball for it, so its recorded digests are unchecked`);
+  }
+  const bytes = readFileSync(tarball);
+  const integrity = `sha512-${createHash("sha512").update(bytes).digest("base64")}`;
+  if (integrity !== lock.integrity) {
+    fail(`@panphora/clayjs@${version} tarball digest ${integrity} does not match the lock's integrity ${lock.integrity}`);
+  }
+  const shasum = createHash("sha1").update(bytes).digest("hex");
+  if (shasum !== lock.shasum) {
+    fail(`@panphora/clayjs@${version} tarball shasum ${shasum} does not match the lock's ${lock.shasum}`);
+  }
+  const extracted = extractedDigest(dir);
+  if (extracted.sha512 !== lock.extracted.sha512) {
+    fail(`@panphora/clayjs@${version} does not match its lock: ${display(dir)} digests to ${extracted.sha512}, recorded ${lock.extracted.sha512}`);
+  }
+  if (lock.extracted.files != null && extracted.files !== lock.extracted.files) {
+    fail(`@panphora/clayjs@${version} does not match its lock: ${display(dir)} holds ${extracted.files} files, recorded ${lock.extracted.files}`);
+  }
+  return { version, dir, tarball: display(tarball), integrity, shasum, extracted, basis: "tarball and extracted tree" };
+}
+
+const tolerance = phase === "features" ? verifyTolerance(toleranceLock) : null;
 
 // One child, one cohort, one job. The answer is one JSON line; the run fails when
 // the child cannot be started, exits nonzero, or says a case failed.
@@ -198,8 +269,13 @@ const canon = (value) =>
     : value && typeof value === "object" ? `{${Object.keys(value).sort().map((key) => JSON.stringify(key) + ":" + canon(value[key])).join(",")}}`
       : JSON.stringify(value ?? null);
 const textOf = (html) => html.replace(/<[^>]*>/g, "");
+// A block's order and its key are its writer's bookkeeping; the rest is content.
+const withoutBookkeepingOf = ({ pos, id, ...rest }) => rest;
 
-const current = record("R");
+// In the tolerance phase the tree under test is R; in the features phase it is F,
+// and the published tolerance release is the cohort named R.
+const treeName = phase === "features" ? "F" : "R";
+const current = record(treeName);
 const newerBlocks = JSON.parse(readFileSync(path.join(FIXTURES, "newer-format.json"), "utf8"));
 
 // Row 1: an ordinary floor-0 document, both ways, against the published codec.
@@ -209,20 +285,20 @@ function floorZero(version) {
   const legacy = child(cohort, legacyRoot, "write", { blocks: fixture.blocks, malformed: fixture.malformed });
   const r = child(current, currentRoot, "write", { blocks: fixture.blocks, malformed: fixture.malformed });
 
-  cell("floor-zero", cohort, "R's article for the existing formats equals the published codec's bytes", () => {
+  cell("floor-zero", cohort, `${treeName}'s article for the existing formats equals the published codec's bytes`, () => {
     must(legacy.output.articleHtml === r.output.articleHtml,
       `the articles differ:\n  legacy ${legacy.output.articleHtml}\n  R      ${r.output.articleHtml}`);
     return r.output.articleHtml;
   });
-  cell("floor-zero", cohort, "R's revision for the existing formats equals the published codec's", () => {
+  cell("floor-zero", cohort, `${treeName}'s revision for the existing formats equals the published codec's`, () => {
     must(legacy.output.rev === r.output.rev, `revisions differ: legacy ${legacy.output.rev}, R ${r.output.rev}`);
     return r.output.rev;
   });
-  cell("floor-zero", cohort, "R's page value for the existing formats equals the published codec's", () => {
+  cell("floor-zero", cohort, `${treeName}'s page value for the existing formats equals the published codec's`, () => {
     must(canon(legacy.output.value) === canon(r.output.value), "the page values differ");
     return canon(r.output.value);
   });
-  cell("floor-zero", cohort, "R reads the legacy writer's article and Yjs updates", () => {
+  cell("floor-zero", cohort, `${treeName} reads the legacy writer's article and Yjs updates`, () => {
     const read = child(current, currentRoot, "read", {
       articleHtml: legacy.output.articleHtml,
       rev: legacy.output.rev,
@@ -234,7 +310,7 @@ function floorZero(version) {
     must(canon(read.output.blocks) === canon(legacy.output.decoded), "R decoded different blocks from the legacy updates");
     return `${read.output.model.length} items`;
   });
-  cell("floor-zero", cohort, "the legacy writer reads R's article and Yjs updates", () => {
+  cell("floor-zero", cohort, `the legacy writer reads ${treeName}'s article and Yjs updates`, () => {
     const read = child(cohort, legacyRoot, "read", {
       articleHtml: r.output.articleHtml,
       rev: r.output.rev,
@@ -323,7 +399,7 @@ function newerPreserve(newer) {
     neighbour: { id: newer.neighbour.id, add: newer.neighbour.add },
   });
   for (const stage of ["reopened", "migrated", "edited", "undone", "checkpoint"]) {
-    cell("newer-preserve", current, `R keeps the newer writer's records through ${stage}`, () => {
+    cell("newer-preserve", current, `${treeName} keeps the newer writer's records through ${stage}`, () => {
       const blocks = preserved.output.stages[stage];
       must(blocks, `the ${stage} stage did not run`);
       for (const id of newer.keeps) must(blocks[id], `the block ${id} is missing after ${stage}`);
@@ -337,7 +413,7 @@ function newerPreserve(newer) {
     must(undone === newer.blocks[newer.neighbour.id].c, `Undo produced ${JSON.stringify(undone)}`);
     return `${JSON.stringify(edited)} then ${JSON.stringify(undone)}`;
   });
-  cell("newer-preserve", current, "the newer writer still reads its own records in R's checkpointed file", () => {
+  cell("newer-preserve", current, `the newer writer still reads its own records in ${treeName}'s checkpointed file`, () => {
     const verify = child(record("fixture newer writer"), currentRoot, "newer-verify", { fileHtml: preserved.output.checkpointHtml }, "newer");
     must(verify.output.neighbour, "the newer writer cannot see the neighbour edit");
     for (const id of newer.keeps) must(verify.output.records[id], `the newer writer cannot find its record ${id}`);
@@ -377,10 +453,246 @@ function invalidContent(newer) {
   });
 }
 
+// Step 9: the published tolerance release and this tree, each in its own child,
+// exchanging serialized articles, page values and Yjs bytes. Nothing here runs
+// the same copy twice: R is the package the lock names, F is this tree.
+function features(artifact) {
+  const r = record("R");
+  const tree = record(treeName);
+  const manifest = JSON.parse(readFileSync(path.join(FIXTURES, "feature-format.json"), "utf8"));
+  const floorZeroBlocks = JSON.parse(readFileSync(path.join(FIXTURES, "floor-zero.json"), "utf8")).blocks;
+  const keeps = manifest.keeps;
+  const input = {
+    blocks: manifest.blocks,
+    keeps,
+    neighbour: manifest.neighbour,
+    quote: manifest.quote,
+    marked: manifest.marked,
+    malformed: manifest.malformed,
+    floor: manifest.floor,
+  };
+
+  // Each writer saves the same document: F with its native formats, R drawing
+  // what it cannot draw inside the envelope a lower schema needs.
+  const wrote = {
+    F: child(tree, currentRoot, "write", { blocks: manifest.blocks, malformed: manifest.malformed, floor: manifest.floor }),
+    R: child(r, artifact.dir, "write", { blocks: manifest.blocks, malformed: manifest.malformed, floor: manifest.floor }),
+  };
+
+  // Row: simultaneous known and unknown formatting.
+  const reads = {
+    F: child(tree, currentRoot, "feature-read", { ...input, updates: wrote.R.output.updates, fileHtml: wrote.R.output.fileHtml }),
+    R: child(r, artifact.dir, "feature-read", { ...input, updates: wrote.F.output.updates, fileHtml: wrote.F.output.fileHtml }),
+  };
+  cell("mixed-format", tree, "F's save keeps its native formats and the unrecognized block side by side", () => {
+    const byId = new Map(wrote.F.output.parsed.map((item) => [item.id, item]));
+    must(byId.get(manifest.quote)?.t === "quote", `the native quote came back as ${byId.get(manifest.quote)?.t}`);
+    must(byId.get(manifest.unknown)?.t === manifest.unknownType, `the unrecognized block came back as ${byId.get(manifest.unknown)?.t}`);
+    must(canon(byId.get(manifest.marked)?.m) === canon(manifest.blocks[manifest.marked].m), "the native mark came back changed");
+    return `${keeps.length} blocks`;
+  });
+  cell("mixed-format", r, "R keeps every record of F's simultaneous formatting", () => {
+    for (const id of keeps) must(reads.R.output.records?.[id], `the record ${id} is missing`);
+    return `${keeps.length} records`;
+  });
+  cell("mixed-format", tree, "F keeps every record of R's save", () => {
+    for (const id of keeps) must(reads.F.output.records?.[id], `the record ${id} is missing`);
+    return `${keeps.length} records`;
+  });
+  cell("mixed-format", r, "the floor R reads is the floor F's content needs", () => {
+    must(reads.R.output.floor === manifest.floor, `R read floor ${reads.R.output.floor}`);
+    return reads.R.output.floor;
+  });
+  cell("mixed-format", tree, "the floor F reads is the floor R's file declares", () => {
+    must(reads.F.output.floor === manifest.floor, `F read floor ${reads.F.output.floor}`);
+    return reads.F.output.floor;
+  });
+
+  // Row: a deletion and its Undo, on the other cohort's document.
+  const edits = {
+    F: child(tree, currentRoot, "feature-edit", input),
+    R: child(r, artifact.dir, "feature-edit", input),
+  };
+  cell("delete-undo", r, "R deletes inside F's marked text and Undo restores the whole record", () => {
+    const cut = edits.R.output.stages.deleted?.[manifest.marked];
+    const back = edits.R.output.stages.restored?.[manifest.marked];
+    must(cut && back, "the deletion and its Undo did not run in R");
+    must(back.c === manifest.blocks[manifest.marked].c, `Undo left ${JSON.stringify(back.c)}`);
+    must(canon(back.m) === canon(manifest.blocks[manifest.marked].m), "Undo lost the marks over the deleted text");
+    return `${JSON.stringify(cut.c)} then ${JSON.stringify(back.c)}`;
+  });
+  cell("delete-undo", tree, "F deletes inside the text it does not know and Undo restores the descriptor", () => {
+    const cut = edits.F.output.stages.deleted?.[manifest.marked];
+    const back = edits.F.output.stages.restored?.[manifest.marked];
+    must(cut && back, "the deletion and its Undo did not run in F");
+    must(back.c === manifest.blocks[manifest.marked].c, `Undo left ${JSON.stringify(back.c)}`);
+    must(canon(back.m) === canon(manifest.blocks[manifest.marked].m), "Undo lost the marks over the deleted text");
+    return `${JSON.stringify(cut.c)} then ${JSON.stringify(back.c)}`;
+  });
+  cell("delete-undo", r, "R refuses a rewrite and a deletion of the block it cannot draw", () => {
+    must(edits.R.output.knows === false, "R read the quote natively");
+    must(edits.R.output.refused?.includes(manifest.quote), "the opaque quote was not refused");
+    return "no rewrite, no deletion";
+  });
+  cell("delete-undo", tree, "F rewrites the quote it knows natively", () => {
+    must(edits.F.output.knows === true, "F did not read its own quote natively");
+    return "rewritable";
+  });
+
+  // Row: a neighbouring known block edited beside the quote, saved, and read back.
+  const rSaved = child(r, artifact.dir, "write", { blocks: edits.R.output.stages.edited, malformed: null, floor: manifest.floor });
+  const fReadsREdit = child(tree, currentRoot, "feature-read", {
+    ...input,
+    blocks: edits.R.output.stages.edited,
+    updates: rSaved.output.updates,
+    fileHtml: rSaved.output.fileHtml,
+  });
+  const readsRSave = child(tree, currentRoot, "read", {
+    articleHtml: rSaved.output.articleHtml,
+    rev: rSaved.output.rev,
+    expected: rSaved.output.parsed,
+    updates: rSaved.output.updates,
+    expectedBlocks: rSaved.output.decoded,
+  });
+  cell("quote-neighbour", r, "R edits the neighbour beside the quote and Undo restores it", () => {
+    const edited = edits.R.output.stages.edited?.[manifest.neighbour.id];
+    const undone = edits.R.output.stages.undone?.[manifest.neighbour.id];
+    must(edited?.c === manifest.neighbour.c + manifest.neighbour.add, `R's edit produced ${JSON.stringify(edited?.c)}`);
+    must(undone?.c === manifest.neighbour.c, `R's Undo produced ${JSON.stringify(undone?.c)}`);
+    return `${JSON.stringify(edited.c)} then ${JSON.stringify(undone.c)}`;
+  });
+  cell("quote-neighbour", tree, "F decodes the page value R saved after that edit", () => {
+    for (const id of keeps) must(fReadsREdit.output.records?.[id], `the record ${id} is missing`);
+    must(fReadsREdit.output.records[manifest.neighbour.id].c === manifest.neighbour.c + manifest.neighbour.add, "the neighbour edit did not survive");
+    return keeps.join(",");
+  });
+  cell("quote-neighbour", tree, "F reads every record out of the article R saved after that edit", () => {
+    must(readsRSave.output.model, "F could not read the article R saved");
+    for (const id of keeps) must(readsRSave.output.model.some((item) => item.id === id), `the block ${id} is missing from the article F read`);
+    return `${readsRSave.output.model.length} items`;
+  });
+
+  // R saved the document after its neighbour edit, so that block carries the edit.
+  const rSavedBlock = (id) => id === manifest.neighbour.id
+    ? { ...manifest.blocks[id], c: manifest.neighbour.c + manifest.neighbour.add }
+    : manifest.blocks[id];
+
+  // Row: save and reopen without page live tags.
+  const tagless = {
+    F: child(tree, currentRoot, "feature-tagless", { blocks: rSaved.output.blocks, keeps, fileHtml: rSaved.output.fileHtml, exact: true }),
+    R: child(r, artifact.dir, "feature-tagless", { blocks: manifest.blocks, keeps, fileHtml: wrote.F.output.fileHtml, exact: false }),
+  };
+  cell("tagless-reopen", r, "R reopens F's saved article without live tags and keeps every block and its text", () => {
+    const back = tagless.R.output.reopened;
+    must(back, "the tagless reopen did not run in R");
+    for (const id of keeps) must(back[id], `the block ${id} is missing after R's tagless reopen`);
+    return `${Object.keys(back).length} blocks`;
+  });
+  cell("tagless-reopen", tree, "F reopens R's saved article without live tags with every record", () => {
+    const back = tagless.F.output.reopened;
+    must(back, "the tagless reopen did not run in F");
+    for (const id of keeps) {
+      must(back[id], `the block ${id} is missing after F's tagless reopen`);
+      must(canon(withoutBookkeepingOf(back[id])) === canon(withoutBookkeepingOf(rSavedBlock(id))), `the block ${id} came back changed: ${JSON.stringify(withoutBookkeepingOf(back[id]))} vs ${JSON.stringify(withoutBookkeepingOf(rSavedBlock(id)))}`);
+    }
+    return keeps.join(",");
+  });
+
+  // Row: the server checkpoint.
+  cell("checkpoint", r, "R's checkpoint of F's document writes every record back into the article", () => {
+    const back = edits.R.output.stages.checkpoint;
+    must(back, "the checkpoint did not run in R");
+    for (const id of keeps) must(back[id], `the record ${id} is missing from R's checkpoint`);
+    return keeps.join(",");
+  });
+  cell("checkpoint", tree, "F's checkpoint keeps its native quote and the block it does not know", () => {
+    const back = edits.F.output.stages.checkpoint;
+    must(back, "the checkpoint did not run in F");
+    must(back[manifest.quote]?.t === "quote", "the native quote did not survive the checkpoint");
+    must(back[manifest.unknown]?.t === manifest.unknownType, "the unrecognized block did not survive the checkpoint");
+    return keeps.join(",");
+  });
+  const fReadsRCheckpoint = child(tree, currentRoot, "feature-tagless", { blocks: rSaved.output.blocks, keeps, fileHtml: edits.R.output.checkpointHtml, exact: true });
+  cell("checkpoint", tree, "F reopens R's checkpointed article with every record", () => {
+    const back = fReadsRCheckpoint.output.reopened;
+    must(back, "the checkpoint article was never reopened");
+    for (const id of keeps) {
+      must(back[id], `the record ${id} is missing from the checkpoint F reopened`);
+      must(canon(withoutBookkeepingOf(back[id])) === canon(withoutBookkeepingOf(rSavedBlock(id))), `the record ${id} came back changed: ${JSON.stringify(withoutBookkeepingOf(back[id]))} vs ${JSON.stringify(withoutBookkeepingOf(rSavedBlock(id)))}`);
+    }
+    return `${Object.keys(back).length} blocks`;
+  });
+  const rReadsFCheckpoint = child(r, artifact.dir, "feature-tagless", { blocks: manifest.blocks, keeps, fileHtml: edits.F.output.checkpointHtml, exact: false });
+  cell("checkpoint", r, "R reads F's checkpointed article and keeps every block and its text", () => {
+    const back = rReadsFCheckpoint.output.reopened;
+    must(back, "R could not read F's checkpointed article");
+    for (const id of keeps) must(back[id], `the block ${id} is missing from F's checkpoint as R reads it`);
+    return `${Object.keys(back).length} blocks`;
+  });
+
+  // Row: the offline host bundle, reading the other cohort's saved file.
+  const offline = {
+    F: child(tree, currentRoot, "feature-offline", { blocks: manifest.blocks, fileHtml: wrote.R.output.fileHtml, floor: manifest.floor }),
+    R: child(r, artifact.dir, "feature-offline", { blocks: manifest.blocks, fileHtml: wrote.F.output.fileHtml, floor: manifest.floor }),
+  };
+  cell("offline-bundle", r, "R's offline reader shows F's saved floor-1 file and leaves its floor alone", () => {
+    must(offline.R.output.blocks === Object.keys(manifest.blocks).length, `R's reader saw ${offline.R.output.blocks} blocks`);
+    must(offline.R.output.floor === manifest.floor, `R's reader read floor ${offline.R.output.floor}`);
+    return `${offline.R.output.blocks} blocks, floor ${offline.R.output.floor}`;
+  });
+  cell("offline-bundle", tree, "F's offline reader shows R's saved file and leaves its floor alone", () => {
+    must(offline.F.output.blocks === Object.keys(manifest.blocks).length, `F's reader saw ${offline.F.output.blocks} blocks`);
+    must(offline.F.output.floor === manifest.floor, `F's reader read floor ${offline.F.output.floor}`);
+    return `${offline.F.output.blocks} blocks, floor ${offline.F.output.floor}`;
+  });
+
+  // Row: a stale pre-R save into a floor-1 document.
+  const stale = child(r, artifact.dir, "write", { blocks: floorZeroBlocks, malformed: null });
+  const admission = { currentHtml: wrote.F.output.fileHtml, html: stale.output.fileHtml, legacyHtml: stale.output.fileHtml, floorZeroHtml: stale.output.fileHtml, capability: 0, admitted: [0], visible: keeps.map((id) => manifest.blocks[id].c) };
+  const admitted = {
+    F: child(tree, currentRoot, "admit", admission),
+    R: child(r, artifact.dir, "admit", admission),
+  };
+  for (const [cohort, name] of [[r, "R"], [tree, "F"]]) {
+    cell("stale-save", cohort, `${name}'s stale capture is refused before mutation and the file stays readable`, () => {
+      const refusal = admitted[name].output.refusal;
+      must(refusal, `${name} admitted a stale capture into a floor-1 document`);
+      must(refusal.code === "page-format-upgrade-required", `the refusal is ${JSON.stringify(refusal.code)}`);
+      must(refusal.statusCode === 409, `the refusal status is ${JSON.stringify(refusal.statusCode)}`);
+      must(refusal.minimum === 1, `the refusal minimum is ${JSON.stringify(refusal.minimum)}`);
+      must(admitted[name].output.currentHtml === wrote.F.output.fileHtml, "the stored file changed while the capture was refused");
+      must(admitted[name].output.floors.capture === 0, "the stale capture gained a marker");
+      return `${refusal.code} (${refusal.statusCode}, floor ${refusal.minimum})`;
+    });
+  }
+
+  // Row: the local channel's floor transition.
+  const channel = {
+    F: child(tree, currentRoot, "feature-channel", { path: "/page.html" }),
+    R: child(r, artifact.dir, "feature-channel", { path: "/page.html" }),
+  };
+  cell("channel", tree, "R and F derive the same two scopes for one document", () => {
+    must(channel.R.output.before === channel.F.output.before, `the floor-0 scopes differ: ${channel.R.output.before} vs ${channel.F.output.before}`);
+    must(channel.R.output.after === channel.F.output.after, `the floor-1 scopes differ: ${channel.R.output.after} vs ${channel.F.output.after}`);
+    return channel.F.output.after;
+  });
+  for (const [cohort, name] of [[r, "R"], [tree, "F"]]) {
+    cell("channel", cohort, `${name}'s pre-R tab on the old scope never receives a future-format frame`, () => {
+      must(channel[name].output.before, `${name} ran no transition`);
+      return `${channel[name].output.before} then ${channel[name].output.after}`;
+    });
+  }
+}
+
 const started = Date.now();
 console.log(`page-format-compat: phase ${phase}`);
 console.log(`  cache   ${display(cache)}`);
 console.log(`  current ${display(currentRoot)}`);
+if (tolerance) {
+  console.log(`  artifact @panphora/clayjs@${tolerance.version}  (R)  ${tolerance.integrity}`);
+  console.log(`           tarball ${tolerance.tarball}  shasum ${tolerance.shasum}`);
+  console.log(`           ${display(tolerance.dir)}  ${tolerance.extracted.files} files, extracted sha512 ${tolerance.extracted.sha512}  (verified against the ${tolerance.basis})`);
+}
 for (const entry of packages) {
   console.log(`  cohort  @panphora/clayjs@${entry.version}  ${entry.integrity}`);
   console.log(`          ${display(entry.dir)}  ${entry.extracted.files} files, extracted sha512 ${entry.extracted.sha512}  (verified against the ${entry.basis})`);
@@ -393,6 +705,7 @@ try {
   newerPreserve(newer);
   offlineReader(newer);
   invalidContent(newer);
+  if (phase === "features") features(tolerance);
 } catch (error) {
   fail(`${error?.message ?? error}`);
 }
@@ -407,13 +720,26 @@ for (const [cohort, tally] of cohorts) {
   for (const failure of tally.failed) cells.push({ row: "case", cohort, name: failure.name, ok: false, detail: failure.detail });
 }
 
-for (const row of ROWS) {
+// Step 9 counts cohort and case combinations: a row a cohort never ran is a
+// failed cell, exactly like a case it ran and failed.
+if (phase === "features") {
+  for (const [row, wanted] of Object.entries(FEATURE_CELLS)) {
+    for (const cohort of wanted) {
+      if (cells.some((entry) => entry.row === row && entry.cohort === cohort)) continue;
+      cells.push({ row, cohort, name: "the cohort ran a cell of this row", ok: false, detail: `${cohort} ran no ${row} cell` });
+    }
+  }
+}
+
+const rows = phase === "features" ? [...ROWS, ...FEATURE_ROWS] : ROWS;
+
+for (const row of rows) {
   const inRow = cells.filter((entry) => entry.row === row);
   const failed = inRow.filter((entry) => !entry.ok);
   console.log(`row ${row}: ${inRow.length - failed.length}/${inRow.length} cells${failed.length ? " FAILED" : ""}`);
   for (const entry of failed) console.log(`  FAIL ${entry.cohort} ${entry.name}\n       ${entry.detail}`);
 }
-for (const entry of cells.filter((item) => !item.ok && !ROWS.includes(item.row))) {
+for (const entry of cells.filter((item) => !item.ok && !rows.includes(item.row))) {
   console.log(`CASE ${entry.cohort} ${entry.name}\n     ${entry.detail}`);
 }
 for (const [cohort, tally] of cohorts) {
@@ -425,8 +751,9 @@ const summary = {
   phase,
   ok: failed.length === 0,
   packages: packages.map(({ version, integrity, extracted, basis }) => ({ version, integrity, extracted, basis })),
+  tolerance: tolerance && { version: tolerance.version, integrity: tolerance.integrity, shasum: tolerance.shasum, extracted: tolerance.extracted, basis: tolerance.basis },
   cohorts: [...cohorts].map(([cohort, tally]) => ({ cohort, positive: tally.positive, negative: tally.negative, failed: tally.failed.length })),
-  rows: ROWS.map((row) => ({ row, cells: cells.filter((entry) => entry.row === row).length, failed: cells.filter((entry) => entry.row === row && !entry.ok).length })),
+  rows: rows.map((row) => ({ row, cells: cells.filter((entry) => entry.row === row).length, failed: cells.filter((entry) => entry.row === row && !entry.ok).length })),
   cells: cells.length,
   failed,
   ms: Date.now() - started,
@@ -437,4 +764,4 @@ if (failed.length) {
   console.error(`page-format-compat: ${failed.length} cell(s) failed`);
   process.exit(1);
 }
-console.log(`page-format-compat: ${cohorts.size} cohorts, ${ROWS.length} rows, ${cells.length} cells, ${summary.cohorts.reduce((sum, entry) => sum + entry.positive, 0)} positive and ${summary.cohorts.reduce((sum, entry) => sum + entry.negative, 0)} negative cases — ok`);
+console.log(`page-format-compat: ${cohorts.size} cohorts, ${rows.length} rows, ${cells.length} cells, ${summary.cohorts.reduce((sum, entry) => sum + entry.positive, 0)} positive and ${summary.cohorts.reduce((sum, entry) => sum + entry.negative, 0)} negative cases — ok`);

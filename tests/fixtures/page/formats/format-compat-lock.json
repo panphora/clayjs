@@ -1,0 +1,14 @@
+{
+  "package": "@panphora/clayjs",
+  "version": "1.16.0",
+  "channel": "tolerance",
+  "note": "R, the tolerance release F is verified against: the one published artifact whose runtime is an independent older peer, so a second build of this tree cannot stand in for it. `integrity` (sha512) and `shasum` (sha1) are the registry's numbers for the packed tarball, recorded from `npm view @panphora/clayjs@1.16.0 dist --json`; the gate hashes the cached tarball against both before it loads it. `extracted.sha512` is the digest of the extracted tree the gate imports, so .version-cache/1.16.0/ is proved to be the tree those numbers were recorded from. Never edit the cache.",
+  "floor": 1,
+  "published": "2026-10-27",
+  "integrity": "sha512-Q1yKeT9mxjMr8L/mXRS3BXeIOirZFpn5fzWM5SFWlxqS+xSGYTVyJBR0GidMNOUPw+T+5d1E/mpbf8XJN96Now==",
+  "shasum": "c27ac4cd060b887b949a3c66c8d60c377e9905e4",
+  "extracted": {
+    "files": 646,
+    "sha512": "4734b5daaa075a6871ea8a539c28f2522ba6e9b7f0f5ff4669a46dc314db6d32fb98ff870ab46385d5dfe542fdedce166f3c848f6b35306c33cb09def6006ef7"
+  }
+}

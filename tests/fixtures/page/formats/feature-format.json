@@ -1,0 +1,56 @@
+{
+  "name": "feature-format",
+  "note": "One document that carries both halves at once: the formats F writes natively (a quote block, underlined text, a highlighted run and a text color) beside content no runtime in this matrix knows (a future block type and a future mark). Document 11 Step 9 runs it through real R code and real F code in both directions.",
+  "floor": 1,
+  "keeps": ["h", "q", "m", "u", "f", "n"],
+  "quote": "q",
+  "marked": "m",
+  "unknown": "f",
+  "unknownType": "future_widget",
+  "neighbour": { "id": "n", "c": "Neighbour line", "add": " edited" },
+  "blocks": {
+    "h": { "t": "heading", "pos": "00000000", "c": "Notes", "level": 3 },
+    "q": {
+      "t": "quote",
+      "pos": "00000001",
+      "c": "Quoted line",
+      "m": [
+        [6, "x[\"highlight\",{\"color\":\"yellow\"}]"],
+        [5, ""]
+      ]
+    },
+    "m": {
+      "t": "paragraph",
+      "pos": "00000002",
+      "c": "Marked words here",
+      "m": [
+        [6, "x[\"text_color\",{\"color\":\"blue\"}]"],
+        [11, ""]
+      ]
+    },
+    "u": {
+      "t": "paragraph",
+      "pos": "00000003",
+      "c": "Ada wrote this",
+      "m": [
+        [4, "x[\"mention\",{\"id\":\"p-ada\"}]"],
+        [10, ""]
+      ]
+    },
+    "f": { "t": "future_widget", "pos": "00000004", "c": "Contents", "maxLevel": 3 },
+    "n": { "t": "paragraph", "pos": "00000005", "c": "Neighbour line" }
+  },
+  "malformed": {
+    "name": "unterminated named descriptor",
+    "blocks": {
+      "m": {
+        "t": "paragraph",
+        "pos": "00000002",
+        "c": "abc",
+        "m": [
+          [3, "x[\"text_color\""]
+        ]
+      }
+    }
+  }
+}

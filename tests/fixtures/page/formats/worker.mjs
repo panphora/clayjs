@@ -21,6 +21,13 @@
  * package: it writes and reads floor-1 content the runtime under test has no
  * native schema for, which is how R's generic extension contract is exercised
  * before F exists.
+ *
+ * The `feature-` scenarios are Document 11 Step 9's half: they run the same
+ * document through the published R package and this tree, one child each, and
+ * cover simultaneous known and unknown formatting, a deletion and its Undo, a
+ * neighbouring block edited beside the quote, a reopen without live tags, the
+ * server checkpoint, the offline reader and the same-browser lane's floor
+ * boundary.
  */
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -588,6 +595,279 @@ async function scenarioNewerVerify(rt, input) {
   return output;
 }
 
+// --- Document 11 Step 9: real R and real F in one matrix ---------------------
+
+// A file as a reader without the editor sees it: no live page tag.
+const liveTagged = (html) => html.replace(/<script\b[^>]*\bclay="live"[^>]*>[\s\S]*?<\/script>/g, "");
+
+// One page open on the page value's own records, the way the editor opens it:
+// no article, so nothing a writer's markup would hide can come between them.
+async function openPage(rt, blocks) {
+  const { migrateHybridValues } = await rt.load("page/ybind/migrate.js");
+  const { createStore } = await rt.load("live/store.js");
+  const { createYPageBinding } = await rt.load("page/ybind/index.js");
+  const { identityPlugin } = await rt.load("page/model.js");
+  const { state: pmState, view: pmView } = await rt.load("vendor/prosemirror.vendor.js");
+  const value = migrateHybridValues([{ blocks }]);
+  const store = createStore({ name: "page", value: JSON.parse(JSON.stringify(value)) });
+  const binding = createYPageBinding({ store, captureTimeout: 0 });
+  const mount = globalThis.document.body.appendChild(globalThis.document.createElement("div"));
+  const view = new pmView.EditorView(mount, {
+    state: pmState.EditorState.create({ doc: binding.doc(), plugins: [identityPlugin()] }),
+    dispatchTransaction: (transaction) => binding.dispatch(transaction),
+  });
+  binding.attach(view);
+  const find = (id) => {
+    let found = null;
+    view.state.doc.forEach((node, offset) => { if (!found && node.attrs.id === id) found = { node, offset }; });
+    return found;
+  };
+  const close = () => {
+    view.destroy();
+    binding.dispose();
+    binding.ydoc.destroy();
+    mount.remove();
+  };
+  return { binding, view, find, close };
+}
+
+// What one cohort makes of another cohort's saved file: its page value read as
+// records, its article read as a reader without the editor reads it, and the
+// floor its content really needs.
+async function scenarioFeatureRead(rt, input) {
+  const { blocks, keeps, updates, fileHtml, floor, malformed } = input;
+  const output = { records: null, floor: null, text: null };
+  await positive("the page value's Yjs updates decode to the writer's whole record", async () => {
+    const decoded = await blocksOfUpdates(rt, updates);
+    keptIn("the page value", decoded, blocks, keeps);
+    output.records = decoded;
+    return keeps.join(",");
+  });
+  await positive("the saved file reads without its live tag and shows every block's text", () => {
+    const withoutTags = liveTagged(fileHtml);
+    must(!/clay="live"/.test(withoutTags), "a live page tag survived the reader's view");
+    const shown = textOf(articleInside(withoutTags));
+    for (const [id, block] of Object.entries(blocks)) {
+      must(shown.includes(block.c ?? ""), `the reader no longer shows ${JSON.stringify(block.c)} for ${id}`);
+    }
+    output.text = Object.keys(blocks).length;
+    return `${output.text} blocks`;
+  });
+  await positive("the content's floor is the one the file declares", async () => {
+    const { requiredPageFormat, pageFormatFloor } = await rt.load("page/format-level.js");
+    must(pageFormatFloor(fileHtml) === floor, `the file declares floor ${pageFormatFloor(fileHtml)}`);
+    const required = requiredPageFormat(rt.projection.project(output.records));
+    must(required === floor, `the records need floor ${required}`);
+    output.floor = required;
+    return required;
+  });
+  if (malformed) await negative("a malformed named descriptor is refused", () => renderArticle(rt, malformed.blocks));
+  return output;
+}
+
+// The ordinary editing flow on another cohort's document: a neighbouring block
+// edited beside the quote, Undo, a deletion inside the marked text and its Undo,
+// the command the runtime cannot carry, and the server checkpoint of the result.
+async function scenarioFeatureEdit(rt, input) {
+  const { blocks, keeps, neighbour, quote, marked, malformed } = input;
+  const { blocksFromYValue } = await rt.load("page/ybind/decode.js");
+  const { yValueOf, enc } = await rt.load("page/ybind/provider.js");
+  const Y = await rt.load("vendor/yjs.vendor.js");
+  const { canTurnInto } = await rt.load("page/items.js");
+  const knows = "quote" in rt.projection.DEFAULTS;
+  const kept = keeps.filter((id) => id !== neighbour.id);
+  const page = await openPage(rt, blocks);
+  const output = { stages: {}, knows, refused: [] };
+  const records = () => blocksFromYValue(yValueOf(page.binding.ydoc));
+  try {
+    await positive("a neighbouring block edited beside the quote keeps every record", () => {
+      const at = page.find(neighbour.id);
+      must(at, "the neighbour block is missing");
+      page.view.dispatch(page.view.state.tr.insertText(neighbour.add, at.offset + 1 + at.node.textContent.length));
+      const edited = records();
+      must(edited[neighbour.id].c === blocks[neighbour.id].c + neighbour.add, "the neighbouring edit did not land");
+      keptIn("the neighbouring edit", edited, blocks, kept);
+      output.stages.edited = edited;
+      output.editedUpdates = [enc(Y.encodeStateAsUpdateV2(page.binding.ydoc))];
+      return edited[neighbour.id].c;
+    });
+    await positive("Undo restores the neighbour and keeps every record", () => {
+      must(page.binding.undo() === true, "Undo did not run");
+      const undone = records();
+      must(undone[neighbour.id].c === blocks[neighbour.id].c, "Undo did not restore the neighbour text");
+      keptIn("Undo", undone, blocks, kept);
+      output.stages.undone = undone;
+      return undone[neighbour.id].c;
+    });
+    await positive("a deletion inside the marked text and Undo restore the whole record", () => {
+      const at = page.find(marked);
+      must(at, `the block ${marked} is missing`);
+      const from = at.offset + 1;
+      page.view.dispatch(page.view.state.tr.delete(from, from + 2));
+      const cut = records();
+      const expected = blocks[marked].c.slice(2);
+      must(cut[marked].c === expected, `the deletion left ${JSON.stringify(cut[marked]?.c)}`);
+      must(page.binding.undo() === true, "Undo did not run");
+      const back = records();
+      must(back[marked].c === blocks[marked].c, "Undo did not restore the deleted text");
+      keptIn("the deletion and its Undo", back, blocks, kept);
+      output.stages.deleted = cut;
+      output.stages.restored = back;
+      return `${JSON.stringify(cut[marked].c)} then ${JSON.stringify(back[marked].c)}`;
+    });
+    if (knows) {
+      await positive("a runtime with the native block may rewrite the quote", () => {
+        const at = page.find(quote);
+        must(at, "the quote block is missing");
+        must(canTurnInto(at.node, { type: "paragraph" }) === true, "the native quote was refused a rewrite");
+        return "rewritable";
+      });
+    } else {
+      await positive("the block the runtime cannot draw is refused a rewrite and a deletion", () => {
+        const at = page.find(quote);
+        must(at, "the quote block is missing");
+        must(canTurnInto(at.node, { type: "paragraph" }) === false, "the opaque block was allowed a rewrite");
+        output.refused.push(quote);
+        const before = canon(records());
+        page.view.dispatch(page.view.state.tr.delete(at.offset, at.offset + at.node.nodeSize));
+        must(canon(records()) === before, "the opaque block was deleted instead of refused");
+        return `${quote}: no rewrite, no deletion`;
+      });
+    }
+    if (malformed) await negative("a malformed named descriptor is refused", () => renderArticle(rt, malformed.blocks));
+
+    await positive("the server checkpoint writes the edited records back into the article", async () => {
+      const { createRooms } = await rt.load("server/rooms/index.js");
+      const { captureCheckpoint, renderCheckpoint } = await rt.load("server/checkpoint/index.js");
+      const { seedPageFromArticle } = await rt.load("page/ybind/migrate.js");
+      const edited = output.stages.edited;
+      const written = renderArticle(rt, edited);
+      const source = fileOf(written.inner, written.rev, await valueOfUpdates(rt, output.editedUpdates), input.floor ?? 1);
+      const rooms = createRooms({ newEpoch: () => "compat-feature" });
+      const room = rooms.open("/page.html", source, { nodeId: "node-1" });
+      must(room, "the room did not open");
+      const capture = captureCheckpoint(room, { nodeId: "node-1", roomKey: "/page.html" });
+      const { JSDOM } = require("jsdom");
+      const checkpoint = renderCheckpoint(source, capture, { createDocument: () => new JSDOM("").window.document });
+      must(checkpoint.kind === "ok", `the checkpoint refused the page: ${checkpoint.reason}`);
+      const reopened = blocksFromYValue(seedPageFromArticle(articleOf(articleInside(checkpoint.html), revInside(checkpoint.html))));
+      keptIn("the checkpoint", reopened, edited, kept);
+      must(reopened[neighbour.id].c === edited[neighbour.id].c, "the checkpointed article lost the neighbour edit");
+      output.checkpointHtml = checkpoint.html;
+      output.stages.checkpoint = reopened;
+      return checkpoint.revision ?? checkpoint.kind;
+    });
+  } finally {
+    page.close();
+  }
+  return output;
+}
+
+// Save, strip every live tag, reopen: what a reader without the editor keeps.
+async function scenarioFeatureTagless(rt, input) {
+  const { blocks, keeps, fileHtml, exact } = input;
+  const { seedPageFromArticle } = await rt.load("page/ybind/migrate.js");
+  const { blocksFromYValue } = await rt.load("page/ybind/decode.js");
+  const output = { reopened: null };
+  await positive("a reopen without live tags keeps every block and its text", () => {
+    const withoutTags = liveTagged(fileHtml);
+    must(!/clay="live"/.test(withoutTags), "a live page tag survived the reopen");
+    const reopened = blocksFromYValue(seedPageFromArticle(articleOf(articleInside(withoutTags), revInside(withoutTags))));
+    output.reopened = reopened;
+    const shown = textOf(renderArticle(rt, reopened).inner);
+    for (const [id, block] of Object.entries(blocks)) {
+      must(reopened[id] != null, `the block ${id} is missing after the tagless reopen`);
+      must(shown.includes(block.c ?? ""), `the block ${id} lost its text`);
+    }
+    return Object.keys(reopened).length;
+  });
+  if (exact) {
+    await positive("the reopen gives back the writer's whole record", () => {
+      keptIn("a tagless reopen", output.reopened, blocks, keeps);
+      return keeps.join(",");
+    });
+  }
+  return output;
+}
+
+// The document read where the host's pinned offline runtime reads it.
+async function scenarioFeatureOffline(rt, input) {
+  const { blocks, fileHtml, floor } = input;
+  const output = { blocks: null, floor: null };
+  await positive("the saved file reads without its live tag and shows every block's text", () => {
+    const withoutTags = liveTagged(fileHtml);
+    must(!/clay="live"/.test(withoutTags), "a live page tag survived the reader's view");
+    const shown = textOf(articleInside(withoutTags));
+    for (const [id, block] of Object.entries(blocks)) {
+      must(shown.includes(block.c ?? ""), `the reader no longer shows ${JSON.stringify(block.c)} for ${id}`);
+    }
+    output.blocks = Object.keys(blocks).length;
+    return `${output.blocks} blocks`;
+  });
+  await positive("the reader leaves the file's floor marker as it found it", async () => {
+    const { pageFormatFloor } = await rt.load("page/format-level.js");
+    must(pageFormatFloor(fileHtml) === floor, `the file declares floor ${pageFormatFloor(fileHtml)}`);
+    output.floor = floor;
+    return floor;
+  });
+  await negative("an envelope that is not canonical JSON is refused", () =>
+    parseArticle(rt, '<p data-id="p" data-clay-page-opaque="1" data-clay-page-value="!!not-base64!!">x</p>', "rev"));
+  return output;
+}
+
+// The same-browser lane's floor boundary: floor 1 moves every tab to a channel
+// of its own, so a tab that cannot read floor 1 never sees a future-format frame.
+async function scenarioFeatureChannel(rt, input) {
+  const pagePath = input.path ?? "/page.html";
+  const { localLaneKey, FORMAT_SCOPE } = await rt.load("live/local-lane.js");
+  const { localChannel } = await rt.load("live/local-channel.js");
+  const output = { before: null, after: null };
+  const later = async (check, ms = 2000) => {
+    const until = Date.now() + ms;
+    while (Date.now() < until) {
+      if (check()) return true;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    return check();
+  };
+  await positive("the floor-1 transition opens a channel of its own", () => {
+    output.before = localLaneKey(0, pagePath);
+    output.after = localLaneKey(1, pagePath);
+    must(output.before === `clay-live:${pagePath}`, `the floor-0 scope is ${output.before}`);
+    must(output.after === `clay-live:${pagePath}:${FORMAT_SCOPE}`, `the floor-1 scope is ${output.after}`);
+    must(FORMAT_SCOPE === "page-format:1", `the transition scope is ${FORMAT_SCOPE}`);
+    must(localLaneKey(2, pagePath) === output.after, "a higher floor left the scope");
+    return output.after;
+  });
+  await positive("a tab left on the old scope never receives a future-format frame", async () => {
+    const oldTab = localChannel(output.before);
+    const oldPeer = localChannel(output.before);
+    const newTab = localChannel(output.after);
+    const newPeer = localChannel(output.after);
+    const old = [];
+    const next = [];
+    const released = [
+      oldTab.subscribe("durable", (data) => old.push(data)),
+      oldPeer.subscribe("durable", () => {}),
+      newTab.subscribe("durable", (data) => next.push(data)),
+      newPeer.subscribe("durable", () => {}),
+    ];
+    try {
+      oldPeer.post({ type: "live", frame: "floor-zero" });
+      must(await later(() => old.length >= 1), "the old scope delivered nothing at all");
+      newPeer.post({ type: "live", frame: "floor-one" });
+      must(await later(() => next.length >= 1), "the new scope delivered nothing to its own tab");
+      must(!old.some((data) => data.frame === "floor-one"), "the old scope received the future-format frame");
+      must(old.every((data) => data.v === 4), "the wire version changed inside the scope");
+      must(next.every((data) => data.frame === "floor-one"), "the new scope received the old scope\u0027s frame");
+      return `${old.length} old, ${next.length} new`;
+    } finally {
+      for (const release of released) release();
+    }
+  });
+  return output;
+}
+
 const SCENARIOS = {
   write: scenarioWrite,
   read: scenarioRead,
@@ -598,6 +878,11 @@ const SCENARIOS = {
   invalid: scenarioInvalid,
   "newer-save": scenarioNewerSave,
   "newer-verify": scenarioNewerVerify,
+  "feature-read": scenarioFeatureRead,
+  "feature-edit": scenarioFeatureEdit,
+  "feature-tagless": scenarioFeatureTagless,
+  "feature-offline": scenarioFeatureOffline,
+  "feature-channel": scenarioFeatureChannel,
 };
 
 async function main() {
