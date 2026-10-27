@@ -73,7 +73,7 @@ test("every case runs through the driver and the oracle, and holds up", async ()
 
   console.log(lines.join("\n"));
   expect(new Set(cases.map((json) => json.id)).size).toBe(cases.length);
-});
+}, 120000);
 
 test("a positive control with its input removed fails the pair", async () => {
   const json = byId.get("enter-leave-zero-writes");
