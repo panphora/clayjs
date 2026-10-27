@@ -60,8 +60,8 @@ const shapeOf = (view) => { const out = []; view.state.doc.forEach((n) => out.pu
 // ---- a page from a newer peer ------------------------------------------------
 
 const NEWER = {
-  marks: [{ key: "underline~p1", value: true }, { key: "clay_opaque_code~p2", value: { tokens: ["u"] } }],
-  block: { id: "q", t: "quote", text: "Read this too", record: { unknown: { keep: true } } },
+  marks: [{ key: "sparkle~p1", value: true }, { key: "clay_opaque_code~p2", value: { tokens: ["u"] } }],
+  block: { id: "q", t: "callout_future", text: "Read this too", record: { unknown: { keep: true } } },
 };
 
 function newerPeer(value) {
@@ -123,7 +123,7 @@ const unknownUnits = (pd, id) => runsOf(pd, id).flatMap((part) => [...part.text]
 
 // ---- the clipboard, on a page this runtime can hold --------------------------
 
-const QUOTE = { t: "quote", c: "Read this too", unknown: { keep: true } };
+const QUOTE = { t: "callout_future", c: "Read this too", unknown: { keep: true } };
 const quoteAt = (view, at) => {
   const node = schema.nodes.opaque_block.create({ id: "q", pos: "C", parent: null, raw: QUOTE }, schema.text(QUOTE.c));
   view.dispatch(view.state.tr.insert(at, node));
@@ -164,10 +164,10 @@ test("pasting a copied opaque block into a live page keeps it in the document an
   expect(types(view.state.doc)).toEqual(["paragraph", "opaque_block", "paragraph", "opaque_block"]);
   const pasted = view.state.doc.child(3);
   expect(pasted.textContent).toBe("Read this too");
-  expect(pasted.attrs.raw).toEqual({ t: "quote", c: "Read this too", unknown: { keep: true } });
+  expect(pasted.attrs.raw).toEqual({ t: "callout_future", c: "Read this too", unknown: { keep: true } });
   const id = pasted.attrs.id;
   expect(id).not.toBe("q");
-  expect(attrsOf(pd, id)).toEqual({ t: "quote", c: "Read this too", unknown: { keep: true } });
+  expect(attrsOf(pd, id)).toEqual({ t: "callout_future", c: "Read this too", unknown: { keep: true } });
   expect(runsOf(pd, id)).toEqual([{ text: "Read this too", attributes: null }]);
   expect(walk(pd).orphans).toEqual([]);
 });
@@ -188,7 +188,7 @@ test("copying text with an unknown descriptor pastes the descriptor back", () =>
   const marked = last.child(last.childCount - 1);
   expect(marked.text).toBe("befo");
   expect(marked.marks.map((mark) => mark.type.name)).toEqual(["opaque_marks"]);
-  expect(JSON.parse(JSON.stringify(marked.marks[0].attrs.entries))).toEqual([{ name: "underline", attrs: {} }]);
+  expect(JSON.parse(JSON.stringify(marked.marks[0].attrs.entries))).toEqual([{ name: "sparkle", attrs: {} }]);
 });
 
 test("an invalid envelope on paste falls back to readable text and invents no record", () => {
@@ -235,7 +235,7 @@ test("a plain-text paste stays plain text", () => {
 });
 
 test("a copied table cell keeps the unknown marks in the cell", () => {
-  const cell = { c: "ab", m: [[1, 'x["underline",{}]'], [1, ""]] };
+  const cell = { c: "ab", m: [[1, 'x["sparkle",{}]'], [1, ""]] };
   const cols = { c1: { pos: "1", name: "A" }, c2: { pos: "2", name: "B" } };
   const rows = { r1: { pos: "1", cells: { c1: cell, c2: "b1" } }, r2: { pos: "2", cells: { c1: "a2", c2: "b2" } } };
   const view = editor([], { blocks: { tbl: { t: "table", pos: "V", cols, rows } } });
@@ -261,7 +261,7 @@ test("turn-into refuses an opaque block and a conversion that would erase an unk
   expect(view.state.doc).toBe(before);
 
   const marked = editor([["a", "paragraph", "before"]]);
-  marked.dispatch(marked.state.tr.addMark(posOf(marked, "a"), posOf(marked, "a") + 6, opaqueMark([{ name: "underline", attrs: {} }])));
+  marked.dispatch(marked.state.tr.addMark(posOf(marked, "a"), posOf(marked, "a") + 6, opaqueMark([{ name: "sparkle", attrs: {} }])));
   expect(turnInto(marked.state, 0, { type: "code_block" })).toBe(REFUSED);
   expect(marked.state.doc.child(0).type.name).toBe("paragraph");
   const kept = turnInto(marked.state, 0, { type: "heading", attrs: { level: 2 } });
@@ -389,7 +389,7 @@ test("the same chrome actions still convert ordinary blocks, and a marked line i
   part(view, '.page-dock [data-cmd="bullet"]').click();
   expect(types(view.state.doc)).toEqual(["list_item", "opaque_block", "code_block"]);
   expect(runsOf(pd, "a")).toEqual([
-    { text: "befo", attributes: { "underline~p1": true } },
+    { text: "befo", attributes: { "sparkle~p1": true } },
     { text: "re", attributes: { "clay_opaque_code~p2": { tokens: ["u"] } } },
   ]);
 });
@@ -400,7 +400,7 @@ test("text typed inside, before and after an unknown mark keeps the descriptor o
   const { tab } = room();
   const pd = tab.binding.pd;
   const a = find(tab.view.state.doc, "a");
-  const underline = { "underline~p1": true };
+  const underline = { "sparkle~p1": true };
   const token = { "clay_opaque_code~p2": { tokens: ["u"] } };
   select(tab.view, a.pos + 1 + 3);
   typeText(tab.view, "Z");
@@ -427,8 +427,8 @@ test("bold and italic over an unknown mark keep the unknown descriptor and touch
   tab.view.dispatch(tab.view.state.tr.addMark(a.pos + 1, a.pos + 3, schema.marks.em.create()));
   expect(nodeOf(tab, "a").firstChild.marks.map((mark) => mark.type.name)).toEqual(["strong", "em", "opaque_marks"]);
   expect(unknownRuns(pd, "a")).toEqual([
-    ["be", { "underline~p1": true }],
-    ["fo", { "underline~p1": true }],
+    ["be", { "sparkle~p1": true }],
+    ["fo", { "sparkle~p1": true }],
     ["re", { "clay_opaque_code~p2": { tokens: ["u"] } }],
   ]);
   expect(runsOf(pd, "q")).toEqual(before.q);
@@ -438,10 +438,10 @@ test("bold and italic over an unknown mark keep the unknown descriptor and touch
   tab.view.dispatch(tab.view.state.tr.removeMark(a.pos + 1, a.pos + 5, schema.marks.strong.create()));
   tab.view.dispatch(tab.view.state.tr.removeMark(a.pos + 1, a.pos + 3, schema.marks.em.create()));
   expect(unknownUnits(pd, "a")).toEqual([
-    ["b", { "underline~p1": true }],
-    ["e", { "underline~p1": true }],
-    ["f", { "underline~p1": true }],
-    ["o", { "underline~p1": true }],
+    ["b", { "sparkle~p1": true }],
+    ["e", { "sparkle~p1": true }],
+    ["f", { "sparkle~p1": true }],
+    ["o", { "sparkle~p1": true }],
     ["r", { "clay_opaque_code~p2": { tokens: ["u"] } }],
     ["e", { "clay_opaque_code~p2": { tokens: ["u"] } }],
   ]);
@@ -454,24 +454,24 @@ test("undo after a peer added a descriptor keeps that descriptor", () => {
   tab.view.dispatch(tab.view.state.tr.insertText("X", b.pos + 1));
   expect(find(tab.view.state.doc, "b").node.textContent).toBe("Xafter");
 
-  peer.ydoc.transact(() => { peer.flow.format(1, 6, { "highlight~p3": { color: "yellow" } }); }, NET);
+  peer.ydoc.transact(() => { peer.flow.format(1, 6, { "glow~p3": { color: "yellow" } }); }, NET);
   relay(peer, tab);
   const highlight = { color: "yellow" };
   const seen = () => unknownUnits(pd, "a");
   expect(seen()).toEqual([
-    ["b", { "underline~p1": true, "highlight~p3": highlight }],
-    ["e", { "underline~p1": true, "highlight~p3": highlight }],
-    ["f", { "underline~p1": true, "highlight~p3": highlight }],
-    ["o", { "underline~p1": true, "highlight~p3": highlight }],
-    ["r", { "clay_opaque_code~p2": { tokens: ["u"] }, "highlight~p3": highlight }],
-    ["e", { "clay_opaque_code~p2": { tokens: ["u"] }, "highlight~p3": highlight }],
+    ["b", { "sparkle~p1": true, "glow~p3": highlight }],
+    ["e", { "sparkle~p1": true, "glow~p3": highlight }],
+    ["f", { "sparkle~p1": true, "glow~p3": highlight }],
+    ["o", { "sparkle~p1": true, "glow~p3": highlight }],
+    ["r", { "clay_opaque_code~p2": { tokens: ["u"] }, "glow~p3": highlight }],
+    ["e", { "clay_opaque_code~p2": { tokens: ["u"] }, "glow~p3": highlight }],
   ]);
 
   expect(tab.binding.undo()).toBe(true);
   expect(find(tab.view.state.doc, "b").node.textContent).toBe("after");
   expect(seen()).toHaveLength(6);
-  expect(seen()[0]).toEqual(["b", { "underline~p1": true, "highlight~p3": highlight }]);
-  expect(attrsOf(pd, "q")).toEqual({ t: "quote", unknown: { keep: true } });
+  expect(seen()[0]).toEqual(["b", { "sparkle~p1": true, "glow~p3": highlight }]);
+  expect(attrsOf(pd, "q")).toEqual({ t: "callout_future", unknown: { keep: true } });
   expect(bareShape(docOf(pd, walk(pd)))).toBe(bareShape(tab.view.state.doc));
 });
 

@@ -8,7 +8,9 @@ import { REMOTE, newId } from "./model.js";
 import { safeHref, safeSrc } from "./link.js";
 import { flatten, runsOf, unflatten, unitsOf } from "./inline.js";
 import { OPAQUE_MARK, opaqueMark } from "./format-codec.js";
+import { NATIVE_NAMES, nativeAttrs, runFormat } from "./format-native.js";
 import { DEFAULTS, MARKS, OPAQUE, envelopeAttrs, envelopeRecord, marksAttrs, marksEntries } from "./projection.js";
+import { announce } from "./announce.js";
 
 const alignOf = (a) => (a === "left" || a === "right" ? a : null);
 
@@ -1118,6 +1120,10 @@ export const clipboardParser = new model.DOMParser(parseSchema, [
   { tag: "del", mark: "strike" },
   { tag: "code", mark: "code" },
   { tag: "a[href]", mark: "link", getAttrs: (d) => { const href = safeHref(d.getAttribute("href")); return href ? { href } : false; } },
+  { tag: "blockquote", node: "quote", getAttrs: (d) => ({ parent: parentAttr(d) }) },
+  { tag: "u", mark: "underline" },
+  { tag: "mark", mark: "highlight", getAttrs: (d) => nativeAttrs("highlight", { color: d.getAttribute("data-color") }) ?? false },
+  { tag: "span[data-color]", mark: "text_color", getAttrs: (d) => nativeAttrs("text_color", { color: d.getAttribute("data-color") }) ?? false },
 ]);
 
 // Every pasted block arrives with no id and no pos (identityPlugin mints and
@@ -1202,10 +1208,49 @@ function pasteIntoClosedSummary(view, _event, slice) {
   return true;
 }
 
+// The four formats pasted in from elsewhere are floor-1 content too: a slice
+// that holds one asks the gate before it is inserted, and text waits in the
+// clipboard rather than being dropped when the answer is a refusal.
+function writesFormat(slice) {
+  let found = false;
+  slice?.content?.descendants((node) => {
+    if (found) return false;
+    if (node.type === N.quote) found = true;
+    else if (node.isText && node.marks.some((mark) => NATIVE_NAMES.has(mark.type.name))) found = true;
+    return !found;
+  });
+  return found;
+}
+
+function pasteFormat(view, event, slice) {
+  const from = view.state.selection.from, to = view.state.selection.to;
+  const plain = () => {
+    const text = slice.content.textBetween(0, slice.content.size, "\n", " ");
+    if (!view.isDestroyed && text) view.dispatch(view.state.tr.insertText(text, from, to));
+    return false;
+  };
+  const place = () => {
+    if (view.isDestroyed) return false;
+    const st = view.state;
+    if (st.selection.from !== from || st.selection.to !== to) return false;
+    view.dispatch(st.tr.replaceSelection(slice).scrollIntoView());
+    return true;
+  };
+  runFormat(view, place).then((result) => {
+    if (result?.status === "applied") return;
+    if (!view.isDestroyed) announce(view, result?.message ?? "That format isn\u2019t available here.");
+    plain();
+  }, plain);
+  return true;
+}
+
 export function pastePlugin() {
   return new Plugin({
     props: {
-      handlePaste: pasteIntoClosedSummary,
+      handlePaste(view, event, slice) {
+        if (writesFormat(slice)) return pasteFormat(view, event, slice);
+        return pasteIntoClosedSummary(view, event, slice);
+      },
       clipboardSerializer,
       transformPastedHTML: (html) => flattenPastedHTML(html),
       clipboardParser,

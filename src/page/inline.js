@@ -18,14 +18,17 @@
 // written as a named descriptor too, x[name, attrs], so a new mark never takes a
 // letter an older writer already reads.
 import { model } from "../vendor/prosemirror.vendor.js";
-import { descriptors, entriesOf, isOpaque, keyOf, NAMED_CODE, opaqueMark } from "./format-codec.js";
+import { descriptors, entriesOf, isOpaque, keyOf, opaqueMark } from "./format-codec.js";
+import { nativeAttrs } from "./format-native.js";
 
 export const ATOM = "￼";
 export const CODES = { strong: "b", em: "i", strike: "s", code: "c", link: "a" };
+const NATIVE = new Set(["underline", "text_color", "highlight"]);
 const NAMES = Object.fromEntries(Object.entries(CODES).map(([name, code]) => [code, name]));
 
 export function markKey(marks) {
   let key = "";
+  const named = [];
   for (const mark of marks) {
     if (isOpaque(mark)) {
       key += keyOf(mark.attrs.entries);
@@ -33,14 +36,19 @@ export function markKey(marks) {
     }
     const code = CODES[mark.type.name];
     if (!code) {
-      key += NAMED_CODE + JSON.stringify([mark.type.name, mark.attrs]);
+      // A mark with no compact letter travels as a named descriptor, after the codes
+      // and in the codec's order: one of the four formats only with attrs it writes,
+      // any other (a mention, a date) with its own attrs.
+      const native = nativeAttrs(mark.type.name, mark.attrs);
+      if (!native && NATIVE.has(mark.type.name)) throw new TypeError(`page: the mark ${mark.type.name} has no key code`);
+      named.push({ name: mark.type.name, attrs: native ?? mark.attrs });
       continue;
     }
     key += code;
     const names = Object.keys(mark.type.attrs);
     if (names.length) key += JSON.stringify(names.map((name) => mark.attrs[name]));
   }
-  return key;
+  return named.length ? key + keyOf(named) : key;
 }
 
 const parsed = new WeakMap();
@@ -55,14 +63,17 @@ export function marksOf(schema, key) {
   const opaque = [];
   for (const desc of descriptors(key)) {
     // A named descriptor this schema does have a type for is that mark, not an opaque
-    // entry: the named grammar is how a mark without a compact letter travels. One
-    // carrying an attribute the type does not declare stays opaque, so nothing is lost.
-    const type = desc.name !== undefined ? schema.marks[desc.name] : null;
-    if (type && Object.keys(desc.attrs).every((field) => Object.hasOwn(type.attrs, field))) {
-      marks = type.create(desc.attrs).addToSet(marks);
+    // entry: one of the four formats only with attrs it writes, any other mark only
+    // with attributes its type declares. Anything else stays opaque, so nothing is lost.
+    if (desc.code === undefined) {
+      const native = nativeAttrs(desc.name, desc.attrs);
+      const type = schema.marks[desc.name];
+      if (native) marks = type.create(native).addToSet(marks);
+      else if (type && !NATIVE.has(desc.name) && Object.keys(desc.attrs ?? {}).every((field) => Object.hasOwn(type.attrs, field))) marks = type.create(desc.attrs).addToSet(marks);
+      else opaque.push(desc);
       continue;
     }
-    const name = desc.code === undefined ? null : NAMES[desc.code];
+    const name = NAMES[desc.code];
     if (!name) {
       opaque.push(desc);
       continue;

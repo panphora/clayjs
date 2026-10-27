@@ -50,6 +50,12 @@ export const schema = new model.Schema({
         "data-checked": n.attrs.checked ? "true" : "false",
       }), 0],
     },
+    quote: {
+      group: "block",
+      content: "inline*",
+      attrs: block,
+      toDOM: (n) => ["blockquote", ref(n), 0],
+    },
     callout: {
       group: "block",
       content: "inline*",
@@ -189,6 +195,17 @@ export const schema = new model.Schema({
       inclusive: false,
       excludes: "mention date link",
       toDOM: (m) => ["time", { datetime: m.attrs.date, "data-page-date": "" }, 0],
+    },
+    // The floor-1 formats (format-native.js): written as named descriptors,
+    // drawn as the elements the saved article keeps for them.
+    underline: { toDOM: () => ["u", 0] },
+    text_color: {
+      attrs: { color: {} },
+      toDOM: (m) => ["span", { "data-color": m.attrs.color }, 0],
+    },
+    highlight: {
+      attrs: { color: {} },
+      toDOM: (m) => ["mark", { "data-color": m.attrs.color }, 0],
     },
   },
 });

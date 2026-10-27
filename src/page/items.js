@@ -13,6 +13,7 @@ import { makeTable, insertTableNode } from "./table.js";
 import { pickCsv } from "./csv-import.js";
 import { makeBoard, insertBoardNode } from "./board.js";
 import { chartFromSlash, chartTables } from "./chart.js";
+import { runFormat } from "./format-native.js";
 
 const { TextSelection } = state;
 const N = schema.nodes;
@@ -27,6 +28,7 @@ export const BLOCK_TYPES = [
   { key: "check", label: "Checklist", description: "Tasks to tick off", icon: "☐", type: "list_item", attrs: { kind: "check" }, hint: "[]", aliases: ["todo", "to-do", "task", "check", "checkbox"] },
   { key: "toggle", label: "Toggle", description: "Hide details under a line", icon: "▸", type: "toggle", attrs: { open: true }, hint: ">", aliases: ["collapse", "details", "fold"] },
   { key: "callout", label: "Callout", description: "Make a note stand out", icon: "!", type: "callout", aliases: ["note", "aside", "info"] },
+  { key: "quote", label: "Quote", description: "Set text apart as a quotation", icon: "\u201c", type: "quote", hint: "\"", aliases: ["blockquote", "quotation", "cite"] },
   { key: "code", label: "Code", description: "Code with highlighting", icon: "</>", type: "code_block", hint: "```", aliases: ["pre", "snippet"] },
 ];
 
@@ -176,8 +178,14 @@ export function rankItems(items, query) {
 
 // What a pick does in the insert menu for the block at `index`. A divider and
 // the file pickers have their own placement; a block type retypes an empty line
-// and otherwise goes into a new block below the line's whole subtree.
+// and otherwise goes into a new block below the line's whole subtree. A block
+// type from a later format asks the format gate before it writes anything.
 export function runItem(view, item, index, remove = null) {
+  if (item.type !== "quote") return insertItem(view, item, index, remove);
+  return runFormat(view, () => insertItem(view, item, index, remove));
+}
+
+function insertItem(view, item, index, remove = null) {
   const st = view.state;
   if (item.insert === "image" || item.insert === "file") return pickFiles(view, item.insert === "image" ? "image/*" : "", hostPlace(st, index), remove);
   if (item.insert === "csv") return pickCsv(view, remove);

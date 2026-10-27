@@ -11,6 +11,7 @@
 import { chartModel, renderChartSvg } from "./rich/chart.js";
 import { cellText } from "./rich/cell.js";
 import { bounded, descriptors, entriesOf, keyOf, normalizeEntries } from "./format-codec.js";
+import { nativeAttrs } from "./format-native.js";
 
 export const ATOM = "￼";
 export const BREAK = '@{"type":"hard_break"}';
@@ -43,6 +44,7 @@ export const DEFAULTS = {
   heading: { parent: null, level: 2 },
   list_item: { parent: null, kind: "bullet", indent: 0, checked: false, owner: null, due: null },
   callout: { parent: null },
+  quote: { parent: null },
   code_block: { parent: null, lang: "" },
   toggle: { parent: null, open: false },
   divider: { parent: null },
@@ -54,7 +56,7 @@ export const DEFAULTS = {
   tool: { parent: null, artifact: null, rev: null, state: {} },
   preserved: { parent: null, html: "" },
 };
-const TEXT = new Set(["paragraph", "heading", "list_item", "callout", "code_block", "toggle"]);
+const TEXT = new Set(["paragraph", "heading", "list_item", "callout", "quote", "code_block", "toggle"]);
 
 const same = (a, b) => canon(a) === canon(b);
 
@@ -153,18 +155,25 @@ export function runsOf(units) {
   return out;
 }
 
-// A mark key as { marks: { b: true, a: ["href"] ... }, entries: [...] }, the
-// entries being the descriptors of every mark this runtime has no code for, in
-// the codec's canonical order.
+// A mark key as { marks: { b: true, a: ["href"] ... }, native: [...], entries: [...] }:
+// the codes this runtime knows, the named descriptors of the four formats it
+// writes (format-native.js), and the entries of every mark it has no code for,
+// each in the codec's canonical order.
 function marksOfKey(key) {
-  const marks = {};
-  if (!key || key[0] === "@") return { marks, entries: [] };
+  const marks = {}, native = [];
+  if (!key || key[0] === "@") return { marks, native: [], entries: [] };
   const opaque = [];
   for (const desc of descriptors(key)) {
-    if (desc.name === undefined && KNOWN.has(desc.code)) marks[desc.code] = desc.attrs ?? true;
+    if (desc.name === undefined) {
+      if (KNOWN.has(desc.code)) marks[desc.code] = desc.attrs ?? true;
+      else opaque.push(desc);
+      continue;
+    }
+    const attrs = nativeAttrs(desc.name, desc.attrs);
+    if (attrs) native.push({ name: desc.name, attrs });
     else opaque.push(desc);
   }
-  return { marks, entries: opaque.length ? entriesOf(opaque) : [] };
+  return { marks, native, entries: opaque.length ? entriesOf(opaque) : [] };
 }
 
 // One unit's key, as the record keeps it: the codes this runtime knows, then
@@ -172,8 +181,8 @@ function marksOfKey(key) {
 const unitKey = (key, text, i) => {
   if (!key) return "";
   if (key[0] === "@") return key === BREAK && text[i] === ATOM ? key : "";
-  const { marks, entries } = marksOfKey(key);
-  return keyOfMarks(safeMarks(marks), entries);
+  const { marks, native, entries } = marksOfKey(key);
+  return keyOfMarks(safeMarks(marks), native.length ? [...entries, ...entriesOf(native)] : entries);
 };
 
 // A link to a script URL is never kept: it would run on the page's origin when a
@@ -417,6 +426,10 @@ const escText = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>
 const escAttr = (s) => escText(String(s)).replace(/"/g, "&quot;");
 const attr = (name, value) => (value === null || value === undefined ? "" : ` ${name}="${escAttr(value)}"`);
 
+// The element each of the four formats is read as in the saved article; the
+// text color and the highlight carry their palette key as data-color.
+const NATIVE_TAGS = { underline: "u", text_color: "span", highlight: "mark" };
+
 export function renderInline(c, m, marksEnvelopes = true) {
   const units = unitsOf(m, c.length) || [];
   let html = "";
@@ -432,8 +445,9 @@ export function renderInline(c, m, marksEnvelopes = true) {
     }
     let j = i + 1;
     while (j < c.length && (units[j] || "") === key && !(c[j] === ATOM && key[0] === "@")) j++;
-    const { marks, entries } = marksOfKey(key);
+    const { marks, native, entries } = marksOfKey(key);
     const want = NEST.filter((code) => marks[code]).map((code) => ({ code, sig: code + JSON.stringify(marks[code]), tag: code === "a" ? "a" : TAGS[code], href: code === "a" ? marks.a[0] : null }));
+    for (const n of native) want.push({ sig: `native${n.name}${canon(n.attrs)}`, tag: NATIVE_TAGS[n.name], color: n.attrs.color ?? null });
     const mention = entries.find((entry) => entry.name === "mention");
     const date = entries.find((entry) => entry.name === "date");
     const day = date && DAY.test(String(date.attrs.date)) ? String(date.attrs.date) : null;
@@ -443,7 +457,8 @@ export function renderInline(c, m, marksEnvelopes = true) {
     closeTo(keep);
     for (const w of want.slice(keep)) {
       if (w.entries) html += w.day ? `<time${attr("datetime", w.day)}${attr(DATE, "")}${marksEnvelope(w.entries)}>` : `<span${marksEnvelope(w.entries)}${attr(MENTION, w.mention)}>`;
-      else html += w.tag === "a" ? `<a${attr("href", w.href)}>` : `<${w.tag}>`;
+      else if (w.tag === "a") html += `<a${attr("href", w.href)}>`;
+      else html += w.color ? `<${w.tag}${attr("data-color", w.color)}>` : `<${w.tag}>`;
       open.push(w);
     }
     html += escText(c.slice(i, j));
@@ -468,6 +483,7 @@ function renderLeaf(item, clean, tables) {
     case "paragraph": return `<p${at}>${inlineOf(item)}</p>`;
     case "heading": { const h = `h${item.level ?? 2}`; return `<${h}${at}>${inlineOf(item)}</${h}>`; }
     case "callout": return `<aside${at} class="page-callout">${inlineOf(item)}</aside>`;
+    case "quote": return `<blockquote${at}>${inlineOf(item)}</blockquote>`;
     case "code_block": return `<pre${at}${attr("data-lang", item.lang || null)}><code>${escText(item.c ?? "")}</code></pre>`;
     case "divider": return `<hr${at}>`;
     case "image": return `<figure${at} data-type="image"${attr("data-align", item.align ?? null)}><img${attr("src", item.src ?? "")}${attr("alt", item.alt ?? "")}${attr("width", item.width ?? null)}>${item.caption ? `<figcaption>${escText(item.caption)}</figcaption>` : ""}</figure>`;
@@ -575,6 +591,17 @@ export function renderBlocks(blocks, opts) {
 const DROP_TAGS = new Set(["SCRIPT", "STYLE", "TEMPLATE", "NOSCRIPT"]);
 const INLINE_TAGS = new Set(["A", "ABBR", "B", "BDI", "BDO", "BR", "CITE", "CODE", "DATA", "DEL", "DFN", "EM", "FONT", "I", "INS", "KBD", "LABEL", "MARK", "Q", "S", "SAMP", "SMALL", "SPAN", "STRIKE", "STRONG", "SUB", "SUP", "TIME", "U", "VAR", "WBR"]);
 
+// The named descriptor an inline element stands for, when it is one of the four
+// formats: <u>, <mark> and a <span data-color> with a palette key. Anything else
+// is not a format this runtime reads natively.
+function nativeOfEl(tag, el) {
+  if (tag === "u") return { name: "underline", attrs: {} };
+  if (tag !== "mark" && tag !== "span") return null;
+  if (tag === "span" && !el.hasAttribute("data-color")) return null;
+  const name = tag === "mark" ? "highlight" : "text_color";
+  return { name, attrs: { color: el.getAttribute("data-color") } };
+}
+
 // Inline content of el as { c, units }, minus the children skip(child) names.
 function inlineOfEl(el, skip = () => false) {
   let c = "";
@@ -602,7 +629,8 @@ function inlineOfEl(el, skip = () => false) {
       else if (tag === "s" || tag === "del" || tag === "strike") next.s = true;
       else if (tag === "code") next.c = true;
       else if (tag === "a" && child.hasAttribute("href")) next.a = [child.getAttribute("href")];
-      walk(child, next, entries);
+      const named = nativeOfEl(tag, child);
+      walk(child, next, named ? [...entries, named] : entries);
     }
   };
   walk(el, {}, []);
@@ -686,6 +714,7 @@ export function parseArticle(article) {
     if (tag === "P" && !onlyImage) return push(el, "paragraph", parent, { ...omitDefaults("paragraph", P), ...tf(el) });
     if (/^H[1-6]$/.test(tag)) return push(el, "heading", parent, { ...omitDefaults("heading", { ...P, level: +tag[1] }), ...tf(el) });
     if (tag === "ASIDE") return push(el, "callout", parent, { ...omitDefaults("callout", P), ...tf(el) });
+    if (tag === "BLOCKQUOTE") return push(el, "quote", parent, { ...omitDefaults("quote", P), ...tf(el) });
     if (tag === "PRE") {
       const code = el.querySelector(":scope > code");
       return push(el, "code_block", parent, { ...omitDefaults("code_block", { ...P, lang: el.getAttribute("data-lang") || "" }), c: (code || el).textContent });

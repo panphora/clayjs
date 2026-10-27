@@ -1,6 +1,6 @@
 import { canon, renderModel, parseModel, fragmentCleaner } from "./projection.js";
 
-const TEXT = new Set(["paragraph", "heading", "list_item", "callout", "code_block", "toggle"]);
+const TEXT = new Set(["paragraph", "heading", "list_item", "callout", "quote", "code_block", "toggle"]);
 const same = (a, b) => canon(a) === canon(b);
 
 function inlineOf(item, doc) {

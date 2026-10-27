@@ -74,8 +74,8 @@ const nodeOf = (tab, id) => find(tab.view.state.doc, id)?.node ?? null;
 const segments = (pd) => walk(pd).visible;
 
 const NEWER = {
-  marks: [{ key: "underline~p1", value: true }, { key: "clay_opaque_code~p2", value: { tokens: ["u"] } }],
-  block: { id: "q", t: "quote", text: "Read this too", record: { unknown: { keep: true }, indent: 2 } },
+  marks: [{ key: "sparkle~p1", value: true }, { key: "clay_opaque_code~p2", value: { tokens: ["u"] } }],
+  block: { id: "q", t: "callout_future", text: "Read this too", record: { unknown: { keep: true }, indent: 2 } },
 };
 
 // The newer peer's own document: a known paragraph carrying two marks this
@@ -110,15 +110,15 @@ test("unfamiliar marks, attributes and a block type reach the tolerant editor in
   const pd = tab.binding.pd;
   expect(types(tab.view.state.doc)).toEqual(["paragraph", "opaque_block", "paragraph"]);
   const block = nodeOf(tab, "q");
-  expect(block.attrs.raw).toEqual({ t: "quote", unknown: { keep: true }, indent: 2 });
+  expect(block.attrs.raw).toEqual({ t: "callout_future", unknown: { keep: true }, indent: 2 });
   expect(block.textContent).toBe("Read this too");
   expect(textOf(tab, "a")).toBe("before");
   expect(textOf(tab, "b")).toBe("after");
   expect(walk(pd).orphans).toEqual([]);
   expect(segments(pd).map((seg) => [seg.id, seg.t, seg.opaque === true, seg.atom, seg.runs.map((run) => run.text ?? "").join("")]))
-    .toEqual([["a", "paragraph", false, false, "before"], ["q", "quote", true, false, "Read this too"], ["b", "paragraph", false, false, "after"]]);
+    .toEqual([["a", "paragraph", false, false, "before"], ["q", "callout_future", true, false, "Read this too"], ["b", "paragraph", false, false, "after"]]);
   const shown = tab.mount.querySelector('[data-type="newer-format"]');
-  expect(shown.getAttribute("data-format")).toBe("quote");
+  expect(shown.getAttribute("data-format")).toBe("callout_future");
   expect(shown.getAttribute("contenteditable")).toBe("false");
   expect(shown.textContent).toContain("Read this too");
   const a = nodeOf(tab, "a");
@@ -165,7 +165,7 @@ test("a known mark over an unknown-marked span and typing beside it never rewrit
   const before = unknownRuns(pd, "a");
   expect(before).toEqual([
     ["a", {}],
-    ["befo", { "underline~p1": true }],
+    ["befo", { "sparkle~p1": true }],
     ["re", { "clay_opaque_code~p2": { tokens: ["u"] } }],
   ]);
 
@@ -202,7 +202,7 @@ test("the record of an opaque block copies as a whole and never becomes a paragr
   expect(copy.attrs.raw).toEqual(block.node.attrs.raw);
   expect(copy.textContent).toBe("Read this too");
   expect(schema.nodeFromJSON(JSON.parse(JSON.stringify(copy.toJSON()))).attrs.raw).toEqual(block.node.attrs.raw);
-  expect(segments(tab.binding.pd).find((seg) => seg.id === "q").t).toBe("quote");
+  expect(segments(tab.binding.pd).find((seg) => seg.id === "q").t).toBe("callout_future");
 });
 
 test("splitting and merging a known neighbour leave the opaque block and its span untouched", () => {

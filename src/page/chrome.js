@@ -17,6 +17,7 @@ import { insertChartAfterTable } from "./chart.js";
 import { pickCsv } from "./csv-import.js";
 import { HISTORY_INTENT, typingIntent } from "./history-intent.js";
 import { composing } from "./markdown.js";
+import { PALETTE, formatMark, runFormat } from "./format-native.js";
 import { announce } from "./announce.js";
 
 export { BLOCK_TYPES, blockTypeOf, turnInto, insertAfter } from "./items.js";
@@ -215,6 +216,26 @@ function runList(view, kind) {
   const tr = st.tr;
   for (const i of idx) retype(tr, i, item);
   if (tr.docChanged) view.dispatch(asStep(tr));
+}
+
+// The four formats this release adds. Every one of them is a command the format
+// gate may refuse, and a refusal is a notice rather than a change.
+const CANNOT_MARK = "This text can\u2019t take that format.";
+const refusalText = (result) => (result.status === "upgrade-required" ? result.message : result.code === "mark-not-allowed" ? CANNOT_MARK : "That format isn\u2019t available here.");
+
+function runNative(view, name, attrs = {}, options = undefined) {
+  formatMark(view, name, attrs, options).then((result) => {
+    if (result?.status !== "applied" && !view.isDestroyed) announce(view, refusalText(result ?? {}));
+  });
+}
+
+// The palette of one color mark, as its own short menu: the nine fixed keys and
+// the way back to none. No arbitrary color picker is offered.
+function colorItems(name, colorLabel, noneLabel) {
+  return [
+    ...PALETTE.map((color) => ({ key: `${name}_${color}`, label: `${colorLabel}: ${color[0].toUpperCase()}${color.slice(1)}`, icon: "\u25CF", run: (view) => runNative(view, name, { color }) })),
+    { key: `${name}_none`, label: noneLabel, icon: "\u00d7", run: (view) => runNative(view, name, {}, { reset: true }) },
+  ];
 }
 
 function runMark(view, name) {
@@ -560,6 +581,9 @@ class Chrome {
     const actions = ACTION_ITEMS.filter((a) => MORE_ACTIONS.has(a.key)).map((a) => ({ ...a, blocks: true }));
     return [
       ...tools,
+      { key: "underline", label: "Underline", icon: "U", hint: `${MOD}u`, run: (view) => runNative(view, "underline") },
+      { key: "text_color", label: "Text color", icon: "A", hint: "\u203a", run: (view, chrome) => openPageMenu(view, chrome.more, colorItems("text_color", "Text", "Automatic")) },
+      { key: "highlight", label: "Highlight", icon: "\u25A0", hint: "\u203a", run: (view, chrome) => openPageMenu(view, chrome.more, colorItems("highlight", "Highlight", "No highlight")) },
       { key: "turn", label: "Turn into", icon: "\u21bb", run: (view, chrome) => chrome.openMenu("turn", chrome.more) },
       { key: "insert", label: "Insert", icon: "+", run: (view, chrome) => chrome.openMenu("insert", chrome.more, null, null, view.state.doc.child(chrome.blockIndex()).attrs.id) },
       ...actions,
@@ -668,9 +692,21 @@ class Chrome {
         this.view.focus();
         return;
       }
-      const tr = st.tr;
-      for (const id of wanted) retype(tr, this.idIndex(id), item);
-      this.view.dispatch(asStep(tr).scrollIntoView());
+      const turn = () => {
+        const tr = this.view.state.tr;
+        for (const id of wanted) {
+          const at = this.idIndex(id);
+          if (at >= 0) retype(tr, at, item);
+        }
+        if (tr.docChanged) this.view.dispatch(asStep(tr).scrollIntoView());
+        return true;
+      };
+      // A block type from a later format asks the gate before it writes.
+      if (item.type === "quote") {
+        runFormat(this.view, turn).then((result) => {
+          if (result?.status !== "applied" && !this.view.isDestroyed) announce(this.view, refusalText(result ?? {}));
+        });
+      } else turn();
       this.view.focus();
     } else if (m.mode === "actions" || m.mode === "more" || m.mode === "external") {
       if (item.blocks) this.selectCaretBlock(wanted);

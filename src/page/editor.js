@@ -11,10 +11,11 @@ import { schema } from "./schema.js";
 import { identityPlugin, docFromBlocks, blockMap, keyBetween, newId } from "./model.js";
 import { blockKeys, structurePlugin, collapsePlugin, pastePlugin, BlockSelection, STEP } from "./blocks.js";
 import { chromePlugin, slashRangePlugin } from "./chrome.js";
-import { announcementPlugin } from "./announce.js";
+import { announcementPlugin, announce } from "./announce.js";
 import { linkPlugin } from "./link.js";
 import { blockSelectionPlugin, asStep } from "./blocksel.js";
 import { markdownPlugin, markdownKeys, backspaceToParagraph, composing } from "./markdown.js";
+import { PALETTE, formatMark, markable } from "./format-native.js";
 import { placeholderPlugin } from "./placeholder.js";
 import { titlePlugin } from "./document-title-runtime.js";
 import { mediaPlugin } from "./media.js";
@@ -39,6 +40,11 @@ const LIGHT = `
   --page-rule: rgba(35, 34, 31, 0.10); --page-accent: #2F5E9E; --page-link: #164583; --page-selection: rgba(88, 120, 170, 0.20);
   --page-check-border: rgba(35, 34, 31, 0.35); --page-check-fill: #23221F; --page-check-ink: #F7F6F2;
   --page-callout-bg: rgba(35, 34, 31, 0.04); --page-code-bg: rgba(35, 34, 31, 0.05);
+  --page-color-gray: #5B5953; --page-color-brown: #8A5A1E; --page-color-orange: #B4531A; --page-color-yellow: #7A6210; --page-color-green: #3E6A28;
+  --page-color-blue: #1F5A8A; --page-color-purple: #5E4596; --page-color-pink: #A23E6E; --page-color-red: #9E3B2F;
+  --page-mark-bg-gray: rgba(35, 34, 31, 0.12); --page-mark-bg-brown: rgba(138, 90, 30, 0.20); --page-mark-bg-orange: rgba(180, 83, 26, 0.20);
+  --page-mark-bg-yellow: rgba(122, 98, 16, 0.22); --page-mark-bg-green: rgba(62, 106, 40, 0.20); --page-mark-bg-blue: rgba(31, 90, 138, 0.18);
+  --page-mark-bg-purple: rgba(94, 69, 150, 0.18); --page-mark-bg-pink: rgba(162, 62, 110, 0.18); --page-mark-bg-red: rgba(158, 59, 47, 0.18);
   --page-code-token-keyword: #8A3B6E; --page-code-token-constant: #1F5A8A; --page-code-token-string: #3E6A28; --page-code-token-string-expression: #3E6A28; --page-code-token-comment: #8B877E; --page-code-token-function: #5E4596; --page-code-token-parameter: #8A5A1E; --page-code-token-punctuation: var(--page-ink-soft); --page-code-token-link: var(--page-link);
   --page-chrome-ink-rest: rgba(35, 34, 31, 0.20); --page-chrome-ink-moved: rgba(35, 34, 31, 0.34);
   --page-chrome-bg-rest: rgba(35, 34, 31, 0.02); --page-chrome-bg-moved: rgba(35, 34, 31, 0.04);
@@ -53,6 +59,11 @@ const DARK = `
   --page-rule: rgba(231, 228, 220, 0.10); --page-accent: #8DB0E6; --page-link: #8DB0E6; --page-selection: rgba(120, 155, 210, 0.28);
   --page-check-border: rgba(231, 228, 220, 0.35); --page-check-fill: #E7E4DC; --page-check-ink: #1A1A18;
   --page-callout-bg: rgba(231, 228, 220, 0.05); --page-code-bg: rgba(231, 228, 220, 0.06);
+  --page-color-gray: #A3A098; --page-color-brown: #E0B47A; --page-color-orange: #E8A177; --page-color-yellow: #DEC97A; --page-color-green: #A9C98B;
+  --page-color-blue: #8DB0E6; --page-color-purple: #BBA6E6; --page-color-pink: #E3A3C4; --page-color-red: #E08A7A;
+  --page-mark-bg-gray: rgba(231, 228, 220, 0.14); --page-mark-bg-brown: rgba(224, 180, 122, 0.22); --page-mark-bg-orange: rgba(232, 161, 119, 0.22);
+  --page-mark-bg-yellow: rgba(222, 201, 122, 0.24); --page-mark-bg-green: rgba(169, 201, 139, 0.22); --page-mark-bg-blue: rgba(141, 176, 230, 0.22);
+  --page-mark-bg-purple: rgba(187, 166, 230, 0.22); --page-mark-bg-pink: rgba(227, 163, 196, 0.22); --page-mark-bg-red: rgba(224, 138, 122, 0.22);
   --page-code-token-keyword: #D9A0C8; --page-code-token-constant: #8DB0E6; --page-code-token-string: #A9C98B; --page-code-token-string-expression: #A9C98B; --page-code-token-comment: #75726B; --page-code-token-function: #BBA6E6; --page-code-token-parameter: #E0B47A; --page-code-token-punctuation: var(--page-ink-soft); --page-code-token-link: var(--page-link);
   --page-chrome-ink-rest: rgba(231, 228, 220, 0.18); --page-chrome-ink-moved: rgba(231, 228, 220, 0.30);
   --page-chrome-bg-rest: rgba(231, 228, 220, 0.02); --page-chrome-bg-moved: rgba(231, 228, 220, 0.04);
@@ -100,6 +111,10 @@ export const PAGE_EDITOR_CSS = `
 .page-editor pre:hover .page-code-lang, .page-editor pre:focus-within .page-code-lang, .page-code-lang:focus-visible, .page-editor pre[data-lang] .page-code-lang { opacity: 1; }
 .page-code-lang:hover, .page-code-lang:focus-visible { background: var(--page-pop-hover); color: var(--page-ink-soft); }
 :where(article[data-page], .page-editor) .page-callout { background: var(--page-callout-bg); border: 1px solid var(--page-callout-line); border-radius: 8px; padding: 10px 14px; }
+/* The four floor-1 formats. A quote is set apart by its own inset and ink, with
+   no left-border accent; the palette's keys are fixed tokens, in both themes. */
+:where(article[data-page], .page-editor) blockquote { padding-inline-start: var(--page-indent); color: var(--page-ink-soft); }
+${PALETTE.map((color) => `:where(article[data-page], .page-editor) span[data-color="${color}"] { color: var(--page-color-${color}); }\n:where(article[data-page], .page-editor) mark[data-color="${color}"] { color: inherit; background: var(--page-mark-bg-${color}); }`).join("\n")}
 :where(article[data-page], .page-editor) hr { border: 0; border-top: 1px solid var(--page-rule); margin-block: 1.2em; }
 :where(article[data-page], .page-editor) .page-hidden { display: none; }
 :where(article[data-page], .page-editor) .page-li { position: relative; --li-indent: 0; padding-inline-start: calc((var(--li-indent) + 1) * var(--page-indent)); }
@@ -232,6 +247,17 @@ const insertHardBreak = (st, dispatch) => {
   return true;
 };
 
+// Mod-u belongs to an editable page selection only: anywhere else the browser
+// keeps its own meaning for the key. The write itself goes through the format
+// gate, so a refused activation leaves the document exactly as it was.
+const underlineShortcut = (st, dispatch, view) => {
+  if (!dispatch || !view?.editable || !markable(st, schema.marks.underline)) return false;
+  formatMark(view, "underline").then((result) => {
+    if (result?.status !== "applied" && !view.isDestroyed) announce(view, result?.message ?? "That format isn\u2019t available here.");
+  });
+  return true;
+};
+
 const editKeys = ({ history: useHistory = true, undo, redo } = {}) => ({
   "Mod-z": useHistory ? history.undo : () => { undo?.(); return true; },
   "Shift-Mod-z": useHistory ? history.redo : () => { redo?.(); return true; },
@@ -239,6 +265,7 @@ const editKeys = ({ history: useHistory = true, undo, redo } = {}) => ({
   "Shift-Enter": insertHardBreak,
   "Mod-b": commands.toggleMark(schema.marks.strong),
   "Mod-i": commands.toggleMark(schema.marks.em),
+  "Mod-u": underlineShortcut,
 });
 
 const restoreShortcut = (st, dispatch, view) => {

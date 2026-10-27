@@ -1,5 +1,6 @@
 import { schema } from "../schema.js";
 import { entriesOfYjs, isOpaque, opaqueMark, yjsFields } from "../format-codec.js";
+import { NATIVE_NAMES, nativeAttrs } from "../format-native.js";
 
 export const markName = (k) => k.split("!")[0].split("~")[0];
 export const isCancel = (k) => k.includes("!");
@@ -29,7 +30,7 @@ export function marksFromAttributes(a, blockType) {
   const marks = [];
   let unknown = null;
   for (const [n, v] of best) {
-    if (schema.marks[n]) marks.push(schema.marks[n].create(v === true ? null : v));
+    if (schema.marks[n] && (!NATIVE_NAMES.has(n) || nativeAttrs(n, v))) marks.push(schema.marks[n].create(v === true ? null : v));
     else (unknown ??= {})[n] = v;
   }
   // The walk asks this of every text run on every keystroke, and almost none carry a

@@ -32,7 +32,7 @@ describe("the slash trigger", () => {
     const view = open([["e", "paragraph", ""]]);
     expect(typeText(view, "/")).toBe(true);
     expect(isOpen(view)).toBe(true);
-    expect(labels(view)).toEqual(["Text", "Heading 1", "Heading 2", "Heading 3", "Bulleted list", "Numbered list", "Checklist", "Toggle", "Callout", "Code", "Divider", "Image", "File", "Table", "Import CSV…", "Board"]);
+    expect(labels(view)).toEqual(["Text", "Heading 1", "Heading 2", "Heading 3", "Bulleted list", "Numbered list", "Checklist", "Toggle", "Callout", "Quote", "Code", "Divider", "Image", "File", "Table", "Import CSV…", "Board"]);
   });
 
   test("opens after a space in the middle of a line, and at the start of a line that has text", () => {
@@ -124,7 +124,7 @@ describe("no match", () => {
     expect(isOpen(view)).toBe(true);
     backspace(view);
     backspace(view);
-    expect(rows(view).length).toBe(16);
+    expect(rows(view).length).toBe(17);
   });
 
   test("a space after a query with no match ends the session", () => {
@@ -209,11 +209,11 @@ describe("the plus", () => {
 });
 
 describe("the toolbar's turn menu", () => {
-  test("still lists the ten block types under its own title and turns the caret's block", () => {
+  test("still lists the eleven block types under its own title and turns the caret's block", () => {
     const view = open([["p", "paragraph", "P"]], "p");
     view.dom.parentElement.querySelector(".page-tool-turn").click();
     expect(menu(view).querySelector(".page-menu-title").textContent).toBe("Turn into");
-    expect(rows(view).length).toBe(10);
+    expect(rows(view).length).toBe(11);
     rows(view)[1].click();
     expect(view.state.doc.child(0).type.name).toBe("heading");
   });
@@ -425,7 +425,7 @@ describe("review menu regressions", () => {
     const view = open([["p", "paragraph", "hello"]]);
     try {
       view.dom.parentElement.querySelector(".page-plus").click();
-      rows(view)[10].click();
+      rows(view)[11].click();
       expect(view.state.doc.childCount).toBe(3);
       expect(view.state.doc.child(1).type.name).toBe("divider");
       expect(view.state.doc.child(2).type.name).toBe("paragraph");

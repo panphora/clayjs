@@ -124,7 +124,40 @@ export const MARKDOWN_RULES = [
   ...INLINE_RULES,
 ];
 
-export const markdownPlugin = () => inputrules.inputRules({ rules: MARKDOWN_RULES });
+// The shortest shortcut that quotes a line: `" ` typed at the start of a
+// paragraph. It writes a floor-1 block, so it asks the format gate first and
+// converts only when the gate answered applied; the transaction it dispatches is
+// the input-rule one, recorded on this plugin so Backspace puts the literal `" `
+// back and undo keeps the conversion whole. The typed space is never swallowed:
+// when the format cannot be written, the space is inserted as itself.
+function quoteShortcut(plugin, view, from, to, text) {
+  if (text !== " " || from !== to) return false;
+  const st = view.state;
+  const $from = st.doc.resolve(from);
+  const node = $from.parent;
+  if ($from.depth !== 1 || node.type !== N.paragraph || $from.parentOffset !== 1 || node.textContent !== '"') return false;
+  if (!view.editable || typeof view.runFormatCommand !== "function") return false;
+  const plain = () => { if (!view.isDestroyed) view.dispatch(st.tr.insertText(" ", from, to)); };
+  const convert = () => {
+    if (view.isDestroyed) return false;
+    const now = view.state;
+    const at = $from.before(1);
+    const current = now.doc.nodeAt(at);
+    if (!current || current.type !== N.paragraph || current.textContent !== '"') return plain();
+    const tr = now.tr.delete(at + 1, at + 2).setNodeMarkup(at, N.quote, current.attrs);
+    view.dispatch(asStep(tr.setMeta(plugin, { transform: tr, from, to, text })));
+    return true;
+  };
+  view.runFormatCommand(convert).then((result) => { if (result?.status !== "applied") plain(); }, plain);
+  return true;
+}
+
+export const markdownPlugin = () => {
+  const plugin = inputrules.inputRules({ rules: MARKDOWN_RULES });
+  const rules = plugin.props.handleTextInput;
+  plugin.props.handleTextInput = (view, from, to, text) => quoteShortcut(plugin, view, from, to, text) || rules(view, from, to, text);
+  return plugin;
+};
 
 // "| Name | Owner |" then Enter at the end of a paragraph: the paragraph becomes
 // a table with those column names and one empty row, the caret in its first cell.
@@ -150,7 +183,7 @@ export function backspaceToParagraph(st, dispatch) {
   const { $from, empty } = st.selection;
   if (!empty || $from.depth !== 1 || $from.parentOffset !== 0) return false;
   const n = $from.parent;
-  if (!(n.type === N.heading || n.type === N.callout || (n.type === N.code_block && n.content.size === 0))) return false;
+  if (!(n.type === N.heading || n.type === N.callout || n.type === N.quote || (n.type === N.code_block && n.content.size === 0))) return false;
   if (dispatch) dispatch(asStep(st.tr.setNodeMarkup($from.before(), N.paragraph, { id: n.attrs.id, pos: n.attrs.pos, parent: n.attrs.parent })));
   return true;
 }
