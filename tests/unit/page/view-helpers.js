@@ -2,6 +2,7 @@ import { createPageEditor, installPageFeature } from "../../../src/page/editor.j
 import * as tableFeature from "../../../src/page/features/table.js";
 import * as boardFeature from "../../../src/page/features/board.js";
 import * as mediaFeature from "../../../src/page/features/media.js";
+import * as codeFeature from "../../../src/page/features/code.js";
 import { state as pmState } from "../../../src/vendor/prosemirror.vendor.js";
 
 const { TextSelection } = pmState;
@@ -25,6 +26,7 @@ export const editor = (spec, options = {}) => {
     installPageFeature({ view }, "table", tableFeature);
     installPageFeature({ view, board: options.board, undo: options.undo, redo: options.redo }, "board", boardFeature);
     installPageFeature({ view }, "media", mediaFeature);
+    installPageFeature({ view, highlight: options.highlight }, "code", codeFeature);
   }
   return trackView(view);
 };

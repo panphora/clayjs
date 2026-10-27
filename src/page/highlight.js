@@ -5,9 +5,12 @@
 import { state, view as pmView } from "../vendor/prosemirror.vendor.js";
 import { schema } from "./schema.js";
 import { asStep } from "./blocksel.js";
+import { highlightKey, highlightSlot } from "./highlight-slot.js";
 
-const { Plugin, PluginKey } = state;
-const { Decoration, DecorationSet } = pmView;
+const { Plugin } = state;
+const { Decoration } = pmView;
+
+export { highlightKey };
 
 export const LANGS = [
   ["", "Plain text"],
@@ -106,9 +109,6 @@ const styleOf = (t) => {
   return s.join("; ");
 };
 
-export const highlightKey = new PluginKey("page-highlight");
-
-
 const CACHE_SIZE = 200;
 
 // Each pass rebuilds every code block's colours from a cache of token runs keyed
@@ -206,18 +206,32 @@ class Highlighter {
   }
 }
 
-export function highlightPlugin({ tokenize: run = tokenize, delay = 300 } = {}) {
+// The highlighter is no longer a plugin view, so nothing calls its update: it
+// watches the editor's own dispatches and stops watching when it is destroyed.
+export function startHighlighter(view, { tokenize: run = tokenize, delay = 300 } = {}) {
+  const highlighter = new Highlighter(view, run, delay);
+  const dispatch = view.dispatch.bind(view);
+  let doc = view.state.doc;
+  const wrapped = (tr) => {
+    dispatch(tr);
+    if (view.state.doc === doc) return;
+    const prev = { doc };
+    doc = view.state.doc;
+    highlighter.update(view, prev);
+  };
+  view.dispatch = wrapped;
+  const stop = highlighter.destroy.bind(highlighter);
+  highlighter.destroy = () => {
+    if (view.dispatch === wrapped) view.dispatch = dispatch;
+    stop();
+  };
+  return highlighter;
+}
+
+export function highlightPlugin(options) {
   return new Plugin({
-    key: highlightKey,
-    state: {
-      init: () => DecorationSet.empty,
-      apply(tr, set) {
-        const decos = tr.getMeta(highlightKey);
-        return decos ? DecorationSet.create(tr.doc, decos) : set.map(tr.mapping, tr.doc);
-      },
-    },
-    props: { decorations: (st) => highlightKey.getState(st) },
-    view: (view) => new Highlighter(view, run, delay),
+    ...highlightSlot().spec,
+    view: (view) => startHighlighter(view, options),
   });
 }
 

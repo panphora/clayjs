@@ -18,7 +18,7 @@ import { markdownPlugin, markdownKeys, backspaceToParagraph, composing } from ".
 import { placeholderPlugin } from "./placeholder.js";
 import { titlePlugin } from "./document-title-runtime.js";
 import { mediaPlugin } from "./media.js";
-import { highlightPlugin, CodeBlockView } from "./highlight.js";
+import { highlightSlot } from "./highlight-slot.js";
 import { tableKeys, tablePlugin } from "./table.js";
 import { tableSelectPlugin } from "./table-select.js";
 import { chartPlugin, ChartView } from "./chart.js";
@@ -296,8 +296,8 @@ export function lazyViewsPlugin() {
 
 // Adds a view part to a running editor: its CSS at once, its node views into the
 // editor's registry, and a transaction that recreates only those block types.
-export function installPageFeature({ view, upload, toolHost, board = null, undo = null, redo = null, revise = null }, id, mod) {
-  const feature = mod.createFeature({ view, upload, toolHost, board, undo, redo, revise });
+export function installPageFeature({ view, upload, toolHost, board = null, undo = null, redo = null, revise = null, highlight }, id, mod) {
+  const feature = mod.createFeature({ view, upload, toolHost, board, undo, redo, revise, highlight });
   const registry = nodeViewRegistries.get(view);
   const apply = () => {
     if (feature.css) styleWithLegacyId(`page-feature-${id}`, feature.css, `page-feature-${id}`, ["editor-ui"]);
@@ -383,7 +383,7 @@ export function pagePlugins({ upload = defaultUpload, highlight, history: useHis
     csvImportPlugin({ upload }),
     collapsePlugin(),
     mediaPlugin({ upload, features }),
-    highlightPlugin(highlight),
+    highlightSlot(),
     pastePlugin(),
     historyIntentPlugin(),
     useHistory ? history.history() : null,
@@ -451,11 +451,10 @@ export function createPageEditor(mount, { blocks = null, onChange = null, upload
   let view = null;
   const features = providedFeatures ?? createFeatureLoader({
     load: (id) => FEATURES[id].load(),
-    install: (id, mod) => installPageFeature({ view, upload, toolHost, board, undo, redo, revise: reviseTool }, id, mod),
+    install: (id, mod) => installPageFeature({ view, upload, toolHost, board, undo, redo, revise: reviseTool, highlight }, id, mod),
   });
   const nodeViewRegistry = new Map();
   const nodeViews = {
-    code_block: (node, v, getPos) => new CodeBlockView(node, v, getPos),
     chart: (node, v, getPos) => new ChartView(node, v, getPos),
   };
   for (const feature of Object.values(FEATURES)) for (const type of feature.views ?? feature.types) {

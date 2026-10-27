@@ -6,6 +6,7 @@
 export const FEATURES = {
   table: { types: ["table"], views: ["table", "table_cell"], module: "page/features/table.js", load: () => import("./table.js") },
   board: { types: ["board"], module: "page/features/board.js", load: () => import("./board.js") },
+  code: { types: ["code_block"], module: "page/features/code.js", load: () => import("./code.js") },
   media: { types: ["image", "file"], module: "page/features/media.js", load: () => import("./media.js") },
   tool: { types: ["tool"], module: "page/features/tool.js", boot: ["page/tools.js", "page/tool-data.js"], load: () => import("./tool.js") },
 };

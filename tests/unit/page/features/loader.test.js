@@ -10,6 +10,7 @@ import { createFeatureLoader } from "../../../../src/page/feature-loader.js";
 import { FEATURES } from "../../../../src/page/features/registry.js";
 import * as tableModule from "../../../../src/page/features/table.js";
 import * as boardModule from "../../../../src/page/features/board.js";
+import * as codeModule from "../../../../src/page/features/code.js";
 import * as mediaModule from "../../../../src/page/features/media.js";
 import * as toolModule from "../../../../src/page/features/tool.js";
 
@@ -161,6 +162,7 @@ test("a host-local runtime prefix activates every feature without reaching clayj
   const modules = {
     "src/page/features/table.js": tableModule,
     "src/page/features/board.js": boardModule,
+    "src/page/features/code.js": codeModule,
     "src/page/features/media.js": mediaModule,
     "src/page/features/tool.js": toolModule,
   };
@@ -190,7 +192,7 @@ test("a host-local runtime prefix activates every feature without reaching clayj
 
   try {
     const ids = Object.keys(FEATURES).sort();
-    expect(ids).toEqual(["board", "media", "table", "tool"]);
+    expect(ids).toEqual(["board", "code", "media", "table", "tool"]);
     for (const id of ids) {
       expect(await loader.ensure(id)).toBeTruthy();
       expect(loader.has(id)).toBe(true);
