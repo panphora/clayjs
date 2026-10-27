@@ -12,6 +12,7 @@ import { chartModel, renderChartSvg } from "./rich/chart.js";
 import { cellText } from "./rich/cell.js";
 import { bounded, descriptors, entriesOf, keyOf, normalizeEntries } from "./format-codec.js";
 import { nativeAttrs } from "./format-native.js";
+import { safeSrc } from "./address.js";
 
 export const ATOM = "￼";
 export const BREAK = '@{"type":"hard_break"}';
@@ -41,7 +42,7 @@ const knownType = (t) => Object.hasOwn(DEFAULTS, t);
 // Mirrors schema.js attrs minus id and pos (a test pins the two together).
 export const DEFAULTS = {
   paragraph: { parent: null },
-  heading: { parent: null, level: 2, pageIcon: null },
+  heading: { parent: null, level: 2, pageIcon: null, pageCoverSrc: null, pageCoverAlt: "", pageCoverX: 50, pageCoverY: 50 },
   list_item: { parent: null, kind: "bullet", indent: 0, checked: false, owner: null, due: null },
   callout: { parent: null },
   quote: { parent: null },
@@ -331,6 +332,8 @@ const omitDefaults = (t, fields) => {
   return out;
 };
 
+const focal = (v) => Math.min(100, Math.max(0, Number.isFinite(+v) && v !== null && v !== "" ? +v : 50));
+
 const columnWidth = (value) => (typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.round(value) : null);
 
 function cellModel(value) {
@@ -409,7 +412,7 @@ function projectOne({ id, b, t, parent, indent }) {
   for (const k of Object.keys(extras)) delete attrs[k];
   const fields = { ...attrs, parent };
   if (t === "list_item") fields.indent = indent;
-  if (t === "heading") fields.level = clampLevel(attrs.level ?? 2);
+  if (t === "heading") Object.assign(fields, { level: clampLevel(attrs.level ?? 2), pageCoverSrc: safeSrc(fields.pageCoverSrc ?? null), pageCoverX: focal(fields.pageCoverX), pageCoverY: focal(fields.pageCoverY) });
   if (t === "toggle") fields.level = toggleLevel(attrs.level);
   if (t === "image" && fields.width != null) fields.width = widthOf(String(fields.width));
   if (t === "image") fields.align = alignOf(fields.align);
@@ -524,7 +527,7 @@ export function renderInline(c, m, marksEnvelopes = true) {
 }
 
 const inlineOf = (item) => renderInline(item.c ?? "", item.m);
-const iconHtml = (item) => `<header${attr("data-id", item.id)} data-page-heading="1"${extrasOfItem(item)}><span data-page-icon aria-hidden="true">${escText(item.pageIcon)}</span><h1>${inlineOf(item)}</h1></header>`;
+const titleHtml = (item) => `<header${attr("data-id", item.id)} data-page-heading="1"${extrasOfItem(item)}>${item.pageCoverSrc ? `<img data-page-cover${attr("src", item.pageCoverSrc)}${attr("alt", item.pageCoverAlt ?? "")} style="object-position:${item.pageCoverX ?? 50}% ${item.pageCoverY ?? 50}%">` : ""}${item.pageIcon ? `<span data-page-icon aria-hidden="true">${escText(item.pageIcon)}</span>` : ""}<h1>${inlineOf(item)}</h1></header>`;
 const toolData = (item) => item.artifact || item.rev || (item.state && Object.keys(item.state).length)
   ? `<script type="application/json" data-tool>${canon({ artifact: item.artifact ?? null, rev: item.rev ?? null, state: item.state ?? {} }).replace(/</g, "\\u003c")}</script>`
   : "";
@@ -633,7 +636,7 @@ export function renderModel(model, { fallbackOf = () => "", clean = RAW } = {}) 
     }
     if (item.t === "tool") { add(`<section${attr("data-id", item.id)} data-type="tool">${toolData(item)}${clean.fallback(fallbackOf(item.id))}</section>`); continue; }
     if (item.t === "toc") { add(tocHtml(item, model)); continue; }
-    if (item === title && item.pageIcon) { add(iconHtml(item)); continue; }
+    if (item === title && (item.pageIcon || item.pageCoverSrc)) { add(titleHtml(item)); continue; }
     add(renderLeaf(item, clean, tables));
   }
   closeLists();
@@ -779,7 +782,10 @@ export function parseArticle(article) {
     if (/^H[1-6]$/.test(tag)) return push(el, "heading", parent, { ...omitDefaults("heading", { ...P, level: +tag[1] }), ...tf(el) });
     if (tag === "HEADER" && el.getAttribute("data-page-heading") === ENVELOPE) {
       const icon = el.querySelector(":scope > [data-page-icon]");
-      return push(el, "heading", parent, { ...omitDefaults("heading", { ...P, level: 1, pageIcon: icon ? icon.textContent : null }), ...tf(el.querySelector(":scope > h1")) });
+      const cover = el.querySelector(":scope > img");
+      const [, x, y] = /object-position:\s*([-\d.]+)%\s+([-\d.]+)%/.exec(cover?.getAttribute("style") ?? "") ?? [];
+      const cover0 = cover ? { pageCoverSrc: safeSrc(cover.getAttribute("src")), pageCoverAlt: cover.getAttribute("alt") ?? "", pageCoverX: focal(x), pageCoverY: focal(y) } : {};
+      return push(el, "heading", parent, { ...omitDefaults("heading", { ...P, level: 1, pageIcon: icon ? icon.textContent : null, ...cover0 }), ...tf(el.querySelector(":scope > h1")) });
     }
     if (tag === "ASIDE") return push(el, "callout", parent, { ...omitDefaults("callout", P), ...tf(el) });
     if (tag === "BLOCKQUOTE") return push(el, "quote", parent, { ...omitDefaults("quote", P), ...tf(el) });

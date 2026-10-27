@@ -299,7 +299,7 @@ test("a gate that refuses writes nothing, and a page with no gate never asks one
 });
 
 test("the title's attribute is one of the heading's defaults, so a page without one writes nothing new", () => {
-  expect(DEFAULTS.heading).toEqual({ parent: null, level: 2, pageIcon: null });
+  expect(DEFAULTS.heading).toEqual({ parent: null, level: 2, pageIcon: null, pageCoverSrc: null, pageCoverAlt: "", pageCoverX: 50, pageCoverY: 50 });
   const shape = project({ h: { t: "heading", pos: "B", c: "Notes", level: 1 } });
   expect(shape[0]).toEqual({ id: "h", t: "heading", level: 1, c: "Notes" });
   expect(renderModel(shape)).toBe('<h1 data-id="h">Notes</h1>');

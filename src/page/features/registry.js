@@ -10,7 +10,7 @@ export const FEATURES = {
   checklist: { types: [], views: [], match: (node) => node.type.name === "list_item" && node.attrs.kind === "check", module: "page/features/checklist.js", load: () => import("./checklist.js") },
   code: { types: ["code_block"], module: "page/features/code.js", load: () => import("./code.js") },
   toc: { types: ["toc"], module: "page/features/toc.js", load: () => import("./toc.js") },
-  titleIcon: { types: [], views: ["heading"], match: (node) => node.attrs.pageIcon != null, module: "page/features/title-icon.js", load: () => import("./title-icon.js") },
+  titleIcon: { types: [], views: ["heading"], match: (node) => node.attrs.pageIcon != null || node.attrs.pageCoverSrc != null, module: "page/features/title-icon.js", load: () => import("./title-icon.js") },
   media: { types: ["image", "file"], module: "page/features/media.js", load: () => import("./media.js") },
   tool: { types: ["tool"], module: "page/features/tool.js", boot: ["page/tools.js", "page/tool-data.js"], load: () => import("./tool.js") },
 };
@@ -39,4 +39,5 @@ export const COMMAND_FEATURES = {
   dates: { module: "page/features/dates.js", load: () => import("./dates.js") },
   emoji: { module: "page/features/emoji.js", load: () => import("./emoji.js") },
   titleIcon: { module: "page/features/title-icon.js", load: () => import("./title-icon.js") },
+  titleCover: { module: "page/features/title-cover.js", load: () => import("./title-cover.js") },
 };

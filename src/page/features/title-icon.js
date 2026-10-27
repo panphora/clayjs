@@ -13,6 +13,7 @@ import { runFormatted } from "../format-command.js";
 const TITLE_CSS = `
 [data-page-heading]{display:block}
 [data-page-heading]>span[data-page-icon]{display:inline-block;font-size:34px;line-height:1;margin-block-end:.2em}
+[data-page-heading]>img[data-page-cover]{display:block;width:100%;height:180px;object-fit:cover;border-radius:var(--page-image-radius, 6px);margin-block-end:.6em}
 [data-page-heading]>h1{font-family:var(--page-font-display);font-size:var(--page-h1-size);font-weight:var(--page-h1-weight);letter-spacing:var(--page-h1-tracking);line-height:var(--page-h1-line);color:var(--page-ink-strong);margin-block:0 .6em}
 `;
 
@@ -44,32 +45,48 @@ export function titleOf(doc) {
   return null;
 }
 
+// The cover the page shows above its title: an ordinary image whose focal point is the
+// part of it a person kept in view, so a reader draws it with nothing of this loaded.
+function coverImg(doc, attrs) {
+  const img = doc.createElement("img");
+  img.setAttribute("data-page-cover", "");
+  img.setAttribute("src", attrs.pageCoverSrc);
+  img.setAttribute("alt", attrs.pageCoverAlt ?? "");
+  img.setAttribute("style", `object-position:${attrs.pageCoverX}% ${attrs.pageCoverY}%`);
+  return img;
+}
+
 // The decorated heading: the block's id on the wrapper and each part of the decoration
 // beside the `h1` the text lives in. A heading with no icon draws the plain heading it
-// always did, and one with a different glyph or level is a new decoration, so the view is
-// rebuilt from the node.
+// always did, and one with a different glyph, cover or level is a new decoration, so the
+// view is rebuilt from the node. The cover is drawn here too: it is the same wrapper, one
+// part of it, not a second view.
 class TitleHeadingView {
   constructor(node, view) {
     this.node = node;
-    this.icon = !!node.attrs.pageIcon;
+    this.decorated = !!(node.attrs.pageIcon || node.attrs.pageCoverSrc);
     const doc = view.dom.ownerDocument;
     const head = doc.createElement(`h${node.attrs.level}`);
     head.setAttribute("data-id", node.attrs.id);
     this.dom = this.contentDOM = head;
-    if (!this.icon) return;
+    if (!this.decorated) return;
     const box = doc.createElement("header");
     box.setAttribute("data-id", node.attrs.id);
     box.setAttribute("data-page-heading", "1");
-    const mark = doc.createElement("span");
-    mark.setAttribute("data-page-icon", "");
-    mark.setAttribute("aria-hidden", "true");
-    mark.textContent = node.attrs.pageIcon;
     head.removeAttribute("data-id");
-    box.append(mark, head);
+    if (node.attrs.pageCoverSrc) box.append(coverImg(doc, node.attrs));
+    if (node.attrs.pageIcon) {
+      const mark = doc.createElement("span");
+      mark.setAttribute("data-page-icon", "");
+      mark.setAttribute("aria-hidden", "true");
+      mark.textContent = node.attrs.pageIcon;
+      box.append(mark);
+    }
+    box.append(head);
     this.dom = box;
   }
   update(node) {
-    if (this.icon !== !!node.attrs.pageIcon || !node.sameMarkup(this.node)) return false;
+    if (this.decorated !== !!(node.attrs.pageIcon || node.attrs.pageCoverSrc) || !node.sameMarkup(this.node)) return false;
     this.node = node;
     return true;
   }
