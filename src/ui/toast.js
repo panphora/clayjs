@@ -145,11 +145,16 @@ function toastPersistent(message, messageType = "warning", { detail = "", action
   reveal(el);
 }
 
-// Takes down the persistent toast showing this message, if one is up.
-function dismissPersistent(message) {
+// Takes down the persistent toast showing this message, if one is up. `now` takes the
+// node out at once: a session that is over has no one left to read the fade.
+function dismissPersistent(message, { now = false } = {}) {
   const el = activePersistentToasts.get(message);
   if (!el) return;
   activePersistentToasts.delete(message);
+  if (now) {
+    el.remove();
+    return;
+  }
   dismiss(el);
 }
 

@@ -459,6 +459,53 @@ test("a journal that cannot write says so once, and the copy it offers holds the
   expect(harness.saves.at(-1)?.body ?? "").not.toContain("Hello there!");
 });
 
+// A device that cannot open the journal says where the work has nowhere to live, once. That
+// toast belongs to the session that raised it: leaving edit takes its node out of the page
+// before it can fade to nobody, and the next session raises one again, not two.
+test("a journal that cannot open says so in edit, and leaving edit takes its toast out", async () => {
+  const real = globalThis.crypto;
+  const noDigest = new Proxy(real, {
+    get(target, property) {
+      if (property === "subtle") return undefined;
+      const value = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+  Object.defineProperty(globalThis, "crypto", { value: noDigest, configurable: true, writable: true });
+  const STORAGE_TEXT = "Changes cannot be stored on this device.";
+  const storageToasts = () => [...document.querySelectorAll("[data-clay-toast]")].filter((el) => el.textContent.includes(STORAGE_TEXT));
+  let second = null;
+  try {
+    const harness = await load();
+    const { preparePageSession } = harness;
+    watchStates();
+
+    const first = preparePageSession(context());
+    try {
+      await first.ready;
+      await settle(harness.save);
+      first.enable();
+      expect(await until(() => storageToasts().length === 1)).toBe(true);
+    } finally {
+      first.dispose();
+    }
+    // The session is over, so its toast goes now rather than through the fade.
+    await tick(10);
+    expect(storageToasts()).toHaveLength(0);
+
+    second = preparePageSession(context());
+    await second.ready;
+    await settle(harness.save);
+    second.enable();
+    expect(await until(() => storageToasts().length === 1)).toBe(true);
+    await tick(40);
+    expect(storageToasts()).toHaveLength(1);
+  } finally {
+    try { second?.dispose(); } catch {}
+    Object.defineProperty(globalThis, "crypto", { value: real, configurable: true, writable: true });
+  }
+});
+
 test("the journal compacts at sixty-four batches, and a refused compaction evicts nothing", async () => {
   const harness = await load();
   const { page, gate, calls, recordsOf } = harness;

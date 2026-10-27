@@ -161,6 +161,19 @@ function armRetry(inst, code, message) {
   }, RETRY_BOUND_MS);
 }
 
+// The persistent save-state toasts a session raises, taken down together: at the page's
+// own teardown the fade plays, and at a session's end, where nobody is left to read it,
+// the nodes go now.
+function dismissSaveStateToasts(inst, now = false) {
+  if (inst.retryTimer) {
+    clearTimeout(inst.retryTimer);
+    inst.retryTimer = null;
+  }
+  dismissPersistent(RETRY_TEXT, { now });
+  dismissPersistent(BLOCKED_TEXT, { now });
+  dismissPersistent(STORE_TEXT, { now });
+}
+
 function showBlocked(inst, code, message, state = "blocked") {
   clearRetry(inst);
   dismissGeneric();
@@ -415,13 +428,7 @@ function dispose() {
   registerPageCheckpoints(null);
   if (!inst) return;
   disposeInstall(inst);
-  if (inst.retryTimer) {
-    clearTimeout(inst.retryTimer);
-    inst.retryTimer = null;
-  }
-  dismissPersistent(RETRY_TEXT);
-  dismissPersistent(BLOCKED_TEXT);
-  dismissPersistent(STORE_TEXT);
+  dismissSaveStateToasts(inst);
   dismissPersistent(REPLACED_TEXT);
   for (const message of inst.notices?.values() ?? []) dismissPersistent(message);
   if (inst.savesHeld) {
@@ -1311,10 +1318,7 @@ function endSession(inst) {
   }
   setSaveHeader("Page-Write", null);
   disposeInstall(inst);
-  if (inst.retryTimer) {
-    clearTimeout(inst.retryTimer);
-    inst.retryTimer = null;
-  }
+  dismissSaveStateToasts(inst, true);
   inst.titleObserver?.dispose();
   inst.titleObserver = null;
   clearLoadingStatus(inst);

@@ -25,6 +25,8 @@ const LABELS = {
   unavailable: "Can't store changes: download a copy",
 };
 
+const SAVE_EVENTS = ["saving", "saved", "error", "offline", "retrying", "blocked"];
+
 // States that stay on screen instead of fading: a save still in flight, one that keeps
 // trying, one the host will not take without help, and where the journal says the work is.
 const STICKY = new Set(["saving", "retrying", "blocked", "pending", "journaled", "acknowledged", "unavailable"]);
@@ -93,7 +95,7 @@ function arm() {
   if (listeners) return;
   listeners = new AbortController();
   const { signal } = listeners;
-  for (const state of Object.keys(LABELS)) {
+  for (const state of SAVE_EVENTS) {
     document.addEventListener("clay:save-" + state, () => show(state), { signal });
   }
   document.addEventListener("clay:page-save-state", (event) => show(event.detail?.state), { signal });

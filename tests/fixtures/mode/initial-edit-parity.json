@@ -97,7 +97,7 @@
       "eventSources": 1,
       "listeners": {
         "window": 3,
-        "document": 13,
+        "document": 14,
         "Element": 4
       },
       "observers": 1,
