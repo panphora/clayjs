@@ -28,7 +28,7 @@ import { csvImportPlugin } from "./csv-import.js";
 import { styleWithLegacyId } from "../lib/style.js";
 import { historyIntentPlugin } from "./history-intent.js";
 import { createFeatureLoader } from "./feature-loader.js";
-import { FEATURES, featureForType } from "./features/registry.js";
+import { COMMAND_FEATURES, FEATURES, featureForType } from "./features/registry.js";
 import { toolViews } from "./tool-views.js";
 
 const STYLE_ID = "page-editor-style";
@@ -343,6 +343,126 @@ function featureWatchPlugin(features) {
   });
 }
 
+// The optional commands. A command module exports `createFeature(context)` returning
+// `{ run, dispose }`; the editor fetches it on the first ask and installs it once, and
+// nothing here is preloaded by the block-type scan. A command is asked for with the state
+// it was asked in: the module is fetched, and the command runs only if the edit is still
+// open, the document revision has not moved and the selection is where it was. A failed
+// fetch is reported and asked for again on the next request; an exit disposes what was
+// installed and aborts whatever was still arriving, and the next entry installs fresh
+// against the module the browser already holds.
+function createCommandHost({ load = () => Promise.reject(new Error("page: this editor has no command module")), context = () => ({}), reportError } = {}) {
+  const modules = new Map();
+  const waiters = new Set();
+  let view = null;
+  let loader = null;
+  let active = true;
+  let disposed = false;
+  let revision = 0;
+
+  // One fetch per command for the life of the host, whatever the entry: a module that
+  // failed is the one thing not kept, so the next ask loads it again.
+  const moduleFor = (id) => {
+    let fetched = modules.get(id);
+    if (!fetched) {
+      fetched = Promise.resolve(load(id));
+      modules.set(id, fetched);
+      fetched.catch(() => { if (modules.get(id) === fetched) modules.delete(id); });
+    }
+    return fetched;
+  };
+
+  const loaderFor = () => {
+    loader ??= createFeatureLoader({
+      load: moduleFor,
+      install: (id, mod) => mod.createFeature(context(view)),
+      reportError: reportError ?? ((error, id) => console.error(`clayjs: the ${id} command failed to load`, error)),
+    });
+    return loader;
+  };
+
+  // The document revision and the selection a command was asked for. A revision moves
+  // when any transaction changes the document, whoever wrote it.
+  const leaseOf = () => {
+    const at = revision;
+    const selection = view.state.selection;
+    return {
+      revision: at,
+      selection,
+      valid: () => active && !disposed && !view.isDestroyed && revision === at && view.state.selection.eq(selection),
+    };
+  };
+
+  function observe(state, prevState) {
+    if (state.doc !== prevState.doc) revision += 1;
+    for (const waiter of waiters) {
+      if (waiter.lease.valid()) continue;
+      waiters.delete(waiter);
+      waiter.controller.abort({ ok: false, code: "stale-target" });
+    }
+  }
+
+  async function run(id, args) {
+    if (!active || disposed || !view || view.isDestroyed) return { ok: false, code: "not-editing" };
+    const waiter = { lease: leaseOf(), controller: new AbortController() };
+    waiters.add(waiter);
+    try {
+      const feature = await loaderFor().ensure(id, { signal: waiter.controller.signal });
+      if (!feature) return { ok: false, code: "not-editing" };
+      if (!waiter.lease.valid()) return { ok: false, code: "stale-target" };
+      return await feature.run(args);
+    } catch (error) {
+      if (waiter.controller.signal.aborted) return waiter.controller.signal.reason;
+      return { ok: false, code: "unavailable", error };
+    } finally {
+      waiters.delete(waiter);
+    }
+  }
+
+  function leave() {
+    if (!active) return;
+    active = false;
+    for (const waiter of waiters) waiter.controller.abort({ ok: false, code: "not-editing" });
+    waiters.clear();
+    loader?.dispose();
+    loader = null;
+  }
+
+  return {
+    attach(editorView) { view = editorView; },
+    observe,
+    run,
+    enter() { if (!disposed) active = true; },
+    leave,
+    dispose() {
+      leave();
+      disposed = true;
+      active = false;
+      modules.clear();
+    },
+  };
+}
+
+const commandHosts = new WeakMap();
+// A command asks for its module with the state it was asked in, so the host has to hear
+// about every transaction: one that moves the document revision or the selection refuses
+// a command whose module is still arriving rather than running it where the person has
+// since left.
+function commandWatchPlugin(host) {
+  return new state.Plugin({
+    view: () => ({ update: (editorView, prevState) => host.observe(editorView.state, prevState) }),
+  });
+}
+
+// Runs an optional command on a mounted editor, by the id its row has in COMMAND_FEATURES.
+// A command nobody offers, or an editor with no command host, refuses rather than throws.
+export function runPageCommand(view, id, args) {
+  const host = view ? commandHosts.get(view) : null;
+  if (!host) return Promise.resolve({ ok: false, code: "not-editing" });
+  if (!Object.hasOwn(COMMAND_FEATURES, id)) return Promise.resolve({ ok: false, code: "unknown-command" });
+  return host.run(id, args);
+}
+
 // Tools follow the tables a document holds; the host arrives with the tool view
 // part on a document that had no tool at boot.
 function toolFollowPlugin(toolHost) {
@@ -355,7 +475,7 @@ function toolFollowPlugin(toolHost) {
   });
 }
 
-export function pagePlugins({ upload = defaultUpload, highlight, history: useHistory = true, undo, redo, onAiTool = null, toolHost = null, features = null } = {}) {
+export function pagePlugins({ upload = defaultUpload, highlight, history: useHistory = true, undo, redo, onAiTool = null, toolHost = null, features = null, commandHost = null } = {}) {
   return [
     announcementPlugin(),
     chromePlugin({ onAiTool }),
@@ -390,6 +510,7 @@ export function pagePlugins({ upload = defaultUpload, highlight, history: useHis
     gapcursor.gapCursor(),
     lazyViewsPlugin(),
     features ? featureWatchPlugin(features) : null,
+    commandHost ? commandWatchPlugin(commandHost) : null,
   ].filter(Boolean);
 }
 
@@ -414,6 +535,11 @@ export function setEditorActive(view, active) {
   if (!view || view.isDestroyed) return false;
   const open = active === true;
   view.setProps({ editable: () => open });
+  // A refused exit closes admission without destroying the view, so the commands are told
+  // here: the exit disposes what they installed, and the next entry installs fresh.
+  const host = commandHosts.get(view);
+  if (open) host?.enter();
+  else host?.leave();
   return open;
 }
 
@@ -453,6 +579,12 @@ export function createPageEditor(mount, { blocks = null, onChange = null, upload
     load: (id) => FEATURES[id].load(),
     install: (id, mod) => installPageFeature({ view, upload, toolHost, board, undo, redo, revise: reviseTool, highlight }, id, mod),
   });
+  // Commands are their own loader: a document never fetches a picker to be read or typed
+  // in, and the host outlives a refused exit so a re-entry installs once more.
+  const commandHost = createCommandHost({
+    load: (id) => COMMAND_FEATURES[id].load(),
+    context: (editorView) => ({ view: editorView, upload }),
+  });
   const nodeViewRegistry = new Map();
   const nodeViews = {
     chart: (node, v, getPos) => new ChartView(node, v, getPos),
@@ -464,7 +596,7 @@ export function createPageEditor(mount, { blocks = null, onChange = null, upload
     };
   }
   view = new pmView.EditorView(shell, {
-    state: pageState(blocks, { upload, highlight, doc: initialDoc, history: useHistory, undo, redo, onAiTool, toolHost, features }),
+    state: pageState(blocks, { upload, highlight, doc: initialDoc, history: useHistory, undo, redo, onAiTool, toolHost, features, commandHost }),
     attributes: { class: "page-editor" },
     editable: () => editable,
     nodeViews,
@@ -490,7 +622,9 @@ export function createPageEditor(mount, { blocks = null, onChange = null, upload
     },
   });
   nodeViewRegistries.set(view, nodeViewRegistry);
+  commandHost.attach(view);
+  commandHosts.set(view, commandHost);
   const destroy = view.destroy.bind(view);
-  view.destroy = () => { features.dispose(); destroy(); };
+  view.destroy = () => { commandHost.dispose(); features.dispose(); destroy(); };
   return view;
 }

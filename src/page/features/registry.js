@@ -12,3 +12,12 @@ export const FEATURES = {
 };
 
 export const featureForType = (type) => Object.keys(FEATURES).find((id) => FEATURES[id].types.includes(type)) ?? null;
+
+// The optional commands: pickers, import and export, which a reader or a plain text
+// editor never needs. They are a table of their own, out of the block-type scan above, so
+// no document preloads one; the page editor fetches a command the first time somebody
+// asks for it. Each row is one literal import, so the build splits it into its own files
+// and the offline manifest carries them, and `module` is the part on the wire (the load
+// meter counts it). A row lands with the step that gives it a module: a literal import of
+// a file this tree does not have yet would stop the chunk build.
+export const COMMAND_FEATURES = {};
