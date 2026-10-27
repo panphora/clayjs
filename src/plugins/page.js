@@ -1,4 +1,4 @@
-import { FEATURES, featureForType } from "../page/features/registry.js";
+import { FEATURES, featureForNode, featureForType } from "../page/features/registry.js";
 import { mergeEngine } from "../sync/merge-engine.js";
 import { registerUnsavedState } from "../lib/unsaved-state.js";
 import { hostMeta } from "../core/host-meta.js";
@@ -72,7 +72,7 @@ function pageCodeReady() {
 function docFeatureIds(doc) {
   const ids = new Set();
   doc.forEach((node) => {
-    const id = featureForType(node.type.name);
+    const id = featureForNode(node);
     if (id) ids.add(id);
   });
   return [...ids];

@@ -1,9 +1,9 @@
 import { state } from "../vendor/prosemirror.vendor.js";
 
-// The update hooks a loaded view part registers for its editor view. The plugin
-// below calls them on every document change, so a part keeps its blocks fresh
-// without the editor importing it: the part adds its hook when it installs and
-// removes it on dispose.
+// The update hooks and decorations a loaded view part registers for its editor
+// view. The plugin below calls the hooks on every document change and collects the
+// decorations on every draw, so a part keeps its blocks fresh without the editor
+// importing it: the part adds its hook when it installs and removes it on dispose.
 export const viewHooks = new WeakMap();
 
 // The feature loader of each mounted editor, so an insert path can ask for a
@@ -18,15 +18,33 @@ export function addViewHook(view, hook) {
 }
 
 export function viewHookPlugin() {
+  let editorView = null;
   return new state.Plugin({
-    view: (view) => ({
-      update: (next) => { for (const hook of viewHooks.get(next) ?? []) hook.update?.(next); },
-      destroy: () => {
-        const hooks = viewHooks.get(view);
-        if (!hooks) return;
-        for (const hook of hooks) hook.destroy?.(view);
-        hooks.clear();
+    view: (view) => {
+      editorView = view;
+      return {
+        update: (next) => { for (const hook of viewHooks.get(next) ?? []) hook.update?.(next); },
+        destroy: () => {
+          const hooks = viewHooks.get(view);
+          editorView = null;
+          if (!hooks) return;
+          for (const hook of hooks) hook.destroy?.(view);
+          hooks.clear();
+        },
+      };
+    },
+    props: {
+      decorations(st) {
+        const hooks = editorView ? viewHooks.get(editorView) : null;
+        if (!hooks) return null;
+        let found = null;
+        for (const hook of hooks) {
+          const set = hook.decorations?.(st);
+          if (!set) continue;
+          found = found ? found.add(st.doc, set.find()) : set;
+        }
+        return found;
       },
-    }),
+    },
   });
 }

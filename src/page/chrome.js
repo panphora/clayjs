@@ -8,7 +8,6 @@ import { schema } from "./schema.js";
 import { BlockSelection, siblingSpan, moveBlock, indentBlocks, outdentBlocks } from "./blocks.js";
 import { outlineOf } from "./outline-cache.js";
 import { currentSpan, selectBlocks, duplicateBlocks, deleteBlocks, asStep, typeIntoBlocks } from "./blocksel.js";
-import { openAltEditor, setImageAttrs } from "./media.js";
 import { BlockDrag } from "./drag.js";
 import { openLinkEditor } from "./link.js";
 import { BLOCK_TYPES, MENU_ITEMS, blockTypeOf, turnInto, insertAfter, rankItems, runItem, retype, canTurnInto, insertItemsFor, loadChartPart } from "./items.js";
@@ -81,10 +80,10 @@ export const ACTION_ITEMS = [
   { key: "delete", label: "Delete", icon: "×", hint: "Del", run: (view) => deleteBlocks(view.state, view.dispatch) },
   { key: "turn", label: "Turn into", icon: "↻", hint: "›", only: "text", run: (view, chrome) => chrome.openMenu("turn", chrome.plus) },
   { key: "link", label: "Copy link", icon: "🔗", run: (view, chrome, index) => copyBlockLink(view.state.doc.child(index).attrs.id) },
-  { key: "alt", label: "Alt text…", icon: "Aa", only: "image", focus: false, run: (view, chrome, index) => openAltEditor(view, imageId(view, index)) },
-  { key: "small", label: "Small", icon: "▫", only: "image", run: (view, chrome, index) => setImageAttrs(view, imageId(view, index), { width: 240 }) },
-  { key: "medium", label: "Medium", icon: "◻", only: "image", run: (view, chrome, index) => setImageAttrs(view, imageId(view, index), { width: 480 }) },
-  { key: "full", label: "Full width", icon: "⬜", only: "image", run: (view, chrome, index) => setImageAttrs(view, imageId(view, index), { width: null }) },
+  { key: "alt", label: "Alt text…", icon: "Aa", only: "image", focus: false, run: (view, chrome, index) => { const id = imageId(view, index); return import("./image-actions.js").then((part) => part.openAltEditor(view, id)); } },
+  { key: "small", label: "Small", icon: "▫", only: "image", run: (view, chrome, index) => { const id = imageId(view, index); return import("./image-actions.js").then((part) => part.setImageAttrs(view, id, { width: 240 })); } },
+  { key: "medium", label: "Medium", icon: "◻", only: "image", run: (view, chrome, index) => { const id = imageId(view, index); return import("./image-actions.js").then((part) => part.setImageAttrs(view, id, { width: 480 })); } },
+  { key: "full", label: "Full width", icon: "⬜", only: "image", run: (view, chrome, index) => { const id = imageId(view, index); return import("./image-actions.js").then((part) => part.setImageAttrs(view, id, { width: null })); } },
   { key: "chart", label: "Chart this table", icon: "📊", only: "table", run: (view, chrome, index) => { const at = blockStart(view.state.doc, index); return loadChartPart(view).then(({ insertChartAfterTable }) => insertChartAfterTable(view, at)); } },
   { key: "csv", label: "Import CSV…", icon: "⇧", only: "table", focus: false, run: (view, chrome, index) => pickCsv(view, null, view.state.doc.child(index).attrs.id) },
 ];

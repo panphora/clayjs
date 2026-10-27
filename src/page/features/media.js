@@ -1,10 +1,20 @@
 // The image and file blocks: their node views, the bookmark a pending upload draws
-// at a block boundary, and their CSS. Loaded the first time a document has or
-// takes one of these blocks.
-import { safeHref } from "../address.js";
+// at a block boundary, their CSS, and the upload work behind them. Loaded the first
+// time a document has or takes one of these blocks, or on the first media paste,
+// drop, insert or upload.
+import { safeHref, safeFileHref } from "../address.js";
+import { view as pmView } from "../../vendor/prosemirror.vendor.js";
 import { asStep } from "../blocksel.js";
-import { RETRY } from "../media.js";
+import { schema } from "../schema.js";
+import { announce } from "../announce.js";
+import { attrsFor, boundary, live, mediaKey, mediaParts, mediaRuntime, placeTr, removeTr, run, settle, update } from "../media.js";
 import { mediaViews } from "../media-views.js";
+import { addViewHook } from "../view-hooks.js";
+
+const { Decoration, DecorationSet } = pmView;
+const N = schema.nodes;
+// The codes an upload is offered a retry for.
+const RETRY = new Set(["timeout", "network", "error", "bad-response"]);
 
 export const MEDIA_CSS = `
 .page-editor .page-image { margin-inline: 0; }
@@ -276,8 +286,50 @@ export class FileView {
   ignoreMutation() { return true; }
 }
 
+const readDataUrl = (file) => new Promise((ok, no) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = () => no(r.error); r.readAsDataURL(file); });
+
+export async function embedUpload(view, id) {
+  const it = live(view, id);
+  if (!it || it.state !== "embed-choice") return;
+  const src = await readDataUrl(it.file);
+  if (!mediaRuntime.has(view) || !live(view, id)) return;
+  settle(it, view, placeTr(view.state, id, attrsFor(it, src)));
+  announce(view, "Saved inside the document");
+}
+
+export function retryUpload(view, id) {
+  const it = live(view, id);
+  if (!it) return;
+  update(view, id, { state: "uploading", percent: 0, code: null, message: null });
+  run(view, live(view, id));
+}
+
+export function cancelUpload(view, id) {
+  const rt = mediaRuntime.get(view);
+  const abort = rt?.aborts.get(id);
+  const it = live(view, id);
+  if (it) settle(it, view, removeTr(view.state, id));
+  rt?.aborts.delete(id);
+  abort?.abort();
+}
+
+// The bookmark a pending upload draws at its block boundary: the view part keeps it
+// through the same hook the other parts use, so the plugin that takes the paste does
+// not carry it.
+function bookmarks(view, st) {
+  const { items } = mediaKey.getState(st);
+  const render = mediaViews.get(view) ?? null;
+  if (!items.length || !render) return null;
+  return DecorationSet.create(st.doc, items.map((it) => Decoration.widget(boundary(st.doc, it.pos), (view) => render(view.dom.ownerDocument, it), {
+    side: -1000 + it.order, key: `${it.id}:${it.state}:${it.percent}`, stopEvent: () => true, ignoreSelection: true,
+  })));
+}
+
 export function createFeature({ view = null } = {}) {
   if (view) mediaViews.set(view, bookmarkDOM);
+  const part = { retryUpload, embedUpload, cancelUpload };
+  if (view) mediaParts.set(view, part);
+  const off = view ? addViewHook(view, { decorations: (st) => bookmarks(view, st) }) : () => {};
   return {
     id: "media",
     nodeViews: {
@@ -285,6 +337,10 @@ export function createFeature({ view = null } = {}) {
       file: (node, editorView) => new FileView(node, editorView),
     },
     css: MEDIA_CSS,
-    dispose() { if (view && mediaViews.get(view) === bookmarkDOM) mediaViews.delete(view); },
+    dispose() {
+      off();
+      if (view && mediaViews.get(view) === bookmarkDOM) mediaViews.delete(view);
+      if (view && mediaParts.get(view) === part) mediaParts.delete(view);
+    },
   };
 }

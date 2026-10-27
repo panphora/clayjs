@@ -1,5 +1,5 @@
 import { history } from "../../../src/vendor/prosemirror.vendor.js";
-import { openAltEditor } from "../../../src/page/media.js";
+import { openAltEditor } from "../../../src/page/image-actions.js";
 import { editor } from "./view-helpers.js";
 
 /**

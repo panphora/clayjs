@@ -23,12 +23,12 @@ import { highlightSlot } from "./highlight-slot.js";
 import { tableKeys, tablePlugin } from "./table.js";
 import { tableSelectPlugin } from "./table-select.js";
 import { viewFeatures, viewHookPlugin } from "./view-hooks.js";
-import { checklistPlugin, checklistKeys } from "./checklist.js";
+import { checklistKeys } from "./checklist.js";
 import { csvImportPlugin } from "./csv-import.js";
 import { styleWithLegacyId } from "../lib/style.js";
 import { historyIntentPlugin } from "./history-intent.js";
 import { createFeatureLoader } from "./feature-loader.js";
-import { COMMAND_FEATURES, FEATURES, featureForType } from "./features/registry.js";
+import { COMMAND_FEATURES, FEATURES, featureForNode } from "./features/registry.js";
 import { toolViews } from "./tool-views.js";
 
 const STYLE_ID = "page-editor-style";
@@ -352,7 +352,7 @@ function featureWatchPlugin(features) {
       const walk = () => {
         for (const id of failed) if (features.has(id)) failed.delete(id);
         editorView.state.doc.forEach((node) => {
-          const id = featureForType(node.type.name);
+          const id = featureForNode(node);
           if (!id || features.has(id) || failed.has(id)) return;
           features.ensure(id).catch(() => { failed.add(id); });
         });
@@ -535,7 +535,6 @@ export function pagePlugins({ upload = defaultUpload, highlight, history: useHis
     identityPlugin(),
     tablePlugin(),
     viewHookPlugin(),
-    checklistPlugin(),
     csvImportPlugin({ upload }),
     collapsePlugin(),
     mediaPlugin({ upload, features }),

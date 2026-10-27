@@ -7,12 +7,23 @@ export const FEATURES = {
   table: { types: ["table"], views: ["table", "table_cell"], module: "page/features/table.js", load: () => import("./table.js") },
   board: { types: ["board"], module: "page/features/board.js", load: () => import("./board.js") },
   chart: { types: ["chart"], views: ["chart"], module: "page/features/chart.js", load: () => import("./chart.js") },
+  checklist: { types: [], views: [], match: (node) => node.type.name === "list_item" && node.attrs.kind === "check", module: "page/features/checklist.js", load: () => import("./checklist.js") },
   code: { types: ["code_block"], module: "page/features/code.js", load: () => import("./code.js") },
   media: { types: ["image", "file"], module: "page/features/media.js", load: () => import("./media.js") },
   tool: { types: ["tool"], module: "page/features/tool.js", boot: ["page/tools.js", "page/tool-data.js"], load: () => import("./tool.js") },
 };
 
 export const featureForType = (type) => Object.keys(FEATURES).find((id) => FEATURES[id].types.includes(type)) ?? null;
+
+// The row for a whole block: a row may name its blocks with `match` instead of a type,
+// the way the checklist serves only the list items whose kind is check.
+export const featureForNode = (node) => {
+  for (const id of Object.keys(FEATURES)) {
+    const row = FEATURES[id];
+    if (row.match ? row.match(node) : row.types.includes(node.type.name)) return id;
+  }
+  return null;
+};
 
 // The optional commands: pickers, import and export, which a reader or a plain text
 // editor never needs. They are a table of their own, out of the block-type scan above, so

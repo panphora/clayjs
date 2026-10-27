@@ -375,6 +375,8 @@ describe("the actions menu on an image", () => {
     return view;
   };
   const popover = (view) => view.dom.parentElement.querySelector('.page-link[data-mode="alt"]');
+  // The image actions are their own part: the chrome asks for it on the first one.
+  const pick = async (view, label) => { row(view, label).click(); await frame(); await frame(); };
   const press = (input, k) => input.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true }));
 
   test("an image gets Alt text, Small, Medium and Full width after the common actions", () => {
@@ -383,19 +385,19 @@ describe("the actions menu on an image", () => {
     expect(labels(view)).toEqual(["Move up", "Move down", "Indent", "Outdent", "Duplicate", "Delete", "Copy link", "Alt text…", "Small", "Medium", "Full width"]);
   });
 
-  test("Small, Medium and Full width set the pixel width, each as one step", () => {
+  test("Small, Medium and Full width set the pixel width, each as one step", async () => {
     const view = onImage();
     for (const [label, width] of [["Small", 240], ["Medium", 480], ["Full width", null]]) {
       key(view, "/", { ctrlKey: true });
-      row(view, label).click();
+      await pick(view, label);
       expect(view.state.doc.child(1).attrs.width).toBe(width);
     }
   });
 
-  test("Alt text opens a one-field popover; Enter saves it as one undo step", () => {
+  test("Alt text opens a one-field popover; Enter saves it as one undo step", async () => {
     const view = onImage();
     key(view, "/", { ctrlKey: true });
-    row(view, "Alt text…").click();
+    await pick(view, "Alt text…");
     const input = popover(view).querySelector(".page-link-input");
     expect(input.getAttribute("aria-label")).toBe("Alt text");
     input.value = "  A red door  ";
@@ -406,11 +408,11 @@ describe("the actions menu on an image", () => {
     expect(view.state.doc.child(1).attrs.alt).toBe("");
   });
 
-  test("Escape closes the popover and leaves the alt text alone, and it opens showing the current text", () => {
+  test("Escape closes the popover and leaves the alt text alone, and it opens showing the current text", async () => {
     const view = onImage();
     view.dispatch(view.state.tr.setNodeMarkup(view.state.doc.child(0).nodeSize, null, { ...view.state.doc.child(1).attrs, alt: "Door" }));
     key(view, "/", { ctrlKey: true });
-    row(view, "Alt text…").click();
+    await pick(view, "Alt text…");
     const input = popover(view).querySelector(".page-link-input");
     expect(input.value).toBe("Door");
     input.value = "changed";

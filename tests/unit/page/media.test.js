@@ -1,7 +1,8 @@
 import { jest } from "@jest/globals";
 import { history } from "../../../src/vendor/prosemirror.vendor.js";
 import { blockMap, REMOTE } from "../../../src/page/model.js";
-import { mediaKey, placeTr, removeTr, insertFiles, cancelUpload, pickFiles, hostPlace, EMBED_MAX } from "../../../src/page/media.js";
+import { mediaKey, placeTr, removeTr, insertFiles, pickFiles, hostPlace, EMBED_MAX } from "../../../src/page/media.js";
+import { cancelUpload } from "../../../src/page/features/media.js";
 import { editor, posOf, select } from "./view-helpers.js";
 
 /**
