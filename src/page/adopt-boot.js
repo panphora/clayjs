@@ -153,6 +153,8 @@ export function installAdoption({
     record(file.article);
     disk = file.article;
     if (!base) return UNCHANGED;
+    // The latest copy again, attributes and all: merging it into the page changes nothing.
+    if (base.outerHTML === file.article.outerHTML) return UNCHANGED;
     // Only the room's elected writer merges a frame, so it lands once however
     // many tabs see it; and it lands even when the editor never settles, since
     // the next save would otherwise write over the edit.
