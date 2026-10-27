@@ -41,4 +41,5 @@ export const COMMAND_FEATURES = {
   titleIcon: { module: "page/features/title-icon.js", load: () => import("./title-icon.js") },
   titleCover: { module: "page/features/title-cover.js", load: () => import("./title-cover.js") },
   exportHtml: { module: "page/features/export-html.js", load: () => import("./export-html.js") },
+  importMarkdown: { module: "page/features/import-markdown.js", load: () => import("./import-markdown.js") },
 };
