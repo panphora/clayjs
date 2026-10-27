@@ -4,8 +4,8 @@
 // capability header every page write declares. Core code because every save sends
 // the header; what content needs which floor lives in `page/format-level.js`.
 
-export const PAGE_FORMAT = 1;
-export const PAGE_FORMAT_HEADER = "X-Clay-Page-Format";
+import { PAGE_FORMAT } from "./host-meta.js";
+export { PAGE_FORMAT, PAGE_FORMAT_HEADER } from "./host-meta.js";
 export const PAGE_FORMAT_META = "clay-page-format";
 export const PAGE_FORMAT_EXTENSION = "page-format-v1";
 export const PAGE_FORMAT_UPGRADE = "page-format-upgrade-required";

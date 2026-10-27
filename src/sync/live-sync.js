@@ -45,7 +45,7 @@ import { attributeMerge } from "./merge-declarations.js";
 import { serializeForSync, captureForComparisonAndDirty, canonicalizeReceived, captureSnapshot, originalSnapshotNode, captureForMerge, captureForSaveAndComparison } from '../core/snapshot.js';
 import { mergeIgnoresAttr, mergeVetoesAttr } from '../lib/root-attrs.js';
 import { autosaveActive } from '../lib/autosave-state.js';
-import { hostSupports } from '../core/host-meta.js';
+import { hostSupports, PAGE_FORMAT, PAGE_FORMAT_HEADER } from '../core/host-meta.js';
 import { servedDocumentEtag } from '../core/host-attrs.js';
 import { recordEtag, seedEtag, lastSeenEtag, conditionalSaves, representedEtag, forgetRepresentedEtag } from '../core/etag.js';
 import { pageMaybeDirty, pauseGate, resumeGate, gateCaptureToken, gateClearIfUnchanged } from '../lib/dirty-gate.js';
@@ -1236,6 +1236,7 @@ class LiveSync {
       headers: {
         'Content-Type': 'application/json',
         [profile.documentHeader]: window.location.href,
+        [PAGE_FORMAT_HEADER]: String(PAGE_FORMAT),
       },
       body: JSON.stringify({
         [profile.snapshotKey]: html,

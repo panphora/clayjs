@@ -234,6 +234,20 @@ describe("the body a commit frame puts on the wire", () => {
     expect(sent[0].snapshot.length).toBeGreaterThan(0);
   });
 
+  // A host refuses a relay that does not say which page format it writes, so a
+  // current tab on a floor-1 document would have every relay turned away.
+  test("declares the page format it writes", () => {
+    const sent = [];
+    global.fetch = (url, options) => {
+      sent.push(options.headers);
+      return Promise.resolve({ ok: true });
+    };
+
+    LiveSync.prototype._postUpdate.call(postingTab(), "<html>saved</html>", { a: 1 });
+
+    expect(sent[0]["X-Clay-Page-Format"]).toBe("1");
+  });
+
   test("leaves the stamp off a body that has none", () => {
     const sent = [];
     global.fetch = (url, options) => {

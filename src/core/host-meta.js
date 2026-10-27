@@ -16,6 +16,12 @@
 import { saveToken } from "./host-attrs.js";
 import { isDraftMode } from "./is-edit-mode.js";
 
+// The page format this runtime writes, and the header every page write declares it in.
+// Defined here, beside what the host announces, so a reader that only relays
+// carries no extra module for it; `core/page-format.js` re-exports both.
+export const PAGE_FORMAT = 1;
+export const PAGE_FORMAT_HEADER = "X-Clay-Page-Format";
+
 const META_PATH = "/_/meta";
 const META_TIMEOUT_MS = 6000;
 
