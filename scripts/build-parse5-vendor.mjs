@@ -7,10 +7,13 @@
 // parser gets implied tags, foster parenting or raw-text elements wrong somewhere,
 // which is exactly where a pairing has to be right. So parse5 is vendored.
 //
-// Only `parse` is exported. parse5's serializer is deliberately left out: this
-// library never serializes a parse5 tree, and shipping a second serializer beside
-// the one whose output we are trying to stop writing would invite somebody to use
-// it. Dropping it is also about a fifth of the bytes.
+// `parse` and `Parser` are exported, and they are the same parser: `parse` is
+// `Parser.parse`. `Parser` is here so the save verifier can feed one document in
+// slices and yield between them instead of holding the main thread for a whole
+// 11 MB parse. parse5's serializer is deliberately left out: this library never
+// serializes a parse5 tree, and shipping a second serializer beside the one whose
+// output we are trying to stop writing would invite somebody to use it. Dropping
+// it is also about a fifth of the bytes.
 //
 // Committed, like every other file in src/vendor/, because src/ is what npm
 // publishes and what clayjs.com serves.
@@ -26,7 +29,7 @@ const { version, license } = JSON.parse(await readFile(join(ROOT, 'node_modules/
 const ENTRY = join(ROOT, 'scripts', '.parse5-entry.js');
 const OUT = join(ROOT, 'src', 'vendor', 'parse5.vendor.js');
 
-await writeFile(ENTRY, "export { parse } from 'parse5';\n");
+await writeFile(ENTRY, "export { parse, Parser } from 'parse5';\n");
 try {
   await build({
     entryPoints: [ENTRY],
@@ -36,7 +39,7 @@ try {
     minify: true,
     target: 'es2020',
     banner: {
-      js: `/* parse5 ${version} (${license}), bundled for clayjs: the \`parse\` export only.\n` +
+      js: `/* parse5 ${version} (${license}), bundled for clayjs: the \`parse\` and \`Parser\` exports.\n` +
         `   https://github.com/inikulin/parse5 — regenerate with node scripts/build-parse5-vendor.mjs */`,
     },
   });
