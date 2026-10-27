@@ -1,0 +1,30 @@
+{
+  "package": "@panphora/clayjs",
+  "note": "The published 1.15.x releases are immutable legacy inputs: they cannot be changed retroactively. `integrity` is the registry's sha512 for the packed tarball, recorded from `npm view @panphora/clayjs@<version> dist.integrity`; `extracted.sha512` is the digest of the extracted cache tree, so the script can prove offline that .version-cache/<version>/ is the tree those numbers were recorded from. Never edit the cache.",
+  "packages": {
+    "1.15.0": {
+      "version": "1.15.0",
+      "integrity": "sha512-x8AzsGzyBKWZUypoDF6X1148Sq2e9LDkK5QH1pzhjkYE6p0IkcOjUZ2vylA/Z3bnSxwh3XzrlQ+5W+wR5KDZ9Q==",
+      "extracted": {
+        "files": 271,
+        "sha512": "a3d51f6108f04631ff1625c898bc66e0c2b2b0efbb3d9cc27a1da070524c9d8d09e0691cf9ff2e5d612c2cccb9b20b1c93587ff2a405917b4ca4aa14a0b5fabb"
+      }
+    },
+    "1.15.1": {
+      "version": "1.15.1",
+      "integrity": "sha512-tJqQtiy+R5Lq6xE4x9bygqDzIGlDGl/9of7dn+3Ro+RMUdK3FkWe/l7Hd4nUle8ovgwilL7LeaqkkCQiA1TVTA==",
+      "extracted": {
+        "files": 271,
+        "sha512": "2060d8260dd91a15d385943c3f14f8329800320a20ce875d8ce9542b93099e405a1f2d3340c1337da702d78eb5677efaf0e62d5edde5a1906b2997ea2e0f9883"
+      }
+    },
+    "1.15.2": {
+      "version": "1.15.2",
+      "integrity": "sha512-XB+f3tv9BOpHfTdwzlREqyfh6LK9TPMVswRp8+yRbPFTEfzS7c5CeSizoCjnoA2G4M9gjTuxfBZen9xAScBuog==",
+      "extracted": {
+        "files": 271,
+        "sha512": "e2b96002bf33b5bebd00df0a02062d36251897b7bb38ec238b9e3fcdec7edfe6b8066248979aeb1bf592f222ea6b04d12de50bd30c1eafbc550864ac925edd42"
+      }
+    }
+  }
+}

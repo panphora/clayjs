@@ -1,0 +1,36 @@
+{
+  "name": "newer-format",
+  "writer": "fixture newer writer (newer-writer.mjs)",
+  "floor": 1,
+  "keeps": ["a", "t", "h"],
+  "neighbour": { "id": "z", "c": "Neighbour line", "add": " edited" },
+  "blocks": {
+    "a": {
+      "t": "paragraph",
+      "pos": "00000001",
+      "c": "Ada Lovelace wrote this",
+      "m": [
+        [12, "x[\"mention\",{\"id\":\"p-ada\"}]"],
+        [11, ""]
+      ]
+    },
+    "t": { "t": "toc", "pos": "00000002", "c": "Contents", "maxLevel": 3 },
+    "h": {
+      "t": "heading",
+      "pos": "00000000",
+      "level": 1,
+      "c": "Notes",
+      "pageIcon": "📘",
+      "pageCoverSrc": "/cover.jpg",
+      "pageCoverAlt": "A door",
+      "pageCoverX": 0.5,
+      "pageCoverY": 0.25
+    },
+    "z": { "t": "paragraph", "pos": "00000009", "c": "Neighbour line" }
+  },
+  "malformed": {
+    "blocks": {
+      "p": { "t": "paragraph", "pos": "00000004", "c": "x", "m": [[1, "x[\"mention\""]] }
+    }
+  }
+}

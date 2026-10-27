@@ -1,0 +1,53 @@
+{
+  "name": "floor-zero",
+  "blocks": {
+    "p1": {
+      "t": "paragraph",
+      "pos": "00000001",
+      "c": "Ordinary text, with bold and a link",
+      "m": [
+        [
+          8,
+          "b"
+        ],
+        [
+          12,
+          ""
+        ],
+        [
+          15,
+          "a[\"https://example.com\"]"
+        ]
+      ]
+    },
+    "l1": {
+      "t": "list_item",
+      "pos": "00000002",
+      "c": "first item",
+      "kind": "ul",
+      "indent": 0
+    },
+    "h1": {
+      "t": "heading",
+      "pos": "00000003",
+      "c": "A heading",
+      "level": 2
+    }
+  },
+  "malformed": {
+    "name": "unterminated named descriptor",
+    "blocks": {
+      "p1": {
+        "t": "paragraph",
+        "pos": "00000001",
+        "c": "abc",
+        "m": [
+          [
+            3,
+            "x[\"underline\""
+          ]
+        ]
+      }
+    }
+  }
+}
