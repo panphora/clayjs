@@ -1,9 +1,10 @@
 /**
  * @jest-environment node
  */
-import { afterAll, expect, jest, test } from "@jest/globals";
+import { afterAll, beforeAll, expect, jest, test } from "@jest/globals";
 import { spawnSync } from "node:child_process";
-import { cpSync, mkdtempSync, rmSync, appendFileSync } from "node:fs";
+import { cpSync, mkdtempSync, rmSync, appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -17,6 +18,28 @@ const ROOT = new URL("../../../", import.meta.url).pathname;
 const SCRIPT = path.join(ROOT, "scripts/verify-page-format-compat.mjs");
 const CACHE = path.join(ROOT, ".version-cache");
 jest.setTimeout(300_000);
+
+const LOCK = JSON.parse(readFileSync(path.join(ROOT, "tests/fixtures/page/formats/legacy-lock.json"), "utf8"));
+
+// The cache is gitignored, so a fresh checkout (a test box) has none. Fill it from
+// the registry the way it was first made, and refuse a tarball whose sha512 is not
+// the one the lock recorded: the published package is the input, never a rebuild.
+function ensureCached(version) {
+  const dir = path.join(CACHE, version);
+  if (existsSync(dir)) return;
+  const temp = mkdtempSync(path.join(tmpdir(), "clay-compat-pack-"));
+  scratch.push(temp);
+  const packed = spawnSync("npm", ["pack", `${LOCK.package}@${version}`, "--pack-destination", temp, "--silent", "--min-release-age=0"], { encoding: "utf8" });
+  if (packed.status !== 0) throw new Error(`npm pack ${version} failed: ${packed.stderr}`);
+  const tarball = path.join(temp, readdirSync(temp).find((name) => name.endsWith(".tgz")));
+  const integrity = `sha512-${createHash("sha512").update(readFileSync(tarball)).digest("base64")}`;
+  if (integrity !== LOCK.packages[version].integrity) throw new Error(`${version} tarball does not match its lock`);
+  mkdirSync(dir, { recursive: true });
+  const extracted = spawnSync("tar", ["-xzf", tarball, "-C", dir, "--strip-components=1"], { encoding: "utf8" });
+  if (extracted.status !== 0) throw new Error(`tar ${version} failed: ${extracted.stderr}`);
+}
+
+beforeAll(() => ensureCached("1.15.2"));
 
 const run = (...args) =>
   spawnSync(process.execPath, [SCRIPT, "--legacy-cache", CACHE, "--current", ".", ...args], {

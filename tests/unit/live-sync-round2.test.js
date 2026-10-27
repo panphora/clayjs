@@ -58,6 +58,9 @@ beforeAll(async () => {
   await import("../../src/core/admin-attrs.js");
   await import("../../src/core/persist.js");
   await import("../../src/core/unsaved-warning.js");
+  // presence.js loads the store on demand; linking it here first keeps that dynamic
+  // import from racing the legacy copy's own graph (jest ESM: "not in cache").
+  await import("../../src/sync/presence-store.js");
 
   const liveSyncModule = await import("../../src/sync/live-sync.js");
   ({ LiveSync, conflicts } = liveSyncModule);
