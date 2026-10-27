@@ -11,7 +11,7 @@
 
 import throttle from "../lib/throttle.js";
 import Mutation from "../lib/mutation.js";
-import { isDraftMode, isEditMode, isOwner } from "./is-edit-mode.js";
+import { isDraftMode, isEditMode, isOwner, learnedHostWritable } from "./is-edit-mode.js";
 import {
   saveCapturedHtml,
   getPageContents,
@@ -632,6 +632,29 @@ function sessionClosed(msg) {
   return skipped_(msg);
 }
 
+// A save this client will not send: the host has already answered that this page may not be
+// written. The shape is any refused save's, carrying the `forbidden` code a host's own 403
+// comes back with and `sent: false` because no request was made, so the chip, the notice and
+// the exit barrier read it exactly as they read that refusal. Sending it would only earn the
+// same answer, later.
+function forbidden_() {
+  return {
+    ok: false,
+    msg: 'You are not allowed to save this document.',
+    msgType: 'forbidden',
+    code: 'forbidden',
+    status: 403,
+    sent: false,
+    etag: null
+  };
+}
+
+// The host has said no, and nothing here overrides that: a page it will not store is not
+// written by an autosave, a Cmd+S, or the exit's own flush.
+function refusesSave() {
+  return learnedHostWritable() === false;
+}
+
 // The exit's own flush is not an ordinary save: it is the barrier writing the bytes the
 // exit is about to account for, so it runs under a permit. Nothing else does — a Cmd+S or
 // a [trigger-save] press while admission is closed stays parked.
@@ -875,6 +898,18 @@ function attemptSaveNow({ kind, permit = null }, callback = () => {}) {
       return resolve(skipped);
     }
 
+    // The host has told this tab this page is no longer writable. Nothing sends a request
+    // the client already knows will be refused: the text stays here, and the answer is the
+    // one a host's 403 gets, so the indicator says so and the exit refuses like a failed
+    // save. The flush inside the exit barrier passes through here too.
+    if (refusesSave()) {
+      if (explicit) clearExplicitSave();
+      const refused = forbidden_();
+      setSaveState('error', refused.msg, '', { code: refused.code, status: refused.status, sent: false });
+      callback(refused);
+      return resolve(refused);
+    }
+
     // A save is already on the wire. Remember that a newer state is waiting rather
     // than dropping it: the in-flight request carries the older bytes, and if no
     // further mutation happens to retrigger autosave, the newer ones would never
@@ -1098,6 +1133,15 @@ export function savePageForce(callback = () => {}, { quietConflict = false, page
       const skipped = sessionClosed('Save session is quiesced');
       callback(skipped);
       return resolve(skipped);
+    }
+
+    // A force save is not a way around the host's answer: these bytes are the ones it has
+    // already refused, and a request it will reject is not sent.
+    if (refusesSave()) {
+      const refused = forbidden_();
+      setSaveState('error', refused.msg, '', { code: refused.code, status: refused.status, sent: false });
+      callback(refused);
+      return resolve(refused);
     }
 
     if (heldForPreview(callback, resolve)) return;

@@ -83,14 +83,27 @@ const hintCanEdit = hostCanEdit || keptCanEdit;
 const authoredRestriction = isDraftMode || servedStaleToken() || forcedEditMode === false ||
   query.editmode === "false" || (isViewOnlyDocument && query.editmode !== "true");
 let canEdit = hintCanEdit;
+// The host's own answer as it stands, true or false, and null while it has said nothing
+// either way. Kept beside canEdit because it is the same answer read for a different
+// question: canEdit is what the page may do, and this is what the host has already said it
+// will refuse.
+let hostWritable = null;
 
 // The host's own answer to "may this caller save here": false takes edit away, true grants
 // it unless the document rules it out, and no answer leaves the hints in charge.
 export function noteHostWritable(writable) {
+  hostWritable = typeof writable === "boolean" ? writable : null;
   const next = writable === false ? false : writable === true ? hintCanEdit || !authoredRestriction : hintCanEdit;
   if (next === canEdit) return;
   canEdit = next;
   if (typeof document !== "undefined") document.dispatchEvent(new Event("clay:capabilitychange"));
+}
+
+// What the host last answered about this page being writable, or null while it has said
+// nothing. A denial is the client's own knowledge that a save will be refused, so the save
+// lane reads it before building a request it already knows the host will not take.
+export function learnedHostWritable() {
+  return hostWritable;
 }
 
 // Does this tab start editing? Only when something explicit asks for it.
