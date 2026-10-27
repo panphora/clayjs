@@ -86,6 +86,23 @@ export function pathIdentityOf(pathname) {
  * @param {string} [options.writerId]
  * @returns {Object}
  */
+/**
+ * Whether two authorities are the same document, seen by the same account.
+ *
+ * `principalId` is the account, never a token, and a changed login is another principal:
+ * a journal is replayed into the authority and principal it was written under or not at
+ * all. A missing field is never equal to a missing field.
+ *
+ * @param {?Object} a
+ * @param {?Object} b
+ * @returns {boolean}
+ */
+export function sameAuthority(a, b) {
+  if (!a || !b) return false;
+  if (!a.host || !a.documentId || !a.principalId) return false;
+  return a.host === b.host && a.documentId === b.documentId && a.principalId === b.principalId;
+}
+
 export function createIdentity({
   mode = EDIT_MODE,
   root = globalThis.document?.documentElement,

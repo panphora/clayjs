@@ -3,6 +3,7 @@ import { toBase64, fromBase64 } from "../../vendor/yjs.vendor.js";
 import { NET } from "./layout.js";
 import { ORIGINS_ORIGIN } from "./origins.js";
 import { PART_KEY, BASE64, entriesOf, captureYValue } from "./parts.js";
+import { containsUpdate } from "./recovery-proof.js";
 
 export { entriesOf } from "./parts.js";
 
@@ -11,7 +12,6 @@ export const dec = (s) => fromBase64(s);
 
 export const PART = 12 * 1024;
 const baseOf = (k) => PART_KEY.exec(k)?.[1] ?? k;
-const sameBytes = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
 
 export function yValueOf(ydoc) {
   return { v: 1, g: 0, y: { seed: enc(Y.encodeStateAsUpdateV2(ydoc)) } };
@@ -201,7 +201,7 @@ export function createYProvider({ store, ydoc, compact: limits = {}, setTimer = 
       proof = { value, folds: new Map() };
       coverCache.set(key, proof);
     }
-    if (!proof.folds.has(foldKey)) proof.folds.set(foldKey, sameBytes(Y.mergeUpdatesV2([base, dec(value)]), base));
+    if (!proof.folds.has(foldKey)) proof.folds.set(foldKey, containsUpdate(base, dec(value)));
     return proof.folds.get(foldKey);
   }
 
