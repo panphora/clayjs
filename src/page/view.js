@@ -8,7 +8,6 @@ import { createSavedStream } from "../sync/saved-stream.js";
 import { stopForUpgrade, upgradeReplaces, upgradeReplacesDocument } from "../sync/version-guard.js";
 import { applyPreparedArticle, keepToolVersion, prepareSavedArticle, toolInfoOf, toolsOf, toolStateOf } from "./reader-patch.js";
 import { claim } from "./runtime-owner.js";
-import { TOC_LABEL, idFromHref } from "./toc.js";
 
 const ARTICLE = "article[data-page]";
 const TOOL = 'section[data-type="tool"][data-id]';
@@ -17,18 +16,9 @@ const LINEAGE = ["live-at", "live-by"];
 
 export { applyPreparedArticle, prepareSavedArticle };
 
-// A table of contents link in a saved page shows its target and opens every collapsed
-// body above it: reading only, so nothing is saved, no history moves and no peer is
-// told. A link whose block is gone, or to anywhere else, changes nothing.
-export function followTocLink(article, href) {
-  const id = idFromHref(href);
-  if (id === null) return null;
-  const target = [...article.querySelectorAll("[data-id]")].find((el) => el.getAttribute("data-id") === id) ?? null;
-  if (!target) return null;
-  for (let el = target.parentElement; el && el !== article; el = el.parentElement) if (el.tagName === "DETAILS") el.open = true;
-  target.scrollIntoView?.({ block: "start" });
-  return target;
-}
+// A table of contents link in a saved page reveals its target. The reveal code and
+// the anchor decoder load the first time somebody follows one, never with the page.
+export const followTocLink = (article, href) => import("./toc-link.js").then((m) => m.followTocLink(article, href));
 
 // The stamp of the file this reader accepted, recorded where a save reads it. The
 // stamp module is the write path's own lazy chunk: a reader paints without it, and
@@ -277,8 +267,8 @@ function createReader({ doc, article, represented = null, feed = null, documentU
   listeners.push(["toggle", onToggle, true]);
 
   const onTocLink = (event) => {
-    const link = event.target.closest?.("a[href]");
-    if (!link || !article.contains(link) || !link.closest(`nav[aria-label="${TOC_LABEL}"]`)) return;
+    const link = event.target.closest?.('a[href^="#page-block-"], a[href^="#"]');
+    if (!link || !article.contains(link) || !link.closest('nav[aria-label="Table of contents"]')) return;
     event.preventDefault();
     followTocLink(article, link.getAttribute("href"));
   };

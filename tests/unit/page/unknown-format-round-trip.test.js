@@ -208,12 +208,21 @@ test("a merge keeps an opaque record neither side touched", () => {
   expect(byId(both.items).get("z").c).toBe("Outside words here");
 });
 
+test("an older writer\u0027s envelope holding a known record opens as that block", () => {
+  const toc = parseModel(articleOf(`<div data-id="t" ${envelopeOf({ t: "toc", maxLevel: 4 })}>Contents</div>`));
+  expect(toc).toEqual([{ id: "t", t: "toc", maxLevel: 4 }]);
+
+  const paragraph = parseModel(articleOf(`<div data-id="p" ${envelopeOf({ t: "paragraph", c: "A known line", due: "2026-11-01" })}>A known line</div>`));
+  expect(paragraph).toEqual([{ id: "p", t: "paragraph", c: "A known line" }]);
+  expect(Object.hasOwn(paragraph[0], "due")).toBe(false);
+});
+
 test("a malformed or inconsistent envelope refuses the article instead of a plain-text fallback", () => {
   const refusals = [
     ["not base64url JSON", `${OPAQUE}="1" ${VALUE}="!!"`],
     ["no value at all", `${OPAQUE}="1"`],
     ["an unknown version", `${OPAQUE}="2" ${VALUE}="${b64encode('{"t":"callout_future"}')}"`],
-    ["a record naming a known block type", envelopeOf({ t: "paragraph", c: "x" })],
+    ["a malformed record naming a known block type", envelopeOf({ t: "toc", c: "x" })],
     ["a record naming the internal node", envelopeOf({ t: "opaque_block" })],
     ["a record with a structural position", envelopeOf({ t: "callout_future", pos: "1" })],
     ["a record with a structural id", envelopeOf({ t: "callout_future", id: "q" })],

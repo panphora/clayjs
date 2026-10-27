@@ -12,7 +12,6 @@ import { chartModel, renderChartSvg } from "./rich/chart.js";
 import { cellText } from "./rich/cell.js";
 import { bounded, descriptors, entriesOf, keyOf, normalizeEntries } from "./format-codec.js";
 import { nativeAttrs } from "./format-native.js";
-import { TOC_LABEL, tocHtml } from "./toc.js";
 
 export const ATOM = "￼";
 export const BREAK = '@{"type":"hard_break"}';
@@ -59,6 +58,43 @@ export const DEFAULTS = {
   preserved: { parent: null, html: "" },
 };
 const TEXT = new Set(["paragraph", "heading", "list_item", "callout", "quote", "code_block", "toggle"]);
+export const TOC_LABEL = "Table of contents";
+export const TOC_ANCHOR = "page-block-";
+export const blockAnchor = (id) => `${TOC_ANCHOR}${b64url(String(id ?? ""))}`;
+const TOC_MAX_LEVEL = 3;
+const tocLevel = (item) => (item.t === "heading"
+  ? Math.min(6, Math.max(1, Number.isInteger(item.level) ? item.level : 2))
+  : item.t === "toggle" && (item.level === 1 || item.level === 2 || item.level === 3) ? item.level : 0);
+const tocTitle = (item) => item.t === "heading" && (item.level ?? 2) === 1 && (item.parent ?? null) === null;
+const tocMax = (value) => (Number.isInteger(value) && value >= 1 && value <= 6 ? value : TOC_MAX_LEVEL);
+const tocText = (item) => String(item.c ?? "").replace(/[\s\uFFFC]+/gu, " ").trim() || "Untitled";
+
+export function tocEntries(model, maxLevel = TOC_MAX_LEVEL) {
+  const max = tocMax(maxLevel);
+  const title = model.find(tocTitle) ?? null;
+  const out = [];
+  for (const item of model) {
+    const level = tocLevel(item);
+    if (!item.id || !level || level > max || item === title) continue;
+    out.push({ id: item.id, level, text: tocText(item) });
+  }
+  return out;
+}
+
+export function tocHtml(item, model) {
+  const entries = tocEntries(model, item.maxLevel);
+  const root = { level: 0, children: [] };
+  const stack = [root];
+  for (const entry of entries) {
+    while (stack.length > 1 && stack[stack.length - 1].level >= entry.level) stack.pop();
+    const node = { ...entry, children: [] };
+    stack[stack.length - 1].children.push(node);
+    stack.push(node);
+  }
+  const list = (nodes) => `<ul>${nodes.map((node) => `<li><a href="#${blockAnchor(node.id)}">${escText(node.text)}</a>${node.children.length ? list(node.children) : ""}</li>`).join("")}</ul>`;
+  const level = item.maxLevel == null ? "" : ` data-max-level="${escAttr(item.maxLevel)}"`;
+  return `<nav aria-label="${TOC_LABEL}" data-type="toc" data-id="${escAttr(item.id ?? "")}"${level}>${entries.length ? list(root.children) : ""}</nav>`;
+}
 
 const same = (a, b) => canon(a) === canon(b);
 
@@ -397,6 +433,20 @@ function projectOne({ id, b, t, parent, indent }) {
   return item;
 }
 
+// A record a newer writer left in an older writer's envelope, for a block type this
+// build knows: the same projection a peer's record gets, without the fields this
+// type does not declare.
+function knownRecordItem(id, record, parent) {
+  const { t } = record;
+  const malformed = new SyntaxError(`page: an envelope names the known block type ${t}`);
+  if (TEXT.has(t) ? record.c != null && typeof record.c !== "string" : record.c != null || record.m != null) throw malformed;
+  let item;
+  try { item = projectOne({ id, b: record, t, parent, indent: 0 }); }
+  catch { throw malformed; }
+  const fields = DEFAULTS[t];
+  return Object.fromEntries(Object.entries(item).filter(([k]) => k === "id" || k === "t" || STRUCTURAL.has(k) || k === "rows" || Object.hasOwn(fields, k)));
+}
+
 const clampLevel = (l) => Math.min(6, Math.max(1, Number.isInteger(l) ? l : 2));
 // A toggle heading is level 1 to 3; anything else is a plain toggle.
 export const toggleLevel = (l) => (l === 1 || l === 2 || l === 3 ? l : null);
@@ -712,7 +762,11 @@ export function parseArticle(article) {
     const P = { parent };
     const record = envelopeAt(el);
     if (record && typeof record.t === "string") {
-      if (knownType(record.t) || record.t === "opaque_block") throw new SyntaxError(`page: an envelope names the known block type ${record.t}`);
+      if (record.t === "opaque_block") throw new SyntaxError(`page: an envelope names the known block type ${record.t}`);
+      if (knownType(record.t)) {
+        items.push(knownRecordItem(idOf(el), record, parent));
+        return;
+      }
       const { t, ...fields } = record;
       items.push({ id: idOf(el), t, parent, ...fields });
       return;

@@ -3,7 +3,7 @@ import * as I from "../../../src/page/items.js";
 import * as tocFeature from "../../../src/page/features/toc.js";
 import { installPageFeature } from "../../../src/page/editor.js";
 import { collapseKey, hiddenRanges, outline, setOpen } from "../../../src/page/blocks.js";
-import { DEFAULTS, canon, parseModel, project, renderModel, revOf } from "../../../src/page/projection.js";
+import { DEFAULTS, OPAQUE, VALUE, canon, parseModel, project, renderModel, revOf } from "../../../src/page/projection.js";
 import { blockMap } from "../../../src/page/model.js";
 import { requiredPageFormat } from "../../../src/page/format-level.js";
 import { captureFormat } from "../../../src/server/rooms/index.js";
@@ -29,6 +29,13 @@ const articleOf = (inner, rev = "0") => {
   );
   return parsed.querySelector("article");
 };
+
+const b64encode = (text) => {
+  let bin = "";
+  for (const byte of new TextEncoder().encode(text)) bin += String.fromCharCode(byte);
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+};
+const envelopeOf = (value) => ` ${OPAQUE}="1" ${VALUE}="${b64encode(JSON.stringify(value))}"`;
 
 // The block record a spec makes, without a text field on the blocks that hold none.
 const blocksOf = (spec) => {
@@ -221,7 +228,7 @@ test("a missing target is a no-op that says so", () => {
   expect(view.dom.parentElement.querySelector(".page-live").textContent).toContain("gone");
 });
 
-test("the saved nav works without the editor: a link opens the closed bodies above its target", () => {
+test("the saved nav works without the editor: a link opens the closed bodies above its target", async () => {
   const model = project(blocksOf([
     ["t", "toggle", "Collapsed", { open: false }],
     ["u", "toggle", "Inner", { open: false, parent: "t" }],
@@ -235,14 +242,14 @@ test("the saved nav works without the editor: a link opens the closed bodies abo
   expect(details.map((d) => d.open)).toEqual([false, false]);
 
   const link = article.querySelector("nav a");
-  expect(followSavedLink(article, link.getAttribute("href"))).toBe(article.querySelector('[data-id="b"]'));
+  expect(await followSavedLink(article, link.getAttribute("href"))).toBe(article.querySelector('[data-id="b"]'));
   expect(details.map((d) => d.open)).toEqual([true, true]);
   // A link whose block is gone changes nothing.
-  expect(followSavedLink(article, `#${blockAnchor("gone")}`)).toBeNull();
+  expect(await followSavedLink(article, `#${blockAnchor("gone")}`)).toBeNull();
   expect(details.map((d) => d.open)).toEqual([true, true]);
 });
 
-test("an old copied block link resolves, and a link to anywhere else is left alone", () => {
+test("an old copied block link resolves, and a link to anywhere else is left alone", async () => {
   expect(idFromHref(`#${blockAnchor("b-1")}`)).toBe("b-1");
   expect(idFromHref(`#${encodeURIComponent("b-1")}`)).toBe("b-1");
   expect(idFromHref("#b-1")).toBe("b-1");
@@ -250,7 +257,7 @@ test("an old copied block link resolves, and a link to anywhere else is left alo
 
   const model = project(blocksOf([["b", "heading", "Beta", { level: 2 }], ["c", "toc", null, { maxLevel: 3 }]]));
   const article = articleOf(renderModel(model));
-  expect(followSavedLink(article, "#b")).toBe(article.querySelector('[data-id="b"]'));
+  expect(await followSavedLink(article, "#b")).toBe(article.querySelector('[data-id="b"]'));
 });
 
 test("a toc arriving from a peer or a paste needs floor 1, and a page without one needs none", () => {
@@ -266,6 +273,14 @@ test("a toc arriving from a peer or a paste needs floor 1, and a page without on
   expect(requiredPageFormat(project(without))).toBe(0);
   expect(captureFormat(fileOf(withToc))).toBe(1);
   expect(captureFormat(fileOf(without))).toBe(0);
+});
+
+test("an older writer\u0027s envelope holding a toc record opens as that toc", () => {
+  const article = articleOf(`<div data-id="t"${envelopeOf({ t: "toc", maxLevel: 4 })}>Contents</div><p data-id="z">Neighbour line</p>`);
+  expect(parseModel(article)).toEqual([
+    { id: "t", t: "toc", maxLevel: 4 },
+    { id: "z", t: "paragraph", c: "Neighbour line" },
+  ]);
 });
 
 test("an older writer's toc record comes back as the toc it stood for, beside a neighbour's edit", () => {
