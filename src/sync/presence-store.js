@@ -408,5 +408,10 @@ export default presence;
 // sender an editor starts with — and both find the same store here.
 if (typeof window !== 'undefined') {
   window.clay = window.clay || {};
-  if (!window.clay.presence) window.clay.presence = presence;
+  if (!window.clay.presence) {
+    window.clay.presence = presence;
+    try {
+      document.dispatchEvent(new CustomEvent('clay:presence-ready', { detail: { presence } }));
+    } catch {}
+  }
 }
