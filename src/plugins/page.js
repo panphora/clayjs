@@ -6,7 +6,7 @@ import { savePageForce, holdAllSaves, releaseAllSaves, suspendAutosave, resumeAu
 import { setSaveHeader } from "../core/save-core.js";
 import { lastSeenEtag, representedEtag, recordEtag } from "../core/etag.js";
 import { captureForSaveAndComparison } from "../core/snapshot.js";
-import { storeOf, stageStore, closeStore, checkpointWithin, requestCheckpoint, fastLane, pageLaneReady, pageWriterReady } from "./live.js";
+import { storeOf, stageStore, closeStore, checkpointWithin, requestCheckpoint, fastLane, pageLaneReady, pageWriterReady, registerPageCheckpoints } from "./live.js";
 import { serializeLive } from "../live/ops.js";
 import { parseJsonRelaxed } from "../vendor/hyper-morph-json.vendor.js";
 import { saveStateFor, BLOCKED_TEXT, RETRY_TEXT, downloadPageCopy, downloadSnapshot, copyPageText } from "../page/save-states.js";
@@ -410,6 +410,7 @@ function dispose() {
   const inst = active;
   active = null;
   setSaveHeader("Page-Write", null);
+  registerPageCheckpoints(null);
   if (!inst) return;
   disposeInstall(inst);
   if (inst.retryTimer) {
@@ -436,6 +437,82 @@ function dispose() {
   }
   releaseMounted(inst);
   restoreArticle(inst);
+}
+
+// The page's journal, its replay and the proof that retires it, all imported the first
+// time a page can actually journal: a reader, a page without a pinned identity and a host
+// with no recovery service pay for none of it.
+let recoveryModules = null;
+
+function pageRecovery() {
+  if (!recoveryModules) {
+    recoveryModules = Promise.all([import("../page/ybind/recovery-replay.js"), import("../page/checkpoint-proof.js")])
+      .then(([replay, proof]) => ({ replay, proof }))
+      .catch((error) => {
+        console.warn("clayjs: page journal could not load", error);
+        return null;
+      });
+  }
+  return recoveryModules;
+}
+
+// What this session journals under, or null when this page cannot pin an identity or this
+// host has no recovery service: the document is then edited with no local copy, as before.
+async function openJournal(meta, store) {
+  const service = globalThis.window?.clay?.recovery ?? null;
+  if (!service || !store) return null;
+  const modules = await pageRecovery();
+  if (!modules) return null;
+  try {
+    return modules.replay.openPageJournal({
+      meta,
+      service,
+      base: modules.replay.journalBase(store.value),
+    });
+  } catch (error) {
+    console.warn("clayjs: page journal could not open", error);
+    return null;
+  }
+}
+
+// Replay once, after the authority snapshot is adopted and before input starts. A capsule
+// this page may not replay is kept and named for review; nothing of it is applied.
+async function replayJournal(inst) {
+  const journal = inst.binding?.journal;
+  if (!journal || !inst.store) return { replayed: [], review: [] };
+  const modules = await pageRecovery();
+  if (!modules) return { replayed: [], review: [] };
+  const outcome = await modules.replay.replayInto({ journal, state: inst.store.value, into: inst.binding.ydoc });
+  // The recovered page is this tab's page now: it is offered to the room exactly as an
+  // edit would be, and it is not one more journal and not one giant undo step.
+  if (outcome.replayed.length) inst.binding.provider.settle();
+  if (outcome.review.length) inst.recoveryReview = outcome.review;
+  return outcome;
+}
+
+// One accepted save retires the records a proof covers, and no others.
+function installCheckpointProof(inst) {
+  registerPageCheckpoints(async ({ capture, state, article, etag }) => {
+    const journal = inst.binding?.journal;
+    if (!journal) return;
+    const modules = await pageRecovery();
+    const context = modules ? await journal.context() : null;
+    if (!context) return;
+    // Where this host serves the page state, if it serves one at all: asked here, because
+    // a page that journals nothing never needs the answer.
+    const { hostPageStateHref } = await import("../core/host-meta.js");
+    const answer = await modules.proof.checkpointAccepted({
+      channel: journal.channel,
+      records: journal.records(),
+      capture,
+      accepted: context,
+      article,
+      state,
+      etag,
+      href: await hostPageStateHref(),
+    });
+    if (answer.ok) journal.retire(answer.retired);
+  });
 }
 
 export function createSteps(inst, options) {
@@ -787,6 +864,11 @@ function mergeRepresentedPage(store, value) {
       return result;
     };
     identity = authorIdentity();
+    // The journal is installed before the editor is enabled, and whether or not this tab
+    // can reach the room: a refused offer, a lost room and an oversize update all leave
+    // the work in a document that a crash must still be able to recover.
+    const journal = await openJournal(meta, store);
+    if (!isCurrent(inst)) return { ok: false, cancelled: true };
     binding = code.createYPageBinding({
       store,
       onStopped: (reason) => {
@@ -802,6 +884,7 @@ function mergeRepresentedPage(store, value) {
       ownedTokens: identity.owned,
       checkpointWithin,
       requestCheckpoint,
+      journal,
       registerUnsavedState: (def) => {
         registered = registerUnsavedState({
           id: def.id,
@@ -812,6 +895,7 @@ function mergeRepresentedPage(store, value) {
       },
     });
     inst.binding = binding;
+    if (journal) installCheckpointProof(inst);
     inst.flush = (options) => trackFlush(() => binding.flush(options));
     listenForSaves(inst);
     return { ok: true, store, handle };
@@ -1025,7 +1109,10 @@ function mountAndAttach(inst, source, loaded) {
     inst.adoption = adoption;
 
     let outcome = await adoption.idle();
-    if (!outcome) return { ok: true, outcome: "unchanged" };
+    if (!outcome) {
+      await replayJournal(inst);
+      return { ok: true, outcome: "unchanged" };
+    }
     // Another tab is the room's writer, so this tab's adoption is the one that tab
     // lands: the wait ends when it reaches this tab, or as the timeout a refusal is.
     if (outcome.outcome === "writer-adopts") outcome = await awaitWriterAdoption(inst, found);
@@ -1034,6 +1121,7 @@ function mountAndAttach(inst, source, loaded) {
     // comes back from what the room accepted. A disposed install restores nothing:
     // dispose already did.
     if (!outcome.ok && isCurrent(inst)) abandonEditor(inst);
+    else if (isCurrent(inst)) await replayJournal(inst);
     return outcome;
   }
 

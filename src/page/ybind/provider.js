@@ -11,6 +11,10 @@ export const enc = (u) => toBase64(u);
 export const dec = (s) => fromBase64(s);
 
 export const PART = 12 * 1024;
+
+// The origin a replayed journal is applied through. It is offered to the room like any
+// other local work and is never journaled again: a recovery is not this tab's typing.
+export const RECOVERY_ORIGIN = "page-recovery";
 const baseOf = (k) => PART_KEY.exec(k)?.[1] ?? k;
 
 export function yValueOf(ydoc) {
@@ -80,7 +84,7 @@ const utf8Bytes = (text) => (encoder ? encoder.encode(text).length : text.length
 const sameDeletes = (a, b) => Y.equalDeleteSets(Y.createDeleteSetFromStructStore(a.store), Y.createDeleteSetFromStructStore(b.store));
 const svEqual = (a, b) => { if (a.size !== b.size) return false; for (const [c, n] of a) if (b.get(c) !== n) return false; return true; };
 
-export function createYProvider({ store, ydoc, compact: limits = {}, setTimer = setTimeout, clearTimer = clearTimeout, onStopped = () => {}, stats = { applied: 0, offered: 0, compactions: 0 } }) {
+export function createYProvider({ store, ydoc, compact: limits = {}, setTimer = setTimeout, clearTimer = clearTimeout, onStopped = () => {}, stats = { applied: 0, offered: 0, compactions: 0 }, journal = null }) {
   const initial = entriesOf(store.value.y);
   const known = new Set();
   // Set when this tab's page can no longer reach the room: "lineage" when the room holds
@@ -116,7 +120,10 @@ export function createYProvider({ store, ydoc, compact: limits = {}, setTimer = 
 
   for (const [k] of initial) known.add(k);
 
+  // Ahead of the stop guards, and of the room's own delivery: work this tab can no longer
+  // offer, and work a refused offer took back, is still work a crash must not lose.
   const onUpdate = (u, origin) => {
+    if (origin !== NET && origin !== ORIGINS_ORIGIN && origin !== RECOVERY_ORIGIN) journal?.local(u);
     if (stopped || origin === NET || origin === ORIGINS_ORIGIN) return;
     put(nextKey("u"), u);
   };
@@ -127,7 +134,11 @@ export function createYProvider({ store, ydoc, compact: limits = {}, setTimer = 
     canCompact = true;
     known.add(k);
     stats.applied++;
-    Y.applyUpdateV2(ydoc, dec(v), NET);
+    const update = dec(v);
+    Y.applyUpdateV2(ydoc, update, NET);
+    // A received update can be the prerequisite of a later local insert, so the journal
+    // keeps it beside the work it owns, and never counts it as this tab's own.
+    journal?.dependency(update);
   };
 
   let wantReconcile = false;

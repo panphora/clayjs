@@ -3,16 +3,32 @@ import { NET, createPageDoc, walk, docOf } from "./core.js";
 import { createBridge, keepViewPos } from "./bridge.js";
 import { createYProvider, entriesOf, dec } from "./provider.js";
 
-export function createYPageBinding({ store, ydoc = new Y.Doc(), onNotice = () => {}, ownedTokens = [], authorToken = null, setTimer = setTimeout, clearTimer = clearTimeout, compact, captureTimeout = 500, checkpointWithin = () => {}, requestCheckpoint = null, registerUnsavedState = null, onStopped = () => {} }) {
+export function createYPageBinding({ store, ydoc = new Y.Doc(), onNotice = () => {}, ownedTokens = [], authorToken = null, setTimer = setTimeout, clearTimer = clearTimeout, compact, captureTimeout = 500, checkpointWithin = () => {}, requestCheckpoint = null, registerUnsavedState = null, onStopped = () => {}, journal = null }) {
   for (const [, v] of entriesOf(store.value.y)) Y.applyUpdateV2(ydoc, dec(v), NET);
   const pd = createPageDoc(ydoc);
-  const provider = createYProvider({ store, ydoc, setTimer, clearTimer, compact, onStopped });
+  // The journal is installed before the provider, because the provider is what sees an
+  // update: nothing can reach the document without passing it first. Its own code lives
+  // with the recovery channel and is only loaded when a page has one to journal into.
+  const pageJournal = journal || null;
+  const provider = createYProvider({
+    store,
+    ydoc,
+    setTimer,
+    clearTimer,
+    compact,
+    onStopped,
+    journal: { local: (u) => pageJournal?.local(u), dependency: (u) => pageJournal?.dependency(u) },
+  });
   const stats = { groups: 0, mismatch: 0, renders: 0, first: null };
   const bridge = createBridge({ pd, onNotice, ownedTokens, authorToken, stats, captureTimeout });
   const waiters = new Set();
   let disposed = false;
   let checksQueued = false;
-  const unsaved = registerUnsavedState?.({ id: "page:live", isPending: () => store.pending.length > 0 || provider.reconcilePending, flush });
+  const unsaved = registerUnsavedState?.({
+    id: "page:live",
+    isPending: () => store.pending.length > 0 || provider.reconcilePending || Boolean(pageJournal?.pending()),
+    flush,
+  });
   const changed = () => {
     unsaved?.changed();
     if (checksQueued) return;
@@ -24,7 +40,13 @@ export function createYPageBinding({ store, ydoc = new Y.Doc(), onNotice = () =>
   };
   const offLocal = store.onLocal(() => { checkpointWithin(1500); changed(); });
   const offRebase = store.onRebase(changed);
-  const offConfirm = store.onConfirm(changed);
+  const offConfirm = store.onConfirm(() => {
+    pageJournal?.acknowledged();
+    changed();
+  });
+  // Everything the journal reports while this session is the active one is unsaved state:
+  // a write in flight, a write the store refused, or a room that has not confirmed.
+  if (pageJournal) pageJournal.onChange = changed;
 
   function flush({ timeoutMs = 10_000 } = {}) {
     if (disposed) return Promise.resolve({ ok: false, code: "disposed" });
@@ -73,6 +95,7 @@ export function createYPageBinding({ store, ydoc = new Y.Doc(), onNotice = () =>
 
   return {
     ydoc, pd, provider, bridge, stats, flush, awareness,
+    get journal() { return pageJournal; },
     doc: () => keepViewPos(docOf(pd, walk(pd))),
     attach: (view) => bridge.attach(view),
     dispatch: (tr) => bridge.dispatch(tr),
@@ -92,6 +115,10 @@ export function createYPageBinding({ store, ydoc = new Y.Doc(), onNotice = () =>
       offRebase();
       offConfirm();
       unsaved?.dispose();
+      // Best effort, never the primary path: every append already resolved on its own
+      // commit, and what is left is only a write the store refused.
+      pageJournal?.close();
+      Promise.resolve(pageJournal?.channel?.flush?.()).catch(() => {});
       for (const waiter of [...waiters]) waiter.finish({ ok: false, code: "disposed" });
       bridge.dispose();
       provider.dispose();
