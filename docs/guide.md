@@ -2117,6 +2117,8 @@ Every save captures and serializes the whole document, every change check captur
 | 3,000 | 1.3 MB | ~120 ms | ~300 ms | ~190 ms |
 | 6,000 | 2.6 MB | ~250 ms | ~650 ms | ~400 ms |
 
+Typing also costs one Sap pass, and a pass visits every record. Sap skips rereading unchanged record values, but it still builds fresh objects for every record, so the pass grows with the record count: at 5,000 records in jsdom, a body edit's pass takes about 27 ms ([Cost at size](https://clayjs.com/docs/plugins/sap/#cost-at-size)).
+
 Up to about 1,000 records feels instant. From 1,000 to 3,000 there is a visible hitch at each save. Past about 3,000 records or 1.5 MB, autosave stalls typing and peers lag. Hosts cap a save at 5 MB (hyperclay.com), 20 MB (Hyperclay Local), and 50 MB (HTML Clay). Design for archiving: one file per year, a hidden archive section that can move to another file, or one file per project.
 
 ### 8.13 Styles a script writes
@@ -2236,6 +2238,7 @@ The old limits apply elsewhere. Ordinary `editable` regions and DOM records have
 - **No suggestion mode, pagination, footnotes, or `.docx` and PPTX export.** Edits apply directly without tracked changes, page breaks, footnotes, or Office exporters. Use print CSS for PDF.
 - **Per-file edit access.** There are no per-row permissions. Split data for different audiences into separate files.
 - **No background work in a closed file.** Nothing runs in a closed file, and a live room ends after two minutes with nobody connected. Compute due states on open.
+- **Large record sets cost every keystroke.** Each change runs a Sap pass that visits every record. Sap rereads only changed values, but the pass still grows with the record count, about 27 ms for a body edit at 5,000 records in jsdom. See [Document size and record limits](https://clayjs.com/docs/guide/architecture/#document-size-and-record-limits).
 - **Undo is per tab.** History is capped at 100 steps per tab, is not saved, and never reverts a peer's merged edits.
 
 > [!NOTE]
