@@ -1,0 +1,42 @@
+{
+  "schema": 1,
+  "id": "icon-page-clean-leave",
+  "fixture": "page-host",
+  "page": {
+    "head": "<meta name=\"clay-page-format\" content=\"1\"><script type=\"application/json\" merge=\"page\" clay=\"live\" live-at=\"esf1oja803qmvrb658g:1:5f5f41b8\">{\"v\":1,\"g\":0,\"y\":{\"seed\":\"AAACQQMEAQAIQgALJwAoAQUAJwAoAIUkHGF0dHJzdGl0bGVsZXZlbHRmbG93YXR0cnNwMXRFAQEEBQIBBwEAAAEBAQACQQACQQEBBwB9AXcHaGVhZGluZ3YBAWJ3BXRpdGxldwlwYXJhZ3JhcGh2AQFidwJwMQA=\",\"uyw4qcc-0\":\"AAAGnJmK3A8BAQAAASgoJG9yaWdpbnNbImF1dGhvciIsMjEwOTgxODQ2MF1wYWdlSWNvbgcVCAMBAAAAAkEAAQIAdxRtdnJiNjR1cC1tMWV4OGQ3d2xvZncE8J+YgAA=\"}}</script><script type=\"application/json\" merge=\"page.tools\" clay=\"live\" live-at=\"esf1oja803qmvrb658g:1:5465b825\">{}</script>",
+    "body": "<article class=\"page\" clay=\"freeze\" data-page=\"1\" data-rev=\"92e368e41e12ed47\"><header data-id=\"title\" data-page-heading=\"1\"><span data-page-icon aria-hidden=\"true\">\ud83d\ude00</span><h1></h1></header>\n<p data-id=\"p1\"></p></article>"
+  },
+  "host": {
+    "extensions": [
+      "page",
+      "page-format-v1"
+    ],
+    "served": "page"
+  },
+  "boot": {
+    "mode": "edit",
+    "live": true,
+    "destination": "host"
+  },
+  "steps": [
+    {
+      "op": "settle",
+      "ms": 200
+    },
+    {
+      "op": "leave",
+      "await": false
+    },
+    {
+      "op": "settle",
+      "ms": 20000
+    }
+  ],
+  "requires": [
+    "transition"
+  ],
+  "expect": {
+    "mode": "view",
+    "writes": 0
+  }
+}

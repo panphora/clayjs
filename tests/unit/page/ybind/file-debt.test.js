@@ -337,3 +337,14 @@ test("a failed journal alone never holds a leave, and never covers the input", (
   acknowledge(tab);
   expect(livePending()).toBe(false);
 });
+
+test("a title with an icon and a cover still reads as accepted bytes", () => {
+  const value = seedValue([
+    { id: "t", t: "heading", attrs: { level: 1, pageIcon: "🌱", pageCoverSrc: "https://example.com/cover.png", pageCoverAlt: "" }, text: "Title" },
+    { id: "p", text: "hello" },
+  ]);
+  const article = articleOfPageState(value);
+  expect(article).toContain("data-page-icon");
+  expect(article).toContain("data-page-cover");
+  expect(acceptedPageState(acceptedHtml(value))).not.toBeNull();
+});

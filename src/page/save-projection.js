@@ -110,7 +110,11 @@ export function acceptedPageState(html) {
     const state = pageStateOfClone(root);
     const article = root.querySelector(ARTICLE);
     if (!state || !article) return null;
-    return article.innerHTML === articleOfPageState(state) ? state : null;
+    // Compare as parsed markup: the projection writes some empty attributes bare,
+    // and a parsed article serializes every attribute with a value.
+    const rendered = root.createElement("article");
+    rendered.innerHTML = articleOfPageState(state);
+    return article.innerHTML === rendered.innerHTML ? state : null;
   } catch {
     return null;
   }
