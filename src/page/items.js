@@ -47,6 +47,7 @@ export const INSERT_ITEMS = [
   { key: "mention", label: "Mention", description: "Name someone on the page", icon: "@", aliases: ["person", "people", "assign"], command: "mentions" },
   { key: "date", label: "Date", description: "Today, tomorrow or a calendar day", icon: "▧", aliases: ["calendar", "today", "tomorrow", "due"], command: "dates" },
   { key: "emoji", label: "Emoji", description: "Insert one glyph", icon: "☺", aliases: ["smiley", "glyph", "symbol"], command: "emoji" },
+  { key: "import-markdown", label: "Import Markdown…", description: "Turn a Markdown file into blocks", icon: "M↓", aliases: ["md", "markdown", "import"], command: "importMarkdown" },
 ];
 
 export const CHART_ITEM = { key: "chart", label: "Chart", description: "A bar or line chart from a table", icon: "📊", aliases: ["graph", "plot", "bar", "line"], insert: "chart" };

@@ -585,6 +585,7 @@ class Chrome {
       { key: "titleIcon", label: "Add icon", icon: "\u263A", run: (view) => runMenuCommand(view, "titleIcon") },
       { key: "titleCover", label: "Add cover", icon: "\u25A4", run: (view) => runMenuCommand(view, "titleCover") },
       { key: "exportHtml", label: "Export reading copy", icon: "\u21E9", run: (view) => runMenuCommand(view, "exportHtml") },
+      { key: "exportMarkdown", label: "Export as Markdown", icon: "M\u21E9", run: (view) => runMenuCommand(view, "exportMarkdown") },
     ];
   }
 
