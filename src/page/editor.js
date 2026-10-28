@@ -139,8 +139,8 @@ ${INDENTS.map((n) => `:where(article[data-page], .page-editor) .page-li[data-ind
 .page-tool { display: inline-flex; align-items: center; justify-content: center; min-width: 28px; height: 28px; padding: 0 6px; border: 0; border-radius: 5px; background: none; color: inherit; font: 500 13px/1 var(--page-font); cursor: pointer; }
 .page-tool:hover, .page-tool[aria-pressed="true"] { background: var(--page-pop-hover); }
 .page-tool-turn { gap: 4px; padding: 0 8px; }
-/* The phone's fourth control: everything the narrow bar folds away. */
-.page-tool-more { display: none; }
+/* The phone's fourth control folds away everything the narrow bar hides; on a desktop it
+   holds what has no button of its own (colors, icon and cover, the exports). */
 .page-tool-sep { width: 1px; height: 16px; margin: 0 3px; background: currentColor; opacity: 0.5; }
 .page-safe-probe { position: fixed; left: 0; bottom: 0; width: 0; height: 0; padding-bottom: env(safe-area-inset-bottom); visibility: hidden; pointer-events: none; }
 .page-plus { position: absolute; z-index: 2; top: calc(var(--page-plus-top, 0px) - var(--page-plus-size) / 2); left: calc(var(--page-plus-left, 0px) - var(--page-plus-size) - 12px); width: var(--page-plus-size); height: var(--page-plus-size); display: grid; place-items: center; padding: 0; cursor: pointer; }

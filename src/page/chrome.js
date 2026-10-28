@@ -571,15 +571,16 @@ class Chrome {
   // Everything the phone toolbar folds away: the rest of the formatting, and the
   // block actions the desktop menu carries. The move commands are the same ones.
   moreItems() {
-    const tools = TOOLS.filter(([name]) => !PHONE_TOOLS.has(name))
-      .map(([name, label]) => ({ key: name, label, icon: ICONS[name], run: (view) => runMark(view, name) }));
+    const phone = this.isPhone();
+    const tools = phone ? TOOLS.filter(([name]) => !PHONE_TOOLS.has(name))
+      .map(([name, label]) => ({ key: name, label, icon: ICONS[name], run: (view) => runMark(view, name) })) : [];
     const actions = ACTION_ITEMS.filter((a) => MORE_ACTIONS.has(a.key)).map((a) => ({ ...a, blocks: true }));
     return [
       ...tools,
       { key: "underline", label: "Underline", icon: "U", hint: `${MOD}u`, run: (view, chrome) => nativeMenu(view, chrome, "underline") },
       { key: "text_color", label: "Text color", icon: "A", hint: "\u203a", run: (view, chrome) => nativeMenu(view, chrome, "text_color") },
       { key: "highlight", label: "Highlight", icon: "\u25A0", hint: "\u203a", run: (view, chrome) => nativeMenu(view, chrome, "highlight") },
-      { key: "turn", label: "Turn into", icon: "\u21bb", run: (view, chrome) => chrome.openMenu("turn", chrome.more) },
+      ...(phone ? [{ key: "turn", label: "Turn into", icon: "\u21bb", run: (view, chrome) => chrome.openMenu("turn", chrome.more) }] : []),
       { key: "insert", label: "Insert", icon: "+", run: (view, chrome) => chrome.openMenu("insert", chrome.more, null, null, view.state.doc.child(chrome.blockIndex()).attrs.id) },
       ...actions,
       { key: "titleIcon", label: "Add icon", icon: "\u263A", run: (view) => runMenuCommand(view, "titleIcon") },
