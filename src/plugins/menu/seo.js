@@ -709,7 +709,10 @@ export function open() {
   // A live entry commits edit without this page going anywhere, so the sheet's own
   // read-only layout has to follow the mode rather than the mode it opened in.
   function followMode() {
-    if (!closed) layout();
+    if (closed) return;
+    layout();
+    // Uploads load with edit, so a sheet opened in view asks again once edit is live.
+    if (!uploadAvailable) checkUploads();
   }
 
   function close() {

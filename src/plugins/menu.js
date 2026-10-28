@@ -274,6 +274,8 @@ function mount() {
   edit.addEventListener("click", async () => {
     if (busy) return;
     const previous = edit.getAttribute("aria-checked");
+    // Disabling the focused switch drops focus to the body; it goes back once the switch is done.
+    const hadFocus = document.activeElement === edit;
     const next = currentMode() === "edit" ? "view" : "edit";
     busy = true;
     edit.setAttribute("aria-busy", "true");
@@ -289,6 +291,7 @@ function mount() {
     busy = false;
     edit.removeAttribute("aria-busy");
     edit.disabled = false;
+    if (hadFocus && edit.isConnected && document.activeElement === document.body) edit.focus();
     if (result && result.ok === false) {
       edit.setAttribute("aria-checked", previous);
       const text = modeRefusalText(result);

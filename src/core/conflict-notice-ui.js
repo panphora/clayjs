@@ -1082,6 +1082,8 @@ function init() {
   document.addEventListener("clay:undo-kept", onUndoKept, { signal });
   if (ledger()?.size) schedule();
   refreshRecovered();
+  // The undo plugin is attached during boot, after this notice can start: ask again once it is.
+  Promise.resolve(window.clay?.ready).catch(() => {}).then(() => { if (!signal.aborted) refreshRecovered(); });
 }
 
 // The shell (conflict-notice.js) asks for this file only when there is something to

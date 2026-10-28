@@ -119,7 +119,9 @@ export function set(patch, { replace = false } = {}) {
     history.replaceState(history.state, "", bare + hash);
     apply();
   } else if (hash) {
+    // Applied now, as the other branches are: the hashchange that follows finds nothing new.
     location.hash = hash;
+    apply();
   } else {
     history.pushState(history.state, "", bare);
     apply();

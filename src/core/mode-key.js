@@ -114,7 +114,12 @@ if (!isDraftMode) {
   document.addEventListener("keydown", onKey);
   onDomReady(() => {
     if (!canEdit || mode !== "view" || document.querySelector("[clay-mode-toggle]")) return;
-    queueMicrotask(() => {
+    // The note needs clay.storage, which the loader attaches after the core wave.
+    const whenReady = (run) => {
+      if (window.clay?.storage) queueMicrotask(run);
+      else document.addEventListener("clay:ready", run, { once: true });
+    };
+    whenReady(() => {
       if (window.clay?.menu) return;
       const store = window.clay?.storage?.local;
       if (!store || store.get("mode-note")) return;
