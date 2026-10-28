@@ -6,9 +6,10 @@
  * The counterexample driver: a schedule, run against the real view/edit switch.
  *
  * A case boots a fixture's page through the production loader and modules, then applies
- * its steps. Only transport, chunk imports and the clock are the driver's: a hold parks
- * one boundary of the machinery until the case releases it, a settle advances fake time,
- * and the trace records what actually happened, in order, with no wall clock in it.
+ * its steps. Only transport, chunk imports (and, under the corpus command, a lazy import
+ * where the module loads) and the clock are the driver's: a hold parks one boundary of the
+ * machinery until the case releases it, a settle advances fake time, and the trace records
+ * what actually happened, in order, with no wall clock in it.
  *
  * A schedule that cannot mean anything (an unknown op, an unsupported boundary, a release
  * of something never held, a requirement the run never reached) is invalid, never passed.
@@ -37,10 +38,10 @@ async function hostHarness() {
   return harness;
 }
 
-const BOUNDARIES = new Set(["save.capture", "save.request", "save.response", "chunk.import", "metadata"]);
+const BOUNDARIES = new Set(["save.capture", "save.request", "save.response", "chunk.import", "lazy.import", "metadata"]);
 // save.capture is observed, not held: the snapshot is taken by the code that decides to
 // take it, so a case can only see that it happened.
-const HOLDABLE = new Set(["save.request", "save.response", "chunk.import", "metadata"]);
+const HOLDABLE = new Set(["save.request", "save.response", "chunk.import", "lazy.import", "metadata"]);
 
 const SAVE_RESULTS = ["accepted", "rejected", "unknown"];
 const CHUNK_RESULTS = ["loaded", "failed"];
@@ -61,12 +62,19 @@ const STEP_KEYS = {
   reload: [],
   click: ["target"],
   storage: ["mode"],
+  flush: ["timeoutMs"],
 };
 const PEER_KEYS = new Set(["value"]);
 
 const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const CHUNK_PATH = /^(?:core|lib|attrs|plugins|sync)\/[a-z0-9./-]+\.js$/;
 const CHUNK_PREFIX = "chunk.import:";
+// A module the save path imports on first use, outside the loader's map: the preparer a
+// large page's first sliced save loads, the style stripper, the source map's session. Its
+// download is as slow as the network makes it, and only a runner that can park a module
+// load (the corpus command) can hold one.
+const LAZY_PREFIX = "lazy.import:";
+const LAZY_PATH = /^(?:core|lib|source)\/[a-z0-9./-]+\.js$/;
 const PEER_SETTLE_MS = 3000;
 // The modes a run can end in: view and edit on a host page, draft on a visitor's.
 const MODES = new Set(["view", "edit", "draft"]);
@@ -259,6 +267,12 @@ function validateSteps(json, errors, fail) {
         if (!["ok", "full", "off"].includes(step.mode)) fail("bad-step-field", `${at}.mode`, "mode is ok, full or off");
         break;
       }
+      case "flush": {
+        if (step.timeoutMs !== undefined && (!Number.isSafeInteger(step.timeoutMs) || step.timeoutMs < 0)) {
+          fail("bad-step-field", `${at}.timeoutMs`, "timeoutMs is the flush's own deadline in milliseconds");
+        }
+        break;
+      }
       case "cycles": {
         if (!Number.isSafeInteger(step.count) || step.count < 1) {
           fail("bad-step-field", `${at}.count`, "count is how many enter/leave cycles to run");
@@ -322,7 +336,7 @@ function validateSteps(json, errors, fail) {
           break;
         }
         held.delete(boundary);
-        const results = baseOf(boundary) === "chunk.import" ? CHUNK_RESULTS : SAVE_RESULTS;
+        const results = baseOf(boundary) === "chunk.import" || baseOf(boundary) === "lazy.import" ? CHUNK_RESULTS : SAVE_RESULTS;
         if (!results.includes(step.result)) {
           fail("bad-release-result", `${at}.result`, `a ${baseOf(boundary)} release is ${results.join(", ")}`);
         }
@@ -348,6 +362,13 @@ function boundaryOf(step, at, fail) {
     const path = step.boundary.slice(CHUNK_PREFIX.length);
     if (!step.boundary.startsWith(CHUNK_PREFIX) || !CHUNK_PATH.test(path)) {
       fail("boundary-needs-path", `${at}.boundary`, `a chunk hold names its path, as ${CHUNK_PREFIX}core/save.js`);
+      return null;
+    }
+  }
+  if (base === "lazy.import") {
+    const path = step.boundary.slice(LAZY_PREFIX.length);
+    if (!step.boundary.startsWith(LAZY_PREFIX) || !LAZY_PATH.test(path)) {
+      fail("boundary-needs-path", `${at}.boundary`, `a lazy hold names its path, as ${LAZY_PREFIX}core/save-prepare.js`);
       return null;
     }
   }
@@ -458,7 +479,20 @@ export async function runCase(json) {
   };
 
   const fixture = specOf(json);
-  const host = createHost(record, fixture.host ?? {});
+  // Which session a request left in, read off the page the moment it is sent: the mode
+  // generation and phase the page reports, and whether the save module was admitting an
+  // ordinary save then, so the oracle can tell a write inside a closed exit from one an
+  // open session made.
+  let saveModule = null;
+  const stamp = () => {
+    const state = window.clay?.modeLifecycle?.state;
+    return {
+      generation: state?.generation ?? null,
+      phase: state?.phase ?? null,
+      open: typeof saveModule?.savesAdmitted === "function" ? saveModule.savesAdmitted() : null,
+    };
+  };
+  const host = createHost(record, fixture.host ?? {}, { stamp });
   const cleanups = [];
   // A schedule can reach a page the case did not describe: an entry answered by a reload is
   // answered by a document a browser would replace, so nothing this driver could type into
@@ -542,6 +576,29 @@ export async function runCase(json) {
     };
     await holdChunks();
 
+    // A lazy import is parked where the module loads, not in the loader's map: the runner
+    // routes a held path through this gate, and this is the only place it is answered.
+    const lazyHeld = new Set();
+    if (host_.lazyImports === true) {
+      globalThis.__clayLazyHeld = lazyHeld;
+      globalThis.__clayLazyGate = async (path) => {
+        const boundary = `${LAZY_PREFIX}${path}`;
+        record("lazy-import-start", { path });
+        if (host.held(boundary)) {
+          const result = await host.wait(boundary);
+          if (result === "failed") {
+            record("lazy-import-done", { path, result: "failed" });
+            throw new Error(`the case failed the import of ${path}`);
+          }
+        }
+        record("lazy-import-done", { path, result: "loaded" });
+      };
+      cleanups.push(() => {
+        delete globalThis.__clayLazyHeld;
+        delete globalThis.__clayLazyGate;
+      });
+    }
+
     host_.startClock();
     cleanups.push(() => host_.stopClock());
 
@@ -563,6 +620,11 @@ export async function runCase(json) {
     let phase = clay.modeLifecycle.state.phase;
     let mode = clay.mode;
     const observe = () => {
+      if (!saveModule && typeof clay.save?.flush === "function") {
+        runtimeImport("src/core/save.js").then((module) => {
+          saveModule = module;
+        });
+      }
       const nextPhase = clay.modeLifecycle.state.phase;
       if (nextPhase !== phase) {
         phase = nextPhase;
@@ -583,9 +645,14 @@ export async function runCase(json) {
         errors.push({ code: "unknown-chunk", path: `steps[${index}].boundary`, message: `no module is named "${path}"` });
       }
     }
+    for (const [index, step] of json.steps.entries()) {
+      if (step.op !== "hold" || !step.boundary.startsWith(LAZY_PREFIX) || host_.lazyImports === true) continue;
+      errors.push({ code: "unsupported-boundary", path: `steps[${index}].boundary`, message: "this runner cannot hold a lazy import: the corpus command can" });
+    }
     if (errors.length) return { status: "invalid", trace, result: { errors } };
 
     let reloading = false;
+    let flushes = 0;
     const precondition = (index, message) => violations.push({ code: "precondition", path: `steps[${index}]`, message });
 
     const lanes = fixture.lanes
@@ -720,6 +787,23 @@ export async function runCase(json) {
           record("click", { target: step.target });
           break;
         }
+        case "flush": {
+          // The page's own `clay.save.flush()`, started and watched like a transition: the
+          // call is stamped with the session it was made in, and its answer with its number.
+          const flush = clay.save?.flush;
+          if (typeof flush !== "function") {
+            record("flush-refused", { reason: "the page has no clay.save.flush" });
+            break;
+          }
+          const number = ++flushes;
+          const { generation, phase } = stamp();
+          record("flush", { flush: number, generation, phase, mode: clay.mode });
+          Promise.resolve(flush(step.timeoutMs === undefined ? {} : { timeoutMs: step.timeoutMs })).then(
+            (answer) => record("flush-settled", { flush: number, state: answer?.state ?? null }),
+            (error) => record("flush-settled", { flush: number, state: error?.state ?? "threw" }),
+          );
+          break;
+        }
         case "storage": {
           if (window.__storageSwitch) window.__storageSwitch.mode = step.mode;
           record("storage", { mode: step.mode });
@@ -727,11 +811,13 @@ export async function runCase(json) {
         }
         case "hold": {
           host.hold(step.boundary);
+          if (step.boundary.startsWith(LAZY_PREFIX)) lazyHeld.add(step.boundary.slice(LAZY_PREFIX.length));
           record("hold", { boundary: step.boundary });
           break;
         }
         case "release": {
           host.release(step.boundary, step.result);
+          if (step.boundary.startsWith(LAZY_PREFIX)) lazyHeld.delete(step.boundary.slice(LAZY_PREFIX.length));
           record("release", { boundary: step.boundary, result: step.result });
           break;
         }
@@ -767,6 +853,7 @@ export async function runCase(json) {
             break;
           }
           clay = booted.clay;
+          saveModule = null;
           await holdChunks();
           await host_.startClock();
           phase = clay.modeLifecycle.state.phase;

@@ -27,12 +27,13 @@ const ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const CLI = path.join(ROOT, "scripts/mode-counterexamples.mjs");
 const CASES = path.join(ROOT, "tests/mode-counterexamples/cases");
 const CASE = path.join(CASES, "bytes-etag-pairing.json");
-// The cases a selftest of the whole corpus takes six minutes to reach. These four carry
-// all three defects the corpus can feel — a write the exit never made, a view announced
-// before the save was accepted and a listener a cycle keeps — so one minute proves the
-// planting and the verdict for those. The three it cannot feel yet are named below.
-const SUBSET = ["canonical-freeze", "cycles-no-growth", "cycles-one-write", "enter-leave-one-write"];
-const UNFELT = ["drop-generation-checks", "rebaseline-current-dom", "route-draft-to-host"];
+// The cases a selftest of the whole corpus takes six minutes to reach. These five carry
+// four of the defects the corpus can feel — a write the exit never made, a view announced
+// before the save was accepted, a listener a cycle keeps and a flush that wrote inside a
+// later generation's exit — so one minute proves the planting and the verdict for those.
+// The two only the rest of the corpus feels are named below.
+const SUBSET = ["canonical-freeze", "cycles-no-growth", "cycles-one-write", "enter-leave-one-write", "stale-flush-generation"];
+const UNFELT = ["rebaseline-current-dom", "route-draft-to-host"];
 const REBASELINE = "rebaseline-current-dom";
 // The fixtures a sweep draws from when a seed must stay cheap: a host page boots in well
 // under a second, while a draft page and an edit-mode boot each spend a real timer.

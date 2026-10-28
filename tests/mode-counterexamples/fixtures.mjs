@@ -46,6 +46,9 @@ const PAGE = {
   path: "/notes.html",
 };
 
+// Past SLICED_SAVE_MIN_BYTES (300 KiB in src/core/save-slices.js) once saved.
+const LARGE_PAGE = { ...PAGE, body: `${PAGE.body}<aside>${"x".repeat(310 * 1024)}</aside>` };
+
 // A document whose authored attributes and `clay="freeze"` region are its own: entering
 // and leaving edit must hand back these exact bytes.
 const FREEZE_PAGE = {
@@ -136,6 +139,9 @@ export const FIXTURES = {
   "persist-host": { page: PAGE, lanes: false },
   // The same page, plus tab B over a shared local channel.
   "lane-peer": { page: PAGE, lanes: true },
+  // The same page with enough bytes after the article that every save after its first
+  // prepares across tasks, and so loads the save preparer on first use.
+  "large-host": { page: LARGE_PAGE, lanes: false },
   // The same page with the unsent-draft plugin and a field outside the save domain.
   "unsent-host": { page: UNSENT_PAGE, lanes: false },
   // A page whose entry loads the source plugin, so a case can hold that chunk.
@@ -263,8 +269,10 @@ function abortError(message) {
  * the request until the case releases it.
  *
  * @param {(kind: string, detail: object) => void} record
+ * @param {object} [options] - the host's own answers
+ * @param {{stamp?: () => object}} [observer] - what the page reports as each save leaves
  */
-export function createHost(record, { extensions = ["conditional"], answerMeta = false, served = null } = {}) {
+export function createHost(record, { extensions = ["conditional"], answerMeta = false, served = null } = {}, { stamp = () => ({}) } = {}) {
   const posts = [];
   const holds = new Map();
   // The document this host serves: the one it was given, replaced by every body it
@@ -360,6 +368,8 @@ export function createHost(record, { extensions = ["conditional"], answerMeta = 
       return jsonResponse(204, "");
     }
     if (method === "POST") {
+      // Read before the body is, so the stamp is the page as it stood when the request left.
+      const at = stamp();
       const body = await bodyText(options.body);
       posts.push(body);
       const call = send({
@@ -371,7 +381,7 @@ export function createHost(record, { extensions = ["conditional"], answerMeta = 
         status: null,
         etag: null,
       });
-      record("save-request-sent", { path: url.pathname });
+      record("save-request-sent", { path: url.pathname, ...at });
       const result = await parkSave();
       const answer = saveAnswer(result);
       call.status = answer.status;

@@ -27,6 +27,7 @@ const PROPERTIES = [
   "unsaved-after-exit",
   "no-growth",
   "canonical-attributes",
+  "flush-generation",
 ];
 
 // A refusal that names no source is one whose work has no registry: a save whose fate is
@@ -406,6 +407,30 @@ function savedDocument(body) {
   }
 }
 
+// A plain `clay.save.flush()` writes under a permit for the generation that owned the page
+// when it was called, and the next generation's commit ends that permit: inside a later
+// generation's exit, where admission is closed, it admits nothing. So a flush that answers
+// "saved" made its own write in its own generation or while admission was open, and such a
+// request left between the call and the answer. The driver stamps each request with the
+// generation and the admission it left under; one whose admission it could not read is
+// never held against the flush.
+function flushGeneration(run, fail) {
+  const trace = run.trace ?? [];
+  for (const call of trace.filter((event) => event.kind === "flush")) {
+    const answer = trace.find((event) => event.kind === "flush-settled" && event.detail.flush === call.detail.flush);
+    if (answer?.detail.state !== "saved") continue;
+    const sent = trace.filter((event) => event.kind === "save-request-sent" && event.seq > call.seq && event.seq < answer.seq);
+    if (sent.some((event) => event.detail.generation === call.detail.generation || event.detail.open !== false)) continue;
+    const exits = [...new Set(sent.map((event) => event.detail.generation))].join(", ");
+    fail(
+      "flush-generation",
+      sent.length
+        ? `the flush called in generation ${call.detail.generation} answered saved, and every request before that answer left inside the closed exit of generation ${exits}`
+        : `the flush called in generation ${call.detail.generation} answered saved, and no request left between the call and that answer`,
+    );
+  }
+}
+
 function noGrowth(run, fail) {
   const readings = (run.trace ?? []).filter((event) => event.kind === "resources").map((event) => event.detail);
   if (readings.length < 2) return;
@@ -453,6 +478,7 @@ export function judge({ case: json, run, control = null } = {}) {
   unsavedAfterExit(run, fail);
   noGrowth(run, fail);
   canonicalAttributes(json, run, fail);
+  flushGeneration(run, fail);
 
   return { status: failures.length ? "failed" : "passed", failures };
 }

@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "id": "stale-flush-generation",
+  "fixture": "large-host",
+  "boot": { "mode": "view", "live": true, "destination": "host" },
+  "steps": [
+    { "op": "enter" },
+    { "op": "input", "target": "title", "value": "Saved once" },
+    { "op": "leave" },
+    { "op": "hold", "boundary": "lazy.import:core/save-prepare.js" },
+    { "op": "enter" },
+    { "op": "input", "target": "title", "value": "Taken back" },
+    { "op": "flush" },
+    { "op": "input", "target": "title", "value": "Saved once" },
+    { "op": "leave", "await": false },
+    { "op": "settle", "ms": 1000 },
+    { "op": "enter" },
+    { "op": "settle" },
+    { "op": "input", "target": "title", "value": "Next session" },
+    { "op": "leave", "await": false },
+    { "op": "release", "boundary": "lazy.import:core/save-prepare.js", "result": "loaded" },
+    { "op": "settle", "ms": 2000 }
+  ],
+  "requires": ["input-admitted", "save-request-sent", "lazy-import-done:core/save-prepare.js", "flush-settled"],
+  "expect": { "mode": "view", "writes": 2 }
+}

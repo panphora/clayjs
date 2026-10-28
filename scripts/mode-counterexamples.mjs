@@ -30,10 +30,11 @@
  * `fence` belongs to a later step and says so.
  */
 
-import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
+import { registerHooks } from "node:module";
 import { createHash } from "node:crypto";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import os from "node:os";
 import path from "node:path";
 import { validateCase } from "../tests/mode-counterexamples/driver.mjs";
@@ -295,6 +296,36 @@ function installClock(window) {
   return api;
 }
 
+// A lazy import a case holds is parked where the module loads: its resolution is routed
+// through a module that waits on the driver's gate and then re-exports the real one, so the
+// page receives the module it asked for, only later. Installed only for a run that holds
+// one, so every other case loads exactly as it always did.
+const LAZY_GATE = "clay-lazy-gate";
+
+function installLazyGate() {
+  const src = pathToFileURL(path.join(realpathSync(process.env.CLAY_COUNTEREXAMPLE_RUNTIME || ROOT), "src") + path.sep).href;
+  const lazyPath = (url) => (url.startsWith(src) ? url.slice(src.length) : null);
+  registerHooks({
+    resolve(specifier, context, nextResolve) {
+      const resolved = nextResolve(specifier, context);
+      const lazy = lazyPath(resolved.url);
+      if (!lazy || !globalThis.__clayLazyHeld?.has(lazy) || String(context.parentURL ?? "").endsWith(`?${LAZY_GATE}`)) return resolved;
+      return { ...resolved, url: `${resolved.url}?${LAZY_GATE}`, shortCircuit: true };
+    },
+    load(url, context, nextLoad) {
+      if (!url.endsWith(`?${LAZY_GATE}`)) return nextLoad(url, context);
+      const real = url.slice(0, -LAZY_GATE.length - 1);
+      return {
+        format: "module",
+        source: `await globalThis.__clayLazyGate(${JSON.stringify(lazyPath(real))});\nexport * from ${JSON.stringify(real)};\n`,
+        shortCircuit: true,
+      };
+    },
+  });
+}
+
+const holdsLazy = (json) => (json?.steps ?? []).some((step) => step?.op === "hold" && String(step.boundary ?? "").startsWith("lazy.import:"));
+
 async function runOne(flags) {
   const dir = flags.cases;
   const files = readCases(dir);
@@ -307,6 +338,8 @@ async function runOne(flags) {
     : loaded.filter((entry) => target === undefined || entry.file === target || entry.name === target);
   if (!chosen.length) fail(`check: no case named "${target}" in "${dir}"`);
 
+  const lazyImports = chosen.some((entry) => holdsLazy(entry.json) || holdsLazy(byId.get(entry.json.control)?.json));
+  if (lazyImports) installLazyGate();
   const { window } = await browserEnvironment();
   const clock = installClock(window);
   const { setHarness } = await import("../tests/mode-counterexamples/driver.mjs");
@@ -317,6 +350,7 @@ async function runOne(flags) {
     startClock: () => clock.install(),
     stopClock: () => clock.stop(),
     advance: (ms) => clock.advance(ms),
+    lazyImports,
   });
 
   const results = [];

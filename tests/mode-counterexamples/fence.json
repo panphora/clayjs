@@ -203,6 +203,11 @@
       "status": "known-failing"
     },
     {
+      "path": "tests/mode-counterexamples/cases/stale-flush-generation.json",
+      "status": "pass",
+      "runner": "cli"
+    },
+    {
       "path": "tests/mode-counterexamples/cases/stuck-parked-flag-trigger-save.json",
       "status": "pass"
     },

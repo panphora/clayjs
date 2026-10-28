@@ -47,6 +47,16 @@ function assertKnown(outcome, verdict, knownFailing) {
 const cases = loadCases();
 const byId = new Map(cases.map((json) => [json.id, json]));
 
+// A case the fence files under the corpus command holds what only that runner can hold (a
+// lazy import parked where the module loads), so it is judged in a process of its own.
+const FENCE = JSON.parse(readFileSync(new URL("../mode-counterexamples/fence.json", import.meta.url), "utf8"));
+const CLI_ONLY = new Set(
+  FENCE.cases
+    .filter((entry) => entry.runner === "cli" && path.posix.dirname(entry.path) === "tests/mode-counterexamples/cases")
+    .map((entry) => path.posix.basename(entry.path)),
+);
+const cliCase = (json) => CLI_ONLY.has(`${json.id}.json`);
+
 test("the corpus is not empty and every control it names is in it", () => {
   expect(cases.length).toBeGreaterThanOrEqual(7);
   for (const json of cases) {
@@ -58,10 +68,22 @@ test("the corpus is not empty and every control it names is in it", () => {
 
 test("every case runs through the driver and the oracle, and holds up", async () => {
   const runs = new Map();
-  for (const json of cases) runs.set(json.id, await runCase(json));
+  for (const json of cases) {
+    if (!cliCase(json)) runs.set(json.id, await runCase(json));
+  }
 
   const lines = [];
   for (const json of cases) {
+    if (cliCase(json)) {
+      const verdict = cliVerdict(fileURLToPath(DIR), `${json.id}.json`);
+      lines.push(`${json.id}: ${verdict.status}${json.knownFailing ? " (known)" : ""} (corpus command)`);
+      if (json.knownFailing) assertKnown(null, verdict, json.knownFailing);
+      else {
+        expect(verdict.failures).toEqual([]);
+        expect(verdict.status).toBe("passed");
+      }
+      continue;
+    }
     const run = runs.get(json.id);
     const control = json.control ? { case: byId.get(json.control), run: runs.get(json.control) } : null;
     const verdict = judge({ case: json, run, control });
@@ -109,7 +131,11 @@ function round3Files() {
 }
 
 function round3Verdict(name) {
-  const child = spawnSync(process.execPath, [CLI, "check", "--cases", ROUND3_DIR, "--case-file", path.join(ROUND3_DIR, name), "--json"], {
+  return cliVerdict(ROUND3_DIR, name);
+}
+
+function cliVerdict(dir, name) {
+  const child = spawnSync(process.execPath, [CLI, "check", "--cases", dir, "--case-file", path.join(dir, name), "--json"], {
     encoding: "utf8",
     env: { ...process.env, NODE_OPTIONS: [process.env.NODE_OPTIONS, "--experimental-vm-modules"].filter(Boolean).join(" ") },
     timeout: 180000,
