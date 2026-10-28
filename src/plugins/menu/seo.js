@@ -685,6 +685,9 @@ export function open() {
     }
     run(LABEL, () => applyHead(document, marker ? { ...wanted, titleMode: marker } : wanted));
     close();
+    // Apply is an explicit save of these settings: a page that does not autosave its markup
+    // (the page editor saves only its own stores) would otherwise keep them until edit ends.
+    if (!document.documentElement.hasAttribute("autosave") && typeof window.clay?.save === "function") window.clay.save();
   }
 
   function applyUploadVisibility() {
