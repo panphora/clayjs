@@ -1,3 +1,4 @@
+@font-face { font-family: "IBM Plex Mono"; font-style: normal; font-weight: 600; font-display: swap; src: url("fonts/ibm-plex-mono-latin-600-normal.woff2") format("woff2"); }
 :root {
   --paper: #F1EFEA;
   --sheet: #FBFAF7;
@@ -52,17 +53,14 @@ a:hover { color: var(--glaze-deep); }
 /* ---------- nav ---------- */
 .nav {
   max-width: 1060px; margin: 0 auto; padding: 22px 24px 0;
-  display: flex; align-items: baseline; gap: 26px;
+  display: flex; align-items: center; gap: 26px;
 }
 .nav .wordmark {
-  font-family: var(--mono); font-size: 16px; font-weight: 700;
+  display: inline-flex; align-items: center; gap: 8px; flex: none;
+  font: 700 17px/1 "IBM Plex Mono", ui-monospace, monospace;
   color: var(--ink); text-decoration: none; letter-spacing: -0.02em;
 }
-.nav .wordmark .js { color: var(--glaze); }
-.nav .wordmark .tm {
-  font-size: 9px; font-weight: 600; color: var(--ink-soft);
-  vertical-align: super; margin-left: 1px; user-select: none;
-}
+.nav .wordmark img { display: block; width: 35px; height: 26px; flex: none; }
 
 .nav .links {
   margin-left: auto; display: flex; flex: 1; flex-wrap: wrap;
