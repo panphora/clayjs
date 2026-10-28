@@ -326,11 +326,20 @@ function downloadName(loc) {
   return /\.html?$/i.test(name) ? name : `${name}.html`;
 }
 
-export function downloadCopy({ clay, doc = document, loc = location } = {}) {
-  const getHTML = clay && clay.getHTML;
-  if (typeof getHTML !== "function" || typeof URL === "undefined" || typeof URL.createObjectURL !== "function") return false;
+// A view-mode tab has no save capture, and edits nothing, so the copy is the stored file
+// this upgrade is about to replace. Only a host without version history asks for it.
+export async function pageBytes(clay, { loc = location, fetchFn = (url, init) => fetch(url, init) } = {}) {
+  if (typeof clay.getHTML === "function") return clay.getHTML();
+  const res = await fetchFn(loc.href, { cache: "no-store", credentials: "same-origin" });
+  if (!res.ok) throw new Error(`copy fetch ${res.status}`);
+  return res.text();
+}
+
+export async function downloadCopy({ clay, doc = document, loc = location, fetchFn } = {}) {
+  if (typeof URL === "undefined" || typeof URL.createObjectURL !== "function") return false;
   try {
-    const url = URL.createObjectURL(new Blob([getHTML()], { type: "text/html" }));
+    const bytes = await pageBytes(clay, { loc, fetchFn });
+    const url = URL.createObjectURL(new Blob([bytes], { type: "text/html" }));
     const a = doc.createElement("a");
     a.setAttribute("clay", "editor-ui");
     a.href = url;
@@ -403,8 +412,8 @@ export async function start(update, options = {}) {
   };
 
   if (download) {
-    download.addEventListener("click", () => {
-      if (downloadCopy({ clay, doc, loc: options.loc })) {
+    download.addEventListener("click", async () => {
+      if (await downloadCopy({ clay, doc, loc: options.loc, fetchFn: options.fetchFn })) {
         agree.disabled = false;
         status.textContent = "Your copy was downloaded.";
       } else {

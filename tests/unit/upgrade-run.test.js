@@ -302,9 +302,45 @@ describe("the offer", () => {
     expect(ui.upgrade.disabled).toBe(true);
 
     ui.download.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(clay.getHTML).toHaveBeenCalledTimes(1);
     expect(anchor).toHaveBeenCalledTimes(1);
+    expect(ui.upgrade.disabled).toBe(false);
+    ui.close();
+  });
+
+  test("a view-mode host without history downloads the stored file, then unlocks Upgrade", async () => {
+    loadKanban();
+    const html = newerKanban();
+    const clay = setupClay({ host: { versions: Promise.resolve(false) } });
+    delete clay.getHTML;
+    const anchor = jest.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    const blobs = [];
+    const createObjectURL = URL.createObjectURL;
+    URL.createObjectURL = (blob) => {
+      blobs.push(blob);
+      return createObjectURL(blob);
+    };
+
+    const source = sourceFetcher(html);
+    const stored = "<!DOCTYPE html><html><body>the stored file</body></html>";
+    const fetchFn = jest.fn(async (url, init) => (url === location.href ? { ok: true, status: 200, text: async () => stored } : source(url, init)));
+    const ui = await startUpgrade(updateFor(html), { clay, fetchFn, doc: document, loc: location });
+
+    expect(ui.download).not.toBeNull();
+    expect(ui.upgrade.disabled).toBe(true);
+
+    ui.download.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    URL.createObjectURL = createObjectURL;
+
+    expect(anchor).toHaveBeenCalledTimes(1);
+    expect(blobs.length).toBe(1);
+    const bytes = blobs[0].__code;
+    expect(bytes).toBe(stored);
+    expect(fetchFn).toHaveBeenCalledWith(location.href, { cache: "no-store", credentials: "same-origin" });
+    expect(ui.status.textContent).toBe("Your copy was downloaded.");
     expect(ui.upgrade.disabled).toBe(false);
     ui.close();
   });
