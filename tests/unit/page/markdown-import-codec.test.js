@@ -2,6 +2,7 @@ import "../../../src/vendor/marked.vendor.js";
 import { Marked } from "../../../src/vendor/marked.vendor.js";
 import { MAX_BLOCKS, MAX_BYTES, MAX_DEPTH, MarkdownImportError, importMarkdownTokens } from "../../../src/page/import-markdown.js";
 import { blockMap, docFromBlocks, orderedIds } from "../../../src/page/model.js";
+import { fragmentCleaner, project, renderModel } from "../../../src/page/projection.js";
 import { schema } from "../../../src/page/schema.js";
 import { unitsOf, unpackMarks } from "../../../src/page/inline.js";
 
@@ -93,7 +94,7 @@ test("every supported token type arrives with a nonzero count and becomes its ow
     expect([type, found.filter((t) => t === type).length > 0]).toEqual([type, true]);
   }
   expect(found).toContain("preserved");
-  expect(unsupported.map((entry) => entry.type)).toEqual(["def"]);
+  expect(unsupported.map((entry) => entry.type)).toEqual(["HTML block cleaned", "def"]);
 
   const [first, second] = inorder(blocks).filter((block) => block.t === "paragraph");
   expect(first.c).toBe("A paragraph with strong, emphasis, struck and inline code,\na link, an ");
@@ -156,11 +157,11 @@ test("only the addresses the editor stores become links and images", () => {
   ]);
 });
 
-test("raw HTML stays inert: a block is preserved as written and inline markup is text", () => {
+test("raw HTML stays inert: a block is preserved cleaned and inline markup is text", () => {
   const { blocks } = convert('<div class="note"><b>bold</b> &amp; <script>alert(1)</script></div>\n\nA <b>bold</b> word with <img src=x onerror=alert(1)> in it.\n');
   const [preserved, paragraph] = inorder(blocks);
   expect(preserved.t).toBe("preserved");
-  expect(preserved.html).toBe('<div class="note"><b>bold</b> &amp; <script>alert(1)</script></div>');
+  expect(preserved.html).toBe('<div class="note"><b>bold</b> &amp; </div>');
   expect(paragraph.t).toBe("paragraph");
   expect(paragraph.c).toBe("A <b>bold</b> word with <img src=x onerror=alert(1)> in it.");
   expect(keys(paragraph).every((key) => key === "")).toBe(true);
@@ -168,9 +169,21 @@ test("raw HTML stays inert: a block is preserved as written and inline markup is
   const doc = docFromBlocks(schema, blocks);
   expect(doc.child(0).type.name).toBe("preserved");
   expect(doc.child(1).type.name).toBe("paragraph");
-  expect(doc.child(0).attrs.html).toContain("<script>alert(1)</script>");
+  expect(doc.child(0).attrs.html).not.toContain("<script");
   expect(doc.child(1).textContent).toBe("A <b>bold</b> word with <img src=x onerror=alert(1)> in it.");
   expect(doc.child(0).childCount).toBe(0);
+});
+
+test("imported HTML is cleaned before it is kept: no script, no handler, and it is named", () => {
+  const { blocks, unsupported } = convert('<img src="x" onerror="alert(1)">\n\n<script>alert(1)</script>\n');
+  expect(kinds(blocks)).toEqual(["preserved", "preserved"]);
+  const html = renderModel(project(blocks), { fallbackOf: () => "", clean: fragmentCleaner(document) });
+  expect(html).not.toContain("onerror");
+  expect(html).not.toContain("<script");
+  expect(html).toContain('<img src="x">');
+  expect(unsupported.map((entry) => entry.type)).toEqual(["HTML block cleaned", "HTML block cleaned"]);
+  expect(unsupported[0].text).toBe('<img src="x" onerror="alert(1)">');
+  expect(unsupported[1].text).toContain("<script>alert(1)</script>");
 });
 
 test("an unsupported token is kept as a literal block and named, never dropped", () => {
@@ -205,6 +218,24 @@ test("ids are fresh, unique and ordered, one set per import", () => {
   expect([...positions].sort()).toEqual(positions);
   expect(new Set(positions).size).toBe(positions.length);
   expect(kinds(first)).toEqual(["table", "list_item", "list_item", "quote"]);
+});
+
+test("a loose list keeps its marks, and its paragraphs are split by a hard break", () => {
+  const loose = convert("- **Bold** and [a link](https://x.test)\n\n- Second item\n");
+  const [first, second] = inorder(loose.blocks);
+  expect(first.t).toBe("list_item");
+  expect(first.c).toBe("Bold and a link");
+  expect(first.c).not.toContain("**");
+  expect(keyAt(first, "Bold")).toBe("b");
+  expect(keyAt(first, "link")).toBe('a["https://x.test"]');
+  expect(second.c).toBe("Second item");
+
+  const several = convert("- First para\n\n  Second para\n- next\n");
+  const [item] = inorder(several.blocks);
+  expect(item.t).toBe("list_item");
+  expect(item.c).toBe("First para\uFFFCSecond para");
+  expect(keys(item)["First para".length]).toBe('@{"type":"hard_break"}');
+  expect(converted(several.blocks)).toEqual(normalized(several.blocks));
 });
 
 test("nested ownership: list indent under its item, quotes flat and in order", () => {

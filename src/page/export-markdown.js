@@ -103,10 +103,16 @@ function inline(item, note) {
       piece = codeSpan(raw);
       for (const name of ["strong", "em", "strike"]) if (codes[name]) note(name);
     } else {
-      piece = escText(raw);
-      if (codes.em) piece = `*${piece}*`;
-      if (codes.strong) piece = `**${piece}**`;
-      if (codes.strike) piece = `~~${piece}~~`;
+      const text = escText(raw);
+      const lead = text.slice(0, text.length - text.trimStart().length);
+      const trail = text.slice(text.trimEnd().length);
+      let core = text.slice(lead.length, text.length - trail.length);
+      if (core) {
+        if (codes.em) core = `*${core}*`;
+        if (codes.strong) core = `**${core}**`;
+        if (codes.strike) core = `~~${core}~~`;
+      }
+      piece = lead + core + trail;
     }
     if (href) piece = `[${piece}](${hrefText(href)})`;
     out += piece;

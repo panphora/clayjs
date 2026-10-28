@@ -227,6 +227,19 @@ test("the report is shown before anything downloads, and the file is the page's 
   expect(text).toContain('data-type="toc"');
 });
 
+test("emphasis reaches a word and not the space beside it", () => {
+  const text = "hello world";
+  const padded = " padded ";
+  const out = exportMarkdown({
+    b0: { t: "paragraph", c: text, m: runsOf([...text].map((_, i) => (i < 6 ? "b" : ""))), pos: "B" },
+    b1: { t: "paragraph", c: padded, m: runsOf([...padded].map((_, i) => (i > 0 && i < 7 ? "i" : ""))), pos: "C" },
+  });
+  expect(out.text).toContain("**hello** world\n");
+  expect(out.text).not.toContain("**hello **");
+  expect(out.text).toContain(" *padded* ");
+  expect(out.losses).toEqual([]);
+});
+
 test("a Markdown file of the supported subset exports back to the same text and structure", () => {
   const SOURCE = `# Title
 
@@ -286,6 +299,15 @@ test("a peer edit while the report is open does not change the file", async () =
   const text = await blobText(blobs[0]);
   expect(text).toBe("# Title\n\nAlpha\n");
   expect(text).not.toContain("Peer");
+});
+
+test("the file downloads as Markdown, not as HTML", async () => {
+  const view = editor([["a", "paragraph", "Alpha"]]);
+  expect(await runPageCommand(view, "exportMarkdown")).toEqual({ ok: true, preview: true });
+  panel().querySelector('[data-export="download"]').click();
+  await settle();
+  expect(blobs).toHaveLength(1);
+  expect(blobs[0].type).toBe("text/markdown");
 });
 
 test("an export leaves the document, history, save counters and pending state alone", async () => {

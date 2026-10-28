@@ -1,13 +1,14 @@
 // Markdown import: the tokens marked's lexer returns become the page's flat block
-// records (model.js), so a file arrives without parsing any HTML and nothing marked
-// rendered ever reaches the DOM. Raw HTML stays inert: a block of it is a
-// preserved block and inline markup is literal text. A construct the schema cannot
+// records (model.js), so a file arrives without marked rendering anything. Raw HTML
+// stays inert: a block of it is a preserved block, cleaned of scripts, event handlers
+// and script URLs, and inline markup is literal text. A construct the schema cannot
 // express is kept as a literal code block and named in `unsupported`; a link or
 // image address the editor refuses is left out and named in `refused`, its text
 // kept. Nothing is dropped, and a limit refuses with a code rather than mutating.
 import { schema } from "./schema.js";
 import { markKey, runsOf } from "./inline.js";
 import { keysBetween, newId } from "./model.js";
+import { fragmentCleaner } from "./projection.js";
 import { safeHref, safeSrc } from "./address.js";
 
 export const MAX_BYTES = 2 * 1024 * 1024;
@@ -171,7 +172,12 @@ export function importMarkdownTokens(tokens) {
         case "text": paragraph(inline(token.tokens ?? [token]), ctx); break;
         case "hr": push({ t: "divider" }); break;
         case "code": push({ t: "code_block", ...(token.lang ? { lang: String(token.lang) } : {}), c: String(token.text ?? "") }); break;
-        case "html": push({ t: "preserved", html: String(token.text ?? token.raw ?? "") }); break;
+        case "html": {
+          const raw = String(token.text ?? token.raw ?? "");
+          unsupported.push({ type: "HTML block cleaned", text: raw });
+          push({ t: "preserved", html: fragmentCleaner(document).fallback(raw) });
+          break;
+        }
         case "blockquote": {
           const depth = deeper(ctx);
           walk(token.tokens, { ...ctx, depth, quote: true });
@@ -188,7 +194,9 @@ export function importMarkdownTokens(tokens) {
               const childType = child?.type;
               if (childType === "checkbox" || childType === "space") continue;
               if (childType === "text" || childType === "paragraph") {
-                for (const part of inline([child], { images: false }).parts) {
+                if (own.c) own = { c: own.c + ATOM, m: [...own.m, "@" + JSON.stringify(BREAK)] };
+                const tokens = childType === "paragraph" ? child.tokens ?? [] : [child];
+                for (const part of inline(tokens, { images: false }).parts) {
                   own = { c: own.c + part.c, m: [...own.m, ...part.m] };
                 }
                 rest.push(...(child.tokens ?? []).filter((nested) => typeof nested?.type === "string" && BLOCK.has(nested.type) && nested.type !== "space"));

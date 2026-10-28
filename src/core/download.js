@@ -9,10 +9,10 @@ export function documentName(pathname = location.pathname) {
   return name.replace(/\.(html?|htmlclay)$/i, "") || "page";
 }
 
-export function downloadHtml({ html, name }) {
+export function downloadHtml({ html, name, type = "text/html" }) {
   let url = null;
   try {
-    url = URL.createObjectURL(new Blob([html], { type: "text/html" }));
+    url = URL.createObjectURL(new Blob([html], { type }));
     const a = document.createElement("a");
     a.setAttribute("clay", "no-save no-watch no-snapshot");
     a.href = url;

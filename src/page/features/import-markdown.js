@@ -209,7 +209,7 @@ export function createFeature({ view = null, load = assetMarked } = {}) {
     const tr = st.tr;
     if (replace) tr.replaceWith(at, at + node.nodeSize, [...(head ? [head] : []), ...placed, ...(last ? [last] : [])]);
     else tr.insert(at + node.nodeSize, placed);
-    if (toggle && !node.attrs.open && placed.length > 1) tr.setNodeMarkup(at, null, { ...node.attrs, open: true });
+    if (toggle && !node.attrs.open && placed.length > 0) tr.setNodeMarkup(at, null, { ...node.attrs, open: true });
     let end = at + (replace ? (head ? head.nodeSize : 0) : node.nodeSize);
     for (const one of placed) end += one.nodeSize;
     tr.setSelection(state.TextSelection.near(tr.doc.resolve(last ? end : Math.max(0, end - 1)), last ? 1 : -1));

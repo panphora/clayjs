@@ -100,6 +100,17 @@ test("one insert is one undo entry", async () => {
   expect(shape(view)).toBe("Alpha | Bravo | Heading | one | two | Two");
 });
 
+test("one block arriving at a closed toggle opens it", async () => {
+  const view = editor(TOGGLE());
+  select(view, posOf(view, "t") + 2);
+  await importFile(view, "notes.md", "## One");
+  await insert();
+  expect(record(view, "t").open).toBe(true);
+  const added = ids(view).filter((id) => id !== "t" && id !== "p");
+  expect(added).toHaveLength(1);
+  expect(record(view, added[0]).parent).toBe("t");
+});
+
 test("a peer that moves the target keeps the blocks at its own new place", async () => {
   const view = editor(PAGE());
   select(view, posOf(view, "b") + 2);
@@ -167,6 +178,23 @@ test("the preview lists what was kept as written and what was refused", async ()
   expect(rows(".page-import-unsupported")).toEqual(["def: [ref]: https://example.com"]);
   await insert("cancel");
   expect(shape(view)).toBe("Alpha | Bravo");
+});
+
+test("raw HTML arrives cleaned, and the preview names each block it cleaned", async () => {
+  const view = editor(PAGE());
+  select(view, posOf(view, "b") + 1);
+  await importFile(view, "notes.md", '<img src="x" onerror="alert(1)">\n\n<script>alert(1)</script>\n');
+  expect(rows(".page-import-unsupported")).toEqual([
+    'HTML block cleaned: <img src="x" onerror="alert(1)">',
+    "HTML block cleaned: <script>alert(1)</script>",
+  ]);
+  await insert();
+  const kept = ids(view).map((id) => record(view, id)).filter((one) => one.t === "preserved");
+  expect(kept).toHaveLength(2);
+  for (const one of kept) {
+    expect(one.html).not.toContain("onerror");
+    expect(one.html).not.toContain("<script");
+  }
 });
 
 test("a parse failure keeps the preview open with its error and inserts nothing", async () => {

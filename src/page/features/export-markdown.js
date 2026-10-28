@@ -86,7 +86,7 @@ export function createFeature({ view = null, download = downloadHtml } = {}) {
   function save() {
     const s = session;
     if (!s) return { ok: false, code: "no-export" };
-    if (download({ html: s.report.text, name: s.name })) {
+    if (download({ html: s.report.text, name: s.name, type: "text/markdown" })) {
       close();
       view.focus?.();
       return { ok: true, downloaded: true };
