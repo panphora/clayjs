@@ -1,0 +1,43 @@
+{
+  "schema": 1,
+  "id": "table-rename-typed-then-leave-reduced",
+  "fixture": "page-host",
+  "boot": {
+    "mode": "edit",
+    "live": true,
+    "destination": "host"
+  },
+  "steps": [
+    {
+      "op": "click",
+      "target": ".page-plus"
+    },
+    {
+      "op": "click",
+      "target": "#page-menu-1-18"
+    },
+    {
+      "op": "click",
+      "target": ".page-table-actions"
+    },
+    {
+      "op": "click",
+      "target": "#page-menu-1-10"
+    },
+    {
+      "op": "input",
+      "target": ".page-table-rename",
+      "value": "Budget"
+    },
+    {
+      "op": "leave",
+      "await": false
+    }
+  ],
+  "requires": [
+    "click",
+    "input-admitted",
+    "transition"
+  ],
+  "reducedFrom": "table-rename-typed-then-leave"
+}

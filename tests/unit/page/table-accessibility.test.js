@@ -3,6 +3,8 @@ import { blockJson, orderedIds } from "../../../src/page/model.js";
 import { history } from "../../../src/vendor/prosemirror.vendor.js";
 import { selectTableCell } from "../../../src/page/table.js";
 import { editor, key, keyOn } from "./view-helpers.js";
+import { pendingIds } from "../../../src/lib/unsaved-state.js";
+import { runSaveBarrier } from "../../../src/core/mode-transition.js";
 
 /**
  * A table stays a native table. Its headers name their columns by id, its cells
@@ -225,6 +227,24 @@ describe("the Table actions menu", () => {
     expect(wrapper(view).querySelector("input.page-table-rename")).toBe(null);
     expect(active()).toBe(colButton(view, "c1"));
     expect(history.undo(view.state, view.dispatch)).toBe(false);
+  });
+
+  test("a typed name refuses the exit by name, stays in the field, and a blur commits it", async () => {
+    const view = opened();
+    walkTo(view, "Rename column");
+    const input = wrapper(view).querySelector("input.page-table-rename");
+    input.value = "Person";
+    expect(pendingIds()).toEqual(["table-rename"]);
+
+    const refused = await runSaveBarrier({ timeoutMs: 1000 });
+    expect(refused).toMatchObject({ ok: false, code: "pending-input" });
+    expect(refused.pending).toEqual(["table-rename"]);
+    expect(wrapper(view).querySelector("input.page-table-rename")).toBe(input);
+    expect(input.value).toBe("Person");
+
+    input.blur();
+    expect(record(view).cols.c1.name).toBe("Person");
+    expect(pendingIds()).toEqual([]);
   });
 
   test("sizes a column through the same command the menu uses", () => {

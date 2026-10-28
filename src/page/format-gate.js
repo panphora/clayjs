@@ -29,6 +29,9 @@
 // lands between `capabilities()` and `activate()` is refused rather than missed.
 
 import { PAGE_FORMAT, PAGE_FORMAT_EXTENSION, PAGE_FORMAT_UPGRADE, formatCapability, notePageFormatFloor, pageFormatDecision, pageFormatFloor } from "./format-level.js";
+import { registerUnsavedState } from "../lib/unsaved-state.js";
+
+const PENDING_COMMAND = "page-format-command";
 
 const UPGRADE_MESSAGE = "This document uses a newer page format; update the editor in the other tabs to keep writing";
 
@@ -150,16 +153,25 @@ export function createFormatGate({
     // same attempt, and a retry after a failure starts a new one.
     activate,
     // A new-format command: capture what it applies to, ask the gate, and apply
-    // only when activation succeeded and nothing moved underneath it.
+    // only when activation succeeded and nothing moved underneath it. While it waits on
+    // activation the work is unsaved and belongs to the person who asked for it: the
+    // exit asks the unsaved-state registry, and this command answers to its own name
+    // until it applies or fails, so an exit is refused rather than committing and
+    // disposing the editor underneath it.
     async run(command) {
       const stamp = { revision: revision(), installed: installed() };
-      const result = await activate();
-      if (result.status !== "active") return result;
-      if (disposed) return { status: "disposed", retry: false };
-      if (revision() !== stamp.revision || installed() !== stamp.installed) {
-        return { status: "retry", code: "format-gate-stale", retry: true };
+      const unsaved = registerUnsavedState({ id: PENDING_COMMAND, isPending: () => true });
+      try {
+        const result = await activate();
+        if (result.status !== "active") return result;
+        if (disposed) return { status: "disposed", retry: false };
+        if (revision() !== stamp.revision || installed() !== stamp.installed) {
+          return { status: "retry", code: "format-gate-stale", retry: true };
+        }
+        return { status: "applied", floor, result: await command?.apply?.(stamp) };
+      } finally {
+        unsaved.dispose();
       }
-      return { status: "applied", floor, result: await command?.apply?.(stamp) };
     },
     // Retry what is still pending: a lane switch whose receipt is in hand, or an
     // activation that failed on the wire. Unsaved work is never part of this.

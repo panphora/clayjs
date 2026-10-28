@@ -18,6 +18,9 @@ import { yValueOf } from "../../../src/page/ybind/provider.js";
 import { seedPageFromArticle } from "../../../src/page/ybind/migrate.js";
 import { NEIGHBOUR } from "../../fixtures/page/formats/m13-cases.mjs";
 import { runFormatted } from "../../../src/page/format-command.js";
+import { createFormatGate } from "../../../src/page/format-gate.js";
+import { pendingIds } from "../../../src/lib/unsaved-state.js";
+import { runSaveBarrier } from "../../../src/core/mode-transition.js";
 
 /**
  * Date mentions: the Date action offers Today and Tomorrow, and choosing one writes that
@@ -353,4 +356,38 @@ test("a caret that moves while the gate is pending refuses with stale-target", a
   expect(record(view, "a").c).toBe("Hello ");
   expect(record(view, "a").m).toBeUndefined();
   expect(record(view, "z").c).toBe("Neighbour line");
+});
+
+// A date chosen while the gate is still activating is work in the person's hands, so the
+// exit asks the unsaved-state registry and refuses by the command's own name instead of
+// committing and disposing the editor underneath it. When activation answers, the command
+// finishes and writes the day into the still-open editor.
+test("a date waiting on activation refuses the exit by name and applies once activation answers", async () => {
+  const view = open();
+  let release = null;
+  const gate = createFormatGate({
+    host: {
+      read: () => ({ floor: 0, revision: null }),
+      capabilities: () => [],
+      activate: () => new Promise((resolve) => { release = () => resolve({ accepted: true, revision: null, receipt: "E1" }); }),
+    },
+  });
+  view.runFormatCommand = (apply) => gate.run({ apply });
+  caret(view, endOf(view, "a"));
+  expect(await start(view)).toEqual({ ok: true, picker: true });
+  options()[0].click();
+  await settle();
+  expect(release).not.toBeNull();
+  expect(pendingIds()).toEqual(["page-format-command"]);
+
+  const refused = await runSaveBarrier({ timeoutMs: 1000 });
+  expect(refused).toMatchObject({ ok: false, code: "pending-input" });
+  expect(refused.pending).toEqual(["page-format-command"]);
+  expect(document.querySelector(".page-mention-picker")).toBeNull();
+  expect(record(view, "a").c).toBe("Hello ");
+
+  release();
+  await settle();
+  expect(isISODate(written(view, "a"))).toBe(true);
+  expect(pendingIds()).toEqual([]);
 });

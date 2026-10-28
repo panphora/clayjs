@@ -6,6 +6,7 @@ import { openPageMenu } from "./chrome.js";
 import { project } from "./projection.js";
 import { columnKinds } from "./table-kinds.js";
 import { cellText } from "./rich/cell.js";
+import { registerUnsavedState } from "../lib/unsaved-state.js";
 
 const views = new WeakMap();
 
@@ -94,6 +95,7 @@ export class ChartView {
     this.getPos = getPos;
     this.source = undefined;
     this.frame = null;
+    this.titleUnsaved = null;
     const doc = view.dom.ownerDocument;
     this.dom = doc.createElement("figure");
     this.dom.className = "page-chart";
@@ -163,13 +165,26 @@ export class ChartView {
     ]);
   }
 
+  // A title typed here is unsaved work until Enter or a blur writes it, so the exit
+  // asks the registry by its name and refuses while the field holds a title the chart
+  // does not.
   editTitle() {
     const input = this.dom.ownerDocument.createElement("input");
     input.type = "text";
     input.className = "page-chart-title-input";
     input.setAttribute("aria-label", "Chart title");
     input.value = this.node.attrs.title ?? "";
+    const unsaved = registerUnsavedState({
+      id: "chart-title",
+      isPending: () => input.isConnected && input.value !== (this.node.attrs.title ?? ""),
+    });
+    this.titleUnsaved = unsaved;
+    let done = false;
     const finish = (save) => {
+      if (done) return;
+      done = true;
+      this.titleUnsaved = null;
+      unsaved.dispose();
       input.remove();
       this.caption.hidden = false;
       if (save) this.setAttrs({ title: input.value });
@@ -182,6 +197,7 @@ export class ChartView {
         finish(event.key === "Enter");
       }
     });
+    input.addEventListener("blur", () => finish(true));
     this.caption.hidden = true;
     this.caption.after(input);
     input.focus();
@@ -200,6 +216,8 @@ export class ChartView {
   stopEvent(event) { return !!event.target.closest?.(".page-chart-settings, .page-chart-title-input"); }
 
   destroy() {
+    this.titleUnsaved?.dispose();
+    this.titleUnsaved = null;
     views.get(this.view)?.delete(this);
     if (this.frame !== null) {
       const win = this.dom.ownerDocument.defaultView;

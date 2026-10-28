@@ -4,6 +4,8 @@ import { RECORD } from "./fixtures/all-kinds.js";
 import { renderBlocks } from "../../../src/page/projection.js";
 import { blockMap } from "../../../src/page/model.js";
 import { history } from "../../../src/vendor/prosemirror.vendor.js";
+import { pendingIds } from "../../../src/lib/unsaved-state.js";
+import { runSaveBarrier } from "../../../src/core/mode-transition.js";
 
 const table = RECORD.blocks.tbl;
 const chart = RECORD.blocks.ch;
@@ -78,6 +80,26 @@ test("each chart setting makes one transaction", () => {
   expect(dispatch).toHaveBeenCalledTimes(1);
   expect(view.state.doc.child(1).attrs.title).toBe("Edited chart");
   dispatch.mockRestore();
+});
+
+test("a typed chart title refuses the exit by name, stays in the field, and a blur writes it", async () => {
+  const view = editor([], { blocks: { tbl: table, ch: chart } });
+  paint();
+  openSettings(view);
+  menuButton(view, "Edit title").click();
+  const input = view.dom.querySelector('input[aria-label="Chart title"]');
+  input.value = "Edited chart";
+  expect(pendingIds()).toEqual(["chart-title"]);
+
+  const refused = await runSaveBarrier({ timeoutMs: 1000 });
+  expect(refused).toMatchObject({ ok: false, code: "pending-input" });
+  expect(refused.pending).toEqual(["chart-title"]);
+  expect(input.isConnected).toBe(true);
+  expect(input.value).toBe("Edited chart");
+
+  input.blur();
+  expect(view.state.doc.child(1).attrs.title).toBe("Edited chart");
+  expect(pendingIds()).toEqual([]);
 });
 
 test("table changes paint once per frame and the editor SVG matches the saved projection", () => {

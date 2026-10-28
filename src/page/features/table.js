@@ -10,6 +10,7 @@ import { TABLE_CSS } from "../table-style.js";
 import { cellViews } from "../table-views.js";
 import { asStep } from "../blocksel.js";
 import { announce } from "../announce.js";
+import { registerUnsavedState } from "../../lib/unsaved-state.js";
 
 const N = schema.nodes;
 
@@ -87,6 +88,7 @@ export class TableView {
     this.getPos = getPos;
     this.preview = null;
     this.renaming = null;
+    this.renamingUnsaved = null;
     this.menuAnchor = null;
     this.destroyed = false;
     const doc = view.dom.ownerDocument;
@@ -243,7 +245,9 @@ export class TableView {
     ], { persist: true });
   }
   // The name field for a column. A peer's edit does not take it away while it has
-  // the focus, and a cancelled one writes nothing.
+  // the focus, and a cancelled one writes nothing. A name typed here is unsaved work
+  // until Enter or a blur commits it, so the exit asks the registry by its name and
+  // refuses while the field holds a name the table does not.
   beginRename(colId) {
     const control = this.control({ control: "column", colId });
     const col = this.node.attrs.cols[colId];
@@ -257,9 +261,16 @@ export class TableView {
     input.dataset.col = colId;
     input.value = col.name ?? "";
     input.setAttribute("aria-label", "Column name");
+    const unsaved = registerUnsavedState({
+      id: "table-rename",
+      isPending: () => this.renaming === input && input.value.trim() !== (col.name ?? ""),
+    });
+    this.renamingUnsaved = unsaved;
     const finish = (save) => {
       if (this.renaming !== input) return;
       this.renaming = null;
+      this.renamingUnsaved = null;
+      unsaved.dispose();
       const value = input.value.trim();
       if (save && value) this.act({ tableId, colId }, renameColumn(colId, value), "Column renamed");
       if (input.isConnected) input.replaceWith(control);
@@ -271,6 +282,7 @@ export class TableView {
       if (event.key === "Escape") { event.preventDefault(); finish(false); }
       event.stopPropagation();
     });
+    input.addEventListener("blur", () => finish(true));
     this.renaming = input;
     control.replaceWith(input);
     input.focus();
@@ -492,6 +504,8 @@ export class TableView {
   destroy() {
     this.destroyed = true;
     this.renaming = null;
+    this.renamingUnsaved?.dispose();
+    this.renamingUnsaved = null;
     this.menuAnchor = null;
     this.preview = null;
   }
