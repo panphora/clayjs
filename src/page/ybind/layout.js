@@ -9,9 +9,14 @@ export const HISTORY_META = Symbol("page-history");
 export const PAGE_ROOTS = Object.freeze(["flow", "attrs", "gone", "boardFields", "tableFields", "origins"]);
 
 const SKIP = new Set(["id", "pos"]);
-export const attrKeys = (type) => [...Object.keys(type.spec.attrs || {}).filter((k) => !SKIP.has(k)), ...(type.name === "table" ? ["rows"] : [])];
+const KEYS = new WeakMap();
+export const attrKeys = (type) => {
+  let keys = KEYS.get(type);
+  if (!keys) KEYS.set(type, keys = Object.freeze([...Object.keys(type.spec.attrs || {}).filter((k) => !SKIP.has(k)), ...(type.name === "table" ? ["rows"] : [])]));
+  return keys;
+};
 export const defaultOf = (type, k) => type.name === "table" && k === "rows" ? {} : type.spec.attrs[k].default;
-export const sameJson = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+export const sameJson = (a, b) => a === b || JSON.stringify(a) === JSON.stringify(b);
 export const idKey = (id) => `${id.client}.${id.clock}`;
 export const parseKey = (k) => { const i = k.indexOf("."); return { client: +k.slice(0, i), clock: +k.slice(i + 1) }; };
 export const isHigh = (u) => u >= 0xd800 && u <= 0xdbff;

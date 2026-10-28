@@ -113,7 +113,7 @@ function walkFlow(pd, index) {
     for (const key of restore.covers) set.add(key);
   }
   const recoveredMarkers = new Map();
-  for (let it = pd.flow._start; it; it = it.right) {
+  if (restoredSources.size) for (let it = pd.flow._start; it; it = it.right) {
     if (it.deleted) continue;
     const source = it.content instanceof Y.ContentEmbed ? markerSource(it, it.content.embed && it.content.embed.b) : null;
     if (source === null) continue;
@@ -134,6 +134,7 @@ function walkFlow(pd, index) {
   const fences = [];
   let cur = null, prevId = "start", hiding = null, at = 0;
   const cattrs = {};
+  let styled = null;
   const typeOf = (id) => { const m = pd.attrs.get(id); return (m && m.get("t")) || "paragraph"; };
   const hideUnit = (len) => {
     if (!len) return;
@@ -249,7 +250,7 @@ function walkFlow(pd, index) {
     }
     if (it.deleted) continue;
     const c = it.content;
-    if (c instanceof Y.ContentFormat) { if (c.value === null) delete cattrs[c.key]; else cattrs[c.key] = c.value; continue; }
+    if (c instanceof Y.ContentFormat) { if (c.value === null) delete cattrs[c.key]; else cattrs[c.key] = c.value; styled = null; continue; }
     if (hiding) {
       if (c instanceof Y.ContentString || c instanceof Y.ContentEmbed) {
         const piece = c instanceof Y.ContentString ? c.str : c.embed.b !== undefined ? "\u00b6" : "\n";
@@ -286,8 +287,12 @@ function walkFlow(pd, index) {
     }
     if (c instanceof Y.ContentString) {
       if (!cur || cur.atom) open(`~${prevId}`, null, true);
-      const marks = marksFromAttributes(cattrs, cur.t);
-      cur.runs.push({ text: c.str, marks, mk: marksKey(marks) });
+      const code = cur.t === "code_block";
+      if (!styled || styled.code !== code) {
+        const marks = marksFromAttributes(cattrs, cur.t);
+        styled = { code, marks, mk: marksKey(marks) };
+      }
+      cur.runs.push({ text: c.str, marks: styled.marks, mk: styled.mk });
       if (cur.items) cur.items.push({ at: here, id: idKey(it.id), client: it.id.client, clock: it.id.clock, length: it.length, kind: "text", text: c.str, blockId: null, raw: { ...cattrs } });
       cur.len += c.str.length;
     }

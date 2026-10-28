@@ -134,11 +134,19 @@ export function structureFixes(doc, oldDoc = null) {
 }
 
 export function structurePlugin() {
+  const valid = new WeakSet();
   return new Plugin({
     appendTransaction(trs, old, next) {
       if (!trs.some((tr) => tr.docChanged && !tr.getMeta(REMOTE))) return null;
+      if (valid.has(old.doc) && sameStructure(old.doc, next.doc)) {
+        valid.add(next.doc);
+        return null;
+      }
       const fixes = structureFixes(next.doc, old.doc);
-      if (!fixes.length) return null;
+      if (!fixes.length) {
+        valid.add(next.doc);
+        return null;
+      }
       const tr = next.tr;
       for (const f of fixes) tr.setNodeMarkup(f.at, null, f.attrs);
       return tr;

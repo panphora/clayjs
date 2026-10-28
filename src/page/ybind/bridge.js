@@ -6,7 +6,7 @@ import { localGroup } from "./group.js";
 import { yBefore, yAfter } from "./tokens.js";
 import { yIndexAt, posAtY, cellPoint, cellAt } from "./positions.js";
 import { state as pmState } from "../../vendor/prosemirror.vendor.js";
-import { repairSiblings } from "../model.js";
+import { repairSiblings, isKey } from "../model.js";
 import { createOriginIndex, installUndoOrigins } from "./origins.js";
 import { reduceRecovery, canonicalRevision, restoreKey, physicalKeyOf, authorKey, RECOVERED_PREFIX, parsePhysicalKey, parseGoneIntents } from "./recovery.js";
 import { moveBlocks } from "./moves.js";
@@ -93,6 +93,35 @@ export function keepViewPos(derived, current = null) {
   return changed ? derived.type.create(derived.attrs, placed) : derived;
 }
 
+const orderedSiblings = (node) => {
+  const ids = new Set();
+  let previous = null;
+  for (let i = 0; i < node.childCount; i++) {
+    const { id, pos } = node.child(i).attrs;
+    if (!id || ids.has(id) || !isKey(pos) || (previous !== null && previous >= pos)) return false;
+    ids.add(id);
+    previous = pos;
+  }
+  return true;
+};
+
+const sameAttrsBesidePos = (left, right) => {
+  for (const key in left.attrs) if (key !== "pos" && left.attrs[key] !== right.attrs[key]) return false;
+  return true;
+};
+
+export function keepsView(current, derived) {
+  if (current.childCount !== derived.childCount || !orderedSiblings(current)) return false;
+  for (let i = 0; i < current.childCount; i++) {
+    const left = current.child(i), right = derived.child(i);
+    const markup = left.type === right.type && left.marks === right.marks && sameAttrsBesidePos(left, right);
+    if (!markup && !left.hasMarkup(right.type, { ...right.attrs, pos: left.attrs.pos }, right.marks)) return false;
+    if (!left.content.eq(right.content)) return false;
+    if (left.type.name === "table" && !orderedSiblings(left)) return false;
+  }
+  return true;
+}
+
 const freezeDeep = (value) => {
   if (value && typeof value === "object") {
     for (const key of Object.keys(value)) freezeDeep(value[key]);
@@ -124,6 +153,7 @@ const newestLocalMarker = (pd, blockId) => {
 export function createBridge({ pd, onNotice = () => {}, ownedTokens = [], authorToken = null, stats = { groups: 0, mismatch: 0, renders: 0, first: null }, captureTimeout = 500 }) {
   let view = null;
   let w = walk(pd);
+  let docVersion = 0, walkedAt = -1;
   const origins = createOriginIndex(pd.origins);
   const um = new Y.UndoManager([pd.flow, pd.attrs, pd.gone, pd.tableFields, pd.boardFields], {
     trackedOrigins: new Set([LOCAL]),
@@ -161,7 +191,7 @@ export function createBridge({ pd, onNotice = () => {}, ownedTokens = [], author
   };
   const recoveryState = () => {
     if (recoveryMemo && recoveryMemo.version === recoveryVersion) return recoveryMemo.snapshot;
-    const reduced = reduceRecovery(pd, { index: origins });
+    const reduced = reduceRecovery(pd, { index: origins, walked: walkedAt === docVersion ? w : undefined });
     const recoverable = reduced.list.filter((record) => record.recoverable).map((record) => detached(record));
     const notices = detached(recoverable.map((record) => personalNotice(record)).filter((notice) => notice && !dismissed.has(`${notice.source}\u0000${notice.revision}`)));
     const snapshot = Object.freeze({ recoverable: Object.freeze(recoverable), notices: Object.freeze(notices) });
@@ -184,6 +214,7 @@ export function createBridge({ pd, onNotice = () => {}, ownedTokens = [], author
   };
   const refresh = () => {
     w = walk(pd);
+    walkedAt = docVersion;
     bumpRecovery();
     return docOf(pd, w);
   };
@@ -227,6 +258,7 @@ export function createBridge({ pd, onNotice = () => {}, ownedTokens = [], author
     }
     view.dispatch(tr);
   };
+  const stale = () => { docVersion++; };
   const onBefore = (t) => {
     if (groupOpen && !joining && t.origin === LOCAL) { um.stopCapturing(); groupOpen = false; }
     if (!view || t.origin === LOCAL || t.origin === um || saved) return;
@@ -273,6 +305,8 @@ export function createBridge({ pd, onNotice = () => {}, ownedTokens = [], author
     return result;
   };
   const board = createBoardCommands({ pd, um, origins, render: () => (view ? render() : refresh()) });
+  pd.ydoc.on("beforeTransaction", stale);
+  pd.ydoc.on("afterTransactionCleanup", stale);
   pd.ydoc.on("beforeTransaction", onBefore);
   pd.ydoc.on("afterTransaction", onAfter);
   return {
@@ -280,8 +314,11 @@ export function createBridge({ pd, onNotice = () => {}, ownedTokens = [], author
     attach(v) {
       view = v;
       w = walk(pd);
+      walkedAt = docVersion;
     },
     dispose() {
+      pd.ydoc.off("beforeTransaction", stale);
+      pd.ydoc.off("afterTransactionCleanup", stale);
       pd.ydoc.off("beforeTransaction", onBefore);
       pd.ydoc.off("afterTransaction", onAfter);
       offOrigins();
@@ -320,7 +357,10 @@ export function createBridge({ pd, onNotice = () => {}, ownedTokens = [], author
         }
         return;
       }
-      w = walk(pd);
+      if (walkedAt !== docVersion) {
+        w = walk(pd);
+        walkedAt = docVersion;
+      } else stats.reusedWalks = (stats.reusedWalks ?? 0) + 1;
       const history = transactions.every((t) => t.getMeta("addToHistory") !== false);
       const register = registerAuthor;
       registerAuthor = null;
@@ -335,9 +375,14 @@ export function createBridge({ pd, onNotice = () => {}, ownedTokens = [], author
       }
       groupOpen = intent !== null;
       const derived = refresh();
-      if (!sameBareShape(derived, view.state.doc)) {
+      const current = view.state.doc;
+      if (!sameBareShape(derived, current)) {
         stats.mismatch++;
-        stats.first ??= { before: bareShape(local[0].before), pm: bareShape(view.state.doc), y: bareShape(derived) };
+        stats.first ??= { before: bareShape(local[0].before), pm: bareShape(current), y: bareShape(derived) };
+      } else if (keepsView(current, derived)) {
+        stats.renders++;
+        saved = null;
+        return;
       }
       render(false, derived);
     },
