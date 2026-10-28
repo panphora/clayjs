@@ -365,6 +365,9 @@ class LiveSync {
     this._liveData = false;
     this._editing = null;
     this._presenceLease = null;
+    // Set by the exit barrier: a sender discovered while it runs is built but stays
+    // quiet until resume, so the exit publishes nobody.
+    this._presenceQuiesced = false;
     this._ready = null;
     // Bumped by every start(), so a discovery that resolves after a stop/restart
     // cannot open a stream for the run that has already been torn down.
@@ -1358,8 +1361,11 @@ class LiveSync {
         return loadEdit().then((mod) => {
           if (this.isDestroyed || this._startGen !== gen || this._editing) return;
           this._editing = new mod.EditingSender({});
-          this._editing.start();
-          this._editing.roster(this._lastRoster);
+          if (this._presenceQuiesced) this._editing.stop();
+          else {
+            this._editing.start();
+            this._editing.roster(this._lastRoster);
+          }
         });
       });
   }

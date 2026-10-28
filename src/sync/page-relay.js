@@ -6,6 +6,9 @@ const tags = (root) => [...root.querySelectorAll('script[merge][clay~="live"]')]
   .filter((el) => PAGE.test(el.getAttribute("merge")));
 
 export function pageRelay(pending, acceptedHtml, identity) {
+  // A capture with no page article has nothing to overlay, and a document without
+  // one is not parsed at all: nothing outside the article would change.
+  if (!pending.html.includes("data-page")) return pending;
   const parse = (html) => new DOMParser().parseFromString(html, "text/html");
   const outgoing = parse(pending.html);
   const article = outgoing.querySelector("article[data-page]");

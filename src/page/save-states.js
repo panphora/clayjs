@@ -66,7 +66,7 @@ function withoutPageTag(html) {
 // page projection already applied by the live store's snapshot listener, and
 // without the page editor's merge state, which no saved file or download carries.
 function downloadPageCopy() {
-  const { forSave } = captureForSaveAndComparison();
+  const { forSave } = captureForSaveAndComparison({ emitForSync: false });
   return downloadHtml({ html: withoutPageTag(forSave), name: `${documentName()}.html` });
 }
 
@@ -79,7 +79,7 @@ function downloadSnapshot(forSave) {
 // the projected article, and only its text is asked for.
 async function copyPageText() {
   try {
-    const { forSave } = captureForSaveAndComparison();
+    const { forSave } = captureForSaveAndComparison({ emitForSync: false });
     const doc = new DOMParser().parseFromString(forSave, "text/html");
     const articles = doc.querySelectorAll("article[data-page]");
     if (articles.length !== 1) return false;

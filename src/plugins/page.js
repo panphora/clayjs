@@ -233,7 +233,7 @@ function stopEditing(inst) {
 // room refused it): the saved document with the article rendered from the tab's document.
 function downloadTabCopy(inst) {
   if (!inst.tabValue) return downloadPageCopy();
-  const { forSave } = captureForSaveAndComparison();
+  const { forSave } = captureForSaveAndComparison({ emitForSync: false });
   const doc = new DOMParser().parseFromString(forSave, "text/html");
   const articles = doc.querySelectorAll(ARTICLE_SEL);
   if (articles.length !== 1) return downloadPageCopy();
@@ -1166,7 +1166,7 @@ function mountAndAttach(inst, source, loaded) {
         return !lane || lane.status.writer === null ? true : lane.isWriter();
       },
       requestCheckpoint: () => checkpointWithin(0),
-      snapshot: () => captureForSaveAndComparison().forSave,
+      snapshot: () => captureForSaveAndComparison({ emitForSync: false }).forSave,
       mergeTagless: inst.mergeTagless,
       writerReady: awaitWriter,
       adopted: (rev) => fastLane()?.adopted?.("page", rev, inst.store.mark),

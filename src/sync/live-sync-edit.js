@@ -32,6 +32,7 @@ export function syncParticipant(sync) {
   // page's own awareness hears the same barrier and resumes with it, so its caret
   // goes quiet with the sender and comes back on a refused exit.
   const quiesce = () => {
+    sync._presenceQuiesced = true;
     sync._editing?.stop();
     presence.setGeneric(null);
     presence.releaseTarget();
@@ -39,10 +40,12 @@ export function syncParticipant(sync) {
     return sync.lane === "live" && sync._morphInFlight ? { ok: false, code: "pending-input" } : { ok: true };
   };
   const resume = () => {
+    sync._presenceQuiesced = false;
     sync._editing?.resume();
     if (typeof document !== "undefined") document.dispatchEvent(new Event("clay:presence-resume"));
   };
   const dispose = () => {
+    sync._presenceQuiesced = false;
     sync.stop();
     if (typeof document !== "undefined") document.dispatchEvent(new Event("clay:presence-resume"));
   };
@@ -70,6 +73,7 @@ export function syncParticipant(sync) {
         // lane was the reader's: stopping it would take the saved lane the switch gives
         // back with it.
         dispose: () => {
+          sync._presenceQuiesced = false;
           if (started) sync.stop();
           if (typeof document !== "undefined") document.dispatchEvent(new Event("clay:presence-resume"));
         },

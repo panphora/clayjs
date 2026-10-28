@@ -204,6 +204,21 @@ describe("pageRelay", () => {
     expect(relayPosts).toHaveLength(0);
     expect(sync._savedSnapshot.captureId).toBe(9999);
   });
+
+  test("a relay of a document with no page article parses nothing", () => {
+    const identity = createIdentityStore("tab-d");
+    const accepted = acceptedFromPending(identity);
+    // No page article and no page tag: the capture is already the answer.
+    const plain = pendingSnapshot('<html><body><p data-id="one">One</p></body></html>', identity);
+
+    const spy = jest.spyOn(DOMParser.prototype, "parseFromString");
+    try {
+      expect(pageRelay(plain, accepted.html, identity)).toBe(plain);
+      expect(spy).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
+  });
 });
 
 describe("a page save's relay", () => {
@@ -372,5 +387,43 @@ describe("a page save's relay", () => {
     // A non-page capture is not touched at all.
     const plain = pendingSnapshot("<html><body><p data-id=\"one\">One</p></body></html>", identity);
     expect(pageRelay(plain, accepted, identity)).toBe(plain);
+  });
+
+  test("a download taken while a save is on the wire does not take that save's relay", async () => {
+    pageDocument();
+    live("page").update((value) => {
+      for (const key of Object.keys(value)) delete value[key];
+      Object.assign(value, seed());
+    });
+    const sync = await startSync();
+    let release;
+    global.fetch.mockImplementationOnce(() => new Promise((r) => { release = r; }));
+
+    const saving = save.savePageForce();
+    await wait(0);
+    const captured = sync._savedSnapshot;
+    expect(captured).not.toBeNull();
+
+    // The Download action captures the document too, and its capture is not a
+    // save's: it must not replace the snapshot this save is waiting to relay.
+    const { downloadPageCopy } = await import("../../src/page/save-states.js");
+    const click = jest.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    URL.createObjectURL = jest.fn(() => "blob:page-copy");
+    URL.revokeObjectURL = jest.fn();
+    try {
+      expect(downloadPageCopy()).toBe(true);
+      expect(sync._savedSnapshot).toBe(captured);
+    } finally {
+      click.mockRestore();
+      delete URL.createObjectURL;
+      delete URL.revokeObjectURL;
+    }
+
+    release(respond(200, { msg: "Saved", etag: "E1" }));
+    expect((await saving).ok).toBe(true);
+    await wait(20);
+
+    expect(relayPosts).toHaveLength(1);
+    expect(articleText(relayPosts[0].html)).toBe("First");
   });
 });

@@ -227,6 +227,35 @@ test("a stopped tab takes the outline down with the stream", async () => {
   expect(document.querySelector("[data-clay-editing]")).toBeNull();
 });
 
+test("a sender discovered during the exit barrier says nothing until resume", async () => {
+  const fetchImpl = host(["sync", "presence", "presence-editing"]);
+  const block = page();
+  global.fetch = fetchImpl;
+  const sync = new LiveSync();
+  syncs.push(sync);
+  const { syncParticipant } = await import("../../src/sync/live-sync-edit.js");
+  const participant = await syncParticipant(sync).prepare({});
+
+  // The barrier is up before discovery answers, so the sender it builds is one
+  // the exit never started.
+  sync.start("index.html");
+  expect(participant.quiesce()).toEqual({ ok: true });
+  await sync._ready;
+  await turn(20);
+  expect(sync._editing).not.toBeNull();
+
+  open(sources[0]);
+  roster(sources[0], [ME, OTHER]);
+  block.focus();
+  await turn(600);
+
+  expect(sentTo(fetchImpl, "/_/presence")).toHaveLength(0);
+
+  participant.resume();
+  await until(() => sentTo(fetchImpl, "/_/presence").length === 1);
+  expect(JSON.parse(sentTo(fetchImpl, "/_/presence")[0][1].body)).toEqual({ editing: "0" });
+});
+
 test("the relay posts the document exactly as it did", async () => {
   const fetchImpl = host(["sync", "presence", "presence-editing"]);
   const sync = await startedAgainst(fetchImpl);
