@@ -623,3 +623,94 @@ test("a soon() caller hears the save a forced save lands in one task", async () 
     await idleLane();
   }
 });
+
+// A force save paused in its preparation holds the capture it took, not the page: an edit
+// typed after that capture is not in the bytes it will write. A caller that asks for a save
+// after the edit is asking about those bytes, so the paused save's result cannot be its
+// answer, and the save the drain starts is.
+test("a soon() caller is answered by the save that carries its edit, not the paused one", async () => {
+  setText("forced-save-paused-alpha");
+  // The preparer loads on demand: one plain save gets it in place, so the hold below
+  // catches a preparation that really is sliced.
+  expect((await save.savePage()).ok).toBe(true);
+  const gate = holdSlices();
+  const restoreClock = stepClock();
+  const answers = [];
+  let forcing;
+  try {
+    const sentBefore = posts.length;
+    forcing = save.savePageForce();
+    expect(saveCore.isSaveInProgress()).toBe(true);
+    expect(gate.held.length).toBeGreaterThan(0);
+
+    // Typed after the force save took its capture, so this edit is not in the bytes it is
+    // preparing, and it is the edit the caller below is asking about.
+    setText("forced-save-paused-beta");
+    save.savePageSoon().then((value) => { answers.push(value); });
+    await sleep(300);
+    expect(answers).toHaveLength(0);
+
+    gate.release();
+    const forced = await forcing;
+    forcing = null;
+    expect(forced).toMatchObject({ ok: true });
+    expect(posts[sentBefore]).toContain("forced-save-paused-alpha");
+    expect(posts[sentBefore]).not.toContain("forced-save-paused-beta");
+
+    await sleep(300);
+    expect(answers).toHaveLength(1);
+    expect(answers[0]).not.toBe(forced);
+    expect(answers[0]).toMatchObject({ ok: true });
+    expect(posts[sentBefore + 1]).toContain("forced-save-paused-beta");
+    expect(answers[0].etag).toBe(`etag-${sentBefore + 2}`);
+  } finally {
+    gate.release();
+    gate.restore();
+    await forcing?.catch(() => {});
+    restoreClock();
+    await idleLane();
+  }
+});
+
+// Control for the test above: a caller queued before the force save takes its capture is
+// answered by that save, because its capture does cover the bytes they asked about.
+test("a soon() caller queued before a forced save's capture is answered by it", async () => {
+  setText("forced-save-queued-before");
+  // The preparer loads on demand: one plain save gets it in place, so the hold below
+  // catches a preparation that really is sliced.
+  expect((await save.savePage()).ok).toBe(true);
+  // Typed after that save, so the save the callers queue behind really goes out and its
+  // aborted request leaves the page's fate unknown.
+  setText("forced-save-queued-before-edit");
+  const gate = holdSlices();
+  const restoreClock = stepClock();
+  let forcing;
+  try {
+    const queued = await queuedBehindSaved(gate);
+    const answers = queued.answers;
+    // The attempt queued behind the save on the wire is kept rather than sent, so the
+    // callers are still waiting when the force save below takes its capture.
+    await keptWhenFateUnknown(gate, queued);
+    for (let i = 0; i < 200 && saveCore.isSaveInProgress(); i++) await sleep(20);
+    expect(saveCore.isSaveInProgress()).toBe(false);
+    expect(answers).toHaveLength(0);
+
+    const sentBefore = posts.length;
+    forcing = save.savePageForce();
+    expect(gate.released).toBe(true);
+    const forced = await forcing;
+    forcing = null;
+    expect(forced).toMatchObject({ ok: true });
+    expect(posts[sentBefore]).toContain("forced-save-queued-before-edit");
+
+    await sleep(100);
+    expect(answers).toHaveLength(1);
+    expect(answers[0]).toBe(forced);
+  } finally {
+    gate.release();
+    gate.restore();
+    await forcing?.catch(() => {});
+    restoreClock();
+    await idleLane();
+  }
+});

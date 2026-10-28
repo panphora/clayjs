@@ -1296,6 +1296,11 @@ function attemptSaveNow({ kind, permit = null }, callback = () => {}) {
     const prepare = window.clay?.source?.ensureForSave?.();
     if (prepare) return prepare.then(() => resolve(attemptSaveNow({ kind, permit }, callback)));
 
+    if (preparesSliced() && !prepDriver) {
+      loadPreparer().then(() => resolve(attemptSaveNow({ kind, permit }, callback)));
+      return;
+    }
+
     // From here this call answers: it either writes, or reports why it did not,
     // and the soon() callers waiting on the save queued behind the one that was
     // on the wire when they asked get that answer.
@@ -1312,10 +1317,6 @@ function attemptSaveNow({ kind, permit = null }, callback = () => {}) {
     // A document this big prepares its save across tasks, so typing is never blocked for
     // the whole verification. The claim and the capture are both taken in this task.
     if (preparesSliced()) {
-      if (!prepDriver) {
-        loadPreparer().then(() => resolve(attemptSaveNow({ kind, permit }, callback)));
-        return;
-      }
       if (startSlicedSave({
         explicit,
         forced: false,
@@ -1469,18 +1470,24 @@ export function savePageForce(callback = () => {}, { quietConflict = false, page
 
     // A forced save prepares like an ordinary one when the document is this big; it only
     // skips the dirty question, which `forced` says here.
+    if (preparesSliced() && !prepDriver) {
+      loadPreparer().then(() => resolve(savePageForce(callback, { quietConflict, pageFormatFloor, permit })));
+      return;
+    }
+
+    // From here this call answers, and the soon() callers waiting now are waiting on its
+    // capture: one that queues after it stays queued for the save the drain starts.
+    const soonQueued = takeSoonQueued();
+    const settleSoonQueued = (result) => soonQueued.forEach((done) => done(result));
+
     if (preparesSliced()) {
-      if (!prepDriver) {
-        loadPreparer().then(() => resolve(savePageForce(callback, { quietConflict, pageFormatFloor, permit })));
-        return;
-      }
       if (startSlicedSave({
         explicit: true,
         forced: true,
         permit,
         pageFormatFloor,
         quietConflict,
-        settleSoonQueued: (result) => takeSoonQueued().forEach((done) => done(result)),
+        settleSoonQueued,
         callback,
         resolve,
       })) return;
@@ -1499,7 +1506,7 @@ export function savePageForce(callback = () => {}, { quietConflict = false, page
         callback(result);
       }
       resolve(result);
-      takeSoonQueued().forEach((done) => done(result));
+      settleSoonQueued(result);
       return;
     }
 
@@ -1521,7 +1528,7 @@ export function savePageForce(callback = () => {}, { quietConflict = false, page
     }).then((outcome) => {
       resolve(outcome.result);
       // The waiters asked for a save soon and this one landed: its result is their answer.
-      takeSoonQueued().forEach((done) => done(outcome.result));
+      settleSoonQueued(outcome.result);
     });
   });
 }
