@@ -794,6 +794,7 @@ export async function runCase(json) {
     await settle(50);
     observe();
 
+    const { pendingIds } = await runtimeImport("src/lib/unsaved-state.js");
     const result = {
       mode: clay.mode,
       writes: host.posts.length,
@@ -822,6 +823,8 @@ export async function runCase(json) {
       }),
       // The page's own answer to the question a person asks before closing it.
       unsaved: clay.hasUnsavedChanges?.() === true,
+      // The sources still pending when the run ended, as the page's own registry lists them.
+      pending: pendingIds(),
       // The visitor's own store, as the run left it: a draft page's saves go there and
       // never to a host, so the oracle reads this rather than an accepted save's body.
       draft: (() => {

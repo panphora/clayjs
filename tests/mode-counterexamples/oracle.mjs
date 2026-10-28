@@ -209,6 +209,14 @@ function conservation(run, fail) {
   }
 }
 
+// The sources the page still holds when the run ends: the run's own final list where the
+// driver recorded one, and otherwise the last pending report the trace carries.
+function pendingAtEnd(run) {
+  if (Array.isArray(run?.result?.pending)) return run.result.pending;
+  const reports = (run?.trace ?? []).filter((event) => Array.isArray(event.detail?.pending));
+  return reports.at(-1)?.detail.pending ?? [];
+}
+
 // O7, liveness: an exit with nothing left to do must commit. A `save-failed` refusal is
 // the machinery giving up on a save, so it is only a person's own work being in the way
 // when something is still owed: the host's last accepted save does not carry it, or the
@@ -235,24 +243,25 @@ function liveness(run, fail) {
     );
   }
 
-  // A refusal that names a source is judged the same way when it is the run's last word
-  // on the exit: an exit refused forever on a source that never clears is refused for
-  // work that does not exist, exactly as an unnamed one is. Only the end of the run
-  // decides this, because a source the person went on to clear refused nothing.
+  // A refusal that names a source is judged the same way at the end of the run: an exit
+  // still refused on a source still pending there has held the exit forever, and is
+  // refused for work that does not exist, exactly as an unnamed one is. Only the end of
+  // the run decides this, because a source the person went on to clear refused nothing.
   const refusals = (run.trace ?? []).filter((event) => event.kind === "transition-refused" && event.detail.op === "leave");
   const last = refusals.at(-1) ?? null;
   if (!last) return;
   const named = Array.isArray(last.detail.pending) ? last.detail.pending : [];
   if (!named.length) return;
-  const left = (run.trace ?? []).some((event) => event.seq > last.seq && event.kind === "transition" && event.detail.op === "leave" && event.detail.ok === true);
-  if (left) return;
+  if (run.result?.mode !== "edit") return;
+  const held = pendingAtEnd(run);
+  if (!named.some((source) => held.includes(source))) return;
   const admitted = standingAdmissions(run, last.seq).filter((entry) => !discarded(run, entry));
   const landed = acceptedBefore(run, last.seq).at(-1) ?? null;
   const owed = admitted.filter((entry) => !landed || !carries(landed.body, entry.value)).filter((entry) => !committed(run, entry));
   if (owed.length) return;
   fail(
     "liveness",
-    `the exit stayed refused "${last.detail.code}" on a pending ${JSON.stringify(named)} that never cleared, and the host's last accepted save carries every value the person left`,
+    `the exit stayed refused "${last.detail.code}" on a pending ${JSON.stringify(named)} that was still pending at the end of the run, and the host's last accepted save carries every value the person left`,
   );
 }
 

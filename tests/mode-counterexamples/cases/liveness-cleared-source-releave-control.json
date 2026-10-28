@@ -1,0 +1,42 @@
+{
+  "schema": 1,
+  "id": "liveness-cleared-source-releave-control",
+  "fixture": "unsent-host",
+  "boot": {
+    "mode": "view",
+    "live": true,
+    "destination": "host"
+  },
+  "steps": [
+    {
+      "op": "enter"
+    },
+    {
+      "op": "unsent",
+      "field": "description",
+      "value": "Draft text"
+    },
+    {
+      "op": "leave"
+    },
+    {
+      "op": "unsent",
+      "field": "description",
+      "value": ""
+    },
+    {
+      "op": "settle",
+      "ms": 2000
+    },
+    {
+      "op": "leave"
+    }
+  ],
+  "requires": [
+    "input-admitted",
+    "transition-refused"
+  ],
+  "expect": {
+    "mode": "view"
+  }
+}

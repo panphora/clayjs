@@ -575,22 +575,24 @@ export async function bootPage(fixture, { mode, host, resetModules, served = nul
 }
 
 function fakeLocks() {
-  const queue = [];
-  let held = false;
-  async function grant() {
-    if (held || !queue.length) return;
-    held = true;
+  const queues = new Map();
+  const held = new Set();
+  async function grant(name) {
+    const queue = queues.get(name) ?? [];
+    if (held.has(name) || !queue.length) return;
+    held.add(name);
     const { callback, resolve } = queue.shift();
-    const result = await callback({ name: LANE_KEY });
-    held = false;
+    const result = await callback({ name });
+    held.delete(name);
     resolve(result);
-    grant();
+    grant(name);
   }
   return {
     request(name, callback) {
       return new Promise((resolve) => {
-        queue.push({ callback, resolve });
-        Promise.resolve().then(grant);
+        if (!queues.has(name)) queues.set(name, []);
+        queues.get(name).push({ callback, resolve });
+        Promise.resolve().then(() => grant(name));
       });
     },
   };
