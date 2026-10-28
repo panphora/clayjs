@@ -1,0 +1,147 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "path": "tests/mode-counterexamples/cases/blob-exit.json",
+      "status": "pass"
+    },
+    {
+      "path": "tests/mode-counterexamples/cases/blob-reload.json",
+      "status": "pass"
+    },
+    {
+      "path": "tests/mode-counterexamples/cases/bytes-etag-pairing.json",
+      "status": "pass"
+    },
+    {
+      "path": "tests/mode-counterexamples/cases/canonical-freeze.json",
+      "status": "pass"
+    },
+    {
+      "path": "tests/mode-counterexamples/cases/cycles-no-growth.json",
+      "status": "pass"
+    },
+    {
+      "path": "tests/mode-counterexamples/cases/cycles-one-write.json",
+      "status": "pass"
+    },
+    {
+      "path": "tests/mode-counterexamples/cases/draft-storage-failure.json",
+      "status": "pass"
+    },
+    {
+      "path": "tests/mode-counterexamples/cases/draft-store-keeps.json",
+      "status": "pass"
+    },
+    {
+      "path": "tests/mode-counterexamples/cases/enter-leave-one-write.json",
+      "status": "pass"
+    },
+    {
+      "path": "tests/mode-counterexamples/cases/enter-leave-zero-writes.json",
+      "status": "pass"
+    },
+    {
+      "path": "tests/mode-counterexamples/cases/expired-barrier-after-two-saves.json",
+      "status": "pass"
+    },
+    {
+      "path": "tests/mode-counterexamples/cases/expired-barrier-sends-new-edit.json",
+      "status": "pass"
+    },
+    {
+      "path": "tests/mode-counterexamples/cases/held-save-unknown.json",
+      "status": "pass"
+    },
+    {
+      "path": "tests/mode-counterexamples/cases/icon-page-clean-leave.json",
+      "status": "pass"
+    },
+    {
+      "path": "tests/mode-counterexamples/cases/icon-page-typed-then-leave-reduced.json",
+      "status": "pass"
+    },
+    {
+      "path": "tests/mode-counterexamples/cases/ime-composition.json",
+      "status": "pass"
+    },
+    {
+      "path": "tests/mode-counterexamples/cases/late-source.json",
+      "status": "pass"
+    },
+    {
+      "path": "tests/mode-counterexamples/cases/liveness-cleared-source-no-releave.json",
+      "status": "pass"
+    },
+    {
+      "path": "tests/mode-counterexamples/cases/liveness-cleared-source-releave-control.json",
+      "status": "pass"
+    },
+    {
+      "path": "tests/mode-counterexamples/cases/oracle-writer-after-reentry-control.json",
+      "status": "pass"
+    },
+    {
+      "path": "tests/mode-counterexamples/cases/oracle-writer-after-reentry.json",
+      "status": "pass"
+    },
+    {
+      "path": "tests/mode-counterexamples/cases/page-large-after-save-exit.json",
+      "status": "pass"
+    },
+    {
+      "path": "tests/mode-counterexamples/cases/reload-receipts.json",
+      "status": "pass"
+    },
+    {
+      "path": "tests/mode-counterexamples/cases/simultaneous-upgrade.json",
+      "status": "known-failing"
+    },
+    {
+      "path": "tests/mode-counterexamples/cases/stuck-parked-flag-trigger-save.json",
+      "status": "pass"
+    },
+    {
+      "path": "tests/mode-counterexamples/cases/superseded-frame.json",
+      "status": "known-failing"
+    },
+    {
+      "path": "tests/mode-counterexamples/cases/sweep-s20261105-0008-generation-change.json",
+      "status": "pass"
+    },
+    {
+      "path": "tests/mode-counterexamples/cases/sweep-s20261105-0030-generation-change.json",
+      "status": "pass"
+    },
+    {
+      "path": "tests/mode-counterexamples/cases/table-rename-typed-then-leave-reduced.json",
+      "status": "pass"
+    },
+    {
+      "path": "tests/mode-counterexamples/cases/tagless-first-write.json",
+      "status": "pass"
+    },
+    {
+      "path": "tests/mode-counterexamples/cases/unsent-field-pending.json",
+      "status": "pass"
+    },
+    {
+      "path": "tests/mode-counterexamples/cases/writer-drain.json",
+      "status": "pass"
+    }
+  ],
+  "templates": [
+    {
+      "repo": "starter-templates",
+      "path": "templates/00-journal/journal.html"
+    },
+    {
+      "repo": "starter-templates",
+      "path": "templates/01-kanban/kanban.html"
+    },
+    {
+      "repo": "starter-templates",
+      "path": "templates/02-page/page.html"
+    }
+  ]
+}
