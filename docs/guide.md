@@ -308,7 +308,7 @@ Plugins add editing, sync, and UI features to `clay.js`. Most are off by default
 | `live` | off | yes | `clay.live(name)`: a `clay="live"` JSON tag as a live object |
 | `sortable` | off | no | the `sortable` attribute, `window.Sortable`, `clay:sorted` |
 | `undo` | off | no | `clay.undo` (whole-page undo, takes Cmd+Z for the window) |
-| `indicator` | off | no | the save status chip |
+| `indicator` | off | no | the save status chip, drawn by a module fetched at the first input or save state |
 | `upload` | off | no | `clay.upload` |
 | `quickcrop` | off | yes | `clay.quickcrop` |
 | `cms` | off | yes | `clay.cms`; implies `quickcrop` and `upload` |
@@ -336,7 +336,7 @@ Plugins add editing, sync, and UI features to `clay.js`. Most are off by default
 
 Measure what each mode you ship downloads, and keep a byte budget and a test that fails when one grows: [Keep a byte budget per boot, and fail a test when it grows](https://clayjs.com/docs/practices/#keep-a-byte-budget-per-boot-and-fail-a-test-when-it-grows).
 
-**A good default for apps:** `?plugins=sync,sortable,undo,indicator`, plus `upload` for images or attachments, plus `exclude=richclay` when there is no rich text.
+**A good default for apps:** `?plugins=sync,sortable,undo,indicator`, plus `upload` for images or attachments, plus `exclude=richclay` when there is no rich text. A document opens in view even for its owner, so add `menu` for the Edit switch, or declare `<html opens-in="edit">` on a tool page that must edit as soon as it opens.
 
 ### 2.3 Satellites
 
@@ -362,7 +362,7 @@ In Hyperclay Local and HTML Clay, a document needs no special loading to work of
 
 ### 2.4 `clay.ready`
 
-`clay.ready` is a promise that resolves with `window.clay` once boot is done and every plugin has loaded. `clay:ready` fires on `document` at the same moment. Before it resolves, members like `clay.save` and `clay.undo` do not exist. Start app code with `clay.start(...)`: it waits for `clay.ready` and runs once per page ([Starting the app once](https://clayjs.com/docs/guide/architecture/#starting-the-app-once)).
+`clay.ready` is a promise that resolves with `window.clay` once boot is done and every plugin that loads at boot has started; the late plugins ([Plugins that load late](#plugins-that-load-late)) arrive after it. `clay:ready` fires on `document` at the same moment. Before it resolves, members like `clay.save` and `clay.undo` do not exist. Start app code with `clay.start(...)`: it waits for `clay.ready` and runs once per page ([Starting the app once](https://clayjs.com/docs/guide/architecture/#starting-the-app-once)).
 
 `clay.plugins` is the frozen list of plugin names in the plan the loader resolved, late plugins included. It says what the page asked for, not what has finished loading.
 
@@ -469,10 +469,14 @@ Permission alone does not open edit. An owner on hyperclay.com opens in view, wi
 The mode this tab starts in is decided once, in this order:
 
 1. **Draft mode**, on a page that opted in ([Free documents for visitors](https://clayjs.com/docs/guide/free-documents/)). The visitor gets the editing UI, and their work stays in their own browser. `?editmode=false`, a `viewonly` attribute, a stale token, `window.clayEditMode`, or a save token all turn draft mode off. Only the owner cookie plus `?editmode=true` edits the original. On a `viewonly` document or one with a stale token, `?editmode=true` is plain edit mode as usual ([The mode ladder](https://clayjs.com/docs/guide/free-documents/#the-mode-ladder)).
-2. **The reload receipt.** A deliberate switch writes `sessionStorage` entry `clay:doc:<pathname>:mode-receipt` just before it reloads. Boot reads it once and removes it, accepts it only within 30 seconds and only for a reload of the same path, and then starts the tab in the mode it names. A tab that can edit also leaves a receipt when the page is hidden, and boot accepts it only for a browser reload, so reloading an editing tab comes back in edit. A receipt keeps a reload in the same tab, not a lasting preference.
+2. **The reload receipt.** A deliberate switch writes `sessionStorage` entry `clay:doc:<pathname>:mode-receipt` just before it reloads. Boot reads it once and removes it, accepts it only within 30 seconds and only for a reload of the same path, and then starts the tab in the mode it names. A tab that can edit also leaves a receipt when the page is hidden, and boot accepts it only for a browser reload, so reloading an editing tab comes back in edit. On a page that declares `<html opens-in="edit">`, that hide receipt never keeps a tab in view, so adding the attribute takes effect on the next reload; a deliberate switch to view still does. A receipt keeps a reload in the same tab, not a lasting preference.
 3. **`?editmode=`.** Only the literal `true` asks for edit.
 4. **`window.clayEditMode === true`** or `<html opens-in="edit">`.
 5. **Otherwise** the tab starts in view.
+
+Nothing else opens edit, including a page whose own script makes text editable. An editor library such as OverType or CodeMirror, a `persist` field, and `contenteditable` set by your code all accept typing in view mode, and none of that typing is saved, because the save path runs only in edit. A tool page that must be editable the moment it opens, such as a journal or a notes pad, declares `<html opens-in="edit">`. Every other document needs a way into edit: the `menu` plugin, or a control that calls `clay.setMode("edit")`.
+
+When someone who can edit types into a document in view anyway, ClayJS shows a notice on the first edit to a field that would save in edit mode: a `persist` control, or `contenteditable` content outside `editor-ui`, `no-save` and `freeze`. A field that edit mode would unlock (`editmode:contenteditable`, `viewmode:readonly`, `viewmode:disabled`) raises it on the first attempt to type into it or press it. The notice reads "In view mode, so edits won't be saved." and stays until the tab enters edit, with a **Switch to edit** button that calls `clay.setMode("edit")`. A document without `clay-mode-switch="live"` reloads to switch, so the characters typed before the notice appeared are lost. A visitor who cannot edit never sees it, and a page with its own handled single-key shortcuts does not set it off. It also writes one warning to the console.
 
 `<html viewonly>` in the file forces view mode. So does a response carrying only the pre-1.9.0 token `htmlclaytoken` (an out-of-date HTML Clay, which also shows an update bar).
 
@@ -1037,7 +1041,7 @@ To batch saves in part of an autosaving page, wrap that region in `clay="no-trig
 
 **Branch on `msgType`, not `ok`.** `ok: false` also means "nothing to save" or "queued behind another save". To ensure the host holds what the page holds now, use `flush`:
 
-- `clay.save.soon()` saves a discrete action (a moved card, a toggled checkbox) within about 250 ms instead of after the autosave wait. Calls within a second share one save, and each resolves with that save's result. Leave typing on autosave.
+- `clay.save.soon()` saves a discrete action (a moved card, a toggled checkbox) within about 250 ms instead of after the autosave wait. Calls within a second share one save, and each resolves with that save's result. A save you asked for with Cmd+S or `soon()` that an incoming merge cancels mid preparation is captured again once, after the merge settles (150 ms of quiet, at most 2 s); an autosave cancelled the same way is not retried. Leave typing on autosave.
 - `clay.save.flush({ keepalive, timeoutMs })` resolves `{ state: "view" | "clean" | "saved", etag }` only when the host holds the current bytes. It waits out the settle window and any in-flight save, and retries while the page keeps changing. It rejects with `err.state` of `failed`, `conflict`, or `blocked`.
 - `clay.save.force()` saves without the dirty check, writing `no-dirty` and `no-watch` edits. Template content edits need no force: `save()` and the close warning see them, and only autosave does not.
 - `clay.save.overwrite()` re-reads the host's current version stamp and force-saves over it. This is "keep mine" after a conflict.
@@ -1150,7 +1154,7 @@ html[unsaved="true"]:not([savestatus="error"]):not([savestatus="offline"]) .chip
 
 In draft mode, nothing is saved on purpose, and `html[draftmode="true"]` indicates why the page is not marked saved.
 
-Put `#status` in chrome, or load the `indicator` plugin for a ready-made chip. With `clay-ui.js` loaded, save errors and offline states become persistent toasts. Without the `indicator` plugin, `clay-ui.js` also toasts "Saved" after every save; with it, set `clay.saveToast = true` to get those toasts too.
+Put `#status` in chrome, or load the `indicator` plugin for a ready-made chip. The chip's drawing arrives on demand, at the first input or the first save state, so it costs nothing at edit ready. With `clay-ui.js` loaded, save errors and offline states become persistent toasts. Without the `indicator` plugin, `clay-ui.js` also toasts "Saved" after every save; with it, set `clay.saveToast = true` to get those toasts too.
 
 Events, all on `document`:
 
@@ -1250,7 +1254,7 @@ When an incoming frame (B) meets unsaved edits in this tab (A), ClayJS merges th
 
 More engine rules:
 
-- Text merges word by word inside a block, and formatting merges per character. Inline `<style>` and textarea text merge word by word. Scripts and comments merge as whole values.
+- Text merges word by word inside a block, and formatting merges per character. Inline `<style>` text merges word by word, while a `<textarea>` merges as one value. Scripts and comments merge as whole values.
 - Matched live nodes are moved, not recreated, so listeners, focus, caret, and iframes survive. An element that matches nothing (re-keyed, or changed beyond recognition among similar siblings) is removed and inserted fresh, and listeners attached directly to it are gone. **Use delegated listeners** on `document` or a stable root.
 - A new or changed inline `<script>` in the frame runs once after the merge. Guard one-time setup with `clay.start` ([Starting the app once](https://clayjs.com/docs/guide/architecture/#starting-the-app-once)).
 - Window scroll is restored. Inner scroll containers are not, except the focused element's own.
@@ -1871,7 +1875,7 @@ Rules for sapjs in a malleable file:
 
 It fits fixed-layout content sites such as landing pages, menus, pricing, FAQs, and team pages, where a non-developer changes copy and images. It does not fit apps where editing is the product: its form is a separate surface from the content, new list items clone the first item's attributes (including its state), and rich text inside lists is flattened in the sidebar. A file can use both if the CMS owns the header copy, the app owns `<main>`, and the rules never reach into the app's region. Give every list that can become empty a `cms-template` seed hidden by CSS, not by the `hidden` attribute (which is copied into every new item). Add `sortable` to the plugin list for drag in the sidebar.
 
-The rules tag can declare which editor opens. `data-cms-view="inline"` edits text in place and opens small popovers for everything else, while no attribute (or `"sidebar"`) opens the form in a side panel. The "Edit content" button opens whichever the page declares.
+The rules tag can declare which editor opens. `data-cms-view="inline"` edits text in place and opens small popovers for everything else, while no attribute (or `"sidebar"`) opens the form in a side panel. The "Edit content" button opens whichever the page declares. The CMS edits only in edit mode: while the page is in view, `clay.cms.open()` answers `{ ok: false, code: "not-allowed" }`, so a button of your own calls `clay.setMode("edit")` first.
 
 The CMS also edits how a page looks. A rule ending in `@--name` reads and writes one CSS custom property in an element's `style` attribute. For example, `"accent": "html@--color-accent"` with `a { color: var(--color-accent) }` in your CSS gives the owner a color picker. Any `--color-*` name gets a color picker, any `--font-*` name gets a list of 40 Google Fonts, and the CMS keeps one `<link data-hcms-fonts>` loading the fonts in use. For a layout choice, put `data-hcms-component:data-layout="variant"` and `data-hcms-options:data-layout="1:cols-1 2:cols-2 3:cols-3"` on a section and key your grid CSS on `[data-layout]`: the owner gets icon tiles, and the choice writes only the attribute. Style fields on `html`, `body`, or `:root` gather in a "Page style" group at the top of the form.
 
@@ -2220,7 +2224,7 @@ Use `clay="editor-ui"` instead for CSS that viewers must not receive or that rep
 | Presence (`clay.presence`) | tabs of this browser, shown as "This computer" | tabs on this computer, relayed by the app | one person per account and one session per tab, filtered per recipient |
 | `by` on frames, editing marker | no | no | yes |
 | Live stores ([Live data: `clay="live"`](https://clayjs.com/docs/guide/live-sync/#live-data-clay-live)) | tabs of one browser at full speed | tabs of one browser at full speed; other devices at save speed | every editor at full speed |
-| Page editor merge state ([Live data: `clay="live"`](https://clayjs.com/docs/guide/live-sync/#live-data-clay-live)) | none in the file: open tabs share it, a fresh open rebuilds it from the article | kept beside the file | kept beside the file |
+| Page editor merge state ([Live data: `clay="live"`](https://clayjs.com/docs/guide/live-sync/#live-data-clay-live)) | kept beside the file: `document.pageState.href` returns the state stored with the exact bytes on disk | kept beside the file | kept beside the file |
 | Wire and ai-edit | yes | yes | ai-edit only, for owners and team editors on a paid plan |
 | Data API write | yes | yes | read only |
 | Uploads | 25 MB, in `~/htmlclay/uploads/` | 25 MB, in the root's `uploads/` | 10, 20 or 100 MB by plan, in the account's `uploads/` |
@@ -2612,6 +2616,7 @@ An element inside the template with `[visitor-intro-start]` scrolls to the app, 
 20. Images use `clay.upload`, embedding only on `unsupported`.
 21. The file opens in view mode with JavaScript disabled and shows correct content and no edit controls.
 22. With sap: `Sap.status().ok`, the live root matches the file after load (no computed value rewritten), no `[sap-error]`, rows with your own ids.
+23. A tool page whose script opens an editor at load (a journal, a notes pad) declares `<html opens-in="edit">`. Without it the page opens in view, accepts typing and saves none of it.
 
 ### 13.2 Testing a document that changes modes
 
@@ -2637,6 +2642,7 @@ Each check names the clayjs test that proves the library side.
 | Records authored with live `contenteditable` stay editable for viewers until the first save | [Mode attributes: one file for editors and viewers](https://clayjs.com/docs/guide/edit-mode/#mode-attributes-one-file-for-editors-and-viewers) |
 | Templates in the inert form give clones that cannot be edited until reload | [Mode attributes: one file for editors and viewers](https://clayjs.com/docs/guide/edit-mode/#mode-attributes-one-file-for-editors-and-viewers) |
 | Unguarded edit-only API calls throw in view mode | [What works in view mode](https://clayjs.com/docs/guide/edit-mode/#what-works-in-view-mode) |
+| A page whose script opens an editor at load accepts typing in view mode and saves nothing | [How the mode is decided](https://clayjs.com/docs/guide/edit-mode/#how-the-mode-is-decided) |
 | Reading `clay.mode` once at boot and keeping it | [How the mode is decided](https://clayjs.com/docs/guide/edit-mode/#how-the-mode-is-decided) |
 | Using `clay.canEdit` as the guard for writing; use `clay.modeLifecycle.canWrite()` | [Switching without a reload: clay-mode-switch="live"](https://clayjs.com/docs/guide/edit-mode/#switching-without-a-reload-clay-mode-switch-live) |
 | Switching modes by writing the root `editmode` attribute | [Switching modes: clay.setMode](https://clayjs.com/docs/guide/edit-mode/#switching-modes-clay-setmode) |
