@@ -223,19 +223,35 @@ test("a mode change mid-preparation cancels with no request and no saved event",
   expect(captures).toBe(capturesBefore + 1);
 });
 
-test("a morph during the preparation cancels the job", async () => {
+test("a morph during the preparation cancels the capture it was verifying", async () => {
   setText("morph-cancel");
   const sentBefore = posts.length;
+  const capturesBefore = captures;
 
   const saving = save.savePage();
   // A disk frame or a peer's edit replaced the page under the job: the bytes it verified
-  // describe a page that is no longer here.
+  // describe a page that is no longer here, so the person's save captures the page again.
   document.dispatchEvent(new CustomEvent("clay:sync-applied", { detail: { source: "disk", seq: 1 } }));
   const result = await saving;
 
-  expect(result.msgType).toBe("skipped");
-  expect(result.msg).toMatch(/cancelled/);
-  expect(posts.length).toBe(sentBefore);
+  expect(result.ok).toBe(true);
+  expect(captures).toBe(capturesBefore + 2);
+  expect(posts.length).toBe(sentBefore + 1);
+});
+
+test("a person's save cancelled by a merge is retried once the merge settles", async () => {
+  setText("retry-A");
+  const sentBefore = posts.length;
+
+  const saving = save.savePage();
+  document.dispatchEvent(new CustomEvent("clay:sync-applied", { detail: { source: "disk", seq: 21 } }));
+  // What the merge left behind: the retry captures this page, not the one the merge replaced.
+  setText("retry-B");
+  const result = await saving;
+
+  expect(result.ok).toBe(true);
+  expect(posts.length).toBe(sentBefore + 1);
+  expect(lastPost()).toContain("retry-B");
 });
 
 function holdSlices() {
@@ -259,6 +275,52 @@ function holdSlices() {
   return gate;
 }
 
+test("a second merge during the retry cancels it for good", async () => {
+  setText("retry-twice-A");
+  const sentBefore = posts.length;
+
+  const gate = holdSlices();
+  let retry = null;
+  try {
+    const saving = save.savePage();
+    expect(gate.held.length).toBeGreaterThan(0);
+
+    document.dispatchEvent(new CustomEvent("clay:sync-applied", { detail: { source: "disk", seq: 22 } }));
+    gate.release();
+    // The retry prepares under its own hold, so a second merge can be made to land inside it.
+    retry = holdSlices();
+
+    await sleep(200);
+    expect(retry.held.length).toBeGreaterThan(0);
+    document.dispatchEvent(new CustomEvent("clay:sync-applied", { detail: { source: "disk", seq: 23 } }));
+    retry.release();
+
+    const result = await saving;
+    expect(result.msgType).toBe("skipped");
+    expect(result.msg).toMatch(/cancelled/);
+    expect(posts.length).toBe(sentBefore);
+  } finally {
+    if (retry) retry.restore();
+    gate.restore();
+  }
+});
+
+test("an autosave cancelled by a merge is not retried", async () => {
+  await sleep(1300);
+  setText("auto-A");
+  const sentBefore = posts.length;
+
+  const saving = save.savePageThrottled();
+  document.dispatchEvent(new CustomEvent("clay:sync-applied", { detail: { source: "disk", seq: 24 } }));
+  const result = await saving;
+
+  expect(result.msgType).toBe("skipped");
+  expect(result.msg).toMatch(/cancelled/);
+
+  await sleep(2500);
+  expect(posts.length).toBe(sentBefore);
+});
+
 test("a cancelled sliced save sends the save queued behind it", async () => {
   const gate = holdSlices();
   try {
@@ -272,7 +334,8 @@ test("a cancelled sliced save sends the save queued behind it", async () => {
     const second = save.savePage();
     expect(await second).toMatchObject({ msgType: "skipped", msg: "Save already in progress" });
 
-    document.dispatchEvent(new CustomEvent("clay:sync-applied", { detail: { source: "disk", seq: 2 } }));
+    // A mode change cancels for good: a merge would be retried (W4).
+    save.setSaveGeneration(save.saveGeneration() + 1);
     gate.release();
 
     const result = await saving;
@@ -302,7 +365,8 @@ test("a cancelled sliced save settles the save.soon() waiter queued behind it", 
     expect(answered).toBe(false);
 
     setText("soon-B");
-    document.dispatchEvent(new CustomEvent("clay:sync-applied", { detail: { source: "disk", seq: 3 } }));
+    // A mode change cancels for good: a merge would be retried (W4).
+    save.setSaveGeneration(save.saveGeneration() + 1);
     gate.release();
 
     const result = await saving;
@@ -335,7 +399,8 @@ test("a cancellation drains an autosave that parked behind the prepared save", a
     const parked = await save.savePageThrottled();
     expect(parked).toMatchObject({ msgType: "skipped", msg: "Save already in progress" });
 
-    document.dispatchEvent(new CustomEvent("clay:sync-applied", { detail: { source: "disk", seq: 11 } }));
+    // A mode change cancels for good: a merge would be retried (W4).
+    save.setSaveGeneration(save.saveGeneration() + 1);
     gate.release();
 
     const result = await saving;
@@ -392,7 +457,7 @@ test("a cancellation with nothing queued sends nothing", async () => {
   const sentBefore = posts.length;
 
   const saving = save.savePage();
-  document.dispatchEvent(new CustomEvent("clay:sync-applied", { detail: { source: "disk", seq: 4 } }));
+  save.setSaveGeneration(save.saveGeneration() + 1);
   const result = await saving;
 
   expect(result.msgType).toBe("skipped");

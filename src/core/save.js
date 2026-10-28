@@ -929,6 +929,22 @@ function prepareInvalidation(ctx, epoch, morph) {
   return null;
 }
 
+// A merge arrives as a burst of applied frames: a retry waits for a quiet moment, never
+// longer than two seconds, so it captures the page the burst left behind.
+function mergeSettled(quietMs = 150, maxMs = 2000) {
+  return new Promise((resolve) => {
+    const started = monotonic();
+    let timer = null;
+    const done = () => { document.removeEventListener('clay:sync-applied', bump); resolve(); };
+    const bump = () => {
+      clearTimeout(timer);
+      timer = setTimeout(done, Math.max(0, Math.min(quietMs, maxMs - (monotonic() - started))));
+    };
+    document.addEventListener('clay:sync-applied', bump);
+    bump();
+  });
+}
+
 /**
  * Everything one capture decides, for both save paths.
  *
@@ -1135,6 +1151,18 @@ async function runSlicedSave(ctx, lane) {
       // The document format rose under a job already prepared: its marker and its
       // verification both predate the floor, so the capture is taken again at the new one.
       if (late === 'floor' && round === 0) continue;
+      // The person asked for this save: a merge that landed under it does not get to
+      // swallow it. Once the merge settles the page is captured again, once.
+      if (late === 'morph' && ctx.explicit && round === 0) {
+        await mergeSettled();
+        applied.over = false;
+        if (!pageMaybeDirty()) {
+          const clean = skipped_('No changes to save');
+          if (typeof ctx.callback === 'function') ctx.callback(clean);
+          return { result: clean, dispatched: false };
+        }
+        continue;
+      }
       if (typeof ctx.callback === 'function') ctx.callback(skipped);
       return { result: skipped, dispatched: false };
     }
