@@ -575,7 +575,7 @@ test("a soon() caller hears the error of a forced save whose capture fails", asy
   }
 });
 
-test("a soon() caller hears the save a forced save lands in one task", async () => {
+test("a soon() caller queued behind a refused drain hears the refusal, and a later forced save lands in one task", async () => {
   setText("forced-save-whole-capture");
   // The preparer loads on demand: one plain save gets it in place, so the hold below
   // catches a preparation that really is sliced.
@@ -592,13 +592,15 @@ test("a soon() caller hears the save a forced save lands in one task", async () 
     const answers = queued.answers;
 
     // The attempt queued behind the save on the wire is kept rather than sent: the host
-    // has withdrawn permission, so the drain refuses it and takes nobody with it, and the
-    // callers are left waiting with the lane idle.
+    // has withdrawn permission, so the drain refuses it, and the callers waiting on it hear
+    // that refusal rather than waiting for a save that may never come.
     editMode.noteHostWritable(false);
     gate.release();
     await saving;
     saving = null;
-    expect(answers).toHaveLength(0);
+    for (let i = 0; i < 50 && answers.length === 0; i++) await sleep(20);
+    expect(answers).toHaveLength(1);
+    expect(answers[0]).toMatchObject({ ok: false });
     editMode.noteHostWritable(true);
     for (let i = 0; i < 200 && saveCore.isSaveInProgress(); i++) await sleep(20);
     expect(saveCore.isSaveInProgress()).toBe(false);
@@ -610,7 +612,6 @@ test("a soon() caller hears the save a forced save lands in one task", async () 
 
     await sleep(100);
     expect(answers).toHaveLength(1);
-    expect(answers[0]).toBe(saved);
     expect(posts.length).toBe(sentBefore + 1);
   } finally {
     editMode.noteHostWritable(true);
