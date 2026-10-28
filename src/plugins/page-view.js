@@ -34,13 +34,14 @@ const oneArticle = () => document.querySelectorAll("article[data-page]").length 
 
 // The reader reports what it applied on `clay:reader-status`; the first file is the
 // first applied one, and a blocked or recoverable first read settles with null while
-// the stream stays open for the next file.
+// the stream stays open for the next file. So does a stream that cannot open: a switch
+// asked before any file arrives reloads instead of waiting out its deadline.
 function listen() {
   onStatus = (event) => {
     if (cancelled) return;
     const status = event.detail;
     if (status?.state === "applied") settle?.(reader);
-    else if (status?.state === "blocked" || status?.state === "recoverable") settle?.(null);
+    else if (status?.state === "blocked" || status?.state === "recoverable" || status?.state === "reconnecting") settle?.(null);
   };
   document.addEventListener("clay:reader-status", onStatus);
 }

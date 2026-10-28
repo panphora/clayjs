@@ -156,6 +156,21 @@ test("clay:ready fires even when the host's stream never opens, and the first fi
   expect(await pageView.acquired).toBeNull();
 });
 
+// A host or proxy that runs no saved-lane stream: a switch asked meanwhile reloads at
+// once instead of waiting out its deadline, and the stream opening later still serves.
+test("a stream that cannot open settles acquired with null, and opening later still serves the file", async () => {
+  const disk = SERVED("two", "Served");
+  const { pageView } = await bootView(async () => ({ ok: true, status: 200, text: async () => disk, headers: { get: () => null } }));
+
+  sources[0].onerror?.(new Event("error"));
+  expect(await pageView.acquired).toBeNull();
+
+  sources[0].onopen();
+  await flush();
+  expect(document.querySelector('[data-id="p1"]').textContent).toBe("Served");
+  pageView.stop();
+});
+
 test("a stream that opens after clay:ready still hands acquired the reader", async () => {
   const disk = SERVED("two", "Served");
   const { pageView, events } = await bootView(async () => ({ ok: true, status: 200, text: async () => disk, headers: { get: () => null } }));
