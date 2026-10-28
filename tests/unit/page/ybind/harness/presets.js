@@ -60,7 +60,8 @@ export const GROUPS = {
   attrs: ["attronly"],
   delblock: ["delblockonly"],
   undo: ["delundo0", "delundo"],
-  known: ["delblockedit", "moveonly", "movejoin", "moveedit", "moveburst", "moveenter", "moveoff", "moveundo", "struct", "structoff", "structloss", "structall"],
+  move: ["moveonly", "attrburst"],
+  known: ["delblockedit", "movejoin", "moveedit", "moveburst", "moveenter", "moveoff", "moveundo", "struct", "structoff", "structloss", "structall"],
 };
 
 export const ALLOWED = {

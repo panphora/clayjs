@@ -4,6 +4,7 @@ import { state as pmState } from "../../vendor/prosemirror.vendor.js";
 import { walk } from "./walk.js";
 import { docOf } from "./doc.js";
 import { createProjectionMap } from "./projection-map.js";
+import { beforeFence } from "./writer.js";
 import { unitIds } from "./origins.js";
 import { attrKey, copyActiveKey, parseGoneIntents, physicalKeyOf, recoveredRoot, removeKey, restoreKey } from "./recovery.js";
 
@@ -264,7 +265,7 @@ export function moveBlocks({ pd, view, um, origins, render }, args = {}) {
       let text = null, textAttrs = null;
       const flush = () => {
         if (text === null) return;
-        pd.flow.insert(cursor, text, textAttrs ?? undefined);
+        beforeFence(pd, cursor, after.fences, () => pd.flow.insert(cursor, text, textAttrs ?? undefined));
         cursor += text.length;
         text = null;
       };
@@ -275,7 +276,7 @@ export function moveBlocks({ pd, view, um, origins, render }, args = {}) {
           text += unit.ch;
         } else {
           flush();
-          pd.flow.insertEmbed(cursor, unit.embed, unit.attrs);
+          beforeFence(pd, cursor, after.fences, () => pd.flow.insertEmbed(cursor, unit.embed, unit.attrs));
           cursor += 1;
         }
       }

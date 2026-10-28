@@ -146,7 +146,7 @@ const fenceAfter = (pd, yIdx, fences) => {
 
 // Yjs places an insertion after every deleted item to its right. A hidden range that starts at a
 // deleted item would then swallow text typed just before it, so the fence counts as live for the call.
-const beforeFence = (pd, yIdx, fences, fn) => {
+export const beforeFence = (pd, yIdx, fences, fn) => {
   const fence = fenceAfter(pd, yIdx, fences);
   if (!fence) return fn();
   fence.deleted = false;

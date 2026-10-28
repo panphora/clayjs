@@ -3,6 +3,7 @@ import { makeYTab, check, reload, seedValue, docOfValue } from './tab.js';
 import { commands, state as pmState, model as pmModel } from '../../../../../src/vendor/prosemirror.vendor.js';
 import { schema } from '../../../../../src/page/schema.js';
 import { REMOTE } from '../../../../../src/page/model.js';
+import { outline, siblingSpan, moveSpanTr, BlockSelection } from '../../../../../src/page/blocks.js';
 import { rng } from './rng.js';
 import { PRESETS } from './presets.js';
 
@@ -69,6 +70,12 @@ export function genPlan(seed, cfg = DEFAULT) {
   }
   return plan;
 }
+
+const moveTo = (ents, lo, hi, target) => (st, dispatch) => {
+  if (target >= ents[lo].at && target <= ents[hi].end) return false;
+  dispatch(moveSpanTr(st, ents, lo, hi, target, () => null, new BlockSelection(st.doc.resolve(ents[lo].at), st.doc.resolve(ents[hi].end))));
+  return true;
+};
 
 const alphabet = (k) => String.fromCharCode(0x4e00 + k);
 
@@ -181,16 +188,12 @@ export async function runPlan(plan, cfg = DEFAULT, { seed = 1, quiet = false } =
       const p = pick(t, a.f[0], a.f[1]); if (!p) return;
       sel(t, p.pos + 1 + p.off); run(commands.splitBlock);
     } else if (a.kind === 'move') {
-      const blocks = [];
-      view.state.doc.forEach((node, pos) => blocks.push({ node, pos }));
-      if (blocks.length < 2) return;
-      const from = blocks[Math.floor(a.f[0] * blocks.length)];
-      const tr = view.state.tr;
-      tr.delete(from.pos, from.pos + from.node.nodeSize);
-      const stops = [0];
-      tr.doc.forEach((node, pos) => stops.push(pos + node.nodeSize));
-      tr.insert(stops[Math.floor(a.f[1] * stops.length)], from.node);
-      view.dispatch(tr);
+      const ents = outline(view.state.doc);
+      if (ents.length < 2) return;
+      const i = Math.floor(a.f[0] * ents.length);
+      const { lo, hi } = siblingSpan(ents, i, i);
+      const stops = [0, ...ents.filter((e) => e.i < lo || e.i > hi).map((e) => e.end)];
+      run(moveTo(ents, lo, hi, stops[Math.floor(a.f[1] * stops.length)]));
     } else if (a.kind === 'delblock') {
       const blocks = [];
       view.state.doc.forEach((node, pos) => blocks.push({ node, pos }));

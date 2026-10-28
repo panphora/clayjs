@@ -183,10 +183,10 @@ function walkFlow(pd, index) {
     if (a.legacy && a.text) orphans.push({ key: a.key, id: a.blockId, text: a.text, h: hashText(a.text) });
     hidden.push({ key: a.key, sourceKey: a.sourceKey, blockId: a.blockId, end: a.end, sv: a.sv, at: a.at, live: a.live, items: a.items });
   };
-  const matchesEnd = (it, end) => {
-    if (covers(it, end)) return true;
+  const matchesEnd = (it, end, after = -1) => {
+    if (covers(it, end) && end.clock > after) return true;
     return markerIdsWithin(it).some((id) => {
-      if (!pd.origins.has(aliasKey(id.client, id.clock))) return false;
+      if (id.clock <= after || !pd.origins.has(aliasKey(id.client, id.clock))) return false;
       const resolved = index.resolve(id);
       return resolved.client === end.client && resolved.clock === end.clock;
     });
@@ -200,6 +200,16 @@ function walkFlow(pd, index) {
     for (let i = lo; i < clocks.length && clocks[i] < it.id.clock + it.length; i++) ids.push({ client: it.id.client, clock: clocks[i] });
     return ids;
   };
+  const deletedEdgesIn = (it, after = -1) => (it.deleted ? markerIdsWithin(it).flatMap((id) => {
+    if (id.clock <= after) return [];
+    const sourceKey = idKey(index.resolve(id));
+    const record = index.boundaryOf(id);
+    if (!record || (record.kind !== "removed" && record.kind !== "copy") || liveSources.has(sourceKey)) return [];
+    return [{ blockId: record.blockId, sourceKey }];
+  }) : []);
+  // `after` limits an end to what lies past a removal's own source: Yjs merges adjacent deleted
+  // items, so a removal can start and end inside the same one, on some replicas and not others.
+  const endsIn = (it, a, { deletedEdges, boundary = false, edge, after = -1 }) => a.end ? matchesEnd(it, a.end, after) : a.implicit ? boundary || deletedEdges.some((e) => e.sourceKey !== a.sourceKey) : (boundary && edge !== a.blockId) || deletedEdges.some((e) => e.blockId !== a.blockId);
   const proj = [];
   const endsOf = (removal) => ({ blockId: removal.blockId, end: removal.end ? parseKey(removal.end) : null, implicit: removal.implicit === true, sourceKey: removal.sourceKey });
   for (let it = pd.flow._start; it; it = it.right) {
@@ -208,13 +218,8 @@ function walkFlow(pd, index) {
     if (hiding || proj.length) {
       const edge = !it.deleted && it.content instanceof Y.ContentEmbed ? it.content.embed.b : undefined;
       const boundary = edge !== undefined && boundarySource(it, edge) === null;
-      const deletedEdges = it.deleted ? markerIdsWithin(it).flatMap((id) => {
-        const sourceKey = idKey(index.resolve(id));
-        const record = index.boundaryOf(id);
-        if (!record || (record.kind !== "removed" && record.kind !== "copy") || liveSources.has(sourceKey)) return [];
-        return [{ blockId: record.blockId, sourceKey }];
-      }) : [];
-      const ends = (a) => a.end ? matchesEnd(it, a.end) : a.implicit ? boundary || deletedEdges.some((e) => e.sourceKey !== a.sourceKey) : (boundary && edge !== a.blockId) || deletedEdges.some((e) => e.blockId !== a.blockId);
+      const deletedEdges = deletedEdgesIn(it);
+      const ends = (a) => endsIn(it, a, { deletedEdges, boundary, edge });
       if (hiding) {
         const keep = [];
         for (const a of hiding.active) { if (ends(a)) settle(a); else keep.push(a); }
@@ -237,10 +242,12 @@ function walkFlow(pd, index) {
       if (!hiding && it.deleted) fences.push({ client: it.id.client, clock: it.id.clock });
       for (const removal of removals) {
         const a = { legacy: false, implicit: removal.implicit === true, key: removal.key, sourceKey: removal.sourceKey, blockId: removal.blockId, end: removal.end ? parseKey(removal.end) : null, sv: removal.sv, at: here, live: !it.deleted, items: [] };
+        const after = it.deleted && covers(it, removal.source) ? removal.source.clock : null;
+        if (after !== null && endsIn(it, a, { deletedEdges: deletedEdgesIn(it, after), after })) { settle(a); continue; }
         if (hiding) hiding.active.push(a);
         else hiding = { active: [a], len: 0, resume: cur };
       }
-      if (!it.deleted) hiding.len += it.length;
+      if (hiding && !it.deleted) hiding.len += it.length;
       continue;
     }
     const start = starts.get(it);
