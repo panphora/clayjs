@@ -107,8 +107,11 @@ export function learnedHostWritable() {
 }
 
 // Does this tab start editing? Only when something explicit asks for it.
+// A receipt the page left on its own hide records where the tab happened to be, not a
+// choice, so a tool page that now declares opens-in="edit" still opens editing. A switch
+// the person made leaves an internal receipt, and that one is kept.
 const startsEditing = receipt
-  ? receipt.mode === "edit"
+  ? receipt.mode === "edit" || (opensInEdit && !receipt.internal)
   : query.editmode
     ? query.editmode === "true"
     : forcedEditMode === true || opensInEdit;

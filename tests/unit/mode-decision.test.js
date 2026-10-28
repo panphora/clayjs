@@ -224,6 +224,20 @@ test("a reload with a view receipt keeps permission with no cookie or token", as
   expect(mod.canEdit).toBe(true);
 });
 
+test("opens-in=\"edit\" outranks the view receipt a reload left on hide", async () => {
+  prepare({ opensIn: "edit", token: true, receipt: { mode: "view", internal: false, canEdit: true }, nav: "reload" });
+  const mod = await decide();
+
+  expect(mod.mode).toBe("edit");
+});
+
+test("a switch to view the person made survives the reload on an opens-in=\"edit\" page", async () => {
+  prepare({ opensIn: "edit", token: true, receipt: { mode: "view", internal: true, canEdit: true }, nav: "reload" });
+  const mod = await decide();
+
+  expect(mod.mode).toBe("view");
+});
+
 test("a receipt's canEdit is ignored under window.clayEditMode = false", async () => {
   prepare({ clayEditMode: false, receipt: { mode: "view", internal: false, canEdit: true }, nav: "reload" });
   const mod = await decide();
