@@ -96,7 +96,8 @@ test('a page update the room refuses as too large is not offered again and leave
     expect(b.ydoc.getText('flow').toString().length).toBe(3_000_000);
     expect(h.room.stores.get('other').value.count).toBe(1);
     const captured = captureCheckpoint(h.room, { nodeId: null, roomKey: 'fixture' });
-    expect(renderCheckpoint(html({ page: initial, other: { count: 0 } }), captured, { createDocument: () => new JSDOM('').window.document })).toMatchObject({ kind: 'ok' });
+    const rendered = renderCheckpoint(html({ page: initial, other: { count: 0 } }), captured, { createDocument: () => new JSDOM('').window.document });
+    expect(rendered.kind === 'ok' ? 'ok' : rendered).toBe('ok');
   } finally { h.stop(); }
 }, 60000);
 
@@ -117,7 +118,8 @@ test('an update queued behind a refused one is taken back with it', async () => 
     const value = h.room.stores.get('page').value;
     expect(Object.keys(value.y)).toEqual(Object.keys(initial.y));
     const captured = captureCheckpoint(h.room, { nodeId: null, roomKey: 'fixture' });
-    expect(renderCheckpoint(html({ page: initial }), captured, { createDocument: () => new JSDOM('').window.document })).toMatchObject({ kind: 'ok' });
+    const rendered = renderCheckpoint(html({ page: initial }), captured, { createDocument: () => new JSDOM('').window.document });
+    expect(rendered.kind === 'ok' ? 'ok' : rendered).toBe('ok');
     expect(a.ydoc.getText('flow').toString()).toMatch(/FOLLOWUP$/);
   } finally { h.stop(); }
 }, 60000);
