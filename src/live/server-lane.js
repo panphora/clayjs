@@ -46,6 +46,7 @@ export async function fetchLiveState(clientId, since = null, { signal } = {}) {
   const url = dataUrl();
   if (clientId) url.searchParams.set("client-id", clientId);
   if (since && typeof since.epoch === "string" && Number.isInteger(since.seq)) url.searchParams.set("since", `${since.epoch}:${since.seq}`);
+  url.searchParams.set("compaction", "1");
   try {
     const response = await fetch(url.href, {
       credentials: "same-origin",

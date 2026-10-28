@@ -231,7 +231,7 @@ export function createFastLane({
     lastSentAt = now();
     let result;
     try {
-      result = await transport.send(clientId, { name, n: frame.n, ops: frame.ops, epoch: sentEpoch, ...(conn !== undefined && { conn }), ...(frame.receiptGeneration !== null && { receiptGeneration: frame.receiptGeneration }), ...(frame.pageGeneration !== null && PAGE_STORE.test(name) && { pageGeneration: frame.pageGeneration }), ...(frame.adopted && { adopted: frame.adopted }) });
+      result = await transport.send(clientId, { name, n: frame.n, ops: frame.ops, epoch: sentEpoch, ...(conn !== undefined && { conn }), ...(frame.receiptGeneration !== null && { receiptGeneration: frame.receiptGeneration }), ...(frame.pageGeneration !== null && PAGE_STORE.test(name) && { pageGeneration: frame.pageGeneration }), ...(frame.adopted && { adopted: frame.adopted }), ...(PAGE_STORE.test(name) && lane.compaction?.v === 1 && { compaction: 1 }) });
     } catch {
       result = null;
     }
@@ -386,6 +386,12 @@ export function createFastLane({
 
   function apply(frame) {
     seq = frame.seq;
+    if (frame.from === "compactor") {
+      holdUntil = 0;
+      if (timer !== null) clearTimer(timer);
+      timer = null;
+      schedule();
+    }
     const store = entries.get(frame.name)?.store;
     if (!store || abandoned.has(frame.name)) return;
     if (!roomNames.has(frame.name)) {
@@ -510,6 +516,7 @@ export function createFastLane({
       prune(name, lane);
       const held = lane.room;
       lane.room = !!room;
+      lane.compaction = room?.compaction ?? null;
       if (!room) {
         // Not in the room (too large, too many stores, or opened after it):
         // there are no frames of it to miss. Already out: its value still
@@ -569,7 +576,7 @@ export function createFastLane({
           frame.pageGeneration = pageGeneration;
         }
         lane.awaiting = resend;
-        entry.store.rebase(room.value, { source: "state", dropIds, room: { seq, fresh: true, moves: state.moves?.[name] ?? null, floor: Number.isInteger(room.floor) ? room.floor : null } });
+        entry.store.rebase(room.value, { source: "state", dropIds, room: { seq, fresh: true, moves: state.moves?.[name] ?? null, floor: Number.isInteger(room.floor) ? room.floor : null, compaction: lane.compaction } });
         lane.unsent = unframed(name, lane);
       } else {
         const seen = room.seen ? room.seen[clientId] : undefined;
@@ -599,7 +606,7 @@ export function createFastLane({
           }
         }
         lane.awaiting = next;
-        entry.store.rebase(room.value, { source: "state", dropIds, room: { seq, fresh: false, moves: state.moves?.[name] ?? null, floor: Number.isInteger(room.floor) ? room.floor : null } });
+        entry.store.rebase(room.value, { source: "state", dropIds, room: { seq, fresh: false, moves: state.moves?.[name] ?? null, floor: Number.isInteger(room.floor) ? room.floor : null, compaction: lane.compaction } });
         // Back in the room after a spell at save speed: frame what was made meanwhile.
         if (rejoined) {
           lane.unsent = unframed(name, lane);
