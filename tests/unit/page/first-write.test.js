@@ -9,6 +9,8 @@ import { seedPageFromArticle } from "../../../src/page/ybind/migrate.js";
 import { blocksFromYValue } from "../../../src/page/ybind/decode.js";
 import { serializeLive } from "../../../src/live/ops.js";
 import { seedLineage, valueClients } from "../../../src/page/ybind/lineage.js";
+import * as Y from "../../../src/vendor/yjs.vendor.js";
+import { docFromValue, enc } from "../../../src/page/ybind/provider.js";
 
 /**
  * A page saved without its merge state is staged, not seeded: entering edit opens its
@@ -35,6 +37,19 @@ const articleOf = (html) => new DOMParser().parseFromString(html, "text/html").q
 const expectedTagValue = (html) => seedPageFromArticle(articleOf(html));
 const pageTag = () => document.querySelector(TAG_SEL);
 
+const peerValue = (html) => {
+  const initial = expectedTagValue(html);
+  const doc = docFromValue(initial);
+  doc.clientID = 8123456;
+  const before = Y.encodeStateVector(doc);
+  const flow = doc.getText("flow");
+  flow.insert(flow.length, " peer");
+  const value = { ...initial, y: { ...initial.y, "u8123456-0": enc(Y.encodeStateAsUpdateV2(doc, before)) } };
+  doc.destroy();
+  return value;
+};
+const taggedPage = (value) => pageHtml(value) + `<script type="application/json" merge="page" clay="live">${JSON.stringify(value)}</script>`;
+
 const settle = async (save, timeout = 4000) => {
   const deadline = Date.now() + timeout;
   while (!save.baselineSettled() && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
@@ -51,22 +66,23 @@ const roomState = (room) => ({
   stores: clone(room.stores),
 });
 
-async function load({ html = pageHtml(), liveData = true, answer = () => ({ status: 200, body: { msg: "Saved", etag: "stamp-2" } }) } = {}) {
+async function load({ html = pageHtml(), liveData = true, storedState = null, stateStatus = 200, answer = () => ({ status: 200, body: { msg: "Saved", etag: "stamp-2" } }) } = {}) {
   jest.resetModules();
   window.clayEditMode = true;
-  if (liveData) document.documentElement.setAttribute("documentetag", "stamp-1");
+  if (liveData || storedState) document.documentElement.setAttribute("documentetag", "stamp-1");
   else document.documentElement.removeAttribute("documentetag");
   document.head.innerHTML = "";
   document.body.innerHTML = html;
 
   const extensions = liveData ? ["page", "live-data", "conditional"] : ["page"];
+  if (storedState) extensions.push("page-recovery-v1");
   const saves = [];
   const sent = [];
   const handlersRef = { h: null };
   const room = { epoch: "e1", seq: 0, writer: null, stores: {} };
 
   await jest.unstable_mockModule("../../../src/core/host-meta.js", () => ({
-    hostMeta: async () => ({ spec: 1, extensions, document: { etag: "stamp-1" } }),
+    hostMeta: async () => ({ spec: 1, extensions, document: storedState ? { etag: "stamp-1", pageState: { href: "/_/page-state" } } : { etag: "stamp-1" } }),
     hostSupports: async (name) => extensions.includes(name),
     hostMetaOutcome: () => "ok",
     querySaveOutcome: () => null,
@@ -102,6 +118,15 @@ async function load({ html = pageHtml(), liveData = true, answer = () => ({ stat
   // The host's answer to a save. A host that keeps a room holds the document's page
   // store as it reads it out of the body it accepted.
   global.fetch = jest.fn(async (url, options) => {
+    if (String(url).endsWith("/_/page-state")) {
+      return {
+        ok: stateStatus < 400,
+        status: stateStatus,
+        statusText: "",
+        headers: { get: () => null },
+        text: async () => JSON.stringify({ version: 1, documentId: "doc", generation: "1".repeat(32), etag: "stamp-1", stateHash: "a".repeat(64), tag: JSON.stringify(storedState) }),
+      };
+    }
     const reply = answer(saves.length);
     saves.push({ url: String(url), options, headers: options?.headers ?? {}, body: String(options?.body ?? "") });
     const doc = new DOMParser().parseFromString(String(options?.body ?? ""), "text/html");
@@ -313,4 +338,99 @@ test("the staged store is pending only after an edit, and its flush is the first
   expect(storeOf("page").pending).toHaveLength(0);
   staged.dispose();
   expect(storeOf("page")).toBeTruthy();
+});
+
+test("a staged editor takes a peer's first saved state without requiring its own edit", async () => {
+  const html = pageHtml();
+  const peer = peerValue(html);
+  const { page, storeOf } = await load({ html, liveData: false });
+  await page.ready;
+  const { receiveFrame } = await import("../../../src/plugins/live.js");
+  receiveFrame(taggedPage(peer));
+  expect(await until(() => page.view.dom.textContent.includes("Hello peer"))).toBe(true);
+  expect(page.view.editable).toBe(true);
+  expect(blocksFromYValue(storeOf("page").value).p.c).toBe("Hello peer");
+});
+
+test("a refused first save merges the stored Yjs lineage and preserves both edits", async () => {
+  const html = pageHtml();
+  const peer = peerValue(html);
+  const { page, storeOf, checkpointWithin, saves } = await load({
+    html,
+    liveData: false,
+    answer: (n) => n === 0
+      ? { status: 412, body: { code: "conflict", msg: "Changed" } }
+      : { status: 200, body: { msg: "Saved", etag: "stamp-3" } },
+  });
+  await page.ready;
+  const save = await import("../../../src/core/save.js");
+  await settle(save);
+  const saveFetch = global.fetch;
+  global.fetch = jest.fn((url, options) => options?.method === "POST"
+    ? saveFetch(url, options)
+    : Promise.resolve({ ok: true, status: 200, headers: { get: (name) => name === "etag" ? "stamp-2" : null }, text: async () => taggedPage(peer) }));
+  const view = page.view;
+  view.dispatch(view.state.tr.insertText(" local", view.state.doc.content.size - 1));
+  checkpointWithin(0);
+  expect(await until(() => saves.length === 2)).toBe(true);
+  expect(await until(() => storeOf("page").pending.length === 0)).toBe(true);
+  expect(view.editable).toBe(true);
+  const value = JSON.parse(new DOMParser().parseFromString(saves[1].body, "text/html").querySelector(TAG_SEL).textContent);
+  const text = blocksFromYValue(value).p.c;
+  expect(text).toContain(" local");
+  expect(text).toContain(" peer");
+  expect(text.match(/Hello/g)).toHaveLength(1);
+});
+
+test("entering a tagless saved version uses the host's existing Yjs state without writing", async () => {
+  const persisted = peerValue(pageHtml());
+  const { page, storeOf, saves } = await load({ html: pageHtml(persisted), liveData: false, storedState: persisted });
+  await page.ready;
+  expect(page.view).toBeTruthy();
+  expect(page.view.editable).toBe(true);
+  expect(storeOf("page").value).toEqual(persisted);
+  expect(pageTag()).toBe(null);
+  expect(saves).toHaveLength(0);
+  const reads = global.fetch.mock.calls.filter(([url]) => String(url).endsWith("/_/page-state"));
+  expect(reads).toHaveLength(1);
+  expect(reads[0][1].headers["If-Match"]).toBe("stamp-1");
+});
+
+test("a moved page-state version refuses entry instead of inventing a new lineage", async () => {
+  const persisted = peerValue(pageHtml());
+  const { page, saves } = await load({ html: pageHtml(persisted), liveData: false, storedState: persisted, stateStatus: 412 });
+  await page.ready;
+  expect(page.view).toBe(null);
+  expect(page.status.reason).toBe("etag-mismatch");
+  expect(saves).toHaveLength(0);
+});
+
+test.each([false, true])("an unstamped reader verifies the served article before using its state, changed=%s", async (changed) => {
+  const persisted = peerValue(pageHtml());
+  const html = pageHtml(persisted);
+  const { page, storeOf, saves } = await load({ html, liveData: false, storedState: persisted });
+  await page.ready;
+  const previous = storeOf("page");
+  page.dispose();
+  const { closeStore } = await import("../../../src/plugins/live.js");
+  closeStore("page", previous);
+  const served = changed ? seedValue([{ id: "p", t: "paragraph", text: "Another article" }]) : persisted;
+  global.fetch = jest.fn(async () => ({
+    ok: true, status: 200, headers: { get: () => "stamp-2" }, text: async () => taggedPage(served),
+  }));
+  const { preparePageSession } = await import("../../../src/plugins/page.js");
+  const lease = preparePageSession({ represented: { bytes: html, etag: null }, isCurrent: () => true });
+  try {
+    if (changed) {
+      await expect(lease.ready).rejects.toMatchObject({ code: "stale-document" });
+    } else {
+      await lease.ready;
+      expect(storeOf("page").value).toEqual(persisted);
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+      expect(global.fetch.mock.calls[0][0]).toBe("https://example.com/notes.html");
+    }
+    expect(saves).toHaveLength(0);
+  } finally {
+    lease.dispose();
+  }
 });

@@ -481,7 +481,7 @@ test("a refused first write re-reads the file once, re-seeds, replays the edit a
   const html = articleHtml();
   // The stored document is the same page, now carrying the tag a first write left on
   // it: same article, newer stamp.
-  const stored = `${tagHtml()}${articleHtml()}`;
+  const stored = `<script type="application/json" merge="page" clay="live">${JSON.stringify(seedPageFromArticle(articleOf(html)))}</script>${html}`;
   const { page, preparePageSession, checkpointWithin, storeOf, saves, reads } = await load({
     html,
     answer: (count) => (count === 0

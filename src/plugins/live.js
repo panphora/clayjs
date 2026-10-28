@@ -755,6 +755,9 @@ function seedLocalRoom() {
       if (value !== null && typeof value === "object") values.set(name, { value, ephemeral: tag.ephemeral });
     } catch {}
   }
+  for (const [name, entry] of entries) {
+    if (!entry.staged) values.set(name, { value: entry.store.authoritative, ephemeral: entry.store.ephemeral });
+  }
   return values;
 }
 
@@ -885,7 +888,9 @@ function receive(entry, text, source, dropIds) {
   } catch {
     return;
   }
-  if (entry.store.rebase(value, { source, ...(dropIds?.length && { dropIds }) })) entry.framesSince = true;
+  if (!entry.store.rebase(value, { source, ...(dropIds?.length && { dropIds }) })) return false;
+  entry.framesSince = true;
+  return true;
 }
 
 // One open store and what the plugin follows about it. A staged store has no lane.
@@ -941,11 +946,12 @@ export function live(name) {
 
 // A page whose file carries no state of its own yet: the seed in memory, no tag in
 // the document, no request, until its first genuine op is written by the ordinary
-// save. Only an accepted write opens its room.
-export function stageStore(name, { value, represented = null, signal = null } = {}) {
+// save. A value already stored by this tab or a peer can open its room.
+export function stageStore(name, { value, represented = null, signal = null, persisted = false } = {}) {
   const existing = entries.get(name);
   if (existing && !existing.staged) throw new Error(`clay.live("${name}"): the store is open in a room`);
   const entry = existing ?? openEntry(name, createStore({ name, value, ephemeral: false }), { staged: { represented, signal } });
+  if (persisted) activateStaged(entry);
   return {
     handle: entry.store.handle,
     isPending: () => !!entry.staged && entry.store.pending.length > 0,
@@ -1366,9 +1372,7 @@ export function receiveFrame(html, seq = null) {
       else if (pageTag.getAttribute("live-by") !== by) pageTag.setAttribute("live-by", by);
     }
     if (entry && !entry.store.ephemeral) {
-      // An old seed is never merged into a newer article before its first write.
-      if (entry.staged) continue;
-      if (entry.store.handle.status.mode === "file") receive(entry, text, "remote", dropIds);
+      if (entry.store.handle.status.mode === "file" && receive(entry, text, "remote", dropIds)) activateStaged(entry);
       continue;
     }
     if (pageTag && pageTag.textContent !== text) pageTag.textContent = text;

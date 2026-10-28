@@ -305,8 +305,7 @@ function listenForSaves(inst) {
   });
 }
 
-// The page the host stores now, read once: the article a first write is offered to
-// again, and the version it is offered against.
+// The page the host stores now, including any merge state it keeps beside the file.
 async function readStoredArticle() {
   const response = await fetch(new URL(globalThis.location.href).href, { cache: "no-store" });
   if (!response?.ok) return null;
@@ -314,12 +313,13 @@ async function readStoredArticle() {
   const doc = new DOMParser().parseFromString(html, "text/html");
   const article = doc.querySelector(ARTICLE_SEL);
   if (!article) return null;
-  return { article, etag: response.headers?.get?.("etag") || null };
+  const tag = doc.querySelector(TAG_SEL);
+  return { article, value: tag ? parseJsonRelaxed(tag.textContent) : null, etag: response.headers?.get?.("etag") || null };
 }
 
 // A refused first write: the stored document has moved on, or it does not descend
-// from the seed this tab staged. The stored document is read once, the seed is rebuilt
-// from its article, this tab's own pending edit replays over it, and the write goes
+// from the seed this tab staged. The stored document is read once, its merge state is
+// kept (or seeded from the article), this tab's pending edit replays over it, and the write goes
 // out once more against the version just read. A second refusal keeps the text in the
 // tab and shows the conflict, exactly as a lone refusal does.
 async function retryFirstWrite(inst, event) {
@@ -334,11 +334,11 @@ async function retryFirstWrite(inst, event) {
     if (!found || !isCurrent(inst)) return;
     const page = await pageCodeReady();
     if (!isCurrent(inst)) return;
-    const seed = page.seedPageFromArticle(found.article.cloneNode(true));
+    const seed = found.value ?? page.seedPageFromArticle(found.article.cloneNode(true));
     // This tab's next write is conditional on the version it has just read.
     const at = found.etag ?? event?.detail?.etag ?? null;
     if (at) recordEtag(at);
-    // The tab's own edit replays over the seed the stored article states; an op the
+    // The tab's own edit replays over the stored page state; an op the
     // stored article cannot hold is dropped by the store, never written over it.
     inst.store.rebase(seed, { source: "state" });
     await savePageForce();
@@ -758,9 +758,29 @@ export function createSteps(inst, options) {
       const code = await pageCodeReady();
       if (!isCurrent(inst)) return { ok: false, cancelled: true };
       if (seeded) {
-        // The seed stays a value in memory: no tag and no write until someone edits.
         try {
-          value = source.seedValue = code.seedPageFromArticle(source.article.cloneNode(true));
+          const meta = await hostMeta();
+          const href = meta?.extensions?.includes("page-recovery-v1") && meta.document?.pageState?.href;
+          const etag = inst.context?.represented ? inst.context.represented.etag : representedEtag() ?? lastSeenEtag();
+          if (href && etag) {
+            const { readPageState } = await import("../page/checkpoint-proof.js");
+            const stored = await readPageState({ href, etag });
+            if (!isCurrent(inst)) return { ok: false, cancelled: true };
+            if (stored.ok) {
+              if (stored.etag !== etag) return { ok: false, reason: "etag-mismatch" };
+              value = parseJsonRelaxed(stored.tag);
+              source.persisted = true;
+            } else if (stored.code !== "no-page-state") {
+              return { ok: false, reason: stored.code };
+            }
+          } else if (href) {
+            const stored = await readStoredArticle();
+            if (!isCurrent(inst)) return { ok: false, cancelled: true };
+            if (!stored || !stored.article.isEqualNode(source.article)) return { ok: false, reason: "stale-document" };
+            value = stored.value;
+            source.persisted = value !== null;
+          }
+          value = source.seedValue = value ?? code.seedPageFromArticle(source.article.cloneNode(true));
         } catch (error) {
           console.warn("clayjs: page plugin could not rebuild the page it found, leaving the page as saved HTML", error);
           return { ok: false, reason: "invalid-page-source" };
@@ -884,6 +904,7 @@ function mergeRepresentedPage(store, value) {
         const staged = stageStore("page", {
           value: source.seedValue,
           represented: options.represented ?? { bytes: source.article.outerHTML, etag: representedEtag() ?? lastSeenEtag() },
+          persisted: source.persisted,
         });
         inst.staged = staged;
         handle = staged.handle;
