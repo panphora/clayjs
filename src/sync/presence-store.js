@@ -60,6 +60,11 @@ export class PresenceStore {
     this.timer = null;
     this.timerKind = null;
     this.inflight = false;
+    // The lease the request in flight belongs to, and the target it carried. A
+    // request a lease left behind is its own: giving the lease back resets these, so
+    // the next one starts unblocked and a late answer changes nothing.
+    this.inflightOwner = null;
+    this.inflightKey = null;
   }
 
   /**
@@ -253,21 +258,37 @@ export class PresenceStore {
       },
       detach() {
         if (store.owner !== lease) return;
+        // A clear this lease asked for and the host never heard: the last word it
+        // holds is a target, and nothing after this lease will take it back.
+        const unsent = store.heldKey === '' && typeof store.inflightKey === 'string' && store.inflightKey !== '';
         store.owner = null;
         store.session = null;
         store.n = 0;
         store.sentKey = null;
+        // The request this lease left behind is its own: the next lease starts
+        // unblocked, and the answer that arrives late releases nothing.
+        store.inflight = false;
+        store.inflightOwner = null;
+        store.inflightKey = null;
         store.cancel();
         store.target = null;
         store.heldKey = '';
         store.explicit = false;
         store.clear();
+        if (unsent) {
+          try {
+            Promise.resolve(lease.send({ editing: null })).catch(() => {});
+          } catch {}
+        }
       },
     };
     this.owner = lease;
     this.session = null;
     this.n = 0;
     this.sentKey = null;
+    this.inflight = false;
+    this.inflightOwner = null;
+    this.inflightKey = null;
     this.cancel();
     // A fresh connection starts from nothing, so the target this tab holds is sent
     // again rather than assumed delivered.
@@ -284,7 +305,7 @@ export class PresenceStore {
    *
    * @param {{send?: ?function(Object): any}} [options] - the relay's send, when
    *   this tab may publish at all. A reader passes none.
-   * @returns {Promise<?{active: boolean, detach: function(): void}>}
+   * @returns {Promise<?{active: boolean, detach: function(): void, stop?: function(): void}>}
    */
   connect({ send = null } = {}) {
     if (this.connecting) return this.connecting;
@@ -297,8 +318,15 @@ export class PresenceStore {
           (extensions.includes('page-awareness-v1') || extensions.includes('record-awareness-v1'))
         ) {
           const scope = typeof awareness.scope === 'string' && awareness.scope ? awareness.scope : null;
-          return import('./local-presence.js')
-            .then(({ localPresence }) => localPresence({ scope, store: this }).start() ?? null);
+          return import('./local-presence.js').then(({ localPresence }) => {
+            const session = localPresence({ scope, store: this });
+            const lease = session.start();
+            if (!lease) return null;
+            // The lease stays the transport this document holds, so it is still the
+            // store's one owner; `stop` is the session's, and stopping it is what
+            // takes the heartbeat, the channel and the goodbye with the session.
+            return Object.defineProperty(lease, 'stop', { value: () => session.stop() });
+          });
         }
         if (typeof send === 'function' && extensions.includes('presence-editing')) {
           return this.attachTransport({ send });
@@ -382,10 +410,17 @@ export class PresenceStore {
     this.cancel();
     this.sentKey = this.heldKey;
     this.inflight = true;
+    this.inflightOwner = owner;
+    this.inflightKey = this.sentKey;
     if (body.v === PRESENCE_VERSION) this.n = n;
 
     const settle = (ok) => {
+      // A request a lease that has since let the tab go is not this store's to
+      // answer for: the newer owner's request, or the final clear, is what stands.
+      if (this.inflightOwner !== owner) return;
       this.inflight = false;
+      this.inflightOwner = null;
+      this.inflightKey = null;
       if (this.owner !== owner) return;
       if (this.heldKey !== this.sentKey) {
         // A newer target arrived while this one was in flight: the latest wins.

@@ -1,6 +1,7 @@
 import { jest } from "@jest/globals";
 import { PresenceStore } from "../../src/sync/presence-store.js";
-import { EXPIRE_MS } from "../../src/sync/presence-target.js";
+import { EXPIRE_MS, RENEW_MS } from "../../src/sync/presence-target.js";
+import { resetHostMeta } from "../../src/core/host-meta.js";
 import { localChannel } from "../../src/live/local-channel.js";
 import { localPresence } from "../../src/sync/local-presence.js";
 import { createStore } from "../../src/live/store.js";
@@ -88,6 +89,8 @@ beforeEach(() => {
 afterEach(() => {
   for (const tab of tabs) tab.stop();
   tabs = [];
+  delete global.fetch;
+  resetHostMeta();
   jest.useRealTimers();
 });
 
@@ -334,4 +337,39 @@ test("the channel closes after the final lease is released", async () => {
 
   expect(channel.closed).toBe(true);
   expect(channel.onmessage).toBeNull();
+});
+
+test("a broadcast document's session goes with its lease (broadcast-cycle-session-survives)", async () => {
+  global.fetch = jest.fn(() => Promise.resolve({
+    ok: true,
+    text: async () => JSON.stringify({
+      spec: 1,
+      extensions: ["page-awareness-v1", "record-awareness-v1"],
+      document: { awareness: { transport: "broadcast", scope: "id:doc-1", label: "This computer" } },
+    }),
+  }));
+  resetHostMeta();
+
+  const store = new PresenceStore();
+  const transport = await store.connect({ send: async () => true });
+  expect(transport).not.toBeNull();
+  // The lease the document keeps is the store's owner, and it carries the session's
+  // own stop rather than only the lease's detach.
+  expect(store.owner).toBe(transport);
+  expect(typeof transport.stop).toBe("function");
+
+  const channel = channels.at(-1);
+  const from = posted.find((message) => message.data.from)?.data.from;
+  expect(typeof from).toBe("string");
+
+  transport.stop();
+
+  expect(store.owner).toBeNull();
+  expect(posted.filter((message) => message.data.op === "bye").map((message) => message.data.from)).toContain(from);
+  // The channel closes and the heartbeat stops with the session: a dead session
+  // neither beats nor answers a tab that arrives later.
+  expect(channel.closed).toBe(true);
+  const after = posted.length;
+  await settle(RENEW_MS + 1000);
+  expect(posted.slice(after)).toEqual([]);
 });

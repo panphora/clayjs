@@ -331,6 +331,69 @@ describe("transport leases", () => {
     expect(second.sent.at(-1)).toMatchObject({ session: "next-token", n: 1 });
   });
 
+  test("a clear the host never heard goes with the lease (relay-leave-inflight-target)", async () => {
+    const sent = [];
+    const answers = [];
+    const lease = store.attachTransport({
+      send: (body) => new Promise((resolve) => {
+        sent.push(body);
+        answers.push(resolve);
+      }),
+    });
+    store.receive(frame([ADA], 0, SELF));
+    store.setGeneric("1");
+    await jest.advanceTimersByTimeAsync(250);
+    expect(sent).toEqual([{ editing: "1" }]);
+
+    // The exit's clear queues behind the target nobody has answered yet.
+    store.setGeneric(null);
+    await jest.advanceTimersByTimeAsync(1000);
+    expect(sent).toHaveLength(1);
+
+    lease.detach();
+    expect(sent).toEqual([{ editing: "1" }, { editing: null }]);
+
+    // The answer that lands after the lease let go takes nothing back.
+    answers[0](true);
+    await jest.advanceTimersByTimeAsync(0);
+    expect(sent).toHaveLength(2);
+  });
+
+  test("a lease that let go does not swallow the next lease's target (relay-second-session-swallowed)", async () => {
+    const first = [];
+    let answerFirst = null;
+    const old = store.attachTransport({
+      send: (body) => new Promise((resolve) => {
+        first.push(body);
+        answerFirst = resolve;
+      }),
+    });
+    store.receive(frame([ADA], 0, SELF));
+    store.setGeneric("1");
+    await jest.advanceTimersByTimeAsync(250);
+    expect(first).toEqual([{ editing: "1" }]);
+
+    old.detach();
+
+    const second = [];
+    // The next session's own request stays unanswered for the rest of the test.
+    store.attachTransport({ send: (body) => new Promise(() => { second.push(body); }) });
+    store.receive(frame([ADA], 0, { id: "next", token: "next-token" }));
+    store.setGeneric("1");
+    await jest.advanceTimersByTimeAsync(250);
+    expect(second).toEqual([{ editing: "1" }]);
+
+    // The old request answers late, and the new session's target still stands: the
+    // old answer releases neither the newer lease nor its request.
+    answerFirst(true);
+    await jest.advanceTimersByTimeAsync(0);
+    expect(second).toEqual([{ editing: "1" }]);
+
+    store.setGeneric("2");
+    await jest.advanceTimersByTimeAsync(250);
+    expect(second).toEqual([{ editing: "1" }]);
+  });
+
   test("a transport without a send function is refused", () => {
     expect(() => store.attachTransport(null)).toThrow(TypeError);
     expect(() => store.attachTransport({})).toThrow(TypeError);

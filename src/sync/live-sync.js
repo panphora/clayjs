@@ -737,10 +737,14 @@ class LiveSync {
       this._editing.stop();
       this._editing = null;
     }
-    // Only this run's lease: a successor that already attached keeps its roster.
+    // Only this run's lease: a successor that already attached keeps its roster. A
+    // broadcast session is stopped, not just detached, so its heartbeat, channel and
+    // goodbye go with the session that opened them.
     if (this._presenceLease) {
-      this._presenceLease.detach();
+      const transport = this._presenceLease;
       this._presenceLease = null;
+      if (typeof transport.stop === 'function') transport.stop();
+      else transport.detach();
     }
     this._lastRoster = null;
 
@@ -1333,7 +1337,8 @@ class LiveSync {
     return store.connect({ send: (body) => this._postPresence(body) })
       .then((transport) => {
         if (this.isDestroyed || this._startGen !== gen) {
-          transport?.detach();
+          if (typeof transport?.stop === 'function') transport.stop();
+          else transport?.detach();
           return null;
         }
         this._presenceLease = transport || null;

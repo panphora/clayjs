@@ -1,6 +1,7 @@
 import { jest } from "@jest/globals";
 
 import { PresenceStore, presence } from "../../src/sync/presence-store.js";
+import { EditingSender } from "../../src/sync/editing-sender.js";
 
 /**
  * One transport and one sender per document (Document 10 Step 5).
@@ -220,6 +221,110 @@ describe("ownership and cleanup", () => {
   });
 });
 
+describe("the gate a leave closes", () => {
+  const ME = { id: "p_me", name: "Me", you: true };
+
+  class FakeChannel {}
+
+  beforeAll(() => {
+    global.BroadcastChannel = FakeChannel;
+    window.BroadcastChannel = FakeChannel;
+  });
+
+  const senders = [];
+
+  // The participant clears the facade the page shares, so these tests drive that one.
+  beforeEach(() => {
+    presence.owner?.detach();
+    presence.clear();
+  });
+
+  afterEach(() => {
+    senders.splice(0).forEach((sender) => sender.stop());
+    presence.owner?.detach();
+    presence.clear();
+  });
+
+  // An editor with the marker publishing through the store: a caret on `one`, one
+  // other person present, and a request that landed.
+  async function editing() {
+    document.body.innerHTML =
+      '<div id="one" contenteditable="true">one</div><div id="two" contenteditable="true">two</div>';
+    const sent = [];
+    const lease = presence.attachTransport({ send: async (body) => { sent.push(body); return true; } });
+    const sender = new EditingSender({});
+    senders.push(sender);
+    sender.start();
+    sender.roster({ people: [ME, ADA] });
+    document.getElementById("one").focus();
+    await jest.advanceTimersByTimeAsync(1000);
+    const sync = { _editing: sender, lane: "view", _morphInFlight: false, stop: () => {} };
+    const { syncParticipant } = await import("../../src/sync/live-sync-edit.js");
+    const participant = await syncParticipant(sync).prepare({});
+    return { sent, lease, sender, participant };
+  }
+
+  // Quiesced: the caret the tab was showing is cleared, and the sender is stopped
+  // rather than merely cleared.
+  async function quiesced() {
+    const session = await editing();
+    expect(session.sent).toEqual([{ editing: "0" }]);
+    expect(session.participant.quiesce()).toEqual({ ok: true });
+    await jest.advanceTimersByTimeAsync(250);
+    expect(session.sent).toEqual([{ editing: "0" }, { editing: null }]);
+    return session;
+  }
+
+  test("no roster frame during the exit republishes the caret (relay-first-frame-during-leave)", async () => {
+    const { sent, lease, sender } = await quiesced();
+
+    // The exit barrier is still running when the stream says everybody else left.
+    sender.roster({ people: [ME] });
+    await jest.advanceTimersByTimeAsync(1000);
+    expect(sent).toHaveLength(2);
+
+    lease.detach();
+    await jest.advanceTimersByTimeAsync(1000);
+    expect(sent).toHaveLength(2);
+  });
+
+  test("no focus move during the exit republishes the caret (relay-focus-move-during-leave)", async () => {
+    const { sent, lease } = await quiesced();
+
+    document.getElementById("two").focus();
+    document.dispatchEvent(new Event("selectionchange"));
+    await jest.advanceTimersByTimeAsync(1000);
+    expect(sent).toHaveLength(2);
+
+    lease.detach();
+    await jest.advanceTimersByTimeAsync(1000);
+    expect(sent).toHaveLength(2);
+  });
+
+  test("a reconnect during the exit publishes nothing (relay-reconnect-during-leave)", async () => {
+    const { sent, lease, sender } = await quiesced();
+
+    sender.reconnected();
+    presence.reconnect();
+    await jest.advanceTimersByTimeAsync(1000);
+    expect(sent).toHaveLength(2);
+
+    lease.detach();
+    await jest.advanceTimersByTimeAsync(1000);
+    expect(sent).toHaveLength(2);
+  });
+
+  test("a refused exit resumes publishing the target it was leaving", async () => {
+    const { sent, participant } = await quiesced();
+
+    participant.resume();
+    await jest.advanceTimersByTimeAsync(250);
+
+    // The clear went with the quiesce, so the target the tab still holds goes again.
+    expect(sent).toEqual([{ editing: "0" }, { editing: null }, { editing: "0" }]);
+  });
+});
+
 describe("one stream and one sender in an editor", () => {
   let LiveSync;
   let resetHostMeta;
@@ -272,9 +377,12 @@ describe("one stream and one sender in an editor", () => {
       this.name = name;
       this.onmessage = null;
       this.closed = false;
+      this.posts = [];
       channels.push(this);
     }
-    postMessage() {}
+    postMessage(data) {
+      this.posts.push(data);
+    }
     close() {
       this.closed = true;
     }
@@ -355,5 +463,29 @@ describe("one stream and one sender in an editor", () => {
     expect(channels).toHaveLength(1);
     expect(channels[0].name).toContain("id:doc-1");
     expect(presence.getSnapshot().people[0]).toMatchObject({ name: "This computer", you: true });
+  });
+
+  test("a broadcast editor's session goes with its exit (broadcast-cycle-session-survives)", async () => {
+    const fetchImpl = host(HTML_CLAY.extensions, HTML_CLAY.document);
+    const sync = await startedAgainst(fetchImpl);
+    await until(() => presence.getSnapshot().people.length === 1);
+    const channel = channels[0];
+    const transport = sync._presenceLease;
+    // The transport the document keeps is the store's owner and the session itself.
+    expect(transport).toBe(presence.owner);
+    expect(typeof transport.stop).toBe("function");
+
+    const cleared = jest.spyOn(globalThis, "clearInterval");
+    sync.stop();
+
+    expect(transport.active).toBe(false);
+    expect(presence.owner).toBeNull();
+    expect(channel.posts.map((post) => post.op)).toContain("bye");
+    expect(cleared).toHaveBeenCalled();
+    // The channel is the session's: it closes with it, so nothing of the dead
+    // session is left to answer a newcomer or to beat.
+    expect(channel.closed).toBe(true);
+    expect(channel.onmessage).toBeNull();
+    cleared.mockRestore();
   });
 });

@@ -36,6 +36,18 @@ export class EditingSender {
     for (const type of EVENTS) document.addEventListener(type, this._onEvent);
   }
 
+  /**
+   * Speak again after a quiesce that was refused: the listeners come back and the
+   * target this tab holds goes again, because the clear that came with the quiesce
+   * took the sender's last word off the host.
+   */
+  resume() {
+    if (!this.stopped) return;
+    this.start();
+    this.sent = null;
+    this.schedule();
+  }
+
   stop() {
     this.stopped = true;
     for (const type of EVENTS) document.removeEventListener(type, this._onEvent);

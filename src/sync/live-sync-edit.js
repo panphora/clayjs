@@ -26,11 +26,16 @@ export function syncParticipant(sync) {
   // published cannot outlive the session that published it. A page target is
   // released with the ownership it came with; the generic marker is cleared
   // outright. Neither falls back to a positional marker: the exit publishes nobody.
+  // The sender is stopped rather than only cleared, so the gate stays shut until the
+  // exit commits or is refused: a reconnect, a roster change or a focus move during
+  // the barrier would otherwise publish a target the session never takes back.
   const quiesce = () => {
+    sync._editing?.stop();
     presence.setGeneric(null);
     presence.releaseTarget();
     return sync.lane === "live" && sync._morphInFlight ? { ok: false, code: "pending-input" } : { ok: true };
   };
+  const resume = () => sync._editing?.resume();
   const dispose = () => sync.stop();
   return {
     id: "clay:sync",
@@ -39,10 +44,11 @@ export function syncParticipant(sync) {
       await loadConflictsEdit();
       // Adoption: the explicit initial edit started this lane as the module
       // evaluated, so the lease covers it and starts nothing new.
-      if (context?.initial) return { quiesce, dispose };
+      if (context?.initial) return { quiesce, resume, dispose };
       let started = false;
       return {
         quiesce,
+        resume,
         // The commit: the lane a reader was following stops, and the same stream
         // slot opens on the live lane.
         enable() {
