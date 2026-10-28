@@ -311,6 +311,11 @@ const actionLabels = (el) => [...el.querySelectorAll("button")].map((b) => b.tex
 const flush = async () => {
   for (let i = 0; i < 50; i++) await Promise.resolve();
 };
+// The chip's drawing is a module the first save event fetches, so a reading waits for it.
+const drawn = async () => {
+  await import("../../../src/plugins/indicator-chip.js");
+  for (let i = 0; i < 50; i++) await Promise.resolve();
+};
 const untilToasts = async () => {
   for (let i = 0; i < 50 && toasts().length === 0; i++) await tick(0);
 };
@@ -325,6 +330,7 @@ test("a known code shows the blocked chip and toast, a retrying save waits out i
     document.dispatchEvent(new CustomEvent("clay:save-error", {
       detail: { code: "too-large", msg: "This page is too large to save" },
     }));
+    await drawn();
 
     expect(chip().textContent).toBe("Can't save here");
     expect(states.at(-1)).toEqual({ state: "blocked", code: "too-large", message: "This page is too large to save" });
@@ -350,6 +356,7 @@ test("a known code shows the blocked chip and toast, a retrying save waits out i
     // toast waits for the bound, survives a repeated failure, and clears on saved.
     jest.useFakeTimers();
     document.dispatchEvent(new CustomEvent("clay:save-error", { detail: { code: "busy", msg: "Busy" } }));
+    await drawn();
     expect(chip().textContent).toBe("Saving\u2026");
     expect(states.at(-1)).toEqual({ state: "retrying", code: "busy", message: "Busy" });
     expect(toasts()).toEqual([]);

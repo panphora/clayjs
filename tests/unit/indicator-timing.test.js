@@ -1,10 +1,15 @@
 import { jest } from "@jest/globals";
-import { capture, last } from "./helpers/injected-ui.js";
+import { captureAsync, last } from "./helpers/injected-ui.js";
 
 // When the chip shows and goes: saving stays until the save finishes, a finished state
 // stays 2200 ms, and a reader who asked for reduced motion gets no fade.
 
 const chip = () => document.querySelector("[data-clay-indicator]");
+// The drawing is a module the first save state fetches, so a reading waits for it.
+const drawn = async () => {
+  await import("../../src/plugins/indicator-chip.js");
+  for (let i = 0; i < 50; i++) await Promise.resolve();
+};
 const fire = (state) => document.dispatchEvent(new CustomEvent("clay:save-" + state));
 
 async function load({ reduced = false } = {}) {
@@ -24,6 +29,7 @@ afterEach(() => {
 test("saving stays on screen for as long as the save takes", async () => {
   await load();
   fire("saving");
+  await drawn();
   jest.advanceTimersByTime(60000);
   expect(chip().style.opacity).toBe("1");
 });
@@ -31,6 +37,7 @@ test("saving stays on screen for as long as the save takes", async () => {
 test("a finished state shows for 2200 ms, then fades", async () => {
   await load();
   fire("saved");
+  await drawn();
   jest.advanceTimersByTime(2199);
   expect(chip().style.opacity).toBe("1");
   jest.advanceTimersByTime(1);
@@ -40,6 +47,9 @@ test("a finished state shows for 2200 ms, then fades", async () => {
 test("reduced motion: no fade transition", async () => {
   let calls = [];
   await load({ reduced: true });
-  calls = capture(() => fire("saved"));
+  calls = await captureAsync(async () => {
+    fire("saved");
+    await drawn();
+  });
   expect(last(calls, chip(), "transition")).toBe("none");
 });

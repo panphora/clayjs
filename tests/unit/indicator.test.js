@@ -1,5 +1,12 @@
 import { jest } from "@jest/globals";
 
+// The chip's drawing is a module of its own, fetched when the first save state arrives,
+// so a test that reads the chip waits for that module before it looks.
+const drawn = async () => {
+  await import("../../src/plugins/indicator-chip.js");
+  for (let i = 0; i < 50; i++) await Promise.resolve();
+};
+
 beforeAll(async () => {
   window.clayEditMode = true;
   await import("../../src/plugins/indicator.js"); // onDomReady => init runs (jsdom is 'complete')
@@ -9,10 +16,20 @@ function fire(state) {
   document.dispatchEvent(new CustomEvent("clay:save-" + state));
 }
 
-test("shows the right label + clay markers on save events, hides after saved", () => {
+test("draws nothing until a save state arrives", async () => {
+  expect(document.querySelector("[data-clay-indicator]")).toBeNull();
+
+  fire("saved");
+  await drawn();
+
+  expect(document.querySelector("[data-clay-indicator]")).not.toBeNull();
+});
+
+test("shows the right label + clay markers on save events, hides after saved", async () => {
   jest.useFakeTimers();
 
   fire("saving");
+  await drawn();
   let node = document.querySelector("[data-clay-indicator]");
   expect(node).not.toBeNull();
   expect(node.getAttribute("clay")).toBe("no-save no-watch no-snapshot");
@@ -21,6 +38,7 @@ test("shows the right label + clay markers on save events, hides after saved", (
   expect(node.style.opacity).toBe("1");
 
   fire("saved");
+  await drawn();
   expect(node.textContent).toBe("Saved");
   expect(node.style.opacity).toBe("1");
 
@@ -28,6 +46,7 @@ test("shows the right label + clay markers on save events, hides after saved", (
   expect(node.style.opacity).toBe("0");
 
   fire("error");
+  await drawn();
   expect(node.textContent).toBe("Couldn't save");
   expect(node.dataset.state).toBe("error");
 
@@ -38,8 +57,9 @@ test("shows the right label + clay markers on save events, hides after saved", (
 // document rather than only the ones that turned this chip on. Both listen to
 // clay:save-conflict, so a label here put a chip in the corner saying the same
 // thing as the bar, at the same moment.
-test("says nothing on a conflict, leaving that to the core notice", () => {
+test("says nothing on a conflict, leaving that to the core notice", async () => {
   fire("saved");
+  await drawn();
   const node = document.querySelector("[data-clay-indicator]");
   const before = node.textContent;
 

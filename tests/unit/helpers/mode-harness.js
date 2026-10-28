@@ -105,6 +105,9 @@ function stubEventSource(counts, streams) {
 export async function bootFixture(name, { mode = "edit", settle = 20, declare = false, params = null, root: extraRoot = null } = {}) {
   const fixture = readFixture(name);
   jest.resetModules();
+  // The save chip's drawing is a dynamic import; jest's ESM linker cannot link one first
+  // requested after a registry reset, so each fresh registry holds it before the boot.
+  await import("../../../src/plugins/indicator-chip.js");
 
   const counts = emptyCounts();
   const arrivals = [];

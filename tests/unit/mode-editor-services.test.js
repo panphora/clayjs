@@ -53,6 +53,11 @@ const textarea = () => panel().querySelector("textarea");
 const bar = () => el('[data-clay-ai-edit="status-bar"]');
 const barButton = (name) => bar().querySelector(`[data-clay-ai-edit-part="bar-${name}"]`);
 const chip = () => el("[data-clay-indicator]");
+// The chip's drawing is a module the first save state fetches, so a reading waits for it.
+const drawn = async () => {
+  await import("../../src/plugins/indicator-chip.js");
+  for (let i = 0; i < 50; i++) await Promise.resolve();
+};
 const noticeRoot = () => el("[data-clay-conflict]");
 
 let aiEditParticipant;
@@ -201,6 +206,7 @@ test("the save chip owns no input, and dispose takes its chip, timer and handler
   lease.enable();
 
   document.dispatchEvent(new CustomEvent("clay:save-saving"));
+  await drawn();
   expect(chip()).not.toBeNull();
   expect(chip().textContent).toBe("Saving\u2026");
 
@@ -211,16 +217,18 @@ test("the save chip owns no input, and dispose takes its chip, timer and handler
 
   // Saved leaves a fade timer behind, and it goes with the session.
   document.dispatchEvent(new CustomEvent("clay:save-saved"));
+  await drawn();
   expect(chip().textContent).toBe("Saved");
 
   lease.dispose();
+  await flush();
   expect(chip()).toBeNull();
 
   document.dispatchEvent(new CustomEvent("clay:save-saving"));
   expect(chip()).toBeNull();
 });
 
-test("a second arm adds no listener, and adoption takes the chip the boot already armed", () => {
+test("a second arm adds no listener, and adoption takes the chip the boot already armed", async () => {
   const adds = [];
   const real = document.addEventListener;
   document.addEventListener = function (type, handler, options) {
@@ -236,6 +244,7 @@ test("a second arm adds no listener, and adoption takes the chip the boot alread
     boot.enable();
     armed = adds.length;
     expect(adds.map((entry) => entry.type)).toEqual([
+      "beforeinput", "keydown", "pointerdown",
       "clay:save-saving", "clay:save-saved", "clay:save-error",
       "clay:save-offline", "clay:save-retrying", "clay:save-blocked",
       "clay:page-save-state",
@@ -253,9 +262,11 @@ test("a second arm adds no listener, and adoption takes the chip the boot alread
     expect(adds).toHaveLength(armed);
 
     document.dispatchEvent(new CustomEvent("clay:save-saving"));
+    await drawn();
     expect(chip().textContent).toBe("Saving\u2026");
 
     adopted.dispose();
+    await flush();
 
     expect(chip()).toBeNull();
     document.dispatchEvent(new CustomEvent("clay:save-saving"));

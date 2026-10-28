@@ -5,7 +5,7 @@
       "eventSources": 1,
       "listeners": {
         "window": 8,
-        "document": 56,
+        "document": 64,
         "Element": 29
       },
       "observers": 2,
@@ -53,6 +53,7 @@
         "writeData"
       ],
       "plugins": [
+        "indicator",
         "upload",
         "sync",
         "live",
@@ -84,6 +85,7 @@
         "lib/cache-bust.js": 1,
         "lib/mutation.js": 1,
         "lib/region-policy.js": 1,
+        "plugins/indicator.js": 1,
         "plugins/live.js": 1,
         "plugins/menu.js": 1,
         "plugins/page.js": 1,
