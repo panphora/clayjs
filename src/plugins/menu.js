@@ -36,6 +36,7 @@ const MENU_CSS = `.clay-menu {
   background: none;
   cursor: pointer;
 }
+.clay-menu[hidden] { display: none !important; }
 .clay-menu-edit:disabled { cursor: progress; opacity: .7; }
 .clay-menu-track {
   position: relative;
@@ -409,10 +410,16 @@ function mount() {
     }
   }
 
+  // A view-mode owner's hint can be stale: the host's own answer decides, and a page the
+  // host will not let this caller save hides the menu rather than offer a refused switch.
+  followCapability = () => { root.hidden = !canEdit && currentMode() !== "edit"; };
+  if (currentMode() !== "edit") import("../core/host-permission.js").then((m) => m.checkHostPermission()).catch(() => {});
+
   window.clay.menu = { addItem, open, close, note: showNote };
 }
 
 let mounted = false;
+let followCapability = null;
 
 const shouldMount = () => (canEdit || isEditMode) && !isDraftMode;
 
@@ -424,5 +431,8 @@ function mountOnce() {
 
 if (!isDraftMode) {
   onDomReady(mountOnce);
-  document.addEventListener("clay:capabilitychange", mountOnce);
+  document.addEventListener("clay:capabilitychange", () => {
+    mountOnce();
+    followCapability?.();
+  });
 }
