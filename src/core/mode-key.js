@@ -91,18 +91,22 @@ function onKey(e) {
     if (r.ok) return;
     import("./mode-refusal.js").then(({ modeRefusalText }) => {
       const text = modeRefusalText(r);
-      if (text) window.clay?.toast?.(text, "error");
+      if (!text) return;
+      // Templates that load no UI satellite still say why the shortcut did nothing.
+      if (typeof window.clay?.toast === "function") window.clay.toast(text, "error");
+      else showNote(text);
     });
   });
 }
 
-function showNote() {
+function showNote(message) {
   styles();
   const note = document.createElement("div");
   note.setAttribute("clay", "editor-ui");
   note.setAttribute("role", "status");
   note.className = "clay-mode-note";
   note.innerHTML = `<span>This page opens in view mode. Press <kbd>${chord}</kbd> to edit.</span><button type="button" aria-label="Dismiss">×</button>`;
+  if (message) note.querySelector("span").textContent = message;
   const close = () => note.remove();
   note.querySelector("button").addEventListener("click", close);
   addEventListener("keydown", (e) => { if (e.key === "Escape") close(); }, { once: true });
