@@ -335,6 +335,9 @@ function attachEditCore(loaded) {
 
 function attachPluginMember(path, mod, namespaces = loaded) {
   const clay = window.clay;
+  // A live entry attaches the edit plugins after boot: clay.plugins names them from then on.
+  const name = PLUGIN_NAMES[path];
+  if (name && Array.isArray(clay.plugins) && !clay.plugins.includes(name)) clay.plugins = Object.freeze([...clay.plugins, name]);
 
   if (path === "plugins/undo.js") {
     clay.undo = mod.undo || mod.default;
