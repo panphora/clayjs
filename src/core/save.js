@@ -1128,6 +1128,9 @@ async function runSlicedSave(ctx, lane) {
       // candidate go, and the waiters hear the skip contract's answer.
       job.drop();
       const skipped = skipped_(SAVE_PREPARE_CANCELLED);
+      // A session's closed admission cancelled this preparation: the page is between
+      // modes, and the attempt is remembered so `resume` replays it.
+      if (late === 'session') parkedAutosave = true;
       settleRecoveryCapture(job.captureId, skipped);
       // The document format rose under a job already prepared: its marker and its
       // verification both predate the floor, so the capture is taken again at the new one.
@@ -1205,9 +1208,9 @@ function attemptSaveNow({ kind, permit = null }, callback = () => {}) {
     }
 
     // A session has admission closed: the page is between modes, and neither lane writes
-    // until it decides. An automatic attempt is remembered so `resume` replays it.
+    // until it decides. The attempt is remembered so `resume` replays it, explicit or not.
     if (!savesAdmitted(permit)) {
-      if (!explicit) parkedAutosave = true;
+      parkedAutosave = true;
       const skipped = sessionClosed('Save session is quiesced');
       // The soon() callers waiting on this save hear its refusal: a queued waiter that is
       // never answered is a promise the page cannot settle, and the refusal is the answer
