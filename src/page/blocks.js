@@ -1262,9 +1262,10 @@ function writesFormat(slice) {
 
 function pasteFormat(view, event, slice) {
   const from = view.state.selection.from, to = view.state.selection.to;
+  const before = view.state.doc;
   const plain = () => {
     const text = slice.content.textBetween(0, slice.content.size, "\n", " ");
-    if (!view.isDestroyed && text) view.dispatch(view.state.tr.insertText(text, from, to));
+    if (!view.isDestroyed && text && view.state.doc === before) view.dispatch(view.state.tr.insertText(text, from, to));
     return false;
   };
   import("./format-native-commands.js").then(({ pasteFormats }) => pasteFormats(view, slice, from, to), plain);

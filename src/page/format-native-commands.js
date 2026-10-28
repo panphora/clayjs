@@ -72,8 +72,11 @@ export function formatMark(view, name, attrs = {}, { reset = false } = {}) {
 // The four formats pasted in from elsewhere are floor-1 content too: the slice is
 // inserted only once the gate answered applied. A refusal keeps the text and
 // writes no descriptor; a selection that moved while the answer came back takes
-// neither.
+// neither, and neither does a document that changed underneath the paste: the
+// plain fallback would write at a place a peer edit has moved, so the text stays
+// in the clipboard instead.
 export function pasteFormats(view, slice, from, to) {
+  const before = view.state.doc;
   const place = () => {
     if (view.isDestroyed) return false;
     const st = view.state;
@@ -83,7 +86,7 @@ export function pasteFormats(view, slice, from, to) {
   };
   const plain = () => {
     const text = slice.content.textBetween(0, slice.content.size, "\n", " ");
-    if (!view.isDestroyed && text) view.dispatch(view.state.tr.insertText(text, from, to));
+    if (!view.isDestroyed && text && view.state.doc === before) view.dispatch(view.state.tr.insertText(text, from, to));
     return false;
   };
   runFormat(view, place).then((result) => {

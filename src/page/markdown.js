@@ -129,7 +129,8 @@ export const MARKDOWN_RULES = [
 // converts only when the gate answered applied; the transaction it dispatches is
 // the input-rule one, recorded on this plugin so Backspace puts the literal `" `
 // back and undo keeps the conversion whole. The typed space is never swallowed:
-// when the format cannot be written, the space is inserted as itself.
+// when the format cannot be written the space is inserted as itself, and a line
+// that changed while the gate waited takes no write at all.
 function quoteShortcut(plugin, view, from, to, text) {
   if (text !== " " || from !== to) return false;
   const st = view.state;
@@ -137,7 +138,10 @@ function quoteShortcut(plugin, view, from, to, text) {
   const node = $from.parent;
   if ($from.depth !== 1 || node.type !== N.paragraph || $from.parentOffset !== 1 || node.textContent !== '"') return false;
   if (!view.editable || typeof view.runFormatCommand !== "function") return false;
-  const plain = () => { if (!view.isDestroyed) view.dispatch(st.tr.insertText(" ", from, to)); };
+  const plain = () => {
+    if (view.isDestroyed || view.state.doc !== st.doc) return;
+    view.dispatch(view.state.tr.insertText(" ", from, to));
+  };
   const at = $from.before(1);
   import("./format-native-commands.js").then(({ quoteFromSpace }) => quoteFromSpace(plugin, view, { at, from, to }, plain), plain);
   return true;

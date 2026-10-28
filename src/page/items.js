@@ -306,8 +306,8 @@ function runCommandItem(view, id, remove) {
 // the file pickers have their own placement; a block type retypes an empty line
 // and otherwise goes into a new block below the line's whole subtree. A block
 // type from a later format asks the format gate before it writes anything, and
-// a toggle heading is found again after it answers: the block and the typed
-// query that moved or changed refuse as a stale target.
+// a toggle heading or a quote is found again after it answers: the block and the
+// typed query that moved or changed refuse as a stale target.
 export function runItem(view, item, index, remove = null) {
   const st = view.state;
   if (item.insert === "image" || item.insert === "file") return pickFiles(view, item.insert === "image" ? "image/*" : "", hostPlace(st, index), remove);
@@ -317,9 +317,7 @@ export function runItem(view, item, index, remove = null) {
   if (item.insert === "chart") return loadChartPart(view).then((part) => (part && !view.isDestroyed ? part.chartFromSlash(view, index, remove) : false));
   if (item.insert === "toc") return runTocItem(view, index, remove);
   if (item.command) return runCommandItem(view, item.command, remove);
-  if (!isToggleHeading(item)) {
-    return item.type === "quote" ? runFormatted(view, () => writeItem(view, item, index, remove)) : writeItem(view, item, index, remove);
-  }
+  if (!isToggleHeading(item) && item.type !== "quote") return writeItem(view, item, index, remove);
   const id = st.doc.maybeChild(index)?.attrs.id ?? null;
   const del = remove && { ...remove, text: st.doc.textBetween(remove.from, remove.to) };
   return runFormatted(view, () => {
