@@ -13,6 +13,15 @@ import { Sim } from '../collab/room-double.js';
 
 const clone = value => JSON.parse(JSON.stringify(value));
 const html = stores => '<!doctype html><html><body><article data-page data-rev="fixture"><p data-id="p">base</p></article>' + Object.entries(stores).map(([name,value]) => `<script type="application/json" merge="${name}" clay="live">${JSON.stringify(value)}</script>`).join('') + '</body></html>';
+// A refused render says which step refused: the page value's decode, the stores the capture
+// holds, or the render itself.
+const explain = (rendered, room, captured) => {
+  if (rendered.kind === 'ok') return 'ok';
+  let decode = 'decodes';
+  try { blocksFromYValue(room.stores.get('page').value); } catch (error) { decode = `${error?.constructor?.name}: ${error?.code ?? ''} ${error?.message}`; }
+  const value = room.stores.get('page').value;
+  return { rendered, decode, stores: captured.stores?.map((store) => store.name), keys: Object.keys(value?.y ?? {}).length, entries: entriesOf(value?.y ?? {}).length };
+};
 const text = value => { const doc = docFromValue(value); const s = doc.getText('flow').toString(); doc.destroy(); return s; };
 function setup(values, { bodyCap = 5 * 1024 * 1024, echo = true } = {}) {
   const sim = new Sim();
@@ -97,7 +106,7 @@ test('a page update the room refuses as too large is not offered again and leave
     expect(h.room.stores.get('other').value.count).toBe(1);
     const captured = captureCheckpoint(h.room, { nodeId: null, roomKey: 'fixture' });
     const rendered = renderCheckpoint(html({ page: initial, other: { count: 0 } }), captured, { createDocument: () => new JSDOM('').window.document });
-    expect(rendered.kind === 'ok' ? 'ok' : rendered).toBe('ok');
+    expect(explain(rendered, h.room, captured)).toBe('ok');
   } finally { h.stop(); }
 }, 60000);
 
@@ -119,7 +128,7 @@ test('an update queued behind a refused one is taken back with it', async () => 
     expect(Object.keys(value.y)).toEqual(Object.keys(initial.y));
     const captured = captureCheckpoint(h.room, { nodeId: null, roomKey: 'fixture' });
     const rendered = renderCheckpoint(html({ page: initial }), captured, { createDocument: () => new JSDOM('').window.document });
-    expect(rendered.kind === 'ok' ? 'ok' : rendered).toBe('ok');
+    expect(explain(rendered, h.room, captured)).toBe('ok');
     expect(a.ydoc.getText('flow').toString()).toMatch(/FOLLOWUP$/);
   } finally { h.stop(); }
 }, 60000);
