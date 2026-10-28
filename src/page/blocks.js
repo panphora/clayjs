@@ -1082,6 +1082,8 @@ export function flattenPastedHTML(html, doc = globalThis.document) {
     if (parent) for (const piece of pieces) piece.setAttribute("data-page-parent", parent);
     child.replaceWith(...pieces);
   }
+  const sliced = root.querySelector("[data-pm-slice]");
+  if (sliced) out.firstElementChild?.setAttribute("data-pm-slice", sliced.dataset.pmSlice);
   return out.innerHTML;
 }
 
@@ -1119,8 +1121,13 @@ const pastedOpaqueMarks = (dom) => {
   try { return { entries: marksEntries(dom.getAttribute(MARKS)) }; } catch { return false; }
 };
 
+// clipboard-shape.js: lists and tables on the clipboard.
+let shape = null;
+export const loadClipboardShape = () => import("./clipboard-shape.js").then((mod) => { shape = mod; }, () => {});
+
 // The clipboard parser: the schema has toDOM only, so paste gets its own rules.
 export const clipboardParser = new model.DOMParser(parseSchema, [
+  { tag: "table", node: "table", getAttrs: (d) => shape?.table(d) ?? false, getContent: (d) => shape.rows(d) },
   { tag: `div[${OPAQUE}]`, node: "opaque_block", getAttrs: pastedOpaque, getContent: pastedOpaqueContent },
   { tag: `span[${MARKS}]`, mark: OPAQUE_MARK, getAttrs: pastedOpaqueMarks },
   { tag: "div[data-page-li]", node: "list_item", getAttrs: (d) => ({ kind: d.getAttribute("data-kind") || "bullet", indent: +d.getAttribute("data-indent") || 0, checked: d.getAttribute("data-checked") === "true", parent: parentAttr(d) }) },
@@ -1212,6 +1219,7 @@ class ClipboardSerializer extends model.DOMSerializer {
       if (isToggle(n) && n.attrs.id) dom.setAttribute("data-page-toggle", n.attrs.id);
       if (n.type === N.image && n.attrs.width) dom.setAttribute("data-width", String(n.attrs.width));
     });
+    shape?.copy(fragment, doms);
     return out;
   }
 }
@@ -1274,12 +1282,14 @@ function pasteFormat(view, event, slice) {
 
 export function pastePlugin() {
   return new Plugin({
+    view() { loadClipboardShape(); return {}; },
     props: {
       handlePaste(view, event, slice) {
         if (writesFormat(slice)) return pasteFormat(view, event, slice);
         return pasteIntoClosedSummary(view, event, slice);
       },
       clipboardSerializer,
+      clipboardTextSerializer: (slice) => shape?.text(slice),
       transformPastedHTML: (html) => flattenPastedHTML(html),
       clipboardParser,
       clipboardTextParser: (text, _$ctx, plain) => (plain ? null : parseListText(text)),

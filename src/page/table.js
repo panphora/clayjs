@@ -295,9 +295,9 @@ export function pasteTable(view, event) {
     if (found.width * found.height < 2) return false;
     return pasteGrid(found.grid)(st, view.dispatch);
   }
-  if (found.width * found.height < 2) return false;
+  if (found.width * found.height < 2 || found.own) return false;
   if (found.height < 2 && !/<table[\s>]/i.test(data.getData("text/html"))) return false;
-  const table = tableFromGrid(found.grid, { header: !found.own && found.height > 1 });
+  const table = tableFromGrid(found.grid, { header: found.height > 1 });
   if (!table) return false;
   if (tableSize(table) > TABLE_IMPORT_LIMIT) {
     toast("This paste is too large for one table.", "error");

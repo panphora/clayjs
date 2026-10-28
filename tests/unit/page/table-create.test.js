@@ -2,6 +2,7 @@ import { editor, select, key, posOf } from "./view-helpers.js";
 import { blockJson, orderedIds } from "../../../src/page/model.js";
 import { history, state as pmState } from "../../../src/vendor/prosemirror.vendor.js";
 import { gridFromClipboard } from "../../../src/page/table-paste.js";
+import { loadClipboardShape } from "../../../src/page/blocks.js";
 import * as Y from "../../../src/vendor/yjs.vendor.js";
 import { createStore } from "../../../src/live/store.js";
 import { createPageEditor } from "../../../src/page/editor.js";
@@ -73,11 +74,15 @@ test("a paste that is not a lone grid is left to the editor", () => {
   expect(gridFromClipboard("", "a\tb")).toMatchObject({ width: 2, height: 1, grid: [["a", "b"]] });
 });
 
-test("a copied page table pastes as a new table without turning its first row into names", () => {
+test("a copied page table pastes as a new table without turning its first row into names", async () => {
+  await loadClipboardShape();
   const view = editor([["p", "paragraph", ""]]);
   select(view, 1);
   const own = `<table data-id="t1"><tbody><tr data-id="r1"><td data-col="c1">A</td><td data-col="c2">1</td></tr><tr data-id="r2"><td data-col="c1">B</td><td data-col="c2">2</td></tr></tbody></table>`;
-  expect(paste(view, { "text/html": own, "text/plain": "A\n\n1" })).toBe(true);
+  const data = { "text/html": own, "text/plain": "A\n\n1" };
+  // The grid paste leaves the editor's own table to the clipboard parser, which keeps its header.
+  expect(paste(view, data)).toBe(false);
+  view.dom.dispatchEvent(Object.assign(new Event("paste", { bubbles: true, cancelable: true }), clip(data)));
   const table = tableOf(view);
   expect(names(table)).toEqual(["Column 1", "Column 2"]);
   expect(grid(table)).toEqual([["A", "1"], ["B", "2"]]);

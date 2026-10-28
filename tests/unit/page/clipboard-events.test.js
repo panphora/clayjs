@@ -1,9 +1,10 @@
-import { editor, ids, posOf, select, shape } from "./view-helpers.js";
+import { blocksOf, editor, ids, posOf, select, shape } from "./view-helpers.js";
 import { selectBlocks } from "../../../src/page/blocksel.js";
 import { history } from "../../../src/vendor/prosemirror.vendor.js";
 import { rectKey } from "../../../src/page/table-select.js";
 import { blockJson, orderedIds } from "../../../src/page/model.js";
 import { REMOTE_META } from "../../../src/page/ybind/layout.js";
+import { loadClipboardShape } from "../../../src/page/blocks.js";
 
 /**
  * Copy, cut and paste through the editor's own DOM events. jsdom has no
@@ -13,7 +14,7 @@ import { REMOTE_META } from "../../../src/page/ybind/layout.js";
  * the browser pass.
  */
 
-beforeAll(() => { document.elementFromPoint = () => null; });
+beforeAll(() => { document.elementFromPoint = () => null; return loadClipboardShape(); });
 afterAll(() => { delete document.elementFromPoint; });
 afterEach(() => { document.body.innerHTML = ""; });
 
@@ -97,8 +98,111 @@ test("lists, links and code text copy as their own markup", () => {
   blocks(view, 0, 3);
   const event = clip();
   fire(view, "copy", event);
-  expect(event.data["text/plain"]).toBe("One\n\nTwo\n\nlet x = 1;\n\nsee site");
-  expect(event.data["text/html"]).toBe('<div data-id="l1" class="page-li" data-kind="bullet" data-indent="0" data-checked="false" data-pm-slice="0 0 []">One</div><div data-id="l2" class="page-li" data-kind="bullet" data-indent="1" data-checked="false">Two</div><pre data-id="cd" data-lang=""><code>let x = 1;</code></pre><p data-id="ln">see <a href="https://example.com">site</a></p>');
+  expect(event.data["text/plain"]).toBe("- One\n    - Two\n\nlet x = 1;\n\nsee site");
+  expect(event.data["text/html"]).toBe('<ul data-pm-slice="0 0 []"><li>One<ul><li>Two</li></ul></li></ul><pre data-id="cd" data-lang=""><code>let x = 1;</code></pre><p data-id="ln">see <a href="https://example.com">site</a></p>');
+});
+
+const LISTS = [
+  ["a", "list_item", "Alpha", { kind: "bullet" }],
+  ["b", "list_item", "Beta", { kind: "ordered", indent: 1 }],
+  ["c", "list_item", "Gamma", { kind: "ordered", indent: 1 }],
+  ["d", "list_item", "Delta", { kind: "check", indent: 2, checked: true }],
+  ["e", "list_item", "Epsilon", { kind: "check" }],
+  ["f", "paragraph", "Between"],
+  ["g", "list_item", "Zeta", { kind: "ordered" }],
+];
+const listsOf = (view) => { const out = []; view.state.doc.forEach((n) => { if (n.textContent) out.push(`${n.type.name}:${n.attrs.kind ?? ""}:${n.attrs.indent ?? ""}:${n.attrs.checked ?? ""}:${n.textContent}`); }); return out; };
+
+test("lists copy out as nested ul/ol with checkboxes and markdown text, and paste back as the same items", () => {
+  const src = editor(LISTS);
+  blocks(src, 0, LISTS.length - 1);
+  const event = clip();
+  fire(src, "copy", event);
+  expect(event.data["text/html"]).toBe('<ul data-pm-slice="0 0 []"><li>Alpha<ol><li>Beta</li><li>Gamma<ul><li><input type="checkbox" disabled="" checked="">Delta</li></ul></li></ol></li><li><input type="checkbox" disabled="">Epsilon</li></ul><p data-id="f">Between</p><ol><li>Zeta</li></ol>');
+  expect(event.data["text/plain"]).toBe("- Alpha\n    1. Beta\n    2. Gamma\n        - [x] Delta\n- [ ] Epsilon\n\nBetween\n\n1. Zeta");
+  const dst = editor([["e", "paragraph", ""]]);
+  select(dst, posOf(dst, "e"));
+  paste(dst, event);
+  expect(listsOf(dst)).toEqual(listsOf(src));
+});
+
+test("a list's markdown text pastes back as the same items when only text reaches the clipboard", () => {
+  const src = editor(LISTS.slice(0, 5));
+  blocks(src, 0, 4);
+  const event = clip();
+  fire(src, "copy", event);
+  const dst = editor([["e", "paragraph", ""]]);
+  select(dst, posOf(dst, "e"));
+  paste(dst, { data: { "text/plain": event.data["text/plain"] } });
+  expect(listsOf(dst)).toEqual(listsOf(src));
+});
+
+test("list items inside a toggle copy and paste with the toggle still owning them", () => {
+  const src = editor([["t", "toggle", "Title", { open: true }], ["i", "list_item", "Inside", { parent: "t" }], ["j", "list_item", "Nested", { parent: "t", indent: 1 }], ["z", "list_item", "Outside"]]);
+  blocks(src, 0, 3);
+  const event = clip();
+  fire(src, "copy", event);
+  const dst = editor([["e", "paragraph", ""]]);
+  select(dst, posOf(dst, "e"));
+  paste(dst, event);
+  const out = [];
+  dst.state.doc.forEach((n) => out.push(n));
+  const toggle = out.find((n) => n.type.name === "toggle");
+  expect(out.filter((n) => n.textContent).map((n) => [n.textContent, n.attrs.indent ?? null, n.attrs.parent === toggle.attrs.id])).toEqual([["Title", null, false], ["Inside", 0, true], ["Nested", 1, true], ["Outside", 0, false]]);
+});
+
+const WIDE = { ...TABLE, cols: { c1: { pos: "1", name: "A", width: 180 }, c2: { pos: "2", name: "B", kind: "number" }, c3: { pos: "3", name: "C" } }, sort: { col: "c2", dir: "desc" } };
+
+test("a table copies its column names as a header row, in both formats", () => {
+  const view = editor([], { blocks: { ...blocksOf([["p", "paragraph", "Before"]]), tbl: { ...WIDE, pos: "W" } } });
+  blocks(view, 0, 1);
+  const event = clip();
+  fire(view, "copy", event);
+  expect(event.data["text/plain"]).toBe("Before\n\nA\tB\tC\na1\tb1\tc1\na2\tb2\tc2\na3\tb3\tc3");
+  expect(event.data["text/html"]).toContain('<thead><tr><th data-col="c1" scope="col" data-width="180" style="width: 180px;">A</th><th data-col="c2" scope="col" data-kind="number">B</th><th data-col="c3" scope="col">C</th></tr></thead><tbody>');
+});
+
+for (const [label, lo, hi] of [["with a paragraph", 0, 1], ["on its own", 1, 1]]) {
+  test(`a table copied ${label} pastes into another Document with its header, cells, widths, kinds and sort`, () => {
+    const src = editor([], { blocks: { ...blocksOf([["p", "paragraph", "Before"]]), tbl: { ...WIDE, pos: "W" } } });
+    blocks(src, lo, hi);
+    const event = clip();
+    fire(src, "copy", event);
+    const dst = editor([["e", "paragraph", "Target"], ["x", "paragraph", ""]]);
+    select(dst, posOf(dst, "x"));
+    paste(dst, event);
+    let table = null;
+    dst.state.doc.forEach((n) => { if (n.type.name === "table") table = blockJson(n); });
+    const cols = orderedIds(table.cols);
+    expect(cols.map((id) => table.cols[id])).toEqual([{ pos: expect.any(String), name: "A", width: 180 }, { pos: expect.any(String), name: "B", kind: "number" }, { pos: expect.any(String), name: "C" }]);
+    expect(orderedIds(table.rows).map((id) => cols.map((col) => table.rows[id].cells[col]))).toEqual([["a1", "b1", "c1"], ["a2", "b2", "c2"], ["a3", "b3", "c3"]]);
+    expect(table.sort).toEqual({ col: cols[1], dir: "desc" });
+  });
+}
+
+test("a table rectangle pasted outside any table becomes a new table of those cells", () => {
+  const view = editor([], { blocks: { ...blocksOf([["e", "paragraph", ""]]), tbl: { ...TABLE, pos: "W" } } });
+  select(view, posOf(view, "e"));
+  paste(view, { data: { "text/html": '<table><tbody><tr><td data-col="c2">b1</td><td data-col="c3">c1</td></tr><tr><td data-col="c2">b2</td><td data-col="c3">c2</td></tr></tbody></table>', "text/plain": "b1\tc1\nb2\tc2" } });
+  const tables = [];
+  view.state.doc.forEach((n) => { if (n.type.name === "table") tables.push(blockJson(n)); });
+  const pasted = tables.find((t) => orderedIds(t.rows).length === 2);
+  const cols = orderedIds(pasted.cols);
+  expect(orderedIds(pasted.rows).map((id) => cols.map((col) => pasted.rows[id].cells[col]))).toEqual([["b1", "c1"], ["b2", "c2"]]);
+});
+
+test("a foreign table among other blocks pastes as a table, its header row naming the columns", () => {
+  const view = editor([["e", "paragraph", ""]]);
+  select(view, posOf(view, "e"));
+  paste(view, { data: { "text/html": "<p>Lead</p><table><thead><tr><th>Name</th><th>Qty</th></tr></thead><tbody><tr><td>Pen</td><td><b>2</b></td></tr></tbody></table><p>Tail</p>", "text/plain": "Lead\nName\tQty\nPen\t2\nTail" } });
+  const out = [];
+  view.state.doc.forEach((n) => out.push(n.type.name === "table" ? blockJson(n) : n.textContent));
+  const table = out.find((n) => typeof n === "object");
+  const cols = orderedIds(table.cols);
+  expect(out.filter((n) => n !== "")).toEqual(["Lead", table, "Tail"]);
+  expect(cols.map((id) => table.cols[id].name)).toEqual(["Name", "Qty"]);
+  expect(orderedIds(table.rows).map((id) => table.rows[id].cells[cols[0]])).toEqual(["Pen"]);
+  expect(table.rows[orderedIds(table.rows)[0]].cells[cols[1]]).toMatchObject({ c: "2" });
 });
 
 test("cut copies the same text and removes exactly that selection in one undo step", () => {
