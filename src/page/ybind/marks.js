@@ -30,7 +30,7 @@ export function marksFromAttributes(a, blockType) {
   const marks = [];
   let unknown = null;
   for (const [n, v] of best) {
-    if (schema.marks[n] && (!NATIVE_NAMES.has(n) || nativeAttrs(n, v))) marks.push(schema.marks[n].create(v === true ? null : v));
+    if (schema.marks[n] && (!NATIVE_NAMES.has(n) || nativeAttrs(n, v === true ? {} : v))) marks.push(schema.marks[n].create(v === true ? null : v));
     else (unknown ??= {})[n] = v;
   }
   // The walk asks this of every text run on every keystroke, and almost none carry a

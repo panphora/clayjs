@@ -361,3 +361,11 @@ test("the article renders the four formats as u, mark and blockquote and reads t
   expect(renderModel(parsed)).toBe(html);
 });
 
+
+test("an underline written to the Yjs doc as a bare mark reads back as underline, not as an opaque mark", async () => {
+  const { marksAttrs, marksFromAttributes } = await import("../../../src/page/ybind/marks.js");
+  const written = marksAttrs([schema.marks.underline.create()]);
+  expect(written).toEqual({ underline: true });
+  const read = marksFromAttributes(written, "paragraph");
+  expect(read.map((m) => m.type.name)).toEqual(["underline"]);
+});
