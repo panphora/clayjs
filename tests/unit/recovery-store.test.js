@@ -178,6 +178,32 @@ test("two tabs stay separate writers and neither overwrites the other", async ()
   expect(new Set(records.map((record) => record.writerId)).size).toBe(2);
 });
 
+test("a record whose writer is another open tab is not listed; once that tab is gone it is", async () => {
+  const held = new Set();
+  const locks = {
+    request: (name) => { held.add(name); return new Promise(() => {}); },
+    query: async () => ({ held: [...held].map((name) => ({ name })) }),
+  };
+  const saved = Object.getOwnPropertyDescriptor(globalThis.navigator, "locks");
+  Object.defineProperty(globalThis.navigator, "locks", { value: locks, configurable: true });
+  try {
+    const factory = new IDBFactory();
+    const other = createRecovery({ indexedDB: factory, writerId: "tab-a" }).register({ channel: "notes" });
+    const mine = createRecovery({ indexedDB: factory, writerId: "tab-b" }).register({ channel: "notes" });
+    other.stage({ key: "n1", payload: { body: "from A" } });
+    mine.stage({ key: "n2", payload: { body: "from B" } });
+    await other.flush();
+    await mine.flush();
+
+    expect((await mine.list()).records.map((record) => record.payload.body)).toEqual(["from B"]);
+    held.delete("clay-recovery-writer:tab-a");
+    expect((await mine.list()).records.map((record) => record.payload.body).sort()).toEqual(["from A", "from B"]);
+  } finally {
+    if (saved) Object.defineProperty(globalThis.navigator, "locks", saved);
+    else delete globalThis.navigator.locks;
+  }
+});
+
 test("a record of a version this build does not know is listed and never dropped", async () => {
   const factory = new IDBFactory();
   const entries = createRecovery({ indexedDB: factory }).register({ channel: "notes", version: 1 });

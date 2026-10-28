@@ -42,6 +42,28 @@ function pageWriterId() {
   return `wr-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 }
 
+// Each page holds a lock named for its writer for as long as it lives: a record whose
+// writer still holds one belongs to an open tab that will save it, not to lost work.
+const WRITER_LOCK = "clay-recovery-writer:";
+
+function holdWriterLock(writerId) {
+  const locks = globalThis.navigator?.locks;
+  if (typeof locks?.request !== "function") return;
+  locks.request(WRITER_LOCK + writerId, () => new Promise(() => {})).catch(() => {});
+}
+
+async function liveWriters(own) {
+  const locks = globalThis.navigator?.locks;
+  if (typeof locks?.query !== "function") return new Set();
+  try {
+    const { held = [] } = await locks.query();
+    return new Set(held.map((lock) => lock.name).filter((name) => typeof name === "string" && name.startsWith(WRITER_LOCK))
+      .map((name) => name.slice(WRITER_LOCK.length)).filter((id) => id !== own));
+  } catch {
+    return new Set();
+  }
+}
+
 function recordKey(id) {
   return Array.isArray(id) ? id.join("\u0000") : String(id);
 }
@@ -188,6 +210,7 @@ export function createRecovery({
   let identity = null;
   let store = null;
   let status = { ok: true, code: null, durable: false };
+  holdWriterLock(writerId);
 
   function snapshot() {
     return {
@@ -726,8 +749,9 @@ export function createRecovery({
     const result = await store.list();
     note(result);
     if (!result.ok) return { ok: false, code: result.code, records: [], status: snapshot() };
+    const live = await liveWriters(writerId);
     const records = result.records
-      .filter((record) => record.channel === entry.channel)
+      .filter((record) => record.channel === entry.channel && !live.has(record.writerId))
       .map((record) => ({ ...record, supported: record.version === entry.version }));
     return { ok: true, records, status: snapshot() };
   }
