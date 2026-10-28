@@ -19,17 +19,25 @@ export function addViewHook(view, hook) {
 
 export function viewHookPlugin() {
   let editorView = null;
+  const mounted = new WeakMap();
   return new state.Plugin({
     view: (view) => {
       editorView = view;
+      mounted.set(view, (mounted.get(view) ?? 0) + 1);
       return {
         update: (next) => { for (const hook of viewHooks.get(next) ?? []) hook.update?.(next); },
         destroy: () => {
-          const hooks = viewHooks.get(view);
-          editorView = null;
-          if (!hooks) return;
-          for (const hook of hooks) hook.destroy?.(view);
-          hooks.clear();
+          mounted.set(view, mounted.get(view) - 1);
+          if (editorView === view) editorView = null;
+          // A reconfigure destroys this plugin view and mounts a new one for the same editor in
+          // the same task; only an editor that stays without one is really going away.
+          queueMicrotask(() => {
+            if (mounted.get(view)) return;
+            const hooks = viewHooks.get(view);
+            if (!hooks) return;
+            for (const hook of hooks) hook.destroy?.(view);
+            hooks.clear();
+          });
         },
       };
     },
