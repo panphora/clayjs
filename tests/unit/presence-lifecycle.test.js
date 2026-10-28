@@ -325,6 +325,138 @@ describe("the gate a leave closes", () => {
   });
 });
 
+describe("the page's caret at the gate a leave closes", () => {
+  let createPageAwareness;
+  let createYPageBinding;
+  let seedValue;
+  let createStore;
+  let identityPlugin;
+  let EditorState;
+  let EditorView;
+  let TextSelection;
+  let opened;
+
+  beforeAll(async () => {
+    ({ createPageAwareness } = await import("../../src/page/awareness.js"));
+    ({ createYPageBinding, seedValue } = await import("../../src/page/ybind/index.js"));
+    ({ createStore } = await import("../../src/live/store.js"));
+    ({ identityPlugin } = await import("../../src/page/model.js"));
+    const pm = await import("../../src/vendor/prosemirror.vendor.js");
+    EditorState = pm.state.EditorState;
+    EditorView = pm.view.EditorView;
+    TextSelection = pm.state.TextSelection;
+  });
+
+  beforeEach(() => {
+    presence.owner?.detach();
+    presence.clear();
+    presence.explicit = false;
+    opened = [];
+    document.body.innerHTML = "";
+  });
+
+  afterEach(() => {
+    for (const one of opened.splice(0)) {
+      one.awareness?.dispose();
+      one.view.destroy();
+      one.binding.dispose();
+      one.binding.ydoc.destroy();
+    }
+    presence.owner?.detach();
+    presence.clear();
+    presence.explicit = false;
+  });
+
+  // The page editor this tab mounted, publishing through the document's one store.
+  function page() {
+    const store = createStore({ name: "page", value: seedValue([{ id: "p", text: "ALPHA" }, { id: "q", text: "bravo" }]) });
+    const binding = createYPageBinding({ store });
+    const editor = new EditorView(document.body.appendChild(document.createElement("div")), {
+      state: EditorState.create({ doc: binding.doc(), plugins: [identityPlugin()] }),
+      dispatchTransaction: (tr) => binding.dispatch(tr),
+    });
+    binding.attach(editor);
+    const awareness = createPageAwareness({
+      binding,
+      view: editor,
+      store: presence,
+      epoch: "id:doc-1",
+      frame: () => 0,
+      cancel: () => {},
+    });
+    const one = { store, binding, view: editor, awareness };
+    opened.push(one);
+    editor.dom.dispatchEvent(new Event("focus"));
+    return one;
+  }
+
+  const pagePosts = (sent) => sent.filter((body) => body.editing && body.editing.kind === "page");
+
+  // A page caret on the wire, then the exit: the participant's quiesce and its clear.
+  async function leaving() {
+    presence.setCapabilities({ supported: true, pageAwareness: true });
+    const sent = [];
+    presence.attachTransport({ send: async (body) => { sent.push(body); return true; } });
+    presence.session = { id: "session-1", token: "token-a" };
+    presence.n = 0;
+    const one = page();
+    await jest.advanceTimersByTimeAsync(250);
+    expect(pagePosts(sent)).toHaveLength(1);
+
+    const sync = { _editing: null, lane: "live", _morphInFlight: false, stop: () => {} };
+    const { syncParticipant } = await import("../../src/sync/live-sync-edit.js");
+    const participant = await syncParticipant(sync).prepare({});
+    expect(participant.quiesce()).toEqual({ ok: true });
+    await jest.advanceTimersByTimeAsync(250);
+    expect(sent.at(-1)).toEqual({ editing: null });
+    return { sent, one, participant };
+  }
+
+  test("a caret move during the exit's barrier posts nothing (pa1)", async () => {
+    const { sent, one } = await leaving();
+
+    one.view.dispatch(one.view.state.tr.setSelection(TextSelection.near(one.view.state.doc.resolve(3))));
+    await jest.advanceTimersByTimeAsync(1000);
+
+    expect(pagePosts(sent)).toHaveLength(1);
+    expect(sent.at(-1)).toEqual({ editing: null });
+  });
+
+  test("a doc change during the exit's barrier posts nothing (pa2)", async () => {
+    const { sent, one } = await leaving();
+
+    one.view.dispatch(one.view.state.tr.insertText("!", one.view.state.doc.content.size - 1));
+    await jest.advanceTimersByTimeAsync(1000);
+
+    expect(pagePosts(sent)).toHaveLength(1);
+    expect(sent.at(-1)).toEqual({ editing: null });
+  });
+
+  test("a refused exit puts the focused target back with no new transaction (pa4)", async () => {
+    const { sent, one, participant } = await leaving();
+
+    participant.resume();
+    await jest.advanceTimersByTimeAsync(250);
+
+    // The clear went with the quiesce, so the target the caret still holds goes again.
+    expect(pagePosts(sent)).toHaveLength(2);
+    expect(pagePosts(sent)[1].editing).toEqual(one.awareness.target);
+    expect(sent.at(-1)).toMatchObject({ v: 1, session: "token-a", editing: { kind: "page", epoch: "id:doc-1" } });
+  });
+
+  test("a committed exit leaves the last word a clear (pa1 commit)", async () => {
+    const { sent, one } = await leaving();
+
+    one.view.dispatch(one.view.state.tr.setSelection(TextSelection.near(one.view.state.doc.resolve(3))));
+    await jest.advanceTimersByTimeAsync(1000);
+    one.awareness.dispose();
+    await jest.advanceTimersByTimeAsync(1000);
+
+    expect(pagePosts(sent)).toHaveLength(1);
+    expect(sent.at(-1)).toEqual({ editing: null });
+  });
+});
+
 describe("one stream and one sender in an editor", () => {
   let LiveSync;
   let resetHostMeta;

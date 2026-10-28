@@ -28,14 +28,20 @@ export function syncParticipant(sync) {
   // outright. Neither falls back to a positional marker: the exit publishes nobody.
   // The sender is stopped rather than only cleared, so the gate stays shut until the
   // exit commits or is refused: a reconnect, a roster change or a focus move during
-  // the barrier would otherwise publish a target the session never takes back.
+  // the barrier would otherwise publish a target the session never takes back. The
+  // page's own awareness hears the same barrier and resumes with it, so its caret
+  // goes quiet with the sender and comes back on a refused exit.
   const quiesce = () => {
     sync._editing?.stop();
     presence.setGeneric(null);
     presence.releaseTarget();
+    if (typeof document !== "undefined") document.dispatchEvent(new Event("clay:presence-quiesce"));
     return sync.lane === "live" && sync._morphInFlight ? { ok: false, code: "pending-input" } : { ok: true };
   };
-  const resume = () => sync._editing?.resume();
+  const resume = () => {
+    sync._editing?.resume();
+    if (typeof document !== "undefined") document.dispatchEvent(new Event("clay:presence-resume"));
+  };
   const dispose = () => sync.stop();
   return {
     id: "clay:sync",

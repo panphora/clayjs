@@ -104,6 +104,10 @@ export function createPageAwareness({ binding, view, store = presenceStore, epoc
   styleWithLegacyId(STYLE_ID, STYLE_CSS, STYLE_ID, ["editor-ui"]);
   const doc = view.dom.ownerDocument;
   let disposed = false;
+  // The exit's barrier, and the clear that came with it: while it runs this tab
+  // publishes nothing, so a caret move or a doc change during the barrier cannot put
+  // a target back the session is about to release.
+  let quiesced = false;
   // Focus is a fact about the document, not a guess: an editor mounted in a background
   // tab is not focused, and publishing a target for it would claim a caret nobody holds.
   let focused = typeof view.hasFocus === "function" ? view.hasFocus() === true : view.dom.contains(doc.activeElement);
@@ -113,7 +117,7 @@ export function createPageAwareness({ binding, view, store = presenceStore, epoc
   const supported = () => store.getSnapshot().pageAwareness !== false;
 
   const publish = (state = view.state) => {
-    if (disposed) return;
+    if (disposed || quiesced) return;
     if (!supported() || !focused || isComposing()) {
       store.setTarget(null);
       return;
@@ -169,6 +173,19 @@ export function createPageAwareness({ binding, view, store = presenceStore, epoc
     schedule();
   });
 
+  // The edit participant reaches these, so the page's target goes quiet with the
+  // sender during the exit's barrier and comes back with it on a refused exit.
+  const quiesce = () => {
+    if (disposed) return;
+    quiesced = true;
+    store.setTarget(null);
+  };
+  const resume = () => {
+    if (disposed) return;
+    quiesced = false;
+    publish();
+  };
+
   const onFocus = () => { focused = true; publish(); schedule(); };
   const onBlur = () => { focused = false; store.setTarget(null); };
   const onHide = () => { store.setTarget(null); };
@@ -178,6 +195,8 @@ export function createPageAwareness({ binding, view, store = presenceStore, epoc
   view.dom.addEventListener("blur", onBlur);
   view.dom.addEventListener("compositionend", onCompositionEnd);
   doc.addEventListener("pagehide", onHide);
+  doc.addEventListener("clay:presence-quiesce", quiesce);
+  doc.addEventListener("clay:presence-resume", resume);
   view.updateState(view.state.reconfigure({ plugins: [...view.state.plugins, plugin] }));
   publish();
   schedule();
@@ -186,6 +205,8 @@ export function createPageAwareness({ binding, view, store = presenceStore, epoc
     epoch,
     refresh,
     plugin,
+    quiesce,
+    resume,
     get decorations() {
       return awarenessKey.getState(view.state) ?? DecorationSet.empty;
     },
@@ -201,6 +222,8 @@ export function createPageAwareness({ binding, view, store = presenceStore, epoc
       view.dom.removeEventListener("blur", onBlur);
       view.dom.removeEventListener("compositionend", onCompositionEnd);
       doc.removeEventListener("pagehide", onHide);
+      doc.removeEventListener("clay:presence-quiesce", quiesce);
+      doc.removeEventListener("clay:presence-resume", resume);
       store.setTarget(null);
       store.releaseTarget();
       if (!view.isDestroyed) {
