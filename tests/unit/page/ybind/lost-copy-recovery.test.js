@@ -102,3 +102,40 @@ test("Restore of a losing copy shows it once as a recovered block, survives relo
   expect(a.bridge.recoverable.map((entry) => entry.source)).toContain(lost);
   expect(a.stats.mismatch).toBe(0);
 });
+
+const projected = (tab) => { const out = []; docOf(tab.pd, walk(tab.pd)).forEach((node) => out.push([node.attrs.id, node.textContent])); return out; };
+
+test("a deleted copy marker ends a retired copy so a cross-block delete keeps the surviving text", () => {
+  const base = createPageDoc(new Y.Doc());
+  base.ydoc.clientID = 1;
+  seedFrom(base, [{ id: "x", text: "" }, { id: "p", text: "ALPHA" }, { id: "u", text: "OMEGA" }, { id: "m", text: "" }, { id: "t", t: "toggle", attrs: { open: true }, text: "HEADTAIL" }]);
+  base.origins.set(authorKey(1), "seed");
+  const a = open(clone(base, 300), { authorToken: "tok-a" });
+  const b = open(clone(base, 200), { authorToken: "tok-b" });
+
+  expect(b.bridge.moveBlocks({ ids: ["m", "t"], afterId: "p" })).toEqual({ status: "moved", ids: ["m", "t"] });
+  merge(a.pd, b.pd);
+  merge(b.pd, a.pd);
+  expect(a.bridge.moveBlocks({ ids: ["x"], afterId: "p" })).toEqual({ status: "moved", ids: ["x"] });
+  merge(a.pd, b.pd);
+  merge(b.pd, a.pd);
+  expect(a.bridge.undo()).toBe(true);
+  merge(a.pd, b.pd);
+  merge(b.pd, a.pd);
+
+  const retired = walk(a.pd).hidden.filter((entry) => entry.blockId === "x");
+  expect(retired).toHaveLength(1);
+  expect(retired[0].live).toBe(true);
+
+  let from = null, to = null;
+  a.view.state.doc.forEach((node, pos) => {
+    if (node.attrs.id === "p") from = pos + node.textContent.length;
+    if (node.attrs.id === "t") to = pos + 2;
+  });
+  a.view.dispatch(a.view.state.tr.delete(from, to));
+
+  expect(a.stats.mismatch).toBe(0);
+  expect(blocks(a)).toEqual([["x", ""], ["p", "ALPHEADTAIL"], ["u", "OMEGA"]]);
+  expect(projected(a)).toEqual(blocks(a));
+  expect(b.stats.mismatch).toBe(0);
+});

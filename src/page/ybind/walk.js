@@ -203,7 +203,7 @@ function walkFlow(pd, index) {
       const deletedEdges = it.deleted ? markerIdsWithin(it).flatMap((id) => {
         const sourceKey = idKey(index.resolve(id));
         const record = index.boundaryOf(id);
-        if (!record || record.kind !== "removed" || liveSources.has(sourceKey)) return [];
+        if (!record || (record.kind !== "removed" && record.kind !== "copy") || liveSources.has(sourceKey)) return [];
         return [{ blockId: record.blockId, sourceKey }];
       }) : [];
       const ends = (a) => a.end ? matchesEnd(it, a.end) : a.implicit ? boundary || deletedEdges.some((e) => e.sourceKey !== a.sourceKey) : (boundary && edge !== a.blockId) || deletedEdges.some((e) => e.blockId !== a.blockId);
