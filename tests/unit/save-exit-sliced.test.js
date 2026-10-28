@@ -21,7 +21,7 @@ jest.setTimeout(120000);
 
 const BIG = 320 * 1024;
 
-let save, saveCore, unsaved, transition, editMode;
+let save, saveCore, unsaved, transition, editMode, snapshot;
 let posts = [];
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -110,6 +110,7 @@ beforeAll(async () => {
   unsaved = await import("../../src/lib/unsaved-state.js");
   transition = await import("../../src/core/mode-transition.js");
   editMode = await import("../../src/core/is-edit-mode.js");
+  snapshot = await import("../../src/core/snapshot.js");
   for (let i = 0; i < 100 && !save.baselineSettled(); i++) await sleep(50);
   expect(save.baselineSettled()).toBe(true);
   // The page's first save: no last saved size to judge yet, so it prepares in one task and
@@ -424,6 +425,197 @@ test("no soon() caller is answered twice, whatever save follows", async () => {
       expect(answer).toMatchObject({ msgType: "skipped", msg: "Save already in progress" });
     }
   } finally {
+    gate.release();
+    gate.restore();
+    await saving?.catch(() => {});
+    restoreClock();
+    await idleLane();
+  }
+});
+
+// The attempt queued behind a save whose fate is unknown is kept, not sent: the callers
+// are still waiting once the lane is idle and nothing later is queued to take them.
+async function keptWhenFateUnknown(gate, queued) {
+  const realFetch = global.fetch;
+  let unknown;
+  global.fetch = jest.fn(async (url) => {
+    if (String(url).includes("/_/save")) {
+      throw Object.assign(new Error("The operation was aborted."), { name: "AbortError" });
+    }
+    return okJson({ spec: 1, document: { etag: "base-1" } });
+  });
+  try {
+    gate.release();
+    unknown = await queued.saving;
+  } finally {
+    global.fetch = realFetch;
+  }
+  expect(unknown.msgType).not.toBe("saved");
+  expect(saveCore.saveFateIsUnknown()).toBe(true);
+  expect(queued.answers).toHaveLength(0);
+}
+
+// A page the save judges in one task: no preparation for the slice gate to hold, so the
+// capture happens in the caller's own step.
+function wholeCapturePage() {
+  const realDescriptor = Object.getOwnPropertyDescriptor(document, "hidden") || Object.getOwnPropertyDescriptor(Object.getPrototypeOf(document), "hidden");
+  Object.defineProperty(document, "hidden", { configurable: true, get: () => true });
+  return () => {
+    if (realDescriptor && realDescriptor.get) Object.defineProperty(document, "hidden", realDescriptor);
+    else delete document.hidden;
+  };
+}
+
+test("a soon() caller hears the hold an explicit save waiting for a preview gives", async () => {
+  setText("explicit-save-held");
+  // The preparer loads on demand: one plain save gets it in place, so the hold below
+  // catches a preparation that really is sliced.
+  expect((await save.savePage()).ok).toBe(true);
+  const reason = "Saves are held for a test preview";
+  const gate = holdSlices();
+  const restoreClock = stepClock();
+  let saving;
+  try {
+    const queued = await queuedBehindSaved(gate);
+    saving = queued.saving;
+    const answers = queued.answers;
+
+    save.holdAllSaves(reason);
+    const held = await save.savePage();
+    expect(held).toMatchObject({ ok: false, msgType: "skipped", msg: reason });
+    // Released without a replay, which is how a closing session drops the missed save: no
+    // later save is coming for these callers.
+    save.releaseAllSaves({ replay: false, reason });
+
+    await sleep(100);
+    expect(answers).toHaveLength(1);
+    expect(answers[0]).toMatchObject({ ok: false, msgType: "skipped", msg: reason });
+  } finally {
+    save.releaseAllSaves({ replay: false, reason });
+    gate.release();
+    gate.restore();
+    await saving?.catch(() => {});
+    restoreClock();
+    await idleLane();
+  }
+});
+
+test("a soon() caller hears the refusal a forced save in a closed session gives", async () => {
+  setText("forced-save-not-admitted");
+  // The preparer loads on demand: one plain save gets it in place, so the hold below
+  // catches a preparation that really is sliced.
+  expect((await save.savePage()).ok).toBe(true);
+  const gate = holdSlices();
+  const restoreClock = stepClock();
+  const session = save.saveSession();
+  let saving;
+  try {
+    const queued = await queuedBehindSaved(gate);
+    saving = queued.saving;
+    const answers = queued.answers;
+
+    session.start();
+    session.quiesce();
+    expect(save.savesAdmitted()).toBe(false);
+    const skipped = await save.savePageForce();
+    expect(skipped).toMatchObject({ ok: false, msgType: "skipped", msg: "Save session is quiesced" });
+
+    await sleep(100);
+    expect(answers).toHaveLength(1);
+    expect(answers[0]).toMatchObject({ ok: false, msgType: "skipped", msg: "Save session is quiesced" });
+    expect(answers[0]).toBe(skipped);
+  } finally {
+    gate.release();
+    gate.restore();
+    await saving?.catch(() => {});
+    session.stop();
+    restoreClock();
+    await idleLane();
+  }
+});
+
+test("a soon() caller hears the error of a forced save whose capture fails", async () => {
+  setText("before-forced-save-capture-failure");
+  // The preparer loads on demand: one plain save gets it in place, so the hold below
+  // catches a preparation that really is sliced.
+  expect((await save.savePage()).ok).toBe(true);
+  // Typed after that save, so the save the callers queue behind really goes out and its
+  // aborted request leaves the page's fate unknown.
+  setText("forced-save-capture-failure");
+  const gate = holdSlices();
+  const restoreClock = stepClock();
+  const realError = console.error;
+  console.error = () => {};
+  let throwing = false;
+  snapshot.addDocumentTransform(() => {
+    if (throwing) throw new Error("capture exploded");
+  });
+  let restoreHidden = null;
+  try {
+    const queued = await queuedBehindSaved(gate);
+    const answers = queued.answers;
+    await keptWhenFateUnknown(gate, queued);
+
+    restoreHidden = wholeCapturePage();
+    throwing = true;
+    const failed = await save.savePageForce();
+    throwing = false;
+    expect(failed).toMatchObject({ msgType: "error", msg: "capture exploded", code: null });
+
+    await sleep(100);
+    expect(answers).toHaveLength(1);
+    expect(answers[0]).toBe(failed);
+  } finally {
+    throwing = false;
+    restoreHidden?.();
+    console.error = realError;
+    gate.restore();
+    restoreClock();
+    await idleLane();
+  }
+});
+
+test("a soon() caller hears the save a forced save lands in one task", async () => {
+  setText("forced-save-whole-capture");
+  // The preparer loads on demand: one plain save gets it in place, so the hold below
+  // catches a preparation that really is sliced.
+  expect((await save.savePage()).ok).toBe(true);
+  const gate = holdSlices();
+  const restoreClock = stepClock();
+  const realError = console.error;
+  console.error = () => {};
+  let saving;
+  let restoreHidden = null;
+  try {
+    const queued = await queuedBehindSaved(gate);
+    saving = queued.saving;
+    const answers = queued.answers;
+
+    // The attempt queued behind the save on the wire is kept rather than sent: the host
+    // has withdrawn permission, so the drain refuses it and takes nobody with it, and the
+    // callers are left waiting with the lane idle.
+    editMode.noteHostWritable(false);
+    gate.release();
+    await saving;
+    saving = null;
+    expect(answers).toHaveLength(0);
+    editMode.noteHostWritable(true);
+    for (let i = 0; i < 200 && saveCore.isSaveInProgress(); i++) await sleep(20);
+    expect(saveCore.isSaveInProgress()).toBe(false);
+
+    restoreHidden = wholeCapturePage();
+    const sentBefore = posts.length;
+    const saved = await save.savePageForce();
+    expect(saved).toMatchObject({ ok: true });
+
+    await sleep(100);
+    expect(answers).toHaveLength(1);
+    expect(answers[0]).toBe(saved);
+    expect(posts.length).toBe(sentBefore + 1);
+  } finally {
+    editMode.noteHostWritable(true);
+    restoreHidden?.();
+    console.error = realError;
     gate.release();
     gate.restore();
     await saving?.catch(() => {});

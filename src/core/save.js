@@ -1206,6 +1206,8 @@ function attemptSaveNow({ kind, permit = null }, callback = () => {}) {
     if (!isEditMode && !window.clay?.testMode) {
       if (explicit) clearExplicitSave();
       const skipped = skipped_('Not in edit mode');
+      // The page left edit mode, so no later save is coming to take these callers.
+      takeSoonQueued().forEach((done) => done(skipped));
       callback(skipped);
       return resolve(skipped);
     }
@@ -1242,7 +1244,13 @@ function attemptSaveNow({ kind, permit = null }, callback = () => {}) {
     // Not cleared here: pendingSave means this request is deferred, not
     // abandoned, and drainPendingSave is what eventually sends it.
     if (explicit) {
-      if (heldForPreview(callback, resolve)) return;
+      const held = heldForPreview(callback, resolve);
+      if (held) {
+        // A hold's replay is an autosave, which takes nobody's queued waiters, and a hold
+        // released without a replay drops the missed save: the hold is their answer.
+        takeSoonQueued().forEach((done) => done(held));
+        return;
+      }
       if (isSaveInProgress()) {
         pendingSave = true;
         const skipped = skipped_('Save already in progress');
@@ -1414,6 +1422,9 @@ export function savePageForce(callback = () => {}, { quietConflict = false, page
     // so a continuation the exit already gave up on cannot write later input.
     if (!savesAdmitted(permit) || (permit && !permitHolds(permit))) {
       const skipped = sessionClosed('Save session is quiesced');
+      // A closed session parks its own attempt and sends nothing more without a permit, so
+      // the refusal is the last word these callers get from this page.
+      takeSoonQueued().forEach((done) => done(skipped));
       callback(skipped);
       return resolve(skipped);
     }
@@ -1487,7 +1498,9 @@ export function savePageForce(callback = () => {}, { quietConflict = false, page
       if (typeof callback === 'function') {
         callback(result);
       }
-      return resolve(result);
+      resolve(result);
+      takeSoonQueued().forEach((done) => done(result));
+      return;
     }
 
     settleCaptured({
@@ -1507,6 +1520,8 @@ export function savePageForce(callback = () => {}, { quietConflict = false, page
       callback,
     }).then((outcome) => {
       resolve(outcome.result);
+      // The waiters asked for a save soon and this one landed: its result is their answer.
+      takeSoonQueued().forEach((done) => done(outcome.result));
     });
   });
 }
