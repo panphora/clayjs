@@ -152,7 +152,7 @@ test("a legacy registration that lands between the check and the save is refused
 test("activation succeeds once with no incompatible editor, covers pending work and switches the lane from the receipt", async () => {
   const adapter = host();
   const switched = [];
-  const lane = { async switchTo({ floor, receipt }) { switched.push({ floor, receipt }); return { status: "switched" }; } };
+  const lane = { async switchScope(floor, { receipt }) { switched.push({ floor, receipt }); return { status: "switched" }; } };
   const gate = createFormatGate({ host: adapter, installed: () => "tab-r", revision: () => adapter.state.revision, lane });
   const applied = [];
   const first = await gate.run({ apply: () => applied.push("underline") });
@@ -184,7 +184,7 @@ test("activation and the lane switch are retried after a wire failure and after 
     return real(input);
   };
   let switches = 0;
-  const lane = { async switchTo() { switches += 1; return switches === 1 ? { status: "refused", code: "uncovered" } : { status: "switched" }; } };
+  const lane = { async switchScope() { switches += 1; return switches === 1 ? { status: "refused", code: "uncovered" } : { status: "switched" }; } };
   const gate = createFormatGate({ host: adapter, installed: () => "tab-r", revision: () => "r1" });
   const failed = await gate.run({ apply: () => "underline" });
   expect(failed.status).toBe("failed");
@@ -207,7 +207,7 @@ test("activation and the lane switch are retried after a wire failure and after 
   // A lane switch that did not happen stays pending and is retried on its own.
   const adapter3 = host();
   const order = [];
-  const lane3 = { async switchTo() { order.push("switch"); return order.filter((x) => x === "switch").length === 1 ? { status: "refused", code: "uncovered" } : { status: "switched" }; } };
+  const lane3 = { async switchScope() { order.push("switch"); return order.filter((x) => x === "switch").length === 1 ? { status: "refused", code: "uncovered" } : { status: "switched" }; } };
   const gate3 = createFormatGate({ host: adapter3, installed: () => "tab-r", revision: () => "r1", lane: lane3 });
   expect(await gate3.activate()).toMatchObject({ status: "active", floor: 1 });
   expect(await gate3.retry()).toMatchObject({ status: "active" });
@@ -221,7 +221,7 @@ test("disposal while awaiting the save applies nothing and switches no lane", as
   const real = adapter.activate;
   adapter.activate = (input) => held.then(() => real(input));
   let switches = 0;
-  const lane = { async switchTo() { switches += 1; return { status: "switched" }; } };
+  const lane = { async switchScope() { switches += 1; return { status: "switched" }; } };
   const gate = createFormatGate({ host: adapter, installed: () => "tab-r", revision: () => "r1", lane });
   const running = gate.run({ apply: () => "underline" });
   gate.dispose();
@@ -260,4 +260,49 @@ test("an unsupported host keeps the newer writers off, and the save says which f
   expect(knownPageFormatFloor()).toBe(1);
   notePageFormatFloor(0);
   expect(knownPageFormatFloor()).toBe(1);
+});
+
+// The lane a floor rise moves this tab onto: the transport's own name for the move is
+// `switchScope(floor, { covered })`, and the receipt of the accepted activation save is
+// what covers the pending work.
+test("an accepted activation switches the lane scope through the transport's own call, and the page says which floor it writes", async () => {
+  document.head.innerHTML = "<title>Notes</title>";
+  const adapter = host();
+  const switched = [];
+  const lane = {
+    async switchScope(next, options) {
+      switched.push({ next, options });
+      return { status: "switched", floor: 1 };
+    },
+  };
+  const gate = createFormatGate({ host: adapter, installed: () => "tab-r", revision: () => adapter.state.revision, lane });
+  const applied = [];
+  expect((await gate.run({ apply: () => applied.push("underline") })).status).toBe("retry");
+
+  expect(applied).toEqual([]);
+  expect(adapter.calls.activate).toBe(1);
+  expect(switched).toHaveLength(1);
+  expect(switched[0].next).toBe(PAGE_FORMAT);
+  expect(switched[0].options.covered).toBe(true);
+  expect(switched[0].options.receipt).toEqual({ accepted: true, revision: "r2" });
+});
+
+test("a switch the lane refuses stays pending and is retried with the same receipt", async () => {
+  document.head.innerHTML = "<title>Notes</title>";
+  const adapter = host();
+  const calls = [];
+  const lane = {
+    async switchScope(next, options) {
+      calls.push({ next, options });
+      return calls.length === 1 ? { status: "refused", code: "uncovered" } : { status: "switched" };
+    },
+  };
+  const gate = createFormatGate({ host: adapter, installed: () => "tab-r", revision: () => "r1", lane });
+  expect(await gate.activate()).toMatchObject({ status: "active", floor: 1 });
+  expect(calls).toHaveLength(1);
+  expect(await gate.retry()).toMatchObject({ status: "active" });
+  expect(calls).toHaveLength(2);
+  // The retry is covered by the receipt the activation was accepted against.
+  expect(calls[1].options.covered).toBe(true);
+  expect(calls[1].options.receipt).toEqual({ accepted: true, revision: "r2" });
 });

@@ -1084,3 +1084,40 @@ test("an interrupted scope change leaves the tab on floor 0 with its pending wor
   c.lane.stop();
   expect(c.transport.switchScope(1, { covered: true })).toMatchObject({ status: "refused", code: "lane-stopped", floor: 0 });
 });
+
+// The format gate's own reason for switching: a tab that rises to floor 1 writes a
+// format a tab that never rose cannot read, so it stops sharing that tab's lane.
+test("a tab that rises to floor 1 shares nothing with a tab still on floor 0", async () => {
+  scopedLocks();
+  const tags = { game: { value: { score: 0 } } };
+  const a = tabAt(tags);
+  await settle();
+  const b = tabAt(tags);
+  await settle();
+  // Both are on the floor-0 scope and see each other.
+  a.game.add("score", 1);
+  await settle();
+  expect(b.game.toJSON()).toEqual({ score: 1 });
+
+  // A's own accepted save covers the work, and its floor rose: it moves, keeping
+  // every store.
+  expect(a.transport.switchScope(1, { covered: true })).toMatchObject({ status: "switched", floor: 1, scope: FORMAT_KEY });
+  await settle();
+  expect(a.game.toJSON()).toEqual({ score: 1 });
+
+  // The update a floor-0 tab could not read never reaches it.
+  a.game.add("score", 2);
+  await settle();
+  expect(a.game.toJSON()).toEqual({ score: 3 });
+  expect(b.game.toJSON()).toEqual({ score: 1 });
+  expect(b.transport.scope).toBe(KEY);
+
+  // A tab that opens at floor 1 joins the new scope and converges with A.
+  const c = tabAt(tags, { key: KEY, floor: 1 });
+  await settle();
+  expect(c.transport.scope).toBe(FORMAT_KEY);
+  expect(c.game.toJSON()).toEqual({ score: 3 });
+  c.game.add("score", 1);
+  await settle();
+  expect(a.game.toJSON()).toEqual({ score: 4 });
+});

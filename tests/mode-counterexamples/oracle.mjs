@@ -214,7 +214,8 @@ function conservation(run, fail) {
 // when something is still owed: the host's last accepted save does not carry it, or the
 // page's own answer says it is unsaved. Where every value the person left standing is
 // already in that save and the refusal names no pending source, the exit is refused for
-// work that does not exist.
+// work that does not exist. A refusal that names a source is judged the same way when
+// the run ends on it: a source that never cleared held the exit forever.
 function liveness(run, fail) {
   // Each refusal is judged as of its own moment: the saves the host had accepted by then
   // and the values standing at then. A save or an admission that arrives afterwards cannot
@@ -233,6 +234,26 @@ function liveness(run, fail) {
       `the exit was refused "${refusal.code}" with no pending source and nothing owed: the host's last accepted save carries every value the person left, and the page says unsaved=${run.result?.unsaved === true}`,
     );
   }
+
+  // A refusal that names a source is judged the same way when it is the run's last word
+  // on the exit: an exit refused forever on a source that never clears is refused for
+  // work that does not exist, exactly as an unnamed one is. Only the end of the run
+  // decides this, because a source the person went on to clear refused nothing.
+  const refusals = (run.trace ?? []).filter((event) => event.kind === "transition-refused" && event.detail.op === "leave");
+  const last = refusals.at(-1) ?? null;
+  if (!last) return;
+  const named = Array.isArray(last.detail.pending) ? last.detail.pending : [];
+  if (!named.length) return;
+  const left = (run.trace ?? []).some((event) => event.seq > last.seq && event.kind === "transition" && event.detail.op === "leave" && event.detail.ok === true);
+  if (left) return;
+  const admitted = standingAdmissions(run, last.seq).filter((entry) => !discarded(run, entry));
+  const landed = acceptedBefore(run, last.seq).at(-1) ?? null;
+  const owed = admitted.filter((entry) => !landed || !carries(landed.body, entry.value)).filter((entry) => !committed(run, entry));
+  if (owed.length) return;
+  fail(
+    "liveness",
+    `the exit stayed refused "${last.detail.code}" on a pending ${JSON.stringify(named)} that never cleared, and the host's last accepted save carries every value the person left`,
+  );
 }
 
 // O8, an entry the switch refuses. An entry is the person asking to edit, and a refused

@@ -6,7 +6,7 @@ import { savePageForce, holdAllSaves, releaseAllSaves, suspendAutosave, resumeAu
 import { setSaveHeader, onSaveAccepted } from "../core/save-core.js";
 import { lastSeenEtag, representedEtag, recordEtag } from "../core/etag.js";
 import { captureForSaveAndComparison } from "../core/snapshot.js";
-import { storeOf, stageStore, closeStore, checkpointWithin, requestCheckpoint, requestExitCheckpoint, fastLane, pageLaneReady, pageWriterReady, registerPageCheckpoints } from "./live.js";
+import { storeOf, stageStore, closeStore, checkpointWithin, requestCheckpoint, requestExitCheckpoint, fastLane, localLane, pageLaneReady, pageWriterReady, registerPageCheckpoints } from "./live.js";
 import { serializeLive } from "../live/ops.js";
 import { parseJsonRelaxed } from "../vendor/hyper-morph-json.vendor.js";
 import { saveStateFor, pageStateFor, BLOCKED_TEXT, RETRY_TEXT, downloadPageCopy, downloadSnapshot, copyPageText } from "../page/save-states.js";
@@ -607,6 +607,17 @@ export function createSteps(inst, options) {
           supported: host.supported,
           installed: () => identity?.token ?? null,
           revision: () => null,
+          // A floor rise moves this tab to the lane scope of the format it now
+          // writes, so a tab that cannot read that format never shares it. The
+          // transport is this tab's to create, on its own schedule, so the gate
+          // asks for it by the move rather than by the object.
+          lane: {
+            switchScope: (next, options) => {
+              const transport = localLane();
+              if (!transport) return { status: "refused", code: "lane-unavailable" };
+              return transport.switchScope(next, options);
+            },
+          },
         });
         return formatGate;
       })

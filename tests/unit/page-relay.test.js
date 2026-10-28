@@ -238,6 +238,26 @@ describe("a page save's relay", () => {
     expect(sync.lastHtml).toBe(relay);
   });
 
+  test("the relay of a floor-0 page activated in the session carries the floor its save sent", async () => {
+    pageDocument();
+    live("page").update((value) => {
+      for (const key of Object.keys(value)) delete value[key];
+      Object.assign(value, seed());
+    });
+    await startSync();
+    // The format gate's activation: one save that raises the document's floor on its
+    // way out, so the marker is in the bytes the host took and not in the capture.
+    const result = await save.savePageForce(() => {}, { pageFormatFloor: 1 });
+    await wait(20);
+
+    expect(result.ok).toBe(true);
+    expect(savePosts).toHaveLength(1);
+    expect(relayPosts).toHaveLength(1);
+    expect(savePosts[0]).toContain('<meta name="clay-page-format" content="1">');
+    // A peer that receives this relay learns the floor the host stored.
+    expect(relayPosts[0].html).toContain('<meta name="clay-page-format" content="1">');
+  });
+
   test("typing after the capture but before the answer is absent from that older relay", async () => {
     pageDocument();
     live("page").update((value) => {

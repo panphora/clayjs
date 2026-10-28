@@ -48,6 +48,8 @@ import { mergeIgnoresAttr, mergeVetoesAttr } from '../lib/root-attrs.js';
 import { autosaveActive } from '../lib/autosave-state.js';
 import { hostSupports } from '../core/host-meta.js';
 import { PAGE_FORMAT, PAGE_FORMAT_HEADER } from '../core/page-format-wire.js';
+import { knownPageFormatFloor, pageFormatFloor, withPageFormatFloor } from '../core/page-format.js';
+import { onSaveAccepted } from '../core/save-core.js';
 import { servedDocumentEtag } from '../core/host-attrs.js';
 import { recordEtag, seedEtag, lastSeenEtag, conditionalSaves, representedEtag, forgetRepresentedEtag } from '../core/etag.js';
 import { pageMaybeDirty, pauseGate, resumeGate, gateCaptureToken, gateClearIfUnchanged } from '../lib/dirty-gate.js';
@@ -1257,6 +1259,13 @@ class LiveSync {
         return;
       }
     }
+
+    // The relay cites this save's stamp, so it declares the floor those bytes went out
+    // at: the save adds the format marker on its way out (core/save-core.js runSave),
+    // after the capture this relay was built from. At floor 0 the html is unchanged.
+    const sent = acceptedBytesFor(captureId) ?? acceptedHtml;
+    const floor = typeof sent === 'string' ? pageFormatFloor(sent) : 0;
+    payload = { ...payload, html: withPageFormatFloor(payload.html, Math.max(knownPageFormatFloor(), floor)) };
 
     // Skip only an unstamped repeat, judged against the base as it stood. A
     // landed save is news even when its bytes equal the last relay: "Keep mine"
@@ -2548,6 +2557,16 @@ class LiveSync {
     return loadEdit().then((mod) => mod.syncParticipant(this));
   }
 }
+
+// The bytes the host just accepted, exactly as they went out, and the capture they came
+// from: a save adds the format marker on its way out, so only these say the floor.
+let lastAccepted = null;
+onSaveAccepted((html, accepted) => {
+  lastAccepted = typeof html === 'string' ? { html, captureId: accepted?.captureId ?? null } : null;
+});
+
+const acceptedBytesFor = (captureId) =>
+  lastAccepted && (lastAccepted.captureId ?? null) === (captureId ?? null) ? lastAccepted.html : null;
 
 // Singleton instance
 const liveSync = new LiveSync();

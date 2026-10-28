@@ -49,6 +49,7 @@ export function createFormatGate({
   let floor = 0;
   let pending = null;
   let lanePending = false;
+  let laneReceipt = null;
   let disposed = false;
 
   // The floor this gate knows the document at. A save or a room answer can tell
@@ -114,19 +115,24 @@ export function createFormatGate({
     }
     note(PAGE_FORMAT);
     lanePending = true;
-    await joinLane(answer.receipt ?? null);
-    return { status: "active", floor, receipt: answer.receipt ?? null };
+    laneReceipt = answer.receipt ?? null;
+    await joinLane(laneReceipt);
+    return { status: "active", floor, receipt: laneReceipt };
   }
 
   // Joining the new lane scope happens after the receipt is accepted, and only
   // then: an interrupted switch leaves this tab on floor 0's scope with every
-  // store intact and the switch still pending, never a lane it cannot cover.
+  // store intact and the switch still pending, never a lane it cannot cover. The
+  // receipt is kept, so the retry of a refused switch is covered by the same write.
   async function joinLane(receipt) {
     if (!lane || !lanePending) return false;
+    const covering = receipt ?? laneReceipt;
     try {
-      const result = await lane.switchTo({ floor: PAGE_FORMAT, receipt });
+      // The receipt is what says the pending work went with an accepted write.
+      const result = await lane.switchScope(PAGE_FORMAT, { covered: Boolean(covering), receipt: covering });
       if (result && result.status === "switched") {
         lanePending = false;
+        laneReceipt = null;
         return true;
       }
     } catch {}
@@ -185,6 +191,7 @@ export function createFormatGate({
     dispose() {
       disposed = true;
       lanePending = false;
+      laneReceipt = null;
       return { status: "disposed" };
     },
   };

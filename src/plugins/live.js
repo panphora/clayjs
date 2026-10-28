@@ -1421,6 +1421,14 @@ export function fastLane() {
   return fast;
 }
 
+// The local lane's transport, for the format gate: a floor-1 document shares a
+// channel scope no tab below that floor is on, and moving this tab there is the
+// gate's call (page/format-gate.js). Null until this tab has such a lane, and a
+// gate asks again on its next retry.
+export function localLane() {
+  return local;
+}
+
 // The page editor's pause save: checkpoint within ms of now. Only the room's
 // writer saves, so in other tabs this changes nothing.
 export function checkpointWithin(ms) {
