@@ -73,6 +73,11 @@ const MODES = new Set(["view", "edit", "draft"]);
 // The baseline's quiet window is SETTLE_MS = 500 in src/core/save.js: an exit that waits
 // for `clay:baseline-settled` cannot commit until that much of the case's clock passed.
 const LEAVE_SETTLE_MS = 600;
+// A transition settles on the case's own clock, and nothing else moves it: a step that
+// waits for one is spent in slices, up to this budget of case time. A budget that runs out
+// is a stalled driver, not a verdict.
+const TRANSITION_STEP_MS = 50;
+const TRANSITION_BUDGET_MS = 60000;
 
 const baseOf = (boundary) => boundary.slice(0, boundary.indexOf(":") === -1 ? boundary.length : boundary.indexOf(":"));
 
@@ -455,12 +460,59 @@ export async function runCase(json) {
   const fixture = specOf(json);
   const host = createHost(record, fixture.host ?? {});
   const cleanups = [];
+  // A schedule can reach a page the case did not describe: an entry answered by a reload is
+  // answered by a document a browser would replace, so nothing this driver could type into
+  // it would be the page the case asked for. The precondition is the case's, so a run that
+  // violates one is invalid, never failed. A stalled driver is the same kind of answer.
+  const violations = [];
+  let stalled = false;
 
   try {
     const host_ = await hostHarness();
-    let booted = await bootPage(fixture, { mode: json.boot.mode, host, resetModules: host_.resetModules });
-    let clay = booted.clay;
+
+    const flush = async (turns = 12) => {
+      for (let i = 0; i < turns; i++) await new Promise((resolve) => process.nextTick(resolve));
+      await host_.advance(0);
+    };
+    const settle = async (ms) => {
+      await host_.advance(ms);
+      await flush();
+    };
+    // A transition parks on the case's own clock: the page's promise settles only when the
+    // clock moves, and only this driver moves it. The step is spent in slices until the
+    // boundary answers, and a budget that runs out stalls the case instead of the child.
+    const until = async (flight, at, op) => {
+      let state = "pending";
+      let value;
+      let failure;
+      Promise.resolve(flight).then(
+        (answer) => {
+          state = "settled";
+          value = answer;
+        },
+        (error) => {
+          state = "failed";
+          failure = error;
+        },
+      );
+      for (let spent = 0; ; spent += TRANSITION_STEP_MS) {
+        await flush();
+        if (state !== "pending") break;
+        if (spent >= TRANSITION_BUDGET_MS) {
+          record("driver-stalled", { step: at, op, budget: TRANSITION_BUDGET_MS });
+          violations.push({ code: "driver-stalled", path: at, message: `the ${op} did not settle within ${TRANSITION_BUDGET_MS} ms of case time` });
+          return { stalled: true, value: null };
+        }
+        await host_.advance(TRANSITION_STEP_MS);
+      }
+      if (state === "failed") throw failure;
+      return { stalled: false, value };
+    };
+
+    let booted = await bootPage(fixture, { mode: json.boot.mode, host, resetModules: host_.resetModules, until });
     cleanups.push(() => booted.resources.stop());
+    if (booted.stalled) return { status: "invalid", trace, result: { errors: violations } };
+    let clay = booted.clay;
 
     // The entry imports its edit plan through this map, so a case holds an import here.
     // A reload imports the map again after a module reset, so its holds are re-applied.
@@ -523,15 +575,6 @@ export async function runCase(json) {
       }
     };
 
-    const flush = async (turns = 12) => {
-      for (let i = 0; i < turns; i++) await new Promise((resolve) => process.nextTick(resolve));
-      await host_.advance(0);
-    };
-    const settle = async (ms) => {
-      await host_.advance(ms);
-      await flush();
-    };
-
     const errors = [];
     for (const [index, step] of json.steps.entries()) {
       if (step.op !== "hold" || !step.boundary.startsWith(CHUNK_PREFIX)) continue;
@@ -542,11 +585,6 @@ export async function runCase(json) {
     }
     if (errors.length) return { status: "invalid", trace, result: { errors } };
 
-    // A schedule can reach a page the case did not describe: an entry answered by a
-    // reload is answered by a document a browser would replace, so nothing this driver
-    // could type into it would be the page the case asked for. The precondition is the
-    // case's, so a run that violates one is invalid, never failed.
-    const violations = [];
     let reloading = false;
     const precondition = (index, message) => violations.push({ code: "precondition", path: `steps[${index}]`, message });
 
@@ -558,6 +596,7 @@ export async function runCase(json) {
     if (lanes) cleanups.push(() => lanes.stop());
 
     for (const [index, step] of json.steps.entries()) {
+      if (stalled) break;
       record("step", { index, op: step.op });
       switch (step.op) {
         case "enter": {
@@ -579,7 +618,13 @@ export async function runCase(json) {
             if (answer?.ok === false) record("transition-refused", { op: "leave", code: answer?.code ?? null, pending: answer?.pending ?? null });
           });
           await settle(LEAVE_SETTLE_MS);
-          if (step.await !== false) await flight;
+          if (step.await !== false) {
+            const answer = await until(flight, `steps[${index}]`, "leave");
+            if (answer.stalled) {
+              stalled = true;
+              break;
+            }
+          }
           await flush();
           break;
         }
@@ -638,12 +683,22 @@ export async function runCase(json) {
         }
         case "cycles": {
           for (let cycle = 1; cycle <= step.count; cycle++) {
-            const enterAnswer = await clay.setMode("edit").catch((error) => ({ ok: false, code: error?.message ?? "threw" }));
+            const entered = await until(clay.setMode("edit").catch((error) => ({ ok: false, code: error?.message ?? "threw" })), `steps[${index}]`, "enter");
+            if (entered.stalled) {
+              stalled = true;
+              break;
+            }
+            const enterAnswer = entered.value;
             record("transition", { op: "enter", ok: enterAnswer?.ok === true, mode: enterAnswer?.mode ?? null, code: enterAnswer?.code ?? null, pending: enterAnswer?.pending ?? null });
             if (enterAnswer?.ok === false) record("transition-refused", { op: "enter", code: enterAnswer?.code ?? null, pending: enterAnswer?.pending ?? null });
             if (enterAnswer?.reloading === true) reloading = true;
             await flush();
-            const leaveAnswer = await clay.setMode("view").catch((error) => ({ ok: false, code: error?.message ?? "threw" }));
+            const departed = await until(clay.setMode("view").catch((error) => ({ ok: false, code: error?.message ?? "threw" })), `steps[${index}]`, "leave");
+            if (departed.stalled) {
+              stalled = true;
+              break;
+            }
+            const leaveAnswer = departed.value;
             record("transition", { op: "leave", ok: leaveAnswer?.ok === true, mode: leaveAnswer?.mode ?? null, code: leaveAnswer?.code ?? null, pending: leaveAnswer?.pending ?? null });
             if (leaveAnswer?.ok === false) record("transition-refused", { op: "leave", code: leaveAnswer?.code ?? null, pending: leaveAnswer?.pending ?? null });
             await flush();
@@ -652,7 +707,7 @@ export async function runCase(json) {
             // the last leaves it as the hundredth should, and the two readings compare.
             if (cycle === 1 || cycle === step.count) record("resources", { cycle, ...booted.resources.snapshot() });
           }
-          record("cycles", { count: step.count });
+          if (!stalled) record("cycles", { count: step.count });
           break;
         }
         case "click": {
@@ -695,12 +750,22 @@ export async function runCase(json) {
           }
           await host_.stopClock();
           booted.resources.stop();
-          booted = await bootPage(fixture, {
+          const again = await until(bootPage(fixture, {
             mode: json.boot.mode,
             host,
             resetModules: host_.resetModules,
             served: accepted.body,
-          });
+            until,
+          }), `steps[${index}]`, "reload");
+          if (again.stalled) {
+            stalled = true;
+            break;
+          }
+          booted = again.value;
+          if (booted.stalled) {
+            stalled = true;
+            break;
+          }
           clay = booted.clay;
           await holdChunks();
           await host_.startClock();

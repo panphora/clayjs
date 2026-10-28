@@ -164,9 +164,19 @@ async function browserEnvironment() {
 function installClock(window) {
   let sequence = 0;
   let now = 0;
+  const owners = [globalThis, window];
+  const TIMER_NAMES = ["setTimeout", "clearTimeout", "setInterval", "clearInterval"];
   const timers = new Map();
   const real = {};
-  let installed = false;
+  // The page boots on the platform's own timers: the clock is installed after the boot,
+  // because the boot needs real turns to land its imports. A real timer the page armed
+  // during that boot would fire on the wall clock, in the middle of a case whose clock is
+  // fake, so every one is recorded as it is armed and taken over when the clock takes over.
+  const armed = new Map();
+  const adopted = new Map();
+  // The id a page holds for a timer it armed on real time is the platform's, so a clear it
+  // issues later still reaches that timer once the case clock holds it.
+  const timerKey = (id) => (id !== null && typeof id === "object" ? id : `real:${id}`);
   // A page that builds its editor imports modules while the case is running, and an
   // import only lands on a real turn of the event loop: the drain takes both, so a boot
   // that downloads is not mistaken for one that hung.
@@ -181,7 +191,20 @@ function installClock(window) {
     timers.set(id, { at: now + Math.max(0, Number(delay) || 0), callback, args, every });
     return id;
   };
-  const cancel = (id) => timers.delete(id);
+  const cancel = (id) => {
+    const key = timerKey(id);
+    const adoptedId = adopted.get(key);
+    if (adoptedId !== undefined) {
+      adopted.delete(key);
+      timers.delete(adoptedId);
+    }
+    const record = armed.get(key);
+    if (record) {
+      armed.delete(key);
+      real.clearTimeout(record.id);
+    }
+    timers.delete(id);
+  };
   const advance = async (ms) => {
     const target = now + Math.max(0, Number(ms) || 0);
     await drain();
@@ -209,36 +232,66 @@ function installClock(window) {
     clearInterval: (id) => cancel(id),
     advance,
   };
-  // The page boots on the platform's own timers, as it does under Jest: the clock is
-  // installed when the driver starts the case, after the boot it lent real time. The
-  // page reads wall time too — the autosave scheduler decides when it may save by
+  // The page reads wall time too — the autosave scheduler decides when it may save by
   // comparing performance.now() with the moment it noted the edit — so the clock moves
   // the wall clocks along with the timers, as Jest's fake timers do.
   const realNow = Date.now;
   const realPerformanceNow = [globalThis, window]
     .map((owner) => [owner.performance, owner.performance?.now])
     .filter(([, now]) => typeof now === "function");
+  for (const name of TIMER_NAMES) real[name] = globalThis[name];
+  const arm = (callback, delay, args, every) => {
+    const record = { id: null, callback, args, every, delay: Math.max(0, Number(delay) || 0), armedAt: realNow() };
+    const fire = (...passed) => {
+      if (every === null) armed.delete(timerKey(record.id));
+      callback(...passed);
+    };
+    record.id = every === null ? real.setTimeout(fire, delay) : real.setInterval(fire, delay);
+    armed.set(timerKey(record.id), record);
+    return record.id;
+  };
+  const track = () => {
+    for (const owner of owners) {
+      owner.setTimeout = (callback, delay = 0, ...args) => arm(callback, delay, args, null);
+      owner.setInterval = (callback, delay = 0, ...args) => arm(callback, delay, args, Math.max(1, Number(delay) || 1));
+      owner.clearTimeout = cancel;
+      owner.clearInterval = cancel;
+    }
+  };
   api.install = () => {
-    for (const owner of [globalThis, window]) {
-      for (const name of ["setTimeout", "clearTimeout", "setInterval", "clearInterval"]) {
-        if (!installed) real[name] ??= owner[name];
-        owner[name] = api[name];
-      }
+    // Every real timer still ticking is taken off the platform and re-armed on the case
+    // clock with the delay it has left, under the id the page already holds: it fires in
+    // case time, where the case can see it, and no wall clock can fire it mid-case.
+    const at = realNow();
+    for (const [key, record] of armed) {
+      const elapsed = at - record.armedAt;
+      const every = Math.max(1, record.every ?? 0);
+      const left = record.every === null ? Math.max(0, record.delay - elapsed) : Math.max(1, record.delay - (elapsed % every));
+      real.clearTimeout(record.id);
+      const id = `adopted:${++sequence}`;
+      timers.set(id, { at: now + left, callback: record.callback, args: record.args, every: record.every });
+      adopted.set(key, id);
+    }
+    armed.clear();
+    for (const owner of owners) {
+      for (const name of TIMER_NAMES) owner[name] = api[name];
     }
     Date.now = () => now;
     for (const [performance] of realPerformanceNow) performance.now = () => now;
-    installed = true;
   };
   api.stop = () => {
-    for (const owner of [globalThis, window]) {
-      for (const name of ["setTimeout", "clearTimeout", "setInterval", "clearInterval"]) {
+    for (const owner of owners) {
+      for (const name of TIMER_NAMES) {
         if (real[name]) owner[name] = real[name];
       }
     }
     Date.now = realNow;
     for (const [performance, performanceNow] of realPerformanceNow) performance.now = performanceNow;
-    installed = false;
+    // The next boot runs on the platform's timers again, and its leftovers are recorded
+    // the same way the first boot's were.
+    track();
   };
+  track();
   return api;
 }
 

@@ -472,9 +472,11 @@ export function createResourceCounter() {
 
 /**
  * Boot the named fixture's page through the real loader. Real timers are in force here:
- * a case installs its fake clock after the page is up.
+ * a case installs its fake clock after the page is up. A driver that lends `until` also
+ * bounds the boot's own callback, so a boot parked on a boundary the case holds ends as a
+ * stalled driver rather than an idle child.
  */
-export async function bootPage(fixture, { mode, host, resetModules, served = null }) {
+export async function bootPage(fixture, { mode, host, resetModules, served = null, until = null }) {
   const spec = typeof fixture === "string" ? FIXTURES[fixture] : fixture;
   // A reload is served the bytes the host last accepted, so the page boots from those
   // rather than from the fixture's authored copy.
@@ -539,13 +541,16 @@ export async function bootPage(fixture, { mode, host, resetModules, served = nul
   window.clay = {};
   globalThis.fetch = window.fetch = host.fetch;
   const resources = createResourceCounter();
+  let stalled = false;
   try {
     const { boot } = await runtimeImport("src/loader.js");
-    await new Promise((resolve) => boot(null, new URLSearchParams(params), resolve));
+    const up = new Promise((resolve) => boot(null, new URLSearchParams(params), resolve));
+    if (until) stalled = (await until(up, "boot", "boot")).stalled;
+    else await up;
     // The lane's lock callback waits CLOSE_WAIT_MS on a real timer before it starts the
     // room, and that timer is already ticking when the page is up: a case's fake clock
     // would never fire it, so the wait happens here, on the real one.
-    if (pageHost) await new Promise((resolve) => setTimeout(resolve, 600));
+    if (pageHost && !stalled) await new Promise((resolve) => setTimeout(resolve, 600));
   } catch (error) {
     resources.stop();
     channel?.stop();
@@ -556,6 +561,7 @@ export async function bootPage(fixture, { mode, host, resetModules, served = nul
   return {
     clay: window.clay,
     channel,
+    stalled,
     resources: {
       snapshot: resources.snapshot,
       stop() {
