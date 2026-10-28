@@ -13,7 +13,7 @@
   },
   "kanban.html": {
     "view": { "requests": 64, "depth": 23, "brotli": 187392, "css": { "requests": 1, "depth": 1 }, "fonts": { "requests": 1, "depth": 1 } },
-    "edit": { "requests": 96, "depth": 45, "brotli": 306176, "css": { "requests": 1, "depth": 1 }, "fonts": { "requests": 1, "depth": 1 } },
+    "edit": { "requests": 96, "depth": 45, "brotli": 305152, "css": { "requests": 1, "depth": 1 }, "fonts": { "requests": 1, "depth": 1 } },
     "draft": { "requests": 87, "depth": 38, "brotli": 261120, "css": { "requests": 1, "depth": 1 }, "fonts": { "requests": 1, "depth": 1 } }
   },
   "journal.html": {
