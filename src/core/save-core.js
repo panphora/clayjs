@@ -7,6 +7,8 @@
  * For full save system with state management, use save.js instead.
  */
 
+import { notifySaveAccepted } from "./save-accepted.js";
+export { onSaveAccepted } from "./save-accepted.js";
 import { isEditMode, isDraftMode } from "./is-edit-mode.js";
 import { draftTransport } from "./draft-mode.js";
 import { consumeUserDriven, consumeExplicitSave, markUserDriven } from "../lib/user-gesture.js";
@@ -68,7 +70,6 @@ let nextSaveKeepalive = false;
 //
 // Not a DOM event, deliberately. The whole document rides in the argument, and a
 // CustomEvent would put it on a bus any script on the page can listen to.
-const saveAcceptedHooks = [];
 
 // Headers another module asks every save to carry, by name.
 const extraSaveHeaders = new Map();
@@ -144,35 +145,6 @@ export function releaseSaveLane(owner) {
 /** Whether the next save rides a keepalive hint, which an unload flush cannot wait on. */
 export function keepaliveHeld() {
   return nextSaveKeepalive;
-}
-
-/**
- * Run a callback with the bytes the host just accepted.
- *
- * Called once per accepted save, after the response, with the exact body that was
- * sent. Never called for a refused, failed or skipped save, and never in test mode,
- * where nothing reached a host.
- *
- * @param {Function} callback - Receives the accepted HTML string
- */
-export function onSaveAccepted(callback) {
-  saveAcceptedHooks.push(callback);
-}
-
-function notifySaveAccepted(html, captureId, artifact = null) {
-  for (const hook of saveAcceptedHooks) {
-    try {
-      // The artifact is the capture's own private model of these bytes, and it is
-      // offered only when it exists: a raw save and a capture without one keep the
-      // shape they had.
-      const accepted = artifact
-        ? { captureId: captureId ?? null, artifact }
-        : { captureId: captureId ?? null };
-      hook(html, accepted);
-    } catch (err) {
-      console.error('clayjs: onSaveAccepted hook failed:', err);
-    }
-  }
 }
 
 // Listeners for "this exact body is about to leave". One call per real fetch, with

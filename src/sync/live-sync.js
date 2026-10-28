@@ -49,7 +49,7 @@ import { autosaveActive } from '../lib/autosave-state.js';
 import { hostSupports } from '../core/host-meta.js';
 import { PAGE_FORMAT, PAGE_FORMAT_HEADER } from '../core/page-format-wire.js';
 import { knownPageFormatFloor, pageFormatFloor, withPageFormatFloor } from '../core/page-format.js';
-import { onSaveAccepted } from '../core/save-core.js';
+import { onSaveAccepted } from '../core/save-accepted.js';
 import { servedDocumentEtag } from '../core/host-attrs.js';
 import { recordEtag, seedEtag, lastSeenEtag, conditionalSaves, representedEtag, forgetRepresentedEtag } from '../core/etag.js';
 import { pageMaybeDirty, pauseGate, resumeGate, gateCaptureToken, gateClearIfUnchanged } from '../lib/dirty-gate.js';
