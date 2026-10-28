@@ -180,7 +180,7 @@ describe("the conservation check", () => {
 
     const result = await apply(update, { clay, fetchFn: miniFetch(newHtml), reload: jest.fn(), doc: document, loc: location });
 
-    expect(result.ok).toBe(true);
+    expect(result.ok ? true : result).toBe(true);
     const saved = clay.save.replace.mock.calls[0][0];
     expect(saved).toContain("Old title");
     expect(saved).toContain("Keep me");
@@ -201,7 +201,7 @@ describe("the conservation check", () => {
     const result = await apply(update, { clay, fetchFn: miniFetch(newHtml), reload: jest.fn(), doc: document, loc: location });
 
     expect(result.ok).toBe(false);
-    expect(result.code).toBe("lost");
+    expect(result.code === "lost" ? "lost" : result).toBe("lost");
     expect(result.lost.map(({ path }) => path)).toContain("api.title");
     expect(result.message).toContain("api.title");
     expect(clay.save.replace).not.toHaveBeenCalled();
