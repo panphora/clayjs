@@ -4,6 +4,7 @@
 import { afterAll, describe, expect, jest, test } from "@jest/globals";
 import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -19,6 +20,11 @@ function run(args) {
     });
   });
 }
+
+// The first test launches the sibling checkouts' own fixture servers, so it runs only where
+// they sit beside this repo; a box that receives clayjs alone skips it.
+const SIBLINGS = existsSync(path.join(ROOT, "../hyperclay-local/scripts/offline-fixture-server.mjs"))
+  && existsSync(path.join(ROOT, "../htmlclay/cmd/offline-fixture-server"));
 
 const lineOf = (stdout, host) => stdout.split("\n").filter((line) => line.startsWith(`${host}: `));
 
@@ -81,7 +87,7 @@ describe("check-page-recovery-hosts", () => {
     for (const root of roots) await rm(root, { recursive: true, force: true });
   });
 
-  test("every host the fixture run launches reports a result, and the one that keeps page state reports the saved text", async () => {
+  (SIBLINGS ? test : test.skip)("every host the fixture run launches reports a result, and the one that keeps page state reports the saved text", async () => {
     const { stdout } = await run(["--fixtures"]);
     console.info(`check-page-recovery-hosts:\n${stdout}`);
 
