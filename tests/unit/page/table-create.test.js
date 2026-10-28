@@ -188,3 +188,9 @@ test("one Undo through the Yjs binding restores three whole paragraphs replaced 
   binding.dispose();
   binding.ydoc.destroy();
 });
+
+test("a pasted document with a table among other blocks is not read as one grid", () => {
+  const html = "<p>Before the table.</p><table><tr><td>c1</td><td>c2</td></tr><tr><td>d1</td><td>d2</td></tr></table><p>After the table.</p>";
+  expect(gridFromClipboard(html, "Before the table.\nc1\tc2\nd1\td2\nAfter the table.")).toBeNull();
+  expect(gridFromClipboard("<table><tr><td>c1</td><td>c2</td></tr></table>", "c1\tc2")).toMatchObject({ width: 2, height: 1 });
+});

@@ -33,7 +33,9 @@ function textGrid(text) {
 export function gridFromClipboard(html, text, doc = globalThis.document) {
   let found = null;
   try { found = htmlGrid(html, doc); } catch { found = null; }
-  if (!found) {
+  // An HTML table with other blocks around it is a document, not a sheet: its tab-separated
+  // text is no grid either, and the editor's own paste keeps every block.
+  if (!found && !/<table[\s>]/i.test(html || "")) {
     try { found = textGrid(text); } catch { found = null; }
   }
   if (!found || !found.grid.length) return null;
