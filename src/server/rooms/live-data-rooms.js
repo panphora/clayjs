@@ -10,6 +10,8 @@ import { makePageTransition, pageTransitionState } from './live-page-history.js'
 export { liveTags } from './live-data-tags.js';
 
 import { frameSet, contains, descendants, receiptHas, receiptBytes, saveReceipt, postReceipt, replaceReceipt, retireReceipt, RECEIPT_LIMIT } from './live-provenance.js';
+import { COMPACTION, pageShape, planCompaction, checkUpdate, admitPageOps, createRangeCache } from './page-compaction.js';
+import { PART_KEY, entriesOf } from '../../page/ybind/parts.js';
 
 const byteLength = (text) => Buffer.byteLength(text, 'utf8');
 const sizeOf = (value) => byteLength(serializeLive(value));
@@ -54,6 +56,7 @@ export const LIVE_LIMITS = Object.freeze({
 });
 
 const PAGE = /^page(\.[0-9]+)?$/;
+export const COMPACTOR = 'compactor';
 const isContainer = (v) => v !== null && typeof v === 'object';
 
 // The stores a room starts with. A store over the store cap is left out, and so
@@ -193,7 +196,15 @@ export class PersistentReservationError extends Error {
   }
 }
 
-export function createRooms({ now = Date.now, newEpoch = randomUUID, liveBytes = LIVE_LIMITS.liveBytes } = {}) {
+export function createRooms({ now = Date.now, newEpoch = randomUUID, liveBytes = LIVE_LIMITS.liveBytes, compaction = null } = {}) {
+  const hostLimits = compaction ? Object.freeze({ ...COMPACTION, ...(typeof compaction === 'object' ? compaction : {}) }) : null;
+  const jobs = new WeakMap();
+  let onDue = () => {};
+  const hostMode = (yjs) => (hostLimits && yjs ? { fence: 0, job: null, lastFull: null, deletesSince: 0, contentSeq: 0, failed: null, retired: new Set(), legacy: new Set(), ranges: createRangeCache() } : null);
+  const due = (room, overflow = false) => {
+    if (!room.compaction || room.compaction.job || room.compaction.failed) return;
+    try { onDue(room, { overflow }); } catch {}
+  };
   const rooms = new Map();
   const pageReservations = new Map();
   const reservedNodes = new Map();
@@ -218,6 +229,7 @@ export function createRooms({ now = Date.now, newEpoch = randomUUID, liveBytes =
     seen: new Map(),
     emptySince: null,
     ...(inspectPage(html).kind === 'yjs' && { pageTransition: makePageTransition() }),
+    compaction: hostMode(inspectPage(html).kind === 'yjs'),
   });
 
   const roomBytes = (room) => {
@@ -226,9 +238,40 @@ export function createRooms({ now = Date.now, newEpoch = randomUUID, liveBytes =
     return total;
   };
   const heldBy = (room) => {
-    let total = (room.receiptBytes ?? 0) + (room.pageTransition?.bytes ?? 0);
+    let total = (room.receiptBytes ?? 0) + (room.pageTransition?.bytes ?? 0) + (room.compaction?.job?.reserved ?? 0);
     for (const s of room.stores.values()) total += s.bytes + s.logBytes;
     return total;
+  };
+
+  const admit = (room, store, frame, ops) => {
+    const state = room.compaction;
+    const answer = admitPageOps({ y: store.value.y, ops, state: { ...room.compaction, compaction: frame.compaction }, limits: hostLimits });
+    if (answer.error) {
+      if (answer.error === 'checkpoint-required') due(room);
+      return answer;
+    }
+    const { added, deleted, limit, shape } = answer;
+    return {
+      limit,
+      over() {
+        if (state.lastFull && state.deletesSince === 0) return { error: 'page-full' };
+        due(room, true);
+        return { error: 'checkpoint-required', retryAfter: 0 };
+      },
+      admitted(bytes) {
+        state.deletesSince += deleted;
+        state.contentSeq = room.seq;
+        if (bytes > hostLimits.activeBytes) due(room, true);
+        else if (shape.loose + added >= hostLimits.soft) due(room);
+      },
+    };
+  };
+
+  const endJob = (job) => {
+    if (job.room.compaction?.job !== job) return false;
+    job.room.compaction.job = null;
+    if (rooms.get(job.room.key) === job.room) used -= job.reserved;
+    return true;
   };
 
   const pageSource = (key, nodeId) => {
@@ -449,6 +492,7 @@ export function createRooms({ now = Date.now, newEpoch = randomUUID, liveBytes =
         reservation.result = null;
         return null;
       }
+      if (room.compaction?.job) endJob(room.compaction.job);
       const before = heldBy(room);
       const { stores, transition } = reservation.target;
       for (const name of room.stores.keys()) if (PAGE.test(name)) room.stores.delete(name);
@@ -465,6 +509,7 @@ export function createRooms({ now = Date.now, newEpoch = randomUUID, liveBytes =
         bytes += store.bytes;
       }
       room.pageTransition = transition;
+      if (hostLimits) room.compaction = hostMode(transition.format === 'yjs');
       reservation.target = null;
       used += heldBy(room) - before - reservation.budget;
       reservation.budget = 0;
@@ -738,6 +783,8 @@ export function createRooms({ now = Date.now, newEpoch = randomUUID, liveBytes =
       }
       const nKey = frame.name + '\n' + clientId;
       const last = room.lastN.get(nKey);
+      const admission = room.compaction && frame.name === 'page' && !receiptHas(last, frame.n) ? admit(room, store, frame, ops) : null;
+      if (admission?.error) return admission;
       // Answered with the seq the sender's last frame landed at, so the tab knows
       // which applied state holds it.
       if (receiptHas(last, frame.n)) return { duplicate: true, seq: frame.n <= last.n ? last.seq : last.savedSeq, epoch: room.epoch };
@@ -793,7 +840,12 @@ export function createRooms({ now = Date.now, newEpoch = randomUUID, liveBytes =
       }
       if (bytes > LIVE_LIMITS.storeBytes || roomBytes(room) - store.bytes + bytes > LIVE_LIMITS.roomBytes) {
         undo();
+        if (admission) return admission.over(bytes);
         return { error: 'too-large' };
+      }
+      if (admission && bytes > admission.limit) {
+        undo();
+        return admission.over(bytes);
       }
       const logged = done.length ? byteLength(JSON.stringify(ops)) : 0;
       const grows = done.length ? bytes - store.bytes + logAfter(store, logged) - store.logBytes : 0;
@@ -819,19 +871,28 @@ export function createRooms({ now = Date.now, newEpoch = randomUUID, liveBytes =
       room.lastSentAt.set(clientId, now());
       room.seen.set(clientId, now());
       if (PAGE.test(frame.name) && typeof frame.adopted === 'string' && frame.adopted.length <= 64) room.adopted = frame.adopted;
+      if (admission && done.length) admission.admitted(bytes);
       const writerGone = room.writer && connected && !connected.includes(room.writer);
       if ((!room.writer || writerGone) && (!connected || connected.includes(clientId))) room.writer = clientId;
       return { seq: room.seq, epoch: room.epoch, name: frame.name, ops, writer: room.writer, checkpoint: pressed(store), receiptGeneration: room.receiptGeneration ?? 0, ...(transition && { pageGeneration: transition.id }) };
     },
 
     /** Everything a joining tab needs, with clientId's own receipt per store. Values are the room's own objects: serialize, never mutate. With since in this room's epoch, moves carries each store's log entries after since.seq (null where the log no longer reaches back that far). */
-    state(room, clientId = null, since = undefined) {
+    state(room, clientId = null, since = undefined, { compaction: capable } = {}) {
       const stores = {};
+      const legacy = room.compaction?.legacy;
+      if (legacy && clientId && capable !== undefined) {
+        if (capable === hostLimits.version) legacy.delete(clientId);
+        else legacy.add(clientId);
+      }
+      const hidden = Boolean(legacy && (capable !== undefined ? capable !== hostLimits.version : clientId && legacy.has(clientId)));
       for (const [name, s] of room.stores) {
+        if (hidden && name === 'page') continue;
         const seen = {};
         const mine = clientId ? room.lastN.get(name + '\n' + clientId) : null;
         if (mine) seen[clientId] = mine.n;
-        stores[name] = { value: s.value, ephemeral: s.ephemeral, from: s.from, landed: s.landed, floor: s.floor, last: s.last, seen, ...(mine?.saved?.length && { saved: mine.saved }) };
+        stores[name] = { value: s.value, ephemeral: s.ephemeral, from: s.from, landed: s.landed, floor: s.floor, last: s.last, seen, ...(mine?.saved?.length && { saved: mine.saved }),
+          ...(name === 'page' && room.compaction && { compaction: { v: hostLimits.version, loose: hostLimits.loose, activeBytes: hostLimits.activeBytes } }) };
       }
       // A client's own read (since is its { epoch, seq }, or null for a first
       // read) carries moves: those after its seq in its own epoch, else this
@@ -898,6 +959,9 @@ export function createRooms({ now = Date.now, newEpoch = randomUUID, liveBytes =
      */
     sweep(connectedOf = () => [], { mayExpire = () => true } = {}) {
       const t = now();
+      for (const room of rooms.values()) {
+        if (room.compaction?.job && t >= room.compaction.job.deadline) endJob(room.compaction.job);
+      }
       for (const [key, room] of rooms) {
         if (!roomIsDirty(room) && mayExpire(room) && !pageReservations.has(key) && !persistentReservations.has(key) && room.emptySince !== null && t - room.emptySince >= LIVE_LIMITS.retainMs) {
           used -= heldBy(room);
@@ -946,6 +1010,101 @@ export function createRooms({ now = Date.now, newEpoch = randomUUID, liveBytes =
         changed = true;
       }
       return changed;
+    },
+
+    onCompactionDue(listener) {
+      onDue = typeof listener === 'function' ? listener : () => {};
+    },
+
+    beginCompaction(room, { overflow = false } = {}) {
+      const state = room?.compaction;
+      if (!state || rooms.get(room.key) !== room || state.failed) return null;
+      if (state.job) {
+        if (now() < state.job.deadline) return null;
+        endJob(state.job);
+      }
+      const store = room.stores.get('page');
+      if (!store || pageReservations.has(room.key) || persistentReservations.has(room.key)) return null;
+      const plan = planCompaction(store.value.y, { overflow }, hostLimits);
+      if (!plan) return null;
+      const reserved = plan.sources.reduce((sum, [k, v]) => sum + k.length + v.length, 0);
+      if (used + reserved > liveBytes) return null;
+      state.fence += 1;
+      const token = Object.freeze({ key: room.key, epoch: room.epoch, fence: state.fence });
+      const job = { token, room, store, epoch: room.epoch, generation: room.pageTransition?.id ?? null, kind: plan.kind,
+        sources: new Map(plan.sources), physical: Object.keys(store.value.y), reserved, deadline: now() + hostLimits.leaseMs, deletesAtBegin: state.deletesSince };
+      state.job = job;
+      used += reserved;
+      jobs.set(token, job);
+      return { token, kind: plan.kind, sources: plan.sources };
+    },
+
+    abandonCompaction(token, { failed = null } = {}) {
+      const job = jobs.get(token);
+      if (!job) return false;
+      jobs.delete(token);
+      const ended = endJob(job);
+      if (ended && failed) job.room.compaction.failed = { reason: failed, at: now() };
+      return ended;
+    },
+
+    commitCompaction(token, result) {
+      const job = jobs.get(token);
+      if (!job) return { refused: 'stale-token' };
+      jobs.delete(token);
+      const { room, store } = job;
+      if (!endJob(job)) return { refused: 'stale-token' };
+      if (rooms.get(room.key) !== room || room.epoch !== job.epoch || room.stores.get('page') !== store ||
+        (room.pageTransition?.id ?? null) !== job.generation) return { refused: 'stale-token' };
+      const y = store.value.y;
+      const retire = job.physical.filter((k) => {
+        const part = PART_KEY.exec(k);
+        return job.sources.has(part ? part[1] : k) || (part && job.kind === 'full');
+      });
+      if (retire.some((k) => !Object.hasOwn(y, k))) return { refused: 'sources-changed' };
+      const held = new Map(entriesOf(Object.fromEntries(retire.map((k) => [k, y[k]]))));
+      for (const [k, v] of job.sources) if (held.get(k) !== v) return { refused: 'sources-changed' };
+      if (typeof result?.update !== 'string' || !checkUpdate(result.update)) return { refused: 'bad-candidate' };
+      const key = `${job.kind === 'full' ? 'c' : 't'}${textHash(room.epoch).slice(0, 8)}-${(room.seq + 1).toString(36)}`;
+      if (Object.hasOwn(y, key)) return { refused: 'bad-candidate' };
+      const ops = [...retire.map((k) => ({ op: 'del', path: ['y', k] })), { op: 'set', path: ['y', key], value: result.update }].map(validateOp);
+      let value = store.value;
+      let bytes = store.bytes;
+      const done = [];
+      for (const op of ops) {
+        const rec = applyTracked(value, op);
+        if (!rec) continue;
+        done.push(rec);
+        bytes += sizeChange(rec, sizeOf, bytes);
+        value = rec.root;
+      }
+      if (bytes > hostLimits.activeBytes && bytes > store.bytes) {
+        for (let i = done.length - 1; i >= 0; i--) undoTracked(done[i]);
+        return { refused: 'too-large' };
+      }
+      const clean = store.landed === store.last;
+      const logged = byteLength(JSON.stringify(ops));
+      used += bytes - store.bytes + logAfter(store, logged) - store.logBytes;
+      store.value = value;
+      store.bytes = bytes;
+      room.seq += 1;
+      store.last = room.seq;
+      if (clean) store.landed = store.last;
+      store.log.push({ seq: room.seq, ops, bytes: logged, from: COMPACTOR, n: 0 });
+      store.logBytes += logged;
+      evict(store);
+      const state = room.compaction;
+      for (const k of job.sources.keys()) {
+        state.retired.add(k);
+        if (state.retired.size > hostLimits.retired) state.retired.delete(state.retired.values().next().value);
+      }
+      if (job.kind === 'full') {
+        state.lastFull = { bytes, seq: room.seq, deletesAtBegin: job.deletesAtBegin };
+        state.deletesSince -= job.deletesAtBegin;
+      }
+      if (pageShape(store.value.y, hostLimits).loose >= hostLimits.soft || !pageShape(store.value.y, hostLimits).normal) due(room);
+      return { seq: room.seq, epoch: room.epoch, name: 'page', ops, from: COMPACTOR, kind: job.kind, landed: store.landed,
+        ...(room.pageTransition && { pageGeneration: room.pageTransition.id }) };
     },
 
     /** Every room's key. */
