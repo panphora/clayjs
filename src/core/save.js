@@ -912,26 +912,19 @@ function preparesSliced() {
   return lastSavedSize() >= SLICED_SAVE_MIN_BYTES;
 }
 
-// The source session's own count of map rebuilds. A save laid out against a pairing that
-// has been rebuilt describes a page that is no longer here.
-function sourceRepairGeneration() {
-  const source = window.clay?.source;
-  return source && typeof source.repairGeneration === 'number' ? source.repairGeneration : 0;
-}
-
 // Why a preparing job must not be sent any more, or null when it may go out.
 //
 // Ordinary typing is deliberately NOT one of these: the capture is a checkpoint, and
 // saving it later is the point. Only an invalidation cancels: the session, the mode, the
-// host's permission, a newer write to this document, a morph, a rebuilt source map, or a
-// document format that rose while the job prepared.
+// host's permission, a newer write to this document, a morph, or a document format that
+// rose while the job prepared. A rebuilt source map is not one: a render laid out against
+// the old pairing falls back to today's bytes, and a stale artifact is never adopted.
 function prepareInvalidation(ctx, epoch, morph) {
   if (morph) return 'morph';
   if (saveGenerationAt !== epoch.generation || !isEditMode) return 'mode';
   if (!savesAdmitted(ctx.permit)) return 'session';
   if (refusesSave()) return 'refused';
   if (baselineRevision !== epoch.baselines) return 'newer save';
-  if (sourceRepairGeneration() !== epoch.repair) return 'repair';
   if (Math.max(knownPageFormatFloor(), ctx.pageFormatFloor) > epoch.floor) return 'floor';
   return null;
 }
@@ -1077,7 +1070,6 @@ async function runSlicedSave(ctx, lane) {
       const epoch = {
         generation: saveGenerationAt,
         baselines: baselineRevision,
-        repair: sourceRepairGeneration(),
         floor: Math.max(knownPageFormatFloor(), ctx.pageFormatFloor),
       };
       const job = prepDriver.beginSaveCapture({
