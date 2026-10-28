@@ -3,14 +3,14 @@
   Journal: a private notebook that is one self-saving HTML file. Graphite ink on cool ruled paper, a vermilion margin rule, each entry headed by a drafting title block.
   - The file is the database. Each entry is an <article class="entry"> inside #entries, holding its Markdown as plain text in <pre class="entry-source"><code class="entry-body">. That is the only content ClayJS writes back to disk.
   - The page chrome is ordinary saved markup that sap.js paints from the entries; a value computed only from the entries (the entry count) saves and syncs like any content. What differs per tab (search results, the open entry, shortcut labels for this OS, open menus, a dismissed banner) sits in clay="freeze" scratchpads, whose contents never save or sync. The list and the tag chips are sap each= projections, never saved. The open entry is the URL hash (#entry=<id>): clay-router marks it route-active, and the editor in #writer shows its text. Search and tag are sap transient state. Opening, searching or scrolling never changes the saved bytes.
-  - One OverType editor for the life of the tab, with persist: true, in the #writer mount beside the reader and outside the saved records. ClayJS's bind-text writes every keystroke into the open entry's <code>, so nothing the editor does reaches the file or a peer.
+  - One OverType editor per edit session, with persist: true, in the #writer mount beside the reader and outside the saved records; the session is prepared, quiesced and disposed by this page's mode participant. ClayJS's bind-text writes every keystroke into the open entry's <code>, so nothing the editor does reaches the file or a peer.
   - Monospace writing (IBM Plex Mono) on a 28px line keeps the ruled lines under the text; the sheet is always at least as tall as the window. Three inks: graphite, blueprint blue for links, vermilion for the margin, cursor and deleting.
 -->
-<html lang="en" autosave visitor-drafts="field-pad-v1">
+<html lang="en" autosave visitor-drafts="field-pad-v1" clay-mode-switch="live">
 <head>
 <meta charset="utf-8">
 <meta name="hyper-source" content="https://hyperclay.com/templates/journal/hosted/latest.html">
-<meta name="hyper-version" content="1.1.0">
+<meta name="hyper-version" content="1.2.0">
 <meta name="clay-template" content="journal hosted">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Journal</title>
@@ -250,6 +250,12 @@ svg.i { width: 15px; height: 15px; flex: none; stroke: currentColor; fill: none;
   margin: 0; font-size: 12.75px; line-height: 1.45; color: var(--ink-2);
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
+.row-presence {
+  display: block; margin-top: 3px;
+  font: 400 10.5px/1.35 var(--mono); color: var(--ink-3);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.row-presence[hidden] { display: none; }
 .row .del {
   align-self: start;
   width: 28px; height: 28px; margin-top: -3px;
@@ -290,6 +296,32 @@ svg.i { width: 15px; height: 15px; flex: none; stroke: currentColor; fill: none;
 .empty-list { padding: 48px 26px; color: var(--ink-3); text-align: center; font-size: 13px; line-height: 1.6; }
 .empty-list b { display: block; font: 500 13px/1.4 var(--mono); color: var(--ink-2); margin-bottom: 4px; }
 .list-empty { display: contents; }
+
+/* ------------------------------------------------ selection: checkboxes exist only while a scope is open */
+.pick-bar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  padding: 9px 20px 10px; border-bottom: 1px solid var(--line); background: var(--paper);
+}
+.pick-bar[hidden] { display: none; }
+.pick-bar .pick-count { flex: 1 1 100%; font: 500 11.5px/1.4 var(--mono); letter-spacing: 0.02em; color: var(--ink); }
+.pick-bar button {
+  padding: 5px 10px; border: 1px solid var(--line-2); border-radius: 6px;
+  font-size: 12px; font-weight: 500; color: var(--ink-2); background: var(--sheet); white-space: nowrap;
+}
+.pick-bar button:hover, .pick-bar button:focus-visible { color: var(--ink); border-color: var(--ink-3); }
+.pick-bar .pick-export { color: var(--accent); background: var(--accent-soft); border-color: color-mix(in oklab, var(--accent) 35%, var(--line-2)); }
+.pick-bar button:disabled { color: var(--ink-3); background: none; border-color: var(--line); cursor: default; }
+.row .pick { display: none; }
+.row.picking { grid-template-columns: 24px 44px minmax(0, 1fr) 28px; }
+.row.picking.trashed { grid-template-columns: 24px 44px minmax(0, 1fr) auto; }
+.row.picking .pick { display: inline-flex; align-items: center; justify-content: center; align-self: start; padding-top: 9px; }
+.row.picking .pick input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); cursor: pointer; }
+.trash-pick {
+  justify-self: start; display: inline-flex; align-items: center;
+  padding: 6px 11px; border: 1px solid var(--line-2); border-radius: 6px;
+  font-size: 13px; font-weight: 500; color: var(--ink-2); background: var(--sheet);
+}
+.trash-pick:hover, .trash-pick:focus-visible { color: var(--ink); border-color: var(--ink-3); }
 
 /* ------------------------------------------------ the calendar and On this day: transient views over the date index */
 .cal-btn {
@@ -383,6 +415,12 @@ svg.i { width: 15px; height: 15px; flex: none; stroke: currentColor; fill: none;
 }
 button.tb-value:hover { color: var(--blue); }
 .tb-value .dim { color: var(--ink-3); }
+.tb-presence {
+  flex: none; padding: 6px 16px 6px 72px;
+  font: 400 11.5px/1.4 var(--mono); color: var(--ink-3);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.tb-presence[hidden] { display: none; }
 .tb-date .tb-value { font-weight: 500; }
 .tb-pin .tb-value[aria-pressed="true"] { color: var(--blue); }
 .tb-pin .tb-value[hidden] { display: none; }
@@ -528,6 +566,18 @@ button.tb-value:hover { color: var(--blue); }
 .peer-bar button { flex: none; padding: 5px 11px; border-radius: 5px; font-size: 12.5px; font-weight: 500; color: var(--accent); white-space: nowrap; }
 .peer-bar button:hover, .peer-bar button:focus-visible { background: color-mix(in oklab, var(--accent) 16%, transparent); }
 
+.archive-pending {
+  flex: none;
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 16px 10px 72px;
+  border-bottom: 1px solid var(--line-2);
+  background: var(--accent-soft);
+  font-size: 13px; color: var(--ink);
+}
+.archive-pending[hidden] { display: none; }
+.archive-pending span { flex: 1; min-width: 0; }
+.archive-pending small { color: var(--ink-2); font-size: 12px; }
+
 /* ------------------------------------------------ the recovery review: this browser's copies of unsaved text (never saved, never the journal) */
 .recovery-panel {
   flex: none;
@@ -592,6 +642,23 @@ button.tb-value:hover { color: var(--blue); }
 .pop .cancel:hover { background: var(--hover); color: var(--ink); }
 .pop .confirm { color: var(--accent); background: var(--accent-soft); }
 .pop .confirm:hover { background: color-mix(in oklab, var(--accent) 20%, transparent); }
+.pop.wide { width: 324px; }
+.pop.wide .acts { flex-wrap: wrap; }
+.pop .acts button:disabled { color: var(--ink-3); background: none; cursor: default; }
+.pop .year-field { display: flex; align-items: center; gap: 8px; margin-bottom: 9px; font: 500 10px/1 var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-3); }
+.pop .year-field select { flex: 1; min-width: 0; padding: 5px 6px; border: 1px solid var(--line-2); border-radius: 5px; font: 400 13px/1.2 var(--mono); letter-spacing: 0; text-transform: none; color: var(--ink); background: var(--sheet); }
+.pop .year-counts, .pop .year-note { margin: 0 0 9px; font-weight: 400; font-size: 12px; line-height: 1.45; color: var(--ink-2); }
+.pop .year-note { color: var(--accent); }
+.pop .year-note[hidden] { display: none; }
+#importPopDiff { display: grid; gap: 7px; margin-bottom: 11px; }
+#importPopDiff[hidden] { display: none; }
+#importPopDiff .diff { display: grid; gap: 3px; }
+#importPopDiff small { margin: 0; }
+#importPopDiff textarea {
+  width: 100%; min-height: 42px; resize: none; padding: 4px 6px;
+  font: 11.5px/1.35 var(--mono); color: var(--ink-2);
+  background: var(--fp-code-bg); border: 1px solid var(--line); border-radius: 4px;
+}
 /* ------------------------------------------------ export / import menu */
 .menu { position: relative; flex: none; }
 .icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 6px; color: var(--ink-2); }
@@ -714,6 +781,7 @@ button.tb-value:hover { color: var(--blue); }
   .sheet { min-height: calc(100dvh - var(--bar)); border: 0; border-radius: 0; box-shadow: none; }
   .titleblock { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(64px, auto); }
   .titleblock .tb-date { grid-column: 1 / -1; border-right: 0; border-bottom: 1px solid var(--line); }
+  .tb-presence { padding-left: 44px; padding-right: 16px; }
   .writer .overtype-container .overtype-wrapper {
     background-image:
       linear-gradient(90deg, transparent 31px, var(--margin) 31px, var(--margin) 32px, transparent 32px),
@@ -739,6 +807,7 @@ button.tb-value:hover { color: var(--blue); }
   .pictures { padding-left: 44px; padding-right: 16px; }
   .image-strip { padding-left: 44px; padding-right: 16px; }
   .otd-row { grid-template-columns: 78px minmax(0, 1fr); }
+  .pick-bar { padding: 9px 12px 10px 16px; }
 }
 @media (max-width: 759px) {
   :root[route-entry] :is(.index, .brand-mark, .brand-name, .search) { display: none; }
@@ -752,7 +821,7 @@ button.tb-value:hover { color: var(--blue); }
 }
 
 /* ------------------------------------------------ reading view: no edit rights, or ClayJS not loaded */
-:root:not([editmode="true"]) :is(.new-btn, .today-btn, .row .del, .row-acts, .tb-pin, .trash-empty, .keys, .save, .write-hint, [data-menu="import"], [data-menu="trash"]) { display: none !important; }
+:root:not([editmode="true"]) :is(.new-btn, .today-btn, .row .del, .row-acts, .tb-pin, .trash-empty, .keys, .save, .write-hint, [data-menu="import"], [data-menu="trash"], [data-menu="archive"]) { display: none !important; }
 :root:not([editmode="true"]) .titleblock { grid-template-columns: minmax(0, 1fr) 112px 112px; }
 :root:not([editmode="true"]) #entries { display: none; }
 :root:not([editmode="true"]) .reader { display: block; }
@@ -765,13 +834,44 @@ button.tb-value:hover { color: var(--blue); }
 .no-clay .entries > .entry[data-deleted-at]:not([data-deleted-at=""]) { display: none !important; }
 .no-clay :is(.reader, .tb-slot, .sheet-empty, .writer, #calBtn) { display: none !important; }
 .vh { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+/* ------------------------------------------------ print: the canonical records and their dates, never the screen
+   around them. The list projection shows one page of rows, the editor one entry and the reader one rendering, so
+   none of that is what a printout is for: every live record prints as wrapping plain Markdown under its date. */
+@media print {
+  :root { color-scheme: light; }
+  html, body { height: auto; overflow: visible; }
+  body { margin: 12mm; background: #fff; color: #000; }
+  .app { display: block; height: auto; overflow: visible; }
+  :is(.topbar, .brand, .bar-right, .search, .save, .recovery, .banner-slot, .privacy-banner, .index, #list, .pick-bar,
+      .trash-head, .calendar, .otd-slot, .keys, .feedback, .pop-slot, .note, .toast, .peer-bar, .tb-slot, .writer,
+      .reader, .sheet-empty, .image-strip, .pictures) { display: none !important; }
+  [clay="editor-ui"], [clay="runtime"], .strip-journal { display: none !important; }
+  .desk-scroll, .sheet {
+    display: block !important; height: auto !important; max-height: none !important; overflow: visible !important;
+    margin: 0; padding: 0; border: 0; box-shadow: none; background: #fff;
+  }
+  #entries, .entries { display: block !important; height: auto; max-height: none; overflow: visible; }
+  .entries > .entry {
+    display: block !important; height: auto; overflow: visible;
+    break-inside: auto; margin: 0 0 16pt; padding: 0; border: 0; color: #000;
+  }
+  .entries > .entry[cms-template], .entries > .entry[data-deleted-at]:not([data-deleted-at=""]) { display: none !important; }
+  .entries > .entry::before {
+    content: attr(data-date); display: block; break-after: avoid; margin-bottom: 6pt;
+    font: 500 10pt/1.3 var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: #000;
+  }
+  .entry-source { display: block; margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 400 11pt/1.5 var(--mono); color: #000; }
+  .entry-body { white-space: pre-wrap; overflow-wrap: anywhere; color: #000; }
+  #entries:has(> .entry[ephemeral~="print-pick"]) > .entry:not([ephemeral~="print-pick"]) { display: none !important; }
+}
 </style>
 <noscript><style>#entries { display: flex !important; } .entries > .entry { display: block; padding: 20px 28px; border-bottom: 1px solid var(--line); white-space: pre-wrap; font-family: var(--mono); } .entries > .entry::before { content: attr(data-date); display: block; margin-bottom: 8px; font: 500 11px/1 var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-3); } .entry-source { margin: 0; white-space: pre-wrap; font: inherit; } .entries > .entry[data-deleted-at]:not([data-deleted-at=""]) { display: none !important; } .desk-scroll { display: block !important; } :is(.reader, .tb-slot, .sheet-empty, .writer) { display: none !important; }</style></noscript>
 <script type="application/json" data-rules-name="api" data-rules-version="1">{"entries":["#entries > article.entry",{"id":"@data-id","date":"@data-date","created":"@data-created","updated":"@data-updated","body":".entry-body@textContent","deletedAt":"@data-deleted-at","pinned":"@data-pinned"}]}</script>
 <style>[cms-template]{display:none!important}</style>
 </head>
 <body>
-<div class="app" sap state="tag:transient view:transient shown:transient from:transient to:transient calendarMonth:transient calendarOpen:transient calendarDay:transient today:transient otdShown:transient" calc:live="fmt.live(state.entries)" calc:otd="fmt.onThisDay(state.live, state.today, state.otdShown)">
+<div class="app" sap state="tag:transient view:transient shown:transient from:transient to:transient calendarMonth:transient calendarOpen:transient calendarDay:transient today:transient otdShown:transient pick:transient" calc:live="fmt.live(state.entries)" calc:otd="fmt.onThisDay(state.live, state.today, state.otdShown)">
   <header class="topbar">
     <div class="brand">
       <button class="back-btn" id="backBtn" type="button" aria-label="Back to entries"><svg class="i" viewBox="0 0 16 16"><path d="M10 3.5 5.5 8l4.5 4.5"/></svg>Entries</button>
@@ -796,9 +896,11 @@ button.tb-value:hover { color: var(--blue); }
         <button class="icon-btn" id="menuBtn" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="Export and import" title="Export and import"><svg class="i" viewBox="0 0 16 16"><circle cx="3.5" cy="8" r="1.1"/><circle cx="8" cy="8" r="1.1"/><circle cx="12.5" cy="8" r="1.1"/></svg></button>
         <div class="menu-pop" id="menuPop" role="menu">
           <button role="menuitem" type="button" data-menu="export"><svg class="i" viewBox="0 0 16 16"><path d="M8 2.5v8M4.5 7 8 10.5 11.5 7M3 13.5h10"/></svg>Download as Markdown</button>
+          <button role="menuitem" type="button" data-menu="select" id="selectItem"><svg class="i" viewBox="0 0 16 16"><path d="M3 8.5 6 11.5 13 4.5"/></svg>Select entries…</button>
           <button role="menuitem" type="button" data-menu="import"><svg class="i" viewBox="0 0 16 16"><path d="M8 10.5v-8M4.5 6 8 2.5 11.5 6M3 13.5h10"/></svg>Import a file…</button>
+          <button role="menuitem" type="button" data-menu="archive"><svg class="i" viewBox="0 0 16 16"><path d="M2.5 5.5h11v8h-11zM2.5 5.5 4 2.5h8l1.5 3M6.5 9h3"/></svg>Archive a year…</button>
           <button role="menuitem" type="button" data-menu="trash" id="trashItem" hidden><svg class="i" viewBox="0 0 16 16"><path d="M2.5 4.5h11M6 4.5V3h4v1.5M4 4.5l.7 9h6.6l.7-9M6.7 7v4M9.3 7v4"/></svg><span id="trashLabel">Trash</span></button>
-          <input type="file" id="importInput" accept=".md,.markdown,.txt,.html,.htm,text/markdown,text/plain,text/html" multiple hidden>
+          <input type="file" id="importInput" accept=".json,.md,.markdown,.txt,.html,.htm,application/json,text/markdown,text/plain,text/html" multiple hidden>
         </div>
       </div>
     </div>
@@ -881,8 +983,17 @@ button.tb-value:hover { color: var(--blue); }
     <div clay="freeze">
       <div class="trash-head" id="trashHead" hidden>
         <p class="trash-note">Entries in Trash are still in this file until you delete them forever.</p>
+        <button class="trash-pick" id="trashPick" type="button">Select trashed entries</button>
         <button class="trash-empty" id="trashEmpty" type="button" data-act="empty-trash">Empty Trash</button>
       </div>
+    </div>
+    <div class="pick-bar" id="pickBar" clay="freeze" show="state.pick !== ''" hidden>
+      <span class="pick-count" id="pickCount" role="status" aria-live="polite">Nothing selected</span>
+      <button class="pick-all" id="pickAll" type="button" show="state.pick === 'entries'">Select these results</button>
+      <button class="pick-clear" id="pickClear" type="button">Clear</button>
+      <button class="pick-export" id="pickExport" type="button" aria-haspopup="dialog" aria-expanded="false">Export selected</button>
+      <button class="pick-print" id="pickPrint" type="button" show="state.pick === 'entries'">Print selected</button>
+      <button class="pick-done" id="pickDone" type="button">Done</button>
     </div>
     <div class="list" id="list" role="list" route="entry by data-key"
          calc:filteredbytext="!!String(state.q || '').trim()"
@@ -891,7 +1002,7 @@ button.tb-value:hover { color: var(--blue); }
          calc:matches="fmt.matches(state.live, state.q, state.tag, state.from, state.to)"
          calc:visible="state.view === 'trash' ? fmt.trash(state.entries) : fmt.page(state.matches, state.q, state.shown, fmt.route('entry'), state.live)"
          each="state.visible">
-      <template><div class:month="item.month" class:row="!item.month" class:trashed="item.trashed" attr:role="item.month ? 'presentation' : 'listitem'" attr:tabindex="item.month ? '-1' : '0'"><span class="caps" show="item.month" text="item.month"></span><span class="n" show="item.month" text="item.monthN"></span><div class="day" show="!item.month"><b text="item.day"></b><i text="item.dow"></i><em class="clock" show="item.clock" attr:title="'Created at ' + item.clock"><span class="vh">Created at </span><span text="item.clock"></span></em></div><div class="row-body" show="!item.month"><h3 class:untitled="item.untitled" text="item.title"></h3><p show="item.snippet" text="item.snippet"></p></div><span class="pin-mark" show="item.pinned" role="img" aria-label="Pinned entry" title="Pinned entry"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 2.5h4l-.6 4.2 2.1 2.3H4.5l2.1-2.3zM8 9v4.5"/></svg></span><button class="del" type="button" data-act="delete" show="!item.month && !item.trashed" aria-label="Delete entry" aria-haspopup="dialog" attr:title="'Delete entry (' + fmt.mod() + '⌫)'"><svg class="i" viewBox="0 0 16 16"><path d="M2.5 4.5h11M6 4.5V3h4v1.5M4 4.5l.7 9h6.6l.7-9M6.7 7v4M9.3 7v4"/></svg></button><span class="row-acts" show="item.trashed"><button class="restore" type="button" data-act="restore">Restore</button><button class="forever" type="button" data-act="purge">Delete forever</button></span></div></template>
+      <template><div class:month="item.month" class:row="!item.month" class:trashed="item.trashed" class:picking="state.pick !== ''" attr:role="item.month ? 'presentation' : 'listitem'" attr:tabindex="item.month ? '-1' : '0'"><label class="pick" show="state.pick !== '' && !item.month"><input type="checkbox" attr:data-pick="item.$key" attr:aria-label="'Select ' + item.title" effect="el.checked = !!item.picked"></label><span class="caps" show="item.month" text="item.month"></span><span class="n" show="item.month" text="item.monthN"></span><div class="day" show="!item.month"><b text="item.day"></b><i text="item.dow"></i><em class="clock" show="item.clock" attr:title="'Created at ' + item.clock"><span class="vh">Created at </span><span text="item.clock"></span></em></div><div class="row-body" show="!item.month"><h3 class:untitled="item.untitled" text="item.title"></h3><p show="item.snippet" text="item.snippet"></p><span class="row-presence" clay="no-save no-watch" attr:data-presence-entry="item.$key" hidden></span></div><span class="pin-mark" show="item.pinned" role="img" aria-label="Pinned entry" title="Pinned entry"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 2.5h4l-.6 4.2 2.1 2.3H4.5l2.1-2.3zM8 9v4.5"/></svg></span><button class="del" type="button" data-act="delete" show="!item.month && !item.trashed" aria-label="Delete entry" aria-haspopup="dialog" attr:title="'Delete entry (' + fmt.mod() + '⌫)'"><svg class="i" viewBox="0 0 16 16"><path d="M2.5 4.5h11M6 4.5V3h4v1.5M4 4.5l.7 9h6.6l.7-9M6.7 7v4M9.3 7v4"/></svg></button><span class="row-acts" show="item.trashed"><button class="restore" type="button" data-act="restore">Restore</button><button class="forever" type="button" data-act="purge">Delete forever</button></span></div></template>
     </div>
     <div class="list-more" clay="freeze"><button class="more-btn" id="more" type="button" data-act="more" show="state.view !== 'trash' && fmt.more(state.matches, state.shown, fmt.route('entry'))" text="fmt.more(state.matches, state.shown, fmt.route('entry'))"></button></div>
     <div class="keys" id="keys" clay="freeze"><span><kbd data-mod="N">⌥⌘N</kbd>New entry</span><span><kbd data-mod="⌫">⌥⌘⌫</kbd>Delete entry</span><span><kbd>/</kbd>Search</span></div>
@@ -979,12 +1090,38 @@ const words = text.trim().split(/\s+/).length;
       <button class="confirm" id="delConfirm" type="button">Delete</button>
     </div>
   </div>
-  <div class="pop" id="importPop" role="dialog" aria-modal="false" aria-labelledby="importPopTitle">
+  <div class="pop wide" id="pickPop" role="dialog" aria-modal="false" aria-labelledby="pickPopTitle">
+    <p id="pickPopTitle">Export selected entries</p>
+    <small id="pickPopWhat">Records only: linked pictures stay links, not files.</small>
+    <div class="acts">
+      <button class="cancel" id="pickCancel" type="button">Cancel</button>
+      <button id="pickJson" type="button">JSON backup</button>
+      <button class="confirm" id="pickHtml" type="button">.htmlclay copy</button>
+    </div>
+  </div>
+  <div class="pop wide" id="yearPop" role="dialog" aria-modal="false" aria-labelledby="yearPopTitle">
+    <p id="yearPopTitle">Archive a year</p>
+    <small id="yearPopWhat">The year leaves this journal only once the file you kept matches it exactly.</small>
+    <label class="year-field" for="yearPick"><span>Year</span><select id="yearPick"></select></label>
+    <p class="year-counts" id="yearCounts" role="status" aria-live="polite"></p>
+    <p class="year-note" id="yearNote" hidden></p>
+    <input type="file" id="archiveInput" accept=".htmlclay,.html,.htm,text/html" hidden>
+    <div class="acts">
+      <button class="cancel" id="yearCancel" type="button">Cancel</button>
+      <button id="yearDownload" type="button" disabled>Archive a year</button>
+      <button class="confirm" id="yearFinish" type="button" disabled>Finish moving this year</button>
+    </div>
+  </div>
+  <div class="pop wide" id="importPop" role="dialog" aria-modal="false" aria-labelledby="importPopTitle">
     <p id="importPopTitle">Import this file?</p>
     <small id="importPopWhat"></small>
+    <small id="importPopSize"></small>
+    <div id="importPopDiff" hidden></div>
     <div class="acts">
       <button class="cancel" id="importCancel" type="button">Cancel</button>
-      <button class="confirm" id="importConfirm" type="button">Import</button>
+      <button id="importCopy" type="button" hidden>Open as a new copy</button>
+      <button id="importKeepBoth" type="button" hidden>Keep both versions</button>
+      <button class="confirm" id="importConfirm" type="button">Add to this journal</button>
     </div>
   </div>
 </div>
@@ -1008,6 +1145,12 @@ const words = text.trim().split(/\s+/).length;
   const PHONE = matchMedia('(max-width: 759px)');
   const route = () => window.clay && window.clay.route;
   const currentEntry = () => document.documentElement.getAttribute('route-entry');
+  // The entry the page is opening or has open: opening one writes the URL at once, while the
+  // router's marking for it only lands on the later hashchange.
+  function openEntryId() {
+    try { return new URLSearchParams(location.hash.slice(1)).get('entry') || currentEntry(); }
+    catch { return currentEntry(); }
+  }
 
   /* ---------------------------------------------------------------- code highlighting */
   // highlight.js spans can cross lines; OverType splits the result per line, so close and reopen them at each break
@@ -1032,7 +1175,7 @@ const words = text.trim().split(/\s+/).length;
       Promise.all([window.clay.assets.load('highlight'), window.clay.assets.load(`highlight/${name}`)]).then(([core, language]) => {
         hljs = core.default;
         hljs.registerLanguage(name, language.default);
-        if (readOnly) Reader.refresh(); else Editor.refresh();
+        if (reading()) Reader.refresh(); else Editor.refresh();
       }, () => {});
     }
     function highlight(code, lang) {
@@ -1071,13 +1214,24 @@ const words = text.trim().split(/\s+/).length;
       const code = a.querySelector('.entry-body');
       return code ? code.textContent : '';
     },
+    record(a) {
+      return {
+        id: a.dataset.id ?? '',
+        date: a.dataset.date ?? '',
+        created: a.dataset.created ?? '',
+        updated: a.dataset.updated ?? '',
+        deletedAt: a.dataset.deletedAt ?? '',
+        pinned: a.dataset.pinned ?? '',
+        body: a.querySelector('.entry-body')?.textContent ?? ''
+      };
+    },
     sortKey: a => `${a.dataset.date || ''}|${a.dataset.created || ''}`,
     open: () => store.querySelector(':scope > .entry[route-active]')
   };
   const pad = n => String(n).padStart(2, '0');
   const ymd = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
   const nowISO = () => { const d = new Date(); return `${ymd(d)}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`; };
-  const touch = a => { a.dataset.updated = nowISO(); };
+  const touch = a => { if (!canWrite()) return; a.dataset.updated = nowISO(); };
   const isTrashed = a => !!a.getAttribute('data-deleted-at');
   const createdHere = new Set();
   let openDate = null;
@@ -1190,7 +1344,13 @@ const words = text.trim().split(/\s+/).length;
       return ready;
     }
     const readable = () => { const a = Entries.open(); return a && !isTrashed(a) ? a : null; };
-    function start() { wirePictures($('#reader')); load().then(() => render(readable(), true), () => {}); }
+    // Setup is subscriptions and the loader; the paint belongs to a page that is reading, and a
+    // page preparing an editor paints its field instead.
+    function start() {
+      wirePictures($('#reader'));
+      if (!reading()) return;
+      load().then(() => { if (reading()) render(readable(), true); }, () => {});
+    }
     async function toHTML(text) { await load(); return md.parse(String(text || '')); }
     // The image tokens marked finds in a body: code spans and fences hold none.
     async function images(text) {
@@ -1470,7 +1630,8 @@ const words = text.trim().split(/\s+/).length;
         $key: e.$key, $el: e.$el, month: '',
         day: d ? pad(d.getDate()) : '--', dow: d ? DOW[d.getDay()].slice(0, 3) : '',
         clock: shared || e.$key === open ? createdClock(e.created) : '',
-        title: s.title || 'New entry', untitled: !s.title, snippet: snippet.slice(0, 320)
+        title: s.title || 'New entry', untitled: !s.title, snippet: snippet.slice(0, 320),
+        picked: isPicked(e.$key)
       };
       if (pinned) row.pinned = true;
       out.push(row);
@@ -1495,7 +1656,8 @@ const words = text.trim().split(/\s+/).length;
           $key: e.$key, $el: e.$el, month: '', trashed: true,
           pinned: e.pinned === 'true',
           day: d ? pad(d.getDate()) : '--', dow: d ? DOW[d.getDay()].slice(0, 3) : '',
-          title: s.title || 'New entry', untitled: !s.title, snippet: s.plain.slice(0, 320)
+          title: s.title || 'New entry', untitled: !s.title, snippet: s.plain.slice(0, 320),
+          picked: isPicked(e.$key)
         };
       });
   }
@@ -1552,8 +1714,19 @@ const words = text.trim().split(/\s+/).length;
   };
 
   /* ---------------------------------------------------------------- UI state: the open entry is the URL hash (#entry=<id>) and kept per document in session storage, search and tag are sap transient state */
-  let readOnly = false;
   let booted = false;
+  // The editor session, or nothing: the reader is the page with no session.
+  let session = null;
+  // Read or write is the committed mode's answer, read at the act itself, and only a page holding
+  // a session writes: a page whose editor never bound shows the reader and never edits. The mode
+  // alone answers for a page with no lifecycle.
+  const canWrite = () => {
+    if (reading()) return false;
+    const lifecycle = window.clay && window.clay.modeLifecycle;
+    if (lifecycle && typeof lifecycle.canWrite === 'function') return lifecycle.canWrite();
+    return !!(window.clay && window.clay.isEditMode === true);
+  };
+  const reading = () => !session;
   const UI_KEY = 'ui';
   const loadUI = () => { try { return window.clay.storage.session.get(UI_KEY) || {}; } catch { return {}; } };
   const saveUI = () => { if (!booted) return; try { window.clay.storage.session.set(UI_KEY, { openId: currentEntry() }); } catch {} };
@@ -1647,6 +1820,7 @@ const words = text.trim().split(/\s+/).length;
     const ta = () => mount.querySelector('textarea');
     let binding = null;
     let overtype = null;
+    let selected = null;
     const padding = () => (PHONE.matches ? `${LINE}px 16px ${LINE * 2}px 44px` : `${LINE}px 44px ${LINE * 2}px 72px`);
     function start() {
       mount.innerHTML = '<div class="overtype-container" data-theme="journal"><div class="overtype-wrapper"><textarea class="overtype-input" autocomplete="off" spellcheck="true" placeholder="Start writing. The first line becomes the heading."></textarea></div></div>';
@@ -1655,6 +1829,13 @@ const words = text.trim().split(/\s+/).length;
         display: 'block', width: '100%', border: '0', outline: 'none', resize: 'none',
         background: 'transparent', color: 'var(--ink)', caretColor: 'var(--accent)',
       });
+    }
+    // The binding is what makes the field an editor, and it needs the plugin that provides it: a
+    // page whose edit plan is still landing binds as soon as it can, and keeps the field disabled
+    // until then. `binding` answers false only while that provider is missing.
+    function bind() {
+      if (binding) return true;
+      if (typeof window.clay?.bindText !== 'function') return false;
       binding = window.clay.bindText(ta(), {
         onWrite: (code) => {
           touch(code.closest('article.entry'));
@@ -1667,16 +1848,31 @@ const words = text.trim().split(/\s+/).length;
         },
         onGone: (typed) => {
           const date = openDate;
-          note('This entry was deleted somewhere else.', typed, { label: 'Keep it', run: () => keepNote(typed, date) });
+          note('This entry was deleted somewhere else.', typed, { label: 'Keep it', run: () => keepNote(typed, date) }, 'peer-delete');
         },
       });
       // After the binding, so the record already holds this keystroke and its timestamp: what
       // the recovery copy stages is exactly what a save of this page would write. It reads the
       // textarea, never the record, so an active composition is captured without ending it.
       stageOn(ta());
+      if (selected) open(selected);
+      return true;
     }
     function stageOn(el) {
-      if (el) el.addEventListener('input', () => Recovery.typed());
+      if (!el) return;
+      el.addEventListener('input', () => Recovery.typed());
+      el.addEventListener('blur', () => Recovery.flush());
+    }
+    // Admission belongs to the session, not to the field: a quiesced exit stops new input while
+    // the field keeps every character the person already typed.
+    function disable() {
+      const el = ta();
+      if (el) el.disabled = true;
+    }
+    function enable() {
+      const el = ta();
+      if (!el) return;
+      el.disabled = false;
     }
     function editorOptions() {
       return {
@@ -1715,24 +1911,226 @@ const words = text.trim().split(/\s+/).length;
       const now = ta();
       if (now !== el) { now.value = el.value; binding.attach(now); stageOn(now); }
       if (focused) { now.focus(); now.setSelectionRange(a, b); }
+      RecordPresence.reconcile();
     }
     function open(article) {
+      selected = article;
+      if (!binding) return;
       const id = article.dataset.id;
       binding.open(article.querySelector('.entry-body'), {
         key: id,
         resolve: () => Entries.byId(id)?.querySelector('.entry-body') ?? null,
       });
     }
+    // After the exit's barrier, and never before it: the binding detaches without flushing, the
+    // OverType instance is destroyed and its toolbar and key handlers go with it.
+    function dispose() {
+      binding?.dispose?.();
+      binding = null;
+      try { overtype?.destroy?.(); } catch {}
+      overtype = null;
+      mount.replaceChildren();
+    }
     return {
-      start, open, enhance,
+      start, open, bind, enhance, enable, disable, dispose,
       close: () => binding?.close(),
+      // Whether the record holds every character in the field: a binding that never wrote a
+      // keystroke (a conflict, a record a peer removed) has text only this tab can see.
+      represented: () => {
+        if (!binding) return true;
+        const code = binding.current();
+        return !code || (code.isConnected && code.textContent === (ta()?.value ?? ''));
+      },
       current: () => binding?.current()?.closest('article.entry') ?? null,
+      currentId: () => binding?.current()?.closest('article.entry')?.dataset.id ?? null,
+      hasFocus: () => !!binding && document.hasFocus() && document.activeElement === ta(),
       focus: () => ta()?.focus(),
       text: () => ta()?.value ?? '',
       reconfigure: (options) => overtype?.reinit(options),
       refresh: () => overtype?.updatePreview(),
       composing: () => !!binding?.composing?.(),
     };
+  })();
+
+  /* ---------------------------------------------------------------- projected presence: who else is in an entry.
+     Read from the one snapshot RecordPresence already subscribes to, mapped onto live entry ids, painted into
+     runtime-only slots. Nothing here writes a record, a save or the dirty state. */
+  const PresenceBadges = (() => {
+    const MAX_NAMES = 2;
+    let roster = new Map();   // entryId -> [{ id, name }]
+    let signature = '';       // what the last paint showed, so an unchanged heartbeat paints nothing
+    let liveIds = null;       // the canonical id set, dropped whenever the records change
+    let sheetEl = null;
+    let last = null;          // the latest snapshot, reprojected whenever something it depends on moves
+
+    const live = () => liveIds || (liveIds = new Set(Entries.live().map(a => a.dataset.id)));
+
+    // Only the host's filtered roster, only someone who is not this tab, only a validated record target on a
+    // live local id, one badge per person id however many tabs they have.
+    function project(snapshot) {
+      const next = new Map();
+      const ids = live();
+      const seen = new Set();
+      for (const person of Array.isArray(snapshot?.people) ? snapshot.people : []) {
+        if (!person || person.you === true || typeof person.id !== 'string' || seen.has(person.id)) continue;
+        const target = person.editing;
+        if (!target || typeof target !== 'object' || target.kind !== 'record' || typeof target.id !== 'string') continue;
+        if (!ids.has(target.id)) continue;
+        seen.add(person.id);
+        if (!next.has(target.id)) next.set(target.id, []);
+        next.get(target.id).push({ id: person.id, name: String(person.name || 'Someone') });
+      }
+      return next;
+    }
+
+    // Up to two names, then a count. textContent only: a display name is never markup.
+    const label = people => {
+      const shown = people.slice(0, MAX_NAMES).map(p => p.name).join(', ');
+      const extra = people.length - Math.min(people.length, MAX_NAMES);
+      return extra > 0 ? `${shown} +${extra}` : shown;
+    };
+    function paintSlot(el, people) {
+      const text = people && people.length ? label(people) : '';
+      if (el.textContent !== text) el.textContent = text;
+      if (el.hidden !== !text) el.hidden = !text;
+    }
+
+    // The sheet's slot is chrome this tab draws, never authored markup: a node carrying no-save in the file
+    // would be missing from the first save and from every reopen of those bytes.
+    function sheetSlot() {
+      if (sheetEl && sheetEl.isConnected) return sheetEl;
+      sheetEl = $('#sheetPresence');
+      if (sheetEl) return sheetEl;
+      const header = $('#titleblock');
+      if (!header || !header.parentNode) return null;
+      const el = document.createElement('span');
+      el.id = 'sheetPresence';
+      el.className = 'tb-presence';
+      el.setAttribute('clay', 'no-save no-watch no-snapshot');
+      el.setAttribute('role', 'status');
+      el.setAttribute('aria-live', 'polite');
+      el.hidden = true;
+      header.after(el);
+      sheetEl = el;
+      return el;
+    }
+
+    // Only the rows that are rendered right now: a page of 80, not the store.
+    const paintRows = () => {
+      for (const slot of $$('#list > .row > .row-body > [data-presence-entry]')) {
+        paintSlot(slot, roster.get(slot.dataset.presenceEntry));
+      }
+    };
+    const paintSheet = () => {
+      const el = sheetSlot();
+      const open = Entries.open();
+      if (el) paintSlot(el, open ? roster.get(open.dataset.id) : null);
+    };
+
+    // The roster is projected from the latest snapshot every time something it depends on moves:
+    // a new frame, a record joining or leaving Trash, a page of rows, or the edit session.
+    function reproject() {
+      const editing = window.clay?.isEditMode === true && !window.clay.isDraftMode;
+      const next = editing && last?.recordAwareness === true ? project(last) : new Map();
+      const sig = [...next].map(([id, p]) => `${id}:${p.map(x => `${x.id}=${x.name}`).join(',')}`).sort().join('|');
+      if (sig === signature) return false;
+      signature = sig;
+      roster = next;
+      return true;
+    }
+
+    function rosterChanged(snapshot) {
+      last = snapshot ?? null;
+      if (reproject()) { paintRows(); paintSheet(); }
+    }
+
+    function refresh() {
+      liveIds = null;
+      reproject();
+      paintRows(); paintSheet();
+    }
+
+    function clear() {
+      roster = new Map();
+      signature = '';
+      paintRows(); paintSheet();
+    }
+
+    return { rosterChanged, refresh, clear };
+  })();
+
+  /* ---------------------------------------------------------------- record presence: the tab publishes the open entry through
+     the host's roster only while its own writing control has focus, and publishes nobody otherwise. */
+  const RecordPresence = (() => {
+    const UNSENT = Symbol('unsent');
+    let facade = null;
+    let unsubscribe = null;
+    let capable = false;
+    let sentId = UNSENT;
+    let pending = false;
+    let started = false;
+
+    function attach() {
+      const next = window.clay?.presence;
+      if (next === facade) return;
+      if (unsubscribe) unsubscribe();
+      unsubscribe = null;
+      facade = next && typeof next.subscribe === 'function' && typeof next.setTarget === 'function' ? next : null;
+      capable = false;
+      sentId = UNSENT;
+      if (!facade) { PresenceBadges.rosterChanged(null); return; }
+      unsubscribe = facade.subscribe(snapshot => {
+        PresenceBadges.rosterChanged(snapshot);   // the roster is news even when the capability is not
+        const now = snapshot?.recordAwareness === true;
+        if (now === capable) return;
+        if (!now && sentId !== UNSENT && sentId !== null) facade.setTarget(null);
+        capable = now;
+        sentId = UNSENT;
+        reconcile();
+      });
+    }
+
+    function nextId() {
+      if (!capable || !window.clay?.isEditMode || window.clay.isDraftMode || document.hidden) return null;
+      const id = Editor.currentId();
+      const entry = id && Entries.byId(id);
+      return entry && !isTrashed(entry) && Editor.hasFocus() ? id : null;
+    }
+
+    function reconcile() {
+      attach();
+      if (!facade || !capable || window.clay?.isDraftMode) return;
+      const id = nextId();
+      if (id === sentId) return;
+      if (facade.setTarget(id ? { kind: 'record', id } : null) !== false) {
+        sentId = id;
+        return;
+      }
+      facade.setTarget(null);
+      sentId = null;
+    }
+
+    function soon() {
+      if (pending) return;
+      pending = true;
+      queueMicrotask(() => { pending = false; reconcile(); });
+    }
+
+    function start(writerContainer) {
+      if (started) return;
+      started = true;
+      writerContainer.addEventListener('focusin', reconcile, true);
+      writerContainer.addEventListener('focusout', soon, true);
+      document.addEventListener('visibilitychange', reconcile);
+      window.addEventListener('blur', reconcile);
+      window.addEventListener('focus', reconcile);
+      window.addEventListener('pagehide', () => { if (facade && capable && typeof sentId === 'string') facade.setTarget(null); sentId = UNSENT; });
+      document.addEventListener('clay:presence-ready', reconcile);
+      document.addEventListener('clay:modechange', () => { reconcile(); PresenceBadges.refresh(); });
+      attach();
+    }
+
+    return { start, reconcile };
   })();
 
   /* ---------------------------------------------------------------- image references: the one Markdown form the Journal writes,
@@ -1900,6 +2298,109 @@ const words = text.trim().split(/\s+/).length;
     return { start, keep, drop, list: () => channel ? channel.list() : Promise.resolve({ ok: false, records: [] }) };
   })();
 
+  /* ---------------------------------------------------------------- archive moves: a year's records this browser has
+     not yet seen leave in a saved file. Only an accepted save whose own bytes lack every one of a move's IDs clears it;
+     seeing the nodes gone from this page proves nothing about the file. */
+  const ArchiveMoves = (() => {
+    const CHANNEL = 'journal.archive-moves';
+    const pending = new Map();
+    const staged = new Map();
+    const durable = new Set();
+    const watchers = new Set();
+    let channel = null;
+    let starting = null;
+    const changed = () => { for (const fn of watchers) { try { fn(); } catch {} } };
+    // A page that shows whether a move still awaits its save listens here.
+    const listen = fn => { if (typeof fn === 'function') watchers.add(fn); return () => watchers.delete(fn); };
+    // Moves this browser holds durably, which are the only ones a save can clear.
+    const awaiting = () => [...pending.keys()].filter(key => durable.has(key)).length;
+    const idsOf = payload => (Array.isArray(payload?.entries) ? payload.entries : []).map(record => record?.id).filter(id => typeof id === 'string' && !!id);
+    function readSaved(html) {
+      const doc = new DOMParser().parseFromString(html, 'text/html');
+      const saved = new Set([...doc.querySelectorAll('#entries > article.entry:not([cms-template])')].map(a => a.dataset.id || ''));
+      const out = new Map();
+      for (const [moveId, payload] of pending) {
+        if (!durable.has(moveId)) continue;
+        if (!idsOf(payload).some(id => saved.has(id))) out.set(moveId, payload);
+      }
+      return out;
+    }
+    const describe = record => ({ label: 'Archive move', text: `${record?.payload?.year ?? ''}: ${(record?.payload?.entries || []).length} entries` });
+    // Only what this browser actually wrote leaves the map: a move it could not keep stays an offer to copy from.
+    function prune(records) {
+      const kept = new Set((records || []).map(record => record.key));
+      let gone = false;
+      for (const key of [...durable]) {
+        if (kept.has(key)) continue;
+        durable.delete(key);
+        staged.delete(key);
+        pending.delete(key);
+        gone = true;
+      }
+      if (gone) changed();
+    }
+    function refresh() {
+      if (!channel) return Promise.resolve();
+      return channel.list().then(result => { if (result?.ok) prune(result.records); }, () => {});
+    }
+    // True only when this browser completed a write of the record.
+    async function stage(moveId, payload) {
+      const key = String(moveId ?? '');
+      if (!key || !payload) return false;
+      pending.set(key, payload);
+      changed();
+      if (!channel) return false;
+      try {
+        staged.set(key, channel.stage({ key, payload }));
+        const result = await channel.flush();
+        if (!result?.ok) return false;
+        durable.add(key);
+        changed();
+        return true;
+      } catch {
+        return false;
+      }
+    }
+    // A move this page staged and then could not finish is withdrawn: the records it lists are
+    // still in the file, so no save could ever cover it.
+    function discard(moveId) {
+      const key = String(moveId ?? '');
+      if (!key) return;
+      const entry = staged.get(key);
+      staged.delete(key);
+      durable.delete(key);
+      pending.delete(key);
+      if (entry?.id && channel) channel.dismiss(entry.id, { revision: entry.revision }).catch(() => {});
+      changed();
+    }
+    // Moves an earlier page kept come back under this page, so this page's own saves can clear them.
+    // One whose entries the opened file no longer has is left for a covering save, never dismissed here.
+    function start() {
+      if (starting) return starting;
+      starting = (async () => {
+        const service = window.clay?.recovery;
+        if (channel || typeof service?.register !== 'function') return;
+        channel = service.register({ channel: CHANNEL, version: 1, readSaved, describe });
+        channel.subscribe(() => { refresh().catch(() => {}); });
+        let result;
+        try { result = await channel.list(); } catch { return; }
+        if (!result?.ok) return;
+        for (const record of result.records) {
+          const payload = record.payload;
+          if (!record.supported || !record.key || !payload || pending.has(record.key)) continue;
+          const kept = await stage(record.key, payload);
+          if (kept && staged.get(record.key)?.id !== record.id) {
+            channel.dismiss(record.id, { revision: record.revision }).catch(() => {});
+          }
+        }
+        changed();
+      })();
+      starting.catch(() => {}).then(() => { if (!channel) starting = null; });
+      return starting;
+    }
+    return { start, stage, discard, listen, awaiting, describe, pending: () => [...pending].map(([moveId, payload]) => ({ moveId, payload })) };
+  })();
+
   /* ---------------------------------------------------------------- pictures: an image pasted or dropped into the editor
      uploads through ClayJS's shared task and belongs to the entry it was dropped on. Only a host that keeps the file
      private to this document, or a local host, is asked; a saved entry only ever holds a Markdown reference. */
@@ -1914,10 +2415,11 @@ const words = text.trim().split(/\s+/).length;
     let tray = null;
     const imagesOf = list => [...(list || [])].filter(f => f && /^image\//.test(f.type || ''));
     const drafting = () => document.documentElement.getAttribute('draftmode') === 'true';
-    const supported = () => alive() && !readOnly && !drafting() && typeof window.clay?.upload?.start === 'function';
+    const ready = () => alive() && !drafting() && typeof window.clay?.upload?.start === 'function';
+    const supported = () => canWrite() && ready();
     function refuse() {
       if (drafting()) note('Pictures need a saved document. Your draft keeps text only.');
-      else if (readOnly) note('Pictures can only be added while editing.');
+      else if (!canWrite()) note('Pictures can only be added while editing.');
       else note('This host cannot keep pictures private to this journal, so it stays text only.');
     }
     function trayEl() {
@@ -2135,7 +2637,7 @@ const words = text.trim().split(/\s+/).length;
       live.add(job);
       offer(job);
     }
-    return { claim, refuseOutside, supported, refreshOffers, start: () => { if (supported()) Links.start(recovered); } };
+    return { claim, refuseOutside, supported, refreshOffers, start: () => { if (ready()) { Links.start(recovered); ArchiveMoves.start(); } } };
   })();
 
   /* ---------------------------------------------------------------- the picture strip: the open entry's pictures, under the editor.
@@ -2193,8 +2695,8 @@ const words = text.trim().split(/\s+/).length;
       });
       host().replaceChildren(...items);
     }
-    function start() {
-      $('#writer').addEventListener('input', schedule);
+    function start(on) {
+      on($('#writer'), 'input', schedule);
     }
     return { start, schedule, refresh };
   })();
@@ -2213,6 +2715,9 @@ const words = text.trim().split(/\s+/).length;
     let downloadBtn = null;
     let copies = 0;
     let reviewTicket = 0;
+    // The conflicts this session staged, and only those: an exit waits on text this tab holds.
+    const stagedHere = new Set();
+    let pendingConflicts = 0;
     let unregisterContext = null;
     const bases = new Map();
     const transfers = new Map();
@@ -2274,7 +2779,7 @@ const words = text.trim().split(/\s+/).length;
       if (!entries) return;
       const key = context.key || '';
       const article = key ? Entries.byId(key) : null;
-      entries.stage({
+      const staged = entries.stage({
         key: key || 'entry',
         kind: 'conflict',
         baseEtag: null,
@@ -2287,6 +2792,10 @@ const words = text.trim().split(/\s+/).length;
           remote: context.remote ?? ''
         }
       });
+      if (!staged) return;
+      stagedHere.add(keyOf(staged.id));
+      pendingConflicts = stagedHere.size;
+      review();
     }
 
     function flush() {
@@ -2295,7 +2804,7 @@ const words = text.trim().split(/\s+/).length;
 
     function review(records) {
       const service = entries;
-      if (!service || readOnly) return Promise.resolve();
+      if (!service) return Promise.resolve();
       const board = panel();
       board.textContent = '';
       const listed = records ?? null;
@@ -2305,6 +2814,10 @@ const words = text.trim().split(/\s+/).length;
       return known.then(result => {
         if (ticket !== reviewTicket) return;
         const all = result.ok ? result.records : [];
+        // A conflict this session staged stops counting as pending once its row is gone.
+        const still = new Set(all.map(record => keyOf(record.id)));
+        for (const id of [...stagedHere]) if (!still.has(id)) stagedHere.delete(id);
+        pendingConflicts = stagedHere.size;
         const pendingDest = new Map();
         for (const record of all) {
           const link = record.lineage;
@@ -2388,6 +2901,7 @@ const words = text.trim().split(/\s+/).length;
       acts.className = 'recovery-acts';
 
       const keep = () => {
+        if (!canWrite()) return Promise.resolve();
         const date = record.payload.date || ymd(new Date());
         const created = makeEntry(date, nowISO(), body ?? '');
         store.prepend(created);
@@ -2400,6 +2914,7 @@ const words = text.trim().split(/\s+/).length;
       if (live) {
         const row = { current: live };
         acts.append(action('Replace current text', () => {
+          if (!canWrite()) return Promise.resolve();
           const now = readEntry(article);
           if (!same(now, row.current)) {
             row.current = now;
@@ -2490,10 +3005,12 @@ const words = text.trim().split(/\s+/).length;
     }
 
     function start() {
-      if (readOnly || entries) return;
+      if (!session || entries) return;
       const service = window.clay && window.clay.recovery;
       if (!service || typeof service.register !== 'function') return;
       entries = service.register({ channel: CHANNEL, version: 1, readSaved, describe });
+      stagedHere.clear();
+      pendingConflicts = 0;
       statusBar();
       rememberAll();
       if (typeof entries.subscribe === 'function') entries.subscribe(() => paintStatus());
@@ -2504,9 +3021,10 @@ const words = text.trim().split(/\s+/).length;
       review();
     }
 
-    // A conflict names its entry only when the record's own nodes are inside one.
+    // A conflict names its entry only when the record's own nodes are inside one. A refused
+    // undo has no node of its own: it names the entry by id, or by the element that id finds.
     function contextOf(record) {
-      const el = record && record.node && typeof record.node.closest === 'function' ? record.node.closest('article.entry') : null;
+      const el = entryOf(record);
       if (!el || !el.dataset.id) return null;
       return {
         kind: 'entry',
@@ -2515,6 +3033,19 @@ const words = text.trim().split(/\s+/).length;
         field: 'body',
         open: () => openEntry(el.dataset.id)
       };
+    }
+
+    function entryOf(record) {
+      if (!record) return null;
+      const node = record.node;
+      if (node && typeof node.closest === 'function') return node.closest('article.entry');
+      const element = record.element;
+      if (element && typeof element.closest === 'function') {
+        const own = element.closest('article.entry');
+        if (own) return own;
+      }
+      if (record.id == null || record.id === '') return null;
+      return Entries.byId(String(record.id));
     }
 
     // A kept-as-new copy is not a save. The source leaves only once a save's own bytes cover
@@ -2541,11 +3072,12 @@ const words = text.trim().split(/\s+/).length;
     function dispose() {
       if (typeof unregisterContext === 'function') unregisterContext();
       unregisterContext = null;
-      if (!entries) return Promise.resolve({ ok: true, stored: [] });
-      const flushed = flush();
-      flushed.then(() => { try { entries.dispose(); } catch {} }, () => {});
+      const service = entries;
       entries = null;
-      return flushed;
+      if (!service) return Promise.resolve({ ok: true, stored: [] });
+      // The channel goes back at once, so the next session registers the same name cleanly;
+      // the service flushes what this one staged and answers when it has.
+      return Promise.resolve().then(() => service.dispose()).catch(() => ({ ok: true, stored: [] }));
     }
 
     function surface() {
@@ -2561,18 +3093,19 @@ const words = text.trim().split(/\s+/).length;
       };
     }
 
-    return { start, typed, conflicted, flush, review, afterSave, surface, rememberAll, dispose };
+    return { start, typed, conflicted, flush, review, afterSave, surface, rememberAll, dispose, pendingConflict: () => pendingConflicts > 0 };
   })();
 
   // One line under the sheet for a conflict or a deletion elsewhere, with the text this tab typed. It is
   // editor-ui chrome, so it never reaches the file, and it goes when dismissed or when the entry changes.
   let noteEl = null;
   function clearNote() { if (noteEl) { noteEl.remove(); noteEl = null; } }
-  function note(message, text, action) {
+  function note(message, text, action, pending) {
     clearNote();
     const el = document.createElement('div');
     el.className = 'note';
     el.setAttribute('clay', 'editor-ui');
+    if (pending) el.dataset.pending = pending;
     const msg = document.createElement('span');
     msg.textContent = message;
     el.append(msg);
@@ -2603,6 +3136,7 @@ const words = text.trim().split(/\s+/).length;
   }
 
   function keepNote(text, date) {
+    if (!canWrite()) return;
     const a = makeEntry(date || ymd(new Date()), nowISO(), text);
     store.prepend(a);
     clearNote();
@@ -2648,12 +3182,13 @@ const words = text.trim().split(/\s+/).length;
   function syncEditor() {
     if (!booted) return;
     const a = store.querySelector(':scope > .entry[route-active]');
-    if (readOnly) { Reader.render(a && !isTrashed(a) ? a : null); refreshHighlights(); return; }
+    if (reading()) { Reader.render(a && !isTrashed(a) ? a : null); refreshHighlights(); return; }
     const left = Editor.current();
     const leftId = left ? left.dataset.id : null;
     const nextId = a ? a.dataset.id : null;
     if (leftId !== nextId) { clearNote(); desk.scrollTop = 0; Recovery.flush(); }
     if (a) Editor.open(a); else Editor.close();
+    RecordPresence.reconcile();
     Strip.schedule();
     Pictures.refreshOffers();
     openDate = a ? a.dataset.date || '' : null;
@@ -2724,7 +3259,7 @@ const words = text.trim().split(/\s+/).length;
           }
         }
       };
-      const open = readOnly ? $('#reader') : $('#writer .overtype-preview');
+      const open = reading() ? $('#reader') : $('#writer .overtype-preview');
       if (open) scan(open, true);
       if (terms.length) for (const el of $$('#list .row-body')) scan(el, false);
       if (hits.length) CSS.highlights.set('jhit', new Highlight(...hits));
@@ -2747,7 +3282,7 @@ const words = text.trim().split(/\s+/).length;
   }
 
   function newEntry() {
-    if (readOnly) return;
+    if (!canWrite()) return;
     if (trashView()) setView('');
     closeDeletePopover();
     clearFilters();
@@ -2773,7 +3308,7 @@ const words = text.trim().split(/\s+/).length;
   }
 
   function openToday() {
-    if (readOnly) return;
+    if (!canWrite()) return;
     if (trashView()) setView('');
     if (filterOn()) clearFilters();
     try { if (window.Sap) Sap(app).calendarMonth = ''; } catch {}
@@ -2874,16 +3409,17 @@ const words = text.trim().split(/\s+/).length;
   window.addEventListener('pagehide', () => { clearTimeout(midnightTimer); midnightTimer = 0; Recovery.dispose(); });
 
   function deleteEntry(id) {
-    if (readOnly) return;
+    if (!canWrite()) return;
     const a = Entries.byId(id);
     if (!a) return;
     const order = $$('#list > .row').map(r => r.dataset.key);
     const idx = order.indexOf(id);
-    const wasOpen = currentEntry() === id;
+    const wasOpen = openEntryId() === id;
     if (createdHere.has(id) && !Entries.body(a).trim()) a.remove();
     else {
       createdHere.delete(id);
       window.clay.trash(a, { at: nowISO() });
+      dropPick(id);
       refreshTrash();
       showToast('Moved to Trash', { label: 'Undo', run: () => restoreEntry(id) });
     }
@@ -2895,9 +3431,11 @@ const words = text.trim().split(/\s+/).length;
   }
 
   function restoreEntry(id) {
+    if (!canWrite()) return;
     const a = Entries.byId(id);
     if (!a) return;
     window.clay.trash.restore(a);
+    dropPick(id);
     setView('');
     refreshTrash();
     openEntry(id, { focus: true });
@@ -2913,6 +3451,7 @@ const words = text.trim().split(/\s+/).length;
 
   // Delete forever only ever removes what is in Trash right now: a peer may have restored it meanwhile.
   function purgeEntry(id) {
+    if (!canWrite()) return;
     const a = Entries.byId(id);
     if (!a || !isTrashed(a)) {
       closeDeletePopover();
@@ -2923,6 +3462,7 @@ const words = text.trim().split(/\s+/).length;
     const next = wasOpen ? neighborOf(a) : null;
     if (wasOpen) Editor.close();
     window.clay.trash.purge(a);
+    dropPick(id);
     refreshTrash();
     if (!wasOpen) return;
     const r = route();
@@ -2930,11 +3470,13 @@ const words = text.trim().split(/\s+/).length;
   }
 
   function emptyTrash() {
+    if (!canWrite()) return;
     const doomed = Entries.all().filter(isTrashed);
     const open = doomed.find(a => a.dataset.id === currentEntry());
     const next = open ? neighborOf(open) : null;
     if (open) Editor.close();
     for (const a of doomed) window.clay.trash.purge(a);
+    dropPick(...doomed.map(a => a.dataset.id));
     setView('');
     refreshTrash();
     if (!open) return;
@@ -2955,6 +3497,7 @@ const words = text.trim().split(/\s+/).length;
     trashHead.hidden = !on;
     list.scrollTop = 0;
     refreshTrash();
+    if (pickOn()) setPickScope('');
   }
 
   // "Trash (N)" exists only while something is in it, and it is chrome, so it never writes.
@@ -3094,79 +3637,869 @@ const words = text.trim().split(/\s+/).length;
     });
   }
 
-  // An entry the file and this journal both have, with the same text, is skipped; the same id with
-  // different text is added under a new id. Nothing is written here: this only counts.
-  function planFieldPad(records) {
-    const here = new Map(Entries.all().map(a => [a.dataset.id, a]));
-    const taken = new Set(here.keys());
-    const plan = { add: [], restore: [], same: 0, conflicts: 0 };
-    for (const r of records) {
-      if (r.id && here.has(r.id)) {
-        const a = here.get(r.id);
-        if (Entries.body(a) === r.body) {
-          if (isTrashed(a) && !r.deletedAt) plan.restore.push(r.id);
-          else plan.same += 1;
-          continue;
-        }
-        plan.conflicts += 1;
-        plan.add.push({ ...r, id: '' });
-        continue;
-      }
-      if (r.id && taken.has(r.id)) { plan.conflicts += 1; plan.add.push({ ...r, id: '' }); continue; }
-      if (r.id) taken.add(r.id);
-      plan.add.push(r);
+
+  /* ---------------------------------------------------------------- exact backup: every field, blanks and Trash included */
+  const RECORD_FIELDS = ['id', 'date', 'created', 'updated', 'deletedAt', 'pinned', 'body'];
+  const BACKUP_FORMAT = 'field-pad';
+  const BACKUP_VERSION = 2;
+  const BACKUP_MAX_BYTES = 64 * 1024 * 1024;
+  const BACKUP_MAX_RECORDS = 100000;
+  const sameRecord = (a, b) => !!a && !!b && RECORD_FIELDS.every(key => a[key] === b[key]);
+  const backupOf = entries => ({ format: BACKUP_FORMAT, version: BACKUP_VERSION, exportedAt: new Date().toISOString(), entries });
+  const refuse = (code, message, row = null) => ({ ok: false, code, row, message });
+
+  function recordsOf() {
+    return Entries.all().map(a => Entries.record(a));
+  }
+
+  function readBackup(text) {
+    const source = String(text ?? '');
+    if (new TextEncoder().encode(source).byteLength > BACKUP_MAX_BYTES) {
+      return refuse('too-large', 'That file is larger than 64 MiB, so nothing from it was read.');
     }
+    let data;
+    try { data = JSON.parse(source); } catch { return refuse('unreadable', 'That file is not JSON, so nothing from it was read.'); }
+    if (!data || typeof data !== 'object' || Array.isArray(data)) {
+      return refuse('unreadable', 'That file is not a Journal backup, so nothing from it was read.');
+    }
+    const unknownEnvelope = Object.keys(data).find(key => !['format', 'version', 'exportedAt', 'entries'].includes(key));
+    if (unknownEnvelope) return refuse('unknown-field', `That backup has a field this journal does not know: ${unknownEnvelope}.`);
+    if (data.format !== BACKUP_FORMAT) {
+      return refuse('unsupported-format', `That file is a “${String(data.format)}” backup, not a Journal backup.`);
+    }
+    if (data.version !== BACKUP_VERSION) {
+      return refuse('unsupported-version', `That backup says version ${JSON.stringify(data.version)}; this journal reads version ${BACKUP_VERSION}.`);
+    }
+    if (typeof data.exportedAt !== 'string') return refuse('unknown-field', 'That backup has no export time, so it is not a version 2 Journal backup.');
+    if (!Array.isArray(data.entries)) return refuse('unknown-field', 'That backup has no list of entries.');
+    if (data.entries.length > BACKUP_MAX_RECORDS) {
+      return refuse('too-many', `That backup has ${data.entries.length} entries; this journal reads at most ${BACKUP_MAX_RECORDS}.`);
+    }
+    const entries = [];
+    const seen = new Set();
+    for (let row = 0; row < data.entries.length; row += 1) {
+      const r = data.entries[row];
+      if (!r || typeof r !== 'object' || Array.isArray(r)) return refuse('bad-record', `Row ${row + 1} is not an entry.`, row);
+      const unknown = Object.keys(r).find(key => !RECORD_FIELDS.includes(key));
+      if (unknown) return refuse('unknown-field', `Row ${row + 1} has a field this journal does not know: ${unknown}.`, row);
+      for (const key of RECORD_FIELDS) {
+        if (!Object.prototype.hasOwnProperty.call(r, key)) return refuse('missing-field', `Row ${row + 1} has no ${key}.`, row);
+        if (typeof r[key] !== 'string') return refuse('wrong-type', `Row ${row + 1} has a ${key} that is not text.`, row);
+      }
+      if (!r.id.trim()) return refuse('missing-id', `Row ${row + 1} has no id.`, row);
+      if (seen.has(r.id)) return refuse('duplicate-id', `More than one row has the id “${r.id}”.`, row);
+      seen.add(r.id);
+      if (r.date && !isDay(r.date)) return refuse('bad-date', `Row ${row + 1} has “${r.date}”, which is not a real date.`, row);
+      if (r.pinned !== '' && r.pinned !== 'false' && r.pinned !== 'true') {
+        return refuse('bad-pin', `Row ${row + 1} has “${r.pinned}”, which is not a pin value.`, row);
+      }
+      entries.push(Object.fromEntries(RECORD_FIELDS.map(key => [key, r[key]])));
+    }
+    return { ok: true, entries };
+  }
+
+  function recordArticle(record, root = store) {
+    const holder = root.nodeType === 9 ? root.querySelector('#entries') : root;
+    const seed = holder && holder.querySelector('article.entry[cms-template]');
+    if (!seed) throw new Error('a journal copy needs its empty entry');
+    const a = seed.cloneNode(true);
+    a.removeAttribute('cms-template');
+    a.dataset.id = record.id;
+    for (const key of ['date', 'created', 'updated', 'deletedAt', 'pinned']) {
+      if (record[key]) a.dataset[key] = record[key];
+      else delete a.dataset[key];
+    }
+    a.querySelector('.entry-body').textContent = record.body;
+    return a;
+  }
+
+  function recordsFromHTML(html) {
+    const doc = new DOMParser().parseFromString(String(html ?? ''), 'text/html');
+    return [...doc.querySelectorAll('#entries > article.entry:not([cms-template])')].map(a => Entries.record(a));
+  }
+
+  function newCopy(shell, records) {
+    const doc = new DOMParser().parseFromString(String(shell ?? ''), 'text/html');
+    const holder = doc.querySelector('#entries');
+    const seed = holder && holder.querySelector('article.entry[cms-template]');
+    if (!seed) return null;
+    for (const a of [...holder.querySelectorAll('article.entry:not([cms-template])')]) a.remove();
+    for (const record of records) holder.append(recordArticle(record, holder));
+    return doc;
+  }
+
+  function newCopyHTML(shell, records) {
+    const doc = newCopy(shell, records);
+    return doc ? `<!doctype html>\n${doc.documentElement.outerHTML}` : '';
+  }
+
+  function verifyRecords(html, records) {
+    const found = recordsFromHTML(html);
+    if (found.length !== records.length) {
+      return { ok: false, row: null, message: `The copy has ${found.length} entries where the backup has ${records.length}.` };
+    }
+    for (let row = 0; row < records.length; row += 1) {
+      if (!sameRecord(found[row], records[row])) return { ok: false, row, message: `Row ${row + 1} would change when the copy is written.` };
+    }
+    return { ok: true };
+  }
+
+  function planRestore(records) {
+    const here = new Map(Entries.all().map(a => [a.dataset.id, a]));
+    const plan = { fresh: [], identical: [], conflicts: [], blank: 0, trashed: 0 };
+    records.forEach((record, row) => {
+      if (!record.body.trim()) plan.blank += 1;
+      if (record.deletedAt) plan.trashed += 1;
+      const a = here.get(record.id);
+      if (!a) { plan.fresh.push(record); return; }
+      if (sameRecord(Entries.record(a), record)) plan.identical.push(record);
+      else plan.conflicts.push({ row, record });
+    });
+    plan.refuses = plan.conflicts.length > 0;
+    const taken = new Set(here.keys());
+    plan.keepBoth = () => records.map((record, row) => {
+      if (!plan.conflicts.some(c => c.row === row)) return { ...record };
+      let id = newId();
+      while (taken.has(id)) id = newId();
+      taken.add(id);
+      return { ...record, id };
+    });
     return plan;
   }
 
-  function offerFieldPad(records) {
-    if (readOnly) return;
-    const bad = records.find(r => !isDay(r.date));
-    if (bad) { note(`“${bad.date || 'That'}” is not a real date, so nothing was imported.`); return; }
-    if (!records.length) { note('That file has no entries in it.'); return; }
-    openImportPopover(records, $('#menuBtn'));
+  const Backup = {
+    FIELDS: RECORD_FIELDS,
+    records: recordsOf,
+    envelope: (records = recordsOf()) => backupOf(records),
+    parse: readBackup,
+    article: recordArticle,
+    newCopy,
+    newCopyHTML,
+    verify: verifyRecords,
+    plan: planRestore
+  };
+
+  /* ---------------------------------------------------------------- selection: a set of stable ids held in this tab, and two exports.
+     A checkbox exists only inside the list projection and only while a scope is open, and the
+     scope is entered deliberately: entries first, or Trash on its own. Nothing here writes a
+     record, a timestamp or the draft. The bar, the count and the popover are freeze chrome. */
+  const PICK_ENTRIES = 'entries';
+  const PICK_TRASH = 'trash';
+  const selected = new Set();
+  const isPicked = id => selected.has(id);
+  const pickScope = () => { const s = transients(); return (s && s.pick) || ''; };
+  const pickOn = () => !!pickScope();
+
+  function filterNow() {
+    const s = transients();
+    return {
+      q: $('#q').value.trim(),
+      tag: (s && s.tag) || '',
+      from: (s && s.from) || '',
+      to: (s && s.to) || ''
+    };
   }
 
-  function applyFieldPad(plan) {
-    let first = null;
-    for (const r of plan.add) {
-      const a = makeEntry(r.date, r.created || nowISO(), r.body);
-      if (r.id && !Entries.byId(r.id)) a.dataset.id = r.id;
-      if (r.updated) a.dataset.updated = r.updated;
-      if (r.pinned === 'true') a.dataset.pinned = 'true';
-      store.append(a);
-      if (r.deletedAt) window.clay.trash(a, { at: r.deletedAt });
-      else first = first || a.dataset.id;
-    }
-    for (const id of plan.restore) {
-      const a = Entries.byId(id);
-      if (a && isTrashed(a)) { window.clay.trash.restore(a); first = first || id; }
-    }
-    if (plan.add.length || plan.restore.length) refreshTrash();
-    if (!first) { note(plan.add.length ? 'The new entries from that file are in Trash, as they were in the file.' : 'Every entry in that file is already here.'); return; }
-    setView('');
-    clearFilters();
-    openEntry(first);
+  // The whole filtered set, not the one page of rows that happens to be rendered. It is the same
+  // projection the list is drawn from, read through sap so every entry carries its stable key.
+  function filteredIds() {
+    const { q, tag, from, to } = filterNow();
+    const entries = (window.Sap && Sap(app).entries) || [];
+    return matches(entries.filter(e => !e.deletedAt), q, tag, from, to).map(e => e.$key);
   }
+
+  // A record that is deleted, that sits in the other scope, or that this page no longer holds
+  // leaves the selection: an ordinary export never carries a tombstone by accident.
+  function pruneSelection() {
+    const here = new Map(Entries.all().map(a => [a.dataset.id, a]));
+    const trash = pickScope() === PICK_TRASH;
+    for (const id of [...selected]) {
+      const a = here.get(id);
+      if (!a || isTrashed(a) !== trash) selected.delete(id);
+    }
+  }
+
+  function pickCount() {
+    const n = selected.size;
+    return n ? `${n} ${n === 1 ? 'entry' : 'entries'} selected` : 'Nothing selected';
+  }
+
+  function paintPick() {
+    pruneSelection();
+    const count = $('#pickCount');
+    if (count) count.textContent = pickCount();
+    const exportButton = $('#pickExport');
+    if (exportButton) exportButton.disabled = !selected.size;
+    const printButton = $('#pickPrint');
+    if (printButton) printButton.disabled = !selected.size;
+    refreshSap();
+  }
+
+  function setPickScope(scope) {
+    const s = transients();
+    if (!s) return;
+    const next = scope || '';
+    if ((s.pick || '') === next) return;
+    selected.clear();
+    s.pick = next;
+    s.shown = '';
+    closePickExport();
+    paintPick();
+  }
+
+  function togglePick(id) {
+    if (!id) return;
+    if (selected.has(id)) selected.delete(id); else selected.add(id);
+    paintPick();
+  }
+
+  // Ids that left the document take their selection with them.
+  function dropPick(...ids) {
+    let gone = false;
+    for (const id of ids) if (selected.delete(id)) gone = true;
+    if (gone && pickOn()) paintPick();
+  }
+
+  function pickAllFiltered() {
+    for (const id of filteredIds()) selected.add(id);
+    paintPick();
+  }
+
+  // The selected records in file order, read off the article rather than off a rendered row.
+  function selectedRecords() {
+    pruneSelection();
+    const ids = new Set(selected);
+    return Entries.all().filter(a => ids.has(a.dataset.id)).map(a => Entries.record(a));
+  }
+
+  function selectedJSON(records) {
+    return JSON.stringify(Backup.envelope(records));
+  }
+
+  // ship.mjs's clean-copy rules, on the bytes this page would save.
+  const INTRO_COPY = /<template\b[^>]*\bvisitor-intro\b[^>]*>[\s\S]*?<\/template>/g;
+  // The attributes that belong to one response or one tab rather than to the journal: a save
+  // token, a host's file identity and revision, this library's own state, and the route.
+  const TAB_LOCAL_ROOT = /^(?:savetoken|htmlclaytoken|documentid|htmlclayid|documentetag|sitevisibility|savestatus|editmode|pageowner|draftmode|unsaved|canedit)$/i;
+  const CLAY_SRC = /(<script\b[^>]*\bsrc=")(https:\/\/clayjs\.com\/v1\/clay\.js\?[^"]*)(")/i;
+
+  function stripVisitorIntro(html) {
+    const found = html.match(INTRO_COPY);
+    if (found && found.length > 1) return null;
+    return found ? html.replace(INTRO_COPY, '') : html;
+  }
+
+  function stripVisitorDraftPlugin(html) {
+    const match = html.match(CLAY_SRC);
+    if (!match) return html;
+    const [full, before, url, after] = match;
+    const [base, query = ''] = url.split('?');
+    const kept = query.split('&').map(param => {
+      const eq = param.indexOf('=');
+      if (eq === -1) return param;
+      if (param.slice(0, eq) !== 'plugins') return param;
+      const plugins = decodeURIComponent(param.slice(eq + 1))
+        .split(',')
+        .map(plugin => plugin.trim())
+        .filter(plugin => plugin && plugin !== 'visitor-drafts');
+      return plugins.length ? `plugins=${plugins.join(',')}` : null;
+    }).filter(param => param !== null && param !== '');
+    return html.replace(full, before + base + (kept.length ? `?${kept.join('&')}` : '') + after);
+  }
+
+  // The copy is built from the bytes this page would save: every other nonseed article goes, one
+  // empty seed stays, and the free-app opt-in and intro come out the way ship.mjs takes them out of
+  // a personal copy. It is a detached projection, so the live document never changes.
+  function selectedCopy(records) {
+    if (!window.clay || typeof window.clay.getHTML !== 'function') return '';
+    const articles = records.map(record => Backup.article(record, document));
+    const html = window.clay.getHTML({
+      transform: root => {
+        const holder = root.querySelector('#entries');
+        if (holder) {
+          for (const a of [...holder.querySelectorAll('article.entry:not([cms-template])')]) a.remove();
+          for (const article of articles) holder.append(article);
+        }
+        for (const intro of [...root.querySelectorAll('template')]) {
+          if (intro.hasAttribute('visitor-intro')) intro.remove();
+        }
+        root.removeAttribute('visitor-drafts');
+        for (const name of [...root.attributes].map(a => a.name)) {
+          if (TAB_LOCAL_ROOT.test(name) || name.startsWith('route-')) root.removeAttribute(name);
+        }
+      },
+      flushUndo: false
+    });
+    const out = stripVisitorIntro(stripVisitorDraftPlugin(html));
+    if (out == null) return '';
+    // The markup decides, never the text: this page's own scripts name both words.
+    const markup = out.replace(/(<script\b[^>]*>)[\s\S]*?(<\/script>)/gi, '$1$2');
+    if (/<[a-z][^\s>/]*\s[^>]*?\bvisitor-drafts(?=[\s=>/])/i.test(markup)) return '';
+    if (/<template\b[^>]*\bvisitor-intro(?=[\s=>/])/i.test(markup)) return '';
+    return out;
+  }
+
+  // The final bytes decide: exactly the selected ids, one empty seed, and the same records.
+  function verifySelectedCopy(html, records) {
+    if (!html) return { ok: false, message: 'This page cannot build a copy right now, so nothing was exported.' };
+    const doc = new DOMParser().parseFromString(String(html), 'text/html');
+    const found = [...doc.querySelectorAll('#entries > article.entry:not([cms-template])')].map(a => a.dataset.id || '');
+    const want = records.map(record => record.id);
+    const extra = found.some(id => !want.includes(id));
+    if (found.length !== want.length || extra || new Set(found).size !== found.length) {
+      return { ok: false, message: 'The copy would hold entries that are not selected, so nothing was exported.' };
+    }
+    if (doc.querySelectorAll('#entries > article.entry[cms-template]').length !== 1) {
+      return { ok: false, message: 'The copy would have no empty entry to write into, so nothing was exported.' };
+    }
+    const check = verifyRecords(html, records);
+    if (!check.ok) return check;
+    return { ok: true };
+  }
+
+  const pickPop = $('#pickPop');
+
+  function closePickExport() {
+    if (!pickPop) return;
+    pickPop.classList.remove('show');
+    $('#pickExport').setAttribute('aria-expanded', 'false');
+  }
+
+  function openPickExport() {
+    if (!pickPop) return;
+    pruneSelection();
+    const n = selected.size;
+    $('#pickPopTitle').textContent = n === 1 ? 'Export 1 selected entry' : `Export ${n} selected entries`;
+    $('#pickJson').disabled = !n;
+    $('#pickHtml').disabled = !n;
+    pickPop.classList.add('show');
+    $('#pickExport').setAttribute('aria-expanded', 'true');
+    placePopover(pickPop, $('#pickExport'));
+    (n ? $('#pickJson') : $('#pickCancel')).focus();
+  }
+
+  function downloadSelected(name, text, type) {
+    const url = URL.createObjectURL(new Blob([text], { type }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = name;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  function exportSelected(kind) {
+    const records = selectedRecords();
+    if (!records.length) {
+      note('Select at least one entry before exporting.');
+      return { ok: false, code: 'empty' };
+    }
+    const one = records.length === 1;
+    const day = ymd(new Date());
+    if (kind === 'json') {
+      downloadSelected(`journal-selected-${day}.json`, selectedJSON(records), 'application/json');
+      closePickExport();
+      note(`${records.length} ${one ? 'entry is' : 'entries are'} downloading as JSON. Linked pictures stay links, not files.`);
+      return { ok: true, count: records.length };
+    }
+    const html = selectedCopy(records);
+    const check = verifySelectedCopy(html, records);
+    if (!check.ok) {
+      closePickExport();
+      note(check.message);
+      return { ok: false, code: 'unverifiable' };
+    }
+    downloadSelected(`journal-selected-${day}.htmlclay`, html, 'text/html');
+    closePickExport();
+    note(`${records.length} ${one ? 'entry is' : 'entries are'} downloading as a personal .htmlclay copy. Linked pictures stay links, not files.`);
+    return { ok: true, count: records.length };
+  }
+
+  // A printout is the canonical records, so the flag that narrows it to the selection is a word on
+  // the ephemeral attribute: ClayJS drops that attribute from every snapshot, so neither the tab's
+  // own save nor a peer sync can carry it, and it never counts as a change. It lasts until the
+  // browser says the print is over.
+  const PRINT_PICK = 'print-pick';
+
+  function flagPrintPick(article) {
+    const words = (article.getAttribute('ephemeral') || '').split(/\s+/).filter(Boolean);
+    if (!words.includes(PRINT_PICK)) article.setAttribute('ephemeral', [...words, PRINT_PICK].join(' '));
+  }
+
+  function unflagPrintPick(article) {
+    const words = (article.getAttribute('ephemeral') || '').split(/\s+/).filter(Boolean).filter(w => w !== PRINT_PICK);
+    if (words.length) article.setAttribute('ephemeral', words.join(' '));
+    else article.removeAttribute('ephemeral');
+  }
+
+  function clearPrintPick() {
+    for (const article of Entries.all()) unflagPrintPick(article);
+  }
+
+  function printSelected() {
+    pruneSelection();
+    const ids = new Set(selected);
+    const articles = Entries.all().filter(a => ids.has(a.dataset.id));
+    if (!articles.length) {
+      note('Select at least one entry before printing.');
+      return { ok: false, code: 'empty' };
+    }
+    closePickExport();
+    for (const article of articles) flagPrintPick(article);
+    try {
+      window.print();
+    } catch {
+      clearPrintPick();
+      return { ok: false, code: 'unavailable' };
+    }
+    return { ok: true, count: articles.length };
+  }
+
+  const Selected = {
+    ids: () => [...selected],
+    scope: pickScope,
+    records: selectedRecords,
+    json: () => selectedJSON(selectedRecords()),
+    copy: () => {
+      const records = selectedRecords();
+      const html = selectedCopy(records);
+      return verifySelectedCopy(html, records).ok ? html : '';
+    },
+    verify: verifySelectedCopy,
+    print: printSelected
+  };
+
+  $('#pickAll').addEventListener('click', pickAllFiltered);
+  $('#pickClear').addEventListener('click', () => { selected.clear(); paintPick(); });
+  $('#pickDone').addEventListener('click', () => setPickScope(''));
+  $('#trashPick').addEventListener('click', () => setPickScope(PICK_TRASH));
+  $('#pickExport').addEventListener('click', () => {
+    if (pickPop.classList.contains('show')) closePickExport(); else openPickExport();
+  });
+  $('#pickCancel').addEventListener('click', () => closePickExport());
+  $('#pickJson').addEventListener('click', () => exportSelected('json'));
+  $('#pickHtml').addEventListener('click', () => exportSelected('html'));
+  $('#pickPrint').addEventListener('click', () => printSelected());
+  window.addEventListener('afterprint', clearPrintPick);
+  document.addEventListener('mousedown', e => {
+    if (pickPop && pickPop.classList.contains('show') && !pickPop.contains(e.target) && !e.target.closest('#pickExport')) closePickExport();
+  }, true);
+
+  /* ---------------------------------------------------------------- archiving a year: the exact reviewed records are
+     copied out first, and they leave this journal only after the file the person kept matches that review and this
+     browser has written the move down. Nothing is removed by a download. */
+  const YearArchive = (() => {
+    const yearOf = record => (isDay(record.date) ? record.date.slice(0, 4) : '');
+    const allRecords = () => Entries.all().map(a => Entries.record(a));
+    const years = () => [...new Set(allRecords().map(yearOf).filter(Boolean))].sort((a, b) => b.localeCompare(a));
+    const recordsFor = year => allRecords().filter(record => yearOf(record) === year);
+    const undated = () => allRecords().filter(record => !isDay(record.date)).length;
+    const countsOf = records => ({
+      live: records.filter(record => !record.deletedAt).length,
+      trash: records.filter(record => !!record.deletedAt).length,
+      blank: records.filter(record => !record.body.trim()).length
+    });
+    const many = (n, one, more) => `${n} ${n === 1 ? one : more}`;
+    function digestOf(text) {
+      const bytes = new TextEncoder().encode(String(text ?? ''));
+      let hash = 0x811c9dc5;
+      for (const byte of bytes) hash = Math.imul(hash ^ byte, 0x01000193) >>> 0;
+      return `journal-archive-1:${hash.toString(16).padStart(8, '0')}:${bytes.length.toString(16)}`;
+    }
+    // The exact set, both ways: no id missing, no id extra, no field different, no id twice.
+    function sameSet(reviewed, current) {
+      const byId = new Map();
+      for (const record of current) {
+        if (!record.id || byId.has(record.id)) return { ok: false, code: 'duplicate' };
+        byId.set(record.id, record);
+      }
+      if (byId.size !== reviewed.length) return { ok: false, code: 'count' };
+      for (const record of reviewed) {
+        const now = byId.get(record.id);
+        if (!now) return { ok: false, code: 'missing' };
+        if (!sameRecord(now, record)) return { ok: false, code: 'changed' };
+      }
+      return { ok: true };
+    }
+    // Pictures kept in this journal's own files: a copy keeps their links, so the year may be copied but not moved.
+    async function mediaOf(records) {
+      let parsed = true;
+      try { await Reader.ready(); } catch { parsed = false; }
+      const found = [];
+      for (const record of records) {
+        const hrefs = parsed
+          ? (await Reader.images(record.body)).map(image => image.href)
+          : (String(record.body).match(/!\[[^\]]*\]\(([^)]*)\)/g) || []).map(match => match.replace(/^!\[[^\]]*\]\(/, '').replace(/\)$/, '').trim().replace(/^<|>$/g, ''));
+        for (const href of hrefs) {
+          let resolved;
+          try { resolved = new URL(String(href || '').trim(), location.href); } catch { continue; }
+          if (resolved.origin === location.origin) { found.push(record.id); break; }
+        }
+      }
+      return found;
+    }
+
+    let review = null;
+    let media = [];
+    let mediaYear = null;
+    let barEl = null;
+
+    function bar() {
+      if (barEl && barEl.isConnected) return barEl;
+      barEl = document.createElement('div');
+      barEl.className = 'archive-pending';
+      barEl.id = 'archivePending';
+      barEl.setAttribute('clay', 'editor-ui');
+      barEl.setAttribute('role', 'status');
+      barEl.setAttribute('aria-live', 'polite');
+      barEl.hidden = true;
+      const msg = document.createElement('span');
+      msg.textContent = 'Archive move awaiting save';
+      const detail = document.createElement('small');
+      detail.textContent = 'The entries stay out of this page once the file has saved them.';
+      barEl.append(msg, detail);
+      $('#writer').before(barEl);
+      return barEl;
+    }
+
+    function paintBar() {
+      if (!booted || typeof document === 'undefined') return;
+      bar().hidden = ArchiveMoves.awaiting() === 0;
+    }
+
+    function paintSelect() {
+      const select = $('#yearPick');
+      if (!select) return;
+      const list = years();
+      const want = list.join('|');
+      if (select.dataset.years !== want) {
+        select.textContent = '';
+        for (const year of list) {
+          const option = document.createElement('option');
+          option.value = year;
+          option.textContent = year;
+          select.append(option);
+        }
+        select.dataset.years = want;
+      }
+      if (list.length && !list.includes(select.value)) select.value = list[0];
+    }
+
+    const chosen = () => $('#yearPick')?.value || '';
+
+    function paint() {
+      if (!$('#yearPop')) return;
+      paintSelect();
+      const year = chosen();
+      const records = year ? recordsFor(year) : [];
+      const counts = countsOf(records);
+      const left = undated();
+      $('#yearCounts').textContent = !year
+        ? 'No entry in this journal has a date.'
+        : `${many(records.length, 'entry', 'entries')} dated ${year}: ${counts.live} live, ${counts.trash} in Trash, ${counts.blank} blank.` +
+          (left ? ` ${many(left, 'entry has', 'entries have')} no date or an unreadable date and ${left === 1 ? 'stays' : 'stay'} here.` : '');
+      const blocked = !!year && mediaYear === year && media.length > 0;
+      $('#yearNote').hidden = !blocked;
+      $('#yearNote').textContent = blocked
+        ? `Finish moving is off for ${year}: ${many(media.length, 'entry links pictures', 'entries link pictures')} kept in this journal's own files, and a copy cannot carry them yet. Archive the year to keep a copy.`
+        : '';
+      $('#yearDownload').disabled = !records.length;
+      $('#yearFinish').disabled = !review || review.year !== year || blocked || !records.length;
+    }
+
+    async function plan(year) {
+      const records = recordsFor(year);
+      media = await mediaOf(records);
+      mediaYear = year;
+      paint();
+      return { year, records, counts: countsOf(records), media };
+    }
+
+    function download(name, text, type) {
+      try {
+        const url = URL.createObjectURL(new Blob([text], { type }));
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = name;
+        link.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        return true;
+      } catch { return false; }
+    }
+
+    function archive(year) {
+      const at = String(year || chosen() || '');
+      const records = recordsFor(at);
+      if (!records.length) {
+        note(at ? `No entry is dated ${at}, so there is nothing to archive.` : 'No entry in this journal has a date.');
+        return { ok: false, code: 'empty' };
+      }
+      const json = selectedJSON(records);
+      const html = selectedCopy(records);
+      const check = verifySelectedCopy(html, records);
+      if (!check.ok) {
+        note(check.message);
+        return { ok: false, code: 'unverifiable' };
+      }
+      const day = ymd(new Date());
+      const copied = download(`journal-year-${at}-${day}.htmlclay`, html, 'text/html');
+      const backed = copied && download(`journal-year-${at}-${day}.json`, json, 'application/json');
+      if (!backed) {
+        review = null;
+        paint();
+        note('The archive could not be downloaded, so nothing left this journal.');
+        return { ok: false, code: 'download-failed' };
+      }
+      review = { year: at, records };
+      paint();
+      note(`${many(records.length, 'entry', 'entries')} from ${at} downloading as a .htmlclay copy and a JSON backup. Nothing has left this journal.`);
+      return { ok: true, year: at, count: records.length };
+    }
+
+    function close() {
+      if ($('#yearPop')) $('#yearPop').classList.remove('show');
+    }
+
+    async function finish(file) {
+      if (!canWrite()) { note('Moving a year happens while editing.'); return { ok: false, code: 'read-only' }; }
+      const planned = review;
+      if (!planned) { note('Archive the year first, then pick the file you kept.'); return { ok: false, code: 'no-review' }; }
+      if (Editor.composing()) { note('Finish the word you are writing before moving a year.'); return { ok: false, code: 'writing' }; }
+      let text;
+      try { text = await file.text(); } catch { text = null; }
+      if (text == null) {
+        note('That file could not be read, so nothing left this journal.');
+        return { ok: false, code: 'unreadable' };
+      }
+      const inFile = sameSet(planned.records, readFieldPad(text));
+      if (!inFile.ok) {
+        note(`That file does not hold exactly the ${many(planned.records.length, 'entry', 'entries')} reviewed from ${planned.year}, so nothing left this journal.`);
+        return { ok: false, code: 'wrong-archive' };
+      }
+      if (!sameSet(planned.records, recordsFor(planned.year)).ok) {
+        review = null;
+        paint();
+        note(`${planned.year} changed since the review, so nothing left this journal. Archive the year again.`);
+        return { ok: false, code: 'changed' };
+      }
+      const bound = await mediaOf(planned.records);
+      if (bound.length) {
+        note(`Finish moving is off for ${planned.year}: ${many(bound.length, 'entry links pictures', 'entries link pictures')} kept in this journal's own files, so nothing left this journal.`);
+        return { ok: false, code: 'media' };
+      }
+      const archiveDigest = digestOf(text);
+      const moveId = `year-${planned.year}-${window.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`}`;
+      const stored = await ArchiveMoves.stage(moveId, { year: planned.year, entries: planned.records, archiveDigest });
+      if (!stored) {
+        ArchiveMoves.discard(moveId);
+        review = null;
+        paint();
+        note('This browser could not keep a recovery copy, so nothing left this journal. Archive the year to keep another copy.');
+        return { ok: false, code: 'unstored', copyOnly: true };
+      }
+      // The await above let the page change: every record and the mode are checked again, and the
+      // removal below runs in one task with no await of its own.
+      if (!canWrite() || Editor.composing() || !sameSet(planned.records, recordsFor(planned.year)).ok) {
+        ArchiveMoves.discard(moveId);
+        review = null;
+        paint();
+        note(`This journal changed while the archive was being kept, so nothing left it. Archive ${planned.year} again.`);
+        return { ok: false, code: 'changed-after-staging' };
+      }
+      const openId = currentEntry();
+      for (const record of planned.records) {
+        const article = Entries.byId(record.id);
+        if (!article) continue;
+        dropPick(record.id);
+        article.remove();
+      }
+      refreshTrash();
+      if (openId && !Entries.byId(openId)) {
+        const r = route();
+        if (r) r.set({ entry: null }, { replace: true });
+      }
+      review = null;
+      close();
+      refreshSap();
+      paintBar();
+      try { window.clay.save.soon(); } catch {}
+      note(`${many(planned.records.length, 'entry', 'entries')} from ${planned.year} left this journal. The move is done when the save finishes.`);
+      return { ok: true, year: planned.year, count: planned.records.length, moveId, archiveDigest };
+    }
+
+    function open() {
+      if (!canWrite()) { note('Archiving a year happens while editing.'); return { ok: false, code: 'read-only' }; }
+      if (!years().length) { note('No entry in this journal has a date, so no year can be archived.'); return { ok: false, code: 'empty' }; }
+      review = null;
+      paint();
+      $('#yearPop').classList.add('show');
+      placePopover($('#yearPop'), $('#menuBtn'));
+      plan(chosen()).catch(() => {});
+      (!$('#yearDownload').disabled ? $('#yearDownload') : $('#yearCancel')).focus();
+      return { ok: true };
+    }
+
+    $('#yearCancel').addEventListener('click', close);
+    $('#yearDownload').addEventListener('click', () => { archive(); });
+    $('#yearFinish').addEventListener('click', () => {
+      if (!review) { note('Archive the year first, then pick the file you kept.'); return; }
+      $('#archiveInput').click();
+    });
+    $('#yearPick').addEventListener('change', () => {
+      review = null;
+      paint();
+      if (chosen()) plan(chosen()).catch(() => {});
+    });
+    $('#archiveInput').addEventListener('change', e => {
+      const files = [...e.target.files];
+      e.target.value = '';
+      if (files[0]) finish(files[0]).catch(() => {});
+    });
+    document.addEventListener('mousedown', e => {
+      const pop = $('#yearPop');
+      if (pop && pop.classList.contains('show') && !pop.contains(e.target) && !e.target.closest('[data-menu="archive"]')) close();
+    }, true);
+
+    function start() {
+      ArchiveMoves.listen(paintBar);
+      Promise.resolve(window.clay && window.clay.ready).catch(() => {}).then(() => ArchiveMoves.start()).then(paintBar, () => {});
+    }
+
+    return {
+      years,
+      plan,
+      archive,
+      finish,
+      open,
+      close,
+      start,
+      awaiting: () => ArchiveMoves.awaiting(),
+      reviewed: () => (review ? { year: review.year, entries: review.records } : null)
+    };
+  })();
 
   const importPop = $('#importPop');
   let importRecords = null, importAnchor = null;
 
-  function openImportPopover(records, anchor) {
-    closeDeletePopover();
-    closeImportPopover();
-    importRecords = records;
-    importAnchor = anchor || $('#menuBtn');
-    const plan = planFieldPad(records);
-    const fresh = plan.add.length - plan.conflicts;
-    const trashed = plan.add.filter(r => r.deletedAt).length;
-    const parts = [`${fresh} new`, `${plan.same} already here`, `${plan.conflicts} with a different text`];
-    if (plan.restore.length) parts.push(`${plan.restore.length} back from Trash`);
-    $('#importPopWhat').textContent = `${parts.join(', ')}.${trashed ? ` ${trashed} of the new ones go to Trash, as in the file.` : ''} The file you picked is not changed.`;
-    importPop.classList.add('show');
-    placePopover(importPop, importAnchor);
-    $('#importConfirm').focus();
+  /* ---------------------------------------------------------------- one import path: read every file, plan it off the
+     document, show what would change, and write only on a second click. Nothing before that
+     click touches a record, a timestamp, the draft or a save. */
+
+  const kindOfFile = file => {
+    const name = String(file?.name || '');
+    const type = String(file?.type || '');
+    if (/\.json$/i.test(name) || /json/i.test(type)) return 'json';
+    if (/\.html?$/i.test(name) || /html/i.test(type)) return 'html';
+    if (/\.(md|markdown|txt)$/i.test(name) || /^text\//i.test(type)) return 'markdown';
+    return null;
+  };
+  const byteSize = text => new TextEncoder().encode(String(text ?? '')).byteLength;
+
+  async function hostLimit({ fresh = false } = {}) {
+    try {
+      if (!window.clay?.save?.limits) return null;
+      const limits = await window.clay.save.limits(fresh ? { fresh: true } : undefined);
+      return Number.isSafeInteger(limits?.maxBytes) && limits.maxBytes > 0 ? limits.maxBytes : null;
+    } catch { return null; }
   }
+
+  // `clay.save.inspect` measures candidate bytes without capturing, sending or claiming a save.
+  async function measureHTML(html, limit) {
+    try {
+      if (window.clay?.save?.inspect) return await window.clay.save.inspect(html);
+    } catch {}
+    return { bytes: byteSize(html), maxBytes: limit, state: 'unknown' };
+  }
+
+  const captureBaseline = () => window.clay.getHTML({ flushUndo: false });
+
+  // The records a plain append would add, in the order they arrived, and the same list with
+  // fresh ids for the rows that collide. Identical rows add nothing.
+  function appendOf(plan, records, keepBoth) {
+    const collides = new Set(plan.conflicts.map(c => c.row));
+    const kept = keepBoth ? plan.keepBoth() : null;
+    const out = [];
+    records.forEach((record, row) => {
+      if (collides.has(row)) { if (kept) out.push(kept[row]); return; }
+      if (!plan.identical.includes(record)) out.push(record);
+    });
+    return out;
+  }
+
+  // The bytes this journal would save with these records already in it, measured on a detached
+  // clone. The articles are built off the document and never enter it here.
+  function candidateWith(records) {
+    const articles = records.map(record => recordArticle(record, document));
+    const html = window.clay.getHTML({
+      transform: root => {
+        const holder = root.querySelector('#entries');
+        if (holder) for (const article of articles) holder.append(article);
+      },
+      flushUndo: false
+    });
+    return { articles, html, expected: [...Entries.all().map(a => Entries.record(a)), ...records] };
+  }
+
+  function sizeText(size) {
+    if (!size) return 'Measuring the file\u2026';
+    const over = size.maxBytes != null && size.bytes > size.maxBytes;
+    const limit = size.maxBytes == null
+      ? 'Host limit unavailable.'
+      : `${over ? 'over' : 'of'} ${size.maxBytes} bytes this host will save.`;
+    return `Projected ${size.bytes} bytes; ${limit}${over ? ' Nothing can be imported at this size.' : ''} Linked pictures are not included.`;
+  }
+
+  function renderConflicts(pending) {
+    const box = $('#importPopDiff');
+    box.textContent = '';
+    const shown = pending.plan.conflicts.slice(0, 4);
+    for (const { row, record } of shown) {
+      const article = Entries.byId(record.id);
+      const diff = document.createElement('div');
+      diff.className = 'diff';
+      const label = document.createElement('small');
+      label.textContent = `Row ${row + 1}: \u201c${record.id}\u201d is already here with different fields.`;
+      const mine = document.createElement('textarea');
+      mine.readOnly = true;
+      mine.setAttribute('aria-label', 'In this journal');
+      mine.value = article ? Entries.body(article) : '';
+      const theirs = document.createElement('textarea');
+      theirs.readOnly = true;
+      theirs.setAttribute('aria-label', 'In the file');
+      theirs.value = record.body;
+      diff.append(label, mine, theirs);
+      box.append(diff);
+    }
+    if (pending.plan.conflicts.length > shown.length) {
+      const more = document.createElement('small');
+      more.textContent = `And ${pending.plan.conflicts.length - shown.length} more.`;
+      box.append(more);
+    }
+    box.hidden = pending.plan.conflicts.length === 0;
+  }
+
+  function showImportActions(pending) {
+    const conflicts = pending.plan.conflicts.length > 0;
+    $('#importCopy').hidden = !pending.copy;
+    $('#importKeepBoth').hidden = !conflicts;
+    $('#importConfirm').disabled = conflicts;
+    $('#importCopy').classList.toggle('confirm', !!pending.copy);
+    $('#importConfirm').classList.toggle('confirm', !pending.copy);
+  }
+
+  function renderPreview(pending) {
+    const { plan, records, sources } = pending;
+    const parts = [`${plan.fresh.length} new`, `${plan.identical.length} already here`, `${plan.conflicts.length} with a different text`];
+    const trashed = records.filter(record => record.deletedAt && !plan.identical.includes(record)).length;
+    const days = records.map(record => record.date).filter(isDay).sort();
+    $('#importPopTitle').textContent = sources.length > 1 ? `Import ${sources.length} files?` : 'Import this file?';
+    $('#importPopWhat').textContent = `${sources.map(source => source.name).join(', ')}. ${parts.join(', ')}.` +
+      `${trashed ? ` ${trashed} of the new ones go to Trash, as in the file.` : ''}` +
+      `${days.length ? ` Dates ${days[0]} to ${days[days.length - 1]}.` : ''} The file you picked is not changed.`;
+    $('#importPopSize').textContent = `${sizeText(pending.size)}${pending.copy ? ` A new copy would be ${byteSize(pending.copy)} bytes.` : ''}`;
+    renderConflicts(pending);
+    showImportActions(pending);
+  }
+
   function closeImportPopover({ refocus = false } = {}) {
     if (!importRecords) return;
     importPop.classList.remove('show');
@@ -3174,12 +4507,193 @@ const words = text.trim().split(/\s+/).length;
     importRecords = null; importAnchor = null;
     if (refocus && anchor && anchor.isConnected) anchor.focus();
   }
+
+  function openImportPopover(pending, anchor) {
+    closeDeletePopover();
+    closeImportPopover();
+    importRecords = pending;
+    importAnchor = anchor || $('#menuBtn');
+    renderPreview(pending);
+    importPop.classList.add('show');
+    placePopover(importPop, importAnchor);
+    const target = !$('#importCopy').hidden ? $('#importCopy')
+      : !$('#importConfirm').disabled ? $('#importConfirm')
+        : (!$('#importKeepBoth').hidden ? $('#importKeepBoth') : $('#importCancel'));
+    target.focus();
+  }
+
+  // Every way records come in lands here: parse all of it first, plan off the document, and show
+  // the preview. A refusal at any point leaves the journal, the draft and the saved bytes alone.
+  async function offerImport(sources, anchor = $('#menuBtn')) {
+    if (!canWrite()) return { ok: false, code: 'read-only' };
+    const total = sources.reduce((n, source) => n + byteSize(source.text), 0);
+    if (total > BACKUP_MAX_BYTES) {
+      note('That selection is larger than 64 MiB, so nothing from it was read.');
+      return { ok: false, code: 'too-large' };
+    }
+    const records = [];
+    for (const source of sources) {
+      if (source.kind === 'json') {
+        const read = readBackup(source.text);
+        if (!read.ok) { note(`${source.name}: ${read.message}`); return { ok: false, code: read.code, row: read.row }; }
+        records.push(...read.entries);
+      } else if (source.kind === 'html') {
+        records.push(...readFieldPad(source.text));
+      } else if (source.kind === 'markdown') {
+        const stamp = nowISO();
+        for (const entry of parseMarkdownFile(source.text)) {
+          records.push({ id: '', date: entry.date, created: stamp, updated: stamp, deletedAt: '', pinned: '', body: entry.body });
+        }
+      } else {
+        note(`${source.name} is not a file this journal reads, so nothing was imported.`);
+        return { ok: false, code: 'unknown-type' };
+      }
+    }
+    if (records.length > BACKUP_MAX_RECORDS) {
+      note(`That selection has ${records.length} entries; this journal reads at most ${BACKUP_MAX_RECORDS}.`);
+      return { ok: false, code: 'too-many' };
+    }
+    const ids = new Set();
+    for (let row = 0; row < records.length; row += 1) {
+      const record = records[row];
+      if (!record.id) record.id = newId();
+      if (ids.has(record.id)) {
+        note(`More than one row has the id \u201c${record.id}\u201d, so nothing was imported.`);
+        return { ok: false, code: 'duplicate-id', row };
+      }
+      ids.add(record.id);
+      if (!isDay(record.date)) {
+        note(`\u201c${record.date || 'That'}\u201d is not a real date, so nothing was imported.`);
+        return { ok: false, code: 'bad-date', row };
+      }
+      if (record.pinned !== '' && record.pinned !== 'false' && record.pinned !== 'true') {
+        note(`Row ${row + 1} has \u201c${record.pinned}\u201d, which is not a pin value.`);
+        return { ok: false, code: 'bad-pin', row };
+      }
+    }
+    if (!records.length) { note('That file has no entries in it.'); return { ok: false, code: 'empty' }; }
+
+    const limit = await hostLimit();
+    if (!canWrite()) return { ok: false, code: 'read-only' };
+    const plan = Backup.plan(records);
+    const pending = { sources, records, plan, baseline: captureBaseline(), size: null, copy: '' };
+    const attempt = candidateWith(appendOf(plan, records, false));
+    const check = verifyRecords(attempt.html, attempt.expected);
+    if (!check.ok) {
+      note(check.message || 'That import would change when the journal is written, so nothing was imported.');
+      return { ok: false, code: 'unrepresentable', row: check.row };
+    }
+    if (sources.every(source => source.kind === 'json')) {
+      const copy = newCopyHTML(pending.baseline, records);
+      const copyCheck = copy
+        ? verifyRecords(copy, records)
+        : { ok: false, row: null, message: 'This journal has no empty entry to build a copy from.' };
+      if (!copyCheck.ok) { note(copyCheck.message); return { ok: false, code: 'unrepresentable', row: copyCheck.row }; }
+      pending.copy = copy;
+    }
+    openImportPopover(pending, anchor);
+    pending.size = await measureHTML(attempt.html, limit);
+    if (importRecords !== pending) return { ok: true, pending };
+    renderPreview(pending);
+    return { ok: true, pending };
+  }
+
+  function downloadNewCopy(pending) {
+    if (!pending.copy) return;
+    const bytes = byteSize(pending.copy);
+    const limit = pending.size?.maxBytes;
+    const url = URL.createObjectURL(new Blob([pending.copy], { type: 'text/html' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `journal-copy-${ymd(new Date())}.html`;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    closeImportPopover();
+    note(`A new journal copy is downloading.${limit != null && bytes > limit ? ` ${bytes} bytes is more than this host will save.` : ''}`);
+  }
+
+  // At the click: fresh limit, fresh baseline, a new plan, the candidate built again from the
+  // records, and only then one synchronous insertion. Anything that moved in between is a
+  // refusal, and a changed journal means looking at a new preview.
+  async function confirmImport(kind) {
+    const pending = importRecords;
+    if (!pending) return { ok: false, code: 'closed' };
+    const refuse = code => { note(code === 'read-only' ? 'Imports only happen while editing.' : 'Finish the word you are writing before importing.'); return { ok: false, code }; };
+    if (!canWrite()) return refuse('read-only');
+    if (Editor.composing()) return refuse('writing');
+    if (kind === 'copy') { downloadNewCopy(pending); return { ok: true }; }
+
+    const limit = await hostLimit({ fresh: true });
+    if (importRecords !== pending) return { ok: false, code: 'closed' };
+    if (!canWrite()) return refuse('read-only');
+    if (Editor.composing()) return refuse('writing');
+    const anchor = importAnchor;
+    if (captureBaseline() !== pending.baseline) {
+      const again = Backup.plan(pending.records);
+      if (!again.conflicts.length && !appendOf(again, pending.records, kind === 'keep').length) {
+        closeImportPopover();
+        note('Every entry in that file is already here.');
+        return { ok: true, added: 0 };
+      }
+      note('This journal changed since the preview. Look at it again, then import.');
+      closeImportPopover();
+      return offerImport(pending.sources, anchor);
+    }
+
+    const plan = Backup.plan(pending.records);
+    const keepBoth = kind === 'keep';
+    if (plan.conflicts.length && !keepBoth) {
+      pending.plan = plan;
+      renderPreview(pending);
+      note('That entry is already here with different text. Choose Keep both versions, or cancel.');
+      return { ok: false, code: 'conflict' };
+    }
+    const added = appendOf(plan, pending.records, keepBoth);
+    const attempt = candidateWith(added);
+    const check = verifyRecords(attempt.html, attempt.expected);
+    if (!check.ok) {
+      note(check.message || 'That import would change when the journal is written, so nothing was imported.');
+      return { ok: false, code: 'unrepresentable', row: check.row };
+    }
+    const size = await measureHTML(attempt.html, limit);
+    if (importRecords !== pending) return { ok: false, code: 'closed' };
+    if (!canWrite()) return refuse('read-only');
+    if (Editor.composing()) return refuse('writing');
+    if (size.maxBytes != null && size.bytes > size.maxBytes) {
+      pending.size = size;
+      pending.plan = plan;
+      renderPreview(pending);
+      note('This import would make the journal larger than this host can save, so nothing was imported.');
+      return { ok: false, code: 'over-limit', bytes: size.bytes, maxBytes: size.maxBytes };
+    }
+    if (!added.length) {
+      closeImportPopover();
+      note('Every entry in that file is already here.');
+      return { ok: true, added: 0 };
+    }
+
+    const fragment = document.createDocumentFragment();
+    for (const article of attempt.articles) fragment.append(article);
+    store.append(fragment);
+    closeImportPopover();
+    refreshTrash();
+    const newest = added.filter(record => !record.deletedAt).sort((x, y) => sortKey(y).localeCompare(sortKey(x)))[0];
+    if (newest) { setView(''); clearFilters(); openEntry(newest.id); }
+    else note('The new entries from that file are in Trash, as they were in the file.');
+    refreshSap();
+    try { window.clay.save.soon(); } catch {}
+    return { ok: true, added: added.length };
+  }
+
   $('#importCancel').addEventListener('click', () => closeImportPopover({ refocus: true }));
-  $('#importConfirm').addEventListener('click', () => { const records = importRecords; closeImportPopover(); applyFieldPad(planFieldPad(records)); });
+  $('#importCopy').addEventListener('click', () => { confirmImport('copy'); });
+  $('#importKeepBoth').addEventListener('click', () => { confirmImport('keep'); });
+  $('#importConfirm').addEventListener('click', () => { confirmImport('add'); });
 
   function requestDeleteOpen() {
-    if (readOnly) return;
-    const open = Editor.current();
+    if (!canWrite()) return;
+    const asked = openEntryId();
+    const open = (asked ? Entries.byId(asked) : null) || Editor.current();
     if (!open) return;
     const id = open.dataset.id;
     const row = $(`#list > .row[data-key="${CSS.escape(id)}"]`);
@@ -3200,6 +4714,7 @@ const words = text.trim().split(/\s+/).length;
   list.addEventListener('click', e => {
     const row = e.target.closest('.row');
     if (!row) return;
+    if (e.target.closest('.pick')) return;
     const id = row.dataset.key;
     const act = e.target.closest('[data-act="delete"]');
     if (act) {
@@ -3217,6 +4732,11 @@ const words = text.trim().split(/\s+/).length;
     }
     if (row.classList.contains('trashed')) return;
     openEntry(id);
+  });
+  list.addEventListener('change', e => {
+    const box = e.target.closest('[data-pick]');
+    if (!box) return;
+    togglePick(box.dataset.pick || (box.closest('.row') || {}).dataset?.key || '');
   });
   list.addEventListener('keydown', e => {
     const row = e.target.closest('.row');
@@ -3308,7 +4828,7 @@ const words = text.trim().split(/\s+/).length;
   });
 
   $('#dateValue').addEventListener('click', () => {
-    if (readOnly) return;
+    if (!canWrite()) return;
     $('#cellDate').classList.add('editing');
     const input = $('#dateInput');
     input.focus();
@@ -3342,7 +4862,7 @@ const words = text.trim().split(/\s+/).length;
   // The pin is one saved attribute on the open entry, set the way the date is: data-updated moves, ClayJS saves once.
   $('#pinBtn').addEventListener('click', () => {
     const a = Editor.current();
-    if (readOnly || !a) return;
+    if (!canWrite() || !a) return;
     if (a.getAttribute('data-pinned') === 'true') a.removeAttribute('data-pinned');
     else a.setAttribute('data-pinned', 'true');
     touch(a);
@@ -3390,14 +4910,16 @@ const words = text.trim().split(/\s+/).length;
   document.addEventListener('clay:route', () => {
     syncEditor();
     saveUI();
+    PresenceBadges.refresh();
   });
   // A merge can replace the open entry's element; the router re-marks the new one, then the editor follows
-  document.addEventListener('clay:sync-applied', () => setTimeout(() => { syncEditor(); Recovery.rememberAll(); }, 0));
+  document.addEventListener('clay:sync-applied', () => setTimeout(() => { syncEditor(); Recovery.rememberAll(); if (pickOn()) paintPick(); PresenceBadges.refresh(); }, 0));
   document.addEventListener('clay:save-saved', () => { Recovery.afterSave(); });
-  app.addEventListener('sap:views-updated', () => { refreshHighlights(); refreshTrash(); });
+  app.addEventListener('sap:views-updated', () => { refreshHighlights(); refreshTrash(); PresenceBadges.refresh(); });
 
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape' && popFor) { e.preventDefault(); e.stopPropagation(); closeDeletePopover({ refocus: true }); return; }
+    if (e.key === 'Escape' && pickPop.classList.contains('show')) { e.preventDefault(); e.stopPropagation(); closePickExport(); return; }
     if (e.key === 'Escape' && importRecords) { e.preventDefault(); e.stopPropagation(); closeImportPopover({ refocus: true }); return; }
     if (e.key === 'Escape' && !popFor && calendarOpen()) { e.preventDefault(); e.stopPropagation(); closeCalendar(); return; }
     if (e.key === 'Escape' && !popFor && trashView()) { e.preventDefault(); e.stopPropagation(); setView(''); return; }
@@ -3459,34 +4981,32 @@ const words = text.trim().split(/\s+/).length;
       .filter(e => e.body.trim());
   }
 
-  function importMarkdown(text) {
-    if (readOnly) return [];
-    const parsed = parseMarkdownFile(text);
-    const bad = parsed.find(e => !isDay(e.date));
-    if (bad) { note(`“${bad.date}” is not a real date, so nothing was imported.`); return []; }
-    const ids = [];
-    const stamp = nowISO();
-    for (const { date, body } of parsed) {
-      const a = makeEntry(date, stamp, body);
-      store.append(a);
-      ids.push(a.dataset.id);
-    }
-    if (ids.length) clearFilters();
-    return ids;
+  // Markdown is still a readable format, not an exact backup: it prepares a preview like every
+  // other way in, and never writes a record on its own.
+  function importMarkdown(text, name = 'Markdown') {
+    return offerImport([{ name, kind: 'markdown', text: String(text ?? '') }], $('#menuBtn'));
   }
 
   async function importFiles(files) {
-    let first = null;
-    const records = [];
-    let html = false;
-    for (const f of [...files]) {
-      if (/\.html?$/i.test(f.name) || /html/.test(f.type)) { html = true; records.push(...readFieldPad(await f.text())); continue; }
-      if (!/\.(md|markdown|txt)$/i.test(f.name) && !/^text\//.test(f.type)) continue;
-      const ids = importMarkdown(await f.text());
-      first = first || ids[0];
+    if (!canWrite()) return { ok: false, code: 'read-only' };
+    const list = [...files];
+    if (!list.length) return { ok: false, code: 'empty' };
+    const sources = [];
+    const unknown = [];
+    for (const file of list) {
+      const name = String(file.name || 'that file');
+      const kind = kindOfFile(file);
+      if (!kind) { unknown.push(name); continue; }
+      let text;
+      try { text = await file.text(); } catch { unknown.push(name); continue; }
+      sources.push({ name, kind, text });
     }
-    if (first) openEntry(first);
-    if (html) offerFieldPad(records);
+    if (unknown.length) {
+      const one = unknown.length === 1;
+      note(`${unknown.join(', ')} ${one ? 'is not a file' : 'are not files'} this journal reads, so nothing was imported.`);
+      return { ok: false, code: 'unknown-type' };
+    }
+    return offerImport(sources);
   }
 
   const menuPop = $('#menuPop');
@@ -3500,18 +5020,24 @@ const words = text.trim().split(/\s+/).length;
     if (!item) return;
     setMenu(false);
     if (item.dataset.menu === 'export') downloadMarkdown();
+    if (item.dataset.menu === 'select') { if (trashView()) setView(''); setPickScope(PICK_ENTRIES); }
     if (item.dataset.menu === 'import') $('#importInput').click();
+    if (item.dataset.menu === 'archive') YearArchive.open();
     if (item.dataset.menu === 'trash') setView('trash');
   });
-  $('#importInput').addEventListener('change', e => { importFiles(e.target.files); e.target.value = ''; });
+  $('#importInput').addEventListener('change', e => {
+    const files = [...e.target.files];
+    e.target.value = '';
+    importFiles(files);
+  });
   document.addEventListener('mousedown', e => { if (!e.target.closest('#fileMenu')) setMenu(false); });
   document.addEventListener('keydown', e => { if (e.key === 'Escape') setMenu(false); });
   app.addEventListener('dragover', e => { if (e.dataTransfer && [...e.dataTransfer.types].includes('Files')) e.preventDefault(); });
   app.addEventListener('drop', e => {
     if (Pictures.refuseOutside(e)) return;
-    if (readOnly || !e.dataTransfer || !e.dataTransfer.files.length) return;
+    if (!canWrite() || !e.dataTransfer || !e.dataTransfer.files.length) return;
     e.preventDefault();
-    importFiles(e.dataTransfer.files);
+    importFiles([...e.dataTransfer.files]);
   });
   $('#writer').addEventListener('paste', e => { Pictures.claim(e, e.clipboardData?.files); });
   $('#writer').addEventListener('drop', e => { Pictures.claim(e, e.dataTransfer?.files); });
@@ -3519,6 +5045,10 @@ const words = text.trim().split(/\s+/).length;
   /* ---------------------------------------------------------------- boot */
   window.Journal = {
     Entries,
+    Backup,
+    Selected,
+    ArchiveMoves,
+    YearArchive,
     formats,
     summary,
     orderOf,
@@ -3537,19 +5067,22 @@ const words = text.trim().split(/\s+/).length;
       try { tag = (window.Sap && Sap(app).tag) || null; } catch {}
       return { q: $('#q').value.trim(), tag, openId: currentEntry() };
     },
-    get editor() { return readOnly ? null : $('#writer textarea'); },
-    get recovery() { return readOnly ? null : Recovery.surface(); },
-    get pictures() { return readOnly ? null : { list: () => Links.list() }; },
-    get readOnly() { return readOnly; },
+    get editor() { return reading() ? null : $('#writer textarea'); },
+    get recovery() { return reading() ? null : Recovery.surface(); },
+    get pictures() { return reading() ? null : { list: () => Links.list() }; },
+    get readOnly() { return reading(); },
     get pane() { return currentEntry() ? 'sheet' : 'list'; }
   };
 
   // Everything here writes per-tab chrome inside freeze scratchpads, so it waits until ClayJS has captured them.
   const PRIVACY_KEY = `fieldpad.privacy-dismissed:${location.host}${location.pathname}`;
-  function boot(editable) {
+
+  // The reader's half of the page: subscriptions, the projections and navigation, and nothing that
+  // writes. It is set up once, whichever road asks for it first, and a session that needs it gets it
+  // without waiting for the loader's own ready promise.
+  function bootReaderOnce() {
     if (booted) return;
     booted = true;
-    readOnly = !editable;
     refreshTrash();
     refreshToday();
     $$('[data-mod]').forEach(k => { k.textContent = MOD + k.dataset.mod; });
@@ -3561,25 +5094,8 @@ const words = text.trim().split(/\s+/).length;
       banner.remove();
       try { localStorage.setItem(PRIVACY_KEY, '1'); } catch {}
     });
-    if (editable) {
-      if (typeof window.clay.bindText !== 'function') {
-        readOnly = true;
-        const style = document.createElement('style');
-        style.setAttribute('clay', 'editor-ui');
-        style.textContent = '.writer{display:none!important}.reader{display:block}';
-        document.head.append(style);
-        note('This journal needs a newer ClayJS to edit.');
-      } else {
-        Editor.start();
-        const assets = window.clay.assets;
-        if (assets) assets.load('overtype').then(Editor.enhance, () => note('Formatting tools could not load. Your writing still saves.'));
-        else note('Formatting tools could not load. Your writing still saves.');
-      }
-    }
-    if (!readOnly) Recovery.start();
-    if (!readOnly) Pictures.start();
-    if (!readOnly) Strip.start();
-    if (readOnly) Reader.start();
+    Reader.start();
+    YearArchive.start();
     const r = route();
     const autoOpen = () => {
       const asked = r && r.get().entry;
@@ -3595,17 +5111,171 @@ const words = text.trim().split(/\s+/).length;
     if (autoOpen()) return;
     syncEditor();
   }
+
+  // Preparing builds the field disabled and selects the record the page already shows; nothing here
+  // or at the commit creates an entry, moves a timestamp or cleans a blank one.
+  function prepareEditor() {
+    Editor.start();
+    Editor.disable();
+    Editor.bind();
+    RecordPresence.start($('#writer'));
+  }
+
+  // An edit plan that is still landing provides bind-text after this boot's own entry committed:
+  // the field waits disabled, then binds and selects the record the page shows.
+  function bindWhenReady(s) {
+    if (Editor.bind()) return true;
+    const ready = window.clay && window.clay.ready;
+    Promise.resolve(ready).catch(() => {}).then(() => {
+      if (session !== s || !s.enabled || !s.isCurrent()) return;
+      if (!Editor.bind()) {
+        leaveEditForReader(s);
+        return;
+      }
+      Editor.enable();
+      syncEditor();
+      enhanceEditor(s);
+    });
+    return false;
+  }
+
+  // A page whose editor never bound cannot edit: the session ends so the page reads, the reader
+  // takes the sheet in the writer's place, and the note stays. The style that swaps them is
+  // editor UI, so it never saves.
+  function leaveEditForReader(s) {
+    if (session !== s) return;
+    disposeEditSession(s);
+    const style = document.createElement('style');
+    style.setAttribute('clay', 'editor-ui');
+    style.textContent = '.writer{display:none!important}.reader{display:block}';
+    document.head.append(style);
+    note('This journal needs a newer ClayJS to edit.');
+  }
+
+  function enhanceEditor(s) {
+    const assets = window.clay && window.clay.assets;
+    const failed = () => { if (session === s) note('Formatting tools could not load. Your writing still saves.'); };
+    if (!assets) { failed(); return; }
+    assets.load('overtype').then(asset => {
+      // An enhancement that resolves after the session ended installs nothing.
+      if (session !== s || !s.enabled || !s.isCurrent()) return;
+      Editor.enhance(asset);
+    }, failed);
+  }
+
+  function onSession(s, target, type, handler, options) {
+    target.addEventListener(type, handler, options);
+    s.listeners.push([target, type, handler, options]);
+  }
+
+  function openEditSession(context) {
+    prepareEditor();
+    const s = {
+      isCurrent: () => (context && typeof context.isCurrent === 'function' ? context.isCurrent() : true),
+      listeners: [],
+      enabled: false,
+    };
+    session = s;
+    syncEditor();
+    return {
+      enable: () => enableEditSession(s),
+      quiesce: () => quiesceEditSession(s),
+      resume: () => resumeEditSession(s),
+      dispose: () => disposeEditSession(s),
+    };
+  }
+
+  function enableEditSession(s) {
+    if (session !== s) return;
+    s.enabled = true;
+    Editor.enable();
+    // The write half needs the host's plugin surfaces: the recovery store, the conflict
+    // resolver and the upload task all arrive with the plugins, after an explicit initial
+    // edit's own session is enabled. So the session takes them once the host is ready; the
+    // field stays disabled until the binding exists, so no keystroke can land before them.
+    Promise.resolve(window.clay && window.clay.ready).catch(() => {}).then(() => {
+      if (session !== s || !s.enabled || !s.isCurrent()) return;
+      Recovery.start();
+      Pictures.start();
+    });
+    Strip.start((target, type, handler, options) => onSession(s, target, type, handler, options));
+    syncEditor();
+    if (bindWhenReady(s)) enhanceEditor(s);
+  }
+
+  // A refused exit keeps every character: composition is not ended on the person's behalf, the
+  // record keeps what it already holds, and only text the record may take is flushed.
+  async function quiesceEditSession(s) {
+    if (session !== s) return { ok: true };
+    if (Editor.composing()) return { ok: false, code: 'pending-input' };
+    if (pendingRecovery()) return { ok: false, code: 'pending-recovery' };
+    if (!Editor.represented()) return { ok: false, code: 'pending-input' };
+    Editor.disable();
+    // Every eligible keystroke is already in the record, so the only text quiesce flushes is
+    // this browser's own recovery copy; the exit's barrier writes the page's bytes.
+    await Recovery.flush();
+    return { ok: true };
+  }
+
+  function resumeEditSession(s) {
+    if (session !== s) return;
+    Editor.enable();
+  }
+
+  function disposeEditSession(s) {
+    if (session !== s) return;
+    for (const [target, type, handler, options] of s.listeners.reverse()) target.removeEventListener(type, handler, options);
+    s.listeners.length = 0;
+    s.enabled = false;
+    Editor.dispose();
+    RecordPresence.reconcile();
+    PresenceBadges.clear();
+    Recovery.dispose();
+    session = null;
+    clearNote();
+    syncEditor();
+  }
+
+  // A conflict this tab staged, or an entry a peer deleted while it was open, is text this browser
+  // holds and the file does not: an exit waits until the person has answered it.
+  const pendingRecovery = () => (noteEl && noteEl.dataset.pending === 'peer-delete') || Recovery.pendingConflict();
+
+  const MODE_PARTICIPANT = {
+    id: 'journal-editor',
+    // The session goes in before the reader boots, so a page preparing an editor paints its field
+    // and never a reader's copy of the entry it is about to edit.
+    async prepare(context) {
+      const lease = openEditSession(context);
+      bootReaderOnce();
+      return lease;
+    },
+  };
+
+  // The preboot queue the dispatcher drains, taken at DOMContentLoaded: an explicit initial edit
+  // prepares this editor before any input arrives, and a reader holds the registration for its
+  // first live switch.
+  function registerModeParticipant() {
+    const clay = window.clay;
+    if (!clay) return;
+    if (!Array.isArray(clay.modeParticipants)) {
+      try { Object.defineProperty(clay, 'modeParticipants', { value: [], writable: true, configurable: true }); }
+      catch { clay.modeParticipants = []; }
+    }
+    if (!clay.modeParticipants.includes(MODE_PARTICIPANT)) clay.modeParticipants.push(MODE_PARTICIPANT);
+  }
+
   // Edit or read is ClayJS's answer, however long it takes. Without ClayJS every entry shows as plain text.
   document.addEventListener('DOMContentLoaded', () => {
     const clay = window.clay;
     if (!clay || !clay.ready || typeof clay.ready.then !== 'function') {
-      readOnly = true;
       document.documentElement.classList.add('no-clay');
       return;
     }
+    // The registration goes in before anything boots: the dispatcher drains this queue for an
+    // explicit initial edit, and a reader keeps it for its first live switch.
+    registerModeParticipant();
     const router = clay.loaded && clay.loaded.router;
-    const decide = () => boot(clay.isEditMode !== false);
-    clay.ready.then(() => Promise.resolve(router).catch(() => {}), () => {}).then(decide);
+    clay.ready.then(() => Promise.resolve(router).catch(() => {}), () => {}).then(bootReaderOnce);
   });
 
 })();

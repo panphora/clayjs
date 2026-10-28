@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" clay-mode-switch="live">
 <head>
 <meta charset="utf-8">
 <meta name="hyper-source" content="https://hyperclay.com/templates/page/hosted/latest.html">
@@ -18,14 +18,14 @@
 <p data-id="intro">Relay went to every workspace on October 6. Two weeks in, activation is back to where it was before the September dip, and invites are the reason. This page is where we decide what ships next.</p>
 <aside data-id="decision" class="page-callout"><strong>Decision:</strong> keep the new invite flow and drop the old one on November 3.</aside>
 <h2 data-id="h-numbers">Activation by week</h2>
-<table data-id="weeks">
-<thead><tr><th data-col="week" data-kind="date">Week</th><th data-col="rate" data-kind="number">Activation %</th><th data-col="note">Note</th></tr></thead>
+<table data-id="weeks" data-clay-page-opaque="1" data-clay-page-value="eyJyb3dzIjpbeyJjZWxscyI6eyJub3RlIjoiIiwicmF0ZSI6IjU4Iiwid2VlayI6IjIwMjYtMDktMTQifSwiaWQiOiJ3MSJ9LHsiY2VsbHMiOnsibm90ZSI6IiIsInJhdGUiOiI1NyIsIndlZWsiOiIyMDI2LTA5LTIxIn0sImlkIjoidzIifSx7ImNlbGxzIjp7Im5vdGUiOiJJbnZpdGUgZW1haWwgd2VudCB0byBzcGFtIiwicmF0ZSI6IjQxIiwid2VlayI6IjIwMjYtMDktMjgifSwiaWQiOiJ3MyJ9LHsiY2VsbHMiOnsibm90ZSI6Ik5ldyBpbnZpdGUgZmxvdyIsInJhdGUiOiI1NSIsIndlZWsiOiIyMDI2LTEwLTA1In0sImlkIjoidzQifSx7ImNlbGxzIjp7Im5vdGUiOiIiLCJyYXRlIjoiNjIiLCJ3ZWVrIjoiMjAyNi0xMC0xMiJ9LCJpZCI6Inc1In1dfQ" aria-label="Table">
+<thead><tr><th data-col="week" id="weeks-week" data-kind="date" scope="col">Week</th><th data-col="rate" id="weeks-rate" data-kind="number" scope="col">Activation %</th><th data-col="note" id="weeks-note" scope="col">Note</th></tr></thead>
 <tbody>
-<tr data-id="w1"><td>2026-09-14</td><td>58</td><td></td></tr>
-<tr data-id="w2"><td>2026-09-21</td><td>57</td><td></td></tr>
-<tr data-id="w3"><td>2026-09-28</td><td>41</td><td>Invite email went to spam</td></tr>
-<tr data-id="w4"><td>2026-10-05</td><td>55</td><td>New invite flow</td></tr>
-<tr data-id="w5"><td>2026-10-12</td><td>62</td><td></td></tr>
+<tr data-id="w1"><td headers="weeks-week">2026-09-14</td><td headers="weeks-rate">58</td><td headers="weeks-note"></td></tr>
+<tr data-id="w2"><td headers="weeks-week">2026-09-21</td><td headers="weeks-rate">57</td><td headers="weeks-note"></td></tr>
+<tr data-id="w3"><td headers="weeks-week">2026-09-28</td><td headers="weeks-rate">41</td><td headers="weeks-note">Invite email went to spam</td></tr>
+<tr data-id="w4"><td headers="weeks-week">2026-10-05</td><td headers="weeks-rate">55</td><td headers="weeks-note">New invite flow</td></tr>
+<tr data-id="w5"><td headers="weeks-week">2026-10-12</td><td headers="weeks-rate">62</td><td headers="weeks-note"></td></tr>
 </tbody>
 </table>
 <figure data-id="chart" data-type="chart" data-source="weeks" data-x="week" data-series="[&quot;rate&quot;]" data-highlight="w3"><svg xmlns="http://www.w3.org/2000/svg" role="img" width="640" height="320" viewBox="0 0 640 320"><title>Activation by week</title><desc>Activation %: 58 to 62</desc><line x1="52" y1="271.47" x2="568" y2="271.47" stroke="currentColor" opacity="0.15"></line><text x="44" y="275.47" text-anchor="end">40</text><line x1="52" y1="218.66" x2="568" y2="218.66" stroke="currentColor" opacity="0.15"></line><text x="44" y="222.66" text-anchor="end">45</text><line x1="52" y1="165.84" x2="568" y2="165.84" stroke="currentColor" opacity="0.15"></line><text x="44" y="169.84" text-anchor="end">50</text><line x1="52" y1="113.03" x2="568" y2="113.03" stroke="currentColor" opacity="0.15"></line><text x="44" y="117.03" text-anchor="end">55</text><line x1="52" y1="60.22" x2="568" y2="60.22" stroke="currentColor" opacity="0.15"></line><text x="44" y="64.22" text-anchor="end">60</text><circle data-point="chart:w1:rate" cx="52" cy="81.34" r="3" fill="var(--chart-1)"></circle><circle data-point="chart:w2:rate" cx="181" cy="91.9" r="3" fill="var(--chart-1)"></circle><circle data-point="chart:w3:rate" data-highlight="true" cx="310" cy="260.91" r="3" fill="var(--chart-1)"></circle><circle data-point="chart:w4:rate" cx="439" cy="113.03" r="3" fill="var(--chart-1)"></circle><circle data-point="chart:w5:rate" cx="568" cy="39.09" r="3" fill="var(--chart-1)"></circle><polyline points="52,81.34 181,91.9 310,260.91 439,113.03 568,39.09" fill="none" stroke="var(--chart-1)" stroke-width="2"></polyline><text x="575" y="34.09">Activation %</text><text x="52" y="306" text-anchor="middle">2026-09-14</text><text x="181" y="306" text-anchor="middle">2026-09-21</text><text x="310" y="306" text-anchor="middle">2026-09-28</text><text x="439" y="306" text-anchor="middle">2026-10-05</text><text x="568" y="306" text-anchor="middle">2026-10-12</text></svg><figcaption>Activation by week</figcaption></figure>
