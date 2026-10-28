@@ -52,7 +52,7 @@ import { knownPageFormatFloor, pageFormatFloor, withPageFormatFloor } from '../c
 import { onSaveAccepted } from '../core/save-accepted.js';
 import { servedDocumentEtag } from '../core/host-attrs.js';
 import { recordEtag, seedEtag, lastSeenEtag, conditionalSaves, representedEtag, forgetRepresentedEtag } from '../core/etag.js';
-import { pageMaybeDirty, pauseGate, resumeGate, gateCaptureToken, gateClearIfUnchanged } from '../lib/dirty-gate.js';
+import { pageMaybeDirty, pauseGate, resumeGate, gateCaptureToken, gateClearIfUnchanged, gateMarkDirty } from '../lib/dirty-gate.js';
 import { gestureSeen } from '../lib/user-gesture.js';
 import { SyncStream } from './stream.js';
 import { streamOpened, streamClosed, streamEvent, LIVE_EVENTS } from '../live/stream-bridge.js';
@@ -2085,7 +2085,9 @@ class LiveSync {
     } finally {
       lineageCapture.finish(conflicts.list());
     }
-    if (dirty && !report.localDiverged) {
+    if (this.lane === 'live' && report.localDiverged) {
+      gateMarkDirty();
+    } else if (dirty && !report.localDiverged) {
       gateClearIfUnchanged(token);
     }
     // Synthetic ids converge: every live element the frame named takes the
