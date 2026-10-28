@@ -1172,7 +1172,7 @@ function startSlicedSave(ctx) {
     if (preparing === task) preparing = null;
     ctx.resolve(outcome.result);
     ctx.settleSoonQueued(outcome.result);
-    if (outcome.dispatched || pendingSave || soonQueuedWaiters.length) drainPendingSave();
+    if (outcome.dispatched || pendingSave || pendingAutosave || soonQueuedWaiters.length) drainPendingSave();
   });
   return true;
 }
@@ -1215,6 +1215,10 @@ function attemptSaveNow({ kind, permit = null }, callback = () => {}) {
     if (!savesAdmitted(permit)) {
       if (!explicit) parkedAutosave = true;
       const skipped = sessionClosed('Save session is quiesced');
+      // The soon() callers waiting on this save hear its refusal: a queued waiter that is
+      // never answered is a promise the page cannot settle, and the refusal is the answer
+      // to the save it was moved to.
+      if (explicit) takeSoonQueued().forEach((done) => done(skipped));
       callback(skipped);
       return resolve(skipped);
     }
@@ -1450,7 +1454,7 @@ export function savePageForce(callback = () => {}, { quietConflict = false, page
         permit,
         pageFormatFloor,
         quietConflict,
-        settleSoonQueued: () => {},
+        settleSoonQueued: (result) => takeSoonQueued().forEach((done) => done(result)),
         callback,
         resolve,
       })) return;
@@ -1598,6 +1602,9 @@ async function flushBytes(keepalive, deadline, permit, run = { over: false }) {
     if (!bytesUnsaved()) {
       gateClearIfUnchanged(token);
       if (hasUnsavedState()) throw flushError('This document has unsaved work a save cannot write.', 'blocked');
+      // Nothing was written because there was nothing to write: the bytes on the page are
+      // the ones the last accepted save left, so work a closed session parked is covered.
+      parkedWork = false;
       return { state: saved ? 'saved' : 'clean', etag: etag ?? lastSeenEtag() };
     }
     if (run.over) return null;

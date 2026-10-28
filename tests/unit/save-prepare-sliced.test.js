@@ -319,6 +319,74 @@ test("a cancelled sliced save settles the save.soon() waiter queued behind it", 
   }
 });
 
+// An autosave that arrives while a prepared save holds the lane only records intent: the
+// scheduler will not ask again on its own, so a cancellation has to hand the intent back to
+// it. Without that the newer bytes wait for the next edit or the exit.
+test("a cancellation drains an autosave that parked behind the prepared save", async () => {
+  await sleep(1300);
+  setText("parked-autosave-A");
+  const sentBefore = posts.length;
+  const gate = holdSlices();
+  try {
+    const saving = save.savePage();
+    expect(gate.held.length).toBeGreaterThan(0);
+
+    setText("parked-autosave-B");
+    const parked = await save.savePageThrottled();
+    expect(parked).toMatchObject({ msgType: "skipped", msg: "Save already in progress" });
+
+    document.dispatchEvent(new CustomEvent("clay:sync-applied", { detail: { source: "disk", seq: 11 } }));
+    gate.release();
+
+    const result = await saving;
+    expect(result.msgType).toBe("skipped");
+    expect(result.msg).toMatch(/cancelled/);
+
+    await waitFor(() => posts.length > sentBefore, 15000);
+    expect(posts.length).toBe(sentBefore + 1);
+    expect(lastPost()).toContain("parked-autosave-B");
+  } finally {
+    gate.restore();
+  }
+});
+
+// A soon() caller waits for the save its call queued behind, and a closed session refuses
+// that save: the refusal is its answer. A waiter nobody answers is a promise the page can
+// never settle.
+test("a soon() waiter hears the refusal a closed session gives the save it waits on", async () => {
+  setText("soon-refused-base");
+  expect((await save.savePage()).ok).toBe(true);
+  const sentBefore = posts.length;
+  const session = save.saveSession();
+  session.start();
+  const gate = holdSlices();
+  try {
+    // A clean page: the refusal is about admission, not about work left behind.
+    const saving = save.savePage();
+    expect(gate.held.length).toBeGreaterThan(0);
+
+    let answered = false;
+    const soon = save.savePageSoon().then((value) => { answered = true; return value; });
+    await sleep(300);
+    expect(answered).toBe(false);
+
+    session.quiesce();
+    document.dispatchEvent(new CustomEvent("clay:sync-applied", { detail: { source: "disk", seq: 12 } }));
+    gate.release();
+
+    const cancelled = await saving;
+    expect(cancelled.msg).toMatch(/cancelled/);
+
+    const answer = await soon;
+    expect(answered).toBe(true);
+    expect(answer).toMatchObject({ ok: false, msgType: "skipped", msg: "Save session is quiesced" });
+    expect(posts.length).toBe(sentBefore);
+  } finally {
+    gate.restore();
+    session.stop();
+  }
+});
+
 test("a cancellation with nothing queued sends nothing", async () => {
   setText("nothing-queued");
   const sentBefore = posts.length;

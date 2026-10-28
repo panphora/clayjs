@@ -79,6 +79,27 @@ async function leave() {
   }
 }
 
+function holdSlices() {
+  const previous = globalThis.scheduler;
+  const held = [];
+  const gate = {
+    held,
+    released: false,
+    release() {
+      gate.released = true;
+      held.splice(0).forEach((resolve) => resolve());
+    },
+    restore() {
+      if (previous === undefined) delete globalThis.scheduler;
+      else globalThis.scheduler = previous;
+    },
+  };
+  globalThis.scheduler = {
+    yield: () => (gate.released ? Promise.resolve() : new Promise((resolve) => { held.push(resolve); })),
+  };
+  return gate;
+}
+
 beforeAll(async () => {
   window.clayEditMode = true;
   window.clay = {};
@@ -108,4 +129,83 @@ test("a large page's exit keeps its permit into the sliced job it starts", async
   posts = [];
   setText("a later exit's own edit");
   await leave();
+});
+
+test("the exit's own save answers a soon() waiter no drained save could", async () => {
+  // Every step of a preparation spends the slice budget, so the job hands the page back
+  // between its phases and the test can hold it there.
+  const realNow = performance.now;
+  let clock = 0;
+  Object.defineProperty(performance, "now", { configurable: true, writable: true, value: () => (clock += 10) });
+  setText("page-soon-A");
+  const session = save.saveSession();
+  session.start();
+  const gate = holdSlices();
+  const answers = [];
+  const sentBefore = posts.length;
+  const realFetch = global.fetch;
+  const realError = console.error;
+  console.error = () => {};
+  try {
+    const saving = save.savePage();
+    expect(gate.held.length).toBeGreaterThan(0);
+
+    // Queued behind the prepared save while admission is still open: the caller waits for
+    // the save its call queued one behind, not for the answer to its own call.
+    save.savePageSoon().then((value) => { answers.push(value); });
+    await sleep(300);
+    expect(answers).toHaveLength(0);
+
+    // That save's fate is unknown, so the queued attempt behind it is kept rather than
+    // sent: nothing but the exit's own write can answer these callers.
+    global.fetch = jest.fn(async (url, options = {}) => {
+      if (String(url).includes("/_/save")) {
+        throw Object.assign(new Error("The operation was aborted."), { name: "AbortError" });
+      }
+      return okJson({ spec: 1, document: { etag: "base-1" } });
+    });
+    gate.release();
+    const unknown = await saving;
+    expect(unknown.msgType).not.toBe("saved");
+    expect(saveCore.saveFateIsUnknown()).toBe(true);
+    expect(answers).toHaveLength(0);
+
+    global.fetch = realFetch;
+    session.quiesce();
+    expect(save.savesAdmitted()).toBe(false);
+
+    let pending = true;
+    const seen = [];
+    const handle = unsaved.registerUnsavedState({
+      id: "page:soon",
+      isPending: () => pending,
+      flush: async (context) => {
+        seen.push(context.permit);
+        const result = await saveCore.exitSave()(context.permit);
+        pending = false;
+        return { ok: result?.ok === true };
+      },
+    });
+    let left;
+    try {
+      left = await transition.runSaveBarrier();
+    } finally {
+      handle.dispose();
+    }
+    expect(seen).toHaveLength(1);
+    expect(left).toMatchObject({ ok: true });
+
+    await sleep(100);
+    expect(answers).toHaveLength(1);
+    expect(answers[0]).toMatchObject({ ok: true });
+    expect(answers[0].msgType).not.toBe("skipped");
+    expect(posts.length).toBe(sentBefore + 1);
+    expect(posts[posts.length - 1]).toContain("page-soon-A");
+  } finally {
+    console.error = realError;
+    global.fetch = realFetch;
+    gate.restore();
+    session.stop();
+    Object.defineProperty(performance, "now", { configurable: true, writable: true, value: realNow });
+  }
 });

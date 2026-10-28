@@ -1,0 +1,22 @@
+{
+  "schema": 1,
+  "id": "stuck-parked-flag-trigger-save",
+  "fixture": "persist-host",
+  "boot": { "mode": "edit", "live": true, "destination": "host" },
+  "page": {
+    "body": "<article><h1 id=\"title\">Untitled</h1><div id=\"content\">start</div></article><button trigger-save>Save</button>"
+  },
+  "steps": [
+    { "op": "input", "target": "content", "value": "ALPHA" },
+    { "op": "hold", "boundary": "save.response" },
+    { "op": "click", "target": "[trigger-save]" },
+    { "op": "input", "target": "content", "value": "BETA" },
+    { "op": "input", "target": "content", "value": "ALPHA" },
+    { "op": "click", "target": "[trigger-save]" },
+    { "op": "leave", "await": false },
+    { "op": "release", "boundary": "save.response", "result": "accepted" },
+    { "op": "settle", "ms": 1000 }
+  ],
+  "requires": ["input-admitted", "save-request-sent", "save-response", "transition"],
+  "expect": { "mode": "view", "writes": 1 }
+}

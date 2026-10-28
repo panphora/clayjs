@@ -24,6 +24,7 @@ const PROPERTIES = [
   "positive-control",
   "bytes-etag-pairing",
   "no-writer-after-view",
+  "unsaved-after-exit",
   "no-growth",
   "canonical-attributes",
 ];
@@ -319,6 +320,10 @@ function canonicalAttributes(json, run, fail) {
   );
 }
 
+// A save is a writer left behind only when it belongs to no live session. The last committed
+// leave closes one, and a committed entry after it opens another: a save inside that later
+// session is the session's own writer, not the leave's. What is left to judge is the stretch
+// between the leave and that entry, which is the page in view.
 function noWriterAfterView(run, fail) {
   const committed = (run.trace ?? []).filter(
     (event) => event.kind === "transition" && event.detail.op === "leave" && event.detail.ok === true,
@@ -328,9 +333,46 @@ function noWriterAfterView(run, fail) {
   if (run.result?.mode === "view" && run.result?.canWrite !== false) {
     fail("no-writer-after-view", "the page is in view and canWrite() is still true");
   }
-  const later = (run.trace ?? []).filter((event) => event.seq > from && event.kind === "save-request-sent");
+  const reopened = (run.trace ?? []).filter(
+    (event) => event.kind === "transition" && event.detail.op === "enter" && event.detail.ok === true && event.seq > from,
+  )[0] ?? null;
+  const until = reopened ? reopened.seq : Infinity;
+  const later = (run.trace ?? []).filter((event) => event.seq > from && event.seq < until && event.kind === "save-request-sent");
   if (later.length) {
     fail("no-writer-after-view", `${later.length} save request(s) were sent after the committed leave`);
+  }
+}
+
+// The page's own answer about unsaved work, read against what the host holds. A committed
+// exit whose last accepted save carries the page's bytes leaves nothing to write, so a page
+// that still reports unsaved work is warning the person about bytes the host already has.
+// The page may append the framework's own view-time chrome after its own bytes, so the save
+// has to carry the page up to that point; anything else is not this property's question.
+function unsavedAfterExit(run, fail) {
+  const transitions = (run.trace ?? []).filter((event) => event.kind === "transition" && event.detail.ok === true);
+  const leave = transitions.at(-1) ?? null;
+  if (!leave || leave.detail.op !== "leave") return;
+  if (run.result?.mode !== "view") return;
+  if (run.result?.unsaved !== true) return;
+  const last = accepted(run).at(-1) ?? null;
+  if (!last) return;
+  const saved = parseHtml(savedDocument(last.body)).body?.innerHTML ?? "";
+  const page = String(run.result?.pageHtml ?? "");
+  if (saved !== page && !(saved.length < page.length && page.startsWith(saved))) return;
+  fail(
+    "unsaved-after-exit",
+    "the exit committed and its last accepted save carries the page's own bytes, yet the page reports unsaved work",
+  );
+}
+
+// The document an accepted save carried. The transport records the request body as it went
+// out, which is the save envelope around the document's bytes.
+function savedDocument(body) {
+  try {
+    const parsed = JSON.parse(String(body ?? ""));
+    return typeof parsed?.html === "string" ? parsed.html : String(body ?? "");
+  } catch {
+    return String(body ?? "");
   }
 }
 
@@ -378,6 +420,7 @@ export function judge({ case: json, run, control = null } = {}) {
   positiveControl(json, run, control, fail);
   etagPairing(run, fail);
   noWriterAfterView(run, fail);
+  unsavedAfterExit(run, fail);
   noGrowth(run, fail);
   canonicalAttributes(json, run, fail);
 

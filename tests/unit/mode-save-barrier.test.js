@@ -177,6 +177,29 @@ test("the barrier is the one write a closed save session admits", async () => {
   expect(posts[0]).toContain("typed between modes");
 });
 
+test("a clean exit clears the work a closed session parked", async () => {
+  await acceptedBaseline("parked base");
+
+  const session = track(save.saveSession());
+  session.start();
+  // Edited and put back: the bytes on the page are the ones the last accepted save left,
+  // so nothing is owed, but the gate still counts the edits made since that save.
+  await edit("parked then put back");
+  await edit("parked base");
+  session.quiesce();
+
+  // A save asked for while admission is closed is refused and its work is parked.
+  expect((await save.savePage()).msgType).toBe("skipped");
+  expect(save.sessionParked()).toBe(true);
+
+  // The exit finds nothing to write, because the host already has these bytes.
+  const clean = await transition.runSaveBarrier();
+  expect(clean).toMatchObject({ ok: true, state: "clean" });
+  expect(posts.length).toBe(0);
+  expect(save.sessionParked()).toBe(false);
+  expect(warning.hasUnsavedChanges()).toBe(false);
+});
+
 test("a permit is bound to its own mode generation", async () => {
   await acceptedBaseline("generation base");
   const session = track(save.saveSession());

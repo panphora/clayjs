@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "id": "oracle-writer-after-reentry-control",
+  "fixture": "persist-host",
+  "boot": { "mode": "edit", "live": true, "destination": "host" },
+  "steps": [
+    { "op": "input", "target": "title", "value": "After reentry" },
+    { "op": "hold", "boundary": "save.response" },
+    { "op": "leave", "await": false },
+    { "op": "release", "boundary": "save.response", "result": "rejected" },
+    { "op": "settle", "ms": 1000 }
+  ],
+  "requires": ["input-admitted", "save-request-sent", "save-response", "transition"],
+  "expect": { "mode": "edit" }
+}
