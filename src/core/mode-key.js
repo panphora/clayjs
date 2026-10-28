@@ -116,11 +116,13 @@ if (!isDraftMode) {
     if (!canEdit || mode !== "view" || document.querySelector("[clay-mode-toggle]")) return;
     // The note needs clay.storage, which the loader attaches after the core wave.
     const whenReady = (run) => {
-      if (window.clay?.storage) queueMicrotask(run);
-      else document.addEventListener("clay:ready", run, { once: true });
+      const ready = window.clay?.ready;
+      if (window.clay?.storage || typeof ready?.then !== "function") queueMicrotask(run);
+      else ready.then(run, () => {});
     };
     whenReady(() => {
-      if (window.clay?.menu) return;
+      // A menu loads after ready and carries its own way in.
+      if (window.clay?.menu || window.clay?.plugins?.includes?.("menu")) return;
       const store = window.clay?.storage?.local;
       if (!store || store.get("mode-note")) return;
       store.set("mode-note", true);
