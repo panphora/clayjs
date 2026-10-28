@@ -1,5 +1,4 @@
 import { BlockSelection } from "../../../src/page/blocks.js";
-import { PAGE_EDITOR_CSS } from "../../../src/page/editor.js";
 import { editor, key, keyOn, posOf, select } from "./view-helpers.js";
 
 /**
@@ -101,10 +100,11 @@ test("a phone walks only its four controls and skips the desktop-only ones", () 
   });
 });
 
-test("a phone-only control the desktop stylesheet hides is never the toolbar\u0027s tab stop", () => {
-  const rule = PAGE_EDITOR_CSS.match(/\.page-tool-more \{[^}]*\}/)[0];
+// More shows on desktop now, so the hidden control is stated here rather than lifted
+// from the stylesheet.
+test("a control the stylesheet hides is never the toolbar\u0027s tab stop", () => {
   const css = document.createElement("style");
-  css.textContent = rule;
+  css.textContent = ".page-tool-more { display: none; }";
   document.head.append(css);
   try {
     const view = editor(DOC);
