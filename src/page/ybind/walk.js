@@ -131,10 +131,13 @@ function walkFlow(pd, index) {
   const segs = [];
   const orphans = [];
   const hidden = [];
-  const fences = [];
+  const fences = [], stops = [];
   let cur = null, prevId = "start", hiding = null, at = 0;
   const cattrs = {};
   let styled = null;
+  // The format state a block starts and ends with, so one block can be walked again on its
+  // own (walk-delta.js) and the next block's marks proven unchanged.
+  const fmt = () => { for (const key in cattrs) return { ...cattrs }; return null; };
   const typeOf = (id) => { const m = pd.attrs.get(id); return (m && m.get("t")) || "paragraph"; };
   const hideUnit = (len) => {
     if (!len) return;
@@ -146,12 +149,16 @@ function walkFlow(pd, index) {
     const id = `recovered:${sourceKey}`;
     const t = root ? root.type : "paragraph";
     const opaque = !Object.hasOwn(schema.nodes, t);
-    cur = { kind: "b", id, baseId: id, brk: { client: it.id.client, clock: it.id.clock }, implicit: false, runs: [], len: 1, atom: !opaque && !schema.nodes[t]?.isTextblock, opaque, recovered: true, restored: !moved, sourceKey, t, fields: root ? root.attrs : null };
+    const f = fmt();
+    if (cur) cur.fmtOut = f;
+    cur = { kind: "b", id, baseId: id, brk: { client: it.id.client, clock: it.id.clock }, implicit: false, runs: [], len: 1, atom: !opaque && !schema.nodes[t]?.isTextblock, opaque, recovered: true, restored: !moved, sourceKey, t, fields: root ? root.attrs : null, fmtIn: f, fmtOut: null };
     segs.push(cur);
     prevId = id;
   };
   const open = (id, brk, implicit) => {
-    cur = { kind: "b", id, baseId: id, brk, implicit, runs: [], len: implicit ? 0 : 1, atom: false, items: !implicit && (markerCount.get(id) ?? 0) > 1 ? [] : null };
+    const f = fmt();
+    if (cur) cur.fmtOut = f;
+    cur = { kind: "b", id, baseId: id, brk, implicit, runs: [], len: implicit ? 0 : 1, atom: false, items: !implicit && (markerCount.get(id) ?? 0) > 1 ? [] : null, fmtIn: f, fmtOut: null };
     if (!implicit) {
       cur.t = typeOf(id);
       // A type this runtime has no schema for still owns the text and marks up to
@@ -221,6 +228,7 @@ function walkFlow(pd, index) {
     }
     const removals = removalStarts.get(it);
     if (removals) {
+      if (it.deleted) stops.push({ client: it.id.client, clock: it.id.clock, len: it.length });
       if (!hiding && exposed(removals[0].sourceKey)) {
         if (!it.deleted) hideUnit(it.length);
         proj.push({ active: removals.map(endsOf), sourceKey: removals[0].sourceKey, root: null });
@@ -237,6 +245,7 @@ function walkFlow(pd, index) {
     }
     const start = starts.get(it);
     if (start) {
+      if (it.deleted) stops.push({ client: it.id.client, clock: it.id.clock, len: it.length });
       if (!hiding && exposed(start.key)) {
         if (!it.deleted) hideUnit(it.length);
         proj.push({ active: [{ blockId: start.blockId, end: start.end }], sourceKey: start.key, root: null });
@@ -298,6 +307,7 @@ function walkFlow(pd, index) {
     }
   }
   if (hiding) { for (const a of hiding.active) settle(a); flush(); }
+  if (cur) cur.fmtOut = fmt();
   const groups = new Map();
   for (const s of segs) {
     if (s.kind !== "b" || s.implicit) continue;
@@ -341,5 +351,5 @@ function walkFlow(pd, index) {
     }
     tokens += s.len;
   }
-  return { visible, holes, orphans, tokens, copies, hidden, removals: lostCopies.length ? [...removals, ...lostCopies] : removals, fences };
+  return { visible, holes, orphans, tokens, copies, hidden, removals: lostCopies.length ? [...removals, ...lostCopies] : removals, fences, stops };
 }
