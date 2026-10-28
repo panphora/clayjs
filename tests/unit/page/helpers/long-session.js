@@ -89,7 +89,7 @@ function clock() {
 function openTab({ id, value, clientID, journal }) {
   const store = createStore({ name: "page", value: clone(value) });
   const timers = clock();
-  const binding = createYPageBinding({ store, setTimer: timers.setTimer, clearTimer: timers.clearTimer, captureTimeout: 0, journal });
+  const binding = createYPageBinding({ store, setTimer: timers.setTimer, clearTimer: timers.clearTimer, captureTimeout: 0, journal, stats: { groups: 0, mismatch: 0, renders: 0, first: null, proveWalks: process.env.CLAY_PROVE_WALKS === "1" } });
   binding.ydoc.clientID = clientID;
   const mount = document.body.appendChild(document.createElement("div"));
   const view = createPageEditor(mount, {

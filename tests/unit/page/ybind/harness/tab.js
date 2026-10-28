@@ -22,7 +22,7 @@ export function makeYTab(sim, room, id, init, opts = {}) {
   const ydoc = new Y.Doc();
   ydoc.clientID = opts.clientID ?? (10000 + tabCounter++);
   const notices = [];
-  const binding = createYPageBinding({ store, ydoc, setTimer: sim.setTimer, clearTimer: sim.clearTimer, compact: opts.compact, captureTimeout: 0, onNotice: (n) => notices.push(n) });
+  const binding = createYPageBinding({ store, ydoc, setTimer: sim.setTimer, clearTimer: sim.clearTimer, compact: opts.compact, captureTimeout: 0, onNotice: (n) => notices.push(n), stats: { groups: 0, mismatch: 0, renders: 0, first: null, proveWalks: process.env.CLAY_PROVE_WALKS === "1" } });
   const el = document.createElement("div");
   document.body.appendChild(el);
   const editor = new pmView.EditorView(el, {

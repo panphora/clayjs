@@ -102,6 +102,8 @@ export async function runPlan(plan, cfg = DEFAULT, { seed = 1, quiet = false } =
   });
   const tabs = new Map();
   for (const id of cfg.tabs) tabs.set(id, makeYTab(sim, room, id, clone(initial), { compact: cfg.compact }));
+  // Every incremental walk a tab proves against a full walk, counted before the plan runs.
+  const walkMismatchAtStart = new Map([...tabs.values()].map((t) => [t.id, t.stats.walkMismatch ?? 0]));
 
   const ev = new Map();
   const undoCaps = new WeakMap();
@@ -259,6 +261,12 @@ export async function runPlan(plan, cfg = DEFAULT, { seed = 1, quiet = false } =
   const findings = [];
   if (crashed) findings.push({ cls: 'exception', detail: crashed });
   for (const e of errors) findings.push({ cls: 'exception', detail: e });
+  const walkGrew = [...tabs.values()].filter((t) => (t.stats.walkMismatch ?? 0) > (walkMismatchAtStart.get(t.id) ?? 0));
+  if (walkGrew.length) {
+    const diverged = errors.find((e) => e.includes('Incremental walk diverged'));
+    const first = diverged ?? JSON.stringify(walkGrew.map((t) => ({ tab: t.id, walkMismatch: t.stats.walkMismatch, first: t.stats.first })));
+    findings.push({ cls: 'walk-diverged', detail: first.slice(0, 400) });
+  }
   if (crashed) return { findings, plan };
   const problems = check({ room, tabs });
   problems.push(...(await reload({ sim, room, tabs })));

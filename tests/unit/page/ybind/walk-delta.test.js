@@ -165,3 +165,33 @@ test("a one-block re-walk equals a full walk, and both refuse what they must", (
   expect(totals.equal).toBeGreaterThanOrEqual(8);
   expect(totals.refused).toBeGreaterThanOrEqual(7);
 });
+
+// A block whose marker appears more than once in the flow is a moved copy, and the walk
+// records its items with absolute positions. Typing in a block before it leaves those
+// positions one character behind unless the re-walk shifts them like the hidden entries.
+test("a one-block re-walk shifts the items of a moved copy after it", () => {
+  const s = open();
+  const { pd } = s;
+  const appendCopy = (id, text) => {
+    pd.flow.insertEmbed(pd.flow.length, { b: id });
+    const attrs = new Y.Map();
+    attrs.set("t", "paragraph");
+    pd.attrs.set(id, attrs);
+    pd.flow.insert(pd.flow.length, text);
+  };
+  pd.ydoc.transact(() => {
+    appendCopy("s", "sierra");
+    appendCopy("s", "sierra again");
+  });
+  s.captured = undefined;
+  s.w = walk(pd);
+  expect(s.w.visible.some((seg) => seg.id === "s" && seg.items?.length > 0)).toBe(true);
+
+  const c = s.capture(() => pd.flow.insert(atOf(pd, "q") + 1, "x"));
+  expect(c).not.toBeNull();
+  expect(c.marker.content.embed.b).toBe("q");
+  const next = rewalk(pd, s.w, c.marker);
+  expect(next).not.toBeNull();
+  expect(walkSignature(pd, next)).toBe(walkSignature(pd, walk(pd)));
+  totals.equal += 1;
+});

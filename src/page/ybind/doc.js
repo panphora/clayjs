@@ -26,16 +26,21 @@ const rawOf = (pd, b) => {
   return out;
 };
 
-export function docOf(pd, w) {
-  const blocks = w.visible.map((b) => {
+// `nodes`, when given, maps a walk segment to a node already proven equal to what this
+// function would build for it (the bridge fills it from the view): that block costs
+// nothing to derive again, and the same node object comes back.
+export function docOf(pd, w, nodes = null) {
+  const build = (b) => {
     if (b.opaque) {
       const fields = b.recovered ? { ...copy(b.fields ?? {}) } : rawOf(pd, b);
       return { b, type: schema.nodes.opaque_block, fields, opaque: true };
     }
     const type = schema.nodes[b.t] ?? schema.nodes.paragraph;
     return { b, type, fields: { ...(b.fields ?? fieldsOf(pd, b, type)) } };
-  });
-  const byId = new Map(blocks.map((block) => [block.b.id, block]));
+  };
+  const blocks = w.visible.map((b) => { const node = nodes?.get(b); return node ? { b, node } : build(b); });
+  const byId = new Map(blocks.map((block, i) => [block.b.id, i]));
+  const parentOf = (i) => (blocks[i].node ? blocks[i].node.attrs.parent : blocks[i].fields.parent);
   const rankOf = (block) => {
     const item = block.b.recovered
       ? pd.gone._map.get(attrKey(block.b.sourceKey, "parent"))
@@ -48,17 +53,20 @@ export function docOf(pd, w) {
     while (byId.has(id) && !positions.has(id)) {
       positions.set(id, chain.length);
       chain.push(id);
-      id = byId.get(id).fields.parent;
+      id = parentOf(byId.get(id));
     }
     if (!positions.has(id)) continue;
     const cycle = chain.slice(positions.get(id));
     const lowest = cycle.reduce((left, right) => {
-      const a = rankOf(byId.get(left)), b = rankOf(byId.get(right));
+      const a = rankOf(blocks[byId.get(left)]), b = rankOf(blocks[byId.get(right)]);
       return a.clock < b.clock || (a.clock === b.clock && a.client < b.client) ? left : right;
     });
-    byId.get(lowest).fields.parent = null;
+    const at = byId.get(lowest);
+    if (blocks[at].node) blocks[at] = build(blocks[at].b);
+    blocks[at].fields.parent = null;
   }
-  const nodes = blocks.map(({ b, type, fields, opaque }) => {
+  const built = blocks.map(({ b, node, type, fields, opaque }) => {
+    if (node) return node;
     if (opaque) {
       const content = [];
       for (const r of b.runs) {
@@ -79,5 +87,5 @@ export function docOf(pd, w) {
     }
     return type.create(attrs, content);
   });
-  return nodes.length ? schema.nodes.doc.create(null, nodes) : schema.nodes.doc.createAndFill();
+  return built.length ? schema.nodes.doc.create(null, built) : schema.nodes.doc.createAndFill();
 }

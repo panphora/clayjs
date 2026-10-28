@@ -1,6 +1,7 @@
 import * as Y from "../../vendor/yjs.vendor.js";
 import { REMOTE_META, LOCAL, HISTORY_META, attrKeys, sameJson, parseKey, mintOp } from "./layout.js";
 import { walk, hashText } from "./walk.js";
+import { captureDelta, rewalk, walkSignature } from "./walk-delta.js";
 import { docOf } from "./doc.js";
 import { localGroup } from "./group.js";
 import { yBefore, yAfter } from "./tokens.js";
@@ -20,6 +21,7 @@ export function sameBareShape(a, b) {
   if (a.childCount !== b.childCount) return false;
   for (let i = 0; i < a.childCount; i++) {
     const left = a.child(i), right = b.child(i);
+    if (left === right) continue;
     if (left.type !== right.type) return false;
     if (attrKeys(left.type).some((key) => !sameJson(left.attrs[key], right.attrs[key]))) return false;
     if ((left.isTextblock || left.type.name === "table") && !left.content.eq(right.content)) return false;
@@ -114,6 +116,7 @@ export function keepsView(current, derived) {
   if (current.childCount !== derived.childCount || !orderedSiblings(current)) return false;
   for (let i = 0; i < current.childCount; i++) {
     const left = current.child(i), right = derived.child(i);
+    if (left === right) continue;
     const markup = left.type === right.type && left.marks === right.marks && sameAttrsBesidePos(left, right);
     if (!markup && !left.hasMarkup(right.type, { ...right.attrs, pos: left.attrs.pos }, right.marks)) return false;
     if (!left.content.eq(right.content)) return false;
@@ -154,6 +157,12 @@ export function createBridge({ pd, onNotice = () => {}, ownedTokens = [], author
   let view = null;
   let w = walk(pd);
   let docVersion = 0, walkedAt = -1;
+  // The one transaction since the last walk, when there was exactly one and it changed
+  // text inside one live block (walk-delta.js); any other history forces a full walk.
+  let delta = null, deltas = 0;
+  // A view node per walk segment it was proven equal to, so an unchanged block is not
+  // derived again and comes back as the same object the view holds.
+  const nodes = new WeakMap();
   const origins = createOriginIndex(pd.origins);
   const um = new Y.UndoManager([pd.flow, pd.attrs, pd.gone, pd.tableFields, pd.boardFields], {
     trackedOrigins: new Set([LOCAL]),
@@ -189,12 +198,14 @@ export function createBridge({ pd, onNotice = () => {}, ownedTokens = [], author
     const authors = [...owners].filter(Boolean).sort();
     return { kind: "recovered-change", source: record.source, revision: record.revision, blockId: record.blockId, author: authors[0] ?? null, authors };
   };
-  const recoveryState = () => {
-    if (recoveryMemo && recoveryMemo.version === recoveryVersion) return recoveryMemo.snapshot;
-    const reduced = reduceRecovery(pd, { index: origins, walked: walkedAt === docVersion ? w : undefined });
+  const snapshotOf = (reduced) => {
     const recoverable = reduced.list.filter((record) => record.recoverable).map((record) => detached(record));
     const notices = detached(recoverable.map((record) => personalNotice(record)).filter((notice) => notice && !dismissed.has(`${notice.source}\u0000${notice.revision}`)));
-    const snapshot = Object.freeze({ recoverable: Object.freeze(recoverable), notices: Object.freeze(notices) });
+    return Object.freeze({ recoverable: Object.freeze(recoverable), notices: Object.freeze(notices) });
+  };
+  const recoveryState = () => {
+    if (recoveryMemo && recoveryMemo.version === recoveryVersion) return recoveryMemo.snapshot;
+    const snapshot = snapshotOf(reduceRecovery(pd, { index: origins, walked: walkedAt === docVersion ? w : undefined }));
     recoveryMemo = { version: recoveryVersion, snapshot };
     return snapshot;
   };
@@ -212,11 +223,48 @@ export function createBridge({ pd, onNotice = () => {}, ownedTokens = [], author
     recoverySignature = signature;
     for (const listener of [...recoveryListeners]) listener(snapshot);
   };
+  const walked = (result) => { w = result; walkedAt = docVersion; delta = null; deltas = 0; };
+  const proveWalk = (next) => {
+    const a = walkSignature(pd, next), b = walkSignature(pd, walk(pd));
+    if (a === b) { stats.provedWalks = (stats.provedWalks ?? 0) + 1; return; }
+    stats.walkMismatch = (stats.walkMismatch ?? 0) + 1;
+    throw new Error(`Incremental walk diverged from the full walk:\n${a}\n---\n${b}`);
+  };
+  const proveRecovery = () => {
+    const fresh = JSON.stringify(snapshotOf(reduceRecovery(pd, { index: origins, walked: w })));
+    if (fresh === JSON.stringify(recoveryState())) return;
+    stats.walkMismatch = (stats.walkMismatch ?? 0) + 1;
+    throw new Error("Recovery snapshot kept across an incremental walk diverged from a fresh one");
+  };
+  // Walks from the start, or re-walks the one block the only transaction since the last
+  // walk changed. Returns that transaction's delta when the walk was incremental.
+  const walkNow = () => {
+    const change = deltas === 1 ? delta : null;
+    const next = change ? rewalk(pd, w, change.marker) : null;
+    if (!next) { walked(walk(pd)); return null; }
+    stats.incrementalWalks = (stats.incrementalWalks ?? 0) + 1;
+    if (stats.proveWalks) proveWalk(next);
+    walked(next);
+    return change;
+  };
+  const adopt = (doc) => {
+    if (doc.childCount !== w.visible.length) return;
+    for (let i = 0; i < doc.childCount; i++) if (!nodes.has(w.visible[i])) nodes.set(w.visible[i], doc.child(i));
+  };
+  const forget = (before, after) => {
+    if (before.childCount !== w.visible.length) return;
+    const d = docDiff(before, after);
+    if (!d) return;
+    const from = before.resolve(d.start).index(0), to = Math.min(before.childCount - 1, before.resolve(d.endA).index(0));
+    for (let i = from; i <= to; i++) nodes.delete(w.visible[i]);
+  };
   const refresh = () => {
-    w = walk(pd);
-    walkedAt = docVersion;
-    bumpRecovery();
-    return docOf(pd, w);
+    const change = walkNow();
+    // Text inserted into one live block hides nothing and exposes nothing, so the
+    // recovery snapshot stands. A deletion can displace a moved copy's source.
+    if (!change || change.deleted) bumpRecovery();
+    else if (stats.proveWalks) proveRecovery();
+    return docOf(pd, w, nodes);
   };
   let saved = null;
   let lastIntent = null;
@@ -228,7 +276,7 @@ export function createBridge({ pd, onNotice = () => {}, ownedTokens = [], author
     saved = null;
     const derived = keepViewPos(fresh ?? refresh(), view.state.doc);
     const d = docDiff(view.state.doc, derived);
-    if (!d) return;
+    if (!d) { adopt(view.state.doc); return; }
     const tr = view.state.tr.replace(d.start, d.endA, derived.slice(d.start, d.endB)).setMeta(REMOTE_META, true).setMeta("addToHistory", false);
     if (own) tr.setMeta("yundo", true);
     if (keep) {
@@ -257,8 +305,10 @@ export function createBridge({ pd, onNotice = () => {}, ownedTokens = [], author
       if (a !== null && a !== undefined && h !== null && h !== undefined) tr.setSelection(pmState.TextSelection.create(tr.doc, a, h));
     }
     view.dispatch(tr);
+    adopt(view.state.doc);
   };
   const stale = () => { docVersion++; };
+  const onTransaction = (t) => { deltas++; delta = deltas === 1 ? captureDelta(pd, t, w) : null; };
   const onBefore = (t) => {
     if (groupOpen && !joining && t.origin === LOCAL) { um.stopCapturing(); groupOpen = false; }
     if (!view || t.origin === LOCAL || t.origin === um || saved) return;
@@ -308,18 +358,19 @@ export function createBridge({ pd, onNotice = () => {}, ownedTokens = [], author
   pd.ydoc.on("beforeTransaction", stale);
   pd.ydoc.on("afterTransactionCleanup", stale);
   pd.ydoc.on("beforeTransaction", onBefore);
+  pd.ydoc.on("afterTransaction", onTransaction);
   pd.ydoc.on("afterTransaction", onAfter);
   return {
     pd, stats, render, um, board,
     attach(v) {
       view = v;
-      w = walk(pd);
-      walkedAt = docVersion;
+      walked(walk(pd));
     },
     dispose() {
       pd.ydoc.off("beforeTransaction", stale);
       pd.ydoc.off("afterTransactionCleanup", stale);
       pd.ydoc.off("beforeTransaction", onBefore);
+      pd.ydoc.off("afterTransaction", onTransaction);
       pd.ydoc.off("afterTransaction", onAfter);
       offOrigins();
       origins.dispose();
@@ -357,10 +408,8 @@ export function createBridge({ pd, onNotice = () => {}, ownedTokens = [], author
         }
         return;
       }
-      if (walkedAt !== docVersion) {
-        w = walk(pd);
-        walkedAt = docVersion;
-      } else stats.reusedWalks = (stats.reusedWalks ?? 0) + 1;
+      if (walkedAt !== docVersion) walkNow();
+      else stats.reusedWalks = (stats.reusedWalks ?? 0) + 1;
       const history = transactions.every((t) => t.getMeta("addToHistory") !== false);
       const register = registerAuthor;
       registerAuthor = null;
@@ -374,14 +423,16 @@ export function createBridge({ pd, onNotice = () => {}, ownedTokens = [], author
         joining = false;
       }
       groupOpen = intent !== null;
-      const derived = refresh();
       const current = view.state.doc;
+      forget(local[0].before, current);
+      const derived = refresh();
       if (!sameBareShape(derived, current)) {
         stats.mismatch++;
         stats.first ??= { before: bareShape(local[0].before), pm: bareShape(current), y: bareShape(derived) };
       } else if (keepsView(current, derived)) {
         stats.renders++;
         saved = null;
+        adopt(current);
         return;
       }
       render(false, derived);

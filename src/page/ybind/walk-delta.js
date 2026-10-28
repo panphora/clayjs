@@ -124,6 +124,10 @@ export function rewalk(pd, previous, marker) {
     const physical = yAfter(previous.holes, start) + old.len;
     const moved = (entry) => (entry.at >= physical ? { ...entry, at: entry.at + delta } : entry);
     next.hidden = previous.hidden.map((entry) => (entry.at >= physical ? { ...entry, at: entry.at + delta, items: entry.items.map(moved) } : entry));
+    for (let j = index + 1; j < visible.length; j += 1) {
+      const seg = visible[j];
+      if (seg.items?.length) next.visible[j] = { ...seg, items: seg.items.map(moved) };
+    }
   }
   return next;
 }

@@ -4,7 +4,7 @@ import { createBridge, keepViewPos } from "./bridge.js";
 import { createYProvider, entriesOf, dec } from "./provider.js";
 import { createPageFileDebt } from "./file-debt.js";
 
-export function createYPageBinding({ store, ydoc = new Y.Doc(), onNotice = () => {}, ownedTokens = [], authorToken = null, setTimer = setTimeout, clearTimer = clearTimeout, compact, captureTimeout = 500, checkpointWithin = () => {}, requestCheckpoint = null, requestExitCheckpoint = null, registerUnsavedState = null, onStopped = () => {}, journal = null, exitClosed = () => false }) {
+export function createYPageBinding({ store, ydoc = new Y.Doc(), onNotice = () => {}, ownedTokens = [], authorToken = null, setTimer = setTimeout, clearTimer = clearTimeout, compact, captureTimeout = 500, checkpointWithin = () => {}, requestCheckpoint = null, requestExitCheckpoint = null, registerUnsavedState = null, onStopped = () => {}, journal = null, exitClosed = () => false, stats = { groups: 0, mismatch: 0, renders: 0, first: null } }) {
   for (const [, v] of entriesOf(store.value.y)) Y.applyUpdateV2(ydoc, dec(v), NET);
   const pd = createPageDoc(ydoc);
   // The journal is installed before the provider, because the provider is what sees an
@@ -27,7 +27,6 @@ export function createYPageBinding({ store, ydoc = new Y.Doc(), onNotice = () =>
     onLocalUpdate: debt.local,
     journal: { local: (u) => pageJournal?.local(u), dependency: (u) => pageJournal?.dependency(u) },
   });
-  const stats = { groups: 0, mismatch: 0, renders: 0, first: null };
   const bridge = createBridge({ pd, onNotice, ownedTokens, authorToken, stats, captureTimeout });
   const waiters = new Set();
   let disposed = false;
