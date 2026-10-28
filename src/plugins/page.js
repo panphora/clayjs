@@ -1135,7 +1135,8 @@ function mountAndAttach(inst, source, loaded) {
     // lane but no writer yet, this tab claims the room (a redundant set of an
     // existing Yjs update: a valid nonempty frame that changes nothing) and then
     // waits for the election, so exactly one tab adopts.
-    const found = code.classifyFile(source.article, source.tags);
+    // A seeded page was built from this article: nothing to adopt.
+    const found = source.seeded ? { kind: "untouched" } : code.classifyFile(source.article, source.tags);
     const needsAdoption = found.kind === "adopt";
     const awaitWriter = async () => {
       const lane = await pageLaneReady();
@@ -1170,6 +1171,7 @@ function mountAndAttach(inst, source, loaded) {
       requestCheckpoint: () => checkpointWithin(0),
       snapshot: () => captureForSaveAndComparison({ emitForSync: false }).forSave,
       mergeTagless: inst.mergeTagless,
+      seeded: source.seeded,
       writerReady: awaitWriter,
       adopted: (rev) => fastLane()?.adopted?.("page", rev, inst.store.mark),
       notice: (counts) => {

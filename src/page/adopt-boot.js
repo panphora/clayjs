@@ -54,6 +54,7 @@ export function installAdoption({
   notice = () => {},
   snapshot = () => null,
   mergeTagless = false,
+  seeded = false,
   writerReady = () => Promise.resolve(),
   adopted = () => {},
   hold = suspendAutosave,
@@ -216,7 +217,7 @@ export function installAdoption({
   }
 
   doc.addEventListener("clay:sync-applied", onFrame);
-  if (source) run(source, true);
+  if (source && !seeded) run(source, true);
 
   return {
     // Resolves once everything queued so far has been attempted, with the boot

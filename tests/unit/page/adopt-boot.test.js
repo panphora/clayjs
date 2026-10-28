@@ -72,6 +72,20 @@ test("untouched boot file: nothing adopted, nothing held", async () => {
   ed.close();
 });
 
+test("seeded boot file: the page was built from it, so nothing is adopted or waited for", async () => {
+  const ed = open();
+  const before = blockMap(ed.view.state.doc);
+  const c = counters();
+  const ready = new Promise(() => {});
+  const controller = installAdoption({ view: ed.view, source: fileOf(fileHtml(RECORD, editA)), seeded: true, ready, hold: c.hold, release: c.release, requestCheckpoint: c.requestCheckpoint, notice: c.notice });
+  expect(await controller.idle()).toBeNull();
+  expect(blockMap(ed.view.state.doc)).toEqual(before);
+  expect(c.holds).toBe(0);
+  expect(c.checkpoints).toBe(0);
+  controller.dispose();
+  ed.close();
+});
+
 test("hand-edited boot file: adopted, held, checkpointed, announced, undoable", async () => {
   const ed = open();
   const c = counters();
