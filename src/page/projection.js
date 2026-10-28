@@ -381,9 +381,12 @@ const recordOfItem = (item) => {
 
 // The fields of a known block the runtime has no schema attribute for. They are
 // merged back only when serialized, inside the inert payload.
+// Fields the renderer writes as visible markup, which the reader rebuilds from it.
+const VISIBLE = { table: new Set(["rows"]) };
+
 const extrasOfItem = (item) => {
   const out = {};
-  for (const [k, v] of Object.entries(item)) if (!STRUCTURAL.has(k) && !(knownType(item.t) && Object.hasOwn(DEFAULTS[item.t], k))) out[k] = v;
+  for (const [k, v] of Object.entries(item)) if (!STRUCTURAL.has(k) && !VISIBLE[item.t]?.has(k) && !(knownType(item.t) && Object.hasOwn(DEFAULTS[item.t], k))) out[k] = v;
   return Object.keys(out).length ? envelopeOf(out) : "";
 };
 

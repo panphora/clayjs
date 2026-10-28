@@ -56,3 +56,12 @@ test("a chart reads marked cells as numbers and labels", () => {
   expect(model.points.map((point) => point.value)).toEqual([58, 41]);
   expect(model.points.map((point) => point.xLabel)).toEqual(["Sep <21>", "Sep\n28"]);
 });
+
+test("a saved table writes its rows once, as the visible table, and reads them back from it", () => {
+  const [item] = project({ tbl: table });
+  const html = renderModel([item]);
+  expect(html).not.toContain("data-clay-page-value");
+  const article = document.createElement("article");
+  article.innerHTML = html;
+  expect(parseModel(article)).toEqual([item]);
+});
