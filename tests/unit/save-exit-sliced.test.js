@@ -21,7 +21,7 @@ jest.setTimeout(120000);
 
 const BIG = 320 * 1024;
 
-let save, saveCore, unsaved, transition;
+let save, saveCore, unsaved, transition, editMode;
 let posts = [];
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -109,6 +109,7 @@ beforeAll(async () => {
   saveCore = await import("../../src/core/save-core.js");
   unsaved = await import("../../src/lib/unsaved-state.js");
   transition = await import("../../src/core/mode-transition.js");
+  editMode = await import("../../src/core/is-edit-mode.js");
   for (let i = 0; i < 100 && !save.baselineSettled(); i++) await sleep(50);
   expect(save.baselineSettled()).toBe(true);
   // The page's first save: no last saved size to judge yet, so it prepares in one task and
@@ -207,5 +208,226 @@ test("the exit's own save answers a soon() waiter no drained save could", async 
     gate.restore();
     session.stop();
     Object.defineProperty(performance, "now", { configurable: true, writable: true, value: realNow });
+  }
+});
+
+// ============================================
+// EVERY RETURN OF THE EXIT'S OWN SAVE ANSWERS THE CALLERS QUEUED BEHIND IT
+// ============================================
+//
+// A soon() caller whose timer fired while a save was on the wire waits for the save its own
+// call queued one behind. Each return below ends the exit's own save with nothing later
+// guaranteed to take those callers, so the answer is the return's own result. A waiter
+// nobody answers is a promise the page can never settle.
+
+// Every step of a preparation spends the slice budget, so the job hands the page back
+// between its phases and the test can hold it there.
+function stepClock() {
+  const realNow = performance.now;
+  let clock = 0;
+  Object.defineProperty(performance, "now", { configurable: true, writable: true, value: () => (clock += 10) });
+  return () => Object.defineProperty(performance, "now", { configurable: true, writable: true, value: realNow });
+}
+
+// Let whatever the return parked finish before the next test takes the lane: a drain runs
+// one more save, and its lane would make the next test's save skip instead of prepare.
+async function idleLane() {
+  for (let i = 0; i < 200 && saveCore.isSaveInProgress(); i++) await sleep(20);
+  expect(saveCore.isSaveInProgress()).toBe(false);
+  await save.savePage();
+  for (let i = 0; i < 200 && saveCore.isSaveInProgress(); i++) await sleep(20);
+  expect(saveCore.isSaveInProgress()).toBe(false);
+}
+
+// Queue callers behind the save on the wire: the timer fires while the lane is held, so
+// their own call parks and they wait for the save it queued behind.
+async function queuedBehindSaved(gate, count = 1) {
+  const answers = [];
+  const saving = save.savePage();
+  expect(gate.held.length).toBeGreaterThan(0);
+  for (let i = 0; i < count; i++) {
+    save.savePageSoon().then((value) => { answers.push(value); });
+  }
+  await sleep(300);
+  expect(answers).toHaveLength(0);
+  return { answers, saving };
+}
+
+test("a soon() caller hears the skip of a forced save that finds no edit mode", async () => {
+  setText("forced-save-not-in-edit-mode");
+  // The preparer loads on demand: one plain save gets it in place, so the hold below
+  // catches a preparation that really is sliced.
+  expect((await save.savePage()).ok).toBe(true);
+  const gate = holdSlices();
+  const restoreClock = stepClock();
+  let saving;
+  try {
+    const queued = await queuedBehindSaved(gate);
+    saving = queued.saving;
+    const answers = queued.answers;
+
+    editMode.commitModeFacts({ isEditMode: false });
+    const skipped = await save.savePageForce();
+    expect(skipped).toMatchObject({ ok: false, msgType: "skipped", msg: "Not in edit mode" });
+    editMode.commitModeFacts({ isEditMode: true });
+
+    await sleep(100);
+    expect(answers).toHaveLength(1);
+    expect(answers[0]).toMatchObject({ ok: false, msgType: "skipped", msg: "Not in edit mode" });
+  } finally {
+    editMode.commitModeFacts({ isEditMode: true });
+    gate.release();
+    gate.restore();
+    await saving?.catch(() => {});
+    restoreClock();
+    await idleLane();
+  }
+});
+
+test("a soon() caller hears the host's refusal a forced save the page may not write gives", async () => {
+  setText("forced-save-refused");
+  // The preparer loads on demand: one plain save gets it in place, so the hold below
+  // catches a preparation that really is sliced.
+  expect((await save.savePage()).ok).toBe(true);
+  const gate = holdSlices();
+  const restoreClock = stepClock();
+  let saving;
+  try {
+    const queued = await queuedBehindSaved(gate);
+    saving = queued.saving;
+    const answers = queued.answers;
+
+    editMode.noteHostWritable(false);
+    const refused = await save.savePageForce();
+    expect(refused).toMatchObject({ ok: false, msgType: "forbidden", code: "forbidden", sent: false });
+    editMode.noteHostWritable(true);
+
+    await sleep(100);
+    expect(answers).toHaveLength(1);
+    expect(answers[0]).toMatchObject({ ok: false, msgType: "forbidden", code: "forbidden" });
+  } finally {
+    editMode.noteHostWritable(true);
+    gate.release();
+    gate.restore();
+    await saving?.catch(() => {});
+    restoreClock();
+    await idleLane();
+  }
+});
+
+test("a soon() caller hears the hold a forced save waiting for a preview gives", async () => {
+  setText("forced-save-held");
+  // The preparer loads on demand: one plain save gets it in place, so the hold below
+  // catches a preparation that really is sliced.
+  expect((await save.savePage()).ok).toBe(true);
+  const reason = "Saves are held for a test preview";
+  const gate = holdSlices();
+  const restoreClock = stepClock();
+  let saving;
+  try {
+    const queued = await queuedBehindSaved(gate);
+    saving = queued.saving;
+    const answers = queued.answers;
+
+    save.holdAllSaves(reason);
+    const held = await save.savePageForce();
+    expect(held).toMatchObject({ ok: false, msgType: "skipped", msg: reason });
+    // Released without a replay, which is how a closing session drops the missed save: no
+    // later save is coming for these callers.
+    save.releaseAllSaves({ replay: false, reason });
+
+    await sleep(100);
+    expect(answers).toHaveLength(1);
+    expect(answers[0]).toMatchObject({ ok: false, msgType: "skipped", msg: reason });
+  } finally {
+    save.releaseAllSaves({ replay: false, reason });
+    gate.release();
+    gate.restore();
+    await saving?.catch(() => {});
+    restoreClock();
+    await idleLane();
+  }
+});
+
+test("a soon() caller hears the skip of a forced save that finds the lane busy", async () => {
+  setText("forced-save-lane-busy");
+  // The preparer loads on demand: one plain save gets it in place, so the hold below
+  // catches a preparation that really is sliced.
+  expect((await save.savePage()).ok).toBe(true);
+  const gate = holdSlices();
+  const restoreClock = stepClock();
+  let saving;
+  try {
+    const queued = await queuedBehindSaved(gate);
+    saving = queued.saving;
+    const answers = queued.answers;
+
+    const skipped = await save.savePageForce();
+    expect(skipped).toMatchObject({ ok: false, msgType: "skipped", msg: "Save already in progress" });
+
+    await sleep(100);
+    expect(answers).toHaveLength(1);
+    expect(answers[0]).toMatchObject({ ok: false, msgType: "skipped", msg: "Save already in progress" });
+  } finally {
+    gate.release();
+    gate.restore();
+    await saving?.catch(() => {});
+    restoreClock();
+    await idleLane();
+  }
+});
+
+// One answer per caller. The return above took the waiters out of the queue, so the save that
+// follows it is nobody's second answer: each caller still holds the skip it was given, and
+// three callers produce three answers, not six.
+test("no soon() caller is answered twice, whatever save follows", async () => {
+  setText("forced-save-answered-once");
+  // The preparer loads on demand: one plain save gets it in place, so the hold below
+  // catches a preparation that really is sliced.
+  expect((await save.savePage()).ok).toBe(true);
+  const gate = holdSlices();
+  const restoreClock = stepClock();
+  let resolutions = 0;
+  const answers = [];
+  const soon = [];
+  let saving;
+  try {
+    saving = save.savePage();
+    expect(gate.held.length).toBeGreaterThan(0);
+    for (let i = 0; i < 3; i++) {
+      soon.push(save.savePageSoon().then((value) => { resolutions++; answers.push(value); }));
+    }
+    await sleep(300);
+    expect(resolutions).toBe(0);
+
+    const skipped = await save.savePageForce();
+    expect(skipped).toMatchObject({ msgType: "skipped", msg: "Save already in progress" });
+    await sleep(100);
+    expect(resolutions).toBe(3);
+
+    // The save on the wire settles and the page is edited again, so a real save follows: a
+    // caller settled by the return above is not the next save's to answer a second time.
+    gate.release();
+    const first = await saving;
+    expect(first.msgType).not.toBe("saved");
+    for (let i = 0; i < 200 && saveCore.isSaveInProgress(); i++) await sleep(20);
+    expect(saveCore.isSaveInProgress()).toBe(false);
+
+    setText("forced-save-answered-once-later");
+    expect((await save.savePage()).ok).toBe(true);
+    await Promise.all(soon);
+    await sleep(100);
+
+    expect(resolutions).toBe(3);
+    expect(answers).toHaveLength(3);
+    for (const answer of answers) {
+      expect(answer).toMatchObject({ msgType: "skipped", msg: "Save already in progress" });
+    }
+  } finally {
+    gate.release();
+    gate.restore();
+    await saving?.catch(() => {});
+    restoreClock();
+    await idleLane();
   }
 });

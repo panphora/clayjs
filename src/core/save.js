@@ -551,7 +551,7 @@ function heldForPreview(callback, resolve) {
   const skipped = skipped_(saveHoldReason());
   callback(skipped);
   resolve(skipped);
-  return true;
+  return skipped;
 }
 
 // ============================================
@@ -1402,6 +1402,9 @@ export function savePageForce(callback = () => {}, { quietConflict = false, page
   return new Promise((resolve) => {
     if (!isEditMode && !window.clay?.testMode) {
       const skipped = skipped_('Not in edit mode');
+      // A soon() caller queued behind a save that ends here hears this answer: the page left
+      // edit mode, and no later save is coming to take them.
+      takeSoonQueued().forEach((done) => done(skipped));
       callback(skipped);
       return resolve(skipped);
     }
@@ -1420,15 +1423,27 @@ export function savePageForce(callback = () => {}, { quietConflict = false, page
     if (refusesSave()) {
       const refused = forbidden_();
       setSaveState('error', refused.msg, '', { code: refused.code, status: refused.status, sent: false });
+      // The host's refusal is the standing answer for this page, so nothing later will take
+      // these callers: they hear it here.
+      takeSoonQueued().forEach((done) => done(refused));
       callback(refused);
       return resolve(refused);
     }
 
-    if (heldForPreview(callback, resolve)) return;
+    // A held save's replay is not the waiters' answer: a hold released without a replay
+    // drops the missed save, and these callers would wait for one that never comes.
+    const held = heldForPreview(callback, resolve);
+    if (held) {
+      takeSoonQueued().forEach((done) => done(held));
+      return;
+    }
 
     if (isSaveInProgress()) {
       pendingSave = true;
       const skipped = skipped_('Save already in progress');
+      // The parked attempt behind the request on the wire is not the save these callers
+      // asked for, and its drain can be held for good: the skip is their answer.
+      takeSoonQueued().forEach((done) => done(skipped));
       callback(skipped);
       return resolve(skipped);
     }
