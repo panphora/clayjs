@@ -409,7 +409,7 @@ function mount() {
     }
   }
 
-  window.clay.menu = { addItem, open, close };
+  window.clay.menu = { addItem, open, close, note: showNote };
 }
 
 let mounted = false;

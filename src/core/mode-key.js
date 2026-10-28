@@ -94,6 +94,7 @@ function onKey(e) {
       if (!text) return;
       // Templates that load no UI satellite still say why the shortcut did nothing.
       if (typeof window.clay?.toast === "function") window.clay.toast(text, "error");
+      else if (typeof window.clay?.menu?.note === "function") window.clay.menu.note(text);
       else showNote(text);
     });
   });
