@@ -317,10 +317,25 @@ export function pasteTable(view, event) {
 
 export const tableKeys = keymap.keymap({ Tab: nextCell, "Shift-Tab": prevCell, Enter: cellBelow, "Mod-Enter": addRow(true) });
 
+function caretInCell(view, event) {
+  const cell = cellViews.get(event.target);
+  const pos = cell?.getPos();
+  if (pos == null || event.button || event.shiftKey || !view.editable) return false;
+  event.preventDefault();
+  const start = event.clientX < cell.contentDOM.getBoundingClientRect().left;
+  view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, pos + 1 + (start ? 0 : cell.node.content.size))));
+  view.focus();
+  cell.openDate();
+  return true;
+}
+
 export function tablePlugin() {
   return new Plugin({
     props: {
       handlePaste: pasteTable,
+      handleDOMEvents: {
+        mousedown: caretInCell,
+      },
       handleClickOn(view, _pos, node, nodePos, event, direct) {
         if (node.type !== N.table_cell || !direct || event.button) return false;
         const desc = view.nodeDOM(nodePos);

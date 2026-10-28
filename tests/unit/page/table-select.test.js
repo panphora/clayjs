@@ -19,7 +19,7 @@ const mouse = (type, target, init = {}) => target.dispatchEvent(new MouseEvent(t
 const clip = () => { const data = {}; return { data, clipboardData: { setData: (type, value) => { data[type] = value; }, getData: (type) => data[type] ?? "", files: [] } }; };
 const fire = (view, type, event) => view.someProp("handleDOMEvents", (handlers) => handlers[type]?.(view, event));
 const grid = (view) => { const table = blockJson(view.state.doc.child(0)); const cols = orderedIds(table.cols); return orderedIds(table.rows).map((id) => cols.map((col) => table.rows[id].cells[col])); };
-const selected = (view) => [...view.dom.querySelectorAll("td.is-cell-selected")].map((cell) => cell.firstElementChild.textContent);
+const selected = (view) => [...view.dom.querySelectorAll("td.is-cell-selected")].map((cell) => cell.querySelector("span").textContent);
 beforeAll(() => { document.elementFromPoint = () => null; });
 afterAll(() => { delete document.elementFromPoint; });
 const menu = (view) => view.dom.parentElement.querySelector(".page-menu");

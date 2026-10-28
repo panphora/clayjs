@@ -410,7 +410,7 @@ export class TableView {
   }
   fit(colId) {
     let widest = 0;
-    for (const cell of this.contentDOM.querySelectorAll("td")) if (cell.dataset.col === colId) widest = Math.max(widest, textWidth(cell.firstElementChild ?? cell));
+    for (const cell of this.contentDOM.querySelectorAll("td")) if (cell.dataset.col === colId) widest = Math.max(widest, textWidth(cell.querySelector("span") ?? cell));
     const head = [...this.header.querySelectorAll("th")].find((th) => th.dataset.col === colId)?.querySelector("button");
     widest = Math.max(widest, head?.scrollWidth ?? 0);
     return this.command(colId, setColumnWidth(colId, widest + 24));
@@ -523,7 +523,6 @@ export class TableCellView {
     cellViews.set(this.dom, this);
     this.dom.dataset.col = node.attrs.col;
     this.contentDOM = doc.createElement("span");
-    this.dom.append(this.contentDOM);
     const menu = doc.createElement("button");
     menu.type = "button";
     menu.className = "page-table-row-menu";
@@ -555,7 +554,7 @@ export class TableCellView {
       ], { persist: true });
     });
     this.menu = menu;
-    this.dom.append(menu);
+    this.dom.append(menu, this.contentDOM);
     this.update(node);
   }
   // The row and column this cell names when its menu opens; both are looked up

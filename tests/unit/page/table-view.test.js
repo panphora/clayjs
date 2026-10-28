@@ -58,3 +58,18 @@ test("editor keymap uses Tab, Enter and Mod-Enter inside cells", () => {
   expect(key(view, "Enter", { ctrlKey: true })).toBe(true);
   expect(view.state.doc.child(0).childCount).toBe(3);
 });
+
+test("a press on a cell's padding puts the caret in that cell's text, after the row button", () => {
+  const view = editor([], { blocks: { tbl: table } });
+  const cells = view.dom.querySelectorAll("tbody td");
+  for (const [index, text] of [[1, "10"], [2, "B"]]) {
+    const press = new MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 0 });
+    cells[index].dispatchEvent(press);
+    expect(press.defaultPrevented).toBe(true);
+    const { $head } = view.state.selection;
+    expect($head.parent.type.name).toBe("table_cell");
+    expect($head.parent.textContent).toBe(text);
+    expect($head.parentOffset).toBe(text.length);
+  }
+  expect(cells[0].querySelector(".page-table-row-menu").nextElementSibling).toBe(cells[0].querySelector("span"));
+});

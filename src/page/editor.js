@@ -191,7 +191,8 @@ ${INDENTS.map((n) => `:where(article[data-page], .page-editor) .page-li[data-ind
 .page-table th[aria-sort="descending"] button::after { content: " ↓"; }
 .page-table th button, .page-table-row-menu, .page-check-chip { border: 0; border-radius: 5px; background: none; color: inherit; font: inherit; cursor: pointer; }
 .page-table th button:hover, .page-table-row-menu:hover, .page-check-chip:hover { background: var(--page-pop-hover); }
-.page-table-row-menu { opacity: 0; font-size: 12px; color: var(--page-ink-soft); }
+.page-editor td > span { display: block; }
+.page-table-row-menu { float: inline-end; margin-inline-start: 4px; opacity: 0; font-size: 12px; color: var(--page-ink-soft); }
 .page-table tr:hover .page-table-row-menu, .page-table tr:focus-within .page-table-row-menu, .page-table-row-menu:focus-visible { opacity: 1; }
 .page-check-controls { display: inline-flex; gap: 4px; margin-inline-start: 8px; color: var(--page-ink-soft); font-size: 0.78em; text-decoration: none; }
 .page-check-controls[data-empty="true"] { opacity: 0; }
