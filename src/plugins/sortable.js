@@ -250,6 +250,7 @@ function makeSortable(sortableElem, Sortable, record = loose) {
   let press = null;
   let restoring = null;
   let started = false;
+  let native = false;
   let ends = [];
   // A press that ends without a drop (a click, a cancel) still has to hand the
   // gesture's exclusion back: the drop itself releases it once its entry is recorded.
@@ -271,7 +272,11 @@ function makeSortable(sortableElem, Sortable, record = loose) {
     ends = [];
     if (pending) later(record, () => restoreRuntimeAttrs(pending));
   };
-  const settleSoon = () => {
+  const settleSoon = (event) => {
+    // Chrome cancels the pointer as a native drag begins, just before Sortable's onStart:
+    // that press ends on the drop or dragend, not on the cancel.
+    if (native && event?.type === 'pointercancel') return;
+    native = false;
     // Only the press that became a drag holds: a click has nothing to keep out of
     // history, and its own handler's writes are the next entry.
     if (started) {
@@ -291,9 +296,11 @@ function makeSortable(sortableElem, Sortable, record = loose) {
     recorded = recordRuntimeAttrs(item);
     press = beginMove(item);
     started = false;
+    native = false;
     record.presses.add(recorded);
     pressed.add(recorded);
     ends = ENDS.map(type => track(record, document, type, settleSoon, true));
+    ends.push(track(record, document, 'dragstart', () => { native = true; }, true));
   }, true);
   options.onUnchoose = restoreSoon;
   // The one signal a click never makes: Sortable says the press became a drag, so this
