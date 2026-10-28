@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { parseJsonRelaxed } from 'hyper-morph/json-parse';
-import { validateOp, checkOp, applyOp, applyTracked, undoTracked, sizeChange, cloneJson, serializeLive, textHash, diffOps } from './live-data-ops.js';
+import { validateOp, checkOp, applyOp, applyOps, applyTracked, undoTracked, sizeChange, cloneJson, serializeLive, textHash, diffOps } from './live-data-ops.js';
 import { liveTags } from './live-data-tags.js';
 import { checkPageConversion, PageConversionError } from './page-conversion.js';
 import { checkPageInitial } from './page-write-admission.js';
@@ -10,7 +10,7 @@ import { makePageTransition, pageTransitionState } from './live-page-history.js'
 export { liveTags } from './live-data-tags.js';
 
 import { frameSet, contains, descendants, receiptHas, receiptBytes, saveReceipt, postReceipt, replaceReceipt, retireReceipt, RECEIPT_LIMIT } from './live-provenance.js';
-import { COMPACTION, pageShape, planCompaction, checkUpdate, admitPageOps, createRangeCache } from './page-compaction.js';
+import { COMPACTION, pageShape, planCompaction, checkUpdate, admitPageOps, createRangeCache, unionFileEntries } from './page-compaction.js';
 import { PART_KEY, entriesOf } from '../../page/ybind/parts.js';
 
 const byteLength = (text) => Buffer.byteLength(text, 'utf8');
@@ -267,6 +267,43 @@ export function createRooms({ now = Date.now, newEpoch = randomUUID, liveBytes =
     };
   };
 
+  const mergePageFile = (room, store, value) => {
+    const state = room.compaction;
+    if (value.g !== store.value.g) return null;
+    const adds = unionFileEntries({
+      y: store.value.y,
+      fileY: value.y,
+      retired: state.retired,
+      rangesFor: state.ranges,
+      keyFor: (i) => `f${textHash(room.epoch).slice(0, 8)}-${(room.seq + 1).toString(36)}-${i.toString(36)}`,
+    });
+    const seq = room.seq + 1;
+    const taken = new Set();
+    const ops = [];
+    for (const [key, v] of adds) {
+      if (Object.hasOwn(store.value.y, key) || taken.has(key)) continue;
+      taken.add(key);
+      ops.push(validateOp({ op: 'set', path: ['y', key], value: v }));
+    }
+    if (!ops.length) return null;
+    const next = applyOps(cloneJson(store.value), ops);
+    const bytes = sizeOf(next);
+    if (bytes > LIVE_LIMITS.storeBytes || roomBytes(room) - store.bytes + bytes > LIVE_LIMITS.roomBytes) return 'dropped';
+    const logged = byteLength(JSON.stringify(ops));
+    store.value = next;
+    store.bytes = bytes;
+    room.seq = seq;
+    store.last = seq;
+    store.log.push({ seq, ops, bytes: logged, merge: true });
+    store.inFile.add(seq);
+    store.logBytes += logged;
+    evict(store);
+    state.contentSeq = seq;
+    state.lastFull = null;
+    due(room);
+    return true;
+  };
+
   const endJob = (job) => {
     if (job.room.compaction?.job !== job) return false;
     job.room.compaction.job = null;
@@ -351,13 +388,14 @@ export function createRooms({ now = Date.now, newEpoch = randomUUID, liveBytes =
           if (tag.name !== 'page' || !isYPageValue(value)) continue;
         } else if (isYPageValue(value, { complete: false })) continue;
       }
+      const host = Boolean(room.compaction && tag.name === 'page' && room.pageTransition?.format === 'yjs');
       const before = store.landed;
       const base = baseOf(room, store, tag.at);
       // A capture (stamped, and still the value its stamp names) holds no merge
       // past its stamp. Anything else descends from the file on disk, which
       // holds the merges in inFile: they are not replayed over it.
       const stamped = placed(room, store, tag.at) && tag.at.hash === textHash(serializeLive(value));
-      if (base < store.floor) {
+      if (!host && base < store.floor) {
         store.landed = -1;
         if (before !== -1) landed.push(tag.name);
         continue;
@@ -365,53 +403,69 @@ export function createRooms({ now = Date.now, newEpoch = randomUUID, liveBytes =
       // A restore proves neither frame inclusion nor descent from a capture.
       const by = restored ? null : provenBy(room, tag.name, tag, stamped);
       const frames = tag.at?.epoch === room.epoch ? frameSet(by) : [];
-      const ancestry = descendants(by);
-      const own = (entry) => {
-        if (!by) return false;
-        if (!entry.merge) return contains(frames, entry.from, entry.n);
-        const p = entry.provenance;
-        return by.v === 2 && p && p.at.epoch === tag.at.epoch && p.at.seq === tag.at.seq && contains(ancestry, ...p.capture);
-      };
-      if (stamped) store.inFile.clear();
-      const entries = [];
-      for (const entry of store.log) {
-        if (entry.seq <= base) continue;
-        if (own(entry)) store.inFile.add(entry.seq);
-        else if (stamped || !store.inFile.has(entry.seq)) entries.push(entry);
-      }
-      for (const entry of entries) {
-        for (const op of entry.ops) {
-          try {
-            checkOp(value, op);
-            value = applyOp(value, op);
-          } catch {}
-        }
-      }
-      const text = serializeLive(value);
-      if (text !== serializeLive(store.value)) {
-        const bytes = byteLength(text);
-        if (bytes > LIVE_LIMITS.storeBytes || roomBytes(room) - store.bytes + bytes > LIVE_LIMITS.roomBytes) {
+      if (host) {
+        // No log replay: the room takes in every edit the file holds and that it
+        // lacks, each under a fresh key, and never deletes or overwrites its own.
+        const merged = mergePageFile(room, store, value);
+        if (merged === 'dropped') {
           room.stores.delete(tag.name);
           valueChanged = true;
           continue;
         }
-        // Logged like a frame, so a capture stamped before this merge gets it
-        // replayed on top (leaf ops: a capture that holds it already is unchanged).
-        const ops = diffOps(store.value, value);
-        store.value = value;
-        store.bytes = bytes;
-        room.seq += 1;
-        store.last = room.seq;
-        const provenance = by?.v === 2 ? { at: { epoch: tag.at.epoch, seq: tag.at.seq }, by: by.frames, capture: by.capture } : null;
-        const logged = byteLength(JSON.stringify(provenance ? { ops, provenance } : ops));
-        store.log.push({ seq: room.seq, ops, bytes: logged, merge: true, ...(provenance && { provenance }) });
-        store.inFile.add(room.seq);
-        store.logBytes += logged;
-        evict(store);
-        valueChanged = true;
+        if (merged) valueChanged = true;
+        if (stamped && tag.at.epoch === room.epoch) {
+          store.landed = tag.at.seq >= room.compaction.contentSeq ? store.last : tag.at.seq;
+          if (store.landed !== before) landed.push(tag.name);
+        }
+      } else {
+        const ancestry = descendants(by);
+        const own = (entry) => {
+          if (!by) return false;
+          if (!entry.merge) return contains(frames, entry.from, entry.n);
+          const p = entry.provenance;
+          return by.v === 2 && p && p.at.epoch === tag.at.epoch && p.at.seq === tag.at.seq && contains(ancestry, ...p.capture);
+        };
+        if (stamped) store.inFile.clear();
+        const entries = [];
+        for (const entry of store.log) {
+          if (entry.seq <= base) continue;
+          if (own(entry)) store.inFile.add(entry.seq);
+          else if (stamped || !store.inFile.has(entry.seq)) entries.push(entry);
+        }
+        for (const entry of entries) {
+          for (const op of entry.ops) {
+            try {
+              checkOp(value, op);
+              value = applyOp(value, op);
+            } catch {}
+          }
+        }
+        const text = serializeLive(value);
+        if (text !== serializeLive(store.value)) {
+          const bytes = byteLength(text);
+          if (bytes > LIVE_LIMITS.storeBytes || roomBytes(room) - store.bytes + bytes > LIVE_LIMITS.roomBytes) {
+            room.stores.delete(tag.name);
+            valueChanged = true;
+            continue;
+          }
+          // Logged like a frame, so a capture stamped before this merge gets it
+          // replayed on top (leaf ops: a capture that holds it already is unchanged).
+          const ops = diffOps(store.value, value);
+          store.value = value;
+          store.bytes = bytes;
+          room.seq += 1;
+          store.last = room.seq;
+          const provenance = by?.v === 2 ? { at: { epoch: tag.at.epoch, seq: tag.at.seq }, by: by.frames, capture: by.capture } : null;
+          const logged = byteLength(JSON.stringify(provenance ? { ops, provenance } : ops));
+          store.log.push({ seq: room.seq, ops, bytes: logged, merge: true, ...(provenance && { provenance }) });
+          store.inFile.add(room.seq);
+          store.logBytes += logged;
+          evict(store);
+          valueChanged = true;
+        }
+        store.landed = entries.length ? base : store.last;
+        if (store.landed !== before) landed.push(tag.name);
       }
-      store.landed = entries.length ? base : store.last;
-      if (store.landed !== before) landed.push(tag.name);
       // Saves record exact inclusion; only legacy captures advance a watermark.
       if (by?.v === 2) {
         for (const [client, ranges] of frames) {
