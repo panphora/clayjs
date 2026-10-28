@@ -842,6 +842,8 @@ class Chrome {
         const r = m.anchor === this.plus ? (dom?.getBoundingClientRect?.() ?? edBox) : m.anchor.getBoundingClientRect();
         left = r.left;
         top = r.bottom + 6;
+        const height = this.menuEl.offsetHeight;
+        if (top + height > this.win.innerHeight - 8 && r.top - 6 - height >= 8) top = r.top - 6 - height;
       }
       out.menu = { x: Math.max(8, Math.min(left - shellBox.left, shellBox.width - 280)), y: top - shellBox.top };
     }

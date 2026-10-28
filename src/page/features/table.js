@@ -499,7 +499,7 @@ export class TableView {
     if (focused && !renaming) this.afterUpdate(focused);
     return true;
   }
-  stopEvent(event) { return !!event.target.closest?.("thead, .page-table-actions"); }
+  stopEvent(event) { return !!event.target.closest?.("thead, .page-table-actions, .page-table-add-row, .page-table-add-col"); }
   ignoreMutation(mutation) { return !this.contentDOM.contains(mutation.target); }
   destroy() {
     this.destroyed = true;
