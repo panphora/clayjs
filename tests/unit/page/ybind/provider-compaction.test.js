@@ -1,7 +1,7 @@
 import * as Y from "../../../../src/vendor/yjs.vendor.js";
 import { createStore } from "../../../../src/live/store.js";
 import { NET } from "../../../../src/page/ybind/layout.js";
-import { createYProvider, enc, entriesOf, docFromValue } from "../../../../src/page/ybind/provider.js";
+import { createYProvider, enc, entriesOf, docFromValue, PART } from "../../../../src/page/ybind/provider.js";
 import { captureYValue } from "../../../../src/page/ybind/parts.js";
 
 const clone = (v) => JSON.parse(JSON.stringify(v));
@@ -339,4 +339,76 @@ test("a transport fold never counts as a checkpoint", () => {
   expect(deliveries).toEqual([]);
   expect(keysUnder(store.authoritative, "m")).toEqual([]);
   expect(textOf(store.authoritative).length).toBe(40);
+});
+
+test("an own acknowledgment of a multipart fold applies nothing", () => {
+  const source = new Y.Doc({ gc: false });
+  source.clientID = 9;
+  const flow = source.getText("flow");
+  flow.insert(0, "x".repeat(20000));
+  let seed = 5;
+  const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+  for (let i = 0; i < 20000; i++) {
+    const at = 1 + Math.floor(rnd() * (flow.length - 2));
+    if (rnd() < 0.6) flow.insert(at, "ab"); else flow.delete(at, 1);
+  }
+  const text = enc(Y.encodeStateAsUpdateV2(source));
+  const n = Math.ceil(text.length / PART);
+  const y = Object.fromEntries(Array.from({ length: n }, (_, i) => [`m9-0.${i}.${n}`, text.slice(i * PART, (i + 1) * PART)]));
+  const store = createStore({ name: "page", value: { v: 1, g: 0, y } });
+  const ydoc = new Y.Doc();
+  ydoc.clientID = 5;
+  Y.applyUpdateV2(ydoc, Y.encodeStateAsUpdateV2(source));
+  const provider = createYProvider({ store, ydoc, ...timers });
+  const applied = [];
+  for (let i = 0; i < 5; i++) {
+    ydoc.getText("flow").insert(5, "k");
+    const next = { v: 1, g: 0, y: { ...store.value.y } };
+    store.rebase(next, { source: "state", confirmed: store.pending.length });
+    flush();
+    applied.push(provider.stats.applied);
+  }
+  expect(n).toBeGreaterThan(1);
+  expect(applied).toEqual([0, 0, 0, 0, 0]);
+  expect(entriesOf(store.value.y).filter(([k]) => k[0] === "m").length).toBe(1);
+  provider.dispose();
+  ydoc.destroy();
+  source.destroy();
+});
+
+test("the cover cache survives consecutive remote frames", () => {
+  const parts = (key, data) => {
+    const encoded = enc(data);
+    const n = Math.ceil(encoded.length / PART);
+    return Object.fromEntries(Array.from({ length: n }, (_, i) => [`${key}.${i}.${n}`, encoded.slice(i * PART, (i + 1) * PART)]));
+  };
+  const source = new Y.Doc();
+  source.clientID = 9;
+  source.transact(() => { for (let i = 0; i < 12000; i++) source.getMap("items").set(`key-${i}`, "x".repeat(120)); });
+  const base = parts("mbase", Y.encodeStateAsUpdateV2(source));
+  let side;
+  source.once("updateV2", (update) => { side = parts("mside", update); });
+  source.getMap("items").set("side-text", "y".repeat(60000));
+  const value = { v: 1, g: 0, y: { ...base, ...side } };
+  const store = createStore({ name: "page", value });
+  const ydoc = docFromValue(value, { strict: true });
+  const provider = createYProvider({ store, ydoc, ...timers });
+  const frame = (i) => {
+    let update;
+    source.once("updateV2", (u) => { update = enc(u); });
+    source.getMap("items").set(`small-${i}`, i);
+    const ops = [{ op: "set", path: ["y", `u9-${i}`], value: update }];
+    store.rebaseOps(ops, { source: "remote", frame: { ops } });
+  };
+  frame(0);
+  expect(provider.compact()).toBe(false);
+  expect(provider._diagnostics().cover).toBe(2);
+  const sizes = [];
+  for (let i = 1; i < 4; i++) { frame(i); sizes.push(provider._diagnostics().cover); }
+  expect(sizes).toEqual([2, 2, 2]);
+  expect(provider._diagnostics().fold).toBe(0);
+  expect(provider.stats.compactions).toBe(0);
+  provider.dispose();
+  ydoc.destroy();
+  source.destroy();
 });

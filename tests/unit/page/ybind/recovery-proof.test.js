@@ -31,6 +31,7 @@ import {
   replayPageValue,
 } from "../../../../src/page/ybind/recovery-replay.js";
 import { lineageOf, sameLineage } from "../../../../src/page/ybind/lineage.js";
+import { indexContains, stateIndex } from "../../../../src/page/ybind/containment.js";
 import { sameAuthority } from "../../../../src/recovery/identity.js";
 
 Object.defineProperty(globalThis, "crypto", { value: webcrypto, configurable: true, writable: true });
@@ -411,4 +412,84 @@ test("a capsule's recorded lineage is the digest and vector of its base", async 
   expect(parts.revision).toBe(FIXTURE.capsule.revision);
   expect(parts.context).toEqual(FIXTURE.context);
   expect(() => accumulateCapsule({ capsule: { ...capsule, kind: "text" }, batches })).toThrow(PageReplayError);
+});
+describe("containment index", () => {
+  const containsUpdateByApplying = (checkpoint, update) => {
+    const doc = new Y.Doc({ gc: false });
+    try {
+      Y.applyUpdateV2(doc, checkpoint);
+      const before = Y.snapshot(doc);
+      Y.applyUpdateV2(doc, update);
+      if (doc.store.pendingStructs || doc.store.pendingDs) return false;
+      return Y.equalSnapshots(before, Y.snapshot(doc));
+    } finally {
+      doc.destroy();
+    }
+  };
+
+  test("agrees with apply-and-compare on random histories", () => {
+    let seed = 7;
+    const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+    const pick = (list) => list[Math.floor(rnd() * list.length)];
+    const sync = (a, b) => Y.applyUpdateV2(b, Y.encodeStateAsUpdateV2(a, Y.encodeStateVector(b)));
+    let checks = 0, mismatches = 0, trues = 0, falses = 0;
+    for (let trial = 0; trial < 300; trial++) {
+      const docs = [1, 2, 3].map((client) => { const doc = new Y.Doc({ gc: rnd() < 0.3 }); doc.clientID = client; return doc; });
+      const updates = [];
+      for (const doc of docs) doc.on("updateV2", (u) => updates.push(u));
+      const steps = 5 + Math.floor(rnd() * 40);
+      for (let step = 0; step < steps; step++) {
+        const doc = pick(docs);
+        const text = doc.getText("flow"), map = doc.getMap("m");
+        const roll = rnd();
+        if (roll < 0.45) text.insert(Math.floor(rnd() * (text.length + 1)), "abcdef".slice(0, 1 + Math.floor(rnd() * 5)));
+        else if (roll < 0.7 && text.length) { const at = Math.floor(rnd() * text.length); text.delete(at, Math.min(text.length - at, 1 + Math.floor(rnd() * 4))); }
+        else if (roll < 0.8) map.set("k" + Math.floor(rnd() * 4), rnd());
+        else if (roll < 0.85) map.delete("k" + Math.floor(rnd() * 4));
+        else { const a = pick(docs), b = pick(docs); if (a !== b) sync(a, b); }
+      }
+      const states = [];
+      states.push(Y.encodeStateAsUpdateV2(pick(docs)));
+      const sub = updates.filter(() => rnd() < 0.7);
+      if (sub.length) states.push(Y.mergeUpdatesV2(sub));
+      states.push(Y.mergeUpdatesV2(updates));
+      const candidates = [...updates, ...states, sub.length ? Y.mergeUpdatesV2(sub.slice(0, Math.ceil(sub.length / 2))) : updates[0]].filter(Boolean);
+      for (const state of states) {
+        const index = stateIndex([state]);
+        for (const update of candidates) {
+          const applied = containsUpdateByApplying(state, update);
+          const indexed = indexContains(index, update);
+          checks++;
+          if (applied) trues++; else falses++;
+          if (applied !== indexed) mismatches++;
+        }
+      }
+      for (const doc of docs) doc.destroy();
+    }
+    expect({ checks, mismatches, trues, falses }).toEqual(expect.objectContaining({ mismatches: 0 }));
+    expect(trues).toBeGreaterThan(0);
+    expect(falses).toBeGreaterThan(0);
+  });
+
+  test("refuses deletion-only records the index lacks, even with equal state vectors", () => {
+    const source = page(1);
+    const map = source.getMap("m");
+    for (let i = 0; i < 33; i++) map.set("k" + i, i);
+    const checkpoint = Y.encodeStateAsUpdateV2(source);
+
+    const later = page(2);
+    Y.applyUpdateV2(later, checkpoint);
+    const updates = [];
+    later.on("updateV2", (u) => updates.push(u));
+    for (let i = 0; i < 33; i++) later.getMap("m").delete("k" + i);
+    expect(updates).toHaveLength(33);
+
+    for (const update of updates) expect([...Y.parseUpdateMetaV2(update).to.keys()]).toEqual([]);
+
+    const checkpointIndex = stateIndex([checkpoint]);
+    for (const update of updates) expect(indexContains(checkpointIndex, update)).toBe(false);
+
+    const laterIndex = stateIndex([Y.encodeStateAsUpdateV2(later)]);
+    for (const update of updates) expect(indexContains(laterIndex, update)).toBe(true);
+  });
 });

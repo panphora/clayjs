@@ -14,8 +14,9 @@
  * state and the receipt arrive in the proof itself.
  */
 
-import { Doc, applyUpdateV2, encodeStateAsUpdateV2, equalSnapshots, snapshot } from "../../vendor/yjs.vendor.js";
+import { encodeStateAsUpdateV2 } from "../../vendor/yjs.vendor.js";
 import { docFromValue } from "./provider.js";
+import { indexOf, indexContains } from "./containment.js";
 
 export class PageProofError extends Error {
   constructor(code, message) {
@@ -41,27 +42,18 @@ export const equalBytes = (a, b) => a.length === b.length && a.every((value, ind
 
 /**
  * Whether applying `update` on top of `checkpoint` adds nothing: no insertion, no
- * deletion. Compared by structure (state vector and delete set), since merged bytes are
- * not stable across merge orders. An update whose dependencies the checkpoint lacks is
- * not contained: Yjs would hold it pending rather than refuse it.
+ * deletion. Compared by structure (the items and deletions the checkpoint holds), since
+ * merged bytes are not stable across merge orders. An update whose dependencies the
+ * checkpoint lacks is not contained: Yjs would hold it pending rather than refuse it. The
+ * checkpoint is integrated once for as long as its bytes are held, and each update after
+ * it is read, not applied.
  *
  * @param {Uint8Array} checkpoint - canonical or merged Yjs V2 update bytes
  * @param {Uint8Array} update - the bytes to look for
- * @param {Object} [Yjs] - the vendored Yjs module
  * @returns {boolean}
  */
-export function containsUpdate(checkpoint, update, Yjs = null) {
-  const Y = Yjs ?? { Doc, applyUpdateV2, snapshot, equalSnapshots };
-  const doc = new Y.Doc({ gc: false });
-  try {
-    Y.applyUpdateV2(doc, checkpoint);
-    const before = Y.snapshot(doc);
-    Y.applyUpdateV2(doc, update);
-    if (doc.store.pendingStructs || doc.store.pendingDs) return false;
-    return Y.equalSnapshots(before, Y.snapshot(doc));
-  } finally {
-    doc.destroy();
-  }
+export function containsUpdate(checkpoint, update) {
+  return indexContains(indexOf(checkpoint), update);
 }
 
 export async function digestHex(bytes) {
@@ -69,27 +61,47 @@ export async function digestHex(bytes) {
   return [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, "0")).join("");
 }
 
+// The last few states decoded, by their entries: a proof, its validation, the file debt
+// and the journal's rebase all ask for the same state's bytes after one accepted save.
+const CANONICAL_MAX = 4;
+const canonical = [];
+const sameState = (memo, state) => {
+  if (memo.v !== state.v || memo.g !== state.g) return false;
+  const keys = Object.keys(state.y ?? {});
+  if (keys.length !== memo.y.size) return false;
+  for (const key of keys) if (memo.y.get(key) !== state.y[key]) return false;
+  return true;
+};
+
 /**
  * The accepted page state as one canonical update, decoded strictly.
  *
  * Pending structs, missing part and a delete set naming an unknown item all refuse:
- * a checkpoint nobody can decode proves nothing about a journaled record.
+ * a checkpoint nobody can decode proves nothing about a journaled record. The same state
+ * answers with the same bytes, which no caller may change.
  *
  * @param {Object} state - a version 1 page value
  * @returns {Uint8Array}
  */
 export function canonicalPageBytes(state) {
+  const hit = state && typeof state === "object" && state.y && typeof state.y === "object" ? canonical.find((memo) => sameState(memo, state)) : null;
+  if (hit) return hit.bytes;
   let doc;
   try {
     doc = docFromValue(state, { strict: true });
   } catch (error) {
     fail("invalid-state", `The accepted page state does not decode: ${error.message}`);
   }
+  let bytes;
   try {
-    return encodeStateAsUpdateV2(doc);
+    bytes = encodeStateAsUpdateV2(doc);
+    indexOf(bytes, doc);
   } finally {
     doc.destroy();
   }
+  if (canonical.length >= CANONICAL_MAX) canonical.shift();
+  canonical.push({ v: state.v, g: state.g, y: new Map(Object.entries(state.y)), bytes });
+  return bytes;
 }
 
 // The same answer `sameAuthority` gives in recovery/identity.js, written here because the

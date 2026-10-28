@@ -4,6 +4,7 @@ import { NET } from "./layout.js";
 import { ORIGINS_ORIGIN } from "./origins.js";
 import { PART_KEY, isBase64, entriesOf, captureYValue } from "./parts.js";
 import { containsUpdate } from "./recovery-proof.js";
+import { rangesOf, unite, within, docRanges } from "./containment.js";
 
 export { entriesOf } from "./parts.js";
 
@@ -158,9 +159,17 @@ export function createYProvider({ store, ydoc, compact: limits = {}, setTimer = 
 
   const settle = () => { reconcile(); maybeCompact(); };
 
+  // The room's entries already hold every item and deletion of this tab's document, read
+  // from each entry's cached ranges: nothing to offer, and no copy of the room is built.
+  const roomHolds = (y) => {
+    const mine = docRanges(ydoc);
+    return mine.complete && within(unite(entriesOf(y ?? {}).map(([k, v]) => rangesFor(k, v))), mine);
+  };
+
   function reconcile() {
     if (stopped) return false;
     const y = store.value.y;
+    if (roomHolds(y)) { wantReconcile = false; reconcilePending = false; return false; }
     const scratch = new Y.Doc();
     for (const [, v] of entriesOf(y)) Y.applyUpdateV2(scratch, dec(v), NET);
     const sv = Y.encodeStateVector(scratch);
@@ -183,24 +192,38 @@ export function createYProvider({ store, ydoc, compact: limits = {}, setTimer = 
   let quietUntil = 0;
   const COVER_MAX = 256;
   const coverCache = new Map();
+  const META_MAX = 256;
+  const metas = new Map();
   const drop = (keys) => store.handle.update((data) => { for (const k of keys) delete data.y[k]; });
   const keysOf = (auth, bases) => Object.keys(auth).filter((k) => bases.has(baseOf(k)));
   // A key is retired only while what this tab shows under it is still what the proof was
   // made over: a late write under the same key keeps its own entry.
   const retire = (auth, keys) => { const visible = store.value.y ?? {}; drop(keys.filter((k) => k in visible && visible[k] === auth[k])); };
 
-  // `known` and the coverage memo keep live references only: the authoritative entries,
-  // this tab's own unconfirmed writes and the fold in progress. Pruned after a rebase, a
-  // fold and a refusal. A key that is forgotten can be decoded again; Yjs is idempotent.
+  // The items and deletions one entry holds, read once per value.
+  const rangesFor = (key, value) => {
+    const meta = metas.get(key);
+    if (meta && meta.value === value) return meta.ranges;
+    if (metas.size >= META_MAX) metas.delete(metas.keys().next().value);
+    const ranges = rangesOf(dec(value));
+    metas.set(key, { value, ranges });
+    return ranges;
+  };
+
+  // `known` and the entry memo keep live references only: the authoritative entries, by
+  // their whole keys, this tab's own unconfirmed writes and the fold in progress. Pruned
+  // after a rebase, a fold and a refusal. A key that is forgotten can be decoded again;
+  // Yjs is idempotent.
   function prune() {
     const auth = store.authoritative.y ?? {};
     const visible = store.value.y ?? {};
     for (const k of own) if (!(k in visible)) own.delete(k);
-    const held = fold ? [...fold.parts.map(([k]) => k), ...fold.inputs.keys()] : [];
-    const retained = new Set([...Object.keys(auth), ...own, ...held]);
-    for (const key of known) if (!retained.has(key)) known.delete(key);
     const values = new Map(entriesOf(auth));
+    const held = fold ? [fold.key, ...fold.parts.map(([k]) => k), ...fold.inputs.keys()] : [];
+    const retained = new Set([...Object.keys(auth), ...values.keys(), ...own, ...held]);
+    for (const key of known) if (!retained.has(key)) known.delete(key);
     for (const [key, proof] of coverCache) if (!retained.has(key) || values.get(key) !== proof.value) coverCache.delete(key);
+    for (const [key, meta] of metas) if (!retained.has(key) || (values.has(key) && values.get(key) !== meta.value)) metas.delete(key);
   }
 
   // Whether a fold's merged bytes already carry this input: merging it in again changes
@@ -315,7 +338,7 @@ export function createYProvider({ store, ydoc, compact: limits = {}, setTimer = 
   // with this tab's document is a page rebuilt from another article while the tab was away.
   const clientsOf = (y) => {
     const clients = new Set();
-    for (const [, v] of entriesOf(y ?? {})) for (const c of Y.decodeStateVector(Y.encodeStateVectorFromUpdateV2(dec(v))).keys()) clients.add(c);
+    for (const [k, v] of entriesOf(y ?? {})) for (const [c, spans] of rangesFor(k, v).items) if (spans[0][0] === 0) clients.add(c);
     return clients;
   };
   // A page whose article has no blocks seeds with no client at all; it still shares its
