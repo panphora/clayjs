@@ -22,6 +22,8 @@ test("a save that took another tab's title keeps an edit made after its capture"
 
   localStorage.setItem(key, JSON.stringify(OTHER));
 
+  // An edit of this tab's own, so the save has something to capture.
+  document.querySelector('#rows > li[data-id="r1"] .n').textContent = "B first edit";
   const saving = clay.save();
   document.querySelector('#rows > li[data-id="r1"] .n').textContent = "B second edit";
   await saving;

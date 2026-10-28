@@ -1,7 +1,4 @@
 import { announceBottomUi, bottomBarHeight } from "./bottom-ui.js";
-
-const FONT_HREF = "https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500&family=IBM+Plex+Sans:wght@400;500;600&family=Newsreader:opsz,wght@6..72,500&display=swap";
-
 const ASIDE = `<aside class="hcp" id="hcp" hidden aria-label="Download this app" data-hcp-state="tab" data-hcp-reason="open" sap-ignore clay="editor-ui">
   <section class="hcp-card" id="hcp-card" role="dialog" aria-modal="false" aria-labelledby="hcp-title">
     <button type="button" class="hcp-x" data-hcp="minimize" aria-label="Minimize"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="M5 12h14"/></svg></button>
@@ -26,7 +23,7 @@ const ASIDE = `<aside class="hcp" id="hcp" hidden aria-label="Download this app"
 export async function mountPrompt({ memory, appName, link }) {
   if (!document.getElementById("hcp-style")) {
     const { PROMPT_CSS } = await import("./prompt-style.js");
-    document.head.insertAdjacentHTML("beforeend", `<link rel="stylesheet" clay="editor-ui" href="${FONT_HREF}">\n<style clay="editor-ui" id="hcp-style">${PROMPT_CSS}</style>`);
+    document.head.insertAdjacentHTML("beforeend", `<style clay="editor-ui" id="hcp-style">${PROMPT_CSS}</style>`);
   }
   if (!document.getElementById("hcp")) document.body.insertAdjacentHTML("beforeend", ASIDE);
 

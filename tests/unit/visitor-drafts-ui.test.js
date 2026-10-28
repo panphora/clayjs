@@ -140,7 +140,8 @@ test("draft mode mounts one prompt whose link points at this page's download", a
   expect(prompt().hasAttribute("sap-ignore")).toBe(true);
   expect(linkHref()).toBe("/_/download?as=htmlclay");
   expect(document.getElementById("hcp-style").getAttribute("clay")).toBe("editor-ui");
-  expect(document.querySelector("head link[clay='editor-ui']").getAttribute("href")).toContain("fonts.googleapis.com/css2");
+  // A visitor's browser asks no third party for fonts: the prompt uses system stacks.
+  expect(document.querySelector("head link[href*='fonts.googleapis.com']")).toBeNull();
 
   const forms = [
     ["/kanban", "/_/download/kanban.html?as=htmlclay"],
