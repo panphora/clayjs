@@ -11,6 +11,9 @@ import { editor, posOf, select, typeText } from "./view-helpers.js";
 afterEach(() => { document.body.innerHTML = ""; });
 
 const wait = (ms = 20) => new Promise((r) => setTimeout(r, ms));
+const until = async (check, timeout = 2000) => {
+  for (const end = Date.now() + timeout; !check() && Date.now() < end;) await wait(10);
+};
 const fake = () => {
   const calls = [];
   const run = (code, lang) => {
@@ -80,12 +83,12 @@ test("the picker sets the language as one undo step, and Plain text clears the c
   picker.value = "python";
   picker.dispatchEvent(new Event("change"));
   expect(view.state.doc.child(0).attrs.lang).toBe("python");
-  await wait();
+  await until(() => decos(view).length > 0);
   expect(calls).toEqual([["print(1)", "python"]]);
   expect(decos(view).length).toBe(1);
   picker.value = "";
   picker.dispatchEvent(new Event("change"));
-  await wait();
+  await until(() => decos(view).length === 0);
   expect(decos(view)).toEqual([]);
   history.undo(view.state, view.dispatch);
   expect(view.state.doc.child(0).attrs.lang).toBe("python");
