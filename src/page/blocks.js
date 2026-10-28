@@ -790,22 +790,40 @@ function collapseState(doc, reveal = NO_REVEAL) {
   return { decos: decorationsFor(doc, ents), ranges: hiddenRanges(ents), reveal };
 }
 
+// The block decorations of a long document in one linear pass. ProseMirror's
+// DecorationSet scans every top-level node decoration for each child the view
+// visits and each decoration it maps, which is quadratic in blocks; this set
+// holds only node decorations at the top and finds a toggle's widget by binary
+// search. It is built directly in document order instead of through create().
+let OutlineSet = null;
+const outlineSet = () => OutlineSet ??= class extends pmView.DecorationSet {
+  forChild(offset, node) {
+    if (node.isLeaf) return pmView.DecorationSet.empty;
+    const c = this.children;
+    let lo = 0, hi = c.length / 3;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (c[mid * 3] < offset) lo = mid + 1; else hi = mid; }
+    return lo * 3 < c.length && c[lo * 3] === offset ? c[lo * 3 + 2] : pmView.DecorationSet.empty;
+  }
+};
+
 export function decorationsFor(doc, ents = outline(doc)) {
   const { Decoration, DecorationSet } = pmView;
   const markers = orderedMarkers(ents);
-  const decos = [];
+  const local = [], children = [];
   for (const e of ents) {
     const attrs = {};
     if (e.hidden) { attrs.class = "page-hidden"; attrs["aria-hidden"] = "true"; }
     if (e.depth) attrs.style = `--page-depth:${e.depth}`;
     if (markers.has(e.i)) attrs["data-marker"] = markers.get(e.i);
     if (isToggle(e.node)) attrs["aria-expanded"] = e.open ? "true" : "false";
-    if (Object.keys(attrs).length) decos.push(Decoration.node(e.at, e.end, attrs));
+    if (Object.keys(attrs).length) local.push(Decoration.node(e.at, e.end, attrs));
     if (isToggle(e.node) && !e.hidden) {
-      decos.push(Decoration.widget(e.at + 1, () => disclosure(e.node, e.open), { side: -1, ignoreSelection: true, key: `t:${e.node.attrs.id}:${e.open}` }));
+      const widget = Decoration.widget(0, () => disclosure(e.node, e.open), { side: -1, ignoreSelection: true, key: `t:${e.node.attrs.id}:${e.open}` });
+      children.push(e.at, e.end, new DecorationSet([widget], []));
     }
   }
-  return DecorationSet.create(doc, decos);
+  if (!local.length && !children.length) return DecorationSet.empty;
+  return new (outlineSet())(local, children);
 }
 
 function disclosure(node, open = node.attrs.open) {
@@ -833,13 +851,7 @@ export function collapsePlugin() {
           return collapseState(s.doc, reveal);
         }
         if (!tr.docChanged) return value;
-        if (!sameStructure(old.doc, s.doc)) return collapseState(s.doc, value.reveal);
-        const m = tr.mapping;
-        return {
-          ...value,
-          decos: value.decos.map(m, s.doc),
-          ranges: value.ranges.map((r) => ({ line: m.map(r.line, -1), sumEnd: m.map(r.sumEnd), from: m.map(r.from), to: m.map(r.to, -1) })),
-        };
+        return collapseState(s.doc, value.reveal);
       },
     },
     appendTransaction(trs, old, next) {
