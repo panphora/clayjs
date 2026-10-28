@@ -2,7 +2,7 @@ import * as Y from "../../vendor/yjs.vendor.js";
 import { toBase64, fromBase64 } from "../../vendor/yjs.vendor.js";
 import { NET } from "./layout.js";
 import { ORIGINS_ORIGIN } from "./origins.js";
-import { PART_KEY, BASE64, entriesOf, captureYValue } from "./parts.js";
+import { PART_KEY, isBase64, entriesOf, captureYValue } from "./parts.js";
 import { containsUpdate } from "./recovery-proof.js";
 
 export { entriesOf } from "./parts.js";
@@ -63,7 +63,7 @@ export function docFromValue(value, { strict = false } = {}) {
   try {
     for (const [key, value] of entries) {
       const text = strict ? value.replace(/[\t\n\f\r ]/g, "") : value;
-      if (strict && !BASE64.test(text)) throw new YDecodeError("invalid-update", `Invalid base64 in Yjs update: ${key}`);
+      if (strict && !isBase64(text)) throw new YDecodeError("invalid-update", `Invalid base64 in Yjs update: ${key}`);
       Y.applyUpdateV2(d, dec(text), NET);
     }
     if (strict && (d.store.pendingStructs || d.store.pendingDs)) {

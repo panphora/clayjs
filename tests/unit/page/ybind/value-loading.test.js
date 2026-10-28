@@ -103,6 +103,17 @@ test("strict base64 rejects Node's ignored garbage while retaining whitespace an
   expect(load(valueOf({ seed: ` \n${full.replace(/=+$/, "")}\t` })).getText("flow").toString()).toBe("hello world");
 });
 
+// A store holds up to 4 MiB, and a backtracking base64 check overflowed V8's backtrack stack
+// at about 4.4 MB of base64 in a fresh process (and at 3.3 MB after earlier files in the same
+// jest worker had used up part of it), so strict loading refused a legitimate large page.
+test("strict base64 checks an update of several MB without exhausting the regexp stack", () => {
+  const text = "s".repeat(4_000_000);
+  const seed = encoded(text);
+  expect(seed.length).toBeGreaterThan(5_000_000);
+  expect(load(valueOf({ seed })).getText("flow").length).toBe(text.length);
+  fails(valueOf({ seed: seed + "@" }), "invalid-update");
+});
+
 test.each([null, { v: 0, y: {} }, { v: 1 }, { v: 1, y: [] }])("strict loading rejects an unsupported envelope: %p", (value) => {
   fails(value, "invalid-value");
 });

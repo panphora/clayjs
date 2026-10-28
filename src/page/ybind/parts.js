@@ -1,5 +1,12 @@
 export const PART_KEY = /^(.+)\.(\d+)\.(\d+)$/;
-export const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}(?:==)?|[A-Za-z0-9+/]{3}=?)?$/;
+// A regexp group per quad keeps backtrack state per quad and overflows on a page of a few MB.
+const NOT_BASE64 = /[^A-Za-z0-9+/]/;
+export function isBase64(text) {
+  const pad = text.endsWith("==") ? 2 : text.endsWith("=") ? 1 : 0;
+  const body = text.length - pad;
+  if (NOT_BASE64.test(pad ? text.slice(0, body) : text)) return false;
+  return pad ? body % 4 + pad === 4 : body % 4 !== 1;
+}
 const PART_CHARS = /^[A-Za-z0-9+/=\t\n\f\r ]*$/;
 
 export function entriesOf(y) {
