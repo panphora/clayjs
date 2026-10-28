@@ -94,6 +94,111 @@
       "status": "pass"
     },
     {
+      "path": "tests/mode-counterexamples/cases/round3/bare-contenteditable-gains-inert.json",
+      "status": "pass",
+      "runner": "cli"
+    },
+    {
+      "path": "tests/mode-counterexamples/cases/round3/entry-lockout-autosave.json",
+      "status": "pass",
+      "runner": "cli"
+    },
+    {
+      "path": "tests/mode-counterexamples/cases/round3/entry-lockout-boolean-order.json",
+      "status": "pass",
+      "runner": "cli"
+    },
+    {
+      "path": "tests/mode-counterexamples/cases/round3/entry-write-autosave-boolean-order.json",
+      "status": "pass",
+      "runner": "cli"
+    },
+    {
+      "path": "tests/mode-counterexamples/cases/round3/entry-write-boolean-order.json",
+      "status": "pass",
+      "runner": "cli"
+    },
+    {
+      "path": "tests/mode-counterexamples/cases/round3/entry-write-inert-contenteditable-order.json",
+      "status": "pass",
+      "runner": "cli"
+    },
+    {
+      "path": "tests/mode-counterexamples/cases/round3/entry-write-inert-onclick-order.json",
+      "status": "pass",
+      "runner": "cli"
+    },
+    {
+      "path": "tests/mode-counterexamples/cases/round3/entry-write-source-mapped.json",
+      "status": "pass",
+      "runner": "cli"
+    },
+    {
+      "path": "tests/mode-counterexamples/cases/round3/ime-late-commit-after-view.json",
+      "status": "pass",
+      "runner": "cli"
+    },
+    {
+      "path": "tests/mode-counterexamples/cases/round3/ime-unsent-compose-target.json",
+      "status": "pass",
+      "runner": "cli"
+    },
+    {
+      "path": "tests/mode-counterexamples/cases/round3/late-source-chunk-failed.json",
+      "status": "pass",
+      "runner": "cli"
+    },
+    {
+      "path": "tests/mode-counterexamples/cases/round3/page-pending-selector-target.json",
+      "status": "pass",
+      "runner": "cli"
+    },
+    {
+      "path": "tests/mode-counterexamples/cases/round3/seo-apply-head-conservation.json",
+      "status": "pass",
+      "runner": "cli"
+    },
+    {
+      "path": "tests/mode-counterexamples/cases/round3/seo-close-discard-conservation.json",
+      "status": "pass",
+      "runner": "cli"
+    },
+    {
+      "path": "tests/mode-counterexamples/cases/round3/seo-pending-selector-target.json",
+      "status": "pass",
+      "runner": "cli"
+    },
+    {
+      "path": "tests/mode-counterexamples/cases/round3/seo-unsent-apply-reopen.json",
+      "status": "pass",
+      "runner": "cli"
+    },
+    {
+      "path": "tests/mode-counterexamples/cases/round3/seo-unsent-close-reopen.json",
+      "status": "pass",
+      "runner": "cli"
+    },
+    {
+      "path": "tests/mode-counterexamples/cases/round3/spelled-boolean-retry-stays-stuck.json",
+      "status": "pass",
+      "runner": "cli"
+    },
+    {
+      "path": "tests/mode-counterexamples/cases/round3/spelled-boolean-stuck-in-edit.json",
+      "status": "pass",
+      "runner": "cli"
+    },
+    {
+      "path": "tests/mode-counterexamples/cases/round3/spelled-boolean-stuck-source-mapped.json",
+      "status": "pass",
+      "runner": "cli"
+    },
+    {
+      "path": "tests/mode-counterexamples/cases/round3/spelled-readonly-stuck-in-edit.json",
+      "status": "pass",
+      "runner": "cli"
+    },
+    {
       "path": "tests/mode-counterexamples/cases/simultaneous-upgrade.json",
       "status": "known-failing"
     },

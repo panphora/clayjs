@@ -1,76 +1,103 @@
 /**
  * @jest-environment node
  */
-import { describe, expect, test } from "@jest/globals";
-import { existsSync, readFileSync } from "node:fs";
+import { afterAll, beforeAll, describe, expect, test } from "@jest/globals";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DOCUMENT_LOAD_BUDGET } from "../../../scripts/document-load-budget.mjs";
 
 /**
  * The built Document report, held to the ceilings the meter and this test import from one
  * module. The report is pinned to its build: it names the chunk manifest identity it was
- * measured from, and an identity that is not this checkout's dist is refused with both
+ * measured from, and an identity that is not this checkout's build is refused with both
  * builds named, so a report from an older, smaller release cannot pass here.
+ *
+ * Nothing sets CLAY_LOAD_REPORT for a whole-suite run, so this test produces the report
+ * itself when the variable is unset: it builds the chunks into a temp directory the way
+ * tests/unit/build/load-budget.test.js does, then runs the meter over that build into a
+ * report file, so the gate measures on every run instead of skipping.
  */
 
 const ROOT = new URL("../../../", import.meta.url).pathname;
-const REPORT = process.env.CLAY_LOAD_REPORT;
+const MEASURE = join(ROOT, "scripts/measure-load.mjs");
+const FIXTURE = join(ROOT, "tests/fixtures/load/document-text.html");
 const DIST_MANIFEST = join(ROOT, "dist/m/manifest.json");
+const { emitBootstraps, emitChunks } = await import("../../../scripts/build-chunks.mjs");
 // What measure-load.mjs records as a row's identity, field for field.
 const IDENTITY = ["schema", "package", "version", "build", "runtime", "edit"];
 const PHASES = ["viewReady", "editReady", "late", "firstSave", "firstAdoption", "firstUse"];
 
 const identityOf = (manifest) => Object.fromEntries(IDENTITY.map((key) => [key, manifest?.[key] ?? null]));
 
+// The build the report has to name: the dist a caller measured, or the one this run built.
+let report = process.env.CLAY_LOAD_REPORT ?? null;
+let manifest = DIST_MANIFEST;
+
 function currentBuild() {
-  if (!existsSync(DIST_MANIFEST)) {
-    throw new Error(`this checkout has no built dist to check the report against: ${DIST_MANIFEST} is missing; run npm run build`);
+  if (!existsSync(manifest)) {
+    throw new Error(`this checkout has no built manifest to check the report against: ${manifest} is missing; run npm run build`);
   }
-  return identityOf(JSON.parse(readFileSync(DIST_MANIFEST, "utf8")));
+  return identityOf(JSON.parse(readFileSync(manifest, "utf8")));
 }
 
 // A report that is set but absent or unreadable is a failure, never a skip: the run that
 // was supposed to measure and did not must not look green.
 function loadReport() {
-  if (!existsSync(REPORT)) throw new Error(`CLAY_LOAD_REPORT names ${REPORT}, and no report is there`);
+  if (!existsSync(report)) throw new Error(`CLAY_LOAD_REPORT names ${report}, and no report is there`);
   let rows;
   try {
-    rows = JSON.parse(readFileSync(REPORT, "utf8"));
+    rows = JSON.parse(readFileSync(report, "utf8"));
   } catch (error) {
-    throw new Error(`CLAY_LOAD_REPORT names ${REPORT}, which is not a readable load report: ${error.message}`);
+    throw new Error(`CLAY_LOAD_REPORT names ${report}, which is not a readable load report: ${error.message}`);
   }
-  if (!Array.isArray(rows) || !rows.length) throw new Error(`${REPORT} holds no measured rows`);
+  if (!Array.isArray(rows) || !rows.length) throw new Error(`${report} holds no measured rows`);
   const mine = currentBuild();
   for (const row of rows) {
     const built = identityOf(row.manifest);
     if (JSON.stringify(built) !== JSON.stringify(mine)) {
-      throw new Error(`${REPORT} measured ${row.file} ${row.mode} from build ${built.build} (${built.package} ${built.version}), ` +
-        `and this checkout's dist is build ${mine.build} (${mine.package} ${mine.version}); measure the build that is in dist`);
+      throw new Error(`${report} measured ${row.file} ${row.mode} from build ${built.build} (${built.package} ${built.version}), ` +
+        `and this checkout's build is ${mine.build} (${mine.package} ${mine.version}); measure the build that is in dist`);
     }
   }
   return rows;
 }
 
-if (!REPORT) {
-  console.warn("load budgets: CLAY_LOAD_REPORT is unset, so no built report was checked. " +
-    "Run npm run build, then node scripts/measure-load.mjs --built dist tests/fixtures/load/document-text.html --json > /tmp/document-load.json, " +
-    "then CLAY_LOAD_REPORT=/tmp/document-load.json npm test -- tests/unit/page/load-budgets.test.js");
-}
+// The report a whole-suite run has no variable for: built here, measured by the meter's own
+// command line, and named by its build so the identity check below still means something.
+let scratch = null;
 
-const suite = REPORT ? describe : describe.skip;
+describe("the built Document load report, against this build's ceilings", () => {
+  beforeAll(async () => {
+    if (report) return;
+    scratch = mkdtempSync(join(tmpdir(), "clay-load-report-"));
+    const chunks = await emitChunks({ root: ROOT, outdir: join(scratch, "m") });
+    await emitBootstraps({ root: ROOT, outdir: scratch, manifest: chunks.manifest, satellites: chunks.satellites });
+    manifest = join(scratch, "m/manifest.json");
+    const file = join(scratch, "document-load.json");
+    writeFileSync(file, execFileSync(process.execPath, [MEASURE, "--built", scratch, FIXTURE, "--json"], {
+      encoding: "utf8",
+      maxBuffer: 64 * 1024 * 1024,
+    }));
+    report = file;
+  }, 180000);
 
-suite("the built Document load report, against this build's ceilings", () => {
+  afterAll(() => {
+    if (scratch) rmSync(scratch, { recursive: true, force: true });
+  });
+
   let rows = null;
-  const report = () => (rows ??= loadReport());
+  const measured = () => (rows ??= loadReport());
   const ceilingFor = (row) => (row.mode === "view" ? DOCUMENT_LOAD_BUDGET.readerBrotli : DOCUMENT_LOAD_BUDGET.textEditorBrotli);
 
-  test("the report was measured from this checkout's current dist build", () => {
-    const builds = [...new Set(report().map((row) => row.manifest.build))];
+  test("the report was measured from this checkout's current build", () => {
+    const builds = [...new Set(measured().map((row) => row.manifest.build))];
     expect(builds).toEqual([currentBuild().build]);
   });
 
   test("view ready and edit ready stay within the reader and editor ceilings, at the built depth", () => {
-    for (const row of report()) {
+    for (const row of measured()) {
       const atViewReady = row.phases.viewReady.brotli;
       const atEditReady = atViewReady + row.phases.editReady.brotli;
       const ready = row.mode === "view" ? atViewReady : atEditReady;
@@ -99,7 +126,7 @@ suite("the built Document load report, against this build's ceilings", () => {
   // loading: the phase has to be reported, in bytes of its own, and no file may appear in
   // two phases, read the way Step 1's test reads the same report.
   test("automatic late work is reported as its own phase, not folded into ready", () => {
-    for (const row of report()) {
+    for (const row of measured()) {
       const phases = row.mode === "view" ? PHASES.filter((key) => key !== "editReady") : PHASES;
       for (const key of phases) {
         expect([row.file, key, row.phases[key].requests > 0]).toEqual([row.file, key, true]);

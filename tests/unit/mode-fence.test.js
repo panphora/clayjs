@@ -26,12 +26,16 @@ const CORPUS = path.join(ROOT, "tests/mode-counterexamples/cases");
 const STATUSES = new Set(["pass", "known-failing"]);
 
 // A case file is a target by its path from the repository root, with forward slashes, in the
-// order a reader sorts them.
+// order a reader sorts them. A case may live in a subfolder of the corpus, and a walk that
+// stopped at the top level would never list it.
 function caseFiles(corpus, root = ROOT) {
-  return readdirSync(corpus)
-    .filter((name) => name.endsWith(".json"))
-    .sort()
-    .map((name) => path.relative(root, path.join(corpus, name)).split(path.sep).join("/"));
+  return readdirSync(corpus, { withFileTypes: true })
+    .flatMap((entry) => {
+      const file = path.join(corpus, entry.name);
+      if (entry.isDirectory()) return caseFiles(file, root);
+      return entry.name.endsWith(".json") ? [path.relative(root, file).split(path.sep).join("/")] : [];
+    })
+    .sort();
 }
 
 function loadCase(root, entry) {
@@ -155,11 +159,12 @@ function templateRoot(manifest) {
     process.env.STARTER_TEMPLATES,
     path.join(ROOT, "../starter-templates"),
     path.join(os.homedir(), "Documents/GitHub/hyper/starter-templates"),
-  ].filter(Boolean);
-  for (const dir of dirs) {
-    if (manifest.templates.every((template) => existsSync(path.join(dir, template.path)))) return dir;
-  }
-  return null;
+  ].filter(Boolean).filter((dir) => existsSync(dir));
+  if (!dirs.length) return null;
+  // A checkout that is here but does not carry every template is a failure, not a skip: the
+  // first one that carries them all is read, and the first one that exists is read when none
+  // does, so the test names every template path that is missing.
+  return dirs.find((dir) => manifest.templates.every((template) => existsSync(path.join(dir, template.path)))) ?? dirs[0];
 }
 
 const manifest = JSON.parse(readFileSync(MANIFEST, "utf8"));
@@ -216,17 +221,21 @@ test("a case whose run produces no result is refused", async () => {
 });
 
 // The canonical templates stay where they are written; the manifest names them, it does not
-// copy them. A box that receives this repo alone skips this test.
+// copy them. Only a box with no starter-templates checkout at all skips this test; a checkout
+// that is present and missing a template fails it, naming each path that is not there.
 if (templates === null) {
-  console.info("mode-fence: no starter-templates checkout carries the templates the manifest names; skipping the template check");
+  console.info("mode-fence: no starter-templates checkout is here; skipping the template check");
 }
 
 (templates === null ? test.skip : test)("every canonical template fixture the manifest names is in the starter-templates checkout", () => {
   const lines = [];
+  const missing = [];
   for (const template of manifest.templates) {
-    const file = path.join(templates, template.path);
-    expect({ path: template.path, repo: template.repo, exists: existsSync(file) }).toEqual({ path: template.path, repo: "starter-templates", exists: true });
+    if (template.repo !== "starter-templates" || !existsSync(path.join(templates, template.path))) {
+      missing.push(`${template.repo} ${template.path}`);
+    }
     lines.push(`${template.repo} ${template.path}`);
   }
   console.log(lines.join("\n"));
+  expect({ checkout: templates, missing }).toEqual({ checkout: templates, missing: [] });
 });
