@@ -15,6 +15,13 @@ const ENTRIES = {
   checkpoint: resolve(ROOT, 'src/server/checkpoint/index.js'),
 };
 
+// The compactor hands a job to a worker_threads worker, so that worker is its own
+// realm with its own Yjs. It is emitted beside the core, and the core bundle is told
+// the sibling's name: `createPageCompactor` resolves it against the directory of the
+// running module, which is __dirname in the cjs bundle and import.meta.url in source.
+export const COMPACTION_WORKER = 'page-compaction-worker.cjs';
+export const COMPACTION_WORKER_ENTRY = resolve(ROOT, 'src/server/rooms/page-compaction-worker.js');
+
 let built = null;
 
 export function buildServerCore(outdir = DIST) {
@@ -33,11 +40,32 @@ export function buildServerCore(outdir = DIST) {
       format: 'cjs',
       target: 'node20',
       metafile: true,
-      logOverride: { 'commonjs-variable-in-esm': 'silent' },
+      logOverride: { 'commonjs-variable-in-esm': 'silent', 'empty-import-meta': 'silent' },
+      define: { __PAGE_COMPACTION_WORKER__: JSON.stringify(`./${COMPACTION_WORKER}`) },
     });
     return Object.keys(result.metafile.inputs);
   })();
   return built;
+}
+
+export async function buildPageCompactionWorker(outdir = DIST) {
+  await mkdir(outdir, { recursive: true });
+  const result = await esbuild({
+    entryPoints: [COMPACTION_WORKER_ENTRY],
+    outfile: join(outdir, COMPACTION_WORKER),
+    absWorkingDir: ROOT,
+    bundle: true,
+    platform: 'node',
+    format: 'cjs',
+    target: 'node20',
+    metafile: true,
+    logOverride: { 'commonjs-variable-in-esm': 'silent' },
+  });
+  const inputs = Object.keys(result.metafile.inputs);
+  if (!inputs.some((file) => file.includes('src/server/rooms/page-compaction.js'))) {
+    throw new Error('the page compaction worker bundle has no page-compaction input');
+  }
+  return inputs;
 }
 
 // The entry `name` re-exports its half of the core: `<name>.cjs` for require and

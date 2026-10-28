@@ -1,4 +1,4 @@
-import { buildServerCore, writeServerEntry } from './build-server-core.mjs';
+import { buildServerCore, buildPageCompactionWorker, writeServerEntry } from './build-server-core.mjs';
 
 export async function buildServerRooms(outdir) {
   const inputs = await buildServerCore(outdir);
@@ -12,5 +12,6 @@ export async function buildServerRooms(outdir) {
     throw new Error('the server rooms bundle has no hyper-morph parser input; the parser must be bundled, not required');
   }
   const names = await writeServerEntry('rooms', outdir);
-  return { inputs: inputs.length, names: names.length };
+  const worker = await buildPageCompactionWorker(outdir);
+  return { inputs: inputs.length, names: names.length, worker: worker.length };
 }
