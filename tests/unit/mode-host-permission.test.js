@@ -138,8 +138,9 @@ test("writable:false overrides a stale owner cookie and refuses the switch", asy
   metaAnswer = okMeta({ writable: false });
   await boot();
 
+  // The menu asks the host in view, so the stale cookie is already overruled.
   expect(window.clay.mode).toBe("view");
-  expect(window.clay.canEdit).toBe(true);
+  expect(window.clay.canEdit).toBe(false);
 
   await withFakeLocation(async (fake) => {
     await expect(window.clay.setMode("edit")).resolves.toEqual({

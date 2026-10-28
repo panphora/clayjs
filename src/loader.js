@@ -135,7 +135,13 @@ export async function boot(base, params, readyResolve, manifest = null, suppleme
       view: resolveModules(params, false, { isDraftMode, hasSap, canEdit, templateSource: templateSource() }),
       loaded,
       modules: MODULES,
-      attach: attachPluginMember,
+      // A live entry attaches the edit plugins after boot: clay.plugins names them from then on.
+      attach: (path, mod) => {
+        attachPluginMember(path, mod);
+        const name = PLUGIN_NAMES[path];
+        const named = window.clay.plugins;
+        if (name && Array.isArray(named) && !named.includes(name)) window.clay.plugins = Object.freeze([...named, name]);
+      },
       attachEditCore,
       announce,
       loadEditHints: loadEditHints ? editHints(loadEditHints, manifest, editing, hasSapJs) : null,
@@ -335,9 +341,6 @@ function attachEditCore(loaded) {
 
 function attachPluginMember(path, mod, namespaces = loaded) {
   const clay = window.clay;
-  // A live entry attaches the edit plugins after boot: clay.plugins names them from then on.
-  const name = PLUGIN_NAMES[path];
-  if (name && Array.isArray(clay.plugins) && !clay.plugins.includes(name)) clay.plugins = Object.freeze([...clay.plugins, name]);
 
   if (path === "plugins/undo.js") {
     clay.undo = mod.undo || mod.default;
