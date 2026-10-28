@@ -351,7 +351,14 @@ class Chrome {
       if (e.detail === 0) this.gripAction(this.gutterIndex());
     });
     this.drag = new BlockDrag(view, this.grip, { index: () => this.gutterIndex(), onClick: (i) => this.gripAction(i) });
-    this.scrim.addEventListener("click", () => this.closeMenu());
+    // A tap that opens a menu ends in a click over the scrim it just showed: only a press
+    // that began on the scrim closes it.
+    let scrimPressed = false;
+    this.scrim.addEventListener("pointerdown", () => { scrimPressed = true; });
+    this.scrim.addEventListener("click", () => {
+      if (scrimPressed) this.closeMenu();
+      scrimPressed = false;
+    });
     this.menuEl.addEventListener("click", (e) => {
       const row = e.target.closest(".page-menu-item");
       if (row) this.pick(Number(row.dataset.index));

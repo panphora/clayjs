@@ -637,6 +637,10 @@ export function createPageEditor(mount, { blocks = null, onChange = null, upload
   view = new pmView.EditorView(shell, {
     state: pageState(blocks, { upload, highlight, doc: initialDoc, history: useHistory, undo, redo, onAiTool, toolHost, features, commandHost }),
     attributes: { class: "page-editor" },
+    // The phone keeps a fixed bar and the plus and grip at the bottom: a caret scrolled into
+    // view stops clear of them.
+    scrollMargin: { top: 16, bottom: 96, left: 5, right: 5 },
+    scrollThreshold: { top: 16, bottom: 96, left: 0, right: 0 },
     editable: () => editable,
     nodeViews,
     handleDOMEvents: {
