@@ -751,7 +751,7 @@ export function createStore({
           if (!sameValue(existing.capsuleId, capsule.id) || existing.revision !== input.revision) return { ok: false, code: "stale" };
           doomed.push({ slot, existing });
         }
-        const updated = { ...capsule, revision: replacement.revision, payload: replacement.payload, updated: replacement.updated };
+        const updated = { ...capsule, revision: replacement.revision, context: replacement.context ?? capsule.context, payload: replacement.payload, updated: replacement.updated };
         updated.bytes = recordBytes(updated);
         let delta = updated.bytes - capsule.bytes;
         for (const { existing } of doomed) delta -= existing.bytes;

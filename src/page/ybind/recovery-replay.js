@@ -270,6 +270,24 @@ export function pageAuthority({ meta = null, location: where = globalThis.locati
 
 const journalKey = (id) => (typeof id === "string" ? id : JSON.stringify(id));
 
+// Is `next` a later accepted state than `base`? A state vector only grows, so one that
+// is behind the base anywhere is an older save that finished late.
+function newer(next, base) {
+  if (!base.length) return true;
+  const ahead = Y.decodeStateVector(Y.encodeStateVectorFromUpdateV2(base));
+  const behind = Y.decodeStateVector(Y.encodeStateVectorFromUpdateV2(next));
+  for (const [client, clock] of ahead) if ((behind.get(client) ?? 0) < clock) return false;
+  return true;
+}
+
+// The part of a capsule the new base does not already hold: work a compaction merged in
+// before the save that covered it reads as nothing once that save is the base.
+function unsaved(base, part) {
+  const bytes = bytesOf(part);
+  if (!bytes || !bytes.length) return new Uint8Array(0);
+  return containsUpdate(base, bytes) ? new Uint8Array(0) : bytes;
+}
+
 /**
  * The accepted page state an episode starts from, as the bytes its capsule keeps.
  *
@@ -324,12 +342,15 @@ export function createPageJournal({ channel, key, context, base = null, onChange
   const waiting = [];
   const awaiting = [];
   const inflight = new Set();
-  const bytesOfBase = bytesOf(base) ?? new Uint8Array(0);
+  let bytesOfBase = bytesOf(base) ?? new Uint8Array(0);
   let resolved = null;
   let failure = null;
   let batches = 0;
   let batchBytes = 0;
   let episode = false;
+  let carryBase = true;
+  let holding = false;
+  let rebasing = Promise.resolve(null);
   let compacting = null;
   let closed = false;
 
@@ -337,7 +358,8 @@ export function createPageJournal({ channel, key, context, base = null, onChange
     channel,
     key,
     onChange,
-    context: () => ready,
+    // The context of the base the journal holds now: an accepted save moves it.
+    context: () => ready.then(() => resolved),
     local: (bytes) => send(bytes, "local"),
     // Only while an episode is open: a peer's updates on their own are not this tab's work
     // to keep, and a page that has journaled nothing owns nothing.
@@ -364,9 +386,10 @@ export function createPageJournal({ channel, key, context, base = null, onChange
       };
       return coversText([capsule], blockId, text);
     },
-    pending: () => inflight.size + (failure ? 1 : 0),
+    pending: () => inflight.size + (holding ? waiting.length : 0) + (failure ? 1 : 0),
     get failure() { return failure; },
     retire,
+    rebase,
     compact,
     // An acknowledgement is metadata: it says a room holds the bytes and retires nothing.
     acknowledged: () => {
@@ -402,6 +425,48 @@ export function createPageJournal({ channel, key, context, base = null, onChange
 
   function retire(list) {
     for (const item of list || []) records.delete(journalKey(item?.id));
+  }
+
+  // An accepted save is the base the next replay starts from: the page reopens on it,
+  // and the batches it retired are no longer there to build on. Rebases run one at a
+  // time, appends wait for them, and a save older than the base already held is ignored.
+  function rebase(state) {
+    rebasing = rebasing.then(() => moveBase(bytesOf(state))).catch(() => null);
+    return rebasing;
+  }
+
+  async function moveBase(next) {
+    if (closed || !resolved || !next || !next.length || !newer(next, bytesOfBase)) return null;
+    holding = true;
+    try {
+      while (inflight.size && !closed) await journal.next();
+      if (closed) return null;
+      const moved = typeof context === "function" ? await context(next) : context;
+      if (!moved || !moved.authority) return null;
+      if (episode) {
+        const answer = typeof channel.rebase === "function"
+          ? await channel.rebase({
+              key,
+              context: moved,
+              rebuild: (payload) => ({
+                base: next,
+                dependencies: unsaved(next, payload.dependencies),
+                owned: unsaved(next, payload.owned),
+              }),
+            })
+          : null;
+        // A writer whose capsule never reached the store starts its next one on this base.
+        if (answer?.code === "missing") carryBase = true;
+        else if (!answer?.ok) return null;
+      }
+      bytesOfBase = next;
+      resolved = moved;
+      for (const record of records.values()) record.context = moved;
+      return moved;
+    } finally {
+      holding = false;
+      if (resolved) for (const run of waiting.splice(0)) run(resolved);
+    }
   }
 
   function names() {
@@ -469,12 +534,17 @@ export function createPageJournal({ channel, key, context, base = null, onChange
     );
   }
 
+  function dispatch(context, bytes, origin) {
+    const first = carryBase;
+    carryBase = false;
+    write(context, bytes, origin, first);
+  }
+
   function send(bytes, origin) {
     if (closed || !bytes || !bytes.byteLength || typeof channel.append !== "function") return;
-    const first = !episode;
     episode = true;
-    if (resolved) write(resolved, bytes, origin, first);
-    else waiting.push((context) => write(context, bytes, origin, first));
+    if (resolved && !holding) dispatch(resolved, bytes, origin);
+    else waiting.push((context) => dispatch(context, bytes, origin));
   }
 
   return journal;

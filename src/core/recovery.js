@@ -648,9 +648,9 @@ export function createRecovery({
    * A swap that lost the head re-reads everything and tries again, so a compaction
    * that raced an append or another compaction never deletes input it did not merge.
    */
-  async function swapBatches(entry, observed) {
+  async function swapBatches(entry, observed, rebase = null) {
     for (let tries = 0; tries < 3; tries++) {
-      let capsuleId = null;
+      let capsuleId = rebase?.capsuleId ?? null;
       const inputs = [];
       for (const { id, revision } of observed) {
         const read = await store.get(id);
@@ -661,7 +661,7 @@ export function createRecovery({
         if (!sameId(capsuleId, record.capsuleId)) continue;
         inputs.push(record);
       }
-      if (!capsuleId || !inputs.length) return { ok: true, retired: [] };
+      if (!capsuleId || !(inputs.length || rebase)) return { ok: true, retired: [] };
       const head = await store.get(capsuleId);
       if (!head.ok || !head.record) return { ok: false, code: "missing" };
       const capsule = head.record;
@@ -672,6 +672,8 @@ export function createRecovery({
       ].filter(Boolean);
       const mergedOwned = owned.length ? copyPayload(await entry.merge(owned)) : new Uint8Array(0);
       const mergedDependencies = dependencies.length ? copyPayload(await entry.merge(dependencies)) : new Uint8Array(0);
+      let payload = { base: capsule.payload?.base ?? new Uint8Array(0), dependencies: mergedDependencies, owned: mergedOwned };
+      if (rebase) payload = await rebase.rebuild(payload);
       const revision = Math.max(entry.revision, capsule.revision) + 1;
       entry.revision = revision;
       const swapped = await store.compactBinary({
@@ -679,20 +681,11 @@ export function createRecovery({
         version: entry.version,
         capsuleId,
         expectedRevision: capsule.revision,
-        replacement: {
-          revision,
-          updated: now?.() ?? Date.now(),
-          payload: {
-            base: capsule.payload?.base ?? new Uint8Array(0),
-            dependencies: mergedDependencies,
-            owned: mergedOwned,
-          },
-        },
+        replacement: { revision, updated: now?.() ?? Date.now(), context: rebase?.context, payload },
         inputs: inputs.map((record) => ({ id: record.id, revision: record.revision })),
       });
       if (swapped.ok) {
-        entry.batches = 0;
-        entry.batchBytes = 0;
+        if (inputs.length) entry.batches = entry.batchBytes = 0;
         return { ok: true, retired: swapped.retired, revision: swapped.revision };
       }
       if (swapped.code !== "stale") return { ok: false, code: swapped.code };
@@ -710,6 +703,13 @@ export function createRecovery({
     note(receipt);
     announce(entry);
     return receipt.ok ? { ok: true, retired: receipt.retired } : { ok: false, code: receipt.code, retired: [] };
+  }
+
+  async function rebase(entry, { key, context, rebuild } = {}) {
+    const opened = await ensurePrepared();
+    const receipt = opened.ok ? await swapBatches(entry, [], { capsuleId: binaryOf(entry, String(key)), context, rebuild }) : opened;
+    note(receipt);
+    return receipt;
   }
 
   function planCompaction(entry) {
@@ -804,6 +804,7 @@ export function createRecovery({
       markAcknowledged: (spec) => markAcknowledged(entry, spec),
       checkpoint: (spec) => checkpoint(entry, spec),
       compact: (spec) => compact(entry, spec),
+      rebase: (spec) => rebase(entry, spec),
       subscribe: (fn) => subscribe(entry, fn),
       dispose: () => dispose(entry),
     };

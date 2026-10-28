@@ -550,8 +550,10 @@ function installCheckpointProof(inst) {
       etag,
       href: await hostPageStateHref(),
     });
-    if (answer.ok) journal.retire(answer.retired);
-    if (answer.ok) inst.pageStatus?.checkpoint();
+    if (!answer.ok) return;
+    journal.retire(answer.retired);
+    inst.pageStatus?.checkpoint();
+    await journal.rebase?.(modules.replay.journalBase(answer.proof.state));
   });
 }
 
