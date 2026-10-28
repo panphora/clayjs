@@ -54,6 +54,12 @@ const caretElement = (doc, name, color) => {
 
 const labelOf = (person) => (typeof person.name === "string" && person.name.trim() ? person.name.trim() : "Someone");
 
+let barrier = false;
+if (typeof document !== "undefined") {
+  document.addEventListener("clay:presence-quiesce", () => { barrier = true; });
+  document.addEventListener("clay:presence-resume", () => { barrier = false; });
+}
+
 /**
  * The decorations one snapshot produces in one document.
  *
@@ -107,7 +113,7 @@ export function createPageAwareness({ binding, view, store = presenceStore, epoc
   // The exit's barrier, and the clear that came with it: while it runs this tab
   // publishes nothing, so a caret move or a doc change during the barrier cannot put
   // a target back the session is about to release.
-  let quiesced = false;
+  let quiesced = barrier;
   // Focus is a fact about the document, not a guess: an editor mounted in a background
   // tab is not focused, and publishing a target for it would claim a caret nobody holds.
   let focused = typeof view.hasFocus === "function" ? view.hasFocus() === true : view.dom.contains(doc.activeElement);

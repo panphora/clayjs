@@ -255,8 +255,8 @@ function liveness(run, fail) {
   if (run.result?.mode !== "edit") return;
   const held = pendingAtEnd(run);
   if (!named.some((source) => held.includes(source))) return;
-  const admitted = standingAdmissions(run, last.seq).filter((entry) => !discarded(run, entry));
-  const landed = acceptedBefore(run, last.seq).at(-1) ?? null;
+  const admitted = standingAdmissions(run).filter((entry) => !discarded(run, entry));
+  const landed = acceptedBefore(run, Infinity).at(-1) ?? null;
   const owed = admitted.filter((entry) => !landed || !carries(landed.body, entry.value)).filter((entry) => !committed(run, entry));
   if (owed.length) return;
   fail(

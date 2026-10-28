@@ -1233,6 +1233,7 @@ function attemptSaveNow({ kind, permit = null }, callback = () => {}) {
       if (explicit) clearExplicitSave();
       const refused = forbidden_();
       setSaveState('error', refused.msg, '', { code: refused.code, status: refused.status, sent: false });
+      takeSoonQueued().forEach((done) => done(refused));
       callback(refused);
       return resolve(refused);
     }

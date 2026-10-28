@@ -7,6 +7,7 @@ import { jest } from "@jest/globals";
  */
 
 let save;
+let noteHostWritable;
 
 const flush = async () => {
   for (let i = 0; i < 50; i++) await Promise.resolve();
@@ -37,6 +38,7 @@ beforeAll(async () => {
   document.body.innerHTML = '<div id="c">start</div>';
   global.fetch = jest.fn(async () => okResponse());
   save = await import("../../src/core/save.js");
+  ({ noteHostWritable } = await import("../../src/core/is-edit-mode.js"));
   for (let i = 0; i < 80 && !save.baselineSettled(); i++) await new Promise((r) => setTimeout(r, 50));
 });
 
@@ -50,6 +52,7 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+  noteHostWritable(null);
   jest.useRealTimers();
 });
 
@@ -216,4 +219,62 @@ test("in view mode it resolves with the skipped result", async () => {
 
   window.clayEditMode = true;
   jest.resetModules();
+});
+
+// Round 12 D1: a soon() caller whose timer fires while a save is on the wire queues
+// behind that save. When the host answers that it is not writable, the drained save
+// is refused before it is captured, and the refusal is those callers' answer: no
+// later save is coming to take them.
+test("a queued caller hears the host's refusal of the drained save (r12 sn3m)", async () => {
+  const requests = [];
+  global.fetch = jest.fn((url, options = {}) => new Promise((resolve) => {
+    requests.push({ body: String(options.body ?? ""), resolve });
+  }));
+
+  edit("refused-edit");
+  const first = save.savePage();
+  await flush();
+  expect(requests.length).toBe(1);
+
+  const queued = save.savePageSoon();
+  jest.advanceTimersByTime(250);
+  await flush();
+  expect(requests.length).toBe(1);
+
+  noteHostWritable(false);
+  requests[0].resolve(okResponse());
+  await flush();
+  await expect(first).resolves.toMatchObject({ ok: true, msg: "Saved" });
+
+  await expect(queued).resolves.toMatchObject({ ok: false, code: "forbidden", msgType: "forbidden" });
+  expect(requests.length).toBe(1);
+});
+
+test("a queued caller without a refusal rides the drained save carrying the edit (r12 sn3m control)", async () => {
+  const requests = [];
+  global.fetch = jest.fn((url, options = {}) => new Promise((resolve) => {
+    requests.push({ body: String(options.body ?? ""), resolve });
+  }));
+
+  edit("first-edit");
+  const first = save.savePage();
+  await flush();
+  expect(requests.length).toBe(1);
+
+  edit("carried-edit");
+  const queued = save.savePageSoon();
+  jest.advanceTimersByTime(250);
+  await flush();
+  expect(requests.length).toBe(1);
+
+  requests[0].resolve(okResponse());
+  await flush();
+  await expect(first).resolves.toMatchObject({ ok: true, msg: "Saved" });
+  await flush();
+
+  expect(requests.length).toBe(2);
+  expect(requests[1].body).toContain("carried-edit");
+  requests[1].resolve(okResponse());
+  await flush();
+  await expect(queued).resolves.toMatchObject({ ok: true, msg: "Saved" });
 });

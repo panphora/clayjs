@@ -362,6 +362,9 @@ describe("the page's caret at the gate a leave closes", () => {
       one.binding.dispose();
       one.binding.ydoc.destroy();
     }
+    // The barrier is document state, and the document outlives one test: a test that
+    // quiesced without resuming would otherwise leave the next one already quiet.
+    document.dispatchEvent(new Event("clay:presence-resume"));
     presence.owner?.detach();
     presence.clear();
     presence.explicit = false;
@@ -454,6 +457,84 @@ describe("the page's caret at the gate a leave closes", () => {
 
     expect(pagePosts(sent)).toHaveLength(1);
     expect(sent.at(-1)).toEqual({ editing: null });
+  });
+
+  // Round 12: an awareness that comes into being while the barrier runs (the page plugin
+  // installs it after an async import and a host-meta answer, plugins/page.js:978-985).
+  test("r12 late: an awareness created during the barrier posts nothing", async () => {
+    const { sent } = await leaving();
+    const before = pagePosts(sent).length;
+    page();
+    await jest.advanceTimersByTimeAsync(1000);
+    expect(pagePosts(sent)).toHaveLength(before);
+    expect(sent.at(-1)).toEqual({ editing: null });
+  });
+
+  test("r12 late control: an awareness created with no barrier posts its target", async () => {
+    presence.setCapabilities({ supported: true, pageAwareness: true });
+    const sent = [];
+    presence.attachTransport({ send: async (body) => { sent.push(body); return true; } });
+    presence.session = { id: "session-1", token: "token-a" };
+    presence.n = 0;
+    page();
+    await jest.advanceTimersByTimeAsync(1000);
+    expect(pagePosts(sent)).toHaveLength(1);
+  });
+
+  test("r12 two editors: a second editor's caret move during the barrier posts nothing", async () => {
+    presence.setCapabilities({ supported: true, pageAwareness: true });
+    const sent = [];
+    presence.attachTransport({ send: async (body) => { sent.push(body); return true; } });
+    presence.session = { id: "session-1", token: "token-a" };
+    presence.n = 0;
+    const first = page();
+    const second = page();
+    await jest.advanceTimersByTimeAsync(250);
+    const sync = { _editing: null, lane: "live", _morphInFlight: false, stop: () => {} };
+    const { syncParticipant } = await import("../../src/sync/live-sync-edit.js");
+    const participant = await syncParticipant(sync).prepare({});
+    participant.quiesce();
+    await jest.advanceTimersByTimeAsync(250);
+    const before = pagePosts(sent).length;
+    second.view.dispatch(second.view.state.tr.setSelection(TextSelection.near(second.view.state.doc.resolve(3))));
+    first.view.dispatch(first.view.state.tr.setSelection(TextSelection.near(first.view.state.doc.resolve(3))));
+    await jest.advanceTimersByTimeAsync(1000);
+    expect(pagePosts(sent)).toHaveLength(before);
+    expect(sent.at(-1)).toEqual({ editing: null });
+  });
+
+  test("r12 blurred on resume: a refused exit republishes nothing for an editor that lost focus in the barrier", async () => {
+    const { sent, one, participant } = await leaving();
+    one.view.dom.dispatchEvent(new Event("blur"));
+    participant.resume();
+    await jest.advanceTimersByTimeAsync(1000);
+    expect(pagePosts(sent)).toHaveLength(1);
+    expect(sent.at(-1)).toEqual({ editing: null });
+  });
+
+  // The barrier is a fact about the document, so it must not outlive the session that
+  // raised it: a later edit in the same document publishes like the first one did.
+  test("r12 re-entry: a later edit session publishes after a committed exit", async () => {
+    const { participant } = await leaving();
+    participant.resume();
+
+    const committed = { _editing: null, lane: "live", _morphInFlight: false, stop: () => {} };
+    const { syncParticipant } = await import("../../src/sync/live-sync-edit.js");
+    const next = await syncParticipant(committed).prepare({});
+    next.quiesce();
+    next.dispose();
+
+    presence.owner?.detach();
+    presence.clear();
+    presence.explicit = false;
+    presence.setCapabilities({ supported: true, pageAwareness: true });
+    const sent = [];
+    presence.attachTransport({ send: async (body) => { sent.push(body); return true; } });
+    presence.session = { id: "session-2", token: "token-b" };
+    presence.n = 0;
+    page();
+    await jest.advanceTimersByTimeAsync(1000);
+    expect(pagePosts(sent)).toHaveLength(1);
   });
 });
 

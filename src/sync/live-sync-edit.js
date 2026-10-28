@@ -42,7 +42,10 @@ export function syncParticipant(sync) {
     sync._editing?.resume();
     if (typeof document !== "undefined") document.dispatchEvent(new Event("clay:presence-resume"));
   };
-  const dispose = () => sync.stop();
+  const dispose = () => {
+    sync.stop();
+    if (typeof document !== "undefined") document.dispatchEvent(new Event("clay:presence-resume"));
+  };
   return {
     id: "clay:sync",
     order: 50,
@@ -68,6 +71,7 @@ export function syncParticipant(sync) {
         // back with it.
         dispose: () => {
           if (started) sync.stop();
+          if (typeof document !== "undefined") document.dispatchEvent(new Event("clay:presence-resume"));
         },
       };
     },
