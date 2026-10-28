@@ -1,7 +1,7 @@
 {
   "document.html": {
     "view": { "requests": 45, "depth": 19, "brotli": 102400, "css": { "requests": 1, "depth": 1 }, "fonts": { "requests": 10, "depth": 2, "raw": 464896 } },
-    "edit": { "requests": 158, "depth": 48, "brotli": 584704, "css": { "requests": 1, "depth": 1 }, "fonts": { "requests": 10, "depth": 2, "raw": 464896 } }
+    "edit": { "requests": 158, "depth": 48, "brotli": 585728, "css": { "requests": 1, "depth": 1 }, "fonts": { "requests": 10, "depth": 2, "raw": 464896 } }
   },
   "document-rich.html": {
     "view": { "requests": 45, "depth": 19, "brotli": 102400, "css": { "requests": 1, "depth": 1 }, "fonts": { "requests": 10, "depth": 2, "raw": 464896 } },
@@ -9,7 +9,7 @@
   },
   "document-text.html": {
     "view": { "requests": 45, "depth": 19, "brotli": 102400, "css": { "requests": 1, "depth": 1 }, "fonts": { "requests": 10, "depth": 2, "raw": 464896 } },
-    "edit": { "requests": 158, "depth": 48, "brotli": 584704, "css": { "requests": 1, "depth": 1 }, "fonts": { "requests": 10, "depth": 2, "raw": 464896 } }
+    "edit": { "requests": 158, "depth": 48, "brotli": 585728, "css": { "requests": 1, "depth": 1 }, "fonts": { "requests": 10, "depth": 2, "raw": 464896 } }
   },
   "kanban.html": {
     "view": { "requests": 64, "depth": 23, "brotli": 187392, "css": { "requests": 1, "depth": 1 }, "fonts": { "requests": 1, "depth": 1 } },
@@ -64,7 +64,7 @@
     },
     "kanban-hyperclay.html": {
       "view": { "requests": 48, "depth": 3, "brotli": 88064, "css": { "requests": 1, "depth": 1 }, "fonts": { "requests": 0, "depth": 0 } },
-      "edit": { "requests": 79, "depth": 3, "brotli": 140288, "css": { "requests": 1, "depth": 1 }, "fonts": { "requests": 0, "depth": 0 } },
+      "edit": { "requests": 79, "depth": 3, "brotli": 141312, "css": { "requests": 1, "depth": 1 }, "fonts": { "requests": 0, "depth": 0 } },
       "draft": { "requests": 71, "depth": 3, "brotli": 137216, "css": { "requests": 1, "depth": 1 }, "fonts": { "requests": 0, "depth": 0 } }
     },
     "kanban-local.html": {
