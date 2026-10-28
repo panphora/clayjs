@@ -194,11 +194,22 @@ export function applyCapsule(doc, parts) {
  *
  * Nothing is applied for a capsule that fails admission: a changed authority, a changed
  * generation, a base the page no longer contains or no shared ancestry is review, not a
- * merge. A capsule with no owned work has nothing to restore and is skipped silently.
+ * merge. A capsule with no owned work has nothing to restore and is skipped silently, and
+ * so is one from the generation before a save that already holds all its work: that save
+ * reached the file after its tab stopped listening for the answer.
  *
  * @param {{records?: Array<Object>, current: {context: Object, state: Object}, into: Object}} options
  * @returns {{replayed: Array<Object>, review: Array<Object>}}
  */
+function alreadyHeld(entry, current) {
+  try {
+    const { owned } = accumulateCapsule({ capsule: entry.capsule, batches: entry.batches });
+    return owned.length > 0 && containsUpdate(canonicalPageBytes(current.state), owned);
+  } catch {
+    return false;
+  }
+}
+
 export function replayJournals({ records = [], current, into } = {}) {
   const replayed = [];
   const review = [];
@@ -207,7 +218,7 @@ export function replayJournals({ records = [], current, into } = {}) {
     try {
       parts = admitCapsule({ capsule: entry.capsule, batches: entry.batches, current });
     } catch (error) {
-      if (error?.code === "nothing-owned") continue;
+      if (error?.code === "nothing-owned" || (error?.code === "foreign-generation" && alreadyHeld(entry, current))) continue;
       review.push({ capsule: entry.capsule, batches: entry.batches, code: error?.code ?? "invalid-capsule", message: error?.message ?? "This journal cannot be replayed" });
       continue;
     }

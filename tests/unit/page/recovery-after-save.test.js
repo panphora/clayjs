@@ -128,3 +128,31 @@ test.each([1, 3])("typing after %i saves is replayed into the page the last save
   tab.binding.dispose();
   next.binding.dispose();
 });
+
+test("a journal whose save reached the file after its tab stopped listening asks for nothing", async () => {
+  const factory = new IDBFactory();
+  const value = { v: 1, g: 0, y: { ...seedValue([{ id: "p", text: "hello" }]).y } };
+  const tab = openTab({ factory, writerId: "w-1", value, clientID: 5 });
+  await tab.journal.context();
+  tab.binding.ydoc.getText("flow").insert(2, "abc");
+  await settled();
+
+  // The save lands, but the tab closes before it reads the answer: nothing is retired.
+  const landed = tab.store.value;
+  const listed = inRealm((await tab.channel.list()).records);
+  expect(capsulesOf(listed)).toHaveLength(1);
+
+  const next = openTab({ factory, writerId: "w-2", value: landed, clientID: 6 });
+  const context = await next.journal.context();
+  const outcome = replayJournals({ records: listed, current: { context, state: next.store.value }, into: next.binding.ydoc });
+  expect(outcome).toEqual({ replayed: [], review: [] });
+
+  // The same journal on the page before that save still needs review.
+  const before = openTab({ factory, writerId: "w-3", value: { v: 1, g: 0, y: { ...seedValue([{ id: "p", text: "other" }]).y } }, clientID: 7 });
+  const elsewhere = await before.journal.context();
+  expect(replayJournals({ records: listed, current: { context: elsewhere, state: before.store.value }, into: before.binding.ydoc }).review).toHaveLength(1);
+
+  tab.binding.dispose();
+  next.binding.dispose();
+  before.binding.dispose();
+});
