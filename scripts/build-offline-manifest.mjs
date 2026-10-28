@@ -91,7 +91,6 @@ const ONLINE_ONLY = {
   "https://esm.sh/diff@5.2.0": "autosave debugging is opt-in; the library itself never imports it",
   "https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&display=swap": "Light 2 is not compiled; offline the page falls back to system fonts",
   "https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600&family=JetBrains+Mono:wght@400;500&display=swap": "Light 4 is not compiled; offline the page falls back to system fonts",
-  "https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500&family=IBM+Plex+Sans:wght@400;500;600&family=Newsreader:opsz,wght@6..72,500&display=swap": "the visitor-drafts prompt names its fonts on Google Fonts; offline it falls back to system fonts",
   "https://cdn.jsdelivr.net/npm/mirk-interface@2.2.0/fonts/DepartureMono-1.500/DepartureMono-Regular.woff2": "the CMS editor's monospace face; offline its controls fall back to the system monospace",
 };
 
