@@ -17,7 +17,7 @@ await jest.unstable_mockModule("../../src/plugins/upgrade-run.js", () => {
 });
 
 await import("../../src/plugins/upgrade.js");
-const { start: startUpgrade, apply, lostValues } = await import("../../src/core/upgrade-run.js");
+const { start: startUpgrade, apply, prepare, lostValues } = await import("../../src/core/upgrade-run.js");
 const { upgrade } = await import("../../src/vendor/hyper-html-api-upgrade.vendor.js");
 
 const KANBAN = readFileSync(new URL("../fixtures/load/kanban-hyperclay.html", import.meta.url), "utf8");
@@ -133,6 +133,61 @@ beforeEach(() => {
 
 afterEach(() => {
   jest.restoreAllMocks();
+});
+
+const PAGE_ARTICLE = '<article data-page="1"><h1 data-id="title">Mine</h1><p data-id="p1">my words</p></article>';
+const PAGE_STORE_TAG = '<script type="application/json" merge="page.tools" clay="live">{"a":1}</script>';
+
+function pageDocument({ version, article = "", store = "", marker = "" }) {
+  return `<!DOCTYPE html><html><head>
+<meta name="hyper-source" content="${MINI_SOURCE}">
+<meta name="hyper-version" content="${version}">
+<meta name="clay-template" content="mini owned">
+${marker}
+</head><body>${article}${store}</body></html>`;
+}
+
+describe("a page document", () => {
+  test("a page document keeps its article and its page stores across an upgrade", async () => {
+    const oldHtml = pageDocument({ version: "1.0.0", article: PAGE_ARTICLE, store: PAGE_STORE_TAG });
+    const newHtml = pageDocument({
+      version: "1.1.0",
+      article: '<article data-page="1"><h1 data-id="title"></h1></article>',
+      store: '<script type="application/json" merge="page.tools" clay="live">{}</script>',
+      marker: '<meta name="layout" content="new">',
+    });
+    const update = loadMini(oldHtml);
+
+    const result = await prepare(update, { doc: document, loc: location, fetchFn: miniFetch(newHtml) });
+
+    expect(result.ok ? true : result).toBe(true);
+    expect(result.html).toContain("my words");
+    expect(result.html.split('{"a":1}').length - 1).toBe(1);
+    expect(result.html).toContain('<meta name="layout" content="new">');
+    const savedDoc = new DOMParser().parseFromString(result.html, "text/html");
+    expect(savedDoc.querySelectorAll("article").length).toBe(1);
+    expect(savedDoc.querySelector("article").textContent).toContain("Mine");
+  });
+
+  test("a page document refuses when the new version has no article", async () => {
+    const oldHtml = pageDocument({ version: "1.0.0", article: PAGE_ARTICLE, store: PAGE_STORE_TAG });
+    const newHtml = pageDocument({ version: "1.1.0", article: '<h1 id="title">New template</h1>' });
+    const update = loadMini(oldHtml);
+
+    const result = await prepare(update, { doc: document, loc: location, fetchFn: miniFetch(newHtml) });
+
+    expect(result.code).toBe("lost");
+  });
+
+  test("a document with no rules tag and no page article is refused", async () => {
+    const oldHtml = pageDocument({ version: "1.0.0", article: '<h1 id="title">Plain markup</h1>' });
+    const newHtml = pageDocument({ version: "1.1.0", article: '<h1 id="title">New template</h1>' });
+    const update = loadMini(oldHtml);
+
+    const result = await prepare(update, { doc: document, loc: location, fetchFn: miniFetch(newHtml) });
+
+    expect(result.code).toBe("undeclared");
+  });
 });
 
 describe("the conservation check", () => {

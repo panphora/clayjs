@@ -196,7 +196,8 @@ describe("an upgrade takes the document-operation slot", () => {
       '<meta name="hyper-source" content="https://hyperclay.com/templates/mini/owned/latest.html">' +
       '<meta name="hyper-version" content="1.0.0">' +
       '<meta name="clay-template" content="mini owned">' +
-      '<meta name="clay-seo-title-mode" content="custom">';
+      '<meta name="clay-seo-title-mode" content="custom">' +
+      '<script type="application/json" data-rules-name="api" data-rules-version="1">{"title":"#title","note":"#note"}</script>';
     document.body.innerHTML = '<h1 id="title">Old title</h1><p id="note">Keep me</p>';
   }
 
@@ -204,7 +205,9 @@ describe("an upgrade takes the document-operation slot", () => {
   const MANIFEST_URL = "https://hyperclay.com/templates/mini/owned/latest.json";
   const NEW_HTML =
     '<!DOCTYPE html><html><head><meta name="hyper-version" content="1.1.0">' +
-    '<meta name="clay-template" content="mini owned"></head><body><h1 id="title">New title</h1>' +
+    '<meta name="clay-template" content="mini owned">' +
+    '<script type="application/json" data-rules-name="api" data-rules-version="1">{"title":"#title","note":"#note"}</script>' +
+    '</head><body><h1 id="title">New title</h1>' +
     '<p id="note">Keep me</p></body></html>';
 
   function fetcher() {

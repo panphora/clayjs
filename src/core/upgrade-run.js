@@ -8,6 +8,8 @@ const MANIFEST_FAILED = "The new version could not be downloaded. Nothing was ch
 const SAVE_FAILED = "The upgrade could not be saved. Nothing was changed.";
 const CONFLICT = "This document changed somewhere else. Reload and try again.";
 const BUSY = "Something else is changing this document. Nothing was changed.";
+const UNDECLARED = "This document does not say which parts are its data, so it cannot be upgraded safely. Nothing was changed.";
+const PAGE_LOST = "The new version has no place for this page's content. Nothing was changed.";
 
 async function digestOf(bytes) {
   const subtle = globalThis.crypto && globalThis.crypto.subtle;
@@ -116,6 +118,26 @@ async function declaredRenames(htmlText) {
   return mod && mod.renames && typeof mod.renames === "object" ? mod.renames : {};
 }
 
+// The page editor's content is its article and the live stores beside it, not values a
+// rules tag can name: the upgrade carries them whole into the new version's article.
+const PAGE_STORE = 'script[clay~="live"][merge]';
+
+function carryPage(doc, afterDoc, article) {
+  const target = afterDoc.querySelector("article[data-page]");
+  if (!target) return null;
+  target.replaceWith(afterDoc.importNode(article, true));
+  for (const store of doc.querySelectorAll(PAGE_STORE)) {
+    const name = store.getAttribute("merge");
+    if (name !== "page" && !name.startsWith("page.")) continue;
+    const copy = afterDoc.importNode(store, true);
+    const existing = [...afterDoc.querySelectorAll(PAGE_STORE)].find((el) => el.getAttribute("merge") === name);
+    if (existing) existing.replaceWith(copy);
+    else afterDoc.querySelector("article[data-page]").after(copy);
+  }
+  const doctype = afterDoc.doctype ? `<!DOCTYPE ${afterDoc.doctype.name}>\n` : "";
+  return doctype + afterDoc.documentElement.outerHTML;
+}
+
 export async function prepare(update, {
   doc = document,
   loc = location,
@@ -187,13 +209,23 @@ export async function prepare(update, {
   }
   const afterDoc = new DOMParser().parseFromString(result.html, "text/html");
   const before = upgrade.extractAll(doc).dataByName;
+  const article = doc.querySelector("article[data-page]");
+  if (!article && !Object.keys(before || {}).length) {
+    return { ok: false, code: "undeclared", message: UNDECLARED };
+  }
+  let html = result.html;
+  if (article) {
+    const carried = carryPage(doc, afterDoc, article);
+    if (!carried) return { ok: false, code: "lost", lost: [], discarded: 0, message: PAGE_LOST };
+    html = carried;
+  }
   const after = upgrade.extractAll(afterDoc).dataByName;
   const lost = lostValues(before, after, renames);
   const discarded = result.summary && result.summary.totals ? result.summary.totals.discarded || 0 : 0;
   if (lost.length || discarded > 0) {
     return { ok: false, code: "lost", lost, discarded, message: lossMessage(lost, discarded) };
   }
-  return { ok: true, html: result.html, version: result.toVersion || latest.version };
+  return { ok: true, html, version: result.toVersion || latest.version };
 }
 
 function lossMessage(lost, discarded) {
