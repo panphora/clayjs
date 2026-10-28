@@ -1268,7 +1268,7 @@ class LiveSync {
     // after the capture this relay was built from. At floor 0 the html is unchanged.
     const sent = acceptedBytesFor(captureId) ?? acceptedHtml;
     const floor = typeof sent === 'string' ? pageFormatFloor(sent) : 0;
-    payload = { ...payload, html: withPageFormatFloor(payload.html, Math.max(knownPageFormatFloor(), floor)) };
+    payload = { ...payload, html: asSent(withPageFormatFloor(payload.html, Math.max(knownPageFormatFloor(), floor)), sent) };
 
     // Skip only an unstamped repeat, judged against the base as it stood. A
     // landed save is news even when its bytes equal the last relay: "Keep mine"
@@ -2573,6 +2573,16 @@ onSaveAccepted((html, accepted) => {
 
 const acceptedBytesFor = (captureId) =>
   lastAccepted && (lastAccepted.captureId ?? null) === (captureId ?? null) ? lastAccepted.html : null;
+
+// A relay re-serializes the DOM, and that spelling is not the file's: a bare empty
+// attribute comes back as `=""`. When the relay describes the same document the host
+// stored, it carries the stored bytes themselves, so a peer reads what a reload would.
+// One that holds regions the file leaves out (`no-save`) keeps its own serialization.
+function asSent(html, sent) {
+  if (typeof sent !== 'string' || sent === html) return html;
+  const root = (source) => new DOMParser().parseFromString(source, 'text/html').documentElement;
+  return root(html).isEqualNode(root(sent)) ? sent : html;
+}
 
 // Singleton instance
 const liveSync = new LiveSync();
