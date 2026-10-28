@@ -50,6 +50,9 @@ export function createFormatGate({
   let pending = null;
   let lanePending = false;
   let laneReceipt = null;
+  let laneAsked = false;
+  let laneJoin = Promise.resolve(false);
+  let laneJoining = null;
   let disposed = false;
 
   // The floor this gate knows the document at. A save or a room answer can tell
@@ -58,7 +61,20 @@ export function createFormatGate({
   function note(level) {
     floor = Math.max(floor, formatCapability(level));
     notePageFormatFloor(floor);
+    if (floor >= PAGE_FORMAT) requestLane();
     return floor;
+  }
+
+  // A raised floor is one lane switch per tab, however this tab learned of it:
+  // its own accepted save (activateNow joins with that receipt), another tab's
+  // write that came in with the document, or a relay's meta. A switch the lane
+  // has not accepted yet stays pending, and the retry path covers it.
+  function requestLane() {
+    if (laneAsked || disposed) return laneJoin;
+    laneAsked = true;
+    lanePending = true;
+    laneJoin = joinLane(null);
+    return laneJoin;
   }
 
   async function read() {
@@ -92,7 +108,10 @@ export function createFormatGate({
     if (disposed) return { status: "disposed", retry: false };
     if (!(await supportedHere())) return { status: "unsupported-host", code: "page-format-unsupported", extension: PAGE_FORMAT_EXTENSION };
     await read();
-    if (floor >= PAGE_FORMAT) return { status: "active", floor };
+    if (floor >= PAGE_FORMAT) {
+      await requestLane();
+      return { status: "active", floor };
+    }
     const admitted = await admittance();
     const early = pageFormatDecision({ floor, required: PAGE_FORMAT, capability, admitted });
     if (!early.ok) return upgrade(early.minimum);
@@ -110,9 +129,11 @@ export function createFormatGate({
     if (disposed) {
       // The save was accepted, so the document is at floor 1 either way; this
       // tab is gone and must not act on it.
+      laneAsked = true;
       note(PAGE_FORMAT);
       return { status: "disposed", retry: false };
     }
+    laneAsked = true;
     note(PAGE_FORMAT);
     lanePending = true;
     laneReceipt = answer.receipt ?? null;
@@ -126,17 +147,27 @@ export function createFormatGate({
   // receipt is kept, so the retry of a refused switch is covered by the same write.
   async function joinLane(receipt) {
     if (!lane || !lanePending) return false;
+    if (laneJoining) return laneJoining;
     const covering = receipt ?? laneReceipt;
+    laneJoining = (async () => {
+      try {
+        // The receipt is what says the pending work went with an accepted write.
+        const result = await lane.switchScope(PAGE_FORMAT, { covered: Boolean(covering), receipt: covering });
+        // "already" is the lane answering that this tab is on that scope: the
+        // join held, and there is nothing left pending.
+        if (result && (result.status === "switched" || result.status === "already")) {
+          lanePending = false;
+          laneReceipt = null;
+          return true;
+        }
+      } catch {}
+      return false;
+    })();
     try {
-      // The receipt is what says the pending work went with an accepted write.
-      const result = await lane.switchScope(PAGE_FORMAT, { covered: Boolean(covering), receipt: covering });
-      if (result && result.status === "switched") {
-        lanePending = false;
-        laneReceipt = null;
-        return true;
-      }
-    } catch {}
-    return false;
+      return await laneJoining;
+    } finally {
+      laneJoining = null;
+    }
   }
 
   function activate() {

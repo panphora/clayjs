@@ -287,6 +287,46 @@ test("an accepted activation switches the lane scope through the transport's own
   expect(switched[0].options.receipt).toEqual({ accepted: true, revision: "r2" });
 });
 
+// Every tab of a floor-1 document writes in the floor-1 lane scope, not only the
+// tab whose own save raised the floor: a tab that comes up on a document another
+// tab already raised joins the same scope once.
+test("a tab that finds the floor already raised joins the floor-1 scope once", async () => {
+  const adapter = host();
+  adapter.state.floor = 1;
+  const switched = [];
+  const lane = {
+    async switchScope(next, options) {
+      switched.push({ next, options });
+      return { status: "switched", floor: 1 };
+    },
+  };
+  const gate = createFormatGate({ host: adapter, lane });
+  const ran = await gate.run({ apply: () => "underline" });
+  expect(ran).toMatchObject({ status: "applied", result: "underline" });
+  expect(await gate.retry()).toMatchObject({ status: "active", floor: 1 });
+  expect(switched).toHaveLength(1);
+  expect(switched[0].next).toBe(PAGE_FORMAT);
+  expect(adapter.calls.activate).toBe(0);
+});
+
+test("a relay raising the floor moves an idle tab onto the floor-1 scope once", async () => {
+  const adapter = host();
+  const switched = [];
+  const lane = {
+    async switchScope(next) {
+      switched.push(next);
+      return { status: "switched", floor: 1 };
+    },
+  };
+  const gate = createFormatGate({ host: adapter, lane });
+  gate.note(1);
+  expect(await gate.retry()).toMatchObject({ status: "active", floor: 1 });
+  gate.note(1);
+  expect(await gate.retry()).toMatchObject({ status: "active", floor: 1 });
+  expect(switched).toEqual([PAGE_FORMAT]);
+  expect(adapter.calls.activate).toBe(0);
+});
+
 test("a switch the lane refuses stays pending and is retried with the same receipt", async () => {
   document.head.innerHTML = "<title>Notes</title>";
   const adapter = host();

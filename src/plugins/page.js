@@ -6,7 +6,7 @@ import { savePageForce, holdAllSaves, releaseAllSaves, suspendAutosave, resumeAu
 import { setSaveHeader, onSaveAccepted } from "../core/save-core.js";
 import { lastSeenEtag, representedEtag, recordEtag } from "../core/etag.js";
 import { captureForSaveAndComparison } from "../core/snapshot.js";
-import { storeOf, stageStore, closeStore, checkpointWithin, requestCheckpoint, requestExitCheckpoint, fastLane, localLane, pageLaneReady, pageWriterReady, registerPageCheckpoints } from "./live.js";
+import { storeOf, stageStore, closeStore, checkpointWithin, requestCheckpoint, requestExitCheckpoint, fastLane, localLane, lanePending, pageLaneReady, pageWriterReady, registerPageCheckpoints } from "./live.js";
 import { serializeLive } from "../live/ops.js";
 import { parseJsonRelaxed } from "../vendor/hyper-morph-json.vendor.js";
 import { saveStateFor, pageStateFor, BLOCKED_TEXT, RETRY_TEXT, downloadPageCopy, downloadSnapshot, copyPageText } from "../page/save-states.js";
@@ -615,7 +615,7 @@ export function createSteps(inst, options) {
             switchScope: (next, options) => {
               const transport = localLane();
               if (!transport) return { status: "refused", code: "lane-unavailable" };
-              return transport.switchScope(next, options);
+              return transport.switchScope(next, { ...options, covered: Boolean(options?.covered) || !lanePending() });
             },
           },
         });

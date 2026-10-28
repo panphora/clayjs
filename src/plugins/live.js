@@ -1425,6 +1425,12 @@ export function fastLane() {
 // channel scope no tab below that floor is on, and moving this tab there is the
 // gate's call (page/format-gate.js). Null until this tab has such a lane, and a
 // gate asks again on its next retry.
+// Whether any live store of this tab holds ops the room has not confirmed. A tab with
+// none has nothing a scope switch could strand, so it may move without a receipt.
+export function lanePending() {
+  return sessionStores().some((entry) => entry.store.pending.length > 0);
+}
+
 export function localLane() {
   return local;
 }
