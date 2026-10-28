@@ -18,7 +18,7 @@
   },
   "journal.html": {
     "view": { "requests": 62, "depth": 21, "brotli": 180224, "css": { "requests": 1, "depth": 1 }, "fonts": { "requests": 8, "depth": 2 } },
-    "edit": { "requests": 91, "depth": 41, "brotli": 281600, "css": { "requests": 1, "depth": 1 }, "fonts": { "requests": 8, "depth": 2 } },
+    "edit": { "requests": 91, "depth": 41, "brotli": 282624, "css": { "requests": 1, "depth": 1 }, "fonts": { "requests": 8, "depth": 2 } },
     "draft": { "requests": 84, "depth": 36, "brotli": 244736, "css": { "requests": 1, "depth": 1 }, "fonts": { "requests": 8, "depth": 2 } }
   },
   "journal-hyperclay.html": {
