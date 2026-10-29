@@ -287,7 +287,6 @@ test("the five states answer to the table, and the indicator draws its texts", a
   await import("../../../src/plugins/indicator.js");
   const texts = {
     pending: "Saving on this device",
-    journaled: "Stored on this device",
     acknowledged: "Shared, not yet saved",
     checkpointed: "Saved",
     unavailable: "Can't store changes: download a copy",
@@ -299,6 +298,12 @@ test("the five states answer to the table, and the indicator draws its texts", a
     expect({ state, text: chip.textContent }).toEqual({ state, text });
     expect(chip.dataset.state).toBe(state);
   }
+  // The journal is not a save: it draws no chip of its own, so typing stays quiet.
+  document.dispatchEvent(new CustomEvent("clay:page-save-state", { detail: { state: "journaled" } }));
+  await drawn();
+  const chip = document.querySelector("[data-clay-indicator]");
+  expect(chip.textContent).not.toBe("Stored on this device");
+  expect(chip.dataset.state).not.toBe("journaled");
 });
 
 // The page's recovery pieces are its own children: the page participant prepares,
@@ -317,7 +322,7 @@ test("the recovery modules are page children, and the page stays an export", asy
   expect(Object.keys(MODULE_SUPPORT).filter((path) => path in PAGE_FEATURE_SUPPORT)).toEqual([]);
 });
 
-test("a page state stays on screen until the journal says something else, and Saved fades", async () => {
+test("a page state stays on screen while the journal has nothing to report, and Saved fades", async () => {
   jest.resetModules();
   window.clayEditMode = true;
   document.body.innerHTML = "";
@@ -327,8 +332,12 @@ test("a page state stays on screen until the journal says something else, and Sa
   const fire = (state) => document.dispatchEvent(new CustomEvent("clay:page-save-state", { detail: { state } }));
   fire("journaled");
   await drawn();
+  expect(document.querySelector("[data-clay-indicator]")).toBeNull();
+
+  fire("pending");
+  await drawn();
   const chip = document.querySelector("[data-clay-indicator]");
-  expect(chip.textContent).toBe("Stored on this device");
+  expect(chip.textContent).toBe("Saving on this device");
   jest.advanceTimersByTime(10_000);
   expect(chip.style.opacity).toBe("1");
 

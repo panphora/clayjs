@@ -120,7 +120,11 @@ export function createFeature({ view = null, upload = null } = {}) {
     } else if (s.state === "embed-choice") box.append(button("embed", "Keep this image inside the document"), button("cancel", "Close"));
     else if (s.state === "position") box.append(button("apply", "Apply"), button("cancel", "Cancel"));
     else box.append(button("cancel", "Close"));
-    if (!box.isConnected) (view.dom.parentElement ?? doc.body).appendChild(box);
+    if (!box.isConnected) {
+      const host = view.dom.parentElement;
+      if (host) host.insertBefore(box, view.dom);
+      else doc.body.appendChild(box);
+    }
   }
 
   function decide(s) {

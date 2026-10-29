@@ -2,7 +2,7 @@ import { jest } from "@jest/globals";
 import { history } from "../../../src/vendor/prosemirror.vendor.js";
 import { selectBlocks } from "../../../src/page/blocksel.js";
 import { editor, key, posOf, select, shape, typeText } from "./view-helpers.js";
-import { ACTION_ITEMS, blockLink } from "../../../src/page/chrome.js";
+import { ACTION_ITEMS, blockLink, blockTypeOf } from "../../../src/page/chrome.js";
 
 /**
  * The block menu: the slash trigger and its session, the plus, the ranking
@@ -296,6 +296,15 @@ describe("the actions menu", () => {
     expect(labels(view)).toEqual(["Move up", "Move down", "Indent", "Outdent", "Duplicate", "Delete", "Turn into", "Copy link"]);
   });
 
+  test("every action icon is a line SVG, not a glyph or an emoji", () => {
+    const view = open(FOLD, "p");
+    key(view, "/", { ctrlKey: true });
+    const icons = rows(view).map((r) => r.querySelector(".page-menu-icon"));
+    expect(icons.length).toBeGreaterThan(0);
+    for (const icon of icons) expect(icon.querySelector("svg")).not.toBeNull();
+    expect(icons.map((icon) => icon.textContent).join("")).not.toMatch(/[\u21bb\u{1F517}\u29c9]/u);
+  });
+
   test("it also opens on Cmd+/ and the highlight starts on the first row", () => {
     const view = open(FOLD, "p");
     key(view, "/", { metaKey: true });
@@ -505,6 +514,66 @@ describe("review menu regressions", () => {
       view.dom.parentElement.querySelector('.page-dock [data-cmd="link"]').click();
       expect(document.activeElement).toBe(view.dom.parentElement.querySelector(".page-link-input"));
     } finally { view.destroy(); }
+  });
+});
+
+describe("the selection bar matches the toolbar", () => {
+  const bubble = (view) => view.dom.parentElement.querySelector(".page-bubble");
+  const dock = (view) => view.dom.parentElement.querySelector(".page-dock");
+
+  test("selecting text shows a Turn into button naming the block and a More button that opens its menu", () => {
+    const view = open([["p", "paragraph", "hello"], ["q", "paragraph", "Q"]]);
+    view.hasFocus = () => true;
+    select(view, posOf(view, "p") + 1, posOf(view, "p") + 4);
+    expect(bubble(view).hidden).toBe(false);
+    const turn = bubble(view).querySelector(".page-tool-turn");
+    const more = bubble(view).querySelector(".page-tool-more");
+    expect(turn.textContent).toBe(`${blockTypeOf(view.state.doc.child(0)).label} \u25be`);
+    expect(turn.textContent).toBe(dock(view).querySelector(".page-tool-turn").textContent);
+    expect(turn.classList.contains("page-tool-desk")).toBe(false);
+    expect(more.classList.contains("page-tool-desk")).toBe(false);
+    expect([...bubble(view).children].indexOf(turn)).toBe(0);
+    expect([...bubble(view).children].indexOf(more)).toBe(bubble(view).children.length - 1);
+    more.click();
+    expect(isOpen(view)).toBe(true);
+    expect(labels(view)).toEqual(expect.arrayContaining(["Text color", "Page icon"]));
+  });
+
+  test("a mark picked from the bubble's More lands on the selection, which opening the menu keeps", async () => {
+    const gate = { calls: [], run: async (command) => { gate.calls.push(command); return { status: "applied", floor: 1, result: await command?.apply?.({}) }; } };
+    const view = editor([["p", "paragraph", "under me"]], { formatGate: () => Promise.resolve(gate) });
+    view.hasFocus = () => true;
+    view.coordsAtPos = () => COORDS;
+    select(view, posOf(view, "p"), posOf(view, "p") + "under me".length);
+    bubble(view).querySelector(".page-tool-more").click();
+    expect(bubble(view).hidden).toBe(false);
+    expect(view.state.selection.empty).toBe(false);
+    rows(view).find((r) => r.querySelector(".page-menu-label").textContent === "Underline").click();
+    await new Promise((done) => setTimeout(done, 0));
+    expect(gate.calls).toHaveLength(1);
+    expect(view.state.doc.rangeHasMark(posOf(view, "p"), posOf(view, "p") + "under me".length, view.state.schema.marks.underline)).toBe(true);
+  });
+
+  test("typing a letter of an unfinished slash word reopens it, but the caret merely returning does not", () => {
+    const view = open([["p", "paragraph", ""], ["q", "paragraph", "Q"]], "p");
+    view.hasFocus = () => true;
+    type(view, "/tabl");
+    expect(isOpen(view)).toBe(true);
+    select(view, posOf(view, "q"));
+    expect(isOpen(view)).toBe(false);
+    select(view, posOf(view, "p", true));
+    expect(isOpen(view)).toBe(false);
+    typeText(view, "e");
+    expect(isOpen(view)).toBe(true);
+    expect(labels(view)).toContain("Table");
+    expect(labels(view)[0]).toBe("Table");
+  });
+
+  test("the More menu names the page's icon row Page icon, and has no Add icon row", () => {
+    const view = open([["p", "paragraph", "hello"]]);
+    dock(view).querySelector(".page-tool-more").click();
+    expect(labels(view)).toContain("Page icon");
+    expect(labels(view)).not.toContain("Add icon");
   });
 });
 

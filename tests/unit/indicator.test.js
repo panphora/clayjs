@@ -57,6 +57,17 @@ test("shows the right label + clay markers on save events, hides after saved", a
 // document rather than only the ones that turned this chip on. Both listen to
 // clay:save-conflict, so a label here put a chip in the corner saying the same
 // thing as the bar, at the same moment.
+// Typing journals work long before the page is saved, and a notice for every keystroke
+// is not a notice: the journal draws nothing, so only a save says anything.
+test("says nothing for journaled work, so typing alone draws no chip", async () => {
+  document.body.innerHTML = "";
+
+  document.dispatchEvent(new CustomEvent("clay:page-save-state", { detail: { state: "journaled" } }));
+  await drawn();
+
+  expect(document.querySelector("[data-clay-indicator]")).toBeNull();
+});
+
 test("says nothing on a conflict, leaving that to the core notice", async () => {
   fire("saved");
   await drawn();

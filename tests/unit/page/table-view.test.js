@@ -73,3 +73,16 @@ test("a press on a cell's padding puts the caret in that cell's text, after the 
   }
   expect(cells[0].querySelector(".page-table-row-menu").nextElementSibling).toBe(cells[0].querySelector("span"));
 });
+
+test("table and row actions are gear icons that keep their accessible labels", () => {
+  const view = editor([], { blocks: { tbl: table } });
+  const wrapper = view.dom.querySelector(".page-table");
+  const actions = wrapper.querySelector(":scope > .page-table-actions");
+  const rowMenu = wrapper.querySelector(".page-table-row-menu");
+  expect(actions.querySelector("svg")).toBeTruthy();
+  expect(actions.textContent).toBe("");
+  expect(actions.getAttribute("aria-label")).toBe("Table actions");
+  expect(rowMenu.querySelector("svg")).toBeTruthy();
+  expect(rowMenu.textContent).toBe("");
+  expect(rowMenu.getAttribute("aria-label")).toMatch(/^Row actions/);
+});

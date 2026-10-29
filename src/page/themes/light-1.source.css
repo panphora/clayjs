@@ -54,12 +54,12 @@
   --page-code-bg: rgba(35, 34, 31, 0.045);
   --page-code-ink: #23221F;
 
-  --page-chrome-ink-rest: rgba(35, 34, 31, 0.16);
-  --page-chrome-ink-moved: rgba(35, 34, 31, 0.30);
-  --page-chrome-bg-rest: rgba(35, 34, 31, 0.025);
-  --page-chrome-bg-moved: rgba(35, 34, 31, 0.045);
-  --page-chrome-line-rest: rgba(35, 34, 31, 0.16);
-  --page-chrome-line-moved: rgba(35, 34, 31, 0.30);
+  --page-chrome-ink-rest: rgba(35, 34, 31, 0.42);
+  --page-chrome-ink-moved: rgba(35, 34, 31, 0.62);
+  --page-chrome-bg-rest: rgba(35, 34, 31, 0.035);
+  --page-chrome-bg-moved: rgba(35, 34, 31, 0.06);
+  --page-chrome-line-rest: rgba(35, 34, 31, 0.22);
+  --page-chrome-line-moved: rgba(35, 34, 31, 0.36);
   --page-chrome-shadow-rest: none;
   --page-chrome-shadow-moved: none;
   --page-chrome-radius: 7px;
@@ -146,7 +146,8 @@ article[data-page] figure[data-type="chart"] > svg { display: block; width: 100%
   height: 15px;
 }
 
-.page-shell .page-dock .page-tool-turn {
+.page-shell .page-dock .page-tool-turn,
+.page-shell .page-bubble .page-tool-turn {
   width: auto;
   gap: 4px;
   padding: 0 8px;

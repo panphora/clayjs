@@ -16,6 +16,7 @@ import { pickCsv } from "./csv-import.js";
 import { HISTORY_INTENT, typingIntent } from "./history-intent.js";
 import { composing } from "./markdown.js";
 import { announce } from "./announce.js";
+import { REMOTE } from "./model.js";
 
 export { BLOCK_TYPES, blockTypeOf, turnInto, insertAfter } from "./items.js";
 
@@ -72,20 +73,24 @@ function copyBlockLink(id) {
 }
 
 export const ACTION_ITEMS = [
-  { key: "up", label: "Move up", icon: "↑", hint: `${MOD}⇧↑`, run: (view) => moveBlock(-1)(view.state, view.dispatch) },
-  { key: "down", label: "Move down", icon: "↓", hint: `${MOD}⇧↓`, run: (view) => moveBlock(1)(view.state, view.dispatch) },
-  { key: "indent", label: "Indent", icon: "→", hint: "Tab", run: (view) => indentBlocks(view.state, view.dispatch) },
-  { key: "outdent", label: "Outdent", icon: "←", hint: "⇧Tab", run: (view) => outdentBlocks(view.state, view.dispatch) },
-  { key: "duplicate", label: "Duplicate", icon: "⧉", hint: `${MOD}D`, run: (view) => duplicateBlocks(view.state, view.dispatch) },
-  { key: "delete", label: "Delete", icon: "×", hint: "Del", run: (view) => deleteBlocks(view.state, view.dispatch) },
-  { key: "turn", label: "Turn into", icon: "↻", hint: "›", only: "text", run: (view, chrome) => chrome.openMenu("turn", chrome.plus) },
-  { key: "link", label: "Copy link", icon: "🔗", run: (view, chrome, index) => copyBlockLink(view.state.doc.child(index).attrs.id) },
-  { key: "alt", label: "Alt text…", icon: "Aa", only: "image", focus: false, run: (view, chrome, index) => { const id = imageId(view, index); return import("./image-actions.js").then((part) => part.openAltEditor(view, id)); } },
-  { key: "small", label: "Small", icon: "▫", only: "image", run: (view, chrome, index) => { const id = imageId(view, index); return import("./image-actions.js").then((part) => part.setImageAttrs(view, id, { width: 240 })); } },
-  { key: "medium", label: "Medium", icon: "◻", only: "image", run: (view, chrome, index) => { const id = imageId(view, index); return import("./image-actions.js").then((part) => part.setImageAttrs(view, id, { width: 480 })); } },
-  { key: "full", label: "Full width", icon: "⬜", only: "image", run: (view, chrome, index) => { const id = imageId(view, index); return import("./image-actions.js").then((part) => part.setImageAttrs(view, id, { width: null })); } },
-  { key: "chart", label: "Chart this table", icon: "📊", only: "table", run: (view, chrome, index) => { const at = blockStart(view.state.doc, index); return loadChartPart(view).then(({ insertChartAfterTable }) => insertChartAfterTable(view, at)); } },
-  { key: "csv", label: "Import CSV…", icon: "⇧", only: "table", focus: false, run: (view, chrome, index) => pickCsv(view, null, view.state.doc.child(index).attrs.id) },
+  { key: "up", label: "Move up", icon: "up", hint: `${MOD}⇧↑`, run: (view) => moveBlock(-1)(view.state, view.dispatch) },
+  { key: "down", label: "Move down", icon: "down", hint: `${MOD}⇧↓`, run: (view) => moveBlock(1)(view.state, view.dispatch) },
+  { key: "indent", label: "Indent", icon: "indent", hint: "Tab", run: (view) => {
+    const before = view.state.doc;
+    indentBlocks(view.state, view.dispatch);
+    if (view.state.doc === before) { announce(view, "Indent works on list items and inside toggles."); toast("Indent works on list items and inside toggles."); }
+  } },
+  { key: "outdent", label: "Outdent", icon: "outdent", hint: "⇧Tab", run: (view) => outdentBlocks(view.state, view.dispatch) },
+  { key: "duplicate", label: "Duplicate", icon: "duplicate", hint: `${MOD}D`, run: (view) => duplicateBlocks(view.state, view.dispatch) },
+  { key: "delete", label: "Delete", icon: "trash", hint: "Del", run: (view) => deleteBlocks(view.state, view.dispatch) },
+  { key: "turn", label: "Turn into", icon: "turn", hint: "›", only: "text", run: (view, chrome) => chrome.openMenu("turn", chrome.plus) },
+  { key: "link", label: "Copy link", icon: "link", run: (view, chrome, index) => copyBlockLink(view.state.doc.child(index).attrs.id) },
+  { key: "alt", label: "Alt text…", icon: "alt", only: "image", focus: false, run: (view, chrome, index) => { const id = imageId(view, index); return import("./image-actions.js").then((part) => part.openAltEditor(view, id)); } },
+  { key: "small", label: "Small", icon: "small", only: "image", run: (view, chrome, index) => { const id = imageId(view, index); return import("./image-actions.js").then((part) => part.setImageAttrs(view, id, { width: 240 })); } },
+  { key: "medium", label: "Medium", icon: "medium", only: "image", run: (view, chrome, index) => { const id = imageId(view, index); return import("./image-actions.js").then((part) => part.setImageAttrs(view, id, { width: 480 })); } },
+  { key: "full", label: "Full width", icon: "full", only: "image", run: (view, chrome, index) => { const id = imageId(view, index); return import("./image-actions.js").then((part) => part.setImageAttrs(view, id, { width: null })); } },
+  { key: "chart", label: "Chart this table", icon: "chart", only: "table", run: (view, chrome, index) => { const at = blockStart(view.state.doc, index); return loadChartPart(view).then(({ insertChartAfterTable }) => insertChartAfterTable(view, at)); } },
+  { key: "csv", label: "Import CSV…", icon: "csv", only: "table", focus: false, run: (view, chrome, index) => pickCsv(view, null, view.state.doc.child(index).attrs.id) },
 ];
 
 const actionsFor = (st) => {
@@ -110,6 +115,19 @@ const ICONS = {
   ordered: svg('<path d="M7 4.5h6.5M7 8h6.5M7 11.5h6.5M2.5 3.5l1-.5v3M2.5 9.3c.2-.5.6-.8 1.1-.8.6 0 1 .4 1 .9 0 .9-2.1 1.4-2.1 2.6h2.1"/>'),
   check: svg('<rect x="2.5" y="2.5" width="11" height="11" rx="2.5"/><path d="M5.5 8.2l1.8 1.8 3.4-4"/>'),
   more: svg('<path stroke-width="2.2" d="M3 8h.01M8 8h.01M13 8h.01"/>'),
+  up: svg('<path d="M8 13V3.5M4 7.5 8 3.5l4 4"/>'),
+  down: svg('<path d="M8 3v9.5M4 8.5l4 4 4-4"/>'),
+  indent: svg('<path d="M2.5 3.5h11M7 8h6.5M2.5 12.5h11M2.5 6l2.5 2-2.5 2"/>'),
+  outdent: svg('<path d="M2.5 3.5h11M7 8h6.5M2.5 12.5h11M5 6 2.5 8 5 10"/>'),
+  duplicate: svg('<rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 3.5v-.5A1.5 1.5 0 0 0 9 1.5H4A1.5 1.5 0 0 0 2.5 3v5A1.5 1.5 0 0 0 4 9.5h.5"/>'),
+  trash: svg('<path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5"/>'),
+  turn: svg('<path d="M3 5.5h9.5M10 3l2.5 2.5L10 8M13 10.5H3.5M6 8l-2.5 2.5L6 13"/>'),
+  chart: svg('<path d="M3 13V3M3 13h10.5M6 10.5V8M9 10.5V5.5M12 10.5V7"/>'),
+  csv: svg('<path d="M4 1.5h5L12.5 5v9.5h-8.5zM9 1.5V5h3.5M8 7.5v5M6 10.5l2 2 2-2"/>'),
+  alt: svg('<path d="M2.5 12.5 5.5 4l3 8.5M3.6 9.5h3.8M10 12.5V7.5M10 8.5c.4-.7 1.1-1 2-1h.5"/>'),
+  small: svg('<rect x="5" y="5" width="6" height="6" rx="1"/>'),
+  medium: svg('<rect x="3.5" y="3.5" width="9" height="9" rx="1.2"/>'),
+  full: svg('<rect x="1.5" y="3.5" width="13" height="9" rx="1.2"/>'),
 };
 const TOOLS = [
   ["strong", "Bold"],
@@ -218,7 +236,7 @@ function runList(view, kind) {
 // The four formats this release adds are commands the format gate may refuse, and
 // a refusal is a notice rather than a change. The menu that offers them, and the
 // commands behind it, load the first time one is chosen (format-native-commands.js).
-const nativeMenu = (view, chrome, name) => import("./format-native-commands.js").then((menu) => menu.nativeMenu(view, name, chrome.more));
+const nativeMenu = (view, chrome, name) => import("./format-native-commands.js").then((menu) => menu.nativeMenu(view, name, chrome.pickedFrom ?? chrome.more));
 
 function runMark(view, name) {
   if (name === "link") return openLinkEditor(view);
@@ -317,6 +335,7 @@ class Chrome {
     this.destroyed = false;
     this.probe = null;
     this.roving = null;
+    this.remote = false;
 
     this.dock = el("div", "page-dock", { role: "toolbar", "aria-label": "Formatting" });
     this.turn = el("button", "page-tool page-tool-turn page-tool-desk", { type: "button", "aria-haspopup": "menu" });
@@ -328,7 +347,10 @@ class Chrome {
     this.grip = el("button", "page-grip", { type: "button", "aria-label": "Block actions", title: "Drag to move, click for actions", "aria-haspopup": "menu" });
     this.grip.innerHTML = ICONS.grip;
     this.bubble = el("div", "page-bubble", { role: "toolbar", "aria-label": "Selection", hidden: "" });
-    this.bubble.append(...TOOLS.map(([n, l]) => toolButton(n, l)));
+    this.bubbleTurn = el("button", "page-tool page-tool-turn", { type: "button", "aria-haspopup": "menu" });
+    this.bubbleMore = el("button", "page-tool page-tool-primary page-tool-more", { type: "button", "aria-label": "More", title: "More", "aria-haspopup": "menu" });
+    this.bubbleMore.innerHTML = ICONS.more;
+    this.bubble.append(this.bubbleTurn, el("span", "page-tool-sep"), ...TOOLS.map(([n, l]) => toolButton(n, l)), this.bubbleMore);
     this.menuId = `page-menu-${++menuCount}`;
     this.menuEl = el("div", "page-menu", { role: "menu", id: this.menuId, hidden: "" });
     this.scrim = el("div", "page-scrim", { hidden: "" });
@@ -345,6 +367,8 @@ class Chrome {
     }
     this.turn.addEventListener("click", () => this.toggleMenu("turn", this.turn));
     this.more.addEventListener("click", () => this.toggleMenu("more", this.more));
+    this.bubbleTurn.addEventListener("click", () => this.toggleMenu("turn", this.bubbleTurn));
+    this.bubbleMore.addEventListener("click", () => this.toggleMenu("more", this.bubbleMore));
     this.dock.addEventListener("keydown", (e) => this.dockKey(e));
     this.plus.addEventListener("click", () => this.fromPlus());
     this.grip.addEventListener("click", (e) => {
@@ -382,7 +406,7 @@ class Chrome {
     this.onResize = () => this.scheduleLayout();
     this.onDocDown = (e) => {
       if (!this.menu) return;
-      if ([this.menuEl, this.plus, this.grip, this.turn].some((part) => part.contains(e.target))) return;
+      if ([this.menuEl, this.plus, this.grip, this.turn, this.bubbleTurn, this.bubbleMore].some((part) => part.contains(e.target))) return;
       this.closeMenu();
     };
     document.addEventListener("mousedown", this.onDocDown, true);
@@ -580,17 +604,17 @@ class Chrome {
   moreItems() {
     const phone = this.isPhone();
     const tools = phone ? TOOLS.filter(([name]) => !PHONE_TOOLS.has(name))
-      .map(([name, label]) => ({ key: name, label, icon: ICONS[name], run: (view) => runMark(view, name) })) : [];
+      .map(([name, label]) => ({ key: name, label, icon: name, run: (view) => runMark(view, name) })) : [];
     const actions = ACTION_ITEMS.filter((a) => MORE_ACTIONS.has(a.key)).map((a) => ({ ...a, blocks: true }));
     return [
       ...tools,
       { key: "underline", label: "Underline", icon: "U", hint: `${MOD}u`, run: (view, chrome) => nativeMenu(view, chrome, "underline") },
       { key: "text_color", label: "Text color", icon: "A", hint: "\u203a", run: (view, chrome) => nativeMenu(view, chrome, "text_color") },
       { key: "highlight", label: "Highlight", icon: "\u25A0", hint: "\u203a", run: (view, chrome) => nativeMenu(view, chrome, "highlight") },
-      ...(phone ? [{ key: "turn", label: "Turn into", icon: "\u21bb", run: (view, chrome) => chrome.openMenu("turn", chrome.more) }] : []),
+      ...(phone ? [{ key: "turn", label: "Turn into", icon: "turn", run: (view, chrome) => chrome.openMenu("turn", chrome.more) }] : []),
       { key: "insert", label: "Insert", icon: "+", run: (view, chrome) => chrome.openMenu("insert", chrome.more, null, null, view.state.doc.child(chrome.blockIndex()).attrs.id) },
       ...actions,
-      { key: "titleIcon", label: "Add icon", icon: "\u263A", run: (view) => runMenuCommand(view, "titleIcon") },
+      { key: "titleIcon", label: "Page icon", icon: "\u263A", run: (view) => runMenuCommand(view, "titleIcon") },
       { key: "titleCover", label: "Add cover", icon: "\u25A4", run: (view) => runMenuCommand(view, "titleCover") },
       { key: "exportHtml", label: "Export reading copy", icon: "\u21E9", run: (view) => runMenuCommand(view, "exportHtml") },
       { key: "exportMarkdown", label: "Export as Markdown", icon: "M\u21E9", run: (view) => runMenuCommand(view, "exportMarkdown") },
@@ -650,7 +674,8 @@ class Chrome {
       const role = m.mode === "turn" ? "menuitemradio" : typeof checked === "boolean" ? "menuitemcheckbox" : slash ? "option" : "menuitem";
       const row = el("button", `page-menu-item${active ? " is-active" : ""}`, { type: "button", role, tabindex: !slash && active ? "0" : "-1", id: `${this.menuId}-${i}`, "data-index": String(i), ...(role === "menuitemradio" ? {} : { "aria-selected": active ? "true" : "false" }), ...(typeof checked === "boolean" ? { "aria-checked": String(checked) } : {}) });
       const icon = el("span", "page-menu-icon");
-      icon.textContent = b.icon || "";
+      if (ICONS[b.icon]) icon.innerHTML = ICONS[b.icon];
+      else icon.textContent = b.icon || "";
       const label = el("span", "page-menu-label");
       label.textContent = b.label;
       if (b.description) {
@@ -673,7 +698,7 @@ class Chrome {
     this.menuEl.hidden = false;
     this.scrim.hidden = false;
     this.scheduleLayout();
-    if (!slash) this.menuEl.querySelectorAll("button")[m.active]?.focus();
+    if (!slash) this.menuEl.querySelectorAll("button")[m.active]?.focus({ preventScroll: true });
   }
 
   pick(i) {
@@ -687,6 +712,8 @@ class Chrome {
     const wanted = m.mode === "insert" ? (m.anchorId ? [m.anchorId] : []) : m.ids;
     const stale = wanted.some((id) => !id || this.idIndex(id) < 0);
     const index = wanted.length ? this.idIndex(wanted[0]) : -1;
+    // A submenu a row opens (text color, highlight) anchors where this menu was opened.
+    this.pickedFrom = m.anchor;
     this.closeMenu();
     if (stale && m.mode !== "external") {
       announce(this.view, TARGET_GONE);
@@ -905,12 +932,24 @@ class Chrome {
     const st = view.state;
     const node = st.doc.child(this.blockIndex());
     this.turn.textContent = `${blockTypeOf(node).label} ▾`;
+    this.bubbleTurn.textContent = this.turn.textContent;
     for (const b of this.dock.querySelectorAll("[data-cmd]")) b.setAttribute("aria-pressed", String(toolActive(st, b.dataset.cmd)));
-    const showBubble = !st.selection.empty && st.selection instanceof TextSelection && view.hasFocus();
+    const bubbleMenu = !!this.menu && [this.bubbleTurn, this.bubbleMore].includes(this.menu.anchor);
+    const showBubble = bubbleMenu || (!st.selection.empty && st.selection instanceof TextSelection && view.hasFocus());
     this.bubble.hidden = !showBubble;
     if (showBubble) for (const b of this.bubble.querySelectorAll("[data-cmd]")) b.setAttribute("aria-pressed", String(toolActive(st, b.dataset.cmd)));
     this.grip.classList.toggle("is-on", st.selection instanceof BlockSelection);
     if (!this.inRoving(this.roving)) this.setRoving(this.dockControls()[0]);
+    // A slash word typed before the caret left the block reopens when its own word is
+    // edited again, not when the caret merely returns to it.
+    if (!this.menu && prev && prev.doc !== st.doc && !this.remote && view.hasFocus() && st.selection.empty) {
+      const $head = st.selection.$head;
+      if ($head.depth === 1 && $head.parent.isTextblock && !$head.parent.type.spec.code) {
+        const before = st.doc.textBetween($head.start(), $head.pos);
+        const match = /(?:^|\s)\/([a-z]*)$/i.exec(before);
+        if (match) this.openMenu("insert", this.plus, $head.start() + match.index + match[0].indexOf("/") + 1, null, $head.parent.attrs.id);
+      }
+    }
     this.slashQuery();
     this.scheduleLayout();
   }
@@ -943,6 +982,10 @@ export function chromePlugin({ onAiTool = null } = {}) {
       return chrome;
     },
     props: {
+      filterTransaction(view, tr) {
+        if (chrome && tr.docChanged) chrome.remote = !!tr.getMeta(REMOTE);
+        return true;
+      },
       handleKeyDown(view, event) {
         if (!chrome) return false;
         if (event.key === "/" && (event.metaKey || event.ctrlKey) && !event.altKey && !chrome.menu) {
@@ -967,7 +1010,7 @@ export function chromePlugin({ onAiTool = null } = {}) {
       handleDOMEvents: {
         keydown(view, event) { return composing(event, view); },
         blur(view) {
-          if (chrome) chrome.bubble.hidden = true;
+          if (chrome && !(chrome.menu && [chrome.bubbleTurn, chrome.bubbleMore].includes(chrome.menu.anchor))) chrome.bubble.hidden = true;
           return false;
         },
       },

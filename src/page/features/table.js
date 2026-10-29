@@ -17,12 +17,13 @@ const N = schema.nodes;
 const columns = (table) => orderedIds(table.attrs.cols);
 
 const UNAVAILABLE = "That part of the table is no longer available.";
+const GEAR = '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="2"/><path d="M8 1.8v1.7M8 12.5v1.7M1.8 8h1.7M12.5 8h1.7M3.6 3.6l1.2 1.2M11.2 11.2l1.2 1.2M3.6 12.4l1.2-1.2M11.2 4.8l1.2-1.2"/></svg>';
 const ACTIONS_CSS = `
-.page-editor .page-table-actions { position: absolute; z-index: 2; bottom: 100%; inset-inline-start: 0; height: 18px; padding: 0 8px; border: 0; border-radius: 6px 6px 0 0; background: var(--page-chrome-bg-rest); color: var(--page-chrome-ink-rest); font: inherit; font-size: 0.75rem; line-height: 1; cursor: pointer; opacity: 0; transition: opacity 120ms; }
-.page-editor .page-table:hover > .page-table-actions, .page-editor .page-table-actions:focus-visible { opacity: 1; }
-.page-editor .page-table-actions:hover { background: var(--page-chrome-bg-moved); color: var(--page-ink-soft); }
+.page-editor .page-table-actions { position: absolute; z-index: 2; bottom: 100%; inset-inline-end: 0; inset-inline-start: auto; width: 24px; height: 20px; padding: 0; display: grid; place-items: center; border: 1px solid var(--page-chrome-line-rest); border-bottom: 0; border-radius: 6px 6px 0 0; background: var(--page-chrome-bg-moved); color: var(--page-chrome-ink-moved); font: inherit; cursor: pointer; opacity: 1; }
+.page-editor .page-table-actions:hover { background: var(--page-pop-hover); color: var(--page-ink-soft); }
 @media (max-width: 560px) {
-  .page-editor .page-table-actions { position: static; display: block; width: 100%; height: 44px; border-radius: 0; opacity: 1; border-block-end: 1px solid var(--page-rule); }
+  .page-editor .page-table-actions { position: absolute; }
+  .page-editor .page-table-actions::after { content: ""; position: absolute; inset: -12px; }
 }
 `;
 
@@ -119,12 +120,12 @@ export class TableView {
     const actions = doc.createElement("button");
     actions.type = "button";
     actions.className = "page-table-actions";
-    actions.textContent = "Table actions";
+    actions.innerHTML = GEAR;
     actions.dataset.control = "actions";
     actions.setAttribute("aria-haspopup", "menu");
     actions.setAttribute("aria-expanded", "false");
     actions.setAttribute("aria-label", "Table actions");
-    actions.title = "Insert, delete, move, sort, rename and size rows and columns";
+    actions.title = "Table actions";
     this.actionsButton = actions;
     actions.addEventListener("click", (event) => {
       event.preventDefault();
@@ -526,11 +527,12 @@ export class TableCellView {
     const menu = doc.createElement("button");
     menu.type = "button";
     menu.className = "page-table-row-menu";
-    menu.textContent = "Row actions";
+    menu.innerHTML = GEAR;
     menu.dataset.control = "row";
     menu.setAttribute("aria-haspopup", "menu");
     menu.setAttribute("aria-expanded", "false");
     menu.setAttribute("aria-label", "Row actions");
+    menu.title = "Row actions";
     menu.contentEditable = "false";
     menu.addEventListener("click", () => {
       const target = this.target();

@@ -10,7 +10,7 @@ import { editor, posOf, select, typeText } from "./view-helpers.js";
  */
 
 const SLASH = [["Mention", "mentions"], ["Date", "dates"], ["Emoji", "emoji"]];
-const MORE = [["Add icon", "titleIcon"], ["Add cover", "titleCover"], ["Export reading copy", "exportHtml"]];
+const MORE = [["Page icon", "titleIcon"], ["Add cover", "titleCover"], ["Export reading copy", "exportHtml"]];
 
 const originals = new Map();
 const spies = {};
@@ -95,7 +95,7 @@ test("choosing one entry twice imports its module and installs it once", async (
   const view = page();
   for (const _ of [1, 2]) {
     more(view).click();
-    row(view, "Add icon").click();
+    row(view, "Page icon").click();
     await flush();
   }
   expect(spies.titleIcon).toHaveBeenCalledTimes(1);

@@ -19,7 +19,6 @@ const LABELS = {
   retrying: "Saving…",
   blocked: "Can't save here",
   pending: "Saving on this device",
-  journaled: "Stored on this device",
   acknowledged: "Shared, not yet saved",
   checkpointed: "Saved",
   unavailable: "Can't store changes: download a copy",
@@ -27,7 +26,7 @@ const LABELS = {
 
 // States that stay on screen instead of fading: a save still in flight, one that keeps
 // trying, one the host will not take without help, and where the journal says the work is.
-const STICKY = new Set(["saving", "retrying", "blocked", "pending", "journaled", "acknowledged", "unavailable"]);
+const STICKY = new Set(["saving", "retrying", "blocked", "pending", "acknowledged", "unavailable"]);
 
 const ALARMING = new Set(["error", "offline", "blocked", "unavailable"]);
 

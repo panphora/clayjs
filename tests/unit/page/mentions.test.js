@@ -451,6 +451,18 @@ test("a gate that refuses writes nothing, marks nothing and leaves no undo entry
     .toEqual({ ok: false, code: "page-format-upgrade-required", retry: false });
 });
 
+// A host that never advertised the format is the one refusal nothing else reports: the
+// command writes nothing and no menu closes, so the gate's no is said out loud.
+test("a host that cannot store the format says so rather than doing nothing", async () => {
+  people();
+  const view = open();
+  view.runFormatCommand = async () => ({ status: "unsupported-host", code: "page-format-unsupported" });
+
+  expect(await runFormatted(view, () => { throw new Error("a refused command writes nothing"); }))
+    .toEqual({ ok: false, code: "page-format-unsupported", retry: false });
+  expect(view.dom.parentElement.querySelector(".page-live").textContent).toContain("This host can't store that yet");
+});
+
 test("the gate is asked once per mention, and the written name is its answer", async () => {
   people();
   const view = open();
