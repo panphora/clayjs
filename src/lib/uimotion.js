@@ -642,6 +642,7 @@ class Scene {
     const doc = this.stage.ownerDocument
     const bar = doc.createElement('div')
     bar.className = 'uimotion-debug'
+    bar.setAttribute('clay', 'editor-ui')
     bar.style.cssText = 'display:flex;gap:8px;align-items:center;margin-top:8px;font:12px/1.4 ui-monospace,monospace'
     bar.innerHTML = '<button type="button">Pause</button><input type="range" min="0" step="1" style="flex:1"><select><option>0.25</option><option>0.5</option><option selected>1</option></select><span></span>'
     const [button, range, select, label] = bar.children
@@ -706,6 +707,7 @@ export function mount(stage, build, { watch = stage, teardown, debug = false } =
   let width = 0
   let onScreen = true
   let queued = false
+  let queuedForce = false
   let done = false
   const shown = () => onScreen && doc.visibilityState !== 'hidden'
   const sync = () => { if (s) shown() ? s.play() : s.pause() }
@@ -749,9 +751,15 @@ export function mount(stage, build, { watch = stage, teardown, debug = false } =
     }
   }
   const queue = force => {
+    queuedForce = queuedForce || force
     if (queued) return
     queued = true
-    requestAnimationFrame(() => { queued = false; start(force) })
+    requestAnimationFrame(() => {
+      queued = false
+      const f = queuedForce
+      queuedForce = false
+      start(f)
+    })
   }
   const ro = new ResizeObserver(() => (stage.isConnected ? queue(false) : stop()))
   ro.observe(watch)

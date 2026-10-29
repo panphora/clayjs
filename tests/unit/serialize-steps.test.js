@@ -55,6 +55,13 @@ function buildSmallPage() {
   `;
 }
 
+// A body whose only child is one big container, the shape a page with a single wrapper takes:
+// the save has to descend into that child to have anything to yield between.
+function buildSingleContainerPage() {
+  const article = (i) => `${entry(i)}<p>Entry ${i} body text, long enough that 2,000 of them run past 256 KB.</p>`;
+  document.body.innerHTML = `<main>${Array.from({ length: 2000 }, (_, i) => article(i)).join("")}</main>`;
+}
+
 const countYields = (gen) => {
   let yields = 0;
   for (let step = gen.next(); !step.done; step = gen.next()) yields++;
@@ -88,6 +95,17 @@ test("a large page's sliced serializations are the one-call bytes", () => {
 test("a small page's sliced serializations are the one-call bytes", () => {
   buildSmallPage();
   const clone = document.documentElement.cloneNode(true);
+  expect(drain(serializeCloneSteps(clone.cloneNode(true)))).toBe(serializeClone(clone));
+  expect(drain(serializeForCompareSteps(clone.cloneNode(true)))).toBe(serializeForCompare(clone));
+});
+
+test("a body holding one big child is still sliced, and its bytes are the one-call bytes", () => {
+  buildSingleContainerPage();
+  const clone = document.documentElement.cloneNode(true);
+  const bytes = serializeClone(clone).length;
+  expect(bytes).toBeGreaterThan(256 * 1024);
+  expect(countYields(serializeCloneSteps(clone))).toBeGreaterThan(3);
+  expect(countYields(serializeForCompareSteps(clone))).toBeGreaterThan(3);
   expect(drain(serializeCloneSteps(clone.cloneNode(true)))).toBe(serializeClone(clone));
   expect(drain(serializeForCompareSteps(clone.cloneNode(true)))).toBe(serializeForCompare(clone));
 });

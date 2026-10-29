@@ -26,7 +26,6 @@ const SLICE_MIN_ELEMENTS = 256;
 function sliceable(el) {
   return el.namespaceURI === XHTML_NS
     && el.localName !== 'template'
-    && el.childNodes.length > 1
     && el.getElementsByTagName('*').length >= SLICE_MIN_ELEMENTS;
 }
 

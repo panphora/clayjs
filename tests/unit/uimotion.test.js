@@ -218,6 +218,38 @@ test("a width change rebuilds the scene at the time it had reached", () => {
   expect(playStates(handle)).toEqual(animsOf(handle).map(() => "running"));
 });
 
+test("fonts arriving in the frame a resize is already queued for still force the rebuild", async () => {
+  const { stage, doc } = fakeStage();
+  let fontsDone;
+  doc.fonts = { status: "loading", ready: new Promise((resolve) => { fontsDone = resolve; }) };
+  let builds = 0;
+  const handle = mount(stage, (el) => {
+    builds += 1;
+    return build(el);
+  });
+  const first = handle.scene;
+  // The resize alone would find the same width and rebuild nothing; the fonts force it.
+  FakeResizeObserver.instances[0].callback([]);
+  fontsDone();
+  await doc.fonts.ready;
+  flush();
+  expect(builds).toBe(2);
+  expect(handle.scene).not.toBe(first);
+  expect(first.animations.every((a) => a.cancelled)).toBe(true);
+});
+
+test("the debug bar is marked as editor UI so a save leaves it out", () => {
+  const { stage, doc } = fakeStage();
+  const bar = new FakeEl(doc);
+  bar.children = [new FakeEl(doc), new FakeEl(doc), new FakeEl(doc), new FakeEl(doc)];
+  doc.createElement = () => bar;
+  doc.defaultView.requestAnimationFrame = () => {};
+  stage.after = () => {};
+  scene(stage).debug();
+  expect(bar.className).toBe("uimotion-debug");
+  expect(bar.attrs.clay).toBe("editor-ui");
+});
+
 test("a hidden tab pauses the scene and showing it plays again", () => {
   const { stage, doc } = fakeStage();
   const handle = mount(stage, build);
