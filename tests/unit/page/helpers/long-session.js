@@ -654,6 +654,8 @@ export async function runLongSession({ seed = LONG_DOCUMENT_SEED, operations = 2
     }
   };
 
+  const msPerHundred = [];
+  let hundredStart = performance.now();
   try {
     for (let op = 0; op < operations; op++) {
       now += 40;
@@ -674,6 +676,10 @@ export async function runLongSession({ seed = LONG_DOCUMENT_SEED, operations = 2
       }
       const at = Math.floor(operations * [0.35, 0.7][recreations]);
       if (recreations < 2 && op === at) await recreate(op);
+      if ((op + 1) % 100 === 0) {
+        msPerHundred.push(Math.round(performance.now() - hundredStart));
+        hundredStart = performance.now();
+      }
     }
 
     // Scripted refusals leave the content exactly as it was.
@@ -751,6 +757,8 @@ export async function runLongSession({ seed = LONG_DOCUMENT_SEED, operations = 2
       cacheHighWater, reopen,
       foldViolations: foldViolations.length, mismatches: mismatches.length,
       diagnostics: { a: tabA.binding.provider._diagnostics(), b: tabB.binding.provider._diagnostics() },
+      msPerHundred,
+      proved: Object.fromEntries(["provedWalks", "provedRecoveries", "walkMismatch"].map((key) => [key, tabs().reduce((n, tab) => n + (tab.binding.stats[key] ?? 0), 0)])),
     };
   } finally {
     Date.now = realNow;
