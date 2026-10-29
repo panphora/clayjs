@@ -433,7 +433,7 @@ Do not read `window.Sortable` in a `clay.ready` callback: the plugin may not hav
 
 ### 2.7 Libraries on demand
 
-`clay.assets.load(name)` loads a library from the same release that served `clay.js` the first time a page asks for it. The document needs no vendor URL, so a copy served by another host or opened from disk still finds it. The names are `overtype`, `marked`, and `highlight`, plus one grammar per `highlight/<language>` for `bash`, `css`, `javascript`, `json`, `python`, and `xml`. `clay.assets.names()` lists them.
+`clay.assets.load(name)` loads a library from the same release that served `clay.js` the first time a page asks for it. The document needs no vendor URL, so a copy served by another host or opened from disk still finds it. The names are `overtype`, `marked`, `highlight`, and `uimotion`, plus one grammar per `highlight/<language>` for `bash`, `css`, `javascript`, `json`, `python`, and `xml`. `clay.assets.names()` lists them.
 
 ```js
 const { Marked } = await clay.assets.load("marked");
@@ -442,7 +442,7 @@ const { default: javascript } = await clay.assets.load("highlight/javascript");
 hljs.registerLanguage("javascript", javascript);
 ```
 
-`overtype` resolves the vendored OverType editor with its toolbar buttons. `marked` resolves the `Marked` class. `highlight` resolves the core with no grammar of its own, so a page registers only the grammars it uses. Each name loads once: a second call before the first settles shares it, a failed one is forgotten and can be tried again, and an unknown name rejects with `clay.assets: no asset named "<name>"`. The [`window.clay` reference](https://clayjs.com/docs/api/) lists what each name resolves to.
+`overtype` resolves the vendored OverType editor with its toolbar buttons. `marked` resolves the `Marked` class. `highlight` resolves the core with no grammar of its own, so a page registers only the grammars it uses. `uimotion` resolves the engine the free apps' intros animate with: `scene(stage, options)` builds a looping scene, `mount(stage, build, options)` plays it while the stage is on screen and stops it when the stage leaves the page, `rewind(scene, keep)` returns a scene to its start, and `ease` holds the curves. Each name loads once: a second call before the first settles shares it, a failed one is forgotten and can be tried again, and an unknown name rejects with `clay.assets: no asset named "<name>"`. The [`window.clay` reference](https://clayjs.com/docs/api/) lists what each name resolves to.
 
 ### 2.8 Editor commands load on first use
 
@@ -2486,6 +2486,8 @@ Both are runtime chrome: `clay="editor-ui"` and `sap-ignore`, built by the plugi
 Both remember themselves per slot and path in `localStorage["clay:visitor-drafts:<slot>@<path>:ui"]`, as `{ "v": 1, "prompt": { "shown": ..., "dismissed": ..., "uses": ..., "downloaded": ... }, "intro": { "done": null | "closed" | "scrolled" }, "src": ... }`. Clearing that key shows the intro and the prompt again.
 
 **The intro** is authored per app as a `<template visitor-intro>`. The template holds the author's whole strip: its markup and any `<style>` it needs. The plugin clones it into a section at the very top of the page body, before the app's own content, and adds a quiet close (`x`) in the corner. The intro leaves for good when the visitor closes it or scrolls it past the top of the viewport; the ui memory records `"closed"` or `"scrolled"` as the reason.
+
+A `<script type="module">` inside the template runs when the intro mounts. Animate it with `clay.assets.load('uimotion')`, never an engine copied into the file, so a visitor the intro skips loads no motion code.
 
 ```html
 <template visitor-intro>
