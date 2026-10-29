@@ -427,7 +427,6 @@ function save() {
 const restoreOf = (before) => ({ ...before });
 
 function offerUndo(before) {
-  if (typeof window.clay?.toastPersistent !== "function") return;
   toastPersistent(APPLIED_TEXT, "success", {
     actions: [
       {

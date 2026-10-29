@@ -321,7 +321,7 @@ const undoButton = () =>
 test("without clay.undo Apply offers an Undo toast that puts the head back and saves", async () => {
   await boot({ plugins: "menu" });
   expect(window.clay.undo?.commit).toBeUndefined();
-  window.clay.toastPersistent = () => {};
+  expect(window.clay.toastPersistent).toBeUndefined();
   await openSheet();
 
   setValue("title", "A new title");
