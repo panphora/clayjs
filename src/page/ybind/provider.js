@@ -100,8 +100,11 @@ export function createYProvider({ store, ydoc, compact: limits = {}, setTimer = 
   let canCompact = !initial.some(([k]) => k[0] === "m");
   let counter = 0;
   const me = ydoc.clientID.toString(36);
-  const nextKey = (p) => `${p}${me}-${(counter++).toString(36)}`;
+  const inst = Math.floor(Math.random() * 36 ** 6).toString(36);
+  let mode = "legacy";
+  const nextKey = (p) => (mode === "host" ? `${p}${me}-${inst}-${(counter++).toString(36)}` : `${p}${me}-${(counter++).toString(36)}`);
   let timer = null;
+  let outbox = [];
   const generation = store.value.g;
   // Keys this tab wrote itself: the updates and offers the room has not confirmed yet.
   const own = new Set();
@@ -118,6 +121,18 @@ export function createYProvider({ store, ydoc, compact: limits = {}, setTimer = 
     const parts = partsOf(key, enc(bytes));
     store.handle.update((data) => { for (const [k, v] of parts) data.y[k] = v; });
   };
+  const putWhole = (key, bytes) => {
+    known.add(key);
+    own.add(key);
+    const text = enc(bytes);
+    store.handle.update((data) => { data.y[key] = text; });
+  };
+  const offer = () => {
+    if (mode !== "host" || stopped || store.pending.length || !outbox.length) return;
+    const update = outbox.length === 1 ? outbox[0] : Y.mergeUpdatesV2(outbox);
+    outbox = [];
+    putWhole(nextKey("u"), update);
+  };
 
   for (const [k] of initial) known.add(k);
 
@@ -127,7 +142,8 @@ export function createYProvider({ store, ydoc, compact: limits = {}, setTimer = 
     if (origin !== NET && origin !== ORIGINS_ORIGIN) onLocalUpdate(u);
     if (origin !== NET && origin !== ORIGINS_ORIGIN && origin !== RECOVERY_ORIGIN) journal?.local(u);
     if (stopped || origin === NET || origin === ORIGINS_ORIGIN) return;
-    put(nextKey("u"), u);
+    if (mode === "host") { outbox.push(u); offer(); }
+    else put(nextKey("u"), u);
   };
   ydoc.on("updateV2", onUpdate);
 
@@ -153,11 +169,11 @@ export function createYProvider({ store, ydoc, compact: limits = {}, setTimer = 
       timer = null;
       const full = wantReconcile;
       if (full) reconcile();
-      maybeCompact();
+      if (mode === "legacy") maybeCompact();
     }, 0);
   };
 
-  const settle = () => { reconcile(); maybeCompact(); };
+  const settle = () => { reconcile(); if (mode === "legacy") maybeCompact(); };
 
   // The room's entries already hold every item and deletion of this tab's document, read
   // from each entry's cached ranges: nothing to offer, and no copy of the room is built.
@@ -168,6 +184,7 @@ export function createYProvider({ store, ydoc, compact: limits = {}, setTimer = 
 
   function reconcile() {
     if (stopped) return false;
+    if (mode === "host" && store.pending.length) return false;
     const y = store.value.y;
     if (roomHolds(y)) { wantReconcile = false; reconcilePending = false; return false; }
     const scratch = new Y.Doc();
@@ -179,7 +196,8 @@ export function createYProvider({ store, ydoc, compact: limits = {}, setTimer = 
     const diff = Y.encodeStateAsUpdateV2(ydoc, sv);
     scratch.destroy();
     stats.offered++;
-    put(nextKey("r"), diff);
+    if (mode === "host") { outbox = []; putWhole(nextKey("r"), diff); }
+    else put(nextKey("r"), diff);
     wantReconcile = false;
     reconcilePending = false;
     return true;
@@ -353,6 +371,7 @@ export function createYProvider({ store, ydoc, compact: limits = {}, setTimer = 
 
   const off = store.onRebase((ev) => {
     if (stopped) return;
+    if (ev.room) mode = ev.room.compaction?.v === 1 ? "host" : "legacy";
     const ops = ev.source === "remote" && ev.frame ? ev.frame.ops : null;
     const plain = ops && ops.every((op) => op.path[0] === "y" && op.path.length === 2 && !PART_KEY.test(op.path[1]));
     if (!plain && ev.cause !== "refused" && !sharesLineage(ev.next.y)) {
@@ -366,6 +385,7 @@ export function createYProvider({ store, ydoc, compact: limits = {}, setTimer = 
     }
     prune();
     schedule(ev.source !== "remote" || !ops, ev.source !== "remote");
+    offer();
   });
 
   // A page update the room refused as too large is never offered again: the difference would
@@ -374,6 +394,11 @@ export function createYProvider({ store, ydoc, compact: limits = {}, setTimer = 
   // hold whole, and the room's page stays one a checkpoint can render.
   const offDelivery = store.onDelivery((event) => {
     if (event.phase !== "refused") return;
+    if (mode === "host") {
+      if (event.code === "page-full" || event.code === "compaction-failed") { stop(event.code); return; }
+      schedule(true, false);
+      return;
+    }
     if (event.code !== "too-large" || stopped) { prune(); return; }
     stop("too-large");
     const auth = store.authoritative.y ?? {};
@@ -384,7 +409,10 @@ export function createYProvider({ store, ydoc, compact: limits = {}, setTimer = 
     prune();
   });
 
+  const offConfirm = store.onConfirm(() => { offer(); });
+
   return { known, stats, settle, reconcile, get reconcilePending() { return reconcilePending; }, get stopped() { return stopped; },
+    get pending() { return outbox.length > 0; },
     // Test-only snapshot of the counters and cache sizes; no mutable set leaves the provider.
-    _diagnostics: () => ({ known: known.size, cover: coverCache.size, fold: fold ? fold.parts.length : 0, generation }), compact: maybeCompact, dispose() { off(); offDelivery(); ydoc.off("updateV2", onUpdate); if (timer) clearTimer(timer); } };
+    _diagnostics: () => ({ known: known.size, cover: coverCache.size, fold: fold ? fold.parts.length : 0, generation }), compact: maybeCompact, dispose() { off(); offDelivery(); offConfirm(); ydoc.off("updateV2", onUpdate); if (timer) clearTimer(timer); } };
 }
