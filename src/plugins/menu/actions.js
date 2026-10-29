@@ -60,10 +60,13 @@ export function attachActions({ addItem, note, currentMode }) {
   }
 
   let history = { canUndo: false, canRedo: false };
+  let heard = false;
 
   function renderUndo() {
     if (!pageWants("undo")) return;
     const live = currentMode() === "edit" && clay().undo;
+    // The menu loads late, so edits made before it are read from the service itself.
+    if (!heard && live && typeof live.canUndo === "boolean") history = { canUndo: live.canUndo, canRedo: !!live.canRedo };
     addItem({
       id: "clay.undo",
       pair: [
@@ -87,6 +90,7 @@ export function attachActions({ addItem, note, currentMode }) {
 
   document.addEventListener("clay:undo-change", (event) => {
     const detail = event.detail || {};
+    heard = true;
     history = { canUndo: !!detail.canUndo, canRedo: !!detail.canRedo };
     renderUndo();
   });
@@ -138,6 +142,10 @@ export function attachActions({ addItem, note, currentMode }) {
           if (response.ok) html = await response.text();
         }
       } catch {}
+      // Upload paths only resolve on this host, so the copy names them in full.
+      if (typeof html === "string" && /^https?:$/.test(location.protocol)) {
+        html = html.replace(/(^|[^\w./:-])\/_\/uploads\//g, `$1${location.origin}/_/uploads/`);
+      }
       if (typeof html !== "string" || !downloadHtml({ html, name: `${documentName()}.html` })) {
         note("Couldn't build the download. Try again.");
       }

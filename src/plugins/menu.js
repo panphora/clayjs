@@ -104,9 +104,11 @@ function mount() {
   }
 
   let actions = null;
+  let people = null;
 
   function open() {
     if (isOpen()) return;
+    people?.close({ restore: false });
     actions?.refresh();
     showIntro = introWanted();
     countIntroOpen();
@@ -470,7 +472,7 @@ function mount() {
   const openSeo = () => import("./menu/seo.js").then((m) => m.open());
 
   actions = attachActions({ addItem, note: showNote, currentMode });
-  attachPeople({ root, capsule: root.querySelector(".clay-menu"), addItem, removeItem, closeMenu: close, note: showNote });
+  people = attachPeople({ root, capsule: root.querySelector(".clay-menu"), addItem, removeItem, closeMenu: close, note: showNote });
 
   addItem({ id: "clay.hide", label: "Hide menu", keys: keys("⌘⇧.", "Ctrl+Shift+."), run: hide });
 

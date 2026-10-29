@@ -1,5 +1,6 @@
 import { jest } from "@jest/globals";
 import { applyHead } from "../../src/plugins/menu/seo-head.js";
+import postcss from "postcss";
 
 // Scenario: "SEO settings…" in claygoo slides a sheet down from the top that edits
 // the document's head fields and writes them only on Apply. Opening and cancelling
@@ -211,4 +212,63 @@ test("the link preview follows the image", async () => {
   setValue("ogImage", "");
   expect(image().hidden).toBe(true);
   expect(head().textContent).toBe("Summary card");
+});
+
+const styleCss = (id) => document.getElementById(id).textContent;
+const styleRoot = (id) => postcss.parse(styleCss(id));
+const ruleFor = (root, selector) =>
+  root.nodes.find((node) => node.type === "rule" && node.selector === selector);
+const declOf = (rule, prop) =>
+  rule.nodes.find((node) => node.type === "decl" && node.prop === prop);
+
+test("a multiline preview description survives opening and Done", async () => {
+  await boot();
+  document.head.insertAdjacentHTML(
+    "beforeend",
+    '<meta property="og:description" content="First line&#10;Second line">',
+  );
+  await openSheet();
+
+  const field = fieldOf("ogDescription");
+  expect(field.tagName).toBe("TEXTAREA");
+  expect(field.value).toBe("First line\nSecond line");
+
+  buttonOf("apply").click();
+  await settle();
+
+  expect(sheetRoot()).toBeNull();
+  const meta = document.querySelector('meta[property="og:description"]');
+  expect(meta.getAttribute("content")).toBe("First line\nSecond line");
+});
+
+test("the panel's stylesheet parses and the image rule is not inside the container query", async () => {
+  await boot();
+  await openSheet();
+
+  const rule = ruleFor(styleRoot("clay-seo-style"), ".clay-og-image img");
+  expect(rule).toBeDefined();
+  expect(rule.parent.type).toBe("root");
+});
+
+test("the menu stylesheet hides the panel's hidden controls", async () => {
+  await boot();
+  await openSheet();
+
+  const rule = postcss
+    .parse(styleCss("clay-menu-style"))
+    .nodes.find((node) => node.type === "rule" && node.selectors.includes(".clay-seo [hidden]"));
+  expect(rule).toBeDefined();
+  const display = declOf(rule, "display");
+  expect(display.value).toBe("none");
+  expect(display.important).toBe(true);
+});
+
+test("the panel sits above the dock and scrolls when tall", async () => {
+  await boot();
+  await openSheet();
+
+  const rule = ruleFor(styleRoot("clay-seo-style"), ".clay-seo");
+  expect(Number(declOf(rule, "z-index").value)).toBeGreaterThan(2147482000);
+  expect(declOf(rule, "overflow-y").value).toBe("auto");
+  expect(declOf(rule, "max-height")).toBeDefined();
 });

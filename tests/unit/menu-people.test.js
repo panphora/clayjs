@@ -293,3 +293,59 @@ test("nothing the item, the roster or the panel draws is saved", async () => {
   expect(html).not.toContain("Ada Lovelace");
   expect(html).not.toContain("Marta Cole");
 });
+
+test("opening the menu closes the people panel", async () => {
+  await boot();
+  stubPeople(true);
+  await present(THREE);
+
+  await openFromItem();
+  expect(panelOf()).not.toBeNull();
+
+  click(gooOf());
+  await flush();
+
+  expect(document.querySelector(".clay-menu-list").hidden).toBe(false);
+  expect(panelOf()).toBeNull();
+});
+
+test("a presence frame keeps focus inside the open panel", async () => {
+  await boot();
+  stubPeople(true);
+  await present(THREE);
+
+  await openFromItem();
+  expect(document.activeElement).toBe(document.querySelector(".clay-people-close"));
+
+  await present(THREE);
+
+  expect(document.activeElement).toBe(document.querySelector(".clay-people-close"));
+
+  key(document.activeElement, "Escape");
+  await flush();
+
+  expect(panelOf()).toBeNull();
+});
+
+test("an unchanged presence frame leaves the open menu's items in place", async () => {
+  await boot();
+  stubPeople(true);
+  await present(THREE);
+
+  click(gooOf());
+  await flush();
+  const kept = document.querySelector('[role="menuitem"][data-menu-id="clay.download"]');
+  expect(kept).not.toBeNull();
+
+  await present(THREE);
+
+  expect(kept.isConnected).toBe(true);
+});
+
+test("the rename refusal note paints above the panel", async () => {
+  await boot();
+
+  const css = document.getElementById("clay-menu-style").textContent;
+
+  expect(css).toContain(".clay-menu-note { z-index: 2;");
+});

@@ -254,3 +254,43 @@ test("Download in view mode fetches the saved file, and says when it cannot", as
     anchorClick.mockRestore();
   }
 });
+
+test("Undo reflects history made before the menu loaded", async () => {
+  const undo = { undo: jest.fn(), redo: jest.fn(), canUndo: true, canRedo: false };
+  const seed = () => {
+    window.clay.undo = undo;
+  };
+  document.addEventListener("clay:ready", seed, { once: true });
+  try {
+    await boot({ plugins: "menu,undo", edit: true });
+  } finally {
+    document.removeEventListener("clay:ready", seed);
+  }
+  expect(window.clay.undo).toBe(undo);
+
+  expect(isDisabled("clay.undo.undo")).toBe(false);
+  expect(isDisabled("clay.undo.redo")).toBe(true);
+});
+
+test("Download names upload paths in full", async () => {
+  await boot({ plugins: "menu", edit: true });
+  window.clay.getHTML = () =>
+    '<img src="/_/uploads/cover.jpg"><a href="https://x.example/_/uploads/keep.png">k</a>';
+  const { createObjectURL, anchorClick } = setupDownload();
+
+  try {
+    click(buttonOf("clay.download"));
+    await flush();
+
+    expect(createObjectURL).toHaveBeenCalledTimes(1);
+    const blob = createObjectURL.mock.calls[0][0];
+    expect(blob).toBeInstanceOf(Blob);
+    if (typeof blob.text === "function") {
+      const html = await blob.text();
+      expect(html).toContain(`src="${location.origin}/_/uploads/cover.jpg"`);
+      expect(html).toContain("https://x.example/_/uploads/keep.png");
+    }
+  } finally {
+    anchorClick.mockRestore();
+  }
+});

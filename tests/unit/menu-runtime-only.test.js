@@ -147,7 +147,32 @@ const FORBIDDEN_TEXTS = [
   PROBE_TITLE,
 ];
 
-test("every surface is drawn at once and none of it is in a save, a comparison or a sync frame", async () => {
+async function expectNothingCaptured() {
+  const { save, comparison, sync } = await captures();
+
+  for (const [name, html] of Object.entries({ save, comparison, sync })) {
+    expect(typeof html).toBe("string");
+    // The page opted in with `<html clay-menu-roster>`, which is the author's own
+    // attribute and has to survive a save. It is the one clay-menu- string that is an
+    // input to the menu rather than something the menu draws, so it comes off before
+    // the scan, and only after proving it is the one occurrence.
+    expect(html.match(AUTHORED_OPT_IN)).toHaveLength(1);
+    const drawn = html.replace(AUTHORED_OPT_IN, "");
+    for (const needle of [...FORBIDDEN_CLASSES, ...FORBIDDEN_IDS, ...FORBIDDEN_TEXTS]) {
+      expect([name, needle, drawn.includes(needle)]).toEqual([name, needle, false]);
+    }
+  }
+}
+
+const expectDrawn = (selectors) => {
+  for (const selector of selectors) {
+    expect([selector, document.querySelectorAll(selector).length > 0]).toEqual([selector, true]);
+  }
+};
+
+// Opening the menu closes the people panel, so the surfaces are captured in two
+// phases: the people panel with its name field, then everything else at once.
+test("every surface is drawn and none of it is in a save, a comparison or a sync frame", async () => {
   viewport(1000, 800);
   await boot();
   stubPeople(true);
@@ -161,7 +186,8 @@ test("every surface is drawn at once and none of it is in a save, a comparison o
   expect(panelOf()).not.toBeNull();
   click(buttonNamed(meRowOf(), "Change"));
   await flush();
-  expect(document.querySelector(".clay-people-input")).not.toBeNull();
+  expectDrawn([".clay-roster", ".clay-people", ".clay-people-input", "#clay-menu-style", "#clay-menu-vars"]);
+  await expectNothingCaptured();
 
   const dock = dockOf();
   const grip = gripOf();
@@ -180,13 +206,11 @@ test("every surface is drawn at once and none of it is in a save, a comparison o
   window.clay.menu.open();
   await flush();
 
-  for (const selector of [
+  expectDrawn([
     ".clay-menu-dock",
     ".clay-menu-list",
     ".clay-menu-notice",
     ".clay-roster",
-    ".clay-people",
-    ".clay-people-input",
     ".clay-menu-spots",
     ".clay-seo",
     ".clay-menu-note",
@@ -194,26 +218,11 @@ test("every surface is drawn at once and none of it is in a save, a comparison o
     "#clay-menu-vars",
     "#clay-seo-style",
     "#clay-seo-vars",
-  ]) {
-    expect(document.querySelectorAll(selector).length).toBeGreaterThan(0);
-  }
+  ]);
   expect(noteOf().hidden).toBe(false);
   expect(noteOf().textContent).toBe(PROBE_NOTE);
 
-  const { save, comparison, sync } = await captures();
-
-  for (const [name, html] of Object.entries({ save, comparison, sync })) {
-    expect(typeof html).toBe("string");
-    // The page opted in with `<html clay-menu-roster>`, which is the author's own
-    // attribute and has to survive a save. It is the one clay-menu- string that is an
-    // input to the menu rather than something the menu draws, so it comes off before
-    // the scan, and only after proving it is the one occurrence.
-    expect(html.match(AUTHORED_OPT_IN)).toHaveLength(1);
-    const drawn = html.replace(AUTHORED_OPT_IN, "");
-    for (const needle of [...FORBIDDEN_CLASSES, ...FORBIDDEN_IDS, ...FORBIDDEN_TEXTS]) {
-      expect([name, needle, drawn.includes(needle)]).toEqual([name, needle, false]);
-    }
-  }
+  await expectNothingCaptured();
 });
 
 test("hiding the menu leaves nothing of the recall toast in the saved file", async () => {

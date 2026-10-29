@@ -230,21 +230,28 @@ export function attachPeople({ root, capsule, addItem, removeItem, closeMenu, no
     roster.setAttribute("aria-label", `Who's here: ${names.join(", ")}${rest > 0 ? `${names.length ? " and " : ""}${plural(rest, "other", "others")}` : ""}`);
   }
 
+  let itemLabel = null;
+
   function update() {
     const count = total();
     if (snapshot.supported && (count > 1 || canRename())) {
-      const item = {
-        id: "clay.people",
-        label: count > 1 ? `Who's here (${plural(count, "person", "people")})` : "Who's here",
-        run: () => openPanel(capsule.querySelector(".clay-menu-goo")),
-      };
-      addItem(item);
+      const label = count > 1 ? `Who's here (${plural(count, "person", "people")})` : "Who's here";
+      // Re-adding redraws the open menu, so only a changed label does it.
+      if (label !== itemLabel) {
+        itemLabel = label;
+        addItem({ id: "clay.people", label, run: () => openPanel(capsule.querySelector(".clay-menu-goo")) });
+      }
     } else {
-      removeItem("clay.people");
+      if (itemLabel !== null) removeItem("clay.people");
+      itemLabel = null;
       closePanel({ restore: false });
     }
     drawRoster();
-    if (panel && !renaming) draw();
+    if (panel && !renaming) {
+      const focused = panel.contains(document.activeElement) ? document.activeElement.classList[0] : null;
+      draw();
+      if (focused) panel.querySelector(`.${focused}`)?.focus();
+    }
   }
 
   document.addEventListener("click", (event) => {

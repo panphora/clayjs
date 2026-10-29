@@ -24,7 +24,7 @@ const FIELD = {
   title: { label: "Title", kind: "text", full: true, count: 60 },
   description: { label: "Description", kind: "textarea", full: true, count: 160 },
   ogTitle: { label: "Preview title", note: "Open Graph", kind: "text" },
-  ogDescription: { label: "Preview description", note: "Open Graph", kind: "text" },
+  ogDescription: { label: "Preview description", note: "Open Graph", kind: "textarea", short: true },
   ogImage: { label: "Preview image", note: "Open Graph", kind: "text", full: true },
   canonical: { label: "Canonical URL", kind: "text" },
   lang: { label: "Language", kind: "text" },
@@ -39,7 +39,7 @@ const BASE_KEYS = ["title", "description", "ogTitle", "ogDescription", "ogImage"
 const MORE_KEYS = ["canonical", "lang", "ogImageAlt", "siteName", "twitterSite"];
 const CHECK_KEYS = ["index", "follow"];
 
-const SHEET_CSS = `.clay-seo { box-sizing: border-box; width: 100%; border-bottom: 1px solid var(--bevel-line-3); background: var(--bevel-surface); box-shadow: var(--clay-sheet-shadow); font-size: 13px; line-height: 1.45; container-type: inline-size; animation: clay-seo-in .2s ease-out; position: relative; z-index: 1; }
+const SHEET_CSS = `.clay-seo { box-sizing: border-box; width: 100%; border-bottom: 1px solid var(--bevel-line-3); background: var(--bevel-surface); box-shadow: var(--clay-sheet-shadow); font-size: 13px; line-height: 1.45; container-type: inline-size; animation: clay-seo-in .2s ease-out; position: relative; z-index: 2147482001; grid-column: 1 / -1; flex: 0 0 100%; max-height: 85vh; max-height: 85dvh; overflow-y: auto; overscroll-behavior: contain; }
 @keyframes clay-seo-in { from { margin-top: -40px; opacity: 0; } to { margin-top: 0; opacity: 1; } }
 .clay-seo-inner { max-width: 1120px; margin: 0 auto; padding: 14px 20px 18px; }
 .clay-seo-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 10px; margin-bottom: 12px; border-bottom: 1px solid var(--bevel-line-2); }
@@ -58,6 +58,7 @@ const SHEET_CSS = `.clay-seo { box-sizing: border-box; width: 100%; border-botto
 .clay-seo-derived { padding: 0; border: 0; background: none; color: var(--bevel-brass); font: 500 12px/1.3 var(--bevel-font-sans); text-decoration: underline; text-decoration-color: var(--bevel-line-3); text-underline-offset: 2px; cursor: pointer; }
 .clay-seo-input { box-sizing: border-box; width: 100%; min-height: 32px; padding: 6px 9px; border: 1px solid var(--bevel-line-2); background: var(--bevel-ground); color: var(--bevel-ink); font: 400 13px/1.45 var(--bevel-font-sans); }
 textarea.clay-seo-input { min-height: 52px; resize: vertical; }
+textarea.clay-seo-input.is-short { min-height: 32px; }
 .clay-seo-input::placeholder { color: var(--bevel-faint); opacity: 1; }
 .clay-seo-input:hover { border-color: var(--bevel-faint); }
 .clay-seo-input:focus-visible { outline: 2px solid var(--bevel-brass); outline-offset: 1px; border-color: var(--bevel-brass); }
@@ -99,7 +100,9 @@ textarea.clay-seo-input { min-height: 52px; resize: vertical; }
   .clay-seo-grid, .clay-seo-fields, .clay-seo-more-grid { grid-template-columns: 1fr; }
   .clay-seo-input { font-size: 16px; min-height: 40px; }
   textarea.clay-seo-input { min-height: 96px; }
+  textarea.clay-seo-input.is-short { min-height: 40px; }
   .clay-seo-check { font-size: 15px; }
+}
 .clay-og-image img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .clay-seo-check > .clay-seo-check { display: inline-block; }
 .clay-seo-conflict { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12px; color: var(--bevel-muted); }
@@ -346,6 +349,10 @@ export function open() {
       input.checked = opened[key] !== false;
     } else {
       if (spec.kind !== "textarea") input.type = "text";
+      if (spec.short) {
+        input.rows = 1;
+        input.classList.add("is-short");
+      }
       input.value = text(opened[key]);
     }
     if (spec.placeholder) input.placeholder = spec.placeholder;

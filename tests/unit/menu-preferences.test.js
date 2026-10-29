@@ -256,6 +256,20 @@ test("a capability change does not reveal a hidden menu", async () => {
   expect(dockOf().hidden).toBe(true);
 });
 
+test("the menu follows a denial and a later grant without an entry", async () => {
+  await boot();
+  expect(dockOf().hidden).toBe(false);
+  const { noteHostWritable } = await import("../../src/core/is-edit-mode.js");
+
+  noteHostWritable(false);
+  await flush();
+  expect(dockOf().hidden).toBe(true);
+
+  noteHostWritable(true);
+  await flush();
+  expect(dockOf().hidden).toBe(false);
+});
+
 test("nothing from the toast or the notice is saved", async () => {
   await boot({ edit: true });
   openList();
