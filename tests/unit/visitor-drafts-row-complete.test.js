@@ -4,10 +4,10 @@
  * for that row id, so the engine pairs the rows by what the visitor saved rather than
  * by position: every row keeps its own color through the restore and the next save.
  */
-import { createStore } from "../../src/plugins/visitor-drafts/store.js";
+import { createStore, draftKey } from "../../src/plugins/visitor-drafts/store.js";
 
 const SLOT = "row-complete-1";
-const KEY = "clay:visitor-drafts:" + SLOT;
+const KEY = draftKey(SLOT, "/");
 const SAVED_AT = "2026-10-15T12:00:00.000Z";
 
 const RULES = JSON.stringify({

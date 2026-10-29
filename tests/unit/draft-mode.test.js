@@ -1,4 +1,5 @@
 import { jest } from "@jest/globals";
+import { draftKey } from "../../src/plugins/visitor-drafts/store.js";
 
 const API_TAG = '<script data-rules-name="api" data-rules-version="1" type="application/json">{"title":"h1"}</script>';
 const BASE_PARAMS = "plugins=visitor-drafts&exclude=richclay,source";
@@ -136,7 +137,7 @@ test("a rules tag this version cannot read is not a draft page", async () => {
     expect(newer.clay.visitorDrafts.active).toBe(false);
     expect(newer.clay.save).toBeUndefined();
     expect(document.documentElement.getAttribute("draftmode")).toBeNull();
-    expect(localStorage.getItem("clay:visitor-drafts:draft-slot-1")).toBeNull();
+    expect(localStorage.getItem(draftKey("draft-slot-1"))).toBeNull();
 
     const broken = await bootPage({
       api: '<script data-rules-name="api" data-rules-version="1" type="application/json">{"title":"h1"</script>',

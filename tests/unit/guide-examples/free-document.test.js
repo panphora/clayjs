@@ -7,10 +7,11 @@
  * app's own computed values following it.
  */
 import { jest } from "@jest/globals";
+import { draftKey } from "../../../src/plugins/visitor-drafts/store.js";
 import { loadExample, saves, tick } from "./helpers.js";
 
 const SLOT = "reading-list-v1";
-const KEY = "clay:visitor-drafts:" + SLOT;
+const KEY = draftKey(SLOT, "/");
 
 const books = () => [...document.querySelectorAll("#books > li[item]:not([cms-template])")];
 const titles = () => books().map((li) => li.querySelector(".title").textContent.trim());

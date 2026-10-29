@@ -5,13 +5,14 @@
  * thrown away on reload and never reaches the document.
  */
 import { jest } from "@jest/globals";
+import { draftKey } from "../../src/plugins/visitor-drafts/store.js";
 
 const PARAMS = "plugins=visitor-drafts&exclude=richclay,source";
 const RULES = '{"title":"#title","note":"#note@value"}';
 const INTRO = '<template visitor-intro><p>Track your week.</p></template>';
 
-const keyFor = (slot) => "clay:visitor-drafts:" + slot + ":ui";
-const draftKeyFor = (slot) => "clay:visitor-drafts:" + slot;
+const keyFor = (slot) => draftKey(slot) + ":ui";
+const draftKeyFor = (slot) => draftKey(slot);
 
 function clearCookies() {
   document.cookie = "isAdminOfCurrentResource=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/";
@@ -144,10 +145,10 @@ test("draft mode mounts one prompt whose link points at this page's download", a
   expect(document.querySelector("head link[href*='fonts.googleapis.com']")).toBeNull();
 
   const forms = [
-    ["/kanban", "/_/download/kanban.html?as=htmlclay"],
+    ["/kanban", "/_/download?as=htmlclay"],
     ["/kanban.html", "/_/download/kanban.html?as=htmlclay"],
     ["/apps/kanban.html", "/_/download/apps/kanban.html?as=htmlclay"],
-    ["/apps/kanban/", "/_/download/apps/kanban.html?as=htmlclay"],
+    ["/apps/kanban/", "/_/download?as=htmlclay"],
   ];
   for (const [path, expected] of forms) {
     await bootPage({ slot: "ui-prompt-" + path.replace(/\W/g, "-"), url: path });

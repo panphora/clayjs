@@ -4,10 +4,10 @@
  * does know, and saves: the key its rules never read is carried through the save
  * instead of being erased from the stored record.
  */
-import { createStore } from "../../src/plugins/visitor-drafts/store.js";
+import { createStore, draftKey } from "../../src/plugins/visitor-drafts/store.js";
 
 const SLOT = "stale-keys-1";
-const KEY = "clay:visitor-drafts:" + SLOT;
+const KEY = draftKey(SLOT, "/");
 const SAVED_AT = "2026-10-15T12:00:00.000Z";
 
 const ROWS = ["#rows > li[item]:not([cms-template])", { id: "@data-id", name: ".n" }];

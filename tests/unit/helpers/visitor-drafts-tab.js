@@ -7,6 +7,7 @@
  * boots in its own file; a file that only boots once gets the same helper.
  */
 import { jest } from "@jest/globals";
+import { draftKey } from "../../../src/plugins/visitor-drafts/store.js";
 
 const PARAMS = "plugins=visitor-drafts,undo&exclude=richclay";
 const RULES = '{"title":"#title","note":"#note@value","rows":["#rows > li[item]:not([cms-template])",{"id":"@data-id","name":".n"}]}';
@@ -17,7 +18,7 @@ const WATCHED = ["clay:drafts-restored", "clay:drafts-saved", "clay:drafts-store
 
 export const DRAFT = { v: 1, savedAt: "2026-10-15T00:00:00.000Z", data: { title: "draft title", note: "typed note", rows: [{ id: "r2", name: "Second" }] } };
 
-const keyFor = (slot) => "clay:visitor-drafts:" + slot;
+const keyFor = (slot) => draftKey(slot);
 
 export const settle = async () => {
   await new Promise((resolve) => setTimeout(resolve, 0));

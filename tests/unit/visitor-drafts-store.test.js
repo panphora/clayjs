@@ -6,10 +6,10 @@
 import { jest } from "@jest/globals";
 import { extractData } from "../../src/vendor/hyper-html-api-data.vendor.js";
 import { draftStoreFailed } from "../../src/core/draft-mode.js";
-import { createStore, safeStorage } from "../../src/plugins/visitor-drafts/store.js";
+import { createStore, draftKey, safeStorage } from "../../src/plugins/visitor-drafts/store.js";
 
 const SLOT = "store-slot-1";
-const KEY = "clay:visitor-drafts:" + SLOT;
+const KEY = draftKey(SLOT, "/");
 const SAVED_AT = "2026-10-15T12:00:00.000Z";
 
 const RULES = '{"title":"#title@value","note":"#note@value","rows":["#rows > li[item]:not([cms-template])",{"id":"@data-id","name":".n"}]}';

@@ -5,10 +5,10 @@
  * another. A later page that can hold the value again restores everything.
  */
 import { jest } from "@jest/globals";
-import { createStore } from "../../src/plugins/visitor-drafts/store.js";
+import { createStore, draftKey } from "../../src/plugins/visitor-drafts/store.js";
 
 const SLOT = "partial-restore-1";
-const KEY = "clay:visitor-drafts:" + SLOT;
+const KEY = draftKey(SLOT, "/");
 const SAVED_AT = "2026-10-15T12:00:00.000Z";
 const LATER_AT = "2026-10-16T12:00:00.000Z";
 const PARKED = KEY + ":unreadable:" + SAVED_AT;

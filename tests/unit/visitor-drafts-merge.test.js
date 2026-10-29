@@ -5,10 +5,10 @@
  */
 import { jest } from "@jest/globals";
 import { bootDraftTab, DRAFT, settle } from "./helpers/visitor-drafts-tab.js";
-import { createStore } from "../../src/plugins/visitor-drafts/store.js";
+import { createStore, draftKey } from "../../src/plugins/visitor-drafts/store.js";
 
 const SLOT = "merge-slot-1";
-const KEY = "clay:visitor-drafts:" + SLOT;
+const KEY = draftKey(SLOT, "/");
 const SAVED_AT = "2026-10-15T12:00:00.000Z";
 
 const RULES = JSON.stringify({

@@ -1,7 +1,7 @@
 import { isDraftMode, isEditMode, isOwner } from "../core/is-edit-mode.js";
 import { hasSaveToken } from "../core/host-attrs.js";
 import { draftSlot, setDraftTransport, setDraftFlush } from "../core/draft-mode.js";
-import { createStore, safeStorage } from "./visitor-drafts/store.js";
+import { createStore, adoptLegacy, draftPath, legacyKey, safeStorage } from "./visitor-drafts/store.js";
 import { createUiMemory } from "./visitor-drafts/ui-memory.js";
 import { rememberSource, downloadUrl } from "./visitor-drafts/source.js";
 import { mountPrompt } from "./visitor-drafts/prompt.js";
@@ -39,12 +39,14 @@ const slot = draftSlot();
 const rulesTag = document.querySelector('script[data-rules-name~="api"]');
 
 if (isDraftMode && slot && rulesTag) {
-  store = createStore();
+  const path = draftPath();
+  const moved = adoptLegacy(slot, { path });
+  store = createStore({ path, fallback: moved === "failed" ? legacyKey(slot) : null });
   setDraftTransport((html) => store.write(html));
   const result = store.restore();
   restoredDetail = { restored: result.restored, hadDraft: result.hadDraft, parked: Boolean(result.parked), ...(result.partial && { partial: true }), ...(result.blocked && { blocked: true }) };
   document.dispatchEvent(new CustomEvent("clay:drafts-restored", { detail: restoredDetail }));
-  const memory = createUiMemory(slot, safeStorage());
+  const memory = createUiMemory(store.key, safeStorage());
   source = rememberSource(memory);
   downloadLink = downloadUrl(source);
   const appName = document.querySelector('meta[name="application-name"]')?.content?.trim() || document.title.split(/:|\s\|\s/)[0].trim() || "This app";

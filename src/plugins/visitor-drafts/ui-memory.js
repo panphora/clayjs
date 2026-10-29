@@ -1,5 +1,5 @@
-export function createUiMemory(slot, storage) {
-  const key = `clay:visitor-drafts:${slot}:ui`;
+export function createUiMemory(draftKey, storage) {
+  const key = `${draftKey}:ui`;
   const blank = () => ({ v: 1, prompt: {}, intro: { done: null }, src: null });
   let mem = blank();
   try {

@@ -4,6 +4,20 @@ import { draftSlot, setDraftStoreFailed } from "../../core/draft-mode.js";
 export const KEY_PREFIX = "clay:visitor-drafts:";
 export const RECORD_VERSION = 1;
 
+// The document a pathname names, spelled the way the hosts resolve it: the path up to
+// and including the first segment that ends in .html or .htmlclay (anything after it is
+// a route inside that document), repeated slashes as one, the root index.html as "/",
+// and "/" for a host that serves one document at every path.
+export function draftPath(pathname = window.location.pathname) {
+  const clean = String(pathname || "/").replace(/\/{2,}/g, "/");
+  const file = clean.match(/^(.*?\/[^/]+\.(?:html|htmlclay))(?:\/|$)/i);
+  const path = file ? file[1] : "/";
+  return path.toLowerCase() === "/index.html" ? "/" : path;
+}
+
+export const legacyKey = (slot) => KEY_PREFIX + slot;
+export const draftKey = (slot, path = draftPath()) => `${KEY_PREFIX}${slot}@${path}`;
+
 export function safeStorage() {
   try { return window.localStorage; } catch { return null; }
 }
@@ -94,9 +108,50 @@ function storageFailure(doc, error) {
   return failure;
 }
 
-export function createStore({ doc = document, storage = safeStorage(), now = () => new Date() } = {}) {
+const savedAtOf = (raw) => {
+  try { return String(JSON.parse(raw)?.savedAt ?? ""); } catch { return ""; }
+};
+
+// A draft saved before drafts were scoped to the document's path lives under the slot
+// alone. It is copied into this path's key with its UI memory, and never written or
+// removed: a tab still on an older ClayJS may write it again, and another document on
+// this origin with the same slot may still need it. The marker keeps the old record's
+// savedAt, so a later write by such a tab is caught up on the next load, and a reset
+// never brings the old draft back.
+export function adoptLegacy(slot, { path = draftPath(), storage = safeStorage() } = {}) {
+  const from = legacyKey(slot);
+  const to = draftKey(slot, path);
+  const marker = to + ":legacy";
+  try {
+    const generation = storage?.getItem(to);
+    const old = storage?.getItem(from);
+    if (old == null) return "none";
+    const stamp = savedAtOf(old);
+    const seen = storage.getItem(marker);
+    if (seen === stamp) return "none";
+    // A visitor who wrote to this document while the copy ran keeps what they typed.
+    const current = storage.getItem(to);
+    if (current !== generation) return "none";
+    if (current == null || (seen != null && savedAtOf(current) === seen)) {
+      storage.setItem(to, old);
+    } else if (current !== old) {
+      storage.setItem(to + ":conflict", old);
+      console.warn("visitor-drafts: an older tab changed this draft after it moved; its copy was kept under", to + ":conflict");
+    }
+    if (seen == null) {
+      const ui = storage.getItem(from + ":ui");
+      if (ui != null && storage.getItem(to + ":ui") == null) storage.setItem(to + ":ui", ui);
+    }
+    storage.setItem(marker, stamp);
+    return "copied";
+  } catch {
+    return "failed";
+  }
+}
+
+export function createStore({ doc = document, storage = safeStorage(), now = () => new Date(), path = draftPath(), fallback = null } = {}) {
   const slot = draftSlot(doc);
-  const key = KEY_PREFIX + slot;
+  const key = draftKey(slot, path);
   const rules = engine.findRulesIn(doc, "api").rules;
 
   let lastRaw = null;
@@ -105,7 +160,11 @@ export function createStore({ doc = document, storage = safeStorage(), now = () 
   let stopped = false;
 
   function getRaw() {
-    try { return storage ? storage.getItem(key) : null; } catch { return null; }
+    try {
+      if (!storage) return null;
+      const raw = storage.getItem(key);
+      return raw == null && fallback ? storage.getItem(fallback) : raw;
+    } catch { return null; }
   }
 
   function parse(raw) {

@@ -4,6 +4,7 @@
  * owner's two lanes, and the flush when the tab goes away.
  */
 import { jest } from "@jest/globals";
+import { draftKey } from "../../src/plugins/visitor-drafts/store.js";
 
 const PARAMS = "plugins=visitor-drafts,undo&exclude=richclay";
 const ALL_PLUGINS = "plugins=visitor-drafts,undo,sync,upload,cms,people,wire,live&exclude=richclay";
@@ -14,7 +15,7 @@ const row = (id, name) => `<li item data-id="${id}"><span class="n">${name}</spa
 
 const DRAFT = { v: 1, savedAt: "2026-10-15T00:00:00.000Z", data: { title: "draft title", note: "typed note", rows: [{ id: "r2", name: "Second" }] } };
 
-const keyFor = (slot) => "clay:visitor-drafts:" + slot;
+const keyFor = (slot) => draftKey(slot);
 
 // Every boot gets its own slot: the plugin's flush listeners outlive the module
 // registry, so two boots on one slot would let a stale store write for the boot

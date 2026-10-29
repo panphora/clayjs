@@ -4,11 +4,11 @@
  * save after room appears keeps the original aside and goes through.
  */
 import { jest } from "@jest/globals";
-import { createStore } from "../../src/plugins/visitor-drafts/store.js";
+import { createStore, draftKey } from "../../src/plugins/visitor-drafts/store.js";
 import { draftStoreFailed, setDraftStoreFailed } from "../../src/core/draft-mode.js";
 
 const SLOT = "blocked-slot-1";
-const KEY = "clay:visitor-drafts:" + SLOT;
+const KEY = draftKey(SLOT, "/");
 const SAVED_AT = "2026-10-15T12:00:00.000Z";
 const PARKED_KEY = KEY + ":unreadable:" + SAVED_AT;
 

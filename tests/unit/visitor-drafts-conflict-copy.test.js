@@ -6,11 +6,11 @@
  * tab therefore ends up in exactly one list.
  */
 import { jest } from "@jest/globals";
-import { createStore } from "../../src/plugins/visitor-drafts/store.js";
+import { createStore, draftKey } from "../../src/plugins/visitor-drafts/store.js";
 import { draftStoreFailed, setDraftStoreFailed } from "../../src/core/draft-mode.js";
 
 const SLOT = "conflict-copy-1";
-const KEY = "clay:visitor-drafts:" + SLOT;
+const KEY = draftKey(SLOT, "/");
 const CONFLICT_KEY = KEY + ":conflict";
 const SAVED_AT = "2026-10-15T12:00:00.000Z";
 

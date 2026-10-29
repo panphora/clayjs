@@ -5,13 +5,14 @@
  * only when the visitor closes it or scrolls past it, so typing here leaves it mounted.
  */
 import { jest } from "@jest/globals";
+import { draftKey } from "../../src/plugins/visitor-drafts/store.js";
 
 const PARAMS = "plugins=visitor-drafts&exclude=richclay,source";
 const RULES = '{"title":"#title","entry":"#entry"}';
 const INTRO = "<template visitor-intro><p>Track your week.</p></template>";
 
-const keyFor = (slot) => "clay:visitor-drafts:" + slot;
-const uiKeyFor = (slot) => "clay:visitor-drafts:" + slot + ":ui";
+const keyFor = (slot) => draftKey(slot);
+const uiKeyFor = (slot) => draftKey(slot) + ":ui";
 
 function notFound() {
   return { ok: false, status: 404, statusText: "Not Found", text: async () => "" };

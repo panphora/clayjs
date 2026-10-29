@@ -6,11 +6,11 @@
  * rows, and the page's own title is never dropped, as if another tab had saved it.
  */
 import { jest } from "@jest/globals";
-import { createStore } from "../../src/plugins/visitor-drafts/store.js";
+import { createStore, draftKey } from "../../src/plugins/visitor-drafts/store.js";
 import { draftStoreFailed, setDraftStoreFailed } from "../../src/core/draft-mode.js";
 
 const SLOT = "refused-park-1";
-const KEY = "clay:visitor-drafts:" + SLOT;
+const KEY = draftKey(SLOT, "/");
 const SAVED_AT = "2026-10-15T12:00:00.000Z";
 const PARKED_KEY = KEY + ":unreadable:" + SAVED_AT;
 
