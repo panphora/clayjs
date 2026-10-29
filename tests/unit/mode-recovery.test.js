@@ -155,6 +155,33 @@ test("a plugins=page,sync Document's exit restarts the saved lane beside its pag
   }
 });
 
+test("a plugins=page Document's exit starts no saved lane its view never ran", async () => {
+  const boot = await bootFixture("document.html", { mode: "view", declare: true, params: "plugins=page&exclude=richclay,source" });
+  const pageView = await import(`${SRC}plugins/page-view.js`);
+  try {
+    await routeHost();
+    const source = openStream(boot);
+    frameFrom(source, `<!DOCTYPE html>\n${document.documentElement.outerHTML}`, 1);
+    await pageView.acquired;
+    // The reader's one stream, and nothing else: `plugins=page` in view resolves to the
+    // page-view reader alone.
+    expect(boot.eventSources().open).toBe(1);
+
+    // An entry of this page loads generic sync, because `page` implies it in edit, so by
+    // the exit a lane exists that this tab's view never ran. The exit restarts the
+    // readers the view had, and that is one.
+    expect((await boot.clay.setMode("edit")).ok).toBe(true);
+    await flush();
+    expect((await boot.clay.setMode("view")).ok).toBe(true);
+    await flush();
+
+    expect(boot.eventSources().open).toBe(1);
+  } finally {
+    pageView.stop();
+    boot.stop();
+  }
+});
+
 test("an enable that throws rolls the entry back and restarts the reader it retired", async () => {
   const { boot, sync } = await syncedPage();
   try {
@@ -453,6 +480,53 @@ test("an exit whose pending-source flush never settles fails with timeout inside
   } finally {
     pending?.dispose();
     timerSpy?.mockRestore();
+    pageView.stop();
+    boot.stop();
+  }
+});
+
+test("an exit that spent its deadline on a lease gives the barrier no fresh one", async () => {
+  const boot = await bootFixture("document.html", { mode: "view", declare: true });
+  const pageView = await import(`${SRC}plugins/page-view.js`);
+  const { registerUnsavedState } = await import(`${SRC}lib/unsaved-state.js`);
+  const realNow = Date.now;
+  let shift = 0;
+  const nowSpy = jest.spyOn(Date, "now").mockImplementation(() => realNow() + shift);
+  let pending = null;
+  let flushed = false;
+  try {
+    await routeHost();
+    const source = openStream(boot);
+    frameFrom(source, `<!DOCTYPE html>\n${document.documentElement.outerHTML}`, 1);
+    await pageView.acquired;
+
+    // A lease that uses all but a moment of the exit's 15 s: the barrier inherits what is
+    // left of that deadline instead of a fresh 15 s of its own.
+    boot.clay.modeLifecycle.register({
+      id: "probe:long-quiesce",
+      order: 900,
+      prepare() {
+        return { enable() {}, quiesce() { shift = 14900; }, resume() {}, dispose() {} };
+      },
+    });
+    expect((await boot.clay.setMode("edit")).ok).toBe(true);
+
+    // Work that finishes on its own, but not inside the moment the exit has left.
+    pending = registerUnsavedState({
+      id: "probe:slow-flush",
+      isPending: () => !flushed,
+      flush() {
+        return new Promise((resolve) => setTimeout(() => { flushed = true; resolve({ ok: true }); }, 400));
+      },
+    });
+
+    const answer = await boot.clay.setMode("view");
+    expect(answer).toMatchObject({ ok: false, mode: "edit", code: "timeout" });
+    expect(boot.clay.mode).toBe("edit");
+    expect(flushed).toBe(false);
+  } finally {
+    pending?.dispose();
+    nowSpy.mockRestore();
     pageView.stop();
     boot.stop();
   }

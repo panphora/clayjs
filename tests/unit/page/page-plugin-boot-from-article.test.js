@@ -192,6 +192,15 @@ test("a tagless page whose article holds a table boots with its rows and cells",
   expect(table.querySelectorAll("tbody tr")).toHaveLength(2);
   expect(table.querySelectorAll("tbody tr:first-child td")).toHaveLength(2);
   expect(table.textContent).toContain("A");
+
+  // The table the store holds with no columns and no rows stays exactly that: the rebuild
+  // invents no row for it, so the next save writes none back into the file.
+  const snapshot = await import("../../../src/core/snapshot.js");
+  const { forSave } = snapshot.captureForSaveAndComparison({ flushUndo: false, emitForSync: false });
+  const saved = new DOMParser().parseFromString(forSave, "text/html");
+  const blank = saved.querySelector('table[data-id="blank"]');
+  expect(blank).toBeTruthy();
+  expect(blank.querySelectorAll("tr[data-id]")).toHaveLength(0);
 });
 
 test("two boots of the same file carry identical tag text into a save", async () => {

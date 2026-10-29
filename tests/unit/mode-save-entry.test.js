@@ -302,6 +302,9 @@ test("initial adoption takes a lease over the open session and installs nothing"
 test("an unstamped session that stopped with work unsaved is never taken as saved", async () => {
   // A host that answers no ETag, and a session that ends without writing what the person
   // typed: nothing but the session's own record says the page holds work no save wrote.
+  // The mode the session runs in, as the controller commits it: a page editing under
+  // the hints, not one that booted read-only.
+  mode.commitModeFacts({ mode: "edit", isEditMode: true, phase: "idle" });
   const session = save.saveSession();
   session.start();
   document.getElementById("content").textContent = "typed and never saved";

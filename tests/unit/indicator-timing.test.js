@@ -53,3 +53,29 @@ test("reduced motion: no fade transition", async () => {
   });
   expect(last(calls, chip(), "transition")).toBe("none");
 });
+
+test("an indicator imported during a transition arms nothing", async () => {
+  // A late import lands while the committed mode is still the one being left, so its
+  // own start would be a chip no exit holds a lease over.
+  jest.resetModules();
+  document.body.innerHTML = "";
+  window.clayEditMode = true;
+  const mode = await import("../../src/core/is-edit-mode.js");
+  const { saveFeedback } = await import("../../src/core/save-feedback.js");
+  mode.commitModeFacts({ mode: "edit", isEditMode: true, phase: "leaving" });
+
+  const added = [];
+  const realAdd = document.addEventListener;
+  document.addEventListener = function (type, ...rest) {
+    added.push(type);
+    return realAdd.call(this, type, ...rest);
+  };
+  try {
+    await import("../../src/plugins/indicator.js");
+  } finally {
+    document.addEventListener = realAdd;
+  }
+
+  expect(saveFeedback.chip).toBe(false);
+  expect(added).not.toContain("clay:save-saved");
+});
