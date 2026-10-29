@@ -691,6 +691,81 @@ export function createSteps(inst, options) {
     });
     return toolsOpening;
   };
+
+  // The document's own switches travel with it: the gear panel writes them into the
+  // page's live store, and a document that never touched one opens no store at all.
+  // Turning a switch off hides a tag; the owner and due values stay in the file.
+  const SETTINGS_SEL = 'script[type="application/json"][merge="page.settings"][clay~="live"]';
+  const SETTING_KEYS = ["assignees", "dates"];
+  let settingsOpening = null;
+  let settingsValue = { assignees: true, dates: true };
+
+  // Both switches default to on, and anything but an explicit false leaves them on.
+  const settingsFrom = (value) => ({
+    assignees: value?.assignees !== false,
+    dates: value?.dates !== false,
+  });
+
+  function readSettings() {
+    const tag = document.querySelector(SETTINGS_SEL);
+    if (!tag) return settingsFrom(null);
+    let value = null;
+    try { value = JSON.parse(tag.textContent); } catch (error) { value = null; }
+    return settingsFrom(value);
+  }
+
+  function applySettings(next) {
+    settingsValue = settingsFrom(next);
+    const dom = inst.view && !inst.view.isDestroyed ? inst.view.dom : null;
+    if (!dom) return;
+    for (const key of SETTING_KEYS) {
+      if (settingsValue[key]) dom.removeAttribute(`data-${key}`);
+      else dom.setAttribute(`data-${key}`, "false");
+    }
+  }
+
+  const openSettings = () => {
+    if (settingsOpening) return settingsOpening;
+    settingsOpening = (async () => {
+      if (!document.querySelector(SETTINGS_SEL)) {
+        const tag = document.createElement("script");
+        tag.setAttribute("type", "application/json");
+        tag.setAttribute("merge", "page.settings");
+        tag.setAttribute("clay", "live");
+        tag.textContent = "{}";
+        document.head.appendChild(tag);
+      }
+      let handle = null;
+      try {
+        handle = window.clay.live("page.settings");
+        await handle.ready;
+      } catch (error) {
+        console.warn("clayjs: page plugin could not open the settings store", error);
+        settingsOpening = null;
+        return null;
+      }
+      if (!isCurrent(inst)) return null;
+      applySettings(handle.data);
+      // A peer's change hides or shows the tags here too, without the view remounting.
+      handle.on("change", () => applySettings(handle.data));
+      return handle;
+    })();
+    return settingsOpening;
+  };
+
+  // The gear panel's API: what the document shows now, and a switch that writes the
+  // document's store and takes effect here at once, without waiting for the change.
+  inst.settings = {
+    read: () => ({ ...settingsValue }),
+    set: async (key, on) => {
+      if (!SETTING_KEYS.includes(key)) throw new TypeError(`clayjs: "${key}" is not a page setting`);
+      const handle = await openSettings();
+      if (!handle) throw new Error("clayjs: the page settings store could not be opened");
+      const next = { ...settingsFrom(handle.data), [key]: on !== false };
+      handle.set([key], next[key]);
+      applySettings(next);
+    },
+  };
   // One notice per feature a person needed and that failed, until Retry succeeds.
   const notices = new Map();
   const notifyFailed = (id) => {
@@ -1078,6 +1153,10 @@ function mountAndAttach(inst, source, loaded) {
     }
     editorView = view;
     inst.view = view;
+    applySettings(readSettings());
+    // A document that states settings opens their store so a peer's change reaches this
+    // tab; one that states none opens it when a switch is first written.
+    if (document.querySelector(SETTINGS_SEL)) openSettings().catch(() => null);
     const shell = view.dom.closest(".page-shell");
     // A shell still waiting for its boot takes no input of any kind: a control inside
     // a non-editable editor would otherwise write before the boot says ready. It is
@@ -1508,6 +1587,10 @@ export const page = {
   dispose,
   get view() {
     return active?.view ?? null;
+  },
+  // The document's settings, for the panel that switches them.
+  get settings() {
+    return active?.settings ?? null;
   },
 };
 

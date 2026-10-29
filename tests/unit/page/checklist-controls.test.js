@@ -172,3 +172,16 @@ test("keyboard shortcuts focus both controls from the item text", () => {
   expect(key(view, "d", { metaKey: true, shiftKey: true })).toBe(true);
   expect(document.activeElement.dataset.check).toBe("date");
 });
+
+test("a control the document switched off has no shortcut", () => {
+  const view = fresh();
+  select(view, 2);
+  view.focus();
+  view.dom.setAttribute("data-assignees", "false");
+  expect(key(view, "o", { metaKey: true, shiftKey: true })).toBe(false);
+  expect(document.activeElement).toBe(view.dom);
+  view.dom.removeAttribute("data-assignees");
+  view.dom.setAttribute("data-dates", "false");
+  expect(key(view, "d", { metaKey: true, shiftKey: true })).toBe(false);
+  expect(document.activeElement).toBe(view.dom);
+});
