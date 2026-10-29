@@ -51,7 +51,7 @@ afterEach(() => {
   jest.restoreAllMocks();
 });
 
-test("two tabs that edited the same list keep this tab's list and the other tab's record aside", () => {
+test("two tabs that edited different rows of one list both keep their edit", () => {
   const storage = storageWithDraft();
   const a = openTab(document, storage);
   const b = openTab(document.implementation.createHTMLDocument("tab b"), storage);
@@ -62,13 +62,12 @@ test("two tabs that edited the same list keep this tab's list and the other tab'
   b.doc.querySelector('[data-id="r2"] .n').textContent = "B second row";
 
   a.store.write(pageHTML(row("r1", "A first row") + row("r2", "Two")));
-  const otherRaw = storage.getItem(KEY);
   jest.spyOn(console, "warn").mockImplementation(() => {});
   b.store.write(pageHTML(row("r1", "One") + row("r2", "B second row")));
 
-  expect(JSON.parse(storage.getItem(KEY)).data.rows).toEqual([{ id: "r1", name: "One" }, { id: "r2", name: "B second row" }]);
-  expect(storage.getItem(KEY + ":conflict")).toBe(otherRaw);
-  expect(visibleRows(b.doc)).toEqual([["r1", "One"], ["r2", "B second row"]]);
+  expect(JSON.parse(storage.getItem(KEY)).data.rows).toEqual([{ id: "r1", name: "A first row" }, { id: "r2", name: "B second row" }]);
+  expect(storage.getItem(KEY + ":conflict")).toBe(null);
+  expect(visibleRows(b.doc)).toEqual([["r1", "A first row"], ["r2", "B second row"]]);
 });
 
 test("a row field both tabs changed keeps this tab's value and keeps the other tab's record aside", () => {

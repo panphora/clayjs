@@ -80,24 +80,86 @@ function complete(draft, page, top = false) {
   return draft;
 }
 
-// Three-way merge of this tab's value with another tab's, from the value both
-// started at. Top-level keys and nested objects merge per field. A list both tabs
-// changed is a conflict, since a card moved between lists or a reorder cannot be
-// told apart from a delete and an add: this tab's value wins.
-export function merge3(base, mine, theirs) {
+const sameIds = (a, b) => a.length === b.length && a.every((id, i) => id === b[i]);
+
+// Rows matched by id, when neither tab reordered the rows all three still have: a row
+// one tab added is kept where that tab put it, a row one tab removed goes unless the
+// other tab changed it, and a row both kept merges field by field. Anything else is
+// null, and the caller treats the list as one value.
+function mergeRows(base, mine, theirs) {
+  const index = (rows) => new Map(rows.map((row) => [row.id, row]));
+  const was = index(base);
+  const mineById = index(mine);
+  const theirsById = index(theirs);
+  const shared = (rows) => rows.filter((row) => was.has(row.id) && mineById.has(row.id) && theirsById.has(row.id)).map((row) => row.id);
+  const order = shared(base);
+  if (!sameIds(order, shared(mine)) || !sameIds(order, shared(theirs))) return null;
+  for (const [id, row] of was) {
+    if (mineById.has(id) && !theirsById.has(id) && !same(mineById.get(id), row)) return null;
+    if (!mineById.has(id) && theirsById.has(id) && !same(theirsById.get(id), row)) return null;
+  }
+  let conflict = false;
+  const out = [];
+  for (const row of mine) {
+    if (was.has(row.id) && !theirsById.has(row.id)) continue;
+    if (!theirsById.has(row.id)) { out.push(row); continue; }
+    const part = mergeValue(was.get(row.id), row, theirsById.get(row.id), true);
+    conflict ||= part.conflict;
+    out.push(part.value);
+  }
+  theirs.forEach((row, i) => {
+    if (was.has(row.id) || mineById.has(row.id)) return;
+    let at = 0;
+    for (let j = i - 1; j >= 0; j--) {
+      const k = out.findIndex((kept) => kept.id === theirs[j].id);
+      if (k !== -1) { at = k + 1; break; }
+    }
+    out.splice(at, 0, row);
+  });
+  return { value: out, conflict };
+}
+
+function mergeValue(base, mine, theirs, rows) {
   if (same(mine, theirs) || same(theirs, base)) return { value: mine, conflict: false };
   if (same(mine, base)) return { value: theirs, conflict: false };
   if (isPlain(mine) && isPlain(theirs)) {
     const value = {};
     let conflict = false;
     for (const name of new Set([...Object.keys(mine), ...Object.keys(theirs)])) {
-      const part = merge3(isPlain(base) ? base[name] : undefined, mine[name], theirs[name]);
+      const part = mergeValue(isPlain(base) ? base[name] : undefined, mine[name], theirs[name], rows);
       conflict ||= part.conflict;
       if (part.value !== undefined) value[name] = part.value;
     }
     return { value, conflict };
   }
+  if (rows && hasIds(base) && hasIds(mine) && hasIds(theirs)) {
+    const merged = mergeRows(base, mine, theirs);
+    if (merged) return merged;
+  }
   return { value: mine, conflict: true };
+}
+
+function countIds(value, counts = new Map()) {
+  if (Array.isArray(value)) {
+    if (hasIds(value)) for (const row of value) counts.set(row.id, (counts.get(row.id) || 0) + 1);
+    for (const item of value) countIds(item, counts);
+  } else if (isPlain(value)) {
+    for (const item of Object.values(value)) countIds(item, counts);
+  }
+  return counts;
+}
+
+// Three-way merge of this tab's value with another tab's, from the value both started
+// at. Objects merge per field and lists of rows with ids merge per row. A list merge that
+// would hold one id in two places (a card moved to different lists in each tab) is
+// undone, and that list is a conflict this tab wins, as is any reorder.
+export function merge3(base, mine, theirs) {
+  const merged = mergeValue(base, mine, theirs, true);
+  const before = countIds(mine);
+  for (const [id, count] of countIds(merged.value)) {
+    if (count > 1 && count > (before.get(id) || 0)) return mergeValue(base, mine, theirs, false);
+  }
+  return merged;
 }
 
 function storageFailure(doc, error) {

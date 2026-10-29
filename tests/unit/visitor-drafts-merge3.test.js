@@ -39,8 +39,8 @@ test("a list only one tab changed is taken whole, and a list both changed is a c
     conflict: false,
   });
   expect(merge3(base, { rows: rows(["r1", "A one"], ["r2", "Two"]) }, { rows: rows(["r1", "One"], ["r2", "B two"]) })).toEqual({
-    value: { rows: rows(["r1", "A one"], ["r2", "Two"]) },
-    conflict: true,
+    value: { rows: rows(["r1", "A one"], ["r2", "B two"]) },
+    conflict: false,
   });
 });
 
