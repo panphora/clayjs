@@ -3,6 +3,9 @@ import { createPageDoc, seedFrom, walk, authorKey } from "../../../../src/page/y
 import { LOCAL, NET, idKey } from "../../../../src/page/ybind/layout.js";
 import { removeKey, textDeleteKey } from "../../../../src/page/ybind/recovery.js";
 import { captureDelta, rewalk, walkSignature } from "../../../../src/page/ybind/walk-delta.js";
+import { createOriginIndex } from "../../../../src/page/ybind/origins.js";
+import { moveBlocks } from "../../../../src/page/ybind/moves.js";
+import { ctxAt } from "../../../../src/page/ybind/writer.js";
 
 const A = 300;
 
@@ -52,7 +55,7 @@ const open = () => {
     expect(c).not.toBeNull();
     expect(c.marker.content.embed.b).toBe(id);
     expect(c.deleted).toBe(deleted);
-    const next = rewalk(pd, s.w, c.marker);
+    const next = rewalk(pd, s.w, c.marker, c);
     expect(next).not.toBeNull();
     expect(walkSignature(pd, next)).toBe(walkSignature(pd, walk(pd)));
     totals.equal += 1;
@@ -83,13 +86,14 @@ test("a one-block re-walk equals a full walk, and both refuse what they must", (
   // 4. Insert a line break embed into block q.
   t.equal(t.capture(() => pd.flow.insertEmbed(atOf(pd, "q") + 1, { br: 1 })), "q", false);
 
-  // 5. Insert a new block marker embed and its attrs record.
-  t.refused(t.capture(() => {
+  // 5. Insert a new block marker embed and its attrs record: a split of block q.
+  const next = t.equal(t.capture(() => {
     pd.flow.insertEmbed(atOf(pd, "q") + 1, { b: "s" });
     const m = new Y.Map();
     m.set("t", "paragraph");
     pd.attrs.set("s", m);
-  }));
+  }), "q", false);
+  expect(next.visible.map((seg) => seg.id)).toEqual(["p", "q", "s", "r"]);
 
   // 6. Change block q's type in pd.attrs.
   t.refused(t.capture(() => pd.attrs.get("q").set("t", "heading")));
@@ -162,7 +166,25 @@ test("a one-block re-walk equals a full walk, and both refuse what they must", (
     expect(textOf(next.visible.find((seg) => seg.id === "q"))).toContain("charlie");
   }
 
-  expect(totals.equal).toBeGreaterThanOrEqual(8);
+  // 16. The same split made by another tab: records this tab already holds may name its id.
+  {
+    const s = open();
+    const doc = new Y.Doc();
+    doc.clientID = 500;
+    Y.applyUpdateV2(doc, Y.encodeStateAsUpdateV2(s.pd.ydoc));
+    const other = createPageDoc(doc);
+    other.ydoc.transact(() => {
+      other.flow.insertEmbed(atOf(other, "q") + 1, { b: "u" });
+      const m = new Y.Map();
+      m.set("t", "paragraph");
+      other.attrs.set("u", m);
+    });
+    s.captured = undefined;
+    Y.applyUpdateV2(s.pd.ydoc, Y.encodeStateAsUpdateV2(other.ydoc), NET);
+    s.refused(s.captured);
+  }
+
+  expect(totals.equal).toBeGreaterThanOrEqual(9);
   expect(totals.refused).toBeGreaterThanOrEqual(7);
 });
 
@@ -194,4 +216,263 @@ test("a one-block re-walk shifts the items of a moved copy after it", () => {
   expect(next).not.toBeNull();
   expect(walkSignature(pd, next)).toBe(walkSignature(pd, walk(pd)));
   totals.equal += 1;
+});
+
+// The position just past the last live marker of a block: a moved block's visible copy.
+const copyAt = (pd, id) => {
+  let at = 0, found = -1;
+  for (let it = pd.flow._start; it; it = it.right) {
+    if (it.deleted) continue;
+    if (it.content instanceof Y.ContentEmbed && it.content.embed.b === id) found = at + 1;
+    if (it.countable) at += it.length;
+  }
+  if (found < 0) throw new Error(`no block at ${id}`);
+  return found;
+};
+
+// A moved block keeps its old marker live under the removal that hides it, so its one
+// visible copy records its items. Typing in that copy, or in a block before it, is walked
+// again on its own; a second visible copy of the same block is the full walk's case.
+test("a one-block re-walk of a moved block keeps its items equal to a full walk", () => {
+  const s = open();
+  const { pd } = s;
+  const origins = createOriginIndex(pd.origins);
+  const moved = moveBlocks({ pd, view: null, um: null, origins, render: () => {} }, { ids: ["p"], afterId: "r" });
+  expect(moved.status).toBe("moved");
+  s.w = walk(pd);
+  const copy = s.w.visible.find((seg) => seg.id === "p");
+  expect(copy.items?.length).toBeGreaterThan(0);
+  expect(s.w.copies.has("p")).toBe(false);
+
+  const typed = s.equal(s.capture(() => pd.flow.insert(copyAt(pd, "p") + 2, "zz", { bold: true })), "p", false);
+  expect(typed.visible.find((seg) => seg.id === "p").items.map((item) => item.text).join("")).toContain("zz");
+  s.equal(s.capture(() => pd.flow.insertEmbed(copyAt(pd, "p") + 1, { br: 1 })), "p", false);
+  s.equal(s.capture(() => pd.flow.delete(copyAt(pd, "p") + 3, 2)), "p", true);
+  s.equal(s.capture(() => pd.flow.insert(atOf(pd, "q") + 1, "before the copy")), "q", false);
+  s.equal(s.capture(() => pd.flow.format(copyAt(pd, "p"), 2, { italic: true })), "p", false);
+
+  origins.dispose();
+});
+
+// Two people move the same block at once: both copies are visible until the post pass
+// hides the later one, and while their text is equal the hidden one is no orphan. Typing
+// in the winner makes them differ, which only a full walk sees.
+test("a one-block re-walk refuses the winning copy of a block two people moved", () => {
+  const base = page();
+  const peer = (client) => {
+    const doc = new Y.Doc();
+    doc.clientID = client;
+    Y.applyUpdateV2(doc, Y.encodeStateAsUpdateV2(base.ydoc));
+    return createPageDoc(doc);
+  };
+  const a = peer(400), b = peer(500);
+  for (const [pd, afterId] of [[a, "r"], [b, "q"]]) {
+    const origins = createOriginIndex(pd.origins);
+    expect(moveBlocks({ pd, view: null, um: null, origins, render: () => {} }, { ids: ["p"], afterId }).status).toBe("moved");
+    origins.dispose();
+  }
+  Y.applyUpdateV2(a.ydoc, Y.encodeStateAsUpdateV2(b.ydoc), NET);
+  const before = walk(a);
+  expect(before.copies.has("p")).toBe(true);
+  expect(before.orphans).toEqual([]);
+  const winner = before.visible.find((seg) => seg.id === "p").brk;
+  let at = 0;
+  for (let it = a.flow._start; it && !(it.id.client === winner.client && it.id.clock === winner.clock); it = it.right) if (!it.deleted && it.countable) at += it.length;
+  let captured = null;
+  a.ydoc.on("afterTransaction", (t) => { captured = captureDelta(a, t, before); });
+  a.ydoc.transact(() => a.flow.insert(at + 1, "w"), LOCAL);
+  expect(captured.marker.id).toEqual(winner);
+  expect(rewalk(a, before, captured.marker)).toBeNull();
+  expect(walk(a).orphans.length).toBe(1);
+  totals.refused += 1;
+});
+
+// A removed block keeps its marker live under its removal record, so the block before it
+// ends in a hidden run, and a block whose next marker was deleted with it goes on after
+// that run. Typing up to the first hidden run is walked again on its own, as long as no
+// format item changed; the hidden run and what follows it only move.
+test("a one-block re-walk of a block with a hidden run equals a full walk", () => {
+  const s = open();
+  const { pd } = s;
+  const peer = new Y.Doc();
+  peer.clientID = 600;
+  Y.applyUpdateV2(peer, Y.encodeStateAsUpdateV2(pd.ydoc));
+  const late = createPageDoc(peer);
+  late.flow.insert(atOf(late, "q") + 2, "late");
+  const q = markerOf(pd, "q"), r = markerOf(pd, "r");
+  pd.ydoc.transact(() => {
+    pd.gone.set(removeKey(idKey(q.id), "op-9"), { blockId: "q", end: idKey(r.id), sv: [] });
+    pd.flow.delete(atOf(pd, "q"), "bravo".length);
+    pd.flow.delete(atOf(pd, "r") - 1, 3);
+  }, LOCAL);
+  Y.applyUpdateV2(pd.ydoc, Y.encodeStateAsUpdateV2(peer), NET);
+  s.w = walk(pd);
+  const p = s.w.visible.find((seg) => seg.id === "p");
+  expect(p.runs.some((run) => run.hole !== undefined)).toBe(true);
+  expect(textOf(p)).toBe("ALPHAarlie");
+  expect(s.w.hidden.some((entry) => entry.blockId === "q" && entry.items.some((item) => item.text === "late"))).toBe(true);
+
+  const equalFlat = (c, deleted) => {
+    expect(c.marker.content.embed.b).toBe("p");
+    expect(c.deleted).toBe(deleted);
+    expect(c.formats).toBe(false);
+    const next = rewalk(pd, s.w, c.marker, c);
+    expect(next).not.toBeNull();
+    expect(walkSignature(pd, next)).toBe(walkSignature(pd, walk(pd)));
+    totals.equal += 1;
+    s.w = next;
+  };
+  equalFlat(s.capture(() => pd.flow.insert(atOf(pd, "p") + 2, "xyz")), false);
+  equalFlat(s.capture(() => pd.flow.delete(atOf(pd, "p") + 1, 4)), true);
+  equalFlat(s.capture(() => pd.flow.insertEmbed(atOf(pd, "p") + 1, { br: 1 })), false);
+
+  const bold = s.capture(() => pd.flow.insert(atOf(pd, "p") + 1, "b", { bold: true }));
+  expect(bold.formats).toBe(true);
+  expect(rewalk(pd, s.w, bold.marker, bold)).toBeNull();
+  totals.refused += 1;
+  s.w = walk(pd);
+
+  const after = s.capture(() => pd.flow.insert(pd.flow.length - 2, "after the hidden run"));
+  expect(after === null || after.marker.content.embed.b !== "p" || rewalk(pd, s.w, after.marker, after) === null).toBe(true);
+});
+
+test("a one-block re-walk of a moved block with a hidden run keeps its items equal to a full walk", () => {
+  const s = open();
+  const { pd } = s;
+  pd.ydoc.transact(() => {
+    pd.flow.insertEmbed(pd.flow.length, { b: "s" });
+    const attrs = new Y.Map();
+    attrs.set("t", "paragraph");
+    pd.attrs.set("s", attrs);
+    pd.flow.insert(pd.flow.length, "sierra");
+  }, LOCAL);
+  const origins = createOriginIndex(pd.origins);
+  expect(moveBlocks({ pd, view: null, um: null, origins, render: () => {} }, { ids: ["p"], afterId: "q" }).status).toBe("moved");
+  origins.dispose();
+  const r = markerOf(pd, "r"), sierra = markerOf(pd, "s");
+  pd.ydoc.transact(() => {
+    pd.gone.set(removeKey(idKey(r.id), "op-8"), { blockId: "r", end: idKey(sierra.id), sv: [] });
+    pd.flow.delete(atOf(pd, "r"), 3);
+    pd.flow.delete(atOf(pd, "s") - 1, 2);
+  }, LOCAL);
+  s.w = walk(pd);
+  const copy = s.w.visible.find((seg) => seg.id === "p");
+  expect(textOf(copy)).toBe("ALPHAierra");
+  expect(copy.items.length).toBeGreaterThan(0);
+  expect(copy.runs.findIndex((run) => run.hole !== undefined)).toBeLessThan(copy.runs.length - 1);
+  const c = s.capture(() => pd.flow.insert(copyAt(pd, "p") + 1, "moved and typed"));
+  expect(c.formats).toBe(false);
+  const next = rewalk(pd, s.w, c.marker, c);
+  expect(next).not.toBeNull();
+  expect(walkSignature(pd, next)).toBe(walkSignature(pd, walk(pd)));
+  totals.equal += 1;
+});
+
+// Enter inside a block inserts one marker, carrying the formats in force there as the
+// writer does, and the new block's attribute map. The block is walked again from its own
+// marker, ends at the new one, and the new block takes the rest of the extent, hidden runs
+// included.
+const splitAt = (pd, at, id) => pd.flow.insertEmbed(at, { b: id }, Object.fromEntries(ctxAt(pd, at)));
+
+test("a split walks the block it splits again and opens the new block, equal to a full walk", () => {
+  const s = open();
+  const { pd } = s;
+  const split = (at, id, t = "paragraph", also = () => {}) => s.capture(() => {
+    splitAt(pd, at, id);
+    const m = new Y.Map();
+    m.set("t", t);
+    pd.attrs.set(id, m);
+    also();
+  });
+  s.equal(s.capture(() => pd.flow.format(atOf(pd, "q") + 1, 3, { strong: true })), "q", false);
+  const inBold = s.equal(split(atOf(pd, "q") + 2, "s1"), "q", false);
+  const opened = inBold.visible.find((seg) => seg.id === "s1");
+  expect(opened.fmtIn).toEqual({ strong: true });
+  expect(opened.runs[0].marks.map((mark) => mark.type.name)).toEqual(["strong"]);
+  s.equal(split(atOf(pd, "q"), "s2"), "q", false);
+  s.equal(split(atOf(pd, "r") + "charlie".length, "s3"), "r", false);
+  s.equal(split(atOf(pd, "p") + 3, "s4", "heading"), "p", false);
+  const code = s.equal(split(atOf(pd, "s1") + 1, "s9", "code_block"), "s1", false);
+  expect(code.visible.find((seg) => seg.id === "s9").runs[0].marks).toEqual([]);
+  expect(walk(pd).visible.map((seg) => seg.id)).toEqual(["p", "s4", "q", "s2", "s1", "s9", "r", "s3"]);
+
+  const atom = split(atOf(pd, "r") + 2, "s8", "divider");
+  expect(atom.split).toBeTruthy();
+  expect(rewalk(pd, s.w, atom.marker, atom)).toBeNull();
+  totals.refused += 1;
+  s.w = walk(pd);
+
+  s.refused(split(atOf(pd, "q"), "s5", "paragraph", () => pd.flow.insert(atOf(pd, "s5"), "typed in the new block")));
+  s.refused(s.capture(() => {
+    pd.flow.insertEmbed(atOf(pd, "r") + 1, { b: "s6" });
+    pd.flow.insertEmbed(atOf(pd, "r") + 2, { b: "s7" });
+    for (const id of ["s6", "s7"]) { const m = new Y.Map(); m.set("t", "paragraph"); pd.attrs.set(id, m); }
+  }));
+
+  s.refused(split(atOf(pd, "q"), "r"));
+  s.refused(s.capture(() => {
+    pd.flow.insertEmbed(atOf(pd, "r") + 1, { b: "bare" });
+    pd.flow.insertEmbed(atOf(pd, "r") + 1, { b: "bare2" });
+  }));
+  s.refused(s.capture(() => {
+    const m = new Y.Map();
+    m.set("t", "heading");
+    pd.attrs.set("bare", m);
+    pd.flow.insert(atOf(pd, "q") + 1, "typed beside it");
+  }));
+  s.refused(split(atOf(pd, "q"), "s10", "paragraph", () => {
+    const m = new Y.Map();
+    m.set("t", "heading");
+    pd.attrs.set("bare2", m);
+  }));
+
+});
+
+test("a split of a block with a hidden run gives the new block that run, equal to a full walk", () => {
+  const s = open();
+  const { pd } = s;
+  const q = markerOf(pd, "q"), r = markerOf(pd, "r");
+  pd.ydoc.transact(() => {
+    pd.gone.set(removeKey(idKey(q.id), "op-7"), { blockId: "q", end: idKey(r.id), sv: [] });
+    pd.flow.delete(atOf(pd, "q"), "bravo".length);
+    pd.flow.delete(atOf(pd, "r") - 1, 3);
+  }, LOCAL);
+  s.w = walk(pd);
+  expect(textOf(s.w.visible.find((seg) => seg.id === "p"))).toBe("ALPHAarlie");
+  const c = s.capture(() => {
+    splitAt(pd, atOf(pd, "p") + 2, "n");
+    const m = new Y.Map();
+    m.set("t", "paragraph");
+    pd.attrs.set("n", m);
+  });
+  const next = s.equal(c, "p", false);
+  const opened = next.visible.find((seg) => seg.id === "n");
+  expect(textOf(opened)).toBe("PHAarlie");
+  expect(opened.runs.some((run) => run.hole !== undefined)).toBe(true);
+});
+
+test("a split that changes the block type past a hidden run takes the full walk, so the tail drops marks the new type does not allow", () => {
+  const s = open();
+  const { pd } = s;
+  pd.flow.format(atOf(pd, "r"), "charlie".length, { strong: true });
+  const q = markerOf(pd, "q"), r = markerOf(pd, "r");
+  pd.ydoc.transact(() => {
+    pd.gone.set(removeKey(idKey(q.id), "op-13"), { blockId: "q", end: idKey(r.id), sv: [] });
+    pd.flow.delete(atOf(pd, "q"), "bravo".length);
+    pd.flow.delete(atOf(pd, "r") - 1, 3);
+  }, LOCAL);
+  s.w = walk(pd);
+  const c = s.capture(() => {
+    splitAt(pd, atOf(pd, "p") + 2, "n");
+    const m = new Y.Map();
+    m.set("t", "code_block");
+    pd.attrs.set("n", m);
+  });
+  expect(c).not.toBeNull();
+  expect(rewalk(pd, s.w, c.marker, c)).toBeNull();
+  totals.refused += 1;
+  const opened = walk(pd).visible.find((seg) => seg.id === "n");
+  const tail = opened.runs.slice(opened.runs.findIndex((run) => run.hole !== undefined) + 1);
+  expect(tail.map((run) => run.text).join("")).toBe("arlie");
+  expect(tail.every((run) => run.mk === "")).toBe(true);
 });

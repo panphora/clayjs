@@ -284,6 +284,33 @@ test("a tracker on its own records the merged updates it is given", () => {
   doc.destroy();
 });
 
+test("a tracker given many updates owes every one of them until a save covers them all", () => {
+  const debt = createPageFileDebt();
+  const updates = [];
+  for (let i = 0; i < 37; i++) {
+    const doc = new Y.Doc();
+    doc.getText("flow").insert(0, `w${i}`);
+    updates.push(Y.encodeStateAsUpdateV2(doc));
+    doc.destroy();
+    debt.local(updates[i]);
+  }
+  const saved = (list) => ({ v: 1, g: 0, y: { seed: enc(Y.mergeUpdatesV2(list)) } });
+  for (const missing of [0, 1, 20, 35, 36]) {
+    expect(debt.accepted(saved(updates.filter((_, i) => i !== missing)))).toBe(false);
+    expect(debt.pending()).toBe(true);
+  }
+  for (let i = 37; i < 41; i++) {
+    const doc = new Y.Doc();
+    doc.getText("flow").insert(0, `x${i}`);
+    updates.push(Y.encodeStateAsUpdateV2(doc));
+    doc.destroy();
+    debt.local(updates[i]);
+  }
+  expect(debt.accepted(saved(updates.slice(0, 40)))).toBe(false);
+  expect(debt.accepted(saved(updates))).toBe(true);
+  expect(debt.pending()).toBe(false);
+});
+
 test("the obligation holds with WebCrypto unavailable", () => {
   const descriptor = Object.getOwnPropertyDescriptor(globalThis, "crypto");
   Object.defineProperty(globalThis, "crypto", { value: undefined, configurable: true, writable: true });

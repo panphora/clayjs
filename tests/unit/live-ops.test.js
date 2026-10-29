@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import {
-  parsePath, cloneJson, validateOp, checkOp, applyOp, applyOps, coalesce, overlaps, assignDeep, serializeLive, diffOps,
+  parsePath, cloneJson, validateOp, checkOp, applyOp, applyOps, coalesce, overlaps, assignDeep, serializeLive, sameLive, diffOps,
   textHash, stampOf, parseStamp,
 } from "../../src/live/ops.js";
 
@@ -230,4 +230,17 @@ describe("lineage stamps", () => {
   test("malformed stamps parse to null", () => {
     for (const bad of ["e1:3", "e1:-1:00000000", "e1:3:zz", "e1:03:00000000", "", null, 7]) expect(parseStamp(bad)).toBeNull();
   });
+});
+
+test("sameLive agrees with comparing serializeLive text, key order included", () => {
+  const values = [
+    null, true, false, 0, -0, 1, 1.5, "", "a", "<b>", "a<", [], {}, [1, 2], [2, 1], [1, [2]], [[1], 2],
+    { a: 1, b: 2 }, { b: 2, a: 1 }, { a: 1 }, { a: [1, { b: null }] }, { a: [1, { b: false }] },
+    { y: { "1.0": "AAA", "2.0": "BBB" } }, { y: { "2.0": "BBB", "1.0": "AAA" } }, { 2: "x", 1: "y" }, { 1: "y", 2: "x" },
+    { a: {} }, { a: [] }, { a: "1" }, { a: 1 },
+  ];
+  for (const a of values) for (const b of values) {
+    expect(sameLive(a, b)).toBe(serializeLive(a) === serializeLive(b));
+    expect(sameLive(cloneJson(a), b)).toBe(serializeLive(a) === serializeLive(b));
+  }
 });

@@ -4,7 +4,7 @@
 // Local ops change state at once. When authoritative moves, state is rebuilt in
 // place, so an object or list page code holds a reference to stays live.
 
-import { validateOp, checkOp, applyOp, applyOps, applyTracked, undoTracked, cloneJson, assignDeep, coalesce, overlaps, serializeLive } from "./ops.js";
+import { validateOp, checkOp, applyOp, applyOps, applyTracked, undoTracked, cloneJson, assignDeep, coalesce, overlaps, serializeLive, sameLive } from "./ops.js";
 
 const MUTATORS = new Set(["push", "pop", "shift", "unshift", "splice", "sort", "reverse", "fill", "copyWithin"]);
 const INDEX = /^(0|[1-9]\d*)$/;
@@ -174,7 +174,7 @@ export function createStore({ name, value, ephemeral = false }) {
       return false;
     }
     if (room) lastRoom = room;
-    const before = serializeLive(state);
+    const before = cloneJson(state);
     const prev = authoritative;
     authoritative = cloneJson(next);
     if (drop) pending = pending.filter((entry) => entry.id < drop[0] || entry.id > drop[1]);
@@ -182,7 +182,7 @@ export function createStore({ name, value, ephemeral = false }) {
     else pending = through === undefined ? pending.slice(confirmed) : pending.filter((entry) => entry.id > through);
     rebuild();
     tell({ source, frame, room, cause, prev, before: (path) => readPath(prev, path), next: authoritative });
-    if (serializeLive(state) !== before) emit(source, null);
+    if (!sameLive(before, state)) emit(source, null);
     return true;
   }
 

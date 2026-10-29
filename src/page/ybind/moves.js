@@ -114,12 +114,12 @@ const liveRemovals = (pd, current, selected) => {
   return out;
 };
 
-export function moveBlocks({ pd, view, um, origins, render }, args = {}) {
+export function moveBlocks({ pd, view, um, origins, render, walked = null }, args = {}) {
   const ids = Array.isArray(args?.ids) ? [...new Set(args.ids)] : [];
   const afterId = args?.afterId === undefined ? null : args.afterId;
   const hasParent = args?.parent !== undefined;
 
-  const current = walk(pd, origins);
+  const current = walked ?? walk(pd, origins);
   // An opaque block is an operation this runtime must refuse before writing: it
   // has no turn-into, it cannot be carried, and its record is never rewritten.
   const protectedIds = new Set(current.visible.filter((seg) => seg.opaque).map((seg) => seg.id));

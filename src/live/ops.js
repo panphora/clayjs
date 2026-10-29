@@ -318,6 +318,22 @@ export function serializeLive(value) {
   return JSON.stringify(value).replace(/</g, "\\u003c");
 }
 
+// True exactly when serializeLive gives both values the same text: the same keys in the
+// same order and equal leaves, read without writing either value out.
+export function sameLive(a, b) {
+  if (a === b) return true;
+  if (!isContainer(a) || !isContainer(b) || Array.isArray(a) !== Array.isArray(b)) return false;
+  if (Array.isArray(a)) {
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) if (!sameLive(a[i], b[i])) return false;
+    return true;
+  }
+  const keys = Object.keys(a), other = Object.keys(b);
+  if (keys.length !== other.length) return false;
+  for (let i = 0; i < keys.length; i++) if (keys[i] !== other[i] || !sameLive(a[keys[i]], b[keys[i]])) return false;
+  return true;
+}
+
 // A live tag's lineage, `live-at="<epoch>:<seq>:<hash>"`: the room position its
 // value was written at, and a hash of the exact text, so a room can tell its own
 // unedited value from an edit of it.

@@ -21,23 +21,41 @@ import { canonicalPageBytes, containsUpdate } from "./recovery-proof.js";
  * @returns {{local: Function, pending: Function, accepted: Function}}
  */
 export function createPageFileDebt({ changed = () => {} } = {}) {
-  let owned = null;
+  // Merged in runs of doubling length, as a binary counter carries: slot k holds 2^k of
+  // this tab's updates. A keystroke merges with the runs it completes, not with everything
+  // the session typed, so a long session without an accepted save stays cheap to type in.
+  let runs = [];
+  const owned = () => {
+    const parts = runs.filter(Boolean);
+    if (!parts.length) return null;
+    const merged = parts.length === 1 ? parts[0] : mergeUpdatesV2(parts);
+    runs = runs.map(() => null);
+    runs[runs.length - 1] = merged;
+    return merged;
+  };
   return {
     local(update) {
-      owned = owned ? mergeUpdatesV2([owned, update]) : update.slice();
+      let carry = update.slice();
+      let k = 0;
+      for (; runs[k]; k++) {
+        carry = mergeUpdatesV2([runs[k], carry]);
+        runs[k] = null;
+      }
+      runs[k] = carry;
       changed();
     },
     pending() {
-      return owned !== null;
+      return runs.some(Boolean);
     },
     accepted(state) {
-      if (!owned) return true;
+      const merged = owned();
+      if (!merged) return true;
       let covered = false;
       try {
-        covered = containsUpdate(canonicalPageBytes(state), owned);
+        covered = containsUpdate(canonicalPageBytes(state), merged);
       } catch {}
       if (!covered) return false;
-      owned = null;
+      runs = [];
       changed();
       return true;
     },

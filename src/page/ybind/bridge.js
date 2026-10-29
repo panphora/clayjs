@@ -90,7 +90,12 @@ export function keepViewPos(derived, current = null) {
     }
     if (pos === block.attrs.pos && content === block.content) return block;
     changed = true;
-    return block.type.create({ ...block.attrs, pos }, content, block.marks);
+    const attrs = { ...block.attrs, pos };
+    // The view's own node, when it is the node this would build: a block a full walk
+    // derived again unchanged keeps the object the view holds.
+    const prev = previous.get(block.attrs.id);
+    if (prev && content === block.content && prev.hasMarkup(block.type, attrs, block.marks) && prev.content.eq(content)) return prev;
+    return block.type.create(attrs, content, block.marks);
   });
   return changed ? derived.type.create(derived.attrs, placed) : derived;
 }
@@ -233,6 +238,7 @@ export function createBridge({ pd, onNotice = () => {}, ownedTokens = [], author
     for (const listener of [...recoveryListeners]) listener(snapshot);
   };
   const walked = (result) => { w = result; walkedAt = docVersion; delta = null; deltas = 0; };
+  const currentWalk = () => (walkedAt === docVersion ? w : null);
   const proveWalk = (next) => {
     const a = walkSignature(pd, next), b = walkSignature(pd, walk(pd));
     if (a === b) { stats.provedWalks = (stats.provedWalks ?? 0) + 1; return; }
@@ -268,7 +274,7 @@ export function createBridge({ pd, onNotice = () => {}, ownedTokens = [], author
   // walk changed. Returns that transaction's delta when the walk was incremental.
   const walkNow = () => {
     const change = deltas === 1 ? delta : null;
-    const next = !change ? null : change.marker ? rewalk(pd, w, change.marker) : w;
+    const next = !change ? null : change.marker ? rewalk(pd, w, change.marker, change) : w;
     if (!next) {
       const full = walk(pd, origins);
       if (stats.proveWalks) proveIndexWalk(full);
@@ -294,9 +300,10 @@ export function createBridge({ pd, onNotice = () => {}, ownedTokens = [], author
   };
   const refresh = () => {
     const change = walkNow();
-    // Text inserted into one live block hides nothing and exposes nothing, so the
-    // recovery snapshot stands. A deletion can displace a moved copy's source.
-    if (!change || change.deleted || change.fields.size) bumpRecovery();
+    // Text this tab inserted into one live block has fresh ids, so it is no copy's source
+    // and the recovery snapshot stands. A deletion can displace a moved copy's source, and
+    // a peer's late insert can be the source of a hidden copy's displaced run.
+    if (!change || change.deleted || change.fields.size || (change.remote && w.hidden.length)) bumpRecovery();
     else if (stats.proveWalks) proveRecovery();
     return docOf(pd, w, nodes);
   };
@@ -396,7 +403,7 @@ export function createBridge({ pd, onNotice = () => {}, ownedTokens = [], author
     render(own);
   };
   const portMove = (tr, move) => {
-    const result = moveBlocks({ pd, view, um, origins, render }, move);
+    const result = moveBlocks({ pd, view, um, origins, render, walked: currentWalk() }, move);
     if (result.status !== "moved") {
       if (result.status === "refused") stats.moveRefusals = (stats.moveRefusals ?? 0) + 1;
       return result;
@@ -537,7 +544,7 @@ export function createBridge({ pd, onNotice = () => {}, ownedTokens = [], author
       return { status: "restored", id: blockId };
     },
     moveBlocks(args) {
-      return moveBlocks({ pd, view, um, origins, render }, args);
+      return moveBlocks({ pd, view, um, origins, render, walked: currentWalk() }, args);
     },
     undo() { return um.undo() !== null; },
     redo() { return um.redo() !== null; },

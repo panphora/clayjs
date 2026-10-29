@@ -182,14 +182,14 @@ test("a backspace adds one incremental walk", () => {
   expect(blocks(a)).toEqual([["p", "ALPHA"], ["q", "bravo"]]);
 });
 
-test("deleting a block whole is a full walk, and so is typing at the end of the block before it", () => {
+test("deleting a block whole is a full walk, and typing at the end of the block before it walks that block up to the hidden run", () => {
   const a = open(page([{ id: "p", text: "ALPHA" }, { id: "q", text: "bravo" }, { id: "r", text: "charlie" }, { id: "s", text: "delta" }]));
   removeBlock(a, "r");
   expect(counts(a)).toEqual({ incremental: 0, proved: 0 });
   typeAt(a, "q", blockAt(a, "q").node.content.size, "x");
-  expect(counts(a)).toEqual({ incremental: 0, proved: 0 });
-  typeAt(a, "p", blockAt(a, "p").node.content.size, "y");
   expect(counts(a)).toEqual({ incremental: 1, proved: 1 });
+  typeAt(a, "p", blockAt(a, "p").node.content.size, "y");
+  expect(counts(a)).toEqual({ incremental: 2, proved: 2 });
   settled(a);
   expect(blocks(a)).toEqual([["p", "ALPHAy"], ["q", "bravox"], ["s", "delta"]]);
 });
