@@ -139,15 +139,56 @@ const recordOf = (value, key, out) => {
   out.removals.push({ key, sourceKey: key, source, operationId: null, blockId: value.b, end, sv: [], legacy: true });
 };
 
+const emptyIntents = () => ({ removals: [], restores: [], copyActive: new Set(), attrs: new Map(), textDeletes: [] });
+
+const frozen = (value) => {
+  if (value !== null && typeof value === "object" && !Object.isFrozen(value)) {
+    for (const key of Object.keys(value)) frozen(value[key]);
+    Object.freeze(value);
+  }
+  return value;
+};
+
+const parsedRecord = (value, key) => {
+  const out = emptyIntents();
+  try {
+    recordOf(value, key, out);
+  } catch (error) {
+    if (!(error instanceof RecoveryError)) throw error;
+    return null;
+  }
+  for (const list of [out.removals, out.restores, out.textDeletes]) for (const record of list) frozen(record);
+  for (const fields of out.attrs.values()) for (const fieldValue of fields.values()) frozen(fieldValue);
+  return out;
+};
+
+const parsedGone = new WeakMap();
+
 export function parseGoneIntents(gone, { strict = false } = {}) {
-  const out = { removals: [], restores: [], copyActive: new Set(), attrs: new Map(), textDeletes: [] };
+  const out = emptyIntents();
+  if (strict) {
+    gone.forEach((value, key) => recordOf(value, key, out));
+    return out;
+  }
+  const previous = parsedGone.get(gone) ?? new Map();
+  const parsed = new Map();
   gone.forEach((value, key) => {
-    try {
-      recordOf(value, key, out);
-    } catch (error) {
-      if (strict || !(error instanceof RecoveryError)) throw error;
+    const hit = previous.get(key);
+    const entry = hit && hit.value === value ? hit : { value, record: parsedRecord(value, key) };
+    parsed.set(key, entry);
+    const record = entry.record;
+    if (!record) return;
+    for (const removal of record.removals) out.removals.push(removal);
+    for (const restore of record.restores) out.restores.push(restore);
+    for (const textDelete of record.textDeletes) out.textDeletes.push(textDelete);
+    for (const sourceKey of record.copyActive) out.copyActive.add(sourceKey);
+    for (const [sourceKey, fields] of record.attrs) {
+      const into = out.attrs.get(sourceKey) ?? new Map();
+      for (const [field, fieldValue] of fields) into.set(field, fieldValue);
+      out.attrs.set(sourceKey, into);
     }
   });
+  parsedGone.set(gone, parsed);
   return out;
 }
 
@@ -371,7 +412,7 @@ function sourceRecord(pd, index, sourceKey, removals, hidden, intents, visible, 
     attrs: root.attrs,
     author: blocks[0].author,
     blocks: blocks.map((block) => ({ id: block.id, type: block.type, attrs: block.attrs, author: block.author, runs: block.runs.map((run) => runOut(run, authorOf)) })),
-    removals: ordered.map((removal) => ({ key: removal.key, operationId: removal.operationId, end: removal.end, sv: removal.sv })),
+    removals: ordered.map((removal) => ({ key: removal.key, operationId: removal.operationId, end: removal.end, sv: removal.sv.map(([client, clock]) => [client, clock]) })),
     restores: intents.restores.filter((restore) => restore.covers.some((cover) => ordered.some((removal) => removal.key === cover))).sort((a, b) => compare(a.key, b.key)).map((restore) => ({ key: restore.key, covers: sortedList(restore.covers) })),
     copyActive: intents.copyActive.has(sourceKey),
     overrides,
