@@ -149,7 +149,9 @@ describe("the menu and the SEO sheet follow committed mode changes", () => {
     facts.commitModeFacts({ mode: "view", isEditMode: false });
     document.dispatchEvent(new Event("clay:modechange"));
     expect(fieldOf("title").readOnly).toBe(true);
-    expect(buttonOf("apply").hidden).toBe(true);
+    // Done stays: in a read-only sheet it closes without writing.
+    expect(buttonOf("apply").hidden).toBe(false);
+    expect(buttonOf("edit").hidden).toBe(false);
   });
 
   test("unapplied SEO fields are pending work without the optional unsent plugin", async () => {
