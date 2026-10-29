@@ -312,3 +312,60 @@ test("a page that is not a Document gets no marker and no first-heading link", a
   expect(document.querySelector("title").textContent).toBe("The person's title");
   expect(document.querySelector('meta[name="clay-seo-title-mode"]')).toBeNull();
 });
+
+const undoButton = () =>
+  [...document.querySelectorAll("[data-clay-toast]")]
+    .flatMap((toast) => [...toast.querySelectorAll("button")])
+    .find((button) => button.textContent.trim() === "Undo");
+
+test("without clay.undo Apply offers an Undo toast that puts the head back and saves", async () => {
+  await boot({ plugins: "menu" });
+  expect(window.clay.undo?.commit).toBeUndefined();
+  window.clay.toastPersistent = () => {};
+  await openSheet();
+
+  setValue("title", "A new title");
+  setValue("description", "A new description");
+  setValue("ogTitle", "A new card title");
+  buttonOf("apply").click();
+  await settle();
+
+  expect(document.querySelector("title").textContent).toBe("A new title");
+  expect(document.querySelector('meta[name="description"]').getAttribute("content")).toBe("A new description");
+  expect(document.querySelector('meta[property="og:title"]').getAttribute("content")).toBe("A new card title");
+  const toast = document.querySelector('[data-clay-toast="success"]');
+  expect(toast).not.toBeNull();
+  expect(toast.textContent).toContain("SEO settings applied");
+  const undo = undoButton();
+  expect(undo).toBeDefined();
+
+  const saves = [];
+  const save = window.clay.save;
+  window.clay.save = (...args) => { saves.push(args); return save(...args); };
+
+  undo.click();
+  await settle();
+
+  expect(document.querySelector("title").textContent).toBe("Start title");
+  expect(document.querySelector('meta[name="description"]').getAttribute("content")).toBe("Start description");
+  expect(document.querySelector('meta[property="og:title"]')).toBeNull();
+  expect(saves).toHaveLength(1);
+});
+
+test("with clay.undo Apply goes through commit and offers no Undo toast", async () => {
+  await boot({ plugins: "menu" });
+  const commit = jest.fn((label, fn) => fn());
+  window.clay.undo = { commit };
+  window.clay.toastPersistent = jest.fn();
+  await openSheet();
+
+  setValue("description", "A new description");
+  buttonOf("apply").click();
+  await settle();
+
+  expect(commit).toHaveBeenCalledTimes(1);
+  expect(commit.mock.calls[0][0]).toBe("SEO settings");
+  expect(document.querySelector('meta[name="description"]').getAttribute("content")).toBe("A new description");
+  expect(document.querySelector("[data-clay-toast]")).toBeNull();
+  expect(window.clay.toastPersistent).not.toHaveBeenCalled();
+});

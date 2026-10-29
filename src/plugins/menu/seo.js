@@ -7,10 +7,12 @@ import { hostMeta } from "../../core/host-meta.js";
 import { documentTitle } from "../../page/document-title.js";
 import { registerUnsavedState } from "../../lib/unsaved-state.js";
 import { modeRefusalText } from "../../core/mode-refusal.js";
+import { dismissPersistent, toastPersistent } from "../../ui/toast-lazy.js";
 
 const STYLE_ID = "clay-seo-style";
 const REOPEN_KEY = "reopen-seo";
 const LABEL = "SEO settings";
+const APPLIED_TEXT = "SEO settings applied";
 const SCHEME = /^[a-z][a-z0-9+.-]*:/i;
 const ROBOTS_NOTE =
   "This site is hidden from search engines in your account settings, so this page stays hidden whatever you choose here.";
@@ -416,10 +418,28 @@ function showValue(key, value) {
   return raw || "(empty)";
 }
 
-function run(label, fn) {
-  const undo = window.clay && window.clay.undo;
-  if (undo && typeof undo.commit === "function") return undo.commit(label, fn);
-  return fn();
+function save() {
+  if (!document.documentElement.hasAttribute("autosave") && typeof window.clay?.save === "function") window.clay.save();
+}
+
+// `readHead` hands back what `applyHead` takes: a field's read and its write speak the
+// same shape, booleans for index and follow and "custom"/"derived" for the title mode.
+const restoreOf = (before) => ({ ...before });
+
+function offerUndo(before) {
+  if (typeof window.clay?.toastPersistent !== "function") return;
+  toastPersistent(APPLIED_TEXT, "success", {
+    actions: [
+      {
+        label: "Undo",
+        onClick: () => {
+          dismissPersistent(APPLIED_TEXT);
+          applyHead(document, restoreOf(before));
+          save();
+        },
+      },
+    ],
+  });
 }
 
 export function open() {
@@ -683,11 +703,19 @@ export function open() {
       showConflicts(found);
       return;
     }
-    run(LABEL, () => applyHead(document, marker ? { ...wanted, titleMode: marker } : wanted));
+    const next = marker ? { ...wanted, titleMode: marker } : wanted;
+    const undo = window.clay && window.clay.undo;
+    if (undo && typeof undo.commit === "function") {
+      undo.commit(LABEL, () => applyHead(document, next));
+    } else {
+      const before = readHead(document).values;
+      applyHead(document, next);
+      offerUndo(before);
+    }
     close();
     // Apply is an explicit save of these settings: a page that does not autosave its markup
     // (the page editor saves only its own stores) would otherwise keep them until edit ends.
-    if (!document.documentElement.hasAttribute("autosave") && typeof window.clay?.save === "function") window.clay.save();
+    save();
   }
 
   function applyUploadVisibility() {
