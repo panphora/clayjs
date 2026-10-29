@@ -162,3 +162,35 @@ test("runFormatCommand on a disposed editor applies nothing", async () => {
   expect(applied).toEqual(["before"]);
   expect(disposed).toBe(true);
 });
+
+test("an activation skipped behind a save already on the wire waits for it and asks again", async () => {
+  const answers = [
+    { ok: false, msg: "Save already in progress", msgType: "skipped", code: null, etag: null },
+    { ok: true, etag: "e2" },
+  ];
+  const sent = [];
+  let waited = 0;
+  const host = hostOf.createFormatHost({
+    save: async (options) => { sent.push(options); return answers.shift(); },
+    settles: async () => { waited += 1; },
+    supported: async () => true,
+  });
+  const answer = await host.activate({ floor: 1 });
+  expect(answer).toEqual({ accepted: true, revision: null, receipt: "e2" });
+  expect(sent).toEqual([{ pageFormatFloor: 1 }, { pageFormatFloor: 1 }]);
+  expect(waited).toBe(1);
+});
+
+test("an activation still skipped after its retries is a retryable failure", async () => {
+  const skipped = { ok: false, msg: "Save already in progress", msgType: "skipped", code: null, etag: null };
+  let sends = 0;
+  const host = hostOf.createFormatHost({
+    save: async () => { sends += 1; return skipped; },
+    settles: async () => {},
+    supported: async () => true,
+  });
+  const answer = await host.activate({ floor: 1 });
+  expect(answer.accepted).toBe(false);
+  expect(answer.code).toBe("page-format-activation-failed");
+  expect(sends).toBe(4);
+});

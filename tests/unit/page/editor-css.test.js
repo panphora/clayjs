@@ -17,6 +17,15 @@ test.each(["--page-danger", "--page-block-selected"])("%s has a different value 
   expect(forced).toBe(dark);
 });
 
+test("the checklist tags are always visible at the design's metrics", () => {
+  expect(PAGE_EDITOR_CSS).not.toContain('[data-empty="true"] { opacity: 0 }');
+  expect(PAGE_EDITOR_CSS).toContain("height: 23px; padding: 0 7px");
+  expect(PAGE_EDITOR_CSS).toContain("float: inline-end");
+  expect(PAGE_EDITOR_CSS).not.toMatch(/\.page-li\[data-kind="check"\] { display: flex/);
+  expect(PAGE_EDITOR_CSS).toContain('.page-check-chip[data-filled="true"]');
+  expect(PAGE_EDITOR_CSS).toContain('.page-check-chip[data-overdue="true"]');
+});
+
 test("a text-only document's editor styles the checklist owner picker", () => {
   const mount = document.body.appendChild(document.createElement("div"));
   const view = createPageEditor(mount, { blocks: { c1: { t: "list_item", pos: "V", c: "Task", kind: "check", owner: "Maya" } } });

@@ -5,6 +5,7 @@ const { Decoration, DecorationSet } = pmView;
 
 export const PLACEHOLDER_TEXT = "Type / for blocks";
 export const TITLE_PLACEHOLDER = "Untitled";
+export const CHECK_PLACEHOLDER = "To do";
 
 function titlePlaceholder(doc) {
   let done = false;
@@ -18,11 +19,23 @@ function titlePlaceholder(doc) {
   return decoration;
 }
 
+// An empty check item keeps its tags, so the line it leaves is the whole click area;
+// the words say where to click.
+function checkPlaceholders(doc) {
+  const decorations = [];
+  doc.forEach((node, offset) => {
+    if (node.type !== schema.nodes.list_item || node.attrs.kind !== "check") return;
+    if (node.content.size || node.attrs.checked) return;
+    decorations.push(Decoration.node(offset, offset + node.nodeSize, { class: "page-check-placeholder", "data-placeholder": CHECK_PLACEHOLDER }));
+  });
+  return decorations;
+}
+
 export function placeholderPlugin(text = PLACEHOLDER_TEXT) {
   return new state.Plugin({
     props: {
       decorations(st) {
-        const decorations = [];
+        const decorations = checkPlaceholders(st.doc);
         const title = titlePlaceholder(st.doc);
         if (title) decorations.push(title);
         const { selection } = st;
