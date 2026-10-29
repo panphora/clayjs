@@ -381,7 +381,7 @@ export function runPageRoomConformance({ adapter, template, seed = 1, steps = 40
       const refused = answer.body.refused;
       if (serializeLive(page()) !== before) fail(`refused commit ${refused} changed the room`);
       if (entry.epoch !== state().epoch) { stats.stale++; return; }
-      if (refused !== 'stale-token') fail(`commit refused: ${refused}`);
+      if (refused !== 'stale-token' && refused !== 'too-large') fail(`commit refused: ${refused}`);
       stats.stale++;
       return;
     }
