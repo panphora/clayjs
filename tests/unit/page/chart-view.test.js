@@ -39,7 +39,7 @@ const flushChrome = () => {
   if (at >= 0) frames.splice(at, 1)[0]();
 };
 
-test("Chart this table inserts the default chart after the table and undoes once", async () => {
+test("Chart this table inserts the default chart after the table with its inspector open, and undoes once", async () => {
   const view = editor([], { blocks: { tbl: table } });
   view.dom.querySelector('th[data-col="c1"] button').click();
   menuButton(view, "Chart this table").click();
@@ -48,9 +48,64 @@ test("Chart this table inserts the default chart after the table and undoes once
   const attrs = view.state.doc.child(1).attrs;
   expect(attrs).toMatchObject({ source: "tbl", kind: "bar", x: "c1", series: ["c2"], title: "" });
   expect(attrs.id).toBeTruthy();
+  paint();
+  expect(view.dom.querySelector(".page-chart-panel")).not.toBeNull();
+  expect(view.dom.querySelector(".page-chart-edit").getAttribute("aria-expanded")).toBe("true");
   view.scrollToSelection = () => {};
   expect(history.undo(view.state, view.dispatch)).toBe(true);
   expect(view.state.doc.childCount).toBe(1);
+});
+
+const other = { t: "table", pos: "Z", cols: { d1: { pos: "1", name: "Region" }, d2: { pos: "2", name: "Tickets", kind: "number" }, d3: { pos: "3", name: "Resolved", kind: "number" } }, rows: { r1: { pos: "1", cells: { d1: "North", d2: "182", d3: "176" } } } };
+const withoutTable = (view) => { view.dispatch(view.state.tr.delete(0, view.state.doc.child(0).nodeSize)); flushChrome(); paint(); };
+const brokenCard = (view) => view.dom.querySelector(".page-chart-broken");
+
+test("deleting the chart\'s table shows the card, and Use this table reconnects it in one transaction", () => {
+  const view = editor([], { blocks: { tbl: table, ch: chart, heading: { t: "heading", pos: "Y", level: 2, c: "Support" }, other } });
+  paint();
+  withoutTable(view);
+  expect(brokenCard(view).hidden).toBe(false);
+  expect(brokenCard(view).querySelector(".page-chart-broken-head").textContent).toBe("This chart\'s table was deleted");
+  expect(brokenCard(view).querySelector(".page-chart-broken-text").textContent).toBe("Pick another table in this document, or delete the chart. Undo brings the table back.");
+  expect(view.dom.querySelector(".page-chart-source").textContent).toBe("No table");
+  expect(view.dom.querySelector(".page-chart-source").disabled).toBe(true);
+  expect(view.dom.querySelector(".page-chart-edit")).not.toBeNull();
+  expect(view.dom.querySelector(".page-chart-plot svg title").textContent).toBe("Chart source missing");
+  const sources = brokenCard(view).querySelector("select");
+  expect([...sources.options].map((entry) => entry.textContent)).toEqual(["Support (1 row)"]);
+  const dispatch = jest.spyOn(view, "dispatch");
+  sources.value = "other";
+  brokenCard(view).querySelector(".page-chart-use").click();
+  expect(dispatch).toHaveBeenCalledTimes(1);
+  expect(view.state.doc.child(0).attrs).toMatchObject({ source: "other", x: "d1", series: ["d2", "d3"], title: "Activation by week" });
+  dispatch.mockRestore();
+  paint();
+  expect(brokenCard(view).hidden).toBe(true);
+  expect(view.dom.querySelector(".page-chart-plot").hidden).toBe(false);
+  expect(view.dom.querySelector(".page-chart-source").textContent).toBe("Support");
+  expect(view.dom.querySelector(".page-chart-plot svg title").textContent).not.toBe("Chart source missing");
+});
+
+test("Delete chart on the card removes the block and one undo restores it", () => {
+  const view = editor([], { blocks: { tbl: table, ch: chart, other } });
+  paint();
+  const id = view.state.doc.child(1).attrs.id;
+  withoutTable(view);
+  brokenCard(view).querySelector(".page-chart-delete").click();
+  expect(view.state.doc.childCount).toBe(1);
+  view.scrollToSelection = () => {};
+  expect(history.undo(view.state, view.dispatch)).toBe(true);
+  expect(view.state.doc.childCount).toBe(2);
+  expect(view.state.doc.child(0).attrs.id).toBe(id);
+});
+
+test("with no other table the card offers only the line and Delete chart", () => {
+  const view = editor([], { blocks: { tbl: table, ch: chart } });
+  paint();
+  withoutTable(view);
+  expect(brokenCard(view).querySelector("select")).toBeNull();
+  expect(brokenCard(view).querySelector(".page-chart-use")).toBeNull();
+  expect(brokenCard(view).querySelector(".page-chart-delete").textContent).toBe("Delete chart");
 });
 
 test("the header shows the title, the source table's heading name, and Edit chart's state", () => {

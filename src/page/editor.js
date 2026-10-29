@@ -218,8 +218,19 @@ ${INDENTS.map((n) => `:where(article[data-page], .page-editor) .page-li[data-ind
 .page-chart-hint { color: var(--page-pop-muted); font-size: 11px; line-height: 1.4; }
 .page-chart-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--page-pop-line); }
 .page-chart-remove { color: var(--page-danger); }
+.page-chart-broken { box-sizing: border-box; padding: 16px; border: 1px solid var(--page-pop-line); border-radius: var(--page-chrome-radius); background: var(--page-pop-hover); font-family: var(--page-font); text-align: start; }
+.page-chart-broken[hidden] { display: none; }
+.page-chart-plot[hidden] { display: none; }
+.page-chart-broken-head { margin-bottom: 4px; font-size: 13.5px; font-weight: 600; line-height: 1.3; }
+.page-chart-broken-text { margin: 0 0 12px; color: var(--page-pop-muted); font-size: 12.5px; line-height: 1.45; }
+.page-chart-broken-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.page-chart-use, .page-chart-delete { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; height: 28px; padding: 0 10px; border: 1px solid var(--page-pop-line); border-radius: var(--page-chrome-radius); background: var(--page-pop-bg); color: var(--page-pop-ink); font: inherit; font-size: 12.5px; font-weight: 500; cursor: pointer; }
+.page-chart-use:hover, .page-chart-delete:hover { background: var(--page-pop-bg); border-color: var(--page-chrome-line-moved); }
+.page-chart-delete { color: var(--page-danger); }
+.page-chart-broken-actions .page-chart-select { width: auto; min-width: 0; flex: 1 1 140px; }
 @media (max-width: 560px) {
   .page-chart-panel { position: static; inset-inline-end: auto; width: auto; border: 0; border-top: 1px solid var(--page-pop-line); border-radius: 0; box-shadow: none; }
+  .page-chart-use, .page-chart-delete, .page-chart-broken-actions .page-chart-select { height: 44px; }
 }
 .page-table-scroll { max-width: 100%; overflow-x: auto; }
 .page-table table { border-collapse: collapse; min-width: max-content; width: 100%; table-layout: auto; }

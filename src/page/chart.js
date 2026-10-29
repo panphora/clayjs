@@ -8,12 +8,16 @@ import { columnKinds } from "./table-kinds.js";
 import { cellText } from "./rich/cell.js";
 import { registerUnsavedState } from "../lib/unsaved-state.js";
 import { tableName } from "./tool-data.js";
+import toast from "../ui/toast-lazy.js";
 import { asStep } from "./blocksel.js";
 import { state } from "../vendor/prosemirror.vendor.js";
 
 const { TextSelection } = state;
 
 const views = new WeakMap();
+// A chart inserted by the slash command or a table action opens its inspector as soon
+// as its node view exists; one that arrives any other way stays closed.
+const openOnMount = new Set();
 
 function sourceTable(doc, id) {
   let table = null;
@@ -52,6 +56,7 @@ export function insertChartAfterTable(view, tablePos) {
   const next = doc.maybeChild(doc.resolve(after).index(0));
   const attrs = chartAttrs(table, keyBetween(table.attrs.pos, next?.attrs.pos ?? null), table.attrs.parent);
   if (!attrs) return false;
+  openOnMount.add(attrs.id);
   view.dispatch(view.state.tr.insert(after, schema.nodes.chart.create(attrs)));
   return true;
 }
@@ -71,9 +76,14 @@ function placeChart(view, index, table, remove) {
   const next = tr.doc.maybeChild(index + 1);
   const pos = replace ? node.attrs.pos : keyBetween(node.attrs.pos, next?.attrs.pos ?? null);
   const attrs = chartAttrs(table, pos, node.attrs.parent ?? null);
-  if (!attrs) return false;
+  if (!attrs) {
+    if (remove) view.dispatch(view.state.tr.delete(remove.from, remove.to));
+    toast("This table has no number column to chart yet.");
+    return true;
+  }
   const chart = schema.nodes.chart.create(attrs);
   tr = replace ? tr.replaceWith(at, at + node.nodeSize, chart) : tr.insert(at + node.nodeSize, chart);
+  openOnMount.add(attrs.id);
   view.dispatch(tr.scrollIntoView());
   return true;
 }
@@ -82,12 +92,17 @@ export const tableLabel = (table) => orderedIds(table.attrs.cols).map((id) => ta
 
 export function chartFromSlash(view, index, remove = null) {
   const tables = chartTables(view.state.doc);
-  if (!tables.length) return false;
+  if (!tables.length) {
+    if (remove) view.dispatch(view.state.tr.delete(remove.from, remove.to));
+    toast("Add a table first: a chart plots the numbers in a table on this page.");
+    return true;
+  }
   if (tables.length === 1) return placeChart(view, index, tables[0], remove);
-  const anchor = view.nodeDOM(view.state.doc.resolve(view.state.selection.head).before(1)) ?? view.dom;
-  return openPageMenu(view, anchor, tables.map((table, i) => ({
-    label: `Table ${i + 1}`,
-    description: tableLabel(table),
+  const doc = view.state.doc;
+  const anchor = view.nodeDOM(doc.resolve(view.state.selection.head).before(1)) ?? view.dom;
+  return openPageMenu(view, anchor, tables.map((table) => ({
+    label: tableName(doc, table.attrs.id) ?? "",
+    description: `${table.childCount} ${table.childCount === 1 ? "row" : "rows"} · ${tableLabel(table)}`,
     icon: "▦",
     run: () => placeChart(view, index, table, remove),
   })));
@@ -148,6 +163,7 @@ export class ChartView {
     this.view = view;
     this.getPos = getPos;
     this.source = undefined;
+    this.tables = null;
     this.frame = null;
     this.unsaved = null;
     this.titleInput = null;
@@ -178,6 +194,12 @@ export class ChartView {
     this.edit.addEventListener("click", () => (this.panel.isConnected ? this.closePanel(true) : this.openPanel()));
     this.head.append(this.title, this.chip, this.edit);
     this.plot = element(doc, "div", "page-chart-plot");
+    this.broken = element(doc, "div", "page-chart-broken");
+    this.broken.hidden = true;
+    this.broken.contentEditable = "false";
+    this.brokenKey = null;
+    this.brokenSelect = null;
+    this.broken.addEventListener("click", (event) => this.brokenClick(event));
     this.panel = element(doc, "div", "page-chart-panel");
     this.panel.tabIndex = -1;
     this.panel.contentEditable = "false";
@@ -195,18 +217,22 @@ export class ChartView {
     };
     doc.addEventListener("mousedown", this.outside, true);
     doc.addEventListener("keydown", this.escape, true);
-    this.dom.append(this.head, this.plot);
+    this.dom.append(this.head, this.plot, this.broken);
     if (!views.has(view)) views.set(view, new Set());
     views.get(view).add(this);
     this.refresh();
+    if (openOnMount.delete(node.attrs.id)) this.openSoon();
   }
 
   refresh() {
     this.renderHead();
     if (this.panel.isConnected) this.renderPanel();
-    const source = sourceTable(this.view.state.doc, this.node.attrs.source);
-    if (source === this.source) return;
+    const doc = this.view.state.doc;
+    const source = sourceTable(doc, this.node.attrs.source);
+    const tables = documentTables(doc).map((table) => `${table.id}:${table.name}:${table.rows}`).join("|");
+    if (source === this.source && tables === this.tables) return;
     this.source = source;
+    this.tables = tables;
     this.schedule();
   }
 
@@ -221,13 +247,70 @@ export class ChartView {
     const attrs = this.node.attrs;
     const chart = chartModel({ id: attrs.id, type: attrs.kind, x: attrs.x, series: attrs.series, title: attrs.title, highlight: attrs.highlight }, tableData(this.source));
     this.plot.innerHTML = renderChartSvg(chart, { width: 640, height: 320, narrow: this.dom.getBoundingClientRect().width < 480 });
+    this.renderBroken(chart);
+  }
+
+  renderBroken(chart) {
+    const broken = chart.state === "missing" && chart.reason === "table";
+    this.plot.hidden = broken;
+    this.broken.hidden = !broken;
+    if (!broken) {
+      if (this.brokenKey !== null) {
+        this.broken.textContent = "";
+        this.brokenKey = null;
+        this.brokenSelect = null;
+      }
+      return;
+    }
+    const tables = documentTables(this.view.state.doc);
+    const key = tables.map((table) => `${table.id}:${table.name}:${table.rows}`).join("|");
+    if (this.brokenKey === key) return;
+    this.brokenKey = key;
+    this.brokenSelect = null;
+    const doc = this.doc;
+    this.broken.textContent = "";
+    this.broken.append(
+      element(doc, "div", "page-chart-broken-head", "This chart's table was deleted"),
+      element(doc, "p", "page-chart-broken-text", "Pick another table in this document, or delete the chart. Undo brings the table back."),
+    );
+    const actions = element(doc, "div", "page-chart-broken-actions");
+    if (tables.length) {
+      const sources = select(doc, "rescue", "Source table");
+      for (const table of tables) sources.append(option(doc, table.id, `${table.name} (${table.rows} ${table.rows === 1 ? "row" : "rows"})`));
+      this.brokenSelect = sources;
+      const use = element(doc, "button", "page-chart-use", "Use this table");
+      use.type = "button";
+      use.dataset.action = "use";
+      actions.append(sources, use);
+    }
+    const remove = element(doc, "button", "page-chart-delete", "Delete chart");
+    remove.type = "button";
+    remove.dataset.action = "delete";
+    actions.append(remove);
+    this.broken.append(actions);
+  }
+
+  brokenClick(event) {
+    const button = event.target.closest?.("button[data-action]");
+    if (!button) return;
+    if (button.dataset.action === "delete") this.removeChart();
+    else if (button.dataset.action === "use") this.switchSource(this.brokenSelect?.value ?? "");
+  }
+
+  openSoon() {
+    const win = this.dom.ownerDocument.defaultView;
+    const raf = win.requestAnimationFrame?.bind(win) ?? ((fn) => win.setTimeout(fn, 0));
+    raf(() => { if (!this.view.isDestroyed && this.dom.isConnected) this.openPanel(); });
   }
 
   renderHead() {
     const attrs = this.node.attrs;
+    const name = tableName(this.view.state.doc, attrs.source);
+    const broken = !sourceTable(this.view.state.doc, attrs.source);
     this.title.textContent = attrs.title || UNTITLED;
     this.title.classList.toggle("is-empty", !attrs.title);
-    this.chipName.textContent = tableName(this.view.state.doc, attrs.source) ?? "";
+    this.chipName.textContent = broken ? "No table" : name ?? "";
+    this.chip.disabled = broken;
   }
 
   setAttrs(changes) {
