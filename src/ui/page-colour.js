@@ -200,10 +200,14 @@ export const BEVEL_SURFACE = { light: [0xFF, 0xFC, 0xF6], dark: [0x11, 0x13, 0x1
  * The look for UI drawn over `rect`: { scheme, surface }. `scheme` is the detected
  * one, or pageScheme() when the colour is unknown. `surface` is Bevel's surface mixed
  * up to 35% toward a confidently detected colour, never so far that the muted ink
- * drops below 4.5:1, or null to keep Bevel's own fill.
+ * drops below 4.5:1, or null to keep Bevel's own fill. A page the detector cannot
+ * read is unknown, never a reason for the UI drawing over it to fail.
  */
 export function uiLook(rect, base = BEVEL_SURFACE) {
-  const found = pageColour(rect);
+  let found = null;
+  try {
+    found = pageColour(rect);
+  } catch {}
   if (!found || found.confidence < 0.5) return { scheme: pageScheme(), surface: null };
   const { scheme } = found;
   const own = base[scheme], muted = (scheme === 'dark' ? base.mutedDark : base.mutedLight).map((v) => v / 255);
@@ -259,8 +263,8 @@ export function followLook(root, target, base) {
     clearTimeout(timer);
     timer = setTimeout(refresh, 150);
   };
-  addEventListener('scroll', soon, { capture: true, passive: true });
-  addEventListener('resize', soon);
+  window.addEventListener('scroll', soon, { capture: true, passive: true });
+  window.addEventListener('resize', soon);
   document.addEventListener('visibilitychange', soon);
   window.matchMedia?.('(prefers-color-scheme: dark)').addEventListener?.('change', soon);
   const watch = new MutationObserver(soon);
