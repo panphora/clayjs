@@ -255,12 +255,16 @@ describe("added subtrees", () => {
     await enter();
     await addCard('<div id="own" clay="no-undo"><p>kept</p></div>');
 
+    const kept = new Promise((resolve) => document.addEventListener("clay:undo-kept", resolve, { once: true }));
     const receipt = undo.undo();
 
     expect(receipt).toMatchObject({ ok: false, code: "protected", direction: "undo" });
     expect(refusals).toEqual([receipt]);
     expect(document.getElementById("own").textContent).toBe("kept");
     expect(undo.history).toHaveLength(1);
+    // The recovery copy is made behind the receipt, so a case that ends on a refusal
+    // waits for the announcement or the page is gone while it is still in flight.
+    await kept;
   });
 
   test("editor chrome inside an added card is not protected", async () => {

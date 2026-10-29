@@ -231,6 +231,20 @@ test("the first ?src= for a slot is kept and never replaced", async () => {
   expect(localStorage.getItem(keyFor("ui-src-2"))).toBeNull();
 });
 
+test("a route after the document keeps the download on the document, not on a path with .html appended", async () => {
+  const forms = [
+    ["/journal/2026-05.html/entry/3", "/_/download/journal/2026-05.html?as=htmlclay"],
+    ["/notes.htmlclay/today", "/_/download/notes.htmlclay?as=htmlclay"],
+    ["/index.html/today", "/_/download?as=htmlclay"],
+    ["/their-site/notes.html/today", "/_/download/their-site/notes.html?as=htmlclay"],
+  ];
+  for (const [url, expected] of forms) {
+    const { clay } = await bootPage({ slot: "ui-route-" + url.replace(/\W/g, "-"), url });
+    expect(linkHref()).toBe(expected);
+    expect(clay.visitorDrafts.downloadUrl()).toBe(expected);
+  }
+});
+
 test("a page that is not in draft mode gets no prompt", async () => {
   await bootPage({ slot: "ui-off-1", owner: true, url: "/notes.html?editmode=true" });
   expect(prompt()).toBeNull();

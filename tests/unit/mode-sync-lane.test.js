@@ -262,6 +262,11 @@ test("a live lane started after a view boot activates an incoming document", asy
   sync.start("index.html", { lane: "live" });
   expect(sync.lane).toBe("live");
   expect(sync._diskBase).toContain("v1");
+  // The lane brings its edit chunk with it, before any frame: a view boot that starts
+  // the live lane has the save code an edit boot would, and its first frame is not
+  // what fetches it.
+  expect(await until(() => editChunkLoads === 1)).toBe(true);
+  expect(editChunkLoads).toBe(1);
 
   await sync._doApplyExternal(
     diskDoc(

@@ -165,6 +165,11 @@ test("a queued caller receives the queued write's failure", async () => {
 });
 
 test("a suspended autosave holds the soon timer until it resumes", async () => {
+  const requests = [];
+  global.fetch = jest.fn((url, options = {}) => new Promise((resolve) => {
+    requests.push({ body: String(options.body ?? ""), resolve });
+  }));
+
   edit("held-edit");
   const result = save.savePageSoon();
   save.suspendAutosave();
@@ -177,11 +182,29 @@ test("a suspended autosave holds the soon timer until it resumes", async () => {
   await flush();
   expect(global.fetch).not.toHaveBeenCalled();
 
+  // The held timer resumes onto a lane a save already holds: the caller rides that
+  // queue and hears the queued write's own answer, not the skip its own call got.
+  edit("first-edit");
+  const first = save.savePage();
+  await flush();
+  expect(global.fetch).toHaveBeenCalledTimes(1);
+
+  edit("second-edit");
   save.resumeAutosave();
   jest.advanceTimersByTime(0);
   await flush();
   expect(global.fetch).toHaveBeenCalledTimes(1);
-  await expect(result).resolves.toMatchObject({ ok: true, msg: "Saved" });
+
+  requests[0].resolve(okResponse());
+  await flush();
+  await expect(first).resolves.toMatchObject({ ok: true, msg: "Saved" });
+  await flush();
+  expect(global.fetch).toHaveBeenCalledTimes(2);
+  expect(requests[1].body).toContain("second-edit");
+
+  requests[1].resolve(okResponse({ msg: "Saved by the queued write" }));
+  await flush();
+  await expect(result).resolves.toMatchObject({ ok: true, msg: "Saved by the queued write" });
 });
 
 test("a failed save settles every waiter with the failure", async () => {

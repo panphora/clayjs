@@ -252,10 +252,20 @@ test("an answer that lands after an abort emits no done and changes nothing", as
   expect(res.code).toBe("aborted");
 
   // The response was already on its way when the person cancelled. It is stale, and
-  // a caller that hears "done" here would insert a URL nothing is waiting for.
+  // a caller that hears "done" here would insert a URL nothing is waiting for — so the
+  // load handler leaves it alone rather than reading and judging an answer that no
+  // longer belongs to anyone.
+  let staleAnswerRead = false;
+  let staleBody = "";
+  Object.defineProperty(req, "responseText", {
+    configurable: true,
+    get() { staleAnswerRead = true; return staleBody; },
+    set(value) { staleBody = value; },
+  });
   respond(req);
   for (let i = 0; i < 20; i++) await Promise.resolve();
   expect(events).toEqual([]);
+  expect(staleAnswerRead).toBe(false);
 });
 
 test("discovery, progress and done carry an additive task id and attempt", async () => {
