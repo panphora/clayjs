@@ -41,21 +41,24 @@ function walkFlow(pd, index) {
   const liveSources = new Set(liveBySource.keys());
   const movedSources = new Set();
   const retired = [];
+  const copyBoundary = (client, clock) => {
+    const sourceKey = `${client}.${clock}`;
+    const record = index.boundaryOf({ client, clock });
+    if (!record || record.kind !== "copy") return;
+    if (intents.copyActive.has(sourceKey)) { if (record.recoveryOf) movedSources.add(record.recoveryOf); }
+    else if (liveSources.has(sourceKey)) retired.push({ key: copyActiveKey(sourceKey), sourceKey, source: { client, clock }, operationId: null, blockId: record.blockId, end: null, sv: [], legacy: false, implicit: true });
+  };
+  const markers = index.markers?.() ?? null;
   const candidateSets = new Map();
-  for (const key of pd.origins.keys()) {
+  if (markers) {
+    for (const entry of markers.records) if (entry.live && entry.kind === "boundary") copyBoundary(entry.client, entry.clock);
+  } else for (const key of pd.origins.keys()) {
     let parts;
     try { parts = JSON.parse(key); } catch { continue; }
     if (!Array.isArray(parts) || parts.length !== 3 || (parts[0] !== "boundary" && parts[0] !== "alias")) continue;
     const [, client, clock] = parts;
     if (!Number.isSafeInteger(client) || client < 0 || !Number.isSafeInteger(clock) || clock < 0) continue;
-    if (parts[0] === "boundary") {
-      const sourceKey = `${client}.${clock}`;
-      const record = index.boundaryOf({ client, clock });
-      if (record && record.kind === "copy") {
-        if (intents.copyActive.has(sourceKey)) { if (record.recoveryOf) movedSources.add(record.recoveryOf); }
-        else if (liveSources.has(sourceKey)) retired.push({ key: copyActiveKey(sourceKey), sourceKey, source: { client, clock }, operationId: null, blockId: record.blockId, end: null, sv: [], legacy: false, implicit: true });
-      }
-    }
+    if (parts[0] === "boundary") copyBoundary(client, clock);
     const clocks = candidateSets.get(client) ?? candidateSets.set(client, new Set()).get(client);
     clocks.add(clock);
   }
@@ -191,7 +194,7 @@ function walkFlow(pd, index) {
       return resolved.client === end.client && resolved.clock === end.clock;
     });
   };
-  const markerClocks = new Map([...candidateSets].map(([client, clocks]) => [client, [...clocks].sort((a, b) => a - b)]));
+  const markerClocks = markers ? markers.clocks : new Map([...candidateSets].map(([client, clocks]) => [client, [...clocks].sort((a, b) => a - b)]));
   const markerIdsWithin = (it) => {
     const clocks = markerClocks.get(it.id.client) ?? [];
     let lo = 0, hi = clocks.length;

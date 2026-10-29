@@ -240,9 +240,20 @@ export function createBridge({ pd, onNotice = () => {}, ownedTokens = [], author
     throw new Error(`Incremental walk diverged from the full walk:\n${a}\n---\n${b}`);
   };
   // Every walk the bridge takes runs after Yjs has settled (onSettled), when the index's
-  // observer has seen every origin record; the proof walks again with a fresh index.
+  // observer has seen every origin record; the proof walks again with a fresh index that
+  // reads the boundary and alias keys from the map itself.
+  const intentsSignature = (intents) => JSON.stringify([intents.removals, intents.restores, intents.textDeletes, [...intents.copyActive], [...intents.attrs].map(([key, fields]) => [key, [...fields]])]);
+  const proveIntents = () => {
+    if (intentsSignature(parseGoneIntents(pd.gone)) === intentsSignature(parseGoneIntents(pd.gone, { kept: false }))) { stats.provedIntents = (stats.provedIntents ?? 0) + 1; return; }
+    stats.walkMismatch = (stats.walkMismatch ?? 0) + 1;
+    throw new Error("Removal records kept across writes diverged from a fresh parse of the gone map");
+  };
   const proveIndexWalk = (full) => {
-    const a = walkSignature(pd, full), b = walkSignature(pd, walk(pd));
+    proveIntents();
+    const fresh = createOriginIndex(pd.origins);
+    let b;
+    try { b = walkSignature(pd, walk(pd, { resolve: fresh.resolve, boundaryOf: fresh.boundaryOf })); } finally { fresh.dispose(); }
+    const a = walkSignature(pd, full);
     if (a === b) { stats.provedIndexWalks = (stats.provedIndexWalks ?? 0) + 1; return; }
     stats.walkMismatch = (stats.walkMismatch ?? 0) + 1;
     throw new Error(`A walk with the kept origin index diverged from one with a fresh index:\n${a}\n---\n${b}`);

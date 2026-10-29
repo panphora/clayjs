@@ -758,7 +758,7 @@ export async function runLongSession({ seed = LONG_DOCUMENT_SEED, operations = 2
       foldViolations: foldViolations.length, mismatches: mismatches.length,
       diagnostics: { a: tabA.binding.provider._diagnostics(), b: tabB.binding.provider._diagnostics() },
       msPerHundred,
-      proved: Object.fromEntries(["provedWalks", "provedIndexWalks", "provedRecoveries", "walkMismatch"].map((key) => [key, tabs().reduce((n, tab) => n + (tab.binding.stats[key] ?? 0), 0)])),
+      proved: Object.fromEntries(["provedWalks", "provedIndexWalks", "provedIntents", "provedRecoveries", "walkMismatch"].map((key) => [key, tabs().reduce((n, tab) => n + (tab.binding.stats[key] ?? 0), 0)])),
     };
   } finally {
     Date.now = realNow;

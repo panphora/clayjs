@@ -10,6 +10,33 @@ const SEED = {
 };
 const fields = (entries) => new Map(entries.map(([tuple, value]) => [JSON.stringify(tuple), value]));
 
+test("a document's table fields resolve by table to what a scan of every field gives, inside a transaction too", () => {
+  const pd = createPageDoc(new Y.Doc());
+  const plain = () => new Map([...pd.tableFields]);
+  const same = (id) => expect(resolveTableFields(pd.tableFields, id, clone(SEED))).toEqual(resolveTableFields(plain(), id, clone(SEED)));
+  pd.tableFields.set(tableKey("t", "cell", "r1", "c1"), "one");
+  pd.tableFields.set(tableKey("u", "cell", "r1", "c1"), "elsewhere");
+  same("t");
+  same("u");
+  same("none");
+  pd.ydoc.transact(() => {
+    pd.tableFields.set(tableKey("t", "row", "r3", "alive"), true);
+    pd.tableFields.set(tableKey("t", "cell", "r3", "c2"), "inside");
+    same("t");
+    pd.tableFields.delete(tableKey("t", "cell", "r1", "c1"));
+    same("t");
+  });
+  same("t");
+  pd.tableFields.set(tableKey("t", "cell", "r1", "c1"), "back");
+  same("t");
+  expect(Object.keys(resolveTableFields(pd.tableFields, "t", clone(SEED)).rows)).toEqual(Object.keys(resolveTableFields(plain(), "t", clone(SEED)).rows));
+  pd.tableFields.set(tableKey("u", "row", "r1", "pos"), 7);
+  expect(() => resolveTableFields(pd.tableFields, "t", clone(SEED))).toThrow(/Unsupported table field/);
+  pd.tableFields.delete(tableKey("u", "row", "r1", "pos"));
+  same("t");
+  pd.ydoc.destroy();
+});
+
 test("the page document has a tableFields root map", () => {
   const pd = createPageDoc(new Y.Doc());
   expect(pd.tableFields).toBeInstanceOf(Y.Map);

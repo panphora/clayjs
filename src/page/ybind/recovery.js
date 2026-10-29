@@ -164,10 +164,82 @@ const parsedRecord = (value, key) => {
 
 const parsedGone = new WeakMap();
 
-export function parseGoneIntents(gone, { strict = false } = {}) {
+const foldRecord = (out, record) => {
+  for (const removal of record.removals) out.removals.push(removal);
+  for (const restore of record.restores) out.restores.push(restore);
+  for (const textDelete of record.textDeletes) out.textDeletes.push(textDelete);
+  for (const sourceKey of record.copyActive) out.copyActive.add(sourceKey);
+  for (const [sourceKey, fields] of record.attrs) {
+    const into = out.attrs.get(sourceKey) ?? new Map();
+    for (const [field, fieldValue] of fields) into.set(field, fieldValue);
+    out.attrs.set(sourceKey, into);
+  }
+};
+
+// A document's gone map parsed once per write, in the map's own key order (Yjs keeps a key
+// where it was first written, through deletes and rewrites). The observer keeps it current
+// as transactions settle; keys a transaction that has not settled yet wrote are read again
+// from the map. A new key adds its record to the totals; any other change rebuilds them
+// from the records kept. Every call gets its own lists, as a fresh parse would.
+const goneIndexes = new WeakMap();
+const goneIndexOf = (gone) => {
+  const known = goneIndexes.get(gone);
+  if (known) return known;
+  const entries = new Map();
+  let totals = null;
+  let added = [];
+  const update = (key) => {
+    const live = gone.has(key);
+    const value = live ? gone.get(key) : undefined;
+    const entry = entries.get(key);
+    if (entry && entry.live === live && entry.value === value) return;
+    const record = live ? parsedRecord(value, key) : null;
+    if (!entry) {
+      const next = { live, value, record };
+      entries.set(key, next);
+      if (live && record && totals) added.push(record);
+      return;
+    }
+    entry.live = live;
+    entry.value = value;
+    entry.record = record;
+    totals = null;
+  };
+  for (const key of gone._map.keys()) update(key);
+  gone.observe((event) => { for (const key of event.keysChanged) update(key); });
+  const index = {
+    intents() {
+      for (const t of gone.doc._transactionCleanups) for (const key of t.changed.get(gone) ?? []) update(key);
+      if (!totals) {
+        totals = emptyIntents();
+        for (const entry of entries.values()) if (entry.record) foldRecord(totals, entry.record);
+        added = [];
+      } else if (added.length) {
+        for (const record of added) foldRecord(totals, record);
+        added = [];
+      }
+      return {
+        removals: totals.removals.slice(),
+        restores: totals.restores.slice(),
+        copyActive: new Set(totals.copyActive),
+        attrs: new Map([...totals.attrs].map(([sourceKey, fields]) => [sourceKey, new Map(fields)])),
+        textDeletes: totals.textDeletes.slice(),
+      };
+    },
+  };
+  goneIndexes.set(gone, index);
+  return index;
+};
+
+export function parseGoneIntents(gone, { strict = false, kept = true } = {}) {
   const out = emptyIntents();
   if (strict) {
     gone.forEach((value, key) => recordOf(value, key, out));
+    return out;
+  }
+  if (kept && gone instanceof Y.Map && gone.doc) return goneIndexOf(gone).intents();
+  if (!kept) {
+    gone.forEach((value, key) => { const record = parsedRecord(value, key); if (record) foldRecord(out, record); });
     return out;
   }
   const previous = parsedGone.get(gone) ?? new Map();
@@ -176,17 +248,7 @@ export function parseGoneIntents(gone, { strict = false } = {}) {
     const hit = previous.get(key);
     const entry = hit && hit.value === value ? hit : { value, record: parsedRecord(value, key) };
     parsed.set(key, entry);
-    const record = entry.record;
-    if (!record) return;
-    for (const removal of record.removals) out.removals.push(removal);
-    for (const restore of record.restores) out.restores.push(restore);
-    for (const textDelete of record.textDeletes) out.textDeletes.push(textDelete);
-    for (const sourceKey of record.copyActive) out.copyActive.add(sourceKey);
-    for (const [sourceKey, fields] of record.attrs) {
-      const into = out.attrs.get(sourceKey) ?? new Map();
-      for (const [field, fieldValue] of fields) into.set(field, fieldValue);
-      out.attrs.set(sourceKey, into);
-    }
+    if (entry.record) foldRecord(out, entry.record);
   });
   parsedGone.set(gone, parsed);
   return out;

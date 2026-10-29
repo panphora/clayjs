@@ -35,3 +35,27 @@ test("a rewritten, added or deleted entry is seen on the next call", () => {
   expect(parseGoneIntents(pd.gone).removals).toHaveLength(1);
   expect(() => parseGoneIntents(pd.gone, { strict: true })).toThrow();
 });
+
+test("the kept records equal a fresh parse after appends, rewrites, deletes and re-adds, inside a transaction too", () => {
+  const pd = page();
+  const signature = (intents) => JSON.stringify([intents.removals, intents.restores, intents.textDeletes, [...intents.copyActive], [...intents.attrs].map(([key, fields]) => [key, [...fields]])]);
+  const same = () => expect(signature(parseGoneIntents(pd.gone))).toBe(signature(parseGoneIntents(pd.gone, { kept: false })));
+  const a = removeKey("1.0", "op-1"), b = removeKey("1.5", "op-2");
+  pd.gone.set(a, { blockId: "q", end: null, sv: [[1, 4]] });
+  same();
+  pd.gone.set(attrKey("1.0", "level"), { nested: [1] });
+  pd.gone.set(b, { blockId: "r", end: null, sv: [] });
+  same();
+  pd.ydoc.transact(() => {
+    pd.gone.set(attrKey("1.0", "level"), { nested: [2] });
+    same();
+    pd.gone.delete(a);
+    same();
+    pd.gone.set(removeKey("1.7", "op-3"), { blockId: "s", end: null, sv: [] });
+    same();
+  });
+  same();
+  pd.gone.set(a, { blockId: "q", end: "1.9", sv: [[1, 4]] });
+  same();
+  expect(parseGoneIntents(pd.gone).removals.map((removal) => removal.key)).toEqual([a, b, removeKey("1.7", "op-3")]);
+});

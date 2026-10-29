@@ -34,6 +34,15 @@ const boundaryRecord = (value) => {
 
 const sameBoundary = (a, b) => a.blockId === b.blockId && a.kind === b.kind && a.recoveryOf === b.recoveryOf;
 
+// The keys walkFlow reads boundary and alias positions from: any key that parses to
+// ["boundary" | "alias", client, clock], whatever its value.
+const markerKey = (key) => {
+  let parts;
+  try { parts = JSON.parse(key); } catch { return null; }
+  if (!Array.isArray(parts) || parts.length !== 3 || (parts[0] !== "boundary" && parts[0] !== "alias")) return null;
+  return isClock(parts[1]) && isClock(parts[2]) ? parts : null;
+};
+
 const recordKey = (key) => {
   if (typeof key !== "string" || key.charCodeAt(0) !== 91) return null;
   let parts;
@@ -68,7 +77,34 @@ export function createOriginIndex(origins) {
     if (list.length) aliasClocks.set(client, list);
     else aliasClocks.delete(client);
   };
+  // Boundary and alias keys in the map's key order (Yjs keeps a key where it was first
+  // written), and each client's clocks that have one, sorted, for walkFlow.
+  const markerRecords = [];
+  const markerEntries = new Map();
+  const markerCounts = new Map();
+  const markerClocks = new Map();
+  const trackMarker = (key, live) => {
+    let entry = markerEntries.get(key);
+    if (entry === undefined) {
+      const parts = markerKey(key);
+      entry = parts ? { kind: parts[0], client: parts[1], clock: parts[2], live: false } : null;
+      markerEntries.set(key, entry);
+      if (entry) markerRecords.push(entry);
+    }
+    if (!entry || entry.live === live) return;
+    entry.live = live;
+    const counts = markerCounts.get(entry.client) ?? markerCounts.set(entry.client, new Map()).get(entry.client);
+    const list = markerClocks.get(entry.client) ?? markerClocks.set(entry.client, []).get(entry.client);
+    const n = (counts.get(entry.clock) ?? 0) + (live ? 1 : -1);
+    if (n) counts.set(entry.clock, n);
+    else counts.delete(entry.clock);
+    const at = lowerClock(list, entry.clock);
+    if (live && n === 1) list.splice(at, 0, entry.clock);
+    else if (!live && n === 0) list.splice(at, 1);
+    if (!list.length) { markerClocks.delete(entry.client); markerCounts.delete(entry.client); }
+  };
   const apply = (key, value) => {
+    trackMarker(key, value !== undefined);
     const parts = recordKey(key);
     if (!parts) return;
     const [kind, client, clock] = parts;
@@ -94,12 +130,17 @@ export function createOriginIndex(origins) {
     if (list.length) spans.set(client, list);
     else spans.delete(client);
   };
-  for (const [key, value] of origins) apply(key, value);
+  for (const key of origins._map.keys()) apply(key, origins.get(key));
   const observer = (event) => { for (const key of event.keysChanged) apply(key, origins.get(key)); };
   origins.observe(observer);
 
+  const hasAlias = (client, clock) => {
+    const list = aliasClocks.get(client);
+    return list !== undefined && list[lowerClock(list, clock)] === clock;
+  };
+
   const resolve = (id) => {
-    const alias = aliases.get(idKey(id.client, id.clock));
+    const alias = hasAlias(id.client, id.clock) ? aliases.get(idKey(id.client, id.clock)) : undefined;
     if (alias) return { client: alias.client, clock: alias.clock };
     const list = spans.get(id.client);
     if (!list) return { client: id.client, clock: id.clock };
@@ -147,6 +188,10 @@ export function createOriginIndex(origins) {
 
   const boundaryOf = (id) => {
     if (!id || !isClock(id.client) || !isClock(id.clock)) return null;
+    if (!hasAlias(id.client, id.clock)) {
+      const record = boundaries.get(idKey(id.client, id.clock));
+      return record ? { ...record } : null;
+    }
     let key = idKey(id.client, id.clock);
     const seen = new Set();
     while (!seen.has(key)) {
@@ -214,8 +259,15 @@ export function createOriginIndex(origins) {
     if (!previous || !sameBoundary(previous, record)) throw conflicting(key);
   };
 
+  // null while a transaction that wrote origin records has not settled: the observer has
+  // not seen those keys yet, and walkFlow then reads the map's keys itself.
+  const markers = () => {
+    for (const t of origins.doc?._transactionCleanups ?? []) if (t.changed.has(origins)) return null;
+    return { records: markerRecords, clocks: markerClocks };
+  };
+
   return {
-    origins, resolve, resolveRange, recordSpans, recordAlias, recordBoundary, boundaryOf,
+    origins, resolve, resolveRange, recordSpans, recordAlias, recordBoundary, boundaryOf, markers,
     get size() { return origins.size; },
     dispose() { origins.unobserve(observer); },
   };

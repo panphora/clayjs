@@ -1,3 +1,4 @@
+import * as Y from "../../vendor/yjs.vendor.js";
 import { schema } from "../schema.js";
 import { marksOf } from "../inline.js";
 import { ATOM, BREAK, canon, unitsOf } from "../projection.js";
@@ -56,9 +57,62 @@ export function tableFieldOwner(key, value) {
   return Object.hasOwn(TABLE_FIELDS, kind) && TABLE_FIELDS[kind].includes(field) && validValue(field, value) ? owner : null;
 }
 
+// Each table's own fields of a document's tableFields map, in the map's own key order
+// (Yjs keeps a key where it was first written, through deletes and rewrites), checked once
+// per write. The observer keeps it current as transactions settle; keys a transaction that
+// has not settled yet wrote are read again from the map.
+const fieldIndexes = new WeakMap();
+const fieldIndexOf = (fields) => {
+  const known = fieldIndexes.get(fields);
+  if (known) return known;
+  const entries = new Map(), byOwner = new Map(), invalid = new Set();
+  const apply = (key) => {
+    let entry = entries.get(key);
+    if (!entry) {
+      let tuple = null;
+      try { tuple = JSON.parse(key); } catch { tuple = null; }
+      const owner = Array.isArray(tuple) && tuple.length === 4 && validId(tuple[0]) ? tuple[0] : null;
+      entry = { key, tuple, live: false, value: undefined };
+      entries.set(key, entry);
+      if (owner !== null) (byOwner.get(owner) ?? byOwner.set(owner, []).get(owner)).push(entry);
+    }
+    entry.live = fields.has(key);
+    entry.value = entry.live ? fields.get(key) : undefined;
+    if (entry.live && tableFieldOwner(key, entry.value) === null) invalid.add(key);
+    else invalid.delete(key);
+  };
+  for (const key of fields._map.keys()) apply(key);
+  fields.observe((event) => { for (const key of event.keysChanged) apply(key); });
+  const index = {
+    owned(blockId) {
+      for (const t of fields.doc._transactionCleanups) for (const key of t.changed.get(fields) ?? []) apply(key);
+      return invalid.size ? null : byOwner.get(blockId) ?? [];
+    },
+  };
+  fieldIndexes.set(fields, index);
+  return index;
+};
+
+const ownedFields = (fields, blockId) => (blockId !== null && fields instanceof Y.Map && fields.doc ? fieldIndexOf(fields).owned(blockId) : null);
+
 export function resolveTableFields(fields, blockId = null, seed = null) {
   const rows = new Map(), cols = new Map(), cells = new Map();
-  for (const [key, value] of fields) {
+  const take = (kind, entityId, field, value) => {
+    if (kind === "cell") {
+      const row = cells.get(entityId) ?? new Map();
+      row.set(field, value);
+      cells.set(entityId, row);
+      return;
+    }
+    const bucket = kind === "row" ? rows : cols;
+    const entity = bucket.get(entityId) ?? {};
+    entity[field] = value;
+    bucket.set(entityId, entity);
+  };
+  const owned = ownedFields(fields, blockId);
+  if (owned) {
+    for (const entry of owned) if (entry.live) take(entry.tuple[1], entry.tuple[2], entry.tuple[3], entry.value);
+  } else for (const [key, value] of fields) {
     let tuple;
     try { tuple = JSON.parse(key); } catch { fail(key); }
     if (!Array.isArray(tuple) || tuple.length !== 4) fail(key);
@@ -68,16 +122,7 @@ export function resolveTableFields(fields, blockId = null, seed = null) {
       if (!validId(field) || !validCell(value)) fail(key);
     } else if (!Object.hasOwn(TABLE_FIELDS, kind) || !TABLE_FIELDS[kind].includes(field) || !validValue(field, value)) fail(key);
     if (owner !== blockId) continue;
-    if (kind === "cell") {
-      const row = cells.get(entityId) ?? new Map();
-      row.set(field, value);
-      cells.set(entityId, row);
-      continue;
-    }
-    const bucket = kind === "row" ? rows : cols;
-    const entity = bucket.get(entityId) ?? {};
-    entity[field] = value;
-    bucket.set(entityId, entity);
+    take(kind, entityId, field, value);
   }
   const outCols = { ...(record(seed?.cols) ? seed.cols : {}) };
   const outRows = { ...(record(seed?.rows) ? seed.rows : {}) };
