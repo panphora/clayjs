@@ -349,10 +349,11 @@ export function createSavedStream({ documentURL, servedEtag = null, represented 
 
   function acceptBody(html, reason, responseEtag) {
     // The served root attribute names the body; the response's own stamp only when the
-    // body carries none, since a server or proxy may add an HTTP ETag of its own. A
+    // body carries none, since a server or proxy may add an HTTP ETag of its own. A weak
+    // ETag is never a document stamp (spec §4): it is how Express names any response. A
     // discovery stamp is never attached, and identical bytes already named by a stamp
     // keep that name.
-    const bodyStamp = readBodyStamp(html) ?? stampOf(responseEtag);
+    const bodyStamp = readBodyStamp(html) ?? (/^W\//.test(responseEtag ?? '') ? null : stampOf(responseEtag));
     const etag = bodyStamp ?? (html === receipt.bytes ? receipt.etag : null);
     const seq = reason.kind === 'startup' ? receipt.seq : reason.seq ?? receipt.seq;
     if (!accept({ bytes: html, etag, seq })) return;

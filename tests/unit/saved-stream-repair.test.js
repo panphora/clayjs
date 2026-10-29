@@ -421,3 +421,17 @@ test("a document's own stamp names it even when the server adds an HTTP ETag of 
   expect(snapshots.at(-1).etag).toBe("disk-C");
   handle.stop();
 });
+
+test("a weak HTTP ETag never names a document that carries no stamp of its own", async () => {
+  docSequencer = () => Promise.resolve({
+    ...response(200, '<!doctype html><html><body><p id="v">C</p></body></html>'),
+    headers: { get: (name) => (name.toLowerCase() === "etag" ? 'W/"12b4e-express"' : null) },
+  });
+  const { handle, snapshots, source } = await startTransport();
+
+  source.dispatchEvent(cursorEvent({ seq: 7, resync: true }));
+  await settle();
+
+  expect(snapshots.map((s) => s.etag)).not.toContain('W/"12b4e-express"');
+  handle.stop();
+});
