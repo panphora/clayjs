@@ -152,16 +152,14 @@ test("Escape closes the assignee panel and returns focus to the tag", () => {
 test("date can be set and cleared, with one undo step per change", () => {
   const view = fresh();
   view.dom.querySelector('[data-check="date"]').click();
-  const input = view.dom.querySelector('input[type="date"]');
-  input.value = "2026-10-26";
-  input.dispatchEvent(new Event("change", { bubbles: true }));
-  expect(view.state.doc.child(0).attrs.due).toBe("2026-10-26");
-  expect(view.dom.querySelector('[data-check="date"]').getAttribute("aria-label")).toBe("Due date: Oct 26");
+  document.querySelector('.page-check-date [data-check="date-quick"]').click();
+  expect(view.state.doc.child(0).attrs.due).toBe(dayKey(0));
+  expect(view.dom.querySelector('[data-check="date"]').getAttribute("aria-label")).toBe("Due date: Today");
   let undone;
   history.undo(view.state, (tr) => { undone = view.state.apply(tr); });
   expect(undone.doc.child(0).attrs.due).toBeNull();
   view.dom.querySelector('[data-check="date"]').click();
-  view.dom.querySelector('[data-check="clear-date"]').click();
+  document.querySelector('.page-check-date [data-check="clear-date"]').click();
   expect(view.state.doc.child(0).attrs.due).toBeNull();
 });
 

@@ -33,16 +33,6 @@ function setItem(view, id, attr, value) {
   view.dispatch(asStep(view.state.tr.setNodeMarkup(found.pos, null, { ...found.node.attrs, [attr]: value || null })));
 }
 
-function chip(doc, label, aria, attr) {
-  const button = doc.createElement("button");
-  button.type = "button";
-  button.className = "page-check-chip";
-  button.dataset.check = attr;
-  button.textContent = label;
-  button.setAttribute("aria-label", aria);
-  return button;
-}
-
 // The design's three line icons, at the editor's 16px stroke-1.5 drawing.
 const ICONS = {
   person: '<circle cx="8" cy="5.4" r="2.3"/><path d="M3.6 13.2c.6-2.1 2.2-3.3 4.4-3.3s3.8 1.2 4.4 3.3"/>',
@@ -51,6 +41,8 @@ const ICONS = {
   tick: '<path d="M3.5 8.3l3 3 6-6.2"/>',
   plus: '<path d="M8 3.5v9M3.5 8h9"/>',
   clear: '<path d="M4.8 4.8l6.4 6.4M11.2 4.8l-6.4 6.4"/>',
+  "chevron-left": '<path d="M9.8 3.6L5.4 8l4.4 4.4"/>',
+  "chevron-right": '<path d="M6.2 3.6L10.6 8l-4.4 4.4"/>',
 };
 
 function icon(doc, paths) {
@@ -101,10 +93,61 @@ function tag(doc, { name, paths, label, aria, filled, overdue = false }) {
   return button;
 }
 
-// The floating assignee panel: the document's people with their check-item counts,
-// a name box for anyone new, and a row that clears the owner. One panel is open at a
-// time, and it hangs off the tag that opened it, right edges aligned.
-let openOwner = null;
+// The floating panels: one is open at a time, and it hangs off the tag that opened
+// it, right edges aligned, flipping above the tag when there is no room below. Escape
+// closes it and hands focus back to the tag; a resize or a scroll moves it with the
+// tag; a mousedown outside closes it.
+let openPopup = null;
+
+function popup(view, anchor, { className, label, check, onKey = null }) {
+  const doc = anchor.ownerDocument;
+  const win = doc.defaultView;
+  if (openPopup) openPopup.close();
+  for (const node of doc.querySelectorAll(".page-check-popup")) node.remove();
+  const parent = view.dom.parentNode;
+  const anchored = ["relative", "absolute", "fixed", "sticky"].includes(win?.getComputedStyle?.(parent)?.position ?? "");
+  const placement = parent && anchored ? parent : doc.body;
+  const panel = el(doc, "div", `page-check-popup ${className}`, { role: "dialog", "aria-label": label, "data-check": check });
+  let closed = false;
+  const place = () => {
+    const ring = anchor.getBoundingClientRect();
+    const base = placement === doc.body ? { top: -(win?.scrollY ?? 0), left: -(win?.scrollX ?? 0) } : placement.getBoundingClientRect();
+    const box = panel.getBoundingClientRect();
+    const width = box.width || Math.min(264, (win?.innerWidth || 292) - 28);
+    const room = (win?.innerHeight ?? 0) - ring.bottom - 2;
+    const flip = box.height > 0 && room < box.height;
+    panel.style.left = `${Math.round(ring.right - width - base.left)}px`;
+    panel.style.top = `${Math.round((flip ? ring.top - box.height - 2 : ring.bottom + 2) - base.top)}px`;
+  };
+  const outside = (event) => {
+    if (!panel.isConnected) return close();
+    if (panel.contains(event.target) || anchor.contains(event.target)) return;
+    close();
+  };
+  const close = ({ focusAnchor = false } = {}) => {
+    if (closed) return;
+    closed = true;
+    doc.removeEventListener("mousedown", outside, true);
+    win?.removeEventListener("resize", place);
+    win?.removeEventListener("scroll", place, true);
+    if (openPopup?.panel === panel) openPopup = null;
+    panel.remove();
+    anchor.setAttribute("aria-expanded", "false");
+    if (focusAnchor) anchor.focus();
+  };
+  panel.addEventListener("keydown", (event) => {
+    event.stopPropagation();
+    if (event.key === "Escape") { event.preventDefault(); close({ focusAnchor: true }); return; }
+    onKey?.(event, panel);
+  });
+  placement.append(panel);
+  anchor.setAttribute("aria-expanded", "true");
+  openPopup = { panel, close: () => close() };
+  doc.addEventListener("mousedown", outside, true);
+  win?.addEventListener("resize", place);
+  win?.addEventListener("scroll", place, true);
+  return { panel, close, place };
+}
 
 function peopleIn(view, extra) {
   const found = new Map();
@@ -124,16 +167,25 @@ function peopleIn(view, extra) {
   return [...found.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
+// The assignee panel: the document's people with their check-item counts, a name
+// box for anyone new, and a row that clears the owner.
 function ownerPicker(view, id, anchor) {
   const doc = anchor.ownerDocument;
-  const win = doc.defaultView;
-  if (openOwner) openOwner.close();
-  for (const node of doc.querySelectorAll(".page-check-popup")) node.remove();
   const current = itemAt(view, id)?.node.attrs.owner || "";
-  const parent = view.dom.parentNode;
-  const anchored = ["relative", "absolute", "fixed", "sticky"].includes(win?.getComputedStyle?.(parent)?.position ?? "");
-  const placement = parent && anchored ? parent : doc.body;
-  const panel = el(doc, "div", "page-check-popup page-check-owner", { role: "dialog", "aria-label": "Assignee", "data-check": "owner-panel" });
+  const { panel, close, place } = popup(view, anchor, {
+    className: "page-check-owner",
+    label: "Assignee",
+    check: "owner-panel",
+    onKey: (event, panel) => {
+      if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+      event.preventDefault();
+      const stops = [...panel.querySelectorAll("input, button:not([disabled])")];
+      const at = stops.indexOf(doc.activeElement);
+      const step = event.key === "ArrowDown" ? 1 : -1;
+      const next = at < 0 ? (step > 0 ? stops[0] : stops[stops.length - 1]) : stops[(at + step + stops.length) % stops.length];
+      next?.focus();
+    },
+  });
   const input = el(doc, "input", "page-check-search", { type: "text", placeholder: "Find or type a name", "aria-label": "Find or type a name" });
   const list = el(doc, "div", "page-check-people");
   const remove = el(doc, "button", "page-check-person page-check-danger", { type: "button", "data-check": "clear-owner" });
@@ -142,18 +194,6 @@ function ownerPicker(view, id, anchor) {
   remove.addEventListener("click", () => choose(null));
   panel.append(input, el(doc, "div", "page-check-subhead", {}, "People in this document"), list, el(doc, "div", "page-check-divider"), remove);
   let available = [];
-  let closed = false;
-  const close = ({ focusAnchor = false } = {}) => {
-    if (closed) return;
-    closed = true;
-    doc.removeEventListener("mousedown", outside, true);
-    win?.removeEventListener("resize", place);
-    win?.removeEventListener("scroll", place, true);
-    if (openOwner?.panel === panel) openOwner = null;
-    panel.remove();
-    anchor.setAttribute("aria-expanded", "false");
-    if (focusAnchor) anchor.focus();
-  };
   const choose = (name) => { close(); setItem(view, id, "owner", name); };
   const personRow = (name, count) => {
     const selected = name.toLowerCase() === String(current).toLowerCase();
@@ -183,21 +223,6 @@ function ownerPicker(view, id, anchor) {
     }
     list.replaceChildren(...rows);
   };
-  const place = () => {
-    const ring = anchor.getBoundingClientRect();
-    const base = placement === doc.body ? { top: -(win?.scrollY ?? 0), left: -(win?.scrollX ?? 0) } : placement.getBoundingClientRect();
-    const box = panel.getBoundingClientRect();
-    const width = box.width || Math.min(264, (win?.innerWidth || 292) - 28);
-    const room = (win?.innerHeight ?? 0) - ring.bottom - 2;
-    const flip = box.height > 0 && room < box.height;
-    panel.style.left = `${Math.round(ring.right - width - base.left)}px`;
-    panel.style.top = `${Math.round((flip ? ring.top - box.height - 2 : ring.bottom + 2) - base.top)}px`;
-  };
-  const outside = (event) => {
-    if (!panel.isConnected) return close();
-    if (panel.contains(event.target) || anchor.contains(event.target)) return;
-    close();
-  };
   input.addEventListener("keydown", (event) => {
     event.stopPropagation();
     if (event.key === "Escape") { event.preventDefault(); close({ focusAnchor: true }); return; }
@@ -205,47 +230,129 @@ function ownerPicker(view, id, anchor) {
     event.preventDefault();
     list.querySelector("button[data-check]")?.click();
   });
-  panel.addEventListener("keydown", (event) => {
-    event.stopPropagation();
-    if (event.key === "Escape") { event.preventDefault(); close({ focusAnchor: true }); return; }
-    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
-    event.preventDefault();
-    const stops = [...panel.querySelectorAll("input, button:not([disabled])")];
-    const at = stops.indexOf(doc.activeElement);
-    const step = event.key === "ArrowDown" ? 1 : -1;
-    const next = at < 0 ? (step > 0 ? stops[0] : stops[stops.length - 1]) : stops[(at + step + stops.length) % stops.length];
-    next?.focus();
-  });
   input.addEventListener("input", draw);
-  placement.append(panel);
-  anchor.setAttribute("aria-expanded", "true");
-  openOwner = { panel, close: () => close() };
   draw();
   place();
-  doc.addEventListener("mousedown", outside, true);
-  win?.addEventListener("resize", place);
-  win?.addEventListener("scroll", place, true);
   input.focus();
   const source = globalThis.clay?.people?.available;
-  if (source) Promise.resolve().then(() => source()).then((names) => { if (!closed) { available = Array.isArray(names) ? names : []; draw(); } }).catch(() => {});
+  if (source) Promise.resolve().then(() => source()).then((names) => { if (!openPopup || openPopup.panel !== panel) return; available = Array.isArray(names) ? names : []; draw(); }).catch(() => {});
 }
 
+// A day of the local calendar, its ISO key, and the words a quick row and a day
+// button read it in.
+const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+const dateOf = (year, month, day) => new Date(year, month, day);
+const shortDay = (day) => day.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+const longDay = (day) => day.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
+const dueDate = (key) => {
+  if (!key || !DUE.test(key)) return null;
+  const [year, month, day] = key.split("-").map(Number);
+  return dateOf(year, month - 1, day);
+};
+
+// The due date panel: three quick days, a compact month calendar, and a row that
+// clears the date. The calendar opens on the month of the item's own date, or on
+// this month when it has none.
 function datePicker(view, id, anchor) {
   const doc = anchor.ownerDocument;
-  const popup = doc.createElement("span");
-  popup.className = "page-check-popup";
-  popup.contentEditable = "false";
-  const input = doc.createElement("input");
-  input.type = "date";
-  input.setAttribute("aria-label", "Due date");
-  input.value = itemAt(view, id)?.node.attrs.due || "";
-  input.addEventListener("change", () => setItem(view, id, "due", input.value));
-  input.addEventListener("keydown", (event) => event.stopPropagation());
-  const clear = chip(doc, "Clear", "Clear due date", "clear-date");
-  clear.addEventListener("click", () => setItem(view, id, "due", null));
-  popup.append(input, clear);
-  anchor.after(popup);
-  input.focus();
+  const current = itemAt(view, id)?.node.attrs.due || null;
+  const today = todayKey();
+  const clock = new Date();
+  const now = dateOf(clock.getFullYear(), clock.getMonth(), clock.getDate());
+  const opened = dueDate(current) ?? now;
+  let year = opened.getFullYear();
+  let month = opened.getMonth();
+
+  const { panel, close, place } = popup(view, anchor, {
+    className: "page-check-date",
+    label: "Due date",
+    check: "date-panel",
+    onKey: (event, panel) => gridKey(event, panel),
+  });
+  const pick = (key) => { close(); setItem(view, id, "due", key); };
+
+  const quick = el(doc, "div", "page-check-quick");
+  const quickRow = (label, offset) => {
+    const day = dateOf(now.getFullYear(), now.getMonth(), now.getDate() + offset);
+    const row = el(doc, "button", "page-check-quick-row", { type: "button", "data-check": "date-quick", "data-date": todayKey(day) });
+    row.append(icon(doc, ICONS.calendar), el(doc, "span", "page-check-quick-label", {}, label), el(doc, "span", "page-check-quick-meta", {}, shortDay(day)));
+    row.addEventListener("click", () => pick(todayKey(day)));
+    return row;
+  };
+  quick.append(quickRow("Today", 0), quickRow("Tomorrow", 1), quickRow("Next week", 7));
+
+  const calendar = el(doc, "div", "page-check-cal");
+  const head = el(doc, "div", "page-check-cal-head");
+  const monthLabel = el(doc, "span", "page-check-cal-month");
+  const nav = el(doc, "span", "page-check-cal-nav");
+  const step = (by) => {
+    const moved = dateOf(year, month + by, 1);
+    year = moved.getFullYear();
+    month = moved.getMonth();
+    draw();
+  };
+  const previous = el(doc, "button", "page-check-cal-btn", { type: "button", "aria-label": "Previous month" });
+  const next = el(doc, "button", "page-check-cal-btn", { type: "button", "aria-label": "Next month" });
+  previous.append(icon(doc, ICONS["chevron-left"]));
+  next.append(icon(doc, ICONS["chevron-right"]));
+  previous.addEventListener("click", () => step(-1));
+  next.addEventListener("click", () => step(1));
+  nav.append(previous, next);
+  head.append(monthLabel, nav);
+  const grid = el(doc, "div", "page-check-cal-grid");
+  calendar.append(head, grid);
+
+  const draw = () => {
+    monthLabel.replaceChildren(el(doc, "span", null, {}, `${MONTHS[month]} `), el(doc, "span", "page-check-cal-year", {}, String(year)));
+    const first = dateOf(year, month, 1);
+    const days = dateOf(year, month + 1, 0).getDate();
+    const cells = Math.ceil((first.getDay() + days) / 7) * 7;
+    const heads = ["S", "M", "T", "W", "T", "F", "S"].map((letter) => el(doc, "span", "page-check-cal-dow", {}, letter));
+    const buttons = [];
+    for (let i = 0; i < cells; i += 1) {
+      const day = dateOf(year, month, 1 - first.getDay() + i);
+      const key = todayKey(day);
+      const button = el(doc, "button", "page-check-cal-day", {
+        type: "button",
+        "data-check": "date-day",
+        "data-date": key,
+        "data-outside": String(day.getMonth() !== month),
+        "data-today": String(key === today),
+        "aria-pressed": String(key === current),
+        "aria-label": longDay(day),
+      }, String(day.getDate()));
+      button.addEventListener("click", () => pick(key));
+      buttons.push(button);
+    }
+    grid.replaceChildren(...heads, ...buttons);
+  };
+
+  const gridKey = (event, panel) => {
+    const button = doc.activeElement?.closest?.('[data-check="date-day"]');
+    if (!button) return;
+    if (event.key === "Enter" || event.key === " ") { event.preventDefault(); button.click(); return; }
+    const move = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -7, ArrowDown: 7 }[event.key];
+    if (!move) return;
+    event.preventDefault();
+    const from = dueDate(button.dataset.date);
+    const day = dateOf(from.getFullYear(), from.getMonth(), from.getDate() + move);
+    if (day.getMonth() !== month || day.getFullYear() !== year) {
+      year = day.getFullYear();
+      month = day.getMonth();
+      draw();
+    }
+    panel.querySelector(`[data-check="date-day"][data-date="${todayKey(day)}"]`)?.focus();
+  };
+
+  const clear = el(doc, "button", "page-check-quick-row page-check-danger", { type: "button", "data-check": "clear-date" });
+  clear.append(icon(doc, ICONS.clear), el(doc, "span", "page-check-quick-label", {}, "Clear date"));
+  clear.disabled = !current;
+  clear.addEventListener("click", () => pick(null));
+
+  panel.append(quick, calendar, el(doc, "div", "page-check-divider"), clear);
+  draw();
+  place();
+  (grid.querySelector('[data-check="date-day"][aria-pressed="true"]') ?? grid.querySelector('[data-check="date-day"][data-today="true"]'))?.focus();
 }
 
 function controls(view, node) {
