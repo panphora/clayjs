@@ -352,6 +352,32 @@ test("compaction racing an append and a checkpoint retires only what it named", 
   tab.binding.dispose();
 });
 
+test("a save that retires the journal's batches does not send it compaction work", async () => {
+  const channel = fakeStore();
+  // This store is not taking compaction here: the batches are retired by an accepted
+  // save, which is the only thing that lowers the journal's own counters.
+  const compact = channel.compact;
+  channel.compact = undefined;
+  const tab = openTab({ channel });
+  await tab.ready();
+
+  for (let i = 0; i < COMPACT_BATCHES; i++) tab.binding.ydoc.getText("flow").insert(2 + i, "x");
+  await tab.settled();
+  expect(tab.binding.journal.records()).toHaveLength(COMPACT_BATCHES);
+
+  channel.compact = compact;
+  tab.binding.journal.retire(tab.binding.journal.names());
+  expect(tab.binding.journal.records()).toHaveLength(0);
+
+  // The journal counts what it holds, not what it has ever appended: one batch is not
+  // a compaction's worth of work.
+  tab.binding.ydoc.getText("flow").insert(2, "y");
+  await tab.settled();
+  expect(channel.compactions).toHaveLength(0);
+  expect(tab.binding.journal.records()).toHaveLength(1);
+  tab.binding.dispose();
+});
+
 test("a recovered page is offered to the room without new recovery records", async () => {
   const channel = fakeStore({ writer: "w-1" });
   const first = openTab({ channel, clientID: 5 });

@@ -123,6 +123,29 @@ test.each(["page-full", "compaction-failed"])("a %s refusal asks for one checkpo
   expect(textOf(h.ydoc)).toBe("ahello");
 });
 
+test("a full page checkpoints what the room admitted before it locks the page", async () => {
+  const order = [];
+  let settle;
+  const checkpoint = new Promise((resolve) => { settle = resolve; });
+  const h = open({
+    requestCheckpoint: () => { order.push("checkpoint"); return checkpoint; },
+    onStopped: (reason) => order.push(`stopped:${reason}`),
+  });
+  h.enter();
+  h.type("a");
+
+  h.store.deliver({ phase: "refused", code: "page-full" });
+  await after();
+  // The checkpoint of what the room did admit is on its way, and the page is not
+  // locked yet: a save it holds would otherwise cover nothing of this tab's work.
+  expect(order).toEqual(["checkpoint"]);
+
+  settle({ ok: true });
+  await after();
+  expect(order).toEqual(["checkpoint", "stopped:page-full"]);
+  expect(h.binding.provider.stopped).toBe("page-full");
+});
+
 test("a refusal that is not about capacity neither checkpoints nor stops the page", async () => {
   const checkpoints = [];
   const stopped = [];

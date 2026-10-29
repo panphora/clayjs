@@ -156,8 +156,9 @@ function room(value) {
   const store = createStore({ name: "page", value: JSON.parse(JSON.stringify(value)) });
   const seed = () => new Map([["page", { value: store.authoritative, ephemeral: false }]]);
   const transport = localTransport({ seed, key: KEY, rooms: true });
-  const stop = transport.start({ open() {}, close() {}, frame() {}, state() {}, writer() {} });
-  const t = { transport, store, stop };
+  const writers = [];
+  const stop = transport.start({ open() {}, close() {}, frame() {}, state() {}, writer: (event) => writers.push(event) });
+  const t = { transport, store, stop, writers };
   tabs.push(t);
   return t;
 }
@@ -258,6 +259,45 @@ test("a hand-off in the middle of typing keeps every admitted update", async () 
   const keys = await keysOf(next);
   expect(keys.filter((key) => /^c[0-9a-z]{8}-[0-9a-z]+$/.test(key))).toHaveLength(1);
   expect(keys.length).toBeLessThanOrEqual(33);
+});
+
+test("a whole-page fold that still does not fit refuses the next write as full", async () => {
+  // A page already past its active bytes, stored as one seed key the room folds under
+  // a name of its own: the fold is the whole page and still does not fit, so nothing
+  // is committed and the page is as small as it gets.
+  const value = { v: 1, g: 0, y: { seed: updateOf("x".repeat(3_000_000), 71) } };
+  const t = room(value);
+  await settle();
+  expect(t.transport.isSequencer).toBe(true);
+  const keysBefore = await keysOf(t);
+
+  const over = await t.transport.send("c1", { name: "page", n: 1, compaction: 1, ops: [setOp("u1aaaaaaa-b-c", updateOf("y".repeat(200_000), 72))] });
+  expect(over).toEqual({ status: 503, body: { code: "checkpoint-required" }, retryAfter: 0 });
+  await settle();
+  expect(await keysOf(t)).toEqual(keysBefore);
+  expect((await t.transport.fetchState("c1")).seq).toBe(0);
+
+  // Waiting for another fold would never help: the next growing write is refused as
+  // a full room refuses it.
+  const full = await t.transport.send("c1", { name: "page", n: 2, compaction: 1, ops: [setOp("u1aaaaaaa-b-d", updateOf("z".repeat(1_000), 73))] });
+  expect(full).toEqual({ status: 409, body: { code: "page-full" }, retryAfter: 0 });
+});
+
+test("a clean fold tells every tab it landed", async () => {
+  // A page of parts is never normal, so the first write asks for a fold; nothing has
+  // been edited since this tab last agreed with the file, so the fold is clean.
+  const t = room(splitSeed());
+  await settle();
+  expect(t.transport.isSequencer).toBe(true);
+
+  const first = await t.transport.send("c1", { name: "page", n: 1, compaction: 1, ops: [setOp("u1aaaaaaa-b-c", updateOf("typed", 61))] });
+  expect(first).toEqual({ status: 503, body: { code: "checkpoint-required" }, retryAfter: 0 });
+  await settle();
+
+  const state = await t.transport.fetchState(t.transport.clientId);
+  expect(state.seq).toBe(1);
+  expect(t.writers).toHaveLength(1);
+  expect(t.writers[0].landed.page).toBe(state.seq);
 });
 
 test("a save of the page merges as a union under names this room makes", async () => {

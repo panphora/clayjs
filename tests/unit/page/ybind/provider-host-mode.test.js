@@ -201,6 +201,74 @@ test("a pending op that is not the provider's own does not hold the outbox", () 
   expect(textOf(h.store.value)).toBe("!mine!");
 });
 
+test("a store that leaves the room sends the updates host mode was holding", () => {
+  const h = makeHost();
+  h.enter();
+  h.ydoc.getText("flow").insert(0, "a");
+  // The first write is in flight, so the second one waits in the outbox.
+  h.ydoc.getText("flow").insert(1, "b");
+  expect(keysUnder(h.store.value, "u")).toHaveLength(1);
+  expect(h.provider.pending).toBe(true);
+
+  // At save speed nothing confirms a write, so host order cannot hold one back.
+  h.store.setMode("file");
+  h.ydoc.getText("flow").insert(2, "c");
+
+  const keys = keysUnder(h.store.value, "u");
+  expect(keys).toHaveLength(2);
+  expect(h.provider.pending).toBe(false);
+  expect(textOf(h.store.value)).toBe("abc");
+});
+
+test("a room that stops compacting is sent what host mode was holding", () => {
+  const h = makeHost();
+  h.enter();
+  h.ydoc.getText("flow").insert(0, "a");
+  h.ydoc.getText("flow").insert(1, "b");
+  expect(h.provider.pending).toBe(true);
+  expect(keysUnder(h.store.value, "u")).toHaveLength(1);
+
+  // The room answers without a compaction descriptor: it confirms nothing in host
+  // order, so what was held behind the first write goes out as an ordinary update.
+  h.ack(null);
+  for (let i = 0; i < 3; i++) h.ack(null);
+  flush();
+
+  expect(h.provider.pending).toBe(false);
+  expect(h.store.pending).toHaveLength(0);
+  const room = docFromValue(h.room.value);
+  expect(room.getText("flow").toString()).toBe("ab");
+  room.destroy();
+});
+
+test("a refused write is reconciled before the newer ones go out", () => {
+  const h = makeHost();
+  h.enter();
+  h.ydoc.getText("flow").insert(0, "a");
+  expect(keysUnder(h.store.value, "u")).toHaveLength(1);
+
+  // The room refuses the write, and the lane drops the op it took, while a newer
+  // edit is already waiting behind it.
+  h.store.deliver({ phase: "refused", code: "page-immutable" });
+  flush();
+  h.ydoc.getText("flow").insert(1, "b");
+  const pending = h.store.pendingEntries();
+  h.store.rebase(h.store.authoritative, { source: "state", drop: [pending[0].id, pending.at(-1).id] });
+  flush();
+
+  // The next key written is the reconcile of everything this tab typed, not a
+  // newer update whose prerequisite the room no longer holds.
+  const written = Object.keys(h.store.value.y);
+  expect(written).toHaveLength(1);
+  expect(written[0][0]).toBe("r");
+  expect(h.provider.pending).toBe(false);
+  expect(h.provider.stopped).toBe(null);
+  let doc = null;
+  expect(() => { doc = docFromValue(h.store.value, { strict: true }); }).not.toThrow();
+  expect(doc.getText("flow").toString()).toBe("ab");
+  doc.destroy();
+});
+
 test("a store whose last rebase carried a room starts its provider in host mode", () => {
   const value = { v: 1, g: 0, y: {} };
   const store = createStore({ name: "page", value: clone(value) });

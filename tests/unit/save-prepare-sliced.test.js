@@ -632,3 +632,39 @@ test("a document format that rises mid-preparation re-prepares at the new floor"
   expect(lastPost()).toContain('<meta name="clay-page-format" content="1">');
   expect(lastPost()).toContain("floor-rise");
 });
+
+// An editor draws its content inside `clay="editor-ui"`, which no snapshot carries and
+// the dirty gate does not watch: its own snapshot hook is what projects the text into the
+// file. The person's save here is cancelled by a merge, and the retry is the only thing
+// that can see the edit at all. This one is asserted after the format-floor test for the
+// same reason that test is last: the hook it registers stays registered.
+test("a person's save cancelled by a merge captures again where the dirty gate cannot see", async () => {
+  const { onSnapshot } = await import("../../src/core/snapshot.js");
+  const { pageMaybeDirty } = await import("../../src/lib/dirty-gate.js");
+  document.body.innerHTML = `<article id="filler">${"z".repeat(BIG)}</article><article id="projected"></article><div clay="editor-ui" id="ed">typed here</div>`;
+  await sleep(0);
+  onSnapshot((clone) => {
+    const live = document.getElementById("ed");
+    const slot = clone.querySelector("#projected");
+    if (live && slot) slot.textContent = live.textContent;
+  });
+  await save.savePage();
+  expect(lastPost()).toContain("typed here");
+
+  // Nothing the gate watches changed: the editor's region is not in the dirty domain,
+  // and its projection is the only difference a capture would find.
+  document.getElementById("ed").textContent = "typed after the merge";
+  await sleep(0);
+  expect(pageMaybeDirty()).toBe(false);
+  const sentBefore = posts.length;
+  const capturesBefore = captures;
+
+  const saving = save.savePage();
+  document.dispatchEvent(new CustomEvent("clay:sync-applied", { detail: { source: "disk", seq: 31 } }));
+  const result = await saving;
+
+  expect(result.ok).toBe(true);
+  expect(captures).toBe(capturesBefore + 2);
+  expect(posts.length).toBe(sentBefore + 1);
+  expect(lastPost()).toContain("typed after the merge");
+});
