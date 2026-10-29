@@ -7,6 +7,11 @@ import { project } from "./projection.js";
 import { columnKinds } from "./table-kinds.js";
 import { cellText } from "./rich/cell.js";
 import { registerUnsavedState } from "../lib/unsaved-state.js";
+import { tableName } from "./tool-data.js";
+import { asStep } from "./blocksel.js";
+import { state } from "../vendor/prosemirror.vendor.js";
+
+const { TextSelection } = state;
 
 const views = new WeakMap();
 
@@ -88,6 +93,55 @@ export function chartFromSlash(view, index, remove = null) {
   })));
 }
 
+const ICON = (body) => `<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
+const TABLE_ICON = ICON('<rect x="2.5" y="3" width="11" height="10" rx="1.5"/><path d="M2.5 6.5h11M6 6.5V13"/>');
+const GEAR_ICON = ICON('<circle cx="8" cy="8" r="2"/><path d="M8 1.8v1.7M8 12.5v1.7M1.8 8h1.7M12.5 8h1.7M3.6 3.6l1.2 1.2M11.2 11.2l1.2 1.2M3.6 12.4l1.2-1.2M11.2 4.8l1.2-1.2"/>');
+const TRASH_ICON = ICON('<path d="M2.75 4.5h10.5M6.25 4.5V2.75h3.5V4.5M4.25 4.5l.6 8.75h6.3l.6-8.75"/>');
+const CHART_TYPES = [["bar", "Bar"], ["line", "Line"], ["pie", "Pie"]];
+const UNTITLED = "Untitled chart";
+
+function tableOffset(doc, id) {
+  let pos = null;
+  doc.forEach((node, offset) => { if (pos === null && node.type === schema.nodes.table && node.attrs.id === id) pos = offset; });
+  return pos;
+}
+
+function documentTables(doc) {
+  const tables = [];
+  doc.forEach((node) => { if (node.type === schema.nodes.table) tables.push(node); });
+  return tables.map((node) => ({ id: node.attrs.id, name: tableName(doc, node.attrs.id), rows: node.childCount }));
+}
+
+function defaultColumns(table) {
+  const colIds = orderedIds(table.attrs.cols);
+  if (!colIds.length) return null;
+  const kinds = columnKinds(table);
+  const x = colIds.find((id) => kinds[id] !== "number") ?? colIds[0];
+  const series = colIds.filter((id) => id !== x && kinds[id] === "number");
+  return { x, series: series.length ? series : colIds.filter((id) => id !== x).slice(0, 1) };
+}
+
+function element(doc, tag, className, text = null) {
+  const node = doc.createElement(tag);
+  if (className) node.className = className;
+  if (text !== null) node.textContent = text;
+  return node;
+}
+
+function option(doc, value, label, selected = false) {
+  const node = element(doc, "option", "", label);
+  node.value = value;
+  node.selected = selected;
+  return node;
+}
+
+function select(doc, field, label) {
+  const node = element(doc, "select", "page-chart-select");
+  node.dataset.field = field;
+  node.setAttribute("aria-label", label);
+  return node;
+}
+
 export class ChartView {
   constructor(node, view, getPos) {
     this.node = node;
@@ -95,29 +149,61 @@ export class ChartView {
     this.getPos = getPos;
     this.source = undefined;
     this.frame = null;
-    this.titleUnsaved = null;
+    this.unsaved = null;
+    this.titleInput = null;
     const doc = view.dom.ownerDocument;
+    this.doc = doc;
     this.dom = doc.createElement("figure");
     this.dom.className = "page-chart";
     this.dom.dataset.id = node.attrs.id ?? "";
     this.dom.dataset.type = "chart";
-    this.plot = doc.createElement("div");
-    this.plot.className = "page-chart-plot";
-    this.caption = doc.createElement("figcaption");
-    this.settings = doc.createElement("button");
-    this.settings.type = "button";
-    this.settings.className = "page-chart-settings";
-    this.settings.textContent = "Chart settings";
-    this.settings.setAttribute("aria-label", "Chart settings");
-    this.settings.contentEditable = "false";
-    this.settings.addEventListener("click", () => this.openSettings());
-    this.dom.append(this.plot, this.caption, this.settings);
+    this.head = element(doc, "div", "page-chart-head");
+    this.head.contentEditable = "false";
+    this.title = element(doc, "span", "page-chart-title");
+    this.chip = element(doc, "button", "page-chart-source");
+    this.chip.type = "button";
+    this.chip.contentEditable = "false";
+    this.chip.setAttribute("aria-label", "Go to source table");
+    this.chip.innerHTML = TABLE_ICON;
+    this.chipName = element(doc, "span", "page-chart-source-name");
+    this.chip.append(this.chipName);
+    this.chip.addEventListener("click", () => this.goToSource());
+    this.edit = element(doc, "button", "page-chart-edit");
+    this.edit.type = "button";
+    this.edit.contentEditable = "false";
+    this.edit.setAttribute("aria-haspopup", "dialog");
+    this.edit.setAttribute("aria-expanded", "false");
+    this.edit.innerHTML = GEAR_ICON;
+    this.edit.append("Edit chart");
+    this.edit.addEventListener("click", () => (this.panel.isConnected ? this.closePanel(true) : this.openPanel()));
+    this.head.append(this.title, this.chip, this.edit);
+    this.plot = element(doc, "div", "page-chart-plot");
+    this.panel = element(doc, "div", "page-chart-panel");
+    this.panel.tabIndex = -1;
+    this.panel.contentEditable = "false";
+    this.panel.setAttribute("role", "dialog");
+    this.panel.setAttribute("aria-label", "Chart settings");
+    this.panel.addEventListener("click", (event) => this.panelClick(event));
+    this.panel.addEventListener("change", (event) => this.panelChange(event));
+    this.panel.addEventListener("mousedown", (event) => { if (event.target.closest?.("button")) event.preventDefault(); });
+    this.outside = (event) => { if (this.panel.isConnected && !this.dom.contains(event.target)) this.closePanel(); };
+    this.escape = (event) => {
+      if (!this.panel.isConnected || event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      this.closePanel(true);
+    };
+    doc.addEventListener("mousedown", this.outside, true);
+    doc.addEventListener("keydown", this.escape, true);
+    this.dom.append(this.head, this.plot);
     if (!views.has(view)) views.set(view, new Set());
     views.get(view).add(this);
     this.refresh();
   }
 
   refresh() {
+    this.renderHead();
+    if (this.panel.isConnected) this.renderPanel();
     const source = sourceTable(this.view.state.doc, this.node.attrs.source);
     if (source === this.source) return;
     this.source = source;
@@ -135,7 +221,13 @@ export class ChartView {
     const attrs = this.node.attrs;
     const chart = chartModel({ id: attrs.id, type: attrs.kind, x: attrs.x, series: attrs.series, title: attrs.title, highlight: attrs.highlight }, tableData(this.source));
     this.plot.innerHTML = renderChartSvg(chart, { width: 640, height: 320, narrow: this.dom.getBoundingClientRect().width < 480 });
-    this.caption.textContent = attrs.title;
+  }
+
+  renderHead() {
+    const attrs = this.node.attrs;
+    this.title.textContent = attrs.title || UNTITLED;
+    this.title.classList.toggle("is-empty", !attrs.title);
+    this.chipName.textContent = tableName(this.view.state.doc, attrs.source) ?? "";
   }
 
   setAttrs(changes) {
@@ -146,62 +238,173 @@ export class ChartView {
     this.view.dispatch(this.view.state.tr.setNodeMarkup(pos, null, { ...node.attrs, ...changes }));
   }
 
-  submenu(items) {
-    openPageMenu(this.view, this.settings, items);
+  row(label, ...children) {
+    const row = element(this.doc, "div", "page-chart-row");
+    if (label) row.append(element(this.doc, "span", "page-chart-label", label));
+    row.append(...children);
+    return row;
   }
 
-  openSettings() {
+  renderPanel() {
+    const doc = this.doc;
     const attrs = this.node.attrs;
-    const table = tableData(sourceTable(this.view.state.doc, attrs.source));
-    const cols = table?.cols ?? [];
-    const rows = table?.rows ?? [];
-    this.submenu([
-      { label: "Line", icon: attrs.kind === "line" ? "✓" : "", run: () => this.setAttrs({ kind: "line" }) },
-      { label: "Bar", icon: attrs.kind === "bar" ? "✓" : "", run: () => this.setAttrs({ kind: "bar" }) },
-      { label: "X column ▸", focus: false, run: () => this.submenu(cols.map((col) => ({ label: col.name || col.id, icon: attrs.x === col.id ? "✓" : "", run: () => this.setAttrs({ x: col.id, series: attrs.series.filter((id) => id !== col.id) }) }))) },
-      { label: "Series ▸", focus: false, run: () => this.submenu(cols.filter((col) => col.id !== attrs.x).map((col) => ({ label: col.name || col.id, icon: attrs.series.includes(col.id) ? "✓" : "", checked: attrs.series.includes(col.id), run: () => this.setAttrs({ series: attrs.series.includes(col.id) ? attrs.series.filter((id) => id !== col.id) : [...attrs.series, col.id] }) }))) },
-      { label: "Highlight row ▸", focus: false, run: () => this.submenu([{ label: "None", icon: !attrs.highlight ? "✓" : "", run: () => this.setAttrs({ highlight: null }) }, ...rows.map((row) => ({ label: cellText(row.cells[attrs.x]) || row.id, icon: attrs.highlight === row.id ? "✓" : "", run: () => this.setAttrs({ highlight: row.id }) }))]) },
-      { label: "Edit title", focus: false, run: () => this.editTitle() },
-    ]);
+    const source = tableData(this.source);
+    const cols = source?.cols ?? [];
+    const rows = source?.rows ?? [];
+    const pie = attrs.kind === "pie";
+    this.unsaved?.dispose();
+    this.unsaved = null;
+    this.titleInput = null;
+    this.panel.textContent = "";
+
+    const types = element(doc, "div", "page-chart-types");
+    for (const [kind, label] of CHART_TYPES) {
+      const button = element(doc, "button", "page-chart-type", label);
+      button.type = "button";
+      button.dataset.kind = kind;
+      button.setAttribute("aria-pressed", String(attrs.kind === kind));
+      types.append(button);
+    }
+    this.panel.append(this.row("Chart type", types));
+
+    const sources = select(doc, "source", "Source table");
+    for (const table of documentTables(this.view.state.doc)) {
+      sources.append(option(doc, table.id, `${table.name} (${table.rows} ${table.rows === 1 ? "row" : "rows"})`, table.id === attrs.source));
+    }
+    this.panel.append(this.row("Source table", sources));
+
+    const labels = select(doc, "labels", "Labels column");
+    for (const col of cols) labels.append(option(doc, col.id, col.name || col.id, col.id === attrs.x));
+    this.panel.append(this.row("Labels column", labels));
+
+    const values = element(doc, "div", "page-chart-values");
+    cols.filter((col) => col.id !== attrs.x).forEach((col, index) => {
+      const line = element(doc, "label", "page-chart-value");
+      const check = element(doc, "input");
+      check.type = "checkbox";
+      check.dataset.field = "series";
+      check.dataset.col = col.id;
+      check.checked = attrs.series.includes(col.id);
+      const swatch = element(doc, "span", "page-chart-swatch");
+      swatch.style.background = `var(--chart-${index % 6 + 1})`;
+      swatch.setAttribute("aria-hidden", "true");
+      line.append(check, swatch, element(doc, "span", "page-chart-value-name", col.name || col.id));
+      values.append(line);
+    });
+    const valueRow = this.row(pie ? "Value column" : "Value columns", values);
+    if (pie) valueRow.append(element(doc, "span", "page-chart-hint", "Pie charts plot the first value column across rows."));
+    this.panel.append(valueRow);
+
+    const highlight = select(doc, "highlight", "Highlight row");
+    highlight.append(option(doc, "", "None", !attrs.highlight));
+    for (const row of rows) highlight.append(option(doc, row.id, cellText(row.cells?.[attrs.x]) || row.id, row.id === attrs.highlight));
+    this.panel.append(this.row("Highlight row", highlight));
+
+    const title = element(doc, "input", "page-chart-title-input");
+    title.type = "text";
+    title.dataset.field = "title";
+    title.setAttribute("aria-label", "Chart title");
+    title.value = attrs.title ?? "";
+    title.addEventListener("keydown", (event) => {
+      if (event.isComposing || event.keyCode === 229) return;
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+      event.stopPropagation();
+      this.commitTitle();
+    });
+    title.addEventListener("change", () => this.commitTitle());
+    title.addEventListener("blur", () => this.commitTitle());
+    this.titleInput = title;
+    this.panel.append(this.row("Chart title", title));
+
+    const foot = element(doc, "div", "page-chart-foot");
+    const remove = element(doc, "button", "page-chart-remove");
+    remove.type = "button";
+    remove.dataset.action = "remove";
+    remove.innerHTML = TRASH_ICON;
+    remove.append("Remove");
+    const done = element(doc, "button", "page-chart-done", "Done");
+    done.type = "button";
+    done.dataset.action = "done";
+    foot.append(remove, done);
+    this.panel.append(foot);
+
+    this.unsaved = registerUnsavedState({
+      id: "chart-title",
+      isPending: () => title.isConnected && title.value !== (this.node.attrs.title ?? ""),
+    });
   }
 
-  // A title typed here is unsaved work until Enter or a blur writes it, so the exit
-  // asks the registry by its name and refuses while the field holds a title the chart
-  // does not.
-  editTitle() {
-    const input = this.dom.ownerDocument.createElement("input");
-    input.type = "text";
-    input.className = "page-chart-title-input";
-    input.setAttribute("aria-label", "Chart title");
-    input.value = this.node.attrs.title ?? "";
-    const unsaved = registerUnsavedState({
-      id: "chart-title",
-      isPending: () => input.isConnected && input.value !== (this.node.attrs.title ?? ""),
-    });
-    this.titleUnsaved = unsaved;
-    let done = false;
-    const finish = (save) => {
-      if (done) return;
-      done = true;
-      this.titleUnsaved = null;
-      unsaved.dispose();
-      input.remove();
-      this.caption.hidden = false;
-      if (save) this.setAttrs({ title: input.value });
-      else this.settings.focus();
-    };
-    input.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" || event.key === "Escape") {
-        event.preventDefault();
-        event.stopPropagation();
-        finish(event.key === "Enter");
-      }
-    });
-    input.addEventListener("blur", () => finish(true));
-    this.caption.hidden = true;
-    this.caption.after(input);
-    input.focus();
-    input.select();
+  openPanel() {
+    if (this.panel.isConnected) return;
+    this.renderPanel();
+    this.dom.append(this.panel);
+    this.edit.setAttribute("aria-expanded", "true");
+    this.panel.focus();
+  }
+
+  closePanel(refocus = false) {
+    if (!this.panel.isConnected) return;
+    this.unsaved?.dispose();
+    this.unsaved = null;
+    this.titleInput = null;
+    this.panel.remove();
+    this.edit.setAttribute("aria-expanded", "false");
+    if (refocus) this.edit.focus();
+  }
+
+  panelClick(event) {
+    const button = event.target.closest?.("button");
+    if (!button) return;
+    if (button.dataset.action === "done") this.closePanel(true);
+    else if (button.dataset.action === "remove") this.removeChart();
+    else if (button.dataset.kind) this.setAttrs({ kind: button.dataset.kind });
+  }
+
+  panelChange(event) {
+    const control = event.target;
+    if (!control?.dataset) return;
+    if (control.dataset.field === "source") this.switchSource(control.value);
+    else if (control.dataset.field === "labels") this.setAttrs({ x: control.value, series: this.node.attrs.series.filter((id) => id !== control.value) });
+    else if (control.dataset.field === "highlight") this.setAttrs({ highlight: control.value || null });
+    else if (control.dataset.field === "series") {
+      const series = this.node.attrs.series.filter((id) => id !== control.dataset.col);
+      this.setAttrs({ series: control.checked ? [...series, control.dataset.col] : series });
+    }
+  }
+
+  switchSource(id) {
+    const table = sourceTable(this.view.state.doc, id);
+    const defaults = table ? defaultColumns(table) : null;
+    if (!defaults) return;
+    this.setAttrs({ source: id, x: defaults.x, series: defaults.series });
+  }
+
+  commitTitle() {
+    const input = this.titleInput;
+    if (!input || input.value === (this.node.attrs.title ?? "")) return;
+    this.setAttrs({ title: input.value });
+  }
+
+  goToSource() {
+    const doc = this.view.state.doc;
+    const pos = tableOffset(doc, this.node.attrs.source);
+    const table = pos === null ? null : doc.nodeAt(pos);
+    if (!table?.childCount || !table.child(0).childCount) return;
+    const at = pos + 3;
+    this.view.dispatch(this.view.state.tr.setSelection(TextSelection.create(doc, at)).scrollIntoView());
+    this.view.focus?.();
+  }
+
+  removeChart() {
+    const pos = this.getPos();
+    if (pos == null) return;
+    const node = this.view.state.doc.nodeAt(pos);
+    if (node?.type !== schema.nodes.chart) return;
+    this.closePanel();
+    const tr = this.view.state.tr.delete(pos, pos + node.nodeSize);
+    tr.setSelection(TextSelection.near(tr.doc.resolve(Math.min(pos, tr.doc.content.size)), -1));
+    this.view.dispatch(asStep(tr).scrollIntoView());
   }
 
   update(node) {
@@ -209,15 +412,21 @@ export class ChartView {
     const changed = !node.sameMarkup(this.node);
     this.node = node;
     this.dom.dataset.id = node.attrs.id ?? "";
-    if (changed) { this.source = sourceTable(this.view.state.doc, node.attrs.source); this.schedule(); }
+    if (changed) {
+      this.source = sourceTable(this.view.state.doc, node.attrs.source);
+      this.renderHead();
+      this.schedule();
+    }
     return true;
   }
 
-  stopEvent(event) { return !!event.target.closest?.(".page-chart-settings, .page-chart-title-input"); }
+  stopEvent(event) { return !!event.target.closest?.(".page-chart-head, .page-chart-panel"); }
 
   destroy() {
-    this.titleUnsaved?.dispose();
-    this.titleUnsaved = null;
+    this.unsaved?.dispose();
+    this.unsaved = null;
+    this.doc.removeEventListener("mousedown", this.outside, true);
+    this.doc.removeEventListener("keydown", this.escape, true);
     views.get(this.view)?.delete(this);
     if (this.frame !== null) {
       const win = this.dom.ownerDocument.defaultView;

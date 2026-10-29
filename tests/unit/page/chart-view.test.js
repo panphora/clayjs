@@ -10,8 +10,13 @@ import { runSaveBarrier } from "../../../src/core/mode-transition.js";
 const table = RECORD.blocks.tbl;
 const chart = RECORD.blocks.ch;
 const menuButton = (view, label) => [...view.dom.parentElement.querySelectorAll(".page-menu-item")].find((button) => button.textContent.includes(label));
-const openSettings = (view) => view.dom.querySelector(".page-chart-settings").click();
-const choose = (view, group, value) => { openSettings(view); menuButton(view, group).click(); menuButton(view, value).click(); };
+const openPanel = (view) => view.dom.querySelector(".page-chart-edit").click();
+const panel = (view) => view.dom.querySelector(".page-chart-panel");
+const typeButton = (view, label) => [...panel(view).querySelectorAll(".page-chart-type")].find((button) => button.textContent === label);
+const field = (view, name) => panel(view).querySelector(`[data-field="${name}"]`);
+const pick = (view, name, value) => { const control = field(view, name); control.value = value; control.dispatchEvent(new Event("change", { bubbles: true })); };
+const valueColumn = (view, col) => panel(view).querySelector(`[data-field="series"][data-col="${col}"]`);
+const toggleValue = (view, col) => { const box = valueColumn(view, col); box.checked = !box.checked; box.dispatchEvent(new Event("change", { bubbles: true })); };
 
 let frames;
 let originalRaf;
@@ -48,46 +53,94 @@ test("Chart this table inserts the default chart after the table and undoes once
   expect(view.state.doc.childCount).toBe(1);
 });
 
+test("the header shows the title, the source table's heading name, and Edit chart's state", () => {
+  const view = editor([["q", "heading", "Quarterly revenue", { level: 2 }], ["tbl", "table", "", { cols: table.cols, rows: table.rows }], ["ch", "chart", "", { source: "tbl", x: "c1", series: ["c2"] }]]);
+  paint();
+  expect(view.dom.querySelector(".page-chart-title").textContent).toBe("Untitled chart");
+  expect(view.dom.querySelector(".page-chart-title").classList.contains("is-empty")).toBe(true);
+  expect(view.dom.querySelector(".page-chart-source").textContent).toBe("Quarterly revenue");
+  expect(view.dom.querySelector(".page-chart-edit").getAttribute("aria-expanded")).toBe("false");
+  expect(view.state.doc.child(2).attrs.title).toBe("");
+
+  const alone = editor([["tbl", "table", "", { cols: table.cols, rows: table.rows }], ["ch", "chart", "", { source: "tbl", x: "c1", series: ["c2"] }]]);
+  paint();
+  expect(alone.dom.querySelector(".page-chart-source").textContent).toBe("Table 1");
+
+  const titled = editor([], { blocks: { tbl: table, ch: chart } });
+  paint();
+  expect(titled.dom.querySelector(".page-chart-title").textContent).toBe("Activation by week");
+  expect(titled.dom.querySelector(".page-chart-title").classList.contains("is-empty")).toBe(false);
+});
+
+test("opening the panel saves nothing for an empty title", () => {
+  const view = editor([], { blocks: { tbl: table, ch: chart } });
+  paint();
+  view.dispatch(view.state.tr.setNodeMarkup(posOf(view, "ch") - 1, null, { ...view.state.doc.child(1).attrs, title: "" }));
+  paint();
+  const dispatch = jest.spyOn(view, "dispatch");
+  openPanel(view);
+  expect(view.dom.querySelector(".page-chart-title").textContent).toBe("Untitled chart");
+  expect(dispatch).toHaveBeenCalledTimes(0);
+  expect(view.state.doc.child(1).attrs.title).toBe("");
+  dispatch.mockRestore();
+});
+
+test("the source chip puts the caret in the table's first cell", () => {
+  const view = editor([], { blocks: { tbl: table, ch: chart } });
+  paint();
+  view.dom.querySelector(".page-chart-source").click();
+  expect(view.state.selection.$head.parent.type.name).toBe("table_cell");
+  expect(view.state.selection.$head.parent.attrs.col).toBe("c1");
+});
+
 test("each chart setting makes one transaction", () => {
   const view = editor([], { blocks: { tbl: table, ch: chart } });
   paint();
   const dispatch = jest.spyOn(view, "dispatch");
-  openSettings(view);
-  menuButton(view, "Bar").click();
+  openPanel(view);
+  typeButton(view, "Bar").click();
   expect(dispatch).toHaveBeenCalledTimes(1);
   expect(view.state.doc.child(1).attrs.kind).toBe("bar");
   dispatch.mockClear();
-  choose(view, "Highlight row", "Sep 28");
+  pick(view, "highlight", "r2");
   expect(dispatch).toHaveBeenCalledTimes(1);
   expect(view.state.doc.child(1).attrs.highlight).toBe("r2");
   dispatch.mockClear();
-  choose(view, "X column", "Note");
+  pick(view, "labels", "c3");
   expect(dispatch).toHaveBeenCalledTimes(1);
   expect(view.state.doc.child(1).attrs.x).toBe("c3");
   dispatch.mockClear();
-  choose(view, "Series", "Week");
+  toggleValue(view, "c1");
   expect(dispatch).toHaveBeenCalledTimes(1);
   expect(view.state.doc.child(1).attrs.series).toContain("c1");
-  openSettings(view);
-  menuButton(view, "Series").click();
-  expect(menuButton(view, "Week").getAttribute("aria-checked")).toBe("true");
+  expect(valueColumn(view, "c1").checked).toBe(true);
   dispatch.mockClear();
-  openSettings(view);
-  menuButton(view, "Edit title").click();
-  const input = view.dom.querySelector('input[aria-label="Chart title"]');
-  input.value = "Edited chart";
-  input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+  const title = field(view, "title");
+  title.value = "Edited chart";
+  title.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
   expect(dispatch).toHaveBeenCalledTimes(1);
   expect(view.state.doc.child(1).attrs.title).toBe("Edited chart");
+  dispatch.mockRestore();
+});
+
+test("switching the source table resets the labels and value columns in one transaction", () => {
+  const second = { t: "table", pos: "Z", cols: { d1: { pos: "1", name: "Region" }, d2: { pos: "2", name: "Tickets", kind: "number" }, d3: { pos: "3", name: "Resolved", kind: "number" } }, rows: { r1: { pos: "1", cells: { d1: "North", d2: "182", d3: "176" } } } };
+  const view = editor([], { blocks: { tbl: table, ch: chart, other: second } });
+  paint();
+  openPanel(view);
+  const dispatch = jest.spyOn(view, "dispatch");
+  pick(view, "source", "other");
+  expect(dispatch).toHaveBeenCalledTimes(1);
+  expect(view.state.doc.child(1).attrs).toMatchObject({ source: "other", x: "d1", series: ["d2", "d3"] });
   dispatch.mockRestore();
 });
 
 test("a typed chart title refuses the exit by name, stays in the field, and a blur writes it", async () => {
   const view = editor([], { blocks: { tbl: table, ch: chart } });
   paint();
-  openSettings(view);
-  menuButton(view, "Edit title").click();
-  const input = view.dom.querySelector('input[aria-label="Chart title"]');
+  openPanel(view);
+  const input = field(view, "title");
+  input.focus();
   input.value = "Edited chart";
   expect(pendingIds()).toEqual(["chart-title"]);
 
@@ -102,18 +155,57 @@ test("a typed chart title refuses the exit by name, stays in the field, and a bl
   expect(pendingIds()).toEqual([]);
 });
 
+test("Remove deletes the chart block and one undo restores it", () => {
+  const view = editor([], { blocks: { tbl: table, ch: chart } });
+  paint();
+  const id = view.state.doc.child(1).attrs.id;
+  openPanel(view);
+  panel(view).querySelector(".page-chart-remove").click();
+  expect(view.state.doc.childCount).toBe(1);
+  expect(panel(view)).toBeNull();
+  view.scrollToSelection = () => {};
+  expect(history.undo(view.state, view.dispatch)).toBe(true);
+  expect(view.state.doc.childCount).toBe(2);
+  expect(view.state.doc.child(1).attrs.id).toBe(id);
+});
+
+test("Pie names one value column and keeps the other selected series in attrs", () => {
+  const view = editor([], { blocks: { tbl: table, ch: chart } });
+  paint();
+  openPanel(view);
+  const valueRow = () => [...panel(view).querySelectorAll(".page-chart-row")].find((row) => row.querySelector(".page-chart-values"));
+  expect(valueRow().querySelector(".page-chart-label").textContent).toBe("Value columns");
+  typeButton(view, "Pie").click();
+  expect(view.state.doc.child(1).attrs.kind).toBe("pie");
+  expect(view.state.doc.child(1).attrs.series).toEqual(["c2"]);
+  expect(valueRow().querySelector(".page-chart-label").textContent).toBe("Value column");
+  expect(valueRow().querySelector(".page-chart-hint").textContent).toBe("Pie charts plot the first value column across rows.");
+});
+
+test("Escape closes the panel and returns focus to Edit chart", () => {
+  const view = editor([], { blocks: { tbl: table, ch: chart } });
+  paint();
+  openPanel(view);
+  const edit = view.dom.querySelector(".page-chart-edit");
+  expect(edit.getAttribute("aria-expanded")).toBe("true");
+  edit.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+  expect(panel(view)).toBeNull();
+  expect(edit.getAttribute("aria-expanded")).toBe("false");
+  expect(document.activeElement).toBe(edit);
+});
+
 test("table changes paint once per frame and the editor SVG matches the saved projection", () => {
   const view = editor([], { blocks: { tbl: table, ch: chart } });
   paint();
   expect(frames).toHaveLength(0);
-  const before = view.dom.querySelector(".page-chart svg").outerHTML;
+  const before = view.dom.querySelector(".page-chart-plot svg").outerHTML;
   const at = posOf(view, "tbl") + 3;
   view.dispatch(view.state.tr.insertText("!", at));
   view.dispatch(view.state.tr.insertText("?", at));
   flushChrome();
   expect(frames).toHaveLength(1);
   expect(paint()).toBe(1);
-  const svg = view.dom.querySelector(".page-chart svg").outerHTML;
+  const svg = view.dom.querySelector(".page-chart-plot svg").outerHTML;
   expect(svg).not.toBe(before);
   const saved = new DOMParser().parseFromString(`<article>${renderBlocks(blockMap(view.state.doc)).html}</article>`, "text/html");
   expect(svg).toBe(saved.querySelector('figure[data-type="chart"] svg').outerHTML);
@@ -133,19 +225,19 @@ test("a narrow chart draws no more than three Y ticks", () => {
 test("sorting, column removal and table removal redraw or show the missing state", () => {
   const view = editor([], { blocks: { tbl: table, ch: chart } });
   paint();
-  const initial = view.dom.querySelector(".page-chart svg").outerHTML;
+  const initial = view.dom.querySelector(".page-chart-plot svg").outerHTML;
   view.dom.querySelector('th[data-col="c2"] button').click();
   menuButton(view, "Sort ascending").click();
   flushChrome();
   expect(paint()).toBe(1);
-  expect(view.dom.querySelector(".page-chart svg").outerHTML).not.toBe(initial);
+  expect(view.dom.querySelector(".page-chart-plot svg").outerHTML).not.toBe(initial);
   view.dom.querySelector('th[data-col="c2"] button').click();
   menuButton(view, "Delete column").click();
   flushChrome();
   expect(paint()).toBe(1);
-  expect(view.dom.querySelector(".page-chart svg title").textContent).toBe("Chart source missing");
+  expect(view.dom.querySelector(".page-chart-plot svg title").textContent).toBe("Chart source missing");
   view.dispatch(view.state.tr.delete(0, view.state.doc.child(0).nodeSize));
   flushChrome();
   expect(paint()).toBe(1);
-  expect(view.dom.querySelector(".page-chart svg title").textContent).toBe("Chart source missing");
+  expect(view.dom.querySelector(".page-chart-plot svg title").textContent).toBe("Chart source missing");
 });

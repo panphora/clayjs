@@ -82,15 +82,15 @@ test("a table without a chart asks for the table part only", async () => {
 
 test("a chart at boot draws once its part arrives and refreshes when its source table changes", async () => {
   const { view, calls } = open({ tbl: table, ch: chart });
-  expect(await waitFor(() => { paint(); return view.dom.querySelector(".page-chart svg") !== null; })).toBe(true);
+  expect(await waitFor(() => { paint(); return view.dom.querySelector(".page-chart-plot svg") !== null; })).toBe(true);
   expect(calls.sort()).toEqual(["chart", "table"]);
   paint();
-  const before = view.dom.querySelector(".page-chart svg").outerHTML;
+  const before = view.dom.querySelector(".page-chart-plot svg").outerHTML;
   view.dispatch(view.state.tr.insertText("!", 3));
   flushChrome();
   expect(frames).toHaveLength(1);
   expect(paint()).toBe(1);
-  expect(view.dom.querySelector(".page-chart svg").outerHTML).not.toBe(before);
+  expect(view.dom.querySelector(".page-chart-plot svg").outerHTML).not.toBe(before);
 });
 
 test("inserting a chart from the menu loads the part before the block draws", async () => {
