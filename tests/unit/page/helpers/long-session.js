@@ -9,18 +9,28 @@ import { createStore } from "../../../../src/live/store.js";
 import { createPageEditor } from "../../../../src/page/editor.js";
 import { createYPageBinding, docOf, walk, shapeOf } from "../../../../src/page/ybind/index.js";
 import { createPageDoc } from "../../../../src/page/ybind/layout.js";
-import { docFromValue } from "../../../../src/page/ybind/provider.js";
+import { docFromValue, entriesOf, dec } from "../../../../src/page/ybind/provider.js";
 import { blocksFromYValue } from "../../../../src/page/ybind/decode.js";
 import { renderFromTags } from "../../../../src/page/save-projection.js";
 import { canonicalPageBytes } from "../../../../src/page/ybind/recovery-proof.js";
 import { moveBlock } from "../../../../src/page/blocks.js";
 import { addRow, deleteRow, setCellText, selectTableCell } from "../../../../src/page/table.js";
 import { createPageJournal, pageJournalContext, replayJournals } from "../../../../src/page/ybind/recovery-replay.js";
+import { rangesOf, within, docRanges } from "../../../../src/page/ybind/containment.js";
+import { createRooms } from "../../../../src/server/rooms/live-data-rooms.js";
+import { buildCandidate, pageShape, COMPACTION } from "../../../../src/server/rooms/page-compaction.js";
+import * as Y from "../../../../src/vendor/yjs.vendor.js";
 import { buildLongDocument, LONG_DOCUMENT_SEED, rng } from "./long-document.js";
 
 const BATCH = 25;
 const AUTHORITY = { host: "https://example.test", documentId: "long-session", principalId: "acct-1" };
 const COVER_MAX = 256;
+// Host mode runs the same session against a real room that compacts on the
+// server. CLAY_COMPACT_ROOM sets the active-value bound, as the long checks do.
+const HOST = process.env.CLAY_HOST_COMPACTION === "1";
+const ROOM_LIMITS = Object.freeze({ ...COMPACTION, activeBytes: Number(process.env.CLAY_COMPACT_ROOM) || COMPACTION.activeBytes });
+const ROOM_INFO = { compaction: { v: 1 } };
+const BLOCK_CODE = HOST ? "page-full" : "too-large";
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -167,6 +177,132 @@ function createRoom(initial) {
   return room;
 }
 
+const pageHtml = (value) =>
+  `<!doctype html><html><body><script type="application/json" merge="page" clay="live">${JSON.stringify(value)}</script></body></html>`;
+
+// The room a host runs: the real registry in host mode, with the compactor run
+// inline where a worker runs it in production (begin, build, commit), and the
+// same one-frame-in-flight outbox per tab that the legacy room models. A tab is
+// switched to host mode by the first rebase that carries the room's capability.
+function createHostRoom(initial) {
+  const rooms = createRooms({ compaction: ROOM_LIMITS });
+  const opened = rooms.open("long-session", pageHtml(initial), { nodeId: "n1" });
+  const state = { admitted: [], violations: [], refusals: [], commits: 0 };
+  const page = () => opened.stores.get("page");
+  const value = () => page().value;
+
+  const contained = (updates) => {
+    if (!updates.length) return true;
+    const doc = new Y.Doc();
+    for (const [, text] of entriesOf(value().y)) Y.applyUpdateV2(doc, dec(text));
+    const index = docRanges(doc);
+    doc.destroy();
+    return updates.every((update) => within(index, rangesOf(update)));
+  };
+
+  const compactOnce = () => {
+    const job = rooms.beginCompaction(opened);
+    if (!job) return false;
+    const built = buildCandidate({ kind: job.kind, sources: job.sources });
+    if (built.failure) {
+      rooms.abandonCompaction(job.token, { failed: built.failure });
+      return false;
+    }
+    const answer = rooms.commitCompaction(job.token, built);
+    if (answer.refused) return false;
+    state.commits += 1;
+    if (contained(state.admitted)) state.admitted.length = 0;
+    else state.violations.push({ invariant: "a commit lost an admitted update", kind: answer.kind, seq: answer.seq });
+    return true;
+  };
+  const compact = () => { for (let i = 0; i < 64 && compactOnce(); i++); };
+  rooms.onCompactionDue(() => { compact(); });
+
+  let sessions = 0;
+  // A tab instance is its own session: a recreated tab reuses the room member's
+  // name and its client id, and the receipts would answer its frames as duplicates.
+  const clientOf = (tab) => tab.hostClient;
+  const admit = (tab, op) => {
+    for (let tries = 0; tries < 8; tries++) {
+      tab.sent = (tab.sent ?? 0) + 1;
+      const frame = {
+        name: "page", n: tab.sent, epoch: opened.epoch,
+        pageGeneration: opened.pageTransition?.id ?? null, compaction: 1, ops: [op],
+      };
+      const res = rooms.apply(opened, clientOf(tab), frame);
+      if (res.error === "checkpoint-required") { compact(); continue; }
+      if (res.error || res.busy) { state.refusals.push({ client: clientOf(tab), code: res.error ?? "busy" }); return false; }
+      if (res.stale) return false;
+      if (!res.duplicate) state.admitted.push(dec(op.value));
+      return true;
+    }
+    state.refusals.push({ client: clientOf(tab), code: "checkpoint-required" });
+    return false;
+  };
+
+  const rebaseTab = (tab, options = {}) =>
+    tab.store.rebase(clone(value()), { source: "remote", room: ROOM_INFO, ...options });
+
+  const room = {
+    members: new Map(),
+    queue: [],
+    paused: false,
+    deliveries: 0,
+    duplicates: 0,
+    reordered: 0,
+    state,
+    page,
+    compact,
+    contains: contained,
+  };
+  room.join = (tab) => {
+    room.members.set(tab.id, tab);
+    tab.hostClient = `c${tab.clientID}-${(sessions += 1)}`;
+    tab.unbind = tab.store.onLocal((ops) => {
+      const taken = [];
+      for (const op of ops) {
+        if (op.path.length !== 2 || op.path[0] !== "y" || op.op !== "set") continue;
+        if (admit(tab, op)) taken.push(op);
+      }
+      if (taken.length) room.queue.push({ from: tab.id, ops: taken });
+    });
+    // A tab joins with what it has, as it does against the legacy room: the
+    // capability rides on the rebase, not a copy of the room's content.
+    tab.store.rebase(clone(tab.store.value), { source: "state", room: ROOM_INFO });
+    tab.timers.flush();
+    return tab;
+  };
+  room.leave = (id) => { room.members.delete(id); };
+  room.deliver = ({ duplicate = false, reorder = false } = {}) => {
+    if (room.paused) return;
+    const queued = room.queue.splice(0);
+    const order = reorder && queued.length > 1 ? [queued[queued.length - 1], ...queued.slice(0, -1)] : queued;
+    if (reorder && queued.length > 1) room.reordered++;
+    for (const item of order) {
+      for (const [id, tab] of room.members) {
+        if (id === item.from) continue;
+        const frame = { ops: item.ops };
+        rebaseTab(tab, { frame });
+        tab.timers.flush();
+        room.deliveries++;
+        if (duplicate) {
+          rebaseTab(tab, { frame });
+          tab.timers.flush();
+          room.duplicates++;
+        }
+      }
+    }
+    // A host's broadcast carries the room's seq: every tab learns what it holds.
+    room.ackAll();
+  };
+  room.ack = (tab) => {
+    rebaseTab(tab, { confirmed: tab.store.pending.length });
+    tab.timers.flush();
+  };
+  room.ackAll = () => { for (const tab of room.members.values()) room.ack(tab); };
+  return room;
+}
+
 const TEXT_TYPES = new Set(["paragraph", "heading", "list_item", "callout", "quote", "toggle"]);
 const blocksOf = (tab) => {
   const out = [];
@@ -268,7 +404,7 @@ function strictShape(value) {
 export async function runLongSession({ seed = LONG_DOCUMENT_SEED, operations = 200, expect } = {}) {
   const fixture = buildLongDocument({ seed });
   const initial = clone(fixture.value);
-  const room = createRoom(initial);
+  const room = HOST ? createHostRoom(initial) : createRoom(initial);
   const records = new Map();
   const journalA = createPageJournal({
     channel: fakeChannel("w-a", records),
@@ -300,7 +436,7 @@ export async function runLongSession({ seed = LONG_DOCUMENT_SEED, operations = 2
   const reopen = { checkpointEqual: false, recoveredEqual: false };
 
   const watch = (tab) => tab.store.onRebase((ev) => {
-    if (tab.binding.provider.stopped) return;
+    if (HOST || tab.binding.provider.stopped) return;
     const prev = ev.prev?.y ?? {};
     const next = (ev.next?.y ?? {});
     const removed = Object.keys(prev).filter((key) => !(key in next));
@@ -319,6 +455,18 @@ export async function runLongSession({ seed = LONG_DOCUMENT_SEED, operations = 2
     for (const tab of tabs()) tab.timers.flush();
     await settleJs();
     for (const tab of tabs()) tab.timers.flush();
+    // A host's tabs send one frame at a time and only a room answer releases the
+    // next, so a quiet host takes a round trip per tab, not one delivery.
+    if (HOST) {
+      for (let round = 0; round < 8; round++) {
+        if (!room.queue.length && tabs().every((tab) => !tab.binding.provider.pending)) break;
+        room.deliver();
+        room.ackAll();
+        for (const tab of tabs()) tab.timers.flush();
+        await settleJs();
+        for (const tab of tabs()) tab.timers.flush();
+      }
+    }
   };
 
   const checkBatch = (batch) => {
@@ -337,6 +485,15 @@ export async function runLongSession({ seed = LONG_DOCUMENT_SEED, operations = 2
     const idsB = Object.keys(blocksFromYValue(tabB.store.value)).sort();
     if (idsA.length !== idsB.length || idsA.some((id, i) => id !== idsB[i])) {
       mismatches.push({ batch, ids: [idsA.length, idsB.length], missing: idsA.filter((id) => !idsB.includes(id)).slice(0, 5) });
+    }
+    if (HOST) {
+      const page = room.page();
+      const shape = pageShape(page.value.y, ROOM_LIMITS);
+      expect({ batch, normal: shape.normal }).toEqual({ batch, normal: true });
+      expect(page.bytes).toBeLessThanOrEqual(ROOM_LIMITS.activeBytes + COMPACTION.deleteReserve);
+      if (!room.contains(room.state.admitted.splice(0))) room.state.violations.push({ batch, invariant: "an admitted update left the room" });
+      expect(room.state.violations).toEqual([]);
+      expect(room.state.refusals).toEqual([]);
     }
     const here = mismatches.filter((entry) => entry.batch === batch);
     if (here.length) expect(here).toEqual([]);
@@ -361,8 +518,9 @@ export async function runLongSession({ seed = LONG_DOCUMENT_SEED, operations = 2
     const rendered = renderFromTags([JSON.stringify(saved)]);
     const foldsBefore = new Map(tabs().map((tab) => [tab.id, new Set(Object.keys(tab.store.authoritative.y).filter((key) => key[0] === "m").map((key) => key.split(".")[0]))]));
     for (let round = 0; round < 8; round++) {
+      if (HOST) room.compact();
       for (const tab of tabs()) {
-        tab.binding.provider.compact();
+        if (!HOST) tab.binding.provider.compact();
         tab.timers.flush();
       }
       room.deliver();
@@ -380,7 +538,7 @@ export async function runLongSession({ seed = LONG_DOCUMENT_SEED, operations = 2
     expect(typeof rendered.html).toBe("string");
     expect(rendered.rev).toBeTruthy();
     for (const tab of tabs()) tab.checkpointing = false;
-    for (const tab of tabs()) {
+    for (const tab of HOST ? [] : tabs()) {
       const keys = Object.keys(tab.store.authoritative.y);
       const foldGroups = new Set(keys.filter((key) => key[0] === "m").map((key) => key.split(".")[0]));
       const loose = keys.filter((key) => key[0] !== "m").length;
@@ -430,6 +588,16 @@ export async function runLongSession({ seed = LONG_DOCUMENT_SEED, operations = 2
     expect(outcome.replayed.length).toBeGreaterThan(0);
     tabA.binding.provider.settle();
     for (const tab of tabs()) tab.timers.flush();
+    // A host's tab sends one frame at a time: what it wrote at open and in the replay
+    // is answered by the room, and each answer releases the next frame.
+    if (HOST) {
+      for (let round = 0; round < 8; round++) {
+        room.deliver();
+        room.ackAll();
+        tabA.binding.provider.settle();
+        for (const tab of tabs()) tab.timers.flush();
+      }
+    }
     expect({ op, diff: diffShape(shapeOf(tabA.view.state.doc), expected) }).toEqual({ op, diff: null });
     expect({ op, ids: Object.keys(blocksFromYValue(tabA.store.value)) }).toEqual({ op, ids: expectedIds });
     recreations += 1;
@@ -521,8 +689,8 @@ export async function runLongSession({ seed = LONG_DOCUMENT_SEED, operations = 2
     // A blocked room keeps this tab's typing in its journal; a matching-generation
     // reopen recovers it.
     room.paused = true;
-    tabB.store.deliver({ phase: "refused", code: "too-large" });
-    expect(tabB.binding.provider.stopped).toBe("too-large");
+    tabB.store.deliver({ phase: "refused", code: BLOCK_CODE });
+    expect(tabB.binding.provider.stopped).toBe(BLOCK_CODE);
     await settleJs();
     await settleJs();
     const typed = "blocked-room-typing";
@@ -534,7 +702,7 @@ export async function runLongSession({ seed = LONG_DOCUMENT_SEED, operations = 2
     expect(blockedShape).toContain(typed);
     expect(tabB.binding.journal.failure).toBe(null);
     expect(tabB.binding.journal.pending()).toBe(0);
-    tabB.store.deliver({ phase: "refused", code: "too-large" });
+    tabB.store.deliver({ phase: "refused", code: BLOCK_CODE });
     room.paused = false;
     room.ackAll();
 
@@ -565,7 +733,8 @@ export async function runLongSession({ seed = LONG_DOCUMENT_SEED, operations = 2
     expect(tabA.binding.stats.mismatch).toBe(0);
     expect(tabB.binding.stats.mismatch).toBe(0);
     const final = checkpoint({ final: true });
-    expect(tabA.binding.provider.stats.compactions).toBeGreaterThan(0);
+    if (HOST) expect(room.state.commits).toBeGreaterThan(0);
+    else expect(tabA.binding.provider.stats.compactions).toBeGreaterThan(0);
     expect(room.deliveries).toBeGreaterThan(0);
     const compacted = JSON.stringify(final.saved);
     const times = samples.map((sample) => sample.ms).sort((a, b) => a - b);
