@@ -140,3 +140,19 @@ describe("Code toggles a code block back into text", () => {
     expect(view.state.doc.child(0).textContent).toBe("x = 1\ny = 2");
   });
 });
+
+test("the document settings gear is the dock control immediately before More", () => {
+  window.clay = { page: { settings: { read: () => ({ assignees: true, dates: true }), set: () => Promise.resolve() } } };
+  try {
+    const view = editor(DOC);
+    const toolbar = bar(view, ".page-dock");
+    const buttons = [...toolbar.querySelectorAll("button")];
+    const gear = toolbar.querySelector(".page-tool-settings");
+    expect(buttons.indexOf(gear)).toBe(buttons.length - 2);
+    expect(buttons[buttons.length - 1].classList.contains("page-tool-more")).toBe(true);
+    expect(gear.getAttribute("aria-haspopup")).toBe("dialog");
+    expect(gear.getAttribute("aria-label")).toBe("Document settings");
+  } finally {
+    delete window.clay;
+  }
+});

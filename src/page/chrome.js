@@ -115,6 +115,8 @@ const ICONS = {
   ordered: svg('<path d="M7 4.5h6.5M7 8h6.5M7 11.5h6.5M2.5 3.5l1-.5v3M2.5 9.3c.2-.5.6-.8 1.1-.8.6 0 1 .4 1 .9 0 .9-2.1 1.4-2.1 2.6h2.1"/>'),
   check: svg('<rect x="2.5" y="2.5" width="11" height="11" rx="2.5"/><path d="M5.5 8.2l1.8 1.8 3.4-4"/>'),
   more: svg('<path stroke-width="2.2" d="M3 8h.01M8 8h.01M13 8h.01"/>'),
+  gear: svg('<circle cx="8" cy="8" r="2"/><path d="M8 1.8v1.7M8 12.5v1.7M1.8 8h1.7M12.5 8h1.7M3.6 3.6l1.2 1.2M11.2 11.2l1.2 1.2M3.6 12.4l1.2-1.2M11.2 4.8l1.2-1.2"/>'),
+  close: svg('<path d="M4 4l8 8M12 4l-8 8"/>'),
   up: svg('<path d="M8 13V3.5M4 7.5 8 3.5l4 4"/>'),
   down: svg('<path d="M8 3v9.5M4 8.5l4 4 4-4"/>'),
   indent: svg('<path d="M2.5 3.5h11M7 8h6.5M2.5 12.5h11M2.5 6l2.5 2-2.5 2"/>'),
@@ -145,6 +147,7 @@ const PHONE_TOOLS = new Set(["strong", "em", "link"]);
 const MORE_ACTIONS = new Set(["up", "down", "indent", "outdent"]);
 const PHONE_BAR_WIDTH = 204, PHONE_BAR_HEIGHT = 52, PHONE_INSET = 8;
 const LIST_KINDS = new Set(["bullet", "ordered", "check"]);
+const SETTING_ROWS = [["assignees", "Checklist assignees"], ["dates", "Checklist due dates"]];
 const LINE_TYPES = new Set(["paragraph", "heading", "list_item"]);
 
 // The top-level blocks a toolbar command acts on. A nonempty selection's end is
@@ -341,7 +344,17 @@ class Chrome {
     this.turn = el("button", "page-tool page-tool-turn page-tool-desk", { type: "button", "aria-haspopup": "menu" });
     this.more = el("button", "page-tool page-tool-primary page-tool-more", { type: "button", "aria-label": "More", title: "More", "aria-haspopup": "menu" });
     this.more.innerHTML = ICONS.more;
+    this.settingsBtn = el("button", "page-tool page-tool-desk page-tool-settings", { type: "button", "aria-label": "Document settings", title: "Document settings", "aria-haspopup": "dialog", "aria-expanded": "false" });
+    this.settingsBtn.innerHTML = ICONS.gear;
+    this.settingsEl = null;
+    this.settingsOpen = false;
+    this.settingsAnchor = null;
+    this.settingSwitches = {};
     this.dock.append(this.turn, el("span", "page-tool-sep page-tool-desk"), ...TOOLS.map(([n, l]) => toolButton(n, l)), this.more);
+    // The loader publishes the page facade when its module arrives, which can be after
+    // this toolbar is built, so the gear asks for the settings each time it is drawn.
+    this.dock.insertBefore(this.settingsBtn, this.more);
+    this.settingsBtn.hidden = !this.settingsAPI;
     this.plus = el("button", "page-plus", { type: "button", "aria-label": "Add a block", title: "Add a block" });
     this.plus.innerHTML = ICONS.plus;
     this.grip = el("button", "page-grip", { type: "button", "aria-label": "Block actions", title: "Drag to move, click for actions", "aria-haspopup": "menu" });
@@ -367,6 +380,7 @@ class Chrome {
     }
     this.turn.addEventListener("click", () => this.toggleMenu("turn", this.turn));
     this.more.addEventListener("click", () => this.toggleMenu("more", this.more));
+    this.settingsBtn.addEventListener("click", () => this.toggleSettings());
     this.bubbleTurn.addEventListener("click", () => this.toggleMenu("turn", this.bubbleTurn));
     this.bubbleMore.addEventListener("click", () => this.toggleMenu("more", this.bubbleMore));
     this.dock.addEventListener("keydown", (e) => this.dockKey(e));
@@ -403,13 +417,21 @@ class Chrome {
       this.setHover(null);
     };
     this.onLeave = () => { this.pendingHover = null; this.setHover(null); };
-    this.onResize = () => this.scheduleLayout();
+    this.onResize = () => { this.scheduleLayout(); this.placeSettings(); };
     this.onDocDown = (e) => {
+      if (this.settingsOpen && ![this.settingsEl, this.settingsAnchor].some((part) => part?.contains(e.target))) this.closeSettings();
       if (!this.menu) return;
       if ([this.menuEl, this.plus, this.grip, this.turn, this.bubbleTurn, this.bubbleMore].some((part) => part.contains(e.target))) return;
       this.closeMenu();
     };
+    this.onSettingsKey = (e) => {
+      if (e.key !== "Escape" || !this.settingsOpen) return;
+      e.preventDefault();
+      e.stopPropagation();
+      this.closeSettings(true);
+    };
     document.addEventListener("mousedown", this.onDocDown, true);
+    document.addEventListener("keydown", this.onSettingsKey, true);
     this.shell.addEventListener("mousemove", this.onMove);
     this.shell.addEventListener("mouseleave", this.onLeave);
     this.shell.addEventListener("keydown", this.onKey);
@@ -569,12 +591,108 @@ class Chrome {
     this.openMenu("insert", this.plus, null, null, this.view.state.doc.child(i).attrs.id);
   }
 
+  // The gear's panel: built once, filled from the document's own settings, and
+  // placed under the control that opened it.
+  buildSettings() {
+    if (this.settingsEl) return this.settingsEl;
+    const panel = el("div", "page-settings", { role: "dialog", "aria-label": "Document settings", hidden: "" });
+    const head = el("div", "page-settings-head");
+    const title = el("span", "page-settings-title");
+    title.textContent = "Document settings";
+    const close = el("button", "page-settings-close", { type: "button", "aria-label": "Close settings" });
+    close.innerHTML = ICONS.close;
+    close.addEventListener("click", () => this.closeSettings(true));
+    head.append(title, close);
+    const rows = SETTING_ROWS.map(([key, label]) => {
+      const row = el("div", "page-settings-row");
+      const name = el("span", "page-settings-name", { id: `${this.menuId}-set-${key}` });
+      name.textContent = label;
+      const sw = el("button", "page-settings-switch", { type: "button", role: "switch", "aria-checked": "true", "aria-labelledby": name.id, "data-setting": key });
+      sw.append(el("span", "page-settings-knob"));
+      sw.addEventListener("click", () => this.flipSetting(key));
+      this.settingSwitches[key] = sw;
+      row.append(name, sw);
+      return row;
+    });
+    const note = el("div", "page-settings-note");
+    note.textContent = "Hidden values stay saved and come back when turned on.";
+    panel.append(head, ...rows, note);
+    this.settingsEl = panel;
+    this.shell.append(panel);
+    return panel;
+  }
+
+  flipSetting(key) {
+    const sw = this.settingSwitches[key];
+    const on = sw.getAttribute("aria-checked") !== "true";
+    sw.setAttribute("aria-checked", String(on));
+    Promise.resolve().then(() => this.settingsAPI.set(key, on)).catch(() => {
+      sw.setAttribute("aria-checked", String(!on));
+      toast("That setting could not be saved.", "error");
+    });
+  }
+
+  openSettings(anchor = this.settingsBtn) {
+    if (!this.settingsAPI) return;
+    if (this.menu) this.closeMenu();
+    const panel = this.buildSettings();
+    const now = this.settingsAPI.read();
+    for (const [key, sw] of Object.entries(this.settingSwitches)) sw.setAttribute("aria-checked", String(now[key] !== false));
+    this.settingsOpen = true;
+    this.settingsAnchor = anchor;
+    anchor.setAttribute("aria-expanded", "true");
+    panel.hidden = false;
+    this.placeSettings();
+    panel.querySelector(".page-settings-close")?.focus({ preventScroll: true });
+  }
+
+  closeSettings(restoreFocus = false) {
+    if (!this.settingsOpen) return;
+    const anchor = this.settingsAnchor;
+    this.settingsOpen = false;
+    this.settingsAnchor = null;
+    if (this.settingsEl) this.settingsEl.hidden = true;
+    anchor?.setAttribute("aria-expanded", "false");
+    if (restoreFocus && anchor?.isConnected) anchor.focus({ preventScroll: true });
+  }
+
+  toggleSettings() {
+    if (this.settingsOpen) this.closeSettings(true);
+    else this.openSettings(this.settingsBtn);
+  }
+
+  // The panel's right edge sits on its control's right edge, under it, and it
+  // flips above the control when there is no room below.
+  placeSettings() {
+    const panel = this.settingsEl;
+    if (!panel || panel.hidden || !this.settingsAnchor) return;
+    const r = this.settingsAnchor.getBoundingClientRect();
+    const width = panel.offsetWidth || 264;
+    const height = panel.offsetHeight || 0;
+    if (this.isPhone()) {
+      const v = phoneViewport(this.win);
+      const x = Math.max(v.left + PHONE_INSET, Math.min(r.right - width, v.left + v.width - PHONE_INSET - width));
+      let y = r.top - 6 - height;
+      if (y < v.top + PHONE_INSET) y = Math.min(r.bottom + 6, v.top + v.height - PHONE_INSET - height);
+      panel.style.setProperty("--page-pop-x", `${x}px`);
+      panel.style.setProperty("--page-pop-y", `${Math.max(v.top + PHONE_INSET, y)}px`);
+      return;
+    }
+    const shellBox = this.shell.getBoundingClientRect();
+    const x = Math.max(8, Math.min(r.right - shellBox.left - width, Math.max(8, shellBox.width - width - 8)));
+    let y = r.bottom - shellBox.top + 6;
+    if (y + height > this.win.innerHeight - 8 && r.top - shellBox.top - 6 - height >= 8) y = r.top - shellBox.top - 6 - height;
+    panel.style.setProperty("--page-pop-x", `${x}px`);
+    panel.style.setProperty("--page-pop-y", `${y}px`);
+  }
+
   toggleMenu(mode, anchor) {
     if (this.menu) this.closeMenu();
     else this.openMenu(mode, anchor);
   }
 
   openMenu(mode, anchor, slashAt = null, ids = null, anchorId = null) {
+    this.closeSettings();
     this.menu = { mode, anchor, slashAt, anchorId, ids: ids ?? (mode === "insert" ? [] : this.selectionIds()), query: "", active: 0, items: [], persist: false };
     anchor.setAttribute("aria-expanded", "true");
     if (slashAt !== null) {
@@ -614,6 +732,7 @@ class Chrome {
       ...(phone ? [{ key: "turn", label: "Turn into", icon: "turn", run: (view, chrome) => chrome.openMenu("turn", chrome.more) }] : []),
       { key: "insert", label: "Insert", icon: "+", run: (view, chrome) => chrome.openMenu("insert", chrome.more, null, null, view.state.doc.child(chrome.blockIndex()).attrs.id) },
       ...actions,
+      ...(phone && this.settingsAPI ? [{ key: "settings", label: "Document settings", icon: "gear", run: (view, chrome) => chrome.openSettings(chrome.more) }] : []),
       { key: "titleIcon", label: "Page icon", icon: "\u263A", run: (view) => runMenuCommand(view, "titleIcon") },
       { key: "titleCover", label: "Add cover", icon: "\u25A4", run: (view) => runMenuCommand(view, "titleCover") },
       { key: "exportHtml", label: "Export reading copy", icon: "\u21E9", run: (view) => runMenuCommand(view, "exportHtml") },
@@ -917,7 +1036,13 @@ class Chrome {
     }
   }
 
+  get settingsAPI() {
+    return globalThis.clay?.page?.settings ?? null;
+  }
+
   update(view, prev) {
+    const settingsHidden = !this.settingsAPI;
+    if (this.settingsBtn.hidden !== settingsHidden) this.settingsBtn.hidden = settingsHidden;
     this.view = view;
     if (this.menu && this.menu.slashAt === null && prev && prev.doc !== view.state.doc) {
       // A menu whose rows resolve their targets by id, from a control the page keeps,
@@ -968,7 +1093,8 @@ class Chrome {
     this.win.visualViewport?.removeEventListener("resize", this.onResize);
     this.win.visualViewport?.removeEventListener("scroll", this.onResize);
     document.removeEventListener("mousedown", this.onDocDown, true);
-    for (const part of [this.dock, this.plus, this.grip, this.bubble, this.scrim, this.menuEl, this.probe]) part?.remove();
+    document.removeEventListener("keydown", this.onSettingsKey, true);
+    for (const part of [this.dock, this.plus, this.grip, this.bubble, this.scrim, this.menuEl, this.settingsEl, this.probe]) part?.remove();
   }
 }
 
