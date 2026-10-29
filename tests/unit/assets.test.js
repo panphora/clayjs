@@ -51,7 +51,7 @@ test.each(["nope", "constructor", "toString", "__proto__", "hasOwnProperty"])("a
 });
 
 test("names lists every asset a document can ask for", () => {
-  expect(assets.names()).toEqual(["overtype", "marked", "highlight", ...LANGUAGES.map((name) => `highlight/${name}`)]);
+  expect(assets.names()).toEqual(["overtype", "marked", "highlight", ...LANGUAGES.map((name) => `highlight/${name}`), "uimotion"]);
 });
 
 test("two calls before the first resolves share one load", async () => {

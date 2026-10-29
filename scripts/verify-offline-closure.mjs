@@ -37,6 +37,7 @@ const REQUIRED = [
   "vendor/marked.vendor.js",
   "vendor/highlight.vendor.js",
   ...HLJS.map((language) => `vendor/hljs-${language}.vendor.js`),
+  "lib/uimotion.js",
 ];
 const REQUIRED_FONTS = ["fonts/inter-latin-wght-normal.woff2", "fonts/ibm-plex-sans-latin-400-normal.woff2"];
 

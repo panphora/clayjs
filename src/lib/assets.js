@@ -10,6 +10,7 @@ const ASSETS = {
   "highlight/json": () => import("../vendor/hljs-json.vendor.js"),
   "highlight/python": () => import("../vendor/hljs-python.vendor.js"),
   "highlight/xml": () => import("../vendor/hljs-xml.vendor.js"),
+  uimotion: () => import("./uimotion.js"),
 };
 
 export function createAssets(table) {
