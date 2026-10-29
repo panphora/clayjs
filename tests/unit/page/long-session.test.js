@@ -25,4 +25,4 @@ test(`a seeded ${OPERATIONS}-operation session on ${2000} blocks with two real e
   } finally {
     jest.restoreAllMocks();
   }
-}, 600000);
+}, Number(process.env.CLAY_LONG_SESSION_TIMEOUT_MS ?? 600000));
