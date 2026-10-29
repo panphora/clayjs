@@ -3,20 +3,6 @@ import { blockJson } from "./model.js";
 import { project } from "./projection.js";
 import { cellText } from "./rich/cell.js";
 
-export function tableName(doc, tableId) {
-  let name = "";
-  let count = 0;
-  let found = null;
-  doc.forEach((node) => {
-    if (found !== null) return;
-    if (node.type === schema.nodes.heading) name = node.textContent;
-    if (node.type !== schema.nodes.table) return;
-    count += 1;
-    if (node.attrs.id === tableId) found = name || `Table ${count}`;
-  });
-  return found;
-}
-
 export function tablesFromDoc(doc) {
   const tables = [];
   let name = "";

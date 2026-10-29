@@ -1,13 +1,12 @@
 import { schema } from "./schema.js";
 import { blockJson, keyBetween, newId, orderedIds } from "./model.js";
-import { chartTables } from "./chart-tables.js";
+import { chartTables, tableName } from "./chart-tables.js";
 import { chartModel, renderChartSvg } from "./rich/chart.js";
 import { openPageMenu } from "./chrome.js";
 import { project } from "./projection.js";
 import { columnKinds } from "./table-kinds.js";
 import { cellText } from "./rich/cell.js";
 import { registerUnsavedState } from "../lib/unsaved-state.js";
-import { tableName } from "./tool-data.js";
 import toast from "../ui/toast-lazy.js";
 import { asStep } from "./blocksel.js";
 import { state } from "../vendor/prosemirror.vendor.js";
