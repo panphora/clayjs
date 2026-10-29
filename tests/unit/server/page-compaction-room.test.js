@@ -10,7 +10,7 @@ import {
   ROOM_ERROR_STATUS,
   COMPACTOR,
 } from "../../../src/server/rooms/index.js";
-import { buildCandidate, isCheckpointKey, pageShape } from "../../../src/server/rooms/page-compaction.js";
+import { buildCandidate, isCheckpointKey, pageShape } from "../../../src/live/page-compaction.js";
 import { rangesOf, within, docRanges } from "../../../src/page/ybind/containment.js";
 
 const doc = (...parts) => `<!doctype html><html><body>${parts.join("")}</body></html>`;

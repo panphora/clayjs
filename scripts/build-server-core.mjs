@@ -62,7 +62,7 @@ export async function buildPageCompactionWorker(outdir = DIST) {
     logOverride: { 'commonjs-variable-in-esm': 'silent' },
   });
   const inputs = Object.keys(result.metafile.inputs);
-  if (!inputs.some((file) => file.includes('src/server/rooms/page-compaction.js'))) {
+  if (!inputs.some((file) => file.includes('src/live/page-compaction.js'))) {
     throw new Error('the page compaction worker bundle has no page-compaction input');
   }
   return inputs;

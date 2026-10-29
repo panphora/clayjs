@@ -1,5 +1,5 @@
 import { parentPort } from 'node:worker_threads';
-import { buildCandidate } from './page-compaction.js';
+import { buildCandidate } from '../../live/page-compaction.js';
 
 parentPort.on('message', ({ id, kind, sources }) => {
   let result;

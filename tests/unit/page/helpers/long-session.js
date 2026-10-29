@@ -18,7 +18,7 @@ import { addRow, deleteRow, setCellText, selectTableCell } from "../../../../src
 import { createPageJournal, pageJournalContext, replayJournals } from "../../../../src/page/ybind/recovery-replay.js";
 import { rangesOf, within, docRanges } from "../../../../src/page/ybind/containment.js";
 import { createRooms } from "../../../../src/server/rooms/live-data-rooms.js";
-import { buildCandidate, pageShape, COMPACTION } from "../../../../src/server/rooms/page-compaction.js";
+import { buildCandidate, pageShape, COMPACTION } from "../../../../src/live/page-compaction.js";
 import * as Y from "../../../../src/vendor/yjs.vendor.js";
 import { buildLongDocument, LONG_DOCUMENT_SEED, rng } from "./long-document.js";
 

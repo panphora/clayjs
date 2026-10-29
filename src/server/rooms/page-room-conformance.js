@@ -1,6 +1,6 @@
 import * as Y from '../../vendor/yjs.vendor.js';
 import { createRooms, LIVE_LIMITS } from './live-data-rooms.js';
-import { COMPACTION, ROOM_ERROR_STATUS, buildCandidate, pageShape } from './page-compaction.js';
+import { COMPACTION, ROOM_ERROR_STATUS, buildCandidate, pageShape } from '../../live/page-compaction.js';
 import { serializeLive, cloneJson, stampOf } from './live-data-ops.js';
 import { entriesOf } from '../../page/ybind/parts.js';
 import { rangesOf, within, docRanges } from '../../page/ybind/containment.js';

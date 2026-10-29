@@ -10,7 +10,7 @@ import { makePageTransition, pageTransitionState } from './live-page-history.js'
 export { liveTags } from './live-data-tags.js';
 
 import { frameSet, contains, descendants, receiptHas, receiptBytes, saveReceipt, postReceipt, replaceReceipt, retireReceipt, RECEIPT_LIMIT } from './live-provenance.js';
-import { COMPACTION, pageShape, planCompaction, checkUpdate, admitPageOps, createRangeCache, unionFileEntries } from './page-compaction.js';
+import { COMPACTION, pageShape, planCompaction, checkUpdate, admitPageOps, createRangeCache, unionFileEntries } from '../../live/page-compaction.js';
 import { PART_KEY, entriesOf } from '../../page/ybind/parts.js';
 
 const byteLength = (text) => Buffer.byteLength(text, 'utf8');

@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import * as Y from "../../../src/vendor/yjs.vendor.js";
 import { createRooms, ROOM_ERROR_STATUS } from "../../../src/server/rooms/index.js";
-import { buildCandidate } from "../../../src/server/rooms/page-compaction.js";
+import { buildCandidate } from "../../../src/live/page-compaction.js";
 import { createStore } from "../../../src/live/store.js";
 import { cloneJson } from "../../../src/live/ops.js";
 import { createFastLane, RETRY_MS } from "../../../src/live/fast-lane.js";

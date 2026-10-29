@@ -1,7 +1,7 @@
-import * as Y from '../../vendor/yjs.vendor.js';
-import { toBase64, fromBase64 } from '../../vendor/yjs.vendor.js';
-import { PART_KEY, isBase64, entriesOf } from '../../page/ybind/parts.js';
-import { rangesOf, unite, within, docRanges } from '../../page/ybind/containment.js';
+import * as Y from '../vendor/yjs.vendor.js';
+import { toBase64, fromBase64 } from '../vendor/yjs.vendor.js';
+import { PART_KEY, isBase64, entriesOf } from '../page/ybind/parts.js';
+import { rangesOf, unite, within, docRanges } from '../page/ybind/containment.js';
 
 export const COMPACTION = Object.freeze({
   version: 1,

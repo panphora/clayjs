@@ -12,7 +12,7 @@ import {
   admitPageOps,
   unionFileEntries,
   createRangeCache,
-} from "../../../src/server/rooms/page-compaction.js";
+} from "../../../src/live/page-compaction.js";
 import { rangesOf, within, docRanges } from "../../../src/page/ybind/containment.js";
 
 const tag = "12345678";

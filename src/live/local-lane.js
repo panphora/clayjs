@@ -29,7 +29,7 @@ import { localChannel } from "./local-channel.js";
 import { applyOp, applyTracked, checkOp, cloneJson, undoTracked, validateOp, serializeLive, textHash, diffOps } from "./ops.js";
 import { parseJsonRelaxed } from "../vendor/hyper-morph-json.vendor.js";
 import { movesSince } from "./moves.js";
-import { COMPACTION, ROOM_ERROR_STATUS, admitPageOps, planCompaction, buildCandidate, checkUpdate, pageShape, createRangeCache, unionFileEntries } from "../server/rooms/page-compaction.js";
+import { COMPACTION, ROOM_ERROR_STATUS, admitPageOps, planCompaction, buildCandidate, checkUpdate, pageShape, createRangeCache, unionFileEntries } from "./page-compaction.js";
 
 // The lane's own message version, carried by every message it posts: a tab of
 // another version drops its frames even if a scope were ever shared. The shared

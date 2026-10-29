@@ -9,7 +9,7 @@ import {
   serializeLive,
   inspectPage,
 } from "../../../src/server/rooms/index.js";
-import { buildCandidate } from "../../../src/server/rooms/page-compaction.js";
+import { buildCandidate } from "../../../src/live/page-compaction.js";
 
 const doc = (...parts) => `<!doctype html><html><body>${parts.join("")}</body></html>`;
 const pageTag = (value, at = null) =>
