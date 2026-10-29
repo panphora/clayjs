@@ -288,3 +288,13 @@ test("a reset after the move removes the path key and leaves the marker, so the 
   expect(document.getElementById("note").value).toBe("owner note");
   expect(localStorage.getItem(draftKey(slot, URL_PATH))).toBeNull();
 });
+
+test("a visitor who only dismissed the intro keeps that memory once, and a later reset stays reset", () => {
+  const storage = fakeStorage({ [UI]: JSON.stringify({ intro: { done: "closed" } }) });
+  expect(adoptLegacy(SLOT, { path: PATH, storage })).toBe("none");
+  expect(storage.getItem(TO + ":ui")).toBe(storage.getItem(UI));
+  storage.removeItem(TO + ":ui");
+  adoptLegacy(SLOT, { path: PATH, storage });
+  expect(storage.getItem(TO + ":ui")).toBeNull();
+  expect(storage.getItem(UI)).not.toBeNull();
+});

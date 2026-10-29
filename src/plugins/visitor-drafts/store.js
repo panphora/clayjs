@@ -187,7 +187,15 @@ export function adoptLegacy(slot, { path = draftPath(), storage = safeStorage() 
   try {
     const generation = storage?.getItem(to);
     const old = storage?.getItem(from);
-    if (old == null) return "none";
+    if (old == null) {
+      // A visitor who only dismissed the intro has UI memory and no draft; it is copied once too.
+      const ui = storage?.getItem(from + ":ui");
+      if (ui != null && storage.getItem(to + ":ui") == null && storage.getItem(to + ":ui-legacy") == null) {
+        storage.setItem(to + ":ui", ui);
+        storage.setItem(to + ":ui-legacy", "1");
+      }
+      return "none";
+    }
     const stamp = savedAtOf(old);
     const seen = storage.getItem(marker);
     if (seen === stamp) return "none";
