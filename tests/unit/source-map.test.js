@@ -12,7 +12,8 @@
 
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { model, checkSource, locate, pair, render, verify } from "../../src/core/source-map.js";
+import { model, checkSource, locate, pair, pairSteps, pairingCounts, resetPairingCounts, render, verify } from "../../src/core/source-map.js";
+import { drain } from "../../src/lib/slice.js";
 import { TextEncoder, TextDecoder } from "node:util";
 globalThis.TextEncoder ??= TextEncoder;
 globalThis.TextDecoder ??= TextDecoder;
@@ -812,4 +813,88 @@ describe("text moved into a <noscript>", () => {
 test("attributes merged in from a second <body> tag are not written twice", () => {
   const SRC = '<!DOCTYPE html><html><head></head><body class="a"><p>hi</p><body id="y"></body></html>';
   expect(roundTrip(SRC).text).toBe(SRC);
+});
+
+/**
+ * pairSteps: the pairing pass as a generator.
+ *
+ * The install hands the page back between steps of the pairing, so the step form and the
+ * one-task form must be the same pass: same stats, same map, same work charged. The yield
+ * count is the thing the slicing actually depends on, so it is asserted on a page big
+ * enough to cross `YIELD_EVERY` and on one too small to.
+ */
+describe("pairSteps: the same pairing pass, in steps", () => {
+  const PARAGRAPHS = 5000;
+  const page = (count) => {
+    const items = Array.from({ length: count }, (_, i) => `    <p data-id="p${i}">Entry ${i}</p>`).join("\n");
+    return `<!DOCTYPE html>\n<html>\n  <body>\n  <article>\n${items}\n  </article>\n  </body>\n</html>\n`;
+  };
+  const SRC = page(PARAGRAPHS);
+  const SMALL = '<!DOCTYPE html><html><head><title>t</title></head><body><p>one</p><p>two</p></body></html>';
+
+  const countLive = (node) => {
+    let n = 1;
+    for (const c of node.childNodes) n += countLive(c);
+    return n;
+  };
+
+  test("the step form pairs exactly what the one-task form pairs", () => {
+    const oneDoc = new DOMParser().parseFromString(SRC, "text/html");
+    const stepDoc = new DOMParser().parseFromString(SRC, "text/html");
+    const oneTask = pair(oneDoc.documentElement, model(SRC));
+    const stepped = drain(pairSteps(stepDoc.documentElement, model(SRC)));
+
+    expect(stepped.stats.paired).toBe(oneTask.stats.paired);
+    expect(stepped.stats.paired).toBeGreaterThan(PARAGRAPHS);
+    expect(stepped.stats.unmatchedLive).toHaveLength(oneTask.stats.unmatchedLive.length);
+    expect(stepped.stats.unmatchedSource).toHaveLength(oneTask.stats.unmatchedSource.length);
+    expect(stepped.stats.attrDiffs).toHaveLength(oneTask.stats.attrDiffs.length);
+    expect(stepped.stats.textDiffs).toBe(oneTask.stats.textDiffs);
+    expect(stepped.stats.unresolved).toBe(oneTask.stats.unresolved);
+
+    // The two maps point at the same places in the file: the two documents are separate,
+    // so each map is keyed by its own objects and the ranges are what can be compared.
+    const oneLive = Array.from(oneDoc.querySelectorAll("p"));
+    const stepLive = Array.from(stepDoc.querySelectorAll("p"));
+    expect(stepLive).toHaveLength(PARAGRAPHS);
+    for (let i = 0; i < 20; i++) {
+      const at = Math.floor((i * PARAGRAPHS) / 20);
+      const one = oneTask.map.get(oneLive[at]);
+      const step = stepped.map.get(stepLive[at]);
+      expect(step).toBeDefined();
+      expect(step.from).toBe(one.from);
+      expect(step.to).toBe(one.to);
+      expect(SRC.slice(step.from, step.to)).toBe(stepLive[at].outerHTML);
+    }
+  });
+
+  test("a large page yields across the pass, and a small one never does", () => {
+    const doc = new DOMParser().parseFromString(SRC, "text/html");
+    const nodes = countLive(doc.documentElement);
+    const gen = pairSteps(doc.documentElement, model(SRC));
+    let yields = 0;
+    for (let step = gen.next(); !step.done; step = gen.next()) yields++;
+    expect(nodes).toBeGreaterThan(2 * PARAGRAPHS);
+    expect(yields).toBeGreaterThanOrEqual(Math.floor(nodes / 1500));
+
+    const small = new DOMParser().parseFromString(SMALL, "text/html");
+    const smallGen = pairSteps(small.documentElement, model(SMALL));
+    let smallYields = 0;
+    for (let step = smallGen.next(); !step.done; step = smallGen.next()) smallYields++;
+    expect(countLive(small.documentElement)).toBeLessThan(20);
+    expect(smallYields).toBe(0);
+  });
+
+  test("both forms charge the same alignment and hashing", () => {
+    resetPairingCounts();
+    pair(new DOMParser().parseFromString(SRC, "text/html").documentElement, model(SRC));
+    const oneTask = { align: pairingCounts.align, hashKey: pairingCounts.hashKey };
+
+    resetPairingCounts();
+    drain(pairSteps(new DOMParser().parseFromString(SRC, "text/html").documentElement, model(SRC)));
+    expect({ align: pairingCounts.align, hashKey: pairingCounts.hashKey }).toEqual(oneTask);
+    expect(oneTask.align).toBeGreaterThan(0);
+    expect(oneTask.hashKey).toBeGreaterThan(0);
+    resetPairingCounts();
+  });
 });

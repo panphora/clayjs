@@ -58,6 +58,7 @@ import {
   nodeAt,
   pair,
   pairCapturedSteps,
+  pairSteps,
   render,
   verifyForSaveSteps,
   verifyRenderedSteps
@@ -198,6 +199,11 @@ function pairAgainstPage(m) {
   return pair(clone, m, originalSnapshotNode);
 }
 
+function* pairAgainstPageSteps(m) {
+  const clone = captureSaveClone({ flushUndo: false, authored: false });
+  return yield* pairSteps(clone, m, originalSnapshotNode);
+}
+
 /**
  * The version a set of bytes names for itself, or null when nothing stamped it.
  *
@@ -277,9 +283,9 @@ async function install(sourceUrl, context = null, attempt = 0, render = true, la
  * Model and pair the bytes an install fetched, as steps.
  *
  * `drain` is the install this module always had and `runSliced` is the same walk across
- * tasks, so a large document's first use hands the page back while its model is parsed.
- * The pairing has no step form (`pair` walks the live page and the file together in one
- * pass), so it is the one part of a large install that still runs in a single task.
+ * tasks, so a large document's first use hands the page back while its model is parsed
+ * and again while the page is paired against it: the pairing has a step form too, and
+ * yields every `YIELD_EVERY` nodes hashed or bound.
  *
  * Nothing is written to the session until the last yield is behind it, and an install
  * whose page moved underneath it answers `SUPERSEDED` or null rather than installing a
@@ -296,7 +302,9 @@ function* installSteps(job) {
   yield;
   if (state.session !== job.session) return null;
   if (state.adoptions !== job.generation) return SUPERSEDED;
-  const { map, stats } = pairAgainstPage(m);
+  const { map, stats } = yield* pairAgainstPageSteps(m);
+  if (state.session !== job.session) return null;
+  if (state.adoptions !== job.generation) return SUPERSEDED;
   const t3 = now();
 
   state.model = m;

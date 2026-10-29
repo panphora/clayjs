@@ -3,6 +3,9 @@
  * @jest-environment-options {"url": "https://example.com/big.html"}
  */
 import { jest } from "@jest/globals";
+import { model, pair, pairSteps } from "../../src/core/source-map.js";
+import { parseSteps } from "../../src/source/parse-steps.js";
+import { drain } from "../../src/lib/slice.js";
 
 /**
  * source-install-sliced: a large document's install and repair run across tasks.
@@ -186,4 +189,67 @@ test("a repair over the threshold hands the page back, and a reader still answer
   session.adoptAccepted(EDITED_AGAIN);
   expect(session.text()).toBe(EDITED_AGAIN);
   expect(session.repairGeneration()).toBe(queued + 1);
+});
+
+/**
+ * The pairing half of the install yields too.
+ *
+ * The filler below is thousands of siblings rather than one long string, because a single
+ * text node is one unit of pairing work: the install of such a page is sliced by the model
+ * alone and says nothing about `pair`. Every entry is a node and every element gets hashed
+ * and bound, so this walk crosses `YIELD_EVERY` many times, and the map it leaves behind
+ * must be the map one task would have built.
+ */
+test("the pairing half of a large install yields, and pairs what one task pairs", async () => {
+  const entries = Array.from({ length: 8000 }, (_, i) => `    <p data-id="p${i}">Entry ${i} lorem ipsum dolor</p>`).join("\n");
+  const SRC_NODES = source(entries);
+  expect(SRC_NODES.length).toBeGreaterThanOrEqual(300 * 1024);
+
+  // How many times the walk could hand the page back: the parse once per chunk, the
+  // pairing once per `YIELD_EVERY` nodes. The turn counter below is the install\'s own.
+  const yieldsOf = (gen) => {
+    let yields = 0;
+    for (let step = gen.next(); !step.done; step = gen.next()) yields++;
+    return yields;
+  };
+  const parseYields = yieldsOf(parseSteps(SRC_NODES, { sourceCodeLocationInfo: true }));
+  expect(parseYields).toBeGreaterThan(0);
+
+  let turns = 0;
+  const timerYield = () => { turns++; return new Promise((resolve) => setTimeout(resolve, 0)); };
+  globalThis.scheduler = { yield: timerYield };
+  let summary;
+  try {
+    seed(entries);
+    const pending = session.start({ latest: () => ({ bytes: SRC_NODES }) });
+    expect(await settlesInThisTask(pending)).toBe(false);
+    summary = await pending;
+  } finally {
+    delete globalThis.scheduler;
+  }
+
+  expect(summary.installed).toBe(true);
+  expect(summary.unmatchedLive).toBe(0);
+  expect(summary.unmatchedSource).toBe(0);
+  expect(summary.paired).toBeGreaterThan(8000);
+
+  // The same page and the same bytes, paired in one task: the installed state is that
+  // result, node for node.
+  const oneTask = pair(document.documentElement, model(SRC_NODES));
+  expect(summary.paired).toBe(oneTask.stats.paired);
+  expect(summary.unresolved).toBe(oneTask.stats.unresolved);
+  expect(summary.attrDiffs).toBe(oneTask.stats.attrDiffs.length);
+  expect(summary.timing.pair).toBeGreaterThan(0);
+  const live = Array.from(document.querySelectorAll("p")).slice(0, 20);
+  for (const node of live) {
+    const loc = oneTask.map.get(node);
+    expect(loc).toBeDefined();
+    expect(SRC_NODES.slice(loc.from, loc.to)).toBe(node.outerHTML);
+  }
+
+  // The install handed the page back more often than its parse alone needs, which is the
+  // pairing\'s own yields: a pairing that ran in one task could not.
+  const pairYields = yieldsOf(pairSteps(document.documentElement, model(SRC_NODES)));
+  expect(pairYields).toBeGreaterThan(0);
+  expect(turns).toBeGreaterThanOrEqual(parseYields + pairYields);
 });

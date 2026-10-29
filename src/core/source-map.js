@@ -364,10 +364,26 @@ function keysOfLive(n, keyMap) {
   keyMap.set(n, k);
   return k;
 }
-function keysOfLoc(loc) {
+function* keysOfLiveSteps(n, keyMap, walked) {
+  if (++walked.n % YIELD_EVERY === 0) yield;
+  let k;
+  if (n.nodeType === 3) k = { tag: '#text', shallow: 't:' + n.data, content: 't:' + n.data, deep: 't:' + n.data };
+  else if (n.nodeType === 8) k = { tag: '#comment', shallow: 'c:' + n.data, content: 'c:' + n.data, deep: 'c:' + n.data };
+  else {
+    const kids = [];
+    for (const c of liveKids(n)) kids.push(yield* keysOfLiveSteps(c, keyMap, walked));
+    const shallow = 'e:' + n.localName + '|' + liveAttrsKey(n);
+    k = { tag: n.localName, shallow, content: 'e:' + n.localName + '|' + hashKey(kids.map((c) => c.content)), deep: shallow + '|' + hashKey(kids.map((c) => c.deep)) };
+  }
+  keyMap.set(n, k);
+  return k;
+}
+function* keysOfLocSteps(loc, walked) {
+  if (++walked.n % YIELD_EVERY === 0) yield;
   if (loc.kind === 'text') return (loc.keys = { tag: '#text', shallow: 't:' + loc.value, content: 't:' + loc.value, deep: 't:' + loc.value });
   if (loc.kind === 'comment') return (loc.keys = { tag: '#comment', shallow: 'c:' + loc.value, content: 'c:' + loc.value, deep: 'c:' + loc.value });
-  const kids = loc.children.map(keysOfLoc);
+  const kids = [];
+  for (const c of loc.children) kids.push(yield* keysOfLocSteps(c, walked));
   const shallow = 'e:' + loc.tag + '|' + srcAttrsKey(loc);
   return (loc.keys = { tag: loc.tag, shallow, content: 'e:' + loc.tag + '|' + hashKey(kids.map((c) => c.content)), deep: shallow + '|' + hashKey(kids.map((c) => c.deep)) });
 }
@@ -507,10 +523,16 @@ function describeLoc(l) {
  * @param {Function} [resolve] - node -> the identity to key the map by (default: itself)
  */
 export function pair(root, m, resolve = (n) => n) {
+  return drain(pairSteps(root, m, resolve));
+}
+
+/** The same pairing pass, `yield`ing every `YIELD_EVERY` nodes hashed or bound. */
+export function* pairSteps(root, m, resolve = (n) => n) {
   const map = new WeakMap();
   const keyMap = new Map();
-  keysOfLive(root, keyMap);
-  keysOfLoc(m.root);
+  const walked = { n: 0 };
+  yield* keysOfLiveSteps(root, keyMap, walked);
+  yield* keysOfLocSteps(m.root, walked);
   const stats = { paired: 0, unmatchedLive: [], unmatchedSource: [], attrDiffs: [], textDiffs: 0, unresolved: 0 };
   // A token identifying THIS pairing pass, stamped on the model and on every loc that
   // binds. render trusts a loc only when the two still agree, which rules out a loc
@@ -519,11 +541,12 @@ export function pair(root, m, resolve = (n) => n) {
   // model, so holding the node here would keep every node the page has since deleted.
   const gen = {};
   m.gen = gen;
-  bind(root, m.root, map, keyMap, stats, 'html', resolve, gen);
+  yield* bindSteps(root, m.root, map, keyMap, stats, 'html', resolve, gen, walked);
   return { map, stats };
 }
 
-function bind(node, loc, map, keyMap, stats, path, resolve, gen) {
+function* bindSteps(node, loc, map, keyMap, stats, path, resolve, gen, walked) {
+  if (++walked.n % YIELD_EVERY === 0) yield;
   const key = resolve(node);
   if (key) { map.set(key, loc); loc.gen = gen; stats.paired++; }
   else stats.unresolved++;
@@ -534,7 +557,7 @@ function bind(node, loc, map, keyMap, stats, path, resolve, gen) {
   const usedL = new Set(), usedS = new Set();
   for (const [i, j] of pairs) {
     usedL.add(i); usedS.add(j);
-    bind(L[i], S[j], map, keyMap, stats, path + '>' + (L[i].nodeType === 1 ? L[i].localName : '#') + '[' + i + ']', resolve, gen);
+    yield* bindSteps(L[i], S[j], map, keyMap, stats, path + '>' + (L[i].nodeType === 1 ? L[i].localName : '#') + '[' + i + ']', resolve, gen, walked);
   }
   for (let i = 0; i < L.length; i++) if (!usedL.has(i)) stats.unmatchedLive.push({ path, node: describe(L[i]) });
   for (let j = 0; j < S.length; j++) if (!usedS.has(j)) stats.unmatchedSource.push({ path, node: describeLoc(S[j]) });
