@@ -565,6 +565,61 @@ test("a recovery copy staged after A's capture is not acknowledged by A's accept
   }
 });
 
+// ------------------------------------------------------------------- serializing in slices
+
+// The three serializations are the last of a prepare's uninterrupted work, and each one used
+// to be a single `outerHTML` over the whole document. The filler below is many siblings
+// rather than one long text node, so every serialization crosses `SLICE_BYTES` several times
+// and the prepare hands the page back once per crossing instead of once per serialization.
+const ENTRIES = 900;
+const filler = () => Array.from(
+  { length: ENTRIES },
+  (_, i) => `<p data-entry="${i}">Entry ${i} ${"lorem ipsum ".repeat(40)}</p>`,
+).join("\n");
+
+const captureBytes = (capture) => ({
+  forSave: capture.forSave,
+  forComparison: capture.forComparison,
+  forDirty: capture.forDirty,
+});
+
+test("a large tree is serialized in slices, and the bytes are the one-task capture's", async () => {
+  const snapshot = await import("../../src/core/snapshot.js");
+  const { beginSaveCapture } = await import("../../src/core/save-job.js");
+  const { drain } = await import("../../src/lib/slice.js");
+
+  document.body.innerHTML = `${filler()}\n<article id="c">initial</article>`;
+  await save.savePage();
+  setText("sliced-serialization");
+
+  const oneTask = snapshot.captureForSaveAndComparison({ emitForSync: false });
+  const bytes = oneTask.forSave.length;
+  expect(bytes).toBeGreaterThan(4 * 64 * 1024);
+
+  // How many times the prepare hands the page back: one turn per yield of its own.
+  let turns = 0;
+  const previous = globalThis.scheduler;
+  globalThis.scheduler = { yield: () => { turns++; return sleep(0); } };
+  let result;
+  try {
+    result = await save.savePage();
+  } finally {
+    if (previous === undefined) delete globalThis.scheduler;
+    else globalThis.scheduler = previous;
+  }
+
+  expect(result.ok).toBe(true);
+  expect(lastPost()).toBe(oneTask.forSave);
+
+  // Three serializations wrote this document in three tasks before; a slice writes 64 KB a
+  // turn, so the prepare hands the page back with every slice of the tree it writes.
+  expect(turns).toBeGreaterThanOrEqual(3 + Math.floor(bytes / (64 * 1024)));
+
+  // The comparison and dirty strings the save was given, from the same page, in a job that
+  // walked the tree in slices too.
+  expect(captureBytes(drain(beginSaveCapture({ emitForSync: false }).steps()))).toEqual(captureBytes(oneTask));
+});
+
 // ---------------------------------------------------------------- the one-task path
 
 test("a small document keeps the synchronous path", async () => {

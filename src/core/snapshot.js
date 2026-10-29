@@ -263,6 +263,21 @@ const XHTML_NS = 'http://www.w3.org/1999/xhtml';
  * a marker only while serializing, so the clone holds the same nodes when this returns.
  */
 export function serializeClone(clone) {
+  const blocks = noscriptBlocks(clone);
+  if (!blocks.length) return "<!DOCTYPE html>" + clone.outerHTML;
+  const raw = swapNoscriptMarkers(blocks);
+  let html;
+  try {
+    html = "<!DOCTYPE html>" + clone.outerHTML;
+  } finally {
+    for (const [el, kids] of blocks) el.replaceChildren(...kids);
+  }
+  for (const [marker, text] of raw) html = html.split(marker).join(text);
+  return html;
+}
+
+/** Every <noscript> in the tree whose content is text only, with the children it held. */
+function noscriptBlocks(clone) {
   const blocks = [];
   const collect = (node) => {
     for (const child of node.childNodes) {
@@ -276,16 +291,78 @@ export function serializeClone(clone) {
     }
   };
   collect(clone);
-  if (!blocks.length) return "<!DOCTYPE html>" + clone.outerHTML;
+  return blocks;
+}
+
+/** Swap each block's text for a marker, and answer the text each marker stands for. */
+function swapNoscriptMarkers(blocks) {
   const nonce = Math.random().toString(36).slice(2);
-  const raw = blocks.map(([el, kids], i) => {
+  return blocks.map(([el, kids], i) => {
     const marker = `\uE000clay-noscript-${nonce}-${i}\uE000`;
     el.replaceChildren(el.ownerDocument.createTextNode(marker));
     return [marker, kids.map((n) => n.data).join('')];
   });
+}
+
+// How much serialized output a sliced save writes before it hands the page back, and how
+// big a subtree has to be before it is serialized child by child instead of in one call.
+const SLICE_BYTES = 64 * 1024;
+const SLICE_MIN_ELEMENTS = 256;
+
+function sliceable(el) {
+  return el.namespaceURI === XHTML_NS
+    && el.localName !== 'template'
+    && el.childNodes.length > 1
+    && el.getElementsByTagName('*').length >= SLICE_MIN_ELEMENTS;
+}
+
+/**
+ * `el.outerHTML`, built from its open tag, each child's own serialization and its end
+ * tag, `yield`ing every `SLICE_BYTES` of output. A text or comment child is serialized
+ * inside a childless copy of its parent, so its escaping follows the same parent element
+ * the one-call serializer would use.
+ */
+function* serializeElementSteps(el, out, budget) {
+  const bare = clonePreventingOnclone(el, false);
+  const shell = bare.outerHTML;
+  const endTag = `</${bare.localName}>`;
+  out.push(shell.slice(0, shell.length - endTag.length));
+  for (const child of el.childNodes) {
+    if (child.nodeType === 1 && sliceable(child)) {
+      yield* serializeElementSteps(child, out, budget);
+      continue;
+    }
+    let piece;
+    if (child.nodeType === 1) piece = child.outerHTML;
+    else {
+      bare.replaceChildren(child.cloneNode(false));
+      piece = bare.innerHTML;
+    }
+    out.push(piece);
+    budget.bytes += piece.length;
+    if (budget.bytes >= SLICE_BYTES) {
+      budget.bytes = 0;
+      yield;
+    }
+  }
+  out.push(endTag);
+}
+
+/** `"<!DOCTYPE html>" + root.outerHTML`, in steps. */
+export function* serializeTreeSteps(root) {
+  const out = ["<!DOCTYPE html>"];
+  yield* serializeElementSteps(root, out, { bytes: 0 });
+  return out.join('');
+}
+
+/** `serializeClone`, in steps: the same bytes, `yield`ing every `SLICE_BYTES` of output. */
+export function* serializeCloneSteps(clone) {
+  const blocks = noscriptBlocks(clone);
+  if (!blocks.length) return yield* serializeTreeSteps(clone);
+  const raw = swapNoscriptMarkers(blocks);
   let html;
   try {
-    html = "<!DOCTYPE html>" + clone.outerHTML;
+    html = yield* serializeTreeSteps(clone);
   } finally {
     for (const [el, kids] of blocks) el.replaceChildren(...kids);
   }
@@ -506,13 +583,23 @@ export function captureSaveClone({ flushUndo = true, authored = true } = {}) {
 // check must not read that as an edit the person would lose on close.
 const EMPTY_INERT_ATTRS = ['style', 'class'];
 
-export function serializeForCompare(clone) {
+function prepareForCompare(clone) {
   stripDerived(clone);
   for (const name of EMPTY_INERT_ATTRS) {
     if (clone.getAttribute(name) === '') clone.removeAttribute(name);
     for (const el of clone.querySelectorAll(`[${name}=""]`)) el.removeAttribute(name);
   }
+}
+
+export function serializeForCompare(clone) {
+  prepareForCompare(clone);
   return "<!DOCTYPE html>" + clone.outerHTML;
+}
+
+/** `serializeForCompare`, in steps. */
+export function* serializeForCompareSteps(clone) {
+  prepareForCompare(clone);
+  return yield* serializeTreeSteps(clone);
 }
 
 /**

@@ -18,8 +18,8 @@ import {
   readCapturePageState,
   releaseSaveCapture,
   runSaveRenderer,
-  serializeClone,
-  serializeForCompare
+  serializeCloneSteps,
+  serializeForCompareSteps
 } from './snapshot.js';
 
 /**
@@ -94,14 +94,14 @@ function* rendererSteps(clone, today, pin) {
   }
 }
 
-/** The resumable half of a save capture: three serializations, then the renderer. */
+/** The resumable half of a save capture: three serializations that each yield too, then the renderer. */
 function* saveSteps(pin) {
   readCapturePageState(pin);
-  const today = serializeClone(pin.clone);
+  const today = yield* serializeCloneSteps(pin.clone);
   yield;
-  const forComparison = pin.compareClone ? serializeForCompare(pin.compareClone) : null;
+  const forComparison = pin.compareClone ? (yield* serializeForCompareSteps(pin.compareClone)) : null;
   yield;
-  const forDirty = pin.dirtyClone ? serializeForCompare(pin.dirtyClone) : forComparison;
+  const forDirty = pin.dirtyClone ? (yield* serializeForCompareSteps(pin.dirtyClone)) : forComparison;
   yield;
   if (pin.pageFormatMarker) setFormatMarker(pin.clone, pin.pageFormatMarker);
   const forSave = yield* rendererSteps(pin.clone, today, pin);
