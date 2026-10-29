@@ -175,3 +175,15 @@ test("clearing a param named like an Object.prototype key clears its root attrib
   expect(document.documentElement.hasAttribute("route-constructor")).toBe(false);
   expect(route.get()).toEqual({});
 });
+
+test("another tab's draft, written into the records in place, moves the stamp", async () => {
+  reset("/app.html#entry=e-2");
+  expect(active()).toEqual(["article:e-2=entry", "a:e-2=entry"]);
+  const [first, second] = document.querySelectorAll("#entries article");
+  first.setAttribute("data-id", "e-2");
+  second.setAttribute("data-id", "e-3");
+  document.dispatchEvent(new CustomEvent("clay:drafts-restored", { detail: { restored: true, external: true } }));
+  await nextTick();
+  expect(active()).toEqual(["article:e-2=entry", "a:e-2=entry"]);
+  expect(document.querySelector("#entries [route-active]")).toBe(first);
+});

@@ -163,6 +163,7 @@ export function start() {
   mirrorRoot(parseHash(location.hash));
   window.addEventListener("hashchange", apply);
   document.addEventListener("clay:sync-applied", queueApply);
+  document.addEventListener("clay:drafts-restored", queueApply);
   document.addEventListener("clay:ready", queueApply);
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", onDomReady, { once: true });
   else onDomReady();
@@ -175,6 +176,7 @@ export function stop() {
   lastUnmatched = "";
   window.removeEventListener("hashchange", apply);
   document.removeEventListener("clay:sync-applied", queueApply);
+  document.removeEventListener("clay:drafts-restored", queueApply);
   document.removeEventListener("clay:ready", queueApply);
   document.removeEventListener("DOMContentLoaded", onDomReady);
   if (observer) observer.disconnect();
