@@ -11,6 +11,24 @@ import { keysBetween, newId } from "./model.js";
 import { fragmentCleaner } from "./projection.js";
 import { safeHref, safeSrc } from "./address.js";
 
+// HTML in a file someone sent is kept for its formatting, never for what it can load or
+// run: anything that embeds or fetches another document goes, and so does every address
+// that runs script, whichever attribute holds it.
+const EMBEDS = "iframe, frame, frameset, object, embed, applet, meta, base, link, form, style, animate, set, animateMotion, animateTransform, portal";
+const LOADERS = /^(srcdoc|data|formaction|codebase|archive|ping|background|poster|lowsrc|dynsrc)$/i;
+const SCRIPTED = /^\s*(javascript|vbscript|data):/i;
+function cleanImported(html) {
+  const t = document.createElement("template");
+  t.innerHTML = html;
+  for (const el of t.content.querySelectorAll(EMBEDS)) el.remove();
+  for (const el of t.content.querySelectorAll("*")) {
+    for (const { name, value } of [...el.attributes]) {
+      if (LOADERS.test(name) || SCRIPTED.test(value.replace(/[\u0000-\u0020]/g, ""))) el.removeAttribute(name);
+    }
+  }
+  return t.innerHTML;
+}
+
 export const MAX_BYTES = 2 * 1024 * 1024;
 export const MAX_DEPTH = 32;
 export const MAX_BLOCKS = 10000;
@@ -175,7 +193,7 @@ export function importMarkdownTokens(tokens) {
         case "html": {
           const raw = String(token.text ?? token.raw ?? "");
           unsupported.push({ type: "HTML block cleaned", text: raw });
-          push({ t: "preserved", html: fragmentCleaner(document).fallback(raw) });
+          push({ t: "preserved", html: cleanImported(fragmentCleaner(document).fallback(raw)) });
           break;
         }
         case "blockquote": {

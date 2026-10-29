@@ -17,12 +17,15 @@ export function createPageCompactor({ rooms, onCommit = () => {}, workerUrl = pa
   let ids = 0;
   let closed = false;
 
+  // A worker's events count only while it is still the current one: a terminated worker
+  // exits on a later tick, after its replacement may already be running the next job.
   const spawn = () => {
-    worker = new WorkerClass(workerUrl);
-    worker.unref?.();
-    worker.on('message', (message) => finish(message));
-    worker.on('error', () => crashed());
-    worker.on('exit', () => { if (running) crashed(); worker = null; });
+    const instance = new WorkerClass(workerUrl);
+    worker = instance;
+    instance.unref?.();
+    instance.on('message', (message) => { if (worker === instance) finish(message); });
+    instance.on('error', () => { if (worker === instance) crashed(); });
+    instance.on('exit', () => { if (worker !== instance) return; worker = null; if (running) crashed(); });
   };
 
   function crashed() {
@@ -32,11 +35,10 @@ export function createPageCompactor({ rooms, onCommit = () => {}, workerUrl = pa
     clearTimer(job.timer);
     worker?.terminate?.();
     worker = null;
-    rooms.abandonCompaction(job.token);
     const tries = (retries.get(job.room) ?? 0) + 1;
     retries.set(job.room, tries);
-    if (tries > RETRY_MS.length) rooms.abandonCompaction(rooms.beginCompaction(job.room)?.token, { failed: 'crashed' });
-    else setTimer(() => due(job.room, {}), RETRY_MS[tries - 1]);
+    rooms.abandonCompaction(job.token, tries > RETRY_MS.length ? { failed: 'crashed' } : {});
+    if (tries <= RETRY_MS.length) setTimer(() => due(job.room, { overflow: job.overflow }), RETRY_MS[tries - 1]);
     pump();
   }
 
@@ -65,7 +67,7 @@ export function createPageCompactor({ rooms, onCommit = () => {}, workerUrl = pa
     if (!begun) { pump(); return; }
     if (!worker) spawn();
     const id = ++ids;
-    running = { id, room, token: begun.token, timer: setTimer(crashed, timeoutMs) };
+    running = { id, room, overflow, token: begun.token, timer: setTimer(crashed, timeoutMs) };
     worker.postMessage({ id, kind: begun.kind, sources: begun.sources });
   }
 
@@ -78,6 +80,13 @@ export function createPageCompactor({ rooms, onCommit = () => {}, workerUrl = pa
   rooms.onCompactionDue(due);
   return {
     get running() { return running !== null; },
-    close() { closed = true; rooms.onCompactionDue(null); if (running) clearTimer(running.timer); return worker?.terminate?.(); },
+    close() {
+      closed = true;
+      rooms.onCompactionDue(null);
+      if (running) { clearTimer(running.timer); rooms.abandonCompaction(running.token); running = null; }
+      const current = worker;
+      worker = null;
+      return current?.terminate?.();
+    },
   };
 }

@@ -281,7 +281,17 @@ async function applyUnderSlot(update, { doc, loc, fetchFn, clay, reload, replace
     }
   }
 
-  const prepared = await prepare(update, { doc, loc, fetchFn });
+  // An editing tab's live article holds the editor, not the page: the upgrade starts from
+  // the document as a save writes it.
+  let source = doc;
+  if (pageClay.isEditMode && typeof pageClay.getHTML === "function") {
+    try {
+      source = new DOMParser().parseFromString(await pageClay.getHTML(), "text/html");
+    } catch {
+      return { ok: false, code: "failed", message: SAVE_FAILED };
+    }
+  }
+  const prepared = await prepare(update, { doc: source, loc, fetchFn });
   if (!prepared.ok) return prepared;
 
   const save = typeof replace === "function"

@@ -895,10 +895,16 @@ function loadPreparer() {
   return prepLoading;
 }
 
-// The size of the bytes the last save wrote. A document that has never saved is as big as
-// its first capture, which is not known before taking it, so it prepares in one task once
-// and slices from then on.
-const lastSavedSize = () => (typeof lastSavedBytes === 'string' ? lastSavedBytes.length : 0);
+// The size of the bytes the last save wrote. A document that has never saved is judged by
+// the document it was served as, which the browser has already measured.
+function servedSize() {
+  try {
+    return performance.getEntriesByType('navigation')[0]?.decodedBodySize || 0;
+  } catch {
+    return 0;
+  }
+}
+const lastSavedSize = () => (typeof lastSavedBytes === 'string' ? lastSavedBytes.length : servedSize());
 
 // Whether this save prepares across tasks instead of in the caller's.
 //
@@ -1156,11 +1162,8 @@ async function runSlicedSave(ctx, lane) {
       if (late === 'morph' && ctx.explicit && round === 0) {
         await mergeSettled();
         applied.over = false;
-        if (!pageMaybeDirty()) {
-          const clean = skipped_('No changes to save');
-          if (typeof ctx.callback === 'function') ctx.callback(clean);
-          return { result: clean, dispatched: false };
-        }
+        // The retry captures again rather than asking the dirty gate: an editor's content
+        // lives where the gate does not look, and the capture itself skips a clean page.
         continue;
       }
       if (typeof ctx.callback === 'function') ctx.callback(skipped);

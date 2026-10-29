@@ -28,6 +28,7 @@ const GENERIC_ERROR = "Couldn't save";
 const GENERIC_OFFLINE = "Offline, not saved";
 const REPLACED_TEXT = "This page was changed outside the editor. Reload to see it.";
 const TOO_LARGE_TEXT = "That change is too large to share, so it was not saved. Reload the page to keep editing.";
+const CLIENT_KEY = /^[ur][0-9a-z]+(-[0-9a-z]+){2}$/;
 export const PAGE_FULL_MESSAGE = "This page is full. Your recent changes are kept here; delete some content to keep editing.";
 const OVERWRITTEN_TEXT = "Some changes you made were replaced by a change made outside the editor.";
 const REPLACED_HOLD = "The page was changed outside the editor; reload to see it.";
@@ -1173,8 +1174,13 @@ function mountAndAttach(inst, source, loaded) {
       if (lane.status.writer === null) {
         const y = inst.store.value.y;
         const keys = Object.keys(y);
-        const key = keys.length ? keys[0] : `claim-${binding.ydoc.clientID.toString(36)}`;
-        const value = keys.length ? y[keys[0]] : code.yValueOf(binding.ydoc).y.seed;
+        // A compacting room admits only whole client keys: an existing one again, or this
+        // tab's document under a fresh one.
+        const me = binding.ydoc.clientID.toString(36);
+        const key = inst.store.room?.compaction?.v === 1
+          ? keys.find((k) => CLIENT_KEY.test(k)) ?? `u${me}-claim-0`
+          : keys.length ? keys[0] : `claim-${me}`;
+        const value = Object.hasOwn(y, key) ? y[key] : code.yValueOf(binding.ydoc).y.seed;
         inst.store.handle.set(["y", key], value);
         // The session is not admitted until the commit, so its ops stay in the tab: the
         // claim alone is framed now, before adoption writes anything, or no election runs.

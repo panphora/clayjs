@@ -443,6 +443,7 @@ export function localTransport({ seed, key = "clay-live:" + window.location.path
     const key = `${plan.kind === "full" ? "c" : "t"}${textHash(room.epoch).slice(0, 8)}-${(room.seq + 1).toString(36)}`;
     if (Object.hasOwn(y, key)) return;
     const ops = [...physical.map((source) => validateOp({ op: "del", path: ["y", source] })), validateOp({ op: "set", path: ["y", key], value: update })];
+    const before = pageBytes(m.value);
     let trial;
     try {
       trial = applyAll(m.value, ops);
@@ -450,9 +451,16 @@ export function localTransport({ seed, key = "clay-live:" + window.location.path
       return;
     }
     const bytes = pageBytes(trial.value);
-    const grew = bytes > pageBytes(m.value);
     trial.undo();
-    if (bytes > COMPACTION.activeBytes && grew) return;
+    if (bytes > COMPACTION.activeBytes && bytes > before) {
+      // A full fold of the whole page that still does not fit: the page is as small as it
+      // gets, so the next write is refused as full instead of waiting for another fold.
+      if (plan.kind === "full" && physical.length === Object.keys(y).length) {
+        host.lastFull = { bytes: before, seq: room.seq };
+        host.deletesSince = 0;
+      }
+      return;
+    }
     const clean = !m.behind && m.landed === m.last;
     for (const [source] of plan.sources) {
       host.retired.add(source);
@@ -468,6 +476,10 @@ export function localTransport({ seed, key = "clay-live:" + window.location.path
     if (clean) m.landed = room.seq;
     post({ type: "data", data });
     handlers.frame(cloneJson(data));
+    if (clean) {
+      tellLanded(["page"]);
+      post({ type: "landed", name: "page", at: { epoch: room.epoch, seq: room.seq } });
+    }
     const shape = pageShape(m.value.y, COMPACTION);
     if (shape.loose >= COMPACTION.soft || !shape.normal) due();
   }

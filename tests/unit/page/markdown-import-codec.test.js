@@ -313,3 +313,21 @@ test("malformed input refuses with a named reason and nothing half-built", () =>
   expect(importMarkdownTokens([{ type: "space", raw: "\n\n" }]).blocks).toEqual({});
   expect(() => docFromBlocks(schema, importMarkdownTokens([{ type: "paragraph", raw: "x", tokens: [{ type: "text", text: "x" }] }]).blocks)).not.toThrow();
 });
+
+test("imported HTML keeps its formatting but nothing that embeds, loads or runs", () => {
+  const vectors = [
+    '<iframe srcdoc="&lt;script&gt;parent.alert(1)&lt;/script&gt;"></iframe>',
+    '<object data="javascript:alert(1)"></object>',
+    '<svg><a><animate attributeName="href" values="javascript:alert(1)"/><text y="20">x</text></a></svg>',
+    '<meta http-equiv="refresh" content="0;url=https://example.com">',
+    '<img src=x onerror=alert(1)>',
+    '<a href="JaVaScRiPt:alert(1)">x</a>',
+    '<p><strong>kept</strong></p>',
+  ];
+  const html = vectors.map((v) => {
+    const { blocks } = importMarkdownTokens([{ type: "html", raw: v, text: v }]);
+    return Object.values(blocks).find((b) => b.t === "preserved")?.html ?? "";
+  }).join("\n");
+  expect(html).not.toMatch(/iframe|srcdoc|object|animate|meta|onerror|javascript/i);
+  expect(html).toContain("<strong>kept</strong>");
+});

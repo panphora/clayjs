@@ -65,7 +65,7 @@ function setupClay(overrides = {}) {
     isDraftMode: false,
     isEditMode: true,
     storage,
-    getHTML: jest.fn(() => "<!DOCTYPE html><html><body>this copy</body></html>"),
+    getHTML: jest.fn(() => "<!DOCTYPE html>\n" + document.documentElement.outerHTML),
     save: {
       flush: jest.fn(async () => ({ state: "clean" })),
       replace: jest.fn(async () => ({ ok: true, etag: "etag-after" })),

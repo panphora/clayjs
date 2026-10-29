@@ -435,7 +435,14 @@ export function createPageJournal({ channel, key, context, base = null, onChange
   }
 
   function retire(list) {
-    for (const item of list || []) records.delete(journalKey(item?.id));
+    for (const item of list || []) {
+      const key = journalKey(item?.id);
+      const record = records.get(key);
+      if (!record) continue;
+      records.delete(key);
+      batches = Math.max(0, batches - 1);
+      batchBytes = Math.max(0, batchBytes - (record.update?.byteLength ?? 0));
+    }
   }
 
   // An accepted save is the base the next replay starts from: the page reopens on it,
@@ -492,8 +499,6 @@ export function createPageJournal({ channel, key, context, base = null, onChange
       .then((receipt) => {
         if (!receipt?.ok) return receipt;
         retire(receipt.retired);
-        batches = Math.max(0, batches - (receipt.retired?.length ?? 0));
-        if (!batches) batchBytes = 0;
         return receipt;
       })
       .catch(() => null)

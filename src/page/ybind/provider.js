@@ -105,6 +105,9 @@ export function createYProvider({ store, ydoc, compact: limits = {}, setTimer = 
   const nextKey = (p) => (mode === "host" ? `${p}${me}-${inst}-${(counter++).toString(36)}` : `${p}${me}-${(counter++).toString(36)}`);
   let timer = null;
   let outbox = [];
+  // A refusal took back writes of this tab's that later updates build on: until a reconcile
+  // puts them back, nothing newer goes out.
+  let refusedGap = false;
   const generation = store.value.g;
   // Keys this tab wrote itself: the updates and offers the room has not confirmed yet.
   const own = new Set();
@@ -133,8 +136,22 @@ export function createYProvider({ store, ydoc, compact: limits = {}, setTimer = 
     return own.has(path[1]);
   };
   const mineInFlight = () => store.pending.some((op) => isOwnYOp(op));
+  // Host mode orders this tab's writes only while the store is in the room: at save
+  // speed nothing confirms a write until the save lands, so updates go out at once.
+  const hosted = () => mode === "host" && store.handle.status?.mode !== "file";
+  const flushOutbox = () => {
+    if (!outbox.length) return;
+    const update = outbox.length === 1 ? outbox[0] : Y.mergeUpdatesV2(outbox);
+    outbox = [];
+    putWhole(nextKey("u"), update);
+  };
   const offer = () => {
-    if (mode !== "host" || stopped || mineInFlight() || !outbox.length) return;
+    if (!hosted() || stopped || mineInFlight()) return;
+    if (refusedGap) {
+      refusedGap = false;
+      if (reconcile()) return;
+    }
+    if (!outbox.length) return;
     const update = outbox.length === 1 ? outbox[0] : Y.mergeUpdatesV2(outbox);
     outbox = [];
     putWhole(nextKey("u"), update);
@@ -148,7 +165,8 @@ export function createYProvider({ store, ydoc, compact: limits = {}, setTimer = 
     if (origin !== NET && origin !== ORIGINS_ORIGIN) onLocalUpdate(u);
     if (origin !== NET && origin !== ORIGINS_ORIGIN && origin !== RECOVERY_ORIGIN) journal?.local(u);
     if (stopped || origin === NET || origin === ORIGINS_ORIGIN) return;
-    if (mode === "host") { outbox.push(u); offer(); }
+    if (hosted()) { outbox.push(u); offer(); }
+    else if (mode === "host") { outbox.push(u); flushOutbox(); }
     else put(nextKey("u"), u);
   };
   ydoc.on("updateV2", onUpdate);
@@ -190,7 +208,7 @@ export function createYProvider({ store, ydoc, compact: limits = {}, setTimer = 
 
   function reconcile() {
     if (stopped) return false;
-    if (mode === "host" && mineInFlight()) return false;
+    if (hosted() && mineInFlight()) return false;
     const y = store.value.y;
     if (roomHolds(y)) { wantReconcile = false; reconcilePending = false; return false; }
     const scratch = new Y.Doc();
@@ -377,7 +395,18 @@ export function createYProvider({ store, ydoc, compact: limits = {}, setTimer = 
 
   const off = store.onRebase((ev) => {
     if (stopped) return;
-    if (ev.room) mode = ev.room.compaction?.v === 1 ? "host" : "legacy";
+    if (ev.room) {
+      const was = mode;
+      mode = ev.room.compaction?.v === 1 ? "host" : "legacy";
+      // A room that stopped compacting confirms nothing in host order: what host mode
+      // was holding back goes out as ordinary updates.
+      if (was === "host" && mode === "legacy" && outbox.length) setTimer(() => {
+        if (stopped || mode !== "legacy" || !outbox.length) return;
+        const update = outbox.length === 1 ? outbox[0] : Y.mergeUpdatesV2(outbox);
+        outbox = [];
+        put(nextKey("u"), update);
+      }, 0);
+    }
     const ops = ev.source === "remote" && ev.frame ? ev.frame.ops : null;
     const plain = ops && ops.every((op) => op.path[0] === "y" && op.path.length === 2 && !PART_KEY.test(op.path[1]));
     if (!plain && ev.cause !== "refused" && !sharesLineage(ev.next.y)) {
@@ -402,6 +431,7 @@ export function createYProvider({ store, ydoc, compact: limits = {}, setTimer = 
     if (event.phase !== "refused") return;
     if (mode === "host") {
       if (event.code === "page-full" || event.code === "compaction-failed") { stop(event.code); return; }
+      refusedGap = true;
       schedule(true, false);
       return;
     }

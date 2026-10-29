@@ -10,7 +10,7 @@ import { makePageTransition, pageTransitionState } from './live-page-history.js'
 export { liveTags } from './live-data-tags.js';
 
 import { frameSet, contains, descendants, receiptHas, receiptBytes, saveReceipt, postReceipt, replaceReceipt, retireReceipt, RECEIPT_LIMIT } from './live-provenance.js';
-import { COMPACTION, pageShape, planCompaction, checkUpdate, admitPageOps, createRangeCache, unionFileEntries } from '../../live/page-compaction.js';
+import { COMPACTION, pageShape, planCompaction, checkUpdate, admitPageOps, createRangeCache, unionFileEntries, buildCandidate } from '../../live/page-compaction.js';
 import { PART_KEY, entriesOf } from '../../page/ybind/parts.js';
 
 const byteLength = (text) => Buffer.byteLength(text, 'utf8');
@@ -201,6 +201,17 @@ export function createRooms({ now = Date.now, newEpoch = randomUUID, liveBytes =
   const jobs = new WeakMap();
   let onDue = () => {};
   const hostMode = (yjs) => (hostLimits && yjs ? { fence: 0, job: null, lastFull: null, deletesSince: 0, contentSeq: 0, failed: null, retired: new Set(), legacy: new Set(), ranges: createRangeCache() } : null);
+  // A copy of a room to try a file against. Its compaction state is room data plus a
+  // running job and a range cache, which hold functions: the copy starts with neither.
+  const projectRoom = (room) => {
+    const compaction = room.compaction;
+    if (!compaction) return structuredClone(room);
+    room.compaction = null;
+    let projected;
+    try { projected = structuredClone(room); } finally { room.compaction = compaction; }
+    projected.compaction = { ...structuredClone({ ...compaction, job: null, ranges: null }), ranges: createRangeCache() };
+    return projected;
+  };
   const due = (room, overflow = false) => {
     if (!room.compaction || room.compaction.job || room.compaction.failed) return;
     try { onDue(room, { overflow }); } catch {}
@@ -286,9 +297,26 @@ export function createRooms({ now = Date.now, newEpoch = randomUUID, liveBytes =
       ops.push(validateOp({ op: 'set', path: ['y', key], value: v }));
     }
     if (!ops.length) return null;
-    const next = applyOps(cloneJson(store.value), ops);
-    const bytes = sizeOf(next);
-    if (bytes > LIVE_LIMITS.storeBytes || roomBytes(room) - store.bytes + bytes > LIVE_LIMITS.roomBytes) return 'dropped';
+    const fits = (n) => n <= LIVE_LIMITS.storeBytes && roomBytes(room) - store.bytes + n <= LIVE_LIMITS.roomBytes;
+    let next = applyOps(cloneJson(store.value), ops);
+    let bytes = sizeOf(next);
+    if (!fits(bytes)) {
+      // A file from an older tab repeats most of the page, so the plain union can be twice
+      // its real size: fold the room and the file into one checkpoint before giving up.
+      const built = buildCandidate({ kind: 'full', sources: [...entriesOf(store.value.y), ...adds] });
+      if (!built.update || built.pending) return 'dropped';
+      const retire = Object.keys(store.value.y);
+      ops.length = 0;
+      for (const key of retire) ops.push(validateOp({ op: 'del', path: ['y', key] }));
+      ops.push(validateOp({ op: 'set', path: ['y', `c${textHash(room.epoch).slice(0, 8)}-${seq.toString(36)}`], value: built.update }));
+      next = applyOps(cloneJson(store.value), ops);
+      bytes = sizeOf(next);
+      if (!fits(bytes)) return 'dropped';
+      for (const [key] of entriesOf(store.value.y)) {
+        state.retired.add(key);
+        if (state.retired.size > hostLimits.retired) state.retired.delete(state.retired.values().next().value);
+      }
+    }
     const logged = byteLength(JSON.stringify(ops));
     store.value = next;
     store.bytes = bytes;
@@ -646,7 +674,7 @@ export function createRooms({ now = Date.now, newEpoch = randomUUID, liveBytes =
         if (!store || store.ephemeral) throw new PersistentReservationError('invalid-target');
       }
       const currentHeld = heldBy(record.room);
-      const projected = structuredClone(record.room);
+      const projected = projectRoom(record.room);
       reconcileFile(projected, record.key, html, {});
       for (const [name, store] of record.room.stores) {
         if (!store.ephemeral && !projected.stores.has(name)) throw new PersistentReservationError('budget');
@@ -991,7 +1019,11 @@ export function createRooms({ now = Date.now, newEpoch = randomUUID, liveBytes =
       if (room.writer !== clientId) return { writerChanged: false, writer: room.writer };
       let best = null;
       let bestAt = -1;
-      for (const id of remaining.filter((candidate) => room.seen.has(candidate))) {
+      // A tab too old to see the page store cannot checkpoint it: a capable tab goes first.
+      const seen = remaining.filter((candidate) => room.seen.has(candidate));
+      const legacy = room.compaction?.legacy;
+      const capable = legacy ? seen.filter((candidate) => !legacy.has(candidate)) : seen;
+      for (const id of capable.length ? capable : seen) {
         const at = room.lastSentAt.get(id) ?? 0;
         if (at > bestAt) {
           best = id;
@@ -1134,6 +1166,12 @@ export function createRooms({ now = Date.now, newEpoch = randomUUID, liveBytes =
       }
       if (bytes > hostLimits.activeBytes && bytes > store.bytes) {
         for (let i = done.length - 1; i >= 0; i--) undoTracked(done[i]);
+        // A full fold of the whole page that still does not fit: the page is as small as it
+        // gets, so the next write is refused as full instead of waiting for another fold.
+        if (job.kind === 'full' && retire.length === Object.keys(y).length) {
+          room.compaction.lastFull = { bytes: store.bytes, seq: room.seq, deletesAtBegin: job.deletesAtBegin };
+          room.compaction.deletesSince -= job.deletesAtBegin;
+        }
         return { refused: 'too-large' };
       }
       const clean = store.landed === store.last;

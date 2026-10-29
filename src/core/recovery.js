@@ -576,7 +576,6 @@ export function createRecovery({
     entry.batches += 1;
     entry.batchBytes += record.payload.byteLength;
     if (receipt.skipped) return { ok: true, id: record.id, revision, skipped: true };
-    planCompaction(entry);
     return { ok: true, id: record.id, revision };
   }
 
@@ -710,24 +709,6 @@ export function createRecovery({
     const receipt = opened.ok ? await swapBatches(entry, [], { capsuleId: binaryOf(entry, String(key)), context, rebuild }) : opened;
     note(receipt);
     return receipt;
-  }
-
-  function planCompaction(entry) {
-    if (typeof entry.merge !== "function" || entry.compaction) return;
-    if (entry.batches < COMPACT_BATCHES && entry.batchBytes < COMPACT_BYTES) return;
-    entry.compaction = (async () => {
-      const listed = await store.list();
-      if (!listed.ok) return;
-      const mine = listed.records.filter(
-        (record) => record.channel === entry.channel && record.kind === "binary-batch" && record.writerId === writerId
-      );
-      if (!mine.length) return;
-      await compact(entry, { records: mine.map(({ id, revision }) => ({ id, revision })) });
-    })()
-      .catch(() => {})
-      .finally(() => {
-        entry.compaction = null;
-      });
   }
 
   function flush(entry) {

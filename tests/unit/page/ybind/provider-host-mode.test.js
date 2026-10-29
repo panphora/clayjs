@@ -34,7 +34,7 @@ const makeHost = ({ value = { v: 1, g: 0, y: {} }, clientID = 5, compaction = CO
     }
   });
   const provider = createYProvider({ store, ydoc, journal, ...timers });
-  const enter = () => { store.rebase(clone(room.value), { source: "state", room: { compaction } }); flush(); };
+  const enter = () => { store.setMode("fast"); store.rebase(clone(room.value), { source: "state", room: { compaction } }); flush(); };
   const ack = (descriptor = compaction) => {
     store.rebase(clone(room.value), { source: "state", room: { compaction: descriptor }, confirmed: store.pending.length });
     flush();

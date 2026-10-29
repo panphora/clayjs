@@ -238,7 +238,7 @@ describe("an upgrade takes the document-operation slot", () => {
       isEditMode: true,
       save: { flush, replace: jest.fn(async () => ({ ok: true, etag: "etag-after" })) },
       storage: { session: new Map() },
-      getHTML: () => "<!DOCTYPE html><html><body>copy</body></html>",
+      getHTML: () => "<!DOCTYPE html>\n" + document.documentElement.outerHTML,
       host: { versions: Promise.resolve(true) },
     };
   }

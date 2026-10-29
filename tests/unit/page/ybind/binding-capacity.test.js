@@ -53,8 +53,10 @@ const open = ({ requestCheckpoint = null, requestExitCheckpoint = null, onStoppe
     onStopped,
     registerUnsavedState: register,
   });
-  const rebaseRoom = (extra = {}) =>
-    store.rebase(clone(room.value), { source: "state", room: { compaction: COMPACTION }, ...extra });
+  const rebaseRoom = (extra = {}) => {
+    store.setMode("fast");
+    return store.rebase(clone(room.value), { source: "state", room: { compaction: COMPACTION }, ...extra });
+  };
   const enter = () => rebaseRoom();
   const ack = () => rebaseRoom({ confirmed: store.pending.length });
   const refuse = (code) => {

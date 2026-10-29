@@ -380,6 +380,7 @@ export function createStore({ name, value, ephemeral = false }) {
     },
     setMode(next) {
       mode = next;
+      if (next !== "fast") lastRoom = null;
     },
     // A transport hears every local op batch, in order, as it is committed.
     onLocal(fn) {
