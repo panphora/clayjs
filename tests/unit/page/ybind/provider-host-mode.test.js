@@ -1,6 +1,6 @@
 import * as Y from "../../../../src/vendor/yjs.vendor.js";
 import { createStore } from "../../../../src/live/store.js";
-import { createYProvider, entriesOf, docFromValue, PART } from "../../../../src/page/ybind/provider.js";
+import { createYProvider, entriesOf, docFromValue, PART, enc } from "../../../../src/page/ybind/provider.js";
 
 const clone = (v) => JSON.parse(JSON.stringify(v));
 
@@ -178,4 +178,25 @@ test("without a compaction descriptor the provider folds as it always did", () =
   expect(h.ops.some((op) => op.op === "del")).toBe(true);
   expect(entriesOf(h.store.value.y)).toHaveLength(1);
   expect(textOf(h.store.value)).toBe("x".repeat(40));
+});
+
+test("a pending op that is not the provider's own does not hold the outbox", () => {
+  const h = makeHost();
+  h.enter();
+  h.ydoc.getText("flow").insert(0, "mine");
+  h.ack();
+  const other = docFromValue(h.room.value);
+  other.getText("flow").insert(4, "!");
+  h.room.value.y["u9-0"] = enc(Y.encodeStateAsUpdateV2(other));
+  other.destroy();
+  h.enter();
+  h.store.handle.set(["y", "u9-0"], h.store.value.y["u9-0"]);
+  expect(h.store.pending.length).toBe(1);
+  const before = new Set(Object.keys(h.store.value.y));
+  h.ydoc.getText("flow").insert(0, "!");
+  const added = Object.keys(h.store.value.y).filter((k) => !before.has(k));
+  expect(added).toHaveLength(1);
+  expect(added[0]).toMatch(/^u5-/);
+  expect(h.store.pending.length).toBe(2);
+  expect(textOf(h.store.value)).toBe("!mine!");
 });

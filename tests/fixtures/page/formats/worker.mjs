@@ -819,7 +819,7 @@ async function scenarioFeatureOffline(rt, input) {
 // of its own, so a tab that cannot read floor 1 never sees a future-format frame.
 async function scenarioFeatureChannel(rt, input) {
   const pagePath = input.path ?? "/page.html";
-  const { localLaneKey, FORMAT_SCOPE } = await rt.load("live/local-lane.js");
+  const { localLaneKey, FORMAT_SCOPE, ROOM_SCOPE } = await rt.load("live/local-lane.js");
   const { localChannel } = await rt.load("live/local-channel.js");
   const output = { before: null, after: null };
   const later = async (check, ms = 2000) => {
@@ -833,9 +833,10 @@ async function scenarioFeatureChannel(rt, input) {
   await positive("the floor-1 transition opens a channel of its own", () => {
     output.before = localLaneKey(0, pagePath);
     output.after = localLaneKey(1, pagePath);
-    must(output.before === `clay-live:${pagePath}`, `the floor-0 scope is ${output.before}`);
-    must(output.after === `clay-live:${pagePath}:${FORMAT_SCOPE}`, `the floor-1 scope is ${output.after}`);
+    must(output.before === `clay-live:${pagePath}:${ROOM_SCOPE}`, `the floor-0 scope is ${output.before}`);
+    must(output.after === `clay-live:${pagePath}:${FORMAT_SCOPE}:${ROOM_SCOPE}`, `the floor-1 scope is ${output.after}`);
     must(FORMAT_SCOPE === "page-format:1", `the transition scope is ${FORMAT_SCOPE}`);
+    must(ROOM_SCOPE === "page-rooms:2", `the room scope is ${ROOM_SCOPE}`);
     must(localLaneKey(2, pagePath) === output.after, "a higher floor left the scope");
     return output.after;
   });

@@ -17,13 +17,24 @@
 // stamp (or, without one, the last version known to be in the file) picks
 // where in the log it starts, the moves after that go back on top, and the
 // merge itself is logged as a diff so a later file stamped before it keeps it.
+//
+// In the room scope the page store is a host-mode room, compacted by the tab that
+// sequences it: an update is one whole client key, a refusal answers with the
+// host's code, and a due room folds its keys in an idle task (a tail merge or a
+// full, each proven before it is written) and sends the commit as a move of its
+// own. A save merges as a union of keys, under names this room makes. The scope is
+// part of the lane key, so a tab of the lane before it never shares a sequencer.
 
 import { localChannel } from "./local-channel.js";
 import { applyOp, applyTracked, checkOp, cloneJson, undoTracked, validateOp, serializeLive, textHash, diffOps } from "./ops.js";
 import { parseJsonRelaxed } from "../vendor/hyper-morph-json.vendor.js";
 import { movesSince } from "./moves.js";
+import { COMPACTION, ROOM_ERROR_STATUS, admitPageOps, planCompaction, buildCandidate, checkUpdate, pageShape, createRangeCache, unionFileEntries } from "../server/rooms/page-compaction.js";
 
-const VERSION = 4;
+// The lane's own message version, carried by every message it posts: a tab of
+// another version drops its frames even if a scope were ever shared. The shared
+// channel keeps its wire version, which presence rides beside.
+const VERSION = 5;
 export const REQUEST_MS = 2000;
 export const CLOSE_WAIT_MS = 500;
 export const LOG_ENTRIES = 1024;
@@ -58,10 +69,21 @@ const encoder = new TextEncoder();
 // host floor. The message protocol inside the scope is unchanged.
 export const FORMAT_SCOPE = "page-format:1";
 
+// The room scope: this lane's sequencer is a host-mode room, so a tab of the lane
+// before it, which cannot read that room, is never on the same channel or lock.
+export const ROOM_SCOPE = "page-rooms:2";
+
 export function localLaneKey(floor = 0, path = window.location.pathname) {
   const base = "clay-live:" + path;
-  return floor >= 1 ? `${base}:${FORMAT_SCOPE}` : base;
+  return `${floor >= 1 ? `${base}:${FORMAT_SCOPE}` : base}:${ROOM_SCOPE}`;
 }
+
+function idle(fn) {
+  if (typeof requestIdleCallback === "function") requestIdleCallback(fn, { timeout: 1000 });
+  else setTimeout(fn, 0);
+}
+
+const isYValue = (value) => !!value && typeof value === "object" && typeof value.y === "object" && value.y !== null && !Array.isArray(value.y);
 
 export function localLaneSupported() {
   return typeof BroadcastChannel === "function" && typeof navigator !== "undefined" && typeof navigator.locks?.request === "function";
@@ -79,12 +101,16 @@ function randomId() {
  * @param {string} [options.key]
  * @param {object} [options.channel] - the document's channel, when a presence
  *   service in this tab already owns one: the two share it rather than open a second
+ * @param {boolean} [options.rooms] - the page's room scope: the channel and the
+ *   lock of the host-mode lane, which a tab of the lane before it never joins
  */
-// `key` is the room's channel without a floor suffix; `floor` scopes it.
-export function localTransport({ seed, key = "clay-live:" + window.location.pathname, channel: shared = null, floor = 0 }) {
+// `key` is the room's channel without a floor suffix; `floor` scopes it, and
+// `rooms` puts it in the room scope.
+export function localTransport({ seed, key = "clay-live:" + window.location.pathname, channel: shared = null, floor = 0, rooms = false }) {
   const clientId = randomId();
   let scopeFloor = floor >= 1 ? 1 : 0;
-  let laneKey = scopeFloor ? `${key}:${FORMAT_SCOPE}` : key;
+  const scopeOf = (f) => `${key}${f >= 1 ? `:${FORMAT_SCOPE}` : ""}${rooms ? `:${ROOM_SCOPE}` : ""}`;
+  let laneKey = scopeOf(scopeFloor);
   let channel = null;
   let unsubscribe = null;
   let handlers = null;
@@ -118,7 +144,7 @@ export function localTransport({ seed, key = "clay-live:" + window.location.path
   let mirror = { epoch: null, seq: 0, sequencer: null, closedBy: null, stale: false, seen: new Map(), stores: new Map() };
 
   function post(message) {
-    channel?.post(message);
+    channel?.post({ ...message, version: VERSION });
   }
 
   // Over either cap the oldest entries go, and a file older than them can no
@@ -166,6 +192,7 @@ export function localTransport({ seed, key = "clay-live:" + window.location.path
     const meta = {};
     for (const [name, m] of mirror.stores) {
       stores[name] = { value: cloneJson(m.value), ephemeral: m.ephemeral, seen: receiptsFor(name), last: m.last, landed: landedIn(m) };
+      if (name === "page" && isYValue(m.value)) stores[name].compaction = { v: COMPACTION.version, loose: COMPACTION.loose, activeBytes: COMPACTION.activeBytes };
       meta[name] = { log: m.log, last: m.last, landed: m.landed, floor: m.floor, behind: m.behind, file: m.file, inFile: m.inFile };
     }
     const state = { epoch: room.epoch, seq: room.seq, writer: clientId, stores, mirror: { seen: [...mirror.seen], stores: meta } };
@@ -272,7 +299,7 @@ export function localTransport({ seed, key = "clay-live:" + window.location.path
     mirror.closedBy = null;
     const lastN = new Map();
     for (const [nKey, n] of mirror.seen) lastN.set(nKey, { n, seq: 0 });
-    room = { epoch: mirror.epoch, seq: mirror.seq, lastN };
+    room = { epoch: mirror.epoch, seq: mirror.seq, lastN, host: pageHost() };
     for (const [name, frame] of kept) {
       const m = mirror.stores.get(name);
       if (!m || m.ephemeral) continue;
@@ -351,6 +378,93 @@ export function localTransport({ seed, key = "clay-live:" + window.location.path
       });
   }
 
+  // A room's host mode: the sources it retired, the last full fold and the
+  // deletions since it (which tell a room that is out of room from one that can
+  // still be compacted), a build failure that stops it, the range cache the union
+  // merge reads, and the idle task the room has asked for.
+  const pageHost = () => ({ retired: new Set(), lastFull: null, deletesSince: 0, failed: null, ranges: createRangeCache(), task: null, overflow: false });
+
+  const pageStore = () => {
+    const m = mirror.stores.get("page");
+    return m && !m.ephemeral && isYValue(m.value) ? m : null;
+  };
+
+  const pageBytes = (value) => encoder.encode(serializeLive(value)).length;
+
+  // A host-mode refusal answers as the server's does: the status its code has and
+  // the code itself, which is what a tab acts on.
+  const refused = (error, retryAfter = 0) => ({ status: ROOM_ERROR_STATUS[error] ?? 409, body: { code: error }, retryAfter });
+
+  // The room is due a compaction: one idle task, in this tab. The plan, the build
+  // and the commit all run inside it without yielding, so no job outlives the
+  // sequencer that made it and a hand-off cannot carry one to its successor.
+  function due(overflow = false) {
+    if (!room) return;
+    const host = room.host;
+    host.overflow ||= overflow;
+    if (host.task) return;
+    const target = room;
+    host.task = idle(() => {
+      host.task = null;
+      const over = host.overflow;
+      host.overflow = false;
+      if (stopped || room !== target || host.failed) return;
+      compact(host, { overflow: over });
+    });
+  }
+
+  function compact(host, { overflow }) {
+    const page = pageStore();
+    if (!page) return;
+    const plan = planCompaction(page.value.y, { overflow }, COMPACTION);
+    if (!plan) return;
+    const built = buildCandidate({ kind: plan.kind, sources: plan.sources });
+    if (typeof built.update !== "string") {
+      host.failed = { reason: built.failure };
+      return;
+    }
+    commitPage(host, page, plan, built.update);
+  }
+
+  // Every source still there with the identical string, and the candidate proven:
+  // then the room retires the sources for one checkpoint key of its own, named for
+  // this epoch and position, and the commit goes out as a move like any other.
+  function commitPage(host, m, plan, update) {
+    const y = m.value.y;
+    for (const [key, value] of plan.sources) if (y[key] !== value) return;
+    if (!checkUpdate(update)) return;
+    const key = `${plan.kind === "full" ? "c" : "t"}${textHash(room.epoch).slice(0, 8)}-${(room.seq + 1).toString(36)}`;
+    if (Object.hasOwn(y, key)) return;
+    const ops = [...plan.sources.map(([source]) => validateOp({ op: "del", path: ["y", source] })), validateOp({ op: "set", path: ["y", key], value: update })];
+    let trial;
+    try {
+      trial = applyAll(m.value, ops);
+    } catch {
+      return;
+    }
+    const bytes = pageBytes(trial.value);
+    const grew = bytes > pageBytes(m.value);
+    trial.undo();
+    if (bytes > COMPACTION.activeBytes && grew) return;
+    const clean = !m.behind && m.landed === m.last;
+    for (const [source] of plan.sources) {
+      host.retired.add(source);
+      if (host.retired.size > COMPACTION.retired) host.retired.delete(host.retired.values().next().value);
+    }
+    room.seq += 1;
+    if (plan.kind === "full") {
+      host.lastFull = { bytes, seq: room.seq };
+      host.deletesSince = 0;
+    }
+    const data = { epoch: room.epoch, seq: room.seq, name: "page", ops, from: "compactor", n: 0, kind: plan.kind };
+    advance(data);
+    if (clean) m.landed = room.seq;
+    post({ type: "data", data });
+    handlers.frame(cloneJson(data));
+    const shape = pageShape(m.value.y, COMPACTION);
+    if (shape.loose >= COMPACTION.soft || !shape.normal) due();
+  }
+
   function roomApply(from, frame) {
     if (!frame || typeof frame.name !== "string" || !Number.isInteger(frame.n) || frame.n < 1 || !Array.isArray(frame.ops) || !frame.ops.length) {
       return { status: 400, body: { error: "bad-frame" }, retryAfter: 0 };
@@ -365,9 +479,27 @@ export function localTransport({ seed, key = "clay-live:" + window.location.path
     let ops;
     try {
       ops = frame.ops.map(validateOp);
-      applyAll(m.value, ops).undo();
     } catch (err) {
       return { status: 422, body: { error: err.message }, retryAfter: 0 };
+    }
+    const host = room.host;
+    const admission = frame.name === "page" && isYValue(m.value) ? admitPageOps({ y: m.value.y, ops, state: { ...host, compaction: frame.compaction }, limits: COMPACTION }) : null;
+    if (admission?.error) {
+      if (admission.error === "checkpoint-required") due();
+      return refused(admission.error, admission.retryAfter);
+    }
+    let trial;
+    try {
+      trial = applyAll(m.value, ops);
+    } catch (err) {
+      return { status: 422, body: { error: err.message }, retryAfter: 0 };
+    }
+    const bytes = admission ? pageBytes(trial.value) : 0;
+    trial.undo();
+    if (admission && bytes > admission.limit) {
+      if (host.lastFull && host.deletesSince === 0) return refused("page-full");
+      due(true);
+      return refused("checkpoint-required");
     }
     room.seq += 1;
     room.lastN.set(nKey, { n: frame.n, seq: room.seq });
@@ -375,6 +507,11 @@ export function localTransport({ seed, key = "clay-live:" + window.location.path
     advance(data);
     post({ type: "data", data });
     handlers.frame(cloneJson(data));
+    if (admission) {
+      host.deletesSince += admission.deleted;
+      if (bytes > COMPACTION.activeBytes) due(true);
+      else if (admission.shape.loose + admission.added >= COMPACTION.soft) due();
+    }
     return { status: 200, body: { seq: room.seq, epoch: room.epoch }, retryAfter: 0 };
   }
 
@@ -416,6 +553,7 @@ export function localTransport({ seed, key = "clay-live:" + window.location.path
     }
     if (value === null || typeof value !== "object" || Array.isArray(value) !== Array.isArray(m.value)) return null;
     const file = { seq: seq ?? null, hash: textHash(serializeLive(value)) };
+    if (name === "page" && isYValue(m.value) && isYValue(value)) return mergePageFile(m, value, file);
     // A stamp of this room places the file. Still the value its stamp names, it
     // is a capture and holds no merge past the stamp; edited, or unstamped, it
     // descends from the file before it, which holds the merges in inFile.
@@ -454,6 +592,40 @@ export function localTransport({ seed, key = "clay-live:" + window.location.path
     m.behind = false;
     m.file = file;
     return { changed, moved: true };
+  }
+
+  // A save of the page merges as a union: every key whose content the room cannot
+  // rebuild from its own keys goes in under a fresh name of this room's, never the
+  // file's, so a key the room retired cannot come back through it. The merge is a
+  // move like any other, and the room is due a compaction after it.
+  function mergePageFile(m, value, file) {
+    if (value.g !== m.value.g) return null;
+    const host = room.host;
+    const adds = unionFileEntries({
+      y: m.value.y,
+      fileY: value.y,
+      retired: host.retired,
+      rangesFor: host.ranges,
+      keyFor: (i) => `f${textHash(room.epoch).slice(0, 8)}-${(room.seq + 1).toString(36)}-${i.toString(36)}`,
+    });
+    m.file = file;
+    const taken = new Set();
+    const ops = [];
+    for (const [key, v] of adds) {
+      if (Object.hasOwn(m.value.y, key) || taken.has(key)) continue;
+      taken.add(key);
+      ops.push(validateOp({ op: "set", path: ["y", key], value: v }));
+    }
+    if (!ops.length) return { changed: false, moved: false };
+    m.value = applyAll(m.value, ops).value;
+    room.seq += 1;
+    mirror.seq = room.seq;
+    m.last = room.seq;
+    pushLog(m, { seq: room.seq, ops });
+    m.inFile = [...m.inFile.filter((seq) => seq > m.floor), room.seq];
+    host.lastFull = null;
+    due();
+    return { changed: true, moved: true };
   }
 
   // A file frame (another tab's or device's save, or this browser's own
@@ -529,7 +701,7 @@ export function localTransport({ seed, key = "clay-live:" + window.location.path
   }
 
   function onMessage({ data: m }) {
-    if (stopped || !m || m.v !== VERSION) return;
+    if (stopped || !m || m.version !== VERSION) return;
     if (room && ((m.type === "data" && m.data?.epoch === room.epoch) || ((m.type === "data-state" || m.type === "closed") && m.state?.epoch === room.epoch && m.state.writer !== clientId))) {
       forked();
       return;
@@ -590,7 +762,7 @@ export function localTransport({ seed, key = "clay-live:" + window.location.path
     if (!covered) return { status: "refused", code: "uncovered", ...held };
     closeRoom();
     unsubscribe?.();
-    laneKey = want ? `${key}:${FORMAT_SCOPE}` : key;
+    laneKey = scopeOf(want);
     scopeFloor = want;
     channel = localChannel(laneKey);
     unsubscribe = channel.subscribe("durable", (data) => onMessage({ data }));
@@ -632,7 +804,7 @@ export function localTransport({ seed, key = "clay-live:" + window.location.path
       };
     },
     async send(_clientId, frame) {
-      if (room) return roomApply(clientId, frame);
+        if (room) return roomApply(clientId, frame);
       return (await request({ type: "post", frame, epoch: mirror.epoch })) || { status: 0, body: null, retryAfter: 0 };
     },
     // The sequencer's state, installed into the mirror first. An answer to a

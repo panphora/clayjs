@@ -783,8 +783,10 @@ function ensureLane() {
         fast = lane.createFastLane(laneOptions(serverTransport()));
       } else if (lane.localLaneSupported()) {
         // The document's own floor picks the channel scope: a floor-1 document
-        // never shares the lane a tab that cannot read it is on.
-        local = lane.localTransport({ seed: seedLocalRoom, floor: document.querySelector('meta[name="clay-page-format"]')?.getAttribute("content") });
+        // never shares the lane a tab that cannot read it is on. The room scope
+        // puts this tab's sequencer in the host-mode room, which a tab of the lane
+        // before it never joins.
+        local = lane.localTransport({ seed: seedLocalRoom, rooms: true, floor: document.querySelector('meta[name="clay-page-format"]')?.getAttribute("content") });
         fast = lane.createFastLane(laneOptions(local));
       } else {
         settleLane?.(null);

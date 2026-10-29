@@ -997,11 +997,12 @@ function tabAt(tags, { key = KEY, floor = 0 } = {}) {
 
 test("the lane's scope follows the document's floor", async () => {
   scopedLocks();
-  const { localLaneKey, FORMAT_SCOPE } = await import("../../src/live/local-lane.js");
+  const { localLaneKey, FORMAT_SCOPE, ROOM_SCOPE } = await import("../../src/live/local-lane.js");
   expect(FORMAT_SCOPE).toBe("page-format:1");
-  expect(localLaneKey(0, "/game.html")).toBe("clay-live:/game.html");
-  expect(localLaneKey(1, "/game.html")).toBe("clay-live:/game.html:page-format:1");
-  expect(localLaneKey(2, "/game.html")).toBe("clay-live:/game.html:page-format:1");
+  expect(ROOM_SCOPE).toBe("page-rooms:2");
+  expect(localLaneKey(0, "/game.html")).toBe(`clay-live:/game.html:${ROOM_SCOPE}`);
+  expect(localLaneKey(1, "/game.html")).toBe(`clay-live:/game.html:${FORMAT_SCOPE}:${ROOM_SCOPE}`);
+  expect(localLaneKey(2, "/game.html")).toBe(`clay-live:/game.html:${FORMAT_SCOPE}:${ROOM_SCOPE}`);
   const floorZero = tabAt({ game: { value: { score: 0 } } });
   const floorOne = tabAt({ game: { value: { score: 0 } } }, { key: KEY, floor: 1 });
   await settle();

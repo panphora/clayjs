@@ -127,8 +127,14 @@ export function createYProvider({ store, ydoc, compact: limits = {}, setTimer = 
     const text = enc(bytes);
     store.handle.update((data) => { data.y[key] = text; });
   };
+  const isOwnYOp = (op) => {
+    const path = op.path;
+    if (!Array.isArray(path) || path.length !== 2 || path[0] !== "y") return true;
+    return own.has(path[1]);
+  };
+  const mineInFlight = () => store.pending.some((op) => isOwnYOp(op));
   const offer = () => {
-    if (mode !== "host" || stopped || store.pending.length || !outbox.length) return;
+    if (mode !== "host" || stopped || mineInFlight() || !outbox.length) return;
     const update = outbox.length === 1 ? outbox[0] : Y.mergeUpdatesV2(outbox);
     outbox = [];
     putWhole(nextKey("u"), update);
@@ -184,7 +190,7 @@ export function createYProvider({ store, ydoc, compact: limits = {}, setTimer = 
 
   function reconcile() {
     if (stopped) return false;
-    if (mode === "host" && store.pending.length) return false;
+    if (mode === "host" && mineInFlight()) return false;
     const y = store.value.y;
     if (roomHolds(y)) { wantReconcile = false; reconcilePending = false; return false; }
     const scratch = new Y.Doc();
