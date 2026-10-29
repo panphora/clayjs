@@ -88,6 +88,37 @@ test("a legacy removal with no vector keeps every hidden unit a candidate", () =
   expect(reduceRecoverable(pd).list).toEqual(recoverableOf(pd));
 });
 
+// The bridge's snapshot builds one record per source a removal displaces, and only those:
+// the source nothing displaces is never opened, so its attributes are never read.
+test("the bridge builds a record only for the source a removal displaces", () => {
+  const pd = seed();
+  const sv = vectorOf(pd.ydoc);
+  const peer = clone(pd, 100);
+  const q = markerOf(peer, "q");
+  peer.ydoc.transact(() => peer.flow.insert(q.at + 2, "X"), NET);
+  merge(pd, peer);
+  const p = markerOf(pd, "p");
+  const r = markerOf(pd, "r");
+  const stats = { groups: 0, mismatch: 0, renders: 0, first: null };
+  const bridge = createBridge({ pd, stats, captureTimeout: 0 });
+  try {
+    pd.ydoc.transact(() => {
+      pd.gone.set(removeKey(q.key, "op-q"), { blockId: "q", end: r.key, sv });
+      pd.gone.set(removeKey(p.key, "op-p"), { blockId: "p", end: q.key, sv: vectorOf(pd.ydoc) });
+    }, LOCAL);
+    const reads = [];
+    const get = pd.attrs.get.bind(pd.attrs);
+    pd.attrs.get = (key) => { reads.push(key); return get(key); };
+    bridge.dismiss("none", "none");
+    pd.attrs.get = get;
+    expect(bridge.recoverable.map((record) => record.blockId)).toEqual(["q"]);
+    expect(reads).not.toContain("p");
+  } finally {
+    bridge.dispose();
+    pd.ydoc.destroy();
+  }
+});
+
 test("a bridge proves every recovery snapshot it builds against the full reduction while a peer keeps typing", () => {
   const base = seed();
   const a = open(clone(base, 100), { authorToken: "tok-a" });

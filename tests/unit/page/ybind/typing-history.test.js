@@ -352,6 +352,23 @@ test("typing over a selection never joins the run before it", () => {
   agree(tab);
 });
 
+// A replace that arrives with no selection transaction of its own (the input path is handed
+// the range directly) still starts a new undo item: it must not join the run before it.
+test("a replace handed straight to the input path never joins the run before it", () => {
+  const tab = open(seedValue([{ id: "p", text: "abcd" }]), typing);
+  caret(tab, 4);
+  type(tab, "xy");
+  expect(text(tab)).toBe("abcxyd");
+  tab.view.someProp("handleTextInput", (f) => f(tab.view, 6, 7, "Z", () => tab.view.state.tr.insertText("Z", 6, 7)));
+  expect(text(tab)).toBe("abcxyZ");
+  expect(tab.binding.undo()).toBe(true);
+  expect(text(tab)).toBe("abcxyd");
+  expect(tab.binding.undo()).toBe(true);
+  expect(text(tab)).toBe("abcd");
+  expect(tab.binding.undo()).toBe(false);
+  agree(tab);
+});
+
 test("a caret move away and back ends a run", () => {
   const tab = open(seedValue([{ id: "p", text: "abc" }]), typing);
   caret(tab, 4);

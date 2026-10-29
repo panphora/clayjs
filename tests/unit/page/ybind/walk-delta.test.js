@@ -336,6 +336,35 @@ test("a one-block re-walk of a block with a hidden run equals a full walk", () =
   expect(after === null || after.marker.content.embed.b !== "p" || rewalk(pd, s.w, after.marker, after) === null).toBe(true);
 });
 
+// A removal whose own marker was deleted opens the hidden region at that deleted item, and
+// text a peer typed into the removed block stays live inside the region. Re-walking the
+// block that holds it would take that text for the block's own, so it takes the full walk.
+test("a one-block re-walk refuses a block whose hidden region holds live text", () => {
+  const s = open();
+  const { pd } = s;
+  const peer = new Y.Doc();
+  peer.clientID = 700;
+  Y.applyUpdateV2(peer, Y.encodeStateAsUpdateV2(pd.ydoc));
+  const late = createPageDoc(peer);
+  late.flow.insert(atOf(late, "q") + 3, "late");
+  const q = markerOf(pd, "q"), r = markerOf(pd, "r");
+  pd.ydoc.transact(() => {
+    pd.gone.set(removeKey(idKey(q.id), "op-7"), { blockId: "q", end: idKey(r.id), sv: [] });
+    pd.flow.delete(atOf(pd, "q") - 1, "bravo".length + 1);
+  }, LOCAL);
+  Y.applyUpdateV2(pd.ydoc, Y.encodeStateAsUpdateV2(peer), NET);
+  s.w = walk(pd);
+  const p = s.w.visible.find((seg) => seg.id === "p");
+  expect(p.runs.some((run) => run.hole !== undefined)).toBe(true);
+  expect(s.w.hidden.some((entry) => entry.blockId === "q" && entry.items.some((item) => item.text === "late"))).toBe(true);
+  expect(s.w.stops.length).toBeGreaterThan(0);
+
+  const c = s.capture(() => pd.flow.insert(atOf(pd, "p") + 1, "x"));
+  expect(c.marker.content.embed.b).toBe("p");
+  expect(rewalk(pd, s.w, c.marker, c)).toBeNull();
+  totals.refused += 1;
+});
+
 test("a one-block re-walk of a moved block with a hidden run keeps its items equal to a full walk", () => {
   const s = open();
   const { pd } = s;

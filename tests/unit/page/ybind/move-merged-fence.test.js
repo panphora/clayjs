@@ -85,6 +85,27 @@ test("a removal whose source and end merge into one deleted item still ends ther
   expect(decoded(pd)).toEqual(projected(pd));
 });
 
+// A merged deleted item holds a removal's source and the items after it. An end that does not
+// lie past that source (a record naming the item's own start) is not this removal's end, so
+// the region keeps hiding, live and after a reload.
+test("a removal whose end does not lie past its own source is not ended by it", () => {
+  const pd = page([{ id: "p", text: "PP" }, { id: "s", text: "SS" }]);
+  const peer = clone(pd, 500);
+  peer.ydoc.transact(() => {
+    peer.flow.insertEmbed(3, { b: "x" });
+    peer.flow.insert(4, "XX");
+  });
+  merge(pd, peer);
+  const sv = [...Y.decodeStateVector(Y.encodeStateVector(pd.ydoc)).entries()].sort((left, right) => left[0] - right[0]);
+  pd.ydoc.transact(() => pd.gone.set(removeKey("500.0", "op"), { blockId: "x", end: "500.0", sv }));
+  merge(peer, pd);
+  peer.ydoc.transact(() => peer.flow.delete(3, 3));
+  merge(pd, peer);
+
+  expect(projected(pd)).toEqual([["p", "PP"]]);
+  expect(decoded(pd)).toEqual(projected(pd));
+});
+
 test("moving a block next to a joined block whose join lost to a move does not bring the joined text back", () => {
   const pd = page([{ id: "p", text: "PP" }, { id: "q", text: "QQ" }, { id: "r", text: "RR" }, { id: "s", text: "SS" }]);
   const peer = clone(pd, 400);

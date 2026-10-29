@@ -17,6 +17,9 @@ test("an unchanged gone entry is parsed once and shared, frozen, across calls", 
   expect(Object.isFrozen(first.attrs.get("1.0").get("level").nested)).toBe(true);
   second.removals.push("extra");
   expect(parseGoneIntents(pd.gone).removals).toHaveLength(1);
+  const kept = second.removals[0];
+  pd.gone.set(removeKey("1.0", "op-1"), pd.gone.get(removeKey("1.0", "op-1")));
+  expect(parseGoneIntents(pd.gone).removals[0]).toBe(kept);
 });
 
 test("a rewritten, added or deleted entry is seen on the next call", () => {
