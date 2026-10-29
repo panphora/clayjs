@@ -174,7 +174,8 @@ class Presence {
     // total either way: a recipient the host would not name gets people: [] and
     // everyone in `anonymous`, so this sum is the same participant count in both
     // directions.
-    if (people.length + anonymous <= 1) {
+    // The page menu draws who is here inside its own dock, so the corner stays empty.
+    if (people.length + anonymous <= 1 || window.clay?.menu) {
       this.hide();
       return;
     }
@@ -307,6 +308,7 @@ class Presence {
 }
 
 const presence = new Presence();
+if (typeof document !== 'undefined') document.addEventListener('clay:menu-ready', () => presence.render());
 
 export { presence, Presence };
 export default presence;

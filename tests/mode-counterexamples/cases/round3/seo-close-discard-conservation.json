@@ -33,7 +33,7 @@
     },
     {
       "op": "click",
-      "target": ".clay-seo-x"
+      "target": ".clay-seo-cancel"
     },
     {
       "op": "leave"

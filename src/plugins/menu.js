@@ -5,150 +5,36 @@ import { canEdit, isDraftMode, isEditMode, mode as startMode } from "../core/is-
 import onDomReady from "../lib/dom-ready.js";
 import CLAYGOO from "./menu/claygoo.svg.js";
 import { modeRefusalText } from "../core/mode-refusal.js";
+import MENU_CSS from "./menu/style.js";
+import { attachPlacement } from "./menu/placement.js";
+import { attachActions } from "./menu/actions.js";
+import { attachPeople } from "./menu/people.js";
+import { introWanted, countIntroOpen, dismissIntro, keys, isHideShortcut } from "./menu/preferences.js";
 
 const SEO_ITEM = true;
 const NOTE_MS = 6000;
 const INTRO_GAP = 12;
+const RECALL_MS = 8000;
+const INFO =
+  '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true" focusable="false"><circle cx="8" cy="8" r="6.4"/><path d="M8 7.2v4M8 4.6v.6"/></svg>';
+const CROSS =
+  '<svg viewBox="0 0 256 256" fill="currentColor" aria-hidden="true" focusable="false"><path d="M205.66 194.34a8 8 0 0 1-11.32 11.32L128 139.31l-66.34 66.35a8 8 0 0 1-11.32-11.32L116.69 128 50.34 61.66a8 8 0 0 1 11.32-11.32L128 116.69l66.34-66.35a8 8 0 0 1 11.32 11.32L139.31 128Z"/></svg>';
+const GRIP =
+  '<svg viewBox="0 0 6 12" aria-hidden="true" focusable="false"><rect width="2" height="2"/><rect x="4" width="2" height="2"/>' +
+  '<rect y="5" width="2" height="2"/><rect x="4" y="5" width="2" height="2"/><rect y="10" width="2" height="2"/><rect x="4" y="10" width="2" height="2"/></svg>';
 
-const MENU_CSS = `.clay-menu {
-  position: fixed;
-  top: max(12px, env(safe-area-inset-top));
-  right: max(12px, env(safe-area-inset-right));
-  z-index: 2147482000;
-  display: flex;
-  align-items: center;
-  flex-wrap: nowrap;
-  gap: 8px;
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-  font-size: 13px;
-  line-height: 1;
-  color: var(--clay-ui-fg, #1F2328);
-}
-.clay-menu-edit {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  font: inherit;
-  color: inherit;
-  background: none;
-  cursor: pointer;
-}
-.clay-menu[hidden] { display: none !important; }
-.clay-menu-edit:disabled { cursor: progress; opacity: .7; }
-.clay-menu-track {
-  position: relative;
-  display: block;
-  box-sizing: border-box;
-  width: 52px;
-  height: 32px;
-  border: 1px solid rgba(23, 28, 36, .16);
-  border-radius: 999px;
-  background: var(--clay-ui-bg, #F4F4F5);
-  transition: background-color .15s ease, border-color .15s ease;
-}
-.clay-menu-thumb {
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  background: #FAFAFB;
-  box-shadow: 0 1px 2px rgba(23, 28, 36, .35);
-  transition: transform .15s ease;
-}
-.clay-menu-edit[aria-checked="true"] .clay-menu-track {
-  border-color: transparent;
-  background: var(--clay-ui-accent, #2F6FEB);
-}
-.clay-menu-edit[aria-checked="true"] .clay-menu-thumb { transform: translateX(20px); }
-.clay-menu-label { font-size: 13px; line-height: 1; }
-.clay-menu-goo {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  box-sizing: border-box;
-  width: 32px;
-  height: 32px;
-  margin: 0;
-  padding: 0;
-  border: 1px solid rgba(23, 28, 36, .16);
-  border-radius: 50%;
-  color: inherit;
-  background: var(--clay-ui-bg, #F4F4F5);
-  cursor: pointer;
-}
-.clay-menu-goo svg { display: block; width: 18px; height: auto; }
-.clay-menu-dot {
-  position: absolute;
-  top: 1px;
-  right: 1px;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--clay-ui-accent, #2F6FEB);
-}
-.clay-menu-list {
-  position: absolute;
-  top: calc(100% + 8px);
-  right: 0;
-  min-width: 184px;
-  margin: 0;
-  padding: 4px;
-  border: 1px solid rgba(23, 28, 36, .16);
-  border-radius: 10px;
-  background: var(--clay-ui-bg, #F4F4F5);
-  box-shadow: 0 10px 28px -14px rgba(23, 28, 36, .5);
-}
-.clay-menu-list button {
-  display: block;
-  width: 100%;
-  padding: 8px 10px;
-  border: 0;
-  border-radius: 6px;
-  font: inherit;
-  text-align: left;
-  color: inherit;
-  background: none;
-  cursor: pointer;
-}
-.clay-menu-list button:hover,
-.clay-menu-list button:focus-visible { outline: none; background: rgba(23, 28, 36, .08); }
-.clay-menu-note {
-  position: absolute;
-  top: calc(100% + 8px);
-  right: 0;
-  max-width: 260px;
-  padding: 8px 10px;
-  border: 1px solid rgba(23, 28, 36, .16);
-  border-radius: 8px;
-  line-height: 1.4;
-  text-align: left;
-  background: var(--clay-ui-bg, #F4F4F5);
-  box-shadow: 0 10px 28px -14px rgba(23, 28, 36, .5);
-}
-@media (pointer: coarse) {
-  .clay-menu-edit { min-height: 44px; padding: 6px 0; }
-  .clay-menu-goo { width: 44px; height: 44px; }
-}
-@media (prefers-color-scheme: dark) {
-  .clay-menu { color: var(--clay-ui-fg, #E9E9EC); }
-  .clay-menu-track,
-  .clay-menu-goo,
-  .clay-menu-list,
-  .clay-menu-note { border-color: rgba(233, 233, 236, .16); background: var(--clay-ui-bg, #26282C); }
-  .clay-menu-track { background: rgba(233, 233, 236, .22); }
-  .clay-menu-thumb { background: #E9E9EC; }
-  .clay-menu-list button:hover,
-  .clay-menu-list button:focus-visible { background: rgba(233, 233, 236, .12); }
-}
-@media (prefers-reduced-motion: reduce) {
-  .clay-menu-track, .clay-menu-thumb { transition: none; }
-}`;
+// Built-in items keep fixed slots, so the order never depends on which plugin
+// registered first. Any other id goes in its own section above the footer, in the
+// order it was added.
+const SECTIONS = [
+  ["clay.undo", "clay.cms", "clay.ai", "clay.code"],
+  ["seo", "clay.share", "clay.people"],
+  ["clay.duplicate", "clay.download"],
+  ["clay.versions", "clay.hide"],
+  null,
+  ["upgrade"],
+];
+const SLOTTED = new Set(SECTIONS.flat().filter(Boolean));
 
 // clay.mode is the live answer; the imported mode is the one the page booted with.
 const currentMode = () =>
@@ -164,22 +50,27 @@ function stylesOnce() {
 }
 
 function mount() {
-  if (document.querySelector(".clay-menu")) return;
+  if (document.querySelector(".clay-menu-dock")) return;
   stylesOnce();
 
   const root = document.createElement("div");
-  root.className = "clay-menu";
+  root.className = "clay-menu-dock";
   root.setAttribute("clay", "editor-ui");
-  root.setAttribute("clay-mode-toggle", "");
+  root.dataset.corner = "top-right";
   root.innerHTML =
+    `<div class="clay-menu" clay="editor-ui" clay-mode-toggle>` +
+    `<button type="button" class="clay-menu-grip" aria-label="Move the menu. Drag it, or use the arrow keys to move it to another corner.">${GRIP}</button>` +
     `<button type="button" class="clay-menu-edit" role="switch" aria-checked="false">` +
     `<span class="clay-menu-track" aria-hidden="true"><span class="clay-menu-thumb"></span></span>` +
     `<span class="clay-menu-label">Edit</span>` +
     `</button>` +
+    `<span class="clay-menu-divider" aria-hidden="true"></span>` +
     `<button type="button" class="clay-menu-goo" aria-haspopup="menu" aria-expanded="false" aria-label="Clay menu">${CLAYGOO}</button>` +
-    `<div class="clay-menu-list" role="menu" hidden></div>` +
+    `</div>` +
+    `<div class="clay-menu-list" role="menu" aria-label="Clay menu" hidden></div>` +
     `<div class="clay-menu-note" role="status" hidden></div>`;
 
+  const grip = root.querySelector(".clay-menu-grip");
   const edit = root.querySelector(".clay-menu-edit");
   const goo = root.querySelector(".clay-menu-goo");
   const list = root.querySelector(".clay-menu-list");
@@ -193,7 +84,7 @@ function mount() {
     goo.setAttribute("aria-expanded", open ? "true" : "false");
   }
 
-  const buttons = () => [...list.querySelectorAll('[role="menuitem"]')];
+  const buttons = () => [...list.querySelectorAll('[role="menuitem"]:not([aria-disabled="true"])')];
 
   function focusItem(index) {
     const all = buttons();
@@ -201,51 +92,154 @@ function mount() {
     all[(index + all.length) % all.length].focus();
   }
 
+  let showIntro = false;
+
   function close() {
-    if (isOpen()) setExpanded(false);
+    if (!isOpen()) return;
+    setExpanded(false);
+    if (showIntro) {
+      showIntro = false;
+      list.querySelector(".clay-menu-notice")?.remove();
+    }
   }
 
+  let actions = null;
+
   function open() {
-    if (!isOpen()) setExpanded(true);
+    if (isOpen()) return;
+    actions?.refresh();
+    showIntro = introWanted();
+    countIntroOpen();
+    render();
+    setExpanded(true);
+  }
+
+  function introNode() {
+    const notice = document.createElement("div");
+    notice.className = "clay-menu-notice";
+    notice.setAttribute("role", "note");
+    notice.innerHTML =
+      `${INFO}<p>Only editors see this menu.<br>Visitors never do.</p>` +
+      `<button type="button" aria-label="Dismiss">${CROSS}</button>`;
+    notice.querySelector("button").addEventListener("click", (event) => {
+      event.stopPropagation();
+      dismissIntro();
+      showIntro = false;
+      notice.remove();
+      focusItem(0);
+    });
+    return notice;
+  }
+
+  function itemButton(item) {
+    const link = item.href && !item.disabled;
+    const button = document.createElement(link ? "a" : "button");
+    if (link) {
+      button.href = item.href;
+      button.target = "_blank";
+      button.rel = "noopener";
+    } else {
+      button.type = "button";
+    }
+    button.setAttribute("role", "menuitem");
+    button.dataset.menuId = item.id;
+    if (item.badge && item.id === "upgrade") {
+      const label = document.createElement("span");
+      label.className = "clay-menu-upgrade";
+      label.textContent = item.label;
+      button.append(label);
+    } else {
+      button.textContent = item.label;
+    }
+    if (item.keys) {
+      const kbd = document.createElement("kbd");
+      kbd.textContent = item.keys;
+      button.append(kbd);
+    }
+    if (item.disabled) button.setAttribute("aria-disabled", "true");
+    button.addEventListener("click", () => {
+      if (item.disabled) return;
+      close();
+      if (item.run) item.run();
+    });
+    return button;
+  }
+
+  function itemNode(item) {
+    if (item.text) {
+      const line = document.createElement("p");
+      line.className = "clay-menu-version";
+      line.dataset.menuId = item.id;
+      line.textContent = item.label;
+      return line;
+    }
+    if (item.pair) {
+      const pair = document.createElement("div");
+      pair.className = "clay-menu-pair";
+      pair.dataset.menuId = item.id;
+      for (const part of item.pair) pair.append(itemButton(part));
+      return pair;
+    }
+    return itemButton(item);
+  }
+
+  function sections() {
+    const extra = [...items.keys()].filter((id) => !SLOTTED.has(id));
+    return SECTIONS.map((ids) => (ids || extra).map((id) => items.get(id)).filter(Boolean)).filter((group) => group.length);
   }
 
   function render() {
-    const hadFocus = list.contains(document.activeElement);
+    const focused = list.contains(document.activeElement) ? document.activeElement.dataset.menuId : null;
     list.textContent = "";
-    for (const item of items.values()) {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.setAttribute("role", "menuitem");
-      button.dataset.menuId = item.id;
-      button.textContent = item.label;
-      button.addEventListener("click", () => {
-        close();
-        if (item.run) item.run();
-      });
-      list.append(button);
-    }
+    if (showIntro) list.append(introNode());
+    sections().forEach((group, index) => {
+      if (index) {
+        const sep = document.createElement("div");
+        sep.className = "clay-menu-sep";
+        sep.setAttribute("role", "separator");
+        list.append(sep);
+      }
+      for (const item of group) list.append(itemNode(item));
+    });
     const dot = goo.querySelector(".clay-menu-dot");
     const wanted = [...items.values()].some((item) => item.badge);
     if (wanted && !dot) {
       const mark = document.createElement("span");
       mark.className = "clay-menu-dot";
+      mark.setAttribute("aria-hidden", "true");
       goo.append(mark);
     } else if (!wanted && dot) {
       dot.remove();
     }
-    if (hadFocus) focusItem(0);
+    if (focused) {
+      const again = buttons().find((button) => button.dataset.menuId === focused);
+      if (again) again.focus();
+      else focusItem(0);
+    }
   }
 
-  function addItem({ id, label, run, badge } = {}) {
+  const clean = ({ id, label, run, badge, keys, disabled, href }) => ({
+    id,
+    href: typeof href === "string" ? href : "",
+    label: String(label ?? ""),
+    run: typeof run === "function" ? run : null,
+    badge: Boolean(badge),
+    keys: keys ? String(keys) : "",
+    disabled: Boolean(disabled),
+  });
+
+  function addItem({ id, label, run, badge, keys, disabled, text, pair, href } = {}) {
     if (!id) return null;
-    items.set(id, {
-      id,
-      label: String(label ?? ""),
-      run: typeof run === "function" ? run : null,
-      badge: Boolean(badge),
-    });
+    const item = clean({ id, label, run, badge, keys, disabled, href });
+    if (text) item.text = true;
+    if (Array.isArray(pair)) item.pair = pair.map(clean);
+    items.set(id, item);
     render();
     return id;
+  }
+
+  function removeItem(id) {
+    if (items.delete(id)) render();
   }
 
   function showNote(text) {
@@ -261,6 +255,69 @@ function mount() {
 
   let noteTimer = 0;
   let busy = false;
+  let userHidden = false;
+  let recall = null;
+  let recallTimer = 0;
+
+  const applyHidden = () => {
+    root.hidden = userHidden || (!canEdit && currentMode() !== "edit");
+  };
+
+  function dropRecall() {
+    clearTimeout(recallTimer);
+    recall?.remove();
+    recall = null;
+  }
+
+  function hide() {
+    close();
+    userHidden = true;
+    applyHidden();
+    dropRecall();
+    const touch = typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches;
+    recall = document.createElement("div");
+    recall.className = "clay-menu-recall";
+    recall.setAttribute("clay", "editor-ui");
+    recall.setAttribute("role", "status");
+    recall.dataset.corner = root.dataset.corner;
+    const text = document.createElement("p");
+    if (touch) {
+      text.textContent = "Menu hidden until you reload";
+    } else {
+      const kbd = document.createElement("kbd");
+      kbd.textContent = keys("⌘⇧.", "Ctrl+Shift+.");
+      text.append("Menu hidden · Press ", kbd, " to bring it back");
+    }
+    const show = document.createElement("button");
+    show.type = "button";
+    show.className = "clay-menu-btn clay-menu-btn-small";
+    show.textContent = "Show menu";
+    show.addEventListener("click", unhide);
+    recall.append(text, show);
+    document.body.append(recall);
+    const shown = recall;
+    recallTimer = setTimeout(() => {
+      shown.setAttribute("data-fading", "");
+      recallTimer = setTimeout(() => {
+        if (recall === shown) dropRecall();
+      }, 450);
+    }, RECALL_MS);
+  }
+
+  function unhide() {
+    userHidden = false;
+    dropRecall();
+    applyHidden();
+    if (!root.hidden) goo.focus();
+  }
+
+  document.addEventListener("keydown", (event) => {
+    if (!isHideShortcut(event)) return;
+    if (!userHidden && root.hidden) return;
+    event.preventDefault();
+    if (userHidden) unhide();
+    else hide();
+  });
 
   function setChecked() {
     edit.setAttribute("aria-checked", currentMode() === "edit" ? "true" : "false");
@@ -308,7 +365,7 @@ function mount() {
   });
 
   document.addEventListener("click", (event) => {
-    if (isOpen() && !root.contains(event.target)) close();
+    if (isOpen() && !event.composedPath().includes(root)) close();
   });
 
   root.addEventListener("keydown", (event) => {
@@ -353,8 +410,17 @@ function mount() {
   let watched = null;
 
   function place(intro) {
-    root.style.top = `${Math.round(intro.getBoundingClientRect().bottom) + INTRO_GAP}px`;
+    if (root.dataset.corner.startsWith("top")) {
+      root.style.top = `${Math.round(intro.getBoundingClientRect().bottom) + INTRO_GAP}px`;
+    } else {
+      root.style.removeProperty("top");
+    }
   }
+
+  const replace = () => {
+    if (watched) place(watched);
+    else root.style.removeProperty("top");
+  };
 
   function watchIntro() {
     if (!root.isConnected) return;
@@ -388,6 +454,13 @@ function mount() {
   }
 
   document.body.append(root);
+  attachPlacement({
+    dock: root,
+    grip,
+    storage: window.clay.storage && window.clay.storage.local,
+    onMove: replace,
+    onDragStart: close,
+  });
   reserveSpace();
   if (typeof ResizeObserver === "function") new ResizeObserver(reserveSpace).observe(root);
 
@@ -395,6 +468,11 @@ function mount() {
   watchIntro();
 
   const openSeo = () => import("./menu/seo.js").then((m) => m.open());
+
+  actions = attachActions({ addItem, note: showNote, currentMode });
+  attachPeople({ root, capsule: root.querySelector(".clay-menu"), addItem, removeItem, closeMenu: close, note: showNote });
+
+  addItem({ id: "clay.hide", label: "Hide menu", keys: keys("⌘⇧.", "Ctrl+Shift+."), run: hide });
 
   if (SEO_ITEM) {
     addItem({
@@ -412,10 +490,11 @@ function mount() {
 
   // A view-mode owner's hint can be stale: the host's own answer decides, and a page the
   // host will not let this caller save hides the menu rather than offer a refused switch.
-  followCapability = () => { root.hidden = !canEdit && currentMode() !== "edit"; };
+  followCapability = applyHidden;
   if (currentMode() !== "edit") import("../core/host-permission.js").then((m) => m.checkHostPermission()).catch(() => {});
 
-  window.clay.menu = { addItem, open, close, note: showNote };
+  window.clay.menu = { addItem, removeItem, open, close, note: showNote };
+  document.dispatchEvent(new CustomEvent("clay:menu-ready"));
 }
 
 let mounted = false;

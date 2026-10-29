@@ -152,6 +152,9 @@ export async function boot(base, params, readyResolve, manifest = null, suppleme
   // leases before a plugin can take input. A reader returns at the first line.
   await loaded["core/edit-mode.js"].activateInitialMode();
   window.clay.plugins = Object.freeze([...plan.plugins, ...plan.late].map((path) => PLUGIN_NAMES[path]));
+  // What an edit session here would load, so view-mode chrome can offer an edit-only feature.
+  const editPlan = isEditMode ? plan : resolveModules(params, true, { isDraftMode, hasSap, canEdit, templateSource: templateSource() });
+  window.clay.editPlugins = Object.freeze([...editPlan.plugins, ...editPlan.late].map((path) => PLUGIN_NAMES[path]));
 
   for (const path of plan.plugins) {
     // A plugin that throws on evaluation degrades to absent. Unguarded, its

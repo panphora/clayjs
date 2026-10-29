@@ -181,6 +181,32 @@ export async function hostVersions() {
   return meta.document?.versions === true;
 }
 
+/**
+ * The host pages this caller may open for the document, from the `document.actions`
+ * block: `{ codeEditor, versions, duplicate }`, each an absolute http(s) URL, present
+ * only when the host named it. A host without the block offers none of them.
+ *
+ * @returns {Promise<{codeEditor?: string, versions?: string, duplicate?: string}>}
+ */
+export async function hostActions() {
+  const meta = await hostMeta();
+  const block = meta.document?.actions;
+  const actions = {};
+  if (!block || typeof block !== "object") return actions;
+  for (const name of ["codeEditor", "versions", "duplicate"]) {
+    const href = block[name]?.href;
+    if (typeof href !== "string" || !href) continue;
+    let url;
+    try {
+      url = new URL(href, location.href);
+    } catch {
+      continue;
+    }
+    if (url.protocol === "http:" || url.protocol === "https:") actions[name] = url.href;
+  }
+  return actions;
+}
+
 /** Drop the memoized answer. Tests only. */
 export function resetHostMeta() {
   inFlight = null;

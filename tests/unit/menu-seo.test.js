@@ -101,10 +101,9 @@ test("the menu carries the SEO item, and opening then cancelling writes nothing"
   const root = sheetRoot();
   expect(root).not.toBeNull();
   expect(root.getAttribute("clay")).toBe("editor-ui");
-  expect(root.getAttribute("role")).toBe("dialog");
-  expect(root.getAttribute("aria-modal")).toBe("true");
+  expect(root.getAttribute("role")).toBe("region");
   expect(root.getAttribute("aria-labelledby")).toBe("clay-seo-heading");
-  expect(document.getElementById("clay-seo-heading").textContent).toBe("SEO settings");
+  expect(document.getElementById("clay-seo-heading").textContent).toBe("SEO and social sharing");
   expect(document.getElementById("clay-seo-style").getAttribute("clay")).toBe("editor-ui");
   expect(document.activeElement).toBe(fieldOf("title"));
   expect(fieldOf("description").value).toBe("Start description");
@@ -161,9 +160,18 @@ test("view mode is read-only, and the Edit button asks for edit mode and sets th
 
   expect(fieldOf("title").readOnly).toBe(true);
   expect(fieldOf("index").disabled).toBe(true);
-  expect(buttonOf("apply").hidden).toBe(true);
+  expect(buttonOf("apply").hidden).toBe(false);
   expect(buttonOf("cancel").hidden).toBe(true);
 
+  setValue("title", "A write that must not happen");
+  buttonOf("apply").click();
+  await settle();
+
+  expect(sheetRoot()).toBeNull();
+  expect(document.querySelector("title").textContent).toBe("Start title");
+  expect(document.querySelector('meta[name="description"]').getAttribute("content")).toBe("Start description");
+
+  await openSheet();
   const editButton = buttonOf("edit");
   expect(editButton.hidden).toBe(false);
   expect(editButton.textContent).toBe("Edit these settings");

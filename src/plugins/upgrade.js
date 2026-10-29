@@ -77,12 +77,9 @@ async function latestManifest(sourceHref, currentVersion, { fetchFn, now }) {
   return { latest, latestUrl };
 }
 
-export async function findUpdate({
-  doc = document,
-  loc = location,
-  fetchFn = (url, init) => fetch(url, init),
-  now = Date.now(),
-} = {}) {
+// The copy this page says it is: its version and the source it was copied from, or
+// null for a page that is not a copy (or a person who cannot act on an offer).
+function copyOf({ doc, loc }) {
   const clay = (typeof window !== "undefined" && window.clay) || {};
   // A visitor cannot act on the offer, and a draft is not the document the source
   // would replace. Neither fetches.
@@ -101,32 +98,63 @@ export async function findUpdate({
   if (!source.pathname.endsWith(".html")) return null;
   // A pristine published copy points at itself: it is the source, not a copy of one.
   if (loc && source.origin === loc.origin && source.pathname === loc.pathname) return null;
+  return { source, currentVersion };
+}
+
+// What the check learned. "current" is said only after the source answered and named
+// nothing newer; anything that stopped the check short is "unknown", and so is an
+// update the person already declined.
+export async function checkUpdate({
+  doc = document,
+  loc = location,
+  fetchFn = (url, init) => fetch(url, init),
+  now = Date.now(),
+} = {}) {
+  const copy = copyOf({ doc, loc });
+  if (!copy) return { status: "none", version: null, update: null };
+  const { source, currentVersion } = copy;
+  const result = (status, update = null) => ({ status, version: currentVersion, update });
   const latestUrl = new URL(source.href);
   latestUrl.pathname = latestUrl.pathname.replace(/\.html$/, ".json");
 
   const { latest } = await latestManifest(source.href, currentVersion, { fetchFn, now });
-  if (!latest || typeof latest !== "object") return null;
-  if (typeof latest.version !== "string" || !isNewerVersion(latest.version, currentVersion)) return null;
+  if (!latest || typeof latest !== "object" || typeof latest.version !== "string") return result("unknown");
+  if (!isNewerVersion(latest.version, currentVersion)) return result("current");
 
+  const clay = (typeof window !== "undefined" && window.clay) || {};
   const storage = clay.storage && clay.storage.local;
-  if (storage && storage.get(DISMISSED_KEY) === latest.version) return null;
+  if (storage && storage.get(DISMISSED_KEY) === latest.version) return result("unknown");
 
-  if (typeof latest.html !== "string" || !latest.html) return null;
+  if (typeof latest.html !== "string" || !latest.html) return result("unknown");
   const htmlUrl = new URL(latest.html, latestUrl).href;
   const res = await fetchOrNull(fetchFn, htmlUrl);
-  if (!res) return null;
+  if (!res) return result("unknown");
   let bytes;
   try {
     bytes = await res.arrayBuffer();
   } catch {
-    return null;
+    return result("unknown");
   }
   const digest = await digestOf(bytes);
   // A manifest whose digest does not match its HTML is a host that served the wrong
   // bytes. Nothing is offered, because nothing can be trusted to be that version.
-  if (!digest || digest !== String(latest.sha256 || "").toLowerCase()) return null;
+  if (!digest || digest !== String(latest.sha256 || "").toLowerCase()) return result("unknown");
 
-  return { version: latest.version, html: htmlUrl, sha256: digest, latestUrl: latestUrl.href };
+  return result("update", { version: latest.version, html: htmlUrl, sha256: digest, latestUrl: latestUrl.href });
+}
+
+export async function findUpdate(options) {
+  return (await checkUpdate(options)).update;
+}
+
+// The menu's footer while and after the check: the bare version until the check proves
+// more, then the latest-version line or, when there is one, the upgrade itself.
+async function showVersion(status, version) {
+  const clay = window.clay;
+  await whenMenuReady(clay);
+  if (!menuReady(clay) || !version) return;
+  const label = status === "current" ? `This doc is at latest version (${version})` : `Version ${version}`;
+  clay.menu.addItem({ id: "upgrade", label, text: true });
 }
 
 function dismiss(version) {
@@ -184,8 +212,13 @@ export async function start(options = {}) {
   const clay = window.clay;
   // Toasts and the menu are drawn by satellites that may land after boot settles.
   await Promise.resolve(clay && clay.loaded && clay.loaded.ui).catch(() => {});
-  const update = await findUpdate(options).catch(() => null);
-  if (!update) return null;
+  const copy = copyOf({ doc: options.doc || document, loc: options.loc || location });
+  if (copy) showVersion("checking", copy.currentVersion);
+  const { status, version, update } = await checkUpdate(options).catch(() => ({ status: "unknown", version: copy && copy.currentVersion, update: null }));
+  if (!update) {
+    if (status !== "none") await showVersion(status, version);
+    return null;
+  }
   await announce(update);
   return update;
 }

@@ -11,7 +11,8 @@ import { dismissPersistent, toastPersistent } from "../../ui/toast-lazy.js";
 
 const STYLE_ID = "clay-seo-style";
 const REOPEN_KEY = "reopen-seo";
-const LABEL = "SEO settings";
+const LABEL = "SEO and social sharing";
+const UNDO_LABEL = "SEO settings";
 const APPLIED_TEXT = "SEO settings applied";
 const SCHEME = /^[a-z][a-z0-9+.-]*:/i;
 const ROBOTS_NOTE =
@@ -19,274 +20,94 @@ const ROBOTS_NOTE =
 const PUBLIC_NOTE = "Uploaded images are public to anyone with the link.";
 const PASTE_NOTE = "Paste the address of an image on the web.";
 
-const GROUPS = [
-  {
-    legend: "Basics",
-    fields: [
-      { key: "title", label: "Title", kind: "text" },
-      { key: "description", label: "Description", kind: "textarea" },
-      { key: "lang", label: "Language", kind: "text" },
-      { key: "canonical", label: "Canonical URL", kind: "text" },
-    ],
-  },
-  {
-    legend: "Search",
-    fields: [
-      { key: "index", label: "Show in search results", kind: "checkbox" },
-      { key: "follow", label: "Let search engines follow links", kind: "checkbox" },
-    ],
-  },
-  {
-    legend: "Link preview",
-    fields: [
-      { key: "ogTitle", label: "Preview title", kind: "text" },
-      { key: "ogDescription", label: "Preview description", kind: "textarea" },
-      { key: "ogImage", label: "Preview image", kind: "text" },
-      { key: "ogImageAlt", label: "Image alt text", kind: "text" },
-      { key: "siteName", label: "Site name", kind: "text" },
-    ],
-  },
-  {
-    legend: "Social card",
-    fields: [{ key: "twitterSite", label: "Handle", kind: "text" }],
-  },
-];
+const FIELD = {
+  title: { label: "Title", kind: "text", full: true, count: 60 },
+  description: { label: "Description", kind: "textarea", full: true, count: 160 },
+  ogTitle: { label: "Preview title", note: "Open Graph", kind: "text" },
+  ogDescription: { label: "Preview description", note: "Open Graph", kind: "text" },
+  ogImage: { label: "Preview image", note: "Open Graph", kind: "text", full: true },
+  canonical: { label: "Canonical URL", kind: "text" },
+  lang: { label: "Language", kind: "text" },
+  ogImageAlt: { label: "Image alt text", kind: "text" },
+  siteName: { label: "Site name", kind: "text" },
+  twitterSite: { label: "Social handle", kind: "text", placeholder: "@yourname" },
+  index: { label: "Show in search results", kind: "checkbox" },
+  follow: { label: "Let search engines follow links", kind: "checkbox" },
+};
 
-const SHEET_CSS = `.clay-seo {
-  position: fixed;
-  top: 0;
-  right: 0;
-  left: 0;
-  z-index: 2147482100;
-  box-sizing: border-box;
-  width: 100%;
-  max-height: 100vh;
-  margin: 0;
-  padding: 16px;
-  overflow-y: auto;
-  border-bottom: 1px solid rgba(23, 28, 36, .16);
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-  font-size: 14px;
-  line-height: 1.4;
-  color: var(--clay-ui-fg, #1F2328);
-  background: var(--clay-ui-bg, #F4F4F5);
-  box-shadow: 0 18px 40px -24px rgba(23, 28, 36, .55);
-  animation: clay-seo-slide 200ms ease-out;
-}
-@keyframes clay-seo-slide {
-  from { transform: translateY(-100%); }
-  to { transform: translateY(0); }
-}
-.clay-seo-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-.clay-seo-heading {
-  margin: 0;
-  font-size: 15px;
-  font-weight: 600;
-  line-height: 1.2;
-}
-.clay-seo-x {
-  width: 32px;
-  height: 32px;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  border-radius: 50%;
-  font: inherit;
-  font-size: 18px;
-  line-height: 1;
-  color: inherit;
-  background: none;
-  cursor: pointer;
-}
-.clay-seo-x:hover,
-.clay-seo-x:focus-visible { background: rgba(23, 28, 36, .08); outline: none; }
-.clay-seo-preview {
-  display: flex;
-  gap: 12px;
-  margin: 12px 0;
-  padding: 10px;
-  border: 1px solid rgba(23, 28, 36, .16);
-  border-radius: 8px;
-}
-.clay-seo-preview-image {
-  flex: none;
-  width: 88px;
-  height: 62px;
-  border-radius: 6px;
-  object-fit: cover;
-}
-.clay-seo-preview-text { min-width: 0; }
-.clay-seo-preview-title {
-  margin: 0;
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.clay-seo-preview-description,
-.clay-seo-preview-host {
-  margin: 2px 0 0;
-  font-size: 12px;
-  opacity: .8;
-}
-.clay-seo-group {
-  margin: 0 0 14px;
-  padding: 0;
-  border: 0;
-}
-.clay-seo-legend {
-  padding: 0;
-  margin-bottom: 6px;
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: .04em;
-  text-transform: uppercase;
-  opacity: .7;
-}
-.clay-seo-row {
-  display: block;
-  margin-bottom: 8px;
-}
-.clay-seo-caption {
-  display: block;
-  margin-bottom: 4px;
-  font-size: 12px;
-  opacity: .8;
-}
-.clay-seo-row-check {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.clay-seo-row-check .clay-seo-caption { margin-bottom: 0; }
-.clay-seo-input {
-  box-sizing: border-box;
-  width: 100%;
-  margin: 0;
-  padding: 7px 9px;
-  border: 1px solid rgba(23, 28, 36, .24);
-  border-radius: 6px;
-  font: inherit;
-  color: inherit;
-  background: rgba(250, 251, 252, .7);
-}
-.clay-seo-input:focus-visible { outline: 2px solid var(--clay-ui-accent, #2F6FEB); outline-offset: 1px; }
-textarea.clay-seo-input { min-height: 64px; resize: vertical; }
-.clay-seo-note {
-  margin: 4px 0 0;
-  font-size: 12px;
-  opacity: .8;
-}
-.clay-seo-error {
-  margin: 4px 0 0;
-  font-size: 12px;
-  color: #A63A2B;
-}
-.clay-seo-derived {
-  margin: 4px 0 0;
-  padding: 0;
-  border: 0;
-  font: inherit;
-  font-size: 12px;
-  color: var(--clay-ui-accent, #2F6FEB);
-  background: none;
-  text-decoration: underline;
-  cursor: pointer;
-}
-.clay-seo-conflict {
-  margin: 6px 0 0;
-  padding: 8px;
-  border: 1px solid rgba(23, 28, 36, .16);
-  border-radius: 6px;
-  font-size: 12px;
-}
-.clay-seo-conflict p { margin: 0 0 6px; }
-.clay-seo-upload {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  margin: 4px 0 8px;
-}
-.clay-seo-upload .clay-seo-note { flex: 1 1 100%; margin: 0; }
-.clay-seo-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 12px;
-}
-.clay-seo-actions button {
-  padding: 8px 14px;
-  border: 1px solid rgba(23, 28, 36, .24);
-  border-radius: 6px;
-  font: inherit;
-  color: inherit;
-  background: none;
-  cursor: pointer;
-}
-.clay-seo-actions button:hover,
-.clay-seo-actions button:focus-visible { outline: none; background: rgba(23, 28, 36, .08); }
-.clay-seo-apply,
-.clay-seo-edit {
-  border-color: transparent;
-  color: #F7F8FA;
-  background: var(--clay-ui-accent, #2F6FEB);
-}
-.clay-seo-actions .clay-seo-apply:hover,
-.clay-seo-actions .clay-seo-apply:focus-visible,
-.clay-seo-actions .clay-seo-edit:hover,
-.clay-seo-actions .clay-seo-edit:focus-visible { background: var(--clay-ui-accent, #2F6FEB); opacity: .9; }
-.clay-seo-upload-button {
-  padding: 6px 10px;
-  border: 1px solid rgba(23, 28, 36, .24);
-  border-radius: 6px;
-  font: inherit;
-  font-size: 12px;
-  color: inherit;
-  background: none;
-  cursor: pointer;
-}
-@media (min-width: 600px) {
-  .clay-seo {
-    width: 560px;
-    margin: 0 auto;
-    padding: 16px;
-    border: 1px solid rgba(23, 28, 36, .16);
-    border-top: 0;
-    border-radius: 0 0 12px 12px;
-  }
-}
-@media (pointer: coarse) {
-  .clay-seo-actions button,
-  .clay-seo-upload-button { min-height: 44px; }
-}
-@media (prefers-color-scheme: dark) {
-  .clay-seo {
-    color: var(--clay-ui-fg, #E9E9EC);
-    background: var(--clay-ui-bg, #26282C);
-    border-color: rgba(233, 233, 236, .16);
-  }
-  .clay-seo-preview { border-color: rgba(233, 233, 236, .16); }
-  .clay-seo-input {
-    border-color: rgba(233, 233, 236, .16);
-    background: rgba(233, 233, 236, .08);
-  }
-  .clay-seo-x:hover,
-  .clay-seo-x:focus-visible,
-  .clay-seo-actions button:hover,
-  .clay-seo-actions button:focus-visible { background: rgba(233, 233, 236, .12); }
-  .clay-seo-actions button { border-color: rgba(233, 233, 236, .24); }
-  .clay-seo-conflict { border-color: rgba(233, 233, 236, .16); }
-  .clay-seo-error { color: #F0A192; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .clay-seo { animation: none; }
-}`;
+const BASE_KEYS = ["title", "description", "ogTitle", "ogDescription", "ogImage"];
+const MORE_KEYS = ["canonical", "lang", "ogImageAlt", "siteName", "twitterSite"];
+const CHECK_KEYS = ["index", "follow"];
+
+const SHEET_CSS = `.clay-seo { box-sizing: border-box; width: 100%; border-bottom: 1px solid var(--bevel-line-3); background: var(--bevel-surface); box-shadow: var(--clay-sheet-shadow); font-size: 13px; line-height: 1.45; container-type: inline-size; animation: clay-seo-in .2s ease-out; position: relative; z-index: 1; }
+@keyframes clay-seo-in { from { margin-top: -40px; opacity: 0; } to { margin-top: 0; opacity: 1; } }
+.clay-seo-inner { max-width: 1120px; margin: 0 auto; padding: 14px 20px 18px; }
+.clay-seo-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 10px; margin-bottom: 12px; border-bottom: 1px solid var(--bevel-line-2); }
+.clay-seo-heading { margin: 0; font: 500 19px/1.15 var(--bevel-font-serif); letter-spacing: -.01em; }
+.clay-seo-actions { display: flex; gap: 8px; }
+.clay-seo-grid { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(260px, .9fr); gap: 22px; align-items: start; }
+.clay-seo-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px; }
+.clay-seo-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.clay-seo-field.is-full { grid-column: 1 / -1; }
+.clay-seo-label-row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font-size: 12.5px; font-weight: 500; color: var(--bevel-ink-2); }
+.clay-seo-label-row label span { font-weight: 400; color: var(--bevel-muted); }
+.clay-seo-field:has([aria-invalid="true"]) .clay-seo-label-row { color: var(--bevel-ox); }
+.clay-seo-aside { display: inline-flex; align-items: baseline; gap: 10px; }
+.clay-seo-count { font: 500 11px/1 var(--bevel-font-mono); color: var(--bevel-muted); font-variant-numeric: tabular-nums; }
+.clay-seo-count[data-over] { color: var(--bevel-ox); }
+.clay-seo-derived { padding: 0; border: 0; background: none; color: var(--bevel-brass); font: 500 12px/1.3 var(--bevel-font-sans); text-decoration: underline; text-decoration-color: var(--bevel-line-3); text-underline-offset: 2px; cursor: pointer; }
+.clay-seo-input { box-sizing: border-box; width: 100%; min-height: 32px; padding: 6px 9px; border: 1px solid var(--bevel-line-2); background: var(--bevel-ground); color: var(--bevel-ink); font: 400 13px/1.45 var(--bevel-font-sans); }
+textarea.clay-seo-input { min-height: 52px; resize: vertical; }
+.clay-seo-input::placeholder { color: var(--bevel-faint); opacity: 1; }
+.clay-seo-input:hover { border-color: var(--bevel-faint); }
+.clay-seo-input:focus-visible { outline: 2px solid var(--bevel-brass); outline-offset: 1px; border-color: var(--bevel-brass); }
+.clay-seo-input[aria-invalid="true"] { border-color: var(--bevel-ox); background: color-mix(in srgb, var(--bevel-ox-soft) 40%, var(--bevel-ground)); }
+.clay-seo-error { margin: 0; font-size: 12px; font-weight: 500; color: var(--bevel-ox); }
+.clay-seo-upload { display: flex; gap: 8px; }
+.clay-seo-upload .clay-seo-input { flex: 1; min-width: 0; }
+.clay-seo-note { margin: 0; font-size: 12px; color: var(--bevel-muted); }
+.clay-seo-more { grid-column: 1 / -1; border: 1px solid var(--bevel-line-2); background: var(--bevel-surface); }
+.clay-seo-more > summary { position: relative; display: flex; align-items: center; gap: 9px; padding: 6px 10px 6px 8px; list-style: none; font-size: 12.5px; font-weight: 500; cursor: pointer; user-select: none; }
+.clay-seo-more > summary::-webkit-details-marker { display: none; }
+.clay-seo-more > summary::before { content: ""; box-sizing: border-box; width: 20px; height: 20px; border: 2px solid; border-color: var(--bevel-edge-hi) var(--bevel-edge-lo) var(--bevel-edge-lo) var(--bevel-edge-hi); background: var(--bevel-face); }
+.clay-seo-more > summary::after { content: ""; position: absolute; left: 15px; top: 50%; width: 5px; height: 5px; border-right: 1.5px solid var(--bevel-ink); border-bottom: 1.5px solid var(--bevel-ink); transform: translateY(-50%) rotate(-45deg); }
+.clay-seo-more[open] > summary { border-bottom: 1px solid var(--bevel-line); }
+.clay-seo-more[open] > summary::before { background: var(--bevel-face-in); border-color: var(--bevel-edge-in) var(--bevel-edge-in-hi) var(--bevel-edge-in-hi) var(--bevel-edge-in); }
+.clay-seo-more[open] > summary::after { transform: translate(1px, -65%) rotate(45deg); }
+.clay-seo-more-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px; padding: 10px; background: var(--bevel-sunk); }
+.clay-seo-checks { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px 18px; }
+.clay-seo-check { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; }
+.clay-seo-check input { appearance: none; -webkit-appearance: none; position: relative; box-sizing: border-box; flex: none; width: 16px; height: 16px; margin: 0; border: 2px solid; border-color: var(--bevel-edge-hi) var(--bevel-edge-lo) var(--bevel-edge-lo) var(--bevel-edge-hi); background: var(--bevel-face); cursor: pointer; }
+.clay-seo-check input:checked { background: var(--bevel-face-in); border-color: var(--bevel-edge-in) var(--bevel-edge-in-hi) var(--bevel-edge-in-hi) var(--bevel-edge-in); }
+.clay-seo-check input:checked::after { content: ""; position: absolute; left: 3px; top: 0; width: 4px; height: 8px; border-right: 1.8px solid var(--bevel-ink); border-bottom: 1.8px solid var(--bevel-ink); transform: rotate(42deg); }
+.clay-seo-check input:focus-visible { outline: 2px solid var(--bevel-brass); outline-offset: 2px; }
+.clay-seo-preview { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.clay-seo-preview-head { display: flex; justify-content: space-between; align-items: baseline; font-size: 12.5px; font-weight: 500; color: var(--bevel-ink-2); }
+.clay-seo-preview-head span { font: 400 11px/1 var(--bevel-font-mono); color: var(--bevel-muted); }
+.clay-og { border: 1px solid var(--bevel-line-2); background: var(--bevel-ground); overflow: hidden; }
+.clay-og-image { position: relative; display: flex; align-items: flex-end; aspect-ratio: 1.91 / 1; max-height: 160px; width: 100%; padding: 10px 12px; box-sizing: border-box; overflow: hidden; background: var(--og-image, var(--bevel-brass-soft)); border-bottom: 1px solid var(--bevel-line-2); }
+.clay-og-image[hidden] { display: none; }
+.clay-og-image span { position: relative; font: 500 10.5px/1.3 var(--bevel-font-mono); padding: 2px 7px; border: 1px solid var(--bevel-line-2); background: var(--bevel-surface); color: var(--bevel-ink); }
+.clay-og-body { display: flex; flex-direction: column; gap: 2px; padding: 9px 12px 11px; }
+.clay-og-host { font: 400 11px/1.3 var(--bevel-font-mono); color: var(--bevel-muted); }
+.clay-og-title { font: 600 14px/1.3 var(--bevel-font-sans); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.clay-og-desc { font-size: 12.5px; line-height: 1.4; color: var(--bevel-ink-2); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.clay-seo-cardsize { margin: 0; font: 400 11px/1.3 var(--bevel-font-mono); color: var(--bevel-muted); }
+
+@container (max-width: 680px) {
+  .clay-seo-inner { padding: 12px 14px 16px; }
+  .clay-seo-grid, .clay-seo-fields, .clay-seo-more-grid { grid-template-columns: 1fr; }
+  .clay-seo-input { font-size: 16px; min-height: 40px; }
+  textarea.clay-seo-input { min-height: 96px; }
+  .clay-seo-check { font-size: 15px; }
+.clay-og-image img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.clay-seo-check > .clay-seo-check { display: inline-block; }
+.clay-seo-conflict { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12px; color: var(--bevel-muted); }
+.clay-seo-conflict[hidden] { display: none; }
+.clay-seo-conflict p { margin: 0; flex-basis: 100%; }
+.clay-seo-title-mode { margin: 0; font-size: 12px; color: var(--bevel-muted); }
+@media (pointer: coarse), (max-width: 680px) { .clay-seo .clay-menu-btn { min-height: 40px; } .clay-seo :is(input, textarea, select) { font-size: 16px; } }
+@media (prefers-reduced-motion: reduce) { .clay-seo { animation: none; transition: none; } }`;
 
 const text = (value) => (value == null ? "" : String(value));
 
@@ -466,56 +287,76 @@ export function open() {
 
   const root = element("div", "clay-seo");
   root.setAttribute("clay", "editor-ui");
-  root.setAttribute("role", "dialog");
-  root.setAttribute("aria-modal", "true");
+  root.setAttribute("role", "region");
   root.setAttribute("aria-labelledby", "clay-seo-heading");
 
-  const title = element("h2", "clay-seo-heading", LABEL);
-  title.id = "clay-seo-heading";
-  const closeButton = element("button", "clay-seo-x", "\u00d7");
-  closeButton.type = "button";
-  closeButton.setAttribute("aria-label", "Close");
-  const top = element("div", "clay-seo-top");
-  top.append(title, closeButton);
+  const derivedButton = element("button", "clay-seo-derived", "Use the first heading");
+  derivedButton.type = "button";
+  derivedButton.hidden = true;
 
-  const previewImage = element("img", "clay-seo-preview-image");
-  previewImage.alt = "";
-  const previewTitle = element("p", "clay-seo-preview-title");
-  const previewDescription = element("p", "clay-seo-preview-description");
-  const previewHost = element("p", "clay-seo-preview-host");
-  const previewText = element("div", "clay-seo-preview-text");
-  previewText.append(previewTitle, previewDescription, previewHost);
-  const preview = element("div", "clay-seo-preview");
-  preview.append(previewImage, previewText);
+  const uploadButton = element("button", "clay-seo-upload-button clay-menu-btn", "Upload image");
+  uploadButton.type = "button";
+  const fileInput = element("input", "clay-seo-file");
+  fileInput.type = "file";
+  fileInput.accept = "image/*";
+  fileInput.hidden = true;
+  fileInput.tabIndex = -1;
+  const publicNote = element("p", "clay-seo-note", PUBLIC_NOTE);
+  publicNote.hidden = true;
+  const pasteNote = element("p", "clay-seo-note", PASTE_NOTE);
+  const uploadRow = element("div", "clay-seo-upload");
 
-  const form = element("div", "clay-seo-form");
   const robotNote = element("p", "clay-seo-note");
   robotNote.hidden = true;
-  const cardSize = element("p", "clay-seo-note");
+  const cardSize = element("p", "clay-seo-cardsize clay-seo-note");
 
-  function buildField(field) {
+  const previewImage = element("img");
+  previewImage.alt = "";
+  const previewImageBox = element("div", "clay-og-image");
+  previewImageBox.hidden = true;
+  previewImageBox.append(previewImage);
+  const previewHost = element("span", "clay-og-host");
+  const previewTitle = element("span", "clay-og-title");
+  const previewDescription = element("span", "clay-og-desc");
+  const ogBody = element("div", "clay-og-body");
+  ogBody.append(previewHost, previewTitle, previewDescription);
+  const ogCard = element("div", "clay-og");
+  ogCard.append(previewImageBox, ogBody);
+  const previewState = element("span");
+  const previewHead = element("div", "clay-seo-preview-head");
+  previewHead.append("Link preview", previewState);
+  const preview = element("div", "clay-seo-preview");
+  preview.append(previewHead, ogCard, cardSize);
+
+  const form = element("div", "clay-seo-fields");
+  const counters = new Map();
+
+  function buildField(key) {
+    const spec = FIELD[key];
+    const id = `clay-seo-${key}`;
     const wrap = element("div", "clay-seo-field");
-    const row = element("label", "clay-seo-row");
-    const caption = element("span", "clay-seo-caption", field.label);
-    const input =
-      field.kind === "textarea" ? element("textarea", "clay-seo-input") : element("input", field.kind === "checkbox" ? "clay-seo-check" : "clay-seo-input");
-    if (field.kind === "checkbox") {
-      row.classList.add("clay-seo-row-check");
+    if (spec.full) wrap.classList.add("is-full");
+
+    const input = element(
+      spec.kind === "checkbox" ? "input" : spec.kind === "textarea" ? "textarea" : "input",
+      spec.kind === "checkbox" ? "clay-seo-check" : "clay-seo-input",
+    );
+    if (spec.kind === "checkbox") {
       input.type = "checkbox";
-      input.checked = opened[field.key] !== false;
-      row.append(input, caption);
+      input.checked = opened[key] !== false;
     } else {
-      if (field.kind !== "textarea") input.type = "text";
-      input.value = text(opened[field.key]);
-      row.append(caption, input);
+      if (spec.kind !== "textarea") input.type = "text";
+      input.value = text(opened[key]);
     }
-    input.dataset.key = field.key;
-    if (window.clay && window.clay.unsent) input.setAttribute("unsent", `seo-${field.key}`);
-    inputs.set(field.key, input);
+    if (spec.placeholder) input.placeholder = spec.placeholder;
+    input.id = id;
+    input.dataset.key = key;
+    if (window.clay && window.clay.unsent) input.setAttribute("unsent", `seo-${key}`);
+    inputs.set(key, input);
 
     const error = element("p", "clay-seo-error");
     error.hidden = true;
-    errors.set(field.key, error);
+    errors.set(key, error);
 
     const conflict = element("div", "clay-seo-conflict");
     conflict.hidden = true;
@@ -527,64 +368,85 @@ export function open() {
     const mineButton = element("button", "clay-seo-mine-button", "Keep mine");
     mineButton.type = "button";
     conflict.append(theirsLine, theirsButton, mineButton);
-    conflicts.set(field.key, { row: conflict, theirs });
+    conflicts.set(key, { row: conflict, theirs });
 
     theirsButton.addEventListener("click", () => {
-      const value = readHead(document).values[field.key];
-      if (field.kind === "checkbox") input.checked = value !== false;
+      const value = readHead(document).values[key];
+      if (spec.kind === "checkbox") input.checked = value !== false;
       else input.value = text(value);
-      chosen.add(field.key);
+      chosen.add(key);
       conflict.hidden = true;
       refresh();
     });
     mineButton.addEventListener("click", () => {
-      chosen.add(field.key);
+      chosen.add(key);
       conflict.hidden = true;
     });
 
-    wrap.append(row, error, conflict);
+    if (spec.kind === "checkbox") {
+      const label = element("label", "clay-seo-check");
+      label.append(input, spec.label);
+      wrap.append(label, error, conflict);
+      return wrap;
+    }
+
+    const row = element("div", "clay-seo-label-row");
+    const label = element("label");
+    label.htmlFor = id;
+    label.append(spec.label);
+    if (spec.note) label.append(" ", element("span", null, `(${spec.note})`));
+    row.append(label);
+    if (spec.count) {
+      const count = element("span", "clay-seo-count");
+      counters.set(key, { el: count, max: spec.count });
+      const aside = element("span", "clay-seo-aside");
+      if (key === "title") aside.append(derivedButton);
+      aside.append(count);
+      row.append(aside);
+    }
+    wrap.append(row);
+    if (key === "ogImage") {
+      uploadRow.append(input, uploadButton, fileInput);
+      wrap.append(uploadRow, pasteNote, publicNote);
+    } else {
+      wrap.append(input);
+    }
+    wrap.append(error, conflict);
     return wrap;
   }
 
-  for (const group of GROUPS) {
-    const section = element("fieldset", "clay-seo-group");
-    section.append(element("legend", "clay-seo-legend", group.legend));
-    for (const field of group.fields) section.append(buildField(field));
-    if (group.legend === "Search") section.append(robotNote);
-    if (group.legend === "Social card") section.append(cardSize);
-    form.append(section);
-  }
+  for (const key of BASE_KEYS) form.append(buildField(key));
 
-  const derivedButton = element("button", "clay-seo-derived", "Use the first heading");
-  derivedButton.type = "button";
-  derivedButton.hidden = true;
-  inputs.get("title").closest(".clay-seo-field").append(derivedButton);
+  const more = element("details", "clay-seo-more");
+  more.append(element("summary", null, "More search and social fields"));
+  const moreGrid = element("div", "clay-seo-more-grid");
+  for (const key of MORE_KEYS) moreGrid.append(buildField(key));
+  const checks = element("div", "clay-seo-checks");
+  for (const key of CHECK_KEYS) checks.append(buildField(key));
+  checks.append(robotNote);
+  moreGrid.append(checks);
+  more.append(moreGrid);
+  form.append(more);
 
-  const imageInput = inputs.get("ogImage");
-  const uploadButton = element("button", "clay-seo-upload-button", "Upload image");
-  uploadButton.type = "button";
-  const fileInput = element("input", "clay-seo-file");
-  fileInput.type = "file";
-  fileInput.accept = "image/*";
-  fileInput.hidden = true;
-  fileInput.tabIndex = -1;
-  const publicNote = element("p", "clay-seo-note", PUBLIC_NOTE);
-  publicNote.hidden = true;
-  const pasteNote = element("p", "clay-seo-note", PASTE_NOTE);
-  const uploadRow = element("div", "clay-seo-upload");
-  uploadRow.append(uploadButton, fileInput, pasteNote, publicNote);
-  imageInput.closest(".clay-seo-field").append(uploadRow);
-
-  const editButton = element("button", "clay-seo-edit", "Edit these settings");
+  const editButton = element("button", "clay-seo-edit clay-menu-btn", "Edit these settings");
   editButton.type = "button";
-  const cancelButton = element("button", "clay-seo-cancel", "Cancel");
+  const cancelButton = element("button", "clay-seo-cancel clay-menu-btn", "Cancel");
   cancelButton.type = "button";
-  const applyButton = element("button", "clay-seo-apply", "Apply");
+  const applyButton = element("button", "clay-seo-apply clay-menu-btn clay-menu-btn-primary", "Done");
   applyButton.type = "button";
   const actions = element("div", "clay-seo-actions");
   actions.append(editButton, cancelButton, applyButton);
 
-  root.append(top, preview, form, actions);
+  const heading = element("h2", "clay-seo-heading", LABEL);
+  heading.id = "clay-seo-heading";
+  const bar = element("div", "clay-seo-bar");
+  bar.append(heading, actions);
+
+  const grid = element("div", "clay-seo-grid");
+  grid.append(form, preview);
+  const inner = element("div", "clay-seo-inner");
+  inner.append(bar, grid);
+  root.append(inner);
 
   const readField = (key) => {
     const input = inputs.get(key);
@@ -614,6 +476,13 @@ export function open() {
     inputs.get("ogTitle").placeholder = titleValue;
     inputs.get("ogDescription").placeholder = descriptionValue;
 
+    for (const [key, entry] of counters) {
+      const length = text(readField(key)).trim().length;
+      entry.el.textContent = `${length} / ${entry.max}`;
+      if (length > entry.max) entry.el.dataset.over = "";
+      else delete entry.el.dataset.over;
+    }
+
     const image = imageSrc();
     if (image) {
       previewImage.src = image;
@@ -622,12 +491,14 @@ export function open() {
       previewImage.removeAttribute("src");
       previewImage.hidden = true;
     }
+    previewImageBox.hidden = previewImage.hidden;
     previewTitle.textContent = text(readField("ogTitle")).trim() || titleValue || "Untitled page";
     const description = text(readField("ogDescription")).trim() || descriptionValue;
     previewDescription.textContent = description;
     previewDescription.hidden = !description;
     previewHost.textContent = hostOf(readField("canonical")) || location.host || "";
-    cardSize.textContent = image ? "Card size: Summary with a large image" : "Card size: Summary";
+    previewState.textContent = image ? "Large image card \u00b7 1.91:1" : "Summary card";
+    cardSize.textContent = image ? "Shared links show the large image." : "Add an image for the large card.";
     derivedButton.hidden = !(isDocumentPage() && FIELDS.titleMode.read(document) === "custom");
   }
 
@@ -665,7 +536,18 @@ export function open() {
     return found;
   }
 
+  function revealMore(found) {
+    for (const key of Object.keys(found)) {
+      const input = inputs.get(key);
+      if (input && more.contains(input)) {
+        more.open = true;
+        return;
+      }
+    }
+  }
+
   function showProblems(found) {
+    revealMore(found);
     for (const [key, el] of errors) {
       const message = found[key] || "";
       el.textContent = message;
@@ -674,6 +556,7 @@ export function open() {
   }
 
   function showConflicts(found) {
+    revealMore(found);
     for (const [key, entry] of conflicts) {
       const current = found[key];
       const visible = current !== undefined;
@@ -683,6 +566,10 @@ export function open() {
   }
 
   function apply() {
+    if (!(window.clay && window.clay.mode === "edit")) {
+      close();
+      return;
+    }
     const wanted = changes();
     const documentPage = isDocumentPage();
     const marker = documentPage ? pendingTitleMode || ("title" in wanted ? "custom" : "") : "";
@@ -705,7 +592,7 @@ export function open() {
     const next = marker ? { ...wanted, titleMode: marker } : wanted;
     const undo = window.clay && window.clay.undo;
     if (undo && typeof undo.commit === "function") {
-      undo.commit(LABEL, () => applyHead(document, next));
+      undo.commit(UNDO_LABEL, () => applyHead(document, next));
     } else {
       const before = readHead(document).values;
       applyHead(document, next);
@@ -718,9 +605,10 @@ export function open() {
   }
 
   function applyUploadVisibility() {
-    uploadButton.hidden = !uploadAvailable;
-    pasteNote.hidden = uploadAvailable;
-    publicNote.hidden = !uploadAvailable || !/(^|\.)hyperclay\.com$/i.test(location.hostname);
+    const editing = !!(window.clay && window.clay.mode === "edit");
+    uploadButton.hidden = !uploadAvailable || !editing;
+    pasteNote.hidden = uploadAvailable || !editing;
+    publicNote.hidden = !uploadAvailable || !editing || !/(^|\.)hyperclay\.com$/i.test(location.hostname);
   }
 
   function layout() {
@@ -731,8 +619,6 @@ export function open() {
     }
     editButton.hidden = editing;
     cancelButton.hidden = !editing;
-    applyButton.hidden = !editing;
-    uploadRow.hidden = !editing || !uploadAvailable;
     applyUploadVisibility();
   }
 
@@ -750,6 +636,8 @@ export function open() {
     closed = true;
     pending.dispose();
     document.removeEventListener("clay:modechange", followMode);
+    if (heightObserver) heightObserver.disconnect();
+    heightVars.remove();
     root.remove();
     if (restoreTo && restoreTo.isConnected && typeof restoreTo.focus === "function") restoreTo.focus();
   }
@@ -780,12 +668,6 @@ export function open() {
     if (closed || !root.isConnected) return;
     uploadAvailable = !!(meta && Array.isArray(meta.extensions) && meta.extensions.includes("upload"));
     layout();
-  }
-
-  function focusables() {
-    return Array.from(root.querySelectorAll("button, input, textarea")).filter(
-      (el) => !el.disabled && !el.hidden && el.tabIndex >= 0 && !el.closest("[hidden]"),
-    );
   }
 
   form.addEventListener("input", () => {
@@ -827,7 +709,6 @@ export function open() {
 
   applyButton.addEventListener("click", apply);
   cancelButton.addEventListener("click", close);
-  closeButton.addEventListener("click", close);
 
   editButton.addEventListener("click", async () => {
     const clay = window.clay;
@@ -852,28 +733,29 @@ export function open() {
     if (result && result.ok !== false) layout();
   });
 
+  const heightVars = document.createElement("style");
+  heightVars.id = "clay-seo-vars";
+  heightVars.setAttribute("clay", "editor-ui");
+  document.head.append(heightVars);
+  let heightObserver = null;
+
+  function writeHeight() {
+    heightVars.textContent = `:root { --clay-seo-height: ${Math.ceil(root.getBoundingClientRect().height)}px; }`;
+  }
+
   root.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      close();
-      return;
-    }
-    if (event.key !== "Tab") return;
-    const all = focusables();
-    if (!all.length) return;
-    const first = all[0];
-    const last = all[all.length - 1];
-    if (event.shiftKey && document.activeElement === first) {
-      event.preventDefault();
-      last.focus();
-    } else if (!event.shiftKey && document.activeElement === last) {
-      event.preventDefault();
-      first.focus();
-    }
+    if (event.key !== "Escape") return;
+    event.preventDefault();
+    close();
   });
 
   document.addEventListener("clay:modechange", followMode);
-  document.body.append(root);
+  document.body.prepend(root);
+  writeHeight();
+  if (typeof ResizeObserver === "function") {
+    heightObserver = new ResizeObserver(writeHeight);
+    heightObserver.observe(root);
+  }
   refresh();
   layout();
   inputs.get("title").focus();

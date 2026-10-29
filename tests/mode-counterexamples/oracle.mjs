@@ -92,7 +92,7 @@ function fieldFor(result, entry) {
 // to is named by the control's own class, and a click on it discards every value the
 // person had put in that sheet before the click. What they closed away is not owed to
 // them, and no save may be asked to carry it.
-const DISCARD_CONTROLS = new Map([[".clay-seo-x", ".clay-seo"]]);
+const DISCARD_CONTROLS = new Map([[".clay-seo-cancel", ".clay-seo"]]);
 
 // A click on a sheet's own apply control writes what the sheet holds into the page, head
 // and all. The value is then in the document itself, so it is not waiting for a save to

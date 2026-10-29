@@ -249,10 +249,10 @@ test("addItem appends items and a duplicate id replaces", async () => {
 
   menu.addItem({ id: "copy", label: "Save a copy" });
   menu.addItem({ id: "share", label: "Share" });
-  expect(labels()).toEqual(["SEO settings…", "Save a copy", "Share"]);
+  expect(labels()).toEqual(["SEO settings…", "Download a copy", "Hide menuCtrl+Shift+.", "Save a copy", "Share"]);
 
   menu.addItem({ id: "copy", label: "Download" });
-  expect(labels()).toEqual(["SEO settings…", "Download", "Share"]);
+  expect(labels()).toEqual(["SEO settings…", "Download a copy", "Hide menuCtrl+Shift+.", "Download", "Share"]);
 });
 
 test("a badge shows a dot on claygoo", async () => {
@@ -285,7 +285,7 @@ test("with a .clay-intro on the page the group sits below its bottom edge", asyn
     introBottom: 120,
   });
 
-  const root = menuRoot();
+  const root = document.querySelector(".clay-menu-dock");
   expect(root).not.toBeNull();
   expect(parseFloat(root.style.top)).toBeGreaterThanOrEqual(120);
 
