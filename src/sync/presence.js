@@ -184,7 +184,6 @@ class Presence {
     if (!this.build()) return;
 
     this.hideTip();
-    ui.paintLook(this.root);
     this.stack.textContent = '';
     for (const person of people) {
       this.stack.appendChild(this.avatar(person));
@@ -201,6 +200,7 @@ class Presence {
       set(this.count, 'display', 'none');
     }
     set(this.root, 'display', 'flex');
+    ui.paintLook(this.root);
   }
 
   hide() {

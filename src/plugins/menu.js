@@ -459,7 +459,6 @@ function mount() {
   }
 
   document.body.append(root);
-  followLook(root, root.querySelector(".clay-menu"), MENU_SURFACE);
   attachPlacement({
     dock: root,
     grip,
@@ -475,6 +474,7 @@ function mount() {
 
   new MutationObserver(watchIntro).observe(doc.body, { childList: true });
   watchIntro();
+  followLook(root, root.querySelector(".clay-menu"), MENU_SURFACE);
 
   const openSeo = () => import("./menu/seo.js").then((m) => m.open());
 

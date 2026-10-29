@@ -1,5 +1,6 @@
 import { expect } from '@esm-bundle/chai';
 import { pageColour, uiLook, paintLook } from '../../src/ui/page-colour.js';
+import { bevelButton } from '../../src/ui/bevel-controls.js';
 
 /**
  * The colour behind a rectangle needs layout and hit-testing, which jsdom has
@@ -87,5 +88,17 @@ describe('uiLook and paintLook', () => {
     expect(look.surface).to.equal(null);
     expect(el.style.getPropertyValue('color-scheme')).to.equal('light dark');
     expect(el.style.getPropertyValue('background-color')).to.equal('rgb(1, 2, 3)');
+  });
+
+  it('keeps a Bevel button\'s look through hover, which rebuilds its inline style', () => {
+    page('background:#1e2a3a');
+    const button = bevelButton('AI');
+    button.pin({ position: 'fixed', top: '8px', right: '20px', width: '220px', height: '48px' });
+    document.body.append(button);
+    extra.push(button);
+    paintLook(button);
+    button.dispatchEvent(new PointerEvent('pointerenter'));
+    button.dispatchEvent(new PointerEvent('pointerleave'));
+    expect(button.style.getPropertyValue('color-scheme')).to.equal('dark');
   });
 });

@@ -221,10 +221,14 @@ export function uiLook(rect, base = BEVEL_SURFACE) {
  * none. Pass `background: null` to leave the fill alone (a surface whose fill means
  * something, like an alarm).
  */
+// A Bevel button rebuilds its inline style on every hover and focus, keeping only what
+// was pinned, so on a button the look is pinned.
 export function paintLook(el, { rect = el.getBoundingClientRect(), background = null } = {}) {
   const look = uiLook(rect);
-  el.style.setProperty('color-scheme', look.scheme, 'important');
-  if (background !== null) el.style.setProperty('background', look.surface || background, 'important');
+  const props = { 'color-scheme': look.scheme };
+  if (background !== null) props.background = look.surface || background;
+  if (typeof el.pin === 'function') el.pin(props);
+  else for (const [prop, value] of Object.entries(props)) el.style.setProperty(prop, value, 'important');
   return look;
 }
 
@@ -242,12 +246,14 @@ export function lookAt(el, rect, base) {
 
 // A fixed surface the page moves under: read again once scrolling or resizing settles,
 // when html or body change attributes (a theme toggle), when the reader's scheme
-// changes, and when the surface moves to another corner.
+// changes, when it moves to another corner and when it is shown again. While it has
+// no size (hidden) it keeps its last look.
 export function followLook(root, target, base) {
   let timer = 0;
   const refresh = () => {
     timer = 0;
-    if (!document.hidden && root.isConnected) lookAt(root, target.getBoundingClientRect(), base);
+    const rect = target.getBoundingClientRect();
+    if (!document.hidden && root.isConnected && rect.width && rect.height) lookAt(root, rect, base);
   };
   const soon = () => {
     clearTimeout(timer);
@@ -260,6 +266,6 @@ export function followLook(root, target, base) {
   const watch = new MutationObserver(soon);
   watch.observe(document.documentElement, { attributes: true });
   watch.observe(document.body, { attributes: true });
-  watch.observe(root, { attributes: true, attributeFilter: ['data-corner'] });
+  watch.observe(root, { attributes: true, attributeFilter: ['data-corner', 'hidden'] });
   refresh();
 }

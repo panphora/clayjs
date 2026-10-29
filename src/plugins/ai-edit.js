@@ -711,6 +711,7 @@ function syncBubble() {
   if (!doc) return;
   const wanted = !barMode && helperState === 'ready' && !!doc.querySelector('[data-edit-id]');
   setShown(docBubble, wanted, 'inline-grid');
+  if (wanted) paintLook(docBubble);
 }
 
 // The selected words stay marked while the person types, through the CSS Custom
