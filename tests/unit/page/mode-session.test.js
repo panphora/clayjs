@@ -530,6 +530,77 @@ test("a refused first write re-reads the file once, re-seeds, replays the edit a
   }
 });
 
+test("a re-read page stamps its own version, never the weak HTTP etag that answered it", async () => {
+  const html = articleHtml();
+  // The stored document names its own version on its root; the host's answer carries a
+  // weak HTTP ETag, which names the response rather than the document.
+  const stored = `<script type="application/json" merge="page" clay="live">${JSON.stringify(seedPageFromArticle(articleOf(html)))}</script>${html}`;
+  const { page, preparePageSession, checkpointWithin, saves, reads } = await load({
+    html,
+    answer: (count) => (count === 0
+      ? { status: 412, body: { msg: "This document changed since you last loaded it.", code: "conflict", etag: "stamp-2" } }
+      : { status: 200, body: { msg: "Saved", etag: "stored-7" } }),
+    reread: () => ({ html: `<html documentetag="stored-7">${stored}</html>`, headers: { etag: 'W/"1c39-express"' } }),
+  });
+  const save = await import("../../../src/core/save.js");
+  const lease = preparePageSession(context());
+  try {
+    await lease.ready;
+    await settle(save);
+    lease.enable();
+
+    const view = page.view;
+    view.dispatch(view.state.tr.insertText(" there", view.state.doc.content.size - 1));
+    checkpointWithin(0);
+    expect(await until(() => reads.length > 0)).toBe(true);
+    expect(await until(() => saves.length > 1)).toBe(true);
+
+    // The retry is conditional on the version the stored page states, not on the weak
+    // header, which no write can ever match.
+    expect(reads).toHaveLength(1);
+    expect(saves).toHaveLength(2);
+    expect(saves[1].headers["If-Match"]).toBe("stored-7");
+    const saved = new DOMParser().parseFromString(saves[1].body, "text/html");
+    expect(blocksFromYValue(JSON.parse(saved.querySelector(TAG_SEL).textContent)).p.c).toBe("Hello there");
+  } finally {
+    lease.dispose();
+  }
+});
+
+test("a re-read page with only a weak HTTP etag retries against the refusal\'s own stamp", async () => {
+  const html = articleHtml();
+  const stored = `<script type="application/json" merge="page" clay="live">${JSON.stringify(seedPageFromArticle(articleOf(html)))}</script>${html}`;
+  const { page, preparePageSession, checkpointWithin, saves, reads } = await load({
+    html,
+    answer: (count) => (count === 0
+      ? { status: 412, body: { msg: "This document changed since you last loaded it.", code: "conflict", etag: "stamp-2" } }
+      : { status: 200, body: { msg: "Saved", etag: "stamp-3" } }),
+    reread: () => ({ html: stored, headers: { etag: 'W/"1c39-express"' } }),
+  });
+  const save = await import("../../../src/core/save.js");
+  const lease = preparePageSession(context());
+  try {
+    await lease.ready;
+    await settle(save);
+    lease.enable();
+
+    const view = page.view;
+    view.dispatch(view.state.tr.insertText(" there", view.state.doc.content.size - 1));
+    checkpointWithin(0);
+    expect(await until(() => reads.length > 0)).toBe(true);
+    expect(await until(() => saves.length > 1)).toBe(true);
+
+    // Nothing in the answer names the document, so the retry falls back to the stamp the
+    // refusal itself carried.
+    expect(reads).toHaveLength(1);
+    expect(saves).toHaveLength(2);
+    expect(saves[1].headers["If-Match"]).toBe("stamp-2");
+    expect(saves[1].headers["If-Match"]).not.toMatch(/^W\//);
+  } finally {
+    lease.dispose();
+  }
+});
+
 test("a seed the host refuses for its lineage is offered again over the stored article", async () => {
   const html = articleHtml();
   const { page, preparePageSession, checkpointWithin, storeOf, saves, reads } = await load({

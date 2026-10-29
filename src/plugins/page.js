@@ -320,7 +320,11 @@ async function readStoredArticle() {
   const article = doc.querySelector(ARTICLE_SEL);
   if (!article) return null;
   const tag = doc.querySelector(TAG_SEL);
-  return { article, value: tag ? parseJsonRelaxed(tag.textContent) : null, etag: response.headers?.get?.("etag") || null };
+  // The served root attribute names the stored document (spec §4). A host may add a weak
+  // HTTP ETag of its own, which names the response, never the document.
+  const header = response.headers?.get?.("etag") || null;
+  const etag = doc.documentElement.getAttribute("documentetag") || (header && !/^W\//.test(header) ? header : null);
+  return { article, value: tag ? parseJsonRelaxed(tag.textContent) : null, etag };
 }
 
 // A refused first write: the stored document has moved on, or it does not descend
