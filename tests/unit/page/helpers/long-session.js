@@ -655,7 +655,10 @@ export async function runLongSession({ seed = LONG_DOCUMENT_SEED, operations = 2
   };
 
   const msPerHundred = [];
+  const productMsPerHundred = [];
   let hundredStart = performance.now();
+  let harnessMs = 0;
+  const harness = (fn) => { const at = performance.now(); try { return fn(); } finally { harnessMs += performance.now() - at; } };
   try {
     for (let op = 0; op < operations; op++) {
       now += 40;
@@ -665,6 +668,7 @@ export async function runLongSession({ seed = LONG_DOCUMENT_SEED, operations = 2
       const startedAt = performance.now();
       const applied = run(kind, tab);
       samples.push({ kind, ms: performance.now() - startedAt });
+      if (kind === "checkpoint") harnessMs += performance.now() - startedAt;
       if (applied) delivered[kind] = (delivered[kind] ?? 0) + 1;
       else refused[kind] = (refused[kind] ?? 0) + 1;
       room.deliver();
@@ -672,13 +676,16 @@ export async function runLongSession({ seed = LONG_DOCUMENT_SEED, operations = 2
       if ((op + 1) % BATCH === 0) {
         await settle();
         tabA.batch = tabB.batch = op + 1;
-        checkBatch(op + 1);
+        harness(() => checkBatch(op + 1));
       }
       const at = Math.floor(operations * [0.35, 0.7][recreations]);
-      if (recreations < 2 && op === at) await recreate(op);
+      if (recreations < 2 && op === at) { const at0 = performance.now(); await recreate(op); harnessMs += performance.now() - at0; }
       if ((op + 1) % 100 === 0) {
-        msPerHundred.push(Math.round(performance.now() - hundredStart));
+        const elapsed = performance.now() - hundredStart;
+        msPerHundred.push(Math.round(elapsed));
+        productMsPerHundred.push(Math.round(elapsed - harnessMs));
         hundredStart = performance.now();
+        harnessMs = 0;
       }
     }
 
@@ -758,6 +765,7 @@ export async function runLongSession({ seed = LONG_DOCUMENT_SEED, operations = 2
       foldViolations: foldViolations.length, mismatches: mismatches.length,
       diagnostics: { a: tabA.binding.provider._diagnostics(), b: tabB.binding.provider._diagnostics() },
       msPerHundred,
+      productMsPerHundred,
       proved: Object.fromEntries(["provedWalks", "provedIndexWalks", "provedIntents", "provedRecoveries", "walkMismatch"].map((key) => [key, tabs().reduce((n, tab) => n + (tab.binding.stats[key] ?? 0), 0)])),
     };
   } finally {
