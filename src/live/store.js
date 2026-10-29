@@ -112,6 +112,8 @@ export function createStore({ name, value, ephemeral = false }) {
   if (!isContainer(value)) throw new TypeError(`clay.live("${name}"): the tag must hold a JSON object or list`);
 
   let authoritative = cloneJson(value);
+  // The last room a rebase described, for a listener that subscribes after the lane joined.
+  let lastRoom = null;
   const state = cloneJson(value);
   // state is authoritative with pending replayed over it. Only a confirm whose
   // ops no longer apply breaks that, until the next rebuild.
@@ -171,6 +173,7 @@ export function createStore({ name, value, ephemeral = false }) {
       console.warn(`clay.live("${name}"): ignored an incoming value that is not ${kind(state)}`);
       return false;
     }
+    if (room) lastRoom = room;
     const before = serializeLive(state);
     const prev = authoritative;
     authoritative = cloneJson(next);
@@ -361,6 +364,9 @@ export function createStore({ name, value, ephemeral = false }) {
     get authoritative() {
       return authoritative;
     },
+    get room() {
+      return lastRoom;
+    },
     get pending() {
       return pending.map((entry) => entry.op);
     },
@@ -471,6 +477,7 @@ export function createStore({ name, value, ephemeral = false }) {
         }
         return readPath(authoritative, path);
       };
+      if (room) lastRoom = room;
       tell({ source, frame, room, cause, get prev() { return prev(); }, before, next: authoritative });
       if (changed) emit(source, null);
       return true;

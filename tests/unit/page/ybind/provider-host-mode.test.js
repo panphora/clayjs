@@ -200,3 +200,21 @@ test("a pending op that is not the provider's own does not hold the outbox", () 
   expect(h.store.pending.length).toBe(2);
   expect(textOf(h.store.value)).toBe("!mine!");
 });
+
+test("a store whose last rebase carried a room starts its provider in host mode", () => {
+  const value = { v: 1, g: 0, y: {} };
+  const store = createStore({ name: "page", value: clone(value) });
+  store.rebase(clone(value), { source: "state", room: { compaction: COMPACTION } });
+  const ydoc = new Y.Doc();
+  ydoc.clientID = 5;
+  const provider = createYProvider({ store, ydoc, ...timers });
+
+  ydoc.getText("flow").insert(0, "host");
+
+  const keys = keysUnder(store.value, "u");
+  expect(keys).toHaveLength(1);
+  expect(keys[0]).toMatch(/^u[0-9a-z]+-[0-9a-z]+-[0-9a-z]+$/);
+  expect(keys[0]).not.toMatch(/^u[0-9a-z]+-[0-9a-z]+$/);
+  expect(provider.pending).toBe(false);
+  expect(textOf(store.value)).toBe("host");
+});

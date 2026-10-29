@@ -3,7 +3,8 @@ import * as Y from "../../../src/vendor/yjs.vendor.js";
 import { createStore } from "../../../src/live/store.js";
 import { createFastLane } from "../../../src/live/fast-lane.js";
 import { localTransport } from "../../../src/live/local-lane.js";
-import { createYProvider, dec } from "../../../src/page/ybind/provider.js";
+import { createYProvider, dec, docFromValue } from "../../../src/page/ybind/provider.js";
+import { isCheckpointKey } from "../../../src/live/page-compaction.js";
 import { NET } from "../../../src/page/ybind/layout.js";
 import { seedValue } from "../../../src/page/ybind/seed.js";
 
@@ -103,6 +104,24 @@ function folded(blocks = BLOCKS) {
   const merged = Y.mergeUpdatesV2(Object.keys(seeded.y).sort().map((key) => dec(seeded.y[key])));
   return { v: 1, g: 0, y: { "c00000000-1": Y.toBase64(merged) } };
 }
+
+// A seed written the way a long page's save writes it: one update's base64 text
+// in parts, under the base name seed.
+function splitSeed(blocks = BLOCKS, n = 3) {
+  const seeded = seedValue(blocks);
+  const text = Y.toBase64(Y.mergeUpdatesV2(Object.keys(seeded.y).sort().map((key) => dec(seeded.y[key]))));
+  const size = Math.ceil(text.length / n);
+  const y = {};
+  for (let i = 0; i < n; i++) y[`seed.${i}.${n}`] = text.slice(i * size, (i + 1) * size);
+  return { v: 1, g: 0, y };
+}
+
+const textOf = (value) => {
+  const doc = docFromValue(value);
+  const out = doc.getText("flow").toString();
+  doc.destroy();
+  return out;
+};
 
 // One whole update, as a client sends it.
 function updateOf(mark, client) {
@@ -290,4 +309,33 @@ test("an old-version tab on the old key never joins the new room", async () => {
   const after = await fresh.transport.fetchState(fresh.transport.clientId);
   expect(after.epoch).toBe(before.epoch);
   expect(after.seq).toBeGreaterThan(before.seq);
+});
+
+test("a seed stored in parts commits its fold and then admits a write", async () => {
+  const value = splitSeed();
+  const before = textOf(value);
+  expect(Object.keys(value.y)).toHaveLength(3);
+  const t = room(value);
+  await settle();
+  expect(t.transport.isSequencer).toBe(true);
+
+  // A page of parts is never normal, so the first write is refused for the shape
+  // and asks the room for a fold; the fold must commit, retiring the parts for one
+  // checkpoint key, or every later write is refused the same way.
+  const first = await t.transport.send("c1", { name: "page", n: 1, compaction: 1, ops: [setOp("u1aaaaaaa-b-c", updateOf("typed", 61))] });
+  expect(first).toEqual({ status: 503, body: { code: "checkpoint-required" }, retryAfter: 0 });
+
+  await settle();
+  const keys = await keysOf(t);
+  expect(keys.filter((key) => key.startsWith("seed."))).toHaveLength(0);
+  expect(keys.filter((key) => isCheckpointKey(key))).toHaveLength(1);
+  expect(posted.some((message) => message.data?.type === "data" && message.data.data?.from === "compactor" && message.data.data?.kind === "full")).toBe(true);
+
+  const state = await t.transport.fetchState(t.transport.clientId);
+  expect(textOf(state.stores.page.value)).toBe(before);
+
+  // The room is within its bounds again: a further host-form update is admitted.
+  const again = await t.transport.send("c1", { name: "page", n: 2, compaction: 1, ops: [setOp("u1aaaaaaa-b-d", updateOf("more", 62))] });
+  expect(again.status).toBe(200);
+  expect(again.body.code).toBeUndefined();
 });

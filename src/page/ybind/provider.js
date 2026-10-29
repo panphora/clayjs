@@ -101,7 +101,7 @@ export function createYProvider({ store, ydoc, compact: limits = {}, setTimer = 
   let counter = 0;
   const me = ydoc.clientID.toString(36);
   const inst = Math.floor(Math.random() * 36 ** 6).toString(36);
-  let mode = "legacy";
+  let mode = store.room?.compaction?.v === 1 ? "host" : "legacy";
   const nextKey = (p) => (mode === "host" ? `${p}${me}-${inst}-${(counter++).toString(36)}` : `${p}${me}-${(counter++).toString(36)}`);
   let timer = null;
   let outbox = [];

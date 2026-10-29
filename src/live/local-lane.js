@@ -29,6 +29,7 @@ import { localChannel } from "./local-channel.js";
 import { applyOp, applyTracked, checkOp, cloneJson, undoTracked, validateOp, serializeLive, textHash, diffOps } from "./ops.js";
 import { parseJsonRelaxed } from "../vendor/hyper-morph-json.vendor.js";
 import { movesSince } from "./moves.js";
+import { PART_KEY, entriesOf } from "../page/ybind/parts.js";
 import { COMPACTION, ROOM_ERROR_STATUS, admitPageOps, planCompaction, buildCandidate, checkUpdate, pageShape, createRangeCache, unionFileEntries } from "./page-compaction.js";
 
 // The lane's own message version, carried by every message it posts: a tab of
@@ -431,11 +432,17 @@ export function localTransport({ seed, key = "clay-live:" + window.location.path
   // this epoch and position, and the commit goes out as a move like any other.
   function commitPage(host, m, plan, update) {
     const y = m.value.y;
-    for (const [key, value] of plan.sources) if (y[key] !== value) return;
+    const sources = new Map(plan.sources);
+    const physical = Object.keys(y).filter((k) => {
+      const part = PART_KEY.exec(k);
+      return sources.has(part ? part[1] : k) || (part && plan.kind === "full");
+    });
+    const held = new Map(entriesOf(Object.fromEntries(physical.map((k) => [k, y[k]]))));
+    for (const [key, value] of sources) if (held.get(key) !== value) return;
     if (!checkUpdate(update)) return;
     const key = `${plan.kind === "full" ? "c" : "t"}${textHash(room.epoch).slice(0, 8)}-${(room.seq + 1).toString(36)}`;
     if (Object.hasOwn(y, key)) return;
-    const ops = [...plan.sources.map(([source]) => validateOp({ op: "del", path: ["y", source] })), validateOp({ op: "set", path: ["y", key], value: update })];
+    const ops = [...physical.map((source) => validateOp({ op: "del", path: ["y", source] })), validateOp({ op: "set", path: ["y", key], value: update })];
     let trial;
     try {
       trial = applyAll(m.value, ops);
