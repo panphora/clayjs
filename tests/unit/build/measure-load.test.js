@@ -92,6 +92,18 @@ test("a Document with a table and a board counts their view parts at boot, a tex
   expect(rich.lazy).not.toContain("src/page/features/table.js");
   expect(rich.lazy).not.toContain("src/page/features/board.js");
   expect(paths(text).filter((path) => path.startsWith("src/page/features/") && path !== "src/page/features/registry.js")).toEqual([]);
+
+  const richBoot = await measureBuilt({ html: fixture("document-rich.html"), mode: "edit", dir: built });
+  const textBoot = await measureBuilt({ html: fixture("document-text.html"), mode: "edit", dir: built });
+  const featureChunks = (measured) => measured.phases.editReady.modules
+    .filter((name) => name.startsWith("page/features/") && name !== "page/features/registry.js")
+    .map((name) => name.slice("page/features/".length).replace(/\.js$/, ""))
+    .sort();
+
+  expect(featureChunks(richBoot)).toEqual(["board", "chart", "table"]);
+  expect(featureChunks(textBoot)).toEqual([]);
+  expect(richBoot.js.requests).toBe(textBoot.js.requests + 4);
+  expect(richBoot.js.depth).toBe(textBoot.js.depth + 1);
 });
 
 test("a Document's view mode counts no view parts, and neither does a tool-less file's tool part", async () => {

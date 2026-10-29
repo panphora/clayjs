@@ -8,6 +8,7 @@ import { createPageEditor, installPageFeature } from "../../../../src/page/edito
 import { createFeatureLoader } from "../../../../src/page/feature-loader.js";
 import { FEATURES } from "../../../../src/page/features/registry.js";
 import { pickFiles, hostPlace } from "../../../../src/page/media.js";
+import { mediaViews } from "../../../../src/page/media-views.js";
 import { createYPageBinding, seedValue, blocksFromYValue, enc } from "../../../../src/page/ybind/index.js";
 
 const { TextSelection } = pmState;
@@ -275,6 +276,24 @@ test("destroying one editor keeps another editor\u2019s bookmark drawing", async
   typeIn(first.view, 1, "x");
   await flush();
   expect(first.view.dom.querySelector(".page-upload")).not.toBe(null);
+});
+
+// The registry is keyed per editor by a weak reference: a dropped editor's views are
+// collectable, so a long-lived page does not keep every editor it ever opened alive.
+test("the bookmark renderer registry holds each editor weakly and forgets one on dispose", async () => {
+  const never = () => new Promise(() => {});
+  const first = open({ p: PARAGRAPH }, { upload: never });
+  const second = open({ p: PARAGRAPH }, { upload: never });
+  paste(first.view, clip([file("first.png")]));
+  paste(second.view, clip([file("second.png")]));
+
+  expect(await waitFor(() => mediaViews.get(first.view) && mediaViews.get(second.view))).toBe(true);
+  expect(mediaViews).toBeInstanceOf(WeakMap);
+
+  second.view.destroy();
+  second.features.dispose("media");
+  expect(mediaViews.get(second.view)).toBeUndefined();
+  expect(mediaViews.get(first.view)).toBeTruthy();
 });
 
 test("an image that arrives from a peer loads the view part", async () => {

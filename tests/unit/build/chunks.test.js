@@ -173,10 +173,25 @@ test("the runtime manifest names each entry's boot imports and the edit-only one
   const supplement = await runtimeOf(built.manifest.edit);
 
   expect({ ...supplement.bootImports, ...runtime.bootImports }).toEqual(BOOT_IMPORTS);
+  // A sortable plan's own init awaits the vendor, so the loader preloads it with the
+  // plugin's chunk: the emitted pairs, not the constant they were built from.
+  expect(supplement.bootImports["plugins/sortable.js"]).toEqual(["vendor/Sortable.vendor.js"]);
+  expect(runtime.bootImports["plugins/derive.js"]).toEqual(["vendor/sap-core.vendor.js"]);
   // The supplement carries the boot imports an edit boot fetches, the dynamic ones
   // included: a view manifest names none of them.
   expect(supplement.editBootImports).toEqual([...EDIT_BOOT_IMPORTS, ...EDIT_DYNAMIC_IMPORTS]);
   expect(runtime.editBootImports).toBeUndefined();
+});
+
+// The presence store has no static importer at boot: its edit half is reached with a
+// dynamic import, so the supplement's own list is the one preload it ever gets.
+test("the supplement preloads the presence store its edit half fetches", async () => {
+  const supplement = await runtimeOf(built.manifest.edit);
+  const entry = built.manifest.entries["sync/presence-store.js"];
+
+  expect(supplement.editBootImports).toContain("sync/presence-store.js");
+  expect(entry).toBeTruthy();
+  expect(supplement.entries["sync/presence-store.js"]).toBe(entry);
 });
 
 // A reader downloads the main manifest and nothing else, so every path its plan can

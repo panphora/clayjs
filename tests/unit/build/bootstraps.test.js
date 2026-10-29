@@ -29,6 +29,19 @@ async function read(name) {
   return readFile(path.join(outdir, name), "utf8");
 }
 
+// The prelude statement alone: the `var __clayChunks = (function (M) { ... })(payload)`
+// every bootstrap carries, ready to run against a document and a window.
+function preludeOf(code) {
+  const start = code.indexOf("var __clayChunks = ");
+  const payload = code.indexOf("})({", start) + 3;
+  let depth = 0;
+  for (let i = payload; i < code.length; i++) {
+    if (code[i] === "{") depth++;
+    else if (code[i] === "}" && --depth === 0) return code.slice(start, i + 2) + ";";
+  }
+  throw new Error("no embedded manifest");
+}
+
 beforeAll(async () => {
   chunkdir = await mkdtemp(path.join(os.tmpdir(), "clay-chunks-"));
   outdir = await mkdtemp(path.join(os.tmpdir(), "clay-bootstraps-"));
@@ -164,6 +177,31 @@ test("the bootstrap fetches the edit supplement for an explicit ?editmode=true o
   expect(code).toContain("likelyEdit ? import(dir + M.edit)");
   expect(code).toContain("function loadEditHints()");
   expect(code).toContain("loadEditHints: loadEditHints");
+});
+
+// A satellite adds its links after the page has already parsed, so an href it repeats
+// is a request the browser makes twice. The prelude seeds its set from the links already
+// in the head, and only appends what is missing.
+test("a satellite appends only the preload links the page does not already carry", async () => {
+  const code = await read("all.js");
+  const M = embedded(code);
+  expect(M.preload.length).toBeGreaterThan(1);
+
+  const dir = "https://cdn.test/v1/m/";
+  const existing = { rel: "modulepreload", href: dir + M.preload[1] };
+  const added = [];
+  const document = {
+    head: {
+      querySelectorAll: (selector) => (selector === 'link[rel="modulepreload"]' ? [existing] : []),
+      appendChild: (link) => added.push(link),
+    },
+    createElement: () => ({ setAttribute: () => {} }),
+  };
+  const window = { clay: { __runtime: Promise.resolve({ chunks: true }) }, location: { search: "" } };
+  new Function("window", "document", "base", preludeOf(code))(window, document, "https://cdn.test/v1");
+
+  expect(added.map((link) => link.href)).not.toContain(existing.href);
+  expect(added.map((link) => link.href)).toEqual(M.preload.map((file) => dir + file).filter((href) => href !== existing.href));
 });
 
 test("each satellite preloads its own entry and the runtime manifest", async () => {

@@ -237,3 +237,26 @@ test("the source plugin refuses a projected response and asks for the canonical 
   const clone = snapshot.captureSaveClone({ flushUndo: false, authored: false });
   expect(renderSave(clone, "today")).toBe("today");
 });
+
+// A file that merely mentions the descriptor's id is still the file. Only a response the
+// host projected — the map script itself, or a local mirror URL — is refused, so the
+// bytes this page already holds are used instead of asking again.
+test("a canonical file that only names the runtime map's id is modelled, not re-fetched", async () => {
+  window.clayEditMode = true;
+  global.fetch = jest.fn(async () => {
+    throw new Error("the source plugin fetched a file it already held");
+  });
+  const info = jest.spyOn(console, "info").mockImplementation(() => {});
+  const canonical = snapshot.captureForSave({ emitForSync: false }).replace("</body>",
+    "<p class=\"note\">the clay-runtime-map descriptor is a host's, not this file's</p></body>");
+  expect(canonical).not.toContain("/_/clayjs/");
+  expect(canonical).not.toContain('<script type="application/json" id="clay-runtime-map"');
+  expect(canonical).toContain("clay-runtime-map");
+
+  const { start, stats } = await import("../../src/source/session.js");
+  await start({ latest: () => ({ bytes: canonical, etag: null, seq: null }) });
+
+  expect(global.fetch).not.toHaveBeenCalled();
+  expect(info.mock.calls.filter(([line]) => String(line).includes("projected response"))).toHaveLength(0);
+  expect(stats().installed).toBe(true);
+});

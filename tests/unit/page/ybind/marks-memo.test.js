@@ -1,7 +1,19 @@
+import { jest } from "@jest/globals";
+
 globalThis.ClipboardEvent ??= class ClipboardEvent extends Event {};
 
-import * as Y from "../../../../src/vendor/yjs.vendor.js";
-import { createPageDoc, seedFrom, walk, docOf } from "../../../../src/page/ybind/index.js";
+// The codec is counted as it is reached: marks.js imports it by name, so the module it
+// gets has to be the one this file wraps.
+const codec = await import("../../../../src/page/format-codec.js");
+let codecRuns = 0;
+await jest.unstable_mockModule("../../../../src/page/format-codec.js", () => ({
+  ...codec,
+  entriesOfYjs: (fields) => { codecRuns += 1; return codec.entriesOfYjs(fields); },
+}));
+
+const Y = await import("../../../../src/vendor/yjs.vendor.js");
+const { createPageDoc, seedFrom, walk, docOf } = await import("../../../../src/page/ybind/index.js");
+const { marksFromAttributes } = await import("../../../../src/page/ybind/marks.js");
 
 const marksOf = (doc) => {
   const out = [];
@@ -38,4 +50,17 @@ test("bold that starts in a code block and runs into the next paragraph", () => 
   expect(got[0]).toBe("c/code_block[CCC:-]");
   expect(got[1]).toMatch(/strong/);
   expect(got[2]).toBe("r/paragraph[RRR:-]");
+});
+
+// The walk asks this of every text run on every keystroke, so the new-format codec runs
+// only for a run that really carries a mark from a newer version.
+test("a run with no unknown mark never runs the new-format codec", () => {
+  codecRuns = 0;
+  const known = marksFromAttributes({ strong: true }, "paragraph");
+  expect(known.map((mark) => mark.type.name)).toEqual(["strong"]);
+  expect(codecRuns).toBe(0);
+
+  const unknown = marksFromAttributes({ future: { level: 2 } }, "paragraph");
+  expect(unknown.map((mark) => mark.type.name)).toEqual(["opaque_marks"]);
+  expect(codecRuns).toBe(1);
 });
