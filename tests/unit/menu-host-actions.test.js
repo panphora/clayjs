@@ -194,5 +194,69 @@ test("hostActions() keeps only the valid hrefs", async () => {
   const { hostActions } = await import("../../src/core/host-meta.js");
   const actions = await hostActions();
 
-  expect(actions).toEqual({ duplicate: new URL("/_/copy/ok.html", location.origin).href });
+  expect(actions).toEqual({ duplicate: { href: new URL("/_/copy/ok.html", location.origin).href } });
+});
+
+test("hostActions() keeps a same-origin post and drops one elsewhere", async () => {
+  jest.resetModules();
+  const meta = metaDocument({
+    actions: {
+      reveal: { post: "/_/reveal/tok" },
+      export: { post: "https://elsewhere.example/_/export" },
+      versions: { post: "javascript:void 0" },
+    },
+  });
+  window.fetch = metaFetch(meta);
+
+  const { hostActions } = await import("../../src/core/host-meta.js");
+  const actions = await hostActions();
+
+  expect(actions).toEqual({ reveal: { post: new URL("/_/reveal/tok", location.origin).href } });
+});
+
+test("a host action the host does itself is a button that posts, opens what it answers, and says why it could not", async () => {
+  const meta = metaDocument({
+    actions: {
+      reveal: { post: "/_/reveal/tok" },
+      duplicate: { post: "/_/duplicate/tok" },
+      export: { post: "/_/export/tok" },
+    },
+  });
+  await boot({ meta });
+  const posts = [];
+  window.fetch = jest.fn(async (url, options = {}) => {
+    const href = fetchSomewhere(url);
+    if (href.includes("/_/meta")) return metaResponse(meta);
+    if (options.method === "POST") {
+      posts.push({ href, documentUrl: options.headers?.["Document-URL"] });
+      if (href.endsWith("/_/duplicate/tok")) return metaResponse({ ok: true, href: "http://localhost/notes-copy.html" });
+      if (href.endsWith("/_/export/tok")) return { ...metaResponse({ ok: false, message: "The Downloads folder is missing." }), ok: false, status: 500 };
+      return metaResponse({ ok: true });
+    }
+    return notFound();
+  });
+  const opened = jest.spyOn(window, "open").mockImplementation(() => null);
+
+  gooOf().click();
+  for (const id of ["clay.reveal", "clay.duplicate", "clay.export"]) {
+    expect(buttonOf(id)).not.toBeNull();
+    expect(buttonOf(id).tagName).toBe("BUTTON");
+  }
+  expect(indexOf("clay.download")).toBeLessThan(indexOf("clay.export"));
+  expect(indexOf("clay.export")).toBeLessThan(indexOf("clay.reveal"));
+
+  buttonOf("clay.reveal").click();
+  await flush();
+  expect(posts.at(-1)).toEqual({ href: new URL("/_/reveal/tok", location.origin).href, documentUrl: location.href });
+
+  gooOf().click();
+  buttonOf("clay.duplicate").click();
+  await flush();
+  expect(opened).toHaveBeenCalledWith("http://localhost/notes-copy.html", "_blank", "noopener");
+
+  gooOf().click();
+  buttonOf("clay.export").click();
+  await flush();
+  expect(document.querySelector(".clay-menu-note").textContent).toBe("The Downloads folder is missing.");
+  opened.mockRestore();
 });

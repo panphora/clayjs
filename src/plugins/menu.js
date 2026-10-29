@@ -30,7 +30,7 @@ const GRIP =
 const SECTIONS = [
   ["clay.undo", "clay.cms", "clay.ai", "clay.code"],
   ["seo", "clay.share", "clay.people"],
-  ["clay.duplicate", "clay.download"],
+  ["clay.duplicate", "clay.download", "clay.export", "clay.reveal"],
   ["clay.versions", "clay.hide"],
   null,
   ["upgrade"],

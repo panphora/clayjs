@@ -2,7 +2,7 @@
 // the service that already does the job and keeps no second copy of its state.
 import { modeRefusalText } from "../../core/mode-refusal.js";
 import { downloadHtml, documentName } from "../../core/download.js";
-import { keys } from "./preferences.js";
+import { keys, revealLabel } from "./preferences.js";
 
 const RESUME_KEY = "menu-resume";
 const READY_MS = 5000;
@@ -152,14 +152,35 @@ export function attachActions({ addItem, note, currentMode }) {
     },
   });
 
-  // Pages the host serves for this document, opened in a new tab so this one keeps
-  // whatever is unsaved.
+  // What the host offers for this document. A page opens in a new tab so this one keeps
+  // whatever is unsaved; anything else the host does itself when asked, and may answer
+  // with a page to open (a duplicate) or a reason it could not.
+  async function askHost(url) {
+    let body = null;
+    try {
+      const response = await fetch(url, { method: "POST", credentials: "same-origin", headers: { "Document-URL": location.href } });
+      body = await response.json().catch(() => null);
+      if (response.ok && body?.ok !== false) {
+        if (typeof body?.href === "string") window.open(body.href, "_blank", "noopener");
+        return;
+      }
+    } catch {}
+    note(typeof body?.message === "string" && body.message ? body.message : "Couldn't do that. Try again.");
+  }
+
+  const hostItem = (id, label, action) => {
+    if (action?.href) addItem({ id, label, href: action.href });
+    else if (action?.post) addItem({ id, label, run: () => askHost(action.post) });
+  };
+
   import("../../core/host-meta.js")
     .then(({ hostActions }) => hostActions())
-    .then((links) => {
-      if (links.codeEditor) addItem({ id: "clay.code", label: "Open the code editor", href: links.codeEditor });
-      if (links.duplicate) addItem({ id: "clay.duplicate", label: "Duplicate as a new page", href: links.duplicate });
-      if (links.versions) addItem({ id: "clay.versions", label: "Version history…", href: links.versions });
+    .then((host) => {
+      hostItem("clay.code", "Open the code editor", host.codeEditor);
+      hostItem("clay.duplicate", "Duplicate as a new page", host.duplicate);
+      hostItem("clay.export", "Export as zip", host.export);
+      hostItem("clay.reveal", revealLabel(), host.reveal);
+      hostItem("clay.versions", "Version history…", host.versions);
     })
     .catch(() => {});
 

@@ -181,28 +181,40 @@ export async function hostVersions() {
   return meta.document?.versions === true;
 }
 
+const HOST_ACTIONS = ["codeEditor", "versions", "duplicate", "reveal", "export"];
+
+function httpUrl(value) {
+  if (typeof value !== "string" || !value) return null;
+  try {
+    const url = new URL(value, location.href);
+    return url.protocol === "http:" || url.protocol === "https:" ? url : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
- * The host pages this caller may open for the document, from the `document.actions`
- * block: `{ codeEditor, versions, duplicate }`, each an absolute http(s) URL, present
- * only when the host named it. A host without the block offers none of them.
+ * What the host offers this caller for the document, from the `document.actions` block:
+ * `{ codeEditor, versions, duplicate, reveal, export }`, each present only when the host
+ * named it. An action is a page to open (`{ href }`, any http(s) URL) or something the
+ * host does itself when the page asks (`{ post }`, a same-origin URL). A host without
+ * the block offers none of them.
  *
- * @returns {Promise<{codeEditor?: string, versions?: string, duplicate?: string}>}
+ * @returns {Promise<Record<string, {href: string} | {post: string}>>}
  */
 export async function hostActions() {
   const meta = await hostMeta();
   const block = meta.document?.actions;
   const actions = {};
   if (!block || typeof block !== "object") return actions;
-  for (const name of ["codeEditor", "versions", "duplicate"]) {
-    const href = block[name]?.href;
-    if (typeof href !== "string" || !href) continue;
-    let url;
-    try {
-      url = new URL(href, location.href);
-    } catch {
+  for (const name of HOST_ACTIONS) {
+    const href = httpUrl(block[name]?.href);
+    if (href) {
+      actions[name] = { href: href.href };
       continue;
     }
-    if (url.protocol === "http:" || url.protocol === "https:") actions[name] = url.href;
+    const post = httpUrl(block[name]?.post);
+    if (post && post.origin === location.origin) actions[name] = { post: post.href };
   }
   return actions;
 }
