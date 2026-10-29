@@ -9,7 +9,7 @@ import { yIndexAt, posAtY, cellPoint, cellAt } from "./positions.js";
 import { state as pmState } from "../../vendor/prosemirror.vendor.js";
 import { repairSiblings, isKey } from "../model.js";
 import { createOriginIndex, installUndoOrigins } from "./origins.js";
-import { reduceRecovery, canonicalRevision, restoreKey, physicalKeyOf, authorKey, RECOVERED_PREFIX, parsePhysicalKey, parseGoneIntents } from "./recovery.js";
+import { reduceRecovery, reduceRecoverable, canonicalRevision, restoreKey, physicalKeyOf, authorKey, RECOVERED_PREFIX, parsePhysicalKey, parseGoneIntents } from "./recovery.js";
 import { moveBlocks } from "./moves.js";
 import { createBoardCommands } from "./board-commands.js";
 import { continuesGroup, intentOf } from "../history-intent.js";
@@ -203,9 +203,17 @@ export function createBridge({ pd, onNotice = () => {}, ownedTokens = [], author
     const notices = detached(recoverable.map((record) => personalNotice(record)).filter((notice) => notice && !dismissed.has(`${notice.source}\u0000${notice.revision}`)));
     return Object.freeze({ recoverable: Object.freeze(recoverable), notices: Object.freeze(notices) });
   };
+  const proveSnapshot = (snapshot, current) => {
+    const fresh = JSON.stringify(snapshotOf(reduceRecovery(pd, { index: origins, walked: current })));
+    if (fresh === JSON.stringify(snapshot)) { stats.provedRecoveries = (stats.provedRecoveries ?? 0) + 1; return; }
+    stats.walkMismatch = (stats.walkMismatch ?? 0) + 1;
+    throw new Error("Recovery snapshot built from the displacing sources diverged from a full reduction");
+  };
   const recoveryState = () => {
     if (recoveryMemo && recoveryMemo.version === recoveryVersion) return recoveryMemo.snapshot;
-    const snapshot = snapshotOf(reduceRecovery(pd, { index: origins, walked: walkedAt === docVersion ? w : undefined }));
+    const current = walkedAt === docVersion ? w : undefined;
+    const snapshot = snapshotOf(reduceRecoverable(pd, { index: origins, walked: current }));
+    if (stats.proveWalks) proveSnapshot(snapshot, current);
     recoveryMemo = { version: recoveryVersion, snapshot };
     return snapshot;
   };

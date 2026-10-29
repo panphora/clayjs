@@ -380,31 +380,63 @@ function sourceRecord(pd, index, sourceKey, removals, hidden, intents, visible, 
   return { ...out, revision: canonicalRevision(out) };
 }
 
+const seenClock = (sv, client) => {
+  for (const [c, clock] of sv) if (c === client) return clock;
+  return 0;
+};
+
+const mayDisplace = (removal, entry) => {
+  for (const item of entry.items) if (item.kind !== "marker" && item.clock + item.length - 1 >= seenClock(removal.sv, item.client)) return true;
+  return false;
+};
+
+const bySource = (a, b) => {
+  const left = parsePhysicalKey(a.source), right = parsePhysicalKey(b.source);
+  return left.client - right.client || left.clock - right.clock;
+};
+
+function recoveryInputs(pd, index, options) {
+  const walked = options.walked ?? walk(pd, index);
+  const intents = options.intents ?? parseGoneIntents(pd.gone, { strict: options.strict === true });
+  const hidden = new Map();
+  for (const entry of walked.hidden ?? []) hidden.set(entry.key, entry);
+  const groups = new Map();
+  for (const removal of walked.removals ?? intents.removals) {
+    const list = groups.get(removal.sourceKey);
+    if (list) list.push(removal);
+    else groups.set(removal.sourceKey, [removal]);
+  }
+  let visibleIndex = null;
+  const visible = (client, clock) => {
+    if (!visibleIndex) visibleIndex = visibleOriginIndex(pd.flow, walked, index);
+    return visibleIndex(client, clock);
+  };
+  return { intents, hidden, groups, visible };
+}
+
 export function reduceRecovery(pd, options = {}) {
   const index = options.index ?? createOriginIndex(pd.origins);
   try {
-    const walked = options.walked ?? walk(pd, index);
-    const intents = options.intents ?? parseGoneIntents(pd.gone, { strict: options.strict === true });
-    const hidden = new Map();
-    for (const entry of walked.hidden ?? []) hidden.set(entry.key, entry);
-    const groups = new Map();
-    for (const removal of walked.removals ?? intents.removals) {
-      const list = groups.get(removal.sourceKey);
-      if (list) list.push(removal);
-      else groups.set(removal.sourceKey, [removal]);
-    }
-    let visibleIndex = null;
-    const visible = (client, clock) => {
-      if (!visibleIndex) visibleIndex = visibleOriginIndex(pd.flow, walked, index);
-      return visibleIndex(client, clock);
-    };
+    const { intents, hidden, groups, visible } = recoveryInputs(pd, index, options);
     const sources = new Map();
     for (const [sourceKey, removals] of groups) sources.set(sourceKey, sourceRecord(pd, index, sourceKey, removals, hidden, intents, visible, groups));
-    const list = [...sources.values()].sort((a, b) => {
-      const left = parsePhysicalKey(a.source), right = parsePhysicalKey(b.source);
-      return left.client - right.client || left.clock - right.clock;
-    });
-    return { sources, list, intents };
+    return { sources, list: [...sources.values()].sort(bySource), intents };
+  } finally {
+    if (!options.index) index.dispose();
+  }
+}
+
+export function reduceRecoverable(pd, options = {}) {
+  const index = options.index ?? createOriginIndex(pd.origins);
+  try {
+    const { intents, hidden, groups, visible } = recoveryInputs(pd, index, options);
+    const list = [];
+    for (const [sourceKey, removals] of groups) {
+      if (!removals.some((removal) => hidden.has(removal.key) && mayDisplace(removal, hidden.get(removal.key)))) continue;
+      const record = sourceRecord(pd, index, sourceKey, removals, hidden, intents, visible, groups);
+      if (record.recoverable) list.push(record);
+    }
+    return { list: list.sort(bySource), intents };
   } finally {
     if (!options.index) index.dispose();
   }
