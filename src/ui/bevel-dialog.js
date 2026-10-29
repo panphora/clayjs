@@ -103,9 +103,10 @@ export function bevelDialog({ zIndex = "100", width = "600px", closable = false,
   root.setAttribute("data-clay-modal", "");
   if (on) root.setAttribute("data-clay-ui", surface);
   root.setAttribute("aria-hidden", "true");
+  const known = on && theme.scheme !== "light dark";
   const panelWidth = Math.min(parseFloat(width) || 600, innerWidth - 32);
   const area = { x: (innerWidth - panelWidth) / 2, y: Math.min(96, innerHeight * 0.1), width: panelWidth, height: 160 };
-  set(root, "color-scheme", on ? theme.scheme : uiLook(area).scheme);
+  set(root, "color-scheme", known ? theme.scheme : uiLook(area).scheme);
 
   const overlay = bevelBox("div", [
     "position:fixed", "inset:0", `z-index:${zIndex}`, "overflow:auto",

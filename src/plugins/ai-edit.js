@@ -758,6 +758,7 @@ function placeBubble() {
     right: beside ? `${Math.round((document.documentElement.clientWidth || window.innerWidth) - rect.left + 8)}px` : '16px',
     bottom: beside ? `${Math.round((document.documentElement.clientHeight || window.innerHeight) - rect.bottom)}px` : '16px',
   });
+  paintLook(docBubble);
 }
 
 // ---------------------------------------------------------------- hover chip
@@ -1002,6 +1003,7 @@ function closePanelForSend() {
   textarea.value = '';
   fitTextarea();
   positionChrome();
+  paintLook(ring);
 }
 
 // The target is gone from the page: whatever was live for it ends, and no observer,

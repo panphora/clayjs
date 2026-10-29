@@ -20,7 +20,8 @@ const pageScheme = () => {
   return s === 'light' || s === 'dark' ? s : 'light dark';
 };
 
-const UI = '[clay~="editor-ui"], [clay="no-save no-watch no-snapshot"]';
+// ClayJS's own UI and anything else drawn over the page that is never saved.
+const UI = '[clay~="editor-ui"], [clay~="no-snapshot"], [editor-ui], [no-snapshot], [snapshot-remove]';
 const REPLACED = /^(img|video|canvas|iframe|embed|object|image|use|path|rect|circle|ellipse|line|poly(line|gon))$/;
 const BAD = /(invert|brightness|contrast|grayscale|sepia|hue-rotate|opacity|url)\(/;
 const TO_LMS = [0.4122, 0.5363, 0.0514, 0.2119, 0.6807, 0.1074, 0.0883, 0.2817, 0.63];
@@ -45,10 +46,11 @@ const inside = (r, x, y) => x >= r.left && x <= r.right && y >= r.top && y <= r.
 const colours = new Map();
 function colour(text) {
   if (!colours.has(text)) {
-    const [, fn, body = ''] = /^(rgba?|oklch|oklab)\(([^()]*)\)$/.exec(text) || [];
-    const v = body.split(/[\s,/]+/).map((t) => parseFloat(t) || 0);
+    const [, fn, body = ''] = /^(rgba?|oklch|oklab|color)\(([^()]*)\)$/.exec(text) || [];
+    const v = body.replace(/^srgb /, '').split(/[\s,/]+/).map((t) => parseFloat(t) || 0);
     const h = (v[2] * Math.PI) / 180;
-    const rgb = !fn ? null
+    const rgb = !fn || (fn === 'color' && !body.startsWith('srgb ')) ? null
+      : fn === 'color' ? v.slice(0, 3).map(clamp)
       : fn[0] === 'r' ? v.slice(0, 3).map((c) => clamp(c / 255))
       : fromOklab(fn === 'oklab' ? v : [v[0], v[1] * Math.cos(h), v[1] * Math.sin(h)]);
     colours.set(text, rgb && [...rgb, v.length > 3 ? clamp(v[3]) : 1]);
@@ -118,6 +120,7 @@ export function pageColour(rect) {
       const host = el.assignedSlot || el.parentElement || el.parentNode?.host;
       const parent = host ? group(host) : { k: 1 };
       i.k = parent.k * +cs.opacity;
+      i.ui = parent.ui || el.matches(UI);
       i.bad = parent.bad || BAD.test(cs.filter + cs.backdropFilter) || cs.mixBlendMode !== 'normal' || /\(/.test(cs.maskImage);
     }
     return i;
@@ -133,8 +136,8 @@ export function pageColour(rect) {
 
   function fold(layers, unknown, withMaybe) {
     let rgb = [0, 0, 0], through = 1;
-    for (const { c, maybe } of layers) {
-      const [r, g, b, a] = c || [unknown, unknown, unknown, 1];
+    for (const { c, k = 1, maybe } of layers) {
+      const [r, g, b, a] = c || [unknown, unknown, unknown, k];
       const opacity = maybe && !withMaybe ? 0 : a;
       rgb = rgb.map((v, k) => v + through * opacity * [r, g, b][k]);
       through *= 1 - opacity;
@@ -148,7 +151,7 @@ export function pageColour(rect) {
     const unplaced = new Set();
     for (const el of found) {
       const r = rectOf(info(el));
-      if (raw.includes(el) || !inside(r, x, y)) continue;
+      if (raw.includes(el) || !inside(r, x, y) || !el.isConnected || info(el).cs.visibility !== 'visible') continue;
       let at = raw.findLastIndex((e) => el.contains(e)) + 1;
       if (!at && info(el).cs.zIndex < 0) at = Math.max(0, raw.findIndex((e) => owners.includes(e)));
       if (!at) unplaced.add(el);
@@ -158,9 +161,9 @@ export function pageColour(rect) {
     let ink = null, covered = false;
     for (const [k, el] of raw.entries()) {
       const i = group(el);
-      if ((i.skip ??= !!el.closest(UI))) continue;
+      if (i.ui || !i.k) continue;
       const own = raw.lastIndexOf(el) === k, stray = !owners.includes(el) && !inside(rectOf(i), x, y);
-      for (const l of stray ? [{}] : own ? ownOf(i) : []) layers.push({ c: i.bad ? null : fade(l.c, i.k), maybe: l.maybe || unplaced.has(el) });
+      for (const l of stray ? [{}] : own ? ownOf(i) : []) layers.push({ c: i.bad ? null : fade(l.c, i.k), k: i.k, maybe: l.maybe || unplaced.has(el) });
       if (own && !ink && !covered && !stray) ink = inkOf(i);
       covered ||= stray || (own && ownOf(i).some((l) => !l.maybe && (!l.c || l.c[3] >= 0.5)));
     }
@@ -226,9 +229,12 @@ export function uiLook(rect, base = BEVEL_SURFACE) {
  * something, like an alarm).
  */
 // A Bevel button rebuilds its inline style on every hover and focus, keeping only what
-// was pinned, so on a button the look is pinned.
+// was pinned, so on a button the look is pinned. An element with no size yet (hidden,
+// empty) takes the page's declared scheme, or keeps the look it has.
 export function paintLook(el, { rect = el.getBoundingClientRect(), background = null } = {}) {
-  const look = uiLook(rect);
+  const sized = rect.width > 0 && rect.height > 0;
+  if (!sized && pageScheme() === 'light dark') return null;
+  const look = sized ? uiLook(rect) : { scheme: pageScheme(), surface: null };
   const props = { 'color-scheme': look.scheme };
   if (background !== null) props.background = look.surface || background;
   if (typeof el.pin === 'function') el.pin(props);
@@ -242,8 +248,8 @@ export function paintLook(el, { rect = el.getBoundingClientRect(), background = 
  */
 export function lookAt(el, rect, base) {
   const look = uiLook(rect, base);
-  el.style.setProperty('color-scheme', look.scheme);
-  if (look.surface) el.style.setProperty('--bevel-surface', look.surface);
+  el.style.setProperty('color-scheme', look.scheme, 'important');
+  if (look.surface) el.style.setProperty('--bevel-surface', look.surface, 'important');
   else el.style.removeProperty('--bevel-surface');
   return look;
 }

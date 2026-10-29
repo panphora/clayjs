@@ -67,6 +67,21 @@ describe('pageColour', () => {
     page('background:#ffffff', '<div clay="editor-ui" style="position:fixed;top:0;right:0;width:300px;height:80px;background:#000"></div>');
     expect(pageColour(corner()).scheme).to.equal('light');
   });
+
+  it('looks through a fully transparent slide to the page', () => {
+    page('background:#1e2a3a', '<img style="position:fixed;inset:0;opacity:0;width:100%;height:100%" src="data:image/gif;base64,R0lGODlhAQABAAAAACw=">');
+    expect(pageColour(corner()).scheme).to.equal('dark');
+  });
+
+  it('reads a background computed as color(srgb ...)', () => {
+    page('background:color-mix(in srgb, #1e2a3a 90%, black)');
+    expect(pageColour(corner()).scheme).to.equal('dark');
+  });
+
+  it('looks through other UI that is never saved', () => {
+    page('background:#1e2a3a', '<div clay="no-snapshot" style="position:fixed;top:0;right:0;width:300px;height:80px;background:#fff"></div>');
+    expect(pageColour(corner()).scheme).to.equal('dark');
+  });
 });
 
 describe('uiLook and paintLook', () => {
