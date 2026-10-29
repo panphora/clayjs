@@ -60,7 +60,7 @@ const typeAt = (tab, id, offset, text) => {
   tab.view.dispatch(tab.view.state.tr.insertText(text, pos));
 };
 
-test("a keystroke reuses the walk the previous write left, and a peer's edit forces a fresh walk", () => {
+test("a keystroke reuses the walk the previous write left, and so does one after a peer's edit renders", () => {
   const a = open(page([{ id: "p", text: "ALPHA" }, { id: "q", text: "bravo" }]));
   const b = open(clone(a.pd, 500));
   typeAt(a, "q", 1, "x");
@@ -69,9 +69,9 @@ test("a keystroke reuses the walk the previous write left, and a peer's edit for
   typeAt(b, "q", 5, "z");
   merge(a.pd, b.pd);
   typeAt(a, "q", 3, "w");
-  expect(a.stats.reusedWalks).toBe(2);
-  typeAt(a, "q", 4, "v");
   expect(a.stats.reusedWalks).toBe(3);
+  typeAt(a, "q", 4, "v");
+  expect(a.stats.reusedWalks).toBe(4);
   settled(a);
   expect(blocks(a)).toEqual([["p", "ALPHA"], ["q", "bxywvravoz"]]);
 });

@@ -10,8 +10,14 @@ import { sameJson } from "./layout.js";
 import { marksFromAttributes, marksKey } from "./marks.js";
 import { yAfter } from "./tokens.js";
 import { canonicalRevision } from "./recovery.js";
+import { tableFieldOwner } from "./table.js";
 
 const TEXT_DELETE_PREFIX = '["text-delete",';
+
+// The block whose attribute map a type is, or null.
+const blockOfAttrs = (pd, type) => (type instanceof Y.AbstractType && type._item && type._item.parent === pd.attrs && typeof type._item.parentSub === "string" ? type._item.parentSub : null);
+// The walk reads a block's type, and docOf reads every block's parent to break cycles.
+const crossBlock = (key) => key === "t" || key === "parent";
 
 const isMarker = (it) => it.content instanceof Y.ContentEmbed && it.content.embed.b !== undefined;
 const textual = (it) => it.content instanceof Y.ContentString || it.content instanceof Y.ContentFormat || (it.content instanceof Y.ContentEmbed && it.content.embed.b === undefined);
@@ -42,11 +48,30 @@ const markerOf = (it, stops) => {
 };
 
 // Reads a finished Yjs transaction and returns the one live marker whose block alone it
-// changed, with whether it deleted anything, or null when the walk must start over.
+// changed (or none), the blocks whose own fields it changed (table fields, attributes
+// other than the type and the parent), and whether it deleted anything; or null when
+// the walk must start over. The walk never reads those fields: only those blocks'
+// nodes are derived again.
 export function captureDelta(pd, transaction, previous) {
   const stops = stopIndex(previous);
+  const fields = new Set();
+  const tableKeys = transaction.changed.get(pd.tableFields) ?? new Set();
   for (const [type, keys] of transaction.changed) {
     if (type === pd.flow) continue;
+    if (type === pd.tableFields) {
+      for (const key of keys) {
+        const owner = pd.tableFields.has(key) ? tableFieldOwner(key, pd.tableFields.get(key)) : null;
+        if (owner === null) return null;
+        fields.add(owner);
+      }
+      continue;
+    }
+    const block = blockOfAttrs(pd, type);
+    if (block !== null) {
+      for (const key of keys) if (crossBlock(key)) return null;
+      fields.add(block);
+      continue;
+    }
     if (type !== pd.gone) return null;
     for (const key of keys) if (typeof key !== "string" || !key.startsWith(TEXT_DELETE_PREFIX)) return null;
   }
@@ -56,7 +81,12 @@ export function captureDelta(pd, transaction, previous) {
     if (!(it instanceof Y.Item)) return false;
     // A text-delete record is written beside the deletion it describes; the walk never reads it.
     if (it.parent === pd.gone) return typeof it.parentSub === "string" && it.parentSub.startsWith(TEXT_DELETE_PREFIX);
-    if (it.parent !== pd.flow || !textual(it)) return false;
+    if (it.parent === pd.tableFields) return tableKeys.has(it.parentSub);
+    if (it.parent !== pd.flow) {
+      const block = blockOfAttrs(pd, it.parent);
+      return block !== null && fields.has(block) && !crossBlock(it.parentSub);
+    }
+    if (!textual(it)) return false;
     const owner = markerOf(it, stops);
     if (!owner || (marker && owner !== marker)) return false;
     marker = owner;
@@ -80,7 +110,7 @@ export function captureDelta(pd, transaction, previous) {
       }
     }
   }
-  return marker ? { marker, deleted } : null;
+  return marker || fields.size ? { marker, deleted, fields } : null;
 }
 
 // Walks one live block again from its marker and splices it into the previous walk,

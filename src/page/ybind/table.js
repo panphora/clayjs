@@ -45,6 +45,17 @@ function keepOne(live, dead) {
   if (first) live[first] = dead[first];
 }
 
+// The table a field belongs to, or null when the field is one resolveTableFields refuses.
+export function tableFieldOwner(key, value) {
+  let tuple;
+  try { tuple = JSON.parse(key); } catch { return null; }
+  if (!Array.isArray(tuple) || tuple.length !== 4) return null;
+  const [owner, kind, entityId, field] = tuple;
+  if (!validId(owner) || !validId(entityId)) return null;
+  if (kind === "cell") return validId(field) && validCell(value) ? owner : null;
+  return Object.hasOwn(TABLE_FIELDS, kind) && TABLE_FIELDS[kind].includes(field) && validValue(field, value) ? owner : null;
+}
+
 export function resolveTableFields(fields, blockId = null, seed = null) {
   const rows = new Map(), cols = new Map(), cells = new Map();
   for (const [key, value] of fields) {

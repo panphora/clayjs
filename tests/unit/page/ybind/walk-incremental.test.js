@@ -8,6 +8,7 @@ import { schema } from "../../../../src/page/schema.js";
 import { state as pmState, view as pmView } from "../../../../src/vendor/prosemirror.vendor.js";
 import { createPageDoc, createBridge, createYPageBinding, keepViewPos, seedFrom, docOf, walk, authorKey } from "../../../../src/page/ybind/index.js";
 import { NET } from "../../../../src/page/ybind/layout.js";
+import { tableKey } from "../../../../src/page/ybind/table.js";
 import { buildLongDocument } from "../helpers/long-document.js";
 
 const A = 300;
@@ -105,6 +106,61 @@ const removeBlock = (tab, id) => {
 
 const counts = (tab) => ({ incremental: tab.stats.incrementalWalks ?? 0, proved: tab.stats.provedWalks ?? 0 });
 
+test("a peer's table cell edit keeps the walk and derives that table alone again", () => {
+  const cols = { c1: { pos: "a0", name: "Name" } };
+  const rows = { r1: { pos: "a0", cells: { c1: "Alpha" } } };
+  const a = open(page([{ id: "p", text: "ALPHA" }, { id: "tab", t: "table", attrs: { cols, rows, sort: null, parent: null } }, { id: "q", text: "bravo" }]));
+  const b = open(clone(a.pd, 500));
+  const walked = a.bridge.walk;
+  const before = counts(a);
+  b.pd.tableFields.set(tableKey("tab", "cell", "r1", "c1"), "Gamma");
+  merge(a.pd, b.pd);
+  expect(a.bridge.walk).toBe(walked);
+  expect(counts(a)).toEqual({ incremental: before.incremental + 1, proved: before.proved + 1 });
+  expect(a.view.state.doc.child(1).textContent).toContain("Gamma");
+  settled(a);
+});
+
+test("an attribute that names a block's parent is not a field-only change", () => {
+  const a = open(page([{ id: "p", text: "ALPHA" }, { id: "q", text: "bravo" }]));
+  const b = open(clone(a.pd, 500));
+  const walked = a.bridge.walk;
+  b.pd.attrs.get("q").set("parent", "p");
+  merge(a.pd, b.pd);
+  expect(a.bridge.walk).not.toBe(walked);
+  settled(a);
+});
+
+test("a full walk with the bridge's kept origin index equals one with a fresh index, across moves and their undo", () => {
+  const a = open(page([{ id: "p", text: "ALPHA" }, { id: "q", text: "bravo" }, { id: "r", text: "charlie" }]));
+  const b = open(clone(a.pd, 500));
+  expect(b.bridge.moveBlocks({ ids: ["q"], afterId: "r" })).toMatchObject({ status: "moved" });
+  merge(a.pd, b.pd);
+  expect(a.bridge.moveBlocks({ ids: ["p"], afterId: "q" })).toMatchObject({ status: "moved" });
+  a.bridge.undo();
+  typeAt(a, "r", 2, "x");
+  expect(a.stats.provedIndexWalks ?? 0).toBeGreaterThan(0);
+  expect(a.stats.walkMismatch ?? 0).toBe(0);
+  settled(a);
+});
+
+test("an update the tab already has walks nothing and renders nothing", () => {
+  const a = open(page([{ id: "p", text: "ALPHA" }, { id: "q", text: "bravo" }]));
+  const b = open(clone(a.pd, 500));
+  typeAt(b, "q", 5, "z");
+  b.pd.flow.format(1, 2, { bold: true });
+  merge(a.pd, b.pd);
+  const walked = a.bridge.walk;
+  const before = { ...counts(a), renders: a.stats.renders };
+  merge(a.pd, b.pd);
+  expect(a.bridge.walk).toBe(walked);
+  expect({ ...counts(a), renders: a.stats.renders }).toEqual(before);
+  const reused = a.stats.reusedWalks ?? 0;
+  typeAt(a, "q", 1, "w");
+  expect(a.stats.reusedWalks ?? 0).toBe(reused + 1);
+  settled(a);
+});
+
 test("typing three characters is three incremental walks, each proven against the full walk", () => {
   const a = open(page([{ id: "p", text: "ALPHA" }, { id: "q", text: "bravo" }]));
   typeAt(a, "q", 1, "x");
@@ -138,7 +194,7 @@ test("deleting a block whole is a full walk, and so is typing at the end of the 
   expect(blocks(a)).toEqual([["p", "ALPHAy"], ["q", "bravox"], ["s", "delta"]]);
 });
 
-test("a peer's merged edit renders incrementally, then a local keystroke is a full walk and the next one is incremental", () => {
+test("a peer's merged edit renders incrementally, and the local keystrokes after it reuse that walk", () => {
   const a = open(page([{ id: "p", text: "ALPHA" }, { id: "q", text: "bravo" }, { id: "r", text: "charlie" }]));
   const b = open(clone(a.pd, 500));
   typeAt(b, "q", 5, "z");
@@ -146,14 +202,12 @@ test("a peer's merged edit renders incrementally, then a local keystroke is a fu
   expect(counts(a)).toEqual({ incremental: 1, proved: 1 });
   expect(a.stats.mismatch).toBe(0);
   expect(blocks(a)).toEqual([["p", "ALPHA"], ["q", "bravoz"], ["r", "charlie"]]);
-  // The merge's render happened inside its own transaction, so the next local keystroke
-  // walks from the start (reusedWalks does not grow) and only the one after reuses.
   const reused = a.stats.reusedWalks ?? 0;
   typeAt(a, "q", 3, "w");
-  expect(a.stats.reusedWalks ?? 0).toBe(reused);
+  expect(a.stats.reusedWalks ?? 0).toBe(reused + 1);
   expect(counts(a)).toEqual({ incremental: 2, proved: 2 });
   typeAt(a, "q", 4, "v");
-  expect(a.stats.reusedWalks ?? 0).toBe(reused + 1);
+  expect(a.stats.reusedWalks ?? 0).toBe(reused + 2);
   expect(counts(a)).toEqual({ incremental: 3, proved: 3 });
   expect(a.stats.walkMismatch ?? 0).toBe(0);
   settled(a);

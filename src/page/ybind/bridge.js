@@ -155,7 +155,7 @@ const newestLocalMarker = (pd, blockId) => {
 
 export function createBridge({ pd, onNotice = () => {}, ownedTokens = [], authorToken = null, stats = { groups: 0, mismatch: 0, renders: 0, first: null }, captureTimeout = 500 }) {
   let view = null;
-  let w = walk(pd);
+  let w = null;
   let docVersion = 0, walkedAt = -1;
   // The one transaction since the last walk, when there was exactly one and it changed
   // text inside one live block (walk-delta.js); any other history forces a full walk.
@@ -164,6 +164,7 @@ export function createBridge({ pd, onNotice = () => {}, ownedTokens = [], author
   // derived again and comes back as the same object the view holds.
   const nodes = new WeakMap();
   const origins = createOriginIndex(pd.origins);
+  w = walk(pd, origins);
   const um = new Y.UndoManager([pd.flow, pd.attrs, pd.gone, pd.tableFields, pd.boardFields], {
     trackedOrigins: new Set([LOCAL]),
     captureTimeout,
@@ -238,6 +239,14 @@ export function createBridge({ pd, onNotice = () => {}, ownedTokens = [], author
     stats.walkMismatch = (stats.walkMismatch ?? 0) + 1;
     throw new Error(`Incremental walk diverged from the full walk:\n${a}\n---\n${b}`);
   };
+  // Every walk the bridge takes runs after Yjs has settled (onSettled), when the index's
+  // observer has seen every origin record; the proof walks again with a fresh index.
+  const proveIndexWalk = (full) => {
+    const a = walkSignature(pd, full), b = walkSignature(pd, walk(pd));
+    if (a === b) { stats.provedIndexWalks = (stats.provedIndexWalks ?? 0) + 1; return; }
+    stats.walkMismatch = (stats.walkMismatch ?? 0) + 1;
+    throw new Error(`A walk with the kept origin index diverged from one with a fresh index:\n${a}\n---\n${b}`);
+  };
   const proveRecovery = () => {
     const fresh = JSON.stringify(snapshotOf(reduceRecovery(pd, { index: origins, walked: w })));
     if (fresh === JSON.stringify(recoveryState())) return;
@@ -248,8 +257,14 @@ export function createBridge({ pd, onNotice = () => {}, ownedTokens = [], author
   // walk changed. Returns that transaction's delta when the walk was incremental.
   const walkNow = () => {
     const change = deltas === 1 ? delta : null;
-    const next = change ? rewalk(pd, w, change.marker) : null;
-    if (!next) { walked(walk(pd)); return null; }
+    const next = !change ? null : change.marker ? rewalk(pd, w, change.marker) : w;
+    if (!next) {
+      const full = walk(pd, origins);
+      if (stats.proveWalks) proveIndexWalk(full);
+      walked(full);
+      return null;
+    }
+    if (change.fields.size) for (const seg of next.visible) if (change.fields.has(seg.baseId)) nodes.delete(seg);
     stats.incrementalWalks = (stats.incrementalWalks ?? 0) + 1;
     if (stats.proveWalks) proveWalk(next);
     walked(next);
@@ -270,7 +285,7 @@ export function createBridge({ pd, onNotice = () => {}, ownedTokens = [], author
     const change = walkNow();
     // Text inserted into one live block hides nothing and exposes nothing, so the
     // recovery snapshot stands. A deletion can displace a moved copy's source.
-    if (!change || change.deleted) bumpRecovery();
+    if (!change || change.deleted || change.fields.size) bumpRecovery();
     else if (stats.proveWalks) proveRecovery();
     return docOf(pd, w, nodes);
   };
@@ -315,8 +330,26 @@ export function createBridge({ pd, onNotice = () => {}, ownedTokens = [], author
     view.dispatch(tr);
     adopt(view.state.doc);
   };
-  const stale = () => { docVersion++; };
-  const onTransaction = (t) => { deltas++; delta = deltas === 1 ? captureDelta(pd, t, w) : null; };
+  // A transaction that wrote nothing (an update the tab already had, Yjs's formatting
+  // cleanup after a remote insert) leaves the walk as it was: it is not a delta, it is
+  // never rendered, and a walk current before it stays current after it.
+  const began = new WeakMap();
+  const idle = new WeakSet();
+  const unchanged = (t) => {
+    if (t.changed.size || t.deleteSet.clients.size) return false;
+    for (const [client, clock] of t.afterState) if ((t.beforeState.get(client) ?? 0) !== clock) return false;
+    return true;
+  };
+  const stale = (t) => { began.set(t, docVersion); docVersion++; };
+  const onTransaction = (t) => {
+    if (unchanged(t)) {
+      idle.add(t);
+      if (walkedAt === began.get(t) && docVersion === walkedAt + 1) walkedAt = docVersion;
+      return;
+    }
+    deltas++;
+    delta = deltas === 1 ? captureDelta(pd, t, w) : null;
+  };
   const onBefore = (t) => {
     if (groupOpen && !joining && t.origin === LOCAL) { um.stopCapturing(); groupOpen = false; }
     if (!view || t.origin === LOCAL || t.origin === um || saved) return;
@@ -335,9 +368,21 @@ export function createBridge({ pd, onNotice = () => {}, ownedTokens = [], author
   };
   const onAfter = (t) => {
     if (t.origin !== LOCAL) { lastIntent = null; groupOpen = false; }
+  };
+  // One render per batch Yjs settles (a transaction and those its observers queued), after
+  // its garbage collection and merges, so the walk it leaves is current for the next keystroke.
+  const onSettled = (doc, transactions) => {
+    let changed = false, local = false, own = false;
+    for (const t of transactions) {
+      if (idle.has(t)) continue;
+      changed = true;
+      if (t.origin === LOCAL) local = true;
+      else if (t.origin === um) own = true;
+    }
+    if (!changed) { saved = null; return; }
     if (!view) { bumpRecovery(); return; }
-    if (t.origin === LOCAL) { saved = null; return; }
-    render(t.origin === um);
+    if (local) { saved = null; return; }
+    render(own);
   };
   const portMove = (tr, move) => {
     const result = moveBlocks({ pd, view, um, origins, render }, move);
@@ -364,22 +409,22 @@ export function createBridge({ pd, onNotice = () => {}, ownedTokens = [], author
   };
   const board = createBoardCommands({ pd, um, origins, render: () => (view ? render() : refresh()) });
   pd.ydoc.on("beforeTransaction", stale);
-  pd.ydoc.on("afterTransactionCleanup", stale);
   pd.ydoc.on("beforeTransaction", onBefore);
   pd.ydoc.on("afterTransaction", onTransaction);
   pd.ydoc.on("afterTransaction", onAfter);
+  pd.ydoc.on("afterAllTransactions", onSettled);
   return {
     pd, stats, render, um, board,
     attach(v) {
       view = v;
-      walked(walk(pd));
+      walked(walk(pd, origins));
     },
     dispose() {
       pd.ydoc.off("beforeTransaction", stale);
-      pd.ydoc.off("afterTransactionCleanup", stale);
       pd.ydoc.off("beforeTransaction", onBefore);
       pd.ydoc.off("afterTransaction", onTransaction);
       pd.ydoc.off("afterTransaction", onAfter);
+      pd.ydoc.off("afterAllTransactions", onSettled);
       offOrigins();
       origins.dispose();
       um.destroy();
