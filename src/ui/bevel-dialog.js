@@ -2,7 +2,7 @@
 // close. It holds no behaviour. The modal and the crop adapter own focus, Escape,
 // backdrop clicks and settling, so each keeps the rules it already had.
 import { style, set } from "../lib/hostile-css.js";
-import { bevelBox, bevelSurface, bevelText, pageScheme, protectIcon, restyleBox } from "./bevel-controls.js";
+import { bevelBox, bevelSurface, bevelText, uiLook, protectIcon, restyleBox } from "./bevel-controls.js";
 import { TOKENS, FONT_SANS, RULES, GLYPHS } from "./bevel.js";
 import { themed, tokenRulesFor, partRules, markParts } from "./theme-parts.js";
 
@@ -103,7 +103,9 @@ export function bevelDialog({ zIndex = "100", width = "600px", closable = false,
   root.setAttribute("data-clay-modal", "");
   if (on) root.setAttribute("data-clay-ui", surface);
   root.setAttribute("aria-hidden", "true");
-  set(root, "color-scheme", on ? theme.scheme : pageScheme());
+  const panelWidth = Math.min(parseFloat(width) || 600, innerWidth - 32);
+  const area = { x: (innerWidth - panelWidth) / 2, y: Math.min(96, innerHeight * 0.1), width: panelWidth, height: 160 };
+  set(root, "color-scheme", on ? theme.scheme : uiLook(area).scheme);
 
   const overlay = bevelBox("div", [
     "position:fixed", "inset:0", `z-index:${zIndex}`, "overflow:auto",

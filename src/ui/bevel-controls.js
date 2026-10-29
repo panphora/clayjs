@@ -335,3 +335,4 @@ export function setShown(el, shown, display = 'block') {
 }
 
 export { pageScheme, protectIcon };
+export { paintLook, uiLook } from './page-colour.js';

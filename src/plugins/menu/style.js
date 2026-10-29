@@ -1,5 +1,8 @@
 // The menu's look: Bevel tokens scoped to the menu family, solid surfaces, one soft
 // shadow, light or dark by the scheme the dock inherits from the page.
+// The surface and muted ink below, per scheme, for ui/page-colour.js's tint.
+export const MENU_SURFACE = { light: [0xFF, 0xFC, 0xF6], dark: [0x1A, 0x1D, 0x2C], mutedLight: [0x6B, 0x59, 0x42], mutedDark: [0xA3, 0xA9, 0xC2] };
+
 export default `.clay-menu-dock, .clay-menu-recall, .clay-menu-spots, .clay-seo {
   --bevel-font-sans: system-ui, -apple-system, "Segoe UI", sans-serif;
   --bevel-font-serif: Newsreader, Georgia, "Times New Roman", serif;

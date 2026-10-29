@@ -50,7 +50,7 @@ import { enableContentEditable } from "../core/admin-contenteditable.js";
 import onDomReady from "../lib/dom-ready.js";
 import wire from "./wire.js";
 import { set } from "../lib/hostile-css.js";
-import { bevelBox, bevelButton, bevelSurface, bevelText, bevelInput, bevelIconButton, pageScheme, setShown, RUNTIME_ONLY } from "../ui/bevel-controls.js";
+import { bevelBox, bevelButton, bevelSurface, bevelText, bevelInput, bevelIconButton, pageScheme, paintLook, setShown, RUNTIME_ONLY } from "../ui/bevel-controls.js";
 import { TOKENS, GLYPHS, FONT_SANS, FONT_MONO, SHADOW } from "../ui/bevel.js";
 
 const HELPER = "ai-edit";
@@ -770,9 +770,9 @@ function showChipFor(unit) {
   chip.pin({
     left: Math.min(rect.right + 8, window.innerWidth - 34) + 'px',
     top: Math.max(8, rect.top) + 'px',
-    'color-scheme': pageScheme(),
   });
   setShown(chip, true, 'inline-grid');
+  paintLook(chip);
 }
 
 function hideChip() {
@@ -808,9 +808,9 @@ function showChipForSelection() {
   chip.pin({
     left: Math.min(end.right + 6, window.innerWidth - 34) + 'px',
     top: Math.max(8, end.top + end.height / 2 - 13) + 'px',
-    'color-scheme': pageScheme(),
   });
   setShown(chip, true, 'inline-grid');
+  paintLook(chip);
 }
 
 // Compose-only messages: the host's switch being off and a request too large to send
@@ -850,10 +850,10 @@ function showBar(mode) {
     setShown(control, controls.includes(control), 'inline-flex');
   }
   hideChip();
-  set(bar, 'color-scheme', pageScheme());
   setShown(bar, true, 'flex');
   syncBubble();
   positionChrome();
+  paintLook(bar);
   // The bar opens on the control that belongs to its state, and a state change moves
   // focus only when the button holding it has just gone away.
   const first = controls[0];
@@ -950,8 +950,6 @@ function openPanel(el, quote) {
   anchorEl = el;
   anchorRange = range ? range.cloneRange() : null;
   hideChip();
-  set(panel, 'color-scheme', pageScheme());
-  set(ring, 'color-scheme', pageScheme());
   setShown(panel, true);
   pendingSelection = quote;
   const shown = quote ? (quote.text.trim().length > 400 ? quote.text.trim().slice(0, 400) + '\u2026' : quote.text.trim()) : '';
@@ -962,6 +960,8 @@ function openPanel(el, quote) {
   applyHelperState();
   positionChrome();
   fitTextarea();
+  paintLook(panel);
+  paintLook(ring);
   textarea.focus();
   refreshHelperState();
 }

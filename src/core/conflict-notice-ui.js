@@ -6,7 +6,7 @@ import { set, make } from "../lib/hostile-css.js";
 import { isSaveConflicted } from "./save.js";
 import { gateCaptureToken } from "../lib/dirty-gate.js";
 import { reloadAfterDiscard } from "./unsaved-warning.js";
-import { bevelButton, bevelIconButton, bevelSurface, bevelWell, bevelText, protectIcon, RUNTIME_ONLY } from "../ui/bevel-controls.js";
+import { bevelButton, bevelIconButton, bevelSurface, bevelWell, bevelText, protectIcon, paintLook, RUNTIME_ONLY } from "../ui/bevel-controls.js";
 import { TOKENS, FONT_SANS, FONT_MONO, GLYPHS } from "../ui/bevel.js";
 
 // One notice for everything this tab holds that the page no longer shows: edits
@@ -114,11 +114,6 @@ function key(node, name) {
   return node;
 }
 
-function schemeOf() {
-  const s = getComputedStyle(document.documentElement).colorScheme;
-  return s === "light" || s === "dark" ? s : "light dark";
-}
-
 // A phone keyboard shrinks the visual viewport but leaves fixed elements pinned to
 // the layout viewport, which parks a bottom-anchored bar behind the keyboard at the
 // exact moment somebody is typing. Lift it by the difference instead.
@@ -185,7 +180,6 @@ function render() {
   wellEl = null;
   panelEl = null;
   root.replaceChildren();
-  set(root, "color-scheme", schemeOf());
 
   if (toastText) {
     root.append(drawToast(toastText));
@@ -202,6 +196,7 @@ function render() {
   // A request for a control the toast is standing in for waits until the toast goes.
   if (!toastText) pendingFocus = null;
   place();
+  paintLook(root);
 }
 
 function dot() {

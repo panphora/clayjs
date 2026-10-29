@@ -5,10 +5,11 @@ import { canEdit, isDraftMode, isEditMode, mode as startMode } from "../core/is-
 import onDomReady from "../lib/dom-ready.js";
 import CLAYGOO from "./menu/claygoo.svg.js";
 import { modeRefusalText } from "../core/mode-refusal.js";
-import MENU_CSS from "./menu/style.js";
+import MENU_CSS, { MENU_SURFACE } from "./menu/style.js";
 import { attachPlacement } from "./menu/placement.js";
 import { attachActions } from "./menu/actions.js";
 import { attachPeople } from "./menu/people.js";
+import { followLook, lookAt } from "../ui/page-colour.js";
 import { introWanted, countIntroOpen, dismissIntro, keys, isHideShortcut } from "./menu/preferences.js";
 
 const SEO_ITEM = true;
@@ -298,6 +299,7 @@ function mount() {
     show.addEventListener("click", unhide);
     recall.append(text, show);
     document.body.append(recall);
+    lookAt(recall, recall.getBoundingClientRect(), MENU_SURFACE);
     const shown = recall;
     recallTimer = setTimeout(() => {
       shown.setAttribute("data-fading", "");
@@ -457,6 +459,7 @@ function mount() {
   }
 
   document.body.append(root);
+  followLook(root, root.querySelector(".clay-menu"), MENU_SURFACE);
   attachPlacement({
     dock: root,
     grip,

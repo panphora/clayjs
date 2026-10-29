@@ -68,6 +68,7 @@ function build() {
 
   document.body.appendChild(root);
   place();
+  ui.paintLook(root, { background: ui.TOKENS.surface });
   window.visualViewport?.addEventListener("resize", place);
   window.visualViewport?.addEventListener("scroll", place);
 }

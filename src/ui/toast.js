@@ -4,7 +4,7 @@
 // The Hyperclay dashboard's toast (Bevel's React toast with the dashboard's overrides),
 // drawn inline: a 3px tone edge, a 16px Bevel glyph, 13.5px semibold text, a quiet close.
 import { set } from "../lib/hostile-css.js";
-import { bevelBox, bevelSurface, bevelText, bevelButton, pageScheme, protectIcon } from "./bevel-controls.js";
+import { bevelBox, bevelSurface, bevelText, bevelButton, protectIcon, paintLook } from "./bevel-controls.js";
 import { TOKENS, RULES, GLYPHS } from "./bevel.js";
 
 const TONES = {
@@ -44,7 +44,7 @@ function build(message, type, { detail = "", actions = [] } = {}) {
   const el = bevelSurface("div", [
     "display:flex", "align-items:flex-start", ...RULES.toast, "width:100%",
     `border-inline-start:3px solid ${tone.edge}`,
-    "cursor:pointer", "pointer-events:auto", `color-scheme:${pageScheme()}`,
+    "cursor:pointer", "pointer-events:auto",
     ...HIDDEN, `transition:${motion()}`,
   ]);
   el.setAttribute("data-clay-toast", type);
@@ -99,6 +99,7 @@ function closeButton(onClick) {
 
 function reveal(el) {
   stack().append(el);
+  paintLook(el, { background: TOKENS.surface });
   setTimeout(() => {
     set(el, "opacity", "1");
     set(el, "transform", "none");

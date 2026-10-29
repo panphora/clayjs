@@ -1,6 +1,7 @@
 import { isEditMode } from "./is-edit-mode.js";
 import { downloadStored } from "./conflict-download.js";
-import { bevelSurface, bevelText, bevelButton, pageScheme, setShown } from "../ui/bevel-controls.js";
+import { bevelSurface, bevelText, bevelButton, pageScheme, paintLook, setShown } from "../ui/bevel-controls.js";
+import { TOKENS } from "../ui/bevel.js";
 import { set } from "../lib/hostile-css.js";
 
 // The one quiet word about how large this document is.
@@ -90,6 +91,7 @@ function render(size) {
   // already recommends downloading one.
   setShown(copy, size.state === "over", "inline-flex");
   place();
+  paintLook(root, { background: TOKENS.surface });
 }
 
 function clear() {

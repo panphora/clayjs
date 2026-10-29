@@ -3,8 +3,6 @@
 // the saved file, a sync frame, the dirty check or undo. Nothing is written until
 // Apply: opening and cancelling change only the sheet.
 import { applyHead, FIELDS, readHead } from "./seo-head.js";
-import { lookAt } from "../../ui/page-colour.js";
-import { MENU_SURFACE } from "./style.js";
 import { hostMeta } from "../../core/host-meta.js";
 import { documentTitle } from "../../page/document-title.js";
 import { registerUnsavedState } from "../../lib/unsaved-state.js";
@@ -761,7 +759,6 @@ export function open() {
   });
 
   document.addEventListener("clay:modechange", followMode);
-  lookAt(root, { x: 0, y: 0, width: innerWidth, height: Math.min(200, innerHeight) }, MENU_SURFACE);
   document.body.prepend(root);
   writeHeight();
   if (typeof ResizeObserver === "function") {

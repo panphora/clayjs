@@ -1,7 +1,7 @@
 // The save chip's drawing: loaded at the person's first input or the first save state,
 // so a page nobody edits never pays for the surface it is drawn with.
 import { set, style } from "../lib/hostile-css.js";
-import { bevelSurface, pageScheme } from "../ui/bevel-controls.js";
+import { bevelSurface, pageScheme, paintLook } from "../ui/bevel-controls.js";
 import { TOKENS, FONT_SANS } from "../ui/bevel.js";
 import { saveFeedback } from "../core/save-feedback.js";
 
@@ -76,8 +76,8 @@ export function show(state) {
   const node = ensure();
   node.textContent = LABELS[state];
   node.dataset.state = state;
-  set(node, "color-scheme", pageScheme());
   style(node, ALARMING.has(state) ? ALARM : REST);
+  paintLook(node, { background: ALARMING.has(state) ? null : TOKENS.surface });
   set(node, "opacity", "1");
   clearTimeout(hideTimer);
   if (!STICKY.has(state)) hideTimer = setTimeout(() => { set(node, "opacity", "0"); }, 2200);

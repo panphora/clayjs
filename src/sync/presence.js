@@ -62,6 +62,7 @@ function loadUI() {
   uiLoad ??= Promise.all([import('../ui/bevel-controls.js'), import('../ui/bevel.js')])
     .then(([controls, bevel]) => (ui = {
       pageScheme: controls.pageScheme,
+      paintLook: controls.paintLook,
       RUNTIME_ONLY: controls.RUNTIME_ONLY,
       TOKENS: bevel.TOKENS,
       SHADOW: bevel.SHADOW,
@@ -149,7 +150,7 @@ class Presence {
     this.roster = next;
     if (!(await this.supported())) return;
     if (same) {
-      set(this.root, 'color-scheme', ui.pageScheme());
+      ui.paintLook(this.root);
       return;
     }
     await this.render();
@@ -183,7 +184,7 @@ class Presence {
     if (!this.build()) return;
 
     this.hideTip();
-    set(this.root, 'color-scheme', ui.pageScheme());
+    ui.paintLook(this.root);
     this.stack.textContent = '';
     for (const person of people) {
       this.stack.appendChild(this.avatar(person));
