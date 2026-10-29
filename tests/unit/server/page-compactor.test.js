@@ -1,6 +1,7 @@
 /**
  * @jest-environment node
  */
+import { EventEmitter } from "node:events";
 import { existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { Worker } from "node:worker_threads";
@@ -266,6 +267,103 @@ test("a worker that never answers times out, abandons the job and retries after 
   expect(room.compaction.failed).toMatchObject({ reason: "crashed" });
   expect(rooms.used()).toBe(used);
 
+  await compactor.close();
+});
+
+class Crashing extends EventEmitter {
+  constructor(url) {
+    super();
+    this.url = url;
+    this.sent = [];
+    this.terminated = 0;
+    Crashing.instances.push(this);
+  }
+  static instances = [];
+  unref() {}
+  postMessage(message) {
+    this.sent.push(message);
+  }
+  terminate() {
+    this.terminated += 1;
+    return Promise.resolve(0);
+  }
+}
+
+test("a replaced worker\u0027s exit leaves the job its replacement runs alone", async () => {
+  const c = clock();
+  const rooms = c.rooms({ compaction: { soft: 2 } });
+  const first = rooms.open("/a.html", html(), { nodeId: "n1" });
+  const second = rooms.open("/b.html", html(), { nodeId: "n2" });
+  Crashing.instances = [];
+  const timers = timerQueue();
+  const compactor = compactorOf({ rooms, WorkerClass: Crashing, setTimer: timers.setTimer, clearTimer: timers.clearTimer });
+
+  expect(send(rooms, first, 1, [[nextKey(), insert("a1")], [nextKey(), insert("a2")]]).seq).toBe(1);
+  expect(send(rooms, second, 1, [[nextKey(), insert("b1")], [nextKey(), insert("b2")]]).seq).toBe(1);
+  await flush();
+  expect(first.compaction.job).not.toBeNull();
+  expect(second.compaction.job).toBeNull();
+  expect(Crashing.instances).toHaveLength(1);
+
+  const old = Crashing.instances[0];
+  old.emit("error", new Error("fixture worker crash"));
+  expect(old.terminated).toBe(1);
+  expect(first.compaction.job).toBeNull();
+  expect(second.compaction.job).not.toBeNull();
+  const replacement = Crashing.instances[1];
+  expect(replacement).toBeDefined();
+  expect(replacement.terminated).toBe(0);
+  expect(timers.entries.map((entry) => entry.ms)).toEqual([1000, 30000]);
+
+  old.emit("exit", 1);
+  expect(replacement.terminated).toBe(0);
+  expect(compactor.running).toBe(true);
+  expect(second.compaction.job).not.toBeNull();
+  expect(second.compaction.failed).toBeNull();
+  expect(first.compaction.failed).toBeNull();
+  await compactor.close();
+});
+
+test("a crash keeps the job\u0027s overflow across every retry, and the last one fails the room", async () => {
+  const c = clock();
+  const rooms = c.rooms({ compaction: { activeBytes: 60 } });
+  const room = open(rooms);
+  const asked = [];
+  const begin = rooms.beginCompaction;
+  rooms.beginCompaction = (target, options) => {
+    asked.push(options?.overflow);
+    return begin(target, options);
+  };
+  Silent.instances = [];
+  const timers = timerQueue();
+  const compactor = compactorOf({ rooms, WorkerClass: Silent, timeoutMs: 30000, setTimer: timers.setTimer, clearTimer: timers.clearTimer });
+
+  expect(send(rooms, room, 1, [[nextKey(), insert("over the bound")]]).error).toBe("checkpoint-required");
+  await flush();
+  expect(asked).toEqual([true]);
+  expect(room.compaction.job).not.toBeNull();
+
+  const waits = [1000, 5000, 30000];
+  for (let attempt = 0; attempt < waits.length; attempt++) {
+    timers.entries.shift().fn();
+    expect(room.compaction.job).toBeNull();
+    expect(asked).toHaveLength(attempt + 1);
+    expect(timers.entries.map((entry) => entry.ms)).toEqual([waits[attempt]]);
+
+    timers.entries.shift().fn();
+    await flush();
+    expect(asked).toHaveLength(attempt + 2);
+    expect(room.compaction.job).not.toBeNull();
+    expect(room.compaction.failed).toBeNull();
+    expect(timers.entries.map((entry) => entry.ms)).toEqual([30000]);
+  }
+  expect(asked).toEqual([true, true, true, true]);
+
+  timers.entries.shift().fn();
+  expect(room.compaction.job).toBeNull();
+  expect(room.compaction.failed).toMatchObject({ reason: "crashed" });
+  expect(asked).toEqual([true, true, true, true]);
+  expect(timers.entries).toHaveLength(0);
   await compactor.close();
 });
 

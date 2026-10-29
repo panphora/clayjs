@@ -492,6 +492,58 @@ test("a legacy client's state hides the page store and a declared client's carri
   expect(rooms.state(room, null).stores.page).toBeDefined();
 });
 
+test("a persistent check on a compacting room projects it without a clone error", () => {
+  const c = clock();
+  const rooms = c.rooms({ compaction: true });
+  const file = html();
+  rooms.open("/p.html", file, { nodeId: "n1" });
+  const token = rooms.holdPersistent("/p.html", { nodeId: "n1" });
+  try {
+    expect(rooms.checkPersistent(token, { html: file })).toEqual({ html: file });
+  } finally {
+    rooms.releasePersistent(token);
+  }
+  expect(typeof rooms.get("/p.html").compaction.ranges).toBe("function");
+});
+
+test("a full fold of the whole page that does not fit makes the next write refuse as full", () => {
+  const c = clock();
+  const rooms = c.rooms({ compaction: { activeBytes: 60 } });
+  const room = open(rooms);
+  expect(send(rooms, room, 1, [[nextKey(), insert("growing")]]).error).toBe("checkpoint-required");
+  const before = snapshot(room);
+
+  const job = rooms.beginCompaction(room, { overflow: true });
+  expect(job.kind).toBe("full");
+  expect(job.sources.map(([key]) => key).sort()).toEqual(Object.keys(room.stores.get("page").value.y).sort());
+  const built = buildCandidate({ kind: job.kind, sources: job.sources });
+  expect(rooms.commitCompaction(job.token, built)).toEqual({ refused: "too-large" });
+  expect(snapshot(room)).toEqual(before);
+  expect(room.compaction.lastFull).toMatchObject({ seq: room.seq, deletesAtBegin: 0 });
+  expect(room.compaction.deletesSince).toBe(0);
+
+  expect(send(rooms, room, 2, [[nextKey(), insert("after the fold")]]).error).toBe("page-full");
+  expect(snapshot(room)).toEqual(before);
+});
+
+test("a leaving writer hands the room to a tab that can see the page store", () => {
+  const c = clock();
+  const rooms = c.rooms({ compaction: true });
+  const room = open(rooms);
+  const apply = (client, n, text) => rooms.apply(room, client, frame(room, n, [setOp(nextKey(), insert(text))]));
+
+  expect(apply("a", 1, "writer").writer).toBe("a");
+  c.state.now += 10;
+  expect(apply("new", 1, "capable").seq).toBe(2);
+  c.state.now += 10;
+  expect(apply("old", 1, "legacy").seq).toBe(3);
+  expect(rooms.state(room, "old", null, { compaction: 0 }).stores.page).toBeUndefined();
+  expect([...room.compaction.legacy]).toEqual(["old"]);
+  expect(room.lastSentAt.get("old")).toBeGreaterThan(room.lastSentAt.get("new"));
+
+  expect(rooms.leave(room, "a", ["new", "old"])).toEqual({ writerChanged: true, writer: "new" });
+});
+
 test("the compaction status table names every refusal the room can answer", () => {
   expect(ROOM_ERROR_STATUS).toEqual({
     "checkpoint-required": 503, "page-full": 409, "compaction-failed": 409,

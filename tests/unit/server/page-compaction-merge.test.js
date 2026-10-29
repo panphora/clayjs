@@ -8,8 +8,9 @@ import {
   stampOf,
   serializeLive,
   inspectPage,
+  LIVE_LIMITS,
 } from "../../../src/server/rooms/index.js";
-import { buildCandidate } from "../../../src/live/page-compaction.js";
+import { buildCandidate, isCheckpointKey } from "../../../src/live/page-compaction.js";
 
 const doc = (...parts) => `<!doctype html><html><body>${parts.join("")}</body></html>`;
 const pageTag = (value, at = null) =>
@@ -170,6 +171,45 @@ test("a legacy file with fold keys, parts and old-format keys merges only the un
   expect(textOf(store(room).value)).toBe("hello world!");
   expect(store(room).log.at(-1).ops.map((op) => op.path[1])).toEqual(added);
   expect(store(room).log.at(-1).merge).toBe(true);
+});
+
+test("a file whose union with the room is over the store cap folds instead of dropping the page", () => {
+  const c = clock();
+  const doc0 = new Y.Doc();
+  doc0.clientID = 20;
+  doc0.getText("flow").insert(0, "x".repeat(1_650_000));
+  const base = Y.encodeStateAsUpdateV2(doc0);
+  const { rooms, room } = hostRoom(c, { v: 1, g: 0, y: { seed: Y.toBase64(base) } });
+
+  const legacy = new Y.Doc();
+  legacy.clientID = 21;
+  Y.applyUpdateV2(legacy, base);
+  legacy.getText("flow").insert(legacy.getText("flow").length, " LEGACY EDIT");
+  const saved = { v: 1, g: 0, y: { "m21-0": Y.toBase64(Y.encodeStateAsUpdateV2(legacy)) } };
+
+  let update;
+  doc0.on("updateV2", (u) => { update = u; });
+  doc0.getText("flow").insert(doc0.getText("flow").length, " ADMITTED LIVE EDIT");
+  expect(send(rooms, room, 1, [["uk-inst-1", Y.toBase64(update)]]).seq).toBe(1);
+
+  const union = { ...store(room).value, y: { ...store(room).value.y, ...saved.y } };
+  expect(Buffer.byteLength(JSON.stringify(union))).toBeGreaterThan(LIVE_LIMITS.storeBytes);
+  const folded = buildCandidate({ kind: "full", sources: [...Object.entries(store(room).value.y), ...Object.entries(saved.y)] });
+  expect(Buffer.byteLength(folded.update)).toBeLessThan(LIVE_LIMITS.storeBytes);
+  const admittedKey = Object.keys(store(room).value.y).find((key) => key.startsWith("uk-"));
+
+  expect(rooms.fileWritten("/p.html", html(saved)).valueChanged).toBe(true);
+  expect(room.stores.get("page")).toBeDefined();
+  const keys = Object.keys(store(room).value.y);
+  expect(keys).toHaveLength(1);
+  expect(keys[0]).not.toBe(admittedKey);
+  expect(isCheckpointKey(keys[0])).toBe(true);
+  const text = textOf(store(room).value);
+  expect(text).toContain("ADMITTED LIVE EDIT");
+  expect(text).toContain("LEGACY EDIT");
+
+  doc0.destroy();
+  legacy.destroy();
 });
 
 test("a file lacking room keys deletes none of them", () => {
