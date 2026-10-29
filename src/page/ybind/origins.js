@@ -46,6 +46,7 @@ const recordKey = (key) => {
 export function createOriginIndex(origins) {
   const spans = new Map();
   const aliases = new Map();
+  const aliasClocks = new Map();
   const boundaries = new Map();
 
   const lower = (list, clock) => {
@@ -53,13 +54,29 @@ export function createOriginIndex(origins) {
     while (lo < hi) { const mid = (lo + hi) >> 1; if (list[mid].clock < clock) lo = mid + 1; else hi = mid; }
     return lo;
   };
+  const lowerClock = (list, clock) => {
+    let lo = 0, hi = list.length;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (list[mid] < clock) lo = mid + 1; else hi = mid; }
+    return lo;
+  };
+  const markAlias = (client, clock, present) => {
+    const list = aliasClocks.get(client) ?? [];
+    const at = lowerClock(list, clock);
+    const there = list[at] === clock;
+    if (present && !there) list.splice(at, 0, clock);
+    else if (!present && there) list.splice(at, 1);
+    if (list.length) aliasClocks.set(client, list);
+    else aliasClocks.delete(client);
+  };
   const apply = (key, value) => {
     const parts = recordKey(key);
     if (!parts) return;
     const [kind, client, clock] = parts;
     if (kind === "alias") {
-      if (value && isClock(value.sourceClient) && isClock(value.sourceClock)) aliases.set(idKey(client, clock), { client: value.sourceClient, clock: value.sourceClock });
+      const valid = Boolean(value && isClock(value.sourceClient) && isClock(value.sourceClock));
+      if (valid) aliases.set(idKey(client, clock), { client: value.sourceClient, clock: value.sourceClock });
       else aliases.delete(idKey(client, clock));
+      markAlias(client, clock, valid);
       return;
     }
     if (kind === "boundary") {
@@ -93,6 +110,39 @@ export function createOriginIndex(origins) {
     const offset = id.clock - record.clock;
     if (offset >= record.length) return { client: id.client, clock: id.clock };
     return { client: record.sourceClient, clock: record.sourceClock + offset };
+  };
+
+  const resolveRange = (client, clock, length) => {
+    const out = [];
+    const push = (sourceClient, sourceClock, size) => {
+      const last = out[out.length - 1];
+      if (last && last.client === sourceClient && last.clock + last.length === sourceClock) last.length += size;
+      else out.push({ client: sourceClient, clock: sourceClock, length: size });
+    };
+    const list = spans.get(client) ?? [];
+    const marks = aliasClocks.get(client) ?? [];
+    const end = clock + length;
+    let s = lower(list, clock + 1) - 1, a = lowerClock(marks, clock), at = clock;
+    while (at < end) {
+      if (a < marks.length && marks[a] === at) {
+        const target = aliases.get(idKey(client, at));
+        push(target.client, target.clock, 1);
+        at += 1;
+        a += 1;
+      } else {
+        let stop = end;
+        if (a < marks.length && marks[a] < stop) stop = marks[a];
+        if (s + 1 < list.length && list[s + 1].clock < stop) stop = list[s + 1].clock;
+        const span = s >= 0 ? list[s] : null;
+        if (span && at < span.clock + span.length) {
+          stop = Math.min(stop, span.clock + span.length);
+          push(span.sourceClient, span.sourceClock + at - span.clock, stop - at);
+        } else push(client, at, stop - at);
+        at = stop;
+      }
+      while (s + 1 < list.length && list[s + 1].clock <= at) s += 1;
+    }
+    return out;
   };
 
   const boundaryOf = (id) => {
@@ -165,7 +215,7 @@ export function createOriginIndex(origins) {
   };
 
   return {
-    origins, resolve, recordSpans, recordAlias, recordBoundary, boundaryOf,
+    origins, resolve, resolveRange, recordSpans, recordAlias, recordBoundary, boundaryOf,
     get size() { return origins.size; },
     dispose() { origins.unobserve(observer); },
   };

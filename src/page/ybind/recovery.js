@@ -261,18 +261,13 @@ const rawOf = (attrs) => {
 
 const displaced = (item, seen) => seen.some((vector) => item.clock >= (vector.get(item.client) ?? 0));
 
-const addClock = (spans, clock) => {
-  const last = spans[spans.length - 1];
-  if (last && clock <= last.end) {
-    if (clock === last.end) last.end = clock + 1;
-    return;
-  }
-  spans.push({ start: clock, end: clock + 1 });
-};
-
-const mergeClocks = (clocks) => {
+const mergeRanges = (list) => {
   const spans = [];
-  for (const clock of [...clocks].sort(compare)) addClock(spans, clock);
+  for (const [start, end] of list.sort((a, b) => a[0] - b[0])) {
+    const last = spans[spans.length - 1];
+    if (last && start <= last.end) last.end = Math.max(last.end, end);
+    else spans.push({ start, end });
+  }
   return spans;
 };
 
@@ -292,11 +287,10 @@ const visibleOriginIndex = (flow, walked, index) => {
   const ranges = createProjectionMap(walked, flow.length).physicalRanges(0, walked.tokens);
   const clocks = new Map();
   const collect = (item, from, to) => {
-    for (let offset = from; offset < to; offset++) {
-      const source = index.resolve({ client: item.id.client, clock: item.id.clock + offset });
-      const list = clocks.get(source.client);
-      if (list) list.push(source.clock);
-      else clocks.set(source.client, [source.clock]);
+    for (const piece of index.resolveRange(item.id.client, item.id.clock + from, to - from)) {
+      const list = clocks.get(piece.client);
+      if (list) list.push([piece.clock, piece.clock + piece.length]);
+      else clocks.set(piece.client, [[piece.clock, piece.clock + piece.length]]);
     }
   };
   let at = 0, cursor = 0;
@@ -318,7 +312,7 @@ const visibleOriginIndex = (flow, walked, index) => {
     cursor = range;
   }
   const spans = new Map();
-  for (const [client, list] of clocks) spans.set(client, mergeClocks(list));
+  for (const [client, list] of clocks) spans.set(client, mergeRanges(list));
   return (client, clock) => {
     const list = spans.get(client);
     return list ? holdsClock(list, clock) : false;
