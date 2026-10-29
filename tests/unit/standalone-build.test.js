@@ -73,8 +73,9 @@ test("carries the core, every plugin and every satellite", () => {
   // markdown and highlighting tools loaded on demand (OverType 192 KB, marked 70 KB,
   // highlight.js 35 KB plus 30 KB of grammars and its sheet), the menu and SEO plugin
   // 49 KB, and the reader's page features and saved stream. The guard is there to catch
-  // something the size of Shiki's grammars (6.3 MB), which 5.5 MB still does.
-  expect(bundle.length).toBeLessThan(5_500_000);
+  // something the size of Shiki's grammars (6.3 MB), which 5.6 MB still does. Raised from
+  // 5.5 MB for the page binding's incremental walk and the sliced save (2026-10-29).
+  expect(bundle.length).toBeLessThan(5_600_000);
 });
 
 // The chunk build adds a generated bootstrap per entry that has a target, plus the
@@ -92,5 +93,5 @@ test("writes exactly the files the unversioned-URL guard pins", () => {
     expect(readFileSync(join(DIST, name), "utf8")).toContain('"dir":"m/"');
   }
   expect(readdirSync(join(DIST, "m"))).toContain("manifest.json");
-  expect(readdirSync(join(DIST, "server")).sort()).toEqual(["checkpoint.cjs", "checkpoint.mjs", "core.cjs", "offline-runtime.cjs", "offline-runtime.mjs", "rooms.cjs", "rooms.mjs"]);
+  expect(readdirSync(join(DIST, "server")).sort()).toEqual(["checkpoint.cjs", "checkpoint.mjs", "core.cjs", "offline-runtime.cjs", "offline-runtime.mjs", "page-compaction-worker.cjs", "rooms.cjs", "rooms.mjs"]);
 });
