@@ -23,7 +23,10 @@ export function createYPageBinding({ store, ydoc = new Y.Doc(), onNotice = () =>
     setTimer,
     clearTimer,
     compact,
-    onStopped,
+    onStopped: (reason) => {
+      if (reason === "page-full" || reason === "compaction-failed") Promise.resolve(requestCheckpoint?.({ timeoutMs: 10_000 })).catch(() => {});
+      onStopped(reason);
+    },
     onLocalUpdate: debt.local,
     journal: { local: (u) => pageJournal?.local(u), dependency: (u) => pageJournal?.dependency(u) },
   });
@@ -33,7 +36,7 @@ export function createYPageBinding({ store, ydoc = new Y.Doc(), onNotice = () =>
   let checksQueued = false;
   const unsaved = registerUnsavedState?.({
     id: "page:live",
-    isPending: () => (exitClosed() && debt.pending()) || store.pending.length > 0 || provider.reconcilePending || Boolean(pageJournal && pageJournal.pending() > (pageJournal.failure ? 1 : 0)),
+    isPending: () => (exitClosed() && debt.pending()) || store.pending.length > 0 || provider.pending || provider.reconcilePending || Boolean(pageJournal && pageJournal.pending() > (pageJournal.failure ? 1 : 0)),
     flush,
   });
   const changed = () => {
@@ -59,7 +62,7 @@ export function createYPageBinding({ store, ydoc = new Y.Doc(), onNotice = () =>
   // Everything the file or the room still owes: this tab's own input, a store op no
   // answer has covered, a reconcile, a journal write still in flight.
   const exitPending = () =>
-    debt.pending() || store.pending.length > 0 || provider.reconcilePending ||
+    debt.pending() || store.pending.length > 0 || provider.pending || provider.reconcilePending ||
     Boolean(pageJournal && pageJournal.pending() > (pageJournal.failure ? 1 : 0));
 
   // The exit's own flush, under the permit the barrier minted.

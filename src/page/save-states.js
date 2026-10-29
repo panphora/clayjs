@@ -27,6 +27,8 @@ const SAVE_STATE_BY_CODE = Object.freeze({
   "save-history-refresh-required": "blocked",
   "provenance-unsupported": "blocked",
   "receipt-expired": "blocked",
+  "page-full": "blocked",
+  "compaction-failed": "blocked",
 });
 
 // Where a person's typing lives, never a stronger claim than the evidence behind it.

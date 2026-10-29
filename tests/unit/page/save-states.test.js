@@ -57,6 +57,7 @@ const BLOCKED = [
   "page-condition-required", "page-conversion-refused", "page-conversion-required",
   "page-conversion-stale", "save-id-reused", "too-large", "unsupported-host",
   "save-history-refresh-required", "provenance-unsupported", "receipt-expired",
+  "page-full", "compaction-failed",
 ];
 
 const tagHtml = (value) => `<script type="application/json" merge="page" clay="live">${JSON.stringify(value)}</script>`;
@@ -103,6 +104,14 @@ test("every code maps to exactly one state, unknown codes fall to error, saved a
   expect(saveStates.saveStateFor({ offline: true })).toBe("retrying");
   expect(saveStates.saveStateFor({ offline: true, code: null })).toBe("retrying");
   expect(saveStates.saveStateFor({ offline: true, code: "too-large" })).toBe("retrying");
+});
+
+test("a compacting room with no room left, and a room whose compaction failed, both block", () => {
+  for (const code of ["page-full", "compaction-failed"]) {
+    expect(saveStates.SAVE_STATE_BY_CODE[code]).toBe("blocked");
+    expect(saveStates.saveStateFor({ code })).toBe("blocked");
+    expect(saveStates.saveStateFor({ code, offline: true })).toBe("retrying");
+  }
 });
 
 test("the two texts are the exact wording the indicator and toast show", () => {

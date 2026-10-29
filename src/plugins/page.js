@@ -28,6 +28,7 @@ const GENERIC_ERROR = "Couldn't save";
 const GENERIC_OFFLINE = "Offline, not saved";
 const REPLACED_TEXT = "This page was changed outside the editor. Reload to see it.";
 const TOO_LARGE_TEXT = "That change is too large to share, so it was not saved. Reload the page to keep editing.";
+export const PAGE_FULL_MESSAGE = "This page is full. Your recent changes are kept here; delete some content to keep editing.";
 const OVERWRITTEN_TEXT = "Some changes you made were replaced by a change made outside the editor.";
 const REPLACED_HOLD = "The page was changed outside the editor; reload to see it.";
 const LOADING_MS = 150;
@@ -258,6 +259,10 @@ function stopWithNotice(inst, text) {
 
 const showReplaced = (inst) => stopWithNotice(inst, REPLACED_TEXT);
 const showTooLarge = (inst) => stopWithNotice(inst, TOO_LARGE_TEXT);
+const showFull = (inst, code) => {
+  dispatchState("blocked", code, PAGE_FULL_MESSAGE);
+  stopWithNotice(inst, PAGE_FULL_MESSAGE);
+};
 
 function applySaveState(inst, state, code, message) {
   if (state === "saved") showSaved(inst);
@@ -965,6 +970,8 @@ function mergeRepresentedPage(store, value) {
         if (reason === "lineage") {
           fastLane()?.abandon?.("page");
           showReplaced(inst);
+        } else if (reason === "page-full" || reason === "compaction-failed") {
+          showFull(inst, reason);
         } else {
           showTooLarge(inst);
         }
