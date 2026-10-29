@@ -2398,7 +2398,7 @@ A **free document** is a published app anyone can use and keep. The visitor gets
 
 ### 12.1 What a visitor gets
 
-On a page that opts in ([The contract](https://clayjs.com/docs/guide/free-documents/#the-contract)), a visitor who is not the owner is in **draft mode**. Every edit-only module loads, so `editable`, `persist`, undo, sortable and the rest behave as they do for the owner, and the autosave pipeline still runs. The save lane is swapped: instead of sending the document to the host, ClayJS extracts the page's `api` JSON out of the bytes a real save would write and stores `{ "v": 1, "savedAt": "2026-10-15T00:00:00.000Z", "data": { ... } }` under `localStorage["clay:visitor-drafts:<slot>"]`. The next load applies that JSON over the file the host served, so an owner's later fix reaches a returning visitor while the visitor's own work stays. The host is never told: no save, no sync, no upload, and no `/_/meta` discovery. Two tabs on the same page share that record: a save takes what only the other tab changed, and when both changed the same thing, this tab's version is saved and the other tab's record is kept under `clay:visitor-drafts:<slot>:conflict`.
+On a page that opts in ([The contract](https://clayjs.com/docs/guide/free-documents/#the-contract)), a visitor who is not the owner is in **draft mode**. Every edit-only module loads, so `editable`, `persist`, undo, sortable and the rest behave as they do for the owner, and the autosave pipeline still runs. The save lane is swapped: instead of sending the document to the host, ClayJS extracts the page's `api` JSON out of the bytes a real save would write and stores `{ "v": 1, "savedAt": "2026-10-15T00:00:00.000Z", "data": { ... } }` under `localStorage["clay:visitor-drafts:<slot>@<path>"]`. The next load applies that JSON over the file the host served, so an owner's later fix reaches a returning visitor while the visitor's own work stays. The host is never told: no save, no sync, no upload, and no `/_/meta` discovery. Two tabs on the same page share that record: a save takes what only the other tab changed, and when both changed the same thing, this tab's version is saved and the other tab's record is kept under `clay:visitor-drafts:<slot>@<path>:conflict`.
 
 The owner is a visitor here too. Signed in, they get the same private draft unless the URL carries `?editmode=true`, which edits the original file and shows every visitor the change. Two things never put the owner in draft mode: a document opened from `file:`, where draft mode never applies, and HTML Clay, which stamps a save token on the response. On HTML Clay the owner opens the file in view and edits the original after switching to edit. Hyperclay Local is not one of them. It serves the folder over `http:` and injects no save token, so its owner is in draft mode like anyone else and adds `?editmode=true` to edit the file ([The mode ladder](https://clayjs.com/docs/guide/free-documents/#the-mode-ladder)).
 
@@ -2407,7 +2407,7 @@ The owner is a visitor here too. Signed in, they get the same private draft unle
 A page that wants draft mode needs all of this. The example in [A complete example](https://clayjs.com/docs/guide/free-documents/#a-complete-example) carries every item, and its test proves the round trip:
 
 1. An `api` rules tag naming every saved field, with a `cms-template` seed row for every list the rules describe. Hide the seed in your own CSS (`[cms-template] { display: none !important }`), never with `hidden`, which the CMS reads as data ([cms: content-managed pages](https://clayjs.com/docs/guide/components/#cms-content-managed-pages)).
-2. `<html visitor-drafts="<site-stem>-v1" autosave>`. The value is the slot: letters, digits, dot, underscore and hyphen, up to 100 characters. It names this app's corner of `localStorage`, so two apps on one origin never mix.
+2. `<html visitor-drafts="<site-stem>-v1" autosave>`. The value is the slot: letters, digits, dot, underscore and hyphen, up to 100 characters. It names this app's drafts. ClayJS keys each draft by the slot and the document's path, so two documents on one origin never share a visitor's draft, even with the same slot.
 3. `plugins=visitor-drafts` on the loader tag, plus whatever else the app needs.
 4. `persist` on every control the rules name. A typed value without `persist` is lost at save ([`persist`: form controls](https://clayjs.com/docs/guide/record/#persist-form-controls)), and in draft mode a save is the visitor's own copy.
 5. `data-id` on every record and `data-id=""` on every blueprint. New rows mint their own (`trigger-add` does it, [sap.js: records, views and totals in markup](https://clayjs.com/docs/guide/components/#sap-js-records-views-and-totals-in-markup)).
@@ -2452,7 +2452,7 @@ The rung is where a free document lives, so the details matter:
 |---|---|
 | `active` | `true` when the plugin found a slot and the rules tag, `false` otherwise |
 | `slot` | the slot from `<html visitor-drafts="...">` |
-| `key` | the `localStorage` key, `clay:visitor-drafts:<slot>` |
+| `key` | the `localStorage` key, `clay:visitor-drafts:<slot>@<path>`, where `<path>` is the document's path up to its `.html` or `.htmlclay` file (`/` for the root and for a host that serves one document at every path) |
 | `hasDraft()` | is there a stored draft for this slot |
 | `restored()` | `{ restored, hadDraft, parked }` for this load, or `null` when the plugin is not active |
 | `saveNow()` | write the page to the slot now; `true` when it landed, `false` when it did not |
@@ -2471,13 +2471,19 @@ The restore runs while ClayJS boots, before `clay.ready` resolves, and applies t
 
 Code that drew before `clay.ready` has two ways to hear about the restore: listen for `clay:drafts-restored` on `document`, or call `clay.visitorDrafts.onRestore(fn)`, which runs `fn` at once when the restore already happened. Either way the detail is `{ restored, hadDraft, parked }`.
 
-A draft that no longer fits the page is never overwritten. When the stored JSON is not `{ v, data }` (garbage, a bare array, a missing `data`), the raw value is moved to `localStorage["clay:visitor-drafts:<slot>:unreadable:<ISO timestamp>"]`, the slot is cleared, and the page loads as authored with `parked: true` in the detail. When the write is refused only for keys the rules do not know, those keys are dropped and the rest is applied, so adding a field to the rules never costs a visitor their work.
+A draft that no longer fits the page is never overwritten. When the stored JSON is not `{ v, data }` (garbage, a bare array, a missing `data`), the raw value is moved to `localStorage["clay:visitor-drafts:<slot>@<path>:unreadable:<ISO timestamp>"]`, the slot is cleared, and the page loads as authored with `parked: true` in the detail. When the write is refused only for keys the rules do not know, those keys are dropped and the rest is applied, so adding a field to the rules never costs a visitor their work.
 
-### 12.6 The download prompt and the intro area
+**Drafts saved by an older ClayJS.** A draft stored under the slot alone is copied into the document's key on its first load, with its intro and prompt memory, and the old key is left as it is. Code outside ClayJS that reads a draft should read `clay.visitorDrafts.key`; a script that must run before `clay.js` uses the same path rule.
+
+### 12.6 Two tabs
+
+Each save merges what the other tab saved. Fields merge one by one, and lists of rows with ids merge row by row: a row added or removed in one tab is kept or removed, and rows changed in different tabs both keep their change. When both tabs changed the same field, reordered a list, or moved one row to different places, this tab's value is saved and the other tab's whole record is kept under `<key>:conflict`.
+
+### 12.7 The download prompt and the intro area
 
 Both are runtime chrome: `clay="editor-ui"` and `sap-ignore`, built by the plugin on every load. Neither is in the file, neither is saved or synced, and neither is read by sapjs.
 
-Both remember themselves per slot in `localStorage["clay:visitor-drafts:<slot>:ui"]`, as `{ "v": 1, "prompt": { "shown": ..., "dismissed": ..., "uses": ..., "downloaded": ... }, "intro": { "done": null | "closed" | "scrolled" }, "src": ... }`. Clearing that key shows the intro and the prompt again.
+Both remember themselves per slot and path in `localStorage["clay:visitor-drafts:<slot>@<path>:ui"]`, as `{ "v": 1, "prompt": { "shown": ..., "dismissed": ..., "uses": ..., "downloaded": ... }, "intro": { "done": null | "closed" | "scrolled" }, "src": ... }`. Clearing that key shows the intro and the prompt again.
 
 **The intro** is authored per app as a `<template visitor-intro>`. The template holds the author's whole strip: its markup and any `<style>` it needs. The plugin clones it into a section at the very top of the page body, before the app's own content, and adds a quiet close (`x`) in the corner. The intro leaves for good when the visitor closes it or scrolls it past the top of the viewport; the ui memory records `"closed"` or `"scrolled"` as the reason.
 
@@ -2501,11 +2507,11 @@ An element inside the template with `[visitor-intro-start]` scrolls to the app, 
 
 **The owner chip** shows only to the signed in owner, at the bottom left: it says whether this load is their private draft ("Edit the original") or the original ("Back to my draft") and switches with `clay.visitorDrafts.editOriginal()` and `backToDraft()`.
 
-### 12.7 Migrating an app's own storage
+### 12.8 Migrating an app's own storage
 
 **Not supported yet:** the plugin reads no migration hook, so an app that kept its earlier data under its own `localStorage` key has to move those values into the page from its own code, on the first load after the switch.
 
-### 12.8 A complete example
+### 12.9 A complete example
 
 [`examples/free-reading-list.html`](https://clayjs.com/examples/free-reading-list.html). Plugins `visitor-drafts,indicator&exclude=richclay`, satellites `clay-options` and `sap.js`. A reading list: a title, an author and a status select per book, one scalar goal for the year, and sapjs counting the books that are read. It is the shortest file that carries every item of the contract, and `tests/unit/guide-examples/free-document.test.js` runs it end to end: edit a title, add a book, check the slot, then load the file again with that storage and check the books and the counts come back. The record is authored in the saved form, with its `viewmode:` attributes. The `reading` option of a status select carries no `selected`: it is the first option, which is the default, and the row that is `read` marks it.
 
