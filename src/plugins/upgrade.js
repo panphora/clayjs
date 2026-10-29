@@ -9,7 +9,7 @@
 // a visitor, a draft, no network, a failed fetch, a bad digest or an equal version.
 // The 24-hour cache is hyper-html-api's own; the dotted-version comparison is
 // core/version.js, so the rules engine that upgrades a document stays the click's.
-import { isNewerVersion } from "../core/version.js";
+import { isNewerVersion, parseVersion } from "../core/version.js";
 
 const CACHE_PREFIX = "hha:upgrade-check:";
 const TTL_MS = 24 * 60 * 60 * 1000;
@@ -119,6 +119,7 @@ export async function checkUpdate({
 
   const { latest } = await latestManifest(source.href, currentVersion, { fetchFn, now });
   if (!latest || typeof latest !== "object" || typeof latest.version !== "string") return result("unknown");
+  if (!parseVersion(latest.version) || !parseVersion(currentVersion)) return result("unknown");
   if (!isNewerVersion(latest.version, currentVersion)) return result("current");
 
   const clay = (typeof window !== "undefined" && window.clay) || {};

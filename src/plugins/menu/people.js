@@ -94,7 +94,11 @@ export function attachPeople({ root, capsule, addItem, removeItem, closeMenu, no
         }
       });
       row.append(input, save);
-      queueMicrotask(() => input.isConnected && input.select());
+      queueMicrotask(() => {
+        if (!input.isConnected) return;
+        input.focus();
+        input.select();
+      });
     } else {
       const name = document.createElement("span");
       name.className = "clay-people-me-name";

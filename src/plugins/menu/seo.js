@@ -3,6 +3,8 @@
 // the saved file, a sync frame, the dirty check or undo. Nothing is written until
 // Apply: opening and cancelling change only the sheet.
 import { applyHead, FIELDS, readHead } from "./seo-head.js";
+import { lookAt } from "../../ui/page-colour.js";
+import { MENU_SURFACE } from "./style.js";
 import { hostMeta } from "../../core/host-meta.js";
 import { documentTitle } from "../../page/document-title.js";
 import { registerUnsavedState } from "../../lib/unsaved-state.js";
@@ -370,9 +372,9 @@ export function open() {
     const theirsLine = element("p");
     const theirs = element("span", "clay-seo-theirs");
     theirsLine.append("Changed elsewhere: ", theirs);
-    const theirsButton = element("button", "clay-seo-theirs-button", "Use theirs");
+    const theirsButton = element("button", "clay-menu-btn clay-menu-btn-small clay-seo-theirs-button", "Use theirs");
     theirsButton.type = "button";
-    const mineButton = element("button", "clay-seo-mine-button", "Keep mine");
+    const mineButton = element("button", "clay-menu-btn clay-menu-btn-small clay-seo-mine-button", "Keep mine");
     mineButton.type = "button";
     conflict.append(theirsLine, theirsButton, mineButton);
     conflicts.set(key, { row: conflict, theirs });
@@ -559,6 +561,8 @@ export function open() {
       const message = found[key] || "";
       el.textContent = message;
       el.hidden = !message;
+      if (message) inputs.get(key)?.setAttribute("aria-invalid", "true");
+      else inputs.get(key)?.removeAttribute("aria-invalid");
     }
   }
 
@@ -736,7 +740,7 @@ export function open() {
     if (reloading) return;
     if (storage) storage.remove(REOPEN_KEY);
     const refusal = modeRefusalText(result);
-    if (refusal) window.clay?.toast?.(refusal, "error");
+    if (refusal) (window.clay?.menu?.note || window.clay?.toast)?.(refusal, "error");
     if (result && result.ok !== false) layout();
   });
 
@@ -757,6 +761,7 @@ export function open() {
   });
 
   document.addEventListener("clay:modechange", followMode);
+  lookAt(root, { x: 0, y: 0, width: innerWidth, height: Math.min(200, innerHeight) }, MENU_SURFACE);
   document.body.prepend(root);
   writeHeight();
   if (typeof ResizeObserver === "function") {

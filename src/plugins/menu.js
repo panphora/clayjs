@@ -273,6 +273,7 @@ function mount() {
 
   function hide() {
     close();
+    people?.close({ restore: false });
     userHidden = true;
     applyHidden();
     dropRecall();
@@ -461,7 +462,10 @@ function mount() {
     grip,
     storage: window.clay.storage && window.clay.storage.local,
     onMove: replace,
-    onDragStart: close,
+    onDragStart: () => {
+      close();
+      people?.close({ restore: false });
+    },
   });
   reserveSpace();
   if (typeof ResizeObserver === "function") new ResizeObserver(reserveSpace).observe(root);

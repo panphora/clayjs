@@ -165,6 +165,10 @@ describe("what the check answers", () => {
     expect((await checkUpdate({ fetchFn: fetcher({ latest: nameless }) })).status).toBe("unknown");
 
     localStorage.clear();
+    const prerelease = manifest({ version: "2.0.0-beta.1" });
+    expect((await checkUpdate({ fetchFn: fetcher({ latest: prerelease }) })).status).toBe("unknown");
+
+    localStorage.clear();
     storage.local.set("upgrade-dismissed", "2.0.0");
     const dismissed = fetcher({ latest: manifest({ version: "2.0.0" }) });
     expect((await checkUpdate({ fetchFn: dismissed })).status).toBe("unknown");
