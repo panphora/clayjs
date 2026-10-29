@@ -10,14 +10,8 @@
  */
 
 import { drain } from "../../src/lib/slice.js";
-import {
-  serializeClone,
-  serializeCloneSteps,
-  serializeForCompare,
-  serializeForCompareSteps,
-  serializeForSync,
-  serializeForSyncSteps,
-} from "../../src/core/snapshot.js";
+import { serializeClone, serializeForCompare, serializeForSync } from "../../src/core/snapshot.js";
+import { serializeCloneSteps, serializeForCompareSteps, serializeForSyncSteps } from "../../src/core/serialize-steps.js";
 import { TAB_LOCAL_ROOT_ATTRS } from "../../src/lib/root-attrs.js";
 
 const SLICE_BYTES = 64 * 1024;

@@ -17,10 +17,9 @@ import {
   prepareSaveCapture,
   readCapturePageState,
   releaseSaveCapture,
-  runSaveRenderer,
-  serializeCloneSteps,
-  serializeForCompareSteps
+  runSaveRenderer
 } from './snapshot.js';
+import { serializeCloneSteps, serializeForCompareSteps } from './serialize-steps.js';
 
 /**
  * Begin one save capture: everything that must see the live page in this call, then a job

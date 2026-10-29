@@ -277,7 +277,7 @@ export function serializeClone(clone) {
 }
 
 /** Every <noscript> in the tree whose content is text only, with the children it held. */
-function noscriptBlocks(clone) {
+export function noscriptBlocks(clone) {
   const blocks = [];
   const collect = (node) => {
     for (const child of node.childNodes) {
@@ -295,86 +295,13 @@ function noscriptBlocks(clone) {
 }
 
 /** Swap each block's text for a marker, and answer the text each marker stands for. */
-function swapNoscriptMarkers(blocks) {
+export function swapNoscriptMarkers(blocks) {
   const nonce = Math.random().toString(36).slice(2);
   return blocks.map(([el, kids], i) => {
     const marker = `\uE000clay-noscript-${nonce}-${i}\uE000`;
     el.replaceChildren(el.ownerDocument.createTextNode(marker));
     return [marker, kids.map((n) => n.data).join('')];
   });
-}
-
-// How much serialized output a sliced save writes before it hands the page back, and how
-// big a subtree has to be before it is serialized child by child instead of in one call.
-const SLICE_BYTES = 64 * 1024;
-const SLICE_MIN_ELEMENTS = 256;
-
-function sliceable(el) {
-  return el.namespaceURI === XHTML_NS
-    && el.localName !== 'template'
-    && el.childNodes.length > 1
-    && el.getElementsByTagName('*').length >= SLICE_MIN_ELEMENTS;
-}
-
-/**
- * The children of `el`, each one step, `yield`ing every `SLICE_BYTES` of output. A text
- * or comment child is serialized inside `bare`, a childless copy of its parent, so its
- * escaping follows the same parent element the one-call serializer would use.
- */
-function* serializeChildrenSteps(el, bare, out, budget) {
-  for (const child of el.childNodes) {
-    if (child.nodeType === 1 && sliceable(child)) {
-      yield* serializeElementSteps(child, out, budget);
-      continue;
-    }
-    let piece;
-    if (child.nodeType === 1) piece = child.outerHTML;
-    else {
-      bare.replaceChildren(child.cloneNode(false));
-      piece = bare.innerHTML;
-    }
-    out.push(piece);
-    budget.bytes += piece.length;
-    if (budget.bytes >= SLICE_BYTES) {
-      budget.bytes = 0;
-      yield;
-    }
-  }
-}
-
-/**
- * `el.outerHTML`, built from its open tag, each child's own serialization and its end
- * tag, `yield`ing every `SLICE_BYTES` of output.
- */
-function* serializeElementSteps(el, out, budget) {
-  const bare = clonePreventingOnclone(el, false);
-  const shell = bare.outerHTML;
-  const endTag = `</${bare.localName}>`;
-  out.push(shell.slice(0, shell.length - endTag.length));
-  yield* serializeChildrenSteps(el, bare, out, budget);
-  out.push(endTag);
-}
-
-/** `"<!DOCTYPE html>" + root.outerHTML`, in steps. */
-export function* serializeTreeSteps(root) {
-  const out = ["<!DOCTYPE html>"];
-  yield* serializeElementSteps(root, out, { bytes: 0 });
-  return out.join('');
-}
-
-/** `serializeClone`, in steps: the same bytes, `yield`ing every `SLICE_BYTES` of output. */
-export function* serializeCloneSteps(clone) {
-  const blocks = noscriptBlocks(clone);
-  if (!blocks.length) return yield* serializeTreeSteps(clone);
-  const raw = swapNoscriptMarkers(blocks);
-  let html;
-  try {
-    html = yield* serializeTreeSteps(clone);
-  } finally {
-    for (const [el, kids] of blocks) el.replaceChildren(...kids);
-  }
-  for (const [marker, text] of raw) html = html.split(marker).join(text);
-  return html;
 }
 
 /**
@@ -447,7 +374,7 @@ export function addDocumentTransform(callback) {
  *
  * @returns {HTMLElement} Cloned document element with snapshot hooks applied
  */
-function clonePreventingOnclone(node, deep = true) {
+export function clonePreventingOnclone(node, deep = true) {
   const prev = window.__preventOnclone;
   window.__preventOnclone = true;
   try { return node.cloneNode(deep); }
@@ -590,7 +517,7 @@ export function captureSaveClone({ flushUndo = true, authored = true } = {}) {
 // check must not read that as an edit the person would lose on close.
 const EMPTY_INERT_ATTRS = ['style', 'class'];
 
-function prepareForCompare(clone) {
+export function prepareForCompare(clone) {
   stripDerived(clone);
   for (const name of EMPTY_INERT_ATTRS) {
     if (clone.getAttribute(name) === '') clone.removeAttribute(name);
@@ -601,12 +528,6 @@ function prepareForCompare(clone) {
 export function serializeForCompare(clone) {
   prepareForCompare(clone);
   return "<!DOCTYPE html>" + clone.outerHTML;
-}
-
-/** `serializeForCompare`, in steps. */
-export function* serializeForCompareSteps(clone) {
-  prepareForCompare(clone);
-  return yield* serializeTreeSteps(clone);
 }
 
 /**
@@ -1025,18 +946,6 @@ export function serializeForSync(clone) {
   // a receiver parses the string and morphs documentElement against documentElement,
   // so the prologue is consumed by the parser and never reaches the morph.
   return "<!DOCTYPE html>" + shell.slice(0, shell.length - endTag.length) + clone.innerHTML + endTag;
-}
-
-/** `serializeForSync`, in steps: the same bytes, `yield`ing every `SLICE_BYTES` of output. */
-export function* serializeForSyncSteps(clone) {
-  const bareRoot = clonePreventingOnclone(clone, false);
-  for (const name of TAB_LOCAL_ROOT_ATTRS) bareRoot.removeAttribute(name);
-  const shell = bareRoot.outerHTML;
-  const endTag = `</${bareRoot.localName}>`;
-  const out = ["<!DOCTYPE html>", shell.slice(0, shell.length - endTag.length)];
-  yield* serializeChildrenSteps(clone, clonePreventingOnclone(clone, false), out, { bytes: 0 });
-  out.push(endTag);
-  return out.join('');
 }
 
 /** A private deep copy of a capture's clone, for work that outlives the capture event. */

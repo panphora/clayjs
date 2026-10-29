@@ -686,7 +686,7 @@ describe("a sliced save's sync serialization runs across tasks", () => {
     try {
       const held = slicedCapture(sync, clone, 71);
       expect(held.html).toBeNull();
-      expect(held.steps).toBeTruthy();
+      expect(held.copy).toBeTruthy();
 
       // What the save does to its clone once the event returns.
       clone.querySelector('[data-id="p0"]').remove();
@@ -710,7 +710,7 @@ describe("a sliced save's sync serialization runs across tasks", () => {
     try {
       const held = slicedCapture(sync, clone, 72);
       expect(held.html).toBeNull();
-      expect(held.steps).toBeTruthy();
+      expect(held.copy).toBeTruthy();
 
       clone.querySelector('[data-id="p1"]').remove();
       sync._relayCommit(72);

@@ -43,7 +43,7 @@ import { NO_DIRTY_SELECTOR, LIVE_SELECTOR } from "../lib/region-policy.js";
 import { EXTENSION_NODE_SELECTOR, EXTENSION_ATTR_PATTERN } from '../lib/extension-noise.js';
 import { isEditMode, modeState } from "../core/is-edit-mode.js";
 import { attributeMerge } from "./merge-declarations.js";
-import { serializeForSync, serializeForSyncSteps, copyCaptureClone, captureForComparisonAndDirty, canonicalizeReceived, captureSnapshot, originalSnapshotNode, captureForMerge, captureForSaveAndComparison } from '../core/snapshot.js';
+import { serializeForSync, copyCaptureClone, captureForComparisonAndDirty, canonicalizeReceived, captureSnapshot, originalSnapshotNode, captureForMerge, captureForSaveAndComparison } from '../core/snapshot.js';
 import { mergeIgnoresAttr, mergeVetoesAttr } from '../lib/root-attrs.js';
 import { autosaveActive } from '../lib/autosave-state.js';
 import { hostSupports } from '../core/host-meta.js';
@@ -1172,6 +1172,7 @@ class LiveSync {
       const held = {
         html: null,
         steps: null,
+        copy: null,
         abort: null,
         identityMap,
         ticket: this._saveTicket,
@@ -1182,18 +1183,21 @@ class LiveSync {
         // that runs across tasks reads a private copy. Cloning is much cheaper than
         // serializing, and the copy is what keeps the bytes exactly a one-call pass's.
         // The generator records its own result, so whichever finishes it, the background
-        // run or the relay, leaves the bytes on `held`. The slicer loads lazily, like the
-        // sliced save that raised this event: a small document never fetches it.
-        const copy = copyCaptureClone(clone);
-        const steps = (function* () {
-          const html = yield* serializeForSyncSteps(copy);
-          held.html = html;
-          held.steps = null;
-        })();
-        held.steps = steps;
+        // run or the relay, leaves the bytes on `held`. The step serializers and the slicer
+        // load lazily; the sliced save that raised this event has already fetched them.
+        held.copy = copyCaptureClone(clone);
         held.abort = new AbortController();
         const { signal } = held.abort;
-        import('../lib/slice.js').then(({ runSliced }) => runSliced(steps, { signal })).catch(() => {});
+        Promise.all([import('../core/serialize-steps.js'), import('../lib/slice.js')]).then(([{ serializeForSyncSteps }, { runSliced }]) => {
+          if (signal.aborted || typeof held.html === 'string') return;
+          const steps = (function* () {
+            const html = yield* serializeForSyncSteps(held.copy);
+            held.html = html;
+            held.steps = null;
+          })();
+          held.steps = steps;
+          return runSliced(steps, { signal });
+        }).catch(() => {});
       } else {
         held.html = serializeForSync(clone);
       }
@@ -1266,10 +1270,10 @@ class LiveSync {
 
     // A serialization still running in the background: this task finishes it, so the
     // relayed bytes are the ones the save stored however the two raced.
-    if (pending?.steps) {
-      const steps = pending.steps;
+    if (pending?.copy && typeof pending.html !== 'string') {
       pending.abort?.abort();
-      for (let step = steps.next(); !step.done; step = steps.next());
+      if (pending.steps) for (let step = pending.steps.next(); !step.done; step = pending.steps.next());
+      else pending.html = serializeForSync(pending.copy);
     }
 
     // No captured snapshot means nothing here knows which bytes this save
