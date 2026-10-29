@@ -317,16 +317,11 @@ function sliceable(el) {
 }
 
 /**
- * `el.outerHTML`, built from its open tag, each child's own serialization and its end
- * tag, `yield`ing every `SLICE_BYTES` of output. A text or comment child is serialized
- * inside a childless copy of its parent, so its escaping follows the same parent element
- * the one-call serializer would use.
+ * The children of `el`, each one step, `yield`ing every `SLICE_BYTES` of output. A text
+ * or comment child is serialized inside `bare`, a childless copy of its parent, so its
+ * escaping follows the same parent element the one-call serializer would use.
  */
-function* serializeElementSteps(el, out, budget) {
-  const bare = clonePreventingOnclone(el, false);
-  const shell = bare.outerHTML;
-  const endTag = `</${bare.localName}>`;
-  out.push(shell.slice(0, shell.length - endTag.length));
+function* serializeChildrenSteps(el, bare, out, budget) {
   for (const child of el.childNodes) {
     if (child.nodeType === 1 && sliceable(child)) {
       yield* serializeElementSteps(child, out, budget);
@@ -345,6 +340,18 @@ function* serializeElementSteps(el, out, budget) {
       yield;
     }
   }
+}
+
+/**
+ * `el.outerHTML`, built from its open tag, each child's own serialization and its end
+ * tag, `yield`ing every `SLICE_BYTES` of output.
+ */
+function* serializeElementSteps(el, out, budget) {
+  const bare = clonePreventingOnclone(el, false);
+  const shell = bare.outerHTML;
+  const endTag = `</${bare.localName}>`;
+  out.push(shell.slice(0, shell.length - endTag.length));
+  yield* serializeChildrenSteps(el, bare, out, budget);
   out.push(endTag);
 }
 
@@ -734,7 +741,7 @@ export function captureForComparisonAndDirty({ flushUndo = true } = {}) {
  *   exactly as they do on the one-task path
  * @returns {Object} the pin `job.steps()` and the one-task capture both read
  */
-export function prepareSaveCapture({ emitForSync = true, flushUndo = true, requestRefresh = false, forRequest = false, pageFormatMarker = null } = {}) {
+export function prepareSaveCapture({ emitForSync = true, flushUndo = true, requestRefresh = false, forRequest = false, pageFormatMarker = null, sliced = false } = {}) {
   if (!Number.isSafeInteger(captureCounter + 1)) throw new Error('Save capture identity exhausted');
   const captureId = ++captureCounter;
   // The context this capture's renderer may attach a private artifact to, and the
@@ -754,7 +761,7 @@ export function prepareSaveCapture({ emitForSync = true, flushUndo = true, reque
   // clone per save. So a listener may READ it and must not write to it.
   if (emitForSync) {
     document.dispatchEvent(new CustomEvent('clay:snapshot-ready', {
-      detail: { documentElement: clone, forSave: true, captureId }
+      detail: { documentElement: clone, forSave: true, captureId, sliced }
     }));
   }
 
@@ -1018,6 +1025,23 @@ export function serializeForSync(clone) {
   // a receiver parses the string and morphs documentElement against documentElement,
   // so the prologue is consumed by the parser and never reaches the morph.
   return "<!DOCTYPE html>" + shell.slice(0, shell.length - endTag.length) + clone.innerHTML + endTag;
+}
+
+/** `serializeForSync`, in steps: the same bytes, `yield`ing every `SLICE_BYTES` of output. */
+export function* serializeForSyncSteps(clone) {
+  const bareRoot = clonePreventingOnclone(clone, false);
+  for (const name of TAB_LOCAL_ROOT_ATTRS) bareRoot.removeAttribute(name);
+  const shell = bareRoot.outerHTML;
+  const endTag = `</${bareRoot.localName}>`;
+  const out = ["<!DOCTYPE html>", shell.slice(0, shell.length - endTag.length)];
+  yield* serializeChildrenSteps(clone, clonePreventingOnclone(clone, false), out, { bytes: 0 });
+  out.push(endTag);
+  return out.join('');
+}
+
+/** A private deep copy of a capture's clone, for work that outlives the capture event. */
+export function copyCaptureClone(clone) {
+  return clonePreventingOnclone(clone);
 }
 
 /**

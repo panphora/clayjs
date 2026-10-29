@@ -43,7 +43,7 @@ import { NO_DIRTY_SELECTOR, LIVE_SELECTOR } from "../lib/region-policy.js";
 import { EXTENSION_NODE_SELECTOR, EXTENSION_ATTR_PATTERN } from '../lib/extension-noise.js';
 import { isEditMode, modeState } from "../core/is-edit-mode.js";
 import { attributeMerge } from "./merge-declarations.js";
-import { serializeForSync, captureForComparisonAndDirty, canonicalizeReceived, captureSnapshot, originalSnapshotNode, captureForMerge, captureForSaveAndComparison } from '../core/snapshot.js';
+import { serializeForSync, serializeForSyncSteps, copyCaptureClone, captureForComparisonAndDirty, canonicalizeReceived, captureSnapshot, originalSnapshotNode, captureForMerge, captureForSaveAndComparison } from '../core/snapshot.js';
 import { mergeIgnoresAttr, mergeVetoesAttr } from '../lib/root-attrs.js';
 import { autosaveActive } from '../lib/autosave-state.js';
 import { hostSupports } from '../core/host-meta.js';
@@ -351,6 +351,7 @@ class LiveSync {
     // Never reconstructed from lastHtml: that is the newest accepted save or
     // applied frame, which can still lag the save in flight, and pairing a fresh
     // stamp with older bytes is the one thing spec §10 forbids.
+    this._savedSnapshot?.abort?.abort();
     this._savedSnapshot = null;
     this._sendInFlight = false;
     this._queuedSend = null;
@@ -599,6 +600,7 @@ class LiveSync {
     this._diskBase = null;
     this._diskBaseTicket = this._ticket();
     this._saveTicket = 0;
+    this._savedSnapshot?.abort?.abort();
     this._savedSnapshot = null;
     this._applyGen++;
     this.lastSeenSeq = 0;
@@ -1161,18 +1163,41 @@ class LiveSync {
       // after dispatchEvent returns, so reading outerHTML and walking children
       // must happen now.
       this._log('snapshot-ready received, preparing to send');
-      const html = serializeForSync(clone);
       const identityMap = this.identity.exportMap(clone, originalSnapshotNode);
 
       // The save that follows this capture stores these bytes, so this is the
       // content its stamp will describe. Held for _relayCommit, and overwritten
       // by the next capture, so it always names the save currently in flight.
-      this._savedSnapshot = {
-        html,
+      this._savedSnapshot?.abort?.abort();
+      const held = {
+        html: null,
+        steps: null,
+        abort: null,
         identityMap,
         ticket: this._saveTicket,
         captureId: event.detail.captureId ?? null,
       };
+      if (event.detail.sliced) {
+        // The save strips this clone as soon as the event returns, so a serialization
+        // that runs across tasks reads a private copy. Cloning is much cheaper than
+        // serializing, and the copy is what keeps the bytes exactly a one-call pass's.
+        // The generator records its own result, so whichever finishes it, the background
+        // run or the relay, leaves the bytes on `held`. The slicer loads lazily, like the
+        // sliced save that raised this event: a small document never fetches it.
+        const copy = copyCaptureClone(clone);
+        const steps = (function* () {
+          const html = yield* serializeForSyncSteps(copy);
+          held.html = html;
+          held.steps = null;
+        })();
+        held.steps = steps;
+        held.abort = new AbortController();
+        const { signal } = held.abort;
+        import('../lib/slice.js').then(({ runSliced }) => runSliced(steps, { signal })).catch(() => {});
+      } else {
+        held.html = serializeForSync(clone);
+      }
+      this._savedSnapshot = held;
     };
 
     document.addEventListener('clay:snapshot-ready', this._snapshotHandler);
@@ -1238,6 +1263,14 @@ class LiveSync {
     // older save's bytes under a newer stamp.
     const pending = held;
     this._savedSnapshot = null;
+
+    // A serialization still running in the background: this task finishes it, so the
+    // relayed bytes are the ones the save stored however the two raced.
+    if (pending?.steps) {
+      const steps = pending.steps;
+      pending.abort?.abort();
+      for (let step = steps.next(); !step.done; step = steps.next());
+    }
 
     // No captured snapshot means nothing here knows which bytes this save
     // stored, and §10 is explicit that a stamp must never travel on its own.

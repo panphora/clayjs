@@ -15,7 +15,10 @@ import {
   serializeCloneSteps,
   serializeForCompare,
   serializeForCompareSteps,
+  serializeForSync,
+  serializeForSyncSteps,
 } from "../../src/core/snapshot.js";
+import { TAB_LOCAL_ROOT_ATTRS } from "../../src/lib/root-attrs.js";
 
 const SLICE_BYTES = 64 * 1024;
 
@@ -93,6 +96,21 @@ test("a small page's sliced serializations are the one-call bytes", () => {
   const clone = document.documentElement.cloneNode(true);
   expect(drain(serializeCloneSteps(clone.cloneNode(true)))).toBe(serializeClone(clone));
   expect(drain(serializeForCompareSteps(clone.cloneNode(true)))).toBe(serializeForCompare(clone));
+});
+
+test("a capture's sync serialization is the one-call bytes, tab-local root attrs and all", () => {
+  const TAB_LOCAL = "savestatus";
+  expect(TAB_LOCAL_ROOT_ATTRS.has(TAB_LOCAL)).toBe(true);
+
+  for (const build of [buildLargePage, buildSmallPage]) {
+    build();
+    const [sliced, oneCall] = [document.documentElement.cloneNode(true), document.documentElement.cloneNode(true)];
+    for (const clone of [sliced, oneCall]) {
+      clone.querySelector("body").setAttribute("data-kept", "kept");
+      clone.setAttribute(TAB_LOCAL, "saved");
+    }
+    expect(drain(serializeForSyncSteps(sliced))).toBe(serializeForSync(oneCall));
+  }
 });
 
 test("a large page yields once per 64 KB written, a small one not at all", () => {

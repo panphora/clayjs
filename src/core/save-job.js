@@ -40,7 +40,7 @@ import {
  * @returns {{ captureId: number, steps: function(): Generator, drop: function(): void }}
  */
 export function beginSaveCapture(options = {}) {
-  const pin = prepareSaveCapture(options);
+  const pin = prepareSaveCapture({ ...options, sliced: true });
   return Object.freeze({
     captureId: pin.captureId,
     steps: () => saveSteps(pin),

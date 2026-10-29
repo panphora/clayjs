@@ -653,3 +653,89 @@ test("17 a save completion from before a restart installs nothing", async () => 
   expect(sync.lastHtml).toBe(seed);
   expect(relayPosts).toHaveLength(0);
 });
+
+// The sliced save path serializes its clone in the background, so live-sync takes a
+// private copy of the capture and reads it across tasks. The bytes it relays must be the
+// ones one call would have produced, whether the run or the save lands first.
+describe("a sliced save's sync serialization runs across tasks", () => {
+  const LARGE = Array.from(
+    { length: 3000 },
+    (_, i) => `<p data-id="p${i}">Entry ${i} lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod</p>`
+  ).join("\n");
+
+  const slicedCapture = (sync, clone, captureId) => {
+    document.dispatchEvent(new CustomEvent("clay:snapshot-ready", {
+      detail: { documentElement: clone, forSave: true, captureId, sliced: true },
+    }));
+    return sync._savedSnapshot;
+  };
+
+  const countTurns = () => {
+    const turns = { count: 0 };
+    globalThis.scheduler = { yield: () => { turns.count += 1; return new Promise((r) => setTimeout(r, 0)); } };
+    return turns;
+  };
+
+  test("the capture serializes a private copy in the background, to the one-call bytes", async () => {
+    await settle(LARGE);
+    const sync = await startSync();
+    const clone = snapshot.captureSnapshot({ flushUndo: false });
+    const expected = snapshot.serializeForSync(clone.cloneNode(true));
+
+    const turns = countTurns();
+    try {
+      const held = slicedCapture(sync, clone, 71);
+      expect(held.html).toBeNull();
+      expect(held.steps).toBeTruthy();
+
+      // What the save does to its clone once the event returns.
+      clone.querySelector('[data-id="p0"]').remove();
+
+      await wait(50);
+      expect(held.html).toBe(expected);
+      expect(held.steps).toBeNull();
+      expect(turns.count).toBeGreaterThan(1);
+    } finally {
+      delete globalThis.scheduler;
+    }
+  });
+
+  test("a save that lands mid-serialization relays the same bytes", async () => {
+    await settle(LARGE);
+    const sync = await startSync();
+    const clone = snapshot.captureSnapshot({ flushUndo: false });
+    const expected = snapshot.serializeForSync(clone.cloneNode(true));
+
+    const turns = countTurns();
+    try {
+      const held = slicedCapture(sync, clone, 72);
+      expect(held.html).toBeNull();
+      expect(held.steps).toBeTruthy();
+
+      clone.querySelector('[data-id="p1"]').remove();
+      sync._relayCommit(72);
+    } finally {
+      delete globalThis.scheduler;
+    }
+
+    expect(sync._savedSnapshot).toBeNull();
+    await wait(20);
+    expect(relayPosts).toHaveLength(1);
+    expect(relayPosts[0].body.snapshot).toBe(expected);
+  });
+
+  test("a one-task capture still serializes inside the event", async () => {
+    await settle(BOARD);
+    const sync = await startSync();
+    const clone = snapshot.captureSnapshot({ flushUndo: false });
+    const expected = snapshot.serializeForSync(clone.cloneNode(true));
+
+    document.dispatchEvent(new CustomEvent("clay:snapshot-ready", {
+      detail: { documentElement: clone, forSave: true, captureId: 73 },
+    }));
+
+    const held = sync._savedSnapshot;
+    expect(held.html).toBe(expected);
+    expect(held.steps).toBeNull();
+  });
+});
