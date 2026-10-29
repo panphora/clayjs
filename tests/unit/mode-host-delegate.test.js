@@ -589,11 +589,12 @@ test("a busy or cancelled refusal says nothing", async () => {
   });
 });
 
-test("the SEO sheet's Edit toasts the permission refusal", async () => {
+test("the SEO sheet's Edit says the permission refusal in the menu's note", async () => {
   const hook = jest.fn(async () => ({ ok: false, reason: "permission-denied" }));
   await bootMenu({ hook, edit: false });
   const toast = jest.fn();
   window.clay.toast = toast;
+  const note = jest.spyOn(window.clay.menu, "note");
 
   document.querySelector(".clay-menu-goo").click();
   await settle();
@@ -606,7 +607,8 @@ test("the SEO sheet's Edit toasts the permission refusal", async () => {
     document.querySelector(".clay-seo-edit").click();
     await settle();
 
-    expect(toast).toHaveBeenCalledWith("You don't have permission to edit this document.", "error");
+    expect(note).toHaveBeenCalledWith("You don't have permission to edit this document.", "error");
+    expect(toast).not.toHaveBeenCalled();
     expect(fake.reload).not.toHaveBeenCalled();
   });
 });
