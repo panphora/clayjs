@@ -48,6 +48,9 @@ const ICONS = {
   person: '<circle cx="8" cy="5.4" r="2.3"/><path d="M3.6 13.2c.6-2.1 2.2-3.3 4.4-3.3s3.8 1.2 4.4 3.3"/>',
   calendar: '<rect x="2.5" y="3.5" width="11" height="10"/><path d="M2.5 6.8h11M5.5 2v2.4M10.5 2v2.4"/>',
   clock: '<circle cx="8" cy="8" r="5.5"/><path d="M8 4.8v3.4l2.3 1.4"/>',
+  tick: '<path d="M3.5 8.3l3 3 6-6.2"/>',
+  plus: '<path d="M8 3.5v9M3.5 8h9"/>',
+  clear: '<path d="M4.8 4.8l6.4 6.4M11.2 4.8l-6.4 6.4"/>',
 };
 
 function icon(doc, paths) {
@@ -98,45 +101,133 @@ function tag(doc, { name, paths, label, aria, filled, overdue = false }) {
   return button;
 }
 
-// The same owner field a board card's panel shows: people as chips, "No owner",
-// then a name box for anyone not in the list.
+// The floating assignee panel: the document's people with their check-item counts,
+// a name box for anyone new, and a row that clears the owner. One panel is open at a
+// time, and it hangs off the tag that opened it, right edges aligned.
+let openOwner = null;
+
+function peopleIn(view, extra) {
+  const found = new Map();
+  view.state.doc.forEach((node) => {
+    if (node.type !== schema.nodes.list_item || node.attrs.kind !== "check") return;
+    const name = String(node.attrs.owner ?? "").trim();
+    if (!name) return;
+    const key = name.toLowerCase();
+    const entry = found.get(key) ?? { name, count: 0 };
+    entry.count += 1;
+    found.set(key, entry);
+  });
+  for (const person of extra ?? []) {
+    const name = String((typeof person === "string" ? person : person?.name) ?? "").trim();
+    if (name && !found.has(name.toLowerCase())) found.set(name.toLowerCase(), { name, count: 0 });
+  }
+  return [...found.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
 function ownerPicker(view, id, anchor) {
   const doc = anchor.ownerDocument;
+  const win = doc.defaultView;
+  if (openOwner) openOwner.close();
+  for (const node of doc.querySelectorAll(".page-check-popup")) node.remove();
   const current = itemAt(view, id)?.node.attrs.owner || "";
-  const popup = doc.createElement("span");
-  popup.className = "page-check-popup page-check-owner";
-  popup.contentEditable = "false";
-  const box = el(doc, "span", "page-board-owners");
-  const people = el(doc, "span", "page-board-people", { role: "group", "aria-label": "Owner" });
-  const input = el(doc, "input", "page-board-owner-input", { type: "text", "aria-label": "Owner name", placeholder: "Or type a name…" });
-  input.value = current;
-  const choose = (name) => setItem(view, id, "owner", name);
-  const person = (name, label, attr, pressed) => {
-    const button = el(doc, "button", `page-board-person${name ? "" : " is-none"}`, { type: "button", "aria-pressed": String(pressed), "data-check": attr });
-    if (name) button.append(cardFace(doc, name), el(doc, "span", null, {}, name));
-    else button.textContent = label;
-    button.addEventListener("click", () => choose(name));
-    return button;
+  const parent = view.dom.parentNode;
+  const anchored = ["relative", "absolute", "fixed", "sticky"].includes(win?.getComputedStyle?.(parent)?.position ?? "");
+  const placement = parent && anchored ? parent : doc.body;
+  const panel = el(doc, "div", "page-check-popup page-check-owner", { role: "dialog", "aria-label": "Assignee", "data-check": "owner-panel" });
+  const input = el(doc, "input", "page-check-search", { type: "text", placeholder: "Find or type a name", "aria-label": "Find or type a name" });
+  const list = el(doc, "div", "page-check-people");
+  const remove = el(doc, "button", "page-check-person page-check-danger", { type: "button", "data-check": "clear-owner" });
+  remove.append(icon(doc, ICONS.clear), el(doc, "span", "page-check-person-name", {}, "Remove assignee"));
+  remove.disabled = !current;
+  remove.addEventListener("click", () => choose(null));
+  panel.append(input, el(doc, "div", "page-check-subhead", {}, "People in this document"), list, el(doc, "div", "page-check-divider"), remove);
+  let available = [];
+  let closed = false;
+  const close = ({ focusAnchor = false } = {}) => {
+    if (closed) return;
+    closed = true;
+    doc.removeEventListener("mousedown", outside, true);
+    win?.removeEventListener("resize", place);
+    win?.removeEventListener("scroll", place, true);
+    if (openOwner?.panel === panel) openOwner = null;
+    panel.remove();
+    anchor.setAttribute("aria-expanded", "false");
+    if (focusAnchor) anchor.focus();
   };
-  const draw = (available) => {
-    const typed = input.value.trim().toLowerCase();
-    const shown = (available || []).filter((p) => !typed || typed === current.toLowerCase() || p.name.toLowerCase().includes(typed));
-    people.replaceChildren(...shown.map((p) => person(p.name, p.name, "owner-option", p.name === current)), person(null, "No owner", "clear-owner", !current));
+  const choose = (name) => { close(); setItem(view, id, "owner", name); };
+  const personRow = (name, count) => {
+    const selected = name.toLowerCase() === String(current).toLowerCase();
+    const row = el(doc, "button", "page-check-person", { type: "button", "data-check": "owner-option", "data-name": name, "aria-pressed": String(selected) });
+    row.append(cardFace(doc, name), el(doc, "span", "page-check-person-name", {}, name), el(doc, "span", "page-check-person-meta", {}, `${count} ${count === 1 ? "item" : "items"}`));
+    if (selected) row.append(icon(doc, ICONS.tick));
+    row.addEventListener("click", () => choose(name));
+    return row;
+  };
+  const addRow = (name) => {
+    const row = el(doc, "button", "page-check-person", { type: "button", "data-check": "owner-new", "data-name": name });
+    const label = el(doc, "span", "page-check-person-name", {}, "Assign to ");
+    label.append(el(doc, "strong", null, {}, name));
+    row.append(icon(doc, ICONS.plus), label, el(doc, "span", "page-check-person-meta", {}, "New"));
+    row.addEventListener("click", () => choose(name));
+    return row;
+  };
+  const draw = () => {
+    const typed = input.value.trim();
+    const needle = typed.toLowerCase();
+    const people = peopleIn(view, available);
+    const rows = [];
+    if (typed && !people.some((person) => person.name.toLowerCase() === needle)) rows.push(addRow(typed));
+    for (const person of people) {
+      if (needle && !person.name.toLowerCase().includes(needle)) continue;
+      rows.push(personRow(person.name, person.count));
+    }
+    list.replaceChildren(...rows);
+  };
+  const place = () => {
+    const ring = anchor.getBoundingClientRect();
+    const base = placement === doc.body ? { top: -(win?.scrollY ?? 0), left: -(win?.scrollX ?? 0) } : placement.getBoundingClientRect();
+    const box = panel.getBoundingClientRect();
+    const width = box.width || Math.min(264, (win?.innerWidth || 292) - 28);
+    const room = (win?.innerHeight ?? 0) - ring.bottom - 2;
+    const flip = box.height > 0 && room < box.height;
+    panel.style.left = `${Math.round(ring.right - width - base.left)}px`;
+    panel.style.top = `${Math.round((flip ? ring.top - box.height - 2 : ring.bottom + 2) - base.top)}px`;
+  };
+  const outside = (event) => {
+    if (!panel.isConnected) return close();
+    if (panel.contains(event.target) || anchor.contains(event.target)) return;
+    close();
   };
   input.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") { event.preventDefault(); choose(input.value.trim()); }
-    if (event.key === "Escape") { event.preventDefault(); popup.remove(); anchor.focus(); }
     event.stopPropagation();
+    if (event.key === "Escape") { event.preventDefault(); close({ focusAnchor: true }); return; }
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    list.querySelector("button[data-check]")?.click();
   });
-  box.append(people, input);
-  popup.append(box);
-  anchor.after(popup);
+  panel.addEventListener("keydown", (event) => {
+    event.stopPropagation();
+    if (event.key === "Escape") { event.preventDefault(); close({ focusAnchor: true }); return; }
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+    event.preventDefault();
+    const stops = [...panel.querySelectorAll("input, button:not([disabled])")];
+    const at = stops.indexOf(doc.activeElement);
+    const step = event.key === "ArrowDown" ? 1 : -1;
+    const next = at < 0 ? (step > 0 ? stops[0] : stops[stops.length - 1]) : stops[(at + step + stops.length) % stops.length];
+    next?.focus();
+  });
+  input.addEventListener("input", draw);
+  placement.append(panel);
+  anchor.setAttribute("aria-expanded", "true");
+  openOwner = { panel, close: () => close() };
+  draw();
+  place();
+  doc.addEventListener("mousedown", outside, true);
+  win?.addEventListener("resize", place);
+  win?.addEventListener("scroll", place, true);
   input.focus();
-  let available = [];
-  draw(available);
-  input.addEventListener("input", () => draw(available));
   const source = globalThis.clay?.people?.available;
-  if (source) Promise.resolve().then(() => source()).then((list) => { if (popup.isConnected) { available = list || []; draw(available); } }).catch(() => {});
+  if (source) Promise.resolve().then(() => source()).then((names) => { if (!closed) { available = Array.isArray(names) ? names : []; draw(); } }).catch(() => {});
 }
 
 function datePicker(view, id, anchor) {

@@ -69,22 +69,84 @@ test("the tags widget leaves a click on the line itself to the editor", () => {
   expect(widget.type.spec.stopEvent({ target: box.querySelector('[data-check="owner"]') })).toBe(true);
 });
 
-test("owner list uses available people and accepts typed names", async () => {
-  globalThis.clay = { people: { available: async () => [{ id: "person-1", name: "Maya" }] } };
-  const view = fresh();
-  view.dom.querySelector('[data-check="owner"]').click();
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  view.dom.querySelector('[data-check="owner-option"]').click();
-  expect(view.state.doc.child(0).attrs.owner).toBe("Maya");
-  view.dom.querySelector('[data-check="owner"]').click();
-  const input = view.dom.querySelector('input[aria-label="Owner name"]');
-  input.value = "Nia";
+const owned = () => editor([
+  ["a", "list_item", "A", { kind: "check", owner: "Maya" }],
+  ["b", "list_item", "B", { kind: "check", owner: "Maya" }],
+  ["c", "list_item", "C", { kind: "check", owner: "Ben" }],
+]);
+const openOwner = (view, item) => {
+  const tag = view.dom.querySelector(`.page-check-controls[data-item="${item}"] [data-check="owner"]`);
+  tag.click();
+  return { tag, panel: document.querySelector(".page-check-owner") };
+};
+const people = (panel) => [...panel.querySelectorAll('[data-check="owner-option"]')];
+const typing = (input, text) => {
+  input.value = text;
   input.dispatchEvent(new Event("input", { bubbles: true }));
-  input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-  expect(view.state.doc.child(0).attrs.owner).toBe("Nia");
-  view.dom.querySelector('[data-check="owner"]').click();
-  view.dom.querySelector('[data-check="clear-owner"]').click();
-  expect(view.state.doc.child(0).attrs.owner).toBeNull();
+};
+const press = (el, k) => el.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true }));
+
+test("the assignee panel lists the document's people with their counts", () => {
+  const view = owned();
+  const { tag, panel } = openOwner(view, "a");
+  expect(tag.getAttribute("aria-expanded")).toBe("true");
+  expect(panel.getAttribute("role")).toBe("dialog");
+  expect(panel.getAttribute("aria-label")).toBe("Assignee");
+  const input = panel.querySelector("input");
+  expect(input.getAttribute("placeholder")).toBe("Find or type a name");
+  expect(input.getAttribute("aria-label")).toBe("Find or type a name");
+  expect(document.activeElement).toBe(input);
+  expect(panel.querySelector(".page-check-subhead").textContent).toBe("People in this document");
+  expect(people(panel).map((row) => row.querySelector(".page-check-person-name").textContent)).toEqual(["Ben", "Maya"]);
+  expect(people(panel).map((row) => row.querySelector(".page-check-person-meta").textContent)).toEqual(["1 item", "2 items"]);
+  expect(people(panel).map((row) => row.getAttribute("aria-pressed"))).toEqual(["false", "true"]);
+  expect(people(panel)[0].querySelector(".page-board-face").textContent).toBe("B");
+  expect(people(panel)[1].querySelector("svg")).not.toBeNull();
+  press(input, "Escape");
+});
+
+test("typing a new name and pressing Enter assigns it in one undo step", () => {
+  const view = owned();
+  const { panel } = openOwner(view, "a");
+  const input = panel.querySelector("input");
+  typing(input, "Ro");
+  expect(people(panel)).toHaveLength(0);
+  const add = panel.querySelector('[data-check="owner-new"]');
+  expect(add.textContent).toContain("Assign to Ro");
+  expect(add.querySelector(".page-check-person-meta").textContent).toBe("New");
+  press(input, "Enter");
+  expect(view.state.doc.child(0).attrs.owner).toBe("Ro");
+  expect(document.querySelector(".page-check-owner")).toBeNull();
+  let undone;
+  history.undo(view.state, (tr) => { undone = view.state.apply(tr); });
+  expect(undone.doc.child(0).attrs.owner).toBe("Maya");
+});
+
+test("Remove assignee is disabled without an owner and clears one when there is an owner", () => {
+  const view = editor([
+    ["a", "list_item", "A", { kind: "check" }],
+    ["b", "list_item", "B", { kind: "check", owner: "Maya" }],
+  ]);
+  const first = openOwner(view, "a");
+  expect(first.panel.querySelector('[data-check="clear-owner"]').disabled).toBe(true);
+  press(first.panel.querySelector("input"), "Escape");
+  const second = openOwner(view, "b");
+  const clear = second.panel.querySelector('[data-check="clear-owner"]');
+  expect(clear.disabled).toBe(false);
+  expect(clear.textContent).toBe("Remove assignee");
+  expect(clear.querySelector("svg")).not.toBeNull();
+  clear.click();
+  expect(view.state.doc.child(1).attrs.owner).toBeNull();
+  expect(document.querySelector(".page-check-owner")).toBeNull();
+});
+
+test("Escape closes the assignee panel and returns focus to the tag", () => {
+  const view = owned();
+  const { tag, panel } = openOwner(view, "a");
+  press(panel, "Escape");
+  expect(document.querySelector(".page-check-owner")).toBeNull();
+  expect(tag.getAttribute("aria-expanded")).toBe("false");
+  expect(document.activeElement).toBe(tag);
 });
 
 test("date can be set and cleared, with one undo step per change", () => {
