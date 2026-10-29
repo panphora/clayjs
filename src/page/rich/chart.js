@@ -16,13 +16,16 @@ function ticks(min, max, count) {
   return out.length ? out : [Number(min.toFixed(2)), Number(max.toFixed(2))];
 }
 
+const missing = (chart, reason) => ({ state: "missing", reason, sourceId: chart.source ?? null, title: chart.title ?? "" });
+
 export function chartModel(chart, table) {
-  if (!table) return { state: "missing", reason: "table" };
+  if (!table) return missing(chart, "table");
   const cols = table.cols ?? [];
   const rows = table.rows ?? [];
   const x = cols.find((col) => col.id === chart.x);
-  if (!x || !chart.series?.length || chart.series.some((id) => !cols.some((col) => col.id === id))) return { state: "missing", reason: "column" };
-  const series = chart.series.map((id, index) => {
+  if (!x || !chart.series?.length || chart.series.some((id) => !cols.some((col) => col.id === id))) return missing(chart, "column");
+  const plotted = chart.type === "pie" ? chart.series.slice(0, 1) : chart.series;
+  const series = plotted.map((id, index) => {
     const col = cols.find((item) => item.id === id);
     const points = rows.map((row, rowIndex) => ({
       id: `${chart.id}:${row.id}:${id}`, rowId: row.id, colId: id, rowIndex,
@@ -45,8 +48,56 @@ export function chartModel(chart, table) {
   };
 }
 
+const PIE = { width: 560, height: 232, cx: 150, cy: 116, radius: 84 };
+
+function chartCaption(series) {
+  const valid = series.points.filter((point) => point.value !== null);
+  return `${series.name}: ${valid.length ? `${fmt(valid[0].value)} to ${fmt(valid.at(-1).value)}` : "no values"}`;
+}
+
+function pieSlices(model) {
+  const series = model.series[0];
+  if (!series) return [];
+  const points = series.points.filter((point) => point.value !== null && point.value > 0);
+  const total = points.reduce((sum, point) => sum + point.value, 0);
+  if (!total) return [];
+  let angle = -Math.PI / 2;
+  return points.map((point, index) => {
+    const fraction = point.value / total;
+    const slice = { point, color: `var(--chart-${index % 6 + 1})`, fraction, percent: Math.round(fraction * 100), from: angle, to: angle + fraction * Math.PI * 2 };
+    angle = slice.to;
+    return slice;
+  });
+}
+
+function renderPie(model, slices, width) {
+  const height = fmt(width * PIE.height / PIE.width);
+  const parts = [`<svg xmlns="http://www.w3.org/2000/svg" role="img" width="${width}" height="${height}" viewBox="0 0 ${PIE.width} ${PIE.height}">`, `<title>${esc(model.title)}</title>`, `<desc>${esc(chartCaption(model.series[0]))}</desc>`];
+  slices.forEach((slice) => {
+    const point = ` data-point="${esc(slice.point.id)}"${slice.point.highlight ? ' data-highlight="true"' : ""}`;
+    if (slice.fraction >= .999) {
+      parts.push(`<circle${point} cx="${PIE.cx}" cy="${PIE.cy}" r="${PIE.radius}" fill="${slice.color}"/>`);
+      return;
+    }
+    const x1 = fmt(PIE.cx + PIE.radius * Math.cos(slice.from));
+    const y1 = fmt(PIE.cy + PIE.radius * Math.sin(slice.from));
+    const x2 = fmt(PIE.cx + PIE.radius * Math.cos(slice.to));
+    const y2 = fmt(PIE.cy + PIE.radius * Math.sin(slice.to));
+    parts.push(`<path${point} d="M ${PIE.cx} ${PIE.cy} L ${x1} ${y1} A ${PIE.radius} ${PIE.radius} 0 ${slice.fraction > .5 ? 1 : 0} 1 ${x2} ${y2} Z" fill="${slice.color}" stroke="var(--page-bg)" stroke-width="2"/>`);
+  });
+  slices.forEach((slice, index) => {
+    const yy = fmt(54 + index * 36);
+    const point = ` data-point="${esc(slice.point.id)}"${slice.point.highlight ? ' data-highlight="true"' : ""}`;
+    parts.push(`<g${point}><rect x="290" y="${fmt(54 + index * 36 - 10)}" width="11" height="11" fill="${slice.color}"/><text x="310" y="${yy}">${esc(slice.point.xLabel)}</text><text x="530" y="${yy}" text-anchor="end">${fmt(slice.point.value)} (${slice.percent}%)</text></g>`);
+  });
+  parts.push("</svg>");
+  return parts.join("");
+}
+
 export function renderChartSvg(model, { width = 640, height = 320, narrow = false } = {}) {
   if (model.state === "missing") return `<svg xmlns="http://www.w3.org/2000/svg" role="img" width="${width}" height="80" viewBox="0 0 ${width} 80"><title>Chart source missing</title><text x="12" y="44">Chart source missing</text></svg>`;
+  const slices = model.type === "pie" ? pieSlices(model) : [];
+  if (slices.length) return renderPie(model, slices, width);
   const margin = { left: 52, right: 72, top: 28, bottom: 48 };
   const plotW = Math.max(1, width - margin.left - margin.right);
   const plotH = Math.max(1, height - margin.top - margin.bottom);
@@ -55,10 +106,7 @@ export function renderChartSvg(model, { width = 640, height = 320, narrow = fals
   const n = model.xLabels.length;
   const x = (index) => margin.left + (n <= 1 ? plotW / 2 : index * plotW / (n - 1));
   const parts = [`<svg xmlns="http://www.w3.org/2000/svg" role="img" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">`, `<title>${esc(model.title)}</title>`];
-  const caption = model.series.map((item) => {
-    const valid = item.points.filter((point) => point.value !== null);
-    return `${item.name}: ${valid.length ? `${fmt(valid[0].value)} to ${fmt(valid.at(-1).value)}` : "no values"}`;
-  }).join("; ");
+  const caption = model.series.map(chartCaption).join("; ");
   parts.push(`<desc>${esc(caption)}</desc>`);
   for (const tick of narrow ? model.narrowTicks : model.yTicks) {
     const yy = fmt(y(tick));
