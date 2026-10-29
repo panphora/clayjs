@@ -23,6 +23,23 @@ describe("the empty-line placeholder", () => {
     expect(found[0].from).toBe(0);
   });
 
+  test("marks an empty check item with the To do placeholder", () => {
+    const doc = docOf(schema.node("list_item", { id: "a", kind: "check" }));
+    const set = decorations(EditorState.create({ doc, selection: caret(doc, 1) }));
+    const found = set.find();
+    expect(found).toHaveLength(1);
+    expect(found[0].type.attrs["data-placeholder"]).toBe("To do");
+    expect(found[0].type.attrs.class).toBe("page-check-placeholder");
+    expect(found[0].from).toBe(0);
+  });
+
+  test("leaves a check item with text and a checked empty item alone", () => {
+    const written = docOf(schema.node("list_item", { id: "a", kind: "check" }, [schema.text("Do it")]));
+    expect(decorations(EditorState.create({ doc: written, selection: caret(written, 1) }))).toBeNull();
+    const done = docOf(schema.node("list_item", { id: "b", kind: "check", checked: true }));
+    expect(decorations(EditorState.create({ doc: done, selection: caret(done, 1) }))).toBeNull();
+  });
+
   test("leaves a paragraph with text alone", () => {
     const doc = docOf(paragraph("a", "Alpha"));
     const set = decorations(EditorState.create({ doc, selection: caret(doc, 1) }));

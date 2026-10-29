@@ -190,14 +190,22 @@ ${INDENTS.map((n) => `:where(article[data-page], .page-editor) .page-li[data-ind
 .page-table th[data-kind="number"], .page-table td[data-kind="number"] { text-align: end; }
 .page-table th[aria-sort="ascending"] button::after { content: " ↑"; }
 .page-table th[aria-sort="descending"] button::after { content: " ↓"; }
-.page-table th button, .page-table-row-menu, .page-check-chip { border: 0; border-radius: 5px; background: none; color: inherit; font: inherit; cursor: pointer; }
-.page-table th button:hover, .page-table-row-menu:hover, .page-check-chip:hover { background: var(--page-pop-hover); }
+.page-table th button, .page-table-row-menu { border: 0; border-radius: 5px; background: none; color: inherit; font: inherit; cursor: pointer; }
+.page-table th button:hover, .page-table-row-menu:hover { background: var(--page-pop-hover); }
 .page-editor td > span { display: block; }
 .page-table-row-menu { float: inline-end; margin-inline-start: 4px; opacity: 0; font-size: 12px; color: var(--page-ink-soft); display: inline-grid; place-items: center; width: 22px; height: 22px; padding: 0; }
 .page-table tr:hover .page-table-row-menu, .page-table tr:focus-within .page-table-row-menu, .page-table-row-menu:focus-visible { opacity: 1; }
-.page-check-controls { display: inline-flex; gap: 4px; margin-inline-start: 8px; color: var(--page-ink-soft); font-size: 0.78em; text-decoration: none; }
-.page-check-controls[data-empty="true"] { opacity: 0; }
-.page-li:hover .page-check-controls, .page-li:focus-within .page-check-controls { opacity: 1; }
+/* The tags float to the end of the item's first line, so long text wraps beside and
+   below them without the text's own marks being pulled apart. The item's whole line
+   stays the click target for an empty item, which has no text of its own. */
+.page-li.page-check-placeholder::after { content: attr(data-placeholder); position: absolute; inset-inline-start: calc((var(--li-indent) + 1) * var(--page-indent)); color: var(--page-ink-faint); pointer-events: none; }
+.page-check-controls { display: inline-flex; float: inline-end; flex-wrap: wrap; align-items: center; gap: 5px; margin-inline-start: 10px; text-decoration: none; }
+.page-check-chip { display: inline-flex; align-items: center; gap: 4px; box-sizing: border-box; height: 23px; padding: 0 7px; border: 1px solid var(--page-rule); border-radius: var(--page-check-radius); background: transparent; color: var(--page-ink-soft); font: 400 12px/1 var(--page-font); white-space: nowrap; cursor: pointer; }
+.page-check-chip svg { flex: none; }
+.page-check-chip:hover { background: var(--page-pop-hover); }
+.page-check-chip[data-filled="true"] { border-color: transparent; background: var(--page-chrome-bg-moved); color: var(--page-ink); font-weight: 500; }
+.page-check-chip[data-overdue="true"] { border-color: var(--page-danger); color: var(--page-danger); }
+.page-li[data-checked="true"] .page-check-controls { opacity: 0.62; }
 .page-check-popup { display: inline-flex; gap: 4px; padding: 4px; background: var(--page-pop-bg); color: var(--page-pop-ink); border: 1px solid var(--page-pop-line); border-radius: var(--page-pop-radius); box-shadow: var(--page-pop-shadow); }
 .page-check-popup input { font: inherit; color: inherit; background: var(--page-pop-bg); border: 1px solid var(--page-pop-line); }
 .page-check-popup.page-check-owner { display: inline-block; width: min(280px, 80vw); padding: 8px 0; vertical-align: top; }

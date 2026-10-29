@@ -346,3 +346,23 @@ test("a switch the lane refuses stays pending and is retried with the same recei
   expect(calls[1].options.covered).toBe(true);
   expect(calls[1].options.receipt).toEqual({ accepted: true, revision: "r2" });
 });
+
+// An installation replaced while the activation is on the wire is a different editor: the command it was about to apply belongs to neither.
+test("an installation replaced while its activation is in the air is refused as stale", async () => {
+  const adapter = host();
+  const real = adapter.activate;
+  let installed = "tab-r";
+  adapter.activate = async (input) => {
+    installed = "tab-other";
+    return real(input);
+  };
+  const lane = { async switchScope() { return { status: "switched", floor: 1 }; } };
+  const gate = createFormatGate({ host: adapter, installed: () => installed, revision: () => null, lane });
+  const applied = [];
+  const result = await gate.run({ apply: () => applied.push("today") });
+
+  expect(result.status).toBe("retry");
+  expect(result.code).toBe("format-gate-stale");
+  expect(result.retry).toBe(true);
+  expect(applied).toEqual([]);
+});

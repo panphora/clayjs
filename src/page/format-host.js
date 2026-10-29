@@ -27,8 +27,21 @@ function servedFloor() {
 // never uses a newer format never downloads the lane to raise one.
 const savePage = async (options) => (await import("../core/save.js")).savePageForce(() => {}, options);
 
+// A forced save asked for while another is on the wire is skipped rather than queued.
+// The activation is the person's own request, so it waits for the save ahead of it to
+// settle and asks again, instead of answering "try again" for a save it never sent.
+const SKIPPED_ATTEMPTS = 4;
+const SKIPPED_WAIT_MS = 10000;
+const skippedBehindSave = (result) => result?.ok === false && result?.msgType === "skipped" && /in progress/i.test(result?.msg ?? "");
+const saveSettles = async () => {
+  const { isSaveInProgress } = await import("../core/save-core.js");
+  const until = Date.now() + SKIPPED_WAIT_MS;
+  while (isSaveInProgress() && Date.now() < until) await new Promise((r) => setTimeout(r, 50));
+};
+
 export function createFormatHost({
   save = savePage,
+  settles = saveSettles,
   supported = () => hostPageFormat().then((floor) => floor === PAGE_FORMAT),
 } = {}) {
   return {
@@ -43,6 +56,10 @@ export function createFormatHost({
       let result;
       try {
         result = await save({ pageFormatFloor: floor });
+        for (let attempt = 1; attempt < SKIPPED_ATTEMPTS && skippedBehindSave(result); attempt += 1) {
+          await settles();
+          result = await save({ pageFormatFloor: floor });
+        }
       } catch (error) {
         return { accepted: false, code: error?.code ?? FAILED };
       }

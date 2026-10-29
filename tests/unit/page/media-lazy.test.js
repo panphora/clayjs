@@ -79,7 +79,7 @@ test("a checklist draws its decorations and toggles its box once the part arrive
   const { view, calls } = open({ chk: { t: "list_item", pos: "B", c: "Do it", kind: "check" } });
   expect(await waitFor(() => view.dom.querySelector(".page-check-controls"))).toBe(true);
   expect(calls).toEqual(["checklist"]);
-  expect([...view.dom.querySelectorAll(".page-check-chip")].map((button) => button.textContent)).toEqual(["Assign", "Date"]);
+  expect([...view.dom.querySelectorAll(".page-check-chip")].map((button) => button.textContent)).toEqual(["Unassigned", "No date"]);
 
   const li = view.dom.querySelector('.page-li[data-kind="check"]');
   li.getBoundingClientRect = () => ({ top: 0, bottom: 20, left: 0, right: 100, height: 20, width: 100 });

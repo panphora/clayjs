@@ -43,6 +43,61 @@ function chip(doc, label, aria, attr) {
   return button;
 }
 
+// The design's three line icons, at the editor's 16px stroke-1.5 drawing.
+const ICONS = {
+  person: '<circle cx="8" cy="5.4" r="2.3"/><path d="M3.6 13.2c.6-2.1 2.2-3.3 4.4-3.3s3.8 1.2 4.4 3.3"/>',
+  calendar: '<rect x="2.5" y="3.5" width="11" height="10"/><path d="M2.5 6.8h11M5.5 2v2.4M10.5 2v2.4"/>',
+  clock: '<circle cx="8" cy="8" r="5.5"/><path d="M8 4.8v3.4l2.3 1.4"/>',
+};
+
+function icon(doc, paths) {
+  const node = doc.createElementNS("http://www.w3.org/2000/svg", "svg");
+  node.setAttribute("viewBox", "0 0 16 16");
+  node.setAttribute("width", "14");
+  node.setAttribute("height", "14");
+  node.setAttribute("fill", "none");
+  node.setAttribute("stroke", "currentColor");
+  node.setAttribute("stroke-width", "1.5");
+  node.setAttribute("stroke-linecap", "round");
+  node.setAttribute("stroke-linejoin", "round");
+  node.setAttribute("aria-hidden", "true");
+  node.innerHTML = paths;
+  return node;
+}
+
+// A tag's words. Today, tomorrow and a short date for the day, as a board card
+// reads its own due badge (board-view.js), with the one word a tag needs that the
+// badge never shows.
+const pad = (n) => String(n).padStart(2, "0");
+const DUE = /^\d{4}-\d{2}-\d{2}$/;
+const todayKey = (now = new Date()) => `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+const dayAfter = (key) => {
+  const day = new Date(`${key}T00:00:00Z`);
+  day.setUTCDate(day.getUTCDate() + 1);
+  return day.toISOString().slice(0, 10);
+};
+function dueLabel(due, today) {
+  if (!due) return "No date";
+  if (!DUE.test(due)) return due;
+  if (due === today) return "Today";
+  if (due === dayAfter(today)) return "Tomorrow";
+  const sameYear = due.slice(0, 4) === today.slice(0, 4);
+  return new Date(`${due}T00:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", ...(sameYear ? {} : { year: "numeric" }), timeZone: "UTC" });
+}
+
+function tag(doc, { name, paths, label, aria, filled, overdue = false }) {
+  const button = el(doc, "button", "page-check-chip", {
+    type: "button",
+    "data-check": name,
+    "data-filled": String(filled),
+    "data-overdue": overdue ? "true" : null,
+    "aria-expanded": "false",
+    "aria-label": aria,
+  });
+  button.append(icon(doc, paths), el(doc, "span", "page-check-chip-label", {}, label));
+  return button;
+}
+
 // The same owner field a board card's panel shows: people as chips, "No owner",
 // then a name box for anyone not in the list.
 function ownerPicker(view, id, anchor) {
@@ -108,9 +163,12 @@ function controls(view, node) {
   box.className = "page-check-controls";
   box.contentEditable = "false";
   box.dataset.empty = String(!node.attrs.owner && !node.attrs.due);
-  const owner = chip(doc, node.attrs.owner || "Assign", node.attrs.owner ? `Owner: ${node.attrs.owner}` : "Assign owner", "owner");
-  const dueLabel = node.attrs.due ? new Date(`${node.attrs.due}T00:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" }) : "Date";
-  const date = chip(doc, dueLabel, node.attrs.due ? `Due ${dueLabel}` : "Set due date", "date");
+  const today = todayKey();
+  const ownerName = node.attrs.owner || "Unassigned";
+  const owner = tag(doc, { name: "owner", paths: ICONS.person, label: ownerName, aria: `Assignee: ${ownerName}`, filled: !!node.attrs.owner });
+  const dateName = dueLabel(node.attrs.due, today);
+  const overdue = !!node.attrs.due && !node.attrs.checked && DUE.test(node.attrs.due) && node.attrs.due < today;
+  const date = tag(doc, { name: "date", paths: overdue ? ICONS.clock : ICONS.calendar, label: dateName, aria: `Due date: ${dateName}`, filled: !!node.attrs.due, overdue });
   owner.addEventListener("click", () => ownerPicker(view, node.attrs.id, owner));
   date.addEventListener("click", () => datePicker(view, node.attrs.id, date));
   box.append(owner, date);
@@ -136,7 +194,7 @@ export function decorations(st) {
       const box = controls(view, node);
       box.dataset.item = node.attrs.id;
       return box;
-    }, { key: `${node.attrs.id}:${node.attrs.owner}:${node.attrs.due}`, side: 1, stopEvent: () => true, ignoreSelection: true }));
+    }, { key: `${node.attrs.id}:${node.attrs.owner}:${node.attrs.due}:${node.attrs.checked}`, side: 1, stopEvent: (event) => !!event.target.closest?.(".page-check-chip, .page-check-popup"), ignoreSelection: true }));
   });
   return DecorationSet.create(st.doc, widgets);
 }
