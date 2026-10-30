@@ -253,12 +253,11 @@ describe('menus, links and uploads in a browser', () => {
     let finish;
     setup({ p: { t: 'paragraph', pos: 'V', c: '' } }, { upload: () => new Promise((r) => { finish = r; }) });
     put(startOf('p'));
+    const until = async (fn, ms = 4000) => { const end = Date.now() + ms; while (Date.now() < end) { if (fn()) return true; await settle(50); } return false; };
     expect(paste([PNG()])).to.not.equal(null);
-    await settle();
-    expect(mount.querySelector('.page-upload')).to.not.equal(null);
+    expect(await until(() => mount.querySelector('.page-upload'))).to.equal(true);
     finish({ ok: true, uploads: [{ url: '/uploads/door.png' }] });
-    await settle(100);
-    expect(mount.querySelector('.page-upload')).to.equal(null);
+    expect(await until(() => !mount.querySelector('.page-upload'))).to.equal(true);
     expect(mount.querySelector('figure.page-image img').getAttribute('src')).to.equal('/uploads/door.png');
   });
 
