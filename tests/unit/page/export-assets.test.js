@@ -11,6 +11,8 @@ import { COMMAND_FEATURES } from "../../../src/page/features/registry.js";
 import { runPageCommand } from "../../../src/page/editor.js";
 import { editor } from "./view-helpers.js";
 
+const exportPanel = () => document.querySelector('clay-editor-ui[data-clay-ui="page-export"]')?.shadowRoot.querySelector(".page-export-panel") ?? null;
+
 afterEach(() => { document.body.innerHTML = ""; });
 
 /**
@@ -379,13 +381,13 @@ test("the live snapshot is taken once: a peer's edit during the fetch never reac
   });
   const pending = feature.run();
   await new Promise((done) => setTimeout(done, 5));
-  expect(document.querySelector(".page-export-panel")).toBeNull();
+  expect(document.querySelector('clay-editor-ui[data-clay-ui="page-export"]')).toBeNull();
   view.dispatch(view.state.tr.insertText("after", view.state.doc.child(1).nodeSize - 1));
   release();
   const answer = await pending;
 
   expect(answer.ok).toBe(true);
-  document.querySelector(".page-export-panel [data-act=\"download\"]").click();
+  exportPanel().querySelector('[data-act="download"]').click();
   expect(downloads.length).toBe(1);
   const text = docOf(downloads[0].html).querySelector("article").textContent;
   expect(text).toContain("Before the edit");
@@ -401,7 +403,7 @@ test("a complete copy shows its captured title and time, and downloads only when
   expect(answer.ok).toBe(true);
   expect(answer.name).toBe("Relay launch review.html");
   expect(downloads).toEqual([]);
-  const panel = document.querySelector(".page-export-panel");
+  const panel = exportPanel();
   expect(panel.textContent).toContain("Relay launch review");
   expect(panel.dataset.at).toBe("2026-10-27T09:30:00.000Z");
   expect(panel.querySelectorAll(".page-export-losses li").length).toBe(0);
@@ -413,7 +415,7 @@ test("a complete copy shows its captured title and time, and downloads only when
   const doc = docOf(downloads[0].html);
   expect(doc.querySelector("figure[data-type=\"image\"] img").getAttribute("src")).toBe(dataUrl(PNG, "dip"));
   expect(remoteDependencies(downloads[0].html)).toEqual([]);
-  expect(document.querySelector(".page-export-panel")).toBeNull();
+  expect(document.querySelector('clay-editor-ui[data-clay-ui="page-export"]')).toBeNull();
   feature.dispose();
 });
 
@@ -428,7 +430,7 @@ test("every loss is listed before anything downloads, and nothing downloads", as
   expect(answer.ok).toBe(false);
   expect(answer.code).toBe("resource-losses");
   expect(answer.losses.map((entry) => entry.code)).toEqual(["missing-resource"]);
-  const panel = document.querySelector(".page-export-panel");
+  const panel = exportPanel();
   const said = [...panel.querySelectorAll(".page-export-losses li")].map((li) => li.textContent);
   expect(said.length).toBe(1);
   expect(said[0]).toContain("https://example.com/uploads/dip.png");
@@ -446,7 +448,7 @@ test("a refusal to render is listed too, never a silent absence", async () => {
 
   expect(answer.ok).toBe(false);
   expect(answer.code).toBe("unsafe-url");
-  const panel = document.querySelector(".page-export-panel");
+  const panel = exportPanel();
   expect(panel.querySelectorAll(".page-export-losses li").length).toBe(1);
   expect(panel.querySelector('[data-act="download"]')).toBeNull();
   expect(downloads).toEqual([]);
@@ -466,7 +468,7 @@ test("a command left while its resources are still arriving paints nothing", asy
   const answer = await pending;
 
   expect(answer).toEqual({ ok: false, code: "not-editing" });
-  expect(document.querySelector(".page-export-panel")).toBeNull();
+  expect(document.querySelector('clay-editor-ui[data-clay-ui="page-export"]')).toBeNull();
   expect(downloads).toEqual([]);
 });
 
@@ -482,7 +484,7 @@ test("the export command is its own lazy row, and the registry runs it on an edi
     expect(answer.ok).toBe(true);
     expect(answer.title).toBe("Relay launch review");
     expect(answer.name).toBe("Relay launch review.html");
-    const panel = document.querySelector(".page-export-panel");
+    const panel = exportPanel();
     expect(panel).not.toBeNull();
     expect(panel.querySelectorAll(".page-export-losses li").length).toBe(0);
   } finally {

@@ -1,4 +1,5 @@
 import { jest } from "@jest/globals";
+import { $, rootOf } from "./helpers/editor-ui.js";
 
 // Scenario: the dock sits in a corner the reader chooses, by dragging the grip or with
 // its arrow keys, and the choice is remembered for this document in this browser. A
@@ -64,12 +65,12 @@ async function boot({
   await flush();
 }
 
-const dockOf = () => document.querySelector(".clay-menu-dock");
-const gripOf = () => document.querySelector(".clay-menu-grip");
-const gooOf = () => document.querySelector(".clay-menu-goo");
-const listOf = () => document.querySelector(".clay-menu-list");
-const spotsOf = () => document.querySelector('.clay-menu-spots[clay="editor-ui"]');
-const spotTo = (corner) => document.querySelector(`.clay-menu-spot[data-to="${corner}"]`);
+const dockOf = () => $(".clay-menu-dock", "menu");
+const gripOf = () => $(".clay-menu-grip", "menu");
+const gooOf = () => $(".clay-menu-goo", "menu");
+const listOf = () => $(".clay-menu-list", "menu");
+const spotsOf = () => $('.clay-menu-spots[clay="editor-ui"]', "menu");
+const spotTo = (corner) => $(`.clay-menu-spot[data-to="${corner}"]`, "menu");
 
 function click(el) {
   el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
@@ -154,7 +155,7 @@ test("a drag shows the four spots, then lands in the nearest corner and clears i
   expect(dock.hasAttribute("data-dragging")).toBe(true);
   const spots = spotsOf();
   expect(spots).not.toBeNull();
-  expect(spots.parentElement).toBe(document.body);
+  expect(spots.parentNode).toBe(rootOf("menu"));
   expect(spots.querySelectorAll(".clay-menu-spot")).toHaveLength(4);
   expect(spotTo("bottom-left").hasAttribute("data-near")).toBe(true);
   expect([...spots.children].filter((spot) => spot.hasAttribute("data-near"))).toHaveLength(1);
@@ -184,7 +185,7 @@ test("a move of two pixels is not a drag", async () => {
       }
     }
   });
-  observer.observe(document.body, { childList: true });
+  observer.observe(rootOf("menu"), { childList: true });
 
   grip.dispatchEvent(pointer("pointerdown", { x: 950, y: 20 }));
   grip.dispatchEvent(pointer("pointermove", { x: 948, y: 20 }));

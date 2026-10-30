@@ -654,7 +654,7 @@ test("both exports carry the fixture: the Markdown extensions and a copy with no
     const answer = await runPageCommand(view, "exportHtml");
     expect(answer).toMatchObject({ ok: true, title: "Notebook", name: "Notebook.html" });
     expect(asked).toEqual(["https://example.com/uploads/cover.png"]);
-    const copy = document.querySelector(".page-export-panel");
+    const copy = document.querySelector('clay-editor-ui[data-clay-ui="page-export"]').shadowRoot.querySelector(".page-export-panel");
     expect(copy.querySelectorAll(".page-export-losses li")).toHaveLength(0);
     copy.querySelector('[data-act="download"]').click();
     await settle();

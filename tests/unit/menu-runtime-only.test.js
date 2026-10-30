@@ -1,4 +1,5 @@
 import { jest } from "@jest/globals";
+import { $, $$, hostOf } from "./helpers/editor-ui.js";
 
 // Scenario: everything the menu draws lives only at runtime. The dock, the list, the
 // first-use notice, the note, the roster, the people panel and its name field, the drag
@@ -78,19 +79,17 @@ function stubPeople(canRename = true) {
   document.dispatchEvent(new CustomEvent("clay:people"));
 }
 
-const dockOf = () => document.querySelector(".clay-menu-dock");
-const gripOf = () => document.querySelector(".clay-menu-grip");
-const gooOf = () => document.querySelector(".clay-menu-goo");
-const listOf = () => document.querySelector(".clay-menu-list");
-const noticeOf = () => document.querySelector(".clay-menu-notice");
-const noteOf = () => document.querySelector(".clay-menu-note");
-const rosterOf = () => document.querySelector(".clay-roster");
-const panelOf = () => document.querySelector(".clay-people");
-const spotsOf = () => document.querySelector(".clay-menu-spots");
-const sheetOf = () => document.querySelector(".clay-seo");
-const recallOf = () => document.querySelector(".clay-menu-recall");
-const itemOf = (id) => document.querySelector(`[role="menuitem"][data-menu-id="${id}"]`);
-const meRowOf = () => document.querySelector(".clay-people-me-row");
+const dockOf = () => $(".clay-menu-dock", "menu");
+const gripOf = () => $(".clay-menu-grip", "menu");
+const gooOf = () => $(".clay-menu-goo", "menu");
+const listOf = () => $(".clay-menu-list", "menu");
+const noteOf = () => $(".clay-menu-note", "menu");
+const rosterOf = () => $(".clay-roster", "menu");
+const panelOf = () => $(".clay-people", "menu");
+const spotsOf = () => $(".clay-menu-spots", "menu");
+const sheetOf = () => $(".clay-seo", "seo");
+const itemOf = (id) => $(`[role="menuitem"][data-menu-id="${id}"]`, "menu");
+const meRowOf = () => $(".clay-people-me-row", "menu");
 const buttonsIn = (el) => [...el.querySelectorAll("button")];
 const buttonNamed = (el, label) => buttonsIn(el).find((button) => button.textContent === label);
 
@@ -120,7 +119,7 @@ function layoutDock(dock) {
 }
 
 function setValue(key, value) {
-  const input = document.querySelector(`.clay-seo [data-key="${key}"]`);
+  const input = $(`.clay-seo [data-key="${key}"]`, "seo");
   input.value = value;
   input.dispatchEvent(new Event("input", { bubbles: true }));
 }
@@ -135,7 +134,7 @@ async function captures() {
 }
 
 const AUTHORED_OPT_IN = /\s*clay-menu-roster(?:=(?:"[^"]*"|'[^']*'|[^\s>]+))?/g;
-const FORBIDDEN_CLASSES = ["clay-menu-", "clay-roster", "clay-people", "clay-seo"];
+const FORBIDDEN_CLASSES = ["clay-menu-", "clay-roster", "clay-people", "clay-seo", "clay-editor-ui"];
 const FORBIDDEN_IDS = ["clay-menu-style", "clay-menu-vars", "clay-seo-style", "clay-seo-vars"];
 const FORBIDDEN_TEXTS = [
   PROBE_NOTE,
@@ -166,7 +165,7 @@ async function expectNothingCaptured() {
 
 const expectDrawn = (selectors) => {
   for (const selector of selectors) {
-    expect([selector, document.querySelectorAll(selector).length > 0]).toEqual([selector, true]);
+    expect([selector, $$(selector).length > 0 || $$(selector, "menu").length > 0 || $$(selector, "seo").length > 0]).toEqual([selector, true]);
   }
 };
 
@@ -179,14 +178,14 @@ test("every surface is drawn and none of it is in a save, a comparison or a sync
   await present(THREE);
 
   click(gooOf());
-  expect(noticeOf()).not.toBeNull();
+  expect(listOf().hidden).toBe(false);
 
   click(itemOf("clay.people"));
   await flush();
   expect(panelOf()).not.toBeNull();
   click(buttonNamed(meRowOf(), "Change"));
   await flush();
-  expectDrawn([".clay-roster", ".clay-people", ".clay-people-input", "#clay-menu-style", "#clay-menu-vars"]);
+  expectDrawn([".clay-roster", ".clay-people", ".clay-people-input", "#clay-menu-vars"]);
   await expectNothingCaptured();
 
   const dock = dockOf();
@@ -209,34 +208,17 @@ test("every surface is drawn and none of it is in a save, a comparison or a sync
   expectDrawn([
     ".clay-menu-dock",
     ".clay-menu-list",
-    ".clay-menu-notice",
     ".clay-roster",
     ".clay-menu-spots",
     ".clay-seo",
     ".clay-menu-note",
-    "#clay-menu-style",
     "#clay-menu-vars",
-    "#clay-seo-style",
     "#clay-seo-vars",
   ]);
   expect(noteOf().hidden).toBe(false);
   expect(noteOf().textContent).toBe(PROBE_NOTE);
 
   await expectNothingCaptured();
-});
-
-test("hiding the menu leaves nothing of the recall toast in the saved file", async () => {
-  await boot();
-  click(gooOf());
-  click(itemOf("clay.hide"));
-
-  expect(recallOf()).not.toBeNull();
-  expect(dockOf().hidden).toBe(true);
-
-  const save = await window.clay.getHTML();
-
-  expect(save).not.toContain("clay-menu-recall");
-  expect(save).not.toContain("Menu hidden");
 });
 
 test("chrome actions are not edits and record nothing in undo", async () => {
@@ -259,7 +241,7 @@ test("chrome actions are not edits and record nothing in undo", async () => {
   click(itemOf("clay.people"));
   await flush();
   expect(panelOf()).not.toBeNull();
-  click(document.querySelector(".clay-people-close"));
+  click($(".clay-people-close", "menu"));
   await flush();
   expect(panelOf()).toBeNull();
 
@@ -267,15 +249,9 @@ test("chrome actions are not edits and record nothing in undo", async () => {
   click(itemOf("seo"));
   await flush();
   expect(sheetOf()).not.toBeNull();
-  click(document.querySelector(".clay-seo-cancel"));
+  click($(".clay-seo-cancel", "seo"));
   await flush();
-  expect(sheetOf()).toBeNull();
-
-  click(gooOf());
-  click(itemOf("clay.hide"));
-  expect(recallOf()).not.toBeNull();
-  click(buttonNamed(recallOf(), "Show menu"));
-  expect(dockOf().hidden).toBe(false);
+  expect(hostOf("seo")).toBeNull();
 
   expect(window.clay.hasUnsavedChanges()).toBe(false);
   expect(window.clay.undo.history.length).toBe(historyBefore);
@@ -294,12 +270,13 @@ test("reopening the menu and the panel five times leaves one of each surface", a
     click(itemOf("clay.people"));
     await flush();
     expect(panelOf()).not.toBeNull();
-    click(document.querySelector(".clay-people-close"));
+    click($(".clay-people-close", "menu"));
     await flush();
   }
 
-  expect(document.querySelectorAll(".clay-menu-dock")).toHaveLength(1);
-  expect(document.querySelectorAll(".clay-people").length).toBeLessThanOrEqual(1);
-  expect(document.querySelectorAll("#clay-menu-style")).toHaveLength(1);
+  expect($$(".clay-menu-dock", "menu")).toHaveLength(1);
+  expect($$(".clay-people", "menu").length).toBeLessThanOrEqual(1);
+  expect(document.querySelectorAll('clay-editor-ui[data-clay-ui="menu"]')).toHaveLength(1);
+  expect(document.querySelectorAll("#clay-menu-style")).toHaveLength(0);
   expect(document.querySelectorAll("#clay-menu-vars")).toHaveLength(1);
 });

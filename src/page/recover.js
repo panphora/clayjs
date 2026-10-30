@@ -1,10 +1,15 @@
 import toast, { toastPersistent, dismissPersistent } from "../ui/toast-lazy.js";
 import { state as pmState } from "../vendor/prosemirror.vendor.js";
+import { mountEditorUI } from "../ui/editor-ui.js";
 
 export const NOTICE_TEXT = "Some text you typed was kept aside when its block moved or was removed.";
 
-const STYLE_ID = "page-recover-style";
+// The control and its panel sit in one shadow root inside the page shell, so the page's
+// CSS cannot restyle them. The page's --page-* tokens still reach them, and they keep
+// the page's font and colour.
 const STYLES = `
+:host { font: inherit !important; color: inherit !important; }
+.page-recover-root { display: contents; }
 .page-recover { position: fixed; right: 16px; bottom: 16px; z-index: 20; min-height: 36px; padding: 0 14px; font: inherit; font-size: 14px; color: var(--page-ink); background: var(--page-pop-bg); border: 1px solid var(--page-chrome-line-rest); border-radius: 999px; cursor: pointer; }
 .page-recover[hidden], .page-recover-panel[hidden] { display: none; }
 .page-recover-panel { position: fixed; right: 16px; bottom: 64px; z-index: 21; width: min(380px, calc(100vw - 32px)); max-height: 60vh; overflow-y: auto; color: var(--page-ink); background: var(--page-pop-bg); border: 1px solid var(--page-chrome-line-rest); border-radius: var(--page-chrome-radius); padding: 8px; box-sizing: border-box; }
@@ -33,13 +38,6 @@ const el = (doc, tag, className, attrs = {}) => {
   return node;
 };
 
-function ensureStyle(doc) {
-  if (doc.getElementById(STYLE_ID)) return;
-  const style = doc.createElement("style");
-  style.id = STYLE_ID;
-  style.textContent = STYLES;
-  doc.head.append(style);
-}
 
 function previewOf(doc, record) {
   const out = el(doc, "div", "page-recover-text");
@@ -74,13 +72,14 @@ export function focusBlock(view, id) {
 
 export function createRecoverList({ binding, mount, ownTokens = [], onRestored = () => {}, onStale = () => {} }) {
   const doc = mount.ownerDocument;
-  ensureStyle(doc);
   const own = new Set(ownTokens.filter(Boolean));
   const button = el(doc, "button", "page-recover", { type: "button", "aria-haspopup": "dialog", "aria-expanded": "false" });
   const panel = el(doc, "div", "page-recover-panel", { role: "dialog", "aria-label": "Recover changes" });
   button.hidden = true;
   panel.hidden = true;
-  mount.append(button, panel);
+  const content = el(doc, "div", "page-recover-root");
+  content.append(button, panel);
+  const ui = mountEditorUI({ name: "page-recover", content, css: [STYLES], parent: mount });
 
   let snapshot = { recoverable: [], notices: [] };
   let target = null;
@@ -186,8 +185,7 @@ export function createRecoverList({ binding, mount, ownTokens = [], onRestored =
     destroy() {
       off();
       dismissPersistent(NOTICE_TEXT);
-      button.remove();
-      panel.remove();
+      ui.remove();
     },
   };
 }

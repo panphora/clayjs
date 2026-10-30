@@ -52,15 +52,16 @@ export function last(calls, el, name) {
 /**
  * The hostile-CSS contract for everything ClayJS draws: runtime-only, no class, no id,
  * every inline declaration !important. `skip` leaves out nodes the caller owns (a crop
- * stage, dialog content). Returns the number of HTML elements checked so a caller can
- * assert it checked something.
+ * stage, dialog content). `rootClay` is the root's own region tokens, for a root that is
+ * also the content of a shadow root (mountEditorUI adds `editor-ui` there). Returns the
+ * number of HTML elements checked so a caller can assert it checked something.
  */
-export function expectHostileProof(root, { skip = () => false } = {}) {
+export function expectHostileProof(root, { skip = () => false, rootClay = RUNTIME_ONLY } = {}) {
   const nodes = [root, ...root.querySelectorAll("*")].filter((el) => el.namespaceURI === HTML_NS && !skip(el));
   for (const el of nodes) {
     expect([el.tagName, el.getAttribute("class")]).toEqual([el.tagName, null]);
     expect([el.tagName, el.getAttribute("id")]).toEqual([el.tagName, null]);
-    expect([el.tagName, el.getAttribute("clay")]).toEqual([el.tagName, RUNTIME_ONLY]);
+    expect([el.tagName, el.getAttribute("clay")]).toEqual([el.tagName, el === root ? rootClay : RUNTIME_ONLY]);
     expect(el.style.length).toBeGreaterThan(0);
     for (let i = 0; i < el.style.length; i++) {
       const prop = el.style.item(i);

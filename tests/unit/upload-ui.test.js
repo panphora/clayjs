@@ -43,10 +43,13 @@ async function mount(task, container = document.createElement("div")) {
   const { mount: draw } = await import("../../src/plugins/upload-ui.js");
   document.body.append(container);
   const handle = draw(task, container);
-  return { ...handle, container, root: container.querySelector(".clay-upload") };
+  return { ...handle, container, root: rowsIn(container)[0] ?? null };
 }
 
 const part = (root, selector) => root.querySelector(selector);
+
+// Each row mounts in its own shadow root, on a <clay-editor-ui data-clay-ui="upload"> host.
+const rowsIn = (el) => [...el.querySelectorAll('clay-editor-ui[data-clay-ui="upload"]')].map((host) => host.shadowRoot.querySelector(".clay-upload")).filter(Boolean);
 
 function click(el) {
   el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
@@ -155,18 +158,18 @@ test("Dismiss waits until the upload settles, then unmounts the row and stops li
   expect(task.listenerCount).toBe(1);
 
   click(part(root, ".clay-upload__dismiss"));
-  expect(container.querySelector(".clay-upload")).not.toBeNull();
+  expect((rowsIn(container)[0] ?? null)).not.toBeNull();
   expect(task.listenerCount).toBe(1);
 
   task.set({ state: "failed", result: { ok: false, msg: "Upload failed", uploads: [] } });
   expect(part(root, ".clay-upload__dismiss").hidden).toBe(false);
   click(part(root, ".clay-upload__dismiss"));
 
-  expect(container.querySelector(".clay-upload")).toBeNull();
+  expect((rowsIn(container)[0] ?? null)).toBeNull();
   expect(task.listenerCount).toBe(0);
   unmount();
   unmount();
-  expect(container.querySelector(".clay-upload")).toBeNull();
+  expect((rowsIn(container)[0] ?? null)).toBeNull();
 });
 
 test("the status region announces state changes, not every progress event", async () => {
@@ -213,6 +216,7 @@ test("nothing the row draws reaches the saved HTML", async () => {
   const html = serializeForSync(captureSnapshot({ flushUndo: false, authored: false }));
 
   expect(html).not.toContain("clay-upload");
+  expect(html).not.toContain("clay-editor-ui");
   expect(html).not.toContain("--clay-upload-");
   expect(html).not.toContain("photo.png");
   expect(html).not.toContain("Cancel");
@@ -229,7 +233,8 @@ test("a container can override a --clay-upload-* token without replacing behavio
   expect(root.style.getPropertyValue("--clay-upload-fill")).toBe("");
   expect(root.style.getPropertyValue("--clay-upload-ink")).toBe("");
 
-  const css = document.getElementById("clay-upload-style").textContent;
+  const css = [...root.getRootNode().querySelectorAll("style")].map((style) => style.textContent).join("\n");
+  expect(document.getElementById("clay-upload-style")).toBeNull();
   expect(css).toContain("var(--clay-upload-fill,");
   expect(css).not.toContain("#00FF00");
   expect(part(root, ".clay-upload__progress")).not.toBeNull();
@@ -245,13 +250,14 @@ test("clay.upload.mount is the shared entry point and loads its UI once", async 
   const b = await upload.mount(second, document.body);
 
   expect(typeof a.unmount).toBe("function");
-  expect(document.querySelectorAll(".clay-upload")).toHaveLength(2);
-  expect(document.querySelectorAll("#clay-upload-style")).toHaveLength(1);
-  expect(document.querySelector('[clay="editor-ui"]#clay-upload-style')).not.toBeNull();
+  expect(rowsIn(document)).toHaveLength(2);
+  expect(document.querySelectorAll('clay-editor-ui[data-clay-ui="upload"][clay="editor-ui"]')).toHaveLength(2);
+  expect(document.querySelectorAll("#clay-upload-style")).toHaveLength(0);
 
   a.unmount();
   b.unmount();
-  expect(document.querySelectorAll(".clay-upload")).toHaveLength(0);
+  expect(rowsIn(document)).toHaveLength(0);
+  expect(document.querySelectorAll("clay-editor-ui")).toHaveLength(0);
 });
 
 test("a retry draws progress again, and a cancel clears the stale error from Retry", async () => {

@@ -6,6 +6,7 @@
  */
 import { jest } from "@jest/globals";
 import { draftKey } from "../../src/plugins/visitor-drafts/store.js";
+import { $, active, hostOf } from "./helpers/editor-ui.js";
 
 const PARAMS = "plugins=visitor-drafts&exclude=richclay,source";
 const RULES = '{"title":"#title","note":"#note@value"}';
@@ -79,7 +80,7 @@ function about() {
 }
 
 function ownerChip() {
-  return document.querySelector(".clay-owner");
+  return $(".clay-owner", "owner");
 }
 
 function styleText(id) {
@@ -93,7 +94,7 @@ function typeInto(el, value) {
 }
 
 function prompt() {
-  return document.querySelector(".hcp");
+  return $(".hcp", "download-prompt");
 }
 
 function clickDownload() {
@@ -135,12 +136,12 @@ function linkHref() {
 
 test("draft mode mounts one prompt whose link points at this page's download", async () => {
   await bootPage({ slot: "ui-prompt-1", url: "/" });
-  expect(document.querySelectorAll(".hcp").length).toBe(1);
+  expect(document.querySelectorAll('clay-editor-ui[data-clay-ui="download-prompt"]').length).toBe(1);
   expect(prompt().tagName).toBe("ASIDE");
   expect(prompt().getAttribute("clay")).toBe("editor-ui");
   expect(prompt().hasAttribute("sap-ignore")).toBe(true);
   expect(linkHref()).toBe("/_/download?as=htmlclay");
-  expect(document.getElementById("hcp-style").getAttribute("clay")).toBe("editor-ui");
+  expect(hostOf("download-prompt").getAttribute("clay")).toBe("editor-ui");
   // A visitor's browser asks no third party for fonts: the prompt uses system stacks.
   expect(document.querySelector("head link[href*='fonts.googleapis.com']")).toBeNull();
 
@@ -152,7 +153,7 @@ test("draft mode mounts one prompt whose link points at this page's download", a
   ];
   for (const [path, expected] of forms) {
     await bootPage({ slot: "ui-prompt-" + path.replace(/\W/g, "-"), url: path });
-    expect(document.querySelectorAll(".hcp").length).toBe(1);
+    expect(document.querySelectorAll('clay-editor-ui[data-clay-ui="download-prompt"]').length).toBe(1);
     expect(linkHref()).toBe(expected);
   }
 });
@@ -166,10 +167,11 @@ test("closing the notice keeps a download icon labeled Keep, remembers it, and c
   expect(aside.hidden).toBe(false);
   expect(aside.getAttribute("data-hcp-state")).toBe("mini");
   expect(tab.getAttribute("aria-expanded")).toBe("false");
-  expect(document.activeElement).toBe(tab);
+  expect(active()).toBe(tab);
   expect(tab.querySelector(".hcp-tab__mini").textContent).toBe("Keep");
   expect(JSON.parse(localStorage.getItem(key)).prompt.shown).toBe(true);
   expect(clay.getHTML()).not.toContain('id="hcp"');
+  expect(clay.getHTML()).not.toContain("clay-editor-ui");
 
   await bootPage({ slot: "ui-prompt-minimize", keepStorage: true });
   expect(prompt().hidden).toBe(false);
@@ -177,7 +179,7 @@ test("closing the notice keeps a download icon labeled Keep, remembers it, and c
   prompt().querySelector("[data-hcp=open]").click();
   expect(prompt().getAttribute("data-hcp-state")).toBe("card");
   expect(prompt().querySelector("[data-hcp=open]").getAttribute("aria-expanded")).toBe("true");
-  expect(document.activeElement).toBe(prompt().querySelector("[data-hcp-link]"));
+  expect(active()).toBe(prompt().querySelector("[data-hcp-link]"));
   expect(linkHref()).toBe("/_/download/notes.html?as=htmlclay");
   expect(clickDownload().defaultPrevented).toBe(false);
 });
@@ -247,12 +249,13 @@ test("a route after the document keeps the download on the document, not on a pa
 
 test("a page that is not in draft mode gets no prompt", async () => {
   await bootPage({ slot: "ui-off-1", owner: true, url: "/notes.html?editmode=true" });
-  expect(prompt()).toBeNull();
+  expect(hostOf("download-prompt")).toBeNull();
   expect(intro()).toBeNull();
-  expect([...document.querySelectorAll("[clay='editor-ui']")].map((el) => el.id)).toEqual(["clay-owner-style", "clay-owner-vars", "clay-owner"]);
+  expect([...document.querySelectorAll("[clay='editor-ui']")].map((el) => el.getAttribute("data-clay-ui") || el.id)).toEqual(["clay-owner-vars", "owner"]);
 
   await bootPage({ slot: "ui-off-2", params: "plugins=undo&exclude=richclay,source" });
-  expect(prompt()).toBeNull();
+  expect(hostOf("download-prompt")).toBeNull();
+  expect(hostOf("owner")).toBeNull();
 });
 
 test("a failed browser write puts the prompt in its error card, and dismiss only minimizes", async () => {
@@ -326,11 +329,14 @@ test("a template puts its own strip at the top of the body with one close button
   expect(section.getAttribute("clay")).toBe("editor-ui");
   expect(section.hasAttribute("sap-ignore")).toBe(true);
   expect(section.textContent).toContain("Track your week.");
-  expect(section.querySelectorAll(".clay-intro__close").length).toBe(1);
+  expect(section.querySelectorAll(".clay-intro__close").length).toBe(0);
+  expect(section.querySelectorAll('clay-editor-ui[data-clay-ui="intro-close"]').length).toBe(1);
+  expect(section.querySelector('clay-editor-ui[data-clay-ui="intro-close"]').shadowRoot.querySelectorAll(".clay-intro__close").length).toBe(1);
 
   const html = clay.getHTML();
   expect(html).not.toContain("clay-intro");
   expect(html).not.toContain("hcp");
+  expect(html).not.toContain("clay-editor-ui");
   expect(html).toContain('<template visitor-intro=""><p>Track your week.</p></template>');
 });
 
@@ -345,7 +351,7 @@ test("an empty or whitespace-only template mounts no intro", async () => {
 test("the close button removes the intro for good and remembers why", async () => {
   const { key } = await bootPage({ slot: "ui-intro-close", template: INTRO });
 
-  intro().querySelector(".clay-intro__close").click();
+  intro().querySelector('clay-editor-ui[data-clay-ui="intro-close"]').shadowRoot.querySelector(".clay-intro__close").click();
   expect(intro()).toBeNull();
   expect(JSON.parse(localStorage.getItem(key)).intro.done).toBe("closed");
 
@@ -512,8 +518,8 @@ test("the owner sees which lane they are in", async () => {
   expect(ownerChip().querySelector(".clay-owner__action").textContent).toBe("Edit the original");
 
   await bootPage({ slot: "ui-owner-3", template: INTRO });
-  expect(ownerChip()).toBeNull();
+  expect(hostOf("owner")).toBeNull();
 
   await bootPage({ slot: "ui-owner-4", params: "plugins=undo&exclude=richclay,source", owner: true });
-  expect(ownerChip()).toBeNull();
+  expect(hostOf("owner")).toBeNull();
 });

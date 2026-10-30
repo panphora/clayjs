@@ -1,4 +1,5 @@
 import { jest } from "@jest/globals";
+import { hostOf, $, $$, active, sheetText } from "./helpers/editor-ui.js";
 
 // Scenario: the menu says who is here. The item, the roster beside the capsule and
 // the people panel all read one snapshot from the presence store, and the page that
@@ -73,15 +74,15 @@ function stubPeople(canRename = true) {
   document.dispatchEvent(new CustomEvent("clay:people"));
 }
 
-const itemOf = () => document.querySelector('[role="menuitem"][data-menu-id="clay.people"]');
-const dockOf = () => document.querySelector(".clay-menu-dock");
-const rosterOf = () => document.querySelector(".clay-roster");
-const panelOf = () => document.querySelector(".clay-people");
-const noteOf = () => document.querySelector(".clay-menu-note");
-const gooOf = () => document.querySelector(".clay-menu-goo");
+const itemOf = () => $('[role="menuitem"][data-menu-id="clay.people"]', "menu");
+const dockOf = () => $(".clay-menu-dock", "menu");
+const rosterOf = () => $(".clay-roster", "menu");
+const panelOf = () => $(".clay-people", "menu");
+const noteOf = () => $(".clay-menu-note", "menu");
+const gooOf = () => $(".clay-menu-goo", "menu");
 const facesOf = (el) => [...el.querySelectorAll(".clay-avatar")];
-const rowsOf = () => [...document.querySelectorAll(".clay-people-row")];
-const meRowOf = () => document.querySelector(".clay-people-me-row");
+const rowsOf = () => $$(".clay-people-row", "menu");
+const meRowOf = () => $(".clay-people-me-row", "menu");
 const buttonsIn = (el) => [...el.querySelectorAll("button")];
 const buttonNamed = (el, label) => buttonsIn(el).find((button) => button.textContent === label);
 
@@ -104,6 +105,7 @@ test("a host that never announced presence gets no item and no roster", async ()
   stubPeople(true);
   await present(THREE, { supported: false });
 
+  expect(hostOf("menu")).not.toBeNull();
   expect(itemOf()).toBeNull();
   expect(rosterOf()).toBeNull();
 });
@@ -136,6 +138,7 @@ test("the roster is opt-in, and sits beside the capsule", async () => {
   stubPeople(true);
   await present(THREE);
 
+  expect(hostOf("menu")).not.toBeNull();
   expect(rosterOf()).toBeNull();
 
   await boot({ roster: true });
@@ -164,21 +167,21 @@ test("the panel opens from the item with the sum, the rows and the anonymous lin
 
   expect(panel).not.toBeNull();
   expect(panel.getAttribute("role")).toBe("dialog");
-  expect(document.querySelector(".clay-people-sum").textContent).toBe("3 people");
+  expect($(".clay-people-sum", "menu").textContent).toBe("3 people");
   const rows = rowsOf();
   expect(rows).toHaveLength(2);
   expect(rows[0].textContent).toContain("Ada Lovelace");
   expect(rows[1].textContent).toContain("Marta Cole");
   expect(rows[1].textContent).toContain("(you)");
   expect(rows[0].textContent).not.toContain("(you)");
-  expect(document.querySelector(".clay-people-anon").textContent).toBe("1 other person is here without a shared name.");
-  expect(document.activeElement).toBe(document.querySelector(".clay-people-close"));
+  expect($(".clay-people-anon", "menu").textContent).toBe("1 other person is here without a shared name.");
+  expect(active()).toBe($(".clay-people-close", "menu"));
 
-  key(document.querySelector(".clay-people-close"), "Escape");
+  key($(".clay-people-close", "menu"), "Escape");
   await flush();
 
   expect(panelOf()).toBeNull();
-  expect(document.activeElement).toBe(gooOf());
+  expect(active()).toBe(gooOf());
 });
 
 test("the panel opens from the roster, and an outside click closes it", async () => {
@@ -196,7 +199,7 @@ test("the panel opens from the roster, and an outside click closes it", async ()
   await flush();
 
   expect(panelOf()).toBeNull();
-  expect(document.activeElement).not.toBe(document.querySelector(".clay-people-close"));
+  expect(active()).not.toBe($(".clay-people-close", "menu"));
 });
 
 test("renaming this browser's name, and what a refusal says", async () => {
@@ -206,11 +209,11 @@ test("renaming this browser's name, and what a refusal says", async () => {
   const rename = window.clay.people.rename;
 
   await openFromItem();
-  expect(document.querySelector(".clay-people-me")).not.toBeNull();
+  expect($(".clay-people-me", "menu")).not.toBeNull();
   click(buttonNamed(meRowOf(), "Change"));
   await flush();
 
-  const input = document.querySelector(".clay-people-input");
+  const input = $(".clay-people-input", "menu");
   expect(input).not.toBeNull();
   expect(input.value).toBe("Marta Cole");
 
@@ -225,14 +228,14 @@ test("renaming this browser's name, and what a refusal says", async () => {
   });
   click(buttonNamed(meRowOf(), "Change"));
   await flush();
-  document.querySelector(".clay-people-input").value = "Marta C";
+  $(".clay-people-input", "menu").value = "Marta C";
   click(buttonNamed(meRowOf(), "Save"));
   await flush();
   expect(noteOf().textContent).toBe("This name comes from your account, so it can't be changed here.");
   expect(noteOf().hidden).toBe(false);
 
   rename.mockReset();
-  const typed = document.querySelector(".clay-people-input");
+  const typed = $(".clay-people-input", "menu");
   typed.value = "Marta C";
   key(typed, "Enter");
   await flush();
@@ -241,11 +244,11 @@ test("renaming this browser's name, and what a refusal says", async () => {
 
   click(buttonNamed(meRowOf(), "Change"));
   await flush();
-  expect(document.querySelector(".clay-people-input")).not.toBeNull();
-  key(document.querySelector(".clay-people-input"), "Escape");
+  expect($(".clay-people-input", "menu")).not.toBeNull();
+  key($(".clay-people-input", "menu"), "Escape");
   await flush();
   expect(panelOf()).not.toBeNull();
-  expect(document.querySelector(".clay-people-input")).toBeNull();
+  expect($(".clay-people-input", "menu")).toBeNull();
   expect(buttonNamed(meRowOf(), "Change")).toBeTruthy();
 });
 
@@ -256,8 +259,8 @@ test("a name this browser cannot change shows no Change button", async () => {
 
   await openFromItem();
 
-  expect(document.querySelector(".clay-people-me")).not.toBeNull();
-  expect(document.querySelector(".clay-people-me-name").textContent).toBe("Marta Cole");
+  expect($(".clay-people-me", "menu")).not.toBeNull();
+  expect($(".clay-people-me-name", "menu").textContent).toBe("Marta Cole");
   expect(buttonNamed(meRowOf(), "Change")).toBeUndefined();
 });
 
@@ -284,6 +287,7 @@ test("nothing the item, the roster or the panel draws is saved", async () => {
   await present(THREE);
   await openFromItem();
 
+  expect(hostOf("menu")).not.toBeNull();
   expect(rosterOf()).not.toBeNull();
   expect(panelOf()).not.toBeNull();
 
@@ -305,7 +309,7 @@ test("opening the menu closes the people panel", async () => {
   click(gooOf());
   await flush();
 
-  expect(document.querySelector(".clay-menu-list").hidden).toBe(false);
+  expect($(".clay-menu-list", "menu").hidden).toBe(false);
   expect(panelOf()).toBeNull();
 });
 
@@ -315,13 +319,13 @@ test("a presence frame keeps focus inside the open panel", async () => {
   await present(THREE);
 
   await openFromItem();
-  expect(document.activeElement).toBe(document.querySelector(".clay-people-close"));
+  expect(active()).toBe($(".clay-people-close", "menu"));
 
   await present(THREE);
 
-  expect(document.activeElement).toBe(document.querySelector(".clay-people-close"));
+  expect(active()).toBe($(".clay-people-close", "menu"));
 
-  key(document.activeElement, "Escape");
+  key(active(), "Escape");
   await flush();
 
   expect(panelOf()).toBeNull();
@@ -334,7 +338,7 @@ test("an unchanged presence frame leaves the open menu's items in place", async 
 
   click(gooOf());
   await flush();
-  const kept = document.querySelector('[role="menuitem"][data-menu-id="clay.download"]');
+  const kept = $('[role="menuitem"][data-menu-id="clay.download"]', "menu");
   expect(kept).not.toBeNull();
 
   await present(THREE);
@@ -345,7 +349,7 @@ test("an unchanged presence frame leaves the open menu's items in place", async 
 test("the rename refusal note paints above the panel", async () => {
   await boot();
 
-  const css = document.getElementById("clay-menu-style").textContent;
+  const css = sheetText("menu");
 
   expect(css).toContain(".clay-menu-note { z-index: 2;");
 });

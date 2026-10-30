@@ -2,7 +2,9 @@
 // automatic "Saved" toast stays. The page carrying both is covered in
 // save-feedback.test.js.
 
-const toasts = (type) => [...document.querySelectorAll(type ? `[data-clay-toast="${type}"]` : "[data-clay-toast]")];
+import { $$ } from "./helpers/editor-ui.js";
+
+const toasts = (type) => $$(type ? `[data-clay-toast="${type}"]` : "[data-clay-toast]", "toasts");
 const fire = (state, detail) => document.dispatchEvent(new CustomEvent("clay:save-" + state, { detail }));
 
 beforeAll(async () => {

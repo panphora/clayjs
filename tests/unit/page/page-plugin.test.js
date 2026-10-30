@@ -1,4 +1,5 @@
 import { jest } from "@jest/globals";
+import { $$ } from "../helpers/editor-ui.js";
 import { readFileSync } from "node:fs";
 import { resolveModules, MODULES } from "../../../src/loader-logic.js";
 import { seedValue } from "../../../src/page/ybind/seed.js";
@@ -304,7 +305,7 @@ test("dispose removes the adopted sync listener, the shell and the unsaved sourc
 });
 
 const chip = () => document.querySelector("[data-clay-indicator]");
-const toasts = () => [...document.querySelectorAll("[data-clay-toast]")];
+const toasts = () => $$("[data-clay-toast]", "toasts");
 const actionLabels = (el) => [...el.querySelectorAll("button")].map((b) => b.textContent).filter(Boolean);
 // The toast stack arrives on the first toast, so a toast is waited for rather than
 // assumed to be in the same tick.

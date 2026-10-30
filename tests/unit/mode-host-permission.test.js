@@ -3,6 +3,7 @@
  * @jest-environment-options {"url": "https://example.com/notes.html"}
  */
 import { jest } from "@jest/globals";
+import { $, hostOf } from "./helpers/editor-ui.js";
 
 /**
  * Discovery's answer to "may this caller save here" outranks the load-time hints.
@@ -305,13 +306,13 @@ test("a switch the host refuses reverts the switch and says why", async () => {
   metaAnswer = okMeta({ writable: false });
   await boot();
 
-  const edit = document.querySelector(".clay-menu-edit");
+  const edit = $(".clay-menu-edit", "menu");
   expect(edit.getAttribute("aria-checked")).toBe("false");
   edit.click();
   await settle();
 
   expect(edit.getAttribute("aria-checked")).toBe("false");
-  expect(document.querySelector(".clay-menu-note").textContent).toBe(
+  expect($(".clay-menu-note", "menu").textContent).toBe(
     "You don't have permission to edit this document.",
   );
 });
@@ -367,7 +368,7 @@ test("the menu recovers from a denial that lands during an edit boot", async () 
   await withFakeLocation(async (fake) => {
     await boot({ opensIn: "edit", fake });
     expect(window.clay.canEdit).toBe(false);
-    expect(document.querySelector(".clay-menu")).not.toBeNull();
+    expect($(".clay-menu", "menu")).not.toBeNull();
 
     const save = await import("../../src/core/save.js");
     if (!save.baselineSettled()) save.adoptEntryBaseline();
@@ -399,7 +400,7 @@ test("a host true without hints grants Edit without entering it", async () => {
   metaAnswer = okMeta({ writable: true });
   await boot({ cookie: false });
   expect(window.clay.canEdit).toBe(false);
-  expect(document.querySelector(".clay-menu")).toBeNull();
+  expect(hostOf("menu")).toBeNull();
 
   const events = [];
   document.addEventListener("clay:capabilitychange", () => events.push(1));
@@ -413,7 +414,7 @@ test("a host true without hints grants Edit without entering it", async () => {
   expect(events.length).toBe(1);
   expect(window.clay.canEdit).toBe(true);
   expect(window.clay.mode).toBe("view");
-  expect(document.querySelector(".clay-menu")).not.toBeNull();
+  expect($(".clay-menu", "menu")).not.toBeNull();
 });
 
 test("a host true never grants Edit over an authored viewonly document", async () => {

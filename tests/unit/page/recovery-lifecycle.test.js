@@ -5,9 +5,15 @@
 import { webcrypto } from "node:crypto";
 import { IDBFactory } from "fake-indexeddb";
 import { jest } from "@jest/globals";
+import { $$ } from "../helpers/editor-ui.js";
 import { seedValue } from "../../../src/page/ybind/seed.js";
 import { renderFromTags } from "../../../src/page/save-projection.js";
 import { pageStateFor } from "../../../src/page/save-states.js";
+
+const recoveryRoots = () => [...document.querySelectorAll('clay-editor-ui[data-clay-ui="page-recovery"]')].map((host) => host.shadowRoot);
+const rq = (selector) => recoveryRoots().map((root) => root.querySelector(selector)).find(Boolean) ?? null;
+const rqa = (selector) => recoveryRoots().flatMap((root) => [...root.querySelectorAll(selector)]);
+const recoveryHosts = () => document.querySelectorAll('clay-editor-ui[data-clay-ui="page-recovery"]');
 
 /**
  * Step 7: the save indicator says where the typing lives, and the recovery pieces live and
@@ -468,7 +474,7 @@ test("a journal that cannot write says so once, and the copy it offers holds the
   expect(harness.recordsOf("page.yjs").length).toBeGreaterThan(0);
   expect(storeOf("page").value).toBeTruthy();
 
-  const action = await until(() => [...document.querySelectorAll("button")].find((button) => button.textContent === "Download a copy"));
+  const action = await until(() => $$("button", "toasts").find((button) => button.textContent === "Download a copy"));
   expect(action).toBeTruthy();
   action.click();
   expect(await until(() => downloads.length > 0)).toBe(true);
@@ -491,7 +497,7 @@ test("a journal that cannot open says so in edit, and leaving edit takes its toa
   });
   Object.defineProperty(globalThis, "crypto", { value: noDigest, configurable: true, writable: true });
   const STORAGE_TEXT = "Changes cannot be stored on this device.";
-  const storageToasts = () => [...document.querySelectorAll("[data-clay-toast]")].filter((el) => el.textContent.includes(STORAGE_TEXT));
+  const storageToasts = () => $$("[data-clay-toast]", "toasts").filter((el) => el.textContent.includes(STORAGE_TEXT));
   let second = null;
   try {
     const harness = await load();
@@ -584,8 +590,8 @@ test("edit, view, edit leaves one observer and one panel", async () => {
     await first.ready;
     await settle(harness.save);
     first.enable();
-    expect(document.querySelectorAll(".page-recovery")).toHaveLength(1);
-    const firstPanel = document.querySelector(".page-recovery-panel");
+    expect(rqa(".page-recovery")).toHaveLength(1);
+    const firstPanel = rq(".page-recovery-panel");
     expect(firstPanel).toBeTruthy();
     const firstSurface = harness.page.view.dom;
     const staged = (channel) => harness.recordsOf(channel).filter((record) => String(record.id).startsWith(`${channel}:stage:`));
@@ -593,8 +599,9 @@ test("edit, view, edit leaves one observer and one panel", async () => {
     first.dispose();
     await tick(20);
     // The view is gone, and so is everything the session drew or listened to.
-    expect(document.querySelectorAll(".page-recovery")).toHaveLength(0);
-    expect(document.querySelectorAll(".page-recovery-panel")).toHaveLength(0);
+    expect(rqa(".page-recovery")).toHaveLength(0);
+    expect(rqa(".page-recovery-panel")).toHaveLength(0);
+    expect(recoveryHosts()).toHaveLength(0);
     const before = staged("page.ime").length;
     firstSurface.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
     firstSurface.dispatchEvent(new CompositionEvent("compositionupdate", { bubbles: true }));
@@ -606,9 +613,9 @@ test("edit, view, edit leaves one observer and one panel", async () => {
       await second.ready;
       await settle(harness.save);
       second.enable();
-      expect(document.querySelectorAll(".page-recovery")).toHaveLength(1);
-      expect(document.querySelectorAll(".page-recovery-panel")).toHaveLength(1);
-      expect(document.querySelector(".page-recovery-panel")).not.toBe(firstPanel);
+      expect(rqa(".page-recovery")).toHaveLength(1);
+      expect(rqa(".page-recovery-panel")).toHaveLength(1);
+      expect(rq(".page-recovery-panel")).not.toBe(firstPanel);
       // One shadow listens: a composition pair stages its text twice, not four times.
       const block = harness.page.view.dom.querySelector('[data-id="p"]');
       expect(block).toBeTruthy();
@@ -636,7 +643,7 @@ test("a refused exit resumes the same document and the same records", async () =
     await settle(harness.save);
     lease.enable();
     const view = page.view;
-    const panel = document.querySelector(".page-recovery-panel");
+    const panel = rq(".page-recovery-panel");
     view.dispatch(view.state.tr.insertText(" there", view.state.doc.content.size - 1));
     expect(await until(() => states.includes("journaled"))).toBe(true);
     const records = harness.recordsOf("page.yjs").length;
@@ -645,13 +652,13 @@ test("a refused exit resumes the same document and the same records", async () =
     await lease.quiesce();
     expect(page.view).toBe(view);
     expect(view.dom.textContent).toContain("Hello there");
-    expect(document.querySelector(".page-recovery-panel")).toBe(panel);
+    expect(rq(".page-recovery-panel")).toBe(panel);
 
     lease.resume();
     expect(page.view).toBe(view);
     expect(view.editable).toBe(true);
     expect(view.dom.textContent).toContain("Hello there");
-    expect(document.querySelector(".page-recovery-panel")).toBe(panel);
+    expect(rq(".page-recovery-panel")).toBe(panel);
     // The records the refused exit kept are the records this session still holds.
     expect(harness.recordsOf("page.yjs").length).toBe(records);
   } finally {
@@ -679,7 +686,8 @@ test("a reader creates no channel and makes no IndexedDB request", async () => {
   expect(opened).toEqual([]);
   expect(await harness.page.ready).toBe(null);
   expect(states).toEqual([]);
-  expect(document.querySelector(".page-recovery")).toBe(null);
+  expect(rq(".page-recovery")).toBe(null);
+  expect(recoveryHosts()).toHaveLength(0);
 });
 
 test("a read that lands after the review is disposed draws nothing", async () => {
@@ -703,7 +711,8 @@ test("a read that lands after the review is disposed draws nothing", async () =>
   await tick(20);
 
   expect(review.count).toBe(0);
-  expect(document.querySelector(".page-recovery")).toBe(null);
-  expect(document.querySelector(".page-recovery-panel")).toBe(null);
+  expect(rq(".page-recovery")).toBe(null);
+  expect(rq(".page-recovery-panel")).toBe(null);
+  expect(recoveryHosts()).toHaveLength(0);
   expect(mount.children).toHaveLength(0);
 });

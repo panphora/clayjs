@@ -26,7 +26,7 @@ export function savedCorner(storage) {
   return CORNERS.has(value) ? value : "top-right";
 }
 
-function makeSpots() {
+function makeSpots(container) {
   const spots = document.createElement("div");
   spots.className = "clay-menu-spots";
   spots.setAttribute("clay", "editor-ui");
@@ -37,11 +37,11 @@ function makeSpots() {
     spot.dataset.to = to;
     spots.append(spot);
   }
-  document.body.append(spots);
+  container.append(spots);
   return spots;
 }
 
-export function attachPlacement({ dock, grip, storage, onMove, onDragStart }) {
+export function attachPlacement({ dock, container = document.body, grip, storage, onMove, onDragStart }) {
   function setCorner(corner, { remember = true } = {}) {
     dock.dataset.corner = corner;
     if (remember) {
@@ -91,7 +91,8 @@ export function attachPlacement({ dock, grip, storage, onMove, onDragStart }) {
       if (Math.hypot(event.clientX - drag.x, event.clientY - drag.y) < DRAG_START) return;
       drag.moving = true;
       dock.setAttribute("data-dragging", "");
-      drag.spots = makeSpots();
+      drag.spots = makeSpots(container);
+      drag.spots.style.setProperty("color-scheme", getComputedStyle(dock).colorScheme);
       if (onDragStart) onDragStart();
     }
     const left = event.clientX - drag.dx;

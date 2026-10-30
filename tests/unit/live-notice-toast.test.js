@@ -1,4 +1,6 @@
-const toasts = () => [...document.querySelectorAll('[data-clay-toast="warning"]')];
+import { $$ } from "./helpers/editor-ui.js";
+
+const toasts = () => $$('[data-clay-toast="warning"]', "toasts");
 const notice = (detail) => document.dispatchEvent(new CustomEvent("clay:live-notice", { detail }));
 
 beforeAll(async () => {

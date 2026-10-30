@@ -561,6 +561,12 @@ export async function bootPage(fixture, { mode, host, resetModules, served = nul
     // room, and that timer is already ticking when the page is up: a case's fake clock
     // would never fire it, so the wait happens here, on the real one.
     if (pageHost && !stalled) await new Promise((resolve) => setTimeout(resolve, 600));
+    // Save's boot baseline settles on real timers too (a quiet spell, or its fallback), and
+    // a case's fake clock would never fire them: the settle a browser reaches by then runs here.
+    if (!stalled && root.getAttribute("editmode") === "true") {
+      const { baselineSettled, releaseBootSettle } = await runtimeImport("src/core/save.js");
+      if (!baselineSettled()) releaseBootSettle();
+    }
   } catch (error) {
     resources.stop();
     channel?.stop();

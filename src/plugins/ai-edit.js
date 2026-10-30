@@ -44,6 +44,7 @@
 import { loadedEngine, mergeEngine } from "../sync/merge-engine.js";
 import Mutation from "../lib/mutation.js";
 import { startsAtImport } from "../core/is-edit-mode.js";
+import { deepActiveElement } from "../dom/active-element.js";
 import { holdAllSaves, releaseAllSaves } from "../core/save.js";
 import { STRIP_FROM_SAVE, SNAPSHOT_REMOVE_SELECTOR } from "../lib/region-policy.js";
 import { enableContentEditable } from "../core/admin-contenteditable.js";
@@ -237,7 +238,7 @@ function sessionMorph(s, content, { rewind = false } = {}) {
     }
     HyperMorph.morph(document.body, content, {
       morphStyle: 'outerHTML',
-      restoreFocus: true,
+      restoreFocus: document.activeElement?.localName !== 'clay-editor-ui',
       scripts,
       callbacks: {
         beforeNodeRemoved: node => !(node.nodeType === 1 && node.matches(STRIP_FROM_SAVE))
@@ -1034,7 +1035,7 @@ function isShortcut(event) {
 
 // A field the page owns keeps its own Ctrl+J, and so does the panel's own box.
 function pageOwnsFocus() {
-  const el = document.activeElement;
+  const el = deepActiveElement();
   if (!el || el === document.body) return false;
   if (panel && panel.contains(el)) return !panel.hidden;
   return el.matches('input,textarea,select');
@@ -1048,7 +1049,7 @@ const PAGE_FIELD = 'input,textarea,select,[contenteditable=""],[contenteditable=
 function escapeIsMine(event) {
   if (event.defaultPrevented) return false;
   if (document.querySelector(MODAL_SELECTOR)) return false;
-  const el = document.activeElement;
+  const el = deepActiveElement();
   if (!el || el === document.body) return true;
   if (panel.contains(el) || bar.contains(el)) return true;
   if (el.isContentEditable === true) return false;

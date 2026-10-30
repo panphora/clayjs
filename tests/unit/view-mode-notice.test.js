@@ -70,7 +70,8 @@ function withFakeLocation(run) {
     .finally(() => Object.defineProperty(window, "location", { value: real, configurable: true }));
 }
 
-const notice = () => document.querySelector(".clay-view-notice");
+const noteRoots = () => [...document.querySelectorAll('clay-editor-ui[data-clay-ui="mode-note"]')].map((host) => host.shadowRoot);
+const notice = () => noteRoots().map((root) => root.querySelector(".clay-view-notice")).find(Boolean) ?? null;
 const type = (el) => el.dispatchEvent(new Event("input", { bubbles: true }));
 const key = (target, k, extra = {}) => {
   const event = new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true, ...extra });
@@ -103,6 +104,7 @@ test("typing in a persist textarea in view raises the notice", async () => {
 
   type(document.getElementById("t"));
 
+  await tick();
   expect(notice()).not.toBeNull();
   expect(notice().textContent).toContain("In view mode, so edits won't be saved.");
   expect(notice().querySelector("button").textContent).toBe("Switch to edit");
@@ -120,7 +122,8 @@ test("a second edit does not add a second notice", async () => {
   type(field);
   type(field);
 
-  expect(document.querySelectorAll(".clay-view-notice").length).toBe(1);
+  await tick();
+  expect(noteRoots().flatMap((root) => [...root.querySelectorAll(".clay-view-notice")]).length).toBe(1);
   expect(warn).toHaveBeenCalledTimes(1);
 });
 
@@ -135,6 +138,7 @@ test("a live contenteditable in saved content raises it", async () => {
   Object.defineProperty(el, "isContentEditable", { value: true });
   type(el);
 
+  await tick();
   expect(notice()).not.toBeNull();
 });
 
@@ -146,6 +150,7 @@ test("a search box without persist never raises it", async () => {
 
   type(document.getElementById("q"));
 
+  await tick();
   expect(notice()).toBeNull();
 });
 
@@ -157,6 +162,7 @@ test("a persist field inside editor-ui never raises it", async () => {
 
   type(document.getElementById("t"));
 
+  await tick();
   expect(notice()).toBeNull();
 });
 
@@ -168,6 +174,7 @@ test("a persist field inside no-save never raises it", async () => {
 
   type(document.getElementById("t"));
 
+  await tick();
   expect(notice()).toBeNull();
 });
 
@@ -179,6 +186,7 @@ test("a visitor who cannot edit never sees it", async () => {
 
   type(document.getElementById("t"));
 
+  await tick();
   expect(notice()).toBeNull();
 });
 
@@ -190,6 +198,7 @@ test("edit mode never shows it", async () => {
 
   type(document.getElementById("t"));
 
+  await tick();
   expect(notice()).toBeNull();
 });
 
@@ -201,6 +210,7 @@ test("a save token alone counts as able to edit", async () => {
 
   type(document.getElementById("t"));
 
+  await tick();
   expect(notice()).not.toBeNull();
 });
 
@@ -213,6 +223,7 @@ test("typing at an inert contenteditable raises it", async () => {
   inertCard();
   key(document.body, "a");
 
+  await tick();
   expect(notice()).not.toBeNull();
 });
 
@@ -226,6 +237,7 @@ test("a keystroke the page already handled does not raise it", async () => {
   inertCard();
   key(document.body, "j");
 
+  await tick();
   expect(notice()).toBeNull();
 });
 
@@ -240,6 +252,7 @@ test("space and shortcut chords do not raise it", async () => {
   key(document.body, "a", { metaKey: true });
   key(document.body, "a", { ctrlKey: true });
 
+  await tick();
   expect(notice()).toBeNull();
 });
 
@@ -253,6 +266,7 @@ test("typing at a viewmode:readonly field raises it", async () => {
   if (!el.hasAttribute("viewmode:readonly")) el.setAttribute("viewmode:readonly", "");
   key(el, "a");
 
+  await tick();
   expect(notice()).not.toBeNull();
 });
 
@@ -266,6 +280,7 @@ test("pressing on a viewmode:disabled field raises it", async () => {
   if (!el.hasAttribute("viewmode:disabled")) el.setAttribute("viewmode:disabled", "");
   el.dispatchEvent(new Event("pointerdown", { bubbles: true }));
 
+  await tick();
   expect(notice()).not.toBeNull();
 });
 
@@ -278,6 +293,7 @@ test("Switch to edit asks for edit", async () => {
     await tick();
 
     type(document.getElementById("t"));
+    await tick();
     expect(notice()).not.toBeNull();
 
     notice().querySelector("button").click();
@@ -295,10 +311,12 @@ test("the notice never appears in clay.getHTML()", async () => {
   await tick();
 
   type(document.getElementById("t"));
+  await tick();
   expect(notice()).not.toBeNull();
 
   const { getPageContents } = await import("../../src/core/snapshot.js");
   const html = getPageContents();
 
   expect(html).not.toContain("clay-view-notice");
+  expect(html).not.toContain("clay-editor-ui");
 });

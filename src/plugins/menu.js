@@ -9,17 +9,13 @@ import MENU_CSS, { MENU_SURFACE } from "./menu/style.js";
 import { attachPlacement } from "./menu/placement.js";
 import { attachActions } from "./menu/actions.js";
 import { attachPeople } from "./menu/people.js";
-import { followLook, lookAt } from "../ui/page-colour.js";
-import { introWanted, countIntroOpen, dismissIntro, keys, isHideShortcut } from "./menu/preferences.js";
+import { attachVariants } from "./menu/variants.js";
+import { followLook } from "../ui/page-colour.js";
+import { mountEditorUI } from "../ui/editor-ui.js";
 
 const SEO_ITEM = true;
 const NOTE_MS = 6000;
 const INTRO_GAP = 12;
-const RECALL_MS = 8000;
-const INFO =
-  '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true" focusable="false"><circle cx="8" cy="8" r="6.4"/><path d="M8 7.2v4M8 4.6v.6"/></svg>';
-const CROSS =
-  '<svg viewBox="0 0 256 256" fill="currentColor" aria-hidden="true" focusable="false"><path d="M205.66 194.34a8 8 0 0 1-11.32 11.32L128 139.31l-66.34 66.35a8 8 0 0 1-11.32-11.32L116.69 128 50.34 61.66a8 8 0 0 1 11.32-11.32L128 116.69l66.34-66.35a8 8 0 0 1 11.32 11.32L139.31 128Z"/></svg>';
 const GRIP =
   '<svg viewBox="0 0 6 12" aria-hidden="true" focusable="false"><rect width="2" height="2"/><rect x="4" width="2" height="2"/>' +
   '<rect y="5" width="2" height="2"/><rect x="4" y="5" width="2" height="2"/><rect y="10" width="2" height="2"/><rect x="4" y="10" width="2" height="2"/></svg>';
@@ -29,9 +25,9 @@ const GRIP =
 // order it was added.
 const SECTIONS = [
   ["clay.undo", "clay.cms", "clay.ai", "clay.code"],
-  ["seo", "clay.share", "clay.people"],
+  ["seo", "clay.variants.keep", "clay.share", "clay.people"],
   ["clay.duplicate", "clay.download", "clay.export", "clay.reveal"],
-  ["clay.versions", "clay.hide"],
+  ["clay.versions"],
   null,
   ["upgrade"],
 ];
@@ -41,25 +37,15 @@ const SLOTTED = new Set(SECTIONS.flat().filter(Boolean));
 const currentMode = () =>
   window.clay && typeof window.clay.mode === "string" ? window.clay.mode : startMode;
 
-function stylesOnce() {
-  if (document.getElementById("clay-menu-style")) return;
-  const style = document.createElement("style");
-  style.id = "clay-menu-style";
-  style.setAttribute("clay", "editor-ui");
-  style.textContent = MENU_CSS;
-  document.head.append(style);
-}
-
 function mount() {
-  if (document.querySelector(".clay-menu-dock")) return;
-  stylesOnce();
+  if (document.querySelector('clay-editor-ui[data-clay-ui="menu"]')) return;
 
   const root = document.createElement("div");
   root.className = "clay-menu-dock";
   root.setAttribute("clay", "editor-ui");
   root.dataset.corner = "top-right";
   root.innerHTML =
-    `<div class="clay-menu" clay="editor-ui" clay-mode-toggle>` +
+    `<div class="clay-menu" clay="editor-ui">` +
     `<button type="button" class="clay-menu-grip" aria-label="Move the menu. Drag it, or use the arrow keys to move it to another corner.">${GRIP}</button>` +
     `<button type="button" class="clay-menu-edit" role="switch" aria-checked="false">` +
     `<span class="clay-menu-track" aria-hidden="true"><span class="clay-menu-thumb"></span></span>` +
@@ -78,6 +64,8 @@ function mount() {
   const noteEl = root.querySelector(".clay-menu-note");
   const items = new Map();
 
+  // Focus inside the shadow root: document.activeElement only ever names the host.
+  const focusedEl = () => root.getRootNode().activeElement || null;
   const isOpen = () => !list.hidden;
 
   function setExpanded(open) {
@@ -93,15 +81,9 @@ function mount() {
     all[(index + all.length) % all.length].focus();
   }
 
-  let showIntro = false;
-
   function close() {
     if (!isOpen()) return;
     setExpanded(false);
-    if (showIntro) {
-      showIntro = false;
-      list.querySelector(".clay-menu-notice")?.remove();
-    }
   }
 
   let actions = null;
@@ -111,27 +93,8 @@ function mount() {
     if (isOpen()) return;
     people?.close({ restore: false });
     actions?.refresh();
-    showIntro = introWanted();
-    countIntroOpen();
     render();
     setExpanded(true);
-  }
-
-  function introNode() {
-    const notice = document.createElement("div");
-    notice.className = "clay-menu-notice";
-    notice.setAttribute("role", "note");
-    notice.innerHTML =
-      `${INFO}<p>Only editors see this menu.<br>Visitors never do.</p>` +
-      `<button type="button" aria-label="Dismiss">${CROSS}</button>`;
-    notice.querySelector("button").addEventListener("click", (event) => {
-      event.stopPropagation();
-      dismissIntro();
-      showIntro = false;
-      notice.remove();
-      focusItem(0);
-    });
-    return notice;
   }
 
   function itemButton(item) {
@@ -192,9 +155,9 @@ function mount() {
   }
 
   function render() {
-    const focused = list.contains(document.activeElement) ? document.activeElement.dataset.menuId : null;
+    const now = focusedEl();
+    const focused = now && list.contains(now) ? now.dataset.menuId : null;
     list.textContent = "";
-    if (showIntro) list.append(introNode());
     sections().forEach((group, index) => {
       if (index) {
         const sep = document.createElement("div");
@@ -258,71 +221,10 @@ function mount() {
 
   let noteTimer = 0;
   let busy = false;
-  let userHidden = false;
-  let recall = null;
-  let recallTimer = 0;
 
   const applyHidden = () => {
-    root.hidden = userHidden || (!canEdit && currentMode() !== "edit");
+    root.hidden = !canEdit && currentMode() !== "edit";
   };
-
-  function dropRecall() {
-    clearTimeout(recallTimer);
-    recall?.remove();
-    recall = null;
-  }
-
-  function hide() {
-    close();
-    people?.close({ restore: false });
-    userHidden = true;
-    applyHidden();
-    dropRecall();
-    const touch = typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches;
-    recall = document.createElement("div");
-    recall.className = "clay-menu-recall";
-    recall.setAttribute("clay", "editor-ui");
-    recall.setAttribute("role", "status");
-    recall.dataset.corner = root.dataset.corner;
-    const text = document.createElement("p");
-    if (touch) {
-      text.textContent = "Menu hidden until you reload";
-    } else {
-      const kbd = document.createElement("kbd");
-      kbd.textContent = keys("⌘⇧.", "Ctrl+Shift+.");
-      text.append("Menu hidden · Press ", kbd, " to bring it back");
-    }
-    const show = document.createElement("button");
-    show.type = "button";
-    show.className = "clay-menu-btn clay-menu-btn-small";
-    show.textContent = "Show menu";
-    show.addEventListener("click", unhide);
-    recall.append(text, show);
-    document.body.append(recall);
-    lookAt(recall, recall.getBoundingClientRect(), MENU_SURFACE);
-    const shown = recall;
-    recallTimer = setTimeout(() => {
-      shown.setAttribute("data-fading", "");
-      recallTimer = setTimeout(() => {
-        if (recall === shown) dropRecall();
-      }, 450);
-    }, RECALL_MS);
-  }
-
-  function unhide() {
-    userHidden = false;
-    dropRecall();
-    applyHidden();
-    if (!root.hidden) goo.focus();
-  }
-
-  document.addEventListener("keydown", (event) => {
-    if (!isHideShortcut(event)) return;
-    if (!userHidden && root.hidden) return;
-    event.preventDefault();
-    if (userHidden) unhide();
-    else hide();
-  });
 
   function setChecked() {
     edit.setAttribute("aria-checked", currentMode() === "edit" ? "true" : "false");
@@ -338,7 +240,7 @@ function mount() {
     if (busy) return;
     const previous = edit.getAttribute("aria-checked");
     // Disabling the focused switch drops focus to the body; it goes back once the switch is done.
-    const hadFocus = document.activeElement === edit;
+    const hadFocus = focusedEl() === edit;
     const next = currentMode() === "edit" ? "view" : "edit";
     busy = true;
     edit.setAttribute("aria-busy", "true");
@@ -354,7 +256,7 @@ function mount() {
     busy = false;
     edit.removeAttribute("aria-busy");
     edit.disabled = false;
-    if (hadFocus && edit.isConnected && document.activeElement === document.body) edit.focus();
+    if (hadFocus && edit.isConnected && !focusedEl() && document.activeElement === document.body) edit.focus();
     if (result && result.ok === false) {
       edit.setAttribute("aria-checked", previous);
       const text = modeRefusalText(result);
@@ -398,7 +300,7 @@ function mount() {
     }
     const all = buttons();
     if (!all.length) return;
-    const at = all.indexOf(document.activeElement);
+    const at = all.indexOf(focusedEl());
     if (event.key === "ArrowDown") {
       event.preventDefault();
       focusItem(at < 0 ? 0 : at + 1);
@@ -458,9 +360,10 @@ function mount() {
       `:root { --clay-menu-width: ${Math.ceil(rect.width)}px; --clay-menu-height: ${Math.ceil(rect.height)}px; }`;
   }
 
-  document.body.append(root);
+  const ui = mountEditorUI({ name: "menu", content: root, css: [MENU_CSS], attributes: { "clay-mode-toggle": "" } });
   attachPlacement({
     dock: root,
+    container: ui.shadow,
     grip,
     storage: window.clay.storage && window.clay.storage.local,
     onMove: replace,
@@ -476,12 +379,11 @@ function mount() {
   watchIntro();
   followLook(root, root.querySelector(".clay-menu"), MENU_SURFACE);
 
-  const openSeo = () => import("./menu/seo.js").then((m) => m.open());
+  const openSeo = () => import("./menu/seo.js").then((m) => m.open({ returnFocus: goo }));
 
   actions = attachActions({ addItem, note: showNote, currentMode });
   people = attachPeople({ root, capsule: root.querySelector(".clay-menu"), addItem, removeItem, closeMenu: close, note: showNote });
-
-  addItem({ id: "clay.hide", label: "Hide menu", keys: keys("⌘⇧.", "Ctrl+Shift+."), run: hide });
+  attachVariants({ root, capsule: root.querySelector(".clay-menu"), addItem, removeItem, note: showNote, currentMode });
 
   if (SEO_ITEM) {
     addItem({

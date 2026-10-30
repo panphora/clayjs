@@ -1,4 +1,5 @@
 import { announceBottomUi, bottomBarHeight } from "./bottom-ui.js";
+import { mountEditorUI } from "../../ui/editor-ui.js";
 const ASIDE = `<aside class="hcp" id="hcp" hidden aria-label="Download this app" data-hcp-state="tab" data-hcp-reason="open" sap-ignore clay="editor-ui">
   <section class="hcp-card" id="hcp-card" role="dialog" aria-modal="false" aria-labelledby="hcp-title">
     <button type="button" class="hcp-x" data-hcp="minimize" aria-label="Minimize"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="M5 12h14"/></svg></button>
@@ -21,13 +22,15 @@ const ASIDE = `<aside class="hcp" id="hcp" hidden aria-label="Download this app"
 </aside>`;
 
 export async function mountPrompt({ memory, appName, link }) {
-  if (!document.getElementById("hcp-style")) {
-    const { PROMPT_CSS } = await import("./prompt-style.js");
-    document.head.insertAdjacentHTML("beforeend", `<style clay="editor-ui" id="hcp-style">${PROMPT_CSS}</style>`);
+  const { PROMPT_CSS } = await import("./prompt-style.js");
+  const existing = document.querySelector('clay-editor-ui[data-clay-ui="download-prompt"]');
+  let root = existing?.shadowRoot.getElementById("hcp");
+  if (!root) {
+    const parsed = document.createElement("template");
+    parsed.innerHTML = ASIDE;
+    root = parsed.content.firstElementChild;
+    mountEditorUI({ name: "download-prompt", content: root, css: [PROMPT_CSS], attributes: { "sap-ignore": "" } });
   }
-  if (!document.getElementById("hcp")) document.body.insertAdjacentHTML("beforeend", ASIDE);
-
-  const root = document.getElementById("hcp");
   const ui = memory.get();
   if (!ui.prompt || typeof ui.prompt !== "object") ui.prompt = {};
   const mem = ui.prompt;
@@ -155,6 +158,8 @@ export async function mountPrompt({ memory, appName, link }) {
   addEventListener("scroll", lift, { passive: true });
   addEventListener("resize", lift);
   document.addEventListener("transitionend", lift, true);
+  // Transition events stop at a shadow root, so the prompt's own slides are heard here.
+  root.addEventListener("transitionend", lift);
 
   set(mem.shown || mem.dismissed ? "mini" : "tab");
   if (!mem.shown && (mem.uses || 0) >= USES_TO_SHOW) maybeShow("return");

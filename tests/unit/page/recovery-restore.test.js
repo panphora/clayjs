@@ -529,7 +529,8 @@ test("mode exit during a recovery await inserts nothing", async () => {
   review.update({ rows });
   expect(review.count).toBe(1);
   review.open();
-  for (const line of rows[0].text.split("\n")) expect(mount.textContent).toContain(line);
+  const panelText = mount.querySelector('clay-editor-ui[data-clay-ui="page-recovery"]').shadowRoot.textContent;
+  for (const line of rows[0].text.split("\n")) expect(panelText).toContain(line);
 
   // The mode leaves while the copy is still being decided.
   const slow = gate();

@@ -2,6 +2,7 @@ import { jest } from "@jest/globals";
 import * as Y from "../../src/vendor/yjs.vendor.js";
 import { seedValue } from "../../src/page/ybind/seed.js";
 import { docFromValue, enc } from "../../src/page/ybind/provider.js";
+import { $, hostOf } from "./helpers/editor-ui.js";
 
 // Scenario: "Use the first heading" chooses the same first root H1 the editor and the
 // checkpoint derive, an empty one becomes Untitled, and a title the person owns keeps
@@ -83,8 +84,8 @@ function setPage(blocks, { custom = null } = {}) {
   return { value, store };
 }
 
-const fieldOf = (key) => document.querySelector(`.clay-seo [data-key="${key}"]`);
-const buttonOf = (name) => document.querySelector(`.clay-seo-${name}`);
+const fieldOf = (key) => $(`.clay-seo [data-key="${key}"]`, "seo");
+const buttonOf = (name) => $(`.clay-seo-${name}`, "seo");
 const markerOf = () => document.querySelector('meta[name="clay-seo-title-mode"]');
 const titleText = () => document.querySelector("title")?.textContent ?? null;
 
@@ -108,7 +109,7 @@ async function openSheet() {
 }
 
 afterEach(() => {
-  document.querySelector(".clay-seo")?.remove();
+  hostOf("seo")?.remove();
   page.dispose();
   document.head.innerHTML = "";
   document.body.innerHTML = "";
@@ -126,7 +127,7 @@ test("Use the first heading takes the first root H1, not a nested one, and clear
 
   await openSheet();
   expect(document.title).toBe("My own title");
-  const link = document.querySelector(".clay-seo-derived");
+  const link = $(".clay-seo-derived", "seo");
   expect(link.hidden).toBe(false);
   link.click();
   await settle();
@@ -149,7 +150,7 @@ test("a Document with no root H1 derives Untitled", async () => {
   ], { custom: "My own title" });
 
   await openSheet();
-  const link = document.querySelector(".clay-seo-derived");
+  const link = $(".clay-seo-derived", "seo");
   expect(link.hidden).toBe(false);
   link.click();
   await settle();

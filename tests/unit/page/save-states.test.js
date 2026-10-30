@@ -1,4 +1,5 @@
 import { jest } from "@jest/globals";
+import { $ } from "../helpers/editor-ui.js";
 import { seedValue } from "../../../src/page/ybind/seed.js";
 import { blocksFromYValue } from "../../../src/page/ybind/decode.js";
 
@@ -223,7 +224,7 @@ test("a persistent toast with options shows the detail and two actions that neve
     });
     jest.advanceTimersByTime(10);
 
-    const el = document.querySelector("[data-clay-toast]");
+    const el = $("[data-clay-toast]", "toasts");
     expect(el.textContent).toContain(saveStates.BLOCKED_TEXT);
     expect(el.textContent).toContain("The page is too large to save");
 

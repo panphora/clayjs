@@ -86,10 +86,11 @@ export async function boot(base, params, readyResolve, manifest = null, suppleme
   const regionPolicy = await MODULES["lib/region-policy.js"]();
 
   const hasSap = Boolean(document.querySelector("[sap]"));
+  const hasVariants = document.querySelectorAll("head style[clay-variant]").length >= 2;
   // derive.js imports the sapjs core only when no sap.js script took the page over.
   const hasSapJs = Boolean(document.querySelector('script[src*="sap.js"]'));
   bootPhase.holdSettle = hasSap && isEditMode;
-  const plan = resolveModules(params, isEditMode, { isDraftMode, hasSap, canEdit, templateSource: templateSource() });
+  const plan = resolveModules(params, isEditMode, { isDraftMode, hasSap, hasVariants, canEdit, templateSource: templateSource() });
   // Where edits land, resolved once: a visitor draft saves into its draft slot, the
   // demo plugin into localStorage, and everything else to the host. setMode takes no
   // destination, and V4 has no draft-to-host transition.
@@ -126,13 +127,13 @@ export async function boot(base, params, readyResolve, manifest = null, suppleme
   // Nothing is fetched for it here: the decision and the controller behind it wait for the
   // first switch, so this costs a reader with a declaration no more than one attribute.
   if (document.documentElement.getAttribute("clay-mode-switch") === "live") {
-    const editing = resolveModules(params, true, { isDraftMode, hasSap, canEdit, templateSource: templateSource() });
+    const editing = resolveModules(params, true, { isDraftMode, hasSap, hasVariants, canEdit, templateSource: templateSource() });
     loaded["core/edit-mode.js"].noteLiveSwitch({
       edit: editing,
       // The plan a view boot would have resolved, not the edit plan this boot resolved: an
       // exit imports it and starts its reader, and an edit-only module belongs to the
       // session being left.
-      view: resolveModules(params, false, { isDraftMode, hasSap, canEdit, templateSource: templateSource() }),
+      view: resolveModules(params, false, { isDraftMode, hasSap, hasVariants, canEdit, templateSource: templateSource() }),
       loaded,
       modules: MODULES,
       // A live entry attaches the edit plugins after boot: clay.plugins names them from then on.
@@ -153,7 +154,7 @@ export async function boot(base, params, readyResolve, manifest = null, suppleme
   await loaded["core/edit-mode.js"].activateInitialMode();
   window.clay.plugins = Object.freeze([...plan.plugins, ...plan.late].map((path) => PLUGIN_NAMES[path]));
   // What an edit session here would load, so view-mode chrome can offer an edit-only feature.
-  const editPlan = isEditMode ? plan : resolveModules(params, true, { isDraftMode, hasSap, canEdit, templateSource: templateSource() });
+  const editPlan = isEditMode ? plan : resolveModules(params, true, { isDraftMode, hasSap, hasVariants, canEdit, templateSource: templateSource() });
   window.clay.editPlugins = Object.freeze([...editPlan.plugins, ...editPlan.late].map((path) => PLUGIN_NAMES[path]));
 
   for (const path of plan.plugins) {

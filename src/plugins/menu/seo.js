@@ -4,14 +4,15 @@
 // Apply: opening and cancelling change only the sheet.
 import { applyHead, FIELDS, readHead } from "./seo-head.js";
 import { lookAt } from "../../ui/page-colour.js";
-import { MENU_SURFACE } from "./style.js";
+import MENU_CSS, { MENU_SURFACE } from "./style.js";
+import { mountEditorUI } from "../../ui/editor-ui.js";
+import { deepActiveElement } from "../../dom/active-element.js";
 import { hostMeta } from "../../core/host-meta.js";
 import { documentTitle } from "../../page/document-title.js";
 import { registerUnsavedState } from "../../lib/unsaved-state.js";
 import { modeRefusalText } from "../../core/mode-refusal.js";
 import { dismissPersistent, toastPersistent } from "../../ui/toast-lazy.js";
 
-const STYLE_ID = "clay-seo-style";
 const REOPEN_KEY = "reopen-seo";
 const LABEL = "SEO and social sharing";
 const UNDO_LABEL = "SEO settings";
@@ -121,15 +122,6 @@ function element(tag, className, content) {
   if (className) el.className = className;
   if (content != null) el.textContent = content;
   return el;
-}
-
-function stylesOnce() {
-  if (document.getElementById(STYLE_ID)) return;
-  const style = document.createElement("style");
-  style.id = STYLE_ID;
-  style.setAttribute("clay", "editor-ui");
-  style.textContent = SHEET_CSS;
-  document.head.append(style);
 }
 
 const parseUrl = (value) => {
@@ -267,17 +259,17 @@ function offerUndo(before) {
   });
 }
 
-export function open() {
-  if (document.querySelector(".clay-seo")) return;
-  stylesOnce();
+export function open({ returnFocus } = {}) {
+  if (document.querySelector('clay-editor-ui[data-clay-ui="seo"]')) return;
 
   const opened = readHead(document).values;
-  const restoreTo = document.activeElement;
+  const restoreTo = returnFocus ?? deepActiveElement();
   const inputs = new Map();
   const errors = new Map();
   const conflicts = new Map();
   const chosen = new Set();
   let closed = false;
+  let ui = null;
   let uploadAvailable = false;
   let pendingTitleMode = "";
 
@@ -649,7 +641,7 @@ export function open() {
     document.removeEventListener("clay:modechange", followMode);
     if (heightObserver) heightObserver.disconnect();
     heightVars.remove();
-    root.remove();
+    ui?.remove();
     if (restoreTo && restoreTo.isConnected && typeof restoreTo.focus === "function") restoreTo.focus();
   }
 
@@ -762,7 +754,7 @@ export function open() {
 
   document.addEventListener("clay:modechange", followMode);
   lookAt(root, { x: 0, y: 0, width: innerWidth, height: Math.min(200, innerHeight) }, MENU_SURFACE);
-  document.body.prepend(root);
+  ui = mountEditorUI({ name: "seo", content: root, css: [MENU_CSS, SHEET_CSS], before: document.body.firstChild });
   writeHeight();
   if (typeof ResizeObserver === "function") {
     heightObserver = new ResizeObserver(writeHeight);

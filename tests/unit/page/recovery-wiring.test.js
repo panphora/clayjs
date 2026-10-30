@@ -9,6 +9,11 @@ import * as realRecoveryUi from "../../../src/page/recovery-ui.js";
 import { seedValue } from "../../../src/page/ybind/seed.js";
 import { renderFromTags } from "../../../src/page/save-projection.js";
 
+const recoveryRoots = () => [...document.querySelectorAll('clay-editor-ui[data-clay-ui="page-recovery"]')].map((host) => host.shadowRoot);
+const rq = (selector) => recoveryRoots().map((root) => root.querySelector(selector)).find(Boolean) ?? null;
+const rqa = (selector) => recoveryRoots().flatMap((root) => [...root.querySelectorAll(selector)]);
+const recoveryHosts = () => document.querySelectorAll('clay-editor-ui[data-clay-ui="page-recovery"]');
+
 /**
  * Step 6b: the review a page draws for work its journal may not replay, and the
  * composition shadow, reach the person through the page plugin's own boot. A session
@@ -204,7 +209,7 @@ afterEach(() => {
   document.body.innerHTML = "";
 });
 
-const reviewButton = () => document.querySelector(".page-recovery");
+const reviewButton = () => rq(".page-recovery");
 
 test("a capsule this page may not replay is shown as a review after boot", async () => {
   const capsule = foreignCapsule();
@@ -223,8 +228,8 @@ test("a capsule this page may not replay is shown as a review after boot", async
   expect(button.closest('[clay="editor-ui"]')).toBeTruthy();
 
   button.click();
-  expect(document.querySelector(".page-recovery-panel").hidden).toBe(false);
-  expect(document.querySelector(".page-recovery-panel").textContent).toContain("another page's words");
+  expect(rq(".page-recovery-panel").hidden).toBe(false);
+  expect(rq(".page-recovery-panel").textContent).toContain("another page's words");
   // Nothing of it was applied to the page.
   expect(page.view.state.doc.textContent).toContain("Hello");
   expect(page.view.state.doc.textContent).not.toContain("another page's words");
@@ -240,7 +245,7 @@ test("a journal with nothing to review draws no review", async () => {
   expect(requested).toEqual(["recovery-ui"]);
   expect(reviewButton()).toBeTruthy();
   expect(reviewButton().hidden).toBe(true);
-  expect(document.querySelector(".page-recovery-panel").hidden).toBe(true);
+  expect(rq(".page-recovery-panel").hidden).toBe(true);
 });
 
 test("view mode asks for no recovery module and draws no review", async () => {
@@ -250,7 +255,7 @@ test("view mode asks for no recovery module and draws no review", async () => {
 
   expect(requested).toEqual([]);
   expect(reviewButton()).toBe(null);
-  expect(document.getElementById("page-recovery-style")).toBe(null);
+  expect(recoveryHosts()).toHaveLength(0);
 });
 
 test("mode exit removes the review and its listeners", async () => {
@@ -267,7 +272,8 @@ test("mode exit removes the review and its listeners", async () => {
   await flushAsync();
 
   expect(reviewButton()).toBe(null);
-  expect(document.querySelector(".page-recovery-panel")).toBe(null);
+  expect(rq(".page-recovery-panel")).toBe(null);
+  expect(recoveryHosts()).toHaveLength(0);
 
   // The composition listeners went with it: a composition on the old surface stages
   // nothing.

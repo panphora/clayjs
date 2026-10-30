@@ -333,6 +333,17 @@ test("exclude=derive keeps the core off a page with a [sap] root", () => {
   expect(resolveModules(params({ exclude: "derive" }), true, { hasSap: true }).plugins).not.toContain("plugins/derive.js");
 });
 
+test("a page with two looks loads the menu, for an editor who can only view it too", () => {
+  expect(resolveModules(params(), false, { hasVariants: true, canEdit: true }).late).toContain("plugins/menu.js");
+  expect(resolveModules(params(), true, { hasVariants: true }).late).toContain("plugins/menu.js");
+  expect(resolveModules(params(), false, { hasVariants: true }).late).not.toContain("plugins/menu.js");
+  expect(resolveModules(params(), false, { hasVariants: true, canEdit: true, isDraftMode: true }).late).not.toContain("plugins/menu.js");
+});
+
+test("exclude=menu keeps the dock off a page with two looks", () => {
+  expect(resolveModules(params({ exclude: "menu" }), true, { hasVariants: true, canEdit: true }).late).not.toContain("plugins/menu.js");
+});
+
 test("draft mode keeps the core: a visitor's tab paints the totals of its own draft", () => {
   expect(resolveModules(params(), false, { isDraftMode: true, hasSap: true }).plugins).toContain("plugins/derive.js");
 });

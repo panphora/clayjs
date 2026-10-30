@@ -1,4 +1,5 @@
 import { jest } from "@jest/globals";
+import { hostOf, $, $$, active, rootOf, sheetText } from "./helpers/editor-ui.js";
 
 // Scenario: the rebuilt menu dock draws fixed slots, separators, kbd hints, disabled
 // items, pairs and a version line, keeps focus across a re-render, and still puts
@@ -54,13 +55,13 @@ async function boot({ cookie = true, draft = false, edit = false, body = BODY, i
   await flush();
 }
 
-const dockOf = () => document.querySelector(".clay-menu-dock");
-const menuRoot = () => document.querySelector(".clay-menu");
-const listOf = () => document.querySelector(".clay-menu-list");
-const gooOf = () => document.querySelector(".clay-menu-goo");
-const itemButtons = () => [...document.querySelectorAll('[role="menuitem"]')];
+const dockOf = () => $(".clay-menu-dock", "menu");
+const menuRoot = () => $(".clay-menu", "menu");
+const listOf = () => $(".clay-menu-list", "menu");
+const gooOf = () => $(".clay-menu-goo", "menu");
+const itemButtons = () => $$('[role="menuitem"]', "menu");
 const labelsOf = () => itemButtons().map((button) => button.textContent);
-const buttonOf = (id) => document.querySelector(`[role="menuitem"][data-menu-id="${id}"]`);
+const buttonOf = (id) => $(`[role="menuitem"][data-menu-id="${id}"]`, "menu");
 
 function click(el) {
   el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
@@ -90,12 +91,11 @@ test("the dock holds a capsule with fixed children, the list, the note and its s
   ]);
 
   expect(dock.contains(listOf())).toBe(true);
-  expect(dock.contains(document.querySelector(".clay-menu-note"))).toBe(true);
+  expect(dock.contains($(".clay-menu-note", "menu"))).toBe(true);
 
-  const style = document.getElementById("clay-menu-style");
-  expect(style).not.toBeNull();
-  expect(style.parentElement).toBe(document.head);
-  expect(style.getAttribute("clay")).toBe("editor-ui");
+  expect(hostOf("menu")).not.toBeNull();
+  expect(hostOf("menu").getAttribute("clay")).toBe("editor-ui");
+  expect($$("style", "menu")[0]?.parentNode).toBe(rootOf("menu"));
 });
 
 test("fixed slots beat registration order, with one separator between each group", async () => {
@@ -104,7 +104,7 @@ test("fixed slots beat registration order, with one separator between each group
 
   menu.addItem({ id: "upgrade", label: "Upgrade to version 2" });
   menu.addItem({ id: "thirdparty", label: "Third" });
-  menu.addItem({ id: "clay.hide", label: "Hide menu" });
+  menu.addItem({ id: "clay.versions", label: "Version history…" });
   menu.addItem({ id: "clay.download", label: "Download a copy" });
   menu.addItem({ id: "clay.cms", label: "Open the CMS (Edit content)" });
 
@@ -112,7 +112,7 @@ test("fixed slots beat registration order, with one separator between each group
     "Open the CMS (Edit content)",
     "SEO settings…",
     "Download a copy",
-    "Hide menu",
+    "Version history…",
     "Third",
     "Upgrade to version 2",
   ]);
@@ -164,16 +164,14 @@ test("a disabled item is skipped by the keyboard and by clicks", async () => {
   expect(ran).not.toHaveBeenCalled();
   expect(listOf().hidden).toBe(false);
 
-  expect(document.activeElement).toBe(buttonOf("seo"));
+  expect(active()).toBe(buttonOf("seo"));
   press(buttonOf("seo"), "ArrowDown");
-  expect(document.activeElement).toBe(buttonOf("clay.download"));
+  expect(active()).toBe(buttonOf("clay.download"));
   press(buttonOf("clay.download"), "ArrowDown");
-  expect(document.activeElement).toBe(buttonOf("clay.hide"));
-  press(buttonOf("clay.hide"), "ArrowDown");
-  expect(document.activeElement).toBe(buttonOf("after"));
+  expect(active()).toBe(buttonOf("after"));
 
   press(buttonOf("after"), "ArrowUp");
-  expect(document.activeElement).toBe(buttonOf("clay.hide"));
+  expect(active()).toBe(buttonOf("clay.download"));
 });
 
 test("a pair renders two buttons and only the enabled half runs", async () => {
@@ -188,7 +186,7 @@ test("a pair renders two buttons and only the enabled half runs", async () => {
     ],
   });
 
-  const pair = document.querySelector(".clay-menu-pair");
+  const pair = $(".clay-menu-pair", "menu");
   expect(pair).not.toBeNull();
   const inside = [...pair.querySelectorAll('[role="menuitem"]')];
   expect(inside).toHaveLength(2);
@@ -203,7 +201,7 @@ test("a text item renders as a version line, not a menu item", async () => {
 
   window.clay.menu.addItem({ id: "upgrade", label: "This doc is at latest version (1.4.0)", text: true });
 
-  const line = document.querySelector("p.clay-menu-version");
+  const line = $("p.clay-menu-version", "menu");
   expect(line).not.toBeNull();
   expect(line.textContent).toBe("This doc is at latest version (1.4.0)");
   expect(buttonOf("upgrade")).toBeNull();
@@ -218,13 +216,13 @@ test("focus survives a re-render", async () => {
 
   const seo = buttonOf("seo");
   seo.focus();
-  expect(document.activeElement).toBe(seo);
+  expect(active()).toBe(seo);
 
   window.clay.menu.addItem({ id: "upgrade", label: "Upgrade" });
   await flush();
 
-  expect(document.activeElement).toBe(buttonOf("seo"));
-  expect(document.activeElement.dataset.menuId).toBe("seo");
+  expect(active()).toBe(buttonOf("seo"));
+  expect(active().dataset.menuId).toBe("seo");
 });
 
 test("removeItem drops the item and its now-empty section's separator", async () => {
@@ -232,13 +230,13 @@ test("removeItem drops the item and its now-empty section's separator", async ()
 
   window.clay.menu.addItem({ id: "thirdparty", label: "Third" });
   expect(buttonOf("thirdparty")).not.toBeNull();
-  expect(document.querySelectorAll(".clay-menu-sep")).toHaveLength(3);
+  expect($$(".clay-menu-sep", "menu")).toHaveLength(2);
 
   window.clay.menu.removeItem("thirdparty");
 
   expect(buttonOf("thirdparty")).toBeNull();
-  expect(document.querySelectorAll(".clay-menu-sep")).toHaveLength(2);
-  expect(labelsOf()).toEqual(["SEO settings…", "Download a copy", "Hide menuCtrl+Shift+."]);
+  expect($$(".clay-menu-sep", "menu")).toHaveLength(1);
+  expect(labelsOf()).toEqual(["SEO settings…", "Download a copy"]);
 });
 
 test("a badge puts a hidden dot on claygoo and marks the upgrade item", async () => {
@@ -246,7 +244,7 @@ test("a badge puts a hidden dot on claygoo and marks the upgrade item", async ()
 
   window.clay.menu.addItem({ id: "upgrade", label: "Upgrade", badge: true });
 
-  const dot = document.querySelector(".clay-menu-goo .clay-menu-dot");
+  const dot = $(".clay-menu-goo .clay-menu-dot", "menu");
   expect(dot).not.toBeNull();
   expect(dot.getAttribute("aria-hidden")).toBe("true");
   expect(buttonOf("upgrade").querySelector("span.clay-menu-upgrade")).not.toBeNull();
@@ -254,6 +252,7 @@ test("a badge puts a hidden dot on claygoo and marks the upgrade item", async ()
 
 test("nothing from the dock reaches the saved file", async () => {
   await boot({ edit: true });
+  expect(hostOf("menu")).not.toBeNull();
   const menu = window.clay.menu;
   menu.addItem({ id: "clay.cms", label: "Open the CMS (Edit content)" });
   menu.addItem({ id: "upgrade", label: "Upgrade to version 2", badge: true });
@@ -265,6 +264,8 @@ test("nothing from the dock reaches the saved file", async () => {
 
   expect(typeof html).toBe("string");
   expect(html).not.toContain("clay-menu-dock");
+  expect(html).not.toContain("clay-editor-ui");
+  expect(html).not.toContain("data-clay-ui");
   expect(html).not.toContain("clay-menu-list");
   expect(html).not.toContain("clay-menu-style");
   expect(html).not.toContain("Open the CMS");
@@ -273,7 +274,7 @@ test("nothing from the dock reaches the saved file", async () => {
 test("the stylesheet carries the phone and scheme rules", async () => {
   await boot();
 
-  const css = document.getElementById("clay-menu-style").textContent;
+  const css = sheetText("menu");
 
   expect(css).toContain("@media (pointer: coarse), (max-width: 680px)");
   expect(css).toContain("font-size: 16px");

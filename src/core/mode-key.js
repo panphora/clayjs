@@ -84,13 +84,19 @@ const NOTE_CSS = `.clay-mode-note {
   }
 }`;
 
-function styles() {
-  if (document.getElementById("clay-mode-note-style")) return;
-  const style = document.createElement("style");
-  style.id = "clay-mode-note-style";
-  style.setAttribute("clay", "editor-ui");
-  style.textContent = NOTE_CSS;
-  document.head.append(style);
+// A note mounts in its own shadow root, so the page's CSS cannot restyle it. The helper is
+// imported only when a note shows: this module loads on every page, a note rarely.
+const closedNotes = new WeakSet();
+
+function mountNote(content) {
+  import("../ui/editor-ui.js").then(({ mountEditorUI }) => {
+    if (!closedNotes.has(content)) mountEditorUI({ name: "mode-note", content, css: [NOTE_CSS] });
+  });
+}
+
+function closeNote(content) {
+  closedNotes.add(content);
+  content.getRootNode().host?.remove();
 }
 
 function switchTo(next) {
@@ -168,8 +174,7 @@ function onViewPointer(e) {
 function showViewNotice() {
   if (viewNotice) return;
   console.warn('clayjs: this tab is in view mode, so edits made here are not saved. clay.setMode("edit") switches; a page that must edit as soon as it opens declares <html opens-in="edit">.');
-  styles();
-  document.querySelector(".clay-mode-note")?.remove();
+  document.querySelector('clay-editor-ui[data-clay-ui="mode-note"]')?.remove();
   viewNotice = document.createElement("div");
   viewNotice.setAttribute("clay", "editor-ui");
   viewNotice.setAttribute("role", "alert");
@@ -177,28 +182,27 @@ function showViewNotice() {
   viewNotice.innerHTML = '<span></span><button type="button" class="clay-view-notice__edit">Switch to edit</button>';
   viewNotice.querySelector("span").textContent = VIEW_NOTICE;
   viewNotice.querySelector("button").addEventListener("click", () => switchTo("edit"));
-  document.body.append(viewNotice);
+  mountNote(viewNotice);
 }
 
 function onModeChange() {
   if (mode === "view" || !viewNotice) return;
-  viewNotice.remove();
+  closeNote(viewNotice);
   viewNotice = null;
 }
 
 function showNote(message) {
-  styles();
   const note = document.createElement("div");
   note.setAttribute("clay", "editor-ui");
   note.setAttribute("role", "status");
   note.className = "clay-mode-note";
   note.innerHTML = `<span>This page opens in view mode. Press <kbd>${chord}</kbd> to edit.</span><button type="button" aria-label="Dismiss">×</button>`;
   if (message) note.querySelector("span").textContent = message;
-  const close = () => note.remove();
+  const close = () => closeNote(note);
   note.querySelector("button").addEventListener("click", close);
   addEventListener("keydown", (e) => { if (e.key === "Escape") close(); }, { once: true });
   setTimeout(close, 12000);
-  document.body.append(note);
+  mountNote(note);
 }
 
 if (!isDraftMode) {

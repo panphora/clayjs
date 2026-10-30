@@ -2,6 +2,7 @@
  * @jest-environment jsdom
  */
 import { jest } from "@jest/globals";
+import { $, hostOf } from "./helpers/editor-ui.js";
 
 /**
  * The owner chip as a mode lease.
@@ -44,7 +45,7 @@ async function load({ url = "/notes.html", owner = true, slot = "owner-lease-1",
   return mod;
 }
 
-const chip = () => document.getElementById("clay-owner");
+const chip = () => $("#clay-owner", "owner");
 const room = () => document.getElementById("clay-owner-vars");
 
 const until = async (predicate) => {
@@ -60,21 +61,21 @@ afterEach(clearCookies);
 test("a managed session mounts the chip at the commit and takes it down at the exit", async () => {
   const mod = await load({ url: "/notes.html?editmode=false" });
   // A view has no chip of an edit session that has not started.
-  expect(chip()).toBeNull();
+  expect(hostOf("owner")).toBeNull();
 
   const mode = await import("../../src/core/is-edit-mode.js");
   const lease = mod.draftsOwnerParticipant().prepare({ generation: 1, isCurrent: () => true });
   // Preparing builds the lease; nothing is on the page yet.
-  expect(chip()).toBeNull();
+  expect(hostOf("owner")).toBeNull();
 
   mode.commitModeFacts({ mode: "edit", isEditMode: true, generation: 1 });
   lease.enable();
   expect(await until(() => chip())).toBe(true);
-  expect(document.querySelectorAll(".clay-owner")).toHaveLength(1);
+  expect(document.querySelectorAll('clay-editor-ui[data-clay-ui="owner"]')).toHaveLength(1);
   expect(room()).not.toBeNull();
 
   lease.dispose();
-  expect(chip()).toBeNull();
+  expect(hostOf("owner")).toBeNull();
   expect(room()).toBeNull();
 });
 
@@ -89,10 +90,10 @@ test("adoption over the chip the import armed adds no second chip", async () => 
   await new Promise((resolve) => setTimeout(resolve, 20));
 
   // The chip the boot armed, not a second one beside or in place of it.
-  expect(document.querySelectorAll(".clay-owner")).toHaveLength(1);
+  expect(document.querySelectorAll('clay-editor-ui[data-clay-ui="owner"]')).toHaveLength(1);
   expect(chip()).toBe(armed);
 
   lease.dispose();
-  expect(chip()).toBeNull();
+  expect(hostOf("owner")).toBeNull();
   expect(room()).toBeNull();
 });

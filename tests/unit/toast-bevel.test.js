@@ -2,12 +2,13 @@ import { jest } from "@jest/globals";
 import toast, { toastPersistent } from "../../src/ui/toast.js";
 import { TOKENS, FONT_SANS, GLYPHS } from "../../src/ui/bevel.js";
 import { capture, last, expectHostileProof, expectCallsResolved } from "./helpers/injected-ui.js";
+import { toastStack, $$ } from "./helpers/editor-ui.js";
 
-const stack = () => document.querySelector("[data-clay-toasts]");
-const toasts = () => [...document.querySelectorAll("[data-clay-toast]")];
+const stack = () => toastStack();
+const toasts = () => $$("[data-clay-toast]", "toasts");
 // Behaviour controls find a toast by either marker, so they pass on the class-based
 // toasts this replaces and keep passing after: timing and dismissal must not move.
-const anyToasts = () => [...document.querySelectorAll("[data-clay-toast], .toast")];
+const anyToasts = () => $$("[data-clay-toast], .toast", "toasts");
 const parsedGlyph = (markup) => {
   const template = document.createElement("template");
   template.innerHTML = markup;
@@ -31,7 +32,7 @@ test("hostile-proof: the stack and every toast part are runtime-only, class-free
     toast("Saved");
     toastPersistent("Couldn't save", "error");
   });
-  expect(expectHostileProof(stack())).toBeGreaterThanOrEqual(8);
+  expect(expectHostileProof(stack(), { rootClay: "no-save no-watch no-snapshot editor-ui" })).toBeGreaterThanOrEqual(8);
   expectCallsResolved(calls, stack());
   for (const el of [stack(), ...toasts()]) expect(el.style.item(0)).toBe("all");
   expect(document.head.querySelector("style")).toBeNull();

@@ -1,5 +1,6 @@
 import { jest } from "@jest/globals";
 import { docKey } from "../../src/lib/doc-storage.js";
+import { $, $$ } from "./helpers/editor-ui.js";
 
 // Scenario: the CMS opens from the menu. On a page that loads the menu, the menu owns
 // the launcher, so the item appears only when the page actually has cms rules, and in
@@ -58,9 +59,9 @@ async function boot({ cookie = true, edit = false, plugins = "menu,cms", rules =
   await flush();
 }
 
-const listOf = () => document.querySelector(".clay-menu-list");
-const noteOf = () => document.querySelector(".clay-menu-note");
-const buttonOf = (id) => document.querySelector(`[role="menuitem"][data-menu-id="${id}"]`);
+const listOf = () => $(".clay-menu-list", "menu");
+const noteOf = () => $(".clay-menu-note", "menu");
+const buttonOf = (id) => $(`[role="menuitem"][data-menu-id="${id}"]`, "menu");
 
 function click(el) {
   el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
@@ -80,7 +81,7 @@ test("cms rules add the item first, ahead of SEO settings", async () => {
   expect(item).not.toBeNull();
   expect(item.textContent).toContain("Open the CMS (Edit content)");
 
-  const labels = [...document.querySelectorAll('[role="menuitem"]')].map((el) => el.textContent);
+  const labels = $$('[role="menuitem"]', "menu").map((el) => el.textContent);
   expect(labels[0]).toContain("Open the CMS (Edit content)");
   expect(labels.findIndex((label) => label.includes("SEO settings"))).toBeGreaterThan(0);
 });

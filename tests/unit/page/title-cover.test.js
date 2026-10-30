@@ -58,7 +58,8 @@ const open = (spec, { upload = recordingUpload().upload, gate = true } = {}) => 
 const record = (view, id) => blockMap(view.state.doc)[id];
 const header = (view) => view.dom.querySelector("header[data-page-heading]");
 const coverImg = (view) => header(view)?.querySelector("img[data-page-cover]");
-const panel = () => document.querySelector(".page-cover-panel");
+const panelHost = () => document.querySelector('clay-editor-ui[data-clay-ui="page-cover"]');
+const panel = () => panelHost()?.shadowRoot.querySelector(".page-cover-panel") ?? null;
 const acts = () => [...(panel()?.querySelectorAll("[data-act]") ?? [])].map((b) => b.dataset.act);
 const press = (act) => panel().querySelector(`[data-act="${act}"]`).click();
 const chooser = () => document.querySelector("input.page-cover-input");
@@ -104,7 +105,7 @@ test("a chosen photograph is uploaded through the media transport and written to
   // The picture is beside the title, never in it.
   expect(header(view).querySelector("h1").textContent).toBe("Notes");
   expect(header(view).firstChild).toBe(img);
-  expect(panel()).toBeNull();
+  expect(panelHost()).toBeNull();
 
   // One commit, so one undo takes the cover and nothing else.
   history.undoNoScroll(view.state, view.dispatch);
@@ -147,7 +148,7 @@ test("a host that stores no files offers the embed choice, and only that choice 
   expect(record(view, "h").pageCoverSrc).toBe(await dataUrlOf(image));
   expect(asked).toHaveLength(1);
   expect(coverImg(view).getAttribute("src")).toBe(record(view, "h").pageCoverSrc);
-  expect(panel()).toBeNull();
+  expect(panelHost()).toBeNull();
 });
 
 test("a forbidden upload embeds nothing: it is a refusal, not an offer", async () => {
@@ -180,7 +181,7 @@ test("cancel stops the upload, and an answer that arrives afterwards lands nowhe
   expect(await waitFor(() => panel()?.dataset.state === "uploading")).toBe(true);
 
   press("cancel");
-  expect(panel()).toBeNull();
+  expect(panelHost()).toBeNull();
   expect(aborted).toBe(true);
   held.release();
   await settle();
@@ -236,7 +237,7 @@ test("the reposition previews without writing, and Apply is one undo step", asyn
 
   // Escape puts the picture back where the record says it is.
   key("Escape");
-  expect(panel()).toBeNull();
+  expect(panelHost()).toBeNull();
   expect(coverImg(view).getAttribute("style")).toBe("object-position:50% 50%");
   expect(view.state.doc).toBe(before);
 
@@ -332,7 +333,7 @@ test("an answer that arrives after the edit left is inert", async () => {
   expect(panel()).not.toBeNull();
 
   feature.dispose();
-  expect(panel()).toBeNull();
+  expect(panelHost()).toBeNull();
   expect(document.querySelector("input.page-cover-input")).toBeNull();
   held.release();
   await settle();

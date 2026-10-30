@@ -4,9 +4,9 @@
       "posts": 0,
       "eventSources": 1,
       "listeners": {
-        "window": 11,
-        "document": 73,
-        "Element": 37
+        "window": 14,
+        "document": 75,
+        "Element": 36
       },
       "observers": 5,
       "intervals": 0,
@@ -51,6 +51,7 @@
         "toggleEditMode",
         "trash",
         "upload",
+        "variants",
         "writeData"
       ],
       "plugins": [
@@ -99,9 +100,9 @@
       "posts": 0,
       "eventSources": 1,
       "listeners": {
-        "window": 6,
-        "document": 23,
-        "Element": 12
+        "window": 9,
+        "document": 25,
+        "Element": 11
       },
       "observers": 4,
       "intervals": 0,
@@ -133,6 +134,7 @@
         "theme",
         "toggleEditMode",
         "trash",
+        "variants",
         "writeData"
       ],
       "plugins": [
@@ -159,8 +161,8 @@
       "posts": 0,
       "eventSources": 1,
       "listeners": {
-        "window": 14,
-        "document": 107,
+        "window": 17,
+        "document": 109,
         "Element": 51
       },
       "observers": 6,
@@ -210,6 +212,7 @@
         "undo",
         "unsent",
         "upload",
+        "variants",
         "visitorDrafts",
         "writeData"
       ],
@@ -267,9 +270,9 @@
       "posts": 0,
       "eventSources": 1,
       "listeners": {
-        "window": 6,
-        "document": 35,
-        "Element": 14
+        "window": 9,
+        "document": 37,
+        "Element": 13
       },
       "observers": 5,
       "intervals": 0,
@@ -307,6 +310,7 @@
         "theme",
         "toggleEditMode",
         "trash",
+        "variants",
         "visitorDrafts",
         "writeData"
       ],
@@ -342,8 +346,8 @@
       "posts": 0,
       "eventSources": 1,
       "listeners": {
-        "window": 12,
-        "document": 74,
+        "window": 15,
+        "document": 76,
         "Element": 14
       },
       "observers": 4,
@@ -388,6 +392,7 @@
         "toggleEditMode",
         "trash",
         "upload",
+        "variants",
         "visitorDrafts",
         "writeData"
       ],
@@ -439,9 +444,9 @@
       "posts": 0,
       "eventSources": 1,
       "listeners": {
-        "window": 6,
-        "document": 35,
-        "Element": 12
+        "window": 9,
+        "document": 37,
+        "Element": 11
       },
       "observers": 4,
       "intervals": 0,
@@ -476,6 +481,7 @@
         "theme",
         "toggleEditMode",
         "trash",
+        "variants",
         "visitorDrafts",
         "writeData"
       ],

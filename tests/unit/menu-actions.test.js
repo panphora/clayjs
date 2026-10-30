@@ -1,5 +1,6 @@
 import { jest } from "@jest/globals";
 import { docKey } from "../../src/lib/doc-storage.js";
+import { $ } from "./helpers/editor-ui.js";
 
 // Scenario: the menu's editing items call the services that already do the job. Undo
 // and Redo follow the page's history and only exist when the page asked for the undo
@@ -49,9 +50,9 @@ async function boot({ cookie = true, edit = false, plugins = "menu", resume = nu
   if (settle) await flush();
 }
 
-const listOf = () => document.querySelector(".clay-menu-list");
-const noteOf = () => document.querySelector(".clay-menu-note");
-const buttonOf = (id) => document.querySelector(`[role="menuitem"][data-menu-id="${id}"]`);
+const listOf = () => $(".clay-menu-list", "menu");
+const noteOf = () => $(".clay-menu-note", "menu");
+const buttonOf = (id) => $(`[role="menuitem"][data-menu-id="${id}"]`, "menu");
 const isDisabled = (id) => buttonOf(id).getAttribute("aria-disabled") === "true";
 
 function click(el) {

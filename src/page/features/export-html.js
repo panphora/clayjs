@@ -9,6 +9,7 @@ import { blockMap } from "../model.js";
 import { PageExportError, renderExportHtml } from "../export-html.js";
 import { inlineExportResources } from "../export-assets.js";
 import { downloadHtml, documentName } from "../../core/download.js";
+import { mountEditorUI } from "../../ui/editor-ui.js";
 
 const MAX_NAME = 80;
 const UNSAFE_NAME = /[\u0000-\u001f\u007f<>:"/\\|?*]+/g;
@@ -21,7 +22,10 @@ function fileName(title) {
   try { return `${documentName()}.html`; } catch { return "page.html"; }
 }
 
+// The panel sits in its own shadow root beside the editor, so the page's CSS cannot restyle
+// it. The page's --page-* tokens still reach it, and it keeps the editor's font and colour.
 const PANEL_CSS = `
+:host{font:inherit !important;color:inherit !important}
 .page-export-panel{max-width:46ch;margin:8px 0;padding:10px 12px;border:1px solid var(--page-pop-line);border-radius:8px;background:var(--page-pop-bg);color:var(--page-pop-ink);box-shadow:var(--page-pop-shadow);font-size:.88em}
 .page-export-title{margin:0 0 2px;font-weight:600}
 .page-export-when{margin:0 0 6px;color:var(--page-ink-soft)}
@@ -37,18 +41,7 @@ export function createFeature({ view = null, download = downloadHtml, fetch: fet
   if (!view) return { run: () => ({ ok: false, code: "not-editing" }), dispose() {} };
   const doc = view.dom.ownerDocument;
   let session = null;
-  let styled = false;
   let disposed = false;
-
-  const useStyle = () => {
-    if (styled) return;
-    styled = true;
-    const el = doc.createElement("style");
-    el.id = "page-feature-exportHtml";
-    el.setAttribute("clay", "no-dirty editor-ui");
-    el.textContent = PANEL_CSS;
-    doc.head.appendChild(el);
-  };
 
   const listen = (s, target, type, fn) => {
     target.addEventListener(type, fn);
@@ -70,13 +63,12 @@ export function createFeature({ view = null, download = downloadHtml, fetch: fet
     session = null;
     for (const [target, type, fn] of s.listen) target.removeEventListener(type, fn);
     s.abort?.abort();
-    s.panel?.remove();
+    s.ui?.remove();
   }
 
   // One panel for the whole session: what was captured, what could not be carried, and
   // the one action that does anything — a download, and only when nothing is missing.
   function draw(s) {
-    useStyle();
     const box = s.panel ?? (s.panel = doc.createElement("aside"));
     box.className = "page-export-panel";
     box.dataset.state = s.ready ? "ready" : "loss";
@@ -113,7 +105,7 @@ export function createFeature({ view = null, download = downloadHtml, fetch: fet
     else acts.append(button("retry", "Try again"), button("close", "Close"));
     box.append(acts);
     const first = acts.firstChild;
-    if (!box.isConnected) (view.dom.parentElement ?? doc.body).appendChild(box);
+    if (!s.ui) s.ui = mountEditorUI({ name: "page-export", content: box, css: [PANEL_CSS], parent: view.dom.parentElement ?? doc.body });
     // The panel is what a person lands on: the download when there is one to take,
     // and the list of what stopped it when there is not.
     (s.ready ? first : box).focus?.();

@@ -1,5 +1,6 @@
 import { isDraftMode } from "../../core/is-edit-mode.js";
 import { BOTTOM_UI_CHANGED, announceBottomUi, bottomBarHeight, promptPanel } from "./bottom-ui.js";
+import { mountEditorUI } from "../../ui/editor-ui.js";
 
 export const COPY = {
   draft: "You're seeing a private draft, like a visitor.",
@@ -77,18 +78,10 @@ const CHIP_CSS = `.clay-owner {
 @media print { .clay-owner { display: none; } }
 `;
 
-function stylesOnce() {
-  if (document.getElementById("clay-owner-style")) return;
-  const style = document.createElement("style");
-  style.id = "clay-owner-style";
-  style.setAttribute("clay", "editor-ui");
-  style.textContent = CHIP_CSS;
-  document.head.appendChild(style);
-}
+export const ownerChip = () => document.querySelector('clay-editor-ui[data-clay-ui="owner"]')?.shadowRoot.getElementById("clay-owner") ?? null;
 
 export function mountOwnerChip() {
-  if (document.getElementById("clay-owner")) return null;
-  stylesOnce();
+  if (ownerChip()) return null;
 
   const draft = isDraftMode;
   const chip = document.createElement("div");
@@ -118,10 +111,10 @@ export function mountOwnerChip() {
   close.className = "clay-owner__x";
   close.setAttribute("aria-label", COPY.close);
   close.textContent = "\u00d7";
-  close.addEventListener("click", () => { chip.remove(); liftOff(); release(); });
+  close.addEventListener("click", () => { ui.remove(); liftOff(); release(); });
 
   chip.append(lead, action, close);
-  document.body.appendChild(chip);
+  const ui = mountEditorUI({ name: "owner", content: chip, css: [CHIP_CSS], attributes: { "sap-ignore": "" } });
 
   const vars = document.createElement("style");
   vars.id = "clay-owner-vars";
@@ -172,10 +165,13 @@ export function mountOwnerChip() {
   document.addEventListener("transitionend", lift, true);
   document.addEventListener("pointerup", lift, true);
   window.addEventListener("hashchange", lift);
+  // Transition events stop at a shadow root, so the chip's own changes are heard here.
+  chip.addEventListener("transitionend", lift);
   lift();
   // Whoever removes the chip takes its listeners back with it: a chip mounted and unmounted
   // once per mode session would otherwise leave six behind each time.
   chip.liftOff = liftOff;
+  chip.unmount = () => { liftOff(); ui.remove(); };
 
   return chip;
 }

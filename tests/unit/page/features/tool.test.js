@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { jest } from "@jest/globals";
+import { $$ } from "../../helpers/editor-ui.js";
 import * as Y from "../../../../src/vendor/yjs.vendor.js";
 import { state as pmState } from "../../../../src/vendor/prosemirror.vendor.js";
 import { createStore } from "../../../../src/live/store.js";
@@ -402,7 +403,7 @@ test("the file's page.tools tag is byte-identical after a save with and without 
   expect(loaded).toContain('{"tally":{"r1":{"count":3}}}');
 });
 
-const toastWith = (text) => [...document.querySelectorAll("[data-clay-toast]")].find((el) => el.textContent.includes(text));
+const toastWith = (text) => $$("[data-clay-toast]", "toasts").find((el) => el.textContent.includes(text));
 const until = async (check, timeout = 1500) => {
   const deadline = Date.now() + timeout;
   while (!check() && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));

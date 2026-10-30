@@ -3,6 +3,7 @@
  * @jest-environment-options {"url": "https://example.com/notes.html"}
  */
 import { jest } from "@jest/globals";
+import { $ } from "../helpers/editor-ui.js";
 import { seedValue } from "../../../src/page/ybind/seed.js";
 import { buildPageValue, seedClientId } from "../../../src/page/ybind/migrate.js";
 import { blocksFromYValue } from "../../../src/page/ybind/decode.js";
@@ -55,8 +56,8 @@ const replaceText = (view, id, from, to, text) => {
   view.dispatch(view.state.tr.insertText(text, start + from, start + to));
 };
 
-const toastText = () => document.querySelector("[data-clay-toast]")?.textContent ?? "";
-const toastActions = () => [...(document.querySelector("[data-clay-toast]")?.querySelectorAll("button") ?? [])]
+const toastText = () => $("[data-clay-toast]", "toasts")?.textContent ?? "";
+const toastActions = () => [...($("[data-clay-toast]", "toasts")?.querySelectorAll("button") ?? [])]
   .filter((b) => b.textContent).map((b) => b.textContent);
 // The toast stack arrives on the first toast, so a notice is waited for rather than
 // assumed to be in the same tick.
@@ -435,7 +436,7 @@ const readDownload = async (click) => {
   const text = await new Promise((resolve) => { const r = new FileReader(); r.onload = () => resolve(String(r.result)); r.readAsText(blobs[0]); });
   return new DOMParser().parseFromString(text, "text/html").querySelector("article[data-page]").textContent;
 };
-const toastButton = (label) => [...(document.querySelector("[data-clay-toast]")?.querySelectorAll("button") ?? [])].find((b) => b.textContent === label);
+const toastButton = (label) => [...($("[data-clay-toast]", "toasts")?.querySelectorAll("button") ?? [])].find((b) => b.textContent === label);
 const appendToPage = (view, text) => {
   let end = null;
   view.state.doc.forEach((node, offset) => { if (node.attrs.id === "p") end = offset + 1 + node.content.size; });

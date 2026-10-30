@@ -13,6 +13,7 @@
  */
 
 import { model, state as pmState } from "../vendor/prosemirror.vendor.js";
+import { mountEditorUI } from "../ui/editor-ui.js";
 import { schema } from "./schema.js";
 import { keysBetween, newId, nodeFromBlock } from "./model.js";
 import { downloadStored } from "../core/conflict-download.js";
@@ -27,8 +28,12 @@ import {
 
 export const REVIEW_TEXT = "Work from an earlier session could not be put back. Read it, download it, or recover it as a copy.";
 
-const STYLE_ID = "page-recovery-style";
+// The control and its panel sit in one shadow root inside the page shell, so the page's
+// CSS cannot restyle them. The page's --page-* tokens still reach them, and they keep
+// the page's font and colour.
 const STYLES = `
+:host { font: inherit !important; color: inherit !important; }
+.page-recovery-root { display: contents; }
 .page-recovery { position: fixed; right: 16px; bottom: 16px; z-index: 20; min-height: 36px; padding: 0 14px; font: inherit; font-size: 14px; color: var(--page-ink); background: var(--page-pop-bg); border: 1px solid var(--page-chrome-line-rest); border-radius: 999px; cursor: pointer; }
 .page-recovery[hidden], .page-recovery-panel[hidden] { display: none; }
 .page-recovery-panel { position: fixed; right: 16px; bottom: 64px; z-index: 21; width: min(420px, calc(100vw - 32px)); max-height: 60vh; overflow-y: auto; color: var(--page-ink); background: var(--page-pop-bg); border: 1px solid var(--page-chrome-line-rest); border-radius: var(--page-chrome-radius); padding: 8px; box-sizing: border-box; }
@@ -56,13 +61,6 @@ const el = (doc, tag, className, attrs = {}) => {
   return node;
 };
 
-function ensureStyle(doc) {
-  if (doc.getElementById(STYLE_ID)) return;
-  const style = doc.createElement("style");
-  style.id = STYLE_ID;
-  style.textContent = STYLES;
-  doc.head.append(style);
-}
 
 const ordered = (blocks) =>
   Object.keys(blocks).sort((a, b) => {
@@ -186,12 +184,13 @@ export function createRecoveryReview({
   onCovered = () => {},
 } = {}) {
   const doc = mount.ownerDocument;
-  ensureStyle(doc);
   const button = el(doc, "button", "page-recovery", { type: "button", "aria-haspopup": "dialog", "aria-expanded": "false" });
   const panel = el(doc, "div", "page-recovery-panel", { role: "dialog", "aria-label": "Recover work" });
   button.hidden = true;
   panel.hidden = true;
-  mount.append(button, panel);
+  const content = el(doc, "div", "page-recovery-root");
+  content.append(button, panel);
+  const ui = mountEditorUI({ name: "page-recovery", content, css: [STYLES], parent: mount });
 
   let rows = [];
   let journaled = [];
@@ -457,8 +456,7 @@ export function createRecoveryReview({
     get journaled() { return journaled; },
     destroy() {
       destroyed = true;
-      button.remove();
-      panel.remove();
+      ui.remove();
       shadow = null;
       copies = null;
     },

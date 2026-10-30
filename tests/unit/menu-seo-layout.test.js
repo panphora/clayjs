@@ -1,6 +1,8 @@
 import { jest } from "@jest/globals";
 import { applyHead } from "../../src/plugins/menu/seo-head.js";
 import postcss from "postcss";
+import { $, $$, active, hostOf, rootOf, sheetText } from "./helpers/editor-ui.js";
+import { HOST_CSS } from "../../src/ui/editor-ui.js";
 
 // Scenario: "SEO settings…" in claygoo slides a sheet down from the top that edits
 // the document's head fields and writes them only on Apply. Opening and cancelling
@@ -73,10 +75,10 @@ async function boot({
   await settle();
 }
 
-const sheetRoot = () => document.querySelector(".clay-seo");
-const fieldOf = (key) => document.querySelector(`.clay-seo [data-key="${key}"]`);
+const sheetRoot = () => $(".clay-seo", "seo");
+const fieldOf = (key) => $(`.clay-seo [data-key="${key}"]`, "seo");
 const fieldWrap = (key) => fieldOf(key).closest(".clay-seo-field");
-const buttonOf = (name) => document.querySelector(`.clay-seo-${name}`);
+const buttonOf = (name) => $(`.clay-seo-${name}`, "seo");
 
 function setValue(key, value) {
   const input = fieldOf(key);
@@ -86,8 +88,8 @@ function setValue(key, value) {
 }
 
 async function openSheet() {
-  document.querySelector(".clay-menu-goo").click();
-  const item = [...document.querySelectorAll('[role="menuitem"]')].find((button) => button.dataset.menuId === "seo");
+  $(".clay-menu-goo", "menu").click();
+  const item = $$('[role="menuitem"]', "menu").find((button) => button.dataset.menuId === "seo");
   expect(item).toBeDefined();
   item.click();
   await settle();
@@ -101,16 +103,17 @@ test("the panel is a full-width region at the top of the body", async () => {
   await boot();
   await openSheet();
 
-  expect(document.body.firstElementChild).toBe(sheetRoot());
-  expect(document.getElementById("clay-seo-style").textContent).not.toContain("position: fixed");
+  expect(document.body.firstElementChild).toBe(hostOf("seo"));
+  expect($(".clay-seo", "seo").parentNode).toBe(rootOf("seo"));
+  expect(declOf(ruleFor(styleRoot("seo"), ".clay-seo"), "position").value).toBe("relative");
 });
 
 test("the fields sit in the approved order, with the rest inside More", async () => {
   await boot();
   await openSheet();
 
-  const form = document.querySelector(".clay-seo-fields");
-  const more = document.querySelector("details.clay-seo-more");
+  const form = $(".clay-seo-fields", "seo");
+  const more = $("details.clay-seo-more", "seo");
   const keys = (scope) => [...scope.querySelectorAll("[data-key]")].map((el) => el.dataset.key);
 
   expect(keys(form).filter((key) => !more.contains(fieldOf(key)))).toEqual([
@@ -140,7 +143,7 @@ test("the title counter reads the trimmed length and marks overflow", async () =
 test("a problem in a field inside More opens the disclosure", async () => {
   await boot();
   await openSheet();
-  const more = document.querySelector("details.clay-seo-more");
+  const more = $("details.clay-seo-more", "seo");
 
   expect(more.open).toBe(false);
   setValue("canonical", "http://localhost/x");
@@ -174,13 +177,13 @@ test("Escape closes the panel and gives focus back", async () => {
   opener.focus();
 
   await openSheet();
-  expect(document.activeElement).toBe(fieldOf("title"));
+  expect(active()).toBe(fieldOf("title"));
 
   fieldOf("title").dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
   await settle();
 
-  expect(sheetRoot()).toBeNull();
-  expect(document.activeElement).toBe(opener);
+  expect(hostOf("seo")).toBeNull();
+  expect(active()).toBe($(".clay-menu-goo", "menu"));
   opener.remove();
 });
 
@@ -199,8 +202,8 @@ test("Tab is not trapped in the panel", async () => {
 test("the link preview follows the image", async () => {
   await boot();
   await openSheet();
-  const image = () => document.querySelector(".clay-og-image");
-  const head = () => document.querySelector(".clay-seo-preview-head span");
+  const image = () => $(".clay-og-image", "seo");
+  const head = () => $(".clay-seo-preview-head span", "seo");
 
   expect(image().hidden).toBe(true);
   expect(head().textContent).toBe("Summary card");
@@ -214,10 +217,10 @@ test("the link preview follows the image", async () => {
   expect(head().textContent).toBe("Summary card");
 });
 
-const styleCss = (id) => document.getElementById(id).textContent;
-const styleRoot = (id) => postcss.parse(styleCss(id));
+const styleCss = (name) => sheetText(name);
+const styleRoot = (name) => postcss.parse(styleCss(name));
 const ruleFor = (root, selector) =>
-  root.nodes.find((node) => node.type === "rule" && node.selector === selector);
+  root.nodes.find((node) => node.type === "rule" && node.selectors.join(", ") === selector);
 const declOf = (rule, prop) =>
   rule.nodes.find((node) => node.type === "decl" && node.prop === prop);
 
@@ -245,7 +248,7 @@ test("the panel's stylesheet parses and the image rule is not inside the contain
   await boot();
   await openSheet();
 
-  const rule = ruleFor(styleRoot("clay-seo-style"), ".clay-og-image img");
+  const rule = ruleFor(styleRoot("seo"), ".clay-og-image img");
   expect(rule).toBeDefined();
   expect(rule.parent.type).toBe("root");
 });
@@ -255,7 +258,7 @@ test("the menu stylesheet hides the panel's hidden controls", async () => {
   await openSheet();
 
   const rule = postcss
-    .parse(styleCss("clay-menu-style"))
+    .parse(styleCss("menu"))
     .nodes.find((node) => node.type === "rule" && node.selectors.includes(".clay-seo [hidden]"));
   expect(rule).toBeDefined();
   const display = declOf(rule, "display");
@@ -267,8 +270,23 @@ test("the panel sits above the dock and scrolls when tall", async () => {
   await boot();
   await openSheet();
 
-  const rule = ruleFor(styleRoot("clay-seo-style"), ".clay-seo");
+  const rule = ruleFor(styleRoot("seo"), ".clay-seo");
   expect(Number(declOf(rule, "z-index").value)).toBeGreaterThan(2147482000);
   expect(declOf(rule, "overflow-y").value).toBe("auto");
   expect(declOf(rule, "max-height")).toBeDefined();
+});
+
+test("the menu and the panel each sit in an open shadow root whose host stops the page's styles", async () => {
+  await boot();
+  await openSheet();
+
+  for (const name of ["menu", "seo"]) {
+    expect(hostOf(name)).not.toBeNull();
+    expect(rootOf(name).mode).toBe("open");
+    expect(sheetText(name)).toContain(HOST_CSS);
+  }
+  expect($(".clay-menu-dock", "menu").parentNode).toBe(rootOf("menu"));
+  expect($(".clay-seo", "seo").parentNode).toBe(rootOf("seo"));
+  expect(document.body.firstElementChild).toBe(hostOf("seo"));
+  expect(document.querySelectorAll("#clay-menu-style, #clay-seo-style")).toHaveLength(0);
 });

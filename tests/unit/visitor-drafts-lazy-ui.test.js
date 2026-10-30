@@ -7,6 +7,7 @@
  * ends up looking at.
  */
 import { jest } from "@jest/globals";
+import { $, hostOf, sheetText } from "./helpers/editor-ui.js";
 
 const PARAMS = "plugins=visitor-drafts&exclude=richclay,source";
 const RULES = '{"title":"#title","note":"#note@value"}';
@@ -48,22 +49,22 @@ async function bootPage({ slot, owner = false, onPromptInsert = null } = {}) {
   window.fetch = fetchMock;
   global.fetch = fetchMock;
 
-  const insert = document.body.insertAdjacentHTML;
-  document.body.insertAdjacentHTML = function (position, html) {
-    if (onPromptInsert && html.includes('id="hcp"')) onPromptInsert();
-    return insert.call(this, position, html);
+  const insertBefore = document.body.insertBefore;
+  document.body.insertBefore = function (node, before) {
+    if (onPromptInsert && node.matches?.('clay-editor-ui[data-clay-ui="download-prompt"]')) onPromptInsert(node);
+    return insertBefore.call(this, node, before);
   };
   try {
     const { boot } = await import("../../src/loader.js");
     await new Promise((resolve) => boot(null, new URLSearchParams(PARAMS), resolve));
   } finally {
-    document.body.insertAdjacentHTML = insert;
+    document.body.insertBefore = insertBefore;
   }
   return { clay: window.clay };
 }
 
-const prompt = () => document.querySelector("#hcp");
-const chip = () => document.querySelector(".clay-owner");
+const prompt = () => $("#hcp", "download-prompt");
+const chip = () => $(".clay-owner", "owner");
 
 afterEach(() => {
   clearCookies();
@@ -74,7 +75,7 @@ test("a visitor's draft boot mounts the prompt and draws no owner chip", async (
 
   expect(clay.isDraftMode).toBe(true);
   expect(prompt()).not.toBeNull();
-  expect(chip()).toBeNull();
+  expect(hostOf("owner")).toBeNull();
 });
 
 test("an owner's draft boot gets the chip", async () => {
@@ -88,13 +89,13 @@ test("an owner's draft boot gets the chip", async () => {
 });
 
 test("the prompt's stylesheet is in the document before the prompt element", async () => {
-  let styleAtInsert = null;
+  let sheetAtInsert = null;
   await bootPage({
     slot: "lazy-style-1",
-    onPromptInsert: () => { styleAtInsert = document.getElementById("hcp-style"); },
+    onPromptInsert: (host) => { sheetAtInsert = Array.from(host.shadowRoot.querySelectorAll("style"), (style) => style.textContent).join("\n"); },
   });
 
-  expect(styleAtInsert).not.toBeNull();
-  expect(styleAtInsert.textContent).toContain(".hcp-card");
-  expect(document.getElementById("hcp-style").getAttribute("clay")).toBe("editor-ui");
+  expect(sheetAtInsert).toContain(".hcp-card");
+  expect(sheetText("download-prompt")).toContain(".hcp-card");
+  expect(hostOf("download-prompt").getAttribute("clay")).toBe("editor-ui");
 });

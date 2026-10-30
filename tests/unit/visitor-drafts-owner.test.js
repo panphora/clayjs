@@ -6,6 +6,7 @@
  * (owner, edit mode, no save token) and the missing-slot warning is the same line.
  */
 import { jest } from "@jest/globals";
+import { $, hostOf } from "./helpers/editor-ui.js";
 
 const PARAMS = "plugins=visitor-drafts&exclude=richclay,source";
 const RULES = '{"title":"#title","note":"#note@value"}';
@@ -54,7 +55,7 @@ async function bootPage({ slot, params = PARAMS, owner = false, url = "/notes.ht
 }
 
 function ownerChip() {
-  return document.querySelector(".clay-owner");
+  return $(".clay-owner", "owner");
 }
 
 // Every listener a page installs on the window and the document, so a teardown can be
@@ -102,16 +103,16 @@ test("an owner editing the original gets the chip and nothing else the drafts UI
   expect(ownerChip()).not.toBeNull();
   expect(ownerChip().querySelector(".clay-owner__lead").textContent)
     .toBe("You're editing the original. Visitors get these changes.");
-  expect(document.querySelector(".hcp")).toBeNull();
+  expect(hostOf("download-prompt")).toBeNull();
   expect(document.querySelector(".clay-intro")).toBeNull();
 });
 
 test("the chip stays away for a page that is not the owner's, or that carries a save token", async () => {
   await bootPage({ slot: "owner-chip-2" });
-  expect(ownerChip()).toBeNull();
+  expect(hostOf("owner")).toBeNull();
 
   await bootPage({ slot: "owner-chip-3", owner: true, attrs: { savetoken: "token-1" } });
-  expect(ownerChip()).toBeNull();
+  expect(hostOf("owner")).toBeNull();
 });
 
 test("a page missing the slot or the rules tag still warns instead of drawing a chip", async () => {
@@ -119,12 +120,12 @@ test("a page missing the slot or the rules tag still warns instead of drawing a 
 
   await bootPage({ slot: null, owner: true });
   expect(warn).toHaveBeenCalledWith('visitor-drafts: this page keeps no draft (missing a visitor-drafts="<slot>" attribute on <html>)');
-  expect(ownerChip()).toBeNull();
+  expect(hostOf("owner")).toBeNull();
 
   warn.mockClear();
   await bootPage({ slot: "owner-chip-4", owner: true, rules: false });
   expect(warn).toHaveBeenCalledWith('visitor-drafts: this page keeps no draft (missing a <script data-rules-name~="api"> rules tag)');
-  expect(ownerChip()).toBeNull();
+  expect(hostOf("owner")).toBeNull();
 });
 
 test("clay.visitorDrafts is the same inert member a non-draft page has always had", async () => {
@@ -156,7 +157,7 @@ test("a session that ends takes the chip's own listeners with it", async () => {
     expect(ownerChip()).not.toBeNull();
     lease.dispose();
 
-    expect(ownerChip()).toBeNull();
+    expect(hostOf("owner")).toBeNull();
     // The lift's six listeners on the window and the document leave with the chip.
     expect({ removed: mounted - listeners.live() }).toEqual({ removed: 6 });
   } finally {

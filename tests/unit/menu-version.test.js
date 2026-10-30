@@ -8,6 +8,7 @@ import { createHash } from "node:crypto";
 import { jest } from "@jest/globals";
 import { storage } from "../../src/lib/doc-storage.js";
 import { checkUpdate, findUpdate } from "../../src/plugins/upgrade.js";
+import { $ } from "./helpers/editor-ui.js";
 
 const BASE = "https://hyperclay.com/templates/kanban/owned";
 const SOURCE = `${BASE}/latest.html`;
@@ -101,9 +102,9 @@ async function boot({ version = "1.4.0", copy = true, fetchFn = netFetch() } = {
 
 let release;
 
-const versionLine = () => document.querySelector("p.clay-menu-version");
-const upgradeItem = () => document.querySelector('[data-menu-id="upgrade"]');
-const badgeLine = () => document.querySelector(".clay-menu-dot");
+const versionLine = () => $("p.clay-menu-version", "menu");
+const upgradeItem = () => $('[data-menu-id="upgrade"]', "menu");
+const badgeLine = () => $(".clay-menu-dot", "menu");
 
 function gated() {
   const gate = new Promise((resolve) => {
@@ -221,8 +222,8 @@ describe("what the menu's footer says", () => {
   test("update: the upgrade item with its dot, and no version line", async () => {
     await boot({ fetchFn: netFetch({ latest: manifest({ version: "2.0.0" }) }) });
 
-    await waitFor(() => document.querySelector('[role="menuitem"][data-menu-id="upgrade"]'));
-    const item = document.querySelector('[role="menuitem"][data-menu-id="upgrade"]');
+    await waitFor(() => $('[role="menuitem"][data-menu-id="upgrade"]', "menu"));
+    const item = $('[role="menuitem"][data-menu-id="upgrade"]', "menu");
     expect(item.textContent).toBe("Upgrade to version 2.0.0");
     expect(badgeLine()).not.toBeNull();
     expect(versionLine()).toBeNull();
@@ -231,10 +232,10 @@ describe("what the menu's footer says", () => {
   test("a page that is not a copy gets no footer at all", async () => {
     await boot({ copy: false });
 
-    await waitFor(() => document.querySelector(".clay-menu-list"));
+    await waitFor(() => $(".clay-menu-list", "menu"));
     await flush();
 
-    expect(document.querySelector(".clay-menu-list")).not.toBeNull();
+    expect($(".clay-menu-list", "menu")).not.toBeNull();
     expect(upgradeItem()).toBeNull();
   });
 

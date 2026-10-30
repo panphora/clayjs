@@ -13,12 +13,15 @@
  * stylesheet load the first time somebody mounts one, so a document that never
  * uploads never downloads them.
  *
- * The look is a set of `--clay-upload-*` custom properties, each with a default in
- * its own `var()`. A container that sets one — `.journal-drop { --clay-upload-ink:
- * #333 }` — restyles the row without replacing any of its behaviour.
+ * The row draws inside its own shadow root, so the page's CSS cannot restyle it. Its
+ * look is a set of `--clay-upload-*` custom properties, each with a default in its own
+ * `var()`, and those do reach in: a container that sets one — `.journal-drop {
+ * --clay-upload-ink: #333 }` — restyles the row without replacing any of its
+ * behaviour. The font family is the one thing it still inherits from the page.
  */
 
 import { canRetry } from "./upload-task.js";
+import { mountEditorUI } from "../ui/editor-ui.js";
 
 const CSS = `.clay-upload {
   display: flex;
@@ -110,16 +113,8 @@ const CSS = `.clay-upload {
   .clay-upload__button { color: var(--clay-upload-button-ink, #8AB4FF); }
   .clay-upload[data-clay-upload-state="failed"] .clay-upload__label { color: var(--clay-upload-failure-ink, #FFB4AB); }
 }
-@media print { .clay-upload { display: none; } }`;
-
-function stylesOnce() {
-  if (document.getElementById("clay-upload-style")) return;
-  const style = document.createElement("style");
-  style.id = "clay-upload-style";
-  style.setAttribute("clay", "editor-ui");
-  style.textContent = CSS;
-  document.head.append(style);
-}
+@media print { .clay-upload { display: none; } }
+:host { font-family: inherit !important; }`;
 
 function percentOf({ loaded, total, percent }) {
   if (typeof percent === "number") return percent;
@@ -142,8 +137,6 @@ export function mount(task, container) {
   if (!host || host.nodeType !== 1) {
     throw new TypeError("clay.upload.mount needs a container");
   }
-
-  stylesOnce();
 
   const name = task.file?.name || "File";
 
@@ -237,9 +230,11 @@ export function mount(task, container) {
     if (!retryEl.hidden) retryEl.setAttribute("aria-label", lastError ? `Retry ${name}: ${lastError}` : `Retry ${name}`);
   }
 
+  let ui = null;
+
   function unmount() {
     unsubscribe();
-    root.remove();
+    ui?.remove();
   }
 
   cancelEl.addEventListener("click", () => {
@@ -257,7 +252,7 @@ export function mount(task, container) {
   });
 
   const unsubscribe = task.subscribe(draw);
-  host.append(root);
+  ui = mountEditorUI({ name: "upload", content: root, css: [CSS], parent: host });
 
   return { unmount };
 }

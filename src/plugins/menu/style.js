@@ -1,9 +1,9 @@
 // The menu's look: Bevel tokens scoped to the menu family, solid surfaces, one soft
-// shadow, light or dark by the scheme the dock inherits from the page.
+// shadow, light or dark by the scheme ui/page-colour.js reads from the page behind it.
 // The surface and muted ink below, per scheme, for ui/page-colour.js's tint.
 export const MENU_SURFACE = { light: [0xFF, 0xFC, 0xF6], dark: [0x1A, 0x1D, 0x2C], mutedLight: [0x6B, 0x59, 0x42], mutedDark: [0xA3, 0xA9, 0xC2] };
 
-export default `.clay-menu-dock, .clay-menu-recall, .clay-menu-spots, .clay-seo {
+export default `.clay-menu-dock, .clay-menu-spots, .clay-seo {
   --bevel-font-sans: system-ui, -apple-system, "Segoe UI", sans-serif;
   --bevel-font-serif: Newsreader, Georgia, "Times New Roman", serif;
   --bevel-font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -36,13 +36,15 @@ export default `.clay-menu-dock, .clay-menu-recall, .clay-menu-spots, .clay-seo 
   color-scheme: inherit;
   font-family: var(--bevel-font-sans);
   color: var(--bevel-ink);
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 /* The dock: the roster (when a page opts in) and the capsule, fixed in one corner. */
 .clay-menu-dock { position: fixed; z-index: 2147482000; top: max(12px, env(safe-area-inset-top)); right: max(12px, env(safe-area-inset-right)); display: flex; align-items: center; gap: 6px; font-size: 13px; line-height: 1.4; }
 .clay-menu-dock[data-corner$="left"] { right: auto; left: max(12px, env(safe-area-inset-left)); flex-direction: row-reverse; }
 .clay-menu-dock[data-corner^="bottom"] { top: auto; bottom: max(12px, env(safe-area-inset-bottom)); }
-.clay-menu-dock[hidden], .clay-menu-recall[hidden], .clay-menu-spots[hidden], .clay-menu-dock [hidden], .clay-seo [hidden] { display: none !important; }
+.clay-menu-dock[hidden], .clay-menu-spots[hidden], .clay-menu-dock [hidden], .clay-seo [hidden] { display: none !important; }
 
 .clay-menu { box-sizing: border-box; display: inline-flex; align-items: center; gap: 2px; height: 34px; padding: 0 4px 0 2px; border: 1px solid var(--bevel-line-3); background: var(--bevel-surface); box-shadow: var(--clay-shadow); user-select: none; -webkit-user-select: none; }
 .clay-menu-dock[data-dragging] .clay-menu { border-color: var(--bevel-brass); cursor: grabbing; }
@@ -82,6 +84,14 @@ export default `.clay-menu-dock, .clay-menu-recall, .clay-menu-spots, .clay-seo 
 .clay-roster { box-sizing: border-box; display: inline-flex; align-items: center; gap: 8px; height: 34px; margin: 0; padding: 0 10px 0 5px; border: 1px solid var(--bevel-line-3); background: var(--bevel-surface); box-shadow: var(--clay-shadow); font: 400 12px/1 var(--bevel-font-mono); color: var(--bevel-muted); cursor: pointer; }
 .clay-roster:hover, .clay-roster[aria-expanded="true"] { background: var(--bevel-sunk); }
 .clay-roster-faces { display: inline-flex; }
+.clay-variants { box-sizing: border-box; display: inline-flex; align-items: center; gap: 2px; height: 34px; margin: 0; padding: 0 4px; border: 1px solid var(--bevel-line-3); background: var(--bevel-surface); box-shadow: var(--clay-shadow); font: 400 12px/1 var(--bevel-font-mono); color: var(--bevel-muted); user-select: none; -webkit-user-select: none; }
+.clay-variants-step { display: inline-grid; place-items: center; width: 22px; height: 28px; margin: 0; padding: 0; border: 0; background: none; color: var(--bevel-faint); cursor: pointer; }
+.clay-variants-step:hover { color: var(--bevel-ink-2); }
+.clay-variants-step svg { display: block; width: 6px; height: 10px; fill: currentColor; }
+.clay-variants-step:focus-visible { outline: 2px solid var(--bevel-brass); outline-offset: 2px; }
+.clay-variants-name { min-width: 72px; text-align: center; color: var(--bevel-ink-2); white-space: nowrap; }
+.clay-variants-name small { color: var(--bevel-faint); font-size: 11px; }
+.clay-variants .clay-menu-btn { margin-left: 4px; }
 .clay-roster-faces .clay-avatar + .clay-avatar { margin-left: -2px; box-shadow: -2px 0 0 var(--bevel-surface); }
 .clay-avatar { display: inline-grid; place-items: center; flex: none; width: 22px; height: 22px; font: 500 10px/1 var(--bevel-font-mono); letter-spacing: .02em; border: 1px solid var(--bevel-ink); background: var(--bevel-ink); color: var(--bevel-ground); }
 .clay-avatar[data-tone="brass"] { background: var(--bevel-brass-soft); color: var(--bevel-brass); border-color: color-mix(in srgb, var(--bevel-brass) 35%, var(--bevel-brass-soft)); }
@@ -93,12 +103,6 @@ export default `.clay-menu-dock, .clay-menu-recall, .clay-menu-spots, .clay-seo 
 .clay-menu-dock[data-corner^="bottom"] :is(.clay-menu-list, .clay-people, .clay-menu-note) { top: auto; bottom: calc(100% + 8px); }
 
 .clay-menu-list { width: max-content; min-width: 284px; max-width: calc(100vw - 24px); max-height: calc(100dvh - 72px); overflow-y: auto; overscroll-behavior: contain; padding: 6px; }
-.clay-menu-notice { display: flex; align-items: flex-start; gap: 9px; margin: 6px 9px 8px; padding: 8px 6px 8px 10px; border: 1px solid var(--bevel-line); background: var(--bevel-sunk); font-size: 13px; line-height: 1.45; color: var(--bevel-ink); }
-.clay-menu-notice svg { flex: none; width: 16px; height: 16px; margin-top: 1px; color: var(--bevel-brass); }
-.clay-menu-notice p { flex: 1; margin: 0; }
-.clay-menu-notice button { flex: none; display: inline-grid; place-items: center; width: 22px; height: 22px; margin: -1px 0 0; padding: 0; border: 0; background: none; color: var(--bevel-muted); cursor: pointer; }
-.clay-menu-notice button:hover { color: var(--bevel-ink); background: var(--bevel-surface); }
-.clay-menu-notice button svg { width: 12px; height: 12px; margin: 0; color: inherit; }
 .clay-menu-list [role="menuitem"] { box-sizing: border-box; display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; min-height: 32px; margin: 0; padding: 5px 9px; border: 0; background: none; font: 400 13px/1.35 var(--bevel-font-sans); color: var(--bevel-ink); text-align: left; text-decoration: none; cursor: pointer; }
 .clay-menu-list [role="menuitem"]:hover:not([aria-disabled="true"]), .clay-menu-list [role="menuitem"]:focus-visible { outline: none; background: var(--bevel-sunk); }
 .clay-menu-list [role="menuitem"][aria-disabled="true"] { color: var(--bevel-faint); cursor: default; }
@@ -146,14 +150,6 @@ export default `.clay-menu-dock, .clay-menu-recall, .clay-menu-spots, .clay-seo 
 .clay-menu-btn-primary { --bevel-face: var(--bevel-ink); --bevel-edge-hi: color-mix(in srgb, var(--bevel-ink), light-dark(#FFFCF6, #FFFFFF) 22%); --bevel-edge-lo: color-mix(in srgb, var(--bevel-ink), light-dark(#0B0C13, #6A7090) 34%); color: var(--bevel-ground); }
 .clay-menu-btn-primary:hover { background: color-mix(in srgb, var(--bevel-ink), var(--bevel-ground) 12%); }
 
-/* The hidden toast: where the capsule was, solid, the same shadow. */
-.clay-menu-recall { position: fixed; z-index: 2147482000; top: max(12px, env(safe-area-inset-top)); right: max(12px, env(safe-area-inset-right)); display: flex; align-items: center; gap: 12px; box-sizing: border-box; max-width: calc(100vw - 24px); min-height: 38px; padding: 4px 4px 4px 12px; border: 1px solid var(--bevel-line-3); background: var(--bevel-surface); box-shadow: var(--clay-shadow); font-size: 13px; line-height: 1.4; transition: opacity .4s; }
-.clay-menu-recall[data-corner$="left"] { right: auto; left: max(12px, env(safe-area-inset-left)); }
-.clay-menu-recall[data-corner^="bottom"] { top: auto; bottom: max(12px, env(safe-area-inset-bottom)); }
-.clay-menu-recall[data-fading] { opacity: 0; }
-.clay-menu-recall p { margin: 0; }
-.clay-menu-recall kbd { font: 500 11px/1 var(--bevel-font-mono); padding: 3px 5px; border: 1px solid var(--bevel-line-2); background: var(--bevel-sunk); color: var(--bevel-ink); white-space: nowrap; }
-
 /* Drop spots while dragging. */
 .clay-menu-spots { position: fixed; inset: 0; z-index: 2147481999; pointer-events: none; }
 .clay-menu-spot { position: absolute; width: 132px; height: 34px; border: 1px dashed var(--bevel-line-3); background: var(--bevel-sunk); }
@@ -170,5 +166,5 @@ export default `.clay-menu-dock, .clay-menu-recall, .clay-menu-spots, .clay-seo 
   .clay-menu-btn { min-height: 40px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .clay-menu-track, .clay-menu-thumb, .clay-menu-recall { transition: none; }
+  .clay-menu-track, .clay-menu-thumb { transition: none; }
 }`;

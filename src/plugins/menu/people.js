@@ -252,7 +252,8 @@ export function attachPeople({ root, capsule, addItem, removeItem, closeMenu, no
     }
     drawRoster();
     if (panel && !renaming) {
-      const focused = panel.contains(document.activeElement) ? document.activeElement.classList[0] : null;
+      const active = root.getRootNode().activeElement;
+      const focused = active && panel.contains(active) ? active.classList[0] : null;
       draw();
       if (focused) panel.querySelector(`.${focused}`)?.focus();
     }

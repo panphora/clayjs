@@ -1,4 +1,5 @@
 import { jest } from "@jest/globals";
+import { hostOf, $, $$, active } from "./helpers/editor-ui.js";
 
 // Scenario: a document that loads `plugins=menu` shows anyone who can edit a small
 // fixed group in the top right, an Edit switch and claygoo, and nothing from it ever
@@ -55,11 +56,11 @@ async function boot({ cookie = true, draft = false, edit = false, body = BODY, i
   await flush();
 }
 
-const menuRoot = () => document.querySelector(".clay-menu");
-const listOf = () => document.querySelector(".clay-menu-list");
-const gooOf = () => document.querySelector(".clay-menu-goo");
-const editOf = () => document.querySelector(".clay-menu-edit");
-const itemButtons = () => [...document.querySelectorAll('[role="menuitem"]')];
+const menuRoot = () => $(".clay-menu", "menu");
+const listOf = () => $(".clay-menu-list", "menu");
+const gooOf = () => $(".clay-menu-goo", "menu");
+const editOf = () => $(".clay-menu-edit", "menu");
+const itemButtons = () => $$('[role="menuitem"]', "menu");
 
 function click(el) {
   el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
@@ -77,7 +78,7 @@ test("mounts for an owner in view: switch, claygoo and clay.menu", async () => {
   const root = menuRoot();
   expect(root).not.toBeNull();
   expect(root.getAttribute("clay")).toBe("editor-ui");
-  expect(root.hasAttribute("clay-mode-toggle")).toBe(true);
+  expect(hostOf("menu").hasAttribute("clay-mode-toggle")).toBe(true);
 
   expect(editOf().getAttribute("role")).toBe("switch");
   expect(editOf().getAttribute("aria-checked")).toBe("false");
@@ -97,10 +98,9 @@ test("mounts for an owner in view: switch, claygoo and clay.menu", async () => {
 
   // 02's note stays off because the document now carries its own toggle.
   expect(document.querySelector("[clay-mode-toggle]")).not.toBeNull();
-  expect(document.querySelector(".clay-mode-note")).toBeNull();
+  expect(document.querySelector('clay-editor-ui[data-clay-ui="mode-note"]')).toBeNull();
 
-  const style = document.getElementById("clay-menu-style");
-  expect(style.getAttribute("clay")).toBe("editor-ui");
+  expect(hostOf("menu").getAttribute("clay")).toBe("editor-ui");
 });
 
 test("mounts in edit mode with the switch on", async () => {
@@ -114,7 +114,7 @@ test("does not mount without permission", async () => {
   await boot({ cookie: false });
 
   expect(window.clay.canEdit).toBe(false);
-  expect(menuRoot()).toBeNull();
+  expect(hostOf("menu")).toBeNull();
   expect(window.clay.menu).toBeUndefined();
 });
 
@@ -122,7 +122,7 @@ test("does not mount in a visitor's draft", async () => {
   await boot({ draft: true });
 
   expect(window.clay.isDraftMode).toBe(true);
-  expect(menuRoot()).toBeNull();
+  expect(hostOf("menu")).toBeNull();
   expect(window.clay.menu).toBeUndefined();
 });
 
@@ -154,7 +154,7 @@ test("a click on the switch calls setMode('edit') once and stays busy while it r
 test("a refused setMode restores the switch, clears busy and shows the reason", async () => {
   await boot();
   const edit = editOf();
-  const note = document.querySelector(".clay-menu-note");
+  const note = $(".clay-menu-note", "menu");
   const setMode = jest.spyOn(window.clay, "setMode")
     .mockResolvedValue({ ok: false, mode: "view", code: "save-failed" });
 
@@ -206,18 +206,18 @@ test("arrow keys move between items, and Escape closes and focuses claygoo", asy
   click(goo);
 
   press(goo, "ArrowDown");
-  expect(document.activeElement).toBe(itemButtons()[0]);
+  expect(active()).toBe(itemButtons()[0]);
 
   press(itemButtons()[0], "ArrowDown");
-  expect(document.activeElement).toBe(itemButtons()[1]);
+  expect(active()).toBe(itemButtons()[1]);
 
   press(itemButtons()[1], "ArrowUp");
-  expect(document.activeElement).toBe(itemButtons()[0]);
+  expect(active()).toBe(itemButtons()[0]);
 
   const escaped = press(itemButtons()[0], "Escape");
   expect(escaped.defaultPrevented).toBe(true);
   expect(listOf().hidden).toBe(true);
-  expect(document.activeElement).toBe(goo);
+  expect(active()).toBe(goo);
 });
 
 test("Enter runs the focused item and closes the list", async () => {
@@ -249,10 +249,10 @@ test("addItem appends items and a duplicate id replaces", async () => {
 
   menu.addItem({ id: "copy", label: "Save a copy" });
   menu.addItem({ id: "share", label: "Share" });
-  expect(labels()).toEqual(["SEO settings…", "Download a copy", "Hide menuCtrl+Shift+.", "Save a copy", "Share"]);
+  expect(labels()).toEqual(["SEO settings…", "Download a copy", "Save a copy", "Share"]);
 
   menu.addItem({ id: "copy", label: "Download" });
-  expect(labels()).toEqual(["SEO settings…", "Download a copy", "Hide menuCtrl+Shift+.", "Download", "Share"]);
+  expect(labels()).toEqual(["SEO settings…", "Download a copy", "Download", "Share"]);
 });
 
 test("a badge shows a dot on claygoo", async () => {
@@ -270,11 +270,14 @@ test("a badge shows a dot on claygoo", async () => {
 
 test("nothing from the menu reaches clay.getHTML()", async () => {
   await boot({ edit: true });
+  expect(hostOf("menu")).not.toBeNull();
   window.clay.menu.addItem({ id: "copy", label: "Save a copy" });
 
   const html = window.clay.getHTML();
 
   expect(html).not.toContain("clay-menu");
+  expect(html).not.toContain("clay-editor-ui");
+  expect(html).not.toContain("data-clay-ui");
   expect(html).not.toContain("--clay-menu-");
   expect(html).not.toContain("Clay menu");
 });
@@ -285,7 +288,7 @@ test("with a .clay-intro on the page the group sits below its bottom edge", asyn
     introBottom: 120,
   });
 
-  const root = document.querySelector(".clay-menu-dock");
+  const root = $(".clay-menu-dock", "menu");
   expect(root).not.toBeNull();
   expect(parseFloat(root.style.top)).toBeGreaterThanOrEqual(120);
 

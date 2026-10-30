@@ -7,6 +7,8 @@
  */
 import { jest } from "@jest/globals";
 
+import { toastStack, $$ } from "./helpers/editor-ui.js";
+
 const actual = await import("../../src/ui/toast.js");
 
 const calls = [];
@@ -37,8 +39,8 @@ const flush = async () => {
   for (let n = 0; n < 50; n++) await Promise.resolve();
 };
 
-const stack = () => document.querySelector("[data-clay-toasts]");
-const toasts = () => [...document.querySelectorAll("[data-clay-toast]")];
+const stack = () => toastStack();
+const toasts = () => $$("[data-clay-toast]", "toasts");
 
 let toast, toastPersistent, dismissPersistent;
 

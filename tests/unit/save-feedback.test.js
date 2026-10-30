@@ -1,4 +1,5 @@
 import { jest } from "@jest/globals";
+import { toastStack, $$ } from "./helpers/editor-ui.js";
 
 // A page carrying both the indicator plugin and clay-ui: the chip owns saving and saved,
 // the toasts own a save that failed or went offline. clay-ui alone, with no chip to
@@ -6,7 +7,7 @@ import { jest } from "@jest/globals";
 // of clay-ui per file, because every copy keeps its own listeners on the document.
 
 const chip = () => document.querySelector("[data-clay-indicator]");
-const toasts = (type) => [...document.querySelectorAll(type ? `[data-clay-toast="${type}"]` : "[data-clay-toast]")];
+const toasts = (type) => $$(type ? `[data-clay-toast="${type}"]` : "[data-clay-toast]", "toasts");
 const fire = (state, detail) => document.dispatchEvent(new CustomEvent("clay:save-" + state, { detail }));
 // The drawing is a module the first save state fetches, so a reading waits for it.
 const drawn = async () => {
@@ -70,7 +71,7 @@ test("a failed save clears the hidden chip's text", async () => {
   fire("error");
   await drawn();
   expect(chip().textContent).toBe("");
-  expect(document.querySelector("[data-clay-toasts]").getAttribute("aria-live")).toBe("polite");
+  expect(toastStack().getAttribute("aria-live")).toBe("polite");
 });
 
 test("clay.saveToast shows Saved as a toast with the host's message, not on the chip", async () => {

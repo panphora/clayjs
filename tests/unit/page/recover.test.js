@@ -1,6 +1,7 @@
 globalThis.ClipboardEvent ??= class ClipboardEvent extends Event {};
 
 import { jest } from "@jest/globals";
+import { $$ } from "../helpers/editor-ui.js";
 import * as Y from "../../../src/vendor/yjs.vendor.js";
 import { identityPlugin } from "../../../src/page/model.js";
 import { state as pmState, view as pmView } from "../../../src/vendor/prosemirror.vendor.js";
@@ -8,6 +9,7 @@ import { createPageDoc, createBridge, keepViewPos, seedFrom, docOf, walk, author
 import { NET } from "../../../src/page/ybind/layout.js";
 import { moveBlock } from "../../../src/page/blocks.js";
 import { createRecoverList, NOTICE_TEXT } from "../../../src/page/recover.js";
+import { deepActiveElement } from "../../../src/dom/active-element.js";
 
 const run = (text, displaced, author = null) => ({ kind: "text", text, displaced, baseline: !displaced, author });
 const record = (source, runs, type = "paragraph") => ({ source, revision: `rev-${source}`, blockId: "q", type, blocks: [{ id: "q", type, runs }] });
@@ -28,9 +30,10 @@ const mountList = (options) => {
   const mount = document.body.appendChild(document.createElement("div"));
   const list = createRecoverList({ mount, ...options });
   mounts.push({ mount, list });
-  return { mount, list, button: mount.querySelector(".page-recover"), panel: mount.querySelector(".page-recover-panel") };
+  const root = mount.querySelector('clay-editor-ui[data-clay-ui="page-recover"]').shadowRoot;
+  return { mount, list, button: root.querySelector(".page-recover"), panel: root.querySelector(".page-recover-panel") };
 };
-const toasts = () => [...document.querySelectorAll("[data-clay-toast]")].filter((el) => el.textContent.includes(NOTICE_TEXT));
+const toasts = () => $$("[data-clay-toast]", "toasts").filter((el) => el.textContent.includes(NOTICE_TEXT));
 const buttonIn = (root, label) => [...root.querySelectorAll("button")].find((b) => b.textContent === label);
 
 afterEach(() => {
@@ -53,7 +56,7 @@ test("the button appears only when something is recoverable, and the panel lists
   expect(rows[0].querySelector(".page-recover-meta").textContent).toBe("Paragraph · You");
   expect(rows[0].querySelector(".page-recover-text").innerHTML).toBe("bra<mark>!Z</mark>");
   expect(rows[1].querySelector(".page-recover-meta").textContent).toBe("Heading · Another editor");
-  expect(document.activeElement).toBe(rows[0].querySelector("button"));
+  expect(deepActiveElement()).toBe(rows[0].querySelector("button"));
 });
 
 test("Restore passes the record's source and revision, and reports the restored block", () => {
@@ -89,7 +92,7 @@ test("Escape closes the panel and returns focus to the button", () => {
   button.click();
   panel.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
   expect(panel.hidden).toBe(true);
-  expect(document.activeElement).toBe(button);
+  expect(deepActiveElement()).toBe(button);
 });
 
 // The toast stack arrives on the first toast, so the toast below is waited for
@@ -114,7 +117,7 @@ test("a personal notice shows one toast; Review opens the record and Dismiss dis
   buttonIn(toasts()[0], "Review").click();
   expect(panel.hidden).toBe(false);
   expect(panel.querySelector(".is-target").dataset.source).toBe("2.9");
-  expect(document.activeElement).toBe(panel.querySelector('[data-source="2.9"] button'));
+  expect(deepActiveElement()).toBe(panel.querySelector('[data-source="2.9"] button'));
   buttonIn(toasts()[0], "Dismiss").click();
   expect(binding.dismiss.mock.calls).toEqual([["2.9", "rev-2.9"], ["1.4", "rev-1.4"]]);
   binding.push({ recoverable: recs, notices: [] });
@@ -130,7 +133,7 @@ test("destroy unsubscribes and removes the button and panel", () => {
   list.destroy();
   mount.remove();
   expect(binding.listening).toBe(false);
-  expect(mount.querySelector(".page-recover")).toBeNull();
+  expect(mount.querySelector('clay-editor-ui[data-clay-ui="page-recover"]')).toBeNull();
 });
 
 test("with a real binding, a peer's text kept aside by an Undo is listed and Restore brings it back", () => {

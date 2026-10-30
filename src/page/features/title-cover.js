@@ -11,6 +11,7 @@ import { asStep } from "../blocksel.js";
 import { announce } from "../announce.js";
 import { safeFileHref, safeSrc } from "../address.js";
 import { EMBED_MAX, mediaRuntime } from "../media.js";
+import { mountEditorUI } from "../../ui/editor-ui.js";
 
 // How far one arrow key moves the focal point, in percent of the image.
 const STEP = 5;
@@ -28,7 +29,10 @@ function titleOf(doc) {
   return null;
 }
 
+// The bar sits in its own shadow root beside the editor, so the page's CSS cannot restyle
+// it. The page's --page-* tokens still reach it, and it keeps the editor's font and colour.
 const COVER_CSS = `
+:host{font:inherit !important;color:inherit !important}
 .page-cover-panel{display:flex;align-items:center;gap:8px;margin:8px 0;padding:6px 10px;border:1px solid var(--page-pop-line);border-radius:8px;background:var(--page-pop-bg);color:var(--page-pop-ink);box-shadow:var(--page-pop-shadow);font-size:.88em}
 .page-cover-msg{max-width:34ch}
 .page-cover-bar{flex:1;height:2px;border-radius:1px;background:var(--page-rule);overflow:hidden}
@@ -53,19 +57,6 @@ export function createFeature({ view = null, upload = null } = {}) {
   if (!view) return { run: () => ({ ok: false, code: "not-editing" }), dispose() {} };
   const doc = view.dom.ownerDocument;
   let session = null;
-  let styled = false;
-
-  // The bar is this module's own chrome, so it arrives with the first cover command and
-  // never with the page: an editor nobody asks for a cover never downloads or paints it.
-  const useStyle = () => {
-    if (styled) return;
-    styled = true;
-    const el = doc.createElement("style");
-    el.id = "page-feature-titleCover";
-    el.setAttribute("clay", "no-dirty editor-ui");
-    el.textContent = COVER_CSS;
-    doc.head.appendChild(el);
-  };
 
   function close() {
     const s = session;
@@ -74,7 +65,7 @@ export function createFeature({ view = null, upload = null } = {}) {
     for (const [target, type, fn, options] of s.listen) target.removeEventListener(type, fn, options);
     s.abort?.abort();
     s.input?.remove();
-    s.panel?.remove();
+    s.ui?.remove();
     s.stopPick?.();
     if (s.state === "position") restore(s);
   }
@@ -120,10 +111,9 @@ export function createFeature({ view = null, upload = null } = {}) {
     } else if (s.state === "embed-choice") box.append(button("embed", "Keep this image inside the document"), button("cancel", "Close"));
     else if (s.state === "position") box.append(button("apply", "Apply"), button("cancel", "Cancel"));
     else box.append(button("cancel", "Close"));
-    if (!box.isConnected) {
+    if (!s.ui) {
       const host = view.dom.parentElement;
-      if (host) host.insertBefore(box, view.dom);
-      else doc.body.appendChild(box);
+      s.ui = mountEditorUI({ name: "page-cover", content: box, css: [COVER_CSS], parent: host ?? doc.body, before: host ? view.dom : null });
     }
   }
 
@@ -253,7 +243,6 @@ export function createFeature({ view = null, upload = null } = {}) {
   // the upload was in the air.
   function add() {
     close();
-    useStyle();
     const s = { id: newId("c"), owner: titleOf(view.state.doc)?.node.attrs.id ?? null, state: "uploading", percent: 0, message: "Choosing a cover", listen: [] };
     session = s;
     listen(s, doc, "keydown", (event) => {
@@ -298,7 +287,6 @@ export function createFeature({ view = null, upload = null } = {}) {
   // until one commit on release, on Enter or on Apply. Escape puts it back.
   function reposition() {
     close();
-    useStyle();
     const title = titleOf(view.state.doc);
     if (!title || !title.node.attrs.pageCoverSrc) return { ok: false, code: "no-cover" };
     const s = {

@@ -1,4 +1,5 @@
 import { jest } from "@jest/globals";
+import { $, $$ } from "./helpers/editor-ui.js";
 
 // Scenario: inside a workspace frame the shell owns the frame's URL, sandbox and
 // replacement, so a mode change from the document is the shell's reload, not the
@@ -214,10 +215,10 @@ test("the keyboard shortcut delegates too", async () => {
 test("the menu switch delegates too", async () => {
   const hook = accept();
   await bootMenu({ hook });
-  expect(document.querySelector(".clay-menu-edit").getAttribute("aria-checked")).toBe("false");
+  expect($(".clay-menu-edit", "menu").getAttribute("aria-checked")).toBe("false");
 
   await withFakeLocation(async (fake) => {
-    document.querySelector(".clay-menu-edit").click();
+    $(".clay-menu-edit", "menu").click();
     await settle();
 
     expect(hook).toHaveBeenCalledWith("edit");
@@ -531,10 +532,10 @@ test("a menu refusal says what the shell said instead of blaming the save", asyn
   await bootMenu({ hook });
 
   await withFakeLocation(async (fake) => {
-    document.querySelector(".clay-menu-edit").click();
+    $(".clay-menu-edit", "menu").click();
     await settle();
 
-    const note = document.querySelector(".clay-menu-note");
+    const note = $(".clay-menu-note", "menu");
     expect(note.hidden).toBe(false);
     expect(note.textContent).toBe("The workspace didn't answer, so this page stays as it was.");
     expect(note.textContent).not.toBe("Couldn't save, so this page stays in edit mode.");
@@ -547,10 +548,10 @@ test("a menu refusal with an unknown code falls back to a general message", asyn
   await bootMenu({ hook });
 
   await withFakeLocation(async () => {
-    document.querySelector(".clay-menu-edit").click();
+    $(".clay-menu-edit", "menu").click();
     await settle();
 
-    expect(document.querySelector(".clay-menu-note").textContent).toBe("Couldn't switch modes.");
+    expect($(".clay-menu-note", "menu").textContent).toBe("Couldn't switch modes.");
   });
 });
 
@@ -559,10 +560,10 @@ test("a busy or cancelled refusal says nothing", async () => {
   await bootMenu({ hook: busy });
 
   await withFakeLocation(async (fake) => {
-    document.querySelector(".clay-menu-edit").click();
+    $(".clay-menu-edit", "menu").click();
     await settle();
 
-    const note = document.querySelector(".clay-menu-note");
+    const note = $(".clay-menu-note", "menu");
     expect(note.hidden).toBe(true);
     expect(note.textContent).toBe("");
     expect(fake.reload).not.toHaveBeenCalled();
@@ -596,15 +597,15 @@ test("the SEO sheet's Edit says the permission refusal in the menu's note", asyn
   window.clay.toast = toast;
   const note = jest.spyOn(window.clay.menu, "note");
 
-  document.querySelector(".clay-menu-goo").click();
+  $(".clay-menu-goo", "menu").click();
   await settle();
-  const item = [...document.querySelectorAll('[role="menuitem"]')].find((button) => button.dataset.menuId === "seo");
+  const item = $$('[role="menuitem"]', "menu").find((button) => button.dataset.menuId === "seo");
   expect(item).toBeDefined();
   item.click();
   await settle();
 
   await withFakeLocation(async (fake) => {
-    document.querySelector(".clay-seo-edit").click();
+    $(".clay-seo-edit", "seo").click();
     await settle();
 
     expect(note).toHaveBeenCalledWith("You don't have permission to edit this document.", "error");

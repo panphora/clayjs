@@ -1,5 +1,7 @@
 import { jest } from "@jest/globals";
 
+import { $ } from "./helpers/editor-ui.js";
+
 const copied = [];
 jest.unstable_mockModule("../../src/utils/copy-to-clipboard.js", () => ({ default: (text) => { copied.push(text); } }));
 
@@ -12,7 +14,7 @@ const { default: themodal } = await import("../../src/ui/modal.js");
 const dialog = () => document.querySelector('[role="dialog"]');
 const submit = () => dialog().querySelector('button[type="submit"]');
 const closeButton = () => dialog().querySelector('button[aria-label="Close"]');
-const anyToast = () => document.querySelector("[data-clay-toast], .toast");
+const anyToast = () => $("[data-clay-toast], .toast", "toasts");
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 beforeEach(() => {

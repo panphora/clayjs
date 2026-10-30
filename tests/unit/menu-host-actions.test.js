@@ -1,4 +1,5 @@
 import { jest } from "@jest/globals";
+import { $, active } from "./helpers/editor-ui.js";
 
 // Scenario: the host names the pages a person may open for this document in the
 // `document.actions` block of `GET /_/meta`. The menu shows each one as a link that
@@ -72,9 +73,9 @@ async function boot({ meta = null, plugins = "menu", edit = false } = {}) {
   await flush();
 }
 
-const listOf = () => document.querySelector(".clay-menu-list");
-const gooOf = () => document.querySelector(".clay-menu-goo");
-const buttonOf = (id) => document.querySelector(`[role="menuitem"][data-menu-id="${id}"]`);
+const listOf = () => $(".clay-menu-list", "menu");
+const gooOf = () => $(".clay-menu-goo", "menu");
+const buttonOf = (id) => $(`[role="menuitem"][data-menu-id="${id}"]`, "menu");
 const ids = () => [...listOf().querySelectorAll('[role="menuitem"]')].map((el) => el.dataset.menuId);
 const indexOf = (id) => ids().indexOf(id);
 
@@ -114,7 +115,7 @@ test("all three host links render as new-tab anchors in their sections", async (
   expect(indexOf("clay.code")).toBeGreaterThan(-1);
   expect(indexOf("clay.code")).toBeLessThan(indexOf("seo"));
   expect(indexOf("clay.duplicate")).toBe(indexOf("clay.download") - 1);
-  expect(indexOf("clay.versions")).toBe(indexOf("clay.hide") - 1);
+  expect(indexOf("clay.versions")).toBeGreaterThan(indexOf("clay.download"));
 });
 
 test("only the actions the host named appear", async () => {
@@ -173,11 +174,11 @@ test("the code editor link is reachable from the keyboard", async () => {
   expect(listOf().hidden).toBe(false);
 
   const code = buttonOf("clay.code");
-  key(document.activeElement, "ArrowUp");
-  expect(document.activeElement).not.toBe(code);
-  key(document.activeElement, "ArrowDown");
-  expect(document.activeElement).toBe(code);
-  expect(document.activeElement.tagName).toBe("A");
+  key(active(), "ArrowUp");
+  expect(active()).not.toBe(code);
+  key(active(), "ArrowDown");
+  expect(active()).toBe(code);
+  expect(active().tagName).toBe("A");
 });
 
 test("hostActions() keeps only the valid hrefs", async () => {
@@ -257,6 +258,6 @@ test("a host action the host does itself is a button that posts, opens what it a
   gooOf().click();
   buttonOf("clay.export").click();
   await flush();
-  expect(document.querySelector(".clay-menu-note").textContent).toBe("The Downloads folder is missing.");
+  expect($(".clay-menu-note", "menu").textContent).toBe("The Downloads folder is missing.");
   opened.mockRestore();
 });

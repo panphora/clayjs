@@ -1,4 +1,5 @@
-import { INTRO_CSS } from "./intro-style.js";
+import { CLOSE_CSS, INTRO_CSS } from "./intro-style.js";
+import { mountEditorUI } from "../../ui/editor-ui.js";
 import { announceBottomUi } from "./bottom-ui.js";
 import { bootPhase } from "../../core/boot-phase.js";
 
@@ -67,7 +68,8 @@ function mount({ memory, template, appName }) {
   close.className = "clay-intro__close";
   close.setAttribute("aria-label", COPY.close);
   close.innerHTML = '<svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true"><path d="M1.4 0 6 4.6 10.6 0 12 1.4 7.4 6 12 10.6 10.6 12 6 7.4 1.4 12 0 10.6 4.6 6 0 1.4z"/></svg>';
-  section.appendChild(close);
+  close.addEventListener("click", () => dismiss("closed"));
+  mountEditorUI({ name: "intro-close", content: close, css: [CLOSE_CSS], parent: section });
 
   let gone = false;
   let frame = 0;
@@ -101,7 +103,7 @@ function mount({ memory, template, appName }) {
   }
 
   section.addEventListener("click", (event) => {
-    if (event.target.closest(".clay-intro__close, [visitor-intro-dismiss]")) {
+    if (event.target.closest("[visitor-intro-dismiss]")) {
       dismiss("closed");
       return;
     }

@@ -6,6 +6,7 @@
 import { set } from "../lib/hostile-css.js";
 import { bevelBox, bevelSurface, bevelText, bevelButton, protectIcon, paintLook } from "./bevel-controls.js";
 import { TOKENS, RULES, GLYPHS } from "./bevel.js";
+import { mountEditorUI } from "./editor-ui.js";
 
 const TONES = {
   success: { edge: TOKENS.teal, icon: GLYPHS.toastSuccess },
@@ -24,9 +25,11 @@ function motion() {
 }
 
 // Looked up on every call, never cached: a live-sync morph or a caller can empty the
-// body, and a detached stack would swallow every toast after it.
+// body, and a detached stack would swallow every toast after it. The stack sits in its own
+// shadow root: the inline !important rules already beat the page's stylesheets, and the
+// root also keeps out what they cannot, such as a page's ::before content.
 function stack() {
-  const existing = document.querySelector("[data-clay-toasts]");
+  const existing = document.querySelector('clay-editor-ui[data-clay-ui="toasts"]')?.shadowRoot.querySelector("[data-clay-toasts]");
   if (existing) return existing;
   const box = bevelBox("div", [
     "position:fixed", "top:18px", "right:18px", "z-index:9999",
@@ -35,7 +38,7 @@ function stack() {
   ]);
   box.setAttribute("data-clay-toasts", "");
   box.setAttribute("aria-live", "polite");
-  document.body.append(box);
+  mountEditorUI({ name: "toasts", content: box });
   return box;
 }
 

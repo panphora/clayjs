@@ -2019,6 +2019,9 @@ class LiveSync {
       ignoreAttribute: (el, name, merged) => isRootLocalAttr(el, name, merged) || (derivedActive() && isDerivedAttr(merged || el, name)),
       attributeMerge,
       protectFocusedValue: true,
+      // Focus inside ClayJS's own UI (a shadow root) has nothing on the page to put back,
+      // and restoring the stale page selection would pull focus out of the field.
+      restoreFocus: document.activeElement?.localName !== 'clay-editor-ui',
       keepLiveOnly: source === 'peer',
       scripts: { mergeTags: loadedEngine().mergeTagRecognizers },
       hooks: { beforeAttributeUpdated },

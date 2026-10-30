@@ -378,11 +378,16 @@ function boundaryOf(step, at, fail) {
 const readValue = (element) =>
   element && element.matches?.("input, textarea") ? element.value : element?.textContent ?? null;
 
-const unsentField = (field) => document.querySelector(`[unsent="${field}"]`);
+// ClayJS's own UI (the menu, the SEO sheet) mounts inside open shadow roots, so a lookup
+// searches the document and then each of those roots.
+const searchRoots = () => [document, ...[...document.querySelectorAll("clay-editor-ui")].map((host) => host.shadowRoot).filter(Boolean)];
+const deepQuery = (selector) => searchRoots().map((root) => root.querySelector(selector)).find(Boolean) ?? null;
+
+const unsentField = (field) => deepQuery(`[unsent="${field}"]`);
 
 // A target is an element id, or — where a page's own editor owns the element and it has
 // no id of its own — the selector that reaches it.
-const elementFor = (target) => document.getElementById(target) ?? document.querySelector(target);
+const elementFor = (target) => searchRoots().map((root) => root.getElementById(target)).find(Boolean) ?? deepQuery(target);
 
 // The page under test's own live store, as the value a peer's frames land in and the
 // article it projects onto.
@@ -892,7 +897,7 @@ export async function runCase(json) {
       inputHtml: fixture.page.body,
       pageHtml: document.body.innerHTML,
       documentHtml: document.documentElement.outerHTML,
-      fields: [...document.querySelectorAll("[id], [unsent]")].map((element) => ({
+      fields: searchRoots().flatMap((root) => [...root.querySelectorAll("[id], [unsent]")]).map((element) => ({
         id: element.id || null,
         unsent: element.getAttribute("unsent"),
         value: readValue(element),

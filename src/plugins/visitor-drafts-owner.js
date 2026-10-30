@@ -20,14 +20,13 @@ function mountChip() {
   if (!mounting) {
     const asked = sessions;
     mounting = import("./visitor-drafts/owner-chip.js")
-      .then(({ mountOwnerChip }) => {
-        const chip = mountOwnerChip() || document.getElementById("clay-owner");
+      .then(({ mountOwnerChip, ownerChip }) => {
+        const chip = mountOwnerChip() || ownerChip();
         if (asked === sessions) {
           mounted = chip;
           return chip;
         }
-        chip?.liftOff?.();
-        chip?.remove();
+        chip?.unmount?.();
         return null;
       })
       .finally(() => { mounting = null; });
@@ -37,8 +36,7 @@ function mountChip() {
 
 function unmountChip() {
   sessions += 1;
-  mounted?.liftOff?.();
-  mounted?.remove();
+  mounted?.unmount?.();
   mounted = null;
   document.getElementById("clay-owner-vars")?.remove();
 }

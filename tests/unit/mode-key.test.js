@@ -82,7 +82,7 @@ function withFakeLocation(run) {
     .finally(() => Object.defineProperty(window, "location", { value: real, configurable: true }));
 }
 
-const note = () => document.querySelector(".clay-mode-note");
+const note = () => document.querySelector('clay-editor-ui[data-clay-ui="mode-note"]')?.shadowRoot?.querySelector(".clay-mode-note") ?? null;
 
 afterEach(() => jest.restoreAllMocks());
 
@@ -157,7 +157,8 @@ test("the note shows once for an owner in view", async () => {
   expect(note().textContent).toContain("This page opens in view mode.");
   expect(note().getAttribute("clay")).toBe("editor-ui");
   expect(note().getAttribute("role")).toBe("status");
-  expect(document.getElementById("clay-mode-note-style").getAttribute("clay")).toBe("editor-ui");
+  expect(document.querySelector('clay-editor-ui[data-clay-ui="mode-note"]').getAttribute("clay")).toBe("editor-ui");
+  expect(document.getElementById("clay-mode-note-style")).toBeNull();
   expect(storage.local.get("mode-note")).toBe(true);
 });
 
@@ -210,5 +211,6 @@ test("the note never appears in clay.getHTML()", async () => {
   const html = getPageContents();
 
   expect(html).not.toContain("clay-mode-note");
+  expect(html).not.toContain("clay-editor-ui");
   expect(html).not.toContain("This page opens in view mode.");
 });

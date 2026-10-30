@@ -4,6 +4,7 @@
  */
 import { createHash } from "node:crypto";
 import { jest } from "@jest/globals";
+import { $, $$ } from "./helpers/editor-ui.js";
 
 /**
  * The menu, the SEO sheet, the upgrade runner and the source map where they meet a mode
@@ -81,14 +82,14 @@ async function boot({ edit = true, plugins = "menu,undo" } = {}) {
   await settle();
 }
 
-const menuEdit = () => document.querySelector(".clay-menu-edit");
-const sheetRoot = () => document.querySelector(".clay-seo");
-const fieldOf = (key) => document.querySelector(`.clay-seo [data-key="${key}"]`);
-const buttonOf = (name) => document.querySelector(`.clay-seo-${name}`);
+const menuEdit = () => $(".clay-menu-edit", "menu");
+const sheetRoot = () => $(".clay-seo", "seo");
+const fieldOf = (key) => $(`.clay-seo [data-key="${key}"]`, "seo");
+const buttonOf = (name) => $(`.clay-seo-${name}`, "seo");
 
 async function openSheet() {
-  document.querySelector(".clay-menu-goo").click();
-  const item = [...document.querySelectorAll('[role="menuitem"]')].find((button) => button.dataset.menuId === "seo");
+  $(".clay-menu-goo", "menu").click();
+  const item = $$('[role="menuitem"]', "menu").find((button) => button.dataset.menuId === "seo");
   expect(item).toBeDefined();
   item.click();
   await settle();

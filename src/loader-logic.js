@@ -214,7 +214,7 @@ const DRAFT_DROPS_CORE = ["attrs/refetch-on-save.js", "core/conflict-notice.js"]
 // Only that host's copies auto-add the update check; another source names it.
 const TEMPLATE_SOURCE_PREFIX = "https://hyperclay.com/templates/";
 
-export function resolveModules(params, isEditMode, { isDraftMode = false, hasSap = false, canEdit = false, templateSource = null } = {}) {
+export function resolveModules(params, isEditMode, { isDraftMode = false, hasSap = false, hasVariants = false, canEdit = false, templateSource = null } = {}) {
   const core = [...CORE_WAVES.always];
   if (isEditMode) core.push(...CORE_WAVES.editOnly);
 
@@ -228,6 +228,8 @@ export function resolveModules(params, isEditMode, { isDraftMode = false, hasSap
     if (spec.default) enabled.add(name);
   }
   if (hasSap) enabled.add("derive");
+  // Two or more looks need the dock's variant pill, and only someone who can edit sees it.
+  if (hasVariants && (isEditMode || canEdit)) enabled.add("menu");
   // ai-edit cannot run without the wire, so excluding the wire excludes it too.
   if (excluded.has("wire")) enabled.delete("ai-edit");
   if (!isEditMode && !isDraftMode && enabled.has("page")) enabled.add("page-view");

@@ -2,6 +2,8 @@
 // read both the text and the severity off the public event, so a server warning
 // on an otherwise-successful save shows as a warning toast rather than "Saved".
 
+import { $ } from "./helpers/editor-ui.js";
+
 beforeAll(async () => {
   window.clayEditMode = true;
   await import("../../src/ui/index.js");
@@ -16,7 +18,7 @@ function fireSaved(detail) {
 }
 
 function renderedToast() {
-  return document.querySelector("[data-clay-toast]");
+  return $("[data-clay-toast]", "toasts");
 }
 
 test("warning msgType renders a warning toast carrying the server's text", () => {

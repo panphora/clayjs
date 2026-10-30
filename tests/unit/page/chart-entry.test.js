@@ -1,5 +1,6 @@
 import { jest } from "@jest/globals";
 import { editor, posOf, select, typeText } from "./view-helpers.js";
+import { $$ } from "../helpers/editor-ui.js";
 import { RECORD } from "./fixtures/all-kinds.js";
 import { history } from "../../../src/vendor/prosemirror.vendor.js";
 import { chartFromSlash, chartTables, tableLabel } from "../../../src/page/chart.js";
@@ -17,7 +18,7 @@ const slash = (view, query) => { view.coordsAtPos = () => COORDS; for (const ch 
 const types = (view) => { const out = []; view.state.doc.forEach((node) => out.push(node.type.name)); return out; };
 const settled = () => new Promise((resolve) => setTimeout(resolve, 0));
 const painted = () => new Promise((resolve) => { window.requestAnimationFrame(() => setTimeout(resolve, 0)); });
-const toasts = () => [...document.querySelectorAll("[data-clay-toast]")];
+const toasts = () => $$("[data-clay-toast]", "toasts");
 const untilToast = async (text) => {
   for (let i = 0; i < 50 && !toasts().some((toast) => toast.textContent.includes(text)); i++) await settled();
 };

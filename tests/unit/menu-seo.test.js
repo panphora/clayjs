@@ -1,5 +1,6 @@
 import { jest } from "@jest/globals";
 import { applyHead } from "../../src/plugins/menu/seo-head.js";
+import { $, $$, active, hostOf, rootOf } from "./helpers/editor-ui.js";
 
 // Scenario: "SEO settings…" in claygoo slides a sheet down from the top that edits
 // the document's head fields and writes them only on Apply. Opening and cancelling
@@ -72,10 +73,10 @@ async function boot({
   await settle();
 }
 
-const sheetRoot = () => document.querySelector(".clay-seo");
-const fieldOf = (key) => document.querySelector(`.clay-seo [data-key="${key}"]`);
+const sheetRoot = () => $(".clay-seo", "seo");
+const fieldOf = (key) => $(`.clay-seo [data-key="${key}"]`, "seo");
 const fieldWrap = (key) => fieldOf(key).closest(".clay-seo-field");
-const buttonOf = (name) => document.querySelector(`.clay-seo-${name}`);
+const buttonOf = (name) => $(`.clay-seo-${name}`, "seo");
 
 function setValue(key, value) {
   const input = fieldOf(key);
@@ -85,8 +86,8 @@ function setValue(key, value) {
 }
 
 async function openSheet() {
-  document.querySelector(".clay-menu-goo").click();
-  const item = [...document.querySelectorAll('[role="menuitem"]')].find((button) => button.dataset.menuId === "seo");
+  $(".clay-menu-goo", "menu").click();
+  const item = $$('[role="menuitem"]', "menu").find((button) => button.dataset.menuId === "seo");
   expect(item).toBeDefined();
   item.click();
   await settle();
@@ -103,14 +104,14 @@ test("the menu carries the SEO item, and opening then cancelling writes nothing"
   expect(root.getAttribute("clay")).toBe("editor-ui");
   expect(root.getAttribute("role")).toBe("region");
   expect(root.getAttribute("aria-labelledby")).toBe("clay-seo-heading");
-  expect(document.getElementById("clay-seo-heading").textContent).toBe("SEO and social sharing");
-  expect(document.getElementById("clay-seo-style").getAttribute("clay")).toBe("editor-ui");
-  expect(document.activeElement).toBe(fieldOf("title"));
+  expect(rootOf("seo").getElementById("clay-seo-heading").textContent).toBe("SEO and social sharing");
+  expect(hostOf("seo").getAttribute("clay")).toBe("editor-ui");
+  expect(active()).toBe(fieldOf("title"));
   expect(fieldOf("description").value).toBe("Start description");
 
   buttonOf("cancel").click();
 
-  expect(sheetRoot()).toBeNull();
+  expect(hostOf("seo")).toBeNull();
   expect(window.clay.getHTML()).toBe(before);
 });
 
@@ -125,7 +126,7 @@ test("Apply writes only the changed fields as one undo step", async () => {
 
   expect(document.querySelector('meta[name="description"]').getAttribute("content")).toBe("A new description");
   expect(document.querySelector("title").textContent).toBe("Start title");
-  expect(sheetRoot()).toBeNull();
+  expect(hostOf("seo")).toBeNull();
   expect(window.clay.undo.history.length).toBe(entries + 1);
   expect(window.clay.undo.history.at(-1).label).toBe("SEO settings");
   expect(window.clay.getHTML()).toContain("A new description");
@@ -167,7 +168,7 @@ test("view mode is read-only, and the Edit button asks for edit mode and sets th
   buttonOf("apply").click();
   await settle();
 
-  expect(sheetRoot()).toBeNull();
+  expect(hostOf("seo")).toBeNull();
   expect(document.querySelector("title").textContent).toBe("Start title");
   expect(document.querySelector('meta[name="description"]').getAttribute("content")).toBe("Start description");
 
@@ -212,7 +213,7 @@ test("a peer change to the same field shows the conflict choice and Apply waits 
   await settle();
 
   expect(document.querySelector('meta[name="description"]').getAttribute("content")).toBe("mine");
-  expect(sheetRoot()).toBeNull();
+  expect(hostOf("seo")).toBeNull();
 });
 
 test("an upload that resolves after the sheet closed writes nothing", async () => {
@@ -224,7 +225,7 @@ test("an upload that resolves after the sheet closed writes nothing", async () =
 
   const uploadButton = buttonOf("upload-button");
   expect(uploadButton.hidden).toBe(false);
-  const fileInput = document.querySelector(".clay-seo-file");
+  const fileInput = $(".clay-seo-file", "seo");
   Object.defineProperty(fileInput, "files", { value: [new File(["x"], "shot.png", { type: "image/png" })], configurable: true });
   fileInput.dispatchEvent(new Event("change"));
   await settle();
@@ -234,7 +235,7 @@ test("an upload that resolves after the sheet closed writes nothing", async () =
   resolveUpload({ ok: true, uploads: [{ url: "https://cdn.example.com/shot.png" }] });
   await settle();
 
-  expect(sheetRoot()).toBeNull();
+  expect(hostOf("seo")).toBeNull();
   expect(window.clay.getHTML()).toBe(before);
   expect(document.querySelector('meta[property="og:image"]')).toBeNull();
 });
@@ -259,7 +260,7 @@ test("the hosted robots note appears when a HEAD of the page says noindex", asyn
   await boot({ robots: "noindex, nofollow" });
   await openSheet();
 
-  const note = [...document.querySelectorAll(".clay-seo-note")].find((el) => !el.hidden && el.textContent.includes("hidden from search engines"));
+  const note = $$(".clay-seo-note", "seo").find((el) => !el.hidden && el.textContent.includes("hidden from search engines"));
   expect(note).toBeDefined();
 });
 
@@ -284,7 +285,7 @@ test("a Document's title change writes the marker in the same undo step", async 
 test("the first-heading link shows only with the marker and Apply takes the title back", async () => {
   await boot({ body: DOCUMENT_BODY });
   await openSheet();
-  const link = () => document.querySelector(".clay-seo-derived");
+  const link = () => $(".clay-seo-derived", "seo");
   expect(link()).not.toBeNull();
   expect(link().hidden).toBe(true);
 
@@ -311,7 +312,7 @@ test("a page that is not a Document gets no marker and no first-heading link", a
   await boot();
   await openSheet();
 
-  expect(document.querySelector(".clay-seo-derived").hidden).toBe(true);
+  expect($(".clay-seo-derived", "seo").hidden).toBe(true);
 
   setValue("title", "The person's title");
   buttonOf("apply").click();
@@ -322,7 +323,7 @@ test("a page that is not a Document gets no marker and no first-heading link", a
 });
 
 const undoButton = () =>
-  [...document.querySelectorAll("[data-clay-toast]")]
+  $$("[data-clay-toast]", "toasts")
     .flatMap((toast) => [...toast.querySelectorAll("button")])
     .find((button) => button.textContent.trim() === "Undo");
 
@@ -341,7 +342,7 @@ test("without clay.undo Apply offers an Undo toast that puts the head back and s
   expect(document.querySelector("title").textContent).toBe("A new title");
   expect(document.querySelector('meta[name="description"]').getAttribute("content")).toBe("A new description");
   expect(document.querySelector('meta[property="og:title"]').getAttribute("content")).toBe("A new card title");
-  const toast = document.querySelector('[data-clay-toast="success"]');
+  const toast = $('[data-clay-toast="success"]', "toasts");
   expect(toast).not.toBeNull();
   expect(toast.textContent).toContain("SEO settings applied");
   const undo = undoButton();
@@ -374,6 +375,6 @@ test("with clay.undo Apply goes through commit and offers no Undo toast", async 
   expect(commit).toHaveBeenCalledTimes(1);
   expect(commit.mock.calls[0][0]).toBe("SEO settings");
   expect(document.querySelector('meta[name="description"]').getAttribute("content")).toBe("A new description");
-  expect(document.querySelector("[data-clay-toast]")).toBeNull();
+  expect($("[data-clay-toast]", "toasts")).toBeNull();
   expect(window.clay.toastPersistent).not.toHaveBeenCalled();
 });
