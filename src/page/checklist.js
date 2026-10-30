@@ -1,5 +1,5 @@
-// The checklist's keys: `Mod-Shift-o` and `Mod-Shift-d` focus an item's owner and
-// due controls. The controls are a decoration the view part draws and focuses, so
+// The checklist's keys: `Mod-Shift-o` and `Mod-Shift-d` open an item's owner and
+// due popovers. The controls are a decoration the view part draws and opens, so
 // this asks the parts it finds for a loaded editor and stays out of the rest.
 import { state } from "../vendor/prosemirror.vendor.js";
 import { viewHooks } from "./view-hooks.js";

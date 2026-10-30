@@ -133,7 +133,10 @@ function popup(view, anchor, { className, label, check, onKey = null }) {
     if (openPopup?.panel === panel) openPopup = null;
     panel.remove();
     anchor.setAttribute("aria-expanded", "false");
-    if (focusAnchor) anchor.focus();
+    const fromKeys = anchor.dataset.fromKeys === "true";
+    delete anchor.dataset.fromKeys;
+    if (focusAnchor && fromKeys) view.focus();
+    else if (focusAnchor) anchor.focus();
   };
   panel.addEventListener("keydown", (event) => {
     event.stopPropagation();
@@ -380,7 +383,8 @@ export function focusControl(view, name) {
   const widget = [...view.dom.querySelectorAll(".page-check-controls")].find((el) => el.dataset.item === id);
   const button = widget?.querySelector(`[data-check="${name}"]`);
   if (!button) return false;
-  button.focus();
+  button.dataset.fromKeys = "true";
+  button.click();
   return true;
 }
 
