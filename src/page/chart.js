@@ -207,7 +207,11 @@ export class ChartView {
     this.panel.addEventListener("click", (event) => this.panelClick(event));
     this.panel.addEventListener("change", (event) => this.panelChange(event));
     this.panel.addEventListener("mousedown", (event) => { if (event.target.closest?.("button")) event.preventDefault(); });
-    this.outside = (event) => { if (this.panel.isConnected && !this.dom.contains(event.target)) this.closePanel(); };
+    this.outside = (event) => {
+      if (!this.panel.isConnected || this.dom.contains(event.target)) return;
+      this.commitTitle();
+      this.closePanel();
+    };
     this.escape = (event) => {
       if (!this.panel.isConnected || event.key !== "Escape") return;
       event.preventDefault();
@@ -225,7 +229,7 @@ export class ChartView {
 
   refresh() {
     this.renderHead();
-    if (this.panel.isConnected) this.renderPanel();
+    if (this.panel.isConnected && this.panelKey() !== this.renderedKey) this.redrawPanel();
     const doc = this.view.state.doc;
     const source = sourceTable(doc, this.node.attrs.source);
     const tables = documentTables(doc).map((table) => `${table.id}:${table.name}:${table.rows}`).join("|");
@@ -327,8 +331,31 @@ export class ChartView {
     return row;
   }
 
+  panelKey() {
+    const doc = this.view.state.doc;
+    const tables = documentTables(doc).map((table) => `${table.id}:${table.name}:${table.rows}`).join("|");
+    return JSON.stringify([this.node.attrs, tables, tableData(sourceTable(doc, this.node.attrs.source))]);
+  }
+
+  redrawPanel() {
+    const active = this.doc.activeElement;
+    const focus = active && this.panel.contains(active) ? active.dataset ?? {} : null;
+    const input = this.titleInput;
+    const draft = input && input.value !== this.renderedTitle ? { value: input.value, start: input.selectionStart, end: input.selectionEnd } : null;
+    this.renderPanel();
+    if (draft && this.titleInput) this.titleInput.value = draft.value;
+    if (!focus) return;
+    const match = [...this.panel.querySelectorAll("button, input, select")].find((control) =>
+      ["field", "kind", "col", "action"].every((key) => control.dataset[key] === focus[key]));
+    if (!match) return this.panel.focus();
+    match.focus();
+    if (draft && match === this.titleInput) match.setSelectionRange?.(draft.start, draft.end);
+  }
+
   renderPanel() {
     const doc = this.doc;
+    this.renderedKey = this.panelKey();
+    this.renderedTitle = this.node.attrs.title ?? "";
     const attrs = this.node.attrs;
     const source = tableData(this.source);
     const cols = source?.cols ?? [];
@@ -438,7 +465,10 @@ export class ChartView {
   panelClick(event) {
     const button = event.target.closest?.("button");
     if (!button) return;
-    if (button.dataset.action === "done") this.closePanel(true);
+    if (button.dataset.action === "done") {
+      this.commitTitle();
+      this.closePanel(true);
+    }
     else if (button.dataset.action === "remove") this.removeChart();
     else if (button.dataset.kind) this.setAttrs({ kind: button.dataset.kind });
   }

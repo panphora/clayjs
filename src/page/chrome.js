@@ -691,6 +691,13 @@ class Chrome {
     else this.openMenu(mode, anchor);
   }
 
+  // A slash dismissed with Escape stays text: it is known by its block and the text
+  // before it, so typing after it does not bring the menu back.
+  slashKey(slashAt) {
+    const $at = this.view.state.doc.resolve(slashAt);
+    return `${$at.parent.attrs.id}\u0000${this.view.state.doc.textBetween($at.start(), slashAt - 1)}`;
+  }
+
   openMenu(mode, anchor, slashAt = null, ids = null, anchorId = null) {
     this.closeSettings();
     this.menu = { mode, anchor, slashAt, anchorId, ids: ids ?? (mode === "insert" ? [] : this.selectionIds()), query: "", active: 0, items: [], persist: false };
@@ -732,7 +739,7 @@ class Chrome {
       ...(phone ? [{ key: "turn", label: "Turn into", icon: "turn", run: (view, chrome) => chrome.openMenu("turn", chrome.more) }] : []),
       { key: "insert", label: "Insert", icon: "+", run: (view, chrome) => chrome.openMenu("insert", chrome.more, null, null, view.state.doc.child(chrome.blockIndex()).attrs.id) },
       ...actions,
-      ...(phone && this.settingsAPI ? [{ key: "settings", label: "Document settings", icon: "gear", run: (view, chrome) => chrome.openSettings(chrome.more) }] : []),
+      ...(phone && this.settingsAPI ? [{ key: "settings", label: "Document settings", icon: "gear", focus: false, run: (view, chrome) => chrome.openSettings(chrome.more) }] : []),
       { key: "titleIcon", label: "Page icon", icon: "\u263A", run: (view) => runMenuCommand(view, "titleIcon") },
       { key: "titleCover", label: "Add cover", icon: "\u25A4", run: (view) => runMenuCommand(view, "titleCover") },
       { key: "exportHtml", label: "Export reading copy", icon: "\u21E9", run: (view) => runMenuCommand(view, "exportHtml") },
@@ -889,6 +896,7 @@ class Chrome {
     }
     if (event.key === "Escape") {
       const target = this.invoker();
+      if (m.slashAt !== null) this.dismissedSlash = this.slashKey(m.slashAt);
       this.closeMenu();
       if (target === this.view.dom) this.view.focus();
       else target?.focus?.();
@@ -1072,7 +1080,8 @@ class Chrome {
       if ($head.depth === 1 && $head.parent.isTextblock && !$head.parent.type.spec.code) {
         const before = st.doc.textBetween($head.start(), $head.pos);
         const match = /(?:^|\s)\/([a-z]*)$/i.exec(before);
-        if (match) this.openMenu("insert", this.plus, $head.start() + match.index + match[0].indexOf("/") + 1, null, $head.parent.attrs.id);
+        const slashAt = match ? $head.start() + match.index + match[0].indexOf("/") + 1 : null;
+        if (match && this.slashKey(slashAt) !== this.dismissedSlash) this.openMenu("insert", this.plus, slashAt, null, $head.parent.attrs.id);
       }
     }
     this.slashQuery();
@@ -1107,11 +1116,11 @@ export function chromePlugin({ onAiTool = null } = {}) {
       chromeFor.set(view, chrome);
       return chrome;
     },
+    filterTransaction(tr) {
+      if (chrome && tr.docChanged) chrome.remote = !!tr.getMeta(REMOTE);
+      return true;
+    },
     props: {
-      filterTransaction(view, tr) {
-        if (chrome && tr.docChanged) chrome.remote = !!tr.getMeta(REMOTE);
-        return true;
-      },
       handleKeyDown(view, event) {
         if (!chrome) return false;
         if (event.key === "/" && (event.metaKey || event.ctrlKey) && !event.altKey && !chrome.menu) {

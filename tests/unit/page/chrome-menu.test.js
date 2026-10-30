@@ -3,6 +3,7 @@ import { history } from "../../../src/vendor/prosemirror.vendor.js";
 import { selectBlocks } from "../../../src/page/blocksel.js";
 import { editor, key, posOf, select, shape, typeText } from "./view-helpers.js";
 import { ACTION_ITEMS, blockLink, blockTypeOf } from "../../../src/page/chrome.js";
+import { REMOTE } from "../../../src/page/model.js";
 
 /**
  * The block menu: the slash trigger and its session, the plus, the ranking
@@ -567,6 +568,31 @@ describe("the selection bar matches the toolbar", () => {
     expect(isOpen(view)).toBe(true);
     expect(labels(view)).toContain("Table");
     expect(labels(view)[0]).toBe("Table");
+  });
+
+  test("a slash dismissed with Escape stays text: the next letters and Enter do not bring the menu back", () => {
+    const view = open([["p", "paragraph", ""]], "p");
+    view.hasFocus = () => true;
+    type(view, "see /ta");
+    expect(isOpen(view)).toBe(true);
+    key(view, "Escape");
+    expect(isOpen(view)).toBe(false);
+    typeText(view, "b");
+    expect(isOpen(view)).toBe(false);
+    expect(view.state.doc.child(0).textContent).toBe("see /tab");
+    type(view, " then /ta");
+    expect(isOpen(view)).toBe(true);
+  });
+
+  test("another person's edit does not reopen a local slash word", () => {
+    const view = open([["p", "paragraph", ""], ["q", "paragraph", "Q"]], "p");
+    view.hasFocus = () => true;
+    type(view, "/ta");
+    select(view, posOf(view, "q"));
+    select(view, posOf(view, "p", true));
+    expect(isOpen(view)).toBe(false);
+    view.dispatch(view.state.tr.insertText("!", posOf(view, "q", true)).setMeta(REMOTE, true));
+    expect(isOpen(view)).toBe(false);
   });
 
   test("the More menu names the page's icon row Page icon, and has no Add icon row", () => {

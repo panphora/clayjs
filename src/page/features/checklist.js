@@ -386,19 +386,39 @@ export function focusControl(view, name) {
 
 export function decorations(st) {
   const widgets = [];
+  const today = todayKey();
   st.doc.forEach((node, pos) => {
     if (node.type !== schema.nodes.list_item || node.attrs.kind !== "check") return;
     widgets.push(Decoration.widget(pos + node.nodeSize - 1, (view) => {
       const box = controls(view, node);
       box.dataset.item = node.attrs.id;
       return box;
-    }, { key: `${node.attrs.id}:${node.attrs.owner}:${node.attrs.due}:${node.attrs.checked}`, side: 1, stopEvent: (event) => !!event.target.closest?.(".page-check-chip, .page-check-popup"), ignoreSelection: true }));
+    }, { key: `${node.attrs.id}:${node.attrs.owner}:${node.attrs.due}:${node.attrs.checked}:${today}`, side: 1, stopEvent: (event) => !!event.target.closest?.(".page-check-chip, .page-check-popup"), ignoreSelection: true }));
   });
   return DecorationSet.create(st.doc, widgets);
 }
 
+// A document left open overnight redraws its Today, Tomorrow and overdue tags when
+// the day turns, checked once a minute and whenever the tab comes back.
+function watchDay(view) {
+  let day = todayKey();
+  const check = () => {
+    if (view.isDestroyed || todayKey() === day) return;
+    day = todayKey();
+    view.dispatch(view.state.tr.setMeta("addToHistory", false));
+  };
+  const win = view.dom.ownerDocument.defaultView;
+  const timer = win.setInterval(check, 60000);
+  win.document.addEventListener("visibilitychange", check);
+  return () => {
+    win.clearInterval(timer);
+    win.document.removeEventListener("visibilitychange", check);
+  };
+}
+
 export function createFeature({ view = null } = {}) {
   const off = view ? addViewHook(view, { decorations, focusControl }) : () => {};
+  const unwatch = view ? watchDay(view) : () => {};
   if (view && !view.isDestroyed) view.dispatch(view.state.tr.setMeta("addToHistory", false));
-  return { id: "checklist", dispose() { off(); } };
+  return { id: "checklist", dispose() { off(); unwatch(); } };
 }

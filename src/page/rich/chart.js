@@ -49,6 +49,8 @@ export function chartModel(chart, table) {
 }
 
 const PIE = { width: 560, height: 232, cx: 150, cy: 116, radius: 84 };
+const PIE_COLOURS = 6;
+const pieHeight = (rows) => Math.max(PIE.height, 54 + (rows - 1) * 36 + 24);
 
 function chartCaption(series) {
   const valid = series.points.filter((point) => point.value !== null);
@@ -58,9 +60,13 @@ function chartCaption(series) {
 function pieSlices(model) {
   const series = model.series[0];
   if (!series) return [];
-  const points = series.points.filter((point) => point.value !== null && point.value > 0);
-  const total = points.reduce((sum, point) => sum + point.value, 0);
+  const positive = series.points.filter((point) => point.value !== null && point.value > 0);
+  const total = positive.reduce((sum, point) => sum + point.value, 0);
   if (!total) return [];
+  const points = positive.length <= PIE_COLOURS ? positive : [
+    ...positive.slice(0, PIE_COLOURS - 1),
+    { id: `${positive[0].id.split(":")[0]}:other`, xLabel: "Other", value: positive.slice(PIE_COLOURS - 1).reduce((sum, point) => sum + point.value, 0), highlight: positive.slice(PIE_COLOURS - 1).some((point) => point.highlight) },
+  ];
   let angle = -Math.PI / 2;
   return points.map((point, index) => {
     const fraction = point.value / total;
@@ -71,8 +77,11 @@ function pieSlices(model) {
 }
 
 function renderPie(model, slices, width) {
-  const height = fmt(width * PIE.height / PIE.width);
-  const parts = [`<svg xmlns="http://www.w3.org/2000/svg" role="img" width="${width}" height="${height}" viewBox="0 0 ${PIE.width} ${PIE.height}">`, `<title>${esc(model.title)}</title>`, `<desc>${esc(chartCaption(model.series[0]))}</desc>`];
+  const box = pieHeight(slices.length);
+  const height = fmt(width * box / PIE.width);
+  const caption = model.series[0] ? chartCaption(model.series[0]) : "no values";
+  const parts = [`<svg xmlns="http://www.w3.org/2000/svg" role="img" width="${width}" height="${height}" viewBox="0 0 ${PIE.width} ${box}">`, `<title>${esc(model.title)}</title>`, `<desc>${esc(caption)}</desc>`];
+  if (!slices.length) parts.push(`<text x="${PIE.width / 2}" y="${PIE.cy}" text-anchor="middle">No positive values to chart</text>`);
   slices.forEach((slice) => {
     const point = ` data-point="${esc(slice.point.id)}"${slice.point.highlight ? ' data-highlight="true"' : ""}`;
     if (slice.fraction >= .999) {
@@ -96,8 +105,7 @@ function renderPie(model, slices, width) {
 
 export function renderChartSvg(model, { width = 640, height = 320, narrow = false } = {}) {
   if (model.state === "missing") return `<svg xmlns="http://www.w3.org/2000/svg" role="img" width="${width}" height="80" viewBox="0 0 ${width} 80"><title>Chart source missing</title><text x="12" y="44">Chart source missing</text></svg>`;
-  const slices = model.type === "pie" ? pieSlices(model) : [];
-  if (slices.length) return renderPie(model, slices, width);
+  if (model.type === "pie") return renderPie(model, pieSlices(model), width);
   const margin = { left: 52, right: 72, top: 28, bottom: 48 };
   const plotW = Math.max(1, width - margin.left - margin.right);
   const plotH = Math.max(1, height - margin.top - margin.bottom);

@@ -86,6 +86,29 @@ test("a pie leaves out zero and negative rows, and one positive row fills the ci
   expect(svg).toContain("7 (100%)");
 });
 
+test("a pie of eight rows keeps every legend row inside the chart and never repeats a colour", () => {
+  const rows = Array.from({ length: 8 }, (_, index) => ({ id: `r${index + 1}`, cells: { day: `Item ${index + 1}`, a: String(80 - index * 5) } }));
+  const svg = renderChartSvg(chartModel({ ...chart, type: "pie", highlight: null }, { cols: table.cols, rows }));
+  const height = Number(svg.match(/viewBox="0 0 560 (\d+)"/)[1]);
+  const baselines = [...svg.matchAll(/<text x="310" y="([\d.]+)">/g)].map((match) => Number(match[1]));
+  expect(baselines).toHaveLength(6);
+  expect(Math.max(...baselines)).toBeLessThan(height);
+  expect(svg).toContain('data-point="chart1:other"');
+  expect(svg).toContain(">Other</text>");
+  const fills = [...svg.matchAll(/<rect x="290"[^>]*fill="([^"]+)"/g)].map((match) => match[1]);
+  expect(new Set(fills).size).toBe(6);
+  expect(svg).toContain("Item 5");
+  expect(svg).not.toContain("Item 6<");
+});
+
+test("a pie with no positive value stays a pie and says so", () => {
+  const zero = { cols: table.cols, rows: [{ id: "r1", cells: { day: "Mon", a: "0" } }, { id: "r2", cells: { day: "Tue", a: "0" } }] };
+  const svg = renderChartSvg(chartModel({ ...chart, type: "pie" }, zero));
+  expect(svg).not.toContain("<polyline");
+  expect(svg).not.toContain("<line");
+  expect(svg).toContain("No positive values to chart");
+});
+
 test("a bar chart names each series once, beside its last bar", () => {
   const svg = renderChartSvg(chartModel({ ...chart, type: "bar", series: ["a", "b"] }, table));
   expect(svg.match(/>A<\/text>/g)).toHaveLength(1);

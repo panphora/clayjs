@@ -121,6 +121,10 @@ test("the header shows the title, the source table's heading name, and Edit char
   paint();
   expect(alone.dom.querySelector(".page-chart-source").textContent).toBe("Table 1");
 
+  const two = editor([["h", "heading", "Budget", { level: 2 }], ["t1", "table", "", { cols: table.cols, rows: table.rows }], ["p", "paragraph", "Second table:"], ["tbl", "table", "", { cols: table.cols, rows: table.rows }], ["ch", "chart", "", { source: "tbl", x: "c1", series: ["c2"] }]]);
+  paint();
+  expect(two.dom.querySelector(".page-chart-source").textContent).toBe("Table 2");
+
   const titled = editor([], { blocks: { tbl: table, ch: chart } });
   paint();
   expect(titled.dom.querySelector(".page-chart-title").textContent).toBe("Activation by week");
@@ -208,6 +212,73 @@ test("a typed chart title refuses the exit by name, stays in the field, and a bl
   input.blur();
   expect(view.state.doc.child(1).attrs.title).toBe("Edited chart");
   expect(pendingIds()).toEqual([]);
+});
+
+const pressButton = (button) => {
+  const down = new MouseEvent("mousedown", { bubbles: true, cancelable: true });
+  button.dispatchEvent(down);
+  if (!down.defaultPrevented) button.focus();
+  button.click();
+};
+
+test("Done and a click outside write a title still being typed", () => {
+  const view = editor([], { blocks: { tbl: table, ch: chart } });
+  paint();
+  openPanel(view);
+  let input = field(view, "title");
+  input.focus();
+  input.value = "Typed then Done";
+  pressButton(panel(view).querySelector('[data-action="done"]'));
+  expect(view.state.doc.child(1).attrs.title).toBe("Typed then Done");
+  expect(panel(view)).toBeNull();
+
+  openPanel(view);
+  input = field(view, "title");
+  input.focus();
+  input.value = "Typed then away";
+  document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+  expect(view.state.doc.child(1).attrs.title).toBe("Typed then away");
+  expect(panel(view)).toBeNull();
+  expect(pendingIds()).toEqual([]);
+});
+
+test("an unrelated transaction keeps the open panel, a half-typed title and its focus", () => {
+  const view = editor([], { blocks: { tbl: table, ch: chart } });
+  paint();
+  openPanel(view);
+  const input = field(view, "title");
+  input.focus();
+  input.value = "Half typ";
+  view.dispatch(view.state.tr.setMeta("remote-caret", true));
+  expect(field(view, "title")).toBe(input);
+  expect(document.activeElement).toBe(input);
+  expect(input.value).toBe("Half typ");
+  expect(pendingIds()).toEqual(["chart-title"]);
+  input.value = "";
+  input.blur();
+});
+
+test("a peer's edit to the source table keeps a half-typed title, and a panel control keeps focus after it writes", () => {
+  const view = editor([], { blocks: { tbl: table, ch: chart } });
+  paint();
+  openPanel(view);
+  const input = field(view, "title");
+  input.focus();
+  input.value = "Draft title";
+  input.setSelectionRange(2, 5);
+  view.dispatch(view.state.tr.insertText("9", posOf(view, "tbl") + 4));
+  const redrawn = field(view, "title");
+  expect(redrawn.value).toBe("Draft title");
+  expect(document.activeElement).toBe(redrawn);
+  expect([redrawn.selectionStart, redrawn.selectionEnd]).toEqual([2, 5]);
+  redrawn.value = "Activation by week";
+
+  const pie = typeButton(view, "Pie");
+  pie.focus();
+  pie.click();
+  expect(view.state.doc.child(1).attrs.kind).toBe("pie");
+  expect(document.activeElement).toBe(typeButton(view, "Pie"));
+  expect(typeButton(view, "Pie").getAttribute("aria-pressed")).toBe("true");
 });
 
 test("Remove deletes the chart block and one undo restores it", () => {
