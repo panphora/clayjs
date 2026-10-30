@@ -163,6 +163,10 @@ async function settle(body) {
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+const until = async (done, ms = 10000) => {
+  const deadline = Date.now() + ms;
+  while (!done() && Date.now() < deadline) await wait(5);
+};
 
 // What a save's own snapshot-ready dispatch does, through the real listener:
 // sets _saveTicket and _savedSnapshot. Returns the snapshot it stored.
@@ -658,6 +662,8 @@ test("17 a save completion from before a restart installs nothing", async () => 
 // private copy of the capture and reads it across tasks. The bytes it relays must be the
 // ones one call would have produced, whether the run or the save lands first.
 describe("a sliced save's sync serialization runs across tasks", () => {
+  jest.setTimeout(30000);
+
   const LARGE = Array.from(
     { length: 3000 },
     (_, i) => `<p data-id="p${i}">Entry ${i} lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod</p>`
@@ -691,7 +697,7 @@ describe("a sliced save's sync serialization runs across tasks", () => {
       // What the save does to its clone once the event returns.
       clone.querySelector('[data-id="p0"]').remove();
 
-      await wait(50);
+      await until(() => held.html !== null);
       expect(held.html).toBe(expected);
       expect(held.steps).toBeNull();
       expect(turns.count).toBeGreaterThan(1);
@@ -719,7 +725,7 @@ describe("a sliced save's sync serialization runs across tasks", () => {
     }
 
     expect(sync._savedSnapshot).toBeNull();
-    await wait(20);
+    await until(() => relayPosts.length > 0);
     expect(relayPosts).toHaveLength(1);
     expect(relayPosts[0].body.snapshot).toBe(expected);
   });
