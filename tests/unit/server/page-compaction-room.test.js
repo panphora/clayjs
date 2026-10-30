@@ -199,7 +199,7 @@ test("a retired key is refused, and the loose bound asks for a checkpoint", () =
   expectUsed(rooms);
 });
 
-test("a failed room refuses every page frame until it is rebuilt", () => {
+test("a failed room keeps taking edits, starts no new compaction, and is clean again when rebuilt", () => {
   const c = clock();
   const rooms = c.rooms({ compaction: true });
   const room = open(rooms);
@@ -209,9 +209,7 @@ test("a failed room refuses every page frame until it is rebuilt", () => {
   expect(rooms.abandonCompaction(job.token, { failed: "worker-crash" })).toBe(true);
   expect(room.compaction.failed).toMatchObject({ reason: "worker-crash" });
 
-  const before = snapshot(room);
-  expect(send(rooms, room, 2, [[nextKey(), insert("two")]]).error).toBe("compaction-failed");
-  expect(snapshot(room)).toEqual(before);
+  expect(send(rooms, room, 2, [[nextKey(), insert("two")]]).seq).toBe(2);
   expect(rooms.beginCompaction(room)).toBeNull();
   expectUsed(rooms);
 
@@ -504,6 +502,16 @@ test("a persistent check on a compacting room projects it without a clone error"
     rooms.releasePersistent(token);
   }
   expect(typeof rooms.get("/p.html").compaction.ranges).toBe("function");
+});
+
+test("a failed room past its byte limit refuses as full, not as waiting for a fold", () => {
+  const c = clock();
+  const rooms = c.rooms({ compaction: { activeBytes: 60 } });
+  const room = open(rooms);
+  room.compaction.failed = { reason: "worker-crash", at: c.now() };
+  const before = snapshot(room);
+  expect(send(rooms, room, 1, [[nextKey(), insert("growing past the limit")]]).error).toBe("page-full");
+  expect(snapshot(room)).toEqual(before);
 });
 
 test("a full fold of the whole page that does not fit makes the next write refuse as full", () => {

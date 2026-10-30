@@ -247,10 +247,10 @@ test("refuses a frame from a client that did not declare the version", () => {
   expect(ROOM_ERROR_STATUS[result.error]).toBe(404);
 });
 
-test("refuses while the room's compaction has failed", () => {
+test("a room whose compaction failed admits frames against its byte limit without asking for a fold", () => {
   const result = admit({ y: {}, ops: [], state: pageState({ failed: { reason: "compaction-failed", at: 1 } }) });
-  expect(result).toEqual({ error: "compaction-failed" });
-  expect(ROOM_ERROR_STATUS[result.error]).toBe(409);
+  expect(result).toMatchObject({ added: 0, failed: true, shape: null });
+  expect(result.limit).toBeGreaterThan(0);
 });
 
 test("refuses a deletion, a foreign key shape, a changed value and a retired key", () => {

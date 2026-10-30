@@ -367,7 +367,7 @@ test("a crash keeps the job\u0027s overflow across every retry, and the last one
   await compactor.close();
 });
 
-test("a failure result marks the room failed, and the next admission gets compaction-failed", async () => {
+test("a failure result marks the room failed, and the next edit is still admitted", async () => {
   const c = clock();
   const rooms = c.rooms({ compaction: true });
   const room = open(rooms);
@@ -383,10 +383,10 @@ test("a failure result marks the room failed, and the next admission gets compac
   expect(commits).toEqual([]);
   expect(room.compaction.job).toBeNull();
 
-  const snapshot = JSON.stringify({ value: room.stores.get("page").value, seq: room.seq });
-  const refused = send(rooms, room, next + 1, [[nextKey(), insert("after the failure")]]);
-  expect(refused.error).toBe("compaction-failed");
-  expect(JSON.stringify({ value: room.stores.get("page").value, seq: room.seq })).toBe(snapshot);
+  const seq = room.seq;
+  const admitted = send(rooms, room, next + 1, [[nextKey(), insert("after the failure")]]);
+  expect(admitted.error).toBeUndefined();
+  expect(room.seq).toBe(seq + 1);
   expect(rooms.beginCompaction(room)).toBeNull();
   await compactor.close();
 });

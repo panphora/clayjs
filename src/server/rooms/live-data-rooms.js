@@ -265,13 +265,14 @@ export function createRooms({ now = Date.now, newEpoch = randomUUID, liveBytes =
     return {
       limit,
       over() {
-        if (state.lastFull && state.deletesSince === 0) return { error: 'page-full' };
+        if (answer.failed || (state.lastFull && state.deletesSince === 0)) return { error: 'page-full' };
         due(room, true);
         return { error: 'checkpoint-required', retryAfter: 0 };
       },
       admitted(bytes) {
         state.deletesSince += deleted;
         state.contentSeq = room.seq;
+        if (answer.failed) return;
         if (bytes > hostLimits.activeBytes) due(room, true);
         else if (shape.loose + added >= hostLimits.soft) due(room);
       },
