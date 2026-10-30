@@ -387,6 +387,17 @@ Boot moves through `loading` (the saved article is read and validated), `joining
 
 A failed or cancelled installation never emits `document:input-ready`. Blocked readiness still resolves: `clay.page.ready` settles, `clay.page.status.phase` is `blocked` with a `reason`, the saved article stays as the host served it, and no editable page appears. [When the page editor is ready](https://clayjs.com/docs/guide/edit-mode/#when-the-page-editor-is-ready) covers the reasons and what a page can offer instead.
 
+**The two waits overlap.** The editor's code downloads while authority is prepared, so the boot waits for the longer of the two plus adoption, never for their sum. Neither branch touches the page: only the coordinator mounts, adopts, and then enables input.
+
+```js
+const settled = await settleBranches(inst, [
+  branch(steps.loadEditorAssets(inst, source), inst, "editor-assets-failed", "document:assets-ready"),
+  branch(steps.prepareAuthority(inst, source), inst, "authority-failed", "document:authority-ready"),
+]);
+```
+
+The first branch to fail answers the wait at once, and the branch still on the wire is aborted instead of being left to subscribe anything. Input opens only after adoption, so the faster start creates no temporary document and no second undo history.
+
 You can set configuration before the tag, and the loader merges into it: `window.clay = { saveToast: true }`.
 
 ### 2.5 Theming ClayJS's own UI
@@ -825,7 +836,7 @@ Escape closes an open menu or the link popover first, returning focus to the con
 
 From a block selection, Escape moves focus from the writing surface to the first toolbar control while keeping the selection, so the keyboard is never trapped in `contenteditable`. In the toolbar, Left and Right move between controls, and Escape returns to the editor. The toolbar is a single tab stop with a roving tabindex: Tab leaves it forward and Shift-Tab leaves it backward. Inside a table, Tab moves across cells and Shift-Tab moves back. The editor takes Tab for nothing else.
 
-A table's column resize handle is a focusable vertical separator named for its column, with `aria-valuemin` 48, `aria-valuemax` 1200, and the current width in `aria-valuenow`. Left and Right preview a 10 px change (50 px with Shift), while Home and End preview the minimum and maximum. Enter commits the change, and Escape cancels it. Holding an arrow key previews across repeated keydowns. The keyup that ends the repeat, Enter, or leaving the handle commits one command, so a held arrow key records a single undo item. Double-click fits the column, and pointer dragging is unchanged. On a phone, the column's Width menu (Wider, Narrower, Fit to content, and Reset width once the column has a width) does the same job.
+A table's column resize handle is a focusable vertical separator named for its column, with `aria-valuemin` 48, `aria-valuemax` 1200, and the current width in `aria-valuenow`. Left and Right preview a 10 px change (50 px with Shift), while Home and End preview the minimum and maximum. Enter commits the change, and Escape cancels it. Holding an arrow key previews across repeated keydowns. The keyup that ends the repeat, Enter, or leaving the handle commits one command, so a held arrow key records a single undo item. A table with no widths fills the page; the first width you set pins the other columns at their drawn widths, in the same undo step. Double-clicking a handle resets the table to the page width, and pointer dragging is unchanged. On a phone, the column's Width menu (Wider, Narrower, Fit to content, and Reset widths once the table has widths) does the same job.
 
 ---
 
@@ -970,6 +981,33 @@ clay.ephemeral.toggle(card, "selected");   // add, remove, toggle(el, word, forc
 
 Use `ephemeral` for state on one element. State that comes from the URL hash and spans many records (the open card, a filter) is still painted with a runtime stylesheet ([Per-tab state](https://clayjs.com/docs/guide/architecture/#per-tab-state)).
 
+### 4.8 A template is an ordinary record with a tag
+
+A reusable template is a record like any other, marked with a tag. It stays editable, searchable, exported, synced and in a visitor's draft, and it needs no second store and no new format. The app reads the tag off the body it already has:
+
+```js
+const templates = open => Entries.live().filter(a => a !== open && summary({ body: Entries.body(a), $el: a }).tags.includes('template'));
+```
+
+The tag is matched outside code spans and fences, so a template entry that shows a `#template` example does not become a template itself. Using one copies its text into the page, and the new record is written by the same save as everything else.
+
+### 4.9 Keep a helper that reads the text beside the editor, in an `editor-ui` row
+
+A helper that reacts to the text being written belongs in a row a script builds beside the editor, marked `clay="editor-ui"`, and refreshed on a debounce. Nothing it draws is saved, printed or synced, and no keystroke pays for it beyond the debounce:
+
+```js
+el = document.createElement('div');
+el.className = 'starters';
+el.setAttribute('clay', 'editor-ui');
+$('#writer').before(el);
+
+function start(on) {
+  on($('#writer'), 'input', () => { clearTimeout(timer); timer = setTimeout(refresh, 300); });
+}
+```
+
+The row is built on demand and refreshed on that debounce. Everything it draws lives in the row, so it is never saved, printed or synced.
+
 ---
 
 ## 5. Saving
@@ -1003,12 +1041,63 @@ Title changes only update the document's content. ClayJS never derives or change
   });
   ```
 
+A save is admitted before the page is captured. The spacing is decided first, and only an admitted attempt takes a snapshot, so nothing captures the page for a save that is still only an intention:
+
+```js
+const cooldown = Math.min(MAX_COOLDOWN_MS, Math.max(MIN_GAP_MS, COST_MULTIPLIER * costMs));
+const quietAt = Math.max(last, finished) + IDLE_MS;
+const continuousAt = Math.max(first + CONTINUOUS_MS, finished + cooldown);
+return Math.max(finished + MIN_GAP_MS, Math.min(quietAt, continuousAt));
+```
+
+The quiet window and the continuous ceiling are both computed from the clock, and the cooldown after a save scales with what that save cost.
+
 **The load-settle window.** At load, ClayJS takes a baseline of the document. It retakes the baseline once the page is quiet for 500 ms (at most 3 s), unless the user typed or a save ran. It then sets `savestatus="saved"` and fires `clay:baseline-settled`. Anything app code writes to the record during that window becomes part of the baseline: it is not saved, not autosaved, and not counted as unsaved. It reaches the file only when a later edit triggers a save:
 
 - Do not seed defaults, migrate a schema, or stamp ids at startup. Author defaults in the file.
 - If an app must write at startup, write after `clay:baseline-settled` (or once `<html savestatus>` exists), or follow the write with `await clay.save.force()`.
 
-### 5.3 Manual-save pages and batching
+### 5.3 Two baselines from one capture
+
+A page keeps two saved baselines from one save: the bytes a comparison uses, and the bytes the dirty check uses. Both domains are taken from one capture, because a comparison that borrowed the dirty domain would lose a batching region's edit, and a dirty baseline that borrowed the comparison domain would call a page clean while a `clay="no-trigger-autosave"` region still held new work.
+
+```js
+const { forComparison, forDirty } = captureForComparisonAndDirty();
+setLastSavedBaselines(forComparison, forDirty);
+```
+
+Both baselines advance from the same capture taken before the request, never from the live DOM, so an edit made while the save was on the wire stays unsaved. A caller with one string is a page with no batching region, and passes it for both: `setLastSavedContents(val)`.
+
+### 5.4 Reuse a verified parse only for the accepted capture
+
+Verifying the bytes a save will send already parses them, and a second parse of the accepted bytes pairs the whole page again. Keep the parse the verification paid for, and adopt its model only when the candidate is still this document:
+
+```js
+function withCandidate(verdict, errors, rendered, liveDocument) {
+  if (!errors.doc) return verdict;
+  const candidate = modelFromParsed(rendered, errors.doc, errors.parseErrors);
+  if (checkSource(candidate, liveDocument)) return verdict;
+  verdict.model = candidate;
+  return verdict;
+}
+```
+
+`checkSource` compares what a tree comparison cannot see: the doctype and the document-level comments outside `<html>`. A model that fails it is not this document, whatever the render verified as, so the save keeps its fallback path and adopts nothing. The model is only kept for the capture the acknowledgement is about, never for newer typing.
+
+### 5.5 Measure typing across several accepted saves
+
+Input to view timing alone misses the work that blocks the next input from arriving. Type continuously across several accepted saves, hold each response so typing continues while the request is on the wire, and report the input delivery gaps between key events beside the input to frame times:
+
+```js
+// node scripts/measure-save-pipeline.mjs --entries 5000 --typing-ms 60000 --pause-ms 3000 --response-delay-ms 2000
+inputGapsMs: stats(gaps),
+inputToFrameMs: stats(meter.inputs.map((input) => input.raf)),
+inputToViewsMs: stats(meter.inputs.map((input) => input.views)),
+```
+
+The gaps inside a save window are the ones that matter. A save that only shifts input to the next frame has still blocked the input that never arrived, and only a run across several accepted saves shows it.
+
+### 5.6 Manual-save pages and batching
 
 To disable autosave, such as for a long-form writer where frequent saves are unwelcome, omit `autosave`. Cmd+S, `[trigger-save]`, and the close warning still work. Save when the tab hides:
 
@@ -1026,7 +1115,7 @@ To batch saves in part of an autosaving page, wrap that region in `clay="no-trig
 
 `clay.Mutation.pause()` and `resume()` hide DOM mutations from the mutation hub's listeners, including autosave's mutation trigger, while paused. The next save still writes those mutations. They do not pause input: `input` and `change` events on controls, including synthetic ones, still mark the page dirty and start autosave. Pair them in `try/finally`. An unbalanced pause silences mutation-driven autosave for the rest of the session.
 
-### 5.4 The save API
+### 5.7 The save API
 
 `clay.save()` returns `Promise<{ ok, msg, msgType, code, etag }>` and never rejects. One exception in 1.8.2: when capturing the page fails because a registered hook threw ([Hooks](https://clayjs.com/docs/guide/saving/#hooks)), the result has `msgType: "error"` and no `ok` field.
 
@@ -1050,7 +1139,7 @@ To batch saves in part of an autosaving page, wrap that region in `clay="no-trig
 - `clay.registerUnsavedState({ id, isPending })` registers work held outside the DOM (such as an unapplied form) so the close warning and `flush` respect it. Call the returned `changed()` when it changes and `dispose()` when done.
 - `clay.markDirty()` tells the dirty gate about an edit no mutation shows, for an editor whose surface is `editor-ui` and which writes the record itself.
 
-### 5.5 Size limits
+### 5.8 Size limits
 
 The limit comes from the host's `/_/meta` answer, `document.maxBytes`: the most bytes of uncompressed UTF-8 HTML one save body may have, inclusive. It counts only as a positive safe integer. A missing, zero, negative, fractional or non-numeric value means the limit is unknown, and `clay.save.limits()` resolves `{ maxBytes: null }`. Draft mode answers the same without asking the host at all. See [Hosts, assets and privacy](https://clayjs.com/docs/guide/hosts/#what-each-host-gives).
 
@@ -1085,7 +1174,7 @@ const html = clay.getHTML({
 
 The transform must be synchronous and its return value is ignored. The live page, the baselines and the network are untouched. See [Importing and exporting records](https://clayjs.com/docs/guide/architecture/#importing-and-exporting-records).
 
-### 5.6 Conflicts on save (412)
+### 5.9 Conflicts on save (412)
 
 On hosts that announce `conditional` (all three hosts in [What the host does](https://clayjs.com/docs/guide/model/#what-the-host-does)), every save sends `If-Match` with the version the tab last saw. If the file changed elsewhere and live sync has not merged that change yet, the host answers 412 and writes nothing.
 
@@ -1095,7 +1184,7 @@ On hosts that announce `conditional` (all three hosts in [What the host does](ht
 - The first save after load can go out without `If-Match` on a slow host because version discovery is not awaited. That save is last-write-wins.
 - If you hide the built-in notice, you must still offer overwrite and reload.
 
-### 5.7 Hooks
+### 5.10 Hooks
 
 Hooks shape the saved bytes without touching the live page. Except for `onaftersave`, they run on a clone.
 
@@ -1135,7 +1224,7 @@ clay.onSnapshot?.((root) => {
 
 Only strip `draggable="false"` if your own markup never authors it.
 
-### 5.8 Save status
+### 5.11 Save status
 
 ClayJS reflects save state on `<html>`, so you can style a status indicator with CSS alone:
 
@@ -1177,7 +1266,7 @@ Events, all on `document`:
 
 A save writes only the document's own bytes, so a downloaded HTML file links to its images rather than embedding them. When the file opens, the browser fetches uploaded images from the host's URLs. Opening a copy where those URLs do not resolve shows broken images.
 
-### 5.9 Recovery copies
+### 5.12 Recovery copies
 
 `clay.recovery` keeps a local copy of edits the host has not accepted. It is not a save, and ClayJS never renders a page directly from it. After a reload, ClayJS compares the stored copies with the loaded file and asks before restoring one. A document is covered only for the channels its adapters register, so a page that registers no channel keeps no local copy.
 
@@ -2512,6 +2601,27 @@ An element inside the template with `[visitor-intro-start]` scrolls to the app, 
 ### 12.8 Migrating an app's own storage
 
 **Not supported yet:** the plugin reads no migration hook, so an app that kept its earlier data under its own `localStorage` key has to move those values into the page from its own code, on the first load after the switch.
+
+**Change a key only after every reader reads both.** A reader that spells the key by hand keeps reading the old one, and an old key stops changing the moment ClayJS writes the new one. The download page and the calculator's row reset both spell the draft key themselves, so both learned to read the new key and the old one before the key changed:
+
+```js
+function readDrafts(win, slot, path) {
+  if (!slot) return null;
+  try {
+    var legacy = 'clay:visitor-drafts:' + slot;
+    var key = legacy + '@' + draftPath(path);
+    var raw = win.localStorage.getItem(key);
+    if (raw == null && win.localStorage.getItem(key + ':legacy') == null) raw = win.localStorage.getItem(legacy);
+    var stored = raw ? JSON.parse(raw) : null;
+    var data = stored && stored.data;
+    return data && typeof data === 'object' && !Array.isArray(data) && Object.keys(data).length ? data : null;
+  } catch (e) {
+    return null;
+  }
+}
+```
+
+The `:legacy` marker is what stops a reset from coming back: once ClayJS has copied the old draft, a reader that still saw the old key would restore work the visitor asked to clear. A reader that can run before `clay.js` uses the same path rule, so it finds the same key ClayJS writes.
 
 ### 12.9 A complete example
 
