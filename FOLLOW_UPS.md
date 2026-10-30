@@ -1,3 +1,5 @@
 # Follow-ups
 
 Findings with no user story yet: the trigger, the effect, and when to look again.
+
+- `tests/unit/page/highlight.test.js`, "review round 1 › turning a coloured code block into text drops its colours": failed once in 4 local `tests/unit/page` folder runs under heavy load (2026-10-29, load average about 20), `decos(view).length` 0 instead of 1 at line 119. Not the ESM linker race (no "not in cache" in that run): the test waits a fixed 20 ms (`wait()`, line 118) for colours, and the code feature that starts the highlighter loads lazily, so a busy machine can take longer. The test-only fix is `await until(() => decos(view).length === 1)` in place of that `wait()`, using the file's own `until`. Revisit if it fails on a box or twice locally.
