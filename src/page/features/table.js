@@ -300,6 +300,7 @@ export class TableView {
     this.view.focus();
   }
   widths() {
+    this.frozen = null;
     const sized = columns(this.node).some((id) => this.node.attrs.cols[id].width);
     const cols = columns(this.node).map((id) => {
       const col = this.dom.ownerDocument.createElement("col");
@@ -341,8 +342,7 @@ export class TableView {
       let width = from;
       const move = (e) => {
         width = widthOf(from + (rtl ? start - e.clientX : e.clientX - start)) ?? from;
-        const col = [...this.colgroup.children].find((el) => el.dataset.col === colId);
-        if (col) { this.table.classList.add("is-sized"); col.style.width = `${width}px`; }
+        this.showWidth(colId, width);
       };
       const up = () => {
         doc.removeEventListener("pointermove", move);
@@ -372,15 +372,24 @@ export class TableView {
   }
   // Before a preview changes one column of a table that fills the page, every
   // column is pinned at its drawn width, so the others stay where they are.
+  // Those widths are kept for the gesture: the table's total follows the
+  // previewed column, and the commit saves them rather than measuring again.
   freeze() {
-    if (this.isSized() || this.table.classList.contains("is-sized")) return;
-    const widths = this.drawnWidths();
-    for (const col of this.colgroup.children) col.style.width = `${widths[col.dataset.col]}px`;
-    this.table.style.width = `${Object.values(widths).reduce((sum, w) => sum + w, 0)}px`;
+    if (this.isSized() || this.frozen) return;
+    this.frozen = this.drawnWidths();
+    for (const col of this.colgroup.children) col.style.width = `${this.frozen[col.dataset.col]}px`;
+    this.table.style.width = `${Object.values(this.frozen).reduce((sum, w) => sum + w, 0)}px`;
     this.table.classList.add("is-sized");
   }
+  showWidth(colId, width) {
+    const col = [...this.colgroup.children].find((el) => el.dataset.col === colId);
+    if (!col) return;
+    this.table.classList.add("is-sized");
+    col.style.width = `${width}px`;
+    if (this.frozen) this.table.style.width = `${Object.values({ ...this.frozen, [colId]: width }).reduce((sum, w) => sum + w, 0)}px`;
+  }
   widthCommand(colId, width) {
-    return this.isSized() ? setColumnWidth(colId, width) : setColumnWidths({ ...this.drawnWidths(), [colId]: width }, colId);
+    return this.isSized() ? setColumnWidth(colId, width) : setColumnWidths({ ...(this.frozen ?? this.drawnWidths()), [colId]: width }, colId);
   }
   sizeColumn(colId, width) {
     return this.command(colId, this.widthCommand(colId, width));
@@ -408,8 +417,7 @@ export class TableView {
     const base = this.preview?.col === colId ? this.preview.base : this.widthOfColumn(colId);
     this.freeze();
     this.preview = { col: colId, width, base };
-    const col = [...this.colgroup.children].find((element) => element.dataset.col === colId);
-    if (col) { this.table.classList.add("is-sized"); col.style.width = `${width}px`; }
+    this.showWidth(colId, width);
     const handle = this.handleFor(colId);
     if (handle) handle.setAttribute("aria-valuenow", String(width));
   }
@@ -429,7 +437,7 @@ export class TableView {
     const col = table?.type === N.table && table.attrs.id === this.node.attrs.id ? table.attrs.cols[colId] : null;
     if (!col) { this.widths(); return false; }
     if ((col.width ?? preview.base) === preview.width) { this.widths(); return false; }
-    const seed = columns(table).some((id) => table.attrs.cols[id].width) ? {} : this.drawnWidths();
+    const seed = columns(table).some((id) => table.attrs.cols[id].width) ? {} : this.frozen ?? this.drawnWidths();
     const cols = { ...table.attrs.cols };
     for (const [id, width] of Object.entries(seed)) if (cols[id]) cols[id] = { ...cols[id], width };
     cols[colId] = { ...col, width: preview.width };
@@ -524,7 +532,7 @@ export class TableView {
     // A peer's edit does not take the name being typed out of the field.
     if (renaming) this.widths();
     else this.render(focused);
-    if (preview && node.attrs.cols[preview.col] && (node.attrs.cols[preview.col].width ?? DEFAULT_WIDTH) === preview.base) {
+    if (preview && node.attrs.cols[preview.col] && (node.attrs.cols[preview.col].width ?? preview.base) === preview.base) {
       this.previewWidth(preview.col, preview.width);
     }
     const effective = columnKinds(node);

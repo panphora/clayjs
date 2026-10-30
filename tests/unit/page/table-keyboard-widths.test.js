@@ -227,3 +227,39 @@ test("an edit to the table during an arrow key keeps the preview, and the keyup 
   press(handle(view), "keyup", "ArrowRight");
   expect(cols(view).c1.width).toBe(170);
 });
+
+const stubDrawn = (view, widths) => {
+  for (const th of view.dom.querySelectorAll("th")) {
+    th.getBoundingClientRect = () => ({ width: widths[th.dataset.col], height: 16, top: 0, left: 0, right: widths[th.dataset.col], bottom: 16 });
+  }
+};
+const textPos = (view, text) => {
+  let at = null;
+  view.state.doc.descendants((node, pos) => { if (at == null && node.isText && node.text === text) at = pos; });
+  return at;
+};
+
+test("narrowing a column on a full-width table keeps the others at their drawn widths", () => {
+  const view = open();
+  stubDrawn(view, { c1: 400, c2: 300 });
+  const el = handle(view);
+  el.focus();
+  press(el, "keydown", "ArrowLeft");
+  expect(view.dom.querySelector("table").style.width).toBe("690px");
+  stubDrawn(view, { c1: 395, c2: 305 });
+  press(el, "keyup", "ArrowLeft");
+  expect(cols(view).c1.width).toBe(390);
+  expect(cols(view).c2.width).toBe(300);
+});
+
+test("a peer's edit in a full-width table keeps the preview, and the keyup writes it", () => {
+  const view = open();
+  stubDrawn(view, { c1: 400, c2: 300 });
+  const el = handle(view);
+  el.focus();
+  press(el, "keydown", "ArrowRight");
+  view.dispatch(view.state.tr.insertText("y", textPos(view, "x") + 1));
+  expect(colWidth(view, "c1")).toBe("410px");
+  press(el, "keyup", "ArrowRight");
+  expect(cols(view).c1.width).toBe(410);
+});
