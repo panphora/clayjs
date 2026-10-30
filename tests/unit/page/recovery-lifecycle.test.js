@@ -287,7 +287,7 @@ test("the five states answer to the table, and the indicator draws its texts", a
   await import("../../../src/plugins/indicator.js");
   const texts = {
     pending: "Saving…",
-    acknowledged: "Shared, not yet saved",
+    acknowledged: "Saving…",
     checkpointed: "Saved",
     unavailable: "Can't store changes: download a copy",
   };

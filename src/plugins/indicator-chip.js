@@ -19,7 +19,7 @@ const LABELS = {
   retrying: "Saving…",
   blocked: "Can't save here",
   pending: "Saving…",
-  acknowledged: "Shared, not yet saved",
+  acknowledged: "Saving…",
   checkpointed: "Saved",
   unavailable: "Can't store changes: download a copy",
 };
