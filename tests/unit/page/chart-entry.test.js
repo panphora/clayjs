@@ -49,6 +49,14 @@ test("/chart with one table turns the empty line into a bar chart of that table,
   expect(view.state.doc.child(1).attrs.id).toBe("p");
 });
 
+test("a one-column table is not offered as a chart source", () => {
+  const view = editor([
+    ["one", "table", "", { cols: { o1: { pos: "1", name: "Only" } }, rows: { r1: { pos: "1", cells: { o1: "a" } } } }],
+    ["tbl", "table", "", { cols: table.cols, rows: table.rows }],
+  ]);
+  expect(chartTables(view.state.doc).map(tableLabel)).toEqual(["Week, Activation %, Note"]);
+});
+
 test("/chart with several tables asks which one, by their headings and row counts", async () => {
   const second = { ...table, pos: "X", cols: { k1: { pos: "1", name: "Month" }, k2: { pos: "2", name: "Revenue", kind: "number" } }, rows: { s1: { pos: "1", cells: { k1: "Jan", k2: "4" } } } };
   const view = editor([

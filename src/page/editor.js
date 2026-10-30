@@ -11,7 +11,7 @@ import { schema } from "./schema.js";
 import { identityPlugin, docFromBlocks, blockMap, keyBetween, newId } from "./model.js";
 import { blockKeys, structurePlugin, collapsePlugin, pastePlugin, BlockSelection, STEP } from "./blocks.js";
 import { chromePlugin, slashRangePlugin } from "./chrome.js";
-import { announcementPlugin, announce } from "./announce.js";
+import { announcementPlugin } from "./announce.js";
 import { linkPlugin } from "./link.js";
 import { blockSelectionPlugin, asStep } from "./blocksel.js";
 import { markdownPlugin, markdownKeys, backspaceToParagraph, composing } from "./markdown.js";
@@ -351,10 +351,9 @@ const insertHardBreak = (st, dispatch) => {
 const underlineShortcut = (st, dispatch, view) => {
   if (!dispatch || !view?.editable || !markable(st, schema.marks.underline)) return false;
   import("./format-native-commands.js")
-    .then(({ formatMark }) => formatMark(view, "underline"), () => null)
-    .then((result) => {
-      if (result?.status !== "applied" && !view.isDestroyed) announce(view, result?.message ?? "That format isn\u2019t available here.");
-    });
+    .then(({ formatMark, refuse }) => formatMark(view, "underline").then((result) => {
+      if (result?.status !== "applied") refuse(view, result?.message ?? "That format isn\u2019t available here.");
+    }), () => null);
   return true;
 };
 

@@ -10,7 +10,8 @@ const RETRY_TEXT = "That didn't go through. Try again.";
 const REFUSED_TEXT = "That couldn't be added here.";
 
 function say(view, answer) {
-  const text = UNSUPPORTED.has(answer?.code) || UNSUPPORTED.has(answer?.status) ? UNSUPPORTED_TEXT
+  const text = answer?.status === "upgrade-required" && answer.message ? answer.message
+    : UNSUPPORTED.has(answer?.code) || UNSUPPORTED.has(answer?.status) ? UNSUPPORTED_TEXT
     : answer?.retry === true ? RETRY_TEXT : REFUSED_TEXT;
   if (view.isDestroyed) return;
   announce(view, text);

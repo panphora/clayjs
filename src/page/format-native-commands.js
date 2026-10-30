@@ -12,6 +12,7 @@ import { history } from "../vendor/prosemirror.vendor.js";
 import { schema } from "./schema.js";
 import { PALETTE, markable } from "./format-native.js";
 import { announce } from "./announce.js";
+import toast from "../ui/toast-lazy.js";
 import { openPageMenu } from "./chrome.js";
 
 // blocks.js's STEP, read here rather than imported from it: this module is part
@@ -91,7 +92,7 @@ export function pasteFormats(view, slice, from, to) {
   };
   runFormat(view, place).then((result) => {
     if (result?.status === "applied") return;
-    if (!view.isDestroyed) announce(view, result?.message ?? "That format isn\u2019t available here.");
+    refuse(view, result?.message ?? "That format isn\u2019t available here.");
     plain();
   }, plain);
 }
@@ -109,7 +110,11 @@ export function quoteFromSpace(plugin, view, { at, from, to }, plain) {
     view.dispatch(asStep(tr.setMeta(plugin, { transform: tr, from, to, text: " " })));
     return true;
   };
-  view.runFormatCommand(convert).then((result) => { if (result?.status !== "applied") plain(); }, plain);
+  view.runFormatCommand(convert).then((result) => {
+    if (result?.status === "applied") return;
+    if (result) refuse(view, refusalText(result));
+    plain();
+  }, plain);
 }
 
 // The More menu's rows: the underline command, the palette of a color mark and
@@ -118,8 +123,16 @@ export function quoteFromSpace(plugin, view, { at, from, to }, plain) {
 const CANNOT_MARK = "This text can\u2019t take that format.";
 const refusalText = (result) => (result.status === "upgrade-required" ? result.message : result.code === "mark-not-allowed" ? CANNOT_MARK : "That format isn\u2019t available here.");
 
+// A refusal is said to a screen reader and shown, since a sighted reader whose
+// click did nothing otherwise has no way to know why.
+export const refuse = (view, text) => {
+  if (view.isDestroyed) return;
+  announce(view, text);
+  toast(text, "error");
+};
+
 const notice = (view, result) => {
-  if (result?.status !== "applied" && !view.isDestroyed) announce(view, refusalText(result ?? {}));
+  if (result?.status !== "applied") refuse(view, refusalText(result ?? {}));
 };
 
 export const runNative = (view, name, attrs = {}, options = undefined) => {

@@ -122,7 +122,7 @@ function tableOffset(doc, id) {
 
 function documentTables(doc) {
   const tables = [];
-  doc.forEach((node) => { if (node.type === schema.nodes.table) tables.push(node); });
+  doc.forEach((node) => { if (node.type === schema.nodes.table && orderedIds(node.attrs.cols).length > 1) tables.push(node); });
   return tables.map((node) => ({ id: node.attrs.id, name: tableName(doc, node.attrs.id), rows: node.childCount }));
 }
 
