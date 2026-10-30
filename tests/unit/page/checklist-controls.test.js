@@ -70,6 +70,12 @@ test("the tags widget leaves a click on the line itself to the editor", () => {
   expect(widget.type.spec.stopEvent({ target: box.querySelector('[data-check="owner"]') })).toBe(true);
 });
 
+test("the tags widget sits before the caret, so typing in an empty item stays in it", () => {
+  const view = editor([["empty", "list_item", "", { kind: "check" }]]);
+  const widget = decorations(view.state).find().find((decoration) => decoration.type.spec.stopEvent);
+  expect(widget.type.spec.side).toBe(-1);
+});
+
 test("a document open across midnight redraws Today, Tomorrow and overdue on its next update", () => {
   jest.useFakeTimers({ now: new Date(2026, 9, 29, 23, 50) });
   try {
@@ -182,14 +188,20 @@ test("date can be set and cleared, with one undo step per change", () => {
   expect(view.state.doc.child(0).attrs.due).toBeNull();
 });
 
-test("keyboard shortcuts focus both controls from the item text", () => {
+test("keyboard shortcuts open both popovers from the item text, and Escape returns to the text", () => {
   const view = fresh();
   select(view, 2);
   expect(key(view, "o", { metaKey: true, shiftKey: true })).toBe(true);
-  expect(document.activeElement.dataset.check).toBe("owner");
-  view.focus();
+  const owner = document.querySelector('.page-check-popup[data-check="owner-panel"]');
+  expect(owner).not.toBeNull();
+  owner.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  expect(document.querySelector(".page-check-popup")).toBeNull();
+  expect(view.dom.contains(document.activeElement)).toBe(true);
   expect(key(view, "d", { metaKey: true, shiftKey: true })).toBe(true);
-  expect(document.activeElement.dataset.check).toBe("date");
+  const date = document.querySelector('.page-check-popup[data-check="date-panel"]');
+  expect(date).not.toBeNull();
+  date.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  expect(view.dom.contains(document.activeElement)).toBe(true);
 });
 
 test("a control the document switched off has no shortcut", () => {

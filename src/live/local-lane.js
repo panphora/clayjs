@@ -516,7 +516,7 @@ export function localTransport({ seed, key = "clay-live:" + window.location.path
     const bytes = admission ? pageBytes(trial.value) : 0;
     trial.undo();
     if (admission && bytes > admission.limit) {
-      if (host.lastFull && host.deletesSince === 0) return refused("page-full");
+      if (admission.failed || (host.lastFull && host.deletesSince === 0)) return refused("page-full");
       due(true);
       return refused("checkpoint-required");
     }
@@ -528,8 +528,8 @@ export function localTransport({ seed, key = "clay-live:" + window.location.path
     handlers.frame(cloneJson(data));
     if (admission) {
       host.deletesSince += admission.deleted;
-      if (bytes > COMPACTION.activeBytes) due(true);
-      else if (admission.shape.loose + admission.added >= COMPACTION.soft) due();
+      if (!admission.failed && bytes > COMPACTION.activeBytes) due(true);
+      else if (!admission.failed && admission.shape.loose + admission.added >= COMPACTION.soft) due();
     }
     return { status: 200, body: { seq: room.seq, epoch: room.epoch }, retryAfter: 0 };
   }

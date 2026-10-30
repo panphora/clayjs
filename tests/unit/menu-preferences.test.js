@@ -77,3 +77,18 @@ test("the menu follows a denial and a later grant without an entry", async () =>
   await flush();
   expect(dockOf().hidden).toBe(false);
 });
+
+test("Chrome on a Mac, which reports its platform as macOS, gets Command shortcuts", async () => {
+  const { isMac, keys } = await import("../../src/plugins/menu/preferences.js");
+  const had = Object.getOwnPropertyDescriptor(navigator, "userAgentData");
+  Object.defineProperty(navigator, "userAgentData", { configurable: true, value: { platform: "macOS" } });
+  try {
+    expect(isMac()).toBe(true);
+    expect(keys("⌘⇧.", "Ctrl+Shift+.")).toBe("⌘⇧.");
+    Object.defineProperty(navigator, "userAgentData", { configurable: true, value: { platform: "Windows" } });
+    expect(isMac()).toBe(false);
+  } finally {
+    if (had) Object.defineProperty(navigator, "userAgentData", had);
+    else delete navigator.userAgentData;
+  }
+});

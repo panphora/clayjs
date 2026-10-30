@@ -236,6 +236,7 @@ export class TableView {
       ...(ids.length > 1 ? [{ label: "Delete column", icon: "×", run: at(deleteColumn, "Column deleted") }] : []),
       { label: "Sort ascending", icon: "↑", checked: sort?.col === ids[index] && sort.dir === "asc", run: at(sortBy(ids[index], "asc"), "Sorted ascending") },
       { label: "Sort descending", icon: "↓", checked: sort?.col === ids[index] && sort.dir === "desc", run: at(sortBy(ids[index], "desc"), "Sorted descending") },
+      { label: "Chart this table", icon: "📊", run: () => { const at = this.getPos(); return loadChartPart(this.view).then(({ insertChartAfterTable }) => insertChartAfterTable(this.view, at)); } },
       { label: "Rename column", focus: false, run: () => this.beginRename(ids[index]) },
       { label: "Column width ▸", icon: "↔", hint: col.width ? `${col.width}px` : "Auto", focus: false, run: () => openPageMenu(this.view, this.actionsButton, [
         { label: "Wider", icon: "+", run: at(setColumnWidth(ids[index], width + 40), "Column width changed") },

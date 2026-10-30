@@ -206,6 +206,11 @@ async function load({
     };
   });
 
+  // live.js loads both lane modules in one Promise.all. Under load, jest's ESM linker
+  // can reject one of two concurrent imports that share yjs ("not in cache"), and the
+  // page then runs with no lane. Linking them one at a time here keeps that race out.
+  await import("../../../src/live/fast-lane.js");
+  await import("../../../src/live/local-lane.js");
   const { live, storeOf, liveWriterParticipant } = await import("../../../src/plugins/live.js");
   window.clay = { live: (name) => live(name) };
   const pageModule = await import("../../../src/plugins/page.js");

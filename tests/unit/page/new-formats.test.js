@@ -29,6 +29,14 @@ function gate({ refuse = false } = {}) {
   };
 }
 
+const toastSaying = async (text) => {
+  for (let i = 0; i < 50; i++) {
+    if ([...document.querySelectorAll("[data-clay-toast]")].some((el) => el.textContent.includes(text))) return true;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  return false;
+};
+
 const opened = (spec, options = {}) => {
   const g = options.gate ?? gate();
   const view = editor(spec, { formatGate: () => Promise.resolve(g), ...options.editor });
@@ -97,6 +105,7 @@ test("a refused floor activation writes no descriptor and leaves the document al
   expect(view.state.doc.eq(before)).toBe(true);
   expect(keyOf(view, "a")).toBe("");
   expect(part(view, ".page-live").textContent).toBe(UPGRADE);
+  expect(await toastSaying(UPGRADE)).toBe(true);
 });
 
 test("Mod-u belongs to an editable page selection only", async () => {
@@ -226,6 +235,7 @@ test("a refused quote leaves the paragraph as it was", async () => {
   expect(view.state.doc.eq(before)).toBe(true);
   expect(quoteOf(view, "a")).toBe("paragraph");
   expect(part(view, ".page-live").textContent).toBe(UPGRADE);
+  expect(await toastSaying(UPGRADE)).toBe(true);
 });
 
 test("a quote inside a toggle keeps its identity, its hierarchy and its inline content", async () => {

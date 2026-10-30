@@ -99,7 +99,6 @@ export function checkUpdate(text) {
 
 export function admitPageOps({ y, ops, state, limits }) {
   if (state.compaction !== limits.version) return { error: 'page-upgrade' };
-  if (state.failed) return { error: 'compaction-failed' };
   let added = 0;
   let deleted = 0;
   let inserts = false;
@@ -118,6 +117,9 @@ export function admitPageOps({ y, ops, state, limits }) {
     inserts ||= checked.inserts;
   }
   if (added > limits.newPerFrame) return { error: 'page-batch' };
+  // A page whose compaction failed keeps taking edits up to its byte limit, as a room
+  // without compaction does, and refuses past it as full instead of waiting for a fold.
+  if (state.failed) return { added, deleted, inserts, limit: limits.activeBytes + (inserts ? 0 : limits.deleteReserve), shape: null, failed: true };
   const shape = pageShape(y, limits);
   if (!shape.normal || shape.loose + added > limits.loose) return { error: 'checkpoint-required', retryAfter: 0 };
   return { added, deleted, inserts, limit: limits.activeBytes + (inserts ? 0 : limits.deleteReserve), shape };

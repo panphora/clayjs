@@ -277,6 +277,7 @@ test("the stylesheet carries the phone and scheme rules", async () => {
   const css = sheetText("menu");
 
   expect(css).toContain("@media (pointer: coarse), (max-width: 680px)");
+  expect(css).toContain('.clay-menu-list .clay-menu-pair [role="menuitem"] { min-height: 44px; }');
   expect(css).toContain("font-size: 16px");
   expect(css).toContain("max-height: calc(100dvh - 72px)");
   expect(css).toContain("light-dark(");
