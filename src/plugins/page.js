@@ -1157,6 +1157,9 @@ function mountAndAttach(inst, source, loaded) {
     // A document that states settings opens their store so a peer's change reaches this
     // tab; one that states none opens it when a switch is first written.
     if (document.querySelector(SETTINGS_SEL)) openSettings().catch(() => null);
+    else listen(inst, "clay:sync-applied", () => {
+      if (!settingsOpening && document.querySelector(SETTINGS_SEL)) openSettings().catch(() => null);
+    });
     const shell = view.dom.closest(".page-shell");
     // A shell still waiting for its boot takes no input of any kind: a control inside
     // a non-editable editor would otherwise write before the boot says ready. It is

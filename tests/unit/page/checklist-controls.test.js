@@ -1,3 +1,4 @@
+import { jest } from "@jest/globals";
 import { editor, key, select } from "./view-helpers.js";
 import { history } from "../../../src/vendor/prosemirror.vendor.js";
 import { decorations } from "../../../src/page/features/checklist.js";
@@ -67,6 +68,24 @@ test("the tags widget leaves a click on the line itself to the editor", () => {
   expect(widget.type.spec.stopEvent({ target: li })).toBe(false);
   expect(widget.type.spec.stopEvent({ target: box })).toBe(false);
   expect(widget.type.spec.stopEvent({ target: box.querySelector('[data-check="owner"]') })).toBe(true);
+});
+
+test("a document open across midnight redraws Today, Tomorrow and overdue on its next update", () => {
+  jest.useFakeTimers({ now: new Date(2026, 9, 29, 23, 50) });
+  try {
+    const view = editor([
+      ["a", "list_item", "A", { kind: "check", due: "2026-10-29" }],
+      ["b", "list_item", "B", { kind: "check", due: "2026-10-30" }],
+    ]);
+    const labels = () => [...view.dom.querySelectorAll('[data-check="date"]')].map((chip) => chip.textContent);
+    expect(labels()).toEqual(["Today", "Tomorrow"]);
+    jest.setSystemTime(new Date(2026, 9, 30, 9, 0));
+    view.dispatch(view.state.tr.setMeta("addToHistory", false));
+    expect(labels()[1]).toBe("Today");
+    expect(view.dom.querySelector('[data-check="date"]').dataset.overdue).toBe("true");
+  } finally {
+    jest.useRealTimers();
+  }
 });
 
 const owned = () => editor([

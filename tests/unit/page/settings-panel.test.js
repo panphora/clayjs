@@ -106,10 +106,13 @@ test("on a phone the More menu carries Document settings and opens the same pane
     const menu = view.dom.parentElement.querySelector(".page-menu");
     const row = [...menu.querySelectorAll(".page-menu-item")].find((r) => r.querySelector(".page-menu-label").textContent === "Document settings");
     expect(row).toBeTruthy();
+    const focused = [];
+    view.focus = () => focused.push("editor");
     row.click();
     await frame();
     expect(panel(view).hidden).toBe(false);
     expect(switches(view).length).toBe(2);
+    expect(focused).toEqual([]);
   });
 });
 

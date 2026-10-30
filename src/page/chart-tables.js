@@ -10,8 +10,9 @@ export function chartTables(doc) {
   return tables;
 }
 
-// A table's name for a person: the heading just before it, else its place among
-// the tables, so a chart and the picker name it without a stored title.
+// A table's name for a person: the heading before it with no other table in
+// between, else its place among the tables, so a chart and the picker name it
+// without a stored title.
 export function tableName(doc, tableId) {
   let name = "";
   let count = 0;
@@ -22,6 +23,7 @@ export function tableName(doc, tableId) {
     if (node.type !== schema.nodes.table) return;
     count += 1;
     if (node.attrs.id === tableId) found = name || `Table ${count}`;
+    name = "";
   });
   return found;
 }

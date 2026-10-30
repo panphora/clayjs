@@ -135,6 +135,19 @@ test("a switch writes the document's store, applies here at once, and follows a 
   expect(page.settings.read()).toEqual({ assignees: true, dates: true });
 });
 
+test("a tab opened before any setting existed follows the first one a peer writes", async () => {
+  const { page, opens } = await load();
+  await page.ready;
+  expect(opens).toHaveLength(0);
+
+  document.head.insertAdjacentHTML("beforeend", settingsTag({ dates: false }));
+  document.dispatchEvent(new CustomEvent("clay:sync-applied", { detail: { html: document.documentElement.outerHTML } }));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(opens).toEqual(["page.settings"]);
+  expect(page.view.dom.dataset.dates).toBe("false");
+  expect(page.settings.read()).toEqual({ assignees: true, dates: false });
+});
+
 test("a setting that is not one of the two switches is refused and writes nothing", async () => {
   const { page, opens } = await load();
   await page.ready;
