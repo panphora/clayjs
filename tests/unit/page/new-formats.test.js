@@ -6,6 +6,7 @@ import { PALETTE } from "../../../src/page/format-native.js";
 import { formatMark } from "../../../src/page/format-native-commands.js";
 import { renderModel, parseModel, revOf } from "../../../src/page/projection.js";
 import { editor, posOf, select, key, typeText } from "./view-helpers.js";
+import { toastText } from "../helpers/editor-ui.js";
 
 /**
  * The four formats this release adds, driven the way a person drives them: the
@@ -31,7 +32,7 @@ function gate({ refuse = false } = {}) {
 
 const toastSaying = async (text) => {
   for (let i = 0; i < 50; i++) {
-    if ([...document.querySelectorAll("[data-clay-toast]")].some((el) => el.textContent.includes(text))) return true;
+    if (toastText().includes(text)) return true;
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   return false;

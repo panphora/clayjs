@@ -147,9 +147,9 @@ async function load({ html = pageHtml(), head = "", liveData = false, answer = (
 
   const { live, storeOf } = await import("../../../src/plugins/live.js");
   window.clay = { live };
-  const { page } = await import("../../../src/plugins/page.js");
+  const { page, PAGE_FULL_MESSAGE } = await import("../../../src/plugins/page.js");
   current = page;
-  return { page, storeOf, saves, sent, room };
+  return { page, PAGE_FULL_MESSAGE, storeOf, saves, sent, room };
 }
 
 afterEach(() => {
@@ -475,4 +475,57 @@ test("a page update refused as too large stops the tab with a notice and keeps t
   expect(toastText()).toContain("That change is too large to share, so it was not saved.");
   const text = await readDownload(() => toastButton("Download your copy").click());
   expect(text).toContain("BIG EDIT");
+});
+
+// A room that compacts holds the page in host order, so a refusal of a page it cannot
+// grow is not news a reload can change: the tab can download its copy and nothing else.
+const enterHostMode = (store) => {
+  store.setMode("fast");
+  store.rebase(clone(store.value), { source: "state", room: { compaction: { v: 1 } } });
+};
+
+test("a host-mode page store that refuses a full page offers only the download", async () => {
+  const value = seedValue(BLOCKS);
+  const { page, PAGE_FULL_MESSAGE, storeOf } = await load({ html: pageHtml(value), head: tagHtml(value) });
+  await page.ready;
+  enterHostMode(storeOf("page"));
+  await flushAsync();
+  storeOf("page").deliver({ phase: "refused", code: "page-full" });
+  await flushAsync();
+
+  await waitForToast(PAGE_FULL_MESSAGE);
+  expect(toastText()).toContain(PAGE_FULL_MESSAGE);
+  expect(toastActions()).toEqual(["Download your copy"]);
+  expect(page.view.editable).toBe(false);
+});
+
+test("a host-mode page store whose compaction failed offers only the download", async () => {
+  const value = seedValue(BLOCKS);
+  const { page, PAGE_FULL_MESSAGE, storeOf } = await load({ html: pageHtml(value), head: tagHtml(value) });
+  await page.ready;
+  enterHostMode(storeOf("page"));
+  await flushAsync();
+  storeOf("page").deliver({ phase: "refused", code: "compaction-failed" });
+  await flushAsync();
+
+  await waitForToast(PAGE_FULL_MESSAGE);
+  expect(toastText()).toContain(PAGE_FULL_MESSAGE);
+  expect(toastActions()).toEqual(["Download your copy"]);
+  expect(page.view.editable).toBe(false);
+});
+
+test("a host-mode full page's download keeps the edit the room refused", async () => {
+  const value = seedValue(BLOCKS);
+  const { page, PAGE_FULL_MESSAGE, storeOf } = await load({ html: pageHtml(value), head: tagHtml(value) });
+  await page.ready;
+  enterHostMode(storeOf("page"));
+  await flushAsync();
+  appendToPage(page.view, " FULL PAGE EDIT");
+  await flushAsync();
+  storeOf("page").deliver({ phase: "refused", code: "page-full" });
+  await flushAsync();
+
+  await waitForToast(PAGE_FULL_MESSAGE);
+  const text = await readDownload(() => toastButton("Download your copy").click());
+  expect(text).toContain("FULL PAGE EDIT");
 });

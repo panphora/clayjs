@@ -28,7 +28,8 @@ test("dragging a column border stores a clamped width as one step and draws a fi
   expect(cols(view).c1.width).toBeUndefined();
   pointer("pointerup", view.dom.ownerDocument, 160);
   expect(cols(view).c1).toEqual({ pos: "1", name: "Name", width: 220 });
-  expect(cols(view).c2.width).toBeUndefined();
+  // The first width on a table that fills the page pins the others at their drawn width (160 in jsdom).
+  expect(cols(view).c2.width).toBe(160);
   const table = view.dom.querySelector("table");
   expect(table.classList.contains("is-sized")).toBe(true);
   expect([...view.dom.querySelectorAll("colgroup col")].map((col) => col.style.width)).toEqual(["220px", "160px"]);
@@ -53,21 +54,24 @@ test("a live drag survives the editor's mutation observer: the table view is kep
   expect(cols(view).c1.width).toBe(220);
 });
 
-test("the Width menu is the button equivalent: Wider, Narrower, Fit and Reset", () => {
+test("the Width menu is the button equivalent: Wider, Narrower, Fit and Reset widths", () => {
   const view = editor([], { blocks: { tbl } });
   view.dom.querySelector('th[data-col="c2"] button').click();
   expect(item(view, "Width ▸").querySelector(".page-menu-hint")?.textContent ?? "Auto").toMatch(/Auto/);
   item(view, "Width ▸").click();
-  expect(item(view, "Reset width")).toBeUndefined();
+  expect(item(view, "Reset widths")).toBeUndefined();
   item(view, "Wider").click();
   expect(cols(view).c2.width).toBe(200);
+  // The first width on a table that fills the page also pins the other column at its drawn width (160 in jsdom).
+  expect(cols(view).c1.width).toBe(160);
   view.dom.querySelector('th[data-col="c2"] button').click();
   item(view, "Width ▸").click();
   item(view, "Narrower").click();
   expect(cols(view).c2.width).toBe(160);
   view.dom.querySelector('th[data-col="c2"] button').click();
   item(view, "Width ▸").click();
-  item(view, "Reset width").click();
+  item(view, "Reset widths").click();
+  expect("width" in cols(view).c1).toBe(false);
   expect("width" in cols(view).c2).toBe(false);
 });
 
@@ -80,7 +84,7 @@ test("Fit sizes a column to its widest unwrapped cell text, measured outside the
     return this.style.whiteSpace === "pre" ? { width: this.textContent.length * 7, height: 16 } : rect.call(this);
   };
   try {
-    view.dom.querySelector('th[data-col="c1"] .page-table-resize').dispatchEvent(new MouseEvent("dblclick", { bubbles: true, cancelable: true }));
+    fitThroughMenu(view, "c1");
   } finally {
     HTMLElement.prototype.getBoundingClientRect = rect;
   }
@@ -116,4 +120,60 @@ test("the saved article carries the width and reads it back; junk widths are dro
   expect(parseModel(article)).toEqual([item]);
   article.querySelector("th").setAttribute("data-width", "-3");
   expect(parseModel(article)[0].cols[0]).toEqual({ id: "c1", name: "Name" });
+});
+
+const stubDrawn = (view, widths) => {
+  for (const th of view.dom.querySelectorAll("th")) {
+    th.getBoundingClientRect = () => ({ width: widths[th.dataset.col], height: 16, top: 0, left: 0, right: widths[th.dataset.col], bottom: 16 });
+  }
+};
+const dblclick = (view, colId) => view.dom.querySelector(`th[data-col="${colId}"] .page-table-resize`).dispatchEvent(new MouseEvent("dblclick", { bubbles: true, cancelable: true }));
+const fitThroughMenu = (view, colId) => {
+  view.dom.querySelector(`th[data-col="${colId}"] button`).click();
+  item(view, "Width ▸").click();
+  item(view, "Fit to content").click();
+  return cols(view)[colId].width;
+};
+
+test("the first width on a table that fills the page stores the drawn widths of every column in one step", () => {
+  const view = editor([], { blocks: { tbl } });
+  stubDrawn(view, { c1: 400, c2: 300 });
+  const handle = view.dom.querySelector('th[data-col="c1"] .page-table-resize');
+  pointer("pointerdown", handle, 100);
+  pointer("pointermove", view.dom.ownerDocument, 140);
+  pointer("pointerup", view.dom.ownerDocument, 140);
+  expect(cols(view).c1.width).toBe(440);
+  expect(cols(view).c2.width).toBe(300);
+  view.scrollToSelection = () => {};
+  expect(history.undo(view.state, view.dispatch)).toBe(true);
+  expect(cols(view).c1.width).toBeUndefined();
+  expect(cols(view).c2.width).toBeUndefined();
+});
+
+test("double-clicking a sized table's handle clears every width in one step", () => {
+  const sized = { ...tbl, cols: { c1: { pos: "1", name: "Name", width: 200 }, c2: { pos: "2", name: "Owner", width: 160 } } };
+  const view = editor([], { blocks: { tbl: sized } });
+  dblclick(view, "c2");
+  expect("width" in cols(view).c1).toBe(false);
+  expect("width" in cols(view).c2).toBe(false);
+  view.scrollToSelection = () => {};
+  expect(history.undo(view.state, view.dispatch)).toBe(true);
+  expect(cols(view).c1.width).toBe(200);
+  expect(cols(view).c2.width).toBe(160);
+});
+
+test("double-clicking a handle on a table with no widths changes nothing", () => {
+  const view = editor([], { blocks: { tbl } });
+  const before = view.state.doc;
+  dblclick(view, "c2");
+  expect(view.state.doc.eq(before)).toBe(true);
+  expect(cols(view).c1.width).toBeUndefined();
+  expect(cols(view).c2.width).toBeUndefined();
+});
+
+test("the resize handle says what a double-click does", () => {
+  const view = editor([], { blocks: { tbl } });
+  for (const handle of view.dom.querySelectorAll(".page-table-resize")) {
+    expect(handle.title).toBe("Drag or use the arrow keys to resize, double-click to reset the table to the page width");
+  }
 });

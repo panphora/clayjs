@@ -6,6 +6,7 @@ import { blockMap } from "../../../src/page/model.js";
 import { history } from "../../../src/vendor/prosemirror.vendor.js";
 import { pendingIds } from "../../../src/lib/unsaved-state.js";
 import { runSaveBarrier } from "../../../src/core/mode-transition.js";
+import { toastText } from "../helpers/editor-ui.js";
 
 const table = RECORD.blocks.tbl;
 const chart = RECORD.blocks.ch;
@@ -61,9 +62,9 @@ test("Chart this table on a table with no number column says so and inserts noth
   const view = editor([], { blocks: { ppl: people } });
   view.dom.querySelector('th[data-col="n1"] button').click();
   menuButton(view, "Chart this table").click();
-  for (let i = 0; i < 50 && ![...document.querySelectorAll("[data-clay-toast]")].some((el) => el.textContent.includes("no number column")); i++) await settled();
+  for (let i = 0; i < 50 && !toastText().includes("no number column"); i++) await settled();
   expect(view.state.doc.childCount).toBe(1);
-  expect([...document.querySelectorAll("[data-clay-toast]")].some((el) => el.textContent.includes("This table has no number column to chart yet."))).toBe(true);
+  expect(toastText()).toContain("This table has no number column to chart yet.");
 });
 
 const other = { t: "table", pos: "Z", cols: { d1: { pos: "1", name: "Region" }, d2: { pos: "2", name: "Tickets", kind: "number" }, d3: { pos: "3", name: "Resolved", kind: "number" } }, rows: { r1: { pos: "1", cells: { d1: "North", d2: "182", d3: "176" } } } };

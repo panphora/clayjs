@@ -29,7 +29,7 @@ const GENERIC_OFFLINE = "Offline, not saved";
 const REPLACED_TEXT = "This page was changed outside the editor. Reload to see it.";
 const TOO_LARGE_TEXT = "That change is too large to share, so it was not saved. Reload the page to keep editing.";
 const CLIENT_KEY = /^[ur][0-9a-z]+(-[0-9a-z]+){2}$/;
-export const PAGE_FULL_MESSAGE = "This page is full. Your recent changes are kept here; delete some content to keep editing.";
+export const PAGE_FULL_MESSAGE = "This document is full, though your changes are still here to download. This tab cannot edit until another editor or the owner in another browser deletes content.";
 const OVERWRITTEN_TEXT = "Some changes you made were replaced by a change made outside the editor.";
 const REPLACED_HOLD = "The page was changed outside the editor; reload to see it.";
 const LOADING_MS = 150;
@@ -246,15 +246,13 @@ function downloadTabCopy(inst) {
   return downloadSnapshot(`<!DOCTYPE html>\n${doc.documentElement.outerHTML}`);
 }
 
-function stopWithNotice(inst, text) {
+function stopWithNotice(inst, text, { reload = true } = {}) {
   if (inst.replaced) return;
   inst.replaced = true;
   stopEditing(inst);
+  const download = { label: "Download your copy", onClick: () => downloadTabCopy(inst) };
   toastPersistent(text, "warning", {
-    actions: [
-      { label: "Reload", onClick: () => window.location.reload() },
-      { label: "Download your copy", onClick: () => downloadTabCopy(inst) },
-    ],
+    actions: reload ? [{ label: "Reload", onClick: () => window.location.reload() }, download] : [download],
   });
 }
 
@@ -262,7 +260,8 @@ const showReplaced = (inst) => stopWithNotice(inst, REPLACED_TEXT);
 const showTooLarge = (inst) => stopWithNotice(inst, TOO_LARGE_TEXT);
 const showFull = (inst, code) => {
   dispatchState("blocked", code, PAGE_FULL_MESSAGE);
-  stopWithNotice(inst, PAGE_FULL_MESSAGE);
+  // A reload replays the refused edit and is refused again, so the notice offers only the download.
+  stopWithNotice(inst, PAGE_FULL_MESSAGE, { reload: false });
 };
 
 function applySaveState(inst, state, code, message) {

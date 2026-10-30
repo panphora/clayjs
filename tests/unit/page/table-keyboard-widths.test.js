@@ -51,7 +51,8 @@ test("repeated arrow downs preview, and one keyup writes one width as one undo s
   expect(cols(view).c1.width).toBeUndefined();
   press(el, "keyup", "ArrowRight");
   expect(cols(view).c1.width).toBe(190);
-  expect(cols(view).c2.width).toBeUndefined();
+  // The first width on a table that fills the page pins the others at their drawn width (160 in jsdom).
+  expect(cols(view).c2.width).toBe(160);
   expect(history.undo(view.state, view.dispatch)).toBe(true);
   expect(cols(view).c1.width).toBeUndefined();
   expect(colWidth(view, "c1")).toBe("");

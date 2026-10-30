@@ -1,6 +1,6 @@
 import { schema } from "../schema.js";
 import { orderedIds } from "../model.js";
-import { DEFAULT_WIDTH, MAX_WIDTH, MIN_WIDTH, addColumn, addRow, deleteColumn, deleteRow, moveColumn, moveRow, renameColumn, selectTableCell, setCellText, setColumnKind, setColumnWidth, sortBy } from "../table.js";
+import { DEFAULT_WIDTH, MAX_WIDTH, MIN_WIDTH, addColumn, addRow, deleteColumn, deleteRow, moveColumn, moveRow, renameColumn, selectTableCell, setCellText, setColumnKind, setColumnWidth, setColumnWidths, clearColumnWidths, sortBy } from "../table.js";
 import { COLUMN_KINDS } from "../rich/csv.js";
 import { KIND_ICONS, KIND_LABELS, columnKinds } from "../table-kinds.js";
 import { openPageMenu, reanchorPageMenu } from "../chrome.js";
@@ -17,7 +17,7 @@ const N = schema.nodes;
 const columns = (table) => orderedIds(table.attrs.cols);
 
 const UNAVAILABLE = "That part of the table is no longer available.";
-const GEAR = '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="2"/><path d="M8 1.8v1.7M8 12.5v1.7M1.8 8h1.7M12.5 8h1.7M3.6 3.6l1.2 1.2M11.2 11.2l1.2 1.2M3.6 12.4l1.2-1.2M11.2 4.8l1.2-1.2"/></svg>';
+const GEAR = '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><g transform="scale(0.6667)" stroke-width="2.25"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></g></svg>';
 const ACTIONS_CSS = `
 .page-editor .page-table-actions { position: absolute; z-index: 2; bottom: 100%; inset-inline-end: 0; inset-inline-start: auto; width: 24px; height: 20px; padding: 0; display: grid; place-items: center; border: 1px solid var(--page-chrome-line-rest); border-bottom: 0; border-radius: 6px 6px 0 0; background: var(--page-chrome-bg-moved); color: var(--page-chrome-ink-moved); font: inherit; cursor: pointer; opacity: 1; }
 .page-editor .page-table-actions:hover { background: var(--page-pop-hover); color: var(--page-ink-soft); }
@@ -239,10 +239,10 @@ export class TableView {
       { label: "Chart this table", icon: "📊", run: () => { const at = this.getPos(); return loadChartPart(this.view).then(({ insertChartAfterTable }) => insertChartAfterTable(this.view, at)); } },
       { label: "Rename column", focus: false, run: () => this.beginRename(ids[index]) },
       { label: "Column width ▸", icon: "↔", hint: col.width ? `${col.width}px` : "Auto", focus: false, run: () => openPageMenu(this.view, this.actionsButton, [
-        { label: "Wider", icon: "+", run: at(setColumnWidth(ids[index], width + 40), "Column width changed") },
-        { label: "Narrower", icon: "−", run: at(setColumnWidth(ids[index], width - 40), "Column width changed") },
+        { label: "Wider", icon: "+", run: at(this.widthCommand(ids[index], width + 40), "Column width changed") },
+        { label: "Narrower", icon: "−", run: at(this.widthCommand(ids[index], width - 40), "Column width changed") },
         { label: "Fit to content", icon: "↔", run: () => this.fit(ids[index]) },
-        ...(col.width ? [{ label: "Reset width", icon: "×", run: at(setColumnWidth(ids[index], null), "Column width reset") }] : []),
+        ...(this.isSized() ? [{ label: "Reset widths", icon: "×", run: at(clearColumnWidths(ids[index]), "Column widths reset") }] : []),
       ]) },
     ], { persist: true });
   }
@@ -325,7 +325,7 @@ export class TableView {
     handle.setAttribute("aria-valuemax", String(MAX_WIDTH));
     handle.setAttribute("aria-valuenow", String(this.widthOfColumn(colId)));
     handle.tabIndex = 0;
-    handle.title = "Drag or use the arrow keys to resize, double-click to fit";
+    handle.title = "Drag or use the arrow keys to resize, double-click to reset the table to the page width";
     handle.addEventListener("mousedown", (event) => event.preventDefault());
     handle.addEventListener("blur", () => this.commitWidth(colId));
     handle.addEventListener("keydown", (event) => this.resizeKey(event, colId));
@@ -335,7 +335,8 @@ export class TableView {
     handle.addEventListener("pointerdown", (event) => {
       event.preventDefault();
       const start = event.clientX;
-      const from = this.node.attrs.cols[colId].width ?? (th.getBoundingClientRect().width || DEFAULT_WIDTH);
+      const from = this.widthOfColumn(colId);
+      this.freeze();
       const rtl = this.dom.ownerDocument.defaultView.getComputedStyle?.(this.dom).direction === "rtl";
       let width = from;
       const move = (e) => {
@@ -346,17 +347,43 @@ export class TableView {
       const up = () => {
         doc.removeEventListener("pointermove", move);
         doc.removeEventListener("pointerup", up);
-        if (width !== from) this.command(colId, setColumnWidth(colId, width));
+        if (width !== from) this.sizeColumn(colId, width);
         else this.widths();
       };
       doc.addEventListener("pointermove", move);
       doc.addEventListener("pointerup", up);
     });
-    handle.addEventListener("dblclick", (event) => { event.preventDefault(); this.fit(colId); });
+    handle.addEventListener("dblclick", (event) => { event.preventDefault(); this.command(colId, clearColumnWidths(colId)); });
     return handle;
   }
+  isSized() {
+    return columns(this.node).some((id) => this.node.attrs.cols[id].width);
+  }
+  // A table with no widths fills the page, so its columns are measured as drawn.
+  drawnWidths() {
+    const widths = {};
+    for (const th of this.header.querySelectorAll("th")) widths[th.dataset.col] = Math.round(th.getBoundingClientRect().width) || DEFAULT_WIDTH;
+    return widths;
+  }
   widthOfColumn(colId) {
-    return this.node.attrs.cols[colId]?.width ?? DEFAULT_WIDTH;
+    const width = this.node.attrs.cols[colId]?.width;
+    if (width) return width;
+    return this.isSized() ? DEFAULT_WIDTH : this.drawnWidths()[colId] ?? DEFAULT_WIDTH;
+  }
+  // Before a preview changes one column of a table that fills the page, every
+  // column is pinned at its drawn width, so the others stay where they are.
+  freeze() {
+    if (this.isSized() || this.table.classList.contains("is-sized")) return;
+    const widths = this.drawnWidths();
+    for (const col of this.colgroup.children) col.style.width = `${widths[col.dataset.col]}px`;
+    this.table.style.width = `${Object.values(widths).reduce((sum, w) => sum + w, 0)}px`;
+    this.table.classList.add("is-sized");
+  }
+  widthCommand(colId, width) {
+    return this.isSized() ? setColumnWidth(colId, width) : setColumnWidths({ ...this.drawnWidths(), [colId]: width }, colId);
+  }
+  sizeColumn(colId, width) {
+    return this.command(colId, this.widthCommand(colId, width));
   }
   handleFor(colId) {
     return [...this.header.querySelectorAll(".page-table-resize")].find((handle) => handle.dataset.col === colId) ?? null;
@@ -379,6 +406,7 @@ export class TableView {
   }
   previewWidth(colId, width) {
     const base = this.preview?.col === colId ? this.preview.base : this.widthOfColumn(colId);
+    this.freeze();
     this.preview = { col: colId, width, base };
     const col = [...this.colgroup.children].find((element) => element.dataset.col === colId);
     if (col) { this.table.classList.add("is-sized"); col.style.width = `${width}px`; }
@@ -400,8 +428,11 @@ export class TableView {
     const table = pos == null ? null : this.view.state.doc.nodeAt(pos);
     const col = table?.type === N.table && table.attrs.id === this.node.attrs.id ? table.attrs.cols[colId] : null;
     if (!col) { this.widths(); return false; }
-    if ((col.width ?? DEFAULT_WIDTH) === preview.width) { this.widths(); return false; }
-    const cols = { ...table.attrs.cols, [colId]: { ...col, width: preview.width } };
+    if ((col.width ?? preview.base) === preview.width) { this.widths(); return false; }
+    const seed = columns(table).some((id) => table.attrs.cols[id].width) ? {} : this.drawnWidths();
+    const cols = { ...table.attrs.cols };
+    for (const [id, width] of Object.entries(seed)) if (cols[id]) cols[id] = { ...cols[id], width };
+    cols[colId] = { ...col, width: preview.width };
     this.view.dispatch(asStep(this.view.state.tr.setNodeMarkup(pos, null, { ...table.attrs, cols })));
     return true;
   }
@@ -415,7 +446,7 @@ export class TableView {
     for (const cell of this.contentDOM.querySelectorAll("td")) if (cell.dataset.col === colId) widest = Math.max(widest, textWidth(cell.querySelector("span") ?? cell));
     const head = [...this.header.querySelectorAll("th")].find((th) => th.dataset.col === colId)?.querySelector("button");
     widest = Math.max(widest, head?.scrollWidth ?? 0);
-    return this.command(colId, setColumnWidth(colId, widest + 24));
+    return this.sizeColumn(colId, widest + 24);
   }
   render(focus = null) {
     const doc = this.dom.ownerDocument;
@@ -457,10 +488,10 @@ export class TableView {
           { label: "Sort ascending", icon: "↑", run: run(sortBy(colId, "asc"), "Sorted ascending") },
           { label: "Sort descending", icon: "↓", run: run(sortBy(colId, "desc"), "Sorted descending") },
           { label: "Width ▸", icon: "↔", hint: col.width ? `${col.width}px` : "Auto", focus: false, run: () => openPageMenu(this.view, control, [
-            { label: "Wider", icon: "+", run: run(setColumnWidth(colId, this.widthOfColumn(colId) + 40), "Column width changed") },
-            { label: "Narrower", icon: "−", run: run(setColumnWidth(colId, this.widthOfColumn(colId) - 40), "Column width changed") },
+            { label: "Wider", icon: "+", run: run(this.widthCommand(colId, this.widthOfColumn(colId) + 40), "Column width changed") },
+            { label: "Narrower", icon: "−", run: run(this.widthCommand(colId, this.widthOfColumn(colId) - 40), "Column width changed") },
             { label: "Fit to content", icon: "↔", run: () => this.fit(colId) },
-            ...(col.width ? [{ label: "Reset width", icon: "×", run: run(setColumnWidth(colId, null), "Column width reset") }] : []),
+            ...(this.isSized() ? [{ label: "Reset widths", icon: "×", run: run(clearColumnWidths(colId), "Column widths reset") }] : []),
           ]) },
           { label: "Chart this table", icon: "📊", run: () => { const at = this.getPos(); return loadChartPart(this.view).then(({ insertChartAfterTable }) => insertChartAfterTable(this.view, at)); } },
           { label: "Insert column left", icon: "+", run: run(addColumn(false), "Column inserted") },

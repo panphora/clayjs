@@ -213,6 +213,33 @@ export const moveColumn = (delta) => (st, dispatch) => changeTable(st, dispatch,
 export const MIN_WIDTH = 48, MAX_WIDTH = 1200, DEFAULT_WIDTH = 160;
 const widthOf = (value) => (Number.isFinite(value) && value > 0 ? Math.round(Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, value))) : null);
 
+// Clears every stored width, so the table fills the page again.
+export const clearColumnWidths = (colId) => (st, dispatch) => changeTable(st, dispatch, (table) => {
+  const ids = columns(table);
+  if (!ids.some((id) => table.attrs.cols[id].width)) return null;
+  const cols = {};
+  for (const id of ids) {
+    const { width: _old, ...rest } = table.attrs.cols[id];
+    cols[id] = rest;
+  }
+  return { table: copyTable(table, { cols }, table.content), cell: Math.max(0, ids.indexOf(colId)) };
+});
+
+// Several widths in one step: the first width set on a table that fills the page
+// also fixes every other column at the width it is drawn at, so none of them jumps.
+export const setColumnWidths = (widths, colId) => (st, dispatch) => changeTable(st, dispatch, (table) => {
+  const cols = { ...table.attrs.cols };
+  let changed = false;
+  for (const [id, width] of Object.entries(widths)) {
+    const next = widthOf(width);
+    if (!cols[id] || next === null || cols[id].width === next) continue;
+    cols[id] = { ...cols[id], width: next };
+    changed = true;
+  }
+  if (!changed) return null;
+  return { table: copyTable(table, { cols }, table.content), cell: columns(table).indexOf(colId) };
+});
+
 export const setColumnWidth = (colId, width) => (st, dispatch) => changeTable(st, dispatch, (table) => {
   const col = table.attrs.cols[colId];
   if (!col) return null;
