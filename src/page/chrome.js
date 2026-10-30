@@ -737,7 +737,7 @@ class Chrome {
       { key: "text_color", label: "Text color", icon: "A", hint: "\u203a", run: (view, chrome) => nativeMenu(view, chrome, "text_color") },
       { key: "highlight", label: "Highlight", icon: "\u25A0", hint: "\u203a", run: (view, chrome) => nativeMenu(view, chrome, "highlight") },
       ...(phone ? [{ key: "turn", label: "Turn into", icon: "turn", run: (view, chrome) => chrome.openMenu("turn", chrome.more) }] : []),
-      { key: "insert", label: "Insert", icon: "+", run: (view, chrome) => chrome.openMenu("insert", chrome.more, null, null, view.state.doc.child(chrome.blockIndex()).attrs.id) },
+      { key: "insert", label: "Insert", icon: "+", run: (view, chrome) => chrome.openMenu("insert", chrome.pickedFrom ?? chrome.more, null, null, view.state.doc.child(chrome.blockIndex()).attrs.id) },
       ...actions,
       ...(phone && this.settingsAPI ? [{ key: "settings", label: "Document settings", icon: "gear", focus: false, run: (view, chrome) => chrome.openSettings(chrome.more) }] : []),
       { key: "titleIcon", label: "Page icon", icon: "\u263A", run: (view) => runMenuCommand(view, "titleIcon") },

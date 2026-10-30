@@ -34,6 +34,7 @@ function chartAttrs(table, pos, parent) {
   if (!colIds.length) return null;
   const kinds = columnKinds(table);
   const series = colIds.filter((id) => id !== colIds[0] && kinds[id] === "number");
+  if (!series.length) return null;
   return {
     id: newId(),
     pos,
@@ -41,7 +42,7 @@ function chartAttrs(table, pos, parent) {
     source: table.attrs.id,
     kind: "bar",
     x: colIds[0],
-    series: series.length ? series : colIds[1] ? [colIds[1]] : [],
+    series,
     title: "",
     highlight: null,
   };
@@ -54,7 +55,10 @@ export function insertChartAfterTable(view, tablePos) {
   const after = tablePos + table.nodeSize;
   const next = doc.maybeChild(doc.resolve(after).index(0));
   const attrs = chartAttrs(table, keyBetween(table.attrs.pos, next?.attrs.pos ?? null), table.attrs.parent);
-  if (!attrs) return false;
+  if (!attrs) {
+    toast("This table has no number column to chart yet.");
+    return true;
+  }
   openOnMount.add(attrs.id);
   view.dispatch(view.state.tr.insert(after, schema.nodes.chart.create(attrs)));
   return true;

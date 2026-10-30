@@ -18,7 +18,7 @@ const LABELS = {
   offline: "Offline, not saved",
   retrying: "Saving…",
   blocked: "Can't save here",
-  pending: "Saving on this device",
+  pending: "Saving…",
   acknowledged: "Shared, not yet saved",
   checkpointed: "Saved",
   unavailable: "Can't store changes: download a copy",

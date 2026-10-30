@@ -393,7 +393,7 @@ export function decorations(st) {
       const box = controls(view, node);
       box.dataset.item = node.attrs.id;
       return box;
-    }, { key: `${node.attrs.id}:${node.attrs.owner}:${node.attrs.due}:${node.attrs.checked}:${today}`, side: 1, stopEvent: (event) => !!event.target.closest?.(".page-check-chip, .page-check-popup"), ignoreSelection: true }));
+    }, { key: `${node.attrs.id}:${node.attrs.owner}:${node.attrs.due}:${node.attrs.checked}:${today}`, side: -1, stopEvent: (event) => !!event.target.closest?.(".page-check-chip, .page-check-popup"), ignoreSelection: true }));
   });
   return DecorationSet.create(st.doc, widgets);
 }

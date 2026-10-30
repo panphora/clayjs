@@ -151,6 +151,11 @@ describe("the Table actions menu", () => {
     return view;
   };
 
+  test("offers Chart this table", () => {
+    const view = opened();
+    expect([...menu(view).querySelectorAll(".page-menu-item")].some((item) => item.textContent.includes("Chart this table"))).toBe(true);
+  });
+
   test("inserts a row and a column from the keyboard", () => {
     const view = opened();
     walkTo(view, "Insert row below");
@@ -196,7 +201,7 @@ describe("the Table actions menu", () => {
     expect(labels(view)).toEqual([
       "Insert row above", "Insert row below", "Move row down", "Delete row",
       "Insert column left", "Insert column right", "Move column right",
-      "Delete column", "Sort ascending", "Sort descending", "Rename column", "Column width ▸",
+      "Delete column", "Sort ascending", "Sort descending", "Chart this table", "Rename column", "Column width ▸",
     ]);
     key(view, "Escape");
     expect(active()).toBe(actionsButton(view));

@@ -56,6 +56,16 @@ test("Chart this table inserts the default chart after the table with its inspec
   expect(view.state.doc.childCount).toBe(1);
 });
 
+test("Chart this table on a table with no number column says so and inserts nothing", async () => {
+  const people = { t: "table", pos: "A", cols: { n1: { pos: "1", name: "Name" }, n2: { pos: "2", name: "Team" } }, rows: { r1: { pos: "1", cells: { n1: "Ada", n2: "Design" } } } };
+  const view = editor([], { blocks: { ppl: people } });
+  view.dom.querySelector('th[data-col="n1"] button').click();
+  menuButton(view, "Chart this table").click();
+  for (let i = 0; i < 50 && ![...document.querySelectorAll("[data-clay-toast]")].some((el) => el.textContent.includes("no number column")); i++) await settled();
+  expect(view.state.doc.childCount).toBe(1);
+  expect([...document.querySelectorAll("[data-clay-toast]")].some((el) => el.textContent.includes("This table has no number column to chart yet."))).toBe(true);
+});
+
 const other = { t: "table", pos: "Z", cols: { d1: { pos: "1", name: "Region" }, d2: { pos: "2", name: "Tickets", kind: "number" }, d3: { pos: "3", name: "Resolved", kind: "number" } }, rows: { r1: { pos: "1", cells: { d1: "North", d2: "182", d3: "176" } } } };
 const withoutTable = (view) => { view.dispatch(view.state.tr.delete(0, view.state.doc.child(0).nodeSize)); flushChrome(); paint(); };
 const brokenCard = (view) => view.dom.querySelector(".page-chart-broken");

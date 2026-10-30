@@ -540,6 +540,26 @@ describe("the selection bar matches the toolbar", () => {
     expect(labels(view)).toEqual(expect.arrayContaining(["Text color", "Page icon"]));
   });
 
+  test("Insert from the bubble's More opens beside the bubble, not at the toolbar", async () => {
+    const view = open([["p", "paragraph", "hello"], ["q", "paragraph", "Q"]]);
+    view.hasFocus = () => true;
+    select(view, posOf(view, "p") + 1, posOf(view, "p") + 4);
+    const more = bubble(view).querySelector(".page-tool-more");
+    const toolbarMore = dock(view).querySelector(".page-tool-more");
+    const rect = { left: 300, right: 320, top: 500, bottom: 520, width: 20, height: 20 };
+    more.getBoundingClientRect = jest.fn(() => rect);
+    toolbarMore.getBoundingClientRect = jest.fn(() => ({ ...rect, top: 10, bottom: 30 }));
+    more.click();
+    await frame();
+    more.getBoundingClientRect.mockClear();
+    toolbarMore.getBoundingClientRect.mockClear();
+    rows(view).find((r) => r.querySelector(".page-menu-label").textContent === "Insert").click();
+    await frame();
+    expect(isOpen(view)).toBe(true);
+    expect(more.getBoundingClientRect).toHaveBeenCalled();
+    expect(toolbarMore.getBoundingClientRect).not.toHaveBeenCalled();
+  });
+
   test("a mark picked from the bubble's More lands on the selection, which opening the menu keeps", async () => {
     const gate = { calls: [], run: async (command) => { gate.calls.push(command); return { status: "applied", floor: 1, result: await command?.apply?.({}) }; } };
     const view = editor([["p", "paragraph", "under me"]], { formatGate: () => Promise.resolve(gate) });

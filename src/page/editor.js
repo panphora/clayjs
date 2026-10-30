@@ -332,6 +332,8 @@ ${INDENTS.map((n) => `:where(article[data-page], .page-editor) .page-li[data-ind
   .page-check-popup .page-check-quick-row { min-height: 44px; }
   .page-check-popup .page-check-cal-day { height: 40px; min-height: 40px; }
   .page-board-owner-input { font-size: 16px; height: 44px; }
+  .page-check-search { font-size: 16px; height: 44px; }
+  .page-check-popup .page-check-cal-btn { width: 44px; height: 44px; }
   .page-board-person { height: 44px; border-radius: 22px; }
 }
 @media (prefers-reduced-motion: reduce) {

@@ -70,6 +70,12 @@ test("the tags widget leaves a click on the line itself to the editor", () => {
   expect(widget.type.spec.stopEvent({ target: box.querySelector('[data-check="owner"]') })).toBe(true);
 });
 
+test("the tags widget sits before the caret, so typing in an empty item stays in it", () => {
+  const view = editor([["empty", "list_item", "", { kind: "check" }]]);
+  const widget = decorations(view.state).find().find((decoration) => decoration.type.spec.stopEvent);
+  expect(widget.type.spec.side).toBe(-1);
+});
+
 test("a document open across midnight redraws Today, Tomorrow and overdue on its next update", () => {
   jest.useFakeTimers({ now: new Date(2026, 9, 29, 23, 50) });
   try {

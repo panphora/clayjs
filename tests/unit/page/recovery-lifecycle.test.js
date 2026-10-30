@@ -286,7 +286,7 @@ test("the five states answer to the table, and the indicator draws its texts", a
   document.body.innerHTML = "";
   await import("../../../src/plugins/indicator.js");
   const texts = {
-    pending: "Saving on this device",
+    pending: "Saving…",
     acknowledged: "Shared, not yet saved",
     checkpointed: "Saved",
     unavailable: "Can't store changes: download a copy",
@@ -337,7 +337,7 @@ test("a page state stays on screen while the journal has nothing to report, and 
   fire("pending");
   await drawn();
   const chip = document.querySelector("[data-clay-indicator]");
-  expect(chip.textContent).toBe("Saving on this device");
+  expect(chip.textContent).toBe("Saving…");
   jest.advanceTimersByTime(10_000);
   expect(chip.style.opacity).toBe("1");
 
