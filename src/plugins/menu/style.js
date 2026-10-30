@@ -165,6 +165,7 @@ export default `.clay-menu-dock, .clay-menu-recall, .clay-menu-spots, .clay-seo 
 
 @media (pointer: coarse), (max-width: 680px) {
   .clay-menu-list [role="menuitem"] { min-height: 44px; font-size: 15px; }
+  .clay-menu-list .clay-menu-pair [role="menuitem"] { min-height: 44px; }
   :is(.clay-menu-dock, .clay-seo) :is(input, textarea, select) { font-size: 16px; }
   .clay-seo-input, .clay-people-input { min-height: 40px; }
   .clay-menu-btn { min-height: 40px; }

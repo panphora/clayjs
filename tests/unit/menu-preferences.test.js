@@ -288,3 +288,18 @@ test("nothing from the toast or the notice is saved", async () => {
   expect(html).not.toContain("clay-menu-spots");
   expect(listOf()).not.toBeNull();
 });
+
+test("Chrome on a Mac, which reports its platform as macOS, gets Command shortcuts", async () => {
+  const { isMac, keys } = await import("../../src/plugins/menu/preferences.js");
+  const had = Object.getOwnPropertyDescriptor(navigator, "userAgentData");
+  Object.defineProperty(navigator, "userAgentData", { configurable: true, value: { platform: "macOS" } });
+  try {
+    expect(isMac()).toBe(true);
+    expect(keys("⌘⇧.", "Ctrl+Shift+.")).toBe("⌘⇧.");
+    Object.defineProperty(navigator, "userAgentData", { configurable: true, value: { platform: "Windows" } });
+    expect(isMac()).toBe(false);
+  } finally {
+    if (had) Object.defineProperty(navigator, "userAgentData", had);
+    else delete navigator.userAgentData;
+  }
+});
