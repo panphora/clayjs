@@ -6,5 +6,9 @@ TESTBOX_RELEASE=1
 TESTBOX_SETUP='npm ci --no-audit --no-fund && npx playwright install chromium'
 # `testbox snapshot` bakes this repo's Playwright browsers into the base image.
 TESTBOX_WARM_BROWSERS=chromium
-TESTBOX_COMMAND='npm test && npm run test:conformance && npm run test:standalone'
+# Each suite runs even when an earlier one fails, so one box run reports all of them
+# (scripts/release-checks.mjs; verdicts in test-box-out/<run>/release-checks.json).
+# Timing tests run alone in test:perf: beside jest's parallel workers the same code measured
+# 572 ms instead of 98 ms, so a ceiling there measured the box, not the code.
+TESTBOX_COMMAND='node scripts/release-checks.mjs "npm test" "npm run test:perf" "npm run test:conformance" "npm run test:standalone"'
 TESTBOX_TIMEOUT=${TESTBOX_TIMEOUT:-45m}

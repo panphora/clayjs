@@ -4,7 +4,7 @@
 // fixture the proof path took about 2 s before the containment index and about 30 ms
 // after it, so this test guards the walk it replaced, not the machine.
 import { webcrypto } from "node:crypto";
-import { measureSaveAccept } from "../../../scripts/measure-save-accept.mjs";
+import { measureSaveAccept } from "../../scripts/measure-save-accept.mjs";
 
 const RECORDS = 200;
 
@@ -15,6 +15,6 @@ test("the work after an accepted save stays small at 2,000 blocks", async () => 
   console.log(JSON.stringify(result));
   expect(result.covered).toBe(RECORDS);
   // A generous ceiling: the proof path measures about 30 ms, the code before step 1 about 2,000 ms.
-  // A loaded test box has measured over 500 ms, so the ceiling sits halfway to the old walk.
+  // It runs alone (npm run test:perf): beside the parallel unit suite it measured 572 ms and 1,036 ms.
   expect(result.total).toBeLessThan(1000);
 }, 300000);

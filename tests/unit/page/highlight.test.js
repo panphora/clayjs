@@ -11,7 +11,7 @@ import { editor, posOf, select, typeText } from "./view-helpers.js";
 afterEach(() => { document.body.innerHTML = ""; });
 
 const wait = (ms = 20) => new Promise((r) => setTimeout(r, ms));
-const until = async (check, timeout = 2000) => {
+const until = async (check, timeout = 10000) => {
   for (const end = Date.now() + timeout; !check() && Date.now() < end;) await wait(10);
 };
 const fake = () => {
@@ -35,7 +35,7 @@ test("a code block with a language gets colours without a document change or an 
   const view = editor([["c", "code_block", "const x = 1", { lang: "js" }]], { highlight: { tokenize: run, delay: 0 } });
   const depth = history.undoDepth(view.state);
   const doc = view.state.doc;
-  await wait();
+  await until(() => calls.length === 1);
   expect(calls).toEqual([["const x = 1", "javascript"]]);
   expect(decos(view).map((d) => [d.from, d.to])).toEqual([[1, 6]]);
   expect(decos(view)[0].type.attrs.style).toBe("color: var(--page-code-token-keyword)");
@@ -115,11 +115,11 @@ describe("review round 1", () => {
   test("turning a coloured code block into text drops its colours", async () => {
     const { run } = fake();
     const view = editor([["c", "code_block", "const x = 1", { lang: "javascript" }]], { highlight: { tokenize: run, delay: 0 } });
-    await wait();
+    await until(() => decos(view).length === 1);
     expect(decos(view).length).toBe(1);
     const { turnInto, BLOCK_TYPES } = await import("../../../src/page/chrome.js");
     view.dispatch(turnInto(view.state, 0, BLOCK_TYPES[0]));
-    await wait();
+    await until(() => decos(view).length === 0);
     expect(view.state.doc.child(0).type.name).toBe("paragraph");
     expect(decos(view)).toEqual([]);
   });
@@ -133,7 +133,7 @@ describe("review round 1", () => {
     await wait();
     expect(decos(view)).toEqual([]);
     history.undo(view.state, view.dispatch);
-    await wait();
+    await until(() => decos(view).length === 1);
     expect(decos(view).length).toBe(1);
     expect(calls.length).toBe(1);
   });
@@ -163,11 +163,11 @@ describe("review round 1", () => {
     try {
       const { run } = fake();
       const view = editor([["p", "paragraph", "P"], ["c", "code_block", "x", { lang: "javascript" }]], { highlight: { tokenize: run, delay: 0 } });
-      await wait();
+      await until(() => observed.size === 1);
       expect(observed.size).toBe(1);
       const n = view.state.doc.child(0).nodeSize;
       view.dispatch(view.state.tr.delete(n, n + view.state.doc.child(1).nodeSize));
-      await wait();
+      await until(() => observed.size === 0);
       expect(observed.size).toBe(0);
     } finally {
       win.IntersectionObserver = prev;
@@ -179,9 +179,9 @@ test("typing in a coloured block keeps its colours until the new ones arrive, so
   const held = [];
   const run = (code) => new Promise((r) => held.push(() => r([[{ content: code.slice(0, 5), offset: 0, color: "var(--page-code-token-keyword)", fontStyle: 0 }]])));
   const view = editor([["c", "code_block", "const x = 1", { lang: "javascript" }]], { highlight: { tokenize: run, delay: 0 } });
-  await wait();
+  await until(() => held.length === 1);
   held.shift()();
-  await wait();
+  await until(() => decos(view).length === 1);
   expect(decos(view).length).toBe(1);
   select(view, posOf(view, "c", true));
   for (const ch of " + 2") {
@@ -190,6 +190,6 @@ test("typing in a coloured block keeps its colours until the new ones arrive, so
     expect(decos(view).map((d) => [d.from, d.to])).toEqual([[1, 6]]);
   }
   while (held.length) held.shift()();
-  await wait();
+  await until(() => decos(view).length === 1);
   expect(decos(view).length).toBe(1);
 });

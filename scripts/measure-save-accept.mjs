@@ -2,7 +2,7 @@
 // checkpoint proof covers, what the channel validates, what the file debt clears and what
 // the journal base and lineage cost. Run at 2,000 blocks: before the containment index
 // this path spent about 2 s proving which records the accepted state covers; after it,
-// about 35 ms. tests/unit/page/save-accept-performance.test.js calls the same function.
+// about 35 ms. tests/perf/save-accept-performance.test.js calls the same function (npm run test:perf, alone).
 import { performance } from "node:perf_hooks";
 import { webcrypto } from "node:crypto";
 import { pathToFileURL } from "node:url";

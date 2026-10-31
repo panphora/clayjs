@@ -173,7 +173,9 @@ describe('the chunked release in edit mode', () => {
     expect(view.state.doc.textContent).to.contain('Typed into the article.');
     expect(win.document.querySelector('article.page [data-id="p1"]').textContent).to.contain('Typed into the article.');
 
-    await win.clay.save.force();
+    // flush, not force: a checkpoint save can start mid-typing on a slow machine, and force()
+    // resolves on that in-flight save; flush() waits until the host holds the current bytes.
+    await win.clay.save.flush();
     expect(bodies.filter((sent) => sent.url === '/_/save').at(-1).body).to.contain('Typed into the article.');
   });
 });
