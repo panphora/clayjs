@@ -15,5 +15,6 @@ test("the work after an accepted save stays small at 2,000 blocks", async () => 
   console.log(JSON.stringify(result));
   expect(result.covered).toBe(RECORDS);
   // A generous ceiling: the proof path measures about 30 ms, the code before step 1 about 2,000 ms.
-  expect(result.total).toBeLessThan(400);
+  // A loaded test box has measured over 500 ms, so the ceiling sits halfway to the old walk.
+  expect(result.total).toBeLessThan(1000);
 }, 300000);
