@@ -314,6 +314,7 @@ Plugins add editing, sync, and UI features to `clay.js`. Most are off by default
 | `cms` | off | yes | `clay.cms`; implies `quickcrop` and `upload` |
 | `wire` | off | yes | `clay.wire`, the channel to a local agent process |
 | `message` | off | yes | `message-form`: a visitor's contact form to the owner, `clay.message` ([message: contact forms](https://clayjs.com/docs/guide/components/#message-contact-forms)) |
+| `like` | off | yes | `like`: a like button on any element, counted by the host, `clay.like` ([like](https://clayjs.com/docs/plugins/like/)) |
 | `ai-edit` | off | no | select text, ask an agent to rewrite it; implies `wire` |
 | `demo` | off | yes | fakes saving into `localStorage` for public demos |
 | `visitor-drafts` | off | yes | `clay.visitorDrafts`; in draft mode, the draft store, download prompt and intro area; outside it, only the owner chip, fetched when the owner edits ([Free documents for visitors](https://clayjs.com/docs/guide/free-documents/)) |
