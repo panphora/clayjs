@@ -27,6 +27,7 @@ const UNSUPPORTED = {
   // Plugins still on the guarded reload until somebody reviews their lifecycle.
   "plugins/quickcrop.js": "reached through cms and unreviewed",
   "plugins/message.js": "unreviewed",
+  "plugins/like.js": "unreviewed",
   "plugins/demo.js": "its own destination, not a host edit session",
   "plugins/visitor-drafts.js": "the draft plan keeps its own startup",
 };
