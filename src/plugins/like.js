@@ -94,8 +94,11 @@ async function request(method, body) {
   }
   const data = await res.json().catch(() => null);
   if (!data) {
-    // A host without likes answers its HTML page at 200; anything else is a failure.
-    if (res.ok) return { ok: false, unsupported: true, error: null };
+    // A host without likes answers its HTML page at 200, or refuses the unknown path with a
+    // plain 404 or 405 (HTML Clay, Hyperclay Local). Hyperclay's own refusals are JSON.
+    if (res.ok || (method === "GET" && (res.status === 404 || res.status === 405))) {
+      return { ok: false, unsupported: true, error: null };
+    }
     return { ok: false, error: `The like couldn't be saved (${res.status}).` };
   }
   if (typeof data.formToken === "string") formToken = data.formToken;

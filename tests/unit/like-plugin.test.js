@@ -136,6 +136,21 @@ test("a host without likes leaves the click alone too", async () => {
   expect(puts()).toHaveLength(0);
 });
 
+test.each([404, 405])("a local host that refuses the totals with a plain %i leaves clicks alone", async (status) => {
+  responses = () => htmlResponse(status);
+  await load('<a href="#next" like="post-1">&#9829;</a>');
+  const el = document.querySelector("a");
+  for (let i = 0; i < 2; i++) {
+    const event = new MouseEvent("click", { bubbles: true, cancelable: true });
+    el.dispatchEvent(event);
+    await flush(); await flush();
+    expect(event.defaultPrevented).toBe(false);
+  }
+  expect(reactionCalls("GET")).toHaveLength(1);
+  expect(puts()).toHaveLength(0);
+  expect(window.clay.toast).not.toHaveBeenCalled();
+});
+
 test("the totals are painted into one count span, however often they are read", async () => {
   await load('<button like="post-1">&#9829;</button>');
   const el = document.querySelector("button");
