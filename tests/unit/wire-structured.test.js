@@ -91,6 +91,20 @@ test("success maps progress and the exact result value", async () => {
   });
 });
 
+test("a missing named program reports its name without asking for an agent", async () => {
+  global.fetch = jest.fn(async (url) => String(url).includes("/_/meta")
+    ? { ok: true, text: async () => JSON.stringify({ spec: 1, extensions: ["wire"] }) }
+    : { ok: true, status: 200, json: async () => ({ delivered: 0 }) });
+
+  const handle = wire.send({ op: "state" }, { id: "missing-program", helper: "bluesky-studio", document: "none" });
+  await settle();
+
+  await expect(handle.done).resolves.toMatchObject({
+    state: "error",
+    error: 'The local program "bluesky-studio" is not connected to this file.',
+  });
+});
+
 test("application errors retain their source, code and details", async () => {
   const handle = wire.send({}, { id: "contract-application-error", helper: "search" });
   await settle();

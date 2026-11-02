@@ -211,7 +211,7 @@ test("a request nobody took fails at once instead of spinning", async () => {
 
   expect(handle.state).toBe("error");
   await expect(handle.done).resolves.toMatchObject({
-    error: "no agent is attached to this file",
+    error: "No program is connected to this file.",
   });
 });
 

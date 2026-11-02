@@ -788,7 +788,9 @@ function send(payload, opts = {}) {
       // Accepted by the router and taken by nobody. Reporting this as an error
       // rather than a pending request is the difference between a UI that says
       // "start an agent" and one that spins forever.
-      finish(rec, "error", "no agent is attached to this file");
+      finish(rec, "error", rec.helper
+        ? `The local program "${rec.helper}" is not connected to this file.`
+        : "No program is connected to this file.");
     }
   };
 

@@ -83,6 +83,6 @@ test("a reply with no refusal still reports that nobody is attached", async () =
   await settle();
   const outcome = await handle.done;
 
-  expect(outcome.error).toBe("no agent is attached to this file");
+  expect(outcome.error).toBe("No program is connected to this file.");
   expect(outcome.errorCode).toBeFalsy();
 });
