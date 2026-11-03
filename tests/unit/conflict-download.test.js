@@ -196,6 +196,50 @@ test("with two applies the newest page is the document and the older one rides a
   expect(data.earlierPages[0].html).toContain("first text");
 });
 
+test("a copy drops copy-only content from the page and the earlier pages, and leaves the edits alone", () => {
+  document.body.innerHTML = '<p id="a">first text</p><div id="promo" clay="no-copy">tracker</div>';
+  const first = snapshot.captureSnapshot({ flushUndo: false });
+  document.body.innerHTML = '<p id="a">second text</p><div id="promo" clay="no-copy">tracker</div><div class="form" clay="no-copy-unless:paid-forms">form</div>';
+  const second = snapshot.captureSnapshot({ flushUndo: false });
+  document.querySelector("#a").textContent = "merged text";
+
+  const one = beginApply({ source: "peer", domain: "sync", root: first });
+  const [idOne] = completeApply(one, [{ kind: "text", node: document.querySelector("#a").firstChild, local: "first text", remote: "merged text" }], { ticket: 1 });
+  const two = beginApply({ source: "peer", domain: "sync", root: second });
+  const [idTwo] = completeApply(two, [{ kind: "text", node: document.querySelector("#a").firstChild, local: "second text", remote: "merged text" }], { ticket: 2 });
+
+  const apply = conflicts.recoveryOf(idTwo);
+  const rootBefore = apply.root.outerHTML;
+  const { html } = download.buildRecovery([conflicts.get(idTwo), conflicts.get(idOne)]);
+  const data = payload(html);
+
+  expect(outside(html)).not.toContain("tracker");
+  expect(outside(html)).not.toContain("no-copy");
+  expect(outside(html)).not.toContain(">form<");
+  expect(data.earlierPages).toHaveLength(1);
+  expect(data.earlierPages[0].html).toContain("first text");
+  expect(data.earlierPages[0].html).not.toContain("tracker");
+  expect(data.earlierPages[0].html).not.toContain("no-copy");
+  expect(data.edits).toHaveLength(2);
+  expect(data.edits[0].yours.hit).toBe("second text");
+  expect(data.edits[0].now.hit).toBe("merged text");
+  expect(data.edits[1].yours.hit).toBe("first text");
+  expect(apply.root.outerHTML).toBe(rootBefore);
+  expect(apply.root.outerHTML).toContain("tracker");
+});
+
+test("a stored copy drops copy-only content", async () => {
+  const page = '<html><body><p>kept</p><div clay="no-copy">tracker</div></body></html>';
+
+  expect(await download.downloadStored({ html: page, edits: [] })).toBe(true);
+
+  return blobText(blobs[0]).then((text) => {
+    expect(text).not.toContain("tracker");
+    expect(text).toContain("kept");
+    expect(payload(text).edits).toEqual([]);
+  });
+});
+
 test("a value that looks like markup cannot end the JSON block early", () => {
   const nasty = "</script><!--x";
   const { saveClone } = snapshot.captureForMerge();
@@ -301,10 +345,10 @@ test("a refused download runs no page code and flushes no undo", () => {
   expect(html).not.toContain("secret");
 });
 
-test("the blob URL is revoked late, so a slow download is not cancelled", () => {
+test("the blob URL is revoked late, so a slow download is not cancelled", async () => {
   jest.useFakeTimers();
   try {
-    expect(download.downloadRecovery([])).toBe(true);
+    expect(await download.downloadRecovery([])).toBe(true);
 
     jest.advanceTimersByTime(1000);
     expect(revokeObjectURL).not.toHaveBeenCalled();
@@ -321,7 +365,7 @@ test("a download saves nothing, acknowledges nothing and fetches nothing", async
   const size = conflicts.size;
   window.fetch = jest.fn();
 
-  expect(download.downloadRecovery([conflicts.get(id)])).toBe(true);
+  expect(await download.downloadRecovery([conflicts.get(id)])).toBe(true);
 
   expect(window.fetch).not.toHaveBeenCalled();
   expect(conflicts.size).toBe(size);
@@ -339,11 +383,11 @@ test("a download saves nothing, acknowledges nothing and fetches nothing", async
   expect(await blobText(blobs[0])).toContain("budget is over");
 });
 
-test("a download that cannot be built reports failure", () => {
+test("a download that cannot be built reports failure", async () => {
   URL.createObjectURL = () => { throw new Error("x"); };
   const logged = jest.spyOn(console, "error").mockImplementation(() => {});
 
-  expect(download.downloadRecovery([])).toBe(false);
+  expect(await download.downloadRecovery([])).toBe(false);
   expect(clickSpy).not.toHaveBeenCalled();
   expect(revokeObjectURL).not.toHaveBeenCalled();
 

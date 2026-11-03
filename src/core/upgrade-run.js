@@ -348,7 +348,11 @@ export async function pageBytes(clay, { loc = location, fetchFn = (url, init) =>
 export async function downloadCopy({ clay, doc = document, loc = location, fetchFn } = {}) {
   if (typeof URL === "undefined" || typeof URL.createObjectURL !== "function") return false;
   try {
-    const bytes = await pageBytes(clay, { loc, fetchFn });
+    let bytes = await pageBytes(clay, { loc, fetchFn });
+    if (typeof bytes === "string" && /clay|data-paid-only/i.test(bytes)) {
+      const { stripCopyContent } = await import("./copy-content.js");
+      bytes = stripCopyContent(bytes);
+    }
     const url = URL.createObjectURL(new Blob([bytes], { type: "text/html" }));
     const a = doc.createElement("a");
     a.setAttribute("clay", "editor-ui");

@@ -1,6 +1,7 @@
 import { serializeRecoveryClone, captureRecoveryPage } from "./snapshot.js";
 import { rowOf } from "./conflict-presentation.js";
 import { documentName, downloadHtml } from "./download.js";
+import { stripCopyContent } from "./copy-content.js";
 
 export { documentName, downloadHtml };
 
@@ -31,12 +32,12 @@ export function buildRecovery(records, { refused = false } = {}) {
     if (apply && !seen.has(apply.id)) { seen.add(apply.id); applies.push(apply); }
   }
   applies.sort((a, b) => (a.ticket || 0) - (b.ticket || 0));
-  const pageOf = (a) => serializeRecoveryClone(a.recoveryRoot ?? a.root, { prepared: a.domain === "save" });
+  const pageOf = (a) => stripCopyContent(serializeRecoveryClone(a.recoveryRoot ?? a.root, { prepared: a.domain === "save" }));
 
   let html;
   let older;
   if (refused || !applies.length) {
-    html = captureRecoveryPage();
+    html = stripCopyContent(captureRecoveryPage());
     older = applies;
   } else {
     html = pageOf(applies[applies.length - 1]);
@@ -66,9 +67,9 @@ export function buildRecovery(records, { refused = false } = {}) {
 // The review panel's own copy: the page a reload kept, when there is one, with every
 // stored row it drew listed beside it as JSON. The rows are already plain, so nothing
 // here reads the ledger the tab no longer has.
-export function downloadStored({ html = null, edits = [] } = {}) {
+export async function downloadStored({ html = null, edits = [] } = {}) {
   try {
-    const page = typeof html === "string" ? html : captureRecoveryPage();
+    const page = stripCopyContent(typeof html === "string" ? html : captureRecoveryPage());
     const data = {
       format: "clay-lost-edits",
       version: 1,
@@ -78,17 +79,17 @@ export function downloadStored({ html = null, edits = [] } = {}) {
       edits: Array.isArray(edits) ? edits : [],
       earlierPages: [],
     };
-    return downloadHtml({ html: embed(page, data), name: `${documentName()}-my-copy-${stamp()}.html` });
+    return await downloadHtml({ html: embed(page, data), name: `${documentName()}-my-copy-${stamp()}.html` });
   } catch (err) {
     console.error("clayjs: could not build the download", err);
     return false;
   }
 }
 
-export function downloadRecovery(records, { refused = false } = {}) {
+export async function downloadRecovery(records, { refused = false } = {}) {
   try {
     const { html, name } = buildRecovery(records, { refused });
-    return downloadHtml({ html, name });
+    return await downloadHtml({ html, name });
   } catch (err) {
     console.error("clayjs: could not build the download", err);
     return false;

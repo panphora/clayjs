@@ -17,7 +17,7 @@ await jest.unstable_mockModule("../../src/plugins/upgrade-run.js", () => {
 });
 
 await import("../../src/plugins/upgrade.js");
-const { start: startUpgrade, apply, prepare, lostValues } = await import("../../src/core/upgrade-run.js");
+const { start: startUpgrade, apply, prepare, lostValues, downloadCopy } = await import("../../src/core/upgrade-run.js");
 const { upgrade } = await import("../../src/vendor/hyper-html-api-upgrade.vendor.js");
 
 const KANBAN = readFileSync(new URL("../fixtures/load/kanban-hyperclay.html", import.meta.url), "utf8");
@@ -105,6 +105,22 @@ function loadMini(html) {
   loadPage(parsed.head.innerHTML, parsed.body.innerHTML);
   return { version: "1.1.0", html: MINI_HTML_URL, sha256: sha256(html), latestUrl: MINI_MANIFEST_URL };
 }
+
+const COPY_ONLY_PAGE = `<!DOCTYPE html><html><head>
+<meta name="hyper-version" content="1.0.0">
+<script src="https://signal.hyperclay.com/v1.js" defer clay="no-copy"></script>
+<script clay="no-save no-snapshot no-watch no-copy">window.clayRuntime={id:7};</script>
+</head><body><h1 id="title">Mine</h1>
+<div class="lead" clay="no-copy-unless:paid-forms">Subscribe</div>
+<div class="ai" data-paid-only="ai">Paid only</div>
+<p id="note">my words</p>
+</body></html>`;
+
+const COPY_STRIPPED = `<!DOCTYPE html><html><head>
+<meta name="hyper-version" content="1.0.0">
+</head><body><h1 id="title">Mine</h1>
+<p id="note">my words</p>
+</body></html>`;
 
 beforeEach(() => {
   localStorage.clear();
@@ -342,6 +358,80 @@ describe("the offer", () => {
     expect(fetchFn).toHaveBeenCalledWith(location.href, { cache: "no-store", credentials: "same-origin" });
     expect(ui.status.textContent).toBe("Your copy was downloaded.");
     expect(ui.upgrade.disabled).toBe(false);
+    ui.close();
+  });
+
+  test("an explicit copy strips copy-only content and the capture survives, and Upgrade unlocks only after it lands", async () => {
+    const clay = setupClay({ host: { versions: Promise.resolve(false) }, getHTML: jest.fn(() => COPY_ONLY_PAGE) });
+    const html = new DOMParser().parseFromString(COPY_ONLY_PAGE, "text/html").documentElement.outerHTML;
+    const loc = {
+      href: "https://example.com/templates/mini/owned/Relay%20notes.html",
+      pathname: "/templates/mini/owned/Relay%20notes.html",
+    };
+    const anchor = jest.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    const blobs = [];
+    const appended = [];
+    const doc = {
+      createElement: (tag) => document.createElement(tag),
+      body: { appendChild: (node) => { appended.push(node); document.body.appendChild(node); } },
+    };
+    const createObjectURL = URL.createObjectURL;
+    URL.createObjectURL = (blob) => { blobs.push(blob); return createObjectURL(blob); };
+    try {
+      expect(await downloadCopy({ clay, doc, loc })).toBe(true);
+    } finally {
+      URL.createObjectURL = createObjectURL;
+    }
+
+    expect(blobs).toHaveLength(1);
+    expect(blobs[0].__code).toBe(COPY_STRIPPED);
+    const captured = clay.getHTML.mock.results[clay.getHTML.mock.results.length - 1].value;
+    expect(captured).toBe(COPY_ONLY_PAGE);
+    expect(captured).toContain("signal.hyperclay.com");
+    expect(captured).toContain("window.clayRuntime");
+    expect(captured).toContain("Subscribe");
+    expect(captured).toContain("Paid only");
+    expect(appended).toHaveLength(1);
+    expect(appended[0].download).toBe("Relay notes.html");
+    expect(appended[0].href.startsWith("data:")).toBe(true);
+    expect(anchor).toHaveBeenCalledTimes(1);
+    expect(document.querySelector("a[download]")).toBeNull();
+
+    const ui = await startUpgrade(updateFor(html), { clay, fetchFn: sourceFetcher(html), doc: document, loc });
+    expect(ui.download).not.toBeNull();
+    expect(ui.upgrade.disabled).toBe(true);
+
+    ui.download.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(anchor).toHaveBeenCalledTimes(2);
+    expect(ui.status.textContent).toBe("Your copy was downloaded.");
+    expect(ui.upgrade.disabled).toBe(false);
+    ui.close();
+  });
+
+  test("a copy the browser refuses clicks nothing, says so, and leaves Upgrade locked", async () => {
+    const clay = setupClay({ host: { versions: Promise.resolve(false) }, getHTML: jest.fn(() => COPY_ONLY_PAGE) });
+    const html = new DOMParser().parseFromString(COPY_ONLY_PAGE, "text/html").documentElement.outerHTML;
+    const anchor = jest.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    const createObjectURL = URL.createObjectURL;
+    URL.createObjectURL = () => { throw new Error("no blob"); };
+
+    let ui = null;
+    try {
+      ui = await startUpgrade(updateFor(html), { clay, fetchFn: sourceFetcher(html), doc: document, loc: location });
+      expect(ui.download).not.toBeNull();
+      expect(ui.upgrade.disabled).toBe(true);
+
+      ui.download.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    } finally {
+      URL.createObjectURL = createObjectURL;
+    }
+
+    expect(anchor).not.toHaveBeenCalled();
+    expect(ui.status.textContent).toBe("The copy could not be downloaded. Nothing was changed.");
+    expect(ui.upgrade.disabled).toBe(true);
     ui.close();
   });
 
