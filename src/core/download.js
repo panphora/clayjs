@@ -1,6 +1,13 @@
 // Saving a page as a file the browser downloads. Kept apart from the conflict copy
 // builders so an editor that only offers "download this page" loads none of them.
 
+const HTML_TYPES = ["text/html", "application/xhtml+xml"];
+
+function isHtml(type) {
+  if (typeof type !== "string") return false;
+  return HTML_TYPES.includes(type.split(";")[0].trim().toLowerCase());
+}
+
 export function documentName(pathname = location.pathname) {
   const last = pathname.split("/").filter(Boolean).pop();
   if (!last) return pathname.endsWith("/") || pathname === "" ? "index" : "page";
@@ -9,10 +16,15 @@ export function documentName(pathname = location.pathname) {
   return name.replace(/\.(html?|htmlclay)$/i, "") || "page";
 }
 
-export function downloadHtml({ html, name, type = "text/html" }) {
+export async function downloadHtml({ html, name, type = "text/html" }) {
   let url = null;
   try {
-    url = URL.createObjectURL(new Blob([html], { type }));
+    let contents = html;
+    if (isHtml(type) && typeof html === "string" && /clay|data-paid-only/i.test(html)) {
+      const { stripCopyContent } = await import("./copy-content.js");
+      contents = stripCopyContent(html);
+    }
+    url = URL.createObjectURL(new Blob([contents], { type }));
     const a = document.createElement("a");
     a.setAttribute("clay", "no-save no-watch no-snapshot");
     a.href = url;

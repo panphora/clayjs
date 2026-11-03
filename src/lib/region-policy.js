@@ -54,7 +54,7 @@ export const REGION_ATTRS = ['no-save', 'no-trigger-autosave', 'no-dirty', 'no-u
 // Every canonical token spellable inside the space-separated `clay` attribute.
 // Exported: this list used to exist as a private CLAY_TOKENS that nothing read,
 // while callers hardcoded their own copies.
-export const TOKENS = [...POLICY_TOKENS];
+export const TOKENS = [...POLICY_TOKENS, 'no-copy', 'no-copy-unless:paid-forms'];
 
 // True when a region marker is present, whether spelled as a `clay` token
 // (whitespace-token semantics, matching [clay~=token]) or a legacy bare attribute.

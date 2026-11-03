@@ -51,6 +51,13 @@ function announceMode() {
   document.dispatchEvent(new Event("clay:modechange"));
 }
 
+// Warm download assets after editing starts so a later offline copy needs no first fetch.
+function warmCopyContentWhenIdle() {
+  const warm = () => Promise.all([import("./download.js"), import("./copy-content.js")]).catch(() => {});
+  if (typeof requestIdleCallback === "function") requestIdleCallback(warm, { timeout: 2000 });
+  else setTimeout(warm, 0);
+}
+
 function refuse(code, phase = "idle", extra = {}) {
   commitModeFacts({ phase, reason: code });
   return { ok: false, mode: current(), code, ...extra };
@@ -319,6 +326,7 @@ async function enter(handle = null) {
   leases = prepared;
   commitModeFacts({ phase: "idle", reason: null });
   announceMode();
+  warmCopyContentWhenIdle();
   // One announcement per plugin this entry loaded, after the mode change: a plugin is
   // announced by the boot that loaded it exactly once, and a refused entry announces
   // nothing so the next successful one does.
