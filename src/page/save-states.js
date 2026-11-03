@@ -67,14 +67,14 @@ function withoutPageTag(html) {
 // One complete, openable file: the capture the save would have sent, with the
 // page projection already applied by the live store's snapshot listener, and
 // without the page editor's merge state, which no saved file or download carries.
-function downloadPageCopy() {
+async function downloadPageCopy() {
   const { forSave } = captureForSaveAndComparison({ emitForSync: false });
-  return downloadHtml({ html: withoutPageTag(forSave), name: `${documentName()}.html` });
+  return await downloadHtml({ html: withoutPageTag(forSave), name: `${documentName()}.html` });
 }
 
 // A copy of the page captured earlier (captureForSaveAndComparison().forSave), as a download.
-function downloadSnapshot(forSave) {
-  return downloadHtml({ html: withoutPageTag(forSave), name: `${documentName()}.html` });
+async function downloadSnapshot(forSave) {
+  return await downloadHtml({ html: withoutPageTag(forSave), name: `${documentName()}.html` });
 }
 
 // The article's own plain text, never the editor's chrome: the capture carries

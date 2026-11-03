@@ -233,6 +233,7 @@ test("download my copy carries the kept step as JSON", async () => {
   URL.revokeObjectURL = jest.fn();
 
   buttonSaying(/^Download my copy$/).click();
+  expect(await until(() => URL.createObjectURL.mock.calls.length === 1)).toBe(true);
   expect(URL.createObjectURL).toHaveBeenCalledTimes(1);
 
   const html = await new Promise((resolve) => {

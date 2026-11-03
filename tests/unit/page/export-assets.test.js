@@ -410,6 +410,7 @@ test("a complete copy shows its captured title and time, and downloads only when
   expect(panel.querySelectorAll("[data-act]").length).toBe(2);
 
   panel.querySelector('[data-act="download"]').click();
+  await new Promise((done) => setTimeout(done, 5));
   expect(downloads.length).toBe(1);
   expect(downloads[0].name).toBe("Relay launch review.html");
   const doc = docOf(downloads[0].html);

@@ -282,7 +282,7 @@ test("R13 Download then Revert: the copy is built and the payload still restores
   const create = jest.fn(() => "blob:revert");
   URL.createObjectURL = create;
   URL.revokeObjectURL = jest.fn();
-  expect(downloadRecovery(ids.map((id) => conflicts.get(id)))).toBe(true);
+  expect(await downloadRecovery(ids.map((id) => conflicts.get(id)))).toBe(true);
   expect(create).toHaveBeenCalledTimes(1);
   expect(conflicts.size).toBe(4);
 

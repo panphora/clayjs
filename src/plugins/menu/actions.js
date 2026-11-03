@@ -146,7 +146,7 @@ export function attachActions({ addItem, note, currentMode }) {
       if (typeof html === "string" && /^https?:$/.test(location.protocol)) {
         html = html.replace(/(^|[^\w./:-])\/_\/uploads\//g, `$1${location.origin}/_/uploads/`);
       }
-      if (typeof html !== "string" || !downloadHtml({ html, name: `${documentName()}.html` })) {
+      if (typeof html !== "string" || !(await downloadHtml({ html, name: `${documentName()}.html` }))) {
         note("Couldn't build the download. Try again.");
       }
     },

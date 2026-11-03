@@ -112,12 +112,12 @@ export function createFeature({ view = null, download = downloadHtml, fetch: fet
   }
 
   function decide(s) {
-    listen(s, s.panel, "click", (event) => {
+    listen(s, s.panel, "click", async (event) => {
       const b = event.target.closest?.("[data-act]");
       if (!b) return;
       event.preventDefault();
       if (b.dataset.act === "close") close();
-      else if (b.dataset.act === "download") save(s);
+      else if (b.dataset.act === "download") await save(s);
       else if (b.dataset.act === "retry") run().catch((error) => console.error("clayjs: the reading copy could not be made", error));
     });
     listen(s, doc, "keydown", (event) => {
@@ -130,9 +130,9 @@ export function createFeature({ view = null, download = downloadHtml, fetch: fet
 
   // The one place a reading copy becomes a file. The download is handed the bytes that
   // were shown, never a second render, so what a person saw is what they get.
-  function save(s) {
+  async function save(s) {
     if (!s.ready || disposed) return { ok: false, code: "not-editing" };
-    const saved = download({ html: s.ready.html, name: s.ready.name });
+    const saved = await download({ html: s.ready.html, name: s.ready.name });
     close();
     return { ok: saved === true, downloaded: saved === true };
   }

@@ -57,8 +57,8 @@ function place() {
 // The safe copy the conflict notice offers, for the same reason: a file the person can
 // open has to exist outside a host that will not store these bytes. It already reports
 // its own failure.
-function download() {
-  downloadStored({});
+async function download() {
+  await downloadStored({});
 }
 
 function build() {

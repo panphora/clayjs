@@ -233,17 +233,17 @@ function stopEditing(inst) {
 
 // The tab's own page, when the store no longer holds it (another page replaced it, or the
 // room refused it): the saved document with the article rendered from the tab's document.
-function downloadTabCopy(inst) {
-  if (!inst.tabValue) return downloadPageCopy();
+async function downloadTabCopy(inst) {
+  if (!inst.tabValue) return await downloadPageCopy();
   const { forSave } = captureForSaveAndComparison({ emitForSync: false });
   const doc = new DOMParser().parseFromString(forSave, "text/html");
   const articles = doc.querySelectorAll(ARTICLE_SEL);
-  if (articles.length !== 1) return downloadPageCopy();
+  if (articles.length !== 1) return await downloadPageCopy();
   const rendered = pageCode.renderFromTags([JSON.stringify(inst.tabValue)]);
   articles[0].innerHTML = rendered.html;
   if (rendered.rev == null) articles[0].removeAttribute("data-rev");
   else articles[0].setAttribute("data-rev", rendered.rev);
-  return downloadSnapshot(`<!DOCTYPE html>\n${doc.documentElement.outerHTML}`);
+  return await downloadSnapshot(`<!DOCTYPE html>\n${doc.documentElement.outerHTML}`);
 }
 
 function stopWithNotice(inst, text, { reload = true } = {}) {

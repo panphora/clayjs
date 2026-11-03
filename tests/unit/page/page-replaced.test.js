@@ -268,7 +268,7 @@ test("a downloaded copy carries no page merge state, and keeps the article and t
   URL.revokeObjectURL = jest.fn();
   try {
     const { downloadPageCopy } = await import("../../../src/page/save-states.js");
-    expect(downloadPageCopy()).toBe(true);
+    expect(await downloadPageCopy()).toBe(true);
     expect(blobs).toHaveLength(1);
 
     const text = await new Promise((resolve, reject) => {

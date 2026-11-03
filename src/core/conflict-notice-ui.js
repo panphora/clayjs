@@ -707,12 +707,12 @@ async function onRevert() {
 let downloadedTimer = null;
 
 // Download my copy. Nothing here acknowledges or releases a record.
-function onDownload() {
+async function onDownload() {
   const l = ledger();
   // A refusal ends in a reload that takes every record with it, so its copy carries
   // all of them; a replaced notice covers the rows it drew.
   const records = refused ? (l?.list() ?? []) : renderedIds.map((id) => l?.get(id)).filter(Boolean);
-  const ok = downloadRecovery(records, { refused: !!refused });
+  const ok = await downloadRecovery(records, { refused: !!refused });
   downloadFailed = !ok;
   downloaded = ok;
   clearTimeout(downloadedTimer);
@@ -801,14 +801,14 @@ async function onCopyStored(entry) {
 
 // Download my copy, from the stored root: the page as this tab had it, with the
 // losing text in it. Nothing here acknowledges or releases a record.
-function onDownloadRecovered() {
+async function onDownloadRecovered() {
   const record = recovered.find((item) => item.root);
   const edits = [];
   for (const item of recovered) {
     for (const entry of item.conflicts) edits.push({ id: entry.id, kind: entry.kind, name: storedName(entry), yours: entry.yours, now: entry.now, sentence: entry.sentence });
   }
   for (const entry of recoveredUndo) edits.push({ id: entry.id, kind: entry.kind, name: entry.name, yours: entry.yours, now: entry.now, sentence: entry.sentence });
-  const ok = downloadStored({ html: record?.root ?? null, edits });
+  const ok = await downloadStored({ html: record?.root ?? null, edits });
   downloadFailed = !ok;
   downloaded = ok;
   clearTimeout(downloadedTimer);

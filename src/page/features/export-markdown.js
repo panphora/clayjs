@@ -83,10 +83,10 @@ export function createFeature({ view = null, download = downloadHtml } = {}) {
     s.panel.replaceChildren(...parts);
   }
 
-  function save() {
+  async function save() {
     const s = session;
     if (!s) return { ok: false, code: "no-export" };
-    if (download({ html: s.report.text, name: s.name, type: "text/markdown" })) {
+    if (await download({ html: s.report.text, name: s.name, type: "text/markdown" })) {
       close();
       view.focus?.();
       return { ok: true, downloaded: true };

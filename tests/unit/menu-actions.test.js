@@ -256,6 +256,54 @@ test("Download in view mode fetches the saved file, and says when it cannot", as
   }
 });
 
+const blobText = (blob) => new Promise((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onload = () => resolve(String(reader.result));
+  reader.onerror = () => reject(reader.error);
+  reader.readAsText(blob);
+});
+
+test("Download drops copy-only content while the page still holds it", async () => {
+  await boot({ plugins: "menu", edit: true });
+  document.body.insertAdjacentHTML("beforeend", '<div id="promo" clay="no-copy">Subscribe now</div><p id="keep">kept</p>');
+  expect(window.clay.getHTML()).toContain("Subscribe now");
+  const { names, createObjectURL, anchorClick } = setupDownload();
+
+  try {
+    click(buttonOf("clay.download"));
+    await flush();
+
+    expect(names).toEqual(["notes.html"]);
+    const text = await blobText(createObjectURL.mock.calls[0][0]);
+    expect(text).not.toContain("Subscribe now");
+    expect(text).not.toContain("no-copy");
+    expect(text).toContain("kept");
+    expect(document.body.innerHTML).toContain("Subscribe now");
+  } finally {
+    anchorClick.mockRestore();
+  }
+});
+
+test("Download in view mode drops copy-only content from the fetched file", async () => {
+  await boot({ plugins: "menu" });
+  delete window.clay.getHTML;
+  const saved = '<html><body><div clay="no-copy">Subscribe now</div><p>kept</p></body></html>';
+  window.fetch = jest.fn(async () => ({ ok: true, text: async () => saved }));
+  const { names, createObjectURL, anchorClick } = setupDownload();
+
+  try {
+    click(buttonOf("clay.download"));
+    await flush();
+
+    expect(names).toEqual(["notes.html"]);
+    const text = await blobText(createObjectURL.mock.calls[0][0]);
+    expect(text).not.toContain("Subscribe now");
+    expect(text).toContain("kept");
+  } finally {
+    anchorClick.mockRestore();
+  }
+});
+
 test("Undo reflects history made before the menu loaded", async () => {
   const undo = { undo: jest.fn(), redo: jest.fn(), canUndo: true, canRedo: false };
   const seed = () => {
@@ -292,6 +340,29 @@ test("Download names upload paths in full", async () => {
       expect(html).toContain("https://x.example/_/uploads/keep.png");
     }
   } finally {
+    anchorClick.mockRestore();
+  }
+});
+
+test("a copy whose filter cannot be loaded reports failure and downloads nothing", async () => {
+  jest.unstable_mockModule("../../src/core/copy-content.js", () => { throw new Error("no copy filter"); });
+  await boot({ plugins: "menu", edit: true });
+  window.clay.getHTML = () => '<html><div clay="no-copy">secret</div></html>';
+  const { names, createObjectURL, anchorClick } = setupDownload();
+  const logged = jest.spyOn(console, "error").mockImplementation(() => {});
+
+  try {
+    const { downloadHtml } = await import("../../src/core/download.js");
+    expect(await downloadHtml({ html: '<html><div clay="no-copy">secret</div></html>', name: "notes.html" })).toBe(false);
+
+    click(buttonOf("clay.download"));
+    await flush();
+
+    expect(createObjectURL).not.toHaveBeenCalled();
+    expect(names).toHaveLength(0);
+    expect(noteOf().textContent).toBe("Couldn't build the download. Try again.");
+  } finally {
+    logged.mockRestore();
     anchorClick.mockRestore();
   }
 });

@@ -411,7 +411,7 @@ describe("a page save's relay", () => {
     URL.createObjectURL = jest.fn(() => "blob:page-copy");
     URL.revokeObjectURL = jest.fn();
     try {
-      expect(downloadPageCopy()).toBe(true);
+      expect(await downloadPageCopy()).toBe(true);
       expect(sync._savedSnapshot).toBe(captured);
     } finally {
       click.mockRestore();

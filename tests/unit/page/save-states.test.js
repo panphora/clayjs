@@ -140,7 +140,7 @@ test("Download a copy writes one html blob with the projected article and no pag
   URL.createObjectURL = jest.fn((blob) => { blobs.push(blob); return "blob:page-copy"; });
   URL.revokeObjectURL = jest.fn();
   try {
-    expect(saveStates.downloadPageCopy()).toBe(true);
+    expect(await saveStates.downloadPageCopy()).toBe(true);
     expect(blobs).toHaveLength(1);
     expect(blobs[0].type).toBe("text/html");
 
@@ -159,6 +159,35 @@ test("Download a copy writes one html blob with the projected article and no pag
     expect(anchors).toHaveLength(1);
     expect(anchors[0].download).toBe("index.html");
     expect(anchors[0].href).toContain("blob:page-copy");
+  } finally {
+    click.mockRestore();
+    URL.createObjectURL = create;
+    URL.revokeObjectURL = revoke;
+  }
+});
+
+test("Download a copy drops copy-only content the saved file keeps", async () => {
+  setPage([{ id: "p", t: "paragraph", text: "Hello" }]);
+  await page.install();
+  page.view.dispatch(page.view.state.tr.insertText("!", 6));
+  document.body.insertAdjacentHTML("beforeend", '<div id="promo" clay="no-copy">Subscribe now</div>');
+
+  const snapshot = await import("../../../src/core/snapshot.js");
+  const saved = snapshot.captureForSaveAndComparison({ emitForSync: false }).forSave;
+  expect(saved).toContain("Subscribe now");
+
+  const blobs = [];
+  const create = URL.createObjectURL;
+  const revoke = URL.revokeObjectURL;
+  const click = jest.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+  URL.createObjectURL = jest.fn((blob) => { blobs.push(blob); return "blob:page-copy"; });
+  URL.revokeObjectURL = jest.fn();
+  try {
+    expect(await saveStates.downloadPageCopy()).toBe(true);
+    const html = await blobText(blobs[0]);
+    expect(html).not.toContain("Subscribe now");
+    expect(html).not.toContain("no-copy");
+    expect(html).toContain("Hello!");
   } finally {
     click.mockRestore();
     URL.createObjectURL = create;

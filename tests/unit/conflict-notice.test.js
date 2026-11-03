@@ -879,6 +879,7 @@ test("Download my copy writes one file, says so, and acknowledges nothing", asyn
   URL.revokeObjectURL = jest.fn();
 
   buttonSaying(/Download my copy/).click();
+  await frame();
 
   expect(create).toHaveBeenCalledTimes(1);
   expect(buttonSaying(/Downloaded/)).toBeDefined();
@@ -899,6 +900,7 @@ test("a download that cannot be built offers another go, and keeps every loss", 
   const logged = jest.spyOn(console, "error").mockImplementation(() => {});
 
   buttonSaying(/Download my copy/).click();
+  await frame();
 
   expect(buttonSaying(/Try again/)).toBeDefined();
   expect(conflicts.size).toBe(3);

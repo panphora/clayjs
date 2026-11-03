@@ -228,12 +228,12 @@ export function createRecoveryReview({
     button.setAttribute("aria-expanded", "false");
   };
 
-  const download = () => {
+  const download = async () => {
     const edits = [];
     for (const row of rows) edits.push({ id: row.id, kind: "recovered-page", name: row.message, yours: row.text, now: "", sentence: row.message });
     const composing = "Text typed while composing never reached the page.";
     for (const row of journaled) edits.push({ id: row.id, kind: "composing", name: "Typed text", yours: row.text, now: "", sentence: composing });
-    if (!downloadStored({ html: null, edits })) failure = "That download could not be made.";
+    if (!(await downloadStored({ html: null, edits }))) failure = "That download could not be made.";
     draw();
   };
 
