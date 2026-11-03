@@ -892,7 +892,23 @@ Traps in this table:
 - **Fill a scratchpad after `clay.ready`, and insert new ones empty.** The contents are captured when the element first appears. Content written before boot, or present in a cloned element when inserted, becomes its saved contents. Empty the scratchpads in a copied record before inserting it.
 - **Create `editor-ui` roots at runtime from an unmarked `<template>` on every load.** An `editor-ui` root disappears from the saved file, so it cannot be authored in the file. Do not mark the blueprint inside the `<template>` as `editor-ui`, or the first save empties the template and leaves no chrome to clone on the next load. Leave the blueprint unmarked and set `clay="editor-ui"` on each clone as you insert it.
 
-### 4.3 `persist`: form controls
+### 4.3 Copy policy: `no-copy` and `no-copy-unless:paid-forms`
+
+Save and sync tokens govern the working document; copy-policy tokens on `clay` govern what travels into an explicit copy:
+
+```html
+<script src="/analytics.js" defer clay="no-copy"></script>
+<header class="intro" clay="no-copy">…</header>
+<form action="/_/message" method="post" clay="no-copy-unless:paid-forms">…</form>
+```
+
+- **Normal saves keep the original.** Ordinary saves, live sync, versions, and automatic recovery retain `no-copy` and conditional regions.
+- **Explicit copies strip `no-copy` content, even for the owner.** Copies, duplicates, forks, HTML downloads, and ZIP exports remove `clay="no-copy"` elements (including inside `<template>` contents). User-requested recovery downloads filter visible HTML and embedded earlier HTML pages while preserving recovery records and edits.
+- **Authored loaders vs runtime scripts.** An authored loader marked `clay="no-copy"` stays in original saves and disappears from copies. Any SDK `<script>` added at runtime uses `clay="no-save no-snapshot no-watch no-copy"` so it is not persisted. ClayJS core knows only generic copy policy, not any analytics provider.
+- **Conditional paid forms.** `clay="no-copy-unless:paid-forms"` aliases legacy `data-paid-only="forms"` (still supported). Hosted copy/create checks the destination's existing `paid-forms` (`forms`) entitlement; offline downloads have no destination entitlement and strip optional conditional content. Reusable templates retain conditional regions for creation-time filtering, while unconditional `no-copy` regions are removed before owned template outputs. Exact case-sensitive matching fails closed, so an unknown conditional spelling cannot disguise a required paid feature.
+- **Supporting hosts and raw file limits.** Enforced in ClayJS client downloads and recovery exports, Hyperclay hosted copy/create/download flows, and Hyperclay Local / HTML Clay copies and exports. Finder, `cp`, and browser Save Page As bypass app hooks and copy raw file bytes unchanged.
+
+### 4.4 `persist`: form controls
 
 Put `persist` on every `<input>`, `<textarea>`, and `<select>` whose value belongs to the record. A control's typed value is a property, not an attribute, and serialization only reads attributes. Without `persist`, a typed value is lost on save and the file keeps the authored `value`.
 
@@ -913,7 +929,7 @@ Put `persist` on every `<input>`, `<textarea>`, and `<select>` whose value belon
 
 **After undo, redo, or a merge, ClayJS puts each control's display back in step with its attributes.** A control the user has touched shows its live property, not its attribute. A merge and the undo plugin copy `checked`, `value`, and `selected` back onto the property (undo does this for `persist` controls outside `no-undo` regions). A merge leaves the focused text field alone, while undo restores it too.
 
-### 4.4 Where to keep data that is not visible text
+### 4.5 Where to keep data that is not visible text
 
 In order of preference:
 
@@ -935,7 +951,7 @@ In order of preference:
 4. **A live JSON script (`clay="live"`)** for state that changes faster than a save: game boards, scores, cursors ([Live data: `clay="live"`](https://clayjs.com/docs/guide/live-sync/#live-data-clay-live)).
 5. **`<template>` content: never for mutable data.** It is saved, but edits there never trigger autosave.
 
-### 4.5 Element identity: `data-id` and `id`
+### 4.6 Element identity: `data-id` and `id`
 
 Live sync and undo pair elements across versions by **`data-id`, then `id`**, used only when the value is unique on its side and the tag names match. Without an id, elements pair by content, which works for distinct text and fails for identical new items.
 
@@ -956,11 +972,11 @@ Live sync and undo pair elements across versions by **`data-id`, then `id`**, us
 - **A `data-id` is also what presence names.** A record target `{ kind: "record", id }` carries it, so a stable id is what lets a peer's badge find the row again after a reload or a merge ([Presence](https://clayjs.com/docs/guide/live-sync/#presence)).
 - **Use ids to find records in commands:** `` board.querySelector(`.card[data-id="${CSS.escape(id)}"]`) ``. Never find a record by position.
 
-### 4.6 Assets
+### 4.7 Assets
 
 ClayJS saves an image through its `src`. Upload the file and write the returned URL ([upload and quickcrop](https://clayjs.com/docs/guide/components/#upload-and-quickcrop)). Every host returns a host path such as `/_/uploads/assets-<name>/photo-ab12.png`, which keeps working on that host when the document is renamed or moved. A document opened straight from disk shows those images broken; Export as zip takes a document with its files. Where the host cannot store files, embed a `data:` URL. Data URLs work anywhere, but every save carries the bytes, so keep embedded images small.
 
-### 4.7 Ephemeral state: per-tab state on saved elements
+### 4.8 Ephemeral state: per-tab state on saved elements
 
 Use `ephemeral` for per-tab state on a saved element, such as a selected card, a row being dragged, or an open section. Toggling a normal class or attribute is an edit like any other: it marks the page unsaved, starts an autosave, adds an undo step, reaches every peer, and lands in the file. Mark it `ephemeral` instead:
 
@@ -982,7 +998,7 @@ clay.ephemeral.toggle(card, "selected");   // add, remove, toggle(el, word, forc
 
 Use `ephemeral` for state on one element. State that comes from the URL hash and spans many records (the open card, a filter) is still painted with a runtime stylesheet ([Per-tab state](https://clayjs.com/docs/guide/architecture/#per-tab-state)).
 
-### 4.8 A template is an ordinary record with a tag
+### 4.9 A template is an ordinary record with a tag
 
 A reusable template is a record like any other, marked with a tag. It stays editable, searchable, exported, synced and in a visitor's draft, and it needs no second store and no new format. The app reads the tag off the body it already has:
 
@@ -992,7 +1008,7 @@ const templates = open => Entries.live().filter(a => a !== open && summary({ bod
 
 The tag is matched outside code spans and fences, so a template entry that shows a `#template` example does not become a template itself. Using one copies its text into the page, and the new record is written by the same save as everything else.
 
-### 4.9 Keep a helper that reads the text beside the editor, in an `editor-ui` row
+### 4.10 Keep a helper that reads the text beside the editor, in an `editor-ui` row
 
 A helper that reacts to the text being written belongs in a row a script builds beside the editor, marked `clay="editor-ui"`, and refreshed on a debounce. Nothing it draws is saved, printed or synced, and no keystroke pays for it beyond the debounce:
 
