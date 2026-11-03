@@ -103,22 +103,19 @@ export async function mountPrompt({ memory, appName, link }) {
     });
   }
 
-  function downloadCurrent() {
+  async function downloadCurrent() {
     const getHTML = window.clay && window.clay.getHTML;
     if (typeof getHTML !== "function" || typeof URL === "undefined" || typeof URL.createObjectURL !== "function") return false;
     const segment = location.pathname.split("/").filter(Boolean).pop() || "index.html";
-    const objectUrl = URL.createObjectURL(new Blob([getHTML()], { type: "text/html" }));
-    const a = document.createElement("a");
-    a.href = objectUrl;
-    a.download = segment.replace(/\.html$/, ".htmlclay");
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL?.(objectUrl), 1000);
-    return true;
+    try {
+      const { downloadHtml } = await import("../../core/download.js");
+      return await downloadHtml({ html: getHTML(), name: segment.replace(/\.html$/, ".htmlclay") });
+    } catch {
+      return false;
+    }
   }
 
-  root.addEventListener("click", (e) => {
+  root.addEventListener("click", async (e) => {
     const t = e.target.closest("[data-hcp]");
     if (t) {
       const act = t.getAttribute("data-hcp");
@@ -133,7 +130,10 @@ export async function mountPrompt({ memory, appName, link }) {
     if (e.target.closest("[data-hcp-link]")) {
       if (root.getAttribute("data-hcp-reason") === "error") {
         e.preventDefault();
-        downloadCurrent();
+        if (!(await downloadCurrent())) {
+          root.querySelector(".hcp-body [data-hcp-for='error']").textContent = "The download could not be made. Keep this page open and try Download free again.";
+          return;
+        }
       }
       mem.downloaded = true; mem.shown = true; memory.save();
     }

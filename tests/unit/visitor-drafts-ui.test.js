@@ -103,7 +103,7 @@ function clickDownload() {
   return event;
 }
 
-function withDownloadStubs(run) {
+async function withDownloadStubs(run) {
   const blobs = [];
   const downloads = [];
   const realCreate = URL.createObjectURL;
@@ -114,6 +114,7 @@ function withDownloadStubs(run) {
   HTMLAnchorElement.prototype.click = function () { downloads.push({ href: this.href, download: this.download }); };
   try {
     run();
+    for (let i = 0; i < 30; i++) await new Promise((resolve) => setTimeout(resolve, 0));
   } finally {
     URL.createObjectURL = realCreate;
     URL.revokeObjectURL = realRevoke;
@@ -288,7 +289,7 @@ test("the error card's download carries the live page, not the stale stored draf
   note.setAttribute("value", "typed but never stored");
 
   let prevented = null;
-  const { blobs, downloads } = withDownloadStubs(() => { prevented = clickDownload().defaultPrevented; });
+  const { blobs, downloads } = await withDownloadStubs(() => { prevented = clickDownload().defaultPrevented; });
 
   expect(prevented).toBe(true);
   expect(downloads).toEqual([{ href: "blob:clay-test", download: "notes.htmlclay" }]);
@@ -299,11 +300,31 @@ test("the error card's download carries the live page, not the stale stored draf
   expect(fetchMock).not.toHaveBeenCalled();
 });
 
+test("the error card's download drops copy-only content the live page keeps", async () => {
+  const { clay } = await bootPage({
+    slot: "ui-error-download-copy",
+    body: '<div id="promo" clay="no-copy">Subscribe now</div><div clay="no-copy-unless:paid-forms">Paid forms only</div>',
+  });
+  document.dispatchEvent(new CustomEvent("clay:drafts-store-failed", { detail: { error: new Error("full") } }));
+
+  const live = clay.getHTML();
+  expect(live).toContain("Subscribe now");
+  expect(live).toContain("Paid forms only");
+
+  const { blobs } = await withDownloadStubs(() => clickDownload());
+  const text = await readBlob(blobs[0]);
+
+  expect(text).not.toContain("Subscribe now");
+  expect(text).not.toContain("Paid forms only");
+  expect(text).toContain("owner title");
+  expect(clay.getHTML()).toBe(live);
+});
+
 test("the error card names the download after the page, index.htmlclay at the root", async () => {
   await bootPage({ slot: "ui-error-download-root", url: "/" });
   document.dispatchEvent(new CustomEvent("clay:drafts-store-failed", { detail: { error: new Error("full") } }));
 
-  const { downloads } = withDownloadStubs(() => clickDownload());
+  const { downloads } = await withDownloadStubs(() => clickDownload());
 
   expect(downloads).toEqual([{ href: "blob:clay-test", download: "index.htmlclay" }]);
 });
@@ -317,6 +338,40 @@ test("outside the error state the download link is a plain link to the host", as
   expect(event.defaultPrevented).toBe(false);
   expect(linkHref()).toBe(href);
   expect(document.querySelector("a[download]")).toBeNull();
+});
+
+test("a download that cannot be made keeps the live page open, asks for a retry, and records nothing", async () => {
+  const { key } = await bootPage({ slot: "ui-error-download-failed" });
+  const aside = prompt();
+  document.dispatchEvent(new CustomEvent("clay:drafts-store-failed", { detail: { error: new Error("full") } }));
+
+  const note = document.getElementById("note");
+  note.value = "typed but never stored";
+  note.setAttribute("value", "typed but never stored");
+
+  const realCreate = URL.createObjectURL;
+  const realClick = HTMLAnchorElement.prototype.click;
+  const clicks = [];
+  URL.createObjectURL = () => { throw new Error("no blob"); };
+  HTMLAnchorElement.prototype.click = function () { clicks.push(this.href); };
+  let prevented = null;
+  try {
+    prevented = clickDownload().defaultPrevented;
+    for (let i = 0; i < 30; i++) await new Promise((resolve) => setTimeout(resolve, 0));
+  } finally {
+    URL.createObjectURL = realCreate;
+    HTMLAnchorElement.prototype.click = realClick;
+  }
+
+  expect(prevented).toBe(true);
+  expect(clicks).toEqual([]);
+  expect(JSON.parse(localStorage.getItem(key)).prompt.downloaded).toBeUndefined();
+  expect(aside.getAttribute("data-hcp-state")).toBe("card");
+  expect(aside.getAttribute("data-hcp-reason")).toBe("error");
+  expect(aside.querySelector('.hcp-body [data-hcp-for="error"]').textContent).toBe(
+    "The download could not be made. Keep this page open and try Download free again."
+  );
+  expect(document.getElementById("note").value).toBe("typed but never stored");
 });
 
 test("a template puts its own strip at the top of the body with one close button", async () => {
