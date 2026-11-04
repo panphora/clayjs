@@ -21,9 +21,10 @@ jobs:
           cache: npm
       - run: npm ci
       # Pinned Chromium for the byte-exact conformance goldens. The version is
-      # locked by playwright in package.json, so CI and local produce the same bytes.
+      # locked in scripts/chrome-for-testing/browser-runtime.json, so CI and local
+      # produce the same bytes.
       - name: Install pinned Chromium
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install-deps chromium && npm run browser:install && node scripts/chrome-for-testing/configure-linux-sandbox.cjs
       - name: Unit tests (jest)
         run: npm test
       - name: Conformance byte gate (web-test-runner)
