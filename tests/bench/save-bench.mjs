@@ -8,6 +8,7 @@ import { readFile } from "node:fs/promises";
 import { extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
+import { chromeOptions } from "../../scripts/chrome-for-testing/browser-runtime.cjs";
 
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const COUNTS = process.argv.slice(2).map(Number).filter(Boolean);
@@ -72,7 +73,7 @@ const server = createServer(async (req, res) => {
 });
 await new Promise((r) => server.listen(0, "127.0.0.1", r));
 const base = `http://127.0.0.1:${server.address().port}`;
-const browser = await chromium.launch();
+const browser = await chromium.launch(chromeOptions());
 
 for (const n of COUNTS) {
   pages.set(`/bench-${n}.html`, todoPage(n));

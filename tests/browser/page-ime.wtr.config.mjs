@@ -1,5 +1,6 @@
 import { defaultReporter, summaryReporter } from '@web/test-runner';
 import { playwrightLauncher } from '@web/test-runner-playwright';
+import { chromeOptions } from '../../scripts/chrome-for-testing/browser-runtime.cjs';
 
 // S5: typing in real browsers. page-ime.test.js in Chromium, Firefox and WebKit.
 // The `ime` command drives Chromium's real IME path over CDP
@@ -29,7 +30,7 @@ export default {
   nodeResolve: true,
   files: 'tests/browser/page-ime.test.js',
   browsers: [
-    playwrightLauncher({ product: 'chromium' }),
+    playwrightLauncher({ product: 'chromium', launchOptions: chromeOptions() }),
     playwrightLauncher({ product: 'firefox' }),
     playwrightLauncher({ product: 'webkit' }),
   ],

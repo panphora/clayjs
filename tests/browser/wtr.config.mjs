@@ -1,5 +1,6 @@
 import { defaultReporter, summaryReporter } from '@web/test-runner';
 import { playwrightLauncher } from '@web/test-runner-playwright';
+import { chromeOptions } from '../../scripts/chrome-for-testing/browser-runtime.cjs';
 import { execFile } from 'node:child_process';
 import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { cp, mkdtemp, readFile, symlink, writeFile } from 'node:fs/promises';
@@ -127,7 +128,7 @@ const staleSatellite = {
 export default {
   nodeResolve: true,
   files: 'tests/browser/**/*.test.js',
-  browsers: [playwrightLauncher({ product: 'chromium' })],
+  browsers: [playwrightLauncher({ product: 'chromium', launchOptions: chromeOptions() })],
   testFramework: { config: { timeout: '20000' } },
   plugins: [chunkRoutes, mixedReleases, mixedFiles, staleSatellite],
   reporters: [summaryReporter(), defaultReporter()],

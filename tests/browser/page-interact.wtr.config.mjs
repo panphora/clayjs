@@ -1,5 +1,6 @@
 import { defaultReporter, summaryReporter } from '@web/test-runner';
 import { playwrightLauncher } from '@web/test-runner-playwright';
+import { chromeOptions } from '../../scripts/chrome-for-testing/browser-runtime.cjs';
 
 // Phase 4: block selection, drag, menus, links and uploads in real browsers.
 // page-interact.test.js in Chromium, Firefox and WebKit.
@@ -9,7 +10,7 @@ export default {
   concurrentBrowsers: 1,
   files: 'tests/browser/page-interact.test.js',
   browsers: [
-    playwrightLauncher({ product: 'chromium' }),
+    playwrightLauncher({ product: 'chromium', launchOptions: chromeOptions() }),
     playwrightLauncher({ product: 'firefox' }),
     playwrightLauncher({ product: 'webkit' }),
   ],
