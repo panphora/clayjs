@@ -115,6 +115,10 @@ async function settle(body) {
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+const until = async (predicate, ms = 5000) => {
+  const deadline = Date.now() + ms;
+  while (!predicate() && Date.now() < deadline) await wait(10);
+};
 
 const BOARD =
   '<div class="list" data-id="planning"><p class="card" data-id="one">One</p><p class="card" data-id="two">Two</p></div>' +
@@ -195,7 +199,7 @@ test("the refused tab merges the peer's stamped frame against the seed, keeps bo
   expect(savePosts[0].headers["If-Match"]).toBe("E0");
   expect(save.isSaveConflicted()).toBe(true);
   expect(document.documentElement.getAttribute("savestatus")).toBe("conflict");
-  await wait(30);
+  await until(() => document.querySelector("[data-clay-conflict]"));
   const bar = document.querySelector("[data-clay-conflict]");
   expect(bar.style.display).toBe("flex");
 
