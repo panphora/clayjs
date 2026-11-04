@@ -6,13 +6,19 @@ Issues and pull requests are welcome.
 
 ```bash
 npm ci
-npx playwright install chromium
+npm run browser:install
 ```
 
-CI runs Node 26. The Chromium install is not optional: the conformance suite compares
-bytes against goldens produced by one pinned browser build, so a different Chromium
-produces different bytes and fails on a non-bug. The version is locked by the `playwright`
-pin in `package.json`, which is what keeps your machine and CI in agreement.
+CI runs Node 26. The browser install is not optional: the conformance suite compares
+bytes against goldens produced by one pinned browser build, so a different browser
+produces different bytes and fails on a non-bug. `package.json` pins `playwright` at
+`1.64.1`, which still bundles an insufficiently patched Chromium `156.0.8078.4`. The
+actual test browser is Chrome for Testing `156.0.8078.80`, pinned independently in
+`scripts/chrome-for-testing/browser-runtime.json` to keep your machine and CI in
+agreement. `npm run browser:install` installs that exact browser archive with SHA256
+verification, `node scripts/chrome-for-testing/browser-runtime.cjs check` reports the
+actual version and path, and `npx playwright install-deps chromium` installs Linux
+system libraries. The Chromium sandbox is enabled by default.
 
 ## The two test lanes
 

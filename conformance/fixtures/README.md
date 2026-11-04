@@ -54,10 +54,16 @@ fixture's `input.html`/setup or the snapshot algorithm changes on purpose.
    ```
    `check-fixtures` confirms both clients now match canonical.
 
-The browser is pinned (Playwright Chromium, version-locked in each client's `package.json`)
-so regeneration is reproducible across machines and CI. `conformance:update` and
-`test:conformance` need the pinned browser installed (`npx playwright install chromium`); the
-same applies to `npm publish`, whose `prepublishOnly` runs the byte gate.
+Each client pins `playwright` at `1.64.1` in `package.json`, which still bundles an
+insufficiently patched Chromium `156.0.8078.4`. The actual test browser is Chrome for
+Testing `156.0.8078.80`, pinned independently in each client's
+`scripts/chrome-for-testing/browser-runtime.json` so regeneration is reproducible across
+machines and CI. `conformance:update` and `test:conformance` need the pinned browser
+installed (`npm run browser:install`, which installs the exact browser archive with SHA256
+verification); the same applies to `npm publish`, whose `prepublishOnly` runs the byte gate.
+`node scripts/chrome-for-testing/browser-runtime.cjs check` reports the actual version and
+path, and `npx playwright install-deps chromium` installs Linux system libraries. The
+Chromium sandbox is enabled by default.
 
 ## License
 
