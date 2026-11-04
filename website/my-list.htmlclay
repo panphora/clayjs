@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" autosave>
+<html lang="en" autosave opens-in="edit">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -21,15 +21,23 @@
 </head>
 <body>
 
-<h1 editable="single-line">My list</h1>
+<h1 editmode:contenteditable inert-contenteditable="plaintext-only">My list</h1>
 <p class="sub">What I need to get done.</p>
 
 <ul>
-  <li><input type="checkbox" persist aria-labelledby="t1"> <span id="t1" editable="single-line">Buy oat milk</span></li>
-  <li><input type="checkbox" persist aria-labelledby="t2"> <span id="t2" editable="single-line">Book the dentist</span></li>
-  <li><input type="checkbox" persist aria-labelledby="t3"> <span id="t3" editable="single-line">Water the fig tree</span></li>
+  <li><input type="checkbox" persist aria-labelledby="t1"> <span id="t1" editmode:contenteditable inert-contenteditable="plaintext-only">Buy oat milk</span></li>
+  <li><input type="checkbox" persist aria-labelledby="t2"> <span id="t2" editmode:contenteditable inert-contenteditable="plaintext-only">Book the dentist</span></li>
+  <li><input type="checkbox" persist aria-labelledby="t3"> <span id="t3" editmode:contenteditable inert-contenteditable="plaintext-only">Water the fig tree</span></li>
 </ul>
 
-<script src="https://clayjs.com/v1/clay.js"></script>
+<script>
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" || event.isComposing) return;
+    if (!event.target.matches?.('[contenteditable="plaintext-only"]')) return;
+    event.preventDefault();
+    event.target.blur();
+  });
+</script>
+<script src="https://clayjs.com/v1/clay.js?plugins=sync,undo,indicator,menu&exclude=richclay"></script>
 </body>
 </html>

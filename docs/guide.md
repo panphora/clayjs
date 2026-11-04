@@ -1,8 +1,16 @@
 # Building malleable documents with ClayJS
 
-This is the complete reference for building malleable documents with ClayJS: one HTML file that is the whole app, edits itself in place, saves itself back to its host, and merges edits from other tabs, other people and agents. Read it top to bottom once. After that, [A document, line by line](https://clayjs.com/docs/guide/walkthrough/), [Structuring an app](https://clayjs.com/docs/guide/architecture/) and [Pre-ship checklist](https://clayjs.com/docs/guide/checklist/) are the parts to return to.
+ClayJS is a script to give HTML files super powers.
 
-It is written for a developer or an LLM building full apps with inline editing and inline controls: kanban boards with card detail, block writers, finance trackers, CRMs, flashcards, trackers. It covers the CMS plugin only in passing ([cms: content-managed pages](https://clayjs.com/docs/guide/components/#cms-content-managed-pages)), because an app whose product is editing should not route editing through a form sidebar.
+It lets the file edit itself and save changes back into itself. With the sync plugin, it also merges edits from other tabs, other people, and agents. The file stays plain HTML.
+
+ClayJS is for people and AI agents to collaborate: a tracker, a board, a notes page, a dashboard a team edits. Saving needs a host that accepts saves: e.g. HTML Clay, Hyperclay Local, hyperclay.com.
+
+Skip ClayJS if your file is static and not meant to be edited. Add ClayJS on the day someone needs to edit the HTML file and collaborate on it.
+
+### How to read this guide
+
+Open [the problem list](https://clayjs.com/docs/start/), pick the problems you are solving, and read those pages. Everything else can wait. The complete reference stays available as [one Markdown file](https://clayjs.com/guide.md) for the details.
 
 Every behavior stated here was read from ClayJS 1.17.0 source or executed. The four example files below are complete, tested apps that this guide quotes. A [test suite](https://github.com/hyperspacesystems/clayjs/tree/main/tests/unit/guide-examples) boots each one in jsdom with the real loader and checks what it saves, how it merges a peer's edit, and what a viewer receives. Open any of them and view source, or download one and open it in HTML Clay to edit it:
 
@@ -285,7 +293,7 @@ ClayJS runs in the page, while a **host** serves the file and accepts saves. The
 Load ClayJS with a single `<script>` tag and select plugins in its query string:
 
 ```html
-<script src="https://clayjs.com/v1/clay.js?plugins=sync,sortable,undo,indicator&exclude=richclay"></script>
+<script src="https://clayjs.com/v1/clay.js?plugins=sync,undo,indicator,menu&exclude=richclay"></script>
 ```
 
 - **Use a classic script with a `src`.** The loader reads `document.currentScript` to find its own URL and locate its modules. As `type="module"` or pasted inline, it logs an error and never boots.
@@ -330,14 +338,14 @@ Plugins add editing, sync, and UI features to `clay.js`. Most are off by default
 - `exclude` wins over implications. `exclude=wire` also drops `ai-edit`.
 - Load order is fixed regardless of how you list them.
 - Use `exclude=richclay` when the app has no rich text. `exclude=source` saves one request and about 48 KB, at the cost of saves reprinting the whole document instead of keeping hand formatting.
-- Nothing implies `undo`, on purpose: it intercepts Cmd+Z in every text field on the page ([undo: whole-page undo](https://clayjs.com/docs/guide/components/#undo-whole-page-undo)).
+- Nothing implies `undo`, on purpose: name it when the page should have whole-page undo. It leaves Cmd+Z to text fields ([undo: whole-page undo](https://clayjs.com/docs/guide/components/#undo-whole-page-undo)).
 - In view mode, `page` loads only its reader half and nothing it implies. A Document on `plugins=page` resolves to `page-view`, with no live data service, no generic `sync`, and no `upload`. Name `sync` as well (`plugins=page,sync`) when the reader should take its saved files from sync's lane instead of its own.
 - `derive` loads automatically when the page has a `[sap]` root at boot, and stays idle when full sapjs is on the page. `exclude=derive` opts out; `plugins=derive` loads it for a page that adds its `[sap]` root later.
 - `visitor-drafts` loads its draft store only in draft mode. A reader or an owner editing the original gets a small module that publishes an inert `clay.visitorDrafts` and, for the owner, the owner chip. On a page with no `visitor-drafts` slot, no `api` rules tag, or a rules tag this version cannot read (not `data-rules-version="1"`, or not JSON), it warns in the console and draws nothing. [Free documents for visitors](https://clayjs.com/docs/guide/free-documents/) covers the opt in.
 
 Measure what each mode you ship downloads, and keep a byte budget and a test that fails when one grows: [Keep a byte budget per boot, and fail a test when it grows](https://clayjs.com/docs/practices/#keep-a-byte-budget-per-boot-and-fail-a-test-when-it-grows).
 
-**A good default for apps:** `?plugins=sync,sortable,undo,indicator`, plus `upload` for images or attachments, plus `exclude=richclay` when there is no rich text. A document opens in view even for its owner, so add `menu` for the Edit switch, or declare `<html opens-in="edit">` on a tool page that must edit as soon as it opens.
+**A good default:** `?plugins=sync,undo,indicator,menu&exclude=richclay`. It gives a page of plain text live sync, whole-page undo, a save status chip and an Edit switch. Then add by task: `sortable` for drag-to-reorder lists, and `upload` for images or attachments. For formatted text, drop `exclude=richclay` and use `editable`. A document opens in view even for its owner, which is why `menu` is in the default. Declare `<html opens-in="edit">` on a tool page that must edit as soon as it opens.
 
 ### 2.3 Satellites
 
@@ -2350,7 +2358,7 @@ On hyperclay.com, every tab holds its own sync connection. Over HTTP/1.1, a brow
 
 - **HTML Clay:** save the file as `name.htmlclay` and open it with HTML Clay 1.9.0 or newer. The extension changes nothing about the content. The file is ordinary HTML.
 - **Hyperclay Local:** put the file in the synced folder and open it from the app.
-- **hyperclay.com:** create a site and paste the file, or upload it.
+- **hyperclay.com:** in your workspace, click **New**, choose **Import files…** and select the file. It becomes a document. An upload does not do this: it stores the file as a static file.
 
 ### 9.3 Privacy
 
