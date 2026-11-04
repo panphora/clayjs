@@ -84,6 +84,7 @@
     <p>That's a complete app. Type into the heading, hit Save, refresh: your words are still there. The file saved itself.</p>
     <p style="margin-top: 18px;">
       <a class="btn primary" href="/docs/guide/quick-start/" style="text-decoration: none; display: inline-block;">Get started</a>
+      <a class="btn ghost" href="/docs/start/" data-send-agent="Read https://clayjs.com/docs/start.md. Pick the problems I am solving with the file I describe, and read only those pages before you start." style="text-decoration: none; display: inline-block; margin-left: 6px;">Send this to your agent</a>
       <a class="btn ghost" href="#configure" style="text-decoration: none; display: inline-block; margin-left: 6px;">Get your script tag</a>
     </p>
   </section>
@@ -449,5 +450,21 @@
 <script src="https://hyperclay.com/public/js/hyper-footer.js" defer></script>
 
 <script src="https://hyperclay.com/public/js/polite-pop.js" defer></script>
+<script>
+document.querySelectorAll('[data-send-agent]').forEach((link) => {
+  link.addEventListener('click', async (event) => {
+    if (!navigator.clipboard) return;
+    event.preventDefault();
+    const label = link.textContent;
+    try {
+      await navigator.clipboard.writeText(link.dataset.sendAgent);
+      link.textContent = 'Copied, paste it to your agent';
+      setTimeout(() => { link.textContent = label; }, 2000);
+    } catch {
+      location.href = link.href;
+    }
+  });
+});
+</script>
 </body>
 </html>
