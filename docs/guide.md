@@ -4,7 +4,7 @@ This is the complete reference for building malleable documents with ClayJS: one
 
 It is written for a developer or an LLM building full apps with inline editing and inline controls: kanban boards with card detail, block writers, finance trackers, CRMs, flashcards, trackers. It covers the CMS plugin only in passing ([cms: content-managed pages](https://clayjs.com/docs/guide/components/#cms-content-managed-pages)), because an app whose product is editing should not route editing through a form sidebar.
 
-Every behavior stated here was read from ClayJS 1.17.0 source or executed. The four example files below are complete, tested apps that this guide quotes. A [test suite](https://github.com/panphora/clayjs/tree/main/tests/unit/guide-examples) boots each one in jsdom with the real loader and checks what it saves, how it merges a peer's edit, and what a viewer receives. Open any of them and view source, or download one and open it in HTML Clay to edit it:
+Every behavior stated here was read from ClayJS 1.17.0 source or executed. The four example files below are complete, tested apps that this guide quotes. A [test suite](https://github.com/hyperspacesystems/clayjs/tree/main/tests/unit/guide-examples) boots each one in jsdom with the real loader and checks what it saves, how it merges a peer's edit, and what a viewer receives. Open any of them and view source, or download one and open it in HTML Clay to edit it:
 
 | File | What it shows |
 |---|---|
