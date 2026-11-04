@@ -51,20 +51,6 @@ function announceMode() {
   document.dispatchEvent(new Event("clay:modechange"));
 }
 
-// Warm download assets at the first interaction in edit mode, so a later offline copy needs
-// no first fetch and a boot nobody touches loads nothing behind the facade.
-function warmCopyContentOnFirstInteraction() {
-  const warm = () => Promise.all([import("./download.js"), import("./copy-content.js")]).catch(() => {});
-  const start = () => {
-    document.removeEventListener("pointerdown", start, true);
-    document.removeEventListener("keydown", start, true);
-    if (typeof requestIdleCallback === "function") requestIdleCallback(warm, { timeout: 2000 });
-    else setTimeout(warm, 0);
-  };
-  document.addEventListener("pointerdown", start, true);
-  document.addEventListener("keydown", start, true);
-}
-
 function refuse(code, phase = "idle", extra = {}) {
   commitModeFacts({ phase, reason: code });
   return { ok: false, mode: current(), code, ...extra };
@@ -333,7 +319,6 @@ async function enter(handle = null) {
   leases = prepared;
   commitModeFacts({ phase: "idle", reason: null });
   announceMode();
-  warmCopyContentOnFirstInteraction();
   // One announcement per plugin this entry loaded, after the mode change: a plugin is
   // announced by the boot that loaded it exactly once, and a refused entry announces
   // nothing so the next successful one does.
