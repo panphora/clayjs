@@ -7,3 +7,4 @@ dist/
 .deploy
 .version-cache/
 test-box-out/
+.chrome-for-testing/
