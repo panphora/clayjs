@@ -5,7 +5,7 @@ import { canEdit, isDraftMode, isEditMode, mode as startMode } from "../core/is-
 import onDomReady from "../lib/dom-ready.js";
 import CLAYGOO from "./menu/claygoo.svg.js";
 import { modeRefusalText } from "../core/mode-refusal.js";
-import MENU_CSS, { MENU_SURFACE } from "./menu/style.js";
+import { MENU_BASE, MENU_FLOATING, MENU_SKIN, MENU_TOUCH, MENU_SURFACE } from "./menu/style.js";
 import { attachPlacement } from "./menu/placement.js";
 import { attachActions } from "./menu/actions.js";
 import { attachPeople } from "./menu/people.js";
@@ -14,6 +14,9 @@ import { followLook } from "../ui/page-colour.js";
 import { mountEditorUI } from "../ui/editor-ui.js";
 
 const SEO_ITEM = true;
+const SKIN_VERSION = "1";
+const EDGE_GAP = 8;
+const DISMISS_ICON = '<svg viewBox="0 0 10 10" aria-hidden="true" focusable="false"><path d="M1 0 5 4l4-4 1 1-4 4 4 4-1 1-4-4-4 4-1-1 4-4-4-4z"/></svg>';
 const NOTE_MS = 6000;
 const INTRO_GAP = 12;
 const GRIP =
@@ -23,6 +26,7 @@ const GRIP =
 // Built-in items keep fixed slots, so the order never depends on which plugin
 // registered first. Any other id goes in its own section above the footer, in the
 // order it was added.
+// An item may also ask for the first or the last section with `section: "start" | "end"`.
 const SECTIONS = [
   ["clay.undo", "clay.cms", "clay.ai", "clay.code"],
   ["seo", "clay.variants.keep", "clay.share", "clay.people"],
@@ -37,25 +41,51 @@ const SLOTTED = new Set(SECTIONS.flat().filter(Boolean));
 const currentMode = () =>
   window.clay && typeof window.clay.mode === "string" ? window.clay.mode : startMode;
 
+// The first [clay-menu-slot] on the page holds the menu. With none, it floats in a corner.
+function findSlot() {
+  const slots = document.querySelectorAll("[clay-menu-slot]");
+  if (slots.length > 1) console.warn("[clay] This page has more than one clay-menu-slot. The menu uses the first.");
+  return slots[0] || null;
+}
+
+// A skin the page wrote, in <style clay-menu-skin="1" media="not all">. The media keeps it
+// off the page itself. An unknown version means the default skin.
+function pageSkin() {
+  const style = document.querySelector("style[clay-menu-skin]");
+  if (!style) return null;
+  if (style.getAttribute("clay-menu-skin") !== SKIN_VERSION) {
+    console.warn(`[clay] This runtime reads clay-menu-skin="${SKIN_VERSION}". The menu keeps its default look.`);
+    return null;
+  }
+  return style.textContent;
+}
+
 function mount() {
   if (document.querySelector('clay-editor-ui[data-clay-ui="menu"]')) return;
+
+  const slot = findSlot();
+  const embedded = Boolean(slot);
+  const skin = embedded ? pageSkin() : null;
+  const hideSwitch = embedded && slot.hasAttribute("no-edit-switch");
 
   const root = document.createElement("div");
   root.className = "clay-menu-dock";
   root.setAttribute("clay", "editor-ui");
+  root.setAttribute("part", "dock");
+  if (embedded) root.dataset.embedded = "";
   root.dataset.corner = "top-right";
   root.innerHTML =
-    `<div class="clay-menu" clay="editor-ui">` +
+    `<div class="clay-menu" part="capsule" clay="editor-ui">` +
     `<button type="button" class="clay-menu-grip" aria-label="Move the menu. Drag it, or use the arrow keys to move it to another corner.">${GRIP}</button>` +
-    `<button type="button" class="clay-menu-edit" role="switch" aria-checked="false">` +
+    `<button type="button" class="clay-menu-edit" part="edit" role="switch" aria-checked="false">` +
     `<span class="clay-menu-track" aria-hidden="true"><span class="clay-menu-thumb"></span></span>` +
     `<span class="clay-menu-label">Edit</span>` +
     `</button>` +
     `<span class="clay-menu-divider" aria-hidden="true"></span>` +
-    `<button type="button" class="clay-menu-goo" aria-haspopup="menu" aria-expanded="false" aria-label="Clay menu">${CLAYGOO}</button>` +
+    `<button type="button" class="clay-menu-goo" part="button" aria-haspopup="menu" aria-expanded="false" aria-label="Clay menu">${CLAYGOO}</button>` +
     `</div>` +
-    `<div class="clay-menu-list" role="menu" aria-label="Clay menu" hidden></div>` +
-    `<div class="clay-menu-note" role="status" hidden></div>`;
+    `<div class="clay-menu-list" part="list" role="menu" aria-label="Clay menu" hidden></div>` +
+    `<div class="clay-menu-note" part="note" role="status" hidden></div>`;
 
   const grip = root.querySelector(".clay-menu-grip");
   const edit = root.querySelector(".clay-menu-edit");
@@ -64,6 +94,36 @@ function mount() {
   const noteEl = root.querySelector(".clay-menu-note");
   const items = new Map();
 
+  if (embedded) {
+    grip.hidden = true;
+    const icon = slot.querySelector("template[clay-menu-icon]");
+    if (icon) goo.replaceChildren(icon.content.cloneNode(true));
+    const name = slot.getAttribute("clay-menu-label");
+    if (name) {
+      goo.setAttribute("aria-label", name);
+      goo.title = name;
+      list.setAttribute("aria-label", name);
+    }
+    if (hideSwitch) {
+      edit.hidden = true;
+      root.querySelector(".clay-menu-divider").hidden = true;
+    }
+  }
+
+  // Embedded, the list opens in the top layer, so a header's overflow cannot clip it.
+  const topLayer = embedded && typeof list.showPopover === "function";
+  if (topLayer) list.setAttribute("popover", "manual");
+
+  function placeList() {
+    const anchor = goo.getBoundingClientRect();
+    const { offsetWidth: width, offsetHeight: height } = list;
+    const left = Math.max(EDGE_GAP, Math.min(anchor.right - width, window.innerWidth - width - EDGE_GAP));
+    const below = anchor.bottom + EDGE_GAP;
+    const top = below + height > window.innerHeight - EDGE_GAP ? Math.max(EDGE_GAP, anchor.top - height - EDGE_GAP) : below;
+    list.style.left = `${Math.round(left)}px`;
+    list.style.top = `${Math.round(top)}px`;
+  }
+
   // Focus inside the shadow root: document.activeElement only ever names the host.
   const focusedEl = () => root.getRootNode().activeElement || null;
   const isOpen = () => !list.hidden;
@@ -71,6 +131,13 @@ function mount() {
   function setExpanded(open) {
     list.hidden = !open;
     goo.setAttribute("aria-expanded", open ? "true" : "false");
+    if (!topLayer) return;
+    if (open) {
+      list.showPopover();
+      placeList();
+    } else if (list.matches(":popover-open")) {
+      list.hidePopover();
+    }
   }
 
   const buttons = () => [...list.querySelectorAll('[role="menuitem"]:not([aria-disabled="true"])')];
@@ -108,6 +175,7 @@ function mount() {
       button.type = "button";
     }
     button.setAttribute("role", "menuitem");
+    button.setAttribute("part", item.quiet ? "item quiet" : "item");
     button.dataset.menuId = item.id;
     if (item.badge && item.id === "upgrade") {
       const label = document.createElement("span");
@@ -126,7 +194,7 @@ function mount() {
     button.addEventListener("click", () => {
       if (item.disabled) return;
       close();
-      if (item.run) item.run();
+      if (item.run) item.run({ anchor: goo });
     });
     return button;
   }
@@ -135,6 +203,7 @@ function mount() {
     if (item.text) {
       const line = document.createElement("p");
       line.className = "clay-menu-version";
+      line.setAttribute("part", "text");
       line.dataset.menuId = item.id;
       line.textContent = item.label;
       return line;
@@ -146,12 +215,35 @@ function mount() {
       for (const part of item.pair) pair.append(itemButton(part));
       return pair;
     }
+    if (item.dismiss) return dismissibleRow(item);
     return itemButton(item);
   }
 
+  function dismissibleRow(item) {
+    const row = document.createElement("div");
+    row.className = "clay-menu-row";
+    row.dataset.menuId = item.id;
+    const dismiss = document.createElement("button");
+    dismiss.type = "button";
+    dismiss.setAttribute("role", "menuitem");
+    dismiss.setAttribute("part", "dismiss");
+    dismiss.dataset.menuId = `${item.id}.dismiss`;
+    dismiss.setAttribute("aria-label", item.dismiss.label);
+    dismiss.title = item.dismiss.label;
+    dismiss.innerHTML = DISMISS_ICON;
+    dismiss.addEventListener("click", () => {
+      removeItem(item.id);
+      item.dismiss.run?.();
+    });
+    row.append(itemButton(item), dismiss);
+    return row;
+  }
+
   function sections() {
-    const extra = [...items.keys()].filter((id) => !SLOTTED.has(id));
-    return SECTIONS.map((ids) => (ids || extra).map((id) => items.get(id)).filter(Boolean)).filter((group) => group.length);
+    const inSection = (name) => [...items.values()].filter((item) => item.section === name);
+    const extra = [...items.keys()].filter((id) => !SLOTTED.has(id) && !items.get(id).section);
+    const fixed = SECTIONS.map((ids) => (ids || extra).map((id) => items.get(id)).filter(Boolean));
+    return [inSection("start"), ...fixed, inSection("end")].filter((group) => group.length);
   }
 
   function render() {
@@ -163,6 +255,7 @@ function mount() {
         const sep = document.createElement("div");
         sep.className = "clay-menu-sep";
         sep.setAttribute("role", "separator");
+        sep.setAttribute("part", "separator");
         list.append(sep);
       }
       for (const item of group) list.append(itemNode(item));
@@ -194,11 +287,14 @@ function mount() {
     disabled: Boolean(disabled),
   });
 
-  function addItem({ id, label, run, badge, keys, disabled, text, pair, href } = {}) {
+  function addItem({ id, label, run, badge, keys, disabled, text, pair, href, section, quiet, dismiss } = {}) {
     if (!id) return null;
     const item = clean({ id, label, run, badge, keys, disabled, href });
     if (text) item.text = true;
     if (Array.isArray(pair)) item.pair = pair.map(clean);
+    if (section === "start" || section === "end") item.section = section;
+    if (quiet) item.quiet = true;
+    if (dismiss) item.dismiss = { label: String(dismiss.label || "Dismiss"), run: typeof dismiss.run === "function" ? dismiss.run : null };
     items.set(id, item);
     render();
     return id;
@@ -228,6 +324,7 @@ function mount() {
 
   function setChecked() {
     edit.setAttribute("aria-checked", currentMode() === "edit" ? "true" : "false");
+    if (hideSwitch) addItem({ id: "clay.mode", label: currentMode() === "edit" ? "View mode" : "Edit mode", section: "start", run: () => edit.click() });
   }
   setChecked();
 
@@ -360,24 +457,30 @@ function mount() {
       `:root { --clay-menu-width: ${Math.ceil(rect.width)}px; --clay-menu-height: ${Math.ceil(rect.height)}px; }`;
   }
 
-  const ui = mountEditorUI({ name: "menu", content: root, css: [MENU_CSS], attributes: { "clay-mode-toggle": "" } });
-  attachPlacement({
-    dock: root,
-    container: ui.shadow,
-    grip,
-    storage: window.clay.storage && window.clay.storage.local,
-    onMove: replace,
-    onDragStart: () => {
-      close();
-      people?.close({ restore: false });
-    },
-  });
-  reserveSpace();
-  if (typeof ResizeObserver === "function") new ResizeObserver(reserveSpace).observe(root);
+  const css = embedded ? [MENU_BASE, skin ?? MENU_SKIN, MENU_TOUCH] : [MENU_BASE, MENU_FLOATING, MENU_SKIN, MENU_TOUCH];
+  const ui = mountEditorUI({ name: "menu", content: root, css, parent: slot || document.body, attributes: { "clay-mode-toggle": "" } });
+  if (embedded) {
+    window.addEventListener("resize", close);
+    window.addEventListener("scroll", () => { if (topLayer && isOpen()) placeList(); }, { capture: true, passive: true });
+  } else {
+    attachPlacement({
+      dock: root,
+      container: ui.shadow,
+      grip,
+      storage: window.clay.storage && window.clay.storage.local,
+      onMove: replace,
+      onDragStart: () => {
+        close();
+        people?.close({ restore: false });
+      },
+    });
+    reserveSpace();
+    if (typeof ResizeObserver === "function") new ResizeObserver(reserveSpace).observe(root);
 
-  new MutationObserver(watchIntro).observe(doc.body, { childList: true });
-  watchIntro();
-  followLook(root, root.querySelector(".clay-menu"), MENU_SURFACE);
+    new MutationObserver(watchIntro).observe(doc.body, { childList: true });
+    watchIntro();
+  }
+  if (!skin) followLook(root, root.querySelector(".clay-menu"), MENU_SURFACE);
 
   const openSeo = () => import("./menu/seo.js").then((m) => m.open({ returnFocus: goo }));
 
@@ -404,7 +507,7 @@ function mount() {
   followCapability = applyHidden;
   if (currentMode() !== "edit") import("../core/host-permission.js").then((m) => m.checkHostPermission()).catch(() => {});
 
-  window.clay.menu = { addItem, removeItem, open, close, note: showNote };
+  window.clay.menu = { addItem, removeItem, open, close, note: showNote, embedded, button: goo };
   document.dispatchEvent(new CustomEvent("clay:menu-ready"));
 }
 

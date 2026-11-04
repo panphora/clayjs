@@ -1,5 +1,5 @@
 import { jest } from "@jest/globals";
-import { hostOf, $, $$, active } from "./helpers/editor-ui.js";
+import { hostOf, $, $$, active, sheetText } from "./helpers/editor-ui.js";
 
 // Scenario: a document that loads `plugins=menu` shows anyone who can edit a small
 // fixed group in the top right, an Edit switch and claygoo, and nothing from it ever
@@ -56,6 +56,7 @@ async function boot({ cookie = true, draft = false, edit = false, body = BODY, i
   await flush();
 }
 
+const cssOfMenu = () => sheetText("menu");
 const menuRoot = () => $(".clay-menu", "menu");
 const listOf = () => $(".clay-menu-list", "menu");
 const gooOf = () => $(".clay-menu-goo", "menu");
@@ -295,4 +296,105 @@ test("with a .clay-intro on the page the group sits below its bottom edge", asyn
   document.querySelector(".clay-intro").remove();
   await flush();
   expect(root.style.top).toBe("");
+});
+
+describe("embedded in a clay-menu-slot", () => {
+  const SKIN = '<style clay-menu-skin="1" media="not all">[part~="button"] { width: 40px; }</style>';
+  const ICON = '<template clay-menu-icon><svg class="gear" viewBox="0 0 24 24"><path d="M1 1h2"/></svg></template>';
+  const page = (slot = "", attrs = "") => `${BODY}<header><div clay-menu-slot ${attrs}>${slot}</div></header>`;
+  const hostParent = () => hostOf("menu").parentElement;
+
+  test("the menu mounts inside the first slot, with no grip and no reserved space", async () => {
+    await boot({ edit: true, body: `${page()}<div clay-menu-slot id="second"></div>` });
+    expect(hostParent()).toBe(document.querySelector("[clay-menu-slot]"));
+    expect(window.clay.menu.embedded).toBe(true);
+    expect($(".clay-menu-grip", "menu").hidden).toBe(true);
+    expect(document.getElementById("clay-menu-vars").textContent).not.toContain("--clay-menu-width");
+    expect(localStorage.getItem("menu-corner")).toBeNull();
+  });
+
+  test("with no slot it still floats", async () => {
+    await boot({ edit: true });
+    expect(hostParent()).toBe(document.body);
+    expect(window.clay.menu.embedded).toBe(false);
+    expect(document.getElementById("clay-menu-vars").textContent).toContain("--clay-menu-width");
+  });
+
+  test("the page replaces the icon and names the button", async () => {
+    await boot({ edit: true, body: page(ICON, 'clay-menu-label="Settings"') });
+    const button = $(".clay-menu-goo", "menu");
+    expect(button.querySelector("svg.gear")).not.toBeNull();
+    expect(button.getAttribute("aria-label")).toBe("Settings");
+    expect(listOf().getAttribute("aria-label")).toBe("Settings");
+  });
+
+  test("a hidden switch becomes a mode item that follows the mode", async () => {
+    await boot({ edit: true, body: page("", "no-edit-switch") });
+    expect($(".clay-menu-edit", "menu").hidden).toBe(true);
+    window.clay.menu.open();
+    expect(listOf().querySelector('[data-menu-id="clay.mode"]').textContent).toBe("View mode");
+    expect(listOf().firstElementChild.dataset.menuId).toBe("clay.mode");
+  });
+
+  test("the switch stays without the attribute", async () => {
+    await boot({ edit: true, body: page() });
+    expect($(".clay-menu-edit", "menu").hidden).toBe(false);
+    window.clay.menu.open();
+    expect(listOf().querySelector('[data-menu-id="clay.mode"]')).toBeNull();
+  });
+
+  test("sections put items first and last, and a run gets the button as its anchor", async () => {
+    await boot({ edit: true, body: page() });
+    let anchor = null;
+    window.clay.menu.addItem({ id: "last", label: "Last", section: "end" });
+    window.clay.menu.addItem({ id: "first", label: "First", section: "start", run: (context) => { anchor = context.anchor; } });
+    window.clay.menu.open();
+    const ids = [...listOf().children].map((node) => node.dataset.menuId).filter(Boolean);
+    expect(ids[0]).toBe("first");
+    expect(ids.at(-1)).toBe("last");
+    listOf().querySelector('[data-menu-id="first"]').click();
+    expect(anchor).toBe($(".clay-menu-goo", "menu"));
+  });
+
+  test("a dismissible item goes on its x, and the x keeps the menu open", async () => {
+    await boot({ edit: true, body: page() });
+    let dismissed = 0;
+    window.clay.menu.addItem({ id: "thanks", label: "Thanks", href: "mailto:a@example.com", quiet: true, dismiss: { label: "Remove", run: () => { dismissed += 1; } } });
+    window.clay.menu.open();
+    const x = listOf().querySelector('[data-menu-id="thanks.dismiss"]');
+    expect(x.getAttribute("aria-label")).toBe("Remove");
+    expect(listOf().querySelector('a[data-menu-id="thanks"]').getAttribute("part")).toBe("item quiet");
+    x.click();
+    expect(dismissed).toBe(1);
+    expect(listOf().querySelector('[data-menu-id="thanks"]')).toBeNull();
+    expect(listOf().hidden).toBe(false);
+  });
+
+  test("a skin replaces the default look and keeps the safety layer", async () => {
+    await boot({ edit: true, body: `${SKIN}${page()}` });
+    const css = cssOfMenu();
+    expect(css).toContain('[part~="button"] { width: 40px; }');
+    expect(css).not.toContain("height: 34px; padding: 0 4px 0 2px");
+    expect(css).toContain(":focus-visible");
+    expect(css).toContain("min-height: 44px");
+  });
+
+  test("an unknown skin version keeps the default look", async () => {
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
+    await boot({ edit: true, body: `${SKIN.replace('skin="1"', 'skin="2"')}${page()}` });
+    const css = cssOfMenu();
+    expect(css).not.toContain('[part~="button"] { width: 40px; }');
+    expect(css).toContain("height: 34px; padding: 0 4px 0 2px");
+    warn.mockRestore();
+  });
+
+  test("the menu never reaches a save, and the slot and its icon do", async () => {
+    await boot({ edit: true, body: page(ICON, "no-edit-switch") });
+    const html = window.clay.getHTML();
+    expect(html).toContain("clay-menu-slot");
+    expect(html).toContain("clay-menu-icon");
+    expect(html).not.toContain("clay-menu-dock");
+    expect(html).not.toContain("clay-editor-ui");
+    expect(window.clay.hasUnsavedChanges()).toBe(false);
+  });
 });
