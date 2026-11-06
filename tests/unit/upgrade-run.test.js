@@ -521,3 +521,33 @@ test("a tab with no stamp learns one before the capture, and a save during the d
   expect(clay.save.replace).toHaveBeenCalledTimes(1);
   expect(clay.save.replace.mock.calls[0][1]).toEqual({ etag: "etag-discovered" });
 });
+
+test("a view-mode upgrade writes the bytes it copied with the stamp it read, even when another tab's save changes the page during the download", async () => {
+  loadKanban();
+  const html = newerKanban();
+  const clay = setupClay({ isEditMode: false });
+  recordEtag("etag-copied");
+  const fetches = sourceFetcher(html);
+  const fetchFn = jest.fn(async (url) => {
+    if (url === HTML_URL) {
+      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        if (node.nodeValue.includes("Referral program for early users")) node.nodeValue = "Changed by the other tab";
+      }
+      recordEtag("etag-peer-save");
+    }
+    return fetches(url);
+  });
+
+  try {
+    await apply(updateFor(html), { clay, fetchFn, reload: jest.fn(), doc: document, loc: location });
+  } finally {
+    recordEtag(null);
+  }
+
+  expect(clay.save.replace).toHaveBeenCalledTimes(1);
+  const [saved, options] = clay.save.replace.mock.calls[0];
+  expect(options).toEqual({ etag: "etag-copied" });
+  expect(saved).toContain("Referral program for early users");
+  expect(saved).not.toContain("Changed by the other tab");
+});

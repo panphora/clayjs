@@ -300,6 +300,10 @@ async function applyUnderSlot(update, { doc, loc, fetchFn, clay, reload, replace
     } catch {
       return { ok: false, code: "failed", message: SAVE_FAILED };
     }
+  } else {
+    // A view-mode tab's live document can change under the download (a disk frame from
+    // another tab), so it is copied now, at the same moment as the stamp.
+    source = new DOMParser().parseFromString("<!DOCTYPE html>\n" + doc.documentElement.outerHTML, "text/html");
   }
   const prepared = await prepare(update, { doc: source, loc, fetchFn });
   if (!prepared.ok) return prepared;

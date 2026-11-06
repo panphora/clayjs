@@ -2756,10 +2756,14 @@ body .strip-journal .sj-line {
       let start = null;
       const paint = () => {
         const list = looks();
-        const index = list.length > 1 && saves() && html.getAttribute('theme-picker') !== 'done' ? at(list) : -1;
+        const ended = html.getAttribute('theme-picker') === 'done';
+        const index = list.length > 1 && saves() && !ended ? at(list) : -1;
         if (index >= 0 && start === null) start = variants().active;
         name.textContent = index < 0 ? '' : list[index].label;
         count.textContent = index < 0 ? '' : `(${index + 1} of ${list.length})`;
+        const menu = window.clay?.menu;
+        if (list.length > 1 && saves() && ended) menu?.addItem({ id: 'look.picker', label: 'Change theme', run: reopen });
+        else menu?.removeItem('look.picker');
       };
       const step = (by) => {
         const list = looks();
@@ -2773,12 +2777,20 @@ body .strip-journal .sj-line {
       };
       const confirm = () => {
         variants().choose(variants().shown);
+        html.setAttribute('look', variants().shown);
         end();
       };
       const dismiss = () => {
         const back = window.clay.mode === 'edit' ? variants().active : start;
         if (back && back !== variants().shown) variants().preview(back);
         end();
+      };
+      // Once ended, the gear menu's Change theme brings the picker back, starting from the theme on screen.
+      const reopen = () => {
+        html.setAttribute('theme-picker', 'open');
+        start = null;
+        window.clay?.save?.soon?.();
+        paint();
       };
       for (const [selector, run] of [['[data-look-prev]', () => step(-1)], ['[data-look-next]', () => step(1)], ['[data-look-choose]', confirm], ['[data-look-dismiss]', dismiss]]) {
         const button = root.querySelector(selector);
