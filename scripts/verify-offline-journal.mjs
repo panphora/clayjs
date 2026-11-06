@@ -113,6 +113,9 @@ export async function verifyOfflineJournal({ manifestFile, journalFile, packageR
   // 1. The Journal's own script and stylesheet URLs.
   for (const raw of journalReferences(await readFile(journalFile, "utf8"))) {
     if (!/^https?:\/\//i.test(raw)) continue;
+    // The hosted Journal's analytics tag is Hyperclay's, not ClayJS's: offline it simply
+    // does not load, and owned copies drop it.
+    if (new URL(raw).origin === "https://signal.hyperclay.com") continue;
     const result = resolveRuntimeURL(raw, { releases, selectedVersion: index.version });
     if (!result || result.available === false) {
       problems.push(`${journalFile}: ${raw} resolves to no file in the release`);

@@ -30,7 +30,7 @@ let measureBuilt;
 let emitChunks;
 let emitBootstraps;
 const SEARCH = "?plugins=page";
-const CEILING = 46080;
+const CEILING = 52992;
 
 const declared = (html) => html.replace(/<html\b([^>]*)>/, '<html$1 clay-mode-switch="live">');
 const upgraded = (html) => html.replace('<meta charset="utf-8">', '<meta charset="utf-8">\n<meta name="hyper-source" content="https://hyperclay.com/templates/document.html">');

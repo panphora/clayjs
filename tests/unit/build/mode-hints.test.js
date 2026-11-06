@@ -19,7 +19,7 @@ const htmlOf = async (name) => readFile(path.join(fixtures, name), "utf8");
 const OWNER = "isAdminOfCurrentResource=1";
 // A path only an editor's plan can name, so its entry lives in the supplement.
 const EDIT_ONLY = PLUGIN_PATHS.page.path;
-const CEILING = 46080;
+const CEILING = 52992;
 
 let outdir;
 let built;

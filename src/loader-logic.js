@@ -83,7 +83,7 @@ export const PLUGIN_PATHS = {
   // the inert `clay.visitorDrafts`, without the drafts UI's 24 KB.
   "visitor-drafts": { path: "plugins/visitor-drafts.js", ownerPath: "plugins/visitor-drafts-owner.js", editOnly: false, default: false },
   // `draft: true` loads it only in a visitor's draft. The key is short on purpose: every
-  // reader downloads this file, and the reader's 46,080-byte ceiling counts it.
+  // reader downloads this file, and the reader's Brotli ceiling counts it.
   "visitor-menu": { path: "plugins/visitor-menu.js", editOnly: true, draft: true },
   // An editor textarea outside the saved records, bound to one record's text
   // element. Edit mode only: the page that asks for it is the page whose owner
