@@ -315,7 +315,7 @@ Plugins add editing, sync, and UI features to `clay.js`. Most are off by default
 | `sync` | off | yes | live sync, `clay.conflicts`, `clay.morph`, presence and the editing marker |
 | `live` | off | yes | `clay.live(name)`: a `clay="live"` JSON tag as a live object |
 | `sortable` | off | no | the `sortable` attribute, `window.Sortable`, `clay:sorted` |
-| `undo` | off | no | `clay.undo` (whole-page undo, takes Cmd+Z for the window) |
+| `undo` | off | no | `clay.undo` (whole-page undo over DOM mutations; leaves Cmd+Z to text fields) |
 | `indicator` | off | no | the save status chip, drawn by a module fetched at the first input or save state |
 | `upload` | off | no | `clay.upload` |
 | `quickcrop` | off | yes | `clay.quickcrop` |
@@ -326,6 +326,7 @@ Plugins add editing, sync, and UI features to `clay.js`. Most are off by default
 | `ai-edit` | off | no | select text, ask an agent to rewrite it; implies `wire` |
 | `demo` | off | yes | fakes saving into `localStorage` for public demos |
 | `visitor-drafts` | off | yes | `clay.visitorDrafts`; in draft mode, the draft store, download prompt and intro area; outside it, only the owner chip, fetched when the owner edits ([Free documents for visitors](https://clayjs.com/docs/guide/free-documents/)) |
+| `visitor-menu` | off | no (draft mode only) | `clay.menu` and `clay.variants` in draft mode: **Download a copy**, [DOM menu items](https://clayjs.com/docs/plugins/menu/#menu-items-from-the-page) and [looks](https://clayjs.com/docs/plugins/menu/#looks), with no owner or host actions ([The visitor menu](https://clayjs.com/docs/plugins/menu/#the-visitor-menu)) |
 | `derive` | on for any page with a `[sap]` root | yes | the sapjs core: records and paints, treated as derived ([sap.js: records, views and totals in markup](https://clayjs.com/docs/guide/components/#sap-js-records-views-and-totals-in-markup)) |
 | `page` | off | reader half only (`page-view`) | the page editor, `clay.page`; implies `live`, `sync` and `upload`, and drops `richclay` unless named |
 | `unsent` | off | no | `unsent="<name>"`: unsent text in chrome survives a redraw and a reload, `clay.unsent` |
@@ -337,15 +338,20 @@ Plugins add editing, sync, and UI features to `clay.js`. Most are off by default
 - Edit-only plugins do not load in a tab that booted in view, even when named. Their members are absent there. Test `clay.isEditMode` (or `clay.modeLifecycle.canWrite()` before a write), never `'save' in clay` or `clay.RichClay` alone, because a live exit leaves those members attached. On a `<html clay-mode-switch="live">` document, entering edit imports them while the tab still shows view, and they stay loaded after the exit ([Leaving edit](https://clayjs.com/docs/guide/edit-mode/#leaving-edit)).
 - `exclude` wins over implications. `exclude=wire` also drops `ai-edit`.
 - Load order is fixed regardless of how you list them.
-- Use `exclude=richclay` when the app has no rich text. `exclude=source` saves one request and about 48 KB, at the cost of saves reprinting the whole document instead of keeping hand formatting.
-- Nothing implies `undo`, on purpose: name it when the page should have whole-page undo. It leaves Cmd+Z to text fields ([undo: whole-page undo](https://clayjs.com/docs/guide/components/#undo-whole-page-undo)).
+- Use `exclude=richclay` when the document has no rich text. `exclude=source` saves one request and about 48 KB, at the cost of saves reprinting the whole document instead of keeping hand formatting.
+- Nothing implies `undo`, on purpose: name it only when the document has discrete DOM commands that should undo as whole-page steps. It leaves Cmd+Z to text fields ([undo: whole-page undo](https://clayjs.com/docs/guide/components/#undo-whole-page-undo)).
 - In view mode, `page` loads only its reader half and nothing it implies. A Document on `plugins=page` resolves to `page-view`, with no live data service, no generic `sync`, and no `upload`. Name `sync` as well (`plugins=page,sync`) when the reader should take its saved files from sync's lane instead of its own.
 - `derive` loads automatically when the page has a `[sap]` root at boot, and stays idle when full sapjs is on the page. `exclude=derive` opts out; `plugins=derive` loads it for a page that adds its `[sap]` root later.
 - `visitor-drafts` loads its draft store only in draft mode. A reader or an owner editing the original gets a small module that publishes an inert `clay.visitorDrafts` and, for the owner, the owner chip. On a page with no `visitor-drafts` slot, no `api` rules tag, or a rules tag this version cannot read (not `data-rules-version="1"`, or not JSON), it warns in the console and draws nothing. [Free documents for visitors](https://clayjs.com/docs/guide/free-documents/) covers the opt in.
+- `visitor-menu` loads only in draft mode (`draftOnly` and `editOnly`). A reader in view mode and an owner editing the original skip it and download zero bytes ([The visitor menu](https://clayjs.com/docs/plugins/menu/#the-visitor-menu)).
 
 Measure what each mode you ship downloads, and keep a byte budget and a test that fails when one grows: [Keep a byte budget per boot, and fail a test when it grows](https://clayjs.com/docs/practices/#keep-a-byte-budget-per-boot-and-fail-a-test-when-it-grows).
 
-**A good default:** `?plugins=sync,undo,indicator,menu&exclude=richclay`. It gives a page of plain text live sync, whole-page undo, a save status chip and an Edit switch. Then add by task: `sortable` for drag-to-reorder lists, and `upload` for images or attachments. For formatted text, drop `exclude=richclay` and use `editable`. A document opens in view even for its owner, which is why `menu` is in the default. Declare `<html opens-in="edit">` on a tool page that must edit as soon as it opens.
+**Defaults by document kind:**
+
+- **Owned document:** `?plugins=sync,indicator,menu&exclude=richclay`. It gives a plain-text document live sync, a save status chip, and an Edit switch (`source` is on by default in edit mode, and `derive` turns on when `[sap]` is present). A document opens in view even for its owner, which is why `menu` is in the default; declare `<html opens-in="edit">` on a tool document that must edit as soon as it opens.
+- **Free document:** `?plugins=visitor-drafts,visitor-menu,menu&exclude=richclay`. In draft mode, ClayJS drops `menu`, `sync`, `upload`, `people`, `source`, and the other host plugins while `visitor-drafts` and `visitor-menu` run; when the owner edits the original, `visitor-menu` is skipped and `menu` and `source` run; for a view-mode reader, neither menu renders.
+- **Add by task on either kind:** `sortable` for `[sortable]` lists, `upload` for attachments, `people` for collaborator names, `bind-text` for a bound `<textarea>`, `unsent` for `[unsent]` inputs, `indicator` when a free document has no `savestatus` UI of its own, `sync` when the owner of a free document co-edits across tabs, and `undo` only when the document runs discrete DOM commands (adding, removing, or moving records) that should undo as whole-page steps. Leave `undo` off when editing happens inside text inputs, textareas, or `contenteditable`, which already use the browser's native undo; otherwise `undo` also groups idle DOM mutations into page steps on Cmd+Z outside the field. For formatted rich text, drop `exclude=richclay` and use `editable`.
 
 ### 2.3 Satellites
 
@@ -2518,17 +2524,17 @@ The owner is a visitor here too. Signed in, they get the same private draft unle
 
 ### 12.2 The contract
 
-A page that wants draft mode needs all of this. The example in [A complete example](https://clayjs.com/docs/guide/free-documents/#a-complete-example) carries every item, and its test proves the round trip:
+A document that wants draft mode needs all of this. The example in [A complete example](https://clayjs.com/docs/guide/free-documents/#a-complete-example) carries the data contract, and its test proves the round trip:
 
 1. An `api` rules tag naming every saved field, with a `cms-template` seed row for every list the rules describe. Hide the seed in your own CSS (`[cms-template] { display: none !important }`), never with `hidden`, which the CMS reads as data ([cms: content-managed pages](https://clayjs.com/docs/guide/components/#cms-content-managed-pages)).
-2. `<html visitor-drafts="<site-stem>-v1" autosave>`. The value is the slot: letters, digits, dot, underscore and hyphen, up to 100 characters. It names this app's drafts. ClayJS keys each draft by the slot and the document's path, so two documents on one origin never share a visitor's draft, even with the same slot.
-3. `plugins=visitor-drafts` on the loader tag, plus whatever else the app needs.
+2. `<html visitor-drafts="<site-stem>-v1" autosave>`. The value is the slot: letters, digits, dot, underscore and hyphen, up to 100 characters. It names this document's drafts. ClayJS keys each draft by the slot and the document's path, so two documents on one origin never share a visitor's draft, even with the same slot.
+3. `plugins=visitor-drafts,visitor-menu` on the loader tag (plus `menu` when the owner also edits the hosted or local file, `exclude=richclay` when there is no rich text, and whatever else the document needs; see [The visitor menu](https://clayjs.com/docs/plugins/menu/#the-visitor-menu)).
 4. `persist` on every control the rules name. A typed value without `persist` is lost at save ([`persist`: form controls](https://clayjs.com/docs/guide/record/#persist-form-controls)), and in draft mode a save is the visitor's own copy.
 5. `data-id` on every record and `data-id=""` on every blueprint. New rows mint their own (`trigger-add` does it, [sap.js: records, views and totals in markup](https://clayjs.com/docs/guide/components/#sap-js-records-views-and-totals-in-markup)).
-6. `<meta name="application-name" content="...">`. The prompt, the intro and the download name the app from it, falling back to the title before the first `:` or `|`.
-7. A feedback link the visitor can use: a `mailto:` address in the page, not in the plugin.
-8. Optional: a `<template visitor-intro>` ([The download prompt and the intro area](https://clayjs.com/docs/guide/free-documents/#the-download-prompt-and-the-intro-area)). No template, no intro; the prompt still shows.
-9. A round trip test in your own repo: write a draft, load the page again with that storage, and check that the values and the computed counts come back.
+6. `<meta name="application-name" content="...">`. The prompt, the intro and the download name the document from it, falling back to the title before the first `:` or `|`.
+7. An appreciation or feedback link in the document, not in the plugin: a `mailto:` `<a clay-menu-item data-id="...">` element with its `cms-template` seed row in a hidden container outside `clay="freeze"`, covered by the `api` rules tag ([Menu items from the page](https://clayjs.com/docs/plugins/menu/#menu-items-from-the-page)).
+8. Optional: a `<template visitor-intro>` or `<template visitor-intro="manual">` ([The download prompt and the intro area](https://clayjs.com/docs/guide/free-documents/#the-download-prompt-and-the-intro-area)). No template, no intro; the prompt still shows.
+9. A round trip test in your own repo: write a draft, load the document again with that storage, and check that the values and the computed counts come back.
 
 Bump the slot (`-v2`) only when an old draft cannot fit the new rules. A draft that no longer fits is parked, not thrown away ([Restoring and redrawing](https://clayjs.com/docs/guide/free-documents/#restoring-and-redrawing)).
 
@@ -2556,10 +2562,11 @@ The rung is where a free document lives, so the details matter:
 
 `clay.isDraftMode` is true, and everything else follows from it:
 
-- **The plugins that talk to the host are dropped**, even when the page names them: `sync`, `live`, `page`, `upload`, `quickcrop`, `cms`, `people`, `menu`, `upgrade`, `wire`, `ai-edit`, `demo` and `source`. `clay.upload`, `clay.cms`, `clay.conflicts` and `clay.source` are absent, and code that guards them (`clay.upload?.(...)`) behaves as it does for a viewer. The `[refetch-on-save]` attribute is dropped too, since it would fetch its element from the host again after every save.
+- **The plugins that talk to the host are dropped**, even when the document names them: `sync`, `live`, `page`, `upload`, `quickcrop`, `cms`, `people`, `menu`, `upgrade`, `wire`, `ai-edit`, `demo` and `source`. `clay.upload`, `clay.cms`, `clay.conflicts` and `clay.source` are absent, and code that guards them (`clay.upload?.(...)`) behaves as it does for a viewer. The `[refetch-on-save]` attribute is dropped too, since it would fetch its element from the host again after every save.
+- **`menu` stays dropped for visitors, and `visitor-menu` runs instead.** `menu` carries the Edit switch, SEO settings, presence, look deletion (`keep()`), and `/_/meta` capability checks, all of which belong to the owner. When the loader tag names `visitor-menu`, draft mode loads `visitor-menu` in its place and mounts `clay.menu` with **Download a copy**, [DOM menu items](https://clayjs.com/docs/plugins/menu/#menu-items-from-the-page), and [looks](https://clayjs.com/docs/plugins/menu/#looks), with no owner code and no host requests ([The visitor menu](https://clayjs.com/docs/plugins/menu/#the-visitor-menu)).
 - **The save lane is the browser.** `clay.save()` and autosave both run, `savestatus` moves as usual, and the save answers `msgType: "success"` with `msg: "Saved in this browser"`. A storage failure answers the 507 path with `code: "draft-storage"` and fires `clay:drafts-store-failed`; the next good write clears it.
 - **No request reaches the host.** The download link goes to the host's download page, which holds the email sign-up. The prompt's own stylesheet is a Google Fonts link.
-- **`clay.readData()` and `clay.writeData()` refuse.** Both reject with `code: "DataUnavailableInDraft"`: the saved file belongs to the owner, and this visitor's work is in their browser, so there is nothing for them to read or write there. A page that calls them in draft mode gets that refusal instead of a request ([Import and export](https://clayjs.com/docs/guide/architecture/#import-and-export)).
+- **`clay.readData()` and `clay.writeData()` refuse.** Both reject with `code: "DataUnavailableInDraft"`: the saved file belongs to the owner, and this visitor's work is in their browser, so there is nothing for them to read or write there. A document that calls them in draft mode gets that refusal instead of a request ([Import and export](https://clayjs.com/docs/guide/architecture/#import-and-export)).
 - **`clay.visitorDrafts`** is the plugin's whole surface:
 
 | Member | What it is |
@@ -2569,12 +2576,13 @@ The rung is where a free document lives, so the details matter:
 | `key` | the `localStorage` key, `clay:visitor-drafts:<slot>@<path>`, where `<path>` is the document's path up to its `.html` or `.htmlclay` file (`/` for the root and for a host that serves one document at every path) |
 | `hasDraft()` | is there a stored draft for this slot |
 | `restored()` | `{ restored, hadDraft, parked }` for this load, or `null` when the plugin is not active |
-| `saveNow()` | write the page to the slot now; `true` when it landed, `false` when it did not |
+| `saveNow()` | write the document to the slot now; `true` when it landed, `false` when it did not |
 | `reset()` | delete this slot and reload the page; nothing outside draft mode |
 | `onRestore(fn)` | call `fn(detail)` at once when the restore already ran, otherwise on `clay:drafts-restored` |
 | `editOriginal()` | navigate to this page with `?editmode=true` |
 | `backToDraft()` | navigate back with `editmode` removed |
 | `downloadUrl()` | the download link the prompt is using, with `src` |
+| `download()` | flush the draft store and trigger the prompt's download |
 | `source` | the `?src=` this slot remembers, or `null` ([The download prompt and the intro area](https://clayjs.com/docs/guide/free-documents/#the-download-prompt-and-the-intro-area)) |
 
 - **Three events** on `document`: `clay:drafts-restored` with `{ restored, hadDraft, parked }`, `clay:drafts-saved` with `{ data }`, and `clay:drafts-store-failed` with `{ error }`.
@@ -2599,13 +2607,16 @@ Both are runtime chrome: `clay="editor-ui"` and `sap-ignore`, built by the plugi
 
 Both remember themselves per slot and path in `localStorage["clay:visitor-drafts:<slot>@<path>:ui"]`, as `{ "v": 1, "prompt": { "shown": ..., "dismissed": ..., "uses": ..., "downloaded": ... }, "intro": { "done": null | "closed" | "scrolled" }, "src": ... }`. Clearing that key shows the intro and the prompt again.
 
-**The intro** is authored per app as a `<template visitor-intro>`. The template holds the author's whole strip: its markup and any `<style>` it needs. The plugin clones it into a section at the very top of the page body, before the app's own content, and adds a quiet close (`x`) in the corner. The intro leaves for good when the visitor closes it or scrolls it past the top of the viewport; the ui memory records `"closed"` or `"scrolled"` as the reason.
+**The intro** is authored per document as `<template visitor-intro>` (the default) or `<template visitor-intro="manual">`. The template holds the author's whole strip: its markup and any `<style>` it needs. The plugin clones it into `<section class="clay-intro">` at the very top of `document.body`, before the document's own content.
 
-A `<script type="module">` inside the template runs when the intro mounts. Animate it with `clay.assets.load('uimotion')`, never an engine copied into the file, so a visitor the intro skips loads no motion code.
+- **Default (`<template visitor-intro>`):** adds a quiet `x` button (`Hide this introduction`) in the corner and dismisses for good when the visitor clicks `x` or scrolls the strip past the top of the viewport. UI memory records `"closed"` or `"scrolled"`, and no menu item is added.
+- **Manual (`<template visitor-intro="manual">`):** adds a **Hide intro** button in the corner instead of `x`, and never collapses or dismisses on scroll. Clicking **Hide intro** (or `[visitor-intro-dismiss]`) records `"closed"` in UI memory, removes the section, focuses the document, and adds **Show intro** (`id: "clay.intro"`) to `clay.menu` (waiting for `clay:menu-ready` when the menu mounts later, and also adding **Show intro** on loads where the intro starts hidden because a draft already exists or `done` is `"closed"`). Choosing **Show intro** clears `intro.done`, prepends the same `<section>` back onto `document.body` without re-cloning the template, removes **Show intro** from the menu, and scrolls to the top.
+
+A `<script type="module">` inside the template runs when the intro first mounts. Animate it with `clay.assets.load('uimotion')`, never an engine copied into the file, so a visitor the intro skips loads no motion code.
 
 ```html
-<template visitor-intro>
-  <p>One paragraph on what the app does and who it is for.</p>
+<template visitor-intro="manual">
+  <p>One paragraph on what the document does and who it is for.</p>
 </template>
 ```
 
@@ -2615,11 +2626,11 @@ When there is a release video, add it as the first element of the template, and 
 <video src="/_/uploads/assets/kanban/release.mp4" poster="/_/uploads/assets/kanban/release-poster.jpg" controls playsinline preload="metadata"></video>
 ```
 
-An element inside the template with `[visitor-intro-start]` scrolls to the app, and one with `[visitor-intro-dismiss]` closes the intro the same way the `x` does. A deep link (a URL with a `#...`) skips the intro so a shared link opens where it points, a draft skips it too, and `?intro=1` forces it.
+An element inside the template with `[visitor-intro-start]` scrolls smoothly to the document below the intro, and one with `[visitor-intro-dismiss]` closes the intro the same way the corner button does. A deep link (a URL with a `#...`) skips the intro on load so a shared link opens where it points, an existing draft skips it too, and `?intro=1` forces it open.
 
-**The prompt** needs nothing from the app but its name: a small tab at the bottom right ("This app is free to keep") that opens into a card holding the download link and "Don't show again", with a minimize button in its corner. The tab's X and the card's minimize button leave a small "Keep" button with the download icon that reopens the download card. That choice survives reload. It opens itself once after the visitor has touched three fields. "Don't show again" stops those reminders for that slot but keeps the icon, including for previously dismissed notices. A storage failure opens it in its error state, and the next good save clears it. In that error state the download link does not go to the host, whose download page would read the stored copy that just failed to be written: the plugin builds the file from the live page in the browser instead, named after the page file with `.htmlclay` at the end.
+**The prompt** needs nothing from the document but its name: a small tab at the bottom right ("This app is free to keep") that opens into a card holding the download link and "Don't show again", with a minimize button in its corner. The tab's X and the card's minimize button leave a small "Keep" button with the download icon that reopens the download card. That choice survives reload. It opens itself once after the visitor has touched three fields. "Don't show again" stops those reminders for that slot but keeps the icon, including for previously dismissed notices. A storage failure opens it in its error state, and the next good save clears it. In that error state the download link does not go to the host, whose download page would read the stored copy that just failed to be written: the plugin builds the file from the live page in the browser instead, named after the page file with `.htmlclay` at the end.
 
-**The download link** is `/_/download<path>?as=htmlclay`, with the page's path (`/_/download?as=htmlclay` for `/`) and `&src=<src>` when this slot has one. `clay.visitorDrafts.downloadUrl()` returns it. **`?src=` is first touch**: the first valid value the page sees for this slot is kept and rides into the download link and every signup. Valid values match `/^[a-z0-9][a-z0-9-]{0,39}$/`.
+**The download link** is `/_/download<path>?as=htmlclay`, with the document's path (`/_/download?as=htmlclay` for `/`) and `&src=<src>` when this slot has one. `clay.visitorDrafts.downloadUrl()` returns it. **`?src=` is first touch**: the first valid value the page sees for this slot is kept and rides into the download link and every signup. Valid values match `/^[a-z0-9][a-z0-9-]{0,39}$/`.
 
 **The owner chip** shows only to the signed in owner, at the bottom left: it says whether this load is their private draft ("Edit the original") or the original ("Back to my draft") and switches with `clay.visitorDrafts.editOriginal()` and `backToDraft()`.
 
@@ -2739,7 +2750,7 @@ The `:legacy` marker is what stops a reset from coming back: once ClayJS has cop
 
 1. Loads with `clay.js` as a classic script at the end of `<body>`, every tag on the same version prefix.
 2. `<html autosave>` unless it is a deliberate manual-save writer.
-3. `sync` is in the plugin list, and `exclude=richclay` if there is no rich text.
+3. On an owned collaborative document, `sync` is in `plugins=`; on a [free document](https://clayjs.com/docs/guide/free-documents/), `visitor-drafts,visitor-menu,menu` is in `plugins=`. Add `exclude=richclay` if there is no rich text, and add task plugins (`sortable`, `upload`, `undo`, `indicator`) only when the document uses them.
 4. The owner has a way into edit: the `menu` plugin, or a control of your own that calls `clay.setMode()` and carries `clay-mode-toggle`. Without either, ClayJS shows a one-time note pointing to Cmd+Shift+E (Ctrl+Shift+E elsewhere).
 5. The fallback rule `html:not([editmode="true"]) [show-when\:editmode="true"] { display: none }` is in the stylesheet, and every edit-only control has `show-when:editmode="true"`.
 6. Records are authored in the saved form (`inert-contenteditable`, `disabled`, `readonly`); templates in the active form.
@@ -2748,9 +2759,9 @@ The `:legacy` marker is what stops a reset from coming back: once ClayJS has cop
 9. All chrome is cloned from a `<template>` into `clay="editor-ui"` after `clay.ready`; nothing in the file is chrome.
 10. Tab-local state is in the hash, `clay.storage.local` or `clay.storage.session`, or memory, painted through a runtime style; opening, filtering and searching leave `clay.hasUnsavedChanges()` false.
 11. Derived values are sapjs paints, in `editor-ui`, or `no-dirty` when the file must show them; every hand-written derived write is guarded, and no script copies a record into a second attribute.
-12. Commands are wrapped in `clay.undo.commit`; derived views are drawn in `clay.effect`, with no effect warnings in the console.
+12. When `undo` is loaded, commands are wrapped in `clay.undo?.commit(label, fn)` (falling back to `fn()` when `undo` is absent); derived views are drawn in `clay.effect`, with no effect warnings in the console.
 13. Views whose record a peer deleted are closed, in the effect or a `clay:sync-applied` handler.
-14. The app script starts with `clay.start`; all listeners are delegated.
+14. The document script starts with `clay.start`; all listeners are delegated.
 15. Nothing writes the record at boot.
 16. Edit-only calls are guarded for view mode, and edit actions check `clay.isEditMode`.
 17. `clay.confirm` calls have a rejection handler.
@@ -2759,7 +2770,7 @@ The `:legacy` marker is what stops a reset from coming back: once ClayJS has cop
 20. Images use `clay.upload`, embedding only on `unsupported`.
 21. The file opens in view mode with JavaScript disabled and shows correct content and no edit controls.
 22. With sap: `Sap.status().ok`, the live root matches the file after load (no computed value rewritten), no `[sap-error]`, rows with your own ids.
-23. A tool page whose script opens an editor at load (a journal, a notes pad) declares `<html opens-in="edit">`. Without it the page opens in view, accepts typing and saves none of it.
+23. A tool document whose script opens an editor at load (a journal, a notes pad) declares `<html opens-in="edit">`. Without it the page opens in view, accepts typing and saves none of it.
 
 ### 13.2 Testing a document that changes modes
 
