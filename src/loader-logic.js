@@ -82,7 +82,9 @@ export const PLUGIN_PATHS = {
   // owner editing the original, gets the owner module: the chip when it applies and
   // the inert `clay.visitorDrafts`, without the drafts UI's 24 KB.
   "visitor-drafts": { path: "plugins/visitor-drafts.js", ownerPath: "plugins/visitor-drafts-owner.js", editOnly: false, default: false },
-  "visitor-menu": { path: "plugins/visitor-menu.js", editOnly: true, draftOnly: true },
+  // `draft: true` loads it only in a visitor's draft. The key is short on purpose: every
+  // reader downloads this file, and the reader's 46,080-byte ceiling counts it.
+  "visitor-menu": { path: "plugins/visitor-menu.js", editOnly: true, draft: true },
   // An editor textarea outside the saved records, bound to one record's text
   // element. Edit mode only: the page that asks for it is the page whose owner
   // writes in it.
@@ -279,7 +281,7 @@ export function resolveModules(params, isEditMode, { isDraftMode = false, hasSap
   for (const name of PLUGIN_ORDER) {
     if (!enabled.has(name)) continue;
     const spec = PLUGIN_PATHS[name];
-    if ((spec.editOnly && !isEditMode) || (spec.draftOnly && !isDraftMode)) continue;
+    if ((spec.editOnly && !isEditMode) || (spec.draft && !isDraftMode)) continue;
     (LATE.has(name) ? late : plugins).push(spec.ownerPath && !isDraftMode ? spec.ownerPath : spec.path);
   }
   return { core, plugins, late };
