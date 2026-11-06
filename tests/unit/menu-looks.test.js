@@ -217,7 +217,7 @@ test("clay.variants.list() carries the label for a visitor", async () => {
   ]);
 });
 
-test("an owner's choose writes html[look] and flips media, and Keep takes the attribute off", async () => {
+test("an owner's choose writes html[look] and flips media, and Keep leaves the kept name in html[look] for an upgrade", async () => {
   await boot({ edit: true, body: PLAIN });
 
   expect(window.clay.variants.choose("B").ok).toBe(true);
@@ -233,9 +233,13 @@ test("an owner's choose writes html[look] and flips media, and Keep takes the at
   await expect(kept).resolves.toEqual({ ok: true });
   await flush();
 
-  expect(look()).toBe(null);
+  expect(look()).toBe("B");
   expect(looks()).toEqual([]);
   expect([...document.querySelectorAll("head style")].map((style) => style.textContent)).toContain("body { --look: B; }");
+
+  document.dispatchEvent(new CustomEvent("clay:sync-applied"));
+  await flush();
+  expect(look()).toBe("B");
 });
 
 test("an owner's choose, undo and redo move html[look] with the blocks", async () => {

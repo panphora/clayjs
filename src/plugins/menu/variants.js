@@ -130,7 +130,9 @@ export function attachVariants({ root, capsule, addItem, removeItem, note, curre
   function keepNow(name) {
     pending = previewing = null;
     writeHead(KEEP_LABEL, () => {
-      recordLook(null);
+      // The kept block becomes an ordinary stylesheet, so `look` is what still names the
+      // theme: an upgrade brings the blocks back and paints this one from it.
+      recordLook(name);
       for (const style of looks()) {
         if (nameOf(style) === name) {
           style.removeAttribute("clay-variant");
@@ -298,7 +300,7 @@ export function attachVariants({ root, capsule, addItem, removeItem, note, curre
   });
 
   const followRecord = () => {
-    if (document.documentElement.hasAttribute("look")) recordLook(names().length > 1 ? savedName() : null);
+    if (document.documentElement.hasAttribute("look") && names().length > 1) recordLook(savedName());
   };
 
   // A merge can rebuild a look block, which clears its CSSOM flag, or bring a peer's

@@ -143,6 +143,35 @@ test("a new value updates in place, keeps the live region and keeps focus", asyn
   expect(listOf().hidden).toBe(false);
 });
 
+test("after an update in place, an arrow runs the newest function", async () => {
+  await boot();
+  const first = addStepper("Ruled 1/3");
+  window.clay.menu.open();
+  const forward = stepsOf()[1];
+
+  const second = addStepper("Plain 2/3");
+  expect(stepsOf()[1]).toBe(forward);
+  click(forward);
+
+  expect(second.next).toHaveBeenCalledTimes(1);
+  expect(first.next).not.toHaveBeenCalled();
+});
+
+test("an update in place keeps the row's section through the next render", async () => {
+  await boot();
+  const add = (value) =>
+    window.clay.menu.addItem({ id: "doc.look", section: "start", stepper: { label: "Switch look", value, prev() {}, next() {} } });
+  window.clay.menu.addItem({ id: "doc.other", label: "Other" });
+  add("Ruled 1/3");
+  window.clay.menu.open();
+  add("Plain 2/3");
+  window.clay.menu.addItem({ id: "doc.later", label: "Later" });
+
+  const ids = Array.from(listOf().querySelectorAll("[data-menu-id]"), (el) => el.dataset.menuId);
+  expect(ids[0]).toBe("doc.look");
+  expect(valueOf().textContent).toBe("Plain 2/3");
+});
+
 test("ArrowDown and ArrowUp move through the two arrows as menu items", async () => {
   await boot();
   addStepper("Ruled 1/3");

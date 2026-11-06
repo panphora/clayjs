@@ -211,7 +211,7 @@ export function createShell({ capsuleStart = "", sections = [null] } = {}) {
   }
 
   function stepperRow(item) {
-    const { label, value, prev, next, prevLabel, nextLabel } = item.stepper;
+    const { label, value, prevLabel, nextLabel } = item.stepper;
     const row = document.createElement("div");
     row.className = "clay-menu-stepper";
     row.setAttribute("part", "stepper");
@@ -223,7 +223,7 @@ export function createShell({ capsuleStart = "", sections = [null] } = {}) {
     shown.className = "clay-menu-stepper-value";
     shown.setAttribute("aria-live", "polite");
     shown.textContent = value;
-    const step = (suffix, icon, name, run) => {
+    const step = (suffix, icon, name) => {
       const button = document.createElement("button");
       button.type = "button";
       button.setAttribute("role", "menuitem");
@@ -231,10 +231,10 @@ export function createShell({ capsuleStart = "", sections = [null] } = {}) {
       button.setAttribute("aria-label", name);
       button.dataset.menuId = `${item.id}.${suffix}`;
       button.innerHTML = icon;
-      button.addEventListener("click", () => run?.());
+      button.addEventListener("click", () => items.get(item.id)?.stepper?.[suffix]?.());
       return button;
     };
-    row.append(text, step("prev", ARROW_PREV, prevLabel, prev), shown, step("next", ARROW_NEXT, nextLabel, next));
+    row.append(text, step("prev", ARROW_PREV, prevLabel), shown, step("next", ARROW_NEXT, nextLabel));
     return row;
   }
 
@@ -290,6 +290,8 @@ export function createShell({ capsuleStart = "", sections = [null] } = {}) {
   function addItem({ id, label, run, badge, keys, disabled, text, pair, href, section, quiet, dismiss, toggle, checked, keepOpen, stepper } = {}) {
     if (!id) return null;
     const item = clean({ id, label, run, badge, keys, disabled, href, keepOpen });
+    if (section === "start" || section === "end") item.section = section;
+    if (quiet) item.quiet = true;
     if (stepper) {
       item.stepper = {
         label: String(stepper.label ?? ""),
@@ -300,7 +302,11 @@ export function createShell({ capsuleStart = "", sections = [null] } = {}) {
         nextLabel: String(stepper.nextLabel || "Next"),
       };
       const shown = [...list.querySelectorAll(".clay-menu-stepper")].find((row) => row.dataset.menuId === id)?.querySelector(".clay-menu-stepper-value");
-      if (items.get(id)?.stepper && shown) {
+      // Only the value changed: update it in place, so focus stays on the arrow. The
+      // buttons read their callbacks from the stored item when pressed.
+      const before = items.get(id);
+      const same = before?.stepper && ["label", "prevLabel", "nextLabel"].every((key) => before.stepper[key] === item.stepper[key]) && before.section === item.section && before.quiet === item.quiet;
+      if (same && shown) {
         items.set(id, item);
         shown.textContent = item.stepper.value;
         return id;
@@ -308,8 +314,6 @@ export function createShell({ capsuleStart = "", sections = [null] } = {}) {
     }
     if (text) item.text = true;
     if (Array.isArray(pair)) item.pair = pair.map(clean);
-    if (section === "start" || section === "end") item.section = section;
-    if (quiet) item.quiet = true;
     if (toggle) {
       item.toggle = true;
       item.checked = Boolean(checked);
