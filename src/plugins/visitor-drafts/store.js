@@ -451,6 +451,13 @@ export function createStore({ doc = document, storage = safeStorage(), now = () 
   function adoptExternal() {
     if (stopped) return false;
     const raw = getRaw();
+    // Another tab pressed Start over: this tab follows it, or its next save would
+    // write the discarded draft back.
+    if (raw == null && lastRaw != null && !changed()) {
+      stopped = true;
+      window.location.reload();
+      return true;
+    }
     if (raw == null || raw === lastRaw || changed()) return false;
     const record = parse(raw);
     const adopted = record && adopt(record.data);
