@@ -166,9 +166,6 @@ cascade layer beat a page's unlayered `!important` rules.
 - RichClay and Quickcrop also get Bevel's integration rules and their own chrome
   rules, re-emitted at `!important`. The CMS gets pins and the Bevel mono face only:
   its theme sits in cascade layers on purpose, so a page's utilities can restyle it.
-- The CMS's "Edit content" toggle also gets Bevel's button face, ink and hover through
-  HyperCMS's documented --hcms-toggle-bg and --hcms-toggle-color hooks, from the
-  hand-written src/ui/skins/cms-toggle.js.
 - Every selector in a source is listed in `scripts/skin-manifest.mjs` or the build
   fails, and edited prose is never in a skin.
 - `npm run build:skins` regenerates; `npm run check:skins` fails when a skin is stale

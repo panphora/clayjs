@@ -285,33 +285,6 @@ test("the panel and ring take the page's scheme when the panel opens", () => {
   expect(root("panel").style.getPropertyValue("color-scheme")).toBe("light");
 });
 
-test("the bubble sits just left of the CMS toggle", async () => {
-  const toggle = document.createElement("hypercms-toggle");
-  toggle.setAttribute("data-hcms-toggle-host", "");
-  toggle.getBoundingClientRect = () => ({ left: 800, right: 960, top: 744, bottom: 784, width: 160, height: 40 });
-  const innerWidth = Object.getOwnPropertyDescriptor(window, "innerWidth");
-  const innerHeight = Object.getOwnPropertyDescriptor(window, "innerHeight");
-  Object.defineProperty(window, "innerWidth", { configurable: true, writable: true, value: 1000 });
-  Object.defineProperty(window, "innerHeight", { configurable: true, writable: true, value: 800 });
-  document.body.append(toggle);
-  try {
-    await Promise.resolve();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    const bubble = root("bubble");
-    expect(bubble.style.getPropertyValue("right")).toBe("208px");
-    expect(bubble.style.getPropertyValue("bottom")).toBe("16px");
-    expect(bubble.style.getPropertyPriority("right")).toBe("important");
-    expect(bubble.style.getPropertyPriority("bottom")).toBe("important");
-  } finally {
-    toggle.remove();
-    Object.defineProperty(window, "innerWidth", innerWidth);
-    Object.defineProperty(window, "innerHeight", innerHeight);
-  }
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  expect(root("bubble").style.getPropertyValue("right")).toBe("16px");
-  expect(root("bubble").style.getPropertyValue("bottom")).toBe("16px");
-});
-
 test("a second click keeps a typed comment", () => {
   const bubble = root("bubble");
   bubble.click();

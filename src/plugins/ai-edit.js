@@ -670,17 +670,13 @@ function buildChrome() {
 
   window.addEventListener('scroll', () => { positionChrome(); hideChip(); }, { passive: true, signal });
   window.addEventListener('resize', () => { placeBubble(); if (panel && !panel.hidden) fitTextarea(); positionChrome(); }, { passive: true, signal });
-  // The CMS toggle can arrive after this chrome, and a docked sidebar slides it left.
+  // A docked CMS sidebar shifts the page under this chrome.
   const replace = () => { placeBubble(); positionChrome(); };
   document.addEventListener('hcms:open', () => { replace(); setTimeout(replace, 350); }, { signal });
   document.addEventListener('hcms:close', () => { replace(); setTimeout(replace, 350); }, { signal });
-  const cmsToggle = new MutationObserver((records) => {
-    syncBubble();
-    const touched = (nodes) => [...nodes].some((n) => n.nodeType === 1 && n.hasAttribute('data-hcms-toggle-host'));
-    if (records.some((r) => touched(r.addedNodes) || touched(r.removedNodes))) replace();
-  });
-  cmsToggle.observe(document.body, { childList: true });
-  observers.push(cmsToggle);
+  const bodyChildren = new MutationObserver(() => syncBubble());
+  bodyChildren.observe(document.body, { childList: true });
+  observers.push(bodyChildren);
 
   // A target removed from the page ends its edit, so the save hold and the paused
   // observers never outlive it. A running bar is no exception: it is torn down with
@@ -748,17 +744,10 @@ function refreshHelperState() {
   }).catch(() => {});
 }
 
-// The bubble sits in the bottom-right corner, or just left of the CMS's "Edit content"
-// toggle when the page has one, bottoms aligned, so the two never overlap.
+// The bubble sits in the bottom-right corner.
 function placeBubble() {
   if (!docBubble) return;
-  const host = document.querySelector('[data-hcms-toggle-host]');
-  const rect = host && host.getBoundingClientRect();
-  const beside = !!rect && rect.width > 0 && rect.height > 0;
-  docBubble.pin({
-    right: beside ? `${Math.round((document.documentElement.clientWidth || window.innerWidth) - rect.left + 8)}px` : '16px',
-    bottom: beside ? `${Math.round((document.documentElement.clientHeight || window.innerHeight) - rect.bottom)}px` : '16px',
-  });
+  docBubble.pin({ right: '16px', bottom: '16px' });
   paintLook(docBubble);
 }
 

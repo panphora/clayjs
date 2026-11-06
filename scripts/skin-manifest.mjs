@@ -238,8 +238,8 @@ export const SKINS = {
     // Descendant rules that re-declare a pinned token. A pin on every descendant would
     // flatten them, so each is re-emitted above the pins.
     local: ['.hcms-shell .mirk-chip__actions .mirk-chip__action--primary'],
-    // The CMS names its webfont on the shell alone (the toggle carries .hcms-shell
-    // too) and every descendant inherits it; the skin puts the Bevel system mono
+    // The CMS names its webfont on the shell alone and every descendant inherits it;
+    // the skin puts the Bevel system mono
     // stack there instead, which keeps the monospace metrics the CMS is laid out in.
     font: 'mono',
     inline: [],

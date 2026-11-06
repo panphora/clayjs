@@ -182,10 +182,9 @@ describe("what a skin leaves alone", () => {
     }
   });
 
-  test("the CMS names its webfont in its @font-face, on the shell and on the toggle, and nowhere else", () => {
+  test("the CMS names its webfont in its @font-face and on the shell, and nowhere else", () => {
     const named = [...vendorText("cms").matchAll(/font-family:\s*'Departure Mono'/g)];
-    expect(named).toHaveLength(3);
-    expect(vendorText("cms")).toMatch(/createElement\("hypercms-toggle"\);\w+\.className="hcms-shell /);
+    expect(named).toHaveLength(2);
   });
 
   // A plain inline style loses to a page's !important rule, and a skin declaring the

@@ -140,9 +140,3 @@ test("from view mode a reloading entry leaves its receipt instead of opening", a
   expect(open).not.toHaveBeenCalled();
   expect(window.clay.storage.session.get("menu-resume")).toBe("cms");
 });
-
-test("the floating toggle stays away while the menu owns the launcher", async () => {
-  await boot({ rules: true });
-
-  expect(document.querySelector("[data-hcms-toggle-host]")).toBeNull();
-});
