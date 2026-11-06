@@ -136,6 +136,112 @@
 
 ## [Unreleased]
 
+## [1.22.0] - 2026-11-06
+
+### Added
+- A page cover above the title, with upload, position, remove and undo. On a touch screen, hold for 250 ms to drag it.
+- A self-contained export: one standalone readable page with every resource inlined, downloaded only once all of them resolve.
+- Import Markdown from the slash menu. It previews the result and inserts it as one undo, and imported HTML blocks are cleaned and listed in the preview.
+- Export as Markdown from More, with the losses and extensions listed before the download. The file downloads as `text/markdown`.
+- Tables use native semantics with header ids and cell headers, plus a keyboard Table actions menu that resolves those ids when it runs.
+- Mention, date and emoji in the slash menu, and icon, cover and reading copy in More.
+- A page menu that docks in any corner, with a fixed item order: Undo, Redo, Ask AI, Open the CMS, Download a copy, Who's here, host links, a version line, hide until reload and a first-use notice.
+- `clay.editPlugins`, `hostActions()` and `checkUpdate()` for documents that wire the menu.
+- Host actions are a page to open (`{href}`) or something the host does when the page asks (`{post}`, same-origin), including Export as zip and Show in Finder or Explorer. A refused post says the host's reason.
+- A document can place the menu in its own slot with `clay-menu-slot` and style it with a `clay-menu-skin` stylesheet. Menu items can carry a dismiss control.
+- A look switcher in the menu for documents that ship style variants.
+- ClayJS UI takes the colour behind it: toasts, the save chip, the save-size, stale-host and conflict notices, presence, AI edit, Bevel dialogs, the menu dock, its recall note and the SEO sheet follow the page's own scheme rather than the reader's preference.
+- `clay.assets.load('uimotion')`, a motion engine that mounts, pauses off screen and respects reduced motion.
+- Checklist tags always show an icon, a word and an overdue state.
+- A checklist assignee popover: find or type a name, see the document's people with their item counts, and remove an assignee.
+- A checklist due date popover: today, tomorrow, next week, a month grid with keyboard moves, and clear date.
+- A per-document settings store that hides checklist assignees or due dates, kept in the file and shared with collaborators.
+- A Document settings gear with switches for checklist assignees and due dates, and a Document settings row in the phone's More menu.
+- Pie charts over the first value column.
+- A chart block header with the title, the source table and Edit chart, and one inspector panel in place of the cascading settings menu.
+- A new chart opens its inspector, and tables are named by their heading. A chart whose table was deleted can be pointed at another table or deleted.
+- A `like` attribute turns any element into a like button counted by the host. A host that answers 404 or 405 has no likes, so clicks pass through.
+- `clay:presence-ready` fires on the document when `clay.presence` attaches, so a template can wire presence without polling.
+- `clay.plugins` names the edit plugins a live entry attaches.
+- `createRooms({ compaction })` lets a page room compact its history: whole client updates only, one fenced compaction job at a time, and a proven checkpoint swapped in. Off by default.
+
+### Changed
+- The save chip says "Saving…" until your typing is saved, instead of "Shared, not yet saved".
+- Editor UI, including the menu, notes, uploads, visitor drafts, page editor panels and toasts, mounts in shadow roots, so page CSS can no longer restyle it.
+- In view mode the menu asks the host whether this person may save, and stays hidden when the answer is no.
+- The More control shows on desktop too, holding text colour, highlight, icon, cover and the two exports.
+- On a page that does not autosave its markup, Apply in the SEO sheet saves at once and keeps you in edit. Without the undo plugin it shows an Undo action that puts the head back and saves.
+- Visitor drafts are keyed by the document's path. An old slot draft is copied once, and a visitor who only dismissed the intro keeps that memory.
+- Two tabs of one visitor's draft merge their lists row by row, so each tab's new entries and edits survive without a conflict copy.
+- Copying out writes real lists, a table with its header row, and Markdown-style plain text. A table copied between Documents pastes back as the same table.
+- Recovery keeps a writer lock per page, so a tab no longer offers another open tab's records.
+- Chrome on a Mac now gets Command shortcuts, and Undo and Redo are 44 px rows on a phone.
+- Checklist shortcuts open the Assignee and Due date popovers, and Escape from a keyboard-opened popover returns to the text.
+- A table with no number column is not offered as a chart source and says why, and a one-column table is not offered at all.
+- A refused Cmd+Shift+E says why, through the menu's note when the page has no toast.
+- Format refusals on underline, colours, highlight, Turn into Quote and the typed quote are shown as well as announced.
+- Typing at 2,000 blocks takes a median of 14 ms instead of 27 ms.
+- Collapse decorations after heavy deleting take 16.0 ms instead of 21.6 ms.
+- The proof that follows an accepted save at 2,000 blocks drops from about 2 s to 28 ms.
+- Documents over 300 KB prepare their save cooperatively, so typing stays responsive, and a save body over 1 MB goes out as a Blob of the same bytes.
+- A large document's first save no longer freezes typing for the install's pairing pass.
+- The save chip draws with Bevel only at the first input or save state, so a Document that loads the indicator pays nothing for it at edit ready.
+- A resize on a full-width table keeps the other columns at their drawn widths, and double-clicking a column handle resets the table to the page width.
+- The page full notice keeps only Download, and says to reload once content is deleted.
+- A page whose compaction failed keeps taking edits up to its byte limit and refuses past it as full, instead of blocking every editor.
+- A full compacting room checkpoints what it admitted and shows a blocked notice, with every typed character kept, and a save or leave is not reported done while unsent edits remain.
+- A page on a host without live-data saves and reopens whole through the local lane in host mode.
+- The upgrade run downloads the stored file and upgrades those bytes rather than the live page, and a used form keeps its values.
+- A document that declares no data is refused on upgrade instead of being emptied.
+- A visitor draft's download prompt asks Google for no fonts, so a visitor's browser makes no third-party request.
+- `route.set` applies a new hash at once.
+
+### Fixed
+- Leaving edit saves this tab's own page input with one conditional checkpoint, so the text typed in this tab lands.
+- A save the person asked for that a merge cancels mid preparation is captured again once the merge goes quiet, instead of being dropped.
+- Leaving edit works on a page whose title has an icon or a cover.
+- A bare underline read back from the document is an underline, so Mod-u shows and removes it.
+- Tab leaves the table's add row and add column buttons, and an anchored menu with no room below opens above its anchor.
+- A pasted document with a table among other blocks keeps its blocks instead of becoming one table.
+- On a phone, a tap on the grip opens its menu instead of the trailing click closing it, and the caret stays clear of the bottom bar while typing.
+- After each accepted save the journal moves its capsule onto the saved state, so typing after any number of saves is recovered after a crash or an offline close.
+- A click anywhere in a table cell puts the caret in its text, so typing there reaches the model and the file.
+- Editors of one Document share its stored merge state, so overlapping first edits and a reader switching to edit converge instead of leaving an editor read-only with its typing dropped.
+- A journal from before a save that already holds all its work asks for nothing, so a close whose save landed unread no longer offers Recover work.
+- A saved-lane stream that cannot open settles the reader's acquisition, so Edit on a host without one reloads at once instead of refusing after 15 s.
+- Pages over about 3.4 million characters load instead of being refused as invalid.
+- A merge that leaves the page different from what was saved marks a clean page dirty, so the convergence save runs instead of being skipped.
+- Two-tab undo of a move no longer leaves a merged block or a lost tail.
+- A reader projection keeps a table's visible header row when its cells are empty.
+- A host that serves no document ETag no longer has every save refused, and a refused first write retries against the stored page's own tag rather than a weak HTTP one.
+- A large page's prepared save is no longer cancelled by a source-map refresh queued before it began.
+- The slash Quote, a refused formatted paste and the quote shortcut write nothing at a position a peer edit moved while the format gate waited.
+- A plugin reconfigure keeps the features' view hooks; only an editor that goes away tears them down.
+- A save attempt refused, or a prepared save cancelled, while an exit holds admission is replayed when the session resumes.
+- A relay parses only a page with an article, Download and copy captures leave the save's relay alone, and no editing sender speaks during the exit barrier.
+- Markdown import keeps loose lists' marks, export keeps emphasis off whitespace, one block opens a closed toggle, and a table's header line becomes its column names only.
+- A long HTML Clay Document no longer refuses typing after heavy deleting.
+- Presence stops publishing while you leave edit, and republishes your focused target if the exit is refused. A stopped reader's late presence import attaches nothing.
+- Cmd+Z on a checkbox reaches the page's undo stack.
+- A Bevel button keeps its detected scheme through hover, and the menu keeps its look while hidden and reads the page colour again when shown.
+- A page the colour detector cannot read is treated as unknown, not as an error in the UI over it.
+- A multiline preview description survives Done, the SEO panel sits above the dock and scrolls when tall, and Undo reads history made before the menu loaded.
+- Hiding or dragging the menu closes Who's here, and presence frames no longer rebuild the open menu.
+- A rename refusal shows above the panel, and Download names upload paths in full.
+- The menu button ignores a page's button min-height and radius, and the list widens to fit longer Ctrl shortcuts.
+- Typing in a new checklist item stays in it, tags redraw when the day turns, and a tab follows the first settings a peer writes.
+- A chart title saves on Done and on a click outside, and an open inspector keeps a half-typed title and its focus through other edits.
+- A pie folds rows past six into Other and grows to fit its legend, and an all-zero pie stays a pie.
+- A slash dismissed with Escape stays text, and another person's edit no longer reopens it.
+- A desktop mouse drag of a block is recorded for undo, and Chrome's pointercancel at the start of a native drag no longer ends the press.
+- The menu's Edit switch keeps focus through a live switch, the SEO sheet offers Upload image once edit goes live, and kept undo copies are offered after a reload once the undo plugin is attached.
+- Insert from the selection bar opens beside it, and phone popover search and month buttons are 44 px.
+- A refused command says so, an edited slash word reopens the menu, and no "Stored on this device" chip shows while typing.
+- A refused cover move never announces success.
+
+### Removed
+- The floating CMS toggle is gone, and the menu plugin loads whenever the CMS is enabled.
+
 ## [1.21.0] - 2026-11-05
 
 ### Added
