@@ -281,6 +281,11 @@ async function applyUnderSlot(update, { doc, loc, fetchFn, clay, reload, replace
     }
   }
 
+  // The stamp is read before the capture, so it can only be older than the bytes the
+  // upgrade starts from: a save that lands while the capture runs or the release
+  // downloads makes the write below fail instead of being overwritten by it.
+  const stamp = etag !== undefined ? etag : lastSeenEtag();
+
   // An editing tab's live article holds the editor, not the page: the upgrade starts from
   // the document as a save writes it.
   let source = doc;
@@ -301,7 +306,7 @@ async function applyUnderSlot(update, { doc, loc, fetchFn, clay, reload, replace
       : replaceDocument;
   let result;
   try {
-    result = await save(prepared.html, { etag: etag !== undefined ? etag : lastSeenEtag() });
+    result = await save(prepared.html, { etag: stamp });
   } catch {
     return { ok: false, code: "failed", message: SAVE_FAILED };
   }

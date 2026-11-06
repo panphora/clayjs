@@ -19,6 +19,7 @@ await jest.unstable_mockModule("../../src/plugins/upgrade-run.js", () => {
 await import("../../src/plugins/upgrade.js");
 const { start: startUpgrade, apply, prepare, lostValues, downloadCopy } = await import("../../src/core/upgrade-run.js");
 const { upgrade } = await import("../../src/vendor/hyper-html-api-upgrade.vendor.js");
+const { recordEtag } = await import("../../src/core/etag.js");
 
 const KANBAN = readFileSync(new URL("../fixtures/load/kanban-hyperclay.html", import.meta.url), "utf8");
 const HTML_URL = "https://hyperclay.com/templates/kanban/owned/1.1.0.html";
@@ -469,4 +470,22 @@ test("conservation counts repeated values: dropping one of two cards with the sa
   const after = { cards: [{ title: "Call Sam" }] };
   expect(lostValues(before, after)).toEqual([{ path: "cards[].title", value: "Call Sam" }]);
   expect(lostValues(before, before)).toEqual([]);
+});
+
+test("a save that lands while the release downloads makes the upgrade's write fail, not be overwritten", async () => {
+  loadKanban();
+  const html = newerKanban();
+  const clay = setupClay();
+  recordEtag("etag-captured");
+  const fetches = sourceFetcher(html);
+  const fetchFn = jest.fn(async (url) => {
+    if (url === HTML_URL) recordEtag("etag-peer-save");
+    return fetches(url);
+  });
+
+  await apply(updateFor(html), { clay, fetchFn, reload: jest.fn(), doc: document, loc: location });
+
+  expect(clay.save.replace).toHaveBeenCalledTimes(1);
+  expect(clay.save.replace.mock.calls[0][1]).toEqual({ etag: "etag-captured" });
+  recordEtag(null);
 });

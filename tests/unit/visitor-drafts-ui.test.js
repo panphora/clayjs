@@ -278,6 +278,25 @@ test("a failed browser write puts the prompt in its error card, and dismiss only
   expect(aside.getAttribute("data-hcp-reason")).toBe("use");
 });
 
+test("an error card minimized and reopened from its tab is still the error card, so Download builds the live page", async () => {
+  const { fetchMock } = await bootPage({ slot: "ui-error-reopen" });
+  const aside = prompt();
+  document.dispatchEvent(new CustomEvent("clay:drafts-store-failed", { detail: { error: new Error("full") } }));
+  aside.querySelector('[data-hcp="minimize"]').click();
+  expect(aside.getAttribute("data-hcp-state")).toBe("mini");
+  aside.querySelector('[data-hcp="open"]').click();
+  expect(aside.getAttribute("data-hcp-state")).toBe("card");
+  expect(aside.getAttribute("data-hcp-reason")).toBe("error");
+
+  const note = document.getElementById("note");
+  note.value = "typed after storage filled";
+  note.setAttribute("value", "typed after storage filled");
+  const { blobs } = await withDownloadStubs(() => { clickDownload(); });
+  expect(blobs).toHaveLength(1);
+  expect(await readBlob(blobs[0])).toContain("typed after storage filled");
+  expect(fetchMock).not.toHaveBeenCalled();
+});
+
 test("the error card's download carries the live page, not the stale stored draft", async () => {
   const { fetchMock } = await bootPage({ slot: "ui-error-download" });
   const aside = prompt();

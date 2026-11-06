@@ -119,7 +119,7 @@ export async function mountPrompt({ memory, appName, link }) {
     const t = e.target.closest("[data-hcp]");
     if (t) {
       const act = t.getAttribute("data-hcp");
-      if (act === "open") { set("card", "open"); linkEl.focus(); }
+      if (act === "open") { set("card", root.getAttribute("data-hcp-reason") === "error" ? undefined : "open"); linkEl.focus(); }
       else if (act === "minimize") { set("mini"); tab.focus(); }
       else if (act === "dismiss") {
         if (root.getAttribute("data-hcp-reason") === "error") { set("mini"); tab.focus(); }
