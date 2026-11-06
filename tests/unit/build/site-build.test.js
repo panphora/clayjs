@@ -3,6 +3,7 @@
  */
 import { afterAll, beforeAll, expect, test } from "@jest/globals";
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { chmod, cp, lstat, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -20,6 +21,11 @@ const PREVIOUS_ONLY = "clay-previous-AAAAAAA.js";
 
 const COPIED_FILES = ["build.js", "package.json", "packed-contract.json", "THIRD-PARTY-NOTICES.md"];
 const COPIED_DIRS = ["src", "entries", "scripts", "website", "docs", "fonts", "compat", "tests/fixtures/offline-runtime"];
+
+// A string that exists nowhere in the tree, so the only way it reaches public/ is if
+// the build served the seed tarball the tests handed it.
+const SEED_MARKER = "seeded-from-the-tested-tarball-b7e1";
+const PACK_ATTEMPTS = "pack-attempts.log";
 
 let site;
 
@@ -45,32 +51,38 @@ async function bootstrapFiles() {
   return files;
 }
 
-async function build() {
-  return run(process.execPath, ["build.js"], {
-    cwd: site,
-    env: { ...process.env, PATH: `${path.join(site, "bin")}:${process.env.PATH}` },
-  });
-}
+async function makeSite({ guardedPack = false } = {}) {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "clay-site-"));
+  for (const name of COPIED_FILES) await cp(path.join(ROOT, name), path.join(dir, name));
+  for (const name of COPIED_DIRS) await cp(path.join(ROOT, name), path.join(dir, name), { recursive: true });
+  await symlink(path.join(ROOT, "node_modules"), path.join(dir, "node_modules"), "dir");
 
-beforeAll(async () => {
-  site = await mkdtemp(path.join(os.tmpdir(), "clay-site-"));
-  for (const name of COPIED_FILES) await cp(path.join(ROOT, name), path.join(site, name));
-  for (const name of COPIED_DIRS) await cp(path.join(ROOT, name), path.join(site, name), { recursive: true });
-  await symlink(path.join(ROOT, "node_modules"), path.join(site, "node_modules"), "dir");
-
-  const pkg = JSON.parse(await readFile(path.join(site, "package.json"), "utf8"));
+  const pkg = JSON.parse(await readFile(path.join(dir, "package.json"), "utf8"));
   pkg.version = CURRENT;
-  await writeFile(path.join(site, "package.json"), `${JSON.stringify(pkg, null, 2)}\n`);
+  await writeFile(path.join(dir, "package.json"), `${JSON.stringify(pkg, null, 2)}\n`);
 
-  await mkdir(path.join(site, "bin"));
-  await writeFile(path.join(site, "bin", "npm"), `#!/bin/sh\necho '["${PREVIOUS}"]'\n`);
-  await chmod(path.join(site, "bin", "npm"), 0o755);
+  await mkdir(path.join(dir, "bin"));
+  // The guarded shim answers the registry lookup with the earlier release alone and
+  // makes `npm pack` fail loudly, the way npm behaves while a version is listed but
+  // its tarball is not served yet. It records any attempt, so a test can prove none
+  // happened.
+  const shim = guardedPack
+    ? `#!/bin/sh
+case "$1" in
+  view) echo '[${JSON.stringify(PREVIOUS)}]' ;;
+  pack) echo "npm pack must not run: the seed already carries this release" >&2
+    echo "$@" >> "${path.join(dir, PACK_ATTEMPTS)}"
+    exit 1 ;;
+  *) echo "unexpected npm command: $*" >&2
+    exit 1 ;;
+esac
+`
+    : `#!/bin/sh\necho '["${PREVIOUS}"]'\n`;
+  await writeFile(path.join(dir, "bin", "npm"), shim);
+  await chmod(path.join(dir, "bin", "npm"), 0o755);
 
-  // An earlier release that already ships chunks, tarball-shaped: entries/, dist/ with
-  // its bootstraps and dist/m/, and src/. One chunk name is its alone, the way a
-  // content-hashed name from a previous release is.
-  const release = path.join(site, ".version-cache", PREVIOUS);
-  for (const dir of ["entries", "src", "dist/m"]) await mkdir(path.join(release, dir), { recursive: true });
+  const release = path.join(dir, ".version-cache", PREVIOUS);
+  for (const name of ["entries", "src", "dist/m"]) await mkdir(path.join(release, name), { recursive: true });
   await writeFile(path.join(release, "entries/clay.js"), "var a = 1;\n");
   await writeFile(path.join(release, "src/loader.js"), "export {};\n");
   await writeFile(path.join(release, "dist/clay.js"), 'var b = 1; /* "dir":"m/" */\n');
@@ -79,6 +91,49 @@ beforeAll(async () => {
   await writeFile(path.join(release, "dist/m/manifest.json"), `{"version":"${PREVIOUS}"}\n`);
   await writeFile(path.join(release, "dist/m", PREVIOUS_ONLY), 'console.log("previous release chunk");\n');
 
+  return dir;
+}
+
+async function build(dir = site, env = {}) {
+  const base = { ...process.env };
+  delete base.CLAYJS_SEED_RELEASE;
+  delete base.CLAYJS_SEED_INTEGRITY;
+  return run(process.execPath, ["build.js"], {
+    cwd: dir,
+    env: { ...base, PATH: `${path.join(dir, "bin")}:${process.env.PATH}`, ...env },
+  });
+}
+
+// A tarball shaped like the release this tree is publishing: package/package.json
+// plus the files the site reads. Its dist/clay.js carries the marker, because dist/
+// is what a release serves as clay.js.
+async function seedTarball(dir, { name, version = CURRENT } = {}) {
+  const stage = await mkdtemp(path.join(os.tmpdir(), "clay-seed-"));
+  const pkgName = name ?? JSON.parse(await readFile(path.join(dir, "package.json"), "utf8")).name;
+  const p = path.join(stage, "package");
+  for (const d of ["entries", "src", "dist/m"]) await mkdir(path.join(p, d), { recursive: true });
+  await writeFile(path.join(p, "package.json"), `${JSON.stringify({ name: pkgName, version }, null, 2)}\n`);
+  await writeFile(path.join(p, "entries/clay.js"), `/* ${SEED_MARKER} */\nvar seeded = 1;\n`);
+  await writeFile(path.join(p, "src/loader.js"), "export {};\n");
+  await writeFile(path.join(p, "dist/clay.js"), `/* ${SEED_MARKER} */\nvar clay = 1; /* "dir":"m/" */\n`);
+  await writeFile(path.join(p, "dist/sap.js"), "/* sap */\n");
+  await writeFile(path.join(p, "dist/clay.standalone.js"), "/* standalone */\n");
+  await writeFile(path.join(p, "dist/m/manifest.json"), `{"version":"${version}"}\n`);
+  const tarball = path.join(stage, "clayjs-seed.tgz");
+  await run("tar", ["-czf", tarball, "-C", stage, "package"]);
+  const integrity = `sha512-${createHash("sha512").update(await readFile(tarball)).digest("base64")}`;
+  return { tarball, integrity, cleanup: () => rm(stage, { recursive: true, force: true }) };
+}
+
+async function expectNoSeededCache(dir) {
+  for (const name of [CURRENT, `${CURRENT}.partial`]) {
+    const present = Boolean(await lstat(path.join(dir, ".version-cache", name)).catch(() => null));
+    expect({ name, present }).toEqual({ name, present: false });
+  }
+}
+
+beforeAll(async () => {
+  site = await makeSite();
   await build();
 }, 300000);
 
@@ -146,3 +201,113 @@ test("a same-name different-bytes pair stops the build", async () => {
     await rm(collide, { force: true });
   }
 });
+
+test.each([
+  ["a matching integrity", true],
+  ["no integrity", false],
+])("a seed with %s builds every prefix from the tested tarball", async (_label, withIntegrity) => {
+  const dir = await makeSite({ guardedPack: true });
+  const seed = await seedTarball(dir);
+  try {
+    const env = { CLAYJS_SEED_RELEASE: seed.tarball };
+    if (withIntegrity) env.CLAYJS_SEED_INTEGRITY = seed.integrity;
+    await build(dir, env);
+
+    for (const prefix of [CURRENT, "v1"]) {
+      const clay = await readFile(path.join(dir, "public", prefix, "clay.js"), "utf8");
+      expect({ prefix, seeded: clay.includes(SEED_MARKER) }).toEqual({ prefix, seeded: true });
+    }
+    // The earlier release keeps the address it was published at.
+    expect(await lstat(path.join(dir, "public", PREVIOUS, "clay.js"))).toBeTruthy();
+    // Nothing asked npm for a tarball, and the caller's file is still there.
+    expect(await lstat(path.join(dir, PACK_ATTEMPTS)).catch(() => null)).toBeNull();
+    expect((await lstat(seed.tarball)).isFile()).toBe(true);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+    await seed.cleanup();
+  }
+}, 300000);
+
+test("a seed whose integrity does not match is refused, naming both values", async () => {
+  const dir = await makeSite({ guardedPack: true });
+  const seed = await seedTarball(dir);
+  try {
+    const wrong = `sha512-${createHash("sha512").update("not the seed").digest("base64")}`;
+    await expect(build(dir, { CLAYJS_SEED_RELEASE: seed.tarball, CLAYJS_SEED_INTEGRITY: wrong })).rejects.toMatchObject({
+      stderr: expect.stringContaining(`CLAYJS_SEED_INTEGRITY mismatch: expected ${wrong}, got ${seed.integrity}`),
+    });
+    await expectNoSeededCache(dir);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+    await seed.cleanup();
+  }
+}, 300000);
+
+test("a seed of a different version is refused", async () => {
+  const dir = await makeSite({ guardedPack: true });
+  const name = JSON.parse(await readFile(path.join(dir, "package.json"), "utf8")).name;
+  const seed = await seedTarball(dir, { version: "9.9.9" });
+  try {
+    await expect(build(dir, { CLAYJS_SEED_RELEASE: seed.tarball })).rejects.toMatchObject({
+      stderr: expect.stringContaining(`CLAYJS_SEED_RELEASE package mismatch: expected ${name}@${CURRENT}, got ${name}@9.9.9`),
+    });
+    await expectNoSeededCache(dir);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+    await seed.cleanup();
+  }
+}, 300000);
+
+test("a seed of a different package is refused", async () => {
+  const dir = await makeSite({ guardedPack: true });
+  const name = JSON.parse(await readFile(path.join(dir, "package.json"), "utf8")).name;
+  const seed = await seedTarball(dir, { name: "not-clayjs" });
+  try {
+    await expect(build(dir, { CLAYJS_SEED_RELEASE: seed.tarball })).rejects.toMatchObject({
+      stderr: expect.stringContaining(`CLAYJS_SEED_RELEASE package mismatch: expected ${name}@${CURRENT}, got not-clayjs@${CURRENT}`),
+    });
+    await expectNoSeededCache(dir);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+    await seed.cleanup();
+  }
+}, 300000);
+
+test("a relative seed path is refused", async () => {
+  const dir = await makeSite({ guardedPack: true });
+  try {
+    await expect(build(dir, { CLAYJS_SEED_RELEASE: "clayjs-seed.tgz" })).rejects.toMatchObject({
+      stderr: expect.stringContaining("CLAYJS_SEED_RELEASE must be an absolute path: clayjs-seed.tgz"),
+    });
+    await expectNoSeededCache(dir);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}, 300000);
+
+test("a missing seed path is refused", async () => {
+  const dir = await makeSite({ guardedPack: true });
+  const missing = path.join(dir, "no-such-seed.tgz");
+  try {
+    await expect(build(dir, { CLAYJS_SEED_RELEASE: missing })).rejects.toMatchObject({
+      stderr: expect.stringContaining(`CLAYJS_SEED_RELEASE must be a regular file: ${missing}`),
+    });
+    await expectNoSeededCache(dir);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}, 300000);
+
+test("a directory seed path is refused", async () => {
+  const dir = await makeSite({ guardedPack: true });
+  const seed = await seedTarball(dir);
+  try {
+    await expect(build(dir, { CLAYJS_SEED_RELEASE: path.dirname(seed.tarball) })).rejects.toMatchObject({
+      stderr: expect.stringContaining(`CLAYJS_SEED_RELEASE must be a regular file: ${path.dirname(seed.tarball)}`),
+    });
+    await expectNoSeededCache(dir);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+    await seed.cleanup();
+  }
+}, 300000);

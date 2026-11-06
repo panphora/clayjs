@@ -37,7 +37,7 @@
 // reach npm and miss the site. That exact miss is why this script exists.
 
 import { readdir, readFile, mkdir, copyFile, rm, rename, lstat, writeFile } from 'node:fs/promises';
-import { basename, dirname, extname, join, resolve, sep } from 'node:path';
+import { basename, dirname, extname, isAbsolute, join, resolve, sep } from 'node:path';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { execFile } from 'node:child_process';
@@ -400,6 +400,21 @@ async function publishedPins() {
   return [...new Set([...versions.filter(isRelease), ...(await cachedPins())])];
 }
 
+// Unpack into a staging directory and rename it into place. tar is not atomic, so
+// extracting straight into the final path means an interruption leaves a
+// half-unpacked directory that every later build accepts as a complete cached
+// release: the existence check passes, npm pack is skipped, and the missing
+// modules ship under a year-long immutable cache policy. rename is atomic, so the
+// directory either does not exist or is whole.
+async function unpackTarball(tarball, dir) {
+  const staging = `${dir}.partial`;
+  await rm(staging, { recursive: true, force: true });
+  await mkdir(staging, { recursive: true });
+  await run('tar', ['-xzf', tarball, '-C', staging, '--strip-components', '1']);
+  await rename(staging, dir);
+  return dir;
+}
+
 async function unpackRelease(version) {
   const dir = join(CACHE, version);
   if (await lstat(dir).catch(() => null)) return dir;
@@ -418,19 +433,30 @@ async function unpackRelease(version) {
   ], { timeout: 60000 });
   const tarball = join(CACHE, JSON.parse(stdout)[0].filename);
 
-  // Unpack into a staging directory and rename it into place. tar is not atomic, so
-  // extracting straight into the final path means an interruption leaves a
-  // half-unpacked directory that every later build accepts as a complete cached
-  // release: the existence check passes, npm pack is skipped, and the missing
-  // modules ship under a year-long immutable cache policy. rename is atomic, so the
-  // directory either does not exist or is whole.
-  const staging = `${dir}.partial`;
-  await rm(staging, { recursive: true, force: true });
-  await mkdir(staging, { recursive: true });
-  await run('tar', ['-xzf', tarball, '-C', staging, '--strip-components', '1']);
+  await unpackTarball(tarball, dir);
   await rm(tarball, { force: true });
-  await rename(staging, dir);
   return dir;
+}
+
+// The release this tree is about to publish, handed over by the tests that ran
+// against its tarball. Unpacking it into the cache before the registry is read makes
+// this version count as published, so its address is built from those exact bytes
+// even while npm still takes half an hour to list it.
+async function seedRelease() {
+  const tarball = process.env.CLAYJS_SEED_RELEASE;
+  if (!tarball) return;
+  if (!isAbsolute(tarball)) throw new Error(`CLAYJS_SEED_RELEASE must be an absolute path: ${tarball}`);
+  if (!(await lstat(tarball).catch(() => null))?.isFile()) throw new Error(`CLAYJS_SEED_RELEASE must be a regular file: ${tarball}`);
+  const expected = process.env.CLAYJS_SEED_INTEGRITY;
+  if (expected) {
+    const actual = `sha512-${createHash('sha512').update(await readFile(tarball)).digest('base64')}`;
+    if (actual !== expected) throw new Error(`CLAYJS_SEED_INTEGRITY mismatch: expected ${expected}, got ${actual}`);
+  }
+  const { stdout } = await run('tar', ['-xzOf', tarball, 'package/package.json']);
+  const seed = JSON.parse(stdout);
+  if (seed.name !== pkg.name || seed.version !== pkg.version) throw new Error(`CLAYJS_SEED_RELEASE package mismatch: expected ${pkg.name}@${pkg.version}, got ${seed.name}@${seed.version}`);
+  const dir = join(CACHE, pkg.version);
+  if (!(await lstat(dir).catch(() => null))) await unpackTarball(tarball, dir);
 }
 
 // Where a version's bytes come from. Published means published: the tarball is what
@@ -492,6 +518,8 @@ if (process.argv.includes('--standalone')) {
   );
   process.exit(0);
 }
+
+await seedRelease();
 
 // Clean rebuild, so a file deleted from source disappears from the site instead of
 // lingering forever. Scoped to PUBLIC, which is computed from this file's own
