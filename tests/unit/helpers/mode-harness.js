@@ -211,13 +211,16 @@ export async function bootFixture(name, { mode = "edit", settle = 20, declare = 
     });
   }
 
-  // Mutation observers, observe minus disconnect.
+  // Mutation observers still connected: one per observer, however many targets it
+  // observes, since a single disconnect() stops all of them.
   const observe = MutationObserver.prototype.observe;
   const disconnect = MutationObserver.prototype.disconnect;
   const liveObservers = new Set();
   MutationObserver.prototype.observe = function (...args) {
-    counts.observers++;
-    liveObservers.add(this);
+    if (!liveObservers.has(this)) {
+      counts.observers++;
+      liveObservers.add(this);
+    }
     return observe.apply(this, args);
   };
   MutationObserver.prototype.disconnect = function () {

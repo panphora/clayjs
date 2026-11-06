@@ -8,7 +8,7 @@
         "document": 78,
         "Element": 36
       },
-      "observers": 5,
+      "observers": 3,
       "intervals": 0,
       "clayKeys": [
         "Mutation",
@@ -104,7 +104,7 @@
         "document": 28,
         "Element": 11
       },
-      "observers": 4,
+      "observers": 2,
       "intervals": 0,
       "clayKeys": [
         "Mutation",
@@ -165,7 +165,7 @@
         "document": 113,
         "Element": 51
       },
-      "observers": 9,
+      "observers": 5,
       "intervals": 0,
       "clayKeys": [
         "Mutation",
@@ -274,7 +274,7 @@
         "document": 40,
         "Element": 13
       },
-      "observers": 5,
+      "observers": 3,
       "intervals": 0,
       "clayKeys": [
         "Mutation",
@@ -347,10 +347,10 @@
       "eventSources": 1,
       "listeners": {
         "window": 17,
-        "document": 80,
-        "Element": 14
+        "document": 79,
+        "Element": 12
       },
-      "observers": 7,
+      "observers": 1,
       "intervals": 0,
       "clayKeys": [
         "Mutation",
@@ -445,10 +445,10 @@
       "eventSources": 1,
       "listeners": {
         "window": 9,
-        "document": 40,
-        "Element": 11
+        "document": 39,
+        "Element": 7
       },
-      "observers": 4,
+      "observers": 0,
       "intervals": 0,
       "clayKeys": [
         "Mutation",
