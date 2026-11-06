@@ -1,5 +1,5 @@
 import { replace as replaceDocument } from "./save-replace.js";
-import { lastSeenEtag } from "./etag.js";
+import { lastSeenEtag, seedEtag } from "./etag.js";
 import { claimDocumentOperation, releaseDocumentOperation } from "./save-core.js";
 import { isNewerVersion } from "./version.js";
 import { upgrade, readMeta } from "../vendor/hyper-html-api-upgrade.vendor.js";
@@ -284,6 +284,11 @@ async function applyUnderSlot(update, { doc, loc, fetchFn, clay, reload, replace
   // The stamp is read before the capture, so it can only be older than the bytes the
   // upgrade starts from: a save that lands while the capture runs or the release
   // downloads makes the write below fail instead of being overwritten by it.
+  // A tab that has never saved learns its stamp from discovery here, before the capture,
+  // not inside the write after the download, when it would describe a later version.
+  if (etag === undefined && !lastSeenEtag()) {
+    try { await seedEtag(); } catch {}
+  }
   const stamp = etag !== undefined ? etag : lastSeenEtag();
 
   // An editing tab's live article holds the editor, not the page: the upgrade starts from

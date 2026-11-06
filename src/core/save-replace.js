@@ -24,12 +24,15 @@ function failed() {
  *
  * @param {string} html - the whole document, as it should be stored
  * @param {Object} [options]
- * @param {?string} [options.etag] - the stamp to replace, defaulting to this tab's
+ * @param {?string} [options.etag] - the stamp to replace. Left out, it is this tab's
+ *   stamp at the moment of writing; given, even as null, it is exactly that stamp, so a
+ *   caller that captured the document earlier never writes against a later version.
  * @returns {Promise<{ok: true, etag: ?string}|{ok: false, code: "conflict"|"forbidden"|"unsupported"|"failed"}>}
  */
 export async function replace(html, { etag } = {}) {
   if (typeof html !== "string" || html === "") return failed();
 
+  const pinned = etag !== undefined;
   const given = typeof etag === "string" && etag ? etag : null;
   // Discovery is what says whether the capability exists, and it is also where a
   // tab that has never saved learns the stamp it is about to replace.
@@ -38,7 +41,7 @@ export async function replace(html, { etag } = {}) {
 
   // With no stamp the write would be unconditional, which is exactly what this lane
   // promises never to send. A reload gives the tab the stamp it is missing.
-  const stamp = given || lastSeenEtag();
+  const stamp = pinned ? given : lastSeenEtag();
   if (!stamp) return { ok: false, code: "conflict" };
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);

@@ -20,6 +20,7 @@ await import("../../src/plugins/upgrade.js");
 const { start: startUpgrade, apply, prepare, lostValues, downloadCopy } = await import("../../src/core/upgrade-run.js");
 const { upgrade } = await import("../../src/vendor/hyper-html-api-upgrade.vendor.js");
 const { recordEtag } = await import("../../src/core/etag.js");
+const { resetHostMeta } = await import("../../src/core/host-meta.js");
 
 const KANBAN = readFileSync(new URL("../fixtures/load/kanban-hyperclay.html", import.meta.url), "utf8");
 const HTML_URL = "https://hyperclay.com/templates/kanban/owned/1.1.0.html";
@@ -488,4 +489,35 @@ test("a save that lands while the release downloads makes the upgrade's write fa
   expect(clay.save.replace).toHaveBeenCalledTimes(1);
   expect(clay.save.replace.mock.calls[0][1]).toEqual({ etag: "etag-captured" });
   recordEtag(null);
+});
+
+test("a tab with no stamp learns one before the capture, and a save during the download cannot lend it a later one", async () => {
+  loadKanban();
+  const html = newerKanban();
+  const clay = setupClay();
+  recordEtag(null);
+  resetHostMeta();
+  const realFetch = global.fetch;
+  global.fetch = jest.fn(async (url) => {
+    if (String(url).includes("/_/meta")) {
+      return { ok: true, status: 200, headers: { get: () => null }, text: async () => JSON.stringify({ spec: 1, extensions: ["conditional"], document: { etag: "etag-discovered" } }), json: async () => ({ spec: 1, extensions: ["conditional"], document: { etag: "etag-discovered" } }) };
+    }
+    throw new Error(`unexpected fetch: ${url}`);
+  });
+  const fetches = sourceFetcher(html);
+  const fetchFn = jest.fn(async (url) => {
+    if (url === HTML_URL) recordEtag("etag-peer-save");
+    return fetches(url);
+  });
+
+  try {
+    await apply(updateFor(html), { clay, fetchFn, reload: jest.fn(), doc: document, loc: location });
+  } finally {
+    global.fetch = realFetch;
+    recordEtag(null);
+    resetHostMeta();
+  }
+
+  expect(clay.save.replace).toHaveBeenCalledTimes(1);
+  expect(clay.save.replace.mock.calls[0][1]).toEqual({ etag: "etag-discovered" });
 });
