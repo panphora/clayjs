@@ -1454,8 +1454,6 @@ document.addEventListener("clay:sync-applied", (event) => {
 - Close or repoint any view whose record a peer deleted. The kanban closes the open card when its id is gone: `if (openId && !cardById(openId)) return writeHash({ card: "" }, { replace: true });`
 - Re-parse any JSON you parsed earlier.
 - Re-attach any per-element setup that a recreated element lost (the writer re-injects block gutters on every render).
-- Never call `location.reload()` on `clay:sync-applied`. Sync merges `peer` and `disk` frames in place with focus, caret, and typed values intact, while a reload discards them and can drop unsaved typing; draw script-built UI into a runtime-created `clay="editor-ui"` root (never authored in the file) and rebuild derived state, chrome, and live `.checked` or `.value` properties in `clay.effect` or `clay:sync-applied` (`htmlfile runtime` flags scripts that draw DOM without either).
-- Version replaced assets at the same URL with `?v=<mtime>`. Overwriting an image or asset file in place leaves the page bytes unchanged and serves the browser's cached copy until the URL changes.
 
 `detail` on `clay:sync-applied` carries `{ seq, source: "peer" | "disk", by, report, conflictIds, unresolved }`, plus `etag` and `html` for disk frames. `by` is `{ id, name }` on hyperclay.com peer frames and `null` elsewhere. `report.applied`, `report.conflicts`, and `report.localDiverged` describe the merge.
 
@@ -1719,7 +1717,6 @@ Traps:
 - **Many editors are expensive.** Each multi-line editor installs document-level listeners and its own Squire instance. Do not put `editable` on every cell of a grid; use `editmode:contenteditable`.
 - **Paste uses an allowlist.** Tables, `<hr>`, `<details>`, `<figure>`, iframes, and inline styles are reduced to text. A pasted remote image keeps its hotlinked `src`. A pasted `data:` image bloats every save.
 - **Cloning an active region** copies runtime attributes. Strip them with `clay.RichClay.stripElement(clone)` ([Element identity: `data-id` and `id`](https://clayjs.com/docs/guide/record/#element-identity-data-id-and-id)), or clone from a `<template>`.
-- **Binding at runtime stamps `data-richclay=""` permanently.** Calling `new clay.RichClay(el)` on an element without `[data-richclay]`, `[richclay]`, `[editable]`, or `[clay-editable]` writes `data-richclay=""` so the watcher can re-adopt it, and save never removes bare `data-richclay`, leaving the element editable on future loads. Code that binds richclay at runtime must strip `data-richclay` in its own save hook only for elements it bound, and cannot invent a `data-richclay-runtime-*` attribute expecting auto-cleanup because `removeRuntimeState` enumerates its nine attributes explicitly (and runs in save-only `addDocumentTransform`, after `onSnapshot` live-sync frames).
 - **`editable` is ignored in view mode.** Viewers get plain markup.
 
 #### 7.1.1 The page editor's Markdown shortcuts
