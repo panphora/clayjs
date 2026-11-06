@@ -5,6 +5,8 @@ import { beforeAll, afterAll, describe, expect, test } from "@jest/globals";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { brotliCompressSync, constants } from "node:zlib";
+import * as esbuild from "esbuild";
 import { parse } from "parse5";
 import { CORE_WAVES, PLUGIN_PATHS } from "../../../src/loader-logic.js";
 
@@ -51,7 +53,7 @@ const countOf = (html, tag, className) => {
 };
 
 for (const [fixture, modes] of Object.entries(budget)) {
-  if (fixture === "built") continue;
+  if (fixture === "built" || fixture === "visitorMenu") continue;
   for (const [mode, limits] of Object.entries(modes)) {
     test(`${fixture} ${mode}: within its load budget`, async () => {
       const measured = await measure({ html: htmlOf(fixture), mode });
@@ -125,6 +127,65 @@ for (const [fixture, modes] of Object.entries(budget.built)) {
     });
   }
 }
+
+// The visitor menu is a draft-only extra: it has to fit in small change, carry no owner
+// code, and cost a document that does not name it exactly nothing, in bytes and requests.
+// Chunk names are hashes, so the source modules are read from esbuild's own graph.
+test("the visitor menu pulls in no owner module", async () => {
+  const { metafile } = await esbuild.build({
+    entryPoints: ["src/plugins/visitor-menu.js"],
+    bundle: true,
+    splitting: true,
+    format: "esm",
+    outdir: join(tmpdir(), "visitor-menu-graph"),
+    external: ["https://*"],
+    write: false,
+    metafile: true,
+    logLevel: "silent",
+  });
+  const modules = Object.keys(metafile.inputs);
+  expect(modules).toContain("src/plugins/menu/visitor.js");
+  expect(modules).toContain("src/plugins/menu/shell.js");
+  expect(modules.filter((path) => /plugins\/menu\.js|menu\/(actions|people|seo|placement|variants)|host-permission|plugins\/upgrade/.test(path))).toEqual([]);
+});
+
+test("the visitor menu stays inside its budget and costs other documents nothing", async () => {
+  const limits = budget.visitorMenu;
+  const journal = htmlOf("journal.html").replace("visitor-menu,", "");
+  const on = journal.replace(/(clay\.js\?plugins=)/, "$1visitor-menu,");
+  expect(on).not.toBe(journal);
+
+  const off = await measureBuilt({ html: journal, mode: "draft", dir });
+  const drafted = await measureBuilt({ html: on, mode: "draft", dir });
+  expect(drafted.js.brotli - off.js.brotli).toBeLessThanOrEqual(limits.bootBrotli);
+
+  const manifest = JSON.parse(readFileSync(join(dir, "m/manifest.json"), "utf8"));
+  const entry = manifest.entries["plugins/visitor-menu.js"];
+  expect(entry).toBeTruthy();
+  const seen = new Set();
+  const stack = [entry, ...(manifest.files[entry].dynamicImports ?? [])];
+  while (stack.length) {
+    const file = stack.pop();
+    if (!file || seen.has(file)) continue;
+    seen.add(file);
+    stack.push(...(manifest.files[file]?.imports ?? []));
+  }
+  const had = new Set(off.js.files.map((f) => f.path));
+  const added = [...seen].filter((file) => !had.has(`m/${file}`));
+  expect(added.length).toBeGreaterThan(0);
+  expect(added.length).toBeLessThanOrEqual(limits.newRequests);
+  const bytes = added.reduce((sum, file) => sum + brotliCompressSync(readFileSync(join(dir, "m", file)), { params: { [constants.BROTLI_PARAM_QUALITY]: 4 } }).length, 0);
+  expect(bytes).toBeLessThanOrEqual(limits.totalBrotli);
+
+  for (const mode of ["view", "edit"]) {
+    const plain = await measureBuilt({ html: journal, mode, dir });
+    const named = await measureBuilt({ html: on, mode, dir });
+    expect(named.js.brotli).toBe(plain.js.brotli);
+    expect(named.js.requests).toBe(plain.js.requests);
+  }
+  const kanban = await measureBuilt({ html: htmlOf("kanban.html"), mode: "draft", dir });
+  expect(kanban.js.files.filter((f) => /visitor-menu/.test(f.path))).toEqual([]);
+}, 180000);
 
 // The Journal as it ships: its template and Hyperclay's copy, in every mode each file
 // allows. The walk has to be real for the absence below to mean anything, and OverType,

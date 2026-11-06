@@ -149,7 +149,7 @@ export async function mountPrompt({ memory, appName, link }) {
   function clearError() {
     if (root.getAttribute("data-hcp-reason") === "error") root.setAttribute("data-hcp-reason", "use");
   }
-  const api = { set, root, showError, clearError };
+  const api = { set, root, showError, clearError, download: () => linkEl.click() };
 
   document.addEventListener("input", onUse, true);
   document.addEventListener("change", onUse, true);

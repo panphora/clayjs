@@ -5,7 +5,7 @@
       "eventSources": 1,
       "listeners": {
         "window": 14,
-        "document": 75,
+        "document": 78,
         "Element": 36
       },
       "observers": 5,
@@ -101,7 +101,7 @@
       "eventSources": 1,
       "listeners": {
         "window": 9,
-        "document": 25,
+        "document": 28,
         "Element": 11
       },
       "observers": 4,
@@ -161,11 +161,11 @@
       "posts": 0,
       "eventSources": 1,
       "listeners": {
-        "window": 17,
-        "document": 109,
+        "window": 19,
+        "document": 113,
         "Element": 51
       },
-      "observers": 6,
+      "observers": 9,
       "intervals": 0,
       "clayKeys": [
         "Mutation",
@@ -271,7 +271,7 @@
       "eventSources": 1,
       "listeners": {
         "window": 9,
-        "document": 37,
+        "document": 40,
         "Element": 13
       },
       "observers": 5,
@@ -346,11 +346,11 @@
       "posts": 0,
       "eventSources": 1,
       "listeners": {
-        "window": 15,
-        "document": 76,
+        "window": 17,
+        "document": 80,
         "Element": 14
       },
-      "observers": 4,
+      "observers": 7,
       "intervals": 0,
       "clayKeys": [
         "Mutation",
@@ -445,7 +445,7 @@
       "eventSources": 1,
       "listeners": {
         "window": 9,
-        "document": 37,
+        "document": 40,
         "Element": 11
       },
       "observers": 4,

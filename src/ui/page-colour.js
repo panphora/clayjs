@@ -202,11 +202,11 @@ export const BEVEL_SURFACE = { light: [0xFF, 0xFC, 0xF6], dark: [0x11, 0x13, 0x1
 /**
  * The look for UI drawn over `rect`: { scheme, surface }. `scheme` is the detected
  * one, or pageScheme() when the colour is unknown. `surface` is Bevel's surface mixed
- * up to 35% toward a confidently detected colour, never so far that the muted ink
- * drops below 4.5:1, or null to keep Bevel's own fill. A page the detector cannot
+ * up to `lean` (35% by default) toward a confidently detected colour, never so far that
+ * the muted ink drops below 4.5:1, or null to keep Bevel's own fill. A page the detector cannot
  * read is unknown, never a reason for the UI drawing over it to fail.
  */
-export function uiLook(rect, base = BEVEL_SURFACE) {
+export function uiLook(rect, base = BEVEL_SURFACE, lean = 0.35) {
   let found = null;
   try {
     found = pageColour(rect);
@@ -215,7 +215,7 @@ export function uiLook(rect, base = BEVEL_SURFACE) {
   const { scheme } = found;
   const own = base[scheme], muted = (scheme === 'dark' ? base.mutedDark : base.mutedLight).map((v) => v / 255);
   let surface = null;
-  for (let w = 0.35; found.confidence >= 0.75 && !surface && w > 0.01; w -= 0.05) {
+  for (let w = lean; found.confidence >= 0.75 && !surface && w > 0.01; w -= 0.05) {
     const mix = own.map((v, k) => Math.round(v + (found.colour[k] - v) * w));
     if (contrast(mix.map((v) => v / 255), muted) >= 4.5) surface = `rgb(${mix.join(' ')})`;
   }
@@ -246,8 +246,8 @@ export function paintLook(el, { rect = el.getBoundingClientRect(), background = 
  * The same look for a surface styled by a stylesheet of Bevel variables (the page
  * menu): `color-scheme`, and `--bevel-surface` when tinted, set inline on `el`.
  */
-export function lookAt(el, rect, base) {
-  const look = uiLook(rect, base);
+export function lookAt(el, rect, base, lean) {
+  const look = uiLook(rect, base, lean);
   el.style.setProperty('color-scheme', look.scheme, 'important');
   if (look.surface) el.style.setProperty('--bevel-surface', look.surface, 'important');
   else el.style.removeProperty('--bevel-surface');
@@ -257,13 +257,13 @@ export function lookAt(el, rect, base) {
 // A fixed surface the page moves under: read again once scrolling or resizing settles,
 // when html or body change attributes (a theme toggle), when the reader's scheme
 // changes, when it moves to another corner and when it is shown again. While it has
-// no size (hidden) it keeps its last look.
-export function followLook(root, target, base) {
+// no size (hidden) it keeps its last look. Returns a function that stops following.
+export function followLook(root, target, base, lean) {
   let timer = 0;
   const refresh = () => {
     timer = 0;
     const rect = target.getBoundingClientRect();
-    if (!document.hidden && root.isConnected && rect.width && rect.height) lookAt(root, rect, base);
+    if (!document.hidden && root.isConnected && rect.width && rect.height) lookAt(root, rect, base, lean);
   };
   const soon = () => {
     clearTimeout(timer);
@@ -278,4 +278,12 @@ export function followLook(root, target, base) {
   watch.observe(document.body, { attributes: true });
   watch.observe(root, { attributes: true, attributeFilter: ['data-corner', 'hidden'] });
   refresh();
+  return () => {
+    clearTimeout(timer);
+    window.removeEventListener('scroll', soon, { capture: true });
+    window.removeEventListener('resize', soon);
+    document.removeEventListener('visibilitychange', soon);
+    window.matchMedia?.('(prefers-color-scheme: dark)').removeEventListener?.('change', soon);
+    watch.disconnect();
+  };
 }

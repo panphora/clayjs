@@ -1,6 +1,11 @@
 import { isDraftMode } from "../../core/is-edit-mode.js";
 import { BOTTOM_UI_CHANGED, announceBottomUi, bottomBarHeight, promptPanel } from "./bottom-ui.js";
 import { mountEditorUI } from "../../ui/editor-ui.js";
+import { followLook } from "../../ui/page-colour.js";
+
+// The notice sits on the page for as long as the owner edits, so it takes most of the
+// page's colour instead of Bevel's: a navy card on a brown page reads as a foreign object.
+const OWNER_LEAN = 0.8;
 
 export const COPY = {
   draft: "You're seeing a private draft, like a visitor.",
@@ -11,29 +16,17 @@ export const COPY = {
 };
 
 const CHIP_CSS = `.clay-owner {
-  --hcp-ground: #FDF8F0;
-  --hcp-surface: #FFFCF6;
-  --hcp-sunk: #F4ECDF;
-  --hcp-ink: #2B241B;
-  --hcp-ink-2: #4A4033;
-  --hcp-muted: #6B5942;
-  --hcp-line: #E8DCC6;
-  --hcp-line-2: #D8C8AF;
-  --hcp-brass: #8F6310;
-  --hcp-shadow: 0 1px 2px rgba(23, 28, 36, .06), 0 14px 34px -14px rgba(43, 36, 27, .32);
+  --hcp-surface: light-dark(#FFFCF6, #11131E);
+  --hcp-ground: var(--bevel-surface, var(--hcp-surface));
+  --hcp-ink: light-dark(#2B241B, #ECEAF2);
+  --hcp-ink-2: light-dark(#4A4033, #C9CDE0);
+  --hcp-muted: light-dark(#6B5942, #8A90AB);
+  --hcp-line-2: color-mix(in srgb, var(--hcp-ink) 22%, var(--hcp-ground));
+  --hcp-brass: light-dark(#8F6310, #D9A445);
+  --hcp-shadow: 0 1px 2px light-dark(rgba(23, 28, 36, .06), rgba(0, 0, 0, .4)), 0 14px 34px -14px light-dark(rgba(43, 36, 27, .32), rgba(0, 0, 0, .7));
   --hcp-sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
   --hcp-lift: 0px;
-  color-scheme: light;
-}
-@media (prefers-color-scheme: dark) {
-  .clay-owner {
-    --hcp-surface: #11131E; --hcp-sunk: #1A1D2C;
-    --hcp-ink: #ECEAF2; --hcp-ink-2: #C9CDE0; --hcp-muted: #8A90AB;
-    --hcp-line: #262B42; --hcp-line-2: #353B52;
-    --hcp-brass: #D9A445;
-    --hcp-shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 16px 38px -14px rgba(0, 0, 0, .7);
-    color-scheme: dark;
-  }
+  color-scheme: light dark;
 }
 .clay-owner, .clay-owner *, .clay-owner *::before, .clay-owner *::after {
   box-sizing: border-box; margin: 0; padding: 0; border: 0;
@@ -46,8 +39,8 @@ const CHIP_CSS = `.clay-owner {
   max-width: min(460px, calc(100vw - 24px));
   padding: 8px 8px 8px 12px;
   font-family: var(--hcp-sans); font-size: 13px; font-weight: 400; line-height: 1.45;
-  color: var(--hcp-ink-2); text-align: left; background: var(--hcp-surface);
-  border: 1px solid var(--hcp-line-2); border-left: 3px solid var(--hcp-brass);
+  color: var(--hcp-ink-2); text-align: left; background: var(--hcp-ground);
+  border: 1px solid var(--hcp-line-2);
   box-shadow: var(--hcp-shadow);
   -webkit-font-smoothing: antialiased;
 }
@@ -151,6 +144,7 @@ export function mountOwnerChip() {
   }
 
   function liftOff() {
+    unfollow?.();
     removeEventListener("scroll", lift);
     removeEventListener("resize", lift);
     document.removeEventListener(BOTTOM_UI_CHANGED, lift);
@@ -168,6 +162,7 @@ export function mountOwnerChip() {
   // Transition events stop at a shadow root, so the chip's own changes are heard here.
   chip.addEventListener("transitionend", lift);
   lift();
+  const unfollow = followLook(chip, chip, undefined, OWNER_LEAN);
   // Whoever removes the chip takes its listeners back with it: a chip mounted and unmounted
   // once per mode session would otherwise leave six behind each time.
   chip.liftOff = liftOff;

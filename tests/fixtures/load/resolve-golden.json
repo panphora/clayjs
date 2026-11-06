@@ -1,0 +1,418 @@
+{
+  "journal": {
+    "view": {
+      "core": [
+        "lib/mutation.js",
+        "core/preserve-authored.js",
+        "core/edit-mode.js",
+        "core/mode-key.js",
+        "core/stale-host-notice.js",
+        "core/page-data.js"
+      ],
+      "plugins": [
+        "plugins/visitor-drafts-owner.js",
+        "sync/live-sync.js",
+        "plugins/derive.js"
+      ],
+      "late": [
+        "plugins/menu.js"
+      ]
+    },
+    "viewOwner": {
+      "core": [
+        "lib/mutation.js",
+        "core/preserve-authored.js",
+        "core/edit-mode.js",
+        "core/mode-key.js",
+        "core/stale-host-notice.js",
+        "core/page-data.js"
+      ],
+      "plugins": [
+        "plugins/visitor-drafts-owner.js",
+        "sync/live-sync.js",
+        "plugins/derive.js"
+      ],
+      "late": [
+        "plugins/menu.js",
+        "plugins/upgrade.js"
+      ]
+    },
+    "edit": {
+      "core": [
+        "lib/mutation.js",
+        "core/preserve-authored.js",
+        "core/edit-mode.js",
+        "core/mode-key.js",
+        "core/stale-host-notice.js",
+        "core/page-data.js",
+        "core/snapshot.js",
+        "core/persist.js",
+        "core/admin-attrs.js",
+        "core/save-core.js",
+        "core/save.js",
+        "core/conflict-notice.js",
+        "core/recovery.js",
+        "core/unsaved-warning.js",
+        "core/autosave.js",
+        "attrs/save-freeze.js",
+        "attrs/onaftersave.js",
+        "attrs/refetch-on-save.js",
+        "attrs/add-from.js",
+        "lib/cache-bust.js"
+      ],
+      "plugins": [
+        "plugins/visitor-drafts-owner.js",
+        "plugins/upload.js",
+        "sync/live-sync.js",
+        "plugins/derive.js",
+        "plugins/bind-text.js"
+      ],
+      "late": [
+        "plugins/menu.js",
+        "plugins/upgrade.js",
+        "plugins/source.js"
+      ]
+    },
+    "draft": {
+      "core": [
+        "lib/mutation.js",
+        "core/preserve-authored.js",
+        "core/edit-mode.js",
+        "core/mode-key.js",
+        "core/stale-host-notice.js",
+        "core/page-data.js",
+        "core/snapshot.js",
+        "core/persist.js",
+        "core/admin-attrs.js",
+        "core/save-core.js",
+        "core/save.js",
+        "core/recovery.js",
+        "core/unsaved-warning.js",
+        "core/autosave.js",
+        "attrs/save-freeze.js",
+        "attrs/onaftersave.js",
+        "attrs/add-from.js",
+        "lib/cache-bust.js"
+      ],
+      "plugins": [
+        "plugins/visitor-drafts.js",
+        "plugins/derive.js",
+        "plugins/bind-text.js"
+      ],
+      "late": []
+    }
+  },
+  "kanban": {
+    "view": {
+      "core": [
+        "lib/mutation.js",
+        "core/preserve-authored.js",
+        "core/edit-mode.js",
+        "core/mode-key.js",
+        "core/stale-host-notice.js",
+        "core/page-data.js"
+      ],
+      "plugins": [
+        "plugins/visitor-drafts-owner.js",
+        "plugins/people.js",
+        "sync/live-sync.js",
+        "plugins/derive.js"
+      ],
+      "late": [
+        "plugins/menu.js"
+      ]
+    },
+    "viewOwner": {
+      "core": [
+        "lib/mutation.js",
+        "core/preserve-authored.js",
+        "core/edit-mode.js",
+        "core/mode-key.js",
+        "core/stale-host-notice.js",
+        "core/page-data.js"
+      ],
+      "plugins": [
+        "plugins/visitor-drafts-owner.js",
+        "plugins/people.js",
+        "sync/live-sync.js",
+        "plugins/derive.js"
+      ],
+      "late": [
+        "plugins/menu.js",
+        "plugins/upgrade.js"
+      ]
+    },
+    "edit": {
+      "core": [
+        "lib/mutation.js",
+        "core/preserve-authored.js",
+        "core/edit-mode.js",
+        "core/mode-key.js",
+        "core/stale-host-notice.js",
+        "core/page-data.js",
+        "core/snapshot.js",
+        "core/persist.js",
+        "core/admin-attrs.js",
+        "core/save-core.js",
+        "core/save.js",
+        "core/conflict-notice.js",
+        "core/recovery.js",
+        "core/unsaved-warning.js",
+        "core/autosave.js",
+        "attrs/save-freeze.js",
+        "attrs/onaftersave.js",
+        "attrs/refetch-on-save.js",
+        "attrs/add-from.js",
+        "lib/cache-bust.js"
+      ],
+      "plugins": [
+        "plugins/visitor-drafts-owner.js",
+        "plugins/undo.js",
+        "plugins/unsent.js",
+        "plugins/upload.js",
+        "plugins/people.js",
+        "sync/live-sync.js",
+        "plugins/derive.js"
+      ],
+      "late": [
+        "plugins/sortable.js",
+        "plugins/menu.js",
+        "plugins/upgrade.js",
+        "plugins/source.js"
+      ]
+    },
+    "draft": {
+      "core": [
+        "lib/mutation.js",
+        "core/preserve-authored.js",
+        "core/edit-mode.js",
+        "core/mode-key.js",
+        "core/stale-host-notice.js",
+        "core/page-data.js",
+        "core/snapshot.js",
+        "core/persist.js",
+        "core/admin-attrs.js",
+        "core/save-core.js",
+        "core/save.js",
+        "core/recovery.js",
+        "core/unsaved-warning.js",
+        "core/autosave.js",
+        "attrs/save-freeze.js",
+        "attrs/onaftersave.js",
+        "attrs/add-from.js",
+        "lib/cache-bust.js"
+      ],
+      "plugins": [
+        "plugins/visitor-drafts.js",
+        "plugins/undo.js",
+        "plugins/unsent.js",
+        "plugins/derive.js"
+      ],
+      "late": [
+        "plugins/sortable.js"
+      ]
+    }
+  },
+  "page": {
+    "view": {
+      "core": [
+        "lib/mutation.js",
+        "core/preserve-authored.js",
+        "core/edit-mode.js",
+        "core/mode-key.js",
+        "core/stale-host-notice.js",
+        "core/page-data.js"
+      ],
+      "plugins": [
+        "plugins/page-view.js",
+        "plugins/derive.js"
+      ],
+      "late": [
+        "plugins/menu.js"
+      ]
+    },
+    "viewOwner": {
+      "core": [
+        "lib/mutation.js",
+        "core/preserve-authored.js",
+        "core/edit-mode.js",
+        "core/mode-key.js",
+        "core/stale-host-notice.js",
+        "core/page-data.js"
+      ],
+      "plugins": [
+        "plugins/page-view.js",
+        "plugins/derive.js"
+      ],
+      "late": [
+        "plugins/menu.js",
+        "plugins/upgrade.js"
+      ]
+    },
+    "edit": {
+      "core": [
+        "lib/mutation.js",
+        "core/preserve-authored.js",
+        "core/edit-mode.js",
+        "core/mode-key.js",
+        "core/stale-host-notice.js",
+        "core/page-data.js",
+        "core/snapshot.js",
+        "core/persist.js",
+        "core/admin-attrs.js",
+        "core/save-core.js",
+        "core/save.js",
+        "core/conflict-notice.js",
+        "core/recovery.js",
+        "core/unsaved-warning.js",
+        "core/autosave.js",
+        "attrs/save-freeze.js",
+        "attrs/onaftersave.js",
+        "attrs/refetch-on-save.js",
+        "attrs/add-from.js",
+        "lib/cache-bust.js"
+      ],
+      "plugins": [
+        "plugins/indicator.js",
+        "plugins/upload.js",
+        "sync/live-sync.js",
+        "plugins/live.js",
+        "plugins/page.js",
+        "plugins/derive.js"
+      ],
+      "late": [
+        "plugins/menu.js",
+        "plugins/upgrade.js",
+        "plugins/source.js"
+      ]
+    },
+    "draft": {
+      "core": [
+        "lib/mutation.js",
+        "core/preserve-authored.js",
+        "core/edit-mode.js",
+        "core/mode-key.js",
+        "core/stale-host-notice.js",
+        "core/page-data.js",
+        "core/snapshot.js",
+        "core/persist.js",
+        "core/admin-attrs.js",
+        "core/save-core.js",
+        "core/save.js",
+        "core/recovery.js",
+        "core/unsaved-warning.js",
+        "core/autosave.js",
+        "attrs/save-freeze.js",
+        "attrs/onaftersave.js",
+        "attrs/add-from.js",
+        "lib/cache-bust.js"
+      ],
+      "plugins": [
+        "plugins/visitor-drafts.js",
+        "plugins/richclay.js",
+        "plugins/indicator.js",
+        "plugins/derive.js"
+      ],
+      "late": []
+    }
+  },
+  "calculator": {
+    "view": {
+      "core": [
+        "lib/mutation.js",
+        "core/preserve-authored.js",
+        "core/edit-mode.js",
+        "core/mode-key.js",
+        "core/stale-host-notice.js",
+        "core/page-data.js"
+      ],
+      "plugins": [
+        "plugins/visitor-drafts-owner.js",
+        "plugins/derive.js"
+      ],
+      "late": [
+        "plugins/menu.js"
+      ]
+    },
+    "viewOwner": {
+      "core": [
+        "lib/mutation.js",
+        "core/preserve-authored.js",
+        "core/edit-mode.js",
+        "core/mode-key.js",
+        "core/stale-host-notice.js",
+        "core/page-data.js"
+      ],
+      "plugins": [
+        "plugins/visitor-drafts-owner.js",
+        "plugins/derive.js"
+      ],
+      "late": [
+        "plugins/menu.js",
+        "plugins/upgrade.js"
+      ]
+    },
+    "edit": {
+      "core": [
+        "lib/mutation.js",
+        "core/preserve-authored.js",
+        "core/edit-mode.js",
+        "core/mode-key.js",
+        "core/stale-host-notice.js",
+        "core/page-data.js",
+        "core/snapshot.js",
+        "core/persist.js",
+        "core/admin-attrs.js",
+        "core/save-core.js",
+        "core/save.js",
+        "core/conflict-notice.js",
+        "core/recovery.js",
+        "core/unsaved-warning.js",
+        "core/autosave.js",
+        "attrs/save-freeze.js",
+        "attrs/onaftersave.js",
+        "attrs/refetch-on-save.js",
+        "attrs/add-from.js",
+        "lib/cache-bust.js"
+      ],
+      "plugins": [
+        "plugins/visitor-drafts-owner.js",
+        "plugins/richclay.js",
+        "plugins/derive.js"
+      ],
+      "late": [
+        "plugins/menu.js",
+        "plugins/upgrade.js",
+        "plugins/source.js"
+      ]
+    },
+    "draft": {
+      "core": [
+        "lib/mutation.js",
+        "core/preserve-authored.js",
+        "core/edit-mode.js",
+        "core/mode-key.js",
+        "core/stale-host-notice.js",
+        "core/page-data.js",
+        "core/snapshot.js",
+        "core/persist.js",
+        "core/admin-attrs.js",
+        "core/save-core.js",
+        "core/save.js",
+        "core/recovery.js",
+        "core/unsaved-warning.js",
+        "core/autosave.js",
+        "attrs/save-freeze.js",
+        "attrs/onaftersave.js",
+        "attrs/add-from.js",
+        "lib/cache-bust.js"
+      ],
+      "plugins": [
+        "plugins/visitor-drafts.js",
+        "plugins/richclay.js",
+        "plugins/derive.js"
+      ],
+      "late": []
+    }
+  }
+}

@@ -82,6 +82,7 @@ export const PLUGIN_PATHS = {
   // owner editing the original, gets the owner module: the chip when it applies and
   // the inert `clay.visitorDrafts`, without the drafts UI's 24 KB.
   "visitor-drafts": { path: "plugins/visitor-drafts.js", ownerPath: "plugins/visitor-drafts-owner.js", editOnly: false, default: false },
+  "visitor-menu": { path: "plugins/visitor-menu.js", editOnly: true, draftOnly: true },
   // An editor textarea outside the saved records, bound to one record's text
   // element. Edit mode only: the page that asks for it is the page whose owner
   // writes in it.
@@ -147,6 +148,7 @@ export const MODULES = {
   "plugins/demo.js":            () => import("./plugins/demo.js"),
   "plugins/visitor-drafts.js": () => import("./plugins/visitor-drafts.js"),
   "plugins/visitor-drafts-owner.js": () => import("./plugins/visitor-drafts-owner.js"),
+  "plugins/visitor-menu.js":    () => import("./plugins/visitor-menu.js"),
   "plugins/bind-text.js":       () => import("./plugins/bind-text.js"),
   "plugins/source.js":          () => import("./plugins/source.js"),
   "plugins/derive.js":          () => import("./plugins/derive.js"),
@@ -155,7 +157,7 @@ export const MODULES = {
 
 // `source` is last on purpose: its install captures a save clone, so it wants every
 // plugin that registers a document transform to have registered it first.
-const PLUGIN_ORDER = ["visitor-drafts", "richclay", "indicator", "sortable", "undo", "unsent", "quickcrop", "upload", "people", "menu", "upgrade", "cms", "page-view", "sync", "live", "page", "message", "like", "wire", "ai-edit", "demo", "derive", "bind-text", "source"];
+const PLUGIN_ORDER = ["visitor-drafts", "visitor-menu", "richclay", "indicator", "sortable", "undo", "unsent", "quickcrop", "upload", "people", "menu", "upgrade", "cms", "page-view", "sync", "live", "page", "message", "like", "wire", "ai-edit", "demo", "derive", "bind-text", "source"];
 
 // A plugin that cannot do its whole job alone. hypercms reads the cropper through
 // a capability lookup (`clay.quickcrop`) and silently uploads the raw file when it
@@ -277,7 +279,7 @@ export function resolveModules(params, isEditMode, { isDraftMode = false, hasSap
   for (const name of PLUGIN_ORDER) {
     if (!enabled.has(name)) continue;
     const spec = PLUGIN_PATHS[name];
-    if (spec.editOnly && !isEditMode) continue;
+    if ((spec.editOnly && !isEditMode) || (spec.draftOnly && !isDraftMode)) continue;
     (LATE.has(name) ? late : plugins).push(spec.ownerPath && !isDraftMode ? spec.ownerPath : spec.path);
   }
   return { core, plugins, late };

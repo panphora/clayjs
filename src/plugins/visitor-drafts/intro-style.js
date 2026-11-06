@@ -21,4 +21,10 @@ export const CLOSE_CSS = `:host { color: inherit !important; }
 .clay-intro__close:focus-visible { opacity: 1; outline: 2px solid currentColor; outline-offset: 2px; }
 .clay-intro__close svg { display: block; width: 12px; height: 12px; fill: currentColor; stroke: none; }
 @media (pointer: coarse) { .clay-intro__close { width: 44px; height: 44px; top: 4px; right: 4px; } }
+.clay-intro__close[data-manual] {
+  width: auto; height: 36px; padding: 0 14px;
+  border-radius: 999px; font-size: 12px; font-weight: 500;
+  text-transform: uppercase; letter-spacing: .04em; white-space: nowrap;
+}
+@media (pointer: coarse), (max-width: 680px) { .clay-intro__close[data-manual] { height: 44px; } }
 `;

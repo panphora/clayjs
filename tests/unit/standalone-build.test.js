@@ -73,11 +73,12 @@ test("carries the core, every plugin and every satellite", () => {
   // markdown and highlighting tools loaded on demand (OverType 192 KB, marked 70 KB,
   // highlight.js 35 KB plus 30 KB of grammars and its sheet), the menu and SEO plugin
   // 49 KB, and the reader's page features and saved stream. The guard is there to catch
-  // something the size of Shiki's grammars (6.3 MB), which 5.7 MB still does. Raised from
+  // something the size of Shiki's grammars (6.3 MB), which 5.8 MB still does. Raised from
   // 5.5 MB for the page binding's incremental walk and the sliced save, then to 5.7 MB for
   // the checklist popovers, document settings, the chart inspector and the menu's host
-  // actions (2026-10-29, 5.65 MB measured).
-  expect(bundle.length).toBeLessThan(5_700_000);
+  // actions (2026-10-29, 5.65 MB measured), then to 5.8 MB for the visitor menu's shell, DOM
+  // items and looks (2026-11-05, 5.71 MB measured).
+  expect(bundle.length).toBeLessThan(5_800_000);
 });
 
 // The chunk build adds a generated bootstrap per entry that has a target, plus the

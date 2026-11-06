@@ -158,9 +158,22 @@ test("a session that ends takes the chip's own listeners with it", async () => {
     lease.dispose();
 
     expect(hostOf("owner")).toBeNull();
-    // The lift's six listeners on the window and the document leave with the chip.
-    expect({ removed: mounted - listeners.live() }).toEqual({ removed: 6 });
+    // The lift's six listeners and the page colour's three leave with the chip.
+    expect({ removed: mounted - listeners.live() }).toEqual({ removed: 9 });
   } finally {
     listeners.restore();
+  }
+});
+
+test("the chip takes the scheme of the page it sits on, not the reader's preference", async () => {
+  // jsdom lays nothing out, and the look is only read for a chip with a size.
+  const rect = jest.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue({ left: 12, top: 700, right: 412, bottom: 740, width: 400, height: 40, x: 12, y: 700 });
+  try {
+    await bootPage({ slot: "owner-chip-7", owner: true, attrs: { style: "color-scheme: dark" } });
+    const chip = ownerChip();
+    expect(chip).not.toBeNull();
+    expect(chip.style.getPropertyValue("color-scheme")).toBe("dark");
+  } finally {
+    rect.mockRestore();
   }
 });

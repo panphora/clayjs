@@ -328,12 +328,49 @@ describe("embedded in a clay-menu-slot", () => {
     expect(listOf().getAttribute("aria-label")).toBe("Settings");
   });
 
-  test("a hidden switch becomes a mode item that follows the mode", async () => {
+  test("a hidden switch becomes an Edit mode toggle that follows the mode", async () => {
     await boot({ edit: true, body: page("", "no-edit-switch") });
     expect($(".clay-menu-edit", "menu").hidden).toBe(true);
     window.clay.menu.open();
-    expect(listOf().querySelector('[data-menu-id="clay.mode"]').textContent).toBe("View mode");
-    expect(listOf().firstElementChild.dataset.menuId).toBe("clay.mode");
+    const row = () => listOf().querySelector('[data-menu-id="clay.mode"]');
+    expect(row().textContent).toBe("Edit mode");
+    expect(row().getAttribute("role")).toBe("menuitemcheckbox");
+    expect(row().getAttribute("aria-checked")).toBe("true");
+    expect(row().querySelector(".clay-menu-track .clay-menu-thumb")).not.toBeNull();
+
+    const setMode = jest.spyOn(window.clay, "setMode").mockImplementation(async () => {
+      jest.spyOn(window.clay, "mode", "get").mockReturnValue("view");
+      document.dispatchEvent(new CustomEvent("clay:modechange"));
+      return { ok: true, mode: "view", changed: true };
+    });
+    click(row());
+    await flush();
+    expect(setMode).toHaveBeenCalledWith("view");
+    expect(listOf().hidden).toBe(false);
+    expect(row().textContent).toBe("Edit mode");
+    expect(row().getAttribute("aria-checked")).toBe("false");
+  });
+
+  test("the Edit mode toggle sits above the version line, after the other items", async () => {
+    await boot({ edit: true, body: page("", "no-edit-switch") });
+    window.clay.menu.addItem({ id: "doc.action", label: "A document action" });
+    window.clay.menu.addItem({ id: "upgrade", label: "Version 1.4.0", text: true });
+    window.clay.menu.addItem({ id: "doc.last", label: "Last", section: "end" });
+    window.clay.menu.open();
+    const ids = [...listOf().querySelectorAll("[data-menu-id]")].map((el) => el.dataset.menuId);
+    expect(ids.indexOf("clay.mode")).toBeGreaterThan(ids.indexOf("doc.action"));
+    expect(ids.indexOf("upgrade")).toBe(ids.indexOf("clay.mode") + 1);
+    expect(ids.at(-1)).toBe("doc.last");
+  });
+
+  test("the arrow keys reach the Edit mode toggle", async () => {
+    await boot({ edit: true, body: page("", "no-edit-switch") });
+    window.clay.menu.open();
+    const row = listOf().querySelector('[data-menu-id="clay.mode"]');
+    const shadow = row.getRootNode();
+    shadow.querySelector(".clay-menu-goo").focus();
+    row.closest(".clay-menu-dock").dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true, composed: true }));
+    expect(shadow.activeElement.dataset.menuId).toBe("clay.mode");
   });
 
   test("the switch stays without the attribute", async () => {
@@ -365,6 +402,7 @@ describe("embedded in a clay-menu-slot", () => {
     expect(x.getAttribute("aria-label")).toBe("Remove");
     expect(listOf().querySelector('a[data-menu-id="thanks"]').getAttribute("part")).toBe("item quiet");
     x.click();
+    await flush();
     expect(dismissed).toBe(1);
     expect(listOf().querySelector('[data-menu-id="thanks"]')).toBeNull();
     expect(listOf().hidden).toBe(false);
@@ -377,6 +415,11 @@ describe("embedded in a clay-menu-slot", () => {
     expect(css).not.toContain("height: 34px; padding: 0 4px 0 2px");
     expect(css).toContain(":focus-visible");
     expect(css).toContain("min-height: 44px");
+  });
+
+  test("a skin keeps the version line lined up with the menu items", async () => {
+    await boot({ edit: true, body: `${SKIN}${page()}` });
+    expect(cssOfMenu()).toContain(".clay-menu-version { box-sizing: border-box; margin: 0; padding: 7px 9px; }");
   });
 
   test("an unknown skin version keeps the default look", async () => {

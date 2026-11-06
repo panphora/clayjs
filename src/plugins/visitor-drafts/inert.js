@@ -27,6 +27,7 @@ export function inertVisitorDrafts() {
     editOriginal,
     backToDraft,
     downloadUrl: () => DOWNLOAD_URL,
+    download: () => Promise.resolve(false),
     source: null,
   };
 }

@@ -30,6 +30,7 @@ const UNSUPPORTED = {
   "plugins/like.js": "unreviewed",
   "plugins/demo.js": "its own destination, not a host edit session",
   "plugins/visitor-drafts.js": "the draft plan keeps its own startup",
+  "plugins/visitor-menu.js": "the draft plan keeps its own startup",
 };
 
 const KINDS = ["neutral", "export", "reader"];

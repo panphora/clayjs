@@ -98,5 +98,6 @@ export const visitorDrafts = store ? {
   editOriginal,
   backToDraft,
   downloadUrl: () => downloadLink,
+  download: () => ready.then((prompt) => { store.flush(); return prompt?.download(); }),
   source,
 } : inertVisitorDrafts();

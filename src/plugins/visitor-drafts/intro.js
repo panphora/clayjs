@@ -5,6 +5,8 @@ import { bootPhase } from "../../core/boot-phase.js";
 
 export const COPY = {
   close: "Hide this introduction",
+  hide: "Hide intro",
+  show: "Show intro",
   label: (appName) => `About ${appName}`,
 };
 
@@ -43,17 +45,7 @@ function focusApp() {
   else document.body.focus({ preventScroll: true });
 }
 
-export function mountIntro({ memory, template, appName, hadDraft }) {
-  if (!template || !template.content.textContent.trim() && !template.content.querySelector("img, svg, video, canvas")) return null;
-  if (!forced()) {
-    if (memory.get().intro.done || hadDraft) return null;
-    if (bootPhase.servedHash) return null;
-    if (window.matchMedia && window.matchMedia("print").matches) return null;
-  }
-  return mount({ memory, template, appName });
-}
-
-function mount({ memory, template, appName }) {
+function buildSection({ template, appName, labelText, onClose }) {
   stylesOnce();
 
   const section = document.createElement("section");
@@ -66,10 +58,47 @@ function mount({ memory, template, appName }) {
   const close = document.createElement("button");
   close.type = "button";
   close.className = "clay-intro__close";
-  close.setAttribute("aria-label", COPY.close);
-  close.innerHTML = '<svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true"><path d="M1.4 0 6 4.6 10.6 0 12 1.4 7.4 6 12 10.6 10.6 12 6 7.4 1.4 12 0 10.6 4.6 6 0 1.4z"/></svg>';
-  close.addEventListener("click", () => dismiss("closed"));
+  if (labelText) {
+    close.textContent = labelText;
+    close.setAttribute("data-manual", "");
+  } else {
+    close.setAttribute("aria-label", COPY.close);
+    close.innerHTML = '<svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true"><path d="M1.4 0 6 4.6 10.6 0 12 1.4 7.4 6 12 10.6 10.6 12 6 7.4 1.4 12 0 10.6 4.6 6 0 1.4z"/></svg>';
+  }
+  close.addEventListener("click", () => onClose());
   mountEditorUI({ name: "intro-close", content: close, css: [CLOSE_CSS], parent: section });
+
+  section.addEventListener("click", (event) => {
+    if (event.target.closest("[visitor-intro-dismiss]")) {
+      onClose();
+      return;
+    }
+    if (event.target.closest("[visitor-intro-start]")) {
+      event.preventDefault();
+      window.scrollTo({ top: window.scrollY + section.getBoundingClientRect().bottom, behavior: "smooth" });
+    }
+  });
+
+  return section;
+}
+
+export function mountIntro({ memory, template, appName, hadDraft }) {
+  if (!template || !template.content.textContent.trim() && !template.content.querySelector("img, svg, video, canvas")) return null;
+  if (template.getAttribute("visitor-intro") === "manual") {
+    const printing = window.matchMedia && window.matchMedia("print").matches;
+    const open = forced() || !(memory.get().intro.done || hadDraft || bootPhase.servedHash || printing);
+    return mountManual({ memory, template, appName, open });
+  }
+  if (!forced()) {
+    if (memory.get().intro.done || hadDraft) return null;
+    if (bootPhase.servedHash) return null;
+    if (window.matchMedia && window.matchMedia("print").matches) return null;
+  }
+  return mount({ memory, template, appName });
+}
+
+function mount({ memory, template, appName }) {
+  const section = buildSection({ template, appName, onClose: () => dismiss("closed") });
 
   let gone = false;
   let frame = 0;
@@ -102,20 +131,43 @@ function mount({ memory, template, appName }) {
     });
   }
 
-  section.addEventListener("click", (event) => {
-    if (event.target.closest("[visitor-intro-dismiss]")) {
-      dismiss("closed");
-      return;
-    }
-    if (event.target.closest("[visitor-intro-start]")) {
-      event.preventDefault();
-      window.scrollTo({ top: window.scrollY + section.getBoundingClientRect().bottom, behavior: "smooth" });
-    }
-  });
-
   document.body.prepend(section);
   announceBottomUi();
   addEventListener("scroll", onScroll, { passive: true });
 
+  return section;
+}
+
+function mountManual({ memory, template, appName, open }) {
+  let section = null;
+  const showRow = (wanted) => {
+    const menu = window.clay?.menu;
+    if (!menu) return;
+    if (wanted) menu.addItem({ id: "clay.intro", label: COPY.show, run: show });
+    else menu.removeItem("clay.intro");
+  };
+  function attach() {
+    section ??= buildSection({ template, appName, labelText: COPY.hide, onClose: hide });
+    document.body.prepend(section);
+    announceBottomUi();
+    showRow(false);
+  }
+  function hide() {
+    memory.get().intro.done = "closed";
+    memory.save();
+    section.remove();
+    announceBottomUi();
+    showRow(true);
+    focusApp();
+  }
+  function show() {
+    memory.get().intro.done = null;
+    memory.save();
+    attach();
+    window.scrollTo(0, 0);
+  }
+  document.addEventListener("clay:menu-ready", () => showRow(!section?.isConnected));
+  if (open) attach();
+  else showRow(true);
   return section;
 }

@@ -5,8 +5,10 @@
 // only. Keep deletes every other look, after which the page is an ordinary one-look
 // document. A choice and Keep are undo entries and saves, like the SEO panel's Done.
 import { modeRefusalText } from "../../core/mode-refusal.js";
+import { OFF, labelOf, looks, nameOf, paintLook, recordLook } from "./looks.js";
 
-const OFF = "not all";
+export { looks };
+
 const RECEIPT = "variants-choose";
 const KEEP_ID = "clay.variants.keep";
 const CHOOSE_LABEL = "Change the page look";
@@ -19,9 +21,12 @@ const NEXT =
   '<svg viewBox="0 0 6 10" aria-hidden="true" focusable="false"><rect width="2" height="2"/><rect x="2" y="2" width="2" height="2"/>' +
   '<rect x="4" y="4" width="2" height="2"/><rect x="2" y="6" width="2" height="2"/><rect y="8" width="2" height="2"/></svg>';
 
-export const looks = () => [...document.querySelectorAll("head style[clay-variant]")];
-const nameOf = (style) => style.getAttribute("clay-variant");
 const names = () => looks().map(nameOf);
+
+const labelFor = (name) => {
+  const style = looks().find((candidate) => nameOf(candidate) === name);
+  return style ? labelOf(style) : `Variant ${name}`;
+};
 
 // The first block without media="not all" is the saved choice. A merge or a hand edit
 // can leave none or several; this tab paints the first one either way, and the next
@@ -52,17 +57,20 @@ async function afterBaseline() {
 }
 
 function joinNames(list) {
-  const named = list.map((name) => `Variant ${name}`);
+  const named = list.map(labelFor);
   return named.length < 2 ? named.join("") : `${named.slice(0, -1).join(", ")} and ${named[named.length - 1]}`;
 }
 
 export function attachVariants({ root, capsule, addItem, removeItem, note, currentMode }) {
+  paintLook();
+
   let previewing = null;
   let pending = null;
   let copy = null;
   let pill = null;
   let drawn = null;
 
+  const wantsRow = Boolean(document.querySelector("[clay-menu-slot]")?.hasAttribute("clay-menu-looks"));
   const isEdit = () => currentMode() === "edit";
   const shown = () => previewing ?? savedName();
   const storage = () => window.clay && window.clay.storage && window.clay.storage.session;
@@ -102,6 +110,7 @@ export function attachVariants({ root, capsule, addItem, removeItem, note, curre
     if (!names().includes(name)) return { ok: false, code: "unknown-variant" };
     pending = previewing = null;
     writeHead(CHOOSE_LABEL, () => {
+      recordLook(name);
       for (const style of looks()) {
         if (nameOf(style) === name) style.removeAttribute("media");
         else if (style.getAttribute("media") !== OFF) style.setAttribute("media", OFF);
@@ -121,6 +130,7 @@ export function attachVariants({ root, capsule, addItem, removeItem, note, curre
   function keepNow(name) {
     pending = previewing = null;
     writeHead(KEEP_LABEL, () => {
+      recordLook(null);
       for (const style of looks()) {
         if (nameOf(style) === name) {
           style.removeAttribute("clay-variant");
@@ -139,7 +149,7 @@ export function attachVariants({ root, capsule, addItem, removeItem, note, curre
     const name = savedName();
     const others = names().filter((other) => other !== name);
     if (!others.length) return Promise.resolve({ ok: false, code: "unknown-variant" });
-    const text = `Keep Variant ${name} and delete ${joinNames(others)}? The switcher goes away. Version history still has them.`;
+    const text = `Keep ${labelFor(name)} and delete ${joinNames(others)}? The switcher goes away. Version history still has them.`;
     return import("../../ui/dialogs.js")
       .then((m) => m.consent(text))
       .then(
@@ -220,20 +230,46 @@ export function attachVariants({ root, capsule, addItem, removeItem, note, curre
     if (all.length < 2) {
       pill?.remove();
       pill = null;
+      removeItem("clay.look");
+      removeItem("clay.look.use");
       removeItem(KEEP_ID);
+      return;
+    }
+    if (root.hasAttribute("data-embedded")) {
+      const name = shown();
+      if (wantsRow) {
+        addItem({
+          id: "clay.look",
+          section: "start",
+          stepper: {
+            label: "Switch look",
+            value: `${labelFor(name)} ${all.indexOf(name) + 1}/${all.length}`,
+            prev: () => step(-1),
+            next: () => step(1),
+            prevLabel: "Previous look",
+            nextLabel: "Next look",
+          },
+        });
+      } else {
+        removeItem("clay.look");
+      }
+      if (!isEdit() && previewing !== null) addItem({ id: "clay.look.use", section: "start", label: "Use this look", run: useShown });
+      else removeItem("clay.look.use");
+      if (isEdit()) addItem({ id: KEEP_ID, label: `Keep ${labelFor(savedName())}, remove the others…`, run: () => keep() });
+      else removeItem(KEEP_ID);
       return;
     }
     if (!pill) pill = buildPill();
     if (!pill.isConnected) root.insertBefore(pill, root.querySelector(".clay-roster") ?? capsule);
     const name = shown();
     const label = pill.querySelector(".clay-variants-name");
-    label.textContent = `Variant ${name} `;
+    label.textContent = `${labelFor(name)} `;
     const count = document.createElement("small");
     count.textContent = `(${all.indexOf(name) + 1}/${all.length})`;
     label.append(count);
     pill.querySelector(".clay-variants-use").hidden = isEdit() || previewing === null;
     pill.querySelector(".clay-variants-keep").hidden = !isEdit();
-    if (isEdit()) addItem({ id: KEEP_ID, label: `Keep Variant ${savedName()}, remove the others…`, run: () => keep() });
+    if (isEdit()) addItem({ id: KEEP_ID, label: `Keep ${labelFor(savedName())}, remove the others…`, run: () => keep() });
     else removeItem(KEEP_ID);
   }
 
@@ -261,22 +297,30 @@ export function attachVariants({ root, capsule, addItem, removeItem, note, curre
     refresh();
   });
 
+  const followRecord = () => {
+    if (document.documentElement.hasAttribute("look")) recordLook(names().length > 1 ? savedName() : null);
+  };
+
   // A merge can rebuild a look block, which clears its CSSOM flag, or bring a peer's
   // choice or Keep; painting again settles all three.
   document.addEventListener("clay:sync-applied", () => {
-    if (current()) refresh();
+    if (!current()) return;
+    followRecord();
+    refresh();
   });
 
   // An undo or redo of a choice or of Keep brings the blocks back or moves the saved one.
   // Every other entry leaves the looks alone, so only a change redraws and announces.
   document.addEventListener("clay:undo-change", () => {
-    if (current() && state() !== drawn) refresh();
+    if (!current() || state() === drawn) return;
+    followRecord();
+    refresh();
   });
 
   api = window.clay.variants = {
     list: () => {
       const active = savedName();
-      return names().map((name) => ({ name, label: `Variant ${name}`, active: name === active }));
+      return names().map((name) => ({ name, label: labelFor(name), active: name === active }));
     },
     get active() {
       return savedName();
