@@ -182,7 +182,10 @@ const PLUGIN_ORDER = ["visitor-drafts", "richclay", "indicator", "sortable", "un
 // image and file blocks send through `clay.upload`: without the plugin every drop
 // ends in "File uploads are not available", while with it a host that stores no
 // files answers `unsupported` and the editor offers to embed the file instead.
-const IMPLIES = { cms: ["quickcrop", "upload"], "ai-edit": ["wire"], page: ["live", "sync", "upload"] };
+// The menu is how a person opens the CMS: hypercms adds no button of its own. It loads
+// in view too, because that is where a person starts, and it shows itself only to
+// someone who can edit. A page with its own control uses exclude=menu.
+const IMPLIES = { cms: ["quickcrop", "upload", "menu"], "ai-edit": ["wire"], page: ["live", "sync", "upload"] };
 
 // A Document's editor owns its article's rich text, so richclay (for [editable]) has
 // nothing to do there; plugins=page,richclay still loads it.

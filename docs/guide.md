@@ -1454,6 +1454,8 @@ document.addEventListener("clay:sync-applied", (event) => {
 - Close or repoint any view whose record a peer deleted. The kanban closes the open card when its id is gone: `if (openId && !cardById(openId)) return writeHash({ card: "" }, { replace: true });`
 - Re-parse any JSON you parsed earlier.
 - Re-attach any per-element setup that a recreated element lost (the writer re-injects block gutters on every render).
+- Never call `location.reload()` on `clay:sync-applied`. Sync merges `peer` and `disk` frames in place with focus, caret, and typed values intact, while a reload discards them and can drop unsaved typing; draw script-built UI into a runtime-created `clay="editor-ui"` root (never authored in the file) and rebuild derived state, chrome, and live `.checked` or `.value` properties in `clay.effect` or `clay:sync-applied` (`htmlfile runtime` flags scripts that draw DOM without either).
+- Version replaced assets at the same URL with `?v=<mtime>`. Overwriting an image or asset file in place leaves the page bytes unchanged and serves the browser's cached copy until the URL changes.
 
 `detail` on `clay:sync-applied` carries `{ seq, source: "peer" | "disk", by, report, conflictIds, unresolved }`, plus `etag` and `html` for disk frames. `by` is `{ id, name }` on hyperclay.com peer frames and `null` elsewhere. `report.applied`, `report.conflicts`, and `report.localDiverged` describe the merge.
 
@@ -1717,6 +1719,7 @@ Traps:
 - **Many editors are expensive.** Each multi-line editor installs document-level listeners and its own Squire instance. Do not put `editable` on every cell of a grid; use `editmode:contenteditable`.
 - **Paste uses an allowlist.** Tables, `<hr>`, `<details>`, `<figure>`, iframes, and inline styles are reduced to text. A pasted remote image keeps its hotlinked `src`. A pasted `data:` image bloats every save.
 - **Cloning an active region** copies runtime attributes. Strip them with `clay.RichClay.stripElement(clone)` ([Element identity: `data-id` and `id`](https://clayjs.com/docs/guide/record/#element-identity-data-id-and-id)), or clone from a `<template>`.
+- **Binding at runtime stamps `data-richclay=""` permanently.** Calling `new clay.RichClay(el)` on an element without `[data-richclay]`, `[richclay]`, `[editable]`, or `[clay-editable]` writes `data-richclay=""` so the watcher can re-adopt it, and save never removes bare `data-richclay`, leaving the element editable on future loads. Code that binds richclay at runtime must strip `data-richclay` in its own save hook only for elements it bound, and cannot invent a `data-richclay-runtime-*` attribute expecting auto-cleanup because `removeRuntimeState` enumerates its nine attributes explicitly (and runs in save-only `addDocumentTransform`, after `onSnapshot` live-sync frames).
 - **`editable` is ignored in view mode.** Viewers get plain markup.
 
 #### 7.1.1 The page editor's Markdown shortcuts
@@ -1979,7 +1982,7 @@ Rules for sapjs in a malleable file:
 
 ### 7.12 cms: content-managed pages
 
-`?plugins=cms` turns a page into a content-managed page. A JSON rules tag maps field names to selectors, and an "Edit content" button opens a sidebar form (or edits text in place) that writes straight into the DOM.
+`?plugins=cms` turns a page into a content-managed page. It brings ClayJS's menu plugin automatically; the menu is a small dock in a corner of the page, shown only to someone who can edit. A JSON rules tag maps field names to selectors, and **Open the CMS (Edit content)** in the menu opens a sidebar form (or edits text in place) that writes straight into the DOM.
 
 ```html
 <script data-rules-name="cms" data-rules-version="1" type="application/json">
@@ -1989,7 +1992,7 @@ Rules for sapjs in a malleable file:
 
 It fits fixed-layout content sites such as landing pages, menus, pricing, FAQs, and team pages, where a non-developer changes copy and images. It does not fit apps where editing is the product: its form is a separate surface from the content, new list items clone the first item's attributes (including its state), and rich text inside lists is flattened in the sidebar. A file can use both if the CMS owns the header copy, the app owns `<main>`, and the rules never reach into the app's region. Give every list that can become empty a `cms-template` seed hidden by CSS, not by the `hidden` attribute (which is copied into every new item). Add `sortable` to the plugin list for drag in the sidebar.
 
-The rules tag can declare which editor opens. `data-cms-view="inline"` edits text in place and opens small popovers for everything else, while no attribute (or `"sidebar"`) opens the form in a side panel. The "Edit content" button opens whichever the page declares. The CMS edits only in edit mode: while the page is in view, `clay.cms.open()` answers `{ ok: false, code: "not-allowed" }`, so a button of your own calls `clay.setMode("edit")` first.
+The rules tag can declare which editor opens. `data-cms-view="inline"` edits text in place and opens small popovers for everything else, while no attribute (or `"sidebar"`) opens the form in a side panel. **Open the CMS (Edit content)** in the menu opens whichever the page declares. The CMS edits only in edit mode: while the page is in view, `clay.cms.open()` answers `{ ok: false, code: "not-allowed" }`, so a button of your own calls `clay.setMode("edit")` first.
 
 The CMS also edits how a page looks. A rule ending in `@--name` reads and writes one CSS custom property in an element's `style` attribute. For example, `"accent": "html@--color-accent"` with `a { color: var(--color-accent) }` in your CSS gives the owner a color picker. Any `--color-*` name gets a color picker, any `--font-*` name gets a list of 40 Google Fonts, and the CMS keeps one `<link data-hcms-fonts>` loading the fonts in use. For a layout choice, put `data-hcms-component:data-layout="variant"` and `data-hcms-options:data-layout="1:cols-1 2:cols-2 3:cols-3"` on a section and key your grid CSS on `[data-layout]`: the owner gets icon tiles, and the choice writes only the attribute. Style fields on `html`, `body`, or `:root` gather in a "Page style" group at the top of the form.
 

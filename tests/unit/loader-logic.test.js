@@ -90,7 +90,7 @@ describe("resolveModules", () => {
       "plugins/upload.js",
       "plugins/cms.js",
     ]);
-    expect(late).toEqual(["plugins/source.js"]);
+    expect(late).toEqual(["plugins/menu.js", "plugins/source.js"]);
   });
 
   test("excluding quickcrop overrides the implication", () => {
@@ -100,7 +100,19 @@ describe("resolveModules", () => {
       "plugins/upload.js",
       "plugins/cms.js",
     ]);
-    expect(late).toEqual(["plugins/source.js"]);
+    expect(late).toEqual(["plugins/menu.js", "plugins/source.js"]);
+  });
+
+  // The menu is how a person opens the CMS, and a person starts in view.
+  test("cms brings the menu, in edit and in view", () => {
+    expect(resolveModules(params({ plugins: "cms" }), true).late).toContain("plugins/menu.js");
+    expect(resolveModules(params({ plugins: "cms" }), false).late).toContain("plugins/menu.js");
+  });
+
+  test("exclude=menu lets a cms page keep its own control", () => {
+    const { plugins, late } = resolveModules(params({ plugins: "cms", exclude: "menu" }), true);
+    expect(late).not.toContain("plugins/menu.js");
+    expect(plugins).toContain("plugins/cms.js");
   });
 
   test("quickcrop loads on its own request, in view mode too", () => {
