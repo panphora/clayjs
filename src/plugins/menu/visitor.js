@@ -56,6 +56,14 @@ function attachLooks({ addItem, removeItem, slot }) {
   }
 }
 
+const START_OVER = "Start over? Your changes in this browser are deleted, and the page goes back to how its owner saved it.";
+
+function startOver() {
+  return import("../../ui/dialogs.js")
+    .then((m) => m.consent(START_OVER))
+    .then(() => window.clay.visitorDrafts.reset(), () => false);
+}
+
 export function start() {
   if (document.querySelector('clay-editor-ui[data-clay-ui="menu"]')) return;
   const shell = createShell({ sections: [null] });
@@ -63,6 +71,7 @@ export function start() {
   shell.mount(embedded ? [MENU_SAFETY, SHELL_BASE, skin ?? MENU_SKIN, MENU_TOUCH] : [MENU_SAFETY, SHELL_BASE, SHELL_FLOATING, MENU_SKIN, MENU_TOUCH]);
   attachLooks({ addItem, removeItem, slot });
   addItem({ id: "clay.download", label: "Download a copy", run: () => window.clay.visitorDrafts.download() });
+  addItem({ id: "clay.start-over", label: "Start over", run: startOver });
   attachDomItems(shell);
   window.clay.menu = { addItem, removeItem, open, close, note, embedded, button: goo };
   document.dispatchEvent(new CustomEvent("clay:menu-ready"));

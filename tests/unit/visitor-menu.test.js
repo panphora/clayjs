@@ -2,7 +2,8 @@ import { jest } from "@jest/globals";
 import { hostOf, $, $$ } from "./helpers/editor-ui.js";
 
 // Scenario: a draft visitor with no account gets the same claygoo menu an owner sees,
-// in the document's slot, holding only "Download a copy" and whatever the document adds.
+// in the document's slot, holding only "Download a copy", "Start over" and whatever the
+// document adds.
 // It makes no host request and loads no owner code, and its download flushes the draft
 // first so the file it gives holds the latest text.
 
@@ -111,16 +112,63 @@ test("mounts nothing outside a draft", async () => {
   expect(window.clay.menu).toBeUndefined();
 });
 
-test("the list holds Download a copy and nothing the owner menu carries", async () => {
+test("the list holds Download a copy, Start over and nothing the owner menu carries", async () => {
   await boot();
 
   click(gooOf());
   expect(listOf().hidden).toBe(false);
 
-  expect(itemIds()).toEqual(["clay.download"]);
+  expect(itemIds()).toEqual(["clay.download", "clay.start-over"]);
   for (const id of ["clay.mode", "seo", "clay.people", "clay.versions", "clay.variants.keep"]) {
     expect(listOf().querySelector(`[data-menu-id="${id}"]`)).toBeNull();
   }
+});
+
+const dialog = () => document.querySelector('[role="dialog"]');
+const draftKeys = () => Object.keys(localStorage).filter((key) => !key.endsWith(":reset"));
+
+async function typeDraft() {
+  const title = document.getElementById("title");
+  title.textContent = "typed by the visitor";
+  title.dispatchEvent(new Event("input", { bubbles: true }));
+  await flush();
+  window.clay.visitorDrafts.saveNow();
+  expect(window.clay.visitorDrafts.hasDraft()).toBe(true);
+}
+
+test("Start over asks first, and Cancel keeps the draft", async () => {
+  await boot();
+  await typeDraft();
+  const reset = jest.spyOn(window.clay.visitorDrafts, "reset");
+
+  click(gooOf());
+  click(listOf().querySelector('[data-menu-id="clay.start-over"]'));
+  await flush();
+  expect(dialog()).not.toBeNull();
+  expect(dialog().textContent).toContain("Your changes in this browser are deleted");
+
+  dialog().querySelector('button[aria-label="Close"]').click();
+  await flush();
+  expect(reset).not.toHaveBeenCalled();
+  expect(window.clay.visitorDrafts.hasDraft()).toBe(true);
+});
+
+test("Start over, confirmed, deletes the draft and reloads the page as its owner saved it", async () => {
+  await boot();
+  await typeDraft();
+  const before = draftKeys();
+  expect(before.length).toBeGreaterThan(0);
+  const reset = jest.spyOn(window.clay.visitorDrafts, "reset");
+
+  click(gooOf());
+  click(listOf().querySelector('[data-menu-id="clay.start-over"]'));
+  await flush();
+  dialog().querySelector('button[type="submit"]').click();
+  await flush();
+
+  expect(reset).toHaveBeenCalledTimes(1);
+  expect(window.clay.visitorDrafts.hasDraft()).toBe(false);
+  expect(draftKeys()).toEqual(before.filter((key) => key !== window.clay.visitorDrafts.key));
 });
 
 test("with storage refusing, the download flushes first and gives a file with the latest text", async () => {
