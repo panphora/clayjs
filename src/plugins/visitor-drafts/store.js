@@ -3,6 +3,7 @@ import { draftSlot, setDraftStoreFailed } from "../../core/draft-mode.js";
 
 export const KEY_PREFIX = "clay:visitor-drafts:";
 export const RECORD_VERSION = 1;
+const LINEAGE = 32;
 
 // The document a pathname names, spelled the way the hosts resolve it: the path up to
 // and including the first segment that ends in .html or .htmlclay (anything after it is
@@ -228,18 +229,35 @@ export function createStore({ doc = document, storage = safeStorage(), now = () 
   let base = null;
   let unparked = null;
   let stopped = false;
-  // This tab's own last write: its record id, the id of the record it was built on, and
-  // that record's data. A read in one tab can miss a write another tab made a few
-  // milliseconds earlier, so a record built on the same parent never saw this write.
+  // This tab's own last write: its record id, its ancestry, and the data of the record it
+  // was built on. A read in one tab can miss a write another tab made a few milliseconds
+  // earlier, so a record whose ancestry lacks this write never saw it.
   let own = null;
 
   const newId = () => Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 6);
 
-  // Another tab's record that was built on the same parent as this tab's own last write
-  // overwrote it without seeing it. Merged from this tab's own write, its missing rows
-  // would read as deletions; merged from the parent, both tabs' work is kept.
+  // A record's ancestry is the ids it descends from, nearest first, ending at the empty
+  // slot it grew from; null when unknown (built on a record from a runtime that kept no
+  // ids). Start over gives the empty slot a new id, so a write from before it never reads
+  // as built on the same slot as one after it.
+  const resetKey = key + ":reset";
+  function rootId() {
+    try { return "root:" + (storage?.getItem(resetKey) ?? ""); } catch { return "root:"; }
+  }
+
+  function lineageOf(record) {
+    return record && record.id && Array.isArray(record.ancestry) ? [record.id, ...record.ancestry].slice(0, LINEAGE) : null;
+  }
+
+  // A record that descends from this tab's own last write's parent but not from that write
+  // dropped it unseen, however many writes since. Merged from this tab's write, its missing
+  // rows would read as deletions; merged from that parent, both sides' work is kept. With no
+  // complete ancestry there is no telling, and the record is taken as it is.
   function forked(record) {
-    return Boolean(own && own.raw === lastRaw && record && record.id && record.id !== own.id && record.parent === own.parent);
+    if (!own || own.raw !== lastRaw || !own.ancestry || !record?.id || record.id === own.id) return false;
+    const seen = record.ancestry;
+    if (!Array.isArray(seen) || seen.includes(own.id)) return false;
+    return seen.includes(own.ancestry[0]);
   }
 
   function getRaw() {
@@ -399,7 +417,7 @@ export function createStore({ doc = document, storage = safeStorage(), now = () 
   function merge(mine) {
     const current = getRaw();
     const record = current == null ? null : parse(current);
-    if (!record) return { data: mine, stored: null, parent: null, parentData: base };
+    if (!record) return { data: mine, stored: null, ancestry: [rootId()], parentData: base };
     let data = mine;
     if (current !== lastRaw) {
       const merged = merge3(forked(record) ? own.parentData : base, mine, record.data);
@@ -407,7 +425,7 @@ export function createStore({ doc = document, storage = safeStorage(), now = () 
       data = merged.value;
     }
     data = complete(data, record.data);
-    return { data, stored: same(data, record.data) ? current : null, parent: record.id ?? null, parentData: record.data };
+    return { data, stored: same(data, record.data) ? current : null, ancestry: lineageOf(record), parentData: record.data };
   }
 
   function adopt(data) {
@@ -431,9 +449,9 @@ export function createStore({ doc = document, storage = safeStorage(), now = () 
       doc.dispatchEvent(new CustomEvent("clay:drafts-saved", { detail: { data: mine, unchanged: true } }));
       return mine;
     }
-    const { data, stored, parent, parentData } = merge(mine);
+    const { data, stored, ancestry, parentData } = merge(mine);
     const id = newId();
-    const raw = stored ?? JSON.stringify({ v: RECORD_VERSION, savedAt: now().toISOString(), id, parent, data });
+    const raw = stored ?? JSON.stringify({ v: RECORD_VERSION, savedAt: now().toISOString(), id, ancestry, data });
     if (!stored) {
       try {
         if (!storage) throw new Error("no storage");
@@ -441,7 +459,7 @@ export function createStore({ doc = document, storage = safeStorage(), now = () 
       } catch (error) {
         throw storageFailure(doc, error);
       }
-      own = { id, parent, parentData, raw };
+      own = { id, ancestry, parentData, raw };
     }
     const taken = Object.keys(mine).filter((name) => !fitsInto(mine[name], data[name]));
     if (taken.length) adopt(Object.fromEntries(taken.map((name) => [name, data[name]])));
@@ -489,6 +507,7 @@ export function createStore({ doc = document, storage = safeStorage(), now = () 
     stopped = true;
     unparked = null;
     setDraftStoreFailed(false);
+    try { storage.setItem(resetKey, newId()); } catch {}
     try { storage.removeItem(key); } catch {}
   }
 

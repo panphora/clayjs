@@ -136,3 +136,89 @@ test("a row another tab removed after it saw this tab's write stays removed", ()
   expect(storedIds(storage)).toEqual(["r1"]);
   expect(pageIds(b.doc)).toEqual(["r1"]);
 });
+
+// A tab opened on a slot that already holds a record.
+function joinTab(storage) {
+  const doc = document.implementation.createHTMLDocument("tab");
+  doc.documentElement.setAttribute("visitor-drafts", SLOT);
+  doc.head.innerHTML = rulesTag;
+  doc.body.innerHTML = `<input id="title" value="owner title"><ul id="rows">${SEED}${row("r1", "One")}</ul>`;
+  const store = createStore({ doc, storage });
+  store.restore();
+  return { doc, store };
+}
+
+const adoptAs = (tab) => { asTab(tab); return tab.store.adoptExternal(); };
+
+test("three tabs that each wrote a row unseen all end with every row, and stop writing", () => {
+  const storage = fakeStorage();
+  const seed = joinTab(storage);
+  seed.doc.getElementById("title").value = "seeded";
+  save(seed);
+  const views = [viewOf(storage), viewOf(storage), viewOf(storage)];
+  const tabs = views.map((view) => joinTab(view));
+  for (const view of views) view.hold();
+  tabs.forEach((tab, i) => { addRow(tab.doc, `t${i}`, `Tab ${i}`); save(tab); });
+  for (const view of views) view.release();
+  expect(storedIds(storage)).toEqual(["r1", "t2"]);
+
+  adoptAs(tabs[0]);
+  adoptAs(tabs[1]);
+  adoptAs(tabs[2]);
+  expect(storedIds(storage)).toEqual(["r1", "t0", "t1", "t2"]);
+  const settled = storage.getItem(KEY);
+  for (const tab of tabs) {
+    adoptAs(tab);
+    expect(pageIds(tab.doc)).toEqual(["r1", "t0", "t1", "t2"]);
+  }
+  expect(storage.getItem(KEY)).toBe(settled);
+});
+
+test("a tab whose write was dropped finds out even after the other tab has saved again", () => {
+  const { storage, a, b } = blindOverwrite();
+  addRow(a.doc, "ra2", "A wrote this too");
+  save(a);
+  expect(storedIds(storage)).toEqual(["r1", "ra", "ra2"]);
+
+  expect(adoptAs(b)).toBe(true);
+  expect(storedIds(storage)).toEqual(["r1", "ra", "ra2", "rb"]);
+  expect(pageIds(b.doc)).toEqual(["r1", "ra", "ra2", "rb"]);
+});
+
+test("a record built on one from a runtime that kept no ids is taken as it is, so a deletion made there stays", () => {
+  const storage = fakeStorage();
+  const a = openTab(document, storage);
+  addRow(a.doc, "ra", "A wrote this");
+  save(a);
+  const legacy = JSON.parse(storage.getItem(KEY));
+  delete legacy.id;
+  delete legacy.ancestry;
+  legacy.data.title = "edited by an older tab";
+  storage.setItem(KEY, JSON.stringify(legacy));
+
+  const c = joinTab(storage);
+  c.doc.querySelector('[data-id="ra"]').remove();
+  save(c);
+  expect(storedIds(storage)).toEqual(["r1"]);
+
+  adoptAs(a);
+  expect(storedIds(storage)).toEqual(["r1"]);
+  expect(pageIds(a.doc)).toEqual(["r1"]);
+});
+
+test("after Start over in another tab, a tab's earlier rows do not come back into the new draft", () => {
+  const storage = fakeStorage();
+  const a = openTab(document, storage);
+  addRow(a.doc, "ra", "A wrote this before Start over");
+  save(a);
+
+  joinTab(storage).store.clear();
+  const c = joinTab(storage);
+  expect(pageIds(c.doc)).toEqual(["r1"]);
+  addRow(c.doc, "rc", "C wrote this after");
+  save(c);
+
+  expect(adoptAs(a)).toBe(true);
+  expect(storedIds(storage)).toEqual(["r1", "rc"]);
+  expect(pageIds(a.doc)).toEqual(["r1", "rc"]);
+});
