@@ -222,3 +222,58 @@ test("after Start over in another tab, a tab's earlier rows do not come back int
   expect(storedIds(storage)).toEqual(["r1", "rc"]);
   expect(pageIds(a.doc)).toEqual(["r1", "rc"]);
 });
+
+test("on a draft an older runtime wrote, two tabs that each wrote a row unseen still keep both", () => {
+  const storage = fakeStorage();
+  const first = openTab(document, storage);
+  first.doc.getElementById("title").value = "written by an older runtime";
+  save(first);
+  const legacy = JSON.parse(storage.getItem(KEY));
+  delete legacy.id;
+  delete legacy.ancestry;
+  storage.setItem(KEY, JSON.stringify(legacy));
+
+  const [viewA, viewB] = [viewOf(storage), viewOf(storage)];
+  const a = joinTab(viewA);
+  const b = joinTab(viewB);
+  viewA.hold();
+  addRow(b.doc, "rb", "B wrote this");
+  save(b);
+  addRow(a.doc, "ra", "A wrote this");
+  save(a);
+  viewA.release();
+  expect(storedIds(storage)).toEqual(["r1", "ra"]);
+
+  expect(adoptAs(b)).toBe(true);
+  expect(storedIds(storage)).toEqual(["r1", "ra", "rb"]);
+});
+
+test("a tab whose dropped write fell out of a long ancestry keeps its row", () => {
+  const { storage, a, b } = blindOverwrite();
+  for (let i = 0; i < 40; i++) {
+    a.doc.getElementById("title").value = `A saved again ${i}`;
+    save(a);
+  }
+
+  expect(adoptAs(b)).toBe(true);
+  expect(storedIds(storage)).toEqual(["r1", "ra", "rb"]);
+});
+
+test("Start over on full storage still gives the empty slot a new id", () => {
+  const backing = fakeStorage();
+  let full = false;
+  const storage = { ...backing, setItem: (name, value) => { if (full && backing.getItem(KEY) != null) throw new Error("quota"); backing.setItem(name, value); } };
+  const a = openTab(document, storage);
+  addRow(a.doc, "ra", "A wrote this before Start over");
+  save(a);
+
+  full = true;
+  joinTab(storage).store.clear();
+  full = false;
+  const c = joinTab(storage);
+  addRow(c.doc, "rc", "C wrote this after");
+  save(c);
+
+  adoptAs(a);
+  expect(storedIds(storage)).toEqual(["r1", "rc"]);
+});

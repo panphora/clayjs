@@ -237,27 +237,36 @@ export function createStore({ doc = document, storage = safeStorage(), now = () 
   const newId = () => Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 6);
 
   // A record's ancestry is the ids it descends from, nearest first, ending at the empty
-  // slot it grew from; null when unknown (built on a record from a runtime that kept no
-  // ids). Start over gives the empty slot a new id, so a write from before it never reads
-  // as built on the same slot as one after it.
+  // slot it grew from, or at a record from a runtime that kept no ids, named by its bytes.
+  // Start over gives the empty slot a new id, so a write from before it never reads as
+  // built on the same slot as one after it.
   const resetKey = key + ":reset";
   function rootId() {
     try { return "root:" + (storage?.getItem(resetKey) ?? ""); } catch { return "root:"; }
   }
 
-  function lineageOf(record) {
-    return record && record.id && Array.isArray(record.ancestry) ? [record.id, ...record.ancestry].slice(0, LINEAGE) : null;
+  function legacyId(raw) {
+    let hash = 0x811c9dc5;
+    for (let i = 0; i < raw.length; i++) hash = Math.imul(hash ^ raw.charCodeAt(i), 0x01000193);
+    return "legacy:" + (hash >>> 0).toString(36) + "." + raw.length.toString(36);
+  }
+
+  function lineageOf(record, raw) {
+    if (!record) return null;
+    if (!record.id) return [legacyId(raw)];
+    return Array.isArray(record.ancestry) ? [record.id, ...record.ancestry].slice(0, LINEAGE) : null;
   }
 
   // A record that descends from this tab's own last write's parent but not from that write
   // dropped it unseen, however many writes since. Merged from this tab's write, its missing
-  // rows would read as deletions; merged from that parent, both sides' work is kept. With no
-  // complete ancestry there is no telling, and the record is taken as it is.
+  // rows would read as deletions; merged from that parent, both sides' work is kept. A full
+  // ancestry without this write may have seen it long ago or never, and keeping this tab's
+  // rows is the side that loses nothing. With no ancestry the record is taken as it is.
   function forked(record) {
     if (!own || own.raw !== lastRaw || !own.ancestry || !record?.id || record.id === own.id) return false;
     const seen = record.ancestry;
     if (!Array.isArray(seen) || seen.includes(own.id)) return false;
-    return seen.includes(own.ancestry[0]);
+    return seen.includes(own.ancestry[0]) || seen.length >= LINEAGE;
   }
 
   function getRaw() {
@@ -425,7 +434,7 @@ export function createStore({ doc = document, storage = safeStorage(), now = () 
       data = merged.value;
     }
     data = complete(data, record.data);
-    return { data, stored: same(data, record.data) ? current : null, ancestry: lineageOf(record), parentData: record.data };
+    return { data, stored: same(data, record.data) ? current : null, ancestry: lineageOf(record, current), parentData: record.data };
   }
 
   function adopt(data) {
@@ -507,8 +516,8 @@ export function createStore({ doc = document, storage = safeStorage(), now = () 
     stopped = true;
     unparked = null;
     setDraftStoreFailed(false);
-    try { storage.setItem(resetKey, newId()); } catch {}
     try { storage.removeItem(key); } catch {}
+    try { storage.setItem(resetKey, newId()); } catch {}
   }
 
   return { slot, key, rules, read, restore, write, writeLive, flush, changed, adoptExternal, park, clear, snapshot };
