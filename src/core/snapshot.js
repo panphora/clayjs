@@ -941,11 +941,23 @@ export function serializeForSync(clone) {
   // truncate the broadcast.
   const shell = bareRoot.outerHTML;
   const endTag = `</${bareRoot.localName}>`;
+  // A <noscript>'s text is written raw, as serializeClone writes it: escaped, a head
+  // <noscript> parses as text on the receiving side, which closes the head and puts
+  // the fallback markup at the top of <body>, and that tab then saves it.
+  const blocks = noscriptBlocks(clone);
+  const raw = blocks.length ? swapNoscriptMarkers(blocks) : [];
+  let inner;
+  try {
+    inner = clone.innerHTML;
+  } finally {
+    for (const [el, kids] of blocks) el.replaceChildren(...kids);
+  }
+  for (const [marker, text] of raw) inner = inner.split(marker).join(text);
   // The doctype, so this artifact is a complete document like every other one this
   // module produces. Spec section 2 asks for that, and it costs nothing on the wire:
   // a receiver parses the string and morphs documentElement against documentElement,
   // so the prologue is consumed by the parser and never reaches the morph.
-  return "<!DOCTYPE html>" + shell.slice(0, shell.length - endTag.length) + clone.innerHTML + endTag;
+  return "<!DOCTYPE html>" + shell.slice(0, shell.length - endTag.length) + inner + endTag;
 }
 
 /** A private deep copy of a capture's clone, for work that outlives the capture event. */

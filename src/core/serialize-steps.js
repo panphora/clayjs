@@ -103,7 +103,15 @@ export function* serializeForSyncSteps(clone) {
   const shell = bareRoot.outerHTML;
   const endTag = `</${bareRoot.localName}>`;
   const out = ["<!DOCTYPE html>", shell.slice(0, shell.length - endTag.length)];
-  yield* serializeChildrenSteps(clone, clonePreventingOnclone(clone, false), out, { bytes: 0 });
+  const blocks = noscriptBlocks(clone);
+  const raw = blocks.length ? swapNoscriptMarkers(blocks) : [];
+  try {
+    yield* serializeChildrenSteps(clone, clonePreventingOnclone(clone, false), out, { bytes: 0 });
+  } finally {
+    for (const [el, kids] of blocks) el.replaceChildren(...kids);
+  }
   out.push(endTag);
-  return out.join('');
+  let html = out.join('');
+  for (const [marker, text] of raw) html = html.split(marker).join(text);
+  return html;
 }
