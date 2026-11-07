@@ -1,5 +1,5 @@
 import { importMap } from "../vendor/hyper-morph-identity.vendor.js";
-import { serializeForSync } from "../core/snapshot.js";
+import { noscriptsAsText, serializeForSync } from "../core/snapshot.js";
 
 const PAGE = /^page(\.[0-9]+)?$/;
 const tags = (root) => [...root.querySelectorAll('script[merge][clay~="live"]')]
@@ -9,7 +9,7 @@ export function pageRelay(pending, acceptedHtml, identity) {
   // A capture with no page article has nothing to overlay, and a document without
   // one is not parsed at all: nothing outside the article would change.
   if (!pending.html.includes("data-page")) return pending;
-  const parse = (html) => new DOMParser().parseFromString(html, "text/html");
+  const parse = (html) => noscriptsAsText(new DOMParser().parseFromString(html, "text/html"));
   const outgoing = parse(pending.html);
   const article = outgoing.querySelector("article[data-page]");
   if (!article) return pending;

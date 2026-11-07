@@ -43,7 +43,7 @@ import { NO_DIRTY_SELECTOR, LIVE_SELECTOR } from "../lib/region-policy.js";
 import { EXTENSION_NODE_SELECTOR, EXTENSION_ATTR_PATTERN } from '../lib/extension-noise.js';
 import { isEditMode, modeState } from "../core/is-edit-mode.js";
 import { attributeMerge } from "./merge-declarations.js";
-import { serializeForSync, copyCaptureClone, captureForComparisonAndDirty, canonicalizeReceived, captureSnapshot, originalSnapshotNode, captureForMerge, captureForSaveAndComparison } from '../core/snapshot.js';
+import { noscriptsAsText, serializeForSync, copyCaptureClone, captureForComparisonAndDirty, canonicalizeReceived, captureSnapshot, originalSnapshotNode, captureForMerge, captureForSaveAndComparison } from '../core/snapshot.js';
 import { mergeIgnoresAttr, mergeVetoesAttr } from '../lib/root-attrs.js';
 import { autosaveActive } from '../lib/autosave-state.js';
 import { hostSupports } from '../core/host-meta.js';
@@ -182,23 +182,11 @@ function emptyScratchpads(root) {
   return root;
 }
 
-// DOMParser parses with scripting off, so a received <noscript> holds real
-// elements, while the live page (parsed with scripting on) holds that markup as
-// text. Merged as elements, a fallback stylesheet in it would go live. Each one
-// goes back to the text a scripting parser keeps.
-function inertNoscripts(doc) {
-  for (const el of [...doc.querySelectorAll('noscript')]) {
-    if (el.namespaceURI === 'http://www.w3.org/1999/xhtml' && el.children.length) {
-      el.replaceChildren(el.ownerDocument.createTextNode(el.innerHTML));
-    }
-  }
-}
-
 function scratchpadsEmptied(input) {
   if (input == null) return input;
   const doc = typeof input === 'string' ? new DOMParser().parseFromString(input, 'text/html') : input;
   canonicalizeReceived(doc);
-  inertNoscripts(doc);
+  noscriptsAsText(doc);
   emptyScratchpads(doc);
   return doc;
 }

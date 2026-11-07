@@ -1,5 +1,5 @@
 import { expect } from '@esm-bundle/chai';
-import { serializeForSync } from '/src/core/snapshot.js';
+import { noscriptsAsText, serializeForSync } from '/src/core/snapshot.js';
 import { serializeForSyncSteps } from '/src/core/serialize-steps.js';
 import { drain } from '/src/lib/slice.js';
 
@@ -39,3 +39,36 @@ describe('a <noscript> in a sync frame', () => {
     expect(parsed.head.querySelector('noscript style')).to.not.equal(null);
   });
 });
+
+// What a receiver does with a frame: parse it with scripting off, then put each <noscript>
+// back to the text the sender's page holds.
+function received(source) {
+  const away = document.implementation.createHTMLDocument('');
+  away.body.innerHTML = '<template><noscript></noscript></template>';
+  const top = away.createElement('noscript');
+  top.textContent = source;
+  away.body.appendChild(top);
+  away.body.querySelector('template').content.firstChild.textContent = source;
+  const parsed = new DOMParser().parseFromString(serializeForSync(away.documentElement.cloneNode(true)), 'text/html');
+  noscriptsAsText(parsed);
+  return [parsed.body.querySelector(':scope > noscript'), parsed.body.querySelector('template').content.querySelector('noscript')];
+}
+
+describe('a received <noscript> holds the text its sender holds', () => {
+  for (const source of [FALLBACK, '&lt;b&gt;Read offline&lt;/b&gt; &amp; more', '<p class="n">needs <b>JavaScript</b> &amp; a reload</p>']) {
+    it(`round-trips ${JSON.stringify(source.slice(0, 24))}, at the top level and inside a <template>`, () => {
+      for (const el of received(source)) {
+        expect(el.childNodes.length).to.equal(1);
+        expect(el.firstChild.nodeType).to.equal(3);
+        expect(el.textContent).to.equal(source);
+      }
+    });
+  }
+
+  it('turns an already-text block back into the source, not a second escape', () => {
+    const parsed = new DOMParser().parseFromString('<body><noscript>a &lt; b</noscript>', 'text/html');
+    noscriptsAsText(parsed);
+    expect(parsed.querySelector('noscript').textContent).to.equal('a &lt; b');
+  });
+});
+

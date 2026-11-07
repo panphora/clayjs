@@ -294,6 +294,30 @@ export function noscriptBlocks(clone) {
   return blocks;
 }
 
+/**
+ * Each <noscript> of a document parsed with scripting off, given back the one text node a
+ * scripting parser keeps. DOMParser parses with scripting off, so a received <noscript>
+ * holds its markup as elements and its escaped text decoded: merged as elements, a fallback
+ * stylesheet would go live, and written raw, decoded text would become markup. Its
+ * innerHTML in that document is the source again, escaping included.
+ */
+export function noscriptsAsText(doc) {
+  const found = [];
+  const collect = (node) => {
+    for (const child of node.childNodes) {
+      if (child.nodeType !== 1) continue;
+      if (child.localName === 'noscript' && child.namespaceURI === XHTML_NS) {
+        if (child.firstChild) found.push(child);
+        continue;
+      }
+      collect(child.localName === 'template' && child.content ? child.content : child);
+    }
+  };
+  collect(doc.documentElement ?? doc);
+  for (const el of found) el.replaceChildren(el.ownerDocument.createTextNode(el.innerHTML));
+  return doc;
+}
+
 /** Swap each block's text for a marker, and answer the text each marker stands for. */
 export function swapNoscriptMarkers(blocks) {
   const nonce = Math.random().toString(36).slice(2);
