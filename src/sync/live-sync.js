@@ -182,10 +182,23 @@ function emptyScratchpads(root) {
   return root;
 }
 
+// DOMParser parses with scripting off, so a received <noscript> holds real
+// elements, while the live page (parsed with scripting on) holds that markup as
+// text. Merged as elements, a fallback stylesheet in it would go live. Each one
+// goes back to the text a scripting parser keeps.
+function inertNoscripts(doc) {
+  for (const el of [...doc.querySelectorAll('noscript')]) {
+    if (el.namespaceURI === 'http://www.w3.org/1999/xhtml' && el.children.length) {
+      el.replaceChildren(el.ownerDocument.createTextNode(el.innerHTML));
+    }
+  }
+}
+
 function scratchpadsEmptied(input) {
   if (input == null) return input;
   const doc = typeof input === 'string' ? new DOMParser().parseFromString(input, 'text/html') : input;
   canonicalizeReceived(doc);
+  inertNoscripts(doc);
   emptyScratchpads(doc);
   return doc;
 }

@@ -1337,3 +1337,31 @@ test("an explicit repair whose body names the version the tab holds is a no-op",
     sync.stop();
   }
 });
+
+// A fetched body is parsed with scripting off, so a <noscript> in it holds real
+// elements. Merged as they are, a fallback stylesheet in it goes live and hides
+// whatever it hides for a page without JavaScript. The live page holds that markup
+// as text, the way a scripting parser read it, and a refetch keeps it that way.
+test("a refetched document's <noscript> stays text, so its fallback CSS never applies", async () => {
+  const fallback = "<style>#value { display: none !important; }</style>";
+  await boot('<noscript></noscript><p id="value">A</p>');
+  document.querySelector("noscript").textContent = fallback;
+  await tick();
+  clearGate();
+  installFetch();
+  metaAnswer = diskMeta("disk-B");
+  docResponder = () => doc("disk-B", `<noscript>${fallback}</noscript><p id="value">B from disk</p>`);
+  const { sync, sse } = await started("live");
+  try {
+    sse.onopen();
+    await tick();
+    await sync._runPending();
+    await tick();
+
+    expect(document.querySelector("#value").textContent).toBe("B from disk");
+    expect(document.querySelectorAll("noscript *").length).toBe(0);
+    expect(document.querySelector("noscript").textContent).toBe(fallback);
+  } finally {
+    sync.stop();
+  }
+});
