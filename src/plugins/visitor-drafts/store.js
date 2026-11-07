@@ -228,6 +228,19 @@ export function createStore({ doc = document, storage = safeStorage(), now = () 
   let base = null;
   let unparked = null;
   let stopped = false;
+  // This tab's own last write: its record id, the id of the record it was built on, and
+  // that record's data. A read in one tab can miss a write another tab made a few
+  // milliseconds earlier, so a record built on the same parent never saw this write.
+  let own = null;
+
+  const newId = () => Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 6);
+
+  // Another tab's record that was built on the same parent as this tab's own last write
+  // overwrote it without seeing it. Merged from this tab's own write, its missing rows
+  // would read as deletions; merged from the parent, both tabs' work is kept.
+  function forked(record) {
+    return Boolean(own && own.raw === lastRaw && record && record.id && record.id !== own.id && record.parent === own.parent);
+  }
 
   function getRaw() {
     try {
@@ -386,15 +399,15 @@ export function createStore({ doc = document, storage = safeStorage(), now = () 
   function merge(mine) {
     const current = getRaw();
     const record = current == null ? null : parse(current);
-    if (!record) return { data: mine, stored: null };
+    if (!record) return { data: mine, stored: null, parent: null, parentData: base };
     let data = mine;
     if (current !== lastRaw) {
-      const merged = merge3(base, mine, record.data);
+      const merged = merge3(forked(record) ? own.parentData : base, mine, record.data);
       if (merged.conflict) keepConflict(current);
       data = merged.value;
     }
     data = complete(data, record.data);
-    return { data, stored: same(data, record.data) ? current : null };
+    return { data, stored: same(data, record.data) ? current : null, parent: record.id ?? null, parentData: record.data };
   }
 
   function adopt(data) {
@@ -418,8 +431,9 @@ export function createStore({ doc = document, storage = safeStorage(), now = () 
       doc.dispatchEvent(new CustomEvent("clay:drafts-saved", { detail: { data: mine, unchanged: true } }));
       return mine;
     }
-    const { data, stored } = merge(mine);
-    const raw = stored ?? JSON.stringify({ v: RECORD_VERSION, savedAt: now().toISOString(), data });
+    const { data, stored, parent, parentData } = merge(mine);
+    const id = newId();
+    const raw = stored ?? JSON.stringify({ v: RECORD_VERSION, savedAt: now().toISOString(), id, parent, data });
     if (!stored) {
       try {
         if (!storage) throw new Error("no storage");
@@ -427,6 +441,7 @@ export function createStore({ doc = document, storage = safeStorage(), now = () 
       } catch (error) {
         throw storageFailure(doc, error);
       }
+      own = { id, parent, parentData, raw };
     }
     const taken = Object.keys(mine).filter((name) => !fitsInto(mine[name], data[name]));
     if (taken.length) adopt(Object.fromEntries(taken.map((name) => [name, data[name]])));
@@ -460,6 +475,9 @@ export function createStore({ doc = document, storage = safeStorage(), now = () 
     }
     if (raw == null || raw === lastRaw || changed()) return false;
     const record = parse(raw);
+    // That tab never saw this tab's last write: this tab writes both back instead of
+    // adopting a record that dropped its own work.
+    if (forked(record) && typeof window.clay?.getHTML === "function") return writeLive();
     const adopted = record && adopt(record.data);
     if (!adopted) return false;
     lastRaw = raw;
